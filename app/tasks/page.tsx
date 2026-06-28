@@ -11,15 +11,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { HoverImage } from "@/components/hover-image";
 import { useAuth } from "@/components/auth";
+import type { UserPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
 import { useSWRLite } from "@/lib/swr-lite";
 import type { ColumnDef } from "@tanstack/react-table";
-import { KanbanBoard } from "./kanban-board";
+import { OverviewKanban } from "./overview-kanban";
+import { KanbanSettings } from "./kanban-settings";
 import { CanvasBoard } from "./canvas-board";
 import { CalendarBoard } from "./calendar-board";
 import { WorkloadBoard } from "./workload-board";
 import { ReportBoard } from "./report-board";
 import { CreateTaskModal } from "./create-task-modal";
+import { QuickTaskModal } from "./quick-task-modal";
 import { KnowledgeDrawer } from "./knowledge-drawer";
 import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
 import { AssigneeStack } from "./assignee-avatar";
@@ -106,6 +109,7 @@ export default function TasksPage() {
 
   // create modal
   const [createOpen, setCreateOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);   // งานด่วน (Quick Task)
   // คลังความรู้
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
 
@@ -206,6 +210,7 @@ export default function TasksPage() {
             <a href="/tasks/templates" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🔁 {t("เทมเพลต", "Templates")}</a>
             <button onClick={() => setKnowledgeOpen(true)} className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📚 {t("ความรู้", "Knowledge")}</button>
             {user?.role === "admin" && <a href="/tasks/settings" className="h-10 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50" title={t("ตั้งค่าสิทธิ์", "Settings")}>⚙️</a>}
+            <button onClick={() => setQuickOpen(true)} className="h-10 px-4 text-amber-700 bg-amber-50 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-100 transition-colors">⚡ {t("งานด่วน", "Quick task")}</button>
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors">＋ {t("สร้างงาน", "New task")}</button>
           </div>
         </div>
@@ -248,6 +253,7 @@ export default function TasksPage() {
                 isAdmin={user?.role === "admin"}
                 onOpenTask={(id) => setDetailId(id)}
                 onCreate={openCreate}
+                onQuickCreate={() => setQuickOpen(true)}
                 onOpenKnowledge={() => setKnowledgeOpen(true)}
                 onChanged={reload}
                 metrics={ovMetrics}
@@ -271,8 +277,16 @@ export default function TasksPage() {
 
             {view === "kanban" && (
               <div>
-                <p className="text-xs text-slate-400 mb-2">💡 {t("ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยนสถานะ · คลิกการ์ดเพื่อดูรายละเอียด", "Drag cards across columns to change status · click a card to view details")}</p>
-                <KanbanBoard tasks={tasks} statuses={statuses} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to) => { const found = tasks.find((x) => x.id === taskId); if (found) applyMove(found, to); }} />
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <p className="text-xs text-slate-400">💡 {t("ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยนสถานะ · คลิกการ์ดเพื่อดูรายละเอียด · ปรับการ์ด/จัดกลุ่มที่ ⚙️", "Drag cards across columns · click to view · adjust via ⚙️")}</p>
+                  <KanbanSettings cfg={ovTheme.kanban} onChange={(k) => saveTheme({ ...ovTheme, kanban: k })} accent={ovTheme.accent} />
+                </div>
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                  <OverviewKanban tasks={tasks} statuses={statuses} brands={brands} cfg={ovTheme.kanban} accent={ovTheme.accent}
+                    onMoveStatus={(taskId, to) => { const found = tasks.find((x) => x.id === taskId); if (found) applyMove(found, to); }}
+                    onSetField={async (taskId, field, value) => { try { await updateTask(taskId, { [field]: value }); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
+                    onCardClick={(id) => setDetailId(id)} />
+                </div>
               </div>
             )}
 
@@ -289,6 +303,10 @@ export default function TasksPage() {
       {/* Create modal (ของกลาง — ใช้ร่วมกับ Campaign Canvas) */}
       <CreateTaskModal open={createOpen} onClose={() => setCreateOpen(false)} pushToast={pushToast}
         onCreated={async (newTask) => { pushToast("success", `${t("สร้างงาน", "Task created")} ${newTask.task_no}`); await reload(); }} />
+
+      <QuickTaskModal open={quickOpen} onClose={() => setQuickOpen(false)} pushToast={pushToast}
+        me={user ? ({ id: user.id, name: user.name } as UserPickerValue) : null}
+        onCreated={async () => { await reload(); }} />
 
       {/* Detail drawer */}
       {detailId && (

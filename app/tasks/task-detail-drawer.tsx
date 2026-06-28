@@ -413,6 +413,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                     <QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={d.reviewer_label || d.approver_label}
                       active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
                       editor={<UserPicker value={d.reviewer_id ? ({ id: d.reviewer_id, name: d.reviewer_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ reviewer_id: v?.id ?? null })} disableCreate />} />
+                    <QuickField label={t("ผู้มอบหมาย", "Assigned by")} value={d.assigned_by_label}
+                      active={qf === "assigned_by"} onOpen={() => setQf("assigned_by")} onClose={() => setQf(null)}
+                      editor={<UserPicker value={d.assigned_by_id ? ({ id: d.assigned_by_id, name: d.assigned_by_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ assigned_by_id: v?.id ?? null })} disableCreate />} />
                     <QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
                       active={qf === "campaign"} onOpen={() => setQf("campaign")} onClose={() => setQf(null)}
                       editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} />

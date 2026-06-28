@@ -38,6 +38,7 @@ export type CreativeTask = {
   assignees?: SubtaskAssignee[];   // ผู้รับผิดชอบหลายคน (ตั้งเอง ∪ คนเริ่มงานย่อย) — m2m
   reviewer_id: string | null; reviewer_label: string | null;
   approver_id: string | null; approver_label: string | null;
+  assigned_by_id?: string | null; assigned_by_label?: string | null;
   start_date: string | null; due_date: string | null; completed_at: string | null;
   approval_status: ApprovalStatus;
   asset_status: AssetStatus;

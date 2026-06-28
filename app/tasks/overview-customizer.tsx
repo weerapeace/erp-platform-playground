@@ -10,6 +10,7 @@ import { useState, useEffect } from "react";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { KanbanSettingsControls } from "./kanban-settings";
 
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
@@ -342,29 +343,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
           ))}
         </div>
         {theme.kanban.view === "kanban" && (
-          <>
-            {/* จัดกลุ่มคอลัมน์ */}
-            <div className="mb-2">
-              <div className="text-xs text-slate-500 mb-1">{t("จัดกลุ่มคอลัมน์ตาม", "Group columns by")}</div>
-              <div className="flex flex-wrap items-center gap-2">
-                {([["status", t("สถานะ", "Status")], ["brand", t("แบรนด์", "Brand")], ["priority", t("ความสำคัญ", "Priority")], ["task_type", t("ประเภทงาน", "Task type")]] as const).map(([g, label]) => (
-                  <button key={g} onClick={() => setKanban({ groupBy: g })} className={`h-8 px-3 text-sm rounded-lg border ${theme.kanban.groupBy === g ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>
-                ))}
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1">{t("ลากการ์ดข้ามคอลัมน์ = เปลี่ยนค่านั้น (สถานะผ่าน workflow)", "Drag a card across columns to change that value (status via workflow)")}</p>
-            </div>
-            {/* ข้อมูลบนการ์ด */}
-            <div>
-              <div className="text-xs text-slate-500 mb-1">{t("ข้อมูลบนการ์ด", "Card fields")}</div>
-              <div className="flex flex-wrap gap-3">
-                {([["cover", t("รูปปก", "Cover")], ["brand", t("แบรนด์", "Brand")], ["assignee", t("ผู้รับผิดชอบ", "Assignee")], ["due", t("กำหนดส่ง", "Due date")], ["priority", t("ความสำคัญ", "Priority")], ["progress", t("ความคืบหน้า", "Progress")], ["brandBorder", t("กรอบสีตามแบรนด์", "Brand color border")]] as const).map(([k, label]) => (
-                  <label key={k} className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-                    <input type="checkbox" checked={theme.kanban[k]} onChange={(e) => setKanban({ [k]: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{label}
-                  </label>
-                ))}
-              </div>
-            </div>
-          </>
+          <KanbanSettingsControls cfg={theme.kanban} onChange={(k) => onChange({ ...theme, kanban: k })} />
         )}
       </section>
 

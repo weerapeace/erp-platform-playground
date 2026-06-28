@@ -11,6 +11,7 @@ import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { OverviewKanban } from "./overview-kanban";
+import { KanbanSettings } from "./kanban-settings";
 import { CalendarBoard } from "./calendar-board";
 import { arrangeMySubtasks, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
 import { isTerminal, statusMeta, type Status } from "./use-statuses";
@@ -33,7 +34,7 @@ type Counts = { total: number; mine: number; overdue: number; review: number };
 export function OverviewDashboard({
   userName, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, isAdmin,
   theme, canUpload, onThemeChange, statuses, onMoveStatus, onSetField, viewSwitcher,
-  onFilter, onOpenTask, onCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange, mySubView = DEFAULT_MYSUB_VIEW,
+  onFilter, onOpenTask, onCreate, onQuickCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange, mySubView = DEFAULT_MYSUB_VIEW,
 }: {
   userName?: string;
   counts: Counts;
@@ -55,6 +56,7 @@ export function OverviewDashboard({
   onFilter: (f: OvFilter) => void;
   onOpenTask: (id: string) => void;
   onCreate: () => void;
+  onQuickCreate?: () => void;
   onOpenKnowledge: () => void;
   onChanged?: () => void | Promise<void>;
   metrics: MetricDef[];
@@ -181,6 +183,8 @@ export function OverviewDashboard({
             <div className="flex items-center gap-2 shrink-0">
               <button onClick={() => setCustomizing(true)} title={t("แต่งหน้านี้ของฉัน", "Customize my overview")}
                 className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">🎨 {t("แต่งหน้า", "Customize")}</button>
+              {onQuickCreate && <button onClick={onQuickCreate} title={t("เพิ่มงานเร็ว ๆ", "Quick add a task")}
+                className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">⚡ {t("งานด่วน", "Quick")}</button>}
               <button onClick={onCreate} style={{ color: theme.accent }} className="h-10 px-4 bg-white font-semibold rounded-xl shadow hover:bg-slate-50">＋ {t("สร้างงานใหม่", "New task")}</button>
             </div>
           </div>
@@ -314,6 +318,7 @@ export function OverviewDashboard({
                     className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`}>{icon} {label}</button>;
                 })}
               </div>
+              {theme.kanban.view === "kanban" && <KanbanSettings cfg={theme.kanban} onChange={(k) => onThemeChange({ ...theme, kanban: k })} accent={theme.accent} />}
             </div>
           </div>
           {theme.kanban.view === "kanban" ? (
