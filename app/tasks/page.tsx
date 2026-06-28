@@ -18,6 +18,7 @@ import { KanbanBoard } from "./kanban-board";
 import { CanvasBoard } from "./canvas-board";
 import { CalendarBoard } from "./calendar-board";
 import { WorkloadBoard } from "./workload-board";
+import { ReportBoard } from "./report-board";
 import { CreateTaskModal } from "./create-task-modal";
 import { KnowledgeDrawer } from "./knowledge-drawer";
 import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
@@ -94,7 +95,8 @@ export default function TasksPage() {
   const t = useT();
   const COLUMNS = useMemo(() => makeColumns(t), [t]);
   const { statuses } = useCreativeStatuses();
-  const [view, setView] = useState<"overview" | "queue" | "calendar" | "workload" | "kanban" | "canvas">("overview");
+  const [view, setView] = useState<"overview" | "queue" | "calendar" | "workload" | "report" | "kanban" | "canvas">("overview");
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [ovFilter, setOvFilter] = useState<"all" | "mine" | "review" | "overdue">("all"); // ตัวกรองตารางในภาพรวม (จากการ์ด)
   const [ovTheme, setOvTheme] = useState<OverviewTheme>(DEFAULT_THEME); // ธีมหน้าภาพรวม "ของฉัน" (per-user)
 
@@ -134,7 +136,7 @@ export default function TasksPage() {
     const sp = new URLSearchParams(window.location.search);
     const tid = sp.get("task"); if (tid) setDetailId(tid);
     const v = sp.get("view");
-    if (v === "queue" || v === "calendar" || v === "workload" || v === "kanban" || v === "canvas" || v === "overview") setView(v);
+    if (v === "queue" || v === "calendar" || v === "workload" || v === "report" || v === "kanban" || v === "canvas" || v === "overview") setView(v);
     else if (v === "table") setView("overview");   // แท็บตารางถูกรวมเข้าภาพรวมแล้ว → ลิงก์เดิมมาที่ภาพรวม
   }, []);
 
@@ -207,15 +209,39 @@ export default function TasksPage() {
       )}
 
       <div className="px-8 py-6 space-y-5">
-        {/* View toggle */}
-        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-          <ViewToggleBtn active={view === "overview"} onClick={() => setView("overview")} icon="🏠" label={t("ภาพรวม", "Overview")} />
-          <ViewToggleBtn active={view === "queue"} onClick={() => setView("queue")} icon="🙋" label={t("คิวงานของฉัน", "My queue")} />
-          <ViewToggleBtn active={view === "calendar"} onClick={() => setView("calendar")} icon="📅" label={t("ปฏิทิน", "Calendar")} />
-          <ViewToggleBtn active={view === "workload"} onClick={() => setView("workload")} icon="👥" label={t("ภาระงาน", "Workload")} />
-          <ViewToggleBtn active={view === "kanban"} onClick={() => setView("kanban")} icon="🟦" label="Kanban" />
-          <ViewToggleBtn active={view === "canvas"} onClick={() => setView("canvas")} icon="🟪" label="Canvas" />
-        </div>
+        {/* View menu (เมนูมุมมอง — ยุบเป็นดรอปดาวน์ให้สะอาด) */}
+        {(() => {
+          const VIEWS = [
+            { k: "overview", icon: "🏠", label: t("ภาพรวม", "Overview") },
+            { k: "queue", icon: "🙋", label: t("คิวงานของฉัน", "My queue") },
+            { k: "calendar", icon: "📅", label: t("ปฏิทิน", "Calendar") },
+            { k: "workload", icon: "👥", label: t("ภาระงาน", "Workload") },
+            { k: "report", icon: "📊", label: t("รายงาน", "Report") },
+            { k: "kanban", icon: "🟦", label: "Kanban" },
+            { k: "canvas", icon: "🟪", label: "Canvas" },
+          ] as const;
+          const cur = VIEWS.find((v) => v.k === view) ?? VIEWS[0];
+          return (
+            <div className="relative w-fit">
+              <button onClick={() => setViewMenuOpen((o) => !o)} className="inline-flex items-center gap-2 h-9 px-3.5 bg-slate-100 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-200">
+                <span>≡</span><span>{cur.icon} {cur.label}</span><span className="text-slate-400">▾</span>
+              </button>
+              {viewMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setViewMenuOpen(false)} />
+                  <div className="absolute left-0 z-30 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+                    {VIEWS.map((v) => (
+                      <button key={v.k} onClick={() => { setView(v.k); setViewMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${view === v.k ? "bg-violet-50 text-violet-700 font-medium" : "text-slate-700 hover:bg-slate-50"}`}>
+                        <span>{v.icon}</span>{v.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
 
         {loading ? (
           <div className="py-20 text-center text-slate-400">{t("กำลังโหลดข้อมูล...", "Loading data...")}</div>
@@ -253,6 +279,8 @@ export default function TasksPage() {
             )}
 
             {view === "workload" && <WorkloadBoard tasks={tasks} onCardClick={(id) => setDetailId(id)} />}
+
+            {view === "report" && <ReportBoard tasks={tasks} />}
 
             {view === "kanban" && (
               <div>
