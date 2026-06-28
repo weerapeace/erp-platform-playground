@@ -21,6 +21,7 @@ export type TemplateStepDef = { title: string; description?: string | null; requ
 export type TemplateContentDef = { title: string; post_type?: string | null; platforms?: string[] };
 export type Template = {
   id: string; task_type: string | null; default_priority: string; brand_id: string | null;
+  default_reviewer_id?: string | null;
   platforms: string[] | null; steps: TemplateStepDef[] | null; content_items?: TemplateContentDef[] | null;
 };
 
@@ -61,7 +62,7 @@ async function createTaskFromRule(admin: Admin, rule: RecurringRule, tpl: Templa
     description: rule.description ?? null,
     brand_id: rule.brand_id ?? tpl?.brand_id ?? null, campaign_id: rule.campaign_id ?? null,
     priority: rule.priority ?? tpl?.default_priority ?? "normal", status: "backlog", progress_percent: 0,
-    assignee_id: rule.assignee_id ?? null, due_date: dueDate,
+    assignee_id: rule.assignee_id ?? null, reviewer_id: tpl?.default_reviewer_id ?? null, due_date: dueDate,
     platforms: (rule.platforms && rule.platforms.length) ? rule.platforms : (tpl?.platforms ?? []),
     created_by: rule.created_by ?? null,
   }).select("id").single();
@@ -116,7 +117,7 @@ export async function runAllDue(admin: Admin): Promise<{ created: number; rules:
   const tplIds = [...new Set(list.map((r) => r.template_id).filter(Boolean))] as string[];
   const tplMap = new Map<string, Template>();
   if (tplIds.length) {
-    const { data: tpls } = await admin.from("erp_creative_task_templates").select("id, task_type, default_priority, brand_id, platforms, steps, content_items").in("id", tplIds);
+    const { data: tpls } = await admin.from("erp_creative_task_templates").select("id, task_type, default_priority, brand_id, default_reviewer_id, platforms, steps, content_items").in("id", tplIds);
     for (const tp of (tpls ?? []) as Template[]) tplMap.set(tp.id, tp);
   }
   let created = 0;

@@ -23,17 +23,24 @@ import {
 
 const PRIORITY_OPTIONS = (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label }));
 
+function todayStr(): string { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function addDaysStr(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00`); if (Number.isNaN(d.getTime())) return "";
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 type FormState = {
   title: string; description: string; task_type: string;
   brand_id: string; campaign_id: string;
   assignee: UserPickerValue | null; reviewer: UserPickerValue | null;
-  priority: CreativePriority; due_date: string;
+  priority: CreativePriority; order_date: string; due_date: string;
   products: SkuPickerValue[]; parents: ParentSkuPickerValue[]; platforms: string[]; drive_folder_url: string;
   cover_image_r2_key: string;
 };
 const EMPTY_FORM: FormState = {
   title: "", description: "", task_type: "photo_shoot", brand_id: "", campaign_id: "",
-  assignee: null, reviewer: null, priority: "normal", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "", cover_image_r2_key: "",
+  assignee: null, reviewer: null, priority: "normal", order_date: "", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "", cover_image_r2_key: "",
 };
 
 // แถวงานย่อยในขั้นที่ 2
@@ -42,7 +49,7 @@ type SubRow = { include: boolean; title: string; description: string | null; req
 export type CreatedTask = { id: string; task_no: string; title: string; subtasks: { title: string }[] };
 
 // Step labels are rendered via t() inside the component
-const STEPS_TH = ["ข้อมูลงาน", "งานย่อย", "สินค้า"];
+const STEPS_TH = ["แบรนด์", "ข้อมูลงาน", "งานย่อย", "สินค้า"];
 
 export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCampaignId, lockedCampaignLabel }: {
   open: boolean;
@@ -61,17 +68,18 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [subs, setSubs] = useState<SubRow[]>([]);
   const [contentItems, setContentItems] = useState<TemplateContentItem[]>([]);   // คอนเทนต์พ่วงจากแม่แบบ
+  const [tplDueOffset, setTplDueOffset] = useState<number | null>(null);   // กำหนดส่ง = วันที่สั่ง + X (จากแม่แบบ)
   const [step, setStep] = useState(1);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const STEPS = [t("ข้อมูลงาน","Task info"), t("งานย่อย","Subtasks"), t("สินค้า","Products")];
+  const STEPS = [t("แบรนด์/เทมเพลต","Brand/Template"), t("ข้อมูลงาน","Task info"), t("งานย่อย","Subtasks"), t("สินค้า","Products")];
 
   useEffect(() => {
     (async () => { try { const [b, c, tp] = await Promise.all([listBrands(), listCampaigns(), listTemplates()]); setBrands(b); setCampaigns(c); setTemplates(tp); } catch { /* ignore */ } })();
   }, []);
-  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "" }); setSubs([]); setContentItems([]); setTplId(""); setStep(1); setFormErr(null); setDirty(false); } }, [open, lockedCampaignId]);
+  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr() }); setSubs([]); setContentItems([]); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); } }, [open, lockedCampaignId]);
 
   const updateForm = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
   const togglePlatform = (v: string) => updateForm({ platforms: form.platforms.includes(v) ? form.platforms.filter((x) => x !== v) : [...form.platforms, v] });
@@ -80,8 +88,17 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const applyTemplate = (id: string) => {
     setTplId(id); setDirty(true);
     const tpl = templates.find((x) => x.id === id);
-    if (!tpl) { setSubs([]); setContentItems([]); return; }
-    setForm((p) => ({ ...p, task_type: tpl.task_type ?? p.task_type, priority: (tpl.default_priority as CreativePriority) ?? p.priority, platforms: tpl.platforms ?? [], brand_id: tpl.brand_id ?? p.brand_id }));
+    if (!tpl) { setSubs([]); setContentItems([]); setTplDueOffset(null); return; }
+    const offset = tpl.due_offset_days ?? null;
+    setTplDueOffset(offset);
+    setForm((p) => ({
+      ...p,
+      task_type: tpl.task_type ?? p.task_type, priority: (tpl.default_priority as CreativePriority) ?? p.priority,
+      platforms: tpl.platforms ?? [], brand_id: tpl.brand_id ?? p.brand_id,
+      description: tpl.description ?? p.description,
+      reviewer: tpl.default_reviewer_id ? ({ id: tpl.default_reviewer_id, name: tpl.default_reviewer_label ?? "" } as UserPickerValue) : p.reviewer,
+      due_date: (offset != null && p.order_date) ? addDaysStr(p.order_date, offset) : p.due_date,
+    }));
     setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []);
     setSubs((tpl.steps ?? []).filter((s) => s.title?.trim()).map((s) => ({
       include: true, title: s.title, description: s.description ?? null, required_before_next: !!s.required_before_next,
@@ -94,11 +111,15 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const patchSub = (i: number, p: Partial<SubRow>) => { setSubs((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...p } : r))); setDirty(true); };
   const removeSub = (i: number) => { setSubs((rows) => rows.filter((_, idx) => idx !== i)); setDirty(true); };
 
-  const next = () => { if (step === 1 && !form.title.trim()) { setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; } setFormErr(null); setStep((s) => Math.min(3, s + 1)); };
+  const next = () => { if (step === 2 && !form.title.trim()) { setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; } setFormErr(null); setStep((s) => Math.min(4, s + 1)); };
   const back = () => { setFormErr(null); setStep((s) => Math.max(1, s - 1)); };
+  // วันที่สั่งเปลี่ยน → คำนวณกำหนดส่งใหม่ถ้าแม่แบบตั้ง +X วันไว้
+  const setOrderDate = (v: string) => updateForm({ order_date: v, ...(tplDueOffset != null && v ? { due_date: addDaysStr(v, tplDueOffset) } : {}) });
+  // เทมเพลตของแบรนด์ที่เลือก (+ เทมเพลตทั่วไปที่ไม่ผูกแบรนด์)
+  const brandTemplates = templates.filter((tp) => form.brand_id ? (tp.brand_id === form.brand_id || !tp.brand_id) : !tp.brand_id);
 
   const save = async () => {
-    if (!form.title.trim()) { setStep(1); setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; }
+    if (!form.title.trim()) { setStep(2); setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; }
     setSaving(true); setFormErr(null);
     const subtasks = subs.filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next, type: s.type, config: s.config }));
     try {
@@ -106,7 +127,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         title: form.title.trim(), description: form.description.trim() || null, task_type: form.task_type || null,
         brand_id: form.brand_id || null, campaign_id: (lockedCampaignId ?? form.campaign_id) || null,
         assignee_id: form.assignee?.id ?? null, reviewer_id: form.reviewer?.id ?? null,
-        priority: form.priority, due_date: form.due_date || null,
+        priority: form.priority, start_date: form.order_date || null, due_date: form.due_date || null,
         sku_id: form.products[0]?.id ?? null, product_name: form.products[0]?.name ?? null, sku_ids: form.products.map((p) => p.id),
         parent_sku_id: form.parents[0]?.id ?? null, parent_sku_ids: form.parents.map((p) => p.id),
         platforms: form.platforms, drive_folder_url: form.drive_folder_url.trim() || null,
@@ -127,7 +148,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       footer={<>
         {step > 1 && <button onClick={back} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 mr-auto">← {t("ย้อนกลับ","Back")}</button>}
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก","Cancel")}</button>
-        {step < 3
+        {step < 4
           ? <button onClick={next} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">{t("ถัดไป","Next")} →</button>
           : <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...","Saving...") : t("สร้างงาน","Create task")}</button>}
       </>}
@@ -146,17 +167,46 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
       {lockedCampaignId && step === 1 && <div className="mb-4 px-3 py-2 bg-violet-50/60 border border-violet-100 rounded-lg text-sm text-slate-600">📣 Campaign: <span className="font-medium text-slate-800">{lockedCampaignLabel || t("แคมเปญนี้","this campaign")}</span></div>}
 
-      {/* STEP 1 — ข้อมูลงาน */}
-      {step === 1 && (<>
-        {templates.length > 0 && (
-          <div className="mb-4 flex items-center gap-2 bg-violet-50/60 border border-violet-100 rounded-lg px-3 py-2">
-            <span className="text-sm text-slate-600 shrink-0">🔁 {t("เริ่มจากเทมเพลต:","Start from Template:")}</span>
-            <select value={tplId} onChange={(e) => applyTemplate(e.target.value)} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm bg-white">
-              <option value="">— {t("ไม่ใช้เทมเพลต","No Template")} —</option>
-              {templates.map((tmpl) => <option key={tmpl.id} value={tmpl.id}>{tmpl.name} ({tmpl.steps?.length ?? 0} {t("ขั้นตอน","steps")})</option>)}
-            </select>
+      {/* STEP 1 — เลือกแบรนด์ + เทมเพลตของแบรนด์ */}
+      {step === 1 && (
+        <div className="space-y-5">
+          <div>
+            <p className="text-sm font-semibold text-slate-700 mb-2">{t("เลือกแบรนด์","Choose a brand")}</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {brands.map((b) => { const on = form.brand_id === b.id; return (
+                <button key={b.id} type="button" onClick={() => { updateForm({ brand_id: b.id }); applyTemplate(""); }}
+                  className={`flex items-center gap-2 p-2.5 rounded-lg border text-left ${on ? "border-violet-400 ring-2 ring-violet-200 bg-violet-50/40" : "border-slate-200 hover:border-violet-300"}`}>
+                  <BrandIcon brand={b} /><span className="text-sm font-medium text-slate-700 truncate">{b.name}</span>
+                </button>
+              ); })}
+              <button type="button" onClick={() => { updateForm({ brand_id: "" }); applyTemplate(""); }}
+                className={`flex items-center gap-2 p-2.5 rounded-lg border text-left ${!form.brand_id ? "border-violet-400 ring-2 ring-violet-200 bg-violet-50/40" : "border-slate-200 hover:border-violet-300"}`}>
+                <span className="h-8 w-8 rounded-md bg-slate-100 flex items-center justify-center text-slate-400 shrink-0">∅</span>
+                <span className="text-sm font-medium text-slate-500">{t("ไม่ระบุแบรนด์","No brand")}</span>
+              </button>
+            </div>
           </div>
-        )}
+          <div>
+            <p className="text-sm font-semibold text-slate-700 mb-2">{t("เลือกเทมเพลต","Choose a template")} <span className="text-xs font-normal text-slate-400">({t("ของแบรนด์นี้ + ทั่วไป","this brand + general")})</span></p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button type="button" onClick={() => applyTemplate("")} className={`p-3 rounded-lg border text-left ${!tplId ? "border-violet-400 ring-2 ring-violet-200 bg-violet-50/40" : "border-slate-200 hover:border-violet-300"}`}>
+                <p className="text-sm font-medium text-slate-700">— {t("ไม่ใช้เทมเพลต","No template")} —</p>
+                <p className="text-xs text-slate-400">{t("กรอกข้อมูลงานเอง","Fill task info manually")}</p>
+              </button>
+              {brandTemplates.map((tpl) => { const on = tplId === tpl.id; return (
+                <button key={tpl.id} type="button" onClick={() => applyTemplate(tpl.id)} className={`p-3 rounded-lg border text-left ${on ? "border-violet-400 ring-2 ring-violet-200 bg-violet-50/40" : "border-slate-200 hover:border-violet-300"}`}>
+                  <p className="text-sm font-medium text-slate-800">{tpl.name}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{(tpl.steps?.length ?? 0)} {t("ขั้นตอน","steps")}{(tpl.content_items?.length ?? 0) > 0 ? ` · 📱 ${tpl.content_items!.length}` : ""}{tpl.due_offset_days != null ? ` · ⏱ +${tpl.due_offset_days}${t("ว","d")}` : ""}</p>
+                </button>
+              ); })}
+              {brandTemplates.length === 0 && <p className="text-xs text-slate-400 sm:col-span-2 py-2">{t("แบรนด์นี้ยังไม่มีเทมเพลต — กดถัดไปกรอกข้อมูลงานได้เลย","No templates for this brand — click Next to fill task info")}</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 2 — ข้อมูลงาน */}
+      {step === 2 && (<>
         {contentItems.length > 0 && (
           <div className="mb-4 flex items-center gap-2 bg-fuchsia-50/60 border border-fuchsia-100 rounded-lg px-3 py-2 text-sm text-fuchsia-700">
             📱 {t("แม่แบบนี้จะสร้างคอนเทนต์", "This template will create")} {contentItems.length} {t("ชิ้นพ่วงกับงาน (ดู/แก้ได้ที่แท็บคอนเทนต์ในงาน)", "content item(s) linked to the task (view/edit in the task's Content tab)")}
@@ -170,8 +220,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           {!lockedCampaignId && <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => updateForm({ campaign_id: e.target.value })} /></ERPFormField>}
           <ERPFormField label={t("ผู้รับผิดชอบ","Assignee")}><UserPicker value={form.assignee} onChange={(v) => updateForm({ assignee: v })} disableCreate /></ERPFormField>
           <ERPFormField label={t("ผู้ตรวจ/อนุมัติ","Reviewer / Approver")}><UserPicker value={form.reviewer} onChange={(v) => updateForm({ reviewer: v })} disableCreate /></ERPFormField>
-          <ERPFormField label={t("กำหนดส่ง","Due date")}><ERPInput type="date" value={form.due_date} onChange={(e) => updateForm({ due_date: e.target.value })} /></ERPFormField>
-          <ERPFormField label={t("โฟลเดอร์ Drive (ลิงก์)","Drive folder (link)")}><ERPInput value={form.drive_folder_url} onChange={(e) => updateForm({ drive_folder_url: e.target.value })} placeholder="https://drive.google.com/..." /></ERPFormField>
+          <ERPFormField label={t("วันที่สั่ง","Order date")}><ERPInput type="date" value={form.order_date} onChange={(e) => setOrderDate(e.target.value)} /></ERPFormField>
+          <ERPFormField label={t("กำหนดส่ง","Due date")} hint={tplDueOffset != null ? t(`อัตโนมัติ = วันที่สั่ง + ${tplDueOffset} วัน (แก้เองได้)`, `auto = order date + ${tplDueOffset}d (editable)`) : undefined}><ERPInput type="date" value={form.due_date} onChange={(e) => updateForm({ due_date: e.target.value })} /></ERPFormField>
+          <ERPFormField label={t("โฟลเดอร์ Drive (ลิงก์)","Drive folder (link)")} span={2}><ERPInput value={form.drive_folder_url} onChange={(e) => updateForm({ drive_folder_url: e.target.value })} placeholder="https://drive.google.com/..." /></ERPFormField>
           <ERPFormField label="Platform" span={2}>
             <div className="flex flex-wrap gap-1.5">
               {platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
@@ -184,8 +235,8 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         </ERPFormSection>
       </>)}
 
-      {/* STEP 2 — งานย่อย */}
-      {step === 2 && (
+      {/* STEP 3 — งานย่อย */}
+      {step === 3 && (
         <div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-slate-600">{t("งานย่อย","Subtasks")} {subs.length > 0 && <span className="text-slate-400">· {t("ติ๊กเลือกอันที่จะสร้าง / แก้ผู้รับผิดชอบได้","Check the ones to create / edit assignees")}</span>}</p>
@@ -201,8 +252,8 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         </div>
       )}
 
-      {/* STEP 3 — สินค้า */}
-      {step === 3 && (
+      {/* STEP 4 — สินค้า */}
+      {step === 4 && (
         <ERPFormSection title={t("สินค้าที่เกี่ยวข้อง (ใส่ได้หลายรายการ)","Related products (multi-select)")} columns={2}>
           <ERPFormField label={t("สินค้า","Product") + "/SKU"}>
             <SkuPicker value={null} onChange={(v) => { if (v && !form.products.some((p) => p.id === v.id)) updateForm({ products: [...form.products, v] }); }} />
@@ -217,6 +268,14 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       )}
     </ERPModal>
   );
+}
+
+// ไอคอนแบรนด์ (รูปโลโก้ถ้ามี ไม่งั้นวงกลมตัวอักษร + สีแบรนด์)
+function BrandIcon({ brand }: { brand: BrandOption }) {
+  const src = brand.logo_url ? (brand.logo_url.startsWith("http") ? brand.logo_url : `/api/r2-image?key=${encodeURIComponent(brand.logo_url)}&w=64`) : null;
+  // eslint-disable-next-line @next/next/no-img-element
+  if (src) return <img src={src} alt="" className="h-8 w-8 rounded-md object-contain bg-white border border-slate-100 shrink-0" />;
+  return <span className="h-8 w-8 rounded-md flex items-center justify-center text-xs font-semibold text-white shrink-0" style={{ background: brand.color || "#94a3b8" }}>{brand.name.slice(0, 2).toUpperCase()}</span>;
 }
 
 // แถวงานย่อย (มี state ผู้รับผิดชอบของตัวเอง)

@@ -25,20 +25,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   const rows = (data ?? []) as Record<string, unknown>[];
-  // resolve ชื่อผู้รับผิดชอบของทุกขั้นตอน (m2m ใน jsonb)
-  const allIds = rows.flatMap((r) => (Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).flatMap((s) => s.assignee_ids ?? []));
+  // resolve ชื่อผู้รับผิดชอบของทุกขั้นตอน (m2m ใน jsonb) + ผู้ตรวจเริ่มต้นของแม่แบบ
+  const allIds = rows.flatMap((r) => [
+    ...(Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).flatMap((s) => s.assignee_ids ?? []),
+    ...(r.default_reviewer_id ? [r.default_reviewer_id as string] : []),
+  ]);
   const empMap = await employeeLabelMap(admin, allIds);
   const items = rows.map((r) => {
     const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
     const steps = (Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).map((s) => ({ ...s, assignee_labels: (s.assignee_ids ?? []).map((id) => empMap.get(String(id)) ?? "") }));
-    const out: Record<string, unknown> = { ...r, steps, brand_label: b?.name ?? null, brand_color: b?.color ?? null }; delete out.brand; return out;
+    const out: Record<string, unknown> = { ...r, steps, brand_label: b?.name ?? null, brand_color: b?.color ?? null, default_reviewer_label: r.default_reviewer_id ? (empMap.get(String(r.default_reviewer_id)) ?? null) : null }; delete out.brand; return out;
   });
   return NextResponse.json({ data: items, error: null });
 }
 
 type Step = { type?: string; title?: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; config?: Record<string, unknown> };
 type ContentItem = { title?: string; post_type?: string | null; platforms?: string[] };
-type Body = { name?: string; task_type?: string | null; default_priority?: string; brand_id?: string | null; description?: string | null; platforms?: string[]; steps?: Step[]; content_items?: ContentItem[] };
+type Body = { name?: string; task_type?: string | null; default_priority?: string; brand_id?: string | null; default_reviewer_id?: string | null; due_offset_days?: number | null; description?: string | null; platforms?: string[]; steps?: Step[]; content_items?: ContentItem[] };
 
 // เก็บ step ครบรูปแบบ type-driven: type + title + config + description + ผู้รับผิดชอบ (ของกลาง — ไม่ตัดทิ้ง)
 function normalizeSteps(raw?: Step[]): Record<string, unknown>[] {
@@ -76,7 +79,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("erp_creative_task_templates").insert({
     name, task_type: body.task_type || null, default_priority: body.default_priority || "normal",
-    brand_id: body.brand_id || null, description: body.description?.trim() || null, platforms: body.platforms ?? [], steps, content_items, created_by: user?.id ?? null,
+    brand_id: body.brand_id || null, default_reviewer_id: body.default_reviewer_id || null,
+    due_offset_days: (body.due_offset_days === null || body.due_offset_days === undefined || Number.isNaN(Number(body.due_offset_days))) ? null : Number(body.due_offset_days),
+    description: body.description?.trim() || null, platforms: body.platforms ?? [], steps, content_items, created_by: user?.id ?? null,
   }).select("id, name").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   await writeAudit(admin, { action: "create", entityType: "creative_template", entityId: data.id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { name } });

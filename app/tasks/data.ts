@@ -394,7 +394,8 @@ export async function saveBrandPrompt(brand_id: string, subtask_type: string, pr
 export type TemplateContentItem = { title: string; post_type?: string | null; platforms?: string[] };
 export type TaskTemplate = {
   id: string; name: string; task_type: string | null; default_priority: string;
-  brand_id: string | null; brand_label?: string | null; description: string | null;
+  brand_id: string | null; brand_label?: string | null; brand_color?: string | null; description: string | null;
+  default_reviewer_id?: string | null; default_reviewer_label?: string | null; due_offset_days?: number | null;
   platforms: string[] | null; steps: TemplateStep[]; content_items?: TemplateContentItem[];
 };
 export type RecurringRule = {
