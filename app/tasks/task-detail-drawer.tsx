@@ -504,9 +504,15 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             }} />
         )}
 
-        {/* footer actions */}
+        {/* footer actions — งานที่มีงานย่อย: คนทั่วไปเห็นสถานะอ่านอย่างเดียว (สถานะมาจากงานย่อย) · แอดมิน/ผจก.ยังกดได้ */}
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2 flex-wrap">
-          {actions.length === 0 ? (
+          {hasSubtasks && !isManager ? (
+            <div className="w-full flex items-center justify-center gap-2 flex-wrap">
+              <span className="text-sm text-slate-400">{t("สถานะ", "Status")}:</span>
+              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${statusMeta(d.status).cls}`}><span className={`h-1.5 w-1.5 rounded-full ${statusMeta(d.status).dot}`} />{statusMeta(d.status).label}</span>
+              <span className="text-xs text-slate-400">— {t("สถานะมาจากงานย่อย (ดูอย่างเดียว)", "driven by subtasks (view only)")}</span>
+            </div>
+          ) : actions.length === 0 ? (
             <p className="text-sm text-slate-400 text-center w-full">{isClosed ? `${t("งานปิดแล้ว", "Task closed")} (${statusMeta(d.status).label})` : t("ไม่มีการกระทำ", "No actions available")} — {t("ดูได้อย่างเดียว", "Read only")}</p>
           ) : actions.map((a, i) => {
             const cls = a.kind === "approve" ? "bg-emerald-600 text-white hover:bg-emerald-700"
