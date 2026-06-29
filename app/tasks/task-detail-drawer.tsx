@@ -19,6 +19,7 @@ const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) =
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 import { ImageInput } from "@/components/image-input";
 import { ConfirmDialog } from "@/components/modal";
+import { PublishModal } from "./publish-modal";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, progressBg, dividerColorOf } from "./drawer-theme";
@@ -138,6 +139,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState<EditForm | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);   // ยืนยันก่อนลบงาน
+  const [publishToKey, setPublishToKey] = useState<string | null>(null);   // เปิด PublishModal เมื่อกด "เผยแพร่"
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
   const [openParentId, setOpenParentId] = useState<string | null>(null); // เปิด drawer Parent SKU
   const [tab, setTab] = useState<"task" | "content" | "reference">("task"); // แท็บ: งาน / คอนเทนต์ / อ้างอิง
@@ -569,12 +571,13 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               : a.kind === "revise" ? "text-orange-700 border border-orange-200 hover:bg-orange-50"
               : a.kind === "block" ? "text-red-600 border border-red-200 hover:bg-red-50"
               : isPrimary ? "flex-1 text-white" : "text-slate-600 border border-slate-200 hover:bg-slate-50";
-            return <button key={a.to_key} disabled={busy} onClick={() => handleMove(a.to_key)} style={isPrimary ? { background: btnBg(dth) } : undefined} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
+            return <button key={a.to_key} disabled={busy} onClick={() => { if (a.to_key === "published") setPublishToKey(a.to_key); else handleMove(a.to_key); }} style={isPrimary ? { background: btnBg(dth) } : undefined} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
           })}
         </div>
       </div>
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
       <ConfirmDialog open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={() => { setConfirmDel(false); onDelete(d.id); }} variant="danger" title={t("ลบงานนี้?", "Delete this task?")} message={t(`ลบงาน "${d.title}" — รวมงานย่อย/คอนเทนต์ที่ผูกอยู่ และกู้คืนไม่ได้`, `Delete "${d.title}" including its subtasks/content. This cannot be undone.`)} confirmText={t("ลบ", "Delete")} cancelText={t("ยกเลิก", "Cancel")} />
+      {publishToKey && <PublishModal taskId={d.id} parents={parentList} parentFallback={d.parent_sku_code} onClose={() => setPublishToKey(null)} onConfirm={async () => { const to = publishToKey; setPublishToKey(null); if (to) await handleMove(to); }} pushToast={pushToast} />}
     </>
   );
 }

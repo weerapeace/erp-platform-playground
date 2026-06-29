@@ -17,7 +17,7 @@ import { SELECT, flattenContent } from "../shared";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["title", "task_id", "campaign_id", "brand_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "status", "scheduled_at", "published_url", "note", "discount_value", "discount_is_percent", "assignee_id"]);
+const EDITABLE = new Set(["title", "task_id", "campaign_id", "brand_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "status", "scheduled_at", "published_url", "posted_links", "note", "discount_value", "discount_is_percent", "assignee_id"]);
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
