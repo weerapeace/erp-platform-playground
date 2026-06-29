@@ -13,13 +13,44 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 
 export type DrawerDensity = "compact" | "normal" | "spacious";
-export type DrawerTheme = { accent: string; bg: string | null; bgImage: string | null; size: "sm" | "md" | "lg"; density: DrawerDensity; swap: boolean; hidden: string[]; order: string[] };
-export const DEFAULT_DRAWER_THEME: DrawerTheme = { accent: "#7c3aed", bg: null, bgImage: null, size: "md", density: "normal", swap: false, hidden: [], order: [] };
+export type DrawerGradient = { from: string; to: string } | null;
+export type DrawerTheme = {
+  accent: string; accent2: string; accentGradient: boolean;   // สีหลัก (+คู่ไล่สีถ้าเปิด gradient)
+  buttonColor: string | null; progressColor: string | null; dividerColor: string | null;   // แยกสีแต่ละส่วน (null = ใช้สีหลัก/ค่าเริ่มต้น)
+  bg: string | null; bgImage: string | null; bgGradient: DrawerGradient;   // พื้นหลัง: สีเดียว / รูป / ไล่สี
+  size: "sm" | "md" | "lg"; density: DrawerDensity; swap: boolean; hidden: string[]; order: string[];
+};
+export const DEFAULT_DRAWER_THEME: DrawerTheme = {
+  accent: "#7c3aed", accent2: "#ec4899", accentGradient: false,
+  buttonColor: null, progressColor: null, dividerColor: null,
+  bg: null, bgImage: null, bgGradient: null,
+  size: "md", density: "normal", swap: false, hidden: [], order: [],
+};
 
 export function mergeDrawerTheme(v: unknown): DrawerTheme {
   const o = (v ?? {}) as Partial<DrawerTheme>;
-  return { accent: o.accent ?? DEFAULT_DRAWER_THEME.accent, bg: o.bg ?? null, bgImage: o.bgImage ?? null, size: o.size ?? "md", density: o.density ?? "normal", swap: !!o.swap, hidden: Array.isArray(o.hidden) ? o.hidden : [], order: Array.isArray(o.order) ? o.order : [] };
+  return {
+    accent: o.accent ?? DEFAULT_DRAWER_THEME.accent, accent2: o.accent2 ?? DEFAULT_DRAWER_THEME.accent2, accentGradient: !!o.accentGradient,
+    buttonColor: o.buttonColor ?? null, progressColor: o.progressColor ?? null, dividerColor: o.dividerColor ?? null,
+    bg: o.bg ?? null, bgImage: o.bgImage ?? null, bgGradient: o.bgGradient ?? null,
+    size: o.size ?? "md", density: o.density ?? "normal", swap: !!o.swap, hidden: Array.isArray(o.hidden) ? o.hidden : [], order: Array.isArray(o.order) ? o.order : [],
+  };
 }
+// สีหลัก (ไล่สีถ้าเปิด) → ใช้กับปุ่ม/แถบ · helper คืนค่า CSS background (string)
+export function accentCss(t: DrawerTheme): string { return t.accentGradient ? `linear-gradient(135deg, ${t.accent}, ${t.accent2})` : t.accent; }
+export function btnBg(t: DrawerTheme): string { return t.buttonColor || accentCss(t); }
+export function progressBg(t: DrawerTheme): string { return t.progressColor || accentCss(t); }
+// สีเส้นแบ่ง (null = ใช้ค่าเริ่มต้นของ Tailwind ผ่าน class) → คืน undefined ให้ปล่อยตาม class
+export function dividerColorOf(t: DrawerTheme): string | undefined { return t.dividerColor || undefined; }
+// ชุดสีสำเร็จรูป
+export const DRAWER_PRESETS: { name: string; accent: string; accent2: string; gradient: boolean }[] = [
+  { name: "ม่วง", accent: "#7c3aed", accent2: "#ec4899", gradient: true },
+  { name: "ฟ้า", accent: "#2563eb", accent2: "#06b6d4", gradient: true },
+  { name: "เขียว", accent: "#059669", accent2: "#84cc16", gradient: true },
+  { name: "ส้ม-แดง", accent: "#ea580c", accent2: "#dc2626", gradient: true },
+  { name: "ชมพู", accent: "#db2777", accent2: "#fb7185", gradient: true },
+  { name: "เทาเข้ม", accent: "#334155", accent2: "#64748b", gradient: false },
+];
 // ลำดับส่วน (ของคนนั้น) ก่อน แล้วต่อด้วยส่วนที่ยังไม่ถูกจัดลำดับ — ส่วนใหม่ที่เพิ่มภายหลังจะไปต่อท้ายอัตโนมัติ
 export function orderedKeys(theme: DrawerTheme, allKeys: string[]): string[] {
   const known = (theme.order ?? []).filter((k) => allKeys.includes(k));
@@ -36,6 +67,7 @@ export function densityGap(d: DrawerDensity): string { return d === "compact" ? 
 // สไตล์พื้นหลัง drawer (รูป + ฉากขาวจางให้อ่านง่าย · หรือสีเดียว)
 export function drawerBgStyle(theme: DrawerTheme): React.CSSProperties {
   if (theme.bgImage) { const u = r2ImageUrl(theme.bgImage); return u ? { backgroundImage: `linear-gradient(rgba(255,255,255,0.86),rgba(255,255,255,0.86)), url(${u})`, backgroundSize: "cover", backgroundAttachment: "local" } : {}; }
+  if (theme.bgGradient) return { background: `linear-gradient(160deg, ${theme.bgGradient.from}, ${theme.bgGradient.to})` };
   return theme.bg ? { background: theme.bg } : {};
 }
 
@@ -100,26 +132,48 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
                 <button key={d} onClick={() => update({ density: d })} className={`h-7 px-2.5 text-xs rounded border ${theme.density === d ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{d === "compact" ? t("แน่น", "Compact") : d === "spacious" ? t("โปร่ง", "Spacious") : t("ปกติ", "Normal")}</button>
               ))}
             </div>
-            {/* พื้นหลัง (สี) */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 w-20">{t("พื้นหลัง", "Background")}</span>
-              <input type="color" value={theme.bg ?? "#ffffff"} onChange={(e) => update({ bg: e.target.value, bgImage: null })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
-              <button onClick={() => update({ bg: null, bgImage: null })} className={`h-7 px-2.5 text-xs rounded border ${theme.bg === null && !theme.bgImage ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{t("ขาว", "White")}</button>
+            {/* ชุดสีสำเร็จรูป */}
+            <div>
+              <span className="text-xs text-slate-500">{t("ชุดสีสำเร็จรูป", "Presets")}</span>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {DRAWER_PRESETS.map((p) => (
+                  <button key={p.name} onClick={() => update({ accent: p.accent, accent2: p.accent2, accentGradient: p.gradient, buttonColor: null, progressColor: null })} title={p.name}
+                    className="h-7 w-7 rounded-full border border-slate-200 hover:scale-110 transition-transform" style={{ background: p.gradient ? `linear-gradient(135deg, ${p.accent}, ${p.accent2})` : p.accent }} />
+                ))}
+              </div>
             </div>
-            {/* พื้นหลัง (รูป) */}
+            {/* สีหลัก + ไล่สี */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 w-20">{t("รูปพื้นหลัง", "BG image")}</span>
-              <label className={`h-7 px-2.5 text-xs rounded border inline-flex items-center cursor-pointer ${theme.bgImage ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"} ${bgBusy ? "opacity-60 pointer-events-none" : ""}`}>
-                {bgBusy ? t("กำลังอัป…", "Uploading…") : theme.bgImage ? t("เปลี่ยนรูป", "Change") : t("อัปโหลด", "Upload")}
+              <span className="text-xs text-slate-500 w-20">{t("สีหลัก", "Accent")}</span>
+              <input type="color" value={theme.accent} onChange={(e) => update({ accent: e.target.value })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+              {theme.accentGradient && <input type="color" value={theme.accent2} onChange={(e) => update({ accent2: e.target.value })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />}
+              <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer ml-auto"><input type="checkbox" checked={theme.accentGradient} onChange={(e) => update({ accentGradient: e.target.checked })} className="h-3.5 w-3.5 rounded border-slate-300 text-violet-600" />{t("ไล่สี (ปุ่ม/แถบ)", "Gradient")}</label>
+            </div>
+            {/* แยกสี: ปุ่ม / แถบคืบหน้า / เส้นแบ่ง (ว่าง = ใช้สีหลัก) */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500 w-20">{t("แยกสี", "Per-part")}</span>
+              <ColorOpt label={t("ปุ่ม", "Btn")} value={theme.buttonColor} fallback={theme.accent} onChange={(c) => update({ buttonColor: c })} />
+              <ColorOpt label={t("คืบหน้า", "Bar")} value={theme.progressColor} fallback={theme.accent} onChange={(c) => update({ progressColor: c })} />
+              <ColorOpt label={t("เส้นแบ่ง", "Line")} value={theme.dividerColor} fallback="#e2e8f0" onChange={(c) => update({ dividerColor: c })} />
+            </div>
+            {/* พื้นหลัง: ขาว / สีเดียว / ไล่สี / รูป */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500 w-20">{t("พื้นหลัง", "Background")}</span>
+              <button onClick={() => update({ bg: null, bgImage: null, bgGradient: null })} className={`h-7 px-2.5 text-xs rounded border ${!theme.bg && !theme.bgImage && !theme.bgGradient ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{t("ขาว", "White")}</button>
+              <input type="color" value={theme.bg ?? "#ffffff"} onChange={(e) => update({ bg: e.target.value, bgImage: null, bgGradient: null })} title={t("สีเดียว", "Solid")} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+              <button onClick={() => update({ bgGradient: theme.bgGradient ?? { from: "#f5f3ff", to: "#fdf2f8" }, bgImage: null })} className={`h-7 px-2 text-xs rounded border ${theme.bgGradient ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{t("ไล่สี", "Gradient")}</button>
+              <label className={`h-7 px-2 text-xs rounded border inline-flex items-center cursor-pointer ${theme.bgImage ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"} ${bgBusy ? "opacity-60 pointer-events-none" : ""}`}>
+                {bgBusy ? "…" : t("รูป", "Image")}
                 <input type="file" accept="image/*" className="hidden" onChange={(e) => { void onPickBg(e.target.files?.[0]); e.target.value = ""; }} />
               </label>
-              {theme.bgImage && <button onClick={() => update({ bgImage: null })} className="h-7 px-2 text-xs rounded border border-slate-200 text-slate-500 hover:bg-slate-50">{t("เอาออก", "Remove")}</button>}
             </div>
-            {/* สีหลัก (แถบบน) */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 w-20">{t("สีหลัก (แถบบน)", "Accent (bar)")}</span>
-              <input type="color" value={theme.accent} onChange={(e) => update({ accent: e.target.value })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
-            </div>
+            {theme.bgGradient && (
+              <div className="flex items-center gap-2 pl-[5.5rem]">
+                <input type="color" value={theme.bgGradient.from} onChange={(e) => update({ bgGradient: { from: e.target.value, to: theme.bgGradient!.to } })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+                <span className="text-xs text-slate-400">→</span>
+                <input type="color" value={theme.bgGradient.to} onChange={(e) => update({ bgGradient: { from: theme.bgGradient!.from, to: e.target.value } })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+              </div>
+            )}
             {/* สลับซ้าย-ขวา */}
             <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
               <input type="checkbox" checked={theme.swap} onChange={(e) => update({ swap: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{t("สลับซ้าย-ขวา", "Swap left/right")}
@@ -148,5 +202,16 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
         </>
       )}
     </div>
+  );
+}
+
+// สวอตช์สีต่อส่วน (ว่าง = ใช้สีหลัก/ค่าเริ่มต้น · มี ✕ ให้รีเซ็ตกลับ)
+function ColorOpt({ label, value, fallback, onChange }: { label: string; value: string | null; fallback: string; onChange: (c: string | null) => void }) {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      <input type="color" value={value ?? fallback} onChange={(e) => onChange(e.target.value)} title={label} className={`w-8 h-7 p-0 border rounded cursor-pointer ${value ? "border-violet-300" : "border-slate-200 opacity-60"}`} />
+      <span className="text-[10px] text-slate-400">{label}</span>
+      {value && <button onClick={() => onChange(null)} title="ใช้สีหลัก" className="text-[10px] text-slate-300 hover:text-red-500 leading-none">✕</button>}
+    </span>
   );
 }

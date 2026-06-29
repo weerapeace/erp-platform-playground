@@ -21,7 +21,7 @@ import { ImageInput } from "@/components/image-input";
 import { ConfirmDialog } from "@/components/modal";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys } from "./drawer-theme";
+import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, progressBg, dividerColorOf } from "./drawer-theme";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
@@ -227,7 +227,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
       <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
         {/* แถบสีหลัก (ธีม) */}
-        <div className="h-1 shrink-0" style={{ background: dth.accent }} />
+        <div className="h-1 shrink-0" style={{ background: accentCss(dth) }} />
         {/* ที่จับลากปรับความกว้าง (ขอบซ้าย) */}
         <div onMouseDown={startResize} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-400/40 active:bg-violet-400/60 z-[60]" />
         {/* header */}
@@ -259,13 +259,13 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             {/* progress */}
             <div>
               <div className="flex justify-between text-xs text-slate-400 mb-1"><span>{t("ความคืบหน้า", "Progress")}</span><span>{d.progress_percent}%</span></div>
-              <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full" style={{ width: `${d.progress_percent}%`, background: dth.accent }} /></div>
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full" style={{ width: `${d.progress_percent}%`, background: progressBg(dth) }} /></div>
               {d.blocker_status === "blocked" && d.blocker_reason && <p className="text-xs text-red-600 mt-1">⚠ {t("ติดปัญหา", "Blocked")}: {d.blocker_reason}</p>}
             </div>
           </div>
 
           {/* แท็บ: งาน / คอนเทนต์ (โซเชียลพ่วงงาน) — โชว์จำนวนงานย่อย / คอนเทนต์ */}
-          <div className="flex items-center gap-1 px-5 pt-1 pb-2 border-t border-slate-100">
+          <div className="flex items-center gap-1 px-5 pt-1 pb-2 border-t border-slate-100" style={{ borderColor: dividerColorOf(dth) }}>
             {([["task", t("📋 งาน", "📋 Task"), d.subtasks?.length ?? 0], ["content", t("📱 คอนเทนต์", "📱 Content"), d.content_count ?? 0], ["reference", t("📎 อ้างอิง", "📎 Reference"), (d.reference_html ?? "").trim() ? 1 : 0]] as const).map(([k, label, count]) => (
               <button key={k} onClick={() => setTab(k)} style={tab === k ? { background: `${dth.accent}1f`, color: dth.accent } : undefined} className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${tab === k ? "" : "text-slate-500 hover:bg-slate-50"}`}>
                 {label}{count > 0 && <span className="text-[11px] rounded-full px-1.5" style={tab === k ? { background: `${dth.accent}33`, color: dth.accent } : { background: "#e2e8f0", color: "#475569" }}>{count}</span>}
@@ -357,7 +357,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
 
             {/* ===== ขวา: ข้อมูลงาน + ความคิดเห็น ===== */}
-            <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} bg-slate-50/40 border-slate-100`}>
+            <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} bg-slate-50/40 border-slate-100`} style={{ borderColor: dividerColorOf(dth) }}>
               {/* รูปปก (เล็ก) — โชว์ทั้งโหมดดู/แก้ */}
               {!isHidden(dth, "cover") && (
               <div style={{ order: tOrderOf("cover") }}>
@@ -403,7 +403,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   </div>
                   <div className="flex justify-end gap-2">
                     <button onClick={() => setEditing(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
-                    <button onClick={saveEdit} disabled={busy} style={{ background: dth.accent }} className="h-8 px-4 text-sm text-white rounded-lg disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
+                    <button onClick={saveEdit} disabled={busy} style={{ background: btnBg(dth) }} className="h-8 px-4 text-sm text-white rounded-lg disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
                   </div>
                 </div>
               ) : (
@@ -484,7 +484,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           </div>
 
           {/* ความคิดเห็น — section เต็มกว้างใต้ 2 คอลัมน์ */}
-          <div className="border-t border-slate-100 px-5 py-4">
+          <div className="border-t border-slate-100 px-5 py-4" style={{ borderColor: dividerColorOf(dth) }}>
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ความคิดเห็น", "Comments")} ({d.comments.length})</p>
             <div className="space-y-2 mb-3">
               {d.comments.map((c) => (
@@ -497,7 +497,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
             <div className="flex gap-2">
               <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder={t("เขียนความคิดเห็น...", "Write a comment...")} />
-              <button onClick={sendComment} style={{ background: dth.accent }} className="h-9 px-4 text-sm font-medium text-white rounded-lg shrink-0">{t("ส่ง", "Send")}</button>
+              <button onClick={sendComment} style={{ background: btnBg(dth) }} className="h-9 px-4 text-sm font-medium text-white rounded-lg shrink-0">{t("ส่ง", "Send")}</button>
             </div>
             {/* แจ้งเตือนถึง (@mention) — คนที่เลือกจะได้แจ้งเตือนเมื่อส่งคอมเมนต์ */}
             <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
@@ -521,7 +521,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 placeholder={t("พิมพ์ข้อมูลอ้างอิง…", "Type reference notes…")}
                 onUploadImage={async (f) => { const r = await uploadResizedImage(f, { folder: "creative-tasks", max: 1600 }); return r2ImageUrl(r.r2_key) ?? ""; }} />
               <div className="flex justify-end">
-                <button onClick={saveRef} disabled={refSaving} style={{ background: dth.accent }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{refSaving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกอ้างอิง", "Save reference")}</button>
+                <button onClick={saveRef} disabled={refSaving} style={{ background: btnBg(dth) }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{refSaving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกอ้างอิง", "Save reference")}</button>
               </div>
             </div>
           )}
@@ -555,7 +555,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               : a.kind === "revise" ? "text-orange-700 border border-orange-200 hover:bg-orange-50"
               : a.kind === "block" ? "text-red-600 border border-red-200 hover:bg-red-50"
               : isPrimary ? "flex-1 text-white" : "text-slate-600 border border-slate-200 hover:bg-slate-50";
-            return <button key={a.to_key} disabled={busy} onClick={() => handleMove(a.to_key)} style={isPrimary ? { background: dth.accent } : undefined} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
+            return <button key={a.to_key} disabled={busy} onClick={() => handleMove(a.to_key)} style={isPrimary ? { background: btnBg(dth) } : undefined} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
           })}
         </div>
       </div>
