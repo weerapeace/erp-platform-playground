@@ -814,15 +814,21 @@ export function AttendanceImportPreview({
                 className="ml-auto h-7 rounded-lg border border-emerald-200 bg-white px-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50">＋ draft ใหม่</button>
             </div>
             {drafts.length > 0 && (
-              <select
-                value={draft?.id || ""}
-                onChange={(event) => { const id = event.target.value; if (id) void selectDraft(id); else newDraft(); }}
-                disabled={busy}
-                className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm"
-              >
-                <option value="">— draft ใหม่ (ยังไม่บันทึก) —</option>
-                {drafts.map((d) => <option key={d.id} value={d.id}>{d.source_filename || "(ไม่มีชื่อ)"}</option>)}
-              </select>
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={draft?.id || ""}
+                  onChange={(event) => { const id = event.target.value; if (id) void selectDraft(id); else newDraft(); }}
+                  disabled={busy}
+                  className="h-8 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                >
+                  <option value="">— draft ใหม่ (ยังไม่บันทึก) —</option>
+                  {drafts.map((d) => <option key={d.id} value={d.id}>{d.source_filename || "(ไม่มีชื่อ)"}</option>)}
+                </select>
+                {draft?.id && (
+                  <button type="button" onClick={() => void clearDraft()} disabled={busy} title="ลบ draft นี้"
+                    className="h-8 rounded-lg border border-rose-200 bg-white px-2 text-sm text-rose-600 hover:bg-rose-50 disabled:opacity-50">🗑</button>
+                )}
+              </div>
             )}
             <label className="block text-xs font-medium text-slate-500">
               ชื่อ draft (ตั้งเอง)

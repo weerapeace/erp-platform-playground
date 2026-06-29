@@ -145,13 +145,22 @@ export async function getAttendanceImportBatch(admin: AdminClient, batchId: stri
   const batch = batches?.[0] as Row | undefined;
   if (!batch) throw new Error("ไม่พบ draft import นี้");
 
-  const { data: rows, error: rowsError } = await admin
-    .from("attendance_import_rows")
-    .select("*")
-    .eq("batch_id", batchId)
-    .order("sort_order", { ascending: true });
-  if (rowsError) throw new Error(rowsError.message);
-  return { ...batch, rows: (rows ?? []) as Row[] };
+  // ดึงทุกแถวแบบแบ่งหน้า — กัน Supabase default max_rows (1000) ตัดแถว (งวดใหญ่มีหลายพันแถว/วันขาดงาน)
+  const PAGE = 1000;
+  const allRows: Row[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error: rowsError } = await admin
+      .from("attendance_import_rows")
+      .select("*")
+      .eq("batch_id", batchId)
+      .order("sort_order", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (rowsError) throw new Error(rowsError.message);
+    const got = (page ?? []) as Row[];
+    allRows.push(...got);
+    if (got.length < PAGE) break;
+  }
+  return { ...batch, rows: allRows };
 }
 
 export async function saveAttendanceImportDraft(
