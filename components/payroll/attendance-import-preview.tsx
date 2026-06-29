@@ -362,7 +362,8 @@ export function AttendanceImportPreview({
   const [editRow, setEditRow] = useState<DisplayImportRow | null>(null);                   // แถวที่กำลังเปิดป๊อปอัปตรวจ/แก้
   const [pendingMatches, setPendingMatches] = useState<Record<string, string>>({});        // รหัสสแกน → employee_id ที่จะจับคู่
   const [matchSaving, setMatchSaving] = useState(false);
-  const [committingCount, setCommittingCount] = useState<number | null>(null);   // โชว์ overlay "กำลังบันทึก..." ตอน commit
+  const [committingCount, setCommittingCount] = useState<number | null>(null);   // โชว์ overlay "กำลังบันทึก..." ตอน commit (ยอดรวม)
+  const [committingDone, setCommittingDone] = useState(0);                        // จำนวนที่บันทึกไปแล้ว (progress)
   const fileRef = useRef<HTMLInputElement | null>(null);
   const matchedCodesRef = useRef<Set<string>>(new Set());   // รหัสที่เพิ่งจับคู่ → re-resolve draft หลัง employees โหลดใหม่
 
@@ -692,24 +693,39 @@ export function AttendanceImportPreview({
     if (!confirm(`ยืนยันบันทึกจริง ${rowIds.length} รายการเข้างวดนี้?\nลงแล้วจะไปอยู่หน้าคำนวณเงินเดือน (แก้ย้อนได้ที่หน้าคำนวณ)`)) return;
     setBusy(true);
     setCommittingCount(rowIds.length);
+    setCommittingDone(0);
     setMessage("");
+    // เซิร์ฟเวอร์บันทึกได้ทีละ 500 (กัน timeout) → ฝั่งจอวนส่งทีละ 500 จนครบในคลิกเดียว
+    const CHUNK = 500;
+    let inserted = 0, skipped = 0, failed = 0, committedRows = 0;
+    const errs: string[] = [];
     try {
-      const res = await apiFetch(`/api/payroll/attendance-import-batches/${draft.id}/commit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ row_ids: rowIds, duplicate_mode: duplicateMode }),
-      });
-      const json = await res.json();
-      if (!res.ok || json.error) throw new Error(json.error || "บันทึกจริงไม่สำเร็จ");
-      const result = json.data as { inserted?: number; skipped?: number; failed?: number; errors?: string[] };
-      setMessage(`บันทึกจริงแล้ว ${result.inserted || 0} รายการ · ข้าม ${result.skipped || 0} · ผิดพลาด ${result.failed || 0}${result.errors?.length ? ` (${result.errors.join(" / ")})` : ""}`);
+      for (let i = 0; i < rowIds.length; i += CHUNK) {
+        const chunk = rowIds.slice(i, i + CHUNK);
+        const res = await apiFetch(`/api/payroll/attendance-import-batches/${draft.id}/commit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ row_ids: chunk, duplicate_mode: duplicateMode }),
+        });
+        const json = await res.json();
+        if (!res.ok || json.error) throw new Error(json.error || "บันทึกจริงไม่สำเร็จ");
+        const r = (json.data ?? {}) as { inserted?: number; skipped?: number; failed?: number; errors?: string[] };
+        inserted += r.inserted || 0; skipped += r.skipped || 0; failed += r.failed || 0;
+        if (r.errors?.length) errs.push(...r.errors);
+        committedRows += chunk.length - (r.failed || 0);
+        setCommittingDone(Math.min(rowIds.length, i + chunk.length));
+      }
+      setMessage(`บันทึกจริงแล้ว ${committedRows.toLocaleString("th-TH")} รายการ · สร้างรายการ ${inserted} · ข้าม ${skipped}${failed ? ` · ผิดพลาด ${failed}` : ""}`);
       onCommitted?.();
       await loadDrafts();
+      alert(`✅ บันทึกจริงสำเร็จ ${committedRows.toLocaleString("th-TH")} รายการเข้างวดแล้ว${failed ? `\n⚠ ผิดพลาด ${failed} รายการ${errs.length ? ` (${errs.slice(0, 3).join(" / ")})` : ""}` : ""}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "บันทึกจริงไม่สำเร็จ");
+      alert(`บันทึกไม่สำเร็จ: ${error instanceof Error ? error.message : "เกิดข้อผิดพลาด"}\n(บันทึกไปได้ ${committedRows.toLocaleString("th-TH")} รายการก่อนหยุด)`);
     } finally {
       setBusy(false);
       setCommittingCount(null);
+      setCommittingDone(0);
     }
   };
 
@@ -1233,7 +1249,10 @@ export function AttendanceImportPreview({
           <div className="flex flex-col items-center gap-3 rounded-2xl bg-white px-8 py-7 shadow-2xl">
             <span className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-orange-500" />
             <div className="text-sm font-semibold text-slate-800">กำลังบันทึกลงงวด…</div>
-            <div className="text-xs text-slate-500">{committingCount.toLocaleString("th-TH")} รายการ · อย่าปิดหน้านี้</div>
+            <div className="text-xs text-slate-500">{committingDone.toLocaleString("th-TH")} / {committingCount.toLocaleString("th-TH")} รายการ · อย่าปิดหน้านี้</div>
+            <div className="h-1.5 w-48 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full bg-orange-500 transition-all" style={{ width: `${committingCount ? Math.round((committingDone / committingCount) * 100) : 0}%` }} />
+            </div>
           </div>
         </div>,
         document.body,
