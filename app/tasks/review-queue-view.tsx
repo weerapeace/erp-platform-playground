@@ -2,18 +2,23 @@
 
 // ============================================================
 // คิวรอตรวจ/อนุมัติ (ของกลางในโมดูล) — ตารางงานย่อยที่ส่งมา + popup ดูรูป/อนุมัติ/ตีกลับ
+// popup: เรียงลำดับรูป (↑↓) · เลือกปลายทาง Parent/SKU · ยืนยันก่อนอนุมัติ (รูปย้ายเข้าอัลบั้มสินค้า)
 // ใช้ทั้งในหน้า /tasks/review และฝังในหน้าภาพรวม (กดการ์ด "รอตรวจ/อนุมัติ")
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
+import type { SkuPickerValue } from "@/components/pickers";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { AssigneeStack } from "./assignee-avatar";
 import { listReviewQueue, updateSubtask, type ReviewQueueItem } from "./data";
 import { useT } from "@/components/i18n";
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
+type Img = { r2_key: string; file_name: string | null };
+type Dest = { id: string; code: string };
 
 export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   const t = useT();
@@ -23,6 +28,13 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   const [lb, setLb] = useState(-1);
   const [search, setSearch] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // สถานะ popup ที่แก้ได้ (เรียงรูป / ปลายทาง / ยืนยันอนุมัติ)
+  const [imgs, setImgs] = useState<Img[]>([]);
+  const [destParents, setDestParents] = useState<Dest[]>([]);
+  const [destSkus, setDestSkus] = useState<Dest[]>([]);
+  const [confirmApprove, setConfirmApprove] = useState(false);
+  const [pickOpen, setPickOpen] = useState(false);
+
   const pushToast = useCallback((type: Toast["type"], message: string) => {
     const id = Date.now() + Math.random(); setToasts((p) => [...p, { id, type, message }]);
     setTimeout(() => setToasts((p) => p.filter((x) => x.id !== id)), 3500);
@@ -31,15 +43,53 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   const load = useCallback(async () => { try { setItems(await listReviewQueue()); } catch (e) { pushToast("error", (e as Error).message); setItems([]); } }, [pushToast]);
   useEffect(() => { load(); }, [load]);
 
+  // เปิดงาน → โหลดค่าเริ่มต้นลงสถานะที่แก้ได้
+  const openItem = (r: ReviewQueueItem) => {
+    setActive(r);
+    setImgs(r.images ?? []);
+    setDestParents(r.dest?.parents ?? []);
+    setDestSkus(r.dest?.skus ?? []);
+    setConfirmApprove(false);
+    setLb(-1);
+  };
+  const closeItem = () => { setActive(null); setLb(-1); setConfirmApprove(false); };
+
+  // บันทึกปลายทาง + ลำดับรูป ลงงานย่อย (best-effort) — คงค่า sku_images เดิมไว้
+  const persist = useCallback((next: { parents?: Dest[]; skus?: Dest[]; order?: string[] }) => {
+    if (!active) return;
+    const ex = active.image_sync_targets ?? {};
+    const body = {
+      ...ex,
+      parent_ids: (next.parents ?? destParents).map((p) => p.id),
+      sku_ids: (next.skus ?? destSkus).map((s) => s.id),
+      image_order: next.order ?? imgs.map((im) => im.r2_key),
+    };
+    updateSubtask(active.task_id, active.id, { image_sync_targets: body }).catch(() => {});
+  }, [active, destParents, destSkus, imgs]);
+
+  const moveImg = (i: number, dir: -1 | 1) => {
+    const j = i + dir; if (j < 0 || j >= imgs.length) return;
+    const next = imgs.slice(); [next[i], next[j]] = [next[j], next[i]];
+    setImgs(next); persist({ order: next.map((im) => im.r2_key) });
+  };
+  const onAddSkus = (skus: SkuPickerValue[]) => {
+    const merged = [...destSkus];
+    for (const s of skus) { const id = String(s.id); if (!merged.some((x) => x.id === id)) merged.push({ id, code: String(s.code ?? s.name ?? id) }); }
+    setDestSkus(merged); persist({ skus: merged }); setPickOpen(false);
+  };
+  const removeSku = (id: string) => { const next = destSkus.filter((s) => s.id !== id); setDestSkus(next); persist({ skus: next }); };
+  const removeParent = (id: string) => { const next = destParents.filter((p) => p.id !== id); setDestParents(next); persist({ parents: next }); };
+
   const act = async (status: string, comment?: string) => {
     if (!active) return; setBusy(true);
     try {
       await updateSubtask(active.task_id, active.id, comment !== undefined ? { status, comment } : { status });
-      pushToast("success", status === "approved" ? t("อนุมัติแล้ว", "Approved") : t("ส่งกลับให้แก้แล้ว", "Sent back for revision"));
-      setActive(null); setLb(-1); await load(); onChanged?.();
+      pushToast("success", status === "approved" ? t("อนุมัติแล้ว — รูปเข้าอัลบั้มสินค้าแล้ว", "Approved — images sent to product albums") : t("ส่งกลับให้แก้แล้ว", "Sent back for revision"));
+      closeItem(); await load(); onChanged?.();
     } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
   const revise = () => { const r = window.prompt(t("เหตุผลที่ขอแก้ (ส่งให้ผู้ทำ)", "Reason for revision")); if (r === null) return; act("revision_requested", r); };
+  const onApprove = () => { if (confirmApprove) act("approved"); else setConfirmApprove(true); };
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase(); const list = items ?? [];
@@ -47,7 +97,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
     return list.filter((r) => [r.task_no, r.task_title, r.title, r.brand_label].some((v) => (v ?? "").toLowerCase().includes(q)));
   }, [items, search]);
 
-  const lbImages = (active?.images ?? []).map((im) => ({ url: r2ImageUrl(im.r2_key, 1600) ?? "", label: im.file_name }));
+  const lbImages = imgs.map((im) => ({ url: r2ImageUrl(im.r2_key, 1600) ?? "", label: im.file_name }));
 
   return (
     <div className="space-y-2">
@@ -83,7 +133,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
                     <td className="px-3 py-2 align-top hidden md:table-cell">{r.assignees.length ? <AssigneeStack list={r.assignees} size={22} /> : <span className="text-slate-300">—</span>}</td>
                     <td className="px-3 py-2 align-top">
                       {r.images.length ? (
-                        <button onClick={() => setActive(r)} className="inline-flex items-center gap-1">
+                        <button onClick={() => openItem(r)} className="inline-flex items-center gap-1">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={r2ImageUrl(r.images[0].r2_key, 80) ?? ""} alt="" className="h-9 w-9 rounded object-cover border border-slate-200" />
                           {r.images.length > 1 && <span className="text-[11px] text-slate-400">+{r.images.length - 1}</span>}
@@ -91,7 +141,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
                       ) : <span className="text-xs text-slate-300">{t("ไม่มีรูป", "none")}</span>}
                     </td>
                     <td className="px-3 py-2 align-top text-right">
-                      <button onClick={() => setActive(r)} className="h-8 px-3 text-xs font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600">🔎 {t("ดูงาน", "View")}</button>
+                      <button onClick={() => openItem(r)} className="h-8 px-3 text-xs font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600">🔎 {t("ดูงาน", "View")}</button>
                     </td>
                   </tr>
                 ))}
@@ -101,27 +151,65 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
         )}
 
       {active && (
-        <ERPModal open onClose={() => { setActive(null); setLb(-1); }} size="lg"
+        <ERPModal open onClose={closeItem} size="lg"
           title={`${t("ตรวจงาน", "Review")}: ${active.title}`}
           footer={<>
-            <button onClick={() => { setActive(null); setLb(-1); }} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+            <button onClick={closeItem} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
             <button onClick={revise} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-50 disabled:opacity-50">↩︎ {t("ตีกลับแก้", "Return")}</button>
-            <button onClick={() => act("approved")} disabled={busy} className="h-9 px-5 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">✓ {t("อนุมัติ", "Approve")}</button>
+            <button onClick={onApprove} disabled={busy} className={`h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50 ${confirmApprove ? "bg-emerald-700 hover:bg-emerald-800 ring-2 ring-emerald-300" : "bg-emerald-600 hover:bg-emerald-700"}`}>✓ {confirmApprove ? t("ยืนยันอนุมัติ", "Confirm approve") : t("อนุมัติ", "Approve")}</button>
           </>}>
           <div className="space-y-3">
             <div className="text-sm text-slate-500"><span className="font-mono text-xs">{active.task_no}</span> · {active.task_title}{active.brand_label ? ` · ${active.brand_label}` : ""}</div>
-            {active.images.length ? (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                {active.images.map((im, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img key={im.r2_key} src={r2ImageUrl(im.r2_key, 400) ?? ""} alt={im.file_name ?? ""} onClick={() => setLb(i)} title={t("กดดูเต็มจอ", "Click to view full")} className="w-full h-28 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
-                ))}
+
+            {/* รูป — เรียงลำดับได้ (↑↓ = ลำดับในอัลบั้มสินค้าตอนอนุมัติ) */}
+            {imgs.length ? (
+              <div>
+                <p className="text-xs text-slate-400 mb-1">{t("รูป (ลากลำดับด้วยปุ่ม ◀▶ — ลำดับนี้จะเป็นลำดับในอัลบั้มสินค้า)", "Images (reorder with ◀▶ — this is the album order)")}</p>
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {imgs.map((im, i) => (
+                    <div key={im.r2_key} className="relative group">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={r2ImageUrl(im.r2_key, 400) ?? ""} alt={im.file_name ?? ""} onClick={() => setLb(i)} title={t("กดดูเต็มจอ", "Click to view full")} className="w-full h-28 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+                      <span className="absolute top-1 left-1 h-5 min-w-5 px-1 rounded-full bg-black/55 text-white text-[10px] flex items-center justify-center">{i + 1}</span>
+                      <div className="absolute bottom-1 left-1 right-1 flex justify-between opacity-0 group-hover:opacity-100">
+                        <button onClick={(e) => { e.stopPropagation(); moveImg(i, -1); }} disabled={i === 0} title={t("เลื่อนซ้าย", "Move left")} className="h-6 w-6 rounded-full bg-white/90 text-slate-700 text-xs shadow disabled:opacity-30 hover:text-violet-700">◀</button>
+                        <button onClick={(e) => { e.stopPropagation(); moveImg(i, 1); }} disabled={i === imgs.length - 1} title={t("เลื่อนขวา", "Move right")} className="h-6 w-6 rounded-full bg-white/90 text-slate-700 text-xs shadow disabled:opacity-30 hover:text-violet-700">▶</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : <p className="text-sm text-slate-400 italic">{t("งานย่อยนี้ไม่ได้แนบรูป", "No images attached")}</p>}
+
+            {/* ปลายทางรูป — Parent SKU + SKU (เลือกได้) */}
+            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-500">📦 {t("อนุมัติแล้วรูปจะเข้าอัลบั้มของ", "On approval, images go to")}</p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-slate-400 w-14">Parent</span>
+                {destParents.length ? destParents.map((p) => (
+                  <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-white border border-slate-200 rounded-full pl-2 pr-1 py-0.5">{p.code}<button onClick={() => removeParent(p.id)} className="text-slate-400 hover:text-red-500">✕</button></span>
+                )) : <span className="text-xs text-slate-300">{t("— ไม่มี", "— none")}</span>}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-slate-400 w-14">SKU</span>
+                {destSkus.map((s) => (
+                  <span key={s.id} className="inline-flex items-center gap-1 text-xs bg-white border border-slate-200 rounded-full pl-2 pr-1 py-0.5">{s.code}<button onClick={() => removeSku(s.id)} className="text-slate-400 hover:text-red-500">✕</button></span>
+                ))}
+                <button onClick={() => setPickOpen(true)} className="h-7 px-2 text-xs font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">＋ {t("เลือก SKU", "Add SKU")}</button>
+              </div>
+              {!destParents.length && !destSkus.length && <p className="text-[11px] text-amber-600">⚠ {t("ยังไม่มีปลายทาง — เลือกอย่างน้อย 1 ที่ ไม่งั้นรูปจะไม่เข้าอัลบั้มสินค้า", "No destination — pick at least one or images won't reach product albums")}</p>}
+            </div>
+
+            {confirmApprove && (
+              <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                {t("กด\"ยืนยันอนุมัติ\" อีกครั้ง — รูป", "Click \"Confirm approve\" again — ")}{imgs.length} {t("รูปจะถูกย้ายเข้าอัลบั้มสินค้าข้างบน (ย้อนกลับยาก)", "image(s) will move into the product albums above (hard to undo)")}
+              </p>
+            )}
           </div>
         </ERPModal>
       )}
       <ImageLightbox images={lbImages} index={lb} onClose={() => setLb(-1)} onIndex={setLb} />
+      <SkuMultiPickerModal open={pickOpen} onClose={() => setPickOpen(false)} onConfirm={onAddSkus} excludeIds={destSkus.map((s) => s.id)} />
 
       <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
         {toasts.map((x) => <div key={x.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${x.type === "success" ? "bg-emerald-600" : x.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{x.message}</div>)}

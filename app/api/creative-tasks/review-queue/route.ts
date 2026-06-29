@@ -18,10 +18,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const { data: subs, error } = await admin.from("erp_creative_subtasks")
-    .select("id, task_id, title, updated_at, status").eq("status", "submitted")
+    .select("id, task_id, title, updated_at, status, image_sync_targets").eq("status", "submitted")
     .order("updated_at", { ascending: false }).limit(300);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
-  const rows = (subs ?? []) as { id: string; task_id: string; title: string; updated_at: string }[];
+  type Ist = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; image_order?: string[] } | null;
+  const rows = (subs ?? []) as { id: string; task_id: string; title: string; updated_at: string; image_sync_targets: Ist }[];
   if (!rows.length) return NextResponse.json({ data: [], error: null });
 
   const taskIds = [...new Set(rows.map((r) => r.task_id))];
@@ -41,16 +42,37 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (a.kind !== "image" || !a.r2_key) continue;
     const k = String(a.subtask_id); const arr = imgBy.get(k) ?? []; arr.push({ r2_key: a.r2_key, file_name: a.file_name }); imgBy.set(k, arr);
   }
+  // เรียงรูปตาม image_order ที่บันทึกไว้ (ผู้ตรวจจัดลำดับ) — คีย์ที่ไม่อยู่ใน order ต่อท้าย
+  for (const r of rows) {
+    const ord = r.image_sync_targets?.image_order;
+    if (ord && ord.length) { const arr = imgBy.get(r.id); if (arr) arr.sort((a, b) => { const ia = ord.indexOf(a.r2_key), ib = ord.indexOf(b.r2_key); return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib); }); }
+  }
+
+  // resolve ป้ายปลายทาง (Parent SKU / SKU) เพื่อโชว์ในป๊อปอัปตรวจงาน
+  const allParentIds = new Set<string>(), allSkuIds = new Set<string>();
+  for (const r of rows) { const ist = r.image_sync_targets; if (!ist) continue; for (const p of ist.parent_ids ?? []) allParentIds.add(p); for (const s of ist.sku_ids ?? []) allSkuIds.add(s); }
+  const [{ data: pRows }, { data: sRows }] = await Promise.all([
+    allParentIds.size ? admin.from("parent_skus_v2").select("id, code").in("id", [...allParentIds]) : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    allSkuIds.size ? admin.from("skus_v2").select("id, code").in("id", [...allSkuIds]) : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+  ]);
+  const pMap = new Map(((pRows ?? []) as Record<string, unknown>[]).map((p) => [String(p.id), String(p.code ?? p.id)]));
+  const sMap = new Map(((sRows ?? []) as Record<string, unknown>[]).map((s) => [String(s.id), String(s.code ?? s.id)]));
 
   const out = rows.map((r) => {
     const tk = taskMap.get(String(r.task_id)); if (!tk) return null;   // งานถูกลบ/ปิด → ข้าม
     const br = tk.brand_id ? brandMap.get(String(tk.brand_id)) : null;
+    const ist = r.image_sync_targets;
     return {
       id: r.id, title: r.title, updated_at: r.updated_at,
       task_id: r.task_id, task_no: (tk.task_no as string) ?? null, task_title: (tk.title as string) ?? "",
       brand_label: (br?.name as string) ?? null, brand_color: (br?.color as string) ?? null,
       assignees: aMap.get(r.id) ?? [],
       images: imgBy.get(r.id) ?? [],
+      image_sync_targets: ist ?? null,
+      dest: {
+        parents: (ist?.parent_ids ?? []).map((id) => ({ id, code: pMap.get(id) ?? id })),
+        skus: (ist?.sku_ids ?? []).map((id) => ({ id, code: sMap.get(id) ?? id })),
+      },
     };
   }).filter(Boolean);
 

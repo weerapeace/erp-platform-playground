@@ -190,6 +190,8 @@ export type ReviewQueueItem = {
   task_id: string; task_no: string | null; task_title: string;
   brand_label: string | null; brand_color: string | null;
   assignees: SubtaskAssignee[]; images: { r2_key: string; file_name: string | null }[];
+  image_sync_targets?: { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; image_order?: string[] } | null;
+  dest?: { parents: { id: string; code: string }[]; skus: { id: string; code: string }[] };
 };
 export async function listReviewQueue(): Promise<ReviewQueueItem[]> {
   const j = await jsonOrThrow(await apiFetch("/api/creative-tasks/review-queue"));

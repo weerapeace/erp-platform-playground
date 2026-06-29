@@ -8,7 +8,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { writeAudit } from "@/lib/audit";
 
-export type ImageSyncTargets = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]> } | null;
+export type ImageSyncTargets = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; image_order?: string[] } | null;
 export type SubtaskForSync = { id: string; task_id: string; subtask_type?: string | null; config?: Record<string, unknown> | null; description?: string | null; image_sync_targets?: ImageSyncTargets };
 export type SyncResult = { pushed: number; skipped: string[] };
 
@@ -83,7 +83,10 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
     // (1) รูปงานที่แนบ → ปลายทางที่ติ๊ก (ถ้ามีติ๊ก + มีรูปงาน)
     if (selTargets.length) {
       const { data: atts } = await admin.from("erp_creative_attachments").select("r2_key").eq("subtask_id", subtask.id).eq("kind", "image");
-      const imageKeys = ((atts ?? []) as { r2_key: string }[]).map((a) => a.r2_key).filter(Boolean);
+      let imageKeys = ((atts ?? []) as { r2_key: string }[]).map((a) => a.r2_key).filter(Boolean);
+      // เรียงตามลำดับที่ผู้ตรวจจัดไว้ (image_order) — คีย์ที่ไม่อยู่ใน order ต่อท้าย
+      const order = sel?.image_order;
+      if (order && order.length) imageKeys = imageKeys.slice().sort((a, b) => { const ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib); });
       if (imageKeys.length) {
         if (target === "cover") {
           for (const tg of selTargets) {
