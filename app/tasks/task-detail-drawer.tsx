@@ -577,7 +577,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
       </div>
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
       <ConfirmDialog open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={() => { setConfirmDel(false); onDelete(d.id); }} variant="danger" title={t("ลบงานนี้?", "Delete this task?")} message={t(`ลบงาน "${d.title}" — รวมงานย่อย/คอนเทนต์ที่ผูกอยู่ และกู้คืนไม่ได้`, `Delete "${d.title}" including its subtasks/content. This cannot be undone.`)} confirmText={t("ลบ", "Delete")} cancelText={t("ยกเลิก", "Cancel")} />
-      {publishToKey && <PublishModal taskId={d.id} parents={parentList} parentFallback={d.parent_sku_code} onClose={() => setPublishToKey(null)} onConfirm={async () => { const to = publishToKey; setPublishToKey(null); if (to) await handleMove(to); }} pushToast={pushToast} />}
+      {publishToKey && <PublishModal taskId={d.id} parents={parentList} parentFallback={d.parent_sku_code} taskPlatforms={d.platforms ?? []} onClose={() => setPublishToKey(null)} onConfirm={async () => { const to = publishToKey; setPublishToKey(null); if (to) await handleMove(to); }} pushToast={pushToast} />}
     </>
   );
 }

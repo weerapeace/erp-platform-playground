@@ -13,7 +13,8 @@ import { ERPInput } from "@/components/form";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
-import { platformLabel } from "./use-options";
+import { platformLabel, useCreativeOptions } from "./use-options";
+import { PlatformChip } from "./platform-chip";
 import type { FormField } from "@/app/api/admin/field-registry-v2/route";
 import {
   listContent, getContent, listContentAttachments, updateContent, getPlatformSettings, savePlatformSettings, listSubtasks,
@@ -34,15 +35,18 @@ const subBadge = (s: string) => s === "approved" ? { label: "✓", cls: "bg-emer
   : s === "revision_requested" ? { label: "แก้", cls: "bg-orange-500" }
   : { label: "ร่าง", cls: "bg-slate-400" };
 
-export function PublishModal({ taskId, parents, parentFallback, onClose, onConfirm, pushToast }: {
+export function PublishModal({ taskId, parents, parentFallback, taskPlatforms = [], onClose, onConfirm, pushToast }: {
   taskId: string;
   parents: ParentRef[];
   parentFallback?: string | null;
+  taskPlatforms?: string[];
   onClose: () => void;
   onConfirm: () => void | Promise<void>;
   pushToast: (type: Toast["type"], m: string) => void;
 }) {
   const t = useT();
+  useCreativeOptions();   // โหลด meta แพลตฟอร์ม (ไอคอน/สี) ให้ PlatformChip
+  const [skuImagesBy, setSkuImagesBy] = useState<Record<string, { key: string; status: string }[]>>({});
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<Row[]>([]);
   const [pset, setPset] = useState<PlatformSettings>({});
@@ -64,18 +68,27 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
       setPosted(Object.fromEntries(details.map((d) => [d.id, { ...(d.posted_links ?? {}) }])));
       setPset(await getPlatformSettings().catch(() => ({})));
       setParentFields((await getPublishConfig().catch(() => ({} as { parent_fields?: string[] }))).parent_fields ?? []);
-      // รูป/ลิงก์ที่ส่งงาน — ทุกงานย่อยที่ส่ง (รวมยังไม่อนุมัติ)
+      // รูป/ลิงก์ที่ส่งงาน — ทุกงานย่อยที่ส่ง (รวมยังไม่อนุมัติ) · แยกรูปที่เจาะจง SKU ไปไว้ใต้ SKU
       try {
         const subs = await listSubtasks(taskId);
+        const skuBy: Record<string, { key: string; status: string }[]> = {};
+        const skuKeys = new Set<string>();
+        for (const s of subs) {
+          for (const [skuId, arr] of Object.entries(s.image_sync_targets?.sku_images ?? {})) {
+            for (const k of (arr as string[])) {
+              if (!k) continue; skuKeys.add(k);
+              (skuBy[skuId] ??= []); if (!skuBy[skuId].some((x) => x.key === k)) skuBy[skuId].push({ key: k, status: s.status });
+            }
+          }
+        }
         const seen = new Set<string>(); const imgs: { key: string; status: string }[] = []; const lks: { label: string | null; url: string }[] = [];
         for (const s of subs) {
           for (const a of (s.attachments ?? [])) {
-            if (a.kind === "image" && a.r2_key) { if (!seen.has(a.r2_key)) { seen.add(a.r2_key); imgs.push({ key: a.r2_key, status: s.status }); } }
+            if (a.kind === "image" && a.r2_key) { if (!skuKeys.has(a.r2_key) && !seen.has(a.r2_key)) { seen.add(a.r2_key); imgs.push({ key: a.r2_key, status: s.status }); } }
             else if (a.kind !== "image" && a.url) lks.push({ label: a.label ?? s.title, url: a.url });
           }
-          for (const arr of Object.values(s.image_sync_targets?.sku_images ?? {})) for (const k of (arr as string[])) { if (k && !seen.has(k)) { seen.add(k); imgs.push({ key: k, status: s.status }); } }
         }
-        setTaskImages(imgs); setTaskLinks(lks);
+        setTaskImages(imgs); setTaskLinks(lks); setSkuImagesBy(skuBy);
       } catch { /* ว่าง */ }
     } catch (e) { pushToast("error", (e as Error).message); }
     finally { setLoading(false); }
@@ -139,7 +152,7 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
           )}
           {/* Parent SKU — รายละเอียดเต็ม (คัดลอกไปลงโพสต์ได้) + SKU ลูก inline */}
           {parents.length ? parents.map((p) => (
-            <ParentDetailPanel key={p.id} parentId={p.id} code={p.code} selectedCols={parentFields} onOpenFull={() => setOpenFull({ moduleKey: "parent-skus-v2", apiPath: "parent-skus", id: p.id })} onOpenSku={(id) => setOpenFull({ moduleKey: "skus-v2", apiPath: "skus", id })} onCopy={copy} />
+            <ParentDetailPanel key={p.id} parentId={p.id} code={p.code} selectedCols={parentFields} skuImagesBy={skuImagesBy} onOpenFull={() => setOpenFull({ moduleKey: "parent-skus-v2", apiPath: "parent-skus", id: p.id })} onOpenSku={(id) => setOpenFull({ moduleKey: "skus-v2", apiPath: "skus", id })} onCopy={copy} />
           )) : (
             <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
               <p className="text-xs font-semibold text-slate-500 mb-1">Parent SKU</p>
@@ -150,7 +163,7 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
           {rows.length === 0 ? (
             <p className="text-sm text-slate-400 italic">{t("งานนี้ยังไม่มีคอนเทนต์ — กดยืนยันเพื่อเปลี่ยนสถานะอย่างเดียว", "No content yet — confirm just changes the status")}</p>
           ) : rows.map((r) => {
-            const c = r.content; const platforms = c.platforms ?? [];
+            const c = r.content; const platforms = [...new Set([...taskPlatforms, ...(c.platforms ?? [])])];   // แพลตฟอร์มของงาน + ของคอนเทนต์
             return (
               <div key={c.id} className="rounded-lg border border-slate-200 overflow-hidden">
                 <div className="bg-slate-50/80 px-3 py-2 border-b border-slate-100 flex items-center justify-between">
@@ -182,7 +195,7 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
                     return (
                       <div key={pf} className={`rounded-lg border p-2.5 ${doneUrl ? "border-emerald-200 bg-emerald-50/40" : "border-slate-200"}`}>
                         <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                          <span className="text-sm font-medium text-slate-700">{doneUrl ? "✅ " : ""}{platformLabel(pf)}</span>
+                          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">{doneUrl && "✅"}<PlatformChip code={pf} /></span>
                           <div className="flex items-center gap-2 flex-wrap">
                             {text && <button onClick={() => copy(text, platformLabel(pf))} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอกแคปชั่น", "Copy caption")}</button>}
                             {goUrl && <a href={goUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-white bg-violet-600 rounded-md px-2 py-1 hover:bg-violet-700">↗ {t("เปิด", "Open")} {platformLabel(pf)}</a>}
@@ -251,7 +264,7 @@ function FieldPickerModal({ selected, onClose, onSaved, pushToast }: { selected:
 type ChildSku = { id: string; code: string; name: string; color: string | null; price: number | null; img: string | null };
 
 // พาเนลรายละเอียด Parent SKU (ฝังใน popup เผยแพร่) — เลือกฟิลด์ที่โชว์ + คัดลอกทุกช่อง + SKU ลูก inline + เปิด drawer เต็ม
-function ParentDetailPanel({ parentId, code, selectedCols, onOpenFull, onOpenSku, onCopy }: { parentId: string; code: string | null; selectedCols: string[]; onOpenFull: () => void; onOpenSku: (id: string) => void; onCopy: (text: string, label: string) => void }) {
+function ParentDetailPanel({ parentId, code, selectedCols, skuImagesBy = {}, onOpenFull, onOpenSku, onCopy }: { parentId: string; code: string | null; selectedCols: string[]; skuImagesBy?: Record<string, { key: string; status: string }[]>; onOpenFull: () => void; onOpenSku: (id: string) => void; onCopy: (text: string, label: string) => void }) {
   const t = useT();
   const [fields, setFields] = useState<{ label: string; value: string }[]>([]);
   const [cover, setCover] = useState<string | null>(null);
@@ -326,19 +339,33 @@ function ParentDetailPanel({ parentId, code, selectedCols, onOpenFull, onOpenSku
           </button>
           {showSkus && (
             <div className="mt-1.5 space-y-1 max-h-56 overflow-y-auto">
-              {skus.map((s) => (
-                <div key={s.id} className="flex items-center gap-2 bg-white border border-slate-100 rounded-lg p-1.5">
-                  {s.img
-                    ? <img src={r2ImageUrl(s.img, 80) ?? ""} alt="" className="h-9 w-9 object-cover rounded border border-slate-200 shrink-0" />
-                    : <span className="h-9 w-9 rounded bg-slate-50 border border-slate-100 shrink-0" />}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5"><span className="text-xs font-mono text-slate-700 truncate">{s.code}</span>{s.color && <span className="text-[11px] text-slate-500 truncate">· {s.color}</span>}</div>
-                    {s.price != null && <div className="text-[11px] text-emerald-700">{Number(s.price).toLocaleString("th-TH")} ฿</div>}
+              {skus.map((s) => { const simgs = skuImagesBy[s.id] ?? []; return (
+                <div key={s.id} className="bg-white border border-slate-100 rounded-lg p-1.5">
+                  <div className="flex items-center gap-2">
+                    {s.img
+                      ? <img src={r2ImageUrl(s.img, 80) ?? ""} alt="" className="h-9 w-9 object-cover rounded border border-slate-200 shrink-0" />
+                      : <span className="h-9 w-9 rounded bg-slate-50 border border-slate-100 shrink-0" />}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5"><span className="text-xs font-mono text-slate-700 truncate">{s.code}</span>{s.color && <span className="text-[11px] text-slate-500 truncate">· {s.color}</span>}</div>
+                      {s.price != null && <div className="text-[11px] text-emerald-700">{Number(s.price).toLocaleString("th-TH")} ฿</div>}
+                    </div>
+                    <button onClick={() => onCopy(s.code, s.code)} title={t("คัดลอกรหัส", "Copy code")} className="text-slate-400 hover:text-violet-600 text-xs shrink-0">📋</button>
+                    <button onClick={() => onOpenSku(s.id)} title={t("เปิด SKU", "Open SKU")} className="text-violet-600 hover:text-violet-800 text-xs shrink-0">↗</button>
                   </div>
-                  <button onClick={() => onCopy(s.code, s.code)} title={t("คัดลอกรหัส", "Copy code")} className="text-slate-400 hover:text-violet-600 text-xs shrink-0">📋</button>
-                  <button onClick={() => onOpenSku(s.id)} title={t("เปิด SKU", "Open SKU")} className="text-violet-600 hover:text-violet-800 text-xs shrink-0">↗</button>
+                  {/* รูปที่ส่งงานของ SKU นี้ */}
+                  {simgs.length > 0 && (
+                    <div className="flex gap-1.5 flex-wrap mt-1.5 pl-11">
+                      {simgs.map((im) => { const bd = subBadge(im.status); return (
+                        <a key={im.key} href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="relative">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={r2ImageUrl(im.key, 160) ?? ""} alt="" className="h-12 w-12 object-cover rounded border border-slate-200 hover:ring-2 hover:ring-violet-300" />
+                          <span className={`absolute top-0 left-0 text-[7px] text-white px-0.5 rounded-br ${bd.cls}`}>{bd.label}</span>
+                        </a>
+                      ); })}
+                    </div>
+                  )}
                 </div>
-              ))}
+              ); })}
             </div>
           )}
         </div>
