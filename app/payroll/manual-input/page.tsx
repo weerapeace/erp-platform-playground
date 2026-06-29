@@ -573,13 +573,13 @@ export default function ManualInputPage() {
               แสดง {shown.length.toLocaleString("th-TH")} จาก {rows.length.toLocaleString("th-TH")} คน
             </div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="max-h-[72vh] overflow-auto">
           <table className="text-sm" style={{ tableLayout: "fixed", width: colW.reduce((a, b) => a + b, 0) }}>
             <colgroup>{SUMMARY_COLS.map((c, i) => <col key={c.key} style={{ width: `${colW[i]}px` }} />)}</colgroup>
-            <thead className="bg-slate-50 text-slate-500 text-xs">
+            <thead className="sticky top-0 z-20 bg-slate-50 text-slate-500 text-xs">
               <tr>
                 {SUMMARY_COLS.map((c, i) => (
-                  <th key={c.key} className={`relative px-3 py-2 ${c.align === "left" ? "text-left" : c.align === "center" ? "text-center" : "text-right"}`}>
+                  <th key={c.key} className={`relative bg-slate-50 px-3 py-2 ${c.align === "left" ? "text-left" : c.align === "center" ? "text-center" : "text-right"}`}>
                     {c.sortable ? (
                       <button type="button" onClick={() => toggleSummarySort(c.key)} className={`inline-flex max-w-full items-center gap-1 hover:text-slate-700 ${c.align === "right" ? "flex-row-reverse" : ""}`}>
                         <span className="truncate">{c.label}</span>

@@ -505,6 +505,15 @@ export function ContractPeekCell({
 }
 
 function ContractDetails({ contract: c }: { contract: Contract }) {
+  // ค่าจ้างรายวัน/รายชม.: ถ้าสัญญาเก็บเป็น 0 แต่มีเงินเดือน → คำนวณให้ดู (÷26 วัน, ÷8 ชม.)
+  const baseNum = Number(c.base_salary) || 0;
+  const dailyStored = Number(c.daily_wage) || 0;
+  const hourlyStored = Number(c.hourly_wage) || 0;
+  const dailyCalc = dailyStored > 0;
+  const hourlyCalc = hourlyStored > 0;
+  const dailyShown = dailyStored > 0 ? dailyStored : (baseNum > 0 ? round2(baseNum / 26) : 0);
+  const hourlyShown = hourlyStored > 0 ? hourlyStored : (baseNum > 0 ? round2(baseNum / 26 / 8) : 0);
+  const calcTag = <span className="ml-1 align-middle text-[10px] font-normal text-amber-600">(คำนวณ)</span>;
   return (
     <div className="space-y-5 p-5">
       <DetailSection title="ข้อมูลหลัก">
@@ -517,8 +526,8 @@ function ContractDetails({ contract: c }: { contract: Contract }) {
       <DetailSection title="ค่าจ้าง">
         <Detail label="ประเภทค่าจ้าง" value={WAGE[c.wage_type] ?? c.wage_type} />
         <Detail label="เงินเดือน" value={baht(c.base_salary)} />
-        <Detail label="ค่าจ้างรายวัน" value={baht(c.daily_wage)} />
-        <Detail label="ค่าจ้างรายชั่วโมง" value={baht(c.hourly_wage)} />
+        <Detail label="ค่าจ้างรายวัน" value={<>{baht(dailyShown)}{!dailyCalc && dailyShown > 0 && calcTag}</>} />
+        <Detail label="ค่าจ้างรายชั่วโมง" value={<>{baht(hourlyShown)}{!hourlyCalc && hourlyShown > 0 && calcTag}</>} />
         <Detail label="ค่าจ้างรายชิ้น" value={baht(c.piece_rate_default)} />
         <Detail label="ฐานทะเบียนเงินเดือน" value={baht(c.payroll_register_base_salary)} />
         <Detail label="รอบจ่าย" value={c.payment_cycle} />

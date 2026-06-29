@@ -14,6 +14,7 @@ import { guardPayroll } from "@/lib/payroll-auth";
 import { writeAudit } from "@/lib/audit";
 import { money, roundMoney, salaryDayDivisor, lateDeduction, absenceDeduction, overtimeAmount } from "@/lib/payroll-calc";
 import { isPayrollContractor } from "@/lib/payroll-attendance-rules";
+import { getPayrollGlobalRules } from "@/lib/payroll-global-rules-db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -155,6 +156,7 @@ export async function POST(req: NextRequest) {
     }
     const { data: sd } = await a.from("employee_payroll_settings").select("payroll_group_id").eq("employee_id", employeeId).limit(1);
     const setting = (sd?.[0] as Row) ?? {};
+    const { rules: gRules } = await getPayrollGlobalRules(a);   // กฎกลาง (ตัวคูณ OT ฯลฯ)
 
     const rate = hourlyRate(contract, period, setting);
     const hoursPerDay = money(period.default_hours_per_day) || 8;
@@ -166,11 +168,14 @@ export async function POST(req: NextRequest) {
     let quantityLabel = ""; let formula = ""; let hours = 0;
 
     if (kind === "ot") {
-      amount = overtimeAmount(value, rate, 1.5); table = "overtime_entries";
+      // ตัวคูณ OT จากกฎกลางที่ตั้งไว้ (OT วันทำงาน / OT วันหยุด) แทนค่าตายตัว 1.5
+      const otHoliday = !isWorkableDate(workDate, holidays, contract);   // วันหยุด/ไม่ใช่วันทำงานตามสัญญา
+      const otMult = otHoliday ? money(gRules.overtimeHolidayMultiplier) : money(gRules.overtimeWeekdayMultiplier);
+      amount = overtimeAmount(value, rate, otMult); table = "overtime_entries";
       quantityLabel = `${value} ชม.`;
-      formula = `${value} ชม. × ${roundMoney(rate).toLocaleString("th-TH", { minimumFractionDigits: 2 })} × 1.5`;
+      formula = `${value} ชม. × ${roundMoney(rate).toLocaleString("th-TH", { minimumFractionDigits: 2 })} × ${otMult}${otHoliday ? " (วันหยุด)" : ""}`;
       if (previewOnly) return NextResponse.json({ data: { kind, value, work_date: workDate, amount, sign: "+", rate: roundMoney(rate), divisor, hours_per_day: hoursPerDay, base_salary: money(contract.base_salary), quantity_label: quantityLabel, formula }, error: null });
-      const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, work_date: workDate, hours: value, rate_multiplier: 1.5, overtime_amount: amount, status: "approved", source_type: "manual", note: note || null }).select("id").limit(1);
+      const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, work_date: workDate, hours: value, rate_multiplier: otMult, overtime_amount: amount, status: "approved", source_type: "manual", note: note || null }).select("id").limit(1);
       if (error) throw new Error(error.message); inserted = data?.[0] as { id: string };
     } else if (kind === "late") {
       amount = lateDeduction(value, rate); table = "attendance_entries";

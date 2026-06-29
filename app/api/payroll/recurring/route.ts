@@ -45,6 +45,7 @@ async function decorate(rows: RecurringRow[]): Promise<RecurringRow[]> {
     ...r,
     active: String(r.status ?? "active") === "active",
     employee_label: employeeById[String(r.employee_id ?? "")] ?? "",
+    employee_name: employeeById[String(r.employee_id ?? "")] ?? "",
     contract_label: contractById[String(r.contract_id ?? "")] ?? "",
     contract_no: contractById[String(r.contract_id ?? "")] ?? "",
   }));
