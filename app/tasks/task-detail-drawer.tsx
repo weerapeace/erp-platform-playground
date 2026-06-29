@@ -20,7 +20,7 @@ const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then
 import { ImageInput } from "@/components/image-input";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, drawerBgStyle } from "./drawer-theme";
+import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys } from "./drawer-theme";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
@@ -145,10 +145,14 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 900); // ลากปรับความกว้าง (ของกลาง) · กว้างพอโชว์ 2 คอลัมน์
   const { theme: dth, update: dthUpdate } = useDrawerTheme("task");   // ธีม drawer (ต่อคน)
   const DRAWER_SECTIONS = [
-    { key: "cover", label: t("รูปปก", "Cover") }, { key: "brand", label: t("แบรนด์", "Brand") }, { key: "platform", label: "Platform" },
-    { key: "assignee", label: t("ผู้รับผิดชอบ", "Assignee") }, { key: "reviewer", label: t("ผู้ตรวจ", "Reviewer") }, { key: "assigned_by", label: t("ผู้มอบหมาย", "Assigned by") },
+    { key: "cover", label: t("รูปปก", "Cover") }, { key: "due_date", label: t("กำหนดส่ง", "Due date") },
+    { key: "brand", label: t("แบรนด์", "Brand") }, { key: "platform", label: "Platform" },
+    { key: "task_type", label: t("ประเภทงาน", "Task type") }, { key: "assignee", label: t("ผู้รับผิดชอบ", "Assignee") },
+    { key: "reviewer", label: t("ผู้ตรวจ", "Reviewer") }, { key: "assigned_by", label: t("ผู้มอบหมาย", "Assigned by") },
     { key: "campaign", label: t("แคมเปญ", "Campaign") }, { key: "parent", label: "Parent SKU" },
   ];
+  const tSecOrder = orderedKeys(dth, DRAWER_SECTIONS.map((s) => s.key));
+  const tOrderOf = (k: string) => tSecOrder.indexOf(k);   // ลำดับส่วนคอลัมน์ขวา (CSS order) ตามที่ผู้ใช้จัด
   const wideScreen = useMediaQuery("(min-width: 860px)");   // จอกว้างพอ (แท็บเล็ตแนวนอน/เดสก์ท็อป)
   const twoCol = drawerW >= 820 && wideScreen;   // กว้างพอ → ซ้าย/ขวาเรียงข้างกัน · มือถือ/แท็บเล็ตแคบ → เรียงบน-ล่าง
 
@@ -351,10 +355,10 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
 
             {/* ===== ขวา: ข้อมูลงาน + ความคิดเห็น ===== */}
-            <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 ${densityCls(dth.density)} bg-slate-50/40 border-slate-100`}>
+            <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} bg-slate-50/40 border-slate-100`}>
               {/* รูปปก (เล็ก) — โชว์ทั้งโหมดดู/แก้ */}
               {!isHidden(dth, "cover") && (
-              <div>
+              <div style={{ order: tOrderOf("cover") }}>
                 {coverKey ? (
                   <div className="relative rounded-lg overflow-hidden border border-slate-200">
                     <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=480`} alt="" className="w-full h-28 object-cover" />
@@ -374,7 +378,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               </div>
               )}
               {editing && ef ? (
-                <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3">
+                <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3" style={{ order: 1 }}>
                   <div className="grid grid-cols-2 gap-3">
                     <div><label className="text-xs text-slate-400">{t("ประเภทงาน", "Task Type")}</label><ERPSelect value={ef.task_type} options={taskTypes} onChange={(e) => setEf({ ...ef, task_type: e.target.value })} /></div>
                     <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={PRIORITY_OPTIONS} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
@@ -403,6 +407,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               ) : (
                 <>
                   {/* กำหนดส่ง — เด่น (ซ่อนถ้าไม่มี · กดแก้/เพิ่มได้) */}
+                  {!isHidden(dth, "due_date") && (<div style={{ order: tOrderOf("due_date") }}>
                   {qf === "due_date" ? (
                     <div><p className="text-xs text-slate-400 mb-0.5">{t("กำหนดส่ง", "Due date")}</p>
                       <div className="flex items-start gap-1"><div className="flex-1"><ERPInput type="date" defaultValue={d.due_date ?? ""} onChange={(e) => saveQuick({ due_date: e.target.value || null })} /></div>
@@ -416,9 +421,10 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   ) : (
                     <button type="button" onClick={() => setQf("due_date")} className="text-xs text-slate-400 hover:text-violet-600">＋ {t("เพิ่มกำหนดส่ง", "Add due date")}</button>
                   )}
+                  </div>)}
 
                   {/* แบรนด์ — โลโก้เด่น */}
-                  {!isHidden(dth, "brand") && (qf === "brand" ? (
+                  {!isHidden(dth, "brand") && (<div style={{ order: tOrderOf("brand") }}>{qf === "brand" ? (
                     <div><p className="text-xs text-slate-400 mb-0.5">{t("แบรนด์", "Brand")}</p>
                       <div className="flex items-start gap-1"><div className="flex-1"><ERPSelect value={d.brand_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => saveQuick({ brand_id: e.target.value || null })} /></div>
                         <button type="button" onClick={() => setQf(null)} className="text-slate-300 hover:text-slate-600 text-xs mt-2 shrink-0">✕</button></div>
@@ -432,46 +438,43 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                     </button>
                   ) : (
                     <button type="button" onClick={() => setQf("brand")} className="text-xs text-slate-400 hover:text-violet-600">＋ {t("เลือกแบรนด์", "Set brand")}</button>
-                  ))}
+                  )}</div>)}
 
                   {/* แพลตฟอร์มที่ลง */}
                   {!isHidden(dth, "platform") && d.platforms && d.platforms.length > 0 && (
-                    <div><p className="text-[10px] text-slate-400 mb-1">Platform</p>
+                    <div style={{ order: tOrderOf("platform") }}><p className="text-[10px] text-slate-400 mb-1">Platform</p>
                       <div className="flex flex-wrap gap-1.5">{d.platforms.map((p) => <PlatformChip key={p} code={p} />)}</div>
                     </div>
                   )}
 
-                  {/* ข้อมูลอื่น — กดที่ค่าเพื่อแก้ */}
-                  <div className="space-y-3 pt-2 border-t border-slate-100">
+                  {/* ข้อมูลอื่น — แต่ละช่องเป็นส่วนเดี่ยว ซ่อน/จัดลำดับได้ (↑↓ ที่ 🎨) */}
+                  {!isHidden(dth, "task_type") && (<div style={{ order: tOrderOf("task_type") }} className="pt-2 border-t border-slate-100">
                     <QuickField label={t("ประเภทงาน", "Task Type")} value={d.task_type ? taskTypeLabel(d.task_type) : null}
                       active={qf === "task_type"} onOpen={() => setQf("task_type")} onClose={() => setQf(null)}
                       editor={<ERPSelect value={d.task_type ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...taskTypes]} onChange={(e) => saveQuick({ task_type: e.target.value || null })} />} />
-                    {!isHidden(dth, "assignee") && <MultiAssigneeField list={d.assignees ?? []} canEdit={canManageAssignees}
-                      onSave={(ids) => saveQuick({ assignee_ids: ids }, true)} />}
-                    {/* ผู้ตรวจ/ผู้มอบหมาย/แคมเปญ/Parent SKU — จัด 2 คอลัมน์ (2 แถว) ให้โปร่ง ไม่เบียด */}
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-3">
-                      {!isHidden(dth, "reviewer") && <QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={(d.reviewers ?? []).length ? (d.reviewers ?? []).map((r) => r.label).filter(Boolean).join(", ") : (d.reviewer_label || d.approver_label)}
-                        active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
-                        editor={<MultiUserPicker value={(d.reviewers ?? []).map((r) => ({ id: r.id, name: r.label } as UserPickerValue))} onChange={(v) => saveQuick({ reviewer_ids: v.map((x) => x.id) }, true)} disableCreate />} />}
-                      {!isHidden(dth, "assigned_by") && <QuickField label={t("ผู้มอบหมาย", "Assigned by")} value={d.assigned_by_label}
-                        active={qf === "assigned_by"} onOpen={() => setQf("assigned_by")} onClose={() => setQf(null)}
-                        editor={<UserPicker value={d.assigned_by_id ? ({ id: d.assigned_by_id, name: d.assigned_by_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ assigned_by_id: v?.id ?? null })} disableCreate />} />}
-                      {!isHidden(dth, "campaign") && <QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
-                        active={qf === "campaign"} onOpen={() => setQf("campaign")} onClose={() => setQf(null)}
-                        editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} />}
-                      {!isHidden(dth, "parent") && <QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
-                        active={qf === "parent_sku"} onOpen={() => setQf("parent_sku")} onClose={() => setQf(null)}
-                        editor={
-                          <div className="space-y-1.5">
-                            <div className="flex flex-wrap gap-1">
-                              {parentList.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5"><button type="button" onClick={() => setOpenParentId(p.id)} title={t("เปิดดูสินค้า", "Open product")} className="hover:text-violet-700 hover:underline">{p.code || p.name}</button><button type="button" onClick={() => saveQuick({ parent_sku_ids: parentList.filter((x) => x.id !== p.id).map((x) => x.id) }, true)} className="text-slate-400 hover:text-red-500">✕</button></span>)}
-                              {parentList.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
-                            </div>
-                            <ParentSkuPicker value={null} onChange={(v) => { if (v && !parentList.some((p) => p.id === v.id)) saveQuick({ parent_sku_ids: [...parentList.map((p) => p.id), v.id] }, true); }} />
-                          </div>
-                        } />}
-                    </div>
-                  </div>
+                  </div>)}
+                  {!isHidden(dth, "assignee") && (<div style={{ order: tOrderOf("assignee") }}><MultiAssigneeField list={d.assignees ?? []} canEdit={canManageAssignees}
+                    onSave={(ids) => saveQuick({ assignee_ids: ids }, true)} /></div>)}
+                  {!isHidden(dth, "reviewer") && (<div style={{ order: tOrderOf("reviewer") }}><QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={(d.reviewers ?? []).length ? (d.reviewers ?? []).map((r) => r.label).filter(Boolean).join(", ") : (d.reviewer_label || d.approver_label)}
+                    active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
+                    editor={<MultiUserPicker value={(d.reviewers ?? []).map((r) => ({ id: r.id, name: r.label } as UserPickerValue))} onChange={(v) => saveQuick({ reviewer_ids: v.map((x) => x.id) }, true)} disableCreate />} /></div>)}
+                  {!isHidden(dth, "assigned_by") && (<div style={{ order: tOrderOf("assigned_by") }}><QuickField label={t("ผู้มอบหมาย", "Assigned by")} value={d.assigned_by_label}
+                    active={qf === "assigned_by"} onOpen={() => setQf("assigned_by")} onClose={() => setQf(null)}
+                    editor={<UserPicker value={d.assigned_by_id ? ({ id: d.assigned_by_id, name: d.assigned_by_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ assigned_by_id: v?.id ?? null })} disableCreate />} /></div>)}
+                  {!isHidden(dth, "campaign") && (<div style={{ order: tOrderOf("campaign") }}><QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
+                    active={qf === "campaign"} onOpen={() => setQf("campaign")} onClose={() => setQf(null)}
+                    editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} /></div>)}
+                  {!isHidden(dth, "parent") && (<div style={{ order: tOrderOf("parent") }}><QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
+                    active={qf === "parent_sku"} onOpen={() => setQf("parent_sku")} onClose={() => setQf(null)}
+                    editor={
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap gap-1">
+                          {parentList.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5"><button type="button" onClick={() => setOpenParentId(p.id)} title={t("เปิดดูสินค้า", "Open product")} className="hover:text-violet-700 hover:underline">{p.code || p.name}</button><button type="button" onClick={() => saveQuick({ parent_sku_ids: parentList.filter((x) => x.id !== p.id).map((x) => x.id) }, true)} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+                          {parentList.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
+                        </div>
+                        <ParentSkuPicker value={null} onChange={(v) => { if (v && !parentList.some((p) => p.id === v.id)) saveQuick({ parent_sku_ids: [...parentList.map((p) => p.id), v.id] }, true); }} />
+                      </div>
+                    } /></div>)}
                 </>
               )}
 

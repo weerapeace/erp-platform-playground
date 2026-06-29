@@ -31,7 +31,7 @@ import {
 import { useCreativeOptions, platformLabel } from "../use-options";
 import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, drawerBgStyle } from "../drawer-theme";
+import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys } from "../drawer-theme";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
 
@@ -339,6 +339,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     { key: "task_media", label: t("รูปจากงาน", "From task") }, { key: "attach", label: t("แนบเพิ่มเอง", "Attach") },
     { key: "links", label: t("ลิงก์สินค้า", "Links") }, { key: "platform_notes", label: t("หมายเหตุแพลตฟอร์ม", "Platform notes") },
   ];
+  const cSecOrder = orderedKeys(dth, CONTENT_SECTIONS.map((s) => s.key));
+  const cOrderOf = (k: string) => cSecOrder.indexOf(k);   // ลำดับส่วน (CSS order) ตามที่ผู้ใช้จัด
   const bodyRef = useRef<HTMLDivElement>(null);
   const leftPctRef = useRef(46);
   const [leftPct, setLeftPctState] = useState(46);
@@ -511,16 +513,16 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         {/* ===== จอกว้าง: 2 ฝั่งปรับขนาดได้ · มือถือ: เรียงบน-ล่าง เลื่อนรวด ===== */}
         <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"} style={{ ...drawerBgStyle(dth), zoom: drawerZoom(dth.size), flexDirection: isWide && dth.swap ? "row-reverse" : undefined }}>
           {/* ───── ฝั่งซ้าย: ข้อมูล + แนบงาน ───── */}
-          <div className={isWide ? `overflow-y-auto ${densityCls(dth.density)} min-w-0` : densityCls(dth.density)} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
-            {/* status + schedule + assignee */}
-            <div className="grid grid-cols-2 gap-3">
+          <div className={`flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} ${isWide ? "overflow-y-auto min-w-0" : ""}`} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
+            {/* status + schedule + assignee — ปักไว้บนสุดเสมอ */}
+            <div className="grid grid-cols-2 gap-3" style={{ order: -1 }}>
               <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
               <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Schedule Post")}</label><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
               <div className="col-span-2"><label className="text-xs text-slate-400">{t("ผู้รับผิดชอบคอนเทนต์", "Content assignee")}</label><UserPicker value={assignee} onChange={setAssignee} disableCreate /></div>
             </div>
 
             {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี + ดึงจากงาน */}
-            {!isHidden(dth, "product") && (<div>
+            {!isHidden(dth, "product") && (<div style={{ order: cOrderOf("product") }}>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("สินค้า", "Product")}</p>
                 {d.task_id && <button onClick={pullFromTask} disabled={pullBusy} className="text-xs text-violet-700 hover:underline disabled:opacity-50">{pullBusy ? t("กำลังดึง…", "Pulling…") : t("⬇ ดึงสินค้าจากงาน", "⬇ Pull from task")}</button>}
@@ -542,7 +544,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>)}
 
             {/* ราคา / ส่วนลด — ใช้กับตัวแปร {fake_price}/{real_price} */}
-            {!isHidden(dth, "price") && (<div>
+            {!isHidden(dth, "price") && (<div style={{ order: cOrderOf("price") }}>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ราคา / ส่วนลด", "Price / Discount")}</p>
               <div className="flex items-end gap-2 flex-wrap">
                 <div><label className="text-xs text-slate-400">{t("ราคาเต็ม (จาก SKU)", "Full Price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakePrice != null ? `${Number(fakePrice).toLocaleString("th-TH")} ฿` : t("— (ไม่มี SKU)", "— (no SKU)")}</div></div>
@@ -558,7 +560,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
             {/* รูป/ลิงก์จากงาน (ส่งมาแล้ว) — หยิบไปโพสต์ได้เลย */}
             {d.task_id && !isHidden(dth, "task_media") && (
-              <div>
+              <div style={{ order: cOrderOf("task_media") }}>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("รูปจากงาน (ส่งมาแล้ว) — หยิบไปโพสต์", "From the task (submitted) — grab to post")}</p>
                 {taskMedia.images.length === 0 && taskMedia.links.length === 0 ? (
                   <p className="text-xs text-slate-400 italic">{t("ยังไม่มีรูป/ลิงก์จากงานย่อยที่อนุมัติแล้ว", "No media from approved subtasks yet")}</p>
@@ -590,13 +592,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             )}
 
             {/* แนบงานเพิ่มเอง: รูป / วิดีโอ / ลิงก์พรีวิว (เผื่อแนบนอกเหนือจากงาน) */}
-            {!isHidden(dth, "attach") && (<div>
+            {!isHidden(dth, "attach") && (<div style={{ order: cOrderOf("attach") }}>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("แนบเพิ่มเอง (รูป · วิดีโอ · ลิงก์)", "Attach extra (image · video · link)")}</p>
               <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onDelete={onDelAttachment} pushToast={pushToast} />
             </div>)}
 
             {/* ลิงก์สินค้า (ปลายทางขาย) */}
-            {!isHidden(dth, "links") && (<div>
+            {!isHidden(dth, "links") && (<div style={{ order: cOrderOf("links") }}>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ลิงก์สินค้า (Shopee/Lazada/Website)", "Product Links (Shopee/Lazada/Website)")}</p>
               <div className="space-y-2">
                 {links.map((l, i) => (
@@ -614,7 +616,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
             {/* หมายเหตุ/สิ่งที่ต้องทำ ต่อแพลตฟอร์ม (แก้ในตัว) */}
             {!isHidden(dth, "platform_notes") && contentPlatforms.length > 0 && (
-              <div>
+              <div style={{ order: cOrderOf("platform_notes") }}>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("สิ่งที่ต้องทำ ต่อแพลตฟอร์ม", "Per-platform checklist")}</p>
                 <div className="space-y-2">
                   {contentPlatforms.map((p) => (
@@ -631,8 +633,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               </div>
             )}
 
-            {/* published url */}
-            {(status === "published") && <div><label className="text-xs text-slate-400">{t("ลิงก์โพสต์ที่เผยแพร่", "Published Post URL")}</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
+            {/* published url — ปักไว้ล่างสุดเสมอ */}
+            {(status === "published") && <div style={{ order: 999 }}><label className="text-xs text-slate-400">{t("ลิงก์โพสต์ที่เผยแพร่", "Published Post URL")}</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
           </div>
 
           {/* ───── เส้นแบ่งลากได้ (เฉพาะจอกว้าง) ───── */}
