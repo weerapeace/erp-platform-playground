@@ -31,10 +31,10 @@ import { PlatformChip } from "./platform-chip";
 import { TaskContentTab } from "./task-content-tab";
 import { HoverImage } from "@/components/hover-image";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { statusMeta, transitionsFrom, isTerminal } from "./use-statuses";
+import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./use-statuses";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue,
-  getTask, updateTask, addComment, addAttachment, deleteAttachment,
+  getTask, updateTask, transitionTask, addComment, addAttachment, deleteAttachment,
   type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption, type SubtaskAssignee,
 } from "./data";
 
@@ -125,6 +125,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 }) {
   const { taskTypes, platforms: platformOpts } = useCreativeOptions();
   const { user } = useAuth();
+  const { statuses: allStatuses } = useCreativeStatuses();   // รายการสถานะทั้งหมด (สำหรับ admin ตั้งอิสระ)
   const t = useT();
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
@@ -197,10 +198,13 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const forwardAction = actions.find((a) => !["approve", "reject", "revise", "block"].includes(a.kind));
   // สิทธิ์งานย่อย: ผจก./admin = จัดการได้หมด · ผู้ตรวจ = อนุมัติได้ · คนสร้างงาน = แก้ผู้รับผิดชอบได้
   const isManager = user?.role === "admin" || user?.role === "manager";
+  const isAdmin = user?.role === "admin";   // ย้อน/ตั้งสถานะอิสระได้เฉพาะ admin
   const canApproveSub = isManager || (!!user?.id && (user.id === d.reviewer_id || (d.reviewers ?? []).some((r) => r.id === user.id)));
   const canManageAssignees = isManager || (!!user?.id && user.id === d.created_by);
 
   const handleMove = async (toKey: string) => { setBusy(true); await onMove(d, toKey); await refresh(); setBusy(false); };
+  // admin: บังคับตั้งสถานะใดก็ได้ (force ข้ามกฎ workflow) — บันทึก audit ฝั่ง server
+  const handleForceStatus = async (toKey: string) => { setBusy(true); try { await transitionTask(d.id, toKey, undefined, true); await refresh(); pushToast("success", t("เปลี่ยนสถานะแล้ว", "Status changed")); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
   const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(d.id, commentText.trim(), mentionUsers.map((u) => u.id)); setCommentText(""); setMentionUsers([]); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(d.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); if ((detail?.subtasks?.length ?? 0) === 0) setSubmitNudge(true); } catch (e) { pushToast("error", (e as Error).message); } };
 
@@ -538,6 +542,16 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             }} />
         )}
 
+        {/* admin: ย้อน/ตั้งสถานะอิสระ (เห็นเฉพาะ admin) */}
+        {isAdmin && (
+          <div className="border-t border-amber-100 bg-amber-50/50 px-6 py-2 shrink-0 flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-amber-700">🔧 admin · {t("ย้อน/ตั้งสถานะ", "Set status")}:</span>
+            <select value={d.status} disabled={busy} onChange={(e) => { const to = e.target.value; if (to && to !== d.status && window.confirm(`${t("เปลี่ยนสถานะเป็น", "Set status to")} "${statusMeta(to).label}"?`)) handleForceStatus(to); }} className="h-8 px-2 text-xs border border-amber-200 rounded-lg bg-white">
+              {allStatuses.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+            <span className="text-[11px] text-amber-600">{t("(บังคับเปลี่ยน ข้ามกฎ workflow · บันทึกประวัติ)", "(force change, bypasses workflow · audited)")}</span>
+          </div>
+        )}
         {/* footer actions — งานที่มีงานย่อย: คนทั่วไปเห็นสถานะอ่านอย่างเดียว (สถานะมาจากงานย่อย) · แอดมิน/ผจก.ยังกดได้ */}
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2 flex-wrap">
           {hasSubtasks && !isManager ? (

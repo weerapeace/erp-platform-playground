@@ -845,7 +845,8 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, p
           <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
         </div>
       </div>
-      {/* เลือกแม่แบบ (พับไว้ — กดกางเมื่อจะเปลี่ยน) */}
+      {/* เลือกแม่แบบ (พับไว้ — กดกางเมื่อจะเปลี่ยน) · ซ่อนถ้าปิดแคปชั่น */}
+      {useCaption && (
       <div className="mb-2">
         <button onClick={() => setTplOpen((o) => !o)} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-violet-700">
           📑 {t("แม่แบบ", "Template")}: <span className="font-medium text-slate-700">{tpl?.label ?? t("ไม่มี", "none")}</span> <span className="text-[10px]">{tplOpen ? "▲" : "▼"}</span>
@@ -859,15 +860,18 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, p
           </div>
         )}
       </div>
+      )}
       {useCaption
         ? <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={t(`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`, `Write caption for ${platformLabel(cap.platform)}...`)} />
         : <p className="text-[11px] text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">{t("ปิดแคปชั่นสำหรับแพลตฟอร์มนี้ (เปิดได้ที่ ⚙️ ตั้งค่าแพลตฟอร์ม)", "Caption off for this platform (toggle in ⚙️ Platform settings)")}</p>}
       {useHashtags && <div className="mt-2"><HashtagInput value={cap.hashtags} onChange={(v) => onChange({ hashtags: v })} brandId={brandId} platform={cap.platform} pushToast={pushToast} /></div>}
-      {/* preview ผลลัพธ์ที่จะคัดลอก */}
-      <div className="mt-2">
-        <p className="text-[11px] text-slate-400 mb-1">{t("ตัวอย่างที่จะโพสต์ (ประกอบจากแม่แบบ)", "Preview (assembled from template)")}</p>
-        <pre className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
-      </div>
+      {/* preview ผลลัพธ์ที่จะคัดลอก — โชว์เฉพาะเมื่อมีแคปชั่นจริง */}
+      {useCaption && (cap.caption ?? "").trim() && (
+        <div className="mt-2">
+          <p className="text-[11px] text-slate-400 mb-1">{t("ตัวอย่างที่จะโพสต์ (ประกอบจากแม่แบบ)", "Preview (assembled from template)")}</p>
+          <pre className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
+        </div>
+      )}
     </div>
   );
 }
