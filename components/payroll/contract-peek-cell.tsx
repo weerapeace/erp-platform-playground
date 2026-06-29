@@ -617,7 +617,7 @@ function EditContractForm({
         ) : (
           <TextInput label="เลขที่สัญญา" value={draft.contract_no} onChange={(v) => set("contract_no", v)} />
         )}
-        <TextInput label="บริษัท" value={draft.company_name} onChange={(v) => set("company_name", v)} />
+        <LookupSelect type="company" label="บริษัท" value={draft.company_name} onChange={(v) => set("company_name", v)} />
         <LookupSelect type="contract_type" label="ประเภทสัญญา" value={draft.contract_type} onChange={(v) => set("contract_type", v)} />
         <LookupSelect type="employment_type" label="ประเภทการจ้าง" value={draft.employment_type} onChange={(v) => set("employment_type", v)} />
       </FormSection>
@@ -645,9 +645,9 @@ function EditContractForm({
       </FormSection>
 
       <FormSection title="นโยบาย / ส่งออก">
-        <TextInput label="ตารางเวลาทำงาน" value={draft.work_schedule_id} onChange={(v) => set("work_schedule_id", v)} />
-        <TextInput label="นโยบาย OT" value={draft.overtime_policy_id} onChange={(v) => set("overtime_policy_id", v)} />
-        <TextInput label="นโยบายการลา" value={draft.leave_policy_id} onChange={(v) => set("leave_policy_id", v)} />
+        <LookupSelect type="work_schedule" label="ตารางเวลาทำงาน" value={draft.work_schedule_id} onChange={(v) => set("work_schedule_id", v)} />
+        <LookupSelect type="overtime_policy" label="นโยบาย OT" value={draft.overtime_policy_id} onChange={(v) => set("overtime_policy_id", v)} />
+        <LookupSelect type="leave_policy" label="นโยบายการลา" value={draft.leave_policy_id} onChange={(v) => set("leave_policy_id", v)} />
         <CheckInput label="ยกเว้นสแกนเวลา" checked={draft.attendance_scan_exempt} onChange={(v) => set("attendance_scan_exempt", v)} />
         <CheckInput label="รวมใน ภ.ง.ด.3" checked={draft.include_pnd3_export} onChange={(v) => set("include_pnd3_export", v)} />
         <CheckInput label="รวมในทะเบียนเงินเดือน" checked={draft.include_payroll_register_export} onChange={(v) => set("include_payroll_register_export", v)} />

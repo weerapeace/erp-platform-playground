@@ -1102,8 +1102,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         .catch(() => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: [] } : p)));
     });
 
-    // fetch full row ใน background (REST mode เท่านั้น)
-    if (!isRest) return;
+    // fetch full row ใน background — master-v2 + payroll (master/core) มี GET /[id]
+    // (กันฟอร์มว่างตอนเปิดแก้ผ่าน ?open ที่ไม่มีค่าจาก row เช่น แก้งวด/สัญญาจากตัวเลือกด้านบน)
+    if (!isRest && !(apiBase ?? "").includes("/payroll/")) return;
     apiFetch(`${apiBase}${config.apiPath}/${r.id}`)
       .then((res) => res.json())
       .then(async (json) => {

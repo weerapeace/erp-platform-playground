@@ -123,6 +123,19 @@ const CONFIG: MasterCRUDConfig = {
     employment_type: ({ value, onChange, disabled }) => (
       <LookupSelect type="employment_type" label="ประเภทการจ้าง" value={String(value ?? "")} onChange={onChange} disabled={disabled} />
     ),
+    // บริษัท / ตารางเวลาทำงาน / นโยบายการลา / นโยบาย OT = m2o (จัดการตัวเลือกที่ /admin/lookups)
+    company_name: ({ value, onChange, disabled }) => (
+      <LookupSelect type="company" label="บริษัท" value={String(value ?? "")} onChange={onChange} disabled={disabled} />
+    ),
+    work_schedule_id: ({ value, onChange, disabled }) => (
+      <LookupSelect type="work_schedule" label="ตารางเวลาทำงาน" value={String(value ?? "")} onChange={onChange} disabled={disabled} />
+    ),
+    leave_policy_id: ({ value, onChange, disabled }) => (
+      <LookupSelect type="leave_policy" label="นโยบายการลา" value={String(value ?? "")} onChange={onChange} disabled={disabled} />
+    ),
+    overtime_policy_id: ({ value, onChange, disabled }) => (
+      <LookupSelect type="overtime_policy" label="นโยบาย OT" value={String(value ?? "")} onChange={onChange} disabled={disabled} />
+    ),
     // ค่าจ้างรายวัน/รายชม. = คำนวณจากเงินเดือนอัตโนมัติ (÷26 วัน, ÷8 ชม.)
     daily_wage: (ctx) => <AutoWageInput {...ctx} kind="daily" label="ค่าจ้างรายวัน" />,
     hourly_wage: (ctx) => <AutoWageInput {...ctx} kind="hourly" label="ค่าจ้างรายชั่วโมง" />,
