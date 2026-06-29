@@ -6,7 +6,7 @@
 // ข้อมูลจาก /api/creative-content + /api/creative-hashtags (ดู app/tasks/data.ts)
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSWRLite } from "@/lib/swr-lite";
 import { renderCaption, computeRealPrice, CAPTION_VARS, type ShopChannel } from "@/lib/caption-template";
 import { StandaloneShell } from "@/components/standalone-shell";
@@ -31,7 +31,7 @@ import {
 import { useCreativeOptions, platformLabel } from "../use-options";
 import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg } from "../drawer-theme";
+import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, isCollapsed, toggleCollapsedList } from "../drawer-theme";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
 
@@ -329,18 +329,25 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [attachments, setAttachments] = useState<ContentAttachment[]>([]);
   const [pset, setPset] = useState<PlatformSettings>({});
   // รูป/ลิงก์ที่ "ส่งมาแล้ว" จากงานย่อยที่อนุมัติแล้ว (ของงานที่ผูกไว้) — ไว้หยิบไปโพสต์
-  const [taskMedia, setTaskMedia] = useState<{ images: { key: string; label: string | null }[]; links: { label: string | null; url: string | null }[] }>({ images: [], links: [] });
+  const [taskMedia, setTaskMedia] = useState<{ images: { key: string; label: string | null; status: string }[]; links: { label: string | null; url: string | null }[] }>({ images: [], links: [] });
   const [tmLb, setTmLb] = useState(-1);   // ดูรูปจากงานเต็มจอ
   // แบ่ง 2 ฝั่ง ปรับขนาดได้ (ลากเส้นกลาง) — จำสัดส่วนใน localStorage
   const isWide = useMediaQuery("(min-width: 1024px)");   // จอกว้าง → 2 ฝั่ง · มือถือ/แท็บเล็ตแคบ → เรียงบน-ล่าง
   const { theme: dth, update: dthUpdate } = useDrawerTheme("content");   // ธีม drawer คอนเทนต์ (ต่อคน)
   const CONTENT_SECTIONS = [
-    { key: "product", label: t("สินค้า", "Product") }, { key: "price", label: t("ราคา/ส่วนลด", "Price") },
-    { key: "task_media", label: t("รูปจากงาน", "From task") }, { key: "attach", label: t("แนบเพิ่มเอง", "Attach") },
+    { key: "task_media", label: t("รูปจากงาน", "From task") }, { key: "product", label: t("สินค้า", "Product") },
+    { key: "price", label: t("ราคา/ส่วนลด", "Price") }, { key: "attach", label: t("แนบเพิ่มเอง", "Attach") },
     { key: "links", label: t("ลิงก์สินค้า", "Links") }, { key: "platform_notes", label: t("หมายเหตุแพลตฟอร์ม", "Platform notes") },
   ];
   const cSecOrder = orderedKeys(dth, CONTENT_SECTIONS.map((s) => s.key));
   const cOrderOf = (k: string) => cSecOrder.indexOf(k);   // ลำดับส่วน (CSS order) ตามที่ผู้ใช้จัด
+  const cLabelOf = (k: string) => CONTENT_SECTIONS.find((s) => s.key === k)?.label ?? k;
+  const coll = (k: string) => isCollapsed(dth, k);
+  const toggleColl = (k: string) => dthUpdate({ collapsed: toggleCollapsedList(dth, k) });
+  const tmBadge = (s: string) => s === "approved" ? { label: t("อนุมัติ", "OK"), cls: "bg-emerald-500" }
+    : s === "submitted" ? { label: t("รออนุมัติ", "Pending"), cls: "bg-amber-500" }
+    : s === "revision_requested" ? { label: t("ตีกลับ", "Revise"), cls: "bg-orange-500" }
+    : { label: t("ร่าง", "Draft"), cls: "bg-slate-400" };
   const bodyRef = useRef<HTMLDivElement>(null);
   const leftPctRef = useRef(46);
   const [leftPct, setLeftPctState] = useState(46);
@@ -371,20 +378,22 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const loadPset = useCallback(async () => { try { setPset(await getPlatformSettings()); } catch { /* ว่าง */ } }, []);
   useEffect(() => { loadPset(); }, [loadPset]);
 
-  // ดึงรูป/ลิงก์จากงานย่อยที่ "อนุมัติแล้ว" ของงานที่ผูกไว้ (รวมรูปแนบงาน + รูปต่อ SKU, ตัดซ้ำ)
+  // ดึงรูป/ลิงก์จากงานย่อยของงานที่ผูกไว้ — โชว์ทั้งที่ยังไม่อนุมัติ (มีป้ายสถานะกำกับ), ตัดซ้ำ
   const loadTaskMedia = useCallback(async () => {
     if (!d?.task_id) { setTaskMedia({ images: [], links: [] }); return; }
     try {
       const subs = await listSubtasks(d.task_id);
       const seen = new Set<string>();
-      const images: { key: string; label: string | null }[] = [];
+      const images: { key: string; label: string | null; status: string }[] = [];
       const links: { label: string | null; url: string | null }[] = [];
-      for (const s of subs.filter((x) => x.status === "approved")) {
+      // เรียงให้ "อนุมัติแล้ว" ขึ้นก่อน แล้วค่อยที่เหลือ
+      const ordered = [...subs].sort((a, b) => (a.status === "approved" ? 0 : 1) - (b.status === "approved" ? 0 : 1));
+      for (const s of ordered) {
         for (const a of (s.attachments ?? [])) {
-          if (a.kind === "image" && a.r2_key) { if (!seen.has(a.r2_key)) { seen.add(a.r2_key); images.push({ key: a.r2_key, label: s.title }); } }
+          if (a.kind === "image" && a.r2_key) { if (!seen.has(a.r2_key)) { seen.add(a.r2_key); images.push({ key: a.r2_key, label: s.title, status: s.status }); } }
           else if (a.kind !== "image" && a.url) { links.push({ label: a.label ?? s.title, url: a.url }); }
         }
-        for (const arr of Object.values(s.image_sync_targets?.sku_images ?? {})) for (const k of (arr as string[])) { if (k && !seen.has(k)) { seen.add(k); images.push({ key: k, label: s.title }); } }
+        for (const arr of Object.values(s.image_sync_targets?.sku_images ?? {})) for (const k of (arr as string[])) { if (k && !seen.has(k)) { seen.add(k); images.push({ key: k, label: s.title, status: s.status }); } }
       }
       setTaskMedia({ images, links });
     } catch { /* ว่าง */ }
@@ -522,11 +531,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
 
             {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี + ดึงจากงาน */}
-            {!isHidden(dth, "product") && (<div style={{ order: cOrderOf("product") }}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("สินค้า", "Product")}</p>
-                {d.task_id && <button onClick={pullFromTask} disabled={pullBusy} className="text-xs text-violet-700 hover:underline disabled:opacity-50">{pullBusy ? t("กำลังดึง…", "Pulling…") : t("⬇ ดึงสินค้าจากงาน", "⬇ Pull from task")}</button>}
-              </div>
+            {!isHidden(dth, "product") && (
+            <CSection title={cLabelOf("product")} order={cOrderOf("product")} collapsed={coll("product")} onToggle={() => toggleColl("product")}
+              right={d.task_id ? <button onClick={(e) => { e.stopPropagation(); pullFromTask(); }} disabled={pullBusy} className="text-xs text-violet-700 hover:underline disabled:opacity-50">{pullBusy ? t("กำลังดึง…", "Pulling…") : t("⬇ ดึงสินค้าจากงาน", "⬇ Pull from task")}</button> : undefined}>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label><SkuPicker value={sku} onChange={setSku} /></div>
                 <div>
@@ -541,11 +548,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 <label className="text-xs text-slate-400">{t("สีที่มี", "Available Colors")} ({"{color}"})</label>
                 <div className="min-h-9 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">{colorText || <span className="text-slate-400">{t("— เลือก SKU (ได้สีเดียว) หรือ Parent SKU (รวมทุกสีลูก)", "— Select SKU (single color) or Parent SKU (all child colors)")}</span>}</div>
               </div>
-            </div>)}
+            </CSection>)}
 
-            {/* ราคา / ส่วนลด — ใช้กับตัวแปร {fake_price}/{real_price} */}
-            {!isHidden(dth, "price") && (<div style={{ order: cOrderOf("price") }}>
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ราคา / ส่วนลด", "Price / Discount")}</p>
+            {/* ราคา / ส่วนลด — ซ่อนถ้ายังไม่เลือก SKU/Parent SKU */}
+            {!isHidden(dth, "price") && (sku || parent) && (
+            <CSection title={cLabelOf("price")} order={cOrderOf("price")} collapsed={coll("price")} onToggle={() => toggleColl("price")}>
               <div className="flex items-end gap-2 flex-wrap">
                 <div><label className="text-xs text-slate-400">{t("ราคาเต็ม (จาก SKU)", "Full Price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakePrice != null ? `${Number(fakePrice).toLocaleString("th-TH")} ฿` : t("— (ไม่มี SKU)", "— (no SKU)")}</div></div>
                 <div><label className="text-xs text-slate-400">{t("ส่วนลด", "Discount")}</label>
@@ -556,28 +563,29 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 </div>
                 <div><label className="text-xs text-slate-400">{t("ราคาขายจริง", "Selling Price")}</label><div className="h-9 px-3 flex items-center text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg min-w-24">{realPrice != null ? `${Number(realPrice).toLocaleString("th-TH")} ฿` : "—"}</div></div>
               </div>
-            </div>)}
+            </CSection>)}
 
-            {/* รูป/ลิงก์จากงาน (ส่งมาแล้ว) — หยิบไปโพสต์ได้เลย */}
+            {/* รูป/ลิงก์จากงาน — โชว์ทั้งที่ยังไม่อนุมัติ (มีป้ายสถานะ) หยิบไปโพสต์ได้ */}
             {d.task_id && !isHidden(dth, "task_media") && (
-              <div style={{ order: cOrderOf("task_media") }}>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("รูปจากงาน (ส่งมาแล้ว) — หยิบไปโพสต์", "From the task (submitted) — grab to post")}</p>
+              <CSection title={cLabelOf("task_media")} order={cOrderOf("task_media")} collapsed={coll("task_media")} onToggle={() => toggleColl("task_media")}
+                right={<span className="text-[11px] text-slate-400">{taskMedia.images.length} {t("รูป", "img")}</span>}>
                 {taskMedia.images.length === 0 && taskMedia.links.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic">{t("ยังไม่มีรูป/ลิงก์จากงานย่อยที่อนุมัติแล้ว", "No media from approved subtasks yet")}</p>
+                  <p className="text-xs text-slate-400 italic">{t("ยังไม่มีรูป/ลิงก์จากงานย่อย", "No media from subtasks yet")}</p>
                 ) : (
                   <>
                     {taskMedia.images.length > 0 && (
                       <div className="grid grid-cols-4 gap-2">
-                        {taskMedia.images.map((im, i) => (
+                        {taskMedia.images.map((im, i) => { const bd = tmBadge(im.status); return (
                           <div key={im.key} className="relative group">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={r2ImageUrl(im.key, 320) ?? ""} alt={im.label ?? ""} onClick={() => setTmLb(i)} title={t("กดดูเต็มจอ", "Click to view full")} className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+                            <img src={r2ImageUrl(im.key, 320) ?? ""} alt={im.label ?? ""} onClick={() => setTmLb(i)} title={`${im.label ?? ""} · ${bd.label}`} className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+                            <span className={`absolute top-0.5 left-0.5 text-[8px] text-white px-1 py-px rounded ${bd.cls}`}>{bd.label}</span>
                             <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100">
                               <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">🔗</button>
                               <a href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">⬇</a>
                             </div>
                           </div>
-                        ))}
+                        ); })}
                       </div>
                     )}
                     {taskMedia.links.length > 0 && (
@@ -587,19 +595,19 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                     )}
                   </>
                 )}
-                <p className="text-[11px] text-slate-300 mt-1">{t("ดึงจากงานย่อยที่อนุมัติแล้ว · กดรูป=ดูเต็มจอ · 🔗 ก๊อปลิงก์ · ⬇ ดาวน์โหลดไปโพสต์", "From approved subtasks · click=view · 🔗 copy link · ⬇ download")}</p>
-              </div>
+                <p className="text-[11px] text-slate-300 mt-1">{t("รูปจากงานย่อย (ป้ายบอกสถานะ) · กดรูป=ดูเต็มจอ · 🔗 ก๊อปลิงก์ · ⬇ ดาวน์โหลด", "Subtask images (status badge) · click=view · 🔗 copy · ⬇ download")}</p>
+              </CSection>
             )}
 
-            {/* แนบงานเพิ่มเอง: รูป / วิดีโอ / ลิงก์พรีวิว (เผื่อแนบนอกเหนือจากงาน) */}
-            {!isHidden(dth, "attach") && (<div style={{ order: cOrderOf("attach") }}>
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("แนบเพิ่มเอง (รูป · วิดีโอ · ลิงก์)", "Attach extra (image · video · link)")}</p>
+            {/* แนบงานเพิ่มเอง: รูป / วิดีโอ / ลิงก์พรีวิว (default พับ) */}
+            {!isHidden(dth, "attach") && (
+            <CSection title={cLabelOf("attach")} order={cOrderOf("attach")} collapsed={coll("attach")} onToggle={() => toggleColl("attach")}>
               <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onDelete={onDelAttachment} pushToast={pushToast} />
-            </div>)}
+            </CSection>)}
 
             {/* ลิงก์สินค้า (ปลายทางขาย) */}
-            {!isHidden(dth, "links") && (<div style={{ order: cOrderOf("links") }}>
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ลิงก์สินค้า (Shopee/Lazada/Website)", "Product Links (Shopee/Lazada/Website)")}</p>
+            {!isHidden(dth, "links") && (
+            <CSection title={cLabelOf("links")} order={cOrderOf("links")} collapsed={coll("links")} onToggle={() => toggleColl("links")}>
               <div className="space-y-2">
                 {links.map((l, i) => (
                   <div key={i} className="flex gap-2">
@@ -612,12 +620,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 ))}
                 <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มลิงก์", "Add Link")}</button>
               </div>
-            </div>)}
+            </CSection>)}
 
             {/* หมายเหตุ/สิ่งที่ต้องทำ ต่อแพลตฟอร์ม (แก้ในตัว) */}
             {!isHidden(dth, "platform_notes") && contentPlatforms.length > 0 && (
-              <div style={{ order: cOrderOf("platform_notes") }}>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("สิ่งที่ต้องทำ ต่อแพลตฟอร์ม", "Per-platform checklist")}</p>
+              <CSection title={cLabelOf("platform_notes")} order={cOrderOf("platform_notes")} collapsed={coll("platform_notes")} onToggle={() => toggleColl("platform_notes")}>
                 <div className="space-y-2">
                   {contentPlatforms.map((p) => (
                     <div key={p} className="border border-slate-200 rounded-lg p-2">
@@ -630,7 +637,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   ))}
                 </div>
                 <p className="text-[11px] text-slate-300 mt-1">{t("โน้ตเป็นค่ากลาง (ทุกคอนเทนต์เห็นเหมือนกัน) · ตั้งลิงก์ไปโพสต์ที่ ⚙️ ตั้งค่าแพลตฟอร์ม", "Notes are global · set post links in ⚙️ Platform settings")}</p>
-              </div>
+              </CSection>
             )}
 
             {/* published url — ปักไว้ล่างสุดเสมอ */}
@@ -993,5 +1000,20 @@ function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushTo
         </div>
       )}
     </ERPModal>
+  );
+}
+
+// ส่วนที่พับได้ในคอลัมน์ซ้ายของ drawer คอนเทนต์ — หัวข้อมีแถบชัด + กด ▼ พับ/กาง (จำต่อคน)
+function CSection({ title, order, collapsed, onToggle, right, children }: { title: string; order: number; collapsed: boolean; onToggle: () => void; right?: ReactNode; children: ReactNode }) {
+  return (
+    <div style={{ order }} className="border border-slate-200 rounded-lg overflow-hidden bg-white/50">
+      <div className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-slate-50/80 border-b border-slate-100">
+        <button onClick={onToggle} className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wider hover:text-violet-700 min-w-0">
+          <span className="text-[9px] text-slate-400 shrink-0">{collapsed ? "▶" : "▼"}</span><span className="truncate">{title}</span>
+        </button>
+        {right && <div className="shrink-0">{right}</div>}
+      </div>
+      {!collapsed && <div className="p-3">{children}</div>}
+    </div>
   );
 }

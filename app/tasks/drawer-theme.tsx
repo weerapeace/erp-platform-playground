@@ -18,13 +18,13 @@ export type DrawerTheme = {
   accent: string; accent2: string; accentGradient: boolean;   // สีหลัก (+คู่ไล่สีถ้าเปิด gradient)
   buttonColor: string | null; progressColor: string | null; dividerColor: string | null;   // แยกสีแต่ละส่วน (null = ใช้สีหลัก/ค่าเริ่มต้น)
   bg: string | null; bgImage: string | null; bgGradient: DrawerGradient;   // พื้นหลัง: สีเดียว / รูป / ไล่สี
-  size: "sm" | "md" | "lg"; density: DrawerDensity; swap: boolean; hidden: string[]; order: string[];
+  size: "sm" | "md" | "lg"; density: DrawerDensity; swap: boolean; hidden: string[]; order: string[]; collapsed: string[];
 };
 export const DEFAULT_DRAWER_THEME: DrawerTheme = {
   accent: "#7c3aed", accent2: "#ec4899", accentGradient: false,
   buttonColor: null, progressColor: null, dividerColor: null,
   bg: null, bgImage: null, bgGradient: null,
-  size: "md", density: "normal", swap: false, hidden: [], order: [],
+  size: "md", density: "normal", swap: false, hidden: [], order: [], collapsed: ["attach"],
 };
 
 export function mergeDrawerTheme(v: unknown): DrawerTheme {
@@ -34,7 +34,13 @@ export function mergeDrawerTheme(v: unknown): DrawerTheme {
     buttonColor: o.buttonColor ?? null, progressColor: o.progressColor ?? null, dividerColor: o.dividerColor ?? null,
     bg: o.bg ?? null, bgImage: o.bgImage ?? null, bgGradient: o.bgGradient ?? null,
     size: o.size ?? "md", density: o.density ?? "normal", swap: !!o.swap, hidden: Array.isArray(o.hidden) ? o.hidden : [], order: Array.isArray(o.order) ? o.order : [],
+    collapsed: Array.isArray(o.collapsed) ? o.collapsed : DEFAULT_DRAWER_THEME.collapsed,
   };
+}
+// พับ/กางส่วน (ต่อคน) — เก็บคีย์ที่ "พับอยู่"
+export const isCollapsed = (theme: DrawerTheme, key: string) => theme.collapsed.includes(key);
+export function toggleCollapsedList(theme: DrawerTheme, key: string): string[] {
+  return theme.collapsed.includes(key) ? theme.collapsed.filter((x) => x !== key) : [...theme.collapsed, key];
 }
 // สีหลัก (ไล่สีถ้าเปิด) → ใช้กับปุ่ม/แถบ · helper คืนค่า CSS background (string)
 export function accentCss(t: DrawerTheme): string { return t.accentGradient ? `linear-gradient(135deg, ${t.accent}, ${t.accent2})` : t.accent; }
