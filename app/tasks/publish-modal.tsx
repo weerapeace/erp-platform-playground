@@ -16,7 +16,7 @@ import { useT } from "@/components/i18n";
 import { platformLabel } from "./use-options";
 import type { FormField } from "@/app/api/admin/field-registry-v2/route";
 import {
-  listContent, getContent, listContentAttachments, updateContent, getPlatformSettings,
+  listContent, getContent, listContentAttachments, updateContent, getPlatformSettings, savePlatformSettings, listSubtasks,
   getPublishConfig, savePublishConfig,
   type ContentDetail, type ContentAttachment, type PlatformSettings,
 } from "./data";
@@ -28,6 +28,11 @@ type ParentRef = { id: string; code: string | null; name?: string | null };
 type Row = { content: ContentDetail; images: ContentAttachment[] };
 // ฟิลด์ที่ "คัดลอกไปลงโพสต์" ได้ (ตัด relation/รูป/ไฟล์ ออก)
 const COPYABLE_TYPES = new Set(["text", "textarea", "longtext", "string", "number", "currency", "decimal", "int", "integer", "richtext", "html", "url", "email", "phone", "select", "date", "datetime"]);
+// ป้ายสถานะงานย่อย (สำหรับรูปที่ส่งงาน)
+const subBadge = (s: string) => s === "approved" ? { label: "✓", cls: "bg-emerald-500" }
+  : s === "submitted" ? { label: "รอ", cls: "bg-amber-500" }
+  : s === "revision_requested" ? { label: "แก้", cls: "bg-orange-500" }
+  : { label: "ร่าง", cls: "bg-slate-400" };
 
 export function PublishModal({ taskId, parents, parentFallback, onClose, onConfirm, pushToast }: {
   taskId: string;
@@ -46,6 +51,8 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
   const [openFull, setOpenFull] = useState<{ moduleKey: string; apiPath: string; id: string } | null>(null);   // เปิด drawer สินค้าเต็ม (Parent/SKU)
   const [parentFields, setParentFields] = useState<string[]>([]);   // คอลัมน์ Parent SKU ที่เลือกโชว์ (ว่าง=อัตโนมัติ)
   const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
+  const [taskImages, setTaskImages] = useState<{ key: string; status: string }[]>([]);   // รูปที่ส่งงาน (ทุกงานย่อย)
+  const [taskLinks, setTaskLinks] = useState<{ label: string | null; url: string }[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,6 +64,19 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
       setPosted(Object.fromEntries(details.map((d) => [d.id, { ...(d.posted_links ?? {}) }])));
       setPset(await getPlatformSettings().catch(() => ({})));
       setParentFields((await getPublishConfig().catch(() => ({} as { parent_fields?: string[] }))).parent_fields ?? []);
+      // รูป/ลิงก์ที่ส่งงาน — ทุกงานย่อยที่ส่ง (รวมยังไม่อนุมัติ)
+      try {
+        const subs = await listSubtasks(taskId);
+        const seen = new Set<string>(); const imgs: { key: string; status: string }[] = []; const lks: { label: string | null; url: string }[] = [];
+        for (const s of subs) {
+          for (const a of (s.attachments ?? [])) {
+            if (a.kind === "image" && a.r2_key) { if (!seen.has(a.r2_key)) { seen.add(a.r2_key); imgs.push({ key: a.r2_key, status: s.status }); } }
+            else if (a.kind !== "image" && a.url) lks.push({ label: a.label ?? s.title, url: a.url });
+          }
+          for (const arr of Object.values(s.image_sync_targets?.sku_images ?? {})) for (const k of (arr as string[])) { if (k && !seen.has(k)) { seen.add(k); imgs.push({ key: k, status: s.status }); } }
+        }
+        setTaskImages(imgs); setTaskLinks(lks);
+      } catch { /* ว่าง */ }
     } catch (e) { pushToast("error", (e as Error).message); }
     finally { setLoading(false); }
   }, [taskId, pushToast]);
@@ -64,6 +84,9 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
 
   const setLink = (contentId: string, platform: string, url: string) =>
     setPosted((p) => ({ ...p, [contentId]: { ...(p[contentId] ?? {}), [platform]: url } }));
+  // ลิงก์เปิดแพลตฟอร์ม = ค่ากลางต่อแพลตฟอร์ม (post_url ใน platform settings) — แก้ inline + บันทึก
+  const setOpenLink = (platform: string, url: string) => setPset((p) => ({ ...p, [platform]: { ...(p[platform] ?? {}), post_url: url } }));
+  const persistPset = (next: PlatformSettings) => { void savePlatformSettings(next).catch(() => {}); };
   const copy = async (text: string, label: string) => {
     try { await navigator.clipboard.writeText(text); pushToast("success", t(`คัดลอก ${label} แล้ว`, `Copied ${label}`)); }
     catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); }
@@ -89,6 +112,29 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
           {parents.length > 0 && (
             <div className="flex justify-end">
               <button onClick={() => setFieldPickerOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ {t("เลือกฟิลด์ที่โชว์", "Choose fields")}</button>
+            </div>
+          )}
+
+          {/* รูป/ลิงก์ที่ส่งงาน (ทุกงานย่อย) — เอาไปลงโพสต์ */}
+          {(taskImages.length > 0 || taskLinks.length > 0) && (
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <p className="text-xs font-semibold text-slate-500 mb-2">🖼️ {t("รูป/ลิงก์ที่ส่งงาน", "Submitted images / links")} <span className="font-normal text-slate-400">({taskImages.length} {t("รูป", "img")})</span></p>
+              {taskImages.length > 0 && (
+                <div className="flex gap-2 flex-wrap">
+                  {taskImages.map((im) => { const bd = subBadge(im.status); return (
+                    <a key={im.key} href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={r2ImageUrl(im.key, 240) ?? ""} alt="" className="h-20 w-20 object-cover rounded-lg border border-slate-200 hover:ring-2 hover:ring-violet-300" />
+                      <span className={`absolute top-0.5 left-0.5 text-[8px] text-white px-1 py-px rounded ${bd.cls}`}>{bd.label}</span>
+                    </a>
+                  ); })}
+                </div>
+              )}
+              {taskLinks.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {taskLinks.map((l, i) => <a key={i} href={l.url} target="_blank" rel="noreferrer" className="block text-xs text-violet-700 hover:underline truncate">🔗 {l.label || l.url}</a>)}
+                </div>
+              )}
             </div>
           )}
           {/* Parent SKU — รายละเอียดเต็ม (คัดลอกไปลงโพสต์ได้) + SKU ลูก inline */}
@@ -139,11 +185,16 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
                           <span className="text-sm font-medium text-slate-700">{doneUrl ? "✅ " : ""}{platformLabel(pf)}</span>
                           <div className="flex items-center gap-2 flex-wrap">
                             {text && <button onClick={() => copy(text, platformLabel(pf))} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอกแคปชั่น", "Copy caption")}</button>}
-                            {goUrl && <a href={goUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-white bg-violet-600 rounded-md px-2 py-1 hover:bg-violet-700">↗ {t("ไปโพสต์", "Go post")}</a>}
+                            {goUrl && <a href={goUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-white bg-violet-600 rounded-md px-2 py-1 hover:bg-violet-700">↗ {t("เปิด", "Open")} {platformLabel(pf)}</a>}
                             {prodUrl && <a href={prodUrl} target="_blank" rel="noreferrer" className="text-xs text-violet-700 hover:underline">🔗 {t("ลิงก์สินค้า", "Product link")}</a>}
                           </div>
                         </div>
                         {text && <pre className="text-[11px] text-slate-600 bg-slate-50 border border-slate-100 rounded p-2 whitespace-pre-wrap font-sans max-h-24 overflow-y-auto mb-1.5">{text}</pre>}
+                        {/* ลิงก์เปิดแพลตฟอร์ม (ค่ากลาง ตั้ง/แก้ได้ตรงนี้) */}
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-[11px] text-slate-400 shrink-0 w-20">{t("ลิงก์เปิด", "Open link")}</span>
+                          <ERPInput value={pset[pf]?.post_url ?? ""} onChange={(e) => setOpenLink(pf, e.target.value)} onBlur={() => persistPset(pset)} placeholder={t("ลิงก์เปิด Shopee/Lazada… (ค่ากลาง)", "Shopee/Lazada link… (shared)")} />
+                        </div>
                         <div className="flex items-center gap-1.5">
                           <span className="text-[11px] text-slate-400 shrink-0 w-20">{t("ลิงก์หลังลง", "Posted link")}</span>
                           <ERPInput value={doneUrl} onChange={(e) => setLink(c.id, pf, e.target.value)} placeholder="https://..." />
