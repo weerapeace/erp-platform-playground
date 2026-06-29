@@ -10,6 +10,7 @@ import type { MasterCRUDConfig } from "@/components/master-crud";
 import { relLink } from "@/components/payroll/cells";
 import { LookupSelect } from "@/components/lookup-select";
 import { AutoWageInput } from "@/components/payroll/auto-wage-input";
+import { ContractTemplateBar } from "@/components/payroll/contract-template-bar";
 
 // UI constants (กำหนดในหน้า — ไม่ import จาก db lib ที่มี service-role เพื่อกัน bundle รั่วเข้า client)
 const WAGE_TYPES = ["monthly", "daily", "hourly", "piece_rate", "mixed"];
@@ -98,6 +99,8 @@ const CONFIG: MasterCRUDConfig = {
   cellRenderers: contractCellRenderers,
   // สร้างใหม่: ตั้งค่าเริ่มต้น (เลขที่สัญญา ออกอัตโนมัติฝั่ง server)
   createDefaults: { status: "active", is_current: true, wage_type: "monthly", payment_cycle: "monthly", start_date: todayISO() },
+  // แถบแม่แบบสัญญา (เฉพาะตอนสร้างใหม่) — เลือกแม่แบบเติมค่าทุกช่อง / บันทึกค่าปัจจุบันเป็นแม่แบบ
+  createFormHeader: ({ form, updateForm }) => <ContractTemplateBar values={form} onApply={(vals) => updateForm(vals)} />,
   // custom field ในฟอร์ม (merge เข้า Registry) — m2o + auto-wage + เลขสัญญาอัตโนมัติ
   formRenderers: {
     // เลขที่สัญญา: ออกอัตโนมัติเมื่อบันทึก (สร้างใหม่) / อ่านอย่างเดียว (แก้ไข)

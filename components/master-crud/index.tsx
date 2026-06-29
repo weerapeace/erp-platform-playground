@@ -416,6 +416,8 @@ export type MasterCRUDConfig = {
   cellRenderers?: Record<string, (value: unknown, row?: Record<string, unknown>) => React.ReactNode>;
   /** custom field ในฟอร์ม (key → renderForm) — merge เข้า field จาก Registry ได้ (คู่กับ cellRenderers) */
   formRenderers?: Record<string, FieldDef["renderForm"]>;
+  /** แถบ custom เหนือฟอร์ม "ตอนสร้างใหม่" เท่านั้น (เช่น แม่แบบ) — รับค่าฟอร์มปัจจุบัน + setter */
+  createFormHeader?: (ctx: { form: Record<string, unknown>; updateForm: (patch: Partial<Record<string, unknown>>) => void }) => React.ReactNode;
   /** unique key field (default: 'code') */
   uniqueKey?: string;
   /** entity_type สำหรับ audit log export */
@@ -2267,6 +2269,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           ) : null;
           // layout=gallery (เช่น Parent SKU) → ย้าย "รูปสินค้า" + Description ขึ้นคอลัมน์ซ้ายให้เห็นเด่น (ไม่ต้องเลื่อนหา)
           const galleryLeft = config.mediaGallery?.layout === "gallery";
+          // แถบ custom เหนือฟอร์ม (เฉพาะตอนสร้างใหม่) เช่น แม่แบบสัญญา
+          const createHeaderEl = (drawerMode === "edit" && !editingId && config.createFormHeader)
+            ? <div className="mb-3">{config.createFormHeader({ form, updateForm })}</div>
+            : null;
 
           // กลุ่ม B: ถ้าจัด Layout ไว้ "และไม่มีรูปปก" → รูป/field เต็มกว้างตาม Layout
           // (โมดูลที่มีรูปปก เช่น Parent SKU/SKU → ใช้เลย์เอาต์ "รูปซ้าย" ด้านล่างเสมอ)
@@ -2289,6 +2295,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
                 )}
                 {/* Layout คุมทุก field (รวม core) */}
+                {createHeaderEl}
                 {drawerMode === "view"
                   ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} />
                   : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} />}
@@ -2304,6 +2311,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {drawerMode === "edit" && formErr && (
                   <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
                 )}
+                {createHeaderEl}
                 {drawerMode === "view"
                   ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} />
                   : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} />}
@@ -2396,6 +2404,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {drawerMode === "edit" && formErr && (
                   <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
                 )}
+                {createHeaderEl}
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"
                     ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} />

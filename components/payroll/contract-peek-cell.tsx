@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { LookupSelect } from "@/components/lookup-select";
+import { ContractTemplateBar } from "@/components/payroll/contract-template-bar";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -429,6 +430,21 @@ export function ContractPeekCell({
                     >
                       ยกเลิก
                     </button>
+                  </div>
+                  <div className="px-5 pt-4">
+                    <ContractTemplateBar
+                      values={draft as unknown as Record<string, unknown>}
+                      onApply={(vals) => setDraft((d) => {
+                        if (!d) return d;
+                        const boolKeys = ["is_current", "include_pnd3_export", "include_payroll_register_export", "attendance_scan_exempt"];
+                        const patch: Record<string, unknown> = {};
+                        for (const [k, v] of Object.entries(vals)) {
+                          if (!(k in d)) continue;
+                          patch[k] = boolKeys.includes(k) ? (v === true || v === "true") : (v == null ? "" : String(v));
+                        }
+                        return applyEndDateRuleToDraft({ ...d, ...patch } as Draft);
+                      })}
+                    />
                   </div>
                   <EditContractForm
                     draft={draft}
