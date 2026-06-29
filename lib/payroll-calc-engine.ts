@@ -158,7 +158,10 @@ function buildLine(period: Row, employee: Row, contract: Row, setting: Row, manu
   const hoursPerDay = money(period.default_hours_per_day ?? 8);
   const manualAtt = hasInput(manual.attendance_days);
   values.attendance_days = contractor ? 0 : manualAtt ? money(manual.attendance_days) : defaultWorkDays;
-  if (!contractor && payByAttendance && contract.wage_type === "daily") {
+  // จ่ายแบบรายวัน: สัญญาที่จ่ายตามวันทำงาน (contract_type/wage_type รายวัน) + มีค่าจ้างรายวัน
+  // (เดิมผูกกับ wage_type==="daily" อย่างเดียว → สัญญา "รายวัน" ที่ตั้ง ประเภทค่าจ้าง=รายเดือน เลยไม่ได้เงิน)
+  const dailyPay = !contractor && payByAttendance && contract.wage_type !== "hourly" && money(contract.daily_wage) > 0;
+  if (dailyPay) {
     values.attendance_days = paidDailyAttendanceDays(money(values.attendance_days), money(values.absence_deduction), money(contract.daily_wage), manualAtt);
     values.absence_deduction = 0;
   }
@@ -167,7 +170,7 @@ function buildLine(period: Row, employee: Row, contract: Row, setting: Row, manu
     values.daily_wage_amount = 0; values.hourly_wage_amount = 0; values.overtime_amount = 0;
     values.late_deduction = 0; values.absence_deduction = 0; values.unpaid_leave_deduction = 0;
   }
-  if (!contractor && contract.wage_type === "daily" && !values.daily_wage_amount) values.daily_wage_amount = roundMoney(money(values.attendance_days) * money(contract.daily_wage));
+  if (dailyPay && !values.daily_wage_amount) values.daily_wage_amount = roundMoney(money(values.attendance_days) * money(contract.daily_wage));
   if (!contractor && contract.wage_type === "hourly" && !values.hourly_wage_amount) values.hourly_wage_amount = roundMoney(money(values.attendance_hours) * money(contract.hourly_wage));
 
   const grossPay = money(values.base_salary) + money(values.daily_wage_amount) + money(values.hourly_wage_amount) + money(values.piece_rate_amount)
