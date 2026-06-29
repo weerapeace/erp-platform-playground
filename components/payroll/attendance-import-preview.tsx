@@ -362,6 +362,7 @@ export function AttendanceImportPreview({
   const [editRow, setEditRow] = useState<DisplayImportRow | null>(null);                   // แถวที่กำลังเปิดป๊อปอัปตรวจ/แก้
   const [pendingMatches, setPendingMatches] = useState<Record<string, string>>({});        // รหัสสแกน → employee_id ที่จะจับคู่
   const [matchSaving, setMatchSaving] = useState(false);
+  const [committingCount, setCommittingCount] = useState<number | null>(null);   // โชว์ overlay "กำลังบันทึก..." ตอน commit
   const fileRef = useRef<HTMLInputElement | null>(null);
   const matchedCodesRef = useRef<Set<string>>(new Set());   // รหัสที่เพิ่งจับคู่ → re-resolve draft หลัง employees โหลดใหม่
 
@@ -690,6 +691,7 @@ export function AttendanceImportPreview({
     if (rowIds.length === 0) { setMessage("เลือกรายการที่พร้อมก่อน"); return; }
     if (!confirm(`ยืนยันบันทึกจริง ${rowIds.length} รายการเข้างวดนี้?\nลงแล้วจะไปอยู่หน้าคำนวณเงินเดือน (แก้ย้อนได้ที่หน้าคำนวณ)`)) return;
     setBusy(true);
+    setCommittingCount(rowIds.length);
     setMessage("");
     try {
       const res = await apiFetch(`/api/payroll/attendance-import-batches/${draft.id}/commit`, {
@@ -707,6 +709,7 @@ export function AttendanceImportPreview({
       setMessage(error instanceof Error ? error.message : "บันทึกจริงไม่สำเร็จ");
     } finally {
       setBusy(false);
+      setCommittingCount(null);
     }
   };
 
@@ -1222,6 +1225,18 @@ export function AttendanceImportPreview({
           onClose={() => setEditRow(null)}
           onApply={(decision) => void applyRowEdit(editRow.rowKey, decision)}
         />
+      )}
+
+      {/* overlay กำลังบันทึกจริง (commit) — กันปิดหน้าระหว่างบันทึก */}
+      {committingCount != null && createPortal(
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50">
+          <div className="flex flex-col items-center gap-3 rounded-2xl bg-white px-8 py-7 shadow-2xl">
+            <span className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-orange-500" />
+            <div className="text-sm font-semibold text-slate-800">กำลังบันทึกลงงวด…</div>
+            <div className="text-xs text-slate-500">{committingCount.toLocaleString("th-TH")} รายการ · อย่าปิดหน้านี้</div>
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
