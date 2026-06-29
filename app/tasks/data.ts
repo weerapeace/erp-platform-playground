@@ -413,6 +413,33 @@ export async function savePlatformSettings(settings: PlatformSettings): Promise<
   await jsonOrThrow(await apiFetch("/api/creative-platform-settings", { method: "PUT", body: JSON.stringify({ settings }) }));
 }
 
+// ---- พรอมต์ตั้งต้น + แฮชแท็กเริ่มต้น (ต่อแบรนด์/แพลตฟอร์ม + ตัวรวม) ----
+export type CaptionConfig = {
+  prompt?: string;                                  // พรอมต์รวม (fallback)
+  prompt_by_brand?: Record<string, string>;         // พรอมต์ต่อแบรนด์
+  hashtags_by_platform?: Record<string, string>;    // แฮชแท็กเริ่มต้นต่อแพลตฟอร์ม
+  hashtags_by_brand?: Record<string, string>;       // แฮชแท็กเริ่มต้นต่อแบรนด์
+};
+export async function getCaptionConfig(): Promise<CaptionConfig> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-caption-config"));
+  return (j.config as CaptionConfig) ?? {};
+}
+export async function saveCaptionConfig(config: CaptionConfig): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/creative-caption-config", { method: "PUT", body: JSON.stringify({ config }) }));
+}
+// แฮชแท็กเริ่มต้น = ของแบรนด์ + ของแพลตฟอร์ม (ตัดซ้ำ) · พรอมต์ = ของแบรนด์ ไม่งั้นตัวรวม
+export function defaultHashtags(cfg: CaptionConfig, brandId: string | null, platform: string): string {
+  const parts: string[] = [];
+  if (brandId && cfg.hashtags_by_brand?.[brandId]) parts.push(cfg.hashtags_by_brand[brandId]);
+  if (cfg.hashtags_by_platform?.[platform]) parts.push(cfg.hashtags_by_platform[platform]);
+  const seen = new Set<string>(); const out: string[] = [];
+  for (const tag of parts.join(" ").split(/\s+/).filter(Boolean)) { const k = tag.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(tag); } }
+  return out.join(" ");
+}
+export function resolvePrompt(cfg: CaptionConfig, brandId: string | null): string {
+  return (brandId && cfg.prompt_by_brand?.[brandId]) || cfg.prompt || "";
+}
+
 // ---- พรีวิวลิงก์ (ดึง OG/meta) ----
 export type LinkPreview = { url: string; title: string | null; description: string | null; image: string | null; site: string | null };
 export async function getLinkPreview(url: string): Promise<LinkPreview> {

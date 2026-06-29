@@ -24,8 +24,9 @@ import {
   getCaptionTemplates, saveCaptionTemplates, getParentSkuColors,
   listContentAttachments, addContentAttachment, deleteContentAttachment,
   getPlatformSettings, savePlatformSettings, getLinkPreview,
+  getCaptionConfig, saveCaptionConfig, defaultHashtags, resolvePrompt,
   type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus,
-  type BrandOption, type Hashtag, type CaptionTemplate,
+  type BrandOption, type Hashtag, type CaptionTemplate, type CaptionConfig,
   type ContentAttachment, type PlatformSettings, type PlatformSetting, type LinkPreview,
 } from "../data";
 import { useCreativeOptions, platformLabel } from "../use-options";
@@ -319,6 +320,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [discountPct, setDiscountPct] = useState(false);
   const [tplSettingsOpen, setTplSettingsOpen] = useState(false);
   const [psOpen, setPsOpen] = useState(false);   // โมดอลตั้งค่าแพลตฟอร์ม
+  const [capCfg, setCapCfg] = useState<CaptionConfig>({});   // พรอมต์ + แฮชแท็กเริ่มต้น
+  const [cfgOpen, setCfgOpen] = useState(false);   // โมดอลตั้งค่าพรอมต์/แฮชแท็ก
   // สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี
   const [sku, setSku] = useState<SkuPickerValue | null>(null);
   const [parent, setParent] = useState<ParentSkuPickerValue | null>(null);
@@ -364,10 +367,12 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       setDiscountPct(!!detail.discount_is_percent);
       setSku(detail.sku_id ? { id: detail.sku_id, code: detail.sku_code ?? "", name: detail.sku_name ?? detail.product_name ?? "", color: detail.sku_color, list_price: detail.sku_price } : null);
       setParent(detail.parent_sku_id ? { id: detail.parent_sku_id, code: detail.parent_sku_code ?? "", name: detail.parent_sku_name ?? "" } : null);
-      // เตรียม caption ให้ครบทุกแพลตฟอร์มของคอนเทนต์
+      // เตรียม caption ให้ครบทุกแพลตฟอร์มของคอนเทนต์ — แพลตฟอร์มที่ยังไม่มีแคปชั่น เติมแฮชแท็กเริ่มต้นให้
+      const cfg = await getCaptionConfig().catch(() => ({} as CaptionConfig));
+      setCapCfg(cfg);
       const platforms = detail.platforms ?? [];
       const byPlat = new Map(detail.captions.map((c) => [c.platform, c]));
-      setCaps(platforms.map((p) => byPlat.get(p) ?? { platform: p, caption: "", hashtags: "" }));
+      setCaps(platforms.map((p) => byPlat.get(p) ?? { platform: p, caption: "", hashtags: defaultHashtags(cfg, detail.brand_id, p) }));
     } catch (e) { pushToast("error", (e as Error).message); }
   }, [contentId, pushToast]);
   useEffect(() => { load(); }, [load]);
@@ -478,6 +483,15 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     shop: shopChannels, fake_price: fakePrice, real_price: realPrice,
     price: fakePrice, color: colorText, sku: sku?.code ?? null, product: sku?.name ?? d?.product_name ?? null,
   }), [shopChannels, fakePrice, realPrice, colorText, sku?.code, sku?.name, d?.product_name]);
+
+  // คัดลอกพรอมต์ตั้งต้น (เติมตัวแปรสินค้าให้แล้ว) ไปวางใน AI เขียนแคปชั่นต่อ
+  const copyPrompt = async () => {
+    const raw = resolvePrompt(capCfg, d?.brand_id ?? null);
+    if (!raw.trim()) { pushToast("info", t("ยังไม่ได้ตั้งพรอมต์ — กด ✍️ ตั้งค่า", "No prompt set — click ✍️ Config")); setCfgOpen(true); return; }
+    const text = renderCaption(raw, { caption: "", hashtags: "", ...sharedVars });
+    try { await navigator.clipboard.writeText(text); pushToast("success", t("คัดลอกพรอมต์แล้ว", "Prompt copied")); }
+    catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -655,7 +669,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           <div className={isWide ? `flex-1 overflow-y-auto ${densityCls(dth.density)} min-w-0 bg-slate-50/40` : `${densityCls(dth.density)} bg-slate-50/40 border-t border-slate-200`}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <button onClick={copyPrompt} className="text-xs font-medium text-violet-700 hover:underline">📋 {t("คัดลอกพรอมต์", "Copy prompt")}</button>
+                <button onClick={() => setCfgOpen(true)} className="text-xs text-violet-700 hover:underline">✍️ {t("พรอมต์/แฮชแท็ก", "Prompt/Hashtags")}</button>
                 <button onClick={() => setPsOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ {t("ตั้งค่าแพลตฟอร์ม", "Platform settings")}</button>
                 <button onClick={() => setTplSettingsOpen(true)} className="text-xs text-violet-700 hover:underline">📝 {t("แม่แบบ", "Templates")}</button>
               </div>
@@ -675,6 +691,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         </div>
       </div>
 
+      {cfgOpen && <CaptionConfigModal cfg={capCfg} brandId={d.brand_id} brandLabel={d.brand_label} platforms={platforms} onClose={() => setCfgOpen(false)} onSaved={(v) => { setCapCfg(v); setCfgOpen(false); }} pushToast={pushToast} />}
       {tplSettingsOpen && <CaptionTemplateSettings brandId={d.brand_id} brandLabel={d.brand_label} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
       <ImageLightbox images={taskMedia.images.map((im) => ({ url: r2ImageUrl(im.key, 1600) ?? "", label: im.label }))} index={tmLb} onClose={() => setTmLb(-1)} onIndex={setTmLb} />
@@ -1003,6 +1020,61 @@ function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushTo
           <p className="text-[11px] text-slate-400">{t("บรรทัดที่ตัวแปรว่างทั้งหมดจะถูกตัดออกอัตโนมัติ", "Lines where all variables are empty will be removed automatically")} · {brandId ? t("บันทึกแล้วจะใช้เฉพาะแบรนด์นี้", "Saved settings apply to this brand only") : t("นี่คือค่ากลางที่ทุกแบรนด์ใช้ ถ้ายังไม่ตั้งของตัวเอง", "This is the default used by all brands that haven't set their own")}</p>
         </div>
       )}
+    </ERPModal>
+  );
+}
+
+// ตั้งค่าพรอมต์ตั้งต้น + แฮชแท็กเริ่มต้น (ต่อแบรนด์ + ต่อแพลตฟอร์ม + ตัวรวม)
+function CaptionConfigModal({ cfg, brandId, brandLabel, platforms, onClose, onSaved, pushToast }: { cfg: CaptionConfig; brandId: string | null; brandLabel: string | null; platforms: { value: string; label: string }[]; onClose: () => void; onSaved: (v: CaptionConfig) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+  const t = useT();
+  const [val, setVal] = useState<CaptionConfig>(cfg);
+  const [saving, setSaving] = useState(false);
+  const brandKey = brandId ?? "";
+  const setPromptBrand = (txt: string) => setVal((v) => ({ ...v, prompt_by_brand: { ...(v.prompt_by_brand ?? {}), [brandKey]: txt } }));
+  const setHashBrand = (txt: string) => setVal((v) => ({ ...v, hashtags_by_brand: { ...(v.hashtags_by_brand ?? {}), [brandKey]: txt } }));
+  const setHashPlat = (p: string, txt: string) => setVal((v) => ({ ...v, hashtags_by_platform: { ...(v.hashtags_by_platform ?? {}), [p]: txt } }));
+  const save = async () => { setSaving(true); try { await saveCaptionConfig(val); pushToast("success", t("บันทึกแล้ว", "Saved")); onSaved(val); } catch (e) { pushToast("error", (e as Error).message); } finally { setSaving(false); } };
+  return (
+    <ERPModal open onClose={onClose} size="lg" title={t("✍️ พรอมต์ + แฮชแท็กเริ่มต้น", "✍️ Prompt + default hashtags")}
+      footer={<>
+        <button onClick={onClose} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>
+        <button onClick={save} disabled={saving} className="h-9 px-5 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
+      </>}>
+      <div className="space-y-4">
+        {/* พรอมต์ */}
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-slate-700">📋 {t("พรอมต์ตั้งต้น (เอาไปวางใน AI เขียนแคปชั่น)", "Prompt (paste into AI to write captions)")}</p>
+          <p className="text-[11px] text-slate-400">{t("ใช้ตัวแปรได้: {product} {price} {color} {shop} — ปุ่ม 📋 คัดลอกพรอมต์ จะเติมข้อมูลสินค้าให้อัตโนมัติ", "Variables: {product} {price} {color} {shop} — the 📋 button fills product info automatically")}</p>
+          {brandId && (
+            <div>
+              <label className="text-xs text-slate-400">{t("พรอมต์ของแบรนด์", "Brand prompt")} — {brandLabel || brandId}</label>
+              <ERPTextarea rows={4} value={val.prompt_by_brand?.[brandKey] ?? ""} onChange={(e) => setPromptBrand(e.target.value)} placeholder={t("เว้นว่าง = ใช้พรอมต์รวมด้านล่าง", "Empty = use the global prompt below")} />
+            </div>
+          )}
+          <div>
+            <label className="text-xs text-slate-400">{t("พรอมต์รวม (ทุกแบรนด์ที่ไม่ได้ตั้งเอง)", "Global prompt (fallback)")}</label>
+            <ERPTextarea rows={4} value={val.prompt ?? ""} onChange={(e) => setVal((v) => ({ ...v, prompt: e.target.value }))} placeholder={t("เช่น: ช่วยเขียนแคปชั่นขายของสำหรับ {product} ราคา {price} สี {color} โทนสนุก ...", "e.g. Write a sales caption for {product} at {price}, colors {color}, fun tone ...")} />
+          </div>
+        </div>
+        {/* แฮชแท็กเริ่มต้น */}
+        <div className="space-y-2 border-t border-slate-100 pt-3">
+          <p className="text-sm font-semibold text-slate-700"># {t("แฮชแท็กเริ่มต้น (คอนเทนต์ใหม่เติมให้: แบรนด์ + แพลตฟอร์ม รวมกัน)", "Default hashtags (new content prefills: brand + platform)")}</p>
+          {brandId && (
+            <div>
+              <label className="text-xs text-slate-400">{t("ของแบรนด์", "Brand")} — {brandLabel || brandId}</label>
+              <ERPInput value={val.hashtags_by_brand?.[brandKey] ?? ""} onChange={(e) => setHashBrand(e.target.value)} placeholder="#แบรนด์ #ของน่ารัก" />
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            {platforms.map((p) => (
+              <div key={p.value}>
+                <label className="text-xs text-slate-400">{p.label}</label>
+                <ERPInput value={val.hashtags_by_platform?.[p.value] ?? ""} onChange={(e) => setHashPlat(p.value, e.target.value)} placeholder="#hashtag" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </ERPModal>
   );
 }
