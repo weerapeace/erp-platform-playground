@@ -114,13 +114,36 @@ async function toColumns(body: Record<string, unknown>): Promise<Record<string, 
   return applyContractLifecycle(out);
 }
 
+// เลขที่สัญญารันอัตโนมัติ: CON-{ปี}-{ลำดับ 4 หลัก} เช่น CON-2026-0001 (นับต่อจากเลขล่าสุดของปีนั้น)
+async function nextContractNo(admin: ReturnType<typeof supabaseAdmin>, year: number): Promise<string> {
+  const prefix = `CON-${year}-`;
+  const { data } = await admin
+    .from(TABLE)
+    .select("contract_no")
+    .like("contract_no", `${prefix}%`)
+    .order("contract_no", { ascending: false })
+    .limit(1);
+  let n = 0;
+  const last = (data?.[0] as { contract_no?: string } | undefined)?.contract_no;
+  if (last) {
+    const m = last.match(/-(\d+)$/);
+    if (m) n = parseInt(m[1], 10);
+  }
+  return `${prefix}${String(n + 1).padStart(4, "0")}`;
+}
+
 export async function createContract(body: Record<string, unknown>): Promise<ContractRow> {
   const employeeId = body.employee_id ?? (body.employee_code ? await codeToEmployeeId(String(body.employee_code)) : null);
   if (!employeeId) throw new Error("ต้องระบุพนักงาน (employee_code) ที่มีอยู่จริง");
   const cols = await toColumns(body);
-  const insert: Record<string, unknown> = {
+  const admin = supabaseAdmin();
+
+  const providedNo = String(cols.contract_no ?? "").trim();
+  const yearStr = String(cols.start_date ?? "").slice(0, 4);
+  const year = /^\d{4}$/.test(yearStr) ? Number(yearStr) : new Date().getFullYear();
+
+  const baseInsert: Record<string, unknown> = {
     employee_id:   employeeId,
-    contract_no:   cols.contract_no ?? `CON-${Date.now()}`,
     wage_type:     cols.wage_type ?? "monthly",
     payment_cycle: cols.payment_cycle ?? "monthly",
     base_salary:   cols.base_salary ?? 0,
@@ -131,10 +154,24 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
     status:        cols.status ?? "active",
     ...cols,
   };
-  const admin = supabaseAdmin();
-  const insertWithLifecycle = applyContractLifecycle(insert);
-  const { data, error } = await admin.from(TABLE).insert(insertWithLifecycle).select(SELECT).limit(1);
-  if (error) throw new Error(error.message);
+
+  // ลองบันทึก พร้อม retry ถ้าเลขซ้ำ (กรณีออกเลขอัตโนมัติแล้วชนกัน)
+  let contractNo = providedNo || (await nextContractNo(admin, year));
+  let data: Record<string, unknown>[] | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const insertWithLifecycle = applyContractLifecycle({ ...baseInsert, contract_no: contractNo });
+    const res = await admin.from(TABLE).insert(insertWithLifecycle).select(SELECT).limit(1);
+    if (!res.error) { data = res.data as Record<string, unknown>[]; break; }
+    // เลขซ้ำ + ออกเลขอัตโนมัติ → ขยับเลขแล้วลองใหม่
+    if (res.error.code === "23505" && !providedNo && attempt < 3) {
+      contractNo = await nextContractNo(admin, year);
+      continue;
+    }
+    throw new Error(res.error.message);
+  }
+  if (!data) throw new Error("บันทึกสัญญาไม่สำเร็จ");
+  const mergedFinal: Record<string, unknown> = { ...baseInsert, contract_no: contractNo };
+  const insertWithLifecycle = applyContractLifecycle(mergedFinal);
   await syncEndedCurrentContracts(admin, [String(employeeId)]);
   if (insertWithLifecycle.status === "ended") {
     await resignEmployeesWithoutActiveCurrentContract(admin, { [String(employeeId)]: String(insertWithLifecycle.end_date ?? "") });

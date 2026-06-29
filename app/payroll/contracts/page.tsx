@@ -8,6 +8,8 @@
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { relLink } from "@/components/payroll/cells";
+import { LookupSelect } from "@/components/lookup-select";
+import { AutoWageInput } from "@/components/payroll/auto-wage-input";
 
 // UI constants (กำหนดในหน้า — ไม่ import จาก db lib ที่มี service-role เพื่อกัน bundle รั่วเข้า client)
 const WAGE_TYPES = ["monthly", "daily", "hourly", "piece_rate", "mixed"];
@@ -34,7 +36,15 @@ const CONTRACT_TYPE_LABEL: Record<string, { th: string; cls: string }> = {
   daily: { th: "รายวัน", cls: "border-emerald-200 bg-emerald-50 text-emerald-700" },
   contractor: { th: "งานเหมา", cls: "border-violet-200 bg-violet-50 text-violet-700" },
   hourly: { th: "รายชั่วโมง", cls: "border-amber-200 bg-amber-50 text-amber-700" },
+  "fixed-term": { th: "สัญญามีกำหนดระยะเวลา", cls: "border-slate-200 bg-slate-50 text-slate-600" },
 };
+const EMPLOYMENT_TYPE_LABEL: Record<string, string> = {
+  full_time: "เต็มเวลา",
+  "full-time": "เต็มเวลา",
+  part_time: "ไม่เต็มเวลา (พาร์ทไทม์)",
+  contractor: "งานเหมา",
+};
+const todayISO = () => new Date().toISOString().slice(0, 10);
 const fmtBaht = (v: unknown) => {
   const n = Number(v);
   return Number.isFinite(n) && n > 0
@@ -48,6 +58,10 @@ const contractCellRenderers: NonNullable<MasterCRUDConfig["cellRenderers"]> = {
     const raw = String(v ?? "");
     const meta = CONTRACT_TYPE_LABEL[raw] ?? { th: raw || "—", cls: "border-slate-200 bg-slate-50 text-slate-600" };
     return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.th}</span>;
+  },
+  employment_type: (v) => {
+    const raw = String(v ?? "");
+    return <span className="text-sm">{EMPLOYMENT_TYPE_LABEL[raw] ?? raw ?? "—"}</span>;
   },
   wage_type: (v) => <span className="text-sm">{WAGE_LABEL[String(v)] ?? String(v)}</span>,
   base_salary: fmtBaht,
@@ -82,6 +96,34 @@ const CONFIG: MasterCRUDConfig = {
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true,
   cellRenderers: contractCellRenderers,
+  // สร้างใหม่: ตั้งค่าเริ่มต้น (เลขที่สัญญา ออกอัตโนมัติฝั่ง server)
+  createDefaults: { status: "active", is_current: true, wage_type: "monthly", payment_cycle: "monthly", start_date: todayISO() },
+  // custom field ในฟอร์ม (merge เข้า Registry) — m2o + auto-wage + เลขสัญญาอัตโนมัติ
+  formRenderers: {
+    // เลขที่สัญญา: ออกอัตโนมัติเมื่อบันทึก (สร้างใหม่) / อ่านอย่างเดียว (แก้ไข)
+    contract_no: ({ value, recordId }) => (
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-slate-600">เลขที่สัญญา</span>
+        <input
+          type="text"
+          readOnly
+          value={recordId ? String(value ?? "") : ""}
+          placeholder={recordId ? "" : "(ระบบออกเลขให้อัตโนมัติเมื่อบันทึก)"}
+          className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500"
+        />
+      </label>
+    ),
+    // ประเภทสัญญา / ประเภทการจ้าง = m2o (ดึงตัวเลือกจาก erp_lookups, เก็บ code, จัดการที่ /admin/lookups)
+    contract_type: ({ value, onChange, disabled }) => (
+      <LookupSelect type="contract_type" label="ประเภทสัญญา" value={String(value ?? "")} onChange={onChange} disabled={disabled} />
+    ),
+    employment_type: ({ value, onChange, disabled }) => (
+      <LookupSelect type="employment_type" label="ประเภทการจ้าง" value={String(value ?? "")} onChange={onChange} disabled={disabled} />
+    ),
+    // ค่าจ้างรายวัน/รายชม. = คำนวณจากเงินเดือนอัตโนมัติ (÷26 วัน, ÷8 ชม.)
+    daily_wage: (ctx) => <AutoWageInput {...ctx} kind="daily" label="ค่าจ้างรายวัน" />,
+    hourly_wage: (ctx) => <AutoWageInput {...ctx} kind="hourly" label="ค่าจ้างรายชั่วโมง" />,
+  },
   fields: [
     { key: "contract_no",   label: "เลขที่สัญญา", type: "text", colSize: 150, groupKey: "core", order: 10 },
     { key: "employee_name", label: "พนักงาน",     type: "text", colSize: 200, readonly: true, groupKey: "core", order: 20,

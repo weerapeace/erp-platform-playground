@@ -8,6 +8,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { LookupSelect } from "@/components/lookup-select";
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 type Contract = Record<string, unknown> & {
   id: string;
@@ -73,6 +76,14 @@ const CONTRACT_TYPE: Record<string, string> = {
   daily: "รายวัน",
   contractor: "งานเหมา",
   hourly: "รายชั่วโมง",
+  "fixed-term": "สัญญามีกำหนดระยะเวลา",
+};
+
+const EMPLOYMENT_TYPE: Record<string, string> = {
+  full_time: "เต็มเวลา",
+  "full-time": "เต็มเวลา",
+  part_time: "ไม่เต็มเวลา (พาร์ทไทม์)",
+  contractor: "งานเหมา",
 };
 
 const STATUS: Record<string, { th: string; cls: string }> = {
@@ -81,7 +92,6 @@ const STATUS: Record<string, { th: string; cls: string }> = {
   cancelled: { th: "ยกเลิก", cls: "bg-red-100 text-red-700" },
 };
 
-const CONTRACT_TYPES = ["permanent", "regular_external", "daily", "contractor", "hourly"];
 const WAGE_TYPES = ["monthly", "daily", "hourly", "piece_rate", "mixed"];
 const STATUSES = ["active", "ended", "cancelled"];
 
@@ -132,6 +142,32 @@ function contractToDraft(c: Contract): Draft {
   });
 }
 
+function blankDraft(): Draft {
+  return {
+    contract_no: "",
+    company_name: "",
+    contract_type: "",
+    employment_type: "",
+    wage_type: "monthly",
+    base_salary: "",
+    daily_wage: "",
+    hourly_wage: "",
+    piece_rate_default: "",
+    payroll_register_base_salary: "",
+    payment_cycle: "monthly",
+    start_date: todayBangkokISO(),
+    end_date: "",
+    is_current: true,
+    status: "active",
+    work_schedule_id: "",
+    overtime_policy_id: "",
+    leave_policy_id: "",
+    include_pnd3_export: false,
+    include_payroll_register_export: false,
+    attendance_scan_exempt: false,
+  };
+}
+
 function draftToPayload(d: Draft) {
   const normalized = applyEndDateRuleToDraft(d);
   return {
@@ -178,6 +214,7 @@ export function ContractPeekCell({
   const [rows, setRows] = useState<Contract[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
@@ -224,14 +261,33 @@ export function ContractPeekCell({
     e?.stopPropagation();
     setOpen(false);
     setEditingId(null);
+    setCreating(false);
     setDraft(null);
     setSaveMsg(null);
+  };
+
+  const startCreate = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSaveMsg(null);
+    setErr(null);
+    setEditingId(null);
+    setCreating(true);
+    setDraft(blankDraft());
+  };
+
+  const cancelCreate = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCreating(false);
+    setDraft(null);
   };
 
   const startEdit = (e: React.MouseEvent, c: Contract) => {
     e.preventDefault();
     e.stopPropagation();
     setSaveMsg(null);
+    setCreating(false);
     setEditingId(c.id);
     setDraft(contractToDraft(c));
   };
@@ -247,20 +303,28 @@ export function ContractPeekCell({
   const saveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!editingId || !draft) return;
+    if (!draft) return;
+    if (!creating && !editingId) return;
     setSaving(true);
     setSaveMsg(null);
     setErr(null);
     try {
-      const res = await apiFetch(`/api/payroll/core/contracts/${editingId}`, {
-        method: "PATCH",
+      const url = creating
+        ? `/api/payroll/core/contracts`
+        : `/api/payroll/core/contracts/${editingId}`;
+      const payload = creating
+        ? { ...draftToPayload(draft), employee_id: employeeId, employee_code: employeeCode }
+        : draftToPayload(draft);
+      const res = await apiFetch(url, {
+        method: creating ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draftToPayload(draft)),
+        body: JSON.stringify(payload),
       });
       const j = await res.json();
       if (!res.ok || j.error) throw new Error(j.error || "บันทึกสัญญาไม่ได้");
-      setSaveMsg("บันทึกสัญญาแล้ว");
+      setSaveMsg(creating ? "เพิ่มสัญญาใหม่แล้ว" : "บันทึกสัญญาแล้ว");
       setEditingId(null);
+      setCreating(false);
       setDraft(null);
       setRows(null);
       await load(true);
@@ -314,23 +378,67 @@ export function ContractPeekCell({
                 </div>
                 <div className="mt-1 text-xs text-slate-500">ดูรายละเอียดครบ และแก้ไขสัญญาได้จากหน้าต่างนี้</div>
               </div>
-              <button
-                type="button"
-                onClick={close}
-                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                aria-label="ปิด"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6 6 18M6 6l12 12" />
-                </svg>
-              </button>
+              <div className="flex items-center gap-2">
+                {!creating && (
+                  <button
+                    type="button"
+                    onClick={startCreate}
+                    className="h-9 whitespace-nowrap rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-700"
+                  >
+                    ＋ เพิ่มสัญญา
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={close}
+                  className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="ปิด"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto bg-slate-50/50 p-5">
               {err && <div className="mb-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{err}</div>}
               {saveMsg && <div className="mb-3 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{saveMsg}</div>}
               {!rows && !err && <div className="py-10 text-center text-sm text-slate-400">กำลังโหลด...</div>}
-              {rows && rows.length === 0 && <div className="py-10 text-center text-sm text-slate-400">พนักงานคนนี้ยังไม่มีสัญญา</div>}
+              {rows && rows.length === 0 && !creating && (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-white py-10 text-center">
+                  <div className="text-sm text-slate-400">พนักงานคนนี้ยังไม่มีสัญญา</div>
+                  <button
+                    type="button"
+                    onClick={startCreate}
+                    className="mt-3 h-9 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700"
+                  >
+                    ＋ เพิ่มสัญญาให้พนักงานคนนี้
+                  </button>
+                </div>
+              )}
+
+              {creating && draft && (
+                <section className="mb-4 rounded-xl border border-emerald-300 bg-white shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/60 px-5 py-3">
+                    <div className="text-sm font-semibold text-emerald-800">＋ สัญญาใหม่ — {employeeCode}{employeeName ? ` · ${employeeName}` : ""}</div>
+                    <button
+                      type="button"
+                      onClick={cancelCreate}
+                      className="h-9 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                  <EditContractForm
+                    draft={draft}
+                    saving={saving}
+                    creating
+                    onChange={setDraft}
+                    onSubmit={saveEdit}
+                  />
+                </section>
+              )}
 
               <div className="space-y-4">
                 {rows?.map((c) => {
@@ -376,6 +484,7 @@ export function ContractPeekCell({
                         <EditContractForm
                           draft={draft}
                           saving={saving}
+                          creating={false}
                           onChange={setDraft}
                           onSubmit={saveEdit}
                         />
@@ -402,7 +511,7 @@ function ContractDetails({ contract: c }: { contract: Contract }) {
         <Detail label="เลขที่สัญญา" value={c.contract_no} />
         <Detail label="บริษัท" value={c.company_name} />
         <Detail label="ประเภทสัญญา" value={CONTRACT_TYPE[String(c.contract_type ?? "")] ?? c.contract_type} />
-        <Detail label="ประเภทการจ้าง" value={c.employment_type} />
+        <Detail label="ประเภทการจ้าง" value={EMPLOYMENT_TYPE[String(c.employment_type ?? "")] ?? c.employment_type} />
       </DetailSection>
 
       <DetailSection title="ค่าจ้าง">
@@ -442,32 +551,57 @@ function ContractDetails({ contract: c }: { contract: Contract }) {
 function EditContractForm({
   draft,
   saving,
+  creating = false,
   onChange,
   onSubmit,
 }: {
   draft: Draft;
   saving: boolean;
+  creating?: boolean;
   onChange: (draft: Draft) => void;
   onSubmit: (e: React.FormEvent) => void;
 }) {
   const set = (key: keyof Draft, value: Draft[keyof Draft]) => {
-    onChange(applyEndDateRuleToDraft({ ...draft, [key]: value }));
+    const next: Draft = { ...draft, [key]: value };
+    // สร้างใหม่: กรอกเงินเดือน → เติมค่าจ้างรายวัน/รายชม. ให้อัตโนมัติ (÷26 วัน, ÷8 ชม.)
+    if (creating && key === "base_salary") {
+      const base = Number(value) || 0;
+      next.daily_wage = base > 0 ? String(round2(base / 26)) : "";
+      next.hourly_wage = base > 0 ? String(round2(base / 26 / 8)) : "";
+    }
+    onChange(applyEndDateRuleToDraft(next));
   };
+  const baseNum = Number(draft.base_salary) || 0;
+  const wageHint = (kind: "daily" | "hourly") =>
+    baseNum > 0
+      ? `คิดจากเงินเดือน ÷ 26 วัน${kind === "hourly" ? " ÷ 8 ชม." : ""} = ฿${round2(kind === "daily" ? baseNum / 26 : baseNum / 26 / 8).toLocaleString("th-TH")}`
+      : undefined;
 
   return (
     <form onSubmit={onSubmit} className="space-y-5 p-5">
       <FormSection title="ข้อมูลหลัก">
-        <TextInput label="เลขที่สัญญา" value={draft.contract_no} onChange={(v) => set("contract_no", v)} />
+        {creating ? (
+          <FieldWrap label="เลขที่สัญญา">
+            <input
+              type="text"
+              readOnly
+              placeholder="(ระบบออกเลขให้อัตโนมัติเมื่อบันทึก)"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500"
+            />
+          </FieldWrap>
+        ) : (
+          <TextInput label="เลขที่สัญญา" value={draft.contract_no} onChange={(v) => set("contract_no", v)} />
+        )}
         <TextInput label="บริษัท" value={draft.company_name} onChange={(v) => set("company_name", v)} />
-        <SelectInput label="ประเภทสัญญา" value={draft.contract_type} options={CONTRACT_TYPES} labels={CONTRACT_TYPE} onChange={(v) => set("contract_type", v)} />
-        <TextInput label="ประเภทการจ้าง" value={draft.employment_type} onChange={(v) => set("employment_type", v)} />
+        <LookupSelect type="contract_type" label="ประเภทสัญญา" value={draft.contract_type} onChange={(v) => set("contract_type", v)} />
+        <LookupSelect type="employment_type" label="ประเภทการจ้าง" value={draft.employment_type} onChange={(v) => set("employment_type", v)} />
       </FormSection>
 
       <FormSection title="ค่าจ้าง">
         <SelectInput label="ประเภทค่าจ้าง" value={draft.wage_type} options={WAGE_TYPES} labels={WAGE} onChange={(v) => set("wage_type", v)} />
         <TextInput label="เงินเดือน" type="number" value={draft.base_salary} onChange={(v) => set("base_salary", v)} />
-        <TextInput label="ค่าจ้างรายวัน" type="number" value={draft.daily_wage} onChange={(v) => set("daily_wage", v)} />
-        <TextInput label="ค่าจ้างรายชั่วโมง" type="number" value={draft.hourly_wage} onChange={(v) => set("hourly_wage", v)} />
+        <TextInput label="ค่าจ้างรายวัน" type="number" value={draft.daily_wage} hint={wageHint("daily")} onChange={(v) => set("daily_wage", v)} />
+        <TextInput label="ค่าจ้างรายชั่วโมง" type="number" value={draft.hourly_wage} hint={wageHint("hourly")} onChange={(v) => set("hourly_wage", v)} />
         <TextInput label="ค่าจ้างรายชิ้น" type="number" value={draft.piece_rate_default} onChange={(v) => set("piece_rate_default", v)} />
         <TextInput label="ฐานทะเบียนเงินเดือน" type="number" value={draft.payroll_register_base_salary} onChange={(v) => set("payroll_register_base_salary", v)} />
         <TextInput label="รอบจ่าย" value={draft.payment_cycle} onChange={(v) => set("payment_cycle", v)} />
@@ -548,11 +682,13 @@ function TextInput({
   value,
   onChange,
   type = "text",
+  hint,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: "text" | "number" | "date";
+  hint?: string;
 }) {
   return (
     <FieldWrap label={label}>
@@ -562,6 +698,7 @@ function TextInput({
         onChange={(e) => onChange(e.target.value)}
         className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
       />
+      {hint && <span className="mt-0.5 block text-[11px] text-slate-400">{hint}</span>}
     </FieldWrap>
   );
 }

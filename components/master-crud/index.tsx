@@ -241,6 +241,8 @@ const GROUP_CONFIG: Record<string, { label: string; icon: string; defaultOpen: b
   supplier:  { label: "ผู้จำหน่าย",     icon: "🏭", defaultOpen: true, order: 35 },
   content:   { label: "เนื้อหา",        icon: "📝", defaultOpen: true, order: 40 },
   pricing:   { label: "ราคา & ต้นทุน",  icon: "💰", defaultOpen: true, order: 50 },
+  pay:       { label: "ค่าจ้าง",         icon: "💰", defaultOpen: true, order: 52 },
+  term:      { label: "ระยะเวลา/สถานะ", icon: "📅", defaultOpen: true, order: 54 },
   media:     { label: "รูปภาพ/ไฟล์",    icon: "🖼️", defaultOpen: true, order: 55 },
   bom:       { label: "BOM (สูตรผลิต)", icon: "📐", defaultOpen: true, order: 58 },
   status:    { label: "สถานะ",          icon: "🟢", defaultOpen: true, order: 60 },
@@ -412,6 +414,8 @@ export type MasterCRUDConfig = {
   moduleKey?: string;
   /** ฟังก์ชัน custom สำหรับ cellRender override (key → fn) — ใช้กับ dynamic mode */
   cellRenderers?: Record<string, (value: unknown, row?: Record<string, unknown>) => React.ReactNode>;
+  /** custom field ในฟอร์ม (key → renderForm) — merge เข้า field จาก Registry ได้ (คู่กับ cellRenderers) */
+  formRenderers?: Record<string, FieldDef["renderForm"]>;
   /** unique key field (default: 'code') */
   uniqueKey?: string;
   /** entity_type สำหรับ audit log export */
@@ -628,6 +632,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   }, [user]);
 
   const effectiveFields: FieldDef[] = useMemo(() => {
+    // ของกลาง: merge custom renderForm จาก config.formRenderers เข้าทุก field (รวมที่มาจาก Registry)
+    const applyFormRenderers = (fields: FieldDef[]): FieldDef[] =>
+      config.formRenderers
+        ? fields.map((f) => (config.formRenderers![f.key] ? { ...f, renderForm: config.formRenderers![f.key] } : f))
+        : fields;
     if (registryFields && registryFields.length > 0) {
       const fromRegistry = registryFields
         .filter((rf) => {
@@ -642,10 +651,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         });
       const registryKeys = new Set(fromRegistry.map((f) => f.key));
       const configOnlyFields = (config.fields ?? []).filter((f) => (f.renderForm || f.renderDetail) && !registryKeys.has(f.key));
-      return [...fromRegistry, ...configOnlyFields];
+      return applyFormRenderers([...fromRegistry, ...configOnlyFields]);
     }
-    return config.fields ?? [];
-  }, [registryFields, config.fields, config.cellRenderers, can, roleOk]);
+    return applyFormRenderers(config.fields ?? []);
+  }, [registryFields, config.fields, config.cellRenderers, config.formRenderers, can, roleOk]);
 
   // auto-derive searchKeys จาก Registry ถ้ามี
   const effectiveSearchKeys: string[] = useMemo(() => {
