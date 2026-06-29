@@ -105,6 +105,15 @@ function matchesFilter(row: DisplayImportRow, filter: string): boolean {
   }
 }
 
+// วันที่ (1-31) จากสตริงวันที่ — รองรับ YYYY-MM-DD และ DD/MM/YYYY
+function dayOf(date: string): number {
+  const iso = /^\d{4}-\d{2}-(\d{2})/.exec(date);
+  if (iso) return Number(iso[1]);
+  const slash = /^(\d{1,2})\//.exec(date);
+  if (slash) return Number(slash[1]);
+  return 0;
+}
+
 // สรุปการแก้มือ 1 แถว (เดิม→ใหม่) — ใช้โชว์ป้าย "แก้มือ" + เก็บลง draft (result_payload.manual_edit)
 function manualEditInfo(previewRow: AttendancePreviewRow, decision: RowDecision | undefined): ManualEditInfo | null {
   if (!decision) return null;
@@ -339,6 +348,7 @@ export function AttendanceImportPreview({
   const [text, setText] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string>("all");
+  const [dayFilter, setDayFilter] = useState<number | null>(null);   // กรองตามวันที่ (1-31) ซ้อนกับสถานะ
   const [message, setMessage] = useState("");
   const [draft, setDraft] = useState<AttendanceDraftBatch | null>(null);
   const [drafts, setDrafts] = useState<AttendanceDraftBatch[]>([]);   // draft ทั้งหมดของงวดนี้ (เลือกดู/สลับได้)
@@ -353,6 +363,7 @@ export function AttendanceImportPreview({
   const [pendingMatches, setPendingMatches] = useState<Record<string, string>>({});        // รหัสสแกน → employee_id ที่จะจับคู่
   const [matchSaving, setMatchSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const matchedCodesRef = useRef<Set<string>>(new Set());   // รหัสที่เพิ่งจับคู่ → re-resolve draft หลัง employees โหลดใหม่
 
   const rowsByEmployeeId = useMemo(() => new Map(rows.map((row) => [row.employee_id, row])), [rows]);
   const holidaySet = useMemo(() => new Set((period?.holidays || []).map((h) => h.holiday_date).filter(Boolean) as string[]), [period]);
@@ -439,9 +450,14 @@ export function AttendanceImportPreview({
 
   const displayRows = draft ? draftDisplayRows : previewDisplayRows;
 
+  // วันที่ที่มีข้อมูลจริง (เรียง 1→31) สำหรับปุ่มกรองวัน
+  const availableDays = useMemo(() => [...new Set(displayRows.map((r) => dayOf(r.date)).filter((d) => d > 0))].sort((a, b) => a - b), [displayRows]);
+  // แถวหลังกรองวัน (ใช้เป็นฐานของทั้งการ์ดสรุปและตาราง → กรอง 2 ชั้น)
+  const dayRows = useMemo(() => (dayFilter == null ? displayRows : displayRows.filter((r) => dayOf(r.date) === dayFilter)), [displayRows, dayFilter]);
+
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let out = displayRows
+    let out = dayRows
       .filter((row) => matchesFilter(row, filter))
       .filter((row) => !q || [row.date, row.scannerCode, row.scannerName, row.employeeLabel, row.rawScans.join(" "), row.result, row.note].join(" ").toLowerCase().includes(q));
     if (sort) {
@@ -456,14 +472,15 @@ export function AttendanceImportPreview({
       out = [...out].sort((a, b) => val(a).localeCompare(val(b), "th", { numeric: true }) * dir);
     }
     return out;
-  }, [displayRows, filter, query, sort]);
+  }, [dayRows, filter, query, sort]);
 
-  const payloadCount = displayRows.reduce((sum, row) => sum + row.payloadCount, 0);
+  // การ์ดสรุปนับตามวันที่เลือกด้วย (dayRows) — สอดคล้องกับตาราง
+  const payloadCount = dayRows.reduce((sum, row) => sum + row.payloadCount, 0);
   const canCommitCount = draftDisplayRows.filter((row) => row.canCommit).length;
   const selectedReadyCount = draftDisplayRows.filter((row) => row.canCommit && selectedIds.has(row.id)).length;
-  const reviewCount = displayRows.filter((row) => isReviewStatus(row.status)).length;
-  const readyCount = displayRows.filter((row) => isCommitReadyStatus(row.status)).length;
-  const blockedCount = displayRows.filter((row) => ["unmapped", "blocked"].includes(row.status)).length;
+  const reviewCount = dayRows.filter((row) => isReviewStatus(row.status)).length;
+  const readyCount = dayRows.filter((row) => isCommitReadyStatus(row.status)).length;
+  const blockedCount = dayRows.filter((row) => ["unmapped", "blocked"].includes(row.status)).length;
   const selectedReviewCount = displayRows.filter((row) => selectedIds.has(row.id) && isReviewStatus(row.status)).length;
   const selectableFilteredRows = filteredRows.filter((row) => row.canSelect && row.status !== "committed");
   const selectedSelectableCount = selectableFilteredRows.filter((row) => selectedIds.has(row.id)).length;
@@ -579,6 +596,24 @@ export function AttendanceImportPreview({
     setSelectedIds(new Set((next.rows || []).filter((row) => isCommitReadyStatus(String(row.status))).map((row) => row.id)));
     setMessage(successText);
   };
+
+  // หลังจับคู่พนักงาน (employees prop โหลดใหม่) → อัปเดตแถวใน draft ที่เพิ่งผูกได้ ให้เลิกเป็น "ยังไม่ผูก"
+  useEffect(() => {
+    if (!draft || matchedCodesRef.current.size === 0) return;
+    const codes = matchedCodesRef.current;
+    const draftRows = draft.rows || [];
+    if (!draftRows.some((r) => codes.has(String(r.scanner_code || "")) && !r.employee_id)) return;
+    const nextRows = draftRows.map((r) => {
+      if (!codes.has(String(r.scanner_code || "")) || r.employee_id) return r;
+      const pr = previewByKey.get(String(r.row_key || r.id));
+      if (!pr?.employee) return r;   // preview ยังไม่ resolve (employees ยังโหลดไม่เสร็จ)
+      const o = outcomeFor(pr, undefined, period?.default_hours_per_day);
+      return { ...r, employee_id: pr.employee.id, employee_label: employeeShortName(pr.employee), status: o.status, manual_payloads: o.payloads, note: o.note, raw_scans: o.rawScans };
+    });
+    matchedCodesRef.current = new Set();
+    void persistDraftRows(nextRows, "อัปเดตการจับคู่เข้า draft แล้ว");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
 
   const saveDraft = async () => {
     if (!editable) return;
@@ -821,7 +856,8 @@ export function AttendanceImportPreview({
         ok++;
       }
       setPendingMatches({});
-      setMessage(`จับคู่แล้ว ${ok} รหัส — กำลังโหลดข้อมูลพนักงานใหม่`);
+      matchedCodesRef.current = new Set(entries.map(([code]) => code));   // ให้ draft อัปเดตแถวที่จับคู่หลัง employees โหลดใหม่
+      setMessage(`จับคู่แล้ว ${ok} รหัส — กำลังอัปเดตในตาราง`);
       onCommitted?.();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "จับคู่พนักงานไม่สำเร็จ");
@@ -975,8 +1011,8 @@ export function AttendanceImportPreview({
 
         <div className="min-w-0 space-y-3">
           <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-            <SummaryBox label="ทั้งหมด" value={displayRows.length} active={filter === "all"} onClick={() => setFilter("all")} />
-            <SummaryBox label="พร้อม" value={draft ? canCommitCount : readyCount} tone="text-emerald-700" active={filter === "ready"} onClick={() => setFilter("ready")} />
+            <SummaryBox label="ทั้งหมด" value={dayRows.length} active={filter === "all"} onClick={() => setFilter("all")} />
+            <SummaryBox label="พร้อม" value={readyCount} tone="text-emerald-700" active={filter === "ready"} onClick={() => setFilter("ready")} />
             <SummaryBox label="ต้องตรวจ" value={reviewCount} tone="text-amber-700" active={filter === "needs_review"} onClick={() => setFilter("needs_review")} />
             <SummaryBox label="ยังไม่ผูก" value={blockedCount} tone="text-red-700" active={filter === "unmapped"} onClick={() => setFilter("unmapped")} />
             <SummaryBox label="รายการที่จะสร้าง" value={payloadCount} tone="text-slate-800" active={filter === "willCreate"} onClick={() => setFilter("willCreate")} />
@@ -1009,6 +1045,21 @@ export function AttendanceImportPreview({
               className="h-9 min-w-[220px] flex-1 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-slate-400"
             />
           </div>
+
+          {/* กรองตามวันที่ (1-31) — ซ้อนกับสถานะ (กรอง 2 ชั้น) */}
+          {availableDays.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="mr-1 text-xs text-slate-500">วันที่:</span>
+              {availableDays.map((d) => (
+                <button key={d} type="button" onClick={() => setDayFilter(dayFilter === d ? null : d)}
+                  className={`h-7 min-w-[28px] rounded-md border px-1.5 text-xs font-medium tabular-nums ${dayFilter === d ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{d}</button>
+              ))}
+              {(dayFilter != null || filter !== "all" || query.trim()) && (
+                <button type="button" onClick={() => { setDayFilter(null); setFilter("all"); setQuery(""); }}
+                  className="ml-2 h-7 rounded-md border border-rose-200 px-2 text-xs font-medium text-rose-600 hover:bg-rose-50">✕ ล้างตัวกรอง</button>
+              )}
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
             <div className="mr-auto text-xs font-medium text-amber-800">
