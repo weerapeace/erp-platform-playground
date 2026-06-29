@@ -7,15 +7,20 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { ERPModal } from "@/components/modal";
 import { ERPInput } from "@/components/form";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { platformLabel } from "./use-options";
+import type { FormField } from "@/app/api/admin/field-registry-v2/route";
 import {
   listContent, getContent, listContentAttachments, updateContent, getPlatformSettings,
   type ContentDetail, type ContentAttachment, type PlatformSettings,
 } from "./data";
+
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 type Toast = { type: "success" | "error" | "info"; message: string };
 type ParentRef = { id: string; code: string | null; name?: string | null };
@@ -35,6 +40,7 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
   const [pset, setPset] = useState<PlatformSettings>({});
   const [posted, setPosted] = useState<Record<string, Record<string, string>>>({});   // contentId → {platform: url}
   const [saving, setSaving] = useState(false);
+  const [openFull, setOpenFull] = useState<string | null>(null);   // เปิด drawer สินค้าเต็ม
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,9 +71,8 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
     } catch (e) { pushToast("error", (e as Error).message); setSaving(false); }
   };
 
-  const parentChips = parents.length ? parents : (parentFallback ? [{ id: "_", code: parentFallback } as ParentRef] : []);
-
   return (
+    <>
     <ERPModal open onClose={onClose} size="xl" title={`🚀 ${t("เผยแพร่ — ตัวช่วยลงโพสต์", "Publish — posting helper")}`}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
@@ -75,13 +80,15 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
       </>}>
       {loading ? <div className="py-12 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div> : (
         <div className="space-y-4">
-          {/* Parent SKU + ข้อมูลสำคัญ */}
-          <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-            <p className="text-xs font-semibold text-slate-500 mb-1">Parent SKU</p>
-            {parentChips.length ? (
-              <div className="flex flex-wrap gap-1.5">{parentChips.map((p) => <span key={p.id} className="inline-flex items-center text-sm font-medium bg-white border border-slate-200 rounded-lg px-2.5 py-1">{p.code || p.name}</span>)}</div>
-            ) : <p className="text-sm text-slate-400">{t("— ไม่มี Parent SKU", "— none")}</p>}
-          </div>
+          {/* Parent SKU — รายละเอียดเต็ม (คัดลอกไปลงโพสต์ได้) */}
+          {parents.length ? parents.map((p) => (
+            <ParentDetailPanel key={p.id} parentId={p.id} code={p.code} onOpenFull={() => setOpenFull(p.id)} onCopy={copy} />
+          )) : (
+            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+              <p className="text-xs font-semibold text-slate-500 mb-1">Parent SKU</p>
+              {parentFallback ? <span className="inline-flex items-center text-sm font-medium bg-white border border-slate-200 rounded-lg px-2.5 py-1">{parentFallback}</span> : <p className="text-sm text-slate-400">{t("— ไม่มี Parent SKU", "— none")}</p>}
+            </div>
+          )}
 
           {rows.length === 0 ? (
             <p className="text-sm text-slate-400 italic">{t("งานนี้ยังไม่มีคอนเทนต์ — กดยืนยันเพื่อเปลี่ยนสถานะอย่างเดียว", "No content yet — confirm just changes the status")}</p>
@@ -141,5 +148,69 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
         </div>
       )}
     </ERPModal>
+    {openFull && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openFull} onClose={() => setOpenFull(null)} onChanged={() => {}} />}
+    </>
+  );
+}
+
+// พาเนลรายละเอียด Parent SKU (ฝังใน popup เผยแพร่) — โชว์ฟิลด์จากทะเบียน + ปุ่มคัดลอกทุกช่อง + ปุ่มเปิด drawer เต็ม
+function ParentDetailPanel({ parentId, code, onOpenFull, onCopy }: { parentId: string; code: string | null; onOpenFull: () => void; onCopy: (text: string, label: string) => void }) {
+  const t = useT();
+  const [fields, setFields] = useState<{ label: string; value: string }[]>([]);
+  const [cover, setCover] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const [regJ, recJ] = await Promise.all([
+          apiFetch(`/api/admin/field-registry-v2?module=parent-skus-v2`).then((r) => r.json()),
+          apiFetch(`/api/master-v2/parent-skus/${parentId}`).then((r) => r.json()),
+        ]);
+        const regs = ((regJ.fields as FormField[]) ?? []).slice().sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
+        const rec = (recJ.data as Record<string, unknown>) ?? {};
+        const ALLOWED = new Set(["text", "textarea", "longtext", "string", "number", "currency", "decimal", "int", "integer", "richtext", "html", "url", "email", "phone", "select", "date", "datetime"]);
+        const out: { label: string; value: string }[] = [];
+        for (const f of regs) {
+          const col = f.column_name;
+          if (!col || f.is_visible === false || f.is_sensitive) continue;
+          if (!ALLOWED.has(f.ui_field_type)) continue;
+          if (/(^id$|_id$|_r2_key$|created_at|updated_at)/.test(col)) continue;
+          const v = rec[col];
+          if (v == null || (typeof v === "object")) continue;
+          let s = String(v); if (!s.trim()) continue;
+          if (f.ui_field_type === "richtext" || f.ui_field_type === "html") s = s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          if (s) out.push({ label: f.field_label || col, value: s });
+        }
+        if (live) { setFields(out); setCover((rec.cover_image_r2_key as string) ?? null); }
+      } catch { /* noop */ }
+      finally { if (live) setLoading(false); }
+    })();
+    return () => { live = false; };
+  }, [parentId]);
+  const copyAll = () => onCopy(fields.map((f) => `${f.label}: ${f.value}`).join("\n"), code || "Parent SKU");
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <span className="text-sm font-semibold text-slate-700">📦 {code || parentId}</span>
+        <div className="flex items-center gap-3">
+          <button onClick={copyAll} className="text-xs font-medium text-violet-700 hover:underline">📋 {t("คัดลอกทั้งหมด", "Copy all")}</button>
+          <button onClick={onOpenFull} className="text-xs text-violet-700 hover:underline">↗ {t("เปิดสินค้าเต็ม", "Open full")}</button>
+        </div>
+      </div>
+      {cover && <a href={r2ImageUrl(cover) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลดรูปปก", "Download cover")}>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={r2ImageUrl(cover, 200) ?? ""} alt="" className="h-20 w-20 object-cover rounded-lg border border-slate-200 mb-2" /></a>}
+      {loading ? <p className="text-xs text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
+        : fields.length === 0 ? <p className="text-xs text-slate-400">{t("— ไม่มีรายละเอียด", "— no details")}</p> : (
+        <div className="space-y-1.5">
+          {fields.map((f, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <span className="text-[11px] text-slate-400 w-28 shrink-0 pt-0.5">{f.label}</span>
+              <span className="text-xs text-slate-700 flex-1 whitespace-pre-wrap break-words min-w-0">{f.value}</span>
+              <button onClick={() => onCopy(f.value, f.label)} title={t("คัดลอก", "Copy")} className="text-slate-400 hover:text-violet-600 text-xs shrink-0">📋</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
