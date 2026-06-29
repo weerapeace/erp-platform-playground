@@ -131,19 +131,30 @@ export default function MenuManagerPage() {
 
   // ---------- App (โมดูลใหญ่ / PWA) ----------
   const [naApp, setNaApp] = useState({ key: "", label: "", icon: "📦" });
+  // ---- ตั้งค่าแอป: แก้แบบ "ร่าง" แล้วกดบันทึกทีเดียว (ชื่อ/ไอคอน/สี/หน้าแรก) ----
+  const [appForm, setAppForm] = useState({ label: "", icon: "", icon_url: null as string | null, theme_color: null as string | null, default_href: null as string | null });
+  const [appDelText, setAppDelText] = useState("");   // พิมพ์รหัสแอปยืนยันก่อนลบ (กันเผลอ)
+  // sync ร่างจากแอปที่เลือก (รีเซ็ตเมื่อสลับแอป / โหลด apps ใหม่ เช่นหลังบันทึก)
+  useEffect(() => {
+    const a = apps.find((x) => x.key === sel);
+    if (a) setAppForm({ label: a.label, icon: a.icon ?? "", icon_url: a.icon_url ?? null, theme_color: a.theme_color ?? null, default_href: a.default_href ?? null });
+    setAppDelText("");
+  }, [sel, apps]);
+
   const patchApp = async (id: string, p: Partial<AppGroup>) => {
     setApps((as) => as.map((a) => (a.id === id ? { ...a, ...p } : a)));
     const j = await apiFetch("/api/menu/apps", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, patch: p }) }).then((r) => r.json());
     if (j.error) { setErr(j.error); await reloadKeepDraft(); }
   };
-  const uploadAppIcon = async (id: string, file: File) => {
+  // อัปโหลดไอคอน → เก็บลงร่างก่อน (รอกดบันทึก) ไม่ยิงทันที
+  const uploadAppIcon = async (file: File) => {
     setUploadingApp(true); setErr(null);
     try {
       const fd = new FormData(); fd.append("file", file); fd.append("folder", "app-icons");
       const j = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then((r) => r.json());
       if (j.error || !j.r2_key) throw new Error(j.error || "อัปโหลดไม่สำเร็จ");
-      await patchApp(id, { icon_url: j.r2_key });
-      flash("อัปโหลดไอคอนแล้ว");
+      setAppForm((f) => ({ ...f, icon_url: j.r2_key }));
+      flash("อัปโหลดไอคอนแล้ว — กดบันทึกเพื่อใช้");
     } catch (e) { setErr(String(e)); } finally { setUploadingApp(false); }
   };
   const addApp = async () => {
@@ -153,11 +164,11 @@ export default function MenuManagerPage() {
     if (j.error) { setErr(j.error); return; }
     setNaApp({ key: "", label: "", icon: "📦" }); setShowAddApp(false); flash("เพิ่มแอปแล้ว"); await reloadKeepDraft();
   };
-  const delApp = async (id: string, label: string) => {
-    if (!confirm(`ลบแอป "${label}"?\n(เมนูจะไม่ถูกลบ แค่หลุดจากแอปนี้)`)) return;
+  // ลบแอป — ป้องกันเผลอลบด้วยการพิมพ์รหัสแอปยืนยันที่ UI (ไม่ใช้ confirm ธรรมดา)
+  const delApp = async (id: string) => {
     const j = await apiFetch(`/api/menu/apps?id=${id}`, { method: "DELETE" }).then((r) => r.json());
     if (j.error) { setErr(j.error); return; }
-    setSel(ALL); await reloadKeepDraft();
+    setAppDelText(""); setSel(ALL); flash("ลบแอปแล้ว"); await reloadKeepDraft();
   };
   const copyShareLink = async (key: string) => {
     try { await navigator.clipboard.writeText(`${origin}/app/${key}`); flash("คัดลอกลิงก์แล้ว"); }
@@ -210,6 +221,28 @@ export default function MenuManagerPage() {
 
   // ---------- มุมมอง ----------
   const selectedApp = apps.find((a) => a.key === sel) ?? null;
+  // ตั้งค่าแอปมีการแก้ที่ยังไม่บันทึกไหม
+  const appDirty = !!selectedApp && (
+    appForm.label !== selectedApp.label
+    || appForm.icon !== (selectedApp.icon ?? "")
+    || appForm.icon_url !== (selectedApp.icon_url ?? null)
+    || appForm.theme_color !== (selectedApp.theme_color ?? null)
+    || appForm.default_href !== (selectedApp.default_href ?? null)
+  );
+  const saveApp = async () => {
+    if (!selectedApp) return;
+    if (!appForm.label.trim()) { setErr("กรอกชื่อแอป"); return; }
+    await patchApp(selectedApp.id!, {
+      label: appForm.label.trim(), icon: appForm.icon || null, icon_url: appForm.icon_url,
+      theme_color: appForm.theme_color, default_href: appForm.default_href,
+    });
+    flash("บันทึกตั้งค่าแอปแล้ว");
+  };
+  const cancelApp = () => {
+    if (!selectedApp) return;
+    setAppForm({ label: selectedApp.label, icon: selectedApp.icon ?? "", icon_url: selectedApp.icon_url ?? null, theme_color: selectedApp.theme_color ?? null, default_href: selectedApp.default_href ?? null });
+    setAppDelText("");
+  };
   const sectionNames = useMemo(() => [...new Set(rows.map((r) => r.section))], [rows]);
 
   // หมวด (ไอคอน/ลำดับ) ของแอปที่เลือก → map ตามชื่อหมวด (เฉพาะเมื่อเลือกแอป ไม่ใช่ "ทุกเมนู")
@@ -412,29 +445,30 @@ export default function MenuManagerPage() {
 
             {showAppCfg && (
               <div className="mt-3 border border-blue-200 bg-blue-50/40 rounded-lg p-3 space-y-3">
-                <div className="flex flex-wrap items-center gap-4">
-                  {/* ไอคอน */}
+                {/* ชื่อ + ไอคอน + สี (แก้ค้างไว้ รอกดบันทึก) */}
+                <div className="flex flex-wrap items-end gap-4">
                   <div className="flex items-center gap-2">
-                    <div className="w-12 h-12 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden text-2xl">
-                      <Ico icon={selectedApp.icon} iconUrl={selectedApp.icon_url} size={selectedApp.icon_url ? 48 : 28} />
+                    <div className="w-12 h-12 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden text-2xl shrink-0">
+                      <Ico icon={appForm.icon} iconUrl={appForm.icon_url} size={appForm.icon_url ? 48 : 28} />
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className={`h-7 px-2.5 leading-7 text-xs font-medium rounded cursor-pointer text-center ${uploadingApp ? "bg-slate-200 text-slate-400" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
-                        {uploadingApp ? "กำลังอัป…" : "⬆ อัปโหลดไอคอน"}
+                        {uploadingApp ? "กำลังอัป…" : "⬆ อัปโหลดรูป"}
                         <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={uploadingApp}
-                          onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadAppIcon(selectedApp.id!, f); e.target.value = ""; }} />
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadAppIcon(f); e.target.value = ""; }} />
                       </label>
-                      {selectedApp.icon_url
-                        ? <button onClick={() => void patchApp(selectedApp.id!, { icon_url: null })} className="text-[11px] text-rose-500 hover:text-rose-700">ลบรูป (ใช้ emoji)</button>
-                        : <input value={selectedApp.icon ?? ""} onChange={(e) => patchApp(selectedApp.id!, { icon: e.target.value })} placeholder="emoji" className="w-16 h-6 px-1 text-center text-sm border border-slate-200 rounded" />}
+                      {appForm.icon_url
+                        ? <button onClick={() => setAppForm((f) => ({ ...f, icon_url: null }))} className="text-[11px] text-rose-500 hover:text-rose-700">ลบรูป (ใช้ emoji)</button>
+                        : <input value={appForm.icon} onChange={(e) => setAppForm((f) => ({ ...f, icon: e.target.value }))} placeholder="emoji" className="w-16 h-6 px-1 text-center text-sm border border-slate-200 rounded" />}
                     </div>
                   </div>
-                  {/* สีธีม */}
+                  <label className="text-xs text-slate-500">ชื่อแอป <span className="text-slate-400">(ใช้ในระบบ + ตอนติดตั้งแอปเดี่ยว)</span>
+                    <input value={appForm.label} onChange={(e) => setAppForm((f) => ({ ...f, label: e.target.value }))} placeholder="เช่น เงินเดือน (Payroll)" className="mt-1 block w-56 h-8 px-2 text-sm border border-slate-200 rounded" />
+                  </label>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500">สีแอป</span>
-                    <input type="color" value={selectedApp.theme_color || "#2563eb"} onChange={(e) => void patchApp(selectedApp.id!, { theme_color: e.target.value })} className="w-9 h-8 p-0 border border-slate-200 rounded cursor-pointer" />
+                    <input type="color" value={appForm.theme_color || "#2563eb"} onChange={(e) => setAppForm((f) => ({ ...f, theme_color: e.target.value }))} className="w-9 h-8 p-0 border border-slate-200 rounded cursor-pointer" />
                   </div>
-                  <button onClick={() => delApp(selectedApp.id!, selectedApp.label)} className="h-8 px-3 text-xs text-rose-600 border border-rose-200 rounded hover:bg-rose-50 ml-auto">🗑 ลบแอปนี้</button>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -456,12 +490,29 @@ export default function MenuManagerPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500 whitespace-nowrap">🏠 หน้าแรก</span>
-                    <select value={selectedApp.default_href ?? ""} onChange={(e) => void patchApp(selectedApp.id!, { default_href: e.target.value || null })} className="w-48 h-8 px-1 text-xs border border-slate-200 rounded bg-white">
+                    <select value={appForm.default_href ?? ""} onChange={(e) => setAppForm((f) => ({ ...f, default_href: e.target.value || null }))} className="w-48 h-8 px-1 text-xs border border-slate-200 rounded bg-white">
                       <option value="">— เมนูแรกของแอป —</option>
                       {appMenuForDefault.map((m) => <option key={m.id} value={m.href}>{m.icon} {m.label}</option>)}
                     </select>
                   </div>
                 </div>
+
+                {/* บันทึก / ยกเลิก (รวมชื่อ/ไอคอน/สี/หน้าแรก) */}
+                <div className="flex items-center gap-2 pt-2 border-t border-blue-100">
+                  <button onClick={() => void saveApp()} disabled={!appDirty} className="h-8 px-4 text-xs font-semibold rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-100 disabled:text-slate-400">💾 บันทึกตั้งค่าแอป</button>
+                  {appDirty && <button onClick={cancelApp} className="h-8 px-3 text-xs font-medium rounded border border-slate-200 text-slate-600 hover:bg-slate-50">ยกเลิก</button>}
+                  {appDirty && <span className="text-[11px] text-amber-600">● มีการแก้ที่ยังไม่บันทึก</span>}
+                </div>
+
+                {/* ลบแอป — ต้องพิมพ์รหัสยืนยัน กันเผลอลบ */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-rose-100">
+                  <span className="text-[11px] text-slate-500">ลบแอป: พิมพ์รหัส <code className="text-rose-600 font-mono">{selectedApp.key}</code> เพื่อยืนยัน</span>
+                  <input value={appDelText} onChange={(e) => setAppDelText(e.target.value)} placeholder={selectedApp.key} className="h-8 w-32 px-2 text-xs font-mono border border-rose-200 rounded" />
+                  <button onClick={() => void delApp(selectedApp.id!)} disabled={appDelText.trim() !== selectedApp.key}
+                    className="h-8 px-3 text-xs font-medium rounded border border-rose-300 text-rose-600 hover:bg-rose-50 disabled:opacity-40 disabled:cursor-not-allowed">🗑 ลบแอปนี้ถาวร</button>
+                  <span className="text-[11px] text-slate-400">(เมนูไม่ถูกลบ แค่หลุดจากแอปนี้)</span>
+                </div>
+
                 <p className="text-[11px] text-slate-400">ไอคอนแนะนำสี่เหลี่ยมจัตุรัส ≥ 512×512px (PNG) · ตั้ง “ใครเข้าได้” เพื่อล็อกไม่ให้คนไม่เกี่ยวเข้า (พิมพ์ URL ตรงก็เข้าไม่ได้)</p>
               </div>
             )}
