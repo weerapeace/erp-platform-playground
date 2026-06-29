@@ -29,7 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!ids.length) return NextResponse.json({ data: [], error: null });
 
   const { data, error } = await admin.from("erp_creative_subtasks")
-    .select("id, title, status, due_date, required_before_next, task_id, task:erp_creative_tasks!task_id(task_no, title, status, is_active, priority)")
+    .select("id, title, status, due_date, required_before_next, task_id, task:erp_creative_tasks!task_id(task_no, title, status, is_active, priority, cover_image_r2_key)")
     .in("id", ids)
     .not("status", "in", "(done,posted,approved)")
     .order("due_date", { ascending: true });
@@ -39,11 +39,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const t = (Array.isArray(r.task) ? r.task[0] : r.task) as Record<string, unknown> | null;
     return {
       id: r.id, title: r.title, status: r.status, due_date: r.due_date, required_before_next: r.required_before_next,
-      task_id: r.task_id, task_no: t?.task_no ?? null, task_title: t?.title ?? null, task_status: t?.status ?? null,
+      task_id: r.task_id as string, task_no: t?.task_no ?? null, task_title: t?.title ?? null, task_status: t?.status ?? null,
       priority: t?.priority ?? null,
+      cover_image_r2_key: (t?.cover_image_r2_key as string | null) ?? null,
       task_active: t?.is_active ?? true,
     };
   }).filter((r) => r.task_active);
+
+  // รูปปก fallback: งานที่ไม่มี cover เอง → ใช้รูป Parent SKU ที่ผูกกับงาน
+  const needCover = [...new Set(rows.filter((r) => !r.cover_image_r2_key).map((r) => r.task_id))];
+  if (needCover.length) {
+    const { data: pl } = await admin.from("erp_creative_task_parent_skus").select("task_id, parent_sku_id").in("task_id", needCover);
+    const taskToParent = new Map<string, string>();
+    for (const r of ((pl ?? []) as { task_id: string; parent_sku_id: string }[])) if (r.parent_sku_id && !taskToParent.has(r.task_id)) taskToParent.set(r.task_id, r.parent_sku_id);
+    const parentIds = [...new Set([...taskToParent.values()])];
+    if (parentIds.length) {
+      const { data: ps } = await admin.from("parent_skus_v2").select("id, cover_image_r2_key").in("id", parentIds);
+      const parentCover = new Map<string, string | null>();
+      for (const p of ((ps ?? []) as { id: string; cover_image_r2_key: string | null }[])) parentCover.set(p.id, p.cover_image_r2_key);
+      for (const r of rows) if (!r.cover_image_r2_key) { const pid = taskToParent.get(r.task_id); if (pid) r.cover_image_r2_key = parentCover.get(pid) ?? null; }
+    }
+  }
 
   return NextResponse.json({ data: rows, error: null });
 }

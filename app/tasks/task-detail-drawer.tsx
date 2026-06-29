@@ -18,6 +18,7 @@ const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) =
 // drawer สินค้ากลาง — กด Parent SKU แล้วเปิดดูได้ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 import { ImageInput } from "@/components/image-input";
+import { ConfirmDialog } from "@/components/modal";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys } from "./drawer-theme";
@@ -135,6 +136,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [linkUrl, setLinkUrl] = useState("");
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState<EditForm | null>(null);
+  const [confirmDel, setConfirmDel] = useState(false);   // ยืนยันก่อนลบงาน
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
   const [openParentId, setOpenParentId] = useState<string | null>(null); // เปิด drawer Parent SKU
   const [tab, setTab] = useState<"task" | "content" | "reference">("task"); // แท็บ: งาน / คอนเทนต์ / อ้างอิง
@@ -239,7 +241,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           <div className="flex items-center gap-1">
             <DrawerThemeButton theme={dth} update={dthUpdate} sections={DRAWER_SECTIONS} />
             {!editing && <button onClick={startEdit} className="h-8 px-2 text-xs text-violet-700 hover:bg-violet-50 rounded-md">✏️ {t("แก้ไข", "Edit")}</button>}
-            <button onClick={() => onDelete(d.id)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">{t("ลบ", "Delete")}</button>
+            <button onClick={() => setConfirmDel(true)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">{t("ลบ", "Delete")}</button>
             <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
           </div>
         </div>
@@ -558,6 +560,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
         </div>
       </div>
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
+      <ConfirmDialog open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={() => { setConfirmDel(false); onDelete(d.id); }} variant="danger" title={t("ลบงานนี้?", "Delete this task?")} message={t(`ลบงาน "${d.title}" — รวมงานย่อย/คอนเทนต์ที่ผูกอยู่ และกู้คืนไม่ได้`, `Delete "${d.title}" including its subtasks/content. This cannot be undone.`)} confirmText={t("ลบ", "Delete")} cancelText={t("ยกเลิก", "Cancel")} />
     </>
   );
 }

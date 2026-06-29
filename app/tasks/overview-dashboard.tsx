@@ -253,6 +253,9 @@ export function OverviewDashboard({
                     {g.items.map((s) => (
                       <button key={s.id} onClick={() => onOpenTask(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}
                         className="w-full flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 text-left">
+                        {s.cover_image_r2_key
+                          ? <img src={`/api/r2-image?key=${encodeURIComponent(s.cover_image_r2_key)}&w=80`} alt="" className="h-9 w-9 rounded object-cover border border-slate-100 shrink-0" />
+                          : <span className="h-9 w-9 rounded bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300 text-xs shrink-0">🖼️</span>}
                         <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
                         <div className="flex-1 min-w-0">
                           <span className="text-sm text-slate-700">{s.title}</span>

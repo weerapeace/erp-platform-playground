@@ -217,6 +217,7 @@ export async function deleteSubtask(taskId: string, subtaskId: string): Promise<
 export type MySubtask = {
   id: string; title: string; status: string; due_date: string | null; required_before_next: boolean;
   task_id: string; task_no: string | null; task_title: string | null; task_status: string | null; priority?: string | null;
+  cover_image_r2_key?: string | null;
 };
 export async function listMySubtasks(): Promise<MySubtask[]> {
   const j = await jsonOrThrow(await apiFetch("/api/creative-tasks/my-subtasks"));
