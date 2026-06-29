@@ -440,6 +440,16 @@ export function resolvePrompt(cfg: CaptionConfig, brandId: string | null): strin
   return (brandId && cfg.prompt_by_brand?.[brandId]) || cfg.prompt || "";
 }
 
+// ---- ตั้งค่าตัวช่วยเผยแพร่: เลือกฟิลด์ Parent SKU ที่จะโชว์ ----
+export type PublishConfig = { parent_fields?: string[] };
+export async function getPublishConfig(): Promise<PublishConfig> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-publish-config"));
+  return (j.config as PublishConfig) ?? {};
+}
+export async function savePublishConfig(config: PublishConfig): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/creative-publish-config", { method: "PUT", body: JSON.stringify({ config }) }));
+}
+
 // ---- พรีวิวลิงก์ (ดึง OG/meta) ----
 export type LinkPreview = { url: string; title: string | null; description: string | null; image: string | null; site: string | null };
 export async function getLinkPreview(url: string): Promise<LinkPreview> {

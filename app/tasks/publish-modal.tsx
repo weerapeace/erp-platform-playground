@@ -17,6 +17,7 @@ import { platformLabel } from "./use-options";
 import type { FormField } from "@/app/api/admin/field-registry-v2/route";
 import {
   listContent, getContent, listContentAttachments, updateContent, getPlatformSettings,
+  getPublishConfig, savePublishConfig,
   type ContentDetail, type ContentAttachment, type PlatformSettings,
 } from "./data";
 
@@ -25,6 +26,8 @@ const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then
 type Toast = { type: "success" | "error" | "info"; message: string };
 type ParentRef = { id: string; code: string | null; name?: string | null };
 type Row = { content: ContentDetail; images: ContentAttachment[] };
+// ฟิลด์ที่ "คัดลอกไปลงโพสต์" ได้ (ตัด relation/รูป/ไฟล์ ออก)
+const COPYABLE_TYPES = new Set(["text", "textarea", "longtext", "string", "number", "currency", "decimal", "int", "integer", "richtext", "html", "url", "email", "phone", "select", "date", "datetime"]);
 
 export function PublishModal({ taskId, parents, parentFallback, onClose, onConfirm, pushToast }: {
   taskId: string;
@@ -40,7 +43,9 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
   const [pset, setPset] = useState<PlatformSettings>({});
   const [posted, setPosted] = useState<Record<string, Record<string, string>>>({});   // contentId → {platform: url}
   const [saving, setSaving] = useState(false);
-  const [openFull, setOpenFull] = useState<string | null>(null);   // เปิด drawer สินค้าเต็ม
+  const [openFull, setOpenFull] = useState<{ moduleKey: string; apiPath: string; id: string } | null>(null);   // เปิด drawer สินค้าเต็ม (Parent/SKU)
+  const [parentFields, setParentFields] = useState<string[]>([]);   // คอลัมน์ Parent SKU ที่เลือกโชว์ (ว่าง=อัตโนมัติ)
+  const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,6 +56,7 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
       setRows(details.map((d, i) => ({ content: d, images: imgs[i].filter((a) => a.kind === "image" && a.r2_key) })));
       setPosted(Object.fromEntries(details.map((d) => [d.id, { ...(d.posted_links ?? {}) }])));
       setPset(await getPlatformSettings().catch(() => ({})));
+      setParentFields((await getPublishConfig().catch(() => ({} as { parent_fields?: string[] }))).parent_fields ?? []);
     } catch (e) { pushToast("error", (e as Error).message); }
     finally { setLoading(false); }
   }, [taskId, pushToast]);
@@ -80,9 +86,14 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
       </>}>
       {loading ? <div className="py-12 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div> : (
         <div className="space-y-4">
-          {/* Parent SKU — รายละเอียดเต็ม (คัดลอกไปลงโพสต์ได้) */}
+          {parents.length > 0 && (
+            <div className="flex justify-end">
+              <button onClick={() => setFieldPickerOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ {t("เลือกฟิลด์ที่โชว์", "Choose fields")}</button>
+            </div>
+          )}
+          {/* Parent SKU — รายละเอียดเต็ม (คัดลอกไปลงโพสต์ได้) + SKU ลูก inline */}
           {parents.length ? parents.map((p) => (
-            <ParentDetailPanel key={p.id} parentId={p.id} code={p.code} onOpenFull={() => setOpenFull(p.id)} onCopy={copy} />
+            <ParentDetailPanel key={p.id} parentId={p.id} code={p.code} selectedCols={parentFields} onOpenFull={() => setOpenFull({ moduleKey: "parent-skus-v2", apiPath: "parent-skus", id: p.id })} onOpenSku={(id) => setOpenFull({ moduleKey: "skus-v2", apiPath: "skus", id })} onCopy={copy} />
           )) : (
             <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
               <p className="text-xs font-semibold text-slate-500 mb-1">Parent SKU</p>
@@ -148,46 +159,91 @@ export function PublishModal({ taskId, parents, parentFallback, onClose, onConfi
         </div>
       )}
     </ERPModal>
-    {openFull && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openFull} onClose={() => setOpenFull(null)} onChanged={() => {}} />}
+    {openFull && <MasterRecordDrawer moduleKey={openFull.moduleKey} apiPath={openFull.apiPath} recordId={openFull.id} onClose={() => setOpenFull(null)} onChanged={() => {}} />}
+    {fieldPickerOpen && <FieldPickerModal selected={parentFields} onClose={() => setFieldPickerOpen(false)} onSaved={(cols) => { setParentFields(cols); setFieldPickerOpen(false); }} pushToast={pushToast} />}
     </>
   );
 }
 
-// พาเนลรายละเอียด Parent SKU (ฝังใน popup เผยแพร่) — โชว์ฟิลด์จากทะเบียน + ปุ่มคัดลอกทุกช่อง + ปุ่มเปิด drawer เต็ม
-function ParentDetailPanel({ parentId, code, onOpenFull, onCopy }: { parentId: string; code: string | null; onOpenFull: () => void; onCopy: (text: string, label: string) => void }) {
+// เลือกคอลัมน์ Parent SKU ที่จะโชว์ใน popup เผยแพร่ (ของกลาง · ว่าง = อัตโนมัติ)
+function FieldPickerModal({ selected, onClose, onSaved, pushToast }: { selected: string[]; onClose: () => void; onSaved: (cols: string[]) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+  const t = useT();
+  const [regs, setRegs] = useState<FormField[]>([]);
+  const [picked, setPicked] = useState<string[]>(selected);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    apiFetch(`/api/admin/field-registry-v2?module=parent-skus-v2`).then((r) => r.json())
+      .then((j) => setRegs(((j.fields as FormField[]) ?? []).filter((f) => f.column_name && f.is_visible !== false && !f.is_sensitive && COPYABLE_TYPES.has(f.ui_field_type) && !/(^id$|_id$|_r2_key$|created_at|updated_at)/.test(f.column_name)).sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))))
+      .catch(() => {});
+  }, []);
+  const toggle = (col: string) => setPicked((p) => p.includes(col) ? p.filter((x) => x !== col) : [...p, col]);
+  const save = async () => { setSaving(true); try { await savePublishConfig({ parent_fields: picked }); pushToast("success", t("บันทึกแล้ว", "Saved")); onSaved(picked); } catch (e) { pushToast("error", (e as Error).message); setSaving(false); } };
+  return (
+    <ERPModal open onClose={onClose} size="lg" title={t("⚙️ เลือกฟิลด์ Parent SKU ที่จะโชว์", "⚙️ Choose Parent SKU fields to show")}
+      footer={<>
+        <button onClick={onClose} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>
+        <button onClick={save} disabled={saving} className="h-9 px-5 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
+      </>}>
+      <p className="text-xs text-slate-400 mb-2">{t("ติ๊กฟิลด์ที่อยากให้โชว์ในตัวช่วยเผยแพร่ · ไม่ติ๊กเลย = โชว์อัตโนมัติทุกฟิลด์ข้อความที่มีค่า", "Check fields to show in the publish helper · none checked = auto-show all text fields with a value")}</p>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 max-h-[55vh] overflow-y-auto">
+        {regs.map((f) => (
+          <label key={f.column_name} className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+            <input type="checkbox" checked={picked.includes(f.column_name!)} onChange={() => toggle(f.column_name!)} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
+            <span className="truncate">{f.field_label || f.column_name}</span>
+          </label>
+        ))}
+      </div>
+    </ERPModal>
+  );
+}
+
+type ChildSku = { id: string; code: string; name: string; color: string | null; price: number | null; img: string | null };
+
+// พาเนลรายละเอียด Parent SKU (ฝังใน popup เผยแพร่) — เลือกฟิลด์ที่โชว์ + คัดลอกทุกช่อง + SKU ลูก inline + เปิด drawer เต็ม
+function ParentDetailPanel({ parentId, code, selectedCols, onOpenFull, onOpenSku, onCopy }: { parentId: string; code: string | null; selectedCols: string[]; onOpenFull: () => void; onOpenSku: (id: string) => void; onCopy: (text: string, label: string) => void }) {
   const t = useT();
   const [fields, setFields] = useState<{ label: string; value: string }[]>([]);
   const [cover, setCover] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [skus, setSkus] = useState<ChildSku[]>([]);
+  const [showSkus, setShowSkus] = useState(true);
   useEffect(() => {
     let live = true;
     (async () => {
       try {
-        const [regJ, recJ] = await Promise.all([
+        const [regJ, recJ, skuJ] = await Promise.all([
           apiFetch(`/api/admin/field-registry-v2?module=parent-skus-v2`).then((r) => r.json()),
           apiFetch(`/api/master-v2/parent-skus/${parentId}`).then((r) => r.json()),
+          apiFetch(`/api/pickers/skus?parent_sku_id=${encodeURIComponent(parentId)}&limit=100`).then((r) => r.json()).catch(() => ({ data: [] })),
         ]);
         const regs = ((regJ.fields as FormField[]) ?? []).slice().sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
         const rec = (recJ.data as Record<string, unknown>) ?? {};
-        const ALLOWED = new Set(["text", "textarea", "longtext", "string", "number", "currency", "decimal", "int", "integer", "richtext", "html", "url", "email", "phone", "select", "date", "datetime"]);
-        const out: { label: string; value: string }[] = [];
+        // map คอลัมน์→{label,value} เฉพาะฟิลด์ข้อความที่มีค่า (เรียงตามทะเบียน)
+        const byCol = new Map<string, { label: string; value: string }>();
         for (const f of regs) {
           const col = f.column_name;
           if (!col || f.is_visible === false || f.is_sensitive) continue;
-          if (!ALLOWED.has(f.ui_field_type)) continue;
+          if (!COPYABLE_TYPES.has(f.ui_field_type)) continue;
           if (/(^id$|_id$|_r2_key$|created_at|updated_at)/.test(col)) continue;
           const v = rec[col];
-          if (v == null || (typeof v === "object")) continue;
+          if (v == null || typeof v === "object") continue;
           let s = String(v); if (!s.trim()) continue;
           if (f.ui_field_type === "richtext" || f.ui_field_type === "html") s = s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-          if (s) out.push({ label: f.field_label || col, value: s });
+          if (s) byCol.set(col, { label: f.field_label || col, value: s });
         }
-        if (live) { setFields(out); setCover((rec.cover_image_r2_key as string) ?? null); }
+        // เลือกฟิลด์ที่ตั้งไว้ (ตามลำดับที่เลือก) ไม่งั้นโชว์ทุกฟิลด์ที่มีค่า
+        const out = selectedCols.length ? selectedCols.map((c) => byCol.get(c)).filter(Boolean) as { label: string; value: string }[] : [...byCol.values()];
+        const childRows = ((skuJ.data ?? []) as Record<string, unknown>[]).map((s) => ({
+          id: String(s.id), code: String(s.code ?? ""), name: String(s.name_th ?? s.name ?? ""),
+          color: (s.color_th as string) ?? (s.color as string) ?? null, price: (s.list_price as number) ?? null,
+          img: (s.image_key as string) ?? (s.cover_image_r2_key as string) ?? null,
+        }));
+        if (live) { setFields(out); setCover((rec.cover_image_r2_key as string) ?? null); setSkus(childRows); }
       } catch { /* noop */ }
       finally { if (live) setLoading(false); }
     })();
     return () => { live = false; };
-  }, [parentId]);
+  }, [parentId, selectedCols]);
   const copyAll = () => onCopy(fields.map((f) => `${f.label}: ${f.value}`).join("\n"), code || "Parent SKU");
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
@@ -200,7 +256,7 @@ function ParentDetailPanel({ parentId, code, onOpenFull, onCopy }: { parentId: s
       </div>
       {cover && <a href={r2ImageUrl(cover) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลดรูปปก", "Download cover")}>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={r2ImageUrl(cover, 200) ?? ""} alt="" className="h-20 w-20 object-cover rounded-lg border border-slate-200 mb-2" /></a>}
       {loading ? <p className="text-xs text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
-        : fields.length === 0 ? <p className="text-xs text-slate-400">{t("— ไม่มีรายละเอียด", "— no details")}</p> : (
+        : fields.length === 0 ? <p className="text-xs text-slate-400">{t("— ไม่มีรายละเอียด (กด ⚙️ เลือกฟิลด์)", "— no details (use ⚙️ Choose fields)")}</p> : (
         <div className="space-y-1.5">
           {fields.map((f, i) => (
             <div key={i} className="flex items-start gap-2">
@@ -209,6 +265,31 @@ function ParentDetailPanel({ parentId, code, onOpenFull, onCopy }: { parentId: s
               <button onClick={() => onCopy(f.value, f.label)} title={t("คัดลอก", "Copy")} className="text-slate-400 hover:text-violet-600 text-xs shrink-0">📋</button>
             </div>
           ))}
+        </div>
+      )}
+      {/* SKU ลูก (สี/ตัวเลือก) inline */}
+      {skus.length > 0 && (
+        <div className="mt-3 pt-2 border-t border-slate-200">
+          <button onClick={() => setShowSkus((v) => !v)} className="text-xs font-semibold text-slate-500 hover:text-violet-700 inline-flex items-center gap-1">
+            <span className="text-[9px]">{showSkus ? "▼" : "▶"}</span>SKU {t("ลูก", "variants")} ({skus.length})
+          </button>
+          {showSkus && (
+            <div className="mt-1.5 space-y-1 max-h-56 overflow-y-auto">
+              {skus.map((s) => (
+                <div key={s.id} className="flex items-center gap-2 bg-white border border-slate-100 rounded-lg p-1.5">
+                  {s.img
+                    ? <img src={r2ImageUrl(s.img, 80) ?? ""} alt="" className="h-9 w-9 object-cover rounded border border-slate-200 shrink-0" />
+                    : <span className="h-9 w-9 rounded bg-slate-50 border border-slate-100 shrink-0" />}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5"><span className="text-xs font-mono text-slate-700 truncate">{s.code}</span>{s.color && <span className="text-[11px] text-slate-500 truncate">· {s.color}</span>}</div>
+                    {s.price != null && <div className="text-[11px] text-emerald-700">{Number(s.price).toLocaleString("th-TH")} ฿</div>}
+                  </div>
+                  <button onClick={() => onCopy(s.code, s.code)} title={t("คัดลอกรหัส", "Copy code")} className="text-slate-400 hover:text-violet-600 text-xs shrink-0">📋</button>
+                  <button onClick={() => onOpenSku(s.id)} title={t("เปิด SKU", "Open SKU")} className="text-violet-600 hover:text-violet-800 text-xs shrink-0">↗</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
