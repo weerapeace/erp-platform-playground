@@ -18,7 +18,7 @@ export type RecurringRule = {
   description?: string | null; task_type?: string | null; priority?: string | null; platforms?: string[] | null; due_day?: number | null;
 };
 export type TemplateStepDef = { title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[] };
-export type TemplateContentDef = { title: string; post_type?: string | null; platforms?: string[] };
+export type TemplateContentDef = { title: string; post_type?: string | null; platforms?: string[]; assignee_id?: string | null };
 export type Template = {
   id: string; task_type: string | null; default_priority: string; brand_id: string | null;
   default_reviewer_id?: string | null;
@@ -82,7 +82,7 @@ async function createTaskFromRule(admin: Admin, rule: RecurringRule, tpl: Templa
   const contentItems = (Array.isArray(tpl?.content_items) ? tpl!.content_items! : []).filter((c) => c?.title);
   for (const ci of contentItems) {
     let cno = await nextContentNo(admin);
-    const crow = { content_no: cno, title: ci.title, task_id: data.id, brand_id: rule.brand_id ?? tpl?.brand_id ?? null, post_type: ci.post_type ?? null, platforms: ci.platforms ?? [], status: "draft", created_by: rule.created_by ?? null };
+    const crow = { content_no: cno, title: ci.title, task_id: data.id, brand_id: rule.brand_id ?? tpl?.brand_id ?? null, post_type: ci.post_type ?? null, platforms: ci.platforms ?? [], assignee_id: ci.assignee_id ?? null, status: "draft", created_by: rule.created_by ?? null };
     let { error: cErr } = await admin.from("erp_creative_content").insert(crow);
     if (cErr && /duplicate|unique/i.test(cErr.message)) { cno = await nextContentNo(admin); ({ error: cErr } = await admin.from("erp_creative_content").insert({ ...crow, content_no: cno })); }
   }
