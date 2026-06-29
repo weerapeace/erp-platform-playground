@@ -270,6 +270,18 @@ function resultSummary(r?: { totalLateMinutes?: number; earlyOutMinutes?: number
   return parts.length ? parts.join(" / ") : "ปกติ";
 }
 
+// สรุป "ผล" จากรายการที่จะสร้าง (manual_payloads) → คอลัมน์ "ผล" โชว์ ขาด/สาย/ออกก่อน กี่ ชม./นาที (แทน "N รายการ")
+function summaryFromPayloads(payloads: Record<string, unknown>[]): string {
+  let late = 0, early = 0, absent = false;
+  for (const p of payloads) {
+    const t = String(p.entry_type || "");
+    if (t === "absence") absent = true;
+    else if (t === "late") late += Number(p.late_minutes ?? p.minutes ?? 0) || 0;
+    else if (t === "early_leave") early += Number(p.minutes ?? 0) || 0;
+  }
+  return resultSummary({ totalLateMinutes: late, earlyOutMinutes: early, absent });
+}
+
 function flagText(flags: string[]): string {
   const labels: Record<string, string> = {
     late_morning: "สายช่วงเช้า",
@@ -374,7 +386,7 @@ export function AttendanceImportPreview({
     const decision = reviewDecisions[row.rowKey];
     const o = outcomeFor(row, decision, period?.default_hours_per_day);
     const result = typeof decision === "object"
-      ? (o.payloads.length ? `${o.payloads.length} รายการ` : "ปกติ")
+      ? (o.payloads.length ? summaryFromPayloads(o.payloads) : "ปกติ")
       : decision === "normal" ? "ปกติ" : decision === "skip" ? "ข้าม" : decision === "absence" ? "ขาดงาน" : resultText(row);
     return {
       id: row.rowKey,
@@ -410,7 +422,7 @@ export function AttendanceImportPreview({
       employeeId: String(row.employee_id || "") || null,
       employeeLabel: String(row.employee_label || row.employee_id || "-"),
       rawScans: Array.isArray(row.raw_scans) ? row.raw_scans : [],
-      result: payloads.length ? `${payloads.length} รายการ` : status === "skipped" ? "ข้าม" : isCommitReadyStatus(status) ? "ปกติ" : "-",
+      result: payloads.length ? summaryFromPayloads(payloads) : status === "skipped" ? "ข้าม" : isCommitReadyStatus(status) ? "ปกติ" : "-",
       status,
       note: row.note || flagText(flags) || "-",
       payloadCount: payloads.length,
