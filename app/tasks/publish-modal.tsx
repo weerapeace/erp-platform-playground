@@ -163,7 +163,7 @@ export function PublishModal({ taskId, parents, parentFallback, taskPlatforms = 
           {rows.length === 0 ? (
             <p className="text-sm text-slate-400 italic">{t("งานนี้ยังไม่มีคอนเทนต์ — กดยืนยันเพื่อเปลี่ยนสถานะอย่างเดียว", "No content yet — confirm just changes the status")}</p>
           ) : rows.map((r) => {
-            const c = r.content; const platforms = [...new Set([...taskPlatforms, ...(c.platforms ?? [])])];   // แพลตฟอร์มของงาน + ของคอนเทนต์
+            const c = r.content; const platforms = taskPlatforms.length ? taskPlatforms : (c.platforms ?? []);   // ใช้แพลตฟอร์มของงาน (ถ้างานไม่ตั้ง ค่อยใช้ของคอนเทนต์)
             return (
               <div key={c.id} className="rounded-lg border border-slate-200 overflow-hidden">
                 <div className="bg-slate-50/80 px-3 py-2 border-b border-slate-100 flex items-center justify-between">
