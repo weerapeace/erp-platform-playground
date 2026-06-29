@@ -36,7 +36,9 @@ type PayrollImportPeriod = {
 type DuplicateMode = "skip" | "replace" | "error";
 type ReviewDecision = "absence" | "skip" | "normal";
 // การตัดสินจากป๊อปอัป "ตรวจ/แก้" รายแถว: นอกจาก absence/skip/normal ยังแก้เวลาเอง (recompute) หรือ ราชการ ได้
-type RowDecision = ReviewDecision | { kind: "official" | "recompute"; scans?: string[]; note?: string; earlyLeaveMinutes?: number };
+type RowDecision = ReviewDecision
+  | { kind: "official" | "recompute"; scans?: string[]; note?: string; earlyLeaveMinutes?: number }
+  | { kind: "leave"; leaveType: "sick" | "unpaid"; medicalCert: boolean; days: number; note?: string };
 
 type AttendanceDraftRow = {
   id: string;
@@ -111,6 +113,7 @@ function manualEditInfo(previewRow: AttendancePreviewRow, decision: RowDecision 
   if (decision === "skip") return { before, after: before, label: "ข้าม ไม่หัก" };
   if (decision === "normal") return { before, after: before, label: "ตั้งเป็นปกติ" };
   if (decision.kind === "official") return { before, after: cleanTimes(decision.scans ?? before), label: "ราชการ" };
+  if (decision.kind === "leave") return { before, after: before, label: "ลา" };
   return { before, after: cleanTimes(decision.scans ?? before), label: "แก้เวลา" };
 }
 
@@ -243,6 +246,8 @@ function outcomeFor(previewRow: AttendancePreviewRow, decision: RowDecision | un
   if (decision.kind === "official") {
     return { status: "normal", payloads: [], note: decision.note?.trim() || "ราชการ (มาทำงาน ไม่หัก)", rawScans: cleanTimes(decision.scans ?? baseRaw) };
   }
+  // leave จัดการแยก (สร้าง leave_entries + ตั้งแถวเป็นข้าม) — ที่นี่กันไว้เฉย ๆ
+  if (decision.kind === "leave") return { status: "skipped", payloads: [], note: "ลา", rawScans: baseRaw };
   // recompute: แก้เวลาเอง → คำนวณสาย/ออกก่อน/ขาด ใหม่ด้วยกฎเดิมของแถวนั้น
   const scans = cleanTimes(decision.scans ?? baseRaw);
   const recomputed = calculateAttendanceDay({ rawScans: scans, scheduleStatus: previewRow.scheduleStatus }, previewRow.ruleConfig);
@@ -741,26 +746,56 @@ export function AttendanceImportPreview({
   );
   const pendingMatchCount = Object.values(pendingMatches).filter(Boolean).length;
 
+  // บันทึก decision ของ 1 แถวลง draft (persist) / preview (reviewDecisions)
+  const commitDecision = async (rowKey: string, decision: RowDecision) => {
+    if (draft) {
+      const pr = previewByKey.get(rowKey);
+      const o = pr ? outcomeFor(pr, decision, period?.default_hours_per_day) : null;
+      const edit = pr ? manualEditInfo(pr, decision) : null;
+      if (o) {
+        const nextRows = (draft.rows || []).map((r) =>
+          String(r.row_key || r.id) !== rowKey ? r : { ...r, status: o.status, manual_payloads: o.payloads, note: o.note, raw_scans: o.rawScans, result_payload: { ...(r.result_payload || {}), manual_edit: edit ?? undefined } });
+        setBusy(true);
+        await persistDraftRows(nextRows, "บันทึกการตรวจแล้ว");
+      }
+    } else {
+      setReviewDecisions((cur) => ({ ...cur, [rowKey]: decision }));
+      setMessage("ตรวจแล้ว — กดบันทึก draft เพื่อเก็บผลนี้");
+    }
+  };
+
   // บันทึกผลตรวจ/แก้ของ 1 แถว (จากป๊อปอัป) — รองรับทั้งโหมด preview และ draft
   const applyRowEdit = async (rowKey: string, decision: RowDecision) => {
     if (!editable) { setEditRow(null); return; }
     try {
-      if (draft) {
+      // ลา: สร้างใบลาทันที (leave_entries ผ่าน time-entry, server คิดหัก) แล้วตั้งวันนั้นเป็น "ข้าม" กันนับซ้ำเป็นขาด
+      if (typeof decision === "object" && decision.kind === "leave") {
         const pr = previewByKey.get(rowKey);
-        const o = pr ? outcomeFor(pr, decision, period?.default_hours_per_day) : null;
-        const edit = pr ? manualEditInfo(pr, decision) : null;
-        if (o) {
-          const nextRows = (draft.rows || []).map((r) =>
-            String(r.row_key || r.id) !== rowKey ? r : { ...r, status: o.status, manual_payloads: o.payloads, note: o.note, raw_scans: o.rawScans, result_payload: { ...(r.result_payload || {}), manual_edit: edit ?? undefined } });
-          setBusy(true);
-          await persistDraftRows(nextRows, "บันทึกการตรวจแล้ว");
-        }
+        const draftRow = (draft?.rows || []).find((r) => String(r.row_key || r.id) === rowKey);
+        const empId = pr?.employee?.id || draftRow?.employee_id || "";
+        const workDate = pr?.date || String(draftRow?.work_date || "");
+        if (!empId || !period?.id) { setMessage("ลาไม่ได้ — แถวนี้ยังไม่ผูกพนักงาน (จับคู่ก่อน)"); setEditRow(null); return; }
+        if (!(decision.days > 0)) { setMessage("กรอกจำนวนวัน/ชั่วโมงลาให้ถูก"); return; }
+        setBusy(true);
+        const paid = decision.leaveType === "sick" && decision.medicalCert;
+        const res = await apiFetch("/api/payroll/time-entry", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            period_id: period.id, employee_id: empId, kind: "leave", value: decision.days,
+            work_date: workDate, note: decision.note?.trim() || (decision.leaveType === "sick" ? "ลาป่วย" : "ลาไม่รับเงิน"),
+            paid_leave: paid, medical_certificate: paid ? { certificate_date: workDate } : undefined,
+          }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+        await commitDecision(rowKey, "skip");
+        onCommitted?.();
+        setMessage(`บันทึกลาแล้ว (${decision.leaveType === "sick" ? "ลาป่วย" : "ลาไม่รับเงิน"}${paid ? " มีใบรับรอง ไม่หัก" : ""}) — ตั้งวันนี้เป็นข้าม`);
       } else {
-        setReviewDecisions((cur) => ({ ...cur, [rowKey]: decision }));
-        setMessage("ตรวจแล้ว — กดบันทึก draft เพื่อเก็บผลนี้");
+        await commitDecision(rowKey, decision);
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "บันทึกการตรวจไม่สำเร็จ");
+      setMessage(error instanceof Error ? error.message : "บันทึกไม่สำเร็จ");
     } finally {
       setBusy(false);
       setEditRow(null);
@@ -1169,16 +1204,28 @@ function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
   const [finalOut, setFinalOut] = useState(result?.finalOut || (row.rawScans.length > 1 ? row.rawScans[row.rawScans.length - 1] : ""));
   const [official, setOfficial] = useState(false);
   const [absent, setAbsent] = useState(false);
+  const [leave, setLeave] = useState(false);
+  const [leaveType, setLeaveType] = useState<"sick" | "unpaid">("sick");
+  const [medicalCert, setMedicalCert] = useState(false);
+  const [leaveDur, setLeaveDur] = useState<"full" | "half" | "custom">("full");
+  const [leaveH, setLeaveH] = useState("");
+  const [leaveM, setLeaveM] = useState("");
   const [earlyH, setEarlyH] = useState("");
   const [earlyM, setEarlyM] = useState("");
   const [note, setNote] = useState("");
   const flags = previewRow?.result.flags ?? [];
-  const lockTimes = absent || official;   // ขาดงาน/ราชการ → ไม่ต้องกรอกเวลา
+  const lockTimes = absent || official || leave;   // ขาด/ราชการ/ลา → ไม่ต้องกรอกเวลา
+  const only = (set: (v: boolean) => void) => { setAbsent(false); setOfficial(false); setLeave(false); set(true); };  // ติ๊กได้ทีละอย่าง
 
   const earlyOverride = (() => {
     const total = (parseInt(earlyH || "0", 10) || 0) * 60 + (parseInt(earlyM || "0", 10) || 0);
     return total > 0 ? total : undefined;
   })();
+
+  // จำนวนวันลา: เต็มวัน=1, ครึ่งวัน=0.5, กำหนดเอง=(ชม.+นาที/60)/8 (เท่ากับฟอร์มลาเดิม)
+  const leaveDays = leaveDur === "full" ? 1 : leaveDur === "half" ? 0.5
+    : Math.round(((parseInt(leaveH || "0", 10) || 0) + (parseInt(leaveM || "0", 10) || 0) / 60) / 8 * 1000) / 1000;
+  const leavePaid = leaveType === "sick" && medicalCert;
 
   // ผลใหม่ (คำนวณสดตามที่กรอก) → โชว์เทียบกับผลเดิม
   const newResult = useMemo(() => {
@@ -1190,6 +1237,13 @@ function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
   }, [absent, official, previewRow, morningIn, noonIn, finalOut, earlyOverride]);
 
   const saveMain = () => {
+    if (leave) {
+      if (!(leaveDays > 0)) { alert("กรอกจำนวนวัน/ชั่วโมงลาให้ถูก"); return; }
+      const label = leaveType === "sick" ? "ลาป่วย" : "ลาไม่รับเงิน";
+      if (confirm(`บันทึก ${label} ${leaveDays} วัน${leavePaid ? " (มีใบรับรอง ไม่หัก)" : ""}?\nวันนี้จะตั้งเป็น "ข้าม" (ไม่นับขาด)`))
+        onApply({ kind: "leave", leaveType, medicalCert, days: leaveDays, note });
+      return;
+    }
     if (absent) { if (confirm("ยืนยันบันทึกเป็น “ขาดงาน”?")) onApply("absence"); return; }
     if (official) { onApply({ kind: "official", scans: [morningIn, noonIn, finalOut], note }); return; }
     onApply({ kind: "recompute", scans: [morningIn, noonIn, finalOut], note, earlyLeaveMinutes: earlyOverride });
@@ -1228,12 +1282,44 @@ function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <label className="flex items-center gap-2 text-xs text-slate-600">
-              <input type="checkbox" checked={absent} onChange={(event) => { setAbsent(event.target.checked); if (event.target.checked) setOfficial(false); }} /> ขาดงาน (ไม่มาทำงาน)
+              <input type="checkbox" checked={absent} onChange={(event) => (event.target.checked ? only(setAbsent) : setAbsent(false))} /> ขาดงาน (ไม่มาทำงาน)
             </label>
             <label className="flex items-center gap-2 text-xs text-slate-600">
-              <input type="checkbox" checked={official} onChange={(event) => { setOfficial(event.target.checked); if (event.target.checked) setAbsent(false); }} /> ราชการ / ออกนอกสถานที่ (นับมาทำงาน ไม่หัก)
+              <input type="checkbox" checked={official} onChange={(event) => (event.target.checked ? only(setOfficial) : setOfficial(false))} /> ราชการ / ออกนอกสถานที่ (นับมาทำงาน ไม่หัก)
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              <input type="checkbox" checked={leave} onChange={(event) => (event.target.checked ? only(setLeave) : setLeave(false))} /> ลา
             </label>
           </div>
+          {leave && (
+            <div className="space-y-2 rounded-lg border border-violet-200 bg-violet-50/50 p-2.5 text-xs">
+              <div>
+                <div className="mb-1 text-slate-500">ชนิดลา</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setLeaveType("sick")} className={`h-8 rounded-lg border text-sm font-medium ${leaveType === "sick" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>ลาป่วย</button>
+                  <button type="button" onClick={() => { setLeaveType("unpaid"); setMedicalCert(false); }} className={`h-8 rounded-lg border text-sm font-medium ${leaveType === "unpaid" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>ลาไม่รับเงิน</button>
+                </div>
+              </div>
+              <label className={`flex items-center gap-2 ${leaveType === "sick" ? "text-slate-600" : "text-slate-300"}`}>
+                <input type="checkbox" checked={medicalCert} disabled={leaveType !== "sick"} onChange={(event) => setMedicalCert(event.target.checked)} /> มีใบรับรองแพทย์ (ลาป่วย + ใบรับรอง = ไม่หักเงิน)
+              </label>
+              <div>
+                <div className="mb-1 text-slate-500">ช่วงเวลา</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {([["full", "เต็มวัน"], ["half", "ครึ่งวัน"], ["custom", "กำหนดเอง"]] as const).map(([k, l]) => (
+                    <button key={k} type="button" onClick={() => setLeaveDur(k)} className={`h-8 rounded-lg border text-sm font-medium ${leaveDur === k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{l}</button>
+                  ))}
+                </div>
+                {leaveDur === "custom" && (
+                  <div className="mt-2 flex items-center gap-2 text-slate-500">
+                    <input value={leaveH} onChange={(event) => setLeaveH(event.target.value)} placeholder="0" className="h-8 w-12 rounded border border-slate-200 px-2 text-center text-sm" /> ชม.
+                    <input value={leaveM} onChange={(event) => setLeaveM(event.target.value)} placeholder="0" className="h-8 w-12 rounded border border-slate-200 px-2 text-center text-sm" /> นาที
+                    <span className="text-[10px] text-slate-400">= {leaveDays} วัน</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2 text-xs text-slate-500">
             ออกก่อน (กำหนดเอง)
             <input value={earlyH} onChange={(event) => setEarlyH(event.target.value)} disabled={lockTimes} placeholder="0" className="h-8 w-12 rounded border border-slate-200 px-2 text-center text-sm disabled:bg-slate-50" /> ชม.
@@ -1247,7 +1333,7 @@ function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
             <div className="flex items-center gap-2">
               <span className="text-slate-400">ผลเดิม:</span> <span className="text-slate-600">{resultSummary(result)}</span>
               <span className="text-slate-300">→</span>
-              <span className="text-slate-400">ผลใหม่:</span> <span className="font-semibold text-slate-800">{resultSummary(newResult)}</span>
+              <span className="text-slate-400">ผลใหม่:</span> <span className="font-semibold text-slate-800">{leave ? `ลา ${leaveDays} วัน${leavePaid ? " (ไม่หัก)" : ""}` : resultSummary(newResult)}</span>
             </div>
             <div className="mt-1 text-slate-400">สแกนดิบ: <span className="font-mono text-slate-600">{row.rawScans.join(" ") || "-"}</span></div>
             {flags.length > 0 && <div className="mt-0.5 text-slate-400">ปัญหาที่เจอ: {flagText(flags)}</div>}
@@ -1259,7 +1345,7 @@ function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
           <button onClick={() => { if (confirm("ตั้งเป็น “ปกติ ไม่หัก” (มาทำงาน ไม่คิดสาย/ออกก่อน)?")) onApply("normal"); }}
             className="h-9 rounded-lg border border-emerald-200 px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-50">ปกติ ไม่หัก</button>
           <button onClick={saveMain} className="h-9 rounded-lg bg-slate-900 px-4 text-xs font-semibold text-white hover:bg-slate-800">
-            {absent ? "บันทึกเป็นขาดงาน" : "บันทึกค่าที่ตรวจแล้ว"}
+            {leave ? "บันทึกลา" : absent ? "บันทึกเป็นขาดงาน" : "บันทึกค่าที่ตรวจแล้ว"}
           </button>
         </div>
       </div>
