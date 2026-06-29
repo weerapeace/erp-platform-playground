@@ -134,11 +134,12 @@ export default function MenuManagerPage() {
   // ---- ตั้งค่าแอป: แก้แบบ "ร่าง" แล้วกดบันทึกทีเดียว (ชื่อ/ไอคอน/สี/หน้าแรก) ----
   const [appForm, setAppForm] = useState({ label: "", icon: "", icon_url: null as string | null, theme_color: null as string | null, default_href: null as string | null });
   const [appDelText, setAppDelText] = useState("");   // พิมพ์รหัสแอปยืนยันก่อนลบ (กันเผลอ)
+  const [appDelOpen, setAppDelOpen] = useState(false); // เปิด "โซนอันตราย" ลบแอป
   // sync ร่างจากแอปที่เลือก (รีเซ็ตเมื่อสลับแอป / โหลด apps ใหม่ เช่นหลังบันทึก)
   useEffect(() => {
     const a = apps.find((x) => x.key === sel);
     if (a) setAppForm({ label: a.label, icon: a.icon ?? "", icon_url: a.icon_url ?? null, theme_color: a.theme_color ?? null, default_href: a.default_href ?? null });
-    setAppDelText("");
+    setAppDelText(""); setAppDelOpen(false);
   }, [sel, apps]);
 
   const patchApp = async (id: string, p: Partial<AppGroup>) => {
@@ -168,7 +169,7 @@ export default function MenuManagerPage() {
   const delApp = async (id: string) => {
     const j = await apiFetch(`/api/menu/apps?id=${id}`, { method: "DELETE" }).then((r) => r.json());
     if (j.error) { setErr(j.error); return; }
-    setAppDelText(""); setSel(ALL); flash("ลบแอปแล้ว"); await reloadKeepDraft();
+    setAppDelText(""); setAppDelOpen(false); setSel(ALL); flash("ลบแอปแล้ว"); await reloadKeepDraft();
   };
   const copyShareLink = async (key: string) => {
     try { await navigator.clipboard.writeText(`${origin}/app/${key}`); flash("คัดลอกลิงก์แล้ว"); }
@@ -241,7 +242,7 @@ export default function MenuManagerPage() {
   const cancelApp = () => {
     if (!selectedApp) return;
     setAppForm({ label: selectedApp.label, icon: selectedApp.icon ?? "", icon_url: selectedApp.icon_url ?? null, theme_color: selectedApp.theme_color ?? null, default_href: selectedApp.default_href ?? null });
-    setAppDelText("");
+    setAppDelText(""); setAppDelOpen(false);
   };
   const sectionNames = useMemo(() => [...new Set(rows.map((r) => r.section))], [rows]);
 
@@ -504,13 +505,25 @@ export default function MenuManagerPage() {
                   {appDirty && <span className="text-[11px] text-amber-600">● มีการแก้ที่ยังไม่บันทึก</span>}
                 </div>
 
-                {/* ลบแอป — ต้องพิมพ์รหัสยืนยัน กันเผลอลบ */}
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-rose-100">
-                  <span className="text-[11px] text-slate-500">ลบแอป: พิมพ์รหัส <code className="text-rose-600 font-mono">{selectedApp.key}</code> เพื่อยืนยัน</span>
-                  <input value={appDelText} onChange={(e) => setAppDelText(e.target.value)} placeholder={selectedApp.key} className="h-8 w-32 px-2 text-xs font-mono border border-rose-200 rounded" />
-                  <button onClick={() => void delApp(selectedApp.id!)} disabled={appDelText.trim() !== selectedApp.key}
-                    className="h-8 px-3 text-xs font-medium rounded border border-rose-300 text-rose-600 hover:bg-rose-50 disabled:opacity-40 disabled:cursor-not-allowed">🗑 ลบแอปนี้ถาวร</button>
-                  <span className="text-[11px] text-slate-400">(เมนูไม่ถูกลบ แค่หลุดจากแอปนี้)</span>
+                {/* โซนอันตราย (ลบแอป) — ซ่อนไว้ กดปุ่มถึงเปิด แล้วพิมพ์รหัสยืนยัน */}
+                <div className="pt-2 border-t border-slate-100">
+                  {!appDelOpen ? (
+                    <button onClick={() => setAppDelOpen(true)} className="h-8 px-3 text-xs font-medium rounded border border-rose-200 text-rose-600 hover:bg-rose-50">⚠️ โซนอันตราย (ลบแอป)</button>
+                  ) : (
+                    <div className="space-y-2 rounded-lg border border-rose-300 bg-rose-50/60 p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-rose-700">⚠️ โซนอันตราย — ลบแอป “{selectedApp.label}”</span>
+                        <button onClick={() => { setAppDelOpen(false); setAppDelText(""); }} className="text-[11px] text-slate-400 hover:text-slate-600">ปิด ✕</button>
+                      </div>
+                      <p className="text-[11px] text-slate-500">ลบแล้วเอาคืนไม่ได้ · เมนูไม่ถูกลบ แค่หลุดจากแอปนี้</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[11px] text-slate-600">พิมพ์รหัส <code className="text-rose-600 font-mono">{selectedApp.key}</code> เพื่อยืนยัน</span>
+                        <input value={appDelText} onChange={(e) => setAppDelText(e.target.value)} placeholder={selectedApp.key} autoFocus className="h-8 w-32 px-2 text-xs font-mono border border-rose-200 rounded" />
+                        <button onClick={() => void delApp(selectedApp.id!)} disabled={appDelText.trim() !== selectedApp.key}
+                          className="h-8 px-3 text-xs font-semibold rounded bg-rose-600 text-white hover:bg-rose-700 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed">🗑 ลบแอปนี้ถาวร</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <p className="text-[11px] text-slate-400">ไอคอนแนะนำสี่เหลี่ยมจัตุรัส ≥ 512×512px (PNG) · ตั้ง “ใครเข้าได้” เพื่อล็อกไม่ให้คนไม่เกี่ยวเข้า (พิมพ์ URL ตรงก็เข้าไม่ได้)</p>
