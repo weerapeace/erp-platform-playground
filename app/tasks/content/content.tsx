@@ -518,6 +518,36 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} /><div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
 
   const contentPlatforms = d.platforms ?? [];
+  // จอกว้าง → แยก "รูปจากงาน" เป็นคอลัมน์ซ้ายสุด (3 คอลัมน์: รูป | ข้อมูล | แคปชั่น) · มือถือ = เป็น section ในสแต็ก
+  const imagesInLeftPane = isWide && !!d.task_id && !isHidden(dth, "task_media");
+  const taskImagesGallery = (cols: string) => (
+    taskMedia.images.length === 0 && taskMedia.links.length === 0 ? (
+      <p className="text-xs text-slate-400 italic">{t("ยังไม่มีรูป/ลิงก์จากงานย่อย", "No media from subtasks yet")}</p>
+    ) : (
+      <>
+        {taskMedia.images.length > 0 && (
+          <div className={`grid ${cols} gap-2`}>
+            {taskMedia.images.map((im, i) => { const bd = tmBadge(im.status); return (
+              <div key={im.key} className="relative group">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={r2ImageUrl(im.key, 320) ?? ""} alt={im.label ?? ""} onClick={() => setTmLb(i)} title={`${im.label ?? ""} · ${bd.label}`} className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+                <span className={`absolute top-0.5 left-0.5 text-[8px] text-white px-1 py-px rounded ${bd.cls}`}>{bd.label}</span>
+                <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100">
+                  <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">🔗</button>
+                  <a href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">⬇</a>
+                </div>
+              </div>
+            ); })}
+          </div>
+        )}
+        {taskMedia.links.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {taskMedia.links.map((l, i) => <a key={i} href={l.url ?? "#"} target="_blank" rel="noreferrer" className="block text-xs text-violet-700 hover:underline truncate">🔗 {l.label || l.url}</a>)}
+          </div>
+        )}
+      </>
+    )
+  );
 
   return (
     <>
@@ -533,9 +563,22 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           </div>
         </div>
 
-        {/* ===== จอกว้าง: 2 ฝั่งปรับขนาดได้ · มือถือ: เรียงบน-ล่าง เลื่อนรวด ===== */}
-        <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"} style={{ ...drawerBgStyle(dth), zoom: drawerZoom(dth.size), flexDirection: isWide && dth.swap ? "row-reverse" : undefined }}>
-          {/* ───── ฝั่งซ้าย: ข้อมูล + แนบงาน ───── */}
+        {/* ===== จอกว้าง: 3 คอลัมน์ (รูปจากงาน | ข้อมูล | แคปชั่น) ปรับขนาดได้ · มือถือ: เรียงบน-ล่าง ===== */}
+        <div className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"} style={{ ...drawerBgStyle(dth), zoom: drawerZoom(dth.size) }}>
+          {/* ───── คอลัมน์ซ้ายสุด: รูปจากงาน (เฉพาะจอกว้าง) ───── */}
+          {imagesInLeftPane && (
+            <div className="w-[210px] shrink-0 overflow-y-auto px-3 py-3 bg-slate-50/50 border-r border-slate-200">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{cLabelOf("task_media")}</p>
+                <span className="text-[11px] text-slate-400">{taskMedia.images.length} {t("รูป", "img")}</span>
+              </div>
+              {taskImagesGallery("grid-cols-2")}
+              <p className="text-[11px] text-slate-300 mt-2">{t("ป้ายบอกสถานะ · กดรูป=ดูเต็มจอ · 🔗 ก๊อปลิงก์ · ⬇ ดาวน์โหลด", "Status badge · click=view · 🔗 copy · ⬇ download")}</p>
+            </div>
+          )}
+          {/* กลุ่ม ข้อมูล | เส้นแบ่ง | แคปชั่น — ตัวลากปรับขนาดทำงานในนี้ (รูปอยู่นอกกลุ่ม จะได้ลากแม่น) */}
+          <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0" : "contents"} style={isWide && dth.swap ? { flexDirection: "row-reverse" } : undefined}>
+          {/* ───── ฝั่งกลาง: ข้อมูล + แนบงาน ───── */}
           <div className={`flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} ${isWide ? "overflow-y-auto min-w-0" : ""}`} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
             {/* status + schedule + assignee — ปักไว้บนสุดเสมอ */}
             <div className="grid grid-cols-2 gap-3" style={{ order: -1 }}>
@@ -579,36 +622,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               </div>
             </CSection>)}
 
-            {/* รูป/ลิงก์จากงาน — โชว์ทั้งที่ยังไม่อนุมัติ (มีป้ายสถานะ) หยิบไปโพสต์ได้ */}
-            {d.task_id && !isHidden(dth, "task_media") && (
+            {/* รูป/ลิงก์จากงาน — มือถือ/จอแคบ: เป็น section ในสแต็ก (จอกว้างแยกเป็นคอลัมน์ซ้ายสุด) */}
+            {!imagesInLeftPane && d.task_id && !isHidden(dth, "task_media") && (
               <CSection title={cLabelOf("task_media")} order={cOrderOf("task_media")} collapsed={coll("task_media")} onToggle={() => toggleColl("task_media")}
                 right={<span className="text-[11px] text-slate-400">{taskMedia.images.length} {t("รูป", "img")}</span>}>
-                {taskMedia.images.length === 0 && taskMedia.links.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic">{t("ยังไม่มีรูป/ลิงก์จากงานย่อย", "No media from subtasks yet")}</p>
-                ) : (
-                  <>
-                    {taskMedia.images.length > 0 && (
-                      <div className="grid grid-cols-4 gap-2">
-                        {taskMedia.images.map((im, i) => { const bd = tmBadge(im.status); return (
-                          <div key={im.key} className="relative group">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={r2ImageUrl(im.key, 320) ?? ""} alt={im.label ?? ""} onClick={() => setTmLb(i)} title={`${im.label ?? ""} · ${bd.label}`} className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
-                            <span className={`absolute top-0.5 left-0.5 text-[8px] text-white px-1 py-px rounded ${bd.cls}`}>{bd.label}</span>
-                            <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100">
-                              <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">🔗</button>
-                              <a href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">⬇</a>
-                            </div>
-                          </div>
-                        ); })}
-                      </div>
-                    )}
-                    {taskMedia.links.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        {taskMedia.links.map((l, i) => <a key={i} href={l.url ?? "#"} target="_blank" rel="noreferrer" className="block text-xs text-violet-700 hover:underline truncate">🔗 {l.label || l.url}</a>)}
-                      </div>
-                    )}
-                  </>
-                )}
+                {taskImagesGallery("grid-cols-4")}
                 <p className="text-[11px] text-slate-300 mt-1">{t("รูปจากงานย่อย (ป้ายบอกสถานะ) · กดรูป=ดูเต็มจอ · 🔗 ก๊อปลิงก์ · ⬇ ดาวน์โหลด", "Subtask images (status badge) · click=view · 🔗 copy · ⬇ download")}</p>
               </CSection>
             )}
@@ -681,6 +699,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => setCap(c.platform, patch)} pushToast={pushToast} />)}
               </div>
             )}
+          </div>
           </div>
         </div>
 
