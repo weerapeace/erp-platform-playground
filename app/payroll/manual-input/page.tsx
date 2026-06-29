@@ -5,7 +5,7 @@
  * เลือกงวด → ตารางพนักงาน + ยอดสรุป (สาย/ขาด/ลา/OT/เพิ่มพิเศษ/หักอื่น) + สุทธิประมาณ (เครื่องจริง)
  * แก้ "เพิ่มพิเศษ/หักอื่น" ต่อคนผ่าน drawer → บันทึก → สุทธิประมาณอัปเดต → ไปคำนวณ+บันทึก
  */
-import { Fragment, useEffect, useState, useCallback, useMemo } from "react";
+import { Fragment, useEffect, useState, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { Drawer, ERPModal } from "@/components/modal";
@@ -27,6 +27,50 @@ type Row = {
   social_security_baht?: number; withholding_tax_baht?: number; system_deduct_baht?: number;
   net_estimate: number; has_manual: boolean;
 };
+
+// คอลัมน์ตารางคำนวณ (sort + ปรับความกว้างได้) — ลำดับต้องตรงกับ <td> ในแถว
+const SUMMARY_COLS: { key: string; label: string; align: "left" | "right" | "center"; sortable: boolean; w: number }[] = [
+  { key: "employee", label: "พนักงาน", align: "left", sortable: true, w: 210 },
+  { key: "work_days", label: "วันจ่ายจริง", align: "right", sortable: true, w: 95 },
+  { key: "late", label: "สาย/ออกก่อน", align: "right", sortable: true, w: 110 },
+  { key: "absence", label: "ขาด", align: "right", sortable: true, w: 75 },
+  { key: "leave", label: "ลา", align: "right", sortable: true, w: 75 },
+  { key: "ot", label: "OT", align: "right", sortable: true, w: 80 },
+  { key: "recurring", label: "รายการประจำ", align: "right", sortable: false, w: 120 },
+  { key: "piecework", label: "งานเหมา", align: "right", sortable: true, w: 100 },
+  { key: "special_add", label: "เพิ่มพิเศษ", align: "right", sortable: true, w: 100 },
+  { key: "other_deduct", label: "หักอื่น", align: "right", sortable: true, w: 90 },
+  { key: "mid_month", label: "หักกลางเดือน", align: "right", sortable: true, w: 110 },
+  { key: "system_deduct", label: "หักตามระบบ", align: "right", sortable: true, w: 110 },
+  { key: "net", label: "สุทธิประมาณ", align: "right", sortable: true, w: 120 },
+  { key: "actions", label: "แก้", align: "center", sortable: false, w: 60 },
+];
+function summaryAccessor(r: Row, key: string): number | string {
+  switch (key) {
+    case "employee": return r.employee_code || r.employee_name || "";
+    case "work_days": return r.work_days;
+    case "late": return r.late_baht;
+    case "absence": return r.absence_baht;
+    case "leave": return r.leave_baht;
+    case "ot": return r.ot_baht;
+    case "piecework": return r.piecework_baht;
+    case "special_add": return r.special_add;
+    case "other_deduct": return r.other_deduct;
+    case "mid_month": return r.mid_month_paid ?? 0;
+    case "system_deduct": return r.system_deduct_baht ?? 0;
+    case "net": return r.net_estimate;
+    default: return 0;
+  }
+}
+function sortSummaryRows(list: Row[], sort: { key: string; dir: "asc" | "desc" } | null): Row[] {
+  if (!sort) return list;
+  const dir = sort.dir === "asc" ? 1 : -1;
+  return [...list].sort((a, b) => {
+    const va = summaryAccessor(a, sort.key), vb = summaryAccessor(b, sort.key);
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+    return String(va).localeCompare(String(vb), "th", { numeric: true }) * dir;
+  });
+}
 type Adj = { id: string; employee_id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null };
 type RecurringItem = {
   id: string; employee_id: string; item_name: string; item_type: string; applied_amount: number;
@@ -252,6 +296,18 @@ export default function ManualInputPage() {
   const [onlyManual, setOnlyManual] = useState(false);
   const [summaryFilter, setSummaryFilter] = useState<SummaryFilter>("all");
   const [summaryGroupBy, setSummaryGroupBy] = useState<SummaryGroupBy>("none");
+  const [summarySort, setSummarySort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);  // กดหัวคอลัมน์เรียง
+  const [colW, setColW] = useState<number[]>(() => SUMMARY_COLS.map((c) => c.w));   // ความกว้างคอลัมน์ (ชั่วคราว ลากปรับ)
+  const toggleSummarySort = (key: string) =>
+    setSummarySort((cur) => (cur?.key === key ? (cur.dir === "asc" ? { key, dir: "desc" } : null) : { key, dir: "asc" }));
+  const startResize = (e: ReactMouseEvent, i: number) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = colW[i];
+    const onMove = (ev: MouseEvent) => setColW((w) => w.map((x, idx) => (idx === i ? Math.max(56, startW + (ev.clientX - startX)) : x)));
+    const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+  };
   const [editRow, setEditRow] = useState<Row | null>(null);
   const [editDate, setEditDate] = useState<string | undefined>();
   const [editKind, setEditKind] = useState<TimeKind | undefined>();
@@ -313,7 +369,7 @@ export default function ManualInputPage() {
       .filter((r) => !needle || `${r.employee_code} ${r.employee_name} ${r.contract_type ?? ""} ${r.wage_type ?? ""}`.toLowerCase().includes(needle));
   }, [onlyManual, q, rows, summaryFilter]);
   const summaryGroups = useMemo(() => {
-    if (summaryGroupBy === "none") return [{ key: "all", label: "ทั้งหมด", rows: shown }];
+    if (summaryGroupBy === "none") return [{ key: "all", label: "ทั้งหมด", rows: sortSummaryRows(shown, summarySort) }];
     const m = new Map<string, Row[]>();
     for (const row of shown) {
       const label = summaryGroupLabel(row, summaryGroupBy);
@@ -321,8 +377,8 @@ export default function ManualInputPage() {
       cur.push(row);
       m.set(label, cur);
     }
-    return Array.from(m.entries()).map(([label, groupRows]) => ({ key: label, label, rows: groupRows }));
-  }, [shown, summaryGroupBy]);
+    return Array.from(m.entries()).map(([label, groupRows]) => ({ key: label, label, rows: sortSummaryRows(groupRows, summarySort) }));
+  }, [shown, summaryGroupBy, summarySort]);
 
   const totalNet = rows.reduce((t, r) => t + r.net_estimate, 0);
   const adjustmentsByEmployee = useMemo(() => {
@@ -518,23 +574,23 @@ export default function ManualInputPage() {
             </div>
           </div>
           <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="text-sm" style={{ tableLayout: "fixed", width: colW.reduce((a, b) => a + b, 0) }}>
+            <colgroup>{SUMMARY_COLS.map((c, i) => <col key={c.key} style={{ width: `${colW[i]}px` }} />)}</colgroup>
             <thead className="bg-slate-50 text-slate-500 text-xs">
               <tr>
-                <th className="text-left px-3 py-2">พนักงาน</th>
-                <th className="text-right px-3 py-2">วันจ่ายจริง</th>
-                <th className="text-right px-3 py-2">สาย/ออกก่อน</th>
-                <th className="text-right px-3 py-2">ขาด</th>
-                <th className="text-right px-3 py-2">ลา</th>
-                <th className="text-right px-3 py-2">OT</th>
-                <th className="text-right px-3 py-2">รายการประจำ</th>
-                <th className="text-right px-3 py-2">งานเหมา</th>
-                <th className="text-right px-3 py-2">เพิ่มพิเศษ</th>
-                <th className="text-right px-3 py-2">หักอื่น</th>
-                <th className="text-right px-3 py-2">หักกลางเดือน</th>
-                <th className="text-right px-3 py-2">หักตามระบบ</th>
-                <th className="text-right px-3 py-2">สุทธิประมาณ</th>
-                <th className="text-center px-3 py-2">แก้</th>
+                {SUMMARY_COLS.map((c, i) => (
+                  <th key={c.key} className={`relative px-3 py-2 ${c.align === "left" ? "text-left" : c.align === "center" ? "text-center" : "text-right"}`}>
+                    {c.sortable ? (
+                      <button type="button" onClick={() => toggleSummarySort(c.key)} className={`inline-flex max-w-full items-center gap-1 hover:text-slate-700 ${c.align === "right" ? "flex-row-reverse" : ""}`}>
+                        <span className="truncate">{c.label}</span>
+                        <span className="shrink-0 text-[9px] text-slate-300">{summarySort?.key === c.key ? (summarySort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                      </button>
+                    ) : <span className="truncate">{c.label}</span>}
+                    {i < SUMMARY_COLS.length - 1 && (
+                      <span onMouseDown={(e) => startResize(e, i)} title="ลากปรับความกว้าง" className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none hover:bg-blue-300" />
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -743,8 +799,38 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);   // กำลังแก้ยอดรายการไหน
+  const [editAmt, setEditAmt] = useState("");
 
   useEffect(() => { setLocalItems(items); }, [items]);
+
+  // แก้ยอดรายการประจำ (amount_per_period) → PATCH
+  const saveItemAmount = async (id: string) => {
+    const amt = Number(editAmt);
+    if (!(amt > 0)) { setErr("ยอดต้องมากกว่า 0"); return; }
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const res = await apiFetch(`/api/payroll/recurring/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount_per_period: amt }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error || "แก้ยอดไม่สำเร็จ");
+      setLocalItems((cur) => cur.map((it) => (it.id === id ? { ...it, amount_per_period: amt, applied_amount: amt } : it)));
+      setEditId(null); setEditAmt(""); setMsg("แก้ยอดแล้ว"); onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : "แก้ยอดไม่สำเร็จ"); } finally { setBusy(false); }
+  };
+  // ลบ / พัก (หยุดใช้) รายการประจำ
+  const removeItem = async (id: string, mode: "delete" | "pause") => {
+    if (!confirm(mode === "delete" ? "ลบรายการประจำนี้?" : "พักรายการนี้? (จะไม่ถูกนำไปคิดในงวดถัดไป)")) return;
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const res = mode === "delete"
+        ? await apiFetch(`/api/payroll/recurring/${id}`, { method: "DELETE" })
+        : await apiFetch(`/api/payroll/recurring/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "paused" }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error || (mode === "delete" ? "ลบไม่สำเร็จ" : "พักไม่สำเร็จ"));
+      setLocalItems((cur) => cur.filter((it) => it.id !== id));
+      setMsg(mode === "delete" ? "ลบรายการแล้ว" : "พักรายการแล้ว"); onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); } finally { setBusy(false); }
+  };
 
   const loadRecurringLookupItems = useCallback(async (type: "earning" | "deduction", preferredId?: string) => {
     setLookupLoading(true);
@@ -871,10 +957,25 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
                   <div className="truncate text-sm font-medium text-slate-800">{item.item_name || "-"}</div>
                   <div className="mt-0.5 text-xs text-slate-400">{range}</div>
                 </div>
-                <div className={sign === "+" ? "text-sm font-semibold tabular-nums text-emerald-700" : "text-sm font-semibold tabular-nums text-red-700"}>
-                  {sign} {baht(Number(item.applied_amount || 0))}
-                </div>
+                {editId === item.id ? (
+                  <div className="flex items-center gap-1">
+                    <input value={editAmt} onChange={(e) => setEditAmt(e.target.value)} autoFocus className="h-7 w-20 rounded border border-slate-200 px-2 text-right text-sm" />
+                    <button disabled={busy} onClick={() => void saveItemAmount(item.id)} className="h-7 rounded bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">บันทึก</button>
+                    <button onClick={() => { setEditId(null); setEditAmt(""); }} className="h-7 rounded border border-slate-200 px-2 text-xs text-slate-500">ยกเลิก</button>
+                  </div>
+                ) : (
+                  <div className={sign === "+" ? "text-sm font-semibold tabular-nums text-emerald-700" : "text-sm font-semibold tabular-nums text-red-700"}>
+                    {sign} {baht(Number(item.applied_amount || 0))}
+                  </div>
+                )}
               </div>
+              {editId !== item.id && (
+                <div className="mt-1.5 flex items-center justify-end gap-3 border-t border-slate-100 pt-1.5">
+                  <button onClick={() => { setEditId(item.id); setEditAmt(String(item.amount_per_period ?? item.applied_amount ?? "")); }} className="text-[11px] font-medium text-blue-600 hover:underline">✏️ แก้ยอด</button>
+                  <button onClick={() => void removeItem(item.id, "pause")} className="text-[11px] font-medium text-amber-600 hover:underline">⏸ พัก</button>
+                  <button onClick={() => void removeItem(item.id, "delete")} className="text-[11px] font-medium text-rose-600 hover:underline">🗑 ลบ</button>
+                </div>
+              )}
             </div>
           );
         })}

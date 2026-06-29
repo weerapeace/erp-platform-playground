@@ -809,14 +809,19 @@ export function AttendanceImportPreview({
     setMatchSaving(true);
     setMessage("");
     try {
-      const edits = entries.map(([code, empId]) => ({ id: empId, changes: { scanner_employee_code: code } }));
-      const res = await apiFetch("/api/master-v2/employees/bulk-update", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+      // เขียนรหัสสแกนลงพนักงานทีละคน ผ่าน API พนักงานจริง (employees ไม่ใช่ entity ของ master-v2)
+      let ok = 0;
+      for (const [code, empId] of entries) {
+        const res = await apiFetch(`/api/payroll/core/employees/${empId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scanner_employee_code: code }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+        ok++;
+      }
       setPendingMatches({});
-      setMessage(`จับคู่แล้ว ${entries.length} รหัส — กำลังโหลดข้อมูลพนักงานใหม่`);
+      setMessage(`จับคู่แล้ว ${ok} รหัส — กำลังโหลดข้อมูลพนักงานใหม่`);
       onCommitted?.();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "จับคู่พนักงานไม่สำเร็จ");
