@@ -254,19 +254,19 @@ function outcomeFor(previewRow: AttendancePreviewRow, decision: RowDecision | un
     { ...previewRow, rawScans: scans, result: { ...finalResult, importStatus: finalResult.importStatus } },
     { default_hours_per_day: hoursPerDay },
   );
-  const summary = finalResult.totalLateMinutes ? `สาย ${finalResult.totalLateMinutes} นาที`
-    : finalResult.earlyOutMinutes ? `ออกก่อน ${finalResult.earlyOutMinutes} นาที`
+  const summary = finalResult.totalLateMinutes ? `สาย ${minutesText(finalResult.totalLateMinutes)}`
+    : finalResult.earlyOutMinutes ? `ออกก่อน ${minutesText(finalResult.earlyOutMinutes)}`
     : finalResult.absent ? "ขาด" : "ปกติ";
   return { status: "ready", payloads, note: `${decision.note?.trim() ? decision.note.trim() + " · " : ""}ตรวจแล้ว (${summary})`, rawScans: scans };
 }
 
-// สรุปผล (สาย/ออกก่อน/ขาด/ปกติ) สำหรับโชว์ "ผลเดิม → ผลใหม่" ในป๊อปอัป
+// สรุปผล (สาย/ออกก่อน/ขาด/ปกติ) สำหรับโชว์ "ผลเดิม → ผลใหม่" ในป๊อปอัป — แสดงเป็น ชม./นาที
 function resultSummary(r?: { totalLateMinutes?: number; earlyOutMinutes?: number; absent?: boolean } | null): string {
   if (!r) return "-";
   const parts: string[] = [];
   if (r.absent) parts.push("ขาด");
-  if (r.totalLateMinutes) parts.push(`สาย ${r.totalLateMinutes} นาที`);
-  if (r.earlyOutMinutes) parts.push(`ออกก่อน ${r.earlyOutMinutes} นาที`);
+  if (r.totalLateMinutes) parts.push(`สาย ${minutesText(r.totalLateMinutes)}`);
+  if (r.earlyOutMinutes) parts.push(`ออกก่อน ${minutesText(r.earlyOutMinutes)}`);
   return parts.length ? parts.join(" / ") : "ปกติ";
 }
 
@@ -1177,16 +1177,19 @@ function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
     onApply({ kind: "recompute", scans: [morningIn, noonIn, finalOut], note, earlyLeaveMinutes: earlyOverride });
   };
 
-  const timeField = (label: string, value: string, set: (v: string) => void, placeholder: string, std: string) => (
-    <label className="text-xs text-slate-500">
-      <span className="flex items-center justify-between">{label}
-        <button type="button" disabled={lockTimes} onClick={() => set(std)} title={`ใส่เวลาปกติ ${std}`}
-          className="text-[10px] font-medium text-blue-600 hover:underline disabled:text-slate-300">ปกติ</button>
-      </span>
-      <input value={value} onChange={(event) => set(event.target.value)} placeholder={placeholder} disabled={lockTimes}
-        className="mt-1 h-8 w-full rounded border border-slate-200 px-2 text-sm disabled:bg-slate-50 disabled:text-slate-300" />
-    </label>
-  );
+  const timeField = (label: string, value: string, set: (v: string) => void, placeholder: string, std: string) => {
+    const missing = !value.trim() && !lockTimes;   // ไม่มีสแกน + ไม่ใช่ขาด/ราชการ → ไฮไลต์แดง
+    return (
+      <label className="text-xs text-slate-500">
+        <span className="flex items-center justify-between">{label}
+          <button type="button" disabled={lockTimes} onClick={() => set(std)} title={`ใส่เวลาปกติ ${std}`}
+            className="text-[10px] font-medium text-blue-600 hover:underline disabled:text-slate-300">ปกติ</button>
+        </span>
+        <input value={value} onChange={(event) => set(event.target.value)} placeholder={placeholder} disabled={lockTimes}
+          className={`mt-1 h-8 w-full rounded border px-2 text-sm disabled:bg-slate-50 disabled:text-slate-300 ${missing ? "border-red-300 bg-red-50 placeholder:text-red-400" : "border-slate-200"}`} />
+      </label>
+    );
+  };
 
   return createPortal(
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
