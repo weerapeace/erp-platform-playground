@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { computePeriodPreview, payableWorkDays } from "@/lib/payroll-calc-engine";
+import { shouldReceivePaidPeriodHoliday } from "@/lib/payroll-attendance-rules";
 import { money } from "@/lib/payroll-calc";
 
 export const dynamic = "force-dynamic";
@@ -132,10 +133,17 @@ export async function GET(req: NextRequest) {
       const absenceHours = absHoursBy.get(id) ?? 0;
       const leaveHours = leaveHoursBy.get(id) ?? (leaveDaysBy.get(id) ?? 0) * hoursPerDay;
       const deductedMinutes = Math.round((absenceHours + leaveHours) * 60 + lateMinutes);
-      // ตัดวันที่อยู่นอกช่วงสัญญา (พนักงานเข้า/ออกกลางงวด) ออกจากฐานวันจ่ายจริง — คนเต็มงวด excluded=0 ไม่กระทบ
+      // ฐานวันจ่ายจริง:
+      //  - รายเดือน (ได้เงินวันหยุด): วันทำงานมาตรฐาน − วันนอกช่วงสัญญา (เข้า/ออกกลางงวด) · วันหยุดยังนับเป็นวันได้เงิน
+      //  - รายวัน/รายชม. (ไม่ได้เงินวันหยุด): วันทำงานที่จ่ายได้จริง = ตัดวันหยุด + คลิปช่วงสัญญาแล้ว
       const cMeta = contractMetaBy[id] ?? {};
-      const excludedDays = Math.max(payableWorkDays(period, { work_schedule_id: cMeta.work_schedule_id }) - payableWorkDays(period, cMeta), 0);
-      const empBaseMinutes = Math.max(basePayMinutes - Math.round(excludedDays * hoursPerDay * 60), 0);
+      let empBaseMinutes: number;
+      if (shouldReceivePaidPeriodHoliday(cMeta)) {
+        const excludedDays = Math.max(payableWorkDays(period, { work_schedule_id: cMeta.work_schedule_id }) - payableWorkDays(period, cMeta), 0);
+        empBaseMinutes = Math.max(basePayMinutes - Math.round(excludedDays * hoursPerDay * 60), 0);
+      } else {
+        empBaseMinutes = Math.round(payableWorkDays(period, cMeta) * hoursPerDay * 60);
+      }
       const paidMinutes = Math.max(empBaseMinutes - deductedMinutes, 0);
       const hasManual = late || absence || leave || ot || piecework || special || other;
       return {

@@ -3,6 +3,7 @@ import { writeAudit } from "@/lib/audit";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { money } from "@/lib/payroll-calc";
 import { payableWorkDays } from "@/lib/payroll-calc-engine";
+import { shouldReceivePaidPeriodHoliday } from "@/lib/payroll-attendance-rules";
 import {
   normalizePayslipPrintLanguage,
   payslipLanguageForEmployee,
@@ -114,7 +115,7 @@ export async function GET(req: NextRequest) {
     const leaveDaysBy: Record<string, number> = {}, leaveHoursBy: Record<string, number> = {}, otHoursBy: Record<string, number> = {};
     if (empIds.length) {
       const [conRes, attRes, lvRes, otRes] = await Promise.all([
-        admin.from("employee_contracts").select("employee_id, work_schedule_id, start_date, end_date").in("employee_id", empIds).eq("is_current", true).eq("status", "active"),
+        admin.from("employee_contracts").select("employee_id, contract_type, employment_type, wage_type, work_schedule_id, start_date, end_date").in("employee_id", empIds).eq("is_current", true).eq("status", "active"),
         admin.from("attendance_entries").select("employee_id, late_minutes, absence_hours").eq("payroll_period_id", periodId),
         admin.from("leave_entries").select("employee_id, days, hours").eq("payroll_period_id", periodId),
         admin.from("overtime_entries").select("employee_id, hours").eq("payroll_period_id", periodId),
@@ -132,8 +133,14 @@ export async function GET(req: NextRequest) {
       (otRes.data ?? []).forEach((r) => { const id = text((r as Row).employee_id); otHoursBy[id] = (otHoursBy[id] ?? 0) + money((r as Row).hours); });
       empIds.forEach((id) => {
         const con = conBy[id] ?? {};
-        const excluded = Math.max(payableWorkDays(period, { work_schedule_id: con.work_schedule_id }) - payableWorkDays(period, con), 0);
-        const empBase = Math.max(baseFlat - Math.round(excluded * hoursPerDay * 60), 0);
+        // รายเดือนได้เงินวันหยุด → ฐาน = วันมาตรฐาน − วันนอกช่วงสัญญา · รายวัน/รายชม.ไม่ได้เงินวันหยุด → ฐาน = วันจ่ายได้จริง (ตัดวันหยุดแล้ว)
+        let empBase: number;
+        if (shouldReceivePaidPeriodHoliday(con)) {
+          const excluded = Math.max(payableWorkDays(period, { work_schedule_id: con.work_schedule_id }) - payableWorkDays(period, con), 0);
+          empBase = Math.max(baseFlat - Math.round(excluded * hoursPerDay * 60), 0);
+        } else {
+          empBase = Math.round(payableWorkDays(period, con) * hoursPerDay * 60);
+        }
         const deducted = Math.round(((absHoursBy[id] ?? 0) + (lvBy[id] ?? 0)) * 60 + (lateMinBy[id] ?? 0));
         paidMinBy[id] = Math.max(empBase - deducted, 0);
       });
