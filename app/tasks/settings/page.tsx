@@ -18,6 +18,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { loadMySubView, saveMySubView, DEFAULT_MYSUB_VIEW, type MySubView } from "../my-subtasks-view";
 import { getParentSkuFieldOptions, getSubmitRequiredFields, saveSubmitRequiredFields } from "../data";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
@@ -361,7 +362,7 @@ function StatusManager({ showToast }: { showToast: (m: string) => void }) {
 // ============================================================
 // แท็บจัดการเส้นทาง (transition)
 // ============================================================
-const KINDS = [{ value: "normal", label: "ปกติ" }, { value: "approve", label: "อนุมัติ" }, { value: "reject", label: "ไม่ผ่าน" }, { value: "revise", label: "ให้แก้" }, { value: "block", label: "ติดปัญหา" }];
+const KINDS = [{ value: "normal", label: () => tr("ปกติ", "Normal") }, { value: "approve", label: () => tr("อนุมัติ", "Approve") }, { value: "reject", label: () => tr("ไม่ผ่าน", "Reject") }, { value: "revise", label: () => tr("ให้แก้", "Revise") }, { value: "block", label: () => tr("ติดปัญหา", "Blocked") }];
 function TransitionManager({ showToast }: { showToast: (m: string) => void }) {
   const t = useT();
   const [statuses, setStatuses] = useState<Status[]>([]);
@@ -399,7 +400,7 @@ function TransitionManager({ showToast }: { showToast: (m: string) => void }) {
               <span className="text-slate-400">→</span>
               <span className="font-medium text-slate-700">{labelOf(tr.to_key)}</span>
               <span className="text-xs bg-slate-50 border border-slate-200 rounded px-1.5 text-slate-500">{tr.label}</span>
-              <span className="text-[11px] text-violet-600">{KINDS.find((k) => k.value === tr.kind)?.label}</span>
+              <span className="text-[11px] text-violet-600">{KINDS.find((k) => k.value === tr.kind)?.label()}</span>
               <button onClick={() => remove(tr)} className="ml-auto text-slate-300 hover:text-red-500">✕</button>
             </div>
           ))}
@@ -407,7 +408,7 @@ function TransitionManager({ showToast }: { showToast: (m: string) => void }) {
         <div className="border-t border-slate-100 pt-3 flex gap-2 flex-wrap items-center">
           <span className="text-xs text-slate-400">{t("เพิ่มเส้นทาง →", "Add transition →")}</span>
           <select value={toKey} onChange={(e) => setToKey(e.target.value)} className="h-8 border border-slate-200 rounded-md px-2 text-sm"><option value="">{t("ปลายทาง...", "Destination...")}</option>{statuses.filter((s) => s.key !== from).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
-          <select value={kind} onChange={(e) => setKind(e.target.value)} className="h-8 border border-slate-200 rounded-md px-2 text-sm">{KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}</select>
+          <select value={kind} onChange={(e) => setKind(e.target.value)} className="h-8 border border-slate-200 rounded-md px-2 text-sm">{KINDS.map((k) => <option key={k.value} value={k.value}>{k.label()}</option>)}</select>
           <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("ป้ายปุ่ม (เช่น 📤 ส่งตรวจ)", "Button label (e.g. 📤 Submit for review)")} className="flex-1 min-w-[140px] h-8 border border-slate-200 rounded-md px-2 text-sm" />
           <button onClick={add} className="h-8 px-3 bg-violet-600 text-white text-sm rounded-md hover:bg-violet-700">{t("เพิ่ม", "Add")}</button>
         </div>

@@ -322,7 +322,7 @@ export default function CampaignCanvasPage() {
             <span className="font-semibold text-slate-900 truncate">{name}</span>
             {detail && (
               <select value={detail.campaign.status} onChange={(e) => setStatus(e.target.value)} className="h-8 border border-slate-200 rounded-md px-2 text-sm">
-                {CAMPAIGN_STATUS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                {CAMPAIGN_STATUS.map((s) => <option key={s.value} value={s.value}>{s.label()}</option>)}
               </select>
             )}
           </div>

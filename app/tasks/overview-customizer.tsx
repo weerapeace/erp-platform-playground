@@ -10,6 +10,7 @@ import { useState, useEffect } from "react";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { KanbanSettingsControls } from "./kanban-settings";
 
 export type CardKey = "all" | "mine" | "review" | "overdue";
@@ -81,7 +82,12 @@ export function pageStyle(p: PageTheme): React.CSSProperties {
   return {};
 }
 
-const CARD_LABEL: Record<CardKey, string> = { all: "งานทั้งหมด", mine: "งานของฉัน", review: "รอตรวจ/อนุมัติ", overdue: "เกินกำหนด" };
+const CARD_LABEL: Record<CardKey, () => string> = {
+  all: () => tr("งานทั้งหมด", "All tasks"),
+  mine: () => tr("งานของฉัน", "My tasks"),
+  review: () => tr("รอตรวจ/อนุมัติ", "In review"),
+  overdue: () => tr("เกินกำหนด", "Overdue"),
+};
 
 // ===== ธีมสำเร็จรูป (preset) — กดปุ่มเดียวเปลี่ยนทั้งหน้า =====
 function makePreset(c1: string, c2: string, pageColor: string | null, cardColors: [string, string, string, string]): OverviewTheme {
@@ -100,14 +106,14 @@ function makePreset(c1: string, c2: string, pageColor: string | null, cardColors
   };
 }
 
-export type ThemePreset = { key: string; name: string; c1: string; c2: string; theme: OverviewTheme };
+export type ThemePreset = { key: string; name: () => string; c1: string; c2: string; theme: OverviewTheme };
 export const PRESETS: ThemePreset[] = [
-  { key: "violet",   name: "ม่วงมินิมอล", c1: "#7c3aed", c2: "#4f46e5", theme: makePreset("#7c3aed", "#4f46e5", null,      ["slate", "violet", "amber", "red"]) },
-  { key: "pastel",   name: "พาสเทล",       c1: "#f9a8d4", c2: "#a5b4fc", theme: makePreset("#f9a8d4", "#a5b4fc", "#fdf4ff", ["pink", "indigo", "amber", "rose"]) },
-  { key: "ocean",    name: "โอเชียน",      c1: "#0ea5e9", c2: "#14b8a6", theme: makePreset("#0ea5e9", "#14b8a6", "#f0f9ff", ["blue", "teal", "amber", "rose"]) },
-  { key: "sunset",   name: "ซันเซ็ต",      c1: "#fb7185", c2: "#f59e0b", theme: makePreset("#fb7185", "#f59e0b", "#fff7ed", ["rose", "amber", "violet", "red"]) },
-  { key: "forest",   name: "ฟอเรสต์",      c1: "#10b981", c2: "#0d9488", theme: makePreset("#10b981", "#0d9488", "#f0fdf4", ["emerald", "teal", "amber", "rose"]) },
-  { key: "graphite", name: "กราไฟต์",      c1: "#334155", c2: "#0f172a", theme: makePreset("#334155", "#0f172a", "#f1f5f9", ["slate", "blue", "amber", "red"]) },
+  { key: "violet",   name: () => tr("ม่วงมินิมอล", "Minimal Violet"), c1: "#7c3aed", c2: "#4f46e5", theme: makePreset("#7c3aed", "#4f46e5", null,      ["slate", "violet", "amber", "red"]) },
+  { key: "pastel",   name: () => tr("พาสเทล", "Pastel"),       c1: "#f9a8d4", c2: "#a5b4fc", theme: makePreset("#f9a8d4", "#a5b4fc", "#fdf4ff", ["pink", "indigo", "amber", "rose"]) },
+  { key: "ocean",    name: () => tr("โอเชียน", "Ocean"),      c1: "#0ea5e9", c2: "#14b8a6", theme: makePreset("#0ea5e9", "#14b8a6", "#f0f9ff", ["blue", "teal", "amber", "rose"]) },
+  { key: "sunset",   name: () => tr("ซันเซ็ต", "Sunset"),      c1: "#fb7185", c2: "#f59e0b", theme: makePreset("#fb7185", "#f59e0b", "#fff7ed", ["rose", "amber", "violet", "red"]) },
+  { key: "forest",   name: () => tr("ฟอเรสต์", "Forest"),      c1: "#10b981", c2: "#0d9488", theme: makePreset("#10b981", "#0d9488", "#f0fdf4", ["emerald", "teal", "amber", "rose"]) },
+  { key: "graphite", name: () => tr("กราไฟต์", "Graphite"),      c1: "#334155", c2: "#0f172a", theme: makePreset("#334155", "#0f172a", "#f1f5f9", ["slate", "blue", "amber", "red"]) },
 ];
 
 async function uploadImage(file: File): Promise<string> {
@@ -183,10 +189,10 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("ธีมสำเร็จรูป (กดเปลี่ยนทั้งหน้า)", "Preset themes (one-click)")}</div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {PRESETS.map((p) => (
-            <button key={p.key} onClick={() => onChange(p.theme)} title={p.name}
+            <button key={p.key} onClick={() => onChange(p.theme)} title={p.name()}
               className="rounded-lg border border-slate-200 overflow-hidden text-left hover:border-violet-300 hover:shadow-sm transition">
               <div className="h-10" style={{ background: `linear-gradient(135deg, ${p.c1}, ${p.c2})` }} />
-              <div className="px-2 py-1 text-xs font-medium text-slate-700">{p.name}</div>
+              <div className="px-2 py-1 text-xs font-medium text-slate-700">{p.name()}</div>
             </button>
           ))}
         </div>
@@ -392,7 +398,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
                     ? <img src={`/api/r2-image?key=${encodeURIComponent(c.iconUrl)}`} alt="" className="w-7 h-7 object-contain" />
                     : <span className="text-lg">{c.icon}</span>}
                 </div>
-                <input value={c.label ?? ""} onChange={(e) => setCard(k, { label: e.target.value || null })} placeholder={t(CARD_LABEL[k], k)} className="text-sm font-medium w-28 shrink-0 h-7 px-1.5 border border-slate-200 rounded bg-white" title={t("ชื่อการ์ด (เว้นว่าง = ค่าเริ่มต้น)", "Card label (blank = default)")} />
+                <input value={c.label ?? ""} onChange={(e) => setCard(k, { label: e.target.value || null })} placeholder={CARD_LABEL[k]()} className="text-sm font-medium w-28 shrink-0 h-7 px-1.5 border border-slate-200 rounded bg-white" title={t("ชื่อการ์ด (เว้นว่าง = ค่าเริ่มต้น)", "Card label (blank = default)")} />
                 <input value={c.icon} onChange={(e) => setCard(k, { icon: e.target.value })} placeholder="emoji" className="w-12 h-7 px-1 text-center text-base border border-slate-200 rounded bg-white" title={t("ไอคอน emoji", "emoji icon")} />
                 {canUpload && (
                   <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === `c:${k}` ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>

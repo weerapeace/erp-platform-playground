@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { STATUS_META, statusLabelFb, getCampaign, updateCampaign, deleteTask, listBrands, type CampaignDetail, type CreativeStatus, type CreativeTask, type BrandOption } from "../data";
 import { TaskDetailDrawer } from "../task-detail-drawer";
 import { applyTaskTransition } from "../task-actions";
@@ -16,11 +17,11 @@ import { UserPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { RichTextEditor } from "@/components/rich-text";
 
-export const CAMPAIGN_STATUS: { value: string; label: string; cls: string }[] = [
-  { value: "planning", label: "วางแผน", cls: "bg-sky-50 text-sky-700 border-sky-200" },
-  { value: "active",   label: "กำลังทำ", cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-  { value: "done",     label: "จบแล้ว",  cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  { value: "cancelled",label: "ยกเลิก",  cls: "bg-slate-100 text-slate-400 border-slate-200" },
+export const CAMPAIGN_STATUS: { value: string; label: () => string; cls: string }[] = [
+  { value: "planning", label: () => tr("วางแผน", "Planning"), cls: "bg-sky-50 text-sky-700 border-sky-200" },
+  { value: "active",   label: () => tr("กำลังทำ", "Active"), cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  { value: "done",     label: () => tr("จบแล้ว", "Done"),  cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  { value: "cancelled",label: () => tr("ยกเลิก", "Cancelled"),  cls: "bg-slate-100 text-slate-400 border-slate-200" },
 ];
 
 type ToastType = "success" | "error" | "info";
@@ -101,7 +102,7 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                 <div>
                   <p className="text-xs text-slate-400 mb-0.5">{t("สถานะ", "Status")}</p>
                   <select value={detail.campaign.status} onChange={(e) => setStatus(e.target.value)} className="text-sm border border-slate-200 rounded-md px-2 py-1">
-                    {CAMPAIGN_STATUS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    {CAMPAIGN_STATUS.map((s) => <option key={s.value} value={s.value}>{s.label()}</option>)}
                   </select>
                 </div>
               </div>

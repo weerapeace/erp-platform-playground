@@ -17,6 +17,7 @@ import { apiFetch } from "@/lib/api";
 import { cachedJson } from "@/lib/client-cache";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import type { UserPickerValue } from "@/components/pickers";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import {
@@ -34,23 +35,23 @@ type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 type TypeMeta = Record<string, SubtaskType>;
 
 // ป้ายปลายทางตอนอนุมัติ (อ่านง่าย)
-const APPROVE_TARGET_HINT: Record<string, string> = {
-  sku_media: "อนุมัติแล้ว → เพิ่มเข้าแกลเลอรีรูปสินค้า",
-  cover: "อนุมัติแล้ว → ตั้งเป็นรูปปกสินค้า",
-  sku_description: "อนุมัติแล้ว → บันทึกเข้า description สินค้า",
-  description_media: "อนุมัติแล้ว → เพิ่มเข้า media คำอธิบาย",
+const APPROVE_TARGET_HINT: Record<string, () => string> = {
+  sku_media: () => tr("อนุมัติแล้ว → เพิ่มเข้าแกลเลอรีรูปสินค้า", "Approved → added to product image gallery"),
+  cover: () => tr("อนุมัติแล้ว → ตั้งเป็นรูปปกสินค้า", "Approved → set as product cover image"),
+  sku_description: () => tr("อนุมัติแล้ว → บันทึกเข้า description สินค้า", "Approved → saved to product description"),
+  description_media: () => tr("อนุมัติแล้ว → เพิ่มเข้า media คำอธิบาย", "Approved → added to description media"),
 };
 
 // ④ สถานะงานย่อย: ยังไม่เริ่ม → กำลังทำ → ส่งงาน(รออนุมัติ) → อนุมัติ (ไม่มี "โพสต์แล้ว" แล้ว)
 export const SUB_STEPS = [
-  { key: "todo",               label: "ยังไม่เริ่ม", dot: "bg-slate-400" },
-  { key: "in_progress",        label: "กำลังทำ",     dot: "bg-blue-500" },
-  { key: "submitted",          label: "รออนุมัติ",   dot: "bg-amber-500" },
-  { key: "approved",           label: "อนุมัติแล้ว", dot: "bg-emerald-500" },
-  { key: "revision_requested", label: "ขอแก้",       dot: "bg-orange-500" },
-  { key: "canceled",           label: "ยกเลิก",      dot: "bg-slate-300" },
+  { key: "todo",               label: () => tr("ยังไม่เริ่ม", "Not started"), dot: "bg-slate-400" },
+  { key: "in_progress",        label: () => tr("กำลังทำ", "In progress"),     dot: "bg-blue-500" },
+  { key: "submitted",          label: () => tr("รออนุมัติ", "Pending approval"),   dot: "bg-amber-500" },
+  { key: "approved",           label: () => tr("อนุมัติแล้ว", "Approved"), dot: "bg-emerald-500" },
+  { key: "revision_requested", label: () => tr("ขอแก้", "Revision requested"),       dot: "bg-orange-500" },
+  { key: "canceled",           label: () => tr("ยกเลิก", "Canceled"),      dot: "bg-slate-300" },
 ];
-const subStepLabel = (st: string) => SUB_STEPS.find((s) => s.key === st)?.label ?? (st === "posted" || st === "done" ? "อนุมัติแล้ว" : "ยังไม่เริ่ม");
+const subStepLabel = (st: string) => SUB_STEPS.find((s) => s.key === st)?.label() ?? (st === "posted" || st === "done" ? tr("อนุมัติแล้ว", "Approved") : tr("ยังไม่เริ่ม", "Not started"));
 const subStepDot = (st: string) => (SUB_STEPS.find((s) => s.key === st)?.dot ?? ((st === "posted" || st === "done") ? "bg-emerald-500" : "bg-slate-400"));
 const isSubDone = (st: string) => st === "approved" || st === "posted" || st === "done";
 
@@ -146,7 +147,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const showImages = (cfg.accepts_image ?? ty?.accepts_image ?? true) !== false;
   const showLinks = (cfg.accepts_link ?? ty?.accepts_link ?? true) !== false;
   const approveTarget = cfg.approve_target ?? ty?.approve_target ?? "none";
-  const approveHint = APPROVE_TARGET_HINT[approveTarget];
+  const approveHint = APPROVE_TARGET_HINT[approveTarget]?.();
   // copy prompt: ให้ค่าจาก registry (ชนิดงาน) เป็นหลัก — งานรูปภาพ/รูปคำอธิบาย = ปิด (แม้ snapshot เก่าจะเปิดไว้)
   const hasPrompt = (ty?.has_copy_prompt ?? cfg.has_copy_prompt) === true;
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);

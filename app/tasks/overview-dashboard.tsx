@@ -385,7 +385,7 @@ export function OverviewDashboard({
                     return (
                       <a key={c.id} href={`/tasks/campaigns/${c.id}`} className="block w-full text-left p-3 rounded-lg border border-slate-100 hover:border-violet-300 hover:bg-violet-50/40 transition-colors">
                         <div className="flex items-center justify-between gap-2">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${st?.cls ?? "bg-slate-50 text-slate-500 border-slate-200"}`}>{st?.label ?? c.status}</span>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${st?.cls ?? "bg-slate-50 text-slate-500 border-slate-200"}`}>{st?.label() ?? c.status}</span>
                           {open > 0 && <span className="text-[11px] text-slate-500">{open} {t("งานค้าง", "open")}</span>}
                         </div>
                         <p className="text-sm font-semibold text-slate-800 mt-1.5 line-clamp-2">{c.name}</p>

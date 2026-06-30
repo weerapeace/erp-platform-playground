@@ -4,6 +4,7 @@
 // ============================================================
 import { isOverdue, type CreativeTask } from "./data";
 import { isTerminal } from "./use-statuses";
+import { tr } from "@/lib/lang";
 
 export type MetricDue = "" | "today" | "overdue" | "thisweek" | "thismonth" | "none";
 export type MetricCond = {
@@ -41,13 +42,13 @@ export function matchMetric(tk: CreativeTask, cond: MetricCond, ctx: { myTaskIds
 /** สรุปเงื่อนไขเป็นข้อความสั้นๆ (โชว์ใต้ชื่อการ์ดในตัวจัดการ) */
 export function describeCond(c: MetricCond, opt: { typeLabel: (v: string) => string; brandLabel: (v: string) => string; statusLabel: (v: string) => string; priorityLabel: (v: string) => string }): string {
   const parts: string[] = [];
-  if (c.mine) parts.push("ของฉัน");
-  if (c.openOnly) parts.push("ยังไม่เสร็จ");
+  if (c.mine) parts.push(tr("ของฉัน", "Mine"));
+  if (c.openOnly) parts.push(tr("ยังไม่เสร็จ", "Open"));
   if (c.status) parts.push(opt.statusLabel(c.status));
   if (c.priority) parts.push(opt.priorityLabel(c.priority));
   if (c.taskType) parts.push(opt.typeLabel(c.taskType));
   if (c.brandId) parts.push(opt.brandLabel(c.brandId));
-  const dueLbl: Record<string, string> = { today: "ครบกำหนดวันนี้", overdue: "เกินกำหนด", thisweek: "ภายในสัปดาห์นี้", thismonth: "ภายในเดือนนี้", none: "ไม่มีกำหนดส่ง" };
+  const dueLbl: Record<string, string> = { today: tr("ครบกำหนดวันนี้", "Due today"), overdue: tr("เกินกำหนด", "Overdue"), thisweek: tr("ภายในสัปดาห์นี้", "This week"), thismonth: tr("ภายในเดือนนี้", "This month"), none: tr("ไม่มีกำหนดส่ง", "No due date") };
   if (c.due) parts.push(dueLbl[c.due] ?? "");
-  return parts.filter(Boolean).join(" · ") || "ทุกงาน";
+  return parts.filter(Boolean).join(" · ") || tr("ทุกงาน", "All tasks");
 }

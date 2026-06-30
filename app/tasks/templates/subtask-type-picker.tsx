@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { ERPInput, ERPSelect } from "@/components/form";
 import { PromptEditor } from "@/components/prompt-editor";
 import { UserPicker, type UserPickerValue } from "@/components/pickers";
@@ -50,17 +51,17 @@ export function stepFromType(ty: SubtaskType): EditStep {
   };
 }
 
-const DESC_FIELD_OPTS = [
-  { value: "description", label: "คำอธิบายหลัก" },
-  { value: "english_description", label: "คำอธิบาย (อังกฤษ)" },
-  { value: "platform_description", label: "คำอธิบายแพลตฟอร์ม" },
+const DESC_FIELD_OPTS = () => [
+  { value: "description", label: tr("คำอธิบายหลัก", "Main description") },
+  { value: "english_description", label: tr("คำอธิบาย (อังกฤษ)", "Description (English)") },
+  { value: "platform_description", label: tr("คำอธิบายแพลตฟอร์ม", "Platform description") },
 ];
 
-const TYPE_HINT: Record<string, string> = {
-  images: "อัปรูป → อนุมัติ → เข้าแกลเลอรีรูปสินค้า",
-  description_text: "เขียนคำอธิบาย (มี prompt) → อนุมัติ → เข้า description",
-  description_image: "รูปประกอบคำอธิบาย → อนุมัติ → เข้า media คำอธิบาย",
-  custom: "งานอิสระ ตั้งค่าได้เอง (text/รูป/ลิงก์/ไฟล์)",
+const TYPE_HINT: Record<string, () => string> = {
+  images: () => tr("อัปรูป → อนุมัติ → เข้าแกลเลอรีรูปสินค้า", "Upload images → approve → product gallery"),
+  description_text: () => tr("เขียนคำอธิบาย (มี prompt) → อนุมัติ → เข้า description", "Write description (with prompt) → approve → product description"),
+  description_image: () => tr("รูปประกอบคำอธิบาย → อนุมัติ → เข้า media คำอธิบาย", "Description images → approve → description media"),
+  custom: () => tr("งานอิสระ ตั้งค่าได้เอง (text/รูป/ลิงก์/ไฟล์)", "Free-form task, configurable (text/image/link/file)"),
 };
 
 export function SubtaskTypePicker({ steps, types, onChange }: { steps: EditStep[]; types: SubtaskType[]; onChange: (s: EditStep[]) => void }) {
@@ -90,7 +91,7 @@ export function SubtaskTypePicker({ steps, types, onChange }: { steps: EditStep[
                 <span className="text-lg leading-none mt-0.5">{ty.icon ?? "🧩"}</span>
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-slate-800">{ty.label_th}</span>
-                  <span className="block text-[11px] text-slate-400 leading-snug">{TYPE_HINT[ty.key] ?? (ty.has_copy_prompt ? "มี prompt ช่วยเขียน" : "งานย่อยทั่วไป")}</span>
+                  <span className="block text-[11px] text-slate-400 leading-snug">{TYPE_HINT[ty.key]?.() ?? (ty.has_copy_prompt ? t("มี prompt ช่วยเขียน", "Includes a writing prompt") : t("งานย่อยทั่วไป", "General subtask"))}</span>
                 </span>
               </button>
             );
@@ -179,7 +180,7 @@ function StepCard({ step, index, onTitle, onReqBefore, onAssignees, onCfg, onRem
             {chk(t("ต้องอนุมัติ", "Require approval"), c.requires_approval, (v) => onCfg({ requires_approval: v }))}
             {chk(t("มีปุ่ม copy prompt", "Copy prompt"), c.has_copy_prompt, (v) => onCfg({ has_copy_prompt: v }))}
             <label className="flex items-center gap-1.5 text-xs text-slate-600">{t("ลงช่อง", "Field")}
-              <ERPSelect value={c.description_field ?? "description"} options={DESC_FIELD_OPTS} onChange={(e) => onCfg({ description_field: e.target.value })} className="h-7" /></label>
+              <ERPSelect value={c.description_field ?? "description"} options={DESC_FIELD_OPTS()} onChange={(e) => onCfg({ description_field: e.target.value })} className="h-7" /></label>
             <label className="flex items-center gap-1.5 text-xs text-slate-600">{t("วิธีบันทึก", "Mode")}
               <ERPSelect value={c.desc_mode ?? "append"} options={[{ value: "append", label: t("ต่อท้าย", "Append") }, { value: "replace", label: t("แทนที่", "Replace") }]} onChange={(e) => onCfg({ desc_mode: e.target.value as "append" | "replace" })} className="h-7" /></label>
           </div>

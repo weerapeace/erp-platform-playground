@@ -25,10 +25,11 @@ import { BulletTextarea } from "@/components/bullet-textarea";
 import { SubtaskTypePicker, type EditStep } from "./subtask-type-picker";
 import { BrandPromptsTab } from "./brand-prompts";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
-const FREQ =[{ value: "daily", label: "รายวัน" }, { value: "weekly", label: "รายสัปดาห์" }, { value: "monthly", label: "รายเดือน" }];
-const FREQ_LABEL = Object.fromEntries(FREQ.map((f) => [f.value, f.label]));
-const PRIORITY_OPTIONS = Object.entries(PRIORITY_META).map(([v, m]) => ({ value: v, label: m.label }));
+const FREQ =[{ value: "daily", label: () => tr("รายวัน", "Daily") }, { value: "weekly", label: () => tr("รายสัปดาห์", "Weekly") }, { value: "monthly", label: () => tr("รายเดือน", "Monthly") }];
+const FREQ_LABEL = (): Record<string, string> => Object.fromEntries(FREQ.map((f) => [f.value, f.label()]));
+const PRIORITY_OPTIONS = () => Object.entries(PRIORITY_META).map(([v, m]) => ({ value: v, label: tr(m.label, m.label_en ?? m.label) }));
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
 export default function TemplatesPage() {
@@ -188,7 +189,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
         <ERPFormSection title={t("ข้อมูลเทมเพลต", "Template Details")} columns={2}>
           <ERPFormField label={t("ชื่อเทมเพลต", "Template Name")} required span={2}><ERPInput value={form.name} onChange={(e) => setFormD((f) => ({ ...f, name: e.target.value }))} placeholder={t("เช่น ถ่ายรูปสินค้าใหม่", "e.g. New product photo shoot")} /></ERPFormField>
           <ERPFormField label={t("ประเภทงาน", "Task Type")}><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => setFormD((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
-          <ERPFormField label={t("ความสำคัญเริ่มต้น", "Default Priority")}><ERPSelect value={form.default_priority} options={PRIORITY_OPTIONS} onChange={(e) => setFormD((f) => ({ ...f, default_priority: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("ความสำคัญเริ่มต้น", "Default Priority")}><ERPSelect value={form.default_priority} options={PRIORITY_OPTIONS()} onChange={(e) => setFormD((f) => ({ ...f, default_priority: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setFormD((f) => ({ ...f, brand_id: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("แพลตฟอร์ม", "Platforms")}><div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlat(p.value)} className={`px-2 py-0.5 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>)}</div></ERPFormField>
           <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เริ่มต้น)", "Reviewer/Approver (default)")} hint={t("งานที่สร้างจากแม่แบบนี้จะตั้งผู้ตรวจเหล่านี้ให้ (เลือกได้หลายคน)", "Tasks from this template get these reviewers (multiple)")}><MultiUserPicker value={reviewers} onChange={(v) => { setReviewers(v); setDirty(true); }} disableCreate /></ERPFormField>
@@ -313,7 +314,7 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-800">{r.name}</p>
                   <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">
-                    <span className="text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{FREQ_LABEL[r.frequency] ?? r.frequency}{r.interval_n > 1 ? ` ×${r.interval_n}` : ""}</span>
+                    <span className="text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{FREQ_LABEL()[r.frequency] ?? r.frequency}{r.interval_n > 1 ? ` ×${r.interval_n}` : ""}</span>
                     {r.template_label && <span>· {t("แม่แบบ", "Template")}: {r.template_label}</span>}
                     {r.assignee_label && <span>· 👤 {r.assignee_label}</span>}
                     {r.next_run && <span>· {t("รอบถัดไป", "Next run")}: {r.next_run}</span>}
@@ -338,7 +339,7 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
           <ERPFormField label={t("ชื่อกฎ/ชื่องาน", "Rule name / Task name")} required span={2}><ERPInput value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder={t("เช่น ทำ Content Calendar รายสัปดาห์", "e.g. Weekly Content Calendar")} /></ERPFormField>
           <ERPFormField label={t("ใช้เทมเพลต", "Use Template")}><ERPSelect value={form.template_id} options={[{ value: "", label: `— ${t("ไม่ใช้", "None")} —` }, ...templates.map((tpl) => ({ value: tpl.id, label: tpl.name }))]} onChange={(e) => setForm((f) => ({ ...f, template_id: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("ผู้รับผิดชอบ", "Assignee")}><UserPicker value={assignee} onChange={setAssignee} disableCreate /></ERPFormField>
-          <ERPFormField label={t("ความถี่", "Frequency")} hint={t("ตั้งว่าให้สร้างงานซ้ำแบบไหน: รายวัน / รายสัปดาห์ / รายเดือน", "How often to repeat: daily / weekly / monthly")}><ERPSelect value={form.frequency} options={FREQ} onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("ความถี่", "Frequency")} hint={t("ตั้งว่าให้สร้างงานซ้ำแบบไหน: รายวัน / รายสัปดาห์ / รายเดือน", "How often to repeat: daily / weekly / monthly")}><ERPSelect value={form.frequency} options={FREQ.map((f) => ({ value: f.value, label: f.label() }))} onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("ทุก ๆ (รอบ)", "Every (cycles)")} hint={t("เว้นกี่รอบถึงสร้างครั้งถัดไป เช่น 2 + รายสัปดาห์ = ทุก 2 สัปดาห์", "Gap between runs, e.g. 2 + weekly = every 2 weeks")}><ERPInput type="number" value={String(form.interval_n)} onChange={(e) => setForm((f) => ({ ...f, interval_n: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setForm((f) => ({ ...f, brand_id: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("แคมเปญ", "Campaign")}><ERPSelect value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => setForm((f) => ({ ...f, campaign_id: e.target.value }))} /></ERPFormField>
@@ -349,7 +350,7 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
         {/* section งาน — ค่าที่จะติดไปกับงานทุกใบที่ระบบสร้าง */}
         <ERPFormSection title={t("รายละเอียดงาน (ติดไปกับงานที่สร้าง)", "Task details (applied to generated tasks)")} columns={2}>
           <ERPFormField label={t("ประเภทงาน", "Task Type")}><ERPSelect value={form.task_type} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...taskTypes]} onChange={(e) => setForm((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
-          <ERPFormField label={t("ความสำคัญ", "Priority")}><ERPSelect value={form.priority} options={PRIORITY_OPTIONS} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("ความสำคัญ", "Priority")}><ERPSelect value={form.priority} options={PRIORITY_OPTIONS()} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("กำหนดส่ง", "Due date")} hint={t("วันที่ของเดือนที่ให้เป็นกำหนดส่ง (1–31) · ว่าง = ใช้วันถึงรอบ", "Day of month for the due date (1–31) · blank = use run date")}><ERPInput type="number" value={form.due_day} placeholder={t("เช่น 25 = วันที่ 25 ของเดือน", "e.g. 25 = the 25th")} onChange={(e) => setForm((f) => ({ ...f, due_day: e.target.value }))} /></ERPFormField>
           <ERPFormField label="Platform">
             <div className="flex flex-wrap gap-1.5">

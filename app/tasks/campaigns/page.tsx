@@ -101,7 +101,7 @@ export default function CampaignsPage() {
               return (
                 <div key={c.id} onClick={() => router.push(`/tasks/campaigns/${c.id}`)} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 hover:shadow cursor-pointer transition-colors">
                   <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${st.cls}`}>{st.label}</span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${st.cls}`}>{st.label()}</span>
                     <button onClick={(e) => { e.stopPropagation(); setDelTarget(c); }} className="text-xs text-slate-300 hover:text-red-500">{t("ลบ", "Delete")}</button>
                   </div>
                   <p className="text-base font-semibold text-slate-800 leading-snug line-clamp-2">{c.name}</p>
