@@ -17,7 +17,7 @@ import { CalendarBoard } from "./calendar-board";
 import { arrangeMySubtasks, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
 import { isTerminal, statusMeta, type Status } from "./use-statuses";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
-import { isOverdue, updateTask, PRIORITY_META, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
+import { isOverdue, updateTask, PRIORITY_META, priorityLabel, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
 import { matchMetric, type MetricDef } from "./metrics";
 import { MetricCardsManager } from "./metric-cards-manager";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
@@ -97,7 +97,7 @@ export function OverviewDashboard({
   const metricCounts = useMemo(() => Object.fromEntries((metrics ?? []).map((m) => [m.id, tasks.filter((tk) => matchMetric(tk, m.cond, metricCtx)).length])), [metrics, tasks, metricCtx]);
   const activeMetricDef = (metrics ?? []).find((m) => m.id === activeMetric) ?? null;
   const statusOptions = useMemo(() => { const s = new Set<string>(); for (const tk of tasks) if (tk.status) s.add(tk.status); return [...s].map((v) => ({ value: v, label: statusMeta(v).label })); }, [tasks]);
-  const priorityOptions = useMemo(() => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label })), []);
+  const priorityOptions = useMemo(() => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) })), [t]);
 
   // ตาราง: การ์ดเมตริก (ถ้ากด) → กรองด้วยเงื่อนไข · ไม่งั้นใช้การ์ดมาตรฐาน × ประเภท × แบรนด์
   const filteredTasks = useMemo(() => {
@@ -121,7 +121,7 @@ export function OverviewDashboard({
 
   // แก้หลายงานพร้อมกัน (bulk) — เฉพาะฟิลด์ที่แก้ตรงได้ปลอดภัย (ไม่รวมสถานะ เพราะต้องผ่าน workflow)
   const bulkEditFields = useMemo(() => [
-    { key: "priority", label: t("ความสำคัญ", "Priority"), type: "select" as const, options: (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label })) },
+    { key: "priority", label: t("ความสำคัญ", "Priority"), type: "select" as const, options: (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) })) },
     { key: "task_type", label: t("ประเภทงาน", "Task type"), type: "select" as const, options: taskTypes },
     { key: "brand_id", label: t("แบรนด์", "Brand"), type: "select" as const, options: brands.map((b) => ({ value: b.id, label: b.name })) },
     { key: "due_date", label: t("กำหนดส่ง (YYYY-MM-DD)", "Due date (YYYY-MM-DD)"), type: "text" as const },

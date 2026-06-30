@@ -12,16 +12,17 @@ import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   useDraggable, useDroppable, type DragStartEvent, type DragEndEvent,
 } from "@dnd-kit/core";
-import { PRIORITY_META, isOverdue, type CreativeTask, type CreativePriority } from "./data";
+import { PRIORITY_META, priorityLabel, isOverdue, type CreativeTask, type CreativePriority } from "./data";
 import { statusMeta, type Status } from "./use-statuses";
 
 function CardBody({ task, dragging }: { task: CreativeTask; dragging?: boolean }) {
+  useT();   // subscribe ภาษา
   const pr = PRIORITY_META[task.priority as CreativePriority];
   const overdue = isOverdue(task);
   return (
     <div className={`bg-white rounded-lg border border-slate-200 p-3 shadow-sm ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}>
       <div className="flex items-center justify-between gap-2 mb-1.5">
-        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{pr.label}</span>
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span>
         <span className="font-mono text-[10px] text-slate-400">{task.task_no}</span>
       </div>
       <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2 mb-2">{task.title}</p>

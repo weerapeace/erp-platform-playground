@@ -18,11 +18,11 @@ import { ImageInput } from "@/components/image-input";
 import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
 import {
-  PRIORITY_META, createTask, listCampaigns, listBrands, listTemplates,
+  PRIORITY_META, priorityLabel, createTask, listCampaigns, listBrands, listTemplates,
   type CreativePriority, type Campaign, type BrandOption, type TaskTemplate, type SubtaskStepConfig, type TemplateContentItem,
 } from "./data";
 
-const PRIORITY_OPTIONS = (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label }));
+const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 
 function todayStr(): string { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function addDaysStr(dateStr: string, days: number): string {
@@ -219,7 +219,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         <ERPFormSection title={t("ข้อมูลงาน","Task info")} columns={2}>
           <ERPFormField label={t("ชื่องาน","Task title")} required span={2}><ERPInput value={form.title} onChange={(e) => updateForm({ title: e.target.value })} placeholder={t("เช่น ถ่ายรูปกระเป๋า Summer 8 สี","e.g. Summer bag photoshoot 8 colors")} /></ERPFormField>
           <ERPFormField label={t("ประเภทงาน","Task type")}><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => updateForm({ task_type: e.target.value })} /></ERPFormField>
-          <ERPFormField label={t("ความสำคัญ","Priority")}><ERPSelect value={form.priority} options={PRIORITY_OPTIONS} onChange={(e) => updateForm({ priority: e.target.value as CreativePriority })} /></ERPFormField>
+          <ERPFormField label={t("ความสำคัญ","Priority")}><ERPSelect value={form.priority} options={priorityOptions()} onChange={(e) => updateForm({ priority: e.target.value as CreativePriority })} /></ERPFormField>
           <ERPFormField label={t("แบรนด์","Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => updateForm({ brand_id: e.target.value })} /></ERPFormField>
           {!lockedCampaignId && <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => updateForm({ campaign_id: e.target.value })} /></ERPFormField>}
           <ERPFormField label={t("ผู้รับผิดชอบ","Assignee")}><UserPicker value={form.assignee} onChange={(v) => updateForm({ assignee: v })} disableCreate /></ERPFormField>

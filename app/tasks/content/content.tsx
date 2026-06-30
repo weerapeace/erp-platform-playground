@@ -18,7 +18,7 @@ import { ImageAttach } from "@/components/image-attach";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { r2ImageUrl } from "@/lib/r2-image";
 import {
-  CONTENT_STATUS_META, POST_TYPES,
+  CONTENT_STATUS_META, POST_TYPES, contentStatusLabel, postTypeLabel,
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
   listCampaigns, listBrands, listHashtags, createHashtag, getTask, listSubtasks,
   getCaptionTemplates, saveCaptionTemplates, getParentSkuColors,
@@ -39,12 +39,12 @@ import { useT } from "@/components/i18n";
 // drawer สินค้ากลาง (ของกลาง) — เปิดดู Parent SKU จากในคอนเทนต์ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
-const POST_TYPE_LABEL = Object.fromEntries(POST_TYPES.map((p) => [p.value, p.label]));
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
 function StatusBadge({ status }: { status: ContentStatus }) {
+  useT();   // subscribe ภาษา
   const m = CONTENT_STATUS_META[status] ?? CONTENT_STATUS_META.draft;
-  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>;
+  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{contentStatusLabel(status)}</span>;
 }
 
 const EMPTY_FORM = { title: "", post_type: "image", status: "draft" as ContentStatus, brand_id: "", campaign_id: "", scheduled_at: "", product: null as SkuPickerValue | null, platforms: [] as string[], note: "" };
@@ -192,7 +192,7 @@ export function ContentPageView() {
                   <div className="flex flex-wrap gap-1 mt-2">{(c.platforms ?? []).map((p) => <span key={p} className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{platformLabel(p)}</span>)}</div>
                   <div className="flex items-center gap-2 text-xs text-slate-400 mt-2 flex-wrap">
                     {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
-                    {c.post_type && <span>· {POST_TYPE_LABEL[c.post_type] ?? c.post_type}</span>}
+                    {c.post_type && <span>· {postTypeLabel(c.post_type)}</span>}
                     {c.assignee_label && <span>· 🙋 {c.assignee_label}</span>}
                     {c.scheduled_at && <span>· 🗓 {c.scheduled_at.slice(0, 16).replace("T", " ")}</span>}
                   </div>
@@ -220,8 +220,8 @@ export function ContentPageView() {
         )}
         <ERPFormSection title={t("ข้อมูลคอนเทนต์", "Content Details")} columns={2}>
           <ERPFormField label={t("ชื่อคอนเทนต์", "Content Title")} required span={2}><ERPInput value={form.title} onChange={(e) => upd({ title: e.target.value })} placeholder={t("เช่น โปรโมต Heart Bag สีชมพู 7.7", "e.g. Promote Heart Bag Pink 7.7")} /></ERPFormField>
-          <ERPFormField label={t("ประเภทโพสต์", "Post Type")}><ERPSelect value={form.post_type} options={POST_TYPES} onChange={(e) => upd({ post_type: e.target.value })} /></ERPFormField>
-          <ERPFormField label={t("สถานะ", "Status")}><ERPSelect value={form.status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => upd({ status: e.target.value as ContentStatus })} /></ERPFormField>
+          <ERPFormField label={t("ประเภทโพสต์", "Post Type")}><ERPSelect value={form.post_type} options={POST_TYPES.map((p) => ({ value: p.value, label: postTypeLabel(p.value) }))} onChange={(e) => upd({ post_type: e.target.value })} /></ERPFormField>
+          <ERPFormField label={t("สถานะ", "Status")}><ERPSelect value={form.status} options={Object.keys(CONTENT_STATUS_META).map((v) => ({ value: v, label: contentStatusLabel(v as ContentStatus) }))} onChange={(e) => upd({ status: e.target.value as ContentStatus })} /></ERPFormField>
           <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => upd({ brand_id: e.target.value })} /></ERPFormField>
           <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
           <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")}><ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} /></ERPFormField>
@@ -582,7 +582,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           <div className={`flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} ${isWide ? "overflow-y-auto min-w-0" : ""}`} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
             {/* status + schedule + assignee — ปักไว้บนสุดเสมอ */}
             <div className="grid grid-cols-2 gap-3" style={{ order: -1 }}>
-              <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
+              <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.keys(CONTENT_STATUS_META).map((v) => ({ value: v, label: contentStatusLabel(v as ContentStatus) }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
               <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Schedule Post")}</label><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
               <div className="col-span-2"><label className="text-xs text-slate-400">{t("ผู้รับผิดชอบคอนเทนต์", "Content assignee")}</label><UserPicker value={assignee} onChange={setAssignee} disableCreate /></div>
             </div>

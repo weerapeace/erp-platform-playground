@@ -13,7 +13,7 @@ import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
 import {
-  PRIORITY_META, isOverdue,
+  PRIORITY_META, priorityLabel, isOverdue,
   type CreativeTask, type CreativePriority,
 } from "./data";
 import { statusMeta, canTransitionTo, type Status } from "./use-statuses";
@@ -675,6 +675,7 @@ function IconAlign({ align }: { align: Align }) {
 }
 
 function CanvasCard({ task }: { task: CreativeTask }) {
+  useT();   // subscribe ภาษา
   const pr = PRIORITY_META[task.priority as CreativePriority] ?? PRIORITY_META.normal;
   const m = statusMeta(task.status);
   const overdue = isOverdue(task);
@@ -689,7 +690,7 @@ function CanvasCard({ task }: { task: CreativeTask }) {
       <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2 mb-1.5">{task.title}</p>
       {task.sku_code && <p className="text-[11px] text-slate-400 line-clamp-1 mb-1">📦 {task.sku_code}</p>}
       <div className="flex items-center justify-between gap-2 text-[11px]">
-        <span className={`px-1.5 py-0.5 rounded-full border ${pr.cls}`}>{pr.label}</span>
+        <span className={`px-1.5 py-0.5 rounded-full border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span>
         <span className="text-slate-500 line-clamp-1">👤 {task.assignee_label || "—"}</span>
       </div>
       <div className="flex items-center gap-2 mt-1.5">

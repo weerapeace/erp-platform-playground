@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
-import { STATUS_META, getCampaign, updateCampaign, deleteTask, listBrands, type CampaignDetail, type CreativeStatus, type CreativeTask, type BrandOption } from "../data";
+import { STATUS_META, statusLabelFb, getCampaign, updateCampaign, deleteTask, listBrands, type CampaignDetail, type CreativeStatus, type CreativeTask, type BrandOption } from "../data";
 import { TaskDetailDrawer } from "../task-detail-drawer";
 import { applyTaskTransition } from "../task-actions";
 import { useRefetchOnFocus } from "@/lib/use-refetch-on-focus";
@@ -115,7 +115,7 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                 <div>
                   <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("สรุปสถานะงาน", "Task status summary")}</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {summaryItems.map(([st, n]) => { const m = STATUS_META[st as CreativeStatus] ?? STATUS_META.backlog; return <span key={st} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label} {n}</span>; })}
+                    {summaryItems.map(([st, n]) => { const m = STATUS_META[st as CreativeStatus] ?? STATUS_META.backlog; return <span key={st} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{statusLabelFb(st)} {n}</span>; })}
                   </div>
                 </div>
               )}

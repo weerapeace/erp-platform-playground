@@ -36,7 +36,7 @@ import { type MetricDef } from "./metrics";
 import { taskTypeLabel } from "./use-options";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import {
-  PRIORITY_RANK, PRIORITY_META, isOverdue,
+  PRIORITY_RANK, PRIORITY_META, priorityLabel, isOverdue,
   listTasks, deleteTask, updateTask,
   listCampaigns, listBrands, listMySubtasks,
   type CreativeTask, type CreativeStatus, type CreativePriority,
@@ -435,7 +435,7 @@ function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
                       <div className="flex-1 min-w-0">
                         <span className="text-sm text-slate-700">{s.title}</span>
                         <span className="ml-2 text-[10px] text-slate-400">{SUB_STATUS_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
-                        {s.priority && s.priority !== "normal" && <span className="ml-2 text-[10px] text-slate-400">· {PRIORITY_META[s.priority as CreativePriority]?.label ?? s.priority}</span>}
+                        {s.priority && s.priority !== "normal" && <span className="ml-2 text-[10px] text-slate-400">· {priorityLabel(s.priority as CreativePriority)}</span>}
                         {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must complete first")}</span>}
                         <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
                       </div>

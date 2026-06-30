@@ -12,6 +12,7 @@ export {
   TASK_TYPES, PLATFORMS, TRANSITIONS, PRIMARY_ACTIONS, STATUS_PROGRESS,
   ALL_STATUSES, canTransition,
   CONTENT_STATUS_META, POST_TYPES, HASHTAG_CATEGORIES,
+  priorityLabel, approvalLabel, assetLabel, statusLabelFb, contentStatusLabel, postTypeLabel,
 } from "@/lib/creative-tasks";
 
 import type { CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus, ContentStatus } from "@/lib/creative-tasks";

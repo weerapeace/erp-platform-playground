@@ -13,7 +13,7 @@ import { ERPInput, ERPSelect } from "@/components/form";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions, platformLabel } from "./use-options";
 import {
-  CONTENT_STATUS_META, POST_TYPES,
+  CONTENT_STATUS_META, POST_TYPES, contentStatusLabel,
   listContent, createContent, updateContent,
   type ContentItem, type ContentStatus, type BrandOption,
 } from "./data";
@@ -23,8 +23,9 @@ const POST_TYPE_LABEL = Object.fromEntries(POST_TYPES.map((p) => [p.value, p.lab
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 
 function StatusChip({ status }: { status: ContentStatus }) {
+  useT();   // subscribe ภาษา
   const m = CONTENT_STATUS_META[status] ?? CONTENT_STATUS_META.draft;
-  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>;
+  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{contentStatusLabel(status)}</span>;
 }
 
 export function TaskContentTab({ taskId, brandId, brands, pushToast }: {

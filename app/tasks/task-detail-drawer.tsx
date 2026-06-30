@@ -34,13 +34,13 @@ import { HoverImage } from "@/components/hover-image";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./use-statuses";
 import {
-  PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue,
+  PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue, priorityLabel, approvalLabel, assetLabel,
   getTask, updateTask, transitionTask, addComment, addAttachment, deleteAttachment,
   type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption, type SubtaskAssignee,
 } from "./data";
 
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
-const PRIORITY_OPTIONS = (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label }));
+const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 // ผู้รับผิดชอบ (หลายคน) จัดการแยกที่ MultiAssigneeField ในโหมดดู — ฟอร์มแก้ไขเต็มไม่มี assignee แล้ว (กันรีเซ็ตหลายคน)
 type EditForm = { task_type: string; priority: CreativePriority; brand_id: string; due_date: string; platforms: string[] };
 
@@ -49,8 +49,9 @@ export function StatusBadge({ status }: { status: string }) {
   return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>;
 }
 export function PriorityBadge({ priority }: { priority: CreativePriority }) {
+  useT();   // subscribe ภาษา → ป้ายสลับตามภาษา
   const m = PRIORITY_META[priority] ?? PRIORITY_META.normal;
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}>{m.label}</span>;
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}>{priorityLabel(priority)}</span>;
 }
 
 // QuickField — คลิกที่ค่า → แก้ตรงนั้นทันที (เซฟอัตโนมัติ) · ไม่ active = แสดงค่าอ่านอย่างเดียว + ✎ ตอน hover
@@ -259,8 +260,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             <div className="flex items-center gap-2 flex-wrap">
               <StatusBadge status={d.status} />
               <PriorityBadge priority={d.priority} />
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${APPROVAL_META[d.approval_status].cls}`}>{t("อนุมัติ", "Approval")}: {APPROVAL_META[d.approval_status].label}</span>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ASSET_META[d.asset_status].cls}`}>{ASSET_META[d.asset_status].label}</span>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${APPROVAL_META[d.approval_status].cls}`}>{t("อนุมัติ", "Approval")}: {approvalLabel(d.approval_status)}</span>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ASSET_META[d.asset_status].cls}`}>{assetLabel(d.asset_status)}</span>
             </div>
             {/* progress */}
             <div>
@@ -389,7 +390,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3" style={{ order: 1 }}>
                   <div className="grid grid-cols-2 gap-3">
                     <div><label className="text-xs text-slate-400">{t("ประเภทงาน", "Task Type")}</label><ERPSelect value={ef.task_type} options={taskTypes} onChange={(e) => setEf({ ...ef, task_type: e.target.value })} /></div>
-                    <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={PRIORITY_OPTIONS} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
+                    <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={priorityOptions()} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
                     <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><ERPSelect value={ef.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} /></div>
                     <div><label className="text-xs text-slate-400">{t("กำหนดส่ง", "Due Date")}</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
                     <div className="col-span-2 text-[11px] text-slate-400">{t("ผู้รับผิดชอบ / ผู้ตรวจ (หลายคน) แก้ที่ช่องในโหมดดู", "Edit assignees / reviewers (multiple) in view mode")}</div>

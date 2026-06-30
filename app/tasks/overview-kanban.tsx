@@ -18,7 +18,7 @@ import { HoverPreview } from "@/components/hover-image";
 import { AssigneeStack } from "./assignee-avatar";
 import { taskTypeLabel } from "./use-options";
 import { statusMeta, type Status } from "./use-statuses";
-import { PRIORITY_META, isOverdue, type CreativeTask, type CreativePriority, type BrandOption } from "./data";
+import { PRIORITY_META, priorityLabel, isOverdue, type CreativeTask, type CreativePriority, type BrandOption } from "./data";
 import type { KanbanTheme, KanbanGroupBy } from "./overview-customizer";
 
 const NONE = "__none__";
@@ -39,6 +39,7 @@ function coverKey(task: CreativeTask): string | null {
 
 // ───────── การ์ด ─────────
 function CardBody({ task, cfg, dragging }: { task: CreativeTask; cfg: KanbanTheme; dragging?: boolean }) {
+  useT();   // subscribe ภาษา
   const pr = PRIORITY_META[task.priority as CreativePriority];
   const overdue = isOverdue(task);
   const cover = cfg.cover ? coverKey(task) : null;
@@ -59,7 +60,7 @@ function CardBody({ task, cfg, dragging }: { task: CreativeTask; cfg: KanbanThem
       )}
       <div className={compact ? "p-2" : "p-2.5"}>
         <div className={`flex items-center justify-between gap-2 ${compact ? "mb-1" : "mb-1.5"}`}>
-          {cfg.priority && pr ? <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{pr.label}</span> : <span />}
+          {cfg.priority && pr ? <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span> : <span />}
           {showTaskNo && <span className="font-mono text-[10px] text-slate-400">{task.task_no}</span>}
         </div>
         <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{task.title}</p>
@@ -140,7 +141,7 @@ export function OverviewKanban({ tasks, statuses, brands, cfg, accent, onMoveSta
       return [...base, ...extra];
     }
     if (cfg.groupBy === "priority") {
-      return (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ key: k, label: PRIORITY_META[k].label }));
+      return (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ key: k, label: priorityLabel(k) }));
     }
     if (cfg.groupBy === "brand") {
       const present = new Set(tasks.map((x) => x.brand_id ?? NONE));
