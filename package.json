@@ -40,6 +40,7 @@
     "@tiptap/react": "^3.26.0",
     "@tiptap/starter-kit": "^3.26.0",
     "aws4fetch": "^1.0.20",
+    "lottie-react": "^2.4.1",
     "next": "^15.0.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",

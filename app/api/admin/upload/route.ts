@@ -17,7 +17,7 @@ import { writeAudit } from "@/lib/audit";
 import { detectAssetType, extOf, sha256Hex } from "@/lib/assets";
 import { attachTags } from "@/app/api/assets/shared";
 
-const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf", "video/mp4", "video/webm", "video/quicktime"]);
+const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf", "video/mp4", "video/webm", "video/quicktime", "application/json"]);
 const MAX_SIZE = 10 * 1024 * 1024;        // 10 MB (รูป/PDF บิล/ใบรับ)
 const MAX_SIZE_VIDEO = 25 * 1024 * 1024;  // 25 MB (วิดีโอสั้น — คลิปยาวให้ใช้ลิงก์ YouTube/TikTok/Drive)
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
@@ -65,9 +65,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "ต้องแนบไฟล์" }, { status: 400 });
   }
 
-  if (!ALLOWED_MIME.has(file.type)) {
+  // ไฟล์ Lottie (.json) บางเบราว์เซอร์ส่ง type ว่าง/octet-stream → ยอมรับตามนามสกุล
+  const nameExt = (file.name.split(".").pop() ?? "").toLowerCase();
+  const isLottieJson = file.type === "application/json" || ((file.type === "" || file.type === "application/octet-stream") && nameExt === "json");
+  if (!ALLOWED_MIME.has(file.type) && !isLottieJson) {
     return NextResponse.json({ error: `ประเภทไฟล์ไม่รองรับ: ${file.type}` }, { status: 400 });
   }
+  const contentType = isLottieJson ? "application/json" : file.type;
 
   const isVideo = file.type.startsWith("video/");
   const cap = isVideo ? MAX_SIZE_VIDEO : MAX_SIZE;
@@ -83,7 +87,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     // F21: R2 binding ล้วน (ไม่มี AWS SDK)
-    await r2PutObject(key, buffer, file.type);
+    await r2PutObject(key, buffer, contentType);
     // ของกลาง: ทุกรูปที่อัปผ่านตัวนี้ → ลงคลังกลาง /master/assets อัตโนมัติ (กันซ้ำ · best-effort)
     await registerToLibrary({ buffer, key, file, folder, uploadedBy: user.email ?? user.id });
     await writeAudit(supabaseAdmin(), {
@@ -92,11 +96,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       entityId: null,
       actorId: user.id,
       actorName: user.email ?? null,
-      metadata: { r2_key: key, content_type: file.type, size: file.size },
+      metadata: { r2_key: key, content_type: contentType, size: file.size },
     });
     return NextResponse.json({
       r2_key:       key,
-      content_type: file.type,
+      content_type: contentType,
       size:         file.size,
       error:        null,
     });

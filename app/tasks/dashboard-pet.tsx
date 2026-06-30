@@ -8,8 +8,34 @@
 // ============================================================
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
 import type { PetConfig, PetCorner } from "./overview-customizer";
+
+// โหลด lottie-react เฉพาะตอนใช้จริง (กันบันเดิลบวมในหน้าที่ไม่มี Lottie)
+const Lottie = dynamic(() => import("lottie-react"), { ssr: false });
+
+// เล่นไฟล์ Lottie จาก URL/R2 — fetch JSON เองแล้วส่งให้ lottie-react
+function LottiePet({ src, size, animCls }: { src: string; size: number; animCls: string }) {
+  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch(src).then((r) => r.json()).then((j) => { if (live) setData(j as Record<string, unknown>); }).catch(() => { if (live) setData(null); });
+    return () => { live = false; };
+  }, [src]);
+  if (!data) return <span style={{ fontSize: size }} className={`block leading-none drop-shadow-lg ${animCls}`}>⏳</span>;
+  return (
+    <div style={{ width: size, height: size }} className={`drop-shadow-lg ${animCls}`}>
+      <Lottie animationData={data} loop autoplay style={{ width: size, height: size }} />
+    </div>
+  );
+}
+
+// ลิงก์ภายนอกใช้ตรง · ไม่งั้นถือเป็น R2 key → ผ่าน proxy
+function lottieSrcOf(v: string | null): string | null {
+  if (!v) return null;
+  return /^https?:/i.test(v) ? v : `/api/r2-image?key=${encodeURIComponent(v)}`;
+}
 
 const SEEN_KEY = "tasks_pet_seen";   // เวลาเข้าหน้าครั้งล่าสุด (กันให้ "งานใหม่" นับเฉพาะของใหม่จริง ๆ)
 export type PetAlertKind = "overdue" | "review" | "dueToday" | "new";
@@ -23,8 +49,9 @@ const CORNER: Record<PetCorner, { pos: string; items: string; isTop: boolean; is
   tl: { pos: "top-1 left-3", items: "items-start", isTop: true, isLeft: true },
 };
 
-export function DashboardPet({ petUrl, cfg, data, onAlert }: {
+export function DashboardPet({ petUrl, lottieUrl, cfg, data, onAlert }: {
   petUrl: string | null;
+  lottieUrl?: string | null;
   cfg: PetConfig;
   data: PetData;
   onAlert: (kind: PetAlertKind) => void;
@@ -77,9 +104,11 @@ export function DashboardPet({ petUrl, cfg, data, onAlert }: {
 
   const corner = CORNER[cfg.corner ?? "br"];
   const size = cfg.size ?? 64;
+  const lottieSrc = lottieSrcOf(lottieUrl ?? null);
 
-  // ปิดโหมดเตือน → รูปลอยเฉย ๆ แบบเดิม (ถ้ามีรูป) — เคารพมุม/ขนาดที่ตั้งไว้
+  // ปิดโหมดเตือน → ตัว PET ลอยเฉย ๆ แบบเดิม (Lottie > รูป/GIF) — เคารพมุม/ขนาดที่ตั้งไว้
   if (!cfg.notify) {
+    if (lottieSrc) return <div className={`absolute ${corner.pos} pointer-events-none select-none`}><LottiePet src={lottieSrc} size={size} animCls="ov-pet-float" /></div>;
     return petUrl ? (
       // eslint-disable-next-line @next/next/no-img-element
       <img src={`/api/r2-image?key=${encodeURIComponent(petUrl)}&w=200`} alt="" style={{ width: size, height: size }} className={`absolute ${corner.pos} object-contain drop-shadow-lg pointer-events-none select-none`} />
@@ -114,7 +143,9 @@ export function DashboardPet({ petUrl, cfg, data, onAlert }: {
       {total > 0 && (
         <span className={`ov-badge-pulse absolute -top-1 ${corner.isLeft ? "-left-1" : "-right-1"} z-10 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow`}>{total > 99 ? "99+" : total}</span>
       )}
-      {petUrl ? (
+      {lottieSrc ? (
+        <LottiePet src={lottieSrc} size={size} animCls={hasAlert ? "ov-pet-alert" : "ov-pet-float"} />
+      ) : petUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={`/api/r2-image?key=${encodeURIComponent(petUrl)}&w=200`} alt="" style={{ width: size, height: size }} className={`object-contain drop-shadow-lg ${hasAlert ? "ov-pet-alert" : "ov-pet-float"}`} draggable={false} />
       ) : (
