@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { Logo, BRAND } from "@/components/brand";
 import { useAuth, roleLabel } from "@/components/auth";
 import { NotificationBell } from "@/components/notification-bell";
+import { AppAccessGate } from "@/components/app-access-gate";
 import { PayrollPeriodProvider, usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 import { cachedGetJson } from "@/lib/shell-cache";
 
@@ -190,8 +191,8 @@ function PayrollShellInner({ children }: { children: React.ReactNode }) {
           </>
         )}
 
-        {/* Main */}
-        <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
+        {/* Main — guard กลาง: ถ้าแอป Payroll ถูกล็อกและไม่มีสิทธิ์ → AccessDenied (กันพนักงานเข้าตรง URL) */}
+        <main className="flex-1 min-w-0 overflow-x-hidden"><AppAccessGate appKey="payroll">{children}</AppAccessGate></main>
       </div>
     </div>
   );

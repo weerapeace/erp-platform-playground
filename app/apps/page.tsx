@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation";
 import { Logo, BRAND } from "@/components/brand";
 import { useAuth, roleLabel, roleColor } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import type { MenuRow } from "@/components/playground-shell";
+import type { MenuRow, AppGroup } from "@/components/playground-shell";
 
 // สีไล่เฉดสำหรับ tile ที่มาจากทะเบียนเมนู (วนสี)
 const TILE_COLORS = [
@@ -211,6 +211,7 @@ export default function AppLauncherPage() {
   const [query, setQuery] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
+  const [appGroups, setAppGroups] = useState<AppGroup[]>([]);   // แอป (ล็อก/ไม่ล็อก) — กรอง tile ตามสิทธิ์เข้าแอป
 
   // โหลดทะเบียนเมนู → สร้าง tile จาก item ที่ตั้ง "โชว์ใน Launcher" (+ มีสิทธิ์); ไม่มี → ใช้ APPS default
   useEffect(() => {
@@ -218,18 +219,28 @@ export default function AppLauncherPage() {
     apiFetch("/api/menu").then((r) => r.json()).then((j) => {
       if (alive && Array.isArray(j.data)) setMenuRows(j.data as MenuRow[]);
     }).catch(() => { if (alive) setMenuRows([]); });
+    // รายชื่อแอป (+permission_key) — ใช้ซ่อน tile ของแอปที่ถูกล็อกและไม่มีสิทธิ์ (เช่น Payroll สำหรับพนักงาน)
+    apiFetch("/api/menu/apps").then((r) => r.json()).then((j) => {
+      if (alive && Array.isArray(j.data)) setAppGroups((j.data as AppGroup[]).filter((a) => a.is_active));
+    }).catch(() => { /* โหลดไม่ได้ = ไม่กรองด้วยแอป */ });
     return () => { alive = false; };
   }, []);
 
   const appList: AppEntry[] = useMemo(() => {
     if (!menuRows || menuRows.length === 0) return APPS;  // fallback
+    // แอปที่เข้าได้ = ไม่ล็อก หรือมีสิทธิ์ตามล็อก (admin มีครบในชุด perms อยู่แล้ว)
+    const okApps = new Set(appGroups.filter((a) => !a.permission_key || can(a.permission_key as Parameters<typeof can>[0])).map((a) => a.key));
+    const hasGroups = appGroups.length > 0;
     return menuRows
-      .filter((r) => r.is_active && r.show_in_launcher && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0])))
+      .filter((r) => r.is_active && r.show_in_launcher
+        && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0]))
+        // เมนูที่สังกัดแอปถูกล็อก → ซ่อน (เว้นแต่สังกัดแอปอื่นที่เข้าได้ด้วย)
+        && (!hasGroups || !r.app_keys?.length || r.app_keys.some((k) => okApps.has(k))))
       .map((r, i) => ({
         key: r.href, icon: r.icon ?? "📄", name: r.label, subtitle: r.section,
         href: r.href, category: r.section, color: TILE_COLORS[i % TILE_COLORS.length], status: "live" as AppStatus,
       }));
-  }, [menuRows, can]);
+  }, [menuRows, can, appGroups]);
 
   // greeting ตามเวลา
   const greeting = useMemo(() => {
