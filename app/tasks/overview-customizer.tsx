@@ -12,6 +12,7 @@ import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { KanbanSettingsControls } from "./kanban-settings";
+import { useCreativeStatuses } from "./use-statuses";
 
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
@@ -25,7 +26,16 @@ export type KanbanGroupBy = "status" | "brand" | "priority" | "task_type";
 export type KanbanView = "kanban" | "table" | "calendar";
 export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean; sku?: boolean; taskNo?: boolean; compact?: boolean };
 export type CardAlign = "left" | "center" | "right";
-export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number; cardLabelSize?: number; cardValueSize?: number; cardAlign?: CardAlign };
+export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: boolean };
+// สีสถานะ "ของฉัน" (per-user): key=status key → c1 (สีหลัก) + c2 (ไล่สี, เว้น=สีเดียว)
+export type StatusColorMap = Record<string, { c1: string; c2?: string | null }>;
+export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number; cardLabelSize?: number; cardValueSize?: number; cardAlign?: CardAlign; anim?: AnimTheme; statusColors?: StatusColorMap };
+
+// สไตล์สีสถานะตามที่ผู้ใช้ตั้งเอง (ไล่สีถ้ามี c2) — คืน null ถ้าไม่ได้ตั้ง (ใช้สีเริ่มต้น)
+export function ovStatusBg(theme: OverviewTheme, key: string): string | null {
+  const c = theme.statusColors?.[key]; if (!c?.c1) return null;
+  return c.c2 ? `linear-gradient(135deg, ${c.c1}, ${c.c2})` : c.c1;
+}
 
 export const DEFAULT_THEME: OverviewTheme = {
   hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff", titleSize: "lg", align: "left", petUrl: null },
@@ -43,6 +53,8 @@ export const DEFAULT_THEME: OverviewTheme = {
   cardLabelSize: 14,   // ขนาดตัวอักษร "หัวข้อ" บนการ์ด (px)
   cardValueSize: 24,   // ขนาดตัวเลข "จำนวนงาน" บนการ์ด (px)
   cardAlign: "left",   // ตำแหน่งตัวอักษรบนการ์ด (ซ้าย/กลาง/ขวา)
+  anim: { hover: false, entrance: false, heroGradient: false },
+  statusColors: {},
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -65,7 +77,7 @@ export function mergeTheme(v: unknown): OverviewTheme {
   const o = (v ?? {}) as Partial<OverviewTheme>;
   const cards = {} as Record<CardKey, CardTheme>;
   for (const k of CARD_KEYS) cards[k] = { ...DEFAULT_THEME.cards[k], ...(o.cards?.[k] ?? {}) };
-  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent, kanban: { ...DEFAULT_THEME.kanban, ...(o.kanban ?? {}) }, cardIconSize: (o.cardIconSize as number) ?? DEFAULT_THEME.cardIconSize, cardLabelSize: (o.cardLabelSize as number) ?? DEFAULT_THEME.cardLabelSize, cardValueSize: (o.cardValueSize as number) ?? DEFAULT_THEME.cardValueSize, cardAlign: (o.cardAlign as CardAlign) ?? DEFAULT_THEME.cardAlign };
+  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent, kanban: { ...DEFAULT_THEME.kanban, ...(o.kanban ?? {}) }, cardIconSize: (o.cardIconSize as number) ?? DEFAULT_THEME.cardIconSize, cardLabelSize: (o.cardLabelSize as number) ?? DEFAULT_THEME.cardLabelSize, cardValueSize: (o.cardValueSize as number) ?? DEFAULT_THEME.cardValueSize, cardAlign: (o.cardAlign as CardAlign) ?? DEFAULT_THEME.cardAlign, anim: { ...DEFAULT_THEME.anim, ...(o.anim ?? {}) }, statusColors: (o.statusColors as StatusColorMap) ?? {} };
 }
 
 // สไตล์พื้นหลัง Hero ตามธีม
@@ -132,6 +144,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
   onClose: () => void;
 }) {
   const t = useT();
+  const { statuses } = useCreativeStatuses();
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // ธีมที่ผู้ใช้บันทึกเอง (เก็บใน user_ui_prefs key=tasks_overview_themes)
@@ -169,6 +182,11 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
   const setPage = (p: Partial<PageTheme>) => onChange({ ...theme, page: { ...theme.page, ...p } });
   const setShow = (p: Partial<SectionsTheme>) => onChange({ ...theme, show: { ...theme.show, ...p } });
   const setKanban = (p: Partial<KanbanTheme>) => onChange({ ...theme, kanban: { ...theme.kanban, ...p } });
+  const setAnim = (p: Partial<AnimTheme>) => onChange({ ...theme, anim: { ...theme.anim, ...p } });
+  const setStatusColor = (key: string, c: { c1: string; c2?: string | null } | null) => {
+    const next = { ...(theme.statusColors ?? {}) }; if (c) next[key] = c; else delete next[key];
+    onChange({ ...theme, statusColors: next });
+  };
 
   const doUpload = async (file: File, apply: (key: string) => void, tag: string) => {
     setBusy(tag); setErr(null);
@@ -355,6 +373,41 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
         {theme.kanban.view === "kanban" && (
           <KanbanSettingsControls cfg={theme.kanban} onChange={(k) => onChange({ ...theme, kanban: k })} />
         )}
+      </section>
+
+      {/* ===== อนิเมชั่น ===== */}
+      <section className="mb-5">
+        <div className="text-sm font-semibold text-slate-700 mb-2">{t("อนิเมชั่น", "Animations")}</div>
+        <div className="flex flex-wrap gap-3">
+          {([["hover", t("การ์ดเด้ง/ยกตอนชี้เมาส์", "Card lift on hover")], ["entrance", t("การ์ดค่อยๆ โผล่ตอนเปิดหน้า", "Cards fade in on load")], ["heroGradient", t("Hero ไล่สีขยับ", "Animated hero gradient")]] as const).map(([k, label]) => (
+            <label key={k} className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+              <input type="checkbox" checked={!!theme.anim?.[k]} onChange={(e) => setAnim({ [k]: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{label}
+            </label>
+          ))}
+        </div>
+      </section>
+
+      {/* ===== สีสถานะ (ของฉัน) ===== */}
+      <section className="mb-5">
+        <div className="text-sm font-semibold text-slate-700 mb-1">{t("สีสถานะงาน (ของฉัน · ไล่สีได้)", "Status colors (yours · gradient)")}</div>
+        <p className="text-[11px] text-slate-400 mb-2">{t("เปลี่ยนสีหัวคอลัมน์/ป้ายสถานะบนหน้านี้ · ติ๊กไล่สีเพื่อใส่สีที่สอง · เว้น = ใช้สีเริ่มต้น", "Recolor status columns/badges on this page · check gradient for a 2nd color · blank = default")}</p>
+        <div className="space-y-1.5">
+          {statuses.map((s) => {
+            const c = theme.statusColors?.[s.key];
+            const preview = ovStatusBg(theme, s.key);
+            return (
+              <div key={s.key} className="flex items-center gap-2 flex-wrap">
+                <span className="h-4 w-6 rounded shrink-0 border border-slate-200" style={preview ? { background: preview } : undefined} />
+                <span className="text-sm text-slate-600 w-28 truncate">{s.label}</span>
+                <input type="color" value={c?.c1 ?? "#7c3aed"} onChange={(e) => setStatusColor(s.key, { c1: e.target.value, c2: c?.c2 ?? null })} className="w-8 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+                <label className="inline-flex items-center gap-1 text-[11px] text-slate-500"><input type="checkbox" checked={!!c?.c2} onChange={(e) => setStatusColor(s.key, { c1: c?.c1 ?? "#7c3aed", c2: e.target.checked ? "#ec4899" : null })} className="h-3.5 w-3.5 rounded border-slate-300 text-violet-600" />{t("ไล่สี", "Gradient")}</label>
+                {c?.c2 && <input type="color" value={c.c2} onChange={(e) => setStatusColor(s.key, { c1: c?.c1 ?? "#7c3aed", c2: e.target.value })} className="w-8 h-7 p-0 border border-slate-200 rounded cursor-pointer" />}
+                {c && <button onClick={() => setStatusColor(s.key, null)} className="text-[11px] text-slate-300 hover:text-red-500" title={t("ใช้สีเริ่มต้น", "Use default")}>✕</button>}
+              </div>
+            );
+          })}
+          {statuses.length === 0 && <p className="text-xs text-slate-400">{t("ยังไม่มีสถานะ", "No statuses")}</p>}
+        </div>
       </section>
 
       {/* ===== Cards ===== */}

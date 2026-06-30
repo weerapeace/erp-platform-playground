@@ -36,6 +36,14 @@ body {
   animation: shimmer 1.8s ease-in-out infinite;
 }
 
+/* ---- ภาพรวม: อนิเมชั่นแต่งได้ (per-user) ---- */
+@keyframes ovEnter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.ov-enter { animation: ovEnter .38s cubic-bezier(.22,1,.36,1) both; }
+.ov-hover { transition: transform .15s ease, box-shadow .15s ease; }
+.ov-hover:hover { transform: translateY(-3px); box-shadow: 0 12px 22px -10px rgba(0,0,0,.18); }
+@keyframes ovGradient { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+.ov-anim-gradient { background-size: 200% 200%; animation: ovGradient 8s ease infinite; }
+
 /* ---- Focus ring มาตรฐาน ---- */
 :focus-visible {
   outline: 2px solid #3b82f6;

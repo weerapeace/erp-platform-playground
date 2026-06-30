@@ -173,7 +173,7 @@ export function OverviewDashboard({
       {theme.page.mode === "image" && <div className="absolute inset-0 rounded-2xl bg-white/45 pointer-events-none" />}
       <div className="relative space-y-6">
       {/* Hero (ธีมแต่งได้) — บนสุด: เมนูมุมมอง ☰ + ทักทาย + ปุ่ม + ทางลัด รวมในตัว */}
-      <div className="relative rounded-2xl overflow-hidden shadow-sm text-white" style={heroStyle(theme.hero)}>
+      <div className={`relative rounded-2xl overflow-hidden shadow-sm text-white ${theme.anim?.heroGradient && theme.hero.mode === "gradient" ? "ov-anim-gradient" : ""}`} style={heroStyle(theme.hero)}>
         {heroImage && <div className="absolute inset-0 bg-black/35" />}
         {/* ไอคอนลอย (Pet) — มุมล่างขวา (GIF จะขยับเอง) */}
         {theme.hero.petUrl && (
@@ -215,7 +215,7 @@ export function OverviewDashboard({
       {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cardMeta.map((m) => (
-          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize} labelSize={cardLabelSize} valueSize={cardValueSize} align={cardAlign}
+          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize} labelSize={cardLabelSize} valueSize={cardValueSize} align={cardAlign} animCls={`${theme.anim?.hover ? "ov-hover" : ""} ${theme.anim?.entrance ? "ov-enter" : ""}`}
             active={filter === m.key && !activeMetric} hint={filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : m.key === "review" ? t("กดดูคิวรอตรวจ", "tap to review") : t("กดเพื่อกรอง", "tap to filter")}
             onClick={() => { setActiveMetric(null); onFilter(m.key); }} />
         ))}
@@ -337,7 +337,7 @@ export function OverviewDashboard({
           </div>
           {theme.kanban.view === "kanban" ? (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-              <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent}
+              <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent} statusColors={theme.statusColors} anim={theme.anim}
                 onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask} />
             </div>
           ) : theme.kanban.view === "calendar" ? (
@@ -411,7 +411,7 @@ export function OverviewDashboard({
   );
 }
 
-function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18, labelSize = 14, valueSize = 24, align = "left" }: { card: CardTheme; value: number; label: string; active?: boolean; hint: string; onClick: () => void; iconSize?: number; labelSize?: number; valueSize?: number; align?: CardAlign }) {
+function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18, labelSize = 14, valueSize = 24, align = "left", animCls = "" }: { card: CardTheme; value: number; label: string; active?: boolean; hint: string; onClick: () => void; iconSize?: number; labelSize?: number; valueSize?: number; align?: CardAlign; animCls?: string }) {
   const c = CARD_COLORS[card.color] ?? CARD_COLORS.slate;
   // ตำแหน่งตัวอักษร: ซ้าย=ไอคอนซ้าย-เลขขวา (คลาสสิก) · กลาง/ขวา=ไอคอน+เลขชิดด้วยกัน + ข้อความตามแนว
   const textAlign = align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
@@ -423,7 +423,7 @@ function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18,
   // โหมดรูปเต็ม — รูปพื้นหลังการ์ด + ฉากดำจาง + ตัวอักษรขาว
   if (card.bgUrl) {
     return (
-      <button onClick={onClick} className={`relative ${textAlign} rounded-xl border overflow-hidden p-4 min-h-[92px] transition-all hover:shadow-sm ${active ? `ring-2 ${c.ring} border-transparent` : "border-slate-200"}`}>
+      <button onClick={onClick} className={`relative ${textAlign} rounded-xl border overflow-hidden p-4 min-h-[92px] transition-all hover:shadow-sm ${animCls} ${active ? `ring-2 ${c.ring} border-transparent` : "border-slate-200"}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={`/api/r2-image?key=${encodeURIComponent(card.bgUrl)}&w=400`} alt="" className="absolute inset-0 w-full h-full object-cover" />
         <div className="absolute inset-0 bg-black/40" />
@@ -439,7 +439,7 @@ function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18,
     );
   }
   return (
-    <button onClick={onClick} className={`${textAlign} rounded-xl border p-4 transition-all hover:shadow-sm hover:brightness-[0.98] ${c.box} ${active ? `ring-2 ${c.ring}` : ""}`}>
+    <button onClick={onClick} className={`${textAlign} rounded-xl border p-4 transition-all hover:shadow-sm hover:brightness-[0.98] ${animCls} ${c.box} ${active ? `ring-2 ${c.ring}` : ""}`}>
       <div className={`flex items-center ${rowJustify}`}>
         {icon("")}
         <span className="font-bold tabular-nums leading-none" style={{ fontSize: valueSize }}>{value}</span>

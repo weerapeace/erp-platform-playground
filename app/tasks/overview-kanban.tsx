@@ -19,11 +19,12 @@ import { AssigneeStack } from "./assignee-avatar";
 import { taskTypeLabel } from "./use-options";
 import { statusMeta, type Status } from "./use-statuses";
 import { PRIORITY_META, priorityLabel, isOverdue, type CreativeTask, type CreativePriority, type BrandOption } from "./data";
-import type { KanbanTheme, KanbanGroupBy } from "./overview-customizer";
+import type { KanbanTheme, KanbanGroupBy, StatusColorMap, AnimTheme } from "./overview-customizer";
+import { ovStatusBg } from "./overview-customizer";
 
 const NONE = "__none__";
 
-type Col = { key: string; label: string; dotClass?: string; dotColor?: string };
+type Col = { key: string; label: string; dotClass?: string; dotColor?: string; barColor?: string };
 
 // ค่ากลุ่มของงานตามมิติที่เลือก
 function groupValue(task: CreativeTask, by: KanbanGroupBy): string {
@@ -86,22 +87,22 @@ function CardBody({ task, cfg, dragging }: { task: CreativeTask; cfg: KanbanThem
   );
 }
 
-function DraggableCard({ task, cfg, onClick }: { task: CreativeTask; cfg: KanbanTheme; onClick: () => void }) {
+function DraggableCard({ task, cfg, animCls, onClick }: { task: CreativeTask; cfg: KanbanTheme; animCls?: string; onClick: () => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id });
   return (
     <div ref={setNodeRef} {...listeners} {...attributes} onClick={onClick}
-      className={`cursor-grab active:cursor-grabbing touch-none ${isDragging ? "opacity-40" : ""}`}>
+      className={`cursor-grab active:cursor-grabbing touch-none ${animCls ?? ""} ${isDragging ? "opacity-40" : ""}`}>
       <CardBody task={task} cfg={cfg} />
     </div>
   );
 }
 
-function Column({ col, tasks, cfg, accent, onCardClick }: { col: Col; tasks: CreativeTask[]; cfg: KanbanTheme; accent: string; onCardClick: (id: string) => void }) {
+function Column({ col, tasks, cfg, accent, animCls, onCardClick }: { col: Col; tasks: CreativeTask[]; cfg: KanbanTheme; accent: string; animCls?: string; onCardClick: (id: string) => void }) {
   const t = useT();
   const { setNodeRef, isOver } = useDroppable({ id: col.key });
   return (
     <div className="flex flex-col w-64 shrink-0">
-      <div className="flex items-center justify-between px-3 py-2 bg-white rounded-t-lg border border-b-0 border-slate-200 border-t-4" style={{ borderTopColor: accent }}>
+      <div className="flex items-center justify-between px-3 py-2 bg-white rounded-t-lg border border-b-0 border-slate-200 border-t-4" style={{ borderTopColor: col.barColor || accent }}>
         <div className="flex items-center gap-2 min-w-0">
           {col.dotColor ? <span className="h-2 w-2 rounded-full shrink-0" style={{ background: col.dotColor }} /> : col.dotClass ? <span className={`h-2 w-2 rounded-full shrink-0 ${col.dotClass}`} /> : null}
           <span className="text-sm font-semibold text-slate-700 truncate" title={col.label}>{col.label}</span>
@@ -109,19 +110,21 @@ function Column({ col, tasks, cfg, accent, onCardClick }: { col: Col; tasks: Cre
         <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5 shrink-0">{tasks.length}</span>
       </div>
       <div ref={setNodeRef} className={`flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-violet-50" : "bg-slate-50/60"}`}>
-        {tasks.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={cfg} onClick={() => onCardClick(tk.id)} />)}
+        {tasks.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={cfg} animCls={animCls} onClick={() => onCardClick(tk.id)} />)}
         {tasks.length === 0 && <div className="h-16 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">{t("ลากการ์ดมาวางที่นี่", "Drag cards here")}</div>}
       </div>
     </div>
   );
 }
 
-export function OverviewKanban({ tasks, statuses, brands, cfg, accent, onMoveStatus, onSetField, onCardClick }: {
+export function OverviewKanban({ tasks, statuses, brands, cfg, accent, statusColors, anim, onMoveStatus, onSetField, onCardClick }: {
   tasks: CreativeTask[];
   statuses: Status[];
   brands: BrandOption[];
   cfg: KanbanTheme;
   accent: string;
+  statusColors?: StatusColorMap;
+  anim?: AnimTheme;
   onMoveStatus: (taskId: string, toKey: string) => void;
   onSetField: (taskId: string, field: string, value: string | null) => void;
   onCardClick: (id: string) => void;
@@ -130,14 +133,20 @@ export function OverviewKanban({ tasks, statuses, brands, cfg, accent, onMoveSta
   const [activeId, setActiveId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const activeTask = tasks.find((x) => x.id === activeId) ?? null;
+  const animCls = `${anim?.hover ? "ov-hover" : ""} ${anim?.entrance ? "ov-enter" : ""}`.trim();
+  // สีสถานะที่ผู้ใช้ตั้งเอง (ไล่สีได้) → ใช้กับจุด/แถบหัวคอลัมน์
+  const stColor = (key: string): { dotColor?: string; barColor?: string } => {
+    const bg = statusColors ? ovStatusBg({ statusColors } as Parameters<typeof ovStatusBg>[0], key) : null;
+    return bg ? { dotColor: bg, barColor: statusColors?.[key]?.c1 } : {};
+  };
 
   // คอลัมน์ตามมิติที่จัดกลุ่ม (เฉพาะที่มีงาน + คอลัมน์ระบบที่กำหนดไว้)
   const columns = useMemo<Col[]>(() => {
     if (cfg.groupBy === "status") {
       const known = new Set(statuses.map((s) => s.key));
-      const base: Col[] = statuses.map((s) => ({ key: s.key, label: statusMeta(s.key).label, dotClass: statusMeta(s.key).dot }));
+      const base: Col[] = statuses.map((s) => ({ key: s.key, label: statusMeta(s.key).label, dotClass: statusMeta(s.key).dot, ...stColor(s.key) }));
       const extra = [...new Set(tasks.map((x) => x.status).filter((s) => !known.has(s)))]
-        .map((s) => ({ key: s, label: statusMeta(s).label, dotClass: statusMeta(s).dot }));
+        .map((s) => ({ key: s, label: statusMeta(s).label, dotClass: statusMeta(s).dot, ...stColor(s) }));
       return [...base, ...extra];
     }
     if (cfg.groupBy === "priority") {
@@ -152,7 +161,7 @@ export function OverviewKanban({ tasks, statuses, brands, cfg, accent, onMoveSta
     // task_type
     const types = [...new Set(tasks.map((x) => x.task_type ?? NONE))];
     return types.map((v) => v === NONE ? { key: NONE, label: t("ไม่ระบุประเภท", "No type") } : { key: v, label: taskTypeLabel(v) || v });
-  }, [cfg.groupBy, statuses, tasks, brands, t]);
+  }, [cfg.groupBy, statuses, tasks, brands, t, statusColors]);
 
   const onDragStart = (e: DragStartEvent) => setActiveId(String(e.active.id));
   const onDragEnd = (e: DragEndEvent) => {
@@ -176,7 +185,7 @@ export function OverviewKanban({ tasks, statuses, brands, cfg, accent, onMoveSta
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div className="flex gap-3 overflow-x-auto p-3">
         {columns.map((col) => (
-          <Column key={col.key} col={col} cfg={cfg} accent={accent} onCardClick={onCardClick}
+          <Column key={col.key} col={col} cfg={cfg} accent={accent} animCls={animCls} onCardClick={onCardClick}
             tasks={tasks.filter((x) => groupValue(x, cfg.groupBy) === col.key)} />
         ))}
       </div>
