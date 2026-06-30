@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { supabaseBrowser } from "@/lib/supabase-browser";
+import { apiFetch } from "@/lib/api";
 
 // ============================================================
 // Auth — Supabase Auth จริง (email/password)
@@ -196,6 +197,22 @@ function callbackUrlWithNext(): string | undefined {
   return n && n.startsWith("/") && !n.startsWith("//") ? `${base}?next=${encodeURIComponent(n)}` : base;
 }
 
+// บันทึกการเข้าสู่ระบบ (ประวัติอุปกรณ์ + เตือนเครื่องใหม่) — throttle 30 นาที/เครื่อง ฝั่ง client
+async function recordLoginEvent(): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    let did = localStorage.getItem("erp_device_id");
+    if (!did) {
+      did = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem("erp_device_id", did);
+    }
+    const lastAt = Number(localStorage.getItem("erp_login_event_at") || 0);
+    if (Date.now() - lastAt < 30 * 60 * 1000) return;   // กันยิงถี่ (refresh/หลายแท็บ)
+    localStorage.setItem("erp_login_event_at", String(Date.now()));
+    await apiFetch("/api/auth/login-event", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ device_id: did }) });
+  } catch { /* เงียบ — ไม่กระทบการใช้งาน */ }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser]   = useState<AuthUser | null>(null);
   // สิทธิ์จริงของผู้ใช้จาก DB (ตั้งที่ /admin/roles) — null = โหลดไม่ได้/ยังไม่โหลด → can() ถอยไปใช้ค่าสำรองในโค้ด (กันล็อกเอาต์)
@@ -235,9 +252,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (s?.user) loadProfile(s.user.email ?? "").finally(() => setReady(true));
       else setReady(true);
     });
-    const { data: sub } = supabaseBrowser.auth.onAuthStateChange((_e, session) => {
-      if (session?.user) loadProfile(session.user.email ?? "");
-      else { setUser(null); setPerms(null); }
+    const { data: sub } = supabaseBrowser.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        loadProfile(session.user.email ?? "");
+        if (event === "SIGNED_IN" || event === "INITIAL_SESSION") void recordLoginEvent();
+      } else { setUser(null); setPerms(null); }
     });
     return () => sub.subscription.unsubscribe();
   }, [loadProfile]);

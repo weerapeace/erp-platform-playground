@@ -860,6 +860,8 @@ function UserSwitcher({ collapsed }: { collapsed?: boolean }) {
           </div>
           <Link href="/profile" onClick={() => setOpen(false)}
             className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">👤 {t("โปรไฟล์ของฉัน", "My Profile")}</Link>
+          <Link href="/account/security" onClick={() => setOpen(false)}
+            className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">🔐 {t("ความปลอดภัย (อุปกรณ์ที่เข้าใช้)", "Security (devices)")}</Link>
           <div className="px-3 py-1.5 flex items-center justify-between gap-2">
             <span className="text-xs text-slate-500">🌐 ภาษา / Language</span>
             <LangToggle />
