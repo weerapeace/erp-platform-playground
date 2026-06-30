@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { PermissionGate, AccessDenied } from "@/components/auth";
 import { FamilyTemplateView } from "@/app/admin/family-template/view";
 
 type Group = { id: string; name: string; parent_group_id: string | null; single_select: boolean; sort_order: number; color: string | null; icon: string | null };
@@ -21,7 +22,12 @@ const TAGS_API = "/api/master-v2/product_families";
 const COLORS = ["#ef4444", "#f97316", "#f59e0b", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#64748b"];
 const ICONS = ["👜", "🎒", "🛍️", "👕", "👖", "👗", "👚", "🧥", "👟", "👠", "👢", "💍", "⌚", "🧣", "🧢", "🧤", "🪡", "🧵", "🔖", "🏷️", "📦", "💄", "🕶️", "👒", "🎀", "💎", "🧶", "🔩", "⚙️", "🧰"];
 
+// เปิดได้เฉพาะผู้ดูแลระบบ (หน้า admin orphan ไม่ผูกแอป)
 export default function ProductFamiliesHub() {
+  return <PermissionGate perm="admin.users" fallback={<AccessDenied message="หน้านี้สำหรับผู้ดูแลระบบเท่านั้น" />}><ProductFamiliesHubInner /></PermissionGate>;
+}
+
+function ProductFamiliesHubInner() {
   const router = useRouter();
   const goBack = () => { if (typeof window !== "undefined" && window.history.length > 1) router.back(); else router.push("/master/lookups"); };
   const [tab, setTab] = useState<"groups" | "tags" | "template">("groups");

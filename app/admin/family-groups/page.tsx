@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { PermissionGate, AccessDenied } from "@/components/auth";
 
 type Group = { id: string; name: string; parent_group_id: string | null; single_select: boolean; sort_order: number };
 type Tag = { id: string; name: string; group_id: string | null };
@@ -21,7 +22,12 @@ type Tag = { id: string; name: string; group_id: string | null };
 const GROUPS_API = "/api/master-v2/product_family_groups";
 const TAGS_API = "/api/master-v2/product_families";
 
+// เปิดได้เฉพาะผู้ดูแลระบบ (หน้า admin orphan ไม่ผูกแอป)
 export default function FamilyGroupsPage() {
+  return <PermissionGate perm="admin.users" fallback={<AccessDenied message="หน้านี้สำหรับผู้ดูแลระบบเท่านั้น" />}><FamilyGroupsPageInner /></PermissionGate>;
+}
+
+function FamilyGroupsPageInner() {
   const router = useRouter();
   const goBack = () => { if (typeof window !== "undefined" && window.history.length > 1) router.back(); else router.push("/master/lookups"); };
 
