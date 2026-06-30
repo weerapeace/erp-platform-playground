@@ -389,6 +389,25 @@ export default function PayrollPaymentsPage() {
     }
   }
 
+  async function resyncBatch() {
+    if (!detail) return;
+    if (!confirm("อัปเดตยอดในรอบนี้ให้ตรงกับการคำนวณล่าสุด?\n\n• คนเดิม: ยอดจ่ายจะอัปเดตตามคำนวณล่าสุด\n• คนใหม่ที่ยังไม่อยู่ในรอบ: จะถูกเพิ่มเข้ามาให้\n\n(การแก้ยอด/ธนาคารรายบรรทัดที่ตั้งไว้เองจะถูกแทนด้วยยอดจากคำนวณ)")) return;
+    setBusy("resync");
+    setErr(null);
+    setMsg(null);
+    try {
+      const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(detail.batch.id)}/resync`, { method: "POST" }).then((res) => res.json());
+      if (json.error) throw new Error(json.error);
+      const r = (json.data as { resync?: { updated: number; inserted: number } } | null)?.resync;
+      setMsg(r ? `อัปเดตยอดจากคำนวณล่าสุดแล้ว — แก้ไข ${r.updated} คน · เพิ่มใหม่ ${r.inserted} คน` : "อัปเดตยอดจากคำนวณล่าสุดแล้ว");
+      await Promise.all([loadBatches(periodId), loadDetail(detail.batch.id), refreshPeriods()]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "อัปเดตยอดจากคำนวณล่าสุดไม่สำเร็จ");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function saveLine(lineId: string, patch: Record<string, unknown>) {
     if (!detail) return;
     setErr(null);
@@ -564,6 +583,7 @@ export default function PayrollPaymentsPage() {
                 {badge(detail.batch.status)}
                 <a href={`/api/payroll/payment-batches/${encodeURIComponent(detail.batch.id)}/export`} className="h-9 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">Export CSV</a>
                 <button type="button" onClick={() => setReportOpen(true)} className="h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50">ปรับ Report</button>
+                {detail.batch.status === "draft" && <button onClick={resyncBatch} disabled={busy === "resync"} className="h-9 rounded-lg border border-amber-300 bg-amber-50 px-3 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-40">{busy === "resync" ? "กำลังอัปเดต…" : "🔄 อัปเดตยอดจากคำนวณล่าสุด"}</button>}
                 {detail.batch.status === "draft" && <button onClick={() => batchAction("approve")} disabled={busy === "approve"} className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40">อนุมัติ</button>}
                 {detail.batch.status === "approved" && <button onClick={() => batchAction("mark-paid")} disabled={busy === "mark-paid"} className="h-9 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">{detail.batch.batch_type === "month_end" ? "จ่ายแล้ว + ปิดงวด" : "จ่ายแล้ว"}</button>}
                 {detail.batch.status !== "paid" && detail.batch.status !== "cancelled" && <button onClick={() => batchAction("cancel")} disabled={busy === "cancel"} className="h-9 rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40">ยกเลิก</button>}
@@ -580,8 +600,13 @@ export default function PayrollPaymentsPage() {
               </div>
             </div>
             {Math.abs(detailCalcDiff) >= 0.005 && (
-              <div className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-                ยอดจ่ายรอบนี้ยังไม่เท่ากับยอดสุทธิจากรอบคำนวณล่าสุด ใช้จุดนี้เช็คก่อน Export CSV หรือบันทึกจ่ายแล้ว
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+                <span>ยอดจ่ายรอบนี้ยังไม่เท่ากับยอดสุทธิจากรอบคำนวณล่าสุด ใช้จุดนี้เช็คก่อน Export CSV หรือบันทึกจ่ายแล้ว</span>
+                {detail.batch.status === "draft" && (
+                  <button onClick={resyncBatch} disabled={busy === "resync"} className="h-8 shrink-0 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-40">
+                    {busy === "resync" ? "กำลังอัปเดต…" : "🔄 อัปเดตยอดให้ตรง"}
+                  </button>
+                )}
               </div>
             )}
             <div className="border-b border-slate-100 px-4 py-3">

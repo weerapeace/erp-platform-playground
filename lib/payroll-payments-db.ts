@@ -609,6 +609,89 @@ export async function createPaymentBatch(input: { periodId: string; batchType?: 
   return { batch, line_count: lines.length, paid_amount: totals(lines).paid_amount };
 }
 
+// อัปเดตยอดในรอบ "ร่าง" ให้ตรงกับการคำนวณล่าสุด — โดยไม่ต้องลบ-สร้างใหม่
+//  - รายชื่อเดิม: อัปเดตยอดจ่าย/รายได้/หัก ตามสลิปล่าสุด (คง override ธนาคาร/ลำดับไว้)
+//  - คนใหม่ที่ยังไม่อยู่ในรอบ: เพิ่มบรรทัดให้ + ผูกสลิป
+// รองรับเฉพาะรอบสิ้นเดือน (month_end) และเฉพาะรอบที่ยังเป็น "ร่าง"
+export async function resyncPaymentBatch(batchId: string, actor: Actor = {}) {
+  const admin = supabaseAdmin();
+  const { data: batchRows, error: batchError } = await admin.from("payment_batches").select("*").eq("id", batchId).limit(1);
+  if (batchError) throw new Error(batchError.message);
+  const batch = batchRows?.[0] as Row | undefined;
+  if (!batch) throw new Error("ไม่พบชุดจ่ายเงิน");
+  if (text(batch.status) !== "draft") throw new Error("อัปเดตยอดได้เฉพาะรอบจ่ายที่ยังเป็นร่างเท่านั้น");
+  const batchType = normalizePaymentBatchType(batch.batch_type);
+  if (batchType !== "month_end") throw new Error("อัปเดตยอดอัตโนมัติรองรับเฉพาะรอบสิ้นเดือน รอบกลางเดือนให้สร้างรอบใหม่");
+  const periodId = text(batch.payroll_period_id);
+  const now = new Date().toISOString();
+
+  // สลิปปัจจุบันของงวด: เอาเฉพาะที่ "ยังไม่ผูกรอบใด" หรือ "ผูกกับรอบนี้อยู่แล้ว" (ไม่ไปแย่งของรอบอื่น)
+  const { data: slipRows, error: slipError } = await admin
+    .from("payroll_payslips")
+    .select("id, payroll_period_id, payroll_line_id, employee_id, gross_pay, total_deduction, net_pay, status, voided_at, payment_batch_id")
+    .eq("payroll_period_id", periodId)
+    .is("voided_at", null);
+  if (slipError) throw new Error(slipError.message);
+  const readySlips = ((slipRows ?? []) as Row[]).filter((slip) => {
+    if (["cancelled", "voided"].includes(text(slip.status))) return false;
+    const linked = text(slip.payment_batch_id);
+    return linked === "" || linked === batchId;
+  });
+
+  const { data: existingLines, error: lineLoadError } = await admin.from("payment_batch_lines").select("id, employee_id").eq("payment_batch_id", batchId);
+  if (lineLoadError) throw new Error(lineLoadError.message);
+  const lineIdByEmp = new Map<string, string>();
+  ((existingLines ?? []) as Row[]).forEach((l) => lineIdByEmp.set(text(l.employee_id), text(l.id)));
+
+  let updated = 0, inserted = 0;
+  const slipIdsToLink: string[] = [];
+  for (const slip of readySlips) {
+    const draft = buildPaymentLineFromPayslip({
+      id: text(slip.id),
+      payroll_period_id: text(slip.payroll_period_id),
+      payroll_line_id: text(slip.payroll_line_id),
+      employee_id: text(slip.employee_id),
+      gross_pay: slip.gross_pay,
+      total_deduction: slip.total_deduction,
+      net_pay: slip.net_pay,
+    });
+    slipIdsToLink.push(text(slip.id));
+    const existingLineId = lineIdByEmp.get(text(slip.employee_id));
+    if (existingLineId) {
+      const { error } = await admin.from("payment_batch_lines").update({
+        gross_amount: draft.gross_amount,
+        deduction_amount: draft.deduction_amount,
+        paid_amount: draft.paid_amount,
+        source_payroll_line_id: draft.source_payroll_line_id,
+        note: draft.note,
+        updated_at: now,
+      }).eq("id", existingLineId).eq("payment_batch_id", batchId);
+      if (error) throw new Error(error.message);
+      updated += 1;
+    } else {
+      const { error } = await admin.from("payment_batch_lines").insert({ payment_batch_id: batchId, ...draft });
+      if (error) throw new Error(error.message);
+      inserted += 1;
+    }
+  }
+  if (slipIdsToLink.length) {
+    const { error } = await admin.from("payroll_payslips").update({ payment_batch_id: batchId, updated_at: now }).in("id", slipIdsToLink);
+    if (error) throw new Error(error.message);
+  }
+
+  await writeAudit(admin, {
+    action: "resync_payment_batch",
+    entityType: "payment_batches",
+    entityId: batchId,
+    actorId: actor.actorId,
+    actorName: actor.actorName,
+    metadata: { period_id: periodId, batch_no: text(batch.batch_no), updated, inserted },
+  });
+
+  const detail = await getPaymentBatchDetail(batchId);
+  return { ...detail, resync: { updated, inserted } };
+}
+
 export async function approvePaymentBatch(batchId: string, actor: Actor = {}) {
   const admin = supabaseAdmin();
   const detail = await getPaymentBatchDetail(batchId);
