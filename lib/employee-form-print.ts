@@ -98,14 +98,17 @@ function lab(l: L, lang: EmployeeFormLang): string {
 }
 
 function cell(f: Field, lang: EmployeeFormLang): string {
-  return `<div class="cell" style="flex:${f.grow ?? 1}"><div class="lab">${lab(f.label, lang)}</div></div>`;
+  // ความกว้างขั้นต่ำตามขนาดช่อง → ตัดขึ้นบรรทัดใหม่อัตโนมัติ (~3-4 ช่อง/แถว) ไม่แน่นเกินไป
+  const grow = f.grow ?? 1;
+  const basis = grow >= 2 ? "58mm" : "40mm";
+  return `<div class="cell" style="flex:${grow} 1 ${basis}; min-width:${basis}"><div class="lab">${lab(f.label, lang)}</div></div>`;
 }
 
 export function buildEmployeeFormHtml(lang: EmployeeFormLang = "th"): string {
   const sectionsHtml = SECTIONS.map((s, i) => {
     const fullHtml = (s.full ?? []).map((f) => `<div class="row"><div class="cell" style="flex:1"><div class="lab">${lab(f.label, lang)}</div></div></div>`).join("");
     const fieldsHtml = (s.fields ?? []).length
-      ? `<div class="row">${(s.fields ?? []).map((f) => cell(f, lang)).join("")}</div>`
+      ? `<div class="fields">${(s.fields ?? []).map((f) => cell(f, lang)).join("")}</div>`
       : "";
     return `<div class="sec"><span class="num">${i + 1}</span>${lab(s.title, lang)}</div>${fullHtml}${fieldsHtml}`;
   }).join("");
@@ -130,9 +133,10 @@ export function buildEmployeeFormHtml(lang: EmployeeFormLang = "th"): string {
     .sec { display: flex; align-items: center; gap: 6px; margin: 11px 0 7px; font-weight: 600; font-size: 12px; }
     .sec .num { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #1f4e79; color: #fff; font-size: 10px; font-weight: 600; flex: none; }
     .sec .en, .lab .en { font-weight: 400; color: #666; }
-    .row { display: flex; gap: 12px; margin-bottom: 7px; }
-    .cell { border-bottom: 1px solid #000; min-height: 9mm; padding-top: 1px; }
-    .lab { font-size: 9.5px; color: #444; line-height: 1.2; }
+    .row { display: flex; gap: 14px; margin-bottom: 4px; }
+    .fields { display: flex; flex-wrap: wrap; gap: 13px 16px; margin-bottom: 4px; }
+    .cell { border-bottom: 1px solid #000; min-height: 11mm; padding-top: 2px; }
+    .lab { font-size: 9.5px; color: #444; line-height: 1.25; min-height: 22px; }
     .attach { display: flex; flex-wrap: wrap; gap: 5px 16px; font-size: 10px; }
     .chk { white-space: nowrap; }
     .sign { display: flex; gap: 22mm; margin-top: 10mm; padding: 0 8mm; }
