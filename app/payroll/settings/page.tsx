@@ -127,6 +127,54 @@ const toneClasses: Record<string, string> = {
   slate: "border-slate-200 bg-slate-50 text-slate-700",
 };
 
+// รวมเมนูตั้งค่าทั้งหมดไว้หน้าเดียว จัดเป็นกลุ่ม (ลดความรกใน sidebar)
+const SETTINGS_GROUPS: { group: string; icon: string; items: { href: string; icon: string; label: string; desc: string }[] }[] = [
+  { group: "ข้อมูลองค์กร", icon: "🏢", items: [
+    { href: "/payroll/companies", icon: "🏢", label: "บริษัท", desc: "ข้อมูลบริษัท/นิติบุคคล" },
+    { href: "/payroll/departments", icon: "🗂️", label: "แผนก", desc: "โครงสร้างแผนก" },
+    { href: "/payroll/positions", icon: "🏷️", label: "ตำแหน่งงาน", desc: "ตำแหน่ง/ระดับ" },
+    { href: "/payroll/cost-centers", icon: "🏦", label: "ศูนย์ต้นทุน", desc: "ศูนย์ต้นทุนสำหรับลงบัญชี" },
+  ] },
+  { group: "เวลาทำงาน", icon: "🕐", items: [
+    { href: "/payroll/work-time-profiles", icon: "🕐", label: "โปรไฟล์เวลาทำงาน", desc: "เวลาเข้า-ออก/ตารางวันทำงาน" },
+    { href: "/payroll/public-holidays", icon: "🎌", label: "วันหยุดพิเศษ", desc: "วันหยุดประจำปี/พิเศษ" },
+  ] },
+  { group: "กฎ & แม่แบบเงินเดือน", icon: "⚙️", items: [
+    { href: "/payroll/employee-settings", icon: "⚙️", label: "ตั้งค่าเงินเดือนรายคน", desc: "ภาษี/ปกส./OT รายคน" },
+    { href: "/payroll/employee-setting-templates", icon: "🧩", label: "แม่แบบตั้งค่ารายคน", desc: "ชุดตั้งค่าตามประเภทสัญญา" },
+    { href: "/payroll/contract-templates", icon: "📄", label: "แม่แบบสัญญา", desc: "ชุดค่าเริ่มต้นตอนสร้างสัญญา" },
+  ] },
+  { group: "คำขอ", icon: "📨", items: [
+    { href: "/payroll/requests", icon: "📨", label: "คำขอพนักงาน", desc: "คำขอ/อนุมัติต่าง ๆ" },
+  ] },
+];
+
+function SettingsLauncher() {
+  return (
+    <div className="space-y-6">
+      {SETTINGS_GROUPS.map((g) => (
+        <section key={g.group}>
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <span>{g.icon}</span><span>{g.group}</span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {g.items.map((it) => (
+              <Link key={it.href} href={it.href}
+                className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 transition hover:border-emerald-300 hover:shadow-sm">
+                <span className="text-2xl leading-none">{it.icon}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-slate-900">{it.label}</span>
+                  <span className="mt-0.5 block text-xs leading-5 text-slate-500">{it.desc}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function formatCount(n: number) {
   return n.toLocaleString("th-TH");
 }
@@ -144,6 +192,7 @@ function HealthPill({ ok, label }: { ok: boolean; label: string }) {
 export default function PayrollSettingsCenterPage() {
   const [data, setData] = useState<SettingsCenter | null>(null);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState<"all" | "overview">("all");
 
   useEffect(() => {
     let alive = true;
@@ -174,23 +223,36 @@ export default function PayrollSettingsCenterPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">ศูนย์ตั้งค่า Payroll</h1>
           <p className="mt-1 text-sm text-slate-500">
-            รวมสถานะของงาน 2, 5, 6, 7, 8 ไว้หน้าเดียว เพื่อเห็นว่าตรงไหนพร้อมใช้งานแล้ว และตรงไหนต้องทำต่อ
+            รวมเมนูตั้งค่าทั้งหมดของระบบเงินเดือนไว้หน้าเดียว — เลือกหมวดที่ต้องการแก้ไข
           </p>
         </div>
 
-        {error && (
+        {/* แท็บ: ตั้งค่าทั้งหมด (launcher) / ภาพรวม & กฎกลาง (ของเดิม) */}
+        <div className="flex gap-1 border-b border-slate-200">
+          {([["all", "🧭 ตั้งค่าทั้งหมด"], ["overview", "📊 ภาพรวม & กฎกลาง"]] as const).map(([k, lbl]) => (
+            <button key={k} onClick={() => setTab(k)}
+              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+                tab === k ? "border-emerald-500 text-emerald-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+
+        {tab === "all" && <SettingsLauncher />}
+
+        {tab === "overview" && error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {!data && !error && (
+        {tab === "overview" && !data && !error && (
           <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-400">
             กำลังโหลดศูนย์ตั้งค่า...
           </div>
         )}
 
-        {data && (
+        {tab === "overview" && data && (
           <>
             <section className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
               <div className="rounded-xl border border-slate-200 bg-white p-5">
