@@ -5,6 +5,8 @@
 // (ตัดออกตามที่สั่ง: ที่อยู่ตามทะเบียนบ้าน, ประวัติการศึกษา, ประวัติการทำงาน, ข้อมูลสำหรับงาน)
 
 export type EmployeeFormLang = "th" | "en" | "my";
+// รายการทักษะที่ตั้งค่าได้ (3 ภาษา) — มาจาก erp_lookups type=employee_skill
+export type SkillOption = { th: string; en: string; my: string };
 
 type L = { th: string; en: string; my: string };
 
@@ -173,36 +175,21 @@ function bankSection(n: number, lang: EmployeeFormLang): string {
   return head + rows;
 }
 
-function documentsSection(n: number, lang: EmployeeFormLang): string {
+// ความสามารถพิเศษ / ทักษะ — รายการ checkbox ที่ตั้งค่าได้ (เก็บใน erp_lookups type=employee_skill)
+// skills = รายการที่ตั้งค่าไว้; ถ้าไม่มี → เว้นช่องว่างให้เขียนเอง
+function skillsSection(n: number, lang: EmployeeFormLang, skills: SkillOption[]): string {
   const T = (th: string, en: string, my: string): L => ({ th, en, my });
-  const head = secHead(n, { th: "เอกสารแนบ", en: "Attachments", my: "ပူးတွဲစာရွက်စာတမ်း" }, lang,
-    { th: "(กรุณาแนบสำเนา)", en: "(please attach copies)", my: "(မိတ္တူ ပူးတွဲပါ)" });
-  const items: L[] = [
-    T("สำเนาบัตรประชาชน", "Copy of ID card", "မှတ်ပုံတင်မိတ္တူ"),
-    T("สำเนาใบผ่านงาน (ถ้ามี)", "Work certificate copy (if any)", "အလုပ်ထွက်လက်မှတ်မိတ္တူ"),
-    T("สำเนาทะเบียนบ้าน", "House registration copy", "အိမ်ထောင်စုစာရင်းမိတ္တူ"),
-    T("สำเนาใบขับขี่ (ถ้ามี)", "Driver license copy (if any)", "ယာဉ်မောင်းလိုင်စင်မိတ္တူ"),
-    T("สำเนาวุฒิการศึกษา", "Education certificate copy", "ပညာအရည်အချင်းမိတ္တူ"),
-    T("รูปถ่าย 1 นิ้ว จำนวน 1 ใบ", "One 1-inch photo", "၁ လက်မ ဓာတ်ပုံ ၁ ပုံ"),
-  ];
-  const grid = items.map((x) => `<span class="cb">&#9744; ${lab(x, lang)}</span>`).join("")
-    + `<span class="cb">&#9744; ${lab(T("อื่นๆ", "Other", "အခြား"), lang)} <span class="tail" style="width:34mm"></span></span>`;
-  return head + `<div class="checklist">${grid}</div>`;
-}
-
-function extraSection(n: number, lang: EmployeeFormLang): string {
-  const T = (th: string, en: string, my: string): L => ({ th, en, my });
-  const head = secHead(n, { th: "ข้อมูลเพิ่มเติม", en: "Additional information", my: "ထပ်ဆောင်းအချက်အလက်" }, lang);
-  const rows = [
-    frow([fcell(T("ความสามารถพิเศษ / ทักษะ", "Special skills", "အထူးကျွမ်းကျင်မှု"), lang)]),
-    frow([fcell(T("งานอดิเรก", "Hobbies", "ဝါသနာ"), lang)]),
-    frow([
-      tcell(T("บุคคลที่ไม่ควรติดต่อในกรณีฉุกเฉิน", "Person NOT to contact in emergency", "အရေးပေါ်တွင် မဆက်သွယ်ရန်သူ"), lang, "62mm", 2),
-      tcell(T("ความสัมพันธ์", "Relationship", "တော်စပ်ပုံ"), lang, "34mm", 1),
-      tcell(T("เบอร์โทร", "Phone", "ဖုန်း"), lang, "32mm", 1),
-    ]),
-  ].join("");
-  return head + rows;
+  const head = secHead(n, { th: "ความสามารถพิเศษ / ทักษะ", en: "Special skills", my: "အထူးကျွမ်းကျင်မှု" }, lang,
+    { th: "(ติ๊กที่มี)", en: "(tick those you have)", my: "(ရှိသည်များ အမှန်ခြစ်ပါ)" });
+  if (!skills.length) {
+    const blank = [frow([fcell(T("ระบุความสามารถพิเศษ / ทักษะ", "Specify skills", "ကျွမ်းကျင်မှု ဖော်ပြပါ"), lang)]),
+      frow([fcell({ th: "", en: "", my: "" }, lang)])].join("");
+    return head + blank;
+  }
+  const grid = skills
+    .map((s) => `<span class="cb">&#9744; ${lab({ th: s.th, en: s.en || s.th, my: s.my || s.th }, lang)}</span>`).join("")
+    + `<span class="cb">&#9744; ${lab(T("อื่นๆ", "Other", "အခြား"), lang)} <span class="tail" style="width:40mm"></span></span>`;
+  return head + `<div class="checklist skills">${grid}</div>`;
 }
 
 function declarationSection(n: number, lang: EmployeeFormLang): string {
@@ -222,15 +209,14 @@ function declarationSection(n: number, lang: EmployeeFormLang): string {
   return head + `<div class="decl">${body}</div>${sign}`;
 }
 
-export function buildEmployeeFormHtml(lang: EmployeeFormLang = "th"): string {
+export function buildEmployeeFormHtml(lang: EmployeeFormLang = "th", skills: SkillOption[] = []): string {
   const corpHtml = CORP.map((c) => `<div class="cr"><span class="cl">${lab(c, lang)}</span><span class="cv"></span></div>`).join("");
   const body = [
     personalSection(lang),
     emergencySection(2, lang),
     bankSection(3, lang),
-    documentsSection(4, lang),
-    extraSection(5, lang),
-    declarationSection(6, lang),
+    skillsSection(4, lang, skills),
+    declarationSection(5, lang),
   ].join("");
 
   return `<!doctype html>
@@ -275,6 +261,8 @@ export function buildEmployeeFormHtml(lang: EmployeeFormLang = "th"): string {
     .tbl td { height: 9mm; }
     .tbl .ord { width: 13mm; text-align: center; }
     .checklist { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; font-size: 10px; padding: 2px 0; }
+    .checklist.skills { grid-template-columns: repeat(3, 1fr); gap: 7px 16px; }
+    .checklist.skills .cb { white-space: normal; }
     .decl { font-size: 10px; line-height: 1.5; margin: 5px 0 0; }
     .sign { display: flex; gap: 20mm; margin-top: 13mm; padding: 0 6mm; }
     .sign .col { flex: 1; text-align: center; }
