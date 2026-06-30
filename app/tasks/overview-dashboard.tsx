@@ -197,7 +197,7 @@ export function OverviewDashboard({
       <div className={`relative rounded-2xl overflow-hidden shadow-sm text-white ${theme.anim?.heroGradient && theme.hero.mode === "gradient" ? "ov-anim-gradient" : ""}`} style={heroStyle(theme.hero)}>
         {heroImage && <div className="absolute inset-0 bg-black/35" />}
         {/* PET — แจ้งเตือนงาน (คลิกได้) หรือรูปลอยเฉย ๆ ถ้าปิดโหมดเตือน */}
-        <DashboardPet petUrl={theme.hero.petUrl ?? null} lottieUrl={theme.hero.petLottieUrl ?? null} cfg={theme.pet ?? { notify: false, overdue: true, review: true, dueToday: true, newTasks: true }} data={petData} onAlert={onPetAlert} />
+        <DashboardPet petUrl={theme.hero.petUrl ?? null} lottieUrl={theme.hero.petLottieUrl ?? null} frames={theme.hero.petFrames ?? null} cfg={theme.pet ?? { notify: false, overdue: true, review: true, dueToday: true, newTasks: true }} data={petData} onAlert={onPetAlert} />
         <div className="relative p-5 sm:p-6">
           {/* แถวบน: เมนูเลือกมุมมอง (ซ้าย) + ปุ่ม (ขวา) — มือถือ: ห่อบรรทัด */}
           <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">

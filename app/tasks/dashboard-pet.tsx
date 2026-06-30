@@ -37,6 +37,21 @@ function lottieSrcOf(v: string | null): string | null {
   return /^https?:/i.test(v) ? v : `/api/r2-image?key=${encodeURIComponent(v)}`;
 }
 
+// หลายรูป (เฟรมอนิเมชั่น) — สลับรูปวนไปเรื่อย ๆ ให้เหมือนขยับ
+function FramePet({ frames, size, intervalMs, animCls }: { frames: string[]; size: number; intervalMs: number; animCls: string }) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    if (frames.length < 2) return;
+    const id = setInterval(() => setI((p) => (p + 1) % frames.length), Math.max(80, intervalMs));
+    return () => clearInterval(id);
+  }, [frames.length, intervalMs]);
+  const key = frames[Math.min(i, frames.length - 1)] ?? frames[0];
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={`/api/r2-image?key=${encodeURIComponent(key)}&w=200`} alt="" style={{ width: size, height: size }} className={`object-contain drop-shadow-lg ${animCls}`} draggable={false} />
+  );
+}
+
 const SEEN_KEY = "tasks_pet_seen";   // เวลาเข้าหน้าครั้งล่าสุด (กันให้ "งานใหม่" นับเฉพาะของใหม่จริง ๆ)
 export type PetAlertKind = "overdue" | "review" | "dueToday" | "new";
 export type PetData = { overdue: number; review: number; dueToday: number; myTaskDates: string[] };
@@ -49,9 +64,10 @@ const CORNER: Record<PetCorner, { pos: string; items: string; isTop: boolean; is
   tl: { pos: "top-1 left-3", items: "items-start", isTop: true, isLeft: true },
 };
 
-export function DashboardPet({ petUrl, lottieUrl, cfg, data, onAlert }: {
+export function DashboardPet({ petUrl, lottieUrl, frames, cfg, data, onAlert }: {
   petUrl: string | null;
   lottieUrl?: string | null;
+  frames?: string[] | null;
   cfg: PetConfig;
   data: PetData;
   onAlert: (kind: PetAlertKind) => void;
@@ -105,9 +121,12 @@ export function DashboardPet({ petUrl, lottieUrl, cfg, data, onAlert }: {
   const corner = CORNER[cfg.corner ?? "br"];
   const size = cfg.size ?? 64;
   const lottieSrc = lottieSrcOf(lottieUrl ?? null);
+  const frameList = (frames ?? []).filter(Boolean);
+  const frameMs = cfg.frameMs ?? 400;
 
-  // ปิดโหมดเตือน → ตัว PET ลอยเฉย ๆ แบบเดิม (Lottie > รูป/GIF) — เคารพมุม/ขนาดที่ตั้งไว้
+  // ปิดโหมดเตือน → ตัว PET ลอยเฉย ๆ แบบเดิม (หลายรูป > Lottie > รูป/GIF) — เคารพมุม/ขนาดที่ตั้งไว้
   if (!cfg.notify) {
+    if (frameList.length) return <div className={`absolute ${corner.pos} pointer-events-none select-none`}><FramePet frames={frameList} size={size} intervalMs={frameMs} animCls="ov-pet-float" /></div>;
     if (lottieSrc) return <div className={`absolute ${corner.pos} pointer-events-none select-none`}><LottiePet src={lottieSrc} size={size} animCls="ov-pet-float" /></div>;
     return petUrl ? (
       // eslint-disable-next-line @next/next/no-img-element
@@ -143,7 +162,9 @@ export function DashboardPet({ petUrl, lottieUrl, cfg, data, onAlert }: {
       {total > 0 && (
         <span className={`ov-badge-pulse absolute -top-1 ${corner.isLeft ? "-left-1" : "-right-1"} z-10 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow`}>{total > 99 ? "99+" : total}</span>
       )}
-      {lottieSrc ? (
+      {frameList.length ? (
+        <FramePet frames={frameList} size={size} intervalMs={hasAlert ? Math.round(frameMs / 2) : frameMs} animCls={hasAlert ? "ov-pet-alert" : "ov-pet-float"} />
+      ) : lottieSrc ? (
         <LottiePet src={lottieSrc} size={size} animCls={hasAlert ? "ov-pet-alert" : "ov-pet-float"} />
       ) : petUrl ? (
         // eslint-disable-next-line @next/next/no-img-element

@@ -17,7 +17,7 @@ import { useCreativeStatuses } from "./use-statuses";
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
 
-export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string; titleSize?: "sm" | "md" | "lg" | "xl"; align?: "left" | "center"; petUrl?: string | null; petLottieUrl?: string | null };
+export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string; titleSize?: "sm" | "md" | "lg" | "xl"; align?: "left" | "center"; petUrl?: string | null; petLottieUrl?: string | null; petFrames?: string[] | null };
 export type CardTheme = { icon: string; iconUrl: string | null; color: string; bgUrl: string | null; label: string | null };
 export type PageTheme = { mode: "none" | "color" | "image"; color: string; imageUrl: string | null };
 export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean };
@@ -31,7 +31,7 @@ export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: bo
 export type StatusColorMap = Record<string, { c1: string; c2?: string | null }>;
 // PET แจ้งเตือน: เปิด/ปิด + เลือกว่าจะเด้งเตือนเมื่อมีงานแบบไหน + แต่งหน้าตา/ตำแหน่ง
 export type PetCorner = "br" | "bl" | "tr" | "tl";
-export type PetConfig = { notify: boolean; overdue: boolean; review: boolean; dueToday: boolean; newTasks: boolean; corner?: PetCorner; size?: number; greeting?: string | null; emojiHappy?: string; emojiAlert?: string };
+export type PetConfig = { notify: boolean; overdue: boolean; review: boolean; dueToday: boolean; newTasks: boolean; corner?: PetCorner; size?: number; greeting?: string | null; emojiHappy?: string; emojiAlert?: string; frameMs?: number };
 export type FontScale = "sm" | "md" | "lg" | "xl";
 export type Density = "compact" | "normal" | "spacious";
 export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number; cardLabelSize?: number; cardValueSize?: number; cardAlign?: CardAlign; anim?: AnimTheme; statusColors?: StatusColorMap; fontFamily?: string; fontScale?: FontScale; density?: Density; cardValueColor?: string | null; cardLabelColor?: string | null; pet?: PetConfig };
@@ -68,7 +68,7 @@ export function ovStatusBg(theme: OverviewTheme, key: string): string | null {
 }
 
 export const DEFAULT_THEME: OverviewTheme = {
-  hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff", titleSize: "lg", align: "left", petUrl: null, petLottieUrl: null },
+  hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff", titleSize: "lg", align: "left", petUrl: null, petLottieUrl: null, petFrames: null },
   cards: {
     all: { icon: "📋", iconUrl: null, color: "slate", bgUrl: null, label: null },
     mine: { icon: "🙋", iconUrl: null, color: "violet", bgUrl: null, label: null },
@@ -90,7 +90,7 @@ export const DEFAULT_THEME: OverviewTheme = {
   density: "normal",
   cardValueColor: null,   // เว้น = สีตามชุดสีการ์ด
   cardLabelColor: null,
-  pet: { notify: false, overdue: true, review: true, dueToday: true, newTasks: true, corner: "br", size: 64, greeting: null, emojiHappy: "🐥", emojiAlert: "🙀" },
+  pet: { notify: false, overdue: true, review: true, dueToday: true, newTasks: true, corner: "br", size: 64, greeting: null, emojiHappy: "🐥", emojiAlert: "🙀", frameMs: 400 },
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -220,6 +220,23 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
   const setKanban = (p: Partial<KanbanTheme>) => onChange({ ...theme, kanban: { ...theme.kanban, ...p } });
   const setAnim = (p: Partial<AnimTheme>) => onChange({ ...theme, anim: { ...theme.anim, ...p } });
   const setPet = (p: Partial<PetConfig>) => onChange({ ...theme, pet: { ...(theme.pet ?? DEFAULT_THEME.pet!), ...p } });
+  // หลายรูป (เฟรมอนิเมชั่น): อัปหลายไฟล์→ต่อท้าย, สลับลำดับ, ลบ
+  const addFrames = async (files: FileList) => {
+    setBusy("frames"); setErr(null);
+    try {
+      const keys: string[] = [];
+      for (const f of Array.from(files)) keys.push(await uploadImage(f));
+      setHero({ petFrames: [...(theme.hero.petFrames ?? []), ...keys] });
+    } catch (e) { setErr(String(e)); } finally { setBusy(null); }
+  };
+  const moveFrame = (i: number, dir: -1 | 1) => {
+    const a = [...(theme.hero.petFrames ?? [])]; const j = i + dir;
+    if (j < 0 || j >= a.length) return;
+    [a[i], a[j]] = [a[j], a[i]]; setHero({ petFrames: a });
+  };
+  const removeFrame = (i: number) => {
+    const a = [...(theme.hero.petFrames ?? [])]; a.splice(i, 1); setHero({ petFrames: a });
+  };
   const setStatusColor = (key: string, c: { c1: string; c2?: string | null } | null) => {
     const next = { ...(theme.statusColors ?? {}) }; if (c) next[key] = c; else delete next[key];
     onChange({ ...theme, statusColors: next });
@@ -370,6 +387,42 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             {theme.hero.petLottieUrl && <button onClick={() => setHero({ petLottieUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบ", "Remove")}</button>}
           </div>
           <p className="text-[11px] text-slate-400">{t("Lottie = อนิเมชั่นเวกเตอร์ ขยับลื่น ไฟล์เล็ก (ดาวน์โหลดฟรีที่ lottiefiles.com → Lottie JSON) · ถ้าตั้ง Lottie จะใช้แทนรูป/GIF", "Lottie = smooth vector animation, tiny file (free at lottiefiles.com → Lottie JSON) · overrides image/GIF when set")}</p>
+          {/* หลายรูป (เฟรมอนิเมชั่น) — อัปหลาย PNG แล้วระบบสลับให้ขยับ */}
+          <div className="pt-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500">{t("หลายรูป (สลับให้ขยับ)", "Multi-frame (animate)")}</span>
+              {canUpload ? (
+                <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === "frames" ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("เลือกได้หลายรูปพร้อมกัน — ระบบจะสลับรูปเรียงซ้าย→ขวา", "Pick several at once — frames play left→right")}>
+                  {busy === "frames" ? "…" : t("⬆ เพิ่มรูป (เลือกหลายรูปได้)", "⬆ Add frames (multi-select)")}
+                  <input type="file" multiple accept="image/png,image/jpeg,image/webp" className="hidden" disabled={busy === "frames"} onChange={(e) => { const fs = e.target.files; if (fs && fs.length) void addFrames(fs); e.target.value = ""; }} />
+                </label>
+              ) : <span className="text-[11px] text-amber-600">{t("ต้องมีสิทธิ์อัปโหลด", "Need upload permission")}</span>}
+              {(theme.hero.petFrames?.length ?? 0) >= 2 && (
+                <span className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">{t("ความเร็ว", "Speed")}</span>
+                  <input type="range" min={150} max={1000} step={50} value={theme.pet?.frameMs ?? 400} onChange={(e) => setPet({ frameMs: Number(e.target.value) })} className="w-24 accent-violet-600" />
+                  <span className="text-[11px] text-slate-400 w-12">{theme.pet?.frameMs ?? 400}ms</span>
+                </span>
+              )}
+            </div>
+            {(theme.hero.petFrames?.length ?? 0) > 0 && (
+              <div className="flex items-center gap-2 flex-wrap mt-2">
+                {(theme.hero.petFrames ?? []).map((k, i) => (
+                  <div key={`${k}-${i}`} className="relative group">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/r2-image?key=${encodeURIComponent(k)}&w=120`} alt="" className="w-12 h-12 object-contain rounded border border-slate-200 bg-slate-50" />
+                    <span className="absolute -top-1.5 -left-1.5 bg-slate-700 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">{i + 1}</span>
+                    <div className="flex items-center justify-center gap-0.5 mt-0.5">
+                      <button onClick={() => moveFrame(i, -1)} disabled={i === 0} className="text-[11px] text-slate-400 hover:text-violet-600 disabled:opacity-30" title={t("เลื่อนซ้าย", "Move left")}>◀</button>
+                      <button onClick={() => removeFrame(i)} className="text-[11px] text-rose-400 hover:text-rose-600" title={t("ลบ", "Remove")}>✕</button>
+                      <button onClick={() => moveFrame(i, 1)} disabled={i === (theme.hero.petFrames?.length ?? 0) - 1} className="text-[11px] text-slate-400 hover:text-violet-600 disabled:opacity-30" title={t("เลื่อนขวา", "Move right")}>▶</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-slate-400 mt-1">{t("ใส่ 2 รูปขึ้นไป PET จะสลับรูปไปมา = ขยับ (เช่น ลืมตา/หลับตา, ยกมือขึ้น/ลง) · เรียงลำดับด้วย ◀ ▶ · ใช้แทน Lottie/รูปเดี่ยวถ้าตั้งไว้", "2+ frames make the pet animate (e.g. eyes open/closed) · reorder with ◀ ▶ · overrides Lottie/single image when set")}</p>
+          </div>
         </div>
       </section>
 
