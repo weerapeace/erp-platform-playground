@@ -9,7 +9,7 @@ import { friendlyDbError } from "../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["label", "color", "sort_order", "progress_percent", "is_terminal", "is_approval_gate", "is_default", "is_active"]);
+const EDITABLE = new Set(["label", "label_en", "color", "sort_order", "progress_percent", "is_terminal", "is_approval_gate", "is_default", "is_active"]);
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;

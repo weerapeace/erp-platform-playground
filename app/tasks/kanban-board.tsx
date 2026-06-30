@@ -55,7 +55,7 @@ function Column({ statusKey, label, tasks, onCardClick }: { statusKey: string; l
   return (
     <div className="flex flex-col w-64 shrink-0">
       <div className="flex items-center justify-between px-3 py-2 bg-white rounded-t-lg border border-b-0 border-slate-200 border-t-4 border-t-violet-300">
-        <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${m.dot}`} /><span className="text-sm font-semibold text-slate-700">{label}</span></div>
+        <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${m.dot}`} /><span className="text-sm font-semibold text-slate-700">{m.label}</span></div>
         <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">{tasks.length}</span>
       </div>
       <div ref={setNodeRef} className={`flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-violet-50" : "bg-slate-50/60"}`}>

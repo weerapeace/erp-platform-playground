@@ -33,7 +33,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { label?: string; color?: string; progress_percent?: number; is_terminal?: boolean; is_approval_gate?: boolean };
+  let body: { label?: string; label_en?: string; color?: string; progress_percent?: number; is_terminal?: boolean; is_approval_gate?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const label = (body.label ?? "").trim();
   if (!label) return NextResponse.json({ error: "กรุณาใส่ชื่อสถานะ" }, { status: 400 });
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   while (existing.has(key)) key = `${deriveKey(label)}_${i++}`;
 
   const { data, error } = await admin.from("erp_creative_statuses").insert({
-    key, label, color: body.color || "slate", progress_percent: body.progress_percent ?? 0,
+    key, label, label_en: (body.label_en ?? "").trim() || null, color: body.color || "slate", progress_percent: body.progress_percent ?? 0,
     is_terminal: !!body.is_terminal, is_approval_gate: !!body.is_approval_gate, sort_order: maxSort + 10, created_by: user?.id ?? null,
   }).select("*").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });

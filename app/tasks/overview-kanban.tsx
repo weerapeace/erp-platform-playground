@@ -135,7 +135,7 @@ export function OverviewKanban({ tasks, statuses, brands, cfg, accent, onMoveSta
   const columns = useMemo<Col[]>(() => {
     if (cfg.groupBy === "status") {
       const known = new Set(statuses.map((s) => s.key));
-      const base: Col[] = statuses.map((s) => ({ key: s.key, label: s.label, dotClass: statusMeta(s.key).dot }));
+      const base: Col[] = statuses.map((s) => ({ key: s.key, label: statusMeta(s.key).label, dotClass: statusMeta(s.key).dot }));
       const extra = [...new Set(tasks.map((x) => x.status).filter((s) => !known.has(s)))]
         .map((s) => ({ key: s, label: statusMeta(s).label, dotClass: statusMeta(s).dot }));
       return [...base, ...extra];

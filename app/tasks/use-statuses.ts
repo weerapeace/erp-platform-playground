@@ -7,9 +7,19 @@ import { apiFetch } from "@/lib/api";
 import { cachedJson, invalidateCache } from "@/lib/client-cache";
 import { statusColor } from "@/lib/creative-status-colors";
 import { STATUS_META as FALLBACK_META } from "@/lib/creative-tasks";
+import { tr } from "@/lib/lang";
 
-export type Status = { id?: string; key: string; label: string; color: string; sort_order: number; progress_percent: number; is_terminal: boolean; is_approval_gate: boolean; is_default: boolean };
+export type Status = { id?: string; key: string; label: string; label_en?: string | null; color: string; sort_order: number; progress_percent: number; is_terminal: boolean; is_approval_gate: boolean; is_default: boolean };
 export type Transition = { id?: string; from_key: string; to_key: string; label: string; kind: string; sort_order: number };
+
+// ป้ายสถานะตามภาษาปัจจุบัน (DB → tr(label, label_en) · fallback อังกฤษ = ไทย ถ้ายังไม่กรอก EN)
+export function statusLabel(key?: string | null): string {
+  if (!key) return "—";
+  const s = byKey[key];
+  if (s) return tr(s.label, s.label_en || s.label);
+  const f = (FALLBACK_META as Record<string, { label: string; label_en?: string }>)[key];
+  return f ? tr(f.label, f.label_en || f.label) : key;
+}
 
 let STATUSES: Status[] = [];
 let TRANSITIONS: Transition[] = [];
@@ -18,9 +28,9 @@ let byKey: Record<string, Status> = {};
 export function statusMeta(key?: string | null): { label: string; cls: string; dot: string } {
   if (!key) { const c = statusColor("slate"); return { label: "—", cls: c.cls, dot: c.dot }; }
   const s = byKey[key];
-  if (s) { const c = statusColor(s.color); return { label: s.label, cls: c.cls, dot: c.dot }; }
-  const f = (FALLBACK_META as Record<string, { label: string; cls: string; dot: string }>)[key];
-  if (f) return f;
+  if (s) { const c = statusColor(s.color); return { label: tr(s.label, s.label_en || s.label), cls: c.cls, dot: c.dot }; }
+  const f = (FALLBACK_META as Record<string, { label: string; label_en?: string; cls: string; dot: string }>)[key];
+  if (f) return { label: tr(f.label, f.label_en || f.label), cls: f.cls, dot: f.dot };
   const c = statusColor("slate"); return { label: key, cls: c.cls, dot: c.dot };
 }
 export function transitionsFrom(key: string): Transition[] { return TRANSITIONS.filter((t) => t.from_key === key); }
@@ -58,7 +68,7 @@ export async function listStatuses(): Promise<{ statuses: Status[]; transitions:
   const j = await ok(await apiFetch("/api/creative-statuses"));
   return { statuses: (j.statuses as Status[]) ?? [], transitions: (j.transitions as Transition[]) ?? [] };
 }
-export async function createStatus(body: { label: string; color?: string; progress_percent?: number; is_terminal?: boolean; is_approval_gate?: boolean }): Promise<Status> {
+export async function createStatus(body: { label: string; label_en?: string; color?: string; progress_percent?: number; is_terminal?: boolean; is_approval_gate?: boolean }): Promise<Status> {
   const j = await ok(await apiFetch("/api/creative-statuses", { method: "POST", body: JSON.stringify(body) })); return bust(j.data as Status);
 }
 export async function updateStatus(id: string, patch: Record<string, unknown>): Promise<void> { await ok(await apiFetch(`/api/creative-statuses/${id}`, { method: "PATCH", body: JSON.stringify(patch) })); bust(0); }

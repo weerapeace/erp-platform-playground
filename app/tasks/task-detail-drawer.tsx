@@ -45,6 +45,7 @@ const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[])
 type EditForm = { task_type: string; priority: CreativePriority; brand_id: string; due_date: string; platforms: string[] };
 
 export function StatusBadge({ status }: { status: string }) {
+  useT();   // subscribe ภาษา → ป้ายสถานะสลับตามภาษา
   const m = statusMeta(status);
   return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>;
 }
