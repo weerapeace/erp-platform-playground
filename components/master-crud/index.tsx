@@ -419,6 +419,8 @@ export type MasterCRUDConfig = {
   formRenderers?: Record<string, FieldDef["renderForm"]>;
   /** แถบ custom เหนือฟอร์ม "ตอนสร้างใหม่" เท่านั้น (เช่น แม่แบบ) — รับค่าฟอร์มปัจจุบัน + setter */
   createFormHeader?: (ctx: { form: Record<string, unknown>; updateForm: (patch: Partial<Record<string, unknown>>) => void }) => React.ReactNode;
+  /** ปุ่ม/ลิงก์เพิ่มเติมบนหัวหน้า (ซ้ายของ ปรับแต่ง/นำเข้า/เพิ่ม) เช่น "พิมพ์ฟอร์ม" */
+  headerActions?: () => React.ReactNode;
   /** unique key field (default: 'code') */
   uniqueKey?: string;
   /** entity_type สำหรับ audit log export */
@@ -2065,6 +2067,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             {config.description && <p className="text-sm text-slate-500 mt-0.5">{config.description}</p>}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            {config.headerActions?.()}
             {/* เมนู "ปรับแต่ง" — ยุบปุ่ม admin (ออกแบบหน้า / Layout / เพิ่ม Field) ให้สะอาด */}
             {config.moduleKey && canEdit && (
               <div className="relative">
