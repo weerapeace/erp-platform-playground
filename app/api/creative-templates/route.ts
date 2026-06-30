@@ -31,14 +31,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     : (r.default_reviewer_id ? [String(r.default_reviewer_id)] : []);
   const allIds = rows.flatMap((r) => [
     ...(Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).flatMap((s) => s.assignee_ids ?? []),
-    ...(Array.isArray(r.content_items) ? (r.content_items as { assignee_id?: string | null }[]) : []).map((c) => c.assignee_id).filter(Boolean) as string[],
+    ...(Array.isArray(r.content_items) ? (r.content_items as { assignee_id?: string | null; assignee_ids?: string[] }[]) : []).flatMap((c) => c.assignee_ids ?? (c.assignee_id ? [c.assignee_id] : [])).filter(Boolean) as string[],
     ...revIdsOf(r),
   ]);
   const empMap = await employeeLabelMap(admin, allIds);
   const items = rows.map((r) => {
     const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
     const steps = (Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).map((s) => ({ ...s, assignee_labels: (s.assignee_ids ?? []).map((id) => empMap.get(String(id)) ?? "") }));
-    const content_items = (Array.isArray(r.content_items) ? (r.content_items as Record<string, unknown>[]) : []).map((c) => ({ ...c, assignee_label: c.assignee_id ? (empMap.get(String(c.assignee_id)) ?? null) : null }));
+    const content_items = (Array.isArray(r.content_items) ? (r.content_items as Record<string, unknown>[]) : []).map((c) => {
+      const ids = (c.assignee_ids as string[]) ?? (c.assignee_id ? [c.assignee_id as string] : []);
+      return { ...c, assignee_ids: ids, assignee_labels: ids.map((id) => empMap.get(String(id)) ?? ""), assignee_label: ids[0] ? (empMap.get(String(ids[0])) ?? null) : null };
+    });
     const revIds = revIdsOf(r);
     const out: Record<string, unknown> = { ...r, steps, content_items, brand_label: b?.name ?? null, brand_color: b?.color ?? null,
       default_reviewer_label: revIds.length ? (empMap.get(revIds[0]) ?? null) : null,
@@ -50,7 +53,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 type Step = { type?: string; title?: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; config?: Record<string, unknown> };
-type ContentItem = { title?: string; post_type?: string | null; platforms?: string[]; assignee_id?: string | null };
+type ContentItem = { title?: string; post_type?: string | null; platforms?: string[]; assignee_id?: string | null; assignee_ids?: string[] };
 type Body = { name?: string; task_type?: string | null; default_priority?: string; brand_id?: string | null; default_reviewer_id?: string | null; default_reviewer_ids?: string[]; due_offset_days?: number | null; description?: string | null; platforms?: string[]; steps?: Step[]; content_items?: ContentItem[] };
 
 // ผู้ตรวจเริ่มต้น (หลายคน) — ใช้ array ถ้าส่งมา ไม่งั้น fallback ค่าเดี่ยว
@@ -72,12 +75,16 @@ function normalizeSteps(raw?: Step[]): Record<string, unknown>[] {
 // บลูพรินต์คอนเทนต์ที่จะสร้างอัตโนมัติตอนสร้างงานจากแม่แบบนี้
 function normalizeContent(raw?: ContentItem[]): Record<string, unknown>[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter((c) => (c?.title ?? "").trim()).map((c) => ({
-    title: (c.title ?? "").trim(),
-    post_type: c.post_type || null,
-    platforms: Array.isArray(c.platforms) ? c.platforms : [],
-    assignee_id: c.assignee_id || null,
-  }));
+  return raw.filter((c) => (c?.title ?? "").trim()).map((c) => {
+    const ids = Array.isArray(c.assignee_ids) ? c.assignee_ids : (c.assignee_id ? [c.assignee_id] : []);
+    return {
+      title: (c.title ?? "").trim(),
+      post_type: c.post_type || null,
+      platforms: Array.isArray(c.platforms) ? c.platforms : [],
+      assignee_ids: ids,
+      assignee_id: ids[0] ?? null,   // back-compat
+    };
+  });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

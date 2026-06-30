@@ -92,7 +92,7 @@ type CreateBody = {
   asset_status?: string | null; platforms?: string[] | null;
   drive_folder_url?: string | null; cover_image_r2_key?: string | null;
   subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: Record<string, unknown> }[];
-  content_items?: { title: string; post_type?: string | null; platforms?: string[]; assignee_id?: string | null }[];   // คอนเทนต์พ่วงจากแม่แบบ → สร้างผูกงานอัตโนมัติ
+  content_items?: { title: string; post_type?: string | null; platforms?: string[]; assignee_id?: string | null; assignee_ids?: string[] }[];   // คอนเทนต์พ่วงจากแม่แบบ → สร้างผูกงานอัตโนมัติ
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -158,7 +158,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const blueprints = body.content_items.filter((c) => c?.title?.trim());
     for (const ci of blueprints) {
       let cno = await nextContentNo(admin);
-      const crow = { content_no: cno, title: ci.title.trim(), task_id: row.id, brand_id: body.brand_id || null, post_type: ci.post_type || null, platforms: ci.platforms ?? [], status: "draft", created_by: user?.id ?? null, assignee_id: ci.assignee_id || null };
+      const cids = (Array.isArray(ci.assignee_ids) ? ci.assignee_ids : (ci.assignee_id ? [ci.assignee_id] : [])).filter(Boolean) as string[];
+      const crow = { content_no: cno, title: ci.title.trim(), task_id: row.id, brand_id: body.brand_id || null, post_type: ci.post_type || null, platforms: ci.platforms ?? [], status: "draft", created_by: user?.id ?? null, assignee_ids: cids, assignee_id: cids[0] ?? null };
       let { error: cErr } = await admin.from("erp_creative_content").insert(crow);
       if (cErr && /duplicate|unique/i.test(cErr.message)) { cno = await nextContentNo(admin); ({ error: cErr } = await admin.from("erp_creative_content").insert({ ...crow, content_no: cno })); }
     }

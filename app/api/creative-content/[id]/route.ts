@@ -12,12 +12,12 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { SELECT, flattenContent } from "../shared";
+import { SELECT, flattenContent, attachAssignees } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["title", "task_id", "campaign_id", "brand_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "status", "scheduled_at", "published_url", "posted_links", "note", "discount_value", "discount_is_percent", "assignee_id"]);
+const EDITABLE = new Set(["title", "task_id", "campaign_id", "brand_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "status", "scheduled_at", "published_url", "posted_links", "note", "discount_value", "discount_is_percent", "assignee_id", "assignee_ids"]);
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
@@ -27,7 +27,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 500 });
   if (!data) return NextResponse.json({ error: "ไม่พบคอนเทนต์" }, { status: 404 });
   const { data: caps } = await admin.from("erp_creative_content_captions").select("*").eq("content_id", id).order("sort_order", { ascending: true });
-  return NextResponse.json({ data: { ...flattenContent(data as Record<string, unknown>), captions: caps ?? [] }, error: null });
+  const flat = flattenContent(data as Record<string, unknown>);
+  await attachAssignees(admin, [flat]);
+  return NextResponse.json({ data: { ...flat, captions: caps ?? [] }, error: null });
 }
 
 type Caption = { platform: string; caption?: string | null; hashtags?: string | null; caption_type?: string | null };
@@ -44,6 +46,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const [k, v] of Object.entries(body)) if (EDITABLE.has(k)) patch[k] = v === "" ? null : v;
   if (Array.isArray(body.product_links)) patch.product_links = body.product_links;
+  // m2m ผู้รับผิดชอบ: ตั้ง assignee_id (เดี่ยว) = คนแรก ให้ back-compat
+  if (Array.isArray((body as { assignee_ids?: string[] }).assignee_ids)) { const arr = (body as { assignee_ids: string[] }).assignee_ids; patch.assignee_ids = arr; patch.assignee_id = arr[0] ?? null; }
   if (patch.status === "published" && !("published_url" in patch && !patch.published_url)) patch.published_at = new Date().toISOString();
 
   if (Object.keys(patch).length > 1 || !body.captions) {

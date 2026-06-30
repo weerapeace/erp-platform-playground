@@ -1,9 +1,10 @@
 /** ของใช้ร่วมของ creative-content API (แยกจาก route.ts — route ต้อง export แค่ handler) */
+import { employeeLabelMap } from "@/lib/creative-tasks-server";
 
 export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sku_id, parent_sku_id, product_name, post_type,
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, note,
   discount_value, discount_is_percent,
-  is_template, is_active, created_at, updated_at, assignee_id,
+  is_template, is_active, created_at, updated_at, assignee_id, assignee_ids,
   brand:brands!brand_id(name, color, shop_channels),
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price),
@@ -30,4 +31,15 @@ export function flattenContent(r: Record<string, unknown>): Record<string, unkno
   out.sku_color = (s?.color_th as string) ?? (s?.color as string) ?? null;
   out.sku_price = s?.list_price ?? null;
   return out;
+}
+
+// ผู้รับผิดชอบหลายคน (m2m) — เติม assignees:[{id,name}] ให้ทุก item (batch resolve ชื่อ) + ป้ายเดี่ยว fallback
+export async function attachAssignees(admin: Parameters<typeof employeeLabelMap>[0], items: Record<string, unknown>[]): Promise<void> {
+  const allIds = [...new Set(items.flatMap((it) => ((it.assignee_ids as string[]) ?? [])))].filter(Boolean) as string[];
+  const map = allIds.length ? await employeeLabelMap(admin, allIds) : new Map<string, string>();
+  for (const it of items) {
+    const ids = (((it.assignee_ids as string[]) ?? []).filter(Boolean));
+    it.assignees = ids.map((id) => ({ id, name: map.get(String(id)) ?? "" }));
+    if (!it.assignee_label && ids.length) it.assignee_label = map.get(String(ids[0])) ?? null;
+  }
 }

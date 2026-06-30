@@ -23,7 +23,7 @@ import {
 import { useCreativeOptions, taskTypeLabel } from "../use-options";
 import { BulletTextarea } from "@/components/bullet-textarea";
 import { SubtaskTypePicker, type EditStep } from "./subtask-type-picker";
-import { TeamMemberSelect } from "../team-picker";
+import { TeamFill } from "../team-picker";
 import { BrandPromptsTab } from "./brand-prompts";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
@@ -227,14 +227,19 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
                         className={`px-2 py-0.5 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>
                     ); })}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400 shrink-0">{t("ผู้รับผิดชอบ", "Assignee")}</span>
-                    {ci.assignee_id
-                      ? <span className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{ci.assignee_label || t("ผู้ใช้", "User")}<button type="button" onClick={() => setContentD(contentItems.map((x, j) => j === i ? { ...x, assignee_id: null, assignee_label: null } : x))} className="text-slate-400 hover:text-red-500">✕</button></span>
-                      : <>
-                          <div className="w-52"><UserPicker value={null} onChange={(v) => { if (v) setContentD(contentItems.map((x, j) => j === i ? { ...x, assignee_id: v.id, assignee_label: v.name } : x)); }} disableCreate /></div>
-                          <TeamMemberSelect onPick={(m) => setContentD(contentItems.map((x, j) => j === i ? { ...x, assignee_id: m.id, assignee_label: m.name } : x))} />
-                        </>}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-400 shrink-0">{t("ผู้รับผิดชอบ", "Assignees")}</span>
+                    {(() => {
+                      const ids = ci.assignee_ids ?? (ci.assignee_id ? [ci.assignee_id] : []);
+                      const labels = ci.assignee_labels ?? (ci.assignee_label ? [ci.assignee_label] : []);
+                      const setCi = (nids: string[], nlabels: string[]) => setContentD(contentItems.map((x, j) => j === i ? { ...x, assignee_ids: nids, assignee_labels: nlabels, assignee_id: nids[0] ?? null, assignee_label: nlabels[0] ?? null } : x));
+                      const addOne = (id: string, name: string) => { if (!ids.includes(id)) setCi([...ids, id], [...labels, name]); };
+                      return <>
+                        {ids.map((id, k) => <span key={id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{labels[k] || t("ผู้ใช้", "User")}<button type="button" onClick={() => setCi(ids.filter((_, j2) => j2 !== k), labels.filter((_, j2) => j2 !== k))} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+                        <div className="w-44"><UserPicker value={null} onChange={(v) => { if (v) addOne(v.id, v.name); }} disableCreate /></div>
+                        <TeamFill onPick={(members) => { const add = members.filter((m) => !ids.includes(m.id)); if (add.length) setCi([...ids, ...add.map((m) => m.id)], [...labels, ...add.map((m) => m.name)]); }} />
+                      </>;
+                    })()}
                   </div>
                 </div>
               ))}

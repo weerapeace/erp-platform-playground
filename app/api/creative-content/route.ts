@@ -13,7 +13,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { nextContentNo } from "@/lib/creative-tasks-server";
-import { SELECT, flattenContent } from "./shared";
+import { SELECT, flattenContent, attachAssignees } from "./shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,6 +47,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data, error, count } = await q;
   if (error) return NextResponse.json({ data: [], total: 0, error: friendlyDbError(error.message) }, { status: 500 });
   const items = ((data ?? []) as Record<string, unknown>[]).map(flattenContent);
+  await attachAssignees(admin, items);
   return NextResponse.json({ data: items, total: count ?? items.length, error: null });
 }
 
@@ -55,7 +56,7 @@ type CreateBody = {
   title?: string; task_id?: string | null; campaign_id?: string | null; brand_id?: string | null; sku_id?: string | null; parent_sku_id?: string | null; product_name?: string | null;
   post_type?: string | null; platforms?: string[]; status?: string; scheduled_at?: string | null;
   product_links?: { platform: string; url: string }[]; note?: string | null; captions?: Caption[]; is_template?: boolean;
-  discount_value?: number | null; discount_is_percent?: boolean; assignee_id?: string | null;
+  discount_value?: number | null; discount_is_percent?: boolean; assignee_id?: string | null; assignee_ids?: string[];
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -72,7 +73,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     sku_id: body.sku_id || null, parent_sku_id: body.parent_sku_id || null, product_name: body.product_name?.trim() || null, post_type: body.post_type || null,
     platforms: body.platforms ?? [], status: body.status || "draft", scheduled_at: body.scheduled_at || null,
     product_links: body.product_links ?? [], note: body.note?.trim() || null, is_template: !!body.is_template, created_by: user?.id ?? null,
-    discount_value: body.discount_value ?? null, discount_is_percent: !!body.discount_is_percent, assignee_id: body.assignee_id || null,
+    discount_value: body.discount_value ?? null, discount_is_percent: !!body.discount_is_percent,
+    assignee_ids: Array.isArray(body.assignee_ids) ? body.assignee_ids : (body.assignee_id ? [body.assignee_id] : []),
+    assignee_id: (Array.isArray(body.assignee_ids) ? body.assignee_ids[0] : body.assignee_id) || null,
   });
 
   let no = await nextContentNo(admin);

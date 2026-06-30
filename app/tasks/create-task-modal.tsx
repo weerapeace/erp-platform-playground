@@ -14,7 +14,7 @@ import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "
 import { UserPicker, SkuPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue, SkuPickerValue, ParentSkuPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "./multi-user-picker";
-import { TeamFill, TeamMemberSelect } from "./team-picker";
+import { TeamFill } from "./team-picker";
 import { ImageInput } from "@/components/image-input";
 import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
@@ -273,13 +273,18 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
                       <button onClick={() => removeContentItem(i)} className="text-slate-300 hover:text-red-500 text-sm px-1" title={t("ลบ", "Remove")}>✕</button>
                     </div>
                     <div className="pl-7 flex items-center gap-2 flex-wrap">
-                      <span className="text-[11px] text-slate-400">{t("ผู้รับผิดชอบ:", "Assignee:")}</span>
-                      {c.assignee_id
-                        ? <span className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{c.assignee_label || t("ผู้ใช้", "User")}<button onClick={() => patchContentItem(i, { assignee_id: null, assignee_label: null })} className="text-slate-400 hover:text-red-500">✕</button></span>
-                        : <>
-                            <div className="w-56"><UserPicker value={null} onChange={(v) => { if (v) patchContentItem(i, { assignee_id: v.id, assignee_label: v.name }); }} disableCreate /></div>
-                            <TeamMemberSelect onPick={(m) => patchContentItem(i, { assignee_id: m.id, assignee_label: m.name })} />
-                          </>}
+                      <span className="text-[11px] text-slate-400">{t("ผู้รับผิดชอบ:", "Assignees:")}</span>
+                      {(() => {
+                        const ids = c.assignee_ids ?? (c.assignee_id ? [c.assignee_id] : []);
+                        const labels = c.assignee_labels ?? (c.assignee_label ? [c.assignee_label] : []);
+                        const set = (nids: string[], nlabels: string[]) => patchContentItem(i, { assignee_ids: nids, assignee_labels: nlabels, assignee_id: nids[0] ?? null, assignee_label: nlabels[0] ?? null });
+                        const addOne = (id: string, name: string) => { if (!ids.includes(id)) set([...ids, id], [...labels, name]); };
+                        return <>
+                          {ids.map((id, k) => <span key={id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{labels[k] || t("ผู้ใช้", "User")}<button onClick={() => set(ids.filter((_, j2) => j2 !== k), labels.filter((_, j2) => j2 !== k))} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+                          <div className="w-48"><UserPicker value={null} onChange={(v) => { if (v) addOne(v.id, v.name); }} disableCreate /></div>
+                          <TeamFill onPick={(members) => { const add = members.filter((m) => !ids.includes(m.id)); if (add.length) set([...ids, ...add.map((m) => m.id)], [...labels, ...add.map((m) => m.name)]); }} />
+                        </>;
+                      })()}
                     </div>
                   </div>
                 ))}
