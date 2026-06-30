@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { writeAudit } from "@/lib/audit";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { money } from "@/lib/payroll-calc";
+import { payableWorkDays } from "@/lib/payroll-calc-engine";
 import {
   normalizePayslipPrintLanguage,
   payslipLanguageForEmployee,
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
     const admin = supabaseAdmin();
     const { data: periodRows } = await admin
       .from("payroll_periods")
-      .select("id, period_name, status, start_date, end_date")
+      .select("id, period_name, status, start_date, end_date, default_work_days, default_hours_per_day, payroll_period_holidays(holiday_date)")
       .eq("id", periodId)
       .limit(1);
     const period = periodRows?.[0] as Row | undefined;
@@ -101,6 +102,30 @@ export async function GET(req: NextRequest) {
         const row = bank as Row;
         const employeeId = text(row.employee_id);
         if (employeeId && !banksByEmployeeId[employeeId]) banksByEmployeeId[employeeId] = row;
+      });
+    }
+
+    // วันทำงานจริง (paid_minutes) แบบเดียวกับหน้าคำนวณ: ฐานวันทำงานตามสัญญา − ขาด/ลา/สาย
+    const hoursPerDay = money(period.default_hours_per_day) || 8;
+    const baseFlat = Math.round((money(period.default_work_days) || 26) * hoursPerDay * 60);
+    const paidMinBy: Record<string, number> = {};
+    if (empIds.length) {
+      const [conRes, attRes, lvRes] = await Promise.all([
+        admin.from("employee_contracts").select("employee_id, work_schedule_id, start_date, end_date").in("employee_id", empIds).eq("is_current", true).eq("status", "active"),
+        admin.from("attendance_entries").select("employee_id, late_minutes, absence_hours").eq("payroll_period_id", periodId),
+        admin.from("leave_entries").select("employee_id, days, hours").eq("payroll_period_id", periodId),
+      ]);
+      const conBy: Record<string, Row> = {};
+      (conRes.data ?? []).forEach((c) => { conBy[text((c as Row).employee_id)] = c as Row; });
+      const lateBy: Record<string, number> = {}, absBy: Record<string, number> = {}, lvBy: Record<string, number> = {};
+      (attRes.data ?? []).forEach((r) => { const id = text((r as Row).employee_id); lateBy[id] = (lateBy[id] ?? 0) + money((r as Row).late_minutes); absBy[id] = (absBy[id] ?? 0) + money((r as Row).absence_hours); });
+      (lvRes.data ?? []).forEach((r) => { const id = text((r as Row).employee_id); lvBy[id] = (lvBy[id] ?? 0) + (money((r as Row).hours) || money((r as Row).days) * hoursPerDay); });
+      empIds.forEach((id) => {
+        const con = conBy[id] ?? {};
+        const excluded = Math.max(payableWorkDays(period, { work_schedule_id: con.work_schedule_id }) - payableWorkDays(period, con), 0);
+        const empBase = Math.max(baseFlat - Math.round(excluded * hoursPerDay * 60), 0);
+        const deducted = Math.round(((absBy[id] ?? 0) + (lvBy[id] ?? 0)) * 60 + (lateBy[id] ?? 0));
+        paidMinBy[id] = Math.max(empBase - deducted, 0);
       });
     }
 
@@ -151,6 +176,7 @@ export async function GET(req: NextRequest) {
             gross_pay: money(slip.gross_pay),
             total_deduction: money(slip.total_deduction),
             net_pay: money(slip.net_pay),
+            paid_minutes: paidMinBy[employeeId] ?? null,
             status: slip.status,
             slip_type: slip.slip_type,
             issued_at: slip.issued_at,

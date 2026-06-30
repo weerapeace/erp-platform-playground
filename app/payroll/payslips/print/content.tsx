@@ -23,6 +23,7 @@ type PrintSlip = {
   employee_name: string;
   nickname: string;
   payslip_language: "th" | "en";
+  paid_minutes?: number | null;
   bank_name: string;
   bank_branch: string;
   bank_account_no: string;
@@ -46,6 +47,19 @@ const baht = (value: unknown) => `฿${money(value).toLocaleString("th-TH", { mi
 
 function label(lang: "th" | "en", th: string, en: string) {
   return lang === "th" ? th : en;
+}
+
+// วันทำงานจริงแบบ "X วัน Y ชม. Z นาที" (จาก paid_minutes) — ใช้กฎเดียวกับหน้าคำนวณ
+function paidDuration(totalMinutes: number | null | undefined, lang: "th" | "en", hoursPerDay = 8): string {
+  if (totalMinutes == null || Number.isNaN(totalMinutes)) return "-";
+  const m = Math.max(Math.round(totalMinutes), 0), dm = Math.max(Math.round(hoursPerDay * 60), 1);
+  const days = Math.floor(m / dm), rem = m % dm, hrs = Math.floor(rem / 60), mins = rem % 60;
+  const u = lang === "th" ? { d: "วัน", h: "ชม.", m: "นาที" } : { d: "d", h: "h", m: "m" };
+  const p: string[] = [];
+  if (days) p.push(`${days} ${u.d}`);
+  if (hrs) p.push(`${hrs} ${u.h}`);
+  if (mins) p.push(`${mins} ${u.m}`);
+  return p.length ? p.join(" ") : `0 ${u.d}`;
 }
 
 function fmtDate(value?: string | null) {
@@ -254,12 +268,12 @@ function PayslipSheet({ period, slip }: { period: PrintResponse["period"]; slip:
       <InfoGrid slip={slip} lang={lang} />
 
       <div className="mt-2 grid grid-cols-6 border border-slate-200 text-center text-xs">
-        <Metric label={label(lang, "วันทำงาน", "Work Days")} value={`${workDays.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${label(lang, "วัน", "day")}`} />
+        <Metric label={label(lang, "วันทำงาน", "Work Days")} value={slip.paid_minutes != null ? paidDuration(slip.paid_minutes, lang) : `${workDays.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${label(lang, "วัน", "day")}`} />
         <Metric label={label(lang, "ชั่วโมงทำงาน", "Work Hours")} value={`${workHours.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${label(lang, "ชม.", "hrs")}`} />
         <Metric label={label(lang, "มาสาย", "Late/Early Leave")} value={late ? baht(late * -1) : "-"} danger={late > 0} />
-        <Metric label={label(lang, "ขาดงาน", "Absent")} value={absent ? String(absent) : "-"} />
-        <Metric label={label(lang, "ลา", "Leave")} value={leave ? String(leave) : "-"} />
-        <Metric label="OT" value={ot ? String(ot) : "-"} />
+        <Metric label={label(lang, "ขาดงาน", "Absent")} value={absent ? String(absent) : "-"} tone={absent ? "danger" : undefined} />
+        <Metric label={label(lang, "ลา", "Leave")} value={leave ? String(leave) : "-"} tone={leave ? "warning" : undefined} />
+        <Metric label="OT" value={ot ? String(ot) : "-"} tone={ot ? "success" : undefined} />
       </div>
 
       <div className="payslip-main-grid mt-3 grid grid-cols-[1fr_1fr_150px]">
@@ -298,11 +312,15 @@ function InfoPair({ label: labelText, value, span = 2 }: { label: string; value:
   );
 }
 
-function Metric({ label: labelText, value, danger = false }: { label: string; value: string; danger?: boolean }) {
+function Metric({ label: labelText, value, danger = false, tone }: { label: string; value: string; danger?: boolean; tone?: "success" | "warning" | "danger" }) {
+  const color = tone === "success" ? "text-emerald-600"
+    : tone === "warning" ? "text-amber-600"
+    : (tone === "danger" || danger) ? "text-red-600"
+    : "text-slate-700";
   return (
     <div className="border-r border-slate-100">
       <div className="bg-slate-50 px-1.5 py-1.5 text-[10px] font-semibold leading-tight text-slate-500">{labelText}</div>
-      <div className={`px-1.5 py-2 font-bold leading-tight ${danger ? "text-red-600" : "text-slate-700"}`}>{value}</div>
+      <div className={`px-1.5 py-2 font-bold leading-tight ${color}`}>{value}</div>
     </div>
   );
 }
@@ -323,7 +341,7 @@ function AmountPanel({ title, tone, rows, totalLabel, total }: {
         <span>Item</span><span className="text-right">Amount</span>
       </div>
       {rows.map((row) => (
-        <div key={row.key} className="grid grid-cols-[1fr_92px] border-b border-slate-100 px-2 py-1.5">
+        <div key={row.key} className={`grid grid-cols-[1fr_92px] border-b border-slate-100 px-2 py-1.5 ${tone === "green" ? "text-emerald-700" : "text-red-600"}`}>
           <span>{row.label}</span><span className="text-right tabular-nums">{row.amount ? baht(row.amount) : "-"}</span>
         </div>
       ))}
