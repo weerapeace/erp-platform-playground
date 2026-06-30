@@ -567,13 +567,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         <div className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"} style={{ ...drawerBgStyle(dth), zoom: drawerZoom(dth.size) }}>
           {/* ───── คอลัมน์ซ้ายสุด: รูปจากงาน (เฉพาะจอกว้าง) ───── */}
           {imagesInLeftPane && (
-            <div className="w-[210px] shrink-0 overflow-y-auto px-3 py-3 bg-slate-50/50 border-r border-slate-200">
+            <div className="w-[210px] shrink-0 overflow-y-auto px-3 py-3 bg-slate-50/40 border-r border-slate-200">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{cLabelOf("task_media")}</p>
-                <span className="text-[11px] text-slate-400">{taskMedia.images.length} {t("รูป", "img")}</span>
+                <p className="text-[11px] font-semibold text-slate-500 tracking-wide">🖼️ {cLabelOf("task_media")}</p>
+                <span className="text-[10px] text-slate-400 bg-white border border-slate-200 rounded-full px-1.5">{taskMedia.images.length}</span>
               </div>
               {taskImagesGallery("grid-cols-2")}
-              <p className="text-[11px] text-slate-300 mt-2">{t("ป้ายบอกสถานะ · กดรูป=ดูเต็มจอ · 🔗 ก๊อปลิงก์ · ⬇ ดาวน์โหลด", "Status badge · click=view · 🔗 copy · ⬇ download")}</p>
+              <p className="text-[10px] text-slate-300 mt-2 leading-tight">{t("กดรูป=ดูเต็มจอ · ⬇ ดาวน์โหลดไปโพสต์", "Click=view · ⬇ download to post")}</p>
             </div>
           )}
           {/* กลุ่ม ข้อมูล | เส้นแบ่ง | แคปชั่น — ตัวลากปรับขนาดทำงานในนี้ (รูปอยู่นอกกลุ่ม จะได้ลากแม่น) */}
@@ -1101,14 +1101,14 @@ function CaptionConfigModal({ cfg, brandId, brandLabel, platforms, onClose, onSa
 // ส่วนที่พับได้ในคอลัมน์ซ้ายของ drawer คอนเทนต์ — หัวข้อมีแถบชัด + กด ▼ พับ/กาง (จำต่อคน)
 function CSection({ title, order, collapsed, onToggle, right, children }: { title: string; order: number; collapsed: boolean; onToggle: () => void; right?: ReactNode; children: ReactNode }) {
   return (
-    <div style={{ order }} className="border border-slate-200 rounded-lg overflow-hidden bg-white/50">
-      <div className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-slate-50/80 border-b border-slate-100">
-        <button onClick={onToggle} className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wider hover:text-violet-700 min-w-0">
-          <span className="text-[9px] text-slate-400 shrink-0">{collapsed ? "▶" : "▼"}</span><span className="truncate">{title}</span>
+    <div style={{ order }} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+      <div className={`w-full flex items-center justify-between gap-2 pl-2.5 pr-3 py-2 ${collapsed ? "" : "border-b border-slate-100"}`}>
+        <button onClick={onToggle} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 tracking-wide hover:text-violet-700 min-w-0">
+          <span className="text-[10px] text-slate-300 shrink-0 w-3 text-center">{collapsed ? "▸" : "▾"}</span><span className="truncate">{title}</span>
         </button>
         {right && <div className="shrink-0">{right}</div>}
       </div>
-      {!collapsed && <div className="p-3">{children}</div>}
+      {!collapsed && <div className="px-3 py-3">{children}</div>}
     </div>
   );
 }
