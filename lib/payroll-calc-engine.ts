@@ -39,17 +39,28 @@ function eachDay(start: string, end: string, fn: (d: Date, iso: string) => void)
 function countWorkDays(start: string, end: string): number {
   let n = 0; eachDay(start, end, (d) => { if (d.getUTCDay() !== 0) n++; }); return n;
 }
+// ช่วงวันที่ "นับจริง" = งวด ∩ ช่วงสัญญา — กันนับวันก่อนเริ่ม/หลังสิ้นสุดสัญญา (พนักงานเข้า/ออกกลางงวด)
+function effectiveRange(period: Row, contract: Row): { start: string; end: string } {
+  const ps = String(period.start_date).slice(0, 10), pe = String(period.end_date).slice(0, 10);
+  const cs = String(contract.start_date ?? "").slice(0, 10), ce = String(contract.end_date ?? "").slice(0, 10);
+  const valid = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+  return { start: valid(cs) && cs > ps ? cs : ps, end: valid(ce) && ce < pe ? ce : pe };
+}
 function scheduledWorkDays(period: Row, contract: Row): number {
   const wd = scheduleWeekdays(contract.work_schedule_id); let n = 0;
-  eachDay(String(period.start_date), String(period.end_date), (d) => { if (wd.includes(d.getUTCDay())) n++; }); return n;
+  const { start, end } = effectiveRange(period, contract);
+  eachDay(start, end, (d) => { if (wd.includes(d.getUTCDay())) n++; }); return n;
 }
 function payableWorkDays(period: Row, contract: Row): number {
   const wd = scheduleWeekdays(contract.work_schedule_id), hol = holidaySet(period); let n = 0;
-  eachDay(String(period.start_date), String(period.end_date), (d, iso) => { if (wd.includes(d.getUTCDay()) && !hol.has(iso)) n++; }); return n;
+  const { start, end } = effectiveRange(period, contract);
+  eachDay(start, end, (d, iso) => { if (wd.includes(d.getUTCDay()) && !hol.has(iso)) n++; }); return n;
 }
 function isPayableWorkDate(iso: string, contract: Row, period: Row): boolean {
   const d = new Date(`${iso}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return false;
+  const { start, end } = effectiveRange(period, contract);
+  if (iso < start || iso > end) return false;   // นอกช่วงสัญญา = ไม่นับ
   return scheduleWeekdays(contract.work_schedule_id).includes(d.getUTCDay()) && !holidaySet(period).has(iso);
 }
 
