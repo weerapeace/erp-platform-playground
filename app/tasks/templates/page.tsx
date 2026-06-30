@@ -23,6 +23,7 @@ import {
 import { useCreativeOptions, taskTypeLabel } from "../use-options";
 import { BulletTextarea } from "@/components/bullet-textarea";
 import { SubtaskTypePicker, type EditStep } from "./subtask-type-picker";
+import { TeamMemberSelect } from "../team-picker";
 import { BrandPromptsTab } from "./brand-prompts";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
@@ -230,7 +231,10 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
                     <span className="text-xs text-slate-400 shrink-0">{t("ผู้รับผิดชอบ", "Assignee")}</span>
                     {ci.assignee_id
                       ? <span className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{ci.assignee_label || t("ผู้ใช้", "User")}<button type="button" onClick={() => setContentD(contentItems.map((x, j) => j === i ? { ...x, assignee_id: null, assignee_label: null } : x))} className="text-slate-400 hover:text-red-500">✕</button></span>
-                      : <div className="w-52"><UserPicker value={null} onChange={(v) => { if (v) setContentD(contentItems.map((x, j) => j === i ? { ...x, assignee_id: v.id, assignee_label: v.name } : x)); }} disableCreate /></div>}
+                      : <>
+                          <div className="w-52"><UserPicker value={null} onChange={(v) => { if (v) setContentD(contentItems.map((x, j) => j === i ? { ...x, assignee_id: v.id, assignee_label: v.name } : x)); }} disableCreate /></div>
+                          <TeamMemberSelect onPick={(m) => setContentD(contentItems.map((x, j) => j === i ? { ...x, assignee_id: m.id, assignee_label: m.name } : x))} />
+                        </>}
                   </div>
                 </div>
               ))}

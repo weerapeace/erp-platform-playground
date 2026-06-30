@@ -14,7 +14,7 @@ import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "
 import { UserPicker, SkuPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue, SkuPickerValue, ParentSkuPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "./multi-user-picker";
-import { TeamFill } from "./team-picker";
+import { TeamFill, TeamMemberSelect } from "./team-picker";
 import { ImageInput } from "@/components/image-input";
 import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
@@ -276,7 +276,10 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
                       <span className="text-[11px] text-slate-400">{t("ผู้รับผิดชอบ:", "Assignee:")}</span>
                       {c.assignee_id
                         ? <span className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{c.assignee_label || t("ผู้ใช้", "User")}<button onClick={() => patchContentItem(i, { assignee_id: null, assignee_label: null })} className="text-slate-400 hover:text-red-500">✕</button></span>
-                        : <div className="w-56"><UserPicker value={null} onChange={(v) => { if (v) patchContentItem(i, { assignee_id: v.id, assignee_label: v.name }); }} disableCreate /></div>}
+                        : <>
+                            <div className="w-56"><UserPicker value={null} onChange={(v) => { if (v) patchContentItem(i, { assignee_id: v.id, assignee_label: v.name }); }} disableCreate /></div>
+                            <TeamMemberSelect onPick={(m) => patchContentItem(i, { assignee_id: m.id, assignee_label: m.name })} />
+                          </>}
                     </div>
                   </div>
                 ))}

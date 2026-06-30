@@ -23,3 +23,23 @@ export function TeamFill({ onPick, className }: { onPick: (members: { id: string
     </select>
   );
 }
+
+// เลือกสมาชิก "ทีละคน" จากทีม (สำหรับช่องผู้รับผิดชอบคนเดียว เช่น คอนเทนต์) — dropdown จัดกลุ่มตามทีม
+export function TeamMemberSelect({ onPick, className }: { onPick: (member: { id: string; name: string }) => void; className?: string }) {
+  const t = useT();
+  const [teams, setTeams] = useState<Team[]>([]);
+  useEffect(() => { let live = true; listTeams().then((ts) => { if (live) setTeams(ts); }).catch(() => {}); return () => { live = false; }; }, []);
+  if (teams.length === 0) return null;
+  return (
+    <select value="" title={t("เลือกจากทีม", "Pick from a team")}
+      onChange={(e) => { const id = e.target.value; if (id) { for (const tm of teams) { const m = tm.members.find((x) => x.id === id); if (m) { onPick(m); break; } } } e.currentTarget.value = ""; }}
+      className={className ?? "h-9 px-2 text-xs border border-violet-200 rounded-lg text-violet-700 bg-white hover:bg-violet-50 cursor-pointer shrink-0"}>
+      <option value="">👥 {t("จากทีม…", "From team…")}</option>
+      {teams.map((tm) => (
+        <optgroup key={tm.id} label={tm.name}>
+          {tm.members.filter((m) => m.id).map((m) => <option key={tm.id + m.id} value={m.id}>{m.name || m.id}</option>)}
+        </optgroup>
+      ))}
+    </select>
+  );
+}

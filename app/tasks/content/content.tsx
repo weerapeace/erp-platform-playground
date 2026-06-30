@@ -30,6 +30,7 @@ import {
   type ContentAttachment, type PlatformSettings, type PlatformSetting, type LinkPreview,
 } from "../data";
 import { useCreativeOptions, platformLabel } from "../use-options";
+import { TeamMemberSelect } from "../team-picker";
 import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, isCollapsed, toggleCollapsedList } from "../drawer-theme";
@@ -584,7 +585,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             <div className="grid grid-cols-2 gap-3" style={{ order: -1 }}>
               <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.keys(CONTENT_STATUS_META).map((v) => ({ value: v, label: contentStatusLabel(v as ContentStatus) }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
               <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Schedule Post")}</label><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
-              <div className="col-span-2"><label className="text-xs text-slate-400">{t("ผู้รับผิดชอบคอนเทนต์", "Content assignee")}</label><UserPicker value={assignee} onChange={setAssignee} disableCreate /></div>
+              <div className="col-span-2"><label className="text-xs text-slate-400">{t("ผู้รับผิดชอบคอนเทนต์", "Content assignee")}</label><div className="flex items-center gap-1.5"><div className="flex-1 min-w-0"><UserPicker value={assignee} onChange={setAssignee} disableCreate /></div><TeamMemberSelect onPick={(m) => setAssignee({ id: m.id, name: m.name } as UserPickerValue)} /></div></div>
             </div>
 
             {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี + ดึงจากงาน */}
