@@ -1,90 +1,25 @@
 // ใบกรอกประวัติพนักงาน (Employee Information Form) — ฟอร์มเปล่า A4 พิมพ์/บันทึก PDF
 // 3 ภาษา: ไทย / English / พม่า — ทุกป้ายมีภาษาอังกฤษกำกับเสมอ (ยกเว้นโหมด en ที่เป็นอังกฤษล้วน)
 // ⚠️ คำแปลพม่าเป็นค่าตั้งต้น ควรให้พนักงานพม่าช่วยตรวจสำนวนอีกครั้ง
+// โครงตามดีไซน์ที่เจ้าของเลือก: ข้อมูลส่วนตัว / ผู้ติดต่อฉุกเฉิน / บัญชีธนาคาร / เอกสารแนบ / ข้อมูลเพิ่มเติม / คำรับรอง
+// (ตัดออกตามที่สั่ง: ที่อยู่ตามทะเบียนบ้าน, ประวัติการศึกษา, ประวัติการทำงาน, ข้อมูลสำหรับงาน)
 
 export type EmployeeFormLang = "th" | "en" | "my";
 
 type L = { th: string; en: string; my: string };
 
 const COMPANY_NAME = "หจก.ไอ.เอส.จี. เทรดดิ้ง (สำนักงานใหญ่)";
-const COMPANY_ADDRESS = "41/243, 41/244 ถนนกัลปพฤกษ์ แขวงบางแค เขตบางแค กรุงเทพฯ 10160";
 
-const TITLE: L = { th: "ใบกรอกประวัติพนักงาน", en: "Employee Information Form", my: "ဝန်ထမ်း အချက်အလက် ပုံစံ" };
-const PHOTO: L = { th: "ติดรูปถ่าย", en: "Photo", my: "ဓာတ်ပုံ" };
+const TITLE: L = { th: "แบบฟอร์มประวัติพนักงาน", en: "Employee Information Form", my: "ဝန်ထမ်း အချက်အလက် ပုံစံ" };
+const TITLE_SUB = "EMPLOYEE INFORMATION FORM";
+const PHOTO: L = { th: "ติดรูปถ่าย 1 นิ้ว", en: "Attach 1-inch photo", my: "၁ လက်မ ဓာတ်ပုံ ကပ်ပါ" };
 
-type Field = { label: L; grow?: number };
-type Section = { title: L; fields?: Field[]; full?: Field[] };
-
-const SECTIONS: Section[] = [
-  {
-    title: { th: "ข้อมูลส่วนตัว", en: "Personal information", my: "ကိုယ်ရေးအချက်အလက်" },
-    fields: [
-      { label: { th: "ชื่อ-นามสกุล (ไทย)", en: "Full name (Thai)", my: "အမည် (ထိုင်း)" }, grow: 2 },
-      { label: { th: "ชื่อ-นามสกุล (อังกฤษ)", en: "Full name (English)", my: "အမည် (အင်္ဂလိပ်)" }, grow: 2 },
-      { label: { th: "ชื่อเล่น", en: "Nickname", my: "အလွယ်ခေါ်အမည်" }, grow: 1 },
-      { label: { th: "เลขบัตรประชาชน / พาสปอร์ต", en: "ID / Passport no.", my: "မှတ်ပုံတင် / ပတ်စ်ပို့နံပါတ်" }, grow: 2 },
-      { label: { th: "วัน/เดือน/ปีเกิด", en: "Date of birth", my: "မွေးနေ့" }, grow: 1 },
-      { label: { th: "อายุ", en: "Age", my: "အသက်" }, grow: 1 },
-      { label: { th: "เพศ", en: "Gender", my: "ကျား/မ" }, grow: 1 },
-      { label: { th: "สัญชาติ", en: "Nationality", my: "နိုင်ငံသား" }, grow: 1 },
-      { label: { th: "ศาสนา", en: "Religion", my: "ဘာသာ" }, grow: 1 },
-      { label: { th: "หมู่เลือด", en: "Blood type", my: "သွေးအုပ်စု" }, grow: 1 },
-    ],
-  },
-  {
-    title: { th: "ข้อมูลการจ้างงาน", en: "Employment", my: "အလုပ်အကိုင်အချက်အလက်" },
-    fields: [
-      { label: { th: "ตำแหน่ง", en: "Position", my: "ရာထူး" }, grow: 1 },
-      { label: { th: "แผนก", en: "Department", my: "ဌာန" }, grow: 1 },
-      { label: { th: "วันเริ่มงาน", en: "Start date", my: "အလုပ်စတင်သည့်ရက်" }, grow: 1 },
-    ],
-  },
-  {
-    title: { th: "ที่อยู่ และการติดต่อ", en: "Address & contact", my: "နေရပ်လိပ်စာ နှင့် ဆက်သွယ်ရန်" },
-    full: [{ label: { th: "ที่อยู่ปัจจุบัน", en: "Current address", my: "လက်ရှိနေရပ်လိပ်စာ" } }],
-    fields: [
-      { label: { th: "เบอร์โทรศัพท์", en: "Phone", my: "ဖုန်းနံပါတ်" }, grow: 1 },
-      { label: { th: "LINE ID", en: "LINE ID", my: "LINE ID" }, grow: 1 },
-      { label: { th: "อีเมล", en: "Email", my: "အီးမေးလ်" }, grow: 1 },
-    ],
-  },
-  {
-    title: { th: "ผู้ติดต่อกรณีฉุกเฉิน", en: "Emergency contact", my: "အရေးပေါ်ဆက်သွယ်ရန်" },
-    fields: [
-      { label: { th: "ชื่อ-นามสกุล", en: "Full name", my: "အမည်" }, grow: 2 },
-      { label: { th: "ความสัมพันธ์", en: "Relationship", my: "တော်စပ်ပုံ" }, grow: 1 },
-      { label: { th: "เบอร์โทร", en: "Phone", my: "ဖုန်းနံပါတ်" }, grow: 1 },
-    ],
-  },
-  {
-    title: { th: "บัญชีรับเงินเดือน", en: "Salary bank account", my: "လစာလက်ခံဘဏ်အကောင့်" },
-    fields: [
-      { label: { th: "ธนาคาร", en: "Bank", my: "ဘဏ်" }, grow: 1 },
-      { label: { th: "เลขที่บัญชี", en: "Account no.", my: "အကောင့်နံပါတ်" }, grow: 1 },
-      { label: { th: "ชื่อบัญชี", en: "Account name", my: "အကောင့်အမည်" }, grow: 1 },
-    ],
-  },
-  {
-    title: { th: "ครอบครัว / ลดหย่อนภาษี", en: "Family / tax allowance", my: "မိသားစု / အခွန်လျှော့ပေါ့" },
-    fields: [
-      { label: { th: "สถานภาพสมรส", en: "Marital status", my: "အိမ်ထောင်ရေးအခြေအနေ" }, grow: 1 },
-      { label: { th: "ชื่อคู่สมรส", en: "Spouse name", my: "အိမ်ထောင်ဖက်အမည်" }, grow: 1 },
-      { label: { th: "จำนวนบุตร", en: "No. of children", my: "သားသမီးအရေအတွက်" }, grow: 1 },
-    ],
-  },
+// ช่องสำหรับบริษัทกรอก (มุมขวาบน)
+const CORP: L[] = [
+  { th: "รหัสพนักงาน (สำหรับบริษัท)", en: "Employee ID (office use)", my: "ဝန်ထမ်း ID (ရုံးသုံး)" },
+  { th: "วันที่กรอกข้อมูล", en: "Date filled", my: "ဖြည့်သည့်ရက်" },
+  { th: "ตำแหน่งที่สมัคร", en: "Position applied", my: "လျှောက်ထားသည့်ရာထူး" },
 ];
-
-const ATTACHMENTS: L[] = [
-  { th: "สำเนาบัตรประชาชน / พาสปอร์ต", en: "Copy of ID / passport", my: "မှတ်ပုံတင် / ပတ်စ်ပို့မိတ္တူ" },
-  { th: "สำเนาทะเบียนบ้าน", en: "Copy of house registration", my: "အိမ်ထောင်စုစာရင်းမိတ္တူ" },
-  { th: "สำเนาสมุดบัญชีธนาคาร", en: "Copy of bank book", my: "ဘဏ်စာအုပ်မိတ္တူ" },
-  { th: "วุฒิการศึกษา", en: "Education certificate", my: "ပညာအရည်အချင်းလက်မှတ်" },
-  { th: "รูปถ่าย", en: "Photo", my: "ဓာတ်ပုံ" },
-];
-
-const ATTACH_TITLE: L = { th: "เอกสารแนบ", en: "Attachments", my: "ပူးတွဲစာရွက်စာတမ်း" };
-const SIGN_EMP: L = { th: "ลงชื่อพนักงาน / วันที่", en: "Employee signature / date", my: "ဝန်ထမ်းလက်မှတ် / ရက်စွဲ" };
-const SIGN_HR: L = { th: "ลงชื่อเจ้าหน้าที่ HR / วันที่", en: "HR signature / date", my: "HR ဝန်ထမ်းလက်မှတ် / ရက်စွဲ" };
 
 function esc(s: string): string {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -97,71 +32,268 @@ function lab(l: L, lang: EmployeeFormLang): string {
   return primary === l.en ? esc(l.en) : `${esc(primary)} <span class="en">/ ${esc(l.en)}</span>`;
 }
 
-function cell(f: Field, lang: EmployeeFormLang): string {
-  // ความกว้างขั้นต่ำตามขนาดช่อง → ตัดขึ้นบรรทัดใหม่อัตโนมัติ (~3-4 ช่อง/แถว) ไม่แน่นเกินไป
-  const grow = f.grow ?? 1;
-  const basis = grow >= 2 ? "58mm" : "40mm";
-  return `<div class="cell" style="flex:${grow} 1 ${basis}; min-width:${basis}"><div class="lab">${lab(f.label, lang)}</div></div>`;
+// ป้ายแบบสั้น (สำหรับ checkbox/หัวตาราง) — โครงเดียวกับ lab()
+const opt = lab;
+
+// ---- ตัวช่วยสร้าง cell ----
+type Cell = { label?: L; grow?: number; basis?: string };
+
+// ช่องเขียน (มีเส้นใต้)
+function tcell(label: L, lang: EmployeeFormLang, basis = "42mm", grow = 1): string {
+  return `<div class="cell" style="flex:${grow} 1 ${basis};min-width:${basis}"><span class="lab">${lab(label, lang)}</span></div>`;
+}
+// ช่องเขียนเต็มแถว
+function fcell(label: L, lang: EmployeeFormLang): string {
+  return `<div class="cell" style="flex:1 1 100%"><span class="lab">${lab(label, lang)}</span></div>`;
+}
+// ช่อง checkbox (ไม่มีเส้นใต้) + ตัวเลือก + ตัวเลือก "อื่นๆ (___)"
+function ccell(label: L | null, opts: L[], lang: EmployeeFormLang, o: { other?: L; grow?: number; basis?: string } = {}): string {
+  const grow = o.grow ?? 1, basis = o.basis ?? "60mm";
+  const boxes = opts.map((x) => `<span class="cb">&#9744; ${opt(x, lang)}</span>`).join("");
+  const other = o.other ? `<span class="cb">&#9744; ${opt(o.other, lang)} <span class="tail"></span></span>` : "";
+  const head = label ? `<span class="lab">${lab(label, lang)}</span>` : "";
+  return `<div class="cell nb" style="flex:${grow} 1 ${basis};min-width:${basis}">${head}<span class="checks">${boxes}${other}</span></div>`;
+}
+// ช่องกล่องตัวเลข (เลขบัตร/เลขบัญชี) จัดกลุ่มด้วยขีด
+function dcell(label: L, groups: number[], lang: EmployeeFormLang, basis = "85mm", grow = 2): string {
+  const g = groups
+    .map((n) => `<span class="dgrp">${'<span class="dbox"></span>'.repeat(n)}</span>`)
+    .join('<span class="dsep">-</span>');
+  return `<div class="cell nb" style="flex:${grow} 1 ${basis};min-width:${basis}"><span class="lab">${lab(label, lang)}</span><span class="digits">${g}</span></div>`;
+}
+function frow(cells: string[]): string {
+  return `<div class="fields">${cells.join("")}</div>`;
+}
+function subhead(label: L, lang: EmployeeFormLang): string {
+  return `<div class="subhead">${lab(label, lang)}</div>`;
+}
+function secHead(n: number, title: L, lang: EmployeeFormLang, note?: L): string {
+  const noteHtml = note ? ` <span class="snote">${lab(note, lang)}</span>` : "";
+  return `<div class="sec"><span class="num">${n}</span><span>${lab(title, lang)}${noteHtml}</span></div>`;
+}
+
+// ---- เนื้อหาแต่ละหมวด ----
+function personalSection(lang: EmployeeFormLang): string {
+  const T = (th: string, en: string, my: string): L => ({ th, en, my });
+  const cn = "ข้อมูลส่วนตัว";
+  const rows = [
+    frow([ccell(T("คำนำหน้า", "Title", "အမည်ရှေ့ဆက်"), [
+      T("นาย", "Mr.", "ဦး"), T("นาง", "Mrs.", "ဒေါ်"), T("นางสาว", "Ms.", "မ"),
+    ], lang, { other: T("อื่นๆ", "Other", "အခြား"), grow: 1, basis: "100%" })]),
+    frow([
+      tcell(T("ชื่อ-นามสกุล (ไทย)", "Full name (Thai)", "အမည် (ထိုင်း)"), lang, "95mm", 3),
+      tcell(T("ชื่อเล่น", "Nickname", "နာမည်ပြောင်"), lang, "32mm", 1),
+    ]),
+    frow([fcell(T("ชื่อ-นามสกุล (อังกฤษ)", "Full name (English)", "အမည် (အင်္ဂလိပ်)"), lang)]),
+    frow([
+      ccell(T("เพศ", "Gender", "ကျား/မ"), [
+        T("ชาย", "Male", "ကျား"), T("หญิง", "Female", "မ"), T("ไม่ระบุ", "N/A", "မဖော်ပြ"),
+      ], lang, { grow: 1, basis: "52mm" }),
+      tcell(T("วัน/เดือน/ปีเกิด", "Date of birth", "မွေးသက္ကရာဇ်"), lang, "38mm", 1),
+      tcell(T("อายุ (ปี)", "Age (yrs)", "အသက်"), lang, "24mm", 1),
+    ]),
+    frow([
+      tcell(T("สัญชาติ", "Nationality", "နိုင်ငံသား"), lang, "36mm", 1),
+      tcell(T("ศาสนา", "Religion", "ဘာသာ"), lang, "36mm", 1),
+      ccell(T("สถานภาพ", "Marital status", "အိမ်ထောင်ရေး"), [
+        T("โสด", "Single", "လူပျို"), T("สมรส", "Married", "အိမ်ထောင်ရှိ"),
+        T("หย่า", "Divorced", "ကွာရှင်း"), T("หม้าย", "Widowed", "မုဆိုးမ/ဖို"),
+      ], lang, { grow: 2, basis: "72mm" }),
+    ]),
+    frow([dcell(T("เลขบัตรประชาชน", "National ID no.", "မှတ်ပုံတင်အမှတ်"), [1, 4, 5, 2, 1], lang, "88mm", 2)]),
+    frow([
+      tcell(T("เลขที่เอกสารอื่นๆ (พาสปอร์ต/ใบต่างด้าว)", "Other doc no. (passport/work permit)", "အခြားစာရွက်အမှတ်"), lang, "60mm", 2),
+      tcell(T("ออกให้โดย", "Issued by", "ထုတ်ပေးသူ"), lang, "36mm", 1),
+      tcell(T("วันหมดอายุ", "Expiry date", "သက်တမ်းကုန်ရက်"), lang, "32mm", 1),
+    ]),
+    frow([
+      tcell(T("กรุ๊ปเลือด", "Blood type", "သွေးအုပ်စု"), lang, "26mm", 1),
+      tcell(T("ส่วนสูง (ซม.)", "Height (cm)", "အရပ် (စမ)"), lang, "28mm", 1),
+      tcell(T("น้ำหนัก (กก.)", "Weight (kg)", "ကိုယ်အလေးချိန် (ကီလို)"), lang, "28mm", 1),
+      tcell(T("โรคประจำตัว (ถ้ามี)", "Chronic illness (if any)", "နာတာရှည်ရောဂါ"), lang, "48mm", 2),
+    ]),
+    frow([
+      tcell(T("แพ้ยา (ถ้ามี)", "Drug allergy (if any)", "ဆေးမတည့်မှု"), lang, "58mm", 1),
+      tcell(T("แพ้อาหาร (ถ้ามี)", "Food allergy (if any)", "အစားအစာမတည့်မှု"), lang, "58mm", 1),
+    ]),
+    subhead(T("ที่อยู่ปัจจุบัน (ที่ติดต่อได้)", "Current address (contactable)", "လက်ရှိနေရပ်လိပ်စာ"), lang),
+    frow([
+      tcell(T("บ้านเลขที่", "House no.", "အိမ်အမှတ်"), lang, "28mm", 1),
+      tcell(T("หมู่", "Village", "အုပ်စု"), lang, "20mm", 1),
+      tcell(T("ซอย", "Soi", "လမ်းသွယ်"), lang, "34mm", 1),
+      tcell(T("ถนน", "Road", "လမ်း"), lang, "40mm", 1),
+    ]),
+    frow([
+      tcell(T("ตำบล/แขวง", "Sub-district", "ကျေးရွာ/ရပ်ကွက်"), lang, "40mm", 1),
+      tcell(T("อำเภอ/เขต", "District", "မြို့နယ်"), lang, "40mm", 1),
+      tcell(T("จังหวัด", "Province", "ခရိုင်/ပြည်နယ်"), lang, "40mm", 1),
+      tcell(T("รหัสไปรษณีย์", "Postal code", "စာတိုက်သင်္ကေတ"), lang, "28mm", 1),
+    ]),
+    frow([
+      tcell(T("เบอร์โทรศัพท์", "Telephone", "ဖုန်းနံပါတ်"), lang, "38mm", 1),
+      tcell(T("มือถือ", "Mobile", "မိုဘိုင်း"), lang, "38mm", 1),
+      tcell(T("E-mail", "E-mail", "အီးမေးလ်"), lang, "52mm", 2),
+    ]),
+    frow([
+      tcell(T("Line ID", "Line ID", "Line ID"), lang, "44mm", 1),
+      tcell(T("Facebook (ถ้ามี)", "Facebook (if any)", "Facebook"), lang, "56mm", 2),
+    ]),
+  ].join("");
+  return secHead(1, { th: cn, en: "Personal information", my: "ကိုယ်ရေးအချက်အလက်" }, lang) + rows;
+}
+
+function emergencySection(n: number, lang: EmployeeFormLang): string {
+  const T = (th: string, en: string, my: string): L => ({ th, en, my });
+  const head = secHead(n, { th: "ผู้ติดต่อกรณีฉุกเฉิน", en: "Emergency contact", my: "အရေးပေါ်ဆက်သွယ်ရန်" }, lang,
+    { th: "(อย่างน้อย 1 ท่าน)", en: "(at least 1)", my: "(အနည်းဆုံး ၁ ဦး)" });
+  const cols = [
+    T("ลำดับ", "No.", "စဉ်"), T("ชื่อ-นามสกุล", "Full name", "အမည်"),
+    T("ความสัมพันธ์", "Relationship", "တော်စပ်ပုံ"), T("เบอร์โทรศัพท์", "Phone", "ဖုန်း"),
+  ];
+  const th = `<tr>${cols.map((c, i) => `<th${i === 0 ? ' class="ord"' : ""}>${lab(c, lang)}</th>`).join("")}</tr>`;
+  const body = [1, 2].map((i) => `<tr><td class="ord">${i}</td><td></td><td></td><td></td></tr>`).join("");
+  return head + `<table class="tbl">${th}${body}</table>`;
+}
+
+function bankSection(n: number, lang: EmployeeFormLang): string {
+  const T = (th: string, en: string, my: string): L => ({ th, en, my });
+  const head = secHead(n, { th: "ข้อมูลบัญชีธนาคาร", en: "Bank account", my: "ဘဏ်အကောင့်" }, lang,
+    { th: "(สำหรับรับเงินเดือน)", en: "(for salary)", my: "(လစာအတွက်)" });
+  const rows = [
+    frow([
+      tcell(T("ชื่อธนาคาร", "Bank name", "ဘဏ်အမည်"), lang, "55mm", 2),
+      tcell(T("สาขา", "Branch", "ဘဏ်ခွဲ"), lang, "40mm", 1),
+    ]),
+    frow([
+      dcell(T("เลขที่บัญชี", "Account no.", "အကောင့်နံပါတ်"), [10], lang, "72mm", 2),
+      tcell(T("ชื่อบัญชี", "Account name", "အကောင့်အမည်"), lang, "55mm", 2),
+    ]),
+    frow([ccell(null, [T("แนบสำเนาหน้าสมุดบัญชีแล้ว", "Bank book copy attached", "ဘဏ်စာအုပ်မိတ္တူ ပူးတွဲပြီး")], lang, { grow: 1, basis: "100%" })]),
+  ].join("");
+  return head + rows;
+}
+
+function documentsSection(n: number, lang: EmployeeFormLang): string {
+  const T = (th: string, en: string, my: string): L => ({ th, en, my });
+  const head = secHead(n, { th: "เอกสารแนบ", en: "Attachments", my: "ပူးတွဲစာရွက်စာတမ်း" }, lang,
+    { th: "(กรุณาแนบสำเนา)", en: "(please attach copies)", my: "(မိတ္တူ ပူးတွဲပါ)" });
+  const items: L[] = [
+    T("สำเนาบัตรประชาชน", "Copy of ID card", "မှတ်ပုံတင်မိတ္တူ"),
+    T("สำเนาใบผ่านงาน (ถ้ามี)", "Work certificate copy (if any)", "အလုပ်ထွက်လက်မှတ်မိတ္တူ"),
+    T("สำเนาทะเบียนบ้าน", "House registration copy", "အိမ်ထောင်စုစာရင်းမိတ္တူ"),
+    T("สำเนาใบขับขี่ (ถ้ามี)", "Driver license copy (if any)", "ယာဉ်မောင်းလိုင်စင်မိတ္တူ"),
+    T("สำเนาวุฒิการศึกษา", "Education certificate copy", "ပညာအရည်အချင်းမိတ္တူ"),
+    T("รูปถ่าย 1 นิ้ว จำนวน 1 ใบ", "One 1-inch photo", "၁ လက်မ ဓာတ်ပုံ ၁ ပုံ"),
+  ];
+  const grid = items.map((x) => `<span class="cb">&#9744; ${lab(x, lang)}</span>`).join("")
+    + `<span class="cb">&#9744; ${lab(T("อื่นๆ", "Other", "အခြား"), lang)} <span class="tail" style="width:34mm"></span></span>`;
+  return head + `<div class="checklist">${grid}</div>`;
+}
+
+function extraSection(n: number, lang: EmployeeFormLang): string {
+  const T = (th: string, en: string, my: string): L => ({ th, en, my });
+  const head = secHead(n, { th: "ข้อมูลเพิ่มเติม", en: "Additional information", my: "ထပ်ဆောင်းအချက်အလက်" }, lang);
+  const rows = [
+    frow([fcell(T("ความสามารถพิเศษ / ทักษะ", "Special skills", "အထူးကျွမ်းကျင်မှု"), lang)]),
+    frow([fcell(T("งานอดิเรก", "Hobbies", "ဝါသနာ"), lang)]),
+    frow([
+      tcell(T("บุคคลที่ไม่ควรติดต่อในกรณีฉุกเฉิน", "Person NOT to contact in emergency", "အရေးပေါ်တွင် မဆက်သွယ်ရန်သူ"), lang, "62mm", 2),
+      tcell(T("ความสัมพันธ์", "Relationship", "တော်စပ်ပုံ"), lang, "34mm", 1),
+      tcell(T("เบอร์โทร", "Phone", "ဖုန်း"), lang, "32mm", 1),
+    ]),
+  ].join("");
+  return head + rows;
+}
+
+function declarationSection(n: number, lang: EmployeeFormLang): string {
+  const decl: L = {
+    th: "ข้าพเจ้าขอรับรองว่าข้อมูลข้างต้นเป็นความจริงทุกประการ หากบริษัทตรวจสอบพบว่าข้อมูลไม่เป็นความจริง บริษัทมีสิทธิพิจารณาเลิกจ้างได้ทันที",
+    en: "I certify that all information above is true and correct. Should the company find any false information, it reserves the right to terminate employment immediately.",
+    my: "အထက်ဖော်ပြပါ အချက်အလက်အားလုံး မှန်ကန်ကြောင်း ကျွန်ုပ်အာမခံပါသည်။ ကုမ္ပဏီမှ မမှန်ကန်သော အချက်အလက် တွေ့ရှိပါက ချက်ချင်း အလုပ်မှ ထုတ်ပယ်ပိုင်ခွင့်ရှိသည်။",
+  };
+  const head = secHead(n, { th: "คำรับรอง", en: "Declaration", my: "အာမခံချက်" }, lang);
+  let body: string;
+  if (lang === "en") body = esc(decl.en);
+  else body = `${esc(lang === "my" ? decl.my : decl.th)}<br><span class="en">${esc(decl.en)}</span>`;
+  const sign = `<div class="sign">
+    <div class="col"><div class="sline">${lab({ th: "ลงชื่อผู้กรอกข้อมูล", en: "Applicant signature", my: "ဖြည့်သွင်းသူ လက်မှတ်" }, lang)}</div></div>
+    <div class="col"><div class="sline">${lab({ th: "วันที่", en: "Date", my: "ရက်စွဲ" }, lang)}</div></div>
+  </div>`;
+  return head + `<div class="decl">${body}</div>${sign}`;
 }
 
 export function buildEmployeeFormHtml(lang: EmployeeFormLang = "th"): string {
-  const sectionsHtml = SECTIONS.map((s, i) => {
-    const fullHtml = (s.full ?? []).map((f) => `<div class="row"><div class="cell" style="flex:1"><div class="lab">${lab(f.label, lang)}</div></div></div>`).join("");
-    const fieldsHtml = (s.fields ?? []).length
-      ? `<div class="fields">${(s.fields ?? []).map((f) => cell(f, lang)).join("")}</div>`
-      : "";
-    return `<div class="sec"><span class="num">${i + 1}</span>${lab(s.title, lang)}</div>${fullHtml}${fieldsHtml}`;
-  }).join("");
-
-  const attachHtml = ATTACHMENTS.map((a) => `<span class="chk">&#9744; ${lab(a, lang)}</span>`).join("");
+  const corpHtml = CORP.map((c) => `<div class="cr"><span class="cl">${lab(c, lang)}</span><span class="cv"></span></div>`).join("");
+  const body = [
+    personalSection(lang),
+    emergencySection(2, lang),
+    bankSection(3, lang),
+    documentsSection(4, lang),
+    extraSection(5, lang),
+    declarationSection(6, lang),
+  ].join("");
 
   return `<!doctype html>
 <html lang="${lang}">
 <head>
   <meta charset="utf-8">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600&family=Noto+Sans+Myanmar:wght@400;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&family=Noto+Sans+Myanmar:wght@400;600&display=swap');
     @page { size: A4; margin: 0; }
     * { box-sizing: border-box; }
-    body { margin: 0; background: #fff; color: #000; font-family: "Sarabun", "Noto Sans Myanmar", Tahoma, "Myanmar Text", Arial, sans-serif; font-size: 11px; }
-    .page { width: 210mm; min-height: 297mm; padding: 12mm 12mm 10mm; margin: 0 auto; background: #fff; }
-    .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 8px; }
-    .company { font-size: 14px; font-weight: 600; }
-    .company-sub { font-size: 9px; color: #333; margin-top: 1px; }
-    .form-title { font-size: 17px; font-weight: 600; margin-top: 4px; }
-    .photo { width: 26mm; height: 32mm; border: 1px dashed #888; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 9px; color: #777; }
-    .sec { display: flex; align-items: center; gap: 6px; margin: 11px 0 7px; font-weight: 600; font-size: 12px; }
-    .sec .num { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #1f4e79; color: #fff; font-size: 10px; font-weight: 600; flex: none; }
-    .sec .en, .lab .en { font-weight: 400; color: #666; }
-    .row { display: flex; gap: 14px; margin-bottom: 4px; }
-    .fields { display: flex; flex-wrap: wrap; gap: 13px 16px; margin-bottom: 4px; }
-    .cell { border-bottom: 1px solid #000; min-height: 11mm; padding-top: 2px; }
-    .lab { font-size: 9.5px; color: #444; line-height: 1.25; min-height: 22px; }
-    .attach { display: flex; flex-wrap: wrap; gap: 5px 16px; font-size: 10px; }
-    .chk { white-space: nowrap; }
-    .sign { display: flex; gap: 22mm; margin-top: 10mm; padding: 0 8mm; }
-    .sign .col { flex: 1; text-align: center; padding-top: 14mm; }
+    body { margin: 0; background: #f1f1f1; color: #111; font-family: "Sarabun", "Noto Sans Myanmar", Tahoma, "Myanmar Text", Arial, sans-serif; font-size: 11px; }
+    .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 11mm 11mm 12mm; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
+    .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border-bottom: 2.5px solid #1f4e79; padding-bottom: 7px; margin-bottom: 8px; }
+    .photo { width: 24mm; height: 30mm; border: 1px solid #999; border-radius: 2px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #777; flex: none; padding: 2px; line-height: 1.3; }
+    .title-wrap { flex: 1; text-align: center; padding-top: 2mm; }
+    .form-title { font-size: 19px; font-weight: 700; color: #1f2937; }
+    .form-sub { font-size: 9.5px; color: #6b7280; letter-spacing: 1px; margin-top: 1px; }
+    .company { font-size: 10px; color: #374151; margin-top: 3px; }
+    .corp { width: 64mm; flex: none; font-size: 8.5px; }
+    .corp .cr { display: flex; align-items: flex-end; gap: 4px; margin-bottom: 4px; }
+    .corp .cr .cl { color: #444; flex: none; max-width: 30mm; line-height: 1.15; }
+    .corp .cr .cv { flex: 1; border-bottom: 1px solid #000; min-height: 13px; }
+    .sec { display: flex; align-items: center; gap: 7px; margin: 10px 0 6px; font-weight: 600; font-size: 12px; background: #eef2f7; border-left: 3px solid #1f4e79; padding: 4px 7px; }
+    .sec .num { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; border-radius: 50%; background: #1f4e79; color: #fff; font-size: 10px; font-weight: 700; flex: none; }
+    .sec .snote { font-weight: 400; font-size: 9.5px; color: #6b7280; }
+    .sec .en, .lab .en, .cb .en, .decl .en, .corp .en { font-weight: 400; color: #6b7280; }
+    .subhead { font-size: 10px; font-weight: 600; color: #1f4e79; margin: 5px 0 1px; }
+    .fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 15px; margin-bottom: 3px; }
+    .cell { border-bottom: 1px solid #000; min-height: 10.5mm; padding-top: 2px; }
+    .cell.nb { border-bottom: none; min-height: auto; padding-bottom: 1px; }
+    .lab { display: block; font-size: 9px; color: #444; line-height: 1.2; }
+    .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
+    .cb { white-space: nowrap; font-size: 10px; }
+    .tail { display: inline-block; width: 26mm; border-bottom: 1px solid #000; vertical-align: bottom; }
+    .digits { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
+    .dgrp { display: flex; gap: 2px; }
+    .dbox { width: 5mm; height: 6mm; border: 1px solid #555; border-radius: 1px; display: inline-block; }
+    .dsep { color: #555; font-weight: 600; }
+    .tbl { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 2px; }
+    .tbl th, .tbl td { border: 1px solid #555; padding: 4px 6px; }
+    .tbl th { background: #eef2f7; font-weight: 600; text-align: left; }
+    .tbl td { height: 9mm; }
+    .tbl .ord { width: 13mm; text-align: center; }
+    .checklist { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; font-size: 10px; padding: 2px 0; }
+    .decl { font-size: 10px; line-height: 1.5; margin: 5px 0 0; }
+    .sign { display: flex; gap: 20mm; margin-top: 13mm; padding: 0 6mm; }
+    .sign .col { flex: 1; text-align: center; }
     .sign .sline { border-top: 1px solid #000; padding-top: 4px; font-size: 10px; color: #333; }
-    @media print { .page { box-shadow: none; margin: 0; } }
+    @media print { body { background: #fff; } .page { box-shadow: none; margin: 0; } }
   </style>
 </head>
 <body>
   <main class="page">
     <div class="head">
-      <div>
-        <div class="company">${esc(COMPANY_NAME)}</div>
-        <div class="company-sub">${esc(COMPANY_ADDRESS)}</div>
+      <div class="photo">${lab(PHOTO, lang)}</div>
+      <div class="title-wrap">
         <div class="form-title">${lab(TITLE, lang)}</div>
+        <div class="form-sub">(${TITLE_SUB})</div>
+        <div class="company">${esc(COMPANY_NAME)}</div>
       </div>
-      <div class="photo">${lab(PHOTO, lang)}<br>1-2"</div>
+      <div class="corp">${corpHtml}</div>
     </div>
-    ${sectionsHtml}
-    <div class="sec"><span class="num">${SECTIONS.length + 1}</span>${lab(ATTACH_TITLE, lang)}</div>
-    <div class="attach">${attachHtml}</div>
-    <div class="sign">
-      <div class="col"><div class="sline">${lab(SIGN_EMP, lang)}</div></div>
-      <div class="col"><div class="sline">${lab(SIGN_HR, lang)}</div></div>
-    </div>
+    ${body}
   </main>
 </body>
 </html>`;
