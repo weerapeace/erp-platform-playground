@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
         ? a.from("employees").select("id, first_name, last_name, nickname").in("id", empIds)
         : Promise.resolve({ data: [] as Row[] }),
       empIds.length
-        ? a.from("employee_contracts").select("employee_id, contract_type, employment_type, wage_type, work_schedule_id, attendance_scan_exempt, status, is_current").in("employee_id", empIds).eq("is_current", true).eq("status", "active")
+        ? a.from("employee_contracts").select("employee_id, contract_type, employment_type, wage_type, work_schedule_id, attendance_scan_exempt, status, is_current, start_date, end_date").in("employee_id", empIds).eq("is_current", true).eq("status", "active")
         : Promise.resolve({ data: [] as Row[] }),
       a.from("attendance_entries").select("employee_id, work_date, late_minutes, late_deduction, absence_hours, absence_deduction, status, note").eq("payroll_period_id", periodId),
       a.from("leave_entries").select("employee_id, leave_date, days, hours, unpaid_leave_deduction, status, note").eq("payroll_period_id", periodId),
@@ -142,8 +142,13 @@ export async function GET(req: NextRequest) {
         const employeeId = String(line.employee_id);
         const contract = { ...(contractBy.get(employeeId) ?? {}), contract_type: line.contract_type, wage_type: line.wage_type } as Row;
         const schedule = scheduleWeekdays(contract.work_schedule_id);
+        // ช่วงสัญญา (กันโชว์เวลาทำงานก่อนเข้า/หลังออก)
+        const cStart = String(contract.start_date ?? "").slice(0, 10);
+        const cEnd = String(contract.end_date ?? "").slice(0, 10);
+        const validDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
         const cells = days.map((day) => {
-          const scheduled = schedule.includes(day.dow);
+          const employed = (!validDate(cStart) || day.iso >= cStart) && (!validDate(cEnd) || day.iso <= cEnd);
+          const scheduled = employed && schedule.includes(day.dow);
           const holiday = day.is_holiday;
           const paidHoliday = scheduled && holiday && shouldReceivePaidPeriodHoliday(contract);
           const input = inputByCell.get(key(employeeId, day.iso)) ?? {};
@@ -190,6 +195,9 @@ export async function GET(req: NextRequest) {
           } else if (otHours) {
             amount = money(input.ot_baht);
           }
+
+          // วันนอกช่วงสัญญา (ก่อนเข้า/หลังออก) — ไม่ใช่วันทำงาน โชว์ว่าง
+          if (!employed) { status = "none"; label = "—"; sublabel = ""; amount = 0; }
 
           return {
             date: day.iso,

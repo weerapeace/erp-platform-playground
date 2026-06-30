@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardPayroll } from "@/lib/payroll-auth";
-import { computePeriodPreview } from "@/lib/payroll-calc-engine";
+import { computePeriodPreview, payableWorkDays } from "@/lib/payroll-calc-engine";
 import { money } from "@/lib/payroll-calc";
 
 export const dynamic = "force-dynamic";
@@ -117,7 +117,11 @@ export async function GET(req: NextRequest) {
       const absenceHours = absHoursBy.get(id) ?? 0;
       const leaveHours = leaveHoursBy.get(id) ?? (leaveDaysBy.get(id) ?? 0) * hoursPerDay;
       const deductedMinutes = Math.round((absenceHours + leaveHours) * 60 + lateMinutes);
-      const paidMinutes = Math.max(basePayMinutes - deductedMinutes, 0);
+      // ตัดวันที่อยู่นอกช่วงสัญญา (พนักงานเข้า/ออกกลางงวด) ออกจากฐานวันจ่ายจริง — คนเต็มงวด excluded=0 ไม่กระทบ
+      const cMeta = contractMetaBy[id] ?? {};
+      const excludedDays = Math.max(payableWorkDays(period, { work_schedule_id: cMeta.work_schedule_id }) - payableWorkDays(period, cMeta), 0);
+      const empBaseMinutes = Math.max(basePayMinutes - Math.round(excludedDays * hoursPerDay * 60), 0);
+      const paidMinutes = Math.max(empBaseMinutes - deductedMinutes, 0);
       const hasManual = late || absence || leave || ot || piecework || special || other;
       return {
         id, employee_id: id, employee_code: l.employee_code, employee_name: nameBy[id] ?? "",
@@ -132,7 +136,7 @@ export async function GET(req: NextRequest) {
         work_days: money(l.attendance_days),
         hours_per_day: hoursPerDay,
         paid_minutes: paidMinutes,
-        base_pay_minutes: basePayMinutes,
+        base_pay_minutes: empBaseMinutes,
         deducted_pay_minutes: deductedMinutes,
         late_baht: Math.round(late * 100) / 100,
         late_minutes: Math.round(lateMinutes * 100) / 100,

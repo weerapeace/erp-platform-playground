@@ -40,7 +40,7 @@ function countWorkDays(start: string, end: string): number {
   let n = 0; eachDay(start, end, (d) => { if (d.getUTCDay() !== 0) n++; }); return n;
 }
 // ช่วงวันที่ "นับจริง" = งวด ∩ ช่วงสัญญา — กันนับวันก่อนเริ่ม/หลังสิ้นสุดสัญญา (พนักงานเข้า/ออกกลางงวด)
-function effectiveRange(period: Row, contract: Row): { start: string; end: string } {
+export function effectiveRange(period: Row, contract: Row): { start: string; end: string } {
   const ps = String(period.start_date).slice(0, 10), pe = String(period.end_date).slice(0, 10);
   const cs = String(contract.start_date ?? "").slice(0, 10), ce = String(contract.end_date ?? "").slice(0, 10);
   const valid = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -51,7 +51,7 @@ function scheduledWorkDays(period: Row, contract: Row): number {
   const { start, end } = effectiveRange(period, contract);
   eachDay(start, end, (d) => { if (wd.includes(d.getUTCDay())) n++; }); return n;
 }
-function payableWorkDays(period: Row, contract: Row): number {
+export function payableWorkDays(period: Row, contract: Row): number {
   const wd = scheduleWeekdays(contract.work_schedule_id), hol = holidaySet(period); let n = 0;
   const { start, end } = effectiveRange(period, contract);
   eachDay(start, end, (d, iso) => { if (wd.includes(d.getUTCDay()) && !hol.has(iso)) n++; }); return n;
