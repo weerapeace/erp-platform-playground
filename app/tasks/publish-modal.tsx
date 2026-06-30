@@ -12,6 +12,7 @@ import { ERPModal } from "@/components/modal";
 import { ERPInput } from "@/components/form";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
 import { platformLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
@@ -31,9 +32,9 @@ type Row = { content: ContentDetail; images: ContentAttachment[] };
 const COPYABLE_TYPES = new Set(["text", "textarea", "longtext", "string", "number", "currency", "decimal", "int", "integer", "richtext", "html", "url", "email", "phone", "select", "date", "datetime"]);
 // ป้ายสถานะงานย่อย (สำหรับรูปที่ส่งงาน)
 const subBadge = (s: string) => s === "approved" ? { label: "✓", cls: "bg-emerald-500" }
-  : s === "submitted" ? { label: "รอ", cls: "bg-amber-500" }
-  : s === "revision_requested" ? { label: "แก้", cls: "bg-orange-500" }
-  : { label: "ร่าง", cls: "bg-slate-400" };
+  : s === "submitted" ? { label: tr("รอ", "Pending"), cls: "bg-amber-500" }
+  : s === "revision_requested" ? { label: tr("แก้", "Revise"), cls: "bg-orange-500" }
+  : { label: tr("ร่าง", "Draft"), cls: "bg-slate-400" };
 
 export function PublishModal({ taskId, parents, parentFallback, taskPlatforms = [], onClose, onConfirm, pushToast }: {
   taskId: string;

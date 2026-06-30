@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { uploadResizedImage } from "@/components/image-attach";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
 
 export type DrawerDensity = "compact" | "normal" | "spacious";
@@ -49,13 +50,13 @@ export function progressBg(t: DrawerTheme): string { return t.progressColor || a
 // สีเส้นแบ่ง (null = ใช้ค่าเริ่มต้นของ Tailwind ผ่าน class) → คืน undefined ให้ปล่อยตาม class
 export function dividerColorOf(t: DrawerTheme): string | undefined { return t.dividerColor || undefined; }
 // ชุดสีสำเร็จรูป
-export const DRAWER_PRESETS: { name: string; accent: string; accent2: string; gradient: boolean }[] = [
-  { name: "ม่วง", accent: "#7c3aed", accent2: "#ec4899", gradient: true },
-  { name: "ฟ้า", accent: "#2563eb", accent2: "#06b6d4", gradient: true },
-  { name: "เขียว", accent: "#059669", accent2: "#84cc16", gradient: true },
-  { name: "ส้ม-แดง", accent: "#ea580c", accent2: "#dc2626", gradient: true },
-  { name: "ชมพู", accent: "#db2777", accent2: "#fb7185", gradient: true },
-  { name: "เทาเข้ม", accent: "#334155", accent2: "#64748b", gradient: false },
+export const DRAWER_PRESETS: { name: string; name_en: string; accent: string; accent2: string; gradient: boolean }[] = [
+  { name: "ม่วง", name_en: "Purple", accent: "#7c3aed", accent2: "#ec4899", gradient: true },
+  { name: "ฟ้า", name_en: "Blue", accent: "#2563eb", accent2: "#06b6d4", gradient: true },
+  { name: "เขียว", name_en: "Green", accent: "#059669", accent2: "#84cc16", gradient: true },
+  { name: "ส้ม-แดง", name_en: "Orange-red", accent: "#ea580c", accent2: "#dc2626", gradient: true },
+  { name: "ชมพู", name_en: "Pink", accent: "#db2777", accent2: "#fb7185", gradient: true },
+  { name: "เทาเข้ม", name_en: "Dark gray", accent: "#334155", accent2: "#64748b", gradient: false },
 ];
 // ลำดับส่วน (ของคนนั้น) ก่อน แล้วต่อด้วยส่วนที่ยังไม่ถูกจัดลำดับ — ส่วนใหม่ที่เพิ่มภายหลังจะไปต่อท้ายอัตโนมัติ
 export function orderedKeys(theme: DrawerTheme, allKeys: string[]): string[] {
@@ -143,7 +144,7 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
               <span className="text-xs text-slate-500">{t("ชุดสีสำเร็จรูป", "Presets")}</span>
               <div className="flex flex-wrap gap-1.5 mt-1">
                 {DRAWER_PRESETS.map((p) => (
-                  <button key={p.name} onClick={() => update({ accent: p.accent, accent2: p.accent2, accentGradient: p.gradient, buttonColor: null, progressColor: null })} title={p.name}
+                  <button key={p.name} onClick={() => update({ accent: p.accent, accent2: p.accent2, accentGradient: p.gradient, buttonColor: null, progressColor: null })} title={t(p.name, p.name_en)}
                     className="h-7 w-7 rounded-full border border-slate-200 hover:scale-110 transition-transform" style={{ background: p.gradient ? `linear-gradient(135deg, ${p.accent}, ${p.accent2})` : p.accent }} />
                 ))}
               </div>
@@ -217,7 +218,7 @@ function ColorOpt({ label, value, fallback, onChange }: { label: string; value: 
     <span className="inline-flex items-center gap-0.5">
       <input type="color" value={value ?? fallback} onChange={(e) => onChange(e.target.value)} title={label} className={`w-8 h-7 p-0 border rounded cursor-pointer ${value ? "border-violet-300" : "border-slate-200 opacity-60"}`} />
       <span className="text-[10px] text-slate-400">{label}</span>
-      {value && <button onClick={() => onChange(null)} title="ใช้สีหลัก" className="text-[10px] text-slate-300 hover:text-red-500 leading-none">✕</button>}
+      {value && <button onClick={() => onChange(null)} title={tr("ใช้สีหลัก", "Use accent")} className="text-[10px] text-slate-300 hover:text-red-500 leading-none">✕</button>}
     </span>
   );
 }
