@@ -24,6 +24,11 @@ type PrintSlip = {
   nickname: string;
   payslip_language: "th" | "en";
   paid_minutes?: number | null;
+  late_minutes_qty?: number | null;
+  absence_hours_qty?: number | null;
+  leave_days_qty?: number | null;
+  leave_hours_qty?: number | null;
+  ot_hours_qty?: number | null;
   bank_name: string;
   bank_branch: string;
   bank_account_no: string;
@@ -60,6 +65,12 @@ function paidDuration(totalMinutes: number | null | undefined, lang: "th" | "en"
   if (hrs) p.push(`${hrs} ${u.h}`);
   if (mins) p.push(`${mins} ${u.m}`);
   return p.length ? p.join(" ") : `0 ${u.d}`;
+}
+
+// ช่องสรุป (มาสาย/ขาดงาน/ลา/OT): โชว์ "จำนวน (฿เงิน)" — ถ้าไม่มีจำนวนแต่มีเงินก็โชว์เงิน
+function qtyAmount(qtyText: string, hasQty: boolean, amount: number): string {
+  if (hasQty) return amount ? `${qtyText} (${baht(amount)})` : qtyText;
+  return amount ? baht(amount) : "-";
 }
 
 function fmtDate(value?: string | null) {
@@ -243,10 +254,17 @@ function PayslipSheet({ period, slip }: { period: PrintResponse["period"]; slip:
   const encodedNetPay = lang === "en" ? roundedNet.rounded.toLocaleString("en-US") : encodePayslipNetPay(roundedNet.rounded);
   const workDays = money(slip.line.work_days || slip.line.attendance_days);
   const workHours = money(slip.line.work_hours || slip.line.attendance_hours);
-  const late = money(slip.line.late_deduction);
-  const absent = money(slip.line.absence_hours || slip.line.absence_deduction);
-  const leave = money(slip.line.leave_days || slip.line.unpaid_leave_days);
-  const ot = money(slip.line.ot_hours || slip.line.overtime_hours);
+  // จำนวนจริง (จาก route) + ยอดเงิน (จาก line) → โชว์ "จำนวน (฿เงิน)"
+  const lateMin = money(slip.late_minutes_qty);
+  const lateAmt = money(slip.line.late_deduction);
+  const absHours = money(slip.absence_hours_qty);
+  const absAmt = money(slip.line.absence_deduction);
+  const leaveDays = money(slip.leave_days_qty);
+  const leaveHours = money(slip.leave_hours_qty);
+  const leaveTotalHours = leaveHours + leaveDays * 8;
+  const leaveAmt = money(slip.line.unpaid_leave_deduction);
+  const otHours = money(slip.ot_hours_qty);
+  const otAmt = money(slip.line.overtime_amount);
 
   return (
     <section className="payslip-page rounded-md border border-slate-200 bg-white shadow-sm">
@@ -270,10 +288,10 @@ function PayslipSheet({ period, slip }: { period: PrintResponse["period"]; slip:
       <div className="mt-2 grid grid-cols-6 border border-slate-200 text-center text-xs">
         <Metric label={label(lang, "วันทำงาน", "Work Days")} value={slip.paid_minutes != null ? paidDuration(slip.paid_minutes, lang) : `${workDays.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${label(lang, "วัน", "day")}`} />
         <Metric label={label(lang, "ชั่วโมงทำงาน", "Work Hours")} value={`${workHours.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${label(lang, "ชม.", "hrs")}`} />
-        <Metric label={label(lang, "มาสาย", "Late/Early Leave")} value={late ? baht(late * -1) : "-"} danger={late > 0} />
-        <Metric label={label(lang, "ขาดงาน", "Absent")} value={absent ? String(absent) : "-"} tone={absent ? "danger" : undefined} />
-        <Metric label={label(lang, "ลา", "Leave")} value={leave ? String(leave) : "-"} tone={leave ? "warning" : undefined} />
-        <Metric label="OT" value={ot ? String(ot) : "-"} tone={ot ? "success" : undefined} />
+        <Metric label={label(lang, "มาสาย", "Late/Early Leave")} value={qtyAmount(paidDuration(lateMin, lang), lateMin > 0, lateAmt)} tone={(lateMin || lateAmt) ? "danger" : undefined} />
+        <Metric label={label(lang, "ขาดงาน", "Absent")} value={qtyAmount(paidDuration(absHours * 60, lang), absHours > 0, absAmt)} tone={(absHours || absAmt) ? "danger" : undefined} />
+        <Metric label={label(lang, "ลา", "Leave")} value={qtyAmount(paidDuration(leaveTotalHours * 60, lang), leaveTotalHours > 0, leaveAmt)} tone={(leaveTotalHours || leaveAmt) ? "warning" : undefined} />
+        <Metric label="OT" value={qtyAmount(paidDuration(otHours * 60, lang), otHours > 0, otAmt)} tone={(otHours || otAmt) ? "success" : undefined} />
       </div>
 
       <div className="payslip-main-grid mt-3 grid grid-cols-[1fr_1fr_150px]">

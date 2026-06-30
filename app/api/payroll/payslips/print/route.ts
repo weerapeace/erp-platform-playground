@@ -109,22 +109,32 @@ export async function GET(req: NextRequest) {
     const hoursPerDay = money(period.default_hours_per_day) || 8;
     const baseFlat = Math.round((money(period.default_work_days) || 26) * hoursPerDay * 60);
     const paidMinBy: Record<string, number> = {};
+    // จำนวนจริงต่อคน (นาทีสาย / ชม.ขาด / วันลา / ชม.OT) → โชว์บนสลิปคู่กับยอดเงิน
+    const lateMinBy: Record<string, number> = {}, absHoursBy: Record<string, number> = {};
+    const leaveDaysBy: Record<string, number> = {}, leaveHoursBy: Record<string, number> = {}, otHoursBy: Record<string, number> = {};
     if (empIds.length) {
-      const [conRes, attRes, lvRes] = await Promise.all([
+      const [conRes, attRes, lvRes, otRes] = await Promise.all([
         admin.from("employee_contracts").select("employee_id, work_schedule_id, start_date, end_date").in("employee_id", empIds).eq("is_current", true).eq("status", "active"),
         admin.from("attendance_entries").select("employee_id, late_minutes, absence_hours").eq("payroll_period_id", periodId),
         admin.from("leave_entries").select("employee_id, days, hours").eq("payroll_period_id", periodId),
+        admin.from("overtime_entries").select("employee_id, hours").eq("payroll_period_id", periodId),
       ]);
       const conBy: Record<string, Row> = {};
       (conRes.data ?? []).forEach((c) => { conBy[text((c as Row).employee_id)] = c as Row; });
-      const lateBy: Record<string, number> = {}, absBy: Record<string, number> = {}, lvBy: Record<string, number> = {};
-      (attRes.data ?? []).forEach((r) => { const id = text((r as Row).employee_id); lateBy[id] = (lateBy[id] ?? 0) + money((r as Row).late_minutes); absBy[id] = (absBy[id] ?? 0) + money((r as Row).absence_hours); });
-      (lvRes.data ?? []).forEach((r) => { const id = text((r as Row).employee_id); lvBy[id] = (lvBy[id] ?? 0) + (money((r as Row).hours) || money((r as Row).days) * hoursPerDay); });
+      const lvBy: Record<string, number> = {};
+      (attRes.data ?? []).forEach((r) => { const id = text((r as Row).employee_id); lateMinBy[id] = (lateMinBy[id] ?? 0) + money((r as Row).late_minutes); absHoursBy[id] = (absHoursBy[id] ?? 0) + money((r as Row).absence_hours); });
+      (lvRes.data ?? []).forEach((r) => {
+        const id = text((r as Row).employee_id);
+        leaveDaysBy[id] = (leaveDaysBy[id] ?? 0) + money((r as Row).days);
+        leaveHoursBy[id] = (leaveHoursBy[id] ?? 0) + money((r as Row).hours);
+        lvBy[id] = (lvBy[id] ?? 0) + (money((r as Row).hours) || money((r as Row).days) * hoursPerDay);
+      });
+      (otRes.data ?? []).forEach((r) => { const id = text((r as Row).employee_id); otHoursBy[id] = (otHoursBy[id] ?? 0) + money((r as Row).hours); });
       empIds.forEach((id) => {
         const con = conBy[id] ?? {};
         const excluded = Math.max(payableWorkDays(period, { work_schedule_id: con.work_schedule_id }) - payableWorkDays(period, con), 0);
         const empBase = Math.max(baseFlat - Math.round(excluded * hoursPerDay * 60), 0);
-        const deducted = Math.round(((absBy[id] ?? 0) + (lvBy[id] ?? 0)) * 60 + (lateBy[id] ?? 0));
+        const deducted = Math.round(((absHoursBy[id] ?? 0) + (lvBy[id] ?? 0)) * 60 + (lateMinBy[id] ?? 0));
         paidMinBy[id] = Math.max(empBase - deducted, 0);
       });
     }
@@ -177,6 +187,11 @@ export async function GET(req: NextRequest) {
             total_deduction: money(slip.total_deduction),
             net_pay: money(slip.net_pay),
             paid_minutes: paidMinBy[employeeId] ?? null,
+            late_minutes_qty: lateMinBy[employeeId] ?? 0,
+            absence_hours_qty: absHoursBy[employeeId] ?? 0,
+            leave_days_qty: leaveDaysBy[employeeId] ?? 0,
+            leave_hours_qty: leaveHoursBy[employeeId] ?? 0,
+            ot_hours_qty: otHoursBy[employeeId] ?? 0,
             status: slip.status,
             slip_type: slip.slip_type,
             issued_at: slip.issued_at,
