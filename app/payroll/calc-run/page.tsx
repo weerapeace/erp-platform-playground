@@ -331,7 +331,7 @@ export default function PayrollCalcRunPage() {
                   <td className="px-3 py-2 text-right tabular-nums">{baht(r.gross_new)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium">{baht(r.net_new)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-400">{baht(r.net_old)}</td>
-                  <td className={`px-3 py-2 text-right tabular-nums ${r.diff_net ? "text-red-600 font-semibold" : "text-slate-300"}`}>{r.diff_net ?? "—"}</td>
+                  <td className={`px-3 py-2 text-right tabular-nums ${!r.diff_net ? "text-slate-300" : r.diff_net > 0 ? "text-emerald-600 font-semibold" : "text-red-600 font-semibold"}`}>{r.diff_net ? `${r.diff_net > 0 ? "+" : ""}${r.diff_net.toLocaleString("th-TH")}` : "—"}</td>
                   <td className="px-3 py-2 text-center">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.status === "ตรง" ? "bg-emerald-100 text-emerald-700" : r.status === "ต่าง" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"}`}>{r.status}</span>
                   </td>
