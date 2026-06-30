@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPInput } from "@/components/form";
 import { useAuth } from "@/components/auth";
+import { AppAccessGate } from "@/components/app-access-gate";
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
@@ -47,6 +48,7 @@ export default function PlatformAccountsPage() {
   };
 
   return (
+    <AppAccessGate appKey="master">
     <div className="max-w-3xl mx-auto p-6">
       <h1 className="text-xl font-semibold text-slate-900 mb-1">🏪 จัดการร้าน/บัญชีแพลตฟอร์ม</h1>
       <p className="text-sm text-slate-500 mb-4">แต่ละแบรนด์มีร้านของตัวเองในแต่ละแพลตฟอร์ม — ตั้งร้านที่นี่ ระบบจะใช้ตอนลงขายตามแบรนด์ของสินค้า</p>
@@ -81,5 +83,6 @@ export default function PlatformAccountsPage() {
         </div>
       )}
     </div>
+    </AppAccessGate>
   );
 }
