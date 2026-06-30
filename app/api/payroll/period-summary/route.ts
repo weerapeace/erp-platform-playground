@@ -13,7 +13,7 @@ import { money } from "@/lib/payroll-calc";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const LINE_COLS = "id, employee_id, payroll_run_id, base_salary, gross_pay, total_deduction, social_security_employee, withholding_tax, net_pay, attendance_days, attendance_hours, recurring_earning_amount, recurring_deduction_amount, late_deduction, absence_deduction, unpaid_leave_deduction, overtime_amount, other_deduction, status";
+const LINE_COLS = "id, employee_id, payroll_run_id, base_salary, gross_pay, total_deduction, social_security_employee, withholding_tax, net_pay, attendance_days, attendance_hours, recurring_earning_amount, recurring_deduction_amount, late_deduction, absence_deduction, unpaid_leave_deduction, overtime_amount, other_deduction, allowance_amount, bonus_amount, commission_amount, status";
 
 export async function GET(req: NextRequest) {
   const denied = await guardPayroll(req); if (denied) return denied;
@@ -89,6 +89,9 @@ export async function GET(req: NextRequest) {
         unpaid_leave_deduction: money(l.unpaid_leave_deduction),
         overtime_amount: money(l.overtime_amount),
         other_deduction: money(l.other_deduction),
+        allowance_amount: money(l.allowance_amount),
+        bonus_amount: money(l.bonus_amount),
+        commission_amount: money(l.commission_amount),
         status: l.status,
         issue_flags: [
           money(l.net_pay) < 0 ? "negative_net" : null,

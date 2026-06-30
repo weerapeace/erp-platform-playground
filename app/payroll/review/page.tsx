@@ -17,8 +17,13 @@ type Line = {
   total_deduction: number; social_security_employee: number; withholding_tax: number; net_pay: number;
   attendance_days: number; attendance_hours: number; recurring_earning_amount: number; recurring_deduction_amount: number;
   late_deduction: number; absence_deduction: number; unpaid_leave_deduction: number; overtime_amount: number; other_deduction: number;
+  allowance_amount?: number; bonus_amount?: number; commission_amount?: number;
   status: string; issue_flags?: string[];
 };
+// เงินเพิ่มพิเศษ (ครั้งเดียว) = ค่าเบี้ยเลี้ยง/โบนัส/คอมมิชชั่น
+const specialAmt = (l: Line) => Number(l.allowance_amount ?? 0) + Number(l.bonus_amount ?? 0) + Number(l.commission_amount ?? 0);
+// สุทธิก่อนปัดเศษ = รายได้รวม − หักรวม (ค่าก่อนเครื่องปัดให้เหลือ 2 ตำแหน่ง)
+const netBeforeRound = (l: Line) => Number(l.gross_pay) - Number(l.total_deduction);
 type FilterMode = "all" | "negative" | "high_deduction" | "missing_base" | "zero_days" | "recurring";
 
 const baht = (v: unknown) => v == null ? "—" : `฿${Number(v).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
@@ -113,8 +118,8 @@ export default function PayrollReviewPage() {
     });
 
   function exportCsv() {
-    const head = ["รหัส", "พนักงาน", "เงินเดือน", "วันจ่ายจริง", "รายได้รวม", "หักรวม", "ปกส.", "ภาษี", "สุทธิ", "สถานะ"];
-    const rows = shown.map((l) => [l.employee_code, l.employee_name, l.base_salary, l.attendance_days, l.gross_pay, l.total_deduction, l.social_security_employee, l.withholding_tax, l.net_pay, l.status]);
+    const head = ["รหัส", "พนักงาน", "เงินเดือน", "วันจ่ายจริง", "พิเศษ", "รายได้รวม", "หักรวม", "ปกส.", "ภาษี", "สุทธิ", "สุทธิก่อนปัดเศษ", "สถานะ"];
+    const rows = shown.map((l) => [l.employee_code, l.employee_name, l.base_salary, l.attendance_days, specialAmt(l), l.gross_pay, l.total_deduction, l.social_security_employee, l.withholding_tax, l.net_pay, netBeforeRound(l), l.status]);
     const csv = [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
@@ -257,19 +262,21 @@ export default function PayrollReviewPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500 text-xs">
               <tr>
-                <th className="text-left px-3 py-2">รหัส</th>
-                <th className="text-left px-3 py-2">พนักงาน</th>
-                <th className="text-right px-3 py-2">เงินเดือน</th>
-                <th className="text-right px-3 py-2">วันจ่ายจริง</th>
-                <th className="text-right px-3 py-2">ประจำ +/-</th>
-                <th className="text-right px-3 py-2">สาย/ขาด/ลา</th>
-                <th className="text-right px-3 py-2">OT</th>
-                <th className="text-right px-3 py-2">รายได้รวม</th>
-                <th className="text-right px-3 py-2">หักรวม</th>
-                <th className="text-right px-3 py-2">ปกส.</th>
-                <th className="text-right px-3 py-2">ภาษี</th>
-                <th className="text-right px-3 py-2">สุทธิ</th>
-                <th className="text-center px-3 py-2">สถานะ</th>
+                <th className="text-left px-3 py-2" title="รหัสพนักงาน">รหัส</th>
+                <th className="text-left px-3 py-2" title="ชื่อ-นามสกุล (ชื่อเล่น)">พนักงาน</th>
+                <th className="text-right px-3 py-2" title="เงินเดือนตามสัญญา (ฐานคำนวณ)">เงินเดือน</th>
+                <th className="text-right px-3 py-2" title="จำนวนวันที่ใช้คิดเงินของงวดนี้ (= ค่าเดียวกับหน้า ‘ข้อมูลคำนวณ’ ของรอบที่บันทึกล่าสุด)">วันจ่ายจริง</th>
+                <th className="text-right px-3 py-2" title="เงินเพิ่ม/หัก ประจำ (รายการประจำ) สุทธิ บวก=เพิ่ม ลบ=หัก">ประจำ +/-</th>
+                <th className="text-right px-3 py-2" title="เงินเพิ่มพิเศษครั้งเดียว (เบี้ยเลี้ยง/โบนัส/คอมมิชชั่น)">พิเศษ</th>
+                <th className="text-right px-3 py-2" title="ยอดหักจากมาสาย + ขาดงาน + ลาไม่รับเงิน">สาย/ขาด/ลา</th>
+                <th className="text-right px-3 py-2" title="ค่าล่วงเวลา (OT) ตามชั่วโมง × อัตรา × ตัวคูณที่ตั้งไว้">OT</th>
+                <th className="text-right px-3 py-2" title="รายได้รวมก่อนหัก = เงินเดือน/ค่าจ้าง + พิเศษ + OT + ประจำ(เพิ่ม)">รายได้รวม</th>
+                <th className="text-right px-3 py-2" title="ยอดหักทั้งหมด = สาย/ขาด/ลา + ปกส. + หักอื่น + ประจำ(หัก)">หักรวม</th>
+                <th className="text-right px-3 py-2" title="ประกันสังคม (ฝั่งพนักงาน)">ปกส.</th>
+                <th className="text-right px-3 py-2" title="ภาษีหัก ณ ที่จ่าย (บริษัทออกให้ — ไม่หักจากสุทธิ)">ภาษี</th>
+                <th className="text-right px-3 py-2" title="จ่ายสุทธิ = รายได้รวม − หักรวม (ไม่รวมภาษี) ปัด 2 ตำแหน่ง">สุทธิ</th>
+                <th className="text-right px-3 py-2" title="สุทธิก่อนปัดเศษ = รายได้รวม − หักรวม (ค่าก่อนเครื่องปัดให้เหลือ 2 ตำแหน่ง)">สุทธิก่อนปัดเศษ</th>
+                <th className="text-center px-3 py-2" title="สถานะรายการของงวด">สถานะ</th>
               </tr>
             </thead>
             <tbody>
@@ -283,6 +290,7 @@ export default function PayrollReviewPage() {
                     <span className="text-emerald-700">{l.recurring_earning_amount ? baht(l.recurring_earning_amount) : "—"}</span>
                     {l.recurring_deduction_amount ? <span className="block text-red-600">-{baht(l.recurring_deduction_amount).replace("฿", "")}</span> : null}
                   </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{specialAmt(l) ? baht(specialAmt(l)) : "—"}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-red-600">
                     {l.late_deduction + l.absence_deduction + l.unpaid_leave_deduction ? baht(l.late_deduction + l.absence_deduction + l.unpaid_leave_deduction) : "—"}
                   </td>
@@ -292,11 +300,12 @@ export default function PayrollReviewPage() {
                   <td className="px-3 py-2 text-right tabular-nums text-slate-500">{baht(l.social_security_employee)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-500">{baht(l.withholding_tax)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium">{baht(l.net_pay)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">{baht(netBeforeRound(l))}</td>
                   <td className="px-3 py-2 text-center">{badge(l.status)}</td>
                 </tr>
               ))}
               {shown.length === 0 && (
-                <tr><td colSpan={13} className="px-3 py-10 text-center text-slate-400 text-sm">
+                <tr><td colSpan={15} className="px-3 py-10 text-center text-slate-400 text-sm">
                   {lines.length === 0 ? "งวดนี้ยังไม่มีผลคำนวณ — ไปที่หน้า “คำนวณงวด” เพื่อคำนวณและบันทึก" : "ไม่พบพนักงานที่ค้นหา"}
                 </td></tr>
               )}
