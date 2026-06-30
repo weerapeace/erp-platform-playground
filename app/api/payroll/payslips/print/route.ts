@@ -66,11 +66,19 @@ export async function GET(req: NextRequest) {
     const admin = supabaseAdmin();
     const { data: periodRows } = await admin
       .from("payroll_periods")
-      .select("id, period_name, status, start_date, end_date")
+      .select("id, period_name, status, start_date, end_date, company_id")
       .eq("id", periodId)
       .limit(1);
     const period = periodRows?.[0] as Row | undefined;
     if (!period) return NextResponse.json({ error: "ไม่พบงวดเงินเดือน" }, { status: 404 });
+
+    // ข้อมูลบริษัท (ชื่อ + เลขประจำตัวผู้เสียภาษี) สำหรับหัวสลิป
+    let companyName = "", companyTaxId = "";
+    if (period.company_id) {
+      const { data: coRows } = await admin.from("companies").select("name, tax_id").eq("id", period.company_id).limit(1);
+      const co = coRows?.[0] as Row | undefined;
+      companyName = text(co?.name); companyTaxId = text(co?.tax_id);
+    }
 
     let slipQuery = admin.from("payroll_payslips").select(SLIP_COLS).eq("payroll_period_id", periodId);
     if (ids.length) slipQuery = slipQuery.in("id", ids);
@@ -126,6 +134,8 @@ export async function GET(req: NextRequest) {
           status: period.status,
           start_date: period.start_date,
           end_date: period.end_date,
+          company_name: companyName,
+          company_tax_id: companyTaxId,
         },
         requested_language: requestedLanguage,
         slips: slips.map((slip) => {

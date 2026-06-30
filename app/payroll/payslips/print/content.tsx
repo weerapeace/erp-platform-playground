@@ -36,7 +36,7 @@ type PrintSlip = {
   line: Line;
 };
 type PrintResponse = {
-  period: { id: string; period_name: string; status: string; start_date?: string | null; end_date?: string | null };
+  period: { id: string; period_name: string; status: string; start_date?: string | null; end_date?: string | null; company_name?: string | null; company_tax_id?: string | null };
   requested_language: PayslipPrintLanguage;
   slips: PrintSlip[];
 };
@@ -226,7 +226,7 @@ function PayslipSheet({ period, slip }: { period: PrintResponse["period"]; slip:
   const deductions = itemRows(displayItems.deductions, lang);
   const extraEarningsTotal = displayItems.earnings.reduce((sum, item) => sum + item.amount, 0);
   const roundedNet = roundPayslipNetPay(slip.net_pay);
-  const encodedNetPay = encodePayslipNetPay(roundedNet.rounded);
+  const encodedNetPay = lang === "en" ? roundedNet.rounded.toLocaleString("en-US") : encodePayslipNetPay(roundedNet.rounded);
   const workDays = money(slip.line.work_days || slip.line.attendance_days);
   const workHours = money(slip.line.work_hours || slip.line.attendance_hours);
   const late = money(slip.line.late_deduction);
@@ -238,7 +238,8 @@ function PayslipSheet({ period, slip }: { period: PrintResponse["period"]; slip:
     <section className="payslip-page rounded-md border border-slate-200 bg-white shadow-sm">
       <header className="mb-3 flex items-start justify-between gap-3 border-b-2 border-slate-800 pb-2">
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">ISG PAYROLL</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{period.company_name || "ISG PAYROLL"}</div>
+          {period.company_tax_id ? <div className="text-[10px] text-slate-400">{label(lang, "เลขผู้เสียภาษี", "Tax ID")} {period.company_tax_id}</div> : null}
           <h1 className="mt-0.5 text-2xl font-bold text-slate-900">{label(lang, "ใบสรุปเงินเดือน", "Payslip")}</h1>
           <div className="mt-0.5 text-xs text-slate-500">
             {period.period_name} · {fmtDate(period.start_date)} - {fmtDate(period.end_date)}

@@ -63,7 +63,8 @@ export async function POST(req: NextRequest) {
         payroll_period_id: periodId, payroll_line_id: line.id, employee_id: empId,
         payslip_no: `PS-${periodId.slice(0, 8)}-${run.run_no}-${code}`.replace(/\s+/g, ""),
         gross_pay: money(line.gross_pay), total_deduction: money(line.total_deduction),
-        net_pay: roundMoney(money(line.net_pay) + money(line.withholding_tax)),
+        // net บนสลิป = ยอดรับจริง (เท่ากับหน้าตรวจสอบเงินเดือน) — ไม่บวกภาษีกลับ
+        net_pay: roundMoney(money(line.net_pay)),
         status: "draft", slip_type: "month_end", issued_at: null,
         payload: { run: { run_no: run.run_no }, line },
       };
