@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
     const companyPaidTaxBy: Record<string, boolean> = {};
     if (empIds.length) {
       let contractQuery = a.from("employee_contracts")
-        .select("employee_id, contract_type, employment_type, wage_type, work_schedule_id, attendance_scan_exempt, start_date, end_date")
+        .select("employee_id, contract_type, employment_type, wage_type, work_schedule_id, work_time_profile_id, attendance_scan_exempt, start_date, end_date")
         .in("employee_id", empIds)
         .eq("is_current", true)
         .eq("status", "active");
@@ -107,6 +107,21 @@ export async function GET(req: NextRequest) {
         const r = c as Record<string, unknown> & { employee_id: string };
         contractMetaBy[r.employee_id] = r;
       });
+      // โปรไฟล์เวลาทำงาน (เข้า/พักเที่ยง/เลิกงาน) → ให้การคิดมาสายใช้เวลาเข้าตามโปรไฟล์ของแต่ละคน
+      // (ออฟฟิศ 08:00 / โรงงาน 07:50) แทนค่ากลางตัวเดียว
+      const profileIds = [...new Set(Object.values(contractMetaBy)
+        .map((c) => c.work_time_profile_id).filter(Boolean) as string[])];
+      if (profileIds.length) {
+        const { data: profiles } = await a.from("work_time_profiles")
+          .select("id, morning_check_in_cutoff, noon_check_in_cutoff, checkout_required_at, early_checkout_grace_minutes")
+          .in("id", profileIds);
+        const profileBy: Record<string, Record<string, unknown>> = {};
+        (profiles ?? []).forEach((p) => { profileBy[(p as { id: string }).id] = p as Record<string, unknown>; });
+        Object.values(contractMetaBy).forEach((c) => {
+          const p = c.work_time_profile_id ? profileBy[c.work_time_profile_id as string] : null;
+          if (p) c.work_time_profiles = p;
+        });
+      }
     }
 
     const rows = lines.map((l) => {
@@ -130,6 +145,8 @@ export async function GET(req: NextRequest) {
         employment_type: contractMetaBy[id]?.employment_type ?? null,
         wage_type: l.wage_type ?? null,
         work_schedule_id: contractMetaBy[id]?.work_schedule_id ?? null,
+        work_time_profile_id: contractMetaBy[id]?.work_time_profile_id ?? null,
+        work_time_profile: (contractMetaBy[id]?.work_time_profiles as Record<string, unknown> | undefined) ?? null,
         attendance_scan_exempt: contractMetaBy[id]?.attendance_scan_exempt === true,
         contract_start_date: contractMetaBy[id]?.start_date ?? null,
         contract_end_date: contractMetaBy[id]?.end_date ?? null,

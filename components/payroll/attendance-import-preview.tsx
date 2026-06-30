@@ -8,6 +8,7 @@ import {
   calculateAttendanceDay,
   type AttendanceImportContract,
   type AttendancePreviewRow,
+  type AttendanceWorkTimeProfile,
 } from "@/lib/payroll-attendance-import";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
@@ -22,6 +23,8 @@ type PayrollImportRow = {
   employment_type?: string | null;
   wage_type?: string | null;
   work_schedule_id?: string | null;
+  work_time_profile_id?: string | null;
+  work_time_profile?: AttendanceWorkTimeProfile | null;
   attendance_scan_exempt?: boolean | null;
   contract_start_date?: string | null;
   contract_end_date?: string | null;
@@ -395,6 +398,8 @@ export function AttendanceImportPreview({
       const row = rowsByEmployeeId.get(String(employee.id));
       return {
         work_schedule_id: row?.work_schedule_id,
+        // เวลาเข้า/พักเที่ยง/เลิกงาน ตามโปรไฟล์ของแต่ละคน → คิดมาสายด้วยเวลา 08:00 (ออฟฟิศ)/07:50 (โรงงาน)
+        work_time_profiles: row?.work_time_profile ?? undefined,
         attendance_scan_exempt: row?.attendance_scan_exempt,
         contract_type: row?.contract_type,
         employment_type: row?.employment_type,
