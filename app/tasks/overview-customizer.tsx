@@ -29,8 +29,9 @@ export type CardAlign = "left" | "center" | "right";
 export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: boolean };
 // สีสถานะ "ของฉัน" (per-user): key=status key → c1 (สีหลัก) + c2 (ไล่สี, เว้น=สีเดียว)
 export type StatusColorMap = Record<string, { c1: string; c2?: string | null }>;
-// PET แจ้งเตือน: เปิด/ปิด + เลือกว่าจะเด้งเตือนเมื่อมีงานแบบไหน
-export type PetConfig = { notify: boolean; overdue: boolean; review: boolean; dueToday: boolean; newTasks: boolean };
+// PET แจ้งเตือน: เปิด/ปิด + เลือกว่าจะเด้งเตือนเมื่อมีงานแบบไหน + แต่งหน้าตา/ตำแหน่ง
+export type PetCorner = "br" | "bl" | "tr" | "tl";
+export type PetConfig = { notify: boolean; overdue: boolean; review: boolean; dueToday: boolean; newTasks: boolean; corner?: PetCorner; size?: number; greeting?: string | null; emojiHappy?: string; emojiAlert?: string };
 export type FontScale = "sm" | "md" | "lg" | "xl";
 export type Density = "compact" | "normal" | "spacious";
 export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number; cardLabelSize?: number; cardValueSize?: number; cardAlign?: CardAlign; anim?: AnimTheme; statusColors?: StatusColorMap; fontFamily?: string; fontScale?: FontScale; density?: Density; cardValueColor?: string | null; cardLabelColor?: string | null; pet?: PetConfig };
@@ -89,7 +90,7 @@ export const DEFAULT_THEME: OverviewTheme = {
   density: "normal",
   cardValueColor: null,   // เว้น = สีตามชุดสีการ์ด
   cardLabelColor: null,
-  pet: { notify: false, overdue: true, review: true, dueToday: true, newTasks: true },
+  pet: { notify: false, overdue: true, review: true, dueToday: true, newTasks: true, corner: "br", size: 64, greeting: null, emojiHappy: "🐥", emojiAlert: "🙀" },
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -465,7 +466,30 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
                 </label>
               ))}
             </div>
-            <p className="text-[11px] text-slate-400 mt-1.5">{t("ไม่ได้อัปโหลด GIF ก็มี PET เริ่มต้น (🐥) ให้ · อัปโหลดรูป/GIF เองได้ที่ส่วน “แถบทักทาย” ด้านบน · คลิก PET เพื่อดู/ปิดการแจ้งเตือน", "No GIF? a default pet (🐥) is used · upload your own in the banner section above · click the pet to toggle alerts")}</p>
+            {/* มุม + ขนาด */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 pl-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-500">{t("มุมที่ลอย", "Corner")}</span>
+                {([["tl", "↖"], ["tr", "↗"], ["bl", "↙"], ["br", "↘"]] as const).map(([cn, arrow]) => (
+                  <button key={cn} onClick={() => setPet({ corner: cn })} className={`h-7 w-8 text-sm rounded border ${(theme.pet?.corner ?? "br") === cn ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{arrow}</button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">{t("ขนาด", "Size")}</span>
+                <input type="range" min={40} max={120} value={theme.pet?.size ?? 64} onChange={(e) => setPet({ size: Number(e.target.value) })} className="w-28 accent-violet-600" />
+                <span className="text-xs text-slate-400 w-9">{theme.pet?.size ?? 64}px</span>
+              </div>
+            </div>
+            {/* ข้อความทักทาย + หน้าตามอารมณ์ */}
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-2 mt-2 pl-1">
+              <label className="text-xs text-slate-500 flex-1 min-w-[200px]">{t("ข้อความตอนเคลียร์งานหมด (เว้น = ค่าเริ่มต้น)", "Message when all clear (blank = default)")}
+                <input value={theme.pet?.greeting ?? ""} onChange={(e) => setPet({ greeting: e.target.value || null })} placeholder={t("เช่น เก่งมาก! พักก่อนได้เลย ☕", "e.g. Great job! Take a break ☕")} className="mt-1 w-full h-8 px-2 text-sm border border-slate-200 rounded" /></label>
+              <label className="flex items-center gap-1.5 text-xs text-slate-500">{t("หน้าสบายดี", "Happy face")}
+                <input value={theme.pet?.emojiHappy ?? "🐥"} onChange={(e) => setPet({ emojiHappy: e.target.value })} className="w-12 h-8 px-1 text-center text-base border border-slate-200 rounded" /></label>
+              <label className="flex items-center gap-1.5 text-xs text-slate-500">{t("หน้าตกใจ", "Alert face")}
+                <input value={theme.pet?.emojiAlert ?? "🙀"} onChange={(e) => setPet({ emojiAlert: e.target.value })} className="w-12 h-8 px-1 text-center text-base border border-slate-200 rounded" /></label>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5">{t("หน้าสบายดี/ตกใจ ใช้เมื่อยังไม่ได้อัปโหลด GIF · อัปโหลดรูป/GIF เองได้ที่ส่วน “แถบทักทาย” ด้านบน · คลิก PET เพื่อดู/ปิดการแจ้งเตือน", "Happy/alert faces apply when no GIF is uploaded · upload your own in the banner section above · click the pet to toggle alerts")}</p>
           </>
         )}
       </section>
