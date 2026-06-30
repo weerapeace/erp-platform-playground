@@ -22,6 +22,8 @@ type Slip = {
 };
 
 const baht = (v: unknown) => v == null ? "-" : `฿${Number(v).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
+// สุทธิ (จ่ายจริง) — ปัดเศษเป็นจำนวนเต็มบาท
+const bahtInt = (v: unknown) => v == null ? "-" : `฿${Math.round(Number(v)).toLocaleString("th-TH")}`;
 const SLIP_TYPE_TH: Record<string, string> = { month_end: "สิ้นเดือน", mid_month: "กลางเดือน", special: "พิเศษ", bonus: "โบนัส" };
 const STATUS_TH: Record<string, { th: string; cls: string }> = {
   draft: { th: "ร่าง", cls: "bg-slate-100 text-slate-600" },
@@ -269,7 +271,7 @@ export default function PayrollPayslipsPage() {
           <Card label="จำนวนสลิป" value={totals.count.toLocaleString("th-TH")} cls="bg-slate-50 text-slate-700 border-slate-200" />
           <Card label="รายได้รวม" value={baht(totals.gross_pay)} cls="bg-blue-50 text-blue-700 border-blue-200" />
           <Card label="หักรวม" value={baht(totals.total_deduction)} cls="bg-amber-50 text-amber-700 border-amber-200" />
-          <Card label="จ่ายสุทธิ" value={baht(totals.net_pay)} cls="bg-emerald-50 text-emerald-700 border-emerald-200" />
+          <Card label="จ่ายสุทธิ" value={bahtInt(totals.net_pay)} cls="bg-emerald-50 text-emerald-700 border-emerald-200" />
         </div>
       )}
 
@@ -306,7 +308,7 @@ export default function PayrollPayslipsPage() {
                   <td className="px-3 py-2 text-slate-500">{SLIP_TYPE_TH[s.slip_type] ?? s.slip_type}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{baht(s.gross_pay)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-amber-700">{baht(s.total_deduction)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums font-medium">{baht(s.net_pay)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium">{bahtInt(s.net_pay)}</td>
                   <td className="px-3 py-2 text-center">{badge(s.status)}</td>
                   <td className="px-3 py-2 text-center">
                     <button type="button" onClick={() => openPrintPreview([s.id], s.payslip_no)}
