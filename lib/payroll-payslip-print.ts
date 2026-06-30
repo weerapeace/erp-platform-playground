@@ -20,7 +20,7 @@ const DEDUCTIONS_FOR_PRINT: readonly (readonly [string, string, string])[] = [
   ["advance_deduction", "เบิกล่วงหน้า", "Advance"],
   ["damage_deduction", "หักค่าเสียหาย", "Damage"],
   ["social_security_employee", "ประกันสังคม", "Social Security"],
-  ["withholding_tax", "ภาษีหัก ณ ที่จ่าย", "Withholding Tax"],
+  // ภาษีหัก ณ ที่จ่าย: บริษัทออกให้ ไม่ได้หักจากพนักงาน → ไม่แสดงบนสลิป (net ไม่รวมภาษีอยู่แล้ว)
   ["other_deduction", "หักอื่น ๆ", "Other"],
   ["mid_month_paid", "จ่ายกลางเดือน", "Mid-month Paid"],
 ];
