@@ -67,7 +67,8 @@ export async function POST(req: NextRequest) {
 
     // เขียน payroll_lines (ตัด employee_code ที่ไม่ใช่คอลัมน์จริงออก)
     const rows = lines.map((ln) => {
-      const { employee_code: _ec, ...cols } = ln as Record<string, unknown>;
+      const { employee_code: _ec, employee_nickname: _en, ...cols } = ln as Record<string, unknown>;
+      void _en;
       void _ec;
       return { ...cols, payroll_period_id: periodId, payroll_run_id: run.id, status: "review" };
     });

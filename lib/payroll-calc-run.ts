@@ -65,6 +65,7 @@ export async function runCalcPreview(periodIdInput?: string | null): Promise<Cal
     return {
       id: `${String(ln.employee_id)}-${i}`,
       employee_name: ln.employee_code as string,
+      employee_nickname: (ln.employee_nickname as string) ?? "",
       gross_new, gross_old: old ? money(old.gross_pay) : null,
       net_new, net_old: old ? money(old.net_pay) : null,
       diff_net: old ? Math.round((net_new - money(old.net_pay)) * 100) / 100 : null,

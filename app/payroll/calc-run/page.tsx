@@ -12,7 +12,7 @@ import { usePermission } from "@/components/auth";
 import { PeriodHolidaysPanel } from "@/components/payroll/period-holidays-panel";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 
-type Row = { id: string; employee_name: string; gross_new: number; gross_old: number | null; net_new: number; net_old: number | null; diff_net: number | null; status: string; ok: boolean };
+type Row = { id: string; employee_name: string; employee_nickname?: string; gross_new: number; gross_old: number | null; net_new: number; net_old: number | null; diff_net: number | null; status: string; ok: boolean };
 type ColumnDiff = { column: string; count: number };
 type Summary = { total: number; match: number; diff: number; fresh: number; columnDiffs: ColumnDiff[] };
 type ValidationIssue = {
@@ -160,7 +160,10 @@ export default function PayrollCalcRunPage() {
     const v = await loadValidation(periodId);
     if (v && !v.ready) { setErr("งวดยังไม่พร้อมบันทึกผลคำนวณ กรุณาแก้รายการ error ในกล่องตรวจความพร้อมก่อน"); return; }
     const period = periods.find((p) => p.id === periodId);
-    if (!confirm(`ยืนยันบันทึกผลคำนวณงวด "${period?.period_name ?? ""}" ลงระบบ?\n\nระบบจะสร้าง "รอบคำนวณใหม่" (ไม่ลบของเดิม) — ทำได้เฉพาะงวดที่ยังไม่ล็อก`)) return;
+    const diffNote = summary && summary.diff > 0
+      ? `\n\n⚠️ มี ${summary.diff} คน ยอดต่างจากของเดิม — ระบบจะบันทึก "ยอดใหม่" เป็นรอบคำนวณล่าสุด`
+      : "";
+    if (!confirm(`ยืนยันบันทึกผลคำนวณงวด "${period?.period_name ?? ""}" ลงระบบ?\n\nระบบจะสร้าง "รอบคำนวณใหม่" (ไม่ลบของเดิม) — ทำได้เฉพาะงวดที่ยังไม่ล็อก${diffNote}`)) return;
     setSaving(true); setErr(null); setSaveMsg(null);
     try {
       const j = await apiFetch("/api/payroll/calc-save", {
@@ -282,9 +285,9 @@ export default function PayrollCalcRunPage() {
               <div className="text-sm text-slate-600">
                 <b>บันทึกผลคำนวณลงระบบ</b> — สร้างรอบคำนวณใหม่ ไม่ลบของเดิม
                 {!editable && <span className="text-red-600"> · งวดนี้ถูกล็อก/จ่ายแล้ว บันทึกไม่ได้</span>}
-                {editable && summary.diff > 0 && <span className="text-amber-600"> · ยังมีช่องไม่ตรง — แก้ให้ตรงก่อนค่อยบันทึก</span>}
+                {editable && summary.diff > 0 && <span className="text-amber-600"> · มี {summary.diff} คน ยอดต่างจากเดิม (ตรวจก่อนบันทึก — บันทึกได้เลยถ้ายอดใหม่ถูกต้อง)</span>}
               </div>
-              <button onClick={save} disabled={saving || !editable || summary.diff > 0 || summary.total === 0}
+              <button onClick={save} disabled={saving || !editable || summary.total === 0}
                 className="h-10 px-5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">
                 {saving ? "กำลังบันทึก..." : "💾 บันทึกผลคำนวณ"}
               </button>
@@ -321,7 +324,10 @@ export default function PayrollCalcRunPage() {
             <tbody>
               {shown.map((r) => (
                 <tr key={r.id} className="border-t border-slate-100">
-                  <td className="px-3 py-2 font-mono text-xs">{r.employee_name}</td>
+                  <td className="px-3 py-2 text-xs">
+                    <span className="font-mono">{r.employee_name}</span>
+                    {r.employee_nickname && <span className="ml-1 text-slate-600">· {r.employee_nickname}</span>}
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums">{baht(r.gross_new)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium">{baht(r.net_new)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-400">{baht(r.net_old)}</td>

@@ -198,6 +198,7 @@ function buildLine(period: Row, employee: Row, contract: Row, setting: Row, manu
   return {
     employee_id: employee.id,
     employee_code: employee.employee_code,
+    employee_nickname: employee.nickname ?? employee.first_name ?? null,
     contract_id: contract.id ?? null,
     company_id: contract.company_id ?? period.company_id ?? null,
     contract_type: contract.contract_type ?? null,
