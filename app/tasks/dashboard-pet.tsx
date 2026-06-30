@@ -1,0 +1,112 @@
+"use client";
+
+// ============================================================
+// DashboardPet — ตัวการ์ตูนลอยมุมแถบทักทาย ทำหน้าที่ "แจ้งเตือนงาน"
+// ใช้ข้อมูลที่หน้า dashboard มีอยู่แล้ว (เกินกำหนด/รอตรวจ/ครบกำหนดวันนี้/งานใหม่) — ไม่ต่อ backend ใหม่
+// notify=false → กลับไปเป็นรูปลอยเฉย ๆ แบบเดิม · "งานใหม่" นับจากเวลาเข้าครั้งล่าสุด (localStorage)
+// ============================================================
+
+import { useEffect, useMemo, useState } from "react";
+import { useT } from "@/components/i18n";
+import type { PetConfig } from "./overview-customizer";
+
+const SEEN_KEY = "tasks_pet_seen";   // เวลาเข้าหน้าครั้งล่าสุด (กันให้ "งานใหม่" นับเฉพาะของใหม่จริง ๆ)
+export type PetAlertKind = "overdue" | "review" | "dueToday" | "new";
+export type PetData = { overdue: number; review: number; dueToday: number; myTaskDates: string[] };
+
+export function DashboardPet({ petUrl, cfg, data, onAlert }: {
+  petUrl: string | null;
+  cfg: PetConfig;
+  data: PetData;
+  onAlert: (kind: PetAlertKind) => void;
+}) {
+  const t = useT();
+  const [seen, setSeen] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [idx, setIdx] = useState(0);
+
+  // ครั้งแรกสุด: ตั้ง lastSeen = ตอนนี้ (ไม่งั้นงานเก่าทั้งหมดจะถูกนับเป็น "งานใหม่")
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(SEEN_KEY);
+      if (v) setSeen(v);
+      else { const now = new Date().toISOString(); localStorage.setItem(SEEN_KEY, now); setSeen(now); }
+    } catch { setSeen(new Date().toISOString()); }
+  }, []);
+
+  const newCount = useMemo(() => {
+    if (!cfg.newTasks || !seen) return 0;
+    return data.myTaskDates.filter((d) => d && d > seen).length;
+  }, [cfg.newTasks, seen, data.myTaskDates]);
+
+  // รายการเตือนตามที่เปิดไว้ + มีจำนวนจริง
+  const alerts = useMemo(() => {
+    const a: { kind: PetAlertKind; icon: string; text: string; n: number }[] = [];
+    if (cfg.overdue && data.overdue > 0) a.push({ kind: "overdue", icon: "⚠️", text: t(`เกินกำหนด ${data.overdue} งาน!`, `${data.overdue} overdue!`), n: data.overdue });
+    if (cfg.dueToday && data.dueToday > 0) a.push({ kind: "dueToday", icon: "⏰", text: t(`ครบกำหนดวันนี้ ${data.dueToday} งาน`, `${data.dueToday} due today`), n: data.dueToday });
+    if (cfg.review && data.review > 0) a.push({ kind: "review", icon: "🟡", text: t(`รอตรวจ ${data.review} งาน`, `${data.review} to review`), n: data.review });
+    if (cfg.newTasks && newCount > 0) a.push({ kind: "new", icon: "✨", text: t(`งานใหม่ ${newCount} งาน`, `${newCount} new`), n: newCount });
+    return a;
+  }, [cfg, data, newCount, t]);
+
+  const total = alerts.reduce((s, a) => s + a.n, 0);
+  const hasAlert = alerts.length > 0;
+
+  // มีงานเตือน → เปิดกรอบคำพูดเอง + วนข้อความถ้ามีหลายอย่าง
+  useEffect(() => { if (hasAlert) setOpen(true); }, [hasAlert]);
+  useEffect(() => {
+    if (!open || alerts.length <= 1) return;
+    const id = setInterval(() => setIdx((i) => (i + 1) % alerts.length), 4000);
+    return () => clearInterval(id);
+  }, [open, alerts.length]);
+
+  const acknowledge = () => {
+    const now = new Date().toISOString();
+    try { localStorage.setItem(SEEN_KEY, now); } catch { /* ignore */ }
+    setSeen(now);
+  };
+
+  // ปิดโหมดเตือน → รูปลอยเฉย ๆ แบบเดิม (ถ้ามีรูป)
+  if (!cfg.notify) {
+    return petUrl ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={`/api/r2-image?key=${encodeURIComponent(petUrl)}&w=200`} alt="" className="absolute bottom-1 right-3 h-16 w-16 object-contain drop-shadow-lg pointer-events-none select-none" />
+    ) : null;
+  }
+
+  const cur = alerts[Math.min(idx, Math.max(0, alerts.length - 1))];
+  return (
+    <div className="absolute bottom-1 right-3 z-10 flex flex-col items-end gap-1">
+      {open && (
+        <div className="ov-bubble-pop max-w-[230px]">
+          <div className="bg-white text-slate-700 rounded-2xl rounded-br-sm shadow-lg border border-slate-100 px-3 py-2">
+            {hasAlert ? (
+              <div className="space-y-1">
+                {alerts.map((a) => (
+                  <button key={a.kind} onClick={() => { onAlert(a.kind); if (a.kind === "new") acknowledge(); }}
+                    className={`flex items-center gap-1.5 text-xs w-full text-left transition-colors hover:text-violet-700 ${a === cur ? "font-semibold text-slate-800" : "text-slate-500"}`}>
+                    <span>{a.icon}</span><span className="flex-1">{a.text}</span><span className="text-slate-300">›</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs">{t("เคลียร์งานหมดแล้ว เก่งมาก! 🎉", "All clear, great job! 🎉")}</p>
+            )}
+          </div>
+        </div>
+      )}
+      <button onClick={() => { setOpen((o) => !o); if (newCount > 0) acknowledge(); }} title={t("กดดูการแจ้งเตือน", "Tap for alerts")}
+        className="relative select-none focus:outline-none">
+        {total > 0 && (
+          <span className="ov-badge-pulse absolute -top-1 -right-1 z-10 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow">{total > 99 ? "99+" : total}</span>
+        )}
+        {petUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={`/api/r2-image?key=${encodeURIComponent(petUrl)}&w=200`} alt="" className={`h-16 w-16 object-contain drop-shadow-lg ${hasAlert ? "ov-pet-alert" : "ov-pet-float"}`} draggable={false} />
+        ) : (
+          <span className={`block text-5xl drop-shadow-lg ${hasAlert ? "ov-pet-alert" : "ov-pet-float"}`}>🐥</span>
+        )}
+      </button>
+    </div>
+  );
+}

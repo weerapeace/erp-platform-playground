@@ -6,7 +6,7 @@
 // ของกลาง: reuse ข้อมูลที่หน้า /tasks โหลดอยู่แล้ว + DataTable กลาง · ธีมต่อคนจาก user_ui_prefs
 // ============================================================
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -21,7 +21,8 @@ import { isOverdue, updateTask, PRIORITY_META, priorityLabel, type CreativeTask,
 import { matchMetric, type MetricDef } from "./metrics";
 import { MetricCardsManager } from "./metric-cards-manager";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
-import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, type OverviewTheme, type CardKey, type CardTheme, type CardAlign } from "./overview-customizer";
+import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, fontStack, fontGoogleHref, OV_ZOOM, OV_DENSITY, type OverviewTheme, type CardKey, type CardTheme, type CardAlign } from "./overview-customizer";
+import { DashboardPet, type PetAlertKind } from "./dashboard-pet";
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
@@ -166,20 +167,37 @@ export function OverviewDashboard({
   const cardLabelSize = theme.cardLabelSize ?? 14;
   const cardValueSize = theme.cardValueSize ?? 24;
   const cardAlign = theme.cardAlign ?? "left";
+  const density = OV_DENSITY[theme.density ?? "normal"];
+  const fontFam = fontStack(theme.fontFamily) || undefined;
+  const zoom = OV_ZOOM[theme.fontScale ?? "md"];
+
+  // โหลด Google Font เมื่อเลือกฟอนต์ที่ต้องโหลด — ใส่ <link> ครั้งเดียวต่อฟอนต์
+  useEffect(() => {
+    const href = fontGoogleHref(theme.fontFamily);
+    if (!href || document.querySelector(`link[data-ovfont="${href}"]`)) return;
+    const l = document.createElement("link"); l.rel = "stylesheet"; l.href = href; l.setAttribute("data-ovfont", href);
+    document.head.appendChild(l);
+  }, [theme.fontFamily]);
+
+  // ข้อมูลให้ PET: เกินกำหนด/รอตรวจ/ครบกำหนดวันนี้ + วันที่สร้างงานของฉัน (นับ "งานใหม่")
+  const petData = useMemo(() => ({
+    overdue: counts.overdue,
+    review: counts.review,
+    dueToday: myTasks.filter((tk) => tk.due_date === today && !isTerminal(tk.status)).length,
+    myTaskDates: myTasks.map((tk) => tk.created_at).filter(Boolean),
+  }), [counts.overdue, counts.review, myTasks, today]);
+  const onPetAlert = (kind: PetAlertKind) => onFilter(kind === "review" ? "review" : kind === "overdue" ? "overdue" : "mine");
 
   const hasPageBg = theme.page.mode !== "none";
   return (
-    <div className={`relative ${hasPageBg ? "rounded-2xl p-3 sm:p-4" : ""}`} style={pageStyle(theme.page)}>
+    <div className={`relative ${hasPageBg ? "rounded-2xl p-3 sm:p-4" : ""}`} style={{ ...pageStyle(theme.page), fontFamily: fontFam, zoom } as CSSProperties}>
       {theme.page.mode === "image" && <div className="absolute inset-0 rounded-2xl bg-white/45 pointer-events-none" />}
-      <div className="relative space-y-6">
+      <div className={`relative ${density.space}`}>
       {/* Hero (ธีมแต่งได้) — บนสุด: เมนูมุมมอง ☰ + ทักทาย + ปุ่ม + ทางลัด รวมในตัว */}
       <div className={`relative rounded-2xl overflow-hidden shadow-sm text-white ${theme.anim?.heroGradient && theme.hero.mode === "gradient" ? "ov-anim-gradient" : ""}`} style={heroStyle(theme.hero)}>
         {heroImage && <div className="absolute inset-0 bg-black/35" />}
-        {/* ไอคอนลอย (Pet) — มุมล่างขวา (GIF จะขยับเอง) */}
-        {theme.hero.petUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={`/api/r2-image?key=${encodeURIComponent(theme.hero.petUrl)}&w=200`} alt="" className="absolute bottom-1 right-3 h-16 w-16 object-contain drop-shadow-lg pointer-events-none select-none" />
-        )}
+        {/* PET — แจ้งเตือนงาน (คลิกได้) หรือรูปลอยเฉย ๆ ถ้าปิดโหมดเตือน */}
+        <DashboardPet petUrl={theme.hero.petUrl ?? null} cfg={theme.pet ?? { notify: false, overdue: true, review: true, dueToday: true, newTasks: true }} data={petData} onAlert={onPetAlert} />
         <div className="relative p-5 sm:p-6">
           {/* แถวบน: เมนูเลือกมุมมอง (ซ้าย) + ปุ่ม (ขวา) — มือถือ: ห่อบรรทัด */}
           <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
@@ -213,9 +231,9 @@ export function OverviewDashboard({
       </div>
 
       {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className={`grid grid-cols-2 lg:grid-cols-4 ${density.gap}`}>
         {cardMeta.map((m) => (
-          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize} labelSize={cardLabelSize} valueSize={cardValueSize} align={cardAlign} animCls={`${theme.anim?.hover ? "ov-hover" : ""} ${theme.anim?.entrance ? "ov-enter" : ""}`}
+          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize} labelSize={cardLabelSize} valueSize={cardValueSize} align={cardAlign} pad={density.cardPad} valueColor={theme.cardValueColor ?? null} labelColor={theme.cardLabelColor ?? null} animCls={`${theme.anim?.hover ? "ov-hover" : ""} ${theme.anim?.entrance ? "ov-enter" : ""}`}
             active={filter === m.key && !activeMetric} hint={filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : m.key === "review" ? t("กดดูคิวรอตรวจ", "tap to review") : t("กดเพื่อกรอง", "tap to filter")}
             onClick={() => { setActiveMetric(null); onFilter(m.key); }} />
         ))}
@@ -411,7 +429,7 @@ export function OverviewDashboard({
   );
 }
 
-function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18, labelSize = 14, valueSize = 24, align = "left", animCls = "" }: { card: CardTheme; value: number; label: string; active?: boolean; hint: string; onClick: () => void; iconSize?: number; labelSize?: number; valueSize?: number; align?: CardAlign; animCls?: string }) {
+function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18, labelSize = 14, valueSize = 24, align = "left", animCls = "", pad = "p-4", valueColor = null, labelColor = null }: { card: CardTheme; value: number; label: string; active?: boolean; hint: string; onClick: () => void; iconSize?: number; labelSize?: number; valueSize?: number; align?: CardAlign; animCls?: string; pad?: string; valueColor?: string | null; labelColor?: string | null }) {
   const c = CARD_COLORS[card.color] ?? CARD_COLORS.slate;
   // ตำแหน่งตัวอักษร: ซ้าย=ไอคอนซ้าย-เลขขวา (คลาสสิก) · กลาง/ขวา=ไอคอน+เลขชิดด้วยกัน + ข้อความตามแนว
   const textAlign = align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
@@ -423,28 +441,28 @@ function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18,
   // โหมดรูปเต็ม — รูปพื้นหลังการ์ด + ฉากดำจาง + ตัวอักษรขาว
   if (card.bgUrl) {
     return (
-      <button onClick={onClick} className={`relative ${textAlign} rounded-xl border overflow-hidden p-4 min-h-[92px] transition-all hover:shadow-sm ${animCls} ${active ? `ring-2 ${c.ring} border-transparent` : "border-slate-200"}`}>
+      <button onClick={onClick} className={`relative ${textAlign} rounded-xl border overflow-hidden ${pad} min-h-[92px] transition-all hover:shadow-sm ${animCls} ${active ? `ring-2 ${c.ring} border-transparent` : "border-slate-200"}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={`/api/r2-image?key=${encodeURIComponent(card.bgUrl)}&w=400`} alt="" className="absolute inset-0 w-full h-full object-cover" />
         <div className="absolute inset-0 bg-black/40" />
         <div className="relative text-white">
           <div className={`flex items-center ${rowJustify}`}>
             {icon("drop-shadow")}
-            <span className="font-bold tabular-nums drop-shadow leading-none" style={{ fontSize: valueSize }}>{value}</span>
+            <span className="font-bold tabular-nums drop-shadow leading-none" style={{ fontSize: valueSize, color: valueColor || undefined }}>{value}</span>
           </div>
-          <p className="font-medium mt-1 drop-shadow leading-snug" style={{ fontSize: labelSize }}>{label}</p>
+          <p className="font-medium mt-1 drop-shadow leading-snug" style={{ fontSize: labelSize, color: labelColor || undefined }}>{label}</p>
           <p className="text-[11px] opacity-85 mt-0.5">{hint}</p>
         </div>
       </button>
     );
   }
   return (
-    <button onClick={onClick} className={`${textAlign} rounded-xl border p-4 transition-all hover:shadow-sm hover:brightness-[0.98] ${animCls} ${c.box} ${active ? `ring-2 ${c.ring}` : ""}`}>
+    <button onClick={onClick} className={`${textAlign} rounded-xl border ${pad} transition-all hover:shadow-sm hover:brightness-[0.98] ${animCls} ${c.box} ${active ? `ring-2 ${c.ring}` : ""}`}>
       <div className={`flex items-center ${rowJustify}`}>
         {icon("")}
-        <span className="font-bold tabular-nums leading-none" style={{ fontSize: valueSize }}>{value}</span>
+        <span className="font-bold tabular-nums leading-none" style={{ fontSize: valueSize, color: valueColor || undefined }}>{value}</span>
       </div>
-      <p className="font-medium mt-1 leading-snug" style={{ fontSize: labelSize }}>{label}</p>
+      <p className="font-medium mt-1 leading-snug" style={{ fontSize: labelSize, color: labelColor || undefined }}>{label}</p>
       <p className="text-[11px] opacity-70 mt-0.5">{hint}</p>
     </button>
   );

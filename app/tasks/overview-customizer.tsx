@@ -29,7 +29,36 @@ export type CardAlign = "left" | "center" | "right";
 export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: boolean };
 // สีสถานะ "ของฉัน" (per-user): key=status key → c1 (สีหลัก) + c2 (ไล่สี, เว้น=สีเดียว)
 export type StatusColorMap = Record<string, { c1: string; c2?: string | null }>;
-export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number; cardLabelSize?: number; cardValueSize?: number; cardAlign?: CardAlign; anim?: AnimTheme; statusColors?: StatusColorMap };
+// PET แจ้งเตือน: เปิด/ปิด + เลือกว่าจะเด้งเตือนเมื่อมีงานแบบไหน
+export type PetConfig = { notify: boolean; overdue: boolean; review: boolean; dueToday: boolean; newTasks: boolean };
+export type FontScale = "sm" | "md" | "lg" | "xl";
+export type Density = "compact" | "normal" | "spacious";
+export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number; cardLabelSize?: number; cardValueSize?: number; cardAlign?: CardAlign; anim?: AnimTheme; statusColors?: StatusColorMap; fontFamily?: string; fontScale?: FontScale; density?: Density; cardValueColor?: string | null; cardLabelColor?: string | null; pet?: PetConfig };
+
+// ===== ฟอนต์ทั้งหน้า (โหลด Google Fonts เฉพาะตอนเลือก) =====
+export const OV_FONTS: { key: string; label: () => string; stack: string; google?: string }[] = [
+  { key: "default", label: () => tr("ค่าเริ่มต้น", "Default"), stack: "" },
+  { key: "sarabun", label: () => "Sarabun", stack: "'Sarabun', sans-serif", google: "Sarabun:wght@400;600;700" },
+  { key: "prompt", label: () => "Prompt", stack: "'Prompt', sans-serif", google: "Prompt:wght@400;600;700" },
+  { key: "kanit", label: () => "Kanit", stack: "'Kanit', sans-serif", google: "Kanit:wght@400;600;700" },
+  { key: "mitr", label: () => "Mitr", stack: "'Mitr', sans-serif", google: "Mitr:wght@400;500;700" },
+  { key: "ibmthai", label: () => "IBM Plex Thai", stack: "'IBM Plex Sans Thai', sans-serif", google: "IBM+Plex+Sans+Thai:wght@400;500;600" },
+  { key: "serif", label: () => tr("ตัวมีหัว (Serif)", "Serif"), stack: "Georgia, 'Times New Roman', serif" },
+  { key: "mono", label: () => tr("ตัวพิมพ์ดีด (Mono)", "Mono"), stack: "ui-monospace, 'Courier New', monospace" },
+];
+export function fontStack(key?: string): string { return OV_FONTS.find((f) => f.key === key)?.stack ?? ""; }
+export function fontGoogleHref(key?: string): string | null {
+  const g = OV_FONTS.find((f) => f.key === key)?.google;
+  return g ? `https://fonts.googleapis.com/css2?family=${g}&display=swap` : null;
+}
+// ขนาดตัวอักษรทั้งหน้า (ใช้ zoom เพื่อให้ขยายทุกข้อความพร้อมกัน)
+export const OV_ZOOM: Record<FontScale, number> = { sm: 0.92, md: 1, lg: 1.1, xl: 1.2 };
+// ความหนาแน่น: ระยะห่างแนวตั้ง + ช่องไฟการ์ด + padding ในการ์ดสรุป
+export const OV_DENSITY: Record<Density, { space: string; gap: string; cardPad: string }> = {
+  compact: { space: "space-y-4", gap: "gap-2", cardPad: "p-3" },
+  normal: { space: "space-y-6", gap: "gap-3", cardPad: "p-4" },
+  spacious: { space: "space-y-8", gap: "gap-5", cardPad: "p-5" },
+};
 
 // สไตล์สีสถานะตามที่ผู้ใช้ตั้งเอง (ไล่สีถ้ามี c2) — คืน null ถ้าไม่ได้ตั้ง (ใช้สีเริ่มต้น)
 export function ovStatusBg(theme: OverviewTheme, key: string): string | null {
@@ -55,6 +84,12 @@ export const DEFAULT_THEME: OverviewTheme = {
   cardAlign: "left",   // ตำแหน่งตัวอักษรบนการ์ด (ซ้าย/กลาง/ขวา)
   anim: { hover: false, entrance: false, heroGradient: false },
   statusColors: {},
+  fontFamily: "default",
+  fontScale: "md",
+  density: "normal",
+  cardValueColor: null,   // เว้น = สีตามชุดสีการ์ด
+  cardLabelColor: null,
+  pet: { notify: false, overdue: true, review: true, dueToday: true, newTasks: true },
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -77,7 +112,7 @@ export function mergeTheme(v: unknown): OverviewTheme {
   const o = (v ?? {}) as Partial<OverviewTheme>;
   const cards = {} as Record<CardKey, CardTheme>;
   for (const k of CARD_KEYS) cards[k] = { ...DEFAULT_THEME.cards[k], ...(o.cards?.[k] ?? {}) };
-  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent, kanban: { ...DEFAULT_THEME.kanban, ...(o.kanban ?? {}) }, cardIconSize: (o.cardIconSize as number) ?? DEFAULT_THEME.cardIconSize, cardLabelSize: (o.cardLabelSize as number) ?? DEFAULT_THEME.cardLabelSize, cardValueSize: (o.cardValueSize as number) ?? DEFAULT_THEME.cardValueSize, cardAlign: (o.cardAlign as CardAlign) ?? DEFAULT_THEME.cardAlign, anim: { ...DEFAULT_THEME.anim, ...(o.anim ?? {}) }, statusColors: (o.statusColors as StatusColorMap) ?? {} };
+  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent, kanban: { ...DEFAULT_THEME.kanban, ...(o.kanban ?? {}) }, cardIconSize: (o.cardIconSize as number) ?? DEFAULT_THEME.cardIconSize, cardLabelSize: (o.cardLabelSize as number) ?? DEFAULT_THEME.cardLabelSize, cardValueSize: (o.cardValueSize as number) ?? DEFAULT_THEME.cardValueSize, cardAlign: (o.cardAlign as CardAlign) ?? DEFAULT_THEME.cardAlign, anim: { ...DEFAULT_THEME.anim, ...(o.anim ?? {}) }, statusColors: (o.statusColors as StatusColorMap) ?? {}, fontFamily: (o.fontFamily as string) ?? DEFAULT_THEME.fontFamily, fontScale: (o.fontScale as FontScale) ?? DEFAULT_THEME.fontScale, density: (o.density as Density) ?? DEFAULT_THEME.density, cardValueColor: (o.cardValueColor as string | null) ?? null, cardLabelColor: (o.cardLabelColor as string | null) ?? null, pet: { ...DEFAULT_THEME.pet!, ...(o.pet ?? {}) } };
 }
 
 // สไตล์พื้นหลัง Hero ตามธีม
@@ -183,6 +218,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
   const setShow = (p: Partial<SectionsTheme>) => onChange({ ...theme, show: { ...theme.show, ...p } });
   const setKanban = (p: Partial<KanbanTheme>) => onChange({ ...theme, kanban: { ...theme.kanban, ...p } });
   const setAnim = (p: Partial<AnimTheme>) => onChange({ ...theme, anim: { ...theme.anim, ...p } });
+  const setPet = (p: Partial<PetConfig>) => onChange({ ...theme, pet: { ...(theme.pet ?? DEFAULT_THEME.pet!), ...p } });
   const setStatusColor = (key: string, c: { c1: string; c2?: string | null } | null) => {
     const next = { ...(theme.statusColors ?? {}) }; if (c) next[key] = c; else delete next[key];
     onChange({ ...theme, statusColors: next });
@@ -387,6 +423,53 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
         </div>
       </section>
 
+      {/* ===== ฟอนต์ & ความหนาแน่น ===== */}
+      <section className="mb-5">
+        <div className="text-sm font-semibold text-slate-700 mb-2">{t("ฟอนต์ & ความหนาแน่น", "Font & density")}</div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <label className="flex items-center gap-2 text-xs text-slate-600">{t("ฟอนต์", "Font")}
+            <select value={theme.fontFamily ?? "default"} onChange={(e) => onChange({ ...theme, fontFamily: e.target.value })}
+              className="h-8 px-2 text-sm border border-slate-200 rounded bg-white" style={{ fontFamily: fontStack(theme.fontFamily) || undefined }}>
+              {OV_FONTS.map((f) => <option key={f.key} value={f.key}>{f.label()}</option>)}
+            </select>
+          </label>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{t("ขนาดตัวอักษร", "Text size")}</span>
+            {(["sm", "md", "lg", "xl"] as const).map((s) => (
+              <button key={s} onClick={() => onChange({ ...theme, fontScale: s })} className={`h-7 w-9 text-xs rounded border ${(theme.fontScale ?? "md") === s ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{s.toUpperCase()}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{t("ความหนาแน่น", "Density")}</span>
+            {([["compact", t("แน่น", "Compact")], ["normal", t("ปกติ", "Normal")], ["spacious", t("โปร่ง", "Spacious")]] as const).map(([d, lbl]) => (
+              <button key={d} onClick={() => onChange({ ...theme, density: d })} className={`h-7 px-2.5 text-xs rounded border ${(theme.density ?? "normal") === d ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{lbl}</button>
+            ))}
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-400 mt-1.5">{t("ฟอนต์/ขนาด มีผลทั้งหน้าภาพรวม · ความหนาแน่น = ระยะห่างการ์ดและช่องไฟ", "Font/size apply to the whole overview · density = card spacing")}</p>
+      </section>
+
+      {/* ===== PET แจ้งเตือน ===== */}
+      <section className="mb-5">
+        <div className="text-sm font-semibold text-slate-700 mb-1">{t("PET แจ้งเตือน (ตัวการ์ตูนมุมแถบทักทาย)", "Pet alerts (mascot on the banner)")}</div>
+        <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+          <input type="checkbox" checked={!!theme.pet?.notify} onChange={(e) => setPet({ notify: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
+          {t("เปิดให้ PET เด้งเตือน + พูดสรุปงาน + ป้ายตัวเลข", "Let the pet alert, speak, and show a count badge")}
+        </label>
+        {theme.pet?.notify && (
+          <>
+            <div className="flex flex-wrap gap-3 mt-2 pl-1">
+              {([["overdue", t("งานเกินกำหนด", "Overdue")], ["dueToday", t("ครบกำหนดวันนี้", "Due today")], ["review", t("งานรอตรวจ/อนุมัติ", "In review")], ["newTasks", t("งานใหม่ที่เพิ่งมอบให้ฉัน", "New tasks for me")]] as const).map(([k, lbl]) => (
+                <label key={k} className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                  <input type="checkbox" checked={!!theme.pet?.[k]} onChange={(e) => setPet({ [k]: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{lbl}
+                </label>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5">{t("ไม่ได้อัปโหลด GIF ก็มี PET เริ่มต้น (🐥) ให้ · อัปโหลดรูป/GIF เองได้ที่ส่วน “แถบทักทาย” ด้านบน · คลิก PET เพื่อดู/ปิดการแจ้งเตือน", "No GIF? a default pet (🐥) is used · upload your own in the banner section above · click the pet to toggle alerts")}</p>
+          </>
+        )}
+      </section>
+
       {/* ===== สีสถานะ (ของฉัน) ===== */}
       <section className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-1">{t("สีสถานะงาน (ของฉัน · ไล่สีได้)", "Status colors (yours · gradient)")}</div>
@@ -434,6 +517,17 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             {([["left", t("ซ้าย", "Left")], ["center", t("กลาง", "Center")], ["right", t("ขวา", "Right")]] as const).map(([a, lbl]) => (
               <button key={a} onClick={() => onChange({ ...theme, cardAlign: a })} className={`h-7 px-2.5 text-xs rounded border ${(theme.cardAlign ?? "left") === a ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{lbl}</button>
             ))}
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-1.5 text-xs text-slate-500">{t("สีตัวเลข", "Number color")}
+              <input type="color" value={theme.cardValueColor ?? "#0f172a"} onChange={(e) => onChange({ ...theme, cardValueColor: e.target.value })} className="w-8 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+              {theme.cardValueColor && <button onClick={() => onChange({ ...theme, cardValueColor: null })} className="text-[11px] text-slate-300 hover:text-red-500" title={t("ตามชุดสีการ์ด", "Follow card color")}>✕</button>}
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-slate-500">{t("สีหัวข้อ", "Label color")}
+              <input type="color" value={theme.cardLabelColor ?? "#334155"} onChange={(e) => onChange({ ...theme, cardLabelColor: e.target.value })} className="w-8 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+              {theme.cardLabelColor && <button onClick={() => onChange({ ...theme, cardLabelColor: null })} className="text-[11px] text-slate-300 hover:text-red-500" title={t("ตามชุดสีการ์ด", "Follow card color")}>✕</button>}
+            </label>
+            <span className="text-[11px] text-slate-400">{t("(เว้น = สีตามชุดสีการ์ด)", "(blank = follow card color)")}</span>
           </div>
           <span className="text-[11px] text-slate-400 w-full">{t("💡 รูปเต็มแนะนำ ~400×400 · ไอคอน ~64×64", "💡 Full image ~400×400 · icon ~64×64")}</span>
         </div>

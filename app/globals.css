@@ -44,6 +44,16 @@ body {
 @keyframes ovGradient { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
 .ov-anim-gradient { background-size: 200% 200%; animation: ovGradient 8s ease infinite; }
 
+/* ---- PET แจ้งเตือน ---- */
+@keyframes ovPetFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes ovPetAlert { 0%,100% { transform: translateY(0) rotate(0); } 15% { transform: translateY(-7px) rotate(-7deg); } 30% { transform: translateY(0) rotate(7deg); } 45% { transform: translateY(-4px) rotate(-4deg); } 60% { transform: translateY(0) rotate(0); } }
+.ov-pet-float { animation: ovPetFloat 3s ease-in-out infinite; }
+.ov-pet-alert { animation: ovPetAlert 1.1s ease-in-out infinite; }
+@keyframes ovBubblePop { from { opacity: 0; transform: translateY(6px) scale(.92); } to { opacity: 1; transform: none; } }
+.ov-bubble-pop { animation: ovBubblePop .25s cubic-bezier(.22,1,.36,1) both; }
+@keyframes ovBadgePulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+.ov-badge-pulse { animation: ovBadgePulse 1.4s ease-in-out infinite; }
+
 /* ---- Focus ring มาตรฐาน ---- */
 :focus-visible {
   outline: 2px solid #3b82f6;
