@@ -316,27 +316,39 @@ export default function PayrollReviewPage() {
       {loading ? (
         <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด...</div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <div className="max-h-[70vh] overflow-auto rounded-xl border border-slate-200">
           <table className="text-sm" style={{ tableLayout: "fixed", width: colW.reduce((a, b) => a + b, 0) }}>
             <colgroup>{COLS.map((c, i) => <col key={c.key} style={{ width: `${colW[i]}px` }} />)}</colgroup>
-            <thead className="bg-slate-50 text-slate-500 text-xs">
+            <thead className="sticky top-0 z-20 bg-slate-50 text-slate-500 text-xs">
               <tr>
-                {COLS.map((c, i) => (
-                  <th key={c.key} title={c.title} className={`relative px-3 py-2 ${cls(c.align)}`}>
-                    <span className="truncate">{c.label}</span>
-                    {i < COLS.length - 1 && (
-                      <span onMouseDown={(e) => startResize(e, i)} title="ลากปรับความกว้าง"
-                        className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none hover:bg-blue-300" />
-                    )}
-                  </th>
-                ))}
+                {COLS.map((c, i) => {
+                  const frozen = i === 0 || i === 1;   // freeze รหัส + พนักงาน (ค้างซ้าย)
+                  const stickyCls = i === 0 ? "sticky left-0 z-30" : i === 1 ? "sticky z-30" : "";
+                  return (
+                    <th key={c.key} title={c.title} style={i === 1 ? { left: colW[0] } : undefined}
+                      className={`relative px-3 py-2 bg-slate-50 ${stickyCls} ${cls(c.align)} ${frozen ? "border-r border-slate-200" : ""}`}>
+                      <span className="truncate">{c.label}</span>
+                      {i < COLS.length - 1 && (
+                        <span onMouseDown={(e) => startResize(e, i)} title="ลากปรับความกว้าง"
+                          className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none hover:bg-blue-300" />
+                      )}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
               {shown.map((l) => (
-                <tr key={l.id} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-3 py-2 font-mono text-xs truncate">{l.employee_code}</td>
-                  <td className="px-3 py-2 truncate" title={l.employee_name}>{l.employee_name}</td>
+                <tr key={l.id} className="group border-t border-slate-100 hover:bg-slate-50">
+                  <td className="sticky left-0 z-10 border-r border-slate-100 bg-white px-3 py-2 font-mono text-xs truncate group-hover:bg-slate-50">{l.employee_code}</td>
+                  <td className="sticky z-10 border-r border-slate-100 bg-white px-3 py-1.5 group-hover:bg-slate-50" style={{ left: colW[0] }} title={l.employee_name}>
+                    {(() => {
+                      const m = l.employee_name.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+                      const name = m ? m[1] : l.employee_name;
+                      const nick = m ? m[2] : "";
+                      return <><div className="truncate">{name}</div>{nick && <div className="truncate text-xs text-slate-400">({nick})</div>}</>;
+                    })()}
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums">{baht(l.base_salary)}</td>
                   <td className="px-3 py-2 text-right text-xs tabular-nums text-slate-600" title="เวลาทำงานที่จ่ายจริง = วันทำงานฐาน − ขาด/ลา/สาย (เท่าหน้าข้อมูลคำนวณ)">
                     {l.paid_minutes != null ? paidDuration(l.paid_minutes) : (l.attendance_days ? `${l.attendance_days} วัน` : "—")}
