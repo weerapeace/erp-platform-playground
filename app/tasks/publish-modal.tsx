@@ -254,7 +254,7 @@ function FieldPickerModal({ selected, onClose, onSaved, pushToast }: { selected:
         {regs.map((f) => (
           <label key={f.column_name} className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
             <input type="checkbox" checked={picked.includes(f.column_name!)} onChange={() => toggle(f.column_name!)} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
-            <span className="truncate">{f.field_label || f.column_name}</span>
+            <span className="truncate">{tr(f.field_label || f.column_name || "", f.field_label_en || f.field_label || f.column_name || "")}</span>
           </label>
         ))}
       </div>
@@ -294,7 +294,7 @@ function ParentDetailPanel({ parentId, code, selectedCols, skuImagesBy = {}, onO
           if (v == null || typeof v === "object") continue;
           let s = String(v); if (!s.trim()) continue;
           if (f.ui_field_type === "richtext" || f.ui_field_type === "html") s = s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-          if (s) byCol.set(col, { label: f.field_label || col, value: s });
+          if (s) byCol.set(col, { label: tr(f.field_label || col, f.field_label_en || f.field_label || col), value: s });
         }
         // เลือกฟิลด์ที่ตั้งไว้ (ตามลำดับที่เลือก) ไม่งั้นโชว์ทุกฟิลด์ที่มีค่า
         const out = selectedCols.length ? selectedCols.map((c) => byCol.get(c)).filter(Boolean) as { label: string; value: string }[] : [...byCol.values()];

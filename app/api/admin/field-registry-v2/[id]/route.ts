@@ -11,7 +11,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const ALLOWED_FIELDS = [
-  "field_label", "group_key", "ui_field_type",
+  "field_label", "field_label_en", "group_key", "ui_field_type",
   "is_visible", "is_required", "is_editable", "is_filterable", "is_sortable", "is_pinned", "is_searchable",
   "is_sensitive", "sensitive_permission",
   // สิทธิ์ระดับฟิลด์ตาม role (ของกลาง) — ว่าง = ทุกคน

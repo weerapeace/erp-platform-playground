@@ -32,6 +32,7 @@ import { RelationMany2Many, RelationOne2Many, MasterDetailRelation } from "@/com
 import { ImportWizard } from "@/components/import-wizard";
 import { buildImportSchemaFromRegistry } from "@/lib/import";
 import { useToast } from "@/components/toast";
+import { tr } from "@/lib/lang";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
 import { formatAmount, currencyLabel } from "@/lib/money";
@@ -169,7 +170,7 @@ function registryToFieldDef(
   return {
     key,
     fieldId:     rf.id,            // F11B: registry id สำหรับ Studio save
-    label:       rf.field_label,
+    label:       tr(rf.field_label, rf.field_label_en || rf.field_label),
     type:        fieldType,
     required:    rf.is_required,
     options:     opts,

@@ -98,6 +98,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 //   body: { updates: { id: string, patch: Record<string, unknown> }[] }
 const ALLOWED_ROW_FIELDS = [
   ...ALLOWED_BULK_FIELDS,
+  "field_label", "field_label_en",
   "display_order", "form_column_span", "help_text", "placeholder", "default_value", "ui_style", "width",
   // ค่าตั้งของฟิลด์ (เช่น select choices, สกุลเงิน currency/currency_field)
   "options",

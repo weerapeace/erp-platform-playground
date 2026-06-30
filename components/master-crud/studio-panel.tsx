@@ -49,6 +49,7 @@ export type StudioField = {
   fieldId?:    string;
   key:         string;
   label:       string;
+  labelEn?:    string;   // ชื่อฟิลด์ภาษาอังกฤษ (2 ภาษา)
   groupKey:    string;
   order:       number;
   type:        string;
@@ -442,7 +443,7 @@ export function StudioPanel({
     const j = await apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then((r) => r.json()).catch(() => ({}));
     const regs = (j.fields ?? []) as Record<string, unknown>[];
     const mapReg = (r: Record<string, unknown>): StudioField => ({
-      fieldId: String(r.id), key: String(r.field_key), label: String(r.field_label ?? r.field_key), groupKey: String(r.group_key ?? "other"),
+      fieldId: String(r.id), key: String(r.field_key), label: String(r.field_label ?? r.field_key), labelEn: (r.field_label_en as string) ?? "", groupKey: String(r.group_key ?? "other"),
       order: Number(r.display_order ?? 999), type: String(r.ui_field_type ?? "text"), isVisible: !!r.is_visible, showInForm: !!r.show_in_form,
       inlineEditable: !!r.is_inline_editable, bulkEditable: !!r.is_bulk_editable, formSpan: Number(r.form_column_span ?? 1),
       helpText: (r.help_text as string) ?? "", placeholder: (r.placeholder as string) ?? "", required: !!r.is_required,
@@ -506,6 +507,8 @@ export function StudioPanel({
         id: i.fieldId!,
         patch: {
           display_order:      (idx + 1) * 10,
+          field_label:        i.label,
+          field_label_en:     i.labelEn || null,
           group_key:          i.groupKey,
           is_visible:         !!i.isVisible,
           show_in_form:       !!i.showInForm,
@@ -1081,6 +1084,12 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
   const selStyle = "h-7 px-1.5 border border-slate-200 rounded bg-white text-slate-600";
   return (
     <div className="p-3 space-y-2 text-xs">
+      <FSGroup title="ชื่อฟิลด์ (2 ภาษา)">
+        <div className="grid grid-cols-2 gap-1.5">
+          <input value={field.label} onChange={(e)=>onPatch({label:e.target.value})} placeholder="ชื่อไทย" className="h-8 px-2 border border-slate-200 rounded" />
+          <input value={field.labelEn ?? ""} onChange={(e)=>onPatch({labelEn:e.target.value})} placeholder="English (เว้นว่าง=ใช้ไทย)" className="h-8 px-2 border border-slate-200 rounded text-slate-600" />
+        </div>
+      </FSGroup>
       <FSGroup title="เลย์เอาต์">
         <FSRow label="ความกว้าง">
           {([[3,"¼"],[4,"⅓"],[6,"ครึ่ง"],[8,"⅔"],[12,"เต็ม"]] as [number,string][]).map(([n,lbl])=>(
