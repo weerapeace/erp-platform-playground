@@ -41,6 +41,10 @@ export type BillingNoteDetail = Omit<BillingNoteListItem, "line_count" | "total_
   reject_reason: string | null;
   issued_at:     string | null;
   paid_at:       string | null;
+  // เติมจาก partners_v2 ตอนดึงรายละเอียด (ใช้แสดง/พิมพ์)
+  customer_address?: string | null;
+  customer_phone?:   string | null;
+  customer_tax_id?:  string | null;
   lines:         BillingNoteLine[];
 };
 

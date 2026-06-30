@@ -150,7 +150,7 @@ export default function BillingNotesPage() {
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash({ issue: "วางบิลแล้ว", pay: "รับชำระแล้ว", cancel: "ยกเลิกแล้ว" }[action] ?? "อัปเดตแล้ว");
+      flash({ issue: "วางบิลแล้ว", pay: "รับชำระแล้ว", cancel: "ยกเลิกแล้ว", revert: "ย้อนสถานะแล้ว" }[action] ?? "อัปเดตแล้ว");
       setDetailOpen(false);
       await fetchList();
     } catch (err) { flash(err instanceof Error ? err.message : "ผิดพลาด"); }
@@ -322,6 +322,10 @@ export default function BillingNotesPage() {
             {(detail.status === "draft" || detail.status === "issued") && (
               <button onClick={() => transition(detail.id, "cancel")} disabled={wfLoading} className="h-9 px-4 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50">⊘ ยกเลิก</button>
             )}
+            {(detail.status === "issued" || detail.status === "paid" || detail.status === "cancelled") && (
+              <button onClick={() => { if (confirm("ย้อนสถานะกลับหนึ่งขั้น?")) transition(detail.id, "revert"); }} disabled={wfLoading}
+                className="h-9 px-4 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 disabled:opacity-50">↩ ย้อนสถานะ</button>
+            )}
           </>
         ) : null}>
         {detailLoading || !detail ? (
@@ -333,6 +337,8 @@ export default function BillingNotesPage() {
               <Info label="วันที่" value={formatDate(detail.bill_date)} />
               <Info label="กำหนดชำระ" value={formatDate(detail.due_date)} />
               <Info label="สถานะ" value={STATUS_LABEL[detail.status] ?? detail.status} />
+              <div className="md:col-span-3"><Info label="ที่อยู่" value={detail.customer_address || "—"} /></div>
+              <Info label="เลขประจำตัวผู้เสียภาษี" value={detail.customer_tax_id || "—"} />
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-slate-200">

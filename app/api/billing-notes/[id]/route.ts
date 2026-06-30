@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { formatThaiAddress } from "@/lib/thai-address";
 
 const firstText = (...values: unknown[]) => {
   for (const value of values) {
@@ -7,22 +8,6 @@ const firstText = (...values: unknown[]) => {
     if (text) return text;
   }
   return "";
-};
-
-const partnerAddress = (partner: Record<string, unknown>) => {
-  const direct = firstText(
-    partner.address, partner.address_th, partner.billing_address, partner.shipping_address, partner.full_address,
-  );
-  if (direct) return direct;
-  return [
-    firstText(partner.street, partner.address_line1),
-    firstText(partner.street2, partner.address_line2),
-    firstText(partner.subdistrict, partner.tambon),
-    firstText(partner.district, partner.amphoe),
-    firstText(partner.province),
-    firstText(partner.postal_code, partner.zip),
-    firstText(partner.country),
-  ].filter(Boolean).join(" ");
 };
 
 // เติมที่อยู่/เลขภาษีลูกค้าจาก partners_v2 (ใช้ตอนพิมพ์ใบวางบิล)
@@ -39,7 +24,7 @@ async function enrichCustomer(request: NextRequest, doc: unknown) {
     ...detail,
     customer_name:    firstText(detail.customer_name, row.name_th, row.name_en, row.display_name, row.code),
     customer_code:    firstText(detail.customer_code, row.code),
-    customer_address: firstText(detail.customer_address, partnerAddress(row)),
+    customer_address: firstText(detail.customer_address, formatThaiAddress(row)),
     customer_phone:   firstText(detail.customer_phone, row.phone, row.mobile, row.tel, row.contact_phone),
     customer_tax_id:  firstText(detail.customer_tax_id, row.tax_id, row.tax_no, row.vat_id),
   };
