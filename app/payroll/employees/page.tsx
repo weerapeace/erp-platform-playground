@@ -153,15 +153,15 @@ const CONFIG: MasterCRUDConfig = {
   activeField: "active",
   // ปุ่มดาวน์โหลด/พิมพ์ "ใบกรอกประวัติพนักงาน" (ฟอร์มเปล่า 3 ภาษา ไทย/อังกฤษ/พม่า)
   headerActions: () => (
-    <a
-      href="/print/employee-form"
-      target="_blank"
-      rel="noopener noreferrer"
+    // เปิดด้วย window.open (สคริปต์) เพื่อให้ปุ่ม "ปิด" ในหน้าพิมพ์ปิดแท็บได้จริง
+    <button
+      type="button"
+      onClick={() => window.open("/print/employee-form", "_blank")}
       title="ดาวน์โหลด/พิมพ์ ใบกรอกประวัติพนักงาน (ไทย/English/พม่า)"
       className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap"
     >
       📄 ฟอร์มกรอกประวัติ
-    </a>
+    </button>
   ),
   exportEntityType: "payroll_employee",
   searchKeys:  ["employee_code", "first_name", "last_name", "nickname", "full_name", "phone", "scanner_employee_code"],

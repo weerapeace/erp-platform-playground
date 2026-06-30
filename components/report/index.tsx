@@ -160,14 +160,24 @@ export function printReportHtmlInNewWindow(html: string) {
   }
 }
 
+// ปุ่ม "ปิด" ของหน้าพิมพ์ (ของกลาง): หน้าพิมพ์มักเปิดในแท็บใหม่ → พยายามปิดแท็บก่อน
+// ถ้าปิดไม่ได้ (เบราว์เซอร์บล็อกเพราะไม่ได้เปิดด้วยสคริปต์ window.open) → fallback กลับหน้าเดิม
+function closeOrBack(onBack?: () => void) {
+  try { window.close(); } catch { /* ignore */ }
+  window.setTimeout(() => {
+    if (typeof window !== "undefined" && !window.closed) {
+      if (onBack) onBack();
+      else if (window.history.length > 1) window.history.back();
+    }
+  }, 150);
+}
+
 export function PrintToolbar({ onBack, onPrint }: { onBack?: () => void; onPrint?: () => void }) {
   return (
     <div className="no-print sticky top-0 z-10 bg-slate-100 border-b border-slate-200 px-6 py-3 flex items-center gap-3">
-      {onBack && (
-        <button onClick={onBack} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 bg-white rounded-lg hover:bg-slate-50">
-          ← กลับ
-        </button>
-      )}
+      <button onClick={() => closeOrBack(onBack)} title="ปิดหน้านี้" className="h-9 px-4 text-sm text-slate-600 border border-slate-200 bg-white rounded-lg hover:bg-slate-50">
+        ✕ ปิด
+      </button>
       <div className="flex-1" />
       <button onClick={onPrint ?? printReportFrameOrWindow}
         className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-2">
