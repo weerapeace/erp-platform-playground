@@ -24,13 +24,23 @@ export async function GET(req: NextRequest) {
   const employeeId = req.nextUrl.searchParams.get("employee_id");
   if (!periodId) return NextResponse.json({ error: "ต้องระบุ period_id" }, { status: 400 });
   try {
-    let q = supabaseAdmin().from("payroll_adjustments")
-      .select("id, employee_id, adjustment_type, item_name, amount, taxable, status, source_type, item_code, created_at")
+    const admin = supabaseAdmin();
+    let q = admin.from("payroll_adjustments")
+      .select("id, employee_id, adjustment_type, item_name, amount, taxable, status, source_type, item_code, created_at, created_by")
       .eq("payroll_period_id", periodId).eq("status", "approved").order("created_at", { ascending: true });
     if (employeeId) q = q.eq("employee_id", employeeId);
     const { data, error } = await q;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ data: data ?? [], error: null });
+    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    // ใครเป็นคนคีย์ (created_by → user_profiles.display_name)
+    const uids = [...new Set(rows.map((r) => String(r.created_by ?? "")).filter(Boolean))];
+    const nameBy: Record<string, string> = {};
+    if (uids.length) {
+      const { data: ups } = await admin.from("user_profiles").select("id, display_name, username, email").in("id", uids);
+      (ups ?? []).forEach((u) => { const r = u as Record<string, unknown>; nameBy[String(r.id)] = String(r.display_name || r.username || r.email || ""); });
+    }
+    const out = rows.map((r) => ({ ...r, created_by_name: nameBy[String(r.created_by ?? "")] ?? "" }));
+    return NextResponse.json({ data: out, error: null });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "โหลดไม่ได้" }, { status: 500 });
   }

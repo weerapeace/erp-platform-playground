@@ -71,7 +71,7 @@ function sortSummaryRows(list: Row[], sort: { key: string; dir: "asc" | "desc" }
     return String(va).localeCompare(String(vb), "th", { numeric: true }) * dir;
   });
 }
-type Adj = { id: string; employee_id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null };
+type Adj = { id: string; employee_id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null; created_by_name?: string | null };
 type RecurringItem = {
   id: string; employee_id: string; item_name: string; item_type: string; applied_amount: number;
   amount_per_period?: number; duration_type?: string | null; target_total_amount?: number | null;
@@ -1385,7 +1385,7 @@ function totalRecurring(items: RecurringItem[], type: "earning" | "deduction") {
 
 function adjustmentTooltip(title: string, items: Adj[], sign: "+" | "-" = "+") {
   if (items.length === 0) return `${title}: ยังไม่มีรายการ`;
-  const lines = items.map((item) => `${sign} ${item.item_name}: ${baht(Number(item.amount || 0))}`);
+  const lines = items.map((item) => `${sign} ${item.item_name}: ${baht(Number(item.amount || 0))}${item.created_by_name ? ` · คีย์โดย ${item.created_by_name}` : ""}`);
   return [title, ...lines].join("\n");
 }
 
