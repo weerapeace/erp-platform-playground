@@ -127,9 +127,10 @@ export default function TasksPage() {
   }, []);
 
   // โหลดข้อมูลแบบ stale-while-revalidate (ของกลาง) — กลับเข้าหน้านี้ใหม่ = โชว์ทันที แล้วอัปเดตเงียบ
-  const tasksSWR = useSWRLite("creative:tasks:all", () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }));
-  const mineSWR = useSWRLite("creative:tasks:mine", () => listTasks({ mine: true }));
-  const subsSWR = useSWRLite("creative:my-subtasks", () => listMySubtasks());
+  // poll ทุก 20 วิ (เฉพาะตอนเปิดแท็บ) → งานที่คนอื่น/เครื่องอื่นแก้ อัปเดตเองไม่ต้อง refresh
+  const tasksSWR = useSWRLite("creative:tasks:all", () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }), { refreshMs: 20000 });
+  const mineSWR = useSWRLite("creative:tasks:mine", () => listTasks({ mine: true }), { refreshMs: 20000 });
+  const subsSWR = useSWRLite("creative:my-subtasks", () => listMySubtasks(), { refreshMs: 20000 });
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
   const tasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);

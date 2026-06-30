@@ -41,11 +41,12 @@ export function invalidateSWR(prefix?: string): void {
 export function useSWRLite<T>(
   key: string | null,
   fetcher: () => Promise<T>,
-  opts: { dedupeMs?: number; revalidateOnFocus?: boolean; focusStaleMs?: number } = {},
+  opts: { dedupeMs?: number; revalidateOnFocus?: boolean; focusStaleMs?: number; refreshMs?: number } = {},
 ): { data: T | undefined; loading: boolean; error: Error | null; revalidate: (force?: boolean) => Promise<void>; mutate: (d: T) => void } {
   const dedupeMs = opts.dedupeMs ?? 2000;
   const revalidateOnFocus = opts.revalidateOnFocus ?? true;
   const focusStaleMs = opts.focusStaleMs ?? 30000; // สลับแท็บ → refetch เฉพาะข้อมูลที่เก่ากว่านี้ (ลดยิงซ้ำ/ประหยัด)
+  const refreshMs = opts.refreshMs ?? 0; // โหลดใหม่อัตโนมัติเป็นรอบ (เฉพาะตอนแท็บเปิดอยู่) — 0 = ปิด
   const fetcherRef = useRef(fetcher); fetcherRef.current = fetcher;
   const [, force] = useState(0);
   const has = !!key && cache.has(key);
@@ -90,6 +91,13 @@ export function useSWRLite<T>(
     document.addEventListener("visibilitychange", fn);
     return () => { window.removeEventListener("focus", fn); document.removeEventListener("visibilitychange", fn); };
   }, [revalidate, revalidateOnFocus, key, focusStaleMs]);
+
+  // โหลดใหม่อัตโนมัติเป็นรอบ (poll) — เฉพาะตอนแท็บมองเห็นอยู่ (ประหยัด/ไม่ยิงตอนซ่อน)
+  useEffect(() => {
+    if (!refreshMs || !key) return;
+    const id = setInterval(() => { if (document.visibilityState === "visible") void revalidate(true); }, refreshMs);
+    return () => clearInterval(id);
+  }, [refreshMs, key, revalidate]);
 
   const data = key ? (cache.get(key) as Entry<T> | undefined)?.data : undefined;
   return { data, loading: loading && data === undefined, error, revalidate, mutate: (d: T) => key && mutateSWR(key, d) };
