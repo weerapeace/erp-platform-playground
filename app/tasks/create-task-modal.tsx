@@ -14,6 +14,7 @@ import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "
 import { UserPicker, SkuPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue, SkuPickerValue, ParentSkuPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "./multi-user-picker";
+import { TeamFill } from "./team-picker";
 import { ImageInput } from "@/components/image-input";
 import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
@@ -332,6 +333,7 @@ function SubRowEditor({ row, onChange, onRemove }: { row: SubRow; onChange: (p: 
           </div>
           <div className="flex items-center gap-2">
             <div className="w-56"><UserPicker value={adding} onChange={addAssignee} disableCreate /></div>
+            <TeamFill onPick={(members) => { const fresh = members.filter((m) => !row.assignees.some((a) => a.id === m.id)).map((m) => ({ id: m.id, label: m.name })); if (fresh.length) onChange({ assignees: [...row.assignees, ...fresh] }); }} />
             <label className="flex items-center gap-1 text-[11px] text-slate-500"><input type="checkbox" checked={row.required_before_next} onChange={(e) => onChange({ required_before_next: e.target.checked })} />{t("ต้องเสร็จก่อนขั้นถัดไป","Must complete before next step")}</label>
           </div>
         </div>

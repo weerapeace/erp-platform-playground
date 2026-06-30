@@ -17,6 +17,7 @@ import { apiFetch } from "@/lib/api";
 import { cachedJson } from "@/lib/client-cache";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
+import { TeamFill } from "./team-picker";
 import { tr } from "@/lib/lang";
 import type { UserPickerValue } from "@/components/pickers";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
@@ -121,7 +122,10 @@ export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: st
         <div className="flex flex-wrap gap-1.5 mb-1.5">
           {assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button onClick={() => setAssignees((xs) => xs.filter((x) => x.id !== a.id))} className="text-slate-400 hover:text-red-500">✕</button></span>)}
         </div>
-        <UserPicker value={adding} onChange={(v) => { if (v && !assignees.some((a) => a.id === v.id)) setAssignees((xs) => [...xs, { id: v.id, label: v.name }]); setAdding(null); }} disableCreate />
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 min-w-0"><UserPicker value={adding} onChange={(v) => { if (v && !assignees.some((a) => a.id === v.id)) setAssignees((xs) => [...xs, { id: v.id, label: v.name }]); setAdding(null); }} disableCreate /></div>
+          <TeamFill onPick={(members) => setAssignees((xs) => { const fresh = members.filter((m) => !xs.some((a) => a.id === m.id)).map((m) => ({ id: m.id, label: m.name })); return fresh.length ? [...xs, ...fresh] : xs; })} />
+        </div>
       </div>
       <div className="flex justify-end gap-2">
         <button onClick={() => setOpen(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
@@ -336,7 +340,10 @@ function EditSubtaskModal({ sub, taskId, reload, pushToast, canManageAssignees, 
             {assignees.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
           </div>
           {canManageAssignees
-            ? <UserPicker value={adding} onChange={(v) => { if (v && !assignees.some((a) => a.id === v.id)) setAssignees((xs) => [...xs, { id: v.id, label: v.name, color: null, avatar_url: null }]); setAdding(null); }} disableCreate />
+            ? <div className="flex items-center gap-1.5">
+                <div className="flex-1 min-w-0"><UserPicker value={adding} onChange={(v) => { if (v && !assignees.some((a) => a.id === v.id)) setAssignees((xs) => [...xs, { id: v.id, label: v.name, color: null, avatar_url: null }]); setAdding(null); }} disableCreate /></div>
+                <TeamFill onPick={(members) => setAssignees((xs) => { const fresh = members.filter((m) => !xs.some((a) => a.id === m.id)).map((m) => ({ id: m.id, label: m.name, color: null, avatar_url: null })); return fresh.length ? [...xs, ...fresh] : xs; })} />
+              </div>
             : <p className="text-[11px] text-slate-400 italic">{t("เฉพาะหัวหน้า/ผู้สร้างงานเปลี่ยนผู้รับผิดชอบได้", "Only managers or task creators can change assignees")}</p>}
         </div>
         <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" disabled={!canManageAssignees} checked={required} onChange={(e) => setRequired(e.target.checked)} />{t("ต้องเสร็จก่อนขั้นถัดไป", "Must complete before next step")}</label>

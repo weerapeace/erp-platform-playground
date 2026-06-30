@@ -16,14 +16,16 @@ import { STATUS_COLOR_OPTIONS, statusColor } from "@/lib/creative-status-colors"
 import { ColorInput } from "@/components/color-picker";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { loadMySubView, saveMySubView, DEFAULT_MYSUB_VIEW, type MySubView } from "../my-subtasks-view";
-import { getParentSkuFieldOptions, getSubmitRequiredFields, saveSubmitRequiredFields } from "../data";
+import { getParentSkuFieldOptions, getSubmitRequiredFields, saveSubmitRequiredFields, listTeams, createTeam, updateTeam, deleteTeam, type Team } from "../data";
+import { MultiUserPicker } from "../multi-user-picker";
+import type { UserPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
 type MatrixRow = { role_key: string; permission_key: string };
-type Tab = "perm" | "task_type" | "platform" | "status" | "transition" | "mysub" | "submit";
+type Tab = "perm" | "task_type" | "platform" | "status" | "transition" | "team" | "mysub" | "submit";
 
 export default function TaskSettingsPage() {
   const t = useT();
@@ -50,6 +52,7 @@ export default function TaskSettingsPage() {
             <TabBtn active={tab === "platform"} onClick={() => setTab("platform")}>📱 {t("แพลตฟอร์ม", "Platforms")}</TabBtn>
             <TabBtn active={tab === "status"} onClick={() => setTab("status")}>🚦 {t("สถานะ", "Status")}</TabBtn>
             <TabBtn active={tab === "transition"} onClick={() => setTab("transition")}>🔀 {t("เส้นทาง", "Transitions")}</TabBtn>
+            <TabBtn active={tab === "team"} onClick={() => setTab("team")}>👥 {t("ทีม", "Teams")}</TabBtn>
             <TabBtn active={tab === "mysub"} onClick={() => setTab("mysub")}>🧩 {t("งานย่อยของฉัน", "My subtasks")}</TabBtn>
             <TabBtn active={tab === "submit"} onClick={() => setTab("submit")}>📤 {t("ส่งงาน", "Submit")}</TabBtn>
           </div>
@@ -65,6 +68,7 @@ export default function TaskSettingsPage() {
         ) : tab === "perm" ? <PermissionMatrix showToast={showToast} />
           : tab === "status" ? <StatusManager showToast={showToast} />
           : tab === "transition" ? <TransitionManager showToast={showToast} />
+          : tab === "team" ? <TeamManager showToast={showToast} />
           : tab === "mysub" ? <MySubViewManager showToast={showToast} />
           : tab === "submit" ? <SubmitRequiredManager showToast={showToast} />
           : <OptionsManager kind={tab} title={tab === "task_type" ? t("ประเภทงาน", "Task Types") : t("แพลตฟอร์ม", "Platforms")} showToast={showToast} />}
@@ -449,6 +453,53 @@ function SubmitRequiredManager({ showToast }: { showToast: (m: string) => void }
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// แท็บจัดการทีม (Creative teams) — ตั้งชื่อ + สมาชิก → ใช้เลือกผู้รับผิดชอบเป็นทีม
+// ============================================================
+function TeamManager({ showToast }: { showToast: (m: string) => void }) {
+  const t = useT();
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newName, setNewName] = useState("");
+  const load = useCallback(async () => { setLoading(true); try { setTeams(await listTeams()); } catch (e) { showToast((e as Error).message); } finally { setLoading(false); } }, [showToast]);
+  useEffect(() => { load(); }, [load]);
+  const add = async () => { if (!newName.trim()) return; try { await createTeam({ name: newName.trim() }); setNewName(""); await load(); showToast(t("เพิ่มทีมแล้ว", "Team added")); } catch (e) { showToast((e as Error).message); } };
+  const rename = async (tm: Team, name: string) => { if (!name.trim() || name === tm.name) return; try { await updateTeam(tm.id, { name: name.trim() }); setTeams((p) => p.map((x) => x.id === tm.id ? { ...x, name: name.trim() } : x)); } catch (e) { showToast((e as Error).message); } };
+  const setMembers = async (tm: Team, members: UserPickerValue[]) => {
+    const member_ids = members.map((m) => m.id);
+    setTeams((p) => p.map((x) => x.id === tm.id ? { ...x, member_ids, members: members.map((m) => ({ id: m.id, name: m.name })) } : x));
+    try { await updateTeam(tm.id, { member_ids }); } catch (e) { showToast((e as Error).message); }
+  };
+  const remove = async (tm: Team) => { if (!window.confirm(`${t("ลบทีม", "Delete team")} "${tm.name}" ?`)) return; try { await deleteTeam(tm.id); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
+      <div className="px-5 py-4 border-b border-slate-100">
+        <h2 className="font-semibold text-slate-800">{t("ทีม", "Teams")}</h2>
+        <p className="text-xs text-slate-400 mt-0.5">{t("สร้างทีม + ใส่สมาชิก → เวลาเลือกผู้รับผิดชอบ เลือก \"ทีม\" แล้วดึงสมาชิกมาใส่ได้เลย (แก้เพิ่ม/ลบรายคนต่อได้)", "Create teams + members → when assigning, pick a team to fill its members (still editable)")}</p>
+      </div>
+      <div className="p-5 space-y-4">
+        <div className="flex gap-2">
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder={t("ชื่อทีมใหม่...", "New team name...")} className="flex-1 h-9 border border-slate-200 rounded-lg px-3 text-sm" />
+          <button onClick={add} className="h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("เพิ่มทีม", "Add team")}</button>
+        </div>
+        {loading ? <div className="py-10 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
+          : teams.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่มีทีม — เพิ่มทีมแรกด้านบน", "No teams yet — add one above")}</p>
+          : <div className="space-y-3">{teams.map((tm) => (
+            <div key={tm.id} className="border border-slate-200 rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-violet-500">👥</span>
+                <input defaultValue={tm.name} onBlur={(e) => rename(tm, e.target.value)} className="flex-1 text-sm font-medium bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
+                <span className="text-[11px] text-slate-400">{tm.members.length} {t("คน", "members")}</span>
+                <button onClick={() => remove(tm)} className="text-slate-300 hover:text-red-500 text-sm">✕</button>
+              </div>
+              <MultiUserPicker value={tm.members.map((m) => ({ id: m.id, name: m.name } as UserPickerValue))} onChange={(v) => setMembers(tm, v)} disableCreate />
+            </div>
+          ))}</div>}
+      </div>
     </div>
   );
 }

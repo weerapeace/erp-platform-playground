@@ -20,6 +20,7 @@ const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then
 import { ImageInput } from "@/components/image-input";
 import { ConfirmDialog } from "@/components/modal";
 import { PublishModal } from "./publish-modal";
+import { TeamFill } from "./team-picker";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, progressBg, dividerColorOf } from "./drawer-theme";
@@ -111,7 +112,10 @@ function MultiAssigneeField({ list, canEdit, onSave }: { list: SubtaskAssignee[]
             ))}
             {list.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
           </div>
-          <UserPicker value={adding} onChange={(v) => { if (v && !ids.includes(v.id)) onSave([...ids, v.id]); setAdding(null); }} disableCreate />
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0"><UserPicker value={adding} onChange={(v) => { if (v && !ids.includes(v.id)) onSave([...ids, v.id]); setAdding(null); }} disableCreate /></div>
+            <TeamFill onPick={(members) => { const fresh = members.map((m) => m.id).filter((mid) => !ids.includes(mid)); if (fresh.length) onSave([...ids, ...fresh]); }} />
+          </div>
           <button onClick={() => setEditing(false)} className="text-[11px] text-slate-500 hover:underline">{t("เสร็จ", "Done")}</button>
         </div>
       )}

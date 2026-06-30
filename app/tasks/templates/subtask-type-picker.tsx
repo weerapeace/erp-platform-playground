@@ -12,6 +12,7 @@ import { tr } from "@/lib/lang";
 import { ERPInput, ERPSelect } from "@/components/form";
 import { PromptEditor } from "@/components/prompt-editor";
 import { UserPicker, type UserPickerValue } from "@/components/pickers";
+import { TeamFill } from "../team-picker";
 import type { SubtaskType, SubtaskStepConfig } from "../data";
 
 export type EditStep = {
@@ -220,6 +221,7 @@ function StepCard({ step, index, onTitle, onReqBefore, onAssignees, onCfg, onRem
         <span className="text-[11px] text-slate-400">{t("ผู้รับผิดชอบ:", "Assignees:")}</span>
         {step.assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button type="button" onClick={() => onAssignees(step.assignees.filter((x) => x.id !== a.id))} className="text-slate-400 hover:text-red-500">✕</button></span>)}
         <div className="w-44"><UserPicker value={adding} onChange={(v) => { if (v && !ids.includes(v.id)) onAssignees([...step.assignees, { id: v.id, label: v.name }]); setAdding(null); }} disableCreate /></div>
+        <TeamFill onPick={(members) => { const fresh = members.filter((m) => !ids.includes(m.id)).map((m) => ({ id: m.id, label: m.name })); if (fresh.length) onAssignees([...step.assignees, ...fresh]); }} />
       </div>
     </div>
   );

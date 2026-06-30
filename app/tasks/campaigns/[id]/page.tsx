@@ -317,6 +317,7 @@ export default function CampaignCanvasPage() {
       <div className="bg-white border-b border-slate-200 px-8 py-4 sticky top-14 z-20">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3 min-w-0">
+            <a href="/tasks" title={t("กลับหน้าแรก (คลิกกลาง = เปิดแท็บใหม่)", "Home (middle-click = new tab)")} className="h-8 px-2.5 inline-flex items-center gap-1 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">🏠 <span className="hidden sm:inline">{t("หน้าแรก", "Home")}</span></a>
             <a href="/tasks/campaigns" className="text-sm text-slate-500 hover:text-slate-800">{t("แคมเปญ", "Campaigns")}</a>
             <span className="text-slate-300">›</span>
             <span className="font-semibold text-slate-900 truncate">{name}</span>

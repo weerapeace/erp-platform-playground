@@ -451,6 +451,23 @@ export async function savePublishConfig(config: PublishConfig): Promise<void> {
   await jsonOrThrow(await apiFetch("/api/creative-publish-config", { method: "PUT", body: JSON.stringify({ config }) }));
 }
 
+// ---- ทีม Creative (เลือกผู้รับผิดชอบเป็นทีม) ----
+export type Team = { id: string; name: string; sort_order?: number; member_ids: string[]; members: { id: string; name: string }[] };
+export async function listTeams(): Promise<Team[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-teams"));
+  return (j.teams as Team[]) ?? [];
+}
+export async function createTeam(body: { name: string; member_ids?: string[] }): Promise<Team> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-teams", { method: "POST", body: JSON.stringify(body) }));
+  return j.data as Team;
+}
+export async function updateTeam(id: string, patch: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-teams/${id}`, { method: "PATCH", body: JSON.stringify(patch) }));
+}
+export async function deleteTeam(id: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-teams/${id}`, { method: "DELETE" }));
+}
+
 // ---- พรีวิวลิงก์ (ดึง OG/meta) ----
 export type LinkPreview = { url: string; title: string | null; description: string | null; image: string | null; site: string | null };
 export async function getLinkPreview(url: string): Promise<LinkPreview> {
