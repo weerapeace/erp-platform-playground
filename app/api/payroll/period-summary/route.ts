@@ -23,8 +23,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const a = supabaseAdmin();
-    const { data: pdata } = await a.from("payroll_periods").select("id, period_name, status").eq("id", periodId).limit(1);
-    const period = pdata?.[0] as { id: string; period_name: string; status: string } | undefined;
+    const { data: pdata } = await a.from("payroll_periods").select("id, period_name, status, default_work_days, default_hours_per_day").eq("id", periodId).limit(1);
+    const period = pdata?.[0] as { id: string; period_name: string; status: string; default_work_days?: number | null; default_hours_per_day?: number | null } | undefined;
     if (!period) return NextResponse.json({ error: "ไม่พบงวด" }, { status: 404 });
 
     // รอบคำนวณของงวดนี้ (ใหม่ → เก่า)
@@ -48,6 +48,24 @@ export async function GET(req: NextRequest) {
         const r = e as { id: string; employee_code: string; first_name: string; last_name: string | null; nickname: string | null };
         codeBy[r.id] = r.employee_code;
         nameBy[r.id] = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() + (r.nickname ? ` (${r.nickname})` : "");
+      });
+    }
+
+    // วันจ่ายจริงแบบ "วัน/ชม./นาที" (paid_minutes) — คิดเหมือนหน้าข้อมูลคำนวณ: ฐานวันทำงาน − (ขาด+ลา+สาย)
+    const hoursPerDay = money(period.default_hours_per_day) || 8;
+    const basePayMinutes = Math.round((money(period.default_work_days) || 26) * hoursPerDay * 60);
+    const paidMinBy: Record<string, number> = {};
+    if (empIds.length) {
+      const lateMinBy: Record<string, number> = {}, absHrBy: Record<string, number> = {}, lvHrBy: Record<string, number> = {};
+      const [attRes, lvRes] = await Promise.all([
+        a.from("attendance_entries").select("employee_id, late_minutes, absence_hours").eq("payroll_period_id", periodId),
+        a.from("leave_entries").select("employee_id, days, hours").eq("payroll_period_id", periodId),
+      ]);
+      (attRes.data ?? []).forEach((r) => { const id = String((r as Record<string, unknown>).employee_id); lateMinBy[id] = (lateMinBy[id] ?? 0) + money((r as Record<string, unknown>).late_minutes); absHrBy[id] = (absHrBy[id] ?? 0) + money((r as Record<string, unknown>).absence_hours); });
+      (lvRes.data ?? []).forEach((r) => { const id = String((r as Record<string, unknown>).employee_id); const h = money((r as Record<string, unknown>).hours) || money((r as Record<string, unknown>).days) * hoursPerDay; lvHrBy[id] = (lvHrBy[id] ?? 0) + h; });
+      empIds.forEach((id) => {
+        const deducted = Math.round(((absHrBy[id] ?? 0) + (lvHrBy[id] ?? 0)) * 60 + (lateMinBy[id] ?? 0));
+        paidMinBy[id] = Math.max(basePayMinutes - deducted, 0);
       });
     }
 
@@ -82,6 +100,7 @@ export async function GET(req: NextRequest) {
         net_pay: money(l.net_pay),
         attendance_days: money(l.attendance_days),
         attendance_hours: money(l.attendance_hours),
+        paid_minutes: paidMinBy[String(l.employee_id)] ?? null,
         recurring_earning_amount: money(l.recurring_earning_amount),
         recurring_deduction_amount: money(l.recurring_deduction_amount),
         late_deduction: money(l.late_deduction),

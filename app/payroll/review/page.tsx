@@ -5,7 +5,7 @@
  * เลือกงวด → ดูยอดรวมทั้งงวด (จำนวนคน/รายได้/หัก/ปกส./ภาษี/สุทธิ) + รายคน ของรอบคำนวณล่าสุด
  * ยอดรวมคิดจากทั้งงวดที่ server (ไม่ใช่แค่หน้าปัจจุบัน)
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, type MouseEvent as ReactMouseEvent } from "react";
 import { apiFetch } from "@/lib/api";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 
@@ -17,7 +17,7 @@ type Line = {
   total_deduction: number; social_security_employee: number; withholding_tax: number; net_pay: number;
   attendance_days: number; attendance_hours: number; recurring_earning_amount: number; recurring_deduction_amount: number;
   late_deduction: number; absence_deduction: number; unpaid_leave_deduction: number; overtime_amount: number; other_deduction: number;
-  allowance_amount?: number; bonus_amount?: number; commission_amount?: number;
+  allowance_amount?: number; bonus_amount?: number; commission_amount?: number; paid_minutes?: number | null;
   status: string; issue_flags?: string[];
 };
 // เงินเพิ่มพิเศษ (ครั้งเดียว) = ค่าเบี้ยเลี้ยง/โบนัส/คอมมิชชั่น
@@ -27,6 +27,35 @@ const netBeforeRound = (l: Line) => Number(l.gross_pay) - Number(l.total_deducti
 type FilterMode = "all" | "negative" | "high_deduction" | "missing_base" | "zero_days" | "recurring";
 
 const baht = (v: unknown) => v == null ? "—" : `฿${Number(v).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
+// สุทธิ (จ่ายจริง) — ปัดเศษเป็นจำนวนเต็มบาท ไม่มีทศนิยม
+const bahtInt = (v: unknown) => v == null ? "—" : `฿${Math.round(Number(v)).toLocaleString("th-TH")}`;
+// วันจ่ายจริงแบบ "X วัน Y ชม. Z นาที" (จาก paid_minutes) เหมือนหน้าข้อมูลคำนวณ
+function paidDuration(totalMinutes?: number | null, hoursPerDay = 8): string {
+  if (totalMinutes == null || Number.isNaN(totalMinutes)) return "—";
+  const minutes = Math.max(Math.round(totalMinutes), 0);
+  const dayMin = Math.max(Math.round(hoursPerDay * 60), 1);
+  const days = Math.floor(minutes / dayMin), rem = minutes % dayMin;
+  const hours = Math.floor(rem / 60), mins = rem % 60;
+  const parts: string[] = [];
+  if (days) parts.push(`${days} วัน`);
+  if (hours) parts.push(`${hours} ชม.`);
+  if (mins) parts.push(`${mins} นาที`);
+  return parts.length ? parts.join(" ") : "0 วัน";
+}
+// tooltip ที่มาของยอดแต่ละช่อง
+const specialTip = (l: Line) => [
+  Number(l.allowance_amount) ? `เบี้ยเลี้ยง ${baht(l.allowance_amount)}` : "",
+  Number(l.bonus_amount) ? `โบนัส ${baht(l.bonus_amount)}` : "",
+  Number(l.commission_amount) ? `คอมมิชชั่น ${baht(l.commission_amount)}` : "",
+].filter(Boolean).join(" + ") || "ไม่มีเงินเพิ่มพิเศษ";
+const deductTip = (l: Line) => [
+  Number(l.late_deduction) ? `มาสาย ${baht(l.late_deduction)}` : "",
+  Number(l.absence_deduction) ? `ขาดงาน ${baht(l.absence_deduction)}` : "",
+  Number(l.unpaid_leave_deduction) ? `ลาไม่รับเงิน ${baht(l.unpaid_leave_deduction)}` : "",
+].filter(Boolean).join(" + ") || "ไม่มีหักสาย/ขาด/ลา";
+const grossTip = (l: Line) => `เงินเดือน/ค่าจ้าง + พิเศษ ${baht(specialAmt(l))} + OT ${baht(l.overtime_amount)} + ประจำเพิ่ม ${baht(l.recurring_earning_amount)}`;
+const totalDedTip = (l: Line) => `สาย/ขาด/ลา ${baht(Number(l.late_deduction)+Number(l.absence_deduction)+Number(l.unpaid_leave_deduction))} + ปกส. ${baht(l.social_security_employee)} + หักอื่น ${baht(l.other_deduction)} + ประจำหัก ${baht(l.recurring_deduction_amount)}`;
+const recurringTip = (l: Line) => `เพิ่มประจำ ${baht(l.recurring_earning_amount)} − หักประจำ ${baht(l.recurring_deduction_amount)}`;
 const STATUS_TH: Record<string, { th: string; cls: string }> = {
   draft: { th: "ร่าง", cls: "bg-slate-100 text-slate-600" },
   review: { th: "รอตรวจ", cls: "bg-amber-100 text-amber-700" },
@@ -74,6 +103,27 @@ const badge = (s: string) => {
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${m.cls}`}>{m.th}</span>;
 };
 
+// คอลัมน์ตาราง (label/ที่มา tooltip/แนว/กว้างเริ่มต้น) — ลากปรับความกว้างได้
+const COLS: { key: string; label: string; title: string; align: "left" | "right" | "center"; w: number }[] = [
+  { key: "code",   label: "รหัส",          title: "รหัสพนักงาน", align: "left", w: 70 },
+  { key: "name",   label: "พนักงาน",       title: "ชื่อ-นามสกุล (ชื่อเล่น)", align: "left", w: 180 },
+  { key: "salary", label: "เงินเดือน",     title: "เงินเดือนตามสัญญา (ฐานคำนวณ)", align: "right", w: 105 },
+  { key: "days",   label: "วันจ่ายจริง",   title: "เวลาทำงานที่จ่ายจริง (วัน/ชม./นาที) = วันทำงานฐาน − ขาด/ลา/สาย — เท่ากับหน้า ‘ข้อมูลคำนวณ’", align: "right", w: 140 },
+  { key: "recur",  label: "ประจำ +/-",     title: "เงินเพิ่ม/หักประจำ (รายการประจำ) สุทธิ — ชี้ที่ตัวเลขเพื่อดูที่มา", align: "right", w: 100 },
+  { key: "special",label: "พิเศษ",         title: "เงินเพิ่มพิเศษครั้งเดียว (เบี้ยเลี้ยง/โบนัส/คอมมิชชั่น) — ชี้ที่ตัวเลขเพื่อดูที่มา", align: "right", w: 95 },
+  { key: "late",   label: "สาย/ขาด/ลา",    title: "หักจากมาสาย + ขาดงาน + ลาไม่รับเงิน — ชี้ที่ตัวเลขเพื่อดูที่มา", align: "right", w: 105 },
+  { key: "ot",     label: "OT",            title: "ค่าล่วงเวลา (ชม. × อัตรา × ตัวคูณที่ตั้งไว้)", align: "right", w: 90 },
+  { key: "gross",  label: "รายได้รวม",     title: "รายได้รวมก่อนหัก — ชี้ที่ตัวเลขเพื่อดูที่มา", align: "right", w: 110 },
+  { key: "ded",    label: "หักรวม",        title: "ยอดหักทั้งหมด — ชี้ที่ตัวเลขเพื่อดูที่มา", align: "right", w: 110 },
+  { key: "sso",    label: "ปกส.",          title: "ประกันสังคม (ฝั่งพนักงาน)", align: "right", w: 90 },
+  { key: "tax",    label: "ภาษี",          title: "ภาษีหัก ณ ที่จ่าย (บริษัทออกให้ — ไม่หักจากสุทธิ)", align: "right", w: 90 },
+  { key: "net",    label: "สุทธิ",         title: "จ่ายสุทธิ = รายได้รวม − หักรวม (ไม่รวมภาษี) ปัดเศษเป็นจำนวนเต็มบาท", align: "right", w: 110 },
+  { key: "netraw", label: "สุทธิก่อนปัดเศษ", title: "สุทธิก่อนปัดเศษ = รายได้รวม − หักรวม (2 ตำแหน่ง)", align: "right", w: 125 },
+  { key: "status", label: "สถานะ",         title: "สถานะรายการของงวด", align: "center", w: 90 },
+];
+// ตัวเลข + จุด ? บอกว่ามี tooltip ที่มา
+const cls = (a: string) => a === "left" ? "text-left" : a === "center" ? "text-center" : "text-right";
+
 export default function PayrollReviewPage() {
   const { periods, periodId, selectedPeriod: curPeriod, setPeriodId, refreshPeriods } = usePayrollPeriod();
   const [runId, setRunId] = useState("");
@@ -88,6 +138,14 @@ export default function PayrollReviewPage() {
   const [issueCounts, setIssueCounts] = useState<IssueCounts | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [colW, setColW] = useState<number[]>(() => COLS.map((c) => c.w));   // ความกว้างคอลัมน์ (ลากปรับ)
+  const startResize = (e: ReactMouseEvent, i: number) => {
+    e.preventDefault();
+    const startX = e.clientX, startW = colW[i];
+    const onMove = (ev: MouseEvent) => setColW((w) => w.map((x, idx) => (idx === i ? Math.max(56, startW + (ev.clientX - startX)) : x)));
+    const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+  };
 
   const load = useCallback(async (pid: string, rid?: string) => {
     if (!pid) return;
@@ -259,47 +317,47 @@ export default function PayrollReviewPage() {
         <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด...</div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-slate-200">
-          <table className="w-full text-sm">
+          <table className="text-sm" style={{ tableLayout: "fixed", width: colW.reduce((a, b) => a + b, 0) }}>
+            <colgroup>{COLS.map((c, i) => <col key={c.key} style={{ width: `${colW[i]}px` }} />)}</colgroup>
             <thead className="bg-slate-50 text-slate-500 text-xs">
               <tr>
-                <th className="text-left px-3 py-2" title="รหัสพนักงาน">รหัส</th>
-                <th className="text-left px-3 py-2" title="ชื่อ-นามสกุล (ชื่อเล่น)">พนักงาน</th>
-                <th className="text-right px-3 py-2" title="เงินเดือนตามสัญญา (ฐานคำนวณ)">เงินเดือน</th>
-                <th className="text-right px-3 py-2" title="จำนวนวันที่ใช้คิดเงินของงวดนี้ (= ค่าเดียวกับหน้า ‘ข้อมูลคำนวณ’ ของรอบที่บันทึกล่าสุด)">วันจ่ายจริง</th>
-                <th className="text-right px-3 py-2" title="เงินเพิ่ม/หัก ประจำ (รายการประจำ) สุทธิ บวก=เพิ่ม ลบ=หัก">ประจำ +/-</th>
-                <th className="text-right px-3 py-2" title="เงินเพิ่มพิเศษครั้งเดียว (เบี้ยเลี้ยง/โบนัส/คอมมิชชั่น)">พิเศษ</th>
-                <th className="text-right px-3 py-2" title="ยอดหักจากมาสาย + ขาดงาน + ลาไม่รับเงิน">สาย/ขาด/ลา</th>
-                <th className="text-right px-3 py-2" title="ค่าล่วงเวลา (OT) ตามชั่วโมง × อัตรา × ตัวคูณที่ตั้งไว้">OT</th>
-                <th className="text-right px-3 py-2" title="รายได้รวมก่อนหัก = เงินเดือน/ค่าจ้าง + พิเศษ + OT + ประจำ(เพิ่ม)">รายได้รวม</th>
-                <th className="text-right px-3 py-2" title="ยอดหักทั้งหมด = สาย/ขาด/ลา + ปกส. + หักอื่น + ประจำ(หัก)">หักรวม</th>
-                <th className="text-right px-3 py-2" title="ประกันสังคม (ฝั่งพนักงาน)">ปกส.</th>
-                <th className="text-right px-3 py-2" title="ภาษีหัก ณ ที่จ่าย (บริษัทออกให้ — ไม่หักจากสุทธิ)">ภาษี</th>
-                <th className="text-right px-3 py-2" title="จ่ายสุทธิ = รายได้รวม − หักรวม (ไม่รวมภาษี) ปัด 2 ตำแหน่ง">สุทธิ</th>
-                <th className="text-right px-3 py-2" title="สุทธิก่อนปัดเศษ = รายได้รวม − หักรวม (ค่าก่อนเครื่องปัดให้เหลือ 2 ตำแหน่ง)">สุทธิก่อนปัดเศษ</th>
-                <th className="text-center px-3 py-2" title="สถานะรายการของงวด">สถานะ</th>
+                {COLS.map((c, i) => (
+                  <th key={c.key} title={c.title} className={`relative px-3 py-2 ${cls(c.align)}`}>
+                    <span className="truncate">{c.label}</span>
+                    {i < COLS.length - 1 && (
+                      <span onMouseDown={(e) => startResize(e, i)} title="ลากปรับความกว้าง"
+                        className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none hover:bg-blue-300" />
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {shown.map((l) => (
                 <tr key={l.id} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-3 py-2 font-mono text-xs">{l.employee_code}</td>
-                  <td className="px-3 py-2">{l.employee_name}</td>
+                  <td className="px-3 py-2 font-mono text-xs truncate">{l.employee_code}</td>
+                  <td className="px-3 py-2 truncate" title={l.employee_name}>{l.employee_name}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{baht(l.base_salary)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">{l.attendance_days || "—"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">
+                  <td className="px-3 py-2 text-right text-xs tabular-nums text-slate-600" title="เวลาทำงานที่จ่ายจริง = วันทำงานฐาน − ขาด/ลา/สาย (เท่าหน้าข้อมูลคำนวณ)">
+                    {l.paid_minutes != null ? paidDuration(l.paid_minutes) : (l.attendance_days ? `${l.attendance_days} วัน` : "—")}
+                    <sup className="ml-0.5 text-[9px] text-slate-300">?</sup>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums" title={recurringTip(l)}>
                     <span className="text-emerald-700">{l.recurring_earning_amount ? baht(l.recurring_earning_amount) : "—"}</span>
                     {l.recurring_deduction_amount ? <span className="block text-red-600">-{baht(l.recurring_deduction_amount).replace("฿", "")}</span> : null}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{specialAmt(l) ? baht(specialAmt(l)) : "—"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-red-600">
-                    {l.late_deduction + l.absence_deduction + l.unpaid_leave_deduction ? baht(l.late_deduction + l.absence_deduction + l.unpaid_leave_deduction) : "—"}
+                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700" title={specialTip(l)}>
+                    {specialAmt(l) ? <>{baht(specialAmt(l))}<sup className="ml-0.5 text-[9px] text-slate-300">?</sup></> : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-red-600" title={deductTip(l)}>
+                    {(l.late_deduction + l.absence_deduction + l.unpaid_leave_deduction) ? <>{baht(l.late_deduction + l.absence_deduction + l.unpaid_leave_deduction)}<sup className="ml-0.5 text-[9px] text-red-300">?</sup></> : "—"}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{l.overtime_amount ? baht(l.overtime_amount) : "—"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{baht(l.gross_pay)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-amber-700">{baht(l.total_deduction)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" title={grossTip(l)}>{baht(l.gross_pay)}<sup className="ml-0.5 text-[9px] text-slate-300">?</sup></td>
+                  <td className="px-3 py-2 text-right tabular-nums text-amber-700" title={totalDedTip(l)}>{baht(l.total_deduction)}<sup className="ml-0.5 text-[9px] text-amber-300">?</sup></td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-500">{baht(l.social_security_employee)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-500">{baht(l.withholding_tax)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums font-medium">{baht(l.net_pay)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium" title={`สุทธิก่อนปัดเศษ ${baht(netBeforeRound(l))}`}>{bahtInt(l.net_pay)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-500">{baht(netBeforeRound(l))}</td>
                   <td className="px-3 py-2 text-center">{badge(l.status)}</td>
                 </tr>
