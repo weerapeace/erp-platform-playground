@@ -8,13 +8,18 @@
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Logo, BRAND } from "@/components/brand";
 import { useAuth, roleLabel } from "@/components/auth";
 import { NotificationBell } from "@/components/notification-bell";
 import { PayrollPeriodProvider, usePayrollPeriod } from "@/components/payroll/payroll-period-context";
+import { cachedGetJson } from "@/lib/shell-cache";
 
-const NAV: { group: string; items: { href: string; icon: string; label: string }[] }[] = [
+type NavItem = { href: string; icon: string; label: string; icon_url?: string | null };
+type NavGroup = { group: string; items: NavItem[] };
+
+// fallback (ใช้เมื่อโหลดเมนูกลางไม่ได้) — เมนูจริงดึงจาก /admin/menu (erp_menu_items + sections) ผ่าน useEffect ด้านล่าง
+const FALLBACK_NAV: NavGroup[] = [
   { group: "ภาพรวม", items: [
     { href: "/payroll/dashboard", icon: "📊", label: "ภาพรวมเงินเดือน" },
   ] },
@@ -83,10 +88,38 @@ function PayrollShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  // เมนูจริงดึงจากระบบกลาง (/admin/menu) — แก้ไอคอน/ลำดับ/หมวด/ซ่อน-แสดง ได้เองที่นั่น
+  const [nav, setNav] = useState<NavGroup[]>(FALLBACK_NAV);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [mi, ms] = await Promise.all([
+          cachedGetJson<{ data: Array<Record<string, unknown>> }>("/api/menu"),
+          cachedGetJson<{ data: Array<Record<string, unknown>> }>("/api/menu/sections"),
+        ]);
+        const items = (mi?.data ?? []).filter((r) =>
+          Array.isArray(r.app_keys) && (r.app_keys as string[]).includes("payroll") && r.is_active !== false && r.show_in_sidebar !== false);
+        if (!items.length) return; // ไม่มีข้อมูล → คงใช้ fallback
+        const secOrder = new Map<string, number>();
+        (ms?.data ?? []).filter((s) => s.app_key === "payroll").forEach((s) => secOrder.set(String(s.name), Number(s.sort_order) || 100));
+        const bySection = new Map<string, { order: number; items: NavItem[] }>();
+        items.forEach((r) => {
+          const sec = String(r.section || "อื่น ๆ");
+          const g = bySection.get(sec) ?? { order: secOrder.get(sec) ?? (Number(r.section_order) || 100), items: [] };
+          g.items.push({ href: String(r.href), icon: String(r.icon || "•"), label: String(r.label), icon_url: (r.icon_url as string) ?? null });
+          bySection.set(sec, g);
+        });
+        const groups = Array.from(bySection.entries()).sort((a, b) => a[1].order - b[1].order).map(([group, g]) => ({ group, items: g.items }));
+        if (alive && groups.length) setNav(groups);
+      } catch { /* คง fallback */ }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const Sidebar = (
     <nav className="flex flex-col gap-4 p-3">
-      {NAV.map((g) => (
+      {nav.map((g) => (
         <div key={g.group}>
           <div className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{g.group}</div>
           <div className="space-y-0.5">
@@ -96,7 +129,11 @@ function PayrollShellInner({ children }: { children: React.ReactNode }) {
                 <Link key={it.href} href={it.href} onClick={() => setOpen(false)}
                   className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors ${
                     active ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-slate-600 hover:bg-slate-100"}`}>
-                  <span className="text-base">{it.icon}</span>
+                  <span className="text-base">
+                    {it.icon_url
+                      ? <img src={it.icon_url} alt="" className="inline-block h-4 w-4 object-contain align-[-2px]" />
+                      : it.icon}
+                  </span>
                   <span className="truncate">{it.label}</span>
                 </Link>
               );
