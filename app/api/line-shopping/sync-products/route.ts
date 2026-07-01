@@ -38,14 +38,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let apiKey: string;
   try { apiKey = await decryptSecret(stored); } catch { return NextResponse.json({ error: "ถอดรหัสคีย์ไม่ได้ (กุญแจหลักไม่ตรง/หาย?)" }, { status: 400 }); }
 
-  // 1) วนดึงสินค้าทุกหน้า
+  // 1) วนดึงสินค้าทุกหน้า (จนกว่าจะครบหน้า หรือหน้าสุดท้ายไม่เต็ม) + จำยอดที่ LINE รายงาน
   const products: Record<string, unknown>[] = [];
-  let page = 1, totalPage = 1;
+  let page = 1, totalPage = 1, apiTotal = 0;
   do {
     const res = await lineListProducts(apiKey, { page, perPage: 100 });
     if (!res.ok) return NextResponse.json({ error: `ดึงสินค้าไม่สำเร็จ: ${res.error}` }, { status: 400 });
-    products.push(...(res.rows ?? []));
+    const got = res.rows ?? [];
+    products.push(...got);
+    if (page === 1) apiTotal = res.totalRow ?? got.length;
     totalPage = res.totalPage ?? 1;
+    if (got.length < 100) break;   // หน้าสุดท้ายไม่เต็ม = จบ (กันกรณี totalPage ไม่ถูก)
     page++;
   } while (page <= totalPage && page <= MAX_PAGES);
   if (products.length === 0) return NextResponse.json({ ok: true, fetched: 0, matched: 0, created: 0, updated: 0, error: null });
@@ -112,6 +115,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (insertRows.length) { const { error } = await admin.from("platform_catalog_listings").insert(insertRows); if (error) return NextResponse.json({ error: error.message }, { status: 400 }); }
   if (updateRows.length) { const { error } = await admin.from("platform_catalog_listings").upsert(updateRows, { onConflict: "id" }); if (error) return NextResponse.json({ error: error.message }, { status: 400 }); }
 
-  await writeAudit(admin, { action: "import", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_api", brand_id, fetched: items.length, matched, created: insertRows.length, updated: updateRows.length } });
-  return NextResponse.json({ ok: true, fetched: items.length, matched, created: insertRows.length, updated: updateRows.length, error: null });
+  await writeAudit(admin, { action: "import", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_api", brand_id, api_total: apiTotal, fetched: items.length, matched, created: insertRows.length, updated: updateRows.length } });
+  return NextResponse.json({ ok: true, api_total: apiTotal, fetched: items.length, matched, created: insertRows.length, updated: updateRows.length, error: null });
 }

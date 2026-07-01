@@ -145,7 +145,8 @@ export default function PlatformCatalogPage() {
     try {
       const r = await apiFetch("/api/line-shopping/sync-products", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
-      setNote(`ดึงจาก LINE แล้ว: ${j.fetched} สินค้า · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่ ERP อัตโนมัติ ${j.matched}`);
+      const totalNote = j.api_total != null && j.api_total !== j.fetched ? ` (LINE รายงานทั้งหมด ${j.api_total})` : "";
+      setNote(`ดึงจาก LINE แล้ว: ${j.fetched} สินค้า${totalNote} · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่ ERP อัตโนมัติ ${j.matched}`);
       await load();
     } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
     finally { setImporting(false); }
