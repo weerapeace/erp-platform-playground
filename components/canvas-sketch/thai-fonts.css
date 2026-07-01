@@ -6,10 +6,10 @@
  * → เลือกฟอนต์ต่างกันบนกระดาน = ได้ฟอนต์ไทยต่างแบบ (self-host กัน URL ภายนอกเปลี่ยน)
  *
  * (เปิด showDeprecatedFonts บน Excalidraw → โชว์ครบ 8 ฟอนต์ = ฟอนต์ไทย 8 แบบ)
- *   ✏️ Excalifont (ลายมือ)  → Itim         · Virgil (ลายมือเก่า) → Sriracha
- *   A  Nunito (ปกติ)        → Sarabun      · Helvetica          → Prompt
- *   </> Comic Shanns (โค้ด) → Chakra Petch · Cascadia (โค้ด)     → Bai Jamjuree
- *   Lilita One (หัวหนา)     → Kanit 600    · Liberation Sans    → Mitr
+ *   ✏️ Excalifont (ลายมือ)  → Itim (ลายมือ)     · Virgil          → Pridi (มีหัวเชิง ทางการ)
+ *   A  Nunito (ปกติ)        → Sarabun (ราชการ) · Helvetica       → Prompt (เรียบ ทันสมัย)
+ *   </> Comic Shanns (โค้ด) → Chakra Petch      · Cascadia        → IBM Plex Sans Thai (คอร์เปอเรต ทางการ)
+ *   Lilita One (หัวหนา)     → Kanit 600         · Liberation Sans → Taviraj (มีหัวเชิง เอกสาร ทางการ)
  * ============================================================ */
 
 @font-face { font-family: "Excalifont";       src: url("/fonts/thai/itim.woff2") format("woff2");        unicode-range: U+0E00-0E7F; font-display: swap; }
@@ -19,9 +19,9 @@
 @font-face { font-family: "Lilita";           src: url("/fonts/thai/kanit600.woff2") format("woff2");    unicode-range: U+0E00-0E7F; font-display: swap; }
 @font-face { font-family: "Lilita One";       src: url("/fonts/thai/kanit600.woff2") format("woff2");    unicode-range: U+0E00-0E7F; font-display: swap; }
 /* ฟอนต์ที่ต้องเปิด showDeprecatedFonts ถึงจะโผล่ในเมนู */
-@font-face { font-family: "Virgil";           src: url("/fonts/thai/sriracha.woff2") format("woff2");    unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Virgil";           src: url("/fonts/thai/pridi.woff2") format("woff2");       unicode-range: U+0E00-0E7F; font-display: swap; }
 @font-face { font-family: "Helvetica";        src: url("/fonts/thai/prompt.woff2") format("woff2");      unicode-range: U+0E00-0E7F; font-display: swap; }
-@font-face { font-family: "Cascadia";         src: url("/fonts/thai/baijamjuree.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
-@font-face { font-family: "Cascadia Code";    src: url("/fonts/thai/baijamjuree.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
-@font-face { font-family: "Liberation Sans";  src: url("/fonts/thai/mitr.woff2") format("woff2");        unicode-range: U+0E00-0E7F; font-display: swap; }
-@font-face { font-family: "Liberation";       src: url("/fonts/thai/mitr.woff2") format("woff2");        unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Cascadia";         src: url("/fonts/thai/ibmplexthai.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Cascadia Code";    src: url("/fonts/thai/ibmplexthai.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Liberation Sans";  src: url("/fonts/thai/taviraj.woff2") format("woff2");     unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Liberation";       src: url("/fonts/thai/taviraj.woff2") format("woff2");     unicode-range: U+0E00-0E7F; font-display: swap; }
