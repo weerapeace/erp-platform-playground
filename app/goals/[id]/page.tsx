@@ -13,7 +13,7 @@ import {
   goalProgress, daysLeft, CATEGORY_LABEL, HEALTH_META, DEFAULT_REWARD,
   type Goal, type GoalHealth, type GoalStatus,
 } from "../mock-data";
-import { fetchGoal, updateStep, addCheckin, updateGoal } from "../api";
+import { fetchGoal, updateStep, addCheckin, updateGoal, addExercise } from "../api";
 import { GoalStatusBadge, GoalHealthBadge, ProgressRing } from "../goal-badges";
 import { GameBar } from "../game-bar";
 import { useCoinFx } from "../coin-fx";
@@ -48,6 +48,7 @@ export default function GoalDetailPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [checkinOpen, setCheckinOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [workoutOpen, setWorkoutOpen] = useState(false);
   const { fx, burst } = useCoinFx();
 
   const load = useCallback(() => {
@@ -115,6 +116,28 @@ export default function GoalDetailPage() {
       awardCoins(coins, `${parts.join(" + ")} · ${g.title}`);
       burst(coins, parts.join(" + "));
       toast.success("บันทึกความคืบหน้าแล้ว");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    }
+  }
+
+  async function handleWorkout(input: { activity_type: string; title: string; quantity: number; unit: string }) {
+    const oldVal = g.current_value ?? g.start_value ?? 0;
+    try {
+      const updated = await addExercise(g.id, input);
+      setGoal(updated);
+      setWorkoutOpen(false);
+      let coins = 2;
+      const parts = [input.title];
+      const upc = reward.units_per_coin;
+      const newVal = updated.current_value ?? oldVal;
+      if (upc && newVal > oldVal) {
+        const gained = Math.floor(newVal / upc) - Math.floor(oldVal / upc);
+        if (gained > 0) { coins += gained; parts.push(`ทุก ${upc} หน่วย`); }
+      }
+      awardCoins(coins, `ออกกำลังกาย: ${input.title} · ${g.title}`);
+      burst(coins, `${input.title} +${input.quantity}${input.unit ? " " + input.unit : ""}`);
+      toast.success("บันทึกออกกำลังกายแล้ว");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
     }
@@ -219,6 +242,11 @@ export default function GoalDetailPage() {
 
         {/* ปุ่ม */}
         <div className="border-t border-slate-100 mt-5 pt-4 flex flex-wrap gap-2">
+          {g.category === "personal" && (
+            <button onClick={() => setWorkoutOpen(true)} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
+              🏃 บันทึกออกกำลังกาย
+            </button>
+          )}
           <button onClick={() => setCheckinOpen(true)} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">
             🚩 อัปเดตความคืบหน้า
           </button>
@@ -255,6 +283,7 @@ export default function GoalDetailPage() {
 
       <CheckinModal open={checkinOpen} onClose={() => setCheckinOpen(false)} goal={g} onSave={handleCheckin} />
       <StatusModal open={statusOpen} onClose={() => setStatusOpen(false)} current={g.status} onPick={changeStatus} />
+      <WorkoutModal open={workoutOpen} onClose={() => setWorkoutOpen(false)} onSave={handleWorkout} />
     </div>
   );
 }
@@ -335,6 +364,86 @@ function StatusModal({ open, onClose, current, onPick }: {
             {o.label}{o.value === current ? " (ปัจจุบัน)" : ""}
           </button>
         ))}
+      </div>
+    </ERPModal>
+  );
+}
+
+// ---- Workout log modal (ขั้น 1) ----
+const WORKOUTS = [
+  { value: "pushup", label: "วิดพื้น", unit: "ครั้ง", icon: "💪" },
+  { value: "situp", label: "ซิทอัพ", unit: "ครั้ง", icon: "🤸" },
+  { value: "run", label: "วิ่ง", unit: "กม.", icon: "🏃" },
+  { value: "walk", label: "เดิน", unit: "นาที", icon: "🚶" },
+  { value: "steps", label: "ก้าวเดิน", unit: "ก้าว", icon: "👣" },
+  { value: "workout", label: "ออกกำลังกาย", unit: "นาที", icon: "🏋️" },
+  { value: "custom", label: "อื่น ๆ", unit: "", icon: "➕" },
+];
+
+function WorkoutModal({ open, onClose, onSave }: {
+  open: boolean; onClose: () => void; onSave: (input: { activity_type: string; title: string; quantity: number; unit: string }) => void;
+}) {
+  const [act, setAct] = useState("pushup");
+  const [qty, setQty] = useState("");
+  const [customTitle, setCustomTitle] = useState("");
+  const [customUnit, setCustomUnit] = useState("");
+  const preset = WORKOUTS.find((w) => w.value === act) ?? WORKOUTS[0];
+  const isCustom = act === "custom";
+
+  function submit() {
+    const q = Number(qty);
+    if (!q || q <= 0) return;
+    const title = isCustom ? (customTitle.trim() || "กิจกรรม") : preset.label;
+    const unit = isCustom ? customUnit.trim() : preset.unit;
+    onSave({ activity_type: act, title, quantity: q, unit });
+    setQty(""); setCustomTitle(""); setCustomUnit("");
+  }
+
+  return (
+    <ERPModal open={open} onClose={onClose} title="🏃 บันทึกออกกำลังกาย" description="บันทึกแล้วบวกเข้าค่าเป้า + ได้เหรียญ" size="md"
+      hasUnsavedChanges={qty.trim() !== ""}
+      footer={
+        <>
+          <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+          <button onClick={submit} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">บันทึก</button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">ประเภท</label>
+          <div className="flex flex-wrap gap-2">
+            {WORKOUTS.map((w) => (
+              <button key={w.value} onClick={() => setAct(w.value)}
+                className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${act === w.value ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                {w.icon} {w.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {isCustom && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">ชื่อกิจกรรม</label>
+              <input value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} placeholder="เช่น โยคะ"
+                className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">หน่วย</label>
+              <input value={customUnit} onChange={(e) => setCustomUnit(e.target.value)} placeholder="ครั้ง/นาที"
+                className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">
+            จำนวน{!isCustom && preset.unit ? ` (${preset.unit})` : ""}
+          </label>
+          <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} autoFocus placeholder="เช่น 20"
+            className="w-full h-10 px-3 text-base border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+        </div>
       </div>
     </ERPModal>
   );

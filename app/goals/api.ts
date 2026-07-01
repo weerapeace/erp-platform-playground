@@ -50,3 +50,10 @@ export async function addCheckin(goalId: string, input: { health?: string; curre
   const j = await unwrap(await apiFetch(`/api/goals/${goalId}/checkins`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) }));
   return j.data as Goal;
 }
+
+export type ExerciseLog = { activity_type?: string; title: string; quantity: number; unit?: string };
+
+export async function addExercise(goalId: string, input: ExerciseLog): Promise<Goal> {
+  const j = await unwrap(await apiFetch(`/api/goals/${goalId}/exercise`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) }));
+  return j.data as Goal;
+}

@@ -213,3 +213,41 @@ export async function addCheckin(goalId: string, input: CheckinInput, author: st
   await admin.from("erp_goals").update(goalUpd).eq("id", goalId);
   return getGoal(goalId);
 }
+
+// ---- บันทึกออกกำลังกาย (ขั้น 1) ----
+export type ExerciseInput = {
+  activity_type?: string; title: string; quantity: number; unit?: string;
+  duration_min?: number | null; distance_km?: number | null; calories?: number | null;
+};
+
+export async function addExerciseLog(goalId: string, input: ExerciseInput, user: { id: string; name: string }) {
+  const admin = supabaseAdmin();
+  const { data: gRow } = await admin.from("erp_goals").select("id, measure_type, current_value, start_value, health").eq("id", goalId).maybeSingle();
+  if (!gRow) throw new Error("ไม่พบเป้าหมาย");
+  const g = gRow as Row;
+  const qty = Number(input.quantity) || 0;
+
+  await admin.from("erp_exercise_logs").insert({
+    goal_id: goalId, user_id: user.id, user_name: user.name,
+    activity_type: input.activity_type ?? "custom", title: input.title,
+    quantity: qty, unit: input.unit ?? null,
+    duration_min: input.duration_min ?? null, distance_km: input.distance_km ?? null, calories: input.calories ?? null,
+    source: "manual",
+  });
+
+  // บวกเข้าค่าเป้า (เฉพาะเป้าที่วัดเป็นตัวเลข)
+  let newVal: number | null = null;
+  if (s(g.measure_type) !== "boolean") {
+    const base = g.current_value == null ? (g.start_value == null ? 0 : Number(g.start_value)) : Number(g.current_value);
+    newVal = base + qty;
+    await admin.from("erp_goals").update({ current_value: newVal, updated_at: new Date().toISOString() }).eq("id", goalId);
+  }
+
+  // ลง check-in เป็นไทม์ไลน์ให้เห็นประวัติ
+  await admin.from("erp_goal_checkins").insert({
+    goal_id: goalId, author: user.name, health: s(g.health) || "on_track",
+    current_value: newVal, note: `🏃 ${input.title} ${qty}${input.unit ? " " + input.unit : ""}`,
+  });
+
+  return getGoal(goalId);
+}
