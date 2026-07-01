@@ -152,6 +152,22 @@ export default function PlatformCatalogPage() {
     finally { setImporting(false); }
   };
 
+  // ส่งราคาขาย ERP → LINE (สินค้าที่จับคู่แล้ว)
+  const pushPricesLine = async () => {
+    if (!brandId) { setNote("เลือกแบรนด์/ร้านก่อน"); return; }
+    setImporting(true); setNote("กำลังส่งราคาขึ้น LINE...");
+    try {
+      const r = await apiFetch("/api/line-shopping/push-prices", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      if (j.note) { setNote(j.note); return; }
+      const fails = (j.results ?? []).filter((x: { ok: boolean }) => !x.ok);
+      let msg = `ส่งราคาขึ้น LINE: สำเร็จ ${j.okCount}/${j.total} สินค้า`;
+      if (fails.length) msg += " · ผิดพลาด: " + fails.map((x: { product: string; error?: string }) => `${x.product} (${x.error})`).join(" | ");
+      setNote(msg);
+    } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
+    finally { setImporting(false); }
+  };
+
   const saveMapping = async (platform_field_key: string, source_key: string) => {
     setMappings((m) => { const n = { ...m }; if (source_key) n[platform_field_key] = source_key; else delete n[platform_field_key]; return n; });
     try {
@@ -213,7 +229,10 @@ export default function PlatformCatalogPage() {
         <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 disabled:opacity-50">{importing ? "กำลังนำเข้า..." : "⬆️ อัปไฟล์ export"}</button>
         <button onClick={() => setShowManager(true)} disabled={!canEdit || !platformId} title="จัดการชนิดไฟล์นำเข้า (เพิ่ม/แก้เองได้)" className="h-9 px-2.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⚙️</button>
         {platformCode === "line_shopping"
-          ? <button onClick={syncLine} disabled={!canEdit || importing || !brandId} title={!brandId ? "เลือกแบรนด์/ร้านก่อน" : "ดึงสินค้าจาก LINE SHOPPING ผ่าน API"} className="h-9 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-50">{importing ? "กำลังดึง..." : "🟢 ดึงสินค้าจาก LINE"}</button>
+          ? <>
+              <button onClick={syncLine} disabled={!canEdit || importing || !brandId} title={!brandId ? "เลือกแบรนด์/ร้านก่อน" : "ดึงสินค้าจาก LINE SHOPPING ผ่าน API"} className="h-9 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-50">{importing ? "กำลังดึง..." : "🟢 ดึงสินค้าจาก LINE"}</button>
+              <button onClick={pushPricesLine} disabled={!canEdit || importing || !brandId} title="ส่งราคาขาย (ERP) ขึ้น LINE สำหรับสินค้าที่จับคู่แล้ว" className="h-9 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-50">⬆️ ส่งราคาขึ้น LINE</button>
+            </>
           : <button disabled title="เฉพาะแพลตฟอร์มที่ต่อ API ได้" className="h-9 px-3 text-sm text-slate-400 border border-slate-200 rounded-lg cursor-not-allowed">🔗 ดึงจาก API (เฉพาะ LINE)</button>}
       </div>
       {note && <p className="text-xs text-slate-500 mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{note}</p>}

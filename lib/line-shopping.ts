@@ -46,6 +46,30 @@ export async function lineListProducts(apiKey: string, params: { page?: number; 
   }
 }
 
+// อัปเดตราคาสินค้า (PATCH /products/{id}/prices) — ส่งราคาใหม่ต่อ variant
+// หมายเหตุ: รูปแบบ body ยังไม่มีในเอกสารสาธารณะ — ใช้ { variants:[{variantId, price}] } เป็นค่าตั้งต้น
+// ถ้า LINE ตอบ error จะคืน body จริงกลับมา (ไว้ยืนยัน/ปรับรูปแบบ)
+export async function lineUpdatePrices(apiKey: string, productId: string, variants: { variantId: string; price: number }[]): Promise<{ ok: boolean; status: number; error?: string }> {
+  try {
+    const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}/prices`, {
+      method: "PATCH", headers: headers(apiKey), body: JSON.stringify({ variants }),
+    });
+    if (r.ok) return { ok: true, status: r.status };
+    const body = await r.text().catch(() => "");
+    return { ok: false, status: r.status, error: friendly(r.status, body) };
+  } catch (e) { return { ok: false, status: 0, error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
+}
+
+// เปิด/ปิดการขายสินค้า (POST /products/{id}/display-status/{status}) — ไม่มี body
+export async function lineSetDisplay(apiKey: string, productId: string, status: "onsale" | "hide"): Promise<{ ok: boolean; status: number; error?: string }> {
+  try {
+    const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}/display-status/${status}`, { method: "POST", headers: headers(apiKey) });
+    if (r.ok) return { ok: true, status: r.status };
+    const body = await r.text().catch(() => "");
+    return { ok: false, status: r.status, error: friendly(r.status, body) };
+  } catch (e) { return { ok: false, status: 0, error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
+}
+
 export type LineOrderListParams = {
   page?: number; perPage?: number;
   sortBy?: "ORDER_NO" | "CREATED_AT" | "UPDATED_AT" | "CHECKED_OUT_AT";
