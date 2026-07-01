@@ -10,8 +10,9 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
-import { OverviewKanban } from "./overview-kanban";
+import { OverviewKanban, coverKey } from "./overview-kanban";
 import { AssigneeStack } from "./assignee-avatar";
+import { r2ImageUrl } from "@/lib/r2-image";
 import { ReviewQueueView } from "./review-queue-view";
 import { KanbanSettings } from "./kanban-settings";
 import { CalendarBoard } from "./calendar-board";
@@ -552,9 +553,16 @@ function MyTaskCard({ task, solo, onClick, accent }: { task: CreativeTask; solo?
   const pr = PRIORITY_META[task.priority as CreativePriority];
   const overdue = isOverdue(task);
   const st = statusMeta(task.status);
+  const cover = coverKey(task);
+  const coverUrl = cover ? r2ImageUrl(cover, 320) : null;
   return (
-    <button onClick={onClick} className="text-left bg-white rounded-lg border border-slate-200 p-2.5 hover:border-violet-300 hover:shadow-sm transition"
+    <button onClick={onClick} className="text-left bg-white rounded-lg border border-slate-200 overflow-hidden hover:border-violet-300 hover:shadow-sm transition"
       style={solo ? { borderLeftWidth: 3, borderLeftColor: accent || "#7c3aed" } : undefined}>
+      {coverUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={coverUrl} alt="" loading="lazy" decoding="async" className="w-full h-20 object-cover bg-slate-50 border-b border-slate-100" />
+      )}
+      <div className="p-2.5">
       <div className="flex items-center gap-1 mb-1 flex-wrap">
         {solo && <span className="text-[10px]" title={t("มีแค่ฉัน", "Only me")}>⭐</span>}
         {pr && <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span>}
@@ -569,6 +577,7 @@ function MyTaskCard({ task, solo, onClick, accent }: { task: CreativeTask; solo?
           <AssigneeStack list={task.assignees} size={18} />
           {task.due_date && <span className={`text-[11px] ${overdue ? "text-red-600 font-semibold" : "text-slate-400"}`}>{overdue && "⚠ "}{task.due_date.slice(5)}</span>}
         </div>
+      </div>
       </div>
     </button>
   );

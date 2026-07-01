@@ -34,8 +34,9 @@ function groupValue(task: CreativeTask, by: KanbanGroupBy): string {
   return task.task_type ?? NONE;
 }
 
-function coverKey(task: CreativeTask): string | null {
-  return (task.cover_image_r2_key as string) || (task.sku_image_key as string) || null;
+// รูปการ์ด: Parent SKU มาก่อน (ตามกฎเดียวกับ drawer) → รูปที่อัปเอง → รูป SKU
+export function coverKey(task: CreativeTask): string | null {
+  return (task.parent_sku_image_key as string) || (task.cover_image_r2_key as string) || (task.sku_image_key as string) || null;
 }
 
 // ───────── การ์ด ─────────

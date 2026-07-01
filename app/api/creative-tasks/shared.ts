@@ -9,18 +9,19 @@ export const SELECT = `id, task_no, title, description, task_type, brand_id, cam
   brand:brands!brand_id(name, color),
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, standard_price, cover_image_r2_key),
-  parent:parent_skus_v2!parent_sku_id(code, name_th)`;
+  parent:parent_skus_v2!parent_sku_id(code, name_th, cover_image_r2_key)`;
 
 /** map แถวดิบ + join → flat object พร้อม label (ของกลางใน module นี้) */
 export function flattenTask(r: Record<string, unknown>, empMap: Map<string, string>): Record<string, unknown> {
   const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
   const c = (Array.isArray(r.campaign) ? r.campaign[0] : r.campaign) as { name?: string } | null;
   const s = (Array.isArray(r.sku) ? r.sku[0] : r.sku) as Record<string, unknown> | null;
-  const par = (Array.isArray(r.parent) ? r.parent[0] : r.parent) as { code?: string; name_th?: string } | null;
+  const par = (Array.isArray(r.parent) ? r.parent[0] : r.parent) as { code?: string; name_th?: string; cover_image_r2_key?: string | null } | null;
   const out: Record<string, unknown> = { ...r };
   delete out.brand; delete out.campaign; delete out.sku; delete out.parent;
   out.parent_sku_code = par?.code ?? null;
   out.parent_sku_name = par?.name_th ?? null;
+  out.parent_sku_image_key = par?.cover_image_r2_key ?? null;
   out.brand_label = b?.name ?? null;
   out.brand_color = b?.color ?? null;
   out.campaign_label = c?.name ?? null;

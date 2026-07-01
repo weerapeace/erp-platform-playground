@@ -29,7 +29,7 @@ export type CreativeTask = {
   campaign_id: string | null; campaign_label: string | null;
   sku_id: string | null; sku_code: string | null; sku_name: string | null;
   sku_color: string | null; sku_price: number | null; sku_image_key: string | null;
-  parent_sku_id: string | null; parent_sku_code: string | null; parent_sku_name: string | null;
+  parent_sku_id: string | null; parent_sku_code: string | null; parent_sku_name: string | null; parent_sku_image_key: string | null;
   product_name: string | null;
   cover_image_r2_key: string | null;
   reference_html?: string | null;   // โน้ต/อ้างอิง (rich text)
