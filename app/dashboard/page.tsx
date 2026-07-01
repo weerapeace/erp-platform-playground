@@ -202,6 +202,31 @@ export default function DashboardPage() {
     return Array.from(map.entries());
   }, [visible]);
 
+  // ---- 🎯 โฟกัสวันนี้ — จัดอันดับงานที่ควรทำก่อน (จากงานค้างทั้งหมด) ----
+  const focusItems = useMemo(() => {
+    const now = Date.now();
+    const score = (n: Notification) => {
+      let s = 0;
+      if (isPinned(n)) s += 300;                              // ปักหมุด = สำคัญสุด
+      if (n.due_at) {
+        const d = new Date(n.due_at).getTime();
+        if (d < now) s += 250;                                // เกินกำหนด
+        else if (d - now < 86_400_000) s += 120;              // ครบใน 24 ชม.
+      }
+      s += n.priority === "high" ? 100 : n.priority === "low" ? 0 : 10;
+      if (!n.read_at) s += 30;
+      const ageH = (now - new Date(n.created_at).getTime()) / 3_600_000;
+      s += Math.max(0, 48 - ageH) * 0.5;                      // งานใหม่ๆ ดันขึ้นเล็กน้อย
+      return s;
+    };
+    return items
+      .filter(n => !n.read_at && !isSnoozed(n))
+      .map(n => ({ n, s: score(n) }))
+      .sort((a, b) => b.s - a.s)
+      .slice(0, 5)
+      .map(x => x.n);
+  }, [items]);
+
   const firstName = user?.name?.split(" ")[0] ?? "";
 
   return (
@@ -231,6 +256,11 @@ export default function DashboardPage() {
       </div>
 
       <div className="px-4 sm:px-8 py-5 space-y-5 max-w-4xl">
+        {/* ---- 🎯 โฟกัสวันนี้ ---- */}
+        {tab !== "team" && focusItems.length > 0 && (
+          <FocusBand items={focusItems} onOpen={openItem} />
+        )}
+
         {/* ---- Tabs ---- */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <TabBtn active={tab === "unread"}  onClick={() => setTab("unread")}  label="ยังไม่อ่าน" count={counts.unread} />
@@ -396,6 +426,32 @@ function EmptyState({ tab }: { tab: Tab }) {
     <div className="bg-white rounded-xl border border-dashed border-slate-200 py-14 text-center">
       <div className="text-4xl mb-3 opacity-40">{icon}</div>
       <p className="text-sm text-slate-400">{text}</p>
+    </div>
+  );
+}
+
+// ---- 🎯 Today Focus band ----
+function FocusBand({ items, onOpen }: { items: Notification[]; onOpen: (n: Notification) => void }) {
+  return (
+    <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-3">
+      <div className="flex items-center gap-2 mb-2 px-1">
+        <span className="text-sm">🎯</span>
+        <span className="text-sm font-semibold text-slate-800">โฟกัสวันนี้</span>
+        <span className="text-[11px] text-slate-500">{items.length} งานที่ควรทำก่อน</span>
+      </div>
+      <div className="space-y-1.5">
+        {items.map((n, i) => (
+          <button key={n.id} onClick={() => onOpen(n)}
+            className="w-full text-left flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-white/70 hover:bg-white border border-amber-100 hover:border-amber-200 transition-colors">
+            <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+            <span className="text-base shrink-0">{iconFor(n.event_type)}</span>
+            <span className="flex-1 min-w-0 text-xs font-medium text-slate-800 truncate">{n.title}</span>
+            {n.priority === "high" && <span className="text-[9px] font-semibold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full shrink-0">ด่วน</span>}
+            {isPinned(n) && <span className="text-xs shrink-0" title="ปักหมุด">📌</span>}
+            <span className="text-[10px] text-slate-400 shrink-0">{relTime(n.created_at)}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
