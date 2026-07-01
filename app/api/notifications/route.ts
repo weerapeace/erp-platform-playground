@@ -26,6 +26,18 @@ export type NotificationsResponse = {
   error:          string | null;
 };
 
+// notification ของคนอื่นในทีม (สำหรับ owner/manager) + ชื่อผู้รับ
+export type TeamNotification = Notification & {
+  recipient_name:  string;
+  recipient_color: string | null;
+};
+
+export type TeamNotificationsResponse = {
+  data:    TeamNotification[];
+  allowed: boolean;           // false = user ไม่มีสิทธิ์ notifications.view_team
+  error:   string | null;
+};
+
 // ---- GET — list + unread count ----
 
 export async function GET(request: NextRequest) {
@@ -34,7 +46,21 @@ export async function GET(request: NextRequest) {
   const unreadOnly     = searchParams.get("unread_only") === "true";
   const includeSnoozed = searchParams.get("include_snoozed") === "true";
 
+  const scope  = searchParams.get("scope");
   const client = supabaseFromRequest(request);
+
+  // ---- scope=team: ภาพรวมทีม (เฉพาะคนมีสิทธิ์ notifications.view_team) ----
+  if (scope === "team") {
+    const [{ data: allowed }, { data: teamList, error: teamErr }] = await Promise.all([
+      client.rpc("erp_can", { p_permission: "notifications.view_team" }),
+      client.rpc("erp_notifications_team_list", { p_limit: limit, p_include_snoozed: true }),
+    ]);
+    if (teamErr) {
+      return NextResponse.json({ data: [], allowed: !!allowed, error: teamErr.message } satisfies TeamNotificationsResponse, { status: 500 });
+    }
+    return NextResponse.json({ data: (teamList as TeamNotification[]) ?? [], allowed: !!allowed, error: null } satisfies TeamNotificationsResponse);
+  }
+
   const [{ data: list, error: listErr }, { data: unread, error: countErr }] = await Promise.all([
     client.rpc("erp_notifications_list", { p_limit: limit, p_unread_only: unreadOnly, p_include_snoozed: includeSnoozed }),
     client.rpc("erp_notifications_unread_count"),

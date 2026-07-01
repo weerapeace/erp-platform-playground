@@ -8,7 +8,7 @@ import { ActivityFeed } from "@/components/activity-feed";
 import type { ActivityEntry } from "@/components/activity-feed";
 import { useAuth, roleLabel } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import type { Notification, NotificationsResponse } from "@/app/api/notifications/route";
+import type { Notification, NotificationsResponse, TeamNotification, TeamNotificationsResponse } from "@/app/api/notifications/route";
 import type { DashboardStats, DashboardResponse } from "@/app/api/dashboard/route";
 import type { AuditLogsResponse } from "@/app/api/audit-logs/route";
 
@@ -67,7 +67,7 @@ function snoozePresets(): { label: string; until: string }[] {
   ];
 }
 
-type Tab = "unread" | "pinned" | "all" | "snoozed";
+type Tab = "unread" | "pinned" | "all" | "snoozed" | "team";
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -81,6 +81,11 @@ export default function DashboardPage() {
   const [tab, setTab]         = useState<Tab>("unread");
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [snoozeOpen, setSnoozeOpen] = useState<string | null>(null);
+
+  // ---- ภาพรวมทีม (owner/manager เท่านั้น) ----
+  const [teamItems, setTeamItems]     = useState<TeamNotification[]>([]);
+  const [teamAllowed, setTeamAllowed] = useState(false);
+  const [teamLoading, setTeamLoading] = useState(false);
 
   const loadNotifications = useCallback(async () => {
     if (!user) return;
@@ -100,6 +105,19 @@ export default function DashboardPage() {
   }, [user]);
 
   useEffect(() => { loadNotifications(); }, [loadNotifications]);
+
+  const loadTeam = useCallback(async () => {
+    if (!user) return;
+    setTeamLoading(true);
+    try {
+      const res  = await apiFetch("/api/notifications?scope=team&limit=300");
+      const json: TeamNotificationsResponse = await res.json();
+      setTeamAllowed(!!json.allowed);
+      setTeamItems(json.data ?? []);
+    } catch { /* silent — ไม่มีสิทธิ์/โหลดไม่ได้ ก็แค่ไม่โชว์แท็บ */ }
+    finally { setTeamLoading(false); }
+  }, [user]);
+  useEffect(() => { loadTeam(); }, [loadTeam]);
 
   // ---- ภาพรวมระบบ (ของเดิม) ----
   const [stats, setStats]       = useState<DashboardStats | null>(null);
@@ -204,7 +222,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-400">
             {lastRefreshed && <span className="hidden sm:inline">อัปเดต {lastRefreshed.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}</span>}
-            <button onClick={loadNotifications} disabled={loadingN}
+            <button onClick={() => { loadNotifications(); loadTeam(); }} disabled={loadingN}
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">
               <span className={loadingN ? "animate-spin" : ""}>🔄</span> รีเฟรช
             </button>
@@ -219,14 +237,20 @@ export default function DashboardPage() {
           <TabBtn active={tab === "pinned"}  onClick={() => setTab("pinned")}  label="📌 ปักหมุด"  count={counts.pinned} />
           <TabBtn active={tab === "all"}     onClick={() => setTab("all")}     label="ทั้งหมด" />
           <TabBtn active={tab === "snoozed"} onClick={() => setTab("snoozed")} label="💤 เลื่อนไว้" count={counts.snoozed} />
+          {teamAllowed && (
+            <TabBtn active={tab === "team"} onClick={() => setTab("team")} label="👥 ภาพรวมทีม" />
+          )}
           <div className="flex-1" />
-          {counts.unread > 0 && (
+          {tab !== "team" && counts.unread > 0 && (
             <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline px-2">อ่านทั้งหมด</button>
           )}
         </div>
 
         {/* ---- Notification feed ---- */}
-        {errN ? (
+        {tab === "team" ? (
+          <TeamView items={teamItems} loading={teamLoading}
+            onOpen={(n) => { if (n.link_url) router.push(n.link_url); }} />
+        ) : errN ? (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 flex items-center justify-between">
             <span>{errN}</span>
             <button onClick={loadNotifications} className="text-red-600 underline shrink-0 ml-3">ลองใหม่</button>
@@ -365,12 +389,79 @@ function EmptyState({ tab }: { tab: Tab }) {
     pinned:  { icon: "📌", text: "ยังไม่มีงานที่ปักหมุดไว้" },
     all:     { icon: "🔔", text: "ยังไม่มีการแจ้งเตือน" },
     snoozed: { icon: "💤", text: "ไม่มีงานที่เลื่อนไว้" },
+    team:    { icon: "👥", text: "ยังไม่มีงานของทีม" },
   };
   const { icon, text } = map[tab];
   return (
     <div className="bg-white rounded-xl border border-dashed border-slate-200 py-14 text-center">
       <div className="text-4xl mb-3 opacity-40">{icon}</div>
       <p className="text-sm text-slate-400">{text}</p>
+    </div>
+  );
+}
+
+// ---- Team overview (owner/manager) ----
+type TeamPerson = { id: string; name: string; color: string | null; items: TeamNotification[]; unread: number };
+
+function TeamView({ items, loading, onOpen }: {
+  items: TeamNotification[]; loading: boolean; onOpen: (n: TeamNotification) => void;
+}) {
+  const people = useMemo<TeamPerson[]>(() => {
+    const map = new Map<string, TeamPerson>();
+    for (const n of items) {
+      if (!map.has(n.user_id)) map.set(n.user_id, { id: n.user_id, name: n.recipient_name, color: n.recipient_color, items: [], unread: 0 });
+      map.get(n.user_id)!.items.push(n);
+    }
+    const arr = Array.from(map.values());
+    for (const p of arr) p.unread = p.items.filter(n => !n.read_at && !isSnoozed(n)).length;
+    arr.sort((a, b) => b.unread - a.unread || a.name.localeCompare(b.name, "th"));
+    return arr;
+  }, [items]);
+
+  if (loading && items.length === 0)
+    return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-24 bg-white rounded-xl border border-slate-200 animate-pulse" />)}</div>;
+  if (people.length === 0)
+    return <div className="bg-white rounded-xl border border-dashed border-slate-200 py-14 text-center"><div className="text-4xl mb-3 opacity-40">👥</div><p className="text-sm text-slate-400">ยังไม่มีงานของทีม</p></div>;
+
+  const totalUnread = people.reduce((s, p) => s + p.unread, 0);
+  return (
+    <div className="space-y-3">
+      <div className="text-xs text-slate-500 px-1">{people.length} คน · งานค้างรวม <span className="font-semibold text-slate-700">{totalUnread}</span> รายการ</div>
+      {people.map(p => <TeamPersonCard key={p.id} person={p} onOpen={onOpen} />)}
+    </div>
+  );
+}
+
+function TeamPersonCard({ person, onOpen }: { person: TeamPerson; onOpen: (n: TeamNotification) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? person.items : person.items.slice(0, 5);
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-slate-100 bg-slate-50/60">
+        <span className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+          style={{ backgroundColor: person.color || "#64748b" }}>{person.name.charAt(0).toUpperCase()}</span>
+        <span className="text-sm font-medium text-slate-800 flex-1 truncate">{person.name}</span>
+        {person.unread > 0
+          ? <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">ค้าง {person.unread}</span>
+          : <span className="text-[10px] text-emerald-600">✓ ไม่มีค้าง</span>}
+      </div>
+      <div className="divide-y divide-slate-50">
+        {shown.map(n => (
+          <button key={n.id} onClick={() => onOpen(n)}
+            className="w-full text-left px-4 py-2 flex items-center gap-2.5 hover:bg-slate-50 transition-colors">
+            <span className="text-base shrink-0">{iconFor(n.event_type)}</span>
+            <span className={`flex-1 min-w-0 text-xs truncate ${!n.read_at ? "font-semibold text-slate-800" : "text-slate-600"}`}>{n.title}</span>
+            {!n.read_at && !isSnoozed(n) && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />}
+            <span className="text-[10px] text-slate-400 shrink-0">{relTime(n.created_at)}</span>
+          </button>
+        ))}
+      </div>
+      {person.items.length > 5 && (
+        <button onClick={() => setExpanded(e => !e)}
+          className="w-full text-[11px] text-slate-500 hover:bg-slate-50 py-1.5 border-t border-slate-100">
+          {expanded ? "ย่อ" : `+ อีก ${person.items.length - 5} รายการ`}
+        </button>
+      )}
     </div>
   );
 }
