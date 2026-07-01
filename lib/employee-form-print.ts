@@ -228,9 +228,9 @@ export function buildEmployeeFormHtml(lang: EmployeeFormLang = "th", skills: Ski
     @page { size: A4; margin: 0; }
     * { box-sizing: border-box; }
     body { margin: 0; background: #f1f1f1; color: #111; font-family: "Sarabun", "Noto Sans Myanmar", Tahoma, "Myanmar Text", Arial, sans-serif; font-size: 11px; }
-    .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 9mm 10mm; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
-    .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border-bottom: 2.5px solid #1f4e79; padding-bottom: 5px; margin-bottom: 5px; }
-    .photo { width: 23mm; height: 28mm; border: 1px solid #999; border-radius: 2px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #777; flex: none; padding: 2px; line-height: 1.3; }
+    .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 7mm 9mm; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
+    .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border-bottom: 1.2px solid #1f4e79; padding-bottom: 4px; margin-bottom: 4px; }
+    .photo { width: 22mm; height: 27mm; border: 0.6px solid #b3b3b3; border-radius: 2px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #777; flex: none; padding: 2px; line-height: 1.3; }
     .title-wrap { flex: 1; text-align: center; padding-top: 1mm; }
     .form-title { font-size: 18px; font-weight: 700; color: #1f2937; }
     .form-sub { font-size: 9px; color: #6b7280; letter-spacing: 1px; margin-top: 1px; }
@@ -238,36 +238,36 @@ export function buildEmployeeFormHtml(lang: EmployeeFormLang = "th", skills: Ski
     .corp { width: 64mm; flex: none; font-size: 8.5px; }
     .corp .cr { display: flex; align-items: flex-end; gap: 4px; margin-bottom: 3px; }
     .corp .cr .cl { color: #444; flex: none; max-width: 30mm; line-height: 1.15; }
-    .corp .cr .cv { flex: 1; border-bottom: 1px solid #000; min-height: 13px; }
-    .sec { display: flex; align-items: center; gap: 7px; margin: 7px 0 4px; font-weight: 600; font-size: 12px; background: #eef2f7; border-left: 3px solid #1f4e79; padding: 3px 6px; break-inside: avoid; }
+    .corp .cr .cv { flex: 1; border-bottom: 0.6px solid #888; min-height: 12px; }
+    .sec { display: flex; align-items: center; gap: 7px; margin: 5px 0 3px; font-weight: 600; font-size: 12px; background: #eef2f7; border-left: 2px solid #1f4e79; padding: 3px 6px; break-inside: avoid; }
     .sec .num { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #1f4e79; color: #fff; font-size: 10px; font-weight: 700; flex: none; }
     .sec .snote { font-weight: 400; font-size: 9.5px; color: #6b7280; }
     .sec .en, .lab .en, .cb .en, .decl .en, .corp .en { font-weight: 400; color: #6b7280; }
-    .subhead { font-size: 10px; font-weight: 600; color: #1f4e79; margin: 3px 0 0; }
-    .fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 14px; margin-bottom: 2px; break-inside: avoid; }
-    .cell { border-bottom: 1px solid #000; min-height: 8.5mm; padding-top: 1px; }
+    .subhead { font-size: 10px; font-weight: 600; color: #1f4e79; margin: 2px 0 0; }
+    .fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 14px; margin-bottom: 1px; break-inside: avoid; }
+    .cell { border-bottom: 0.6px solid #888; min-height: 7.6mm; padding-top: 1px; }
     .cell.nb { border-bottom: none; min-height: auto; padding-bottom: 1px; }
     .lab { display: block; font-size: 9px; color: #444; line-height: 1.2; }
-    .checks { display: flex; flex-wrap: wrap; gap: 3px 13px; margin-top: 3px; }
+    .checks { display: flex; flex-wrap: wrap; gap: 3px 13px; margin-top: 2px; }
     .cb { white-space: nowrap; font-size: 10px; }
-    .tail { display: inline-block; width: 26mm; border-bottom: 1px solid #000; vertical-align: bottom; }
-    .digits { display: flex; align-items: center; gap: 5px; margin-top: 3px; }
+    .tail { display: inline-block; width: 26mm; border-bottom: 0.6px solid #888; vertical-align: bottom; }
+    .digits { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
     .dgrp { display: flex; gap: 2px; }
-    .dbox { width: 5mm; height: 6mm; border: 1px solid #555; border-radius: 1px; display: inline-block; }
-    .dsep { color: #555; font-weight: 600; }
+    .dbox { width: 4.8mm; height: 5.6mm; border: 0.6px solid #777; border-radius: 1px; display: inline-block; }
+    .dsep { color: #777; }
     .tbl { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 2px; break-inside: avoid; }
-    .tbl th, .tbl td { border: 1px solid #555; padding: 3px 5px; }
+    .tbl th, .tbl td { border: 0.6px solid #999; padding: 3px 5px; }
     .tbl th { background: #eef2f7; font-weight: 600; text-align: left; }
-    .tbl td { height: 8mm; }
+    .tbl td { height: 7mm; }
     .tbl .ord { width: 13mm; text-align: center; }
-    .checklist { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 18px; font-size: 10px; padding: 1px 0; break-inside: avoid; }
-    .checklist.skills { grid-template-columns: repeat(3, 1fr); gap: 5px 14px; }
+    .checklist { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; font-size: 10px; padding: 1px 0; break-inside: avoid; }
+    .checklist.skills { grid-template-columns: repeat(3, 1fr); gap: 4px 14px; }
     .checklist.skills .cb { white-space: normal; }
-    .decl { font-size: 10px; line-height: 1.4; margin: 3px 0 0; break-inside: avoid; }
-    .sign { display: flex; gap: 20mm; margin-top: 9mm; padding: 0 6mm; break-inside: avoid; }
+    .decl { font-size: 10px; line-height: 1.4; margin: 2px 0 0; break-inside: avoid; }
+    .sign { display: flex; gap: 20mm; margin-top: 6mm; padding: 0 6mm; break-inside: avoid; }
     .sign .col { flex: 1; text-align: center; }
-    .sign .sline { border-top: 1px solid #000; padding-top: 4px; font-size: 10px; color: #333; }
-    @media print { body { background: #fff; } .page { box-shadow: none; margin: 0; } }
+    .sign .sline { border-top: 0.6px solid #888; padding-top: 4px; font-size: 10px; color: #333; }
+    @media print { body { background: #fff; } .page { box-shadow: none; margin: 0; min-height: 0; padding: 6mm 9mm; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   </style>
 </head>
 <body>
