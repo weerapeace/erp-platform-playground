@@ -1,17 +1,17 @@
 "use client";
 
-// หน้ารายการเป้าหมาย (เฟส 1 mock) — ใช้ Universal DataTable กลาง + การ์ด KPI
-// ปุ่ม "ตั้งเป้าหมายใหม่" เปิดป๊อปอัปผ่าน ERPModal กลาง
-import { useMemo, useState } from "react";
+// หน้ารายการเป้าหมาย (เฟส 2a) — ดึงข้อมูลจริงจาก /api/goals ผ่าน service กลาง
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import {
-  MOCK_GOALS, CATEGORY_LABEL, goalProgress, daysLeft,
-  type Goal,
+  CATEGORY_LABEL, goalProgress, daysLeft,
+  type Goal, type GoalDraft,
 } from "./mock-data";
+import { listGoals, createGoal } from "./api";
 import { GoalStatusBadge, GoalHealthBadge, ProgressBar } from "./goal-badges";
 import { GoalFormModal } from "./goal-form-modal";
 import { GameBar } from "./game-bar";
@@ -27,10 +27,22 @@ export default function GoalsListPage() {
   const router = useRouter();
   const toast = useToast();
   const { user } = useAuth();
-  const [goals, setGoals] = useState<Goal[]>(MOCK_GOALS);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
-  const myName = user?.name ?? "อีวา";
+  const myName = user?.name ?? "";
+  const myId = user?.id ?? "";
+
+  const load = useCallback(() => {
+    setLoading(true);
+    listGoals()
+      .then((gs) => { setGoals(gs); setError(null); })
+      .catch((e) => setError(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ"))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   const kpi = useMemo(() => ({
     total: goals.length,
@@ -100,16 +112,23 @@ export default function GoalsListPage() {
 
   const views = useMemo(() => [
     { id: "all", label: "ทั้งหมด" },
-    { id: "mine", label: "เป้าหมายของฉัน", filter: (r: Record<string, unknown>) => (r as unknown as Goal).owner === myName },
+    { id: "mine", label: "เป้าหมายของฉัน", filter: (r: Record<string, unknown>) => !!myId && (r as unknown as Goal).owner_id === myId },
     { id: "team", label: "เป้าหมายทีม", filter: (r: Record<string, unknown>) => (r as unknown as Goal).level === "team" },
     { id: "risk", label: "กำลังเสี่ยง/หลุดเป้า", filter: (r: Record<string, unknown>) => { const g = r as unknown as Goal; return g.status === "active" && (g.health === "at_risk" || g.health === "off_track"); } },
     { id: "achieved", label: "สำเร็จแล้ว", filter: (r: Record<string, unknown>) => (r as unknown as Goal).status === "achieved" },
-  ], [myName]);
+  ], [myId]);
 
-  function handleCreate(goal: Goal) {
-    setGoals((prev) => [goal, ...prev]);
-    setCreateOpen(false);
-    toast.success(`ตั้งเป้าหมาย "${goal.title}" แล้ว`);
+  async function handleCreate(draft: GoalDraft): Promise<boolean> {
+    try {
+      const g = await createGoal(draft);
+      setGoals((prev) => [g, ...prev]);
+      setCreateOpen(false);
+      toast.success(`ตั้งเป้าหมาย "${g.title}" แล้ว`);
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "สร้างเป้าหมายไม่สำเร็จ");
+      return false;
+    }
   }
 
   return (
@@ -118,7 +137,7 @@ export default function GoalsListPage() {
       <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
         <div>
           <h1 className="text-xl font-bold text-slate-900">🎯 เป้าหมาย & เส้นทางสู่ความสำเร็จ</h1>
-          <p className="text-sm text-slate-500 mt-0.5">สวัสดี {myName} · ตั้งเป้าหมาย แตกเป็นขั้นบันได แล้วเดินไปทีละก้าว</p>
+          <p className="text-sm text-slate-500 mt-0.5">สวัสดี {myName || "ผู้ใช้"} · ตั้งเป้าหมาย แตกเป็นขั้นบันได แล้วเดินไปทีละก้าว</p>
         </div>
         <div className="flex items-center gap-2">
           <GameBar />
@@ -144,6 +163,9 @@ export default function GoalsListPage() {
         <DataTable<Goal>
           data={goals}
           columns={columns}
+          loading={loading}
+          error={error ?? undefined}
+          onRetry={load}
           tableId="goals"
           views={views}
           searchableKeys={["title", "goal_no", "owner", "category"]}
@@ -157,7 +179,7 @@ export default function GoalsListPage() {
         />
       </div>
 
-      <GoalFormModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={handleCreate} existingCount={goals.length} />
+      <GoalFormModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={handleCreate} />
     </div>
   );
 }

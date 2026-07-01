@@ -35,7 +35,8 @@ export type Goal = {
   description?: string;
   category: string;          // sales | ops | production | finance | product | personal ...
   level: GoalLevel;
-  owner: string;
+  owner: string;             // ชื่อเจ้าของ (display)
+  owner_id?: string | null;  // auth uid เจ้าของ (ใช้กรอง "ของฉัน")
   department?: string;
   collaborators?: string[];
   status: GoalStatus;
@@ -58,6 +59,23 @@ export type Goal = {
 
 /** กฎเหรียญเริ่มต้น (ถ้าเป้าไม่ได้ตั้งเอง) */
 export const DEFAULT_REWARD = { per_step: 5, on_achieve: 40 };
+
+/** payload ตอนสร้างเป้าหมายใหม่ (ส่งไป API) */
+export type GoalDraft = {
+  title: string;
+  why?: string;
+  category: string;
+  level: GoalLevel;
+  department?: string;
+  target_date?: string;
+  measure_type: MeasureType;
+  measure_unit?: string;
+  start_value?: number;
+  target_value?: number;
+  current_value?: number;
+  reward?: { per_step?: number; on_achieve?: number; units_per_coin?: number };
+  steps: { title: string; target_date?: string }[];
+};
 
 // ---- ป้าย/ชื่อภาษาไทย (เฟส 2 ย้ายเข้า lib/status-config กลาง) ----
 

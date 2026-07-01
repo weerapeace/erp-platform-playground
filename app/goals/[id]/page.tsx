@@ -1,19 +1,19 @@
 "use client";
 
-// หน้ารายละเอียดเป้าหมาย (เฟส 1 mock) — พระเอกคือ "เส้นทางสู่ความสำเร็จ" (GoalRoadmap กลาง)
-// กดขั้นบันไดสลับเสร็จ/ยังไม่เสร็จ → วง% เดินเอง · Check-in / เปลี่ยนสถานะ ผ่าน ERPModal กลาง
-import { useMemo, useState } from "react";
+// หน้ารายละเอียดเป้าหมาย (เฟส 2a) — ดึง/บันทึกผ่าน /api/goals จริง
+// พระเอก: "เส้นทางสู่ความสำเร็จ" (GoalRoadmap) + ลูกเล่นเกม (เหรียญเด้ง) ยังใช้ player-store (localStorage) รอเฟส 2b
+import { useMemo, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ERPModal } from "@/components/modal";
 import { SearchableSelect } from "@/components/searchable-select";
 import { useToast } from "@/components/toast";
-import { useAuth } from "@/components/auth";
 import { GoalRoadmap, type RoadmapStep } from "@/components/goal-roadmap";
 import {
-  findGoal, goalProgress, daysLeft, CATEGORY_LABEL, HEALTH_META, DEFAULT_REWARD,
-  type Goal, type GoalHealth, type GoalStatus, type GoalCheckin,
+  goalProgress, daysLeft, CATEGORY_LABEL, HEALTH_META, DEFAULT_REWARD,
+  type Goal, type GoalHealth, type GoalStatus,
 } from "../mock-data";
+import { fetchGoal, updateStep, addCheckin, updateGoal } from "../api";
 import { GoalStatusBadge, GoalHealthBadge, ProgressRing } from "../goal-badges";
 import { GameBar } from "../game-bar";
 import { useCoinFx } from "../coin-fx";
@@ -42,80 +42,97 @@ const STATUS_OPTIONS: { value: GoalStatus; label: string; cls: string }[] = [
 export default function GoalDetailPage() {
   const id = String(useParams().id ?? "");
   const toast = useToast();
-  const { user } = useAuth();
-  const myName = user?.name ?? "อีวา";
 
-  const [goal, setGoal] = useState<Goal | undefined>(() => {
-    const g = findGoal(id);
-    return g ? (JSON.parse(JSON.stringify(g)) as Goal) : undefined;
-  });
+  const [goal, setGoal] = useState<Goal | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [checkinOpen, setCheckinOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const { fx, burst } = useCoinFx();
 
+  const load = useCallback(() => {
+    setLoading(true);
+    fetchGoal(id)
+      .then((g) => { setGoal(g); setLoadError(null); })
+      .catch((e) => setLoadError(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ"))
+      .finally(() => setLoading(false));
+  }, [id]);
+  useEffect(() => { load(); }, [load]);
+
   const progress = useMemo(() => (goal ? goalProgress(goal) : 0), [goal]);
+  const reward = useMemo(
+    () => ({ ...DEFAULT_REWARD, ...((goal?.reward as { per_step?: number; on_achieve?: number; units_per_coin?: number }) ?? {}) }),
+    [goal],
+  );
 
-  if (!goal) {
-    return (
-      <div className="p-10 text-center">
-        <p className="text-slate-500 mb-3">ไม่พบเป้าหมายนี้</p>
-        <Link href="/goals" className="text-violet-600 hover:underline">← กลับไปหน้ารายการ</Link>
-      </div>
-    );
-  }
+  if (loading) return <Center>กำลังโหลดเป้าหมาย…</Center>;
+  if (loadError) return (
+    <Center>
+      <p className="text-slate-500 mb-3">{loadError}</p>
+      <button onClick={load} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg">ลองใหม่</button>
+    </Center>
+  );
+  if (!goal) return (
+    <Center>
+      <p className="text-slate-500 mb-3">ไม่พบเป้าหมายนี้</p>
+      <Link href="/goals" className="text-violet-600 hover:underline">← กลับไปหน้ารายการ</Link>
+    </Center>
+  );
 
-  const dl = daysLeft(goal.target_date);
-  const showMetric = goal.measure_type !== "boolean" && goal.target_value != null;
-  const reward = { ...DEFAULT_REWARD, ...(goal.reward ?? {}) };
+  const g = goal; // non-null alias
+  const dl = daysLeft(g.target_date);
+  const showMetric = g.measure_type !== "boolean" && g.target_value != null;
 
-  function toggleStep(stepId: string) {
-    const step = goal.steps.find((s) => s.id === stepId);
+  async function toggleStep(stepId: string) {
+    const step = g.steps.find((s) => s.id === stepId);
     if (!step) return;
     const becameDone = step.status !== "done";
-    setGoal((prev) =>
-      prev
-        ? {
-            ...prev,
-            steps: prev.steps.map((s) =>
-              s.id === stepId ? { ...s, status: becameDone ? ("done" as const) : ("in_progress" as const) } : s,
-            ),
-          }
-        : prev,
-    );
-    // เหรียญ: ทำขั้นบันไดเสร็จ (ไม่หักคืนตอนกดกลับ — ให้กำลังใจ)
-    if (becameDone && (reward.per_step ?? 0) > 0) {
-      awardCoins(reward.per_step!, `ทำขั้นบันไดเสร็จ · ${goal.title}`);
-      burst(reward.per_step!, "ทำขั้นเสร็จ");
+    try {
+      const updated = await updateStep(g.id, stepId, { status: becameDone ? "done" : "in_progress" });
+      setGoal(updated);
+      if (becameDone && (reward.per_step ?? 0) > 0) {
+        awardCoins(reward.per_step!, `ทำขั้นบันไดเสร็จ · ${g.title}`);
+        burst(reward.per_step!, "ทำขั้นเสร็จ");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "อัปเดตขั้นบันไดไม่สำเร็จ");
     }
   }
 
-  function addCheckin(c: GoalCheckin) {
-    const oldVal = goal.current_value;
-    setGoal((prev) =>
-      prev ? { ...prev, health: c.health, current_value: c.current_value ?? prev.current_value, checkins: [c, ...prev.checkins] } : prev,
-    );
-    setCheckinOpen(false);
-    // เหรียญ: check-in สม่ำเสมอ (+3) + ทุก X หน่วย (แบบวิดพื้น)
-    let coins = 3;
-    const parts = ["check-in"];
-    const upc = reward.units_per_coin;
-    if (upc && c.current_value != null && oldVal != null && c.current_value > oldVal) {
-      const gained = Math.floor(c.current_value / upc) - Math.floor(oldVal / upc);
-      if (gained > 0) { coins += gained; parts.push(`ทุก ${upc} หน่วย`); }
+  async function handleCheckin(input: { health: GoalHealth; current_value?: number; note: string }) {
+    const oldVal = g.current_value;
+    try {
+      const updated = await addCheckin(g.id, { health: input.health, current_value: input.current_value ?? null, note: input.note });
+      setGoal(updated);
+      setCheckinOpen(false);
+      let coins = 3;
+      const parts = ["check-in"];
+      const upc = reward.units_per_coin;
+      if (upc && input.current_value != null && oldVal != null && input.current_value > oldVal) {
+        const gained = Math.floor(input.current_value / upc) - Math.floor(oldVal / upc);
+        if (gained > 0) { coins += gained; parts.push(`ทุก ${upc} หน่วย`); }
+      }
+      awardCoins(coins, `${parts.join(" + ")} · ${g.title}`);
+      burst(coins, parts.join(" + "));
+      toast.success("บันทึกความคืบหน้าแล้ว");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
     }
-    awardCoins(coins, `${parts.join(" + ")} · ${goal.title}`);
-    burst(coins, parts.join(" + "));
-    toast.success("บันทึกความคืบหน้าแล้ว");
   }
 
-  function changeStatus(s: GoalStatus) {
-    const wasAchieved = goal.status === "achieved";
-    setGoal((prev) => (prev ? { ...prev, status: s } : prev));
-    setStatusOpen(false);
-    toast.success(`เปลี่ยนสถานะเป็น "${STATUS_OPTIONS.find((o) => o.value === s)?.label ?? s}"`);
-    if (s === "achieved" && !wasAchieved && (reward.on_achieve ?? 0) > 0) {
-      awardCoins(reward.on_achieve!, `เป้าสำเร็จ · ${goal.title}`);
-      burst(reward.on_achieve!, "เป้าสำเร็จ! 🎉");
+  async function changeStatus(sVal: GoalStatus) {
+    const wasAchieved = g.status === "achieved";
+    try {
+      const updated = await updateGoal(g.id, { status: sVal });
+      setGoal(updated);
+      setStatusOpen(false);
+      toast.success(`เปลี่ยนสถานะเป็น "${STATUS_OPTIONS.find((o) => o.value === sVal)?.label ?? sVal}"`);
+      if (sVal === "achieved" && !wasAchieved && (reward.on_achieve ?? 0) > 0) {
+        awardCoins(reward.on_achieve!, `เป้าสำเร็จ · ${g.title}`);
+        burst(reward.on_achieve!, "เป้าสำเร็จ! 🎉");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "เปลี่ยนสถานะไม่สำเร็จ");
     }
   }
 
@@ -132,15 +149,15 @@ export default function GoalDetailPage() {
         <div className="flex flex-wrap justify-between gap-4">
           <div className="flex-1 min-w-[240px]">
             <div className="flex items-center gap-2 flex-wrap mb-1.5">
-              <span className="font-mono text-xs text-slate-400">{goal.goal_no}</span>
-              <GoalStatusBadge status={goal.status} />
-              {goal.status === "active" && <GoalHealthBadge health={goal.health} />}
+              <span className="font-mono text-xs text-slate-400">{g.goal_no}</span>
+              <GoalStatusBadge status={g.status} />
+              {g.status === "active" && <GoalHealthBadge health={g.health} />}
             </div>
-            <h1 className="text-xl font-bold text-slate-900 leading-snug">{goal.title}</h1>
+            <h1 className="text-xl font-bold text-slate-900 leading-snug">{g.title}</h1>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500 mt-2">
-              <span>👤 เจ้าของ: {goal.owner}</span>
-              <span>📅 เส้นตาย: {fmtDate(goal.target_date)}{goal.status === "active" && dl != null && dl >= 0 ? ` (เหลือ ${dl} วัน)` : ""}</span>
-              <span>🏷️ {CATEGORY_LABEL[goal.category] ?? goal.category}{goal.department ? ` · ${goal.department}` : ""}</span>
+              <span>👤 เจ้าของ: {g.owner || "—"}</span>
+              <span>📅 เส้นตาย: {fmtDate(g.target_date)}{g.status === "active" && dl != null && dl >= 0 ? ` (เหลือ ${dl} วัน)` : ""}</span>
+              <span>🏷️ {CATEGORY_LABEL[g.category] ?? g.category}{g.department ? ` · ${g.department}` : ""}</span>
             </div>
           </div>
           <div className="flex flex-col items-center">
@@ -150,9 +167,9 @@ export default function GoalDetailPage() {
         </div>
 
         {/* Why */}
-        {goal.why && (
+        {g.why && (
           <div className="bg-slate-50 rounded-lg px-4 py-3 mt-4 text-sm text-slate-600">
-            <span className="text-slate-900 font-medium">🎯 ทำไมต้องทำ:</span> {goal.why}
+            <span className="text-slate-900 font-medium">🎯 ทำไมต้องทำ:</span> {g.why}
           </div>
         )}
 
@@ -160,14 +177,14 @@ export default function GoalDetailPage() {
         {showMetric && (
           <div className="mt-4">
             <div className="flex justify-between text-sm mb-1.5">
-              <span className="text-slate-500">ตัววัดผล{goal.measure_unit ? ` (${goal.measure_unit})` : ""}</span>
-              <span><span className="font-semibold text-slate-900">{fmtNum(goal.current_value)}</span> <span className="text-slate-400">/ เป้า {fmtNum(goal.target_value)}</span></span>
+              <span className="text-slate-500">ตัววัดผล{g.measure_unit ? ` (${g.measure_unit})` : ""}</span>
+              <span><span className="font-semibold text-slate-900">{fmtNum(g.current_value)}</span> <span className="text-slate-400">/ เป้า {fmtNum(g.target_value)}</span></span>
             </div>
             <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
               <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${progress}%` }} />
             </div>
             <div className="flex justify-between text-xs text-slate-400 mt-1">
-              <span>เริ่ม {fmtNum(goal.start_value)}</span><span>เป้า {fmtNum(goal.target_value)}</span>
+              <span>เริ่ม {fmtNum(g.start_value)}</span><span>เป้า {fmtNum(g.target_value)}</span>
             </div>
           </div>
         )}
@@ -177,7 +194,7 @@ export default function GoalDetailPage() {
           <span className="text-xs text-slate-400">ได้เหรียญเมื่อ:</span>
           <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2.5 py-1">🪙 ก้าวละ +{reward.per_step}</span>
           {reward.units_per_coin != null && (
-            <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2.5 py-1">🪙 ทุก {reward.units_per_coin} {goal.measure_unit ?? "หน่วย"} = +1</span>
+            <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2.5 py-1">🪙 ทุก {reward.units_per_coin} {g.measure_unit ?? "หน่วย"} = +1</span>
           )}
           <span className="text-xs bg-violet-50 text-violet-700 border border-violet-200 rounded-full px-2.5 py-1">🏆 สำเร็จ +{reward.on_achieve}</span>
         </div>
@@ -188,13 +205,16 @@ export default function GoalDetailPage() {
             <h2 className="text-base font-semibold text-slate-900">🛤️ เส้นทางสู่ความสำเร็จ</h2>
             <span className="text-xs text-slate-400">แตะวงกลมเพื่อสลับเสร็จ/ยังไม่เสร็จ</span>
           </div>
-          <GoalRoadmap
-            steps={goal.steps as RoadmapStep[]}
-            editable
-            onToggleStep={toggleStep}
-            onAddStep={() => toast.success("เฟส 2: เพิ่มขั้นบันไดจะบันทึกลงฐานข้อมูลจริง")}
-            onCreateTask={(s) => toast.success(`เฟส 3: จะสร้างงาน "${s.title}" ใน Task Manager แล้วผูกกลับมา`)}
-          />
+          {g.steps.length === 0 ? (
+            <p className="text-sm text-slate-400">ยังไม่มีขั้นบันได</p>
+          ) : (
+            <GoalRoadmap
+              steps={g.steps as RoadmapStep[]}
+              editable
+              onToggleStep={toggleStep}
+              onCreateTask={(st) => toast.success(`เฟส 3: จะสร้างงาน "${st.title}" ใน Task Manager แล้วผูกกลับมา`)}
+            />
+          )}
         </div>
 
         {/* ปุ่ม */}
@@ -205,19 +225,16 @@ export default function GoalDetailPage() {
           <button onClick={() => setStatusOpen(true)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
             ↻ เปลี่ยนสถานะ
           </button>
-          <button onClick={() => toast.success("เฟส 2: แก้ไขเป้าหมายผ่านฟอร์มกลาง")} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
-            ✎ แก้ไข
-          </button>
         </div>
 
         {/* ประวัติ check-in */}
         <div className="border-t border-slate-100 mt-5 pt-4">
           <h2 className="text-base font-semibold text-slate-900 mb-3">📈 ประวัติอัปเดตความคืบหน้า</h2>
-          {goal.checkins.length === 0 ? (
+          {g.checkins.length === 0 ? (
             <p className="text-sm text-slate-400">ยังไม่มีการอัปเดต — กด “อัปเดตความคืบหน้า” เพื่อบันทึกครั้งแรก</p>
           ) : (
             <div className="space-y-3">
-              {goal.checkins.map((c) => (
+              {g.checkins.map((c) => (
                 <div key={c.id} className="flex gap-3">
                   <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${HEALTH_META[c.health].dot}`} />
                   <div className="flex-1">
@@ -225,7 +242,7 @@ export default function GoalDetailPage() {
                       <span className="font-medium text-slate-900">{c.author}</span>
                       <span className="text-slate-400"> · {fmtDate(c.checkin_date)} · </span>
                       <span className={HEALTH_META[c.health].cls.split(" ").find((x) => x.startsWith("text-"))}>{HEALTH_META[c.health].label}</span>
-                      {c.current_value != null && <span className="text-slate-400"> · {fmtNum(c.current_value)}{goal.measure_unit ?? ""}</span>}
+                      {c.current_value != null && <span className="text-slate-400"> · {fmtNum(c.current_value)}{g.measure_unit ?? ""}</span>}
                     </div>
                     <div className="text-sm text-slate-600 mt-0.5">{c.note}</div>
                   </div>
@@ -236,15 +253,19 @@ export default function GoalDetailPage() {
         </div>
       </div>
 
-      <CheckinModal open={checkinOpen} onClose={() => setCheckinOpen(false)} goal={goal} author={myName} onSave={addCheckin} />
-      <StatusModal open={statusOpen} onClose={() => setStatusOpen(false)} current={goal.status} onPick={changeStatus} />
+      <CheckinModal open={checkinOpen} onClose={() => setCheckinOpen(false)} goal={g} onSave={handleCheckin} />
+      <StatusModal open={statusOpen} onClose={() => setStatusOpen(false)} current={g.status} onPick={changeStatus} />
     </div>
   );
 }
 
+function Center({ children }: { children: React.ReactNode }) {
+  return <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-6">{children}</div>;
+}
+
 // ---- Check-in modal ----
-function CheckinModal({ open, onClose, goal, author, onSave }: {
-  open: boolean; onClose: () => void; goal: Goal; author: string; onSave: (c: GoalCheckin) => void;
+function CheckinModal({ open, onClose, goal, onSave }: {
+  open: boolean; onClose: () => void; goal: Goal; onSave: (input: { health: GoalHealth; current_value?: number; note: string }) => void;
 }) {
   const [health, setHealth] = useState<GoalHealth>(goal.health);
   const [note, setNote] = useState("");
@@ -253,9 +274,6 @@ function CheckinModal({ open, onClose, goal, author, onSave }: {
 
   function submit() {
     onSave({
-      id: `c-${Date.now()}`,
-      author,
-      checkin_date: "2026-07-01",
       health,
       current_value: current.trim() === "" ? undefined : Number(current),
       note: note.trim() || "(ไม่มีโน้ต)",
@@ -282,7 +300,7 @@ function CheckinModal({ open, onClose, goal, author, onSave }: {
         {showValue && (
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
-              ค่าปัจจุบัน{goal.measure_unit ? ` (${goal.measure_unit})` : ""} — เป้า {goal.target_value?.toLocaleString("th-TH")}
+              ค่าปัจจุบัน{goal.measure_unit ? ` (${goal.measure_unit})` : ""}{goal.target_value != null ? ` — เป้า ${goal.target_value.toLocaleString("th-TH")}` : ""}
             </label>
             <input type="number" value={current} onChange={(e) => setCurrent(e.target.value)}
               placeholder={String(goal.current_value ?? "")}

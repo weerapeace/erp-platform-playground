@@ -9,14 +9,12 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { DateInput } from "@/components/date-input";
 import {
   CATEGORY_LABEL,
-  type Goal,
-  type GoalStep,
+  type GoalDraft,
   type MeasureType,
 } from "./mock-data";
 
 type DraftStep = { key: string; title: string; target_date: string };
 
-const OWNER_OPTIONS = ["อีวา", "สมชาย", "นภา", "พลอย", "อาร์ม"].map((n) => ({ value: n, label: n }));
 const DEPT_OPTIONS = ["ฝ่ายขาย", "ฝ่ายปฏิบัติการ", "ฝ่ายผลิต", "ฝ่ายการตลาด", "ฝ่ายไอที"].map((n) => ({ value: n, label: n }));
 const CATEGORY_OPTIONS = Object.entries(CATEGORY_LABEL).map(([value, label]) => ({ value, label }));
 const LEVEL_OPTIONS = [
@@ -36,18 +34,16 @@ export function GoalFormModal({
   open,
   onClose,
   onCreate,
-  existingCount,
 }: {
   open: boolean;
   onClose: () => void;
-  onCreate: (goal: Goal) => void;
-  existingCount: number;
+  /** สร้างเป้า (เรียก API) — คืน true ถ้าสำเร็จ (ป๊อปอัปจะรีเซ็ต/ปิด) */
+  onCreate: (draft: GoalDraft) => Promise<boolean>;
 }) {
   const [title, setTitle] = useState("");
   const [why, setWhy] = useState("");
   const [category, setCategory] = useState("sales");
   const [level, setLevel] = useState("team");
-  const [owner, setOwner] = useState("อีวา");
   const [department, setDepartment] = useState("ฝ่ายขาย");
   const [targetDate, setTargetDate] = useState("");
   const [measureType, setMeasureType] = useState<MeasureType>("percent");
@@ -57,6 +53,7 @@ export function GoalFormModal({
   const [currentValue, setCurrentValue] = useState("");
   const [steps, setSteps] = useState<DraftStep[]>([{ key: "s1", title: "", target_date: "" }]);
   const [showError, setShowError] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const isNumeric = measureType === "currency" || measureType === "number" || measureType === "percent";
   const dirty = useMemo(
@@ -65,7 +62,7 @@ export function GoalFormModal({
   );
 
   function reset() {
-    setTitle(""); setWhy(""); setCategory("sales"); setLevel("team"); setOwner("อีวา");
+    setTitle(""); setWhy(""); setCategory("sales"); setLevel("team");
     setDepartment("ฝ่ายขาย"); setTargetDate(""); setMeasureType("percent"); setUnit("");
     setStartValue(""); setTargetValue(""); setCurrentValue(""); setSteps([{ key: "s1", title: "", target_date: "" }]);
     setShowError(false);
@@ -91,42 +88,27 @@ export function GoalFormModal({
     });
   }
 
-  function submit() {
+  async function submit() {
     if (!title.trim()) { setShowError(true); return; }
-    const cleanSteps: GoalStep[] = steps
-      .filter((s) => s.title.trim() !== "")
-      .map((s, i) => ({
-        id: `${Date.now()}-${i}`,
-        title: s.title.trim(),
-        status: "pending",
-        target_date: s.target_date || null,
-        weight: 1,
-      }));
     const num = (v: string) => (v.trim() === "" ? undefined : Number(v));
-    const goal: Goal = {
-      id: `new-${Date.now()}`,
-      goal_no: `GOAL-2026-${String(existingCount + 1).padStart(4, "0")}`,
+    const draft: GoalDraft = {
       title: title.trim(),
       why: why.trim() || undefined,
       category,
-      level: level as Goal["level"],
-      owner,
+      level: level as GoalDraft["level"],
       department: level === "personal" ? undefined : department,
-      status: "active",
-      health: "on_track",
-      progress_mode: "auto",
-      progress_percent: 0,
+      target_date: targetDate || undefined,
       measure_type: measureType,
       measure_unit: unit.trim() || undefined,
       start_value: isNumeric ? num(startValue) : undefined,
       target_value: isNumeric ? num(targetValue) : undefined,
       current_value: isNumeric ? num(currentValue) : undefined,
-      target_date: targetDate || undefined,
-      steps: cleanSteps,
-      checkins: [],
+      steps: steps.filter((st) => st.title.trim() !== "").map((st) => ({ title: st.title.trim(), target_date: st.target_date || undefined })),
     };
-    onCreate(goal);
-    reset();
+    setSubmitting(true);
+    const ok = await onCreate(draft);
+    setSubmitting(false);
+    if (ok) reset();
   }
 
   return (
@@ -140,11 +122,11 @@ export function GoalFormModal({
       hasUnsavedChanges={dirty}
       footer={
         <>
-          <button onClick={close} className="h-9 px-4 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
+          <button onClick={close} disabled={submitting} className="h-9 px-4 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">
             ยกเลิก
           </button>
-          <button onClick={submit} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">
-            สร้างเป้าหมาย
+          <button onClick={submit} disabled={submitting} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">
+            {submitting ? "กำลังบันทึก..." : "สร้างเป้าหมาย"}
           </button>
         </>
       }
@@ -175,7 +157,6 @@ export function GoalFormModal({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="หมวด"><SearchableSelect value={category} options={CATEGORY_OPTIONS} onChange={setCategory} /></Field>
           <Field label="ระดับ"><SearchableSelect value={level} options={LEVEL_OPTIONS} onChange={setLevel} /></Field>
-          <Field label="เจ้าของ"><SearchableSelect value={owner} options={OWNER_OPTIONS} onChange={setOwner} /></Field>
           {level !== "personal" && (
             <Field label="แผนก"><SearchableSelect value={department} options={DEPT_OPTIONS} onChange={setDepartment} /></Field>
           )}
