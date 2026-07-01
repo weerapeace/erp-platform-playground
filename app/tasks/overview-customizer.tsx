@@ -17,7 +17,7 @@ import { useCreativeStatuses } from "./use-statuses";
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
 
-export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string; titleSize?: "sm" | "md" | "lg" | "xl"; align?: "left" | "center"; petUrl?: string | null; petLottieUrl?: string | null; petFrames?: string[] | null };
+export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string; titleSize?: "sm" | "md" | "lg" | "xl"; align?: "left" | "center"; petUrl?: string | null; petLottieUrl?: string | null; petLottieData?: unknown | null; petFrames?: string[] | null };
 export type CardTheme = { icon: string; iconUrl: string | null; color: string; bgUrl: string | null; label: string | null };
 export type PageTheme = { mode: "none" | "color" | "image"; color: string; imageUrl: string | null };
 export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean };
@@ -68,7 +68,7 @@ export function ovStatusBg(theme: OverviewTheme, key: string): string | null {
 }
 
 export const DEFAULT_THEME: OverviewTheme = {
-  hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff", titleSize: "lg", align: "left", petUrl: null, petLottieUrl: null, petFrames: null },
+  hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff", titleSize: "lg", align: "left", petUrl: null, petLottieUrl: null, petLottieData: null, petFrames: null },
   cards: {
     all: { icon: "📋", iconUrl: null, color: "slate", bgUrl: null, label: null },
     mine: { icon: "🙋", iconUrl: null, color: "violet", bgUrl: null, label: null },
@@ -290,6 +290,17 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
     setBusy(tag); setErr(null);
     try { apply(await uploadImage(file)); } catch (e) { setErr(String(e)); } finally { setBusy(null); }
   };
+  // Lottie: อ่านไฟล์ในเบราว์เซอร์แล้วเก็บ JSON ลงธีมตรง ๆ (ไม่ผ่าน R2 — เลี่ยงบั๊กอัปโหลด/เสิร์ฟ + ขึ้นทันที)
+  const loadLottieFile = async (f: File) => {
+    setBusy("lottie"); setErr(null);
+    try {
+      const text = await f.text();
+      if (text.length > 400_000) throw new Error(tr("ไฟล์ใหญ่ไป (จำกัด ~400KB) — ใช้ช่องวางลิงก์แทน", "Too large (~400KB) — paste a URL instead"));
+      const json = JSON.parse(text) as Record<string, unknown>;
+      if (!json || typeof json !== "object" || !("layers" in json || "v" in json)) throw new Error(tr("ไม่ใช่ไฟล์ Lottie (.json)", "Not a Lottie .json"));
+      setHero({ petLottieData: json, petLottieUrl: null });
+    } catch (e) { setErr(tr("โหลด Lottie ไม่ได้: ", "Failed to load Lottie: ") + (e as Error).message); } finally { setBusy(null); }
+  };
 
   return (
     <ERPModal open={open} onClose={onClose} size="lg" title={t("🎨 แต่งหน้าภาพรวม (ของฉัน)", "🎨 Customize my overview")}
@@ -418,19 +429,18 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             ) : <span className="text-[11px] text-amber-600">{t("ต้องมีสิทธิ์อัปโหลด", "Need upload permission")}</span>}
             {theme.hero.petUrl && <button onClick={() => setHero({ petUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบ", "Remove")}</button>}
           </div>
-          {/* Lottie (ขยับลื่น ไฟล์เล็ก) — อัปโหลด .json หรือวางลิงก์ · ใช้แทนรูป/GIF ถ้าตั้งไว้ */}
-          <div className="flex items-center gap-2">
+          {/* Lottie (ขยับลื่น) — อ่านไฟล์ในเครื่อง (ไม่ผ่าน R2 → ขึ้นทันที) หรือวางลิงก์ · ใช้แทนรูป/GIF ถ้าตั้งไว้ */}
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-slate-500">{t("Lottie (ขยับลื่น)", "Lottie (smooth)")}</span>
-            {canUpload && (
-              <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === "lottie" ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("อัปโหลดไฟล์ .json (ดาวน์โหลดฟรีจาก LottieFiles)", "Upload a .json (free from LottieFiles)")}>
-                {busy === "lottie" ? "…" : (theme.hero.petLottieUrl ? t("เปลี่ยน", "Change") : t("⬆ อัปโหลด .json", "⬆ Upload .json"))}
-                <input type="file" accept=".json,application/json" className="hidden" disabled={busy === "lottie"} onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (k) => setHero({ petLottieUrl: k }), "lottie"); e.target.value = ""; }} />
-              </label>
-            )}
-            <input value={(theme.hero.petLottieUrl && /^https?:/i.test(theme.hero.petLottieUrl)) ? theme.hero.petLottieUrl : ""} onChange={(e) => setHero({ petLottieUrl: e.target.value.trim() || null })} placeholder={t("หรือวางลิงก์ .json", "or paste .json URL")} className="h-7 px-2 text-[11px] border border-slate-200 rounded w-40" />
-            {theme.hero.petLottieUrl && <button onClick={() => setHero({ petLottieUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบ", "Remove")}</button>}
+            <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === "lottie" ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("เลือกไฟล์ .json (ดาวน์โหลดฟรีจาก LottieFiles)", "Pick a .json (free from LottieFiles)")}>
+              {busy === "lottie" ? "…" : ((theme.hero.petLottieData || theme.hero.petLottieUrl) ? t("เปลี่ยนไฟล์", "Change") : t("⬆ เลือกไฟล์ .json", "⬆ Choose .json"))}
+              <input type="file" accept=".json,application/json" className="hidden" disabled={busy === "lottie"} onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadLottieFile(f); e.target.value = ""; }} />
+            </label>
+            {theme.hero.petLottieData ? <span className="text-[11px] text-emerald-600">✓ {t("โหลดแล้ว", "Loaded")}</span> : null}
+            <input value={(theme.hero.petLottieUrl && /^https?:/i.test(theme.hero.petLottieUrl)) ? theme.hero.petLottieUrl : ""} onChange={(e) => setHero({ petLottieUrl: e.target.value.trim() || null, petLottieData: null })} placeholder={t("หรือวางลิงก์ .json", "or paste .json URL")} className="h-7 px-2 text-[11px] border border-slate-200 rounded w-40" />
+            {(theme.hero.petLottieData || theme.hero.petLottieUrl) ? <button onClick={() => setHero({ petLottieData: null, petLottieUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบ", "Remove")}</button> : null}
           </div>
-          <p className="text-[11px] text-slate-400">{t("Lottie = อนิเมชั่นเวกเตอร์ ขยับลื่น ไฟล์เล็ก (ดาวน์โหลดฟรีที่ lottiefiles.com → Lottie JSON) · ถ้าตั้ง Lottie จะใช้แทนรูป/GIF", "Lottie = smooth vector animation, tiny file (free at lottiefiles.com → Lottie JSON) · overrides image/GIF when set")}</p>
+          <p className="text-[11px] text-slate-400">{t("Lottie = อนิเมชั่นเวกเตอร์ ขยับลื่น (ดาวน์โหลดฟรีที่ lottiefiles.com → Lottie JSON) · เก็บในธีมของคุณ ขึ้นทันที · ถ้าตั้ง Lottie จะใช้แทนรูป/GIF", "Lottie = smooth vector animation (free at lottiefiles.com → Lottie JSON) · stored in your theme, shows instantly · overrides image/GIF when set")}</p>
           {/* หลายรูป (เฟรมอนิเมชั่น) — อัปหลาย PNG แล้วระบบสลับให้ขยับ */}
           <div className="pt-1">
             <div className="flex items-center gap-2 flex-wrap">

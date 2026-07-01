@@ -7,7 +7,7 @@
 // notify=false → กลับไปเป็นรูปลอยเฉย ๆ แบบเดิม · "งานใหม่" นับจากเวลาเข้าครั้งล่าสุด (localStorage)
 // ============================================================
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
 import type { PetConfig, PetCorner } from "./overview-customizer";
@@ -15,18 +15,21 @@ import type { PetConfig, PetCorner } from "./overview-customizer";
 // โหลด lottie-react เฉพาะตอนใช้จริง (กันบันเดิลบวมในหน้าที่ไม่มี Lottie)
 const Lottie = dynamic(() => import("lottie-react"), { ssr: false });
 
-// เล่นไฟล์ Lottie จาก URL/R2 — fetch JSON เองแล้วส่งให้ lottie-react
-function LottiePet({ src, size, animCls }: { src: string; size: number; animCls: string }) {
-  const [data, setData] = useState<Record<string, unknown> | null>(null);
+// เล่น Lottie จาก data ตรง ๆ (เก็บในธีม) หรือ fetch จาก URL — ล้มเหลว/กำลังโหลด → โชว์ fallback (ไม่ค้าง ⏳)
+function LottiePet({ data, src, size, animCls, fallback }: { data?: unknown; src?: string | null; size: number; animCls: string; fallback: ReactNode }) {
+  const [fetched, setFetched] = useState<Record<string, unknown> | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    let live = true;
-    fetch(src).then((r) => r.json()).then((j) => { if (live) setData(j as Record<string, unknown>); }).catch(() => { if (live) setData(null); });
+    if (data || !src) return;
+    let live = true; setFailed(false); setFetched(null);
+    fetch(src).then((r) => r.json()).then((j) => { if (live) setFetched(j as Record<string, unknown>); }).catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
-  }, [src]);
-  if (!data) return <span style={{ fontSize: size }} className={`block leading-none drop-shadow-lg ${animCls}`}>⏳</span>;
+  }, [data, src]);
+  const anim = (data as Record<string, unknown> | undefined) ?? fetched ?? undefined;
+  if (!anim || failed) return <>{fallback}</>;
   return (
     <div style={{ width: size, height: size }} className={`drop-shadow-lg ${animCls}`}>
-      <Lottie animationData={data} loop autoplay style={{ width: size, height: size }} />
+      <Lottie animationData={anim} loop autoplay style={{ width: size, height: size }} />
     </div>
   );
 }
@@ -64,9 +67,10 @@ const CORNER: Record<PetCorner, { pos: string; items: string; isTop: boolean; is
   tl: { pos: "top-1 left-3", items: "items-start", isTop: true, isLeft: true },
 };
 
-export function DashboardPet({ petUrl, lottieUrl, frames, cfg, data, onAlert }: {
+export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data, onAlert }: {
   petUrl: string | null;
   lottieUrl?: string | null;
+  lottieData?: unknown;
   frames?: string[] | null;
   cfg: PetConfig;
   data: PetData;
@@ -121,13 +125,18 @@ export function DashboardPet({ petUrl, lottieUrl, frames, cfg, data, onAlert }: 
   const corner = CORNER[cfg.corner ?? "br"];
   const size = cfg.size ?? 64;
   const lottieSrc = lottieSrcOf(lottieUrl ?? null);
+  const hasLottie = !!lottieData || !!lottieSrc;
   const frameList = (frames ?? []).filter(Boolean);
   const frameMs = cfg.frameMs ?? 400;
+  const petImgNode = petUrl ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={`/api/r2-image?key=${encodeURIComponent(petUrl)}&w=200`} alt="" style={{ width: size, height: size }} className="object-contain drop-shadow-lg" draggable={false} />
+  ) : null;
 
   // ปิดโหมดเตือน → ตัว PET ลอยเฉย ๆ แบบเดิม (หลายรูป > Lottie > รูป/GIF) — เคารพมุม/ขนาดที่ตั้งไว้
   if (!cfg.notify) {
     if (frameList.length) return <div className={`absolute ${corner.pos} pointer-events-none select-none`}><FramePet frames={frameList} size={size} intervalMs={frameMs} animCls="ov-pet-float" /></div>;
-    if (lottieSrc) return <div className={`absolute ${corner.pos} pointer-events-none select-none`}><LottiePet src={lottieSrc} size={size} animCls="ov-pet-float" /></div>;
+    if (hasLottie) return <div className={`absolute ${corner.pos} pointer-events-none select-none`}><LottiePet data={lottieData} src={lottieSrc} size={size} animCls="ov-pet-float" fallback={petImgNode} /></div>;
     return petUrl ? (
       // eslint-disable-next-line @next/next/no-img-element
       <img src={`/api/r2-image?key=${encodeURIComponent(petUrl)}&w=200`} alt="" style={{ width: size, height: size }} className={`absolute ${corner.pos} object-contain drop-shadow-lg pointer-events-none select-none`} />
@@ -136,6 +145,12 @@ export function DashboardPet({ petUrl, lottieUrl, frames, cfg, data, onAlert }: 
 
   const cur = alerts[Math.min(idx, Math.max(0, alerts.length - 1))];
   const face = hasAlert ? (cfg.emojiAlert ?? "🙀") : (cfg.emojiHappy ?? "🐥");
+  const alertCls = hasAlert ? "ov-pet-alert" : "ov-pet-float";
+  const faceNode = <span style={{ fontSize: size }} className={`block leading-none drop-shadow-lg ${alertCls}`}>{face}</span>;
+  const petImgAlertNode = petUrl ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={`/api/r2-image?key=${encodeURIComponent(petUrl)}&w=200`} alt="" style={{ width: size, height: size }} className={`object-contain drop-shadow-lg ${alertCls}`} draggable={false} />
+  ) : null;
 
   const bubbleEl = open ? (
     <div className="ov-bubble-pop max-w-[230px]">
@@ -163,14 +178,13 @@ export function DashboardPet({ petUrl, lottieUrl, frames, cfg, data, onAlert }: 
         <span className={`ov-badge-pulse absolute -top-1 ${corner.isLeft ? "-left-1" : "-right-1"} z-10 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow`}>{total > 99 ? "99+" : total}</span>
       )}
       {frameList.length ? (
-        <FramePet frames={frameList} size={size} intervalMs={hasAlert ? Math.round(frameMs / 2) : frameMs} animCls={hasAlert ? "ov-pet-alert" : "ov-pet-float"} />
-      ) : lottieSrc ? (
-        <LottiePet src={lottieSrc} size={size} animCls={hasAlert ? "ov-pet-alert" : "ov-pet-float"} />
-      ) : petUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={`/api/r2-image?key=${encodeURIComponent(petUrl)}&w=200`} alt="" style={{ width: size, height: size }} className={`object-contain drop-shadow-lg ${hasAlert ? "ov-pet-alert" : "ov-pet-float"}`} draggable={false} />
+        <FramePet frames={frameList} size={size} intervalMs={hasAlert ? Math.round(frameMs / 2) : frameMs} animCls={alertCls} />
+      ) : hasLottie ? (
+        <LottiePet data={lottieData} src={lottieSrc} size={size} animCls={alertCls} fallback={petImgAlertNode ?? faceNode} />
+      ) : petImgAlertNode ? (
+        petImgAlertNode
       ) : (
-        <span style={{ fontSize: size }} className={`block leading-none drop-shadow-lg ${hasAlert ? "ov-pet-alert" : "ov-pet-float"}`}>{face}</span>
+        faceNode
       )}
     </button>
   );
