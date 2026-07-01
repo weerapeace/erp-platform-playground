@@ -227,47 +227,47 @@ export function buildEmployeeFormHtml(lang: EmployeeFormLang = "th", skills: Ski
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&family=Noto+Sans+Myanmar:wght@400;600&display=swap');
     @page { size: A4; margin: 0; }
     * { box-sizing: border-box; }
-    body { margin: 0; background: #f1f1f1; color: #111; font-family: "Sarabun", "Noto Sans Myanmar", Tahoma, "Myanmar Text", Arial, sans-serif; font-size: 11px; line-height: 1.25; }
-    .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 9mm 10mm; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
-    .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border-bottom: 1.4px solid #1f4e79; padding-bottom: 5px; margin-bottom: 6px; }
-    .photo { width: 24mm; height: 29mm; border: 0.6px solid #b3b3b3; border-radius: 2px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #777; flex: none; padding: 2px; line-height: 1.3; }
-    .title-wrap { flex: 1; text-align: center; padding-top: 1.5mm; }
-    .form-title { font-size: 20px; font-weight: 700; color: #1f2937; }
-    .form-sub { font-size: 9px; color: #6b7280; letter-spacing: 1px; margin-top: 1px; }
-    .company { font-size: 10px; color: #374151; margin-top: 3px; }
-    .corp { width: 64mm; flex: none; font-size: 8.5px; }
-    .corp .cr { display: flex; align-items: flex-end; gap: 4px; margin-bottom: 4px; }
-    .corp .cr .cl { color: #444; flex: none; max-width: 30mm; line-height: 1.15; }
-    .corp .cr .cv { flex: 1; border-bottom: 0.6px solid #888; min-height: 14px; }
-    .sec { display: flex; align-items: center; gap: 7px; margin: 8px 0 5px; font-weight: 600; font-size: 12.5px; background: #eef2f7; border-left: 3px solid #1f4e79; padding: 4px 8px; break-inside: avoid; }
-    .sec .num { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: #1f4e79; color: #fff; font-size: 10.5px; font-weight: 700; flex: none; }
-    .sec .snote { font-weight: 400; font-size: 9.5px; color: #6b7280; }
+    body { margin: 0; background: #f1f1f1; color: #111; font-family: "Sarabun", "Noto Sans Myanmar", Tahoma, "Myanmar Text", Arial, sans-serif; font-size: 11px; line-height: 1.15; }
+    .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 8mm 10mm; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
+    .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border-bottom: 1.4px solid #1f4e79; padding-bottom: 4px; margin-bottom: 4px; }
+    .photo { width: 22mm; height: 27mm; border: 0.6px solid #b3b3b3; border-radius: 2px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #777; flex: none; padding: 2px; line-height: 1.25; }
+    .title-wrap { flex: 1; text-align: center; padding-top: 1mm; }
+    .form-title { font-size: 18px; font-weight: 700; color: #1f2937; }
+    .form-sub { font-size: 8.5px; color: #6b7280; letter-spacing: 1px; margin-top: 1px; }
+    .company { font-size: 9.5px; color: #374151; margin-top: 2px; }
+    .corp { width: 63mm; flex: none; font-size: 8px; }
+    .corp .cr { display: flex; align-items: flex-end; gap: 4px; margin-bottom: 3px; }
+    .corp .cr .cl { color: #444; flex: none; max-width: 30mm; line-height: 1.12; }
+    .corp .cr .cv { flex: 1; border-bottom: 0.6px solid #888; min-height: 12px; }
+    .sec { display: flex; align-items: center; gap: 6px; margin: 5px 0 3px; font-weight: 600; font-size: 12px; background: #eef2f7; border-left: 3px solid #1f4e79; padding: 3px 7px; break-inside: avoid; }
+    .sec .num { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #1f4e79; color: #fff; font-size: 10px; font-weight: 700; flex: none; }
+    .sec .snote { font-weight: 400; font-size: 9px; color: #6b7280; }
     .sec .en, .lab .en, .cb .en, .decl .en, .corp .en { font-weight: 400; color: #6b7280; }
-    .subhead { font-size: 10px; font-weight: 600; color: #1f4e79; margin: 5px 0 1px; }
-    .fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 9px 16px; margin-bottom: 3px; break-inside: avoid; }
-    .cell { border-bottom: 0.6px solid #888; min-height: 9mm; padding-top: 2px; }
+    .subhead { font-size: 10px; font-weight: 600; color: #1f4e79; margin: 3px 0 0; }
+    .fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 15px; margin-bottom: 1px; break-inside: avoid; }
+    .cell { border-bottom: 0.6px solid #888; min-height: 7.5mm; padding-top: 1px; }
     .cell.nb { border-bottom: none; min-height: auto; padding-bottom: 1px; }
-    .lab { display: block; font-size: 9px; color: #444; line-height: 1.2; }
-    .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
-    .cb { white-space: nowrap; font-size: 10px; line-height: 1.35; }
+    .lab { display: block; font-size: 9px; color: #444; line-height: 1.12; }
+    .checks { display: flex; flex-wrap: wrap; gap: 3px 13px; margin-top: 3px; }
+    .cb { white-space: nowrap; font-size: 10px; line-height: 1.25; }
     .tail { display: inline-block; width: 28mm; border-bottom: 0.6px solid #888; vertical-align: bottom; }
-    .digits { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
+    .digits { display: flex; align-items: center; gap: 5px; margin-top: 3px; }
     .dgrp { display: flex; gap: 2px; }
-    .dbox { width: 5mm; height: 6mm; border: 0.6px solid #777; border-radius: 1px; display: inline-block; }
+    .dbox { width: 4.8mm; height: 5.6mm; border: 0.6px solid #777; border-radius: 1px; display: inline-block; }
     .dsep { color: #777; font-weight: 600; }
-    .tbl { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 2px; break-inside: avoid; }
-    .tbl th, .tbl td { border: 0.6px solid #999; padding: 4px 6px; }
+    .tbl { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 1px; break-inside: avoid; }
+    .tbl th, .tbl td { border: 0.6px solid #999; padding: 3px 6px; }
     .tbl th { background: #eef2f7; font-weight: 600; text-align: left; }
-    .tbl td { height: 9mm; }
+    .tbl td { height: 8mm; }
     .tbl .ord { width: 13mm; text-align: center; }
-    .checklist { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; font-size: 10px; padding: 2px 0; break-inside: avoid; }
-    .checklist.skills { grid-template-columns: repeat(3, 1fr); gap: 6px 16px; }
+    .checklist { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; font-size: 10px; padding: 1px 0; break-inside: avoid; }
+    .checklist.skills { grid-template-columns: repeat(3, 1fr); gap: 4px 15px; }
     .checklist.skills .cb { white-space: normal; }
-    .decl { font-size: 10px; line-height: 1.45; margin: 4px 0 0; break-inside: avoid; }
-    .sign { display: flex; gap: 20mm; margin-top: 11mm; padding: 0 6mm; break-inside: avoid; }
+    .decl { font-size: 10px; line-height: 1.3; margin: 3px 0 0; break-inside: avoid; }
+    .sign { display: flex; gap: 20mm; margin-top: 6mm; padding: 0 6mm; break-inside: avoid; }
     .sign .col { flex: 1; text-align: center; }
     .sign .sline { border-top: 0.6px solid #888; padding-top: 4px; font-size: 10px; color: #333; }
-    @media print { body { background: #fff; } .page { box-shadow: none; margin: 0; min-height: 0; padding: 7mm 10mm; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    @media print { body { background: #fff; } .page { box-shadow: none; margin: 0; min-height: 0; padding: 6mm 10mm; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   </style>
 </head>
 <body>
