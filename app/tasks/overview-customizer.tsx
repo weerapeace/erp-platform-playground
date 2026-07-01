@@ -13,6 +13,7 @@ import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { KanbanSettingsControls } from "./kanban-settings";
 import { useCreativeStatuses } from "./use-statuses";
+import { LineSettings } from "./line-settings";
 
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
@@ -229,6 +230,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
   const t = useT();
   const { statuses } = useCreativeStatuses();
   const [busy, setBusy] = useState<string | null>(null);
+  const [tab, setTab] = useState<"theme" | "hero" | "cards" | "line">("theme");   // แยกหมวดเป็นแท็บ
   const [err, setErr] = useState<string | null>(null);
   // ธีมที่ผู้ใช้บันทึกเอง (เก็บใน user_ui_prefs key=tasks_overview_themes)
   const [saved, setSaved] = useState<{ name: string; theme: OverviewTheme }[]>([]);
@@ -247,6 +249,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
 
   useEffect(() => {
     if (!open) return;
+    setTab("theme");
     apiFetch("/api/user-prefs?key=tasks_overview_themes").then((r) => r.json())
       .then((j) => { if (j && !j.error && Array.isArray(j.value)) setSaved(j.value); }).catch(() => {});
   }, [open]);
@@ -312,10 +315,18 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">{t("เสร็จ", "Done")}</button>
       </>}>
       {err && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between">⚠ {err}<button onClick={() => setErr(null)} className="text-red-400 hover:text-red-700">✕</button></div>}
-      <p className="text-[11px] text-slate-400 mb-4">{t("ทุกการเปลี่ยนบันทึกอัตโนมัติ (เห็นผลทันที) · เป็นการแต่งของคุณคนเดียว ไม่กระทบคนอื่น", "Saves automatically (live) · personal to you")}</p>
+      <p className="text-[11px] text-slate-400 mb-3">{t("ทุกการเปลี่ยนบันทึกอัตโนมัติ (เห็นผลทันที) · เป็นการแต่งของคุณคนเดียว ไม่กระทบคนอื่น", "Saves automatically (live) · personal to you")}</p>
+
+      {/* ===== แท็บ ===== */}
+      <div className="flex items-center gap-1 mb-4 border-b border-slate-200 overflow-x-auto">
+        {([["theme", t("🎨 ธีม & สี", "🎨 Theme & colors")], ["hero", t("👋 แถบทักทาย & PET", "👋 Banner & PET")], ["cards", t("🗂 การ์ด & มุมมอง", "🗂 Cards & views")], ...(isAdmin ? [["line", t("🔔 LINE", "🔔 LINE")] as const] : [])] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)}
+            className={`shrink-0 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === k ? "border-violet-600 text-violet-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}>{label}</button>
+        ))}
+      </div>
 
       {/* ===== ธีมสำเร็จรูป (preset) ===== */}
-      <section className="mb-5">
+      <section hidden={tab !== "theme"} className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("ธีมสำเร็จรูป (กดเปลี่ยนทั้งหน้า)", "Preset themes (one-click)")}</div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {PRESETS.map((p) => (
@@ -355,7 +366,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       </section>
 
       {/* ===== สีหลักของหน้า (accent) ===== */}
-      <section className="mb-5">
+      <section hidden={tab !== "theme"} className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-1">{t("สีหลักของหน้า (ปุ่ม/ไฮไลต์)", "Page accent (buttons/highlights)")}</div>
         <div className="flex items-center gap-3">
           <input type="color" value={theme.accent} onChange={(e) => onChange({ ...theme, accent: e.target.value })} className="w-10 h-9 p-0 border border-slate-200 rounded cursor-pointer" />
@@ -368,7 +379,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       </section>
 
       {/* ===== Hero ===== */}
-      <section className="mb-5">
+      <section hidden={tab !== "hero"} className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("แถบทักทาย (Hero)", "Greeting banner (Hero)")}</div>
         <div className="flex items-center gap-2 mb-3">
           {([["gradient", t("ไล่สี", "Gradient")], ["solid", t("สีเดียว", "Solid")], ["image", t("รูปพื้นหลัง", "Image")]] as const).map(([m, label]) => (
@@ -498,7 +509,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       </section>
 
       {/* ===== พื้นหลังทั้งหน้า ===== */}
-      <section className="mb-5">
+      <section hidden={tab !== "hero"} className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("พื้นหลังทั้งหน้า", "Page background")}</div>
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           {([["none", t("ไม่มี", "None")], ["color", t("สีเดียว", "Solid")], ["image", t("รูปภาพ", "Image")]] as const).map(([m, label]) => (
@@ -524,7 +535,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       </section>
 
       {/* ===== ส่วนที่แสดงบนหน้า ===== */}
-      <section className="mb-5">
+      <section hidden={tab !== "cards"} className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("ส่วนที่แสดงบนหน้า", "Sections to show")}</div>
         <div className="flex flex-wrap gap-3">
           {([["shortcuts", t("ทางลัด", "Shortcuts")], ["filters", t("แถบกรอง (ประเภท/แบรนด์)", "Filter bar")], ["campaigns", t("แคมเปญที่กำลังทำ", "Active campaigns")]] as const).map(([k, label]) => (
@@ -536,7 +547,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       </section>
 
       {/* ===== มุมมองงานหลัก (Kanban / ตาราง) ===== */}
-      <section className="mb-5">
+      <section hidden={tab !== "cards"} className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("มุมมองงานหลัก", "Main task view")}</div>
         {/* เลือกแบบ Kanban / ตาราง */}
         <div className="flex items-center gap-2 mb-3">
@@ -550,7 +561,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       </section>
 
       {/* ===== อนิเมชั่น ===== */}
-      <section className="mb-5">
+      <section hidden={tab !== "cards"} className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("อนิเมชั่น", "Animations")}</div>
         <div className="flex flex-wrap gap-3">
           {([["hover", t("การ์ดเด้ง/ยกตอนชี้เมาส์", "Card lift on hover")], ["entrance", t("การ์ดค่อยๆ โผล่ตอนเปิดหน้า", "Cards fade in on load")], ["heroGradient", t("Hero ไล่สีขยับ", "Animated hero gradient")]] as const).map(([k, label]) => (
@@ -562,7 +573,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       </section>
 
       {/* ===== ฟอนต์ & ความหนาแน่น ===== */}
-      <section className="mb-5">
+      <section hidden={tab !== "theme"} className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("ฟอนต์ & ความหนาแน่น", "Font & density")}</div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <label className="flex items-center gap-2 text-xs text-slate-600">{t("ฟอนต์", "Font")}
@@ -588,7 +599,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       </section>
 
       {/* ===== PET แจ้งเตือน ===== */}
-      <section className="mb-5">
+      <section hidden={tab !== "hero"} className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-1">{t("PET แจ้งเตือน (ตัวการ์ตูนมุมแถบทักทาย)", "Pet alerts (mascot on the banner)")}</div>
         <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
           <input type="checkbox" checked={!!theme.pet?.notify} onChange={(e) => setPet({ notify: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
@@ -634,7 +645,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       </section>
 
       {/* ===== สีสถานะ (ของฉัน) ===== */}
-      <section className="mb-5">
+      <section hidden={tab !== "cards"} className="mb-5">
         <div className="text-sm font-semibold text-slate-700 mb-1">{t("สีสถานะงาน (ของฉัน · ไล่สีได้)", "Status colors (yours · gradient)")}</div>
         <p className="text-[11px] text-slate-400 mb-2">{t("เปลี่ยนสีหัวคอลัมน์/ป้ายสถานะบนหน้านี้ · ติ๊กไล่สีเพื่อใส่สีที่สอง · เว้น = ใช้สีเริ่มต้น", "Recolor status columns/badges on this page · check gradient for a 2nd color · blank = default")}</p>
         <div className="space-y-1.5">
@@ -657,7 +668,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       </section>
 
       {/* ===== Cards ===== */}
-      <section>
+      <section hidden={tab !== "cards"}>
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("การ์ดสรุป (ไอคอน · รูปเต็ม · ชื่อ · สี)", "Summary cards (icon · full image · label · color)")}</div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-2">
           <div className="flex items-center gap-2">
@@ -735,6 +746,15 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
           })}
         </div>
       </section>
+
+      {/* ===== แจ้งเตือน LINE (แอดมิน) ===== */}
+      {isAdmin && (
+        <section hidden={tab !== "line"}>
+          <div className="text-sm font-semibold text-slate-700 mb-1">{t("แจ้งเตือนงานเข้า LINE", "LINE task notifications")}</div>
+          <p className="text-[11px] text-slate-400 mb-3">{t("เตือนเมื่อมีงานใหม่ + งานย่อยส่งมารอตรวจ (ส่งเข้ากลุ่ม LINE) · เป็นการตั้งค่าของทั้งทีม", "Alerts on new tasks + review submissions (to a LINE group) · team-wide setting")}</p>
+          <LineSettings />
+        </section>
+      )}
     </ERPModal>
   );
 }
