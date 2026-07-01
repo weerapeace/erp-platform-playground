@@ -51,8 +51,8 @@ export async function lineListProducts(apiKey: string, params: { page?: number; 
 // ส่งทั้ง key id และ variantId เผื่อ API ต้องการชื่อใดชื่อหนึ่ง · ถ้า error จะคืน body จริงกลับมา
 export async function lineUpdatePrices(apiKey: string, productId: string, variants: { variantId: string | number; price: number }[]): Promise<{ ok: boolean; status: number; error?: string }> {
   try {
-    // LINE ต้องการ variants.id เป็น "ตัวเลข" (number only) + price ตัวเลข
-    const payload = { variants: variants.map((v) => ({ id: Number(v.variantId), price: Number(v.price) })) };
+    // LINE ต้องการ variants.id เป็นตัวเลข + price ตัวเลข + instantDiscount (ส่วนลดทันที) required → 0 = ไม่มีส่วนลด
+    const payload = { variants: variants.map((v) => ({ id: Number(v.variantId), price: Number(v.price), instantDiscount: 0 })) };
     const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}/prices`, {
       method: "PATCH", headers: headers(apiKey), body: JSON.stringify(payload),
     });
