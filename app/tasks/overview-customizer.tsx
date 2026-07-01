@@ -393,7 +393,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
               <div className="flex items-center gap-2">
                 <label className={`h-8 px-3 leading-8 text-xs font-medium rounded cursor-pointer ${busy === "hero" ? "bg-slate-200 text-slate-400" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
                   {busy === "hero" ? t("กำลังอัป…", "Uploading…") : t("⬆ อัปโหลดรูป", "⬆ Upload")}
-                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={busy === "hero"}
+                  <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={busy === "hero"}
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (k) => setHero({ imageUrl: k }), "hero"); e.target.value = ""; }} /></label>
                 {theme.hero.imageUrl && <button onClick={() => setHero({ imageUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบรูป", "Remove")}</button>}
               </div>
@@ -513,7 +513,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
               <div className="flex items-center gap-2">
                 <label className={`h-8 px-3 leading-8 text-xs font-medium rounded cursor-pointer ${busy === "page" ? "bg-slate-200 text-slate-400" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
                   {busy === "page" ? t("กำลังอัป…", "Uploading…") : t("⬆ อัปโหลดรูป", "⬆ Upload")}
-                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={busy === "page"}
+                  <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={busy === "page"}
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (k) => setPage({ imageUrl: k }), "page"); e.target.value = ""; }} /></label>
                 {theme.page.imageUrl && <button onClick={() => setPage({ imageUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบรูป", "Remove")}</button>}
               </div>
@@ -692,7 +692,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             </label>
             <span className="text-[11px] text-slate-400">{t("(เว้น = สีตามชุดสีการ์ด)", "(blank = follow card color)")}</span>
           </div>
-          <span className="text-[11px] text-slate-400 w-full">{t("💡 รูปเต็มแนะนำ ~400×400 · ไอคอน ~64×64", "💡 Full image ~400×400 · icon ~64×64")}</span>
+          <span className="text-[11px] text-slate-400 w-full">{t("💡 รูปเต็มแนะนำ ~400×400 · ไอคอน ~64×64 · ใส่ GIF ได้ (ภาพขยับ)", "💡 Full image ~400×400 · icon ~64×64 · GIF supported (animated)")}</span>
         </div>
         <div className="space-y-2">
           {CARD_KEYS.map((k) => {
@@ -713,14 +713,14 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
                 {canUpload && (
                   <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === `c:${k}` ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
                     {busy === `c:${k}` ? "…" : t("⬆ ไอคอน", "⬆ Icon")}
-                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={busy === `c:${k}`}
+                    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={busy === `c:${k}`}
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (key) => setCard(k, { iconUrl: key }), `c:${k}`); e.target.value = ""; }} /></label>
                 )}
                 {c.iconUrl && <button onClick={() => setCard(k, { iconUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">×</button>}
                 {canUpload && (
                   <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === `cb:${k}` ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
                     {busy === `cb:${k}` ? "…" : (c.bgUrl ? t("เปลี่ยนรูปเต็ม", "Full") : t("⬆ รูปเต็ม", "⬆ Full"))}
-                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={busy === `cb:${k}`}
+                    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={busy === `cb:${k}`}
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (key) => setCard(k, { bgUrl: key }), `cb:${k}`); e.target.value = ""; }} /></label>
                 )}
                 {c.bgUrl && <button onClick={() => setCard(k, { bgUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบรูปเต็ม", "× full")}</button>}
