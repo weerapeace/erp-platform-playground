@@ -50,9 +50,14 @@ export type Goal = {
   start_value?: number;
   target_value?: number;
   current_value?: number;
+  /** กฎการได้เหรียญ (เกม) — ก้าวละ / ทุก X หน่วย / โบนัสตอนสำเร็จ */
+  reward?: { per_step?: number; on_achieve?: number; units_per_coin?: number };
   steps: GoalStep[];
   checkins: GoalCheckin[];
 };
+
+/** กฎเหรียญเริ่มต้น (ถ้าเป้าไม่ได้ตั้งเอง) */
+export const DEFAULT_REWARD = { per_step: 5, on_achieve: 40 };
 
 // ---- ป้าย/ชื่อภาษาไทย (เฟส 2 ย้ายเข้า lib/status-config กลาง) ----
 
@@ -245,6 +250,7 @@ export const MOCK_GOALS: Goal[] = [
     start_value: 0,
     target_value: 100,
     current_value: 52,
+    reward: { units_per_coin: 20, per_step: 5, on_achieve: 40 },
     steps: [
       { id: "g4s1", title: "เลือกกิจกรรมที่ชอบ (วิ่ง/โยคะ)", status: "done", target_date: "2026-01-10", weight: 1 },
       { id: "g4s2", title: "จัดตารางประจำสัปดาห์", status: "done", target_date: "2026-01-20", weight: 1 },

@@ -14,6 +14,7 @@ import {
 } from "./mock-data";
 import { GoalStatusBadge, GoalHealthBadge, ProgressBar } from "./goal-badges";
 import { GoalFormModal } from "./goal-form-modal";
+import { GameBar } from "./game-bar";
 
 const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 function fmtDate(iso?: string): string {
@@ -119,12 +120,15 @@ export default function GoalsListPage() {
           <h1 className="text-xl font-bold text-slate-900">🎯 เป้าหมาย & เส้นทางสู่ความสำเร็จ</h1>
           <p className="text-sm text-slate-500 mt-0.5">สวัสดี {myName} · ตั้งเป้าหมาย แตกเป็นขั้นบันได แล้วเดินไปทีละก้าว</p>
         </div>
-        <button
-          onClick={() => setCreateOpen(true)}
-          className="h-10 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors"
-        >
-          + ตั้งเป้าหมายใหม่
-        </button>
+        <div className="flex items-center gap-2">
+          <GameBar />
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="h-10 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors"
+          >
+            + ตั้งเป้าหมายใหม่
+          </button>
+        </div>
       </div>
 
       {/* KPI */}

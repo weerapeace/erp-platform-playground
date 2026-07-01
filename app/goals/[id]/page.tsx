@@ -11,10 +11,13 @@ import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { GoalRoadmap, type RoadmapStep } from "@/components/goal-roadmap";
 import {
-  findGoal, goalProgress, daysLeft, CATEGORY_LABEL, HEALTH_META,
+  findGoal, goalProgress, daysLeft, CATEGORY_LABEL, HEALTH_META, DEFAULT_REWARD,
   type Goal, type GoalHealth, type GoalStatus, type GoalCheckin,
 } from "../mock-data";
 import { GoalStatusBadge, GoalHealthBadge, ProgressRing } from "../goal-badges";
+import { GameBar } from "../game-bar";
+import { useCoinFx } from "../coin-fx";
+import { awardCoins } from "../player-store";
 
 const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 function fmtDate(iso?: string): string {
@@ -48,6 +51,7 @@ export default function GoalDetailPage() {
   });
   const [checkinOpen, setCheckinOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  const { fx, burst } = useCoinFx();
 
   const progress = useMemo(() => (goal ? goalProgress(goal) : 0), [goal]);
 
@@ -62,40 +66,66 @@ export default function GoalDetailPage() {
 
   const dl = daysLeft(goal.target_date);
   const showMetric = goal.measure_type !== "boolean" && goal.target_value != null;
+  const reward = { ...DEFAULT_REWARD, ...(goal.reward ?? {}) };
 
   function toggleStep(stepId: string) {
-    setGoal((prev) => {
-      if (!prev) return prev;
-      const steps = prev.steps.map((s) =>
-        s.id === stepId ? { ...s, status: s.status === "done" ? ("in_progress" as const) : ("done" as const) } : s,
-      );
-      return { ...prev, steps };
-    });
+    const step = goal.steps.find((s) => s.id === stepId);
+    if (!step) return;
+    const becameDone = step.status !== "done";
+    setGoal((prev) =>
+      prev
+        ? {
+            ...prev,
+            steps: prev.steps.map((s) =>
+              s.id === stepId ? { ...s, status: becameDone ? ("done" as const) : ("in_progress" as const) } : s,
+            ),
+          }
+        : prev,
+    );
+    // เหรียญ: ทำขั้นบันไดเสร็จ (ไม่หักคืนตอนกดกลับ — ให้กำลังใจ)
+    if (becameDone && (reward.per_step ?? 0) > 0) {
+      awardCoins(reward.per_step!, `ทำขั้นบันไดเสร็จ · ${goal.title}`);
+      burst(reward.per_step!, "ทำขั้นเสร็จ");
+    }
   }
 
   function addCheckin(c: GoalCheckin) {
-    setGoal((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        health: c.health,
-        current_value: c.current_value ?? prev.current_value,
-        checkins: [c, ...prev.checkins],
-      };
-    });
+    const oldVal = goal.current_value;
+    setGoal((prev) =>
+      prev ? { ...prev, health: c.health, current_value: c.current_value ?? prev.current_value, checkins: [c, ...prev.checkins] } : prev,
+    );
     setCheckinOpen(false);
+    // เหรียญ: check-in สม่ำเสมอ (+3) + ทุก X หน่วย (แบบวิดพื้น)
+    let coins = 3;
+    const parts = ["check-in"];
+    const upc = reward.units_per_coin;
+    if (upc && c.current_value != null && oldVal != null && c.current_value > oldVal) {
+      const gained = Math.floor(c.current_value / upc) - Math.floor(oldVal / upc);
+      if (gained > 0) { coins += gained; parts.push(`ทุก ${upc} หน่วย`); }
+    }
+    awardCoins(coins, `${parts.join(" + ")} · ${goal.title}`);
+    burst(coins, parts.join(" + "));
     toast.success("บันทึกความคืบหน้าแล้ว");
   }
 
   function changeStatus(s: GoalStatus) {
+    const wasAchieved = goal.status === "achieved";
     setGoal((prev) => (prev ? { ...prev, status: s } : prev));
     setStatusOpen(false);
     toast.success(`เปลี่ยนสถานะเป็น "${STATUS_OPTIONS.find((o) => o.value === s)?.label ?? s}"`);
+    if (s === "achieved" && !wasAchieved && (reward.on_achieve ?? 0) > 0) {
+      awardCoins(reward.on_achieve!, `เป้าสำเร็จ · ${goal.title}`);
+      burst(reward.on_achieve!, "เป้าสำเร็จ! 🎉");
+    }
   }
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto w-full">
-      <Link href="/goals" className="text-sm text-slate-500 hover:text-violet-600 inline-flex items-center gap-1 mb-3">← กลับไปรายการเป้าหมาย</Link>
+      {fx}
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <Link href="/goals" className="text-sm text-slate-500 hover:text-violet-600 inline-flex items-center gap-1">← กลับไปรายการเป้าหมาย</Link>
+        <GameBar compact />
+      </div>
 
       <div className="bg-white border border-slate-200 rounded-xl p-5 sm:p-6">
         {/* Header */}
@@ -141,6 +171,16 @@ export default function GoalDetailPage() {
             </div>
           </div>
         )}
+
+        {/* กฎการได้เหรียญ (เกม) */}
+        <div className="flex flex-wrap items-center gap-2 mt-4">
+          <span className="text-xs text-slate-400">ได้เหรียญเมื่อ:</span>
+          <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2.5 py-1">🪙 ก้าวละ +{reward.per_step}</span>
+          {reward.units_per_coin != null && (
+            <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2.5 py-1">🪙 ทุก {reward.units_per_coin} {goal.measure_unit ?? "หน่วย"} = +1</span>
+          )}
+          <span className="text-xs bg-violet-50 text-violet-700 border border-violet-200 rounded-full px-2.5 py-1">🏆 สำเร็จ +{reward.on_achieve}</span>
+        </div>
 
         {/* เส้นทางสู่ความสำเร็จ */}
         <div className="border-t border-slate-100 mt-5 pt-4">
