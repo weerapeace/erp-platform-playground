@@ -22,16 +22,25 @@ export default function PlatformAccountsPage() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandId, setBrandId] = useState("");
   const [accounts, setAccounts] = useState<Record<string, Account>>({});
+  const [keys, setKeys] = useState<Record<string, boolean>>({});   // platform_id → มี API Key ไหม
+  const [keyDraft, setKeyDraft] = useState<Record<string, string>>({});
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
 
   const load = useCallback(async (bid: string) => {
     setLoading(true);
     try {
-      const j = await apiFetch(`/api/platform-accounts${bid ? `?brand_id=${encodeURIComponent(bid)}` : ""}`).then((r) => r.json());
+      const [j, kj] = await Promise.all([
+        apiFetch(`/api/platform-accounts${bid ? `?brand_id=${encodeURIComponent(bid)}` : ""}`).then((r) => r.json()),
+        bid ? apiFetch(`/api/platform-credentials?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve({ keys: {} }),
+      ]);
       setPlatforms((j.platforms ?? []) as Platform[]);
       setBrands((j.brands ?? []) as Brand[]);
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
+      setKeys((kj.keys ?? {}) as Record<string, boolean>);
+      setTestMsg(null);
       if (!bid && j.brands?.[0]) setBrandId(j.brands[0].id);
     } catch (e) { setMsg((e as Error).message); } finally { setLoading(false); }
   }, []);
@@ -45,6 +54,26 @@ export default function PlatformAccountsPage() {
       const j = await r.json(); if (j.error) throw new Error(j.error);
       setMsg("บันทึกแล้ว"); setTimeout(() => setMsg(null), 1500);
     } catch (e) { setMsg((e as Error).message); }
+  };
+
+  // บันทึก/ล้าง API Key (ค่าไม่ถูกส่งกลับมาแสดง — เก็บฝั่งเซิร์ฟเวอร์)
+  const saveKey = async (platform_id: string, api_key: string) => {
+    try {
+      const r = await apiFetch("/api/platform-credentials", { method: "PATCH", body: JSON.stringify({ brand_id: brandId, platform_id, api_key }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setKeys((k) => ({ ...k, [platform_id]: !!j.has_key }));
+      setKeyDraft((d) => ({ ...d, [platform_id]: "" }));
+      setMsg(j.has_key ? "บันทึก API Key แล้ว" : "ล้าง API Key แล้ว"); setTimeout(() => setMsg(null), 1500);
+    } catch (e) { setMsg((e as Error).message); }
+  };
+  const testConn = async () => {
+    setTesting(true); setTestMsg("กำลังทดสอบ...");
+    try {
+      const r = await apiFetch("/api/line-shopping/test", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
+      const j = await r.json();
+      setTestMsg(j.ok ? "✅ เชื่อมต่อสำเร็จ! API Key ใช้งานได้" : "❌ " + (j.error ?? "เชื่อมต่อไม่สำเร็จ"));
+    } catch (e) { setTestMsg("❌ " + (e as Error).message); }
+    finally { setTesting(false); }
   };
 
   return (
@@ -69,13 +98,30 @@ export default function PlatformAccountsPage() {
           {platforms.map((p) => {
             const acc = accounts[p.id] ?? { label: null, external_shop_id: null, is_active: false };
             const hasShop = !!(acc.label || acc.external_shop_id);
+            const hasApi = p.code === "line_shopping";   // แพลตฟอร์มที่ต่อ API ได้ (ใส่ API Key + ทดสอบ)
             return (
-              <div key={p.id} className={`flex items-center gap-3 border rounded-xl p-3 ${acc.is_active && hasShop ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200"}`}>
-                <span className="text-lg w-7 text-center shrink-0">{p.icon_key || PLATFORM_ICON[p.code] || "🏬"}</span>
-                <span className="text-sm font-medium text-slate-700 w-24 shrink-0">{p.name_th}</span>
-                <ERPInput value={acc.label ?? ""} disabled={!canManage} placeholder="ชื่อร้าน (เช่น Shopee – แบรนด์ A)" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, label: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { label: e.target.value })} />
-                <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage} placeholder="Shop ID (ถ้ามี)" className="max-w-[160px]" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, external_shop_id: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { external_shop_id: e.target.value })} />
-                <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0"><input type="checkbox" disabled={!canManage} checked={acc.is_active} onChange={(e) => save(p.id, { is_active: e.target.checked })} />เปิด</label>
+              <div key={p.id} className={`border rounded-xl p-3 ${acc.is_active && hasShop ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200"}`}>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-lg w-7 text-center shrink-0">{p.icon_key || PLATFORM_ICON[p.code] || "🏬"}</span>
+                  <span className="text-sm font-medium text-slate-700 w-24 shrink-0">{p.name_th}</span>
+                  <ERPInput value={acc.label ?? ""} disabled={!canManage} placeholder="ชื่อร้าน (เช่น Shopee – แบรนด์ A)" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, label: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { label: e.target.value })} />
+                  <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage} placeholder="Shop ID (ถ้ามี)" className="max-w-[160px]" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, external_shop_id: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { external_shop_id: e.target.value })} />
+                  <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0"><input type="checkbox" disabled={!canManage} checked={acc.is_active} onChange={(e) => save(p.id, { is_active: e.target.checked })} />เปิด</label>
+                </div>
+                {hasApi && canManage && (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-slate-500 shrink-0">🔑 API Key</span>
+                    {keys[p.id] && <span className="text-[11px] text-emerald-600 shrink-0">● ตั้งค่าแล้ว</span>}
+                    <input type="password" autoComplete="off" value={keyDraft[p.id] ?? ""} placeholder={keys[p.id] ? "•••• (ใส่ใหม่เพื่อเปลี่ยน)" : "วาง API Key จาก MyShop"}
+                      onChange={(e) => setKeyDraft((d) => ({ ...d, [p.id]: e.target.value }))}
+                      className="h-8 flex-1 min-w-[180px] border border-slate-200 rounded-md px-2 text-sm font-mono" />
+                    <button onClick={() => saveKey(p.id, keyDraft[p.id] ?? "")} disabled={!(keyDraft[p.id] ?? "").trim()} className="h-8 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">บันทึกคีย์</button>
+                    {keys[p.id] && <button onClick={() => saveKey(p.id, "")} className="h-8 px-2 text-xs text-rose-500 border border-rose-200 rounded-lg hover:bg-rose-50">ล้าง</button>}
+                    <button onClick={testConn} disabled={testing || !keys[p.id]} title={keys[p.id] ? "" : "ใส่ API Key ก่อน"} className="h-8 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-40">🔌 ทดสอบเชื่อมต่อ</button>
+                    {testMsg && <span className="text-xs text-slate-600">{testMsg}</span>}
+                    <a href="https://oaplus.line.biz" target="_blank" rel="noopener noreferrer" className="text-[11px] text-violet-600 underline shrink-0">วิธีสร้างคีย์ ↗</a>
+                  </div>
+                )}
               </div>
             );
           })}
