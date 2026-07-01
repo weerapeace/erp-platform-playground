@@ -213,6 +213,17 @@ export default function AppLauncherPage() {
   const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);   // แอป (ล็อก/ไม่ล็อก) — กรอง tile ตามสิทธิ์เข้าแอป
 
+  // จำนวนงานค้างของฉัน (สำหรับการ์ด "งานของฉัน")
+  const [pending, setPending] = useState<number | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    apiFetch("/api/notifications?limit=1").then((r) => r.json()).then((j) => {
+      if (alive && typeof j.unread_count === "number") setPending(j.unread_count);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [user]);
+
   // โหลดทะเบียนเมนู → สร้าง tile จาก item ที่ตั้ง "โชว์ใน Launcher" (+ มีสิทธิ์); ไม่มี → ใช้ APPS default
   useEffect(() => {
     let alive = true;
@@ -393,6 +404,28 @@ export default function AppLauncherPage() {
             )}
           </div>
         </div>
+      </section>
+
+      {/* ============= งานของฉัน (การ์ดเด่น → Dashboard) ============= */}
+      <section className="max-w-7xl mx-auto px-6 pb-2">
+        <Link href="/dashboard"
+          className="group flex items-center gap-4 rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-white px-5 py-4 shadow-sm hover:shadow-md hover:border-blue-300 transition-all">
+          <span className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 text-white text-2xl flex items-center justify-center shrink-0 shadow">🏠</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-base font-bold text-slate-900">งานของฉัน</span>
+              {pending !== null && pending > 0 && (
+                <span className="text-[11px] font-semibold text-white bg-red-500 px-2 py-0.5 rounded-full">{pending} งานค้าง</span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
+              {pending === null ? "สรุปงานที่มอบหมายให้คุณ + ภาพรวมทีม"
+                : pending > 0 ? `คุณมีงานค้าง ${pending} รายการ — คลิกเพื่อดูและจัดการ`
+                : "ไม่มีงานค้าง เยี่ยมมาก! 🎉 — คลิกดูภาพรวม"}
+            </p>
+          </div>
+          <span className="text-blue-500 text-lg shrink-0 group-hover:translate-x-0.5 transition-transform">→</span>
+        </Link>
       </section>
 
       {/* ============= App grid (grouped) ============= */}
