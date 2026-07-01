@@ -32,17 +32,17 @@ export async function PATCH(
   return NextResponse.json({ data, error: null });
 }
 
-// soft delete (set is_active = false) — DELETE
+// DELETE — default: soft delete (is_active=false) · ?hard=1: ลบจริงออกจากตาราง
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id } = await params;
+  const hard = new URL(request.url).searchParams.get("hard") === "1";
   const supabase = supabaseFromRequest(request);
-  const { error } = await supabase
-    .from("erp_lookups")
-    .update({ is_active: false })
-    .eq("id", id);
+  const { error } = hard
+    ? await supabase.from("erp_lookups").delete().eq("id", id)
+    : await supabase.from("erp_lookups").update({ is_active: false }).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, error: null });
 }
