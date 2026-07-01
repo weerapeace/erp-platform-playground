@@ -1,11 +1,14 @@
 "use client";
 
-// หน้า "รางวัล & เกม" (เฟส 1 mock) — เหรียญ/เลเวล/ตรารางวัล/ร้านแลกรางวัล/กระดานทีม
+// หน้า "รางวัล & เกม" (เฟส 2b) — เหรียญ/เลเวล/ตรารางวัล/ร้านแลก/กระดานทีม จาก DB จริง
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { usePlayer, levelFromXp, redeem, REWARDS, TEAMMATES, type Reward } from "../player-store";
-import { MOCK_GOALS } from "../mock-data";
+import { usePlayer, levelFromXp, redeem, refreshPlayer } from "../player-store";
+
+type Reward = { id: string; label: string; icon: string; cost: number; desc: string };
+type BoardRow = { user_name: string; coins: number; xp: number; is_me: boolean };
 
 export default function RewardsPage() {
   const p = usePlayer();
@@ -13,26 +16,29 @@ export default function RewardsPage() {
   const lv = levelFromXp(p.xp);
   const pct = lv.span > 0 ? Math.min(100, Math.round((lv.into / lv.span) * 100)) : 100;
 
-  const badges = useMemo(() => {
-    const anyAchieved = MOCK_GOALS.some((g) => g.status === "achieved");
-    return [
-      { icon: "🏆", label: "เป้าแรกสำเร็จ", desc: "ทำเป้าหมายสำเร็จครั้งแรก", earned: anyAchieved },
-      { icon: "🪙", label: "นักสะสม 100", desc: "สะสมแต้มรวม 100", earned: p.xp >= 100 },
-      { icon: "💎", label: "นักสะสม 500", desc: "สะสมแต้มรวม 500", earned: p.xp >= 500 },
-      { icon: "🔥", label: "ต่อเนื่อง 7 วัน", desc: "อัปเดต/ทำงานต่อเนื่อง 7 วัน", earned: p.streakDays >= 7 },
-      { icon: "⚡", label: "ต่อเนื่อง 30 วัน", desc: "ต่อเนื่องไม่ขาด 30 วัน", earned: p.streakDays >= 30 },
-      { icon: "🎁", label: "แลกรางวัลแรก", desc: "แลกรางวัลครั้งแรก", earned: p.redeemed.length > 0 },
-    ];
-  }, [p.xp, p.streakDays, p.redeemed.length]);
+  const [rewards, setRewards] = useState<Reward[]>([]);
+  const [board, setBoard] = useState<BoardRow[]>([]);
 
-  const board = useMemo(() => {
-    const rows = [...TEAMMATES, { name: "คุณ", coins: p.coins, xp: p.xp }];
-    return rows.sort((a, b) => b.coins - a.coins);
-  }, [p.coins, p.xp]);
+  useEffect(() => {
+    refreshPlayer();
+    apiFetch("/api/goals/rewards").then((r) => r.json()).then((j) => setRewards(j.data ?? [])).catch(() => {});
+    apiFetch("/api/goals/leaderboard").then((r) => r.json()).then((j) => setBoard(j.data ?? [])).catch(() => {});
+  }, []);
 
-  function handleRedeem(r: Reward) {
+  const badges = useMemo(() => [
+    { icon: "🏆", label: "เป้าแรกสำเร็จ", desc: "ทำเป้าหมายสำเร็จครั้งแรก", earned: p.goalsAchieved > 0 },
+    { icon: "🪙", label: "นักสะสม 100", desc: "สะสมแต้มรวม 100", earned: p.xp >= 100 },
+    { icon: "💎", label: "นักสะสม 500", desc: "สะสมแต้มรวม 500", earned: p.xp >= 500 },
+    { icon: "🔥", label: "ต่อเนื่อง 7 วัน", desc: "ได้เหรียญต่อเนื่อง 7 วัน", earned: p.streakDays >= 7 },
+    { icon: "⚡", label: "ต่อเนื่อง 30 วัน", desc: "ต่อเนื่องไม่ขาด 30 วัน", earned: p.streakDays >= 30 },
+    { icon: "🎁", label: "แลกรางวัลแรก", desc: "แลกรางวัลครั้งแรก", earned: p.redeemed.length > 0 },
+  ], [p.goalsAchieved, p.xp, p.streakDays, p.redeemed.length]);
+
+  async function handleRedeem(r: Reward) {
     if (p.coins < r.cost) { toast.error(`เหรียญไม่พอ — ขาดอีก ${r.cost - p.coins} เหรียญ`); return; }
-    if (redeem(r)) toast.success(`แลก “${r.label}” สำเร็จ! 🎉`);
+    const ok = await redeem(r.id);
+    if (ok) toast.success(`แลก “${r.label}” สำเร็จ! 🎉`);
+    else toast.error("แลกไม่สำเร็จ — เหรียญอาจไม่พอ");
   }
 
   return (
@@ -66,7 +72,7 @@ export default function RewardsPage() {
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
           {badges.map((b) => (
             <div key={b.label} title={b.desc} className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center ${b.earned ? "bg-white border-slate-200" : "bg-slate-50 border-dashed border-slate-200 opacity-55"}`}>
-              <div className={`w-11 h-11 rounded-full flex items-center justify-center text-2xl ${b.earned ? "" : "grayscale"}`}>{b.earned ? b.icon : "🔒"}</div>
+              <div className="w-11 h-11 rounded-full flex items-center justify-center text-2xl">{b.earned ? b.icon : "🔒"}</div>
               <div className="text-[11px] leading-tight text-slate-600">{b.label}</div>
             </div>
           ))}
@@ -76,46 +82,49 @@ export default function RewardsPage() {
       {/* ร้านแลกรางวัล */}
       <section className="mt-5">
         <h2 className="text-base font-semibold text-slate-900 mb-1">🛍️ ร้านแลกรางวัล</h2>
-        <p className="text-xs text-slate-400 mb-3">ใช้เหรียญที่สะสมแลกของรางวัลจริง (รายการตัวอย่าง — เฟส 2 แอดมินตั้งเองได้)</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {REWARDS.map((r) => {
-            const can = p.coins >= r.cost;
-            return (
-              <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-4 flex items-center gap-3">
-                <div className="text-3xl flex-shrink-0">{r.icon}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-slate-900">{r.label}</div>
-                  <div className="text-xs text-slate-400">{r.desc}</div>
+        <p className="text-xs text-slate-400 mb-3">ใช้เหรียญที่สะสมแลกของรางวัลจริง</p>
+        {rewards.length === 0 ? (
+          <p className="text-sm text-slate-400">กำลังโหลดรายการรางวัล…</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {rewards.map((r) => {
+              const can = p.coins >= r.cost;
+              return (
+                <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-4 flex items-center gap-3">
+                  <div className="text-3xl flex-shrink-0">{r.icon}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-slate-900">{r.label}</div>
+                    <div className="text-xs text-slate-400">{r.desc}</div>
+                  </div>
+                  <button onClick={() => handleRedeem(r)}
+                    className={`flex-shrink-0 h-9 px-3 rounded-lg text-sm font-medium border transition-colors ${can ? "text-amber-700 border-amber-300 hover:bg-amber-50" : "text-slate-400 border-slate-200 cursor-not-allowed"}`}>
+                    🪙 {r.cost}
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRedeem(r)}
-                  className={`flex-shrink-0 h-9 px-3 rounded-lg text-sm font-medium border transition-colors ${can ? "text-amber-700 border-amber-300 hover:bg-amber-50" : "text-slate-400 border-slate-200 cursor-not-allowed"}`}
-                >
-                  🪙 {r.cost}
-                </button>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* กระดานทีม */}
       <section className="mt-5">
         <h2 className="text-base font-semibold text-slate-900 mb-1">👥 กระดานทีม</h2>
         <p className="text-xs text-slate-400 mb-3">ให้กำลังใจกัน ไม่ใช่แข่งกดดัน — ทุกคนไปถึงเป้าของตัวเองคือชนะ</p>
-        <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
-          {board.map((row, i) => {
-            const me = row.name === "คุณ";
-            return (
-              <div key={row.name} className={`flex items-center gap-3 px-4 py-2.5 ${me ? "bg-violet-50/50" : ""}`}>
+        {board.length === 0 ? (
+          <p className="text-sm text-slate-400">ยังไม่มีใครสะสมเหรียญ — เริ่มทำเป้าหมายเพื่อขึ้นกระดาน!</p>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
+            {board.map((row, i) => (
+              <div key={`${row.user_name}-${i}`} className={`flex items-center gap-3 px-4 py-2.5 ${row.is_me ? "bg-violet-50/50" : ""}`}>
                 <div className={`w-6 text-center font-bold ${i === 0 ? "text-amber-500" : "text-slate-400"}`}>{i === 0 ? "👑" : i + 1}</div>
-                <div className={`flex-1 text-sm ${me ? "font-semibold text-violet-700" : "text-slate-700"}`}>{row.name}{me && " (คุณ)"}</div>
+                <div className={`flex-1 text-sm ${row.is_me ? "font-semibold text-violet-700" : "text-slate-700"}`}>{row.user_name}{row.is_me && " (คุณ)"}</div>
                 <div className="text-xs text-slate-400">Lv.{levelFromXp(row.xp).level}</div>
                 <div className="flex items-center gap-1 text-sm font-medium text-amber-700 w-16 justify-end">🪙 {row.coins}</div>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* ประวัติได้เหรียญ */}
