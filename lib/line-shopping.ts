@@ -32,6 +32,20 @@ export async function linePing(apiKey: string): Promise<{ ok: boolean; status: n
   }
 }
 
+// รายการสินค้า (GET /products) — data[] + paging · แต่ละสินค้ามี variants[{variantId, sku, price, onHandAmount, ...}]
+export async function lineListProducts(apiKey: string, params: { page?: number; perPage?: number } = {}): Promise<{ ok: boolean; status: number; rows?: Record<string, unknown>[]; totalPage?: number; totalRow?: number; error?: string }> {
+  try {
+    const q = new URLSearchParams({ page: String(params.page ?? 1), perPage: String(params.perPage ?? 100) });
+    const r = await fetch(`${LINE_SHOPPING_BASE}/products?${q.toString()}`, { headers: headers(apiKey) });
+    if (!r.ok) { const body = await r.text().catch(() => ""); return { ok: false, status: r.status, error: friendly(r.status, body) }; }
+    const j = await r.json().catch(() => null) as Record<string, unknown> | null;
+    const rows = Array.isArray(j?.data) ? j!.data as Record<string, unknown>[] : (Array.isArray(j) ? j as Record<string, unknown>[] : []);
+    return { ok: true, status: r.status, rows, totalPage: Number(j?.totalPage ?? 1), totalRow: Number(j?.totalRow ?? rows.length) };
+  } catch (e) {
+    return { ok: false, status: 0, error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` };
+  }
+}
+
 export type LineOrderListParams = {
   page?: number; perPage?: number;
   sortBy?: "ORDER_NO" | "CREATED_AT" | "UPDATED_AT" | "CHECKED_OUT_AT";
