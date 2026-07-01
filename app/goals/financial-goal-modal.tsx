@@ -35,7 +35,7 @@ export function FinancialGoalModal({
   open: boolean; onClose: () => void; onCreate: (draft: GoalDraft) => Promise<boolean>;
 }) {
   const [title, setTitle] = useState("");
-  const [kind, setKind] = useState<"house" | "lump">("house");
+  const [kind, setKind] = useState<"house" | "lump" | "dividend">("house");
   const [price, setPrice] = useState("3000000");
   const [downPct, setDownPct] = useState("15");
   const [targetLump, setTargetLump] = useState("");
@@ -45,32 +45,60 @@ export function FinancialGoalModal({
   const [saveYears, setSaveYears] = useState("2");
   const [interestPct, setInterestPct] = useState("3");
   const [loanYears, setLoanYears] = useState("30");
+  const [dividendMonthly, setDividendMonthly] = useState("");
+  const [dividendRate, setDividendRate] = useState("5");
+  const [dividendModel, setDividendModel] = useState<"perpetual" | "annuity">("perpetual");
   const [showError, setShowError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const c = useMemo(() => {
-    const target = kind === "house" ? Math.round(num(price) * num(downPct) / 100) : num(targetLump);
+    // ค่างวดผ่อน (ใช้ทั้งโหมดบ้าน + ปันผล)
+    const downAmt = Math.round(num(price) * num(downPct) / 100);
+    const loan = kind === "lump" ? 0 : Math.max(0, num(price) - downAmt);
+    const mMonthly = kind === "lump" ? 0 : Math.round(mortgage(loan, num(interestPct), num(loanYears)));
+
+    let target = 0;      // ยอดที่ต้องเก็บ
+    let divMonthly = 0;  // ปันผลต่อเดือน (โหมดปันผล)
+    if (kind === "house") target = downAmt;
+    else if (kind === "lump") target = num(targetLump);
+    else {
+      // โหมดปันผลผ่อนบ้าน: หาเงินก้อนที่ปันผลพอจ่ายค่างวด
+      divMonthly = num(dividendMonthly) || mMonthly;
+      const rate = num(dividendRate);
+      const nMonths = Math.round(num(loanYears) * 12);
+      let deposit = 0;
+      if (rate > 0 && divMonthly > 0) {
+        if (dividendModel === "perpetual") {
+          deposit = divMonthly * 1200 / rate;                        // เงินต้นคงไว้
+        } else {
+          const i = rate / 100 / 12;                                 // ใช้เงินต้นด้วย (annuity PV)
+          deposit = i > 0 ? divMonthly * (1 - Math.pow(1 + i, -nMonths)) / i : divMonthly * nMonths;
+        }
+      }
+      target = Math.round(deposit);
+    }
+
     const cur = num(current);
     const remaining = Math.max(0, target - cur);
     let months = 0, perMonth = 0;
     if (direction === "byMonthly") { perMonth = num(monthly); months = perMonth > 0 ? Math.ceil(remaining / perMonth) : 0; }
     else { months = Math.round(num(saveYears) * 12); perMonth = months > 0 ? Math.ceil(remaining / months) : 0; }
     const finishISO = months > 0 ? addMonthsISO(TODAY_ISO, months) : "";
-    const loan = kind === "house" ? num(price) - target : 0;
-    const mMonthly = kind === "house" ? Math.round(mortgage(loan, num(interestPct), num(loanYears))) : 0;
     const milestones = [0.25, 0.5, 0.75, 1].map((f) => ({
       pct: f * 100, amount: Math.round(target * f),
       date: months > 0 ? addMonthsISO(TODAY_ISO, Math.round(months * f)) : "",
     }));
-    return { target, cur, remaining, months, perMonth, finishISO, loan, mMonthly, milestones };
-  }, [kind, price, downPct, targetLump, current, direction, monthly, saveYears, interestPct, loanYears]);
+    return { target, cur, remaining, months, perMonth, finishISO, loan, mMonthly, divMonthly, milestones };
+  }, [kind, price, downPct, targetLump, current, direction, monthly, saveYears, interestPct, loanYears, dividendMonthly, dividendRate, dividendModel]);
 
   const valid = title.trim() !== "" && c.target > 0 && c.months > 0 && c.perMonth > 0;
 
   function reset() {
     setTitle(""); setKind("house"); setPrice("3000000"); setDownPct("15"); setTargetLump("");
     setCurrent("0"); setDirection("byMonthly"); setMonthly("15000"); setSaveYears("2");
-    setInterestPct("3"); setLoanYears("30"); setShowError(false);
+    setInterestPct("3"); setLoanYears("30");
+    setDividendMonthly(""); setDividendRate("5"); setDividendModel("perpetual");
+    setShowError(false);
   }
   function close() { reset(); onClose(); }
 
@@ -89,14 +117,18 @@ export function FinancialGoalModal({
       reward: { per_step: 10, on_achieve: 100, units_per_coin: 10000 },
       plan: {
         kind,
-        price: kind === "house" ? num(price) : undefined,
-        down_pct: kind === "house" ? num(downPct) : undefined,
+        price: kind !== "lump" ? num(price) : undefined,
+        down_pct: kind !== "lump" ? num(downPct) : undefined,
         monthly: c.perMonth,
         months: c.months,
-        interest_pct: kind === "house" ? num(interestPct) : undefined,
-        years: kind === "house" ? num(loanYears) : undefined,
-        mortgage_monthly: kind === "house" ? c.mMonthly : undefined,
+        interest_pct: kind !== "lump" ? num(interestPct) : undefined,
+        years: kind !== "lump" ? num(loanYears) : undefined,
+        mortgage_monthly: kind !== "lump" ? c.mMonthly : undefined,
         finish_date: c.finishISO || undefined,
+        dividend_monthly: kind === "dividend" ? c.divMonthly : undefined,
+        dividend_rate: kind === "dividend" ? num(dividendRate) : undefined,
+        dividend_model: kind === "dividend" ? dividendModel : undefined,
+        required_deposit: kind === "dividend" ? c.target : undefined,
       },
       steps: c.milestones.map((ms) => ({ title: `เก็บได้ ${ms.pct}% (${baht(ms.amount)} บาท)`, target_date: ms.date || undefined })),
     };
@@ -124,12 +156,13 @@ export function FinancialGoalModal({
         </Field>
 
         {/* โหมด */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <ModeBtn active={kind === "house"} onClick={() => setKind("house")}>🏠 ซื้อบ้าน</ModeBtn>
           <ModeBtn active={kind === "lump"} onClick={() => setKind("lump")}>💰 เก็บเงินก้อน</ModeBtn>
+          <ModeBtn active={kind === "dividend"} onClick={() => setKind("dividend")}>📈 ปันผลผ่อนบ้าน</ModeBtn>
         </div>
 
-        {kind === "house" ? (
+        {kind === "house" && (
           <div className="grid grid-cols-2 gap-3">
             <Field label="ราคาบ้าน (บาท)"><NumInput value={price} onChange={setPrice} /></Field>
             <Field label="เงินดาวน์ (%)"><NumInput value={downPct} onChange={setDownPct} /></Field>
@@ -137,8 +170,39 @@ export function FinancialGoalModal({
               💡 เงินดาวน์ที่ต้องเก็บ = ราคาบ้าน × {num(downPct)}% = <span className="font-semibold">{baht(c.target)} บาท</span>
             </div>
           </div>
-        ) : (
+        )}
+
+        {kind === "lump" && (
           <Field label="ยอดที่ต้องการเก็บ (บาท)"><NumInput value={targetLump} onChange={setTargetLump} /></Field>
+        )}
+
+        {kind === "dividend" && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="ราคาบ้าน (บาท)"><NumInput value={price} onChange={setPrice} /></Field>
+              <Field label="เงินดาวน์ (%)"><NumInput value={downPct} onChange={setDownPct} /></Field>
+              <Field label="ดอกเบี้ยกู้ (%/ปี)"><NumInput value={interestPct} onChange={setInterestPct} /></Field>
+              <Field label="จำนวนปีผ่อน"><NumInput value={loanYears} onChange={setLoanYears} /></Field>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800">
+              🏦 กู้ {baht(c.loan)} → ค่างวดผ่อนราว <span className="font-semibold">{baht(c.mMonthly)}</span>/เดือน
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="ปันผลที่อยากได้/เดือน (บาท)"><NumInput value={dividendMonthly} onChange={setDividendMonthly} placeholder={String(c.mMonthly || "")} /></Field>
+              <Field label="อัตราปันผล (%/ปี)"><NumInput value={dividendRate} onChange={setDividendRate} /></Field>
+            </div>
+            <div>
+              <div className="text-xs font-medium text-slate-600 mb-1.5">วิธีคิดเงินก้อน</div>
+              <div className="flex gap-2">
+                <ModeBtn active={dividendModel === "perpetual"} onClick={() => setDividendModel("perpetual")}>เงินต้นคงไว้</ModeBtn>
+                <ModeBtn active={dividendModel === "annuity"} onClick={() => setDividendModel("annuity")}>ใช้เงินต้นด้วย</ModeBtn>
+              </div>
+            </div>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm text-emerald-800">
+              📈 ต้องมีเงินก้อน <span className="font-semibold">{baht(c.target)} บาท</span> — ปันผล {num(dividendRate)}%/ปี ได้เดือนละ ~{baht(c.divMonthly)} พอผ่อน
+              <div className="text-xs text-emerald-600 mt-0.5">{dividendModel === "perpetual" ? "เงินต้นคงไว้ ปันผลจ่ายค่างวดไปเรื่อย ๆ" : `ทยอยใช้เงินต้น จนหมดพอดีเมื่อผ่อนจบ (${num(loanYears)} ปี)`}</div>
+            </div>
+          </div>
         )}
 
         <Field label="เงินที่มีอยู่แล้ว (บาท)"><NumInput value={current} onChange={setCurrent} /></Field>
@@ -213,8 +277,8 @@ function Field({ label, required, children }: { label: string; required?: boolea
     </div>
   );
 }
-function NumInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return <input type="number" value={value} onChange={(e) => onChange(e.target.value)}
+function NumInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return <input type="number" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
     className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />;
 }
 function ModeBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {

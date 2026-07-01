@@ -13,17 +13,22 @@ export type GoalHealth = "on_track" | "at_risk" | "off_track";
 export type MeasureType = "percent" | "number" | "currency" | "boolean";
 export type GoalLevel = "team" | "personal";
 
-/** พารามิเตอร์แผนการเงิน (บ้าน / เก็บเงินก้อน) */
+/** พารามิเตอร์แผนการเงิน (บ้าน / เก็บเงินก้อน / ปันผลผ่อนบ้าน) */
 export type GoalPlan = {
-  kind?: "house" | "lump";
-  price?: number;            // ราคาบ้าน (โหมดบ้าน)
+  kind?: "house" | "lump" | "dividend";
+  price?: number;            // ราคาบ้าน (โหมดบ้าน/ปันผล)
   down_pct?: number;         // %ดาวน์
   monthly?: number;          // เก็บเดือนละ
   months?: number;           // ใช้เวลา (เดือน)
-  interest_pct?: number;     // ดอกเบี้ยกู้ (โหมดบ้าน)
+  interest_pct?: number;     // ดอกเบี้ยกู้
   years?: number;            // จำนวนปีผ่อน
   mortgage_monthly?: number; // ค่างวดผ่อนโดยประมาณ
   finish_date?: string;      // วันคาดว่าถึงเป้า (ISO)
+  // ---- โหมดปันผลผ่อนบ้าน ----
+  dividend_monthly?: number;               // ปันผลที่อยากได้ต่อเดือน
+  dividend_rate?: number;                  // อัตราปันผลต่อปี (%)
+  dividend_model?: "perpetual" | "annuity";// เงินต้นคงไว้ / ใช้เงินต้นด้วย
+  required_deposit?: number;               // เงินก้อนที่ต้องมี
 };
 
 export type GoalStep = RoadmapStep & {

@@ -3,6 +3,7 @@
 // แต้ม/เหรียญ/XP/streak/รางวัล/การแลก/กระดานทีม ลง DB จริง
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 
 type Row = Record<string, unknown>;
 const s = (v: unknown) => (v == null ? "" : String(v));
@@ -78,6 +79,7 @@ export async function redeem(userId: string, userName: string, rewardId: string)
   if (coins < cost) return { ok: false, player: await getPlayer(userId, userName) };
   await admin.from("erp_goal_players").update({ coins: coins - cost, updated_at: new Date().toISOString() }).eq("user_id", userId);
   await admin.from("erp_goal_redemptions").insert({ user_id: userId, reward_id: rewardId, label: s((reward as Row).label), cost });
+  await writeAudit(admin, { action: "reward_redeem", entityType: "goal_rewards", entityId: rewardId, actorId: userId, actorName: userName, metadata: { label: s((reward as Row).label), cost } });
   return { ok: true, player: await getPlayer(userId, userName) };
 }
 

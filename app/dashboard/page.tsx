@@ -256,6 +256,9 @@ export default function DashboardPage() {
       </div>
 
       <div className="px-4 sm:px-8 py-5 space-y-5 max-w-4xl">
+        {/* ทางเข้าแอปเป้าหมาย */}
+        <GoalsEntryCard />
+
         {/* ---- 🎯 โฟกัสวันนี้ ---- */}
         {tab !== "team" && focusItems.length > 0 && (
           <FocusBand items={focusItems} onOpen={openItem} />
@@ -326,6 +329,21 @@ export default function DashboardPage() {
         </div>
       </div>
     </PlaygroundShell>
+  );
+}
+
+// ---- ทางเข้าแอปเป้าหมาย (การ์ดบน Dashboard) ----
+function GoalsEntryCard() {
+  return (
+    <Link href="/goals"
+      className="flex items-center gap-3 rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3 hover:border-violet-300 hover:shadow-sm transition-all">
+      <div className="w-10 h-10 rounded-lg bg-violet-100 flex items-center justify-center text-xl shrink-0">🎯</div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold text-slate-800">เป้าหมาย &amp; เก็บเงิน</div>
+        <div className="text-xs text-slate-500 truncate">ตั้งเป้า · เก็บเงิน/คำนวณ · ออกกำลังกาย · สะสมเหรียญ</div>
+      </div>
+      <span className="text-violet-600 text-sm font-medium shrink-0">เปิดแอป →</span>
+    </Link>
   );
 }
 

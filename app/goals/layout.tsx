@@ -1,20 +1,17 @@
-"use client";
-
 /**
  * Layout ของแอปเดี่ยว "เป้าหมาย" (standalone /goals/*)
- * - ห่อด้วย StandaloneShell (ของกลาง) → topbar โฟกัส ไม่มี sidebar ERP รก ๆ
- * - ShellPresentContext=true กัน component กลางที่ห่อ shell ซ้ำ
- * เปิด/บุ๊กมาร์ก/ติดตั้งบนมือถือได้ (ผ่านทางเข้า /app/goals)
+ * - server component → export metadata/manifest ได้ (ติดตั้งเป็น PWA แยกของ Goals เอง)
+ * - เปลือก client (topbar โฟกัส) อยู่ใน GoalsShell
  */
-import { ShellPresentContext } from "@/components/playground-shell";
-import { StandaloneShell } from "@/components/standalone-shell";
+import type { Metadata } from "next";
+import { GoalsShell } from "./goals-shell";
+
+export const metadata: Metadata = {
+  title: "เป้าหมาย & เส้นทางสู่ความสำเร็จ",
+  manifest: "/goals.webmanifest",              // override manifest กลาง → ติดตั้งแอป "เป้าหมาย" ได้
+  appleWebApp: { capable: true, title: "เป้าหมาย", statusBarStyle: "default" },
+};
 
 export default function GoalsLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <ShellPresentContext.Provider value={true}>
-      <StandaloneShell title="เป้าหมาย & เส้นทางสู่ความสำเร็จ" icon="🎯" accent="violet">
-        {children}
-      </StandaloneShell>
-    </ShellPresentContext.Provider>
-  );
+  return <GoalsShell>{children}</GoalsShell>;
 }

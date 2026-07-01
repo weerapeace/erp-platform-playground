@@ -17,7 +17,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const owner = await getRequestOwner(request);
   try {
     const body = await request.json();
-    return NextResponse.json({ data: await addCheckin(id, body, owner.name) });
+    return NextResponse.json({ data: await addCheckin(id, body, owner) });
   } catch (e) {
     return NextResponse.json({ error: msg(e) }, { status: 500 });
   }

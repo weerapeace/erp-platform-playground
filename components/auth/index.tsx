@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { supabaseBrowser } from "@/lib/supabase-browser";
-import { apiFetch } from "@/lib/api";
 
 // ============================================================
 // Auth — Supabase Auth จริง (email/password)
@@ -12,8 +11,6 @@ import { apiFetch } from "@/lib/api";
 export type Permission =
   | "products.view" | "products.create" | "products.edit" | "products.delete"
   | "products.cost.view"
-  | "products.platforms.view" | "products.platforms.edit" | "products.platforms.publish" | "products.platforms.manage_accounts"
-  | "platform_orders.view" | "platform_orders.manage"
   | "pr.view" | "pr.create" | "pr.edit" | "pr.submit" | "pr.approve" | "pr.reject" | "pr.cancel"
   | "suppliers.view" | "suppliers.create" | "suppliers.edit"
   | "fields.view" | "admin.field_registry.edit" | "admin.field_registry.bulk_edit"
@@ -22,6 +19,7 @@ export type Permission =
   | "numbering.view" | "admin.numbering"
   | "approval.view" | "admin.approval_rules"
   | "notifications.view"
+  | "goals.view" | "goals.edit"
   | "saved_views.share" | "admin.saved_views"
   | "workflow.view" | "admin.workflow"
   | "reports.view" | "admin.reports"
@@ -44,19 +42,7 @@ export type Permission =
   | "attachments.view" | "attachments.upload" | "attachments.delete"
   | "files.upload" | "files.delete"
   | "accounting.view" | "accounting.manage" | "accounting.post"
-  | "work_board.dispatch" | "production.piecework"
-  | "qc.view" | "qc.receive" | "qc.move" | "qc.ship" | "qc.defect" | "qc.repair"
-  | "admin.users" | "admin.audit_log"
-  // สิทธิ์ระดับ "เข้าถึง App" (เฟส 2) — ผูกกับ erp_app_groups.permission_key (home เปิดให้ทุกคน)
-  | "app.tasks" | "app.master" | "app.purchasing" | "app.inventory" | "app.production"
-  | "app.sales" | "app.china_pay" | "app.payroll" | "app.settings"
-  | "app.design" | "app.misc"
-  | "offers.view" | "offers.edit"
-  | "report.create" | "report.manage"
-  // งานจัดการ — เทมเพลต + งานย่อย type-driven + sync เข้าสินค้า
-  | "task_template.view" | "task_template.create" | "task_template.edit" | "task_template.delete"
-  | "task_subtask.approve" | "task_subtask.revise" | "task_subtask.cancel"
-  | "product_media.sync" | "sku_description.sync";
+  | "admin.users" | "admin.audit_log";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
 
@@ -64,8 +50,6 @@ export type Role = "admin" | "manager" | "staff" | "viewer";
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   admin: [
     "products.view", "products.create", "products.edit", "products.delete", "products.cost.view",
-    "products.platforms.view", "products.platforms.edit", "products.platforms.publish", "products.platforms.manage_accounts",
-    "platform_orders.view", "platform_orders.manage",
     "pr.view", "pr.create", "pr.edit", "pr.submit", "pr.approve", "pr.reject", "pr.cancel",
     "suppliers.view", "suppliers.create", "suppliers.edit",
     "fields.view", "admin.field_registry.edit", "admin.field_registry.bulk_edit",
@@ -74,6 +58,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "numbering.view", "admin.numbering",
     "approval.view", "admin.approval_rules",
     "notifications.view", "saved_views.share", "admin.saved_views",
+    "goals.view", "goals.edit",
     "workflow.view", "admin.workflow",
     "reports.view", "admin.reports",
     "plugins.view", "admin.plugins",
@@ -95,19 +80,14 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "attachments.view", "attachments.upload", "attachments.delete",
     "files.upload", "files.delete",
     "accounting.view", "accounting.manage", "accounting.post",
-    "work_board.dispatch", "production.piecework",
-    "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair",
     "admin.users", "admin.audit_log",
-    "task_template.view", "task_template.create", "task_template.edit", "task_template.delete",
-    "task_subtask.approve", "task_subtask.revise", "task_subtask.cancel", "product_media.sync", "sku_description.sync",
   ],
   manager: [
     "products.view", "products.create", "products.edit", "products.cost.view",
-    "products.platforms.view", "products.platforms.edit", "products.platforms.publish", "products.platforms.manage_accounts",
-    "platform_orders.view", "platform_orders.manage",
     "pr.view", "pr.create", "pr.edit", "pr.submit", "pr.approve", "pr.reject", "pr.cancel",
     "suppliers.view", "suppliers.create", "suppliers.edit",
     "fields.view", "numbering.view", "approval.view", "notifications.view", "saved_views.share",
+    "goals.view", "goals.edit",
     "workflow.view", "reports.view", "plugins.view", "table_layouts.view",
     "customers.view", "customers.create", "customers.edit",
     "employees.view", "employees.create", "employees.edit",
@@ -116,19 +96,14 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "units.view", "units.create", "taxes.view", "taxes.create",
     "attachments.view", "attachments.upload", "attachments.delete",
     "accounting.view", "accounting.manage", "accounting.post",
-    "work_board.dispatch", "production.piecework",
-    "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair",
     "admin.audit_log",
-    "task_template.view", "task_template.create", "task_template.edit", "task_template.delete",
-    "task_subtask.approve", "task_subtask.revise", "task_subtask.cancel", "product_media.sync", "sku_description.sync",
   ],
   staff: [
     "products.view", "products.create", "products.edit",
-    "products.platforms.view", "products.platforms.edit",
-    "platform_orders.view", "platform_orders.manage",
     "pr.view", "pr.create", "pr.edit", "pr.submit", "pr.cancel",
     "suppliers.view", "suppliers.create",
     "fields.view", "numbering.view", "approval.view", "notifications.view", "workflow.view", "reports.view", "plugins.view", "table_layouts.view",
+    "goals.view", "goals.edit",
     "customers.view", "customers.create", "employees.view", "employees.create",
     "warehouses.view", "departments.view", "units.view", "taxes.view", "validation.view", "roles.view",
     "comments.view", "comments.create", "comments.edit",
@@ -137,11 +112,9 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "qt.view", "qt.create", "qt.edit", "qt.send", "qt.accept", "qt.reject", "qt.cancel",
     "stock.view", "stock.create",
     "po.view", "po.create", "po.edit", "po.receive", "po.cancel",
-    "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair",
     "attachments.view", "attachments.upload",
-    "task_template.view",
   ],
-  viewer: ["products.view", "qc.view", "pr.view", "suppliers.view", "fields.view", "numbering.view", "approval.view", "notifications.view", "workflow.view", "reports.view", "plugins.view", "table_layouts.view",
+  viewer: ["goals.view", "products.view", "pr.view", "suppliers.view", "fields.view", "numbering.view", "approval.view", "notifications.view", "workflow.view", "reports.view", "plugins.view", "table_layouts.view",
     "customers.view", "employees.view", "warehouses.view", "departments.view", "units.view", "taxes.view", "validation.view", "roles.view",
     "comments.view", "notification_rules.view",
     "so.view", "qt.view", "stock.view", "po.view",
@@ -180,62 +153,25 @@ type AuthState = {
   resetPassword: (email: string) => Promise<boolean>;
   logout: () => Promise<void>;
   can: (perm: Permission) => boolean;
-  /** สิทธิ์จริงจาก DB โหลดสำเร็จหรือยัง — false = กำลังใช้ค่าสำรอง (app guard ไม่ควรบล็อกตอนนี้) */
-  permsReady: boolean;
   /** โหลดโปรไฟล์ใหม่ (หลังแก้ชื่อ/รูปของตัวเอง) */
   refreshProfile: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
 
-// URL callback หลัง OAuth/magic-link — ฝัง ?next= (จาก login_next) ไว้ใน URL
-// เพื่อให้กลับมาหน้าเดิมได้แม้คลิกลิงก์จากอีเมล/อุปกรณ์อื่น (sessionStorage หาย)
-function callbackUrlWithNext(): string | undefined {
-  if (typeof window === "undefined") return undefined;
-  const base = `${window.location.origin}/auth/callback`;
-  const n = sessionStorage.getItem("login_next");
-  return n && n.startsWith("/") && !n.startsWith("//") ? `${base}?next=${encodeURIComponent(n)}` : base;
-}
-
-// บันทึกการเข้าสู่ระบบ (ประวัติอุปกรณ์ + เตือนเครื่องใหม่) — throttle 30 นาที/เครื่อง ฝั่ง client
-async function recordLoginEvent(): Promise<void> {
-  if (typeof window === "undefined") return;
-  try {
-    let did = localStorage.getItem("erp_device_id");
-    if (!did) {
-      did = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      localStorage.setItem("erp_device_id", did);
-    }
-    const lastAt = Number(localStorage.getItem("erp_login_event_at") || 0);
-    if (Date.now() - lastAt < 30 * 60 * 1000) return;   // กันยิงถี่ (refresh/หลายแท็บ)
-    localStorage.setItem("erp_login_event_at", String(Date.now()));
-    await apiFetch("/api/auth/login-event", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ device_id: did }) });
-  } catch { /* เงียบ — ไม่กระทบการใช้งาน */ }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser]   = useState<AuthUser | null>(null);
-  // สิทธิ์จริงของผู้ใช้จาก DB (ตั้งที่ /admin/roles) — null = โหลดไม่ได้/ยังไม่โหลด → can() ถอยไปใช้ค่าสำรองในโค้ด (กันล็อกเอาต์)
-  const [perms, setPerms] = useState<Set<string> | null>(null);
   const [ready, setReady] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
   // โหลด profile (role) ผ่าน erp_current_user() — SECURITY DEFINER เลี่ยง RLS
   const loadProfile = useCallback(async (fallbackEmail: string) => {
-    // ยิง 2 RPC พร้อมกัน (โปรไฟล์ + สิทธิ์) — ทั้งคู่อิง auth.uid() อิสระต่อกัน ไม่ต้องรอกัน → ลด 1 รอบวิ่งตอน cold load
-    const [profileRes, permsRes] = await Promise.all([
-      supabaseBrowser.rpc("erp_current_user"),
-      supabaseBrowser.rpc("erp_my_permissions"),
-    ]);
-    const p = profileRes.data as { id: string; email: string; display_name: string | null; role: string | null; active: boolean | null; avatar_url: string | null } | null;
+    const { data } = await supabaseBrowser.rpc("erp_current_user");
+    const p = data as { id: string; email: string; display_name: string | null; role: string | null; active: boolean | null; avatar_url: string | null } | null;
     if (p && p.active !== false) {
       setUser({ id: p.id, email: p.email ?? fallbackEmail, name: p.display_name ?? p.email ?? fallbackEmail, role: (p.role ?? "viewer") as Role, avatar: p.avatar_url ?? null });
-      // รายการสิทธิ์จาก DB → can() เช็คจากชุดนี้แทนค่า hardcode (โหลดพลาด → null → ใช้ค่าสำรอง กันล็อกเอาต์)
-      const permData = permsRes.data;
-      setPerms(Array.isArray(permData) && !permsRes.error ? new Set(permData as string[]) : null);
     } else {
       setUser(null);
-      setPerms(null);
     }
   }, []);
 
@@ -252,11 +188,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (s?.user) loadProfile(s.user.email ?? "").finally(() => setReady(true));
       else setReady(true);
     });
-    const { data: sub } = supabaseBrowser.auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
-        loadProfile(session.user.email ?? "");
-        if (event === "SIGNED_IN" || event === "INITIAL_SESSION") void recordLoginEvent();
-      } else { setUser(null); setPerms(null); }
+    const { data: sub } = supabaseBrowser.auth.onAuthStateChange((_e, session) => {
+      if (session?.user) loadProfile(session.user.email ?? "");
+      else setUser(null);
     });
     return () => sub.subscription.unsubscribe();
   }, [loadProfile]);
@@ -274,7 +208,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Magic Link — ส่ง link เข้า email, user คลิก → login เสร็จ
   const loginWithMagicLink = useCallback(async (email: string) => {
     setLoginError(null);
-    const redirectTo = callbackUrlWithNext();
+    const redirectTo = typeof window !== "undefined"
+      ? `${window.location.origin}/auth/callback`
+      : undefined;
     const { error } = await supabaseBrowser.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: redirectTo },
@@ -289,7 +225,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Google OAuth — redirect ไป Google login → กลับมาที่ /auth/callback
   const loginWithGoogle = useCallback(async () => {
     setLoginError(null);
-    const redirectTo = callbackUrlWithNext();
+    const redirectTo = typeof window !== "undefined"
+      ? `${window.location.origin}/auth/callback`
+      : undefined;
     const { error } = await supabaseBrowser.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo },
@@ -318,18 +256,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     await supabaseBrowser.auth.signOut();
     setUser(null);
-    setPerms(null);
   }, []);
 
   const can = useCallback((perm: Permission) => {
     if (!user) return false;
-    // สิทธิ์จริงจาก DB (ตั้งที่ /admin/roles) — โหลดไม่ได้ (perms=null) ถอยใช้ค่าสำรองในโค้ด กันล็อกเอาต์
-    if (perms) return perms.has(perm);
     return ROLE_PERMISSIONS[user.role]?.includes(perm) ?? false;
-  }, [user, perms]);
+  }, [user]);
 
   return (
-    <AuthContext.Provider value={{ user, ready, loginError, login, loginWithMagicLink, loginWithGoogle, resetPassword, logout, can, permsReady: perms !== null, refreshProfile }}>
+    <AuthContext.Provider value={{ user, ready, loginError, login, loginWithMagicLink, loginWithGoogle, resetPassword, logout, can, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

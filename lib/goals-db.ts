@@ -4,8 +4,10 @@
 // route ทุกตัวเรียกผ่านที่นี่ ไม่ query ตรงในหน้า UI
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 
 type Row = Record<string, unknown>;
+type Actor = { id: string; name: string };
 const s = (v: unknown) => (v == null ? "" : String(v));
 const n = (v: unknown) => (v == null ? undefined : Number(v));
 
@@ -147,12 +149,13 @@ export async function createGoal(input: GoalInput, owner: { id: string; name: st
       .map((st, i) => ({ goal_id: goalId, title: st.title.trim(), sort_order: i, status: "pending", weight: st.weight ?? 1, target_date: st.target_date || null }));
     if (rows.length) await admin.from("erp_goal_steps").insert(rows);
   }
+  await writeAudit(admin, { action: "create", entityType: "goals", entityId: goalId, actorId: owner.id, actorName: owner.name, metadata: { title: input.title, goal_no: goalNo } });
   return getGoal(goalId);
 }
 
 const GOAL_FIELDS = ["title", "why", "description", "category", "level", "department", "status", "health", "priority", "start_date", "target_date", "progress_mode", "progress_percent", "measure_type", "measure_unit", "start_value", "target_value", "current_value", "reward", "plan"];
 
-export async function updateGoal(id: string, patch: Record<string, unknown>) {
+export async function updateGoal(id: string, patch: Record<string, unknown>, actor?: Actor) {
   const admin = supabaseAdmin();
   const upd: Row = { updated_at: new Date().toISOString() };
   for (const k of GOAL_FIELDS) if (k in patch) upd[k] = patch[k];
@@ -160,13 +163,15 @@ export async function updateGoal(id: string, patch: Record<string, unknown>) {
   if (patch.status === "missed" || patch.status === "cancelled") upd.closed_at = new Date().toISOString();
   const { error } = await admin.from("erp_goals").update(upd).eq("id", id);
   if (error) throw error;
+  await writeAudit(admin, { action: patch.status ? "status_change" : "update", entityType: "goals", entityId: id, actorId: actor?.id ?? null, actorName: actor?.name ?? null, metadata: { fields: Object.keys(patch), status: patch.status ?? null } });
   return getGoal(id);
 }
 
-export async function deleteGoal(id: string) {
+export async function deleteGoal(id: string, actor?: Actor) {
   const admin = supabaseAdmin();
   const { error } = await admin.from("erp_goals").delete().eq("id", id);
   if (error) throw error;
+  await writeAudit(admin, { action: "delete", entityType: "goals", entityId: id, actorId: actor?.id ?? null, actorName: actor?.name ?? null });
 }
 
 export async function addStep(goalId: string, input: StepInput) {
@@ -201,10 +206,10 @@ export async function deleteStep(goalId: string, stepId: string) {
   return getGoal(goalId);
 }
 
-export async function addCheckin(goalId: string, input: CheckinInput, author: string) {
+export async function addCheckin(goalId: string, input: CheckinInput, actor: Actor) {
   const admin = supabaseAdmin();
   const { error } = await admin.from("erp_goal_checkins").insert({
-    goal_id: goalId, step_id: input.step_id ?? null, author,
+    goal_id: goalId, step_id: input.step_id ?? null, author: actor.name,
     progress_percent: input.progress_percent ?? null, current_value: input.current_value ?? null,
     health: input.health ?? null, note: input.note ?? null,
   });
@@ -214,6 +219,7 @@ export async function addCheckin(goalId: string, input: CheckinInput, author: st
   if (input.health) goalUpd.health = input.health;
   if (input.current_value != null) goalUpd.current_value = input.current_value;
   await admin.from("erp_goals").update(goalUpd).eq("id", goalId);
+  await writeAudit(admin, { action: "checkin", entityType: "goals", entityId: goalId, actorId: actor.id, actorName: actor.name, metadata: { health: input.health ?? null } });
   return getGoal(goalId);
 }
 
@@ -251,7 +257,7 @@ export async function addExerciseLog(goalId: string, input: ExerciseInput, user:
     goal_id: goalId, author: user.name, health: s(g.health) || "on_track",
     current_value: newVal, note: `🏃 ${input.title} ${qty}${input.unit ? " " + input.unit : ""}`,
   });
-
+  await writeAudit(admin, { action: "exercise_log", entityType: "goals", entityId: goalId, actorId: user.id, actorName: user.name, metadata: { title: input.title, quantity: qty, unit: input.unit ?? null } });
   return getGoal(goalId);
 }
 
@@ -268,5 +274,6 @@ export async function addProgress(goalId: string, amount: number, note: string, 
     goal_id: goalId, author: user.name, health: s(gg.health) || "on_track",
     current_value: newVal, note: note || `ฝากเงิน ${(Number(amount) || 0).toLocaleString("th-TH")}`,
   });
+  await writeAudit(admin, { action: "deposit", entityType: "goals", entityId: goalId, actorId: user.id, actorName: user.name, metadata: { amount: Number(amount) || 0 } });
   return getGoal(goalId);
 }

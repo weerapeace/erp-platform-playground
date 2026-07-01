@@ -2,11 +2,11 @@
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 /**
- * permission นำร่อง (เฟส 2a): ทุก role มี notifications.view → ใช้เป็นตัวเช็ก "ล็อกอินแล้ว"
- * เฟส 2c: เปลี่ยนเป็น goals.view / goals.edit จริง + เพิ่มใน erp_can (backend) และ ROLE_PERMISSIONS (client)
+ * permission จริง (เฟส 2c) — เก็บใน erp_role_permissions (erp_can อ่านตาราง)
+ * viewer = goals.view เท่านั้น · admin/manager/staff/PR_manager = view + edit
  */
-export const GOALS_VIEW = "notifications.view";
-export const GOALS_EDIT = "notifications.view";
+export const GOALS_VIEW = "goals.view";
+export const GOALS_EDIT = "goals.edit";
 
 /** คืนเจ้าของ (id + ชื่อ) จาก JWT ของ request ผ่าน erp_current_user() */
 export async function getRequestOwner(request: Request): Promise<{ id: string; name: string }> {

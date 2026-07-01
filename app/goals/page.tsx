@@ -27,7 +27,8 @@ function fmtDate(iso?: string): string {
 export default function GoalsListPage() {
   const router = useRouter();
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  const canEdit = can("goals.edit");
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -143,18 +144,22 @@ export default function GoalsListPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <GameBar />
-          <button
-            onClick={() => setFinOpen(true)}
-            className="h-10 px-4 text-sm font-medium text-teal-700 border border-teal-300 rounded-lg hover:bg-teal-50 transition-colors"
-          >
-            💰 เก็บเงิน
-          </button>
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="h-10 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors"
-          >
-            + ตั้งเป้าหมายใหม่
-          </button>
+          {canEdit && (
+            <>
+              <button
+                onClick={() => setFinOpen(true)}
+                className="h-10 px-4 text-sm font-medium text-teal-700 border border-teal-300 rounded-lg hover:bg-teal-50 transition-colors"
+              >
+                💰 เก็บเงิน
+              </button>
+              <button
+                onClick={() => setCreateOpen(true)}
+                className="h-10 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors"
+              >
+                + ตั้งเป้าหมายใหม่
+              </button>
+            </>
+          )}
         </div>
       </div>
 

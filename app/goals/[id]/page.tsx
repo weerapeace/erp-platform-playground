@@ -8,6 +8,7 @@ import { useParams } from "next/navigation";
 import { ERPModal } from "@/components/modal";
 import { SearchableSelect } from "@/components/searchable-select";
 import { useToast } from "@/components/toast";
+import { useAuth } from "@/components/auth";
 import { GoalRoadmap, type RoadmapStep } from "@/components/goal-roadmap";
 import {
   goalProgress, daysLeft, CATEGORY_LABEL, HEALTH_META, DEFAULT_REWARD,
@@ -47,6 +48,8 @@ const STATUS_OPTIONS: { value: GoalStatus; label: string; cls: string }[] = [
 export default function GoalDetailPage() {
   const id = String(useParams().id ?? "");
   const toast = useToast();
+  const { can } = useAuth();
+  const canEdit = can("goals.edit");
 
   const [goal, setGoal] = useState<Goal | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,7 +93,7 @@ export default function GoalDetailPage() {
   const dl = daysLeft(g.target_date);
   const showMetric = g.measure_type !== "boolean" && g.target_value != null;
   const plan = (g.plan ?? {}) as GoalPlan;
-  const isFinancial = plan.kind === "house" || plan.kind === "lump";
+  const isFinancial = plan.kind === "house" || plan.kind === "lump" || plan.kind === "dividend";
 
   async function toggleStep(stepId: string) {
     const step = g.steps.find((s) => s.id === stepId);
@@ -249,7 +252,8 @@ export default function GoalDetailPage() {
               {plan.monthly ? <span>เก็บเดือนละ ~{fmtNum(plan.monthly)} บาท</span> : null}
               {plan.months ? <span>ใช้เวลา ~{plan.months} เดือน</span> : null}
               {plan.finish_date ? <span>ถึงเป้า ~{monthYear(plan.finish_date)}</span> : null}
-              {plan.kind === "house" && plan.mortgage_monthly ? <span>🏦 ผ่อนบ้าน ~{fmtNum(plan.mortgage_monthly)}/เดือน</span> : null}
+              {(plan.kind === "house" || plan.kind === "dividend") && plan.mortgage_monthly ? <span>🏦 ผ่อนบ้าน ~{fmtNum(plan.mortgage_monthly)}/เดือน</span> : null}
+              {plan.kind === "dividend" && plan.dividend_rate ? <span>📈 ปันผล {plan.dividend_rate}%/ปี → เงินก้อน {fmtNum(plan.required_deposit)}</span> : null}
             </div>
           </div>
         )}
@@ -275,32 +279,34 @@ export default function GoalDetailPage() {
           ) : (
             <GoalRoadmap
               steps={g.steps as RoadmapStep[]}
-              editable
+              editable={canEdit}
               onToggleStep={toggleStep}
               onCreateTask={(st) => toast.success(`เฟส 3: จะสร้างงาน "${st.title}" ใน Task Manager แล้วผูกกลับมา`)}
             />
           )}
         </div>
 
-        {/* ปุ่ม */}
-        <div className="border-t border-slate-100 mt-5 pt-4 flex flex-wrap gap-2">
-          {isFinancial && (
-            <button onClick={() => setDepositOpen(true)} className="h-9 px-4 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700">
-              💰 บันทึกเงินเก็บ
+        {/* ปุ่ม (เฉพาะผู้มีสิทธิ์แก้) */}
+        {canEdit && (
+          <div className="border-t border-slate-100 mt-5 pt-4 flex flex-wrap gap-2">
+            {isFinancial && (
+              <button onClick={() => setDepositOpen(true)} className="h-9 px-4 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700">
+                💰 บันทึกเงินเก็บ
+              </button>
+            )}
+            {g.category === "personal" && (
+              <button onClick={() => setWorkoutOpen(true)} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
+                🏃 บันทึกออกกำลังกาย
+              </button>
+            )}
+            <button onClick={() => setCheckinOpen(true)} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">
+              🚩 อัปเดตความคืบหน้า
             </button>
-          )}
-          {g.category === "personal" && (
-            <button onClick={() => setWorkoutOpen(true)} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
-              🏃 บันทึกออกกำลังกาย
+            <button onClick={() => setStatusOpen(true)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
+              ↻ เปลี่ยนสถานะ
             </button>
-          )}
-          <button onClick={() => setCheckinOpen(true)} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">
-            🚩 อัปเดตความคืบหน้า
-          </button>
-          <button onClick={() => setStatusOpen(true)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
-            ↻ เปลี่ยนสถานะ
-          </button>
-        </div>
+          </div>
+        )}
 
         {/* ประวัติ check-in */}
         <div className="border-t border-slate-100 mt-5 pt-4">

@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { getGoal, updateGoal, deleteGoal } from "@/lib/goals-db";
-import { GOALS_VIEW, GOALS_EDIT } from "@/lib/goals-auth";
+import { getRequestOwner, GOALS_VIEW, GOALS_EDIT } from "@/lib/goals-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,7 +28,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const { id } = await params;
   try {
     const patch = await request.json();
-    return NextResponse.json({ data: await updateGoal(id, patch) });
+    return NextResponse.json({ data: await updateGoal(id, patch, await getRequestOwner(request)) });
   } catch (e) {
     return NextResponse.json({ error: msg(e) }, { status: 500 });
   }
@@ -38,7 +38,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const denied = await guardApi(request, GOALS_EDIT); if (denied) return denied;
   const { id } = await params;
   try {
-    await deleteGoal(id);
+    await deleteGoal(id, await getRequestOwner(request));
     return NextResponse.json({ data: { ok: true } });
   } catch (e) {
     return NextResponse.json({ error: msg(e) }, { status: 500 });
