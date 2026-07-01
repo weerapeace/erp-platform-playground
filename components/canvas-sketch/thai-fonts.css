@@ -5,15 +5,23 @@
  *   ตัวอักษรอังกฤษ = ฟอนต์ Excalidraw เดิม · ตัวอักษรไทย = ฟอนต์ไทยที่แมปไว้
  * → เลือกฟอนต์ต่างกันบนกระดาน = ได้ฟอนต์ไทยต่างแบบ (self-host กัน URL ภายนอกเปลี่ยน)
  *
- *   ✏️ Excalifont (ลายมือ)  → Itim (ลายมือไทย)
- *   A  Nunito (ปกติ)        → Sarabun (อ่านง่าย)
- *   </> Comic Shanns (โค้ด) → Chakra Petch (แนวเทค)
- *   Lilita One (หัวหนา)     → Kanit 600 (ตัวหนา)
+ * (เปิด showDeprecatedFonts บน Excalidraw → โชว์ครบ 8 ฟอนต์ = ฟอนต์ไทย 8 แบบ)
+ *   ✏️ Excalifont (ลายมือ)  → Itim         · Virgil (ลายมือเก่า) → Sriracha
+ *   A  Nunito (ปกติ)        → Sarabun      · Helvetica          → Prompt
+ *   </> Comic Shanns (โค้ด) → Chakra Petch · Cascadia (โค้ด)     → Bai Jamjuree
+ *   Lilita One (หัวหนา)     → Kanit 600    · Liberation Sans    → Mitr
  * ============================================================ */
 
-@font-face { font-family: "Excalifont";   src: url("/fonts/thai/itim.woff2") format("woff2");        unicode-range: U+0E00-0E7F; font-display: swap; }
-@font-face { font-family: "Nunito";       src: url("/fonts/thai/sarabun.woff2") format("woff2");     unicode-range: U+0E00-0E7F; font-display: swap; }
-@font-face { font-family: "ComicShanns";  src: url("/fonts/thai/chakrapetch.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
-@font-face { font-family: "Comic Shanns"; src: url("/fonts/thai/chakrapetch.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
-@font-face { font-family: "Lilita";       src: url("/fonts/thai/kanit600.woff2") format("woff2");    unicode-range: U+0E00-0E7F; font-display: swap; }
-@font-face { font-family: "Lilita One";   src: url("/fonts/thai/kanit600.woff2") format("woff2");    unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Excalifont";       src: url("/fonts/thai/itim.woff2") format("woff2");        unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Nunito";           src: url("/fonts/thai/sarabun.woff2") format("woff2");     unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "ComicShanns";      src: url("/fonts/thai/chakrapetch.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Comic Shanns";     src: url("/fonts/thai/chakrapetch.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Lilita";           src: url("/fonts/thai/kanit600.woff2") format("woff2");    unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Lilita One";       src: url("/fonts/thai/kanit600.woff2") format("woff2");    unicode-range: U+0E00-0E7F; font-display: swap; }
+/* ฟอนต์ที่ต้องเปิด showDeprecatedFonts ถึงจะโผล่ในเมนู */
+@font-face { font-family: "Virgil";           src: url("/fonts/thai/sriracha.woff2") format("woff2");    unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Helvetica";        src: url("/fonts/thai/prompt.woff2") format("woff2");      unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Cascadia";         src: url("/fonts/thai/baijamjuree.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Cascadia Code";    src: url("/fonts/thai/baijamjuree.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Liberation Sans";  src: url("/fonts/thai/mitr.woff2") format("woff2");        unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Liberation";       src: url("/fonts/thai/mitr.woff2") format("woff2");        unicode-range: U+0E00-0E7F; font-display: swap; }

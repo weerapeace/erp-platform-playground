@@ -606,6 +606,7 @@ export function CanvasSketch({
         )}
         <Excalidraw
           langCode="th-TH"
+          showDeprecatedFonts   // โชว์ฟอนต์ครบ 8 ตัว (Virgil/Helvetica/Cascadia/Liberation) → แมปเป็นฟอนต์ไทย 8 แบบ
           viewModeEnabled={!(editable && serverCanEdit)}
           excalidrawAPI={(a: any) => { apiRef.current = a; }}
           initialData={scene ? { elements: scene.elements as any, files: scene.files as any, scrollToContent: true } : undefined}
