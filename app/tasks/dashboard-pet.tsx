@@ -80,6 +80,7 @@ export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data,
   const [seen, setSeen] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [idx, setIdx] = useState(0);
+  const [chat, setChat] = useState<string | null>(null);   // ข้อความคุยเล่น (พูดเป็นระยะ)
 
   // ครั้งแรกสุด: ตั้ง lastSeen = ตอนนี้ (ไม่งั้นงานเก่าทั้งหมดจะถูกนับเป็น "งานใหม่")
   useEffect(() => {
@@ -108,6 +109,12 @@ export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data,
   const total = alerts.reduce((s, a) => s + a.n, 0);
   const hasAlert = alerts.length > 0;
 
+  // ข้อความที่ PET พูดเล่น (พูดเป็นระยะเมื่อไม่มีงานด่วน) — บรรทัดละ 1 ข้อความ
+  const messages = (cfg.messages && cfg.messages.length ? cfg.messages : cfg.greeting ? [cfg.greeting] : []).map((s) => s.trim()).filter(Boolean);
+  const chatEvery = cfg.chatEveryMin ?? 10;
+  const defaultClear = t("เคลียร์งานหมดแล้ว เก่งมาก! 🎉", "All clear, great job! 🎉");
+  const pickMsg = () => (messages.length ? messages[Math.floor(Math.random() * messages.length)] : defaultClear);
+
   // มีงานเตือน → เปิดกรอบคำพูดเอง + วนข้อความถ้ามีหลายอย่าง
   useEffect(() => { if (hasAlert) setOpen(true); }, [hasAlert]);
   useEffect(() => {
@@ -115,6 +122,14 @@ export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data,
     const id = setInterval(() => setIdx((i) => (i + 1) % alerts.length), 4000);
     return () => clearInterval(id);
   }, [open, alerts.length]);
+  // คุยเล่นเป็นระยะ (ทุก chatEvery นาที) เฉพาะตอนไม่มีงานด่วน · โผล่แล้วหายเองใน 8 วิ
+  useEffect(() => {
+    if (!cfg.notify || messages.length === 0 || chatEvery <= 0) return;
+    const id = setInterval(() => setChat(pickMsg()), chatEvery * 60000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg.notify, messages.join("|"), chatEvery]);
+  useEffect(() => { if (!chat) return; const id = setTimeout(() => setChat(null), 8000); return () => clearTimeout(id); }, [chat]);
 
   const acknowledge = () => {
     const now = new Date().toISOString();
@@ -152,7 +167,8 @@ export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data,
     <img src={`/api/r2-image?key=${encodeURIComponent(petUrl)}&w=200`} alt="" style={{ width: size, height: size }} className={`object-contain drop-shadow-lg ${alertCls}`} draggable={false} />
   ) : null;
 
-  const bubbleEl = open ? (
+  const bubbleShown = hasAlert ? open : !!chat;
+  const bubbleEl = bubbleShown ? (
     <div className="ov-bubble-pop max-w-[230px]">
       <div className="bg-white text-slate-700 rounded-2xl shadow-lg border border-slate-100 px-3 py-2">
         {hasAlert ? (
@@ -165,14 +181,14 @@ export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data,
             ))}
           </div>
         ) : (
-          <p className="text-xs">{cfg.greeting || t("เคลียร์งานหมดแล้ว เก่งมาก! 🎉", "All clear, great job! 🎉")}</p>
+          <p className="text-xs">{chat ?? defaultClear}</p>
         )}
       </div>
     </div>
   ) : null;
 
   const petEl = (
-    <button onClick={() => { setOpen((o) => !o); if (newCount > 0) acknowledge(); }} title={t("กดดูการแจ้งเตือน", "Tap for alerts")}
+    <button onClick={() => { if (hasAlert) setOpen((o) => !o); else setChat((c) => (c ? null : pickMsg())); if (newCount > 0) acknowledge(); }} title={t("กดดูการแจ้งเตือน / ให้ PET พูด", "Tap for alerts / make the pet talk")}
       className="relative select-none focus:outline-none">
       {total > 0 && (
         <span className={`ov-badge-pulse absolute -top-1 ${corner.isLeft ? "-left-1" : "-right-1"} z-10 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow`}>{total > 99 ? "99+" : total}</span>

@@ -17,7 +17,7 @@ import { useCreativeStatuses } from "./use-statuses";
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
 
-export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string; titleSize?: "sm" | "md" | "lg" | "xl"; align?: "left" | "center"; petUrl?: string | null; petLottieUrl?: string | null; petLottieData?: unknown | null; petFrames?: string[] | null };
+export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string; titleSize?: "sm" | "md" | "lg" | "xl"; align?: "left" | "center"; imagePos?: string; petUrl?: string | null; petLottieUrl?: string | null; petLottieData?: unknown | null; petFrames?: string[] | null };
 export type CardTheme = { icon: string; iconUrl: string | null; color: string; bgUrl: string | null; label: string | null };
 export type PageTheme = { mode: "none" | "color" | "image"; color: string; imageUrl: string | null };
 export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean };
@@ -31,7 +31,7 @@ export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: bo
 export type StatusColorMap = Record<string, { c1: string; c2?: string | null }>;
 // PET แจ้งเตือน: เปิด/ปิด + เลือกว่าจะเด้งเตือนเมื่อมีงานแบบไหน + แต่งหน้าตา/ตำแหน่ง
 export type PetCorner = "br" | "bl" | "tr" | "tl";
-export type PetConfig = { notify: boolean; overdue: boolean; review: boolean; dueToday: boolean; newTasks: boolean; corner?: PetCorner; size?: number; greeting?: string | null; emojiHappy?: string; emojiAlert?: string; frameMs?: number };
+export type PetConfig = { notify: boolean; overdue: boolean; review: boolean; dueToday: boolean; newTasks: boolean; corner?: PetCorner; size?: number; greeting?: string | null; emojiHappy?: string; emojiAlert?: string; frameMs?: number; messages?: string[]; chatEveryMin?: number };
 export type FontScale = "sm" | "md" | "lg" | "xl";
 export type Density = "compact" | "normal" | "spacious";
 export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number; cardLabelSize?: number; cardValueSize?: number; cardAlign?: CardAlign; anim?: AnimTheme; statusColors?: StatusColorMap; fontFamily?: string; fontScale?: FontScale; density?: Density; cardValueColor?: string | null; cardLabelColor?: string | null; pet?: PetConfig };
@@ -68,7 +68,7 @@ export function ovStatusBg(theme: OverviewTheme, key: string): string | null {
 }
 
 export const DEFAULT_THEME: OverviewTheme = {
-  hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff", titleSize: "lg", align: "left", petUrl: null, petLottieUrl: null, petLottieData: null, petFrames: null },
+  hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff", titleSize: "lg", align: "left", imagePos: "center", petUrl: null, petLottieUrl: null, petLottieData: null, petFrames: null },
   cards: {
     all: { icon: "📋", iconUrl: null, color: "slate", bgUrl: null, label: null },
     mine: { icon: "🙋", iconUrl: null, color: "violet", bgUrl: null, label: null },
@@ -90,7 +90,7 @@ export const DEFAULT_THEME: OverviewTheme = {
   density: "normal",
   cardValueColor: null,   // เว้น = สีตามชุดสีการ์ด
   cardLabelColor: null,
-  pet: { notify: false, overdue: true, review: true, dueToday: true, newTasks: true, corner: "br", size: 64, greeting: null, emojiHappy: "🐥", emojiAlert: "🙀", frameMs: 400 },
+  pet: { notify: false, overdue: true, review: true, dueToday: true, newTasks: true, corner: "br", size: 64, greeting: null, emojiHappy: "🐥", emojiAlert: "🙀", frameMs: 400, messages: [], chatEveryMin: 10 },
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -116,9 +116,12 @@ export function mergeTheme(v: unknown): OverviewTheme {
   return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent, kanban: { ...DEFAULT_THEME.kanban, ...(o.kanban ?? {}) }, cardIconSize: (o.cardIconSize as number) ?? DEFAULT_THEME.cardIconSize, cardLabelSize: (o.cardLabelSize as number) ?? DEFAULT_THEME.cardLabelSize, cardValueSize: (o.cardValueSize as number) ?? DEFAULT_THEME.cardValueSize, cardAlign: (o.cardAlign as CardAlign) ?? DEFAULT_THEME.cardAlign, anim: { ...DEFAULT_THEME.anim, ...(o.anim ?? {}) }, statusColors: (o.statusColors as StatusColorMap) ?? {}, fontFamily: (o.fontFamily as string) ?? DEFAULT_THEME.fontFamily, fontScale: (o.fontScale as FontScale) ?? DEFAULT_THEME.fontScale, density: (o.density as Density) ?? DEFAULT_THEME.density, cardValueColor: (o.cardValueColor as string | null) ?? null, cardLabelColor: (o.cardLabelColor as string | null) ?? null, pet: { ...DEFAULT_THEME.pet!, ...(o.pet ?? {}) } };
 }
 
+// ตำแหน่งโชว์รูปพื้นหลัง Hero (9 จุด) — ค่า = CSS background-position
+export const HERO_POS9: string[] = ["left top", "center top", "right top", "left center", "center", "right center", "left bottom", "center bottom", "right bottom"];
+
 // สไตล์พื้นหลัง Hero ตามธีม
 export function heroStyle(h: HeroTheme): React.CSSProperties {
-  if (h.mode === "image" && h.imageUrl) return { backgroundImage: `url(/api/r2-image?key=${encodeURIComponent(h.imageUrl)})`, backgroundSize: "cover", backgroundPosition: "center" };
+  if (h.mode === "image" && h.imageUrl) return { backgroundImage: `url(/api/r2-image?key=${encodeURIComponent(h.imageUrl)})`, backgroundSize: "cover", backgroundPosition: h.imagePos ?? "center" };
   if (h.mode === "solid") return { background: h.color1 };
   return { background: `linear-gradient(135deg, ${h.color1}, ${h.color2})` };
 }
@@ -397,6 +400,19 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             ) : <span className="text-[11px] text-amber-600">{t("ต้องมีสิทธิ์อัปโหลดไฟล์ถึงจะใส่รูปได้", "Need file-upload permission for images")}</span>
           )}
         </div>
+        {/* ตำแหน่งโชว์ของรูปพื้นหลัง (9 จุด) — ไม่ล็อกกลาง */}
+        {theme.hero.mode === "image" && theme.hero.imageUrl && (
+          <div className="flex items-center gap-3 mt-3">
+            <span className="text-xs text-slate-500">{t("จุดที่โชว์ของรูป", "Image focus")}</span>
+            <div className="grid grid-cols-3 gap-0.5" style={{ width: 60, height: 60 }}>
+              {HERO_POS9.map((val) => (
+                <button key={val} onClick={() => setHero({ imagePos: val })} title={val}
+                  className={`rounded-sm border transition-colors ${(theme.hero.imagePos ?? "center") === val ? "bg-violet-500 border-violet-600" : "bg-slate-100 border-slate-200 hover:bg-slate-200"}`} />
+              ))}
+            </div>
+            <span className="text-[11px] text-slate-400">{t("เลือกว่าจะให้เห็นส่วนไหนของรูป (บน/กลาง/ล่าง · ซ้าย/ขวา)", "Pick which part of the image shows (top/center/bottom · left/right)")}</span>
+          </div>
+        )}
         {/* ข้อความ + สีตัวอักษร Hero */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
           <label className="text-xs text-slate-500">{t("ข้อความทักทาย (เว้นว่าง = ใช้ค่าเริ่มต้น)", "Greeting text (blank = default)")}
@@ -603,8 +619,10 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             </div>
             {/* ข้อความทักทาย + หน้าตามอารมณ์ */}
             <div className="flex flex-wrap items-end gap-x-4 gap-y-2 mt-2 pl-1">
-              <label className="text-xs text-slate-500 flex-1 min-w-[200px]">{t("ข้อความตอนเคลียร์งานหมด (เว้น = ค่าเริ่มต้น)", "Message when all clear (blank = default)")}
-                <input value={theme.pet?.greeting ?? ""} onChange={(e) => setPet({ greeting: e.target.value || null })} placeholder={t("เช่น เก่งมาก! พักก่อนได้เลย ☕", "e.g. Great job! Take a break ☕")} className="mt-1 w-full h-8 px-2 text-sm border border-slate-200 rounded" /></label>
+              <label className="text-xs text-slate-500 w-full">{t("ข้อความที่ PET พูด (บรรทัดละ 1 ข้อความ)", "Pet messages (one per line)")}
+                <textarea value={(theme.pet?.messages && theme.pet.messages.length ? theme.pet.messages : theme.pet?.greeting ? [theme.pet.greeting] : []).join("\n")} onChange={(e) => setPet({ messages: e.target.value.split("\n"), greeting: null })} rows={3} placeholder={t("เช่น (พิมพ์หลายบรรทัด)\nเก่งมาก! พักก่อนได้เลย ☕\nสู้ ๆ นะ 💪\nอย่าลืมดื่มน้ำ 💧", "e.g. (multi-line)\nGreat job! Take a break ☕\nKeep going 💪")} className="mt-1 w-full px-2 py-1.5 text-sm border border-slate-200 rounded resize-none" /></label>
+              <label className="flex items-center gap-1.5 text-xs text-slate-500">{t("พูดเล่นทุกกี่นาที (0 = ปิด)", "Chat every (min, 0 = off)")}
+                <input type="number" min={0} value={theme.pet?.chatEveryMin ?? 10} onChange={(e) => setPet({ chatEveryMin: Math.max(0, Number(e.target.value) || 0) })} className="w-16 h-8 px-2 text-sm border border-slate-200 rounded" /></label>
               <label className="flex items-center gap-1.5 text-xs text-slate-500">{t("หน้าสบายดี", "Happy face")}
                 <input value={theme.pet?.emojiHappy ?? "🐥"} onChange={(e) => setPet({ emojiHappy: e.target.value })} className="w-12 h-8 px-1 text-center text-base border border-slate-200 rounded" /></label>
               <label className="flex items-center gap-1.5 text-xs text-slate-500">{t("หน้าตกใจ", "Alert face")}
