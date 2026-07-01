@@ -358,7 +358,7 @@ export function OverviewDashboard({
               <ReviewQueueView onChanged={onChanged} />
             </>
           ) : mineGroups ? (
-            <MyTasksView doing={mineGroups.doing} delegated={mineGroups.delegated} isSoloMine={mineGroups.isSoloMine} onOpenTask={onOpenTask} accent={theme.accent} />
+            <MyTasksView doing={mineGroups.doing} delegated={mineGroups.delegated} isSoloMine={mineGroups.isSoloMine} onOpenTask={onOpenTask} accent={theme.accent} columns={columns} />
           ) : (<>
           <div className="flex items-center justify-between gap-2">
             {theme.kanban.view !== "table"
@@ -519,31 +519,48 @@ function ShortcutPill({ icon, label, href, onClick }: { icon: string; label: str
 }
 
 // มุมมอง "งานของฉัน" = 2 กลุ่ม (ฉันทำ / ฉันมอบหมายให้คนอื่น) — งานเดี่ยว (มีแค่ฉัน) อยู่บนสุดของกลุ่มแรก
-function MyTasksView({ doing, delegated, isSoloMine, onOpenTask, accent }: {
+function MyTasksView({ doing, delegated, isSoloMine, onOpenTask, accent, columns }: {
   doing: CreativeTask[]; delegated: CreativeTask[]; isSoloMine: (tk: CreativeTask) => boolean;
-  onOpenTask: (id: string) => void; accent?: string;
+  onOpenTask: (id: string) => void; accent?: string; columns: ColumnDef<CreativeTask>[];
 }) {
   const t = useT();
-  const Section = ({ icon, title, hint, list }: { icon: string; title: string; hint?: string; list: CreativeTask[] }) => (
-    <div>
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-sm font-semibold text-slate-700">{icon} {title}</span>
-        <span className="text-xs text-slate-400">({list.length})</span>
-        {hint && <span className="text-[11px] text-slate-400">· {hint}</span>}
-      </div>
-      {list.length === 0 ? (
-        <div className="border border-dashed border-slate-200 rounded-lg p-4 text-center text-xs text-slate-400">{t("ไม่มีงานในกลุ่มนี้", "No tasks here")}</div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {list.map((tk) => <MyTaskCard key={tk.id} task={tk} solo={isSoloMine(tk)} onClick={() => onOpenTask(tk.id)} accent={accent} />)}
-        </div>
-      )}
-    </div>
-  );
+  const emptyBox = <div className="border border-dashed border-slate-200 rounded-lg p-4 text-center text-xs text-slate-400">{t("ไม่มีงานในกลุ่มนี้", "No tasks here")}</div>;
   return (
     <div className="space-y-4">
-      <Section icon="🙋" title={t("งานที่ฉันทำ", "Tasks I do")} hint={t("งานที่มีแค่ฉันอยู่บนสุด", "solo tasks first")} list={doing} />
-      <Section icon="📤" title={t("งานที่ฉันมอบหมายให้คนอื่น", "Tasks I delegated")} list={delegated} />
+      {/* งานที่ฉันทำ = การ์ด (งานเดี่ยวขึ้นบน) */}
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-sm font-semibold text-slate-700">🙋 {t("งานที่ฉันทำ", "Tasks I do")}</span>
+          <span className="text-xs text-slate-400">({doing.length})</span>
+          <span className="text-[11px] text-slate-400">· {t("งานที่มีแค่ฉันอยู่บนสุด", "solo tasks first")}</span>
+        </div>
+        {doing.length === 0 ? emptyBox : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {doing.map((tk) => <MyTaskCard key={tk.id} task={tk} solo={isSoloMine(tk)} onClick={() => onOpenTask(tk.id)} accent={accent} />)}
+          </div>
+        )}
+      </div>
+      {/* งานที่ฉันมอบหมายให้คนอื่น = ตาราง */}
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-sm font-semibold text-slate-700">📤 {t("งานที่ฉันมอบหมายให้คนอื่น", "Tasks I delegated")}</span>
+          <span className="text-xs text-slate-400">({delegated.length})</span>
+        </div>
+        {delegated.length === 0 ? emptyBox : (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <DataTable<CreativeTask>
+              data={delegated} columns={columns}
+              emptyMessage={t("ไม่มีงาน", "No tasks")}
+              searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
+              searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
+              tableId="my-delegated" exportFilename="งานที่มอบหมาย"
+              enableCards
+              cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
+              onRowClick={(row) => onOpenTask(row.id)}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

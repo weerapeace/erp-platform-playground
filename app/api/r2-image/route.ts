@@ -61,7 +61,8 @@ export async function GET(request: NextRequest): Promise<Response> {
     // ย่อไม่ได้ (เช่น Cloudflare ไม่มี sharp) → ส่ง "รูปเดิม" แทน (ปลอดภัย)
     const ct0 = obj.httpMetadata?.contentType ?? "image/jpeg";
     const wParam = Number(new URL(request.url).searchParams.get("w") || 0);
-    const canResize = wParam > 0 && wParam <= 2000 && ct0.startsWith("image/") && ct0 !== "image/svg+xml";
+    // ไม่ย่อ GIF (sharp→webp จะได้เฟรมเดียว = ภาพนิ่ง) → เสิร์ฟตัวเต็มให้ยังขยับได้
+    const canResize = wParam > 0 && wParam <= 2000 && ct0.startsWith("image/") && ct0 !== "image/svg+xml" && ct0 !== "image/gif";
     if (canResize) {
       try {
         const sharp = (await import("sharp")).default;
