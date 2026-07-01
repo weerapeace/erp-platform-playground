@@ -15,7 +15,8 @@ import { decryptSecret } from "@/lib/secret-box";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const MAX_PAGES = 50;   // กันวนไม่จบ (สูงสุด ~5000 สินค้า/ครั้ง)
+const MAX_PAGES = 200;   // กันวนไม่จบ
+const PER_PAGE = 100;
 const asStr = (v: unknown): string | null => { const s = v == null ? "" : String(v).trim(); return s || null; };
 const asNum = (v: unknown): number | null => { if (v == null || v === "") return null; const n = Number(v); return Number.isNaN(n) ? null : n; };
 
@@ -38,19 +39,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let apiKey: string;
   try { apiKey = await decryptSecret(stored); } catch { return NextResponse.json({ error: "ถอดรหัสคีย์ไม่ได้ (กุญแจหลักไม่ตรง/หาย?)" }, { status: 400 }); }
 
-  // 1) วนดึงสินค้าทุกหน้า (จนกว่าจะครบหน้า หรือหน้าสุดท้ายไม่เต็ม) + จำยอดที่ LINE รายงาน
+  // 1) วนดึงสินค้าทุกหน้า — ยึด "ยอดที่ LINE รายงาน" (totalRow) เป็นหลัก
+  //    เผื่อ LINE แบ่งหน้าเล็กกว่าที่ขอ: วนต่อจนได้ครบตามยอด หรือหน้าว่าง (ไม่พึ่ง totalPage อย่างเดียว)
   const products: Record<string, unknown>[] = [];
-  let page = 1, totalPage = 1, apiTotal = 0;
-  do {
-    const res = await lineListProducts(apiKey, { page, perPage: 100 });
+  let page = 1, apiTotal = 0;
+  while (page <= MAX_PAGES) {
+    const res = await lineListProducts(apiKey, { page, perPage: PER_PAGE });
     if (!res.ok) return NextResponse.json({ error: `ดึงสินค้าไม่สำเร็จ: ${res.error}` }, { status: 400 });
     const got = res.rows ?? [];
+    if (page === 1) apiTotal = res.totalRow ?? 0;
     products.push(...got);
-    if (page === 1) apiTotal = res.totalRow ?? got.length;
-    totalPage = res.totalPage ?? 1;
-    if (got.length < 100) break;   // หน้าสุดท้ายไม่เต็ม = จบ (กันกรณี totalPage ไม่ถูก)
+    if (got.length === 0) break;                                 // หน้าว่าง = จบ
+    if (apiTotal > 0 && products.length >= apiTotal) break;      // ครบตามที่ LINE รายงาน
+    if (apiTotal === 0 && got.length < PER_PAGE) break;          // ไม่รู้ยอดรวม + หน้าไม่เต็ม = จบ
     page++;
-  } while (page <= totalPage && page <= MAX_PAGES);
+  }
   if (products.length === 0) return NextResponse.json({ ok: true, fetched: 0, matched: 0, created: 0, updated: 0, error: null });
 
   // 2) แปลงเป็นรายการมาตรฐาน (ระดับสินค้า + เก็บ variants ใน raw)
