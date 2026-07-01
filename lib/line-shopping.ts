@@ -47,12 +47,13 @@ export async function lineListProducts(apiKey: string, params: { page?: number; 
 }
 
 // อัปเดตราคาสินค้า (PATCH /products/{id}/prices) — ส่งราคาใหม่ต่อ variant
-// หมายเหตุ: รูปแบบ body ยังไม่มีในเอกสารสาธารณะ — ใช้ { variants:[{variantId, price}] } เป็นค่าตั้งต้น
-// ถ้า LINE ตอบ error จะคืน body จริงกลับมา (ไว้ยืนยัน/ปรับรูปแบบ)
-export async function lineUpdatePrices(apiKey: string, productId: string, variants: { variantId: string; price: number }[]): Promise<{ ok: boolean; status: number; error?: string }> {
+// หมายเหตุ: รูปแบบ body ยังไม่มีในเอกสารสาธารณะ — variant ของ LINE ใช้ฟิลด์ id (ตัวเลข)
+// ส่งทั้ง key id และ variantId เผื่อ API ต้องการชื่อใดชื่อหนึ่ง · ถ้า error จะคืน body จริงกลับมา
+export async function lineUpdatePrices(apiKey: string, productId: string, variants: { variantId: string | number; price: number }[]): Promise<{ ok: boolean; status: number; error?: string }> {
   try {
+    const payload = { variants: variants.map((v) => ({ id: v.variantId, variantId: v.variantId, price: v.price })) };
     const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}/prices`, {
-      method: "PATCH", headers: headers(apiKey), body: JSON.stringify({ variants }),
+      method: "PATCH", headers: headers(apiKey), body: JSON.stringify(payload),
     });
     if (r.ok) return { ok: true, status: r.status };
     const body = await r.text().catch(() => "");

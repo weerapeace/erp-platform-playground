@@ -61,11 +61,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const results: { product: string; ok: boolean; variants: number; error?: string }[] = [];
   let okCount = 0;
   for (const r of rows) {
+    // variant ของ LINE ใช้ฟิลด์ id (ตัวเลข) เป็นตัวระบุ · sku ไว้จับคู่ราคา ERP
     const items = variantsOf(r)
-      .map((v) => ({ variantId: asStr(v.variantId), sku: asStr(v.sku) }))
+      .map((v) => ({ variantId: asStr(v.id ?? v.variantId), sku: asStr(v.sku) }))
       .filter((v) => v.variantId && v.sku && priceOf.has(v.sku))
       .map((v) => ({ variantId: v.variantId as string, price: priceOf.get(v.sku as string)! }));
-    if (items.length === 0) { results.push({ product: r.title ?? r.external_product_id, ok: false, variants: 0, error: "ไม่พบราคาขายใน ERP สำหรับ SKU ของสินค้านี้" }); continue; }
+    if (items.length === 0) { results.push({ product: r.title ?? r.external_product_id, ok: false, variants: 0, error: "ไม่พบ variant id หรือราคาขาย ERP ที่ตรงกับ SKU" }); continue; }
     const res = await lineUpdatePrices(apiKey, r.external_product_id, items);
     if (res.ok) okCount++;
     results.push({ product: r.title ?? r.external_product_id, ok: res.ok, variants: items.length, error: res.ok ? undefined : res.error });
