@@ -165,12 +165,13 @@ function PayrollShellInner({ children }: { children: React.ReactNode }) {
             <PayrollPeriodSwitcher />
             <NotificationBell />
             {user && (
-              <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-200">
+              <Link href="/dashboard" title="Dashboard ของฉัน"
+                className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-200 rounded-lg hover:bg-slate-50 pr-2 py-1 transition-colors">
                 <div className="leading-tight text-right">
                   <div className="text-xs font-medium text-slate-700 truncate max-w-[120px]">{user.name}</div>
                   <div className="text-[10px] text-slate-400">{roleLabel(user.role)}</div>
                 </div>
-              </div>
+              </Link>
             )}
             <Link href="/apps" className="h-9 px-3 hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 whitespace-nowrap">
               ← ERP เต็ม

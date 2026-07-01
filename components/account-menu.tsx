@@ -47,8 +47,10 @@ export function AccountMenu() {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl z-50 py-1">
             <div className="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 truncate">{user.email}</div>
+            <button type="button" onClick={() => { setOpen(false); router.push("/dashboard"); }}
+              className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">🏠 Dashboard ของฉัน</button>
             <button type="button" onClick={() => { setOpen(false); setProfileOpen(true); }}
-              className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">👤 โปรไฟล์ของฉัน (แก้ชื่อ/รูป)</button>
+              className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 border-t border-slate-100">👤 โปรไฟล์ของฉัน (แก้ชื่อ/รูป)</button>
 
             {/* สีธีม (accent) */}
             <div className="px-3 py-2 border-t border-slate-100">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -172,11 +173,11 @@ export function NotificationBell() {
             )}
           </div>
 
-          {items.length > 0 && (
-            <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 text-center">
-              <span className="text-[10px] text-slate-400">โพลทุก 30 วินาที</span>
-            </div>
-          )}
+          <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+            <Link href="/dashboard" onClick={() => setOpen(false)}
+              className="text-xs font-medium text-blue-600 hover:underline">ดูงานทั้งหมด →</Link>
+            <span className="text-[10px] text-slate-400">โพลทุก 30 วินาที</span>
+          </div>
         </div>
       )}
     </div>

@@ -4,17 +4,20 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 // ---- Types ----
 
 export type Notification = {
-  id:          string;
-  user_id:     string;
-  event_type:  string;
-  title:       string;
-  body:        string | null;
-  link_url:    string | null;
-  entity_type: string | null;
-  entity_id:   string | null;
-  priority:    "low" | "normal" | "high";
-  read_at:     string | null;
-  created_at:  string;
+  id:            string;
+  user_id:       string;
+  event_type:    string;
+  title:         string;
+  body:          string | null;
+  link_url:      string | null;
+  entity_type:   string | null;
+  entity_id:     string | null;
+  priority:      "low" | "normal" | "high";
+  read_at:       string | null;
+  created_at:    string;
+  pinned_at:     string | null;
+  snoozed_until: string | null;
+  due_at:        string | null;
 };
 
 export type NotificationsResponse = {
@@ -27,12 +30,13 @@ export type NotificationsResponse = {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const limit       = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "30")));
-  const unreadOnly  = searchParams.get("unread_only") === "true";
+  const limit          = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "30")));
+  const unreadOnly     = searchParams.get("unread_only") === "true";
+  const includeSnoozed = searchParams.get("include_snoozed") === "true";
 
   const client = supabaseFromRequest(request);
   const [{ data: list, error: listErr }, { data: unread, error: countErr }] = await Promise.all([
-    client.rpc("erp_notifications_list", { p_limit: limit, p_unread_only: unreadOnly }),
+    client.rpc("erp_notifications_list", { p_limit: limit, p_unread_only: unreadOnly, p_include_snoozed: includeSnoozed }),
     client.rpc("erp_notifications_unread_count"),
   ]);
 
@@ -47,9 +51,15 @@ export async function GET(request: NextRequest) {
   } satisfies NotificationsResponse);
 }
 
-// ---- PATCH — mark read (single หรือ all) ----
+// ---- PATCH — mark read (single/all) + pin/snooze ----
 
-type PatchBody = { id?: string; all?: boolean };
+type PatchBody = {
+  id?:     string;
+  all?:    boolean;
+  action?: "pin" | "snooze";
+  value?:  boolean;         // pin: true = ปักหมุด, false = เลิกปักหมุด
+  until?:  string | null;   // snooze: ISO timestamp, null = ยกเลิกการเลื่อน
+};
 
 export async function PATCH(request: NextRequest) {
   let body: PatchBody;
@@ -57,6 +67,19 @@ export async function PATCH(request: NextRequest) {
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const client = supabaseFromRequest(request);
+
+  // ปักหมุด / เลิกปักหมุด
+  if (body.action === "pin" && body.id) {
+    const { data, error } = await client.rpc("erp_notifications_pin", { p_id: body.id, p_pinned: body.value ?? true });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ success: data, error: null });
+  }
+  // เลื่อนดูทีหลัง / ยกเลิกการเลื่อน
+  if (body.action === "snooze" && body.id) {
+    const { data, error } = await client.rpc("erp_notifications_snooze", { p_id: body.id, p_until: body.until ?? null });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ success: data, error: null });
+  }
   if (body.all) {
     const { data, error } = await client.rpc("erp_notifications_mark_all_read");
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
