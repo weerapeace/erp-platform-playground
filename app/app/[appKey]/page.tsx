@@ -35,7 +35,7 @@ type AppGroup = { key: string; label: string; icon: string | null; permission_ke
 
 export default function StandaloneApp() {
   const appKey = String(useParams().appKey ?? "");
-  const { user, ready, can, permsReady } = useAuth();
+  const { user, ready, can } = useAuth();
   const [app, setApp] = useState<AppGroup | null>(null);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [active, setActive] = useState(0);
@@ -77,9 +77,9 @@ export default function StandaloneApp() {
       setLoaded(true);
     }).catch(() => { if (alive) setLoaded(true); });
     return () => { alive = false; };
-    // ใช้ permsReady (boolean ที่ flip ครั้งเดียว) ไม่ใช่ can (อาจเปลี่ยน reference) เพื่อกัน fetch วนไม่จบ
+    // ใช้ ready (boolean ที่ flip ครั้งเดียว) ไม่ใช่ can (อาจเปลี่ยน reference) เพื่อกัน fetch วนไม่จบ
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [appKey, permsReady]);
+  }, [appKey, ready]);
 
   // จำหน้าลึกในกรอบ (iframe) ทุก 1.5วิ → refresh แล้วกลับมาหน้าเดิม (ฝั่ง browser ล้วน ไม่กิน CPU worker)
   useEffect(() => {
@@ -105,7 +105,7 @@ export default function StandaloneApp() {
   );
 
   // ยังโหลดเมนู/สิทธิ์ไม่เสร็จ → โชว์หน้าโหลด (กัน empty state "ยังไม่มีรายการ" เด้งแว้บตอนยังโหลดไม่จบ)
-  if (!loaded || !permsReady) return <AppLoading label={app?.label} icon={app?.icon} />;
+  if (!loaded) return <AppLoading label={app?.label} icon={app?.icon} />;
 
   // กั้นเข้าแอปตามสิทธิ์ — แอปตั้ง permission_key แล้ว user ไม่มีสิทธิ์ → เข้าไม่ได้ (กันพิมพ์ URL ตรง)
   if (app?.permission_key && !can(app.permission_key as Parameters<typeof can>[0])) return (
