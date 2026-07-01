@@ -1,0 +1,19 @@
+/* ============================================================
+ * ฟอนต์ไทยบนกระดาน Excalidraw
+ * Excalidraw v0.18 ไม่เปิดให้เพิ่มฟอนต์เข้าเมนู (register เป็น private)
+ * → เทคนิค: เติม @font-face "family เดียวกับ Excalidraw" แต่จำกัด unicode-range เฉพาะช่วงไทย
+ *   ตัวอักษรอังกฤษ = ฟอนต์ Excalidraw เดิม · ตัวอักษรไทย = ฟอนต์ไทยที่แมปไว้
+ * → เลือกฟอนต์ต่างกันบนกระดาน = ได้ฟอนต์ไทยต่างแบบ (self-host กัน URL ภายนอกเปลี่ยน)
+ *
+ *   ✏️ Excalifont (ลายมือ)  → Itim (ลายมือไทย)
+ *   A  Nunito (ปกติ)        → Sarabun (อ่านง่าย)
+ *   </> Comic Shanns (โค้ด) → Chakra Petch (แนวเทค)
+ *   Lilita One (หัวหนา)     → Kanit 600 (ตัวหนา)
+ * ============================================================ */
+
+@font-face { font-family: "Excalifont";   src: url("/fonts/thai/itim.woff2") format("woff2");        unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Nunito";       src: url("/fonts/thai/sarabun.woff2") format("woff2");     unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "ComicShanns";  src: url("/fonts/thai/chakrapetch.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Comic Shanns"; src: url("/fonts/thai/chakrapetch.woff2") format("woff2"); unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Lilita";       src: url("/fonts/thai/kanit600.woff2") format("woff2");    unicode-range: U+0E00-0E7F; font-display: swap; }
+@font-face { font-family: "Lilita One";   src: url("/fonts/thai/kanit600.woff2") format("woff2");    unicode-range: U+0E00-0E7F; font-display: swap; }

@@ -18,6 +18,7 @@
 import { useState, useEffect, useRef, useCallback, type MutableRefObject } from "react";
 import dynamic from "next/dynamic";
 import "@excalidraw/excalidraw/index.css";
+import "./thai-fonts.css";   // เติมฟอนต์ไทยให้ family ของ Excalidraw (unicode-range เฉพาะไทย)
 import { apiFetch } from "@/lib/api";
 import { isUnloadSuppressed } from "@/lib/canvas-unload-guard";
 import { useCanvasRealtime } from "./use-canvas-realtime";
