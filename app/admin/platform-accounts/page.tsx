@@ -26,6 +26,7 @@ export default function PlatformAccountsPage() {
   const [keyDraft, setKeyDraft] = useState<Record<string, string>>({});
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(false);   // คู่มือขอ API Key ของ LINE SHOPPING
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -119,13 +120,44 @@ export default function PlatformAccountsPage() {
                     {keys[p.id] && <button onClick={() => saveKey(p.id, "")} className="h-8 px-2 text-xs text-rose-500 border border-rose-200 rounded-lg hover:bg-rose-50">ล้าง</button>}
                     <button onClick={testConn} disabled={testing || !keys[p.id]} title={keys[p.id] ? "" : "ใส่ API Key ก่อน"} className="h-8 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-40">🔌 ทดสอบเชื่อมต่อ</button>
                     {testMsg && <span className="text-xs text-slate-600">{testMsg}</span>}
-                    <a href="https://oaplus.line.biz" target="_blank" rel="noopener noreferrer" className="text-[11px] text-violet-600 underline shrink-0">วิธีสร้างคีย์ ↗</a>
+                    <button onClick={() => setShowGuide(true)} className="text-[11px] text-violet-600 underline shrink-0">📖 วิธีขอ API Key</button>
                   </div>
                 )}
               </div>
             );
           })}
           {platforms.length === 0 && <p className="text-slate-400 text-sm">ยังไม่มีแพลตฟอร์ม</p>}
+        </div>
+      )}
+
+      {showGuide && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setShowGuide(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg my-8" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+              <h2 className="text-base font-semibold text-slate-800">📖 วิธีขอ API Key จาก LINE SHOPPING</h2>
+              <button onClick={() => setShowGuide(false)} className="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
+            </div>
+            <div className="p-5 space-y-4 text-sm text-slate-700">
+              <p className="text-slate-500">ทำครั้งเดียวต่อร้าน — คัดลอกคีย์มาวางในช่อง “API Key” แล้วกดบันทึก + ทดสอบเชื่อมต่อ</p>
+              <ol className="space-y-2.5">
+                <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-xs flex items-center justify-center font-semibold">1</span><span>เข้า <a href="https://oaplus.line.biz" target="_blank" rel="noopener noreferrer" className="text-violet-600 underline">oaplus.line.biz</a> แล้ว <b>ล็อกอิน</b> ด้วยบัญชี LINE ที่เป็นเจ้าของร้าน (ต้องเป็น<b>แอดมินร้าน</b>)</span></li>
+                <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-xs flex items-center justify-center font-semibold">2</span><span>เลือก <b>ร้าน/บัญชี (Channel)</b> ที่ต้องการ → เข้าเมนู <b>“อีคอมเมิร์ซ” (E-Commerce)</b></span></li>
+                <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-xs flex items-center justify-center font-semibold">3</span><span>ไปที่ <b>“ตั้งค่าร้านค้า” (Shop settings)</b> → เลือกหัวข้อ <b>“Open API”</b></span></li>
+                <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-xs flex items-center justify-center font-semibold">4</span><span>เข้าเมนู <b>“จัดการ API Keys” (Manage API Keys)</b></span></li>
+                <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-violet-100 text-violet-700 text-xs flex items-center justify-center font-semibold">5</span><span>กด <b>+ Generate</b> → ตั้งชื่อกำกับ (เช่น <span className="font-mono text-xs bg-slate-100 px-1 rounded">ERP</span>) → กด <b>Generate</b></span></li>
+                <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 text-xs flex items-center justify-center font-semibold">6</span><span><b>คัดลอกคีย์</b>ที่ได้ → กลับมาวางในช่อง “API Key” ที่นี่ → <b>บันทึกคีย์</b> → <b>🔌 ทดสอบเชื่อมต่อ</b></span></li>
+              </ol>
+              <div className="border-t border-slate-100 pt-3 space-y-1.5 text-[13px] text-slate-500">
+                <p className="font-medium text-slate-600">⚠️ ข้อควรระวัง</p>
+                <p>• คีย์จะโชว์ให้ <b>คัดลอกทันทีที่สร้าง</b> — ถ้าไม่ได้ก๊อป ต้องสร้างใหม่</p>
+                <p>• สร้างได้สูงสุด <b>10 คีย์</b> ต่อร้าน · ถ้าไม่เจอเมนู Open API อาจต้องเปิดใช้ MyShop/แพ็กเกจร้านก่อน</p>
+                <p>• ระบบเราเก็บคีย์แบบ<b>เข้ารหัส</b> — ปลอดภัย ไม่มีใครเห็นค่าคีย์อีก</p>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <a href="https://oaplus.line.biz" target="_blank" rel="noopener noreferrer" className="h-9 px-4 leading-9 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700">เปิด oaplus.line.biz ↗</a>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
