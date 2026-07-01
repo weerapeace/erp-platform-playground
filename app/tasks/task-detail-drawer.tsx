@@ -147,6 +147,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [confirmDel, setConfirmDel] = useState(false);   // ยืนยันก่อนลบงาน
   const [publishToKey, setPublishToKey] = useState<string | null>(null);   // เปิด PublishModal เมื่อกด "เผยแพร่"
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
+  const [descEdit, setDescEdit] = useState<string | null>(null); // null=ไม่แก้ · string=กำลังแก้รายละเอียด
   const [openParentId, setOpenParentId] = useState<string | null>(null); // เปิด drawer Parent SKU
   const [tab, setTab] = useState<"task" | "content" | "reference">("task"); // แท็บ: งาน / คอนเทนต์ / อ้างอิง
   const [refHtml, setRefHtml] = useState("");     // เนื้อหาแท็บอ้างอิง (rich text)
@@ -290,8 +291,27 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           <div className={`flex ${twoCol ? (dth.swap ? "flex-row-reverse" : "flex-row") : "flex-col"} items-stretch`}>
             {/* ===== ซ้าย: รายละเอียดงาน + งานย่อย + ไฟล์ ===== */}
             <div className={`flex-1 min-w-0 w-full ${densityCls(dth.density)}`}>
-              {/* รายละเอียดงาน (ถ้ามี) */}
-              {d.description && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600 whitespace-pre-wrap"><p className="text-xs text-slate-400 mb-1">{t("รายละเอียดงาน", "Description")}</p>{d.description}</div>}
+              {/* รายละเอียดงาน — คลิกเพื่อแก้ได้ (เซฟทันที) */}
+              {descEdit === null ? (
+                <button type="button" onClick={() => setDescEdit(d.description ?? "")}
+                  className="w-full text-left bg-slate-50 rounded-lg p-3 text-sm hover:bg-slate-100 transition-colors group">
+                  <p className="text-xs text-slate-400 mb-1">{t("รายละเอียดงาน", "Description")} <span className="opacity-0 group-hover:opacity-100 text-slate-300">✎</span></p>
+                  {d.description
+                    ? <span className="text-slate-600 whitespace-pre-wrap">{d.description}</span>
+                    : <span className="text-slate-400 italic">{t("เพิ่มรายละเอียด...", "Add description...")}</span>}
+                </button>
+              ) : (
+                <div className="bg-white rounded-lg p-3 border border-violet-200">
+                  <p className="text-xs text-slate-400 mb-1">{t("รายละเอียดงาน", "Description")}</p>
+                  <textarea value={descEdit} onChange={(e) => setDescEdit(e.target.value)} rows={3} autoFocus
+                    className="w-full text-sm border border-slate-200 rounded p-2 resize-none focus:outline-none focus:ring-2 focus:ring-violet-200" />
+                  <div className="flex justify-end gap-2 mt-2">
+                    <button type="button" onClick={() => setDescEdit(null)} className="text-xs text-slate-500 hover:underline">{t("ยกเลิก", "Cancel")}</button>
+                    <button type="button" disabled={busy} onClick={async () => { const v = (descEdit ?? "").trim(); await saveQuick({ description: v || null }); setDescEdit(null); }}
+                      className="text-xs font-medium text-white bg-violet-600 rounded px-2.5 py-1 hover:bg-violet-700 disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
+                  </div>
+                </div>
+              )}
 
               {/* งานย่อย (การ์ด) — ของกลางจัดการสด · ถ้าไม่มีจะมีปุ่มเพิ่มในตัว */}
               <SubtaskManager taskId={d.id} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />
