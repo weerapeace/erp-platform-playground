@@ -301,7 +301,7 @@ export function OverviewDashboard({
                           : <span className="h-9 w-9 rounded bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300 text-xs shrink-0">🖼️</span>}
                         <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
                         <div className="flex-1 min-w-0">
-                          <span className="text-sm text-slate-700">{s.title}</span>
+                          <span className="text-sm text-slate-700">{t(s.title, s.title_en || s.title)}</span>
                           <span className="ml-2 text-[10px] text-slate-400">{SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
                           {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
                           <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>

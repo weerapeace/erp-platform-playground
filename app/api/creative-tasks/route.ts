@@ -91,7 +91,7 @@ type CreateBody = {
   start_date?: string | null; due_date?: string | null;
   asset_status?: string | null; platforms?: string[] | null;
   drive_folder_url?: string | null; cover_image_r2_key?: string | null;
-  subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: Record<string, unknown> }[];
+  subtasks?: { title: string; title_en?: string | null; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: Record<string, unknown> }[];
   content_items?: { title: string; post_type?: string | null; platforms?: string[]; assignee_id?: string | null; assignee_ids?: string[] }[];   // คอนเทนต์พ่วงจากแม่แบบ → สร้างผูกงานอัตโนมัติ
 };
 
@@ -142,8 +142,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (Array.isArray(body.subtasks) && body.subtasks.length > 0) {
     const steps = body.subtasks.filter((s) => s?.title?.trim());
     if (steps.length) {
+      // ชื่ออังกฤษของงานย่อย: ใช้ที่ส่งมา หรือเติมจาก label_en ของชนิด (ตั้งให้ก่อน)
+      const typeKeys = [...new Set(steps.map((s) => s.type).filter(Boolean) as string[])];
+      const typeEn: Record<string, string> = {};
+      if (typeKeys.length) {
+        const { data: tps } = await admin.from("erp_subtask_types").select("key, label_en").in("key", typeKeys);
+        (tps ?? []).forEach((tp) => { const r = tp as { key: string; label_en: string | null }; if (r.label_en) typeEn[r.key] = r.label_en; });
+      }
       const { data: subs } = await admin.from("erp_creative_subtasks")
-        .insert(steps.map((s, i) => ({ task_id: row!.id, title: s.title.trim(), description: s.description ?? null, assignee_id: s.assignee_ids?.[0] || s.assignee_id || null, required_before_next: !!s.required_before_next, sort_order: i, subtask_type: s.type ?? "custom", config: s.config ?? {} })))
+        .insert(steps.map((s, i) => ({ task_id: row!.id, title: s.title.trim(), title_en: (s.title_en?.trim() || (s.type && s.type !== "custom" ? typeEn[s.type] : null)) || null, description: s.description ?? null, assignee_id: s.assignee_ids?.[0] || s.assignee_id || null, required_before_next: !!s.required_before_next, sort_order: i, subtask_type: s.type ?? "custom", config: s.config ?? {} })))
         .select("id");
       const subIds = (subs ?? []) as { id: string }[];
       for (let i = 0; i < subIds.length; i++) {

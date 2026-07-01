@@ -97,7 +97,7 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
   return NextResponse.json({ parents, linked_sku_ids: linkedSkuIds, required, error: null });
 }
 
-const EDITABLE = new Set(["title", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order", "image_sync_targets"]);
+const EDITABLE = new Set(["title", "title_en", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order", "image_sync_targets"]);
 
 // อ่าน role ของผู้ใช้ปัจจุบัน (admin/manager/...) — ใช้คุมสิทธิ์ละเอียดของงานย่อย
 async function currentRole(request: NextRequest): Promise<string> {
@@ -146,7 +146,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const sort = ((maxRow?.[0]?.sort_order as number) ?? -1) + 1;
   const ids = Array.isArray(body.assignee_ids) ? (body.assignee_ids as string[]) : [];
   const { data: row, error } = await admin.from("erp_creative_subtasks").insert({
-    task_id: id, title, description: (body.description as string)?.trim() || null, assignee_id: ids[0] || (body.assignee_id as string) || null,
+    task_id: id, title, title_en: (body.title_en as string)?.trim() || null, description: (body.description as string)?.trim() || null, assignee_id: ids[0] || (body.assignee_id as string) || null,
     due_date: (body.due_date as string) || null, required_before_next: !!body.required_before_next, sort_order: sort,
   }).select("*").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });

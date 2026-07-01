@@ -97,10 +97,11 @@ export function SubtaskManager({ taskId, pushToast, canApprove = false, canManag
 }
 
 // ฟอร์มเพิ่มงานย่อย (รวยเหมือนเทมเพลต — ชื่อ + รายละเอียด + ผู้รับผิดชอบหลายคน)
-export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: string; description?: string | null; assignee_ids?: string[] }) => Promise<void>; pushToast: ToastFn }) {
+export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: string; title_en?: string | null; description?: string | null; assignee_ids?: string[] }) => Promise<void>; pushToast: ToastFn }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const [titleEn, setTitleEn] = useState("");
   const [desc, setDesc] = useState("");
   const [assignees, setAssignees] = useState<{ id: string; label: string }[]>([]);
   const [adding, setAdding] = useState<UserPickerValue | null>(null);
@@ -108,14 +109,15 @@ export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: st
   const submit = async () => {
     if (!title.trim()) return;
     setBusy(true);
-    try { await onAdd({ title: title.trim(), description: desc.trim() || null, assignee_ids: assignees.map((a) => a.id) }); setTitle(""); setDesc(""); setAssignees([]); setOpen(false); }
+    try { await onAdd({ title: title.trim(), title_en: titleEn.trim() || null, description: desc.trim() || null, assignee_ids: assignees.map((a) => a.id) }); setTitle(""); setTitleEn(""); setDesc(""); setAssignees([]); setOpen(false); }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setBusy(false); }
   };
   if (!open) return <button onClick={() => setOpen(true)} className="mt-2 text-sm text-violet-700 hover:underline">＋ {t("เพิ่มงานย่อย", "Add Subtask")}</button>;
   return (
     <div className="mt-2 border border-violet-200 rounded-lg p-3 space-y-2 bg-violet-50/30">
-      <ERPInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("ชื่องานย่อย", "Subtask title")} />
+      <ERPInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("ชื่องานย่อย (ไทย)", "Subtask title (Thai)")} />
+      <ERPInput value={titleEn} onChange={(e) => setTitleEn(e.target.value)} placeholder={t("ชื่ออังกฤษ (ไม่บังคับ — โชว์ตอนสลับภาษา EN)", "English title (optional — shown in EN mode)")} />
       <ERPTextarea value={desc} rows={2} onChange={(e) => setDesc(e.target.value)} placeholder={t("รายละเอียด (ไม่บังคับ)", "Description (optional)")} />
       <div>
         <p className="text-[11px] text-slate-400 mb-1">{t("ผู้รับผิดชอบ (เลือกได้หลายคน)", "Assignees (multiple allowed)")}</p>
@@ -209,7 +211,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         {st === "canceled" && <span className="shrink-0 text-xs font-medium text-slate-400">🚫 {t("ยกเลิก", "Canceled")}</span>}
         {isSubDone(st) && <span className="shrink-0 text-xs font-medium text-emerald-600">✓ {subStepLabel(st)}</span>}
         {ty && <span className="shrink-0 text-sm leading-none" title={ty.label_th}>{ty.icon ?? "🧩"}</span>}
-        <button onClick={() => setOpen((o) => !o)} className={`text-sm flex-1 text-left ${isSubDone(st) ? "line-through text-slate-400" : "text-slate-700"}`}>{sub.title}</button>
+        <button onClick={() => setOpen((o) => !o)} className={`text-sm flex-1 text-left ${isSubDone(st) ? "line-through text-slate-400" : "text-slate-700"}`}>{t(sub.title, sub.title_en || sub.title)}</button>
         {sub.required_before_next && <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
         <div className="flex -space-x-1">{sub.assignees.slice(0, 3).map((a) => <AssigneeAvatar key={a.id} a={a} size={20} />)}</div>
         {attachCount > 0 && <span className="text-[10px] text-slate-400">📎{attachCount}</span>}
@@ -286,19 +288,20 @@ function EditSubtaskModal({ sub, taskId, reload, pushToast, canManageAssignees, 
 }) {
   const t = useT();
   const [title, setTitle] = useState(sub.title);
+  const [titleEn, setTitleEn] = useState(sub.title_en ?? "");
   const [desc, setDesc] = useState(sub.description ?? "");
   const [assignees, setAssignees] = useState<SubtaskAssignee[]>(sub.assignees);
   const [adding, setAdding] = useState<UserPickerValue | null>(null);
   const [required, setRequired] = useState(sub.required_before_next);
   const [busy, setBusy] = useState(false);
   const idsKey = (xs: SubtaskAssignee[]) => xs.map((a) => a.id).join(",");
-  const dirty = title.trim() !== sub.title || (desc.trim() || "") !== (sub.description || "") || required !== sub.required_before_next || idsKey(assignees) !== idsKey(sub.assignees);
+  const dirty = title.trim() !== sub.title || (titleEn.trim() || "") !== (sub.title_en || "") || (desc.trim() || "") !== (sub.description || "") || required !== sub.required_before_next || idsKey(assignees) !== idsKey(sub.assignees);
 
   const save = async () => {
     if (!title.trim()) { pushToast("error", t("ใส่ชื่องานย่อยก่อน", "Title is required")); return; }
     setBusy(true);
     try {
-      const p: Record<string, unknown> = { title: title.trim(), description: desc.trim() || null, required_before_next: required };
+      const p: Record<string, unknown> = { title: title.trim(), title_en: titleEn.trim() || null, description: desc.trim() || null, required_before_next: required };
       if (canManageAssignees) p.assignee_ids = assignees.map((a) => a.id);
       await updateSubtask(taskId, sub.id, p);
       await reload();
@@ -326,8 +329,12 @@ function EditSubtaskModal({ sub, taskId, reload, pushToast, canManageAssignees, 
       }>
       <div className="space-y-3">
         <div>
-          <p className="text-[11px] text-slate-400 mb-1">{t("ชื่องานย่อย", "Title")}</p>
+          <p className="text-[11px] text-slate-400 mb-1">{t("ชื่องานย่อย (ไทย)", "Title (Thai)")}</p>
           <ERPInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("ชื่องานย่อย", "Subtask title")} />
+        </div>
+        <div>
+          <p className="text-[11px] text-slate-400 mb-1">{t("ชื่ออังกฤษ (โชว์ตอนสลับภาษา EN)", "English title (shown in EN mode)")}</p>
+          <ERPInput value={titleEn} onChange={(e) => setTitleEn(e.target.value)} placeholder={t("เช่น Photo Editing", "e.g. Photo Editing")} />
         </div>
         <div>
           <p className="text-[11px] text-slate-400 mb-1">{t("รายละเอียด", "Description")}</p>

@@ -55,7 +55,7 @@ export type CreativeTask = {
 
 export type SubtaskAssignee = { id: string; label: string; color?: string | null; avatar_url?: string | null };
 export type CreativeSubtask = {
-  id: string; task_id: string; title: string; description: string | null;
+  id: string; task_id: string; title: string; title_en?: string | null; description: string | null;
   assignee_id: string | null;
   assignees: SubtaskAssignee[];
   attachments?: CreativeAttachment[];
@@ -144,7 +144,7 @@ export async function getTask(id: string): Promise<TaskDetail> {
   return j.data as TaskDetail;
 }
 
-export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: SubtaskStepConfig }[]; content_items?: TemplateContentItem[] };
+export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; title_en?: string | null; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: SubtaskStepConfig }[]; content_items?: TemplateContentItem[] };
 
 export async function createTask(body: CreateTaskBody): Promise<{ id: string; task_no: string }> {
   const res = await apiFetch("/api/creative-tasks", { method: "POST", body: JSON.stringify(body) });
@@ -204,7 +204,7 @@ export async function listSubtasks(taskId: string): Promise<CreativeSubtask[]> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/subtasks`));
   return (j.data as CreativeSubtask[]) ?? [];
 }
-export async function addSubtask(taskId: string, body: { title: string; description?: string | null; assignee_ids?: string[]; due_date?: string | null; required_before_next?: boolean }): Promise<CreativeSubtask> {
+export async function addSubtask(taskId: string, body: { title: string; title_en?: string | null; description?: string | null; assignee_ids?: string[]; due_date?: string | null; required_before_next?: boolean }): Promise<CreativeSubtask> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/subtasks`, { method: "POST", body: JSON.stringify(body) }));
   return j.data as CreativeSubtask;
 }
@@ -218,7 +218,7 @@ export async function deleteSubtask(taskId: string, subtaskId: string): Promise<
 
 // ---- งานย่อยของฉัน (queue พนักงาน) ----
 export type MySubtask = {
-  id: string; title: string; status: string; due_date: string | null; required_before_next: boolean;
+  id: string; title: string; title_en?: string | null; status: string; due_date: string | null; required_before_next: boolean;
   task_id: string; task_no: string | null; task_title: string | null; task_status: string | null; priority?: string | null;
   cover_image_r2_key?: string | null;
 };

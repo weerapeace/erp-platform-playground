@@ -29,7 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!ids.length) return NextResponse.json({ data: [], error: null });
 
   const { data, error } = await admin.from("erp_creative_subtasks")
-    .select("id, title, status, due_date, required_before_next, task_id, task:erp_creative_tasks!task_id(task_no, title, status, is_active, priority, cover_image_r2_key)")
+    .select("id, title, title_en, status, due_date, required_before_next, task_id, task:erp_creative_tasks!task_id(task_no, title, status, is_active, priority, cover_image_r2_key)")
     .in("id", ids)
     .not("status", "in", "(done,posted,approved)")
     .order("due_date", { ascending: true });
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rows = ((data ?? []) as Record<string, unknown>[]).map((r) => {
     const t = (Array.isArray(r.task) ? r.task[0] : r.task) as Record<string, unknown> | null;
     return {
-      id: r.id, title: r.title, status: r.status, due_date: r.due_date, required_before_next: r.required_before_next,
+      id: r.id, title: r.title, title_en: r.title_en ?? null, status: r.status, due_date: r.due_date, required_before_next: r.required_before_next,
       task_id: r.task_id as string, task_no: t?.task_no ?? null, task_title: t?.title ?? null, task_status: t?.status ?? null,
       priority: t?.priority ?? null,
       cover_image_r2_key: (t?.cover_image_r2_key as string | null) ?? null,
