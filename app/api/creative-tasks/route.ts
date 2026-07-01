@@ -14,7 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
-import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser, setTaskReviewers } from "@/lib/creative-tasks-server";
+import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser, setTaskReviewers, pushTasksLine } from "@/lib/creative-tasks-server";
 import { SELECT, flattenTask } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -200,6 +200,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
   }
+
+  // แจ้งเข้ากลุ่ม LINE ของทีม (best-effort — ไม่กระทบการสร้างงาน)
+  try {
+    const names = taskAssignees.length ? [...(await employeeLabelMap(admin, taskAssignees)).values()].filter(Boolean).join(", ") : "";
+    const due = typeof body.due_date === "string" && body.due_date ? body.due_date : "";
+    await pushTasksLine(admin, `🆕 งานใหม่ ${taskNo}\n• ${title}${names ? `\n👤 ผู้รับผิดชอบ: ${names}` : ""}${due ? `\n🗓 กำหนดส่ง: ${due}` : ""}`);
+  } catch { /* noop */ }
 
   return NextResponse.json({ id: row.id, task_no: taskNo, error: null });
 }

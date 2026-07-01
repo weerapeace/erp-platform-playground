@@ -7,6 +7,24 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
+/**
+ * แจ้งเตือนเข้ากลุ่ม LINE ของทีม Creative (reuse line_config ของ china-pay)
+ * ส่งกลุ่ม "creative" ถ้าตั้งไว้ ไม่งั้นใช้กลุ่มหลัก (group_id) · เงียบถ้ายังไม่ตั้งค่า/ล้มเหลว (ไม่กระทบการบันทึก)
+ */
+export async function pushTasksLine(admin: Admin, text: string): Promise<void> {
+  try {
+    const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
+    const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string> };
+    const target = cfg.groups?.creative || cfg.group_id || "";
+    if (!cfg.token || !target) return;
+    await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
+      body: JSON.stringify({ to: target, messages: [{ type: "text", text: text.slice(0, 4900) }] }),
+    });
+  } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
+}
+
 /** เลขที่งาน CT-YYYYMM-#### (นับตามเดือน) */
 export async function nextTaskNo(admin: Admin): Promise<string> {
   const now = new Date();
