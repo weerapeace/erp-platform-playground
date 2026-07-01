@@ -30,7 +30,7 @@ export async function pushTasksLine(admin: Admin, text: string): Promise<void> {
  * แจ้งเตือนเข้ากลุ่ม LINE ตาม "แม่แบบข้อความต่อเหตุการณ์" (line_config.templates[eventKey])
  * ไม่มีแม่แบบที่ตั้งเอง → ใช้ค่าเริ่มต้น · แทนตัวแปร {…} ด้วย vars · เงียบถ้าไม่มี config/ล้ม
  */
-export async function pushTasksLineTpl(admin: Admin, eventKey: string, vars: Record<string, string | null | undefined>): Promise<void> {
+export async function pushTasksLineTpl(admin: Admin, eventKey: string, vars: Record<string, unknown>): Promise<void> {
   try {
     const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
     const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; templates?: Record<string, string> };

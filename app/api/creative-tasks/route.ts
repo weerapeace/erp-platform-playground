@@ -202,10 +202,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // แจ้งเข้ากลุ่ม LINE ของทีม ตามแม่แบบ (best-effort — ไม่กระทบการสร้างงาน)
+  // ส่ง "ทั้งงาน" (flatten + label) เป็นตัวแปร → แม่แบบใช้ {ฟิลด์ใดก็ได้} ของงานได้
   try {
-    const names = taskAssignees.length ? [...(await employeeLabelMap(admin, taskAssignees)).values()].filter(Boolean).join(", ") : "";
-    const due = typeof body.due_date === "string" && body.due_date ? body.due_date : "";
-    await pushTasksLineTpl(admin, "new_task", { task_no: taskNo, title, assignees: names, due });
+    const { data: full } = await admin.from("erp_creative_tasks").select(SELECT).eq("id", row.id).maybeSingle();
+    if (full) {
+      const f = full as Record<string, unknown>;
+      const empMap = await employeeLabelMap(admin, [f.assignee_id, f.reviewer_id, f.approver_id, f.assigned_by_id, ...taskAssignees].filter(Boolean) as string[]);
+      const flat = flattenTask(f, empMap);
+      const names = taskAssignees.length ? taskAssignees.map((id) => empMap.get(id)).filter(Boolean).join(", ") : (flat.assignee_label as string) ?? "";
+      await pushTasksLineTpl(admin, "new_task", { ...flat, assignees: names, due: flat.due_date, task: `${taskNo} ${title}`.trim() });
+    }
   } catch { /* noop */ }
 
   return NextResponse.json({ id: row.id, task_no: taskNo, error: null });

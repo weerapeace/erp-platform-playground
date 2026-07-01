@@ -22,10 +22,24 @@ async function readCfg(admin: Admin): Promise<{ id?: string; cfg: LineCfg }> {
   return { id: (row as { id?: string } | null)?.id, cfg: ((row as { sval?: LineCfg } | null)?.sval ?? {}) as LineCfg };
 }
 
+// ฟิลด์ที่ระบบเติมให้ (label/alias) นอกเหนือคอลัมน์จริง — ต่อท้ายให้เลือกได้ด้วย
+const TASK_COMPUTED = ["task", "assignees", "due", "brand_label", "campaign_label", "assignee_label", "reviewer_label", "approver_label", "assigned_by_label", "sku_code", "sku_name", "sku_color", "sku_price", "parent_sku_code", "parent_sku_name"];
+const SUB_COMPUTED = ["subtask", "task", "submitter", "task_no"];
+const HIDE = new Set(["id", "config", "image_sync_targets", "reference_html"]);   // ฟิลด์ที่ไม่เหมาะใส่ข้อความ
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
-  const { cfg } = await readCfg(supabaseAdmin());
+  const admin = supabaseAdmin();
+  const { cfg } = await readCfg(admin);
   const current = cfg.groups?.creative ?? "";
+  // รายชื่อตัวแปร = คอลัมน์จริงของตาราง (ดึงสด ไม่ hardcode) + ฟิลด์ label ที่ระบบเติม
+  const [{ data: tSample }, { data: sSample }] = await Promise.all([
+    admin.from("erp_creative_tasks").select("*").limit(1),
+    admin.from("erp_creative_subtasks").select("*").limit(1),
+  ]);
+  const uniq = (arr: string[]) => [...new Set(arr)].filter((k) => !HIDE.has(k));
+  const taskCols = (tSample?.[0] ? Object.keys(tSample[0]) : []) as string[];
+  const subCols = (sSample?.[0] ? Object.keys(sSample[0]) : []) as string[];
   return NextResponse.json({
     captured: cfg.group_id ?? "",
     captured_at: cfg.group_captured_at ?? null,
@@ -33,6 +47,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     using_main: !current && !!cfg.group_id,   // ยังไม่ตั้งกลุ่มงาน → ใช้กลุ่มหลัก
     has_token: !!cfg.token,
     templates: cfg.templates ?? {},
+    vars: {
+      new_task: uniq([...taskCols, ...TASK_COMPUTED]),
+      subtask_submitted: uniq([...subCols, ...SUB_COMPUTED]),
+    },
     error: null,
   });
 }

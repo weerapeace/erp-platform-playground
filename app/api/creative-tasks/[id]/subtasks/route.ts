@@ -278,9 +278,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         title: `รออนุมัติงานย่อย: ${subTitle}`, body: taskLabel || null,
         linkUrl: `/tasks?task=${id}`, entityId: id,
       })));
-      // แจ้งเข้ากลุ่ม LINE ของทีม ตามแม่แบบ (best-effort)
+      // แจ้งเข้ากลุ่ม LINE ของทีม ตามแม่แบบ (best-effort) — ส่งทั้งแถวงานย่อย + บริบทงาน → ใช้ {ฟิลด์ใดก็ได้}
       const submitter = user?.id ? (await employeeLabelMap(admin, [user.id])).get(user.id) ?? null : null;
-      await pushTasksLineTpl(admin, "subtask_submitted", { subtask: subTitle, task: taskLabel, submitter });
+      await pushTasksLineTpl(admin, "subtask_submitted", { ...(row ?? {}), subtask: subTitle, task: taskLabel, submitter, task_no: parent?.task_no });
     } catch { /* แจ้งเตือนล้มเหลวไม่ทำให้บันทึกพัง */ }
   }
 

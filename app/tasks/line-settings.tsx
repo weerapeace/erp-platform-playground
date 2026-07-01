@@ -8,7 +8,7 @@ import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { LINE_TEMPLATES } from "@/lib/creative-line-templates";
 
-type Info = { captured: string; current: string; has_token: boolean; using_main: boolean; templates?: Record<string, string> };
+type Info = { captured: string; current: string; has_token: boolean; using_main: boolean; templates?: Record<string, string>; vars?: Record<string, string[]> };
 
 export function LineSettings() {
   const t = useT();
@@ -70,9 +70,9 @@ export function LineSettings() {
               <div className="text-xs font-medium text-slate-600 mb-1">{d.label}</div>
               <textarea value={tpls[d.key] ?? ""} onChange={(e) => setTpls((p) => ({ ...p, [d.key]: e.target.value }))} rows={3} placeholder={d.defaultTpl}
                 className="w-full text-xs border border-slate-200 rounded p-2 resize-none font-mono focus:outline-none focus:ring-2 focus:ring-violet-200" />
-              <div className="flex items-center gap-1 flex-wrap mt-1">
-                <span className="text-[10px] text-slate-400">{t("ตัวแปร:", "Variables:")}</span>
-                {d.vars.map((v) => (
+              <div className="flex items-start gap-1 flex-wrap mt-1 max-h-24 overflow-y-auto">
+                <span className="text-[10px] text-slate-400 sticky left-0">{t("ตัวแปร (กดเพื่อแทรก):", "Variables (tap to insert):")}</span>
+                {(info?.vars?.[d.key] ?? d.vars).map((v) => (
                   <button key={v} type="button" onClick={() => setTpls((p) => ({ ...p, [d.key]: `${p[d.key] ?? ""}{${v}}` }))}
                     className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-violet-100 hover:text-violet-700">{`{${v}}`}</button>
                 ))}

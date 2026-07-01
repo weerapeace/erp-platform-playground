@@ -22,10 +22,18 @@ export const LINE_TEMPLATES: LineTemplateDef[] = [
   },
 ];
 
-/** แทนที่ {var} ด้วยค่าจริง · var ที่ไม่มีค่า = ตัดทิ้ง · เก็บกวาดบรรทัดว่างซ้อน */
-export function renderLineTemplate(tpl: string, vars: Record<string, string | null | undefined>): string {
+/** แปลงค่าฟิลด์เป็นข้อความ (array→คั่นด้วย , · object/null→ว่าง) */
+function coerce(v: unknown): string {
+  if (v == null) return "";
+  if (Array.isArray(v)) return v.map((x) => coerce(x)).filter(Boolean).join(", ");
+  if (typeof v === "object") return "";
+  return String(v);
+}
+
+/** แทนที่ {var} ด้วยค่าจริงจาก vars (รับได้ทุกชนิด) · var ที่ไม่มีค่า = ตัดทิ้ง · เก็บกวาดบรรทัดว่างซ้อน */
+export function renderLineTemplate(tpl: string, vars: Record<string, unknown>): string {
   return tpl
-    .replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? "").toString())
+    .replace(/\{(\w+)\}/g, (_, k) => coerce(vars[k]))
     .replace(/[ \t]+$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
