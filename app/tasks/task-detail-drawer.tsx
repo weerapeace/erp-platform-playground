@@ -375,7 +375,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               <div style={{ order: tOrderOf("cover") }}>
                 {coverKey ? (
                   <div className="relative rounded-lg overflow-hidden border border-slate-200">
-                    <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=480`} alt="" className="w-full h-28 object-cover" />
+                    <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=480`} alt="" className="w-full h-32 object-contain bg-white" />
                     {coverFromParent && <span className="absolute top-1.5 left-1.5 text-[9px] bg-black/55 text-white px-1 py-0.5 rounded">{t("รูปจาก Parent SKU", "From Parent SKU")}</span>}
                     <button type="button" onClick={() => setCoverEdit((v) => !v)} title={t("เปลี่ยนรูปปก", "Change cover")} className="absolute top-1.5 right-1.5 text-[10px] bg-white/90 hover:bg-white text-slate-700 border border-slate-200 rounded px-1.5 py-0.5">✎</button>
                   </div>

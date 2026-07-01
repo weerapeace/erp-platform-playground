@@ -72,12 +72,14 @@ export interface ERPFormFieldProps {
   hint?: string;
   children: React.ReactNode;
   span?: 1 | 2 | 3;
+  className?: string;
+  style?: React.CSSProperties;
 }
 
-export function ERPFormField({ label, required, error, hint, children, span = 1 }: ERPFormFieldProps) {
+export function ERPFormField({ label, required, error, hint, children, span = 1, className = "", style }: ERPFormFieldProps) {
   const spanClass = span === 2 ? "sm:col-span-2" : span === 3 ? "sm:col-span-3" : "";
   return (
-    <div className={spanClass}>
+    <div className={`${spanClass} ${className}`} style={style}>
       <label className="block text-xs font-medium text-slate-700 mb-1.5">
         {label}
         {required && <span className="text-red-500 ml-0.5">*</span>}

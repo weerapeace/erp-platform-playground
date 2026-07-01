@@ -25,6 +25,9 @@ import {
 
 const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 
+// ช่องในขั้น "ข้อมูลงาน" ที่จัดลำดับได้ (ช่องว่างดันขึ้นบน) — ไม่รวม "ชื่องาน" (ตรึงบนสุดเสมอ)
+const REORDER_KEYS = ["task_type", "priority", "brand_id", "campaign_id", "assignee", "reviewers", "order_date", "due_date", "drive", "platform", "description", "cover"];
+
 function todayStr(): string { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function addDaysStr(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00`); if (Number.isNaN(d.getTime())) return "";
@@ -75,8 +78,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const [formErr, setFormErr] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  // ช่องที่ผู้ใช้ "แตะเอง" ในขั้นข้อมูลงาน — ช่องที่ยังไม่แตะ (ยังเป็นค่าเริ่มต้น) จะโชว์ตัวหนังสือสีเทา ให้กวาดตาดูง่าย
+  // ช่องที่ผู้ใช้ "แตะเอง" ในขั้นข้อมูลงาน — ช่องที่ยังไม่แตะ (ยังเป็นค่าเริ่มต้น) = กล่องเทาอ่อน · ช่องว่าง = กล่องส้มอ่อน + ดันขึ้นบน
   const [touched, setTouched] = useState<Set<string>>(new Set());
+  const [emptySnap, setEmptySnap] = useState<Set<string>>(new Set());   // ช่องที่ว่างตอน "เข้าขั้นข้อมูลงาน" (snapshot กันเด้งไปมาระหว่างพิมพ์)
 
   const STEPS = [t("แบรนด์/เทมเพลต","Brand/Template"), t("ข้อมูลงาน","Task info"), t("งานย่อย","Subtasks"), t("สินค้า","Products")];
 
@@ -86,9 +90,32 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr() }); setSubs([]); setContentItems([]); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);
 
   const updateForm = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
-  // แตะช่องแล้ว = ตั้งเอง → ตัวหนังสือเป็นสีปกติ · ยังไม่แตะ = ค่าเริ่มต้น → สีเทา
+  // แตะช่องแล้ว = ตั้งเอง → กล่องปกติ · ยังไม่แตะแต่มีค่า = ค่าเริ่มต้น → กล่องเทาอ่อน · ว่าง = กล่องส้มอ่อน
   const markTouched = (k: string) => setTouched((prev) => (prev.has(k) ? prev : new Set(prev).add(k)));
-  const mutedCls = (k: string) => (touched.has(k) ? "" : "text-slate-400");
+  const emptyNow = (k: string): boolean => {
+    switch (k) {
+      case "title": return !form.title.trim();
+      case "brand_id": return !form.brand_id;
+      case "campaign_id": return !form.campaign_id;
+      case "assignee": return !form.assignee;
+      case "reviewers": return form.reviewers.length === 0;
+      case "order_date": return !form.order_date;
+      case "due_date": return !form.due_date;
+      case "drive": return !form.drive_folder_url.trim();
+      case "platform": return form.platforms.length === 0;
+      case "description": return !form.description.trim();
+      case "cover": return !form.cover_image_r2_key;
+      default: return false;   // task_type/priority มีค่าเสมอ
+    }
+  };
+  const orderStyle = (k: string) => ({ order: emptySnap.has(k) ? 0 : 1 });
+  const ctrlCls = (k: string) => (emptyNow(k) ? "bg-orange-50 border-orange-200" : touched.has(k) ? "" : "bg-slate-100");
+  const wrapCls = (k: string) => (emptyNow(k) ? "rounded-lg bg-orange-50 border border-orange-200 p-1.5" : "");
+  // เข้าขั้น "ข้อมูลงาน" ครั้งใด → จับ snapshot ว่าช่องไหนว่าง (ใช้จัดลำดับให้ช่องว่างอยู่บน โดยไม่เด้งระหว่างพิมพ์)
+  useEffect(() => {
+    if (step === 2) setEmptySnap(new Set(REORDER_KEYS.filter((k) => emptyNow(k))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
   const togglePlatform = (v: string) => updateForm({ platforms: form.platforms.includes(v) ? form.platforms.filter((x) => x !== v) : [...form.platforms, v] });
 
   // เลือก template → เติมข้อมูลงาน + ดึงงานย่อยมาเป็นรายการให้เลือก/แก้
@@ -223,24 +250,24 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           </div>
         )}
         <ERPFormSection title={t("ข้อมูลงาน","Task info")} columns={2}>
-          <ERPFormField label={t("ชื่องาน","Task title")} required span={2}><ERPInput value={form.title} onChange={(e) => updateForm({ title: e.target.value })} placeholder={t("เช่น ถ่ายรูปกระเป๋า Summer 8 สี","e.g. Summer bag photoshoot 8 colors")} /></ERPFormField>
-          <ERPFormField label={t("ประเภทงาน","Task type")}><ERPSelect className={mutedCls("task_type")} value={form.task_type} options={taskTypes} onChange={(e) => { markTouched("task_type"); updateForm({ task_type: e.target.value }); }} /></ERPFormField>
-          <ERPFormField label={t("ความสำคัญ","Priority")}><ERPSelect className={mutedCls("priority")} value={form.priority} options={priorityOptions()} onChange={(e) => { markTouched("priority"); updateForm({ priority: e.target.value as CreativePriority }); }} /></ERPFormField>
-          <ERPFormField label={t("แบรนด์","Brand")}><ERPSelect className={mutedCls("brand_id")} value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => { markTouched("brand_id"); updateForm({ brand_id: e.target.value }); }} /></ERPFormField>
-          {!lockedCampaignId && <ERPFormField label="Campaign"><ERPSelect className={mutedCls("campaign_id")} value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => { markTouched("campaign_id"); updateForm({ campaign_id: e.target.value }); }} /></ERPFormField>}
-          <ERPFormField label={t("ผู้รับผิดชอบ","Assignee")}><UserPicker value={form.assignee} onChange={(v) => updateForm({ assignee: v })} disableCreate /></ERPFormField>
-          <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เลือกได้หลายคน)","Reviewer / Approver (multiple)")}><MultiUserPicker value={form.reviewers} onChange={(v) => updateForm({ reviewers: v })} disableCreate /></ERPFormField>
-          <ERPFormField label={t("วันที่สั่ง","Order date")}><ERPInput type="date" className={mutedCls("order_date")} value={form.order_date} onChange={(e) => { markTouched("order_date"); setOrderDate(e.target.value); }} /></ERPFormField>
-          <ERPFormField label={t("กำหนดส่ง","Due date")} hint={tplDueOffset != null ? t(`อัตโนมัติ = วันที่สั่ง + ${tplDueOffset} วัน (แก้เองได้)`, `auto = order date + ${tplDueOffset}d (editable)`) : undefined}><ERPInput type="date" className={mutedCls("due_date")} value={form.due_date} onChange={(e) => { markTouched("due_date"); updateForm({ due_date: e.target.value }); }} /></ERPFormField>
-          <ERPFormField label={t("โฟลเดอร์ Drive (ลิงก์)","Drive folder (link)")} span={2}><ERPInput value={form.drive_folder_url} onChange={(e) => updateForm({ drive_folder_url: e.target.value })} placeholder="https://drive.google.com/..." /></ERPFormField>
-          <ERPFormField label="Platform" span={2}>
-            <div className="flex flex-wrap gap-1.5">
+          <ERPFormField label={t("ชื่องาน","Task title")} required span={2}><ERPInput className={ctrlCls("title")} value={form.title} onChange={(e) => { markTouched("title"); updateForm({ title: e.target.value }); }} placeholder={t("เช่น ถ่ายรูปกระเป๋า Summer 8 สี","e.g. Summer bag photoshoot 8 colors")} /></ERPFormField>
+          <ERPFormField label={t("ประเภทงาน","Task type")} style={orderStyle("task_type")}><ERPSelect className={ctrlCls("task_type")} value={form.task_type} options={taskTypes} onChange={(e) => { markTouched("task_type"); updateForm({ task_type: e.target.value }); }} /></ERPFormField>
+          <ERPFormField label={t("ความสำคัญ","Priority")} style={orderStyle("priority")}><ERPSelect className={ctrlCls("priority")} value={form.priority} options={priorityOptions()} onChange={(e) => { markTouched("priority"); updateForm({ priority: e.target.value as CreativePriority }); }} /></ERPFormField>
+          <ERPFormField label={t("แบรนด์","Brand")} style={orderStyle("brand_id")}><ERPSelect className={ctrlCls("brand_id")} value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => { markTouched("brand_id"); updateForm({ brand_id: e.target.value }); }} /></ERPFormField>
+          {!lockedCampaignId && <ERPFormField label="Campaign" style={orderStyle("campaign_id")}><ERPSelect className={ctrlCls("campaign_id")} value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => { markTouched("campaign_id"); updateForm({ campaign_id: e.target.value }); }} /></ERPFormField>}
+          <ERPFormField label={t("ผู้รับผิดชอบ","Assignee")} style={orderStyle("assignee")}><div className={wrapCls("assignee")}><UserPicker value={form.assignee} onChange={(v) => updateForm({ assignee: v })} disableCreate /></div></ERPFormField>
+          <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เลือกได้หลายคน)","Reviewer / Approver (multiple)")} style={orderStyle("reviewers")}><div className={wrapCls("reviewers")}><MultiUserPicker value={form.reviewers} onChange={(v) => updateForm({ reviewers: v })} disableCreate /></div></ERPFormField>
+          <ERPFormField label={t("วันที่สั่ง","Order date")} style={orderStyle("order_date")}><ERPInput type="date" className={ctrlCls("order_date")} value={form.order_date} onChange={(e) => { markTouched("order_date"); setOrderDate(e.target.value); }} /></ERPFormField>
+          <ERPFormField label={t("กำหนดส่ง","Due date")} style={orderStyle("due_date")} hint={tplDueOffset != null ? t(`อัตโนมัติ = วันที่สั่ง + ${tplDueOffset} วัน (แก้เองได้)`, `auto = order date + ${tplDueOffset}d (editable)`) : undefined}><ERPInput type="date" className={ctrlCls("due_date")} value={form.due_date} onChange={(e) => { markTouched("due_date"); updateForm({ due_date: e.target.value }); }} /></ERPFormField>
+          <ERPFormField label={t("โฟลเดอร์ Drive (ลิงก์)","Drive folder (link)")} span={2} style={orderStyle("drive")}><ERPInput className={ctrlCls("drive")} value={form.drive_folder_url} onChange={(e) => { markTouched("drive"); updateForm({ drive_folder_url: e.target.value }); }} placeholder="https://drive.google.com/..." /></ERPFormField>
+          <ERPFormField label="Platform" span={2} style={orderStyle("platform")}>
+            <div className={`flex flex-wrap gap-1.5 ${wrapCls("platform")}`}>
               {platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
             </div>
           </ERPFormField>
-          <ERPFormField label={t("รายละเอียด","Description")} span={2}><ERPTextarea value={form.description} rows={2} onChange={(e) => updateForm({ description: e.target.value })} placeholder={t("อธิบายงาน/บรีฟเพิ่มเติม","Describe the task or brief")} /></ERPFormField>
-          <ERPFormField label={t("รูปปก (ไม่บังคับ — ถ้า Parent SKU มีรูป จะใช้รูปนั้นแทน)","Cover image (optional — Parent SKU image takes priority)")} span={2}>
-            <ImageInput value={form.cover_image_r2_key || null} onChange={(k) => updateForm({ cover_image_r2_key: k ?? "" })} folder="creative-tasks" compact />
+          <ERPFormField label={t("รายละเอียด","Description")} span={2} style={orderStyle("description")}><ERPTextarea className={ctrlCls("description")} value={form.description} rows={2} onChange={(e) => { markTouched("description"); updateForm({ description: e.target.value }); }} placeholder={t("อธิบายงาน/บรีฟเพิ่มเติม","Describe the task or brief")} /></ERPFormField>
+          <ERPFormField label={t("รูปปก (ไม่บังคับ — ถ้า Parent SKU มีรูป จะใช้รูปนั้นแทน)","Cover image (optional — Parent SKU image takes priority)")} span={2} style={orderStyle("cover")}>
+            <div className={wrapCls("cover")}><ImageInput value={form.cover_image_r2_key || null} onChange={(k) => updateForm({ cover_image_r2_key: k ?? "" })} folder="creative-tasks" compact /></div>
           </ERPFormField>
         </ERPFormSection>
       </>)}
