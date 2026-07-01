@@ -1330,6 +1330,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       flash(deleteMode === "hard" ? "ลบถาวรแล้ว" : "ลบแล้ว (กู้คืนได้)");
+      // ถ้ากำลังลบ record ที่เปิดใน drawer อยู่ → ปิด drawer หลังลบเสร็จ
+      if (modalOpen && editingId != null && String(deleteTarget.id) === String(editingId)) setModalOpen(false);
       setDeleteTarget(null); setDeleteMode("soft"); setDeleteText("");
       await refreshData();
     } catch (err) { const m = err instanceof Error ? err.message : "ลบไม่สำเร็จ"; setError(m); fail(m); }
@@ -2236,6 +2238,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     {a.icon ? `${a.icon} ` : ""}{a.label}
                   </button>
                 ))}
+              {editingId && canEdit && !config.hideActiveStatus && (
+                <button onClick={() => openDelete({ ...form, id: editingId })} title="ลบ (เก็บในถังขยะ · กู้คืนได้)"
+                  className="h-9 px-3 text-sm border border-rose-300 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1.5">🗑 ลบ</button>
+              )}
               <button onClick={() => setModalOpen(false)}
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">ปิด</button>
               {canEdit && (
