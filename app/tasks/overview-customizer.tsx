@@ -171,6 +171,50 @@ async function uploadImage(file: File): Promise<string> {
   return j.r2_key as string;
 }
 
+// ตัวช่วย prompt สร้างรูป PET — พิมพ์ตัวการ์ตูนที่อยากได้ แล้วคัดลอก prompt ไปวางใน AI สร้างรูป
+function PetPromptHelper() {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [subject, setSubject] = useState("a chubby baby chick");
+  const [copied, setCopied] = useState<number | null>(null);
+  const base = subject.trim() || "a chubby baby chick";
+  const prompts: { label: string; text: string }[] = [
+    { label: t("ท่าปกติ (ลืมตา ยิ้ม)", "Idle (eyes open, smiling)"),
+      text: `A cute mascot character, ${base}, friendly big smile, large sparkly eyes, arms down relaxed, simple flat vector sticker style, thick clean outlines, soft pastel colors, full body front view, centered, isolated on a fully transparent background, high quality, 512x512` },
+    { label: t("ท่าขยับ (หลับตา โบกมือ) — สำหรับหลายรูป", "Motion (blink, waving) — for multi-frame"),
+      text: `The SAME mascot (${base}), identical style and colors, but eyes closed (blinking) and both arms raised waving, full body front view, centered, isolated on a fully transparent background, 512x512` },
+    { label: t("ท่าตกใจ (สำหรับหน้า alert)", "Alert face (worried)"),
+      text: `The SAME mascot (${base}), identical style and colors, worried panicked expression, wide eyes, a sweat drop, holding a small red "!" alert sign, full body front view, centered, isolated on a fully transparent background, 512x512` },
+  ];
+  const copy = async (i: number, text: string) => {
+    try { await navigator.clipboard.writeText(text); setCopied(i); setTimeout(() => setCopied((c) => (c === i ? null : c)), 1500); } catch { /* clipboard ไม่ให้ */ }
+  };
+  return (
+    <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
+      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-xs font-semibold text-violet-700">
+        <span>{open ? "▾" : "▸"}</span>💡 {t("ตัวช่วย: prompt สร้างรูป PET (คัดลอกได้)", "Helper: prompts to create a PET image (copyable)")}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <label className="block text-[11px] text-slate-500">{t("ตัวการ์ตูนที่อยากได้ (พิมพ์อังกฤษได้ผลดีกว่า)", "Character you want (English works best)")}
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="a chubby baby chick / a fluffy orange cat / a little robot" className="mt-1 w-full h-8 px-2 text-sm border border-slate-200 rounded bg-white" />
+          </label>
+          {prompts.map((p, i) => (
+            <div key={i} className="rounded border border-slate-200 bg-white p-2">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="text-[11px] font-medium text-slate-600">{p.label}</span>
+                <button onClick={() => copy(i, p.text)} className="h-6 px-2 text-[11px] font-medium rounded bg-violet-600 text-white hover:bg-violet-700 shrink-0">{copied === i ? t("คัดลอกแล้ว ✓", "Copied ✓") : t("คัดลอก prompt", "Copy prompt")}</button>
+              </div>
+              <textarea readOnly value={p.text} rows={2} onFocus={(e) => e.currentTarget.select()} className="w-full text-[11px] text-slate-500 bg-slate-50 border border-slate-100 rounded px-2 py-1 resize-none" />
+            </div>
+          ))}
+          <p className="text-[11px] text-slate-400">{t("วิธีใช้: คัดลอก → วางในแอปสร้างรูป AI (ChatGPT/DALL·E, Midjourney, Ideogram, Firefly) → ลบพื้นหลังให้โปร่งใสถ้าจำเป็น (remove.bg) → อัปที่ช่อง “หลายรูป” ด้านบน (2-3 ท่า = ขยับ)", "How to: copy → paste into an AI image tool → make the background transparent if needed (remove.bg) → upload to “Multi-frame” above (2-3 poses = animation)")}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, onClose }: {
   open: boolean;
   theme: OverviewTheme;
@@ -424,6 +468,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             <p className="text-[11px] text-slate-400 mt-1">{t("ใส่ 2 รูปขึ้นไป PET จะสลับรูปไปมา = ขยับ (เช่น ลืมตา/หลับตา, ยกมือขึ้น/ลง) · เรียงลำดับด้วย ◀ ▶ · ใช้แทน Lottie/รูปเดี่ยวถ้าตั้งไว้", "2+ frames make the pet animate (e.g. eyes open/closed) · reorder with ◀ ▶ · overrides Lottie/single image when set")}</p>
           </div>
         </div>
+        <PetPromptHelper />
       </section>
 
       {/* ===== พื้นหลังทั้งหน้า ===== */}
