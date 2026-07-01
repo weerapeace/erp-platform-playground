@@ -249,6 +249,7 @@ export default function TasksPage() {
             {view === "overview" && (
               <OverviewDashboard
                 userName={user?.name}
+                userId={user?.id ?? null}
                 counts={counts}
                 myTasks={myTasks}
                 mySubs={mySubs}

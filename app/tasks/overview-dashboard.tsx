@@ -11,6 +11,7 @@ import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { OverviewKanban } from "./overview-kanban";
+import { AssigneeStack } from "./assignee-avatar";
 import { ReviewQueueView } from "./review-queue-view";
 import { KanbanSettings } from "./kanban-settings";
 import { CalendarBoard } from "./calendar-board";
@@ -34,11 +35,12 @@ export type OvFilter = "all" | "mine" | "review" | "overdue";
 type Counts = { total: number; mine: number; overdue: number; review: number };
 
 export function OverviewDashboard({
-  userName, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, isAdmin,
+  userName, userId, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, isAdmin,
   theme, canUpload, onThemeChange, statuses, onMoveStatus, onSetField, viewSwitcher,
   onFilter, onOpenTask, onCreate, onQuickCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange, mySubView = DEFAULT_MYSUB_VIEW,
 }: {
   userName?: string;
+  userId?: string | null;
   counts: Counts;
   myTasks: CreativeTask[];
   mySubs: MySubtask[];
@@ -112,6 +114,28 @@ export function OverviewDashboard({
     return arr;
   }, [activeMetricDef, filter, typeFilter, brandFilter, tasks, myTaskIds, metricCtx]);
   const filterLabel = activeMetricDef ? activeMetricDef.label : filter === "mine" ? t("งานของฉัน", "My tasks") : filter === "review" ? t("รอตรวจ/อนุมัติ", "In review") : filter === "overdue" ? t("เกินกำหนด", "Overdue") : t("งานทั้งหมด", "All tasks");
+
+  // มุมมอง "งานของฉัน" = 2 กลุ่ม: 🙋 ฉันทำ (เป็นผู้รับผิดชอบ/มีงานย่อย) · 📤 ฉันมอบหมายให้คนอื่น (ฉันสั่ง/สร้าง แต่ไม่ได้ทำเอง)
+  const mineGroups = useMemo(() => {
+    if (filter !== "mine" || activeMetric) return null;
+    const applyTB = (arr: CreativeTask[]) => {
+      let a = arr;
+      if (typeFilter) a = a.filter((tk) => tk.task_type === typeFilter);
+      if (brandFilter) a = a.filter((tk) => tk.brand_id === brandFilter);
+      return a;
+    };
+    const assigneeIds = (tk: CreativeTask) => (tk.assignees?.length ? tk.assignees.map((a) => a.id) : tk.assignee_id ? [tk.assignee_id] : []);
+    const isSoloMine = (tk: CreativeTask) => { const ids = assigneeIds(tk); return ids.length === 1 && ids[0] === userId; };
+    const byDue = (a: CreativeTask, b: CreativeTask) => (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999");
+    // ฉันทำ: งานเดี่ยว (มีแค่ฉัน) ขึ้นก่อน → แล้วเรียงตามกำหนดส่ง
+    const doing = applyTB(tasks.filter((tk) => myTaskIds.has(tk.id)))
+      .sort((a, b) => (Number(isSoloMine(b)) - Number(isSoloMine(a))) || byDue(a, b));
+    // ฉันมอบหมาย: ฉันเป็นผู้มอบหมาย (หรือผู้สร้าง) แต่ไม่ได้อยู่ในผู้รับผิดชอบ
+    const delegated = userId
+      ? applyTB(tasks.filter((tk) => !myTaskIds.has(tk.id) && (tk.assigned_by_id === userId || tk.created_by === userId))).sort(byDue)
+      : [];
+    return { doing, delegated, isSoloMine };
+  }, [filter, activeMetric, tasks, myTaskIds, userId, typeFilter, brandFilter]);
 
   // Kanban: กรองข้อความเพิ่ม (เลขที่/ชื่อ/ผู้รับผิดชอบ/แบรนด์/SKU)
   const kanbanTasks = useMemo(() => {
@@ -332,6 +356,8 @@ export function OverviewDashboard({
               <p className="text-sm font-semibold text-slate-700">🟡 {t("รอตรวจ/อนุมัติ — งานย่อยที่ส่งมา", "Review queue — submitted subtasks")}</p>
               <ReviewQueueView onChanged={onChanged} />
             </>
+          ) : mineGroups ? (
+            <MyTasksView doing={mineGroups.doing} delegated={mineGroups.delegated} isSoloMine={mineGroups.isSoloMine} onOpenTask={onOpenTask} accent={theme.accent} />
           ) : (<>
           <div className="flex items-center justify-between gap-2">
             {theme.kanban.view !== "table"
@@ -489,4 +515,61 @@ function ShortcutPill({ icon, label, href, onClick }: { icon: string; label: str
   return href
     ? <a href={href} className={cls}>{inner}</a>
     : <button onClick={onClick} className={cls}>{inner}</button>;
+}
+
+// มุมมอง "งานของฉัน" = 2 กลุ่ม (ฉันทำ / ฉันมอบหมายให้คนอื่น) — งานเดี่ยว (มีแค่ฉัน) อยู่บนสุดของกลุ่มแรก
+function MyTasksView({ doing, delegated, isSoloMine, onOpenTask, accent }: {
+  doing: CreativeTask[]; delegated: CreativeTask[]; isSoloMine: (tk: CreativeTask) => boolean;
+  onOpenTask: (id: string) => void; accent?: string;
+}) {
+  const t = useT();
+  const Section = ({ icon, title, hint, list }: { icon: string; title: string; hint?: string; list: CreativeTask[] }) => (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-sm font-semibold text-slate-700">{icon} {title}</span>
+        <span className="text-xs text-slate-400">({list.length})</span>
+        {hint && <span className="text-[11px] text-slate-400">· {hint}</span>}
+      </div>
+      {list.length === 0 ? (
+        <div className="border border-dashed border-slate-200 rounded-lg p-4 text-center text-xs text-slate-400">{t("ไม่มีงานในกลุ่มนี้", "No tasks here")}</div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {list.map((tk) => <MyTaskCard key={tk.id} task={tk} solo={isSoloMine(tk)} onClick={() => onOpenTask(tk.id)} accent={accent} />)}
+        </div>
+      )}
+    </div>
+  );
+  return (
+    <div className="space-y-4">
+      <Section icon="🙋" title={t("งานที่ฉันทำ", "Tasks I do")} hint={t("งานที่มีแค่ฉันอยู่บนสุด", "solo tasks first")} list={doing} />
+      <Section icon="📤" title={t("งานที่ฉันมอบหมายให้คนอื่น", "Tasks I delegated")} list={delegated} />
+    </div>
+  );
+}
+
+function MyTaskCard({ task, solo, onClick, accent }: { task: CreativeTask; solo?: boolean; onClick: () => void; accent?: string }) {
+  const t = useT();
+  const pr = PRIORITY_META[task.priority as CreativePriority];
+  const overdue = isOverdue(task);
+  const st = statusMeta(task.status);
+  return (
+    <button onClick={onClick} className="text-left bg-white rounded-lg border border-slate-200 p-2.5 hover:border-violet-300 hover:shadow-sm transition"
+      style={solo ? { borderLeftWidth: 3, borderLeftColor: accent || "#7c3aed" } : undefined}>
+      <div className="flex items-center gap-1 mb-1 flex-wrap">
+        {solo && <span className="text-[10px]" title={t("มีแค่ฉัน", "Only me")}>⭐</span>}
+        {pr && <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span>}
+        {task.task_type && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-slate-100 text-slate-600 border-slate-200 truncate max-w-[100px]">{taskTypeLabel(task.task_type)}</span>}
+        <span className="ml-auto font-mono text-[10px] text-slate-400 shrink-0">{task.task_no}</span>
+      </div>
+      <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{task.title}</p>
+      {task.brand_label && <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-500"><span className="h-2 w-2 rounded-full" style={{ background: task.brand_color || "#cbd5e1" }} />{task.brand_label}</div>}
+      <div className="flex items-center justify-between gap-2 mt-2">
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-slate-50 border border-slate-200 text-slate-500">{st.label}</span>
+        <div className="flex items-center gap-2">
+          <AssigneeStack list={task.assignees} size={18} />
+          {task.due_date && <span className={`text-[11px] ${overdue ? "text-red-600 font-semibold" : "text-slate-400"}`}>{overdue && "⚠ "}{task.due_date.slice(5)}</span>}
+        </div>
+      </div>
+    </button>
+  );
 }
