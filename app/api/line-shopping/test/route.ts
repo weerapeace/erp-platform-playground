@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { linePing } from "@/lib/line-shopping";
+import { decryptSecret } from "@/lib/secret-box";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,8 +26,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!platformId) return NextResponse.json({ error: "ยังไม่มีแพลตฟอร์ม LINE SHOPPING ในระบบ" }, { status: 400 });
 
   const { data: cred } = await admin.from("platform_credentials").select("api_key").eq("brand_id", brand_id).eq("platform_id", platformId).maybeSingle();
-  const apiKey = (cred as { api_key?: string } | null)?.api_key;
-  if (!apiKey) return NextResponse.json({ ok: false, error: "ยังไม่ได้ใส่ API Key ของแบรนด์นี้" }, { status: 400 });
+  const stored = (cred as { api_key?: string } | null)?.api_key;
+  if (!stored) return NextResponse.json({ ok: false, error: "ยังไม่ได้ใส่ API Key ของแบรนด์นี้" }, { status: 400 });
+
+  let apiKey: string;
+  try { apiKey = await decryptSecret(stored); }
+  catch { return NextResponse.json({ ok: false, error: "ถอดรหัสคีย์ไม่ได้ (กุญแจหลักไม่ตรง/หาย?)" }, { status: 400 }); }
 
   const res = await linePing(apiKey);
   return NextResponse.json({ ok: res.ok, status: res.status, error: res.ok ? null : res.error });

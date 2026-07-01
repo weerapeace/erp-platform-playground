@@ -9,6 +9,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { encryptSecret, hasMasterKey } from "@/lib/secret-box";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,14 +33,20 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const brand_id = (body.brand_id ?? "").trim();
   const platform_id = (body.platform_id ?? "").trim();
   if (!brand_id || !platform_id) return NextResponse.json({ error: "ต้องมี brand_id + platform_id" }, { status: 400 });
-  const api_key = (body.api_key ?? "").trim() || null;
+  const rawKey = (body.api_key ?? "").trim();
+  // มีคีย์ใหม่ → ต้องมีกุญแจหลักก่อน แล้วเข้ารหัสก่อนเก็บ (กันเก็บแบบ plaintext)
+  let stored: string | null = null;
+  if (rawKey) {
+    if (!hasMasterKey()) return NextResponse.json({ error: "ยังไม่ได้ตั้งกุญแจหลัก (PLATFORM_SECRET_KEY) ในโฮสต์ — ต้องตั้งก่อนจึงจะบันทึกคีย์ได้อย่างปลอดภัย" }, { status: 400 });
+    try { stored = await encryptSecret(rawKey); } catch (e) { return NextResponse.json({ error: "เข้ารหัสคีย์ไม่สำเร็จ: " + (e as Error).message }, { status: 400 }); }
+  }
   const admin = supabaseAdmin();
   const { error } = await admin.from("platform_credentials").upsert(
-    { brand_id, platform_id, api_key, updated_by: user?.id ?? null, updated_at: new Date().toISOString() },
+    { brand_id, platform_id, api_key: stored, meta: { enc: stored ? "v1" : null }, updated_by: user?.id ?? null, updated_at: new Date().toISOString() },
     { onConflict: "brand_id,platform_id" },
   );
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   // audit: ไม่บันทึกค่าคีย์ บันทึกแค่ว่ามีการตั้ง/ล้าง
-  await writeAudit(admin, { action: "update", entityType: "platform_credential", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { brand_id, platform_id, set: !!api_key } });
-  return NextResponse.json({ ok: true, has_key: !!api_key, error: null });
+  await writeAudit(admin, { action: "update", entityType: "platform_credential", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { brand_id, platform_id, set: !!stored } });
+  return NextResponse.json({ ok: true, has_key: !!stored, error: null });
 }
