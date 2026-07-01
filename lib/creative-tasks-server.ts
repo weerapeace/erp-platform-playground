@@ -4,6 +4,7 @@
 // หมายเหตุ: ผู้รับผิดชอบงาน creative = user จริง (user_profiles) ไม่ใช่ employees แล้ว
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { defaultLineTemplate, renderLineTemplate } from "@/lib/creative-line-templates";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -17,6 +18,27 @@ export async function pushTasksLine(admin: Admin, text: string): Promise<void> {
     const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string> };
     const target = cfg.groups?.creative || cfg.group_id || "";
     if (!cfg.token || !target) return;
+    await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
+      body: JSON.stringify({ to: target, messages: [{ type: "text", text: text.slice(0, 4900) }] }),
+    });
+  } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
+}
+
+/**
+ * แจ้งเตือนเข้ากลุ่ม LINE ตาม "แม่แบบข้อความต่อเหตุการณ์" (line_config.templates[eventKey])
+ * ไม่มีแม่แบบที่ตั้งเอง → ใช้ค่าเริ่มต้น · แทนตัวแปร {…} ด้วย vars · เงียบถ้าไม่มี config/ล้ม
+ */
+export async function pushTasksLineTpl(admin: Admin, eventKey: string, vars: Record<string, string | null | undefined>): Promise<void> {
+  try {
+    const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
+    const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; templates?: Record<string, string> };
+    const target = cfg.groups?.creative || cfg.group_id || "";
+    if (!cfg.token || !target) return;
+    const tplRaw = (cfg.templates?.[eventKey] && cfg.templates[eventKey].trim()) || defaultLineTemplate(eventKey);
+    const text = renderLineTemplate(tplRaw, vars);
+    if (!text) return;
     await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },

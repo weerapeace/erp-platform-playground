@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
-import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers, recomputeTaskStatusFromSubtasks, pushTasksLine, employeeLabelMap } from "@/lib/creative-tasks-server";
+import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers, recomputeTaskStatusFromSubtasks, pushTasksLineTpl, employeeLabelMap } from "@/lib/creative-tasks-server";
 import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
 import { renderPrompt } from "@/lib/subtask-prompt";
 
@@ -278,9 +278,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         title: `รออนุมัติงานย่อย: ${subTitle}`, body: taskLabel || null,
         linkUrl: `/tasks?task=${id}`, entityId: id,
       })));
-      // แจ้งเข้ากลุ่ม LINE ของทีม (best-effort)
+      // แจ้งเข้ากลุ่ม LINE ของทีม ตามแม่แบบ (best-effort)
       const submitter = user?.id ? (await employeeLabelMap(admin, [user.id])).get(user.id) ?? null : null;
-      await pushTasksLine(admin, `🟡 งานย่อยรอตรวจ/อนุมัติ\n• ${subTitle}\n📋 ${taskLabel || "-"}${submitter ? `\n👤 ส่งโดย: ${submitter}` : ""}`);
+      await pushTasksLineTpl(admin, "subtask_submitted", { subtask: subTitle, task: taskLabel, submitter });
     } catch { /* แจ้งเตือนล้มเหลวไม่ทำให้บันทึกพัง */ }
   }
 

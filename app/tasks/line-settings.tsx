@@ -6,8 +6,9 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { LINE_TEMPLATES } from "@/lib/creative-line-templates";
 
-type Info = { captured: string; current: string; has_token: boolean; using_main: boolean };
+type Info = { captured: string; current: string; has_token: boolean; using_main: boolean; templates?: Record<string, string> };
 
 export function LineSettings() {
   const t = useT();
@@ -15,7 +16,8 @@ export function LineSettings() {
   const [gid, setGid] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const load = () => apiFetch("/api/creative-line-group").then((r) => r.json()).then((j) => { if (j && !j.error) setInfo(j as Info); }).catch(() => {});
+  const [tpls, setTpls] = useState<Record<string, string>>({});
+  const load = () => apiFetch("/api/creative-line-group").then((r) => r.json()).then((j) => { if (j && !j.error) { setInfo(j as Info); setTpls((j.templates ?? {}) as Record<string, string>); } }).catch(() => {});
   useEffect(() => { load(); }, []);
   const post = async (payload: Record<string, unknown>, okMsg: string) => {
     setBusy(true); setMsg(null);
@@ -56,6 +58,32 @@ export function LineSettings() {
       <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-50 rounded-lg p-2.5">
         {t("วิธีตั้ง: 1) เพิ่มบอท LINE เข้ากลุ่มที่ต้องการ  2) พิมพ์อะไรก็ได้ในกลุ่มนั้น  3) กด “รีเฟรช” แล้วกด “ใช้กลุ่มนี้”  4) กด “ส่งข้อความทดสอบ” เช็กว่าเข้าถูกกลุ่ม",
           "How: 1) Add the LINE bot to the group  2) Send any message in that group  3) tap Refresh then Use this group  4) tap Send test to confirm")}
+      </div>
+
+      {/* แม่แบบข้อความต่อเหตุการณ์ */}
+      <div className="border-t border-slate-100 pt-3">
+        <div className="text-sm font-semibold text-slate-700 mb-1">{t("แม่แบบข้อความ (ต่อเหตุการณ์)", "Message templates (per event)")}</div>
+        <p className="text-[11px] text-slate-400 mb-2">{t("เว้นว่าง = ใช้ข้อความเริ่มต้น · ใช้ตัวแปร {…} แทนค่าจริง (กดชิปเพื่อแทรก)", "Blank = default · use {…} variables (tap a chip to insert)")}</p>
+        <div className="space-y-3">
+          {LINE_TEMPLATES.map((d) => (
+            <div key={d.key}>
+              <div className="text-xs font-medium text-slate-600 mb-1">{d.label}</div>
+              <textarea value={tpls[d.key] ?? ""} onChange={(e) => setTpls((p) => ({ ...p, [d.key]: e.target.value }))} rows={3} placeholder={d.defaultTpl}
+                className="w-full text-xs border border-slate-200 rounded p-2 resize-none font-mono focus:outline-none focus:ring-2 focus:ring-violet-200" />
+              <div className="flex items-center gap-1 flex-wrap mt-1">
+                <span className="text-[10px] text-slate-400">{t("ตัวแปร:", "Variables:")}</span>
+                {d.vars.map((v) => (
+                  <button key={v} type="button" onClick={() => setTpls((p) => ({ ...p, [d.key]: `${p[d.key] ?? ""}{${v}}` }))}
+                    className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-violet-100 hover:text-violet-700">{`{${v}}`}</button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 mt-2">
+          <button disabled={busy} onClick={() => post({ templates: tpls }, t("บันทึกแม่แบบแล้ว ✓", "Templates saved ✓"))} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded hover:bg-violet-700 disabled:opacity-50">{t("บันทึกแม่แบบ", "Save templates")}</button>
+          <button disabled={busy} onClick={() => setTpls({})} className="h-8 px-3 text-xs font-medium text-slate-500 border border-slate-200 rounded hover:bg-slate-50">{t("ล้างเป็นค่าเริ่มต้น", "Clear to default")}</button>
+        </div>
       </div>
     </div>
   );

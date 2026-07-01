@@ -14,7 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type LineCfg = { token?: string; group_id?: string; group_captured_at?: string; groups?: Record<string, string> } & Record<string, unknown>;
+type LineCfg = { token?: string; group_id?: string; group_captured_at?: string; groups?: Record<string, string>; templates?: Record<string, string> } & Record<string, unknown>;
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 async function readCfg(admin: Admin): Promise<{ id?: string; cfg: LineCfg }> {
@@ -32,6 +32,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     current,
     using_main: !current && !!cfg.group_id,   // ยังไม่ตั้งกลุ่มงาน → ใช้กลุ่มหลัก
     has_token: !!cfg.token,
+    templates: cfg.templates ?? {},
     error: null,
   });
 }
@@ -39,9 +40,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
   const admin = supabaseAdmin();
-  let body: { group_id?: string; test?: boolean; clear?: boolean };
+  let body: { group_id?: string; test?: boolean; clear?: boolean; templates?: Record<string, string> };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const { id, cfg } = await readCfg(admin);
+
+  // บันทึกแม่แบบข้อความ (merge — เก็บเฉพาะที่ตั้งค่า, ว่าง = ใช้ค่าเริ่มต้น)
+  if (body.templates && typeof body.templates === "object") {
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(body.templates)) if (typeof v === "string" && v.trim()) clean[k] = v;
+    const next: LineCfg = { ...cfg, templates: clean };
+    if (id) await admin.from("china_app_settings").update({ sval: next }).eq("id", id);
+    else await admin.from("china_app_settings").insert({ skey: "line_config", sval: next });
+    return NextResponse.json({ ok: true, savedTemplates: true, error: null });
+  }
 
   // ส่งข้อความทดสอบเข้ากลุ่มงาน (creative ถ้าตั้งไว้ ไม่งั้นกลุ่มหลัก)
   if (body.test) {
