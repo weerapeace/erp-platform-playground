@@ -24,7 +24,7 @@ export default function EmployeeFormPrintPage() {
   // โหลดเฉพาะทักษะที่ "แสดง" (is_active) มาขึ้นในฟอร์ม
   const loadFormSkills = useCallback(async () => {
     try {
-      const json = await apiFetch("/api/lookups?type=employee_skill&limit=200").then((r) => r.json());
+      const json = await apiFetch("/api/lookups?type=employee_skill&limit=200", { cache: "no-store" }).then((r) => r.json());
       const rows = (json.data ?? []) as Array<{ name: string; metadata?: { en?: string; my?: string } }>;
       setSkills(rows.map((r) => ({ th: r.name, en: r.metadata?.en ?? "", my: r.metadata?.my ?? "" })));
     } catch { setSkills([]); }
@@ -77,7 +77,7 @@ function SkillSettings({ open, onClose, onChanged }: { open: boolean; onClose: (
   // โหลดทั้งหมด รวมที่ซ่อนไว้ (include_inactive) เพื่อให้แก้/แสดงกลับได้
   const reload = useCallback(async () => {
     try {
-      const json = await apiFetch("/api/lookups?type=employee_skill&limit=200&include_inactive=true").then((r) => r.json());
+      const json = await apiFetch("/api/lookups?type=employee_skill&limit=200&include_inactive=true", { cache: "no-store" }).then((r) => r.json());
       const data = (json.data ?? []) as Array<{ id: string; name: string; sort_order?: number; is_active?: boolean; metadata?: { en?: string; my?: string } }>;
       setRows(data.map((r) => ({ id: r.id, th: r.name, en: r.metadata?.en ?? "", my: r.metadata?.my ?? "", sort: r.sort_order ?? 0, active: r.is_active !== false })));
     } catch { setRows([]); }
@@ -88,49 +88,47 @@ function SkillSettings({ open, onClose, onChanged }: { open: boolean; onClose: (
     setRows((cur) => cur.map((r) => (r.id === id ? { ...r, [key]: val } : r)));
 
   const after = async () => { await reload(); await onChanged(); };
+  // เขียนแล้วเช็ก error จริง (fetch ไม่ throw เองตอน 4xx/5xx)
+  const write = async (url: string, init: RequestInit) => {
+    const res = await apiFetch(url, { ...init, cache: "no-store", headers: { "Content-Type": "application/json", ...(init.headers ?? {}) } });
+    const json = await res.json().catch(() => ({} as { error?: string }));
+    if (!res.ok || json?.error) throw new Error(json?.error || `HTTP ${res.status}`);
+    return json;
+  };
 
   async function saveRow(r: Skill) {
     if (!r.th.trim()) { setMsg("กรุณากรอกชื่อทักษะ (ไทย)"); return; }
     setBusy(true); setMsg(null);
     try {
-      await apiFetch(`/api/lookups/${encodeURIComponent(r.id)}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: r.th.trim(), metadata: { en: r.en.trim(), my: r.my.trim() } }),
-      }).then((x) => x.json());
+      await write(`/api/lookups/${encodeURIComponent(r.id)}`, { method: "PATCH", body: JSON.stringify({ name: r.th.trim(), metadata: { en: r.en.trim(), my: r.my.trim() } }) });
       setMsg("บันทึกแล้ว"); await after();
-    } catch { setMsg("บันทึกไม่สำเร็จ"); } finally { setBusy(false); }
+    } catch (e) { setMsg(`บันทึกไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); } finally { setBusy(false); }
   }
 
   async function toggleShow(r: Skill) {
     setBusy(true); setMsg(null);
     try {
-      await apiFetch(`/api/lookups/${encodeURIComponent(r.id)}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_active: !r.active }),
-      }).then((x) => x.json());
+      await write(`/api/lookups/${encodeURIComponent(r.id)}`, { method: "PATCH", body: JSON.stringify({ is_active: !r.active }) });
       await after();
-    } catch { setMsg("ปรับการแสดงไม่สำเร็จ"); } finally { setBusy(false); }
+    } catch (e) { setMsg(`ปรับการแสดงไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); } finally { setBusy(false); }
   }
 
   async function delRow(r: Skill) {
     if (!confirm(`ลบทักษะ "${r.th}" ถาวร?\n(ถ้าแค่ไม่อยากให้ขึ้นในฟอร์ม กด "ซ่อน" แทน)`)) return;
     setBusy(true); setMsg(null);
     try {
-      await apiFetch(`/api/lookups/${encodeURIComponent(r.id)}?hard=1`, { method: "DELETE" }).then((x) => x.json());
+      await write(`/api/lookups/${encodeURIComponent(r.id)}?hard=1`, { method: "DELETE" });
       await after();
-    } catch { setMsg("ลบไม่สำเร็จ"); } finally { setBusy(false); }
+    } catch (e) { setMsg(`ลบไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); } finally { setBusy(false); }
   }
 
   async function addRow() {
     if (!draft.th.trim()) { setMsg("กรุณากรอกชื่อทักษะ (ไทย)"); return; }
     setBusy(true); setMsg(null);
     try {
-      await apiFetch("/api/lookups", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lookup_type: "employee_skill", name: draft.th.trim(), metadata: { en: draft.en.trim(), my: draft.my.trim() }, sort_order: rows.length + 1 }),
-      }).then((x) => x.json());
-      setDraft({ th: "", en: "", my: "" }); await after();
-    } catch { setMsg("เพิ่มไม่สำเร็จ"); } finally { setBusy(false); }
+      await write("/api/lookups", { method: "POST", body: JSON.stringify({ lookup_type: "employee_skill", name: draft.th.trim(), metadata: { en: draft.en.trim(), my: draft.my.trim() }, sort_order: rows.length + 1 }) });
+      setDraft({ th: "", en: "", my: "" }); setMsg("เพิ่มแล้ว"); await after();
+    } catch (e) { setMsg(`เพิ่มไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); } finally { setBusy(false); }
   }
 
   const hiddenCount = rows.filter((r) => !r.active).length;
