@@ -61,6 +61,7 @@ function mapGoal(r: Row, steps: Row[] = [], checkins: Row[] = []) {
     target_value: n(r.target_value),
     current_value: n(r.current_value),
     reward: (r.reward as Record<string, unknown>) ?? {},
+    plan: (r.plan as Record<string, unknown>) ?? {},
     steps: steps.map(mapStep).sort((a, b) => a.sort_order - b.sort_order),
     checkins: checkins.map(mapCheckin),
   };
@@ -73,6 +74,7 @@ export type GoalInput = {
   measure_type?: string; measure_unit?: string;
   start_value?: number | null; target_value?: number | null; current_value?: number | null;
   reward?: Record<string, unknown>;
+  plan?: Record<string, unknown>;
   steps?: { title: string; target_date?: string | null; weight?: number }[];
 };
 export type StepInput = { title: string; description?: string; target_date?: string | null; weight?: number };
@@ -130,6 +132,7 @@ export async function createGoal(input: GoalInput, owner: { id: string; name: st
     target_value: input.target_value ?? null,
     current_value: input.current_value ?? null,
     reward: input.reward ?? {},
+    plan: input.plan ?? {},
     start_date: input.start_date ?? null,
     target_date: input.target_date ?? null,
     created_by: owner.id,
@@ -147,7 +150,7 @@ export async function createGoal(input: GoalInput, owner: { id: string; name: st
   return getGoal(goalId);
 }
 
-const GOAL_FIELDS = ["title", "why", "description", "category", "level", "department", "status", "health", "priority", "start_date", "target_date", "progress_mode", "progress_percent", "measure_type", "measure_unit", "start_value", "target_value", "current_value", "reward"];
+const GOAL_FIELDS = ["title", "why", "description", "category", "level", "department", "status", "health", "priority", "start_date", "target_date", "progress_mode", "progress_percent", "measure_type", "measure_unit", "start_value", "target_value", "current_value", "reward", "plan"];
 
 export async function updateGoal(id: string, patch: Record<string, unknown>) {
   const admin = supabaseAdmin();
@@ -249,5 +252,21 @@ export async function addExerciseLog(goalId: string, input: ExerciseInput, user:
     current_value: newVal, note: `🏃 ${input.title} ${qty}${input.unit ? " " + input.unit : ""}`,
   });
 
+  return getGoal(goalId);
+}
+
+// ---- บันทึกความคืบหน้าเป็นจำนวน (เช่น ฝากเงินเก็บ) — บวกเข้าค่าเป้า + ลง check-in ----
+export async function addProgress(goalId: string, amount: number, note: string, user: { id: string; name: string }) {
+  const admin = supabaseAdmin();
+  const { data: gRow } = await admin.from("erp_goals").select("id, current_value, start_value, health").eq("id", goalId).maybeSingle();
+  if (!gRow) throw new Error("ไม่พบเป้าหมาย");
+  const gg = gRow as Row;
+  const base = gg.current_value == null ? (gg.start_value == null ? 0 : Number(gg.start_value)) : Number(gg.current_value);
+  const newVal = base + (Number(amount) || 0);
+  await admin.from("erp_goals").update({ current_value: newVal, updated_at: new Date().toISOString() }).eq("id", goalId);
+  await admin.from("erp_goal_checkins").insert({
+    goal_id: goalId, author: user.name, health: s(gg.health) || "on_track",
+    current_value: newVal, note: note || `ฝากเงิน ${(Number(amount) || 0).toLocaleString("th-TH")}`,
+  });
   return getGoal(goalId);
 }

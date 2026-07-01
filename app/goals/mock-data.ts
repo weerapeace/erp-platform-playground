@@ -13,6 +13,19 @@ export type GoalHealth = "on_track" | "at_risk" | "off_track";
 export type MeasureType = "percent" | "number" | "currency" | "boolean";
 export type GoalLevel = "team" | "personal";
 
+/** พารามิเตอร์แผนการเงิน (บ้าน / เก็บเงินก้อน) */
+export type GoalPlan = {
+  kind?: "house" | "lump";
+  price?: number;            // ราคาบ้าน (โหมดบ้าน)
+  down_pct?: number;         // %ดาวน์
+  monthly?: number;          // เก็บเดือนละ
+  months?: number;           // ใช้เวลา (เดือน)
+  interest_pct?: number;     // ดอกเบี้ยกู้ (โหมดบ้าน)
+  years?: number;            // จำนวนปีผ่อน
+  mortgage_monthly?: number; // ค่างวดผ่อนโดยประมาณ
+  finish_date?: string;      // วันคาดว่าถึงเป้า (ISO)
+};
+
 export type GoalStep = RoadmapStep & {
   weight?: number;
 };
@@ -53,6 +66,8 @@ export type Goal = {
   current_value?: number;
   /** กฎการได้เหรียญ (เกม) — ก้าวละ / ทุก X หน่วย / โบนัสตอนสำเร็จ */
   reward?: { per_step?: number; on_achieve?: number; units_per_coin?: number };
+  /** แผนการเงิน (ถ้าเป็นเป้าเก็บเงิน) */
+  plan?: GoalPlan;
   steps: GoalStep[];
   checkins: GoalCheckin[];
 };
@@ -74,6 +89,7 @@ export type GoalDraft = {
   target_value?: number;
   current_value?: number;
   reward?: { per_step?: number; on_achieve?: number; units_per_coin?: number };
+  plan?: GoalPlan;
   steps: { title: string; target_date?: string }[];
 };
 

@@ -11,9 +11,9 @@ import { useToast } from "@/components/toast";
 import { GoalRoadmap, type RoadmapStep } from "@/components/goal-roadmap";
 import {
   goalProgress, daysLeft, CATEGORY_LABEL, HEALTH_META, DEFAULT_REWARD,
-  type Goal, type GoalHealth, type GoalStatus,
+  type Goal, type GoalHealth, type GoalStatus, type GoalPlan,
 } from "../mock-data";
-import { fetchGoal, updateStep, addCheckin, updateGoal, addExercise } from "../api";
+import { fetchGoal, updateStep, addCheckin, updateGoal, addExercise, addProgress } from "../api";
 import { GoalStatusBadge, GoalHealthBadge, ProgressRing } from "../goal-badges";
 import { GameBar } from "../game-bar";
 import { useCoinFx } from "../coin-fx";
@@ -26,6 +26,11 @@ function fmtDate(iso?: string): string {
   return y && m && d ? `${d} ${TH_MONTH[m - 1]} ${y}` : iso;
 }
 const fmtNum = (n?: number) => (n == null ? "—" : n.toLocaleString("th-TH"));
+function monthYear(iso?: string): string {
+  if (!iso) return "—";
+  const [y, m] = iso.split("-").map(Number);
+  return y && m ? `${TH_MONTH[m - 1]} ${y}` : iso;
+}
 
 const HEALTH_OPTIONS = [
   { value: "on_track", label: "🟢 ตามแผน" },
@@ -49,6 +54,7 @@ export default function GoalDetailPage() {
   const [checkinOpen, setCheckinOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [workoutOpen, setWorkoutOpen] = useState(false);
+  const [depositOpen, setDepositOpen] = useState(false);
   const { fx, burst } = useCoinFx();
 
   const load = useCallback(() => {
@@ -83,6 +89,8 @@ export default function GoalDetailPage() {
   const g = goal; // non-null alias
   const dl = daysLeft(g.target_date);
   const showMetric = g.measure_type !== "boolean" && g.target_value != null;
+  const plan = (g.plan ?? {}) as GoalPlan;
+  const isFinancial = plan.kind === "house" || plan.kind === "lump";
 
   async function toggleStep(stepId: string) {
     const step = g.steps.find((s) => s.id === stepId);
@@ -138,6 +146,27 @@ export default function GoalDetailPage() {
       awardCoins(coins, `ออกกำลังกาย: ${input.title} · ${g.title}`);
       burst(coins, `${input.title} +${input.quantity}${input.unit ? " " + input.unit : ""}`);
       toast.success("บันทึกออกกำลังกายแล้ว");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    }
+  }
+
+  async function handleDeposit(amount: number) {
+    const oldVal = g.current_value ?? g.start_value ?? 0;
+    try {
+      const updated = await addProgress(g.id, amount, `💰 ฝากเงิน ${amount.toLocaleString("th-TH")} บาท`);
+      setGoal(updated);
+      setDepositOpen(false);
+      let coins = 3;
+      const upc = reward.units_per_coin;
+      const newVal = updated.current_value ?? oldVal;
+      if (upc && newVal > oldVal) {
+        const gained = Math.floor(newVal / upc) - Math.floor(oldVal / upc);
+        if (gained > 0) coins += gained;
+      }
+      awardCoins(coins, `ฝากเงิน · ${g.title}`);
+      burst(coins, `ฝากเงิน +${amount.toLocaleString("th-TH")}`);
+      toast.success("บันทึกเงินเก็บแล้ว");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
     }
@@ -212,6 +241,19 @@ export default function GoalDetailPage() {
           </div>
         )}
 
+        {/* แผนเก็บเงิน (เป้าการเงิน) */}
+        {isFinancial && (
+          <div className="bg-teal-50 border border-teal-200 rounded-lg px-4 py-3 mt-4 text-sm text-teal-900">
+            <div className="font-medium mb-1">💰 แผนเก็บเงิน</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-teal-800">
+              {plan.monthly ? <span>เก็บเดือนละ ~{fmtNum(plan.monthly)} บาท</span> : null}
+              {plan.months ? <span>ใช้เวลา ~{plan.months} เดือน</span> : null}
+              {plan.finish_date ? <span>ถึงเป้า ~{monthYear(plan.finish_date)}</span> : null}
+              {plan.kind === "house" && plan.mortgage_monthly ? <span>🏦 ผ่อนบ้าน ~{fmtNum(plan.mortgage_monthly)}/เดือน</span> : null}
+            </div>
+          </div>
+        )}
+
         {/* กฎการได้เหรียญ (เกม) */}
         <div className="flex flex-wrap items-center gap-2 mt-4">
           <span className="text-xs text-slate-400">ได้เหรียญเมื่อ:</span>
@@ -242,6 +284,11 @@ export default function GoalDetailPage() {
 
         {/* ปุ่ม */}
         <div className="border-t border-slate-100 mt-5 pt-4 flex flex-wrap gap-2">
+          {isFinancial && (
+            <button onClick={() => setDepositOpen(true)} className="h-9 px-4 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700">
+              💰 บันทึกเงินเก็บ
+            </button>
+          )}
           {g.category === "personal" && (
             <button onClick={() => setWorkoutOpen(true)} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
               🏃 บันทึกออกกำลังกาย
@@ -284,6 +331,7 @@ export default function GoalDetailPage() {
       <CheckinModal open={checkinOpen} onClose={() => setCheckinOpen(false)} goal={g} onSave={handleCheckin} />
       <StatusModal open={statusOpen} onClose={() => setStatusOpen(false)} current={g.status} onPick={changeStatus} />
       <WorkoutModal open={workoutOpen} onClose={() => setWorkoutOpen(false)} onSave={handleWorkout} />
+      <DepositModal open={depositOpen} onClose={() => setDepositOpen(false)} onSave={handleDeposit} />
     </div>
   );
 }
@@ -443,6 +491,42 @@ function WorkoutModal({ open, onClose, onSave }: {
           </label>
           <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} autoFocus placeholder="เช่น 20"
             className="w-full h-10 px-3 text-base border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+        </div>
+      </div>
+    </ERPModal>
+  );
+}
+
+// ---- Deposit modal (เป้าการเงิน) ----
+function DepositModal({ open, onClose, onSave }: {
+  open: boolean; onClose: () => void; onSave: (amount: number) => void;
+}) {
+  const [amt, setAmt] = useState("");
+  const quick = [1000, 5000, 10000, 20000];
+  function submit() { const a = Number(amt); if (!a || a <= 0) return; onSave(a); setAmt(""); }
+
+  return (
+    <ERPModal open={open} onClose={onClose} title="💰 บันทึกเงินเก็บ" description="ใส่จำนวนที่เก็บได้ → บวกเข้ายอด + ได้เหรียญ" size="sm"
+      hasUnsavedChanges={amt.trim() !== ""}
+      footer={
+        <>
+          <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+          <button onClick={submit} className="h-9 px-4 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700">บันทึก</button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">จำนวนเงิน (บาท)</label>
+          <input type="number" autoFocus value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="เช่น 15000"
+            className="w-full h-10 px-3 text-base border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {quick.map((q) => (
+            <button key={q} onClick={() => setAmt(String(q))} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
+              +{q.toLocaleString("th-TH")}
+            </button>
+          ))}
         </div>
       </div>
     </ERPModal>

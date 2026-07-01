@@ -57,3 +57,8 @@ export async function addExercise(goalId: string, input: ExerciseLog): Promise<G
   const j = await unwrap(await apiFetch(`/api/goals/${goalId}/exercise`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) }));
   return j.data as Goal;
 }
+
+export async function addProgress(goalId: string, amount: number, note: string): Promise<Goal> {
+  const j = await unwrap(await apiFetch(`/api/goals/${goalId}/progress`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ amount, note }) }));
+  return j.data as Goal;
+}

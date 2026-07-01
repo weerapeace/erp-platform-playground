@@ -14,6 +14,7 @@ import {
 import { listGoals, createGoal } from "./api";
 import { GoalStatusBadge, GoalHealthBadge, ProgressBar } from "./goal-badges";
 import { GoalFormModal } from "./goal-form-modal";
+import { FinancialGoalModal } from "./financial-goal-modal";
 import { GameBar } from "./game-bar";
 
 const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
@@ -31,6 +32,7 @@ export default function GoalsListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [finOpen, setFinOpen] = useState(false);
 
   const myName = user?.name ?? "";
   const myId = user?.id ?? "";
@@ -139,8 +141,14 @@ export default function GoalsListPage() {
           <h1 className="text-xl font-bold text-slate-900">🎯 เป้าหมาย & เส้นทางสู่ความสำเร็จ</h1>
           <p className="text-sm text-slate-500 mt-0.5">สวัสดี {myName || "ผู้ใช้"} · ตั้งเป้าหมาย แตกเป็นขั้นบันได แล้วเดินไปทีละก้าว</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <GameBar />
+          <button
+            onClick={() => setFinOpen(true)}
+            className="h-10 px-4 text-sm font-medium text-teal-700 border border-teal-300 rounded-lg hover:bg-teal-50 transition-colors"
+          >
+            💰 เก็บเงิน
+          </button>
           <button
             onClick={() => setCreateOpen(true)}
             className="h-10 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors"
@@ -180,6 +188,7 @@ export default function GoalsListPage() {
       </div>
 
       <GoalFormModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={handleCreate} />
+      <FinancialGoalModal open={finOpen} onClose={() => setFinOpen(false)} onCreate={handleCreate} />
     </div>
   );
 }
