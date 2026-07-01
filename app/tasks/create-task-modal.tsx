@@ -38,14 +38,14 @@ function addDaysStr(dateStr: string, days: number): string {
 type FormState = {
   title: string; description: string; task_type: string;
   brand_id: string; campaign_id: string;
-  assignee: UserPickerValue | null; reviewers: UserPickerValue[];
+  assignees: UserPickerValue[]; reviewers: UserPickerValue[];
   priority: CreativePriority; order_date: string; due_date: string;
   products: SkuPickerValue[]; parents: ParentSkuPickerValue[]; platforms: string[]; drive_folder_url: string;
   cover_image_r2_key: string;
 };
 const EMPTY_FORM: FormState = {
   title: "", description: "", task_type: "photo_shoot", brand_id: "", campaign_id: "",
-  assignee: null, reviewers: [], priority: "normal", order_date: "", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "", cover_image_r2_key: "",
+  assignees: [], reviewers: [], priority: "normal", order_date: "", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "", cover_image_r2_key: "",
 };
 
 // แถวงานย่อยในขั้นที่ 2
@@ -90,6 +90,13 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr() }); setSubs([]); setContentItems([]); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);
 
   const updateForm = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
+  // เลือกผู้รับผิดชอบงานแม่ → เซ็ตผู้รับผิดชอบงานย่อย "ทุกอัน" เป็นรายการนี้ (แก้รายอันทีหลังได้)
+  const pickTaskAssignees = (list: UserPickerValue[]) => {
+    markTouched("assignee");
+    updateForm({ assignees: list });
+    const asg = list.map((u) => ({ id: u.id, label: u.name }));
+    setSubs((rows) => rows.map((r) => ({ ...r, assignees: asg })));
+  };
   // แตะช่องแล้ว = ตั้งเอง → กล่องปกติ · ยังไม่แตะแต่มีค่า = ค่าเริ่มต้น → กล่องเทาอ่อน · ว่าง = กล่องส้มอ่อน
   const markTouched = (k: string) => setTouched((prev) => (prev.has(k) ? prev : new Set(prev).add(k)));
   const emptyNow = (k: string): boolean => {
@@ -97,7 +104,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       case "title": return !form.title.trim();
       case "brand_id": return !form.brand_id;
       case "campaign_id": return !form.campaign_id;
-      case "assignee": return !form.assignee;
+      case "assignee": return form.assignees.length === 0;
       case "reviewers": return form.reviewers.length === 0;
       case "order_date": return !form.order_date;
       case "due_date": return !form.due_date;
@@ -141,7 +148,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     })));
   };
 
-  const addBlankSub = () => { setSubs((p) => [...p, { include: true, title: "", description: null, required_before_next: false, assignees: [], type: "custom", config: {} }]); setDirty(true); };
+  const addBlankSub = () => { setSubs((p) => [...p, { include: true, title: "", description: null, required_before_next: false, assignees: form.assignees.map((u) => ({ id: u.id, label: u.name })), type: "custom", config: {} }]); setDirty(true); };
   const addContentItem = () => { setContentItems((p) => [...p, { title: "", platforms: [] }]); setDirty(true); };
   const patchContentItem = (i: number, patch: Partial<TemplateContentItem>) => { setContentItems((p) => p.map((c, j) => j === i ? { ...c, ...patch } : c)); setDirty(true); };
   const removeContentItem = (i: number) => { setContentItems((p) => p.filter((_, j) => j !== i)); setDirty(true); };
@@ -163,7 +170,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       const { id, task_no } = await createTask({
         title: form.title.trim(), description: form.description.trim() || null, task_type: form.task_type || null,
         brand_id: form.brand_id || null, campaign_id: (lockedCampaignId ?? form.campaign_id) || null,
-        assignee_id: form.assignee?.id ?? null, reviewer_ids: form.reviewers.map((r) => r.id),
+        assignee_ids: form.assignees.map((a) => a.id), assignee_id: form.assignees[0]?.id ?? null, reviewer_ids: form.reviewers.map((r) => r.id),
         priority: form.priority, start_date: form.order_date || null, due_date: form.due_date || null,
         sku_id: form.products[0]?.id ?? null, product_name: form.products[0]?.name ?? null, sku_ids: form.products.map((p) => p.id),
         parent_sku_id: form.parents[0]?.id ?? null, parent_sku_ids: form.parents.map((p) => p.id),
@@ -255,7 +262,15 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           <ERPFormField label={t("ความสำคัญ","Priority")} style={orderStyle("priority")}><ERPSelect className={ctrlCls("priority")} value={form.priority} options={priorityOptions()} onChange={(e) => { markTouched("priority"); updateForm({ priority: e.target.value as CreativePriority }); }} /></ERPFormField>
           <ERPFormField label={t("แบรนด์","Brand")} style={orderStyle("brand_id")}><ERPSelect className={ctrlCls("brand_id")} value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => { markTouched("brand_id"); updateForm({ brand_id: e.target.value }); }} /></ERPFormField>
           {!lockedCampaignId && <ERPFormField label="Campaign" style={orderStyle("campaign_id")}><ERPSelect className={ctrlCls("campaign_id")} value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => { markTouched("campaign_id"); updateForm({ campaign_id: e.target.value }); }} /></ERPFormField>}
-          <ERPFormField label={t("ผู้รับผิดชอบ","Assignee")} style={orderStyle("assignee")}><div className={wrapCls("assignee")}><UserPicker value={form.assignee} onChange={(v) => updateForm({ assignee: v })} disableCreate /></div></ERPFormField>
+          <ERPFormField label={t("ผู้รับผิดชอบ (เลือกได้หลายคน)","Assignee (multiple)")} span={2} style={orderStyle("assignee")}>
+            <div className={wrapCls("assignee")}>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0"><MultiUserPicker value={form.assignees} onChange={pickTaskAssignees} disableCreate /></div>
+                <TeamFill onPick={(members) => { const add = members.filter((m) => !form.assignees.some((u) => u.id === m.id)).map((m) => ({ id: m.id, name: m.name } as UserPickerValue)); if (add.length) pickTaskAssignees([...form.assignees, ...add]); }} />
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">{t("เลือกแล้ว งานย่อยทุกอันจะใช้คนกลุ่มนี้อัตโนมัติ (แก้รายอันได้ในขั้นถัดไป)", "Subtasks inherit these people automatically (editable per subtask in the next step)")}</p>
+            </div>
+          </ERPFormField>
           <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เลือกได้หลายคน)","Reviewer / Approver (multiple)")} style={orderStyle("reviewers")}><div className={wrapCls("reviewers")}><MultiUserPicker value={form.reviewers} onChange={(v) => updateForm({ reviewers: v })} disableCreate /></div></ERPFormField>
           <ERPFormField label={t("วันที่สั่ง","Order date")} style={orderStyle("order_date")}><ERPInput type="date" className={ctrlCls("order_date")} value={form.order_date} onChange={(e) => { markTouched("order_date"); setOrderDate(e.target.value); }} /></ERPFormField>
           <ERPFormField label={t("กำหนดส่ง","Due date")} style={orderStyle("due_date")} hint={tplDueOffset != null ? t(`อัตโนมัติ = วันที่สั่ง + ${tplDueOffset} วัน (แก้เองได้)`, `auto = order date + ${tplDueOffset}d (editable)`) : undefined}><ERPInput type="date" className={ctrlCls("due_date")} value={form.due_date} onChange={(e) => { markTouched("due_date"); updateForm({ due_date: e.target.value }); }} /></ERPFormField>
