@@ -2473,8 +2473,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         confirmText="ปิดบัญชี" cancelText="ยกเลิก" variant="danger"
         onConfirm={() => { if (archiveTarget) { void apiFetch(`${apiBase}${config.apiPath}/${archiveTarget.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" }).then(() => refreshData()); setArchiveTarget(null); } }} />
 
-      {/* กล่องลบ — เลือกลบชั่วคราว / ลบถาวร (ของกลาง) */}
-      {deleteTarget && (
+      {/* กล่องลบ — เลือกลบชั่วคราว / ลบถาวร (ของกลาง) · portal ไป body: กันเด้ง "หลัง" drawer (Drawer ใช้ portal z-50) */}
+      {deleteTarget && typeof document !== "undefined" && createPortal(
         <div className="fixed inset-0 z-[150] bg-black/40 flex items-center justify-center p-4" onClick={() => !deleting && setDeleteTarget(null)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-100">
@@ -2509,7 +2509,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* กลุ่ม C: Field Creator — เพิ่ม column จริงใน Supabase */}
