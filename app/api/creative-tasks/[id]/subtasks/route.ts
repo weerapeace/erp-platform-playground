@@ -82,6 +82,7 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
   if (!pIds.length) return NextResponse.json({ parents: [], linked_sku_ids: linkedSkuIds, required, galleries: {}, error: null });
   // select * เพื่อรองรับ "ทุกฟิลด์" ที่ admin เลือกบังคับ (parent มีไม่กี่แถว)
   const { data } = await admin.from("parent_skus_v2").select("*").in("id", pIds);
+  const asText = (v: unknown): string => v == null ? "" : Array.isArray(v) ? v.map((x) => asText(x)).filter(Boolean).join(", ") : typeof v === "object" ? "" : String(v);
   const parents = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
     id: (p.id as string) ?? "",
     code: (p.code as string) ?? "",
@@ -93,6 +94,8 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
     has_description: !!((p.description as string) ?? "").trim(),
     // ฟิลด์บังคับที่ยังว่าง (ป้ายจากทะเบียนฟิลด์) — ใช้โชว์ * + บล็อกส่งงาน
     missing: reqCols.filter((c) => isEmptyVal(p[c])).map((c) => colLabel[c] ?? c),
+    // ทุกช่องบังคับ + ค่าจริง (โชว์เต็ม + ปุ่มคัดลอกในป๊อปอัป)
+    fields: reqCols.map((c) => ({ key: c, label: colLabel[c] ?? c, value: asText(p[c]), empty: isEmptyVal(p[c]) })),
   }));
   // แกลเลอรีปัจจุบันของ Parent SKU (โชว์ preview + จับคู่แทนรูปในป๊อปอัปส่งงาน)
   const galleries = await loadGalleries(admin, "parent_sku", pIds);

@@ -384,7 +384,7 @@ function EditSubtaskModal({ sub, taskId, reload, pushToast, canManageAssignees, 
   );
 }
 
-type PlatformParent = { id: string; code: string; name_th: string; name_platform: string; introduction: string; description: string; english_description: string; has_description: boolean; missing: string[] };
+type PlatformParent = { id: string; code: string; name_th: string; name_platform: string; introduction: string; description: string; english_description: string; has_description: boolean; missing: string[]; fields?: { key: string; label: string; value: string; empty: boolean }[] };
 
 // ป๊อปอัปแนบงาน/ส่งงาน
 // - งานปกติ (รับรูป/ลิงก์): แนบ ≥1 ก่อนส่ง
@@ -771,6 +771,11 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
 
+  // อนุมัติ/ขอแก้ ในป๊อปอัป (เฉพาะผู้มีสิทธิ์อนุมัติ + งานย่อยรออนุมัติ)
+  const canReview = canApprove && sub.status === "submitted";
+  const doApprove = async () => { setBusy(true); try { await updateSubtask(taskId, sub.id, { status: "approved" }); await reload(); pushToast("success", t("อนุมัติแล้ว", "Approved")); onClose(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+  const doRevise = async () => { const r = window.prompt(t("เหตุผลที่ขอแก้ (ส่งให้ผู้ทำ)", "Reason for revision")); if (r === null) return; setBusy(true); try { await updateSubtask(taskId, sub.id, { status: "revision_requested", comment: r }); await reload(); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); onClose(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+
   return (
     <>
     <ERPModal open onClose={onClose} size="md"
@@ -778,6 +783,10 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       footer={
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+          {canReview && <>
+            <button onClick={doRevise} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50">↩︎ {t("ขอแก้", "Revise")}</button>
+            <button onClick={doApprove} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">✓ {t("อนุมัติ", "Approve")}</button>
+          </>}
           {canSubmit && <button onClick={submit} disabled={!canPressSubmit} className="h-9 px-4 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50">📤 {t("ส่งงาน (รออนุมัติ)", "Submit (pending approval)")}</button>}
         </div>
       }>
@@ -797,8 +806,22 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                     {ok ? <span className="text-[10px] text-emerald-600 ml-auto">✓ {t("ครบ", "Complete")}</span> : <span className="text-[10px] text-rose-600 ml-auto">⚠ {t("ยังไม่ครบ", "Incomplete")}</span>}
                   </div>
                   {!ok && <p className="text-xs text-rose-600">{t("ต้องกรอก", "Required")}: {p.missing.map((m) => `${m}*`).join(", ")}</p>}
-                  {p.introduction && <p className="text-xs text-slate-500 whitespace-pre-wrap line-clamp-3">{p.introduction}</p>}
-                  {p.description && <p className="text-xs text-slate-600 whitespace-pre-wrap line-clamp-6 border-t border-slate-100 pt-1.5">{p.description}</p>}
+                  {p.introduction && <p className="text-xs text-slate-500 whitespace-pre-wrap">{p.introduction}</p>}
+                  {/* ทุกช่องบังคับ + ค่าจริง (โชว์เต็ม ไม่ตัด) + ปุ่มคัดลอก */}
+                  {(p.fields && p.fields.length > 0
+                    ? p.fields
+                    : (p.description ? [{ key: "description", label: t("รายละเอียด", "Description"), value: p.description, empty: false }] : [])
+                  ).map((f) => (
+                    <div key={f.key} className="border-t border-slate-100 pt-1.5">
+                      <div className="flex items-center justify-between gap-2 mb-0.5">
+                        <span className="text-[11px] font-medium text-slate-500">{f.label}{f.empty && <span className="text-rose-500">*</span>}</span>
+                        {!f.empty && f.value && <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(f.value); pushToast("success", t(`คัดลอก ${f.label} แล้ว`, `Copied ${f.label}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } }} className="shrink-0 text-[10px] text-violet-600 hover:text-violet-800 border border-violet-200 rounded px-1.5 py-0.5">📋 {t("คัดลอก", "Copy")}</button>}
+                      </div>
+                      {f.empty
+                        ? <p className="text-[11px] text-rose-500 italic">— {t("ยังไม่กรอก", "not filled")}</p>
+                        : <p className="text-xs text-slate-600 whitespace-pre-wrap">{f.value}</p>}
+                    </div>
+                  ))}
                   <button onClick={() => setEditParentId(p.id)} disabled={!p.id} className={`w-full mt-1 h-8 rounded-md text-xs font-medium border disabled:opacity-50 ${ok ? "text-violet-700 border-violet-200 hover:bg-violet-50" : "text-white bg-violet-600 border-violet-600 hover:bg-violet-700"}`}>
                     ✏️ {ok ? t("แก้รายละเอียดสินค้า", "Edit product details") : t("กรอกข้อมูลสินค้าที่ขาด", "Fill missing product details")}
                   </button>
