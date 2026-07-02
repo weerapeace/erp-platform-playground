@@ -402,6 +402,15 @@ export function BomLineEditor({
     uom: c.uom_name ?? l.uom, uom_id: c.uom_id ?? l.uom_id,
   });
 
+  // เพิ่มวัตถุดิบใหม่จากปุ่ม "+ เพิ่มวัตถุดิบ" (เลือกจาก dropdown ได้เลย) → เพิ่มแถวที่ตั้งค่าครบ + คิดปริมาณ
+  const addComponent = (c: BomComponent) => {
+    const base = emptyLine();
+    const line = recalc({ ...base, ...pickComponent(base, c) });
+    setUndoStack((u) => [...u, lines].slice(-50));
+    setRedoStack([]);
+    onChange([...lines, line]);
+  };
+
   const resolveSkuId = async (l: EditorLine): Promise<string | null> => {
     if (l.component_id) return l.component_id;
     if (!l.component_sku) return null;
@@ -605,11 +614,19 @@ export function BomLineEditor({
   return (
     <>
       <div className="flex items-center justify-between gap-1 mb-1">
-        <div className="flex border border-slate-200 rounded-lg overflow-hidden text-xs">
-          <button type="button" onClick={() => setView("basic")} title="โชว์เฉพาะคอลัมน์หลัก"
-            className={`h-7 px-3 ${view === "basic" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>BASIC</button>
-          <button type="button" onClick={() => setView("pro")} title="โชว์ทุกคอลัมน์"
-            className={`h-7 px-3 border-l border-slate-200 ${view === "pro" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>PRO</button>
+        <div className="flex items-center gap-2">
+          <div className="flex border border-slate-200 rounded-lg overflow-hidden text-xs">
+            <button type="button" onClick={() => setView("basic")} title="โชว์เฉพาะคอลัมน์หลัก"
+              className={`h-7 px-3 ${view === "basic" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>BASIC</button>
+            <button type="button" onClick={() => setView("pro")} title="โชว์ทุกคอลัมน์"
+              className={`h-7 px-3 border-l border-slate-200 ${view === "pro" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>PRO</button>
+          </div>
+          {!readonly && (
+            // ปุ่มเพิ่มวัตถุดิบแบบเลือกจาก dropdown ได้เลย (มี ⭐ ใช้ล่าสุด บนสุด) → เลือกเสร็จเพิ่มแถวอัตโนมัติ
+            <span className="inline-block w-64">
+              <ComponentPicker sku="" name="" placeholder="＋ เพิ่มวัตถุดิบ (เลือกได้เลย)" onPick={addComponent} />
+            </span>
+          )}
         </div>
         {!readonly && (
           <div className="flex items-center gap-1">
