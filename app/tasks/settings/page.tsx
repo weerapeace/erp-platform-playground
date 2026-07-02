@@ -6,7 +6,7 @@
 // ทุกอย่าง admin-only
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -433,12 +433,40 @@ function SubmitRequiredManager({ showToast }: { showToast: (m: string) => void }
   }, []);
   const toggle = (key: string) => setFields((f) => (f ?? []).includes(key) ? (f ?? []).filter((x) => x !== key) : [...(f ?? []), key]);
   const save = async () => { if (!fields) return; setSaving(true); try { await saveSubmitRequiredFields(fields); showToast(t("บันทึกแล้ว", "Saved")); } catch (e) { showToast((e as Error).message); } finally { setSaving(false); } };
+  const labelOf = (col: string) => options.find((o) => o.col === col)?.label ?? col;
+  // ลากเรียงลำดับฟิลด์ที่เลือก (ลำดับนี้ = ลำดับที่โชว์ในป๊อปอัปตรวจงาน)
+  const dragIdx = useRef<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+  const move = (from: number, to: number) => setFields((f) => { if (!f || from === to || from < 0 || to < 0) return f; const n = [...f]; const [m] = n.splice(from, 1); n.splice(to, 0, m); return n; });
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 max-w-2xl">
       <h2 className="text-lg font-semibold text-slate-800">📤 {t("ฟิลด์บังคับก่อนส่งงาน", "Required before submit")}</h2>
-      <p className="text-sm text-slate-500 mt-1 mb-4">{t("เลือกฟิลด์ของ Parent SKU ที่ต้องกรอกครบก่อน (ดึงทุกฟิลด์จากทะเบียนฟิลด์กลาง) — ระบบจะใส่ * และกดส่งงานไม่ได้จนกว่าจะกรอกครบ", "Pick Parent SKU fields that must be filled (all fields from the central field registry) — they get a * and submit is blocked until complete")}</p>
+      <p className="text-sm text-slate-500 mt-1 mb-4">{t("เลือกฟิลด์ของ Parent SKU ที่ต้องกรอกครบก่อน (ดึงทุกฟิลด์จากทะเบียนฟิลด์กลาง) — ระบบจะใส่ * และกดส่งงานไม่ได้จนกว่าจะกรอกครบ · ลากจัดลำดับ = ลำดับที่โชว์ในป๊อปอัปตรวจงาน", "Pick Parent SKU fields that must be filled — drag to set the order shown in the review popup")}</p>
       {fields === null ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : (
         <>
+          {/* ฟิลด์ที่เลือก (ลากเรียงลำดับได้) */}
+          {fields.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-medium text-slate-500 mb-1.5">{t("ฟิลด์ที่เลือก (ลากเรียงลำดับ):", "Selected (drag to reorder):")}</p>
+              <div className="space-y-1">
+                {fields.map((col, i) => (
+                  <div key={col} draggable
+                    onDragStart={() => { dragIdx.current = i; }}
+                    onDragOver={(e) => { e.preventDefault(); if (dragIdx.current !== null && overIdx !== i) setOverIdx(i); }}
+                    onDrop={(e) => { e.preventDefault(); if (dragIdx.current !== null) move(dragIdx.current, i); dragIdx.current = null; setOverIdx(null); }}
+                    onDragEnd={() => { dragIdx.current = null; setOverIdx(null); }}
+                    className={`flex items-center gap-2 text-sm rounded-md border px-2.5 py-1.5 bg-white cursor-grab active:cursor-grabbing ${overIdx === i ? "border-violet-400 ring-1 ring-violet-300" : "border-slate-200"}`}>
+                    <span className="text-slate-300 text-xs">⠿</span>
+                    <span className="w-5 text-[11px] text-slate-400">{i + 1}.</span>
+                    <span className="text-slate-700 flex-1">{labelOf(col)} <span className="text-[10px] text-slate-300">{col}</span></span>
+                    <button type="button" onClick={() => toggle(col)} title={t("เอาออก", "Remove")} className="text-slate-300 hover:text-rose-500 text-xs">✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* เพิ่มฟิลด์ (ติ๊ก) */}
+          <p className="text-xs font-medium text-slate-500 mb-1.5">{t("เพิ่มฟิลด์:", "Add fields:")}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
             {options.length === 0 && <p className="text-sm text-slate-400">{t("ไม่พบฟิลด์ Parent SKU", "No Parent SKU fields found")}</p>}
             {options.map((o) => (

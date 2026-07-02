@@ -6,6 +6,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { ERPInput, ERPTextarea } from "@/components/form";
 import { ERPModal } from "@/components/modal";
@@ -143,6 +144,55 @@ export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: st
   );
 }
 
+// ป๊อปอัป "ขอแก้" — เหตุผล + เลือกช่องที่ต้องแก้ (แทน window.prompt) · ลอยทับด้วย portal
+function ReviseModal({ fields, busy, onCancel, onConfirm }: {
+  fields?: { key: string; label: string }[];
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: (comment: string) => void;
+}) {
+  const t = useT();
+  const [reason, setReason] = useState("");
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const toggle = (k: string) => setChecked((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const picked = (fields ?? []).filter((f) => checked.has(f.key));
+  const submit = () => {
+    const parts: string[] = [];
+    if (picked.length) parts.push(`${t("ต้องแก้", "Fix")}: ${picked.map((f) => f.label).join(", ")}`);
+    if (reason.trim()) parts.push(reason.trim());
+    onConfirm(parts.join("\n"));
+  };
+  const node = (
+    <div className="fixed inset-0 z-[9998] bg-black/50 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <p className="text-base font-semibold text-slate-800">↩︎ {t("ขอแก้งานย่อย", "Request revision")}</p>
+        {fields && fields.length > 0 && (
+          <div>
+            <p className="text-xs text-slate-500 mb-1.5">{t("เลือกช่องที่ต้องแก้ (ถ้ามี)", "Pick fields to fix (optional)")}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-40 overflow-auto border border-slate-100 rounded-lg p-2">
+              {fields.map((f) => (
+                <label key={f.key} className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={checked.has(f.key)} onChange={() => toggle(f.key)} className="h-3.5 w-3.5 rounded border-slate-300 text-orange-500" />
+                  {f.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        <div>
+          <p className="text-xs text-slate-500 mb-1">{t("เหตุผล/รายละเอียดที่ต้องแก้", "Reason / details")}</p>
+          <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus placeholder={t("เช่น รูปเบลอ, คำอธิบายยังไม่ครบ...", "e.g. blurry image, incomplete description...")} className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 focus:ring-1 focus:ring-orange-300 outline-none resize-none" />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onCancel} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={submit} disabled={busy || (!reason.trim() && picked.length === 0)} className="h-9 px-4 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:opacity-50">↩︎ {t("ส่งขอแก้", "Send")}</button>
+        </div>
+      </div>
+    </div>
+  );
+  return typeof document !== "undefined" ? createPortal(node, document.body) : node;
+}
+
 // การ์ดงานย่อย — สถานะเป็นปุ่มกด (เริ่ม→ส่งงาน→อนุมัติ) + ผู้รับผิดชอบ + ไฟล์แนบ
 export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {}, hasDescSibling = false }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta; hasDescSibling?: boolean }) {
   const t = useT();
@@ -152,6 +202,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const [editOpen, setEditOpen] = useState(false); // ป๊อปอัปแก้ไขงานย่อย
   const [cardLb, setCardLb] = useState(-1); // ดูรูปบนการ์ดเต็มจอ
   const [busy, setBusy] = useState(false);
+  const [reviseOpen, setReviseOpen] = useState(false); // ป๊อปอัปขอแก้
   const attachCount = sub.attachments?.length ?? 0;
   const st = sub.status;
   // ชนิดงานย่อย + ความสามารถ (config ทับ registry · legacy ไม่มีค่า = อนุญาตหมด)
@@ -224,7 +275,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         {st === "submitted" && (canApprove
           ? <span className="shrink-0 inline-flex items-center gap-1">
               <button disabled={busy} onClick={() => patch({ status: "approved" })} className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 hover:bg-emerald-100 disabled:opacity-50">✓ {t("อนุมัติ", "Approve")}</button>
-              <button disabled={busy} onClick={async () => { const r = window.prompt(t("เหตุผลที่ขอแก้ (ส่งให้ผู้ทำ)", "Reason for revision")); if (r === null) return; await patch({ status: "revision_requested", comment: r }); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); }} title={t("ขอแก้", "Request revision")} className="text-xs text-orange-600 border border-orange-200 rounded-md px-1.5 py-0.5 hover:bg-orange-50 disabled:opacity-50">↩︎ {t("ขอแก้", "Revise")}</button>
+              <button disabled={busy} onClick={() => setReviseOpen(true)} title={t("ขอแก้", "Request revision")} className="text-xs text-orange-600 border border-orange-200 rounded-md px-1.5 py-0.5 hover:bg-orange-50 disabled:opacity-50">↩︎ {t("ขอแก้", "Revise")}</button>
               <button disabled={busy} onClick={async () => { const r = window.prompt(t("เหตุผลที่ยกเลิก", "Reason to cancel")); if (r === null) return; await patch({ status: "canceled", comment: r }); pushToast("info", t("ยกเลิกงานย่อยแล้ว", "Subtask canceled")); }} title={t("ยกเลิก", "Cancel")} className="text-xs text-slate-400 border border-slate-200 rounded-md px-1.5 py-0.5 hover:bg-slate-50 disabled:opacity-50">✕</button>
             </span>
           : <span className="shrink-0 text-xs font-medium text-amber-600">⏳ {t("รออนุมัติ", "Pending approval")}</span>)}
@@ -319,6 +370,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       <ImageLightbox images={cardImages} index={cardLb} onClose={() => setCardLb(-1)} onIndex={setCardLb} />
       {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} approveTarget={String(approveTarget ?? "none")} hasDescSibling={hasDescSibling} onClose={() => setWorkOpen(false)} />}
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
+      {reviseOpen && <ReviseModal busy={busy} onCancel={() => setReviseOpen(false)} onConfirm={async (c) => { setReviseOpen(false); await patch({ status: "revision_requested", comment: c }); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); }} />}
     </div>
   );
 }
@@ -795,8 +847,9 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
 
   // อนุมัติ/ขอแก้ ในป๊อปอัป (เฉพาะผู้มีสิทธิ์อนุมัติ + งานย่อยรออนุมัติ)
   const canReview = canApprove && sub.status === "submitted";
+  const [reviseOpen, setReviseOpen] = useState(false);
   const doApprove = async () => { setBusy(true); try { await updateSubtask(taskId, sub.id, { status: "approved" }); await reload(); pushToast("success", t("อนุมัติแล้ว", "Approved")); onClose(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
-  const doRevise = async () => { const r = window.prompt(t("เหตุผลที่ขอแก้ (ส่งให้ผู้ทำ)", "Reason for revision")); if (r === null) return; setBusy(true); try { await updateSubtask(taskId, sub.id, { status: "revision_requested", comment: r }); await reload(); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); onClose(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+  const doRevise = async (comment: string) => { setReviseOpen(false); setBusy(true); try { await updateSubtask(taskId, sub.id, { status: "revision_requested", comment }); await reload(); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); onClose(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
 
   return (
     <>
@@ -806,7 +859,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
           {canReview && <>
-            <button onClick={doRevise} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50">↩︎ {t("ขอแก้", "Revise")}</button>
+            <button onClick={() => setReviseOpen(true)} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50">↩︎ {t("ขอแก้", "Revise")}</button>
             <button onClick={doApprove} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">✓ {t("อนุมัติ", "Approve")}</button>
           </>}
           {canSubmit && <button onClick={submit} disabled={!canPressSubmit} className="h-9 px-4 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50">📤 {t("ส่งงาน (รออนุมัติ)", "Submit (pending approval)")}</button>}
@@ -968,6 +1021,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       )}
       {/* ดูรูปต่อ SKU เต็มจอ + เลื่อนดูได้ */}
       <ImageLightbox images={skuLb.images} index={skuLb.index} onClose={() => setSkuLb((s) => ({ ...s, index: -1 }))} onIndex={(i) => setSkuLb((s) => ({ ...s, index: i }))} />
+      {reviseOpen && <ReviseModal fields={requiredFields} busy={busy} onCancel={() => setReviseOpen(false)} onConfirm={doRevise} />}
     </>
   );
 }
