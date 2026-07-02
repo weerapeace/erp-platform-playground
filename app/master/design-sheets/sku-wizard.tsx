@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
 
 const FAMILIES: [string, string][] = [
   ["general", "ทั่วไป"], ["bag", "กระเป๋า"], ["belt", "เข็มขัด"], ["jewelry", "เครื่องประดับ"], ["spare", "อะไหล่"],
@@ -39,8 +40,11 @@ export function SkuWizard({
   const [pNameEn, setPNameEn] = useState("");
   const [family, setFamily] = useState("general");
   const [rows, setRows] = useState<SkuRow[]>([]);
-  const [parentExists, setParentExists] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [brands, setBrands] = useState<{ id: string; name: string; color: string | null }[]>([]);
+  const [bId, setBId] = useState("");                                // แบรนด์ที่เลือก (ค่าเริ่มต้น = แบรนด์ของใบงาน)
+  const [check, setCheck] = useState<ParentSkuCheck | null>(null);   // ผลเช็ครหัส Parent (ซ้ำ/ล่าสุด/ถัดไป/รายการที่มี)
+  const [codeOpen, setCodeOpen] = useState(false);                   // เปิดลิสต์รหัสที่มี
 
   // เปิดหน้าต่าง = เซ็ตค่าเริ่มต้นจากใบงาน
   useEffect(() => {
@@ -48,18 +52,28 @@ export function SkuWizard({
     setPCode(parentCodeDefault || "");
     setPName(sheetName || "");
     setPNameEn(""); setFamily("general");
+    setBId(brandId ?? ""); setCheck(null); setCodeOpen(false);
     setRows([{ code: "", color: "", name: sheetName || "", price: defaultPrice != null ? String(defaultPrice) : "" }]);
-  }, [open, parentCodeDefault, sheetName, defaultPrice]);
+  }, [open, parentCodeDefault, sheetName, defaultPrice, brandId]);
 
-  // เช็กว่ารหัส Parent มีอยู่แล้วไหม (เตือนว่าจะเพิ่มเข้า Parent เดิม)
+  // โหลดรายชื่อแบรนด์ (ให้เลือก/เปลี่ยนได้ในหน้านี้)
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    apiFetch("/api/brands").then((r) => r.json())
+      .then((j) => { if (alive && Array.isArray(j.data)) setBrands(j.data); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open]);
+
+  // เช็ครหัส Parent: ซ้ำ / ล่าสุด / ถัดไป / รายการที่มี — อ่าน j.data (ของเดิมอ่าน j เฉยๆ เลยไม่เคยเตือนซ้ำ)
   useEffect(() => {
     if (!open) return;
     const code = pCode.trim();
-    if (!code) { setParentExists(false); return; }
+    if (!code) { setCheck(null); return; }
     let alive = true;
     const t = setTimeout(() => {
       apiFetch(`/api/design-sheets/parent-sku-check?code=${encodeURIComponent(code)}`)
-        .then((r) => r.json()).then((j) => { if (alive) setParentExists(!!j?.exists); }).catch(() => {});
+        .then((r) => r.json()).then((j) => { if (alive) setCheck((j?.data ?? null) as ParentSkuCheck | null); }).catch(() => {});
     }, 300);
     return () => { alive = false; clearTimeout(t); };
   }, [pCode, open]);
@@ -78,7 +92,7 @@ export function SkuWizard({
       const res = await apiFetch(`/api/design-sheets/${sheetId}/create-skus`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          parent: { code: pCode.trim(), name_th: pName.trim(), name_en: pNameEn.trim() || null, product_family: family, brand_id: brandId },
+          parent: { code: pCode.trim(), name_th: pName.trim(), name_en: pNameEn.trim() || null, product_family: family, brand_id: bId || null },
           skus: valid.map((r) => ({
             code: r.code.trim(), color: r.color.trim() || null, name_th: r.name.trim() || pName.trim(),
             standard_price: r.price === "" ? null : Number(r.price),
@@ -123,11 +137,48 @@ export function SkuWizard({
               <span className="text-[10px] text-slate-300">(สร้างทีละตัว)</span>
             </div>
           )}
+          {/* รหัส Parent SKU — พิมพ์แล้วเด้งลิสต์รหัสที่มี + ตัวช่วยเลข + เตือนซ้ำ */}
+          <label className="block relative">
+            <span className="text-xs text-slate-500">รหัส Parent SKU *</span>
+            <input value={pCode} onChange={(e) => { setPCode(e.target.value); setCodeOpen(true); }}
+              onFocus={() => setCodeOpen(true)} onBlur={() => setTimeout(() => setCodeOpen(false), 150)}
+              placeholder="เช่น CTL085" autoComplete="off"
+              className={`mt-0.5 w-full h-9 px-2 text-sm font-mono border rounded-lg focus:outline-none focus:ring-2 ${
+                check?.exists ? "border-rose-400 bg-rose-50 focus:ring-rose-400"
+                  : check?.skipped ? "border-amber-300 focus:ring-amber-400"
+                  : "border-slate-200 focus:ring-blue-500"}`} />
+            {codeOpen && (check?.matches?.length ?? 0) > 0 && (
+              <div className="absolute z-20 mt-1 w-full max-h-44 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                <div className="px-2 py-1 text-[10px] text-slate-400 border-b border-slate-100">รหัสที่มีอยู่แล้วในกลุ่มนี้ (คลิกเพื่อดู)</div>
+                {check!.matches.map((c) => {
+                  const dup = c.toUpperCase() === pCode.trim().toUpperCase();
+                  return (
+                    <button key={c} type="button" onMouseDown={(e) => { e.preventDefault(); setPCode(c); setCodeOpen(false); }}
+                      className={`block w-full px-2 py-1 text-left text-xs font-mono hover:bg-blue-50 ${dup ? "bg-rose-50 text-rose-600" : "text-slate-600"}`}>
+                      {c}{dup ? " · มีแล้ว" : ""}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </label>
+          <div className="text-[11px] min-h-[16px]">
+            {check?.exists ? <span className="text-rose-600 font-medium">✕ รหัสนี้มีอยู่แล้ว — SKU ลูกที่สร้างจะเข้า Parent เดิม (ไม่สร้าง Parent ซ้ำ)</span>
+              : check?.skipped ? <span className="text-amber-600">⚠ ตั้งข้ามเลข — ล่าสุดคือ {check.latest} (ตั้งได้ แต่เช็คว่าตั้งใจ)</span>
+              : check?.latest ? <span className="text-slate-400">ล่าสุด: <b>{check.latest}</b>{check.suggested ? <> · ถัดไป: <b className="text-emerald-600">{check.suggested}</b></> : null}{check.max_code ? <> · สูงสุด: {check.max_code}</> : null}</span>
+              : null}
+            {check?.suggested && !check.exists && (
+              <button type="button" onClick={() => setPCode(check.suggested!)} className="ml-2 text-blue-600 hover:underline">ใช้ {check.suggested}</button>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
-              <span className="text-xs text-slate-500">รหัส Parent SKU *</span>
-              <input value={pCode} onChange={(e) => setPCode(e.target.value)} placeholder="เช่น CTL085"
-                className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <span className="text-xs text-slate-500">แบรนด์</span>
+              <select value={bId} onChange={(e) => setBId(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                <option value="">— ไม่ระบุ —</option>
+                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
             </label>
             <label className="block">
               <span className="text-xs text-slate-500">หมวดสินค้า</span>
@@ -144,9 +195,6 @@ export function SkuWizard({
               <input value={pNameEn} onChange={(e) => setPNameEn(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </label>
           </div>
-          {parentExists && (
-            <p className="text-xs text-amber-600">⚠ รหัสนี้มีอยู่แล้ว — SKU ลูกที่สร้างจะถูกเพิ่มเข้า Parent เดิม (ไม่สร้าง Parent ซ้ำ)</p>
-          )}
         </div>
 
         {/* ---- SKU ลูก ---- */}
