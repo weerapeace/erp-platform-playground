@@ -1699,7 +1699,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                         <p className="text-sm text-slate-700 whitespace-pre-wrap">{c.body}</p>
                         {c.images.length > 0 && (
                           <div className="flex gap-1 mt-1.5 flex-wrap">
-                            {c.images.map((u, xi) => <ImageThumbnail key={xi} url={u} size={44} />)}
+                            {c.images.map((u, xi) => <ImageThumbnail key={xi} url={u} size={44} enlargeable />)}
                           </div>
                         )}
                       </div>
