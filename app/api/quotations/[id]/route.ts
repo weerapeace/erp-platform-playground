@@ -80,7 +80,7 @@ export async function PATCH(
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_quote_update", {
-    p_id: id, p_header: body.header ?? {}, p_lines: body.lines ?? null, p_actor: body.actor ?? null,
+    p_id: id, p_header: body.header ?? null, p_lines: body.lines ?? null, p_actor: body.actor ?? null,   // null = ไม่แก้หัวใบ (ส่ง {} ชนบั๊ก v_cust ในฟังก์ชัน)
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ id: data, error: null });

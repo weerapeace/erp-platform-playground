@@ -92,7 +92,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   })), newLine];
 
   const { data, error } = await client.rpc("erp_playground_quote_update", {
-    p_id: target, p_header: {}, p_lines: lines, p_actor: actor,
+    p_id: target, p_header: null, p_lines: lines, p_actor: actor,   // null = ไม่แก้หัวใบ (ส่ง {} จะไปชนบั๊ก v_cust ในฟังก์ชัน)
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   await writeAudit(supabaseAdmin(), {
