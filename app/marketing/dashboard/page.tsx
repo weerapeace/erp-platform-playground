@@ -4,7 +4,9 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
-import type { OrderStatusKey, StatusData, HourlyPoint } from "@/lib/marketing/mock-data";
+import { useAuth } from "@/components/auth";
+import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
+import type { OrderStatusKey, StatusData, HourlyPoint, ProductRow } from "@/lib/marketing/mock-data";
 
 /* ---------- format helpers ---------- */
 const nf = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 0 });
@@ -39,6 +41,8 @@ export default function MarketingDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [status, setStatus] = useState<OrderStatusKey>("paid");
+  const { can } = useAuth();
+  const canMap = can("marketing.mapping.manage" as never);
 
   const load = useCallback(async (opts?: { date?: string; shop?: string }) => {
     setLoading(true);
@@ -187,7 +191,12 @@ export default function MarketingDashboardPage() {
                 <TrafficCard s={s} />
               </div>
               <div className="lg:col-span-3">
-                <TopProductsTable s={s} />
+                <TopProductsTable
+                  s={s}
+                  platform={data!.platform}
+                  canMap={canMap}
+                  onChanged={() => load({ date: data!.date ?? undefined, shop: data!.shop })}
+                />
               </div>
             </div>
 
@@ -375,9 +384,59 @@ function TrafficCard({ s }: { s: StatusData }) {
   );
 }
 
-function TopProductsTable({ s }: { s: StatusData }) {
+function TopProductsTable({
+  s,
+  platform,
+  canMap,
+  onChanged,
+}: {
+  s: StatusData;
+  platform: string;
+  canMap: boolean;
+  onChanged: () => void;
+}) {
   const products = [...s.products].sort((a, b) => b.sales - a.sales);
   const maxShare = Math.max(1, ...products.map((p) => p.sales_share));
+  const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const mappedCount = products.filter((p) => p.internal_sku).length;
+
+  async function link(item: ProductRow, v: SkuPickerValue | null) {
+    if (!v) return;
+    setSaving(true);
+    try {
+      const r = await apiFetch("/api/marketing/mapping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform,
+          marketplace_item_id: item.marketplace_item_id,
+          internal_sku: v.code,
+          listing_name: item.product_name,
+        }),
+      });
+      if (r.ok) {
+        setLinkingId(null);
+        onChanged();
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function unlink(item: ProductRow) {
+    setSaving(true);
+    try {
+      const r = await apiFetch(
+        `/api/marketing/mapping?platform=${encodeURIComponent(platform)}&item=${encodeURIComponent(item.marketplace_item_id)}`,
+        { method: "DELETE" },
+      );
+      if (r.ok) onChanged();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (!products.length) {
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-400 h-full">
@@ -394,30 +453,63 @@ function TopProductsTable({ s }: { s: StatusData }) {
           <p className="text-xs text-slate-400 mt-0.5">เรียงตามยอดขาย</p>
         </div>
         <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-500 px-2 py-0.5 text-[10px] font-medium">
-          รหัส Shopee (ยังไม่ผูก SKU ระบบ)
+          ผูก SKU ระบบแล้ว {mappedCount}/{products.length}
         </span>
       </div>
       <div className="space-y-2.5">
         {products.map((p, i) => (
-          <div key={p.marketplace_item_id} className="flex items-center gap-3 rounded-lg border border-slate-100 hover:border-slate-200 px-3 py-2.5 transition-colors">
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-50 text-blue-700 text-xs font-bold flex items-center justify-center">{i + 1}</div>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium text-slate-700 truncate" title={p.product_name}>
-                {p.product_name}
+          <div key={p.marketplace_item_id} className="rounded-lg border border-slate-100 hover:border-slate-200 px-3 py-2.5 transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-50 text-blue-700 text-xs font-bold flex items-center justify-center">{i + 1}</div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-medium text-slate-700 truncate" title={p.product_name}>
+                  {p.product_name}
+                </div>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="text-[10px] text-slate-400 tabular-nums">#{p.marketplace_item_id}</span>
+                  {p.internal_sku ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 px-1.5 py-0.5 text-[10px] font-medium">
+                      🔗 {p.internal_sku}
+                      {p.erp_name ? <span className="text-emerald-500 font-normal max-w-[120px] truncate">· {p.erp_name}</span> : null}
+                      {canMap ? (
+                        <button
+                          onClick={() => unlink(p)}
+                          disabled={saving}
+                          title="เลิกผูก"
+                          className="ml-0.5 text-emerald-400 hover:text-red-500 disabled:opacity-40"
+                        >
+                          ✕
+                        </button>
+                      ) : null}
+                    </span>
+                  ) : canMap ? (
+                    <button
+                      onClick={() => setLinkingId(linkingId === p.marketplace_item_id ? null : p.marketplace_item_id)}
+                      className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-1.5 py-0.5 text-[10px] font-medium hover:bg-amber-100"
+                    >
+                      🔗 ผูกสินค้าระบบ
+                    </button>
+                  ) : (
+                    <span className="rounded-full bg-slate-100 text-slate-400 px-1.5 py-0.5 text-[10px]">ยังไม่ผูก</span>
+                  )}
+                  <div className="h-1.5 flex-1 min-w-[40px] max-w-[120px] rounded-full bg-slate-100 overflow-hidden">
+                    <div className="h-full rounded-full bg-blue-500" style={{ width: `${(p.sales_share / maxShare) * 100}%` }} />
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-[10px] text-slate-400 tabular-nums">#{p.marketplace_item_id}</span>
-                <div className="h-1.5 flex-1 max-w-[120px] rounded-full bg-slate-100 overflow-hidden">
-                  <div className="h-full rounded-full bg-blue-500" style={{ width: `${(p.sales_share / maxShare) * 100}%` }} />
+              <div className="flex-shrink-0 text-right">
+                <div className="text-sm font-semibold text-slate-800 tabular-nums">{baht(p.sales)}</div>
+                <div className="text-[10px] text-slate-400 tabular-nums">
+                  {nf(p.orders)} ออเดอร์ · ซื้อ {pct(p.conversion_rate)}
                 </div>
               </div>
             </div>
-            <div className="flex-shrink-0 text-right">
-              <div className="text-sm font-semibold text-slate-800 tabular-nums">{baht(p.sales)}</div>
-              <div className="text-[10px] text-slate-400 tabular-nums">
-                {nf(p.orders)} ออเดอร์ · ซื้อ {pct(p.conversion_rate)}
+            {linkingId === p.marketplace_item_id && canMap ? (
+              <div className="mt-2 pl-9">
+                <div className="text-[11px] text-slate-500 mb-1">เลือก SKU ในระบบเพื่อผูกกับสินค้านี้:</div>
+                <SkuPicker value={null} onChange={(v) => link(p, v)} placeholder="ค้นหา SKU ระบบ..." />
               </div>
-            </div>
+            ) : null}
           </div>
         ))}
       </div>

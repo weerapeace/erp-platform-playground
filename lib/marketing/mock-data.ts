@@ -48,6 +48,9 @@ export interface ProductRow {
   conversion_rate: number;
   aov: number;
   buyers: number;
+  // ผูกกับ SKU ในระบบ (เติมโดย dashboard API จาก marketplace_sku_mappings + skus_v2)
+  internal_sku?: string | null;
+  erp_name?: string | null;
 }
 
 export interface TrafficBreakdown {

@@ -132,6 +132,37 @@ export async function GET(request: NextRequest) {
     };
   }
 
+  // เติมการผูก SKU ระบบ (marketplace_sku_mappings → internal_sku → skus_v2.name_th)
+  const itemIds = Array.from(
+    new Set(Object.values(byStatus).flatMap((sd) => (sd?.products ?? []).map((p) => p.marketplace_item_id))),
+  );
+  if (itemIds.length) {
+    const { data: maps } = await admin
+      .from("marketplace_sku_mappings")
+      .select("marketplace_sku, internal_sku")
+      .eq("platform", platform)
+      .in("marketplace_sku", itemIds);
+    const itemToSku = new Map<string, string>();
+    for (const m of (maps ?? []) as Row[]) {
+      const ms = String(m.marketplace_sku ?? "");
+      const isku = String(m.internal_sku ?? "");
+      if (ms && isku) itemToSku.set(ms, isku);
+    }
+    const codes = Array.from(new Set(itemToSku.values()));
+    const codeToName = new Map<string, string>();
+    if (codes.length) {
+      const { data: skus } = await admin.from("skus_v2").select("code, name_th").in("code", codes);
+      for (const sk of (skus ?? []) as Row[]) codeToName.set(String(sk.code), String(sk.name_th ?? ""));
+    }
+    for (const sd of Object.values(byStatus)) {
+      for (const p of sd?.products ?? []) {
+        const isku = itemToSku.get(p.marketplace_item_id) ?? null;
+        p.internal_sku = isku;
+        p.erp_name = isku ? codeToName.get(isku) ?? null : null;
+      }
+    }
+  }
+
   return NextResponse.json({
     data: { platform, shop, date, byStatus, meta: { availableDates, availableShops } },
     error: null,
