@@ -451,8 +451,8 @@ function SubmitRequiredManager({ showToast }: { showToast: (m: string) => void }
               <div className="space-y-1">
                 {fields.map((col, i) => (
                   <div key={col} draggable
-                    onDragStart={() => { dragIdx.current = i; }}
-                    onDragOver={(e) => { e.preventDefault(); if (dragIdx.current !== null && overIdx !== i) setOverIdx(i); }}
+                    onDragStart={(e) => { dragIdx.current = i; e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", col); } catch { /* noop */ } }}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragIdx.current !== null && overIdx !== i) setOverIdx(i); }}
                     onDrop={(e) => { e.preventDefault(); if (dragIdx.current !== null) move(dragIdx.current, i); dragIdx.current = null; setOverIdx(null); }}
                     onDragEnd={() => { dragIdx.current = null; setOverIdx(null); }}
                     className={`flex items-center gap-2 text-sm rounded-md border px-2.5 py-1.5 bg-white cursor-grab active:cursor-grabbing ${overIdx === i ? "border-violet-400 ring-1 ring-violet-300" : "border-slate-200"}`}>

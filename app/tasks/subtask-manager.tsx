@@ -881,7 +881,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                     {ok ? <span className="text-[10px] text-emerald-600 ml-auto">✓ {t("ครบ", "Complete")}</span> : <span className="text-[10px] text-rose-600 ml-auto">⚠ {t("ยังไม่ครบ", "Incomplete")}</span>}
                   </div>
                   {!ok && <p className="text-xs text-rose-600">{t("ต้องกรอก", "Required")}: {p.missing.map((m) => `${m}*`).join(", ")}</p>}
-                  {p.introduction && <p className="text-xs text-slate-500 whitespace-pre-wrap">{p.introduction}</p>}
+                  {/* intro โชว์บนสุดเฉพาะตอน "ไม่ได้" ตั้งเป็นฟิลด์บังคับ — ถ้าเป็นฟิลด์บังคับจะโชว์ตามลำดับที่จัดด้านล่างแทน (กันโชว์ซ้ำ/ผิดลำดับ) */}
+                  {p.introduction && !(p.fields ?? []).some((f) => f.key === "introduction") && <p className="text-xs text-slate-500 whitespace-pre-wrap">{p.introduction}</p>}
                   {/* ทุกช่องบังคับ + ค่าจริง (โชว์เต็ม ไม่ตัด) + ปุ่มคัดลอก */}
                   {(p.fields && p.fields.length > 0
                     ? p.fields
