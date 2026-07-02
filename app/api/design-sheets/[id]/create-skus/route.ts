@@ -21,9 +21,9 @@ import { friendlyDbError } from "../../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type SkuInput = { code?: string; name_th?: string; color?: string; standard_price?: number | null; list_price?: number | null };
+type SkuInput = { code?: string; name_th?: string; color?: string; standard_price?: number | null; list_price?: number | null; cover_image_r2_key?: string | null };
 type Body = {
-  parent?: { code?: string; name_th?: string; name_en?: string; product_family?: string; brand_id?: string | null };
+  parent?: { code?: string; name_th?: string; name_en?: string; product_family?: string; brand_id?: string | null; cover_image_r2_key?: string | null };
   skus?: SkuInput[];
 };
 
@@ -62,6 +62,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       code: pCode, name_th: pName, name_en: body.parent?.name_en?.trim() || null,
       product_family: body.parent?.product_family || "general",
       brand_id: body.parent?.brand_id || null, is_active: true,
+      cover_image_r2_key: body.parent?.cover_image_r2_key || null,
     }).select("id").single();
     if (pErr || !newPar) return NextResponse.json({ error: friendlyDbError(pErr?.message ?? "สร้าง Parent SKU ไม่สำเร็จ") }, { status: 400 });
     parentId = newPar.id as string; parentCreated = true;
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     parent_sku_id: parentId, color: s.color?.trim() || null,
     standard_price: s.standard_price != null ? Number(s.standard_price) : null,
     list_price: s.list_price != null ? Number(s.list_price) : null,
+    cover_image_r2_key: s.cover_image_r2_key || null,
     is_active: true, sale_ok: true, purchase_ok: true,
   }));
   const { data: inserted, error: sErr } = await admin.from("skus_v2").insert(rows).select("id, code");
