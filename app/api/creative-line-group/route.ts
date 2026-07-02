@@ -23,8 +23,8 @@ async function readCfg(admin: Admin): Promise<{ id?: string; cfg: LineCfg }> {
 }
 
 // ฟิลด์ที่ระบบเติมให้ (label/alias) นอกเหนือคอลัมน์จริง — ต่อท้ายให้เลือกได้ด้วย
-const TASK_COMPUTED = ["task", "assignees", "due", "brand_label", "campaign_label", "assignee_label", "reviewer_label", "approver_label", "assigned_by_label", "sku_code", "sku_name", "sku_color", "sku_price", "parent_sku_code", "parent_sku_name"];
-const SUB_COMPUTED = ["subtask", "task", "submitter", "task_no"];
+const TASK_COMPUTED = ["task", "assignees", "due", "link", "brand_label", "campaign_label", "assignee_label", "reviewer_label", "approver_label", "assigned_by_label", "sku_code", "sku_name", "sku_color", "sku_price", "parent_sku_code", "parent_sku_name"];
+const SUB_COMPUTED = ["subtask", "task", "submitter", "task_no", "link"];
 const HIDE = new Set(["id", "config", "image_sync_targets", "reference_html"]);   // ฟิลด์ที่ไม่เหมาะใส่ข้อความ
 
 export async function GET(request: NextRequest): Promise<NextResponse> {

@@ -10,15 +10,15 @@ export const LINE_TEMPLATES: LineTemplateDef[] = [
     key: "new_task",
     label: "งานใหม่ / มอบงาน",
     labelEn: "New task",
-    defaultTpl: "🆕 งานใหม่ {task_no}\n• {title}\n👤 ผู้รับผิดชอบ: {assignees}\n🗓 กำหนดส่ง: {due}",
-    vars: ["task_no", "title", "assignees", "due"],
+    defaultTpl: "🆕 งานใหม่ {task_no}\n• {title}\n👤 ผู้รับผิดชอบ: {assignees}\n🗓 กำหนดส่ง: {due}\n🔗 เปิดงาน: {link}",
+    vars: ["task_no", "title", "assignees", "due", "link"],
   },
   {
     key: "subtask_submitted",
     label: "งานย่อยส่งมารอตรวจ",
     labelEn: "Subtask submitted for review",
-    defaultTpl: "🟡 งานย่อยรอตรวจ/อนุมัติ\n• {subtask}\n📋 {task}\n👤 ส่งโดย: {submitter}",
-    vars: ["subtask", "task", "submitter"],
+    defaultTpl: "🟡 งานย่อยรอตรวจ/อนุมัติ\n• {subtask}\n📋 {task}\n👤 ส่งโดย: {submitter}\n🔗 เปิดงาน: {link}",
+    vars: ["subtask", "task", "submitter", "link"],
   },
 ];
 

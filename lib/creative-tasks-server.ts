@@ -47,6 +47,17 @@ export async function pushTasksLineTpl(admin: Admin, eventKey: string, vars: Rec
   } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
 }
 
+/** โดเมนแอปหลัก (ตัด / ท้าย) — จาก env, fallback prod บน Vercel · ใช้ทำลิงก์ในแจ้งเตือน/LINE */
+export function appBaseUrl(): string {
+  return (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "https://erp-platform-playground.vercel.app").replace(/\/$/, "");
+}
+
+/** ลิงก์เปิดหน้ารายละเอียดงาน (deep link /tasks?task=<id>) — ใช้เป็นตัวแปร {link} ในแม่แบบ LINE */
+export function taskLink(taskId: string | null | undefined): string {
+  const base = appBaseUrl();
+  return taskId ? `${base}/tasks?task=${taskId}` : `${base}/tasks`;
+}
+
 /** เลขที่งาน CT-YYYYMM-#### (นับตามเดือน) */
 export async function nextTaskNo(admin: Admin): Promise<string> {
   const now = new Date();

@@ -391,7 +391,16 @@ function ReplaceMapper({ tk, slots, images, replaceMap, setReplace, tt, onRestor
   if (!images.length) return null;
   return (
     <div className="mt-2 border-t border-amber-100 pt-2">
-      <p className="text-[11px] text-slate-500 mb-1">🔄 {tt("จับคู่รูปที่ส่ง → แทนรูปเดิม (เว้น = เพิ่มเป็นรูปใหม่)", "Map submitted → replace existing (blank = add new)")}</p>
+      <p className="text-[11px] text-slate-500 mb-1 flex items-center gap-1">
+        🔄 {tt("จับคู่รูปที่ส่ง → แทนรูปเดิม (เว้น = เพิ่มเป็นรูปใหม่)", "Map submitted → replace existing (blank = add new)")}
+        <span
+          className="cursor-help text-slate-400 hover:text-violet-600"
+          title={tt(
+            "รูปที่ส่งแต่ละใบ เลือกได้ว่าจะ:\n• เพิ่มใหม่ = เพิ่มเข้าแกลเลอรีสินค้าเป็นรูปเพิ่ม (ค่าเริ่มต้น)\n• แทน #N = เอาไปทับรูปเดิมช่องที่ N (แถว 'รูปเดิมในสินค้า' ด้านล่างมีเลขกำกับ)\nรูปเดิมที่ถูกแทนจะถูกเก็บเป็นเวอร์ชันเก่า กดปุ่ม 🕘 เพื่อดู/กู้คืนได้\nการเปลี่ยนจะมีผลตอน 'อนุมัติ' งานย่อยเท่านั้น",
+            "For each submitted image, choose:\n• Add new = append to the product gallery (default)\n• → #N = overwrite existing image slot N (numbered in 'Current gallery' below)\nReplaced images are kept as old versions — tap 🕘 to view/restore.\nChanges apply only when the subtask is approved.",
+          )}
+        >ⓘ</span>
+      </p>
       {slots.length === 0 ? (
         <p className="text-[10px] text-slate-400 italic">{tt("ยังไม่มีรูปในแกลเลอรี — รูปที่ส่งจะเพิ่มเป็นรูปใหม่", "No gallery yet — submitted images will be added as new")}</p>
       ) : (<>

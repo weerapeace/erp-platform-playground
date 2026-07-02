@@ -14,7 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
-import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser, setTaskReviewers, pushTasksLineTpl } from "@/lib/creative-tasks-server";
+import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser, setTaskReviewers, pushTasksLineTpl, taskLink } from "@/lib/creative-tasks-server";
 import { SELECT, flattenTask } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -210,7 +210,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const empMap = await employeeLabelMap(admin, [f.assignee_id, f.reviewer_id, f.approver_id, f.assigned_by_id, ...taskAssignees].filter(Boolean) as string[]);
       const flat = flattenTask(f, empMap);
       const names = taskAssignees.length ? taskAssignees.map((id) => empMap.get(id)).filter(Boolean).join(", ") : (flat.assignee_label as string) ?? "";
-      await pushTasksLineTpl(admin, "new_task", { ...flat, assignees: names, due: flat.due_date, task: `${taskNo} ${title}`.trim() });
+      await pushTasksLineTpl(admin, "new_task", { ...flat, assignees: names, due: flat.due_date, task: `${taskNo} ${title}`.trim(), link: taskLink(String(row.id)) });
     }
   } catch { /* noop */ }
 
