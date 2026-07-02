@@ -74,6 +74,12 @@ export function SubtaskManager({ taskId, pushToast, canApprove = false, canManag
   // ถ้าไม่มีงานย่อยของฉันเลย → เด้งไปแท็บทั้งหมดให้อัตโนมัติ (ครั้งแรกที่โหลดเสร็จ)
   useEffect(() => { if (!loading && subs.length > 0 && mine.length === 0) setTab("all"); }, [loading, subs.length, mine.length]);
   const shown = tab === "mine" ? mine : subs;
+  // มีงานย่อยชนิด "รูปคำอธิบาย" (จัดการ Description) อยู่แล้วไหม → งานอื่นจะได้ไม่โชว์ตัวเลือก Description ซ้ำ
+  const hasDescSubtask = useMemo(() => subs.some((s) => {
+    const cfg = (s.config ?? {}) as Record<string, unknown>;
+    const tgt = cfg.approve_target ?? (s.subtask_type ? typeMeta[s.subtask_type]?.approve_target : undefined) ?? "none";
+    return tgt === "description_media";
+  }), [subs, typeMeta]);
 
   return (
     <div>
@@ -88,7 +94,7 @@ export function SubtaskManager({ taskId, pushToast, canApprove = false, canManag
       </div>
       {loading ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : (
         <div className="space-y-2">
-          {shown.length === 0 ? <p className="text-sm text-slate-400 italic">{tab === "mine" ? t("ไม่มีงานย่อยที่มอบให้คุณ", "No subtasks assigned to you") : t("ยังไม่มีงานย่อย", "No subtasks yet")}</p> : shown.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} canApprove={canApprove} canManageAssignees={canManageAssignees} typeMeta={typeMeta} />)}
+          {shown.length === 0 ? <p className="text-sm text-slate-400 italic">{tab === "mine" ? t("ไม่มีงานย่อยที่มอบให้คุณ", "No subtasks assigned to you") : t("ยังไม่มีงานย่อย", "No subtasks yet")}</p> : shown.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} canApprove={canApprove} canManageAssignees={canManageAssignees} typeMeta={typeMeta} hasDescSibling={hasDescSubtask} />)}
         </div>
       )}
       <AddSubtaskForm onAdd={async (body) => { await addSubtask(taskId, body); await reload(); }} pushToast={pushToast} />
@@ -138,7 +144,7 @@ export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: st
 }
 
 // การ์ดงานย่อย — สถานะเป็นปุ่มกด (เริ่ม→ส่งงาน→อนุมัติ) + ผู้รับผิดชอบ + ไฟล์แนบ
-export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {} }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta }) {
+export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {}, hasDescSibling = false }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta; hasDescSibling?: boolean }) {
   const t = useT();
   const [open, setOpen] = useState(true);   // กาง (ขยาย) งานย่อยเป็นค่าเริ่มต้น
   const [workOpen, setWorkOpen] = useState(false); // ป๊อปอัปแนบงาน/ส่งงาน
@@ -300,7 +306,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       )}
       {/* ดูรูปบนการ์ดเต็มจอ + เลื่อน (รูปงาน + รูปเข้าสินค้า) */}
       <ImageLightbox images={cardImages} index={cardLb} onClose={() => setCardLb(-1)} onIndex={setCardLb} />
-      {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} approveTarget={String(approveTarget ?? "none")} onClose={() => setWorkOpen(false)} />}
+      {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} approveTarget={String(approveTarget ?? "none")} hasDescSibling={hasDescSibling} onClose={() => setWorkOpen(false)} />}
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
     </div>
   );
@@ -515,9 +521,9 @@ function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, onAddDra
   );
 }
 
-function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks, canSubmit, platformConfirm, canApprove = false, approveTarget = "none", onClose }: {
+function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks, canSubmit, platformConfirm, canApprove = false, approveTarget = "none", hasDescSibling = false, onClose }: {
   sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn;
-  showImages: boolean; showLinks: boolean; canSubmit: boolean; platformConfirm: boolean; canApprove?: boolean; approveTarget?: string; onClose: () => void;
+  showImages: boolean; showLinks: boolean; canSubmit: boolean; platformConfirm: boolean; canApprove?: boolean; approveTarget?: string; hasDescSibling?: boolean; onClose: () => void;
 }) {
   const t = useT();
   const { can } = useAuth();
@@ -748,6 +754,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const hasProductTarget = syncParentIds.size > 0 || syncSkuIds.size > 0;
   const needProductTarget = showImages && !platformConfirm && !noParent;
   const isDescTask = approveTarget === "description_media";                 // งานรูปคำอธิบาย → โชว์แค่ Description
+  const hideDescOption = hasDescSibling && !isDescTask;                     // มีงานย่อยรูปคำอธิบายแยกอยู่แล้ว → งานนี้ไม่ต้องโชว์ตัวเลือก Description ซ้ำ
   const hasParentTarget = !noParent && displayParents.length > 0;           // มีสินค้าปลายทาง → ซ่อนกล่อง "รูปแนบงาน" บน
   const anyDraft = Object.values(draftImages).some((a) => a.length > 0);    // มีรูปในกล่องสินค้าไหม
   const hasWork = attachCount > 0 || anyDraft;                              // แนบรูป/ลิงก์ หรือหย่อนรูปในกล่องสินค้าก็นับ
@@ -874,13 +881,14 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                         <button type="button" onClick={() => setEditParentId(p.id)} title={t("แก้/เพิ่ม SKU ในตัวแก้สินค้า", "Manage SKUs in product editor")} className="text-[11px] text-violet-600 hover:underline shrink-0">✏️ {t("แก้สินค้า", "Edit product")}</button>
                       </div>
                       {/* กล่องรูปของ Parent SKU นี้ — แกลเลอรี + (ติ๊ก) Description · งานรูปคำอธิบาย = โชว์แค่ Description */}
-                      {pon && (() => { const ptk = `parent:${p.id}`; const descOpen = isDescTask || (descBoxOpen[ptk] ?? (draftFor(ptk, "description").length > 0)); return (
+                      {pon && (() => { const ptk = `parent:${p.id}`; const descOpen = isDescTask || (!hideDescOption && (descBoxOpen[ptk] ?? (draftFor(ptk, "description").length > 0))); return (
                         <div className="pl-6 space-y-1.5">
                           {!isDescTask && <ProductImageBox tk={ptk} label={p.code} mode="gallery" refSlots={galleryRef(ptk)} draft={draftFor(ptk, "gallery")} uploading={uploadingTk === `gallery#${ptk}`} onAddDraft={(f) => void addDraftImages(ptk, f, "gallery")} onRemoveDraft={(k) => removeDraftImage(ptk, k)} onReorder={(a, b) => reorderDraft(ptk, a, b)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `gallery#${ptk}`} onApplyNow={() => void applyNow(ptk, "gallery")} tt={t} onRestored={() => refreshGallery(ptk)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />}
-                          {!isDescTask && <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
+                          {!isDescTask && !hideDescOption && <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
                             <input type="checkbox" checked={descOpen} onChange={(e) => setDescBoxOpen((m) => ({ ...m, [ptk]: e.target.checked }))} className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 cursor-pointer" />
                             📂 {t("ส่งเข้า Description ด้วย", "Also send to Description")}
                           </label>}
+                          {!isDescTask && hideDescOption && <p className="text-[10px] text-slate-400 italic">📂 {t("Description จัดการที่งานย่อย \"รูปคำอธิบาย\" แยกแล้ว", "Description handled by the separate description-image subtask")}</p>}
                           {descOpen && <ProductImageBox tk={ptk} label={p.code} mode="description" refSlots={descGalleries[ptk] ?? []} draft={draftFor(ptk, "description")} uploading={uploadingTk === `description#${ptk}`} onAddDraft={(f) => void addDraftImages(ptk, f, "description")} onRemoveDraft={(k) => removeDraftImage(ptk, k)} onReorder={(a, b) => reorderDraft(ptk, a, b)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `description#${ptk}`} onApplyNow={() => void applyNow(ptk, "description")} tt={t} onRestored={() => refreshDescGallery(p.id)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />}
                         </div>
                       ); })()}
