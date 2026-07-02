@@ -165,7 +165,9 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
     const ks = (keys as string[]).filter(Boolean); if (!ks.length) continue;
     productGroups.push({ key: tk, label: ist?.product_labels?.[tk] || (tk.startsWith("parent:") ? "Parent SKU" : "SKU"), keys: ks });
   }
-  for (const [sid, keys] of Object.entries(ist?.sku_images ?? {})) { const ks = (keys as string[]).filter(Boolean); if (ks.length) productGroups.push({ key: `legacy:${sid}`, label: "SKU", keys: ks }); }
+  for (const [sid, keys] of Object.entries(ist?.sku_images ?? {})) { const ks = (keys as string[]).filter(Boolean); if (ks.length) productGroups.push({ key: `legacy:${sid}`, label: ist?.product_labels?.[`sku:${sid}`] || "SKU", keys: ks }); }
+  // เรียง Parent ก่อน แล้วตามด้วย SKU (รูปในกลุ่มเรียงตามลำดับที่จัดไว้อยู่แล้ว)
+  productGroups.sort((a, b) => (a.key.startsWith("parent:") ? 0 : 1) - (b.key.startsWith("parent:") ? 0 : 1));
   const skuImgKeys = productGroups.flatMap((g) => g.keys);   // แบน ๆ ไว้ทำ lightbox/ดัชนี
   // รวมรูปทั้งหมดบนการ์ด (รูปงาน + รูปเข้าสินค้า) ไว้กดดูเต็มจอ/เลื่อน
   const cardImages: LightboxImage[] = [
@@ -464,6 +466,8 @@ function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, onAddDra
               <div className="relative group cursor-grab active:cursor-grabbing" title={tt("ลากเพื่อสลับลำดับ", "Drag to reorder")}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={`/api/r2-image?key=${encodeURIComponent(d.r2_key)}&w=64`} alt="" title={tt("กดเพื่อดูเต็มจอ · ลากเพื่อสลับลำดับ", "Click to view · drag to reorder")} onClick={() => onZoom?.(draft.map((x) => ({ url: `/api/r2-image?key=${encodeURIComponent(x.r2_key)}&w=1600`, label })), j)} className={`h-12 w-12 object-cover rounded border-2 cursor-zoom-in ${isReplace ? (isDesc ? "border-indigo-400" : "border-amber-400") : "border-slate-200"}`} />
+                {/* เลขตำแหน่ง (ลำดับที่จะเข้าสินค้า) */}
+                <span className={`absolute -top-1 -left-1 text-white text-[8px] font-medium rounded-full w-4 h-4 flex items-center justify-center ${isDesc ? "bg-indigo-600" : "bg-amber-500"}`}>{j + 1}</span>
                 <button type="button" onClick={() => onRemoveDraft(d.r2_key)} className="absolute -top-1 -right-1 h-4 w-4 flex items-center justify-center bg-white rounded-full text-red-500 text-[9px] shadow opacity-0 group-hover:opacity-100">✕</button>
               </div>
               <select value={curVal} onChange={(e) => setReplace(tk, d.r2_key, e.target.value)} className="text-[10px] border border-slate-200 rounded px-0.5 py-0.5 w-[76px]">

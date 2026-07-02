@@ -181,7 +181,30 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { data: atts } = await admin.from("erp_creative_attachments").select("*").in("subtask_id", subIds).order("created_at", { ascending: true });
     for (const a of (atts ?? []) as Record<string, unknown>[]) { const k = String(a.subtask_id); const arr = attBy.get(k) ?? []; arr.push(a); attBy.set(k, arr); }
   }
-  return NextResponse.json({ data: rows.map((r) => ({ ...r, assignees: aMap.get(String(r.id)) ?? [], attachments: attBy.get(String(r.id)) ?? [] })), error: null });
+  // เติมรหัสสินค้าจริงให้ "รูปเข้าสินค้า" บนการ์ด (แม้งานเก่าที่ไม่ได้เก็บ product_labels) — ดึงจาก id จริง
+  const codeMap = await resolveProductCodes(admin, rows);
+  return NextResponse.json({ data: rows.map((r) => {
+    const ist = r.image_sync_targets as { product_labels?: Record<string, string> } | null;
+    const image_sync_targets = ist ? { ...ist, product_labels: { ...(ist.product_labels ?? {}), ...codeMap } } : ist;
+    return { ...r, image_sync_targets, assignees: aMap.get(String(r.id)) ?? [], attachments: attBy.get(String(r.id)) ?? [] };
+  }), error: null });
+}
+
+// รวบรวม parent/sku ids จาก image_sync_targets ทุกงานย่อย → คืน map tk("parent:<id>"/"sku:<id>") → code จริง
+async function resolveProductCodes(admin: ReturnType<typeof supabaseAdmin>, rows: Record<string, unknown>[]): Promise<Record<string, string>> {
+  const parentIds = new Set<string>(); const skuIds = new Set<string>();
+  for (const r of rows) {
+    const ist = r.image_sync_targets as { product_images?: Record<string, string[]>; sku_images?: Record<string, string[]>; parent_ids?: string[]; sku_ids?: string[] } | null;
+    if (!ist) continue;
+    for (const tk of Object.keys(ist.product_images ?? {})) { const [pfx, id] = tk.split(":"); if (!id) continue; (pfx === "parent" ? parentIds : skuIds).add(id); }
+    for (const sid of Object.keys(ist.sku_images ?? {})) skuIds.add(sid);
+    for (const pid of ist.parent_ids ?? []) parentIds.add(pid);
+    for (const sid of ist.sku_ids ?? []) skuIds.add(sid);
+  }
+  const out: Record<string, string> = {};
+  if (parentIds.size) { const { data } = await admin.from("parent_skus_v2").select("id, code").in("id", [...parentIds]); for (const p of (data ?? []) as { id: string; code: string }[]) out[`parent:${p.id}`] = p.code; }
+  if (skuIds.size) { const { data } = await admin.from("skus_v2").select("id, code").in("id", [...skuIds]); for (const s of (data ?? []) as { id: string; code: string }[]) out[`sku:${s.id}`] = s.code; }
+  return out;
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
