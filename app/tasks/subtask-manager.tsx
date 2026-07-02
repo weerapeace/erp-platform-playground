@@ -365,6 +365,77 @@ type PlatformParent = { id: string; code: string; name_th: string; name_platform
 // - งานปกติ (รับรูป/ลิงก์): แนบ ≥1 ก่อนส่ง
 // - งานเขียนคำอธิบาย (ไม่รับรูป/ลิงก์ = platformConfirm): ไม่ต้องแนบ แต่โชว์รายละเอียด Platform ของ
 //   Parent SKU ให้ตรวจ + ต้องมีรายละเอียด (description) ครบทุกตัวก่อนถึงส่งได้
+// จับคู่ "รูปที่ส่ง → แทนรูปเดิมในแกลเลอรีสินค้า" (ของกลาง ใช้ทั้ง Parent SKU + SKU) · เว้น = เพิ่มเป็นรูปใหม่ · + ดู/กู้คืนเวอร์ชันเก่า
+function ReplaceMapper({ tk, slots, images, replaceMap, setReplace, tt, onRestored }: {
+  tk: string;
+  slots: { slot_id: string; slot: number; r2_key: string }[];
+  images: { id: string; r2_key: string | null }[];
+  replaceMap: Record<string, Record<string, string>>;
+  setReplace: (tk: string, imgKey: string, val: string) => void;
+  tt: (th: string, en: string) => string;
+  onRestored: () => void;
+}) {
+  const [verOpen, setVerOpen] = useState(false);
+  const [versions, setVersions] = useState<{ slot_id: string; slot: number | null; old_r2_key: string }[] | null>(null);
+  const pfx = tk.split(":")[0]; const ownerType = pfx === "parent" ? "parent_sku" : "product_sku"; const ownerId = tk.split(":")[1];
+  const loadVersions = async () => {
+    setVerOpen((o) => !o);
+    if (versions !== null) return;
+    try { const j = await apiFetch(`/api/product-images?owner_type=${ownerType}&owner_id=${encodeURIComponent(ownerId)}&versions=1`).then((r) => r.json()); setVersions((j.versions as { slot_id: string; slot: number | null; old_r2_key: string }[]) ?? []); } catch { setVersions([]); }
+  };
+  const restore = async (slotId: string, key: string) => {
+    try { await apiFetch("/api/product-images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "restore", slot_id: slotId, r2_key: key }) });
+      setVersions((v) => (v ?? []).filter((x) => !(x.slot_id === slotId && x.old_r2_key === key))); onRestored(); } catch { /* noop */ }
+  };
+  if (!images.length) return null;
+  return (
+    <div className="mt-2 border-t border-amber-100 pt-2">
+      <p className="text-[11px] text-slate-500 mb-1">🔄 {tt("จับคู่รูปที่ส่ง → แทนรูปเดิม (เว้น = เพิ่มเป็นรูปใหม่)", "Map submitted → replace existing (blank = add new)")}</p>
+      {slots.length === 0 ? (
+        <p className="text-[10px] text-slate-400 italic">{tt("ยังไม่มีรูปในแกลเลอรี — รูปที่ส่งจะเพิ่มเป็นรูปใหม่", "No gallery yet — submitted images will be added as new")}</p>
+      ) : (<>
+        <div className="flex flex-wrap gap-2 mb-1.5">
+          {images.map((a) => { const key = String(a.r2_key); const curVal = replaceMap[tk]?.[key] ?? "new"; return (
+            <div key={a.id} className="flex flex-col items-center gap-0.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/api/r2-image?key=${encodeURIComponent(key)}&w=64`} alt="" className={`h-12 w-12 object-cover rounded border-2 ${curVal !== "new" ? "border-amber-400" : "border-slate-200"}`} />
+              <select value={curVal} onChange={(e) => setReplace(tk, key, e.target.value)} className="text-[10px] border border-slate-200 rounded px-0.5 py-0.5 w-[72px]">
+                <option value="new">➕ {tt("เพิ่มใหม่", "Add new")}</option>
+                {slots.map((s, i) => <option key={s.slot_id} value={s.slot_id}>{tt(`แทน #${i + 1}`, `→ #${i + 1}`)}</option>)}
+              </select>
+            </div>
+          ); })}
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] text-slate-400">{tt("รูปเดิมในสินค้า:", "Current gallery:")}</span>
+          {slots.map((s, i) => (
+            <div key={s.slot_id} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/api/r2-image?key=${encodeURIComponent(s.r2_key)}&w=64`} alt="" title={`#${i + 1}`} className="h-9 w-9 object-cover rounded border border-slate-200" />
+              <span className="absolute -top-1 -left-1 bg-slate-700 text-white text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{i + 1}</span>
+            </div>
+          ))}
+        </div>
+      </>)}
+      {/* เฟส 3: รูปเก่าที่เคยถูกแทน — ดู/กู้คืน */}
+      <button type="button" onClick={loadVersions} className="mt-1.5 text-[10px] text-slate-500 hover:text-violet-700">🕘 {tt("รูปเก่าที่เคยถูกแทน", "Replaced versions")} {verOpen ? "▲" : "▼"}</button>
+      {verOpen && (versions === null ? <p className="text-[10px] text-slate-400 mt-0.5">{tt("กำลังโหลด…", "Loading…")}</p>
+        : versions.length === 0 ? <p className="text-[10px] text-slate-400 italic mt-0.5">{tt("ยังไม่มีรูปที่ถูกแทน", "No replaced versions yet")}</p>
+        : (
+          <div className="flex flex-wrap gap-2 mt-1">
+            {versions.map((v, i) => (
+              <div key={i} className="flex flex-col items-center gap-0.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`/api/r2-image?key=${encodeURIComponent(v.old_r2_key)}&w=64`} alt="" className="h-10 w-10 object-cover rounded border border-slate-200 opacity-80" />
+                <button type="button" onClick={() => restore(v.slot_id, v.old_r2_key)} className="text-[9px] text-violet-600 hover:underline">↩ {tt(`กู้คืน #${(v.slot ?? 0) + 1}`, `restore #${(v.slot ?? 0) + 1}`)}</button>
+              </div>
+            ))}
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks, canSubmit, platformConfirm, onClose }: {
   sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn;
   showImages: boolean; showLinks: boolean; canSubmit: boolean; platformConfirm: boolean; onClose: () => void;
@@ -438,6 +509,11 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       setSkusByParent((m) => ({ ...m, [pid]: ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? ""), image_key: s.image_key ? String(s.image_key) : null })) }));
     } catch { /* noop */ }
   }, []);
+  // รีเฟรชแกลเลอรีของสินค้าตัวเดียว (หลังกู้คืนเวอร์ชันเก่า) — tk = "parent:<id>" / "sku:<id>"
+  const refreshGallery = useCallback(async (tk: string) => {
+    const [pfx, id] = tk.split(":"); const ot = pfx === "parent" ? "parent_sku" : "product_sku";
+    try { const gj = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?gallery=${ot}:${encodeURIComponent(id)}`).then((r) => r.json()); if (gj.galleries) setGalleries((prev) => ({ ...prev, ...(gj.galleries as Record<string, GallerySlot[]>) })); } catch { /* noop */ }
+  }, [taskId]);
 
   // ติ๊กล่วงหน้า: ใช้ค่าที่เคยเลือกถ้ามี ไม่งั้น prefill ด้วย Parent/SKU ที่ผูกกับงาน
   useEffect(() => {
@@ -461,7 +537,11 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     updateSubtask(taskId, sub.id, { image_sync_targets: { parent_ids: [...pids], sku_ids: [...sids], sku_images, replace_map: rmap } }).catch(() => {});
   }, [taskId, sub.id, skuDraftImages, replaceMap]);
   const toggleSyncParent = (pid: string) => { const n = new Set(syncParentIds); n.has(pid) ? n.delete(pid) : n.add(pid); setSyncParentIds(n); persistTargets(n, syncSkuIds); };
-  const toggleSyncSku = (sid: string) => { const n = new Set(syncSkuIds); n.has(sid) ? n.delete(sid) : n.add(sid); setSyncSkuIds(n); persistTargets(syncParentIds, n); };
+  const toggleSyncSku = (sid: string) => {
+    const n = new Set(syncSkuIds); const adding = !n.has(sid); adding ? n.add(sid) : n.delete(sid); setSyncSkuIds(n); persistTargets(syncParentIds, n);
+    // ติ๊ก SKU → ดึงแกลเลอรีของ SKU มาโชว์ preview + จับคู่แทนรูป (ครั้งแรกครั้งเดียว)
+    if (adding && !galleries[`sku:${sid}`]) apiFetch(`/api/creative-tasks/${taskId}/subtasks?gallery=product_sku:${encodeURIComponent(sid)}`).then((r) => r.json()).then((gj) => { if (gj.galleries) setGalleries((prev) => ({ ...prev, ...(gj.galleries as Record<string, GallerySlot[]>) })); }).catch(() => {});
+  };
   // จับคู่ "รูปส่ง → แทนช่องไหน" ของสินค้า (val = slot_id หรือ "new" = เพิ่มรูปใหม่)
   const setReplace = (tk: string, imgKey: string, val: string) => {
     setReplaceMap((prev) => {
@@ -604,41 +684,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                         <span className="text-sm text-slate-700 truncate flex-1">{p.name_platform || p.name_th || "—"}</span>
                         <button type="button" onClick={() => setEditParentId(p.id)} title={t("แก้/เพิ่ม SKU ในตัวแก้สินค้า", "Manage SKUs in product editor")} className="text-[11px] text-violet-600 hover:underline shrink-0">✏️ {t("แก้สินค้า", "Edit product")}</button>
                       </div>
-                      {/* เฟส 2: จับคู่ "รูปส่ง → แทนรูปเดิม" (มี preview) — เว้น = เพิ่มใหม่ */}
-                      {pon && imageAtts.length > 0 && (() => {
-                        const tk = `parent:${p.id}`; const slots = galleries[tk] ?? [];
-                        return (
-                          <div className="pl-6 mt-2 border-t border-amber-100 pt-2">
-                            <p className="text-[11px] text-slate-500 mb-1">🔄 {t("จับคู่รูปที่ส่ง → แทนรูปเดิม (เว้น = เพิ่มเป็นรูปใหม่)", "Map submitted → replace existing (blank = add new)")}</p>
-                            {slots.length === 0 ? (
-                              <p className="text-[10px] text-slate-400 italic">{t("สินค้านี้ยังไม่มีรูปในแกลเลอรี — รูปที่ส่งจะเพิ่มเป็นรูปใหม่", "No gallery images yet — submitted images will be added as new")}</p>
-                            ) : (<>
-                              <div className="flex flex-wrap gap-2 mb-1.5">
-                                {imageAtts.map((a) => { const key = String(a.r2_key); const curVal = replaceMap[tk]?.[key] ?? "new"; return (
-                                  <div key={a.id} className="flex flex-col items-center gap-0.5">
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img src={`/api/r2-image?key=${encodeURIComponent(key)}&w=64`} alt="" className={`h-12 w-12 object-cover rounded border-2 ${curVal !== "new" ? "border-amber-400" : "border-slate-200"}`} />
-                                    <select value={curVal} onChange={(e) => setReplace(tk, key, e.target.value)} className="text-[10px] border border-slate-200 rounded px-0.5 py-0.5 w-[72px]">
-                                      <option value="new">➕ {t("เพิ่มใหม่", "Add new")}</option>
-                                      {slots.map((s, i) => <option key={s.slot_id} value={s.slot_id}>{t(`แทน #${i + 1}`, `→ #${i + 1}`)}</option>)}
-                                    </select>
-                                  </div>
-                                ); })}
-                              </div>
-                              <div className="flex flex-wrap items-center gap-1">
-                                <span className="text-[10px] text-slate-400">{t("รูปเดิมในสินค้า:", "Current gallery:")}</span>
-                                {slots.map((s, i) => (
-                                  <div key={s.slot_id} className="relative">
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img src={`/api/r2-image?key=${encodeURIComponent(s.r2_key)}&w=64`} alt="" title={`#${i + 1}`} className="h-9 w-9 object-cover rounded border border-slate-200" />
-                                    <span className="absolute -top-1 -left-1 bg-slate-700 text-white text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{i + 1}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </>)}
-                          </div>
-                        );
-                      })()}
+                      {/* เฟส 2: จับคู่ "รูปส่ง → แทนรูปเดิม" ของ Parent SKU (มี preview) */}
+                      {pon && <div className="pl-6"><ReplaceMapper tk={`parent:${p.id}`} slots={galleries[`parent:${p.id}`] ?? []} images={imageAtts} replaceMap={replaceMap} setReplace={setReplace} tt={t} onRestored={() => refreshGallery(`parent:${p.id}`)} /></div>}
                       <div className="pl-6 mt-1.5 space-y-1">
                         {(skusByParent[p.id] ?? []).map((s) => { const son = syncSkuIds.has(s.id); const thumb = s.image_key ? `/api/r2-image?key=${encodeURIComponent(s.image_key)}` : null; const drafts = skuDraftImages[s.id] ?? []; return (
                           <div key={s.id} className="space-y-1">
@@ -668,6 +715,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                                 {drafts.length > 0 && <p className="text-[10px] text-amber-600 mt-0.5">{t(`ร่าง ${drafts.length} รูป — เข้าแกลเลอรี SKU ตอนอนุมัติ`, `${drafts.length} draft — added on approval`)}</p>}
                               </div>
                             </div>
+                            {son && <ReplaceMapper tk={`sku:${s.id}`} slots={galleries[`sku:${s.id}`] ?? []} images={imageAtts} replaceMap={replaceMap} setReplace={setReplace} tt={t} onRestored={() => refreshGallery(`sku:${s.id}`)} />}
                           </div>
                         ); })}
                         {(skusByParent[p.id] ?? []).length === 0 && <p className="text-[11px] text-slate-400 italic">{t("ยังไม่มี SKU", "No SKUs yet")}</p>}
