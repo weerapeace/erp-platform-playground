@@ -458,6 +458,8 @@ export type MasterCRUDConfig = {
   };
   /** section พิเศษในฟอร์ม (เช่น รูป Description ของ Parent SKU) — render เมื่อเปิดฟอร์ม */
   extraFormSection?: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode;
+  /** แท็บพิเศษต่อโมดูล — โผล่ในแถบแท็บ (ต่อจากแท็บจาก Field Registry) เช่น "🛍 เว็บไซต์" ของ Parent SKU */
+  extraTabs?: { key: string; label: string; icon?: string; render: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode }[];
   /**
    * F19: server-side pagination — ดึงทีละหน้าจาก server (กัน Worker 1102 ถาวร)
    * เหมาะกับ dataset ใหญ่ (>500 rows เช่น parent-skus, skus)
@@ -2285,6 +2287,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           const createHeaderEl = (drawerMode === "edit" && !editingId && config.createFormHeader)
             ? <div className="mb-3">{config.createFormHeader({ form, updateForm })}</div>
             : null;
+          // แท็บพิเศษต่อโมดูล (เช่น "🛍 เว็บไซต์" ของ Parent SKU) — ผูก ctx แล้วส่งเข้า Form/DetailSections
+          const boundExtraTabs = (config.extraTabs ?? []).map((t) => ({
+            key: t.key, label: t.label, icon: t.icon,
+            node: t.render({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit }),
+          }));
 
           // กลุ่ม B: ถ้าจัด Layout ไว้ "และไม่มีรูปปก" → รูป/field เต็มกว้างตาม Layout
           // (โมดูลที่มีรูปปก เช่น Parent SKU/SKU → ใช้เลย์เอาต์ "รูปซ้าย" ด้านล่างเสมอ)
@@ -2309,8 +2316,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {/* Layout คุมทุก field (รวม core) */}
                 {createHeaderEl}
                 {drawerMode === "view"
-                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} />
-                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} />}
+                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
+                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} />}
               </div>
             );
           }
@@ -2325,8 +2332,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 )}
                 {createHeaderEl}
                 {drawerMode === "view"
-                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} />
-                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} />}
+                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
+                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} />}
               </div>
             );
           }
@@ -2419,8 +2426,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {createHeaderEl}
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"
-                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} />
-                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} />
+                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
+                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} />
                 ) : (
                   <div className="text-sm text-slate-300 py-8 text-center">ไม่มีข้อมูลเพิ่มเติม</div>
                 )}
@@ -2646,14 +2653,13 @@ export function MasterRecordDrawer({
       icon, activeField: "is_active", serverMode: true,
       permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
-      // Parent SKU → ใส่ช่อง "รูป Description" + ส่วน "🛍 เว็บไซต์" ให้อัตโนมัติ (เหมือนหน้า master page โดยตรง)
+      // Parent SKU → ช่อง "รูป Description" ในฟอร์ม (เหมือนหน้า master page โดยตรง)
       extraFormSection: moduleKey === "parent-skus-v2"
-        ? ({ recordId, readonly }) => (
-            <>
-              <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
-              <ParentWebListings parentId={recordId} />
-            </>
-          )
+        ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
+        : undefined,
+      // Parent SKU → แท็บ "🛍 เว็บไซต์" (จัดการการขายบนเว็บร้านออนไลน์ได้ในแท็บ)
+      extraTabs: moduleKey === "parent-skus-v2"
+        ? [{ key: "web", label: "เว็บไซต์", icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> }]
         : undefined,
     };
   }, [apiBase, apiPath, moduleKey, title, createTitle, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults, actor]);
@@ -2824,30 +2830,33 @@ function groupByKey(fields: FieldDef[]): Map<string, FieldDef[]> {
 
 /** กลุ่ม B: render ตาม layout (Tab → Section → columns) ใช้ทั้ง form + detail */
 function LayoutTabs({
-  layout, byGroup, renderGrid,
+  layout, byGroup, renderGrid, extraTabs = [],
 }: {
   layout: NonNullable<FormLayout>;
   byGroup: Map<string, FieldDef[]>;
   renderGrid: (fields: FieldDef[], columns: number) => React.ReactNode;
+  extraTabs?: BoundTab[];
 }) {
   // ซ่อนแท็บที่ไม่มี field จริง (เช่นแท็บ core ฝั่งขวาที่ core ถูกเรนเดอร์แยกซ้ายแล้ว)
   const tabs = (layout.tabs ?? []).filter((t) => t.sections.some((s) => (byGroup.get(s.key)?.length ?? 0) > 0));
-  const [active, setActive] = useState<string>(tabs[0]?.key ?? "");
+  const [active, setActive] = useState<string>(tabs[0]?.key ?? extraTabs[0]?.key ?? "");
   useEffect(() => {
-    if (tabs.length > 0 && !tabs.some((t) => t.key === active)) setActive(tabs[0].key);
-  }, [tabs, active]);
+    const keys = [...tabs.map((t) => t.key), ...extraTabs.map((t) => t.key)];
+    if (keys.length > 0 && !keys.includes(active)) setActive(keys[0]);
+  }, [tabs, extraTabs, active]);
 
   const assigned = new Set<string>();
   tabs.forEach((t) => t.sections.forEach((s) => assigned.add(s.key)));
   const leftover: FieldDef[] = [];
   byGroup.forEach((fs, g) => { if (!assigned.has(g)) leftover.push(...fs); });
 
-  const cur = tabs.find((t) => t.key === active) ?? tabs[0];
-  if (!cur) return null;
+  const activeExtra = extraTabs.find((t) => t.key === active);
+  const cur = tabs.find((t) => t.key === active) ?? (activeExtra ? undefined : tabs[0]);
+  if (!cur && !activeExtra) return null;
 
   return (
     <div>
-      {tabs.length > 1 && (
+      {tabs.length + extraTabs.length > 1 && (
         <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
           {tabs.map((t) => (
             <button key={t.key} type="button" onClick={() => setActive(t.key)}
@@ -2857,10 +2866,21 @@ function LayoutTabs({
               {sectionIconNode(t.icon)}<span>{t.label}</span>
             </button>
           ))}
+          {extraTabs.map((t) => (
+            <button key={t.key} type="button" onClick={() => setActive(t.key)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
+                t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}>
+              {t.icon && <span>{t.icon}</span>}<span>{t.label}</span>
+            </button>
+          ))}
         </div>
       )}
+      {activeExtra ? (
+        <div className="pt-3">{activeExtra.node}</div>
+      ) : (
       <div className="pt-3 space-y-4">
-        {cur.sections.map((sec) => {
+        {cur!.sections.map((sec) => {
           const fs = byGroup.get(sec.key) ?? [];
           if (fs.length === 0) return null;
           return (
@@ -2877,16 +2897,21 @@ function LayoutTabs({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
 
+// แท็บพิเศษที่ผูก ctx แล้ว (พร้อม node) — ใช้ส่งเข้า LayoutTabs
+type BoundTab = { key: string; label: string; icon?: string; node: React.ReactNode };
+
 function FormSections({
-  fields, renderField, layout,
+  fields, renderField, layout, extraTabs,
 }: {
   fields: FieldDef[];
   renderField: (f: FieldDef, maxSpan?: number) => React.ReactNode;
   layout?: FormLayout;
+  extraTabs?: BoundTab[];
 }) {
   // hooks ทั้งหมดเรียกก่อน return เสมอ (Rules of Hooks)
   const byGroup = useMemo(() => groupByKey(fields), [fields]);
@@ -2900,7 +2925,7 @@ function FormSections({
 
   // กลุ่ม B: ถ้ามี layout → ใช้ Tab → Section → columns
   if (layout?.tabs?.length) {
-    return <LayoutTabs layout={layout} byGroup={byGroup} renderGrid={(fs, cols) => (
+    return <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} renderGrid={(fs, cols) => (
       <div className="grid grid-cols-12 gap-3">{fs.map((f) => renderField(f, cols))}</div>
     )} />;
   }
@@ -3008,12 +3033,13 @@ function CompletenessBar({ fields, values }: { fields: FieldDef[]; values: Recor
 }
 
 function DetailSections({
-  fields, renderValue, layout, values,
+  fields, renderValue, layout, values, extraTabs,
 }: {
   fields: FieldDef[];
   renderValue: (f: FieldDef) => React.ReactNode;
   layout?: FormLayout;
   values?: Record<string, unknown>;
+  extraTabs?: BoundTab[];
 }) {
   const byGroup = useMemo(() => groupByKey(fields), [fields]);
   const grouped = useMemo(() =>
@@ -3050,7 +3076,7 @@ function DetailSections({
     return (
       <div className="space-y-4">
         {values && <CompletenessBar fields={fields} values={values} />}
-        <LayoutTabs layout={layout} byGroup={byGroup} renderGrid={renderDl} />
+        <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} renderGrid={renderDl} />
       </div>
     );
   }

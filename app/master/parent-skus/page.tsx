@@ -112,13 +112,12 @@ export default function ParentSKUsV2Page() {
       ...(CONFIG.extraRowActions ?? []),
       { label: "ลงขายหลายแพลตฟอร์ม", icon: "🏬", onClick: (row) => setMgrId(String(row.id)) },
     ],
-    // section พิเศษในฟอร์ม: รูป Description (มีลำดับ) + ส่วน "🛍 เว็บไซต์" (ร้านออนไลน์)
+    // section พิเศษในฟอร์ม: รูป Description (มีลำดับ)
     extraFormSection: ({ recordId, readonly }) => (
-      <>
-        <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
-        <ParentWebListings parentId={recordId} />
-      </>
+      <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
     ),
+    // แท็บ "🛍 เว็บไซต์" — จัดการการขายบนเว็บร้านออนไลน์ได้ในแท็บ
+    extraTabs: [{ key: "web", label: "เว็บไซต์", icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> }],
   }), [actor]);
   return (
     <>
