@@ -244,6 +244,7 @@ export default function AppLauncherPage() {
     const hasGroups = appGroups.length > 0;
     return menuRows
       .filter((r) => r.is_active && r.show_in_launcher
+        && r.href !== "/apps"   // ไม่โชว์การ์ด launcher เอง (ลิงก์มาหน้าเดิม → กดแล้วเหมือนไม่ทำงาน)
         && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0]))
         // เมนูที่สังกัดแอปถูกล็อก → ซ่อน (เว้นแต่สังกัดแอปอื่นที่เข้าได้ด้วย)
         && (!hasGroups || !r.app_keys?.length || r.app_keys.some((k) => okApps.has(k))))
