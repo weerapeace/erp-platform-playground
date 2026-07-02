@@ -23,10 +23,21 @@ export const revalidate = 0;
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { id } = await params;
-  const { data, error } = await supabaseAdmin().from("design_sheets")
+  const admin = supabaseAdmin();
+  const { data, error } = await admin.from("design_sheets")
     .select("*, brand:brands!brand_id(name, color)").eq("id", id).single();
   if (error) return NextResponse.json({ data: null, error: friendlyDbError(error.message) }, { status: 404 });
-  return NextResponse.json({ data, error: null });
+  // resolve รหัส Parent SKU → id → ทำ chip เป็นลิงก์เปิด Parent SKU ได้
+  const row = data as Record<string, unknown>;
+  const codesSet = new Set<string>();
+  if (Array.isArray(row.parent_sku_codes)) for (const c of row.parent_sku_codes as unknown[]) if (c) codesSet.add(String(c));
+  if (row.parent_sku_code) codesSet.add(String(row.parent_sku_code));
+  let parent_sku_refs: { code: string; id: string }[] = [];
+  if (codesSet.size) {
+    const { data: prs } = await admin.from("parent_skus_v2").select("id, code").in("code", Array.from(codesSet));
+    parent_sku_refs = (prs ?? []).map((p) => ({ code: String((p as { code: string }).code), id: String((p as { id: string }).id) }));
+  }
+  return NextResponse.json({ data: { ...data, parent_sku_refs }, error: null });
 }
 
 // field ที่แก้ได้ (whitelist)

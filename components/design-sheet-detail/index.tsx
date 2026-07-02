@@ -15,6 +15,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
+import { RecordPeekLink } from "@/components/pickers/record-peek-link";
 import { RecordTasksButton } from "@/components/record-tasks";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
 import { WorkflowStatusManager } from "@/components/workflow-status-manager";
@@ -392,6 +393,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [modalTab, setModalTab] = useState<"info" | "comments" | "cost" | "quotes">("info");
   // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย
   const [editing, setEditing] = useState(false);
+  const [parentRefs, setParentRefs] = useState<Record<string, string>>({});   // รหัส Parent SKU → id (ทำ chip เป็นลิงก์)
   const [comments, setComments] = useState<DesignSheetComment[]>([]);
   const [quotes, setQuotes] = useState<DesignSheetQuote[]>([]);
   const [cqLoading, setCqLoading] = useState(false);
@@ -991,21 +993,26 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch { /* ไม่ critical */ }
   };
 
-  const openCreate = () => { setEditing(true); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
+  const openCreate = () => { setEditing(true); setParentRefs({}); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
 
   const openEdit = async (row: DesignSheetListItem, tab: "info" | "comments" | "cost" | "quotes" = "info") => {
-    setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false);
+    setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false); setParentRefs({});
     setModalTab(tab); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend();
     try {
       const res = await apiFetch(`/api/design-sheets/${row.id}`); const j = await res.json();
       if (j.error) throw new Error(j.error);
       const d = j.data;
+      // แสดงรหัส Parent SKU: ถ้า chips ว่างแต่มี parent_sku_code (ใบเก่า) → ใช้ตัวนั้น · เก็บ map code→id ทำลิงก์
+      const pArr = Array.isArray(d.parent_sku_codes) ? (d.parent_sku_codes as string[]) : [];
+      const pCodes = pArr.length ? pArr : (d.parent_sku_code ? [String(d.parent_sku_code)] : []);
+      const refs: Record<string, string> = {};
+      for (const r of (Array.isArray(d.parent_sku_refs) ? d.parent_sku_refs : []) as { code: string; id: string }[]) refs[r.code] = r.id;
+      setParentRefs(refs);
       setForm({
         id: d.id, code: d.code ?? "", name: d.name ?? "", brand_id: d.brand_id ?? "",
         detail: d.detail ?? "", note: d.note ?? "", status: d.status ?? "design",
         order_date: d.order_date ?? "", deadline: d.deadline ?? "", drive_link: d.drive_link ?? "",
-        parent_sku_codes: Array.isArray(d.parent_sku_codes) ? (d.parent_sku_codes as string[])
-          : (d.parent_sku_code ? [String(d.parent_sku_code)] : []),
+        parent_sku_codes: pCodes,
         parent_sku_drafts: Array.isArray(d.parent_sku_drafts) ? (d.parent_sku_drafts as string[]) : [],
       });
       setSkuInput("");
@@ -1597,13 +1604,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               <div className="block">
                 <span className="text-[11px] text-slate-500">Parent SKU ที่จะตั้ง (เพิ่มได้หลายตัว)</span>
                 {form.parent_sku_codes.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {form.parent_sku_codes.map((c) => (
-                      <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono bg-blue-50 border border-blue-200 text-blue-700 rounded">
-                        {c}
-                        {fullEdit && <button type="button" onClick={() => removeParentCode(c)} title="เอาออก" className="text-blue-300 hover:text-rose-500 leading-none">✕</button>}
-                      </span>
-                    ))}
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    {form.parent_sku_codes.map((c) => {
+                      const pid = parentRefs[c];
+                      return (
+                        <span key={c} className="inline-flex items-center gap-1">
+                          {pid
+                            ? <RecordPeekLink moduleKey="parent-skus-v2" recordId={pid} label={c} />
+                            : <span className="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-mono text-blue-700">{c}</span>}
+                          {fullEdit && <button type="button" onClick={() => removeParentCode(c)} title="เอาออก" className="leading-none text-slate-300 hover:text-rose-500">✕</button>}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
                 {fullEdit && (
