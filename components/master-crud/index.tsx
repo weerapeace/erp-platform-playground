@@ -41,6 +41,7 @@ import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
 // ช่อง "รูป Description" ของ Parent SKU — ใส่อัตโนมัติใน MasterRecordDrawer (โหลดเฉพาะตอนใช้)
 const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
+const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -2645,9 +2646,14 @@ export function MasterRecordDrawer({
       icon, activeField: "is_active", serverMode: true,
       permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
-      // Parent SKU → ใส่ช่อง "รูป Description" ให้อัตโนมัติ (เหมือนหน้า master page โดยตรง)
+      // Parent SKU → ใส่ช่อง "รูป Description" + ส่วน "🛍 เว็บไซต์" ให้อัตโนมัติ (เหมือนหน้า master page โดยตรง)
       extraFormSection: moduleKey === "parent-skus-v2"
-        ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
+        ? ({ recordId, readonly }) => (
+            <>
+              <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
+              <ParentWebListings parentId={recordId} />
+            </>
+          )
         : undefined,
     };
   }, [apiBase, apiPath, moduleKey, title, createTitle, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults, actor]);

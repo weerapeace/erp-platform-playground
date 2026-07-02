@@ -29,6 +29,10 @@ const ParentDescriptionImages = dynamic(
   () => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages),
   { ssr: false },
 );
+const ParentWebListings = dynamic(
+  () => import("@/components/parent-web-listings").then((m) => m.ParentWebListings),
+  { ssr: false },
+);
 
 const FAMILY_LABEL: Record<string, string> = {
   general: "🏷️ ทั่วไป",
@@ -108,9 +112,12 @@ export default function ParentSKUsV2Page() {
       ...(CONFIG.extraRowActions ?? []),
       { label: "ลงขายหลายแพลตฟอร์ม", icon: "🏬", onClick: (row) => setMgrId(String(row.id)) },
     ],
-    // section พิเศษในฟอร์ม: รูป Description (มีลำดับ) → โฟลเดอร์ Description ในมุมมอง "ดูตามแบรนด์"
+    // section พิเศษในฟอร์ม: รูป Description (มีลำดับ) + ส่วน "🛍 เว็บไซต์" (ร้านออนไลน์)
     extraFormSection: ({ recordId, readonly }) => (
-      <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
+      <>
+        <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
+        <ParentWebListings parentId={recordId} />
+      </>
     ),
   }), [actor]);
   return (
