@@ -12,6 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { applyProductImagesNow } from "@/lib/subtask-sync";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -54,8 +55,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { owner_type?: string; owner_id?: string; r2_key?: string; action?: string; slot_id?: string };
+  let body: { owner_type?: string; owner_id?: string; r2_key?: string; action?: string; slot_id?: string; subtask_id?: string; task_id?: string; items?: { r2_key: string; slot?: string | null }[] };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  // action=apply → ใส่รูปเข้าสินค้าทันที (ปุ่ม 'ใส่เข้าสินค้าเลย' ไม่รออนุมัติ) — แทน/เพิ่มหลายรูปในครั้งเดียว
+  if (body.action === "apply") {
+    const ownerType = body.owner_type === "parent_sku" ? "parent_sku" : "product_sku";
+    const ownerId = (body.owner_id ?? "").trim();
+    const items = (body.items ?? []).filter((it) => it && typeof it.r2_key === "string" && it.r2_key.trim());
+    if (!ownerId || !items.length) return NextResponse.json({ error: "ต้องมี owner_id + items" }, { status: 400 });
+    const res = await applyProductImagesNow(supabaseAdmin(), {
+      ownerType, ownerId, items,
+      subtaskId: body.subtask_id ?? null, taskId: body.task_id ?? null, actorId: user?.id ?? null,
+    });
+    return NextResponse.json({ ok: true, ...res, error: null });
+  }
 
   // action=restore → คืนรูปเก่าเข้าแถวเดิม (slot_id = id ของแถว attachment) — ย้ายปกตามถ้ารูปเดิมเป็นปก
   if (body.action === "restore") {
