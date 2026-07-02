@@ -7,9 +7,11 @@
 // ============================================================
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { ImageThumbnail } from "@/components/image-manager";
 import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
 
 const FAMILIES: [string, string][] = [
@@ -48,6 +50,7 @@ export function SkuWizard({
   const [sheetImgs, setSheetImgs] = useState<{ key: string; url: string }[]>([]);  // รูปที่แนบในใบงาน (เลือกเป็นรูปสินค้า)
   const [pImgs, setPImgs] = useState<string[]>([]);                  // รูป Parent (R2 keys, ตัวแรก = ปก)
   const [pickOpen, setPickOpen] = useState<string | null>(null);     // ช่องรูปที่กำลังเลือก ("parent" | "row-<i>")
+  const [pickPos, setPickPos] = useState<{ left: number; top: number } | null>(null);   // ตำแหน่งป๊อปอัปเลือกรูป (fixed/portal)
 
   // เปิดหน้าต่าง = เซ็ตค่าเริ่มต้นจากใบงาน
   useEffect(() => {
@@ -79,7 +82,7 @@ export function SkuWizard({
         const imgs = (j.data as { file_path: string; content_type: string | null; is_primary: boolean }[])
           .filter((a) => (a.content_type ?? "").startsWith("image/"))
           // สร้าง URL จาก file_path ผ่าน proxy เสมอ (attachment เก่าบางรูป public_url เพี้ยน → รูปขาด)
-          .map((a) => ({ key: a.file_path, url: `/api/r2-image?key=${encodeURIComponent(a.file_path)}&w=240`, primary: a.is_primary }));
+          .map((a) => ({ key: a.file_path, url: `/api/r2-image?key=${encodeURIComponent(a.file_path)}`, primary: a.is_primary }));
         setSheetImgs(imgs.map(({ key, url }) => ({ key, url })));
         const primary = imgs.find((i) => i.primary) ?? imgs[0];
         if (primary) setPImgs((cur) => (cur.length ? cur : [primary.key]));
@@ -113,45 +116,53 @@ export function SkuWizard({
   const removeRow = (i: number) => setRows((list) => (list.length <= 1 ? list : list.filter((_, idx) => idx !== i)));
 
   // ช่องเลือกรูปจากรูปที่แนบในใบงาน (ของกลางเล็ก ๆ ในหน้านี้) — คลิกเปิดกริดรูป → เลือก
-  const imgUrlOf = (key: string) => sheetImgs.find((im) => im.key === key)?.url ?? (key ? `/api/r2-image?key=${encodeURIComponent(key)}&w=240` : "");
-  // ช่องเลือกรูปจากใบงาน — เลือกได้หลายรูป (รูปแรก = ปก) · คลิกรูปเพื่อเลือก/เอาออก
+  const imgUrlOf = (key: string) => sheetImgs.find((im) => im.key === key)?.url ?? (key ? `/api/r2-image?key=${encodeURIComponent(key)}` : "");
+  // เปิดตัวเลือกรูป — คำนวณตำแหน่งจากปุ่ม แล้วลอย (portal→body) ออกนอกโมดอล ไม่โดนกรอบตัด
+  const openPicker = (id: string, btn: HTMLElement) => {
+    const r = btn.getBoundingClientRect();
+    const W = 236, Hest = 280;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - W - 8));
+    const top = r.bottom + 4 + Hest > window.innerHeight - 8 ? Math.max(8, r.top - Hest - 4) : r.bottom + 4;
+    setPickPos({ left, top }); setPickOpen(id);
+  };
+  // ช่องเลือกรูปจากใบงาน — เลือกได้หลายรูป (รูปแรก = ปก) · ป๊อปอัปลอย + hover ขยาย (ผ่าน ImageThumbnail)
   const imgSlot = (values: string[], onToggle: (k: string) => void, onClear: () => void, id: string) => {
     const cover = values[0];
     return (
       <div className="relative inline-block" data-imgpick>
-        <button type="button" onClick={() => setPickOpen((o) => (o === id ? null : id))} title="เลือกรูปจากใบงาน (เลือกได้หลายรูป)"
+        <button type="button" title="เลือกรูปจากใบงาน (เลือกได้หลายรูป)"
+          onClick={(e) => { if (pickOpen === id) { setPickOpen(null); return; } openPicker(id, e.currentTarget); }}
           className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-white hover:border-blue-300">
-          {cover
-            ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={imgUrlOf(cover)} alt="" className="h-full w-full object-contain" />
-            : <span className="text-lg leading-none text-slate-300">＋</span>}
-          {values.length > 1 && <span className="absolute -right-1 -top-1 rounded-full bg-blue-600 px-1 text-[9px] font-medium text-white">+{values.length - 1}</span>}
+          {cover ? <ImageThumbnail url={imgUrlOf(cover)} size={38} /> : <span className="text-lg leading-none text-slate-300">＋</span>}
+          {values.length > 1 && <span className="absolute -right-1 -top-1 z-10 rounded-full bg-blue-600 px-1 text-[9px] font-medium text-white">+{values.length - 1}</span>}
         </button>
-        {pickOpen === id && (
-          <div className="absolute left-0 z-30 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl">
+        {pickOpen === id && pickPos && createPortal(
+          <div data-imgpick className="rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl"
+            style={{ position: "fixed", left: pickPos.left, top: pickPos.top, width: 236, zIndex: 1000 }}>
             {sheetImgs.length === 0 ? <div className="p-2 text-[11px] text-slate-400">ใบงานนี้ยังไม่มีรูปแนบ</div> : (
               <>
-                <div className="grid max-h-48 grid-cols-3 gap-1 overflow-auto">
+                <div className="grid max-h-52 grid-cols-3 gap-1.5 overflow-auto">
                   <button type="button" onClick={onClear}
-                    className="flex h-14 items-center justify-center rounded border border-dashed border-slate-200 text-[10px] text-slate-400 hover:bg-slate-50">ไม่มีรูป</button>
+                    className="flex h-16 items-center justify-center rounded border border-dashed border-slate-200 text-[10px] text-slate-400 hover:bg-slate-50">ไม่มีรูป</button>
                   {sheetImgs.map((im) => {
                     const idx = values.indexOf(im.key);
                     return (
                       <button key={im.key} type="button" onClick={() => onToggle(im.key)}
-                        className={`relative h-14 overflow-hidden rounded border bg-white ${idx >= 0 ? "border-blue-500 ring-1 ring-blue-300" : "border-slate-200 hover:border-blue-300"}`}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={im.url} alt="" className="h-full w-full object-contain" />
-                        {idx >= 0 && <span className="absolute left-0.5 top-0.5 rounded bg-blue-600 px-1 text-[9px] font-medium text-white">{idx === 0 ? "ปก" : idx + 1}</span>}
+                        className={`relative flex h-16 items-center justify-center overflow-hidden rounded border bg-white ${idx >= 0 ? "border-blue-500 ring-1 ring-blue-300" : "border-slate-200 hover:border-blue-300"}`}>
+                        <ImageThumbnail url={im.url} size={54} />
+                        {idx >= 0 && <span className="absolute left-0.5 top-0.5 z-10 rounded bg-blue-600 px-1 text-[9px] font-medium text-white">{idx === 0 ? "ปก" : idx + 1}</span>}
                       </button>
                     );
                   })}
                 </div>
                 <div className="mt-1 flex items-center justify-between px-1">
-                  <span className="text-[10px] text-slate-400">เลือกได้หลายรูป · รูปแรก = ปก</span>
+                  <span className="text-[10px] text-slate-400">เลือกหลายรูปได้ · แรก=ปก · ชี้เมาส์ดูใหญ่</span>
                   <button type="button" onClick={() => setPickOpen(null)} className="text-[11px] text-blue-600 hover:underline">เสร็จ</button>
                 </div>
               </>
             )}
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     );
