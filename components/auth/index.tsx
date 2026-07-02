@@ -145,6 +145,7 @@ export type AuthUser = {
 type AuthState = {
   user: AuthUser | null;
   ready: boolean;
+  permsReady: boolean;   // สิทธิ์จริงจาก DB โหลดเสร็จหรือยัง (app-lock บล็อกเฉพาะเมื่อ true)
   loginError: string | null;
   login: (email: string, password: string) => Promise<boolean>;
   loginWithMagicLink: (email: string) => Promise<boolean>;
@@ -162,6 +163,7 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser]   = useState<AuthUser | null>(null);
   const [ready, setReady] = useState(false);
+  const [perms, setPerms] = useState<Set<string> | null>(null);   // สิทธิ์จริงจาก DB (null = ยังไม่โหลด)
   const [loginError, setLoginError] = useState<string | null>(null);
 
   // โหลด profile (role) ผ่าน erp_current_user() — SECURITY DEFINER เลี่ยง RLS
@@ -170,8 +172,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const p = data as { id: string; email: string; display_name: string | null; role: string | null; active: boolean | null; avatar_url: string | null } | null;
     if (p && p.active !== false) {
       setUser({ id: p.id, email: p.email ?? fallbackEmail, name: p.display_name ?? p.email ?? fallbackEmail, role: (p.role ?? "viewer") as Role, avatar: p.avatar_url ?? null });
+      // โหลดสิทธิ์จริงจาก DB (รวม app.* + grant/revoke รายคน) → can() ใช้ตัวนี้แทน ROLE_PERMISSIONS ที่ hardcode
+      // โหลดพลาด = perms คงเป็น null → can() ใช้ค่าสำรอง + app-lock ไม่บล็อก (ไม่ค้าง)
+      supabaseBrowser.rpc("erp_my_permissions").then(({ data: pr, error }) => {
+        if (!error && Array.isArray(pr)) setPerms(new Set(pr as string[]));
+      }).catch(() => { /* เงียบ — ใช้ค่าสำรอง */ });
     } else {
       setUser(null);
+      setPerms(null);
     }
   }, []);
 
@@ -190,7 +198,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     const { data: sub } = supabaseBrowser.auth.onAuthStateChange((_e, session) => {
       if (session?.user) loadProfile(session.user.email ?? "");
-      else setUser(null);
+      else { setUser(null); setPerms(null); }
     });
     return () => sub.subscription.unsubscribe();
   }, [loadProfile]);
@@ -256,16 +264,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     await supabaseBrowser.auth.signOut();
     setUser(null);
+    setPerms(null);
   }, []);
 
   const can = useCallback((perm: Permission) => {
     if (!user) return false;
-    if (user.role === "admin") return true;   // admin = superuser: มีทุกสิทธิ์ (รวม app.*/ฟีเจอร์ใหม่ที่ยังไม่อยู่ใน ROLE_PERMISSIONS)
-    return ROLE_PERMISSIONS[user.role]?.includes(perm) ?? false;
-  }, [user]);
+    if (user.role === "admin") return true;   // admin = superuser: มีทุกสิทธิ์ (กันพลาดถ้า perms โหลดไม่ทัน)
+    if (perms) return perms.has(perm);          // สิทธิ์จริงจาก DB (erp_my_permissions รวม app.* + grant/revoke รายคน)
+    return ROLE_PERMISSIONS[user.role]?.includes(perm) ?? false;   // ค่าสำรองระหว่างโหลด/โหลดพลาด
+  }, [user, perms]);
 
   return (
-    <AuthContext.Provider value={{ user, ready, loginError, login, loginWithMagicLink, loginWithGoogle, resetPassword, logout, can, refreshProfile }}>
+    <AuthContext.Provider value={{ user, ready, permsReady: perms !== null, loginError, login, loginWithMagicLink, loginWithGoogle, resetPassword, logout, can, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
