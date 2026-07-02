@@ -62,6 +62,13 @@ export default function MarketingImportPage() {
   const [commitErr, setCommitErr] = useState<string | null>(null);
   const [result, setResult] = useState<CommitResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  function acceptFile(f: File | null) {
+    setFile(f);
+    setPreview(null);
+    setPreviewErr(null);
+  }
 
   async function runPreview(f: File) {
     setPreviewLoading(true);
@@ -189,21 +196,39 @@ export default function MarketingImportPage() {
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  setFile(f);
-                  setPreview(null);
-                  setPreviewErr(null);
-                }}
+                onChange={(e) => acceptFile(e.target.files?.[0] ?? null)}
               />
-              <button
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => fileRef.current?.click()}
-                className="w-full rounded-xl border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50/40 transition-colors py-10 text-center"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") fileRef.current?.click();
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragging(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setDragging(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragging(false);
+                  const f = e.dataTransfer.files?.[0] ?? null;
+                  if (f) acceptFile(f);
+                }}
+                className={`w-full rounded-xl border-2 border-dashed transition-colors py-10 text-center cursor-pointer ${
+                  dragging ? "border-blue-500 bg-blue-50" : "border-slate-300 hover:border-blue-400 hover:bg-blue-50/40"
+                }`}
               >
-                <div className="text-3xl mb-2">📄</div>
-                <div className="text-sm font-medium text-slate-600">คลิกเพื่อเลือกไฟล์รายงาน Shopee</div>
+                <div className="text-3xl mb-2">{dragging ? "📥" : "📄"}</div>
+                <div className="text-sm font-medium text-slate-600">
+                  {dragging ? "วางไฟล์ที่นี่ได้เลย" : "ลากไฟล์มาวาง หรือคลิกเพื่อเลือกไฟล์ Shopee"}
+                </div>
                 <div className="text-xs text-slate-400 mt-1">รองรับ .xlsx / .csv (สูงสุด 15 MB)</div>
-              </button>
+              </div>
               {file ? (
                 <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5">
                   <span className="text-emerald-600">✓</span>
