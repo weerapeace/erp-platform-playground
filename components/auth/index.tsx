@@ -260,6 +260,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const can = useCallback((perm: Permission) => {
     if (!user) return false;
+    if (user.role === "admin") return true;   // admin = superuser: มีทุกสิทธิ์ (รวม app.*/ฟีเจอร์ใหม่ที่ยังไม่อยู่ใน ROLE_PERMISSIONS)
     return ROLE_PERMISSIONS[user.role]?.includes(perm) ?? false;
   }, [user]);
 
