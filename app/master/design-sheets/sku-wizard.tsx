@@ -16,7 +16,7 @@ const FAMILIES: [string, string][] = [
   ["general", "ทั่วไป"], ["bag", "กระเป๋า"], ["belt", "เข็มขัด"], ["jewelry", "เครื่องประดับ"], ["spare", "อะไหล่"],
 ];
 
-type SkuRow = { code: string; color: string; name: string; price: string; img: string };
+type SkuRow = { code: string; color: string; name: string; price: string; imgs: string[] };
 
 export function SkuWizard({
   open, onClose, sheetId, sheetName, brandId, parentCodeDefault, parentCodeOptions, defaultPrice, onDone,
@@ -46,7 +46,7 @@ export function SkuWizard({
   const [check, setCheck] = useState<ParentSkuCheck | null>(null);   // ผลเช็ครหัส Parent (ซ้ำ/ล่าสุด/ถัดไป/รายการที่มี)
   const [codeOpen, setCodeOpen] = useState(false);                   // เปิดลิสต์รหัสที่มี
   const [sheetImgs, setSheetImgs] = useState<{ key: string; url: string }[]>([]);  // รูปที่แนบในใบงาน (เลือกเป็นรูปสินค้า)
-  const [pImg, setPImg] = useState("");                              // รูป Parent (R2 key)
+  const [pImgs, setPImgs] = useState<string[]>([]);                  // รูป Parent (R2 keys, ตัวแรก = ปก)
   const [pickOpen, setPickOpen] = useState<string | null>(null);     // ช่องรูปที่กำลังเลือก ("parent" | "row-<i>")
 
   // เปิดหน้าต่าง = เซ็ตค่าเริ่มต้นจากใบงาน
@@ -55,8 +55,8 @@ export function SkuWizard({
     setPCode(parentCodeDefault || "");
     setPName(sheetName || "");
     setPNameEn(""); setFamily("general");
-    setBId(brandId ?? ""); setCheck(null); setCodeOpen(false); setPImg(""); setPickOpen(null);
-    setRows([{ code: "", color: "", name: sheetName || "", price: defaultPrice != null ? String(defaultPrice) : "", img: "" }]);
+    setBId(brandId ?? ""); setCheck(null); setCodeOpen(false); setPImgs([]); setPickOpen(null);
+    setRows([{ code: "", color: "", name: sheetName || "", price: defaultPrice != null ? String(defaultPrice) : "", imgs: [] }]);
   }, [open, parentCodeDefault, sheetName, defaultPrice, brandId]);
 
   // โหลดรายชื่อแบรนด์ (ให้เลือก/เปลี่ยนได้ในหน้านี้)
@@ -76,12 +76,13 @@ export function SkuWizard({
       .then((r) => r.json())
       .then((j) => {
         if (!alive || !Array.isArray(j.data)) return;
-        const imgs = (j.data as { file_path: string; public_url: string; content_type: string | null; is_primary: boolean }[])
+        const imgs = (j.data as { file_path: string; content_type: string | null; is_primary: boolean }[])
           .filter((a) => (a.content_type ?? "").startsWith("image/"))
-          .map((a) => ({ key: a.file_path, url: a.public_url, primary: a.is_primary }));
+          // สร้าง URL จาก file_path ผ่าน proxy เสมอ (attachment เก่าบางรูป public_url เพี้ยน → รูปขาด)
+          .map((a) => ({ key: a.file_path, url: `/api/r2-image?key=${encodeURIComponent(a.file_path)}&w=240`, primary: a.is_primary }));
         setSheetImgs(imgs.map(({ key, url }) => ({ key, url })));
         const primary = imgs.find((i) => i.primary) ?? imgs[0];
-        if (primary) setPImg((cur) => cur || primary.key);
+        if (primary) setPImgs((cur) => (cur.length ? cur : [primary.key]));
       }).catch(() => {});
     return () => { alive = false; };
   }, [open, sheetId]);
@@ -108,38 +109,53 @@ export function SkuWizard({
   }, [pCode, open]);
 
   const setRow = (i: number, p: Partial<SkuRow>) => setRows((list) => list.map((r, idx) => (idx === i ? { ...r, ...p } : r)));
-  const addRow = () => setRows((list) => [...list, { code: "", color: "", name: pName, price: defaultPrice != null ? String(defaultPrice) : "", img: pImg }]);
+  const addRow = () => setRows((list) => [...list, { code: "", color: "", name: pName, price: defaultPrice != null ? String(defaultPrice) : "", imgs: [...pImgs] }]);
   const removeRow = (i: number) => setRows((list) => (list.length <= 1 ? list : list.filter((_, idx) => idx !== i)));
 
   // ช่องเลือกรูปจากรูปที่แนบในใบงาน (ของกลางเล็ก ๆ ในหน้านี้) — คลิกเปิดกริดรูป → เลือก
-  const imgUrlOf = (key: string) => sheetImgs.find((im) => im.key === key)?.url ?? (key ? `/api/r2-image?key=${encodeURIComponent(key)}` : "");
-  const imgSlot = (value: string, onPick: (k: string) => void, id: string) => (
-    <div className="relative inline-block" data-imgpick>
-      <button type="button" onClick={() => setPickOpen((o) => (o === id ? null : id))} title="เลือกรูปจากใบงาน"
-        className="h-10 w-10 shrink-0 flex items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50 hover:border-blue-300">
-        {value
-          ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={imgUrlOf(value)} alt="" className="h-full w-full object-cover" />
-          : <span className="text-lg leading-none text-slate-300">＋</span>}
-      </button>
-      {pickOpen === id && (
-        <div className="absolute left-0 z-30 mt-1 w-52 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl">
-          {sheetImgs.length === 0 ? <div className="p-2 text-[11px] text-slate-400">ใบงานนี้ยังไม่มีรูปแนบ</div> : (
-            <div className="grid max-h-48 grid-cols-3 gap-1 overflow-auto">
-              <button type="button" onClick={() => { onPick(""); setPickOpen(null); }}
-                className="flex h-14 items-center justify-center rounded border border-dashed border-slate-200 text-[10px] text-slate-400 hover:bg-slate-50">ไม่มีรูป</button>
-              {sheetImgs.map((im) => (
-                <button key={im.key} type="button" onClick={() => { onPick(im.key); setPickOpen(null); }}
-                  className={`h-14 overflow-hidden rounded border ${value === im.key ? "border-blue-500 ring-1 ring-blue-300" : "border-slate-200 hover:border-blue-300"}`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={im.url} alt="" className="h-full w-full object-cover" />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+  const imgUrlOf = (key: string) => sheetImgs.find((im) => im.key === key)?.url ?? (key ? `/api/r2-image?key=${encodeURIComponent(key)}&w=240` : "");
+  // ช่องเลือกรูปจากใบงาน — เลือกได้หลายรูป (รูปแรก = ปก) · คลิกรูปเพื่อเลือก/เอาออก
+  const imgSlot = (values: string[], onToggle: (k: string) => void, onClear: () => void, id: string) => {
+    const cover = values[0];
+    return (
+      <div className="relative inline-block" data-imgpick>
+        <button type="button" onClick={() => setPickOpen((o) => (o === id ? null : id))} title="เลือกรูปจากใบงาน (เลือกได้หลายรูป)"
+          className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-white hover:border-blue-300">
+          {cover
+            ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={imgUrlOf(cover)} alt="" className="h-full w-full object-contain" />
+            : <span className="text-lg leading-none text-slate-300">＋</span>}
+          {values.length > 1 && <span className="absolute -right-1 -top-1 rounded-full bg-blue-600 px-1 text-[9px] font-medium text-white">+{values.length - 1}</span>}
+        </button>
+        {pickOpen === id && (
+          <div className="absolute left-0 z-30 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl">
+            {sheetImgs.length === 0 ? <div className="p-2 text-[11px] text-slate-400">ใบงานนี้ยังไม่มีรูปแนบ</div> : (
+              <>
+                <div className="grid max-h-48 grid-cols-3 gap-1 overflow-auto">
+                  <button type="button" onClick={onClear}
+                    className="flex h-14 items-center justify-center rounded border border-dashed border-slate-200 text-[10px] text-slate-400 hover:bg-slate-50">ไม่มีรูป</button>
+                  {sheetImgs.map((im) => {
+                    const idx = values.indexOf(im.key);
+                    return (
+                      <button key={im.key} type="button" onClick={() => onToggle(im.key)}
+                        className={`relative h-14 overflow-hidden rounded border bg-white ${idx >= 0 ? "border-blue-500 ring-1 ring-blue-300" : "border-slate-200 hover:border-blue-300"}`}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={im.url} alt="" className="h-full w-full object-contain" />
+                        {idx >= 0 && <span className="absolute left-0.5 top-0.5 rounded bg-blue-600 px-1 text-[9px] font-medium text-white">{idx === 0 ? "ปก" : idx + 1}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-1 flex items-center justify-between px-1">
+                  <span className="text-[10px] text-slate-400">เลือกได้หลายรูป · รูปแรก = ปก</span>
+                  <button type="button" onClick={() => setPickOpen(null)} className="text-[11px] text-blue-600 hover:underline">เสร็จ</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const save = async () => {
     if (!pCode.trim()) { toast.error("กรอกรหัส Parent SKU"); return; }
@@ -151,12 +167,12 @@ export function SkuWizard({
       const res = await apiFetch(`/api/design-sheets/${sheetId}/create-skus`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          parent: { code: pCode.trim(), name_th: pName.trim(), name_en: pNameEn.trim() || null, product_family: family, brand_id: bId || null, cover_image_r2_key: pImg || null },
+          parent: { code: pCode.trim(), name_th: pName.trim(), name_en: pNameEn.trim() || null, product_family: family, brand_id: bId || null, image_keys: pImgs },
           skus: valid.map((r) => ({
             code: r.code.trim(), color: r.color.trim() || null, name_th: r.name.trim() || pName.trim(),
             standard_price: r.price === "" ? null : Number(r.price),
             list_price: r.price === "" ? null : Number(r.price),
-            cover_image_r2_key: r.img || null,
+            image_keys: r.imgs,
           })),
         }),
       });
@@ -189,7 +205,7 @@ export function SkuWizard({
             <div className="text-xs font-medium text-slate-500">สินค้าหลัก (Parent SKU)</div>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-slate-400">รูปสินค้า:</span>
-              {imgSlot(pImg, setPImg, "parent")}
+              {imgSlot(pImgs, (k) => setPImgs((a) => (a.includes(k) ? a.filter((x) => x !== k) : [...a, k])), () => setPImgs([]), "parent")}
             </div>
           </div>
           {/* ใบงานมีหลายรหัส → เลือกตัวที่จะสร้าง (ทีละตัว) */}
@@ -281,7 +297,7 @@ export function SkuWizard({
               {rows.map((r, i) => (
                 <tr key={i}>
                   <td className="border border-slate-200 px-1 py-1 text-center">
-                    {imgSlot(r.img, (k) => setRow(i, { img: k }), `row-${i}`)}
+                    {imgSlot(r.imgs, (k) => setRow(i, { imgs: r.imgs.includes(k) ? r.imgs.filter((x) => x !== k) : [...r.imgs, k] }), () => setRow(i, { imgs: [] }), `row-${i}`)}
                   </td>
                   <td className="border border-slate-200 px-1 py-1">
                     <input value={r.code} onChange={(e) => setRow(i, { code: e.target.value })} placeholder="เช่น CTL085-BLK"
