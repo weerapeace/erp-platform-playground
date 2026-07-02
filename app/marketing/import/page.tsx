@@ -31,23 +31,37 @@ const MAPPING: { excel: string; field: string; status: "ok" | "unknown" }[] = [
   { excel: "# ผู้ที่อาจจะซื้อ", field: "— (ยังไม่ใช้)", status: "unknown" },
 ];
 
+interface AdsCampaignLite {
+  campaign_name: string;
+  spend: number;
+  sales: number;
+  roas: number;
+  orders: number;
+}
 interface PreviewData {
+  kind: "sales" | "ads";
   file_name: string;
   shop: string;
   platform: string;
-  date: string | null;
+  date?: string | null;
   period_start: string | null;
   period_end: string | null;
-  statuses: OrderStatusKey[];
-  counts: { daily: number; hourly: number; products: number };
+  generated_at?: string | null;
+  statuses?: OrderStatusKey[];
+  counts: { daily?: number; hourly?: number; products?: number; campaigns?: number };
+  totals?: { spend: number; sales: number; orders: number };
   warnings: string[];
-  byStatus: Partial<Record<OrderStatusKey, StatusData>>;
+  byStatus?: Partial<Record<OrderStatusKey, StatusData>>;
+  campaigns?: AdsCampaignLite[];
 }
 interface CommitResult {
+  kind?: "sales" | "ads";
   import_id: string;
   shop: string;
-  date: string;
-  counts: { daily: number; hourly: number; products: number };
+  date?: string;
+  period_start?: string;
+  period_end?: string;
+  counts: { daily?: number; hourly?: number; products?: number; campaigns?: number };
   replaced: number;
   warnings: string[];
 }
@@ -129,8 +143,9 @@ export default function MarketingImportPage() {
   const canNext =
     step === 2 ? !!file : step === 3 ? !!preview && !previewLoading && !previewErr : true;
 
-  const sampleStatus = preview?.statuses.includes("paid") ? "paid" : preview?.statuses[0];
-  const sample = sampleStatus ? preview?.byStatus[sampleStatus] : undefined;
+  const isAds = preview?.kind === "ads";
+  const sampleStatus = preview?.statuses?.includes("paid") ? "paid" : preview?.statuses?.[0];
+  const sample = sampleStatus ? preview?.byStatus?.[sampleStatus] : undefined;
 
   return (
     <PlaygroundShell>
@@ -177,13 +192,13 @@ export default function MarketingImportPage() {
                   <FakeSelect value="อ่านอัตโนมัติจากชื่อไฟล์" />
                 </Field>
                 <Field label="ประเภทรายงาน">
-                  <FakeSelect value="ยอดขาย (Shop Stats)" />
+                  <FakeSelect value="ตรวจอัตโนมัติ (ยอดขาย / โฆษณา)" />
                 </Field>
                 <Field label="แม่แบบแปลงไฟล์ (Template)">
-                  <FakeSelect value="Shopee Shop Stats v1" />
+                  <FakeSelect value="Shopee Shop Stats / Shopee Ads" />
                 </Field>
               </div>
-              <p className="text-xs text-slate-400">* รอบนี้รองรับ Shopee ยอดขายก่อน ช่องทางอื่นจะเพิ่มภายหลัง</p>
+              <p className="text-xs text-slate-400">* รองรับ Shopee: ไฟล์ยอดขาย (.xlsx) และไฟล์โฆษณา CPC (.csv) — ระบบดูชนิดจากไฟล์ให้เอง</p>
             </div>
           )}
 
@@ -253,13 +268,45 @@ export default function MarketingImportPage() {
                 <div className="py-10 text-center text-sm text-slate-400">⏳ กำลังอ่านไฟล์...</div>
               ) : previewErr ? (
                 <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-700">{previewErr}</div>
+              ) : preview && isAds ? (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <MiniStat label="ชนิดไฟล์" value="โฆษณา (Ads)" tone="ok" />
+                    <MiniStat label="ร้าน" value={preview.shop || "-"} />
+                    <MiniStat label="ช่วงวันที่" value={preview.period_start ? `${preview.period_start} – ${preview.period_end}` : "-"} />
+                    <MiniStat label="จำนวนแคมเปญ" value={`${preview.counts.campaigns ?? 0}`} />
+                  </div>
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 text-slate-500">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">แคมเปญ</th>
+                          <th className="text-right px-3 py-2 font-medium">ค่าโฆษณา</th>
+                          <th className="text-right px-3 py-2 font-medium">ยอดขาย</th>
+                          <th className="text-right px-3 py-2 font-medium">ROAS</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(preview.campaigns ?? []).slice(0, 10).map((c) => (
+                          <tr key={c.campaign_name}>
+                            <td className="px-3 py-1.5 text-slate-600 truncate max-w-[200px]" title={c.campaign_name}>{c.campaign_name}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{baht(c.spend)}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{baht(c.sales)}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{c.roas.toLocaleString("th-TH", { maximumFractionDigits: 2 })}x</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs text-slate-400">พบไฟล์โฆษณา CPC — แสดงตัวอย่างแคมเปญ (สูงสุด 10)</p>
+                </>
               ) : preview ? (
                 <>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <MiniStat label="ชนิดไฟล์" value="ยอดขาย (Sales)" tone="ok" />
                     <MiniStat label="ร้าน" value={preview.shop || "-"} />
                     <MiniStat label="วันที่" value={preview.date || "-"} />
-                    <MiniStat label="สถานะที่พบ" value={`${preview.statuses.length} สถานะ`} />
-                    <MiniStat label="แถวข้อมูล" value={`${preview.counts.daily + preview.counts.hourly + preview.counts.products}`} />
+                    <MiniStat label="แถวข้อมูล" value={`${(preview.counts.daily ?? 0) + (preview.counts.hourly ?? 0) + (preview.counts.products ?? 0)}`} />
                   </div>
                   {sample ? (
                     <div className="overflow-x-auto rounded-lg border border-slate-200">
@@ -328,13 +375,28 @@ export default function MarketingImportPage() {
             <div className="space-y-4">
               <h2 className="font-semibold text-slate-800">ตรวจข้อมูลก่อนบันทึก</h2>
               <div className="space-y-2">
-                <CheckRow tone="ok" text={`อ่านยอดสรุปรายวันได้ ${preview?.counts.daily ?? 0} รายการ (ตามสถานะ)`} />
-                <CheckRow tone="ok" text={`อ่านรายชั่วโมงได้ ${preview?.counts.hourly ?? 0} แถว`} />
-                <CheckRow tone="ok" text={`อ่านสินค้าขายดีได้ ${preview?.counts.products ?? 0} รายการ`} />
-                {(preview?.warnings ?? []).map((w, i) => (
-                  <CheckRow key={i} tone="warn" text={w} />
-                ))}
-                <CheckRow tone="info" text={`ถ้าเคยนำเข้าข้อมูลวันที่ ${preview?.date ?? "-"} ของร้านนี้แล้ว ระบบจะแทนที่ด้วยข้อมูลใหม่`} />
+                {isAds ? (
+                  <>
+                    <CheckRow tone="ok" text={`อ่านแคมเปญโฆษณาได้ ${preview?.counts.campaigns ?? 0} แคมเปญ`} />
+                    {preview?.totals ? (
+                      <CheckRow tone="ok" text={`ค่าโฆษณารวม ${baht(preview.totals.spend)} · ยอดขายจากโฆษณา ${baht(preview.totals.sales)}`} />
+                    ) : null}
+                    {(preview?.warnings ?? []).map((w, i) => (
+                      <CheckRow key={i} tone="warn" text={w} />
+                    ))}
+                    <CheckRow tone="info" text={`ถ้าเคยนำเข้าโฆษณาช่วง ${preview?.period_start ?? "-"} ถึง ${preview?.period_end ?? "-"} ของร้านนี้แล้ว ระบบจะแทนที่`} />
+                  </>
+                ) : (
+                  <>
+                    <CheckRow tone="ok" text={`อ่านยอดสรุปรายวันได้ ${preview?.counts.daily ?? 0} รายการ (ตามสถานะ)`} />
+                    <CheckRow tone="ok" text={`อ่านรายชั่วโมงได้ ${preview?.counts.hourly ?? 0} แถว`} />
+                    <CheckRow tone="ok" text={`อ่านสินค้าขายดีได้ ${preview?.counts.products ?? 0} รายการ`} />
+                    {(preview?.warnings ?? []).map((w, i) => (
+                      <CheckRow key={i} tone="warn" text={w} />
+                    ))}
+                    <CheckRow tone="info" text={`ถ้าเคยนำเข้าข้อมูลวันที่ ${preview?.date ?? "-"} ของร้านนี้แล้ว ระบบจะแทนที่ด้วยข้อมูลใหม่`} />
+                  </>
+                )}
               </div>
               {commitErr ? <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-700">{commitErr}</div> : null}
             </div>
@@ -350,16 +412,30 @@ export default function MarketingImportPage() {
               </div>
               {commitErr ? <div className="rounded-lg bg-amber-50 border border-amber-100 px-4 py-3 text-sm text-amber-700">{commitErr}</div> : null}
               {result ? (
-                <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 space-y-1.5 text-sm">
-                  <SummaryRow k="ร้าน" v={`Shopee · ${result.shop || "(ไม่ระบุ)"}`} />
-                  <SummaryRow k="วันที่" v={result.date} />
-                  <SummaryRow k="บันทึก" v={`รายวัน ${result.counts.daily} · รายชั่วโมง ${result.counts.hourly} · สินค้า ${result.counts.products}`} />
-                  <SummaryRow k="ข้อมูลซ้ำ" v={result.replaced > 0 ? `แทนที่ข้อมูลเดิมของวันนี้ (${result.replaced} รายการ)` : "ไม่พบข้อมูลเดิม — บันทึกใหม่"} />
-                </div>
+                result.kind === "ads" ? (
+                  <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 space-y-1.5 text-sm">
+                    <SummaryRow k="ชนิด" v="โฆษณา (Ads)" />
+                    <SummaryRow k="ร้าน" v={`Shopee · ${result.shop || "(ไม่ระบุ)"}`} />
+                    <SummaryRow k="ช่วงวันที่" v={`${result.period_start ?? "-"} – ${result.period_end ?? "-"}`} />
+                    <SummaryRow k="บันทึก" v={`${result.counts.campaigns ?? 0} แคมเปญ`} />
+                    <SummaryRow k="ข้อมูลซ้ำ" v={result.replaced > 0 ? `แทนที่ข้อมูลเดิมของช่วงนี้ (${result.replaced} แคมเปญ)` : "ไม่พบข้อมูลเดิม — บันทึกใหม่"} />
+                  </div>
+                ) : (
+                  <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 space-y-1.5 text-sm">
+                    <SummaryRow k="ชนิด" v="ยอดขาย (Sales)" />
+                    <SummaryRow k="ร้าน" v={`Shopee · ${result.shop || "(ไม่ระบุ)"}`} />
+                    <SummaryRow k="วันที่" v={result.date ?? "-"} />
+                    <SummaryRow k="บันทึก" v={`รายวัน ${result.counts.daily ?? 0} · รายชั่วโมง ${result.counts.hourly ?? 0} · สินค้า ${result.counts.products ?? 0}`} />
+                    <SummaryRow k="ข้อมูลซ้ำ" v={result.replaced > 0 ? `แทนที่ข้อมูลเดิมของวันนี้ (${result.replaced} รายการ)` : "ไม่พบข้อมูลเดิม — บันทึกใหม่"} />
+                  </div>
+                )
               ) : null}
               <div className="flex flex-wrap gap-2 pt-2">
-                <Link href={`/marketing/dashboard`} className="rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700">
-                  ดู Dashboard →
+                <Link
+                  href={result?.kind === "ads" ? "/marketing/ads" : "/marketing/dashboard"}
+                  className="rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700"
+                >
+                  {result?.kind === "ads" ? "ดูหน้าโฆษณา →" : "ดู Dashboard →"}
                 </Link>
                 <button
                   onClick={() => {

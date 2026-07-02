@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
-import { parseShopeeShopStats, parseShopeeFileName } from "@/lib/marketing/shopee-parser";
+import { parseMarketingFile } from "@/lib/marketing/parse-file";
+import { parseShopeeFileName } from "@/lib/marketing/shopee-parser";
 import type { OrderStatusKey } from "@/lib/marketing/mock-data";
 
 export const dynamic = "force-dynamic";
 
-// POST multipart/form-data { file, platform?, shop? } → พรีวิวข้อมูลที่อ่านได้ (ไม่บันทึก)
+// POST multipart/form-data { file, shop? } → พรีวิวข้อมูลที่อ่านได้ (ไม่บันทึก) รองรับทั้งยอดขาย & โฆษณา
 export async function POST(request: NextRequest) {
   const denied = await guardApi(request, "marketing.import.create");
   if (denied) return denied;
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
 
   let parsed;
   try {
-    parsed = await parseShopeeShopStats(await file.arrayBuffer(), { shop });
+    parsed = await parseMarketingFile(file, shop);
   } catch (e) {
     return NextResponse.json(
       { data: null, error: "อ่านไฟล์ไม่สำเร็จ: " + (e instanceof Error ? e.message : String(e)) },
@@ -35,10 +36,41 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const statuses = Object.keys(parsed.byStatus) as OrderStatusKey[];
+  if (parsed.kind === "ads") {
+    const r = parsed.result;
+    const totals = r.campaigns.reduce(
+      (a, c) => {
+        a.spend += c.spend;
+        a.sales += c.sales;
+        a.orders += c.orders;
+        return a;
+      },
+      { spend: 0, sales: 0, orders: 0 },
+    );
+    return NextResponse.json({
+      data: {
+        kind: "ads",
+        file_name: file.name,
+        shop: r.shop,
+        platform: r.platform,
+        period_start: r.period_start,
+        period_end: r.period_end,
+        generated_at: r.generated_at,
+        counts: { campaigns: r.campaigns.length },
+        totals,
+        warnings: r.warnings,
+        campaigns: r.campaigns,
+      },
+      error: null,
+    });
+  }
+
+  // sales
+  const r = parsed.result;
+  const statuses = Object.keys(r.byStatus) as OrderStatusKey[];
   const counts = statuses.reduce(
     (acc, st) => {
-      const s = parsed.byStatus[st]!;
+      const s = r.byStatus[st]!;
       acc.daily += 1;
       acc.hourly += s.hourly.length;
       acc.products += s.products.length;
@@ -46,19 +78,19 @@ export async function POST(request: NextRequest) {
     },
     { daily: 0, hourly: 0, products: 0 },
   );
-
   return NextResponse.json({
     data: {
+      kind: "sales",
       file_name: file.name,
-      shop: parsed.shop,
-      platform: parsed.platform,
-      date: parsed.date,
+      shop: r.shop,
+      platform: r.platform,
+      date: r.date,
       period_start: fromName.periodStart,
       period_end: fromName.periodEnd,
       statuses,
       counts,
-      warnings: parsed.warnings,
-      byStatus: parsed.byStatus, // ส่งกลับให้หน้าใช้พรีวิว (ตัวเลขจริง)
+      warnings: r.warnings,
+      byStatus: r.byStatus,
     },
     error: null,
   });
