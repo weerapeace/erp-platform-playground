@@ -57,6 +57,33 @@ function ctFromKey(key: string): string {
   return "image/jpeg";
 }
 
+const DESC_MODULE = "parent_sku_description";
+// ผูกรูป (r2Key ที่มีอยู่แล้ว) เป็น "รูป Description" ของ Parent SKU ผ่านคลังกลาง (assets) + asset_usages
+// replaceAssetId != null → แทนช่องนั้น (ใส่ที่ sort_order เดิม + ถอดลิงก์เก่า, asset เก่ายังอยู่ในคลัง)
+async function linkDescriptionImage(admin: any, parentId: string, r2Key: string, replaceAssetId: string | null, baseLedger: Record<string, unknown>, ledger: Record<string, unknown>[]): Promise<boolean> {
+  const ext = (r2Key.split(".").pop() ?? "").toLowerCase();
+  const name = r2Key.split("/").pop() ?? "image";
+  const { data: asset } = await admin.from("assets").insert({
+    title: name, file_name: name, r2_key: r2Key, asset_type: "image",
+    content_type: ctFromKey(r2Key), ext: ext || null, status: "active", source: "upload",
+  }).select("id").single();
+  const assetId = asset?.id as string | undefined;
+  if (!assetId) return false;
+  if (replaceAssetId) {
+    const { data: oldU } = await admin.from("asset_usages").select("id, sort_order").eq("module", DESC_MODULE).eq("record_id", parentId).eq("asset_id", replaceAssetId).is("field", null).maybeSingle();
+    const ord = (oldU?.sort_order as number | null) ?? null;
+    await admin.from("asset_usages").insert({ asset_id: assetId, module: DESC_MODULE, record_id: parentId, record_label: null, field: null, sort_order: ord });
+    if (oldU?.id) await admin.from("asset_usages").delete().eq("id", oldU.id);
+    ledger.push({ ...baseLedger, target_kind: "desc_media_replace", target_table: "asset_usages", target_id: assetId, ref: r2Key, prev_value: replaceAssetId, new_value: assetId, mode: "description" });
+  } else {
+    const { data: mx } = await admin.from("asset_usages").select("sort_order").eq("module", DESC_MODULE).eq("record_id", parentId).order("sort_order", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+    const ord = ((mx?.sort_order as number | null) ?? -1) + 1;
+    await admin.from("asset_usages").insert({ asset_id: assetId, module: DESC_MODULE, record_id: parentId, record_label: null, field: null, sort_order: ord });
+    ledger.push({ ...baseLedger, target_kind: "desc_media", target_table: "asset_usages", target_id: assetId, ref: r2Key, mode: "description" });
+  }
+  return true;
+}
+
 /** อนุมัติแล้ว -> ส่งข้อมูลเข้าสินค้า + บันทึก ledger */
 export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts: { actorId?: string | null }): Promise<SyncResult> {
   const cfg = (subtask.config ?? {}) as Record<string, any>;
@@ -98,10 +125,20 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
   };
 
   // helper: ดันรูป "keys" เข้าสินค้าเป้าหมายหนึ่ง ตาม m (replace map ของ tk นั้น) — แทนช่องเดิม/เพิ่มใหม่ + จด ledger
+  // ค่า m[k]: "new"=เพิ่มแกลเลอรี · "<attId>"=แทนแกลเลอรี · "desc:new"=เพิ่ม Description · "desc:<assetId>"=แทน Description (Parent เท่านั้น)
   const applyKeysToTarget = async (ownerType: "product_sku" | "parent_sku", table: "skus_v2" | "parent_skus_v2", ownerId: string, keys: string[], m: Record<string, string>) => {
     const entityType = ownerType === "parent_sku" ? "parent_skus_v2" : "skus_v2";
-    const replaceKeys = keys.filter((k) => m[k] && m[k] !== "new");
-    const appendKeys = keys.filter((k) => !m[k] || m[k] === "new");
+    // Description (Parent เท่านั้น)
+    if (ownerType === "parent_sku") {
+      const descKeys = keys.filter((k) => (m[k] ?? "").startsWith("desc"));
+      for (const imgKey of descKeys) {
+        const val = m[imgKey]; const replaceAssetId = val === "desc:new" ? null : val.slice("desc:".length) || null;
+        if (await linkDescriptionImage(admin, ownerId, imgKey, replaceAssetId, base, ledger)) pushed++; else skipped.push("desc_fail");
+      }
+    }
+    const galleryKeys = keys.filter((k) => !(m[k] ?? "").startsWith("desc"));
+    const replaceKeys = galleryKeys.filter((k) => m[k] && m[k] !== "new");
+    const appendKeys = galleryKeys.filter((k) => !m[k] || m[k] === "new");
     for (const imgKey of replaceKeys) {
       const attId = m[imgKey];
       const { data: attRow } = await admin.from("erp_playground_attachments").select("id, file_path").eq("id", attId).eq("entity_type", entityType).eq("entity_id", ownerId).maybeSingle();
@@ -209,6 +246,16 @@ export async function reverseSubtaskSync(admin: any, subtaskId: string, opts: { 
           const { data: cur } = await admin.from("product_image_slots").select("r2_key").eq("id", r.target_id).maybeSingle();
           if ((cur?.r2_key ?? null) === r.new_value) await admin.from("product_image_slots").update({ r2_key: r.prev_value ?? null }).eq("id", r.target_id);
         }
+      } else if (r.target_kind === "desc_media") {
+        // ถอดรูป Description ที่เพิ่ม → ลบลิงก์ (asset_id ที่สร้างใหม่ ไม่ซ้ำใคร ลบตรงได้)
+        await admin.from("asset_usages").delete().eq("asset_id", r.target_id).eq("module", DESC_MODULE);
+      } else if (r.target_kind === "desc_media_replace") {
+        // คืนรูป Description เก่า: ถ้าลิงก์ใหม่ยังอยู่ → ใส่ลิงก์เก่ากลับที่ตำแหน่งเดิม แล้วลบลิงก์ใหม่
+        const { data: newU } = await admin.from("asset_usages").select("id, record_id, sort_order").eq("asset_id", r.target_id).eq("module", DESC_MODULE).maybeSingle();
+        if (newU?.id && r.prev_value) {
+          await admin.from("asset_usages").insert({ asset_id: r.prev_value, module: DESC_MODULE, record_id: newU.record_id, record_label: null, field: null, sort_order: newU.sort_order ?? null });
+          await admin.from("asset_usages").delete().eq("id", newU.id);
+        }
       } else if (r.target_kind === "cover") {
         const { data: cur } = await admin.from(r.target_table).select("cover_image_r2_key").eq("id", r.target_id).maybeSingle();
         if ((cur?.cover_image_r2_key ?? null) === r.new_value) await admin.from(r.target_table).update({ cover_image_r2_key: r.prev_value ?? null }).eq("id", r.target_id);
@@ -245,8 +292,17 @@ export async function applyProductImagesNow(
   const ledger: Record<string, unknown>[] = [];
   let pushed = 0; const skipped: string[] = [];
   const items = (input.items ?? []).filter((it) => it && it.r2_key);
-  const replaceItems = items.filter((it) => it.slot && it.slot !== "new");
-  const appendKeys = items.filter((it) => !it.slot || it.slot === "new").map((it) => it.r2_key);
+  // Description (Parent เท่านั้น): slot ขึ้นต้น "desc"
+  if (input.ownerType === "parent_sku") {
+    const descItems = items.filter((it) => (it.slot ?? "").startsWith("desc"));
+    for (const it of descItems) {
+      const replaceAssetId = it.slot === "desc:new" ? null : String(it.slot).slice("desc:".length) || null;
+      if (await linkDescriptionImage(admin, input.ownerId, it.r2_key, replaceAssetId, base, ledger)) pushed++; else skipped.push("desc_fail");
+    }
+  }
+  const galleryItems = items.filter((it) => !(it.slot ?? "").startsWith("desc"));
+  const replaceItems = galleryItems.filter((it) => it.slot && it.slot !== "new");
+  const appendKeys = galleryItems.filter((it) => !it.slot || it.slot === "new").map((it) => it.r2_key);
 
   // แทนช่องเดิม
   for (const it of replaceItems) {

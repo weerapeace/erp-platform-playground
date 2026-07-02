@@ -368,10 +368,11 @@ type PlatformParent = { id: string; code: string; name_th: string; name_platform
 //   Parent SKU ให้ตรวจ + ต้องมีรายละเอียด (description) ครบทุกตัวก่อนถึงส่งได้
 // กล่องจัดการรูปของ "สินค้าหนึ่งตัว" (Parent SKU หรือ SKU) — ของกลาง
 // โชว์แกลเลอรีเดิม (มีเลข) + ลากรูปเข้ากล่องนี้ + เลือกต่อรูปว่า "เพิ่มใหม่/แทน #N" + ปุ่ม "ใส่เข้าสินค้าเลย" + ดู/กู้เวอร์ชันเก่า
-function ProductImageBox({ tk, label, slots, draft, uploading, onAddDraft, onRemoveDraft, replaceMap, setReplace, canApplyNow, applying, onApplyNow, tt, onRestored, onZoom }: {
+function ProductImageBox({ tk, label, slots, descSlots, draft, uploading, onAddDraft, onRemoveDraft, replaceMap, setReplace, canApplyNow, applying, onApplyNow, tt, onRestored, onZoom }: {
   tk: string;
   label: string;
   slots: { slot_id: string; slot: number; r2_key: string }[];
+  descSlots?: { slot_id: string; slot: number; url: string }[];   // รูป Description (Parent เท่านั้น) — undefined = ไม่มีช่อง Description
   draft: { r2_key: string; file_name: string }[];
   uploading: boolean;
   onAddDraft: (files: FileList | File[]) => void;
@@ -405,8 +406,8 @@ function ProductImageBox({ tk, label, slots, draft, uploading, onAddDraft, onRem
         <span
           className="cursor-help text-slate-400 hover:text-violet-600"
           title={tt(
-            `รูปที่ลากลงกล่องนี้จะเข้าแกลเลอรีของ ${label}\nต่อรูปเลือกได้ว่าจะ:\n• เพิ่มใหม่ = เพิ่มเป็นรูปใหม่ในแกลเลอรี (ค่าเริ่มต้น)\n• แทน #N = ทับรูปเดิมช่องที่ N ('รูปเดิมในสินค้า' ด้านบนมีเลขกำกับ)\nรูปเดิมที่ถูกแทนจะเก็บเป็นเวอร์ชันเก่า กด 🕘 เพื่อดู/กู้คืน\n• ปุ่ม 'ใส่เข้าสินค้าเลย' = ใส่ทันที ไม่ต้องรออนุมัติ\n• ถ้าไม่กด รูปจะเข้าตอน 'อนุมัติ' งานย่อย`,
-            `Images dropped here go to ${label}'s gallery.\nPer image choose:\n• Add new = append to gallery (default)\n• → #N = overwrite existing slot N (numbered in 'Current gallery' above)\nReplaced images are kept as old versions — tap 🕘 to view/restore.\n• 'Add to product now' = apply immediately, no approval needed.\n• Otherwise images apply when the subtask is approved.`,
+            `ลากรูปลงกล่องนี้ แล้วเลือก "ปลายทาง" ต่อรูปได้จาก dropdown:\n• แกลเลอรีสินค้า → เพิ่มใหม่ หรือ แทน #N (แถว 'รูปเดิมในสินค้า')\n${descSlots ? "• รูป Description → เพิ่มใหม่ หรือ แทน #N (แถว 'รูป Description เดิม')\n" : ""}รูปเดิมที่ถูกแทนในแกลเลอรีจะเก็บเป็นเวอร์ชันเก่า กด 🕘 ดู/กู้คืนได้\n• ปุ่ม 'ใส่เข้าสินค้าเลย' = ใส่ทันที ไม่ต้องรออนุมัติ · ถ้าไม่กด รูปจะเข้าตอน 'อนุมัติ'`,
+            `Drop images here, then pick each image's destination from the dropdown:\n• Product gallery → add new or replace #N ('Current gallery' row)\n${descSlots ? "• Description images → add new or replace #N ('Current Description' row)\n" : ""}Replaced gallery images are kept as old versions — tap 🕘 to view/restore.\n• 'Add to product now' = apply immediately, no approval; otherwise on approval.`,
           )}
         >ⓘ</span>
       </p>
@@ -424,7 +425,22 @@ function ProductImageBox({ tk, label, slots, draft, uploading, onAddDraft, onRem
           ))}
       </div>
 
-      {/* กล่องลากรูป + รูปร่างที่จะใส่ (เลือกแทน/เพิ่ม ต่อรูป) */}
+      {/* รูป Description เดิม (Parent เท่านั้น) */}
+      {descSlots && (
+        <div className="flex flex-wrap items-center gap-1 mb-2">
+          <span className="text-[10px] text-slate-400">📂 {tt("รูป Description เดิม:", "Current Description:")}</span>
+          {descSlots.length === 0 ? <span className="text-[10px] text-slate-400 italic">{tt("ยังไม่มีรูป", "none yet")}</span>
+            : descSlots.map((s, i) => (
+              <div key={s.slot_id} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`${s.url}${s.url.includes("?") ? "&" : "?"}w=64`} alt="" title={`Description #${i + 1}`} className="h-9 w-9 object-cover rounded border border-indigo-200" />
+                <span className="absolute -top-1 -left-1 bg-indigo-600 text-white text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{i + 1}</span>
+              </div>
+            ))}
+        </div>
+      )}
+
+      {/* กล่องลากรูป + รูปร่างที่จะใส่ (เลือกปลายทาง/แทน/เพิ่ม ต่อรูป) */}
       <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) onAddDraft(e.dataTransfer.files); }}
         className="rounded-md border border-dashed border-amber-300 bg-amber-50/30 px-2 py-1.5">
         <div className="flex flex-wrap items-start gap-2">
@@ -435,9 +451,17 @@ function ProductImageBox({ tk, label, slots, draft, uploading, onAddDraft, onRem
                 <img src={`/api/r2-image?key=${encodeURIComponent(d.r2_key)}&w=64`} alt="" title={tt("กดเพื่อดูเต็มจอ", "Click to view full")} onClick={() => onZoom?.(draft.map((x) => ({ url: `/api/r2-image?key=${encodeURIComponent(x.r2_key)}&w=1600`, label })), j)} className={`h-12 w-12 object-cover rounded border-2 cursor-zoom-in ${curVal !== "new" ? "border-amber-400" : "border-slate-200"}`} />
                 <button type="button" onClick={() => onRemoveDraft(j)} className="absolute -top-1 -right-1 h-4 w-4 flex items-center justify-center bg-white rounded-full text-red-500 text-[9px] shadow opacity-0 group-hover:opacity-100">✕</button>
               </div>
-              <select value={curVal} onChange={(e) => setReplace(tk, d.r2_key, e.target.value)} className="text-[10px] border border-slate-200 rounded px-0.5 py-0.5 w-[72px]">
-                <option value="new">➕ {tt("เพิ่มใหม่", "Add new")}</option>
-                {slots.map((s, i) => <option key={s.slot_id} value={s.slot_id}>{tt(`แทน #${i + 1}`, `→ #${i + 1}`)}</option>)}
+              <select value={curVal} onChange={(e) => setReplace(tk, d.r2_key, e.target.value)} className="text-[10px] border border-slate-200 rounded px-0.5 py-0.5 w-[96px]">
+                <optgroup label={tt("แกลเลอรีสินค้า", "Gallery")}>
+                  <option value="new">➕ {tt("เพิ่มใหม่", "Add new")}</option>
+                  {slots.map((s, i) => <option key={s.slot_id} value={s.slot_id}>{tt(`แทน #${i + 1}`, `→ #${i + 1}`)}</option>)}
+                </optgroup>
+                {descSlots && (
+                  <optgroup label={tt("รูป Description", "Description")}>
+                    <option value="desc:new">➕ {tt("เพิ่มใหม่", "Add new")}</option>
+                    {descSlots.map((s, i) => <option key={s.slot_id} value={`desc:${s.slot_id}`}>{tt(`แทน #${i + 1}`, `→ #${i + 1}`)}</option>)}
+                  </optgroup>
+                )}
               </select>
             </div>
           ); })}
@@ -501,8 +525,10 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const [noParent, setNoParent] = useState(false);   // ติ๊ก "ไม่ต้องแนบ Parent SKU" → ข้ามการบังคับเลือกสินค้าปลายทาง
   // เฟส 2: แกลเลอรีปัจจุบันของสินค้า (โชว์ preview) + จับคู่ "รูปส่ง → แทนช่องไหน"
   type GallerySlot = { slot_id: string; slot: number; r2_key: string };
+  type DescSlot = { slot_id: string; slot: number; url: string };
   const [galleries, setGalleries] = useState<Record<string, GallerySlot[]>>({});
-  const [replaceMap, setReplaceMap] = useState<Record<string, Record<string, string>>>({});   // targetKey → { workR2Key → slotId | "new" }
+  const [descGalleries, setDescGalleries] = useState<Record<string, DescSlot[]>>({});   // รูป Description ต่อ Parent "parent:<id>"
+  const [replaceMap, setReplaceMap] = useState<Record<string, Record<string, string>>>({});   // targetKey → { workR2Key → "new"|attId|"desc:new"|"desc:<assetId>" }
   const [linkedSkuIds, setLinkedSkuIds] = useState<string[]>([]);          // SKU ที่ผูกกับงาน (ใช้ติ๊กล่วงหน้า)
   const [requiredFields, setRequiredFields] = useState<{ key: string; label: string }[]>([]);   // ฟิลด์บังคับก่อนส่ง (ค่ากลาง)
   const [draftImages, setDraftImages] = useState<Record<string, { r2_key: string; file_name: string }[]>>({}); // รูปร่างต่อสินค้า key="parent:<id>"/"sku:<id>" (เข้าตอนอนุมัติ หรือกด "ใส่เลย")
@@ -521,6 +547,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       setRequiredFields((j.required as { key: string; label: string }[]) ?? []);
       setLinkedSkuIds((j.linked_sku_ids as string[]) ?? []);
       if (j.galleries) setGalleries((prev) => ({ ...prev, ...(j.galleries as Record<string, GallerySlot[]>) }));
+      if (j.desc_galleries) setDescGalleries((prev) => ({ ...prev, ...(j.desc_galleries as Record<string, DescSlot[]>) }));
       const entries = await Promise.all(ps.map(async (p) => {
         try {
           const sj = await apiFetch(`/api/pickers/skus?parent_sku_id=${encodeURIComponent(p.id)}&limit=50`).then((r) => r.json());
@@ -558,6 +585,11 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const refreshGallery = useCallback(async (tk: string) => {
     const [pfx, id] = tk.split(":"); const ot = pfx === "parent" ? "parent_sku" : "product_sku";
     try { const gj = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?gallery=${ot}:${encodeURIComponent(id)}`).then((r) => r.json()); if (gj.galleries) setGalleries((prev) => ({ ...prev, ...(gj.galleries as Record<string, GallerySlot[]>) })); } catch { /* noop */ }
+    if (pfx === "parent") await refreshDescGallery(id);
+  }, [taskId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // รีเฟรชรูป Description ของ Parent ตัวเดียว
+  const refreshDescGallery = useCallback(async (parentId: string) => {
+    try { const gj = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?descgallery=parent:${encodeURIComponent(parentId)}`).then((r) => r.json()); if (gj.desc_galleries) setDescGalleries((prev) => ({ ...prev, ...(gj.desc_galleries as Record<string, DescSlot[]>) })); } catch { /* noop */ }
   }, [taskId]);
 
   // ติ๊กล่วงหน้า: ใช้ค่าที่เคยเลือกถ้ามี ไม่งั้น prefill ด้วย Parent/SKU ที่ผูกกับงาน
@@ -619,8 +651,9 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       await reloadSkusFor(p.id);
     }
     const n = new Set(syncParentIds); n.add(p.id); setSyncParentIds(n); persistTargets(n, syncSkuIds);
-    // ดึงแกลเลอรีของ Parent ที่เพิ่งเลือก มาโชว์ preview + ให้จับคู่แทนรูปได้
+    // ดึงแกลเลอรี + รูป Description ของ Parent ที่เพิ่งเลือก มาโชว์ preview + ให้จับคู่แทนรูปได้
     try { const gj = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?gallery=parent_sku:${encodeURIComponent(p.id)}`).then((r) => r.json()); if (gj.galleries) setGalleries((prev) => ({ ...prev, ...(gj.galleries as Record<string, GallerySlot[]>) })); } catch { /* noop */ }
+    await refreshDescGallery(p.id);
     setAddParentOpen(false);
   };
   const displayParents = useMemo(() => [...(parents ?? []), ...extraParents], [parents, extraParents]);
@@ -761,7 +794,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                         <button type="button" onClick={() => setEditParentId(p.id)} title={t("แก้/เพิ่ม SKU ในตัวแก้สินค้า", "Manage SKUs in product editor")} className="text-[11px] text-violet-600 hover:underline shrink-0">✏️ {t("แก้สินค้า", "Edit product")}</button>
                       </div>
                       {/* กล่องรูปของ Parent SKU นี้ — แกลเลอรีเดิม + ลากรูป + เลือกแทน/เพิ่ม + ปุ่มใส่เลย */}
-                      {pon && <div className="pl-6"><ProductImageBox tk={`parent:${p.id}`} label={p.code} slots={galleries[`parent:${p.id}`] ?? []} draft={draftImages[`parent:${p.id}`] ?? []} uploading={uploadingTk === `parent:${p.id}`} onAddDraft={(f) => void addDraftImages(`parent:${p.id}`, f)} onRemoveDraft={(i) => removeDraftImage(`parent:${p.id}`, i)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `parent:${p.id}`} onApplyNow={() => void applyNow(`parent:${p.id}`)} tt={t} onRestored={() => refreshGallery(`parent:${p.id}`)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} /></div>}
+                      {pon && <div className="pl-6"><ProductImageBox tk={`parent:${p.id}`} label={p.code} slots={galleries[`parent:${p.id}`] ?? []} descSlots={descGalleries[`parent:${p.id}`] ?? []} draft={draftImages[`parent:${p.id}`] ?? []} uploading={uploadingTk === `parent:${p.id}`} onAddDraft={(f) => void addDraftImages(`parent:${p.id}`, f)} onRemoveDraft={(i) => removeDraftImage(`parent:${p.id}`, i)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `parent:${p.id}`} onApplyNow={() => void applyNow(`parent:${p.id}`)} tt={t} onRestored={() => refreshGallery(`parent:${p.id}`)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} /></div>}
                       <div className="pl-6 mt-1.5 space-y-1.5">
                         {(skusByParent[p.id] ?? []).map((s) => { const son = syncSkuIds.has(s.id); const thumb = s.image_key ? `/api/r2-image?key=${encodeURIComponent(s.image_key)}` : null; return (
                           <div key={s.id} className="space-y-1">

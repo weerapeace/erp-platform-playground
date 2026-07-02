@@ -96,7 +96,27 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
   }));
   // แกลเลอรีปัจจุบันของ Parent SKU (โชว์ preview + จับคู่แทนรูปในป๊อปอัปส่งงาน)
   const galleries = await loadGalleries(admin, "parent_sku", pIds);
-  return NextResponse.json({ parents, linked_sku_ids: linkedSkuIds, required, galleries, error: null });
+  const desc_galleries = await loadDescGalleries(admin, pIds);   // รูป Description ของ Parent (เลือกแทน/เพิ่มได้)
+  return NextResponse.json({ parents, linked_sku_ids: linkedSkuIds, required, galleries, desc_galleries, error: null });
+}
+
+// รูป Description ของ Parent SKU (asset_usages module=parent_sku_description) → "parent:<id>" → [{slot_id=assetId, slot, url}]
+async function loadDescGalleries(admin: ReturnType<typeof supabaseAdmin>, parentIds: string[]): Promise<Record<string, { slot_id: string; slot: number; url: string }[]>> {
+  const out: Record<string, { slot_id: string; slot: number; url: string }[]> = {};
+  if (!parentIds.length) return out;
+  const { data: us } = await admin.from("asset_usages").select("asset_id, record_id, sort_order").eq("module", "parent_sku_description").in("record_id", parentIds).order("sort_order", { ascending: true, nullsFirst: false });
+  const rows = (us ?? []) as { asset_id: string; record_id: string; sort_order: number | null }[];
+  const assetIds = [...new Set(rows.map((r) => r.asset_id))];
+  if (!assetIds.length) return out;
+  const { data: assets } = await admin.from("assets").select("id, r2_key").in("id", assetIds).eq("status", "active");
+  const keyById = new Map(((assets ?? []) as { id: string; r2_key: string }[]).map((a) => [a.id, a.r2_key]));
+  const idx: Record<string, number> = {};
+  for (const r of rows) {
+    const key = keyById.get(r.asset_id); if (!key) continue;
+    const tk = `parent:${r.record_id}`; idx[tk] = (idx[tk] ?? -1) + 1;
+    (out[tk] ??= []).push({ slot_id: r.asset_id, slot: idx[tk], url: `/api/r2-image?key=${encodeURIComponent(key)}` });
+  }
+  return out;
 }
 
 // แกลเลอรีสินค้าที่ผู้ใช้เห็นจริง (erp_playground_attachments) ต่อ owner — คืน map "parent:<id>" / "sku:<id>" → [{slot_id,slot,r2_key}]
@@ -141,6 +161,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const ownerType = ot === "parent_sku" ? "parent_sku" : "product_sku";
     const g = await loadGalleries(admin, ownerType, oid ? [oid] : []);
     return NextResponse.json({ galleries: g, error: null });
+  }
+  // รูป Description ของ Parent แบบเจาะจง — "parent:<id>"
+  const descOwner = sp.get("descgallery");
+  if (descOwner) {
+    const oid = descOwner.split(":")[1];
+    const dg = await loadDescGalleries(admin, oid ? [oid] : []);
+    return NextResponse.json({ desc_galleries: dg, error: null });
   }
   if (sp.get("platform") === "1") return platformPreview(admin, id);
   const { data, error } = await admin.from("erp_creative_subtasks").select("*").eq("task_id", id).order("sort_order", { ascending: true });
