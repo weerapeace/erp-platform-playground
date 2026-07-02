@@ -65,7 +65,9 @@ function buildSoData(so: SODetailExt): Record<string, unknown> {
       unit:            l.unit,
       unit_price:      baht(l.unit_price),
       discount_amount: baht(l.discount_amount ?? 0),
-      line_total:      baht(l.line_total ?? 0),
+      // คอลัมน์ AMOUNT = ยอดก่อน VAT (net) เพื่อให้รวมกันได้ = "รวมราคาทั้งสิ้น" แล้วบวก VAT แยกด้านล่าง
+      // (เดิมใช้ line_total ที่รวม VAT แล้ว → ไม่ตรงกับยอดรวม)
+      line_total:      baht(l.net_amount ?? l.line_total ?? 0),
     })),
   };
 }
