@@ -1,14 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
-import {
-  MOCK_SHOPEE_SALES,
-  type OrderStatusKey,
-  type StatusData,
-  type HourlyPoint,
-} from "@/lib/marketing/mock-data";
+import { apiFetch } from "@/lib/api";
+import type { OrderStatusKey, StatusData, HourlyPoint } from "@/lib/marketing/mock-data";
 
 /* ---------- format helpers ---------- */
 const nf = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 0 });
@@ -17,6 +13,7 @@ const baht = (n: number) => "฿" + n.toLocaleString("th-TH", { maximumFractionD
 const pct = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 2 }) + "%";
 function thaiDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
+  if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
 }
 
@@ -27,12 +24,58 @@ const STATUS_HINT: Record<OrderStatusKey, string> = {
   all: "ทุกออเดอร์ที่กดสั่ง (รวมที่ยังไม่จ่าย/ยกเลิก)",
 };
 
+interface DashData {
+  platform: string;
+  shop: string;
+  date: string | null;
+  byStatus: Partial<Record<OrderStatusKey, StatusData>>;
+  meta: { availableDates: string[]; availableShops: string[] };
+}
+
 /* ================================================================== */
 
 export default function MarketingDashboardPage() {
-  const data = MOCK_SHOPEE_SALES;
+  const [data, setData] = useState<DashData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
   const [status, setStatus] = useState<OrderStatusKey>("paid");
-  const s: StatusData = data.byStatus[status];
+
+  const load = useCallback(async (opts?: { date?: string; shop?: string }) => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const qs = new URLSearchParams();
+      if (opts?.date) qs.set("date", opts.date);
+      if (opts?.shop) qs.set("shop", opts.shop);
+      const r = await apiFetch("/api/marketing/dashboard?" + qs.toString());
+      const j = await r.json();
+      if (!r.ok || j.error) {
+        setErr(j.error || "โหลดข้อมูลไม่สำเร็จ");
+        setData(null);
+      } else {
+        const d = j.data as DashData;
+        setData(d);
+        const keys = Object.keys(d.byStatus) as OrderStatusKey[];
+        if (keys.length && !keys.includes(status)) {
+          setStatus(keys.includes("paid") ? "paid" : keys[0]);
+        }
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const statuses = data ? (Object.keys(data.byStatus) as OrderStatusKey[]) : [];
+  const s: StatusData | null = data && data.byStatus[status] ? data.byStatus[status]! : null;
+  const hasData = statuses.length > 0;
 
   return (
     <PlaygroundShell>
@@ -40,147 +83,178 @@ export default function MarketingDashboardPage() {
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
         <div className="flex flex-wrap items-start justify-between gap-3 max-w-6xl mx-auto">
           <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-800">
-                📊 Marketing Dashboard — Shopee
-              </h1>
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 px-2.5 py-0.5 text-xs font-medium">
-                ข้อมูลตัวอย่าง (Mock)
-              </span>
-            </div>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">📊 Marketing Dashboard — Shopee</h1>
             <p className="text-sm text-slate-500 mt-1">
-              ร้าน <span className="font-medium text-slate-700">{data.shop}</span> · ยอดขายวันที่{" "}
-              <span className="font-medium text-slate-700">{thaiDate(data.date)}</span>
+              {data?.shop ? (
+                <>
+                  ร้าน <span className="font-medium text-slate-700">{data.shop}</span>
+                  {data.date ? (
+                    <>
+                      {" "}
+                      · ยอดขายวันที่ <span className="font-medium text-slate-700">{thaiDate(data.date)}</span>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                "ยอดขายจาก Shopee"
+              )}
             </p>
           </div>
-          <Link
-            href="/marketing/import"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3.5 py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
-            ⬆️ อัปไฟล์ Excel
-          </Link>
+          <div className="flex items-center gap-2">
+            {data && data.meta.availableDates.length > 0 && (
+              <select
+                value={data.date ?? ""}
+                onChange={(e) => load({ date: e.target.value, shop: data.shop })}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+              >
+                {data.meta.availableDates.map((d) => (
+                  <option key={d} value={d}>
+                    {thaiDate(d)}
+                  </option>
+                ))}
+              </select>
+            )}
+            {data && data.meta.availableShops.length > 1 && (
+              <select
+                value={data.shop}
+                onChange={(e) => load({ shop: e.target.value })}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+              >
+                {data.meta.availableShops.map((sh) => (
+                  <option key={sh} value={sh}>
+                    {sh || "(ไม่ระบุร้าน)"}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Link
+              href="/marketing/import"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3.5 py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
+            >
+              ⬆️ อัปไฟล์ Excel
+            </Link>
+          </div>
         </div>
       </div>
 
       <div className="px-4 sm:px-8 py-5 space-y-6 max-w-6xl mx-auto">
-        {/* Status selector */}
-        <div>
-          <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-            {STATUS_ORDER.map((k) => (
-              <button
-                key={k}
-                onClick={() => setStatus(k)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  status === k
-                    ? "bg-blue-600 text-white"
-                    : "text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {data.byStatus[k].label}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-slate-400 mt-1.5">{STATUS_HINT[status]}</p>
-        </div>
+        {loading ? (
+          <LoadingState />
+        ) : err ? (
+          <ErrorState msg={err} onRetry={() => load()} />
+        ) : !hasData ? (
+          <EmptyState />
+        ) : s ? (
+          <>
+            {/* Status selector */}
+            <div>
+              <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+                {STATUS_ORDER.filter((k) => statuses.includes(k)).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setStatus(k)}
+                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      status === k ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {data!.byStatus[k]!.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-slate-400 mt-1.5">{STATUS_HINT[status]}</p>
+            </div>
 
-        {/* KPI cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <StatCard
-            accent
-            label="ยอดขายรวม"
-            value={baht(s.daily.gross_sales)}
-            sub={`ไม่รวมส่วนลด Shopee: ${baht(s.daily.sales_excl_shopee_discount)}`}
-          />
-          <StatCard
-            label="จำนวนออเดอร์"
-            value={nf(s.daily.orders)}
-            sub={`ยกเลิก ${nf(s.daily.cancelled_orders)} ออเดอร์`}
-          />
-          <StatCard
-            label="ยอดเฉลี่ย/ออเดอร์"
-            value={baht(s.daily.aov)}
-            sub="AOV — Average Order Value"
-          />
-          <StatCard
-            label="อัตราการซื้อ"
-            value={pct(s.daily.conversion_rate)}
-            sub={`คลิก ${nf(s.daily.clicks)} · ผู้เข้าชม ${nf(s.daily.visitors)}`}
-          />
-          <StatCard
-            label="ผู้เข้าชมร้าน"
-            value={nf(s.daily.visitors)}
-            sub={`คลิกสินค้า ${nf(s.daily.clicks)} ครั้ง`}
-          />
-          <StatCard
-            label="จำนวนผู้ซื้อ"
-            value={nf(s.daily.buyers)}
-            sub={`ใหม่ ${nf(s.daily.new_buyers)} · เดิม ${nf(s.daily.returning_buyers)}`}
-          />
-          <StatCard
-            label="ยอดขายจากโฆษณา"
-            value={baht(s.traffic.shopee_ads)}
-            sub={`${pct((s.traffic.shopee_ads / s.daily.gross_sales) * 100)} ของยอดขาย · ยังไม่มีค่าโฆษณา`}
-          />
-          <StatCard
-            label="ยอดที่ยกเลิก"
-            value={baht(s.daily.cancelled_sales)}
-            sub={`${nf(s.daily.cancelled_orders)} ออเดอร์ถูกยกเลิก`}
-          />
-        </div>
+            {/* KPI cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              <StatCard accent label="ยอดขายรวม" value={baht(s.daily.gross_sales)} sub={`ไม่รวมส่วนลด Shopee: ${baht(s.daily.sales_excl_shopee_discount)}`} />
+              <StatCard label="จำนวนออเดอร์" value={nf(s.daily.orders)} sub={`ยกเลิก ${nf(s.daily.cancelled_orders)} ออเดอร์`} />
+              <StatCard label="ยอดเฉลี่ย/ออเดอร์" value={baht(s.daily.aov)} sub="AOV — Average Order Value" />
+              <StatCard label="อัตราการซื้อ" value={pct(s.daily.conversion_rate)} sub={`คลิก ${nf(s.daily.clicks)} · ผู้เข้าชม ${nf(s.daily.visitors)}`} />
+              <StatCard label="ผู้เข้าชมร้าน" value={nf(s.daily.visitors)} sub={`คลิกสินค้า ${nf(s.daily.clicks)} ครั้ง`} />
+              <StatCard label="จำนวนผู้ซื้อ" value={nf(s.daily.buyers)} sub={`ใหม่ ${nf(s.daily.new_buyers)} · เดิม ${nf(s.daily.returning_buyers)}`} />
+              <StatCard
+                label="ยอดขายจากโฆษณา"
+                value={baht(s.traffic.shopee_ads)}
+                sub={`${s.daily.gross_sales ? pct((s.traffic.shopee_ads / s.daily.gross_sales) * 100) : "-"} ของยอดขาย · ยังไม่มีค่าโฆษณา`}
+              />
+              <StatCard label="ยอดที่ยกเลิก" value={baht(s.daily.cancelled_sales)} sub={`${nf(s.daily.cancelled_orders)} ออเดอร์ถูกยกเลิก`} />
+            </div>
 
-        {/* Hourly chart */}
-        <HourlyChart hourly={s.hourly} />
+            <HourlyChart hourly={s.hourly} />
 
-        {/* Traffic + Top products */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-          <div className="lg:col-span-2">
-            <TrafficCard s={s} />
-          </div>
-          <div className="lg:col-span-3">
-            <TopProductsTable s={s} />
-          </div>
-        </div>
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+              <div className="lg:col-span-2">
+                <TrafficCard s={s} />
+              </div>
+              <div className="lg:col-span-3">
+                <TopProductsTable s={s} />
+              </div>
+            </div>
 
-        {/* footer note */}
-        <p className="text-xs text-slate-400 leading-relaxed">
-          หมายเหตุ: นี่คือหน้าตัวอย่าง ตัวเลขดึงจากไฟล์รายงานร้าน Shopee วันที่ 30 มิ.ย. 2026
-          จริง แต่ยังไม่ต่อระบบอัปไฟล์อัตโนมัติ · ROAS จริงต้องใช้ไฟล์ค่าโฆษณา (Shopee Ads)
-          เพิ่มอีกไฟล์ · รหัสสินค้าที่แสดงเป็นรหัสของ Shopee ยังไม่ผูกกับรหัสสินค้าในระบบเรา
-        </p>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              หมายเหตุ: ROAS จริงต้องใช้ไฟล์ค่าโฆษณา (Shopee Ads) เพิ่มอีกไฟล์ · รหัสสินค้าที่แสดงเป็นรหัสของ
+              Shopee ยังไม่ผูกกับรหัสสินค้าในระบบเรา
+            </p>
+          </>
+        ) : null}
       </div>
     </PlaygroundShell>
   );
 }
 
 /* ================================================================== */
+/* States                                                              */
+/* ================================================================== */
+function LoadingState() {
+  return (
+    <div className="space-y-4">
+      <div className="h-9 w-64 rounded-lg bg-slate-100 animate-pulse" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="h-24 rounded-xl bg-slate-100 animate-pulse" />
+        ))}
+      </div>
+      <div className="h-56 rounded-xl bg-slate-100 animate-pulse" />
+    </div>
+  );
+}
+function ErrorState({ msg, onRetry }: { msg: string; onRetry: () => void }) {
+  return (
+    <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
+      <div className="text-3xl mb-2">⚠️</div>
+      <div className="text-sm text-red-700">{msg}</div>
+      <button onClick={onRetry} className="mt-3 rounded-lg border border-red-200 bg-white text-red-700 px-4 py-1.5 text-sm font-medium hover:bg-red-50">
+        ลองใหม่
+      </button>
+    </div>
+  );
+}
+function EmptyState() {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
+      <div className="text-4xl mb-3">📭</div>
+      <h2 className="text-lg font-semibold text-slate-800">ยังไม่มีข้อมูล</h2>
+      <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
+        เริ่มต้นด้วยการอัปโหลดไฟล์รายงานยอดขายจาก Shopee เข้าระบบ แล้วตัวเลขจะสรุปขึ้นที่หน้านี้อัตโนมัติ
+      </p>
+      <Link
+        href="/marketing/import"
+        className="inline-flex items-center gap-1.5 mt-4 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700"
+      >
+        ⬆️ อัปไฟล์ Excel
+      </Link>
+    </div>
+  );
+}
+
+/* ================================================================== */
 /* Sub-components                                                       */
 /* ================================================================== */
-
-function StatCard({
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  accent?: boolean;
-}) {
+function StatCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
   return (
-    <div
-      className={`rounded-xl border p-4 ${
-        accent ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-white"
-      }`}
-    >
+    <div className={`rounded-xl border p-4 ${accent ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-white"}`}>
       <div className="text-xs font-medium text-slate-500">{label}</div>
-      <div
-        className={`mt-1 text-2xl sm:text-3xl font-bold tabular-nums ${
-          accent ? "text-blue-700" : "text-slate-800"
-        }`}
-      >
-        {value}
-      </div>
+      <div className={`mt-1 text-2xl sm:text-3xl font-bold tabular-nums ${accent ? "text-blue-700" : "text-slate-800"}`}>{value}</div>
       {sub ? <div className="mt-1 text-[11px] text-slate-400 leading-snug">{sub}</div> : null}
     </div>
   );
@@ -195,9 +269,15 @@ const HOUR_METRICS: { key: HourMetric; label: string }[] = [
 
 function HourlyChart({ hourly }: { hourly: HourlyPoint[] }) {
   const [metric, setMetric] = useState<HourMetric>("gross_sales");
+  if (!hourly.length) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-400">
+        ไม่มีข้อมูลรายชั่วโมงสำหรับวันนี้
+      </div>
+    );
+  }
   const max = Math.max(1, ...hourly.map((h) => h[metric]));
   const peak = hourly.reduce((a, b) => (b[metric] > a[metric] ? b : a), hourly[0]);
-
   const fmt = (v: number) => (metric === "gross_sales" ? baht(v) : nf(v));
 
   return (
@@ -234,15 +314,11 @@ function HourlyChart({ hourly }: { hourly: HourlyPoint[] }) {
               className="flex-1 flex flex-col items-center min-w-0 group relative"
               title={`${String(h.hour).padStart(2, "0")}:00 — ${fmt(v)}`}
             >
-              <div
-                className="w-full rounded-t bg-blue-500 group-hover:bg-blue-600 transition-colors"
-                style={{ height: `${barH}px` }}
-              />
+              <div className="w-full rounded-t bg-blue-500 group-hover:bg-blue-600 transition-colors" style={{ height: `${barH}px` }} />
             </div>
           );
         })}
       </div>
-      {/* hour axis (every 3h) */}
       <div className="flex gap-[3px] sm:gap-1.5 mt-1.5">
         {hourly.map((h) => (
           <div key={h.hour} className="flex-1 text-center text-[9px] text-slate-400 min-w-0">
@@ -268,7 +344,6 @@ function TrafficCard({ s }: { s: StatusData }) {
     <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 h-full">
       <h2 className="text-sm font-semibold text-slate-700">ที่มาของยอดขาย</h2>
       <p className="text-xs text-slate-400 mt-0.5 mb-4">ยอดขายมาจากช่องทางไหนบ้าง</p>
-
       <div className="space-y-3">
         {rows.map((r) => {
           const p = (r.value / total) * 100;
@@ -287,20 +362,14 @@ function TrafficCard({ s }: { s: StatusData }) {
           );
         })}
       </div>
-
       <div className="mt-4 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2.5">
         <div className="text-xs text-amber-800">
           ในยอดขายนี้ มาจาก <span className="font-semibold">โฆษณา Shopee Ads</span>
         </div>
         <div className="text-lg font-bold text-amber-900 tabular-nums mt-0.5">
-          {baht(t.shopee_ads)}{" "}
-          <span className="text-xs font-normal text-amber-700">
-            ({nf1((t.shopee_ads / total) * 100)}% ของยอด)
-          </span>
+          {baht(t.shopee_ads)} <span className="text-xs font-normal text-amber-700">({nf1((t.shopee_ads / total) * 100)}% ของยอด)</span>
         </div>
-        <div className="text-[11px] text-amber-600 mt-0.5">
-          * ยังคำนวณ ROAS ไม่ได้ ต้องมีไฟล์ &quot;ค่าโฆษณา&quot; เพิ่ม
-        </div>
+        <div className="text-[11px] text-amber-600 mt-0.5">* ยังคำนวณ ROAS ไม่ได้ ต้องมีไฟล์ &quot;ค่าโฆษณา&quot; เพิ่ม</div>
       </div>
     </div>
   );
@@ -309,6 +378,13 @@ function TrafficCard({ s }: { s: StatusData }) {
 function TopProductsTable({ s }: { s: StatusData }) {
   const products = [...s.products].sort((a, b) => b.sales - a.sales);
   const maxShare = Math.max(1, ...products.map((p) => p.sales_share));
+  if (!products.length) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-400 h-full">
+        ไม่มีข้อมูลสินค้าขายดีสำหรับวันนี้
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 h-full">
@@ -321,36 +397,23 @@ function TopProductsTable({ s }: { s: StatusData }) {
           รหัส Shopee (ยังไม่ผูก SKU ระบบ)
         </span>
       </div>
-
       <div className="space-y-2.5">
         {products.map((p, i) => (
-          <div
-            key={p.marketplace_item_id}
-            className="flex items-center gap-3 rounded-lg border border-slate-100 hover:border-slate-200 px-3 py-2.5 transition-colors"
-          >
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-50 text-blue-700 text-xs font-bold flex items-center justify-center">
-              {i + 1}
-            </div>
+          <div key={p.marketplace_item_id} className="flex items-center gap-3 rounded-lg border border-slate-100 hover:border-slate-200 px-3 py-2.5 transition-colors">
+            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-50 text-blue-700 text-xs font-bold flex items-center justify-center">{i + 1}</div>
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-slate-700 truncate" title={p.product_name}>
                 {p.product_name}
               </div>
               <div className="flex items-center gap-2 mt-1">
-                <span className="text-[10px] text-slate-400 tabular-nums">
-                  #{p.marketplace_item_id}
-                </span>
+                <span className="text-[10px] text-slate-400 tabular-nums">#{p.marketplace_item_id}</span>
                 <div className="h-1.5 flex-1 max-w-[120px] rounded-full bg-slate-100 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-blue-500"
-                    style={{ width: `${(p.sales_share / maxShare) * 100}%` }}
-                  />
+                  <div className="h-full rounded-full bg-blue-500" style={{ width: `${(p.sales_share / maxShare) * 100}%` }} />
                 </div>
               </div>
             </div>
             <div className="flex-shrink-0 text-right">
-              <div className="text-sm font-semibold text-slate-800 tabular-nums">
-                {baht(p.sales)}
-              </div>
+              <div className="text-sm font-semibold text-slate-800 tabular-nums">{baht(p.sales)}</div>
               <div className="text-[10px] text-slate-400 tabular-nums">
                 {nf(p.orders)} ออเดอร์ · ซื้อ {pct(p.conversion_rate)}
               </div>
