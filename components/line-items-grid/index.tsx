@@ -56,6 +56,8 @@ export type LineItemsGridProps<T> = {
   onDuplicate?: (row: T) => T;
   emptyText?: string;
   footer?:    React.ReactNode;
+  /** ปุ่ม/ตัวเลือกเสริม วางข้างปุ่ม "เพิ่มบรรทัด" (เช่น เพิ่มจากรายการที่ใช้บ่อย) */
+  addExtra?:  React.ReactNode;
   /** key เก็บความกว้างคอลัมน์ลง localStorage (เฟส 2) */
   storageKey?: string;
   /** ตรึงหัวตาราง + ให้ตารางเลื่อนเองภายในความสูงนี้ (เช่น "55vh") */
@@ -76,7 +78,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
-  groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", footer, storageKey,
+  groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", footer, addExtra, storageKey,
   stickyHeader = false, maxHeight, defaultSort = null, dense = false,
 }: LineItemsGridProps<T>) {
   const [sort, setSort]       = useState<SortState>(defaultSort);
@@ -313,11 +315,14 @@ export function LineItemsGrid<T>({
         </div>
       )}
 
-      {(onAdd || footer) && rows.length > 0 && !readonly && (
-        <div className="flex items-center justify-between pt-1">
-          {onAdd ? (
-            <button type="button" onClick={() => onChange([...rows, onAdd()])} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{addLabel}</button>
-          ) : <span />}
+      {(onAdd || footer || addExtra) && rows.length > 0 && !readonly && (
+        <div className="flex items-center justify-between gap-3 pt-1">
+          <div className="flex items-center gap-3">
+            {onAdd && (
+              <button type="button" onClick={() => onChange([...rows, onAdd()])} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{addLabel}</button>
+            )}
+            {addExtra}
+          </div>
           {footer}
         </div>
       )}

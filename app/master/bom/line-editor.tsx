@@ -13,7 +13,7 @@
  *       อะไหล่                             : = ชิ้น
  *   - ไม่มีกลุ่ม → พิมพ์ปริมาณเองได้ + มีปุ่มติด tag กลุ่มให้ SKU
  */
-import { useState, useEffect, useRef, useLayoutEffect, useCallback, type RefObject, type ReactNode, type CSSProperties } from "react";
+import { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback, type RefObject, type ReactNode, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import type { CuttingBlock } from "@/app/api/bom/cutting-blocks/route";
@@ -206,6 +206,58 @@ function GroupReplacePicker({ onPick }: { onPick: (c: BomComponent) => void }) {
   const [open, setOpen] = useState(false);
   if (!open) return <button type="button" onClick={() => setOpen(true)} className="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100">🔁 เปลี่ยนทั้งกลุ่ม</button>;
   return <span className="inline-block w-64 align-middle"><ComponentPicker sku="" name="" placeholder="เลือกวัตถุดิบใหม่..." onPick={(c) => { onPick(c); setOpen(false); }} /></span>;
+}
+
+// เพิ่มวัตถุดิบจาก "รายการที่มีในสูตรนี้แล้ว" — dropdown สั้น ๆ (⭐ ใช้ล่าสุดบนสุด) ไว้เพิ่มซ้ำง่าย
+function QuickAddFromBomPicker({ lines, onPick }: { lines: EditorLine[]; onPick: (c: BomComponent) => void }) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const f = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", f); return () => document.removeEventListener("mousedown", f);
+  }, []);
+  const items = useMemo(() => {
+    const seen = new Set<string>();
+    const distinct: BomComponent[] = [];
+    for (const l of lines) {
+      const key = l.component_id || l.component_sku;
+      if (!key || !l.component_sku || seen.has(key)) continue;
+      seen.add(key);
+      distinct.push({
+        id: l.component_id ?? "", code: l.component_sku, name: l.component_name,
+        material_group_id: l.material_group_id, material_type: l.material_type,
+        loss_percent: l.waste_percent, fabric_width_cm: l.face_width_cm,
+        uom_id: l.uom_id, uom_name: l.uom, image_key: l.image_key ?? null,
+      });
+    }
+    const recentIds = loadRecentMat().map((r) => r.id);
+    return distinct.sort((a, b) => {
+      const ia = recentIds.indexOf(a.id); const ib = recentIds.indexOf(b.id);
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    });
+  }, [lines, open]);   // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div ref={boxRef} className="relative inline-block">
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className="text-sm text-emerald-600 hover:text-emerald-800 font-medium">＋ เพิ่มจากที่มีใน BOM</button>
+      {open && (
+        <div className="absolute bottom-full mb-1 left-0 z-30 w-[380px] max-w-[90vw] bg-white border border-slate-200 rounded-lg shadow-lg">
+          <div className="px-3 py-1.5 text-[11px] text-slate-400 border-b border-slate-100">วัตถุดิบในสูตรนี้ ({items.length}) · ⭐ ใช้ล่าสุดบนสุด</div>
+          <div className="max-h-72 overflow-auto py-1">
+            {items.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">ยังไม่มีวัตถุดิบในสูตร</div>}
+            {items.map((c) => (
+              <button key={c.id || c.code} type="button" onClick={() => { onPick(c); setOpen(false); }}
+                className="w-full px-3 py-1.5 text-left hover:bg-emerald-50 flex items-center gap-2">
+                <Thumb k={c.image_key ?? null} size={24} />
+                <code className="text-xs text-slate-500 shrink-0">{c.code}</code>
+                <span className="text-sm text-slate-700 truncate">{c.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ============================================================
@@ -614,19 +666,11 @@ export function BomLineEditor({
   return (
     <>
       <div className="flex items-center justify-between gap-1 mb-1">
-        <div className="flex items-center gap-2">
-          <div className="flex border border-slate-200 rounded-lg overflow-hidden text-xs">
-            <button type="button" onClick={() => setView("basic")} title="โชว์เฉพาะคอลัมน์หลัก"
-              className={`h-7 px-3 ${view === "basic" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>BASIC</button>
-            <button type="button" onClick={() => setView("pro")} title="โชว์ทุกคอลัมน์"
-              className={`h-7 px-3 border-l border-slate-200 ${view === "pro" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>PRO</button>
-          </div>
-          {!readonly && (
-            // ปุ่มเพิ่มวัตถุดิบแบบเลือกจาก dropdown ได้เลย (มี ⭐ ใช้ล่าสุด บนสุด) → เลือกเสร็จเพิ่มแถวอัตโนมัติ
-            <span className="inline-block w-64">
-              <ComponentPicker sku="" name="" placeholder="＋ เพิ่มวัตถุดิบ (เลือกได้เลย)" onPick={addComponent} />
-            </span>
-          )}
+        <div className="flex border border-slate-200 rounded-lg overflow-hidden text-xs">
+          <button type="button" onClick={() => setView("basic")} title="โชว์เฉพาะคอลัมน์หลัก"
+            className={`h-7 px-3 ${view === "basic" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>BASIC</button>
+          <button type="button" onClick={() => setView("pro")} title="โชว์ทุกคอลัมน์"
+            className={`h-7 px-3 border-l border-slate-200 ${view === "pro" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>PRO</button>
         </div>
         {!readonly && (
           <div className="flex items-center gap-1">
@@ -648,6 +692,7 @@ export function BomLineEditor({
         maxHeight="56vh"
         onAdd={emptyLine}
         addLabel="＋ เพิ่มวัตถุดิบ"
+        addExtra={!readonly && lines.length > 0 ? <QuickAddFromBomPicker lines={lines} onPick={addComponent} /> : undefined}
         emptyText="ยังไม่มีวัตถุดิบในสูตรนี้"
         groupByOptions={[{ key: "material_type", label: "ชนิดวัตถุดิบ" }, { key: "component", label: "วัตถุดิบ (เปลี่ยนทั้งกลุ่มได้)" }, { key: "uom", label: "หน่วย" }]}
         footer={<span className="text-sm text-slate-600">รวม <span className="font-bold text-slate-900">{lines.length}</span> รายการ</span>}
