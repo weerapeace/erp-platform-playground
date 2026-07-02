@@ -146,6 +146,7 @@ export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: st
 // การ์ดงานย่อย — สถานะเป็นปุ่มกด (เริ่ม→ส่งงาน→อนุมัติ) + ผู้รับผิดชอบ + ไฟล์แนบ
 export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {}, hasDescSibling = false }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta; hasDescSibling?: boolean }) {
   const t = useT();
+  const { user } = useAuth();
   const [open, setOpen] = useState(true);   // กาง (ขยาย) งานย่อยเป็นค่าเริ่มต้น
   const [workOpen, setWorkOpen] = useState(false); // ป๊อปอัปแนบงาน/ส่งงาน
   const [editOpen, setEditOpen] = useState(false); // ป๊อปอัปแก้ไขงานย่อย
@@ -201,6 +202,11 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   };
 
   const patch = async (p: Record<string, unknown>) => { setBusy(true); try { await updateSubtask(taskId, sub.id, p); await reload(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+  // พนักงานเพิ่ม/เอาตัวเองออกเป็นผู้ช่วย (self-join · เฉพาะงานยังไม่จบ)
+  const isAssignee = !!user?.id && sub.assignees.some((a) => a.id === user.id);
+  const canSelfJoin = !!user?.id && !isSubDone(st) && st !== "canceled";
+  const selfJoin = async () => { await patch({ self_join: true }); pushToast("success", t("เพิ่มตัวเองเป็นผู้ช่วยแล้ว", "You joined as a helper")); };
+  const selfLeave = async () => { await patch({ self_leave: true }); pushToast("info", t("เอาตัวเองออกจากผู้ช่วยแล้ว", "You left as a helper")); };
 
   // ③ ส่งงาน/แนบงาน: เปิดป๊อปอัป (แนบรูป/ลิงก์ + กดส่ง) — การ์ดไม่ต้องโชว์ฟอร์มแนบเอง
   const openWork = () => setWorkOpen(true);
@@ -248,11 +254,16 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
           )}
           {/* รายละเอียด (อ่านอย่างเดียว — ไม่มีไม่โชว์) */}
           {sub.description?.trim() && <p className="text-sm text-slate-600 whitespace-pre-wrap">{sub.description}</p>}
-          {/* ผู้รับผิดชอบ (อ่านอย่างเดียว ธีม+รูปพนักงาน — ไม่มีไม่โชว์) */}
-          {sub.assignees.length > 0 && (
+          {/* ผู้รับผิดชอบ (ธีม+รูปพนักงาน) + ปุ่มพนักงานเพิ่ม/เอาตัวเองออกเป็นผู้ช่วย */}
+          {(sub.assignees.length > 0 || canSelfJoin) && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] text-slate-400">{t("ผู้รับผิดชอบ", "Assignee")}:</span>
-              {sub.assignees.map((a) => <AssigneeChip key={a.id} a={a} />)}
+              {sub.assignees.length > 0 && <>
+                <span className="text-[11px] text-slate-400">{t("ผู้รับผิดชอบ", "Assignee")}:</span>
+                {sub.assignees.map((a) => <AssigneeChip key={a.id} a={a} />)}
+              </>}
+              {canSelfJoin && (isAssignee
+                ? <button disabled={busy} onClick={selfLeave} title={t("เอาตัวเองออกจากผู้ช่วย", "Leave as helper")} className="text-[11px] text-slate-400 border border-slate-200 rounded-md px-1.5 py-0.5 hover:bg-slate-50 disabled:opacity-50">↩︎ {t("ออกจากผู้ช่วย", "Leave")}</button>
+                : <button disabled={busy} onClick={selfJoin} title={t("ไปช่วยทำงานนี้ (เพิ่มตัวเองเป็นผู้ช่วย)", "Help with this (add yourself)")} className="text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 hover:bg-emerald-100 disabled:opacity-50">✋ {t("ช่วยทำงานนี้", "Help with this")}</button>)}
             </div>
           )}
           {/* ③ ไฟล์แนบ (compact) — โชว์เฉพาะที่มีอยู่ · ฟอร์มแนบ/ส่งงาน/ยืนยันไปอยู่ในป๊อปอัป */}

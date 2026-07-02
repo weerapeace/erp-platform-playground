@@ -258,6 +258,34 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // ผู้ตรวจ = อยู่ในรายชื่อผู้ตรวจหลายคน หรือ reviewer_id เดี่ยว (เผื่อข้อมูลเก่า)
   const isReviewer = !!user?.id && (reviewerSet.has(user.id) || user.id === (parent?.reviewer_id as string | null));
 
+  // ── พนักงานเพิ่ม/เอาตัวเองออกเป็นผู้ช่วย (self-join) — กันมั่วระดับ 1: เฉพาะตัวเอง · เฉพาะงานยังไม่จบ · audit + แจ้งคนสร้าง ──
+  if (body.self_join === true || body.self_leave === true) {
+    if (!user?.id) return NextResponse.json({ error: "ต้องเข้าสู่ระบบ" }, { status: 401 });
+    const status = ((curSub as { status?: string } | null)?.status) ?? "";
+    if (body.self_join === true) {
+      if (["approved", "canceled", "posted", "done"].includes(status))
+        return NextResponse.json({ error: "งานย่อยนี้จบแล้ว เพิ่มตัวเองไม่ได้" }, { status: 400 });
+      const { data: curA } = await admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId);
+      const set = new Set(((curA ?? []) as { user_id: string }[]).map((r) => r.user_id));
+      if (!set.has(user.id)) {
+        await admin.from("erp_creative_subtask_assignees").insert({ subtask_id: subtaskId, user_id: user.id });
+        await writeAudit(admin, { action: "subtask:self_join", entityType: "creative_subtask", entityId: subtaskId, actorId: user.id, actorName: user.email ?? null, metadata: { task_id: id } });
+        const creator = parent?.created_by ? String(parent.created_by) : "";
+        if (creator && creator !== user.id) {
+          const who = (await employeeLabelMap(admin, [user.id])).get(user.id) ?? "";
+          await notify(admin, { userId: creator, eventType: "subtask_self_join", title: `${who} เพิ่มตัวเองช่วยงานย่อย`, body: `${parent?.task_no ? parent.task_no + " " : ""}${parent?.title ?? ""}`.trim() || null, linkUrl: `/tasks?task=${id}`, entityId: id });
+        }
+      }
+    } else {
+      await admin.from("erp_creative_subtask_assignees").delete().eq("subtask_id", subtaskId).eq("user_id", user.id);
+      await writeAudit(admin, { action: "subtask:self_leave", entityType: "creative_subtask", entityId: subtaskId, actorId: user.id, actorName: user.email ?? null, metadata: { task_id: id } });
+    }
+    await recomputeTaskStatusFromSubtasks(admin, id);
+    const { data: row } = await admin.from("erp_creative_subtasks").select("*").eq("id", subtaskId).maybeSingle();
+    const aMap = await subtaskAssigneesMap(admin, [subtaskId]);
+    return NextResponse.json({ data: row ? { ...row, assignees: aMap.get(subtaskId) ?? [] } : null, error: null });
+  }
+
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const [k, v] of Object.entries(body)) if (EDITABLE.has(k)) patch[k] = v === "" ? null : v;
 
