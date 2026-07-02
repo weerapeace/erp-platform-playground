@@ -1,7 +1,7 @@
 // ============================================================
 // Subtask -> Product sync engine (server-only)
 // approve -> push images/text to Parent SKU/SKU; revise/cancel -> reverse via ledger (erp_subtask_sync)
-// targets: product_image_slots (owner_type product_sku/parent_sku, image_group gallery/description)
+// targets: erp_playground_attachments (แกลเลอรีสินค้าที่ผู้ใช้เห็นจริง — entity_type skus_v2/parent_skus_v2)
 //          + skus_v2/parent_skus_v2.cover_image_r2_key + *.description (field from config)
 // best-effort + ledger every action (must not break approve)
 // ============================================================
@@ -46,6 +46,16 @@ export function buildSelectedTargets(sel: ImageSyncTargets): Target[] {
 
 const ALLOWED_DESC_FIELDS = new Set(["description", "english_description", "platform_description"]);
 
+// เดา content_type จากนามสกุลของ r2 key (แกลเลอรีกรองด้วย content_type startsWith "image/")
+function ctFromKey(key: string): string {
+  const ext = (key.split(".").pop() ?? "").toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  if (ext === "svg") return "image/svg+xml";
+  return "image/jpeg";
+}
+
 /** อนุมัติแล้ว -> ส่งข้อมูลเข้าสินค้า + บันทึก ledger */
 export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts: { actorId?: string | null }): Promise<SyncResult> {
   const cfg = (subtask.config ?? {}) as Record<string, any>;
@@ -61,15 +71,20 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
   const now = new Date().toISOString();
   const base = { subtask_id: subtask.id, task_id: subtask.task_id, type_key: subtask.subtask_type ?? null, created_by: opts.actorId ?? null, created_at: now, active: true };
 
-  // helper: เพิ่มรูปเข้าแกลเลอรี + ตั้งปกถ้าว่าง (พร้อมจด ledger ให้ถอดกลับได้)
+  // helper: เพิ่มรูปเข้า "แกลเลอรีสินค้าที่ผู้ใช้เห็น" = erp_playground_attachments (entity_type skus_v2/parent_skus_v2)
   const pushGallery = async (ownerType: "product_sku" | "parent_sku", table: "skus_v2" | "parent_skus_v2", ownerId: string, keys: string[], setCoverIfEmpty: boolean) => {
-    const { data: mx } = await admin.from("product_image_slots").select("slot").eq("owner_type", ownerType).eq("owner_id", ownerId).eq("image_group", "gallery").order("slot", { ascending: false }).limit(1);
-    let slot = (mx?.[0]?.slot as number) ?? -1;
-    for (const key of keys) {
-      slot += 1;
-      const { data: ins, error } = await admin.from("product_image_slots").insert({ owner_type: ownerType, owner_id: ownerId, image_group: "gallery", slot, r2_key: key }).select("id").single();
-      if (!error && ins?.id) { ledger.push({ ...base, target_kind: "media", target_table: "product_image_slots", target_id: ins.id, ref: key, mode: "gallery" }); pushed++; }
+    const entityType = ownerType === "parent_sku" ? "parent_skus_v2" : "skus_v2";
+    const { data: ex } = await admin.from("erp_playground_attachments").select("id, sort_order, is_primary").eq("entity_type", entityType).eq("entity_id", ownerId).order("sort_order", { ascending: false });
+    const rows = (ex ?? []) as { id: string; sort_order: number; is_primary: boolean }[];
+    let ord = rows.length ? Number(rows[0].sort_order ?? rows.length - 1) : -1;
+    const hasPrimary = rows.length > 0 && rows.some((r) => r.is_primary);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i]; ord += 1;
+      const makePrimary = setCoverIfEmpty && rows.length === 0 && !hasPrimary && i === 0;
+      const { data: ins, error } = await admin.from("erp_playground_attachments").insert({ entity_type: entityType, entity_id: ownerId, file_name: key.split("/").pop() ?? "image", file_path: key, public_url: `/api/r2-image?key=${encodeURIComponent(key)}`, content_type: ctFromKey(key), is_primary: makePrimary, sort_order: ord, uploaded_by: opts.actorId ?? null }).select("id").single();
+      if (!error && ins?.id) { ledger.push({ ...base, target_kind: "media", target_table: "erp_playground_attachments", target_id: ins.id, ref: key, mode: "gallery" }); pushed++; }
     }
+    // ตั้ง cover_image_r2_key ของสินค้าด้วย (การ์ด/รายการใช้) ถ้ายังไม่มี
     if (setCoverIfEmpty && keys[0]) {
       const { data: cur } = await admin.from(table).select("cover_image_r2_key").eq("id", ownerId).maybeSingle();
       if (!(cur?.cover_image_r2_key as string | null)) {
@@ -99,17 +114,19 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
         } else {
           const rmap = sel?.replace_map ?? {};
           for (const tg of selTargets) {
+            const entityType = tg.ownerType === "parent_sku" ? "parent_skus_v2" : "skus_v2";
             const tk = `${tg.ownerType === "parent_sku" ? "parent" : "sku"}:${tg.id}`;
             const m = rmap[tk] ?? {};
             // แยก: รูปที่จับคู่ "แทนช่องเดิม" กับ รูปที่ "เพิ่มใหม่" (ไม่จับคู่/จับคู่ = new)
             const replaceKeys = imageKeys.filter((k) => m[k] && m[k] !== "new");
             const appendKeys = imageKeys.filter((k) => !m[k] || m[k] === "new");
             for (const imgKey of replaceKeys) {
-              const slotId = m[imgKey];
-              const { data: slotRow } = await admin.from("product_image_slots").select("id, r2_key").eq("id", slotId).eq("owner_type", tg.ownerType).eq("owner_id", tg.id).maybeSingle();
-              if (!slotRow) { skipped.push("slot_gone"); continue; }
-              const prevKey = String(slotRow.r2_key ?? "");
-              await admin.from("product_image_slots").update({ r2_key: imgKey }).eq("id", slotId);
+              const attId = m[imgKey];
+              // slot_id ที่จับคู่ = id ของแถวใน erp_playground_attachments (แกลเลอรีที่ผู้ใช้เห็น)
+              const { data: attRow } = await admin.from("erp_playground_attachments").select("id, file_path").eq("id", attId).eq("entity_type", entityType).eq("entity_id", tg.id).maybeSingle();
+              if (!attRow) { skipped.push("slot_gone"); continue; }
+              const prevKey = String(attRow.file_path ?? "");
+              await admin.from("erp_playground_attachments").update({ file_path: imgKey, public_url: `/api/r2-image?key=${encodeURIComponent(imgKey)}`, file_name: imgKey.split("/").pop() ?? "image", content_type: ctFromKey(imgKey) }).eq("id", attId);
               // ถ้ารูปเก่าของช่องนี้เป็น "รูปปก" → ย้ายปกมาเป็นรูปใหม่ (จด ledger แยกให้ถอดกลับได้)
               const { data: cur } = await admin.from(tg.table).select("cover_image_r2_key").eq("id", tg.id).maybeSingle();
               if ((cur?.cover_image_r2_key ?? null) === prevKey && prevKey) {
@@ -117,7 +134,7 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
                 ledger.push({ ...base, target_kind: "cover", target_table: tg.table, target_id: tg.id, ref: "cover_image_r2_key", prev_value: prevKey, new_value: imgKey });
               }
               // ledger เก็บ "รูปเก่า" ไว้ (ถอดกลับ/ดูเวอร์ชันเก่าเฟส 3) — ไม่ลบไฟล์ R2
-              ledger.push({ ...base, target_kind: "media_replace", target_table: "product_image_slots", target_id: slotId, ref: imgKey, prev_value: prevKey, new_value: imgKey, mode: "gallery" }); pushed++;
+              ledger.push({ ...base, target_kind: "media_replace", target_table: "erp_playground_attachments", target_id: attId, ref: imgKey, prev_value: prevKey, new_value: imgKey, mode: "gallery" }); pushed++;
             }
             if (appendKeys.length) await pushGallery(tg.ownerType, tg.table, tg.id, appendKeys, false);
           }
@@ -164,11 +181,18 @@ export async function reverseSubtaskSync(admin: any, subtaskId: string, opts: { 
   for (const r of (rows ?? []) as Record<string, any>[]) {
     try {
       if (r.target_kind === "media") {
-        await admin.from("product_image_slots").delete().eq("id", r.target_id);
+        // ลบรูปที่เคยเพิ่ม (target_table = erp_playground_attachments ของใหม่ / product_image_slots ของเก่า)
+        await admin.from(r.target_table ?? "erp_playground_attachments").delete().eq("id", r.target_id);
       } else if (r.target_kind === "media_replace") {
         // คืนรูปเก่าเข้าช่องเดิม (เฉพาะถ้ายังเป็นรูปที่เราแทนไว้ กันทับการแก้มือภายหลัง)
-        const { data: cur } = await admin.from("product_image_slots").select("r2_key").eq("id", r.target_id).maybeSingle();
-        if ((cur?.r2_key ?? null) === r.new_value) await admin.from("product_image_slots").update({ r2_key: r.prev_value ?? null }).eq("id", r.target_id);
+        if (r.target_table === "erp_playground_attachments") {
+          // public_url = NOT NULL → คืนได้เฉพาะเมื่อมีรูปเก่า (prev_value) จริง
+          const { data: cur } = await admin.from("erp_playground_attachments").select("file_path").eq("id", r.target_id).maybeSingle();
+          if (r.prev_value && (cur?.file_path ?? null) === r.new_value) await admin.from("erp_playground_attachments").update({ file_path: r.prev_value, public_url: `/api/r2-image?key=${encodeURIComponent(r.prev_value)}`, file_name: String(r.prev_value).split("/").pop() ?? "image" }).eq("id", r.target_id);
+        } else {
+          const { data: cur } = await admin.from("product_image_slots").select("r2_key").eq("id", r.target_id).maybeSingle();
+          if ((cur?.r2_key ?? null) === r.new_value) await admin.from("product_image_slots").update({ r2_key: r.prev_value ?? null }).eq("id", r.target_id);
+        }
       } else if (r.target_kind === "cover") {
         const { data: cur } = await admin.from(r.target_table).select("cover_image_r2_key").eq("id", r.target_id).maybeSingle();
         if ((cur?.cover_image_r2_key ?? null) === r.new_value) await admin.from(r.target_table).update({ cover_image_r2_key: r.prev_value ?? null }).eq("id", r.target_id);

@@ -99,13 +99,18 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
   return NextResponse.json({ parents, linked_sku_ids: linkedSkuIds, required, galleries, error: null });
 }
 
-// แกลเลอรีสินค้า (product_image_slots) ต่อ owner — คืน map "parent:<id>" / "sku:<id>" → [{slot_id,slot,r2_key}]
+// แกลเลอรีสินค้าที่ผู้ใช้เห็นจริง (erp_playground_attachments) ต่อ owner — คืน map "parent:<id>" / "sku:<id>" → [{slot_id,slot,r2_key}]
+// slot_id = id ของแถว attachment (ใช้อ้างตอน "แทนรูป"), r2_key = file_path
 async function loadGalleries(admin: ReturnType<typeof supabaseAdmin>, ownerType: "parent_sku" | "product_sku", ownerIds: string[]): Promise<Record<string, { slot_id: string; slot: number; r2_key: string }[]>> {
   const out: Record<string, { slot_id: string; slot: number; r2_key: string }[]> = {};
   if (!ownerIds.length) return out;
   const prefix = ownerType === "parent_sku" ? "parent" : "sku";
-  const { data } = await admin.from("product_image_slots").select("id, owner_id, slot, r2_key").eq("owner_type", ownerType).eq("image_group", "gallery").in("owner_id", ownerIds).order("slot", { ascending: true });
-  for (const s of ((data ?? []) as Record<string, unknown>[])) { const k = `${prefix}:${s.owner_id}`; (out[k] ??= []).push({ slot_id: String(s.id), slot: Number(s.slot), r2_key: String(s.r2_key ?? "") }); }
+  const entityType = ownerType === "parent_sku" ? "parent_skus_v2" : "skus_v2";
+  const { data } = await admin.from("erp_playground_attachments").select("id, entity_id, sort_order, file_path, content_type").eq("entity_type", entityType).in("entity_id", ownerIds).order("sort_order", { ascending: true });
+  for (const s of ((data ?? []) as Record<string, unknown>[])) {
+    const ct = String(s.content_type ?? ""); if (ct && !ct.startsWith("image/")) continue; // แสดงเฉพาะรูป
+    const k = `${prefix}:${s.entity_id}`; (out[k] ??= []).push({ slot_id: String(s.id), slot: Number(s.sort_order ?? 0), r2_key: String(s.file_path ?? "") });
+  }
   return out;
 }
 
