@@ -377,17 +377,19 @@ type PlatformParent = { id: string; code: string; name_th: string; name_platform
 // - งานปกติ (รับรูป/ลิงก์): แนบ ≥1 ก่อนส่ง
 // - งานเขียนคำอธิบาย (ไม่รับรูป/ลิงก์ = platformConfirm): ไม่ต้องแนบ แต่โชว์รายละเอียด Platform ของ
 //   Parent SKU ให้ตรวจ + ต้องมีรายละเอียด (description) ครบทุกตัวก่อนถึงส่งได้
-// กล่องจัดการรูปของ "สินค้าหนึ่งตัว" (Parent SKU หรือ SKU) — ของกลาง
-// โชว์แกลเลอรีเดิม (มีเลข) + ลากรูปเข้ากล่องนี้ + เลือกต่อรูปว่า "เพิ่มใหม่/แทน #N" + ปุ่ม "ใส่เข้าสินค้าเลย" + ดู/กู้เวอร์ชันเก่า
-function ProductImageBox({ tk, label, slots, descSlots, draft, uploading, onAddDraft, onRemoveDraft, replaceMap, setReplace, canApplyNow, applying, onApplyNow, tt, onRestored, onZoom }: {
+const withW = (url: string, w: number) => `${url}${url.includes("?") ? "&" : "?"}w=${w}`;
+
+// กล่องจัดการรูปของ "สินค้าหนึ่งตัว" ปลายทางเดียว (แกลเลอรี หรือ Description) — ของกลาง
+// โชว์รูปเดิม (มีเลข, กดซูมได้) + ลากรูปเข้า + เลือกต่อรูป "เพิ่มใหม่/แทน #N" + ปุ่ม "ใส่เข้าสินค้าเลย" + ดู/กู้เวอร์ชันเก่า (เฉพาะแกลเลอรี)
+function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, onAddDraft, onRemoveDraft, replaceMap, setReplace, canApplyNow, applying, onApplyNow, tt, onRestored, onZoom }: {
   tk: string;
   label: string;
-  slots: { slot_id: string; slot: number; r2_key: string }[];
-  descSlots?: { slot_id: string; slot: number; url: string }[];   // รูป Description (Parent เท่านั้น) — undefined = ไม่มีช่อง Description
-  draft: { r2_key: string; file_name: string }[];
+  mode: "gallery" | "description";
+  refSlots: { slot_id: string; slot: number; url: string }[];   // รูปเดิมของปลายทางนี้ (มีเลข)
+  draft: { r2_key: string; file_name: string }[];               // รูปร่าง (กรองเฉพาะปลายทางนี้แล้ว)
   uploading: boolean;
   onAddDraft: (files: FileList | File[]) => void;
-  onRemoveDraft: (idx: number) => void;
+  onRemoveDraft: (key: string) => void;
   replaceMap: Record<string, Record<string, string>>;
   setReplace: (tk: string, imgKey: string, val: string) => void;
   canApplyNow: boolean;
@@ -400,7 +402,9 @@ function ProductImageBox({ tk, label, slots, descSlots, draft, uploading, onAddD
   const [verOpen, setVerOpen] = useState(false);
   const [versions, setVersions] = useState<{ slot_id: string; slot: number | null; old_r2_key: string }[] | null>(null);
   const pfx = tk.split(":")[0]; const ownerType = pfx === "parent" ? "parent_sku" : "product_sku"; const ownerId = tk.split(":")[1];
-  const isParent = pfx === "parent";
+  const isDesc = mode === "description";
+  const addNewVal = isDesc ? "desc:new" : "new";
+  const replaceVal = (slotId: string) => isDesc ? `desc:${slotId}` : slotId;
   const loadVersions = async () => {
     setVerOpen((o) => !o);
     if (versions !== null) return;
@@ -410,80 +414,56 @@ function ProductImageBox({ tk, label, slots, descSlots, draft, uploading, onAddD
     try { await apiFetch("/api/product-images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "restore", slot_id: slotId, r2_key: key }) });
       setVersions((v) => (v ?? []).filter((x) => !(x.slot_id === slotId && x.old_r2_key === key))); onRestored(); } catch { /* noop */ }
   };
+  const refImages: LightboxImage[] = refSlots.map((s) => ({ url: withW(s.url, 1600), label }));
   return (
-    <div className="mt-2 border-t border-amber-100 pt-2">
+    <div className={`mt-2 border-t pt-2 ${isDesc ? "border-indigo-100" : "border-amber-100"}`}>
       <p className="text-[11px] text-slate-500 mb-1 flex items-center gap-1">
-        🖼 {isParent ? tt("รูปของ Parent SKU นี้", "Images for this Parent SKU") : tt("รูปของ SKU นี้", "Images for this SKU")}
-        <span
-          className="cursor-help text-slate-400 hover:text-violet-600"
-          title={tt(
-            `ลากรูปลงกล่องนี้ แล้วเลือก "ปลายทาง" ต่อรูปได้จาก dropdown:\n• แกลเลอรีสินค้า → เพิ่มใหม่ หรือ แทน #N (แถว 'รูปเดิมในสินค้า')\n${descSlots ? "• รูป Description → เพิ่มใหม่ หรือ แทน #N (แถว 'รูป Description เดิม')\n" : ""}รูปเดิมที่ถูกแทนในแกลเลอรีจะเก็บเป็นเวอร์ชันเก่า กด 🕘 ดู/กู้คืนได้\n• ปุ่ม 'ใส่เข้าสินค้าเลย' = ใส่ทันที ไม่ต้องรออนุมัติ · ถ้าไม่กด รูปจะเข้าตอน 'อนุมัติ'`,
-            `Drop images here, then pick each image's destination from the dropdown:\n• Product gallery → add new or replace #N ('Current gallery' row)\n${descSlots ? "• Description images → add new or replace #N ('Current Description' row)\n" : ""}Replaced gallery images are kept as old versions — tap 🕘 to view/restore.\n• 'Add to product now' = apply immediately, no approval; otherwise on approval.`,
-          )}
+        {isDesc ? `📂 ${tt("ใส่รูปเข้า Description", "Add to Description")}` : `🖼 ${tt("ใส่รูปเข้าแกลเลอรีสินค้า", "Add to product gallery")}`}
+        <span className="cursor-help text-slate-400 hover:text-violet-600"
+          title={isDesc
+            ? tt(`รูปที่ลากลงกล่องนี้จะเข้า "รูป Description" ของ ${label}\nต่อรูปเลือก: เพิ่มใหม่ หรือ แทน #N (แถวด้านบนมีเลขกำกับ)\nปุ่ม 'ใส่เข้าสินค้าเลย' = ใส่ทันที · ถ้าไม่กด เข้าตอน 'อนุมัติ'`, `Images here go to ${label}'s Description.\nPer image: add new or replace #N.\n'Add now' applies immediately; otherwise on approval.`)
+            : tt(`รูปที่ลากลงกล่องนี้จะเข้า "แกลเลอรีสินค้า" ของ ${label}\nต่อรูปเลือก: เพิ่มใหม่ หรือ แทน #N (แถวด้านบนมีเลขกำกับ)\nรูปเดิมที่ถูกแทนเก็บเป็นเวอร์ชันเก่า กด 🕘 ดู/กู้คืน\nปุ่ม 'ใส่เข้าสินค้าเลย' = ใส่ทันที · ถ้าไม่กด เข้าตอน 'อนุมัติ'`, `Images here go to ${label}'s gallery.\nPer image: add new or replace #N.\nReplaced images kept as versions — tap 🕘.\n'Add now' applies immediately; otherwise on approval.`)}
         >ⓘ</span>
       </p>
 
-      {/* รูปเดิมในสินค้า (มีเลขกำกับ) */}
+      {/* รูปเดิมของปลายทางนี้ (มีเลขกำกับ · กดซูมได้) */}
       <div className="flex flex-wrap items-center gap-1 mb-2">
-        <span className="text-[10px] text-slate-400">{tt("รูปเดิมในสินค้า:", "Current gallery:")}</span>
-        {slots.length === 0 ? <span className="text-[10px] text-slate-400 italic">{tt("ยังไม่มีรูป", "none yet")}</span>
-          : slots.map((s, i) => (
+        <span className="text-[10px] text-slate-400">{isDesc ? tt("รูป Description เดิม:", "Current Description:") : tt("รูปเดิมในสินค้า:", "Current gallery:")}</span>
+        {refSlots.length === 0 ? <span className="text-[10px] text-slate-400 italic">{tt("ยังไม่มีรูป", "none yet")}</span>
+          : refSlots.map((s, i) => (
             <div key={s.slot_id} className="relative">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`/api/r2-image?key=${encodeURIComponent(s.r2_key)}&w=64`} alt="" title={`#${i + 1}`} className="h-9 w-9 object-cover rounded border border-slate-200" />
-              <span className="absolute -top-1 -left-1 bg-slate-700 text-white text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{i + 1}</span>
+              <img src={withW(s.url, 64)} alt="" title={tt("กดดูเต็มจอ", "Click to view full")} onClick={() => onZoom?.(refImages, i)} className={`h-9 w-9 object-cover rounded border cursor-zoom-in ${isDesc ? "border-indigo-200" : "border-slate-200"}`} />
+              <span className={`absolute -top-1 -left-1 text-white text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center ${isDesc ? "bg-indigo-600" : "bg-slate-700"}`}>{i + 1}</span>
             </div>
           ))}
       </div>
 
-      {/* รูป Description เดิม (Parent เท่านั้น) */}
-      {descSlots && (
-        <div className="flex flex-wrap items-center gap-1 mb-2">
-          <span className="text-[10px] text-slate-400">📂 {tt("รูป Description เดิม:", "Current Description:")}</span>
-          {descSlots.length === 0 ? <span className="text-[10px] text-slate-400 italic">{tt("ยังไม่มีรูป", "none yet")}</span>
-            : descSlots.map((s, i) => (
-              <div key={s.slot_id} className="relative">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`${s.url}${s.url.includes("?") ? "&" : "?"}w=64`} alt="" title={`Description #${i + 1}`} className="h-9 w-9 object-cover rounded border border-indigo-200" />
-                <span className="absolute -top-1 -left-1 bg-indigo-600 text-white text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{i + 1}</span>
-              </div>
-            ))}
-        </div>
-      )}
-
-      {/* กล่องลากรูป + รูปร่างที่จะใส่ (เลือกปลายทาง/แทน/เพิ่ม ต่อรูป) */}
+      {/* กล่องลากรูป + รูปร่างที่จะใส่ (แทน/เพิ่ม ต่อรูป) */}
       <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) onAddDraft(e.dataTransfer.files); }}
-        className="rounded-md border border-dashed border-amber-300 bg-amber-50/30 px-2 py-1.5">
+        className={`rounded-md border border-dashed px-2 py-1.5 ${isDesc ? "border-indigo-300 bg-indigo-50/30" : "border-amber-300 bg-amber-50/30"}`}>
         <div className="flex flex-wrap items-start gap-2">
-          {draft.map((d, j) => { const curVal = replaceMap[tk]?.[d.r2_key] ?? "new"; return (
-            <div key={j} className="flex flex-col items-center gap-0.5">
+          {draft.map((d, j) => { const curVal = replaceMap[tk]?.[d.r2_key] ?? addNewVal; const isReplace = curVal !== addNewVal; return (
+            <div key={d.r2_key} className="flex flex-col items-center gap-0.5">
               <div className="relative group">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/api/r2-image?key=${encodeURIComponent(d.r2_key)}&w=64`} alt="" title={tt("กดเพื่อดูเต็มจอ", "Click to view full")} onClick={() => onZoom?.(draft.map((x) => ({ url: `/api/r2-image?key=${encodeURIComponent(x.r2_key)}&w=1600`, label })), j)} className={`h-12 w-12 object-cover rounded border-2 cursor-zoom-in ${curVal !== "new" ? "border-amber-400" : "border-slate-200"}`} />
-                <button type="button" onClick={() => onRemoveDraft(j)} className="absolute -top-1 -right-1 h-4 w-4 flex items-center justify-center bg-white rounded-full text-red-500 text-[9px] shadow opacity-0 group-hover:opacity-100">✕</button>
+                <img src={`/api/r2-image?key=${encodeURIComponent(d.r2_key)}&w=64`} alt="" title={tt("กดเพื่อดูเต็มจอ", "Click to view full")} onClick={() => onZoom?.(draft.map((x) => ({ url: `/api/r2-image?key=${encodeURIComponent(x.r2_key)}&w=1600`, label })), j)} className={`h-12 w-12 object-cover rounded border-2 cursor-zoom-in ${isReplace ? (isDesc ? "border-indigo-400" : "border-amber-400") : "border-slate-200"}`} />
+                <button type="button" onClick={() => onRemoveDraft(d.r2_key)} className="absolute -top-1 -right-1 h-4 w-4 flex items-center justify-center bg-white rounded-full text-red-500 text-[9px] shadow opacity-0 group-hover:opacity-100">✕</button>
               </div>
-              <select value={curVal} onChange={(e) => setReplace(tk, d.r2_key, e.target.value)} className="text-[10px] border border-slate-200 rounded px-0.5 py-0.5 w-[96px]">
-                <optgroup label={tt("แกลเลอรีสินค้า", "Gallery")}>
-                  <option value="new">➕ {tt("เพิ่มใหม่", "Add new")}</option>
-                  {slots.map((s, i) => <option key={s.slot_id} value={s.slot_id}>{tt(`แทน #${i + 1}`, `→ #${i + 1}`)}</option>)}
-                </optgroup>
-                {descSlots && (
-                  <optgroup label={tt("รูป Description", "Description")}>
-                    <option value="desc:new">➕ {tt("เพิ่มใหม่", "Add new")}</option>
-                    {descSlots.map((s, i) => <option key={s.slot_id} value={`desc:${s.slot_id}`}>{tt(`แทน #${i + 1}`, `→ #${i + 1}`)}</option>)}
-                  </optgroup>
-                )}
+              <select value={curVal} onChange={(e) => setReplace(tk, d.r2_key, e.target.value)} className="text-[10px] border border-slate-200 rounded px-0.5 py-0.5 w-[76px]">
+                <option value={addNewVal}>➕ {tt("เพิ่มใหม่", "Add new")}</option>
+                {refSlots.map((s, i) => <option key={s.slot_id} value={replaceVal(s.slot_id)}>{tt(`แทน #${i + 1}`, `→ #${i + 1}`)}</option>)}
               </select>
             </div>
           ); })}
-          <label className="h-12 px-2 inline-flex items-center gap-1 rounded border border-dashed border-amber-300 text-amber-700 text-[11px] cursor-pointer hover:bg-amber-50">
+          <label className={`h-12 px-2 inline-flex items-center gap-1 rounded border border-dashed text-[11px] cursor-pointer ${isDesc ? "border-indigo-300 text-indigo-700 hover:bg-indigo-50" : "border-amber-300 text-amber-700 hover:bg-amber-50"}`}>
             {uploading ? "⏳" : <>📥 {tt("ลากรูปมาใส่ / เลือกไฟล์", "Drop or pick images")}</>}
             <input type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) onAddDraft(e.target.files); e.target.value = ""; }} />
           </label>
         </div>
         {draft.length > 0 && (
           <div className="flex items-center justify-between gap-2 mt-1.5">
-            <p className="text-[10px] text-amber-600">{tt(`${draft.length} รูป — เข้าสินค้าตอนอนุมัติ (หรือกดใส่เลย)`, `${draft.length} image(s) — on approval, or add now`)}</p>
+            <p className={`text-[10px] ${isDesc ? "text-indigo-600" : "text-amber-600"}`}>{tt(`${draft.length} รูป — เข้าสินค้าตอนอนุมัติ (หรือกดใส่เลย)`, `${draft.length} image(s) — on approval, or add now`)}</p>
             {canApplyNow && (
               <button type="button" onClick={onApplyNow} disabled={applying}
                 className="h-7 px-2.5 text-[11px] font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-50 shrink-0">
@@ -494,21 +474,23 @@ function ProductImageBox({ tk, label, slots, descSlots, draft, uploading, onAddD
         )}
       </div>
 
-      {/* รูปเก่าที่เคยถูกแทน — ดู/กู้คืน */}
-      <button type="button" onClick={loadVersions} className="mt-1.5 text-[10px] text-slate-500 hover:text-violet-700">🕘 {tt("รูปเก่าที่เคยถูกแทน", "Replaced versions")} {verOpen ? "▲" : "▼"}</button>
-      {verOpen && (versions === null ? <p className="text-[10px] text-slate-400 mt-0.5">{tt("กำลังโหลด…", "Loading…")}</p>
-        : versions.length === 0 ? <p className="text-[10px] text-slate-400 italic mt-0.5">{tt("ยังไม่มีรูปที่ถูกแทน", "No replaced versions yet")}</p>
-        : (
-          <div className="flex flex-wrap gap-2 mt-1">
-            {versions.map((v, i) => (
-              <div key={i} className="flex flex-col items-center gap-0.5">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/api/r2-image?key=${encodeURIComponent(v.old_r2_key)}&w=64`} alt="" className="h-10 w-10 object-cover rounded border border-slate-200 opacity-80" />
-                <button type="button" onClick={() => restore(v.slot_id, v.old_r2_key)} className="text-[9px] text-violet-600 hover:underline">↩ {tt(`กู้คืน #${(v.slot ?? 0) + 1}`, `restore #${(v.slot ?? 0) + 1}`)}</button>
-              </div>
-            ))}
-          </div>
-        ))}
+      {/* รูปเก่าที่เคยถูกแทน — ดู/กู้คืน (เฉพาะแกลเลอรี · Description ยังไม่มีกู้คืน) */}
+      {!isDesc && <>
+        <button type="button" onClick={loadVersions} className="mt-1.5 text-[10px] text-slate-500 hover:text-violet-700">🕘 {tt("รูปเก่าที่เคยถูกแทน", "Replaced versions")} {verOpen ? "▲" : "▼"}</button>
+        {verOpen && (versions === null ? <p className="text-[10px] text-slate-400 mt-0.5">{tt("กำลังโหลด…", "Loading…")}</p>
+          : versions.length === 0 ? <p className="text-[10px] text-slate-400 italic mt-0.5">{tt("ยังไม่มีรูปที่ถูกแทน", "No replaced versions yet")}</p>
+          : (
+            <div className="flex flex-wrap gap-2 mt-1">
+              {versions.map((v, i) => (
+                <div key={i} className="flex flex-col items-center gap-0.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/api/r2-image?key=${encodeURIComponent(v.old_r2_key)}&w=64`} alt="" onClick={() => onZoom?.(versions.map((x) => ({ url: `/api/r2-image?key=${encodeURIComponent(x.old_r2_key)}&w=1600`, label })), i)} className="h-10 w-10 object-cover rounded border border-slate-200 opacity-80 cursor-zoom-in" />
+                  <button type="button" onClick={() => restore(v.slot_id, v.old_r2_key)} className="text-[9px] text-violet-600 hover:underline">↩ {tt(`กู้คืน #${(v.slot ?? 0) + 1}`, `restore #${(v.slot ?? 0) + 1}`)}</button>
+                </div>
+              ))}
+            </div>
+          ))}
+      </>}
     </div>
   );
 }
@@ -671,33 +653,55 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
 
   // image-sync section: กล่องร่างรูปต่อสินค้า (tk="parent:<id>"/"sku:<id>") — ลากเข้า = เก็บร่าง (เข้าแกลเลอรีตอนอนุมัติ หรือกด "ใส่เลย")
   const [uploadingTk, setUploadingTk] = useState<string | null>(null);
-  const addDraftImages = async (tk: string, files: FileList | File[]) => {
+  const [descBoxOpen, setDescBoxOpen] = useState<Record<string, boolean>>({});   // ติ๊ก "ส่งเข้า Description ด้วย" ต่อ Parent (tk)
+  // แปลงแกลเลอรี → refSlots ให้ ProductImageBox (url สำหรับโชว์/ซูม)
+  const galleryRef = (tk: string) => (galleries[tk] ?? []).map((s) => ({ slot_id: s.slot_id, slot: s.slot, url: `/api/r2-image?key=${encodeURIComponent(s.r2_key)}` }));
+  const draftFor = (tk: string, dest: "gallery" | "description") => (draftImages[tk] ?? []).filter((d) => (dest === "description") === (replaceMap[tk]?.[d.r2_key] ?? "").startsWith("desc"));
+  // dest: "gallery" (ค่าเริ่มต้น) หรือ "description" (Parent เท่านั้น) — description จะตั้ง replaceMap เป็น "desc:new"
+  const isDescVal = (v: string | undefined) => (v ?? "").startsWith("desc");
+  const addDraftImages = async (tk: string, files: FileList | File[], dest: "gallery" | "description" = "gallery") => {
     const imgs = Array.from(files).filter((x) => x.type.startsWith("image/"));
     if (!imgs.length) return;
     const folder = tk.startsWith("parent:") ? "parent_skus" : "skus";
-    setUploadingTk(tk);
+    setUploadingTk(`${dest}#${tk}`);
     try {
       const ups: { r2_key: string; file_name: string }[] = [];
       for (const f of imgs) { const up = await uploadResizedImage(f, { folder, max: 1200 }); ups.push({ r2_key: up.r2_key, file_name: up.file_name }); }
-      setDraftImages((prev) => { const next = { ...prev, [tk]: [...(prev[tk] ?? []), ...ups] }; persistTargets(syncParentIds, syncSkuIds, next); return next; });
+      const nextDrafts = { ...draftImages, [tk]: [...(draftImages[tk] ?? []), ...ups] };
+      const nextRm = dest === "description"
+        ? { ...replaceMap, [tk]: { ...(replaceMap[tk] ?? {}), ...Object.fromEntries(ups.map((u) => [u.r2_key, "desc:new"])) } }
+        : replaceMap;
+      setDraftImages(nextDrafts);
+      if (dest === "description") setReplaceMap(nextRm);
+      persistTargets(syncParentIds, syncSkuIds, nextDrafts, nextRm);
     } catch (e) { pushToast("error", t("อัปรูปไม่สำเร็จ: ", "Upload failed: ") + (e as Error).message); } finally { setUploadingTk(null); }
   };
-  const removeDraftImage = (tk: string, idx: number) => {
-    setDraftImages((prev) => { const next = { ...prev, [tk]: (prev[tk] ?? []).filter((_, i) => i !== idx) }; persistTargets(syncParentIds, syncSkuIds, next); return next; });
+  const removeDraftImage = (tk: string, key: string) => {
+    const nextDrafts = { ...draftImages, [tk]: (draftImages[tk] ?? []).filter((d) => d.r2_key !== key) };
+    const inner = { ...(replaceMap[tk] ?? {}) }; delete inner[key];
+    const nextRm = { ...replaceMap, [tk]: inner };
+    setDraftImages(nextDrafts); setReplaceMap(nextRm);
+    persistTargets(syncParentIds, syncSkuIds, nextDrafts, nextRm);
   };
-  // ปุ่ม "ใส่เข้าสินค้าเลย (ไม่รออนุมัติ)" — ดันรูปร่างของสินค้านั้นเข้าแกลเลอรีทันที (guard products.edit ฝั่ง server)
-  const applyNow = async (tk: string) => {
-    const arr = draftImages[tk] ?? []; if (!arr.length) return;
+  // ปุ่ม "ใส่เข้าสินค้าเลย (ไม่รออนุมัติ)" — ดันเฉพาะรูปของปลายทาง dest นั้นเข้าสินค้าทันที (guard products.edit ฝั่ง server)
+  const applyNow = async (tk: string, dest: "gallery" | "description") => {
+    const all = draftImages[tk] ?? [];
+    const arr = all.filter((d) => (dest === "description") === isDescVal(replaceMap[tk]?.[d.r2_key]));
+    if (!arr.length) return;
     const [pfx, id] = tk.split(":"); const ownerType = pfx === "parent" ? "parent_sku" : "product_sku";
     const items = arr.map((d) => ({ r2_key: d.r2_key, slot: replaceMap[tk]?.[d.r2_key] ?? "new" }));
-    setApplyingTk(tk);
+    setApplyingTk(`${dest}#${tk}`);
     try {
       const r = await apiFetch("/api/product-images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "apply", owner_type: ownerType, owner_id: id, subtask_id: sub.id, task_id: taskId, items }) }).then((x) => x.json());
       if (r?.error) throw new Error(r.error);
-      // ล้างร่าง + การจับคู่ของสินค้านี้ แล้วรีเฟรชแกลเลอรี (โชว์ผลทันที)
-      setReplaceMap((prev) => { const n = { ...prev }; delete n[tk]; return n; });
-      setDraftImages((prev) => { const n = { ...prev }; delete n[tk]; persistTargets(syncParentIds, syncSkuIds, n, (() => { const rm = { ...replaceMap }; delete rm[tk]; return rm; })()); return n; });
-      await refreshGallery(tk);
+      // ล้างเฉพาะรูปของปลายทางนี้ แล้วรีเฟรช (โชว์ผลทันที)
+      const appliedKeys = new Set(arr.map((d) => d.r2_key));
+      const nextDrafts = { ...draftImages, [tk]: (draftImages[tk] ?? []).filter((d) => !appliedKeys.has(d.r2_key)) };
+      const inner = { ...(replaceMap[tk] ?? {}) }; appliedKeys.forEach((k) => delete inner[k]);
+      const nextRm = { ...replaceMap, [tk]: inner };
+      setDraftImages(nextDrafts); setReplaceMap(nextRm);
+      persistTargets(syncParentIds, syncSkuIds, nextDrafts, nextRm);
+      if (dest === "description") await refreshDescGallery(id); else await refreshGallery(tk);
       pushToast("success", t("ใส่รูปเข้าสินค้าแล้ว", "Images added to the product"));
     } catch (e) { pushToast("error", t("ใส่รูปไม่สำเร็จ: ", "Failed: ") + (e as Error).message); } finally { setApplyingTk(null); }
   };
@@ -804,8 +808,17 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                         <span className="text-sm text-slate-700 truncate flex-1">{p.name_platform || p.name_th || "—"}</span>
                         <button type="button" onClick={() => setEditParentId(p.id)} title={t("แก้/เพิ่ม SKU ในตัวแก้สินค้า", "Manage SKUs in product editor")} className="text-[11px] text-violet-600 hover:underline shrink-0">✏️ {t("แก้สินค้า", "Edit product")}</button>
                       </div>
-                      {/* กล่องรูปของ Parent SKU นี้ — แกลเลอรีเดิม + ลากรูป + เลือกแทน/เพิ่ม + ปุ่มใส่เลย */}
-                      {pon && <div className="pl-6"><ProductImageBox tk={`parent:${p.id}`} label={p.code} slots={galleries[`parent:${p.id}`] ?? []} descSlots={descGalleries[`parent:${p.id}`] ?? []} draft={draftImages[`parent:${p.id}`] ?? []} uploading={uploadingTk === `parent:${p.id}`} onAddDraft={(f) => void addDraftImages(`parent:${p.id}`, f)} onRemoveDraft={(i) => removeDraftImage(`parent:${p.id}`, i)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `parent:${p.id}`} onApplyNow={() => void applyNow(`parent:${p.id}`)} tt={t} onRestored={() => refreshGallery(`parent:${p.id}`)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} /></div>}
+                      {/* กล่องรูปของ Parent SKU นี้ — แกลเลอรี + (ติ๊ก) Description */}
+                      {pon && (() => { const ptk = `parent:${p.id}`; const descOpen = descBoxOpen[ptk] ?? (draftFor(ptk, "description").length > 0); return (
+                        <div className="pl-6 space-y-1.5">
+                          <ProductImageBox tk={ptk} label={p.code} mode="gallery" refSlots={galleryRef(ptk)} draft={draftFor(ptk, "gallery")} uploading={uploadingTk === `gallery#${ptk}`} onAddDraft={(f) => void addDraftImages(ptk, f, "gallery")} onRemoveDraft={(k) => removeDraftImage(ptk, k)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `gallery#${ptk}`} onApplyNow={() => void applyNow(ptk, "gallery")} tt={t} onRestored={() => refreshGallery(ptk)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />
+                          <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
+                            <input type="checkbox" checked={descOpen} onChange={(e) => setDescBoxOpen((m) => ({ ...m, [ptk]: e.target.checked }))} className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 cursor-pointer" />
+                            📂 {t("ส่งเข้า Description ด้วย", "Also send to Description")}
+                          </label>
+                          {descOpen && <ProductImageBox tk={ptk} label={p.code} mode="description" refSlots={descGalleries[ptk] ?? []} draft={draftFor(ptk, "description")} uploading={uploadingTk === `description#${ptk}`} onAddDraft={(f) => void addDraftImages(ptk, f, "description")} onRemoveDraft={(k) => removeDraftImage(ptk, k)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `description#${ptk}`} onApplyNow={() => void applyNow(ptk, "description")} tt={t} onRestored={() => refreshDescGallery(p.id)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />}
+                        </div>
+                      ); })()}
                       <div className="pl-6 mt-1.5 space-y-1.5">
                         {(skusByParent[p.id] ?? []).map((s) => { const son = syncSkuIds.has(s.id); const thumb = s.image_key ? `/api/r2-image?key=${encodeURIComponent(s.image_key)}` : null; return (
                           <div key={s.id} className="space-y-1">
@@ -817,7 +830,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                               <button type="button" onClick={() => setSkuEditor({ recordId: s.id, parentId: p.id })} className="text-violet-600 hover:underline shrink-0">✏️</button>
                             </div>
                             {son
-                              ? <ProductImageBox tk={`sku:${s.id}`} label={s.code} slots={galleries[`sku:${s.id}`] ?? []} draft={draftImages[`sku:${s.id}`] ?? []} uploading={uploadingTk === `sku:${s.id}`} onAddDraft={(f) => void addDraftImages(`sku:${s.id}`, f)} onRemoveDraft={(i) => removeDraftImage(`sku:${s.id}`, i)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `sku:${s.id}`} onApplyNow={() => void applyNow(`sku:${s.id}`)} tt={t} onRestored={() => refreshGallery(`sku:${s.id}`)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />
+                              ? <ProductImageBox tk={`sku:${s.id}`} label={s.code} mode="gallery" refSlots={galleryRef(`sku:${s.id}`)} draft={draftFor(`sku:${s.id}`, "gallery")} uploading={uploadingTk === `gallery#sku:${s.id}`} onAddDraft={(f) => void addDraftImages(`sku:${s.id}`, f, "gallery")} onRemoveDraft={(k) => removeDraftImage(`sku:${s.id}`, k)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `gallery#sku:${s.id}`} onApplyNow={() => void applyNow(`sku:${s.id}`, "gallery")} tt={t} onRestored={() => refreshGallery(`sku:${s.id}`)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />
                               : <p className="ml-6 text-[10px] text-slate-400 italic">{t("ติ๊กเพื่อใส่/แทนรูปของ SKU นี้", "Tick to add/replace this SKU's images")}</p>}
                           </div>
                         ); })}

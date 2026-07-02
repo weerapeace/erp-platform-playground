@@ -7,6 +7,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 export type LightboxImage = { url: string; label?: string | null };
 
@@ -38,8 +39,9 @@ export function ImageLightbox({ images, index, onClose, onIndex }: {
   if (!open) return null;
   const cur = images[index];
   const navBtn = "absolute top-1/2 -translate-y-1/2 h-11 w-11 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl leading-none select-none";
-  return (
-    <div className="fixed inset-0 z-[120] bg-black/85 flex items-center justify-center" onClick={onClose}
+  // z-[9999] + portal ไป body → ลอยทับทุกอย่าง (modal/drawer) ไม่จมหลัง popup ที่เปิดอยู่
+  const node = (
+    <div className="fixed inset-0 z-[9999] bg-black/85 flex items-center justify-center" onClick={onClose}
       onTouchStart={(e) => { touchX.current = e.touches[0]?.clientX ?? null; }}
       onTouchEnd={(e) => { const x0 = touchX.current; const x1 = e.changedTouches[0]?.clientX ?? null; if (x0 != null && x1 != null && Math.abs(x1 - x0) > 50) go(x1 < x0 ? 1 : -1); touchX.current = null; }}>
       {/* แถบบน: ลำดับ + ป้ายกำกับ + ปิด */}
@@ -51,4 +53,5 @@ export function ImageLightbox({ images, index, onClose, onIndex }: {
       {images.length > 1 && <button onClick={(e) => { e.stopPropagation(); go(1); }} title="ถัดไป (→)" className={`${navBtn} right-3`}>›</button>}
     </div>
   );
+  return typeof document !== "undefined" ? createPortal(node, document.body) : node;
 }
