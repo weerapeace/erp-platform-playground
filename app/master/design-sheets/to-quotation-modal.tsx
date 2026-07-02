@@ -13,6 +13,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { CustomerPicker } from "@/components/pickers";
 import type { CustomerPickerValue } from "@/components/pickers";
+import type { SheetSku } from "@/app/api/design-sheets/[id]/skus/route";
 
 export function ToQuotationModal({
   open, onClose, sheetId, sheetName, defaultPrice, cartId, cartLabel, onCartSet, onAdded,
@@ -38,19 +39,41 @@ export function ToQuotationModal({
   const [price, setPrice] = useState("");
   const [qty, setQty] = useState("1");
   const [saving, setSaving] = useState(false);
+  const [sheetSkus, setSheetSkus] = useState<SheetSku[]>([]);   // SKU ที่สร้างจากงานนี้ (เลือกได้ ถ้ามี)
+  const [selSkuId, setSelSkuId] = useState("");                 // SKU ที่เลือก ("" = พิมพ์ชื่อเอง)
 
   const hasCart = !!cartId;
 
   useEffect(() => {
     if (!open) return;
-    setVariation(""); setQty("1"); setCustomer(null);
+    setVariation(""); setQty("1"); setCustomer(null); setSelSkuId("");
     setName(sheetName || "");
     setPrice(defaultPrice != null ? String(defaultPrice) : "");
   }, [open, sheetName, defaultPrice]);
 
+  // โหลด SKU ที่สร้างจากงานนี้ → ให้เลือกแทนพิมพ์ชื่อเอง (เติมชื่อ/สี/ราคา + ผูกรหัสสินค้าจริง)
+  useEffect(() => {
+    if (!open || !sheetId) return;
+    let alive = true;
+    apiFetch(`/api/design-sheets/${sheetId}/skus`).then((r) => r.json())
+      .then((j) => { if (alive && Array.isArray(j.data)) setSheetSkus(j.data as SheetSku[]); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open, sheetId]);
+
+  const pickSku = (skuId: string) => {
+    setSelSkuId(skuId);
+    const s = sheetSkus.find((x) => x.id === skuId);
+    if (s) {
+      setName(s.name_th || sheetName || "");
+      setVariation(s.color || "");
+      if (s.list_price != null) setPrice(String(s.list_price));
+    }
+  };
+
   const save = async () => {
     if (!name.trim()) { toast.error("กรอกชื่อสินค้า"); return; }
     if (!hasCart && !customer) { toast.error("เลือกลูกค้าก่อน"); return; }
+    const sel = sheetSkus.find((x) => x.id === selSkuId);
     setSaving(true);
     try {
       const res = await apiFetch(`/api/design-sheets/${sheetId}/to-quotation`, {
@@ -58,7 +81,8 @@ export function ToQuotationModal({
         body: JSON.stringify({
           target: hasCart ? cartId : "new",
           customer: !hasCart && customer ? { id: customer.id, name: customer.name, code: customer.code } : null,
-          line: { product_name: name.trim(), variation: variation.trim() || null, unit_price: price === "" ? 0 : Number(price), qty: Number(qty) || 1 },
+          line: { product_name: name.trim(), variation: variation.trim() || null, unit_price: price === "" ? 0 : Number(price), qty: Number(qty) || 1,
+                  sku: sel?.code ?? null, product_id: sel?.id ?? null },
         }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
@@ -95,9 +119,20 @@ export function ToQuotationModal({
           </label>
         )}
 
+        {sheetSkus.length > 0 && (
+          <label className="block">
+            <span className="text-xs text-slate-500">เลือก SKU ของงานนี้ (หรือพิมพ์ชื่อเอง)</span>
+            <select value={selSkuId} onChange={(e) => pickSku(e.target.value)}
+              className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">— พิมพ์ชื่อเอง —</option>
+              {sheetSkus.map((s) => <option key={s.id} value={s.id}>{s.code}{s.color ? ` · ${s.color}` : ""}{s.name_th ? ` — ${s.name_th}` : ""}</option>)}
+            </select>
+          </label>
+        )}
+
         <label className="block">
           <span className="text-xs text-slate-500">ชื่อสินค้า *</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input value={name} onChange={(e) => { setName(e.target.value); setSelSkuId(""); }} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </label>
         <label className="block">
           <span className="text-xs text-slate-500">ตัวเลือก / variation (สี, ขนาด...)</span>

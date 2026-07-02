@@ -115,7 +115,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   // ---- 3) อัปเดตสถานะใบงาน + เก็บรหัส parent ----
-  await admin.from("design_sheets").update({ status: "sku_created", parent_sku_code: pCode, updated_at: new Date().toISOString() }).eq("id", id);
+  // เติมรหัส Parent เข้า "Parent SKU ที่จะตั้ง" (chips) ของใบ + ตั้ง parent_sku_code หลัก + สถานะ
+  const { data: cur } = await admin.from("design_sheets").select("parent_sku_codes").eq("id", id).maybeSingle();
+  const curCodes: string[] = Array.isArray(cur?.parent_sku_codes) ? (cur!.parent_sku_codes as string[]) : [];
+  const mergedCodes = curCodes.includes(pCode) ? curCodes : [...curCodes, pCode];
+  await admin.from("design_sheets").update({ status: "sku_created", parent_sku_code: pCode, parent_sku_codes: mergedCodes, updated_at: new Date().toISOString() }).eq("id", id);
 
   await writeAudit(admin, {
     action: "create_skus", entityType: "design_sheet", entityId: id,

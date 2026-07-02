@@ -24,7 +24,7 @@ export const revalidate = 0;
 type Body = {
   target?: string;
   customer?: { id?: string; name?: string | null; code?: string | null } | null;
-  line?: { product_name?: string; variation?: string; unit_price?: number | null; qty?: number | null };
+  line?: { product_name?: string; variation?: string; unit_price?: number | null; qty?: number | null; sku?: string | null; product_id?: string | null };
 };
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -51,9 +51,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     .eq("id", id)
     .maybeSingle();
   const productCode = (sheet?.parent_sku_code as string | undefined)?.trim() || null;
+  // ถ้าเลือก SKU เจาะจงจากใบงาน (มี sku/product_id) → ใช้รหัสสินค้าจริงนั้น แทนรหัส Parent
+  const lineSku = (body.line?.sku ?? "").trim() || productCode;
 
   const newLine: QuoteLine = {
-    sku: productCode, product_name: name, qty, unit: "ชิ้น", unit_price: price,
+    sku: lineSku, product_id: body.line?.product_id ?? null, product_name: name, qty, unit: "ชิ้น", unit_price: price,
     note: body.line?.variation?.trim() || null,
   };
 
