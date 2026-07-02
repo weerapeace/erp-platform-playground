@@ -10,7 +10,8 @@ import { writeAudit } from "@/lib/audit";
 
 // replace_map: targetKey ("parent:<id>" / "sku:<id>") → { attachmentR2Key → slotId ที่จะแทน (หรือ "new" = เพิ่มรูปใหม่) }
 // product_images: targetKey ("parent:<id>" / "sku:<id>") → รูป (r2_key) เฉพาะสินค้านั้น (กล่องต่อสินค้า) · ใช้ replace_map[tk] เพื่อเลือกแทน/เพิ่ม
-export type ImageSyncTargets = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; product_images?: Record<string, string[]>; image_order?: string[]; replace_map?: Record<string, Record<string, string>> } | null;
+// product_labels: tk → รหัสสินค้า (เช่น "BSAC007") ใช้โชว์ป้ายบนการ์ด (denormalize, engine ไม่ใช้)
+export type ImageSyncTargets = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; product_images?: Record<string, string[]>; product_labels?: Record<string, string>; image_order?: string[]; replace_map?: Record<string, Record<string, string>> } | null;
 export type SubtaskForSync = { id: string; task_id: string; subtask_type?: string | null; config?: Record<string, unknown> | null; description?: string | null; image_sync_targets?: ImageSyncTargets };
 export type SyncResult = { pushed: number; skipped: string[] };
 
