@@ -715,18 +715,21 @@ export function DataTable<T extends Record<string, unknown>>({
     };
   }), [rowActions]);
 
+  // ลายเซ็น string ของชุด action (คงที่ตามเนื้อหา) — ใช้เป็น dep แทน object actionOptions
+  // กัน effect รันซ้ำทุก render เมื่อ rowActions ถูกส่งเป็น array ใหม่ทุกครั้ง (default [] / inline)
+  // ไม่งั้น setActionSettings(object ใหม่) → re-render → effect รันอีก = วนไม่จบ (หน้าค้าง)
+  const actionSig = actionOptions.map((a) => a.id).join("|");
+
   useEffect(() => {
+    if (actionOptions.length === 0) { setActionSettings({}); return; }
     let alive = true;
     const localSettings = loadRowActionSettings(actionStorageKey, actionOptions);
-    setActionSettings(localSettings);
-
     const tableKey = normalizeRowActionTableKey(tableId || exportEntityType || exportFilename);
-    if (!tableKey || actionOptions.length === 0) return () => { alive = false; };
-
+    const swKey = tableKey ? `ras:${tableKey}` : "";
     // SWR: revisit → ใช้ค่าที่แคชไว้ทันที (ไม่ต้องรอ network) แล้ว revalidate เงียบ ๆ
-    const swKey = `ras:${tableKey}`;
-    const cached = peekSWR<Record<string, RowActionSetting>>(swKey);
-    if (cached) setActionSettings({ ...localSettings, ...cached });
+    const cached = swKey ? peekSWR<Record<string, RowActionSetting>>(swKey) : undefined;
+    setActionSettings(cached ? { ...localSettings, ...cached } : localSettings);
+    if (!swKey) return () => { alive = false; };
 
     apiFetch(`/api/row-action-settings?key=${encodeURIComponent(tableKey)}`)
       .then((res) => res.ok ? res.json() : null)
@@ -739,7 +742,8 @@ export function DataTable<T extends Record<string, unknown>>({
       .catch(() => {});
 
     return () => { alive = false; };
-  }, [actionOptions, actionStorageKey, tableId, exportEntityType, exportFilename]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionSig, actionStorageKey, tableId, exportEntityType, exportFilename]);
 
   const inlineRowActions = useMemo(
     () => actionOptions.filter((action) => actionSettings[action.id]?.placement === "inline"),
