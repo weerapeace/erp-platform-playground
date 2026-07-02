@@ -382,6 +382,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const [syncSkuIds, setSyncSkuIds] = useState<Set<string>>(new Set());
   const [extraParents, setExtraParents] = useState<PlatformParent[]>([]);  // Parent ที่เลือกเพิ่มเอง (นอกเหนือที่ผูกกับงาน)
   const [addParentOpen, setAddParentOpen] = useState(false);
+  const [noParent, setNoParent] = useState(false);   // ติ๊ก "ไม่ต้องแนบ Parent SKU" → ข้ามการบังคับเลือกสินค้าปลายทาง
   const [linkedSkuIds, setLinkedSkuIds] = useState<string[]>([]);          // SKU ที่ผูกกับงาน (ใช้ติ๊กล่วงหน้า)
   const [requiredFields, setRequiredFields] = useState<{ key: string; label: string }[]>([]);   // ฟิลด์บังคับก่อนส่ง (ค่ากลาง)
   const [skuDraftImages, setSkuDraftImages] = useState<Record<string, { r2_key: string; file_name: string }[]>>({}); // รูปร่างต่อ SKU (เข้าตอนอนุมัติ)
@@ -485,7 +486,10 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
 
   // ส่งงานได้เมื่อ Parent SKU ทุกตัวกรอกฟิลด์บังคับ ("*") ครบ (ค่ากลางตั้งที่ /tasks/settings)
   const platformReady = parents !== null && parents.length > 0 && parents.every((p) => (p.missing?.length ?? 0) === 0);
-  const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : attachCount > 0);
+  // โหมดแนบรูป: ต้องเลือกสินค้าปลายทาง (Parent SKU/SKU) อย่างน้อย 1 ก่อนส่ง — เว้นแต่ติ๊ก "ไม่ต้องแนบ"
+  const hasProductTarget = syncParentIds.size > 0 || syncSkuIds.size > 0;
+  const needProductTarget = showImages && !platformConfirm && !noParent;
+  const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : (attachCount > 0 && (!needProductTarget || hasProductTarget)));
 
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(taskId, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim(), subtask_id: sub.id }); setLinkLabel(""); setLinkUrl(""); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
   const submit = async () => {
@@ -493,6 +497,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       if (!platformReady) { pushToast("error", parents && parents.length === 0 ? t("งานนี้ยังไม่ได้ผูก Parent SKU", "No Parent SKU linked to this task") : t("ยังไม่มีรายละเอียด Platform ครบ — กรอกในสินค้าก่อนส่ง", "Platform details incomplete — fill them in the product first")); return; }
     } else if (attachCount === 0) {
       pushToast("error", t("กรุณาแนบลิงก์หรือรูปงานอย่างน้อย 1 ก่อนส่ง", "Please attach at least one file or link before submitting")); return;
+    } else if (needProductTarget && !hasProductTarget) {
+      pushToast("error", t('เลือก Parent SKU ปลายทางอย่างน้อย 1 หรือติ๊ก "ไม่ต้องแนบ Parent SKU"', 'Pick at least one target Parent SKU, or tick "No Parent SKU needed"')); return;
     }
     setBusy(true);
     try {
@@ -563,6 +569,11 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                   <span className="text-[10px] text-slate-400 shrink-0">{(syncParentIds.size + syncSkuIds.size) > 0 ? t(`เลือก ${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`, `${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`) : t("ไม่เลือก = แนบรูปเฉย ๆ", "None = attach only")}</span>
                 </div>
                 <p className="text-[11px] text-slate-400 mb-2">{t("ติ๊กสินค้าที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ · ไม่ติ๊ก = ไม่ส่งเข้าสินค้า", "Tick products to add the images to their gallery on approval · none = attach only")}</p>
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-600 mb-2 cursor-pointer">
+                  <input type="checkbox" checked={noParent} onChange={(e) => setNoParent(e.target.checked)} className="h-3.5 w-3.5 rounded border-slate-300 text-amber-600 cursor-pointer" />
+                  {t("ไม่ต้องแนบ Parent SKU (งานนี้ไม่ส่งเข้าสินค้า)", "No Parent SKU needed (don't send to products)")}
+                </label>
+                {needProductTarget && !hasProductTarget && <p className="text-[11px] text-rose-600 mb-2">⚠ {t("ต้องเลือก Parent SKU อย่างน้อย 1 ก่อนส่งงาน", "Pick at least one Parent SKU before submitting")}</p>}
                 {displayParents.length === 0 && parents !== null ? (
                   <p className="text-xs text-slate-400 italic mb-2">{t("งานนี้ยังไม่ผูก Parent SKU — กดเลือกด้านล่างได้", "No Parent SKU linked — add one below")}</p>
                 ) : displayParents.map((p) => {
