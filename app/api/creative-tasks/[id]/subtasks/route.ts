@@ -79,7 +79,7 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
   const required = reqCols.map((c) => ({ key: c, label: colLabel[c] ?? c }));
   const { data: pl } = await admin.from("erp_creative_task_parent_skus").select("parent_sku_id").eq("task_id", taskId);
   const pIds = ((pl ?? []) as { parent_sku_id: string }[]).map((r) => r.parent_sku_id).filter(Boolean);
-  if (!pIds.length) return NextResponse.json({ parents: [], linked_sku_ids: linkedSkuIds, required, error: null });
+  if (!pIds.length) return NextResponse.json({ parents: [], linked_sku_ids: linkedSkuIds, required, galleries: {}, error: null });
   // select * เพื่อรองรับ "ทุกฟิลด์" ที่ admin เลือกบังคับ (parent มีไม่กี่แถว)
   const { data } = await admin.from("parent_skus_v2").select("*").in("id", pIds);
   const parents = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
@@ -94,7 +94,19 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
     // ฟิลด์บังคับที่ยังว่าง (ป้ายจากทะเบียนฟิลด์) — ใช้โชว์ * + บล็อกส่งงาน
     missing: reqCols.filter((c) => isEmptyVal(p[c])).map((c) => colLabel[c] ?? c),
   }));
-  return NextResponse.json({ parents, linked_sku_ids: linkedSkuIds, required, error: null });
+  // แกลเลอรีปัจจุบันของ Parent SKU (โชว์ preview + จับคู่แทนรูปในป๊อปอัปส่งงาน)
+  const galleries = await loadGalleries(admin, "parent_sku", pIds);
+  return NextResponse.json({ parents, linked_sku_ids: linkedSkuIds, required, galleries, error: null });
+}
+
+// แกลเลอรีสินค้า (product_image_slots) ต่อ owner — คืน map "parent:<id>" / "sku:<id>" → [{slot_id,slot,r2_key}]
+async function loadGalleries(admin: ReturnType<typeof supabaseAdmin>, ownerType: "parent_sku" | "product_sku", ownerIds: string[]): Promise<Record<string, { slot_id: string; slot: number; r2_key: string }[]>> {
+  const out: Record<string, { slot_id: string; slot: number; r2_key: string }[]> = {};
+  if (!ownerIds.length) return out;
+  const prefix = ownerType === "parent_sku" ? "parent" : "sku";
+  const { data } = await admin.from("product_image_slots").select("id, owner_id, slot, r2_key").eq("owner_type", ownerType).eq("image_group", "gallery").in("owner_id", ownerIds).order("slot", { ascending: true });
+  for (const s of ((data ?? []) as Record<string, unknown>[])) { const k = `${prefix}:${s.owner_id}`; (out[k] ??= []).push({ slot_id: String(s.id), slot: Number(s.slot), r2_key: String(s.r2_key ?? "") }); }
+  return out;
 }
 
 const EDITABLE = new Set(["title", "title_en", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order", "image_sync_targets"]);
@@ -117,6 +129,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const sp = new URL(request.url).searchParams;
   const promptSubId = sp.get("prompt_subtask_id");
   if (promptSubId) return resolvePrompt(admin, id, promptSubId);
+  // ดึงแกลเลอรีของสินค้าแบบเจาะจง (เช่น Parent SKU ที่เพิ่งเลือกเพิ่มในป๊อปอัป) — "parent_sku:<id>" / "product_sku:<id>"
+  const galleryOwner = sp.get("gallery");
+  if (galleryOwner) {
+    const [ot, oid] = galleryOwner.split(":");
+    const ownerType = ot === "parent_sku" ? "parent_sku" : "product_sku";
+    const g = await loadGalleries(admin, ownerType, oid ? [oid] : []);
+    return NextResponse.json({ galleries: g, error: null });
+  }
   if (sp.get("platform") === "1") return platformPreview(admin, id);
   const { data, error } = await admin.from("erp_creative_subtasks").select("*").eq("task_id", id).order("sort_order", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });

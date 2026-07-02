@@ -383,6 +383,10 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const [extraParents, setExtraParents] = useState<PlatformParent[]>([]);  // Parent ที่เลือกเพิ่มเอง (นอกเหนือที่ผูกกับงาน)
   const [addParentOpen, setAddParentOpen] = useState(false);
   const [noParent, setNoParent] = useState(false);   // ติ๊ก "ไม่ต้องแนบ Parent SKU" → ข้ามการบังคับเลือกสินค้าปลายทาง
+  // เฟส 2: แกลเลอรีปัจจุบันของสินค้า (โชว์ preview) + จับคู่ "รูปส่ง → แทนช่องไหน"
+  type GallerySlot = { slot_id: string; slot: number; r2_key: string };
+  const [galleries, setGalleries] = useState<Record<string, GallerySlot[]>>({});
+  const [replaceMap, setReplaceMap] = useState<Record<string, Record<string, string>>>({});   // targetKey → { workR2Key → slotId | "new" }
   const [linkedSkuIds, setLinkedSkuIds] = useState<string[]>([]);          // SKU ที่ผูกกับงาน (ใช้ติ๊กล่วงหน้า)
   const [requiredFields, setRequiredFields] = useState<{ key: string; label: string }[]>([]);   // ฟิลด์บังคับก่อนส่ง (ค่ากลาง)
   const [skuDraftImages, setSkuDraftImages] = useState<Record<string, { r2_key: string; file_name: string }[]>>({}); // รูปร่างต่อ SKU (เข้าตอนอนุมัติ)
@@ -400,6 +404,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       setParents(ps);
       setRequiredFields((j.required as { key: string; label: string }[]) ?? []);
       setLinkedSkuIds((j.linked_sku_ids as string[]) ?? []);
+      if (j.galleries) setGalleries((prev) => ({ ...prev, ...(j.galleries as Record<string, GallerySlot[]>) }));
       const entries = await Promise.all(ps.map(async (p) => {
         try {
           const sj = await apiFetch(`/api/pickers/skus?parent_sku_id=${encodeURIComponent(p.id)}&limit=50`).then((r) => r.json());
@@ -442,6 +447,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       setSyncParentIds(new Set(ex.parent_ids ?? []));
       setSyncSkuIds(new Set(ex.sku_ids ?? []));
       setSkuDraftImages(Object.fromEntries(Object.entries(ex.sku_images ?? {}).map(([k, keys]) => [k, (keys as string[]).map((r) => ({ r2_key: r, file_name: "" }))])));
+      if (ex.replace_map) setReplaceMap(ex.replace_map as Record<string, Record<string, string>>);
     } else {
       setSyncParentIds(new Set(parents.map((p) => p.id).filter(Boolean)));
       setSyncSkuIds(new Set(linkedSkuIds));
@@ -450,12 +456,22 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   }, [showImages, parents, linkedSkuIds, sub.image_sync_targets]);
 
   // เซฟปลายทาง + รูปร่างต่อ SKU ลงงานย่อย (best-effort) — ทั้งผู้ส่งและผู้ตรวจปรับได้ก่อนอนุมัติ
-  const persistTargets = useCallback((pids: Set<string>, sids: Set<string>, skuImgs: Record<string, { r2_key: string; file_name: string }[]> = skuDraftImages) => {
+  const persistTargets = useCallback((pids: Set<string>, sids: Set<string>, skuImgs: Record<string, { r2_key: string; file_name: string }[]> = skuDraftImages, rmap: Record<string, Record<string, string>> = replaceMap) => {
     const sku_images = Object.fromEntries(Object.entries(skuImgs).map(([k, arr]) => [k, arr.map((x) => x.r2_key)]).filter(([, ks]) => (ks as string[]).length));
-    updateSubtask(taskId, sub.id, { image_sync_targets: { parent_ids: [...pids], sku_ids: [...sids], sku_images } }).catch(() => {});
-  }, [taskId, sub.id, skuDraftImages]);
+    updateSubtask(taskId, sub.id, { image_sync_targets: { parent_ids: [...pids], sku_ids: [...sids], sku_images, replace_map: rmap } }).catch(() => {});
+  }, [taskId, sub.id, skuDraftImages, replaceMap]);
   const toggleSyncParent = (pid: string) => { const n = new Set(syncParentIds); n.has(pid) ? n.delete(pid) : n.add(pid); setSyncParentIds(n); persistTargets(n, syncSkuIds); };
   const toggleSyncSku = (sid: string) => { const n = new Set(syncSkuIds); n.has(sid) ? n.delete(sid) : n.add(sid); setSyncSkuIds(n); persistTargets(syncParentIds, n); };
+  // จับคู่ "รูปส่ง → แทนช่องไหน" ของสินค้า (val = slot_id หรือ "new" = เพิ่มรูปใหม่)
+  const setReplace = (tk: string, imgKey: string, val: string) => {
+    setReplaceMap((prev) => {
+      const inner = { ...(prev[tk] ?? {}) };
+      if (val === "new") delete inner[imgKey]; else inner[imgKey] = val;
+      const next = { ...prev, [tk]: inner };
+      persistTargets(syncParentIds, syncSkuIds, skuDraftImages, next);
+      return next;
+    });
+  };
   const addSyncParent = async (p: ParentSkuPickerValue) => {
     if (!p) return;
     const exists = (parents ?? []).some((x) => x.id === p.id) || extraParents.some((x) => x.id === p.id);
@@ -464,6 +480,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       await reloadSkusFor(p.id);
     }
     const n = new Set(syncParentIds); n.add(p.id); setSyncParentIds(n); persistTargets(n, syncSkuIds);
+    // ดึงแกลเลอรีของ Parent ที่เพิ่งเลือก มาโชว์ preview + ให้จับคู่แทนรูปได้
+    try { const gj = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?gallery=parent_sku:${encodeURIComponent(p.id)}`).then((r) => r.json()); if (gj.galleries) setGalleries((prev) => ({ ...prev, ...(gj.galleries as Record<string, GallerySlot[]>) })); } catch { /* noop */ }
     setAddParentOpen(false);
   };
   const displayParents = useMemo(() => [...(parents ?? []), ...extraParents], [parents, extraParents]);
@@ -505,7 +523,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       const body: Record<string, unknown> = { status: "submitted" };
       if (showImages) {
         const sku_images = Object.fromEntries(Object.entries(skuDraftImages).map(([k, arr]) => [k, arr.map((x) => x.r2_key)]).filter(([, ks]) => (ks as string[]).length));
-        body.image_sync_targets = { parent_ids: [...syncParentIds], sku_ids: [...syncSkuIds], sku_images }; // บันทึกปลายทาง + รูปร่างต่อ SKU ตอนส่ง
+        body.image_sync_targets = { parent_ids: [...syncParentIds], sku_ids: [...syncSkuIds], sku_images, replace_map: replaceMap }; // บันทึกปลายทาง + รูปร่างต่อ SKU + การจับคู่แทนรูป ตอนส่ง
       }
       await updateSubtask(taskId, sub.id, body); await reload(); pushToast("success", t("ส่งงานแล้ว — รออนุมัติ", "Submitted — pending approval")); onClose();
     }
@@ -586,6 +604,41 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                         <span className="text-sm text-slate-700 truncate flex-1">{p.name_platform || p.name_th || "—"}</span>
                         <button type="button" onClick={() => setEditParentId(p.id)} title={t("แก้/เพิ่ม SKU ในตัวแก้สินค้า", "Manage SKUs in product editor")} className="text-[11px] text-violet-600 hover:underline shrink-0">✏️ {t("แก้สินค้า", "Edit product")}</button>
                       </div>
+                      {/* เฟส 2: จับคู่ "รูปส่ง → แทนรูปเดิม" (มี preview) — เว้น = เพิ่มใหม่ */}
+                      {pon && imageAtts.length > 0 && (() => {
+                        const tk = `parent:${p.id}`; const slots = galleries[tk] ?? [];
+                        return (
+                          <div className="pl-6 mt-2 border-t border-amber-100 pt-2">
+                            <p className="text-[11px] text-slate-500 mb-1">🔄 {t("จับคู่รูปที่ส่ง → แทนรูปเดิม (เว้น = เพิ่มเป็นรูปใหม่)", "Map submitted → replace existing (blank = add new)")}</p>
+                            {slots.length === 0 ? (
+                              <p className="text-[10px] text-slate-400 italic">{t("สินค้านี้ยังไม่มีรูปในแกลเลอรี — รูปที่ส่งจะเพิ่มเป็นรูปใหม่", "No gallery images yet — submitted images will be added as new")}</p>
+                            ) : (<>
+                              <div className="flex flex-wrap gap-2 mb-1.5">
+                                {imageAtts.map((a) => { const key = String(a.r2_key); const curVal = replaceMap[tk]?.[key] ?? "new"; return (
+                                  <div key={a.id} className="flex flex-col items-center gap-0.5">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={`/api/r2-image?key=${encodeURIComponent(key)}&w=64`} alt="" className={`h-12 w-12 object-cover rounded border-2 ${curVal !== "new" ? "border-amber-400" : "border-slate-200"}`} />
+                                    <select value={curVal} onChange={(e) => setReplace(tk, key, e.target.value)} className="text-[10px] border border-slate-200 rounded px-0.5 py-0.5 w-[72px]">
+                                      <option value="new">➕ {t("เพิ่มใหม่", "Add new")}</option>
+                                      {slots.map((s, i) => <option key={s.slot_id} value={s.slot_id}>{t(`แทน #${i + 1}`, `→ #${i + 1}`)}</option>)}
+                                    </select>
+                                  </div>
+                                ); })}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className="text-[10px] text-slate-400">{t("รูปเดิมในสินค้า:", "Current gallery:")}</span>
+                                {slots.map((s, i) => (
+                                  <div key={s.slot_id} className="relative">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={`/api/r2-image?key=${encodeURIComponent(s.r2_key)}&w=64`} alt="" title={`#${i + 1}`} className="h-9 w-9 object-cover rounded border border-slate-200" />
+                                    <span className="absolute -top-1 -left-1 bg-slate-700 text-white text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{i + 1}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </>)}
+                          </div>
+                        );
+                      })()}
                       <div className="pl-6 mt-1.5 space-y-1">
                         {(skusByParent[p.id] ?? []).map((s) => { const son = syncSkuIds.has(s.id); const thumb = s.image_key ? `/api/r2-image?key=${encodeURIComponent(s.image_key)}` : null; const drafts = skuDraftImages[s.id] ?? []; return (
                           <div key={s.id} className="space-y-1">

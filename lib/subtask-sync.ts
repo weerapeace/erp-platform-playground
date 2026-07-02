@@ -8,7 +8,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { writeAudit } from "@/lib/audit";
 
-export type ImageSyncTargets = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; image_order?: string[] } | null;
+// replace_map: targetKey ("parent:<id>" / "sku:<id>") → { attachmentR2Key → slotId ที่จะแทน (หรือ "new" = เพิ่มรูปใหม่) }
+export type ImageSyncTargets = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; image_order?: string[]; replace_map?: Record<string, Record<string, string>> } | null;
 export type SubtaskForSync = { id: string; task_id: string; subtask_type?: string | null; config?: Record<string, unknown> | null; description?: string | null; image_sync_targets?: ImageSyncTargets };
 export type SyncResult = { pushed: number; skipped: string[] };
 
@@ -96,7 +97,30 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
             ledger.push({ ...base, target_kind: "cover", target_table: tg.table, target_id: tg.id, ref: "cover_image_r2_key", prev_value: prev, new_value: imageKeys[0] }); pushed++;
           }
         } else {
-          for (const tg of selTargets) await pushGallery(tg.ownerType, tg.table, tg.id, imageKeys, false);
+          const rmap = sel?.replace_map ?? {};
+          for (const tg of selTargets) {
+            const tk = `${tg.ownerType === "parent_sku" ? "parent" : "sku"}:${tg.id}`;
+            const m = rmap[tk] ?? {};
+            // แยก: รูปที่จับคู่ "แทนช่องเดิม" กับ รูปที่ "เพิ่มใหม่" (ไม่จับคู่/จับคู่ = new)
+            const replaceKeys = imageKeys.filter((k) => m[k] && m[k] !== "new");
+            const appendKeys = imageKeys.filter((k) => !m[k] || m[k] === "new");
+            for (const imgKey of replaceKeys) {
+              const slotId = m[imgKey];
+              const { data: slotRow } = await admin.from("product_image_slots").select("id, r2_key").eq("id", slotId).eq("owner_type", tg.ownerType).eq("owner_id", tg.id).maybeSingle();
+              if (!slotRow) { skipped.push("slot_gone"); continue; }
+              const prevKey = String(slotRow.r2_key ?? "");
+              await admin.from("product_image_slots").update({ r2_key: imgKey }).eq("id", slotId);
+              // ถ้ารูปเก่าของช่องนี้เป็น "รูปปก" → ย้ายปกมาเป็นรูปใหม่ (จด ledger แยกให้ถอดกลับได้)
+              const { data: cur } = await admin.from(tg.table).select("cover_image_r2_key").eq("id", tg.id).maybeSingle();
+              if ((cur?.cover_image_r2_key ?? null) === prevKey && prevKey) {
+                await admin.from(tg.table).update({ cover_image_r2_key: imgKey }).eq("id", tg.id);
+                ledger.push({ ...base, target_kind: "cover", target_table: tg.table, target_id: tg.id, ref: "cover_image_r2_key", prev_value: prevKey, new_value: imgKey });
+              }
+              // ledger เก็บ "รูปเก่า" ไว้ (ถอดกลับ/ดูเวอร์ชันเก่าเฟส 3) — ไม่ลบไฟล์ R2
+              ledger.push({ ...base, target_kind: "media_replace", target_table: "product_image_slots", target_id: slotId, ref: imgKey, prev_value: prevKey, new_value: imgKey, mode: "gallery" }); pushed++;
+            }
+            if (appendKeys.length) await pushGallery(tg.ownerType, tg.table, tg.id, appendKeys, false);
+          }
         }
       }
     }
@@ -141,6 +165,10 @@ export async function reverseSubtaskSync(admin: any, subtaskId: string, opts: { 
     try {
       if (r.target_kind === "media") {
         await admin.from("product_image_slots").delete().eq("id", r.target_id);
+      } else if (r.target_kind === "media_replace") {
+        // คืนรูปเก่าเข้าช่องเดิม (เฉพาะถ้ายังเป็นรูปที่เราแทนไว้ กันทับการแก้มือภายหลัง)
+        const { data: cur } = await admin.from("product_image_slots").select("r2_key").eq("id", r.target_id).maybeSingle();
+        if ((cur?.r2_key ?? null) === r.new_value) await admin.from("product_image_slots").update({ r2_key: r.prev_value ?? null }).eq("id", r.target_id);
       } else if (r.target_kind === "cover") {
         const { data: cur } = await admin.from(r.target_table).select("cover_image_r2_key").eq("id", r.target_id).maybeSingle();
         if ((cur?.cover_image_r2_key ?? null) === r.new_value) await admin.from(r.target_table).update({ cover_image_r2_key: r.prev_value ?? null }).eq("id", r.target_id);
