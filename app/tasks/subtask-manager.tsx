@@ -300,7 +300,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       )}
       {/* ดูรูปบนการ์ดเต็มจอ + เลื่อน (รูปงาน + รูปเข้าสินค้า) */}
       <ImageLightbox images={cardImages} index={cardLb} onClose={() => setCardLb(-1)} onIndex={setCardLb} />
-      {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} onClose={() => setWorkOpen(false)} />}
+      {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} approveTarget={String(approveTarget ?? "none")} onClose={() => setWorkOpen(false)} />}
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
     </div>
   );
@@ -441,8 +441,8 @@ function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, onAddDra
         >ⓘ</span>
       </p>
 
-      {/* รูปเดิมของปลายทางนี้ (มีเลขกำกับ · กดซูมได้) */}
-      <div className="flex flex-wrap items-center gap-1 mb-2">
+      {/* รูปเดิมของปลายทางนี้ (มีเลขกำกับ · กดซูมได้) — กล่องพื้นหลังเทาอ่อน แยกจากรูปใหม่ */}
+      <div className="flex flex-wrap items-center gap-1 mb-2 bg-slate-100 rounded-md px-2 py-1.5">
         <span className="text-[10px] text-slate-400">{isDesc ? tt("รูป Description เดิม:", "Current Description:") : tt("รูปเดิมในสินค้า:", "Current gallery:")}</span>
         {refSlots.length === 0 ? <span className="text-[10px] text-slate-400 italic">{tt("ยังไม่มีรูป", "none yet")}</span>
           : refSlots.map((s, i) => (
@@ -515,9 +515,9 @@ function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, onAddDra
   );
 }
 
-function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks, canSubmit, platformConfirm, canApprove = false, onClose }: {
+function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks, canSubmit, platformConfirm, canApprove = false, approveTarget = "none", onClose }: {
   sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn;
-  showImages: boolean; showLinks: boolean; canSubmit: boolean; platformConfirm: boolean; canApprove?: boolean; onClose: () => void;
+  showImages: boolean; showLinks: boolean; canSubmit: boolean; platformConfirm: boolean; canApprove?: boolean; approveTarget?: string; onClose: () => void;
 }) {
   const t = useT();
   const { can } = useAuth();
@@ -747,14 +747,18 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   // โหมดแนบรูป: ต้องเลือกสินค้าปลายทาง (Parent SKU/SKU) อย่างน้อย 1 ก่อนส่ง — เว้นแต่ติ๊ก "ไม่ต้องแนบ"
   const hasProductTarget = syncParentIds.size > 0 || syncSkuIds.size > 0;
   const needProductTarget = showImages && !platformConfirm && !noParent;
-  const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : (attachCount > 0 && (!needProductTarget || hasProductTarget)));
+  const isDescTask = approveTarget === "description_media";                 // งานรูปคำอธิบาย → โชว์แค่ Description
+  const hasParentTarget = !noParent && displayParents.length > 0;           // มีสินค้าปลายทาง → ซ่อนกล่อง "รูปแนบงาน" บน
+  const anyDraft = Object.values(draftImages).some((a) => a.length > 0);    // มีรูปในกล่องสินค้าไหม
+  const hasWork = attachCount > 0 || anyDraft;                              // แนบรูป/ลิงก์ หรือหย่อนรูปในกล่องสินค้าก็นับ
+  const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : (hasWork && (!needProductTarget || hasProductTarget)));
 
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(taskId, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim(), subtask_id: sub.id }); setLinkLabel(""); setLinkUrl(""); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
   const submit = async () => {
     if (platformConfirm) {
       if (!platformReady) { pushToast("error", parents && parents.length === 0 ? t("งานนี้ยังไม่ได้ผูก Parent SKU", "No Parent SKU linked to this task") : t("ยังไม่มีรายละเอียด Platform ครบ — กรอกในสินค้าก่อนส่ง", "Platform details incomplete — fill them in the product first")); return; }
-    } else if (attachCount === 0) {
-      pushToast("error", t("กรุณาแนบลิงก์หรือรูปงานอย่างน้อย 1 ก่อนส่ง", "Please attach at least one file or link before submitting")); return;
+    } else if (!hasWork) {
+      pushToast("error", t("กรุณาแนบรูป/ลิงก์ หรือใส่รูปในกล่องสินค้าอย่างน้อย 1 ก่อนส่ง", "Please attach at least one image/link before submitting")); return;
     } else if (needProductTarget && !hasProductTarget) {
       pushToast("error", t('เลือก Parent SKU ปลายทางอย่างน้อย 1 หรือติ๊ก "ไม่ต้องแนบ Parent SKU"', 'Pick at least one target Parent SKU, or tick "No Parent SKU needed"')); return;
     }
@@ -832,8 +836,9 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
           </div>
         ) : (
           <>
-            {canSubmit && attachCount === 0 && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{t("แนบรูปหรือลิงก์อย่างน้อย 1 ก่อนกดส่งงาน", "Attach at least one image or link before submitting")}</p>}
-            {showImages && (
+            {canSubmit && !hasWork && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{hasParentTarget ? t("ใส่รูปในกล่องสินค้าอย่างน้อย 1 ก่อนกดส่งงาน", "Add at least one image to a product box before submitting") : t("แนบรูปหรือลิงก์อย่างน้อย 1 ก่อนกดส่งงาน", "Attach at least one image or link before submitting")}</p>}
+            {/* กล่อง "รูปแนบงาน" บน — ซ่อนเมื่อมีสินค้าปลายทาง (หย่อนรูปในกล่องสินค้าด้านล่างแทน) */}
+            {showImages && !hasParentTarget && (
               <div>
                 <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤1500px)", "Work images (resized ≤1500px)")}</p>
                 <ImageAttach
@@ -868,18 +873,18 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                         <span className="text-sm text-slate-700 truncate flex-1">{p.name_platform || p.name_th || "—"}</span>
                         <button type="button" onClick={() => setEditParentId(p.id)} title={t("แก้/เพิ่ม SKU ในตัวแก้สินค้า", "Manage SKUs in product editor")} className="text-[11px] text-violet-600 hover:underline shrink-0">✏️ {t("แก้สินค้า", "Edit product")}</button>
                       </div>
-                      {/* กล่องรูปของ Parent SKU นี้ — แกลเลอรี + (ติ๊ก) Description */}
-                      {pon && (() => { const ptk = `parent:${p.id}`; const descOpen = descBoxOpen[ptk] ?? (draftFor(ptk, "description").length > 0); return (
+                      {/* กล่องรูปของ Parent SKU นี้ — แกลเลอรี + (ติ๊ก) Description · งานรูปคำอธิบาย = โชว์แค่ Description */}
+                      {pon && (() => { const ptk = `parent:${p.id}`; const descOpen = isDescTask || (descBoxOpen[ptk] ?? (draftFor(ptk, "description").length > 0)); return (
                         <div className="pl-6 space-y-1.5">
-                          <ProductImageBox tk={ptk} label={p.code} mode="gallery" refSlots={galleryRef(ptk)} draft={draftFor(ptk, "gallery")} uploading={uploadingTk === `gallery#${ptk}`} onAddDraft={(f) => void addDraftImages(ptk, f, "gallery")} onRemoveDraft={(k) => removeDraftImage(ptk, k)} onReorder={(a, b) => reorderDraft(ptk, a, b)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `gallery#${ptk}`} onApplyNow={() => void applyNow(ptk, "gallery")} tt={t} onRestored={() => refreshGallery(ptk)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />
-                          <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
+                          {!isDescTask && <ProductImageBox tk={ptk} label={p.code} mode="gallery" refSlots={galleryRef(ptk)} draft={draftFor(ptk, "gallery")} uploading={uploadingTk === `gallery#${ptk}`} onAddDraft={(f) => void addDraftImages(ptk, f, "gallery")} onRemoveDraft={(k) => removeDraftImage(ptk, k)} onReorder={(a, b) => reorderDraft(ptk, a, b)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `gallery#${ptk}`} onApplyNow={() => void applyNow(ptk, "gallery")} tt={t} onRestored={() => refreshGallery(ptk)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />}
+                          {!isDescTask && <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
                             <input type="checkbox" checked={descOpen} onChange={(e) => setDescBoxOpen((m) => ({ ...m, [ptk]: e.target.checked }))} className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 cursor-pointer" />
                             📂 {t("ส่งเข้า Description ด้วย", "Also send to Description")}
-                          </label>
+                          </label>}
                           {descOpen && <ProductImageBox tk={ptk} label={p.code} mode="description" refSlots={descGalleries[ptk] ?? []} draft={draftFor(ptk, "description")} uploading={uploadingTk === `description#${ptk}`} onAddDraft={(f) => void addDraftImages(ptk, f, "description")} onRemoveDraft={(k) => removeDraftImage(ptk, k)} onReorder={(a, b) => reorderDraft(ptk, a, b)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `description#${ptk}`} onApplyNow={() => void applyNow(ptk, "description")} tt={t} onRestored={() => refreshDescGallery(p.id)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />}
                         </div>
                       ); })()}
-                      <div className="pl-6 mt-1.5 space-y-1.5">
+                      {!isDescTask && <div className="pl-6 mt-1.5 space-y-1.5">
                         {(skusByParent[p.id] ?? []).map((s) => { const son = syncSkuIds.has(s.id); const thumb = s.image_key ? `/api/r2-image?key=${encodeURIComponent(s.image_key)}` : null; return (
                           <div key={s.id} className="space-y-1">
                             <div className="flex items-center gap-2 text-xs">
@@ -896,7 +901,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                         ); })}
                         {(skusByParent[p.id] ?? []).length === 0 && <p className="text-[11px] text-slate-400 italic">{t("ยังไม่มี SKU", "No SKUs yet")}</p>}
                         <p className="text-[10px] text-slate-400 pt-0.5">💡 {t('สร้าง/เพิ่ม SKU กดปุ่ม "แก้สินค้า" ด้านบน (ตัวแก้สินค้ามีตารางเพิ่ม SKU)', 'Create/add SKUs via "Edit product" above')}</p>
-                      </div>
+                      </div>}
                     </div>
                   );
                 })}
