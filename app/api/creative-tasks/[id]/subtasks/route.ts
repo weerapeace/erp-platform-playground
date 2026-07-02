@@ -188,11 +188,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const admin = supabaseAdmin();
   // งานแม่ (ผู้สร้าง + ผู้ตรวจ) + รายชื่อผู้ตรวจ (m2m) + role ผู้ใช้ — ใช้คุมสิทธิ์ละเอียด
-  const [{ data: parent }, role, reviewerSet] = await Promise.all([
+  const [{ data: parent }, role, reviewerSet, { data: curSub }] = await Promise.all([
     admin.from("erp_creative_tasks").select("created_by, reviewer_id, task_no, title").eq("id", id).maybeSingle(),
     currentRole(request),
     userIdsReviewers(admin, id),
+    admin.from("erp_creative_subtasks").select("status").eq("id", subtaskId).maybeSingle(),
   ]);
+  const wasApproved = ((curSub as { status?: string } | null)?.status) === "approved";
   const isManager = role === "admin" || role === "manager";
   const isCreator = !!user?.id && user.id === (parent?.created_by as string | null);
   // ผู้ตรวจ = อยู่ในรายชื่อผู้ตรวจหลายคน หรือ reviewer_id เดี่ยว (เผื่อข้อมูลเก่า)
@@ -211,6 +213,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์ขอแก้งานย่อยนี้" }, { status: 403 });
   if (patch.status === "canceled" && !(isManager || await canPerm(request, "task_subtask.cancel")))
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์ยกเลิกงานย่อยนี้" }, { status: 403 });
+  // ย้อนสถานะงานย่อยที่ "อนุมัติแล้ว" (เช่น approved → submitted) — เฉพาะ admin/ผจก./ผู้ตรวจ
+  if (wasApproved && patch.status && patch.status !== "approved" && !(isManager || isReviewer || await canPerm(request, "task_subtask.approve")))
+    return NextResponse.json({ error: "คุณไม่มีสิทธิ์ย้อนสถานะงานย่อยที่อนุมัติแล้ว" }, { status: 403 });
 
   if (Array.isArray(body.assignee_ids)) {
     const { data: curA } = await admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId);
@@ -282,6 +287,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   } else if ((patch.status === "revision_requested" || patch.status === "canceled")) {
     try { await reverseSubtaskSync(admin, subtaskId, { actorId: user?.id ?? null, reason: reason || null }); } catch { /* ถอดพลาดไม่ทำให้บันทึกพัง */ }
     if (reason) { try { const cfg = (row?.config as Record<string, unknown>) ?? {}; await admin.from("erp_creative_subtasks").update({ config: { ...cfg, review_note: reason, review_status: patch.status } }).eq("id", subtaskId); } catch { /* noop */ } }
+  }
+  // ย้อนจาก "อนุมัติแล้ว" → สถานะอื่น (เช่น submitted) → ถอดข้อมูลที่ส่งเข้าสินค้าออก (revise/cancel ถอดในบล็อกบนแล้ว)
+  if (wasApproved && patch.status && !["approved", "revision_requested", "canceled"].includes(String(patch.status))) {
+    try { await reverseSubtaskSync(admin, subtaskId, { actorId: user?.id ?? null, reason: "revert from approved" }); } catch { /* noop */ }
   }
 
   // ④ ส่งงาน (status → submitted) → แจ้งเตือน ผู้ตรวจ + admin/ผจก. ให้มากดอนุมัติ
