@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import {
@@ -38,7 +38,7 @@ export default function MarketingDashboardPage() {
     <PlaygroundShell>
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
-        <div className="flex flex-wrap items-start justify-between gap-3 max-w-6xl">
+        <div className="flex flex-wrap items-start justify-between gap-3 max-w-6xl mx-auto">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl sm:text-2xl font-bold text-slate-800">
@@ -62,7 +62,7 @@ export default function MarketingDashboardPage() {
         </div>
       </div>
 
-      <div className="px-4 sm:px-8 py-5 space-y-6 max-w-6xl">
+      <div className="px-4 sm:px-8 py-5 space-y-6 max-w-6xl mx-auto">
         {/* Status selector */}
         <div>
           <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -224,19 +224,19 @@ function HourlyChart({ hourly }: { hourly: HourlyPoint[] }) {
         </div>
       </div>
 
-      <div className="flex items-end gap-[3px] sm:gap-1.5 h-44">
+      <div className="flex items-end gap-[3px] sm:gap-1.5 h-40">
         {hourly.map((h) => {
           const v = h[metric];
-          const heightPct = (v / max) * 100;
+          const barH = Math.max(2, (v / max) * 150);
           return (
             <div
               key={h.hour}
-              className="flex-1 flex flex-col items-center justify-end min-w-0 group relative"
+              className="flex-1 flex flex-col items-center min-w-0 group relative"
               title={`${String(h.hour).padStart(2, "0")}:00 — ${fmt(v)}`}
             >
               <div
                 className="w-full rounded-t bg-blue-500 group-hover:bg-blue-600 transition-colors"
-                style={{ height: `${Math.max(2, heightPct)}%` }}
+                style={{ height: `${barH}px` }}
               />
             </div>
           );

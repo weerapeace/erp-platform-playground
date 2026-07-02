@@ -46,7 +46,7 @@ export default function MarketingImportPage() {
   return (
     <PlaygroundShell>
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 max-w-4xl">
+        <div className="flex flex-wrap items-center justify-between gap-3 max-w-4xl mx-auto">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl sm:text-2xl font-bold text-slate-800">
@@ -69,7 +69,7 @@ export default function MarketingImportPage() {
         </div>
       </div>
 
-      <div className="px-4 sm:px-8 py-5 max-w-4xl">
+      <div className="px-4 sm:px-8 py-5 max-w-4xl mx-auto">
         {/* Stepper */}
         <div className="flex items-center gap-1 sm:gap-2 mb-6 overflow-x-auto pb-1">
           {STEPS.map((st, i) => (
