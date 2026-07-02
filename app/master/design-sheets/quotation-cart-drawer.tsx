@@ -8,6 +8,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import type { QuoteDetail, QuoteLine } from "@/app/api/quotations/route";
@@ -31,6 +32,8 @@ export function QuotationCartDrawer({
   const [lines, setLines] = useState<QuoteLine[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const load = useCallback(async () => {
     if (!cartId) { setQuote(null); setLines([]); onLabel?.(null); return; }
@@ -71,14 +74,15 @@ export function QuotationCartDrawer({
   const count = lines.length;
 
   // ไม่มีตะกร้า / ไม่มีรายการ → ไม่โชว์อะไร
-  if (!cartId || !quote || count === 0) return null;
+  if (!mounted || !cartId || !quote || count === 0) return null;
 
-  return (
+  // portal → body + z สูงกว่า modal (z-50) → กดตะกร้าได้แม้เปิดป๊อปอัปรายละเอียดอยู่ (ไม่จมใน stacking context)
+  return createPortal(
     <>
       {/* แถบลอยขอบขวา (เมื่อปิด drawer) */}
       {!open && (
         <button onClick={() => setOpen(true)} title="เปิดตะกร้าใบเสนอราคา"
-          className="fixed right-0 top-1/3 z-40 flex flex-col items-center gap-1 rounded-l-xl bg-indigo-600 px-2.5 py-3 text-white shadow-lg hover:bg-indigo-700">
+          className="fixed right-0 top-1/3 z-[60] flex flex-col items-center gap-1 rounded-l-xl bg-indigo-600 px-2.5 py-3 text-white shadow-lg hover:bg-indigo-700">
           <span className="text-lg leading-none">🧺</span>
           <span className="text-xs font-semibold">{count}</span>
         </button>
@@ -87,8 +91,8 @@ export function QuotationCartDrawer({
       {/* backdrop + drawer */}
       {open && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setOpen(false)} />
-          <div className="fixed right-0 top-0 z-50 flex h-full w-[380px] max-w-[92vw] flex-col bg-white shadow-2xl">
+          <div className="fixed inset-0 z-[60] bg-black/20" onClick={() => setOpen(false)} />
+          <div className="fixed right-0 top-0 z-[70] flex h-full w-[380px] max-w-[92vw] flex-col bg-white shadow-2xl">
             {/* หัว */}
             <div className="flex items-start justify-between gap-2 border-b border-slate-200 px-4 py-3">
               <div>
@@ -141,6 +145,7 @@ export function QuotationCartDrawer({
           </div>
         </>
       )}
-    </>
+    </>,
+    document.body
   );
 }
