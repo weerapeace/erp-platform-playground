@@ -159,7 +159,11 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
   const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
   // รูปที่ผูกเข้าสินค้า (จะเข้าแกลเลอรี SKU ตอนอนุมัติ) — โชว์บนการ์ดด้วย
-  const skuImgKeys = Object.values((sub.image_sync_targets?.sku_images ?? {}) as Record<string, string[]>).flat().filter(Boolean);
+  // รูปที่เพิ่มเข้าสินค้า (โชว์บนการ์ด) — รวมทั้งโครงเดิม sku_images + โครงใหม่ product_images (Parent+SKU)
+  const skuImgKeys = [
+    ...Object.values((sub.image_sync_targets?.sku_images ?? {}) as Record<string, string[]>).flat(),
+    ...Object.values(((sub.image_sync_targets as { product_images?: Record<string, string[]> } | null)?.product_images ?? {})).flat(),
+  ].filter(Boolean);
   // รวมรูปทั้งหมดบนการ์ด (รูปงาน + รูปเข้าสินค้า) ไว้กดดูเต็มจอ/เลื่อน
   const cardImages: LightboxImage[] = [
     ...imageAtts.map((a) => ({ url: `/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}&w=1600`, label: a.file_name ?? t("รูปแนบงาน", "Work image") })),
@@ -263,7 +267,14 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
             )}
             {linkAtts.length > 0 && (
               <div className="space-y-1">
-                {linkAtts.map((a) => <a key={a.id} href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="block text-xs text-violet-700 truncate">🔗 {a.label || a.url}</a>)}
+                {linkAtts.map((a) => (
+                  <div key={a.id} className="flex items-center gap-1.5">
+                    <a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="block text-xs text-violet-700 truncate flex-1">🔗 {a.label || a.url}</a>
+                    <button type="button" title={t("คัดลอกที่อยู่", "Copy path")}
+                      onClick={async () => { try { await navigator.clipboard.writeText(a.url || a.label || ""); pushToast("success", t("คัดลอกที่อยู่แล้ว", "Path copied")); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } }}
+                      className="shrink-0 text-[11px] text-slate-400 hover:text-violet-700 border border-slate-200 rounded px-1.5 py-0.5">📋</button>
+                  </div>
+                ))}
               </div>
             )}
             <button onClick={openWork} className={`w-full h-9 rounded-lg text-sm font-medium ${canSubmit ? "bg-amber-500 text-white hover:bg-amber-600" : "text-violet-700 border border-violet-200 hover:bg-violet-50"}`}>
@@ -830,7 +841,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
               <div>
                 <p className="text-[11px] text-slate-400 mb-1">{t("ลิงก์ส่งงาน", "Work links")}</p>
                 <div className="space-y-1 mb-1.5">
-                  {linkAtts.map((a) => <div key={a.id} className="flex items-center gap-2 text-xs"><a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-violet-700 truncate flex-1">🔗 {a.label || a.url}</a><button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500">✕</button></div>)}
+                  {linkAtts.map((a) => <div key={a.id} className="flex items-center gap-2 text-xs"><a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-violet-700 truncate flex-1">🔗 {a.label || a.url}</a><button type="button" title={t("คัดลอกที่อยู่", "Copy path")} onClick={async () => { try { await navigator.clipboard.writeText(a.url || a.label || ""); pushToast("success", t("คัดลอกที่อยู่แล้ว", "Path copied")); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } }} className="text-slate-400 hover:text-violet-700 border border-slate-200 rounded px-1 shrink-0">📋</button><button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500">✕</button></div>)}
                   {linkAtts.length === 0 && <p className="text-xs text-slate-400 italic">{t("ยังไม่มีลิงก์", "No links yet")}</p>}
                 </div>
                 <div className="flex gap-1.5">
