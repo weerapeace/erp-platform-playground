@@ -34,6 +34,7 @@ export function QuotationCartDrawer({
   const [saving, setSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+  const [detailOpen, setDetailOpen] = useState(false);   // ป๊อปอัปดูรายละเอียด + พิมพ์
 
   const load = useCallback(async () => {
     if (!cartId) { setQuote(null); setLines([]); onLabel?.(null); return; }
@@ -131,6 +132,8 @@ export function QuotationCartDrawer({
                 <span className="text-slate-500">รวม {count} รายการ</span>
                 <span className="text-base font-semibold tabular-nums text-slate-900">{baht(total)} ฿</span>
               </div>
+              <button onClick={() => setDetailOpen(true)}
+                className="h-9 w-full rounded-lg border border-indigo-300 text-sm font-medium text-indigo-700 hover:bg-indigo-50">👁 ดูรายละเอียด / พิมพ์</button>
               {dirty && (
                 <button onClick={() => void save()} disabled={saving}
                   className="h-9 w-full rounded-lg bg-blue-600 text-sm text-white hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "💾 บันทึกการแก้ไข"}</button>
@@ -144,6 +147,59 @@ export function QuotationCartDrawer({
             </div>
           </div>
         </>
+      )}
+
+      {/* ป๊อปอัปดูรายละเอียด + พิมพ์ (z สูงกว่า drawer) */}
+      {detailOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" onClick={() => setDetailOpen(false)}>
+          <div className="flex max-h-[88vh] w-[580px] max-w-full flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-2 border-b border-slate-200 px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-base font-semibold text-slate-800">🧾 {quote.quote_number ?? "(ร่าง)"}</div>
+                <div className="truncate text-xs text-slate-500">{quote.customer_name ?? "ไม่ระบุลูกค้า"}{quote.customer_code ? ` (${quote.customer_code})` : ""}</div>
+                <div className="text-[11px] text-slate-400">วันที่ {quote.quote_date}{quote.valid_until ? ` · ใช้ได้ถึง ${quote.valid_until}` : ""}</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <a href={`/print/quotation/${cartId}`} target="_blank" rel="noreferrer"
+                  className="inline-flex h-8 items-center rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700">🖨 พิมพ์</a>
+                <button onClick={() => setDetailOpen(false)} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-xs text-slate-500">
+                    <th className="py-1.5 text-left">รายการ</th>
+                    <th className="w-14 py-1.5 text-right">จำนวน</th>
+                    <th className="w-24 py-1.5 text-right">ราคา/หน่วย</th>
+                    <th className="w-28 py-1.5 text-right">รวม</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((l, i) => (
+                    <tr key={l.id ?? i} className="border-b border-slate-100 align-top">
+                      <td className="py-1.5">
+                        <div className="text-slate-800">{l.product_name}</div>
+                        {l.note && <div className="text-[11px] text-slate-400">ตัวเลือก: {l.note}</div>}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">{Number(l.qty) || 0}</td>
+                      <td className="py-1.5 text-right tabular-nums">{baht(Number(l.unit_price) || 0)}</td>
+                      <td className="py-1.5 text-right font-medium tabular-nums">{baht((Number(l.qty) || 0) * (Number(l.unit_price) || 0))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t border-slate-200 px-4 py-3">
+              <div className="flex items-center justify-between text-base font-semibold">
+                <span className="text-slate-700">รวม {count} รายการ</span>
+                <span className="tabular-nums text-emerald-700">{baht(total)} ฿</span>
+              </div>
+              {dirty && <p className="mt-1 text-[11px] text-amber-600">● มีการแก้ไขที่ยังไม่บันทึก — กด “บันทึกการแก้ไข” ก่อนพิมพ์เพื่อให้เอกสารตรง</p>}
+              <p className="mt-1 text-[11px] text-slate-400">ภาษี/ส่วนลดท้ายบิลจะแสดงครบในเอกสารพิมพ์</p>
+            </div>
+          </div>
+        </div>
       )}
     </>,
     document.body
