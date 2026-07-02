@@ -300,7 +300,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       )}
       {/* ดูรูปบนการ์ดเต็มจอ + เลื่อน (รูปงาน + รูปเข้าสินค้า) */}
       <ImageLightbox images={cardImages} index={cardLb} onClose={() => setCardLb(-1)} onIndex={setCardLb} />
-      {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} onClose={() => setWorkOpen(false)} />}
+      {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} onClose={() => setWorkOpen(false)} />}
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
     </div>
   );
@@ -515,13 +515,14 @@ function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, onAddDra
   );
 }
 
-function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks, canSubmit, platformConfirm, onClose }: {
+function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks, canSubmit, platformConfirm, canApprove = false, onClose }: {
   sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn;
-  showImages: boolean; showLinks: boolean; canSubmit: boolean; platformConfirm: boolean; onClose: () => void;
+  showImages: boolean; showLinks: boolean; canSubmit: boolean; platformConfirm: boolean; canApprove?: boolean; onClose: () => void;
 }) {
   const t = useT();
   const { can } = useAuth();
-  const canEditProduct = can("products.edit");   // เห็นปุ่ม "ใส่เข้าสินค้าเลย (ไม่รออนุมัติ)"
+  // ปุ่ม "ใส่เข้าสินค้าเลย (ไม่รออนุมัติ)" — เฉพาะผู้มีสิทธิ์อนุมัติ (admin/ผจก./ผู้ตรวจ) ที่แก้สินค้าได้ด้วย
+  const canEditProduct = canApprove && can("products.edit");
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
