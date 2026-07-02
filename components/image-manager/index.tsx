@@ -192,8 +192,8 @@ export function ImageManager({
     setUploading(true); setError(null);
     try {
       for (const orig of incoming) {
-        // ย่อรูป "ด้านกว้าง ≤ 1200px" ตอนอัป (คงสัดส่วน · เฉพาะรูป) — ไฟล์อื่นคงเดิม · เช็กขนาดหลังย่อ
-        const file = imageOnly ? await downscaleImageWidth(orig, 1200) : orig;
+        // ย่อรูป "ด้านกว้าง ≤ 1500px" ตอนอัป (คงสัดส่วน · เฉพาะรูป) — ไฟล์อื่นคงเดิม · เช็กขนาดหลังย่อ
+        const file = imageOnly ? await downscaleImageWidth(orig, 1500) : orig;
         if (file.size > maxSizeBytes) { setError(`ไฟล์ ${orig.name} ใหญ่เกิน ${maxSizeMb}MB (แม้ย่อแล้ว)`); continue; }
         const fd = new FormData();
         fd.append("file", file);

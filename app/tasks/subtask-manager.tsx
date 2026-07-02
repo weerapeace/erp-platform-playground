@@ -690,7 +690,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     setUploadingTk(`${dest}#${tk}`);
     try {
       const ups: { r2_key: string; file_name: string }[] = [];
-      for (const f of imgs) { const up = await uploadResizedImage(f, { folder, max: 1200 }); ups.push({ r2_key: up.r2_key, file_name: up.file_name }); }
+      for (const f of imgs) { const up = await uploadResizedImage(f, { folder, max: 1500 }); ups.push({ r2_key: up.r2_key, file_name: up.file_name }); }
       const nextDrafts = { ...draftImages, [tk]: [...(draftImages[tk] ?? []), ...ups] };
       const nextRm = dest === "description"
         ? { ...replaceMap, [tk]: { ...(replaceMap[tk] ?? {}), ...Object.fromEntries(ups.map((u) => [u.r2_key, "desc:new"])) } }
@@ -811,12 +811,12 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
             {canSubmit && attachCount === 0 && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{t("แนบรูปหรือลิงก์อย่างน้อย 1 ก่อนกดส่งงาน", "Attach at least one image or link before submitting")}</p>}
             {showImages && (
               <div>
-                <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤1200px)", "Work images (resized ≤1200px)")}</p>
+                <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤1500px)", "Work images (resized ≤1500px)")}</p>
                 <ImageAttach
                   images={imageAtts.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
                   onAttach={async (r) => { await addAttachment(taskId, { kind: "image", subtask_id: sub.id, ...r }); await reload(); }}
                   onDelete={async (aid) => { try { await deleteAttachment(taskId, aid); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
-                  pushToast={pushToast} maxSize={1200} />
+                  pushToast={pushToast} maxSize={1500} />
               </div>
             )}
             {/* ── ส่งรูปเข้าสินค้า (เลือกได้) — ติ๊ก Parent/SKU ที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ ── */}

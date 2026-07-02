@@ -58,7 +58,7 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
     let ok = 0;
     for (let i = 0; i < arr.length; i++) {
       try {
-        const file = await downscaleImageWidth(arr[i], 1200);   // ย่อด้านกว้าง ≤ 1200px ตอนอัป
+        const file = await downscaleImageWidth(arr[i], 1500);   // ย่อด้านกว้าง ≤ 1500px ตอนอัป
         const fd = new FormData();
         fd.append("file", file); fd.append("source", "upload");
         if (actor) fd.append("actor", actor);
