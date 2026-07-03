@@ -504,6 +504,49 @@ export function CanvasSketch({
     if (editable) queueSave();
   };
 
+  // ต่อ "รายการ" อัตโนมัติ: กด Enter ในกล่องข้อความที่บรรทัดเป็น list (• / 1.) → ขึ้นบรรทัดใหม่ต่อเลข/หัวข้อให้เอง
+  // Excalidraw ไม่มี list ในตัว — ดักที่ textarea ตอนแก้ข้อความ (บรรทัด list ว่างแล้วกด Enter = ออกจากรายการ)
+  useEffect(() => {
+    if (!editable) return;
+    const setVal = (ta: HTMLTextAreaElement, v: string) => {
+      const d = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+      if (d?.set) d.set.call(ta, v); else ta.value = v;
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      const ta = document.activeElement as HTMLTextAreaElement | null;
+      if (!ta || ta.tagName !== "TEXTAREA") return;
+      if (!ta.classList.contains("excalidraw-wysiwyg") && !wrapRef.current?.contains(ta)) return; // เฉพาะกล่องข้อความ Excalidraw
+      const val = ta.value;
+      const pos = ta.selectionStart ?? val.length;
+      const lineStart = val.lastIndexOf("\n", pos - 1) + 1;
+      const lineEndIdx = val.indexOf("\n", pos);
+      const lineEnd = lineEndIdx === -1 ? val.length : lineEndIdx;
+      const fullLine = val.slice(lineStart, lineEnd);
+      const numM = fullLine.match(/^(\s*)(\d+)\.\s(.*)$/);
+      const bulM = numM ? null : fullLine.match(/^(\s*)([•-])\s(.*)$/);
+      if (!numM && !bulM) return; // ไม่ใช่บรรทัด list → ปล่อย Enter ปกติ
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); // กัน Excalidraw ใส่ newline ซ้ำ
+      const indent = numM?.[1] ?? bulM?.[1] ?? "";
+      const content = numM?.[3] ?? bulM?.[3] ?? "";
+      let next: string, caret: number;
+      if (content.trim() === "") {
+        next = val.slice(0, lineStart) + indent + val.slice(lineEnd); // list ว่าง → ออกจากรายการ (ลบหัวข้อ)
+        caret = lineStart + indent.length;
+      } else {
+        const prefix = numM ? `${indent}${parseInt(numM[2], 10) + 1}. ` : `${indent}${bulM![2]} `;
+        const ins = "\n" + prefix;
+        next = val.slice(0, pos) + ins + val.slice(pos);
+        caret = pos + ins.length;
+      }
+      setVal(ta, next);
+      ta.selectionStart = ta.selectionEnd = caret;
+      ta.dispatchEvent(new Event("input", { bubbles: true })); // ให้ Excalidraw รับข้อความใหม่ + ปรับขนาดกล่อง
+    };
+    window.addEventListener("keydown", onKeyDown, true); // capture ก่อน Excalidraw
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [editable]);
+
   // ถอนโฟกัสจากปุ่ม/ช่องของเรา → คืนให้กระดาน เพื่อให้คีย์ลัด (R/A/T/P) ทำงาน
   const blurActive = () => { try { (document.activeElement as HTMLElement)?.blur?.(); } catch { /* noop */ } };
 
