@@ -177,6 +177,26 @@ export function DesignDashboard() {
   const [openSheetId, setOpenSheetId] = useState<string | null>(null);   // เปิด popup รายละเอียดในตัวบอร์ด
   const [createOpen, setCreateOpen] = useState(false);                   // เปิด popup สร้างงานใหม่
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
+  const [brandLogos, setBrandLogos] = useState<Record<string, string>>({});   // brand id → logo R2 key (จาก /api/brands)
+  const [othersOpen, setOthersOpen] = useState(false);                        // ดรอปดาวน์ "แบรนด์อื่นๆ"
+  // โหลดโลโก้แบรนด์ (จาก /master/brands → brands.logo_url) มาโชว์ในการ์ดแบรนด์แถวบน
+  useEffect(() => {
+    let alive = true;
+    apiFetch("/api/brands").then((r) => r.json()).then((j) => {
+      if (!alive || !Array.isArray(j.data)) return;
+      const m: Record<string, string> = {};
+      for (const b of j.data as { id?: string; logo_url?: string | null }[]) if (b.id && b.logo_url) m[b.id] = b.logo_url;
+      setBrandLogos(m);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  // ปิดดรอปดาวน์ "อื่นๆ" เมื่อคลิกนอก
+  useEffect(() => {
+    if (!othersOpen) return;
+    const onDown = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest("[data-brands-others]")) setOthersOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [othersOpen]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const id = new URLSearchParams(window.location.search).get("open");
@@ -293,6 +313,18 @@ export function DesignDashboard() {
   }, [selectedBrandKey, sheets, search, quickFilter, statusMeta]);
 
   const selectedBrand = brandSummaries.find((brand) => brand.key === selectedBrandKey) ?? null;
+  // แถวแบรนด์แนวนอน: โชว์ 4 อันดับแรก (ตามงานกำลังเดิน) + ที่เหลือไปอยู่ดรอปดาวน์ "อื่นๆ"
+  const sortedBrands = useMemo(() => [...brandSummaries].sort((a, b) => b.active - a.active), [brandSummaries]);
+  const topBrands = sortedBrands.slice(0, 4);
+  const otherBrands = sortedBrands.slice(4);
+  const othersSelected = otherBrands.find((b) => b.key === selectedBrandKey) ?? null;
+  // สัญลักษณ์แบรนด์: โลโก้จริง (ถ้ามี) ไม่งั้นสี+ตัวย่อ
+  const brandMark = (brand: BrandSummary, cls: string) => {
+    const logo = brand.id ? brandLogos[brand.id] : undefined;
+    return logo
+      ? <img src={`/api/r2-image?key=${encodeURIComponent(logo)}`} alt="" className={`${cls} shrink-0 rounded-md border border-slate-100 bg-white object-contain`} />
+      : <span className={`${cls} flex shrink-0 items-center justify-center rounded-md text-[10px] font-semibold text-white`} style={{ backgroundColor: brand.color }}>{brand.name.slice(0, 2).toUpperCase()}</span>;
+  };
   const activeJobs = filteredSheets.filter((sheet) => !statusMeta.finished.has(sheet.status)).length;
   const urgentJobs = filteredSheets.filter((sheet) => isUrgent(sheet, statusMeta)).length;
   const finishedJobs = filteredSheets.filter((sheet) => statusMeta.finished.has(sheet.status)).length;
@@ -452,7 +484,7 @@ export function DesignDashboard() {
           )}
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+        <div className="space-y-4">
           <aside data-gg-sidebar className="rounded-lg border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
             <BrandSlot theme={brandTheme} id="sidebar_top" />
             <div className="mb-3 flex items-center justify-between gap-3">
@@ -463,58 +495,56 @@ export function DesignDashboard() {
               <span data-gg-brand-count className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} แบรนด์</span>
             </div>
 
-            <button data-gg-action onClick={() => setCreateOpen(true)} title="สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)"
-              className="mb-2 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:border-blue-300 hover:text-blue-600">
-              ＋ เพิ่มงาน / แบรนด์
-            </button>
+            <div className="flex flex-wrap items-stretch gap-2">
+              <button data-gg-action onClick={() => setCreateOpen(true)} title="สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)"
+                className="flex flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600">＋ เพิ่มงาน</button>
 
-            <button
-              data-gg-all-button
-              onClick={() => setSelectedBrandKey("ALL")}
-              className={`mb-2 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition ${selectedBrandKey === "ALL" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
-            >
-              <span className="font-semibold">ทั้งหมด</span>
-              <span className="text-xs opacity-70">{activeJobs} งานเดินอยู่</span>
-            </button>
+              <button data-gg-all-button onClick={() => setSelectedBrandKey("ALL")}
+                className={`flex flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${selectedBrandKey === "ALL" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                <span className="text-sm font-semibold">ทั้งหมด</span>
+                <span className="text-[11px] opacity-70">{activeJobs} งานเดินอยู่</span>
+              </button>
 
-            <div className="space-y-2">
-              {brandSummaries.map((brand) => {
+              {topBrands.map((brand) => {
                 const selected = selectedBrandKey === brand.key;
                 return (
-                  <button
-                    key={brand.key}
-                    data-gg-brand-card
-                    data-gg-selected={selected ? "true" : undefined}
+                  <button key={brand.key} data-gg-brand-card data-gg-selected={selected ? "true" : undefined}
                     onClick={() => setSelectedBrandKey(brand.key)}
-                    className="w-full rounded-lg border bg-white p-3 text-left shadow-[3px_3px_0_rgba(148,163,184,0.16)] transition hover:-translate-y-0.5"
-                    style={{ borderColor: selected ? brand.color : "#e2e8f0", boxShadow: selected ? `0 0 0 1px ${brand.color}33, 0 18px 45px ${brand.color}18` : undefined }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span data-gg-brand-mark className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-semibold text-white shadow-sm" style={{ backgroundColor: brand.color }}>
-                        {brand.name.slice(0, 2).toUpperCase()}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-slate-800">{brand.name}</div>
-                        <div className="text-xs text-slate-400">{brand.active} งานกำลังเดิน</div>
-                      </div>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                      <div data-gg-mini-stat className="rounded-md bg-slate-50 px-2 py-1.5">
-                        <div className="text-slate-400">งานทั้งหมด</div>
-                        <div className="font-semibold text-slate-700">{brand.total}</div>
-                      </div>
-                      <div data-gg-mini-stat className="rounded-md bg-rose-50 px-2 py-1.5">
-                        <div className="text-rose-400">ใกล้ครบ</div>
-                        <div className="font-semibold text-rose-700">{brand.urgent}</div>
-                      </div>
+                    className="flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-left transition hover:-translate-y-0.5"
+                    style={{ borderColor: selected ? brand.color : "#e2e8f0", boxShadow: selected ? `0 0 0 1px ${brand.color}55` : undefined }}>
+                    {brandMark(brand, "h-9 w-9")}
+                    <div className="min-w-0">
+                      <div className="max-w-[130px] truncate text-sm font-semibold text-slate-800">{brand.name}</div>
+                      <div className="text-[11px] text-slate-400">{brand.active} เดิน{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} ใกล้ครบ</span></> : null}</div>
                     </div>
                   </button>
                 );
               })}
-              {!loading && brandSummaries.length === 0 && (
-                <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-4 text-center text-sm text-slate-400">
-                  ยังไม่มีใบงานที่ผูกแบรนด์
+
+              {otherBrands.length > 0 && (
+                <div className="relative" data-brands-others>
+                  <button onClick={() => setOthersOpen((o) => !o)}
+                    className={`flex h-full flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${othersSelected ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                    <span className="max-w-[140px] truncate text-sm font-semibold">{othersSelected ? othersSelected.name : "แบรนด์อื่นๆ"} ▾</span>
+                    <span className="text-[11px] opacity-70">{othersSelected ? `${othersSelected.active} เดิน` : `อีก ${otherBrands.length} แบรนด์`}</span>
+                  </button>
+                  {othersOpen && (
+                    <div className="absolute left-0 top-full z-30 mt-1 max-h-72 w-60 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+                      {otherBrands.map((brand) => (
+                        <button key={brand.key} onClick={() => { setSelectedBrandKey(brand.key); setOthersOpen(false); }}
+                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${selectedBrandKey === brand.key ? "bg-blue-50" : ""}`}>
+                          {brandMark(brand, "h-6 w-6")}
+                          <span className="min-w-0 flex-1 truncate text-slate-700">{brand.name}</span>
+                          <span className="text-[11px] text-slate-400">{brand.active}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              )}
+
+              {!loading && brandSummaries.length === 0 && (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-center text-sm text-slate-400">ยังไม่มีใบงานที่ผูกแบรนด์</div>
               )}
             </div>
             <BrandSlot theme={brandTheme} id="sidebar_bottom" />
