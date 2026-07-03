@@ -17,6 +17,19 @@ const clampScale = (s: number) => Math.min(MAX, Math.max(MIN, s));
 type Pt = { clientX: number; clientY: number };
 const dist = (a: Pt, b: Pt) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 
+/** ตั้งชื่อไฟล์ .jpg จากรูป (ใช้ชื่อไฟล์เดิมจาก R2 key ถ้ามี ไม่งั้นใช้ป้ายกำกับ) */
+function jpgFileName(img: LightboxImage): string {
+  let base = "";
+  try {
+    const origin = typeof location !== "undefined" ? location.origin : "http://x";
+    const key = new URL(img.url, origin).searchParams.get("key");
+    if (key) base = key.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
+  } catch { /* ไม่ใช่ URL proxy — ข้าม */ }
+  if (!base && img.label) base = img.label;
+  base = (base || "image").replace(/[^\w฀-๿.-]+/g, "_").slice(0, 60);
+  return base.toLowerCase().endsWith(".jpg") ? base : `${base}.jpg`;
+}
+
 export function ImageLightbox({ images, index, onClose, onIndex }: {
   images: LightboxImage[];
   index: number;                 // รูปปัจจุบัน · นอกช่วง (เช่น -1) = ปิด
@@ -32,6 +45,7 @@ export function ImageLightbox({ images, index, onClose, onIndex }: {
   const last = useRef({ x: 0, y: 0 });
   const pinch = useRef<{ dist: number; scale: number } | null>(null);
   const touchX = useRef<number | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const reset = useCallback(() => { setScale(1); setTx(0); setTy(0); }, []);
   const go = useCallback((delta: number) => {
@@ -109,6 +123,40 @@ export function ImageLightbox({ images, index, onClose, onIndex }: {
 
   const bgClick = () => { if (zoomed || moved.current) return; onClose(); };
 
+  // ดาวน์โหลดรูปปัจจุบันเป็น JPG — วาดลง canvas แล้ว export image/jpeg
+  // (ขอรูปเต็มความละเอียดโดยตัด &w= ที่ย่อไว้สำหรับพรีวิวออกก่อน)
+  const downloadJpg = (e: RMouseEvent) => {
+    e.stopPropagation();
+    if (downloading) return;
+    setDownloading(true);
+    const fullUrl = cur.url.replace(/([?&])w=\d+/, "$1").replace(/[?&]$/, "");
+    const name = jpgFileName(cur);
+    const done = () => setDownloading(false);
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const ctx = c.getContext("2d");
+        if (!ctx) throw new Error("no ctx");
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, c.width, c.height); // JPG ไม่มีพื้นโปร่ง → พื้นขาว
+        ctx.drawImage(img, 0, 0);
+        c.toBlob((blob) => {
+          if (blob) {
+            const href = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(href), 1000);
+          } else { window.open(fullUrl, "_blank"); } // เผื่อ export ไม่ได้ → เปิดรูปเดิมแทน
+          done();
+        }, "image/jpeg", 0.95);
+      } catch { window.open(fullUrl, "_blank"); done(); } // รูปข้ามโดเมนไม่มี CORS → เปิดแท็บใหม่แทน
+    };
+    img.onerror = () => { window.open(fullUrl, "_blank"); done(); };
+    img.src = fullUrl;
+  };
+
   // z-[9999] + portal ไป body → ลอยทับทุกอย่าง (modal/drawer) ไม่จมหลัง popup ที่เปิดอยู่
   const node = (
     <div className="fixed inset-0 z-[9999] bg-black/85 flex items-center justify-center overflow-hidden select-none"
@@ -123,6 +171,7 @@ export function ImageLightbox({ images, index, onClose, onIndex }: {
         <button onClick={(e) => { e.stopPropagation(); setScale((s) => { const n = clampScale(s / 1.3); if (n === 1) reset(); return n; }); }} title="ซูมออก (−)" className="h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-xl">−</button>
         <button onClick={(e) => { e.stopPropagation(); setScale((s) => clampScale(s * 1.3)); }} title="ซูมเข้า (+)" className="h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-xl">＋</button>
         {zoomed && <button onClick={(e) => { e.stopPropagation(); reset(); }} title="พอดีจอ (0)" className="h-10 px-3 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-sm">⤢</button>}
+        <button onClick={downloadJpg} disabled={downloading} title="ดาวน์โหลดรูปนี้เป็น JPG" className="h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-lg disabled:opacity-50">{downloading ? "…" : "⬇"}</button>
         <button onClick={(e) => { e.stopPropagation(); onClose(); }} title="ปิด (Esc)" className="h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-xl">✕</button>
       </div>
 
