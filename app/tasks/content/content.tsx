@@ -1100,16 +1100,17 @@ function CaptionConfigModal({ cfg, brandId, brandLabel, platforms, onClose, onSa
 }
 
 // ส่วนที่พับได้ในคอลัมน์ซ้ายของ drawer คอนเทนต์ — หัวข้อมีแถบชัด + กด ▼ พับ/กาง (จำต่อคน)
+// section แบบ "แบน" — หัวข้อ + เส้นคั่นบน (ไม่ทำเป็นกล่อง/เงา จะได้ไม่ดูจม)
 function CSection({ title, order, collapsed, onToggle, right, children }: { title: string; order: number; collapsed: boolean; onToggle: () => void; right?: ReactNode; children: ReactNode }) {
   return (
-    <div style={{ order }} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-      <div className={`w-full flex items-center justify-between gap-2 pl-2.5 pr-3 py-2 ${collapsed ? "" : "border-b border-slate-100"}`}>
+    <div style={{ order }} className="border-t border-slate-100 pt-2.5">
+      <div className="w-full flex items-center justify-between gap-2 mb-1.5">
         <button onClick={onToggle} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 tracking-wide hover:text-violet-700 min-w-0">
           <span className="text-[10px] text-slate-300 shrink-0 w-3 text-center">{collapsed ? "▸" : "▾"}</span><span className="truncate">{title}</span>
         </button>
         {right && <div className="shrink-0">{right}</div>}
       </div>
-      {!collapsed && <div className="px-3 py-3">{children}</div>}
+      {!collapsed && <div>{children}</div>}
     </div>
   );
 }
