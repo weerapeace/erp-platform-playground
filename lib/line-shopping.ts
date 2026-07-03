@@ -79,6 +79,17 @@ export async function lineUpdateProduct(apiKey: string, productId: string, field
   } catch (e) { return { ok: false, status: 0, sent: [], error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
 }
 
+// สร้างสินค้าใหม่ (POST /products) — route เป็นคนประกอบ payload (name/categoryId/imageUrls/variants/...)
+export async function lineCreateProduct(apiKey: string, payload: Record<string, unknown>): Promise<{ ok: boolean; status: number; productId?: string; raw?: unknown; error?: string }> {
+  try {
+    const r = await fetch(`${LINE_SHOPPING_BASE}/products`, { method: "POST", headers: headers(apiKey), body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => null) as Record<string, unknown> | null;
+    if (r.ok) return { ok: true, status: r.status, productId: String(j?.id ?? j?.productId ?? ""), raw: j };
+    const bodyt = j ? JSON.stringify(j) : await r.text().catch(() => "");
+    return { ok: false, status: r.status, error: friendly(r.status, bodyt) };
+  } catch (e) { return { ok: false, status: 0, error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
+}
+
 // เปิด/ปิดการขายสินค้า (POST /products/{id}/display-status/{status}) — ไม่มี body
 export async function lineSetDisplay(apiKey: string, productId: string, status: "onsale" | "hide"): Promise<{ ok: boolean; status: number; error?: string }> {
   try {

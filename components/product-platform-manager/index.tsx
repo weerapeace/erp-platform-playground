@@ -88,6 +88,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [massPrice, setMassPrice] = useState("");   // Mass fill ราคาทุก SKU
   const [massBusy, setMassBusy] = useState(false);
+  const [creating, setCreating] = useState(false);  // สร้างสินค้าใหม่บน LINE
   const [prefillTick, setPrefillTick] = useState(0); // บังคับรีเฟรชช่อง (uncontrolled) หลัง prefill
   // F: render ผ่าน portal ไป body (เหมือน Drawer กลาง) → เปิดทับ drawer แม่ที่ค้างอยู่ ไม่ซ้อนหลัง
   const [mounted, setMounted] = useState(false);
@@ -150,6 +151,15 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   };
   const giftCats = (extra.gift_categories ?? []) as string[];
   const toggleGiftCat = (c: string) => saveExtra({ gift_categories: giftCats.includes(c) ? giftCats.filter((x) => x !== c) : [...giftCats, c] });
+  // สร้างสินค้าใหม่บน LINE (สินค้าที่ยังไม่มีบน LINE)
+  const createOnLine = async () => {
+    setCreating(true);
+    try {
+      const r = await apiFetch("/api/line-shopping/create-product", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast("success", `สร้างบน LINE แล้ว (รหัส ${j.product_id})`); await load();
+    } catch (e) { toast("error", (e as Error).message); } finally { setCreating(false); }
+  };
   // เซ็ตช่องหมวดหมู่เมื่อสลับแพลตฟอร์ม (draft > mapping > ว่าง)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setCatInput((drafts[active]?.category_path ?? mappings[active] ?? "") as string); }, [active]);
@@ -389,6 +399,11 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                       <li key={i} className={`text-xs flex items-center gap-2 ${c.ok ? "text-slate-600" : c.required ? "text-rose-600" : "text-amber-600"}`}><span>{c.ok ? "✓" : "✗"}</span>{c.label}{!c.required && <span className="text-[10px] text-slate-400">(แนะนำ)</span>}</li>
                     ))}
                   </ul>
+                  {activePf?.code === "line_shopping" && (
+                    activeDraft.platform_product_id
+                      ? <p className="text-[11px] text-emerald-700 mt-2">✓ มีบน LINE แล้ว (รหัส {String(activeDraft.platform_product_id)}) — แก้แล้วใช้ปุ่ม “ส่งรายละเอียด/ราคา”</p>
+                      : canEdit && <button onClick={createOnLine} disabled={creating || !ready} title={!ready ? "กรอกฟิลด์จำเป็นให้ครบก่อน (ดูรายการด้านบน)" : "สร้างสินค้าใหม่บน LINE"} className="mt-2 w-full h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{creating ? "กำลังสร้าง..." : "🆕 สร้างสินค้าใหม่บน LINE"}</button>
+                  )}
                 </div>
               </div>
             )}
