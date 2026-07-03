@@ -89,6 +89,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [massPrice, setMassPrice] = useState("");   // Mass fill ราคาทุก SKU
   const [massBusy, setMassBusy] = useState(false);
   const [creating, setCreating] = useState(false);  // สร้างสินค้าใหม่บน LINE
+  const [displaying, setDisplaying] = useState(false); // เปิด/ปิดการขายบน LINE
   const [prefillTick, setPrefillTick] = useState(0); // บังคับรีเฟรชช่อง (uncontrolled) หลัง prefill
   // F: render ผ่าน portal ไป body (เหมือน Drawer กลาง) → เปิดทับ drawer แม่ที่ค้างอยู่ ไม่ซ้อนหลัง
   const [mounted, setMounted] = useState(false);
@@ -159,6 +160,14 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
       const j = await r.json(); if (j.error) throw new Error(j.error);
       toast("success", `สร้างบน LINE แล้ว (รหัส ${j.product_id})`); await load();
     } catch (e) { toast("error", (e as Error).message); } finally { setCreating(false); }
+  };
+  const setDisplayLine = async (status: "onsale" | "hide") => {
+    setDisplaying(true);
+    try {
+      const r = await apiFetch("/api/line-shopping/set-display", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, status }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast("success", status === "onsale" ? "เปิดขายบน LINE แล้ว" : "ปิดขายบน LINE แล้ว"); await load();
+    } catch (e) { toast("error", (e as Error).message); } finally { setDisplaying(false); }
   };
   // เซ็ตช่องหมวดหมู่เมื่อสลับแพลตฟอร์ม (draft > mapping > ว่าง)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -401,7 +410,13 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                   </ul>
                   {activePf?.code === "line_shopping" && (
                     activeDraft.platform_product_id
-                      ? <p className="text-[11px] text-emerald-700 mt-2">✓ มีบน LINE แล้ว (รหัส {String(activeDraft.platform_product_id)}) — แก้แล้วใช้ปุ่ม “ส่งรายละเอียด/ราคา”</p>
+                      ? <div className="mt-2 space-y-1.5">
+                          <p className="text-[11px] text-emerald-700">✓ มีบน LINE แล้ว (รหัส {String(activeDraft.platform_product_id)}) — แก้แล้วใช้ปุ่ม “ส่งรายละเอียด/ราคา”</p>
+                          {canEdit && <div className="flex gap-2">
+                            <button onClick={() => setDisplayLine("onsale")} disabled={displaying} className="h-8 px-3 text-xs text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-50">▶ เปิดขาย</button>
+                            <button onClick={() => setDisplayLine("hide")} disabled={displaying} className="h-8 px-3 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⏸ ปิดขาย</button>
+                          </div>}
+                        </div>
                       : canEdit && <button onClick={createOnLine} disabled={creating || !ready} title={!ready ? "กรอกฟิลด์จำเป็นให้ครบก่อน (ดูรายการด้านบน)" : "สร้างสินค้าใหม่บน LINE"} className="mt-2 w-full h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{creating ? "กำลังสร้าง..." : "🆕 สร้างสินค้าใหม่บน LINE"}</button>
                   )}
                 </div>

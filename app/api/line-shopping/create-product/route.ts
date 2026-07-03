@@ -35,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const [{ data: parent }, { data: draft }, { data: skus }] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, brand_id").eq("id", parent_sku_id).maybeSingle(),
     admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, platform_product_id").eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id).maybeSingle(),
-    admin.from("skus_v2").select("code, color_th, color, list_price").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
+    admin.from("skus_v2").select("id, code, color_th, color, list_price").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
   ]);
   if (!parent) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 400 });
   const p = parent as Record<string, unknown>;
@@ -55,8 +55,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const categoryId = catIdOf(d.category_path);
   const imageKeys = Array.isArray(d.image_keys) ? d.image_keys as string[] : [];
   const imageUrls = imageKeys.map((k) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`);
-  const skuRows = (skus ?? []) as { code: string; color_th: string | null; color: string | null; list_price: number | null }[];
-  const variants = skuRows.map((s) => ({ sku: s.code, price: Number(s.list_price) || 0, onHandNumber: 0, ...(extra.weight ? { weight: Number(extra.weight) } : {}) }));
+  const skuRows = (skus ?? []) as { id: string; code: string; color_th: string | null; color: string | null; list_price: number | null }[];
+  // สต๊อกจริงต่อ SKU (พร้อมขาย = on_hand − reserved, รวมทุกคลัง)
+  const stockOf = new Map<string, number>();
+  const skuIds = skuRows.map((s) => s.id);
+  if (skuIds.length) {
+    const { data: bal } = await admin.from("erp_playground_stock_balances").select("product_id, qty_on_hand, qty_reserved").in("product_id", skuIds);
+    for (const b of ((bal ?? []) as Record<string, unknown>[])) {
+      const avail = (Number(b.qty_on_hand) || 0) - (Number(b.qty_reserved) || 0);
+      stockOf.set(String(b.product_id), (stockOf.get(String(b.product_id)) ?? 0) + Math.max(0, avail));
+    }
+  }
+  const gtin = String(extra.barcode ?? "").trim();
+  const variants = skuRows.map((s) => ({ sku: s.code, price: Number(s.list_price) || 0, onHandNumber: stockOf.get(s.id) ?? 0, ...(extra.weight ? { weight: Number(extra.weight) } : {}), ...(gtin ? { gtin } : {}) }));
   const colors = [...new Set(skuRows.map((s) => (s.color_th || s.color || "").trim()).filter(Boolean))];
 
   // ตรวจครบก่อนส่ง
