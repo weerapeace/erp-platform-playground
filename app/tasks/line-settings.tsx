@@ -8,6 +8,9 @@ import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { LINE_TEMPLATES } from "@/lib/creative-line-templates";
 
+// ชุดอีโมจิคร่าว ๆ ให้เลือกแทรกในแม่แบบข้อความ (เน้นที่ใช้บ่อยในงาน/แจ้งเตือน)
+const EMOJIS = ["🆕", "✅", "❌", "⚠️", "🟡", "🟢", "🔴", "🟠", "📌", "📝", "📋", "🖼", "📷", "🎨", "🔗", "👤", "👥", "🗓", "⏰", "⏳", "🔔", "📤", "📥", "🚀", "⭐", "💡", "🙏", "👍", "🔥", "✨", "🎉", "➡️", "↩️", "⬇️", "💬", "📎", "🏷", "🛒", "💰", "🏭", "✂️", "🧵", "😀", "😍", "🥳", "🤝", "💯"];
+
 type Info = { captured: string; current: string; has_token: boolean; using_main: boolean; templates?: Record<string, string>; vars?: Record<string, string[]> };
 
 export function LineSettings() {
@@ -17,6 +20,7 @@ export function LineSettings() {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tpls, setTpls] = useState<Record<string, string>>({});
+  const [emojiFor, setEmojiFor] = useState<string | null>(null);   // เปิด palette อีโมจิของแม่แบบไหน
   const load = () => apiFetch("/api/creative-line-group").then((r) => r.json()).then((j) => { if (j && !j.error) { setInfo(j as Info); setTpls((j.templates ?? {}) as Record<string, string>); } }).catch(() => {});
   useEffect(() => { load(); }, []);
   const post = async (payload: Record<string, unknown>, okMsg: string) => {
@@ -70,6 +74,19 @@ export function LineSettings() {
               <div className="text-xs font-medium text-slate-600 mb-1">{d.label}</div>
               <textarea value={tpls[d.key] ?? ""} onChange={(e) => setTpls((p) => ({ ...p, [d.key]: e.target.value }))} rows={3} placeholder={d.defaultTpl}
                 className="w-full text-xs border border-slate-200 rounded p-2 resize-none font-mono focus:outline-none focus:ring-2 focus:ring-violet-200" />
+              {/* ปุ่มอีโมจิ — กดเด้ง palette ให้เลือกแทรก */}
+              <div className="mt-1">
+                <button type="button" onClick={() => setEmojiFor((k) => k === d.key ? null : d.key)}
+                  className="text-[11px] px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">😀 {t("อีโมจิ", "Emoji")} {emojiFor === d.key ? "▲" : "▼"}</button>
+                {emojiFor === d.key && (
+                  <div className="mt-1 flex flex-wrap gap-0.5 p-2 border border-slate-200 rounded-lg bg-white shadow-sm max-h-32 overflow-y-auto">
+                    {EMOJIS.map((em, i) => (
+                      <button key={i} type="button" title={t("แทรกอีโมจินี้", "Insert this emoji")} onClick={() => setTpls((p) => ({ ...p, [d.key]: `${p[d.key] ?? ""}${em}` }))}
+                        className="w-7 h-7 text-base flex items-center justify-center rounded hover:bg-violet-100">{em}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex items-start gap-1 flex-wrap mt-1 max-h-24 overflow-y-auto">
                 <span className="text-[10px] text-slate-400 sticky left-0">{t("ตัวแปร (กดเพื่อแทรก):", "Variables (tap to insert):")}</span>
                 {(info?.vars?.[d.key] ?? d.vars).map((v) => (

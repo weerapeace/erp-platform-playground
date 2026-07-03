@@ -37,7 +37,9 @@ export function StandaloneShell({
       <div className="h-14 px-4 flex items-center gap-3">
         {/* แบรนด์ + ชื่อโมดูล */}
         <div className="flex items-center gap-2.5 min-w-0">
-          <Logo size={26} className="flex-shrink-0" />
+          <a href="/apps" title={t("ไปที่รวมแอป (App launcher)", "Go to App launcher")} className="flex-shrink-0 rounded-lg hover:opacity-80 transition-opacity" aria-label="App launcher">
+            <Logo size={26} className="flex-shrink-0" />
+          </a>
           <span className={`h-1.5 w-1.5 rounded-full ${dot} hidden sm:block`} />
           <div className="leading-tight min-w-0">
             <div className="text-sm font-bold text-slate-900 truncate flex items-center gap-1.5">
