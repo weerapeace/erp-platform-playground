@@ -27,6 +27,7 @@ export default function PlatformCatalogPage() {
   const { can } = useAuth();
   const canEdit = can("products.platforms.edit");
   const fileRef = useRef<HTMLInputElement>(null);
+  const catFileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   // คิวไฟล์ที่อ่านแล้วรอยืนยันชนิด (เลือกได้หลายไฟล์ เดาให้ทุกไฟล์ → ยืนยัน → นำเข้าตามลำดับ)
@@ -198,6 +199,33 @@ export default function PlatformCatalogPage() {
     finally { setImporting(false); }
   };
 
+  // นำเข้ารายการหมวดหมู่แพลตฟอร์มจากไฟล์ (ชีต "ตัวเลือกหมวดสินค้า" — คอลัมน์ id/en/th)
+  const importCategoryFile = async (file: File) => {
+    if (!platformId) { setNote("เลือกแพลตฟอร์มก่อน"); return; }
+    setImporting(true); setNote("กำลังอ่านไฟล์หมวดหมู่...");
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const cand = wb.SheetNames.find((n) => /หมวด|categ/i.test(n)) ? [wb.SheetNames.find((n) => /หมวด|categ/i.test(n))!] : wb.SheetNames;
+      let aoa: unknown[][] = [];
+      for (const sn of cand) {
+        const a = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sn], { header: 1, defval: "" });
+        const hdr = ((a[0] ?? []) as unknown[]).map((x) => String(x).trim().toLowerCase());
+        if (hdr.includes("id") && (hdr.includes("en") || hdr.includes("th"))) { aoa = a; break; }
+      }
+      if (aoa.length < 2) { setNote("ไม่พบชีตหมวดหมู่ (ต้องมีคอลัมน์ id + en/th)"); return; }
+      const hdr = (aoa[0] as unknown[]).map((x) => String(x).trim().toLowerCase());
+      const ci = { id: hdr.indexOf("id"), en: hdr.indexOf("en"), th: hdr.indexOf("th") };
+      const rows = (aoa.slice(1) as unknown[][])
+        .map((r) => ({ id: r[ci.id], en: ci.en >= 0 ? r[ci.en] : "", th: ci.th >= 0 ? r[ci.th] : "" }))
+        .filter((r) => String(r.id ?? "").trim());
+      const res = await apiFetch("/api/platform-category-options", { method: "POST", body: JSON.stringify({ platform_id: platformId, rows }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      setNote(`นำเข้าหมวดหมู่ ${activePf?.name_th ?? ""} แล้ว: ${j.imported} หมวด (ใช้เลือกใน "แก้รายละเอียดต่อแพลตฟอร์ม" ได้)`);
+    } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
+    finally { setImporting(false); if (catFileRef.current) catFileRef.current.value = ""; }
+  };
+
   // ส่งราคาขาย ERP → LINE (สินค้าที่จับคู่แล้ว)
   const pushPricesLine = async () => {
     if (!brandId) { setNote("เลือกแบรนด์/ร้านก่อน"); return; }
@@ -278,6 +306,8 @@ export default function PlatformCatalogPage() {
           ? <>
               <button onClick={syncLine} disabled={!canEdit || importing || !brandId} title={!brandId ? "เลือกแบรนด์/ร้านก่อน" : "ดึงสินค้าจาก LINE SHOPPING ผ่าน API"} className="h-9 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-50">{importing ? "กำลังดึง..." : "🟢 ดึงสินค้าจาก LINE"}</button>
               <button onClick={pushPricesLine} disabled={!canEdit || importing || !brandId} title="ส่งราคาขาย (ERP) ขึ้น LINE สำหรับสินค้าที่จับคู่แล้ว" className="h-9 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-50">⬆️ ส่งราคาขึ้น LINE</button>
+              <input ref={catFileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importCategoryFile(f); }} />
+              <button onClick={() => catFileRef.current?.click()} disabled={!canEdit || importing} title="นำเข้ารายการหมวดหมู่ LINE จากไฟล์ template (ชีตตัวเลือกหมวดสินค้า) — ใช้ครั้งเดียว" className="h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">📂 นำเข้าหมวดหมู่</button>
             </>
           : <button disabled title="เฉพาะแพลตฟอร์มที่ต่อ API ได้" className="h-9 px-3 text-sm text-slate-400 border border-slate-200 rounded-lg cursor-not-allowed">🔗 ดึงจาก API (เฉพาะ LINE)</button>}
       </div>
