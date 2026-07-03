@@ -41,12 +41,13 @@ export function invalidateSWR(prefix?: string): void {
 export function useSWRLite<T>(
   key: string | null,
   fetcher: () => Promise<T>,
-  opts: { dedupeMs?: number; revalidateOnFocus?: boolean; focusStaleMs?: number; refreshMs?: number } = {},
+  opts: { dedupeMs?: number; revalidateOnFocus?: boolean; focusStaleMs?: number; refreshMs?: number; timeoutMs?: number } = {},
 ): { data: T | undefined; loading: boolean; error: Error | null; revalidate: (force?: boolean) => Promise<void>; mutate: (d: T) => void } {
   const dedupeMs = opts.dedupeMs ?? 2000;
   const revalidateOnFocus = opts.revalidateOnFocus ?? true;
   const focusStaleMs = opts.focusStaleMs ?? 30000; // สลับแท็บ → refetch เฉพาะข้อมูลที่เก่ากว่านี้ (ลดยิงซ้ำ/ประหยัด)
   const refreshMs = opts.refreshMs ?? 0; // โหลดใหม่อัตโนมัติเป็นรอบ (เฉพาะตอนแท็บเปิดอยู่) — 0 = ปิด
+  const timeoutMs = opts.timeoutMs ?? 0;  // ตัดจบถ้า fetch ค้างเกินนี้ (เช่น DB ล่ม) → error ขึ้นเร็ว ไม่ค้างนิ่ง · 0 = ปิด
   const fetcherRef = useRef(fetcher); fetcherRef.current = fetcher;
   const [, force] = useState(0);
   const has = !!key && cache.has(key);
@@ -59,12 +60,16 @@ export function useSWRLite<T>(
     if (!forceFetch && cur && Date.now() - cur.at < dedupeMs) return; // ยังสดอยู่ → ข้าม
     if (inflight.has(key)) { try { await inflight.get(key); } catch { /* ignore */ } return; }
     if (!cur) setLoading(true);
-    const p = fetcherRef.current();
+    // ตัดจบถ้า fetch ค้างเกิน timeoutMs (DB/เน็ตล่ม) → reject เร็ว ให้ error ขึ้น ไม่ค้างนาน
+    const raw = fetcherRef.current();
+    const p = timeoutMs > 0
+      ? Promise.race([raw, new Promise<T>((_, rej) => setTimeout(() => rej(new Error("เชื่อมต่อฐานข้อมูลไม่ได้ (หมดเวลา)")), timeoutMs))])
+      : raw;
     inflight.set(key, p);
     try { const data = await p; cache.set(key, { data, at: Date.now() }); setError(null); emit(key); }
     catch (e) { setError(e as Error); }
     finally { inflight.delete(key); setLoading(false); }
-  }, [key, dedupeMs]);
+  }, [key, dedupeMs, timeoutMs]);
 
   // subscribe การเปลี่ยนแปลง cache ของ key นี้ → re-render
   useEffect(() => {

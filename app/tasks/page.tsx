@@ -30,6 +30,7 @@ import { AssigneeStack } from "./assignee-avatar";
 import { apiFetch } from "@/lib/api";
 import { applyTaskTransition } from "./task-actions";
 import { OverviewDashboard } from "./overview-dashboard";
+import { ConnectionError } from "@/components/connection-error";
 import { arrangeMySubtasks, loadMySubView, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
 import { DEFAULT_THEME, mergeTheme, type OverviewTheme } from "./overview-customizer";
 import { type MetricDef } from "./metrics";
@@ -128,9 +129,9 @@ export default function TasksPage() {
 
   // โหลดข้อมูลแบบ stale-while-revalidate (ของกลาง) — กลับเข้าหน้านี้ใหม่ = โชว์ทันที แล้วอัปเดตเงียบ
   // poll ทุก 20 วิ (เฉพาะตอนเปิดแท็บ) → งานที่คนอื่น/เครื่องอื่นแก้ อัปเดตเองไม่ต้อง refresh
-  const tasksSWR = useSWRLite("creative:tasks:all", () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }), { refreshMs: 20000 });
-  const mineSWR = useSWRLite("creative:tasks:mine", () => listTasks({ mine: true }), { refreshMs: 20000 });
-  const subsSWR = useSWRLite("creative:my-subtasks", () => listMySubtasks(), { refreshMs: 20000 });
+  const tasksSWR = useSWRLite("creative:tasks:all", () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }), { refreshMs: 20000, timeoutMs: 15000 });
+  const mineSWR = useSWRLite("creative:tasks:mine", () => listTasks({ mine: true }), { refreshMs: 20000, timeoutMs: 15000 });
+  const subsSWR = useSWRLite("creative:my-subtasks", () => listMySubtasks(), { refreshMs: 20000, timeoutMs: 15000 });
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
   const tasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);
@@ -139,6 +140,7 @@ export default function TasksPage() {
   const brands = useMemo(() => brandsSWR.data ?? [], [brandsSWR.data]);
   const campaigns = useMemo(() => campaignsSWR.data ?? [], [campaignsSWR.data]);
   const loading = tasksSWR.loading; // โชว์ skeleton เฉพาะตอนยังไม่เคยมีข้อมูลจริง
+  const loadFailed = !!tasksSWR.error && tasks.length === 0; // โหลดพลาด + ยังไม่เคยมีข้อมูล → โชว์หน้า "เชื่อมต่อไม่ได้"
 
   // เปิด drawer งานอัตโนมัติจากลิงก์ /tasks?task=<id> (เช่นกดมาจากการ์ดบน Canvas)
   // และรองรับ /tasks?view=table|queue|kanban|canvas|overview (เช่นลิงก์ "งานทั้งหมด" จากหน้าแคมเปญ)
@@ -245,7 +247,9 @@ export default function TasksPage() {
         {/* เมนูมุมมอง — บนภาพรวมย้ายเข้า Hero แล้ว (ส่งเป็น viewSwitcher) · มุมมองอื่นโชว์ตรงนี้ */}
         {view !== "overview" && <ViewSwitcher view={view} setView={setView} t={t} />}
 
-        {loading ? (
+        {loadFailed ? (
+          <ConnectionError onRetry={() => void reload()} retrying={loading} />
+        ) : loading ? (
           <div className="py-20 text-center text-slate-400">{t("กำลังโหลดข้อมูล...", "Loading data...")}</div>
         ) : (
           <>
