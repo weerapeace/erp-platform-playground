@@ -36,6 +36,8 @@ export default function PlatformCatalogPage() {
   const [openListing, setOpenListing] = useState<Listing | null>(null);
   const [matchDraft, setMatchDraft] = useState<ParentSkuPickerValue | null>(null);
   const [savingMatch, setSavingMatch] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [pushMsg, setPushMsg] = useState<string | null>(null);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [platformId, setPlatformId] = useState("");
@@ -143,7 +145,22 @@ export default function PlatformCatalogPage() {
   // เปิดแถวสินค้า (drawer แก้ไข/จับคู่มือ) — ตั้งค่าจับคู่เริ่มจากที่มีอยู่
   const openRow = (l: Listing) => {
     setOpenListing(l);
+    setPushMsg(null);
     setMatchDraft(l.matched_parent_sku_id ? { id: l.matched_parent_sku_id, code: l.matched_code ?? "", name: l.matched_name ?? l.matched_code ?? "" } : null);
+  };
+  // ส่งราคาขึ้น LINE เฉพาะสินค้านี้ (ทดสอบทีละตัวก่อนยิงทั้งหมด — ปลอดภัยกว่า)
+  const pushOnePrice = async () => {
+    if (!openListing?.matched_parent_sku_id) return;
+    setPushing(true); setPushMsg("กำลังส่งราคาขึ้น LINE...");
+    try {
+      const r = await apiFetch("/api/line-shopping/push-prices", { method: "POST", body: JSON.stringify({ brand_id: brandId, parent_sku_id: openListing.matched_parent_sku_id }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      const first = (j.results ?? [])[0] as { ok?: boolean; error?: string; variants?: number } | undefined;
+      setPushMsg(j.okCount > 0
+        ? `✅ ส่งราคาขึ้น LINE สำเร็จ (${first?.variants ?? 0} ตัวเลือก) — ไปเช็กราคาใน MyShop ว่าถูกไหม`
+        : `❌ ${first?.error ?? "ส่งไม่สำเร็จ"}`);
+    } catch (e) { setPushMsg("❌ " + (e as Error).message); }
+    finally { setPushing(false); }
   };
   // บันทึกการจับคู่มือ (parent_sku_id ว่าง = ยกเลิกจับคู่)
   const saveMatch = async () => {
@@ -369,6 +386,16 @@ export default function PlatformCatalogPage() {
                   </>
                 ) : <p className="text-xs text-amber-600">ไม่มีสิทธิ์แก้ไข (ดูได้อย่างเดียว)</p>}
               </div>
+
+              {/* ส่งราคาขึ้น LINE เฉพาะสินค้านี้ (เฉพาะ LINE + จับคู่แล้ว) */}
+              {canEdit && platformCode === "line_shopping" && openListing.matched_parent_sku_id && (
+                <div className="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3 space-y-1.5">
+                  <div className="text-xs font-semibold text-slate-600">ส่งราคาขึ้น LINE</div>
+                  <button onClick={pushOnePrice} disabled={pushing} className="h-9 px-3 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{pushing ? "กำลังส่ง..." : "⬆️ ส่งราคาขึ้น LINE (สินค้านี้)"}</button>
+                  {pushMsg && <p className="text-xs text-slate-700">{pushMsg}</p>}
+                  <p className="text-[11px] text-slate-400">ราคาเอาจากราคาขาย (list_price) ใน ERP · ไม่ตั้งส่วนลด · แนะนำทดสอบตัวนี้ก่อนกด “ส่งทั้งหมด”</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
