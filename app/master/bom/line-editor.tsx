@@ -139,55 +139,8 @@ function pushRecentMat(c: BomComponent) {
   try { const list = loadRecentMat().filter((x) => x.id !== c.id); localStorage.setItem(RECENT_MAT_KEY, JSON.stringify([c, ...list].slice(0, 8))); } catch { /* ignore */ }
 }
 
-// ============================================================
-// SkuPicker — เลือก SKU ทั่วไป (หัวสูตร product) ผ่าน /api/admin/picker
-// ============================================================
-export function SkuPicker({
-  sku, name, onPick, placeholder = "— เลือก SKU —",
-}: { sku: string; name: string; onPick: (sku: string, name: string) => void; placeholder?: string }) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [options, setOptions] = useState<Array<{ id: string; label: string; secondary?: string }>>([]);
-  const [loading, setLoading] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
-  const load = useCallback(async (q: string) => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ table: "skus_v2", label: "code", secondary: "name_th", search_in: "code,name_th", limit: "30" });
-      if (q) params.set("search", q);
-      const res = await apiFetch(`/api/admin/picker?${params}`); const json = await res.json();
-      setOptions((json.data ?? []) as Array<{ id: string; label: string; secondary?: string }>);
-    } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { if (!open) return; const t = setTimeout(() => load(search), 250); return () => clearTimeout(t); }, [open, search, load]);
-  useEffect(() => { const f = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); }; document.addEventListener("mousedown", f); return () => document.removeEventListener("mousedown", f); }, []);
-  return (
-    <div ref={boxRef} className="relative">
-      <button type="button" onClick={() => { setOpen((o) => !o); setSearch(""); }}
-        className="w-full h-9 px-2 text-left text-sm border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 truncate">
-        {sku ? <span><code className="text-xs text-slate-500">{sku}</code> <span className="text-slate-700">{name}</span></span> : <span className="text-slate-400">{placeholder}</span>}
-      </button>
-      {open && (
-        <div className="absolute z-30 mt-1 w-[420px] max-w-[90vw] bg-white border border-slate-200 rounded-lg shadow-lg">
-          <div className="p-2 border-b border-slate-100">
-            <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อ..." className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div className="max-h-64 overflow-auto py-1">
-            {loading && <div className="px-3 py-2 text-xs text-slate-400">กำลังค้นหา...</div>}
-            {!loading && options.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">ไม่พบ</div>}
-            {options.map((o) => (
-              <button key={o.id} type="button" onClick={() => { onPick(o.label, o.secondary ?? ""); setOpen(false); }}
-                className="w-full px-3 py-1.5 text-left hover:bg-blue-50 flex items-center gap-2">
-                <code className="text-xs text-slate-500 shrink-0">{o.label}</code><span className="text-sm text-slate-700 truncate">{o.secondary}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
+// หมายเหตุ: เลือก SKU เดี่ยว ใช้ของกลาง `SkuPicker` จาก @/components/pickers เท่านั้น
+// (ของเดิมที่นี่เป็น one-off /api/admin/picker ไม่มีรูป/ราคา/โหลดเพิ่ม — ลบทิ้งแล้ว)
 
 // ComponentPicker / MaterialSearchModal ย้ายไปของกลาง @/components/material-picker — re-export ให้ของเดิมที่ import จากไฟล์นี้ยังใช้ได้
 export { ComponentPicker };
