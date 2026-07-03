@@ -10,12 +10,24 @@
  */
 
 import Link from "next/link";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Logo, BRAND } from "@/components/brand";
 import { useAuth, roleLabel, roleColor } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import type { MenuRow, AppGroup } from "@/components/playground-shell";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, useSortable, arrayMove, rectSortingStrategy, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
+// ค่าปรับแต่งหน้าแรกรายคน (เก็บใน user_ui_prefs key=launcher_prefs)
+type LauncherPrefs = {
+  favorites: string[];                    // app key (href) ที่ปักดาว
+  hidden: string[];                       // app key ที่ซ่อน
+  appOrder: Record<string, string[]>;     // ลำดับแอปในแต่ละหมวด (category → key[])
+  sectionOrder: string[];                 // ลำดับหมวด
+};
+const EMPTY_PREFS: LauncherPrefs = { favorites: [], hidden: [], appOrder: {}, sectionOrder: [] };
 
 // สีไล่เฉดสำหรับ tile ที่มาจากทะเบียนเมนู (วนสี)
 const TILE_COLORS = [
@@ -286,6 +298,69 @@ export default function AppLauncherPage() {
     return [...known, ...unknown].map((c) => ({ category: c, apps: map.get(c)! }));
   }, [filtered]);
 
+  // ---- ปรับแต่งหน้าแรกรายคน: favorite / ซ่อน / จัดลำดับ (เก็บใน user_ui_prefs) ----
+  const [prefs, setPrefs] = useState<LauncherPrefs>(EMPTY_PREFS);
+  const [editMode, setEditMode] = useState(false);
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=launcher_prefs").then((r) => r.json()).then((j) => {
+      const v = (j.value ?? {}) as Partial<LauncherPrefs>;
+      setPrefs({ favorites: v.favorites ?? [], hidden: v.hidden ?? [], appOrder: v.appOrder ?? {}, sectionOrder: v.sectionOrder ?? [] });
+    }).catch(() => { /* ใช้ค่าว่าง */ });
+  }, []);
+  // แก้ prefs + บันทึกขึ้น server ทันที (functional update กัน stale)
+  const mutatePrefs = useCallback((fn: (p: LauncherPrefs) => LauncherPrefs) => {
+    setPrefs((p) => {
+      const next = fn(p);
+      apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "launcher_prefs", value: next }) }).catch(() => {});
+      return next;
+    });
+  }, []);
+  const toggleFav = useCallback((key: string) => mutatePrefs((p) => ({ ...p, favorites: p.favorites.includes(key) ? p.favorites.filter((k) => k !== key) : [...p.favorites, key] })), [mutatePrefs]);
+  const toggleHidden = useCallback((key: string) => mutatePrefs((p) => ({ ...p, hidden: p.hidden.includes(key) ? p.hidden.filter((k) => k !== key) : [...p.hidden, key] })), [mutatePrefs]);
+
+  // หมวดที่แสดง (ใส่ลำดับแอป/หมวดตาม prefs; โหมดปกติ = ตัดแอปที่ซ่อน + หมวดว่างออก)
+  const displaySections = useMemo(() => {
+    const applyOrder = (cat: string, apps: AppEntry[]) => {
+      const ord = prefs.appOrder[cat]; if (!ord?.length) return apps;
+      const idx = (k: string) => { const i = ord.indexOf(k); return i === -1 ? 9999 : i; };
+      return [...apps].sort((a, b) => idx(a.key) - idx(b.key));
+    };
+    let secs = grouped.map((g) => ({ category: g.category, apps: applyOrder(g.category, g.apps) }));
+    if (prefs.sectionOrder.length) {
+      const idx = (c: string) => { const i = prefs.sectionOrder.indexOf(c); return i === -1 ? 9999 : i; };
+      secs = [...secs].sort((a, b) => idx(a.category) - idx(b.category));
+    }
+    if (editMode) return secs;
+    return secs.map((s) => ({ ...s, apps: s.apps.filter((a) => !prefs.hidden.includes(a.key)) })).filter((s) => s.apps.length > 0);
+  }, [grouped, prefs, editMode]);
+
+  const favApps = useMemo(() => {
+    const byKey = new Map(appList.map((a) => [a.key, a] as const));
+    return prefs.favorites.map((k) => byKey.get(k)).filter((a): a is AppEntry => !!a && !prefs.hidden.includes(a.key));
+  }, [appList, prefs.favorites, prefs.hidden]);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const onSectionDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e; if (!over || active.id === over.id) return;
+    const cats = displaySections.map((s) => s.category);
+    const oldI = cats.indexOf(String(active.id).replace("sec::", ""));
+    const newI = cats.indexOf(String(over.id).replace("sec::", ""));
+    if (oldI < 0 || newI < 0) return;
+    const next = arrayMove(cats, oldI, newI);
+    mutatePrefs((p) => ({ ...p, sectionOrder: next }));
+  };
+  const onAppDragEnd = (cat: string) => (e: DragEndEvent) => {
+    const { active, over } = e; if (!over || active.id === over.id) return;
+    const sec = displaySections.find((s) => s.category === cat); if (!sec) return;
+    const keys = sec.apps.map((a) => a.key);
+    const oldI = keys.indexOf(String(active.id));
+    const newI = keys.indexOf(String(over.id));
+    if (oldI < 0 || newI < 0) return;
+    const next = arrayMove(keys, oldI, newI);
+    mutatePrefs((p) => ({ ...p, appOrder: { ...p.appOrder, [cat]: next } }));
+  };
+  const searching = query.trim().length > 0;
+
   // Esc ปิด user menu
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -431,32 +506,99 @@ export default function AppLauncherPage() {
 
       {/* ============= App grid (grouped) ============= */}
       <main className="max-w-7xl mx-auto px-6 pb-16">
-        {grouped.length === 0 ? (
-          <div className="text-center py-16">
-            <div className="text-5xl mb-3 opacity-40">🔍</div>
-            <p className="text-slate-500 text-sm">ไม่พบแอปที่ตรงกับ &ldquo;{query}&rdquo;</p>
+        {/* แถบจัดการหน้าแรก (ซ่อนตอนกำลังค้นหา) */}
+        {!searching && (
+          <div className="flex items-center justify-end mb-4">
+            {editMode ? (
+              <div className="flex items-center gap-2">
+                <span className="hidden sm:inline text-[11px] text-slate-400">ลากการ์ด/หมวดเพื่อจัดลำดับ · ☆ ปักโปรด · 👁 ซ่อน</span>
+                <button type="button" onClick={() => setEditMode(false)} className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">✓ เสร็จ</button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setEditMode(true)} className="h-8 px-3 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">⚙️ จัดการหน้าแรก</button>
+            )}
           </div>
-        ) : (
-          <div className="space-y-10">
-            {grouped.map(({ category, apps }) => (
-              <section key={category}>
-                <div className="flex items-baseline gap-3 mb-4 px-1">
-                  <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    {CATEGORY_LABEL[category] ?? category}
-                  </h2>
-                  <span className="text-[10px] text-slate-400">
-                    {apps.length} แอป
-                  </span>
-                  <div className="flex-1 h-px bg-slate-200/70" />
-                </div>
+        )}
 
+        {searching ? (
+          grouped.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="text-5xl mb-3 opacity-40">🔍</div>
+              <p className="text-slate-500 text-sm">ไม่พบแอปที่ตรงกับ &ldquo;{query}&rdquo;</p>
+            </div>
+          ) : (
+            <div className="space-y-10">
+              {grouped.map(({ category, apps }) => (
+                <section key={category}>
+                  <div className="flex items-baseline gap-3 mb-4 px-1">
+                    <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{CATEGORY_LABEL[category] ?? category}</h2>
+                    <span className="text-[10px] text-slate-400">{apps.length} แอป</span>
+                    <div className="flex-1 h-px bg-slate-200/70" />
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                    {apps.map((app) => <AppTile key={app.key} app={app} />)}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )
+        ) : editMode ? (
+          // โหมดจัดการ — ลากหมวด (นอก) + ลากการ์ดในหมวด (ใน) + ปุ่มโปรด/ซ่อนบนการ์ด
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onSectionDragEnd}>
+            <SortableContext items={displaySections.map((s) => `sec::${s.category}`)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-10">
+                {displaySections.map(({ category, apps }) => (
+                  <SortableSection key={category} category={category} label={CATEGORY_LABEL[category] ?? category} count={apps.length}>
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onAppDragEnd(category)}>
+                      <SortableContext items={apps.map((a) => a.key)} strategy={rectSortingStrategy}>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                          {apps.map((app) => (
+                            <SortableTile key={app.key} app={app}
+                              isFav={prefs.favorites.includes(app.key)} isHidden={prefs.hidden.includes(app.key)}
+                              onFav={() => toggleFav(app.key)} onHide={() => toggleHidden(app.key)} />
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </DndContext>
+                  </SortableSection>
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        ) : (
+          // โหมดปกติ — โปรดบนสุด + หมวดที่จัดลำดับไว้ (ตัดแอปที่ซ่อน)
+          <div className="space-y-10">
+            {favApps.length > 0 && (
+              <section>
+                <div className="flex items-baseline gap-3 mb-4 px-1">
+                  <h2 className="text-xs font-semibold text-amber-500 uppercase tracking-wider">⭐ โปรด</h2>
+                  <span className="text-[10px] text-slate-400">{favApps.length} แอป</span>
+                  <div className="flex-1 h-px bg-amber-200/70" />
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-                  {apps.map((app) => (
-                    <AppTile key={app.key} app={app} />
-                  ))}
+                  {favApps.map((app) => <AppTile key={app.key} app={app} />)}
                 </div>
               </section>
-            ))}
+            )}
+            {displaySections.length === 0 && favApps.length === 0 ? (
+              <div className="text-center py-16">
+                <div className="text-5xl mb-3 opacity-40">📭</div>
+                <p className="text-slate-500 text-sm">ไม่มีแอปแสดง — กด &ldquo;⚙️ จัดการหน้าแรก&rdquo; เพื่อเลิกซ่อน</p>
+              </div>
+            ) : (
+              displaySections.map(({ category, apps }) => (
+                <section key={category}>
+                  <div className="flex items-baseline gap-3 mb-4 px-1">
+                    <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{CATEGORY_LABEL[category] ?? category}</h2>
+                    <span className="text-[10px] text-slate-400">{apps.length} แอป</span>
+                    <div className="flex-1 h-px bg-slate-200/70" />
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                    {apps.map((app) => <AppTile key={app.key} app={app} />)}
+                  </div>
+                </section>
+              ))
+            )}
           </div>
         )}
       </main>
@@ -478,59 +620,68 @@ export default function AppLauncherPage() {
 // AppTile — การ์ดแอป 1 ใบ
 // ============================================================
 
-function AppTile({ app }: { app: AppEntry }) {
-  const disabled = app.status === "soon" || app.href === "#";
-
-  const inner = (
+// เนื้อหาการ์ด (ไอคอน + ชื่อ + subtitle) — reuse ทั้งโหมดปกติและโหมดจัดการ
+function AppTileContent({ app }: { app: AppEntry }) {
+  return (
     <>
-      {/* icon block สี gradient */}
-      <div
-        className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${app.color} flex items-center justify-center text-2xl shadow-sm mb-3 group-hover:scale-105 group-hover:shadow-md transition-all duration-200`}
-      >
+      <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${app.color} flex items-center justify-center text-2xl shadow-sm mb-3 group-hover:scale-105 group-hover:shadow-md transition-all duration-200`}>
         <span className="drop-shadow-sm">{app.icon}</span>
       </div>
-
-      <div className="text-sm font-semibold text-slate-900 leading-tight">
-        {app.name}
-      </div>
-      <div className="text-[11px] text-slate-400 mt-0.5 leading-tight truncate">
-        {app.subtitle}
-      </div>
-
+      <div className="text-sm font-semibold text-slate-900 leading-tight">{app.name}</div>
+      <div className="text-[11px] text-slate-400 mt-0.5 leading-tight truncate">{app.subtitle}</div>
       {app.status === "soon" && (
-        <span className="absolute top-2 right-2 inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-amber-50 text-amber-600 border border-amber-200 rounded-full">
-          เร็ว ๆ นี้
-        </span>
+        <span className="absolute top-2 right-2 inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-amber-50 text-amber-600 border border-amber-200 rounded-full">เร็ว ๆ นี้</span>
       )}
       {app.status === "beta" && (
-        <span className="absolute top-2 right-2 inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-blue-50 text-blue-600 border border-blue-200 rounded-full">
-          BETA
-        </span>
+        <span className="absolute top-2 right-2 inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium bg-blue-50 text-blue-600 border border-blue-200 rounded-full">BETA</span>
       )}
     </>
   );
+}
 
-  const className = `
-    group relative flex flex-col items-start p-4 sm:p-5
-    bg-white border border-slate-200/70 rounded-2xl
-    transition-all duration-200
-    ${disabled
-      ? "opacity-60 cursor-not-allowed"
-      : "hover:border-blue-300 hover:shadow-lg hover:-translate-y-0.5 cursor-pointer"
-    }
-  `;
+const TILE_CLASS = "group relative flex flex-col items-start p-4 sm:p-5 bg-white border border-slate-200/70 rounded-2xl transition-all duration-200";
 
-  if (disabled) {
-    return (
-      <div className={className} aria-disabled="true">
-        {inner}
-      </div>
-    );
-  }
+function AppTile({ app }: { app: AppEntry }) {
+  const disabled = app.status === "soon" || app.href === "#";
+  const className = `${TILE_CLASS} ${disabled ? "opacity-60 cursor-not-allowed" : "hover:border-blue-300 hover:shadow-lg hover:-translate-y-0.5 cursor-pointer"}`;
+  if (disabled) return <div className={className} aria-disabled="true"><AppTileContent app={app} /></div>;
+  return <Link href={app.href} className={className}><AppTileContent app={app} /></Link>;
+}
 
+// หมวดในโหมดจัดการ — ลากสลับลำดับหมวดได้ (จับที่ ⋮⋮)
+function SortableSection({ category, label, count, children }: { category: string; label: string; count: number; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `sec::${category}` });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1 };
   return (
-    <Link href={app.href} className={className}>
-      {inner}
-    </Link>
+    <section ref={setNodeRef} style={style}>
+      <div className="flex items-baseline gap-2 mb-4 px-1">
+        <span {...attributes} {...listeners} title="ลากเพื่อจัดลำดับหมวด"
+          className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 text-sm leading-none self-center">⋮⋮</span>
+        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</h2>
+        <span className="text-[10px] text-slate-400">{count} แอป</span>
+        <div className="flex-1 h-px bg-slate-200/70" />
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// การ์ดในโหมดจัดการ — ลากได้ + ปุ่มดาว(โปรด) + ปุ่มซ่อน (ไม่ใช่ลิงก์)
+function SortableTile({ app, isFav, isHidden, onFav, onHide }: {
+  app: AppEntry; isFav: boolean; isHidden: boolean; onFav: () => void; onHide: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: app.key });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : isHidden ? 0.45 : 1 };
+  return (
+    <div ref={setNodeRef} style={style} className={`${TILE_CLASS} ring-1 ring-slate-100`}>
+      <div {...attributes} {...listeners} className="absolute inset-0 cursor-grab active:cursor-grabbing rounded-2xl" title="ลากเพื่อจัดลำดับ" />
+      <AppTileContent app={app} />
+      <div className="absolute top-1.5 right-1.5 z-10 flex gap-1">
+        <button type="button" onClick={onFav} title={isFav ? "เอาออกจากโปรด" : "ปักเป็นโปรด"}
+          className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm ${isFav ? "bg-amber-100 text-amber-600" : "bg-slate-100 text-slate-400 hover:text-amber-500"}`}>{isFav ? "★" : "☆"}</button>
+        <button type="button" onClick={onHide} title={isHidden ? "เลิกซ่อน" : "ซ่อนแอปนี้"}
+          className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs ${isHidden ? "bg-slate-200 text-slate-500" : "bg-slate-100 text-slate-400 hover:text-slate-700"}`}>{isHidden ? "🚫" : "👁"}</button>
+      </div>
+    </div>
   );
 }
