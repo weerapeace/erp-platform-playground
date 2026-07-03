@@ -62,6 +62,23 @@ export async function lineUpdatePrices(apiKey: string, productId: string, varian
   } catch (e) { return { ok: false, status: 0, error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
 }
 
+// อัปเดตรายละเอียดสินค้า (PATCH /products/{id}) — ส่งเฉพาะฟิลด์ที่มีค่า (name/description/brand/categoryId)
+export async function lineUpdateProduct(apiKey: string, productId: string, fields: { name?: string; description?: string; brand?: string; categoryId?: number | string }): Promise<{ ok: boolean; status: number; sent: string[]; error?: string }> {
+  try {
+    const body: Record<string, unknown> = {};
+    if (fields.name?.trim()) body.name = fields.name.trim();
+    if (fields.description != null && String(fields.description).trim()) body.description = String(fields.description).trim();
+    if (fields.brand?.trim()) body.brand = fields.brand.trim();
+    if (fields.categoryId != null && String(fields.categoryId).trim()) { const n = Number(fields.categoryId); body.categoryId = Number.isFinite(n) ? n : String(fields.categoryId); }
+    const sent = Object.keys(body);
+    if (sent.length === 0) return { ok: false, status: 0, sent, error: "ไม่มีข้อมูลให้ส่ง (กรอกชื่อ/รายละเอียด/แบรนด์/หมวดก่อน)" };
+    const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}`, { method: "PATCH", headers: headers(apiKey), body: JSON.stringify(body) });
+    if (r.ok) return { ok: true, status: r.status, sent };
+    const bodyt = await r.text().catch(() => "");
+    return { ok: false, status: r.status, sent, error: friendly(r.status, bodyt) };
+  } catch (e) { return { ok: false, status: 0, sent: [], error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
+}
+
 // เปิด/ปิดการขายสินค้า (POST /products/{id}/display-status/{status}) — ไม่มี body
 export async function lineSetDisplay(apiKey: string, productId: string, status: "onsale" | "hide"): Promise<{ ok: boolean; status: number; error?: string }> {
   try {

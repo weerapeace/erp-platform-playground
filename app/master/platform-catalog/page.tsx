@@ -168,6 +168,20 @@ export default function PlatformCatalogPage() {
     } catch (e) { setPushMsg("❌ " + (e as Error).message); }
     finally { setPushing(false); }
   };
+  // ส่งรายละเอียด (ชื่อ/รายละเอียด/แบรนด์/หมวด) ขึ้น LINE เฉพาะสินค้านี้
+  const pushOneDetails = async () => {
+    if (!openListing?.matched_parent_sku_id) return;
+    setPushing(true); setPushMsg("กำลังส่งรายละเอียดขึ้น LINE...");
+    try {
+      const r = await apiFetch("/api/line-shopping/push-details", { method: "POST", body: JSON.stringify({ brand_id: brandId, parent_sku_id: openListing.matched_parent_sku_id }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      const first = (j.results ?? [])[0] as { ok?: boolean; error?: string; sent?: string[] } | undefined;
+      setPushMsg(j.okCount > 0
+        ? `✅ ส่งรายละเอียดขึ้น LINE สำเร็จ (ส่ง: ${(first?.sent ?? []).join(", ") || "-"}) — เช็กใน MyShop`
+        : `❌ ${first?.error ?? "ส่งไม่สำเร็จ"}`);
+    } catch (e) { setPushMsg("❌ " + (e as Error).message); }
+    finally { setPushing(false); }
+  };
   // บันทึกการจับคู่มือ (parent_sku_id ว่าง = ยกเลิกจับคู่)
   const saveMatch = async () => {
     if (!openListing) return;
@@ -431,7 +445,10 @@ export default function PlatformCatalogPage() {
               {canEdit && platformCode === "line_shopping" && openListing.matched_parent_sku_id && (
                 <div className="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3 space-y-1.5">
                   <div className="text-xs font-semibold text-slate-600">ส่งราคาขึ้น LINE</div>
-                  <button onClick={pushOnePrice} disabled={pushing} className="h-9 px-3 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{pushing ? "กำลังส่ง..." : "⬆️ ส่งราคาขึ้น LINE (สินค้านี้)"}</button>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={pushOnePrice} disabled={pushing} className="h-9 px-3 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{pushing ? "กำลังส่ง..." : "⬆️ ส่งราคา"}</button>
+                    <button onClick={pushOneDetails} disabled={pushing} className="h-9 px-3 text-sm text-emerald-700 border border-emerald-300 rounded-lg hover:bg-emerald-50 disabled:opacity-50">📝 ส่งรายละเอียด (ชื่อ/แบรนด์/หมวด)</button>
+                  </div>
                   {pushMsg && <p className="text-xs text-slate-700">{pushMsg}</p>}
                   <p className="text-[11px] text-slate-400">ราคาเอาจากราคาขาย (list_price) ใน ERP · ไม่ตั้งส่วนลด · แนะนำทดสอบตัวนี้ก่อนกด “ส่งทั้งหมด”</p>
                 </div>
