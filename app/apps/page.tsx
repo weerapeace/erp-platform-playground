@@ -52,9 +52,10 @@ type LauncherPrefs = {
   sectionOrder: string[];                 // ลำดับหมวด
   labels: Record<string, string>;         // ชื่อเล่นเฉพาะตัวเรา (appKey → ชื่อ)
   icons: Record<string, string>;          // ไอคอนเฉพาะตัวเรา (appKey → emoji)
+  iconImages: Record<string, string>;     // ไอคอนรูปภาพเฉพาะตัวเรา (appKey → r2 key) — มีรูปใช้รูปแทน emoji
   sectionLabels: Record<string, string>;  // ชื่อหมวดเฉพาะตัวเรา (category → ชื่อ)
 };
-const EMPTY_PREFS: LauncherPrefs = { favorites: [], hidden: [], appOrder: {}, sectionOrder: [], labels: {}, icons: {}, sectionLabels: {} };
+const EMPTY_PREFS: LauncherPrefs = { favorites: [], hidden: [], appOrder: {}, sectionOrder: [], labels: {}, icons: {}, iconImages: {}, sectionLabels: {} };
 // ชุด emoji ยอดนิยมสำหรับเปลี่ยนไอคอนแอป
 const ICON_CHOICES = "📦📋🛒🧾🗄️🏭🧑‍💼🏢🪪📊📜📥🖨️👥🔐⚙️✋🧩🌴💵📒🤝🏷️🧬🗂️📁📌⭐✅📈💼🔧🛠️📝📮🎯🚚🏪🧰🔔📞💬🖼️".match(/./gu) ?? [];
 
@@ -74,6 +75,7 @@ type AppStatus = "live" | "beta" | "soon";
 type AppEntry = {
   key:        string;
   icon:       string;        // emoji (เปลี่ยนเป็น SVG ทีหลังได้)
+  iconImage?: string | null; // r2 key ของรูปไอคอน (override รายคน) — มีค่าใช้รูปแทน emoji
   name:       string;        // ภาษาไทย
   subtitle:   string;        // คำอธิบายสั้น
   href:       string;
@@ -333,7 +335,7 @@ export default function AppLauncherPage() {
   useEffect(() => {
     apiFetch("/api/user-prefs?key=launcher_prefs").then((r) => r.json()).then((j) => {
       const v = (j.value ?? {}) as Partial<LauncherPrefs>;
-      setPrefs({ favorites: v.favorites ?? [], hidden: v.hidden ?? [], appOrder: v.appOrder ?? {}, sectionOrder: v.sectionOrder ?? [], labels: v.labels ?? {}, icons: v.icons ?? {}, sectionLabels: v.sectionLabels ?? {} });
+      setPrefs({ favorites: v.favorites ?? [], hidden: v.hidden ?? [], appOrder: v.appOrder ?? {}, sectionOrder: v.sectionOrder ?? [], labels: v.labels ?? {}, icons: v.icons ?? {}, iconImages: v.iconImages ?? {}, sectionLabels: v.sectionLabels ?? {} });
     }).catch(() => { /* ใช้ค่าว่าง */ });
   }, []);
   // แก้ prefs + บันทึกขึ้น server ทันที (functional update กัน stale)
@@ -351,6 +353,15 @@ export default function AppLauncherPage() {
   const setAppIcon = useCallback((key: string, icon: string) => mutatePrefs((p) => { const icons = { ...p.icons }; if (icon.trim()) icons[key] = icon.trim(); else delete icons[key]; return { ...p, icons }; }), [mutatePrefs]);
   const setSectionLabel = useCallback((cat: string, label: string) => mutatePrefs((p) => { const sectionLabels = { ...p.sectionLabels }; if (label.trim()) sectionLabels[cat] = label.trim(); else delete sectionLabels[cat]; return { ...p, sectionLabels }; }), [mutatePrefs]);
   const [renameApp, setRenameApp] = useState<AppEntry | null>(null);   // แอปที่กำลังตั้งชื่อ/ไอคอน (modal)
+  const [iconBusy, setIconBusy] = useState(false);
+  const setAppIconImage = useCallback((key: string, r2key: string | null) => mutatePrefs((p) => { const iconImages = { ...p.iconImages }; if (r2key) iconImages[key] = r2key; else delete iconImages[key]; return { ...p, iconImages }; }), [mutatePrefs]);
+  const onPickIcon = async (key: string, file: File | null | undefined) => {
+    if (!file) return;
+    setIconBusy(true);
+    try { const up = await uploadResizedImage(file, { folder: "app-icon", max: 256 }); setAppIconImage(key, up.r2_key); }
+    catch { alert("อัปโหลดรูปไม่สำเร็จ"); }
+    finally { setIconBusy(false); }
+  };
 
   // หมวดที่แสดง (ใส่ลำดับแอป/หมวดตาม prefs; โหมดปกติ = ตัดแอปที่ซ่อน + หมวดว่างออก)
   const displaySections = useMemo(() => {
@@ -359,7 +370,7 @@ export default function AppLauncherPage() {
       const idx = (k: string) => { const i = ord.indexOf(k); return i === -1 ? 9999 : i; };
       return [...apps].sort((a, b) => idx(a.key) - idx(b.key));
     };
-    const ov = (a: AppEntry): AppEntry => ({ ...a, name: prefs.labels[a.key] || a.name, icon: prefs.icons[a.key] || a.icon });
+    const ov = (a: AppEntry): AppEntry => ({ ...a, name: prefs.labels[a.key] || a.name, icon: prefs.icons[a.key] || a.icon, iconImage: prefs.iconImages[a.key] || null });
     let secs = grouped.map((g) => ({ category: g.category, apps: applyOrder(g.category, g.apps).map(ov) }));
     if (prefs.sectionOrder.length) {
       const idx = (c: string) => { const i = prefs.sectionOrder.indexOf(c); return i === -1 ? 9999 : i; };
@@ -372,8 +383,8 @@ export default function AppLauncherPage() {
   const favApps = useMemo(() => {
     const byKey = new Map(appList.map((a) => [a.key, a] as const));
     return prefs.favorites.map((k) => byKey.get(k)).filter((a): a is AppEntry => !!a && !prefs.hidden.includes(a.key))
-      .map((a) => ({ ...a, name: prefs.labels[a.key] || a.name, icon: prefs.icons[a.key] || a.icon }));
-  }, [appList, prefs.favorites, prefs.hidden, prefs.labels, prefs.icons]);
+      .map((a) => ({ ...a, name: prefs.labels[a.key] || a.name, icon: prefs.icons[a.key] || a.icon, iconImage: prefs.iconImages[a.key] || null }));
+  }, [appList, prefs.favorites, prefs.hidden, prefs.labels, prefs.icons, prefs.iconImages]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const onSectionDragEnd = (e: DragEndEvent) => {
@@ -741,7 +752,12 @@ export default function AppLauncherPage() {
                 <button type="button" onClick={() => setRenameApp(null)} className="text-slate-400 hover:text-slate-700">✕</button>
               </div>
               <div className="flex items-center gap-3">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${base.color} flex items-center justify-center text-2xl shadow-sm`}>{prefs.icons[base.key] || base.icon}</div>
+                <div className={`w-12 h-12 rounded-xl overflow-hidden bg-gradient-to-br ${base.color} flex items-center justify-center text-2xl shadow-sm`}>
+                  {prefs.iconImages[base.key]
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={r2ImageUrl(prefs.iconImages[base.key]) ?? ""} alt="" className="w-full h-full object-cover" />
+                    : (prefs.icons[base.key] || base.icon)}
+                </div>
                 <div className="text-sm font-semibold text-slate-800">{prefs.labels[base.key] || base.name}</div>
               </div>
               <label className="block">
@@ -752,14 +768,24 @@ export default function AppLauncherPage() {
               </label>
               <div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500">ไอคอน</span>
-                  <button type="button" onClick={() => { setAppLabel(base.key, ""); setAppIcon(base.key, ""); }} className="text-[11px] text-slate-400 hover:text-blue-600">คืนค่ากลาง</button>
+                  <span className="text-xs text-slate-500">ไอคอน (อีโมจิ หรือรูป)</span>
+                  <button type="button" onClick={() => { setAppLabel(base.key, ""); setAppIcon(base.key, ""); setAppIconImage(base.key, null); }} className="text-[11px] text-slate-400 hover:text-blue-600">คืนค่ากลาง</button>
+                </div>
+                {/* อัปโหลดรูปเป็นไอคอน (มีรูป = ใช้รูปแทนอีโมจิ) */}
+                <div className="mt-1 flex items-center gap-2">
+                  <label className="h-8 px-3 rounded-lg border border-dashed border-slate-300 text-xs text-slate-600 hover:bg-slate-50 cursor-pointer flex items-center gap-1">
+                    {iconBusy ? "กำลังอัปโหลด…" : "🖼 ใช้รูปเป็นไอคอน"}
+                    <input type="file" accept="image/*" className="hidden" disabled={iconBusy} onChange={(e) => onPickIcon(base.key, e.target.files?.[0])} />
+                  </label>
+                  {prefs.iconImages[base.key] && (
+                    <button type="button" onClick={() => setAppIconImage(base.key, null)} className="text-[11px] text-red-500 hover:text-red-700">ลบรูป (ใช้อีโมจิ)</button>
+                  )}
                 </div>
                 <input value={prefs.icons[base.key] ?? ""} placeholder={base.icon} onChange={(e) => setAppIcon(base.key, e.target.value)}
-                  className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-lg outline-none focus:border-blue-400" />
+                  className="mt-1.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-lg outline-none focus:border-blue-400" />
                 <div className="mt-1.5 flex flex-wrap gap-1 max-h-28 overflow-auto">
                   {ICON_CHOICES.map((em, i) => (
-                    <button key={i} type="button" onClick={() => setAppIcon(base.key, em)} className="w-8 h-8 rounded-lg hover:bg-slate-100 text-lg">{em}</button>
+                    <button key={i} type="button" onClick={() => { setAppIcon(base.key, em); setAppIconImage(base.key, null); }} className="w-8 h-8 rounded-lg hover:bg-slate-100 text-lg">{em}</button>
                   ))}
                 </div>
               </div>
@@ -782,8 +808,11 @@ export default function AppLauncherPage() {
 function AppTileContent({ app }: { app: AppEntry }) {
   return (
     <>
-      <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${app.color} flex items-center justify-center text-2xl shadow-sm mb-3 group-hover:scale-105 group-hover:shadow-md transition-all duration-200`}>
-        <span className="drop-shadow-sm">{app.icon}</span>
+      <div className={`w-14 h-14 rounded-2xl overflow-hidden bg-gradient-to-br ${app.color} flex items-center justify-center text-2xl shadow-sm mb-3 group-hover:scale-105 group-hover:shadow-md transition-all duration-200`}>
+        {app.iconImage
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={r2ImageUrl(app.iconImage) ?? ""} alt="" className="w-full h-full object-cover" />
+          : <span className="drop-shadow-sm">{app.icon}</span>}
       </div>
       <div className="text-sm font-semibold text-slate-900 leading-tight">{app.name}</div>
       <div className="text-[11px] text-slate-400 mt-0.5 leading-tight truncate">{app.subtitle}</div>
