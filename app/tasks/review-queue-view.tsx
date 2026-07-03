@@ -191,6 +191,14 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
           <div className="space-y-3">
             <div className="text-sm text-slate-500"><span className="font-mono text-xs">{active.task_no}</span> · {active.task_title}{active.brand_label ? ` · ${active.brand_label}` : ""}</div>
 
+            {/* รายละเอียดงาน (งานย่อย + งานหลัก) — โชว์ถ้ามี */}
+            {(active.description?.trim() || active.task_desc?.trim()) && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-1.5 text-sm">
+                {active.description?.trim() && <div><p className="text-[11px] font-semibold text-slate-400 mb-0.5">📝 {t("รายละเอียดงานย่อย", "Subtask details")}</p><p className="text-slate-600 whitespace-pre-wrap">{active.description}</p></div>}
+                {active.task_desc?.trim() && <div className={active.description?.trim() ? "border-t border-slate-200 pt-1.5" : ""}><p className="text-[11px] font-semibold text-slate-400 mb-0.5">📋 {t("รายละเอียดงานหลัก", "Task details")}</p><p className="text-slate-500 whitespace-pre-wrap">{active.task_desc}</p></div>}
+              </div>
+            )}
+
             {/* รูป — เรียงลำดับได้ (↑↓ = ลำดับในอัลบั้มสินค้าตอนอนุมัติ) */}
             {imgs.length ? (
               <div>

@@ -190,12 +190,15 @@ export default function TasksPage() {
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "tasks_metric_cards", value: list }) });
   }, []);
 
+  // "รอตรวจ" = จำนวนงานย่อยที่ส่งมาในคิว (ไม่ใช่งานสถานะ need_review) — ให้ตรงกับตารางคิว
+  const [reviewPending, setReviewPending] = useState<number | null>(null);
+  useEffect(() => { void apiFetch("/api/creative-tasks/review-queue?count=1").then((r) => r.json()).then((j) => { if (typeof j.pending === "number") setReviewPending(j.pending); }).catch(() => {}); }, [tasks]);
   const counts = useMemo(() => ({
     total: tasks.length,
     mine: myTasks.length,
     overdue: tasks.filter(isOverdue).length,
-    review: tasks.filter((tk) => tk.status === "need_review").length,
-  }), [tasks, myTasks]);
+    review: reviewPending ?? tasks.filter((tk) => tk.status === "need_review").length,
+  }), [tasks, myTasks, reviewPending]);
 
   // ---- create ----
   const openCreate = () => setCreateOpen(true);

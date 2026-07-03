@@ -17,19 +17,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
   const admin = supabaseAdmin();
 
+  // ?count=1 → นับจำนวน (รอตรวจ/อนุมัติแล้ว) เฉพาะงานที่ยัง active — เบา ไม่ดึงรูป/แบรนด์
+  if (new URL(request.url).searchParams.get("count") === "1") {
+    const { data: cs } = await admin.from("erp_creative_subtasks").select("status, task_id").in("status", ["submitted", "approved"]).limit(2000);
+    const cr = (cs ?? []) as { status: string; task_id: string }[];
+    const tIds = [...new Set(cr.map((r) => r.task_id))];
+    const { data: tk } = tIds.length ? await admin.from("erp_creative_tasks").select("id").in("id", tIds).neq("is_active", false) : { data: [] as { id: string }[] };
+    const active = new Set(((tk ?? []) as { id: string }[]).map((t) => String(t.id)));
+    let pending = 0, approved = 0;
+    for (const r of cr) { if (!active.has(String(r.task_id))) continue; if (r.status === "approved") approved++; else pending++; }
+    return NextResponse.json({ pending, approved, error: null });
+  }
+
   // รอตรวจ (submitted) + อนุมัติแล้ว (approved) — แยกกลุ่มในหน้า UI
   const { data: subs, error } = await admin.from("erp_creative_subtasks")
-    .select("id, task_id, title, updated_at, status, image_sync_targets").in("status", ["submitted", "approved"])
+    .select("id, task_id, title, description, updated_at, status, image_sync_targets").in("status", ["submitted", "approved"])
     .order("updated_at", { ascending: false }).limit(400);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   type Ist = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; image_order?: string[] } | null;
-  const rows = (subs ?? []) as { id: string; task_id: string; title: string; updated_at: string; status: string; image_sync_targets: Ist }[];
+  const rows = (subs ?? []) as { id: string; task_id: string; title: string; description: string | null; updated_at: string; status: string; image_sync_targets: Ist }[];
   if (!rows.length) return NextResponse.json({ data: [], error: null });
 
   const taskIds = [...new Set(rows.map((r) => r.task_id))];
   const subIds = rows.map((r) => r.id);
   const [{ data: tasks }, aMap, { data: atts }] = await Promise.all([
-    admin.from("erp_creative_tasks").select("id, task_no, title, brand_id, is_active").in("id", taskIds),
+    admin.from("erp_creative_tasks").select("id, task_no, title, description, brand_id, is_active").in("id", taskIds),
     subtaskAssigneesMap(admin, subIds),
     admin.from("erp_creative_attachments").select("subtask_id, r2_key, file_name, kind").in("subtask_id", subIds),
   ]);
@@ -64,8 +76,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const br = tk.brand_id ? brandMap.get(String(tk.brand_id)) : null;
     const ist = r.image_sync_targets;
     return {
-      id: r.id, title: r.title, updated_at: r.updated_at, status: r.status,
-      task_id: r.task_id, task_no: (tk.task_no as string) ?? null, task_title: (tk.title as string) ?? "",
+      id: r.id, title: r.title, description: r.description ?? null, updated_at: r.updated_at, status: r.status,
+      task_id: r.task_id, task_no: (tk.task_no as string) ?? null, task_title: (tk.title as string) ?? "", task_desc: (tk.description as string) ?? null,
       brand_label: (br?.name as string) ?? null, brand_color: (br?.color as string) ?? null,
       assignees: aMap.get(r.id) ?? [],
       images: imgBy.get(r.id) ?? [],
