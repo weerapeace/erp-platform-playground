@@ -462,93 +462,93 @@ export function DesignDashboard() {
           </div>
         )}
 
-        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {loading ? (
-            <>
-              <LoadingCard /><LoadingCard /><LoadingCard /><LoadingCard />
-            </>
-          ) : (
-            [
-              ["งานทั้งหมด", visibleTotal, selectedBrand ? selectedBrand.name : loadedLimitNote],
-              ["กำลังเดินงาน", activeJobs, "ยังไม่จบหรือยกเลิก"],
-              ["ใกล้ครบกำหนด", urgentJobs, "ควรไล่สถานะวันนี้"],
-              ["ปิดงานแล้ว", finishedJobs, "อนุมัติ / ตั้ง SKU / ยกเลิก"],
-            ].map(([label, value, hint], index) => (
-              <div key={label} data-gg-stat-card className="relative overflow-hidden rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
-                <BrandSlot theme={brandTheme} id={`stat_icon_${index}`} />
-                <div className="text-xs font-medium text-slate-400">{label}</div>
-                <div className="mt-1 text-3xl font-semibold text-slate-900">{value}</div>
-                <div className="mt-1 text-xs text-slate-500">{hint}</div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="space-y-4">
-          <aside data-gg-sidebar className="rounded-lg border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
-            <BrandSlot theme={brandTheme} id="sidebar_top" />
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-800">แบรนด์จากงานจริง</h2>
-                <p className="text-xs text-slate-400">คลิกเพื่อกรองบอร์ด</p>
-              </div>
-              <span data-gg-brand-count className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} แบรนด์</span>
+        {/* แบรนด์: แถวบนสุด (เต็มกว้าง) */}
+        <aside data-gg-sidebar className="mb-4 rounded-lg border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
+          <BrandSlot theme={brandTheme} id="sidebar_top" />
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">แบรนด์จากงานจริง</h2>
+              <p className="text-xs text-slate-400">คลิกเพื่อกรองบอร์ด</p>
             </div>
+            <span data-gg-brand-count className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} แบรนด์</span>
+          </div>
 
-            <div className="flex flex-wrap items-stretch gap-2">
-              <button data-gg-action onClick={() => setCreateOpen(true)} title="สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)"
-                className="flex flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600">＋ เพิ่มงาน</button>
+          <div className="flex flex-wrap items-stretch gap-2">
+            <button data-gg-action onClick={() => setCreateOpen(true)} title="สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)"
+              className="flex flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600">＋ เพิ่มงาน</button>
 
-              <button data-gg-all-button onClick={() => setSelectedBrandKey("ALL")}
-                className={`flex flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${selectedBrandKey === "ALL" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                <span className="text-sm font-semibold">ทั้งหมด</span>
-                <span className="text-[11px] opacity-70">{activeJobs} งานเดินอยู่</span>
-              </button>
+            <button data-gg-all-button onClick={() => setSelectedBrandKey("ALL")}
+              className={`flex flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${selectedBrandKey === "ALL" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+              <span className="text-sm font-semibold">ทั้งหมด</span>
+              <span className="text-[11px] opacity-70">{activeJobs} งานเดินอยู่</span>
+            </button>
 
-              {topBrands.map((brand) => {
-                const selected = selectedBrandKey === brand.key;
-                return (
-                  <button key={brand.key} data-gg-brand-card data-gg-selected={selected ? "true" : undefined}
-                    onClick={() => setSelectedBrandKey(brand.key)}
-                    className="flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-left transition hover:-translate-y-0.5"
-                    style={{ borderColor: selected ? brand.color : "#e2e8f0", boxShadow: selected ? `0 0 0 1px ${brand.color}55` : undefined }}>
-                    {brandMark(brand, "h-9 w-9")}
-                    <div className="min-w-0">
-                      <div className="max-w-[130px] truncate text-sm font-semibold text-slate-800">{brand.name}</div>
-                      <div className="text-[11px] text-slate-400">{brand.active} เดิน{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} ใกล้ครบ</span></> : null}</div>
-                    </div>
-                  </button>
-                );
-              })}
+            {topBrands.map((brand) => {
+              const selected = selectedBrandKey === brand.key;
+              return (
+                <button key={brand.key} data-gg-brand-card data-gg-selected={selected ? "true" : undefined}
+                  onClick={() => setSelectedBrandKey(brand.key)}
+                  className="flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-left transition hover:-translate-y-0.5"
+                  style={{ borderColor: selected ? brand.color : "#e2e8f0", boxShadow: selected ? `0 0 0 1px ${brand.color}55` : undefined }}>
+                  {brandMark(brand, "h-9 w-9")}
+                  <div className="min-w-0">
+                    <div className="max-w-[130px] truncate text-sm font-semibold text-slate-800">{brand.name}</div>
+                    <div className="text-[11px] text-slate-400">{brand.active} เดิน{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} ใกล้ครบ</span></> : null}</div>
+                  </div>
+                </button>
+              );
+            })}
 
-              {otherBrands.length > 0 && (
-                <div className="relative" data-brands-others>
-                  <button onClick={() => setOthersOpen((o) => !o)}
-                    className={`flex h-full flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${othersSelected ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                    <span className="max-w-[140px] truncate text-sm font-semibold">{othersSelected ? othersSelected.name : "แบรนด์อื่นๆ"} ▾</span>
-                    <span className="text-[11px] opacity-70">{othersSelected ? `${othersSelected.active} เดิน` : `อีก ${otherBrands.length} แบรนด์`}</span>
-                  </button>
-                  {othersOpen && (
-                    <div className="absolute left-0 top-full z-30 mt-1 max-h-72 w-60 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
-                      {otherBrands.map((brand) => (
-                        <button key={brand.key} onClick={() => { setSelectedBrandKey(brand.key); setOthersOpen(false); }}
-                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${selectedBrandKey === brand.key ? "bg-blue-50" : ""}`}>
-                          {brandMark(brand, "h-6 w-6")}
-                          <span className="min-w-0 flex-1 truncate text-slate-700">{brand.name}</span>
-                          <span className="text-[11px] text-slate-400">{brand.active}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+            {otherBrands.length > 0 && (
+              <div className="relative" data-brands-others>
+                <button onClick={() => setOthersOpen((o) => !o)}
+                  className={`flex h-full flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${othersSelected ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                  <span className="max-w-[140px] truncate text-sm font-semibold">{othersSelected ? othersSelected.name : "แบรนด์อื่นๆ"} ▾</span>
+                  <span className="text-[11px] opacity-70">{othersSelected ? `${othersSelected.active} เดิน` : `อีก ${otherBrands.length} แบรนด์`}</span>
+                </button>
+                {othersOpen && (
+                  <div className="absolute left-0 top-full z-30 mt-1 max-h-72 w-60 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+                    {otherBrands.map((brand) => (
+                      <button key={brand.key} onClick={() => { setSelectedBrandKey(brand.key); setOthersOpen(false); }}
+                        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${selectedBrandKey === brand.key ? "bg-blue-50" : ""}`}>
+                        {brandMark(brand, "h-6 w-6")}
+                        <span className="min-w-0 flex-1 truncate text-slate-700">{brand.name}</span>
+                        <span className="text-[11px] text-slate-400">{brand.active}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!loading && brandSummaries.length === 0 && (
+              <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-center text-sm text-slate-400">ยังไม่มีใบงานที่ผูกแบรนด์</div>
+            )}
+          </div>
+          <BrandSlot theme={brandTheme} id="sidebar_bottom" />
+        </aside>
+
+        {/* สถิติ (คอลัมน์ซ้าย) + บอร์ด (ขวา) */}
+        <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-1">
+            {loading ? (
+              <><LoadingCard /><LoadingCard /><LoadingCard /><LoadingCard /></>
+            ) : (
+              [
+                ["งานทั้งหมด", visibleTotal, selectedBrand ? selectedBrand.name : loadedLimitNote],
+                ["กำลังเดินงาน", activeJobs, "ยังไม่จบหรือยกเลิก"],
+                ["ใกล้ครบกำหนด", urgentJobs, "ควรไล่สถานะวันนี้"],
+                ["ปิดงานแล้ว", finishedJobs, "อนุมัติ / ตั้ง SKU / ยกเลิก"],
+              ].map(([label, value, hint], index) => (
+                <div key={label} data-gg-stat-card className="relative overflow-hidden rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+                  <BrandSlot theme={brandTheme} id={`stat_icon_${index}`} />
+                  <div className="text-xs font-medium text-slate-400">{label}</div>
+                  <div className="mt-1 text-3xl font-semibold text-slate-900">{value}</div>
+                  <div className="mt-1 text-xs text-slate-500">{hint}</div>
                 </div>
-              )}
-
-              {!loading && brandSummaries.length === 0 && (
-                <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-center text-sm text-slate-400">ยังไม่มีใบงานที่ผูกแบรนด์</div>
-              )}
-            </div>
-            <BrandSlot theme={brandTheme} id="sidebar_bottom" />
-          </aside>
+              ))
+            )}
+          </div>
 
           <main className="min-w-0 space-y-4">
             <section data-gg-panel className="min-w-0 rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
