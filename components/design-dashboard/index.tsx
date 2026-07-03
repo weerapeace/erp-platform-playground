@@ -522,12 +522,12 @@ export function DesignDashboard() {
               return (
                 <button key={brand.key} data-gg-brand-card data-gg-selected={selected ? "true" : undefined}
                   onClick={() => setSelectedBrandKey(brand.key)}
-                  className="flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-left transition hover:-translate-y-0.5"
+                  className="flex items-center gap-3 rounded-xl border bg-white px-4 py-3 text-left transition hover:-translate-y-0.5"
                   style={{ borderColor: selected ? brand.color : "#e2e8f0", boxShadow: selected ? `0 0 0 1px ${brand.color}55` : undefined }}>
-                  {brandMark(brand, "h-9 w-9")}
+                  {brandMark(brand, "h-12 w-12")}
                   <div className="min-w-0">
-                    <div className="max-w-[130px] truncate text-sm font-semibold text-slate-800">{brand.name}</div>
-                    <div className="text-[11px] text-slate-400">{brand.active} เดิน{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} ใกล้ครบ</span></> : null}</div>
+                    <div className="max-w-[170px] truncate text-base font-semibold text-slate-800">{brand.name}</div>
+                    <div className="text-xs text-slate-400">{brand.active} เดิน{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} ใกล้ครบ</span></> : null}</div>
                   </div>
                 </button>
               );
@@ -597,9 +597,9 @@ export function DesignDashboard() {
           document.body,
         )}
 
-        {/* สถิติ (คอลัมน์ซ้าย) + บอร์ด (ขวา) */}
-        <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
-          <div className="grid grid-cols-2 gap-3 xl:grid-cols-1">
+        {/* สถิติ (แถวป้ายเล็กด้านบน) + บอร์ด (เต็มกว้าง) */}
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {loading ? (
               <><LoadingCard /><LoadingCard /><LoadingCard /><LoadingCard /></>
             ) : (
@@ -609,11 +609,13 @@ export function DesignDashboard() {
                 ["ใกล้ครบกำหนด", urgentJobs, "ควรไล่สถานะวันนี้"],
                 ["ปิดงานแล้ว", finishedJobs, "อนุมัติ / ตั้ง SKU / ยกเลิก"],
               ].map(([label, value, hint], index) => (
-                <div key={label} data-gg-stat-card className="relative overflow-hidden rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+                <div key={label} data-gg-stat-card className="relative overflow-hidden rounded-lg border border-white/70 bg-white/80 px-3 py-2 shadow-sm backdrop-blur">
                   <BrandSlot theme={brandTheme} id={`stat_icon_${index}`} />
-                  <div className="text-xs font-medium text-slate-400">{label}</div>
-                  <div className="mt-1 text-3xl font-semibold text-slate-900">{value}</div>
-                  <div className="mt-1 text-xs text-slate-500">{hint}</div>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[11px] font-medium text-slate-400">{label}</span>
+                    <span className="text-xl font-semibold text-slate-900">{value}</span>
+                  </div>
+                  <div className="truncate text-[10px] text-slate-400">{hint}</div>
                 </div>
               ))
             )}
