@@ -9,8 +9,12 @@ import { useAuth } from "@/components/auth";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { PLATFORM_SOURCE_FIELDS } from "@/lib/platform-source-fields";
 import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type ImportMatrix, type ImportProfile, type DbProfileRow } from "@/lib/platform-import-profiles";
+import dynamic from "next/dynamic";
 import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
+
+// Drawer รายละเอียดต่อแพลตฟอร์ม (ของกลาง เปิดจาก Parent SKUs ด้วย) — dynamic กัน bundle หนัก
+const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
@@ -38,6 +42,7 @@ export default function PlatformCatalogPage() {
   const [savingMatch, setSavingMatch] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pushMsg, setPushMsg] = useState<string | null>(null);
+  const [managerParent, setManagerParent] = useState<string | null>(null);   // เปิด ProductPlatformManager (แก้รายละเอียดต่อแพลตฟอร์ม)
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [platformId, setPlatformId] = useState("");
@@ -351,6 +356,8 @@ export default function PlatformCatalogPage() {
 
       {showManager && <PlatformImportProfileManager platformId={platformId} platformCode={platformCode} onClose={() => setShowManager(false)} onChanged={loadCustomProfiles} />}
 
+      {managerParent && <ProductPlatformManager parentSkuId={managerParent} initialPlatformId={platformId} canEdit={canEdit} canPublish={can("products.platforms.publish")} onClose={() => { setManagerParent(null); load(); }} />}
+
       {openListing && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setOpenListing(null)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg my-8" onClick={(e) => e.stopPropagation()}>
@@ -375,6 +382,9 @@ export default function PlatformCatalogPage() {
                 {openListing.matched_parent_sku_id
                   ? <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">✓ จับคู่อยู่กับ <span className="font-mono">{openListing.matched_code}</span> {openListing.matched_name ? `· ${openListing.matched_name}` : ""}</div>
                   : <div className="text-xs text-amber-600">ยังไม่จับคู่ — ค้นหาสินค้าในระบบด้านล่างเพื่อผูก</div>}
+                {openListing.matched_parent_sku_id && (
+                  <button onClick={() => setManagerParent(openListing.matched_parent_sku_id!)} className="w-full h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📝 แก้รายละเอียดต่อแพลตฟอร์ม (ชื่อ/หมวด/รูป/ราคา) →</button>
+                )}
                 {canEdit ? (
                   <>
                     <ParentSkuPicker value={matchDraft} onChange={setMatchDraft} placeholder="ค้นหาสินค้า (รหัส/ชื่อ) เพื่อจับคู่..." disableCreate />

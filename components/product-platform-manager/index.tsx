@@ -30,8 +30,10 @@ type Toast = { id: number; type: "success" | "error" | "info"; msg: string };
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", tiktok_shop: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
-export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, canPublish = false }: {
+export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, canPublish = false, initialPlatformId }: {
   parentSkuId: string; onClose: () => void; canEdit?: boolean; canPublish?: boolean;
+  /** เปิดมาให้อยู่แท็บแพลตฟอร์มนี้เลย (เช่น เปิดจากหน้า catalog ของ LINE) */
+  initialPlatformId?: string;
 }) {
   const { width, startResize } = useDrawerResize("platformMgrWidth", 780);
   const [loading, setLoading] = useState(true);
@@ -69,10 +71,10 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
       setMappings((j.mappings ?? {}) as Record<string, string>);
       setImages((j.images ?? []) as ImageItem[]);
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
-      setActive((prev) => prev || (pfs[0]?.id ?? ""));
+      setActive((prev) => prev || (initialPlatformId && pfs.some((p) => p.id === initialPlatformId) ? initialPlatformId : (pfs[0]?.id ?? "")));
     } catch (e) { toast("error", (e as Error).message); }
     finally { setLoading(false); }
-  }, [parentSkuId, toast]);
+  }, [parentSkuId, toast, initialPlatformId]);
   useEffect(() => { load(); }, [load]);
 
   const activeDraft = drafts[active] ?? {};
