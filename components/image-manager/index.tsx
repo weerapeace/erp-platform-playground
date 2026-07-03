@@ -472,6 +472,8 @@ export function ImageManager({
           onClick={() => setLightboxId(null)}>
           <button onClick={() => setLightboxId(null)} title="ปิด (Esc)"
             className="absolute top-3 right-3 h-10 w-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/25 text-white text-xl">✕</button>
+          <button onClick={(e) => { e.stopPropagation(); printImageWindow(withImageWidth(lbImage.public_url, 2000) ?? lbImage.public_url); }} title="พิมพ์เฉพาะรูปนี้"
+            className="absolute top-3 right-16 h-10 px-3 flex items-center justify-center gap-1 rounded-full bg-white/10 hover:bg-white/25 text-white text-sm">🖨 พิมพ์</button>
           {imageItems.length > 1 && (
             <>
               <button onClick={(e) => { e.stopPropagation(); lbStep(-1); }} title="ก่อนหน้า (←)"
