@@ -406,6 +406,12 @@ export default function AppLauncherPage() {
     const next = arrayMove(keys, oldI, newI);
     mutatePrefs((p) => ({ ...p, appOrder: { ...p.appOrder, [cat]: next } }));
   };
+  // ลากจัดลำดับใน "⭐ โปรด" (id การ์ดมี prefix fav::)
+  const onFavDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e; if (!over || active.id === over.id) return;
+    const ak = String(active.id).replace("fav::", ""); const ok = String(over.id).replace("fav::", "");
+    mutatePrefs((p) => { const from = p.favorites.indexOf(ak); const to = p.favorites.indexOf(ok); if (from < 0 || to < 0) return p; return { ...p, favorites: arrayMove(p.favorites, from, to) }; });
+  };
   const searching = query.trim().length > 0;
 
   // ---- ธีมหน้าแรกรายคน: พื้นหลัง / สี / ฟอนต์ ----
@@ -670,11 +676,32 @@ export default function AppLauncherPage() {
             </div>
           )
         ) : editMode ? (
-          // โหมดจัดการ — ลากหมวด (นอก) + ลากการ์ดในหมวด (ใน) + ปุ่มโปรด/ซ่อนบนการ์ด
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onSectionDragEnd}>
-            <SortableContext items={displaySections.map((s) => `sec::${s.category}`)} strategy={verticalListSortingStrategy}>
-              <div className="space-y-10">
-                {displaySections.map(({ category, apps }) => (
+          // โหมดจัดการ — โปรด (ลากเรียงได้) + ลากหมวด (นอก) + ลากการ์ดในหมวด (ใน) + ปุ่มโปรด/ซ่อน/ตั้งชื่อ
+          <div className="space-y-10">
+            {favApps.length > 0 && (
+              <section>
+                <div className="flex items-baseline gap-3 mb-4 px-1">
+                  <h2 className="text-xs font-semibold text-amber-500 uppercase tracking-wider">⭐ โปรด</h2>
+                  <span className="text-[10px] text-slate-400">{favApps.length} แอป · ลากเรียงได้</span>
+                  <div className="flex-1 h-px bg-amber-200/70" />
+                </div>
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onFavDragEnd}>
+                  <SortableContext items={favApps.map((a) => `fav::${a.key}`)} strategy={rectSortingStrategy}>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                      {favApps.map((app) => (
+                        <SortableTile key={`fav-${app.key}`} sortId={`fav::${app.key}`} app={app}
+                          isFav={true} isHidden={prefs.hidden.includes(app.key)}
+                          onFav={() => toggleFav(app.key)} onHide={() => toggleHidden(app.key)} onEdit={() => setRenameApp(app)} />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              </section>
+            )}
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onSectionDragEnd}>
+              <SortableContext items={displaySections.map((s) => `sec::${s.category}`)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-10">
+                  {displaySections.map(({ category, apps }) => (
                   <SortableSection key={category} category={category} label={prefs.sectionLabels[category] || CATEGORY_LABEL[category] || category} count={apps.length}
                     onRename={(v) => setSectionLabel(category, v)}>
                     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onAppDragEnd(category)}>
@@ -690,9 +717,10 @@ export default function AppLauncherPage() {
                     </DndContext>
                   </SortableSection>
                 ))}
-              </div>
-            </SortableContext>
-          </DndContext>
+                </div>
+              </SortableContext>
+            </DndContext>
+          </div>
         ) : (
           // โหมดปกติ — โปรดบนสุด + หมวดที่จัดลำดับไว้ (ตัดแอปที่ซ่อน)
           <div className="space-y-10">
@@ -857,10 +885,11 @@ function SortableSection({ category, label, count, onRename, children }: { categ
 }
 
 // การ์ดในโหมดจัดการ — ลากได้ + ปุ่มดาว(โปรด) + ซ่อน + ตั้งชื่อ/ไอคอน (ไม่ใช่ลิงก์)
-function SortableTile({ app, isFav, isHidden, onFav, onHide, onEdit }: {
-  app: AppEntry; isFav: boolean; isHidden: boolean; onFav: () => void; onHide: () => void; onEdit: () => void;
+// sortId แยกได้ (กันรหัสซ้ำเมื่อการ์ดเดียวโผล่ทั้งใน "โปรด" และในหมวด)
+function SortableTile({ app, isFav, isHidden, onFav, onHide, onEdit, sortId }: {
+  app: AppEntry; isFav: boolean; isHidden: boolean; onFav: () => void; onHide: () => void; onEdit: () => void; sortId?: string;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: app.key });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: sortId ?? app.key });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : isHidden ? 0.45 : 1 };
   return (
     <div ref={setNodeRef} style={style} className={`${TILE_CLASS} ring-1 ring-slate-100`}>
