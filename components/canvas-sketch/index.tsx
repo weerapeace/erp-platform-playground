@@ -15,7 +15,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useState, useEffect, useRef, useCallback, type MutableRefObject } from "react";
+import { useState, useEffect, useRef, useCallback, type MutableRefObject, type MouseEvent as RMouseEvent } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import "@excalidraw/excalidraw/index.css";
 import "./thai-fonts.css";   // เติมฟอนต์ไทยให้ family ของ Excalidraw (unicode-range เฉพาะไทย)
@@ -576,6 +577,88 @@ export function CanvasSketch({
   };
   const submitNote = () => { void addNote(noteText); setNoteText(""); setNoteOpen(false); };
 
+  // ── แคปเฉพาะพื้นที่ (ลากคลุม) → ส่งเข้ากลุ่ม LINE งาน ──
+  const [capArmed, setCapArmed] = useState(false);            // โหมดลากคลุม
+  const [capBox, setCapBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null); // กรอบที่ลาก (พิกัดในกรอบกระดาน)
+  const capStartRef = useRef<{ cx: number; cy: number } | null>(null);
+  const [capModal, setCapModal] = useState<{ blob: Blob; url: string } | null>(null); // พรีวิวก่อนส่ง
+  const [capCaption, setCapCaption] = useState("");
+  const [capSending, setCapSending] = useState(false);
+  const [capMsg, setCapMsg] = useState<string | null>(null);
+
+  const closeCap = useCallback(() => {
+    setCapModal((m) => { if (m) URL.revokeObjectURL(m.url); return null; });
+    setCapArmed(false); setCapBox(null); setCapCaption(""); setCapMsg(null); capStartRef.current = null;
+  }, []);
+
+  // Esc = ออกจากโหมดลากคลุม
+  useEffect(() => {
+    if (!capArmed) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setCapArmed(false); setCapBox(null); capStartRef.current = null; } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [capArmed]);
+
+  const onCapDown = (e: RMouseEvent<HTMLDivElement>) => {
+    const wrap = wrapRef.current; if (!wrap) return;
+    capStartRef.current = { cx: e.clientX, cy: e.clientY };
+    const r = wrap.getBoundingClientRect();
+    setCapBox({ x: e.clientX - r.left, y: e.clientY - r.top, w: 0, h: 0 });
+  };
+  const onCapMove = (e: RMouseEvent<HTMLDivElement>) => {
+    const s = capStartRef.current, wrap = wrapRef.current; if (!s || !wrap) return;
+    const r = wrap.getBoundingClientRect();
+    setCapBox({ x: Math.min(s.cx, e.clientX) - r.left, y: Math.min(s.cy, e.clientY) - r.top, w: Math.abs(e.clientX - s.cx), h: Math.abs(e.clientY - s.cy) });
+  };
+  const onCapUp = (e: RMouseEvent<HTMLDivElement>) => {
+    const s = capStartRef.current; capStartRef.current = null; if (!s) return;
+    if (Math.abs(e.clientX - s.cx) < 8 || Math.abs(e.clientY - s.cy) < 8) { setCapBox(null); return; } // เล็กไป
+    void exportRegion({ x: s.cx, y: s.cy }, { x: e.clientX, y: e.clientY });
+  };
+
+  // แปลงพิกัดจอ→scene, กรองชิ้นงานที่อยู่ในกรอบ, export เป็น JPG
+  const exportRegion = async (c0: { x: number; y: number }, c1: { x: number; y: number }) => {
+    const api = apiRef.current; if (!api) return;
+    try {
+      const st = api.getAppState(); const z = st.zoom?.value || 1;
+      const ox = st.offsetLeft ?? 0, oy = st.offsetTop ?? 0;
+      const toScene = (cx: number, cy: number) => ({ x: (cx - ox) / z - st.scrollX, y: (cy - oy) / z - st.scrollY });
+      const a = toScene(Math.min(c0.x, c1.x), Math.min(c0.y, c1.y));
+      const b = toScene(Math.max(c0.x, c1.x), Math.max(c0.y, c1.y));
+      const inside = (api.getSceneElements() as any[]).filter((el) =>
+        !el.isDeleted && el.x < b.x && el.x + (el.width || 0) > a.x && el.y < b.y && el.y + (el.height || 0) > a.y);
+      if (!inside.length) { setCapArmed(false); setCapBox(null); setCapMsg(null); setTimeout(() => window.alert("ไม่มีอะไรในกรอบที่เลือก ลองลากคลุมใหม่"), 0); return; }
+      const lib: any = await import("@excalidraw/excalidraw");
+      const blob: Blob = await lib.exportToBlob({
+        elements: inside, files: api.getFiles(), mimeType: "image/jpeg", quality: 0.92, maxWidthOrHeight: 1600,
+        appState: { exportBackground: true, viewBackgroundColor: "#ffffff" },
+      });
+      setCapBox(null);
+      setCapModal({ blob, url: URL.createObjectURL(blob) }); setCapCaption(""); setCapMsg(null);
+    } catch (e) { console.error("[canvas-sketch] capture failed:", e); setCapArmed(false); setCapBox(null); }
+  };
+
+  const sendCapture = async () => {
+    if (!capModal) return;
+    setCapSending(true); setCapMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", new File([capModal.blob], `cap-${Date.now()}.jpg`, { type: "image/jpeg" }));
+      fd.append("folder", "canvas-line");
+      fd.append("no_library", "1"); // รูปแคป — ไม่ลงคลังกลาง
+      const up = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
+      const uj = await up.json(); if (uj.error || !uj.r2_key) throw new Error(uj.error || "อัปโหลดรูปไม่สำเร็จ");
+      const res = await apiFetch("/api/canvas-line/send", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_key: uj.r2_key, caption: capCaption, entity_type: entityType, entity_id: entityId }),
+      });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      setCapMsg("✓ ส่งเข้ากลุ่ม LINE แล้ว");
+      setTimeout(() => closeCap(), 1200);
+    } catch (e) { setCapMsg("⚠ " + ((e as Error).message || "ส่งไม่สำเร็จ")); }
+    finally { setCapSending(false); }
+  };
+
   if (scene === "loading") {
     return <div className="flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl" style={{ height }}>กำลังโหลดกระดาน...</div>;
   }
@@ -630,6 +713,12 @@ export function CanvasSketch({
               </div>
             )}
           </div>
+        )}
+        {editable && serverCanEdit && (
+          <button onClick={() => { setCapArmed(true); setCapMsg(null); blurActive(); }} title="ลากคลุมพื้นที่ → ส่งรูปเข้ากลุ่ม LINE งาน"
+            className={`inline-flex items-center gap-1 text-[11px] border rounded-md px-2 py-0.5 ${capArmed ? "text-white bg-green-600 border-green-600" : "text-green-700 border-green-200 hover:bg-green-50"}`}>
+            📷 {capArmed ? "ลากคลุมพื้นที่..." : "ส่ง LINE"}
+          </button>
         )}
         {editable && serverCanEdit && (
           <button onClick={() => { clearBoard(); blurActive(); }} title="ล้างกระดานทั้งหมด (ลบทุกอย่างออก)"
@@ -707,7 +796,30 @@ export function CanvasSketch({
             if (data?.kind && cardCbRef.current) { ev?.preventDefault?.(); cardCbRef.current(data); }
           }}
         />
+        {/* โหมดลากคลุมพื้นที่เพื่อแคปส่ง LINE — overlay จับเมาส์ทับกระดาน */}
+        {capArmed && !capModal && (
+          <div className="absolute inset-0 z-40 cursor-crosshair" onMouseDown={onCapDown} onMouseMove={onCapMove} onMouseUp={onCapUp}>
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-slate-900/85 text-white text-[11px] px-3 py-1.5 rounded-full pointer-events-none whitespace-nowrap">ลากคลุมพื้นที่ที่จะส่ง LINE · Esc = ยกเลิก</div>
+            {capBox && <div className="absolute border-2 border-green-500 bg-green-400/15 pointer-events-none" style={{ left: capBox.x, top: capBox.y, width: capBox.w, height: capBox.h }} />}
+          </div>
+        )}
       </div>
+      {/* พรีวิว + ยืนยันส่งเข้า LINE (portal → ทับทุกอย่าง แม้เต็มจอ) */}
+      {capModal && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[9998] bg-black/50 flex items-center justify-center p-4" onClick={() => { if (!capSending) closeCap(); }}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-slate-800 mb-2">📷 ส่งรูปเข้ากลุ่ม LINE งาน</h3>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={capModal.url} alt="preview" className="w-full max-h-64 object-contain rounded-lg border border-slate-200 bg-slate-50" />
+            <textarea value={capCaption} onChange={(e) => setCapCaption(e.target.value)} rows={2} placeholder="ข้อความประกอบ (ไม่ใส่ก็ได้)"
+              className="mt-2 w-full text-sm border border-slate-200 rounded-md p-2 resize-none focus:outline-none focus:ring-1 focus:ring-green-300" />
+            {capMsg && <p className={`text-xs mt-1.5 ${capMsg.startsWith("✓") ? "text-emerald-600" : "text-rose-600"}`}>{capMsg}</p>}
+            <div className="flex justify-end gap-2 mt-3">
+              <button onClick={closeCap} disabled={capSending} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+              <button onClick={() => void sendCapture()} disabled={capSending} className="h-9 px-4 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50">{capSending ? "กำลังส่ง..." : "ส่งเข้า LINE"}</button>
+            </div>
+          </div>
+        </div>, document.body)}
     </div>
   );
 }

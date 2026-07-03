@@ -89,7 +89,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // F21: R2 binding ล้วน (ไม่มี AWS SDK)
     await r2PutObject(key, buffer, contentType);
     // ของกลาง: ทุกรูปที่อัปผ่านตัวนี้ → ลงคลังกลาง /master/assets อัตโนมัติ (กันซ้ำ · best-effort)
-    await registerToLibrary({ buffer, key, file, folder, uploadedBy: user.email ?? user.id });
+    // เว้นเมื่อส่ง no_library=1 (เช่นรูปแคปกระดานส่ง LINE — ไม่อยากให้รกคลัง)
+    if (formData.get("no_library") !== "1") await registerToLibrary({ buffer, key, file, folder, uploadedBy: user.email ?? user.id });
     await writeAudit(supabaseAdmin(), {
       action: "upload",
       entityType: "file",
