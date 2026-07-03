@@ -22,8 +22,8 @@ import { requiredChecks } from "@/lib/platform-required-fields";
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null; capabilities?: Record<string, unknown> };
-type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
-type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null };
+type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; extra?: Record<string, unknown>; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
+type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null; brand_name: string | null };
 type ImageItem = { key: string; source: string };
 type Account = { label: string | null; is_active: boolean };
 type Variant = { id: string; code: string; name: string; color: string | null; price: number | null; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean };
@@ -103,7 +103,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     try {
       const j = await apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(parentSkuId)}`).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      setParent(j.parent ? { id: String(j.parent.id ?? ""), code: String(j.parent.code ?? ""), name_th: String(j.parent.name_th ?? ""), name_platform: String(j.parent.name_platform ?? ""), description: String(j.parent.description ?? ""), category_id: j.parent.category_id ?? null, category_name: j.parent.category_name ?? null } : null);
+      setParent(j.parent ? { id: String(j.parent.id ?? ""), code: String(j.parent.code ?? ""), name_th: String(j.parent.name_th ?? ""), name_platform: String(j.parent.name_platform ?? ""), description: String(j.parent.description ?? ""), category_id: j.parent.category_id ?? null, category_name: j.parent.category_name ?? null, brand_name: j.parent.brand_name ?? null } : null);
       const pfs = (j.platforms ?? []) as Platform[];
       setPlatforms(pfs);
       setDrafts((j.drafts ?? {}) as Record<string, Draft>);
@@ -139,6 +139,17 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
       toast("success", `ตั้งราคา ${j.updated} SKU แล้ว`); setMassPrice(""); await load();
     } catch (e) { toast("error", (e as Error).message); } finally { setMassBusy(false); }
   };
+  // ฟิลด์เพิ่มเติม (แบรนด์/บาร์โค้ด/น้ำหนัก-ขนาด/ของขวัญ) — เก็บรวมใน draft.extra (client ส่งทั้งก้อน)
+  const extra = (activeDraft.extra ?? {}) as Record<string, unknown>;
+  const exStr = (k: string) => (extra[k] == null ? "" : String(extra[k]));
+  const saveExtra = async (patch: Record<string, unknown>) => {
+    const next = { ...extra, ...patch };
+    setDrafts((d) => ({ ...d, [active]: { ...d[active], extra: next } }));
+    try { const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: active, extra: next }) }); const j = await r.json(); if (j.error) throw new Error(j.error); toast("success", "เซฟแล้ว"); }
+    catch (e) { toast("error", (e as Error).message); }
+  };
+  const giftCats = (extra.gift_categories ?? []) as string[];
+  const toggleGiftCat = (c: string) => saveExtra({ gift_categories: giftCats.includes(c) ? giftCats.filter((x) => x !== c) : [...giftCats, c] });
   // เซ็ตช่องหมวดหมู่เมื่อสลับแพลตฟอร์ม (draft > mapping > ว่าง)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setCatInput((drafts[active]?.category_path ?? mappings[active] ?? "") as string); }, [active]);
@@ -334,6 +345,42 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                   )}
                   <MiniTable rows={variants} columns={cols} rowKey={(v) => v.id} searchText={(v) => `${v.code} ${v.color ?? ""}`} dense emptyText="ยังไม่มี SKU ลูก — กด ➕ เพิ่มสี" />
                 </div>
+
+                {canEdit && activePf?.code === "line_shopping" && (
+                  <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+                    <p className="text-xs font-medium text-slate-600">ฟิลด์เพิ่มเติมของ LINE</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="text-[11px] text-slate-500">แบรนด์/ยี่ห้อ
+                        <input key={`br-${active}-${prefillTick}`} defaultValue={exStr("brand") || (parent?.brand_name ?? "")} onBlur={(e) => saveExtra({ brand: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" />
+                      </label>
+                      <label className="text-[11px] text-slate-500">บาร์โค้ด / GTIN
+                        <input key={`gt-${active}`} defaultValue={exStr("barcode")} onBlur={(e) => saveExtra({ barcode: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" />
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      <label className="text-[11px] text-slate-500">น้ำหนัก(kg)<input key={`w-${active}`} type="number" defaultValue={exStr("weight")} onBlur={(e) => saveExtra({ weight: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
+                      <label className="text-[11px] text-slate-500">กว้าง(cm)<input key={`wd-${active}`} type="number" defaultValue={exStr("width")} onBlur={(e) => saveExtra({ width: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
+                      <label className="text-[11px] text-slate-500">ยาว(cm)<input key={`ln-${active}`} type="number" defaultValue={exStr("length")} onBlur={(e) => saveExtra({ length: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
+                      <label className="text-[11px] text-slate-500">สูง(cm)<input key={`h-${active}`} type="number" defaultValue={exStr("height")} onBlur={(e) => saveExtra({ height: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-slate-500 mb-1">สถานะของขวัญ</p>
+                      <div className="flex gap-2">
+                        {([["on", "เปิด"], ["gift_only", "เฉพาะของขวัญ"], ["off", "ปิด"]] as const).map(([v, l]) => (
+                          <button key={v} onClick={() => saveExtra({ gift_status: v })} className={`h-7 px-2.5 text-xs rounded-full border ${(extra.gift_status ?? "on") === v ? "bg-violet-600 text-white border-violet-600" : "bg-white border-slate-200 text-slate-600"}`}>{l}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-slate-500 mb-1">หมวดของขวัญ (เลือกได้หลายอัน)</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {["For Her", "For Him", "Mom & Kids", "Seniors", "Couples", "Pet Lovers"].map((c) => (
+                          <button key={c} onClick={() => toggleGiftCat(c)} className={`h-7 px-2.5 text-xs rounded-full border ${giftCats.includes(c) ? "bg-violet-600 text-white border-violet-600" : "bg-white border-slate-200 text-slate-600"}`}>{c}</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="rounded-lg border border-slate-200 p-3">
                   <p className="text-xs font-medium text-slate-600 mb-2">ฟิลด์จำเป็นของ {activePf?.name_th ?? "แพลตฟอร์ม"}</p>
