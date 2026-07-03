@@ -150,11 +150,15 @@ export async function PATCH(request: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     updated = data;
   }
-  // ⑥ สีประจำตัว — ตรวจสิทธิ์ admin.users แล้วเขียนตรงที่ user_profiles (RPC เดิมไม่มีช่องนี้)
+  // ⑥ สีประจำตัว — แก้ของตัวเองได้เสมอ · แก้ให้คนอื่นต้องมีสิทธิ์ admin.users
   if (body.color !== undefined) {
-    const { data: can, error: canErr } = await client.rpc("erp_can", { p_permission: "admin.users" });
-    if (canErr) return NextResponse.json({ error: canErr.message }, { status: 500 });
-    if (can !== true) return NextResponse.json({ error: "ไม่มีสิทธิ์แก้สีผู้ใช้ (admin.users)" }, { status: 403 });
+    const { data: { user: authU } } = await client.auth.getUser();
+    const isSelf = !!authU?.id && authU.id === body.user_id;
+    if (!isSelf) {
+      const { data: can, error: canErr } = await client.rpc("erp_can", { p_permission: "admin.users" });
+      if (canErr) return NextResponse.json({ error: canErr.message }, { status: 500 });
+      if (can !== true) return NextResponse.json({ error: "ไม่มีสิทธิ์แก้สีผู้ใช้อื่น (admin.users)" }, { status: 403 });
+    }
     const { error } = await supabaseAdmin().from("user_profiles").update({ color: body.color || null }).eq("id", body.user_id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     updated = { ...(updated as object ?? {}), color: body.color || null };

@@ -9,6 +9,7 @@ import { useAuth, roleLabel, roleColor } from "@/components/auth";
 import { useFileUploadAccess } from "@/components/upload-permission";
 import { apiFetch } from "@/lib/api";
 import { supabaseBrowser } from "@/lib/supabase-browser";
+import { ColorInput } from "@/components/color-picker";
 
 function avatarSrc(v: string | null): string | null {
   if (!v) return null;
@@ -19,6 +20,7 @@ export function ProfileEditor() {
   const { user, refreshProfile } = useAuth();
   const [name, setName]       = useState("");
   const [avatar, setAvatar]   = useState<string | null>(null);
+  const [color, setColor]     = useState("");   // สีประจำตัว (user_profiles.color) — โชว์บน chip ผู้รับผิดชอบ/อวตาร
   const [busy, setBusy]       = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [msg, setMsg]         = useState<string | null>(null);
@@ -39,6 +41,9 @@ export function ProfileEditor() {
       seeded.current = true;
       setName(user.name ?? "");
       setAvatar(user.avatar ?? null);
+      // ดึงสีประจำตัวของตัวเอง
+      void supabaseBrowser.from("user_profiles").select("color").eq("id", user.id).maybeSingle()
+        .then(({ data }) => setColor(((data as { color?: string | null } | null)?.color) ?? ""));
     }
   }, [user]);
 
@@ -75,7 +80,7 @@ export function ProfileEditor() {
     try {
       const res = await apiFetch("/api/admin/users", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: user.id, display_name: name.trim(), avatar_url: avatar ?? "", actor: user.name }),
+        body: JSON.stringify({ user_id: user.id, display_name: name.trim(), avatar_url: avatar ?? "", color: color || null, actor: user.name }),
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
@@ -129,6 +134,19 @@ export function ProfileEditor() {
           <input value={name} onChange={(e) => setName(e.target.value)} disabled={busy} placeholder={user.email.split("@")[0]}
             className="w-full h-10 mt-1 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60" />
         </label>
+
+        {/* สีประจำตัว — โชว์บน chip ผู้รับผิดชอบงาน/อวตาร */}
+        <div>
+          <span className="text-xs font-medium text-slate-600">สีประจำตัว</span>
+          <p className="text-[11px] text-slate-400 mb-1">สีนี้จะโชว์บนป้ายชื่อคุณในงาน (chip ผู้รับผิดชอบ) — เว้นว่าง = ใช้สีเริ่มต้น</p>
+          <div className="flex items-center gap-2">
+            <div className="flex-1"><ColorInput value={color} onChange={setColor} /></div>
+            <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full border" style={{ borderColor: (color || "#cbd5e1") + "55", background: (color || "#e2e8f0") + "22", color: color || "#64748b" }}>
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: color || "#cbd5e1" }} />{name || "ตัวอย่าง"}
+            </span>
+            {color && <button type="button" onClick={() => setColor("")} className="text-[11px] text-slate-400 hover:text-rose-500">ล้าง</button>}
+          </div>
+        </div>
 
         <div className="text-xs text-slate-500 space-y-0.5">
           <div>อีเมล: <span className="text-slate-700">{user.email}</span></div>
