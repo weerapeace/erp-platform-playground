@@ -3,7 +3,11 @@
 // จัดกลุ่ม: ไม่จัด / ตามสถานะ · เรียงหลายชั้น เช่น 1.ความสำคัญ 2.กำหนดส่ง
 // ============================================================
 import { apiFetch } from "@/lib/api";
+import { getLang } from "@/lib/lang";
 import { PRIORITY_RANK, type MySubtask } from "./data";
+
+// แปล 2 ภาษา (module scope) — reactive เมื่อ component เรียก arrange ใหม่ตอนเปลี่ยนภาษา
+const tr = (th: string, en: string) => (getLang() === "en" ? en : th);
 
 export type MySubSort = "priority" | "deadline" | "status" | "none";
 export type MySubGroupBy = "none" | "status";
@@ -18,9 +22,20 @@ export function mergeMySubView(v: unknown): MySubView {
 
 // ลำดับสถานะงานย่อย: กำลังทำบนสุด → ยังไม่เริ่ม → รออนุมัติ → ขอแก้ → อื่น ๆ → ยกเลิก
 const STATUS_RANK: Record<string, number> = { in_progress: 0, doing: 0, todo: 1, submitted: 2, revision_requested: 3, approved: 4, done: 4, posted: 4, canceled: 5 };
-const STATUS_LABEL: Record<string, string> = { todo: "ยังไม่เริ่ม", in_progress: "กำลังทำ", doing: "กำลังทำ", submitted: "รออนุมัติ", revision_requested: "ขอแก้", approved: "อนุมัติแล้ว", done: "เสร็จ", posted: "เสร็จ", canceled: "ยกเลิก" };
 const statusRank = (s: string) => STATUS_RANK[s] ?? 9;
-const statusLabel = (s: string) => STATUS_LABEL[s] ?? s;
+// ป้ายสถานะ 2 ภาษา (tr = module scope, reactive เมื่อ component เรียกใหม่)
+const statusLabel = (s: string): string => {
+  switch (s) {
+    case "todo": return tr("ยังไม่เริ่ม", "Not started");
+    case "in_progress": case "doing": return tr("กำลังทำ", "In progress");
+    case "submitted": return tr("รออนุมัติ", "Pending approval");
+    case "revision_requested": return tr("ขอแก้", "Revision requested");
+    case "approved": return tr("อนุมัติแล้ว", "Approved");
+    case "done": case "posted": return tr("เสร็จ", "Done");
+    case "canceled": return tr("ยกเลิก", "Canceled");
+    default: return s;
+  }
+};
 
 // ค่าจัดเรียงต่อ 1 field (น้อย = มาก่อน)
 function sortVal(s: MySubtask, key: MySubSort): number | string {
