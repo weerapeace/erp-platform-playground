@@ -21,9 +21,9 @@ const partnerAddress = (partner: Record<string, unknown>) => {
   if (direct) return direct;
 
   return [
-    firstText(partner.street, partner.address_line1),
+    firstText(partner.address_line, partner.street, partner.address_line1),
     firstText(partner.street2, partner.address_line2),
-    firstText(partner.subdistrict, partner.tambon),
+    firstText(partner.sub_district, partner.subdistrict, partner.tambon),
     firstText(partner.district, partner.amphoe),
     firstText(partner.province),
     firstText(partner.postal_code, partner.zip),

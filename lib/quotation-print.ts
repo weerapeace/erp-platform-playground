@@ -162,7 +162,7 @@ export function buildQuotationHtml(
       <tr>
         <td class="center">${index + 1}</td>
         ${layout.showSku ? `<td class="center">${escapeHtml(printableSku(line.sku))}</td>` : ""}
-        <td>${escapeHtml(line.product_name)}</td>
+        <td>${escapeHtml(line.product_name)}${line.note ? `<div style="font-size:0.85em;color:#555;margin-top:1px">สี/ตัวเลือก: ${escapeHtml(line.note)}</div>` : ""}</td>
         ${layout.showImage ? `<td class="photo-cell">${src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(line.product_name)}">` : ""}</td>` : ""}
         <td class="right">${formatQty(line.qty)}</td>
         <td class="center">${escapeHtml(line.unit || "")}</td>
@@ -177,7 +177,6 @@ export function buildQuotationHtml(
     ? `ภาษีมูลค่าเพิ่ม ${quote.vat_rate}% (รวมแล้ว)`
     : `ภาษีมูลค่าเพิ่ม ${quote.vat_rate}%`;
   const totalQty = quote.lines.reduce((sum, line) => sum + Number(line.qty ?? 0), 0);
-  const unitPriceTotal = quote.lines.reduce((sum, line) => sum + Number(line.unit_price ?? 0), 0);
   const visibleColumnCount = 6 + (layout.showSku ? 1 : 0) + (layout.showImage ? 1 : 0);
   const summaryLabelColspan = 1 + (layout.showSku ? 1 : 0) + (layout.showImage ? 1 : 0);
   const signatureMarginTop = layout.signatureToBottom ? "auto" : `${layout.signatureGapMm}mm`;
@@ -288,7 +287,7 @@ export function buildQuotationHtml(
           <td colspan="${summaryLabelColspan}" class="center">รวม</td>
           <td class="right">${formatQty(totalQty)}</td>
           <td></td>
-          <td class="right">${formatMoney(unitPriceTotal)}</td>
+          <td></td>
           <td class="right">${formatMoney(subtotal)}</td>
         </tr>
       </tbody>
