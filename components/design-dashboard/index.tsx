@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import type { DragEvent } from "react";
+import { createPortal } from "react-dom";
 import type { AuditLogEntry } from "@/app/api/audit-logs/route";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { apiFetch } from "@/lib/api";
@@ -197,6 +198,19 @@ export function DesignDashboard() {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [othersOpen]);
+  // ตั้งค่าแบรนด์ (เรียง/ซ่อน) — เก็บรายคนที่ user_ui_prefs
+  const [brandPrefs, setBrandPrefs] = useState<{ order: string[]; hidden: string[] }>({ order: [], hidden: [] });
+  const [brandSettingsOpen, setBrandSettingsOpen] = useState(false);
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=design_dashboard_brand_prefs").then((r) => r.json())
+      .then((j) => { const v = (j?.value ?? {}) as { order?: string[]; hidden?: string[] };
+        setBrandPrefs({ order: Array.isArray(v.order) ? v.order : [], hidden: Array.isArray(v.hidden) ? v.hidden : [] }); })
+      .catch(() => {});
+  }, []);
+  const saveBrandPrefs = (next: { order: string[]; hidden: string[] }) => {
+    setBrandPrefs(next);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_brand_prefs", value: next }) }).catch(() => {});
+  };
   useEffect(() => {
     if (typeof window === "undefined") return;
     const id = new URLSearchParams(window.location.search).get("open");
@@ -314,10 +328,26 @@ export function DesignDashboard() {
 
   const selectedBrand = brandSummaries.find((brand) => brand.key === selectedBrandKey) ?? null;
   // แถวแบรนด์แนวนอน: โชว์ 4 อันดับแรก (ตามงานกำลังเดิน) + ที่เหลือไปอยู่ดรอปดาวน์ "อื่นๆ"
-  const sortedBrands = useMemo(() => [...brandSummaries].sort((a, b) => b.active - a.active), [brandSummaries]);
-  const topBrands = sortedBrands.slice(0, 4);
-  const otherBrands = sortedBrands.slice(4);
+  const orderedAll = useMemo(() => {
+    const idx = (k: string) => { const i = brandPrefs.order.indexOf(k); return i === -1 ? 1e6 : i; };
+    return [...brandSummaries].sort((a, b) => (idx(a.key) - idx(b.key)) || (b.active - a.active));
+  }, [brandSummaries, brandPrefs.order]);
+  const visibleBrands = orderedAll.filter((b) => !brandPrefs.hidden.includes(b.key));
+  const hiddenBrands = orderedAll.filter((b) => brandPrefs.hidden.includes(b.key));
+  const topBrands = visibleBrands.slice(0, 4);          // โชว์ 4 อันดับแรกที่ไม่ซ่อน
+  const otherBrands = [...visibleBrands.slice(4), ...hiddenBrands];   // ที่เหลือ + ที่ซ่อน → ไปอยู่ "อื่นๆ"
   const othersSelected = otherBrands.find((b) => b.key === selectedBrandKey) ?? null;
+  const moveBrand = (key: string, dir: -1 | 1) => {
+    const keys = orderedAll.map((b) => b.key);
+    const i = keys.indexOf(key); const j = i + dir;
+    if (i < 0 || j < 0 || j >= keys.length) return;
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+    saveBrandPrefs({ ...brandPrefs, order: keys });
+  };
+  const toggleHiddenBrand = (key: string) => {
+    const hidden = brandPrefs.hidden.includes(key) ? brandPrefs.hidden.filter((k) => k !== key) : [...brandPrefs.hidden, key];
+    saveBrandPrefs({ ...brandPrefs, hidden });
+  };
   // สัญลักษณ์แบรนด์: โลโก้จริง (ถ้ามี) ไม่งั้นสี+ตัวย่อ
   const brandMark = (brand: BrandSummary, cls: string) => {
     const logo = brand.id ? brandLogos[brand.id] : undefined;
@@ -470,7 +500,11 @@ export function DesignDashboard() {
               <h2 className="text-sm font-semibold text-slate-800">แบรนด์จากงานจริง</h2>
               <p className="text-xs text-slate-400">คลิกเพื่อกรองบอร์ด</p>
             </div>
-            <span data-gg-brand-count className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} แบรนด์</span>
+            <div className="flex items-center gap-2">
+              <span data-gg-brand-count className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} แบรนด์</span>
+              <button onClick={() => setBrandSettingsOpen(true)} title="ตั้งค่าแบรนด์ (เรียงลำดับ / ซ่อน-โชว์)"
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">⚙️</button>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-stretch gap-2">
@@ -527,6 +561,41 @@ export function DesignDashboard() {
           </div>
           <BrandSlot theme={brandTheme} id="sidebar_bottom" />
         </aside>
+
+        {/* ป๊อปอัปตั้งค่าแบรนด์ (เรียง/ซ่อน) — บันทึกรายคน */}
+        {brandSettingsOpen && createPortal(
+          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={() => setBrandSettingsOpen(false)}>
+            <div className="flex max-h-[85vh] w-[440px] max-w-full flex-col rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                <div className="text-base font-semibold text-slate-800">⚙️ ตั้งค่าแบรนด์</div>
+                <button onClick={() => setBrandSettingsOpen(false)} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
+              </div>
+              <div className="flex-1 overflow-auto p-3">
+                <p className="mb-2 text-[11px] text-slate-400">เรียงลำดับด้วยลูกศร ▲▼ · กด 👁 เพื่อซ่อน (ที่ซ่อนไปอยู่ใน &ldquo;แบรนด์อื่นๆ&rdquo;) · โชว์ 4 อันดับแรกที่ไม่ซ่อนเป็นการ์ด · บันทึกอัตโนมัติ (เฉพาะคุณ)</p>
+                {orderedAll.map((brand, i) => {
+                  const hidden = brandPrefs.hidden.includes(brand.key);
+                  const isTop = topBrands.some((b) => b.key === brand.key);
+                  return (
+                    <div key={brand.key} className={`mb-1 flex items-center gap-2 rounded-lg border px-2 py-1.5 ${hidden ? "border-slate-100 bg-slate-50 opacity-70" : "border-slate-200"}`}>
+                      <div className="flex flex-col text-[10px] leading-none">
+                        <button onClick={() => moveBrand(brand.key, -1)} disabled={i === 0} className="py-0.5 text-slate-400 hover:text-slate-700 disabled:opacity-25">▲</button>
+                        <button onClick={() => moveBrand(brand.key, 1)} disabled={i === orderedAll.length - 1} className="py-0.5 text-slate-400 hover:text-slate-700 disabled:opacity-25">▼</button>
+                      </div>
+                      {brandMark(brand, "h-7 w-7")}
+                      <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{brand.name}</span>
+                      <span className="text-[11px] text-slate-400">{brand.active} เดิน</span>
+                      {isTop && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">โชว์</span>}
+                      <button onClick={() => toggleHiddenBrand(brand.key)} title={hidden ? "เลิกซ่อน" : "ซ่อน"}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-slate-100">{hidden ? "🙈" : "👁"}</button>
+                    </div>
+                  );
+                })}
+                {orderedAll.length === 0 && <div className="py-6 text-center text-sm text-slate-300">ยังไม่มีแบรนด์</div>}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
 
         {/* สถิติ (คอลัมน์ซ้าย) + บอร์ด (ขวา) */}
         <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
