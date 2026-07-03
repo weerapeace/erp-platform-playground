@@ -46,13 +46,19 @@ export async function lineListProducts(apiKey: string, params: { page?: number; 
   }
 }
 
-// อัปเดตราคาสินค้า (PATCH /products/{id}/prices) — ส่งราคาใหม่ต่อ variant
+// อัปเดตราคาสินค้า (PATCH /products/{id}/prices) — ส่งราคาใหม่ + ส่วนลดต่อ variant
 // หมายเหตุ: รูปแบบ body ยังไม่มีในเอกสารสาธารณะ — variant ของ LINE ใช้ฟิลด์ id (ตัวเลข)
-// ส่งทั้ง key id และ variantId เผื่อ API ต้องการชื่อใดชื่อหนึ่ง · ถ้า error จะคืน body จริงกลับมา
-export async function lineUpdatePrices(apiKey: string, productId: string, variants: { variantId: string | number; price: number }[]): Promise<{ ok: boolean; status: number; error?: string }> {
+// instantDiscount = จำนวนเงินที่ลด (บาท) ต่อ variant · required → 0 = ไม่มีส่วนลด
+export async function lineUpdatePrices(apiKey: string, productId: string, variants: { variantId: string | number; price: number; instantDiscount?: number }[]): Promise<{ ok: boolean; status: number; error?: string }> {
   try {
-    // LINE ต้องการ variants.id เป็นตัวเลข + price ตัวเลข + instantDiscount (ส่วนลดทันที) required → 0 = ไม่มีส่วนลด
-    const payload = { variants: variants.map((v) => ({ id: Number(v.variantId), price: Number(v.price), instantDiscount: 0 })) };
+    // LINE ต้องการ variants.id เป็นตัวเลข + price ตัวเลข + instantDiscount (ส่วนลดทันที, บาท) required
+    const payload = { variants: variants.map((v) => {
+      const price = Number(v.price) || 0;
+      let disc = Number(v.instantDiscount) || 0;
+      if (disc < 0) disc = 0;
+      if (disc > price) disc = price;   // กันส่วนลดเกินราคา (ราคาสุทธิ < 0)
+      return { id: Number(v.variantId), price, instantDiscount: disc };
+    }) };
     const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}/prices`, {
       method: "PATCH", headers: headers(apiKey), body: JSON.stringify(payload),
     });
