@@ -72,10 +72,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const allSkus = [...new Set(items.flatMap((i) => i.skus))];
   const skuToParent = new Map<string, string>();   // sku code → parent_sku_id
   const codeToParent = new Map<string, string>();  // parent code → id
-  if (allSkus.length) {
+  // ถามเป็นชุดย่อย (กัน .in() ยาวเกินขีดจำกัด URL เมื่อสินค้าเยอะ → เดิมทำให้จับคู่ไม่ได้เลย)
+  for (let i = 0; i < allSkus.length; i += 200) {
+    const chunk = allSkus.slice(i, i + 200);
     const [{ data: skus }, { data: parents }] = await Promise.all([
-      admin.from("skus_v2").select("code, parent_sku_id").in("code", allSkus),
-      admin.from("parent_skus_v2").select("id, code").in("code", allSkus),
+      admin.from("skus_v2").select("code, parent_sku_id").in("code", chunk),
+      admin.from("parent_skus_v2").select("id, code").in("code", chunk),
     ]);
     for (const s of ((skus ?? []) as Record<string, unknown>[])) if (s.parent_sku_id) skuToParent.set(String(s.code), String(s.parent_sku_id));
     for (const p of ((parents ?? []) as Record<string, unknown>[])) codeToParent.set(String(p.code), String(p.id));

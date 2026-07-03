@@ -19,7 +19,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!platformId) return NextResponse.json({ fields: [], listings: [], summary: { total: 0, matched: 0 }, error: null });
   const admin = supabaseAdmin();
 
-  let lq = admin.from("platform_catalog_listings").select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, status, source, last_imported_at").eq("platform_id", platformId).order("created_at", { ascending: false }).limit(500);
+  let lq = admin.from("platform_catalog_listings").select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, status, source, last_imported_at").eq("platform_id", platformId).order("created_at", { ascending: false }).limit(5000);
   if (brandId) lq = lq.eq("brand_id", brandId);
   const [{ data: fields }, { data: listings }] = await Promise.all([
     admin.from("platform_field_schemas").select("field_key, field_label, data_type, is_required, sample, source").eq("platform_id", platformId).order("sort_order", { ascending: true }),
