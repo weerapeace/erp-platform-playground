@@ -23,7 +23,7 @@ const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null; capabilities?: Record<string, unknown> };
 type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
-type ParentInfo = { id: string; code: string; name_th: string; description: string; category_id: string | null; category_name: string | null };
+type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null };
 type ImageItem = { key: string; source: string };
 type Account = { label: string | null; is_active: boolean };
 type Variant = { id: string; code: string; name: string; color: string | null; price: number | null; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean };
@@ -50,6 +50,9 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [publishing, setPublishing] = useState(false);
   const [skuEditor, setSkuEditor] = useState<{ recordId: string | null } | null>(null); // แก้/เพิ่มสี (SKU)
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [massPrice, setMassPrice] = useState("");   // Mass fill ราคาทุก SKU
+  const [massBusy, setMassBusy] = useState(false);
+  const [prefillTick, setPrefillTick] = useState(0); // บังคับรีเฟรชช่อง (uncontrolled) หลัง prefill
   // F: render ผ่าน portal ไป body (เหมือน Drawer กลาง) → เปิดทับ drawer แม่ที่ค้างอยู่ ไม่ซ้อนหลัง
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -64,7 +67,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     try {
       const j = await apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(parentSkuId)}`).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      setParent(j.parent ? { id: String(j.parent.id ?? ""), code: String(j.parent.code ?? ""), name_th: String(j.parent.name_th ?? ""), description: String(j.parent.description ?? ""), category_id: j.parent.category_id ?? null, category_name: j.parent.category_name ?? null } : null);
+      setParent(j.parent ? { id: String(j.parent.id ?? ""), code: String(j.parent.code ?? ""), name_th: String(j.parent.name_th ?? ""), name_platform: String(j.parent.name_platform ?? ""), description: String(j.parent.description ?? ""), category_id: j.parent.category_id ?? null, category_name: j.parent.category_name ?? null } : null);
       const pfs = (j.platforms ?? []) as Platform[];
       setPlatforms(pfs);
       setDrafts((j.drafts ?? {}) as Record<string, Draft>);
@@ -81,6 +84,25 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const activeDraft = drafts[active] ?? {};
   const title = activeDraft.title ?? "";
   const description = activeDraft.description ?? "";
+
+  // เติมชื่อ/รายละเอียดจากข้อมูลสินค้าใน ERP (ชื่อ = name_platform > name_th)
+  const prefillFromErp = async (field: "title" | "description") => {
+    const val = field === "title" ? (parent?.name_platform || parent?.name_th || "") : (parent?.description || "");
+    if (!val.trim()) { toast("info", "ไม่มีข้อมูลใน ERP ให้เติม"); return; }
+    await saveField(field, val);
+    setPrefillTick((t) => t + 1);
+  };
+  // Mass fill ราคาขายทุก SKU ใต้สินค้านี้
+  const massFillPrice = async (onlyEmpty: boolean) => {
+    const p = Number(massPrice);
+    if (!Number.isFinite(p) || p < 0) { toast("error", "ใส่ราคาให้ถูกต้อง"); return; }
+    setMassBusy(true);
+    try {
+      const r = await apiFetch("/api/product-platforms/mass-price", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, price: p, only_empty: onlyEmpty }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast("success", `ตั้งราคา ${j.updated} SKU แล้ว`); setMassPrice(""); await load();
+    } catch (e) { toast("error", (e as Error).message); } finally { setMassBusy(false); }
+  };
   // เซ็ตช่องหมวดหมู่เมื่อสลับแพลตฟอร์ม (draft > mapping > ว่าง)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setCatInput((drafts[active]?.category_path ?? mappings[active] ?? "") as string); }, [active]);
@@ -203,12 +225,18 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
 
                 <div className="space-y-2">
                   <div>
-                    <p className="text-[11px] text-slate-400 mb-1">ชื่อสินค้าบน {activePf.name_th}</p>
-                    <ERPInput key={`t-${active}`} defaultValue={title} placeholder={parent?.name_th ?? "ชื่อสินค้า"} disabled={!canEdit} onBlur={(e) => saveField("title", e.target.value)} />
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-[11px] text-slate-400">ชื่อสินค้าบน {activePf.name_th}</p>
+                      {canEdit && !title.trim() && (parent?.name_platform || parent?.name_th) && <button onClick={() => prefillFromErp("title")} className="text-[11px] text-violet-600 hover:underline">↙ ใช้ชื่อจากสินค้า</button>}
+                    </div>
+                    <ERPInput key={`t-${active}-${prefillTick}`} defaultValue={title} placeholder={parent?.name_platform || parent?.name_th || "ชื่อสินค้า"} disabled={!canEdit} onBlur={(e) => saveField("title", e.target.value)} />
                   </div>
                   <div>
-                    <p className="text-[11px] text-slate-400 mb-1">รายละเอียดสินค้า</p>
-                    <ERPTextarea key={`d-${active}`} defaultValue={description} rows={4} placeholder="รายละเอียดเฉพาะแพลตฟอร์มนี้..." disabled={!canEdit} onBlur={(e) => saveField("description", e.target.value)} />
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-[11px] text-slate-400">รายละเอียดสินค้า</p>
+                      {canEdit && !description.trim() && parent?.description && <button onClick={() => prefillFromErp("description")} className="text-[11px] text-violet-600 hover:underline">↙ ใช้รายละเอียดจากสินค้า</button>}
+                    </div>
+                    <ERPTextarea key={`d-${active}-${prefillTick}`} defaultValue={description} rows={4} placeholder="รายละเอียดเฉพาะแพลตฟอร์มนี้..." disabled={!canEdit} onBlur={(e) => saveField("description", e.target.value)} />
                   </div>
                 </div>
 
@@ -255,6 +283,18 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                       ? <button onClick={() => setSkuEditor({ recordId: null })} className="text-xs text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50">➕ เพิ่มสี</button>
                       : <span className="text-[10px] text-amber-600" title="แพลตฟอร์มนี้เพิ่มสีใหม่ใน listing เดิมไม่ได้ ต้องสร้าง listing ใหม่">⚠ เพิ่มสีใน listing เดิมไม่ได้</span>)}
                   </div>
+                  {canEdit && variants.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 mb-2 p-2 rounded-lg bg-slate-50 border border-slate-200">
+                      <span className="text-[11px] text-slate-500">⚡ ตั้งราคาทุก SKU พร้อมกัน:</span>
+                      <div className="relative">
+                        <input type="number" min={0} value={massPrice} onChange={(e) => setMassPrice(e.target.value)} placeholder="ราคา" className="h-8 w-28 border border-slate-200 rounded-md pl-2 pr-5 text-sm" />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">฿</span>
+                      </div>
+                      <button onClick={() => massFillPrice(false)} disabled={massBusy || !massPrice} className="h-8 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">ใช้กับทั้งหมด</button>
+                      <button onClick={() => massFillPrice(true)} disabled={massBusy || !massPrice} className="h-8 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 disabled:opacity-40">เฉพาะที่ยังไม่มีราคา</button>
+                      <span className="text-[10px] text-slate-400">= ราคาขายกลางของ SKU (ใช้ทุกช่องทาง)</span>
+                    </div>
+                  )}
                   <MiniTable rows={variants} columns={cols} rowKey={(v) => v.id} searchText={(v) => `${v.code} ${v.color ?? ""}`} dense emptyText="ยังไม่มี SKU ลูก — กด ➕ เพิ่มสี" />
                 </div>
 

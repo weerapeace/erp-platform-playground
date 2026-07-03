@@ -76,7 +76,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const v of variants) addImg(v.image_key, `SKU ${v.code}`);
 
   return NextResponse.json({
-    parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", description: pRow.description ?? "", category_id: categoryId, category_name: categoryName } : null,
+    parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", name_platform: pRow.name_platform ?? "", description: pRow.description ?? "", category_id: categoryId, category_name: categoryName } : null,
     platforms, drafts: draftMap, variants, mappings, images, accounts, error: null,
   });
 }
