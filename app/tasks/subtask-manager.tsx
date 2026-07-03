@@ -597,12 +597,11 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const { can } = useAuth();
   // ปุ่ม "ใส่เข้าสินค้าเลย (ไม่รออนุมัติ)" — เฉพาะผู้มีสิทธิ์อนุมัติ (admin/ผจก./ผู้ตรวจ) ที่แก้สินค้าได้ด้วย
   const canEditProduct = canApprove && can("products.edit");
-  const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [applyingTk, setApplyingTk] = useState<string | null>(null);   // กำลังใส่รูปเข้าสินค้าตัวไหน
   const [parents, setParents] = useState<PlatformParent[] | null>(null);
-  const [skusByParent, setSkusByParent] = useState<Record<string, { id: string; code: string; name: string; image_key: string | null }[]>>({});
+  const [skusByParent, setSkusByParent] = useState<Record<string, { id: string; code: string; name: string; image_key: string | null; color: string | null }[]>>({});
   const [editParentId, setEditParentId] = useState<string | null>(null);                       // เปิดตัวแก้ Parent SKU กลาง
   const [skuEditor, setSkuEditor] = useState<{ recordId: string | null; parentId: string } | null>(null); // เปิดตัวแก้ SKU กลาง (recordId null = สร้างใหม่)
   // ── ปลายทางรูป (โหมดแนบรูป): ติ๊กเลือก Parent/SKU ที่จะดันรูปเข้าตอนอนุมัติ ──
@@ -639,8 +638,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       const entries = await Promise.all(ps.map(async (p) => {
         try {
           const sj = await apiFetch(`/api/pickers/skus?parent_sku_id=${encodeURIComponent(p.id)}&limit=50`).then((r) => r.json());
-          return [p.id, ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? ""), image_key: s.image_key ? String(s.image_key) : null }))] as const;
-        } catch { return [p.id, [] as { id: string; code: string; name: string; image_key: string | null }[]] as const; }
+          return [p.id, ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? ""), image_key: s.image_key ? String(s.image_key) : null, color: s.color ? String(s.color) : null }))] as const;
+        } catch { return [p.id, [] as { id: string; code: string; name: string; image_key: string | null; color: string | null }[]] as const; }
       }));
       setSkusByParent((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
     } catch { setParents([]); }
@@ -666,7 +665,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const reloadSkusFor = useCallback(async (pid: string) => {
     try {
       const sj = await apiFetch(`/api/pickers/skus?parent_sku_id=${encodeURIComponent(pid)}&limit=50`).then((r) => r.json());
-      setSkusByParent((m) => ({ ...m, [pid]: ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? ""), image_key: s.image_key ? String(s.image_key) : null })) }));
+      setSkusByParent((m) => ({ ...m, [pid]: ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? ""), image_key: s.image_key ? String(s.image_key) : null, color: s.color ? String(s.color) : null })) }));
     } catch { /* noop */ }
   }, []);
   // รีเฟรชแกลเลอรีของสินค้าตัวเดียว (หลังกู้คืนเวอร์ชันเก่า) — tk = "parent:<id>" / "sku:<id>"
@@ -826,9 +825,12 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const hasParentTarget = !noParent && displayParents.length > 0;           // มีสินค้าปลายทาง → ซ่อนกล่อง "รูปแนบงาน" บน
   const anyDraft = Object.values(draftImages).some((a) => a.length > 0);    // มีรูปในกล่องสินค้าไหม
   const hasWork = attachCount > 0 || anyDraft;                              // แนบรูป/ลิงก์ หรือหย่อนรูปในกล่องสินค้าก็นับ
-  const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : (hasWork && (!needProductTarget || hasProductTarget)));
+  // สินค้าที่ติ๊กไว้แต่ยังไม่ใส่รูป — ติ๊กแล้วต้องแนบรูป ไม่งั้นส่งไม่ได้
+  const tickedTks = [...[...syncParentIds].map((id) => `parent:${id}`), ...[...syncSkuIds].map((id) => `sku:${id}`)];
+  const tickedNoImg = tickedTks.filter((tk) => (draftImages[tk] ?? []).length === 0);
+  const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : (hasWork && (!needProductTarget || hasProductTarget) && tickedNoImg.length === 0));
 
-  const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(taskId, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim(), subtask_id: sub.id }); setLinkLabel(""); setLinkUrl(""); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
+  const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(taskId, { kind: "drive_link", url: linkUrl.trim(), subtask_id: sub.id }); setLinkUrl(""); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
   const submit = async () => {
     if (platformConfirm) {
       if (!platformReady) { pushToast("error", parents && parents.length === 0 ? t("งานนี้ยังไม่ได้ผูก Parent SKU", "No Parent SKU linked to this task") : t("ยังไม่มีรายละเอียด Platform ครบ — กรอกในสินค้าก่อนส่ง", "Platform details incomplete — fill them in the product first")); return; }
@@ -836,6 +838,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       pushToast("error", t("กรุณาแนบรูป/ลิงก์ หรือใส่รูปในกล่องสินค้าอย่างน้อย 1 ก่อนส่ง", "Please attach at least one image/link before submitting")); return;
     } else if (needProductTarget && !hasProductTarget) {
       pushToast("error", t('เลือก Parent SKU ปลายทางอย่างน้อย 1 หรือติ๊ก "ไม่ต้องแนบ Parent SKU"', 'Pick at least one target Parent SKU, or tick "No Parent SKU needed"')); return;
+    } else if (tickedNoImg.length) {
+      pushToast("error", t(`สินค้าที่ติ๊กต้องใส่รูปให้ครบ: ${tickedNoImg.map((tk) => labelMapRef.current[tk] ?? tk).join(", ")}`, `Add images to all ticked products: ${tickedNoImg.map((tk) => labelMapRef.current[tk] ?? tk).join(", ")}`)); return;
     }
     setBusy(true);
     try {
@@ -849,6 +853,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
+  // บันทึกร่าง — เก็บรูป/ปลายทางไว้ ไม่ส่ง (รูปถูก persist ทุกครั้งที่เพิ่มอยู่แล้ว, ปุ่มนี้ยืนยัน+ปิด)
+  const saveDraft = () => { persistTargets(syncParentIds, syncSkuIds); pushToast("success", t("บันทึกร่างแล้ว — รูปถูกเก็บไว้ (ยังไม่ส่ง)", "Draft saved — images kept (not submitted)")); onClose(); };
 
   // อนุมัติ/ขอแก้ ในป๊อปอัป (เฉพาะผู้มีสิทธิ์อนุมัติ + งานย่อยรออนุมัติ)
   const canReview = canApprove && sub.status === "submitted";
@@ -867,6 +873,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
             <button onClick={() => setReviseOpen(true)} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50">↩︎ {t("ขอแก้", "Revise")}</button>
             <button onClick={doApprove} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">✓ {t("อนุมัติ", "Approve")}</button>
           </>}
+          {canSubmit && !platformConfirm && showImages && <button onClick={saveDraft} disabled={busy} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50">💾 {t("บันทึกร่าง", "Save draft")}</button>}
           {canSubmit && <button onClick={submit} disabled={!canPressSubmit} className="h-9 px-4 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50">📤 {t("ส่งงาน (รออนุมัติ)", "Submit (pending approval)")}</button>}
         </div>
       }>
@@ -914,6 +921,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
         ) : (
           <>
             {canSubmit && !hasWork && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{hasParentTarget ? t("ใส่รูปในกล่องสินค้าอย่างน้อย 1 ก่อนกดส่งงาน", "Add at least one image to a product box before submitting") : t("แนบรูปหรือลิงก์อย่างน้อย 1 ก่อนกดส่งงาน", "Attach at least one image or link before submitting")}</p>}
+            {canSubmit && hasWork && tickedNoImg.length > 0 && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">⚠ {t(`สินค้าที่ติ๊กไว้ต้องใส่รูปให้ครบก่อนส่ง: ${tickedNoImg.map((tk) => labelMapRef.current[tk] ?? tk).join(", ")}`, `Add images to all ticked products before submitting: ${tickedNoImg.map((tk) => labelMapRef.current[tk] ?? tk).join(", ")}`)}</p>}
             {/* กล่อง "รูปแนบงาน" บน — ซ่อนเมื่อมีสินค้าปลายทาง (หย่อนรูปในกล่องสินค้าด้านล่างแทน) */}
             {showImages && !hasParentTarget && (
               <div>
@@ -963,12 +971,18 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                         </div>
                       ); })()}
                       {!isDescTask && <div className="pl-6 mt-1.5 space-y-1.5">
+                        {/* เลือก SKU ทั้งหมด (มี > 1 ตัว) */}
+                        {(skusByParent[p.id] ?? []).length > 1 && (() => { const list = skusByParent[p.id] ?? []; const allOn = list.every((s) => syncSkuIds.has(s.id)); return (
+                          <button type="button" onClick={() => { const n = new Set(syncSkuIds); if (allOn) list.forEach((s) => n.delete(s.id)); else list.forEach((s) => n.add(s.id)); setSyncSkuIds(n); persistTargets(syncParentIds, n); if (!allOn) list.forEach((s) => { if (!galleries[`sku:${s.id}`]) apiFetch(`/api/creative-tasks/${taskId}/subtasks?gallery=product_sku:${encodeURIComponent(s.id)}`).then((r) => r.json()).then((gj) => { if (gj.galleries) setGalleries((prev) => ({ ...prev, ...(gj.galleries as Record<string, GallerySlot[]>) })); }).catch(() => {}); }); }}
+                            className="text-[11px] text-violet-700 border border-violet-200 rounded px-2 py-0.5 hover:bg-violet-50">{allOn ? `☐ ${t("ยกเลิกทั้งหมด", "Deselect all")}` : `☑ ${t("เลือก SKU ทั้งหมด", "Select all SKUs")}`}</button>
+                        ); })()}
                         {(skusByParent[p.id] ?? []).map((s) => { const son = syncSkuIds.has(s.id); const thumb = s.image_key ? `/api/r2-image?key=${encodeURIComponent(s.image_key)}` : null; return (
                           <div key={s.id} className="space-y-1">
                             <div className="flex items-center gap-2 text-xs">
                               <input type="checkbox" checked={son} onChange={() => toggleSyncSku(s.id)} className="h-3.5 w-3.5 rounded border-slate-300 text-amber-600 cursor-pointer" />
                               <HoverImage url={thumb} size={26} rounded="rounded" fallback="📦" />
                               <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+                              {s.color && <span className="text-[10px] text-slate-500 shrink-0 bg-slate-50 border border-slate-200 rounded px-1">🎨 {s.color}</span>}
                               <span className="text-slate-700 truncate flex-1">{s.name}</span>
                               <button type="button" onClick={() => setSkuEditor({ recordId: s.id, parentId: p.id })} className="text-violet-600 hover:underline shrink-0">✏️</button>
                             </div>
@@ -1001,7 +1015,6 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                   {linkAtts.length === 0 && <p className="text-xs text-slate-400 italic">{t("ยังไม่มีลิงก์", "No links yet")}</p>}
                 </div>
                 <div className="flex gap-1.5">
-                  <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder={t("ชื่อ", "Label")} />
                   <ERPInput value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder={t("วางลิงก์", "Paste link")} />
                   <button onClick={addLink} className="h-9 px-2 text-xs text-violet-700 border border-violet-200 rounded-lg shrink-0">{t("แนบ", "Attach")}</button>
                 </div>

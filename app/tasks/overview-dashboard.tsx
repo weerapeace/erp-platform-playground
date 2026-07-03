@@ -535,8 +535,17 @@ function MyTasksView({ doing, delegated, isSoloMine, onOpenTask, accent, columns
           <span className="text-[11px] text-slate-400">· {t("งานที่มีแค่ฉันอยู่บนสุด", "solo tasks first")}</span>
         </div>
         {doing.length === 0 ? emptyBox : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {doing.map((tk) => <MyTaskCard key={tk.id} task={tk} solo={isSoloMine(tk)} onClick={() => onOpenTask(tk.id)} accent={accent} />)}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <DataTable<CreativeTask>
+              data={doing} columns={columns}
+              emptyMessage={t("ไม่มีงาน", "No tasks")}
+              searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
+              searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
+              tableId="my-doing" exportFilename="งานที่ฉันทำ"
+              enableCards
+              cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
+              onRowClick={(row) => onOpenTask(row.id)}
+            />
           </div>
         )}
       </div>
