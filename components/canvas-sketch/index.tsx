@@ -20,9 +20,11 @@ import dynamic from "next/dynamic";
 import "@excalidraw/excalidraw/index.css";
 import "./thai-fonts.css";   // เติมฟอนต์ไทยให้ family ของ Excalidraw (unicode-range เฉพาะไทย)
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/components/auth";
+import { avatarSrc } from "@/lib/r2-image";
 import { isUnloadSuppressed } from "@/lib/canvas-unload-guard";
 import { useCanvasRealtime } from "./use-canvas-realtime";
-import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl } from "./utils";
+import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl, userColor, initials } from "./utils";
 
 const Excalidraw = dynamic(async () => (await import("@excalidraw/excalidraw")).Excalidraw, {
   ssr: false,
@@ -89,9 +91,13 @@ export function CanvasSketch({
   const hoistRef = useRef<((files: Record<string, any>) => void) | null>(null); // ตัวย้ายรูปขึ้น R2 (ตั้งค่าหลัง hoistImages นิยาม)
   const markDirty  = (d: boolean) => { dirtyRef.current = d; dirtyCbRef.current?.(d); };
 
-  // ชั้น realtime (แชร์สดหลายคน) — แยกเป็น hook: broadcast/รับของคนอื่น/นับคนออนไลน์ ผ่าน Supabase Broadcast
-  const { peers, broadcast, broadcastFiles, applyingRemoteRef } = useCanvasRealtime({
+  // ตัวตนผู้ใช้ (โชว์ว่าใครออนไลน์ + ใส่ชื่อกำกับโน้ตคอมเมนต์)
+  const { user } = useAuth();
+
+  // ชั้น realtime (แชร์สดหลายคน) — แยกเป็น hook: broadcast/รับของคนอื่น/รายชื่อคนออนไลน์ ผ่าน Supabase Broadcast
+  const { peerList, broadcast, broadcastFiles, applyingRemoteRef } = useCanvasRealtime({
     collab, editable, ready: scene !== "loading", entityType, entityId, apiRef,
+    selfId: user?.id ?? "", selfName: user?.name ?? "", selfAvatar: user?.avatar ?? null,
   });
 
   useEffect(() => {
@@ -540,6 +546,36 @@ export function CanvasSketch({
     } finally { setTranslating(false); }
   };
 
+  // โน้ตคอมเมนต์ (annotation) — วางกล่องโน้ตกลางจอ มีชื่อผู้เขียน+เวลา, กรอบสีประจำคน
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const addNote = async (text: string) => {
+    const api = apiRef.current; const body = text.trim();
+    if (!api || !body) return;
+    try {
+      const lib: any = await import("@excalidraw/excalidraw");
+      const st = api.getAppState();
+      const center = lib.viewportCoordsToSceneCoords(
+        { clientX: (st.offsetLeft ?? 0) + (st.width ?? 800) / 2, clientY: (st.offsetTop ?? 0) + (st.height ?? 600) / 2 }, st);
+      const authorName = user?.name || "ไม่ทราบชื่อ";
+      const color = user?.id ? userColor(user.id) : "#eab308";
+      const when = new Date().toLocaleString("th-TH", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+      const full = `💬 ${authorName} · ${when}\n${body}`;
+      const W = 250;
+      const rows = full.split("\n").reduce((n, ln) => n + Math.max(1, Math.ceil((ln.length || 1) / 32)), 0);
+      const H = 22 + rows * 20;
+      const gid = `note-${Math.random().toString(36).slice(2, 8)}`;
+      const data = { note: true, author: authorName, author_id: user?.id ?? null, at: Date.now() };
+      const skeletons: Record<string, unknown>[] = [
+        { type: "rectangle", x: center.x, y: center.y, width: W, height: H, backgroundColor: "#fffbeb", strokeColor: color, fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
+        { type: "text", x: center.x + 12, y: center.y + 11, width: W - 24, text: full, fontSize: 14, strokeColor: "#78350f", groupIds: [gid], customData: data },
+      ];
+      api.updateScene({ elements: [...api.getSceneElements(), ...lib.convertToExcalidrawElements(skeletons)] });
+      if (editable) queueSave();
+    } catch (e) { console.error("[canvas-sketch] add note failed:", e); }
+  };
+  const submitNote = () => { void addNote(noteText); setNoteText(""); setNoteOpen(false); };
+
   if (scene === "loading") {
     return <div className="flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl" style={{ height }}>กำลังโหลดกระดาน...</div>;
   }
@@ -572,14 +608,50 @@ export function CanvasSketch({
           </button>
         )}
         {editable && serverCanEdit && (
+          <div className="relative">
+            <button onClick={() => setNoteOpen((o) => !o)} title="เพิ่มโน้ตคอมเมนต์ (มีชื่อคุณ + เวลา กำกับ)"
+              className="inline-flex items-center gap-1 text-[11px] text-amber-700 border border-amber-200 rounded-md px-2 py-0.5 hover:bg-amber-50">
+              💬 คอมเมนต์
+            </button>
+            {noteOpen && (
+              <div className="absolute right-0 top-full mt-1 z-30 w-64 bg-white border border-slate-200 rounded-lg shadow-xl p-2">
+                {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
+                <textarea autoFocus value={noteText} onChange={(e) => setNoteText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitNote(); } else if (e.key === "Escape") setNoteOpen(false); }}
+                  rows={3} placeholder="พิมพ์คอมเมนต์... (Ctrl+Enter = วาง)"
+                  className="w-full text-sm border border-slate-200 rounded-md p-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-amber-300" />
+                <div className="flex items-center justify-between mt-1.5">
+                  <span className="text-[10px] text-slate-400">ใส่ชื่อ {user?.name || "คุณ"} + เวลาให้อัตโนมัติ</span>
+                  <div className="flex gap-1">
+                    <button onClick={() => { setNoteOpen(false); setNoteText(""); }} className="h-6 px-2 text-[11px] text-slate-500 rounded hover:bg-slate-100">ยกเลิก</button>
+                    <button onClick={submitNote} disabled={!noteText.trim()} className="h-6 px-2 text-[11px] text-white bg-amber-600 rounded hover:bg-amber-700 disabled:opacity-50">วางโน้ต</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {editable && serverCanEdit && (
           <button onClick={() => { clearBoard(); blurActive(); }} title="ล้างกระดานทั้งหมด (ลบทุกอย่างออก)"
             className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-600 border border-slate-200 hover:border-rose-200 rounded-md px-2 py-0.5">
             🗑 ล้าง
           </button>
         )}
-        {collab && peers > 0 && (
-          <span className="text-[11px] inline-flex items-center gap-1 text-emerald-600 border border-emerald-200 bg-emerald-50 rounded-md px-2 py-0.5" title="คนอื่นกำลังดู/แก้กระดานนี้พร้อมคุณ">
-            👥 {peers} คนออนไลน์
+        {collab && peerList.length > 0 && (
+          <span className="inline-flex items-center gap-1.5 border border-emerald-200 bg-emerald-50 rounded-md px-2 py-0.5" title="คนที่กำลังดู/แก้กระดานนี้พร้อมคุณ">
+            <span className="flex -space-x-1.5">
+              {peerList.slice(0, 6).map((p) => (
+                <span key={p.id} title={`${p.name}${p.editing ? " · กำลังแก้อยู่" : ""}`}
+                  className="relative inline-flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-white text-[9px] font-bold text-white overflow-hidden"
+                  style={{ backgroundColor: p.color }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  {p.avatar ? <img src={avatarSrc(p.avatar, 48) ?? ""} alt="" className="h-full w-full object-cover" /> : initials(p.name)}
+                  {p.editing && <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-1 ring-white animate-pulse" />}
+                </span>
+              ))}
+            </span>
+            {peerList.length > 6 && <span className="text-[11px] text-slate-500">+{peerList.length - 6}</span>}
+            <span className="text-[11px] text-emerald-700 font-medium">{peerList.length} คนออนไลน์</span>
           </span>
         )}
         {editable && !serverCanEdit && <span className="text-[11px] inline-flex items-center gap-1 text-amber-600">👁 อ่านอย่างเดียว (ไม่มีสิทธิ์แก้)</span>}

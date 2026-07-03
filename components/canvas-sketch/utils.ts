@@ -13,6 +13,21 @@ export const MAX_AUTOSAVE_MS = 30000;  // เซฟกันลืม: เฉพ
 export const BROADCAST_MS = 200;       // realtime: ส่งให้คนอื่นทุก ~200ms (throttle)
 export const BC_MAX_BYTES = 200_000;   // กันส่งก้อนใหญ่เกินลิมิต Supabase Broadcast (ของใหญ่ปล่อยให้ save+refresh sync)
 
+// สีประจำคน (คงที่ต่อ user id) — ใช้ทั้งวงกลม presence และกรอบโน้ตคอมเมนต์ ให้สีตรงกัน
+export function userColor(id: string): string {
+  let h = 0; for (let i = 0; i < id.length; i++) h = (Math.imul(h, 31) + id.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360} 62% 45%)`;
+}
+
+// ชื่อย่อสำหรับวงกลม avatar — คำแรกของ 2 คำ (อังกฤษ) หรือ 1–2 ตัวอักษรแรก (ไทย/คำเดียว)
+export function initials(name: string): string {
+  const s = (name || "?").trim();
+  if (!s) return "?";
+  const parts = s.split(/\s+/);
+  if (parts.length >= 2 && parts[0] && parts[1]) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return (s.charCodeAt(0) > 0x0e00 ? s.slice(0, 1) : s.slice(0, 2)).toUpperCase();
+}
+
 // ลายเซ็นกระดานแบบเบา (count + version รวม + id) — ใช้เทียบว่าเปลี่ยนจริงไหม กัน loop realtime
 export function sceneSig(els: { id?: string; version?: number }[]): string {
   let h = els.length | 0;

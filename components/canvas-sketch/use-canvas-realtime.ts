@@ -13,12 +13,15 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useState, useEffect, useRef, useCallback, type MutableRefObject } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type MutableRefObject } from "react";
 import { supabaseBrowser } from "@/lib/supabase-browser";
-import { sceneSig, BROADCAST_MS, BC_MAX_BYTES } from "./utils";
+import { sceneSig, userColor, BROADCAST_MS, BC_MAX_BYTES } from "./utils";
+
+/** คนที่อยู่ในห้องพร้อมเรา (คนอื่น ไม่รวมตัวเอง) */
+export type CanvasPeer = { id: string; name: string; avatar: string | null; color: string; editing: boolean };
 
 export function useCanvasRealtime({
-  collab, editable, ready, entityType, entityId, apiRef,
+  collab, editable, ready, entityType, entityId, apiRef, selfId = "", selfName = "", selfAvatar = null,
 }: {
   collab: boolean;
   editable: boolean;
@@ -26,13 +29,27 @@ export function useCanvasRealtime({
   entityType: string;
   entityId: string;
   apiRef: MutableRefObject<any>;        // Excalidraw API ของไฟล์หลัก
+  selfId?: string;                      // ตัวตนของเรา (โชว์ว่าใครออนไลน์) — id/ชื่อ/avatar
+  selfName?: string;
+  selfAvatar?: string | null;
 }) {
-  const [peers, setPeers] = useState(0); // จำนวนคนอื่นในห้อง
+  const [basePeers, setBasePeers] = useState<Omit<CanvasPeer, "editing">[]>([]); // คนอื่นในห้อง (จาก presence)
+  const editingRef = useRef<Map<string, number>>(new Map());  // userId → เวลาแก้ล่าสุด (โชว์ "กำลังแก้")
+  const [editTick, setEditTick] = useState(0);                // bump เพื่อ recompute สถานะกำลังแก้ (หมดอายุ)
+  const selfRef = useRef({ id: selfId, name: selfName, avatar: selfAvatar });
+  selfRef.current = { id: selfId, name: selfName, avatar: selfAvatar };
   const channelRef = useRef<ReturnType<typeof supabaseBrowser.channel> | null>(null);
   const applyingRemoteRef = useRef(false);   // กันส่งซ้ำตอนเอาของคนอื่นมาวาง
   const bcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSigRef = useRef<string>("");     // ลายเซ็นกระดานล่าสุดที่ส่ง/รับ — กัน loop ส่งวนไม่จบ
   const lastVerRef = useRef<Map<string, number>>(new Map()); // version ล่าสุดต่อ element ที่ส่ง/รับ — ส่งเฉพาะที่เปลี่ยน (delta)
+
+  // รวมชื่อ/สีคน (จาก presence) + สถานะ "กำลังแก้" (จาก broadcast ล่าสุด ~3.5วิ)
+  const peerList = useMemo<CanvasPeer[]>(() => {
+    const now = Date.now();
+    void editTick; // dep เพื่อ recompute เมื่อมีคนแก้/หมดเวลา
+    return basePeers.map((p) => ({ ...p, editing: now - (editingRef.current.get(p.id) ?? 0) < 3500 }));
+  }, [basePeers, editTick]);
 
   // ส่งเฉพาะ "ชิ้นที่เปลี่ยน" (delta) ให้คนอื่นในห้อง (throttle ~200ms)
   const broadcast = useCallback(() => {
@@ -49,7 +66,7 @@ export function useCanvasRealtime({
       const changed = els.filter((e) => (e.version ?? 0) > (lastVerRef.current.get(e.id) ?? -1)); // เฉพาะที่เปลี่ยน
       if (!changed.length) return;
       for (const e of changed) lastVerRef.current.set(e.id, e.version ?? 0);
-      const payload = { els: changed };
+      const payload = { els: changed, by: selfRef.current.id }; // แนบ id คนส่ง → ฝั่งรับโชว์ "กำลังแก้"
       try {
         if (JSON.stringify(payload).length > BC_MAX_BYTES) return; // ใหญ่ไป → ข้าม (save+refresh จะ sync)
         void ch.send({ type: "broadcast", event: "scene", payload });
@@ -96,19 +113,35 @@ export function useCanvasRealtime({
       if (cancelled) return;
       const ch = supabaseBrowser.channel(room, { config: { private: true, broadcast: { self: false }, presence: { key: myKey } } });
       ch
-        .on("broadcast", { event: "scene" }, (msg: { payload?: { els?: any[] } }) => { applyRemote(msg?.payload?.els ?? []); })
+        .on("broadcast", { event: "scene" }, (msg: { payload?: { els?: any[]; by?: string } }) => {
+          const by = msg?.payload?.by;   // คนที่ส่ง = คนที่เพิ่งแก้ → ติดธง "กำลังแก้" ~3.5วิ
+          if (by && by !== selfRef.current.id) { editingRef.current.set(by, Date.now()); setEditTick((v) => v + 1); setTimeout(() => setEditTick((v) => v + 1), 3600); }
+          applyRemote(msg?.payload?.els ?? []);
+        })
         .on("broadcast", { event: "files" }, (msg: { payload?: { files?: any[] } }) => { const fs = msg?.payload?.files; if (fs?.length && apiRef.current) { try { apiRef.current.addFiles(fs); } catch { /* noop */ } } })
-        .on("presence", { event: "sync" }, () => { const n = Object.keys(ch.presenceState()).length; setPeers(Math.max(0, n - 1)); })
-        .subscribe((status) => { if (status === "SUBSCRIBED") void ch.track({ at: Date.now() }); });
+        .on("presence", { event: "sync" }, () => {
+          // แปลง presence → รายชื่อคนอื่น (ไม่รวมตัวเอง + รวมหลายแท็บของคนเดียวเป็นคนเดียว)
+          const state = ch.presenceState() as Record<string, any[]>;
+          const map = new Map<string, Omit<CanvasPeer, "editing">>();
+          for (const key of Object.keys(state)) {
+            const meta = (state[key]?.[0] ?? {}) as { id?: string; name?: string; avatar?: string | null };
+            const uid = String(meta.id ?? key);
+            if (selfRef.current.id && uid === selfRef.current.id) continue;   // ข้ามตัวเอง (รวมแท็บอื่นของเรา)
+            if (map.has(uid)) continue;                                        // dedupe คนเดียวหลายแท็บ
+            map.set(uid, { id: uid, name: String(meta.name || "ไม่ทราบชื่อ"), avatar: meta.avatar ?? null, color: userColor(uid) });
+          }
+          setBasePeers([...map.values()]);
+        })
+        .subscribe((status) => { if (status === "SUBSCRIBED") void ch.track({ id: selfRef.current.id, name: selfRef.current.name, avatar: selfRef.current.avatar, at: Date.now() }); });
       channel = ch;
       channelRef.current = ch;
     })();
     return () => {
       cancelled = true;
       if (channel) { try { void supabaseBrowser.removeChannel(channel); } catch { /* noop */ } }
-      channelRef.current = null; setPeers(0);
+      channelRef.current = null; setBasePeers([]); editingRef.current.clear();
     };
-  }, [collab, editable, ready, entityType, entityId, applyRemote, apiRef]);
+  }, [collab, editable, ready, entityType, entityId, selfId, applyRemote, apiRef]);
 
-  return { peers, broadcast, broadcastFiles, applyingRemoteRef };
+  return { peerList, broadcast, broadcastFiles, applyingRemoteRef };
 }
