@@ -450,13 +450,14 @@ export default function SalesOrdersPage() {
   const views = useMemo(() => {
     const monthPrefix = new Date().toISOString().slice(0, 7); // YYYY-MM
     const myName = user?.name ?? "";
+    // ซ่อนรายการ "ยกเลิก" จากทุกแท็บ ยกเว้นแท็บ ⊘ ยกเลิก
     return [
-      { id: "all",       label: "ทั้งหมด" },
-      { id: "mine",      label: "👤 ของฉัน",     filter: (r: Record<string, unknown>) => String(r.sale_person_name ?? "") === myName },
+      { id: "all",       label: "ทั้งหมด",         filter: (r: Record<string, unknown>) => r.status !== "cancelled" },
+      { id: "mine",      label: "👤 ของฉัน",     filter: (r: Record<string, unknown>) => String(r.sale_person_name ?? "") === myName && r.status !== "cancelled" },
       { id: "draft",     label: "📝 ร่าง",        filter: (r: Record<string, unknown>) => r.status === "draft" },
       { id: "confirmed", label: "✅ ยืนยันแล้ว",  filter: (r: Record<string, unknown>) => r.status === "confirmed" },
       { id: "shipped",   label: "📦 ส่งของแล้ว",  filter: (r: Record<string, unknown>) => r.status === "shipped" },
-      { id: "month",     label: "🗓 เดือนนี้",    filter: (r: Record<string, unknown>) => String(r.order_date ?? "").startsWith(monthPrefix) },
+      { id: "month",     label: "🗓 เดือนนี้",    filter: (r: Record<string, unknown>) => String(r.order_date ?? "").startsWith(monthPrefix) && r.status !== "cancelled" },
       { id: "cancelled", label: "⊘ ยกเลิก",       filter: (r: Record<string, unknown>) => r.status === "cancelled" },
     ];
   }, [user?.name]);

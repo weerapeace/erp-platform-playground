@@ -417,29 +417,38 @@ export function SkuPicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SkuPickerValue[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+
+  const SKU_PAGE = 24;
+  const fetchPage = useCallback(async (q: string, offset: number): Promise<{ rows: SkuPickerValue[]; total: number }> => {
+    const params = new URLSearchParams({ search: q, limit: String(SKU_PAGE), offset: String(offset) });
+    if (!salesOnly) params.set("sales_only", "false");
+    const res = await apiFetch(`/api/pickers/skus?${params}`);
+    const json = await res.json();
+    return { rows: ((json.data ?? []) as Record<string, unknown>[]).map(mapSkuRow), total: Number(json.total ?? 0) };
+  }, [salesOnly]);
 
   useEffect(() => {
     if (!open) return;
     let active = true;
     setLoading(true);
     const t = setTimeout(async () => {
-      try {
-        const params = new URLSearchParams({ search: query, limit: "24" });
-        if (!salesOnly) params.set("sales_only", "false");
-        const res = await apiFetch(`/api/pickers/skus?${params}`);
-        const json = await res.json();
-        const rows = (json.data ?? []) as Record<string, unknown>[];
-        if (active) setResults(rows.map(mapSkuRow));
-      } catch {
-        if (active) setResults([]);
-      } finally {
-        if (active) setLoading(false);
-      }
+      try { const { rows, total } = await fetchPage(query, 0); if (active) { setResults(rows); setTotal(total); } }
+      catch { if (active) { setResults([]); setTotal(0); } }
+      finally { if (active) setLoading(false); }
     }, 250);
     return () => { active = false; clearTimeout(t); };
-  }, [open, query, salesOnly]);
+  }, [open, query, fetchPage]);
+
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+    try { const { rows, total } = await fetchPage(query, results.length); setResults(prev => [...prev, ...rows]); setTotal(total); }
+    catch { /* ignore */ }
+    finally { setLoadingMore(false); }
+  }, [fetchPage, query, results.length]);
 
   const select = useCallback((sku: SkuPickerValue) => {
     onChange(sku);
@@ -500,7 +509,18 @@ export function SkuPicker({
                 </button>
               ))
             )}
+            {!loading && results.length > 0 && results.length < total && (
+              <button type="button" onClick={loadMore} disabled={loadingMore}
+                className="w-full px-3 py-2 text-xs font-medium text-blue-600 hover:bg-blue-50 border-t border-slate-100 sticky bottom-0 bg-white disabled:opacity-60">
+                {loadingMore ? "กำลังโหลด..." : `ดูเพิ่มเติม (เหลืออีก ${total - results.length})`}
+              </button>
+            )}
           </div>
+          {!loading && total > 0 && (
+            <div className="px-3 py-1.5 border-t border-slate-100 text-[11px] text-slate-400 bg-slate-50/60">
+              แสดง {results.length} จาก {total} รายการ
+            </div>
+          )}
         </div>
       </FloatingDropdown>
     </div>
