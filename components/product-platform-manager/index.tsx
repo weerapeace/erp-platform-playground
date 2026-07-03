@@ -16,6 +16,7 @@ import { HoverImage } from "@/components/hover-image";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
+import { requiredChecks } from "@/lib/platform-required-fields";
 
 // ตัวแก้สินค้ากลาง (SKU) — เปิดจากตัวจัดการเพื่อแก้ราคา/สี/รูป หรือเพิ่มสีใหม่ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -142,20 +143,17 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     } catch (e) { toast("error", (e as Error).message); } finally { setPublishing(false); }
   };
 
+  // เช็คลิสต์ "ฟิลด์จำเป็น" ตามแพลตฟอร์มที่เลือก (LINE มี spec เฉพาะ · อื่น ๆ ใช้ชุดทั่วไป)
   const checks = useMemo(() => {
     const allHavePrice = variants.length > 0 && variants.every((v) => v.has_price);
     const allHaveImage = variants.length > 0 && variants.every((v) => v.has_image);
-    return [
-      { ok: !!title.trim(), label: "มีชื่อสินค้าบนแพลตฟอร์มนี้" },
-      { ok: !!description.trim(), label: "มีรายละเอียดสินค้า" },
-      { ok: variants.length > 0, label: "มี SKU/สี อย่างน้อย 1 รายการ" },
-      { ok: allHavePrice, label: "SKU ทุกตัวมีราคา" },
-      { ok: allHaveImage, label: "SKU ทุกตัวมีรูป" },
-      { ok: !!(activeDraft.category_path ?? "").trim(), label: "เลือกหมวดหมู่ปลายทาง" },
-      { ok: (activeDraft.image_keys ?? []).length > 0, label: "เลือกรูปส่งไปแพลตฟอร์ม ≥ 1" },
-    ];
-  }, [title, description, variants, activeDraft.category_path, activeDraft.image_keys]);
-  const ready = checks.every((c) => c.ok);
+    const code = platforms.find((p) => p.id === active)?.code ?? "";
+    return requiredChecks(code, {
+      title, description, category: (activeDraft.category_path ?? "") as string,
+      imagesToSend: (activeDraft.image_keys ?? []).length, variantCount: variants.length, allHavePrice, allHaveImage,
+    });
+  }, [title, description, variants, activeDraft.category_path, activeDraft.image_keys, platforms, active]);
+  const ready = checks.every((c) => !c.required || c.ok);
 
   const cols: MiniColumn<Variant>[] = useMemo(() => [
     { key: "img", header: "รูป", width: "3rem", cell: (v) => <HoverImage url={r2ImageUrl(v.image_key)} size={32} /> },
@@ -261,10 +259,10 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                 </div>
 
                 <div className="rounded-lg border border-slate-200 p-3">
-                  <p className="text-xs font-medium text-slate-600 mb-2">ตรวจความพร้อมก่อนลงขาย</p>
+                  <p className="text-xs font-medium text-slate-600 mb-2">ฟิลด์จำเป็นของ {activePf?.name_th ?? "แพลตฟอร์ม"}</p>
                   <ul className="space-y-1">
                     {checks.map((c, i) => (
-                      <li key={i} className={`text-xs flex items-center gap-2 ${c.ok ? "text-slate-600" : "text-rose-600"}`}><span>{c.ok ? "✓" : "✗"}</span>{c.label}</li>
+                      <li key={i} className={`text-xs flex items-center gap-2 ${c.ok ? "text-slate-600" : c.required ? "text-rose-600" : "text-amber-600"}`}><span>{c.ok ? "✓" : "✗"}</span>{c.label}{!c.required && <span className="text-[10px] text-slate-400">(แนะนำ)</span>}</li>
                     ))}
                   </ul>
                 </div>
