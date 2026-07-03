@@ -12,6 +12,7 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import type { SkuPickerValue } from "@/components/pickers";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { apiFetch } from "@/lib/api";
 import { AssigneeStack } from "./assignee-avatar";
 import { listReviewQueue, updateSubtask, type ReviewQueueItem } from "./data";
 import { useT } from "@/components/i18n";
@@ -34,6 +35,9 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   const [destSkus, setDestSkus] = useState<Dest[]>([]);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [pickOpen, setPickOpen] = useState(false);
+  // รูปเดิมในสินค้า (แกลเลอรีจริง) ต่อปลายทาง — โชว์ให้ผู้ตรวจเห็นก่อนอนุมัติ · tk = "parent:<id>"/"sku:<id>"
+  const [destGalleries, setDestGalleries] = useState<Record<string, { r2_key: string }[]>>({});
+  const [galLb, setGalLb] = useState<{ images: { url: string; label: string | null }[]; index: number }>({ images: [], index: -1 });   // ซูมรูปเดิมในสินค้า (แยกจาก imgs งานส่ง)
 
   const pushToast = useCallback((type: Toast["type"], message: string) => {
     const id = Date.now() + Math.random(); setToasts((p) => [...p, { id, type, message }]);
@@ -51,6 +55,12 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
     setDestSkus(r.dest?.skus ?? []);
     setConfirmApprove(false);
     setLb(-1);
+    setDestGalleries({});
+    // ดึง "รูปเดิมในสินค้า" (แกลเลอรีจริง) ของทุกปลายทาง มาโชว์
+    const fetchGal = (owner: string) => apiFetch(`/api/creative-tasks/${r.task_id}/subtasks?gallery=${owner}`).then((x) => x.json())
+      .then((gj) => { if (gj.galleries) setDestGalleries((prev) => ({ ...prev, ...(gj.galleries as Record<string, { r2_key: string }[]>) })); }).catch(() => {});
+    for (const p of r.dest?.parents ?? []) void fetchGal(`parent_sku:${p.id}`);
+    for (const s of r.dest?.skus ?? []) void fetchGal(`product_sku:${s.id}`);
   };
   const closeItem = () => { setActive(null); setLb(-1); setConfirmApprove(false); };
 
@@ -111,52 +121,72 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
             <div className="text-4xl mb-3">✅</div>
             <p className="text-slate-600 font-medium">{t("ไม่มีงานรอตรวจ", "Nothing awaiting review")}</p>
           </div>
-        ) : (
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs">
-                <tr>
-                  <th className="text-left font-medium px-3 py-2">{t("งาน", "Task")}</th>
-                  <th className="text-left font-medium px-3 py-2">{t("งานย่อย", "Subtask")}</th>
-                  <th className="text-left font-medium px-3 py-2 hidden sm:table-cell">{t("แบรนด์", "Brand")}</th>
-                  <th className="text-left font-medium px-3 py-2 hidden md:table-cell">{t("ผู้รับผิดชอบ", "Assignee")}</th>
-                  <th className="text-left font-medium px-3 py-2">{t("รูป", "Images")}</th>
-                  <th className="text-right font-medium px-3 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                    <td className="px-3 py-2 align-top"><div className="font-mono text-[11px] text-slate-400">{r.task_no}</div><div className="text-slate-700 line-clamp-1">{r.task_title}</div></td>
-                    <td className="px-3 py-2 align-top text-slate-700">{r.title}</td>
-                    <td className="px-3 py-2 align-top hidden sm:table-cell">{r.brand_label ? <span className="inline-flex items-center gap-1 text-xs text-slate-600"><span className="h-2 w-2 rounded-full" style={{ background: r.brand_color || "#cbd5e1" }} />{r.brand_label}</span> : <span className="text-slate-300">—</span>}</td>
-                    <td className="px-3 py-2 align-top hidden md:table-cell">{r.assignees.length ? <AssigneeStack list={r.assignees} size={22} /> : <span className="text-slate-300">—</span>}</td>
-                    <td className="px-3 py-2 align-top">
-                      {r.images.length ? (
-                        <button onClick={() => openItem(r)} className="inline-flex items-center gap-1">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={r2ImageUrl(r.images[0].r2_key, 80) ?? ""} alt="" className="h-9 w-9 rounded object-cover border border-slate-200" />
-                          {r.images.length > 1 && <span className="text-[11px] text-slate-400">+{r.images.length - 1}</span>}
-                        </button>
-                      ) : <span className="text-xs text-slate-300">{t("ไม่มีรูป", "none")}</span>}
-                    </td>
-                    <td className="px-3 py-2 align-top text-right">
-                      <button onClick={() => openItem(r)} className="h-8 px-3 text-xs font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600">🔎 {t("ดูงาน", "View")}</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        ) : (() => {
+          const stMeta = (s: string) => s === "approved" ? { label: t("อนุมัติแล้ว", "Approved"), cls: "bg-emerald-50 text-emerald-700 border-emerald-200" }
+            : s === "revision_requested" ? { label: t("ขอแก้", "Revision"), cls: "bg-orange-50 text-orange-700 border-orange-200" }
+            : { label: t("รออนุมัติ", "Pending"), cls: "bg-amber-50 text-amber-700 border-amber-200" };
+          const pending = rows.filter((r) => r.status !== "approved");
+          const approved = rows.filter((r) => r.status === "approved");
+          const groupTable = (title: string, list: ReviewQueueItem[]) => list.length === 0 ? null : (
+            <div key={title} className="space-y-1.5">
+              <p className="text-sm font-semibold text-slate-600">{title} <span className="text-slate-400 font-normal">({list.length})</span></p>
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-500 text-xs">
+                    <tr>
+                      <th className="text-left font-medium px-3 py-2">{t("งาน", "Task")}</th>
+                      <th className="text-left font-medium px-3 py-2">{t("งานย่อย", "Subtask")}</th>
+                      <th className="text-left font-medium px-3 py-2">{t("สถานะ", "Status")}</th>
+                      <th className="text-left font-medium px-3 py-2 hidden sm:table-cell">{t("แบรนด์", "Brand")}</th>
+                      <th className="text-left font-medium px-3 py-2 hidden md:table-cell">{t("ผู้รับผิดชอบ", "Assignee")}</th>
+                      <th className="text-left font-medium px-3 py-2">{t("รูป", "Images")}</th>
+                      <th className="text-right font-medium px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.map((r) => { const sm = stMeta(r.status); return (
+                      <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                        <td className="px-3 py-2 align-top">
+                          <a href={`/tasks?task=${r.task_id}`} title={t("เปิดรายละเอียดงาน", "Open task")} className="block hover:text-violet-700">
+                            <div className="font-mono text-[11px] text-slate-400">{r.task_no}</div>
+                            <div className="text-slate-700 line-clamp-1 hover:underline">{r.task_title}</div>
+                          </a>
+                        </td>
+                        <td className="px-3 py-2 align-top text-slate-700">{r.title}</td>
+                        <td className="px-3 py-2 align-top"><span className={`inline-flex text-[11px] font-medium border rounded-full px-2 py-0.5 ${sm.cls}`}>{sm.label}</span></td>
+                        <td className="px-3 py-2 align-top hidden sm:table-cell">{r.brand_label ? <span className="inline-flex items-center gap-1 text-xs text-slate-600"><span className="h-2 w-2 rounded-full" style={{ background: r.brand_color || "#cbd5e1" }} />{r.brand_label}</span> : <span className="text-slate-300">—</span>}</td>
+                        <td className="px-3 py-2 align-top hidden md:table-cell">{r.assignees.length ? <AssigneeStack list={r.assignees} size={22} /> : <span className="text-slate-300">—</span>}</td>
+                        <td className="px-3 py-2 align-top">
+                          {r.images.length ? (
+                            <button onClick={() => openItem(r)} className="inline-flex items-center gap-1">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={r2ImageUrl(r.images[0].r2_key, 80) ?? ""} alt="" className="h-9 w-9 rounded object-cover border border-slate-200" />
+                              {r.images.length > 1 && <span className="text-[11px] text-slate-400">+{r.images.length - 1}</span>}
+                            </button>
+                          ) : <span className="text-xs text-slate-300">{t("ไม่มีรูป", "none")}</span>}
+                        </td>
+                        <td className="px-3 py-2 align-top text-right">
+                          <button onClick={() => openItem(r)} className="h-8 px-3 text-xs font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600">🔎 {t("ดูงาน", "View")}</button>
+                        </td>
+                      </tr>
+                    ); })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+          return <div className="space-y-4">{groupTable(`🟡 ${t("รอตรวจ", "Pending review")}`, pending)}{groupTable(`✅ ${t("อนุมัติแล้ว", "Approved")}`, approved)}</div>;
+        })()}
 
       {active && (
         <ERPModal open onClose={closeItem} size="lg"
           title={`${t("ตรวจงาน", "Review")}: ${active.title}`}
           footer={<>
             <button onClick={closeItem} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
-            <button onClick={revise} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-50 disabled:opacity-50">↩︎ {t("ตีกลับแก้", "Return")}</button>
-            <button onClick={onApprove} disabled={busy} className={`h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50 ${confirmApprove ? "bg-emerald-700 hover:bg-emerald-800 ring-2 ring-emerald-300" : "bg-emerald-600 hover:bg-emerald-700"}`}>✓ {confirmApprove ? t("ยืนยันอนุมัติ", "Confirm approve") : t("อนุมัติ", "Approve")}</button>
+            <button onClick={revise} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-50 disabled:opacity-50">↩︎ {active.status === "approved" ? t("ย้อน/ตีกลับแก้", "Revert / Return") : t("ตีกลับแก้", "Return")}</button>
+            {active.status === "approved"
+              ? <span className="h-9 px-4 inline-flex items-center text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg">✓ {t("อนุมัติแล้ว", "Approved")}</span>
+              : <button onClick={onApprove} disabled={busy} className={`h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50 ${confirmApprove ? "bg-emerald-700 hover:bg-emerald-800 ring-2 ring-emerald-300" : "bg-emerald-600 hover:bg-emerald-700"}`}>✓ {confirmApprove ? t("ยืนยันอนุมัติ", "Confirm approve") : t("อนุมัติ", "Approve")}</button>}
           </>}>
           <div className="space-y-3">
             <div className="text-sm text-slate-500"><span className="font-mono text-xs">{active.task_no}</span> · {active.task_title}{active.brand_label ? ` · ${active.brand_label}` : ""}</div>
@@ -200,6 +230,33 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
               {!destParents.length && !destSkus.length && <p className="text-[11px] text-amber-600">⚠ {t("ยังไม่มีปลายทาง — เลือกอย่างน้อย 1 ที่ ไม่งั้นรูปจะไม่เข้าอัลบั้มสินค้า", "No destination — pick at least one or images won't reach product albums")}</p>}
             </div>
 
+            {/* รูปที่ลงไว้ในสินค้าตอนนี้ (แกลเลอรีจริงของแต่ละ Parent/SKU) */}
+            {(() => {
+              const dests = [...destParents.map((p) => ({ tk: `parent:${p.id}`, code: p.code })), ...destSkus.map((s) => ({ tk: `sku:${s.id}`, code: s.code }))];
+              if (!dests.length) return null;
+              return (
+                <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-slate-500">🖼 {t("รูปที่ลงไว้ในสินค้าตอนนี้", "Current images in the products")}</p>
+                  {dests.map((d) => { const g = destGalleries[d.tk] ?? []; return (
+                    <div key={d.tk}>
+                      <p className="text-[10px] font-mono text-slate-500 bg-slate-100 inline-block px-1.5 py-0.5 rounded mb-1">{d.code} <span className="text-slate-400">({g.length})</span></p>
+                      {g.length ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {g.map((im, i) => (
+                            <div key={i} className="relative">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={r2ImageUrl(im.r2_key, 160) ?? ""} alt="" onClick={() => setGalLb({ images: g.map((x) => ({ url: r2ImageUrl(x.r2_key, 1600) ?? "", label: d.code })), index: i })} title={t("กดดูเต็มจอ", "Click to view full")} className="h-12 w-12 rounded object-cover border border-slate-200 cursor-zoom-in" />
+                              <span className="absolute -top-1 -left-1 bg-slate-700 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">{i + 1}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : <span className="text-[11px] text-slate-300 italic">{t("ยังไม่มีรูป", "none yet")}</span>}
+                    </div>
+                  ); })}
+                </div>
+              );
+            })()}
+
             {confirmApprove && (
               <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
                 {t("กด\"ยืนยันอนุมัติ\" อีกครั้ง — รูป", "Click \"Confirm approve\" again — ")}{imgs.length} {t("รูปจะถูกย้ายเข้าอัลบั้มสินค้าข้างบน (ย้อนกลับยาก)", "image(s) will move into the product albums above (hard to undo)")}
@@ -209,6 +266,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
         </ERPModal>
       )}
       <ImageLightbox images={lbImages} index={lb} onClose={() => setLb(-1)} onIndex={setLb} />
+      <ImageLightbox images={galLb.images} index={galLb.index} onClose={() => setGalLb((s) => ({ ...s, index: -1 }))} onIndex={(i) => setGalLb((s) => ({ ...s, index: i }))} />
       <SkuMultiPickerModal open={pickOpen} onClose={() => setPickOpen(false)} onConfirm={onAddSkus} excludeIds={destSkus.map((s) => s.id)} />
 
       <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">

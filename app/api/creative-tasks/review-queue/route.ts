@@ -17,12 +17,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
   const admin = supabaseAdmin();
 
+  // รอตรวจ (submitted) + อนุมัติแล้ว (approved) — แยกกลุ่มในหน้า UI
   const { data: subs, error } = await admin.from("erp_creative_subtasks")
-    .select("id, task_id, title, updated_at, status, image_sync_targets").eq("status", "submitted")
-    .order("updated_at", { ascending: false }).limit(300);
+    .select("id, task_id, title, updated_at, status, image_sync_targets").in("status", ["submitted", "approved"])
+    .order("updated_at", { ascending: false }).limit(400);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   type Ist = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; image_order?: string[] } | null;
-  const rows = (subs ?? []) as { id: string; task_id: string; title: string; updated_at: string; image_sync_targets: Ist }[];
+  const rows = (subs ?? []) as { id: string; task_id: string; title: string; updated_at: string; status: string; image_sync_targets: Ist }[];
   if (!rows.length) return NextResponse.json({ data: [], error: null });
 
   const taskIds = [...new Set(rows.map((r) => r.task_id))];
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const br = tk.brand_id ? brandMap.get(String(tk.brand_id)) : null;
     const ist = r.image_sync_targets;
     return {
-      id: r.id, title: r.title, updated_at: r.updated_at,
+      id: r.id, title: r.title, updated_at: r.updated_at, status: r.status,
       task_id: r.task_id, task_no: (tk.task_no as string) ?? null, task_title: (tk.title as string) ?? "",
       brand_label: (br?.name as string) ?? null, brand_color: (br?.color as string) ?? null,
       assignees: aMap.get(r.id) ?? [],
