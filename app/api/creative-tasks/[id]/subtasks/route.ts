@@ -69,11 +69,18 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
   const { data: cfg } = await admin.from("ui_config").select("value").eq("key", "creative_submit_required_fields").maybeSingle();
   const reqCols = Array.isArray((cfg as { value?: unknown } | null)?.value) ? ((cfg as { value: string[] }).value).filter((x) => typeof x === "string") : [];
   const colLabel: Record<string, string> = {};
+  // ฟิลด์ relation ที่ต้องแปลง id → ชื่อ (จาก relation_config ในทะเบียนฟิลด์กลาง) — ของกลาง ไม่ hardcode
+  const relCfg: Record<string, { table: string; labelField: string }> = {};
   if (reqCols.length) {
     const { data: mod } = await admin.from("erp_modules").select("id").eq("module_key", "parent-skus-v2").maybeSingle();
     if ((mod as { id?: string } | null)?.id) {
-      const { data: mf } = await admin.from("erp_module_fields").select("column_name, field_label").eq("module_id", (mod as { id: string }).id);
-      for (const f of ((mf ?? []) as { column_name: string | null; field_label: string | null }[])) if (f.column_name) colLabel[f.column_name] = f.field_label || f.column_name;
+      const { data: mf } = await admin.from("erp_module_fields").select("column_name, field_label, ui_field_type, relation_config").eq("module_id", (mod as { id: string }).id);
+      for (const f of ((mf ?? []) as { column_name: string | null; field_label: string | null; ui_field_type: string | null; relation_config: Record<string, unknown> | null }[])) {
+        if (!f.column_name) continue;
+        colLabel[f.column_name] = f.field_label || f.column_name;
+        const rc = (f.relation_config ?? {}) as { target_table?: string; target_label_field?: string };
+        if (f.ui_field_type === "relation" && rc.target_table) relCfg[f.column_name] = { table: String(rc.target_table).replace(/[^a-z0-9_]/gi, ""), labelField: String(rc.target_label_field || "name").replace(/[^a-z0-9_]/gi, "") };
+      }
     }
   }
   const required = reqCols.map((c) => ({ key: c, label: colLabel[c] ?? c }));
@@ -83,6 +90,20 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
   // select * เพื่อรองรับ "ทุกฟิลด์" ที่ admin เลือกบังคับ (parent มีไม่กี่แถว)
   const { data } = await admin.from("parent_skus_v2").select("*").in("id", pIds);
   const asText = (v: unknown): string => v == null ? "" : Array.isArray(v) ? v.map((x) => asText(x)).filter(Boolean).join(", ") : typeof v === "object" ? "" : String(v);
+  // แปลง id → ชื่อ สำหรับฟิลด์ relation ที่บังคับ (ดึงชื่อจากตารางปลายทางทีเดียว)
+  const relLabel: Record<string, Map<string, string>> = {};
+  for (const col of reqCols) {
+    const cfg = relCfg[col]; if (!cfg) continue;
+    const ids = [...new Set(((data ?? []) as Record<string, unknown>[]).map((p) => p[col]).filter(Boolean).map(String))];
+    relLabel[col] = new Map();
+    if (!ids.length) continue;
+    const { data: rows } = await admin.from(cfg.table).select(`id, ${cfg.labelField}`).in("id", ids);
+    for (const r of ((rows ?? []) as unknown as Record<string, unknown>[])) relLabel[col].set(String(r.id), String(r[cfg.labelField] ?? ""));
+  }
+  const fieldVal = (p: Record<string, unknown>, c: string): string => {
+    if (relCfg[c]) { const lbl = relLabel[c]?.get(String(p[c] ?? "")); if (lbl) return lbl; }   // relation → ชื่อ (fallback ค่าดิบถ้าไม่เจอ)
+    return asText(p[c]);
+  };
   const parents = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
     id: (p.id as string) ?? "",
     code: (p.code as string) ?? "",
@@ -94,8 +115,8 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
     has_description: !!((p.description as string) ?? "").trim(),
     // ฟิลด์บังคับที่ยังว่าง (ป้ายจากทะเบียนฟิลด์) — ใช้โชว์ * + บล็อกส่งงาน
     missing: reqCols.filter((c) => isEmptyVal(p[c])).map((c) => colLabel[c] ?? c),
-    // ทุกช่องบังคับ + ค่าจริง (โชว์เต็ม + ปุ่มคัดลอกในป๊อปอัป)
-    fields: reqCols.map((c) => ({ key: c, label: colLabel[c] ?? c, value: asText(p[c]), empty: isEmptyVal(p[c]) })),
+    // ทุกช่องบังคับ + ค่าจริง (relation → ชื่อ) โชว์เต็ม + ปุ่มคัดลอกในป๊อปอัป
+    fields: reqCols.map((c) => ({ key: c, label: colLabel[c] ?? c, value: fieldVal(p, c), empty: isEmptyVal(p[c]) })),
   }));
   // แกลเลอรีปัจจุบันของ Parent SKU (โชว์ preview + จับคู่แทนรูปในป๊อปอัปส่งงาน)
   const galleries = await loadGalleries(admin, "parent_sku", pIds);

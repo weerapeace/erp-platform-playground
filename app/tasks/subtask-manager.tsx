@@ -338,8 +338,13 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
                     <div key={g.key}>
                       <p className="text-[10px] font-mono text-slate-500 bg-slate-100 inline-block px-1.5 py-0.5 rounded mb-1">{g.label}</p>
                       <div className="flex flex-wrap gap-1.5">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        {g.keys.map((k, j) => <img key={k} src={`/api/r2-image?key=${encodeURIComponent(k)}&w=160`} alt="" onClick={() => setCardLb(base + j)} title={t("กดดูเต็มจอ", "Click to view full")} className="h-12 w-12 rounded object-cover border border-amber-200 cursor-zoom-in" />)}
+                        {g.keys.map((k, j) => (
+                          <div key={k} className="relative">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={`/api/r2-image?key=${encodeURIComponent(k)}&w=160`} alt="" onClick={() => setCardLb(base + j)} title={t("กดดูเต็มจอ", "Click to view full")} className="h-12 w-12 rounded object-cover border border-amber-200 cursor-zoom-in" />
+                            <span className="absolute -top-1 -left-1 bg-slate-700 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center shadow">{j + 1}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   );
