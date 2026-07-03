@@ -10,13 +10,14 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { PLATFORM_SOURCE_FIELDS } from "@/lib/platform-source-fields";
 import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type ImportMatrix, type ImportProfile, type DbProfileRow } from "@/lib/platform-import-profiles";
 import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
+import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string };
 type FieldRow = { field_key: string; field_label: string | null; data_type: string | null; is_required: boolean; sample: string | null; source: string };
-type Listing = { id: string; external_product_id: string | null; title: string | null; sku_code: string | null; matched_parent_sku_id: string | null; price: number | null; status: string | null };
+type Listing = { id: string; external_product_id: string | null; title: string | null; sku_code: string | null; matched_parent_sku_id: string | null; matched_code?: string | null; matched_name?: string | null; price: number | null; status: string | null };
 
 export default function PlatformCatalogPage() {
   const { can } = useAuth();
@@ -31,6 +32,10 @@ export default function PlatformCatalogPage() {
   const [customProfiles, setCustomProfiles] = useState<ImportProfile[]>([]);
   const [showManager, setShowManager] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  // แถวสินค้าที่กดเปิด (drawer แก้ไข/จับคู่มือ) + ค่าที่กำลังเลือกจับคู่
+  const [openListing, setOpenListing] = useState<Listing | null>(null);
+  const [matchDraft, setMatchDraft] = useState<ParentSkuPickerValue | null>(null);
+  const [savingMatch, setSavingMatch] = useState(false);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [platformId, setPlatformId] = useState("");
@@ -135,6 +140,25 @@ export default function PlatformCatalogPage() {
   const setQueueProfile = (id: number, profileId: string) => setQueue((q) => q.map((it) => it.id === id ? { ...it, profileId } : it));
   const removeFromQueue = (id: number) => setQueue((q) => q.filter((it) => it.id !== id));
 
+  // เปิดแถวสินค้า (drawer แก้ไข/จับคู่มือ) — ตั้งค่าจับคู่เริ่มจากที่มีอยู่
+  const openRow = (l: Listing) => {
+    setOpenListing(l);
+    setMatchDraft(l.matched_parent_sku_id ? { id: l.matched_parent_sku_id, code: l.matched_code ?? "", name: l.matched_name ?? l.matched_code ?? "" } : null);
+  };
+  // บันทึกการจับคู่มือ (parent_sku_id ว่าง = ยกเลิกจับคู่)
+  const saveMatch = async () => {
+    if (!openListing) return;
+    setSavingMatch(true);
+    try {
+      const r = await apiFetch("/api/platform-catalog/match", { method: "POST", body: JSON.stringify({ listing_id: openListing.id, parent_sku_id: matchDraft?.id ?? null }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setNote(matchDraft ? `จับคู่ ${openListing.sku_code ?? "สินค้า"} → ${j.matched_code} แล้ว ✓` : "ยกเลิกจับคู่แล้ว");
+      setOpenListing(null);
+      await load();
+    } catch (e) { setNote("จับคู่ไม่สำเร็จ: " + (e as Error).message); }
+    finally { setSavingMatch(false); }
+  };
+
   const platformCode = platforms.find((p) => p.id === platformId)?.code ?? "";
   const profileOptions = profilesForPlatform(platformCode, customProfiles);
 
@@ -183,7 +207,7 @@ export default function PlatformCatalogPage() {
     { key: "title", header: "ชื่อสินค้า", width: "2fr", sortValue: (l) => l.title ?? "", cell: (l) => <span className="block truncate" title={l.title ?? ""}>{l.title || "—"}</span> },
     { key: "sku", header: "SKU", width: "1fr", cell: (l) => <span className="block truncate font-mono text-xs" title={l.sku_code ?? ""}>{l.sku_code || "—"}</span> },
     { key: "price", header: "ราคา", width: "0.8fr", align: "right", sortValue: (l) => l.price ?? -1, cell: (l) => l.price != null ? <span>{l.price.toLocaleString()}฿</span> : "—" },
-    { key: "match", header: "จับคู่ ERP", width: "5rem", align: "center", cell: (l) => l.matched_parent_sku_id ? <span className="text-emerald-600">✓</span> : <span className="text-slate-300">—</span> },
+    { key: "match", header: "จับคู่ ERP", width: "1.1fr", align: "center", cell: (l) => l.matched_parent_sku_id ? <span className="text-emerald-600 text-xs font-mono truncate" title={l.matched_name ?? ""}>✓ {l.matched_code || ""}</span> : <span className="text-amber-500 text-xs">จับคู่</span> },
   ];
   const fcols: MiniColumn<FieldRow>[] = [
     { key: "key", header: "Field", width: "1.3fr", sortValue: (f) => f.field_key, cell: (f) => <span className="font-mono text-xs">{f.field_key}</span> },
@@ -275,7 +299,7 @@ export default function PlatformCatalogPage() {
       {loading ? <p className="text-slate-400 text-sm py-8 text-center">กำลังโหลด...</p> : tab === "catalog" ? (
         listings.length === 0
           ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่มีข้อมูลสินค้าบนแพลตฟอร์มนี้<br />กด “⬆️ อัปไฟล์ export” ด้านบน เพื่อนำเข้าไฟล์ Excel/CSV จาก Seller Center</div>
-          : <MiniTable rows={listings} columns={cols} rowKey={(l) => l.id} searchText={(l) => `${l.title ?? ""} ${l.sku_code ?? ""} ${l.external_product_id ?? ""}`} resizable storageKey="platform-catalog-listings" dense />
+          : <MiniTable rows={listings} columns={cols} rowKey={(l) => l.id} onRowClick={openRow} searchText={(l) => `${l.title ?? ""} ${l.sku_code ?? ""} ${l.external_product_id ?? ""}`} resizable storageKey="platform-catalog-listings" dense />
       ) : tab === "fields" ? (
         fields.length === 0
           ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่ทราบฟิลด์ของแพลตฟอร์มนี้<br />อัปไฟล์ export แล้วระบบจะอ่านหัวคอลัมน์เป็นฟิลด์ให้อัตโนมัติ</div>
@@ -309,6 +333,46 @@ export default function PlatformCatalogPage() {
       )}
 
       {showManager && <PlatformImportProfileManager platformId={platformId} platformCode={platformCode} onClose={() => setShowManager(false)} onChanged={loadCustomProfiles} />}
+
+      {openListing && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setOpenListing(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg my-8" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+              <h2 className="text-base font-semibold text-slate-800 truncate">สินค้าบนแพลตฟอร์ม</h2>
+              <button onClick={() => setOpenListing(null)} className="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
+            </div>
+            <div className="p-5 space-y-4 text-sm">
+              {/* ข้อมูลสินค้าบนแพลตฟอร์ม */}
+              <div className="space-y-1.5">
+                <div className="text-slate-800 font-medium">{openListing.title || "—"}</div>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
+                  <span>รหัสบนแพลตฟอร์ม: <span className="font-mono text-slate-700">{openListing.external_product_id || "—"}</span></span>
+                  <span>SKU: <span className="font-mono text-slate-700">{openListing.sku_code || "—"}</span></span>
+                  <span>ราคา: <span className="text-slate-700">{openListing.price != null ? `${openListing.price.toLocaleString()}฿` : "—"}</span></span>
+                </div>
+              </div>
+
+              {/* จับคู่กับสินค้าใน ERP */}
+              <div className="border border-slate-200 rounded-xl p-3 space-y-2">
+                <div className="text-xs font-semibold text-slate-600">จับคู่กับสินค้าใน ERP</div>
+                {openListing.matched_parent_sku_id
+                  ? <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">✓ จับคู่อยู่กับ <span className="font-mono">{openListing.matched_code}</span> {openListing.matched_name ? `· ${openListing.matched_name}` : ""}</div>
+                  : <div className="text-xs text-amber-600">ยังไม่จับคู่ — ค้นหาสินค้าในระบบด้านล่างเพื่อผูก</div>}
+                {canEdit ? (
+                  <>
+                    <ParentSkuPicker value={matchDraft} onChange={setMatchDraft} placeholder="ค้นหาสินค้า (รหัส/ชื่อ) เพื่อจับคู่..." disableCreate />
+                    <div className="flex items-center gap-2 pt-1">
+                      <button onClick={saveMatch} disabled={savingMatch} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{savingMatch ? "กำลังบันทึก..." : "บันทึกการจับคู่"}</button>
+                      {openListing.matched_parent_sku_id && <button onClick={() => { setMatchDraft(null); }} disabled={savingMatch} className="h-9 px-3 text-sm text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50 disabled:opacity-50">ล้างที่เลือก</button>}
+                    </div>
+                    <p className="text-[11px] text-slate-400">ล้างที่เลือกแล้วกดบันทึก = ยกเลิกจับคู่</p>
+                  </>
+                ) : <p className="text-xs text-amber-600">ไม่มีสิทธิ์แก้ไข (ดูได้อย่างเดียว)</p>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

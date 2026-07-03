@@ -26,6 +26,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     lq,
   ]);
   const rows = (listings ?? []) as Record<string, unknown>[];
+  // เติมรหัส/ชื่อ Parent SKU ที่จับคู่ไว้ (ไว้โชว์ว่าจับกับอะไร) — ถามเป็นชุดย่อยกัน .in() ยาวเกิน
+  const matchedIds = [...new Set(rows.map((r) => r.matched_parent_sku_id).filter(Boolean) as string[])];
+  const pMap = new Map<string, { code: string | null; name: string | null }>();
+  for (let i = 0; i < matchedIds.length; i += 200) {
+    const { data: ps } = await admin.from("parent_skus_v2").select("id, code, name_th").in("id", matchedIds.slice(i, i + 200));
+    for (const p of ((ps ?? []) as Record<string, unknown>[])) pMap.set(String(p.id), { code: (p.code as string) ?? null, name: (p.name_th as string) ?? null });
+  }
+  for (const r of rows) {
+    const m = r.matched_parent_sku_id ? pMap.get(String(r.matched_parent_sku_id)) : null;
+    r.matched_code = m?.code ?? null; r.matched_name = m?.name ?? null;
+  }
   return NextResponse.json({
     fields: (fields ?? []) as Record<string, unknown>[],
     listings: rows,
