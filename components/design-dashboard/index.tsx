@@ -667,7 +667,7 @@ export function DesignDashboard() {
                 </div>
               ) : (
                 <div className="overflow-x-auto pb-2">
-                  <div className="grid min-w-[1120px] grid-flow-col auto-cols-[160px] gap-3">
+                  <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${boardColumns.length}, minmax(160px, 1fr))` }}>
                     {boardColumns.map((column, index) => {
                       const expanded = expandedCols.has(column.key);
                       const shown = expanded ? column.sheets : column.sheets.slice(0, 8);
