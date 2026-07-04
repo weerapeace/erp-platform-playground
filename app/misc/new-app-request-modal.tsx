@@ -26,6 +26,14 @@ const EMOJI_QUICK = ["🧩", "📋", "📝", "📦", "💰", "🧮", "📅", "�
 
 const PICKER_THRESHOLD = 6; // ตัวเลือกเกินจำนวนนี้ → เปลี่ยนเป็นปุ่มเปิด popup แทนโชว์ชิปเรียง
 const DRAFT_KEY = "misc_new_app_draft"; // เก็บร่างต่อ user (user_ui_prefs) — บันทึกอัตโนมัติ + โหลดกลับตอนเปิด
+const IDEAS_KEY = "misc_app_ideas";     // คลังไอเดียแอป (เก็บหลายรายการไว้ทำทีหลัง) ต่อ user
+
+type DraftData = {
+  icon: string; iconImg: string | null; name: string; purpose: string;
+  selRoles: string[]; usersText: string; dataFields: string[]; features: string[];
+  example: string; selModules: string[]; notes: string;
+};
+type AppIdea = { id: string; title: string; icon: string; iconImg: string | null; savedAt: string; data: DraftData };
 
 function Field({ label, hint, value, onChange, area }: { label: string; hint?: string; value: string; onChange: (v: string) => void; area?: boolean }) {
   return (
@@ -203,9 +211,11 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
   const [generated, setGenerated] = useState("");
   const [draftLoaded, setDraftLoaded] = useState(false); // โหลดร่างเสร็จแล้วหรือยัง (กัน autosave เขียนทับตอนกำลังโหลด)
   const [hasDraft, setHasDraft] = useState(false);       // มีร่างอยู่ → โชว์แถบ "บันทึกร่างอัตโนมัติ · ล้างร่าง"
+  const [ideas, setIdeas] = useState<AppIdea[]>([]);     // คลังไอเดียแอปที่เก็บไว้
+  const [showIdeas, setShowIdeas] = useState(false);     // เปิด/ปิดลิสต์ไอเดีย
 
   // รวมค่าฟอร์มปัจจุบันเป็นก้อนร่าง
-  const draftValue = () => ({ icon, iconImg, name, purpose, selRoles, usersText, dataFields, features, example, selModules, notes });
+  const draftValue = (): DraftData => ({ icon, iconImg, name, purpose, selRoles, usersText, dataFields, features, example, selModules, notes });
 
   // โหลด role จริง + โมดูลจริง (no hardcode) เมื่อเปิด
   useEffect(() => {
@@ -245,6 +255,17 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
     return () => { alive = false; };
   }, [open]);
 
+  // โหลดคลังไอเดียที่เก็บไว้ เมื่อเปิด modal
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    apiFetch(`/api/user-prefs?key=${IDEAS_KEY}`).then((r) => r.json()).then((j) => {
+      const arr = (j?.value as { ideas?: AppIdea[] } | undefined)?.ideas;
+      if (alive && Array.isArray(arr)) setIdeas(arr);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [open]);
+
   // บันทึกร่างอัตโนมัติ (หน่วง 800ms) หลังโหลดร่างเสร็จแล้วเท่านั้น
   useEffect(() => {
     if (!open || !draftLoaded) return;
@@ -268,6 +289,35 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
     setHasDraft(false);
     toast.success("ล้างร่างแล้ว");
   };
+
+  // เขียนคลังไอเดียลง user_ui_prefs
+  const persistIdeas = async (next: AppIdea[]) => {
+    setIdeas(next);
+    try { await apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: IDEAS_KEY, value: { ideas: next } }) }); }
+    catch { toast.error("บันทึกไอเดียไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+  };
+
+  // เก็บฟอร์มปัจจุบันเป็นไอเดียใหม่ (ไว้ทำทีหลัง)
+  const saveAsIdea = async () => {
+    if (!name.trim()) { toast.error("ใส่ชื่อแอปก่อนเก็บเป็นไอเดีย"); return; }
+    const id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+    const idea: AppIdea = { id, title: name.trim(), icon, iconImg, savedAt: new Date().toISOString(), data: draftValue() };
+    await persistIdeas([idea, ...ideas]);
+    setShowIdeas(true);
+    toast.success(`เก็บไอเดีย “${idea.title}” แล้ว (มี ${ideas.length + 1} รายการ)`);
+  };
+
+  // เปิดไอเดียกลับมาแก้ / สร้าง Prompt ต่อ
+  const loadIdea = (it: AppIdea) => {
+    const v = it.data;
+    setIcon(v.icon ?? "🧩"); setIconImg(v.iconImg ?? null); setName(v.name ?? ""); setPurpose(v.purpose ?? "");
+    setSelRoles(v.selRoles ?? []); setUsersText(v.usersText ?? ""); setDataFields(v.dataFields ?? []);
+    setFeatures(v.features ?? []); setExample(v.example ?? ""); setSelModules(v.selModules ?? []); setNotes(v.notes ?? "");
+    setGenerated(""); setShowIdeas(false);
+    toast.success(`เปิดไอเดีย “${it.title}” — แก้ต่อหรือกดสร้าง Prompt ได้เลย`);
+  };
+
+  const deleteIdea = async (id: string) => { await persistIdeas(ideas.filter((x) => x.id !== id)); toast.success("ลบไอเดียแล้ว"); };
 
   const build = () => {
     if (!name.trim()) { toast.error("ใส่ชื่อแอปก่อน"); return; }
@@ -314,11 +364,38 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
       title="✨ ขอแอปใหม่ (สร้าง Prompt ให้ Claude)"
       description="กรอกตามคำถาม แล้วกด “สร้าง Prompt” → คัดลอกไปวางให้ Claude สร้างให้ (ไม่ต้องรู้โค้ด)"
       footer={<>
-        <button onClick={onClose} className="h-9 px-4 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">ปิด</button>
-        <button onClick={() => void saveDraft()} className="h-9 px-4 text-sm rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50">💾 บันทึกร่าง</button>
+        <button onClick={onClose} className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">ปิด</button>
+        <button onClick={() => void saveDraft()} className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">💾 บันทึกร่าง</button>
+        <button onClick={() => void saveAsIdea()} className="h-9 px-3 text-sm rounded-lg border border-indigo-300 text-indigo-600 hover:bg-indigo-50">💡 เก็บเป็นไอเดีย</button>
         <button onClick={build} className="h-9 px-5 text-sm font-medium rounded-lg bg-rose-500 text-white hover:bg-rose-600">✨ สร้าง Prompt</button>
       </>}>
       <div className="space-y-3">
+        {/* คลังไอเดียแอปที่เก็บไว้ (ไว้ทำทีหลัง) */}
+        {ideas.length > 0 && (
+          <div className="rounded-lg border border-indigo-200 bg-indigo-50/50">
+            <button type="button" onClick={() => setShowIdeas((v) => !v)}
+              className="flex w-full items-center justify-between px-3 py-2 text-xs font-medium text-indigo-700">
+              <span>💡 ไอเดียที่เก็บไว้ ({ideas.length})</span>
+              <span className="text-[10px]">{showIdeas ? "▲ ซ่อน" : "▼ ดู"}</span>
+            </button>
+            {showIdeas && (
+              <div className="max-h-44 space-y-1 overflow-y-auto border-t border-indigo-100 px-2 py-1.5">
+                {ideas.map((it) => (
+                  <div key={it.id} className="flex items-center gap-2 rounded-lg border border-indigo-100 bg-white px-2 py-1.5">
+                    <span className="text-base leading-none">{it.iconImg ? "🖼️" : it.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-medium text-slate-700">{it.title}</div>
+                      <div className="text-[10px] text-slate-400">{new Date(it.savedAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</div>
+                    </div>
+                    <button type="button" onClick={() => loadIdea(it)} className="h-7 rounded-md border border-indigo-300 px-2 text-[11px] text-indigo-600 hover:bg-indigo-50">เปิด</button>
+                    <button type="button" onClick={() => void deleteIdea(it.id)} title="ลบไอเดีย"
+                      className="h-7 rounded-md border border-slate-200 px-2 text-[11px] text-slate-400 hover:border-rose-200 hover:text-rose-500">🗑</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {hasDraft && (
           <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-700">
             <span>📝 บันทึกร่างไว้อัตโนมัติ — ปิดแล้วเปิดมากรอกต่อได้</span>
