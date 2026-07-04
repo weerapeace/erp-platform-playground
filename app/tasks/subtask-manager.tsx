@@ -23,7 +23,7 @@ import { tr } from "@/lib/lang";
 import type { UserPickerValue } from "@/components/pickers";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import {
-  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint,
+  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel,
   type CreativeSubtask, type SubtaskType, type SubtaskAssignee,
 } from "./data";
 
@@ -108,11 +108,12 @@ export function SubtaskManager({ taskId, subCardStyle, pushToast, canApprove = f
       )}
       <AddSubtaskForm
         onAdd={async (body) => { await addSubtask(taskId, body); await reload(); }}
-        onAddType={async (ty) => {
-          // เพิ่ม 1 งานย่อยของชนิดที่เลือก + ก๊อปค่าตั้ง (config) จาก registry ของชนิดนั้น → พฤติกรรมครบเหมือนสร้างจากเทมเพลต
+        onAddType={async (ty, opts) => {
+          // เพิ่ม 1 งานย่อยของชนิดที่เลือก + ก๊อปค่าตั้ง (config) จาก registry · content: ใส่ประเภทคอนเทนต์ + ผู้รับผิดชอบจากมินิฟอร์ม
           const isDescText = ty.approve_target === "sku_description";
           await addSubtask(taskId, {
             title: ty.label_th, type: ty.key, required_before_next: false,
+            assignee_ids: opts?.assignee_ids ?? [],
             config: {
               required: ty.default_required, due_offset_days: ty.default_due_offset_days,
               requires_approval: ty.requires_approval, approve_target: ty.approve_target,
@@ -120,6 +121,7 @@ export function SubtaskManager({ taskId, subCardStyle, pushToast, canApprove = f
               applies_to: (ty.applies_to as ("parent" | "sku")[]) ?? ["parent", "sku"],
               has_copy_prompt: ty.has_copy_prompt, prompt_template: ty.prompt_template,
               description_field: isDescText ? "description" : undefined, desc_mode: isDescText ? "append" : undefined,
+              ...(opts?.post_type ? { post_type: opts.post_type } : {}),
             },
           });
           await reload();
@@ -134,14 +136,18 @@ export function SubtaskManager({ taskId, subCardStyle, pushToast, canApprove = f
 // ฟอร์มเพิ่มงานย่อย — เลือก "ชนิดงานย่อย" ก่อน (งานรูปภาพ/เขียนคำอธิบาย/ฯลฯ) → เพิ่ม 1 งานย่อยของชนิดนั้น (ค่าตั้งครบ) · หรือ "เพิ่มเอง" (ชื่อ+ผู้รับผิดชอบ)
 export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
   onAdd: (body: { title: string; title_en?: string | null; description?: string | null; assignee_ids?: string[] }) => Promise<void>;
-  onAddType?: (ty: SubtaskType) => Promise<void>;
+  onAddType?: (ty: SubtaskType, opts?: { post_type?: string; assignee_ids?: string[] }) => Promise<void>;
   pushToast: ToastFn;
 }) {
   const t = useT();
-  const [mode, setMode] = useState<"closed" | "choose" | "custom">("closed");
+  const [mode, setMode] = useState<"closed" | "choose" | "typeForm" | "custom">("closed");
   const [types, setTypes] = useState<SubtaskType[]>([]);
   const [tyLoading, setTyLoading] = useState(false);
   const [applyingKey, setApplyingKey] = useState<string | null>(null);
+  const [selType, setSelType] = useState<SubtaskType | null>(null);   // ชนิดที่เลือก (มินิฟอร์ม content)
+  const [postType, setPostType] = useState("");
+  const [typeAssignees, setTypeAssignees] = useState<{ id: string; label: string }[]>([]);
+  const [adding2, setAdding2] = useState<UserPickerValue | null>(null);
   const [title, setTitle] = useState("");
   const [titleEn, setTitleEn] = useState("");
   const [desc, setDesc] = useState("");
@@ -156,12 +162,17 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
     listSubtaskTypes().then(setTypes).catch((e) => pushToast("error", (e as Error).message)).finally(() => setTyLoading(false));
   }, [mode, types.length, tyLoading, pushToast]);
 
-  const applyType = async (ty: SubtaskType) => {
+  const applyType = async (ty: SubtaskType, opts?: { post_type?: string; assignee_ids?: string[] }) => {
     if (!onAddType) return;
     setApplyingKey(ty.key);
-    try { await onAddType(ty); setMode("closed"); }
+    try { await onAddType(ty, opts); setMode("closed"); }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setApplyingKey(null); }
+  };
+  // content = ต้องเลือกประเภทคอนเทนต์ + ผู้รับผิดชอบก่อน → เปิดมินิฟอร์ม · ชนิดอื่น = เพิ่มทันที
+  const pickType = (ty: SubtaskType) => {
+    if (ty.key === "content") { setSelType(ty); setPostType(""); setTypeAssignees([]); setMode("typeForm"); }
+    else void applyType(ty);
   };
   const submit = async () => {
     if (!title.trim()) return;
@@ -184,7 +195,7 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
         : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
             {types.map((ty) => (
-              <button key={ty.key} type="button" disabled={!!applyingKey} onClick={() => applyType(ty)}
+              <button key={ty.key} type="button" disabled={!!applyingKey} onClick={() => pickType(ty)}
                 className="flex items-start gap-2 text-left border border-slate-200 rounded-lg px-3 py-2 hover:border-violet-300 hover:bg-white disabled:opacity-50">
                 <span className="text-base leading-none mt-0.5 shrink-0">{ty.icon || "🧩"}</span>
                 <span className="min-w-0">
@@ -197,6 +208,38 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
         )}
       <div className="border-t border-violet-100 pt-2">
         <button onClick={() => setMode("custom")} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มเอง (กำหนดชื่อ/ผู้รับผิดชอบ)", "Add manually (name/assignees)")}</button>
+      </div>
+    </div>
+  );
+
+  // มินิฟอร์มสำหรับชนิด "คอนเทนต์" — เลือกประเภทคอนเทนต์ + ผู้รับผิดชอบ ก่อนเพิ่ม
+  if (mode === "typeForm" && selType) return (
+    <div className="mt-2 border border-violet-200 rounded-lg p-3 space-y-2 bg-violet-50/30">
+      <div className="flex items-center justify-between">
+        <button onClick={() => setMode("choose")} className="text-xs text-slate-500 hover:text-violet-700">← {t("เลือกชนิด", "Choose type")}</button>
+        <button onClick={() => setMode("closed")} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>
+      </div>
+      <p className="text-sm font-medium text-slate-700">{selType.icon || "🧩"} {selType.label_th}</p>
+      <div>
+        <p className="text-[11px] text-slate-400 mb-1">{t("ประเภทคอนเทนต์", "Content type")}</p>
+        <select value={postType} onChange={(e) => setPostType(e.target.value)} className="h-9 w-full border border-slate-200 rounded-lg px-2 text-sm bg-white">
+          <option value="">{t("— เลือกประเภท —", "— select —")}</option>
+          {POST_TYPES.map((p) => <option key={p.value} value={p.value}>{postTypeLabel(p.value)}</option>)}
+        </select>
+      </div>
+      <div>
+        <p className="text-[11px] text-slate-400 mb-1">{t("มอบหมายให้ (เลือกได้หลายคน)", "Assign to (multiple)")}</p>
+        <div className="flex flex-wrap gap-1.5 mb-1.5">
+          {typeAssignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button onClick={() => setTypeAssignees((xs) => xs.filter((x) => x.id !== a.id))} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 min-w-0"><UserPicker value={adding2} onChange={(v) => { if (v && !typeAssignees.some((a) => a.id === v.id)) setTypeAssignees((xs) => [...xs, { id: v.id, label: v.name }]); setAdding2(null); }} disableCreate /></div>
+          <TeamFill onPick={(members) => setTypeAssignees((xs) => { const fresh = members.filter((m) => !xs.some((a) => a.id === m.id)).map((m) => ({ id: m.id, label: m.name })); return fresh.length ? [...xs, ...fresh] : xs; })} />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2">
+        <button onClick={() => setMode("choose")} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+        <button onClick={() => void applyType(selType, { post_type: postType || undefined, assignee_ids: typeAssignees.map((a) => a.id) })} disabled={applyingKey === selType.key} className="h-8 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{applyingKey === selType.key ? "..." : t("เพิ่ม", "Add")}</button>
       </div>
     </div>
   );
