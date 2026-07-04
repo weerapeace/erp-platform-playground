@@ -392,7 +392,7 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
       <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-800">⚙ เลือกคอลัมน์ตารางลูก</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
         </div>
         <div className="px-4 py-2 text-[11px] text-slate-400 border-b border-slate-100">
           คอลัมน์หลัก: <b className="text-slate-600">{labelOf(titleField)}</b> (แสดงเสมอ) — เลือกคอลัมน์เพิ่มด้านล่าง
@@ -405,9 +405,9 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
               {selected.map((k, i) => (
                 <li key={k} className="flex items-center gap-1 px-2 py-1.5 bg-blue-50/60 border border-blue-100 rounded-md text-sm">
                   <span className="flex-1 truncate text-slate-700">{labelOf(k)}</span>
-                  <button onClick={() => move(i, -1)} disabled={i === 0} title="ขึ้น" className="w-6 h-6 rounded text-slate-400 hover:text-blue-600 disabled:opacity-30">▲</button>
-                  <button onClick={() => move(i, 1)} disabled={i === selected.length - 1} title="ลง" className="w-6 h-6 rounded text-slate-400 hover:text-blue-600 disabled:opacity-30">▼</button>
-                  <button onClick={() => setSelected(selected.filter((x) => x !== k))} title="เอาออก" className="w-6 h-6 rounded text-slate-400 hover:text-red-500">✕</button>
+                  <button type="button" onClick={() => move(i, -1)} disabled={i === 0} title="ขึ้น" className="w-6 h-6 rounded text-slate-400 hover:text-blue-600 disabled:opacity-30">▲</button>
+                  <button type="button" onClick={() => move(i, 1)} disabled={i === selected.length - 1} title="ลง" className="w-6 h-6 rounded text-slate-400 hover:text-blue-600 disabled:opacity-30">▼</button>
+                  <button type="button" onClick={() => setSelected(selected.filter((x) => x !== k))} title="เอาออก" className="w-6 h-6 rounded text-slate-400 hover:text-red-500">✕</button>
                 </li>
               ))}
             </ul>
@@ -426,8 +426,8 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
           </div>
         </div>
         <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
-          <button onClick={onClose} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
-          <button onClick={() => onSave(selected)} className="h-8 px-4 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">บันทึก (ทุกคนเห็น)</button>
+          <button type="button" onClick={onClose} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
+          <button type="button" onClick={() => onSave(selected)} className="h-8 px-4 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">บันทึก (ทุกคนเห็น)</button>
         </div>
       </div>
     </div>
@@ -494,7 +494,7 @@ function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, imageField, la
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-800">เลือก{title ? ` ${title}` : "รายการ"}ที่มีอยู่แล้ว</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
         </div>
         <div className="p-3 border-b border-slate-100">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหารหัส/ชื่อ…" autoFocus
@@ -531,8 +531,8 @@ function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, imageField, la
         <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between gap-2">
           <span className="text-xs text-slate-500">{picked.size > 0 ? `เลือก ${picked.size} รายการ` : "เลือกรายการที่จะผูก"}</span>
           <div className="flex gap-2">
-            <button onClick={onClose} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
-            <button onClick={attach} disabled={saving || picked.size === 0}
+            <button type="button" onClick={onClose} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
+            <button type="button" onClick={attach} disabled={saving || picked.size === 0}
               className="h-8 px-4 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-40">
               {saving ? "กำลังผูก…" : `ผูกเป็นลูก (${picked.size})`}
             </button>
@@ -753,10 +753,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) { alert("บันทึกคอลัมน์ไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
-      setSubFields(next);
+      setSubFields(next);   // อัปเดตคอลัมน์ใน inline ทันที (ไม่ reload → ไม่ปิด drawer)
       setPickerOpen(false);
-      // โหลดใหม่ให้ค่าจาก DB มีผลทุกที่ (และยืนยันว่าบันทึกจริง)
-      if (typeof window !== "undefined") window.location.reload();
     } catch (e) {
       alert("บันทึกคอลัมน์ไม่สำเร็จ: " + (e instanceof Error ? e.message : "network error"));
     }
