@@ -112,7 +112,10 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [massFake, setMassFake] = useState("");   // Mass fill ราคาเต็มทุก SKU
   const [massSale, setMassSale] = useState("");   // Mass fill ราคาขายทุก SKU
-  const [massBusy, setMassBusy] = useState(false);
+  // staged-save: เก็บการแก้ค้างในหน้า แล้วกด "บันทึก" ทีเดียว (ไม่ auto-save)
+  const [priceEdits, setPriceEdits] = useState<Record<string, { fake_price?: number | null; list_price?: number | null }>>({});
+  const [dirtyPlatforms, setDirtyPlatforms] = useState<Set<string>>(new Set());
+  const [savingAll, setSavingAll] = useState(false);
   const [creating, setCreating] = useState(false);  // สร้างสินค้าใหม่บน LINE
   const [displaying, setDisplaying] = useState(false); // เปิด/ปิดการขายบน LINE
   const [pushingPrice, setPushingPrice] = useState(false); // ส่งราคา/ส่วนลดขึ้น LINE
@@ -148,38 +151,43 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const activeDraft = drafts[active] ?? {};
   const title = activeDraft.title ?? "";
   const description = activeDraft.description ?? "";
+  const dirty = dirtyPlatforms.size > 0 || Object.keys(priceEdits).length > 0;
+  const markDirty = () => setDirtyPlatforms((s) => (s.has(active) ? s : new Set(s).add(active)));
 
   // เติมชื่อ/รายละเอียดจากข้อมูลสินค้าใน ERP (ชื่อ = name_platform > name_th)
-  const prefillFromErp = async (field: "title" | "description") => {
+  const prefillFromErp = (field: "title" | "description") => {
     const val = field === "title" ? (parent?.name_platform || parent?.name_th || "") : (parent?.description || "");
     if (!val.trim()) { toast("info", "ไม่มีข้อมูลใน ERP ให้เติม"); return; }
-    await saveField(field, val);
+    saveField(field, val);
     setPrefillTick((t) => t + 1);
   };
-  // Mass fill ราคา (เต็ม/ขาย) ทุก SKU ใต้สินค้านี้
-  const massFillPrice = async (field: "fake_price" | "list_price", valueStr: string, onlyEmpty: boolean) => {
+  // Mass fill ราคา (เต็ม/ขาย) ทุก SKU — ค้างในหน้า (กด "บันทึก" ถึงเขียนจริง)
+  const massFillPrice = (field: "fake_price" | "list_price", valueStr: string, onlyEmpty: boolean) => {
     const p = Number(valueStr);
     if (!Number.isFinite(p) || p < 0) { toast("error", "ใส่ราคาให้ถูกต้อง"); return; }
-    setMassBusy(true);
-    try {
-      const r = await apiFetch("/api/product-platforms/mass-price", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, price: p, only_empty: onlyEmpty, field }) });
-      const j = await r.json(); if (j.error) throw new Error(j.error);
-      toast("success", `ตั้ง${field === "fake_price" ? "ราคาเต็ม" : "ราคาขาย"} ${j.updated} SKU แล้ว`); setMassFake(""); setMassSale(""); await load();
-    } catch (e) { toast("error", (e as Error).message); } finally { setMassBusy(false); }
+    const targets = variants.filter((v) => !(onlyEmpty && (((field === "fake_price" ? v.fake_price : v.sale_price) ?? 0) > 0)));
+    setVariants((vs) => vs.map((v) => {
+      if (!targets.some((t) => t.id === v.id)) return v;
+      const nv = { ...v, ...(field === "fake_price" ? { fake_price: p } : { sale_price: p }) };
+      const disc = (nv.fake_price != null && nv.sale_price != null && nv.fake_price > nv.sale_price) ? nv.fake_price - nv.sale_price : 0;
+      return { ...nv, discount: disc, has_price: nv.fake_price != null && nv.fake_price > 0 };
+    }));
+    setPriceEdits((pe) => { const next = { ...pe }; for (const t of targets) next[t.id] = { ...next[t.id], [field]: p }; return next; });
+    setMassFake(""); setMassSale("");
+    toast("info", `ตั้ง${field === "fake_price" ? "ราคาเต็ม" : "ราคาขาย"} ${targets.length} SKU (ยังไม่บันทึก — กด “บันทึก”)`);
   };
   // ฟิลด์เพิ่มเติม (แบรนด์/บาร์โค้ด/น้ำหนัก-ขนาด/ของขวัญ) — เก็บรวมใน draft.extra (client ส่งทั้งก้อน)
   const extra = (activeDraft.extra ?? {}) as Record<string, unknown>;
   const exStr = (k: string) => (extra[k] == null ? "" : String(extra[k]));
-  const saveExtra = async (patch: Record<string, unknown>) => {
+  const saveExtra = (patch: Record<string, unknown>) => {
     const next = { ...extra, ...patch };
     setDrafts((d) => ({ ...d, [active]: { ...d[active], extra: next } }));
-    try { const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: active, extra: next }) }); const j = await r.json(); if (j.error) throw new Error(j.error); toast("success", "เซฟแล้ว"); }
-    catch (e) { toast("error", (e as Error).message); }
+    markDirty();
   };
   const giftCats = (extra.gift_categories ?? []) as string[];
   const toggleGiftCat = (c: string) => saveExtra({ gift_categories: giftCats.includes(c) ? giftCats.filter((x) => x !== c) : [...giftCats, c] });
   // แก้ราคาราย SKU (inline) — เขียน fake_price (ราคาเต็ม) หรือ list_price (ราคาขาย) + คิดส่วนลดใหม่ในหน้าทันที
-  const savePrice = useCallback(async (skuId: string, field: "fake_price" | "list_price", priceStr: string) => {
+  const savePrice = useCallback((skuId: string, field: "fake_price" | "list_price", priceStr: string) => {
     const raw = priceStr.trim();
     const p = raw === "" ? null : Number(raw);
     if (p != null && (!Number.isFinite(p) || p < 0)) { toast("error", "ราคาไม่ถูกต้อง"); return; }
@@ -189,13 +197,33 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
       const disc = (nv.fake_price != null && nv.sale_price != null && nv.fake_price > nv.sale_price) ? nv.fake_price - nv.sale_price : 0;
       return { ...nv, discount: disc, has_price: nv.fake_price != null && nv.fake_price > 0 };
     }));
+    setPriceEdits((pe) => ({ ...pe, [skuId]: { ...pe[skuId], [field]: p } }));   // ค้างไว้ กด "บันทึก" ถึงเขียน
+  }, [toast]);
+  // บันทึกทั้งหมด (staged) — ร่างต่อแพลตฟอร์มที่แก้ + ราคา SKU ที่แก้
+  const saveAll = async () => {
+    if (!dirty || savingAll) return;
+    setSavingAll(true);
     try {
-      const r = await apiFetch("/api/product-platforms/sku-price", { method: "POST", body: JSON.stringify({ sku_id: skuId, field, price: p }) });
-      const j = await r.json(); if (j.error) throw new Error(j.error);
-    } catch (e) { toast("error", (e as Error).message); load(); }
-  }, [toast, load]);
+      for (const pid of dirtyPlatforms) {
+        const d = drafts[pid] ?? {};
+        const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: pid, title: d.title ?? null, description: d.description ?? null, category_path: d.category_path ?? null, image_keys: d.image_keys ?? [], extra: d.extra ?? {} }) });
+        const j = await r.json(); if (j.error) throw new Error(j.error);
+      }
+      for (const [skuId, edit] of Object.entries(priceEdits)) {
+        for (const field of ["fake_price", "list_price"] as const) {
+          if (field in edit) {
+            const r = await apiFetch("/api/product-platforms/sku-price", { method: "POST", body: JSON.stringify({ sku_id: skuId, field, price: edit[field] }) });
+            const j = await r.json(); if (j.error) throw new Error(j.error);
+          }
+        }
+      }
+      setDirtyPlatforms(new Set()); setPriceEdits({});
+      toast("success", "บันทึกแล้ว"); await load();
+    } catch (e) { toast("error", (e as Error).message); } finally { setSavingAll(false); }
+  };
   // สร้างสินค้าใหม่บน LINE (สินค้าที่ยังไม่มีบน LINE)
   const createOnLine = async () => {
+    if (dirty) { toast("info", "มีข้อมูลที่ยังไม่บันทึก — กด “บันทึก” ก่อน"); return; }
     setCreating(true);
     try {
       const r = await apiFetch("/api/line-shopping/create-product", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId }) });
@@ -204,6 +232,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     } catch (e) { toast("error", (e as Error).message); } finally { setCreating(false); }
   };
   const setDisplayLine = async (status: "onsale" | "hide") => {
+    if (dirty) { toast("info", "มีข้อมูลที่ยังไม่บันทึก — กด “บันทึก” ก่อน"); return; }
     setDisplaying(true);
     try {
       const r = await apiFetch("/api/line-shopping/set-display", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, status }) });
@@ -213,6 +242,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   };
   // ส่งราคา + ส่วนลด (instantDiscount) ของสินค้านี้ขึ้น LINE — ใช้ push-prices โหมดสินค้าเดียว (หาแบรนด์จาก parent)
   const pushPricesLine = async () => {
+    if (dirty) { toast("info", "มีข้อมูลที่ยังไม่บันทึก — กด “บันทึก” ก่อนส่ง"); return; }
     setPushingPrice(true);
     try {
       const r = await apiFetch("/api/line-shopping/push-prices", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId }) });
@@ -227,21 +257,16 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setCatInput((drafts[active]?.category_path ?? mappings[active] ?? "") as string); }, [active]);
 
-  const saveField = async (field: keyof Draft, value: string) => {
+  const saveField = (field: keyof Draft, value: string) => {
     const cur = (drafts[active]?.[field] ?? "") as string;
     if ((value || "") === (cur || "")) return;
     setDrafts((d) => ({ ...d, [active]: { ...d[active], [field]: value || null } }));
-    try {
-      const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: active, [field]: value }) });
-      const j = await r.json(); if (j.error) throw new Error(j.error);
-      toast("success", "เซฟร่างแล้ว");
-    } catch (e) { toast("error", (e as Error).message); }
+    markDirty();
   };
-  // เลือกรูปส่งแพลตฟอร์ม (array) — เซฟทันที
-  const saveImages = async (keys: string[]) => {
+  // เลือกรูปส่งแพลตฟอร์ม (array) — ค้างในหน้า กด "บันทึก" ถึงเขียน
+  const saveImages = (keys: string[]) => {
     setDrafts((d) => ({ ...d, [active]: { ...d[active], image_keys: keys } }));
-    try { const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: active, image_keys: keys }) }); const j = await r.json(); if (j.error) throw new Error(j.error); }
-    catch (e) { toast("error", (e as Error).message); }
+    markDirty();
   };
   const toggleImage = (key: string) => {
     const cur = activeDraft.image_keys ?? [];
@@ -325,7 +350,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   if (!mounted) return null;
   return createPortal(
     <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/20 z-40" onClick={() => { if (!dirty || window.confirm("มีข้อมูลที่ยังไม่ได้บันทึก — ออกโดยไม่บันทึก?")) onClose(); }} />
       <div style={{ width }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
         <div onMouseDown={startResize} title="ลากเพื่อปรับความกว้าง" className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-400/40 z-[60]" />
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
@@ -333,7 +358,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
             <h3 className="text-base font-semibold text-slate-900 truncate">🏬 ลงขายหลายแพลตฟอร์ม</h3>
             {parent && <p className="text-xs text-slate-500 truncate"><span className="font-mono">{parent.code}</span> · {parent.name_th}</p>}
           </div>
-          <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
+          <button onClick={() => { if (!dirty || window.confirm("มีข้อมูลที่ยังไม่ได้บันทึก — ออกโดยไม่บันทึก?")) onClose(); }} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
         </div>
 
         {loading ? <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">กำลังโหลด...</div> : (
@@ -430,14 +455,14 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                           <input type="number" min={0} value={massFake} onChange={(e) => setMassFake(e.target.value)} placeholder="ราคาเต็ม" className="h-8 w-24 border border-slate-200 rounded-md pl-2 pr-5 text-sm" />
                           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">฿</span>
                         </div>
-                        <button onClick={() => massFillPrice("fake_price", massFake, false)} disabled={massBusy || !massFake} className="h-8 px-2.5 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">ตั้งราคาเต็ม</button>
+                        <button onClick={() => massFillPrice("fake_price", massFake, false)} disabled={!massFake} className="h-8 px-2.5 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">ตั้งราคาเต็ม</button>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <div className="relative">
                           <input type="number" min={0} value={massSale} onChange={(e) => setMassSale(e.target.value)} placeholder="ราคาขาย" className="h-8 w-24 border border-emerald-200 rounded-md pl-2 pr-5 text-sm" />
                           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">฿</span>
                         </div>
-                        <button onClick={() => massFillPrice("list_price", massSale, false)} disabled={massBusy || !massSale} className="h-8 px-2.5 text-sm text-emerald-700 border border-emerald-300 rounded-lg hover:bg-emerald-50 disabled:opacity-40">ตั้งราคาขาย</button>
+                        <button onClick={() => massFillPrice("list_price", massSale, false)} disabled={!massSale} className="h-8 px-2.5 text-sm text-emerald-700 border border-emerald-300 rounded-lg hover:bg-emerald-50 disabled:opacity-40">ตั้งราคาขาย</button>
                       </div>
                       <span className="text-[10px] text-slate-400">ส่วนลด = ราคาเต็ม − ราคาขาย (คิดให้อัตโนมัติ)</span>
                     </div>
@@ -510,10 +535,10 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
             )}
 
             <div className="border-t border-slate-200 px-5 py-3 flex items-center justify-between gap-2 shrink-0">
-              <span className="text-[11px] text-slate-400">เซฟร่างอัตโนมัติ · ลงขายตอนนี้เป็นแบบจำลอง (mock) — ต่อ API จริงทีหลังต่อแพลตฟอร์ม</span>
+              <span className="text-[11px] text-slate-400">{dirty ? <span className="text-amber-600 font-medium">● มีข้อมูลที่ยังไม่บันทึก</span> : "แก้แล้วกด “บันทึก” · ลงขายเป็นแบบจำลอง (mock)"}</span>
               <div className="flex items-center gap-2 shrink-0">
-                {canPublish && <button onClick={publishAll} disabled={publishing} className="h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">📦 ลงขายทุกที่พร้อม</button>}
-                <button onClick={publishOnePlatform} disabled={!canPublish || publishing || !ready || !account?.is_active} title={!canPublish ? "ไม่มีสิทธิ์ลงขาย" : !account?.is_active ? "ยังไม่มีร้าน" : !ready ? "ข้อมูลยังไม่ครบ" : ""} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed">{publishing ? "..." : published ? "🔄 ส่ง update" : "📤 ลงขาย"}</button>
+                {canEdit && <button onClick={saveAll} disabled={!dirty || savingAll} className={`h-9 px-4 text-sm font-medium rounded-lg ${dirty ? "text-white bg-emerald-600 hover:bg-emerald-700" : "text-slate-400 bg-slate-100 cursor-not-allowed"} disabled:opacity-60`}>{savingAll ? "กำลังบันทึก..." : "💾 บันทึก"}</button>}
+                {canPublish && <button onClick={publishOnePlatform} disabled={!canPublish || publishing || !ready || !account?.is_active} title={!canPublish ? "ไม่มีสิทธิ์ลงขาย" : !account?.is_active ? "ยังไม่มีร้าน" : !ready ? "ข้อมูลยังไม่ครบ" : ""} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed">{publishing ? "..." : published ? "🔄 ส่ง update" : "📤 ลงขาย"}</button>}
               </div>
             </div>
           </>
