@@ -508,6 +508,7 @@ export type SubtaskStepConfig = {
   content_id?: string;             // งานย่อยชนิด content: คอนเทนต์ที่ผูก (erp_creative_content.id)
   content_template_id?: string;    // แม่แบบคอนเทนต์ที่ใช้ตอนสร้าง
   post_type?: string;              // ประเภทคอนเทนต์
+  platform_notes?: Record<string, string>;   // หมายเหตุ/รายละเอียดงาน ต่อแพลตฟอร์ม (เฉพาะคอนเทนต์นี้)
 };
 export type TemplateStep = { type?: string; title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; assignee_labels?: string[]; config?: SubtaskStepConfig };
 

@@ -355,6 +355,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const [open, setOpen] = useState(true);   // กาง (ขยาย) งานย่อยเป็นค่าเริ่มต้น
   const [workOpen, setWorkOpen] = useState(false); // ป๊อปอัปแนบงาน/ส่งงาน
   const [contentOpen, setContentOpen] = useState(false); // ContentDrawer (งานย่อยชนิด content)
+  const [detailsOpen, setDetailsOpen] = useState(false); // ป๊อป "รายละเอียดงาน" ต่อแพลตฟอร์ม (content)
   const [editOpen, setEditOpen] = useState(false); // ป๊อปอัปแก้ไขงานย่อย
   const [cardLb, setCardLb] = useState(-1); // ดูรูปบนการ์ดเต็มจอ
   const [busy, setBusy] = useState(false);
@@ -545,11 +546,14 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
                 ))}
               </div>
             )}
-            <button onClick={openWork} className={`w-full h-9 rounded-lg text-sm font-medium ${canSubmit ? "bg-amber-500 text-white hover:bg-amber-600" : "text-violet-700 border border-violet-200 hover:bg-violet-50"}`}>
-              {canSubmit
-                ? (platformConfirm ? `📤 ${t("ตรวจ & ส่งงาน", "Review & submit")}` : `📤 ${t("ส่งงาน (แนบรูป/ลิงก์)", "Submit (attach files/links)")}`)
-                : (platformConfirm ? `🔎 ${t("ดูรายละเอียด Platform", "View platform details")}` : `📎 ${attachCount > 0 ? t("จัดการไฟล์แนบ", "Manage attachments") : t("แนบงาน", "Attach work")}`)}
-            </button>
+            <div className="flex items-center gap-2">
+              {sub.subtask_type === "content" && <button onClick={() => setDetailsOpen(true)} title={t("รายละเอียด/สิ่งที่ต้องแนบ ต่อแพลตฟอร์ม", "Details / requirements per platform")} className="h-9 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">📋 {t("รายละเอียดงาน", "Details")}</button>}
+              <button onClick={openWork} className={`flex-1 h-9 rounded-lg text-sm font-medium ${canSubmit ? "bg-amber-500 text-white hover:bg-amber-600" : "text-violet-700 border border-violet-200 hover:bg-violet-50"}`}>
+                {canSubmit
+                  ? (platformConfirm ? `📤 ${t("ตรวจ & ส่งงาน", "Review & submit")}` : `📤 ${t("ส่งงาน (แนบรูป/ลิงก์)", "Submit (attach files/links)")}`)
+                  : (platformConfirm ? `🔎 ${t("ดูรายละเอียด Platform", "View platform details")}` : `📎 ${attachCount > 0 ? t("จัดการไฟล์แนบ", "Manage attachments") : t("แนบงาน", "Attach work")}`)}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -560,6 +564,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         : <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} approveTarget={String(approveTarget ?? "none")} hasDescSibling={hasDescSibling} onClose={() => setWorkOpen(false)} />)}
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
       {contentOpen && sub.config?.content_id && <ContentDrawer contentId={String(sub.config.content_id)} brands={[]} onClose={() => setContentOpen(false)} onChanged={() => { void reload(); }} pushToast={pushToast} />}
+      {detailsOpen && <ContentDetailsModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} onClose={() => setDetailsOpen(false)} />}
       {reviseOpen && <ReviseModal busy={busy} onCancel={() => setReviseOpen(false)} onConfirm={async (c) => { setReviseOpen(false); await patch({ status: "revision_requested", comment: c }); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); }} />}
     </div>
   );
@@ -866,6 +871,39 @@ function ContentTemplateModal({ pushToast, onClose, onChanged, onPick }: { pushT
             <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
             <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : editId ? t("บันทึก", "Save") : t("สร้าง", "Create")}</button>
           </div>
+        </div>
+      </div>
+    </ERPModal>
+  );
+}
+
+// ป๊อป "รายละเอียดงาน" ต่อแพลตฟอร์ม (เฉพาะคอนเทนต์นี้) — ดู+แก้ หมายเหตุ/สิ่งที่ต้องแนบ · เก็บใน subtask.config.platform_notes
+function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
+  sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; onClose: () => void;
+}) {
+  const t = useT();
+  const platforms = sub.content_preview?.platforms ?? [];
+  const [notes, setNotes] = useState<Record<string, string>>(() => ({ ...((sub.config?.platform_notes ?? {}) as Record<string, string>) }));
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try { await updateSubtask(taskId, sub.id, { config: { ...(sub.config ?? {}), platform_notes: notes } }); await reload(); pushToast("success", t("บันทึกแล้ว", "Saved")); onClose(); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} size="md" title={t("รายละเอียดงาน — ต่อแพลตฟอร์ม", "Work details — per platform")}>
+      <div className="space-y-3">
+        <p className="text-[11px] text-slate-400">{t("หมายเหตุ/สิ่งที่ต้องเตรียม ของคอนเทนต์นี้ แยกต่อแพลตฟอร์ม (คนทำงานเปิดดูได้)", "Notes / requirements for this content, per platform (visible to workers)")}</p>
+        {platforms.length === 0 && <p className="text-sm text-slate-400 italic">{t("คอนเทนต์นี้ยังไม่ได้เลือกแพลตฟอร์ม", "This content has no platforms yet")}</p>}
+        {platforms.map((p) => (
+          <div key={p}>
+            <div className="mb-1"><PlatformChip code={p} /></div>
+            <textarea value={notes[p] ?? ""} onChange={(e) => setNotes((n) => ({ ...n, [p]: e.target.value }))} rows={2} placeholder={t("หมายเหตุ/สิ่งที่ต้องแนบ เช่น รูป 1:1 อย่างน้อย 5 รูป", "Notes / what to attach, e.g. 1:1 images, at least 5")} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-violet-300" />
+          </div>
+        ))}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+          <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
         </div>
       </div>
     </ERPModal>
