@@ -434,6 +434,99 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
   );
 }
 
+// ---- เพิ่ม "แบบ/ไซส์" ให้สีที่มีอยู่ (สร้างหลาย SKU ลูกทีเดียว) — ใช้กับตารางที่จัดกลุ่ม (SKU ลูก) ----
+function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupField, base, existingCodes, onDone, onClose }: {
+  moduleKey: string; fkField: string; parentValue: string | number;
+  titleField: string; groupField: string;
+  base: Record<string, unknown>; existingCodes: Set<string>;
+  onDone: (created: number, skipped: number) => void; onClose: () => void;
+}) {
+  const baseCode = String(base[titleField] ?? "");
+  const colorLabel = String(base[groupField] ?? "");
+  const [optName, setOptName] = useState("แบบพิมพ์");
+  const [opts, setOpts] = useState<{ code: string; value: string }[]>([{ code: "", value: "" }]);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const SIZE_PRESET = ["S", "M", "L", "XL", "XXL"].map((s) => ({ code: s, value: s }));
+  const PRINT_PRESET = [{ code: "D", value: "พิมพ์จม" }, { code: "N", value: "ฟอยล์เงิน" }, { code: "G", value: "ฟอยล์ทอง" }];
+  const setOpt = (i: number, k: "code" | "value", v: string) => setOpts((p) => p.map((o, j) => (j === i ? { ...o, [k]: v } : o)));
+
+  const create = async () => {
+    const rows = opts.map((o) => ({ code: o.code.trim(), value: o.value.trim() })).filter((o) => o.code && o.value);
+    if (!rows.length) { setMsg("กรอกตัวย่อ (รหัส) + ชื่ออย่างน้อย 1 แบบ"); return; }
+    setSaving(true); setMsg(null);
+    let ok = 0, skip = 0;
+    for (const o of rows) {
+      const code = baseCode + o.code;
+      if (existingCodes.has(code)) { skip++; continue; }
+      const body: Record<string, unknown> = {
+        [fkField]: parentValue,
+        [titleField]: code,
+        name_th: `${colorLabel} / ${o.value}`,
+        color: base.color ?? colorLabel,
+        color_th: base.color_th ?? colorLabel,
+        list_price: base.list_price ?? null,
+        fake_price: base.fake_price ?? null,
+        attribute_values: { variant_option: { code: o.code, name: optName, value: o.value } },
+        is_active: true,
+      };
+      try {
+        const res = await apiFetch(`/api/master-v2/${moduleKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.error) throw new Error(j.error || "ผิดพลาด");
+        ok++;
+      } catch { skip++; }
+    }
+    setSaving(false);
+    onDone(ok, skip);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[125] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">＋ เพิ่มแบบ/ไซส์ ให้สี “{colorLabel}”</h3>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="text-[11px] text-slate-400">รหัสฐาน <b className="text-slate-600">{baseCode}</b> · รหัสใหม่ = {baseCode}<span className="text-emerald-600">+ตัวย่อ</span> · ชื่อ = สี / ชื่อแบบ · ราคาก๊อปจากตัวฐาน</div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500 w-20 flex-shrink-0">ชุดตัวเลือก</label>
+            <input value={optName} onChange={(e) => setOptName(e.target.value)} placeholder="เช่น แบบพิมพ์ / ไซส์"
+              className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md" />
+          </div>
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <span className="text-[11px] text-slate-400">ชุดสำเร็จ:</span>
+            <button type="button" onClick={() => { setOptName("ไซส์"); setOpts(SIZE_PRESET); }} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 hover:bg-slate-50">ไซส์ S–XXL</button>
+            <button type="button" onClick={() => { setOptName("แบบพิมพ์"); setOpts(PRINT_PRESET); }} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 hover:bg-slate-50">แบบพิมพ์ (จม/เงิน/ทอง)</button>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex gap-2 text-[11px] text-slate-400"><span className="w-16">ตัวย่อ</span><span className="flex-1">ชื่อที่โชว์</span></div>
+            {opts.map((o, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input value={o.code} onChange={(e) => setOpt(i, "code", e.target.value)} placeholder="S"
+                  className="w-16 h-8 px-2 text-sm border border-slate-200 rounded-md font-mono" />
+                <input value={o.value} onChange={(e) => setOpt(i, "value", e.target.value)} placeholder="เช่น พิมพ์จม / S"
+                  className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md" />
+                <button type="button" onClick={() => setOpts((p) => p.filter((_, j) => j !== i))} disabled={opts.length === 1}
+                  className="w-7 h-7 rounded text-slate-400 hover:text-red-500 disabled:opacity-30">✕</button>
+              </div>
+            ))}
+            <button type="button" onClick={() => setOpts((p) => [...p, { code: "", value: "" }])}
+              className="text-xs text-blue-600 hover:underline">＋ เพิ่มบรรทัด</button>
+          </div>
+          {msg && <div className="text-xs text-red-600">{msg}</div>}
+        </div>
+        <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
+          <button type="button" onClick={create} disabled={saving} className="h-8 px-4 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-50">{saving ? "กำลังสร้าง…" : "สร้าง"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---- เลือกรายการที่ "มีอยู่แล้ว" มาผูกเป็นลูก (ตั้งค่า FK) — ของกลาง ใช้ได้ทุก one2many ----
 function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, imageField, labels, alreadyIds, title, onAttached, onClose }: {
   moduleKey: string; fk: string; matchValue: string | number; titleField: string;
@@ -553,6 +646,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const { user } = useAuth();
   const [dropRowId, setDropRowId]         = useState<string | null>(null);   // แถวที่กำลังลากรูปมาวาง (ไฮไลต์)
   const [uploadingRowId, setUploadingRowId] = useState<string | null>(null); // แถวที่กำลังอัปรูป (สปินเนอร์)
+  const [variantBase, setVariantBase] = useState<Record<string, unknown> | null>(null);   // เปิดโมดัล "เพิ่มแบบ/ไซส์" ให้กลุ่มสี (base = แถวฐานของสีนั้น)
   // จับคู่ด้วยฟิลด์ไหนของพ่อ: 'id' = ลิงก์ id ปกติ (ใช้ recordId) · อื่นๆ เช่น 'code' = เชื่อมด้วยรหัส (ใช้ค่าจาก parentValues)
   const matchField = config.parent_match_field || "id";
   const matchValue = matchField === "id" ? recordId : ((parentValues?.[matchField] as string | number | null | undefined) ?? null);
@@ -1021,7 +1115,16 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       for (const r of rows) { const k = (String(r[groupField] ?? "").trim() || "— ไม่ระบุ —"); const arr = groups.get(k); if (arr) arr.push(r); else groups.set(k, [r]); }
       return [...groups.entries()].flatMap(([label, grs]) => [
         <tr key={`grp-${label}`} className="bg-slate-100/70 border-t border-slate-200">
-          <td colSpan={colCount} className="px-2 py-1.5 text-xs font-semibold text-slate-600">🎨 {label} <span className="text-slate-400 font-normal">({grs.length})</span></td>
+          <td colSpan={colCount} className="px-2 py-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-600">🎨 {label} <span className="text-slate-400 font-normal">({grs.length})</span></span>
+              {canAdd && (
+                <button type="button" title="เพิ่มแบบ/ไซส์ให้สีนี้"
+                  onClick={() => setVariantBase(grs.find((r) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !av || !av.variant_option; }) ?? grs[0])}
+                  className="h-6 px-2 rounded-md text-[11px] font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50">＋ เพิ่มแบบ/ไซส์</button>
+              )}
+            </div>
+          </td>
         </tr>,
         ...grs.map(renderDataRow),
       ]);
@@ -1138,6 +1241,13 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           onChanged={load} onClose={() => setPeek(null)} />
       )}
       {pickerModal}
+      {variantBase && (
+        <O2MVariantAdder moduleKey={moduleKey} fkField={fk} parentValue={matchValue as string | number}
+          titleField={titleField} groupField={config.list_group_field ?? "color_th"} base={variantBase}
+          existingCodes={new Set(rows.map((r) => String(r[titleField] ?? "")))}
+          onClose={() => setVariantBase(null)}
+          onDone={(ok, skip) => { setVariantBase(null); if (ok) { toast.success(`สร้าง ${ok} รายการ${skip ? ` · ข้าม ${skip} (ซ้ำ/พลาด)` : ""}`); load(); } else toast.error("ไม่ได้สร้าง (ซ้ำ/พลาด/ว่าง)"); }} />
+      )}
       {createModal}
       {attachModal}
     </>
