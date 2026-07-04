@@ -44,6 +44,14 @@ const APPROVE_TARGET_HINT: Record<string, () => string> = {
   description_media: () => tr("อนุมัติแล้ว → เพิ่มเข้า media คำอธิบาย", "Approved → added to description media"),
 };
 
+// สีแถบปลายทาง (แบบ A: คนละสีตามว่าอนุมัติแล้วไปไหน) — เหลือบตาก็รู้ว่างานย่อยนี้ทำอะไร
+const APPROVE_TARGET_STYLE: Record<string, { icon: string; cls: string }> = {
+  sku_media:         { icon: "🖼️", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  cover:             { icon: "⭐",  cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  sku_description:   { icon: "📝", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  description_media: { icon: "🖼️", cls: "bg-purple-50 text-purple-700 border-purple-200" },
+};
+
 // ④ สถานะงานย่อย: ยังไม่เริ่ม → กำลังทำ → ส่งงาน(รออนุมัติ) → อนุมัติ (ไม่มี "โพสต์แล้ว" แล้ว)
 export const SUB_STEPS = [
   { key: "todo",               label: () => tr("ยังไม่เริ่ม", "Not started"), dot: "bg-slate-400" },
@@ -212,6 +220,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const showLinks = (cfg.accepts_link ?? ty?.accepts_link ?? true) !== false;
   const approveTarget = cfg.approve_target ?? ty?.approve_target ?? "none";
   const approveHint = APPROVE_TARGET_HINT[approveTarget]?.();
+  const approveStyle = APPROVE_TARGET_STYLE[approveTarget];
   // copy prompt: ให้ค่าจาก registry (ชนิดงาน) เป็นหลัก — งานรูปภาพ/รูปคำอธิบาย = ปิด (แม้ snapshot เก่าจะเปิดไว้)
   const hasPrompt = (ty?.has_copy_prompt ?? cfg.has_copy_prompt) === true;
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
@@ -293,7 +302,11 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 space-y-3 border-t border-slate-100">
-          {approveHint && <p className="text-[11px] text-emerald-600">↗ {approveHint}</p>}
+          {approveHint && (
+            <div className={`inline-flex items-center gap-1.5 text-[11px] font-medium rounded-md border px-2.5 py-1 ${approveStyle?.cls ?? "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+              <span aria-hidden>{approveStyle?.icon ?? "↗"}</span>{approveHint}
+            </div>
+          )}
           {(st === "revision_requested" || st === "canceled") && ((sub.config as Record<string, unknown> | undefined)?.review_note as string | undefined) && (
             <p className="text-[11px] text-orange-600">📝 {st === "canceled" ? t("เหตุผลยกเลิก", "Cancel reason") : t("ขอแก้", "Revision")}: {(sub.config as Record<string, unknown>).review_note as string}</p>
           )}

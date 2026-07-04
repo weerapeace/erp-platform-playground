@@ -90,12 +90,12 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr() }); setSubs([]); setContentItems([]); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);
 
   const updateForm = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
-  // เลือกผู้รับผิดชอบงานแม่ → เซ็ตผู้รับผิดชอบงานย่อย "ทุกอัน" เป็นรายการนี้ (แก้รายอันทีหลังได้)
+  // เลือกผู้รับผิดชอบงานแม่ → เติมให้เฉพาะงานย่อยที่ "ยังว่าง" (งานย่อยที่ template ใส่คนไว้แล้ว/แก้เองแล้ว จะไม่โดนทับ)
   const pickTaskAssignees = (list: UserPickerValue[]) => {
     markTouched("assignee");
     updateForm({ assignees: list });
     const asg = list.map((u) => ({ id: u.id, label: u.name }));
-    setSubs((rows) => rows.map((r) => ({ ...r, assignees: asg })));
+    setSubs((rows) => rows.map((r) => (r.assignees.length === 0 ? { ...r, assignees: asg } : r)));
   };
   // แตะช่องแล้ว = ตั้งเอง → กล่องปกติ · ยังไม่แตะแต่มีค่า = ค่าเริ่มต้น → กล่องเทาอ่อน · ว่าง = กล่องส้มอ่อน
   const markTouched = (k: string) => setTouched((prev) => (prev.has(k) ? prev : new Set(prev).add(k)));
