@@ -6,7 +6,6 @@
  * → สินค้าทุกตัวในหมวดนั้นได้หมวดร้านอัตโนมัติ · เก็บใน platform_category_mappings
  */
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 
@@ -74,8 +73,7 @@ export default function PlatformCategoryMapPage() {
   const selCat = cats.find((c) => c.id === sel) ?? null;
 
   return (
-    <PlaygroundShell>
-      <div className="max-w-6xl mx-auto px-5 py-6">
+    <div className="max-w-6xl mx-auto px-5 py-6">
         <div className="mb-4">
           <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">🗂️ จับคู่หมวดหมู่แพลตฟอร์ม</h1>
           <p className="text-sm text-slate-500 mt-1">ตั้งครั้งเดียวว่า “หมวดสินค้าของเรา” = หมวดอะไรในแต่ละร้าน → สินค้าทุกตัวในหมวดนั้นได้หมวดร้านอัตโนมัติ</p>
@@ -140,6 +138,5 @@ export default function PlatformCategoryMapPage() {
           </div>
         )}
       </div>
-    </PlaygroundShell>
   );
 }
