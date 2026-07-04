@@ -90,6 +90,25 @@ function DiscountView({ v }: { v: Variant }) {
   );
 }
 
+// ประวัติ (audit) — แปลงเป็นข้อความคน + เวลา
+type LogEntry = { at: string; actor: string | null; action: string; entity_type: string; source: string | null; metadata: Record<string, unknown> };
+function fmtLogTime(at: string): string { try { return new Date(at).toLocaleString("th-TH", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); } catch { return at; } }
+function logLabel(e: LogEntry): string {
+  const m = e.metadata ?? {};
+  if (e.source === "line_push_price") return `⬆️ ส่งราคา/ส่วนลดขึ้น LINE (สำเร็จ ${m.ok ?? 0}/${m.products ?? 0})`;
+  if (e.source === "line_push_details") return `📝 ส่งรายละเอียดขึ้น LINE (สำเร็จ ${m.ok ?? 0}/${m.products ?? 0})`;
+  if (e.source === "line_create") return `🆕 สร้างสินค้าบน LINE${m.product_id ? ` (รหัส ${m.product_id})` : ""}`;
+  if (e.source === "line_display") return m.status === "hide" ? "⏸ ปิดขายบน LINE" : "▶ เปิดขายบน LINE";
+  if (e.entity_type === "sku_price") {
+    if (m.mass_fill) return `⚡ ตั้ง${m.field === "fake_price" ? "ราคาเต็ม" : "ราคาขาย"}ทุก SKU = ${Number(m.price).toLocaleString()}฿ (${m.count} ตัว)`;
+    return `✏️ แก้${m.field === "fake_price" ? "ราคาเต็ม" : "ราคาขาย"} ${m.sku_code ?? ""}: ${m.old ?? "—"} → ${m.new ?? "—"}`;
+  }
+  if (e.entity_type === "platform_listing_draft") { const f = Array.isArray(m.fields) ? (m.fields as string[]).join(", ") : ""; return `📄 แก้ร่างลงขาย${f ? ` (${f})` : ""}`; }
+  if (e.entity_type === "platform_category_mapping") return "🗂 ตั้งหมวดหมู่มาตรฐาน";
+  if (e.entity_type === "platform_catalog") return "📤 ส่ง/ลงขายแพลตฟอร์ม";
+  return `${e.action} · ${e.entity_type}`;
+}
+
 export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, canPublish = false, initialPlatformId }: {
   parentSkuId: string; onClose: () => void; canEdit?: boolean; canPublish?: boolean;
   /** เปิดมาให้อยู่แท็บแพลตฟอร์มนี้เลย (เช่น เปิดจากหน้า catalog ของ LINE) */
@@ -116,6 +135,9 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [priceEdits, setPriceEdits] = useState<Record<string, { fake_price?: number | null; list_price?: number | null }>>({});
   const [dirtyPlatforms, setDirtyPlatforms] = useState<Set<string>>(new Set());
   const [savingAll, setSavingAll] = useState(false);
+  const [showLog, setShowLog] = useState(false);   // แผงประวัติ (audit)
+  const [logRows, setLogRows] = useState<LogEntry[]>([]);
+  const [logLoading, setLogLoading] = useState(false);
   const [creating, setCreating] = useState(false);  // สร้างสินค้าใหม่บน LINE
   const [displaying, setDisplaying] = useState(false); // เปิด/ปิดการขายบน LINE
   const [pushingPrice, setPushingPrice] = useState(false); // ส่งราคา/ส่วนลดขึ้น LINE
@@ -147,6 +169,14 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     finally { setLoading(false); }
   }, [parentSkuId, toast, initialPlatformId]);
   useEffect(() => { load(); }, [load]);
+
+  // ประวัติ (audit) — โหลดตอนเปิดแผง หรือกดรีเฟรช
+  const loadLog = useCallback(async () => {
+    setLogLoading(true);
+    try { const j = await apiFetch(`/api/product-platforms/audit?parent_sku_id=${encodeURIComponent(parentSkuId)}`).then((r) => r.json()); setLogRows((j.entries ?? []) as LogEntry[]); }
+    catch { /* ignore */ } finally { setLogLoading(false); }
+  }, [parentSkuId]);
+  const toggleLog = () => { const n = !showLog; setShowLog(n); if (n) void loadLog(); };
 
   const activeDraft = drafts[active] ?? {};
   const title = activeDraft.title ?? "";
@@ -529,6 +559,31 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                           </div>}
                         </div>
                       : canEdit && <button onClick={createOnLine} disabled={creating || !ready} title={!ready ? "กรอกฟิลด์จำเป็นให้ครบก่อน (ดูรายการด้านบน)" : "สร้างสินค้าใหม่บน LINE"} className="mt-2 w-full h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{creating ? "กำลังสร้าง..." : "🆕 สร้างสินค้าใหม่บน LINE"}</button>
+                  )}
+                </div>
+
+                {/* ประวัติการแก้/ส่งขึ้นแพลตฟอร์ม (audit) — ใครทำอะไร เมื่อไหร่ */}
+                <div className="rounded-lg border border-slate-200 p-3">
+                  <div className="flex items-center justify-between">
+                    <button onClick={toggleLog} className="flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-800">
+                      <span className="text-[10px]">{showLog ? "▲" : "▼"}</span> 📜 ประวัติการแก้/ส่งขึ้นแพลตฟอร์ม
+                    </button>
+                    {showLog && <button onClick={() => void loadLog()} className="text-[11px] text-violet-600 hover:underline">🔄 รีเฟรช</button>}
+                  </div>
+                  {showLog && (
+                    <div className="mt-2">
+                      {logLoading ? <p className="text-xs text-slate-400">กำลังโหลด…</p>
+                        : logRows.length === 0 ? <p className="text-xs text-slate-400">ยังไม่มีประวัติ</p>
+                        : <ul className="max-h-64 overflow-y-auto divide-y divide-slate-50">
+                            {logRows.map((e, i) => (
+                              <li key={i} className="flex items-start gap-2 py-1 text-xs">
+                                <span className="text-slate-400 shrink-0 w-[5.5rem] tabular-nums">{fmtLogTime(e.at)}</span>
+                                <span className="flex-1 text-slate-700">{logLabel(e)}</span>
+                                <span className="text-slate-400 shrink-0 truncate max-w-[9rem]" title={e.actor ?? ""}>{e.actor ?? "—"}</span>
+                              </li>
+                            ))}
+                          </ul>}
+                    </div>
                   )}
                 </div>
               </div>

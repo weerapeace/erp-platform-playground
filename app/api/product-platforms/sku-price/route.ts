@@ -27,10 +27,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   else { price = Number(body.price); if (!Number.isFinite(price) || price < 0) return NextResponse.json({ error: "ราคาไม่ถูกต้อง" }, { status: 400 }); }
 
   const admin = supabaseAdmin();
-  const { data: before } = await admin.from("skus_v2").select(`id, ${field}`).eq("id", sku_id).maybeSingle();
+  const { data: before } = await admin.from("skus_v2").select(`id, code, parent_sku_id, ${field}`).eq("id", sku_id).maybeSingle();
   if (!before) return NextResponse.json({ error: "ไม่พบ SKU" }, { status: 404 });
+  const brow = before as Record<string, unknown>;
   const { error } = await admin.from("skus_v2").update({ [field]: price }).eq("id", sku_id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  await writeAudit(admin, { action: "update", entityType: "sku_price", entityId: sku_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { field, old: (before as Record<string, unknown>)[field] ?? null, new: price, source: "platform_manager_inline" } });
+  await writeAudit(admin, { action: "update", entityType: "sku_price", entityId: sku_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { field, old: brow[field] ?? null, new: price, source: "platform_manager_inline", parent_sku_id: (brow.parent_sku_id as string) ?? null, sku_code: (brow.code as string) ?? null } });
   return NextResponse.json({ ok: true, price, field, error: null });
 }

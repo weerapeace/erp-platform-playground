@@ -86,6 +86,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     results.push({ product: r.title ?? r.external_product_id, ok: res.ok, variants: items.length, error: res.ok ? undefined : res.error });
   }
 
-  await writeAudit(admin, { action: "update", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_push_price", brand_id, products: rows.length, ok: okCount } });
+  await writeAudit(admin, { action: "update", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_push_price", brand_id, parent_sku_id: onlyParent || null, products: rows.length, ok: okCount } });
   return NextResponse.json({ ok: true, total: rows.length, okCount, results, error: null });
 }

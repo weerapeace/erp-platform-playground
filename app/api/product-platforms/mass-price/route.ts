@@ -34,6 +34,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const ids = targets.map((s) => String(s.id));
   const { error } = await admin.from("skus_v2").update({ [field]: price }).in("id", ids);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  await writeAudit(admin, { action: "update", entityType: "sku_price", entityId: parent_sku_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { mass_fill: true, field, price, count: ids.length, only_empty: !!body.only_empty } });
+  await writeAudit(admin, { action: "update", entityType: "sku_price", entityId: parent_sku_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { mass_fill: true, field, price, count: ids.length, only_empty: !!body.only_empty, parent_sku_id } });
   return NextResponse.json({ ok: true, updated: ids.length, error: null });
 }
