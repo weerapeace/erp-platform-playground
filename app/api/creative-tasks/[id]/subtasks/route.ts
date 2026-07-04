@@ -207,10 +207,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
   // เติมรหัสสินค้าจริงให้ "รูปเข้าสินค้า" บนการ์ด (แม้งานเก่าที่ไม่ได้เก็บ product_labels) — ดึงจาก id จริง
   const codeMap = await resolveProductCodes(admin, rows);
+  // พรีวิวคอนเทนต์ (งานย่อยชนิด content) — platforms + แคปชั่นย่อต่อแพลตฟอร์ม (จากคอนเทนต์ที่ผูก)
+  const contentIds = [...new Set(rows.filter((r) => r.subtask_type === "content").map((r) => ((r.config ?? {}) as Record<string, unknown>).content_id).filter(Boolean).map(String))];
+  const cPrev = new Map<string, Record<string, unknown>>();
+  if (contentIds.length) {
+    const [{ data: cs }, { data: caps }] = await Promise.all([
+      admin.from("erp_creative_content").select("id, platforms, post_type, status, scheduled_at").in("id", contentIds),
+      admin.from("erp_creative_content_captions").select("content_id, platform, caption").in("content_id", contentIds).order("sort_order", { ascending: true }),
+    ]);
+    const capBy = new Map<string, { platform: string; caption: string | null }[]>();
+    for (const c of (caps ?? []) as { content_id: string; platform: string; caption: string | null }[]) { const arr = capBy.get(c.content_id) ?? []; arr.push({ platform: c.platform, caption: c.caption }); capBy.set(c.content_id, arr); }
+    for (const c of (cs ?? []) as Record<string, unknown>[]) cPrev.set(String(c.id), { platforms: c.platforms ?? [], post_type: c.post_type ?? null, status: c.status ?? null, scheduled_at: c.scheduled_at ?? null, captions: capBy.get(String(c.id)) ?? [] });
+  }
   return NextResponse.json({ data: rows.map((r) => {
     const ist = r.image_sync_targets as { product_labels?: Record<string, string> } | null;
     const image_sync_targets = ist ? { ...ist, product_labels: { ...(ist.product_labels ?? {}), ...codeMap } } : ist;
-    return { ...r, image_sync_targets, assignees: aMap.get(String(r.id)) ?? [], attachments: attBy.get(String(r.id)) ?? [] };
+    const cid = r.subtask_type === "content" ? String(((r.config ?? {}) as Record<string, unknown>).content_id ?? "") : "";
+    return { ...r, image_sync_targets, assignees: aMap.get(String(r.id)) ?? [], attachments: attBy.get(String(r.id)) ?? [], content_preview: cid ? (cPrev.get(cid) ?? null) : null };
   }), error: null });
 }
 

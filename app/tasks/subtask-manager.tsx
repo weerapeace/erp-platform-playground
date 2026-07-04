@@ -22,6 +22,8 @@ import { TeamFill } from "./team-picker";
 import { tr } from "@/lib/lang";
 import type { UserPickerValue } from "@/components/pickers";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
+import { PlatformChip } from "./platform-chip";
+import { platformLabel } from "./use-options";
 import {
   listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates,
   type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem,
@@ -29,6 +31,8 @@ import {
 
 // ตัวแก้สินค้ากลาง (ของกลาง) — เปิดแก้ Parent SKU จากป๊อปอัปส่งงาน · dynamic กัน import วน + ลด bundle
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+// ContentDrawer (แก้คอนเทนต์) — dynamic กัน bundle · เปิดจากการ์ดงานย่อยชนิด content
+const ContentDrawer = dynamic(() => import("./content/content").then((m) => m.ContentDrawer), { ssr: false });
 
 // อวตาร/ชิปผู้รับผิดชอบ — ของกลาง (แยกไฟล์เบา) · re-export กันโค้ดเดิมที่เคยอ้างจากไฟล์นี้
 export { AssigneeAvatar, AssigneeChip };
@@ -344,6 +348,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const { user } = useAuth();
   const [open, setOpen] = useState(true);   // กาง (ขยาย) งานย่อยเป็นค่าเริ่มต้น
   const [workOpen, setWorkOpen] = useState(false); // ป๊อปอัปแนบงาน/ส่งงาน
+  const [contentOpen, setContentOpen] = useState(false); // ContentDrawer (งานย่อยชนิด content)
   const [editOpen, setEditOpen] = useState(false); // ป๊อปอัปแก้ไขงานย่อย
   const [cardLb, setCardLb] = useState(-1); // ดูรูปบนการ์ดเต็มจอ
   const [busy, setBusy] = useState(false);
@@ -444,6 +449,20 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               <span aria-hidden>{approveStyle?.icon ?? "↗"}</span>{approveHint}
             </div>
           )}
+          {sub.subtask_type === "content" && (
+            <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-1 min-w-0">
+                  {(sub.content_preview?.platforms ?? []).map((p) => <PlatformChip key={p} code={p} />)}
+                  {!(sub.content_preview?.platforms ?? []).length && <span className="text-[11px] text-slate-400">{t("ยังไม่ได้เลือกแพลตฟอร์ม", "No platforms yet")}</span>}
+                </div>
+                <button onClick={() => setContentOpen(true)} className="text-[11px] font-medium text-violet-700 hover:underline shrink-0">📱 {t("เปิด/แก้คอนเทนต์", "Open content")}</button>
+              </div>
+              {(sub.content_preview?.captions ?? []).filter((c) => c.caption?.trim()).slice(0, 4).map((c) => (
+                <p key={c.platform} className="text-[11px] text-slate-500 leading-snug"><span className="font-medium text-slate-600">{platformLabel(c.platform)}:</span> <span className="line-clamp-2">{c.caption}</span></p>
+              ))}
+            </div>
+          )}
           {(st === "revision_requested" || st === "canceled") && ((sub.config as Record<string, unknown> | undefined)?.review_note as string | undefined) && (
             <p className="text-[11px] text-orange-600">📝 {st === "canceled" ? t("เหตุผลยกเลิก", "Cancel reason") : t("ขอแก้", "Revision")}: {(sub.config as Record<string, unknown>).review_note as string}</p>
           )}
@@ -525,6 +544,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       <ImageLightbox images={cardImages} index={cardLb} onClose={() => setCardLb(-1)} onIndex={setCardLb} />
       {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} approveTarget={String(approveTarget ?? "none")} hasDescSibling={hasDescSibling} onClose={() => setWorkOpen(false)} />}
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
+      {contentOpen && sub.config?.content_id && <ContentDrawer contentId={String(sub.config.content_id)} brands={[]} onClose={() => setContentOpen(false)} onChanged={() => { void reload(); }} pushToast={pushToast} />}
       {reviseOpen && <ReviseModal busy={busy} onCancel={() => setReviseOpen(false)} onConfirm={async (c) => { setReviseOpen(false); await patch({ status: "revision_requested", comment: c }); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); }} />}
     </div>
   );
