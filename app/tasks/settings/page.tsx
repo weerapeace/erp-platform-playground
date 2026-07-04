@@ -253,7 +253,7 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
         <h2 className="font-semibold text-slate-800">{title}</h2>
         <p className="text-xs text-slate-400 mt-0.5">{kind === "platform"
           ? t("เพิ่ม/แก้ชื่อ/ลบ/จัดลำดับ + ตั้งสีหรือไอคอน (emoji/รูป) ต่อแพลตฟอร์ม — ชิปในหน้างานจะใช้สี/ไอคอนนี้ · ใส่รูปไอคอนจะแทนที่สี", "Add / rename / delete / reorder + set a color or icon (emoji/image) per platform — task chips use this · an icon image replaces the color")
-          : t("เพิ่ม/แก้ชื่อ/ลบ/จัดลำดับ — เปลี่ยนที่นี่แล้วฟอร์มสร้างงาน/เทมเพลต/คอนเทนต์จะใช้ตามทันที", "Add / rename / delete / reorder — changes here apply immediately to task, template, and content forms")}</p>
+          : t("เพิ่ม/แก้ชื่อ/ลบ/จัดลำดับ + ตั้งสี/ไอคอน (emoji) ต่อประเภทงาน — ชิปในการ์ด/คิวจะใช้สีนี้ · เปลี่ยนที่นี่แล้วฟอร์มสร้างงาน/เทมเพลตใช้ตามทันที", "Add / rename / delete / reorder + set color/icon (emoji) per task type — cards/queue chips use this · changes apply immediately to task and template forms")}</p>
       </div>
       <div className="p-5">
         <div className="flex gap-2 mb-4">
@@ -280,20 +280,20 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                     <span className="truncate">{o.label}</span>
                   </span>
                   <input defaultValue={o.label} onBlur={(e) => rename(o, e.target.value)} className="flex-1 min-w-[80px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
-                  {kind === "platform" && (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {/* สีประเภท */}
-                      <div title={t("สีประเภท", "Color")}><ColorInput value={o.color || "#64748b"} onChange={(v) => patchMeta(o, { color: v })} allowText={false} /></div>
-                      {/* ไอคอน emoji */}
-                      <input defaultValue={o.icon || ""} maxLength={2} placeholder="😀" onBlur={(e) => { const v = e.target.value.trim(); if (v !== (o.icon || "")) patchMeta(o, { icon: v }); }} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />
-                      {/* รูปไอคอน (อัปโหลด) */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* สีประเภท (มีทั้งประเภทงาน + แพลตฟอร์ม) */}
+                    <div title={t("สีประเภท", "Color")}><ColorInput value={o.color || "#64748b"} onChange={(v) => patchMeta(o, { color: v })} allowText={false} /></div>
+                    {/* ไอคอน emoji */}
+                    <input defaultValue={o.icon || ""} maxLength={2} placeholder="😀" onBlur={(e) => { const v = e.target.value.trim(); if (v !== (o.icon || "")) patchMeta(o, { icon: v }); }} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />
+                    {/* รูปไอคอน (อัปโหลด) — เฉพาะแพลตฟอร์ม (task_type ไม่มีคอลัมน์ icon_key) */}
+                    {kind === "platform" && (<>
                       <label className={`h-7 px-2 inline-flex items-center text-[11px] rounded border cursor-pointer ${uploadingId === o.id ? "opacity-50 pointer-events-none" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("อัปโหลดรูปไอคอน (แทนสี)", "Upload icon image (replaces color)")}>
                         {uploadingId === o.id ? "..." : iconImg ? "🖼" : t("รูป", "Img")}
                         <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadIcon(o, f); e.target.value = ""; }} />
                       </label>
                       {iconImg && <button onClick={() => patchMeta(o, { icon_key: null })} title={t("ลบรูปไอคอน", "Remove icon image")} className="text-slate-300 hover:text-red-500 text-xs">⊘</button>}
-                    </div>
-                  )}
+                    </>)}
+                  </div>
                   <span className="text-[10px] text-slate-300 font-mono">{o.key}</span>
                   <button onClick={() => remove(o)} className="text-slate-300 hover:text-red-500 text-sm">✕</button>
                 </div>

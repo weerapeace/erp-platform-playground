@@ -19,6 +19,7 @@ import { CalendarBoard } from "./calendar-board";
 import { arrangeMySubtasks, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
 import { isTerminal, statusMeta, type Status } from "./use-statuses";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
+import { TaskTypeChip } from "./task-type-chip";
 import { isOverdue, updateTask, PRIORITY_META, priorityLabel, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
 import { matchMetric, type MetricDef } from "./metrics";
 import { MetricCardsManager } from "./metric-cards-manager";
@@ -592,7 +593,7 @@ function MyTaskCard({ task, solo, onClick, accent }: { task: CreativeTask; solo?
       <div className="flex items-center gap-1 mb-1 flex-wrap">
         {solo && <span className="text-[10px]" title={t("มีแค่ฉัน", "Only me")}>⭐</span>}
         {pr && <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span>}
-        {task.task_type && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-slate-100 text-slate-600 border-slate-200 truncate max-w-[100px]">{taskTypeLabel(task.task_type)}</span>}
+        {task.task_type && <TaskTypeChip code={task.task_type} />}
         <span className="ml-auto font-mono text-[10px] text-slate-400 shrink-0">{task.task_no}</span>
       </div>
       <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{task.title}</p>

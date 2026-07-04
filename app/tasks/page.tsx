@@ -35,6 +35,7 @@ import { arrangeMySubtasks, loadMySubView, DEFAULT_MYSUB_VIEW, type MySubView } 
 import { DEFAULT_THEME, mergeTheme, type OverviewTheme } from "./overview-customizer";
 import { type MetricDef } from "./metrics";
 import { taskTypeLabel } from "./use-options";
+import { TaskTypeChip } from "./task-type-chip";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import {
   PRIORITY_RANK, PRIORITY_META, priorityLabel, isOverdue,
@@ -470,7 +471,7 @@ function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <PriorityBadge priority={task.priority} />
                   <StatusBadge status={task.status} />
-                  {task.task_type && <span className="text-xs text-slate-400">{taskTypeLabel(task.task_type)}</span>}
+                  {task.task_type && <TaskTypeChip code={task.task_type} />}
                 </div>
                 <p className="text-base font-semibold text-slate-800 leading-snug">{task.title}</p>
                 <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">

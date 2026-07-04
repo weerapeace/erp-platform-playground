@@ -37,7 +37,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const table = KIND_TABLE[k]; if (!table) continue;
     // icon_key มีเฉพาะ erp_platforms — task_types ไม่มีคอลัมน์นี้ (select แยกตามตาราง)
     const sel = table === "erp_platforms" ? "id, code, name_th, name_en, color, icon, icon_key, sort_order, is_active" : "id, code, name_th, name_en, color, icon, sort_order, is_active";
-    const { data, error } = await admin.from(table).select(sel).eq("is_active", true).order("sort_order", { ascending: true });
+    // คืนทุกแถว (รวมที่ปิดใช้งาน) → ตัวแปลป้ายชื่อรวมประเภทที่ปิดด้วย งานเก่าจะไม่โชว์ code ดิบ · ฟอร์ม dropdown กรอง is_active เองฝั่ง client
+    const { data, error } = await admin.from(table).select(sel).order("sort_order", { ascending: true });
     if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
     for (const r of (data ?? []) as unknown as Record<string, unknown>[]) out.push(mapRow(r, k));
   }

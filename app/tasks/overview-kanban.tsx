@@ -17,6 +17,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
 import { AssigneeStack } from "./assignee-avatar";
 import { taskTypeLabel } from "./use-options";
+import { TaskTypeChip } from "./task-type-chip";
 import { statusMeta, type Status } from "./use-statuses";
 import { PRIORITY_META, priorityLabel, isOverdue, type CreativeTask, type CreativePriority, type BrandOption } from "./data";
 import type { KanbanTheme, KanbanGroupBy, StatusColorMap, AnimTheme } from "./overview-customizer";
@@ -64,7 +65,7 @@ function CardBody({ task, cfg, dragging }: { task: CreativeTask; cfg: KanbanThem
         <div className={`flex items-center justify-between gap-2 ${compact ? "mb-1" : "mb-1.5"}`}>
           <div className="flex items-center gap-1 min-w-0">
             {cfg.priority && pr && <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span>}
-            {cfg.taskType !== false && task.task_type && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-slate-100 text-slate-600 border-slate-200 truncate max-w-[110px]">{taskTypeLabel(task.task_type)}</span>}
+            {cfg.taskType !== false && task.task_type && <TaskTypeChip code={task.task_type} />}
           </div>
           {showTaskNo && <span className="font-mono text-[10px] text-slate-400 shrink-0">{task.task_no}</span>}
         </div>

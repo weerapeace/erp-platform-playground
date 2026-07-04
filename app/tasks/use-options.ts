@@ -20,13 +20,16 @@ let taskTypeMap: Record<string, string> = Object.fromEntries(TASK_TYPES.map((t) 
 let taskTypeMapEn: Record<string, string> = { ...taskTypeMap };
 let platformMap: Record<string, string> = Object.fromEntries(PLATFORMS.map((p) => [p.value, p.label]));
 let platformMapEn: Record<string, string> = { ...platformMap };
-// ทะเบียน meta แพลตฟอร์ม (สี/ไอคอน) อ่านได้นอก component เช่นชิปในการ์ด/ตาราง
+// ทะเบียน meta (สี/ไอคอน) อ่านได้นอก component เช่นชิปในการ์ด/ตาราง
 let platformMetaMap: Record<string, PlatformMeta> = {};
+let taskTypeMetaMap: Record<string, PlatformMeta> = {};
 const pick = (th: Record<string, string>, en: Record<string, string>, k: string) => (getLang() === "en" ? (en[k] ?? th[k]) : th[k]);
 export const taskTypeLabel = (k?: string | null): string => (k ? (pick(taskTypeMap, taskTypeMapEn, k) ?? k) : "");
 export const platformLabel = (k?: string | null): string => (k ? (pick(platformMap, platformMapEn, k) ?? k) : "");
 /** meta (สี/ไอคอน) ของแพลตฟอร์มตาม key — undefined ถ้ายังไม่ตั้ง */
 export const platformMeta = (k?: string | null): PlatformMeta | undefined => (k ? platformMetaMap[k] : undefined);
+/** meta (สี/ไอคอน) ของประเภทงานตาม key — undefined ถ้ายังไม่ตั้ง */
+export const taskTypeMeta = (k?: string | null): PlatformMeta | undefined => (k ? taskTypeMetaMap[k] : undefined);
 
 /** โหลดตัวเลือกทั้งสองชนิดสำหรับใช้ในฟอร์ม + อัปเดต label registry (สลับภาษาได้สด) */
 let lastRaw: Option[] = []; // จำค่าล่าสุดข้ามการ mount → เปิด drawer ใหม่เห็นทันที
@@ -45,7 +48,11 @@ export function useCreativeOptions() {
       lastRaw = opts; setRaw(opts);
       const tt = opts.filter((o) => o.kind === "task_type");
       const pf = opts.filter((o) => o.kind === "platform");
-      if (tt.length) { taskTypeMap = Object.fromEntries(tt.map((o) => [o.key, o.label])); taskTypeMapEn = Object.fromEntries(tt.map((o) => [o.key, o.label_en || o.label])); }
+      if (tt.length) {
+        taskTypeMap = Object.fromEntries(tt.map((o) => [o.key, o.label]));
+        taskTypeMapEn = Object.fromEntries(tt.map((o) => [o.key, o.label_en || o.label]));
+        taskTypeMetaMap = Object.fromEntries(tt.map((o) => [o.key, { color: o.color ?? null, icon: o.icon ?? null, icon_key: null }]));
+      }
       if (pf.length) {
         platformMap = Object.fromEntries(pf.map((o) => [o.key, o.label]));
         platformMapEn = Object.fromEntries(pf.map((o) => [o.key, o.label_en || o.label]));
@@ -57,8 +64,8 @@ export function useCreativeOptions() {
   useEffect(() => { reload(); }, [reload]);
 
   const labelOf = (o: Option) => (lang === "en" ? (o.label_en || o.label) : o.label);
-  const taskTypes = raw.filter((o) => o.kind === "task_type").map((o) => ({ value: o.key, label: labelOf(o) }));
-  const platforms: PlatformOpt[] = raw.filter((o) => o.kind === "platform").map((o) => ({ value: o.key, label: labelOf(o), color: o.color ?? null, icon: o.icon ?? null, icon_key: o.icon_key ?? null }));
+  const taskTypes = raw.filter((o) => o.kind === "task_type" && o.is_active !== false).map((o) => ({ value: o.key, label: labelOf(o) }));
+  const platforms: PlatformOpt[] = raw.filter((o) => o.kind === "platform" && o.is_active !== false).map((o) => ({ value: o.key, label: labelOf(o), color: o.color ?? null, icon: o.icon ?? null, icon_key: o.icon_key ?? null }));
 
   return {
     taskTypes: taskTypes.length ? taskTypes : TASK_TYPES,
