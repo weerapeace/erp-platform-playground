@@ -30,6 +30,7 @@ type RelConfig = {
   list_image_field?: string;          // column ที่เป็น R2 key รูป
   list_title_field?: string;          // column ชื่อหลัก (default = target_label_field)
   list_sub_fields?: string[];         // columns ข้อมูลย่อย แสดงต่อท้าย คั่นด้วย ·
+  list_group_field?: string;          // one2many (table): จัดกลุ่มแถวตาม field นี้ (เช่น color_th) — มีหัวกลุ่มคั่น
   list_display_mode?: string;         // 'table' | 'tags' | 'cards' | 'master_detail'
   parent_match_field?: string;        // ฟิลด์ของพ่อที่ใช้จับคู่ (default 'id'; เช่น 'code' = เชื่อมด้วยรหัส)
   detail_field?: string;              // master_detail: field_key ของ o2m ชั้น 2 บน target module (เช่น bom_lines บน bom-headers)
@@ -962,6 +963,72 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       for (const r of rows) { const n = Number(r[f]); if (r[f] !== null && r[f] !== "" && typeof r[f] !== "boolean" && isFinite(n)) { s += n; has = true; } }
       if (has) { sums[f] = s; anySum = true; }
     }
+
+    // จัดกลุ่มแถวตาม field (เช่น สี) — มีหัวกลุ่มคั่น · ไม่มี list_group_field = ตารางแบนเหมือนเดิม
+    const groupField = config.list_group_field;
+    const colCount = (imageField ? 1 : 0) + 1 + subFields.length + 1;
+    const renderDataRow = (r: Record<string, unknown>) => (
+      <tr key={String(r.id)}
+        className={`group cursor-pointer ${dropRowId === String(r.id) ? "bg-indigo-50 ring-1 ring-indigo-300" : "hover:bg-blue-50/40"}`}
+        title={canDropImages ? "ลากรูปมาวางเพื่อเพิ่มรูปให้รายการนี้" : undefined}
+        onClick={() => setPeek({ id: String(r.id), edit: false })}
+        onDragOver={canDropImages ? (e) => { e.preventDefault(); if (dropRowId !== String(r.id)) setDropRowId(String(r.id)); } : undefined}
+        onDragLeave={canDropImages ? () => setDropRowId((p) => (p === String(r.id) ? null : p)) : undefined}
+        onDrop={canDropImages ? (e) => { e.preventDefault(); setDropRowId(null); if (e.dataTransfer.files?.length) void dropImagesOnRow(r, e.dataTransfer.files); } : undefined}>
+        {imageField && (
+          <td className="px-2 py-1.5">
+            <div className={`relative w-8 h-8 rounded bg-slate-50 border overflow-hidden flex items-center justify-center ${dropRowId === String(r.id) ? "border-indigo-400" : "border-slate-100"}`}>
+              {uploadingRowId === String(r.id)
+                ? <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />
+                : r2img(r[imageField])
+                  ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(r[imageField])!} alt="" className="w-full h-full object-cover" />
+                  : <span className="text-slate-300 text-xs">📦</span>}
+            </div>
+          </td>
+        )}
+        <td className="px-2 py-1.5 text-slate-700">{String(r[titleField] ?? r.name ?? r.id)}</td>
+        {subFields.map((f) => {
+          const isRel = !!relCfgByField[f];
+          const editable = isEditableCol(f);
+          const editing = !!editCell && editCell.rowId === String(r.id) && editCell.field === f;
+          if (editing) {
+            return (
+              <td key={f} className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
+                <input autoFocus
+                  type={["number", "currency"].includes(typeByField[f] ?? "") ? "number" : "text"}
+                  value={editVal} onChange={(e) => setEditVal(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveCell(String(r.id), f, editVal); if (e.key === "Escape") setEditCell(null); }}
+                  onBlur={() => saveCell(String(r.id), f, editVal)}
+                  className="w-full h-7 px-1 text-sm border border-blue-300 rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </td>
+            );
+          }
+          return (
+            <td key={f}
+              onClick={editable ? (e) => { e.stopPropagation(); setEditCell({ rowId: String(r.id), field: f }); setEditVal(r[f] == null ? "" : String(r[f])); } : undefined}
+              className={`px-2 py-1.5 text-slate-600 whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"} ${editable ? "cursor-text hover:bg-blue-50/60" : ""}`}>
+              {cellValue(r, f) ?? "—"}
+            </td>
+          );
+        })}
+        <td className="px-2 py-1.5 text-right">
+          <button type="button" title="แก้ไข" onClick={(e) => { e.stopPropagation(); setPeek({ id: String(r.id), edit: true }); }}
+            className="w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
+        </td>
+      </tr>
+    );
+    const renderBody = () => {
+      if (!groupField) return rows.map(renderDataRow);
+      const groups = new Map<string, Record<string, unknown>[]>();
+      for (const r of rows) { const k = (String(r[groupField] ?? "").trim() || "— ไม่ระบุ —"); const arr = groups.get(k); if (arr) arr.push(r); else groups.set(k, [r]); }
+      return [...groups.entries()].flatMap(([label, grs]) => [
+        <tr key={`grp-${label}`} className="bg-slate-100/70 border-t border-slate-200">
+          <td colSpan={colCount} className="px-2 py-1.5 text-xs font-semibold text-slate-600">🎨 {label} <span className="text-slate-400 font-normal">({grs.length})</span></td>
+        </tr>,
+        ...grs.map(renderDataRow),
+      ]);
+    };
+
     return (
       <div className="overflow-x-auto border border-slate-100 rounded-lg">
         <table className="w-full text-sm">
@@ -992,56 +1059,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {rows.map((r) => (
-              <tr key={String(r.id)}
-                className={`group cursor-pointer ${dropRowId === String(r.id) ? "bg-indigo-50 ring-1 ring-indigo-300" : "hover:bg-blue-50/40"}`}
-                title={canDropImages ? "ลากรูปมาวางเพื่อเพิ่มรูปให้รายการนี้" : undefined}
-                onClick={() => setPeek({ id: String(r.id), edit: false })}
-                onDragOver={canDropImages ? (e) => { e.preventDefault(); if (dropRowId !== String(r.id)) setDropRowId(String(r.id)); } : undefined}
-                onDragLeave={canDropImages ? () => setDropRowId((p) => (p === String(r.id) ? null : p)) : undefined}
-                onDrop={canDropImages ? (e) => { e.preventDefault(); setDropRowId(null); if (e.dataTransfer.files?.length) void dropImagesOnRow(r, e.dataTransfer.files); } : undefined}>
-                {imageField && (
-                  <td className="px-2 py-1.5">
-                    <div className={`relative w-8 h-8 rounded bg-slate-50 border overflow-hidden flex items-center justify-center ${dropRowId === String(r.id) ? "border-indigo-400" : "border-slate-100"}`}>
-                      {uploadingRowId === String(r.id)
-                        ? <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />
-                        : r2img(r[imageField])
-                          ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(r[imageField])!} alt="" className="w-full h-full object-cover" />
-                          : <span className="text-slate-300 text-xs">📦</span>}
-                    </div>
-                  </td>
-                )}
-                <td className="px-2 py-1.5 text-slate-700">{String(r[titleField] ?? r.name ?? r.id)}</td>
-                {subFields.map((f) => {
-                  const isRel = !!relCfgByField[f];
-                  const editable = isEditableCol(f);
-                  const editing = !!editCell && editCell.rowId === String(r.id) && editCell.field === f;
-                  if (editing) {
-                    return (
-                      <td key={f} className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
-                        <input autoFocus
-                          type={["number", "currency"].includes(typeByField[f] ?? "") ? "number" : "text"}
-                          value={editVal} onChange={(e) => setEditVal(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") saveCell(String(r.id), f, editVal); if (e.key === "Escape") setEditCell(null); }}
-                          onBlur={() => saveCell(String(r.id), f, editVal)}
-                          className="w-full h-7 px-1 text-sm border border-blue-300 rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                      </td>
-                    );
-                  }
-                  return (
-                    <td key={f}
-                      onClick={editable ? (e) => { e.stopPropagation(); setEditCell({ rowId: String(r.id), field: f }); setEditVal(r[f] == null ? "" : String(r[f])); } : undefined}
-                      className={`px-2 py-1.5 text-slate-600 whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"} ${editable ? "cursor-text hover:bg-blue-50/60" : ""}`}>
-                      {cellValue(r, f) ?? "—"}
-                    </td>
-                  );
-                })}
-                <td className="px-2 py-1.5 text-right">
-                  <button type="button" title="แก้ไข" onClick={(e) => { e.stopPropagation(); setPeek({ id: String(r.id), edit: true }); }}
-                    className="w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
-                </td>
-              </tr>
-            ))}
+            {renderBody()}
             {showInlineAdd && (
               <tr className="bg-amber-50/50">
                 {imageField && (
