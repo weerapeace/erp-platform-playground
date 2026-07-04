@@ -442,6 +442,11 @@ export type MasterCRUDConfig = {
   hideActiveStatus?: boolean;
   /** ปิดปุ่มลบถาวรสำหรับเอกสารที่ต้องเก็บประวัติ เช่น Payroll Periods */
   allowPermanentDelete?: boolean;
+  /** กล่องลบ: โชว์ "สิ่งที่ผูกอยู่" + ตัวเลือกลบพ่วง (เช่น Parent SKU: รูป/ตัวลูก) · apply เรียกก่อนลบตัวหลัก */
+  deleteExtras?: {
+    fetch: (id: string) => Promise<{ items: { icon: string; label: string; count: number }[]; options: { key: string; label: string }[] }>;
+    apply: (id: string, selected: Record<string, boolean>, mode: "soft" | "hard") => Promise<void>;
+  };
   /** จำนวน row ที่ดึงตอนโหลด (client mode, default 200) */
   pageLimit?: number;
   /** hook หลังบันทึก parent สำเร็จ ใช้กับข้อมูลลูกที่มากับฟอร์ม เช่น วันหยุดประจำงวด */
@@ -930,6 +935,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // delete dialog (ลบชั่วคราว / ลบถาวร)
   const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
   const [deleteMode, setDeleteMode] = useState<"soft" | "hard">("soft");
+  const [deleteInfo, setDeleteInfo] = useState<{ items: { icon: string; label: string; count: number }[]; options: { key: string; label: string }[] } | null>(null);
+  const [deleteOpts, setDeleteOpts] = useState<Record<string, boolean>>({});   // ตัวเลือกลบพ่วงที่ติ๊ก
   const [deleteText, setDeleteText] = useState("");
   const [deleting, setDeleting] = useState(false);
 
@@ -1355,6 +1362,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     if (deleteMode === "hard" && deleteText.trim() !== "ลบ") { setError('พิมพ์คำว่า "ลบ" เพื่อยืนยันการลบถาวร'); return; }
     setDeleting(true); setError(null);
     try {
+      // ลบพ่วง (รูป/ตัวลูก) ก่อนลบตัวหลัก — สำคัญตอนลบถาวร (ลูกต้องไปก่อน กัน FK)
+      if (config.deleteExtras && (deleteOpts.images || deleteOpts.children)) {
+        await config.deleteExtras.apply(String(deleteTarget.id), deleteOpts, deleteMode);
+      }
       const url = `${apiBase}${config.apiPath}/${deleteTarget.id}?actor=${encodeURIComponent(user?.name ?? "")}${deleteMode === "hard" ? "&hard=1" : ""}`;
       const res = await apiFetch(url, { method: "DELETE" });
       const json = await res.json();
@@ -1367,7 +1378,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     } catch (err) { const m = err instanceof Error ? err.message : "ลบไม่สำเร็จ"; setError(m); fail(m); }
     finally { setDeleting(false); }
   };
-  const openDelete = (r: Row) => { setDeleteTarget(r); setDeleteMode("soft"); setDeleteText(""); setError(null); };
+  const openDelete = (r: Row) => {
+    setDeleteTarget(r); setDeleteMode("soft"); setDeleteText(""); setError(null); setDeleteInfo(null); setDeleteOpts({});
+    if (config.deleteExtras) config.deleteExtras.fetch(String(r.id)).then(setDeleteInfo).catch(() => {});   // โชว์สิ่งที่ผูก + ตัวเลือกลบพ่วง
+  };
   const restore = async (r: Row) => {
     try {
       const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}`, {
@@ -2526,6 +2540,26 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   <label className="text-xs text-slate-600">พิมพ์ <code className="px-1 bg-slate-100 rounded text-red-600 font-mono">ลบ</code> เพื่อยืนยัน</label>
                   <input value={deleteText} onChange={(e) => setDeleteText(e.target.value)} autoFocus placeholder="ลบ"
                     className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-red-400" />
+                </div>
+              )}
+              {deleteInfo && (deleteInfo.items.length > 0 || deleteInfo.options.length > 0) && (
+                <div className="pt-1 space-y-2">
+                  {deleteInfo.items.length > 0 && (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                      <div className="text-[11px] font-medium text-slate-500 mb-1">สิ่งที่ผูกอยู่กับรายการนี้</div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        {deleteInfo.items.map((it) => (
+                          <span key={it.label} className="text-xs text-slate-600">{it.icon} {it.label} <b className="text-slate-800">{it.count}</b></span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {deleteInfo.options.map((opt) => (
+                    <label key={opt.key} className="flex gap-2 items-start px-1 cursor-pointer">
+                      <input type="checkbox" checked={!!deleteOpts[opt.key]} onChange={(e) => setDeleteOpts((p) => ({ ...p, [opt.key]: e.target.checked }))} className="mt-0.5" />
+                      <span className="text-xs text-slate-700">{opt.label}</span>
+                    </label>
+                  ))}
                 </div>
               )}
               {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">⚠ {error}</div>}

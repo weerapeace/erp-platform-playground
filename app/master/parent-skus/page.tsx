@@ -16,6 +16,7 @@ import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { useAuth } from "@/components/auth";
+import { apiFetch } from "@/lib/api";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -62,6 +63,22 @@ const CONFIG: MasterCRUDConfig = {
   serverMode:  true,
   pageLimit:   200,
   exportEntityType: "parent_skus_v2",
+  // กล่องลบ: โชว์สิ่งที่ผูก (ลูก/รูป/แท็ก/ลงขาย) + ติ๊กลบรูป/ตัวลูกพ่วง
+  deleteExtras: {
+    fetch: async (id) => {
+      const j = await apiFetch(`/api/parent-skus/${id}/delete-related`).then((r) => r.json());
+      return { items: j.items ?? [], options: j.options ?? [] };
+    },
+    apply: async (id, sel, mode) => {
+      if (!sel.images && !sel.children) return;
+      const res = await apiFetch(`/api/parent-skus/${id}/delete-related`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images: !!sel.images, children: !!sel.children, mode }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error || "ลบพ่วงไม่สำเร็จ");
+    },
+  },
   mediaGallery: {
     entityType: "parent_skus_v2",
     title: "รูปสินค้า",
