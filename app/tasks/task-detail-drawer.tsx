@@ -314,7 +314,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               )}
 
               {/* งานย่อย (การ์ด) — ของกลางจัดการสด · ถ้าไม่มีจะมีปุ่มเพิ่มในตัว */}
-              <SubtaskManager taskId={d.id} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />
+              <SubtaskManager taskId={d.id} brandId={d.brand_id} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />
 
               {/* สินค้าที่เกี่ยวข้อง (SKU m2m) */}
               {(() => {

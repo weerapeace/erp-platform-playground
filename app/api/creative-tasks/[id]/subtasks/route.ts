@@ -247,6 +247,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { data: row, error } = await admin.from("erp_creative_subtasks").insert({
     task_id: id, title, title_en: (body.title_en as string)?.trim() || null, description: (body.description as string)?.trim() || null, assignee_id: ids[0] || (body.assignee_id as string) || null,
     due_date: (body.due_date as string) || null, required_before_next: !!body.required_before_next, sort_order: sort,
+    subtask_type: (body.type as string) || null, config: (body.config && typeof body.config === "object") ? body.config : {},   // รองรับสร้างจากเทมเพลต (เก็บชนิด+ค่าตั้ง)
   }).select("*").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   if (ids.length) await setSubtaskAssignees(admin, row.id, ids);

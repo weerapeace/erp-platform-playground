@@ -23,8 +23,8 @@ import { tr } from "@/lib/lang";
 import type { UserPickerValue } from "@/components/pickers";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import {
-  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes,
-  type CreativeSubtask, type SubtaskType, type SubtaskAssignee,
+  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, listTemplates,
+  type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type TaskTemplate,
 } from "./data";
 
 // ตัวแก้สินค้ากลาง (ของกลาง) — เปิดแก้ Parent SKU จากป๊อปอัปส่งงาน · dynamic กัน import วน + ลด bundle
@@ -67,7 +67,7 @@ const isSubDone = (st: string) => st === "approved" || st === "posted" || st ===
 
 /** กล่องจัดการงานย่อยแบบครบ (โหลดเอง) — ใช้บน canvas/หน้าอื่นได้
  *  canApprove = เห็นปุ่มอนุมัติ (admin/ผจก./ผู้ตรวจ) · canManageAssignees = แก้ผู้รับผิดชอบได้ (admin/ผจก./คนสร้างงาน) */
-export function SubtaskManager({ taskId, pushToast, canApprove = false, canManageAssignees = false }: { taskId: string; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean }) {
+export function SubtaskManager({ taskId, brandId, pushToast, canApprove = false, canManageAssignees = false }: { taskId: string; brandId?: string | null; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean }) {
   const { user } = useAuth();
   const t = useT();
   const [subs, setSubs] = useState<CreativeSubtask[]>([]);
@@ -106,31 +106,98 @@ export function SubtaskManager({ taskId, pushToast, canApprove = false, canManag
           {shown.length === 0 ? <p className="text-sm text-slate-400 italic">{tab === "mine" ? t("ไม่มีงานย่อยที่มอบให้คุณ", "No subtasks assigned to you") : t("ยังไม่มีงานย่อย", "No subtasks yet")}</p> : shown.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} canApprove={canApprove} canManageAssignees={canManageAssignees} typeMeta={typeMeta} hasDescSibling={hasDescSubtask} />)}
         </div>
       )}
-      <AddSubtaskForm onAdd={async (body) => { await addSubtask(taskId, body); await reload(); }} pushToast={pushToast} />
+      <AddSubtaskForm
+        brandId={brandId}
+        onAdd={async (body) => { await addSubtask(taskId, body); await reload(); }}
+        onAddFromTemplate={async (tpl) => {
+          const steps = (tpl.steps ?? []).filter((s) => s.title?.trim());
+          if (!steps.length) { pushToast("info", t("เทมเพลตนี้ไม่มีงานย่อย", "This template has no subtasks")); return; }
+          for (const s of steps) await addSubtask(taskId, { title: s.title, description: s.description ?? null, assignee_ids: s.assignee_ids ?? [], required_before_next: !!s.required_before_next, type: s.type ?? "custom", config: s.config ?? {} });
+          await reload();
+          pushToast("success", t("เพิ่มงานย่อยจากเทมเพลตแล้ว", "Subtasks added from template"));
+        }}
+        pushToast={pushToast}
+      />
     </div>
   );
 }
 
-// ฟอร์มเพิ่มงานย่อย (รวยเหมือนเทมเพลต — ชื่อ + รายละเอียด + ผู้รับผิดชอบหลายคน)
-export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: string; title_en?: string | null; description?: string | null; assignee_ids?: string[] }) => Promise<void>; pushToast: ToastFn }) {
+// ฟอร์มเพิ่มงานย่อย — เลือกเทมเพลตก่อน (กรองตามแบรนด์ของงาน) แล้วสร้างงานย่อยจากเทมเพลต · หรือ "เพิ่มเอง" (ชื่อ+ผู้รับผิดชอบ)
+export function AddSubtaskForm({ onAdd, onAddFromTemplate, brandId, pushToast }: {
+  onAdd: (body: { title: string; title_en?: string | null; description?: string | null; assignee_ids?: string[] }) => Promise<void>;
+  onAddFromTemplate?: (tpl: TaskTemplate) => Promise<void>;
+  brandId?: string | null;
+  pushToast: ToastFn;
+}) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"closed" | "choose" | "custom">("closed");
+  const [templates, setTemplates] = useState<TaskTemplate[]>([]);
+  const [tplLoading, setTplLoading] = useState(false);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [titleEn, setTitleEn] = useState("");
   const [desc, setDesc] = useState("");
   const [assignees, setAssignees] = useState<{ id: string; label: string }[]>([]);
   const [adding, setAdding] = useState<UserPickerValue | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // โหลดเทมเพลตครั้งแรกที่เปิดตัวเลือก
+  useEffect(() => {
+    if (mode !== "choose" || templates.length || tplLoading) return;
+    setTplLoading(true);
+    listTemplates().then(setTemplates).catch((e) => pushToast("error", (e as Error).message)).finally(() => setTplLoading(false));
+  }, [mode, templates.length, tplLoading, pushToast]);
+  // เทมเพลตของแบรนด์นี้ + เทมเพลตทั่วไป (ไม่ผูกแบรนด์) · ไม่รู้แบรนด์ = โชว์ทั้งหมด
+  const brandTemplates = templates.filter((tp) => (brandId ? (tp.brand_id === brandId || !tp.brand_id) : true));
+
+  const applyTpl = async (tpl: TaskTemplate) => {
+    if (!onAddFromTemplate) return;
+    setApplyingId(tpl.id);
+    try { await onAddFromTemplate(tpl); setMode("closed"); }
+    catch (e) { pushToast("error", (e as Error).message); }
+    finally { setApplyingId(null); }
+  };
   const submit = async () => {
     if (!title.trim()) return;
     setBusy(true);
-    try { await onAdd({ title: title.trim(), title_en: titleEn.trim() || null, description: desc.trim() || null, assignee_ids: assignees.map((a) => a.id) }); setTitle(""); setTitleEn(""); setDesc(""); setAssignees([]); setOpen(false); }
+    try { await onAdd({ title: title.trim(), title_en: titleEn.trim() || null, description: desc.trim() || null, assignee_ids: assignees.map((a) => a.id) }); setTitle(""); setTitleEn(""); setDesc(""); setAssignees([]); setMode("closed"); }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setBusy(false); }
   };
-  if (!open) return <button onClick={() => setOpen(true)} className="mt-2 text-sm text-violet-700 hover:underline">＋ {t("เพิ่มงานย่อย", "Add Subtask")}</button>;
+
+  if (mode === "closed") return <button onClick={() => setMode("choose")} className="mt-2 text-sm text-violet-700 hover:underline">＋ {t("เพิ่มงานย่อย", "Add Subtask")}</button>;
+
+  if (mode === "choose") return (
+    <div className="mt-2 border border-violet-200 rounded-lg p-3 space-y-2 bg-violet-50/30">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-slate-700">{t("เลือกเทมเพลต", "Choose a template")} <span className="text-xs font-normal text-slate-400">({t("ของแบรนด์นี้ + ทั่วไป", "this brand + general")})</span></p>
+        <button onClick={() => setMode("closed")} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>
+      </div>
+      {tplLoading ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
+        : brandTemplates.length === 0 ? <p className="text-xs text-slate-400 italic">{t("ยังไม่มีเทมเพลต — เพิ่มเองด้านล่างได้", "No templates — add manually below")}</p>
+        : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            {brandTemplates.map((tpl) => (
+              <button key={tpl.id} type="button" disabled={!!applyingId} onClick={() => applyTpl(tpl)}
+                className="text-left border border-slate-200 rounded-lg px-3 py-2 hover:border-violet-300 hover:bg-white disabled:opacity-50">
+                <span className="block text-sm font-medium text-slate-700">{applyingId === tpl.id ? t("กำลังเพิ่ม...", "Adding...") : tpl.name}</span>
+                <span className="block text-[11px] text-slate-400">{(tpl.steps?.filter((s) => s.title?.trim()).length ?? 0)} {t("งานย่อย", "subtasks")}{tpl.brand_label ? ` · ${tpl.brand_label}` : ` · ${t("ทั่วไป", "general")}`}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      <div className="border-t border-violet-100 pt-2">
+        <button onClick={() => setMode("custom")} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มเอง (กำหนดชื่อ/ผู้รับผิดชอบ)", "Add manually (name/assignees)")}</button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="mt-2 border border-violet-200 rounded-lg p-3 space-y-2 bg-violet-50/30">
+      <div className="flex items-center justify-between">
+        <button onClick={() => setMode("choose")} className="text-xs text-slate-500 hover:text-violet-700">← {t("เลือกเทมเพลต", "Choose template")}</button>
+        <button onClick={() => setMode("closed")} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>
+      </div>
       <ERPInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("ชื่องานย่อย (ไทย)", "Subtask title (Thai)")} />
       <ERPInput value={titleEn} onChange={(e) => setTitleEn(e.target.value)} placeholder={t("ชื่ออังกฤษ (ไม่บังคับ — โชว์ตอนสลับภาษา EN)", "English title (optional — shown in EN mode)")} />
       <ERPTextarea value={desc} rows={2} onChange={(e) => setDesc(e.target.value)} placeholder={t("รายละเอียด (ไม่บังคับ)", "Description (optional)")} />
@@ -145,7 +212,7 @@ export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: st
         </div>
       </div>
       <div className="flex justify-end gap-2">
-        <button onClick={() => setOpen(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+        <button onClick={() => setMode("closed")} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <button onClick={submit} disabled={busy} className="h-8 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : t("เพิ่ม", "Add")}</button>
       </div>
     </div>
