@@ -25,6 +25,7 @@ const FEATURE_OPTIONS = [
 const EMOJI_QUICK = ["🧩", "📋", "📝", "📦", "💰", "🧮", "📅", "👕", "🏷️", "🚚", "🧾", "⭐", "🔧", "📊"];
 
 const PICKER_THRESHOLD = 6; // ตัวเลือกเกินจำนวนนี้ → เปลี่ยนเป็นปุ่มเปิด popup แทนโชว์ชิปเรียง
+const DRAFT_KEY = "misc_new_app_draft"; // เก็บร่างต่อ user (user_ui_prefs) — บันทึกอัตโนมัติ + โหลดกลับตอนเปิด
 
 function Field({ label, hint, value, onChange, area }: { label: string; hint?: string; value: string; onChange: (v: string) => void; area?: boolean }) {
   return (
@@ -200,6 +201,11 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
   const [selModules, setSelModules] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [generated, setGenerated] = useState("");
+  const [draftLoaded, setDraftLoaded] = useState(false); // โหลดร่างเสร็จแล้วหรือยัง (กัน autosave เขียนทับตอนกำลังโหลด)
+  const [hasDraft, setHasDraft] = useState(false);       // มีร่างอยู่ → โชว์แถบ "บันทึกร่างอัตโนมัติ · ล้างร่าง"
+
+  // รวมค่าฟอร์มปัจจุบันเป็นก้อนร่าง
+  const draftValue = () => ({ icon, iconImg, name, purpose, selRoles, usersText, dataFields, features, example, selModules, notes });
 
   // โหลด role จริง + โมดูลจริง (no hardcode) เมื่อเปิด
   useEffect(() => {
@@ -211,6 +217,57 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
       .then((j) => { if (alive && Array.isArray(j.data)) setModules(j.data.map((x: { module_key: string; label: string }) => ({ key: x.module_key, label: x.label }))); }).catch(() => {});
     return () => { alive = false; };
   }, [open]);
+
+  // โหลดร่างที่เคยบันทึกไว้ เมื่อเปิด modal
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setDraftLoaded(false);
+    apiFetch(`/api/user-prefs?key=${DRAFT_KEY}`).then((r) => r.json()).then((j) => {
+      if (!alive) return;
+      const v = (j?.value ?? {}) as Record<string, unknown>;
+      const has = !!(v.name || v.purpose || (Array.isArray(v.dataFields) && v.dataFields.length) || (Array.isArray(v.features) && v.features.length) || (Array.isArray(v.selModules) && v.selModules.length));
+      if (has) {
+        setIcon(typeof v.icon === "string" ? v.icon : "🧩");
+        setIconImg(typeof v.iconImg === "string" ? v.iconImg : null);
+        setName(typeof v.name === "string" ? v.name : "");
+        setPurpose(typeof v.purpose === "string" ? v.purpose : "");
+        setSelRoles(Array.isArray(v.selRoles) ? (v.selRoles as string[]) : []);
+        setUsersText(typeof v.usersText === "string" ? v.usersText : "");
+        setDataFields(Array.isArray(v.dataFields) ? (v.dataFields as string[]) : []);
+        setFeatures(Array.isArray(v.features) ? (v.features as string[]) : []);
+        setExample(typeof v.example === "string" ? v.example : "");
+        setSelModules(Array.isArray(v.selModules) ? (v.selModules as string[]) : []);
+        setNotes(typeof v.notes === "string" ? v.notes : "");
+      }
+      setHasDraft(has);
+    }).catch(() => {}).finally(() => { if (alive) setDraftLoaded(true); });
+    return () => { alive = false; };
+  }, [open]);
+
+  // บันทึกร่างอัตโนมัติ (หน่วง 800ms) หลังโหลดร่างเสร็จแล้วเท่านั้น
+  useEffect(() => {
+    if (!open || !draftLoaded) return;
+    const t = setTimeout(() => { void saveDraft(true); }, 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, draftLoaded, icon, iconImg, name, purpose, selRoles, usersText, dataFields, features, example, selModules, notes]);
+
+  const saveDraft = async (silent = false) => {
+    try {
+      await apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: DRAFT_KEY, value: draftValue() }) });
+      setHasDraft(true);
+      if (!silent) toast.success("บันทึกร่างแล้ว — ปิดแล้วเปิดมากรอกต่อได้เลย");
+    } catch { if (!silent) toast.error("บันทึกร่างไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+  };
+
+  const clearDraft = async () => {
+    try { await apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: DRAFT_KEY, value: {} }) }); } catch {}
+    setIcon("🧩"); setIconImg(null); setName(""); setPurpose(""); setSelRoles([]); setUsersText("");
+    setDataFields([]); setFeatures([]); setExample(""); setSelModules([]); setNotes(""); setGenerated("");
+    setHasDraft(false);
+    toast.success("ล้างร่างแล้ว");
+  };
 
   const build = () => {
     if (!name.trim()) { toast.error("ใส่ชื่อแอปก่อน"); return; }
@@ -258,9 +315,16 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
       description="กรอกตามคำถาม แล้วกด “สร้าง Prompt” → คัดลอกไปวางให้ Claude สร้างให้ (ไม่ต้องรู้โค้ด)"
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">ปิด</button>
+        <button onClick={() => void saveDraft()} className="h-9 px-4 text-sm rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50">💾 บันทึกร่าง</button>
         <button onClick={build} className="h-9 px-5 text-sm font-medium rounded-lg bg-rose-500 text-white hover:bg-rose-600">✨ สร้าง Prompt</button>
       </>}>
       <div className="space-y-3">
+        {hasDraft && (
+          <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-700">
+            <span>📝 บันทึกร่างไว้อัตโนมัติ — ปิดแล้วเปิดมากรอกต่อได้</span>
+            <button type="button" onClick={() => void clearDraft()} className="rounded-md border border-amber-300 px-2 py-0.5 text-amber-700 hover:bg-amber-100">ล้างร่าง</button>
+          </div>
+        )}
         {/* ไอคอน (อีโมจิ หรือ อัปรูป) + ชื่อ */}
         <div className="flex items-start gap-2">
           <label className="block">
