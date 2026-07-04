@@ -5,7 +5,7 @@
 // ใช้ที่: TaskDetailDrawer (/tasks) และ drawer การ์ดงานบน Campaign Canvas
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { ERPInput, ERPTextarea } from "@/components/form";
@@ -67,7 +67,7 @@ const isSubDone = (st: string) => st === "approved" || st === "posted" || st ===
 
 /** กล่องจัดการงานย่อยแบบครบ (โหลดเอง) — ใช้บน canvas/หน้าอื่นได้
  *  canApprove = เห็นปุ่มอนุมัติ (admin/ผจก./ผู้ตรวจ) · canManageAssignees = แก้ผู้รับผิดชอบได้ (admin/ผจก./คนสร้างงาน) */
-export function SubtaskManager({ taskId, pushToast, canApprove = false, canManageAssignees = false }: { taskId: string; brandId?: string | null; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean }) {
+export function SubtaskManager({ taskId, subCardStyle, pushToast, canApprove = false, canManageAssignees = false }: { taskId: string; brandId?: string | null; subCardStyle?: CSSProperties; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean }) {
   const { user } = useAuth();
   const t = useT();
   const [subs, setSubs] = useState<CreativeSubtask[]>([]);
@@ -103,7 +103,7 @@ export function SubtaskManager({ taskId, pushToast, canApprove = false, canManag
       </div>
       {loading ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : (
         <div className="space-y-2">
-          {shown.length === 0 ? <p className="text-sm text-slate-400 italic">{tab === "mine" ? t("ไม่มีงานย่อยที่มอบให้คุณ", "No subtasks assigned to you") : t("ยังไม่มีงานย่อย", "No subtasks yet")}</p> : shown.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} canApprove={canApprove} canManageAssignees={canManageAssignees} typeMeta={typeMeta} hasDescSibling={hasDescSubtask} />)}
+          {shown.length === 0 ? <p className="text-sm text-slate-400 italic">{tab === "mine" ? t("ไม่มีงานย่อยที่มอบให้คุณ", "No subtasks assigned to you") : t("ยังไม่มีงานย่อย", "No subtasks yet")}</p> : shown.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} canApprove={canApprove} canManageAssignees={canManageAssignees} typeMeta={typeMeta} hasDescSibling={hasDescSubtask} subCardStyle={subCardStyle} />)}
         </div>
       )}
       <AddSubtaskForm
@@ -278,7 +278,7 @@ function ReviseModal({ fields, busy, onCancel, onConfirm }: {
 }
 
 // การ์ดงานย่อย — สถานะเป็นปุ่มกด (เริ่ม→ส่งงาน→อนุมัติ) + ผู้รับผิดชอบ + ไฟล์แนบ
-export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {}, hasDescSibling = false }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta; hasDescSibling?: boolean }) {
+export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {}, hasDescSibling = false, subCardStyle }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta; hasDescSibling?: boolean; subCardStyle?: CSSProperties }) {
   const t = useT();
   const { user } = useAuth();
   const [open, setOpen] = useState(true);   // กาง (ขยาย) งานย่อยเป็นค่าเริ่มต้น
@@ -348,7 +348,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const openWork = () => setWorkOpen(true);
 
   return (
-    <div className="border border-slate-200 rounded-lg">
+    <div className="border border-slate-200 rounded-lg" style={subCardStyle}>
       <div className="flex items-center gap-2 px-3 py-2">
         <span className={`h-2 w-2 rounded-full shrink-0 ${subStepDot(st)}`} title={subStepLabel(st)} />
         {/* ปุ่ม action ตามสถานะ */}

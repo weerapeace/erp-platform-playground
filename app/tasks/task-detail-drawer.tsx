@@ -23,7 +23,7 @@ import { PublishModal } from "./publish-modal";
 import { TeamFill } from "./team-picker";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, progressBg, dividerColorOf } from "./drawer-theme";
+import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, subCardBgStyle, orderedKeys, accentCss, btnBg, progressBg, dividerColorOf } from "./drawer-theme";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
@@ -314,7 +314,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               )}
 
               {/* งานย่อย (การ์ด) — ของกลางจัดการสด · ถ้าไม่มีจะมีปุ่มเพิ่มในตัว */}
-              <SubtaskManager taskId={d.id} brandId={d.brand_id} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />
+              <SubtaskManager taskId={d.id} brandId={d.brand_id} subCardStyle={subCardBgStyle(dth)} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />
 
               {/* สินค้าที่เกี่ยวข้อง (SKU m2m) */}
               {(() => {

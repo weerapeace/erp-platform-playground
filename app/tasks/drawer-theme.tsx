@@ -19,12 +19,14 @@ export type DrawerTheme = {
   accent: string; accent2: string; accentGradient: boolean;   // สีหลัก (+คู่ไล่สีถ้าเปิด gradient)
   buttonColor: string | null; progressColor: string | null; dividerColor: string | null;   // แยกสีแต่ละส่วน (null = ใช้สีหลัก/ค่าเริ่มต้น)
   bg: string | null; bgImage: string | null; bgGradient: DrawerGradient;   // พื้นหลัง: สีเดียว / รูป / ไล่สี
+  subCardBg: string | null; subCardBgImage: string | null; subCardBgGradient: DrawerGradient;   // พื้นหลังการ์ดงานย่อย
   size: "sm" | "md" | "lg"; density: DrawerDensity; swap: boolean; hidden: string[]; order: string[]; collapsed: string[];
 };
 export const DEFAULT_DRAWER_THEME: DrawerTheme = {
   accent: "#7c3aed", accent2: "#ec4899", accentGradient: false,
   buttonColor: null, progressColor: null, dividerColor: null,
   bg: null, bgImage: null, bgGradient: null,
+  subCardBg: null, subCardBgImage: null, subCardBgGradient: null,
   size: "md", density: "normal", swap: false, hidden: [], order: [], collapsed: ["attach"],
 };
 
@@ -34,6 +36,7 @@ export function mergeDrawerTheme(v: unknown): DrawerTheme {
     accent: o.accent ?? DEFAULT_DRAWER_THEME.accent, accent2: o.accent2 ?? DEFAULT_DRAWER_THEME.accent2, accentGradient: !!o.accentGradient,
     buttonColor: o.buttonColor ?? null, progressColor: o.progressColor ?? null, dividerColor: o.dividerColor ?? null,
     bg: o.bg ?? null, bgImage: o.bgImage ?? null, bgGradient: o.bgGradient ?? null,
+    subCardBg: o.subCardBg ?? null, subCardBgImage: o.subCardBgImage ?? null, subCardBgGradient: o.subCardBgGradient ?? null,
     size: o.size ?? "md", density: o.density ?? "normal", swap: !!o.swap, hidden: Array.isArray(o.hidden) ? o.hidden : [], order: Array.isArray(o.order) ? o.order : [],
     collapsed: Array.isArray(o.collapsed) ? o.collapsed : DEFAULT_DRAWER_THEME.collapsed,
   };
@@ -77,6 +80,12 @@ export function drawerBgStyle(theme: DrawerTheme): React.CSSProperties {
   if (theme.bgGradient) return { background: `linear-gradient(160deg, ${theme.bgGradient.from}, ${theme.bgGradient.to})` };
   return theme.bg ? { background: theme.bg } : {};
 }
+// สไตล์พื้นหลังการ์ดงานย่อย (รูป+ฉากขาวจางให้อ่านง่าย · หรือสีเดียว/ไล่สี) — undefined = การ์ดขาวปกติ
+export function subCardBgStyle(theme: DrawerTheme): React.CSSProperties | undefined {
+  if (theme.subCardBgImage) { const u = r2ImageUrl(theme.subCardBgImage); return u ? { backgroundImage: `linear-gradient(rgba(255,255,255,0.82),rgba(255,255,255,0.82)), url(${u})`, backgroundSize: "cover" } : undefined; }
+  if (theme.subCardBgGradient) return { background: `linear-gradient(160deg, ${theme.subCardBgGradient.from}, ${theme.subCardBgGradient.to})` };
+  return theme.subCardBg ? { background: theme.subCardBg } : undefined;
+}
 
 export function useDrawerTheme(which: "task" | "content") {
   const prefKey = `tasks_drawer_theme_${which}`;
@@ -97,6 +106,7 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
   const t = useT();
   const [open, setOpen] = useState(false);
   const [bgBusy, setBgBusy] = useState(false);
+  const [subBgBusy, setSubBgBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const toggleHidden = (key: string) => update({ hidden: theme.hidden.includes(key) ? theme.hidden.filter((x) => x !== key) : [...theme.hidden, key] });
   const moveSection = (key: string, dir: -1 | 1) => {
@@ -113,6 +123,13 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
     try { const up = await uploadResizedImage(file, { folder: "drawer-bg", max: 1600 }); update({ bgImage: up.r2_key }); }
     catch { alert(t("อัปโหลดรูปไม่สำเร็จ", "Upload failed")); }
     finally { setBgBusy(false); }
+  };
+  const onPickSubCardBg = async (file: File | null | undefined) => {
+    if (!file) return;
+    setSubBgBusy(true);
+    try { const up = await uploadResizedImage(file, { folder: "subcard-bg", max: 1600 }); update({ subCardBgImage: up.r2_key }); }
+    catch { alert(t("อัปโหลดรูปไม่สำเร็จ", "Upload failed")); }
+    finally { setSubBgBusy(false); }
   };
   return (
     <div className="relative" ref={ref}>
@@ -179,6 +196,24 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
                 <input type="color" value={theme.bgGradient.from} onChange={(e) => update({ bgGradient: { from: e.target.value, to: theme.bgGradient!.to } })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
                 <span className="text-xs text-slate-400">→</span>
                 <input type="color" value={theme.bgGradient.to} onChange={(e) => update({ bgGradient: { from: theme.bgGradient!.from, to: e.target.value } })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+              </div>
+            )}
+            {/* พื้นหลังการ์ดงานย่อย: ขาว / สีเดียว / ไล่สี / รูป */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500 w-20">{t("พื้นการ์ดย่อย", "Subtask card")}</span>
+              <button onClick={() => update({ subCardBg: null, subCardBgImage: null, subCardBgGradient: null })} className={`h-7 px-2.5 text-xs rounded border ${!theme.subCardBg && !theme.subCardBgImage && !theme.subCardBgGradient ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{t("ขาว", "White")}</button>
+              <input type="color" value={theme.subCardBg ?? "#ffffff"} onChange={(e) => update({ subCardBg: e.target.value, subCardBgImage: null, subCardBgGradient: null })} title={t("สีเดียว", "Solid")} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+              <button onClick={() => update({ subCardBgGradient: theme.subCardBgGradient ?? { from: "#f5f3ff", to: "#fdf2f8" }, subCardBgImage: null })} className={`h-7 px-2 text-xs rounded border ${theme.subCardBgGradient ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{t("ไล่สี", "Gradient")}</button>
+              <label className={`h-7 px-2 text-xs rounded border inline-flex items-center cursor-pointer ${theme.subCardBgImage ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"} ${subBgBusy ? "opacity-60 pointer-events-none" : ""}`}>
+                {subBgBusy ? "…" : t("รูป", "Image")}
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => { void onPickSubCardBg(e.target.files?.[0]); e.target.value = ""; }} />
+              </label>
+            </div>
+            {theme.subCardBgGradient && (
+              <div className="flex items-center gap-2 pl-[5.5rem]">
+                <input type="color" value={theme.subCardBgGradient.from} onChange={(e) => update({ subCardBgGradient: { from: e.target.value, to: theme.subCardBgGradient!.to } })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+                <span className="text-xs text-slate-400">→</span>
+                <input type="color" value={theme.subCardBgGradient.to} onChange={(e) => update({ subCardBgGradient: { from: theme.subCardBgGradient!.from, to: e.target.value } })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
               </div>
             )}
             {/* สลับซ้าย-ขวา */}
