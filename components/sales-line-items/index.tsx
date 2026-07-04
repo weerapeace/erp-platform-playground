@@ -84,6 +84,7 @@ export function SOLineEditor({
   readonly,
   layout = "card",
   onSaveMasterName,
+  hidePrice = false,
 }: {
   lines: EditorLine[];
   onChange: (lines: EditorLine[]) => void;
@@ -92,6 +93,8 @@ export function SOLineEditor({
   layout?: "card" | "table";
   /** ถ้าส่งมา = เปิดตัวเลือก "บันทึกเป็นชื่อสินค้าตัวจริงด้วย" (อัปเดต name_th ใน master) */
   onSaveMasterName?: (productId: string, name: string) => Promise<void>;
+  /** ซ่อนคอลัมน์ราคา/ส่วนลด/รวม (โหมดตาราง) — เช่น ใบส่งสินค้าที่สนใจแค่จำนวน */
+  hidePrice?: boolean;
 }) {
   const update = (i: number, patch: Partial<EditorLine>) => {
     onChange(lines.map((l, idx) => idx === i ? { ...l, ...patch } : l));
@@ -192,16 +195,18 @@ export function SOLineEditor({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] border-collapse text-sm">
+          <table className={`w-full ${hidePrice ? "min-w-[520px]" : "min-w-[860px]"} border-collapse text-sm`}>
             <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
               <tr className="border-b border-slate-200">
                 <th className="w-8 px-2 py-2 text-center font-semibold">#</th>
                 <th className="min-w-[240px] px-2 py-2 text-left font-semibold">สินค้า</th>
-                <th className="w-20 px-2 py-2 text-right font-semibold">จำนวน</th>
+                <th className={`${hidePrice ? "w-32" : "w-20"} px-2 py-2 text-right font-semibold`}>จำนวน</th>
                 <th className="w-28 px-2 py-2 text-left font-semibold">หน่วย</th>
-                <th className="w-28 px-2 py-2 text-right font-semibold">ราคา/หน่วย</th>
-                <th className="w-36 px-2 py-2 text-left font-semibold">ส่วนลด</th>
-                <th className="w-28 px-2 py-2 text-right font-semibold">รวมก่อนภาษี</th>
+                {!hidePrice && <>
+                  <th className="w-28 px-2 py-2 text-right font-semibold">ราคา/หน่วย</th>
+                  <th className="w-36 px-2 py-2 text-left font-semibold">ส่วนลด</th>
+                  <th className="w-28 px-2 py-2 text-right font-semibold">รวมก่อนภาษี</th>
+                </>}
                 {!readonly && <th className="w-9 px-1 py-2"></th>}
               </tr>
             </thead>
@@ -239,27 +244,29 @@ export function SOLineEditor({
                       onChange={(u: UnitPickerValue | null) => update(i, { unit: u?.name ?? "ชิ้น" })}
                       disabled={readonly} />
                   </td>
-                  <td className="px-2 py-2">
-                    <input type="number" value={l.unit_price} disabled={readonly}
-                      onChange={(e) => update(i, { unit_price: parseFloat(e.target.value) || 0 })}
-                      className="h-9 w-full rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50" />
-                  </td>
-                  <td className="px-2 py-2">
-                    <div className="flex gap-1">
-                      <input type="number" value={l.discount_value} disabled={readonly}
-                        onChange={(e) => update(i, { discount_value: parseFloat(e.target.value) || 0 })}
-                        className="h-9 w-16 rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50" />
-                      <select value={l.discount_type} disabled={readonly}
-                        onChange={(e) => update(i, { discount_type: e.target.value as "percent" | "amount" })}
-                        className="h-9 w-14 rounded-lg border border-slate-200 bg-white px-1 text-sm disabled:bg-slate-50">
-                        <option value="percent">%</option>
-                        <option value="amount">฿</option>
-                      </select>
-                    </div>
-                  </td>
-                  <td className="px-2 py-2 text-right font-mono text-sm font-semibold tabular-nums text-slate-900">
-                    {formatMoney(money(lineTotal(l)))}
-                  </td>
+                  {!hidePrice && <>
+                    <td className="px-2 py-2">
+                      <input type="number" value={l.unit_price} disabled={readonly}
+                        onChange={(e) => update(i, { unit_price: parseFloat(e.target.value) || 0 })}
+                        className="h-9 w-full rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50" />
+                    </td>
+                    <td className="px-2 py-2">
+                      <div className="flex gap-1">
+                        <input type="number" value={l.discount_value} disabled={readonly}
+                          onChange={(e) => update(i, { discount_value: parseFloat(e.target.value) || 0 })}
+                          className="h-9 w-16 rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50" />
+                        <select value={l.discount_type} disabled={readonly}
+                          onChange={(e) => update(i, { discount_type: e.target.value as "percent" | "amount" })}
+                          className="h-9 w-14 rounded-lg border border-slate-200 bg-white px-1 text-sm disabled:bg-slate-50">
+                          <option value="percent">%</option>
+                          <option value="amount">฿</option>
+                        </select>
+                      </div>
+                    </td>
+                    <td className="px-2 py-2 text-right font-mono text-sm font-semibold tabular-nums text-slate-900">
+                      {formatMoney(money(lineTotal(l)))}
+                    </td>
+                  </>}
                   {!readonly && (
                     <td className="px-1 py-2 text-center">
                       <button type="button" onClick={() => remove(i)} aria-label="ลบรายการ"
@@ -269,7 +276,7 @@ export function SOLineEditor({
                 </tr>
               ))}
               {lines.length === 0 && (
-                <tr><td colSpan={readonly ? 7 : 8} className="px-4 py-8 text-center text-sm text-slate-400">
+                <tr><td colSpan={(hidePrice ? 4 : 7) + (readonly ? 0 : 1)} className="px-4 py-8 text-center text-sm text-slate-400">
                   {readonly ? "ไม่มีรายการสินค้า" : 'กด "+ เพิ่มรายการ" เพื่อเริ่มเลือกสินค้า'}
                 </td></tr>
               )}

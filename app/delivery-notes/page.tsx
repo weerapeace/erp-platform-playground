@@ -100,6 +100,21 @@ export default function DeliveryNotesPage() {
     finally { setDetailLoading(false); }
   };
 
+  // แก้ไข (ร่างเท่านั้น) → เติมฟอร์มจากรายละเอียด
+  const openEdit = (d: DeliveryNoteDetail) => {
+    setEditingId(d.id);
+    setCustomer(d.customer_id ? ({ id: d.customer_id, code: d.customer_code ?? null, name: d.customer_name ?? "" } as CustomerPickerValue) : null);
+    setDeliveryDate(d.delivery_date ? String(d.delivery_date).slice(0, 10) : new Date().toISOString().slice(0, 10));
+    setNote(d.note ?? "");
+    setLines(d.lines.length ? d.lines.map(l => ({
+      tempId: l.id ?? String(Math.random()).slice(2),
+      product_id: l.product_id ?? null, sku: l.sku ?? null, product_name: l.product_name, qty: l.qty,
+      unit: l.unit ?? "ชิ้น", unit_price: 0, discount_type: "percent" as const, discount_value: 0, note: l.note ?? "",
+    })) : [emptyLine()]);
+    setSrcSo((d.so_ids ?? []).map((sid, i) => ({ id: sid, number: (d.so_numbers ?? [])[i] ?? "SO" })));
+    setFormErr(null); setDetailOpen(false); setModalOpen(true);
+  };
+
   // ดึงจากใบขาย: ดึงรายการสินค้า+จำนวนของแต่ละ SO มารวม + ล็อกลูกค้าเดียวกัน
   const handlePicked = async (picked: SourceDocRow[]) => {
     const lockedCust = srcSo.length > 0 ? customer?.id : undefined;
@@ -288,6 +303,9 @@ export default function DeliveryNotesPage() {
             {detail.dn_number && (
               <a href={`/print/delivery-doc/${detail.id}`} target="_blank" rel="noopener noreferrer"
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center">📦 พิมพ์ใบส่งสินค้า</a>
+            )}
+            {detail.status === "draft" && (
+              <button onClick={() => openEdit(detail)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">✏️ แก้ไข</button>
             )}
             {detail.status === "draft" && (
               <button onClick={() => transition(detail.id, "deliver")} disabled={wfLoading} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">🚚 ส่งของ</button>
