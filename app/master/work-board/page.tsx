@@ -24,6 +24,7 @@ import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/compon
 import { needsCut, type CutFields } from "@/lib/cut-rules";
 import { addToPrCart } from "@/lib/pr-cart";
 import { PurchaseNeeds } from "./purchase-needs";
+import { DispatchShop } from "./dispatch-shop";
 import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
@@ -129,7 +130,7 @@ export default function WorkBoardPage() {
 
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], pendingPiece: [] });
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"board" | "table" | "purchase">("board");   // สลับ บอร์ด/ตาราง/ขอซื้อ
+  const [viewMode, setViewMode] = useState<"board" | "table" | "purchase" | "shop">("board");   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ
   const [pendingCols] = useState<number | null>(null);     // (เลิกใช้) คอลัมน์โซนรอจ่าย — รอจ่ายย้ายไปป๊อปอัปแล้ว
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
   const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // เงินเดือนรวมพนักงานต่อแผนก (จาก payroll)
@@ -965,6 +966,7 @@ export default function WorkBoardPage() {
           <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
             <button onClick={() => setViewMode("board")} className={`h-9 px-3 font-medium ${viewMode === "board" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 บอร์ด</button>
             <button onClick={() => setViewMode("table")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ ตาราง</button>
+            <button onClick={() => setViewMode("shop")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "shop" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🛒 ช้อปจ่ายงาน</button>
             <button onClick={() => setViewMode("purchase")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "purchase" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 ขอซื้อ/เตรียม</button>
           </div>
           <PwaInstallButton className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 inline-flex items-center gap-1" />
@@ -1030,6 +1032,18 @@ export default function WorkBoardPage() {
         <PurchaseNeeds canEdit={canEdit} onOpenMo={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "table" ? (
         <BoardTable pending={board.pending} workOrders={board.workOrders} onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
+      ) : viewMode === "shop" ? (
+        <DispatchShop
+          pending={board.pending}
+          departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
+          craftsmen={craftsmen}
+          canDispatch={canDispatch}
+          moGroups={moGroups}
+          groupOf={pendGroupOf}
+          laborByMo={Object.fromEntries(board.pending.map((m) => [m.mo_no, pendLaborPP(m)]))}
+          onOpenMO={(mo) => { const real = board.pending.find((x) => x.id === mo.id); if (real) { setClWO(null); setChecklistMO(real); } }}
+          onReload={() => void load(true)}
+        />
       ) : activePlan !== "real" ? (
         (() => {
           const p = plans.find((x) => x.id === activePlan);
