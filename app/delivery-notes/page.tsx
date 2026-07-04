@@ -282,7 +282,7 @@ export default function DeliveryNotesPage() {
           </div>
 
           {/* รายการสินค้า (เหมือนใบขาย) */}
-          <SOLineEditor lines={lines} onChange={setLines} layout="table" />
+          <SOLineEditor lines={lines} onChange={setLines} layout="table" hidePrice />
           <div className="text-right text-sm text-slate-600">รวมจำนวน <span className="font-bold text-slate-900 tabular-nums">{totalQty.toLocaleString("th-TH")}</span></div>
 
           <label className="block">
