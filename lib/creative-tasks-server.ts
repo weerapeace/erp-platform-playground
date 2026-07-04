@@ -80,6 +80,32 @@ export async function nextContentNo(admin: Admin): Promise<string> {
   return `${prefix}${String(Number.isFinite(seq) ? seq : 1).padStart(4, "0")}`;
 }
 
+/**
+ * B2 (Hybrid): งานย่อยชนิด "content" → สร้าง erp_creative_content ผูกกับงาน + เก็บ content_id ใน subtask.config
+ * (ใช้ storage คอนเทนต์เดิม → คอนเทนต์โผล่ในแท็บ 📱 คอนเทนต์ของงาน แก้แคปชั่น/เวลาโพสต์ที่นั่นได้ทันที)
+ * best-effort: ถ้าสร้างไม่ได้ ไม่ทำให้การสร้างงานย่อยพัง
+ */
+export async function materializeContentSubtasks(
+  admin: Admin, taskId: string, brandId: string | null,
+  subs: { id: string; subtask_type?: string | null; config?: Record<string, unknown> | null; title?: string | null }[],
+  createdBy: string | null,
+): Promise<void> {
+  for (const s of subs) {
+    if (s.subtask_type !== "content") continue;
+    const cfg = (s.config ?? {}) as Record<string, unknown>;
+    if (cfg.content_id) continue;   // ผูกไว้แล้ว
+    try {
+      let cno = await nextContentNo(admin);
+      const platforms = Array.isArray(cfg.platforms) ? (cfg.platforms as string[]) : [];
+      const crow = { content_no: cno, title: (s.title || "คอนเทนต์"), task_id: taskId, brand_id: brandId || null, post_type: (cfg.post_type as string) || null, platforms, status: "draft", created_by: createdBy };
+      let ins = await admin.from("erp_creative_content").insert(crow).select("id").single();
+      if (ins.error && /duplicate|unique/i.test(ins.error.message)) { cno = await nextContentNo(admin); ins = await admin.from("erp_creative_content").insert({ ...crow, content_no: cno }).select("id").single(); }
+      if (ins.error || !ins.data) continue;
+      await admin.from("erp_creative_subtasks").update({ config: { ...cfg, content_id: (ins.data as { id: string }).id } }).eq("id", s.id);
+    } catch { /* best-effort */ }
+  }
+}
+
 /** สร้างการแจ้งเตือนในระบบ (ไม่ throw) — userId = user_profiles.id (auth uid) */
 export async function notify(
   admin: Admin,

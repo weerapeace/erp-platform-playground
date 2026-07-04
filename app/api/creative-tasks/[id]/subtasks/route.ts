@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
-import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers, recomputeTaskStatusFromSubtasks, pushTasksLineTpl, employeeLabelMap, taskLink } from "@/lib/creative-tasks-server";
+import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers, recomputeTaskStatusFromSubtasks, pushTasksLineTpl, employeeLabelMap, taskLink, materializeContentSubtasks } from "@/lib/creative-tasks-server";
 import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
 import { renderPrompt } from "@/lib/subtask-prompt";
 
@@ -253,6 +253,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (ids.length) await setSubtaskAssignees(admin, row.id, ids);
   await writeAudit(admin, { action: "subtask:create", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { title } });
   try { await recomputeTaskStatusFromSubtasks(admin, id); } catch { /* best-effort */ }
+  // B2: งานย่อยชนิด content → สร้างคอนเทนต์ผูกงานอัตโนมัติ (best-effort)
+  if (row.subtask_type === "content") {
+    const { data: tk } = await admin.from("erp_creative_tasks").select("brand_id").eq("id", id).maybeSingle();
+    await materializeContentSubtasks(admin, id, ((tk as { brand_id?: string | null } | null)?.brand_id) ?? null, [row], user?.id ?? null);
+  }
   const aMap = await subtaskAssigneesMap(admin, [row.id]);
   return NextResponse.json({ data: { ...row, assignees: aMap.get(String(row.id)) ?? [] }, error: null });
 }

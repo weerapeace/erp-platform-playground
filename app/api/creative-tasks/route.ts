@@ -14,7 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
-import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser, setTaskReviewers, pushTasksLineTpl, taskLink } from "@/lib/creative-tasks-server";
+import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser, setTaskReviewers, pushTasksLineTpl, taskLink, materializeContentSubtasks } from "@/lib/creative-tasks-server";
 import { SELECT, flattenTask } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -151,12 +151,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
       const { data: subs } = await admin.from("erp_creative_subtasks")
         .insert(steps.map((s, i) => ({ task_id: row!.id, title: s.title.trim(), title_en: (s.title_en?.trim() || (s.type && s.type !== "custom" ? typeEn[s.type] : null)) || null, description: s.description ?? null, assignee_id: s.assignee_ids?.[0] || s.assignee_id || null, required_before_next: !!s.required_before_next, sort_order: i, subtask_type: s.type ?? "custom", config: s.config ?? {} })))
-        .select("id");
-      const subIds = (subs ?? []) as { id: string }[];
-      for (let i = 0; i < subIds.length; i++) {
+        .select("id, subtask_type, config, title");
+      const subRows = (subs ?? []) as { id: string; subtask_type?: string | null; config?: Record<string, unknown> | null; title?: string | null }[];
+      for (let i = 0; i < subRows.length; i++) {
         const ids = steps[i]?.assignee_ids;
-        if (Array.isArray(ids) && ids.length) await setSubtaskAssignees(admin, subIds[i].id, ids);
+        if (Array.isArray(ids) && ids.length) await setSubtaskAssignees(admin, subRows[i].id, ids);
       }
+      // B2: งานย่อยชนิด content → สร้างคอนเทนต์ผูกงานอัตโนมัติ (best-effort)
+      await materializeContentSubtasks(admin, row!.id, body.brand_id ?? null, subRows, user?.id ?? null);
     }
   }
 
