@@ -35,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const [{ data: parent }, { data: draft }, { data: skus }] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, brand_id").eq("id", parent_sku_id).maybeSingle(),
     admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, platform_product_id").eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id).maybeSingle(),
-    admin.from("skus_v2").select("id, code, color_th, color, list_price").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
+    admin.from("skus_v2").select("id, code, color_th, color, list_price, cover_image_r2_key").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
   ]);
   if (!parent) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 400 });
   const p = parent as Record<string, unknown>;
@@ -54,11 +54,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const name = String(d.title || p.name_platform || p.name_th || "").trim();
   const categoryId = catIdOf(d.category_path);
   const imageKeys = Array.isArray(d.image_keys) ? d.image_keys as string[] : [];
-  const imageUrls = imageKeys.map((k) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`);
-  const skuRows = (skus ?? []) as { id: string; code: string; color_th: string | null; color: string | null; list_price: number | null }[];
-  // สต๊อกจริงต่อ SKU (พร้อมขาย = on_hand − reserved, รวมทุกคลัง)
+  const skuRows = (skus ?? []) as { id: string; code: string; color_th: string | null; color: string | null; list_price: number | null; cover_image_r2_key: string | null }[];
+
+  // โครง 3 ชั้น: แยก "ตัวสี" (master) ออกจาก "ตัวขาย" (sellable) — ส่ง LINE เฉพาะตัวขาย
+  // master = รหัสที่เป็นฐานของตัวขาย (WK42-01 เป็นฐานของ WK42-01D/N/G) · ตัวขายดึงราคา/รูปจากตัวสีเมื่อไม่มีของตัวเอง
+  const baseOf = (code: string): string | null => { const m = code.match(/^(.*\d)[A-Za-z]+$/); return m ? m[1] : null; };
+  const byCode = new Map(skuRows.map((s) => [s.code, s]));
+  const masterCodes = new Set<string>();
+  for (const s of skuRows) { const b = baseOf(s.code); if (b && byCode.has(b)) masterCodes.add(b); }
+  const sellable = skuRows.filter((s) => !masterCodes.has(s.code));
+  const masterOf = (code: string) => { const b = baseOf(code); return b ? byCode.get(b) : null; };
+
+  // สต๊อกจริงต่อ SKU (พร้อมขาย = on_hand − reserved, รวมทุกคลัง) — เฉพาะตัวขาย
   const stockOf = new Map<string, number>();
-  const skuIds = skuRows.map((s) => s.id);
+  const skuIds = sellable.map((s) => s.id);
   if (skuIds.length) {
     const { data: bal } = await admin.from("erp_playground_stock_balances").select("product_id, qty_on_hand, qty_reserved").in("product_id", skuIds);
     for (const b of ((bal ?? []) as Record<string, unknown>[])) {
@@ -67,8 +76,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
   const gtin = String(extra.barcode ?? "").trim();
-  const variants = skuRows.map((s) => ({ sku: s.code, price: Number(s.list_price) || 0, onHandNumber: stockOf.get(s.id) ?? 0, ...(extra.weight ? { weight: Number(extra.weight) } : {}), ...(gtin ? { gtin } : {}) }));
-  const colors = [...new Set(skuRows.map((s) => (s.color_th || s.color || "").trim()).filter(Boolean))];
+  const priceOf = (s: typeof skuRows[number]) => { const own = Number(s.list_price); if (Number.isFinite(own) && own > 0) return own; const mp = Number(masterOf(s.code)?.list_price); return Number.isFinite(mp) && mp > 0 ? mp : 0; };
+  const variants = sellable.map((s) => ({ sku: s.code, price: priceOf(s), onHandNumber: stockOf.get(s.id) ?? 0, ...(extra.weight ? { weight: Number(extra.weight) } : {}), ...(gtin ? { gtin } : {}) }));
+  const colors = [...new Set(sellable.map((s) => (s.color_th || s.color || "").trim()).filter(Boolean))];
+
+  // รูป: ใช้ที่เลือกในร่าง · ถ้าว่าง → ดึงปกตัวสี + ปกตัวขาย (สืบทอดจากตัวสี) อัตโนมัติ
+  const autoKeys = imageKeys.length ? imageKeys : [...new Set([
+    ...skuRows.filter((s) => masterCodes.has(s.code)).map((s) => s.cover_image_r2_key),
+    ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null),
+  ].filter(Boolean) as string[])];
+  const imageUrls = autoKeys.map((k) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`);
 
   // ตรวจครบก่อนส่ง
   const missing: string[] = [];
