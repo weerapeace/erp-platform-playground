@@ -51,7 +51,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({ parent_code: parentCode, existing_codes, colors, error: null });
 }
 
-type InRow = { code?: string; name_th?: string; color?: string; color_index?: number | string; dim2_value?: string; dim2_code?: string; list_price?: number | string };
+type InRow = { code?: string; name_th?: string; color?: string; color_index?: number | string; dim2_value?: string; dim2_code?: string; list_price?: number | string; is_master?: boolean };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.create"); if (denied) return denied;
@@ -96,7 +96,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       color_index: r.color_index == null || r.color_index === "" ? null : Number(r.color_index),
       list_price: price != null && Number.isFinite(price) ? price : null,
       attribute_values,
-      is_active: true, sale_ok: true, purchase_ok: true,
+      // ตัวสี (master) = ไม่ขายตรง (sale_ok=false) · ตัวขาย = ขายได้
+      is_active: true, sale_ok: !r.is_master, purchase_ok: true,
     };
   });
 

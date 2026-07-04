@@ -15,7 +15,7 @@ import { apiFetch } from "@/lib/api";
 
 type Dim1 = { value: string; part: string };
 type Dim2 = { value: string; suffix: string };
-type Combo = { code: string; color: string; part: string; dim2Value: string; dim2Suffix: string; colorIndex: number; exists: boolean; dup: boolean };
+type Combo = { code: string; color: string; part: string; dim2Value: string; dim2Suffix: string; colorIndex: number; exists: boolean; dup: boolean; isMaster: boolean };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
@@ -31,6 +31,7 @@ export function VariantMatrixModal({ parentSkuId, onClose, onCreated }: {
   const [sep, setSep] = useState("-");
   const [defaultPrice, setDefaultPrice] = useState("");
   const [useDim2, setUseDim2] = useState(true);
+  const [createMasters, setCreateMasters] = useState(true); // สร้าง "ตัวสี" (แม่) ที่เก็บรูป/รายละเอียด
   const [dim2Name, setDim2Name] = useState("แบบพิมพ์");
   const [dim1, setDim1] = useState<Dim1[]>([{ value: "", part: "01" }]);
   const [dim2, setDim2] = useState<Dim2[]>([{ value: "", suffix: "" }, { value: "", suffix: "" }, { value: "", suffix: "" }]);
@@ -55,25 +56,28 @@ export function VariantMatrixModal({ parentSkuId, onClose, onCreated }: {
   const combos = useMemo<Combo[]>(() => {
     const d1 = dim1.filter((d) => d.value.trim() && d.part.trim());
     const d2 = useDim2 ? dim2.filter((d) => d.value.trim()) : [{ value: "", suffix: "" }];
+    const wantMasters = useDim2 && createMasters;
     const out: Combo[] = [];
     const codeCount = new Map<string, number>();
-    for (let i = 0; i < d1.length; i++) {
-      const c = d1[i];
-      for (const p of d2) {
-        const code = `${base}${sep}${c.part}${useDim2 ? p.suffix : ""}`.trim();
-        codeCount.set(code, (codeCount.get(code) ?? 0) + 1);
-      }
+    const bump = (code: string) => codeCount.set(code, (codeCount.get(code) ?? 0) + 1);
+    for (const c of d1) {
+      if (wantMasters) bump(`${base}${sep}${c.part}`.trim());
+      for (const p of d2) bump(`${base}${sep}${c.part}${useDim2 ? p.suffix : ""}`.trim());
     }
     for (let i = 0; i < d1.length; i++) {
       const c = d1[i];
       const idx = /^\d+$/.test(c.part.trim()) ? Number(c.part.trim()) : i + 1;
+      if (wantMasters) {
+        const code = `${base}${sep}${c.part}`.trim();
+        out.push({ code, color: c.value.trim(), part: c.part.trim(), dim2Value: "", dim2Suffix: "", colorIndex: idx, exists: existing.has(code), dup: (codeCount.get(code) ?? 0) > 1, isMaster: true });
+      }
       for (const p of d2) {
         const code = `${base}${sep}${c.part}${useDim2 ? p.suffix : ""}`.trim();
-        out.push({ code, color: c.value.trim(), part: c.part.trim(), dim2Value: useDim2 ? p.value.trim() : "", dim2Suffix: useDim2 ? p.suffix.trim() : "", colorIndex: idx, exists: existing.has(code), dup: (codeCount.get(code) ?? 0) > 1 });
+        out.push({ code, color: c.value.trim(), part: c.part.trim(), dim2Value: useDim2 ? p.value.trim() : "", dim2Suffix: useDim2 ? p.suffix.trim() : "", colorIndex: idx, exists: existing.has(code), dup: (codeCount.get(code) ?? 0) > 1, isMaster: false });
       }
     }
     return out;
-  }, [dim1, dim2, useDim2, base, sep, existing]);
+  }, [dim1, dim2, useDim2, createMasters, base, sep, existing]);
 
   const toCreate = combos.filter((c) => !c.exists && !c.dup);
   const nExists = combos.filter((c) => c.exists).length;
@@ -93,6 +97,7 @@ export function VariantMatrixModal({ parentSkuId, onClose, onCreated }: {
         code: c.code, color: c.color, color_index: c.colorIndex,
         dim2_value: c.dim2Value, dim2_code: c.dim2Suffix,
         list_price: defaultPrice.trim() === "" ? undefined : Number(defaultPrice),
+        is_master: c.isMaster,
       }));
       const r = await apiFetch("/api/skus/variant-matrix", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, dimension2_name: useDim2 ? dim2Name : "", rows }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
@@ -167,6 +172,10 @@ export function VariantMatrixModal({ parentSkuId, onClose, onCreated }: {
                 <label className="text-[11px] text-slate-500 block mb-2">ชื่อชั้นที่ 2
                   <input value={dim2Name} onChange={(e) => setDim2Name(e.target.value)} placeholder="เช่น แบบพิมพ์" className="mt-1 block w-full h-8 border border-slate-200 rounded-md px-2 text-sm" />
                 </label>
+                <label className="flex items-start gap-2 text-[11px] text-slate-600 mb-2 p-1.5 rounded bg-violet-50/60 border border-violet-100">
+                  <input type="checkbox" checked={createMasters} onChange={(e) => setCreateMasters(e.target.checked)} className="w-4 h-4 accent-violet-600 mt-0.5" />
+                  <span>สร้าง <b>“ตัวสี” (แม่)</b> เก็บรูป/รายละเอียดต่อสี — ตัวขายดึงไปใช้ · ตัวสีไม่ขายตรง</span>
+                </label>
                 <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
                   <div className="grid grid-cols-[1fr_3.5rem_1.5rem] gap-1.5 text-[10px] text-slate-400 px-0.5"><span>ชื่อตัวเลือก</span><span className="text-center">ท้ายรหัส</span><span /></div>
                   {dim2.map((d, i) => (
@@ -193,10 +202,10 @@ export function VariantMatrixModal({ parentSkuId, onClose, onCreated }: {
                 </thead>
                 <tbody>
                   {combos.map((c, i) => (
-                    <tr key={i} className={`border-t border-slate-50 ${c.dup ? "bg-rose-50" : c.exists ? "bg-amber-50/50" : ""}`}>
+                    <tr key={i} className={`border-t border-slate-50 ${c.dup ? "bg-rose-50" : c.exists ? "bg-amber-50/50" : c.isMaster ? "bg-violet-50/40" : ""}`}>
                       <td className="px-3 py-1 font-mono text-xs text-slate-700">{c.code}</td>
                       <td className="px-3 py-1 text-slate-600">{c.color}</td>
-                      {useDim2 && <td className="px-3 py-1 text-slate-600">{c.dim2Value || "—"}</td>}
+                      {useDim2 && <td className="px-3 py-1 text-slate-600">{c.isMaster ? <span className="text-violet-600 text-[11px]">🎨 ตัวสี (เก็บรูป)</span> : (c.dim2Value || "—")}</td>}
                       <td className="px-3 py-1 text-right tabular-nums text-slate-500">{defaultPrice || "—"}</td>
                       <td className="px-3 py-1 text-center text-xs">{c.dup ? <span className="text-rose-600">ซ้ำ</span> : c.exists ? <span className="text-amber-600">มีแล้ว</span> : <span className="text-emerald-600">ใหม่</span>}</td>
                     </tr>
