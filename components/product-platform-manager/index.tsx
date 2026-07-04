@@ -28,7 +28,7 @@ type Draft = { title?: string | null; description?: string | null; category_path
 type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null; brand_name: string | null };
 type ImageItem = { key: string; source: string };
 type Account = { label: string | null; is_active: boolean };
-type Variant = { id: string; code: string; name: string; color: string | null; price: number | null; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean; option_name?: string | null; option_value?: string | null };
+type Variant = { id: string; code: string; name: string; color: string | null; fake_price: number | null; sale_price: number | null; discount: number; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean; option_name?: string | null; option_value?: string | null };
 type Toast = { id: number; type: "success" | "error" | "info"; msg: string };
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", tiktok_shop: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
@@ -69,43 +69,24 @@ function CategoryOptionPicker({ platformId, onPick }: { platformId: string; onPi
   );
 }
 
-// ช่องแก้ราคาขายราย SKU (inline) — uncontrolled + เซฟตอน blur/Enter (เปลี่ยนค่าถึงเซฟ)
-function PriceCell({ v, onSave }: { v: Variant; onSave: (id: string, price: string) => void }) {
-  const cur = v.price == null ? "" : String(v.price);
+// ช่องแก้ราคาราย SKU (inline) — ใช้ได้ทั้งราคาเต็ม/ราคาขาย · uncontrolled เซฟตอน blur/Enter
+function PriceInput({ id, field, value, onSave, warn, title }: { id: string; field: "fake_price" | "list_price"; value: number | null; onSave: (id: string, field: "fake_price" | "list_price", val: string) => void; warn?: boolean; title?: string }) {
+  const cur = value == null ? "" : String(value);
   return (
-    <input type="number" min={0} key={`p-${v.id}-${cur}`} defaultValue={cur}
+    <input type="number" min={0} key={`${field}-${id}-${cur}`} defaultValue={cur}
       onFocus={(e) => e.currentTarget.select()}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-      onBlur={(e) => { const val = e.target.value.trim(); if (val !== cur) onSave(v.id, val === "" ? "0" : val); }}
-      placeholder="—" title="ราคาขายกลาง (ใช้ทุกช่องทาง)"
-      className={`h-7 w-full text-right tabular-nums border rounded-md pl-1.5 pr-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-violet-300 ${v.has_price ? "border-slate-200" : "border-rose-300 bg-rose-50/40"}`} />
+      onBlur={(e) => { const val = e.target.value.trim(); if (val !== cur) onSave(id, field, val); }}
+      placeholder="—" title={title}
+      className={`h-7 w-full text-right tabular-nums border rounded-md px-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-violet-300 ${warn ? "border-rose-300 bg-rose-50/40" : "border-slate-200"}`} />
   );
 }
 
-// ช่องส่วนลดราย SKU (instantDiscount ของ LINE) — สวิตช์เปิด/ปิด + ช่องกรอกจำนวนเงินที่ลด (บาท) + ราคาหลังลด
-function DiscountCell({ v, disc, onToggle, onValue }: { v: Variant; disc: { on: boolean; value: number }; onToggle: (on: boolean) => void; onValue: (value: number) => void }) {
-  const showNet = disc.on && disc.value > 0 && v.price != null;
-  const net = Math.max(0, (v.price ?? 0) - disc.value);
+// คอลัมน์ส่วนลด — คิดเองจาก (ราคาเต็ม − ราคาขาย) · อ่านอย่างเดียว = instantDiscount ที่จะส่ง LINE
+function DiscountView({ v }: { v: Variant }) {
+  const hasDisc = v.discount > 0;
   return (
-    <div className="flex flex-col items-end gap-0.5">
-      <div className="flex items-center gap-1.5 justify-end">
-        <button type="button" onClick={() => onToggle(!disc.on)} title={disc.on ? "ปิดส่วนลด" : "เปิดส่วนลด"}
-          className={`h-5 w-9 rounded-full relative transition-colors shrink-0 ${disc.on ? "bg-violet-600" : "bg-slate-300"}`}>
-          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${disc.on ? "left-[1.15rem]" : "left-0.5"}`} />
-        </button>
-        <div className="relative w-16">
-          <input type="number" min={0} disabled={!disc.on} key={`d-${v.id}-${disc.value}`} defaultValue={disc.value || ""}
-            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-            onBlur={(e) => { const n = Math.max(0, Number(e.target.value) || 0); if (n !== disc.value) onValue(n); }}
-            placeholder="ลด" title={disc.on ? "จำนวนเงินที่ลด (บาท)" : "เปิดสวิตช์ก่อนกรอกส่วนลด"}
-            className={`h-7 w-full text-right tabular-nums border rounded-md pl-1.5 pr-4 text-sm focus:outline-none focus:ring-1 focus:ring-violet-300 ${disc.on ? "border-violet-300" : "border-slate-200 bg-slate-50 text-slate-300"}`} />
-          <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">฿</span>
-        </div>
-      </div>
-      {showNet
-        ? <span className="text-[10px] text-emerald-600 tabular-nums">ขายจริง {net.toLocaleString()}฿</span>
-        : <span className="text-[10px] text-slate-300">—</span>}
-    </div>
+    <span className={`tabular-nums text-sm ${hasDisc ? "text-violet-600" : "text-slate-300"}`} title="ส่วนลด = ราคาเต็ม − ราคาขาย (คิดอัตโนมัติ)">{hasDisc ? `−${v.discount.toLocaleString()}฿` : "—"}</span>
   );
 }
 
@@ -129,9 +110,9 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [skuEditor, setSkuEditor] = useState<{ recordId: string | null } | null>(null); // แก้/เพิ่มสี (SKU)
   const [matrixOpen, setMatrixOpen] = useState(false); // ตัวช่วยสร้าง SKU หลายชั้น
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [massPrice, setMassPrice] = useState("");   // Mass fill ราคาทุก SKU
+  const [massFake, setMassFake] = useState("");   // Mass fill ราคาเต็มทุก SKU
+  const [massSale, setMassSale] = useState("");   // Mass fill ราคาขายทุก SKU
   const [massBusy, setMassBusy] = useState(false);
-  const [massDiscount, setMassDiscount] = useState(""); // Mass fill ส่วนลดทุก SKU
   const [creating, setCreating] = useState(false);  // สร้างสินค้าใหม่บน LINE
   const [displaying, setDisplaying] = useState(false); // เปิด/ปิดการขายบน LINE
   const [pushingPrice, setPushingPrice] = useState(false); // ส่งราคา/ส่วนลดขึ้น LINE
@@ -175,15 +156,15 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     await saveField(field, val);
     setPrefillTick((t) => t + 1);
   };
-  // Mass fill ราคาขายทุก SKU ใต้สินค้านี้
-  const massFillPrice = async (onlyEmpty: boolean) => {
-    const p = Number(massPrice);
+  // Mass fill ราคา (เต็ม/ขาย) ทุก SKU ใต้สินค้านี้
+  const massFillPrice = async (field: "fake_price" | "list_price", valueStr: string, onlyEmpty: boolean) => {
+    const p = Number(valueStr);
     if (!Number.isFinite(p) || p < 0) { toast("error", "ใส่ราคาให้ถูกต้อง"); return; }
     setMassBusy(true);
     try {
-      const r = await apiFetch("/api/product-platforms/mass-price", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, price: p, only_empty: onlyEmpty }) });
+      const r = await apiFetch("/api/product-platforms/mass-price", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, price: p, only_empty: onlyEmpty, field }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
-      toast("success", `ตั้งราคา ${j.updated} SKU แล้ว`); setMassPrice(""); await load();
+      toast("success", `ตั้ง${field === "fake_price" ? "ราคาเต็ม" : "ราคาขาย"} ${j.updated} SKU แล้ว`); setMassFake(""); setMassSale(""); await load();
     } catch (e) { toast("error", (e as Error).message); } finally { setMassBusy(false); }
   };
   // ฟิลด์เพิ่มเติม (แบรนด์/บาร์โค้ด/น้ำหนัก-ขนาด/ของขวัญ) — เก็บรวมใน draft.extra (client ส่งทั้งก้อน)
@@ -197,39 +178,22 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   };
   const giftCats = (extra.gift_categories ?? []) as string[];
   const toggleGiftCat = (c: string) => saveExtra({ gift_categories: giftCats.includes(c) ? giftCats.filter((x) => x !== c) : [...giftCats, c] });
-  // แก้ราคาขายราย SKU (inline) — เขียน skus_v2.list_price + อัปเดตในหน้าทันที (ไม่โหลดใหม่ทั้งก้อน)
-  const savePrice = useCallback(async (skuId: string, priceStr: string) => {
-    const p = Number(priceStr);
-    if (!Number.isFinite(p) || p < 0) { toast("error", "ราคาไม่ถูกต้อง"); return; }
-    setVariants((vs) => vs.map((v) => v.id === skuId ? { ...v, price: p, has_price: p > 0 } : v));
+  // แก้ราคาราย SKU (inline) — เขียน fake_price (ราคาเต็ม) หรือ list_price (ราคาขาย) + คิดส่วนลดใหม่ในหน้าทันที
+  const savePrice = useCallback(async (skuId: string, field: "fake_price" | "list_price", priceStr: string) => {
+    const raw = priceStr.trim();
+    const p = raw === "" ? null : Number(raw);
+    if (p != null && (!Number.isFinite(p) || p < 0)) { toast("error", "ราคาไม่ถูกต้อง"); return; }
+    setVariants((vs) => vs.map((v) => {
+      if (v.id !== skuId) return v;
+      const nv = { ...v, ...(field === "fake_price" ? { fake_price: p } : { sale_price: p }) };
+      const disc = (nv.fake_price != null && nv.sale_price != null && nv.fake_price > nv.sale_price) ? nv.fake_price - nv.sale_price : 0;
+      return { ...nv, discount: disc, has_price: nv.fake_price != null && nv.fake_price > 0 };
+    }));
     try {
-      const r = await apiFetch("/api/product-platforms/sku-price", { method: "POST", body: JSON.stringify({ sku_id: skuId, price: p }) });
+      const r = await apiFetch("/api/product-platforms/sku-price", { method: "POST", body: JSON.stringify({ sku_id: skuId, field, price: p }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
-      toast("success", "ตั้งราคาแล้ว");
     } catch (e) { toast("error", (e as Error).message); load(); }
   }, [toast, load]);
-  // ส่วนลดต่อ SKU (instantDiscount ของ LINE) — เก็บใน draft.extra.discounts = { [skuId]: { on, value } } ต่อแพลตฟอร์ม
-  const discounts = (extra.discounts ?? {}) as Record<string, { on?: boolean; value?: number }>;
-  const discOf = (skuId: string) => { const d = discounts[skuId]; return { on: !!d?.on, value: Number(d?.value) || 0 }; };
-  const setDiscount = (skuId: string, patch: { on?: boolean; value?: number }) => {
-    const cur = discOf(skuId);
-    saveExtra({ discounts: { ...discounts, [skuId]: { ...cur, ...patch } } });
-  };
-  // ตั้งส่วนลดทุก SKU พร้อมกัน (Bulk fill) — เปิดสวิตช์ + ใส่ค่าให้ทุกตัว
-  const applyDiscountAll = () => {
-    const val = Math.max(0, Number(massDiscount) || 0);
-    const next: Record<string, { on: boolean; value: number }> = { ...discounts } as Record<string, { on: boolean; value: number }>;
-    for (const v of variants) next[v.id] = { on: true, value: val };
-    saveExtra({ discounts: next }); setMassDiscount("");
-    toast("success", `ตั้งส่วนลด ${val.toLocaleString()}฿ ทุก SKU แล้ว`);
-  };
-  // เปิด/ปิดส่วนลดทั้งหมด (คงค่าส่วนลดเดิมไว้)
-  const toggleAllDiscount = (on: boolean) => {
-    const next: Record<string, { on: boolean; value: number }> = { ...discounts } as Record<string, { on: boolean; value: number }>;
-    for (const v of variants) next[v.id] = { on, value: discOf(v.id).value };
-    saveExtra({ discounts: next });
-    toast("success", on ? "เปิดส่วนลดทุก SKU แล้ว" : "ปิดส่วนลดทุก SKU แล้ว");
-  };
   // สร้างสินค้าใหม่บน LINE (สินค้าที่ยังไม่มีบน LINE)
   const createOnLine = async () => {
     setCreating(true);
@@ -344,15 +308,16 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     { key: "code", header: "SKU", width: "1fr", sortValue: (v) => v.code, cell: (v) => <span className="font-mono text-xs">{v.code}</span> },
     { key: "color", header: "สี", width: "0.9fr", sortValue: (v) => v.color ?? "", cell: (v) => v.color || "—" },
     ...(hasOption ? [{ key: "option", header: optionName, width: "0.9fr", sortValue: (v: Variant) => v.option_value ?? "", cell: (v: Variant) => v.option_value || <span className="text-slate-300">—</span> } as MiniColumn<Variant>] : []),
-    { key: "price", header: "ราคา", width: "5.5rem", align: "right", sortValue: (v) => v.price ?? -1,
-      cell: (v) => canEdit ? <PriceCell v={v} onSave={savePrice} /> : (v.has_price ? <span className="tabular-nums">{v.price!.toLocaleString()}฿</span> : <span className="text-rose-500 text-xs">ไม่มี</span>) },
-    { key: "discount", header: "ส่วนลด", width: "7rem", align: "right",
-      cell: (v) => canEdit ? <DiscountCell v={v} disc={discOf(v.id)} onToggle={(on) => setDiscount(v.id, { on })} onValue={(value) => setDiscount(v.id, { value, on: true })} />
-        : (discOf(v.id).on && discOf(v.id).value > 0 ? <span className="tabular-nums text-violet-600">-{discOf(v.id).value.toLocaleString()}฿</span> : <span className="text-slate-300">—</span>) },
-    { key: "ready", header: "พร้อม", width: "3.5rem", align: "center", cell: (v) => (v.has_price && v.has_image && v.is_active) ? <span className="text-emerald-600">✓</span> : <span className="text-rose-500" title={[!v.has_price && "ไม่มีราคา", !v.has_image && "ไม่มีรูป", !v.is_active && "ปิดอยู่"].filter(Boolean).join(", ")}>✗</span> },
-    { key: "edit", header: "", width: "2.5rem", align: "center", cell: (v) => canEdit ? <button onClick={() => setSkuEditor({ recordId: v.id })} title="แก้สี/รูป (หน้าสินค้าเต็ม)" className="text-violet-600 hover:underline">✏️</button> : null },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [canEdit, savePrice, discounts, active, hasOption, optionName]);
+    { key: "fake", header: "ราคา", width: "5rem", align: "right", sortValue: (v) => v.fake_price ?? -1,
+      cell: (v) => canEdit ? <PriceInput id={v.id} field="fake_price" value={v.fake_price} onSave={savePrice} warn={!(v.fake_price && v.fake_price > 0)} title="ราคาเต็ม (Fake Price) — ราคาก่อนลด" />
+        : (v.fake_price ? <span className="tabular-nums">{v.fake_price.toLocaleString()}฿</span> : <span className="text-rose-500 text-xs">ไม่มี</span>) },
+    { key: "sale", header: "ราคาหลังลด", width: "5.5rem", align: "right", sortValue: (v) => v.sale_price ?? -1,
+      cell: (v) => canEdit ? <PriceInput id={v.id} field="list_price" value={v.sale_price} onSave={savePrice} title="ราคาขายจริง (Sale Price) — เว้นว่าง = ขายเต็มราคา" />
+        : (v.sale_price ? <span className="tabular-nums text-emerald-700">{v.sale_price.toLocaleString()}฿</span> : <span className="text-slate-300">—</span>) },
+    { key: "discount", header: "ส่วนลด", width: "4.5rem", align: "right", sortValue: (v) => v.discount, cell: (v) => <DiscountView v={v} /> },
+    { key: "ready", header: "พร้อม", width: "3.25rem", align: "center", cell: (v) => (v.has_price && v.has_image && v.is_active) ? <span className="text-emerald-600">✓</span> : <span className="text-rose-500" title={[!v.has_price && "ไม่มีราคา", !v.has_image && "ไม่มีรูป", !v.is_active && "ปิดอยู่"].filter(Boolean).join(", ")}>✗</span> },
+    { key: "edit", header: "", width: "2.25rem", align: "center", cell: (v) => canEdit ? <button onClick={() => setSkuEditor({ recordId: v.id })} title="แก้สี/รูป (หน้าสินค้าเต็ม)" className="text-violet-600 hover:underline">✏️</button> : null },
+  ], [canEdit, savePrice, hasOption, optionName]);
 
   const activePf = platforms.find((p) => p.id === active);
   const iconOf = (p: Platform) => p.icon_key || PLATFORM_ICON[p.code] || "🏬";
@@ -458,35 +423,30 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                     )}
                   </div>
                   {canEdit && variants.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-2 mb-2 p-2 rounded-lg bg-slate-50 border border-slate-200">
-                      <span className="text-[11px] text-slate-500">⚡ ตั้งราคาทุก SKU พร้อมกัน:</span>
-                      <div className="relative">
-                        <input type="number" min={0} value={massPrice} onChange={(e) => setMassPrice(e.target.value)} placeholder="ราคา" className="h-8 w-28 border border-slate-200 rounded-md pl-2 pr-5 text-sm" />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">฿</span>
+                    <div className="flex flex-wrap items-center gap-3 mb-2 p-2 rounded-lg bg-slate-50 border border-slate-200">
+                      <span className="text-[11px] text-slate-500">⚡ ตั้งราคาทุก SKU:</span>
+                      <div className="flex items-center gap-1.5">
+                        <div className="relative">
+                          <input type="number" min={0} value={massFake} onChange={(e) => setMassFake(e.target.value)} placeholder="ราคาเต็ม" className="h-8 w-24 border border-slate-200 rounded-md pl-2 pr-5 text-sm" />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">฿</span>
+                        </div>
+                        <button onClick={() => massFillPrice("fake_price", massFake, false)} disabled={massBusy || !massFake} className="h-8 px-2.5 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">ตั้งราคาเต็ม</button>
                       </div>
-                      <button onClick={() => massFillPrice(false)} disabled={massBusy || !massPrice} className="h-8 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">ใช้กับทั้งหมด</button>
-                      <button onClick={() => massFillPrice(true)} disabled={massBusy || !massPrice} className="h-8 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 disabled:opacity-40">เฉพาะที่ยังไม่มีราคา</button>
-                      <span className="text-[10px] text-slate-400">= ราคาขายกลางของ SKU (ใช้ทุกช่องทาง)</span>
-                    </div>
-                  )}
-                  {canEdit && variants.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-2 mb-2 p-2 rounded-lg bg-violet-50/60 border border-violet-200">
-                      <span className="text-[11px] text-violet-700">⚡ ส่วนลดทุก SKU พร้อมกัน:</span>
-                      <div className="relative">
-                        <input type="number" min={0} value={massDiscount} onChange={(e) => setMassDiscount(e.target.value)} placeholder="ส่วนลด" className="h-8 w-28 border border-violet-200 rounded-md pl-2 pr-5 text-sm" />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">฿</span>
+                      <div className="flex items-center gap-1.5">
+                        <div className="relative">
+                          <input type="number" min={0} value={massSale} onChange={(e) => setMassSale(e.target.value)} placeholder="ราคาขาย" className="h-8 w-24 border border-emerald-200 rounded-md pl-2 pr-5 text-sm" />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">฿</span>
+                        </div>
+                        <button onClick={() => massFillPrice("list_price", massSale, false)} disabled={massBusy || !massSale} className="h-8 px-2.5 text-sm text-emerald-700 border border-emerald-300 rounded-lg hover:bg-emerald-50 disabled:opacity-40">ตั้งราคาขาย</button>
                       </div>
-                      <button onClick={applyDiscountAll} disabled={!massDiscount} className="h-8 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">ตั้งส่วนลดทั้งหมด</button>
-                      <button onClick={() => toggleAllDiscount(true)} className="h-8 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">เปิดส่วนลดทั้งหมด</button>
-                      <button onClick={() => toggleAllDiscount(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">ปิดทั้งหมด</button>
-                      <span className="text-[10px] text-slate-400">ราคาหลังลดโชว์ในคอลัมน์ส่วนลด</span>
+                      <span className="text-[10px] text-slate-400">ส่วนลด = ราคาเต็ม − ราคาขาย (คิดให้อัตโนมัติ)</span>
                     </div>
                   )}
                   <MiniTable rows={variants} columns={cols} rowKey={(v) => v.id} searchText={(v) => `${v.code} ${v.color ?? ""} ${v.option_value ?? ""}`} dense emptyText="ยังไม่มี SKU ลูก — กด ➕ เพิ่มสี"
                     groupBy={hasColorGroups ? (v) => v.color || "— ไม่ระบุสี" : undefined} groupLabel="ตามสี"
                     footnote={activePf?.code === "line_shopping"
-                      ? "ราคา = ราคาขายกลาง (แก้แล้วมีผลทุกช่องทาง) · ส่วนลด = ต่อ SKU เฉพาะ LINE (instantDiscount) ส่งเมื่อกด “ส่งราคา/ส่วนลดขึ้น LINE”"
-                      : "ราคา = ราคาขายกลางของ SKU (ใช้ทุกช่องทาง) · ส่วนลดจะส่งไปเฉพาะแพลตฟอร์มที่รองรับ"} />
+                      ? "ราคา = ราคาเต็ม (Fake) · ราคาหลังลด = ราคาขาย (Sale) · ส่วนลด = ราคาเต็ม−ขาย ส่งเป็น instantDiscount ตอนกด “ส่งราคา/ส่วนลดขึ้น LINE”"
+                      : "ราคา = ราคาเต็ม · ราคาหลังลด = ราคาขายจริง (ราคากลางใช้ทุกช่องทาง)"} />
                 </div>
 
                 {canEdit && activePf?.code === "line_shopping" && (

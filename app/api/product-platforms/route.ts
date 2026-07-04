@@ -23,7 +23,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, brand_id").eq("id", parentId).maybeSingle(),
     admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, capabilities, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
     admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, extra, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
-    admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, cover_image_r2_key, is_active, attribute_values").eq("parent_sku_id", parentId).order("code", { ascending: true }),
+    admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, fake_price, cover_image_r2_key, is_active, attribute_values").eq("parent_sku_id", parentId).order("code", { ascending: true }),
     admin.from("product_image_slots").select("r2_key").eq("owner_id", parentId),
   ]);
   const pRow = (parent ?? {}) as Record<string, unknown>;
@@ -76,9 +76,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const code = String(s.code ?? "");
       const base = baseOf(code);
       const master = base ? byCode.get(base) : null;   // ตัวสีของตัวขายนี้
-      const ownPrice = s.list_price == null ? null : Number(s.list_price);
-      const masterPrice = master && master.list_price != null ? Number(master.list_price) : null;
-      const price = ownPrice != null ? ownPrice : masterPrice;   // ไม่มีราคาตัวเอง → ดึงจากตัวสี
+      // ราคา: fake_price (เต็ม) + list_price (ขาย) · ไม่มีของตัวเอง → ดึงจากตัวสี · ส่วนลด = เต็ม − ขาย
+      const ownFake = s.fake_price == null ? null : Number(s.fake_price);
+      const ownSale = s.list_price == null ? null : Number(s.list_price);
+      const mFake = master && master.fake_price != null ? Number(master.fake_price) : null;
+      const mSale = master && master.list_price != null ? Number(master.list_price) : null;
+      const fake_price = ownFake != null ? ownFake : mFake;
+      const sale_price = ownSale != null ? ownSale : mSale;
+      const discount = (fake_price != null && sale_price != null && fake_price > sale_price) ? (fake_price - sale_price) : 0;
       const ownImg = (s.cover_image_r2_key as string) ?? null;
       const masterImg = master ? ((master.cover_image_r2_key as string) ?? null) : null;
       const image_key = ownImg || masterImg;   // ไม่มีรูปตัวเอง → ดึงจากตัวสี
@@ -86,9 +91,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const vo = (av.variant_option && typeof av.variant_option === "object") ? av.variant_option as Record<string, unknown> : null;
       return {
         id: String(s.id), code, name: (s.name_th as string) ?? "",
-        color: (s.color_th as string) ?? (s.color as string) ?? null, price, image_key,
+        color: (s.color_th as string) ?? (s.color as string) ?? null, fake_price, sale_price, discount, image_key,
         is_active: s.is_active !== false,
-        has_price: price != null && price > 0, has_image: !!image_key,
+        has_price: fake_price != null && fake_price > 0, has_image: !!image_key,
         inherited_image: !ownImg && !!masterImg,
         option_name: vo ? (String(vo.name ?? "").trim() || null) : null,
         option_value: vo ? (String(vo.value ?? "").trim() || null) : null,
