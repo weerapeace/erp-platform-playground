@@ -81,6 +81,11 @@ export default function PlatformCategoryMapPage() {
   const [saving, setSaving] = useState(false);
   const [newCat, setNewCat] = useState("");
   const [addingCat, setAddingCat] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);   // โมดัลนำเข้าหมวดของร้าน
+  const [importPf, setImportPf] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,13 +133,46 @@ export default function PlatformCategoryMapPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); } finally { setSaving(false); }
   };
 
+  // นำเข้ารายการหมวดของร้านจากไฟล์ (Excel/CSV: คอลัมน์ id + th/en · ชีต "หมวด…" หรือชีตแรก)
+  const importCats = async (file: File) => {
+    if (!importPf) { setImportMsg("เลือกร้านก่อน"); return; }
+    setImporting(true); setImportMsg("กำลังอ่านไฟล์…");
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const hit = wb.SheetNames.find((n) => /หมวด|categ/i.test(n));
+      const cand = hit ? [hit] : wb.SheetNames;
+      let aoa: unknown[][] = [];
+      for (const sn of cand) {
+        const a = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sn], { header: 1, defval: "" });
+        const hdr = ((a[0] ?? []) as unknown[]).map((x) => String(x).trim().toLowerCase());
+        if (hdr.includes("id") && (hdr.includes("en") || hdr.includes("th"))) { aoa = a; break; }
+      }
+      if (aoa.length < 2) { setImportMsg("ไม่พบชีตหมวดหมู่ (ต้องมีคอลัมน์ id + en/th)"); return; }
+      const hdr = (aoa[0] as unknown[]).map((x) => String(x).trim().toLowerCase());
+      const ci = { id: hdr.indexOf("id"), en: hdr.indexOf("en"), th: hdr.indexOf("th") };
+      const rows = (aoa.slice(1) as unknown[][])
+        .map((r) => ({ id: r[ci.id], en: ci.en >= 0 ? r[ci.en] : "", th: ci.th >= 0 ? r[ci.th] : "" }))
+        .filter((r) => String(r.id ?? "").trim());
+      const res = await apiFetch("/api/platform-category-options", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platform_id: importPf, rows }) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "นำเข้าไม่สำเร็จ");
+      setImportMsg(`✅ นำเข้าแล้ว ${j.imported ?? rows.length} หมวด`);
+      toast.success(`นำเข้าหมวด ${platforms.find((p) => p.id === importPf)?.name_th ?? ""} แล้ว`);
+    } catch (e) { setImportMsg("ผิดพลาด: " + (e instanceof Error ? e.message : "")); }
+    finally { setImporting(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+
   const selCat = cats.find((c) => c.id === sel) ?? null;
 
   return (
     <div className="max-w-6xl mx-auto px-5 py-6">
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">🗂️ จับคู่หมวดหมู่แพลตฟอร์ม</h1>
-        <p className="text-sm text-slate-500 mt-1">สร้าง “หมวดกลาง” ของเราเอง → จับคู่กับหมวดของแต่ละร้าน (เลือกจากรายการที่นำเข้าไว้)</p>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">🗂️ จับคู่หมวดหมู่แพลตฟอร์ม</h1>
+          <p className="text-sm text-slate-500 mt-1">สร้าง “หมวดกลาง” ของเราเอง → จับคู่กับหมวดของแต่ละร้าน (เลือกจากรายการที่นำเข้าไว้)</p>
+        </div>
+        <button type="button" onClick={() => { setImportOpen(true); setImportMsg(null); }}
+          className="shrink-0 h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">📂 นำเข้าหมวดของร้าน</button>
       </div>
 
       {loading ? (
@@ -197,6 +235,34 @@ export default function PlatformCategoryMapPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {importOpen && (
+        <div className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center p-4" onClick={() => !importing && setImportOpen(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-slate-800">📂 นำเข้าหมวดของร้าน</h3>
+              <button type="button" onClick={() => setImportOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="text-xs text-slate-500">เลือกร้าน</label>
+                <select value={importPf} onChange={(e) => { setImportPf(e.target.value); setImportMsg(null); }}
+                  className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                  <option value="">— เลือกร้าน —</option>
+                  {platforms.map((p) => <option key={p.id} value={p.id}>{p.name_th}</option>)}
+                </select>
+              </div>
+              <p className="text-[11px] text-slate-400">อัปไฟล์ Excel/CSV ที่มีคอลัมน์ <b>id</b> + <b>th</b>/<b>en</b> (ชีตชื่อ “หมวด…” หรือชีตแรก) — ระบบจะเพิ่ม/อัปเดตหมวดของร้านนั้น แล้วเลือกใน dropdown ได้เลย</p>
+              <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importCats(f); }} />
+              <button type="button" onClick={() => fileRef.current?.click()} disabled={!importPf || importing}
+                className="w-full h-10 text-sm font-medium border-2 border-dashed border-indigo-200 rounded-lg text-indigo-600 hover:bg-indigo-50 disabled:opacity-40">
+                {importing ? "กำลังนำเข้า…" : "⬆️ เลือกไฟล์หมวดหมู่"}
+              </button>
+              {importMsg && <div className="text-xs text-slate-600">{importMsg}</div>}
+            </div>
           </div>
         </div>
       )}
