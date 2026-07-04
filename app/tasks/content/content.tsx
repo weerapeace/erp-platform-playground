@@ -22,6 +22,7 @@ import {
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
   listCampaigns, listBrands, listHashtags, createHashtag, getTask, listSubtasks,
   getCaptionTemplates, saveCaptionTemplates, getParentSkuColors, getParentSkuChildren, type ParentSkuChild,
+  getRecommendedTimes, saveRecommendedTimes, type RecommendedTimes,
   listContentAttachments, addContentAttachment, deleteContentAttachment,
   getPlatformSettings, savePlatformSettings, getLinkPreview,
   getCaptionConfig, saveCaptionConfig, defaultHashtags, resolvePrompt,
@@ -30,6 +31,7 @@ import {
   type ContentAttachment, type PlatformSettings, type PlatformSetting, type LinkPreview,
 } from "../data";
 import { useCreativeOptions, platformLabel } from "../use-options";
+import { PlatformChip } from "../platform-chip";
 import { MultiUserPicker } from "../multi-user-picker";
 import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -333,6 +335,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [children, setChildren] = useState<ParentSkuChild[]>([]);   // ลูก SKU ของ Parent (สี 2 ภาษา + ราคา)
   const [colorSource, setColorSource] = useState<"th" | "en">("th");   // {color} ใช้ไทย/อังกฤษ (จำต่อคอนเทนต์)
   const [priceSkuId, setPriceSkuId] = useState<string>("");   // เลือกราคาจาก SKU ลูกตัวไหน (Parent)
+  const [recTimes, setRecTimes] = useState<RecommendedTimes>({});   // เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์)
+  const [recOpen, setRecOpen] = useState(false);   // โมดอลตั้งเวลาแนะนำ
   const [pullBusy, setPullBusy] = useState(false);
   const [openParentId, setOpenParentId] = useState<string | null>(null);   // เปิด drawer Parent SKU
   // แนบงาน (รูป/วิดีโอ/ลิงก์) + ตั้งค่าแพลตฟอร์มกลาง
@@ -446,6 +450,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   // เลือก Parent SKU → ดึงสีของ SKU ลูกทั้งหมดมารวม
   useEffect(() => { if (!parent?.id) { setChildren([]); return; } let live = true; getParentSkuChildren(parent.id).then((cs) => { if (live) { setChildren(cs); setPriceSkuId((prev) => prev || cs[0]?.id || ""); } }).catch(() => {}); return () => { live = false; }; }, [parent?.id]);
+  useEffect(() => { getRecommendedTimes().then(setRecTimes).catch(() => {}); }, []);
 
   // ดึงสินค้า (SKU/Parent) จากงานที่ผูกไว้
   const pullFromTask = async () => {
@@ -491,6 +496,16 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const priceChild = children.find((c) => c.id === priceSkuId) ?? children[0] ?? null;
   const fakePrice = sku?.list_price ?? priceChild?.list_price ?? null;
   const realPrice = computeRealPrice(fakePrice, discountValue === "" ? null : Number(discountValue), discountPct);
+  // เวลาแนะนำของวันที่เลือกโพสต์ (โชว์ปุ่มให้กดใช้ ถ้ายังไม่ตรง)
+  const schedRec = useMemo(() => {
+    const dpart = scheduledAt.slice(0, 10);
+    if (dpart.length < 10) return null;
+    const day = new Date(`${dpart}T00:00:00`).getDay();
+    const time = recTimes[String(day)];
+    if (!time || scheduledAt.slice(11, 16) === time) return null;
+    return { time, label: ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."][day] };
+  }, [scheduledAt, recTimes]);
+  const applyRecommendedTime = () => { if (schedRec) setScheduledAt(`${scheduledAt.slice(0, 10)}T${schedRec.time}`); };
   // ตัวแปรสินค้าที่ใช้ร่วมทุก caption (ไม่รวม caption/hashtags ที่ต่างกันต่อแพลตฟอร์ม)
   const sharedVars = useMemo(() => ({
     shop: shopChannels, fake_price: fakePrice, real_price: realPrice,
@@ -596,8 +611,16 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             {/* status + schedule + assignee — ปักไว้บนสุดเสมอ */}
             {/* ตั้งเวลาโพสต์ — เด่น ปักบนสุด · (สถานะ/ผู้รับผิดชอบ ย้ายไปจัดการที่งานย่อยแทน) */}
             <div style={{ order: -1 }} className="bg-violet-50 border border-violet-200 rounded-xl p-3">
-              <label className="text-sm font-semibold text-violet-800 flex items-center gap-1.5">🗓 {t("ตั้งเวลาโพสต์", "Schedule Post")}</label>
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold text-violet-800 flex items-center gap-1.5">🗓 {t("ตั้งเวลาโพสต์", "Schedule Post")}</label>
+                <button type="button" onClick={() => setRecOpen(true)} className="text-[11px] text-violet-700 hover:underline">⚙️ {t("เวลาแนะนำ", "Suggested times")}</button>
+              </div>
               <div className="mt-1.5"><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
+              {schedRec && (
+                <button type="button" onClick={applyRecommendedTime} className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-violet-700 bg-white border border-violet-200 rounded-full px-2.5 py-1 hover:bg-violet-100">
+                  💡 {t("ใช้เวลาแนะนำ", "Use suggested")}: {schedRec.time} <span className="text-violet-400">({schedRec.label})</span>
+                </button>
+              )}
             </div>
 
             {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี + ดึงจากงาน */}
@@ -703,7 +726,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => setCap(c.platform, patch)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => setCap(c.platform, patch)} onOpenSettings={() => setPsOpen(true)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -720,6 +743,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       {cfgOpen && <CaptionConfigModal cfg={capCfg} brandId={d.brand_id} brandLabel={d.brand_label} platforms={platforms} onClose={() => setCfgOpen(false)} onSaved={(v) => { setCapCfg(v); setCfgOpen(false); }} pushToast={pushToast} />}
       {tplSettingsOpen && <CaptionTemplateSettings brandId={d.brand_id} brandLabel={d.brand_label} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
+      {recOpen && <RecommendedTimesModal initial={recTimes} onClose={() => setRecOpen(false)} onSaved={(v) => { setRecTimes(v); setRecOpen(false); }} pushToast={pushToast} />}
       <ImageLightbox images={taskMedia.images.map((im) => ({ url: r2ImageUrl(im.key, 1600) ?? "", label: im.label }))} index={tmLb} onClose={() => setTmLb(-1)} onIndex={setTmLb} />
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
     </>
@@ -864,7 +888,7 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [tplOpen, setTplOpen] = useState(false);   // พับปุ่มเลือกแม่แบบไว้ก่อน
   const useCaption = setting?.use_caption !== false;
@@ -882,9 +906,11 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, p
   return (
     <div className="border border-slate-200 rounded-lg p-3 bg-white">
       <div className="flex items-center justify-between gap-2 mb-2">
-        <span className="text-sm font-medium text-slate-700">{platformLabel(cap.platform)}</span>
+        <PlatformChip code={cap.platform} />
         <div className="flex items-center gap-3 shrink-0">
-          {postUrl && <a href={postUrl} target="_blank" rel="noreferrer" className="text-xs text-violet-700 hover:underline">↗ {t("ไปโพสต์", "Post")}</a>}
+          {postUrl
+            ? <a href={postUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-100">↗ {t("ไปโพสต์", "Post")}</a>
+            : onOpenSettings && <button onClick={onOpenSettings} title={t("ตั้งลิงก์ไปหน้าโพสต์ ที่ตั้งค่าแพลตฟอร์ม", "Set post link in platform settings")} className="text-[11px] text-slate-400 hover:text-violet-700">🔗 {t("ตั้งลิงก์", "Set link")}</button>}
           <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
         </div>
       </div>
@@ -920,6 +946,33 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, p
 }
 
 // ตั้งค่าต่อแพลตฟอร์ม (ค่ากลาง): แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์ / โน้ตบอกคนทำงาน
+// โมดอลตั้ง "เวลาแนะนำการโพสต์" ต่อวัน (จันทร์-อาทิตย์) — เก็บค่ากลาง ใช้เตือนตอนเลือกวันโพสต์
+function RecommendedTimesModal({ initial, onClose, onSaved, pushToast }: { initial: RecommendedTimes; onClose: () => void; onSaved: (v: RecommendedTimes) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+  const t = useT();
+  const [times, setTimes] = useState<RecommendedTimes>({ ...initial });
+  const [busy, setBusy] = useState(false);
+  const days: [string, string, string][] = [["1", "จันทร์", "Mon"], ["2", "อังคาร", "Tue"], ["3", "พุธ", "Wed"], ["4", "พฤหัสบดี", "Thu"], ["5", "ศุกร์", "Fri"], ["6", "เสาร์", "Sat"], ["0", "อาทิตย์", "Sun"]];
+  const save = async () => { setBusy(true); try { await saveRecommendedTimes(times); pushToast("success", t("บันทึกเวลาแนะนำแล้ว", "Saved")); onSaved(times); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+  return (
+    <ERPModal open onClose={onClose} size="sm" title={t("เวลาแนะนำการโพสต์ (ต่อวัน)", "Suggested posting times")}>
+      <div className="space-y-2">
+        <p className="text-[11px] text-slate-400">{t("ตั้งเวลาที่แนะนำให้โพสต์ในแต่ละวัน — เมื่อเลือกวันโพสต์จะมีปุ่มให้กดใช้เวลานี้", "Set a suggested time per weekday — a button appears to apply it when you pick a date")}</p>
+        {days.map(([k, th, en]) => (
+          <div key={k} className="flex items-center gap-2">
+            <span className="w-24 text-sm text-slate-600">{t(th, en)}</span>
+            <input type="time" value={times[k] ?? ""} onChange={(e) => setTimes((x) => ({ ...x, [k]: e.target.value }))} className="h-9 border border-slate-200 rounded-lg px-2 text-sm" />
+            {times[k] && <button onClick={() => setTimes((x) => { const n = { ...x }; delete n[k]; return n; })} title={t("ล้าง", "Clear")} className="text-slate-300 hover:text-red-500 text-sm">✕</button>}
+          </div>
+        ))}
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+          <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
+        </div>
+      </div>
+    </ERPModal>
+  );
+}
+
 function PlatformSettingsModal({ platforms, templates, settings, onClose, onSaved, pushToast }: { platforms: { value: string; label: string }[]; templates: CaptionTemplate[]; settings: PlatformSettings; onClose: () => void; onSaved: (v: PlatformSettings) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [val, setVal] = useState<PlatformSettings>(settings);

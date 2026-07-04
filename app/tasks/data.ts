@@ -427,6 +427,17 @@ export async function savePlatformSettings(settings: PlatformSettings): Promise<
   await jsonOrThrow(await apiFetch("/api/creative-platform-settings", { method: "PUT", body: JSON.stringify({ settings }) }));
 }
 
+// ---- เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์) — เก็บ ui_config key 'creative_recommended_times' ----
+// คีย์ = วันในสัปดาห์ตาม Date.getDay() ('0'=อาทิตย์ .. '6'=เสาร์) · ค่า = "HH:MM"
+export type RecommendedTimes = Record<string, string>;
+export async function getRecommendedTimes(): Promise<RecommendedTimes> {
+  const j = await apiFetch("/api/ui-config?key=creative_recommended_times").then((r) => r.json()).catch(() => ({}));
+  return (j.value as RecommendedTimes) ?? {};
+}
+export async function saveRecommendedTimes(times: RecommendedTimes): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/ui-config", { method: "PATCH", body: JSON.stringify({ key: "creative_recommended_times", value: times }) }));
+}
+
 // ---- พรอมต์ตั้งต้น + แฮชแท็กเริ่มต้น (ต่อแบรนด์/แพลตฟอร์ม + ตัวรวม) ----
 export type CaptionConfig = {
   prompt?: string;                                  // พรอมต์รวม (fallback)
