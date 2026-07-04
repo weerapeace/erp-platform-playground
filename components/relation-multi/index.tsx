@@ -11,6 +11,9 @@ import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { ImageInput } from "@/components/image-input";
 import { TagOrganizerModal } from "@/components/tag-organizer";
+import { useToast } from "@/components/toast";
+import { useAuth } from "@/components/auth";
+import { downscaleImageWidth } from "@/lib/image-resize";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
 // drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน (master-crud import ไฟล์นี้อยู่)
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -545,6 +548,10 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const fk = config.target_fk_column ?? "";
   const titleField = config.list_title_field ?? config.target_label_field ?? "name";
   const imageField = config.list_image_field;
+  const toast = useToast();
+  const { user } = useAuth();
+  const [dropRowId, setDropRowId]         = useState<string | null>(null);   // แถวที่กำลังลากรูปมาวาง (ไฮไลต์)
+  const [uploadingRowId, setUploadingRowId] = useState<string | null>(null); // แถวที่กำลังอัปรูป (สปินเนอร์)
   // จับคู่ด้วยฟิลด์ไหนของพ่อ: 'id' = ลิงก์ id ปกติ (ใช้ recordId) · อื่นๆ เช่น 'code' = เชื่อมด้วยรหัส (ใช้ค่าจาก parentValues)
   const matchField = config.parent_match_field || "id";
   const matchValue = matchField === "id" ? recordId : ((parentValues?.[matchField] as string | number | null | undefined) ?? null);
@@ -615,6 +622,48 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   // ---- inline edit + flash fill (ตารางลูก) ----
   const canEditRows = !!configurable;
   const isEditableCol = (f: string) => canEditRows && !relCfgByField[f] && ["text", "number", "currency"].includes(typeByField[f] ?? "text");
+
+  // ลากรูปวางที่แถวลูก → อัปเข้าคลังรูปของลูกตัวนั้น (entity_type = ตารางจริง เช่น skus_v2) + ตั้งรูปปกถ้ายังว่าง
+  // เปิดเฉพาะโหมดแก้ไข + ลูกมีฟิลด์รูป (imageField) เท่านั้น
+  const entityType = config.target_table || moduleKey;
+  const canDropImages = canEditRows && !!imageField && !!entityType;
+  const keyFromPublicUrl = (u: string): string | null => { try { return new URLSearchParams((u.split("?")[1]) ?? "").get("key"); } catch { return null; } };
+  const dropImagesOnRow = async (r: Record<string, unknown>, files: FileList | File[]) => {
+    const imgs = Array.from(files).filter((f) => (f.type || "").startsWith("image/"));
+    if (!imgs.length || !imageField) return;
+    const rowId = String(r.id);
+    setUploadingRowId(rowId); setDropRowId(null);
+    let ok = 0; let firstKey: string | null = null;
+    for (const orig of imgs) {
+      try {
+        const file = await downscaleImageWidth(orig, 1500);   // ย่อด้านกว้าง ≤ 1500px
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("entity_type", entityType);
+        fd.append("entity_id", rowId);
+        fd.append("attachment_kind", "image_gallery");
+        fd.append("image_only", "1");
+        fd.append("max_items", "9");
+        if (user?.name) fd.append("actor", user.name);
+        const res = await apiFetch("/api/attachments", { method: "POST", body: fd });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.error) throw new Error(j.error || "อัปไม่สำเร็จ");
+        if (!firstKey) firstKey = keyFromPublicUrl(String(j.public_url ?? "")) ?? ((j.data as { file_path?: string } | null)?.file_path ?? null);
+        ok++;
+      } catch (e) { toast.error(e instanceof Error ? e.message : "อัปรูปไม่สำเร็จ"); }
+    }
+    // ตั้งรูปปกให้ลูก ถ้ายังไม่มีรูปปก → รูปย่อในแถวอัปเดตทันที (ใช้ bulk-update เหมือน inline edit)
+    if (firstKey && (r[imageField] == null || r[imageField] === "")) {
+      try {
+        await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ edits: [{ id: rowId, changes: { [imageField]: firstKey } }] }),
+        });
+      } catch { /* ตั้งรูปปกพลาดไม่เป็นไร รูปยังอยู่ในคลัง */ }
+    }
+    setUploadingRowId(null);
+    if (ok) { toast.success(`เพิ่มรูปให้ ${String(r[titleField] ?? rowId)} ${ok} รูป`); load(); }
+  };
   const [editCell, setEditCell] = useState<{ rowId: string; field: string } | null>(null);
   const [editVal, setEditVal] = useState("");
   const fkCol = config.target_fk_column ?? "";
@@ -944,13 +993,21 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((r) => (
-              <tr key={String(r.id)} className="group hover:bg-blue-50/40 cursor-pointer" onClick={() => setPeek({ id: String(r.id), edit: false })}>
+              <tr key={String(r.id)}
+                className={`group cursor-pointer ${dropRowId === String(r.id) ? "bg-indigo-50 ring-1 ring-indigo-300" : "hover:bg-blue-50/40"}`}
+                title={canDropImages ? "ลากรูปมาวางเพื่อเพิ่มรูปให้รายการนี้" : undefined}
+                onClick={() => setPeek({ id: String(r.id), edit: false })}
+                onDragOver={canDropImages ? (e) => { e.preventDefault(); if (dropRowId !== String(r.id)) setDropRowId(String(r.id)); } : undefined}
+                onDragLeave={canDropImages ? () => setDropRowId((p) => (p === String(r.id) ? null : p)) : undefined}
+                onDrop={canDropImages ? (e) => { e.preventDefault(); setDropRowId(null); if (e.dataTransfer.files?.length) void dropImagesOnRow(r, e.dataTransfer.files); } : undefined}>
                 {imageField && (
                   <td className="px-2 py-1.5">
-                    <div className="w-8 h-8 rounded bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center">
-                      {r2img(r[imageField])
-                        ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(r[imageField])!} alt="" className="w-full h-full object-cover" />
-                        : <span className="text-slate-300 text-xs">📦</span>}
+                    <div className={`relative w-8 h-8 rounded bg-slate-50 border overflow-hidden flex items-center justify-center ${dropRowId === String(r.id) ? "border-indigo-400" : "border-slate-100"}`}>
+                      {uploadingRowId === String(r.id)
+                        ? <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />
+                        : r2img(r[imageField])
+                          ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(r[imageField])!} alt="" className="w-full h-full object-cover" />
+                          : <span className="text-slate-300 text-xs">📦</span>}
                     </div>
                   </td>
                 )}
@@ -1045,10 +1102,15 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     );
   })();
 
+  const dropHint = canDropImages ? (
+    <p className="text-[10px] text-slate-400 mt-1">💡 ลากรูปมาวางที่แถวเพื่อเพิ่มรูปให้รายการนั้น (เข้าคลังรูป + ตั้งรูปปกถ้ายังว่าง · ย่อ 1500px อัตโนมัติ)</p>
+  ) : null;
+
   return (
     <>
       {header}
       {list}
+      {dropHint}
       {rows.length < total && (
         <button type="button" onClick={loadMore} disabled={loadingMore}
           className="mt-1.5 w-full h-8 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
