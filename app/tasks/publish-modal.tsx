@@ -18,7 +18,7 @@ import { platformLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
 import type { FormField } from "@/app/api/admin/field-registry-v2/route";
 import {
-  listContent, getContent, listContentAttachments, updateContent, getPlatformSettings, savePlatformSettings, listSubtasks,
+  listContent, getContent, listContentAttachments, updateContent, getPlatformSettings, savePlatformSettings, listSubtasks, updateSubtask,
   getPublishConfig, savePublishConfig,
   type ContentDetail, type ContentAttachment, type PlatformSettings,
 } from "./data";
@@ -110,6 +110,14 @@ export function PublishModal({ taskId, parents, parentFallback, taskPlatforms = 
     setSaving(true);
     try {
       for (const r of rows) await updateContent(r.content.id, { posted_links: posted[r.content.id] ?? {} });
+      // ปิดวง: งานย่อยชนิด content ที่คอนเทนต์ถูกโพสต์แล้ว (มีลิงก์) → ขยับเป็น "อนุมัติ" (best-effort)
+      try {
+        const postedIds = new Set(rows.filter((r) => Object.values(posted[r.content.id] ?? {}).some((v) => v)).map((r) => r.content.id));
+        if (postedIds.size) {
+          const subs = await listSubtasks(taskId);
+          await Promise.all(subs.filter((s) => s.subtask_type === "content" && s.config?.content_id && postedIds.has(String(s.config.content_id)) && !["approved", "posted", "done"].includes(s.status)).map((s) => updateSubtask(taskId, s.id, { status: "approved" }).catch(() => {})));
+        }
+      } catch { /* best-effort */ }
       await onConfirm();
     } catch (e) { pushToast("error", (e as Error).message); setSaving(false); }
   };

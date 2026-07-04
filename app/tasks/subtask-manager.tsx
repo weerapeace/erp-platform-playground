@@ -457,7 +457,13 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
           )}
           {sub.subtask_type === "content" && (
             <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2 space-y-1.5">
-              {sub.content_preview?.title && <p className="text-xs font-medium text-slate-700">📄 {sub.content_preview.title}</p>}
+              {(sub.content_preview?.title || sub.content_preview?.status) && (
+                <p className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
+                  📄 <span className="truncate">{sub.content_preview?.title || t("คอนเทนต์", "Content")}</span>
+                  {sub.content_preview?.status === "published" && <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-1 shrink-0">{t("เผยแพร่แล้ว", "Published")}</span>}
+                  {sub.content_preview?.status === "scheduled" && <span className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 rounded px-1 shrink-0">{t("ตั้งเวลา", "Scheduled")}</span>}
+                </p>
+              )}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex flex-wrap gap-1 min-w-0">
                   {(sub.content_preview?.platforms ?? []).map((p) => <PlatformChip key={p} code={p} />)}
