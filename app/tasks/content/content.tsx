@@ -845,9 +845,9 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
   const t = useT();
   const [tags, setTags] = useState<Hashtag[]>([]);
   const [focus, setFocus] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const loadTags = useCallback(async () => { try { setTags(await listHashtags({ brand_id: brandId || undefined, platform })); setLoaded(true); } catch { /* ว่าง */ } }, [brandId, platform]);
-  useEffect(() => { if (focus && !loaded) loadTags(); }, [focus, loaded, loadTags]);
+  // คลังแฮชแท็กใช้ร่วมทุกแพลตฟอร์ม — กรองแค่ "แบรนด์นี้ + ของกลาง" (ไม่ผูกแพลตฟอร์ม) · โหลดใหม่ทุกครั้งที่โฟกัส (เห็นตัวที่เพิ่งเพิ่ม)
+  const loadTags = useCallback(async () => { try { setTags(await listHashtags({ brand_id: brandId || undefined })); } catch { /* ว่าง */ } }, [brandId]);
+  useEffect(() => { if (focus) loadTags(); }, [focus, loadTags]);
 
   const tokens = (value ?? "").split(/\s+/).filter(Boolean);
   const lastTok = (value ?? "").split(/\s+/).pop() ?? "";
@@ -867,7 +867,7 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
   const addNew = async () => {
     const raw = q.trim(); if (!raw) return;
     const text = "#" + raw.replace(/^#/, "");
-    try { const h = await createHashtag({ text, brand_id: brandId || null, platform }); applyTag(h.text); await loadTags(); }
+    try { const h = await createHashtag({ text, brand_id: brandId || null }); applyTag(h.text); await loadTags(); }
     catch (e) { pushToast("error", (e as Error).message); }
   };
 
