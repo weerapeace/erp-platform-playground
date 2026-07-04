@@ -9,6 +9,7 @@
 import { useEffect, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { PlatformIcon } from "@/components/platform-icon";
 
 // dynamic กัน import วน (ProductPlatformManager → master-crud → ParentPlatformsTab)
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
@@ -17,8 +18,6 @@ type Platform = { id: string; code: string; name_th: string; icon_key: string | 
 type Draft = { title?: string | null; category_path?: string | null; image_keys?: string[]; status?: string | null; platform_product_id?: string | null; last_sync_status?: string | null };
 type Account = { label: string | null; is_active: boolean };
 type Parent = { name_platform?: string; name_th?: string };
-
-const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", tiktok_shop: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", line_shopping: "💚", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
 export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [loading, setLoading] = useState(true);
@@ -45,8 +44,6 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   if (loading) return <div className="text-sm text-slate-400 py-8 text-center">กำลังโหลด…</div>;
   if (platforms.length === 0) return <div className="text-sm text-slate-400 py-8 text-center">ยังไม่มีแพลตฟอร์มที่เปิดใช้ — เพิ่มที่ตั้งค่า</div>;
 
-  const iconOf = (p: Platform) => p.icon_key || PLATFORM_ICON[p.code] || "🏬";
-
   return (
     <div className="space-y-3">
       <p className="text-xs text-slate-500">รายละเอียดการขายแต่ละแพลตฟอร์ม — กด “จัดการ” เพื่อแก้ชื่อ/หมวดหมู่/รูป/ราคา แล้วส่งขึ้นแพลตฟอร์มนั้น</p>
@@ -62,7 +59,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
         return (
           <div key={p.id} className="rounded-xl border border-slate-200 overflow-hidden">
             <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 border-b border-slate-200 flex-wrap">
-              <span className="text-sm font-medium text-slate-800">{iconOf(p)} {p.name_th}</span>
+              <span className="text-sm font-medium text-slate-800 inline-flex items-center gap-1.5"><PlatformIcon code={p.code} iconKey={p.icon_key} size={18} /> {p.name_th}</span>
               <span className={`text-[11px] px-2 py-0.5 rounded-full border ${status.c}`}>{status.t}</span>
               {d.platform_product_id && <span className="text-[11px] text-slate-400 font-mono truncate max-w-[10rem]">#{d.platform_product_id}</span>}
               <button onClick={() => setManage(p.id)} className="ml-auto text-xs bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-3 py-1.5">จัดการ →</button>

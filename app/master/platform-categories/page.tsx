@@ -9,13 +9,13 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { PlatformIcon } from "@/components/platform-icon";
 
 type Cat = { id: string; name: string };
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Mapping = { central_category_id: string; platform_id: string; platform_category_path: string | null };
 type Opt = { external_id: string; name_en: string; name_th: string };
 
-const ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", tiktok_shop: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", line_shopping: "💚", youtube: "▶️", pinterest: "📌", x: "✖️" };
 const key = (c: string, p: string) => `${c}:${p}`;
 
 // dropdown ค้นหาหมวดของร้าน (โหลด options ตอนเปิด/พิมพ์)
@@ -223,7 +223,7 @@ export default function PlatformCategoryMapPage() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-2">
                   {platforms.map((p) => (
                     <div key={p.id} className="flex items-center gap-3">
-                      <span className="w-32 flex-shrink-0 text-sm text-slate-700 truncate">{p.icon_key || ICON[p.code] || "🏬"} {p.name_th}</span>
+                      <span className="w-32 flex-shrink-0 text-sm text-slate-700 truncate inline-flex items-center gap-1.5"><PlatformIcon code={p.code} iconKey={p.icon_key} size={16} /> {p.name_th}</span>
                       <OptionPicker platformId={p.id} value={draft[p.id] ?? ""} onPick={(path) => setDraft((d) => ({ ...d, [p.id]: path }))} />
                     </div>
                   ))}

@@ -17,6 +17,7 @@ import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
 import { requiredChecks } from "@/lib/platform-required-fields";
+import { PlatformIcon } from "@/components/platform-icon";
 
 // ตัวแก้สินค้ากลาง (SKU) — เปิดจากตัวจัดการเพื่อแก้ราคา/สี/รูป หรือเพิ่มสีใหม่ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -31,7 +32,6 @@ type Account = { label: string | null; is_active: boolean };
 type Variant = { id: string; code: string; name: string; color: string | null; fake_price: number | null; sale_price: number | null; discount: number; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean; option_name?: string | null; option_value?: string | null };
 type Toast = { id: number; type: "success" | "error" | "info"; msg: string };
 
-const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", tiktok_shop: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
 // ค้นหา + เลือกหมวดหมู่ของแพลตฟอร์ม (จาก platform_category_options ที่นำเข้ามา) — คืนค่า "id · ชื่อ"
 function CategoryOptionPicker({ platformId, onPick }: { platformId: string; onPick: (label: string) => void }) {
@@ -375,7 +375,6 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   ], [canEdit, savePrice, hasOption, optionName]);
 
   const activePf = platforms.find((p) => p.id === active);
-  const iconOf = (p: Platform) => p.icon_key || PLATFORM_ICON[p.code] || "🏬";
 
   if (!mounted) return null;
   return createPortal(
@@ -396,7 +395,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
             <div className="flex gap-1 px-4 pt-3 overflow-x-auto shrink-0 border-b border-slate-100">
               {platforms.map((p) => (
                 <button key={p.id} onClick={() => setActive(p.id)} className={`shrink-0 px-3 py-1.5 text-sm rounded-t-lg border-b-2 transition-colors ${active === p.id ? "border-violet-500 text-violet-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
-                  {iconOf(p)} {p.name_th}
+                  <PlatformIcon code={p.code} iconKey={p.icon_key} size={16} /> {p.name_th}
                 </button>
               ))}
               {platforms.length === 0 && <p className="text-sm text-slate-400 py-2">ยังไม่มีแพลตฟอร์มที่เปิดใช้ — เพิ่มที่ตั้งค่า</p>}
