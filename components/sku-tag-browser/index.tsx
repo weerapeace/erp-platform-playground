@@ -110,6 +110,7 @@ export function SkuTagBrowser() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<string>("code");
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);   // กรองเฉพาะ SKU ที่ข้อมูลไม่ครบ
+  const [showTrash, setShowTrash] = useState(false);             // ดู "ถังขยะ" (ตัวปิดใช้งาน) แทนตัวใช้งาน
   const [selected, setSelected] = useState<Set<string>>(new Set());   // เลือกหลายตัว (bulk)
   const [view, setView] = useState<"card" | "table">(() => {
     if (typeof window !== "undefined" && localStorage.getItem("sku-browser-view") === "table") return "table";
@@ -175,11 +176,12 @@ export function SkuTagBrowser() {
     p.set("sort", sort.by); p.set("dir", sort.dir);
     p.set("limit", String(LIMIT)); p.set("offset", String(off));
     p.set("entity", entity);
+    if (showTrash) p.set("scope", "trashed");
     const extra = cardFields.filter((k) => !CORE_KEYS.has(k));
     if (extra.length) p.set("fields", extra.join(","));
     const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
     return { cards: (j.cards ?? []) as SkuCard[], total: Number(j.total ?? 0) };
-  }, [tagFilter, search, sort, cardFields, entity]);
+  }, [tagFilter, search, sort, cardFields, entity, showTrash]);
 
   // โหลดหน้าแรกใหม่เมื่อเปลี่ยน filter/search/sort
   useEffect(() => {
@@ -253,6 +255,7 @@ export function SkuTagBrowser() {
       if (tagFilter.tagIds.length) p.set("family_ids", tagFilter.tagIds.join(","));
       if (search.trim()) p.set("search", search.trim());
       p.set("entity", entity); p.set("ids", "1");
+      if (showTrash) p.set("scope", "trashed");
       const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
       const ids = (j.ids ?? []) as string[];
       setSelected(new Set(ids));
@@ -379,6 +382,9 @@ export function SkuTagBrowser() {
                 </div>
                 <button onClick={() => setOnlyIncomplete((v) => !v)}
                   className={`h-8 px-2.5 text-[12px] rounded-lg border ${onlyIncomplete ? "bg-amber-50 border-amber-300 text-amber-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>⚠️ เฉพาะข้อมูลไม่ครบ</button>
+                <button onClick={() => { setShowTrash((v) => !v); setSelected(new Set()); }}
+                  title={showTrash ? "กลับไปดูรายการที่ใช้งาน" : "ดูรายการในถังขยะ (ปิดใช้งาน)"}
+                  className={`h-8 px-2.5 text-[12px] rounded-lg border ${showTrash ? "bg-rose-50 border-rose-300 text-rose-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🗑 ถังขยะ{showTrash ? " (กำลังดู)" : ""}</button>
                 <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
                   <span>เรียง</span>
                   <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white">

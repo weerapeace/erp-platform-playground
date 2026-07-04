@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
   const sp = new URL(request.url).searchParams;
   const familyIds = (sp.get("family_ids") ?? sp.get("family_id") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const search   = (sp.get("search") ?? "").trim();
+  const scope    = sp.get("scope") === "trashed" ? "trashed" : "active";   // active=ใช้งาน (default) · trashed=ถังขยะ (is_active=false)
   const admin = supabaseAdmin();
 
   // entity: skus (ดีฟอลต์) หรือ parent-skus — สลับตาราง/junction/RPC (ใช้ของกลางตัวเดียว)
@@ -63,13 +64,13 @@ export async function GET(request: NextRequest) {
       const pageRpc = entity === "parent-skus" ? "erp_parent_skus_tag_page" : "erp_skus_tag_page";
       const { data: rpc, error } = await admin.rpc(pageRpc, {
         p_incl: familyIds, p_excl: null, p_search: search || null,
-        p_include_inactive: true, p_limit: IDS_CAP, p_offset: 0, p_sort_by: "code", p_sort_dir: "asc",
+        p_include_inactive: scope === "trashed", p_limit: IDS_CAP, p_offset: 0, p_sort_by: "code", p_sort_dir: "asc",
       });
       if (error) return NextResponse.json({ ids: [], total: 0, error: error.message }, { status: 500 });
       return NextResponse.json({ ids: (rpc as { ids?: string[] } | null)?.ids ?? [], total: Number((rpc as { total?: number } | null)?.total ?? 0), error: null });
     }
     const tbl = entity === "parent-skus" ? "parent_skus_v2" : "skus_v2";
-    let q = admin.from(tbl).select("id", { count: "exact" });
+    let q = admin.from(tbl).select("id", { count: "exact" }).eq("is_active", scope === "trashed" ? false : true);
     for (const raw of search.split(/\s+/)) { const t = sanitize(raw); if (t) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`); }
     const { data, count, error } = await q.range(0, IDS_CAP - 1);
     if (error) return NextResponse.json({ ids: [], total: 0, error: error.message }, { status: 500 });
@@ -110,7 +111,7 @@ export async function GET(request: NextRequest) {
     // กรองแท็ก (หลายแท็ก = OR) ผ่าน RPC กลาง erp_skus_tag_page (EXISTS ที่ DB + แบ่งหน้า) — รองรับแท็กที่มี SKU เป็นพัน ไม่ส่ง id ยาวใน URL
     const { data: rpc, error: rpcErr } = await admin.rpc(ENT.pageRpc, {
       p_incl: familyIds, p_excl: null, p_search: search || null,
-      p_include_inactive: true, p_limit: limit, p_offset: offset, p_sort_by: effSort, p_sort_dir: sortDir,
+      p_include_inactive: scope === "trashed", p_limit: limit, p_offset: offset, p_sort_by: effSort, p_sort_dir: sortDir,
     });
     if (rpcErr) return NextResponse.json({ cards: [], total: 0, error: rpcErr.message }, { status: 500 });
     const pageIds = (rpc as { ids?: string[] } | null)?.ids ?? [];
@@ -120,9 +121,10 @@ export async function GET(request: NextRequest) {
     if (error) return NextResponse.json({ cards: [], total: 0, error: error.message }, { status: 500 });
     const order = new Map(pageIds.map((id, i) => [id, i]));
     rows = ((skus ?? []) as unknown as SkuRow[]).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    if (scope === "trashed") rows = rows.filter((r) => !r.is_active);   // RPC ให้ทั้งหมด → กรองเหลือถังขยะ
   } else {
     // ค้นหาอย่างเดียว (ไม่มีแท็ก) — search จำกัดผลอยู่แล้ว
-    let q = admin.from(ENT.table).select(sel, { count: "exact" });
+    let q = admin.from(ENT.table).select(sel, { count: "exact" }).eq("is_active", scope === "trashed" ? false : true);
     for (const raw of search.split(/\s+/)) { const t = sanitize(raw); if (t) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`); }
     q = q.order(effSort, { ascending: sortDir === "asc" }).range(offset, offset + limit - 1);
     const { data: skus, count, error } = await q;
