@@ -239,8 +239,27 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
     try { await createOption(kind, l); setNewLabel(""); await load(); showToast(t("เพิ่มแล้ว", "Added")); }
     catch (e) { showToast((e as Error).message); } finally { setBusy(false); }
   };
-  const rename = async (o: Option, label: string) => { if (label.trim() === o.label || !label.trim()) return; try { await updateOption(o.id, { label: label.trim() }); setOpts((p) => p.map((x) => x.id === o.id ? { ...x, label: label.trim() } : x)); showToast(t("บันทึกแล้ว", "Saved")); } catch (e) { showToast((e as Error).message); } };
-  // แก้ meta แพลตฟอร์ม (สี/ไอคอน emoji/รูปไอคอน) — อัปเดตทันทีบนจอ
+  // ร่างแก้ไขต่อแถว (ชื่อ/สี/ไอคอน) — ไม่ autosave, กดปุ่ม 💾 ค่อยบันทึก (กันสีกระพริบ/ยิง API รัวตอนเลื่อนเลือกสี)
+  const [draft, setDraft] = useState<Record<string, Partial<Option>>>({});
+  const setField = (o: Option, patch: Partial<Option>) => setDraft((d) => ({ ...d, [o.id]: { ...d[o.id], ...patch } }));
+  const clearDraft = (id: string) => setDraft((d) => { const n = { ...d }; delete n[id]; return n; });
+  const isDirty = (o: Option) => {
+    const d = draft[o.id]; if (!d) return false;
+    return (("label" in d) && (d.label ?? "").trim() !== (o.label ?? ""))
+      || (("color" in d) && (d.color ?? "") !== (o.color ?? ""))
+      || (("icon" in d) && (d.icon ?? "").trim() !== (o.icon ?? ""));
+  };
+  const saveRow = async (o: Option) => {
+    const d = draft[o.id]; if (!d) return;
+    const patch: Record<string, unknown> = {};
+    if ("label" in d) { const l = (d.label ?? "").trim(); if (!l) { showToast(t("ชื่อห้ามว่าง", "Name is required")); return; } patch.label = l; }
+    if ("color" in d) patch.color = d.color || null;
+    if ("icon" in d) patch.icon = (d.icon ?? "").trim() || null;
+    if (Object.keys(patch).length === 0) { clearDraft(o.id); return; }
+    try { await updateOption(o.id, patch); setOpts((p) => p.map((x) => x.id === o.id ? { ...x, ...patch } : x)); clearDraft(o.id); showToast(t("บันทึกแล้ว", "Saved")); }
+    catch (e) { showToast((e as Error).message); }
+  };
+  // แก้รูปไอคอน (บันทึกทันที — เป็นการคลิกครั้งเดียว ไม่มีปัญหา delay)
   const patchMeta = async (o: Option, patch: Partial<Option>) => { setOpts((p) => p.map((x) => x.id === o.id ? { ...x, ...patch } : x)); try { await updateOption(o.id, patch as Record<string, unknown>); showToast(t("บันทึกแล้ว", "Saved")); } catch (e) { showToast((e as Error).message); } };
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const uploadIcon = async (o: Option, file: File) => {
@@ -267,6 +286,7 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
         <p className="text-xs text-slate-400 mt-0.5">{kind === "platform"
           ? t("เพิ่ม/แก้ชื่อ/ลบ/จัดลำดับ + ตั้งสีหรือไอคอน (emoji/รูป) ต่อแพลตฟอร์ม — ชิปในหน้างานจะใช้สี/ไอคอนนี้ · ใส่รูปไอคอนจะแทนที่สี", "Add / rename / delete / reorder + set a color or icon (emoji/image) per platform — task chips use this · an icon image replaces the color")
           : t("เพิ่ม/แก้ชื่อ/ลบ/จัดลำดับ + ตั้งสี/ไอคอน (emoji) ต่อประเภทงาน — ชิปในการ์ด/คิวจะใช้สีนี้ · เปลี่ยนที่นี่แล้วฟอร์มสร้างงาน/เทมเพลตใช้ตามทันที", "Add / rename / delete / reorder + set color/icon (emoji) per task type — cards/queue chips use this · changes apply immediately to task and template forms")}</p>
+        <p className="text-[11px] text-slate-400 mt-1">💡 {t("แก้ชื่อ/สี/ไอคอน emoji แล้วกดปุ่ม 💾 บันทึก ที่ท้ายแถว (รูปไอคอน + จัดลำดับ บันทึกทันที)", "Edit name/color/emoji then press 💾 Save at the end of the row (icon image + reorder save immediately)")}</p>
       </div>
       <div className="p-5">
         <div className="flex gap-2 mb-4">
@@ -278,8 +298,13 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
           : (
             <div className="space-y-1.5">
               {opts.map((o, i) => {
+                const d = draft[o.id] ?? {};
+                const label = (d.label ?? o.label) as string;
+                const color = ("color" in d ? d.color : o.color) as string | null | undefined;
+                const icon = ("icon" in d ? d.icon : o.icon) as string | null | undefined;
+                const dirty = isDirty(o);
                 const iconImg = o.icon_key ? r2ImageUrl(o.icon_key, 48) : null;
-                const hex = o.color && /^#[0-9a-fA-F]{6}$/.test(o.color) ? o.color : null;
+                const hex = color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null;
                 return (
                 <div key={o.id} className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2">
                   <div className="flex flex-col text-slate-300">
@@ -289,15 +314,15 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                   {/* พรีวิวชิปจริง — รูปไอคอน > สี+emoji > slate */}
                   <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border shrink-0 max-w-[140px]" style={hex && !iconImg ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined}
                     title={t("ตัวอย่างชิป", "Chip preview")}>
-                    {iconImg ? <img src={iconImg} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : o.icon ? <span className="leading-none">{o.icon}</span> : null}
-                    <span className="truncate">{o.label}</span>
+                    {iconImg ? <img src={iconImg} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : icon ? <span className="leading-none">{icon}</span> : null}
+                    <span className="truncate">{label || o.label}</span>
                   </span>
-                  <input defaultValue={o.label} onBlur={(e) => rename(o, e.target.value)} className="flex-1 min-w-[80px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
+                  <input value={label} onChange={(e) => setField(o, { label: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && dirty) saveRow(o); }} className="flex-1 min-w-[80px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
                   <div className="flex items-center gap-1.5 shrink-0">
                     {/* สีประเภท (มีทั้งประเภทงาน + แพลตฟอร์ม) */}
-                    <div title={t("สีประเภท", "Color")}><ColorInput value={o.color || "#64748b"} onChange={(v) => patchMeta(o, { color: v })} allowText={false} /></div>
+                    <div title={t("สีประเภท", "Color")}><ColorInput value={color || "#64748b"} onChange={(v) => setField(o, { color: v })} allowText={false} /></div>
                     {/* ไอคอน emoji */}
-                    <input defaultValue={o.icon || ""} maxLength={2} placeholder="😀" onBlur={(e) => { const v = e.target.value.trim(); if (v !== (o.icon || "")) patchMeta(o, { icon: v }); }} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />
+                    <input value={icon || ""} maxLength={2} placeholder="😀" onChange={(e) => setField(o, { icon: e.target.value })} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />
                     {/* รูปไอคอน (อัปโหลด) — เฉพาะแพลตฟอร์ม (task_type ไม่มีคอลัมน์ icon_key) */}
                     {kind === "platform" && (<>
                       <label className={`h-7 px-2 inline-flex items-center text-[11px] rounded border cursor-pointer ${uploadingId === o.id ? "opacity-50 pointer-events-none" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("อัปโหลดรูปไอคอน (แทนสี)", "Upload icon image (replaces color)")}>
@@ -307,6 +332,7 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                       {iconImg && <button onClick={() => patchMeta(o, { icon_key: null })} title={t("ลบรูปไอคอน", "Remove icon image")} className="text-slate-300 hover:text-red-500 text-xs">⊘</button>}
                     </>)}
                   </div>
+                  {dirty && <button onClick={() => saveRow(o)} title={t("บันทึกแถวนี้", "Save this row")} className="h-7 px-2 text-[11px] font-medium text-white bg-violet-600 rounded hover:bg-violet-700 shrink-0">💾 {t("บันทึก", "Save")}</button>}
                   <span className="text-[10px] text-slate-300 font-mono">{o.key}</span>
                   <button onClick={() => remove(o)} className="text-slate-300 hover:text-red-500 text-sm">✕</button>
                 </div>
