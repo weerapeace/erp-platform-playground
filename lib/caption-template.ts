@@ -16,6 +16,7 @@ export const CAPTION_VARS: { key: string; label: string; hint: string }[] = [
   { key: "color",      label: "{color}",      hint: "สีสินค้า" },
   { key: "sku",        label: "{sku}",        hint: "รหัส SKU" },
   { key: "product",    label: "{product}",    hint: "ชื่อสินค้า" },
+  { key: "link",       label: "{link}",       hint: "ลิงก์สินค้า (ตามแพลตฟอร์มของแคปชั่นนั้น)" },
 ];
 
 export type CaptionVars = {
@@ -28,6 +29,7 @@ export type CaptionVars = {
   color?: string | null;
   sku?: string | null;
   product?: string | null;
+  link?: string | null;
 };
 
 const money = (n: number | null | undefined) => (n == null ? "" : Number(n).toLocaleString("th-TH"));
@@ -45,6 +47,7 @@ function toMap(v: CaptionVars): Record<string, string> {
     color: (v.color ?? "").trim(),
     sku: (v.sku ?? "").trim(),
     product: (v.product ?? "").trim(),
+    link: (v.link ?? "").trim(),
   };
 }
 

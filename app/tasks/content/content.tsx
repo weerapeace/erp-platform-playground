@@ -20,7 +20,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import {
   CONTENT_STATUS_META, POST_TYPES, contentStatusLabel, postTypeLabel,
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
-  listCampaigns, listBrands, listHashtags, createHashtag, getTask, listSubtasks,
+  listCampaigns, listBrands, listHashtags, createHashtag, deleteHashtag, getTask, listSubtasks,
   getCaptionTemplates, saveCaptionTemplates, getParentSkuColors, getParentSkuChildren, type ParentSkuChild,
   getRecommendedTimes, saveRecommendedTimes, type RecommendedTimes,
   listContentAttachments, addContentAttachment, deleteContentAttachment,
@@ -329,6 +329,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [psOpen, setPsOpen] = useState(false);   // โมดอลตั้งค่าแพลตฟอร์ม
   const [capCfg, setCapCfg] = useState<CaptionConfig>({});   // พรอมต์ + แฮชแท็กเริ่มต้น
   const [cfgOpen, setCfgOpen] = useState(false);   // โมดอลตั้งค่าพรอมต์/แฮชแท็ก
+  const [hashOpen, setHashOpen] = useState(false);   // โมดอลจัดการคลังแฮชแท็ก
   // สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี
   const [sku, setSku] = useState<SkuPickerValue | null>(null);
   const [parent, setParent] = useState<ParentSkuPickerValue | null>(null);
@@ -722,11 +723,12 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 <button onClick={() => setCfgOpen(true)} className="text-xs text-violet-700 hover:underline">✍️ {t("พรอมต์/แฮชแท็ก", "Prompt/Hashtags")}</button>
                 <button onClick={() => setPsOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ {t("ตั้งค่าแพลตฟอร์ม", "Platform settings")}</button>
                 <button onClick={() => setTplSettingsOpen(true)} className="text-xs text-violet-700 hover:underline">📝 {t("แม่แบบ", "Templates")}</button>
+                <button onClick={() => setHashOpen(true)} className="text-xs text-violet-700 hover:underline">🏷 {t("คลังแฮชแท็ก", "Hashtag library")}</button>
               </div>
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => setCap(c.platform, patch)} onOpenSettings={() => setPsOpen(true)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} productLink={links.find((l) => l.platform === c.platform)?.url ?? links[0]?.url ?? ""} onChange={(patch) => setCap(c.platform, patch)} onOpenSettings={() => setPsOpen(true)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -744,6 +746,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       {tplSettingsOpen && <CaptionTemplateSettings brandId={d.brand_id} brandLabel={d.brand_label} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
       {recOpen && <RecommendedTimesModal initial={recTimes} onClose={() => setRecOpen(false)} onSaved={(v) => { setRecTimes(v); setRecOpen(false); }} pushToast={pushToast} />}
+      {hashOpen && <HashtagLibraryModal brandId={d.brand_id} onClose={() => setHashOpen(false)} pushToast={pushToast} />}
       <ImageLightbox images={taskMedia.images.map((im) => ({ url: r2ImageUrl(im.key, 1600) ?? "", label: im.label }))} index={tmLb} onClose={() => setTmLb(-1)} onIndex={setTmLb} />
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
     </>
@@ -888,7 +891,7 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ cap, templates, sharedVars, brandId, setting, productLink, onChange, onOpenSettings, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; productLink?: string; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [tplOpen, setTplOpen] = useState(false);   // พับปุ่มเลือกแม่แบบไว้ก่อน
   const useCaption = setting?.use_caption !== false;
@@ -899,7 +902,7 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, o
   const tpl = templates.find((x) => x.key === typeKey) ?? templates[0];
   // ประกอบ preview จากแม่แบบ + ตัวแปร (ตัด caption/hashtags ออกถ้าปิดไว้)
   const preview = tpl
-    ? renderCaption(tpl.body, { caption: useCaption ? cap.caption : "", hashtags: useHashtags ? cap.hashtags : "", ...sharedVars })
+    ? renderCaption(tpl.body, { caption: useCaption ? cap.caption : "", hashtags: useHashtags ? cap.hashtags : "", link: productLink, ...sharedVars })
     : `${useCaption ? (cap.caption ?? "") : ""}\n\n${useHashtags ? (cap.hashtags ?? "") : ""}`.trim();
   const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", t(`คัดลอก ${platformLabel(cap.platform)} แล้ว`, `Copied ${platformLabel(cap.platform)}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } };
 
@@ -946,6 +949,63 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, o
 }
 
 // ตั้งค่าต่อแพลตฟอร์ม (ค่ากลาง): แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์ / โน้ตบอกคนทำงาน
+// โมดอลจัดการ "คลังแฮชแท็ก" — ดู/เพิ่ม/ลบ/ค้นหา · แฮชแท็กในคลังจะขึ้น typeahead ในช่อง #hashtag
+function HashtagLibraryModal({ brandId, onClose, pushToast }: { brandId: string | null; onClose: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
+  const t = useT();
+  const [tags, setTags] = useState<Hashtag[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [newText, setNewText] = useState("");
+  const [scope, setScope] = useState<"brand" | "all">("all");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setTags(await listHashtags({ search: search.trim() || undefined, brand_id: scope === "brand" && brandId ? brandId : undefined })); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setLoading(false); }
+  }, [search, scope, brandId, pushToast]);
+  useEffect(() => { load(); }, [load]);
+  const add = async () => {
+    const raw = newText.trim().replace(/^#/, ""); if (!raw) return;
+    setBusy(true);
+    try { await createHashtag({ text: "#" + raw, brand_id: scope === "brand" ? brandId : null }); setNewText(""); await load(); pushToast("success", t("เพิ่มเข้าคลังแล้ว", "Added to library")); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
+  const remove = async (h: Hashtag) => { if (!window.confirm(`${t("ลบ", "Delete")} ${h.text}?`)) return; try { await deleteHashtag(h.id); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
+  return (
+    <ERPModal open onClose={onClose} size="md" title={t("คลังแฮชแท็ก", "Hashtag library")}>
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <input value={newText} onChange={(e) => setNewText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder={t("เพิ่มแฮชแท็กใหม่ เช่น LouisMontini", "New hashtag e.g. LouisMontini")} className="flex-1 h-9 border border-slate-200 rounded-lg px-3 text-sm" />
+          <button onClick={add} disabled={busy} className="h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50 shrink-0">＋ {t("เพิ่ม", "Add")}</button>
+        </div>
+        <div className="flex items-center gap-2">
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("ค้นหาในคลัง...", "Search library...")} className="flex-1 h-9 border border-slate-200 rounded-lg px-3 text-sm" />
+          {brandId && (
+            <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-[11px] shrink-0">
+              <button onClick={() => setScope("all")} className={`px-2.5 h-9 ${scope === "all" ? "bg-violet-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{t("ทั้งหมด", "All")}</button>
+              <button onClick={() => setScope("brand")} className={`px-2.5 h-9 border-l border-slate-200 ${scope === "brand" ? "bg-violet-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{t("แบรนด์นี้", "This brand")}</button>
+            </div>
+          )}
+        </div>
+        {loading ? <p className="text-sm text-slate-400 py-6 text-center">{t("กำลังโหลด...", "Loading...")}</p>
+          : tags.length === 0 ? <p className="text-sm text-slate-400 py-6 text-center italic">{t("ยังไม่มีแฮชแท็กในคลัง — พิมพ์เพิ่มด้านบน", "No hashtags yet — add above")}</p>
+          : (
+            <div className="flex flex-wrap gap-1.5 max-h-72 overflow-y-auto">
+              {tags.map((h) => (
+                <span key={h.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-700 rounded-full pl-2.5 pr-1 py-1">
+                  {h.text}<span className="text-[10px] text-slate-400">·{h.usage_count}</span>
+                  <button onClick={() => remove(h)} title={t("ลบ", "Delete")} className="text-slate-300 hover:text-red-500 w-4 h-4 flex items-center justify-center">✕</button>
+                </span>
+              ))}
+            </div>
+          )}
+        <p className="text-[11px] text-slate-400">{t("แฮชแท็กในคลังจะขึ้นให้เลือกอัตโนมัติเมื่อพิมพ์ในช่อง #hashtag ของแต่ละแพลตฟอร์ม", "Library hashtags autocomplete in each platform's #hashtag field")}</p>
+        <div className="flex justify-end"><button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button></div>
+      </div>
+    </ERPModal>
+  );
+}
+
 // โมดอลตั้ง "เวลาแนะนำการโพสต์" ต่อวัน (จันทร์-อาทิตย์) — เก็บค่ากลาง ใช้เตือนตอนเลือกวันโพสต์
 function RecommendedTimesModal({ initial, onClose, onSaved, pushToast }: { initial: RecommendedTimes; onClose: () => void; onSaved: (v: RecommendedTimes) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
@@ -1039,7 +1099,7 @@ function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushTo
   const removeActive = () => { if (!active || !window.confirm(t(`ลบแม่แบบ "${active.label}" ?`, `Delete template "${active.label}"?`))) return; setTemplates((ts) => ts.filter((_, i) => i !== activeIdx)); setActiveIdx(0); };
 
   // preview ตัวอย่าง (ใช้ข้อมูลสมมติ)
-  const sampleVars = { caption: "ข้อความตัวอย่างที่พิมพ์เอง", hashtags: "#LouisMontini #กระเป๋าหนัง", shop: channels, fake_price: 1290, real_price: 990, price: 1290, color: "ดำ", sku: "TTM061-04", product: "กระเป๋าสตางค์หนังแท้" };
+  const sampleVars = { caption: "ข้อความตัวอย่างที่พิมพ์เอง", hashtags: "#LouisMontini #กระเป๋าหนัง", shop: channels, fake_price: 1290, real_price: 990, price: 1290, color: "ดำ", sku: "TTM061-04", product: "กระเป๋าสตางค์หนังแท้", link: "https://shp.ee/ตัวอย่าง" };
 
   const save = async () => {
     setSaving(true);
