@@ -23,9 +23,9 @@ import { tr } from "@/lib/lang";
 import type { UserPickerValue } from "@/components/pickers";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { PlatformChip } from "./platform-chip";
-import { platformLabel } from "./use-options";
+import { platformLabel, useCreativeOptions } from "./use-options";
 import {
-  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates,
+  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent,
   type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem,
 } from "./data";
 
@@ -156,6 +156,7 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
   const [contentTpls, setContentTpls] = useState<ContentItem[]>([]);   // แม่แบบคอนเทนต์ (ให้เลือกตอนเพิ่มงานย่อยชนิด content)
   const [tplId, setTplId] = useState("");
   const [ctLoading, setCtLoading] = useState(false);
+  const [tplModalOpen, setTplModalOpen] = useState(false);   // ป๊อปสร้างแม่แบบคอนเทนต์
   const [title, setTitle] = useState("");
   const [titleEn, setTitleEn] = useState("");
   const [desc, setDesc] = useState("");
@@ -237,7 +238,7 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
       <div>
         <div className="flex items-center justify-between mb-1">
           <p className="text-[11px] text-slate-400">{t("แม่แบบคอนเทนต์ (ถ้ามี)", "Content template (optional)")}</p>
-          <a href="/tasks/content?view=templates" target="_blank" rel="noopener" className="text-[11px] text-violet-600 hover:underline">⚙️ {t("จัดการแม่แบบ", "Manage")}</a>
+          <button type="button" onClick={() => setTplModalOpen(true)} className="text-[11px] text-violet-600 hover:underline">⚙️ {t("จัดการแม่แบบ", "Manage")}</button>
         </div>
         <select value={tplId} onChange={(e) => setTplId(e.target.value)} className="h-9 w-full border border-slate-200 rounded-lg px-2 text-sm bg-white">
           <option value="">{ctLoading ? t("กำลังโหลด...", "Loading...") : t("— ไม่ใช้แม่แบบ —", "— none —")}</option>
@@ -263,6 +264,7 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
         <button onClick={() => setMode("choose")} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <button onClick={() => void applyType(selType, { post_type: postType || undefined, assignee_ids: typeAssignees.map((a) => a.id), content_template_id: tplId || undefined })} disabled={applyingKey === selType.key} className="h-8 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{applyingKey === selType.key ? "..." : t("เพิ่ม", "Add")}</button>
       </div>
+      {tplModalOpen && <ContentTemplateModal pushToast={pushToast} onClose={() => setTplModalOpen(false)} onCreated={(id) => { setTplModalOpen(false); listContentTemplates().then(setContentTpls).catch(() => {}); setTplId(id); }} />}
     </div>
   );
 
@@ -758,6 +760,64 @@ function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, onAddDra
           ))}
       </>}
     </div>
+  );
+}
+
+// ป๊อปสร้าง "แม่แบบคอนเทนต์" (แบบร่าง) — ชื่อ + ประเภท + platforms (หลายอัน) + มอบหมาย · สร้างแล้วเด้งเข้า dropdown
+function ContentTemplateModal({ pushToast, onClose, onCreated }: { pushToast: ToastFn; onClose: () => void; onCreated: (id: string) => void }) {
+  const t = useT();
+  const { platforms: platformOpts } = useCreativeOptions();
+  const [title, setTitle] = useState("");
+  const [postType, setPostType] = useState("");
+  const [pf, setPf] = useState<string[]>([]);
+  const [assignees, setAssignees] = useState<{ id: string; label: string }[]>([]);
+  const [adding, setAdding] = useState<UserPickerValue | null>(null);
+  const [busy, setBusy] = useState(false);
+  const togglePf = (v: string) => setPf((xs) => (xs.includes(v) ? xs.filter((x) => x !== v) : [...xs, v]));
+  const save = async () => {
+    if (!title.trim()) { pushToast("error", t("ใส่ชื่อแม่แบบ", "Enter a template name")); return; }
+    setBusy(true);
+    try {
+      const { id } = await createContent({ title: title.trim(), post_type: postType || null, platforms: pf, assignee_ids: assignees.map((a) => a.id), is_template: true });
+      pushToast("success", t("สร้างแม่แบบแล้ว", "Template created")); onCreated(id);
+    } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} size="md" title={t("สร้างแม่แบบคอนเทนต์", "New content template")}>
+      <div className="space-y-3">
+        <div>
+          <p className="text-[11px] text-slate-400 mb-1">{t("ชื่อแม่แบบ", "Template name")}</p>
+          <ERPInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("เช่น โปรโมตสินค้าใหม่", "e.g. New product promo")} />
+        </div>
+        <div>
+          <p className="text-[11px] text-slate-400 mb-1">{t("ประเภทคอนเทนต์", "Content type")}</p>
+          <select value={postType} onChange={(e) => setPostType(e.target.value)} className="h-9 w-full border border-slate-200 rounded-lg px-2 text-sm bg-white">
+            <option value="">{t("— เลือกประเภท —", "— select —")}</option>
+            {POST_TYPES.map((p) => <option key={p.value} value={p.value}>{postTypeLabel(p.value)}</option>)}
+          </select>
+        </div>
+        <div>
+          <p className="text-[11px] text-slate-400 mb-1">{t("แพลตฟอร์มที่จะลง (เลือกได้หลายอัน)", "Platforms (multi-select)")}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {platformOpts.map((p) => <button key={p.value} type="button" onClick={() => togglePf(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${pf.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
+          </div>
+        </div>
+        <div>
+          <p className="text-[11px] text-slate-400 mb-1">{t("มอบหมายให้ (เลือกได้หลายคน)", "Assign to (multiple)")}</p>
+          <div className="flex flex-wrap gap-1.5 mb-1.5">
+            {assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button onClick={() => setAssignees((xs) => xs.filter((x) => x.id !== a.id))} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0"><UserPicker value={adding} onChange={(v) => { if (v && !assignees.some((a) => a.id === v.id)) setAssignees((xs) => [...xs, { id: v.id, label: v.name }]); setAdding(null); }} disableCreate /></div>
+            <TeamFill onPick={(members) => setAssignees((xs) => { const fresh = members.filter((m) => !xs.some((a) => a.id === m.id)).map((m) => ({ id: m.id, label: m.name })); return fresh.length ? [...xs, ...fresh] : xs; })} />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : t("สร้าง", "Create")}</button>
+        </div>
+      </div>
+    </ERPModal>
   );
 }
 
