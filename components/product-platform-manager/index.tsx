@@ -82,23 +82,29 @@ function PriceCell({ v, onSave }: { v: Variant; onSave: (id: string, price: stri
   );
 }
 
-// ช่องส่วนลดราย SKU (instantDiscount ของ LINE) — สวิตช์เปิด/ปิด + ช่องกรอกจำนวนเงินที่ลด (บาท)
+// ช่องส่วนลดราย SKU (instantDiscount ของ LINE) — สวิตช์เปิด/ปิด + ช่องกรอกจำนวนเงินที่ลด (บาท) + ราคาหลังลด
 function DiscountCell({ v, disc, onToggle, onValue }: { v: Variant; disc: { on: boolean; value: number }; onToggle: (on: boolean) => void; onValue: (value: number) => void }) {
-  const net = (v.price ?? 0) - (disc.on ? disc.value : 0);
+  const showNet = disc.on && disc.value > 0 && v.price != null;
+  const net = Math.max(0, (v.price ?? 0) - disc.value);
   return (
-    <div className="flex items-center gap-1.5 justify-end">
-      <button type="button" onClick={() => onToggle(!disc.on)} title={disc.on ? "ปิดส่วนลด" : "เปิดส่วนลด"}
-        className={`h-5 w-9 rounded-full relative transition-colors shrink-0 ${disc.on ? "bg-violet-600" : "bg-slate-300"}`}>
-        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${disc.on ? "left-[1.15rem]" : "left-0.5"}`} />
-      </button>
-      <div className="relative w-16">
-        <input type="number" min={0} disabled={!disc.on} key={`d-${v.id}-${disc.value}`} defaultValue={disc.value || ""}
-          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-          onBlur={(e) => { const n = Math.max(0, Number(e.target.value) || 0); if (n !== disc.value) onValue(n); }}
-          placeholder="ลด" title={disc.on ? `ราคาสุทธิ ≈ ${net.toLocaleString()}฿` : "เปิดสวิตช์ก่อนกรอกส่วนลด"}
-          className={`h-7 w-full text-right tabular-nums border rounded-md pl-1.5 pr-4 text-sm focus:outline-none focus:ring-1 focus:ring-violet-300 ${disc.on ? "border-violet-300" : "border-slate-200 bg-slate-50 text-slate-300"}`} />
-        <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">฿</span>
+    <div className="flex flex-col items-end gap-0.5">
+      <div className="flex items-center gap-1.5 justify-end">
+        <button type="button" onClick={() => onToggle(!disc.on)} title={disc.on ? "ปิดส่วนลด" : "เปิดส่วนลด"}
+          className={`h-5 w-9 rounded-full relative transition-colors shrink-0 ${disc.on ? "bg-violet-600" : "bg-slate-300"}`}>
+          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${disc.on ? "left-[1.15rem]" : "left-0.5"}`} />
+        </button>
+        <div className="relative w-16">
+          <input type="number" min={0} disabled={!disc.on} key={`d-${v.id}-${disc.value}`} defaultValue={disc.value || ""}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            onBlur={(e) => { const n = Math.max(0, Number(e.target.value) || 0); if (n !== disc.value) onValue(n); }}
+            placeholder="ลด" title={disc.on ? "จำนวนเงินที่ลด (บาท)" : "เปิดสวิตช์ก่อนกรอกส่วนลด"}
+            className={`h-7 w-full text-right tabular-nums border rounded-md pl-1.5 pr-4 text-sm focus:outline-none focus:ring-1 focus:ring-violet-300 ${disc.on ? "border-violet-300" : "border-slate-200 bg-slate-50 text-slate-300"}`} />
+          <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">฿</span>
+        </div>
       </div>
+      {showNet
+        ? <span className="text-[10px] text-emerald-600 tabular-nums">ขายจริง {net.toLocaleString()}฿</span>
+        : <span className="text-[10px] text-slate-300">—</span>}
     </div>
   );
 }
@@ -125,6 +131,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [massPrice, setMassPrice] = useState("");   // Mass fill ราคาทุก SKU
   const [massBusy, setMassBusy] = useState(false);
+  const [massDiscount, setMassDiscount] = useState(""); // Mass fill ส่วนลดทุก SKU
   const [creating, setCreating] = useState(false);  // สร้างสินค้าใหม่บน LINE
   const [displaying, setDisplaying] = useState(false); // เปิด/ปิดการขายบน LINE
   const [pushingPrice, setPushingPrice] = useState(false); // ส่งราคา/ส่วนลดขึ้น LINE
@@ -207,6 +214,21 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const setDiscount = (skuId: string, patch: { on?: boolean; value?: number }) => {
     const cur = discOf(skuId);
     saveExtra({ discounts: { ...discounts, [skuId]: { ...cur, ...patch } } });
+  };
+  // ตั้งส่วนลดทุก SKU พร้อมกัน (Bulk fill) — เปิดสวิตช์ + ใส่ค่าให้ทุกตัว
+  const applyDiscountAll = () => {
+    const val = Math.max(0, Number(massDiscount) || 0);
+    const next: Record<string, { on: boolean; value: number }> = { ...discounts } as Record<string, { on: boolean; value: number }>;
+    for (const v of variants) next[v.id] = { on: true, value: val };
+    saveExtra({ discounts: next }); setMassDiscount("");
+    toast("success", `ตั้งส่วนลด ${val.toLocaleString()}฿ ทุก SKU แล้ว`);
+  };
+  // เปิด/ปิดส่วนลดทั้งหมด (คงค่าส่วนลดเดิมไว้)
+  const toggleAllDiscount = (on: boolean) => {
+    const next: Record<string, { on: boolean; value: number }> = { ...discounts } as Record<string, { on: boolean; value: number }>;
+    for (const v of variants) next[v.id] = { on, value: discOf(v.id).value };
+    saveExtra({ discounts: next });
+    toast("success", on ? "เปิดส่วนลดทุก SKU แล้ว" : "ปิดส่วนลดทุก SKU แล้ว");
   };
   // สร้างสินค้าใหม่บน LINE (สินค้าที่ยังไม่มีบน LINE)
   const createOnLine = async () => {
@@ -445,6 +467,19 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                       <button onClick={() => massFillPrice(false)} disabled={massBusy || !massPrice} className="h-8 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">ใช้กับทั้งหมด</button>
                       <button onClick={() => massFillPrice(true)} disabled={massBusy || !massPrice} className="h-8 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 disabled:opacity-40">เฉพาะที่ยังไม่มีราคา</button>
                       <span className="text-[10px] text-slate-400">= ราคาขายกลางของ SKU (ใช้ทุกช่องทาง)</span>
+                    </div>
+                  )}
+                  {canEdit && variants.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 mb-2 p-2 rounded-lg bg-violet-50/60 border border-violet-200">
+                      <span className="text-[11px] text-violet-700">⚡ ส่วนลดทุก SKU พร้อมกัน:</span>
+                      <div className="relative">
+                        <input type="number" min={0} value={massDiscount} onChange={(e) => setMassDiscount(e.target.value)} placeholder="ส่วนลด" className="h-8 w-28 border border-violet-200 rounded-md pl-2 pr-5 text-sm" />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">฿</span>
+                      </div>
+                      <button onClick={applyDiscountAll} disabled={!massDiscount} className="h-8 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">ตั้งส่วนลดทั้งหมด</button>
+                      <button onClick={() => toggleAllDiscount(true)} className="h-8 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">เปิดส่วนลดทั้งหมด</button>
+                      <button onClick={() => toggleAllDiscount(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">ปิดทั้งหมด</button>
+                      <span className="text-[10px] text-slate-400">ราคาหลังลดโชว์ในคอลัมน์ส่วนลด</span>
                     </div>
                   )}
                   <MiniTable rows={variants} columns={cols} rowKey={(v) => v.id} searchText={(v) => `${v.code} ${v.color ?? ""} ${v.option_value ?? ""}`} dense emptyText="ยังไม่มี SKU ลูก — กด ➕ เพิ่มสี"
