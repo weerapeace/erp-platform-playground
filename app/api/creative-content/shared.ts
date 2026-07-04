@@ -3,7 +3,7 @@ import { employeeLabelMap } from "@/lib/creative-tasks-server";
 
 export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sku_id, parent_sku_id, product_name, post_type,
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, note,
-  discount_value, discount_is_percent,
+  discount_value, discount_is_percent, color_source,
   is_template, is_active, created_at, updated_at, assignee_id, assignee_ids,
   brand:brands!brand_id(name, color, shop_channels),
   campaign:erp_creative_campaigns!campaign_id(name),
@@ -29,6 +29,8 @@ export function flattenContent(r: Record<string, unknown>): Record<string, unkno
   out.sku_code = s?.code ?? null;
   out.sku_name = s?.name_th ?? null;
   out.sku_color = (s?.color_th as string) ?? (s?.color as string) ?? null;
+  out.sku_color_en = (s?.color as string) ?? null;   // สีภาษาอังกฤษ (color)
+  out.sku_color_th = (s?.color_th as string) ?? null; // สีภาษาไทย (color_th)
   out.sku_price = s?.list_price ?? null;
   return out;
 }

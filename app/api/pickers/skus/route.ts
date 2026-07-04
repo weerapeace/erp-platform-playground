@@ -162,6 +162,8 @@ export async function GET(request: NextRequest) {
       name: row.name_th ?? code,
       uom_name: uom?.name ?? null,
       color: row.color_th ?? row.color ?? null,
+      color_en: row.color ?? null,
+      color_th: row.color_th ?? null,
       category: cat?.name ?? null,
       list_price: row.list_price,
       image_key: imageKey,

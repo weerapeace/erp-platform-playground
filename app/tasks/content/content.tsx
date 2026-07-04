@@ -21,7 +21,7 @@ import {
   CONTENT_STATUS_META, POST_TYPES, contentStatusLabel, postTypeLabel,
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
   listCampaigns, listBrands, listHashtags, createHashtag, getTask, listSubtasks,
-  getCaptionTemplates, saveCaptionTemplates, getParentSkuColors,
+  getCaptionTemplates, saveCaptionTemplates, getParentSkuColors, getParentSkuChildren, type ParentSkuChild,
   listContentAttachments, addContentAttachment, deleteContentAttachment,
   getPlatformSettings, savePlatformSettings, getLinkPreview,
   getCaptionConfig, saveCaptionConfig, defaultHashtags, resolvePrompt,
@@ -330,7 +330,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   // สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี
   const [sku, setSku] = useState<SkuPickerValue | null>(null);
   const [parent, setParent] = useState<ParentSkuPickerValue | null>(null);
-  const [parentColors, setParentColors] = useState<string[]>([]);
+  const [children, setChildren] = useState<ParentSkuChild[]>([]);   // ลูก SKU ของ Parent (สี 2 ภาษา + ราคา)
+  const [colorSource, setColorSource] = useState<"th" | "en">("th");   // {color} ใช้ไทย/อังกฤษ (จำต่อคอนเทนต์)
+  const [priceSkuId, setPriceSkuId] = useState<string>("");   // เลือกราคาจาก SKU ลูกตัวไหน (Parent)
   const [pullBusy, setPullBusy] = useState(false);
   const [openParentId, setOpenParentId] = useState<string | null>(null);   // เปิด drawer Parent SKU
   // แนบงาน (รูป/วิดีโอ/ลิงก์) + ตั้งค่าแพลตฟอร์มกลาง
@@ -372,6 +374,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       setDiscountPct(!!detail.discount_is_percent);
       setSku(detail.sku_id ? { id: detail.sku_id, code: detail.sku_code ?? "", name: detail.sku_name ?? detail.product_name ?? "", color: detail.sku_color, list_price: detail.sku_price } : null);
       setParent(detail.parent_sku_id ? { id: detail.parent_sku_id, code: detail.parent_sku_code ?? "", name: detail.parent_sku_name ?? "" } : null);
+      setColorSource(detail.color_source === "en" ? "en" : "th");
       // เตรียม caption ให้ครบทุกแพลตฟอร์มของคอนเทนต์ — แพลตฟอร์มที่ยังไม่มีแคปชั่น เติมแฮชแท็กเริ่มต้นให้
       const cfg = await getCaptionConfig().catch(() => ({} as CaptionConfig));
       setCapCfg(cfg);
@@ -442,7 +445,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const setCap = (platform: string, patch: Partial<ContentCaption>) => setCaps((cs) => cs.map((c) => c.platform === platform ? { ...c, ...patch } : c));
 
   // เลือก Parent SKU → ดึงสีของ SKU ลูกทั้งหมดมารวม
-  useEffect(() => { if (!parent?.id) { setParentColors([]); return; } let live = true; getParentSkuColors(parent.id).then((cs) => { if (live) setParentColors(cs); }).catch(() => {}); return () => { live = false; }; }, [parent?.id]);
+  useEffect(() => { if (!parent?.id) { setChildren([]); return; } let live = true; getParentSkuChildren(parent.id).then((cs) => { if (live) { setChildren(cs); setPriceSkuId((prev) => prev || cs[0]?.id || ""); } }).catch(() => {}); return () => { live = false; }; }, [parent?.id]);
 
   // ดึงสินค้า (SKU/Parent) จากงานที่ผูกไว้
   const pullFromTask = async () => {
@@ -480,9 +483,14 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const persistPset = async () => { try { await savePlatformSettings(pset); } catch (e) { pushToast("error", (e as Error).message); } };
 
   // ราคาเต็ม = ราคา SKU ที่เลือก · ราคาขาย = ราคา − ส่วนลด · สี = SKU เดี่ยว หรือ รวมสีลูกของ Parent
-  const fakePrice = sku?.list_price ?? null;
+  // สี: Parent → รวมสีลูก (เลือกภาษาไทย/อังกฤษได้) · SKU เดี่ยว → สีของตัวเอง (ตามภาษาที่มี)
+  const childColors = [...new Set(children.map((c) => ((colorSource === "en" ? c.color_en : c.color_th) ?? "").trim()).filter(Boolean))];
+  const singleColor = colorSource === "en" ? (d?.sku_color_en ?? sku?.color ?? null) : (d?.sku_color_th ?? sku?.color ?? null);
+  const colorText = childColors.length ? childColors.join(", ") : (sku ? singleColor : null);
+  // ราคา: SKU เดี่ยว → ราคาตัวเอง · Parent → ราคาจาก SKU ลูกที่เลือก (default ตัวแรก)
+  const priceChild = children.find((c) => c.id === priceSkuId) ?? children[0] ?? null;
+  const fakePrice = sku?.list_price ?? priceChild?.list_price ?? null;
   const realPrice = computeRealPrice(fakePrice, discountValue === "" ? null : Number(discountValue), discountPct);
-  const colorText = parentColors.length ? parentColors.join(", ") : (sku?.color ?? null);
   // ตัวแปรสินค้าที่ใช้ร่วมทุก caption (ไม่รวม caption/hashtags ที่ต่างกันต่อแพลตฟอร์ม)
   const sharedVars = useMemo(() => ({
     shop: shopChannels, fake_price: fakePrice, real_price: realPrice,
@@ -502,7 +510,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     setSaving(true);
     try {
       await updateContent(contentId, {
-        status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null, assignee_ids: assignees.map((a) => a.id),
+        status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null, assignee_ids: assignees.map((a) => a.id), color_source: colorSource,
         sku_id: sku?.id ?? null, parent_sku_id: parent?.id ?? null, product_name: sku?.name ?? d?.product_name ?? null,
         discount_value: discountValue === "" ? null : Number(discountValue), discount_is_percent: discountPct,
         product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })),
@@ -610,7 +618,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 </div>
               </div>
               <div className="mt-2">
-                <label className="text-xs text-slate-400">{t("สีที่มี", "Available Colors")} ({"{color}"})</label>
+                <div className="flex items-center justify-between h-5">
+                  <label className="text-xs text-slate-400">{t("สีที่มี", "Available Colors")} ({"{color}"})</label>
+                  <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-[11px]" title={t("เลือกภาษาที่ใช้แสดงสีใน {color}", "Language for {color}")}>
+                    <button type="button" onClick={() => setColorSource("th")} className={`px-2 h-6 ${colorSource === "th" ? "bg-violet-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{t("ไทย", "TH")}</button>
+                    <button type="button" onClick={() => setColorSource("en")} className={`px-2 h-6 border-l border-slate-200 ${colorSource === "en" ? "bg-violet-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>Eng</button>
+                  </div>
+                </div>
                 <div className="min-h-9 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">{colorText || <span className="text-slate-400">{t("— เลือก SKU (ได้สีเดียว) หรือ Parent SKU (รวมทุกสีลูก)", "— Select SKU (single color) or Parent SKU (all child colors)")}</span>}</div>
               </div>
             </CSection>)}
@@ -619,6 +633,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             {!isHidden(dth, "price") && (sku || parent) && (
             <CSection title={cLabelOf("price")} order={cOrderOf("price")} collapsed={coll("price")} onToggle={() => toggleColl("price")}>
               <div className="flex items-end gap-2 flex-wrap">
+                {!sku && children.length > 0 && (
+                  <div><label className="text-xs text-slate-400">{t("ราคาจาก SKU", "Price from SKU")}</label>
+                    <select value={priceSkuId} onChange={(e) => setPriceSkuId(e.target.value)} className="h-9 border border-slate-200 rounded-lg px-2 text-sm bg-white max-w-[190px]">
+                      {children.map((c) => <option key={c.id} value={c.id}>{c.code}{c.list_price != null ? ` · ${Number(c.list_price).toLocaleString("th-TH")}฿` : ""}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div><label className="text-xs text-slate-400">{t("ราคาเต็ม (จาก SKU)", "Full Price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakePrice != null ? `${Number(fakePrice).toLocaleString("th-TH")} ฿` : t("— (ไม่มี SKU)", "— (no SKU)")}</div></div>
                 <div><label className="text-xs text-slate-400">{t("ส่วนลด", "Discount")}</label>
                   <div className="flex">
