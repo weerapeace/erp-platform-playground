@@ -5,7 +5,7 @@
  * - RelationMany2Many: เลือกหลายค่า (จัดการ link ใน junction table ทันที)
  * - RelationOne2Many: แสดงรายการลูกที่ชี้กลับมา (read-only)
  */
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
@@ -648,6 +648,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const [dropRowId, setDropRowId]         = useState<string | null>(null);   // แถวที่กำลังลากรูปมาวาง (ไฮไลต์)
   const [uploadingRowId, setUploadingRowId] = useState<string | null>(null); // แถวที่กำลังอัปรูป (สปินเนอร์)
   const [variantBase, setVariantBase] = useState<Record<string, unknown> | null>(null);   // เปิดโมดัล "เพิ่มแบบ/ไซส์" ให้กลุ่มสี (base = แถวฐานของสีนั้น)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());   // id ตัวหลักที่ "พับ" ตัวย่อยอยู่ (ว่าง = ขยายหมด)
   // จับคู่ด้วยฟิลด์ไหนของพ่อ: 'id' = ลิงก์ id ปกติ (ใช้ recordId) · อื่นๆ เช่น 'code' = เชื่อมด้วยรหัส (ใช้ค่าจาก parentValues)
   const matchField = config.parent_match_field || "id";
   const matchValue = matchField === "id" ? recordId : ((parentValues?.[matchField] as string | number | null | undefined) ?? null);
@@ -1060,9 +1061,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     // จัดกลุ่มแถวตาม field (เช่น สี) — มีหัวกลุ่มคั่น · ไม่มี list_group_field = ตารางแบนเหมือนเดิม
     const groupField = config.list_group_field;
     const colCount = (imageField ? 1 : 0) + 1 + subFields.length + 1;
-    const renderDataRow = (r: Record<string, unknown>) => (
+    const renderDataRow = (r: Record<string, unknown>, opts?: { indent?: number; lead?: ReactNode; trail?: ReactNode }) => (
       <tr key={String(r.id)}
-        className={`group cursor-pointer ${dropRowId === String(r.id) ? "bg-indigo-50 ring-1 ring-indigo-300" : "hover:bg-blue-50/40"}`}
+        className={`group cursor-pointer ${dropRowId === String(r.id) ? "bg-indigo-50 ring-1 ring-indigo-300" : opts?.indent ? "hover:bg-blue-50/40 bg-slate-50/40" : "hover:bg-blue-50/40"}`}
         title={canDropImages ? "ลากรูปมาวางเพื่อเพิ่มรูปให้รายการนี้" : undefined}
         onClick={() => setPeek({ id: String(r.id), edit: false })}
         onDragOver={canDropImages ? (e) => { e.preventDefault(); if (dropRowId !== String(r.id)) setDropRowId(String(r.id)); } : undefined}
@@ -1079,7 +1080,14 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             </div>
           </td>
         )}
-        <td className="px-2 py-1.5 text-slate-700">{String(r[titleField] ?? r.name ?? r.id)}</td>
+        <td className="px-2 py-1.5 text-slate-700" style={opts?.indent ? { paddingLeft: 8 + opts.indent * 22 } : undefined}>
+          <span className="inline-flex items-center gap-1.5">
+            {opts?.lead}
+            {opts?.indent ? <span className="text-slate-300 text-xs">└</span> : null}
+            <span className={opts?.lead ? "font-semibold text-slate-800" : opts?.indent ? "text-slate-500" : ""}>{String(r[titleField] ?? r.name ?? r.id)}</span>
+            {opts?.trail}
+          </span>
+        </td>
         {subFields.map((f) => {
           const isRel = !!relCfgByField[f];
           const editable = isEditableCol(f);
@@ -1110,25 +1118,42 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         </td>
       </tr>
     );
+    const hasVariant = (r: Record<string, unknown>) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !!(av && av.variant_option); };
+    const addVariantBtn = (base: Record<string, unknown>) => canAdd ? (
+      <button type="button" title="เพิ่มแบบ/ไซส์ให้สีนี้" onClick={(e) => { e.stopPropagation(); setVariantBase(base); }}
+        className="h-5 px-1.5 rounded text-[10px] font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 opacity-0 group-hover:opacity-100 transition-opacity">＋ เพิ่มแบบ/ไซส์</button>
+    ) : null;
+    // ทรี 2 ชั้น: ตัวหลักของสี (ไม่มี variant_option) = แถวแม่ + ปุ่มพับ/ขยาย · ตัวย่อย = ย่อหน้าใต้แม่
     const renderBody = () => {
-      if (!groupField) return rows.map(renderDataRow);
+      if (!groupField) return rows.map((r) => renderDataRow(r));
       const groups = new Map<string, Record<string, unknown>[]>();
       for (const r of rows) { const k = (String(r[groupField] ?? "").trim() || "— ไม่ระบุ —"); const arr = groups.get(k); if (arr) arr.push(r); else groups.set(k, [r]); }
-      return [...groups.entries()].flatMap(([label, grs]) => [
-        <tr key={`grp-${label}`} className="bg-slate-100/70 border-t border-slate-200">
-          <td colSpan={colCount} className="px-2 py-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-600">🎨 {label} <span className="text-slate-400 font-normal">({grs.length})</span></span>
-              {canAdd && (
-                <button type="button" title="เพิ่มแบบ/ไซส์ให้สีนี้"
-                  onClick={() => setVariantBase(grs.find((r) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !av || !av.variant_option; }) ?? grs[0])}
-                  className="h-6 px-2 rounded-md text-[11px] font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50">＋ เพิ่มแบบ/ไซส์</button>
-              )}
-            </div>
-          </td>
-        </tr>,
-        ...grs.map(renderDataRow),
-      ]);
+      const out: ReactNode[] = [];
+      for (const [label, grs] of groups.entries()) {
+        const base = grs.find((r) => !hasVariant(r));
+        const subs = base ? grs.filter((r) => r !== base) : grs;
+        if (base) {
+          const id = String(base.id);
+          const isColl = collapsed.has(id);
+          const toggle = subs.length > 0 ? (
+            <button type="button" title={isColl ? "ขยาย" : "พับ"}
+              onClick={(e) => { e.stopPropagation(); setCollapsed((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); }}
+              className="w-5 h-5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center text-[10px]">{isColl ? "▶" : "▼"}</button>
+          ) : <span className="w-5 inline-block" />;
+          out.push(renderDataRow(base, { lead: toggle, trail: <>{subs.length > 0 && <span className="text-[10px] text-slate-400">({subs.length})</span>} {addVariantBtn(base)}</> }));
+          if (!isColl) for (const s of subs) out.push(renderDataRow(s, { indent: 1 }));
+        } else {
+          out.push(
+            <tr key={`grp-${label}`} className="bg-slate-100/70 border-t border-slate-200">
+              <td colSpan={colCount} className="px-2 py-1.5">
+                <div className="flex items-center gap-2"><span className="text-xs font-semibold text-slate-600">🎨 {label} <span className="text-slate-400 font-normal">({grs.length})</span></span>{canAdd && addVariantBtn(grs[0])}</div>
+              </td>
+            </tr>,
+          );
+          for (const r of grs) out.push(renderDataRow(r, { indent: 1 }));
+        }
+      }
+      return out;
     };
 
     return (
