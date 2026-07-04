@@ -16,7 +16,7 @@ export const CAPTION_VARS: { key: string; label: string; hint: string }[] = [
   { key: "color",      label: "{color}",      hint: "สีสินค้า" },
   { key: "sku",        label: "{sku}",        hint: "รหัส SKU" },
   { key: "product",    label: "{product}",    hint: "ชื่อสินค้า" },
-  { key: "link",       label: "{link}",       hint: "ลิงก์สินค้า (ตามแพลตฟอร์มของแคปชั่นนั้น)" },
+  { key: "link",       label: "{link}",       hint: "ลิงก์สินค้าทุกแพลตฟอร์ม (แพลตฟอร์ม: ลิงก์ ต่อบรรทัด)" },
 ];
 
 export type CaptionVars = {

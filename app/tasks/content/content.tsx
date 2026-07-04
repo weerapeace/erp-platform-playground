@@ -511,7 +511,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const sharedVars = useMemo(() => ({
     shop: shopChannels, fake_price: fakePrice, real_price: realPrice,
     price: fakePrice, color: colorText, sku: sku?.code ?? null, product: sku?.name ?? d?.product_name ?? null,
-  }), [shopChannels, fakePrice, realPrice, colorText, sku?.code, sku?.name, d?.product_name]);
+    // {link} = ลิงก์สินค้าทุกแพลตฟอร์มเป็นบล็อก (เช่น "Shopee: TEST1\nLazada: TEST2")
+    link: links.filter((l) => l.url.trim()).map((l) => `${platformLabel(l.platform)}: ${l.url.trim()}`).join("\n") || null,
+  }), [shopChannels, fakePrice, realPrice, colorText, sku?.code, sku?.name, d?.product_name, links]);
 
   // คัดลอกพรอมต์ตั้งต้น (เติมตัวแปรสินค้าให้แล้ว) ไปวางใน AI เขียนแคปชั่นต่อ
   const copyPrompt = async () => {
@@ -728,7 +730,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} productLink={links.find((l) => l.platform === c.platform)?.url ?? links[0]?.url ?? ""} onChange={(patch) => setCap(c.platform, patch)} onOpenSettings={() => setPsOpen(true)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => setCap(c.platform, patch)} onOpenSettings={() => setPsOpen(true)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -753,7 +755,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   );
 }
 
-type SharedVars = { shop: ShopChannel[]; fake_price: number | null; real_price: number | null; price: number | null; color: string | null; sku: string | null; product: string | null };
+type SharedVars = { shop: ShopChannel[]; fake_price: number | null; real_price: number | null; price: number | null; color: string | null; sku: string | null; product: string | null; link: string | null };
 
 // ============================================================
 // ไฟล์แนบของคอนเทนต์: รูป (ย่อก่อนอัป) / วิดีโอสั้น / ลิงก์ (พรีวิว OG เต็ม)
@@ -891,7 +893,7 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ cap, templates, sharedVars, brandId, setting, productLink, onChange, onOpenSettings, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; productLink?: string; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [tplOpen, setTplOpen] = useState(false);   // พับปุ่มเลือกแม่แบบไว้ก่อน
   const useCaption = setting?.use_caption !== false;
@@ -902,7 +904,7 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, productLink
   const tpl = templates.find((x) => x.key === typeKey) ?? templates[0];
   // ประกอบ preview จากแม่แบบ + ตัวแปร (ตัด caption/hashtags ออกถ้าปิดไว้)
   const preview = tpl
-    ? renderCaption(tpl.body, { caption: useCaption ? cap.caption : "", hashtags: useHashtags ? cap.hashtags : "", link: productLink, ...sharedVars })
+    ? renderCaption(tpl.body, { caption: useCaption ? cap.caption : "", hashtags: useHashtags ? cap.hashtags : "", ...sharedVars })
     : `${useCaption ? (cap.caption ?? "") : ""}\n\n${useHashtags ? (cap.hashtags ?? "") : ""}`.trim();
   const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", t(`คัดลอก ${platformLabel(cap.platform)} แล้ว`, `Copied ${platformLabel(cap.platform)}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } };
 
@@ -1099,7 +1101,7 @@ function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushTo
   const removeActive = () => { if (!active || !window.confirm(t(`ลบแม่แบบ "${active.label}" ?`, `Delete template "${active.label}"?`))) return; setTemplates((ts) => ts.filter((_, i) => i !== activeIdx)); setActiveIdx(0); };
 
   // preview ตัวอย่าง (ใช้ข้อมูลสมมติ)
-  const sampleVars = { caption: "ข้อความตัวอย่างที่พิมพ์เอง", hashtags: "#LouisMontini #กระเป๋าหนัง", shop: channels, fake_price: 1290, real_price: 990, price: 1290, color: "ดำ", sku: "TTM061-04", product: "กระเป๋าสตางค์หนังแท้", link: "https://shp.ee/ตัวอย่าง" };
+  const sampleVars = { caption: "ข้อความตัวอย่างที่พิมพ์เอง", hashtags: "#LouisMontini #กระเป๋าหนัง", shop: channels, fake_price: 1290, real_price: 990, price: 1290, color: "ดำ", sku: "TTM061-04", product: "กระเป๋าสตางค์หนังแท้", link: "Shopee: https://shp.ee/xxx\nLazada: https://lzd.co/yyy" };
 
   const save = async () => {
     setSaving(true);
