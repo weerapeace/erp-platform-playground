@@ -393,6 +393,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const canSubmit = st === "in_progress"; // ส่งงานได้เฉพาะตอนกำลังทำ
   // งานที่ไม่รับรูป+ลิงก์ (เช่น เขียนคำอธิบาย) → ส่งงานโดยยืนยันรายละเอียด Platform แทนการแนบไฟล์
   const platformConfirm = !showImages && !showLinks;
+  const contentApproved = sub.subtask_type === "content" && isSubDone(st); // คอนเทนต์อนุมัติแล้ว → โชว์ปุ่มโพสต์
 
   // คัดลอก prompt (เติมข้อมูลสินค้าฝั่ง server) ไปคลิปบอร์ด
   const copyPrompt = async () => {
@@ -548,11 +549,16 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
             )}
             <div className="flex items-center gap-2">
               {sub.subtask_type === "content" && <button onClick={() => setDetailsOpen(true)} title={t("รายละเอียด/สิ่งที่ต้องแนบ ต่อแพลตฟอร์ม", "Details / requirements per platform")} className="h-9 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">📋 {t("รายละเอียดงาน", "Details")}</button>}
-              <button onClick={openWork} className={`flex-1 h-9 rounded-lg text-sm font-medium ${canSubmit ? "bg-amber-500 text-white hover:bg-amber-600" : "text-violet-700 border border-violet-200 hover:bg-violet-50"}`}>
+              {/* ปุ่มแนบ/ส่งงาน — เมื่อคอนเทนต์อนุมัติแล้ว จะย่อเป็นไอคอน+ชิดซ้าย ให้พื้นที่กับปุ่มโพสต์ */}
+              <button onClick={openWork} title={t("จัดการไฟล์แนบ", "Manage attachments")} className={contentApproved
+                ? "h-9 w-10 flex items-center justify-center text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0"
+                : `flex-1 h-9 rounded-lg text-sm font-medium ${canSubmit ? "bg-amber-500 text-white hover:bg-amber-600" : "text-violet-700 border border-violet-200 hover:bg-violet-50"}`}>
                 {canSubmit
                   ? (platformConfirm ? `📤 ${t("ตรวจ & ส่งงาน", "Review & submit")}` : `📤 ${t("ส่งงาน (แนบรูป/ลิงก์)", "Submit (attach files/links)")}`)
-                  : (platformConfirm ? `🔎 ${t("ดูรายละเอียด Platform", "View platform details")}` : `📎 ${attachCount > 0 ? t("จัดการไฟล์แนบ", "Manage attachments") : t("แนบงาน", "Attach work")}`)}
+                  : (contentApproved ? "📎" : (platformConfirm ? `🔎 ${t("ดูรายละเอียด Platform", "View platform details")}` : `📎 ${attachCount > 0 ? t("จัดการไฟล์แนบ", "Manage attachments") : t("แนบงาน", "Attach work")}`))}
               </button>
+              {/* ปุ่มโพสต์ — เฉพาะคอนเทนต์ที่อนุมัติแล้ว · เปิดหน้าแก้คอนเทนต์ (แคปชั่น/ลิงก์โพสต์) */}
+              {contentApproved && <button onClick={() => setContentOpen(true)} title={t("เปิดหน้าแก้คอนเทนต์เพื่อโพสต์ (ใส่แคปชั่น/ลิงก์โพสต์)", "Open content editor to post")} className="flex-1 h-9 rounded-lg text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700">🚀 {t("โพสต์", "Post")}</button>}
             </div>
           </div>
         </div>
@@ -1021,9 +1027,10 @@ function ContentSubmitModal({ sub, taskId, reload, pushToast, canSubmit, onClose
             {linkAtts.length === 0 && <p className="text-xs text-slate-400 italic">{t("ยังไม่มี path/ลิงก์", "No path/links yet")}</p>}
           </div>
         </div>
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end items-center gap-2">
+          {canSubmit && (imageAtts.length + linkAtts.length) === 0 && <span className="text-[11px] text-amber-600 mr-auto">⚠️ {t("แนบรูป หรือ path/ลิงก์ ก่อนอย่างน้อย 1 รายการ ถึงจะส่งงานได้", "Attach at least one image or path/link before submitting")}</span>}
           <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
-          {canSubmit && <button onClick={submit} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : t("ส่งงาน", "Submit")}</button>}
+          {canSubmit && <button onClick={submit} disabled={busy || (imageAtts.length + linkAtts.length) === 0} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{busy ? "..." : `✅ ${t("ยืนยันส่งงาน", "Confirm submit")}`}</button>}
         </div>
       </div>
     </ERPModal>
