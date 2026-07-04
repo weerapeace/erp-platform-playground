@@ -541,23 +541,43 @@ function TeamManager({ showToast }: { showToast: (m: string) => void }) {
 
 // ============================================================
 // แท็บจัดการชนิดงานย่อย (erp_subtask_types) — ชื่อ TH/EN + ไอคอน + สี + เปิด/ปิด + เรียง + คำอธิบาย logic
-// ความสามารถ (รับรูป/ลิงก์ · อนุมัติแล้วไปไหน) แก้รายขั้นในเทมเพลตได้อยู่แล้ว — ที่นี่โชว์เป็นคำอธิบายอ่านอย่างเดียว
+// แก้ในเครื่องก่อน แล้วกดปุ่ม "บันทึก" ต่อแถว (กันเซฟรัว/toast กระพริบตอนลากเลือกสี) · เปิด/ปิด + เรียง = บันทึกทันที
 // ============================================================
 function SubtaskTypeManager({ showToast }: { showToast: (m: string) => void }) {
   const t = useT();
   const [rows, setRows] = useState<SubtaskType[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dirty, setDirty] = useState<Set<string>>(new Set());
+  const [savingKey, setSavingKey] = useState<string | null>(null);
   const [newKey, setNewKey] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const isHex = (c?: string | null): c is string => !!c && /^#[0-9a-fA-F]{6}$/.test(c);
 
-  const load = useCallback(async () => { setLoading(true); try { setRows(await listSubtaskTypes(true)); } catch (e) { showToast((e as Error).message); } finally { setLoading(false); } }, [showToast]);
+  const load = useCallback(async () => { setLoading(true); try { setRows(await listSubtaskTypes(true)); setDirty(new Set()); } catch (e) { showToast((e as Error).message); } finally { setLoading(false); } }, [showToast]);
   useEffect(() => { load(); }, [load]);
 
-  const patch = async (key: string, p: Partial<SubtaskType>) => {
+  // แก้ในเครื่อง (ยังไม่เซฟ) → ใช้กับ ชื่อ/ไอคอน/สี · ลากเลือกสีจะอัปเดตพรีวิวสด แต่ไม่ยิง API
+  const setField = (key: string, p: Partial<SubtaskType>) => {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
-    try { await updateSubtaskType(key, p as Record<string, unknown>); showToast(t("บันทึกแล้ว", "Saved")); } catch (e) { showToast((e as Error).message); }
+    setDirty((d) => new Set(d).add(key));
+  };
+  // เซฟทันที (ไม่ผ่านปุ่ม) → ใช้กับ เปิด/ปิด + เรียงลำดับ (คลิกครั้งเดียว ไม่กระพริบ)
+  const saveNow = async (key: string, p: Partial<SubtaskType>) => {
+    setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
+    try { await updateSubtaskType(key, p as Record<string, unknown>); } catch (e) { showToast((e as Error).message); }
+  };
+  // กดปุ่มบันทึกต่อแถว → เซฟ ชื่อ/ไอคอน/สี ที่แก้ไว้ ครั้งเดียว
+  const saveRow = async (key: string) => {
+    const r = rows.find((x) => x.key === key); if (!r) return;
+    const label_th = (r.label_th || "").trim();
+    if (!label_th) { showToast(t("ต้องมีชื่อไทย", "Thai name required")); return; }
+    setSavingKey(key);
+    try {
+      await updateSubtaskType(key, { label_th, label_en: (r.label_en || "").trim() || null, icon: (r.icon || "").trim(), color: r.color ?? null });
+      setDirty((d) => { const n = new Set(d); n.delete(key); return n; });
+      showToast(t("บันทึกแล้ว", "Saved"));
+    } catch (e) { showToast((e as Error).message); } finally { setSavingKey(null); }
   };
   const add = async () => {
     const k = newKey.trim().toLowerCase(); const l = newLabel.trim();
@@ -567,16 +587,19 @@ function SubtaskTypeManager({ showToast }: { showToast: (m: string) => void }) {
     try { await createSubtaskType(k, l); setNewKey(""); setNewLabel(""); await load(); showToast(t("เพิ่มแล้ว", "Added")); }
     catch (e) { showToast((e as Error).message); } finally { setBusy(false); }
   };
+  // เรียง: สลับในเครื่อง + เซฟ sort_order ทั้งคู่ (ไม่ reload → ที่แก้ค้างในแถวอื่นไม่หาย)
   const move = async (i: number, dir: -1 | 1) => {
-    const j = i + dir; if (j < 0 || j >= rows.length) return; const a = rows[i], b = rows[j];
-    try { await Promise.all([updateSubtaskType(a.key, { sort_order: b.sort_order }), updateSubtaskType(b.key, { sort_order: a.sort_order })]); await load(); } catch (e) { showToast((e as Error).message); }
+    const j = i + dir; if (j < 0 || j >= rows.length) return;
+    const a = rows[i], b = rows[j];
+    setRows((rs) => { const n = [...rs]; n[i] = { ...b, sort_order: a.sort_order }; n[j] = { ...a, sort_order: b.sort_order }; return n; });
+    try { await Promise.all([updateSubtaskType(a.key, { sort_order: b.sort_order }), updateSubtaskType(b.key, { sort_order: a.sort_order })]); } catch (e) { showToast((e as Error).message); }
   };
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
       <div className="px-5 py-4 border-b border-slate-100">
         <h2 className="font-semibold text-slate-800">🧩 {t("ชนิดงานย่อย", "Subtask types")}</h2>
-        <p className="text-xs text-slate-400 mt-0.5">{t("ตั้งชื่อ (ไทย/อังกฤษ) + ไอคอน + สี + เปิด/ปิด + เรียงลำดับ — ใช้ตอนเลือกงานย่อยในเทมเพลต/สร้างงาน · บรรทัดใต้แต่ละอันบอก \"logic\" (รับอะไร · อนุมัติแล้วไปไหน) · ปิด = ซ่อนจากรายการเลือก (ของเดิมไม่หาย)", "Set name (TH/EN) + icon + color + active + order — used when choosing subtasks in templates · the line below each shows its logic (accepts · where it goes on approve) · off = hidden from the picker (data kept)")}</p>
+        <p className="text-xs text-slate-400 mt-0.5">{t("ตั้งชื่อ (ไทย/อังกฤษ) + ไอคอน + สี แล้วกดปุ่ม \"บันทึก\" ต่อแถว · เปิด/ปิด + เรียงลำดับ = บันทึกทันที · บรรทัดใต้แต่ละอันบอก \"logic\" (รับอะไร · อนุมัติแล้วไปไหน) · ปิด = ซ่อนจากรายการเลือก (ของเดิมไม่หาย)", "Set name (TH/EN) + icon + color then click Save per row · active + reorder save instantly · the line below shows its logic (accepts · where it goes on approve) · off = hidden from picker (data kept)")}</p>
       </div>
       <div className="p-5">
         <div className="flex gap-2 mb-4 flex-wrap">
@@ -590,8 +613,9 @@ function SubtaskTypeManager({ showToast }: { showToast: (m: string) => void }) {
             <div className="space-y-2">
               {rows.map((r, i) => {
                 const hex = isHex(r.color) ? r.color : null;
+                const isDirty = dirty.has(r.key);
                 return (
-                  <div key={r.key} className={`border rounded-lg px-3 py-2 ${r.is_active ? "border-slate-200" : "border-slate-200 bg-slate-50 opacity-70"}`}>
+                  <div key={r.key} className={`border rounded-lg px-3 py-2 ${isDirty ? "border-violet-300 ring-1 ring-violet-200" : r.is_active ? "border-slate-200" : "border-slate-200 bg-slate-50 opacity-70"}`}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <div className="flex flex-col text-slate-300">
                         <button onClick={() => move(i, -1)} disabled={i === 0} className="h-3 leading-none hover:text-slate-600 disabled:opacity-30">▲</button>
@@ -600,13 +624,17 @@ function SubtaskTypeManager({ showToast }: { showToast: (m: string) => void }) {
                       <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border shrink-0 max-w-[160px]" style={hex ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined} title={t("ตัวอย่างชิป", "Chip preview")}>
                         <span className="leading-none">{r.icon || "🧩"}</span><span className="truncate">{r.label_th}</span>
                       </span>
-                      <div title={t("สีประจำ", "Color")}><ColorInput value={r.color || "#64748b"} onChange={(v) => patch(r.key, { color: v })} allowText={false} /></div>
-                      <input defaultValue={r.icon || ""} maxLength={2} placeholder="🧩" onBlur={(e) => { const v = e.target.value.trim(); if (v !== (r.icon || "")) patch(r.key, { icon: v }); }} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />
-                      <input defaultValue={r.label_th} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== r.label_th) patch(r.key, { label_th: v }); }} placeholder={t("ชื่อไทย", "Thai")} className="flex-1 min-w-[100px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
-                      <input defaultValue={r.label_en ?? ""} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (r.label_en ?? "")) patch(r.key, { label_en: v || null }); }} placeholder="EN" title={t("ชื่ออังกฤษ (ว่าง=ใช้ไทย)", "English (blank = use Thai)")} className="w-28 text-sm text-slate-500 bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
-                      <label className="flex items-center gap-1 text-[11px] text-slate-500"><input type="checkbox" checked={r.is_active} onChange={(e) => patch(r.key, { is_active: e.target.checked })} />{t("ใช้งาน", "Active")}</label>
+                      <div title={t("สีประจำ", "Color")}><ColorInput value={r.color || "#64748b"} onChange={(v) => setField(r.key, { color: v })} allowText={false} /></div>
+                      <input value={r.icon || ""} maxLength={2} placeholder="🧩" onChange={(e) => setField(r.key, { icon: e.target.value })} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />
+                      <input value={r.label_th} onChange={(e) => setField(r.key, { label_th: e.target.value })} placeholder={t("ชื่อไทย", "Thai")} className="flex-1 min-w-[100px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
+                      <input value={r.label_en ?? ""} onChange={(e) => setField(r.key, { label_en: e.target.value })} placeholder="EN" title={t("ชื่ออังกฤษ (ว่าง=ใช้ไทย)", "English (blank = use Thai)")} className="w-28 text-sm text-slate-500 bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
+                      <label className="flex items-center gap-1 text-[11px] text-slate-500"><input type="checkbox" checked={r.is_active} onChange={(e) => saveNow(r.key, { is_active: e.target.checked })} />{t("ใช้งาน", "Active")}</label>
                       {r.is_builtin && <span className="text-[10px] bg-slate-100 text-slate-500 border border-slate-200 rounded px-1">{t("ระบบ", "built-in")}</span>}
                       <span className="text-[10px] text-slate-300 font-mono">{r.key}</span>
+                      <button onClick={() => saveRow(r.key)} disabled={!isDirty || savingKey === r.key} title={t("บันทึกแถวนี้", "Save this row")}
+                        className={`h-7 px-3 text-xs font-medium rounded-md shrink-0 ${isDirty ? "bg-violet-600 text-white hover:bg-violet-700" : "bg-slate-100 text-slate-400"} disabled:opacity-60`}>
+                        {savingKey === r.key ? "..." : t("บันทึก", "Save")}
+                      </button>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1 pl-6">↳ {subtaskTypeHint(r)}</p>
                   </div>
