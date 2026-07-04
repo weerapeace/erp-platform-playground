@@ -586,20 +586,23 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           {/* ───── ฝั่งกลาง: ข้อมูล + แนบงาน ───── */}
           <div className={`flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} ${isWide ? "overflow-y-auto min-w-0" : ""}`} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
             {/* status + schedule + assignee — ปักไว้บนสุดเสมอ */}
-            <div className="grid grid-cols-2 gap-3" style={{ order: -1 }}>
-              <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.keys(CONTENT_STATUS_META).map((v) => ({ value: v, label: contentStatusLabel(v as ContentStatus) }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
-              <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Schedule Post")}</label><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
-              <div className="col-span-2"><label className="text-xs text-slate-400">{t("ผู้รับผิดชอบคอนเทนต์ (หลายคนได้)", "Content assignees (multiple)")}</label><MultiUserPicker value={assignees} onChange={setAssignees} disableCreate /></div>
+            {/* ตั้งเวลาโพสต์ — เด่น ปักบนสุด · (สถานะ/ผู้รับผิดชอบ ย้ายไปจัดการที่งานย่อยแทน) */}
+            <div style={{ order: -1 }} className="bg-violet-50 border border-violet-200 rounded-xl p-3">
+              <label className="text-sm font-semibold text-violet-800 flex items-center gap-1.5">🗓 {t("ตั้งเวลาโพสต์", "Schedule Post")}</label>
+              <div className="mt-1.5"><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
             </div>
 
             {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี + ดึงจากงาน */}
             {!isHidden(dth, "product") && (
             <CSection title={cLabelOf("product")} order={cOrderOf("product")} collapsed={coll("product")} onToggle={() => toggleColl("product")}
               right={d.task_id ? <button onClick={(e) => { e.stopPropagation(); pullFromTask(); }} disabled={pullBusy} className="text-xs text-violet-700 hover:underline disabled:opacity-50">{pullBusy ? t("กำลังดึง…", "Pulling…") : t("⬇ ดึงสินค้าจากงาน", "⬇ Pull from task")}</button> : undefined}>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label><SkuPicker value={sku} onChange={setSku} /></div>
+              <div className="grid grid-cols-2 gap-3 items-start">
                 <div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between h-5"><label className="text-xs text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label></div>
+                  <SkuPicker value={sku} onChange={setSku} />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between h-5">
                     <label className="text-xs text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label>
                     {parent?.id && <button onClick={() => setOpenParentId(parent.id)} className="text-[11px] text-violet-700 hover:underline">↗ {t("เปิดดูสินค้า", "Open")}</button>}
                   </div>
@@ -636,11 +639,6 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               </CSection>
             )}
 
-            {/* แนบงานเพิ่มเอง: รูป / วิดีโอ / ลิงก์พรีวิว (default พับ) */}
-            {!isHidden(dth, "attach") && (
-            <CSection title={cLabelOf("attach")} order={cOrderOf("attach")} collapsed={coll("attach")} onToggle={() => toggleColl("attach")}>
-              <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onDelete={onDelAttachment} pushToast={pushToast} />
-            </CSection>)}
 
             {/* ลิงก์สินค้า (ปลายทางขาย) */}
             {!isHidden(dth, "links") && (
@@ -659,23 +657,6 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               </div>
             </CSection>)}
 
-            {/* หมายเหตุ/สิ่งที่ต้องทำ ต่อแพลตฟอร์ม (แก้ในตัว) */}
-            {!isHidden(dth, "platform_notes") && contentPlatforms.length > 0 && (
-              <CSection title={cLabelOf("platform_notes")} order={cOrderOf("platform_notes")} collapsed={coll("platform_notes")} onToggle={() => toggleColl("platform_notes")}>
-                <div className="space-y-2">
-                  {contentPlatforms.map((p) => (
-                    <div key={p} className="border border-slate-200 rounded-lg p-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-slate-600">{platformLabel(p)}</span>
-                        {pset[p]?.post_url && <a href={pset[p].post_url ?? "#"} target="_blank" rel="noreferrer" className="text-[11px] text-violet-700 hover:underline">↗ {t("ไปโพสต์", "Open to post")}</a>}
-                      </div>
-                      <textarea value={pset[p]?.note ?? ""} onChange={(e) => setPlatNote(p, e.target.value)} onBlur={persistPset} rows={2} placeholder={t("หมายเหตุ/สิ่งที่ต้องแนบ เช่น รูป 1:1 อย่างน้อย 5 รูป", "Notes / what to attach")} className="mt-1 w-full border border-slate-200 rounded px-2 py-1 text-xs" />
-                    </div>
-                  ))}
-                </div>
-                <p className="text-[11px] text-slate-300 mt-1">{t("โน้ตเป็นค่ากลาง (ทุกคอนเทนต์เห็นเหมือนกัน) · ตั้งลิงก์ไปโพสต์ที่ ⚙️ ตั้งค่าแพลตฟอร์ม", "Notes are global · set post links in ⚙️ Platform settings")}</p>
-              </CSection>
-            )}
 
             {/* published url — ปักไว้ล่างสุดเสมอ */}
             {(status === "published") && <div style={{ order: 999 }}><label className="text-xs text-slate-400">{t("ลิงก์โพสต์ที่เผยแพร่", "Published Post URL")}</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
