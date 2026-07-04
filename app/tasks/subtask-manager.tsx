@@ -25,7 +25,7 @@ import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { PlatformChip } from "./platform-chip";
 import { platformLabel, useCreativeOptions } from "./use-options";
 import {
-  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent,
+  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent,
   type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem,
 } from "./data";
 
@@ -264,7 +264,7 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
         <button onClick={() => setMode("choose")} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <button onClick={() => void applyType(selType, { post_type: postType || undefined, assignee_ids: typeAssignees.map((a) => a.id), content_template_id: tplId || undefined })} disabled={applyingKey === selType.key} className="h-8 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{applyingKey === selType.key ? "..." : t("เพิ่ม", "Add")}</button>
       </div>
-      {tplModalOpen && <ContentTemplateModal pushToast={pushToast} onClose={() => setTplModalOpen(false)} onCreated={(id) => { setTplModalOpen(false); listContentTemplates().then(setContentTpls).catch(() => {}); setTplId(id); }} />}
+      {tplModalOpen && <ContentTemplateModal pushToast={pushToast} onClose={() => setTplModalOpen(false)} onChanged={() => { listContentTemplates().then(setContentTpls).catch(() => {}); }} onPick={(id) => setTplId(id)} />}
     </div>
   );
 
@@ -763,58 +763,98 @@ function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, onAddDra
   );
 }
 
-// ป๊อปสร้าง "แม่แบบคอนเทนต์" (แบบร่าง) — ชื่อ + ประเภท + platforms (หลายอัน) + มอบหมาย · สร้างแล้วเด้งเข้า dropdown
-function ContentTemplateModal({ pushToast, onClose, onCreated }: { pushToast: ToastFn; onClose: () => void; onCreated: (id: string) => void }) {
+// ป๊อปจัดการ "แม่แบบคอนเทนต์" — รายการ + สร้าง + แก้ + ลบ (ชื่อ + ประเภท + platforms หลายอัน + มอบหมาย)
+function ContentTemplateModal({ pushToast, onClose, onChanged, onPick }: { pushToast: ToastFn; onClose: () => void; onChanged: () => void; onPick: (id: string) => void }) {
   const t = useT();
   const { platforms: platformOpts } = useCreativeOptions();
+  const [list, setList] = useState<ContentItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editId, setEditId] = useState<string | null>(null);   // null = สร้างใหม่
   const [title, setTitle] = useState("");
   const [postType, setPostType] = useState("");
   const [pf, setPf] = useState<string[]>([]);
   const [assignees, setAssignees] = useState<{ id: string; label: string }[]>([]);
   const [adding, setAdding] = useState<UserPickerValue | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const load = async () => { setLoading(true); try { setList(await listContentTemplates()); } catch (e) { pushToast("error", (e as Error).message); } finally { setLoading(false); } };
+  useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  const resetForm = () => { setEditId(null); setTitle(""); setPostType(""); setPf([]); setAssignees([]); };
+  const startEdit = (c: ContentItem) => { setEditId(c.id); setTitle(c.title || ""); setPostType(c.post_type || ""); setPf(c.platforms ?? []); setAssignees((c.assignees ?? []).map((a) => ({ id: a.id, label: a.name }))); };
   const togglePf = (v: string) => setPf((xs) => (xs.includes(v) ? xs.filter((x) => x !== v) : [...xs, v]));
   const save = async () => {
     if (!title.trim()) { pushToast("error", t("ใส่ชื่อแม่แบบ", "Enter a template name")); return; }
     setBusy(true);
     try {
-      const { id } = await createContent({ title: title.trim(), post_type: postType || null, platforms: pf, assignee_ids: assignees.map((a) => a.id), is_template: true });
-      pushToast("success", t("สร้างแม่แบบแล้ว", "Template created")); onCreated(id);
+      const body = { title: title.trim(), post_type: postType || null, platforms: pf, assignee_ids: assignees.map((a) => a.id) };
+      if (editId) { await updateContent(editId, body); pushToast("success", t("บันทึกแม่แบบแล้ว", "Template saved")); }
+      else { const { id } = await createContent({ ...body, is_template: true }); pushToast("success", t("สร้างแม่แบบแล้ว", "Template created")); onPick(id); }
+      resetForm(); await load(); onChanged();
     } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
+  const del = async (c: ContentItem) => {
+    if (!window.confirm(`${t("ลบแม่แบบ", "Delete template")} "${c.title}" ?`)) return;
+    try { await deleteContent(c.id); if (editId === c.id) resetForm(); await load(); onChanged(); pushToast("success", t("ลบแล้ว", "Deleted")); }
+    catch (e) { pushToast("error", (e as Error).message); }
+  };
+
   return (
-    <ERPModal open onClose={onClose} size="md" title={t("สร้างแม่แบบคอนเทนต์", "New content template")}>
+    <ERPModal open onClose={onClose} size="md" title={t("จัดการแม่แบบคอนเทนต์", "Manage content templates")}>
       <div className="space-y-3">
+        {/* รายการแม่แบบที่มี */}
         <div>
-          <p className="text-[11px] text-slate-400 mb-1">{t("ชื่อแม่แบบ", "Template name")}</p>
-          <ERPInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("เช่น โปรโมตสินค้าใหม่", "e.g. New product promo")} />
+          <p className="text-[11px] font-semibold text-slate-500 mb-1">{t("แม่แบบที่มี", "Existing templates")}</p>
+          {loading ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
+            : list.length === 0 ? <p className="text-xs text-slate-400 italic">{t("ยังไม่มีแม่แบบ", "No templates yet")}</p>
+            : (
+              <div className="space-y-1 max-h-40 overflow-y-auto">
+                {list.map((c) => (
+                  <div key={c.id} className={`flex items-center gap-2 text-sm rounded-md border px-2 py-1 ${editId === c.id ? "border-violet-300 bg-violet-50/50" : "border-slate-200"}`}>
+                    <span className="flex-1 truncate">{c.title} <span className="text-[10px] text-slate-400">· {(c.platforms ?? []).length} {t("แพลตฟอร์ม", "platforms")}</span></span>
+                    <button onClick={() => startEdit(c)} title={t("แก้ไข", "Edit")} className="text-slate-400 hover:text-violet-600">✎</button>
+                    <button onClick={() => void del(c)} title={t("ลบ", "Delete")} className="text-slate-300 hover:text-red-500">🗑</button>
+                  </div>
+                ))}
+              </div>
+            )}
         </div>
-        <div>
-          <p className="text-[11px] text-slate-400 mb-1">{t("ประเภทคอนเทนต์", "Content type")}</p>
-          <select value={postType} onChange={(e) => setPostType(e.target.value)} className="h-9 w-full border border-slate-200 rounded-lg px-2 text-sm bg-white">
-            <option value="">{t("— เลือกประเภท —", "— select —")}</option>
-            {POST_TYPES.map((p) => <option key={p.value} value={p.value}>{postTypeLabel(p.value)}</option>)}
-          </select>
-        </div>
-        <div>
-          <p className="text-[11px] text-slate-400 mb-1">{t("แพลตฟอร์มที่จะลง (เลือกได้หลายอัน)", "Platforms (multi-select)")}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {platformOpts.map((p) => <button key={p.value} type="button" onClick={() => togglePf(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${pf.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
+        {/* ฟอร์ม สร้าง/แก้ */}
+        <div className="border-t border-slate-100 pt-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-semibold text-violet-700">{editId ? t("แก้ไขแม่แบบ", "Edit template") : t("สร้างแม่แบบใหม่", "New template")}</p>
+            {editId && <button onClick={resetForm} className="text-[11px] text-slate-500 hover:underline">＋ {t("สร้างใหม่แทน", "Create new")}</button>}
           </div>
-        </div>
-        <div>
-          <p className="text-[11px] text-slate-400 mb-1">{t("มอบหมายให้ (เลือกได้หลายคน)", "Assign to (multiple)")}</p>
-          <div className="flex flex-wrap gap-1.5 mb-1.5">
-            {assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button onClick={() => setAssignees((xs) => xs.filter((x) => x.id !== a.id))} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">{t("ชื่อแม่แบบ", "Template name")}</p>
+            <ERPInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("เช่น โปรโมตสินค้าใหม่", "e.g. New product promo")} />
           </div>
-          <div className="flex items-center gap-1.5">
-            <div className="flex-1 min-w-0"><UserPicker value={adding} onChange={(v) => { if (v && !assignees.some((a) => a.id === v.id)) setAssignees((xs) => [...xs, { id: v.id, label: v.name }]); setAdding(null); }} disableCreate /></div>
-            <TeamFill onPick={(members) => setAssignees((xs) => { const fresh = members.filter((m) => !xs.some((a) => a.id === m.id)).map((m) => ({ id: m.id, label: m.name })); return fresh.length ? [...xs, ...fresh] : xs; })} />
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">{t("ประเภทคอนเทนต์", "Content type")}</p>
+            <select value={postType} onChange={(e) => setPostType(e.target.value)} className="h-9 w-full border border-slate-200 rounded-lg px-2 text-sm bg-white">
+              <option value="">{t("— เลือกประเภท —", "— select —")}</option>
+              {POST_TYPES.map((p) => <option key={p.value} value={p.value}>{postTypeLabel(p.value)}</option>)}
+            </select>
           </div>
-        </div>
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-          <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : t("สร้าง", "Create")}</button>
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">{t("แพลตฟอร์มที่จะลง (เลือกได้หลายอัน)", "Platforms (multi-select)")}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {platformOpts.map((p) => <button key={p.value} type="button" onClick={() => togglePf(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${pf.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
+            </div>
+          </div>
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">{t("มอบหมายให้ (เลือกได้หลายคน)", "Assign to (multiple)")}</p>
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
+              {assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button onClick={() => setAssignees((xs) => xs.filter((x) => x.id !== a.id))} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="flex-1 min-w-0"><UserPicker value={adding} onChange={(v) => { if (v && !assignees.some((a) => a.id === v.id)) setAssignees((xs) => [...xs, { id: v.id, label: v.name }]); setAdding(null); }} disableCreate /></div>
+              <TeamFill onPick={(members) => setAssignees((xs) => { const fresh = members.filter((m) => !xs.some((a) => a.id === m.id)).map((m) => ({ id: m.id, label: m.name })); return fresh.length ? [...xs, ...fresh] : xs; })} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : editId ? t("บันทึก", "Save") : t("สร้าง", "Create")}</button>
+          </div>
         </div>
       </div>
     </ERPModal>
