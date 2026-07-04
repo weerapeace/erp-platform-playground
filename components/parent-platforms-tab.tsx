@@ -3,7 +3,11 @@
 /**
  * ParentPlatformsTab — แท็บ "🏬 แพลตฟอร์ม" ใน Parent SKU (drawer/หน้าเต็ม)
  * แสดงทุกแพลตฟอร์มที่เปิดใช้เป็นแถว: สถานะ (ยังไม่ทำ/มีร่าง/ลงขายแล้ว) + ฟิลด์สรุป
- * (ชื่อ/หมวดหมู่/รูปที่เลือก/ร้าน) + ปุ่ม "จัดการ" เปิด ProductPlatformManager (ดึงรายละเอียดที่ลงไว้)
+ * (ชื่อ/หมวดหมู่/รูปที่เลือก/ร้าน) + ปุ่ม "จัดการ" เปิด ProductPlatformManager
+ *
+ * หมวดกลางสำหรับลงขาย (platform_category_id → platform_central_categories):
+ *   เลือกครั้งเดียวที่หัวแท็บ → หมวดของแต่ละร้านเติมอัตโนมัติตามที่จับคู่ไว้
+ *   (/master/platform-categories) · ร่างต่อร้านยัง override ได้
  * ของกลาง: /api/product-platforms (guardApi products.platforms.view) · ProductPlatformManager
  */
 import { useEffect, useState, useCallback } from "react";
@@ -17,14 +21,18 @@ const ProductPlatformManager = dynamic(() => import("@/components/product-platfo
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Draft = { title?: string | null; category_path?: string | null; image_keys?: string[]; status?: string | null; platform_product_id?: string | null; last_sync_status?: string | null };
 type Account = { label: string | null; is_active: boolean };
-type Parent = { name_platform?: string; name_th?: string };
+type Parent = { name_platform?: string; name_th?: string; platform_category_id?: string | null; platform_category_name?: string | null };
+type Cat = { id: string; name: string };
 
 export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [loading, setLoading] = useState(true);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [accounts, setAccounts] = useState<Record<string, Account>>({});
+  const [mappings, setMappings] = useState<Record<string, string>>({});   // platform_id → หมวดของร้าน (จากหมวดกลาง)
   const [parent, setParent] = useState<Parent | null>(null);
+  const [cats, setCats] = useState<Cat[]>([]);                            // รายการหมวดกลางให้เลือก
+  const [savingCat, setSavingCat] = useState(false);
   const [manage, setManage] = useState<string | null>(null); // platform id ที่เปิดตัวจัดการอยู่
 
   const load = useCallback(async () => {
@@ -35,10 +43,29 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       setPlatforms((j.platforms ?? []) as Platform[]);
       setDrafts((j.drafts ?? {}) as Record<string, Draft>);
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
+      setMappings((j.mappings ?? {}) as Record<string, string>);
       setParent((j.parent ?? null) as Parent | null);
     } catch { /* ignore */ } finally { setLoading(false); }
   }, [parentId]);
   useEffect(() => { void load(); }, [load]);
+
+  // รายการหมวดกลาง (ครั้งเดียว)
+  useEffect(() => {
+    apiFetch("/api/platform-central-categories").then((r) => r.json())
+      .then((j) => setCats((j.data ?? []) as Cat[])).catch(() => {});
+  }, []);
+
+  const saveCat = useCallback(async (v: string) => {
+    if (!parentId) return;
+    setSavingCat(true);
+    try {
+      await apiFetch("/api/product-platforms", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ set_platform_category: true, parent_sku_id: parentId, platform_category_id: v || null }),
+      });
+      await load();
+    } finally { setSavingCat(false); }
+  }, [parentId, load]);
 
   if (!parentId) return <div className="text-sm text-slate-400 py-8 text-center">บันทึกสินค้าก่อน แล้วค่อยตั้งค่าการขายแต่ละแพลตฟอร์ม</div>;
   if (loading) return <div className="text-sm text-slate-400 py-8 text-center">กำลังโหลด…</div>;
@@ -46,6 +73,19 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
 
   return (
     <div className="space-y-3">
+      {/* หมวดกลางสำหรับลงขาย — เลือกครั้งเดียว เติมทุกร้านอัตโนมัติ */}
+      <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-medium text-indigo-900 shrink-0">🗂️ หมวดกลางสำหรับลงขาย</span>
+        <select value={parent?.platform_category_id ?? ""} disabled={savingCat}
+          onChange={(e) => void saveCat(e.target.value)}
+          className="h-8 px-2 text-sm border border-indigo-200 rounded-lg bg-white min-w-[12rem] disabled:opacity-50">
+          <option value="">— ยังไม่เลือก —</option>
+          {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <a href="/master/platform-categories" target="_blank" rel="noopener noreferrer" className="text-[11px] text-indigo-600 underline shrink-0">จับคู่หมวด / นำเข้า →</a>
+        <span className="basis-full text-[11px] text-indigo-700/70">เลือกครั้งเดียว → หมวดของแต่ละร้านจะเติมให้อัตโนมัติตามที่จับคู่ไว้ (ยังแก้เองรายร้านได้)</span>
+      </div>
+
       <p className="text-xs text-slate-500">รายละเอียดการขายแต่ละแพลตฟอร์ม — กด “จัดการ” เพื่อแก้ชื่อ/หมวดหมู่/รูป/ราคา แล้วส่งขึ้นแพลตฟอร์มนั้น</p>
       {platforms.map((p) => {
         const d = drafts[p.id] ?? {};
@@ -56,6 +96,9 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
           : hasDraft ? { t: "มีร่าง", c: "text-blue-700 bg-blue-50 border-blue-200" }
           : { t: "ยังไม่ทำ", c: "text-slate-500 bg-slate-50 border-slate-200" };
         const name = d.title || parent?.name_platform || parent?.name_th || "—";
+        const auto = (mappings[p.id] ?? "").trim();            // หมวดของร้านนี้จากหมวดกลาง
+        const catValue = d.category_path || auto || "— ยังไม่ตั้ง";
+        const fromCentral = !d.category_path && !!auto;         // เติมมาจากหมวดกลาง (ยังไม่ได้ override)
         return (
           <div key={p.id} className="rounded-xl border border-slate-200 overflow-hidden">
             <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 border-b border-slate-200 flex-wrap">
@@ -66,7 +109,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
             </div>
             <div className="p-3 grid sm:grid-cols-2 gap-y-1.5 gap-x-4">
               <Row label="ชื่อ" value={name} />
-              <Row label="หมวดหมู่" value={d.category_path || "— ยังไม่ตั้ง"} warn={!d.category_path} />
+              <Row label="หมวดหมู่" value={catValue} warn={!d.category_path && !auto} hint={fromCentral ? "จากหมวดกลาง" : undefined} />
               <Row label="รูปที่เลือกส่ง" value={`${d.image_keys?.length ?? 0} รูป`} warn={!(d.image_keys?.length)} />
               <Row label="ร้าน" value={acct?.is_active ? (acct.label || "มีร้าน") : "ยังไม่มีร้าน"} warn={!acct?.is_active} />
             </div>
@@ -80,11 +123,14 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   );
 }
 
-function Row({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+function Row({ label, value, warn, hint }: { label: string; value: string; warn?: boolean; hint?: string }) {
   return (
     <div className="flex gap-2 text-xs min-w-0">
       <span className="text-slate-400 shrink-0 w-20">{label}</span>
-      <span className={`truncate ${warn ? "text-amber-600" : "text-slate-700"}`} title={value}>{value}</span>
+      <span className={`truncate ${warn ? "text-amber-600" : "text-slate-700"}`} title={value}>
+        {value}
+        {hint && <span className="ml-1 text-[10px] text-indigo-500 align-middle">({hint})</span>}
+      </span>
     </div>
   );
 }

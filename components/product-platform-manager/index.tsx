@@ -26,7 +26,7 @@ const VariantMatrixModal = dynamic(() => import("@/components/variant-matrix").t
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null; capabilities?: Record<string, unknown> };
 type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; extra?: Record<string, unknown>; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
-type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null; brand_name: string | null; weight_kg: number | null; box_width: number | null; box_length: number | null; box_height: number | null };
+type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null; platform_category_id: string | null; platform_category_name: string | null; brand_name: string | null; weight_kg: number | null; box_width: number | null; box_length: number | null; box_height: number | null };
 type ImageItem = { key: string; source: string };
 type Account = { label: string | null; is_active: boolean };
 type Variant = { id: string; code: string; name: string; color: string | null; fake_price: number | null; sale_price: number | null; discount: number; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean; option_name?: string | null; option_value?: string | null };
@@ -156,7 +156,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     try {
       const j = await apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(parentSkuId)}`).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      setParent(j.parent ? { id: String(j.parent.id ?? ""), code: String(j.parent.code ?? ""), name_th: String(j.parent.name_th ?? ""), name_platform: String(j.parent.name_platform ?? ""), description: String(j.parent.description ?? ""), category_id: j.parent.category_id ?? null, category_name: j.parent.category_name ?? null, brand_name: j.parent.brand_name ?? null, weight_kg: j.parent.weight_kg ?? null, box_width: j.parent.box_width ?? null, box_length: j.parent.box_length ?? null, box_height: j.parent.box_height ?? null } : null);
+      setParent(j.parent ? { id: String(j.parent.id ?? ""), code: String(j.parent.code ?? ""), name_th: String(j.parent.name_th ?? ""), name_platform: String(j.parent.name_platform ?? ""), description: String(j.parent.description ?? ""), category_id: j.parent.category_id ?? null, category_name: j.parent.category_name ?? null, platform_category_id: j.parent.platform_category_id ?? null, platform_category_name: j.parent.platform_category_name ?? null, brand_name: j.parent.brand_name ?? null, weight_kg: j.parent.weight_kg ?? null, box_width: j.parent.box_width ?? null, box_length: j.parent.box_length ?? null, box_height: j.parent.box_height ?? null } : null);
       const pfs = (j.platforms ?? []) as Platform[];
       setPlatforms(pfs);
       setDrafts((j.drafts ?? {}) as Record<string, Draft>);
@@ -305,9 +305,9 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   // หมวดหมู่: ใช้ค่ามาตรฐาน / บันทึกเป็นค่ามาตรฐานของหมวดกลางนี้
   const useStandard = () => { const v = mappings[active] ?? ""; if (!v) { toast("info", "ยังไม่มีค่ามาตรฐานของหมวดนี้"); return; } setCatInput(v); saveField("category_path", v); };
   const saveMapping = async () => {
-    if (!parent?.category_id) { toast("info", "สินค้านี้ยังไม่มีหมวดหมู่กลาง"); return; }
+    if (!parent?.platform_category_id) { toast("info", "เลือก “หมวดกลางสำหรับลงขาย” ของสินค้านี้ก่อน (แท็บแพลตฟอร์ม)"); return; }
     try {
-      const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ save_mapping: true, central_category_id: parent.category_id, platform_id: active, platform_category_path: catInput }) });
+      const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ save_mapping: true, central_category_id: parent.platform_category_id, platform_id: active, platform_category_path: catInput }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
       setMappings((m) => ({ ...m, [active]: catInput }));
       toast("success", "บันทึกเป็นค่ามาตรฐานของหมวดนี้แล้ว");
@@ -428,10 +428,10 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                 </div>
 
                 {/* หมวดหมู่ปลายทาง + mapping */}
-                {parent?.category_id ? (
+                {parent?.platform_category_id ? (
                   <div className="rounded-lg border border-slate-200 p-3 space-y-2">
                     <p className="text-xs font-medium text-slate-600">หมวดหมู่ปลายทาง — {activePf.name_th}</p>
-                    <p className="text-[11px] text-slate-400">หมวดกลาง: <span className="text-slate-600">{parent.category_name || "—"}</span></p>
+                    <p className="text-[11px] text-slate-400">หมวดกลาง: <span className="text-slate-600">{parent.platform_category_name || "—"}</span></p>
                     {canEdit && <CategoryOptionPicker platformId={active} onPick={(label) => { setCatInput(label); saveField("category_path", label); }} />}
                     <ERPInput value={catInput} disabled={!canEdit} placeholder="หรือพิมพ์เอง เช่น Women's Bags > Shoulder Bags" onChange={(e) => setCatInput(e.target.value)} onBlur={() => saveField("category_path", catInput)} />
                     {!catInput.trim() && <p className="text-[11px] text-rose-600">⚠ ยังไม่ได้ตั้งค่าหมวดหมู่สำหรับแพลตฟอร์มนี้</p>}
@@ -442,7 +442,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                       </div>
                     )}
                   </div>
-                ) : <p className="text-[11px] text-amber-600">สินค้านี้ยังไม่มีหมวดหมู่กลาง — ตั้งที่หน้าสินค้าก่อน จึงจะใช้ mapping ได้</p>}
+                ) : <p className="text-[11px] text-amber-600">ยังไม่ได้เลือก “หมวดกลางสำหรับลงขาย” ของสินค้านี้ — เลือกที่หัวแท็บ 🏬 แพลตฟอร์ม ก่อน จึงจะเติมหมวดของแต่ละร้านอัตโนมัติได้</p>}
 
                 {/* เลือกรูปส่งไปแพลตฟอร์ม */}
                 <div className="rounded-lg border border-slate-200 p-3">

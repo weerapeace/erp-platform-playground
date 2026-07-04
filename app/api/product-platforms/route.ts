@@ -20,7 +20,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const [{ data: parent }, { data: pf }, { data: drafts }, { data: skus }, { data: slots }] = await Promise.all([
-    admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, brand_id, weight_g, parcel_size_id").eq("id", parentId).maybeSingle(),
+    admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, platform_category_id, brand_id, weight_g, parcel_size_id").eq("id", parentId).maybeSingle(),
     admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, capabilities, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
     admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, extra, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
     admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, fake_price, cover_image_r2_key, is_active, attribute_values").eq("parent_sku_id", parentId).order("code", { ascending: true }),
@@ -28,6 +28,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ]);
   const pRow = (parent ?? {}) as Record<string, unknown>;
   const categoryId = (pRow.category_id as string) ?? null;
+  const platformCategoryId = (pRow.platform_category_id as string) ?? null;   // "หมวดกลางสำหรับลงขาย" → key ของ mapping ต่อแพลตฟอร์ม
   const brandId = (pRow.brand_id as string) ?? null;
 
   // auto-fill ฟิลด์ LINE: น้ำหนัก (weight_g → kg) + ขนาดกล่องไปรษณีย์ (parcel_sizes)
@@ -53,15 +54,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     brandName = (br as { name?: string } | null)?.name ?? null;
   }
 
-  // หมวดหมู่กลาง + mapping ต่อแพลตฟอร์ม (จากหมวดเดียวกัน — ใช้ซ้ำได้)
+  // ชื่อหมวดสินค้าทั่วไป (แสดงเฉย ๆ)
   let categoryName: string | null = null;
-  const mappings: Record<string, string> = {};
   if (categoryId) {
-    const [{ data: cat }, { data: maps }] = await Promise.all([
-      admin.from("product_categories").select("display_name, name").eq("id", categoryId).maybeSingle(),
-      admin.from("platform_category_mappings").select("platform_id, platform_category_path").eq("central_category_id", categoryId),
-    ]);
+    const { data: cat } = await admin.from("product_categories").select("display_name, name").eq("id", categoryId).maybeSingle();
     categoryName = ((cat as { display_name?: string; name?: string } | null)?.display_name) ?? ((cat as { name?: string } | null)?.name) ?? null;
+  }
+
+  // "หมวดกลางสำหรับลงขาย" (platform_central_categories) + mapping ต่อแพลตฟอร์ม
+  // เลือกหมวดกลาง 1 ครั้ง → หมวดของแต่ละร้านเติมอัตโนมัติตามที่จับคู่ไว้ (/master/platform-categories)
+  let platformCategoryName: string | null = null;
+  const mappings: Record<string, string> = {};
+  if (platformCategoryId) {
+    const [{ data: pcat }, { data: maps }] = await Promise.all([
+      admin.from("platform_central_categories").select("name").eq("id", platformCategoryId).maybeSingle(),
+      admin.from("platform_category_mappings").select("platform_id, platform_category_path").eq("central_category_id", platformCategoryId),
+    ]);
+    platformCategoryName = (pcat as { name?: string } | null)?.name ?? null;
     for (const m of ((maps ?? []) as Record<string, unknown>[])) mappings[String(m.platform_id)] = (m.platform_category_path as string) ?? "";
   }
 
@@ -121,7 +130,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const v of variants) addImg(v.image_key, `SKU ${v.code}`);
 
   return NextResponse.json({
-    parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", name_platform: pRow.name_platform ?? "", description: pRow.description ?? "", category_id: categoryId, category_name: categoryName, brand_name: brandName, weight_kg: weightKg, box_width: box.w, box_length: box.l, box_height: box.h } : null,
+    parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", name_platform: pRow.name_platform ?? "", description: pRow.description ?? "", category_id: categoryId, category_name: categoryName, platform_category_id: platformCategoryId, platform_category_name: platformCategoryName, brand_name: brandName, weight_kg: weightKg, box_width: box.w, box_length: box.l, box_height: box.h } : null,
     platforms, drafts: draftMap, variants, mappings, images, accounts, error: null,
   });
 }
@@ -144,6 +153,18 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       .upsert({ central_category_id: central, platform_id, platform_category_path: String(body.platform_category_path ?? "").trim() || null, updated_by: user?.id ?? null, updated_at: new Date().toISOString(), created_by: user?.id ?? null }, { onConflict: "central_category_id,platform_id" });
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     await writeAudit(admin0, { action: "update", entityType: "platform_category_mapping", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { central_category_id: central, platform_id } });
+    return NextResponse.json({ ok: true, error: null });
+  }
+
+  // ตั้ง "หมวดกลางสำหรับลงขาย" ของสินค้า (parent_skus_v2.platform_category_id)
+  if (body.set_platform_category) {
+    const pid = String(body.parent_sku_id ?? "").trim();
+    if (!pid) return NextResponse.json({ error: "ต้องมี parent_sku_id" }, { status: 400 });
+    const central = String(body.platform_category_id ?? "").trim() || null;
+    const admin1 = supabaseAdmin();
+    const { error } = await admin1.from("parent_skus_v2").update({ platform_category_id: central }).eq("id", pid);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    await writeAudit(admin1, { action: "update", entityType: "parent_sku", entityId: pid, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { platform_category_id: central } });
     return NextResponse.json({ ok: true, error: null });
   }
 
