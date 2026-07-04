@@ -13,7 +13,7 @@ import { ERPInput, ERPSelect } from "@/components/form";
 import { PromptEditor } from "@/components/prompt-editor";
 import { UserPicker, type UserPickerValue } from "@/components/pickers";
 import { TeamFill } from "../team-picker";
-import type { SubtaskType, SubtaskStepConfig } from "../data";
+import { subtaskTypeHint, type SubtaskType, type SubtaskStepConfig } from "../data";
 
 export type EditStep = {
   type: string;
@@ -81,18 +81,21 @@ export function SubtaskTypePicker({ steps, types, onChange }: { steps: EditStep[
     <div className="space-y-4">
       {/* 1. checkbox card เลือกชนิด */}
       <div>
-        <p className="text-sm font-medium text-slate-700 mb-2">{t("เลือกงานย่อยที่ต้องทำ", "Choose subtasks")}</p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm font-medium text-slate-700">{t("เลือกงานย่อยที่ต้องทำ", "Choose subtasks")}</p>
+          <a href="/tasks/settings?tab=subtype" target="_blank" rel="noopener" className="text-[11px] text-violet-600 hover:underline shrink-0">⚙️ {t("จัดการชนิดงานย่อย", "Manage types")}</a>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {types.map((ty) => {
             const on = included.has(ty.key);
             return (
-              <button type="button" key={ty.key} onClick={() => toggleType(ty)}
+              <button type="button" key={ty.key} onClick={() => toggleType(ty)} title={subtaskTypeHint(ty)}
                 className={`flex items-start gap-2.5 p-3 rounded-xl border text-left transition-colors ${on ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:border-slate-300"}`}>
                 <span className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center text-xs shrink-0 ${on ? "bg-violet-600 text-white" : "bg-slate-100 text-transparent"}`}>✓</span>
                 <span className="text-lg leading-none mt-0.5">{ty.icon ?? "🧩"}</span>
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-slate-800">{ty.label_th}</span>
-                  <span className="block text-[11px] text-slate-400 leading-snug">{TYPE_HINT[ty.key]?.() ?? (ty.has_copy_prompt ? t("มี prompt ช่วยเขียน", "Includes a writing prompt") : t("งานย่อยทั่วไป", "General subtask"))}</span>
+                  <span className="block text-[11px] text-slate-400 leading-snug">{TYPE_HINT[ty.key]?.() ?? subtaskTypeHint(ty)}</span>
                 </span>
               </button>
             );

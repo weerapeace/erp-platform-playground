@@ -3,6 +3,7 @@
 // เรียก API จริงผ่าน apiFetch (แนบ token). ของกลางค่าคงที่จาก lib/creative-tasks
 // ============================================================
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
 
 export type {
   CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus, ContentStatus,
@@ -506,9 +507,37 @@ export type SubtaskStepConfig = {
 };
 export type TemplateStep = { type?: string; title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; assignee_labels?: string[]; config?: SubtaskStepConfig };
 
-export async function listSubtaskTypes(): Promise<SubtaskType[]> {
-  const j = await jsonOrThrow(await apiFetch("/api/subtask-types"));
+export async function listSubtaskTypes(all = false): Promise<SubtaskType[]> {
+  const j = await jsonOrThrow(await apiFetch(`/api/subtask-types${all ? "?all=1" : ""}`));
   return (j.data as SubtaskType[]) ?? [];
+}
+export async function updateSubtaskType(key: string, patch: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/subtask-types", { method: "PATCH", body: JSON.stringify({ key, patch }) }));
+}
+export async function createSubtaskType(key: string, label_th: string, patch?: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/subtask-types", { method: "POST", body: JSON.stringify({ key, label_th, patch }) }));
+}
+
+// สรุป "logic" ของชนิดงานย่อยแบบอ่านง่าย (สร้างอัตโนมัติจากความสามารถ) — ใช้เป็น tooltip/คำอธิบาย
+const SUBTASK_APPROVE_TEXT: Record<string, () => string> = {
+  sku_media: () => tr("อนุมัติแล้ว → เข้าแกลเลอรีรูปสินค้า", "approved → product gallery"),
+  cover: () => tr("อนุมัติแล้ว → ตั้งเป็นรูปปก", "approved → cover image"),
+  sku_description: () => tr("อนุมัติแล้ว → เข้า description สินค้า", "approved → product description"),
+  description_media: () => tr("อนุมัติแล้ว → เข้า media คำอธิบาย", "approved → description media"),
+};
+export function subtaskTypeHint(ty: SubtaskType): string {
+  const parts: string[] = [];
+  const accepts: string[] = [];
+  if (ty.accepts_multi_image) accepts.push(tr("รูปหลายรูป", "multiple images"));
+  else if (ty.accepts_image) accepts.push(tr("รูป", "image"));
+  if (ty.accepts_text) accepts.push(tr("ข้อความ", "text"));
+  if (ty.accepts_link) accepts.push(tr("ลิงก์", "link"));
+  if (ty.accepts_file) accepts.push(tr("ไฟล์", "file"));
+  if (accepts.length) parts.push(`${tr("รับ", "Accepts")}: ${accepts.join(", ")}`);
+  if (ty.has_copy_prompt) parts.push(tr("มีปุ่ม copy prompt", "copy-prompt button"));
+  if (ty.requires_approval) parts.push(tr("ต้องอนุมัติ", "needs approval"));
+  const tgt = SUBTASK_APPROVE_TEXT[ty.approve_target]; if (tgt) parts.push(tgt());
+  return parts.join(" · ") || tr("งานย่อยทั่วไป", "general subtask");
 }
 
 // prompt ต่อแบรนด์ (override)
