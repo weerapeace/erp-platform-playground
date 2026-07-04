@@ -20,7 +20,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const [{ data: parent }, { data: pf }, { data: drafts }, { data: skus }, { data: slots }] = await Promise.all([
-    admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, brand_id").eq("id", parentId).maybeSingle(),
+    admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, brand_id, weight_g, parcel_size_id").eq("id", parentId).maybeSingle(),
     admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, capabilities, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
     admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, extra, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
     admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, fake_price, cover_image_r2_key, is_active, attribute_values").eq("parent_sku_id", parentId).order("code", { ascending: true }),
@@ -29,6 +29,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const pRow = (parent ?? {}) as Record<string, unknown>;
   const categoryId = (pRow.category_id as string) ?? null;
   const brandId = (pRow.brand_id as string) ?? null;
+
+  // auto-fill ฟิลด์ LINE: น้ำหนัก (weight_g → kg) + ขนาดกล่องไปรษณีย์ (parcel_sizes)
+  const weightG = pRow.weight_g != null ? Number(pRow.weight_g) : null;
+  const weightKg = weightG != null && Number.isFinite(weightG) ? Number((weightG / 1000).toFixed(3)) : null;
+  const box: { w: number | null; l: number | null; h: number | null } = { w: null, l: null, h: null };
+  const parcelId = (pRow.parcel_size_id as string) ?? null;
+  if (parcelId) {
+    const { data: pc } = await admin.from("parcel_sizes").select("width_cm, length_cm, height_cm").eq("id", parcelId).maybeSingle();
+    const pcr = pc as Record<string, unknown> | null;
+    if (pcr) { box.w = pcr.width_cm != null ? Number(pcr.width_cm) : null; box.l = pcr.length_cm != null ? Number(pcr.length_cm) : null; box.h = pcr.height_cm != null ? Number(pcr.height_cm) : null; }
+  }
 
   // ร้านตามแบรนด์ (แบรนด์ × แพลตฟอร์ม) — โชว์ว่าแพลตฟอร์มไหนมีร้านพร้อม publish
   const accounts: Record<string, { label: string | null; is_active: boolean }> = {};
@@ -110,7 +121,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const v of variants) addImg(v.image_key, `SKU ${v.code}`);
 
   return NextResponse.json({
-    parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", name_platform: pRow.name_platform ?? "", description: pRow.description ?? "", category_id: categoryId, category_name: categoryName, brand_name: brandName } : null,
+    parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", name_platform: pRow.name_platform ?? "", description: pRow.description ?? "", category_id: categoryId, category_name: categoryName, brand_name: brandName, weight_kg: weightKg, box_width: box.w, box_length: box.l, box_height: box.h } : null,
     platforms, drafts: draftMap, variants, mappings, images, accounts, error: null,
   });
 }

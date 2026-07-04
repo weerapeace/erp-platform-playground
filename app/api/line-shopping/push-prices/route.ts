@@ -50,46 +50,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const rows = (listings ?? []) as { external_product_id: string; title: string | null; matched_parent_sku_id: string; raw: Record<string, unknown> }[];
   if (rows.length === 0) return NextResponse.json({ ok: true, note: "ไม่มีสินค้าที่จับคู่ ERP แล้วให้ส่งราคา", results: [], error: null });
 
-  // รวม sku ทั้งหมด → ดึงราคาขาย (list_price) + id จาก ERP (id ไว้จับคู่ส่วนลดที่ตั้งต่อ SKU)
+  // รวม sku ทั้งหมด → ดึง fake_price (เต็ม) + list_price (ขาย) จาก ERP
   const variantsOf = (r: { raw: Record<string, unknown> }): Record<string, unknown>[] => {
     const line = (r.raw?.line && typeof r.raw.line === "object") ? r.raw.line as Record<string, unknown> : {};
     return Array.isArray(line.variants) ? line.variants as Record<string, unknown>[] : [];
   };
+  const baseOf = (code: string): string | null => { const m = code.match(/^(.*\d)[A-Za-z]+$/); return m ? m[1] : null; };
   const allSkus = [...new Set(rows.flatMap((r) => variantsOf(r).map((v) => asStr(v.sku)).filter(Boolean) as string[]))];
-  const priceOf = new Map<string, number>();
-  const idOf = new Map<string, string>();   // sku code → skus_v2.id
-  if (allSkus.length) {
-    const { data: skus } = await admin.from("skus_v2").select("id, code, list_price").in("code", allSkus);
-    // ส่งเฉพาะที่มีราคา > 0 · ราคาว่าง/0 = ข้าม (กันเผลอส่งราคา 0 ทับราคาจริงบน LINE)
-    for (const s of ((skus ?? []) as Record<string, unknown>[])) { const p = Number(s.list_price); if (Number.isFinite(p) && p > 0) priceOf.set(String(s.code), p); idOf.set(String(s.code), String(s.id)); }
-  }
-
-  // ส่วนลดต่อ SKU (instantDiscount) — เก็บใน platform_listing_drafts.extra.discounts = { [skuId]: { on, value } }
-  // โหลดร่าง LINE ของทุก parent ที่จับคู่ → map parentId → { skuId: ส่วนลด(บาท) }
-  const parentIds = [...new Set(rows.map((r) => r.matched_parent_sku_id).filter(Boolean))];
-  const discByParent = new Map<string, Record<string, number>>();
-  if (parentIds.length) {
-    const { data: drafts } = await admin.from("platform_listing_drafts").select("parent_sku_id, extra").eq("platform_id", platform_id).in("parent_sku_id", parentIds);
-    for (const d of ((drafts ?? []) as Record<string, unknown>[])) {
-      const extra = (d.extra && typeof d.extra === "object") ? d.extra as Record<string, unknown> : {};
-      const raw = (extra.discounts && typeof extra.discounts === "object") ? extra.discounts as Record<string, { on?: boolean; value?: number }> : {};
-      const map: Record<string, number> = {};
-      for (const [skuId, v] of Object.entries(raw)) { const val = Number(v?.value) || 0; if (v?.on && val > 0) map[skuId] = val; }
-      discByParent.set(String(d.parent_sku_id), map);
+  // โหลดราคาของตัวขาย + ตัวสี (base) เผื่อสืบทอด · ส่ง LINE: price=fake, instantDiscount=fake−sale
+  const lookupCodes = [...new Set([...allSkus, ...(allSkus.map(baseOf).filter(Boolean) as string[])])];
+  const fakeOf = new Map<string, number>(); const saleOf = new Map<string, number>();
+  if (lookupCodes.length) {
+    const { data: skus } = await admin.from("skus_v2").select("code, fake_price, list_price").in("code", lookupCodes);
+    for (const s of ((skus ?? []) as Record<string, unknown>[])) {
+      const f = Number(s.fake_price); if (Number.isFinite(f) && f > 0) fakeOf.set(String(s.code), f);
+      const l = Number(s.list_price); if (Number.isFinite(l) && l > 0) saleOf.set(String(s.code), l);
     }
   }
+  const resolve = (m: Map<string, number>, sku: string): number | null => { const own = m.get(sku); if (own != null) return own; const b = baseOf(sku); const mv = b ? m.get(b) : undefined; return mv ?? null; };
 
   // ยิงราคาไป LINE ทีละสินค้า
   const results: { product: string; ok: boolean; variants: number; error?: string }[] = [];
   let okCount = 0;
   for (const r of rows) {
-    const discMap = discByParent.get(r.matched_parent_sku_id) ?? {};
-    // variant ของ LINE ใช้ฟิลด์ id (ตัวเลข) เป็นตัวระบุ · sku ไว้จับคู่ราคา/ส่วนลด ERP
+    // variant ของ LINE ใช้ฟิลด์ id (ตัวเลข) เป็นตัวระบุ · sku ไว้จับคู่ราคา ERP
     const items = variantsOf(r)
       .map((v) => ({ variantId: asStr(v.id ?? v.variantId), sku: asStr(v.sku) }))
-      .filter((v) => v.variantId && v.sku && priceOf.has(v.sku))
-      .map((v) => { const skuId = idOf.get(v.sku as string) ?? ""; return { variantId: v.variantId as string, price: priceOf.get(v.sku as string)!, instantDiscount: discMap[skuId] ?? 0 }; });
-    if (items.length === 0) { results.push({ product: r.title ?? r.external_product_id, ok: false, variants: 0, error: "ไม่พบ variant id หรือราคาขาย ERP ที่ตรงกับ SKU" }); continue; }
+      .filter((v): v is { variantId: string; sku: string } => !!(v.variantId && v.sku))
+      .map((v) => ({ variantId: v.variantId, fake: resolve(fakeOf, v.sku), sale: resolve(saleOf, v.sku) }))
+      .filter((v) => v.fake != null && v.fake > 0)   // ต้องมีราคาเต็ม (Fake) ถึงส่ง (กันส่งราคา 0)
+      .map((v) => ({ variantId: v.variantId, price: v.fake as number, instantDiscount: (v.sale != null && v.sale < (v.fake as number)) ? (v.fake as number) - v.sale : 0 }));
+    if (items.length === 0) { results.push({ product: r.title ?? r.external_product_id, ok: false, variants: 0, error: "ไม่พบ variant id หรือราคาเต็ม (Fake) ของ SKU ใน ERP" }); continue; }
     const res = await lineUpdatePrices(apiKey, r.external_product_id, items);
     if (res.ok) okCount++;
     results.push({ product: r.title ?? r.external_product_id, ok: res.ok, variants: items.length, error: res.ok ? undefined : res.error });

@@ -33,7 +33,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!platform_id) return NextResponse.json({ error: "ยังไม่มีแพลตฟอร์ม LINE SHOPPING" }, { status: 400 });
 
   const [{ data: parent }, { data: draft }, { data: skus }] = await Promise.all([
-    admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, brand_id").eq("id", parent_sku_id).maybeSingle(),
+    admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, brand_id, weight_g").eq("id", parent_sku_id).maybeSingle(),
     admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, platform_product_id").eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id).maybeSingle(),
     admin.from("skus_v2").select("id, code, color_th, color, list_price, cover_image_r2_key").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
   ]);
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const name = String(d.title || p.name_platform || p.name_th || "").trim();
   const categoryId = catIdOf(d.category_path);
   const imageKeys = Array.isArray(d.image_keys) ? d.image_keys as string[] : [];
-  const skuRows = (skus ?? []) as { id: string; code: string; color_th: string | null; color: string | null; list_price: number | null; cover_image_r2_key: string | null }[];
+  const skuRows = (skus ?? []) as { id: string; code: string; color_th: string | null; color: string | null; list_price: number | null; fake_price: number | null; cover_image_r2_key: string | null }[];
 
   // โครง 3 ชั้น: แยก "ตัวสี" (master) ออกจาก "ตัวขาย" (sellable) — ส่ง LINE เฉพาะตัวขาย
   // master = รหัสที่เป็นฐานของตัวขาย (WK42-01 เป็นฐานของ WK42-01D/N/G) · ตัวขายดึงราคา/รูปจากตัวสีเมื่อไม่มีของตัวเอง
@@ -75,9 +75,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       stockOf.set(String(b.product_id), (stockOf.get(String(b.product_id)) ?? 0) + Math.max(0, avail));
     }
   }
-  const gtin = String(extra.barcode ?? "").trim();
-  const priceOf = (s: typeof skuRows[number]) => { const own = Number(s.list_price); if (Number.isFinite(own) && own > 0) return own; const mp = Number(masterOf(s.code)?.list_price); return Number.isFinite(mp) && mp > 0 ? mp : 0; };
-  const variants = sellable.map((s) => ({ sku: s.code, price: priceOf(s), onHandNumber: stockOf.get(s.id) ?? 0, ...(extra.weight ? { weight: Number(extra.weight) } : {}), ...(gtin ? { gtin } : {}) }));
+  // บาร์โค้ด: ใช้ที่กรอก · ว่าง = รหัส Parent · น้ำหนัก(kg): ที่กรอก · ว่าง = weight_g÷1000
+  const gtin = String(extra.barcode ?? "").trim() || String(p.code ?? "").trim();
+  const weightKg = extra.weight ? Number(extra.weight) : (p.weight_g != null ? Number(p.weight_g) / 1000 : 0);
+  // ราคา LINE: price=fake_price (เต็ม) · instantDiscount=fake−sale · ตัวขายไม่มี → ดึงจากตัวสี
+  const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
+  const fakeOf = (s: typeof skuRows[number]) => num(s.fake_price) || num(masterOf(s.code)?.fake_price);
+  const saleOf = (s: typeof skuRows[number]) => num(s.list_price) || num(masterOf(s.code)?.list_price);
+  const variants = sellable.map((s) => { const fake = fakeOf(s); const sale = saleOf(s); const disc = (fake > 0 && sale > 0 && sale < fake) ? fake - sale : 0; return { sku: s.code, price: fake, instantDiscount: disc, onHandNumber: stockOf.get(s.id) ?? 0, ...(weightKg > 0 ? { weight: weightKg } : {}), ...(gtin ? { gtin } : {}) }; });
   const colors = [...new Set(sellable.map((s) => (s.color_th || s.color || "").trim()).filter(Boolean))];
 
   // รูป: ใช้ที่เลือกในร่าง · ถ้าว่าง → ดึงปกตัวสี + ปกตัวขาย (สืบทอดจากตัวสี) อัตโนมัติ

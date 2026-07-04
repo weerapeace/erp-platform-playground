@@ -25,7 +25,7 @@ const VariantMatrixModal = dynamic(() => import("@/components/variant-matrix").t
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null; capabilities?: Record<string, unknown> };
 type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; extra?: Record<string, unknown>; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
-type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null; brand_name: string | null };
+type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null; brand_name: string | null; weight_kg: number | null; box_width: number | null; box_length: number | null; box_height: number | null };
 type ImageItem = { key: string; source: string };
 type Account = { label: string | null; is_active: boolean };
 type Variant = { id: string; code: string; name: string; color: string | null; fake_price: number | null; sale_price: number | null; discount: number; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean; option_name?: string | null; option_value?: string | null };
@@ -131,7 +131,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     try {
       const j = await apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(parentSkuId)}`).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      setParent(j.parent ? { id: String(j.parent.id ?? ""), code: String(j.parent.code ?? ""), name_th: String(j.parent.name_th ?? ""), name_platform: String(j.parent.name_platform ?? ""), description: String(j.parent.description ?? ""), category_id: j.parent.category_id ?? null, category_name: j.parent.category_name ?? null, brand_name: j.parent.brand_name ?? null } : null);
+      setParent(j.parent ? { id: String(j.parent.id ?? ""), code: String(j.parent.code ?? ""), name_th: String(j.parent.name_th ?? ""), name_platform: String(j.parent.name_platform ?? ""), description: String(j.parent.description ?? ""), category_id: j.parent.category_id ?? null, category_name: j.parent.category_name ?? null, brand_name: j.parent.brand_name ?? null, weight_kg: j.parent.weight_kg ?? null, box_width: j.parent.box_width ?? null, box_length: j.parent.box_length ?? null, box_height: j.parent.box_height ?? null } : null);
       const pfs = (j.platforms ?? []) as Platform[];
       setPlatforms(pfs);
       setDrafts((j.drafts ?? {}) as Record<string, Draft>);
@@ -456,16 +456,17 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                       <label className="text-[11px] text-slate-500">แบรนด์/ยี่ห้อ
                         <input key={`br-${active}-${prefillTick}`} defaultValue={exStr("brand") || (parent?.brand_name ?? "")} onBlur={(e) => saveExtra({ brand: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" />
                       </label>
-                      <label className="text-[11px] text-slate-500">บาร์โค้ด / GTIN
-                        <input key={`gt-${active}`} defaultValue={exStr("barcode")} onBlur={(e) => saveExtra({ barcode: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" />
+                      <label className="text-[11px] text-slate-500">บาร์โค้ด / GTIN <span className="text-slate-300">(ว่าง = รหัสสินค้า {parent?.code})</span>
+                        <input key={`gt-${active}-${prefillTick}`} defaultValue={exStr("barcode") || (parent?.code ?? "")} onBlur={(e) => saveExtra({ barcode: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" />
                       </label>
                     </div>
                     <div className="grid grid-cols-4 gap-2">
-                      <label className="text-[11px] text-slate-500">น้ำหนัก(kg)<input key={`w-${active}`} type="number" defaultValue={exStr("weight")} onBlur={(e) => saveExtra({ weight: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
-                      <label className="text-[11px] text-slate-500">กว้าง(cm)<input key={`wd-${active}`} type="number" defaultValue={exStr("width")} onBlur={(e) => saveExtra({ width: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
-                      <label className="text-[11px] text-slate-500">ยาว(cm)<input key={`ln-${active}`} type="number" defaultValue={exStr("length")} onBlur={(e) => saveExtra({ length: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
-                      <label className="text-[11px] text-slate-500">สูง(cm)<input key={`h-${active}`} type="number" defaultValue={exStr("height")} onBlur={(e) => saveExtra({ height: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
+                      <label className="text-[11px] text-slate-500">น้ำหนัก(kg)<input key={`w-${active}-${prefillTick}`} type="number" defaultValue={exStr("weight") || (parent?.weight_kg != null ? String(parent.weight_kg) : "")} onBlur={(e) => saveExtra({ weight: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
+                      <label className="text-[11px] text-slate-500">กว้าง(cm)<input key={`wd-${active}-${prefillTick}`} type="number" defaultValue={exStr("width") || (parent?.box_width != null ? String(parent.box_width) : "")} onBlur={(e) => saveExtra({ width: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
+                      <label className="text-[11px] text-slate-500">ยาว(cm)<input key={`ln-${active}-${prefillTick}`} type="number" defaultValue={exStr("length") || (parent?.box_length != null ? String(parent.box_length) : "")} onBlur={(e) => saveExtra({ length: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
+                      <label className="text-[11px] text-slate-500">สูง(cm)<input key={`h-${active}-${prefillTick}`} type="number" defaultValue={exStr("height") || (parent?.box_height != null ? String(parent.box_height) : "")} onBlur={(e) => saveExtra({ height: e.target.value })} className="mt-1 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" /></label>
                     </div>
+                    <p className="text-[10px] text-slate-400">💡 บาร์โค้ด/น้ำหนัก/ขนาดกล่อง ดึงจากข้อมูลสินค้าให้อัตโนมัติ — แก้ทับได้ถ้าต้องการ (คลิกออกจากช่องเพื่อบันทึก)</p>
                     <div>
                       <p className="text-[11px] text-slate-500 mb-1">สถานะของขวัญ</p>
                       <div className="flex gap-2">
