@@ -765,6 +765,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [error,   setError]   = useState<string | null>(null);
   const [validationRules, setValidationRules] = useState<Record<string, ValidationRule>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [dupHit, setDupHit] = useState<{ field: string; value: string } | null>(null);   // ค่าซ้ำล่าสุด (ไฮไลต์ฟิลด์ + ปุ่มดูตัวที่ซ้ำ)
 
   // load validation rules once
   useEffect(() => { loadValidationRules().then(setValidationRules); }, []);
@@ -1201,7 +1202,28 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const tryClose = () => { if (drawerMode === "edit" && dirty) setConfirmDiscard(true); else setModalOpen(false); };
   const discard  = () => { setConfirmDiscard(false); setModalOpen(false); setDirty(false); };
   // F11: สลับเข้าโหมดแก้ไข
-  const switchToEdit = () => { setDrawerMode("edit"); setFormErr(null); setFieldErrors({}); };
+  const switchToEdit = () => { setDrawerMode("edit"); setFormErr(null); setFieldErrors({}); setDupHit(null); };
+
+  // เปิดดู "รายการที่ซ้ำ" กับค่าที่กรอก (หา id จากค่าที่ซ้ำ → เปิด drawer ตัวนั้น)
+  const gotoDup = async () => {
+    const mk = config.moduleKey;
+    if (!dupHit || !mk) return;
+    try {
+      const flt = encodeURIComponent(JSON.stringify({ [dupHit.field]: { type: "text", value: dupHit.value } }));
+      const j = await apiFetch(`${apiBase}${config.apiPath}?limit=20&filters=${flt}`).then((r) => r.json());
+      const rows = (j.data ?? j.rows ?? []) as Record<string, unknown>[];
+      const hit = rows.find((r) => String(r[dupHit.field]) === String(dupHit.value)) ?? rows[0];
+      if (hit?.id) setPeek({ moduleKey: mk, id: String(hit.id) });
+      else fail("ไม่พบรายการที่ซ้ำ (อาจถูกปิดใช้งาน/ลบไปแล้ว)");
+    } catch { fail("ค้นหารายการที่ซ้ำไม่สำเร็จ"); }
+  };
+  const formErrBanner = (mb: boolean) => (drawerMode === "edit" && formErr) ? (
+    <div className={`${mb ? "mb-3 " : ""}px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2 flex-wrap`}>
+      <span className="flex-1 min-w-0">⚠ {formErr}</span>
+      {dupHit && config.moduleKey && <button type="button" onClick={gotoDup}
+        className="flex-shrink-0 h-6 px-2 rounded border border-red-300 bg-white text-red-700 hover:bg-red-100 font-medium">👁 ดูตัวที่ซ้ำ</button>}
+    </div>
+  ) : null;
 
   const save = async () => {
     // 1. รัน validation rules per field — Sprint 13: skip field ที่ condition ไม่ผ่าน
@@ -1225,7 +1247,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       setFormErr("มี field ที่ยังไม่ผ่านการตรวจ — ดูข้อความใต้แต่ละ field");
       return;
     }
-    setSaving(true); setFormErr(null);
+    setSaving(true); setFormErr(null); setDupHit(null);
     try {
       // serialize fields:
       //   REST mode (v2): proper types (number → number, boolean → boolean)
@@ -1258,7 +1280,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         body: JSON.stringify({ ...serialized, actor: user?.name }),
       });
       const json = await res.json();
-      if (json.error) throw new Error(json.error);
+      if (json.error) {
+        // ค่าซ้ำ (unique) → ไฮไลต์ฟิลด์นั้นแดง + เก็บไว้ให้ปุ่ม "ดูตัวที่ซ้ำ"
+        if (json.dup?.field) { setFieldErrors({ [json.dup.field]: [`ค่านี้ซ้ำ — มี “${json.dup.value}” อยู่แล้วในระบบ`] }); setDupHit(json.dup as { field: string; value: string }); }
+        throw new Error(json.error);
+      }
       flash(editingId ? "บันทึกแล้ว" : "สร้างใหม่แล้ว");
       setDirty(false);
       // ผูก/ถอดลิงก์ m2m ให้ตรงกับที่เลือก (widget mirror ค่าเข้า form แล้ว) — ทั้งสร้างและแก้ไข
@@ -2311,9 +2337,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   </div>
                 )}
                 {renderDetailHero(visibleFields)}
-                {drawerMode === "edit" && formErr && (
-                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
-                )}
+                {formErrBanner(false)}
                 {/* Layout คุมทุก field (รวม core) */}
                 {createHeaderEl}
                 {drawerMode === "view"
@@ -2328,9 +2352,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             return (
               <div className="space-y-4">
                 {renderDetailHero(visibleFields)}
-                {drawerMode === "edit" && formErr && (
-                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
-                )}
+                {formErrBanner(false)}
                 {createHeaderEl}
                 {drawerMode === "view"
                   ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
@@ -2421,9 +2443,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
               <div className="flex-1 min-w-0 md:order-2">
                 {detailLoading && drawerMode === "view" && <div className="text-xs text-slate-400 mb-2">⏳ กำลังโหลด...</div>}
-                {drawerMode === "edit" && formErr && (
-                  <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
-                )}
+                {formErrBanner(true)}
                 {createHeaderEl}
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"

@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { resolveEntity, resolveRelationLabels, friendlyDbError } from "../route";
+import { resolveEntity, resolveRelationLabels, friendlyDbError, parseDupError } from "../route";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { timeRoute } from "@/lib/api-timing";
@@ -108,7 +108,7 @@ async function _PATCH(
     .select(cfg.selectColumns)
     .single();
 
-  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message), dup: parseDupError(error) }, { status: 400 });
 
   // รูปปกเปลี่ยน/ลบ → ย้ายไฟล์เก่าเข้าถังขยะ R2 (ลบจริงด้วย lifecycle rule) ไม่ปล่อยขยะค้าง · ไม่ขวางการบันทึก
   if (oldCoverKey && oldCoverKey !== cleanPatch.cover_image_r2_key) {

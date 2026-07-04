@@ -81,6 +81,16 @@ export function friendlyDbError(msg: string): string {
   return msg;
 }
 
+/** ดึงชื่อฟิลด์+ค่าที่ซ้ำจาก error 23505 ของ Postgres (ให้ client ไฮไลต์ฟิลด์ + หารายการที่ซ้ำ) */
+export function parseDupError(err: { message?: string | null; details?: string | null } | null | undefined): { field: string; value: string } | null {
+  if (!err) return null;
+  const text = `${err.details ?? ""} ${err.message ?? ""}`;
+  if (!/duplicate key|unique constraint|23505/i.test(text)) return null;
+  const m = /Key \(([^)]+)\)=\(([^)]*)\)/i.exec(text);   // เช่น "Key (code)=(JEAN08) already exists"
+  if (!m) return null;
+  return { field: m[1].split(",")[0].trim(), value: m[2] };
+}
+
 export type ColFilter =
   | { type: "text"; value: string }
   | { type: "number"; min: string; max: string }
@@ -665,7 +675,7 @@ async function _POST(
     .select(cfg.selectColumns)
     .single();
 
-  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message), dup: parseDupError(error) }, { status: 400 });
 
   // audit (ของกลาง — ลง audit_logs, ไม่ throw)
   const newId = (data as unknown as Record<string, unknown> | null)?.id;
