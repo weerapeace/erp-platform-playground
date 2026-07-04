@@ -14,6 +14,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { IconPicker } from "@/components/icon-picker";
+import { NewAppRequestModal } from "./new-app-request-modal";
 
 type MenuItem = {
   id: string; label: string; href: string; icon: string | null; icon_url: string | null;
@@ -35,6 +36,7 @@ export default function MiscPortalPage() {
   const [manage, setManage] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [newAppOpen, setNewAppOpen] = useState(false);   // ป๊อปอัป "ขอแอปใหม่ (สร้าง Prompt)"
   // standalone: เปิด /misc ในเชลล์เต็ม → เด้งไปแอปเดี่ยว /app/misc (เข้า ERP อื่นไม่ได้)
   // ถ้าอยู่ใน /app/misc แล้ว (โหลดผ่าน iframe ด้วย embed=1) → ไม่เด้ง แสดงพอร์ทัลตามปกติ
   const [embed, setEmbed] = useState<boolean | null>(null);
@@ -136,12 +138,16 @@ export default function MiscPortalPage() {
               <h1 className="text-2xl font-bold text-rose-600 flex items-center gap-2">🗂️ งานอื่นๆ</h1>
               <p className="text-sm text-rose-400 mt-0.5">รวมแอปเล็ก ๆ ที่ไม่ใช่งาน ERP หลัก — กดการ์ดเพื่อเข้าใช้งาน</p>
             </div>
-            {canManage && (
-              <button onClick={() => setManage((m) => !m)}
-                className={`h-10 px-4 rounded-full text-sm font-medium border ${manage ? "bg-rose-500 text-white border-rose-500" : "bg-white text-rose-500 border-pink-200 hover:bg-pink-50"}`}>
-                {manage ? "✓ เสร็จ" : "⚙ จัดการ"}
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              <button onClick={() => setNewAppOpen(true)} title="กรอกรายละเอียด → ได้ Prompt ไปให้ Claude สร้างแอป"
+                className="h-10 px-4 rounded-full text-sm font-medium border border-pink-200 bg-white text-rose-500 hover:bg-pink-50">✨ ขอแอปใหม่</button>
+              {canManage && (
+                <button onClick={() => setManage((m) => !m)}
+                  className={`h-10 px-4 rounded-full text-sm font-medium border ${manage ? "bg-rose-500 text-white border-rose-500" : "bg-white text-rose-500 border-pink-200 hover:bg-pink-50"}`}>
+                  {manage ? "✓ เสร็จ" : "⚙ จัดการ"}
+                </button>
+              )}
+            </div>
           </div>
 
           {loading ? (
@@ -230,6 +236,8 @@ export default function MiscPortalPage() {
           </div>
         </div>
       )}
+
+      <NewAppRequestModal open={newAppOpen} onClose={() => setNewAppOpen(false)} />
     </PlaygroundShell>
   );
 }
