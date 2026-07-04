@@ -847,6 +847,7 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
   const t = useT();
   const [tags, setTags] = useState<Hashtag[]>([]);
   const [focus, setFocus] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);   // ไฮไลต์รายการในดรอปดาวน์ด้วยคีย์บอร์ด (↓/↑/Enter)
   // คลังแฮชแท็กใช้ร่วมทุกแพลตฟอร์ม — กรองแค่ "แบรนด์นี้ + ของกลาง" (ไม่ผูกแพลตฟอร์ม) · โหลดใหม่ทุกครั้งที่โฟกัส (เห็นตัวที่เพิ่งเพิ่ม)
   const loadTags = useCallback(async () => { try { setTags(await listHashtags({ brand_id: brandId || undefined })); } catch { /* ว่าง */ } }, [brandId]);
   useEffect(() => { if (focus) loadTags(); }, [focus, loadTags]);
@@ -859,6 +860,9 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
     .filter((h) => !tokens.includes(h.text))
     .slice(0, 12);
   const exists = tags.some((h) => h.text.toLowerCase().replace(/^#/, "") === q);
+  const showAdd = !!q && !exists;
+  const itemCount = suggestions.length + (showAdd ? 1 : 0);
+  useEffect(() => { setActiveIdx(-1); }, [q, focus]);   // รีเซ็ตไฮไลต์เมื่อคำค้น/โฟกัสเปลี่ยน
 
   const applyTag = (text: string) => {
     const parts = (value ?? "").split(/\s+/);
@@ -876,15 +880,24 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
   return (
     <div className="relative">
       <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} onFocus={() => setFocus(true)} onBlur={() => setTimeout(() => setFocus(false), 150)}
+        onKeyDown={(e) => {
+          if (!focus || itemCount === 0) return;
+          if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((i) => (i + 1) % itemCount); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((i) => (i - 1 + itemCount) % itemCount); }
+          else if (e.key === "Enter" && activeIdx >= 0) { e.preventDefault(); if (activeIdx < suggestions.length) applyTag(suggestions[activeIdx].text); else void addNew(); }
+          else if (e.key === "Escape") { setActiveIdx(-1); e.currentTarget.blur(); }
+        }}
         placeholder={t("#hashtag คั่นด้วยเว้นวรรค (พิมพ์เพื่อค้นหาจากคลัง)", "#hashtag (type to search library)")} className="w-full h-9 border border-slate-200 rounded-lg px-2 text-sm" />
-      {focus && (suggestions.length > 0 || (q && !exists)) && (
+      {focus && itemCount > 0 && (
         <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-44 overflow-y-auto p-1">
-          {suggestions.map((h) => (
-            <button key={h.id} onMouseDown={(e) => { e.preventDefault(); applyTag(h.text); }} className="flex w-full items-center justify-between gap-2 text-left px-2 py-1 text-sm rounded hover:bg-violet-50 text-slate-700">
+          {suggestions.map((h, idx) => (
+            <button key={h.id} onMouseDown={(e) => { e.preventDefault(); applyTag(h.text); }} onMouseEnter={() => setActiveIdx(idx)}
+              className={`flex w-full items-center justify-between gap-2 text-left px-2 py-1 text-sm rounded text-slate-700 ${activeIdx === idx ? "bg-violet-100" : "hover:bg-violet-50"}`}>
               <span className="truncate">{h.text}</span><span className="text-[10px] text-slate-300 shrink-0">{h.usage_count}</span>
             </button>
           ))}
-          {q && !exists && <button onMouseDown={(e) => { e.preventDefault(); void addNew(); }} className="block w-full text-left px-2 py-1 text-sm rounded hover:bg-emerald-50 text-emerald-700">＋ {t("เพิ่ม", "Add")} “#{q}” {t("เข้าคลัง", "to library")}</button>}
+          {showAdd && <button onMouseDown={(e) => { e.preventDefault(); void addNew(); }} onMouseEnter={() => setActiveIdx(suggestions.length)}
+            className={`block w-full text-left px-2 py-1 text-sm rounded text-emerald-700 ${activeIdx === suggestions.length ? "bg-emerald-100" : "hover:bg-emerald-50"}`}>＋ {t("เพิ่ม", "Add")} “#{q}” {t("เข้าคลัง", "to library")}</button>}
         </div>
       )}
     </div>
