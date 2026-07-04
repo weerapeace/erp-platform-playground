@@ -53,7 +53,11 @@ const EMPTY_FORM = { title: "", post_type: "image", status: "draft" as ContentSt
 export function ContentPageView() {
   const t = useT();
   const { platforms } = useCreativeOptions();
-  const [view, setView] = useState<"list" | "calendar" | "templates">("list");
+  const [view, setView] = useState<"list" | "calendar" | "templates">(() => {
+    if (typeof window === "undefined") return "list";
+    const v = new URLSearchParams(window.location.search).get("view");
+    return v === "templates" || v === "calendar" ? v : "list";
+  });
   const [detailId, setDetailId] = useState<string | null>(null);
   const [delTarget, setDelTarget] = useState<ContentItem | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);

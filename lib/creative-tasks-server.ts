@@ -95,13 +95,31 @@ export async function materializeContentSubtasks(
     const cfg = (s.config ?? {}) as Record<string, unknown>;
     if (cfg.content_id) continue;   // ผูกไว้แล้ว
     try {
+      // ถ้าเลือกแม่แบบคอนเทนต์ → ก๊อป ประเภท/แพลตฟอร์ม/แคปชั่น จากแม่แบบ (mini-form ทับ post_type ได้)
+      const tplId = cfg.content_template_id ? String(cfg.content_template_id) : null;
+      let post_type = (cfg.post_type as string) || null;
+      let platforms = Array.isArray(cfg.platforms) ? (cfg.platforms as string[]) : [];
+      let title = s.title || "คอนเทนต์";
+      let tplCaps: Record<string, unknown>[] = [];
+      if (tplId) {
+        const { data: tpl } = await admin.from("erp_creative_content").select("title, post_type, platforms").eq("id", tplId).maybeSingle();
+        if (tpl) {
+          const tr2 = tpl as { title?: string | null; post_type?: string | null; platforms?: string[] | null };
+          post_type = post_type || (tr2.post_type ?? null);
+          if (!platforms.length) platforms = tr2.platforms ?? [];
+          if (!s.title) title = tr2.title || "คอนเทนต์";
+          const { data: caps } = await admin.from("erp_creative_content_captions").select("platform, caption, hashtags, caption_type, sort_order").eq("content_id", tplId).order("sort_order", { ascending: true });
+          tplCaps = (caps ?? []) as Record<string, unknown>[];
+        }
+      }
       let cno = await nextContentNo(admin);
-      const platforms = Array.isArray(cfg.platforms) ? (cfg.platforms as string[]) : [];
-      const crow = { content_no: cno, title: (s.title || "คอนเทนต์"), task_id: taskId, brand_id: brandId || null, post_type: (cfg.post_type as string) || null, platforms, status: "draft", created_by: createdBy };
+      const crow = { content_no: cno, title, task_id: taskId, brand_id: brandId || null, post_type, platforms, status: "draft", created_by: createdBy };
       let ins = await admin.from("erp_creative_content").insert(crow).select("id").single();
       if (ins.error && /duplicate|unique/i.test(ins.error.message)) { cno = await nextContentNo(admin); ins = await admin.from("erp_creative_content").insert({ ...crow, content_no: cno }).select("id").single(); }
       if (ins.error || !ins.data) continue;
-      await admin.from("erp_creative_subtasks").update({ config: { ...cfg, content_id: (ins.data as { id: string }).id } }).eq("id", s.id);
+      const newId = (ins.data as { id: string }).id;
+      if (tplCaps.length) await admin.from("erp_creative_content_captions").insert(tplCaps.map((c, i) => ({ content_id: newId, platform: c.platform, caption: c.caption ?? null, hashtags: c.hashtags ?? null, caption_type: c.caption_type ?? "short", sort_order: (c.sort_order as number) ?? i })));
+      await admin.from("erp_creative_subtasks").update({ config: { ...cfg, content_id: newId } }).eq("id", s.id);
     } catch { /* best-effort */ }
   }
 }
