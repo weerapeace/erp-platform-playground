@@ -8,7 +8,7 @@ import { buildReportHtml } from "@/lib/template";
 import { thaiBahtText } from "@/lib/quotation-print";
 import type { SODetail } from "@/app/api/sales-orders/route";
 
-type SODetailExt = SODetail & {
+export type SODetailExt = SODetail & {
   subtotal?:         number;
   customer_address?: string;
   customer_phone?:   string;
@@ -29,10 +29,11 @@ const baht = (n: number | null | undefined) =>
 const thaiDate = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
-function buildSoData(so: SODetailExt): Record<string, unknown> {
+export function buildSoData(so: SODetailExt): Record<string, unknown> {
   const isoDate = (iso: string | null | undefined) => (iso ? String(iso).slice(0, 10) : "—");
   return {
     so_number:        so.so_number ?? "(ยังไม่ออกเลข)",
+    total_qty:        so.lines.reduce((s, l) => s + Number(l.qty ?? 0), 0).toLocaleString("th-TH"),
     tax_invoice_no:   so.tax_invoice_no ?? so.so_number ?? "",
     status_label:     STATUS_LABELS[so.status] ?? so.status,
     customer_name:    so.customer_name ?? "—",

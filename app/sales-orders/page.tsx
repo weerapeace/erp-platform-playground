@@ -411,17 +411,28 @@ export default function SalesOrdersPage() {
       cell: ({ getValue }) => <span className="text-xs text-slate-500">{getValue() as number}</span>,
     },
     {
-      id: "actions", header: "", size: 120, enableSorting: false,
+      id: "actions", header: "", size: 200, enableSorting: false,
       cell: ({ row }) => (
-        <a
-          href={`/print/sales-order/${row.original.id}`}
-          target="_blank" rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          title="พิมพ์ใบเสร็จรับเงิน/ใบกำกับภาษี"
-          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
-        >
-          🧾 ใบกำกับภาษี
-        </a>
+        <div className="flex items-center gap-1">
+          <a
+            href={`/print/sales-order/${row.original.id}`}
+            target="_blank" rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            title="พิมพ์ใบเสร็จรับเงิน/ใบกำกับภาษี"
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
+          >
+            🧾 ใบกำกับภาษี
+          </a>
+          <a
+            href={`/print/delivery-note/${row.original.id}`}
+            target="_blank" rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            title="พิมพ์ใบส่งสินค้า (ไม่มีราคา)"
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
+          >
+            📦 ใบส่ง
+          </a>
+        </div>
       ),
     },
   ], []);
@@ -512,6 +523,12 @@ export default function SalesOrdersPage() {
               <a href={`/print/sales-order/${detail.id}`} target="_blank" rel="noopener noreferrer"
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center">
                 🧾 ใบเสร็จ/ใบกำกับภาษี
+              </a>
+            )}
+            {detail.so_number && (
+              <a href={`/print/delivery-note/${detail.id}`} target="_blank" rel="noopener noreferrer"
+                className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center">
+                📦 ใบส่งสินค้า
               </a>
             )}
             {detail.status === "draft" && (
