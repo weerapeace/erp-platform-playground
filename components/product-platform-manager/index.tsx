@@ -28,7 +28,7 @@ type Draft = { title?: string | null; description?: string | null; category_path
 type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null; brand_name: string | null };
 type ImageItem = { key: string; source: string };
 type Account = { label: string | null; is_active: boolean };
-type Variant = { id: string; code: string; name: string; color: string | null; price: number | null; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean };
+type Variant = { id: string; code: string; name: string; color: string | null; price: number | null; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean; option_name?: string | null; option_value?: string | null };
 type Toast = { id: number; type: "success" | "error" | "info"; msg: string };
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", tiktok_shop: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
@@ -311,10 +311,17 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   }, [title, description, variants, activeDraft.category_path, activeDraft.image_keys, platforms, active]);
   const ready = checks.every((c) => !c.required || c.ok);
 
+  // ตัวเลือกชั้นที่ 2 (เช่น แบบพิมพ์) + จัดกลุ่มตามสี — โชว์คอลัมน์/กลุ่มเฉพาะเมื่อมีประโยชน์
+  const hasOption = useMemo(() => variants.some((v) => v.option_value), [variants]);
+  const optionName = useMemo(() => variants.find((v) => v.option_name)?.option_name || "ตัวเลือก", [variants]);
+  // จัดกลุ่มตามสีเมื่อมีสีซ้ำ (หลาย SKU สีเดียวกัน) — สินค้าที่แต่ละ SKU คนละสีล้วนไม่ต้องจัดกลุ่ม
+  const hasColorGroups = useMemo(() => new Set(variants.map((v) => v.color || "—")).size < variants.length, [variants]);
+
   const cols: MiniColumn<Variant>[] = useMemo(() => [
     { key: "img", header: "รูป", width: "2.5rem", cell: (v) => <HoverImage url={r2ImageUrl(v.image_key)} size={32} /> },
     { key: "code", header: "SKU", width: "1fr", sortValue: (v) => v.code, cell: (v) => <span className="font-mono text-xs">{v.code}</span> },
-    { key: "color", header: "สี", width: "0.9fr", cell: (v) => v.color || "—" },
+    { key: "color", header: "สี", width: "0.9fr", sortValue: (v) => v.color ?? "", cell: (v) => v.color || "—" },
+    ...(hasOption ? [{ key: "option", header: optionName, width: "0.9fr", sortValue: (v: Variant) => v.option_value ?? "", cell: (v: Variant) => v.option_value || <span className="text-slate-300">—</span> } as MiniColumn<Variant>] : []),
     { key: "price", header: "ราคา", width: "5.5rem", align: "right", sortValue: (v) => v.price ?? -1,
       cell: (v) => canEdit ? <PriceCell v={v} onSave={savePrice} /> : (v.has_price ? <span className="tabular-nums">{v.price!.toLocaleString()}฿</span> : <span className="text-rose-500 text-xs">ไม่มี</span>) },
     { key: "discount", header: "ส่วนลด", width: "7rem", align: "right",
@@ -323,7 +330,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     { key: "ready", header: "พร้อม", width: "3.5rem", align: "center", cell: (v) => (v.has_price && v.has_image && v.is_active) ? <span className="text-emerald-600">✓</span> : <span className="text-rose-500" title={[!v.has_price && "ไม่มีราคา", !v.has_image && "ไม่มีรูป", !v.is_active && "ปิดอยู่"].filter(Boolean).join(", ")}>✗</span> },
     { key: "edit", header: "", width: "2.5rem", align: "center", cell: (v) => canEdit ? <button onClick={() => setSkuEditor({ recordId: v.id })} title="แก้สี/รูป (หน้าสินค้าเต็ม)" className="text-violet-600 hover:underline">✏️</button> : null },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [canEdit, savePrice, discounts, active]);
+  ], [canEdit, savePrice, discounts, active, hasOption, optionName]);
 
   const activePf = platforms.find((p) => p.id === active);
   const iconOf = (p: Platform) => p.icon_key || PLATFORM_ICON[p.code] || "🏬";
@@ -440,7 +447,8 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                       <span className="text-[10px] text-slate-400">= ราคาขายกลางของ SKU (ใช้ทุกช่องทาง)</span>
                     </div>
                   )}
-                  <MiniTable rows={variants} columns={cols} rowKey={(v) => v.id} searchText={(v) => `${v.code} ${v.color ?? ""}`} dense emptyText="ยังไม่มี SKU ลูก — กด ➕ เพิ่มสี"
+                  <MiniTable rows={variants} columns={cols} rowKey={(v) => v.id} searchText={(v) => `${v.code} ${v.color ?? ""} ${v.option_value ?? ""}`} dense emptyText="ยังไม่มี SKU ลูก — กด ➕ เพิ่มสี"
+                    groupBy={hasColorGroups ? (v) => v.color || "— ไม่ระบุสี" : undefined} groupLabel="ตามสี"
                     footnote={activePf?.code === "line_shopping"
                       ? "ราคา = ราคาขายกลาง (แก้แล้วมีผลทุกช่องทาง) · ส่วนลด = ต่อ SKU เฉพาะ LINE (instantDiscount) ส่งเมื่อกด “ส่งราคา/ส่วนลดขึ้น LINE”"
                       : "ราคา = ราคาขายกลางของ SKU (ใช้ทุกช่องทาง) · ส่วนลดจะส่งไปเฉพาะแพลตฟอร์มที่รองรับ"} />

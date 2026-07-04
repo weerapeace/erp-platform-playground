@@ -23,7 +23,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, brand_id").eq("id", parentId).maybeSingle(),
     admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, capabilities, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
     admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, extra, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
-    admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, cover_image_r2_key, is_active").eq("parent_sku_id", parentId).order("code", { ascending: true }),
+    admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, cover_image_r2_key, is_active, attribute_values").eq("parent_sku_id", parentId).order("code", { ascending: true }),
     admin.from("product_image_slots").select("r2_key").eq("owner_id", parentId),
   ]);
   const pRow = (parent ?? {}) as Record<string, unknown>;
@@ -64,11 +64,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const variants = ((skus ?? []) as Record<string, unknown>[]).map((s) => {
     const price = s.list_price == null ? null : Number(s.list_price);
     const image_key = (s.cover_image_r2_key as string) ?? null;
+    // ตัวเลือกชั้นที่ 2 (เช่น แบบพิมพ์) เก็บใน attribute_values.variant_option {name,value,code}
+    const av = (s.attribute_values && typeof s.attribute_values === "object") ? s.attribute_values as Record<string, unknown> : {};
+    const vo = (av.variant_option && typeof av.variant_option === "object") ? av.variant_option as Record<string, unknown> : null;
     return {
       id: String(s.id), code: String(s.code ?? ""), name: (s.name_th as string) ?? "",
       color: (s.color_th as string) ?? (s.color as string) ?? null, price, image_key,
       is_active: s.is_active !== false,
       has_price: price != null && price > 0, has_image: !!image_key,
+      option_name: vo ? (String(vo.name ?? "").trim() || null) : null,
+      option_value: vo ? (String(vo.value ?? "").trim() || null) : null,
     };
   });
 
