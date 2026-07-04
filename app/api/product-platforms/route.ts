@@ -61,28 +61,47 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }));
   const draftMap: Record<string, unknown> = {};
   for (const d of ((drafts ?? []) as Record<string, unknown>[])) draftMap[String(d.platform_id)] = d;
-  const variants = ((skus ?? []) as Record<string, unknown>[]).map((s) => {
-    const price = s.list_price == null ? null : Number(s.list_price);
-    const image_key = (s.cover_image_r2_key as string) ?? null;
-    // ตัวเลือกชั้นที่ 2 (เช่น แบบพิมพ์) เก็บใน attribute_values.variant_option {name,value,code}
-    const av = (s.attribute_values && typeof s.attribute_values === "object") ? s.attribute_values as Record<string, unknown> : {};
-    const vo = (av.variant_option && typeof av.variant_option === "object") ? av.variant_option as Record<string, unknown> : null;
-    return {
-      id: String(s.id), code: String(s.code ?? ""), name: (s.name_th as string) ?? "",
-      color: (s.color_th as string) ?? (s.color as string) ?? null, price, image_key,
-      is_active: s.is_active !== false,
-      has_price: price != null && price > 0, has_image: !!image_key,
-      option_name: vo ? (String(vo.name ?? "").trim() || null) : null,
-      option_value: vo ? (String(vo.value ?? "").trim() || null) : null,
-    };
-  });
+  // โครง 3 ชั้น: parent → ตัวสี (master) → ตัวขาย (variant)
+  // "ตัวสี" = SKU ที่รหัสเป็น "ฐาน" ของตัวขาย (เช่น WK42-01 เป็นฐานของ WK42-01D/N/G) → ซ่อนจากตาราง platform
+  // ตัวขาย ดึงรูป/ราคา จากตัวสีเมื่อไม่มีของตัวเอง (baseOf = ตัดตัวอักษรท้ายที่ตามหลังตัวเลข)
+  const skuRows = ((skus ?? []) as Record<string, unknown>[]);
+  const baseOf = (code: string): string | null => { const m = code.match(/^(.*\d)[A-Za-z]+$/); return m ? m[1] : null; };
+  const byCode = new Map(skuRows.map((s) => [String(s.code ?? ""), s]));
+  const masterCodes = new Set<string>();
+  for (const s of skuRows) { const b = baseOf(String(s.code ?? "")); if (b && byCode.has(b)) masterCodes.add(b); }
 
-  // รวมรูปที่เลือกส่งได้: ปก parent + แกลเลอรี parent + รูปประจำ SKU (dedup)
+  const variants = skuRows
+    .filter((s) => !masterCodes.has(String(s.code ?? "")))   // โชว์เฉพาะตัวขาย/เดี่ยว (ซ่อนตัวสี)
+    .map((s) => {
+      const code = String(s.code ?? "");
+      const base = baseOf(code);
+      const master = base ? byCode.get(base) : null;   // ตัวสีของตัวขายนี้
+      const ownPrice = s.list_price == null ? null : Number(s.list_price);
+      const masterPrice = master && master.list_price != null ? Number(master.list_price) : null;
+      const price = ownPrice != null ? ownPrice : masterPrice;   // ไม่มีราคาตัวเอง → ดึงจากตัวสี
+      const ownImg = (s.cover_image_r2_key as string) ?? null;
+      const masterImg = master ? ((master.cover_image_r2_key as string) ?? null) : null;
+      const image_key = ownImg || masterImg;   // ไม่มีรูปตัวเอง → ดึงจากตัวสี
+      const av = (s.attribute_values && typeof s.attribute_values === "object") ? s.attribute_values as Record<string, unknown> : {};
+      const vo = (av.variant_option && typeof av.variant_option === "object") ? av.variant_option as Record<string, unknown> : null;
+      return {
+        id: String(s.id), code, name: (s.name_th as string) ?? "",
+        color: (s.color_th as string) ?? (s.color as string) ?? null, price, image_key,
+        is_active: s.is_active !== false,
+        has_price: price != null && price > 0, has_image: !!image_key,
+        inherited_image: !ownImg && !!masterImg,
+        option_name: vo ? (String(vo.name ?? "").trim() || null) : null,
+        option_value: vo ? (String(vo.value ?? "").trim() || null) : null,
+      };
+    });
+
+  // รวมรูปที่เลือกส่งได้: ปก parent + แกลเลอรี parent + ปกตัวสี + รูปประจำตัวขาย (dedup)
   const seen = new Set<string>();
   const images: { key: string; source: string }[] = [];
   const addImg = (key: string | null | undefined, source: string) => { const k = (key ?? "").trim(); if (k && !seen.has(k)) { seen.add(k); images.push({ key: k, source }); } };
   addImg(pRow.cover_image_r2_key as string, "ปก");
   for (const s of ((slots ?? []) as Record<string, unknown>[])) addImg(s.r2_key as string, "แกลเลอรี");
+  for (const s of skuRows) if (masterCodes.has(String(s.code ?? ""))) addImg((s.cover_image_r2_key as string) ?? null, `สี ${(s.color_th as string) || (s.color as string) || String(s.code)}`);
   for (const v of variants) addImg(v.image_key, `SKU ${v.code}`);
 
   return NextResponse.json({
