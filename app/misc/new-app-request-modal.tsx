@@ -6,6 +6,7 @@
 // ไม่แตะ DB — เป็นตัวช่วยเขียน prompt ล้วน ๆ
 // ============================================================
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
@@ -22,6 +23,8 @@ const FEATURE_OPTIONS = [
   "หลายขั้นตอน (สถานะ / workflow)", "คอมเมนต์ / แชท", "ประวัติการแก้ไข", "ใช้บนมือถือ (PWA)",
 ];
 const EMOJI_QUICK = ["🧩", "📋", "📝", "📦", "💰", "🧮", "📅", "👕", "🏷️", "🚚", "🧾", "⭐", "🔧", "📊"];
+
+const PICKER_THRESHOLD = 6; // ตัวเลือกเกินจำนวนนี้ → เปลี่ยนเป็นปุ่มเปิด popup แทนโชว์ชิปเรียง
 
 function Field({ label, hint, value, onChange, area }: { label: string; hint?: string; value: string; onChange: (v: string) => void; area?: boolean }) {
   return (
@@ -45,22 +48,156 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
   );
 }
 
+type Opt = { key: string; label: string };
+
+/**
+ * MultiSelect กลาง (ในไฟล์นี้):
+ * - ตัวเลือก ≤ 6 → โชว์ชิปเรียงเลย (ติ๊กได้ทันที)
+ * - ตัวเลือก > 6 → ปุ่ม "＋ เลือก (n)" → เปิด popup มีค้นหา + ติ๊ก + (เพิ่มเอง) เพื่อไม่ให้รก
+ * เก็บค่าเป็น label string (ให้ build() นำไปเรียงต่อได้เลย)
+ */
+function MultiSelect({
+  label, hint, required, options, selected, setSelected, allowCustom = false, addPlaceholder, pickerTitle,
+}: {
+  label: string; hint?: string; required?: boolean;
+  options: Opt[]; selected: string[]; setSelected: (v: string[]) => void;
+  allowCustom?: boolean; addPlaceholder?: string; pickerTitle?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [custom, setCustom] = useState("");
+
+  const optLabels = options.map((o) => o.label);
+  const customSel = selected.filter((s) => !optLabels.includes(s)); // ที่ผู้ใช้พิมพ์เพิ่มเอง
+  const usePicker = options.length > PICKER_THRESHOLD;
+
+  const toggle = (v: string) => setSelected(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
+  const add = () => { const t = custom.trim(); if (!t) return; if (!selected.includes(t)) setSelected([...selected, t]); setCustom(""); };
+
+  // Escape ปิดเฉพาะ popup นี้ (capture + stopImmediatePropagation กันไม่ให้ modal หลักปิดตาม)
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopImmediatePropagation(); e.preventDefault(); setOpen(false); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [open]);
+
+  const header = (
+    <div>
+      <span className="text-[11px] font-medium text-slate-600">{label}{required && " *"}</span>
+      {hint && <span className="ml-1 text-[10px] text-slate-400">{hint}</span>}
+    </div>
+  );
+
+  const customInput = (big?: boolean) => (
+    <div className={`flex gap-1 ${big ? "" : "mt-1.5"}`}>
+      <input value={custom} onChange={(e) => setCustom(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+        placeholder={addPlaceholder || "เพิ่มเอง แล้วกด Enter"}
+        className={`${big ? "h-9" : "h-8"} flex-1 rounded-lg border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-rose-300`} />
+      <button type="button" onClick={add} className={`${big ? "h-9" : "h-8"} rounded-lg border border-rose-300 px-3 text-xs text-rose-600 hover:bg-rose-50`}>＋ เพิ่ม</button>
+    </div>
+  );
+
+  // โหมดชิปเรียง (ตัวเลือกน้อย)
+  if (!usePicker) {
+    return (
+      <div>
+        {header}
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {options.map((o) => <Chip key={o.key} on={selected.includes(o.label)} onClick={() => toggle(o.label)}>{o.label}</Chip>)}
+          {customSel.map((c) => <Chip key={c} on onClick={() => toggle(c)}>{c}</Chip>)}
+        </div>
+        {allowCustom && customInput()}
+      </div>
+    );
+  }
+
+  // โหมดปุ่ม → popup (ตัวเลือกเยอะ)
+  const filtered = options.filter((o) => o.label.toLowerCase().includes(q.trim().toLowerCase()));
+  return (
+    <div>
+      {header}
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        <button type="button" onClick={() => setOpen(true)}
+          className="h-8 rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">
+          ＋ เลือก{selected.length ? ` (${selected.length})` : ""}
+        </button>
+        {selected.map((s) => (
+          <button key={s} type="button" onClick={() => toggle(s)} title="กดเพื่อเอาออก"
+            className="h-8 rounded-lg border border-rose-300 bg-rose-50 px-2.5 text-xs text-rose-600 hover:bg-rose-100">
+            {s} ✕
+          </button>
+        ))}
+        {selected.length === 0 && <span className="text-[11px] text-slate-400">ยังไม่ได้เลือก</span>}
+      </div>
+
+      {open && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+          onMouseDown={(e) => { e.stopPropagation(); setOpen(false); }}>
+          <div className="absolute inset-0 bg-slate-900/40" />
+          <div className="relative z-[81] flex max-h-[72vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div className="text-sm font-semibold text-slate-800">{pickerTitle || label}</div>
+              <button type="button" onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div className="border-b border-slate-100 px-4 py-2">
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา..."
+                className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-300" />
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-2">
+              {filtered.length === 0 && <div className="px-2 py-6 text-center text-xs text-slate-400">ไม่พบรายการ</div>}
+              <div className="flex flex-col gap-0.5">
+                {filtered.map((o) => {
+                  const on = selected.includes(o.label);
+                  return (
+                    <button key={o.key} type="button" onClick={() => toggle(o.label)}
+                      className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${on ? "bg-rose-50 text-rose-700" : "text-slate-700 hover:bg-slate-50"}`}>
+                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${on ? "border-rose-500 bg-rose-500 text-white" : "border-slate-300"}`}>{on ? "✓" : ""}</span>
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {customSel.length > 0 && (
+                <div className="mt-2 border-t border-slate-100 pt-2">
+                  <div className="px-2 pb-1 text-[10px] text-slate-400">เพิ่มเอง</div>
+                  <div className="flex flex-wrap gap-1.5 px-2">
+                    {customSel.map((c) => <Chip key={c} on onClick={() => toggle(c)}>{c} ✕</Chip>)}
+                  </div>
+                </div>
+              )}
+            </div>
+            {allowCustom && <div className="border-t border-slate-100 px-4 py-2">{customInput(true)}</div>}
+            <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2.5">
+              <span className="text-[11px] text-slate-400">เลือกแล้ว {selected.length} รายการ</span>
+              <button type="button" onClick={() => setOpen(false)} className="h-8 rounded-lg bg-rose-500 px-4 text-xs font-medium text-white hover:bg-rose-600">เสร็จ</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
 export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
   const [icon, setIcon] = useState("🧩");
   const [iconImg, setIconImg] = useState<string | null>(null);       // โลโก้/รูปไอคอน (R2 key) — ถ้ามีจะใช้แทนอีโมจิ
   const [name, setName] = useState("");
   const [purpose, setPurpose] = useState("");
-  const [roles, setRoles] = useState<{ key: string; label: string }[]>([]);
+  const [roles, setRoles] = useState<Opt[]>([]);
   const [selRoles, setSelRoles] = useState<string[]>([]);
   const [usersText, setUsersText] = useState("");                    // เผื่อโหลด role ไม่ได้
   const [dataFields, setDataFields] = useState<string[]>([]);        // ข้อมูลที่ต้องเก็บ (preset + เพิ่มเอง)
-  const [dataCustom, setDataCustom] = useState("");
   const [features, setFeatures] = useState<string[]>([]);
   const [example, setExample] = useState("");
-  const [modules, setModules] = useState<{ key: string; label: string }[]>([]);
+  const [modules, setModules] = useState<Opt[]>([]);
   const [selModules, setSelModules] = useState<string[]>([]);
-  const [modCustom, setModCustom] = useState("");
   const [notes, setNotes] = useState("");
   const [generated, setGenerated] = useState("");
 
@@ -74,12 +211,6 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
       .then((j) => { if (alive && Array.isArray(j.data)) setModules(j.data.map((x: { module_key: string; label: string }) => ({ key: x.module_key, label: x.label }))); }).catch(() => {});
     return () => { alive = false; };
   }, [open]);
-
-  const toggle = (arr: string[], set: (v: string[]) => void, v: string) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
-  const addChip = (arr: string[], set: (v: string[]) => void, v: string, clear: () => void) => {
-    const t = v.trim(); if (!t) return;
-    if (!arr.includes(t)) set([...arr, t]); clear();
-  };
 
   const build = () => {
     if (!name.trim()) { toast.error("ใส่ชื่อแอปก่อน"); return; }
@@ -157,66 +288,34 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
 
         <Field label="แอปนี้ช่วยทำอะไร / แก้ปัญหาอะไร *" hint="สั้น ๆ 1-2 ประโยค" value={purpose} onChange={setPurpose} area />
 
-        {/* ใครใช้ = ติ๊ก role จริง */}
-        <div>
-          <span className="text-[11px] font-medium text-slate-600">ใครใช้แอปนี้</span>
-          <span className="ml-1 text-[10px] text-slate-400">(ติ๊กตำแหน่ง)</span>
-          {roles.length > 0 ? (
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {roles.map((r) => <Chip key={r.key} on={selRoles.includes(r.label)} onClick={() => toggle(selRoles, setSelRoles, r.label)}>{r.label}</Chip>)}
-            </div>
-          ) : (
+        {/* ใครใช้ = ติ๊ก role จริง (เกิน 6 → popup) */}
+        {roles.length > 0 ? (
+          <MultiSelect label="ใครใช้แอปนี้" hint="(ติ๊กตำแหน่ง)" options={roles}
+            selected={selRoles} setSelected={setSelRoles} pickerTitle="เลือกผู้ใช้งาน (role)" />
+        ) : (
+          <div>
+            <span className="text-[11px] font-medium text-slate-600">ใครใช้แอปนี้</span>
             <input value={usersText} onChange={(e) => setUsersText(e.target.value)} placeholder="เช่น ฝ่ายคลัง, หัวหน้าช่าง"
               className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-300" />
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* ข้อมูลที่ต้องเก็บ = preset + เพิ่มเอง */}
-        <div>
-          <span className="text-[11px] font-medium text-slate-600">ข้อมูลที่ต้องเก็บ *</span>
-          <span className="ml-1 text-[10px] text-slate-400">(ติ๊กที่จำเป็น หรือพิมพ์เพิ่มเอง)</span>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {DATA_PRESETS.map((d) => <Chip key={d} on={dataFields.includes(d)} onClick={() => toggle(dataFields, setDataFields, d)}>{d}</Chip>)}
-            {dataFields.filter((d) => !DATA_PRESETS.includes(d)).map((d) => <Chip key={d} on onClick={() => toggle(dataFields, setDataFields, d)}>{d}</Chip>)}
-          </div>
-          <div className="mt-1.5 flex gap-1">
-            <input value={dataCustom} onChange={(e) => setDataCustom(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addChip(dataFields, setDataFields, dataCustom, () => setDataCustom("")); } }}
-              placeholder="เพิ่มข้อมูลอื่น เช่น เลขซีเรียล แล้วกด Enter"
-              className="h-8 flex-1 rounded-lg border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-rose-300" />
-            <button type="button" onClick={() => addChip(dataFields, setDataFields, dataCustom, () => setDataCustom(""))}
-              className="h-8 rounded-lg border border-rose-300 px-3 text-xs text-rose-600 hover:bg-rose-50">＋ เพิ่ม</button>
-          </div>
-        </div>
+        {/* ข้อมูลที่ต้องเก็บ = preset + เพิ่มเอง (15 ตัว → popup) */}
+        <MultiSelect label="ข้อมูลที่ต้องเก็บ" required hint="(ติ๊กที่จำเป็น หรือพิมพ์เพิ่มเอง)"
+          options={DATA_PRESETS.map((d) => ({ key: d, label: d }))} selected={dataFields} setSelected={setDataFields}
+          allowCustom addPlaceholder="เพิ่มข้อมูลอื่น เช่น เลขซีเรียล" pickerTitle="เลือกข้อมูลที่ต้องเก็บ" />
 
-        {/* ฟีเจอร์ */}
-        <div>
-          <span className="text-[11px] font-medium text-slate-600">อยากให้ทำอะไรได้บ้าง</span>
-          <span className="ml-1 text-[10px] text-slate-400">(ติ๊กเลือก)</span>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {FEATURE_OPTIONS.map((f) => <Chip key={f} on={features.includes(f)} onClick={() => toggle(features, setFeatures, f)}>{f}</Chip>)}
-          </div>
-        </div>
+        {/* ฟีเจอร์ (16 ตัว → popup) */}
+        <MultiSelect label="อยากให้ทำอะไรได้บ้าง" hint="(ติ๊กเลือก)"
+          options={FEATURE_OPTIONS.map((f) => ({ key: f, label: f }))} selected={features} setSelected={setFeatures}
+          pickerTitle="เลือกฟีเจอร์ที่ต้องการ" />
 
         <Field label="ตัวอย่างการใช้งานจริง 1 เคส" hint="เช่น พนักงานเพิ่มรายการเบิก → หัวหน้าอนุมัติ → พิมพ์ใบเบิก" value={example} onChange={setExample} area />
 
-        {/* เชื่อมกับข้อมูลเดิม = โมดูลจริง */}
-        <div>
-          <span className="text-[11px] font-medium text-slate-600">เชื่อมกับข้อมูลเดิมในระบบ</span>
-          <span className="ml-1 text-[10px] text-slate-400">(ติ๊กจากข้อมูลที่เรามี — ไม่มีก็ข้ามได้)</span>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {modules.map((m) => <Chip key={m.key} on={selModules.includes(m.label)} onClick={() => toggle(selModules, setSelModules, m.label)}>{m.label}</Chip>)}
-            {selModules.filter((m) => !modules.some((x) => x.label === m)).map((m) => <Chip key={m} on onClick={() => toggle(selModules, setSelModules, m)}>{m}</Chip>)}
-          </div>
-          <div className="mt-1.5 flex gap-1">
-            <input value={modCustom} onChange={(e) => setModCustom(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addChip(selModules, setSelModules, modCustom, () => setModCustom("")); } }}
-              placeholder="เพิ่มเองถ้าไม่มีในรายการ แล้วกด Enter"
-              className="h-8 flex-1 rounded-lg border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-rose-300" />
-            <button type="button" onClick={() => addChip(selModules, setSelModules, modCustom, () => setModCustom(""))}
-              className="h-8 rounded-lg border border-rose-300 px-3 text-xs text-rose-600 hover:bg-rose-50">＋ เพิ่ม</button>
-          </div>
-        </div>
+        {/* เชื่อมกับข้อมูลเดิม = โมดูลจริง (เยอะ → popup) */}
+        <MultiSelect label="เชื่อมกับข้อมูลเดิมในระบบ" hint="(ติ๊กจากข้อมูลที่เรามี — ไม่มีก็ข้ามได้)"
+          options={modules} selected={selModules} setSelected={setSelModules}
+          allowCustom addPlaceholder="เพิ่มเองถ้าไม่มีในรายการ" pickerTitle="เชื่อมกับข้อมูลเดิม" />
 
         <Field label="อื่นๆ ที่อยากบอก" hint="สิ่งที่ต้องระวัง / อยากได้พิเศษ" value={notes} onChange={setNotes} area />
 
