@@ -240,7 +240,11 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
           <p className="text-[11px] text-slate-400">{t("แม่แบบคอนเทนต์ (ถ้ามี)", "Content template (optional)")}</p>
           <button type="button" onClick={() => setTplModalOpen(true)} className="text-[11px] text-violet-600 hover:underline">⚙️ {t("จัดการแม่แบบ", "Manage")}</button>
         </div>
-        <select value={tplId} onChange={(e) => setTplId(e.target.value)} className="h-9 w-full border border-slate-200 rounded-lg px-2 text-sm bg-white">
+        <select value={tplId} onChange={(e) => {
+          const id = e.target.value; setTplId(id);
+          const tpl = contentTpls.find((c) => c.id === id);   // เลือกแม่แบบ → เติมประเภท + ผู้รับผิดชอบให้ (แก้ทับเองได้)
+          if (tpl) { setPostType(tpl.post_type || ""); setTypeAssignees((tpl.assignees ?? []).map((a) => ({ id: a.id, label: a.name }))); }
+        }} className="h-9 w-full border border-slate-200 rounded-lg px-2 text-sm bg-white">
           <option value="">{ctLoading ? t("กำลังโหลด...", "Loading...") : t("— ไม่ใช้แม่แบบ —", "— none —")}</option>
           {contentTpls.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
         </select>
@@ -453,6 +457,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
           )}
           {sub.subtask_type === "content" && (
             <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2 space-y-1.5">
+              {sub.content_preview?.title && <p className="text-xs font-medium text-slate-700">📄 {sub.content_preview.title}</p>}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex flex-wrap gap-1 min-w-0">
                   {(sub.content_preview?.platforms ?? []).map((p) => <PlatformChip key={p} code={p} />)}

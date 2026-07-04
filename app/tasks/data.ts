@@ -63,7 +63,7 @@ export type CreativeSubtask = {
   status: SubtaskStatus; due_date: string | null;
   required_before_next: boolean; sort_order: number;
   subtask_type?: string | null; config?: SubtaskStepConfig;
-  content_preview?: { platforms: string[]; post_type: string | null; status: string | null; scheduled_at: string | null; captions: { platform: string; caption: string | null }[] } | null;   // งานย่อยชนิด content — พรีวิวคอนเทนต์ที่ผูก
+  content_preview?: { title: string | null; platforms: string[]; post_type: string | null; status: string | null; scheduled_at: string | null; captions: { platform: string; caption: string | null }[] } | null;   // งานย่อยชนิด content — พรีวิวคอนเทนต์ที่ผูก
   image_sync_targets?: { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; image_order?: string[]; replace_map?: Record<string, Record<string, string>> } | null; // ปลายทางรูป + รูปร่างต่อ SKU + จับคู่แทนรูป ตอนส่งงาน
 };
 

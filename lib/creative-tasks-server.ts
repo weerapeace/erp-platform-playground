@@ -107,7 +107,7 @@ export async function materializeContentSubtasks(
           const tr2 = tpl as { title?: string | null; post_type?: string | null; platforms?: string[] | null };
           post_type = post_type || (tr2.post_type ?? null);
           if (!platforms.length) platforms = tr2.platforms ?? [];
-          if (!s.title) title = tr2.title || "คอนเทนต์";
+          if (tr2.title) title = tr2.title;   // สร้างจากแม่แบบ → ใช้ชื่อแม่แบบเป็นชื่อคอนเทนต์
           const { data: caps } = await admin.from("erp_creative_content_captions").select("platform, caption, hashtags, caption_type, sort_order").eq("content_id", tplId).order("sort_order", { ascending: true });
           tplCaps = (caps ?? []) as Record<string, unknown>[];
         }

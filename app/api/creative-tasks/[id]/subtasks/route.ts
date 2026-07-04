@@ -212,12 +212,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const cPrev = new Map<string, Record<string, unknown>>();
   if (contentIds.length) {
     const [{ data: cs }, { data: caps }] = await Promise.all([
-      admin.from("erp_creative_content").select("id, platforms, post_type, status, scheduled_at").in("id", contentIds),
+      admin.from("erp_creative_content").select("id, title, platforms, post_type, status, scheduled_at").in("id", contentIds),
       admin.from("erp_creative_content_captions").select("content_id, platform, caption").in("content_id", contentIds).order("sort_order", { ascending: true }),
     ]);
     const capBy = new Map<string, { platform: string; caption: string | null }[]>();
     for (const c of (caps ?? []) as { content_id: string; platform: string; caption: string | null }[]) { const arr = capBy.get(c.content_id) ?? []; arr.push({ platform: c.platform, caption: c.caption }); capBy.set(c.content_id, arr); }
-    for (const c of (cs ?? []) as Record<string, unknown>[]) cPrev.set(String(c.id), { platforms: c.platforms ?? [], post_type: c.post_type ?? null, status: c.status ?? null, scheduled_at: c.scheduled_at ?? null, captions: capBy.get(String(c.id)) ?? [] });
+    for (const c of (cs ?? []) as Record<string, unknown>[]) cPrev.set(String(c.id), { title: c.title ?? null, platforms: c.platforms ?? [], post_type: c.post_type ?? null, status: c.status ?? null, scheduled_at: c.scheduled_at ?? null, captions: capBy.get(String(c.id)) ?? [] });
   }
   return NextResponse.json({ data: rows.map((r) => {
     const ist = r.image_sync_targets as { product_labels?: Record<string, string> } | null;
