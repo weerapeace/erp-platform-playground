@@ -52,13 +52,17 @@ export async function lineListProducts(apiKey: string, params: { page?: number; 
 export async function lineUpdatePrices(apiKey: string, productId: string, variants: { variantId: string | number; price: number; instantDiscount?: number }[]): Promise<{ ok: boolean; status: number; error?: string }> {
   try {
     // LINE ต้องการ variants.id เป็นตัวเลข + price ตัวเลข + instantDiscount (ส่วนลดทันที, บาท) required
-    const payload = { variants: variants.map((v) => {
+    const items = variants.map((v) => {
       const price = Number(v.price) || 0;
       let disc = Number(v.instantDiscount) || 0;
       if (disc < 0) disc = 0;
       if (disc > price) disc = price;   // กันส่วนลดเกินราคา (ราคาสุทธิ < 0)
       return { id: Number(v.variantId), price, instantDiscount: disc };
-    }) };
+    });
+    // LINE บังคับ instantDiscount ที่ระดับบนสุดด้วย → ถ้าทุก variant ลดเท่ากันใช้ค่านั้น ไม่งั้น 0 (อาศัยต่อ variant)
+    const discs = items.map((i) => i.instantDiscount);
+    const topDisc = discs.length > 0 && discs.every((d) => d === discs[0]) ? discs[0] : 0;
+    const payload = { instantDiscount: topDisc, variants: items };
     const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}/prices`, {
       method: "PATCH", headers: headers(apiKey), body: JSON.stringify(payload),
     });

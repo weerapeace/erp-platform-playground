@@ -204,19 +204,19 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     if (!dirty || savingAll) return;
     setSavingAll(true);
     try {
+      // ยิงทุกคำขอพร้อมกัน (parallel) — เร็วกว่าเรียงทีละตัวมาก
+      const jobs: Promise<Response>[] = [];
       for (const pid of dirtyPlatforms) {
         const d = drafts[pid] ?? {};
-        const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: pid, title: d.title ?? null, description: d.description ?? null, category_path: d.category_path ?? null, image_keys: d.image_keys ?? [], extra: d.extra ?? {} }) });
-        const j = await r.json(); if (j.error) throw new Error(j.error);
+        jobs.push(apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: pid, title: d.title ?? null, description: d.description ?? null, category_path: d.category_path ?? null, image_keys: d.image_keys ?? [], extra: d.extra ?? {} }) }));
       }
       for (const [skuId, edit] of Object.entries(priceEdits)) {
         for (const field of ["fake_price", "list_price"] as const) {
-          if (field in edit) {
-            const r = await apiFetch("/api/product-platforms/sku-price", { method: "POST", body: JSON.stringify({ sku_id: skuId, field, price: edit[field] }) });
-            const j = await r.json(); if (j.error) throw new Error(j.error);
-          }
+          if (field in edit) jobs.push(apiFetch("/api/product-platforms/sku-price", { method: "POST", body: JSON.stringify({ sku_id: skuId, field, price: edit[field] }) }));
         }
       }
+      const ress = await Promise.all(jobs);
+      for (const r of ress) { const j = await r.json(); if (j.error) throw new Error(j.error); }
       setDirtyPlatforms(new Set()); setPriceEdits({});
       toast("success", "บันทึกแล้ว"); await load();
     } catch (e) { toast("error", (e as Error).message); } finally { setSavingAll(false); }
