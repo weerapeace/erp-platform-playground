@@ -15,6 +15,7 @@ type Cat = { id: string; name: string };
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Mapping = { central_category_id: string; platform_id: string; platform_category_path: string | null };
 type Opt = { external_id: string; name_en: string; name_th: string };
+type PfRow = { id: string; code: string; name_th: string; icon_key: string | null; is_active: boolean; sort_order: number };
 
 const key = (c: string, p: string) => `${c}:${p}`;
 
@@ -86,6 +87,9 @@ export default function PlatformCategoryMapPage() {
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [pfOpen, setPfOpen] = useState(false);          // โมดัลตั้งค่าร้านที่แสดง
+  const [allPfs, setAllPfs] = useState<PfRow[]>([]);
+  const [pfBusy, setPfBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +107,24 @@ export default function PlatformCategoryMapPage() {
   const pick = (catId: string) => { setSel(catId); const d: Record<string, string> = {}; for (const p of platforms) d[p.id] = map[key(catId, p.id)] ?? ""; setDraft(d); };
   const mappedCount = useCallback((catId: string) => platforms.reduce((n, p) => n + (map[key(catId, p.id)] ? 1 : 0), 0), [platforms, map]);
   const filtered = useMemo(() => { const s = q.trim().toLowerCase(); return s ? cats.filter((c) => c.name.toLowerCase().includes(s)) : cats; }, [cats, q]);
+
+  // ── ตั้งค่าร้านที่แสดง (erp_platforms) ────────────────────────────
+  const openPfSettings = useCallback(() => {
+    setPfOpen(true);
+    apiFetch("/api/platforms").then((r) => r.json()).then((j) => setAllPfs((j.data ?? []) as PfRow[])).catch(() => {});
+  }, []);
+  const togglePf = useCallback(async (row: PfRow) => {
+    setPfBusy(true);
+    try {
+      await apiFetch("/api/platforms", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, is_active: !row.is_active }) });
+      setAllPfs((a) => a.map((x) => (x.id === row.id ? { ...x, is_active: !x.is_active } : x)));
+      await load();  // อัปเดตคอลัมน์ร้านในหน้าจับคู่ (ดึงเฉพาะที่เปิด)
+    } catch { toast.error("บันทึกไม่สำเร็จ"); } finally { setPfBusy(false); }
+  }, [load, toast]);
+  const movePf = useCallback(async (idx: number, dir: -1 | 1) => {
+    const j = idx + dir;
+    setAllPfs((cur) => { if (j < 0 || j >= cur.length) return cur; const n = [...cur]; [n[idx], n[j]] = [n[j], n[idx]]; void apiFetch("/api/platforms", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order: n.map((p) => p.id) }) }).then(() => load()); return n; });
+  }, [load]);
 
   const addCat = async () => {
     const name = newCat.trim(); if (!name) return;
@@ -171,8 +193,12 @@ export default function PlatformCategoryMapPage() {
           <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">🗂️ จับคู่หมวดหมู่แพลตฟอร์ม</h1>
           <p className="text-sm text-slate-500 mt-1">สร้าง “หมวดกลาง” ของเราเอง → จับคู่กับหมวดของแต่ละร้าน (เลือกจากรายการที่นำเข้าไว้)</p>
         </div>
-        <button type="button" onClick={() => { setImportOpen(true); setImportMsg(null); }}
-          className="shrink-0 h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">📂 นำเข้าหมวดของร้าน</button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button type="button" onClick={openPfSettings}
+            className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ ตั้งค่าร้านที่แสดง</button>
+          <button type="button" onClick={() => { setImportOpen(true); setImportMsg(null); }}
+            className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">📂 นำเข้าหมวดของร้าน</button>
+        </div>
       </div>
 
       {loading ? (
@@ -262,6 +288,37 @@ export default function PlatformCategoryMapPage() {
                 {importing ? "กำลังนำเข้า…" : "⬆️ เลือกไฟล์หมวดหมู่"}
               </button>
               {importMsg && <div className="text-xs text-slate-600">{importMsg}</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pfOpen && (
+        <div className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center p-4" onClick={() => !pfBusy && setPfOpen(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-slate-800">⚙️ ตั้งค่าร้านที่แสดง</h3>
+              <button type="button" onClick={() => setPfOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+            </div>
+            <div className="p-4">
+              <p className="text-[11px] text-slate-400 mb-2">เปิด/ปิด และเรียงลำดับร้าน — มีผลกับทุกที่ที่แสดง “ร้านที่เปิดใช้” (เช่น แท็บแพลตฟอร์มของสินค้า)</p>
+              <div className="space-y-1">
+                {allPfs.map((p, i) => (
+                  <div key={p.id} className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${p.is_active ? "border-slate-200" : "border-slate-100 bg-slate-50"}`}>
+                    <div className="flex flex-col leading-none">
+                      <button type="button" disabled={i === 0 || pfBusy} onClick={() => void movePf(i, -1)} className="text-slate-400 hover:text-slate-700 disabled:opacity-20 text-[10px]">▲</button>
+                      <button type="button" disabled={i === allPfs.length - 1 || pfBusy} onClick={() => void movePf(i, 1)} className="text-slate-400 hover:text-slate-700 disabled:opacity-20 text-[10px]">▼</button>
+                    </div>
+                    <PlatformIcon code={p.code} iconKey={p.icon_key} size={18} />
+                    <span className={`flex-1 text-sm truncate ${p.is_active ? "text-slate-700" : "text-slate-400"}`}>{p.name_th}</span>
+                    <button type="button" disabled={pfBusy} onClick={() => void togglePf(p)}
+                      className={`text-xs px-2.5 py-1 rounded-full border whitespace-nowrap disabled:opacity-50 ${p.is_active ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-slate-500 bg-white border-slate-200"}`}>
+                      {p.is_active ? "✓ แสดง" : "ซ่อนอยู่"}
+                    </button>
+                  </div>
+                ))}
+                {allPfs.length === 0 && <div className="text-xs text-slate-400 text-center py-6">กำลังโหลด…</div>}
+              </div>
             </div>
           </div>
         </div>
