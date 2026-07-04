@@ -25,7 +25,7 @@ import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { PlatformChip } from "./platform-chip";
 import { platformLabel, useCreativeOptions } from "./use-options";
 import {
-  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent,
+  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent, getPlatformSettings,
   type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem,
 } from "./data";
 
@@ -884,7 +884,18 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
   const t = useT();
   const platforms = sub.content_preview?.platforms ?? [];
   const [notes, setNotes] = useState<Record<string, string>>(() => ({ ...((sub.config?.platform_notes ?? {}) as Record<string, string>) }));
+  const [prefilled, setPrefilled] = useState(false);
   const [busy, setBusy] = useState(false);
+  // เติมค่าเริ่มต้นจาก "หมายเหตุแพลตฟอร์ม (ทั่วไป)" ให้ช่องที่ยังว่าง (แก้เฉพาะงานได้)
+  useEffect(() => {
+    getPlatformSettings().then((ps) => setNotes((n) => {
+      const next = { ...n }; let changed = false;
+      for (const p of platforms) { if (!next[p]?.trim() && ps[p]?.note?.trim()) { next[p] = ps[p]!.note as string; changed = true; } }
+      if (changed) setPrefilled(true);
+      return next;
+    })).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const save = async () => {
     setBusy(true);
     try { await updateSubtask(taskId, sub.id, { config: { ...(sub.config ?? {}), platform_notes: notes } }); await reload(); pushToast("success", t("บันทึกแล้ว", "Saved")); onClose(); }
@@ -894,6 +905,7 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
     <ERPModal open onClose={onClose} size="md" title={t("รายละเอียดงาน — ต่อแพลตฟอร์ม", "Work details — per platform")}>
       <div className="space-y-3">
         <p className="text-[11px] text-slate-400">{t("หมายเหตุ/สิ่งที่ต้องเตรียม ของคอนเทนต์นี้ แยกต่อแพลตฟอร์ม (คนทำงานเปิดดูได้)", "Notes / requirements for this content, per platform (visible to workers)")}</p>
+        {prefilled && <p className="text-[11px] text-amber-600">✎ {t("เติมค่าเริ่มต้นจากหมายเหตุแพลตฟอร์มให้แล้ว — แก้เฉพาะงานนี้ได้", "Prefilled from platform defaults — edit for this content")}</p>}
         {platforms.length === 0 && <p className="text-sm text-slate-400 italic">{t("คอนเทนต์นี้ยังไม่ได้เลือกแพลตฟอร์ม", "This content has no platforms yet")}</p>}
         {platforms.map((p) => (
           <div key={p}>
