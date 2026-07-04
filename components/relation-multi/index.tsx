@@ -442,7 +442,8 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
   onDone: (created: number, skipped: number) => void; onClose: () => void;
 }) {
   const baseCode = String(base[titleField] ?? "");
-  const colorLabel = String(base[groupField] ?? "");
+  // ชื่อสีสำหรับตั้งชื่อ = color_th ของตัวฐาน (ไทย) · จัดกลุ่มด้วยฟิลด์อื่น (เช่น color) ได้
+  const colorLabel = String(base.color_th ?? base[groupField] ?? base.color ?? "");
   const [optName, setOptName] = useState("แบบพิมพ์");
   const [opts, setOpts] = useState<{ code: string; value: string }[]>([{ code: "", value: "" }]);
   const [saving, setSaving] = useState(false);
@@ -464,8 +465,8 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
         [fkField]: parentValue,
         [titleField]: code,
         name_th: `${colorLabel} / ${o.value}`,
-        color: base.color ?? colorLabel,
-        color_th: base.color_th ?? colorLabel,
+        color: base.color ?? colorLabel,                 // สีฐาน (ใช้จัดกลุ่ม)
+        color_th: `${colorLabel} / ${o.value}`,          // ชื่อเต็ม (= name_th) — platform ดึงจากนี่
         list_price: base.list_price ?? null,
         fake_price: base.fake_price ?? null,
         attribute_values: { variant_option: { code: o.code, name: optName, value: o.value } },
