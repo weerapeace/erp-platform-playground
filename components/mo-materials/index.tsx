@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { needsCut as needsCutRule } from "@/lib/cut-rules";
+import { ERPModal } from "@/components/modal";
 
 export type MoMatPreview = {
   key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null;
@@ -48,6 +49,9 @@ export function MoMaterialsTable({
   const [matTab, setMatTab] = useState<"sum" | "block">("sum");
   const [editBuy, setEditBuy] = useState<Set<string>>(new Set());
   const [added, setAdded] = useState<Set<string>>(new Set());   // key แถวที่กดใส่ตะกร้าแล้ว (โชว์ "✓ ในตะกร้า")
+  const [buyRow, setBuyRow] = useState<MatRow | null>(null);    // ป๊อปยืนยันจำนวนก่อนใส่ตะกร้าขอซื้อ
+  const [buyQty, setBuyQty] = useState("");
+  const [bulkConfirm, setBulkConfirm] = useState<null | "ready" | "cut">(null);   // ยืนยันเตรียม/ตัดครบทั้งหมด
   // จำนวนของไซส์นั้น (กลุ่ม C): บล็อกที่ผูกไซส์ใช้จำนวนของไซส์นั้น · บล็อกที่ไม่ผูกไซส์ใช้จำนวนรวมทั้งใบ
   const rowQty = (sl: string | null | undefined) => (sl != null && sizeQty[sl] != null) ? sizeQty[sl] : (qty || 0);
 
@@ -97,8 +101,8 @@ export function MoMaterialsTable({
       if (onAddToCart && r.to_purchase > 0.0001) {
         return added.has(r.key)
           ? <span className="text-[11px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 whitespace-nowrap">✓ ในตะกร้า</span>
-          : <button type="button" title={`ใส่ตะกร้าขอซื้อ ${fmt(r.to_purchase)} ${r.uom ?? ""}`}
-              onClick={() => { onAddToCart({ component_sku: r.component_sku, component_name: r.component_name, uom: r.uom, to_purchase: r.to_purchase }); setAdded((s) => { const n = new Set(s); n.add(r.key); return n; }); }}
+          : <button type="button" title="ขอซื้อ — แก้จำนวนแล้วยืนยัน"
+              onClick={() => { setBuyRow(r); setBuyQty(String(r.to_purchase)); }}
               className="text-[11px] px-2 py-0.5 rounded border border-rose-300 text-rose-600 hover:bg-rose-50 whitespace-nowrap">🛒 ขอซื้อ</button>;
       }
       return <span className="text-slate-300 text-xs">— ยังไม่ขอ</span>;
@@ -148,10 +152,10 @@ export function MoMaterialsTable({
         </div>
         <div className="flex items-center gap-1.5">
           {matTab === "sum" && editable && canEdit && onChangeSummary && summary.length > 0 && (
-            <button type="button" onClick={() => markAllReady(!allReady)} className="h-7 px-3 text-xs font-medium border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 whitespace-nowrap">{allReady ? "ยกเลิกเตรียมทั้งหมด" : "✓ เตรียมครบทั้งหมด"}</button>
+            <button type="button" onClick={() => allReady ? markAllReady(false) : setBulkConfirm("ready")} className="h-7 px-3 text-xs font-medium border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 whitespace-nowrap">{allReady ? "ยกเลิกเตรียมทั้งหมด" : "✓ เตรียมครบทั้งหมด"}</button>
           )}
           {matTab === "block" && canEdit && onToggleCut && cutLines.length > 0 && (
-            <button type="button" onClick={() => markAllCut(!allCut)} className="h-7 px-3 text-xs font-medium border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 whitespace-nowrap">{allCut ? "ยกเลิกตัดทั้งหมด" : "✓ ตัดครบทั้งหมด"}</button>
+            <button type="button" onClick={() => allCut ? markAllCut(false) : setBulkConfirm("cut")} className="h-7 px-3 text-xs font-medium border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 whitespace-nowrap">{allCut ? "ยกเลิกตัดทั้งหมด" : "✓ ตัดครบทั้งหมด"}</button>
           )}
           {editable && matTab === "sum" && needCount > 0 && canEdit && onCreatePR && (
             <button type="button" onClick={() => onCreatePR(needCount)} className="h-7 px-3 text-xs font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 whitespace-nowrap">🛒 สร้างใบขอซื้อ ({needCount})</button>
@@ -170,6 +174,40 @@ export function MoMaterialsTable({
           groupByOptions={[{ key: "material_type", label: "ประเภท" }, { key: "component", label: "วัตถุดิบ" }]}
         />
       )}
+
+      {/* ป๊อปยืนยันจำนวนก่อนใส่ตะกร้าขอซื้อ */}
+      <ERPModal open={buyRow !== null} onClose={() => setBuyRow(null)} size="sm" title="🛒 ขอซื้อวัตถุดิบ"
+        footer={<>
+          <button onClick={() => setBuyRow(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
+          <button onClick={() => { if (buyRow) { onAddToCart?.({ component_sku: buyRow.component_sku, component_name: buyRow.component_name, uom: buyRow.uom, to_purchase: Number(buyQty) || 0 }); setAdded((s) => { const n = new Set(s); n.add(buyRow.key); return n; }); } setBuyRow(null); }}
+            disabled={!(Number(buyQty) > 0)} className="h-9 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">ใส่ตะกร้า</button>
+        </>}>
+        {buyRow && (
+          <div className="space-y-3">
+            <div className="text-sm text-slate-700"><code className="text-[10px] text-slate-400">{buyRow.component_sku}</code> {buyRow.component_name}</div>
+            <label className="block">
+              <span className="text-[11px] text-slate-500">จำนวนที่ขอซื้อ ({buyRow.uom ?? ""})</span>
+              <input type="number" min={0} step="any" autoFocus value={buyQty} onFocus={(e) => e.target.select()} onChange={(e) => setBuyQty(e.target.value)}
+                className="w-full h-10 mt-0.5 px-3 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-400" />
+            </label>
+            <p className="text-[11px] text-slate-400">ค่าเริ่มต้น = ต้องขอซื้อ ({fmt(buyRow.to_purchase)}) — แก้ได้ · ยืนยันแล้วจะหย่อนลงตะกร้าหน้า “ขอซื้อ”</p>
+          </div>
+        )}
+      </ERPModal>
+
+      {/* ยืนยันเตรียม/ตัดครบทั้งหมด */}
+      <ERPModal open={bulkConfirm !== null} onClose={() => setBulkConfirm(null)} size="sm" title={bulkConfirm === "cut" ? "ยืนยันตัดครบทั้งหมด" : "ยืนยันเตรียมครบทั้งหมด"}
+        footer={<>
+          <button onClick={() => setBulkConfirm(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
+          <button onClick={() => { if (bulkConfirm === "cut") markAllCut(true); else markAllReady(true); setBulkConfirm(null); }}
+            className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">ยืนยัน</button>
+        </>}>
+        <p className="text-sm text-slate-600">
+          {bulkConfirm === "cut"
+            ? <>ทำเครื่องหมาย <b>ตัดครบ</b> ให้บล็อกที่ต้องตัดทั้งหมด <b className="text-emerald-700">{cutLines.length}</b> รายการ</>
+            : <>ทำเครื่องหมาย <b>เตรียมครบ</b> ให้วัตถุดิบทั้งหมด <b className="text-emerald-700">{summary.length}</b> ชนิด</>}
+        </p>
+      </ERPModal>
     </div>
   );
 }
