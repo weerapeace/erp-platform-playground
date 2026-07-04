@@ -60,7 +60,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const idOf = new Map<string, string>();   // sku code → skus_v2.id
   if (allSkus.length) {
     const { data: skus } = await admin.from("skus_v2").select("id, code, list_price").in("code", allSkus);
-    for (const s of ((skus ?? []) as Record<string, unknown>[])) { const p = Number(s.list_price); if (!Number.isNaN(p)) priceOf.set(String(s.code), p); idOf.set(String(s.code), String(s.id)); }
+    // ส่งเฉพาะที่มีราคา > 0 · ราคาว่าง/0 = ข้าม (กันเผลอส่งราคา 0 ทับราคาจริงบน LINE)
+    for (const s of ((skus ?? []) as Record<string, unknown>[])) { const p = Number(s.list_price); if (Number.isFinite(p) && p > 0) priceOf.set(String(s.code), p); idOf.set(String(s.code), String(s.id)); }
   }
 
   // ส่วนลดต่อ SKU (instantDiscount) — เก็บใน platform_listing_drafts.extra.discounts = { [skuId]: { on, value } }
