@@ -20,6 +20,8 @@ import { requiredChecks } from "@/lib/platform-required-fields";
 
 // ตัวแก้สินค้ากลาง (SKU) — เปิดจากตัวจัดการเพื่อแก้ราคา/สี/รูป หรือเพิ่มสีใหม่ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+// ตัวช่วยสร้าง SKU หลายชั้น (สี × ตัวเลือก) — ของกลาง
+const VariantMatrixModal = dynamic(() => import("@/components/variant-matrix").then((m) => m.VariantMatrixModal), { ssr: false });
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null; capabilities?: Record<string, unknown> };
 type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; extra?: Record<string, unknown>; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
@@ -119,6 +121,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [catInput, setCatInput] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [skuEditor, setSkuEditor] = useState<{ recordId: string | null } | null>(null); // แก้/เพิ่มสี (SKU)
+  const [matrixOpen, setMatrixOpen] = useState(false); // ตัวช่วยสร้าง SKU หลายชั้น
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [massPrice, setMassPrice] = useState("");   // Mass fill ราคาทุก SKU
   const [massBusy, setMassBusy] = useState(false);
@@ -416,9 +419,14 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-[11px] text-slate-400">SKU / สี ที่จะส่งไป {activePf.name_th} ({variants.length})</p>
-                    {canEdit && (activePf.capabilities?.add_variant !== false
-                      ? <button onClick={() => setSkuEditor({ recordId: null })} className="text-xs text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50">➕ เพิ่มสี</button>
-                      : <span className="text-[10px] text-amber-600" title="แพลตฟอร์มนี้เพิ่มสีใหม่ใน listing เดิมไม่ได้ ต้องสร้าง listing ใหม่">⚠ เพิ่มสีใน listing เดิมไม่ได้</span>)}
+                    {canEdit && (
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => setMatrixOpen(true)} title="สร้าง SKU หลายชั้น (สี × ตัวเลือก เช่น แบบพิมพ์) ทีเดียว" className="text-xs text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50">🧬 หลายชั้น</button>
+                        {activePf.capabilities?.add_variant !== false
+                          ? <button onClick={() => setSkuEditor({ recordId: null })} className="text-xs text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50">➕ เพิ่มสี</button>
+                          : <span className="text-[10px] text-amber-600" title="แพลตฟอร์มนี้เพิ่มสีใหม่ใน listing เดิมไม่ได้ ต้องสร้าง listing ใหม่">⚠ เพิ่มสีใน listing เดิมไม่ได้</span>}
+                      </div>
+                    )}
                   </div>
                   {canEdit && variants.length > 0 && (
                     <div className="flex flex-wrap items-center gap-2 mb-2 p-2 rounded-lg bg-slate-50 border border-slate-200">
@@ -520,6 +528,10 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
           createTitle="เพิ่มสี (SKU ใหม่)"
           createDefaults={skuEditor.recordId ? undefined : { parent_sku_id: parent.id }}
           onClose={() => { setSkuEditor(null); load(); }} onChanged={load} />
+      )}
+      {/* ตัวช่วยสร้าง SKU หลายชั้น (สี × ตัวเลือก) — ปิดแล้วโหลดตาราง SKU ใหม่ */}
+      {matrixOpen && parent && (
+        <VariantMatrixModal parentSkuId={parent.id} onClose={() => setMatrixOpen(false)} onCreated={load} />
       )}
     </>,
     document.body,
