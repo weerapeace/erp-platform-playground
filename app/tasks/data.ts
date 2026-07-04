@@ -485,7 +485,7 @@ export async function getLinkPreview(url: string): Promise<LinkPreview> {
 // ============================================================
 // ชนิดงานย่อย (registry กลาง) — จาก /api/subtask-types
 export type SubtaskType = {
-  key: string; label_th: string; label_en?: string | null; icon?: string | null; color?: string | null;
+  key: string; label_th: string; label_en?: string | null; icon?: string | null; icon_key?: string | null; color?: string | null;
   sort_order: number; is_active: boolean; is_builtin: boolean;
   accepts_text: boolean; accepts_image: boolean; accepts_multi_image: boolean; accepts_link: boolean; accepts_file: boolean;
   requires_approval: boolean; approve_target: string; has_copy_prompt: boolean;

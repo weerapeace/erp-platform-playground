@@ -6,7 +6,7 @@
 // step.config = snapshot ค่าตั้ง (เก็บลง template.steps แล้วคัดลอกไป subtask ตอนสร้างงาน)
 // ============================================================
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { ERPInput, ERPSelect } from "@/components/form";
@@ -14,6 +14,10 @@ import { PromptEditor } from "@/components/prompt-editor";
 import { UserPicker, type UserPickerValue } from "@/components/pickers";
 import { TeamFill } from "../team-picker";
 import { subtaskTypeHint, type SubtaskType, type SubtaskStepConfig } from "../data";
+import { ERPModal } from "@/components/modal";
+import { SubtaskTypeManager } from "../subtask-type-manager";
+
+const isHex = (c?: string | null): c is string => !!c && /^#[0-9a-fA-F]{6}$/.test(c);
 
 export type EditStep = {
   type: string;
@@ -65,8 +69,11 @@ const TYPE_HINT: Record<string, () => string> = {
   custom: () => tr("งานอิสระ ตั้งค่าได้เอง (text/รูป/ลิงก์/ไฟล์)", "Free-form task, configurable (text/image/link/file)"),
 };
 
-export function SubtaskTypePicker({ steps, types, onChange }: { steps: EditStep[]; types: SubtaskType[]; onChange: (s: EditStep[]) => void }) {
+export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { steps: EditStep[]; types: SubtaskType[]; onChange: (s: EditStep[]) => void; onTypesChanged?: () => void }) {
   const t = useT();
+  const [mgrOpen, setMgrOpen] = useState(false);
+  const mgrChanged = useRef(false);
+  const closeMgr = () => { setMgrOpen(false); if (mgrChanged.current) { mgrChanged.current = false; onTypesChanged?.(); } };
   const included = new Set(steps.map((s) => s.type));
   const setStep = (i: number, patch: Partial<EditStep>) => onChange(steps.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const setCfg = (i: number, patch: Partial<SubtaskStepConfig>) => onChange(steps.map((s, j) => (j === i ? { ...s, config: { ...s.config, ...patch } } : s)));
@@ -83,7 +90,7 @@ export function SubtaskTypePicker({ steps, types, onChange }: { steps: EditStep[
       <div>
         <div className="flex items-center justify-between mb-2">
           <p className="text-sm font-medium text-slate-700">{t("เลือกงานย่อยที่ต้องทำ", "Choose subtasks")}</p>
-          <a href="/tasks/settings?tab=subtype" target="_blank" rel="noopener" className="text-[11px] text-violet-600 hover:underline shrink-0">⚙️ {t("จัดการชนิดงานย่อย", "Manage types")}</a>
+          <button type="button" onClick={() => { mgrChanged.current = false; setMgrOpen(true); }} className="text-[11px] text-violet-600 hover:underline shrink-0">⚙️ {t("จัดการชนิดงานย่อย", "Manage types")}</button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {types.map((ty) => {
@@ -92,7 +99,7 @@ export function SubtaskTypePicker({ steps, types, onChange }: { steps: EditStep[
               <button type="button" key={ty.key} onClick={() => toggleType(ty)} title={subtaskTypeHint(ty)}
                 className={`flex items-start gap-2.5 p-3 rounded-xl border text-left transition-colors ${on ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:border-slate-300"}`}>
                 <span className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center text-xs shrink-0 ${on ? "bg-violet-600 text-white" : "bg-slate-100 text-transparent"}`}>✓</span>
-                <span className="text-lg leading-none mt-0.5">{ty.icon ?? "🧩"}</span>
+                <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded text-base leading-none shrink-0" style={isHex(ty.color) ? { backgroundColor: `${ty.color}1a` } : undefined}>{ty.icon ?? "🧩"}</span>
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-slate-800">{ty.label_th}</span>
                   <span className="block text-[11px] text-slate-400 leading-snug">{TYPE_HINT[ty.key]?.() ?? subtaskTypeHint(ty)}</span>
@@ -133,6 +140,11 @@ export function SubtaskTypePicker({ steps, types, onChange }: { steps: EditStep[
             ))}
           </ol>
         </div>
+      )}
+      {mgrOpen && (
+        <ERPModal open onClose={closeMgr} size="xl" title={t("จัดการชนิดงานย่อย", "Manage subtask types")}>
+          <SubtaskTypeManager onChanged={() => { mgrChanged.current = true; }} />
+        </ERPModal>
       )}
     </div>
   );

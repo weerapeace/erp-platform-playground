@@ -94,6 +94,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const [delId, setDelId] = useState<TaskTemplate | null>(null);
 
   const load = useCallback(async () => { try { setItems(await listTemplates()); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast]);
+  const reloadTypes = useCallback(async () => { try { setTypes(await listSubtaskTypes()); } catch { /* ignore */ } }, []);
   useEffect(() => { (async () => { setLoading(true); await load(); try { const [b, ty] = await Promise.all([listBrands(), listSubtaskTypes()]); setBrands(b); setTypes(ty); } catch { /* ignore */ } setLoading(false); })(); }, [load]);
 
   // map step (DB) → EditStep (UI) — legacy step (ไม่มี type) ถือเป็น custom
@@ -198,7 +199,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
           <ERPFormField label={t("คำอธิบาย", "Description")} span={2} hint={t("กด Enter เพื่อขึ้นหัวข้อย่อยถัดไป", "Press Enter for the next bullet")}><BulletTextarea value={form.description} onChange={(v) => setFormD((f) => ({ ...f, description: v }))} placeholder={t("อธิบายงาน / เช็คลิสต์ (ทำหัวข้อย่อยได้)", "Describe the work / checklist (supports bullets)")} /></ERPFormField>
         </ERPFormSection>
         <div className="mt-4 border-t border-slate-100 pt-4">
-          <SubtaskTypePicker steps={steps} types={types} onChange={setStepsD} />
+          <SubtaskTypePicker steps={steps} types={types} onChange={setStepsD} onTypesChanged={reloadTypes} />
         </div>
 
         {/* คอนเทนต์ที่จะสร้างอัตโนมัติเมื่อใช้แม่แบบนี้ (พ่วงกับงาน) */}
