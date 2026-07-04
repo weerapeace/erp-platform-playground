@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { needsCut, type CutFields } from "@/lib/cut-rules";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -86,7 +87,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     bomCodes.length ? admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes).is("craftsman_id", null).eq("is_current", true).eq("is_active", true) : Promise.resolve(noData),
     allMoNos.length ? admin.from("mo_piecework").select("id, mo_no, job_name, rate, qty_per, total_qty, status, assignee_name").in("mo_no", allMoNos).eq("is_active", true) : Promise.resolve(noData),
     pendingMoNos.length ? admin.from("mo_material_summary").select("mo_no, is_ready").in("mo_no", pendingMoNos).eq("is_active", true) : Promise.resolve(noData),
-    pendingMoNos.length ? admin.from("mo_materials").select("mo_no, cut_block_code, cut_length, pieces, cut_done").in("mo_no", pendingMoNos).eq("is_active", true) : Promise.resolve(noData),
+    pendingMoNos.length ? admin.from("mo_materials").select("mo_no, material_type, cut_block_code, cut_length, pieces, cut_done").in("mo_no", pendingMoNos).eq("is_active", true) : Promise.resolve(noData),
   ]);
 
   for (const m of (extraMoRes.data ?? []) as Record<string, unknown>[]) moIdByNo.set(String(m.mo_no), String(m.id));
@@ -137,7 +138,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     prog.set(k, p);
   }
   for (const x of (matsRes.data ?? []) as Record<string, unknown>[]) {
-    if (!(x.cut_block_code != null || x.cut_length != null || x.pieces != null)) continue;
+    if (!needsCut(x as CutFields)) continue;   // ไม่นับอะไหล่ (ให้ตรงกับตัวนับในป๊อปอัป/ตาราง)
     const k = String(x.mo_no);
     const p = prog.get(k) ?? { prepTotal: 0, prepDone: 0, cutTotal: 0, cutDone: 0 };
     p.cutTotal += 1; if (x.cut_done) p.cutDone += 1;

@@ -10,13 +10,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { needsCut, type CutFields } from "@/lib/cut-rules";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Body = { id?: string; cut_done?: boolean };
-const needsCut = (m: Record<string, unknown>) => m.cut_block_code != null || m.cut_length != null || m.pieces != null;
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -37,10 +37,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
   // คำนวณ "เตรียมครบ" ของวัตถุดิบนี้จากบล็อกที่ต้องตัด (ลิงก์สองทาง)
-  let q = admin.from("mo_materials").select("cut_done, cut_block_code, cut_length, pieces").eq("mo_no", moNo).eq("is_active", true);
+  let q = admin.from("mo_materials").select("cut_done, material_type, cut_block_code, cut_length, pieces").eq("mo_no", moNo).eq("is_active", true);
   q = sku == null ? q.is("component_sku", null) : q.eq("component_sku", sku);
   const { data: siblings } = await q;
-  const cutLines = (siblings ?? []).filter(needsCut);
+  const cutLines = (siblings ?? []).filter((m) => needsCut(m as CutFields));
   const allCut = cutLines.length > 0 && cutLines.every((m) => m.cut_done);
 
   let su = admin.from("mo_material_summary").update({ is_ready: allCut }).eq("mo_no", moNo);

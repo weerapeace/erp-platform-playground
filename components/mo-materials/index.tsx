@@ -8,6 +8,7 @@
  */
 import { useState } from "react";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
+import { needsCut as needsCutRule } from "@/lib/cut-rules";
 
 export type MoMatPreview = {
   key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null;
@@ -23,13 +24,12 @@ type MatRow = MoMatPreview & { required: number; to_purchase: number };
 
 const fmt = (n: number) => (Math.round(n * 10000) / 10000).toLocaleString("th-TH");
 const numCls = "w-full h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
-const isAccessory = (m: { material_type: string | null }) => /อะไหล่/.test(m.material_type ?? "");   // อะไหล่ไม่ต้องตัด
-const needsCutLine = (m: { cut_block_code: string | null; cut_length: number | null; pieces: number | null; material_type: string | null }) =>
-  !isAccessory(m) && (m.cut_block_code != null || m.cut_length != null || m.pieces != null);
+// กติกา "ต้องตัดไหม" ใช้ของกลาง lib/cut-rules (อะไหล่ไม่ต้องตัด) — ให้ตรงกับตัวนับบนบอร์ด/ป๊อปอัป
+const needsCutLine = (m: { cut_block_code: string | null; cut_length: number | null; pieces: number | null; material_type: string | null }) => needsCutRule(m);
 
 export function MoMaterialsTable({
   summary, materials, qty, sizeQty = {}, requested = {}, editable, canEdit,
-  onChangeSummary, onToggleCut, onCreatePR, emptyText,
+  onChangeSummary, onToggleCut, onCreatePR, onAddToCart, emptyText,
 }: {
   summary: MoMatSummary[];
   materials: MoMatPreview[];
@@ -41,10 +41,13 @@ export function MoMaterialsTable({
   onChangeSummary?: (rows: MoMatSummary[]) => void;
   onToggleCut?: (line: MoMatPreview, next: boolean) => void;
   onCreatePR?: (count: number) => void;
+  // หย่อนวัตถุดิบลงตะกร้าขอซื้อ (เมื่อมี = คอลัมน์สถานะสั่งซื้อจะโชว์ปุ่ม "🛒 ขอซื้อ" แทน "— ยังไม่ขอ")
+  onAddToCart?: (row: { component_sku: string | null; component_name: string | null; uom: string | null; to_purchase: number }) => void;
   emptyText?: string;
 }) {
   const [matTab, setMatTab] = useState<"sum" | "block">("sum");
   const [editBuy, setEditBuy] = useState<Set<string>>(new Set());
+  const [added, setAdded] = useState<Set<string>>(new Set());   // key แถวที่กดใส่ตะกร้าแล้ว (โชว์ "✓ ในตะกร้า")
   // จำนวนของไซส์นั้น (กลุ่ม C): บล็อกที่ผูกไซส์ใช้จำนวนของไซส์นั้น · บล็อกที่ไม่ผูกไซส์ใช้จำนวนรวมทั้งใบ
   const rowQty = (sl: string | null | undefined) => (sl != null && sizeQty[sl] != null) ? sizeQty[sl] : (qty || 0);
 
@@ -86,9 +89,19 @@ export function MoMaterialsTable({
     getValue: (r) => (r.component_sku ? (requested[r.component_sku] ?? 0) : 0),
     render: (r) => {
       const got = r.component_sku ? (requested[r.component_sku] ?? 0) : 0;
-      if (got <= 0) return <span className="text-slate-300 text-xs">— ยังไม่ขอ</span>;
-      const full = got >= r.to_purchase - 0.0001;
-      return <span className={`text-[11px] px-2 py-0.5 rounded whitespace-nowrap ${full ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>🛒 ขอแล้ว {fmt(got)}{full ? "" : " (บางส่วน)"}</span>;
+      if (got > 0) {
+        const full = got >= r.to_purchase - 0.0001;
+        return <span className={`text-[11px] px-2 py-0.5 rounded whitespace-nowrap ${full ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>🛒 ขอแล้ว {fmt(got)}{full ? "" : " (บางส่วน)"}</span>;
+      }
+      // ยังไม่ขอ — ถ้าเปิดใช้ตะกร้า + ยังต้องซื้อ → ปุ่ม "🛒 ขอซื้อ" (หย่อนลงตะกร้าตามจำนวนต้องขอซื้อ)
+      if (onAddToCart && r.to_purchase > 0.0001) {
+        return added.has(r.key)
+          ? <span className="text-[11px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 whitespace-nowrap">✓ ในตะกร้า</span>
+          : <button type="button" title={`ใส่ตะกร้าขอซื้อ ${fmt(r.to_purchase)} ${r.uom ?? ""}`}
+              onClick={() => { onAddToCart({ component_sku: r.component_sku, component_name: r.component_name, uom: r.uom, to_purchase: r.to_purchase }); setAdded((s) => { const n = new Set(s); n.add(r.key); return n; }); }}
+              className="text-[11px] px-2 py-0.5 rounded border border-rose-300 text-rose-600 hover:bg-rose-50 whitespace-nowrap">🛒 ขอซื้อ</button>;
+      }
+      return <span className="text-slate-300 text-xs">— ยังไม่ขอ</span>;
     } };
   const sumCols: LineColumn<MatRow>[] = editable
     ? [codeCol, typeCol, reqCol, uomCol, onhandCol, buyCol, readyCol, orderedCol]

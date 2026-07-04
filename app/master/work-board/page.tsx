@@ -21,6 +21,8 @@ import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import { AddPieceworkModal } from "./add-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
+import { needsCut, type CutFields } from "@/lib/cut-rules";
+import { addToPrCart } from "@/lib/pr-cart";
 import { PurchaseNeeds } from "./purchase-needs";
 import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
@@ -710,10 +712,10 @@ export default function WorkBoardPage() {
         const res = await apiFetch(`/api/mo/${checklistMO.id}`); const j = await res.json();
         const summary = (j?.data?.summary ?? []) as Record<string, unknown>[];
         const materials = (j?.data?.materials ?? []) as Record<string, unknown>[];
-        // ตัดครบของวัตถุดิบ = ทุกบล็อกที่ต้องตัดของมันตัดครบ (จาก mo_materials รายบล็อก)
+        // ตัดครบของวัตถุดิบ = ทุกบล็อกที่ต้องตัดของมันตัดครบ (จาก mo_materials รายบล็อก) — ไม่นับอะไหล่
         const cutTotal = new Map<string, number>(), cutDone = new Map<string, number>();
         for (const x of materials) {
-          if (!(x.cut_block_code != null || x.cut_length != null || x.pieces != null)) continue;
+          if (!needsCut(x as CutFields)) continue;
           const k = String(x.component_sku);
           cutTotal.set(k, (cutTotal.get(k) ?? 0) + 1);
           if (x.cut_done) cutDone.set(k, (cutDone.get(k) ?? 0) + 1);
@@ -724,8 +726,8 @@ export default function WorkBoardPage() {
             required_qty: Number(s.required_qty) || 0, uom: (s.uom as string) ?? null,
             is_ready: !!s.is_ready, needs_cut: ct > 0, cut_done: ct > 0 && (cutDone.get(k) ?? 0) >= ct };
         });
-        // หน้าตัด — รายบล็อกจริงจาก mo_materials (1 แถว = 1 บล็อกตัด)
-        const isCut = (x: Record<string, unknown>) => x.cut_block_code != null || x.cut_length != null || x.pieces != null;
+        // หน้าตัด — รายบล็อกจริงจาก mo_materials (1 แถว = 1 บล็อกตัด) — ไม่นับอะไหล่
+        const isCut = (x: Record<string, unknown>) => needsCut(x as CutFields);
         const num = (v: unknown) => (v == null ? null : Number(v));
         const cutRows: CutRow[] = materials.filter(isCut).map((x) => ({
           id: String(x.id), component_sku: (x.component_sku as string) ?? null, component_name: (x.component_name as string) ?? null,
@@ -1378,8 +1380,8 @@ export default function WorkBoardPage() {
                 <p className="text-sm font-medium text-slate-800 truncate">{checklistMO.product_name ?? checklistMO.product_sku}</p>
                 <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${ready ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ready ? "พร้อมจ่าย ✓" : "ยังไม่พร้อม"}</span>
               </div>
-              {/* รายละเอียดสั่งงาน (เหมือนหน้าแก้ใบสั่งผลิต) — ดูสเปก/วัตถุดิบจาก BOM ได้เลย */}
-              {checklistMO.product_sku && <WorkInstructionPanel sku={checklistMO.product_sku} editable={false} />}
+              {/* รายละเอียดสั่งงาน (เหมือนหน้าแก้ใบสั่งผลิต) — พับไว้ โชว์แค่รูป+ชื่อ กดกางดูสเปกเต็ม */}
+              {checklistMO.product_sku && <WorkInstructionPanel sku={checklistMO.product_sku} editable={false} defaultOpen={false} />}
               {/* แท็บรวม 6 หน้า — ใช้ได้ทั้งมี/ไม่มี BOM */}
               {(() => {
                 const tabBtn = (id: typeof clTab, label: string) => (
@@ -1481,6 +1483,11 @@ export default function WorkBoardPage() {
                           editable={canEdit} canEdit={canEdit}
                           onChangeSummary={(rows) => void onMatSummaryChange(rows)}
                           onToggleCut={(line, next) => void onMatToggleCut(line, next)}
+                          onAddToCart={canEdit ? (row) => {
+                            const label = row.component_sku ? `[${row.component_sku}] ${row.component_name ?? ""}`.trim() : (row.component_name ?? "วัตถุดิบ");
+                            addToPrCart([{ label, qty: row.to_purchase, uom: row.uom ?? "", seller: "—", price: 0, currency: "THB", image: null, variationId: null, skuRef: row.component_sku, skuId: null, note: `จากใบสั่งผลิต ${checklistMO.mo_no}`, sourceMoNo: checklistMO.mo_no, usedForLabel: checklistMO.product_name ?? checklistMO.product_sku ?? null }]);
+                            toast.success(`ใส่ตะกร้าขอซื้อแล้ว: ${row.component_name ?? row.component_sku ?? ""} · ${fmt(row.to_purchase)} ${row.uom ?? ""} — ไปหน้า “ขอซื้อ” เพื่อยืนยัน`);
+                          } : undefined}
                         />
                       )
                     ) : clTab === "cut" ? (

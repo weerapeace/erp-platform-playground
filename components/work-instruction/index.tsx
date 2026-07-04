@@ -34,11 +34,11 @@ function Row({ f, bomSkus, onEdit }: { f: SpecField; bomSkus?: string[]; onEdit?
   );
 }
 
-export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMaterials, refreshKey, className = "" }: { sku: string | null | undefined; editable?: boolean; bomSkus?: string[]; onAddMaterials?: (mats: { code: string; name: string }[]) => void; refreshKey?: number | string; className?: string }) {
+export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMaterials, refreshKey, className = "", defaultOpen = true }: { sku: string | null | undefined; editable?: boolean; bomSkus?: string[]; onAddMaterials?: (mats: { code: string; name: string }[]) => void; refreshKey?: number | string; className?: string; defaultOpen?: boolean }) {
   const toast = useToast();
   const [spec, setSpec] = useState<ProductSpec | null>(null);
   const [loading, setLoading] = useState(false);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);   // พับได้ — พับแล้วยังเห็นรูป+ชื่อ (ป๊อปอัปเช็กลิสต์ตั้ง defaultOpen=false)
   const [editOpen, setEditOpen] = useState(false);
   const [skuMenuOpen, setSkuMenuOpen] = useState(false);   // เมนูเลือกว่าจะแก้ SKU หรือ Parent SKU
   const [skuPeek, setSkuPeek] = useState<{ moduleKey: string; recordId: string } | null>(null);   // popup แก้แบบเต็ม (MasterRecordDrawer)
@@ -154,8 +154,19 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
     )}
     <div className={`border border-slate-200 rounded-lg bg-white ${className}`}>
       <div className="w-full flex items-center justify-between px-3 py-2 rounded-t-lg hover:bg-slate-50">
-        <button type="button" onClick={() => setOpen((o) => !o)} className="flex-1 flex items-center gap-2 text-sm font-semibold text-slate-700 text-left">
-          <span>📋 รายละเอียดสั่งงาน</span><span className="text-slate-400 text-xs">{open ? "▾" : "▸"}</span>
+        <button type="button" onClick={() => setOpen((o) => !o)} className="flex-1 min-w-0 flex items-center gap-2 text-sm font-semibold text-slate-700 text-left">
+          <span className="shrink-0">📋 รายละเอียดสั่งงาน</span>
+          {/* พับอยู่ → โชว์รูป+ชื่อพอ (กดกางดูสเปกเต็ม) */}
+          {!open && spec && (img || titleName) && (
+            <span className="flex items-center gap-1.5 min-w-0 font-normal text-slate-500">
+              {img && !imgErr
+                ? // eslint-disable-next-line @next/next/no-img-element
+                  <img src={img} alt="" onError={() => setImgErr(true)} className="w-6 h-6 rounded object-cover border border-slate-100 shrink-0" />
+                : <span className="w-6 h-6 rounded border border-slate-100 bg-slate-50 flex items-center justify-center text-slate-300 text-xs shrink-0">📦</span>}
+              <span className="truncate">{titleName}</span>
+            </span>
+          )}
+          <span className="text-slate-400 text-xs ml-auto shrink-0">{open ? "▾" : "▸"}</span>
         </button>
         <div className="flex items-center gap-1.5 shrink-0">
           {sku && (spec?.parent?.id || spec?.sku_id) && (
