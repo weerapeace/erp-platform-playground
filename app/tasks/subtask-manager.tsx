@@ -542,7 +542,9 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       )}
       {/* ดูรูปบนการ์ดเต็มจอ + เลื่อน (รูปงาน + รูปเข้าสินค้า) */}
       <ImageLightbox images={cardImages} index={cardLb} onClose={() => setCardLb(-1)} onIndex={setCardLb} />
-      {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} approveTarget={String(approveTarget ?? "none")} hasDescSibling={hasDescSibling} onClose={() => setWorkOpen(false)} />}
+      {workOpen && (sub.subtask_type === "content"
+        ? <ContentSubmitModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canSubmit={canSubmit} onClose={() => setWorkOpen(false)} />
+        : <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} approveTarget={String(approveTarget ?? "none")} hasDescSibling={hasDescSibling} onClose={() => setWorkOpen(false)} />)}
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
       {contentOpen && sub.config?.content_id && <ContentDrawer contentId={String(sub.config.content_id)} brands={[]} onClose={() => setContentOpen(false)} onChanged={() => { void reload(); }} pushToast={pushToast} />}
       {reviseOpen && <ReviseModal busy={busy} onCancel={() => setReviseOpen(false)} onConfirm={async (c) => { setReviseOpen(false); await patch({ status: "revision_requested", comment: c }); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); }} />}
@@ -756,6 +758,68 @@ function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, onAddDra
           ))}
       </>}
     </div>
+  );
+}
+
+// ป๊อปส่งงาน "คอนเทนต์" — เฉพาะทาง: แนบรูป + path (Drive) + ลิงก์วิดีโอ · ไม่มี Parent SKU / ดันรูปเข้าสินค้า
+function ContentSubmitModal({ sub, taskId, reload, pushToast, canSubmit, onClose }: {
+  sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canSubmit: boolean; onClose: () => void;
+}) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkKind, setLinkKind] = useState<"path" | "video" | "link">("path");
+  const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
+  const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
+  const addLink = async () => {
+    const u = linkUrl.trim(); if (!u) return;
+    try { await addAttachment(taskId, { kind: "drive_link", url: u, label: linkKind, subtask_id: sub.id }); setLinkUrl(""); await reload(); }
+    catch (e) { pushToast("error", (e as Error).message); }
+  };
+  const submit = async () => {
+    setBusy(true);
+    try { await updateSubtask(taskId, sub.id, { status: "submitted" }); await reload(); pushToast("success", t("ส่งงานแล้ว", "Submitted")); onClose(); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
+  const linkLabel = (k?: string | null) => k === "video" ? t("วิดีโอ", "Video") : k === "path" ? "Path" : t("ลิงก์", "Link");
+  return (
+    <ERPModal open onClose={onClose} size="md" title={t("ส่งงานคอนเทนต์ — แนบรูป / path / ลิงก์วิดีโอ", "Submit content — images / path / video links")}>
+      <div className="space-y-4">
+        <div>
+          <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤1500px)", "Work images (resized ≤1500px)")}</p>
+          <ImageAttach images={imageAtts.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
+            onAttach={async (r) => { await addAttachment(taskId, { kind: "image", subtask_id: sub.id, ...r }); await reload(); }}
+            onDelete={async (aid) => { try { await deleteAttachment(taskId, aid); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
+            pushToast={pushToast} maxSize={1500} />
+        </div>
+        <div>
+          <p className="text-[11px] text-slate-400 mb-1">{t("path (โฟลเดอร์/ไฟล์) · ลิงก์วิดีโอ", "Path (folder/file) · video links")}</p>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <select value={linkKind} onChange={(e) => setLinkKind(e.target.value as "path" | "video" | "link")} className="h-9 border border-slate-200 rounded-lg px-2 text-sm bg-white shrink-0">
+              <option value="path">Path</option>
+              <option value="video">{t("วิดีโอ", "Video")}</option>
+              <option value="link">{t("ลิงก์อื่น", "Other")}</option>
+            </select>
+            <input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addLink()} placeholder={linkKind === "path" ? t("พาธโฟลเดอร์/ไฟล์ (เช่น ลิงก์ Google Drive)", "Folder/file path (e.g. Google Drive link)") : t("วางลิงก์...", "Paste link...")} className="flex-1 min-w-0 h-9 border border-slate-200 rounded-lg px-3 text-sm" />
+            <button onClick={addLink} className="h-9 px-3 bg-violet-600 text-white text-sm rounded-lg hover:bg-violet-700 shrink-0">＋ {t("เพิ่ม", "Add")}</button>
+          </div>
+          <div className="space-y-1">
+            {linkAtts.map((a) => (
+              <div key={a.id} className="flex items-center gap-2 text-xs border border-slate-200 rounded-md px-2 py-1">
+                <span className="text-[10px] font-medium text-slate-500 bg-slate-100 rounded px-1 shrink-0">{linkLabel(a.label)}</span>
+                <a href={a.url ?? "#"} target="_blank" rel="noopener" className="flex-1 truncate text-violet-600 hover:underline">{a.url}</a>
+                <button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500 shrink-0">✕</button>
+              </div>
+            ))}
+            {linkAtts.length === 0 && <p className="text-xs text-slate-400 italic">{t("ยังไม่มี path/ลิงก์", "No path/links yet")}</p>}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+          {canSubmit && <button onClick={submit} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : t("ส่งงาน", "Submit")}</button>}
+        </div>
+      </div>
+    </ERPModal>
   );
 }
 
