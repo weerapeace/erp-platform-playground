@@ -25,8 +25,8 @@ import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { PlatformChip } from "./platform-chip";
 import { platformLabel, useCreativeOptions } from "./use-options";
 import {
-  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent, getPlatformSettings,
-  type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem,
+  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent, getPlatformSettings, savePlatformSettings,
+  type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem, type PlatformSettings,
 } from "./data";
 
 // ตัวแก้สินค้ากลาง (ของกลาง) — เปิดแก้ Parent SKU จากป๊อปอัปส่งงาน · dynamic กัน import วน + ลด bundle
@@ -885,9 +885,10 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
   const platforms = sub.content_preview?.platforms ?? [];
   const [notes, setNotes] = useState<Record<string, string>>(() => ({ ...((sub.config?.platform_notes ?? {}) as Record<string, string>) }));
   const [prefilled, setPrefilled] = useState(false);
+  const [showDefaults, setShowDefaults] = useState(false);
   const [busy, setBusy] = useState(false);
   // เติมค่าเริ่มต้นจาก "หมายเหตุแพลตฟอร์ม (ทั่วไป)" ให้ช่องที่ยังว่าง (แก้เฉพาะงานได้)
-  useEffect(() => {
+  const prefillFromDefaults = useCallback(() => {
     getPlatformSettings().then((ps) => setNotes((n) => {
       const next = { ...n }; let changed = false;
       for (const p of platforms) { if (!next[p]?.trim() && ps[p]?.note?.trim()) { next[p] = ps[p]!.note as string; changed = true; } }
@@ -896,6 +897,7 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
     })).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => { prefillFromDefaults(); }, [prefillFromDefaults]);
   const save = async () => {
     setBusy(true);
     try { await updateSubtask(taskId, sub.id, { config: { ...(sub.config ?? {}), platform_notes: notes } }); await reload(); pushToast("success", t("บันทึกแล้ว", "Saved")); onClose(); }
@@ -904,7 +906,10 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
   return (
     <ERPModal open onClose={onClose} size="md" title={t("รายละเอียดงาน — ต่อแพลตฟอร์ม", "Work details — per platform")}>
       <div className="space-y-3">
-        <p className="text-[11px] text-slate-400">{t("หมายเหตุ/สิ่งที่ต้องเตรียม ของคอนเทนต์นี้ แยกต่อแพลตฟอร์ม (คนทำงานเปิดดูได้)", "Notes / requirements for this content, per platform (visible to workers)")}</p>
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-[11px] text-slate-400 flex-1">{t("หมายเหตุ/สิ่งที่ต้องเตรียม ของคอนเทนต์นี้ แยกต่อแพลตฟอร์ม (คนทำงานเปิดดูได้)", "Notes / requirements for this content, per platform (visible to workers)")}</p>
+          <button onClick={() => setShowDefaults(true)} className="shrink-0 h-7 px-2.5 text-[11px] text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">⚙️ {t("ตั้งค่า default", "Set defaults")}</button>
+        </div>
         {prefilled && <p className="text-[11px] text-amber-600">✎ {t("เติมค่าเริ่มต้นจากหมายเหตุแพลตฟอร์มให้แล้ว — แก้เฉพาะงานนี้ได้", "Prefilled from platform defaults — edit for this content")}</p>}
         {platforms.length === 0 && <p className="text-sm text-slate-400 italic">{t("คอนเทนต์นี้ยังไม่ได้เลือกแพลตฟอร์ม", "This content has no platforms yet")}</p>}
         {platforms.map((p) => (
@@ -916,6 +921,47 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
           <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
+        </div>
+        {showDefaults && (
+          <PlatformDefaultsModal platforms={platforms} pushToast={pushToast} onSaved={prefillFromDefaults} onClose={() => setShowDefaults(false)} />
+        )}
+      </div>
+    </ERPModal>
+  );
+}
+
+// ป๊อปตั้งค่า "หมายเหตุเริ่มต้น (ทั่วไป)" ต่อแพลตฟอร์ม — ค่ากลางที่ทุกคอนเทนต์ดึงไปเติมให้เมื่อยังไม่กรอกเฉพาะงาน
+function PlatformDefaultsModal({ platforms, pushToast, onSaved, onClose }: {
+  platforms: string[]; pushToast: ToastFn; onSaved: () => void; onClose: () => void;
+}) {
+  const t = useT();
+  const [all, setAll] = useState<PlatformSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { getPlatformSettings().then(setAll).catch(() => setAll({})); }, []);
+  const setNote = (p: string, v: string) => setAll((a) => ({ ...(a ?? {}), [p]: { ...((a ?? {})[p] ?? {}), note: v } }));
+  const save = async () => {
+    if (!all) return;
+    setBusy(true);
+    try { await savePlatformSettings(all); pushToast("success", t("บันทึกค่าเริ่มต้นแล้ว", "Defaults saved")); onSaved(); onClose(); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} size="md" title={t("ตั้งค่าหมายเหตุเริ่มต้น (ทั่วไป)", "Default platform notes (global)")}>
+      <div className="space-y-3">
+        <p className="text-[11px] text-slate-400">{t("ค่ากลางนี้ใช้กับ 'ทุกคอนเทนต์' ที่ลงแพลตฟอร์มนั้น — ระบบจะเติมให้อัตโนมัติเมื่อยังไม่ได้กรอกหมายเหตุเฉพาะงาน", "These global defaults apply to every content on that platform — auto-filled when the per-content note is empty.")}</p>
+        {all === null ? (
+          <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
+        ) : platforms.length === 0 ? (
+          <p className="text-sm text-slate-400 italic">{t("คอนเทนต์นี้ยังไม่ได้เลือกแพลตฟอร์ม", "This content has no platforms yet")}</p>
+        ) : platforms.map((p) => (
+          <div key={p}>
+            <div className="mb-1"><PlatformChip code={p} /></div>
+            <textarea value={all[p]?.note ?? ""} onChange={(e) => setNote(p, e.target.value)} rows={2} placeholder={t("หมายเหตุเริ่มต้นของแพลตฟอร์มนี้ เช่น รูป 1:1 อย่างน้อย 5 รูป", "Default note for this platform, e.g. 1:1 images, at least 5")} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-violet-300" />
+          </div>
+        ))}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={save} disabled={busy || all === null} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : t("บันทึกค่าเริ่มต้น", "Save defaults")}</button>
         </div>
       </div>
     </ERPModal>
