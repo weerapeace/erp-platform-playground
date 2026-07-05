@@ -82,16 +82,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
   const fakeOf = (s: typeof skuRows[number]) => num(s.fake_price) || num(masterOf(s.code)?.fake_price);
   const saleOf = (s: typeof skuRows[number]) => num(s.list_price) || num(masterOf(s.code)?.list_price);
-  // แต่ละ variant ต้องผูกกับตัวเลือก (LINE: options=[{name,value}] ต้องตรงกับ variantOptions.option1.data)
+  const colors = [...new Set(sellable.map((s) => (s.color_th || s.color || "").trim()).filter(Boolean))];
+  // หลายสี = "สินค้ามีตัวเลือก" (ส่ง variantOptions + options) · สีเดียว/ไม่มีสี = "สินค้าไม่มีตัวเลือก" (ไม่ส่ง — เลี่ยงปัญหา options invalid)
+  const multiVariant = colors.length > 1;
   const variants = sellable.map((s) => {
     const fake = fakeOf(s); const sale = saleOf(s);
     const disc = (fake > 0 && sale > 0 && sale < fake) ? fake - sale : 0;
     const color = (s.color_th || s.color || "").trim();
     return { sku: s.code, price: fake, instantDiscount: disc, onHandNumber: stockOf.get(s.id) ?? 0,
-      ...(color ? { options: { option1: { value: color } } } : {}),
+      ...(multiVariant && color ? { options: { option1: { value: color } } } : {}),
       ...(weightKg > 0 ? { weight: weightKg } : {}), ...(gtin ? { gtin } : {}) };
   });
-  const colors = [...new Set(sellable.map((s) => (s.color_th || s.color || "").trim()).filter(Boolean))];
 
   // รูป: ใช้ที่เลือกในร่าง · ถ้าว่าง → ดึงปกตัวสี + ปกตัวขาย (สืบทอดจากตัวสี) อัตโนมัติ
   const autoKeys = imageKeys.length ? imageKeys : [...new Set([
@@ -111,8 +112,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const payload: Record<string, unknown> = {
     name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || ""),
     brand: String(extra.brand || ""), imageUrls, variants, instantDiscount: 0,
-    // LINE: variantOptions = { option1: { name, data: [{ value }] } } · data เป็น array ของ object (ลองมาแล้ว: string/array-string/object ล้วน invalid type)
-    ...(colors.length ? { variantOptions: { option1: { name: "สี", data: colors.map((c) => ({ value: c })) } } } : {}),
+    // ส่ง variantOptions เฉพาะสินค้ามีหลายสี (multiVariant) · สีเดียว = สินค้าไม่มีตัวเลือก
+    ...(multiVariant ? { variantOptions: { option1: { name: "สี", data: colors.map((c) => ({ value: c })) } } } : {}),
   };
 
   const res = await lineCreateProduct(apiKey, payload);
