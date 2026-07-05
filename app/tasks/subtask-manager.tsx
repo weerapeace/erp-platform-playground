@@ -468,7 +468,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               )}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex flex-wrap gap-1 min-w-0">
-                  {(sub.content_preview?.platforms ?? []).map((p) => <PlatformChip key={p} code={p} />)}
+                  {(sub.content_preview?.platforms ?? []).map((p) => <PlatformChip key={p} code={p} iconOnly />)}
                   {!(sub.content_preview?.platforms ?? []).length && <span className="text-[11px] text-slate-400">{t("ยังไม่ได้เลือกแพลตฟอร์ม", "No platforms yet")}</span>}
                 </div>
                 <button onClick={() => setContentOpen(true)} className="text-[11px] font-medium text-violet-700 hover:underline shrink-0">📱 {t("เปิด/แก้คอนเทนต์", "Open content")}</button>

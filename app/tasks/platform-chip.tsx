@@ -10,7 +10,7 @@ import { platformLabel, platformMeta } from "./use-options";
 
 const isHex = (c?: string | null): c is string => !!c && /^#[0-9a-fA-F]{6}$/.test(c);
 
-export function PlatformChip({ code }: { code: string }) {
+export function PlatformChip({ code, iconOnly }: { code: string; iconOnly?: boolean }) {
   const meta = platformMeta(code);
   const label = platformLabel(code) || code;
   const img = meta?.icon_key ? r2ImageUrl(meta.icon_key, 32) : null;
@@ -19,9 +19,18 @@ export function PlatformChip({ code }: { code: string }) {
 
   // ชิปสีอ่อนจากสีแพลตฟอร์ม (พื้น ~10%, ขอบ ~33%, ตัวอักษรสีเข้ม)
   const style = color ? { backgroundColor: `${color}1a`, color, borderColor: `${color}55` } : undefined;
+
+  // โหมดไอคอนอย่างเดียว — ลดความรกเมื่อมีหลายแพลตฟอร์ม (โฮเวอร์ดูชื่อ)
+  if (iconOnly && (img || emoji)) {
+    return (
+      <span title={label} className={`inline-flex items-center justify-center h-6 w-6 rounded-full border ${color ? "" : "bg-slate-100 border-slate-200"}`} style={style}>
+        {img ? <img src={img} alt={label} className="h-4 w-4 rounded-sm object-contain" /> : <span className="text-sm leading-none">{emoji}</span>}
+      </span>
+    );
+  }
+
   const base = "inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border";
   const fallback = color ? "" : "bg-slate-100 text-slate-600 border-slate-200";
-
   return (
     <span className={`${base} ${fallback}`} style={style}>
       {img
