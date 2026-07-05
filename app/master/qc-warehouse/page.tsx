@@ -74,6 +74,7 @@ export default function QcWarehousePage() {
   const [shopShelf, setShopShelf] = useState<string>("__all__");
   const [shopSort, setShopSort] = useState<"qty" | "sku" | "shelf">("qty");
   const [shopGroup, setShopGroup] = useState<"none" | "shelf" | "status" | "brand">("shelf");
+  const [shopTab, setShopTab] = useState<"flow" | "shelf">("flow");   // แท็บย่อยในช้อป: รับ-ส่งงาน / ของในชั้น
   const [atDesks, setAtDesks] = useState<QcDeskCard[]>([]);   // งานที่จ่ายไปที่โต๊ะ (ยังทำอยู่) — โชว์ในมุมมองช้อป
   const [histOpen, setHistOpen] = useState(false);
   const [histSearch, setHistSearch] = useState("");
@@ -156,9 +157,15 @@ export default function QcWarehousePage() {
   const [sendModal, setSendModal] = useState<QcDeskCard | null>(null);
   const [sendQty, setSendQty] = useState("");
   const [sendWage, setSendWage] = useState("");
-  const [sendCart, setSendCart] = useState<Record<string, { qty: number; wage: number }>>({});
+  const [sendSaveBom, setSendSaveBom] = useState(false);   // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง)
+  const [sendCart, setSendCart] = useState<Record<string, { qty: number; wage: number; saveBom: boolean }>>({});
   const [sendSaving, setSendSaving] = useState(false);
-  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendWage(String(Math.round(w.rate * remain * 100) / 100)); };
+  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendWage(String(Math.round(w.rate * remain * 100) / 100)); setSendSaveBom(w.rate <= 0); };
+  // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง — ไม่ระบุช่าง) ผ่านของกลาง /api/bom/labor-rates (หา BOM จาก product_sku ให้เอง)
+  const saveBomRate = async (sku: string | null, perUnit: number) => {
+    if (!sku || !(perUnit > 0)) return;
+    try { await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product_sku: sku, rate: perUnit }) }); } catch { /* ignore */ }
+  };
   const postSubmission = async (woId: string, qty: number, wage: number): Promise<string | null> => {
     try { const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: woId, qty, wage }) }); const j = await res.json(); return (j.error as string) ?? null; }
     catch (e) { return e instanceof Error ? e.message : "ส่งงานไม่สำเร็จ"; }
@@ -166,20 +173,26 @@ export default function QcWarehousePage() {
   const submitSendNow = async () => {
     if (!sendModal) return; const qty = num(sendQty); const wage = Number(sendWage) || 0;
     if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    setSendSaving(true); const err = await postSubmission(sendModal.id, qty, wage); setSendSaving(false);
+    setSendSaving(true); const err = await postSubmission(sendModal.id, qty, wage);
+    if (!err && sendSaveBom && qty > 0 && wage > 0) await saveBomRate(sendModal.sku, Math.round((wage / qty) * 100) / 100);
+    setSendSaving(false);
     if (err) { toast.error(err); return; }
-    toast.success("ส่งงานแล้ว → เข้างานรอ QC"); setSendModal(null); await load();
+    toast.success(`ส่งงานแล้ว → เข้างานรอ QC${sendSaveBom && wage > 0 ? " · บันทึกค่าแรงเข้า BOM" : ""}`); setSendModal(null); await load();
   };
   const addSendCart = () => {
     if (!sendModal) return; const qty = num(sendQty); const wage = Number(sendWage) || 0;
     if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, wage } })); setSendModal(null);
+    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, wage, saveBom: sendSaveBom } })); setSendModal(null);
   };
   const removeSendCart = (woId: string) => setSendCart((c) => { const n = { ...c }; delete n[woId]; return n; });
   const submitSendCart = async () => {
     const ids = Object.keys(sendCart); if (ids.length === 0) return;
     setSendSaving(true); let ok = 0; const fails: string[] = [];
-    for (const id of ids) { const d = sendCart[id]; const err = await postSubmission(id, d.qty, d.wage); if (!err) ok++; else fails.push(id); }
+    for (const id of ids) {
+      const d = sendCart[id]; const err = await postSubmission(id, d.qty, d.wage);
+      if (!err) { ok++; if (d.saveBom && d.qty > 0 && d.wage > 0) { const w = atDesks.find((x) => x.id === id); await saveBomRate(w?.sku ?? null, Math.round((d.wage / d.qty) * 100) / 100); } }
+      else fails.push(id);
+    }
     setSendSaving(false); setSendCart({});
     if (ok > 0) toast.success(`ส่งงานแล้ว ${ok} รายการ${fails.length ? ` · พลาด ${fails.length}` : ""}`); else toast.error("ส่งงานไม่สำเร็จ");
     await load();
@@ -582,56 +595,68 @@ export default function QcWarehousePage() {
           const queueFiltered = queue.filter((c) => q === "" || `${c.sku ?? ""} ${c.name ?? ""} ${c.mo_no ?? ""} ${c.worker ?? ""}`.toLowerCase().includes(q));
           return (
             <div>
-              <div className="flex flex-wrap items-center gap-2 mb-3">
+              {/* แท็บย่อย: รับ-ส่งงาน / ของในชั้น + ช่องค้นหา */}
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+                  <button onClick={() => setShopTab("flow")} className={`h-9 px-3 font-medium ${shopTab === "flow" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🔄 รับ-ส่งงาน</button>
+                  <button onClick={() => setShopTab("shelf")} className={`h-9 px-3 font-medium border-l border-slate-200 ${shopTab === "shelf" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 ของในชั้น ({items.length})</button>
+                </div>
                 <input value={shopSearch} onChange={(e) => setShopSearch(e.target.value)} placeholder="ค้นหา SKU / ชื่อ / ใบผลิต / ช่าง / ชั้น"
                   className="h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[200px] flex-1" />
-                <select value={shopStatus} onChange={(e) => setShopStatus(e.target.value as typeof shopStatus)} title="กรองสถานะ" className={selCls}>
-                  <option value="all">ทุกสถานะ</option><option value="good">ของดี</option><option value="defect">ของเสีย</option><option value="repairing">กำลังซ่อม</option>
-                </select>
-                <select value={shopShelf} onChange={(e) => setShopShelf(e.target.value)} title="กรองชั้น" className={selCls}>
-                  <option value="__all__">🗄️ ทุกชั้น</option>
-                  {shelves.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-                <select value={shopSort} onChange={(e) => setShopSort(e.target.value as typeof shopSort)} title="เรียงลำดับ" className={selCls}>
-                  <option value="qty">↕ จำนวนมาก→น้อย</option><option value="sku">↕ รหัสสินค้า</option><option value="shelf">↕ ชั้น</option>
-                </select>
-                <select value={shopGroup} onChange={(e) => setShopGroup(e.target.value as typeof shopGroup)} title="จัดกลุ่ม" className={selCls}>
-                  <option value="shelf">จัดกลุ่ม: ชั้น</option><option value="status">จัดกลุ่ม: สถานะ</option><option value="none">ไม่จัดกลุ่ม</option>
-                </select>
               </div>
 
-              {/* 📥 งานรอ QC — ติ๊กเลือกใส่ตะกร้า → รับเข้าชั้นทีเดียว */}
-              <div className="mb-5">
-                <div className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-1.5 mb-2">📥 งานรอ QC (ติ๊กเลือก → รับเข้าชั้น) <span className="text-indigo-400 font-normal">({queueFiltered.length})</span></div>
-                {queueFiltered.length === 0
-                  ? <div className="text-center py-6 text-[12px] text-slate-300">ไม่มีงานรอรับเข้า (งานที่ช่างส่งกลับจากบอร์ดจ่ายงานจะมาโชว์ที่นี่)</div>
-                  : <div className={gridCls}>{queueFiltered.map(renderQueueCard)}</div>}
-              </div>
-
-              <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">📦 ของในชั้น <span className="text-slate-400 font-normal">({items.length})</span></div>
-              {items.length === 0 ? (
-                <div className="text-center py-16 text-slate-300 text-sm">{allItems.length === 0 ? "ยังไม่มีของในโกดัง" : "ไม่พบรายการที่ตรงกับตัวกรอง"}</div>
-              ) : shopGroup === "none" ? (
-                <div className={gridCls}>{items.map(renderShopCard)}</div>
+              {shopTab === "flow" ? (
+                <>
+                  {/* 📥 งานรอ QC — ติ๊กเลือกใส่ตะกร้า → รับเข้าชั้นทีเดียว */}
+                  <div className="mb-5">
+                    <div className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-1.5 mb-2">📥 งานรอ QC (ติ๊กเลือก → รับเข้าชั้น) <span className="text-indigo-400 font-normal">({queueFiltered.length})</span></div>
+                    {queueFiltered.length === 0
+                      ? <div className="text-center py-6 text-[12px] text-slate-300">ไม่มีงานรอรับเข้า (งานที่ช่างส่งกลับจากบอร์ดจ่ายงานจะมาโชว์ที่นี่)</div>
+                      : <div className={gridCls}>{queueFiltered.map(renderQueueCard)}</div>}
+                  </div>
+                  {/* 🪑 จ่ายไปที่โต๊ะ — กดส่งงาน */}
+                  <div>
+                    <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">🪑 จ่ายไปที่โต๊ะ (กดการ์ดเพื่อส่งงาน) <span className="text-slate-400 font-normal">({deskFiltered.length})</span></div>
+                    {deskFiltered.length === 0
+                      ? <div className="text-center py-6 text-[12px] text-slate-300">ยังไม่มีงานที่จ่ายไปที่โต๊ะ — งานที่จ่ายให้ช่างที่โต๊ะ (บนบอร์ดจ่ายงาน) จะมาโชว์ที่นี่ แล้วไหลเข้า QC เมื่อช่างส่งงาน</div>
+                      : <div className={gridCls}>{deskFiltered.map(renderDeskCard)}</div>}
+                  </div>
+                </>
               ) : (
-                <div className="space-y-3">
-                  {buckets.map((b) => (
-                    <div key={b.name}>
-                      <div className="text-xs font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">
-                        {shopGroup === "shelf" ? "🗄️ " : "🏷 "}{b.name} <span className="text-slate-400 font-normal">({b.items.length})</span>
-                      </div>
-                      <div className={gridCls}>{b.items.map(renderShopCard)}</div>
+                <>
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    <select value={shopStatus} onChange={(e) => setShopStatus(e.target.value as typeof shopStatus)} title="กรองสถานะ" className={selCls}>
+                      <option value="all">ทุกสถานะ</option><option value="good">ของดี</option><option value="defect">ของเสีย</option><option value="repairing">กำลังซ่อม</option>
+                    </select>
+                    <select value={shopShelf} onChange={(e) => setShopShelf(e.target.value)} title="กรองชั้น" className={selCls}>
+                      <option value="__all__">🗄️ ทุกชั้น</option>
+                      {shelves.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                    <select value={shopSort} onChange={(e) => setShopSort(e.target.value as typeof shopSort)} title="เรียงลำดับ" className={selCls}>
+                      <option value="qty">↕ จำนวนมาก→น้อย</option><option value="sku">↕ รหัสสินค้า</option><option value="shelf">↕ ชั้น</option>
+                    </select>
+                    <select value={shopGroup} onChange={(e) => setShopGroup(e.target.value as typeof shopGroup)} title="จัดกลุ่ม" className={selCls}>
+                      <option value="shelf">จัดกลุ่ม: ชั้น</option><option value="status">จัดกลุ่ม: สถานะ</option><option value="none">ไม่จัดกลุ่ม</option>
+                    </select>
+                  </div>
+                  {items.length === 0 ? (
+                    <div className="text-center py-16 text-slate-300 text-sm">{allItems.length === 0 ? "ยังไม่มีของในโกดัง" : "ไม่พบรายการที่ตรงกับตัวกรอง"}</div>
+                  ) : shopGroup === "none" ? (
+                    <div className={gridCls}>{items.map(renderShopCard)}</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {buckets.map((b) => (
+                        <div key={b.name}>
+                          <div className="text-xs font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">
+                            {shopGroup === "shelf" ? "🗄️ " : "🏷 "}{b.name} <span className="text-slate-400 font-normal">({b.items.length})</span>
+                          </div>
+                          <div className={gridCls}>{b.items.map(renderShopCard)}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )}
-              {/* 🪑 จ่ายไปที่โต๊ะ (งานที่ช่างกำลังทำอยู่ที่โต๊ะ ยังไม่ส่งครบ) — พรีวิว จะไหลเข้า QC เมื่อช่างส่งงาน */}
-              <div className="mt-5">
-                <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">🪑 จ่ายไปที่โต๊ะ (กดการ์ดเพื่อส่งงาน) <span className="text-slate-400 font-normal">({deskFiltered.length})</span></div>
-                {deskFiltered.length === 0
-                  ? <div className="text-center py-6 text-[12px] text-slate-300">ยังไม่มีงานที่จ่ายไปที่โต๊ะ — งานที่จ่ายให้ช่างที่โต๊ะ (บนบอร์ดจ่ายงาน) จะมาโชว์ที่นี่ แล้วไหลเข้า QC เมื่อช่างส่งงาน</div>
-                  : <div className={gridCls}>{deskFiltered.map(renderDeskCard)}</div>}
-              </div>
             </div>
           );
         })()
@@ -791,6 +816,10 @@ export default function QcWarehousePage() {
                   <input type="number" min={0} step="any" value={sendWage} onChange={(e) => setSendWage(e.target.value)}
                     className="w-full h-10 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
               </div>
+              <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer w-fit">
+                <input type="checkbox" checked={sendSaveBom} onChange={(e) => setSendSaveBom(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+                💾 บันทึกค่าแรงนี้กลับเข้า BOM (ราคากลาง/ชิ้น)
+              </label>
               <p className="text-[10px] text-slate-400">ค่าแรงเติมให้จากราคากลาง ({fmt(sendModal.rate)}/ชิ้น) แก้ได้ · ส่งงานแล้วจะเข้า “งานรอ QC” ให้รับเข้าชั้นต่อ</p>
             </div>
           );

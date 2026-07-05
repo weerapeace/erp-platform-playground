@@ -70,6 +70,22 @@ async function buildImageMap(admin: ReturnType<typeof supabaseAdmin>, skus: stri
   return map;
 }
 
+// ราคาแรงผลิต "กลาง" (ราคากลาง = ไม่ระบุช่าง, is_current) ต่อ SKU → เติมค่าแรงตอนส่งงาน
+async function buildRateMap(admin: ReturnType<typeof supabaseAdmin>, skus: string[]): Promise<Record<string, number>> {
+  const map: Record<string, number> = {};
+  if (skus.length === 0) return map;
+  const { data: boms } = await admin.from("bom_headers").select("product_sku, bom_code, updated_at").in("product_sku", skus).eq("is_active", true).order("updated_at", { ascending: false });
+  const skuBom = new Map<string, string>();
+  for (const b of (boms ?? []) as { product_sku: string | null; bom_code: string | null }[]) if (b.product_sku && b.bom_code && !skuBom.has(b.product_sku)) skuBom.set(b.product_sku, b.bom_code);
+  const bomCodes = [...new Set([...skuBom.values()])];
+  if (bomCodes.length === 0) return map;
+  const { data: rates } = await admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes).eq("is_active", true).eq("is_current", true).is("craftsman_id", null);
+  const bomRate = new Map<string, number>();
+  for (const r of (rates ?? []) as { bom_code: string | null; rate: number | null }[]) if (r.bom_code && bomRate.get(r.bom_code) == null) bomRate.set(r.bom_code, Number(r.rate) || 0);
+  for (const [sku, bom] of skuBom) { const rr = bomRate.get(bom); if (rr != null) map[sku] = rr; }
+  return map;
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "qc.view"); if (denied) return denied;
   const admin = supabaseAdmin();
@@ -87,7 +103,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // รูป + แบรนด์ ต่อ SKU (จากของบนชั้น + งานในคิว + งานในโต๊ะ)
   const skus = Array.from(new Set([...(it.data ?? []).map((i) => i.sku as string | null), ...(wo.data ?? []).map((w) => w.product_sku as string | null), ...(ad.data ?? []).map((w) => w.product_sku as string | null)].filter((s): s is string => !!s)));
-  const [imgMap, brandMap] = await Promise.all([buildImageMap(admin, skus), buildBrandMap(admin, skus)]);
+  const [imgMap, brandMap, rateMap] = await Promise.all([buildImageMap(admin, skus), buildBrandMap(admin, skus), buildRateMap(admin, skus)]);
 
   // ช่างเหมา: assignee_id (craftsman) → employees.is_subcontract
   const assigneeIds = Array.from(new Set((wo.data ?? []).filter((w) => w.assignee_type === "craftsman" && w.assignee_id).map((w) => w.assignee_id as string)));
@@ -115,7 +131,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     worker: w.assignee_name as string | null, qty: Number(w.qty ?? 0), received_qty: Number(w.received_qty ?? 0),
     status: (w.status as string) ?? "dispatched", due_date: w.due_date as string | null,
     image_key: sku ? imgMap[sku] ?? null : null, brand_color: b?.color ?? null,
-    rate: Number(w.qty) > 0 && w.labor_cost != null ? Math.round((Number(w.labor_cost) / Number(w.qty)) * 100) / 100 : 0,
+    // ค่าแรง/ชิ้น: ราคากลางจาก BOM ก่อน · ไม่มีค่อยถอดจาก labor_cost ที่ตั้งไว้ตอนจ่าย
+    rate: (sku && rateMap[sku] > 0) ? rateMap[sku] : (Number(w.qty) > 0 && w.labor_cost != null ? Math.round((Number(w.labor_cost) / Number(w.qty)) * 100) / 100 : 0),
   }; });
 
   return NextResponse.json({ shelves: sh.data ?? [], items, reasons: rs.data ?? [], sources: sc.data ?? [], queue, atDesks, error: null });
