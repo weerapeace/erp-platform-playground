@@ -301,6 +301,8 @@ export function OverviewDashboard({
                         : s.status === "revision_requested" ? t("ขอแก้", "Revision")
                         : s.status === "canceled" ? t("ยกเลิก", "Canceled")
                         : t("ยังไม่เริ่ม", "Not started");
+                      const remain = s.due_date ? Math.ceil((new Date(`${s.due_date}T23:59:59`).getTime() - Date.now()) / 86400000) : null;
+                      const remainText = remain == null ? "" : remain < 0 ? t(`เกินกำหนด ${-remain} วัน`, `${-remain}d overdue`) : remain === 0 ? t("ครบกำหนดวันนี้", "Due today") : t(`เหลือ ${remain} วัน`, `${remain}d left`);
                       return (
                       <button key={s.id} onClick={() => onOpenTask(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}
                         className="w-full flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 text-left"
@@ -318,7 +320,12 @@ export function OverviewDashboard({
                           </div>
                           {s.task_no && <div className="text-xs text-slate-400 truncate font-mono">↳ {s.task_no}</div>}
                         </div>
-                        {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
+                        {s.due_date && (
+                          <div className="text-right shrink-0 leading-tight">
+                            <div className="text-xs text-slate-500">🗓 {s.due_date}</div>
+                            <div className={`text-[11px] font-medium ${remain != null && remain < 0 ? "text-red-600" : remain != null && remain <= 2 ? "text-amber-600" : "text-slate-400"}`}>{remainText}</div>
+                          </div>
+                        )}
                       </button>
                       );
                     })}

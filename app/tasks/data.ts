@@ -429,13 +429,22 @@ export async function savePlatformSettings(settings: PlatformSettings): Promise<
 }
 
 // ---- เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์) — เก็บ ui_config key 'creative_recommended_times' ----
-// คีย์ = วันในสัปดาห์ตาม Date.getDay() ('0'=อาทิตย์ .. '6'=เสาร์) · ค่า = รายการเวลา ["HH:MM", ...]
-export type RecommendedTimes = Record<string, string[]>;
+// คีย์ = วันในสัปดาห์ตาม Date.getDay() ('0'=อาทิตย์ .. '6'=เสาร์) · ค่า = รายการเวลา [{time:"HH:MM", note?}]
+export type RecTime = { time: string; note?: string };
+export type RecommendedTimes = Record<string, RecTime[]>;
 export async function getRecommendedTimes(): Promise<RecommendedTimes> {
   const j = await apiFetch("/api/ui-config?key=creative_recommended_times").then((r) => r.json()).catch(() => ({}));
-  const raw = (j.value as Record<string, string | string[]>) ?? {};
+  const raw = (j.value as Record<string, unknown>) ?? {};
   const out: RecommendedTimes = {};
-  for (const [k, v] of Object.entries(raw)) { const arr = (Array.isArray(v) ? v : (v ? [v] : [])).filter(Boolean); if (arr.length) out[k] = arr; }  // รองรับข้อมูลเก่า (string เดี่ยว)
+  for (const [k, v] of Object.entries(raw)) {
+    const items = Array.isArray(v) ? v : (v ? [v] : []);
+    const arr: RecTime[] = [];
+    for (const it of items) {
+      if (typeof it === "string") { if (it) arr.push({ time: it }); }   // ข้อมูลเก่า: string เดี่ยว
+      else if (it && typeof it === "object" && typeof (it as { time?: unknown }).time === "string") { const o = it as { time: string; note?: string }; if (o.time) arr.push({ time: o.time, note: o.note || undefined }); }
+    }
+    if (arr.length) out[k] = arr;
+  }
   return out;
 }
 export async function saveRecommendedTimes(times: RecommendedTimes): Promise<void> {

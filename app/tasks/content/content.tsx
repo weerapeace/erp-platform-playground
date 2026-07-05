@@ -588,9 +588,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     if (dpart.length < 10) return null;
     const day = new Date(`${dpart}T00:00:00`).getDay();
     const cur = scheduledAt.slice(11, 16);
-    const times = (recTimes[String(day)] ?? []).filter((tm) => tm && tm !== cur);
-    if (!times.length) return null;
-    return { times, label: ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."][day] };
+    const items = (recTimes[String(day)] ?? []).filter((it) => it.time && it.time !== cur);
+    if (!items.length) return null;
+    return { items, label: ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."][day] };
   }, [scheduledAt, recTimes]);
   const applyRecommendedTime = (tm: string) => setScheduledAt(`${scheduledAt.slice(0, 10)}T${tm}`);
   // ตัวแปรสินค้าที่ใช้ร่วมทุก caption (ไม่รวม caption/hashtags ที่ต่างกันต่อแพลตฟอร์ม)
@@ -708,8 +708,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               {schedRec && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <span className="text-[11px] text-violet-400">💡 {t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
-                  {schedRec.times.map((tm) => (
-                    <button key={tm} type="button" onClick={() => applyRecommendedTime(tm)} className="inline-flex items-center text-[11px] text-violet-700 bg-white border border-violet-200 rounded-full px-2.5 py-1 hover:bg-violet-100">{tm}</button>
+                  {schedRec.items.map((it) => (
+                    <button key={it.time} type="button" onClick={() => applyRecommendedTime(it.time)} title={it.note || t("เวลาแนะนำ", "Suggested time")} className="inline-flex items-center gap-0.5 text-[11px] text-violet-700 bg-white border border-violet-200 rounded-full px-2.5 py-1 hover:bg-violet-100">{it.time}{it.note ? <span className="text-violet-300">ⓘ</span> : null}</button>
                   ))}
                 </div>
               )}
@@ -1125,30 +1125,49 @@ function HashtagLibraryModal({ brandId, onClose, pushToast }: { brandId: string 
 // โมดอลตั้ง "เวลาแนะนำการโพสต์" ต่อวัน (จันทร์-อาทิตย์) — เก็บค่ากลาง ใช้เตือนตอนเลือกวันโพสต์
 function RecommendedTimesModal({ initial, onClose, onSaved, pushToast }: { initial: RecommendedTimes; onClose: () => void; onSaved: (v: RecommendedTimes) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
-  const [times, setTimes] = useState<RecommendedTimes>(() => { const o: RecommendedTimes = {}; for (const [k, v] of Object.entries(initial)) o[k] = [...v]; return o; });
+  const [times, setTimes] = useState<RecommendedTimes>(() => { const o: RecommendedTimes = {}; for (const [k, v] of Object.entries(initial)) o[k] = v.map((it) => ({ ...it })); return o; });
   const [busy, setBusy] = useState(false);
   const days: [string, string, string][] = [["1", "จันทร์", "Mon"], ["2", "อังคาร", "Tue"], ["3", "พุธ", "Wed"], ["4", "พฤหัสบดี", "Thu"], ["5", "ศุกร์", "Fri"], ["6", "เสาร์", "Sat"], ["0", "อาทิตย์", "Sun"]];
-  const addTime = (k: string) => setTimes((x) => ({ ...x, [k]: [...(x[k] ?? []), ""] }));
-  const setTime = (k: string, i: number, v: string) => setTimes((x) => ({ ...x, [k]: (x[k] ?? []).map((tm, j) => (j === i ? v : tm)) }));
+  const addTime = (k: string) => setTimes((x) => ({ ...x, [k]: [...(x[k] ?? []), { time: "" }] }));
+  const patchTime = (k: string, i: number, patch: Partial<{ time: string; note: string }>) => setTimes((x) => ({ ...x, [k]: (x[k] ?? []).map((it, j) => (j === i ? { ...it, ...patch } : it)) }));
   const removeTime = (k: string, i: number) => setTimes((x) => ({ ...x, [k]: (x[k] ?? []).filter((_, j) => j !== i) }));
   const save = async () => {
     setBusy(true);
-    try { const clean: RecommendedTimes = {}; for (const [k, v] of Object.entries(times)) { const c = v.filter(Boolean); if (c.length) clean[k] = c; } await saveRecommendedTimes(clean); pushToast("success", t("บันทึกเวลาแนะนำแล้ว", "Saved")); onSaved(clean); }
+    try { const clean: RecommendedTimes = {}; for (const [k, v] of Object.entries(times)) { const c = v.filter((it) => it.time).map((it) => ({ time: it.time, ...(it.note?.trim() ? { note: it.note.trim() } : {}) })); if (c.length) clean[k] = c; } await saveRecommendedTimes(clean); pushToast("success", t("บันทึกเวลาแนะนำแล้ว", "Saved")); onSaved(clean); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
+  // ตัวเลือกเวลาแบบ 24 ชม. (ชั่วโมง:นาที) — บังคับรูปแบบ ไม่ขึ้นกับ locale ของเบราว์เซอร์
+  const HourMin = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => {
+    const [h, m] = (value || ":").split(":");
+    const mins = ["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"]; if (m && !mins.includes(m)) mins.push(m);
+    return (
+      <span className="inline-flex items-center gap-0.5">
+        <select value={h || ""} onChange={(e) => onChange(`${e.target.value || "00"}:${m || "00"}`)} className="h-9 border border-slate-200 rounded-lg px-1 text-sm bg-white">
+          <option value="" disabled>--</option>
+          {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0")).map((hh) => <option key={hh} value={hh}>{hh}</option>)}
+        </select>
+        <span className="text-slate-400">:</span>
+        <select value={m || ""} onChange={(e) => onChange(`${h || "00"}:${e.target.value || "00"}`)} className="h-9 border border-slate-200 rounded-lg px-1 text-sm bg-white">
+          <option value="" disabled>--</option>
+          {mins.sort().map((mm) => <option key={mm} value={mm}>{mm}</option>)}
+        </select>
+      </span>
+    );
+  };
   return (
-    <ERPModal open onClose={onClose} size="sm" title={t("เวลาแนะนำการโพสต์ (ต่อวัน)", "Suggested posting times")}>
+    <ERPModal open onClose={onClose} size="md" title={t("เวลาแนะนำการโพสต์ (ต่อวัน)", "Suggested posting times")}>
       <div className="space-y-2">
-        <p className="text-[11px] text-slate-400">{t("ตั้งเวลาที่แนะนำให้โพสต์ในแต่ละวัน (เพิ่มได้หลายเวลา) — เมื่อเลือกวันโพสต์จะมีปุ่มให้กดใช้", "Set suggested times per weekday (multiple allowed) — buttons appear to apply when you pick a date")}</p>
+        <p className="text-[11px] text-slate-400">{t("ตั้งเวลา (24 ชม.) ที่แนะนำให้โพสต์ในแต่ละวัน (เพิ่มได้หลายเวลา) · ใส่หมายเหตุได้ (จะโชว์ตอนชี้ปุ่มเวลา) — เมื่อเลือกวันโพสต์จะมีปุ่มให้กดใช้", "Set suggested times (24h) per weekday (multiple) · add a note (shown as tooltip) — buttons appear when you pick a date")}</p>
         {days.map(([k, th, en]) => (
           <div key={k} className="flex items-start gap-2">
             <span className="w-24 text-sm text-slate-600 pt-1.5 shrink-0">{t(th, en)}</span>
             <div className="flex-1 flex flex-wrap items-center gap-1.5">
-              {(times[k] ?? []).map((tm, i) => (
-                <span key={i} className="inline-flex items-center gap-0.5">
-                  <input type="time" value={tm} onChange={(e) => setTime(k, i, e.target.value)} className="h-9 border border-slate-200 rounded-lg px-2 text-sm" />
+              {(times[k] ?? []).map((it, i) => (
+                <div key={i} className="inline-flex items-center gap-1 border border-slate-100 rounded-lg p-1">
+                  <HourMin value={it.time} onChange={(v) => patchTime(k, i, { time: v })} />
+                  <input value={it.note ?? ""} onChange={(e) => patchTime(k, i, { note: e.target.value })} placeholder={t("หมายเหตุ", "Note")} title={t("หมายเหตุ (โชว์ตอนชี้ปุ่มเวลา)", "Note (shown as tooltip)")} className="h-9 w-24 border border-slate-200 rounded-lg px-2 text-xs" />
                   <button onClick={() => removeTime(k, i)} title={t("ลบ", "Remove")} className="text-slate-300 hover:text-red-500 text-sm px-0.5">✕</button>
-                </span>
+                </div>
               ))}
               <button onClick={() => addTime(k)} className="h-8 px-2 text-[11px] text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">＋ {t("เพิ่มเวลา", "Add time")}</button>
             </div>
