@@ -28,7 +28,7 @@ type Platform = { id: string; code: string; name_th: string; icon_key: string | 
 type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; description_image_keys?: string[]; extra?: Record<string, unknown>; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
 type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null; platform_category_id: string | null; platform_category_name: string | null; brand_name: string | null; weight_kg: number | null; box_width: number | null; box_length: number | null; box_height: number | null };
 type ImageItem = { key: string; source: string };
-type Account = { label: string | null; is_active: boolean };
+type Account = { label: string | null; is_active: boolean; external_shop_id?: string | null };
 type Variant = { id: string; code: string; name: string; color: string | null; fake_price: number | null; sale_price: number | null; discount: number; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean; option_name?: string | null; option_value?: string | null };
 type Toast = { id: number; type: "success" | "error" | "info"; msg: string };
 
@@ -441,6 +441,18 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   // ลงขาย (mock connector) — เดี่ยว / ทุกที่พร้อม
   const account = accounts[active];
   const published = activeDraft.last_sync_status === "success" || activeDraft.status === "published";
+  // ลิงก์สินค้าบนร้าน (LINE): https://shop.line.me/@{shopId}/product/{productId} — รับทั้ง URL เต็มที่วางมา หรือ @handle
+  const shopLink = (() => {
+    const pid = activeDraft.platform_product_id; const sid = (account?.external_shop_id ?? "").trim();
+    if (!pid || !sid) return "";
+    const base = /^https?:\/\//i.test(sid) ? sid.replace(/\/+$/, "") : `https://shop.line.me/@${sid.replace(/^@/, "")}`;
+    return `${base}/product/${pid}`;
+  })();
+  const copyShopLink = async () => {
+    if (!shopLink) return;
+    try { await navigator.clipboard.writeText(shopLink); toast("success", "คัดลอกลิงก์สินค้าแล้ว"); }
+    catch { toast("error", "คัดลอกไม่ได้ — กดค้างที่ลิงก์เพื่อคัดลอกเอง"); }
+  };
   const publishOnePlatform = async () => {
     if (!ready) { toast("error", "ข้อมูลยังไม่ครบ — ดูเช็คลิสต์"); return; }
     if (!account?.is_active) { toast("error", "แบรนด์นี้ยังไม่มีร้านสำหรับแพลตฟอร์มนี้"); return; }
@@ -734,6 +746,19 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                             <button onClick={() => setDisplayLine("hide")} disabled={displaying} className="h-8 px-3 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⏸ ปิดขาย</button>
                             <button onClick={unlinkFromPlatform} disabled={matching} title="ให้ระบบลืมว่าสินค้านี้เชื่อมกับ LINE (ไม่ลบของจริงบนร้าน) เพื่อกดสร้างใหม่ได้" className="h-8 px-3 text-xs text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50 disabled:opacity-50">🔓 เลิกเชื่อม</button>
                           </div>}
+                          {/* ลิงก์สินค้าบนร้าน LINE — ก๊อปไปแชร์/โพสต์ได้ */}
+                          <div>
+                            <p className="text-[11px] text-slate-400 mb-0.5">🔗 ลิงก์สินค้าบน LINE</p>
+                            {shopLink ? (
+                              <div className="flex items-center gap-1.5">
+                                <input readOnly value={shopLink} onFocus={(e) => e.currentTarget.select()} className="flex-1 min-w-0 h-8 border border-slate-200 rounded-md px-2 text-xs text-slate-600 bg-slate-50" />
+                                <button onClick={copyShopLink} className="h-8 px-2.5 text-xs text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">📋 คัดลอก</button>
+                                <a href={shopLink} target="_blank" rel="noopener noreferrer" className="h-8 px-2.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0 flex items-center">เปิด ↗</a>
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-amber-600">ยังสร้างลิงก์ไม่ได้ — ตั้ง “Shop ID / ลิงก์ร้าน {activePf.name_th}” ที่ <a href="/admin/platform-accounts" target="_blank" rel="noopener noreferrer" className="underline">ตั้งค่าร้าน</a> ก่อน (เช่น louismontini หรือวางลิงก์ร้านเต็ม)</p>
+                            )}
+                          </div>
                         </div>
                       : canEdit && <button onClick={createOnLine} disabled={creating || !ready} title={!ready ? "กรอกฟิลด์จำเป็นให้ครบก่อน (ดูรายการด้านบน)" : "สร้างสินค้าใหม่บน LINE"} className="mt-2 w-full h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{creating ? "กำลังสร้าง..." : "🆕 สร้างสินค้าใหม่บน LINE"}</button>
                   )}

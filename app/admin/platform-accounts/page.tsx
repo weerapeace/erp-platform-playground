@@ -106,7 +106,7 @@ export default function PlatformAccountsPage() {
                   <span className="text-lg w-7 text-center shrink-0">{p.icon_key || PLATFORM_ICON[p.code] || "🏬"}</span>
                   <span className="text-sm font-medium text-slate-700 w-24 shrink-0">{p.name_th}</span>
                   <ERPInput value={acc.label ?? ""} disabled={!canManage} placeholder="ชื่อร้าน (เช่น Shopee – แบรนด์ A)" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, label: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { label: e.target.value })} />
-                  <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage} placeholder="Shop ID (ถ้ามี)" className="max-w-[160px]" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, external_shop_id: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { external_shop_id: e.target.value })} />
+                  <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage} placeholder="Shop ID / ลิงก์ร้าน (เช่น @louismontini — ใช้ทำลิงก์สินค้า)" title="ใช้สร้างลิงก์สินค้าบนร้าน เช่น LINE: https://shop.line.me/@Shop ID/product/..." className="max-w-[280px]" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, external_shop_id: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { external_shop_id: e.target.value })} />
                   <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0"><input type="checkbox" disabled={!canManage} checked={acc.is_active} onChange={(e) => save(p.id, { is_active: e.target.checked })} />เปิด</label>
                 </div>
                 {hasApi && canManage && (

@@ -54,14 +54,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // ร้านตามแบรนด์ (แบรนด์ × แพลตฟอร์ม) — โชว์ว่าแพลตฟอร์มไหนมีร้านพร้อม publish
-  const accounts: Record<string, { label: string | null; is_active: boolean }> = {};
+  const accounts: Record<string, { label: string | null; is_active: boolean; external_shop_id: string | null }> = {};
   let brandName: string | null = null;
   if (brandId) {
     const [{ data: accts }, { data: br }] = await Promise.all([
-      admin.from("platform_accounts").select("platform_id, label, is_active").eq("brand_id", brandId),
+      admin.from("platform_accounts").select("platform_id, label, is_active, external_shop_id").eq("brand_id", brandId),
       admin.from("brands").select("name").eq("id", brandId).maybeSingle(),
     ]);
-    for (const a of ((accts ?? []) as Record<string, unknown>[])) accounts[String(a.platform_id)] = { label: (a.label as string) ?? null, is_active: a.is_active !== false };
+    for (const a of ((accts ?? []) as Record<string, unknown>[])) accounts[String(a.platform_id)] = { label: (a.label as string) ?? null, is_active: a.is_active !== false, external_shop_id: (a.external_shop_id as string) ?? null };
     brandName = (br as { name?: string } | null)?.name ?? null;
   }
 
