@@ -313,7 +313,7 @@ export type ContentItem = {
   parent_sku_id?: string | null; parent_sku_code?: string | null; parent_sku_name?: string | null;
   post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
   scheduled_at: string | null; published_at: string | null; published_url: string | null;
-  product_links: { platform: string; url: string }[]; posted_links?: Record<string, string> | null; note: string | null; is_template?: boolean; updated_at: string;
+  product_links: { platform: string; url: string }[]; posted_links?: Record<string, string> | null; post_status?: Record<string, string> | null; note: string | null; is_template?: boolean; updated_at: string;
   discount_value?: number | null; discount_is_percent?: boolean;
   brand_shop_channels?: { label: string; value: string }[];
   assignee_id?: string | null; assignee_label?: string | null;   // ผู้รับผิดชอบคอนเทนต์ (เดี่ยว = back-compat)
