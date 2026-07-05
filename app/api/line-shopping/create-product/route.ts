@@ -35,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const [{ data: parent }, { data: draft }, { data: skus }] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, brand_id, weight_g").eq("id", parent_sku_id).maybeSingle(),
     admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, platform_product_id").eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id).maybeSingle(),
-    admin.from("skus_v2").select("id, code, color_th, color, list_price, cover_image_r2_key").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
+    admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
   ]);
   if (!parent) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 400 });
   const p = parent as Record<string, unknown>;
