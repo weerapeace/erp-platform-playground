@@ -19,6 +19,8 @@ type Opt = { external_id: string; name_en: string; name_th: string };
 type PfRow = { id: string; code: string; name_th: string; icon_key: string | null; is_active: boolean; sort_order: number };
 
 const key = (c: string, p: string) => `${c}:${p}`;
+// แพลตฟอร์มที่ยึดหมวดของ Google (Merchant Center) → ดึงจาก Google Product Taxonomy อัตโนมัติได้
+const GOOGLE_TAXONOMY_CODES = ["facebook", "instagram", "pinterest", "youtube"];
 
 export default function PlatformCategoryMapPage() {
   const toast = useToast();
@@ -153,6 +155,19 @@ export default function PlatformCategoryMapPage() {
     finally { setImporting(false); if (fileRef.current) fileRef.current.value = ""; }
   };
 
+  // ดึงหมวดจาก Google Product Taxonomy อัตโนมัติ (FB/IG/Pinterest/YouTube)
+  const importGoogle = async () => {
+    if (!importPf) { setImportMsg("เลือกร้านก่อน"); return; }
+    setImporting(true); setImportMsg("กำลังดึงจาก Google… (~5,500 หมวด)");
+    try {
+      const res = await apiFetch("/api/platform-category-options/import-google", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platform_id: importPf }) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ดึงไม่สำเร็จ");
+      setImportMsg(`✅ ดึงจาก Google แล้ว ${j.imported} หมวด (เป็นภาษาอังกฤษ)`);
+      toast.success("ดึงหมวดจาก Google แล้ว");
+    } catch (e) { setImportMsg("ผิดพลาด: " + (e instanceof Error ? e.message : "")); } finally { setImporting(false); }
+  };
+  const importPfCode = platforms.find((p) => p.id === importPf)?.code ?? "";
+
   const selCat = cats.find((c) => c.id === sel) ?? null;
 
   return (
@@ -256,6 +271,16 @@ export default function PlatformCategoryMapPage() {
                 className="w-full h-10 text-sm font-medium border-2 border-dashed border-indigo-200 rounded-lg text-indigo-600 hover:bg-indigo-50 disabled:opacity-40">
                 {importing ? "กำลังนำเข้า…" : "⬆️ เลือกไฟล์หมวดหมู่"}
               </button>
+              {GOOGLE_TAXONOMY_CODES.includes(importPfCode) && (
+                <>
+                  <div className="flex items-center gap-2 text-[11px] text-slate-400"><span className="flex-1 border-t border-slate-100" />หรือ<span className="flex-1 border-t border-slate-100" /></div>
+                  <button type="button" onClick={importGoogle} disabled={importing}
+                    className="w-full h-10 text-sm font-medium border-2 border-emerald-200 rounded-lg text-emerald-700 bg-emerald-50/40 hover:bg-emerald-50 disabled:opacity-40">
+                    🔎 ดึงจาก Google อัตโนมัติ (~5,500 หมวด · อังกฤษ)
+                  </button>
+                  <p className="text-[10px] text-slate-400">ร้านนี้ใช้หมวดของ Google (Merchant Center) — ดึงจาก Google Product Taxonomy ได้เลย ไม่ต้องอัปไฟล์</p>
+                </>
+              )}
               {importMsg && <div className="text-xs text-slate-600">{importMsg}</div>}
             </div>
           </div>
