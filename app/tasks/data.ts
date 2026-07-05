@@ -438,6 +438,16 @@ export async function saveRecommendedTimes(times: RecommendedTimes): Promise<voi
   await jsonOrThrow(await apiFetch("/api/ui-config", { method: "PATCH", body: JSON.stringify({ key: "creative_recommended_times", value: times }) }));
 }
 
+// ---- รายละเอียดงานรวม ต่อ "ประเภทโพสต์" (image/video/reel...) — เก็บ ui_config key 'creative_content_type_notes' ----
+export type ContentTypeNotes = Record<string, string>;   // คีย์ = post_type · ค่า = ข้อความบรีฟ
+export async function getContentTypeNotes(): Promise<ContentTypeNotes> {
+  const j = await apiFetch("/api/ui-config?key=creative_content_type_notes").then((r) => r.json()).catch(() => ({}));
+  return (j.value as ContentTypeNotes) ?? {};
+}
+export async function saveContentTypeNotes(notes: ContentTypeNotes): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/ui-config", { method: "PATCH", body: JSON.stringify({ key: "creative_content_type_notes", value: notes }) }));
+}
+
 // ---- พรอมต์ตั้งต้น + แฮชแท็กเริ่มต้น (ต่อแบรนด์/แพลตฟอร์ม + ตัวรวม) ----
 export type CaptionConfig = {
   prompt?: string;                                  // พรอมต์รวม (fallback)
