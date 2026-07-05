@@ -30,6 +30,7 @@ export type QcDeskCard = {
   id: string; wo_no: string | null; mo_no: string | null; sku: string | null; name: string | null;
   department_name: string | null; worker: string | null; qty: number; received_qty: number;
   status: string; due_date: string | null; image_key?: string | null; brand_color?: string | null;
+  rate: number;   // ค่าแรงผลิต/ชิ้น (จาก labor_cost ÷ qty ที่จ่าย) — ใช้เติมค่าแรงตอนส่งงาน
 };
 
 type BrandInfo = { color: string | null; name: string | null; is_customer_job: boolean };
@@ -79,7 +80,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     admin.from("mo_work_orders").select("id,mo_no,product_sku,product_name,assignee_name,assignee_id,assignee_type,received_qty,qc_pulled_qty,due_date").eq("is_active", true).gt("received_qty", 0),
     admin.from("qc_sources").select("id,name").eq("is_active", true).order("sort_order"),
     // "จ่ายไปที่โต๊ะ" — ใบจ่ายงาน active ที่ยังไม่ done (ยังทำ/ส่งไม่ครบที่โต๊ะ)
-    admin.from("mo_work_orders").select("id,wo_no,mo_no,product_sku,product_name,department_name,assignee_name,qty,received_qty,status,due_date").eq("is_active", true).neq("status", "done"),
+    admin.from("mo_work_orders").select("id,wo_no,mo_no,product_sku,product_name,department_name,assignee_name,qty,received_qty,status,due_date,labor_cost").eq("is_active", true).neq("status", "done"),
   ]);
   const err = sh.error || it.error || rs.error || wo.error || sc.error || ad.error;
   if (err) return NextResponse.json({ error: err.message }, { status: 500 });
@@ -114,6 +115,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     worker: w.assignee_name as string | null, qty: Number(w.qty ?? 0), received_qty: Number(w.received_qty ?? 0),
     status: (w.status as string) ?? "dispatched", due_date: w.due_date as string | null,
     image_key: sku ? imgMap[sku] ?? null : null, brand_color: b?.color ?? null,
+    rate: Number(w.qty) > 0 && w.labor_cost != null ? Math.round((Number(w.labor_cost) / Number(w.qty)) * 100) / 100 : 0,
   }; });
 
   return NextResponse.json({ shelves: sh.data ?? [], items, reasons: rs.data ?? [], sources: sc.data ?? [], queue, atDesks, error: null });

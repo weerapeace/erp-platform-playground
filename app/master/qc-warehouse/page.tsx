@@ -152,6 +152,39 @@ export default function QcWarehousePage() {
     await load();
   };
 
+  // ── ส่งงาน (จ่ายไปที่โต๊ะ → งานรอ QC) — ป๊อปใส่จำนวน+ค่าแรง · ส่งเดี่ยว/ใส่ตะกร้า ──
+  const [sendModal, setSendModal] = useState<QcDeskCard | null>(null);
+  const [sendQty, setSendQty] = useState("");
+  const [sendWage, setSendWage] = useState("");
+  const [sendCart, setSendCart] = useState<Record<string, { qty: number; wage: number }>>({});
+  const [sendSaving, setSendSaving] = useState(false);
+  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendWage(String(Math.round(w.rate * remain * 100) / 100)); };
+  const postSubmission = async (woId: string, qty: number, wage: number): Promise<string | null> => {
+    try { const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: woId, qty, wage }) }); const j = await res.json(); return (j.error as string) ?? null; }
+    catch (e) { return e instanceof Error ? e.message : "ส่งงานไม่สำเร็จ"; }
+  };
+  const submitSendNow = async () => {
+    if (!sendModal) return; const qty = num(sendQty); const wage = Number(sendWage) || 0;
+    if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
+    setSendSaving(true); const err = await postSubmission(sendModal.id, qty, wage); setSendSaving(false);
+    if (err) { toast.error(err); return; }
+    toast.success("ส่งงานแล้ว → เข้างานรอ QC"); setSendModal(null); await load();
+  };
+  const addSendCart = () => {
+    if (!sendModal) return; const qty = num(sendQty); const wage = Number(sendWage) || 0;
+    if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
+    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, wage } })); setSendModal(null);
+  };
+  const removeSendCart = (woId: string) => setSendCart((c) => { const n = { ...c }; delete n[woId]; return n; });
+  const submitSendCart = async () => {
+    const ids = Object.keys(sendCart); if (ids.length === 0) return;
+    setSendSaving(true); let ok = 0; const fails: string[] = [];
+    for (const id of ids) { const d = sendCart[id]; const err = await postSubmission(id, d.qty, d.wage); if (!err) ok++; else fails.push(id); }
+    setSendSaving(false); setSendCart({});
+    if (ok > 0) toast.success(`ส่งงานแล้ว ${ok} รายการ${fails.length ? ` · พลาด ${fails.length}` : ""}`); else toast.error("ส่งงานไม่สำเร็จ");
+    await load();
+  };
+
   // drag/drop
   const [dragWo, setDragWo] = useState<string | null>(null);
   const [dragItem, setDragItem] = useState<{ shelfId: string; itemId: string } | null>(null);
@@ -346,11 +379,14 @@ export default function QcWarehousePage() {
     );
   };
 
-  // ── การ์ด "จ่ายไปที่โต๊ะ" (งานที่ช่างกำลังทำอยู่ที่โต๊ะ) — อ่านอย่างเดียว/พรีวิว ──
+  // ── การ์ด "จ่ายไปที่โต๊ะ" (งานที่ช่างกำลังทำอยู่ที่โต๊ะ) — คลิกเพื่อส่งงาน ──
   const renderDeskCard = (w: QcDeskCard) => {
     const remain = Math.max(0, w.qty - w.received_qty);
+    const inCart = sendCart[w.id] != null;
     return (
-      <div key={w.id} className="rounded-xl bg-white border border-slate-200 p-2.5" style={{ borderLeft: `4px solid ${cardColor(w.brand_color, w.sku)}` }}>
+      <div key={w.id} onClick={() => openSend(w)}
+        className={`rounded-xl bg-white border p-2.5 cursor-pointer transition ${inCart ? "border-indigo-400 ring-2 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}
+        style={{ borderLeft: `4px solid ${cardColor(w.brand_color, w.sku)}` }} title="คลิกเพื่อส่งงาน / ใส่ตะกร้าส่งงาน">
         <div className="flex items-start gap-2">
           <Thumb k={w.image_key} color={cardColor(w.brand_color, w.sku)} />
           <div className="min-w-0 flex-1">
@@ -359,7 +395,12 @@ export default function QcWarehousePage() {
             <div className="text-[11px] text-slate-500 truncate">🪑 {w.department_name ?? "—"}{w.worker && w.worker !== w.department_name ? ` · 👷 ${w.worker}` : ""}</div>
             <div className="text-[10px] text-slate-400">จ่าย {fmt(w.qty)} · ส่งกลับแล้ว {fmt(w.received_qty)}{w.due_date ? ` · กำหนด ${dueText(w.due_date)}` : ""}</div>
           </div>
-          <span className="text-sm font-bold text-indigo-600 shrink-0">เหลือ {fmt(remain)}</span>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <span className="text-sm font-bold text-indigo-600">เหลือ {fmt(remain)}</span>
+            {inCart
+              ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">✓ ในตะกร้า</span>
+              : <span className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-700">📤 ส่งงาน</span>}
+          </div>
         </div>
       </div>
     );
@@ -586,7 +627,7 @@ export default function QcWarehousePage() {
               )}
               {/* 🪑 จ่ายไปที่โต๊ะ (งานที่ช่างกำลังทำอยู่ที่โต๊ะ ยังไม่ส่งครบ) — พรีวิว จะไหลเข้า QC เมื่อช่างส่งงาน */}
               <div className="mt-5">
-                <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">🪑 จ่ายไปที่โต๊ะ (กำลังทำ) <span className="text-slate-400 font-normal">({deskFiltered.length})</span></div>
+                <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">🪑 จ่ายไปที่โต๊ะ (กดการ์ดเพื่อส่งงาน) <span className="text-slate-400 font-normal">({deskFiltered.length})</span></div>
                 {deskFiltered.length === 0
                   ? <div className="text-center py-6 text-[12px] text-slate-300">ยังไม่มีงานที่จ่ายไปที่โต๊ะ — งานที่จ่ายให้ช่างที่โต๊ะ (บนบอร์ดจ่ายงาน) จะมาโชว์ที่นี่ แล้วไหลเข้า QC เมื่อช่างส่งงาน</div>
                   : <div className={gridCls}>{deskFiltered.map(renderDeskCard)}</div>}
@@ -680,18 +721,81 @@ export default function QcWarehousePage() {
         </div>
       </ERPModal>
 
-      {/* แถบตะกร้ารับเข้า (ลอยล่าง) — เฉพาะมุมมองช้อป */}
-      {view === "shop" && rcvCart.size > 0 && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-white border border-slate-200 shadow-2xl rounded-xl px-4 py-2.5 flex items-center gap-3 flex-wrap max-w-[95vw]">
-          <span className="text-sm font-bold text-slate-700">📥 รับเข้า {rcvCart.size} รายการ</span>
-          <select value={rcvShelf} onChange={(e) => setRcvShelf(e.target.value)} className="h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="">— เลือกชั้นปลายทาง —</option>
-            {storeShelves.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <button onClick={() => setRcvCart(new Set())} className="text-[12px] text-slate-400 hover:text-rose-500">ล้าง</button>
-          <button onClick={openRcvConfirm} disabled={!rcvShelf} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">รับเข้าชั้น</button>
+      {/* ตะกร้าลอยริมขวา (มุมมองช้อป) — 📤 ส่งงาน + 📥 รับเข้า */}
+      {view === "shop" && (rcvCart.size > 0 || Object.keys(sendCart).length > 0) && (
+        <div className="fixed right-3 top-24 z-40 w-72 max-w-[92vw] max-h-[calc(100vh-120px)] overflow-y-auto bg-white border border-slate-200 shadow-2xl rounded-xl p-3 space-y-3">
+          {Object.keys(sendCart).length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-bold text-emerald-700">📤 ตะกร้าส่งงาน ({Object.keys(sendCart).length})</span>
+                <button onClick={() => setSendCart({})} className="text-[11px] text-slate-400 hover:text-rose-500">ล้าง</button>
+              </div>
+              <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                {Object.entries(sendCart).map(([id, d]) => { const w = atDesks.find((x) => x.id === id); return (
+                  <div key={id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-100">
+                    <Thumb k={w?.image_key} color={cardColor(w?.brand_color, w?.sku)} size={28} />
+                    <div className="min-w-0 flex-1"><div className="text-xs font-semibold text-slate-800 truncate">{w?.sku ?? id}</div><div className="text-[10px] text-slate-400">ส่ง {fmt(d.qty)} · ฿{fmt(d.wage)}</div></div>
+                    <button onClick={() => removeSendCart(id)} className="text-slate-300 hover:text-rose-500 text-xs shrink-0">✕</button>
+                  </div>
+                ); })}
+              </div>
+              <button onClick={() => void submitSendCart()} disabled={sendSaving} className="mt-2 w-full h-9 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{sendSaving ? "กำลังส่ง…" : `ส่งงานทั้งหมด (${Object.keys(sendCart).length})`}</button>
+            </div>
+          )}
+          {rcvCart.size > 0 && (
+            <div className={Object.keys(sendCart).length > 0 ? "pt-3 border-t border-slate-100" : ""}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-bold text-indigo-700">📥 ตะกร้ารับเข้า ({rcvCart.size})</span>
+                <button onClick={() => setRcvCart(new Set())} className="text-[11px] text-slate-400 hover:text-rose-500">ล้าง</button>
+              </div>
+              <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                {queue.filter((c) => rcvCart.has(c.wo_id)).map((c) => (
+                  <div key={c.wo_id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-100">
+                    <Thumb k={c.image_key} color={cardColor(c.brand_color, c.sku)} size={28} />
+                    <div className="min-w-0 flex-1"><div className="text-xs font-semibold text-slate-800 truncate">{c.sku}</div><div className="text-[10px] text-slate-400">รอรับ {fmt(c.remaining)}</div></div>
+                    <button onClick={() => toggleRcv(c.wo_id)} className="text-slate-300 hover:text-rose-500 text-xs shrink-0">✕</button>
+                  </div>
+                ))}
+              </div>
+              <select value={rcvShelf} onChange={(e) => setRcvShelf(e.target.value)} className="mt-2 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="">— เลือกชั้นปลายทาง —</option>
+                {storeShelves.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              <button onClick={openRcvConfirm} disabled={!rcvShelf} className="mt-1.5 w-full h-9 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">รับเข้าชั้น</button>
+            </div>
+          )}
         </div>
       )}
+
+      {/* ป๊อปส่งงาน (จ่ายไปที่โต๊ะ) — จำนวน + ค่าแรง · ส่งเลย/ใส่ตะกร้า */}
+      <ERPModal open={sendModal !== null} onClose={() => !sendSaving && setSendModal(null)} size="sm" title="📤 ส่งงานจากโต๊ะ"
+        footer={sendModal ? <>
+          <button onClick={() => setSendModal(null)} disabled={sendSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+          <button onClick={addSendCart} disabled={sendSaving} className="h-9 px-3 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50">🛒 ใส่ตะกร้า</button>
+          <button onClick={() => void submitSendNow()} disabled={sendSaving} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{sendSaving ? "กำลังส่ง…" : "ส่งงานเลย"}</button>
+        </> : undefined}>
+        {sendModal && (() => {
+          const remain = Math.max(0, sendModal.qty - sendModal.received_qty);
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Thumb k={sendModal.image_key} color={cardColor(sendModal.brand_color, sendModal.sku)} size={40} />
+                <div className="min-w-0"><div className="text-sm font-semibold text-slate-800 truncate">{sendModal.name || sendModal.sku}</div><div className="text-[11px] text-slate-400 font-mono truncate">{sendModal.sku} · {sendModal.mo_no} · 🪑 {sendModal.department_name ?? "—"}</div></div>
+              </div>
+              <div className="text-[11px] text-slate-500">จ่ายไป {fmt(sendModal.qty)} · ส่งกลับแล้ว {fmt(sendModal.received_qty)} · <b className="text-indigo-600">เหลือส่ง {fmt(remain)}</b></div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block"><span className="text-[11px] text-slate-500">จำนวนที่ส่ง</span>
+                  <input type="number" min={0} max={remain} value={sendQty} autoFocus onFocus={(e) => e.target.select()} onChange={(e) => { setSendQty(e.target.value); setSendWage(String(Math.round(sendModal.rate * num(e.target.value) * 100) / 100)); }}
+                    className="w-full h-10 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" /></label>
+                <label className="block"><span className="text-[11px] text-slate-500">ค่าแรงผลิต (บาท)</span>
+                  <input type="number" min={0} step="any" value={sendWage} onChange={(e) => setSendWage(e.target.value)}
+                    className="w-full h-10 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
+              </div>
+              <p className="text-[10px] text-slate-400">ค่าแรงเติมให้จากราคากลาง ({fmt(sendModal.rate)}/ชิ้น) แก้ได้ · ส่งงานแล้วจะเข้า “งานรอ QC” ให้รับเข้าชั้นต่อ</p>
+            </div>
+          );
+        })()}
+      </ERPModal>
 
       {/* ป๊อปยืนยันรับเข้า — ใส่ดี/เสีย+สาเหตุ ต่อใบ */}
       <ERPModal open={rcvConfirm} onClose={() => !rcvSaving && setRcvConfirm(false)} size="lg" title="📥 ยืนยันรับเข้าชั้น"
