@@ -61,13 +61,19 @@ export async function GET(request: NextRequest): Promise<Response> {
     // ย่อไม่ได้ (เช่น Cloudflare ไม่มี sharp) → ส่ง "รูปเดิม" แทน (ปลอดภัย)
     const ct0 = obj.httpMetadata?.contentType ?? "image/jpeg";
     const wParam = Number(new URL(request.url).searchParams.get("w") || 0);
+    // sq=1 → บังคับสี่เหลี่ยมจัตุรัส (1:1) แบบ contain + พื้นขาว (ไม่ครอปสินค้าหาย) — ใช้กับรูปตัวเลือก LINE ที่ต้อง 1:1
+    const sq = new URL(request.url).searchParams.get("sq") === "1";
     // ไม่ย่อ GIF (sharp→webp จะได้เฟรมเดียว = ภาพนิ่ง) → เสิร์ฟตัวเต็มให้ยังขยับได้
     const canResize = wParam > 0 && wParam <= 2000 && ct0.startsWith("image/") && ct0 !== "image/svg+xml" && ct0 !== "image/gif";
     if (canResize) {
       try {
         const sharp = (await import("sharp")).default;
         const input = Buffer.from(await new Response(obj.body as ReadableStream).arrayBuffer());
-        const out = await sharp(input).rotate().resize({ width: wParam, withoutEnlargement: true }).webp({ quality: 75 }).toBuffer();
+        const pipeline = sharp(input).rotate();
+        const resized = sq
+          ? pipeline.resize({ width: wParam, height: wParam, fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 1 } })
+          : pipeline.resize({ width: wParam, withoutEnlargement: true });
+        const out = await resized.webp({ quality: 75 }).toBuffer();
         const body = new Uint8Array(out);   // Buffer → Uint8Array<ArrayBuffer> (BodyInit ที่ถูกชนิด)
         const res = new Response(body, {
           status: 200,

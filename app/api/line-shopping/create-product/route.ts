@@ -89,13 +89,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const voOf = (s: typeof skuRows[number]) => { const av = s.attribute_values; const vo = (av && typeof av === "object") ? (av as Record<string, unknown>).variant_option : null; return (vo && typeof vo === "object") ? vo as Record<string, unknown> : null; };
   const opt2Of = (s: typeof skuRows[number]) => { const vo = voOf(s); return vo ? String(vo.value ?? "").trim() : ""; };
   const opt2Name = (() => { for (const s of sellable) { const vo = voOf(s); const n = vo ? String(vo.name ?? "").trim() : ""; if (n) return n; } return "ตัวเลือก"; })();
+  // รูปต่อสี (imageUrl ใส่ได้เฉพาะ option1 = สี): ใช้ปก "ตัวสี" (master) ก่อน แล้ว fallback ตัวขาย · LINE ต้อง 1:1 → เรียก r2-image แบบ square
+  const sqImg = (k: string) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}&w=800&sq=1`;
+  const colorImg = new Map<string, string>();
+  for (const s of skuRows) { const c = colorOf(s); if (!c || colorImg.has(c)) continue; const key = masterCodes.has(s.code) ? s.cover_image_r2_key : (s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null); if (key) colorImg.set(c, key); }
   // ค่าตัวเลือกเรียงตามลำดับพบครั้งแรก (index ต้องคงที่ เพราะ variant.options อ้าง index นี้)
   const distinctVals = (fn: (s: typeof skuRows[number]) => string) => { const out: string[] = []; const seen = new Set<string>(); for (const s of sellable) { const v = fn(s); if (v && !seen.has(v)) { seen.add(v); out.push(v); } } return out; };
-  const dims: { name: string; vals: string[]; valOf: (s: typeof skuRows[number]) => string }[] = [];
-  { const cv = distinctVals(colorOf); if (cv.length) dims.push({ name: "สี", vals: cv, valOf: colorOf }); }
-  { const ov = distinctVals(opt2Of); if (ov.length) dims.push({ name: opt2Name, vals: ov, valOf: opt2Of }); }
+  const dims: { name: string; vals: string[]; valOf: (s: typeof skuRows[number]) => string; img: boolean }[] = [];
+  { const cv = distinctVals(colorOf); if (cv.length) dims.push({ name: "สี", vals: cv, valOf: colorOf, img: true }); }
+  { const ov = distinctVals(opt2Of); if (ov.length) dims.push({ name: opt2Name, vals: ov, valOf: opt2Of, img: false }); }
   // เจ้าของต้องการ "ลงเป็นสินค้ามีตัวเลือกเสมอ แม้ SKU เดียว" → ถ้าไม่มีสี/ตัวเลือกเลย ใช้รหัส SKU เป็นค่าตัวเลือก
-  if (!dims.length && sellable.length >= 1) dims.push({ name: "แบบ", vals: sellable.map((s) => s.code), valOf: (s) => s.code });
+  if (!dims.length && sellable.length >= 1) dims.push({ name: "แบบ", vals: sellable.map((s) => s.code), valOf: (s) => s.code, img: false });
   const isVariant = dims.length > 0;   // สินค้ามีตัวเลือกเสมอ (LINE variant product) — ส่ง variantOptions + variant.options (index)
   const opt1 = dims[0]; const opt2 = dims[1];
   // ส่วนลด: create รับ instantDiscount "ระดับบนสุด" เท่านั้น → ใช้ค่าร่วมถ้าทุกตัวเท่ากัน ไม่งั้น 0 (ส่งส่วนลดต่อ SKU ทีหลังด้วยปุ่ม "ส่งราคา/ส่วนลด")
@@ -127,9 +131,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const payload: Record<string, unknown> = {
     name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || p.platform_description || p.description || ""),
     brand: String(extra.brand || brandName || ""), imageUrls, variants, instantDiscount: topDiscount,
-    // สินค้ามีตัวเลือกเสมอ → ส่ง variantOptions (option1 = มิติแรก, option2 = มิติสอง ถ้ามี) · รูปต่อสีเติมภายหลัง (ต้อง 1:1)
+    // สินค้ามีตัวเลือกเสมอ → ส่ง variantOptions · imageUrl ต่อสีใส่ได้เฉพาะ option1 (สี) แบบ 1:1
     ...(isVariant && opt1 ? { variantOptions: {
-      option1: { name: opt1.name, data: opt1.vals.map((v) => ({ value: v })) },
+      option1: { name: opt1.name, data: opt1.vals.map((v) => ({ value: v, ...(opt1.img && colorImg.get(v) ? { imageUrl: sqImg(colorImg.get(v)!) } : {}) })) },
       ...(opt2 ? { option2: { name: opt2.name, data: opt2.vals.map((v) => ({ value: v })) } } : {}),
     } } : {}),
   };
