@@ -505,6 +505,19 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   useEffect(() => { if (d) loadTemplates(); }, [d, loadTemplates]);
 
   const setCap = (platform: string, patch: Partial<ContentCaption>) => setCaps((cs) => cs.map((c) => c.platform === platform ? { ...c, ...patch } : c));
+  // "ใช้ทั้งหมด": เอา caption/hashtags ของช่องต้นทาง ไปเติมแพลตฟอร์มอื่น "ที่ยังว่าง" เท่านั้น (ไม่ทับที่กรอกไว้แล้ว)
+  const applyCapToAll = (fromPlatform: string) => {
+    const src = caps.find((c) => c.platform === fromPlatform);
+    if (!src || (!src.caption?.trim() && !src.hashtags?.trim())) { pushToast("info", t("ช่องนี้ยังว่าง — กรอกก่อนแล้วค่อยกด", "This field is empty — fill it first")); return; }
+    setCaps((cs) => cs.map((c) => {
+      if (c.platform === fromPlatform) return c;
+      const next = { ...c };
+      if (!c.caption?.trim() && src.caption?.trim()) next.caption = src.caption;
+      if (!c.hashtags?.trim() && src.hashtags?.trim()) next.hashtags = src.hashtags;
+      return next;
+    }));
+    pushToast("success", t("ใช้กับช่องที่ยังว่างให้แล้ว (ไม่ทับที่กรอกไว้)", "Applied to empty fields only"));
+  };
 
   // เลือก Parent SKU → ดึงสีของ SKU ลูกทั้งหมดมารวม
   useEffect(() => { if (!parent?.id) { setChildren([]); return; } let live = true; getParentSkuChildren(parent.id).then((cs) => { if (live) { setChildren(cs); setPriceSkuId((prev) => prev || cs[0]?.id || ""); } }).catch(() => {}); return () => { live = false; }; }, [parent?.id]);
@@ -787,7 +800,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => setCap(c.platform, patch)} onOpenSettings={() => setPsOpen(true)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => setCap(c.platform, patch)} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? applyCapToAll : undefined} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -963,7 +976,7 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [tplOpen, setTplOpen] = useState(false);   // พับปุ่มเลือกแม่แบบไว้ก่อน
   const useCaption = setting?.use_caption !== false;
@@ -986,6 +999,7 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, o
           {postUrl
             ? <a href={postUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-100">↗ {t("ไปโพสต์", "Post")}</a>
             : onOpenSettings && <button onClick={onOpenSettings} title={t("ตั้งลิงก์ไปหน้าโพสต์ ที่ตั้งค่าแพลตฟอร์ม", "Set post link in platform settings")} className="text-[11px] text-slate-400 hover:text-violet-700">🔗 {t("ตั้งลิงก์", "Set link")}</button>}
+          {onApplyAll && <button onClick={() => onApplyAll(cap.platform)} title={t("เอาแคปชั่น+แฮชแท็กช่องนี้ ไปเติมแพลตฟอร์มอื่นที่ยังว่าง (ไม่ทับที่กรอกไว้แล้ว)", "Fill other empty platforms with this caption+hashtags (won't overwrite)")} className="text-xs text-violet-700 hover:underline">⇊ {t("ใช้ทั้งหมด", "Apply all")}</button>}
           <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
         </div>
       </div>
