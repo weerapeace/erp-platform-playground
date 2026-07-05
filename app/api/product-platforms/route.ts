@@ -19,13 +19,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!parentId) return NextResponse.json({ error: "ต้องระบุ parent_sku_id" }, { status: 400 });
   const admin = supabaseAdmin();
 
-  const [{ data: parent }, { data: pf }, { data: drafts }, { data: skus }, { data: slots }, { data: descU }] = await Promise.all([
+  const [{ data: parent }, { data: pf }, { data: drafts }, { data: skus }, { data: slots }, { data: descU }, { data: galleryAtts }] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, platform_category_id, brand_id, weight_g, parcel_size_id").eq("id", parentId).maybeSingle(),
     admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, capabilities, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
     admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, description_image_keys, extra, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
     admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, fake_price, cover_image_r2_key, is_active, attribute_values").eq("parent_sku_id", parentId).order("code", { ascending: true }),
     admin.from("product_image_slots").select("r2_key").eq("owner_id", parentId),
     admin.from("asset_usages").select("asset_id, sort_order").eq("module", "parent_sku_description").eq("record_id", parentId).order("sort_order", { ascending: true }),
+    // แกลเลอรีจริงของ Parent SKU ("รูปภาพเพิ่มเติม") — เก็บใน erp_playground_attachments (ไม่ใช่ product_image_slots)
+    admin.from("erp_playground_attachments").select("file_path, is_primary, sort_order").eq("entity_type", "parent_skus_v2").eq("entity_id", parentId).order("is_primary", { ascending: false }).order("sort_order", { ascending: true }),
   ]);
   const pRow = (parent ?? {}) as Record<string, unknown>;
   const categoryId = (pRow.category_id as string) ?? null;
@@ -126,6 +128,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const images: { key: string; source: string }[] = [];
   const addImg = (key: string | null | undefined, source: string) => { const k = (key ?? "").trim(); if (k && !seen.has(k)) { seen.add(k); images.push({ key: k, source }); } };
   addImg(pRow.cover_image_r2_key as string, "ปก");
+  for (const a of ((galleryAtts ?? []) as Record<string, unknown>[])) addImg(a.file_path as string, a.is_primary ? "รูปหลัก" : "แกลเลอรี");
   for (const s of ((slots ?? []) as Record<string, unknown>[])) addImg(s.r2_key as string, "แกลเลอรี");
   for (const s of skuRows) if (masterCodes.has(String(s.code ?? ""))) addImg((s.cover_image_r2_key as string) ?? null, `สี ${(s.color_th as string) || (s.color as string) || String(s.code)}`);
   for (const v of variants) addImg(v.image_key, `SKU ${v.code}`);
