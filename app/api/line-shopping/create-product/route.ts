@@ -35,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const [{ data: parent }, { data: draft }, { data: skus }] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, platform_description, brand_id, weight_g").eq("id", parent_sku_id).maybeSingle(),
     admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, platform_product_id").eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id).maybeSingle(),
-    admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
+    admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
   ]);
   if (!parent) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 400 });
   const p = parent as Record<string, unknown>;
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const name = String(d.title || p.name_platform || p.name_th || "").trim();
   const categoryId = catIdOf(d.category_path);
   const imageKeys = Array.isArray(d.image_keys) ? d.image_keys as string[] : [];
-  const skuRows = (skus ?? []) as { id: string; code: string; color_th: string | null; color: string | null; list_price: number | null; fake_price: number | null; cover_image_r2_key: string | null }[];
+  const skuRows = (skus ?? []) as { id: string; code: string; color_th: string | null; color: string | null; list_price: number | null; fake_price: number | null; cover_image_r2_key: string | null; attribute_values: Record<string, unknown> | null }[];
 
   // โครง 3 ชั้น: แยก "ตัวสี" (master) ออกจาก "ตัวขาย" (sellable) — ส่ง LINE เฉพาะตัวขาย
   // master = รหัสที่เป็นฐานของตัวขาย (WK42-01 เป็นฐานของ WK42-01D/N/G) · ตัวขายดึงราคา/รูปจากตัวสีเมื่อไม่มีของตัวเอง
@@ -85,16 +85,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
   const fakeOf = (s: typeof skuRows[number]) => num(s.fake_price) || num(masterOf(s.code)?.fake_price);
   const saleOf = (s: typeof skuRows[number]) => num(s.list_price) || num(masterOf(s.code)?.list_price);
-  const colors = [...new Set(sellable.map((s) => (s.color_th || s.color || "").trim()).filter(Boolean))];
-  // หลายสี = "สินค้ามีตัวเลือก" (ส่ง variantOptions + options) · สีเดียว/ไม่มีสี = "สินค้าไม่มีตัวเลือก" (ไม่ส่ง — เลี่ยงปัญหา options invalid)
-  const multiVariant = colors.length > 1;
+  const r2url = (k: string) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`;
+  // มิติตัวเลือก (LINE รองรับ option1 + option2): สี = มิติหลัก · ตัวเลือกที่ 2 = attribute_values.variant_option {name,value}
+  const colorOf = (s: typeof skuRows[number]) => (s.color_th || s.color || "").trim();
+  const voOf = (s: typeof skuRows[number]) => { const av = s.attribute_values; const vo = (av && typeof av === "object") ? (av as Record<string, unknown>).variant_option : null; return (vo && typeof vo === "object") ? vo as Record<string, unknown> : null; };
+  const opt2Of = (s: typeof skuRows[number]) => { const vo = voOf(s); return vo ? String(vo.value ?? "").trim() : ""; };
+  const opt2Name = (() => { for (const s of sellable) { const vo = voOf(s); const n = vo ? String(vo.name ?? "").trim() : ""; if (n) return n; } return "ตัวเลือก"; })();
+  // รูปต่อสี (แสดงบน swatch สีของ LINE — imageUrl อยู่ได้เฉพาะ option1): ใช้ปก "ตัวสี" (master) ก่อน แล้ว fallback ตัวขาย
+  const colorImg = new Map<string, string>();
+  for (const s of skuRows) { const c = colorOf(s); if (!c || colorImg.has(c)) continue; const key = masterCodes.has(s.code) ? s.cover_image_r2_key : (s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null); if (key) colorImg.set(c, key); }
+  // ค่าตัวเลือกเรียงตามลำดับพบครั้งแรก (index ต้องคงที่ เพราะ variant.options อ้าง index นี้)
+  const distinctVals = (fn: (s: typeof skuRows[number]) => string) => { const out: string[] = []; const seen = new Set<string>(); for (const s of sellable) { const v = fn(s); if (v && !seen.has(v)) { seen.add(v); out.push(v); } } return out; };
+  const dims: { name: string; vals: string[]; valOf: (s: typeof skuRows[number]) => string; img: boolean }[] = [];
+  { const cv = distinctVals(colorOf); if (cv.length) dims.push({ name: "สี", vals: cv, valOf: colorOf, img: true }); }
+  { const ov = distinctVals(opt2Of); if (ov.length) dims.push({ name: opt2Name, vals: ov, valOf: opt2Of, img: false }); }
+  if (!dims.length && sellable.length > 1) dims.push({ name: "แบบ", vals: sellable.map((s) => s.code), valOf: (s) => s.code, img: false });
+  // สินค้ามีตัวเลือก = ตัวขาย > 1 (LINE simple product มี SKU เดียว) → ส่ง variantOptions + variant.options เป็น "index"
+  const isVariant = sellable.length > 1 && dims.length > 0;
+  const opt1 = dims[0]; const opt2 = dims[1];
   const variants = sellable.map((s) => {
     const fake = fakeOf(s); const sale = saleOf(s);
     const disc = (fake > 0 && sale > 0 && sale < fake) ? fake - sale : 0;
-    const color = (s.color_th || s.color || "").trim();
-    return { sku: s.code, price: fake, instantDiscount: disc, onHandNumber: stockOf.get(s.id) ?? 0,
-      ...(multiVariant && color ? { options: { option1: { value: color } } } : {}),
-      ...(weightKg > 0 ? { weight: weightKg } : {}), ...(gtin ? { gtin } : {}) };
+    const base: Record<string, unknown> = { sku: s.code, price: fake, instantDiscount: disc, onHandNumber: stockOf.get(s.id) ?? 0 };
+    if (weightKg > 0) base.weight = weightKg;
+    if (gtin) base.gtin = gtin;
+    // variant.options = array ของ index ชี้ค่าใน variantOptions (option1 ก่อน option2) เช่น [0] หรือ [0,1]
+    if (isVariant && opt1) { const i1 = Math.max(0, opt1.vals.indexOf(opt1.valOf(s))); base.options = opt2 ? [i1, Math.max(0, opt2.vals.indexOf(opt2.valOf(s)))] : [i1]; }
+    return base;
   });
 
   // รูป: ใช้ที่เลือกในร่าง · ถ้าว่าง → ดึงปกตัวสี + ปกตัวขาย (สืบทอดจากตัวสี) อัตโนมัติ
@@ -115,8 +132,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const payload: Record<string, unknown> = {
     name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || p.platform_description || p.description || ""),
     brand: String(extra.brand || brandName || ""), imageUrls, variants, instantDiscount: 0,
-    // ส่ง variantOptions เฉพาะสินค้ามีหลายสี (multiVariant) · สีเดียว = สินค้าไม่มีตัวเลือก
-    ...(multiVariant ? { variantOptions: { option1: { name: "สี", data: colors.map((c) => ({ value: c })) } } } : {}),
+    // ส่ง variantOptions เฉพาะสินค้ามีตัวเลือก (ตัวขาย > 1) · SKU เดียว = สินค้าไม่มีตัวเลือก (ไม่ส่ง)
+    ...(isVariant && opt1 ? { variantOptions: {
+      option1: { name: opt1.name, data: opt1.vals.map((v) => ({ value: v, ...(opt1.img && colorImg.get(v) ? { imageUrl: r2url(colorImg.get(v)!) } : {}) })) },
+      ...(opt2 ? { option2: { name: opt2.name, data: opt2.vals.map((v) => ({ value: v })) } } : {}),
+    } } : {}),
   };
 
   const res = await lineCreateProduct(apiKey, payload);
@@ -127,7 +147,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // เก็บรหัสสินค้าในร่าง + สร้าง catalog listing (จับคู่ parent)
   await admin.from("platform_listing_drafts").upsert({ parent_sku_id, platform_id, platform_product_id: productId, last_sync_status: "created", last_synced_at: now, updated_by: user?.id ?? null, updated_at: now }, { onConflict: "parent_sku_id,platform_id" });
   if (productId) {
-    const priceMin = Math.min(...variants.map((v) => v.price).filter((n) => n > 0), Infinity);
+    const priceMin = Math.min(...variants.map((v) => Number(v.price) || 0).filter((n) => n > 0), Infinity);
     await admin.from("platform_catalog_listings").upsert({
       platform_id, brand_id, source: "api", external_product_id: productId, title: name, sku_code: String(p.code ?? ""),
       matched_parent_sku_id: parent_sku_id, price: Number.isFinite(priceMin) ? priceMin : null, last_imported_at: now, raw: { created_by_erp: true },
