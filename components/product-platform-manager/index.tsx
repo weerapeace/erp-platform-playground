@@ -327,6 +327,8 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     const cur = activeDraft.image_keys ?? [];
     saveImages(cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]);
   };
+  const allImgOn = images.length > 0 && images.every((im) => (activeDraft.image_keys ?? []).includes(im.key));
+  const toggleAllImg = () => saveImages(allImgOn ? [] : images.map((im) => im.key));
   // รูปรายละเอียด (Description) — ชุดแยก เก็บใน description_image_keys
   const saveDescImages = (keys: string[]) => {
     setDrafts((d) => ({ ...d, [active]: { ...d[active], description_image_keys: keys } }));
@@ -511,7 +513,10 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
 
                 {/* เลือกรูปส่งไปแพลตฟอร์ม */}
                 <div className="rounded-lg border border-slate-200 p-3">
-                  <p className="text-xs font-medium text-slate-600 mb-2">รูปสินค้าที่ส่งไป {activePf.name_th} ({(activeDraft.image_keys ?? []).length}/{images.length})</p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-medium text-slate-600">รูปสินค้าที่ส่งไป {activePf.name_th} ({(activeDraft.image_keys ?? []).length}/{images.length})</p>
+                    {canEdit && images.length > 0 && <button type="button" onClick={toggleAllImg} className="text-[11px] text-violet-600 hover:underline">{allImgOn ? "ล้างทั้งหมด" : "เลือกทั้งหมด"}</button>}
+                  </div>
                   {images.length === 0 ? <p className="text-xs text-slate-400">ยังไม่มีรูป — เพิ่มที่หน้าสินค้า/SKU</p> : (
                     <div className="flex flex-wrap gap-2">
                       {images.map((im) => {
