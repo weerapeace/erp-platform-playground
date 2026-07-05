@@ -294,22 +294,34 @@ export function OverviewDashboard({
                 <div key={g.key}>
                   {g.label && <p className="text-[11px] font-semibold text-slate-500 mb-1">{g.label} ({g.items.length})</p>}
                   <div className="space-y-1.5">
-                    {g.items.map((s) => (
+                    {g.items.map((s) => {
+                      const statusText = s.status === "in_progress" || s.status === "doing" ? t("กำลังทำ", "In progress")
+                        : s.status === "submitted" ? t("รออนุมัติ", "Pending review")
+                        : s.status === "approved" || s.status === "done" || s.status === "posted" ? t("อนุมัติแล้ว", "Approved")
+                        : s.status === "revision_requested" ? t("ขอแก้", "Revision")
+                        : s.status === "canceled" ? t("ยกเลิก", "Canceled")
+                        : t("ยังไม่เริ่ม", "Not started");
+                      return (
                       <button key={s.id} onClick={() => onOpenTask(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}
-                        className="w-full flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 text-left">
+                        className="w-full flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 text-left"
+                        style={s.type_color ? { borderLeftColor: s.type_color, borderLeftWidth: 3 } : undefined}>
                         {s.cover_image_r2_key
                           ? <img src={`/api/r2-image?key=${encodeURIComponent(s.cover_image_r2_key)}&w=80`} alt="" className="h-9 w-9 rounded object-cover border border-slate-100 shrink-0" />
                           : <span className="h-9 w-9 rounded bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300 text-xs shrink-0">🖼️</span>}
-                        <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
+                        <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_DOT[s.status] ?? "bg-slate-400"}`} title={statusText} />
                         <div className="flex-1 min-w-0">
-                          <span className="text-sm text-slate-700">{t(s.title, s.title_en || s.title)}</span>
-                          <span className="ml-2 text-[10px] text-slate-400">{SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
-                          {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
-                          <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-sm font-semibold text-slate-800">{s.task_title || t("(ไม่มีชื่องาน)", "(untitled)")}</span>
+                            <span className="text-sm" style={s.type_color ? { color: s.type_color } : undefined}>- {t(s.title, s.title_en || s.title)}</span>
+                            <span className="text-[10px] text-slate-400">· {statusText}</span>
+                            {s.required_before_next && <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
+                          </div>
+                          {s.task_no && <div className="text-xs text-slate-400 truncate font-mono">↳ {s.task_no}</div>}
                         </div>
                         {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}

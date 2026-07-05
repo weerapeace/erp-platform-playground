@@ -221,6 +221,7 @@ export async function deleteSubtask(taskId: string, subtaskId: string): Promise<
 // ---- งานย่อยของฉัน (queue พนักงาน) ----
 export type MySubtask = {
   id: string; title: string; title_en?: string | null; status: string; due_date: string | null; required_before_next: boolean;
+  subtask_type?: string | null; type_color?: string | null; type_icon?: string | null;
   task_id: string; task_no: string | null; task_title: string | null; task_status: string | null; priority?: string | null;
   cover_image_r2_key?: string | null;
 };
