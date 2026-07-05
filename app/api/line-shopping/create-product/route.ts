@@ -103,8 +103,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const payload: Record<string, unknown> = {
     name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || ""),
     brand: String(extra.brand || ""), imageUrls, variants, instantDiscount: 0,
-    // LINE: variantOptions = object { option1: { name, data:[ค่า...] }, option2?: {...} } · data เป็น array (string → invalid type)
-    ...(colors.length ? { variantOptions: { option1: { name: "สี", data: colors } } } : {}),
+    // LINE: variantOptions = { option1: { name, data: { value: "ค่า1,ค่า2" } } } · data เป็น object มี value คั่นคอมมา (สเปก data.value)
+    ...(colors.length ? { variantOptions: { option1: { name: "สี", data: { value: colors.join(",") } } } } : {}),
   };
 
   const res = await lineCreateProduct(apiKey, payload);
