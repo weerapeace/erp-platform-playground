@@ -23,6 +23,7 @@ import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
 import { addToPrCart } from "@/lib/pr-cart";
+import { useViewPref } from "@/lib/use-view-pref";
 import { PurchaseNeeds } from "./purchase-needs";
 import { DispatchShop } from "./dispatch-shop";
 import { DispatchPlanBoard } from "./dispatch-plan-board";
@@ -130,7 +131,8 @@ export default function WorkBoardPage() {
 
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], pendingPiece: [] });
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"board" | "table" | "purchase" | "shop">("board");   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ
+  // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ + จำมุมมองเริ่มต้นต่อผู้ใช้ (⭐)
+  const { view: viewMode, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase"] as const, "board");
   const [pendingCols] = useState<number | null>(null);     // (เลิกใช้) คอลัมน์โซนรอจ่าย — รอจ่ายย้ายไปป๊อปอัปแล้ว
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
   const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // เงินเดือนรวมพนักงานต่อแผนก (จาก payroll)
@@ -969,6 +971,9 @@ export default function WorkBoardPage() {
             <button onClick={() => setViewMode("shop")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "shop" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🛒 ช้อปจ่ายงาน</button>
             <button onClick={() => setViewMode("purchase")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "purchase" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 ขอซื้อ/เตรียม</button>
           </div>
+          <button onClick={() => { void saveDefView(viewMode); toast.success("ตั้งเป็นมุมมองเริ่มต้นของคุณแล้ว"); }}
+            title={defView === viewMode ? "มุมมองนี้เป็นค่าเริ่มต้นของคุณเมื่อเปิดหน้า" : "ตั้งมุมมองนี้เป็นค่าเริ่มต้นเมื่อเปิดหน้า (เฉพาะคุณ)"}
+            className={`h-9 px-2.5 text-sm rounded-lg border ${defView === viewMode ? "border-amber-300 bg-amber-50 text-amber-600" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>{defView === viewMode ? "⭐" : "☆"}</button>
           <PwaInstallButton className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 inline-flex items-center gap-1" />
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
           <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>

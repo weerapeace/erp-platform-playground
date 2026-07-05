@@ -13,6 +13,7 @@ import { usePermission, AccessDenied } from "@/components/auth";
 import { SkuPicker } from "@/components/pickers";
 import type { SkuPickerValue } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
+import { useViewPref } from "@/lib/use-view-pref";
 import type { QcShelf, QcItem, QcReason, QcSource, QcQueueCard } from "@/app/api/qc-warehouse/route";
 import type { DefectLog } from "@/app/api/qc-warehouse/defect-history/route";
 
@@ -64,8 +65,15 @@ export default function QcWarehousePage() {
   const [sources, setSources] = useState<QcSource[]>([]);
   const [sourceMgr, setSourceMgr] = useState(false);
   const [newSource, setNewSource] = useState("");
-  const [view, setView] = useState<"board" | "table" | "queue">("board");
+  // มุมมอง + จำค่าเริ่มต้นต่อผู้ใช้ (⭐)
+  const { view, setView, defaultView: defView, saveDefault: saveDefView } = useViewPref("qc_warehouse_view", ["board", "table", "queue", "shop"] as const, "board");
   const [tableSearch, setTableSearch] = useState("");
+  // ตัวกรองมุมมอง "ช้อป"
+  const [shopSearch, setShopSearch] = useState("");
+  const [shopStatus, setShopStatus] = useState<"all" | "good" | "defect" | "repairing">("all");
+  const [shopShelf, setShopShelf] = useState<string>("__all__");
+  const [shopSort, setShopSort] = useState<"qty" | "sku" | "shelf">("qty");
+  const [shopGroup, setShopGroup] = useState<"none" | "shelf" | "status" | "brand">("shelf");
   const [histOpen, setHistOpen] = useState(false);
   const [histSearch, setHistSearch] = useState("");
   const [histRows, setHistRows] = useState<DefectLog[]>([]);
@@ -259,6 +267,45 @@ export default function QcWarehousePage() {
     );
   };
 
+  // ── การ์ดสำหรับมุมมอง "ช้อป" (แบน ไม่ผูกชั้น + ปุ่มรายใบเหมือนบอร์ด) ──
+  const shopBtn = "text-[11px] px-2 py-1 rounded-md border";
+  const renderShopCard = (i: QcItem & { shelfName: string; shelfKind: string }) => {
+    const sb = statusBadge(i.status);
+    return (
+      <div key={i.id} onClick={() => { const shelf = shelves.find((s) => s.id === i.shelf_id); if (shelf) setDetail({ kind: "item", shelf, item: i }); }}
+        className="rounded-xl bg-white border border-slate-200 shadow-sm p-2.5 cursor-pointer hover:border-indigo-300"
+        style={{ borderLeft: `4px solid ${cardColor(i.brand_color, i.sku)}` }}>
+        <div className="flex items-start gap-2">
+          <Thumb k={i.image_key} color={cardColor(i.brand_color, i.sku)} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-semibold text-slate-800 leading-snug truncate">{i.sku_name}</div>
+            <div className="text-[11px] text-slate-500 font-mono truncate">{i.sku} · {i.mo_no}</div>
+            <div className="text-[11px] text-slate-500 truncate">🗄️ {i.shelfName} · 👷 {i.worker ?? "—"}</div>
+            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+              <span className={`text-[10px] rounded px-1.5 py-0.5 ${sb.c}`}>{sb.t}</span>
+              {i.reason && <span className="text-[10px] text-rose-600">⚠️ {i.reason}</span>}
+              {i.is_customer_job && <span className="text-[10px] rounded px-1.5 py-0.5 bg-violet-100 text-violet-700">👤 ลูกค้า</span>}
+            </div>
+          </div>
+          <span className="text-sm font-bold text-slate-700 shrink-0">{fmt(Number(i.qty))}</span>
+        </div>
+        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+          {i.status === "repairing" ? (<>
+            <span className="text-[10px] text-amber-700 bg-amber-100 rounded px-1.5 py-0.5">🔧 ซ่อม: {i.repair_by}</span>
+            <button onClick={() => openFromRepair(i)} className={`${shopBtn} border-emerald-200 text-emerald-700 hover:bg-emerald-50`}>📥 รับจากซ่อม</button>
+            <button onClick={() => void cancelRepair(i)} className={`${shopBtn} border-slate-200 text-slate-500 hover:bg-slate-50`}>ยกเลิกซ่อม</button>
+          </>) : i.status === "defect" ? (
+            <button onClick={() => openRepair(i)} className={`${shopBtn} border-amber-200 text-amber-700 hover:bg-amber-50`}>🔧 ส่งซ่อม</button>
+          ) : (<>
+            <button onClick={() => { setShip(i); setShipMode("sales_wh"); setShipWh(WAREHOUSES[0]); }} className={`${shopBtn} border-indigo-200 text-indigo-700 hover:bg-indigo-50`}>📤 ส่งออก</button>
+            <button onClick={() => setMovePick(i)} className={`${shopBtn} border-slate-200 text-slate-600 hover:bg-slate-50`}>↔️ ย้ายชั้น</button>
+            <button onClick={() => openToDefect(i)} className={`${shopBtn} border-rose-200 text-rose-700 hover:bg-rose-50`}>⚠️ เสีย</button>
+          </>)}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-[1700px] mx-auto px-5 py-5">
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
@@ -268,11 +315,14 @@ export default function QcWarehousePage() {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
-            {(["board", "table", "queue"] as const).map((v) => (
+            {(["board", "table", "shop", "queue"] as const).map((v) => (
               <button key={v} onClick={() => setView(v)} className={`h-8 px-3 text-sm rounded-md ${view === v ? "bg-white shadow-sm font-medium text-slate-800" : "text-slate-500 hover:text-slate-700"}`}>
-                {v === "board" ? "🗄️ บอร์ด" : v === "table" ? "📋 ตาราง" : "⏱️ คิวงาน"}</button>
+                {v === "board" ? "🗄️ บอร์ด" : v === "table" ? "📋 ตาราง" : v === "shop" ? "🛒 ช้อป" : "⏱️ คิวงาน"}</button>
             ))}
           </div>
+          <button onClick={() => { void saveDefView(view); toast.success("ตั้งเป็นมุมมองเริ่มต้นของคุณแล้ว"); }}
+            title={defView === view ? "มุมมองนี้เป็นค่าเริ่มต้นของคุณเมื่อเปิดหน้า" : "ตั้งมุมมองนี้เป็นค่าเริ่มต้นเมื่อเปิดหน้า (เฉพาะคุณ)"}
+            className={`h-9 px-2.5 text-sm rounded-lg border ${defView === view ? "border-amber-300 bg-amber-50 text-amber-600" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>{defView === view ? "⭐" : "☆"}</button>
           <button onClick={() => { setHistSearch(""); setHistOpen(true); void loadHist(""); }} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📋 ประวัติของเสีย</button>
           <button onClick={() => void load()} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⟳</button>
         </div>
@@ -388,6 +438,61 @@ export default function QcWarehousePage() {
             </tbody>
           </table>
         </div>
+      ) : view === "shop" ? (
+        /* ── ช้อป: การ์ด + ค้น/เรียง/จัดกลุ่ม/กรอง + ปุ่มรายใบ ── */
+        (() => {
+          const q = shopSearch.trim().toLowerCase();
+          const items = allItems
+            .filter((i) =>
+              (shopStatus === "all" || i.status === shopStatus) &&
+              (shopShelf === "__all__" || i.shelf_id === shopShelf) &&
+              (q === "" || `${i.sku} ${i.sku_name} ${i.mo_no} ${i.worker ?? ""} ${i.shelfName} ${i.reason ?? ""}`.toLowerCase().includes(q)))
+            .sort((a, b) => shopSort === "qty" ? Number(b.qty) - Number(a.qty) : shopSort === "sku" ? String(a.sku).localeCompare(String(b.sku)) : String(a.shelfName).localeCompare(String(b.shelfName), "th"));
+          const buckets = shopGroup === "none" ? [{ name: "", items }] : (() => {
+            const m = new Map<string, typeof items>();
+            for (const i of items) { const k = shopGroup === "shelf" ? i.shelfName : statusBadge(i.status).t; (m.get(k) ?? m.set(k, []).get(k)!).push(i); }
+            return [...m.entries()].map(([name, its]) => ({ name, items: its })).sort((a, b) => a.name.localeCompare(b.name, "th"));
+          })();
+          const gridCls = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5";
+          const selCls = "h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500";
+          return (
+            <div>
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <input value={shopSearch} onChange={(e) => setShopSearch(e.target.value)} placeholder="ค้นหา SKU / ชื่อ / ใบผลิต / ช่าง / ชั้น"
+                  className="h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[200px] flex-1" />
+                <select value={shopStatus} onChange={(e) => setShopStatus(e.target.value as typeof shopStatus)} title="กรองสถานะ" className={selCls}>
+                  <option value="all">ทุกสถานะ</option><option value="good">ของดี</option><option value="defect">ของเสีย</option><option value="repairing">กำลังซ่อม</option>
+                </select>
+                <select value={shopShelf} onChange={(e) => setShopShelf(e.target.value)} title="กรองชั้น" className={selCls}>
+                  <option value="__all__">🗄️ ทุกชั้น</option>
+                  {shelves.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                <select value={shopSort} onChange={(e) => setShopSort(e.target.value as typeof shopSort)} title="เรียงลำดับ" className={selCls}>
+                  <option value="qty">↕ จำนวนมาก→น้อย</option><option value="sku">↕ รหัสสินค้า</option><option value="shelf">↕ ชั้น</option>
+                </select>
+                <select value={shopGroup} onChange={(e) => setShopGroup(e.target.value as typeof shopGroup)} title="จัดกลุ่ม" className={selCls}>
+                  <option value="shelf">จัดกลุ่ม: ชั้น</option><option value="status">จัดกลุ่ม: สถานะ</option><option value="none">ไม่จัดกลุ่ม</option>
+                </select>
+              </div>
+              {items.length === 0 ? (
+                <div className="text-center py-16 text-slate-300 text-sm">{allItems.length === 0 ? "ยังไม่มีของในโกดัง" : "ไม่พบรายการที่ตรงกับตัวกรอง"}</div>
+              ) : shopGroup === "none" ? (
+                <div className={gridCls}>{items.map(renderShopCard)}</div>
+              ) : (
+                <div className="space-y-3">
+                  {buckets.map((b) => (
+                    <div key={b.name}>
+                      <div className="text-xs font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">
+                        {shopGroup === "shelf" ? "🗄️ " : "🏷 "}{b.name} <span className="text-slate-400 font-normal">({b.items.length})</span>
+                      </div>
+                      <div className={gridCls}>{b.items.map(renderShopCard)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()
       ) : (
         /* ── คิวงาน (สำหรับพนักงาน) เรียงตามกำหนดส่ง ── */
         <div className="max-w-[820px] mx-auto space-y-2">
