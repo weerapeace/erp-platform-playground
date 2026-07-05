@@ -10,7 +10,7 @@
  *   (/master/platform-categories) · ร่างต่อร้านยัง override ได้
  * ของกลาง: /api/product-platforms (guardApi products.platforms.view) · ProductPlatformManager
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { PlatformIcon } from "@/components/platform-icon";
@@ -34,6 +34,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [cats, setCats] = useState<Cat[]>([]);                            // รายการหมวดกลางให้เลือก
   const [savingCat, setSavingCat] = useState(false);
   const [manage, setManage] = useState<string | null>(null); // platform id ที่เปิดตัวจัดการอยู่
+  const lastLoadRef = useRef(0);                              // เวลาที่โหลดล่าสุด (ใช้หน่วง auto-refresh)
 
   const load = useCallback(async () => {
     if (!parentId) return;
@@ -45,15 +46,28 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
       setMappings((j.mappings ?? {}) as Record<string, string>);
       setParent((j.parent ?? null) as Parent | null);
+      lastLoadRef.current = Date.now();
     } catch { /* ignore */ } finally { setLoading(false); }
   }, [parentId]);
-  useEffect(() => { void load(); }, [load]);
-
-  // รายการหมวดกลาง (ครั้งเดียว)
-  useEffect(() => {
+  const loadCats = useCallback(() => {
     apiFetch("/api/platform-central-categories").then((r) => r.json())
       .then((j) => setCats((j.data ?? []) as Cat[])).catch(() => {});
   }, []);
+  const refreshAll = useCallback(() => { void load(); loadCats(); }, [load, loadCats]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { loadCats(); }, [loadCats]);
+
+  // โหลดใหม่เมื่อกลับมาที่แท็บ — หน่วง 15 วิ กัน spam (เบา ไม่กระทบความเร็ว)
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastLoadRef.current < 15000) return;
+      refreshAll();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
+  }, [refreshAll]);
 
   const saveCat = useCallback(async (v: string) => {
     if (!parentId) return;
@@ -86,7 +100,13 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
         <span className="basis-full text-[11px] text-indigo-700/70">เลือกครั้งเดียว → หมวดของแต่ละร้านจะเติมให้อัตโนมัติตามที่จับคู่ไว้ (ยังแก้เองรายร้านได้)</span>
       </div>
 
-      <p className="text-xs text-slate-500">รายละเอียดการขายแต่ละแพลตฟอร์ม — กด “จัดการ” เพื่อแก้ชื่อ/หมวดหมู่/รูป/ราคา แล้วส่งขึ้นแพลตฟอร์มนั้น</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-slate-500">รายละเอียดการขายแต่ละแพลตฟอร์ม — กด “จัดการ” เพื่อแก้ชื่อ/หมวดหมู่/รูป/ราคา แล้วส่งขึ้นแพลตฟอร์มนั้น</p>
+        <button type="button" onClick={refreshAll} disabled={loading} title="โหลดข้อมูลล่าสุด"
+          className="shrink-0 text-xs text-slate-500 hover:text-violet-700 border border-slate-200 rounded-lg px-2 py-1 hover:bg-violet-50 disabled:opacity-40">
+          <span className={loading ? "inline-block animate-spin" : ""}>🔄</span> รีเฟรช
+        </button>
+      </div>
       {platforms.map((p) => {
         const d = drafts[p.id] ?? {};
         const acct = accounts[p.id];

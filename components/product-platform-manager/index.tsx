@@ -7,7 +7,7 @@
 // ยังไม่ publish จริง (เฟส 2 — ต่อ API/queue) · มี toast ในตัว (droppable ทุกที่)
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { ERPInput, ERPTextarea } from "@/components/form";
@@ -142,6 +142,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [displaying, setDisplaying] = useState(false); // เปิด/ปิดการขายบน LINE
   const [pushingPrice, setPushingPrice] = useState(false); // ส่งราคา/ส่วนลดขึ้น LINE
   const [prefillTick, setPrefillTick] = useState(0); // บังคับรีเฟรชช่อง (uncontrolled) หลัง prefill
+  const lastLoadRef = useRef(0);                     // เวลาที่โหลดล่าสุด (ใช้หน่วง auto-refresh)
   // F: render ผ่าน portal ไป body (เหมือน Drawer กลาง) → เปิดทับ drawer แม่ที่ค้างอยู่ ไม่ซ้อนหลัง
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -165,10 +166,26 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
       setImages((j.images ?? []) as ImageItem[]);
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
       setActive((prev) => prev || (initialPlatformId && pfs.some((p) => p.id === initialPlatformId) ? initialPlatformId : (pfs[0]?.id ?? "")));
+      lastLoadRef.current = Date.now();
     } catch (e) { toast("error", (e as Error).message); }
     finally { setLoading(false); }
   }, [parentSkuId, toast, initialPlatformId]);
   useEffect(() => { load(); }, [load]);
+
+  // โหลดข้อมูลใหม่เมื่อกลับมาที่แท็บ — แต่ "หน่วง" (เกิน 15 วิ) + ไม่ทับของที่แก้ค้างไว้
+  // เบา ไม่ยิงถี่ (กัน request แย่งกันตาม perf) แต่แก้ปัญหา "ไปแก้ที่อื่นแล้วไม่อัปเดต"
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      if (dirtyRef.current) return;                       // มีของค้าง — อย่าทับ
+      if (Date.now() - lastLoadRef.current < 15000) return; // หน่วง กัน spam
+      void load();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
+  }, [load]);
 
   // ประวัติ (audit) — โหลดตอนเปิดแผง หรือกดรีเฟรช
   const loadLog = useCallback(async () => {
@@ -182,15 +199,21 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const title = activeDraft.title ?? "";
   const description = activeDraft.description ?? "";
   const dirty = dirtyPlatforms.size > 0 || Object.keys(priceEdits).length > 0;
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);   // ให้ตัว auto-refresh รู้ว่ามีของค้างไหม
   const markDirty = () => setDirtyPlatforms((s) => (s.has(active) ? s : new Set(s).add(active)));
 
   // เติมชื่อ/รายละเอียดจากข้อมูลสินค้าใน ERP (ชื่อ = name_platform > name_th)
-  const prefillFromErp = (field: "title" | "description") => {
-    const val = field === "title" ? (parent?.name_platform || parent?.name_th || "") : (parent?.description || "");
-    if (!val.trim()) { toast("info", "ไม่มีข้อมูลใน ERP ให้เติม"); return; }
-    saveField(field, val);
-    setPrefillTick((t) => t + 1);
+  // เติม "ทั้งชื่อ + รายละเอียด" จากข้อมูลสินค้าใน ERP ในปุ่มเดียว (ยิง 0 request — บันทึกตอนกด "บันทึก")
+  const prefillAllFromErp = () => {
+    const t = parent?.name_platform || parent?.name_th || "";
+    const d = parent?.description || "";
+    if (!t.trim() && !d.trim()) { toast("info", "ไม่มีข้อมูลใน ERP ให้เติม"); return; }
+    if (t.trim()) saveField("title", t);
+    if (d.trim()) saveField("description", d);
+    setPrefillTick((tick) => tick + 1);
+    toast("success", "เติมชื่อ + รายละเอียดจากสินค้าแล้ว");
   };
+  const canPrefill = !!(parent?.name_platform || parent?.name_th || parent?.description);
   // Mass fill ราคา (เต็ม/ขาย) ทุก SKU — ค้างในหน้า (กด "บันทึก" ถึงเขียนจริง)
   const massFillPrice = (field: "fake_price" | "list_price", valueStr: string, onlyEmpty: boolean) => {
     const p = Number(valueStr);
@@ -387,7 +410,13 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
             <h3 className="text-base font-semibold text-slate-900 truncate">🏬 ลงขายหลายแพลตฟอร์ม</h3>
             {parent && <p className="text-xs text-slate-500 truncate"><span className="font-mono">{parent.code}</span> · {parent.name_th}</p>}
           </div>
-          <button onClick={() => { if (!dirty || window.confirm("มีข้อมูลที่ยังไม่ได้บันทึก — ออกโดยไม่บันทึก?")) onClose(); }} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button onClick={() => { if (dirty && !window.confirm("มีข้อมูลที่ยังไม่ได้บันทึก — โหลดใหม่จะทิ้งที่แก้ค้างไว้ ต่อไหม?")) return; void load(); if (showLog) void loadLog(); }}
+              disabled={loading} title="โหลดข้อมูลล่าสุด (รูป/หมวด/ราคา)" className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-violet-700 hover:bg-violet-50 disabled:opacity-40">
+              <span className={loading ? "inline-block animate-spin" : ""}>🔄</span>
+            </button>
+            <button onClick={() => { if (!dirty || window.confirm("มีข้อมูลที่ยังไม่ได้บันทึก — ออกโดยไม่บันทึก?")) onClose(); }} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
+          </div>
         </div>
 
         {loading ? <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">กำลังโหลด...</div> : (
@@ -414,14 +443,13 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <p className="text-[11px] text-slate-400">ชื่อสินค้าบน {activePf.name_th}</p>
-                      {canEdit && !title.trim() && (parent?.name_platform || parent?.name_th) && <button onClick={() => prefillFromErp("title")} className="text-[11px] text-violet-600 hover:underline">↙ ใช้ชื่อจากสินค้า</button>}
+                      {canEdit && canPrefill && (!title.trim() || !description.trim()) && <button onClick={prefillAllFromErp} className="text-[11px] text-violet-600 hover:underline">↙ ใช้ข้อมูลจากสินค้า (ชื่อ + รายละเอียด)</button>}
                     </div>
                     <ERPInput key={`t-${active}-${prefillTick}`} defaultValue={title} placeholder={parent?.name_platform || parent?.name_th || "ชื่อสินค้า"} disabled={!canEdit} onBlur={(e) => saveField("title", e.target.value)} />
                   </div>
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <p className="text-[11px] text-slate-400">รายละเอียดสินค้า</p>
-                      {canEdit && !description.trim() && parent?.description && <button onClick={() => prefillFromErp("description")} className="text-[11px] text-violet-600 hover:underline">↙ ใช้รายละเอียดจากสินค้า</button>}
                     </div>
                     <ERPTextarea key={`d-${active}-${prefillTick}`} defaultValue={description} rows={4} placeholder="รายละเอียดเฉพาะแพลตฟอร์มนี้..." disabled={!canEdit} onBlur={(e) => saveField("description", e.target.value)} />
                   </div>
