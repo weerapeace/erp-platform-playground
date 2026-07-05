@@ -90,7 +90,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ...skuRows.filter((s) => masterCodes.has(s.code)).map((s) => s.cover_image_r2_key),
     ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null),
   ].filter(Boolean) as string[])];
-  const imageUrls = autoKeys.map((k) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`);
+  const imageUrls = autoKeys.slice(0, 7).map((k) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`);   // LINE จำกัด ≤ 7 รูป
 
   // ตรวจครบก่อนส่ง
   const missing: string[] = [];
@@ -103,8 +103,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const payload: Record<string, unknown> = {
     name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || ""),
     brand: String(extra.brand || ""), imageUrls, variants, instantDiscount: 0,
-    // LINE ต้องการ variantOptions เป็น "object" { name, value(คั่นคอมมา) } ไม่ใช่ array (ไม่งั้น 400 invalid type)
-    ...(colors.length ? { variantOptions: { name: "สี", value: colors.join(",") } } : {}),
+    // LINE: variantOptions = object { option1: { name, data(คั่นคอมมา) }, option2?: {...} } · data ห้ามว่าง
+    ...(colors.length ? { variantOptions: { option1: { name: "สี", data: colors.join(",") } } } : {}),
   };
 
   const res = await lineCreateProduct(apiKey, payload);
