@@ -128,6 +128,7 @@ export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { 
               onReqBefore={(v) => setStep(i, { required_before_next: v })}
               onAssignees={(a) => setStep(i, { assignees: a })}
               onCfg={(p) => setCfg(i, p)}
+              onSelectTemplate={(cfg, asg) => onChange(steps.map((s2, j) => j === i ? { ...s2, config: { ...s2.config, ...cfg }, ...(asg ? { assignees: asg } : {}) } : s2))}
               onRemove={() => removeStep(i)} />
           ))}
           <button type="button" onClick={addCustom} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มงานอื่น (Custom)", "Add custom task")}</button>
@@ -158,11 +159,13 @@ export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { 
   );
 }
 
-function StepCard({ step, index, contentTpls, onTitle, onReqBefore, onAssignees, onCfg, onRemove }: {
+function StepCard({ step, index, contentTpls, onTitle, onReqBefore, onAssignees, onCfg, onSelectTemplate, onRemove }: {
   step: EditStep; index: number; contentTpls?: ContentItem[];
   onTitle: (v: string) => void; onReqBefore: (v: boolean) => void;
   onAssignees: (a: { id: string; label: string }[]) => void;
-  onCfg: (p: Partial<SubtaskStepConfig>) => void; onRemove: () => void;
+  onCfg: (p: Partial<SubtaskStepConfig>) => void;
+  onSelectTemplate: (cfg: Partial<SubtaskStepConfig>, assignees?: { id: string; label: string }[]) => void;
+  onRemove: () => void;
 }) {
   const t = useT();
   const [adding, setAdding] = useState<UserPickerValue | null>(null);
@@ -244,8 +247,9 @@ function StepCard({ step, index, contentTpls, onTitle, onReqBefore, onAssignees,
               onChange={(e) => {
                 const id = e.target.value;
                 const tpl = (contentTpls ?? []).find((x) => x.id === id);
-                onCfg({ content_template_id: id || undefined, ...(tpl?.post_type ? { post_type: tpl.post_type } : {}) });
-                if (tpl && (tpl.assignees?.length)) onAssignees(tpl.assignees.map((a) => ({ id: a.id, label: a.name })));
+                const asg = (tpl && tpl.assignees?.length) ? tpl.assignees.map((a) => ({ id: a.id, label: a.name })) : undefined;
+                // อัปเดตครั้งเดียว (config + ผู้รับผิดชอบ) กัน race ที่ทำให้ post_type/แม่แบบหาย
+                onSelectTemplate({ content_template_id: id || undefined, ...(tpl?.post_type ? { post_type: tpl.post_type } : {}) }, asg);
               }} className="h-8" />
           </div>
           <div>
