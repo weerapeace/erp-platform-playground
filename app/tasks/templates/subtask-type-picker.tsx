@@ -78,7 +78,10 @@ export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { 
   const setStep = (i: number, patch: Partial<EditStep>) => onChange(steps.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const setCfg = (i: number, patch: Partial<SubtaskStepConfig>) => onChange(steps.map((s, j) => (j === i ? { ...s, config: { ...s.config, ...patch } } : s)));
   const removeStep = (i: number) => onChange(steps.filter((_, j) => j !== i));
+  const MULTI_TYPES = new Set(["content"]);   // ชนิดที่เพิ่มได้หลายอัน (เช่น คอนเทนต์หลายโพสต์)
+  const countOf = (key: string) => steps.filter((s) => s.type === key).length;
   const toggleType = (ty: SubtaskType) => {
+    if (MULTI_TYPES.has(ty.key)) { onChange([...steps, stepFromType(ty)]); return; }   // เพิ่มได้เรื่อยๆ (ลบที่การ์ดตั้งค่า)
     if (included.has(ty.key)) onChange(steps.filter((s) => s.type !== ty.key));
     else onChange([...steps, stepFromType(ty)]);
   };
@@ -94,14 +97,16 @@ export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { 
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {types.map((ty) => {
-            const on = included.has(ty.key);
+            const multi = MULTI_TYPES.has(ty.key);
+            const cnt = countOf(ty.key);
+            const on = multi ? cnt > 0 : included.has(ty.key);
             return (
-              <button type="button" key={ty.key} onClick={() => toggleType(ty)} title={subtaskTypeHint(ty)}
+              <button type="button" key={ty.key} onClick={() => toggleType(ty)} title={multi ? t("กดเพื่อเพิ่มอีก 1 อัน (ลบได้ที่การ์ดตั้งค่าด้านล่าง)", "Click to add another (remove in settings below)") : subtaskTypeHint(ty)}
                 className={`flex items-start gap-2.5 p-3 rounded-xl border text-left transition-colors ${on ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:border-slate-300"}`}>
-                <span className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center text-xs shrink-0 ${on ? "bg-violet-600 text-white" : "bg-slate-100 text-transparent"}`}>✓</span>
+                <span className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center text-xs font-semibold shrink-0 ${on ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-400"}`}>{multi ? (cnt > 0 ? cnt : "＋") : (on ? "✓" : <span className="text-transparent">✓</span>)}</span>
                 <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded text-base leading-none shrink-0" style={isHex(ty.color) ? { backgroundColor: `${ty.color}1a` } : undefined}>{ty.icon ?? "🧩"}</span>
                 <span className="min-w-0">
-                  <span className="block text-sm font-medium text-slate-800">{ty.label_th}</span>
+                  <span className="block text-sm font-medium text-slate-800">{ty.label_th}{multi && <span className="ml-1 text-[10px] font-normal text-violet-500">· {t("เพิ่มได้หลายอัน", "add multiple")}</span>}</span>
                   <span className="block text-[11px] text-slate-400 leading-snug">{TYPE_HINT[ty.key]?.() ?? subtaskTypeHint(ty)}</span>
                 </span>
               </button>
