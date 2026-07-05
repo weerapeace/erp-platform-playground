@@ -308,7 +308,7 @@ export type ContentItem = {
   task_id?: string | null;
   campaign_id: string | null; campaign_label: string | null;
   brand_id: string | null; brand_label: string | null; brand_color: string | null;
-  sku_id: string | null; sku_code: string | null; sku_name: string | null; sku_color: string | null; sku_color_en?: string | null; sku_color_th?: string | null; sku_price: number | null; product_name: string | null;
+  sku_id: string | null; sku_code: string | null; sku_name: string | null; sku_color: string | null; sku_color_en?: string | null; sku_color_th?: string | null; sku_price: number | null; sku_fake_price?: number | null; product_name: string | null;
   color_source?: string | null;   // 'th' | 'en' — ภาษาที่ใช้แสดง {color}
   parent_sku_id?: string | null; parent_sku_code?: string | null; parent_sku_name?: string | null;
   post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
@@ -329,12 +329,12 @@ export async function getParentSkuColors(parentId: string): Promise<string[]> {
 }
 
 // ลูก SKU ของ Parent (รหัส/สี 2 ภาษา/ราคา) — ใช้ทำ dropdown เลือกราคา + สลับภาษาสีในคอนเทนต์
-export type ParentSkuChild = { id: string; code: string; color_en: string | null; color_th: string | null; list_price: number | null };
+export type ParentSkuChild = { id: string; code: string; color_en: string | null; color_th: string | null; list_price: number | null; fake_price: number | null };
 export async function getParentSkuChildren(parentId: string): Promise<ParentSkuChild[]> {
   const res = await apiFetch(`/api/pickers/skus?parent_sku_id=${parentId}&limit=100`);
   const j = await res.json().catch(() => ({}));
-  const rows = (j.data as { id: string; code?: string | null; color_en?: string | null; color_th?: string | null; list_price?: number | null }[]) ?? [];
-  return rows.map((r) => ({ id: r.id, code: r.code ?? "", color_en: r.color_en ?? null, color_th: r.color_th ?? null, list_price: r.list_price ?? null }));
+  const rows = (j.data as { id: string; code?: string | null; color_en?: string | null; color_th?: string | null; list_price?: number | null; fake_price?: number | null }[]) ?? [];
+  return rows.map((r) => ({ id: r.id, code: r.code ?? "", color_en: r.color_en ?? null, color_th: r.color_th ?? null, list_price: r.list_price ?? null, fake_price: r.fake_price ?? null }));
 }
 
 // ---- แม่แบบแคปชั่น + ช่องทางร้าน ----

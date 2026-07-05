@@ -436,7 +436,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       setLinks(Array.isArray(detail.product_links) ? detail.product_links : []);
       setDiscountValue(detail.discount_value != null ? String(detail.discount_value) : "");
       setDiscountPct(!!detail.discount_is_percent);
-      setSku(detail.sku_id ? { id: detail.sku_id, code: detail.sku_code ?? "", name: detail.sku_name ?? detail.product_name ?? "", color: detail.sku_color, list_price: detail.sku_price } : null);
+      setSku(detail.sku_id ? { id: detail.sku_id, code: detail.sku_code ?? "", name: detail.sku_name ?? detail.product_name ?? "", color: detail.sku_color, list_price: detail.sku_price, fake_price: detail.sku_fake_price ?? null } : null);
       setParent(detail.parent_sku_id ? { id: detail.parent_sku_id, code: detail.parent_sku_code ?? "", name: detail.parent_sku_name ?? "" } : null);
       setColorSource(detail.color_source === "en" ? "en" : "th");
       // เตรียม caption ให้ครบทุกแพลตฟอร์มของคอนเทนต์ — แพลตฟอร์มที่ยังไม่มีแคปชั่น เติมแฮชแท็กเริ่มต้นให้
@@ -580,8 +580,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const colorText = childColors.length ? childColors.join(", ") : (sku ? singleColor : null);
   // ราคา: SKU เดี่ยว → ราคาตัวเอง · Parent → ราคาจาก SKU ลูกที่เลือก (default ตัวแรก)
   const priceChild = children.find((c) => c.id === priceSkuId) ?? children[0] ?? null;
-  const fakePrice = sku?.list_price ?? priceChild?.list_price ?? null;
-  const realPrice = computeRealPrice(fakePrice, discountValue === "" ? null : Number(discountValue), discountPct);
+  const realSelling = sku?.list_price ?? priceChild?.list_price ?? null;   // ราคาขายจริง (list_price)
+  const fakeVal = sku?.fake_price ?? priceChild?.fake_price ?? null;        // ราคาปลอม (fake_price — ราคาขีดฆ่าให้ดูลดเยอะ)
+  const discountAmt = (fakeVal != null && realSelling != null && fakeVal > realSelling) ? fakeVal - realSelling : null;  // ส่วนลด = ปลอม − จริง
   // เวลาแนะนำของวันที่เลือกโพสต์ (โชว์ปุ่มให้กดใช้ — มีได้หลายเวลา ตัดอันที่ตรงกับที่เลือกอยู่)
   const schedRec = useMemo(() => {
     const dpart = scheduledAt.slice(0, 10);
@@ -595,11 +596,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const applyRecommendedTime = (tm: string) => setScheduledAt(`${scheduledAt.slice(0, 10)}T${tm}`);
   // ตัวแปรสินค้าที่ใช้ร่วมทุก caption (ไม่รวม caption/hashtags ที่ต่างกันต่อแพลตฟอร์ม)
   const sharedVars = useMemo(() => ({
-    shop: shopChannels, fake_price: fakePrice, real_price: realPrice,
-    price: fakePrice, color: colorText, sku: sku?.code ?? null, product: sku?.name ?? d?.product_name ?? null,
+    shop: shopChannels, fake_price: fakeVal, real_price: realSelling,
+    price: realSelling, color: colorText, sku: sku?.code ?? null, product: sku?.name ?? d?.product_name ?? null,
     // {link} = ลิงก์สินค้าทุกแพลตฟอร์มเป็นบล็อก (เช่น "Shopee: TEST1\nLazada: TEST2")
     link: links.filter((l) => l.url.trim()).map((l) => `${platformLabel(l.platform)}: ${l.url.trim()}`).join("\n") || null,
-  }), [shopChannels, fakePrice, realPrice, colorText, sku?.code, sku?.name, d?.product_name, links]);
+  }), [shopChannels, fakeVal, realSelling, colorText, sku?.code, sku?.name, d?.product_name, links]);
 
   // คัดลอกพรอมต์ตั้งต้น (เติมตัวแปรสินค้าให้แล้ว) ไปวางใน AI เขียนแคปชั่นต่อ
   const copyPrompt = async () => {
@@ -755,14 +756,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                     </select>
                   </div>
                 )}
-                <div><label className="text-xs text-slate-400">{t("ราคาเต็ม (จาก SKU)", "Full Price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakePrice != null ? `${Number(fakePrice).toLocaleString("th-TH")} ฿` : t("— (ไม่มี SKU)", "— (no SKU)")}</div></div>
-                <div><label className="text-xs text-slate-400">{t("ส่วนลด", "Discount")}</label>
-                  <div className="flex">
-                    <input value={discountValue} onChange={(e) => setDiscountValue(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0" className="h-9 w-24 border border-slate-200 rounded-l-lg px-2 text-sm" />
-                    <button type="button" onClick={() => setDiscountPct((p) => !p)} title={t("สลับ บาท/เปอร์เซ็นต์", "Toggle Baht/Percent")} className="h-9 px-3 text-sm border border-l-0 border-slate-200 rounded-r-lg bg-slate-50 hover:bg-slate-100">{discountPct ? "%" : "฿"}</button>
-                  </div>
-                </div>
-                <div><label className="text-xs text-slate-400">{t("ราคาขายจริง", "Selling Price")}</label><div className="h-9 px-3 flex items-center text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg min-w-24">{realPrice != null ? `${Number(realPrice).toLocaleString("th-TH")} ฿` : "—"}</div></div>
+                <div><label className="text-xs text-slate-400">{t("ราคาปลอม (จาก SKU)", "Fake price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm text-slate-500 line-through bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakeVal != null ? `${Number(fakeVal).toLocaleString("th-TH")} ฿` : "—"}</div></div>
+                <div><label className="text-xs text-slate-400">{t("ราคาขายจริง (จาก SKU)", "Selling price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg min-w-24">{realSelling != null ? `${Number(realSelling).toLocaleString("th-TH")} ฿` : t("— (ไม่มี SKU)", "— (no SKU)")}</div></div>
+                <div><label className="text-xs text-slate-400">{t("ส่วนลด (ปลอม−จริง)", "Discount (fake−real)")}</label><div className="h-9 px-3 flex items-center text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg min-w-24">{discountAmt != null ? `${Number(discountAmt).toLocaleString("th-TH")} ฿` : "—"}</div></div>
               </div>
             </CSection>)}
 

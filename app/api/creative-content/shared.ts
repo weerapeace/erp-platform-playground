@@ -7,14 +7,14 @@ export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sk
   is_template, is_active, created_at, updated_at, assignee_id, assignee_ids,
   brand:brands!brand_id(name, color, shop_channels),
   campaign:erp_creative_campaigns!campaign_id(name),
-  sku:skus_v2!sku_id(code, name_th, color, color_th, list_price),
+  sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, fake_price),
   parent:parent_skus_v2!parent_sku_id(code, name_th),
   assignee:user_profiles!assignee_id(display_name, username, email)`;
 
 export function flattenContent(r: Record<string, unknown>): Record<string, unknown> {
   const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null; shop_channels?: { label: string; value: string }[] } | null;
   const c = (Array.isArray(r.campaign) ? r.campaign[0] : r.campaign) as { name?: string } | null;
-  const s = (Array.isArray(r.sku) ? r.sku[0] : r.sku) as { code?: string; name_th?: string; color?: string | null; color_th?: string | null; list_price?: number | null } | null;
+  const s = (Array.isArray(r.sku) ? r.sku[0] : r.sku) as { code?: string; name_th?: string; color?: string | null; color_th?: string | null; list_price?: number | null; fake_price?: number | null } | null;
   const par = (Array.isArray(r.parent) ? r.parent[0] : r.parent) as { code?: string; name_th?: string } | null;
   const asg = (Array.isArray(r.assignee) ? r.assignee[0] : r.assignee) as { display_name?: string | null; username?: string | null; email?: string | null } | null;
   const out: Record<string, unknown> = { ...r };
@@ -32,6 +32,7 @@ export function flattenContent(r: Record<string, unknown>): Record<string, unkno
   out.sku_color_en = (s?.color as string) ?? null;   // สีภาษาอังกฤษ (color)
   out.sku_color_th = (s?.color_th as string) ?? null; // สีภาษาไทย (color_th)
   out.sku_price = s?.list_price ?? null;
+  out.sku_fake_price = s?.fake_price ?? null;
   return out;
 }
 

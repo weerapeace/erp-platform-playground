@@ -372,6 +372,7 @@ export type SkuPickerValue = {
   color?: string | null;
   category?: string | null;
   list_price?: number | null;
+  fake_price?: number | null;
   image_url?: string | null;
   image_key?: string | null;
   sale_ok?: boolean | null;
@@ -400,6 +401,7 @@ function mapSkuRow(row: Record<string, unknown>): SkuPickerValue {
     uom_name: row.uom_name != null ? String(row.uom_name) : row.uom_label != null ? String(row.uom_label) : null,
     color: row.color != null ? String(row.color) : row.color_th != null ? String(row.color_th) : null,
     list_price: row.list_price == null ? null : Number(row.list_price),
+    fake_price: row.fake_price == null ? null : Number(row.fake_price),
     image_key: imageKey == null ? null : String(imageKey),
     image_url: skuImageUrl(imageKey),
     sale_ok: typeof row.sale_ok === "boolean" ? row.sale_ok : null,
