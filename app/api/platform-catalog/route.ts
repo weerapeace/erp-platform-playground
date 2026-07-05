@@ -16,11 +16,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const sp = new URL(request.url).searchParams;
   const platformId = (sp.get("platform_id") ?? "").trim();
   const brandId = (sp.get("brand_id") ?? "").trim();
+  const search = (sp.get("search") ?? "").trim();                       // ค้นหา listing (สำหรับ picker จับคู่)
+  const limit = Math.min(5000, Math.max(1, parseInt(sp.get("limit") ?? "5000", 10)));
   if (!platformId) return NextResponse.json({ fields: [], listings: [], summary: { total: 0, matched: 0 }, error: null });
   const admin = supabaseAdmin();
 
-  let lq = admin.from("platform_catalog_listings").select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, status, source, last_imported_at").eq("platform_id", platformId).order("created_at", { ascending: false }).limit(5000);
+  let lq = admin.from("platform_catalog_listings").select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, status, source, last_imported_at").eq("platform_id", platformId).order("created_at", { ascending: false }).limit(limit);
   if (brandId) lq = lq.eq("brand_id", brandId);
+  if (search) lq = lq.or(`title.ilike.%${search}%,sku_code.ilike.%${search}%,external_product_id.ilike.%${search}%`);
   const [{ data: fields }, { data: listings }] = await Promise.all([
     admin.from("platform_field_schemas").select("field_key, field_label, data_type, is_required, sample, source").eq("platform_id", platformId).order("sort_order", { ascending: true }),
     lq,

@@ -19,7 +19,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!parentId) return NextResponse.json({ error: "ต้องระบุ parent_sku_id" }, { status: 400 });
   const admin = supabaseAdmin();
 
-  const [{ data: parent }, { data: pf }, { data: drafts }, { data: skus }, { data: slots }, { data: descU }, { data: galleryAtts }] = await Promise.all([
+  const [{ data: parent }, { data: pf }, { data: drafts }, { data: skus }, { data: slots }, { data: descU }, { data: galleryAtts }, { data: matchedL }] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, platform_category_id, brand_id, weight_g, parcel_size_id").eq("id", parentId).maybeSingle(),
     admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, capabilities, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
     admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, description_image_keys, extra, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
@@ -28,7 +28,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     admin.from("asset_usages").select("asset_id, sort_order").eq("module", "parent_sku_description").eq("record_id", parentId).order("sort_order", { ascending: true }),
     // แกลเลอรีจริงของ Parent SKU ("รูปภาพเพิ่มเติม") — เก็บใน erp_playground_attachments (ไม่ใช่ product_image_slots)
     admin.from("erp_playground_attachments").select("file_path, is_primary, sort_order").eq("entity_type", "parent_skus_v2").eq("entity_id", parentId).order("is_primary", { ascending: false }).order("sort_order", { ascending: true }),
+    // สินค้าบนร้าน (platform_catalog_listings) ที่จับคู่กับสินค้านี้อยู่ — ต่อแพลตฟอร์ม
+    admin.from("platform_catalog_listings").select("platform_id, id, title, external_product_id, sku_code").eq("matched_parent_sku_id", parentId),
   ]);
+  // matchedListings: platform_id → listing ที่จับคู่ (ตัวแรกต่อร้าน)
+  const matchedListings: Record<string, { id: string; title: string | null; external_id: string | null; sku_code: string | null }> = {};
+  for (const l of ((matchedL ?? []) as Record<string, unknown>[])) {
+    const pid = String(l.platform_id);
+    if (!matchedListings[pid]) matchedListings[pid] = { id: String(l.id), title: (l.title as string) ?? null, external_id: (l.external_product_id as string) ?? null, sku_code: (l.sku_code as string) ?? null };
+  }
   const pRow = (parent ?? {}) as Record<string, unknown>;
   const categoryId = (pRow.category_id as string) ?? null;
   const platformCategoryId = (pRow.platform_category_id as string) ?? null;   // "หมวดกลางสำหรับลงขาย" → key ของ mapping ต่อแพลตฟอร์ม
@@ -147,7 +155,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({
     parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", name_platform: pRow.name_platform ?? "", description: pRow.description ?? "", category_id: categoryId, category_name: categoryName, platform_category_id: platformCategoryId, platform_category_name: platformCategoryName, brand_name: brandName, weight_kg: weightKg, box_width: box.w, box_length: box.l, box_height: box.h } : null,
-    platforms, drafts: draftMap, variants, mappings, images, descImages, accounts, error: null,
+    platforms, drafts: draftMap, variants, mappings, images, descImages, accounts, matchedListings, error: null,
   });
 }
 

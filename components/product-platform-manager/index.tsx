@@ -69,6 +69,43 @@ function CategoryOptionPicker({ platformId, onPick }: { platformId: string; onPi
   );
 }
 
+// ค้นหา + เลือกสินค้าบนร้าน (platform_catalog_listings) เพื่อจับคู่กับ Parent SKU นี้
+type ListingHit = { id: string; title: string | null; external_product_id: string | null; sku_code: string | null; matched_parent_sku_id: string | null };
+function ListingMatchPicker({ platformId, onPick }: { platformId: string; onPick: (l: { id: string; title: string; external_id: string; sku_code: string }) => void }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [results, setResults] = useState<ListingHit[]>([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let live = true; setLoading(true);
+    const t = setTimeout(async () => {
+      try { const j = await apiFetch(`/api/platform-catalog?${new URLSearchParams({ platform_id: platformId, search: q, limit: "30" })}`).then((r) => r.json()); if (live) setResults((j.listings ?? []) as ListingHit[]); }
+      catch { if (live) setResults([]); } finally { if (live) setLoading(false); }
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [open, q, platformId]);
+  return (
+    <div className="relative">
+      <input value={q} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        placeholder="🔍 ค้นหาสินค้าบนร้าน (ชื่อ / รหัส SKU / รหัสสินค้า)" className="h-9 w-full border border-violet-200 rounded-md px-2 text-sm" />
+      {open && (
+        <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+          {loading ? <div className="p-3 text-xs text-slate-400">กำลังค้นหา...</div>
+            : results.length === 0 ? <div className="p-3 text-xs text-amber-600">ไม่พบสินค้าบนร้านนี้ — นำเข้าแคตตาล็อกที่หน้า “สินค้าบนแพลตฟอร์ม” ก่อน</div>
+            : results.map((l) => (
+              <button key={l.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { onPick({ id: l.id, title: l.title ?? "", external_id: l.external_product_id ?? "", sku_code: l.sku_code ?? "" }); setOpen(false); setQ(""); }} className="block w-full text-left px-3 py-1.5 text-xs hover:bg-violet-50">
+                <span className="text-slate-700">{l.title || "(ไม่มีชื่อ)"}</span>
+                <span className="text-slate-400 font-mono ml-1">{l.sku_code || l.external_product_id}</span>
+                {l.matched_parent_sku_id && <span className="ml-1 text-[10px] text-amber-500">• จับคู่แล้ว</span>}
+              </button>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ช่องแก้ราคาราย SKU (inline) — ใช้ได้ทั้งราคาเต็ม/ราคาขาย · uncontrolled เซฟตอน blur/Enter
 function PriceInput({ id, field, value, onSave, warn, title }: { id: string; field: "fake_price" | "list_price"; value: number | null; onSave: (id: string, field: "fake_price" | "list_price", val: string) => void; warn?: boolean; title?: string }) {
   const cur = value == null ? "" : String(value);
@@ -123,6 +160,8 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [mappings, setMappings] = useState<Record<string, string>>({});
   const [images, setImages] = useState<ImageItem[]>([]);
   const [descImages, setDescImages] = useState<ImageItem[]>([]);   // รูปรายละเอียด (Description) — แยกชุด
+  const [matchedListings, setMatchedListings] = useState<Record<string, { id: string; title: string | null; external_id: string | null; sku_code: string | null }>>({});   // platform_id → สินค้าบนร้านที่จับคู่
+  const [matching, setMatching] = useState(false);
   const [accounts, setAccounts] = useState<Record<string, Account>>({});
   const [active, setActive] = useState<string>("");
   const [catInput, setCatInput] = useState("");
@@ -166,6 +205,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
       setMappings((j.mappings ?? {}) as Record<string, string>);
       setImages((j.images ?? []) as ImageItem[]);
       setDescImages((j.descImages ?? []) as ImageItem[]);
+      setMatchedListings((j.matchedListings ?? {}) as Record<string, { id: string; title: string | null; external_id: string | null; sku_code: string | null }>);
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
       setActive((prev) => prev || (initialPlatformId && pfs.some((p) => p.id === initialPlatformId) ? initialPlatformId : (pfs[0]?.id ?? "")));
       lastLoadRef.current = Date.now();
@@ -340,6 +380,27 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   };
   const allDescOn = descImages.length > 0 && descImages.every((im) => (activeDraft.description_image_keys ?? []).includes(im.key));
   const toggleAllDesc = () => saveDescImages(allDescOn ? [] : descImages.map((im) => im.key));
+  // จับคู่สินค้ากับ "สินค้าบนร้าน" (platform_catalog_listings) — เขียนทันที (ไม่ staged)
+  const doMatch = async (l: { id: string; title: string; external_id: string; sku_code: string }) => {
+    setMatching(true);
+    try {
+      const r = await apiFetch("/api/platform-catalog/match", { method: "POST", body: JSON.stringify({ listing_id: l.id, parent_sku_id: parentSkuId }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setMatchedListings((m) => ({ ...m, [active]: { id: l.id, title: l.title || null, external_id: l.external_id || null, sku_code: l.sku_code || null } }));
+      toast("success", "จับคู่กับสินค้าบนร้านแล้ว");
+    } catch (e) { toast("error", (e as Error).message); } finally { setMatching(false); }
+  };
+  const doUnmatch = async () => {
+    const cur = matchedListings[active]; if (!cur) return;
+    if (!window.confirm("ยกเลิกการจับคู่สินค้านี้กับสินค้าบนร้าน?")) return;
+    setMatching(true);
+    try {
+      const r = await apiFetch("/api/platform-catalog/match", { method: "POST", body: JSON.stringify({ listing_id: cur.id, parent_sku_id: null }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setMatchedListings((m) => { const n = { ...m }; delete n[active]; return n; });
+      toast("info", "ยกเลิกการจับคู่แล้ว");
+    } catch (e) { toast("error", (e as Error).message); } finally { setMatching(false); }
+  };
   // หมวดหมู่: ใช้ค่ามาตรฐาน / บันทึกเป็นค่ามาตรฐานของหมวดกลางนี้
   const useStandard = () => { const v = mappings[active] ?? ""; if (!v) { toast("info", "ยังไม่มีค่ามาตรฐานของหมวดนี้"); return; } setCatInput(v); saveField("category_path", v); };
   const saveMapping = async () => {
@@ -452,6 +513,25 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                   {account?.is_active ? <span className="text-xs text-slate-400">ร้าน: {account.label || "—"}</span> : <span className="text-xs text-amber-600">⚠ แบรนด์นี้ยังไม่มีร้าน {activePf.name_th} <a href="/admin/platform-accounts" target="_blank" rel="noopener noreferrer" className="underline">ตั้งร้าน</a></span>}
                   {published && <span className="text-xs text-emerald-600">✅ ลงขายแล้ว (จำลอง){activeDraft.platform_product_id ? ` · ${activeDraft.platform_product_id}` : ""}</span>}
                   {activeDraft.last_sync_status === "failed" && <span className="text-xs text-rose-600" title={activeDraft.last_error ?? ""}>⚠ ส่งไม่สำเร็จ</span>}
+                </div>
+
+                {/* จับคู่กับ "สินค้าบนร้าน" (platform_catalog_listings) — เชื่อมสินค้านี้กับสินค้าที่มีอยู่แล้วบนร้าน */}
+                <div className="rounded-lg border border-slate-200 p-3">
+                  {matchedListings[active] ? (
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="min-w-0 text-xs">
+                        <span className="text-emerald-700 font-medium">🔗 จับคู่กับสินค้าบนร้านแล้ว</span>
+                        <div className="text-slate-600 truncate">{matchedListings[active].title || "(ไม่มีชื่อ)"} <span className="text-slate-400 font-mono">{matchedListings[active].sku_code || matchedListings[active].external_id || ""}</span></div>
+                      </div>
+                      {canEdit && <button onClick={doUnmatch} disabled={matching} className="shrink-0 text-xs text-rose-600 border border-rose-200 rounded-md px-2 py-1 hover:bg-rose-50 disabled:opacity-50">ยกเลิกจับคู่</button>}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-slate-600">🔗 จับคู่กับสินค้าบนร้าน {activePf.name_th}</p>
+                      <p className="text-[10px] text-slate-400">เชื่อมสินค้านี้กับสินค้าที่มีอยู่แล้วบนร้าน (ระบบจะรู้ว่าตัวไหนคือตัวเดียวกัน — ใช้อัปเดต/ไม่สร้างซ้ำ)</p>
+                      {canEdit ? <ListingMatchPicker platformId={active} onPick={doMatch} /> : <p className="text-[11px] text-slate-400">ไม่มีสิทธิ์จับคู่</p>}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
