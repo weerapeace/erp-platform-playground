@@ -255,6 +255,14 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     setPrefillTick((tick) => tick + 1);
     toast("success", "เติมชื่อ + รายละเอียดจากสินค้าแล้ว");
   };
+  // ดึงเฉพาะ "รายละเอียด" จากข้อมูลสินค้า (= Platform Description ตัวเต็ม) — ใช้ทับของเดิมได้ทุกเมื่อ
+  const prefillDescFromErp = () => {
+    const d = parent?.description || "";
+    if (!d.trim()) { toast("info", "ไม่มีรายละเอียดในข้อมูลสินค้าให้ดึง"); return; }
+    saveField("description", d);
+    setPrefillTick((tick) => tick + 1);
+    toast("success", "ดึงรายละเอียดจากสินค้าแล้ว");
+  };
   const canPrefill = !!(parent?.name_platform || parent?.name_th || parent?.description);
   // Mass fill ราคา (เต็ม/ขาย) ทุก SKU — ค้างในหน้า (กด "บันทึก" ถึงเขียนจริง)
   const massFillPrice = (field: "fake_price" | "list_price", valueStr: string, onlyEmpty: boolean) => {
@@ -397,8 +405,26 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     try {
       const r = await apiFetch("/api/platform-catalog/match", { method: "POST", body: JSON.stringify({ listing_id: cur.id, parent_sku_id: null }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
+      // ถ้าสินค้านี้เคยลง/เชื่อมกับแพลตฟอร์มไว้ (มี platform_product_id) ให้เลิกเชื่อมด้วย → ปุ่ม "สร้างสินค้าใหม่" กลับมา
+      if (activeDraft.platform_product_id) {
+        const r2 = await apiFetch("/api/product-platforms/unlink", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: active }) });
+        const j2 = await r2.json(); if (j2.error) throw new Error(j2.error);
+      }
       setMatchedListings((m) => { const n = { ...m }; delete n[active]; return n; });
-      toast("info", "ยกเลิกการจับคู่แล้ว");
+      setDrafts((dd) => ({ ...dd, [active]: { ...dd[active], platform_product_id: null } }));
+      toast("info", "ยกเลิกการจับคู่แล้ว — กด “สร้างสินค้าใหม่” เพื่อลงใหม่ได้");
+    } catch (e) { toast("error", (e as Error).message); } finally { setMatching(false); }
+  };
+  // เลิกเชื่อมกับแพลตฟอร์ม (ล้าง platform_product_id) — ไม่ได้ลบสินค้าจริงบนร้าน แค่ให้กด "สร้างใหม่" ได้อีก
+  const unlinkFromPlatform = async () => {
+    if (!window.confirm("เลิกเชื่อมสินค้านี้กับแพลตฟอร์ม?\n(ไม่ได้ลบสินค้าบนร้าน — แค่ให้ระบบลืมการเชื่อม เพื่อกด “สร้างสินค้าใหม่” ได้อีกครั้ง)")) return;
+    setMatching(true);
+    try {
+      const r = await apiFetch("/api/product-platforms/unlink", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: active }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setMatchedListings((m) => { const n = { ...m }; delete n[active]; return n; });
+      setDrafts((dd) => ({ ...dd, [active]: { ...dd[active], platform_product_id: null } }));
+      toast("success", "เลิกเชื่อมแล้ว — กด “สร้างสินค้าใหม่บน LINE” เพื่อลงใหม่ได้");
     } catch (e) { toast("error", (e as Error).message); } finally { setMatching(false); }
   };
   // หมวดหมู่: ใช้ค่ามาตรฐาน / บันทึกเป็นค่ามาตรฐานของหมวดกลางนี้
@@ -545,6 +571,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <p className="text-[11px] text-slate-400">รายละเอียดสินค้า</p>
+                      {canEdit && parent?.description?.trim() && <button onClick={prefillDescFromErp} className="text-[11px] text-violet-600 hover:underline">↙ ดึงรายละเอียดจากสินค้า (Platform Description)</button>}
                     </div>
                     <ERPTextarea key={`d-${active}-${prefillTick}`} defaultValue={description} rows={4} placeholder="รายละเอียดเฉพาะแพลตฟอร์มนี้..." disabled={!canEdit} onBlur={(e) => saveField("description", e.target.value)} />
                   </div>
@@ -705,6 +732,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                             <button onClick={pushPricesLine} disabled={pushingPrice} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{pushingPrice ? "กำลังส่ง..." : "⬆️ ส่งราคา/ส่วนลด"}</button>
                             <button onClick={() => setDisplayLine("onsale")} disabled={displaying} className="h-8 px-3 text-xs text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-50">▶ เปิดขาย</button>
                             <button onClick={() => setDisplayLine("hide")} disabled={displaying} className="h-8 px-3 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⏸ ปิดขาย</button>
+                            <button onClick={unlinkFromPlatform} disabled={matching} title="ให้ระบบลืมว่าสินค้านี้เชื่อมกับ LINE (ไม่ลบของจริงบนร้าน) เพื่อกดสร้างใหม่ได้" className="h-8 px-3 text-xs text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50 disabled:opacity-50">🔓 เลิกเชื่อม</button>
                           </div>}
                         </div>
                       : canEdit && <button onClick={createOnLine} disabled={creating || !ready} title={!ready ? "กรอกฟิลด์จำเป็นให้ครบก่อน (ดูรายการด้านบน)" : "สร้างสินค้าใหม่บน LINE"} className="mt-2 w-full h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{creating ? "กำลังสร้าง..." : "🆕 สร้างสินค้าใหม่บน LINE"}</button>
