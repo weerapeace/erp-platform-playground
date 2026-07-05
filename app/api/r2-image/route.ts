@@ -70,14 +70,15 @@ export async function GET(request: NextRequest): Promise<Response> {
         const sharp = (await import("sharp")).default;
         const input = Buffer.from(await new Response(obj.body as ReadableStream).arrayBuffer());
         const pipeline = sharp(input).rotate();
-        const resized = sq
-          ? pipeline.resize({ width: wParam, height: wParam, fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 1 } })
-          : pipeline.resize({ width: wParam, withoutEnlargement: true });
-        const out = await resized.webp({ quality: 75 }).toBuffer();
+        // sq (รูปตัวเลือก LINE): 1:1 + LINE ไม่รับ webp ("Unsupported media type") → ออกเป็น JPEG · โหมดย่อทั่วไป → webp (เบากว่า)
+        const out = sq
+          ? await pipeline.resize({ width: wParam, height: wParam, fit: "contain", background: { r: 255, g: 255, b: 255 } }).jpeg({ quality: 82 }).toBuffer()
+          : await pipeline.resize({ width: wParam, withoutEnlargement: true }).webp({ quality: 75 }).toBuffer();
+        const outType = sq ? "image/jpeg" : "image/webp";
         const body = new Uint8Array(out);   // Buffer → Uint8Array<ArrayBuffer> (BodyInit ที่ถูกชนิด)
         const res = new Response(body, {
           status: 200,
-          headers: { "Content-Type": "image/webp", "Content-Length": String(body.byteLength), ...CACHE_HEADERS },
+          headers: { "Content-Type": outType, "Content-Length": String(body.byteLength), ...CACHE_HEADERS },
         });
         if (edge) { try { edge.waitUntil(edge.cache.put(request, res.clone())); } catch { /* noop */ } }
         return res;

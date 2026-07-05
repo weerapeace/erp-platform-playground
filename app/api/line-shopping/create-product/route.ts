@@ -90,7 +90,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const opt2Of = (s: typeof skuRows[number]) => { const vo = voOf(s); return vo ? String(vo.value ?? "").trim() : ""; };
   const opt2Name = (() => { for (const s of sellable) { const vo = voOf(s); const n = vo ? String(vo.name ?? "").trim() : ""; if (n) return n; } return "ตัวเลือก"; })();
   // รูปต่อสี (imageUrl ใส่ได้เฉพาะ option1 = สี): ใช้ปก "ตัวสี" (master) ก่อน แล้ว fallback ตัวขาย · LINE ต้อง 1:1 → เรียก r2-image แบบ square
-  const sqImg = (k: string) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}&w=800&sq=1`;
+  const sqImg = (k: string) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}&w=800&sq=1&fmt=jpg`;
   const colorImg = new Map<string, string>();
   for (const s of skuRows) { const c = colorOf(s); if (!c || colorImg.has(c)) continue; const key = masterCodes.has(s.code) ? s.cover_image_r2_key : (s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null); if (key) colorImg.set(c, key); }
   // ค่าตัวเลือกเรียงตามลำดับพบครั้งแรก (index ต้องคงที่ เพราะ variant.options อ้าง index นี้)
