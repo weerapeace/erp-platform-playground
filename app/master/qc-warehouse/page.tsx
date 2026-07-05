@@ -624,6 +624,10 @@ export default function QcWarehousePage() {
                 </>
               ) : (
                 <>
+                  <div className="flex items-center justify-end gap-2 mb-2">
+                    <button onClick={() => openAddManual("")} className="h-9 px-3 text-sm font-medium border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">➕ ใส่ของเข้าชั้น</button>
+                    <button onClick={openAddShelf} className="h-9 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">➕ เพิ่มชั้น</button>
+                  </div>
                   <div className="flex flex-wrap items-center gap-2 mb-3">
                     <select value={shopStatus} onChange={(e) => setShopStatus(e.target.value as typeof shopStatus)} title="กรองสถานะ" className={selCls}>
                       <option value="all">ทุกสถานะ</option><option value="good">ของดี</option><option value="defect">ของเสีย</option><option value="repairing">กำลังซ่อม</option>
