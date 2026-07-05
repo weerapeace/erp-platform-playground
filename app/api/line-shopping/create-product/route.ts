@@ -118,11 +118,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ...skuRows.filter((s) => masterCodes.has(s.code)).map((s) => s.cover_image_r2_key),
     ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null),
   ].filter(Boolean) as string[])];
-  const imageUrls = autoKeys.slice(0, 7).map((k) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`);   // LINE จำกัด ≤ 7 รูป
-  // รูปประกอบรายละเอียด (Description) → แนบเป็น <img> ต่อท้ายรายละเอียด (LINE description รองรับ HTML) — ไม่กินโควตา 7 รูปหลัก
+  // รูปประกอบรายละเอียด (Description): LINE ไม่รองรับ <img> ในช่องรายละเอียด (400 "Invalid Description") → รวมเข้าแกลเลอรีรูปสินค้าแทน (ต่อท้ายรูปหลัก)
   const descImgKeys = Array.isArray(d.description_image_keys) ? d.description_image_keys as string[] : [];
+  const galleryKeys = [...new Set([...autoKeys, ...descImgKeys])].slice(0, 7);   // LINE จำกัด ≤ 7 รูป (รูปหลักก่อน แล้วรูป Description เติมช่องที่เหลือ)
+  const imageUrls = galleryKeys.map((k) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`);
   const descText = String(d.description || p.platform_description || p.description || "");
-  const descriptionHtml = descText + descImgKeys.map((k) => `<p><img src="${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}&w=1080"></p>`).join("");
 
   // ตรวจครบก่อนส่ง
   const missing: string[] = [];
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (missing.length) return NextResponse.json({ error: `ยังกรอกไม่ครบ: ${missing.join(", ")}` }, { status: 400 });
 
   const payload: Record<string, unknown> = {
-    name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: descriptionHtml,
+    name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: descText,
     brand: String(extra.brand || brandName || ""), imageUrls, variants, instantDiscount: topDiscount,
     // สินค้ามีตัวเลือกเสมอ → ส่ง variantOptions · imageUrl ต่อสีใส่ได้เฉพาะ option1 (สี) แบบ 1:1
     ...(isVariant && opt1 ? { variantOptions: {
