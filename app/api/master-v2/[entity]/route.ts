@@ -214,7 +214,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
                     parcel_sizes ( name, size_text ),
                     special_descriptions ( name ),
                     size_descriptions ( name ),
-                    platform_categories ( name )`,
+                    platform_central_categories ( name )`,
     // F19: list view — ตัด JOIN เหลือแค่ brands + collections (2 ตัวที่โชว์จริง)
     // relation อื่น (category/parcel/special/size/platform) แสดงเป็น id ใน list อยู่แล้ว
     // → label ครบเฉพาะตอนเปิด detail drawer (GET /[id] ใช้ selectColumns เต็ม)
@@ -234,7 +234,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { alias: "parcel_sizes",         labelField: "name", resultKey: "parcel_size_label", secondaryField: "size_text", secondaryKey: "parcel_size_size_text" },
       { alias: "special_descriptions", labelField: "name", resultKey: "special_description_label" },
       { alias: "size_descriptions",    labelField: "name", resultKey: "size_description_label" },
-      { alias: "platform_categories",  labelField: "name", resultKey: "platform_category_label" },
+      { alias: "platform_central_categories", labelField: "name", resultKey: "platform_category_label" },
     ]),
   },
   skus: {
