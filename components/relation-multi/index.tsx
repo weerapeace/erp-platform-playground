@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { ImageInput } from "@/components/image-input";
+import { CopyButton } from "@/components/copy-button";
 import { TagOrganizerModal } from "@/components/tag-organizer";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
@@ -1085,6 +1086,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             {opts?.lead}
             {opts?.indent ? <span className="text-slate-300 text-xs">└</span> : null}
             <span className={opts?.lead ? "font-semibold text-slate-800" : opts?.indent ? "text-slate-500" : ""}>{String(r[titleField] ?? r.name ?? r.id)}</span>
+            <CopyButton value={String(r[titleField] ?? r.name ?? "")} className="opacity-0 group-hover:opacity-100" />
             {opts?.trail}
           </span>
         </td>
@@ -1108,7 +1110,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             <td key={f}
               onClick={editable ? (e) => { e.stopPropagation(); setEditCell({ rowId: String(r.id), field: f }); setEditVal(r[f] == null ? "" : String(r[f])); } : undefined}
               className={`px-2 py-1.5 text-slate-600 whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"} ${editable ? "cursor-text hover:bg-blue-50/60" : ""}`}>
-              {cellValue(r, f) ?? "—"}
+              {f === "color_th" && r[f] != null && r[f] !== ""
+                ? <span className="inline-flex items-center gap-1 justify-end">{cellValue(r, f) ?? "—"}<CopyButton value={String(r[f] ?? "")} className="opacity-0 group-hover:opacity-100" /></span>
+                : (cellValue(r, f) ?? "—")}
             </td>
           );
         })}
