@@ -12,11 +12,10 @@ import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type Im
 import dynamic from "next/dynamic";
 import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
+import { platformGlyph } from "@/components/platform-icon";
 
 // Drawer รายละเอียดต่อแพลตฟอร์ม (ของกลาง เปิดจาก Parent SKUs ด้วย) — dynamic กัน bundle หนัก
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
-
-const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string };
@@ -306,7 +305,7 @@ export default function PlatformCatalogPage() {
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <select value={platformId} onChange={(e) => setPlatformId(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white">
-          {platforms.map((p) => <option key={p.id} value={p.id}>{(p.icon_key || PLATFORM_ICON[p.code] || "🏬") + " " + p.name_th}</option>)}
+          {platforms.map((p) => <option key={p.id} value={p.id}>{platformGlyph(p.code, p.icon_key) + " " + p.name_th}</option>)}
         </select>
         <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white">
           <option value="">ทุกแบรนด์/ร้าน</option>

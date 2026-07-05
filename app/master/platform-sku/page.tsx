@@ -6,8 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
-
-const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", line_shopping: "🟢", youtube: "▶️", pinterest: "📌", x: "✖️" };
+import { PlatformIcon } from "@/components/platform-icon";
 
 type Brand = { id: string; name: string };
 type Channel = { platform_id: string; code: string; name_th: string; icon_key: string | null; count: number; price: number | null };
@@ -47,7 +46,6 @@ export default function PlatformSkuPage() {
   }, [items]);
 
   const shown = platformFilter ? items.filter((it) => it.channels.some((c) => c.platform_id === platformFilter)) : items;
-  const icon = (c: Channel) => c.icon_key || PLATFORM_ICON[c.code] || "🏬";
 
   return (
     <div className="max-w-4xl mx-auto p-6">
@@ -71,7 +69,7 @@ export default function PlatformSkuPage() {
           <button onClick={() => setPlatformFilter("")} className={`h-7 px-2.5 rounded-full text-xs border ${!platformFilter ? "bg-violet-600 text-white border-violet-600" : "bg-white border-slate-200 text-slate-600"}`}>ทั้งหมด ({items.length})</button>
           {channelStats.map((c) => (
             <button key={c.platform_id} onClick={() => setPlatformFilter(platformFilter === c.platform_id ? "" : c.platform_id)} className={`h-7 px-2.5 rounded-full text-xs border ${platformFilter === c.platform_id ? "bg-violet-600 text-white border-violet-600" : "bg-white border-slate-200 text-slate-600"}`}>
-              {(c.icon_key || PLATFORM_ICON[c.code] || "🏬")} {c.name_th} ({c.skus})
+              <PlatformIcon code={c.code} iconKey={c.icon_key} size={14} /> {c.name_th} ({c.skus})
             </button>
           ))}
         </div>
@@ -90,7 +88,7 @@ export default function PlatformSkuPage() {
                 <div className="flex flex-wrap items-center gap-1.5">
                   {it.channels.map((c) => (
                     <span key={c.platform_id} className="inline-flex items-center gap-1 text-xs bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5" title={`${c.name_th}${c.count > 1 ? ` · ${c.count} รายการ` : ""}`}>
-                      <span>{icon(c)}</span>
+                      <PlatformIcon code={c.code} iconKey={c.icon_key} size={14} />
                       <span className="text-slate-600">{c.price != null ? `${c.price.toLocaleString()}฿` : "—"}</span>
                       {c.count > 1 && <span className="text-[10px] text-slate-400">×{c.count}</span>}
                     </span>

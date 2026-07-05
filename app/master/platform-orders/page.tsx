@@ -8,8 +8,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { ERPInput } from "@/components/form";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
-
-const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
+import { platformGlyph } from "@/components/platform-icon";
 const ST: Record<string, { label: string; cls: string }> = {
   new: { label: "ใหม่", cls: "bg-blue-50 text-blue-700 border-blue-200" },
   confirmed: { label: "ยืนยันแล้ว", cls: "bg-violet-50 text-violet-700 border-violet-200" },
@@ -92,7 +91,7 @@ export default function PlatformOrdersPage() {
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <select value={platformId} onChange={(e) => setPlatformId(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white">
-          {platforms.map((p) => <option key={p.id} value={p.id}>{(p.icon_key || PLATFORM_ICON[p.code] || "🏬") + " " + p.name_th}</option>)}
+          {platforms.map((p) => <option key={p.id} value={p.id}>{platformGlyph(p.code, p.icon_key) + " " + p.name_th}</option>)}
         </select>
         <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white"><option value="">ทุกแบรนด์/ร้าน</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
         <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white"><option value="">ทุกสถานะ</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{ST[s].label}{summary[s] != null ? ` (${summary[s]})` : ""}</option>)}</select>

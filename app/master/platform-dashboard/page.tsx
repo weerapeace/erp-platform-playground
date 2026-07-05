@@ -6,8 +6,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { PlatformIcon, platformGlyph } from "@/components/platform-icon";
 
-const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 const ST: Record<string, { label: string; cls: string }> = {
   new: { label: "ใหม่", cls: "bg-blue-50 text-blue-700" },
   confirmed: { label: "ยืนยันแล้ว", cls: "bg-violet-50 text-violet-700" },
@@ -80,7 +80,7 @@ export default function PlatformDashboardPage() {
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <select value={platformId} onChange={(e) => setPlatformId(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white">
           <option value="">ทุกแพลตฟอร์ม</option>
-          {platforms.map((p) => <option key={p.id} value={p.id}>{(p.icon_key || PLATFORM_ICON[p.code] || "🏬") + " " + p.name_th}</option>)}
+          {platforms.map((p) => <option key={p.id} value={p.id}>{platformGlyph(p.code, p.icon_key) + " " + p.name_th}</option>)}
         </select>
         <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white">
           <option value="">ทุกแบรนด์/ร้าน</option>
@@ -110,7 +110,7 @@ export default function PlatformDashboardPage() {
               <div className="space-y-2.5">
                 {d.byPlatform.map((p) => (
                   <div key={p.code} className="flex items-center gap-3">
-                    <span className="w-28 shrink-0 text-sm text-slate-600 truncate">{(p.icon_key || PLATFORM_ICON[p.code] || "🏬")} {p.name_th}</span>
+                    <span className="w-28 shrink-0 text-sm text-slate-600 truncate inline-flex items-center gap-1"><PlatformIcon code={p.code} iconKey={p.icon_key} size={15} /> {p.name_th}</span>
                     <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
                       <div className="h-full bg-emerald-400/80 rounded-full" style={{ width: `${Math.max(2, (p.sales / maxSales) * 100)}%` }} />
                     </div>
