@@ -428,11 +428,14 @@ export async function savePlatformSettings(settings: PlatformSettings): Promise<
 }
 
 // ---- เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์) — เก็บ ui_config key 'creative_recommended_times' ----
-// คีย์ = วันในสัปดาห์ตาม Date.getDay() ('0'=อาทิตย์ .. '6'=เสาร์) · ค่า = "HH:MM"
-export type RecommendedTimes = Record<string, string>;
+// คีย์ = วันในสัปดาห์ตาม Date.getDay() ('0'=อาทิตย์ .. '6'=เสาร์) · ค่า = รายการเวลา ["HH:MM", ...]
+export type RecommendedTimes = Record<string, string[]>;
 export async function getRecommendedTimes(): Promise<RecommendedTimes> {
   const j = await apiFetch("/api/ui-config?key=creative_recommended_times").then((r) => r.json()).catch(() => ({}));
-  return (j.value as RecommendedTimes) ?? {};
+  const raw = (j.value as Record<string, string | string[]>) ?? {};
+  const out: RecommendedTimes = {};
+  for (const [k, v] of Object.entries(raw)) { const arr = (Array.isArray(v) ? v : (v ? [v] : [])).filter(Boolean); if (arr.length) out[k] = arr; }  // รองรับข้อมูลเก่า (string เดี่ยว)
+  return out;
 }
 export async function saveRecommendedTimes(times: RecommendedTimes): Promise<void> {
   await jsonOrThrow(await apiFetch("/api/ui-config", { method: "PATCH", body: JSON.stringify({ key: "creative_recommended_times", value: times }) }));
