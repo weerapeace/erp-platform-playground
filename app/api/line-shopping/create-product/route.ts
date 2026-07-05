@@ -33,7 +33,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!platform_id) return NextResponse.json({ error: "ยังไม่มีแพลตฟอร์ม LINE SHOPPING" }, { status: 400 });
 
   const [{ data: parent }, { data: draft }, { data: skus }] = await Promise.all([
-    admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, brand_id, weight_g").eq("id", parent_sku_id).maybeSingle(),
+    admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, platform_description, brand_id, weight_g").eq("id", parent_sku_id).maybeSingle(),
     admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, platform_product_id").eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id).maybeSingle(),
     admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
   ]);
@@ -44,6 +44,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const brand_id = (p.brand_id as string) ?? null;
   if (!brand_id) return NextResponse.json({ error: "สินค้านี้ยังไม่มีแบรนด์ — ตั้งแบรนด์ก่อน (คีย์ LINE ผูกกับแบรนด์)" }, { status: 400 });
+  const { data: brandRow } = await admin.from("brands").select("name").eq("id", brand_id).maybeSingle();
+  const brandName = ((brandRow as { name?: string } | null)?.name ?? "").trim();
   const { data: cred } = await admin.from("platform_credentials").select("api_key").eq("brand_id", brand_id).eq("platform_id", platform_id).maybeSingle();
   const stored = (cred as { api_key?: string } | null)?.api_key;
   if (!stored) return NextResponse.json({ error: "แบรนด์นี้ยังไม่ได้ใส่ API Key ของ LINE" }, { status: 400 });
@@ -111,8 +113,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (missing.length) return NextResponse.json({ error: `ยังกรอกไม่ครบ: ${missing.join(", ")}` }, { status: 400 });
 
   const payload: Record<string, unknown> = {
-    name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || ""),
-    brand: String(extra.brand || ""), imageUrls, variants, instantDiscount: 0,
+    name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || p.platform_description || p.description || ""),
+    brand: String(extra.brand || brandName || ""), imageUrls, variants, instantDiscount: 0,
     // ส่ง variantOptions เฉพาะสินค้ามีหลายสี (multiVariant) · สีเดียว = สินค้าไม่มีตัวเลือก
     ...(multiVariant ? { variantOptions: { option1: { name: "สี", data: colors.map((c) => ({ value: c })) } } } : {}),
   };
