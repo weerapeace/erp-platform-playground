@@ -26,6 +26,7 @@ import { addToPrCart } from "@/lib/pr-cart";
 import { useViewPref } from "@/lib/use-view-pref";
 import { PurchaseNeeds } from "./purchase-needs";
 import { DispatchShop } from "./dispatch-shop";
+import { DeskShop } from "./desk-shop";
 import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
@@ -133,6 +134,7 @@ export default function WorkBoardPage() {
   const [loading, setLoading] = useState(true);
   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ + จำมุมมองเริ่มต้นต่อผู้ใช้ (⭐)
   const { view: viewMode, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase"] as const, "board");
+  const [shopMode, setShopMode] = useState<"dispatch" | "desk">("dispatch");   // มุมมองช้อป: รอจ่าย / งานในโต๊ะ
   const [pendingCols] = useState<number | null>(null);     // (เลิกใช้) คอลัมน์โซนรอจ่าย — รอจ่ายย้ายไปป๊อปอัปแล้ว
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
   const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // เงินเดือนรวมพนักงานต่อแผนก (จาก payroll)
@@ -1038,17 +1040,31 @@ export default function WorkBoardPage() {
       ) : viewMode === "table" ? (
         <BoardTable pending={board.pending} workOrders={board.workOrders} onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : viewMode === "shop" ? (
-        <DispatchShop
-          pending={board.pending}
-          departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
-          craftsmen={craftsmen}
-          canDispatch={canDispatch}
-          moGroups={moGroups}
-          groupOf={pendGroupOf}
-          laborByMo={Object.fromEntries(board.pending.map((m) => [m.mo_no, pendLaborPP(m)]))}
-          onOpenMO={(mo) => { const real = board.pending.find((x) => x.id === mo.id); if (real) { setClWO(null); setChecklistMO(real); } }}
-          onReload={() => void load(true)}
-        />
+        <div className="space-y-3">
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+            <button onClick={() => setShopMode("dispatch")} className={`h-9 px-3 font-medium ${shopMode === "dispatch" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🛒 รอจ่าย (จ่ายงาน)</button>
+            <button onClick={() => setShopMode("desk")} className={`h-9 px-3 font-medium border-l border-slate-200 ${shopMode === "desk" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🪑 งานในโต๊ะ (ส่งงาน)</button>
+          </div>
+          {shopMode === "dispatch" ? (
+            <DispatchShop
+              pending={board.pending}
+              departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
+              craftsmen={craftsmen}
+              canDispatch={canDispatch}
+              moGroups={moGroups}
+              groupOf={pendGroupOf}
+              laborByMo={Object.fromEntries(board.pending.map((m) => [m.mo_no, pendLaborPP(m)]))}
+              onOpenMO={(mo) => { const real = board.pending.find((x) => x.id === mo.id); if (real) { setClWO(null); setChecklistMO(real); } }}
+              onReload={() => void load(true)}
+            />
+          ) : (
+            <DeskShop
+              workOrders={board.workOrders}
+              departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
+              onOpenWO={(w) => { const real = board.workOrders.find((x) => x.id === w.id); if (real) { setRecvQty(Math.max(0, (real.qty || 0) - (real.received_qty || 0))); openWO(real); } }}
+            />
+          )}
+        </div>
       ) : activePlan !== "real" ? (
         (() => {
           const p = plans.find((x) => x.id === activePlan);
@@ -1380,7 +1396,7 @@ export default function WorkBoardPage() {
       </ERPModal>
 
       {/* เช็กลิสต์วัตถุดิบ เตรียม/ตัด (Phase 2 — จาก BOM) */}
-      <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="lg" title={clWO ? `🔄 ใบจ่ายงาน · ${clWO.wo_no}` : `📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
+      <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="xl" storageKey="wb-checklist" title={clWO ? `🔄 ใบจ่ายงาน · ${clWO.wo_no}` : `📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
         footer={<>
           {checklistMO && !clWO && canEdit && (delArmed
             ? <span className="mr-auto flex gap-1"><button onClick={() => deleteMO(checklistMO)} className="h-9 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยันลบงานนี้</button><button onClick={() => setDelArmed(false)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">ยกเลิก</button></span>
