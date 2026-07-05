@@ -25,7 +25,7 @@ const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then
 const VariantMatrixModal = dynamic(() => import("@/components/variant-matrix").then((m) => m.VariantMatrixModal), { ssr: false });
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null; capabilities?: Record<string, unknown> };
-type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; extra?: Record<string, unknown>; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
+type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; description_image_keys?: string[]; extra?: Record<string, unknown>; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
 type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null; platform_category_id: string | null; platform_category_name: string | null; brand_name: string | null; weight_kg: number | null; box_width: number | null; box_length: number | null; box_height: number | null };
 type ImageItem = { key: string; source: string };
 type Account = { label: string | null; is_active: boolean };
@@ -122,6 +122,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [variants, setVariants] = useState<Variant[]>([]);
   const [mappings, setMappings] = useState<Record<string, string>>({});
   const [images, setImages] = useState<ImageItem[]>([]);
+  const [descImages, setDescImages] = useState<ImageItem[]>([]);   // รูปรายละเอียด (Description) — แยกชุด
   const [accounts, setAccounts] = useState<Record<string, Account>>({});
   const [active, setActive] = useState<string>("");
   const [catInput, setCatInput] = useState("");
@@ -164,6 +165,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
       setVariants((j.variants ?? []) as Variant[]);
       setMappings((j.mappings ?? {}) as Record<string, string>);
       setImages((j.images ?? []) as ImageItem[]);
+      setDescImages((j.descImages ?? []) as ImageItem[]);
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
       setActive((prev) => prev || (initialPlatformId && pfs.some((p) => p.id === initialPlatformId) ? initialPlatformId : (pfs[0]?.id ?? "")));
       lastLoadRef.current = Date.now();
@@ -261,7 +263,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
       const jobs: Promise<Response>[] = [];
       for (const pid of dirtyPlatforms) {
         const d = drafts[pid] ?? {};
-        jobs.push(apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: pid, title: d.title ?? null, description: d.description ?? null, category_path: d.category_path ?? null, image_keys: d.image_keys ?? [], extra: d.extra ?? {} }) }));
+        jobs.push(apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: pid, title: d.title ?? null, description: d.description ?? null, category_path: d.category_path ?? null, image_keys: d.image_keys ?? [], description_image_keys: d.description_image_keys ?? [], extra: d.extra ?? {} }) }));
       }
       for (const [skuId, edit] of Object.entries(priceEdits)) {
         for (const field of ["fake_price", "list_price"] as const) {
@@ -325,6 +327,17 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     const cur = activeDraft.image_keys ?? [];
     saveImages(cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]);
   };
+  // รูปรายละเอียด (Description) — ชุดแยก เก็บใน description_image_keys
+  const saveDescImages = (keys: string[]) => {
+    setDrafts((d) => ({ ...d, [active]: { ...d[active], description_image_keys: keys } }));
+    markDirty();
+  };
+  const toggleDescImage = (key: string) => {
+    const cur = activeDraft.description_image_keys ?? [];
+    saveDescImages(cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]);
+  };
+  const allDescOn = descImages.length > 0 && descImages.every((im) => (activeDraft.description_image_keys ?? []).includes(im.key));
+  const toggleAllDesc = () => saveDescImages(allDescOn ? [] : descImages.map((im) => im.key));
   // หมวดหมู่: ใช้ค่ามาตรฐาน / บันทึกเป็นค่ามาตรฐานของหมวดกลางนี้
   const useStandard = () => { const v = mappings[active] ?? ""; if (!v) { toast("info", "ยังไม่มีค่ามาตรฐานของหมวดนี้"); return; } setCatInput(v); saveField("category_path", v); };
   const saveMapping = async () => {
@@ -453,6 +466,30 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                     </div>
                     <ERPTextarea key={`d-${active}-${prefillTick}`} defaultValue={description} rows={4} placeholder="รายละเอียดเฉพาะแพลตฟอร์มนี้..." disabled={!canEdit} onBlur={(e) => saveField("description", e.target.value)} />
                   </div>
+
+                  {/* รูปประกอบรายละเอียด (Description) — ชุดแยกจากรูปสินค้าหลัก */}
+                  {descImages.length > 0 && (
+                    <div className="rounded-lg border border-slate-200 p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-xs font-medium text-slate-600">รูปประกอบรายละเอียด (Description) ({(activeDraft.description_image_keys ?? []).length}/{descImages.length})</p>
+                        {canEdit && <button type="button" onClick={toggleAllDesc} className="text-[11px] text-violet-600 hover:underline">{allDescOn ? "ล้างทั้งหมด" : "เลือกทั้งหมด"}</button>}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mb-2">ภาพประกอบยาว ๆ ของรายละเอียดสินค้า — เพิ่ม/แก้ที่หน้าสินค้า → “รูป Description”</p>
+                      <div className="flex flex-wrap gap-2">
+                        {descImages.map((im) => {
+                          const on = (activeDraft.description_image_keys ?? []).includes(im.key);
+                          return (
+                            <button key={im.key} type="button" onClick={() => canEdit && toggleDescImage(im.key)} title={im.source} className={`relative rounded-lg overflow-hidden border-2 ${on ? "border-violet-500" : "border-slate-200"}`}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={r2ImageUrl(im.key, 140) ?? ""} alt="" loading="lazy" className="h-16 w-16 object-cover block" />
+                              {on && <span className="absolute top-0.5 right-0.5 bg-violet-600 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">✓</span>}
+                              <span className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[8px] truncate px-0.5 text-left">{im.source}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* หมวดหมู่ปลายทาง + mapping */}
@@ -474,7 +511,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
 
                 {/* เลือกรูปส่งไปแพลตฟอร์ม */}
                 <div className="rounded-lg border border-slate-200 p-3">
-                  <p className="text-xs font-medium text-slate-600 mb-2">รูปที่ส่งไป {activePf.name_th} ({(activeDraft.image_keys ?? []).length}/{images.length})</p>
+                  <p className="text-xs font-medium text-slate-600 mb-2">รูปสินค้าที่ส่งไป {activePf.name_th} ({(activeDraft.image_keys ?? []).length}/{images.length})</p>
                   {images.length === 0 ? <p className="text-xs text-slate-400">ยังไม่มีรูป — เพิ่มที่หน้าสินค้า/SKU</p> : (
                     <div className="flex flex-wrap gap-2">
                       {images.map((im) => {
@@ -619,6 +656,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
             <div className="border-t border-slate-200 px-5 py-3 flex items-center justify-between gap-2 shrink-0">
               <span className="text-[11px] text-slate-400">{dirty ? <span className="text-amber-600 font-medium">● มีข้อมูลที่ยังไม่บันทึก</span> : "แก้แล้วกด “บันทึก” · ลงขายเป็นแบบจำลอง (mock)"}</span>
               <div className="flex items-center gap-2 shrink-0">
+                <button onClick={() => { if (!dirty || window.confirm("มีข้อมูลที่ยังไม่ได้บันทึก — ออกโดยไม่บันทึก?")) onClose(); }} className="h-9 px-4 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
                 {canEdit && <button onClick={saveAll} disabled={!dirty || savingAll} className={`h-9 px-4 text-sm font-medium rounded-lg ${dirty ? "text-white bg-emerald-600 hover:bg-emerald-700" : "text-slate-400 bg-slate-100 cursor-not-allowed"} disabled:opacity-60`}>{savingAll ? "กำลังบันทึก..." : "💾 บันทึก"}</button>}
                 {canPublish && <button onClick={publishOnePlatform} disabled={!canPublish || publishing || !ready || !account?.is_active} title={!canPublish ? "ไม่มีสิทธิ์ลงขาย" : !account?.is_active ? "ยังไม่มีร้าน" : !ready ? "ข้อมูลยังไม่ครบ" : ""} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed">{publishing ? "..." : published ? "🔄 ส่ง update" : "📤 ลงขาย"}</button>}
               </div>

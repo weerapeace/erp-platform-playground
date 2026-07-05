@@ -22,7 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const [{ data: parent }, { data: pf }, { data: drafts }, { data: skus }, { data: slots }, { data: descU }] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, platform_category_id, brand_id, weight_g, parcel_size_id").eq("id", parentId).maybeSingle(),
     admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, capabilities, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
-    admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, extra, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
+    admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, description_image_keys, extra, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
     admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, fake_price, cover_image_r2_key, is_active, attribute_values").eq("parent_sku_id", parentId).order("code", { ascending: true }),
     admin.from("product_image_slots").select("r2_key").eq("owner_id", parentId),
     admin.from("asset_usages").select("asset_id, sort_order").eq("module", "parent_sku_description").eq("record_id", parentId).order("sort_order", { ascending: true }),
@@ -129,22 +129,26 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const s of ((slots ?? []) as Record<string, unknown>[])) addImg(s.r2_key as string, "แกลเลอรี");
   for (const s of skuRows) if (masterCodes.has(String(s.code ?? ""))) addImg((s.cover_image_r2_key as string) ?? null, `สี ${(s.color_th as string) || (s.color as string) || String(s.code)}`);
   for (const v of variants) addImg(v.image_key, `SKU ${v.code}`);
-  // รูป Description (asset_usages module=parent_sku_description → assets.r2_key) — เลือกส่งไปแพลตฟอร์มได้ด้วย
+
+  // รูป "รายละเอียด (Description)" — แยกชุด (ไม่ปนกับรูปสินค้าหลัก) → เลือกส่งเป็นภาพประกอบรายละเอียด
+  // (asset_usages module=parent_sku_description → assets.r2_key)
+  const descImages: { key: string; source: string }[] = [];
+  const descSeen = new Set<string>();
   const descIds = ((descU ?? []) as Record<string, unknown>[]).map((x) => String(x.asset_id)).filter(Boolean);
   if (descIds.length) {
     const { data: descAssets } = await admin.from("assets").select("id, r2_key").in("id", descIds).eq("status", "active");
     const keyById = new Map(((descAssets ?? []) as Record<string, unknown>[]).map((a) => [String(a.id), (a.r2_key as string) ?? null]));
     let dn = 1;
-    for (const id of descIds) addImg(keyById.get(id) ?? null, `Description ${dn++}`);
+    for (const id of descIds) { const k = (keyById.get(id) ?? "").trim(); if (k && !descSeen.has(k)) { descSeen.add(k); descImages.push({ key: k, source: `Description ${dn}` }); } dn++; }
   }
 
   return NextResponse.json({
     parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", name_platform: pRow.name_platform ?? "", description: pRow.description ?? "", category_id: categoryId, category_name: categoryName, platform_category_id: platformCategoryId, platform_category_name: platformCategoryName, brand_name: brandName, weight_kg: weightKg, box_width: box.w, box_length: box.l, box_height: box.h } : null,
-    platforms, drafts: draftMap, variants, mappings, images, accounts, error: null,
+    platforms, drafts: draftMap, variants, mappings, images, descImages, accounts, error: null,
   });
 }
 
-const FIELDS = ["title", "description", "category_path", "status", "image_keys"] as const;
+const FIELDS = ["title", "description", "category_path", "status", "image_keys", "description_image_keys"] as const;
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.edit"); if (denied) return denied;
