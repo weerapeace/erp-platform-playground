@@ -103,8 +103,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const payload: Record<string, unknown> = {
     name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || ""),
     brand: String(extra.brand || ""), imageUrls, variants, instantDiscount: 0,
-    // LINE: variantOptions = { option1: { name, data: { value: "ค่า1,ค่า2" } } } · data เป็น object มี value คั่นคอมมา (สเปก data.value)
-    ...(colors.length ? { variantOptions: { option1: { name: "สี", data: { value: colors.join(",") } } } } : {}),
+    // LINE: variantOptions = { option1: { name, data: [{ value }] } } · data เป็น array ของ object (ลองมาแล้ว: string/array-string/object ล้วน invalid type)
+    ...(colors.length ? { variantOptions: { option1: { name: "สี", data: colors.map((c) => ({ value: c })) } } } : {}),
   };
 
   const res = await lineCreateProduct(apiKey, payload);
