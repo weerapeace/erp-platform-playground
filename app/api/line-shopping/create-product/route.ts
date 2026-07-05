@@ -88,7 +88,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const disc = (fake > 0 && sale > 0 && sale < fake) ? fake - sale : 0;
     const color = (s.color_th || s.color || "").trim();
     return { sku: s.code, price: fake, instantDiscount: disc, onHandNumber: stockOf.get(s.id) ?? 0,
-      ...(color ? { options: [{ name: "สี", value: color }] } : {}),
+      ...(color ? { options: { option1: { value: color } } } : {}),
       ...(weightKg > 0 ? { weight: weightKg } : {}), ...(gtin ? { gtin } : {}) };
   });
   const colors = [...new Set(sellable.map((s) => (s.color_th || s.color || "").trim()).filter(Boolean))];
