@@ -114,6 +114,44 @@ export default function QcWarehousePage() {
     catch (e) { toast.error(e instanceof Error ? e.message : "ไม่สำเร็จ"); return false; }
   }, [load, toast]);
 
+  // ── ตะกร้ารับเข้า (มุมมองช้อป) — เลือกงานรอ QC หลายใบ → รับเข้าชั้นทีเดียว ──
+  const [rcvCart, setRcvCart] = useState<Set<string>>(new Set());
+  const [rcvShelf, setRcvShelf] = useState("");
+  const [rcvConfirm, setRcvConfirm] = useState(false);
+  const [rcvData, setRcvData] = useState<Record<string, { good: number; bad: BadRow[] }>>({});
+  const [rcvSaving, setRcvSaving] = useState(false);
+  const toggleRcv = (woId: string) => setRcvCart((s) => { const n = new Set(s); n.has(woId) ? n.delete(woId) : n.add(woId); return n; });
+  const openRcvConfirm = () => {
+    if (!rcvShelf) { toast.error("เลือกชั้นปลายทางก่อน"); return; }
+    const sel = queue.filter((q) => rcvCart.has(q.wo_id));
+    if (sel.length === 0) { toast.error("ยังไม่ได้เลือกงาน"); return; }
+    const d: Record<string, { good: number; bad: BadRow[] }> = {};
+    for (const q of sel) d[q.wo_id] = { good: q.remaining, bad: [] };
+    setRcvData(d); setRcvConfirm(true);
+  };
+  const rcvSetGood = (woId: string, v: number) => setRcvData((d) => ({ ...d, [woId]: { good: v, bad: d[woId]?.bad ?? [] } }));
+  const rcvAddBad = (woId: string) => setRcvData((d) => { const cur = d[woId] ?? { good: 0, bad: [] }; return { ...d, [woId]: { ...cur, bad: [...cur.bad, { id: rid(), reasonId: reasons[0]?.id ?? "", qty: 0 }] } }; });
+  const rcvSetBad = (woId: string, bid: string, patch: Partial<BadRow>) => setRcvData((d) => { const cur = d[woId]; if (!cur) return d; return { ...d, [woId]: { ...cur, bad: cur.bad.map((b) => b.id === bid ? { ...b, ...patch } : b) } }; });
+  const rcvDelBad = (woId: string, bid: string) => setRcvData((d) => { const cur = d[woId]; if (!cur) return d; return { ...d, [woId]: { ...cur, bad: cur.bad.filter((b) => b.id !== bid) } }; });
+  const submitRcvBulk = async () => {
+    const sel = queue.filter((q) => rcvCart.has(q.wo_id));
+    for (const q of sel) { const dd = rcvData[q.wo_id]; if (dd?.bad.some((b) => num(b.qty) > 0 && !b.reasonId)) { toast.error("เลือกสาเหตุของเสียให้ครบ"); return; } }
+    setRcvSaving(true);
+    let ok = 0; const fails: string[] = [];
+    for (const q of sel) {
+      const dd = rcvData[q.wo_id] ?? { good: q.remaining, bad: [] };
+      const badRows = dd.bad.filter((b) => num(b.qty) > 0).map((b) => ({ reason: reasonName(b.reasonId), qty: num(b.qty) }));
+      try {
+        const res = await apiFetch("/api/qc-warehouse/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "receive", wo_id: q.wo_id, shelf_id: rcvShelf, good: num(dd.good), bad: badRows }) });
+        const j = await res.json(); if (j.error) throw new Error(j.error); ok++;
+      } catch { fails.push(q.mo_no ?? q.wo_id); }
+    }
+    setRcvSaving(false); setRcvConfirm(false); setRcvCart(new Set());
+    if (ok > 0) toast.success(`รับเข้าชั้นแล้ว ${ok} รายการ${fails.length ? ` · พลาด ${fails.length}` : ""}`);
+    else toast.error("รับเข้าไม่สำเร็จ");
+    await load();
+  };
+
   // drag/drop
   const [dragWo, setDragWo] = useState<string | null>(null);
   const [dragItem, setDragItem] = useState<{ shelfId: string; itemId: string } | null>(null);
@@ -318,10 +356,33 @@ export default function QcWarehousePage() {
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-semibold text-slate-700 leading-snug truncate">{w.name || w.sku}</div>
             <div className="text-[11px] text-slate-500 font-mono truncate">{w.sku}{w.mo_no ? ` · ${w.mo_no}` : ""}</div>
-            <div className="text-[11px] text-slate-500 truncate">🪑 {w.department_name ?? "—"} · 👷 {w.worker ?? "—"}</div>
+            <div className="text-[11px] text-slate-500 truncate">🪑 {w.department_name ?? "—"}{w.worker && w.worker !== w.department_name ? ` · 👷 ${w.worker}` : ""}</div>
             <div className="text-[10px] text-slate-400">จ่าย {fmt(w.qty)} · ส่งกลับแล้ว {fmt(w.received_qty)}{w.due_date ? ` · กำหนด ${dueText(w.due_date)}` : ""}</div>
           </div>
           <span className="text-sm font-bold text-indigo-600 shrink-0">เหลือ {fmt(remain)}</span>
+        </div>
+      </div>
+    );
+  };
+
+  // ── การ์ด "งานรอ QC" (ติ๊กเลือกใส่ตะกร้ารับเข้า) ──
+  const renderQueueCard = (c: QcQueueCard) => {
+    const inCart = rcvCart.has(c.wo_id);
+    return (
+      <div key={c.wo_id} onClick={() => toggleRcv(c.wo_id)}
+        className={`rounded-xl border p-2.5 cursor-pointer transition ${inCart ? "border-indigo-400 ring-2 ring-indigo-200 bg-white" : "border-slate-200 bg-white hover:border-indigo-300"}`}
+        style={{ borderLeft: `4px solid ${cardColor(c.brand_color, c.sku)}` }}>
+        <div className="flex items-start gap-2">
+          <Thumb k={c.image_key} color={cardColor(c.brand_color, c.sku)} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-semibold text-slate-800 leading-snug truncate">{c.name || c.sku}</div>
+            <div className="text-[11px] text-slate-500 font-mono truncate">{c.sku} · {c.mo_no}</div>
+            <div className="text-[11px] text-slate-500 truncate">👷 {c.worker ?? "—"}</div>
+          </div>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <input type="checkbox" checked={inCart} onClick={(e) => e.stopPropagation()} onChange={() => toggleRcv(c.wo_id)} className="w-4 h-4 accent-indigo-600" />
+            <span className="text-xs font-bold text-indigo-600">รอรับ {fmt(c.remaining)}</span>
+          </div>
         </div>
       </div>
     );
@@ -477,6 +538,7 @@ export default function QcWarehousePage() {
           const gridCls = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5";
           const selCls = "h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500";
           const deskFiltered = atDesks.filter((w) => q === "" || `${w.sku ?? ""} ${w.name ?? ""} ${w.mo_no ?? ""} ${w.worker ?? ""} ${w.department_name ?? ""}`.toLowerCase().includes(q));
+          const queueFiltered = queue.filter((c) => q === "" || `${c.sku ?? ""} ${c.name ?? ""} ${c.mo_no ?? ""} ${c.worker ?? ""}`.toLowerCase().includes(q));
           return (
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -496,6 +558,16 @@ export default function QcWarehousePage() {
                   <option value="shelf">จัดกลุ่ม: ชั้น</option><option value="status">จัดกลุ่ม: สถานะ</option><option value="none">ไม่จัดกลุ่ม</option>
                 </select>
               </div>
+
+              {/* 📥 งานรอ QC — ติ๊กเลือกใส่ตะกร้า → รับเข้าชั้นทีเดียว */}
+              <div className="mb-5">
+                <div className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-1.5 mb-2">📥 งานรอ QC (ติ๊กเลือก → รับเข้าชั้น) <span className="text-indigo-400 font-normal">({queueFiltered.length})</span></div>
+                {queueFiltered.length === 0
+                  ? <div className="text-center py-6 text-[12px] text-slate-300">ไม่มีงานรอรับเข้า (งานที่ช่างส่งกลับจากบอร์ดจ่ายงานจะมาโชว์ที่นี่)</div>
+                  : <div className={gridCls}>{queueFiltered.map(renderQueueCard)}</div>}
+              </div>
+
+              <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">📦 ของในชั้น <span className="text-slate-400 font-normal">({items.length})</span></div>
               {items.length === 0 ? (
                 <div className="text-center py-16 text-slate-300 text-sm">{allItems.length === 0 ? "ยังไม่มีของในโกดัง" : "ไม่พบรายการที่ตรงกับตัวกรอง"}</div>
               ) : shopGroup === "none" ? (
@@ -605,6 +677,59 @@ export default function QcWarehousePage() {
               <span className="text-xs font-bold text-slate-700">{fmt(Number(i.qty))}</span>
             </div>
           ); })}
+        </div>
+      </ERPModal>
+
+      {/* แถบตะกร้ารับเข้า (ลอยล่าง) — เฉพาะมุมมองช้อป */}
+      {view === "shop" && rcvCart.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-white border border-slate-200 shadow-2xl rounded-xl px-4 py-2.5 flex items-center gap-3 flex-wrap max-w-[95vw]">
+          <span className="text-sm font-bold text-slate-700">📥 รับเข้า {rcvCart.size} รายการ</span>
+          <select value={rcvShelf} onChange={(e) => setRcvShelf(e.target.value)} className="h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">— เลือกชั้นปลายทาง —</option>
+            {storeShelves.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <button onClick={() => setRcvCart(new Set())} className="text-[12px] text-slate-400 hover:text-rose-500">ล้าง</button>
+          <button onClick={openRcvConfirm} disabled={!rcvShelf} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">รับเข้าชั้น</button>
+        </div>
+      )}
+
+      {/* ป๊อปยืนยันรับเข้า — ใส่ดี/เสีย+สาเหตุ ต่อใบ */}
+      <ERPModal open={rcvConfirm} onClose={() => !rcvSaving && setRcvConfirm(false)} size="lg" title="📥 ยืนยันรับเข้าชั้น"
+        footer={<>
+          <button onClick={() => setRcvConfirm(false)} disabled={rcvSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+          <button onClick={() => void submitRcvBulk()} disabled={rcvSaving} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{rcvSaving ? "กำลังรับเข้า…" : `ยืนยันรับเข้า (${rcvCart.size})`}</button>
+        </>}>
+        <div className="space-y-2.5">
+          <div className="text-sm text-slate-600">รับเข้าชั้น <b>{storeShelves.find((s) => s.id === rcvShelf)?.name ?? "—"}</b> · แยกจำนวนดี/เสียต่อใบได้ (ของเสียจะเข้าชั้นของเสียให้อัตโนมัติ)</div>
+          {queue.filter((q) => rcvCart.has(q.wo_id)).map((q) => {
+            const dd = rcvData[q.wo_id] ?? { good: q.remaining, bad: [] };
+            const badTotal = dd.bad.reduce((s, b) => s + num(b.qty), 0);
+            const over = num(dd.good) + badTotal > q.remaining + 0.0001;
+            return (
+              <div key={q.wo_id} className="border border-slate-200 rounded-lg p-2.5">
+                <div className="flex items-center gap-2">
+                  <Thumb k={q.image_key} color={cardColor(q.brand_color, q.sku)} size={32} />
+                  <div className="min-w-0 flex-1"><span className="text-sm font-semibold text-slate-800">{q.sku}</span> <span className="text-[11px] text-slate-400 font-mono">· {q.mo_no}</span><div className="text-[11px] text-slate-400">รอรับ {fmt(q.remaining)}</div></div>
+                  <label className="text-[11px] text-slate-500">ดี <input type="number" min={0} value={dd.good} onChange={(e) => rcvSetGood(q.wo_id, num(e.target.value))} className="w-20 h-8 ml-1 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
+                </div>
+                {dd.bad.map((b) => (
+                  <div key={b.id} className="flex items-center gap-1.5 mt-1.5 pl-1">
+                    <span className="text-[11px] text-rose-500">เสีย</span>
+                    <select value={b.reasonId} onChange={(e) => rcvSetBad(q.wo_id, b.id, { reasonId: e.target.value })} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white flex-1 min-w-0">
+                      <option value="">— เลือกสาเหตุ —</option>
+                      {reasons.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                    <input type="number" min={0} value={b.qty} onChange={(e) => rcvSetBad(q.wo_id, b.id, { qty: num(e.target.value) })} className="w-16 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg" />
+                    <button onClick={() => rcvDelBad(q.wo_id, b.id)} className="text-slate-300 hover:text-rose-500 text-sm shrink-0">✕</button>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between mt-1.5">
+                  <button onClick={() => rcvAddBad(q.wo_id)} className="text-[11px] text-rose-600 hover:underline">+ เพิ่มของเสีย</button>
+                  {over && <span className="text-[11px] text-rose-500">⚠️ ดี+เสีย เกินจำนวนรอรับ</span>}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </ERPModal>
 

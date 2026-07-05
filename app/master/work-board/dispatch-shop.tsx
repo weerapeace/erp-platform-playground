@@ -337,7 +337,9 @@ export function DispatchShop({
                 <span className="text-[11px] text-slate-500">กำหนดเสร็จ (ทั้งตะกร้า — ว่าง = ใช้ของแต่ละใบ)</span>
                 <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={`${selCls} w-full mt-0.5`} />
               </label>
-              <button onClick={openConfirm} disabled={cartItems.length === 0 || !selDept}
+              {isHire && craftIds.length === 0 && <p className="text-[11px] text-rose-500">งานเหมา — ต้องเลือกช่างอย่างน้อย 1 คนก่อนจ่าย</p>}
+              <button onClick={openConfirm} disabled={cartItems.length === 0 || !selDept || (isHire && craftIds.length === 0)}
+                title={isHire && craftIds.length === 0 ? "งานเหมา ต้องเลือกช่างก่อน" : ""}
                 className="w-full h-10 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 {craftIds.length > 1 ? `แบ่งงานให้ช่าง ${craftIds.length} คน (${cartItems.length} ใบ)` : `จ่ายงาน (${cartItems.length} ใบ)`}
               </button>
