@@ -126,30 +126,43 @@ export default function PlatformCategoryMapPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); } finally { setSaving(false); }
   };
 
-  // นำเข้ารายการหมวดของร้านจากไฟล์ (Excel/CSV: คอลัมน์ id + th/en · ชีต "หมวด…" หรือชีตแรก)
+  // นำเข้ารายการหมวดของร้านจากไฟล์ — รองรับ 2 รูปแบบ:
+  //  (ก) template ง่าย: คอลัมน์ id + en/th
+  //  (ข) Lazada "Category Tree": Category Id + Category Level 1..N → รวมเป็น path (name_th)
   const importCats = async (file: File) => {
     if (!importPf) { setImportMsg("เลือกร้านก่อน"); return; }
     setImporting(true); setImportMsg("กำลังอ่านไฟล์…");
     try {
       const XLSX = await import("xlsx");
       const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const hit = wb.SheetNames.find((n) => /หมวด|categ/i.test(n));
-      const cand = hit ? [hit] : wb.SheetNames;
-      let aoa: unknown[][] = [];
+      const cand = [...wb.SheetNames.filter((n) => /(หมวด|categ)/i.test(n)), ...wb.SheetNames];   // ชีตหมวดก่อน
+      let rows: { id: unknown; en: string; th: string }[] = [];
       for (const sn of cand) {
         const a = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sn], { header: 1, defval: "" });
         const hdr = ((a[0] ?? []) as unknown[]).map((x) => String(x).trim().toLowerCase());
-        if (hdr.includes("id") && (hdr.includes("en") || hdr.includes("th"))) { aoa = a; break; }
+        const idIdx = hdr.findIndex((h) => h === "id" || h === "category id" || h === "categoryid");
+        if (idIdx < 0) continue;
+        const lvlIdx = hdr.map((h, i) => (/category\s*level|^level\s*\d/.test(h) ? i : -1)).filter((i) => i >= 0);
+        if (lvlIdx.length > 0) {   // (ข) Lazada tree → path
+          rows = (a.slice(1) as unknown[][]).map((r) => ({ id: r[idIdx], en: "", th: lvlIdx.map((i) => String(r[i] ?? "").trim()).filter(Boolean).join(" > ") })).filter((r) => String(r.id ?? "").trim() && r.th);
+          break;
+        }
+        const enIdx = hdr.indexOf("en"), thIdx = hdr.indexOf("th");
+        if (enIdx >= 0 || thIdx >= 0) {   // (ก) template id + en/th
+          rows = (a.slice(1) as unknown[][]).map((r) => ({ id: r[idIdx], en: enIdx >= 0 ? String(r[enIdx] ?? "") : "", th: thIdx >= 0 ? String(r[thIdx] ?? "") : "" })).filter((r) => String(r.id ?? "").trim());
+          break;
+        }
       }
-      if (aoa.length < 2) { setImportMsg("ไม่พบชีตหมวดหมู่ (ต้องมีคอลัมน์ id + en/th)"); return; }
-      const hdr = (aoa[0] as unknown[]).map((x) => String(x).trim().toLowerCase());
-      const ci = { id: hdr.indexOf("id"), en: hdr.indexOf("en"), th: hdr.indexOf("th") };
-      const rows = (aoa.slice(1) as unknown[][])
-        .map((r) => ({ id: r[ci.id], en: ci.en >= 0 ? r[ci.en] : "", th: ci.th >= 0 ? r[ci.th] : "" }))
-        .filter((r) => String(r.id ?? "").trim());
-      const res = await apiFetch("/api/platform-category-options", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platform_id: importPf, rows }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "นำเข้าไม่สำเร็จ");
-      setImportMsg(`✅ นำเข้าแล้ว ${j.imported ?? rows.length} หมวด`);
+      if (rows.length === 0) { setImportMsg("ไม่พบชีตหมวดหมู่ (ต้องมี Category Id + ระดับ หรือ id + en/th)"); return; }
+      // ส่งเป็นชุด ๆ (กันไฟล์ใหญ่ เช่น Lazada 3,000+ หมวด)
+      let done = 0;
+      for (let i = 0; i < rows.length; i += 1500) {
+        const chunk = rows.slice(i, i + 1500);
+        const res = await apiFetch("/api/platform-category-options", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platform_id: importPf, rows: chunk }) });
+        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "นำเข้าไม่สำเร็จ");
+        done += (j.imported ?? chunk.length); setImportMsg(`กำลังนำเข้า… ${done}/${rows.length}`);
+      }
+      setImportMsg(`✅ นำเข้าแล้ว ${done} หมวด`);
       toast.success(`นำเข้าหมวด ${platforms.find((p) => p.id === importPf)?.name_th ?? ""} แล้ว`);
     } catch (e) { setImportMsg("ผิดพลาด: " + (e instanceof Error ? e.message : "")); }
     finally { setImporting(false); if (fileRef.current) fileRef.current.value = ""; }
