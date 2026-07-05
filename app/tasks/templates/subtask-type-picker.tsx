@@ -6,14 +6,14 @@
 // step.config = snapshot ค่าตั้ง (เก็บลง template.steps แล้วคัดลอกไป subtask ตอนสร้างงาน)
 // ============================================================
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { ERPInput, ERPSelect } from "@/components/form";
 import { PromptEditor } from "@/components/prompt-editor";
 import { UserPicker, type UserPickerValue } from "@/components/pickers";
 import { TeamFill } from "../team-picker";
-import { subtaskTypeHint, type SubtaskType, type SubtaskStepConfig } from "../data";
+import { subtaskTypeHint, listContentTemplates, POST_TYPES, postTypeLabel, type SubtaskType, type SubtaskStepConfig, type ContentItem } from "../data";
 import { ERPModal } from "@/components/modal";
 import { SubtaskTypeManager } from "../subtask-type-manager";
 
@@ -74,6 +74,9 @@ export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { 
   const [mgrOpen, setMgrOpen] = useState(false);
   const mgrChanged = useRef(false);
   const closeMgr = () => { setMgrOpen(false); if (mgrChanged.current) { mgrChanged.current = false; onTypesChanged?.(); } };
+  // แม่แบบคอนเทนต์ (ให้เลือกในสเต็ปชนิด content) — โหลดเมื่อ registry มีชนิด content
+  const [contentTpls, setContentTpls] = useState<ContentItem[]>([]);
+  useEffect(() => { if (types.some((x) => x.key === "content")) listContentTemplates().then(setContentTpls).catch(() => {}); }, [types]);
   const included = new Set(steps.map((s) => s.type));
   const setStep = (i: number, patch: Partial<EditStep>) => onChange(steps.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const setCfg = (i: number, patch: Partial<SubtaskStepConfig>) => onChange(steps.map((s, j) => (j === i ? { ...s, config: { ...s.config, ...patch } } : s)));
@@ -120,7 +123,7 @@ export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { 
         <div className="space-y-2">
           <p className="text-sm font-medium text-slate-700">{t("ตั้งค่างานย่อย", "Subtask settings")} ({steps.length})</p>
           {steps.map((s, i) => (
-            <StepCard key={i} step={s} index={i}
+            <StepCard key={i} step={s} index={i} contentTpls={contentTpls}
               onTitle={(v) => setStep(i, { title: v })}
               onReqBefore={(v) => setStep(i, { required_before_next: v })}
               onAssignees={(a) => setStep(i, { assignees: a })}
@@ -155,8 +158,8 @@ export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { 
   );
 }
 
-function StepCard({ step, index, onTitle, onReqBefore, onAssignees, onCfg, onRemove }: {
-  step: EditStep; index: number;
+function StepCard({ step, index, contentTpls, onTitle, onReqBefore, onAssignees, onCfg, onRemove }: {
+  step: EditStep; index: number; contentTpls?: ContentItem[];
   onTitle: (v: string) => void; onReqBefore: (v: boolean) => void;
   onAssignees: (a: { id: string; label: string }[]) => void;
   onCfg: (p: Partial<SubtaskStepConfig>) => void; onRemove: () => void;
@@ -228,6 +231,29 @@ function StepCard({ step, index, onTitle, onReqBefore, onAssignees, onCfg, onRem
           {chk(t("รับลิงก์", "Link"), c.accepts_link, (v) => onCfg({ accepts_link: v }))}
           {chk(t("รับไฟล์", "File"), c.accepts_file, (v) => onCfg({ accepts_file: v }))}
           {chk(t("ต้องอนุมัติ", "Require approval"), c.requires_approval, (v) => onCfg({ requires_approval: v }))}
+        </div>
+      )}
+
+      {/* content: เลือกแม่แบบคอนเทนต์ + ประเภท (เก็บใน config → ตอนสร้างงานจากเทมเพลตจะสร้างคอนเทนต์ให้ตามแม่แบบ) */}
+      {step.type === "content" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-100">
+          <div>
+            <label className="text-[11px] text-slate-400">{t("แม่แบบคอนเทนต์ (ถ้ามี)", "Content template (optional)")}</label>
+            <ERPSelect value={c.content_template_id ?? ""}
+              options={[{ value: "", label: t("— ไม่ใช้แม่แบบ —", "— none —") }, ...(contentTpls ?? []).map((ct) => ({ value: ct.id, label: ct.title }))]}
+              onChange={(e) => {
+                const id = e.target.value;
+                const tpl = (contentTpls ?? []).find((x) => x.id === id);
+                onCfg({ content_template_id: id || undefined, ...(tpl?.post_type ? { post_type: tpl.post_type } : {}) });
+                if (tpl && (tpl.assignees?.length)) onAssignees(tpl.assignees.map((a) => ({ id: a.id, label: a.name })));
+              }} className="h-8" />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-400">{t("ประเภทคอนเทนต์", "Content type")}</label>
+            <ERPSelect value={c.post_type ?? ""}
+              options={[{ value: "", label: t("— เลือกประเภท —", "— select —") }, ...POST_TYPES.map((p) => ({ value: p.value, label: postTypeLabel(p.value) }))]}
+              onChange={(e) => onCfg({ post_type: e.target.value || undefined })} className="h-8" />
+          </div>
         </div>
       )}
 
