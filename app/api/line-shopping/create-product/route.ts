@@ -82,7 +82,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
   const fakeOf = (s: typeof skuRows[number]) => num(s.fake_price) || num(masterOf(s.code)?.fake_price);
   const saleOf = (s: typeof skuRows[number]) => num(s.list_price) || num(masterOf(s.code)?.list_price);
-  const variants = sellable.map((s) => { const fake = fakeOf(s); const sale = saleOf(s); const disc = (fake > 0 && sale > 0 && sale < fake) ? fake - sale : 0; return { sku: s.code, price: fake, instantDiscount: disc, onHandNumber: stockOf.get(s.id) ?? 0, ...(weightKg > 0 ? { weight: weightKg } : {}), ...(gtin ? { gtin } : {}) }; });
+  // แต่ละ variant ต้องผูกกับตัวเลือก (LINE: options=[{name,value}] ต้องตรงกับ variantOptions.option1.data)
+  const variants = sellable.map((s) => {
+    const fake = fakeOf(s); const sale = saleOf(s);
+    const disc = (fake > 0 && sale > 0 && sale < fake) ? fake - sale : 0;
+    const color = (s.color_th || s.color || "").trim();
+    return { sku: s.code, price: fake, instantDiscount: disc, onHandNumber: stockOf.get(s.id) ?? 0,
+      ...(color ? { options: [{ name: "สี", value: color }] } : {}),
+      ...(weightKg > 0 ? { weight: weightKg } : {}), ...(gtin ? { gtin } : {}) };
+  });
   const colors = [...new Set(sellable.map((s) => (s.color_th || s.color || "").trim()).filter(Boolean))];
 
   // รูป: ใช้ที่เลือกในร่าง · ถ้าว่าง → ดึงปกตัวสี + ปกตัวขาย (สืบทอดจากตัวสี) อัตโนมัติ
