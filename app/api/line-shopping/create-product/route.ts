@@ -34,7 +34,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const [{ data: parent }, { data: draft }, { data: skus }] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, platform_description, brand_id, weight_g").eq("id", parent_sku_id).maybeSingle(),
-    admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, platform_product_id").eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id).maybeSingle(),
+    admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, description_image_keys, platform_product_id").eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id).maybeSingle(),
     admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parent_sku_id).eq("is_active", true).order("code"),
   ]);
   if (!parent) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 400 });
@@ -119,6 +119,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null),
   ].filter(Boolean) as string[])];
   const imageUrls = autoKeys.slice(0, 7).map((k) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`);   // LINE จำกัด ≤ 7 รูป
+  // รูปประกอบรายละเอียด (Description) → แนบเป็น <img> ต่อท้ายรายละเอียด (LINE description รองรับ HTML) — ไม่กินโควตา 7 รูปหลัก
+  const descImgKeys = Array.isArray(d.description_image_keys) ? d.description_image_keys as string[] : [];
+  const descText = String(d.description || p.platform_description || p.description || "");
+  const descriptionHtml = descText + descImgKeys.map((k) => `<p><img src="${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}&w=1080"></p>`).join("");
 
   // ตรวจครบก่อนส่ง
   const missing: string[] = [];
@@ -129,7 +133,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (missing.length) return NextResponse.json({ error: `ยังกรอกไม่ครบ: ${missing.join(", ")}` }, { status: 400 });
 
   const payload: Record<string, unknown> = {
-    name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || p.platform_description || p.description || ""),
+    name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: descriptionHtml,
     brand: String(extra.brand || brandName || ""), imageUrls, variants, instantDiscount: topDiscount,
     // สินค้ามีตัวเลือกเสมอ → ส่ง variantOptions · imageUrl ต่อสีใส่ได้เฉพาะ option1 (สี) แบบ 1:1
     ...(isVariant && opt1 ? { variantOptions: {

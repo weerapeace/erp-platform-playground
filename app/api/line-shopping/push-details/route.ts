@@ -15,6 +15,8 @@ import { decryptSecret } from "@/lib/secret-box";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const baseUrl = () => (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "https://erp-platform-playground.vercel.app").replace(/\/$/, "");
+
 // แยก categoryId จาก category_path ("42 · กระเป๋า" → "42" · หรือขึ้นต้นด้วยตัวเลข)
 function catIdOf(path: unknown): string | null {
   const s = String(path ?? "").trim(); if (!s) return null;
@@ -51,17 +53,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ร่างต่อ parent (ชื่อ/รายละเอียด/หมวด/extra) ของแพลตฟอร์ม LINE
   const parentIds = [...new Set(rows.map((r) => r.matched_parent_sku_id))];
-  const draftByParent = new Map<string, { title?: string; description?: string; category_path?: string; extra?: Record<string, unknown> }>();
+  const draftByParent = new Map<string, { title?: string; description?: string; category_path?: string; extra?: Record<string, unknown>; description_image_keys?: string[] }>();
   for (let i = 0; i < parentIds.length; i += 300) {
-    const { data: ds } = await admin.from("platform_listing_drafts").select("parent_sku_id, title, description, category_path, extra").eq("platform_id", platform_id).in("parent_sku_id", parentIds.slice(i, i + 300));
-    for (const d of ((ds ?? []) as Record<string, unknown>[])) draftByParent.set(String(d.parent_sku_id), { title: (d.title as string) ?? "", description: (d.description as string) ?? "", category_path: (d.category_path as string) ?? "", extra: (d.extra as Record<string, unknown>) ?? {} });
+    const { data: ds } = await admin.from("platform_listing_drafts").select("parent_sku_id, title, description, category_path, extra, description_image_keys").eq("platform_id", platform_id).in("parent_sku_id", parentIds.slice(i, i + 300));
+    for (const d of ((ds ?? []) as Record<string, unknown>[])) draftByParent.set(String(d.parent_sku_id), { title: (d.title as string) ?? "", description: (d.description as string) ?? "", category_path: (d.category_path as string) ?? "", extra: (d.extra as Record<string, unknown>) ?? {}, description_image_keys: (d.description_image_keys as string[]) ?? [] });
   }
 
   const results: { product: string; ok: boolean; sent?: string[]; error?: string }[] = [];
   let okCount = 0;
   for (const r of rows) {
     const d = draftByParent.get(r.matched_parent_sku_id) ?? {};
-    const fields = { name: d.title, description: d.description, brand: (d.extra?.brand as string) ?? "", categoryId: catIdOf(d.category_path) ?? undefined };
+    // รูปประกอบรายละเอียด (Description) → แนบ <img> ต่อท้าย (LINE description รองรับ HTML)
+    const descImgKeys = Array.isArray(d.description_image_keys) ? d.description_image_keys : [];
+    const descriptionHtml = String(d.description ?? "") + descImgKeys.map((k) => `<p><img src="${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}&w=1080"></p>`).join("");
+    const fields = { name: d.title, description: descriptionHtml, brand: (d.extra?.brand as string) ?? "", categoryId: catIdOf(d.category_path) ?? undefined };
     const res = await lineUpdateProduct(apiKey, r.external_product_id, fields);
     if (res.ok) okCount++;
     results.push({ product: r.title ?? r.external_product_id, ok: res.ok, sent: res.sent, error: res.ok ? undefined : res.error });
