@@ -103,8 +103,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const payload: Record<string, unknown> = {
     name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || ""),
     brand: String(extra.brand || ""), imageUrls, variants, instantDiscount: 0,
-    // LINE: variantOptions = object { option1: { name, data(คั่นคอมมา) }, option2?: {...} } · data ห้ามว่าง
-    ...(colors.length ? { variantOptions: { option1: { name: "สี", data: colors.join(",") } } } : {}),
+    // LINE: variantOptions = object { option1: { name, data:[ค่า...] }, option2?: {...} } · data เป็น array (string → invalid type)
+    ...(colors.length ? { variantOptions: { option1: { name: "สี", data: colors } } } : {}),
   };
 
   const res = await lineCreateProduct(apiKey, payload);
