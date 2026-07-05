@@ -77,40 +77,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       stockOf.set(String(b.product_id), (stockOf.get(String(b.product_id)) ?? 0) + Math.max(0, avail));
     }
   }
-  // บาร์โค้ด: ใช้ที่กรอก · ว่าง = รหัส Parent · น้ำหนัก(kg): ที่กรอก · ว่าง = weight_g÷1000
-  const gtin = String(extra.barcode ?? "").trim() || String(p.code ?? "").trim();
+  // น้ำหนัก(kg): ที่กรอก · ว่าง = weight_g÷1000 · (บาร์โค้ดไม่ส่งตอน create — เลี่ยงชนกันข้าม variant · ตั้งทีหลังได้)
   const weightRaw = extra.weight ? Number(extra.weight) : (p.weight_g != null ? Number(p.weight_g) / 1000 : 0);
   const weightKg = Number.isFinite(weightRaw) ? Math.round(weightRaw * 100) / 100 : 0;   // LINE: น้ำหนัก ≤ 2 ตำแหน่งทศนิยม
   // ราคา LINE: price=fake_price (เต็ม) · instantDiscount=fake−sale · ตัวขายไม่มี → ดึงจากตัวสี
   const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
   const fakeOf = (s: typeof skuRows[number]) => num(s.fake_price) || num(masterOf(s.code)?.fake_price);
   const saleOf = (s: typeof skuRows[number]) => num(s.list_price) || num(masterOf(s.code)?.list_price);
-  const r2url = (k: string) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`;
   // มิติตัวเลือก (LINE รองรับ option1 + option2): สี = มิติหลัก · ตัวเลือกที่ 2 = attribute_values.variant_option {name,value}
   const colorOf = (s: typeof skuRows[number]) => (s.color_th || s.color || "").trim();
   const voOf = (s: typeof skuRows[number]) => { const av = s.attribute_values; const vo = (av && typeof av === "object") ? (av as Record<string, unknown>).variant_option : null; return (vo && typeof vo === "object") ? vo as Record<string, unknown> : null; };
   const opt2Of = (s: typeof skuRows[number]) => { const vo = voOf(s); return vo ? String(vo.value ?? "").trim() : ""; };
   const opt2Name = (() => { for (const s of sellable) { const vo = voOf(s); const n = vo ? String(vo.name ?? "").trim() : ""; if (n) return n; } return "ตัวเลือก"; })();
-  // รูปต่อสี (แสดงบน swatch สีของ LINE — imageUrl อยู่ได้เฉพาะ option1): ใช้ปก "ตัวสี" (master) ก่อน แล้ว fallback ตัวขาย
-  const colorImg = new Map<string, string>();
-  for (const s of skuRows) { const c = colorOf(s); if (!c || colorImg.has(c)) continue; const key = masterCodes.has(s.code) ? s.cover_image_r2_key : (s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null); if (key) colorImg.set(c, key); }
   // ค่าตัวเลือกเรียงตามลำดับพบครั้งแรก (index ต้องคงที่ เพราะ variant.options อ้าง index นี้)
   const distinctVals = (fn: (s: typeof skuRows[number]) => string) => { const out: string[] = []; const seen = new Set<string>(); for (const s of sellable) { const v = fn(s); if (v && !seen.has(v)) { seen.add(v); out.push(v); } } return out; };
-  const dims: { name: string; vals: string[]; valOf: (s: typeof skuRows[number]) => string; img: boolean }[] = [];
-  { const cv = distinctVals(colorOf); if (cv.length) dims.push({ name: "สี", vals: cv, valOf: colorOf, img: true }); }
-  { const ov = distinctVals(opt2Of); if (ov.length) dims.push({ name: opt2Name, vals: ov, valOf: opt2Of, img: false }); }
-  if (!dims.length && sellable.length > 1) dims.push({ name: "แบบ", vals: sellable.map((s) => s.code), valOf: (s) => s.code, img: false });
-  // สินค้ามีตัวเลือก = ตัวขาย > 1 (LINE simple product มี SKU เดียว) → ส่ง variantOptions + variant.options เป็น "index"
-  const isVariant = sellable.length > 1 && dims.length > 0;
+  const dims: { name: string; vals: string[]; valOf: (s: typeof skuRows[number]) => string }[] = [];
+  { const cv = distinctVals(colorOf); if (cv.length) dims.push({ name: "สี", vals: cv, valOf: colorOf }); }
+  { const ov = distinctVals(opt2Of); if (ov.length) dims.push({ name: opt2Name, vals: ov, valOf: opt2Of }); }
+  // เจ้าของต้องการ "ลงเป็นสินค้ามีตัวเลือกเสมอ แม้ SKU เดียว" → ถ้าไม่มีสี/ตัวเลือกเลย ใช้รหัส SKU เป็นค่าตัวเลือก
+  if (!dims.length && sellable.length >= 1) dims.push({ name: "แบบ", vals: sellable.map((s) => s.code), valOf: (s) => s.code });
+  const isVariant = dims.length > 0;   // สินค้ามีตัวเลือกเสมอ (LINE variant product) — ส่ง variantOptions + variant.options (index)
   const opt1 = dims[0]; const opt2 = dims[1];
+  // ส่วนลด: create รับ instantDiscount "ระดับบนสุด" เท่านั้น → ใช้ค่าร่วมถ้าทุกตัวเท่ากัน ไม่งั้น 0 (ส่งส่วนลดต่อ SKU ทีหลังด้วยปุ่ม "ส่งราคา/ส่วนลด")
+  const discs = sellable.map((s) => { const f = fakeOf(s), sl = saleOf(s); return (f > 0 && sl > 0 && sl < f) ? f - sl : 0; });
+  const topDiscount = discs.length && discs.every((d) => d === discs[0]) ? discs[0] : 0;
   const variants = sellable.map((s) => {
-    const fake = fakeOf(s); const sale = saleOf(s);
-    const disc = (fake > 0 && sale > 0 && sale < fake) ? fake - sale : 0;
-    const base: Record<string, unknown> = { sku: s.code, price: fake, instantDiscount: disc, onHandNumber: stockOf.get(s.id) ?? 0 };
+    const base: Record<string, unknown> = { sku: s.code, price: fakeOf(s), onHandNumber: stockOf.get(s.id) ?? 0 };
     if (weightKg > 0) base.weight = weightKg;
-    if (gtin) base.gtin = gtin;
     // variant.options = array ของ index ชี้ค่าใน variantOptions (option1 ก่อน option2) เช่น [0] หรือ [0,1]
-    if (isVariant && opt1) { const i1 = Math.max(0, opt1.vals.indexOf(opt1.valOf(s))); base.options = opt2 ? [i1, Math.max(0, opt2.vals.indexOf(opt2.valOf(s)))] : [i1]; }
+    if (opt1) { const i1 = Math.max(0, opt1.vals.indexOf(opt1.valOf(s))); base.options = opt2 ? [i1, Math.max(0, opt2.vals.indexOf(opt2.valOf(s)))] : [i1]; }
     return base;
   });
 
@@ -131,10 +126,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const payload: Record<string, unknown> = {
     name, code: String(p.code ?? ""), categoryId: Number(categoryId), description: String(d.description || p.platform_description || p.description || ""),
-    brand: String(extra.brand || brandName || ""), imageUrls, variants, instantDiscount: 0,
-    // ส่ง variantOptions เฉพาะสินค้ามีตัวเลือก (ตัวขาย > 1) · SKU เดียว = สินค้าไม่มีตัวเลือก (ไม่ส่ง)
+    brand: String(extra.brand || brandName || ""), imageUrls, variants, instantDiscount: topDiscount,
+    // สินค้ามีตัวเลือกเสมอ → ส่ง variantOptions (option1 = มิติแรก, option2 = มิติสอง ถ้ามี) · รูปต่อสีเติมภายหลัง (ต้อง 1:1)
     ...(isVariant && opt1 ? { variantOptions: {
-      option1: { name: opt1.name, data: opt1.vals.map((v) => ({ value: v, ...(opt1.img && colorImg.get(v) ? { imageUrl: r2url(colorImg.get(v)!) } : {}) })) },
+      option1: { name: opt1.name, data: opt1.vals.map((v) => ({ value: v })) },
       ...(opt2 ? { option2: { name: opt2.name, data: opt2.vals.map((v) => ({ value: v })) } } : {}),
     } } : {}),
   };
