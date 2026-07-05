@@ -36,7 +36,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [pickOpen, setPickOpen] = useState(false);
   // รูปเดิมในสินค้า (แกลเลอรีจริง) ต่อปลายทาง — โชว์ให้ผู้ตรวจเห็นก่อนอนุมัติ · tk = "parent:<id>"/"sku:<id>"
-  const [destGalleries, setDestGalleries] = useState<Record<string, { r2_key: string }[]>>({});
+  const [destGalleries, setDestGalleries] = useState<Record<string, { r2_key?: string; url?: string }[]>>({});
   const [galLb, setGalLb] = useState<{ images: { url: string; label: string | null }[]; index: number }>({ images: [], index: -1 });   // ซูมรูปเดิมในสินค้า (แยกจาก imgs งานส่ง)
 
   const pushToast = useCallback((type: Toast["type"], message: string) => {
@@ -56,11 +56,18 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
     setConfirmApprove(false);
     setLb(-1);
     setDestGalleries({});
-    // ดึง "รูปเดิมในสินค้า" (แกลเลอรีจริง) ของทุกปลายทาง มาโชว์
+    // ดึง "รูปเดิมในสินค้า" ของทุกปลายทาง มาโชว์ — งานรูปคำอธิบาย (description_media) ดึงจาก "รูป Description" ไม่ใช่แกลเลอรีหลัก
+    const isDesc = r.approve_target === "description_media";
     const fetchGal = (owner: string) => apiFetch(`/api/creative-tasks/${r.task_id}/subtasks?gallery=${owner}`).then((x) => x.json())
       .then((gj) => { if (gj.galleries) setDestGalleries((prev) => ({ ...prev, ...(gj.galleries as Record<string, { r2_key: string }[]>) })); }).catch(() => {});
-    for (const p of r.dest?.parents ?? []) void fetchGal(`parent_sku:${p.id}`);
-    for (const s of r.dest?.skus ?? []) void fetchGal(`product_sku:${s.id}`);
+    const fetchDescGal = (pid: string) => apiFetch(`/api/creative-tasks/${r.task_id}/subtasks?descgallery=parent:${pid}`).then((x) => x.json())
+      .then((gj) => { if (gj.desc_galleries) setDestGalleries((prev) => ({ ...prev, ...(gj.desc_galleries as Record<string, { url: string }[]>) })); }).catch(() => {});
+    if (isDesc) {
+      for (const p of r.dest?.parents ?? []) void fetchDescGal(p.id);   // รูป Description เป็นระดับ Parent
+    } else {
+      for (const p of r.dest?.parents ?? []) void fetchGal(`parent_sku:${p.id}`);
+      for (const s of r.dest?.skus ?? []) void fetchGal(`product_sku:${s.id}`);
+    }
   };
   const closeItem = () => { setActive(null); setLb(-1); setConfirmApprove(false); };
 
@@ -253,7 +260,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
                           {g.map((im, i) => (
                             <div key={i} className="relative">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={r2ImageUrl(im.r2_key, 160) ?? ""} alt="" onClick={() => setGalLb({ images: g.map((x) => ({ url: r2ImageUrl(x.r2_key, 1600) ?? "", label: d.code })), index: i })} title={t("กดดูเต็มจอ", "Click to view full")} className="h-12 w-12 rounded object-cover border border-slate-200 cursor-zoom-in" />
+                              <img src={im.url ?? (r2ImageUrl(im.r2_key ?? "", 160) ?? "")} alt="" onClick={() => setGalLb({ images: g.map((x) => ({ url: x.url ?? (r2ImageUrl(x.r2_key ?? "", 1600) ?? ""), label: d.code })), index: i })} title={t("กดดูเต็มจอ", "Click to view full")} className="h-12 w-12 rounded object-cover border border-slate-200 cursor-zoom-in" />
                               <span className="absolute -top-1 -left-1 bg-slate-700 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">{i + 1}</span>
                             </div>
                           ))}

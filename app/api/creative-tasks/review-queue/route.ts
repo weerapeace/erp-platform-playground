@@ -31,11 +31,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // รอตรวจ (submitted) + อนุมัติแล้ว (approved) — แยกกลุ่มในหน้า UI
   const { data: subs, error } = await admin.from("erp_creative_subtasks")
-    .select("id, task_id, title, description, updated_at, status, image_sync_targets").in("status", ["submitted", "approved"])
+    .select("id, task_id, title, description, updated_at, status, image_sync_targets, subtask_type, config").in("status", ["submitted", "approved"])
     .order("updated_at", { ascending: false }).limit(400);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   type Ist = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]>; image_order?: string[] } | null;
-  const rows = (subs ?? []) as { id: string; task_id: string; title: string; description: string | null; updated_at: string; status: string; image_sync_targets: Ist }[];
+  const rows = (subs ?? []) as { id: string; task_id: string; title: string; description: string | null; updated_at: string; status: string; image_sync_targets: Ist; subtask_type: string | null; config: { approve_target?: string } | null }[];
   if (!rows.length) return NextResponse.json({ data: [], error: null });
 
   const taskIds = [...new Set(rows.map((r) => r.task_id))];
@@ -77,6 +77,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const ist = r.image_sync_targets;
     return {
       id: r.id, title: r.title, description: r.description ?? null, updated_at: r.updated_at, status: r.status,
+      approve_target: r.config?.approve_target ?? null,
       task_id: r.task_id, task_no: (tk.task_no as string) ?? null, task_title: (tk.title as string) ?? "", task_desc: (tk.description as string) ?? null,
       brand_label: (br?.name as string) ?? null, brand_color: (br?.color as string) ?? null,
       assignees: aMap.get(r.id) ?? [],

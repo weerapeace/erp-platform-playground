@@ -189,7 +189,7 @@ export async function saveSubmitRequiredFields(fields: string[]): Promise<void> 
 
 // ---- คิวรอตรวจ/อนุมัติ (งานย่อยที่ส่งมาแล้ว) ----
 export type ReviewQueueItem = {
-  id: string; title: string; description?: string | null; updated_at: string; status: string;
+  id: string; title: string; description?: string | null; updated_at: string; status: string; approve_target?: string | null;
   task_id: string; task_no: string | null; task_title: string; task_desc?: string | null;
   brand_label: string | null; brand_color: string | null;
   assignees: SubtaskAssignee[]; images: { r2_key: string; file_name: string | null }[];
