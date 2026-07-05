@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { useViewPref } from "@/lib/use-view-pref";
 import type { QcShelf, QcItem, QcReason, QcSource, QcQueueCard } from "@/app/api/qc-warehouse/route";
 import type { DefectLog } from "@/app/api/qc-warehouse/defect-history/route";
+import type { ShippedRow } from "@/app/api/qc-warehouse/shipped/route";
 
 // "ผลิต" สำหรับของจากการผลิต · โค้ดเดิม (stock/purchase…) แปลไทย · ที่เหลือ = ชื่อที่ตั้งเอง
 const sourceLabel = (s?: string | null) => !s || s === "production" ? "ผลิต" : s === "stock" ? "สต็อกเดิม" : s === "purchase" ? "ซื้อมา" : s === "return" ? "รับคืน" : s === "other" ? "อื่นๆ" : s;
@@ -74,6 +75,7 @@ export default function QcWarehousePage() {
   const [shopShelf, setShopShelf] = useState<string>("__all__");
   const [shopSort, setShopSort] = useState<"qty" | "sku" | "shelf">("qty");
   const [shopGroup, setShopGroup] = useState<"none" | "shelf" | "status" | "brand">("shelf");
+  const [shipped, setShipped] = useState<ShippedRow[]>([]);   // รายการที่จ่ายแล้ว (ส่งออก) — โชว์ในมุมมองช้อป
   const [histOpen, setHistOpen] = useState(false);
   const [histSearch, setHistSearch] = useState("");
   const [histRows, setHistRows] = useState<DefectLog[]>([]);
@@ -92,6 +94,11 @@ export default function QcWarehousePage() {
     finally { setLoading(false); }
   }, [toast]);
   useEffect(() => { void load(); }, [load]);
+  // รายการที่จ่ายแล้ว (ส่งออก) — โหลดเมื่อเข้ามุมมองช้อป
+  const loadShipped = useCallback(async () => {
+    try { const r = await apiFetch("/api/qc-warehouse/shipped"); const j = await r.json(); setShipped((j.data ?? []) as ShippedRow[]); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { if (view === "shop") void loadShipped(); }, [view, loadShipped]);
 
   const defectShelf = useMemo(() => shelves.find((s) => s.kind === "defect") ?? null, [shelves]);
   const storeShelves = useMemo(() => shelves.filter((s) => s.kind === "store"), [shelves]);
@@ -178,7 +185,7 @@ export default function QcWarehousePage() {
     openReceive(card, shelf);
   };
   const moveItem = async (item: QcItem, shelfId: string) => { if (await act("/api/qc-warehouse/items", { action: "move", item_id: item.id, shelf_id: shelfId })) toast.success("ย้ายชั้นแล้ว"); };
-  const submitShip = async () => { if (!ship) return; if (await act("/api/qc-warehouse/items", { action: "ship", item_id: ship.id, mode: shipMode, wh: shipMode === "sales_wh" ? shipWh : null })) { toast.success("ส่งออกแล้ว"); setShip(null); } };
+  const submitShip = async () => { if (!ship) return; if (await act("/api/qc-warehouse/items", { action: "ship", item_id: ship.id, mode: shipMode, wh: shipMode === "sales_wh" ? shipWh : null })) { toast.success("ส่งออกแล้ว"); setShip(null); void loadShipped(); } };
   const openToDefect = (item: QcItem) => { if (!defectShelf) { toast.error("ยังไม่มีชั้นของเสีย"); return; } setToDefect(item); setTdQty(item.qty); setTdReason(reasons[0]?.id ?? ""); };
   const submitToDefect = async () => { if (!toDefect) return; if (await act("/api/qc-warehouse/items", { action: "to_defect", item_id: toDefect.id, qty: num(tdQty), reason: reasonName(tdReason) })) { toast.success("ย้ายไปของเสียแล้ว"); setToDefect(null); } };
   const openRepair = (item: QcItem) => { setRepair(item); setRepairBy(item.repair_by || item.worker || ""); };
@@ -305,6 +312,23 @@ export default function QcWarehousePage() {
       </div>
     );
   };
+
+  // ── การ์ด "จ่ายแล้ว" (ส่งออกจากโกดังไปแล้ว) — อ่านอย่างเดียว จากประวัติ ──
+  const shipModeLabel = (m: string | null, wh: string | null) => m === "sell" ? "ขายออก" : `เข้าคลัง${wh ? ` · ${wh}` : ""}`;
+  const renderShippedCard = (s: ShippedRow) => (
+    <div key={s.id} className="rounded-xl bg-slate-50 border border-slate-200 p-2.5" style={{ borderLeft: `4px solid ${cardColor(s.brand_color, s.sku)}` }}>
+      <div className="flex items-start gap-2">
+        <Thumb k={s.image_key} color={cardColor(s.brand_color, s.sku)} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold text-slate-700 leading-snug truncate">{s.sku_name || s.sku}</div>
+          <div className="text-[11px] text-slate-500 font-mono truncate">{s.sku}{s.mo_no ? ` · ${s.mo_no}` : ""}</div>
+          <div className="text-[11px] text-slate-500 truncate">👷 {s.worker ?? "—"} · 📤 {shipModeLabel(s.mode, s.wh)}</div>
+          <div className="text-[10px] text-slate-400">{tsText(s.at)}{s.actor ? ` · ${s.actor}` : ""}</div>
+        </div>
+        <span className="text-sm font-bold text-slate-600 shrink-0">{fmt(Number(s.qty))}</span>
+      </div>
+    </div>
+  );
 
   return (
     <div className="max-w-[1700px] mx-auto px-5 py-5">
@@ -455,6 +479,7 @@ export default function QcWarehousePage() {
           })();
           const gridCls = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5";
           const selCls = "h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500";
+          const shippedFiltered = shipped.filter((s) => q === "" || `${s.sku ?? ""} ${s.sku_name ?? ""} ${s.mo_no ?? ""} ${s.worker ?? ""}`.toLowerCase().includes(q));
           return (
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -490,6 +515,13 @@ export default function QcWarehousePage() {
                   ))}
                 </div>
               )}
+              {/* 📤 จ่ายแล้ว (ส่งออกจากโกดังไปแล้ว) — จากประวัติ */}
+              <div className="mt-5">
+                <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">📤 จ่ายแล้ว (ส่งออกจากโกดัง) <span className="text-slate-400 font-normal">({shippedFiltered.length})</span></div>
+                {shippedFiltered.length === 0
+                  ? <div className="text-center py-6 text-[12px] text-slate-300">ยังไม่มีของที่จ่ายออกจากโกดัง — กด “ส่งออก” ที่การ์ดของดี แล้วจะมาโชว์ที่นี่</div>
+                  : <div className={gridCls}>{shippedFiltered.map(renderShippedCard)}</div>}
+              </div>
             </div>
           );
         })()

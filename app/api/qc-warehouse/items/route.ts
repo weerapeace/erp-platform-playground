@@ -105,7 +105,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (!item) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
       const del = await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       if (del.error) return NextResponse.json({ error: del.error.message }, { status: 400 });
-      await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, qty: item.qty, mode: body.mode, wh: body.wh } });
+      await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: item.qty, mode: body.mode, wh: body.wh } });
       return NextResponse.json({ error: null });
     }
 
