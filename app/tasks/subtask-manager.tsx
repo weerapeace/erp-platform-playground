@@ -25,8 +25,8 @@ import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { PlatformChip } from "./platform-chip";
 import { platformLabel, useCreativeOptions } from "./use-options";
 import {
-  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent, getPlatformSettings, savePlatformSettings, getContentTypeNotes, saveContentTypeNotes,
-  type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem, type PlatformSettings, type ContentTypeNotes,
+  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent, getPlatformSettings, savePlatformSettings,
+  type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem, type PlatformSettings,
 } from "./data";
 
 // ตัวแก้สินค้ากลาง (ของกลาง) — เปิดแก้ Parent SKU จากป๊อปอัปส่งงาน · dynamic กัน import วน + ลด bundle
@@ -796,19 +796,20 @@ function ContentTemplateModal({ pushToast, onClose, onChanged, onPick }: { pushT
   const [postType, setPostType] = useState("");
   const [pf, setPf] = useState<string[]>([]);
   const [assignees, setAssignees] = useState<{ id: string; label: string }[]>([]);
+  const [note, setNote] = useState("");   // บรีฟงานของแม่แบบ (โชว์บนสุดของป๊อปรายละเอียดงาน)
   const [adding, setAdding] = useState<UserPickerValue | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = async () => { setLoading(true); try { setList(await listContentTemplates()); } catch (e) { pushToast("error", (e as Error).message); } finally { setLoading(false); } };
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
-  const resetForm = () => { setEditId(null); setTitle(""); setPostType(""); setPf([]); setAssignees([]); };
-  const startEdit = (c: ContentItem) => { setEditId(c.id); setTitle(c.title || ""); setPostType(c.post_type || ""); setPf(c.platforms ?? []); setAssignees((c.assignees ?? []).map((a) => ({ id: a.id, label: a.name }))); };
+  const resetForm = () => { setEditId(null); setTitle(""); setPostType(""); setPf([]); setAssignees([]); setNote(""); };
+  const startEdit = (c: ContentItem) => { setEditId(c.id); setTitle(c.title || ""); setPostType(c.post_type || ""); setPf(c.platforms ?? []); setAssignees((c.assignees ?? []).map((a) => ({ id: a.id, label: a.name }))); setNote((c.note as string) ?? ""); };
   const togglePf = (v: string) => setPf((xs) => (xs.includes(v) ? xs.filter((x) => x !== v) : [...xs, v]));
   const save = async () => {
     if (!title.trim()) { pushToast("error", t("ใส่ชื่อแม่แบบ", "Enter a template name")); return; }
     setBusy(true);
     try {
-      const body = { title: title.trim(), post_type: postType || null, platforms: pf, assignee_ids: assignees.map((a) => a.id) };
+      const body = { title: title.trim(), post_type: postType || null, platforms: pf, assignee_ids: assignees.map((a) => a.id), note: note.trim() || null };
       if (editId) { await updateContent(editId, body); pushToast("success", t("บันทึกแม่แบบแล้ว", "Template saved")); }
       else { const { id } = await createContent({ ...body, is_template: true }); pushToast("success", t("สร้างแม่แบบแล้ว", "Template created")); onPick(id); }
       resetForm(); await load(); onChanged();
@@ -858,6 +859,10 @@ function ContentTemplateModal({ pushToast, onClose, onChanged, onPick }: { pushT
             </select>
           </div>
           <div>
+            <p className="text-[11px] text-slate-400 mb-1">📋 {t("บรีฟงาน / รายละเอียดงาน (โชว์บนสุดของป๊อปรายละเอียดงาน)", "Work brief (shown at top of the details popup)")}</p>
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder={t("เช่น สเปกรูป/สิ่งที่ต้องส่ง/โทนงาน ของแม่แบบนี้", "e.g. image specs / deliverables / tone for this template")} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-mono leading-relaxed resize-y bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-violet-300" />
+          </div>
+          <div>
             <p className="text-[11px] text-slate-400 mb-1">{t("แพลตฟอร์มที่จะลง (เลือกได้หลายอัน)", "Platforms (multi-select)")}</p>
             <div className="flex flex-wrap gap-1.5">
               {platformOpts.map((p) => <button key={p.value} type="button" onClick={() => togglePf(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${pf.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
@@ -889,14 +894,14 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
 }) {
   const t = useT();
   const platforms = sub.content_preview?.platforms ?? [];
-  const postType = sub.content_preview?.post_type ?? "";
+  const templateId = sub.config?.content_template_id ?? "";
   const [notes, setNotes] = useState<Record<string, string>>(() => ({ ...((sub.config?.platform_notes ?? {}) as Record<string, string>) }));
   const [prefilled, setPrefilled] = useState(false);
   const [showDefaults, setShowDefaults] = useState(false);
-  const [typeNote, setTypeNote] = useState("");   // บรีฟงานรวม ตามประเภทโพสต์ (อ่านอย่างเดียว ตั้งที่ default)
+  const [brief, setBrief] = useState("");        // บรีฟงานจากแม่แบบที่คอนเทนต์นี้ใช้ (อ่านอย่างเดียว · แก้ที่จัดการแม่แบบ)
+  const [briefFrom, setBriefFrom] = useState(""); // ชื่อแม่แบบ
   const [busy, setBusy] = useState(false);
-  const reloadTypeNote = useCallback(() => { if (!postType) return; getContentTypeNotes().then((m) => setTypeNote(m[postType] ?? "")).catch(() => {}); }, [postType]);
-  useEffect(() => { reloadTypeNote(); }, [reloadTypeNote]);
+  useEffect(() => { if (!templateId) return; listContentTemplates().then((ts) => { const tp = ts.find((x) => x.id === templateId); setBrief((tp?.note as string) ?? ""); setBriefFrom(tp?.title ?? ""); }).catch(() => {}); }, [templateId]);
   // เติมค่าเริ่มต้นจาก "หมายเหตุแพลตฟอร์ม (ทั่วไป)" ให้ช่องที่ยังว่าง (แก้เฉพาะงานได้)
   const prefillFromDefaults = useCallback(() => {
     getPlatformSettings().then((ps) => setNotes((n) => {
@@ -916,10 +921,10 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
   return (
     <ERPModal open onClose={onClose} size="md" title={t("รายละเอียดงาน — ต่อแพลตฟอร์ม", "Work details — per platform")}>
       <div className="space-y-3">
-        {postType && typeNote.trim() && (
+        {brief.trim() && (
           <div className="rounded-lg bg-amber-50/70 border border-amber-200 p-2.5">
-            <p className="text-[11px] font-semibold text-amber-700 mb-1">📋 {t("รายละเอียดงานรวม", "Work brief")} · {postTypeLabel(postType)}</p>
-            <pre className="text-[11px] font-mono text-slate-700 whitespace-pre-wrap leading-relaxed">{typeNote}</pre>
+            <p className="text-[11px] font-semibold text-amber-700 mb-1">📋 {t("บรีฟงาน", "Work brief")}{briefFrom ? ` · ${briefFrom}` : ""}</p>
+            <pre className="text-[11px] font-mono text-slate-700 whitespace-pre-wrap leading-relaxed">{brief}</pre>
           </div>
         )}
         <div className="flex items-start justify-between gap-2">
@@ -939,7 +944,7 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
           <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
         </div>
         {showDefaults && (
-          <PlatformDefaultsModal platforms={platforms} postType={postType} pushToast={pushToast} onSaved={() => { prefillFromDefaults(); reloadTypeNote(); }} onClose={() => setShowDefaults(false)} />
+          <PlatformDefaultsModal platforms={platforms} pushToast={pushToast} onSaved={prefillFromDefaults} onClose={() => setShowDefaults(false)} />
         )}
       </div>
     </ERPModal>
@@ -947,31 +952,23 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
 }
 
 // ป๊อปตั้งค่า "หมายเหตุเริ่มต้น (ทั่วไป)" ต่อแพลตฟอร์ม — ค่ากลางที่ทุกคอนเทนต์ดึงไปเติมให้เมื่อยังไม่กรอกเฉพาะงาน
-function PlatformDefaultsModal({ platforms, postType, pushToast, onSaved, onClose }: {
-  platforms: string[]; postType?: string; pushToast: ToastFn; onSaved: () => void; onClose: () => void;
+function PlatformDefaultsModal({ platforms, pushToast, onSaved, onClose }: {
+  platforms: string[]; pushToast: ToastFn; onSaved: () => void; onClose: () => void;
 }) {
   const t = useT();
   const [all, setAll] = useState<PlatformSettings | null>(null);
-  const [typeNotes, setTypeNotes] = useState<ContentTypeNotes>({});
   const [busy, setBusy] = useState(false);
   useEffect(() => { getPlatformSettings().then(setAll).catch(() => setAll({})); }, []);
-  useEffect(() => { getContentTypeNotes().then(setTypeNotes).catch(() => {}); }, []);
   const setNote = (p: string, v: string) => setAll((a) => ({ ...(a ?? {}), [p]: { ...((a ?? {})[p] ?? {}), note: v } }));
   const save = async () => {
     if (!all) return;
     setBusy(true);
-    try { await savePlatformSettings(all); if (postType) await saveContentTypeNotes(typeNotes); pushToast("success", t("บันทึกค่าเริ่มต้นแล้ว", "Defaults saved")); onSaved(); onClose(); }
+    try { await savePlatformSettings(all); pushToast("success", t("บันทึกค่าเริ่มต้นแล้ว", "Defaults saved")); onSaved(); onClose(); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
   return (
     <ERPModal open onClose={onClose} size="md" title={t("ตั้งค่าหมายเหตุเริ่มต้น (ทั่วไป)", "Default platform notes (global)")}>
       <div className="space-y-3">
-        {postType && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-2.5">
-            <label className="text-[11px] font-semibold text-amber-700">📋 {t("รายละเอียดงานรวม", "Work brief")} · {t("ประเภท", "Type")}: {postTypeLabel(postType)}</label>
-            <textarea value={typeNotes[postType] ?? ""} onChange={(e) => setTypeNotes((m) => ({ ...m, [postType]: e.target.value }))} rows={3} placeholder={t("รายละเอียดงานรวมของประเภทนี้ — จะโชว์บนสุดของป๊อปรายละเอียดงาน", "Overall brief for this type — shown at top of the details popup")} className="mt-1 w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-mono leading-relaxed resize-y bg-white focus:outline-none focus:ring-1 focus:ring-violet-300" />
-          </div>
-        )}
         <p className="text-[11px] text-slate-400">{t("ค่ากลางนี้ใช้กับ 'ทุกคอนเทนต์' ที่ลงแพลตฟอร์มนั้น — ระบบจะเติมให้อัตโนมัติเมื่อยังไม่ได้กรอกหมายเหตุเฉพาะงาน", "These global defaults apply to every content on that platform — auto-filled when the per-content note is empty.")}</p>
         {all === null ? (
           <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
