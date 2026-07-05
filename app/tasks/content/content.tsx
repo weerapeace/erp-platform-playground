@@ -55,13 +55,16 @@ const EMPTY_FORM = { title: "", post_type: "image", status: "draft" as ContentSt
 export function ContentPageView() {
   const t = useT();
   const { platforms } = useCreativeOptions();
-  const [view, setView] = useState<"list" | "calendar" | "templates">(() => {
+  const [view, setView] = useState<"list" | "table" | "calendar" | "templates">(() => {
     if (typeof window === "undefined") return "list";
     const v = new URLSearchParams(window.location.search).get("view");
-    return v === "templates" || v === "calendar" ? v : "list";
+    return v === "templates" || v === "calendar" || v === "table" ? v : "list";
   });
   const [detailId, setDetailId] = useState<string | null>(null);
   const [delTarget, setDelTarget] = useState<ContentItem | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());   // เลือกหลายรายการ (table view)
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // create modal
@@ -120,6 +123,12 @@ export function ContentPageView() {
   };
 
   const onDelete = async () => { if (!delTarget) return; try { await deleteContent(delTarget.id); pushToast("info", t("ลบแล้ว", "Deleted")); if (detailId === delTarget.id) setDetailId(null); await load(); await reloadTemplates(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDelTarget(null); } };
+  const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const bulkDelete = async () => {
+    setBulkBusy(true);
+    try { const ids = [...selected]; for (const id of ids) await deleteContent(id); pushToast("info", t(`ลบ ${ids.length} รายการแล้ว`, `Deleted ${ids.length}`)); setSelected(new Set()); if (detailId && selected.has(detailId)) setDetailId(null); await load(); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setBulkBusy(false); setBulkConfirm(false); }
+  };
   // สร้างแม่แบบคอนเทนต์เปล่า → เปิด drawer ให้กรอกแคปชั่น/แพลตฟอร์ม
   const createTpl = async () => {
     const name = window.prompt(t("ชื่อแม่แบบคอนเทนต์", "Content template name"));
@@ -143,6 +152,7 @@ export function ContentPageView() {
         </div>
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit mt-4">
           <button onClick={() => setView("list")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📋 {t("รายการ", "List")}</button>
+          <button onClick={() => setView("table")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "table" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📊 {t("ตาราง", "Table")}</button>
           <button onClick={() => setView("calendar")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "calendar" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🗓️ {t("ปฏิทิน", "Calendar")}</button>
           <button onClick={() => setView("templates")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "templates" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🧩 {t("แม่แบบ", "Templates")}</button>
         </div>
@@ -186,6 +196,50 @@ export function ContentPageView() {
               <div className="text-4xl mb-3">📱</div>
               <p className="text-slate-600 font-medium">{t("ยังไม่มีคอนเทนต์", "No content yet")}</p>
               <button onClick={openCreate} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างคอนเทนต์", "Create Content")}</button>
+            </div>
+          ) : view === "table" ? (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              {selected.size > 0 && (
+                <div className="flex items-center justify-between gap-2 px-4 py-2 bg-violet-50 border-b border-violet-100">
+                  <span className="text-sm text-violet-800 font-medium">{t("เลือก", "Selected")} {selected.size}</span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setSelected(new Set())} className="text-xs text-slate-500 hover:underline">{t("ล้าง", "Clear")}</button>
+                    <button onClick={() => setBulkConfirm(true)} className="h-8 px-3 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700">🗑 {t("ลบที่เลือก", "Delete selected")}</button>
+                  </div>
+                </div>
+              )}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-500 text-xs">
+                    <tr>
+                      <th className="w-10 px-3 py-2"><input type="checkbox" checked={items.length > 0 && selected.size === items.length} onChange={(e) => setSelected(e.target.checked ? new Set(items.map((c) => c.id)) : new Set())} /></th>
+                      <th className="text-left px-3 py-2 font-medium">{t("สถานะ", "Status")}</th>
+                      <th className="text-left px-3 py-2 font-medium">{t("เลขที่", "No.")}</th>
+                      <th className="text-left px-3 py-2 font-medium">{t("ชื่อ", "Title")}</th>
+                      <th className="text-left px-3 py-2 font-medium">{t("แบรนด์", "Brand")}</th>
+                      <th className="text-left px-3 py-2 font-medium">{t("ประเภท", "Type")}</th>
+                      <th className="text-left px-3 py-2 font-medium">{t("แพลตฟอร์ม", "Platforms")}</th>
+                      <th className="text-left px-3 py-2 font-medium">{t("ผู้รับผิดชอบ", "Assignees")}</th>
+                      <th className="text-left px-3 py-2 font-medium">{t("ตั้งเวลา", "Schedule")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((c) => (
+                      <tr key={c.id} onClick={() => setDetailId(c.id)} className={`border-t border-slate-100 hover:bg-slate-50 cursor-pointer ${selected.has(c.id) ? "bg-violet-50/50" : ""}`}>
+                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSel(c.id)} /></td>
+                        <td className="px-3 py-2"><StatusBadge status={c.status} /></td>
+                        <td className="px-3 py-2 font-mono text-[11px] text-slate-400 whitespace-nowrap">{c.content_no}</td>
+                        <td className="px-3 py-2 font-medium text-slate-800 max-w-[220px] truncate">{c.title}</td>
+                        <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{c.brand_label ? <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span> : "—"}</td>
+                        <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{c.post_type ? postTypeLabel(c.post_type) : "—"}</td>
+                        <td className="px-3 py-2"><div className="flex flex-wrap gap-1">{(c.platforms ?? []).map((p) => <span key={p} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{platformLabel(p)}</span>)}</div></td>
+                        <td className="px-3 py-2 text-slate-600 max-w-[160px] truncate">{c.assignees?.length ? c.assignees.map((a) => a.name).filter(Boolean).join(", ") : (c.assignee_label ?? "—")}</td>
+                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap text-xs">{c.scheduled_at ? c.scheduled_at.slice(0, 16).replace("T", " ") : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -244,6 +298,9 @@ export function ContentPageView() {
 
       <ConfirmDialog open={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={onDelete}
         title={t("ลบคอนเทนต์", "Delete Content")} message={<span>{t("ต้องการลบ", "Delete")} <span className="font-semibold">{delTarget?.title}</span> {t("ใช่ไหม?", "?")}</span>} confirmText={t("ลบ", "Delete")} variant="danger" />
+
+      <ConfirmDialog open={bulkConfirm} onClose={() => setBulkConfirm(false)} onConfirm={bulkDelete}
+        title={t("ลบคอนเทนต์ที่เลือก", "Delete selected content")} message={<span>{t("ต้องการลบ", "Delete")} <span className="font-semibold">{selected.size}</span> {t("รายการใช่ไหม?", "items?")}</span>} confirmText={bulkBusy ? "..." : t("ลบทั้งหมด", "Delete all")} variant="danger" />
 
       <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
         {toasts.map((t) => <div key={t.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${t.type === "success" ? "bg-emerald-600" : t.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{t.message}</div>)}

@@ -921,7 +921,7 @@ function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }: {
         {platforms.map((p) => (
           <div key={p}>
             <div className="mb-1"><PlatformChip code={p} /></div>
-            <textarea value={notes[p] ?? ""} onChange={(e) => setNotes((n) => ({ ...n, [p]: e.target.value }))} rows={2} placeholder={t("หมายเหตุ/สิ่งที่ต้องแนบ เช่น รูป 1:1 อย่างน้อย 5 รูป", "Notes / what to attach, e.g. 1:1 images, at least 5")} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-violet-300" />
+            <textarea value={notes[p] ?? ""} onChange={(e) => setNotes((n) => ({ ...n, [p]: e.target.value }))} rows={4} placeholder={t("หมายเหตุ/สิ่งที่ต้องแนบ เช่น รูป 1:1 อย่างน้อย 5 รูป", "Notes / what to attach, e.g. 1:1 images, at least 5")} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-mono leading-relaxed resize-y bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-violet-300" />
           </div>
         ))}
         <div className="flex justify-end gap-2">
@@ -962,7 +962,7 @@ function PlatformDefaultsModal({ platforms, pushToast, onSaved, onClose }: {
         ) : platforms.map((p) => (
           <div key={p}>
             <div className="mb-1"><PlatformChip code={p} /></div>
-            <textarea value={all[p]?.note ?? ""} onChange={(e) => setNote(p, e.target.value)} rows={2} placeholder={t("หมายเหตุเริ่มต้นของแพลตฟอร์มนี้ เช่น รูป 1:1 อย่างน้อย 5 รูป", "Default note for this platform, e.g. 1:1 images, at least 5")} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-violet-300" />
+            <textarea value={all[p]?.note ?? ""} onChange={(e) => setNote(p, e.target.value)} rows={4} placeholder={t("หมายเหตุเริ่มต้นของแพลตฟอร์มนี้ เช่น รูป 1:1 อย่างน้อย 5 รูป", "Default note for this platform, e.g. 1:1 images, at least 5")} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-mono leading-relaxed resize-y bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-violet-300" />
           </div>
         ))}
         <div className="flex justify-end gap-2">
