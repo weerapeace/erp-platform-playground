@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { PlatformIcon } from "@/components/platform-icon";
+import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
 
 type Cat = { id: string; name: string };
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
@@ -18,57 +19,6 @@ type Opt = { external_id: string; name_en: string; name_th: string };
 type PfRow = { id: string; code: string; name_th: string; icon_key: string | null; is_active: boolean; sort_order: number };
 
 const key = (c: string, p: string) => `${c}:${p}`;
-
-// dropdown ค้นหาหมวดของร้าน (โหลด options ตอนเปิด/พิมพ์)
-function OptionPicker({ platformId, value, onPick }: { platformId: string; value: string; onPick: (path: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const [opts, setOpts] = useState<Opt[]>([]);
-  const [loading, setLoading] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    const t = setTimeout(() => {
-      apiFetch(`/api/platform-category-options?platform_id=${platformId}&search=${encodeURIComponent(q)}&limit=40`).then((r) => r.json())
-        .then((j) => setOpts((j.categories ?? []) as Opt[])).catch(() => setOpts([])).finally(() => setLoading(false));
-    }, 250);
-    return () => clearTimeout(t);
-  }, [open, q, platformId]);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-  return (
-    <div className="relative flex-1 min-w-0" ref={ref}>
-      <button type="button" onClick={() => setOpen((o) => !o)}
-        className="w-full h-9 px-3 text-sm text-left border border-slate-200 rounded-lg bg-white hover:border-indigo-300 flex items-center justify-between gap-2">
-        <span className={`truncate ${value ? "text-slate-700" : "text-slate-400"}`}>{value || "— เลือกหมวดของร้านนี้ —"}</span>
-        <span className="text-slate-400 text-xs shrink-0">▾</span>
-      </button>
-      {open && (
-        <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg">
-          <div className="p-1.5 border-b border-slate-100"><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาหมวด…" className="w-full h-8 px-2 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400" /></div>
-          <div className="max-h-56 overflow-y-auto py-1">
-            {value && <button type="button" onClick={() => { onPick(""); setOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs text-rose-500 hover:bg-rose-50">✕ ล้างการเลือก</button>}
-            {loading ? <div className="px-3 py-3 text-xs text-slate-400 text-center">กำลังโหลด…</div>
-              : opts.length === 0 ? <div className="px-3 py-3 text-xs text-slate-400 text-center">— ไม่พบหมวด —<br />นำเข้าไฟล์หมวดของร้านนี้ก่อน</div>
-                : opts.map((o) => {
-                  const label = `${o.external_id} · ${o.name_th || o.name_en}`;
-                  return (
-                    <button key={o.external_id} type="button" onClick={() => { onPick(label); setOpen(false); }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-slate-700 hover:bg-indigo-50 truncate">
-                      {o.name_th || o.name_en} <span className="text-[10px] text-slate-400">#{o.external_id}</span>
-                    </button>
-                  );
-                })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function PlatformCategoryMapPage() {
   const toast = useToast();
@@ -90,6 +40,8 @@ export default function PlatformCategoryMapPage() {
   const [pfOpen, setPfOpen] = useState(false);          // โมดัลตั้งค่าร้านที่แสดง
   const [allPfs, setAllPfs] = useState<PfRow[]>([]);
   const [pfBusy, setPfBusy] = useState(false);
+  const [optsByPf, setOptsByPf] = useState<Record<string, SelectOption[]>>({});   // หมวดของแต่ละร้าน (สำหรับ dropdown ของกลาง)
+  const optsLoaded = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +55,23 @@ export default function PlatformCategoryMapPage() {
     } catch { toast.error("โหลดข้อมูลไม่สำเร็จ"); } finally { setLoading(false); }
   }, [toast]);
   useEffect(() => { void load(); }, [load]);
+
+  // โหลดหมวดของทุกร้านครั้งเดียว → ป้อนให้ dropdown ของกลาง (SearchableSelect)
+  useEffect(() => {
+    if (optsLoaded.current || platforms.length === 0) return;
+    optsLoaded.current = true;
+    (async () => {
+      const entries = await Promise.all(platforms.map(async (p): Promise<[string, SelectOption[]]> => {
+        const head: SelectOption = { value: "", label: "— ไม่จับคู่ร้านนี้ —" };
+        try {
+          const j = await apiFetch(`/api/platform-category-options?platform_id=${p.id}&limit=2000`).then((r) => r.json());
+          const opts = ((j.categories ?? []) as Opt[]).map((o) => ({ value: `${o.external_id} · ${o.name_th || o.name_en}`, label: o.name_th || o.name_en, sub: `#${o.external_id}`, searchText: o.external_id }));
+          return [p.id, [head, ...opts]];
+        } catch { return [p.id, [head]]; }
+      }));
+      setOptsByPf(Object.fromEntries(entries));
+    })();
+  }, [platforms]);
 
   const pick = (catId: string) => { setSel(catId); const d: Record<string, string> = {}; for (const p of platforms) d[p.id] = map[key(catId, p.id)] ?? ""; setDraft(d); };
   const mappedCount = useCallback((catId: string) => platforms.reduce((n, p) => n + (map[key(catId, p.id)] ? 1 : 0), 0), [platforms, map]);
@@ -250,7 +219,7 @@ export default function PlatformCategoryMapPage() {
                   {platforms.map((p) => (
                     <div key={p.id} className="flex items-center gap-3">
                       <span className="w-32 flex-shrink-0 text-sm text-slate-700 truncate inline-flex items-center gap-1.5"><PlatformIcon code={p.code} iconKey={p.icon_key} size={16} /> {p.name_th}</span>
-                      <OptionPicker platformId={p.id} value={draft[p.id] ?? ""} onPick={(path) => setDraft((d) => ({ ...d, [p.id]: path }))} />
+                      <SearchableSelect className="flex-1 min-w-0" value={draft[p.id] ?? ""} options={optsByPf[p.id] ?? []} onChange={(path) => setDraft((d) => ({ ...d, [p.id]: path }))} placeholder="— เลือกหมวดของร้านนี้ —" />
                     </div>
                   ))}
                   {platforms.length === 0 && <div className="text-xs text-slate-400 text-center py-6">ยังไม่มีแพลตฟอร์มที่เปิดใช้</div>}
