@@ -25,6 +25,12 @@ export type QcQueueCard = {
   worker: string | null; remaining: number; due_date: string | null; image_key?: string | null;
   brand_color?: string | null; brand_name?: string | null; is_customer_job?: boolean; is_subcontract?: boolean;
 };
+// "จ่ายไปที่โต๊ะ" — ใบจ่ายงานที่ยังทำอยู่ที่โต๊ะ (ยังไม่ส่งครบ/ยังไม่ done) โชว์เป็นพรีวิวในหน้า QC ช้อป
+export type QcDeskCard = {
+  id: string; wo_no: string | null; mo_no: string | null; sku: string | null; name: string | null;
+  department_name: string | null; worker: string | null; qty: number; received_qty: number;
+  status: string; due_date: string | null; image_key?: string | null; brand_color?: string | null;
+};
 
 type BrandInfo = { color: string | null; name: string | null; is_customer_job: boolean };
 // แมป SKU → แบรนด์ (สี/ชื่อ/ธงงานลูกค้า) ผ่าน skus_v2.parent_sku_id → parent_skus_v2.brand_id → brands
@@ -66,18 +72,20 @@ async function buildImageMap(admin: ReturnType<typeof supabaseAdmin>, skus: stri
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "qc.view"); if (denied) return denied;
   const admin = supabaseAdmin();
-  const [sh, it, rs, wo, sc] = await Promise.all([
+  const [sh, it, rs, wo, sc, ad] = await Promise.all([
     admin.from("qc_shelves").select("id,name,kind,sort_order").eq("is_active", true).order("sort_order"),
     admin.from("qc_warehouse_items").select("id,shelf_id,wo_id,mo_no,sku,sku_name,worker,qty,status,reason,repair_by,source").order("created_at"),
     admin.from("qc_defect_reasons").select("id,name").eq("is_active", true).order("sort_order"),
     admin.from("mo_work_orders").select("id,mo_no,product_sku,product_name,assignee_name,assignee_id,assignee_type,received_qty,qc_pulled_qty,due_date").eq("is_active", true).gt("received_qty", 0),
     admin.from("qc_sources").select("id,name").eq("is_active", true).order("sort_order"),
+    // "จ่ายไปที่โต๊ะ" — ใบจ่ายงาน active ที่ยังไม่ done (ยังทำ/ส่งไม่ครบที่โต๊ะ)
+    admin.from("mo_work_orders").select("id,wo_no,mo_no,product_sku,product_name,department_name,assignee_name,qty,received_qty,status,due_date").eq("is_active", true).neq("status", "done"),
   ]);
-  const err = sh.error || it.error || rs.error || wo.error || sc.error;
+  const err = sh.error || it.error || rs.error || wo.error || sc.error || ad.error;
   if (err) return NextResponse.json({ error: err.message }, { status: 500 });
 
-  // รูป + แบรนด์ ต่อ SKU (จากของบนชั้น + งานในคิว)
-  const skus = Array.from(new Set([...(it.data ?? []).map((i) => i.sku as string | null), ...(wo.data ?? []).map((w) => w.product_sku as string | null)].filter((s): s is string => !!s)));
+  // รูป + แบรนด์ ต่อ SKU (จากของบนชั้น + งานในคิว + งานในโต๊ะ)
+  const skus = Array.from(new Set([...(it.data ?? []).map((i) => i.sku as string | null), ...(wo.data ?? []).map((w) => w.product_sku as string | null), ...(ad.data ?? []).map((w) => w.product_sku as string | null)].filter((s): s is string => !!s)));
   const [imgMap, brandMap] = await Promise.all([buildImageMap(admin, skus), buildBrandMap(admin, skus)]);
 
   // ช่างเหมา: assignee_id (craftsman) → employees.is_subcontract
@@ -100,5 +108,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     is_subcontract: w.assignee_type === "craftsman" && w.assignee_id ? subMap[w.assignee_id as string] ?? false : false,
   }; }).filter((q) => q.remaining > 0);
 
-  return NextResponse.json({ shelves: sh.data ?? [], items, reasons: rs.data ?? [], sources: sc.data ?? [], queue, error: null });
+  const atDesks: QcDeskCard[] = (ad.data ?? []).map((w) => { const sku = w.product_sku as string | null; const b = sku ? brandMap[sku] : undefined; return {
+    id: w.id as string, wo_no: w.wo_no as string | null, mo_no: w.mo_no as string | null, sku,
+    name: (w.product_name as string | null) ?? sku, department_name: w.department_name as string | null,
+    worker: w.assignee_name as string | null, qty: Number(w.qty ?? 0), received_qty: Number(w.received_qty ?? 0),
+    status: (w.status as string) ?? "dispatched", due_date: w.due_date as string | null,
+    image_key: sku ? imgMap[sku] ?? null : null, brand_color: b?.color ?? null,
+  }; });
+
+  return NextResponse.json({ shelves: sh.data ?? [], items, reasons: rs.data ?? [], sources: sc.data ?? [], queue, atDesks, error: null });
 }
