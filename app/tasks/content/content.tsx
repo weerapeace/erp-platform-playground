@@ -371,6 +371,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const { platforms } = useCreativeOptions();
   const [d, setD] = useState<ContentDetail | null>(null);
   const [caps, setCaps] = useState<ContentCaption[]>([]);
+  const [touchedCaps, setTouchedCaps] = useState<Set<string>>(new Set());   // ช่องที่ผู้ใช้ "แก้เอง" (platform|caption / platform|hashtags)
+  const [applyFrom, setApplyFrom] = useState<string | null>(null);          // ป๊อป "ใช้ทั้งหมด" — แพลตฟอร์มต้นทาง
   const [links, setLinks] = useState<{ platform: string; url: string }[]>([]);
   const [status, setStatus] = useState<ContentStatus>("draft");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -505,18 +507,31 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   useEffect(() => { if (d) loadTemplates(); }, [d, loadTemplates]);
 
   const setCap = (platform: string, patch: Partial<ContentCaption>) => setCaps((cs) => cs.map((c) => c.platform === platform ? { ...c, ...patch } : c));
-  // "ใช้ทั้งหมด": เอา caption/hashtags ของช่องต้นทาง ไปเติมแพลตฟอร์มอื่น "ที่ยังว่าง" เท่านั้น (ไม่ทับที่กรอกไว้แล้ว)
-  const applyCapToAll = (fromPlatform: string) => {
+  // "ใช้ทั้งหมด": เปิดป๊อปให้เลือกโหมด (ถ้าช่องต้นทางยังว่างก็ไม่ต้องเปิด)
+  const openApplyAll = (fromPlatform: string) => {
     const src = caps.find((c) => c.platform === fromPlatform);
     if (!src || (!src.caption?.trim() && !src.hashtags?.trim())) { pushToast("info", t("ช่องนี้ยังว่าง — กรอกก่อนแล้วค่อยกด", "This field is empty — fill it first")); return; }
+    setApplyFrom(fromPlatform);
+  };
+  // เอา caption/hashtags ของช่องต้นทางไปแพลตฟอร์มอื่นตามโหมด: empty=เฉพาะช่องว่าง · except_edited=ทุกอันยกเว้นที่แก้เอง · all=ทับหมด
+  const applyCapToAll = (fromPlatform: string, mode: "empty" | "except_edited" | "all") => {
+    const src = caps.find((c) => c.platform === fromPlatform);
+    if (!src) return;
     setCaps((cs) => cs.map((c) => {
       if (c.platform === fromPlatform) return c;
       const next = { ...c };
-      if (!c.caption?.trim() && src.caption?.trim()) next.caption = src.caption;
-      if (!c.hashtags?.trim() && src.hashtags?.trim()) next.hashtags = src.hashtags;
+      if (src.caption?.trim()) {
+        const keep = mode === "empty" ? !!c.caption?.trim() : mode === "except_edited" ? touchedCaps.has(`${c.platform}|caption`) : false;
+        if (!keep) next.caption = src.caption;
+      }
+      if (src.hashtags?.trim()) {
+        const keep = mode === "empty" ? !!c.hashtags?.trim() : mode === "except_edited" ? touchedCaps.has(`${c.platform}|hashtags`) : false;
+        if (!keep) next.hashtags = src.hashtags;
+      }
       return next;
     }));
-    pushToast("success", t("ใช้กับช่องที่ยังว่างให้แล้ว (ไม่ทับที่กรอกไว้)", "Applied to empty fields only"));
+    pushToast("success", t("ใช้กับแพลตฟอร์มอื่นแล้ว", "Applied to other platforms"));
+    setApplyFrom(null);
   };
 
   // เลือก Parent SKU → ดึงสีของ SKU ลูกทั้งหมดมารวม
@@ -800,7 +815,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => setCap(c.platform, patch)} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? applyCapToAll : undefined} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -819,6 +834,17 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
       {recOpen && <RecommendedTimesModal initial={recTimes} onClose={() => setRecOpen(false)} onSaved={(v) => { setRecTimes(v); setRecOpen(false); }} pushToast={pushToast} />}
       {hashOpen && <HashtagLibraryModal brandId={d.brand_id} onClose={() => setHashOpen(false)} pushToast={pushToast} />}
+      {applyFrom && (
+        <ERPModal open onClose={() => setApplyFrom(null)} size="sm" title={t("ใช้แคปชั่น/แฮชแท็กนี้กับแพลตฟอร์มอื่น", "Apply to other platforms")}>
+          <div className="space-y-2">
+            <p className="text-[11px] text-slate-400">{t("คัดลอกจาก", "Copy from")} <span className="font-medium text-slate-600">{platformLabel(applyFrom)}</span></p>
+            <button onClick={() => applyCapToAll(applyFrom, "empty")} className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 hover:bg-violet-50 hover:border-violet-300 text-sm">✅ {t("แทนแค่ช่องที่ยังว่าง", "Only empty fields")}<span className="block text-[11px] text-slate-400">{t("ปลอดภัยสุด — ไม่ทับที่มีข้อความแล้ว", "Safest — won't touch filled fields")}</span></button>
+            <button onClick={() => applyCapToAll(applyFrom, "except_edited")} className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 hover:bg-violet-50 hover:border-violet-300 text-sm">✍️ {t("แทนทุกอัน ยกเว้นอันที่แก้เอง", "All except manually edited")}<span className="block text-[11px] text-slate-400">{t("ทับค่าจากแม่แบบ/อัตโนมัติ แต่เก็บที่พิมพ์เอง", "Overwrite auto/template values, keep your edits")}</span></button>
+            <button onClick={() => applyCapToAll(applyFrom, "all")} className="w-full text-left px-3 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50 text-sm">⚠️ {t("แทนทุกอัน", "Replace all")}<span className="block text-[11px] text-red-400">{t("ทับทุกช่อง รวมที่กรอกไว้แล้ว", "Overwrites everything, including filled")}</span></button>
+            <div className="flex justify-end pt-1"><button onClick={() => setApplyFrom(null)} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button></div>
+          </div>
+        </ERPModal>
+      )}
       <ImageLightbox images={taskMedia.images.map((im) => ({ url: r2ImageUrl(im.key, 1600) ?? "", label: im.label }))} index={tmLb} onClose={() => setTmLb(-1)} onIndex={setTmLb} />
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
     </>
@@ -999,7 +1025,7 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, o
           {postUrl
             ? <a href={postUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-100">↗ {t("ไปโพสต์", "Post")}</a>
             : onOpenSettings && <button onClick={onOpenSettings} title={t("ตั้งลิงก์ไปหน้าโพสต์ ที่ตั้งค่าแพลตฟอร์ม", "Set post link in platform settings")} className="text-[11px] text-slate-400 hover:text-violet-700">🔗 {t("ตั้งลิงก์", "Set link")}</button>}
-          {onApplyAll && <button onClick={() => onApplyAll(cap.platform)} title={t("เอาแคปชั่น+แฮชแท็กช่องนี้ ไปเติมแพลตฟอร์มอื่นที่ยังว่าง (ไม่ทับที่กรอกไว้แล้ว)", "Fill other empty platforms with this caption+hashtags (won't overwrite)")} className="text-xs text-violet-700 hover:underline">⇊ {t("ใช้ทั้งหมด", "Apply all")}</button>}
+          {onApplyAll && <button onClick={() => onApplyAll(cap.platform)} title={t("เอาแคปชั่น/แฮชแท็กช่องนี้ไปใช้กับแพลตฟอร์มอื่น (เลือกวิธี)", "Apply this caption/hashtags to other platforms")} className="text-[11px] text-slate-500 hover:text-violet-700">⇊ {t("ใช้ทั้งหมด", "Apply all")}</button>}
           <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
         </div>
       </div>
