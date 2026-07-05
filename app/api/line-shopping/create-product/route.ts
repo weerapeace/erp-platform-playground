@@ -77,7 +77,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   // บาร์โค้ด: ใช้ที่กรอก · ว่าง = รหัส Parent · น้ำหนัก(kg): ที่กรอก · ว่าง = weight_g÷1000
   const gtin = String(extra.barcode ?? "").trim() || String(p.code ?? "").trim();
-  const weightKg = extra.weight ? Number(extra.weight) : (p.weight_g != null ? Number(p.weight_g) / 1000 : 0);
+  const weightRaw = extra.weight ? Number(extra.weight) : (p.weight_g != null ? Number(p.weight_g) / 1000 : 0);
+  const weightKg = Number.isFinite(weightRaw) ? Math.round(weightRaw * 100) / 100 : 0;   // LINE: น้ำหนัก ≤ 2 ตำแหน่งทศนิยม
   // ราคา LINE: price=fake_price (เต็ม) · instantDiscount=fake−sale · ตัวขายไม่มี → ดึงจากตัวสี
   const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
   const fakeOf = (s: typeof skuRows[number]) => num(s.fake_price) || num(masterOf(s.code)?.fake_price);
