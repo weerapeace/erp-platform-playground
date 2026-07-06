@@ -37,12 +37,26 @@ export async function pushTasksLineTpl(admin: Admin, eventKey: string, vars: Rec
     const target = cfg.groups?.creative || cfg.group_id || "";
     if (!cfg.token || !target) return;
     const tplRaw = (cfg.templates?.[eventKey] && cfg.templates[eventKey].trim()) || defaultLineTemplate(eventKey);
-    const text = renderLineTemplate(tplRaw, vars);
-    if (!text) return;
+    let text = renderLineTemplate(tplRaw, vars);
+    const link = typeof vars.link === "string" ? vars.link.trim() : "";
+    // มีลิงก์ → ตัด URL ยาวออกจากข้อความ แล้วแนบ "ปุ่มเปิดดู" (Flex) แทน (กัน URL เป็นกำแพงตัวอักษรใน LINE)
+    if (link) {
+      text = text.split(link).join("");
+      text = text.split("\n").filter((ln) => { const s = ln.trim(); return s && !/^(เปิดงาน|เปิดดู|เปิด|ลิงก์|link)\s*[:：]?$/i.test(s); }).join("\n").trim();
+    }
+    const messages: Record<string, unknown>[] = [];
+    if (text) messages.push({ type: "text", text: text.slice(0, 4900) });
+    if (link) messages.push({
+      type: "flex", altText: "เปิดดูงาน",
+      contents: { type: "bubble", size: "micro", body: { type: "box", layout: "vertical", contents: [
+        { type: "button", style: "primary", color: "#7C3AED", height: "sm", action: { type: "uri", label: "เปิดดู", uri: link } },
+      ] } },
+    });
+    if (!messages.length) return;
     await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ to: target, messages: [{ type: "text", text: text.slice(0, 4900) }] }),
+      body: JSON.stringify({ to: target, messages }),
     });
   } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
 }
