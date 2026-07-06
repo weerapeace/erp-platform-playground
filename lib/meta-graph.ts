@@ -63,16 +63,36 @@ export async function metaGetPages(userToken: string): Promise<MetaPage[]> {
   }));
 }
 
-// โพสต์ขึ้น Facebook Page — มีรูป = โพสต์รูป+แคปชั่น (/photos) · ไม่มีรูป = โพสต์ข้อความ (/feed)
-export async function fbPublish(pageId: string, pageToken: string, message: string, imageUrl?: string): Promise<{ url: string; id: string }> {
-  if (imageUrl) {
-    const body = new URLSearchParams({ url: imageUrl, caption: message, access_token: pageToken });
-    const j = await graph(`${META_API}/${pageId}/photos`, { method: "POST", body });
-    const postId = String(j.post_id ?? j.id ?? "");
-    return { id: postId, url: postId ? `https://www.facebook.com/${postId}` : "" };
+// โพสต์ขึ้น Facebook Page
+//  - ไม่มีรูป      → โพสต์ข้อความ (/feed)
+//  - รูปเดียว      → โพสต์รูป+แคปชั่น (/photos)
+//  - หลายรูป       → อัปโหลดแบบยังไม่เผยแพร่ทีละรูป แล้วสร้างโพสต์ feed แนบรูปทั้งหมด (อัลบั้ม)
+//  - scheduledTime → ตั้งเวลา (unix วินาที): FB จัดคิวโพสต์ให้เอง (published=false + scheduled_publish_time)
+export async function fbPublish(pageId: string, pageToken: string, message: string, imageUrls: string[] = [], scheduledTime?: number): Promise<{ url: string; id: string; scheduled: boolean }> {
+  const scheduled = !!scheduledTime && scheduledTime > 0;
+  const withSchedule = (b: URLSearchParams) => { if (scheduled) { b.set("published", "false"); b.set("scheduled_publish_time", String(scheduledTime)); } return b; };
+  const result = (id: string) => ({ id, url: id ? `https://www.facebook.com/${id}` : "", scheduled });
+
+  if (imageUrls.length === 0) {
+    const b = withSchedule(new URLSearchParams({ message, access_token: pageToken }));
+    const j = await graph(`${META_API}/${pageId}/feed`, { method: "POST", body: b });
+    return result(String(j.id ?? ""));
   }
-  const body = new URLSearchParams({ message, access_token: pageToken });
-  const j = await graph(`${META_API}/${pageId}/feed`, { method: "POST", body });
-  const postId = String(j.id ?? "");
-  return { id: postId, url: postId ? `https://www.facebook.com/${postId}` : "" };
+  if (imageUrls.length === 1) {
+    const b = withSchedule(new URLSearchParams({ url: imageUrls[0], caption: message, access_token: pageToken }));
+    const j = await graph(`${META_API}/${pageId}/photos`, { method: "POST", body: b });
+    return result(String(j.post_id ?? j.id ?? ""));
+  }
+  // หลายรูป: อัปทีละรูปแบบ published=false → เก็บ media_fbid → สร้างโพสต์เดียวแนบทั้งหมด
+  const mediaIds: string[] = [];
+  for (const url of imageUrls) {
+    const b = new URLSearchParams({ url, published: "false", access_token: pageToken });
+    const j = await graph(`${META_API}/${pageId}/photos`, { method: "POST", body: b });
+    if (j.id) mediaIds.push(String(j.id));
+  }
+  const b = new URLSearchParams({ message, access_token: pageToken });
+  mediaIds.forEach((mid, i) => b.set(`attached_media[${i}]`, JSON.stringify({ media_fbid: mid })));
+  withSchedule(b);
+  const j = await graph(`${META_API}/${pageId}/feed`, { method: "POST", body: b });
+  return result(String(j.id ?? ""));
 }

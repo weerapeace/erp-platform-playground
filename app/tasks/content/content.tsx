@@ -33,6 +33,7 @@ import {
 } from "../data";
 import { useCreativeOptions, platformLabel } from "../use-options";
 import { PlatformChip } from "../platform-chip";
+import { PostConfirmModal, type PostImage } from "./post-confirm-modal";
 import { MultiUserPicker } from "../multi-user-picker";
 import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -383,6 +384,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [postedLinks, setPostedLinks] = useState<Record<string, string>>({});   // platform → ลิงก์โพสต์ที่ลงแล้ว
   const [metaStatus, setMetaStatus] = useState<MetaConnStatus>({});   // เชื่อมต่อ Facebook/IG ของแบรนด์นี้แล้วหรือยัง (กด "โพสต์เลย" ยิงจริงได้ไหม)
   const [posting, setPosting] = useState<string | null>(null);   // แพลตฟอร์มที่กำลังยิงโพสต์จริง
+  const [postModal, setPostModal] = useState<{ platform: string; captionText: string } | null>(null);   // ป๊อปอัปยืนยันก่อนโพสต์
   const [assignees, setAssignees] = useState<UserPickerValue[]>([]);   // ผู้รับผิดชอบคอนเทนต์ (หลายคน m2m)
   const [saving, setSaving] = useState(false);
   // แม่แบบ + ส่วนลด
@@ -525,20 +527,35 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const setPlatPostedUrl = (platform: string, url: string) =>
     setPostedLinks((prev) => { const n = { ...prev }; if (url.trim()) n[platform] = url; else delete n[platform]; return n; });
   const persistPostedLinks = () => void updateContent(contentId, { posted_links: postedLinks }).catch((e) => pushToast("error", (e as Error).message));
-  // ยิงโพสต์จริง (เฟส 2 — ตอนนี้ Facebook) · ยืนยันก่อน แล้วเรียก API → อัปเดตสถานะ/ลิงก์
-  const autoPost = async (platform: string, captionText: string) => {
+  // ยิงโพสต์จริง (เฟส 2 — Facebook) เรียกจากป๊อปอัปยืนยัน · รองรับหลายรูป + ตั้งเวลา
+  const runPublish = async (platform: string, captionText: string, imageKeys: string[], scheduledUnix: number | null) => {
     const label = platform === "facebook" ? "Facebook" : platformLabel(platform);
-    if (!window.confirm(t(`ยืนยันโพสต์ขึ้น ${label} เลยไหม?\nแคปชั่นนี้จะเผยแพร่สู่สาธารณะจริงทันที`, `Post to ${label} now?\nThis will be published publicly right away.`))) return;
-    const imageKeys = attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => a.r2_key as string);
     setPosting(platform);
     try {
-      const { url } = await publishToPlatform(contentId, platform, captionText, imageKeys);
-      setPostStatus((prev) => ({ ...prev, [platform]: "posted" }));
+      const { url, scheduled } = await publishToPlatform(contentId, platform, captionText, imageKeys, scheduledUnix ?? undefined);
+      setPostStatus((prev) => ({ ...prev, [platform]: scheduled ? "scheduled" : "posted" }));
       setPostedLinks((prev) => ({ ...prev, [platform]: url }));
-      pushToast("success", t(`โพสต์ขึ้น ${label} แล้ว 🎉`, `Posted to ${label} 🎉`));
+      pushToast("success", scheduled ? t(`ตั้งเวลาโพสต์บน ${label} แล้ว ⏰`, `Scheduled on ${label} ⏰`) : t(`โพสต์ขึ้น ${label} แล้ว 🎉`, `Posted to ${label} 🎉`));
+      setPostModal(null);
     } catch (e) { pushToast("error", (e as Error).message); }
     finally { setPosting(null); }
   };
+  // โหมดมือ (ยังไม่เชื่อม): คัดลอกแคปชั่น + เปิดหน้าโพสต์ให้
+  const manualPost = (platform: string, captionText: string) => {
+    navigator.clipboard.writeText(captionText).catch(() => {});
+    const u = (pset[platform]?.post_url ?? "").trim();
+    if (u) { window.open(u, "_blank", "noopener,noreferrer"); pushToast("success", t("คัดลอกแคปชั่น + เปิดหน้าโพสต์แล้ว", "Caption copied + post page opened")); }
+    else pushToast("info", t("คัดลอกแคปชั่นแล้ว · ยังไม่ได้ตั้งลิงก์หน้าโพสต์ (⚙️ ตั้งค่าแพลตฟอร์ม)", "Caption copied · no post link set (⚙️ Platform settings)"));
+    setPostModal(null);
+  };
+  // รูปที่เลือกลงโพสต์ได้ (รูปแนบคอนเทนต์ + รูปจากงาน · ตัดซ้ำ)
+  const postImages: PostImage[] = (() => {
+    const seen = new Set<string>(); const out: PostImage[] = [];
+    for (const a of attachments) if (a.kind === "image" && a.r2_key && !seen.has(a.r2_key)) { seen.add(a.r2_key); out.push({ key: a.r2_key, label: a.label ?? null }); }
+    for (const im of taskMedia.images) if (im.key && !seen.has(im.key)) { seen.add(im.key); out.push({ key: im.key, label: im.label ?? null }); }
+    return out;
+  })();
+  const contentImageKeys = attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => a.r2_key as string);
   // "ใช้ทั้งหมด": เปิดป๊อปให้เลือกโหมด (ถ้าช่องต้นทางยังว่างก็ไม่ต้องเปิด)
   const openApplyAll = (fromPlatform: string) => {
     const src = caps.find((c) => c.platform === fromPlatform);
@@ -848,7 +865,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onAutoPost={c.platform === "facebook" && metaStatus.facebook?.connected ? (text) => autoPost("facebook", text) : undefined} autoLabel={c.platform === "facebook" ? "Facebook" : undefined} autoBusy={posting === c.platform} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={c.platform === "facebook" && !!metaStatus.facebook?.connected} autoLabel={c.platform === "facebook" ? "Facebook" : undefined} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -867,6 +884,21 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
       {recOpen && <RecommendedTimesModal initial={recTimes} onClose={() => setRecOpen(false)} onSaved={(v) => { setRecTimes(v); setRecOpen(false); }} pushToast={pushToast} />}
       {hashOpen && <HashtagLibraryModal brandId={d.brand_id} onClose={() => setHashOpen(false)} pushToast={pushToast} />}
+      {postModal && (
+        <PostConfirmModal
+          platform={postModal.platform}
+          connected={postModal.platform === "facebook" && !!metaStatus.facebook?.connected}
+          pageName={metaStatus.facebook?.page_name}
+          captionText={postModal.captionText}
+          images={postImages}
+          defaultSelected={contentImageKeys}
+          scheduledAtLocal={scheduledAt}
+          busy={posting === postModal.platform}
+          onClose={() => setPostModal(null)}
+          onPublish={(keys, sched) => runPublish(postModal.platform, postModal.captionText, keys, sched)}
+          onManual={() => manualPost(postModal.platform, postModal.captionText)}
+        />
+      )}
       {applyFrom && (
         <ERPModal open onClose={() => setApplyFrom(null)} size="sm" title={t("ใช้แคปชั่น/แฮชแท็กนี้กับแพลตฟอร์มอื่น", "Apply to other platforms")}>
           <div className="space-y-2">
@@ -1035,7 +1067,7 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onAutoPost, autoLabel, autoBusy = false, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onAutoPost?: (captionText: string) => void; autoLabel?: string; autoBusy?: boolean; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [tplOpen, setTplOpen] = useState(false);   // พับปุ่มเลือกแม่แบบไว้ก่อน
   const useCaption = setting?.use_caption !== false;
@@ -1056,11 +1088,6 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, o
     { key: "skip", label: `⊘ ${t("ข้าม", "Skip")}`, onCls: "bg-slate-50 text-slate-400 border-slate-200" },
   ];
   // "โพสต์เลย" (มือ) — คัดลอกแคปชั่น + เปิดหน้าโพสต์ของแพลตฟอร์มให้ในคลิกเดียว แล้วให้ผู้ใช้มากด ✅
-  const postNow = async () => {
-    try { await navigator.clipboard.writeText(preview); } catch { /* noop */ }
-    if (postUrl) { window.open(postUrl, "_blank", "noopener,noreferrer"); pushToast("success", t("คัดลอกแคปชั่น + เปิดหน้าโพสต์แล้ว — วางแล้วกดโพสต์ เสร็จแล้วมากด ✅ โพสต์แล้ว", "Caption copied + post page opened — paste & post, then mark ✅ Posted")); }
-    else { pushToast("info", t("คัดลอกแคปชั่นแล้ว · ยังไม่ได้ตั้งลิงก์หน้าโพสต์ (กด 🔗 ตั้งลิงก์ / ⚙️ ตั้งค่าแพลตฟอร์ม)", "Caption copied · no post link set (use 🔗 Set link / ⚙️ Platform settings)")); }
-  };
 
   return (
     <div className="border border-slate-200 rounded-lg p-3 bg-white">
@@ -1068,6 +1095,7 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, o
         <span className="inline-flex items-center gap-1.5 min-w-0">
           <PlatformChip code={cap.platform} />
           {postStatus === "posted" && <span className="text-emerald-600 text-sm" title={t("โพสต์แล้ว", "Posted")}>✅</span>}
+          {postStatus === "scheduled" && <span className="text-blue-600 text-sm" title={t("ตั้งเวลาโพสต์แล้ว", "Scheduled")}>⏰</span>}
           {postStatus === "skip" && <span className="text-slate-300 text-sm" title={t("ข้าม (ไม่โพสต์แพลตฟอร์มนี้)", "Skipped")}>⊘</span>}
         </span>
         <div className="flex items-center gap-3 shrink-0">
@@ -1112,11 +1140,10 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, o
           {POST_STATES.map((st) => { const on = postStatus === st.key; return (
             <button key={st.key} onClick={() => onSetStatus?.(st.key)} className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${on ? st.onCls : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>{st.label}</button>
           ); })}
-          {onAutoPost
-            ? <button onClick={() => onAutoPost(preview)} disabled={autoBusy} title={t(`โพสต์ขึ้น ${autoLabel} จริงทันที`, `Publish to ${autoLabel} now`)} className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-white bg-blue-600 rounded-md px-2.5 py-1 hover:bg-blue-700 disabled:opacity-50">{autoBusy ? t("กำลังโพสต์...", "Posting...") : `🚀 ${t("โพสต์ขึ้น", "Post to")} ${autoLabel}`}</button>
-            : <button onClick={postNow} title={t("คัดลอกแคปชั่น + เปิดหน้าโพสต์ให้", "Copy caption + open post page")} className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-white bg-violet-600 rounded-md px-2.5 py-1 hover:bg-violet-700">📤 {t("โพสต์เลย", "Post now")}</button>}
+          {postStatus === "scheduled" && <span className="text-[11px] px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-300">⏰ {t("ตั้งเวลาแล้ว", "Scheduled")}</span>}
+          <button onClick={() => onRequestPost?.(preview)} title={canAuto ? t(`โพสต์ขึ้น ${autoLabel} จริง`, `Publish to ${autoLabel}`) : t("คัดลอกแคปชั่น + เปิดหน้าโพสต์", "Copy caption + open post page")} className={`ml-auto inline-flex items-center gap-1 text-xs font-medium text-white rounded-md px-2.5 py-1 ${canAuto ? "bg-blue-600 hover:bg-blue-700" : "bg-violet-600 hover:bg-violet-700"}`}>{canAuto ? `🚀 ${t("โพสต์ขึ้น", "Post to")} ${autoLabel}` : `📤 ${t("โพสต์เลย", "Post now")}`}</button>
         </div>
-        {postStatus === "posted" && (
+        {(postStatus === "posted" || postStatus === "scheduled") && (
           <div className="flex items-center gap-1.5 mt-1.5">
             <span className="text-[11px] text-slate-400 shrink-0">{t("ลิงก์ที่ลง", "Posted link")}</span>
             <input value={postedUrl} onChange={(e) => onSetPostedUrl?.(e.target.value)} onBlur={() => onCommitPostedUrl?.()} placeholder="https://..." className="flex-1 min-w-0 h-7 border border-slate-200 rounded-md px-2 text-xs" />

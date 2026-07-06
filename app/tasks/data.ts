@@ -434,10 +434,10 @@ export async function getMetaStatus(brandId: string): Promise<MetaConnStatus> {
   try { return (await apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(brandId)}`).then((r) => r.json())) as MetaConnStatus; }
   catch { return {}; }
 }
-// ยิงโพสต์คอนเทนต์ขึ้นแพลตฟอร์มจริง (ตอนนี้ facebook) — คืนลิงก์โพสต์
-export async function publishToPlatform(contentId: string, platform: string, captionText: string, imageKeys: string[]): Promise<{ url: string }> {
-  const j = await jsonOrThrow(await apiFetch("/api/meta/publish", { method: "POST", body: JSON.stringify({ content_id: contentId, platform, caption_text: captionText, image_keys: imageKeys }) }));
-  return { url: String((j as { url?: string }).url ?? "") };
+// ยิงโพสต์คอนเทนต์ขึ้นแพลตฟอร์มจริง (ตอนนี้ facebook) — เลือกได้หลายรูป + ตั้งเวลา (unix วินาที, 0=ทันที) · คืนลิงก์+ตั้งเวลาไหม
+export async function publishToPlatform(contentId: string, platform: string, captionText: string, imageKeys: string[], scheduledTime?: number): Promise<{ url: string; scheduled: boolean }> {
+  const j = await jsonOrThrow(await apiFetch("/api/meta/publish", { method: "POST", body: JSON.stringify({ content_id: contentId, platform, caption_text: captionText, image_keys: imageKeys, scheduled_time: scheduledTime ?? 0 }) }));
+  return { url: String((j as { url?: string }).url ?? ""), scheduled: !!(j as { scheduled?: boolean }).scheduled };
 }
 
 // ---- เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์) — เก็บ ui_config key 'creative_recommended_times' ----
