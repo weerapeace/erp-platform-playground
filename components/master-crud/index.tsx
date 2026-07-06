@@ -43,6 +43,7 @@ import type { StudioField } from "@/components/master-crud/studio-panel";
 const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-tab").then((m) => m.ParentPlatformsTab), { ssr: false });
+const CentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -2714,6 +2715,12 @@ export function MasterRecordDrawer({
       icon, activeField: "is_active", serverMode: true,
       permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
+      // Parent SKU → ช่อง "หมวดกลางสำหรับลงขาย" (platform_category_id) ใช้ picker ค้นหา+เพิ่มในตัว
+      formRenderers: moduleKey === "parent-skus-v2" ? {
+        platform_category_id: ({ value, onChange, disabled }) => (
+          <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder="— เลือกหมวดกลาง —" />
+        ),
+      } : undefined,
       // Parent SKU → ช่อง "รูป Description" ในฟอร์ม (เหมือนหน้า master page โดยตรง)
       extraFormSection: moduleKey === "parent-skus-v2"
         ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />

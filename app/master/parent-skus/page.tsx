@@ -26,6 +26,10 @@ const ProductPlatformManager = dynamic(
   () => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager),
   { ssr: false },
 );
+const CentralCategoryPicker = dynamic(
+  () => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker),
+  { ssr: false },
+);
 const ParentDescriptionImages = dynamic(
   () => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages),
   { ssr: false },
@@ -129,6 +133,13 @@ export default function ParentSKUsV2Page() {
       ...(CONFIG.extraRowActions ?? []),
       { label: "ลงขายหลายแพลตฟอร์ม", icon: "🏬", onClick: (row) => setMgrId(String(row.id)) },
     ],
+    // ช่อง "หมวดกลางสำหรับลงขาย" (platform_category_id) — picker ค้นหา+เพิ่มในตัว บนแท็บข้อมูลหลัก
+    formRenderers: {
+      ...(CONFIG.formRenderers ?? {}),
+      platform_category_id: ({ value, onChange, disabled }) => (
+        <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder="— เลือกหมวดกลาง —" />
+      ),
+    },
     // section พิเศษในฟอร์ม: รูป Description (มีลำดับ)
     extraFormSection: ({ recordId, readonly }) => (
       <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
