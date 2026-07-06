@@ -9,7 +9,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { verifyApprovalToken, APPROVE_CHANNEL_ID } from "@/lib/approval-token";
 import { verifyLineIdToken } from "@/lib/line-employee-portal-db";
-import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
+import { applySubtaskSync, reverseSubtaskSync, restoreSkuImagesBackup } from "@/lib/subtask-sync";
 import { userIdsReviewers, recomputeTaskStatusFromSubtasks } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
@@ -96,7 +96,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await applySubtaskSync(admin, r as Parameters<typeof applySubtaskSync>[1], { actorId: me.id });
       const ist = (r.image_sync_targets as Record<string, unknown> | null) ?? null;
       if (ist && Object.keys((ist.sku_images as Record<string, unknown>) ?? {}).length) {
-        await admin.from("erp_creative_subtasks").update({ image_sync_targets: { ...ist, sku_images: {}, moved_to_product: true } }).eq("id", v.subtaskId);
+        await admin.from("erp_creative_subtasks").update({ image_sync_targets: { ...ist, sku_images_backup: ist.sku_images, sku_images: {}, moved_to_product: true } }).eq("id", v.subtaskId);
       }
     } catch { /* sync พลาดไม่ทำให้อนุมัติพัง */ }
     await writeAudit(admin, { action: "subtask:approve_line", entityType: "creative_task", entityId: taskId, actorId: me.id, actorName: me.display_name ?? null, metadata: { subtask_id: v.subtaskId, via: "line" } });
@@ -104,6 +104,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const reason = String(body.reason ?? "").trim();
     await admin.from("erp_creative_subtasks").update({ status: "revision_requested", updated_at: new Date().toISOString(), config: { ...((row.config as Record<string, unknown>) ?? {}), review_note: reason || null, review_status: "revision_requested" } }).eq("id", v.subtaskId);
     try { await reverseSubtaskSync(admin, v.subtaskId, { actorId: me.id, reason: reason || null }); } catch { /* noop */ }
+    try { await restoreSkuImagesBackup(admin, v.subtaskId); } catch { /* noop */ }
     await writeAudit(admin, { action: "subtask:revise_line", entityType: "creative_task", entityId: taskId, actorId: me.id, actorName: me.display_name ?? null, metadata: { subtask_id: v.subtaskId, via: "line", reason } });
   }
   try { await recomputeTaskStatusFromSubtasks(admin, taskId); } catch { /* noop */ }

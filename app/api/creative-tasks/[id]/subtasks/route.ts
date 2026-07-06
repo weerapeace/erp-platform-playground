@@ -12,7 +12,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers, recomputeTaskStatusFromSubtasks, pushTasksLineTpl, employeeLabelMap, taskLink, materializeContentSubtasks } from "@/lib/creative-tasks-server";
-import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
+import { applySubtaskSync, reverseSubtaskSync, restoreSkuImagesBackup } from "@/lib/subtask-sync";
 import { approvalLink } from "@/lib/approval-token";
 import { renderPrompt } from "@/lib/subtask-prompt";
 
@@ -407,17 +407,21 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       // "ย้าย" รูปที่ส่งเข้าสินค้าแล้ว — เคลียร์ draft sku_images ออกจากงานย่อย (รูปไปอยู่ที่อัลบั้ม Parent SKU/SKU แล้ว · ไฟล์ R2 ใช้ร่วมกัน ไม่ลบ)
       const ist = (row.image_sync_targets as Record<string, unknown> | null) ?? null;
       if (ist && Object.keys((ist.sku_images as Record<string, unknown>) ?? {}).length) {
-        await admin.from("erp_creative_subtasks").update({ image_sync_targets: { ...ist, sku_images: {}, moved_to_product: true } }).eq("id", subtaskId);
-        if (row) row.image_sync_targets = { ...ist, sku_images: {}, moved_to_product: true };
+        // สำรอง sku_images ไว้ (sku_images_backup) — ถ้าตีกลับแก้ทีหลังจะคืนให้ช่างเห็น ไม่หาย
+        const moved = { ...ist, sku_images_backup: ist.sku_images, sku_images: {}, moved_to_product: true };
+        await admin.from("erp_creative_subtasks").update({ image_sync_targets: moved }).eq("id", subtaskId);
+        if (row) row.image_sync_targets = moved;
       }
     } catch { /* sync พลาดไม่ทำให้อนุมัติพัง */ }
   } else if ((patch.status === "revision_requested" || patch.status === "canceled")) {
     try { await reverseSubtaskSync(admin, subtaskId, { actorId: user?.id ?? null, reason: reason || null }); } catch { /* ถอดพลาดไม่ทำให้บันทึกพัง */ }
+    try { await restoreSkuImagesBackup(admin, subtaskId); } catch { /* คืนรูปสำรองพลาดไม่กระทบ */ }
     if (reason) { try { const cfg = (row?.config as Record<string, unknown>) ?? {}; await admin.from("erp_creative_subtasks").update({ config: { ...cfg, review_note: reason, review_status: patch.status } }).eq("id", subtaskId); } catch { /* noop */ } }
   }
   // ย้อนจาก "อนุมัติแล้ว" → สถานะอื่น (เช่น submitted) → ถอดข้อมูลที่ส่งเข้าสินค้าออก (revise/cancel ถอดในบล็อกบนแล้ว)
   if (wasApproved && patch.status && !["approved", "revision_requested", "canceled"].includes(String(patch.status))) {
     try { await reverseSubtaskSync(admin, subtaskId, { actorId: user?.id ?? null, reason: "revert from approved" }); } catch { /* noop */ }
+    try { await restoreSkuImagesBackup(admin, subtaskId); } catch { /* noop */ }
   }
 
   // ④ ส่งงาน (status → submitted) → แจ้งเตือน ผู้ตรวจ + admin/ผจก. ให้มากดอนุมัติ

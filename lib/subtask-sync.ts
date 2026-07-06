@@ -277,6 +277,23 @@ export async function reverseSubtaskSync(admin: any, subtaskId: string, opts: { 
 }
 
 /**
+ * คืน "รูปร่างต่อ SKU" (sku_images) ที่ถูกสำรองไว้ตอนอนุมัติ (sku_images_backup) กลับมา
+ * ใช้ตอน "ตีกลับแก้/ย้อนสถานะ" — ช่างจะได้เห็นรูปเดิมเพื่อแก้ ไม่หาย · ปลอดภัย (เพิ่มคืน ไม่ลบ)
+ */
+export async function restoreSkuImagesBackup(admin: any, subtaskId: string): Promise<void> {
+  const { data } = await admin.from("erp_creative_subtasks").select("image_sync_targets").eq("id", subtaskId).maybeSingle();
+  const ist = (data as { image_sync_targets?: Record<string, any> } | null)?.image_sync_targets ?? null;
+  if (!ist) return;
+  const backup = ist.sku_images_backup as Record<string, unknown> | undefined;
+  const curEmpty = !Object.keys((ist.sku_images as Record<string, unknown>) ?? {}).length;
+  if (backup && Object.keys(backup).length && curEmpty) {
+    const next: Record<string, any> = { ...ist, sku_images: backup, moved_to_product: false };
+    delete next.sku_images_backup;
+    await admin.from("erp_creative_subtasks").update({ image_sync_targets: next }).eq("id", subtaskId);
+  }
+}
+
+/**
  * ใส่รูปเข้าสินค้า "ทันที" (ปุ่ม 'ใส่เข้าสินค้าเลย' ในป๊อปอัปส่งงาน — ไม่รออนุมัติ)
  * items: { r2_key, slot }  · slot = attachment id (แทนช่องนั้น) หรือ "new"/ว่าง (เพิ่มรูปใหม่)
  * เก็บ ledger (media/media_replace) ไว้ดู/กู้เวอร์ชันเก่าได้ แต่ active:false → ไม่ถูกถอดตอน revise/ย้อนงานย่อย
