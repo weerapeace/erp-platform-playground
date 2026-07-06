@@ -7,7 +7,12 @@
  * ใช้: แท็บแพลตฟอร์มของสินค้า + หน้าข้อมูลหลัก (คู่กับ Category Id)
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+
+// หน้าจับคู่หมวด (ของกลาง) — โหลดเฉพาะตอนเปิด popup กัน bundle หนัก
+const PlatformCategoryMapper = dynamic(() => import("@/components/platform-category-mapper").then((m) => m.PlatformCategoryMapper), { ssr: false });
 
 type Cat = { id: string; name: string };
 
@@ -33,18 +38,20 @@ export function InlineCentralCategoryPicker({
 }
 
 export function CentralCategoryPicker({
-  value, onChange, disabled, placeholder = "— เลือกหมวดกลาง —", className = "",
+  value, onChange, disabled, placeholder = "— เลือกหมวดกลาง —", className = "", showMap = true,
 }: {
   value: string | null;
   onChange: (id: string | null) => void;
   disabled?: boolean;
   placeholder?: string;
   className?: string;
+  showMap?: boolean;   // แสดงปุ่ม "จับคู่หมวด" (เปิด popup หน้าจับคู่)
 }) {
   const [cats, setCats] = useState<Cat[]>([]);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
@@ -82,7 +89,8 @@ export function CentralCategoryPicker({
   };
 
   return (
-    <div className={`relative ${className}`} ref={ref}>
+    <div className={`flex items-center gap-1.5 ${className}`}>
+    <div className="relative flex-1 min-w-0" ref={ref}>
       <button type="button" disabled={disabled} onClick={() => setOpen((o) => !o)}
         className="w-full h-9 px-3 text-sm text-left border border-slate-200 rounded-lg bg-white hover:border-indigo-300 flex items-center justify-between gap-2 disabled:opacity-50">
         <span className={`truncate ${selected ? "text-slate-700" : "text-slate-400"}`}>{selected?.name || placeholder}</span>
@@ -113,6 +121,25 @@ export function CentralCategoryPicker({
           </div>
         </div>
       )}
+    </div>
+    {showMap && (
+      <button type="button" onClick={() => setMapOpen(true)} title="จับคู่หมวด / นำเข้าหมวดของร้าน"
+        className="shrink-0 h-9 px-2.5 text-xs font-medium text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 whitespace-nowrap">🔗 จับคู่</button>
+    )}
+    {mapOpen && typeof document !== "undefined" && createPortal(
+      <div className="fixed inset-0 z-[200] bg-black/40 flex items-start justify-center p-3 sm:p-6 overflow-y-auto" onClick={() => { setMapOpen(false); load(); }}>
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl my-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 sticky top-0 bg-white rounded-t-xl z-10">
+            <h3 className="text-base font-semibold text-slate-800">🗂️ จับคู่หมวดหมู่แพลตฟอร์ม</h3>
+            <button type="button" onClick={() => { setMapOpen(false); load(); }} className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+          </div>
+          <div className="max-h-[82vh] overflow-y-auto">
+            <PlatformCategoryMapper />
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )}
     </div>
   );
 }

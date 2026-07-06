@@ -85,8 +85,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 flex items-center gap-2 flex-wrap">
         <span className="text-xs font-medium text-indigo-900 shrink-0">🗂️ หมวดกลางสำหรับลงขาย</span>
         <CentralCategoryPicker value={parent?.platform_category_id ?? null} disabled={savingCat}
-          onChange={(id) => void saveCat(id ?? "")} placeholder="— ยังไม่เลือก —" className="min-w-[14rem] flex-1 max-w-xs" />
-        <a href="/master/platform-categories" target="_blank" rel="noopener noreferrer" className="text-[11px] text-indigo-600 underline shrink-0">จับคู่หมวด / นำเข้า →</a>
+          onChange={(id) => void saveCat(id ?? "")} placeholder="— ยังไม่เลือก —" className="min-w-[16rem] flex-1 max-w-md" />
         <span className="basis-full text-[11px] text-indigo-700/70">เลือกครั้งเดียว → หมวดของแต่ละร้านจะเติมให้อัตโนมัติตามที่จับคู่ไว้ (ยังแก้เองรายร้านได้)</span>
       </div>
 
