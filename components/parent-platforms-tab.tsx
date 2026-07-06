@@ -14,6 +14,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { PlatformIcon } from "@/components/platform-icon";
+import { CentralCategoryPicker } from "@/components/central-category-picker";
 
 // dynamic กัน import วน (ProductPlatformManager → master-crud → ParentPlatformsTab)
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
@@ -22,7 +23,6 @@ type Platform = { id: string; code: string; name_th: string; icon_key: string | 
 type Draft = { title?: string | null; category_path?: string | null; image_keys?: string[]; status?: string | null; platform_product_id?: string | null; last_sync_status?: string | null };
 type Account = { label: string | null; is_active: boolean };
 type Parent = { name_platform?: string; name_th?: string; platform_category_id?: string | null; platform_category_name?: string | null };
-type Cat = { id: string; name: string };
 
 export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [loading, setLoading] = useState(true);
@@ -31,7 +31,6 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [accounts, setAccounts] = useState<Record<string, Account>>({});
   const [mappings, setMappings] = useState<Record<string, string>>({});   // platform_id → หมวดของร้าน (จากหมวดกลาง)
   const [parent, setParent] = useState<Parent | null>(null);
-  const [cats, setCats] = useState<Cat[]>([]);                            // รายการหมวดกลางให้เลือก
   const [savingCat, setSavingCat] = useState(false);
   const [manage, setManage] = useState<string | null>(null); // platform id ที่เปิดตัวจัดการอยู่
   const lastLoadRef = useRef(0);                              // เวลาที่โหลดล่าสุด (ใช้หน่วง auto-refresh)
@@ -49,13 +48,8 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       lastLoadRef.current = Date.now();
     } catch { /* ignore */ } finally { setLoading(false); }
   }, [parentId]);
-  const loadCats = useCallback(() => {
-    apiFetch("/api/platform-central-categories").then((r) => r.json())
-      .then((j) => setCats((j.data ?? []) as Cat[])).catch(() => {});
-  }, []);
-  const refreshAll = useCallback(() => { void load(); loadCats(); }, [load, loadCats]);
+  const refreshAll = useCallback(() => { void load(); }, [load]);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { loadCats(); }, [loadCats]);
 
   // โหลดใหม่เมื่อกลับมาที่แท็บ — หน่วง 15 วิ กัน spam (เบา ไม่กระทบความเร็ว)
   useEffect(() => {
@@ -90,12 +84,8 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       {/* หมวดกลางสำหรับลงขาย — เลือกครั้งเดียว เติมทุกร้านอัตโนมัติ */}
       <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 flex items-center gap-2 flex-wrap">
         <span className="text-xs font-medium text-indigo-900 shrink-0">🗂️ หมวดกลางสำหรับลงขาย</span>
-        <select value={parent?.platform_category_id ?? ""} disabled={savingCat}
-          onChange={(e) => void saveCat(e.target.value)}
-          className="h-8 px-2 text-sm border border-indigo-200 rounded-lg bg-white min-w-[12rem] disabled:opacity-50">
-          <option value="">— ยังไม่เลือก —</option>
-          {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <CentralCategoryPicker value={parent?.platform_category_id ?? null} disabled={savingCat}
+          onChange={(id) => void saveCat(id ?? "")} placeholder="— ยังไม่เลือก —" className="min-w-[14rem] flex-1 max-w-xs" />
         <a href="/master/platform-categories" target="_blank" rel="noopener noreferrer" className="text-[11px] text-indigo-600 underline shrink-0">จับคู่หมวด / นำเข้า →</a>
         <span className="basis-full text-[11px] text-indigo-700/70">เลือกครั้งเดียว → หมวดของแต่ละร้านจะเติมให้อัตโนมัติตามที่จับคู่ไว้ (ยังแก้เองรายร้านได้)</span>
       </div>
