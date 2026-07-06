@@ -14,6 +14,7 @@ import { SkuPicker } from "@/components/pickers";
 import type { SkuPickerValue } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
 import { useViewPref } from "@/lib/use-view-pref";
+import { BoardLineSettings } from "@/components/board-line-settings";
 import type { QcShelf, QcItem, QcReason, QcSource, QcQueueCard, QcDeskCard } from "@/app/api/qc-warehouse/route";
 import type { DefectLog } from "@/app/api/qc-warehouse/defect-history/route";
 
@@ -75,6 +76,7 @@ export default function QcWarehousePage() {
   const [shopSort, setShopSort] = useState<"qty" | "sku" | "shelf">("qty");
   const [shopGroup, setShopGroup] = useState<"none" | "shelf" | "status" | "brand">("shelf");
   const [shopTab, setShopTab] = useState<"flow" | "shelf">("flow");   // แท็บย่อยในช้อป: รับ-ส่งงาน / ของในชั้น
+  const [lineSettingsOpen, setLineSettingsOpen] = useState(false);   // ป๊อปตั้งค่าแจ้งเตือน LINE
   const [atDesks, setAtDesks] = useState<QcDeskCard[]>([]);   // งานที่จ่ายไปที่โต๊ะ (ยังทำอยู่) — โชว์ในมุมมองช้อป
   const [histOpen, setHistOpen] = useState(false);
   const [histSearch, setHistSearch] = useState("");
@@ -459,6 +461,7 @@ export default function QcWarehousePage() {
           <button onClick={() => { void saveDefView(view); toast.success("ตั้งเป็นมุมมองเริ่มต้นของคุณแล้ว"); }}
             title={defView === view ? "มุมมองนี้เป็นค่าเริ่มต้นของคุณเมื่อเปิดหน้า" : "ตั้งมุมมองนี้เป็นค่าเริ่มต้นเมื่อเปิดหน้า (เฉพาะคุณ)"}
             className={`h-9 px-2.5 text-sm rounded-lg border ${defView === view ? "border-amber-300 bg-amber-50 text-amber-600" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>{defView === view ? "⭐" : "☆"}</button>
+          <button onClick={() => setLineSettingsOpen(true)} title="ตั้งค่ากลุ่ม LINE + ข้อความแจ้งเตือน" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🔔 แจ้งเตือน</button>
           <button onClick={() => { setHistSearch(""); setHistOpen(true); void loadHist(""); }} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📋 ประวัติของเสีย</button>
           <button onClick={() => void load()} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⟳</button>
         </div>
@@ -869,6 +872,8 @@ export default function QcWarehousePage() {
           })}
         </div>
       </ERPModal>
+
+      <BoardLineSettings open={lineSettingsOpen} onClose={() => setLineSettingsOpen(false)} />
 
       {/* ประวัติของเสีย (ตาม SKU) */}
       <ERPModal open={histOpen} onClose={() => setHistOpen(false)} size="lg" title="📋 ประวัติของเสีย (ตาม SKU)"
