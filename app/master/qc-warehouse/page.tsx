@@ -15,6 +15,7 @@ import type { SkuPickerValue } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
 import { useViewPref } from "@/lib/use-view-pref";
 import { BoardLineSettings } from "@/components/board-line-settings";
+import { SearchableSelect } from "@/components/searchable-select";
 import type { QcShelf, QcItem, QcReason, QcSource, QcQueueCard, QcDeskCard } from "@/app/api/qc-warehouse/route";
 import type { DefectLog } from "@/app/api/qc-warehouse/defect-history/route";
 
@@ -121,41 +122,25 @@ export default function QcWarehousePage() {
     catch (e) { toast.error(e instanceof Error ? e.message : "ไม่สำเร็จ"); return false; }
   }, [load, toast]);
 
-  // ── ตะกร้ารับเข้า (มุมมองช้อป) — เลือกงานรอ QC หลายใบ → รับเข้าชั้นทีเดียว ──
-  const [rcvCart, setRcvCart] = useState<Set<string>>(new Set());
-  const [rcvShelf, setRcvShelf] = useState("");
-  const [rcvConfirm, setRcvConfirm] = useState(false);
-  const [rcvData, setRcvData] = useState<Record<string, { good: number; bad: BadRow[] }>>({});
-  const [rcvSaving, setRcvSaving] = useState(false);
-  const toggleRcv = (woId: string) => setRcvCart((s) => { const n = new Set(s); n.has(woId) ? n.delete(woId) : n.add(woId); return n; });
-  const openRcvConfirm = () => {
-    if (!rcvShelf) { toast.error("เลือกชั้นปลายทางก่อน"); return; }
-    const sel = queue.filter((q) => rcvCart.has(q.wo_id));
-    if (sel.length === 0) { toast.error("ยังไม่ได้เลือกงาน"); return; }
-    const d: Record<string, { good: number; bad: BadRow[] }> = {};
-    for (const q of sel) d[q.wo_id] = { good: q.remaining, bad: [] };
-    setRcvData(d); setRcvConfirm(true);
-  };
-  const rcvSetGood = (woId: string, v: number) => setRcvData((d) => ({ ...d, [woId]: { good: v, bad: d[woId]?.bad ?? [] } }));
-  const rcvAddBad = (woId: string) => setRcvData((d) => { const cur = d[woId] ?? { good: 0, bad: [] }; return { ...d, [woId]: { ...cur, bad: [...cur.bad, { id: rid(), reasonId: reasons[0]?.id ?? "", qty: 0 }] } }; });
-  const rcvSetBad = (woId: string, bid: string, patch: Partial<BadRow>) => setRcvData((d) => { const cur = d[woId]; if (!cur) return d; return { ...d, [woId]: { ...cur, bad: cur.bad.map((b) => b.id === bid ? { ...b, ...patch } : b) } }; });
-  const rcvDelBad = (woId: string, bid: string) => setRcvData((d) => { const cur = d[woId]; if (!cur) return d; return { ...d, [woId]: { ...cur, bad: cur.bad.filter((b) => b.id !== bid) } }; });
-  const submitRcvBulk = async () => {
-    const sel = queue.filter((q) => rcvCart.has(q.wo_id));
-    for (const q of sel) { const dd = rcvData[q.wo_id]; if (dd?.bad.some((b) => num(b.qty) > 0 && !b.reasonId)) { toast.error("เลือกสาเหตุของเสียให้ครบ"); return; } }
-    setRcvSaving(true);
+  // ── ตะกร้าส่งออก (มุมมองช้อป → แท็บของในชั้น) — เลือกของดีหลายชิ้น → ส่งออกทีเดียว ──
+  const [shipCartMode, setShipCartMode] = useState(false);          // โหมดใส่ตะกร้า (กดการ์ด = ใส่ตะกร้า)
+  const [shipCart, setShipCart] = useState<Set<string>>(new Set()); // item.id ของดีที่เลือกส่งออก
+  const [shipCartDest, setShipCartDest] = useState<"sell" | "sales_wh">("sales_wh");   // ปลายทาง
+  const [shipCartWh, setShipCartWh] = useState(WAREHOUSES[0]);
+  const [shipCartSaving, setShipCartSaving] = useState(false);
+  const toggleShipCart = (id: string) => setShipCart((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const submitShipCart = async () => {
+    const ids = [...shipCart]; if (ids.length === 0) return;
+    setShipCartSaving(true);
     let ok = 0; const fails: string[] = [];
-    for (const q of sel) {
-      const dd = rcvData[q.wo_id] ?? { good: q.remaining, bad: [] };
-      const badRows = dd.bad.filter((b) => num(b.qty) > 0).map((b) => ({ reason: reasonName(b.reasonId), qty: num(b.qty) }));
+    for (const id of ids) {
       try {
-        const res = await apiFetch("/api/qc-warehouse/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "receive", wo_id: q.wo_id, shelf_id: rcvShelf, good: num(dd.good), bad: badRows }) });
+        const res = await apiFetch("/api/qc-warehouse/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "ship", item_id: id, mode: shipCartDest, wh: shipCartDest === "sales_wh" ? shipCartWh : null }) });
         const j = await res.json(); if (j.error) throw new Error(j.error); ok++;
-      } catch { fails.push(q.mo_no ?? q.wo_id); }
+      } catch { fails.push(id); }
     }
-    setRcvSaving(false); setRcvConfirm(false); setRcvCart(new Set());
-    if (ok > 0) toast.success(`รับเข้าชั้นแล้ว ${ok} รายการ${fails.length ? ` · พลาด ${fails.length}` : ""}`);
-    else toast.error("รับเข้าไม่สำเร็จ");
+    setShipCartSaving(false); setShipCart(new Set());
+    if (ok > 0) toast.success(`ส่งออกแล้ว ${ok} ชิ้น${fails.length ? ` · พลาด ${fails.length}` : ""}`); else toast.error("ส่งออกไม่สำเร็จ");
     await load();
   };
 
@@ -223,6 +208,13 @@ export default function QcWarehousePage() {
   const [tdReason, setTdReason] = useState("");
   const [repair, setRepair] = useState<QcItem | null>(null);
   const [repairBy, setRepairBy] = useState("");
+  // ช่าง/แผนก สำหรับเลือกช่างที่ซ่อม (default = คนที่ส่งมา)
+  const [craftsmen, setCraftsmen] = useState<{ id: string; name: string; code: string | null; department_id?: string | null }[]>([]);
+  const [repairDepts, setRepairDepts] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { void (async () => {
+    try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); } catch { /* ignore */ }
+    try { const r = await apiFetch("/api/mo/departments"); const j = await r.json(); setRepairDepts(((j.data ?? []) as { id: string; name: string }[]).map((d) => ({ id: d.id, name: d.name }))); } catch { /* ignore */ }
+  })(); }, []);
   const [fromRepair, setFromRepair] = useState<QcItem | null>(null);
   const [frGood, setFrGood] = useState(0);
   const [frScrap, setFrScrap] = useState(0);
@@ -364,8 +356,11 @@ export default function QcWarehousePage() {
   const renderShopCard = (i: QcItem & { shelfName: string; shelfKind: string }) => {
     const sb = statusBadge(i.status);
     return (
-      <div key={i.id} onClick={() => { const shelf = shelves.find((s) => s.id === i.shelf_id); if (shelf) setDetail({ kind: "item", shelf, item: i }); }}
-        className="rounded-xl bg-white border border-slate-200 shadow-sm p-2.5 cursor-pointer hover:border-indigo-300"
+      <div key={i.id} onClick={() => {
+          if (shipCartMode && i.status === "good") { toggleShipCart(i.id); return; }
+          const shelf = shelves.find((s) => s.id === i.shelf_id); if (shelf) setDetail({ kind: "item", shelf, item: i });
+        }}
+        className={`rounded-xl bg-white border shadow-sm p-2.5 cursor-pointer ${shipCart.has(i.id) ? "border-indigo-400 ring-2 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}
         style={{ borderLeft: `4px solid ${cardColor(i.brand_color, i.sku)}` }}>
         <div className="flex items-start gap-2">
           <Thumb k={i.image_key} color={cardColor(i.brand_color, i.sku)} />
@@ -425,28 +420,22 @@ export default function QcWarehousePage() {
     );
   };
 
-  // ── การ์ด "งานรอ QC" (ติ๊กเลือกใส่ตะกร้ารับเข้า) ──
-  const renderQueueCard = (c: QcQueueCard) => {
-    const inCart = rcvCart.has(c.wo_id);
-    return (
-      <div key={c.wo_id} onClick={() => toggleRcv(c.wo_id)}
-        className={`rounded-xl border p-2.5 cursor-pointer transition ${inCart ? "border-indigo-400 ring-2 ring-indigo-200 bg-white" : "border-slate-200 bg-white hover:border-indigo-300"}`}
-        style={{ borderLeft: `4px solid ${cardColor(c.brand_color, c.sku)}` }}>
-        <div className="flex items-start gap-2">
-          <Thumb k={c.image_key} color={cardColor(c.brand_color, c.sku)} />
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-semibold text-slate-800 leading-snug truncate">{c.name || c.sku}</div>
-            <div className="text-[11px] text-slate-500 font-mono truncate">{c.sku} · {c.mo_no}</div>
-            <div className="text-[11px] text-slate-500 truncate">👷 {c.worker ?? "—"}</div>
-          </div>
-          <div className="flex flex-col items-end gap-1 shrink-0">
-            <input type="checkbox" checked={inCart} onClick={(e) => e.stopPropagation()} onChange={() => toggleRcv(c.wo_id)} className="w-4 h-4 accent-indigo-600" />
-            <span className="text-xs font-bold text-indigo-600">รอรับ {fmt(c.remaining)}</span>
-          </div>
+  // ── การ์ด "งานรอ QC" — กดเปิดป๊อป (เลือกชั้นรับเข้า + ดี/เสีย) ──
+  const renderQueueCard = (c: QcQueueCard) => (
+    <div key={c.wo_id} onClick={() => setDetail({ kind: "queue", card: c })}
+      className="rounded-xl border border-slate-200 bg-white p-2.5 cursor-pointer transition hover:border-indigo-300"
+      style={{ borderLeft: `4px solid ${cardColor(c.brand_color, c.sku)}` }} title="กดเพื่อรับเข้าชั้น">
+      <div className="flex items-start gap-2">
+        <Thumb k={c.image_key} color={cardColor(c.brand_color, c.sku)} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold text-slate-800 leading-snug truncate">{c.name || c.sku}</div>
+          <div className="text-[11px] text-slate-500 font-mono truncate">{c.sku} · {c.mo_no}</div>
+          <div className="text-[11px] text-slate-500 truncate">👷 {c.worker ?? "—"}</div>
         </div>
+        <span className="text-xs font-bold text-indigo-600 shrink-0">รอรับ {fmt(c.remaining)}</span>
       </div>
-    );
-  };
+    </div>
+  );
 
   return (
     <div className={isMax ? "fixed inset-0 z-40 bg-white overflow-auto px-5 py-4" : "max-w-[1700px] mx-auto px-5 py-5"}>
@@ -617,7 +606,7 @@ export default function QcWarehousePage() {
                 <>
                   {/* 📥 งานรอ QC — ติ๊กเลือกใส่ตะกร้า → รับเข้าชั้นทีเดียว */}
                   <div className="mb-5">
-                    <div className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-1.5 mb-2">📥 งานรอ QC (ติ๊กเลือก → รับเข้าชั้น) <span className="text-indigo-400 font-normal">({queueFiltered.length})</span></div>
+                    <div className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-1.5 mb-2">📥 งานรอ QC (กดการ์ด → เลือกชั้นรับเข้า) <span className="text-indigo-400 font-normal">({queueFiltered.length})</span></div>
                     {queueFiltered.length === 0
                       ? <div className="text-center py-6 text-[12px] text-slate-300">ไม่มีงานรอรับเข้า (งานที่ช่างส่งกลับจากบอร์ดจ่ายงานจะมาโชว์ที่นี่)</div>
                       : <div className={gridCls}>{queueFiltered.map(renderQueueCard)}</div>}
@@ -632,9 +621,15 @@ export default function QcWarehousePage() {
                 </>
               ) : (
                 <>
-                  <div className="flex items-center justify-end gap-2 mb-2">
-                    <button onClick={() => openAddManual("")} className="h-9 px-3 text-sm font-medium border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">➕ ใส่ของเข้าชั้น</button>
-                    <button onClick={openAddShelf} className="h-9 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">➕ เพิ่มชั้น</button>
+                  <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                    <button onClick={() => setShipCartMode((m) => { if (m) setShipCart(new Set()); return !m; })}
+                      className={`h-9 px-3 text-sm font-medium rounded-lg border ${shipCartMode ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                      {shipCartMode ? "✓ โหมดใส่ตะกร้า (กดของดี = ใส่ตะกร้า)" : "🛒 โหมดใส่ตะกร้า — ส่งออกหลายชิ้น"}
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => openAddManual("")} className="h-9 px-3 text-sm font-medium border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">➕ ใส่ของเข้าชั้น</button>
+                      <button onClick={openAddShelf} className="h-9 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">➕ เพิ่มชั้น</button>
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 mb-3">
                     <select value={shopStatus} onChange={(e) => setShopStatus(e.target.value as typeof shopStatus)} title="กรองสถานะ" className={selCls}>
@@ -759,7 +754,7 @@ export default function QcWarehousePage() {
       </ERPModal>
 
       {/* ตะกร้าลอยริมขวา (มุมมองช้อป) — 📤 ส่งงาน + 📥 รับเข้า */}
-      {view === "shop" && (rcvCart.size > 0 || Object.keys(sendCart).length > 0) && (
+      {view === "shop" && (shipCart.size > 0 || Object.keys(sendCart).length > 0) && (
         <div className="fixed right-3 top-24 z-40 w-72 max-w-[92vw] max-h-[calc(100vh-120px)] overflow-y-auto bg-white border border-slate-200 shadow-2xl rounded-xl p-3 space-y-3">
           {Object.keys(sendCart).length > 0 && (
             <div>
@@ -779,26 +774,31 @@ export default function QcWarehousePage() {
               <button onClick={() => void submitSendCart()} disabled={sendSaving} className="mt-2 w-full h-9 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{sendSaving ? "กำลังส่ง…" : `ส่งงานทั้งหมด (${Object.keys(sendCart).length})`}</button>
             </div>
           )}
-          {rcvCart.size > 0 && (
+          {shipCart.size > 0 && (
             <div className={Object.keys(sendCart).length > 0 ? "pt-3 border-t border-slate-100" : ""}>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-sm font-bold text-indigo-700">📥 ตะกร้ารับเข้า ({rcvCart.size})</span>
-                <button onClick={() => setRcvCart(new Set())} className="text-[11px] text-slate-400 hover:text-rose-500">ล้าง</button>
+                <span className="text-sm font-bold text-indigo-700">📤 ตะกร้าส่งออก ({shipCart.size})</span>
+                <button onClick={() => setShipCart(new Set())} className="text-[11px] text-slate-400 hover:text-rose-500">ล้าง</button>
               </div>
               <div className="space-y-1.5 max-h-52 overflow-y-auto">
-                {queue.filter((c) => rcvCart.has(c.wo_id)).map((c) => (
-                  <div key={c.wo_id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-100">
-                    <Thumb k={c.image_key} color={cardColor(c.brand_color, c.sku)} size={28} />
-                    <div className="min-w-0 flex-1"><div className="text-xs font-semibold text-slate-800 truncate">{c.sku}</div><div className="text-[10px] text-slate-400">รอรับ {fmt(c.remaining)}</div></div>
-                    <button onClick={() => toggleRcv(c.wo_id)} className="text-slate-300 hover:text-rose-500 text-xs shrink-0">✕</button>
+                {allItems.filter((i) => shipCart.has(i.id)).map((i) => (
+                  <div key={i.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-100">
+                    <Thumb k={i.image_key} color={cardColor(i.brand_color, i.sku)} size={28} />
+                    <div className="min-w-0 flex-1"><div className="text-xs font-semibold text-slate-800 truncate">{i.sku}</div><div className="text-[10px] text-slate-400">{fmt(Number(i.qty))} ชิ้น · {i.shelfName}</div></div>
+                    <button onClick={() => toggleShipCart(i.id)} className="text-slate-300 hover:text-rose-500 text-xs shrink-0">✕</button>
                   </div>
                 ))}
               </div>
-              <select value={rcvShelf} onChange={(e) => setRcvShelf(e.target.value)} className="mt-2 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <option value="">— เลือกชั้นปลายทาง —</option>
-                {storeShelves.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              <select value={shipCartDest} onChange={(e) => setShipCartDest(e.target.value as "sell" | "sales_wh")} className="mt-2 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="sales_wh">เข้าคลังขาย</option>
+                <option value="sell">ขายออก</option>
               </select>
-              <button onClick={openRcvConfirm} disabled={!rcvShelf} className="mt-1.5 w-full h-9 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">รับเข้าชั้น</button>
+              {shipCartDest === "sales_wh" && (
+                <select value={shipCartWh} onChange={(e) => setShipCartWh(e.target.value)} className="mt-1.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  {WAREHOUSES.map((w) => <option key={w} value={w}>{w}</option>)}
+                </select>
+              )}
+              <button onClick={() => void submitShipCart()} disabled={shipCartSaving} className="mt-1.5 w-full h-9 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{shipCartSaving ? "กำลังส่งออก…" : `ส่งออกทั้งหมด (${shipCart.size})`}</button>
             </div>
           )}
         </div>
@@ -836,46 +836,6 @@ export default function QcWarehousePage() {
             </div>
           );
         })()}
-      </ERPModal>
-
-      {/* ป๊อปยืนยันรับเข้า — ใส่ดี/เสีย+สาเหตุ ต่อใบ */}
-      <ERPModal open={rcvConfirm} onClose={() => !rcvSaving && setRcvConfirm(false)} size="lg" title="📥 ยืนยันรับเข้าชั้น"
-        footer={<>
-          <button onClick={() => setRcvConfirm(false)} disabled={rcvSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-          <button onClick={() => void submitRcvBulk()} disabled={rcvSaving} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{rcvSaving ? "กำลังรับเข้า…" : `ยืนยันรับเข้า (${rcvCart.size})`}</button>
-        </>}>
-        <div className="space-y-2.5">
-          <div className="text-sm text-slate-600">รับเข้าชั้น <b>{storeShelves.find((s) => s.id === rcvShelf)?.name ?? "—"}</b> · แยกจำนวนดี/เสียต่อใบได้ (ของเสียจะเข้าชั้นของเสียให้อัตโนมัติ)</div>
-          {queue.filter((q) => rcvCart.has(q.wo_id)).map((q) => {
-            const dd = rcvData[q.wo_id] ?? { good: q.remaining, bad: [] };
-            const badTotal = dd.bad.reduce((s, b) => s + num(b.qty), 0);
-            const over = num(dd.good) + badTotal > q.remaining + 0.0001;
-            return (
-              <div key={q.wo_id} className="border border-slate-200 rounded-lg p-2.5">
-                <div className="flex items-center gap-2">
-                  <Thumb k={q.image_key} color={cardColor(q.brand_color, q.sku)} size={32} />
-                  <div className="min-w-0 flex-1"><span className="text-sm font-semibold text-slate-800">{q.sku}</span> <span className="text-[11px] text-slate-400 font-mono">· {q.mo_no}</span><div className="text-[11px] text-slate-400">รอรับ {fmt(q.remaining)}</div></div>
-                  <label className="text-[11px] text-slate-500">ดี <input type="number" min={0} value={dd.good} onChange={(e) => rcvSetGood(q.wo_id, num(e.target.value))} className="w-20 h-8 ml-1 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
-                </div>
-                {dd.bad.map((b) => (
-                  <div key={b.id} className="flex items-center gap-1.5 mt-1.5 pl-1">
-                    <span className="text-[11px] text-rose-500">เสีย</span>
-                    <select value={b.reasonId} onChange={(e) => rcvSetBad(q.wo_id, b.id, { reasonId: e.target.value })} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white flex-1 min-w-0">
-                      <option value="">— เลือกสาเหตุ —</option>
-                      {reasons.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                    </select>
-                    <input type="number" min={0} value={b.qty} onChange={(e) => rcvSetBad(q.wo_id, b.id, { qty: num(e.target.value) })} className="w-16 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg" />
-                    <button onClick={() => rcvDelBad(q.wo_id, b.id)} className="text-slate-300 hover:text-rose-500 text-sm shrink-0">✕</button>
-                  </div>
-                ))}
-                <div className="flex items-center justify-between mt-1.5">
-                  <button onClick={() => rcvAddBad(q.wo_id)} className="text-[11px] text-rose-600 hover:underline">+ เพิ่มของเสีย</button>
-                  {over && <span className="text-[11px] text-rose-500">⚠️ ดี+เสีย เกินจำนวนรอรับ</span>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </ERPModal>
 
       <BoardLineSettings open={lineSettingsOpen} onClose={() => setLineSettingsOpen(false)} />
@@ -972,8 +932,16 @@ export default function QcWarehousePage() {
         {repair && (
           <div className="space-y-3">
             <div className="text-[12px] text-slate-500"><b className="text-slate-700">{repair.sku_name}</b> · {fmt(Number(repair.qty))} ชิ้น{repair.reason ? ` · ⚠️ ${repair.reason}` : ""}</div>
-            <label className="block"><span className="text-[11px] text-slate-500">ช่างที่ซ่อม</span>
-              <input value={repairBy} onChange={(e) => setRepairBy(e.target.value)} placeholder="ชื่อช่างซ่อม" className="w-full h-10 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" /></label>
+            <label className="block"><span className="text-[11px] text-slate-500">ช่างที่ซ่อม (แผนก / ช่างรายคน)</span>
+              <div className="mt-0.5">
+                <SearchableSelect value={repairBy} onChange={setRepairBy} placeholder="— เลือกช่าง/แผนก —"
+                  options={[
+                    ...(repairBy && ![...repairDepts.map((d) => d.name), ...craftsmen.map((c) => c.name)].includes(repairBy) ? [{ value: repairBy, label: repairBy, searchText: repairBy }] : []),
+                    ...repairDepts.map((d) => ({ value: d.name, label: `🪑 ${d.name}`, searchText: d.name })),
+                    ...craftsmen.map((c) => ({ value: c.name, label: `👷 ${c.code ? `[${c.code}] ` : ""}${c.name}`, searchText: `${c.code ?? ""} ${c.name}` })),
+                  ]} />
+              </div>
+              <span className="text-[10px] text-slate-400">ค่าเริ่มต้น = คนที่ส่งมา ({repair.worker ?? "—"})</span></label>
           </div>
         )}
       </ERPModal>
@@ -1041,6 +1009,18 @@ export default function QcWarehousePage() {
                     {storeShelves.map((s) => (<button key={s.id} onClick={() => { const card = detail.card; setDetail(null); openReceive(card, s); }} className="text-[12px] px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">🗄️ {s.name}</button>))}
                     {storeShelves.length === 0 && <span className="text-[11px] text-rose-500">ยังไม่มีชั้นเก็บ</span>}
                   </div></div>
+              )}
+              {detail.kind === "item" && detail.shelf.kind === "defect" && (
+                <div className="pt-1 border-t border-slate-100">
+                  {detail.item.status === "repairing" ? (
+                    <div className="flex gap-1.5">
+                      <button onClick={() => { const it = detail.item; setDetail(null); openFromRepair(it); }} className="flex-1 text-[12px] px-2.5 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50">📥 รับจากซ่อม</button>
+                      <button onClick={() => { const it = detail.item; setDetail(null); void cancelRepair(it); }} className="text-[12px] px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">ยกเลิกซ่อม</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => { const it = detail.item; setDetail(null); openRepair(it); }} className="w-full text-[12px] px-2.5 py-1.5 rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50">🔧 ส่งซ่อม</button>
+                  )}
+                </div>
               )}
             </div>
           );
