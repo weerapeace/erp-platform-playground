@@ -969,10 +969,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // F11B: Studio v1 (drag-drop layout builder)
   const [studioOpen, setStudioOpen] = useState(false);
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
-  // ปุ่ม "ออกแบบฟอร์ม" (Studio) วางที่แถบแท็บบนของ drawer — โผล่เฉพาะโมดูลจริง + มีสิทธิ์แก้
+  // ปุ่ม "ออกแบบฟอร์ม" (Studio) — ไอคอนที่หัว drawer ข้างซ้ายปุ่มปิด · โผล่เฉพาะโมดูลจริง + มีสิทธิ์แก้
   const studioHeaderBtn = config.moduleKey && canEdit ? (
     <button type="button" onClick={() => setStudioOpen(true)} title="ออกแบบฟอร์ม/ตาราง — จัดฟิลด์ · แท็บ · เห็น preview สด"
-      className="h-7 px-2.5 text-xs font-medium border border-orange-200 text-orange-600 rounded-md hover:bg-orange-50 inline-flex items-center gap-1 whitespace-nowrap">🎨 ออกแบบฟอร์ม</button>
+      className="p-1.5 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors text-base leading-none">🎨</button>
   ) : undefined;
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);   // นำเข้าข้อมูล (ของกลาง)
@@ -2255,6 +2255,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         onClose={discard}
         size="lg"
         hasUnsavedChanges={drawerMode === "edit" && dirty}
+        headerActions={studioHeaderBtn}
         title={
           drawerMode === "view"
             ? (editingId ? `${config.title}` : `เพิ่ม ${config.title}`)
@@ -2466,8 +2467,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {createHeaderEl}
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"
-                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} headerRight={studioHeaderBtn} />
-                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} headerRight={studioHeaderBtn} />
+                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
+                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} />
                 ) : (
                   <div className="text-sm text-slate-300 py-8 text-center">ไม่มีข้อมูลเพิ่มเติม</div>
                 )}

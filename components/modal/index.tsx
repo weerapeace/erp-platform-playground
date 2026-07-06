@@ -109,6 +109,8 @@ export interface DrawerProps {
   hasUnsavedChanges?: boolean;
   storageKey?: string;
   defaultWidth?: number;
+  /** ปุ่ม/ไอคอนเสริมที่หัว drawer (ซ้ายของปุ่มปิด) — เช่น ปุ่มออกแบบฟอร์ม */
+  headerActions?: React.ReactNode;
 }
 
 // ---- Size map ----
@@ -526,6 +528,7 @@ export function Drawer({
   hasUnsavedChanges = false,
   storageKey = "erp-drawer-width",
   defaultWidth,
+  headerActions,
 }: DrawerProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -618,12 +621,15 @@ export function Drawer({
             <h2 className="text-base font-semibold text-slate-900">{title}</h2>
             {description && <p className="text-sm text-slate-500 mt-0.5">{description}</p>}
           </div>
-          <button
-            onClick={handleClose}
-            className="ml-4 flex-shrink-0 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-          >
-            <IconX />
-          </button>
+          <div className="ml-4 flex-shrink-0 flex items-center gap-1">
+            {headerActions}
+            <button
+              onClick={handleClose}
+              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <IconX />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
