@@ -36,14 +36,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!v) return NextResponse.json({ error: "ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว" }, { status: 400 });
   const admin = supabaseAdmin();
   const { data: sub } = await admin.from("erp_creative_subtasks")
-    .select("id, task_id, title, subtask_type, status, config, task:erp_creative_tasks!task_id(task_no, title)")
+    .select("id, task_id, title, subtask_type, status, config, image_sync_targets, task:erp_creative_tasks!task_id(task_no, title)")
     .eq("id", v.subtaskId).maybeSingle();
   if (!sub) return NextResponse.json({ error: "ไม่พบงานย่อยนี้" }, { status: 404 });
   const t = (Array.isArray((sub as Record<string, unknown>).task) ? (sub as Record<string, unknown[]>).task[0] : (sub as Record<string, unknown>).task) as { task_no?: string; title?: string } | null;
+  const url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
   const { data: atts } = await admin.from("erp_creative_attachments").select("r2_key, file_name, kind").eq("subtask_id", v.subtaskId);
-  const images = ((atts ?? []) as { r2_key: string | null; kind: string }[]).filter((a) => a.kind === "image" && a.r2_key)
-    .map((a) => `/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}`);
+  const images = ((atts ?? []) as { r2_key: string | null; kind: string }[]).filter((a) => a.kind === "image" && a.r2_key).map((a) => url(a.r2_key as string));
   const links = ((atts ?? []) as { r2_key: string | null; file_name: string | null; kind: string }[]).filter((a) => a.kind !== "image");
+  // รูปงานที่จะเข้าสินค้า — จัดกลุ่มตาม Parent/SKU (มีรหัสกำกับ) จาก image_sync_targets
+  const ist = (sub as { image_sync_targets?: { product_images?: Record<string, string[]>; sku_images?: Record<string, string[]>; product_labels?: Record<string, string> } | null }).image_sync_targets ?? null;
+  const groups: { code: string; images: string[] }[] = [];
+  if (ist) {
+    const labels = ist.product_labels ?? {};
+    for (const [tk, keys] of Object.entries(ist.product_images ?? {})) {
+      const ks = (keys ?? []).filter(Boolean); if (!ks.length) continue;
+      groups.push({ code: labels[tk] || (tk.startsWith("parent:") ? "Parent SKU" : "SKU"), images: ks.map(url) });
+    }
+    for (const [sid, keys] of Object.entries(ist.sku_images ?? {})) {
+      const ks = (keys ?? []).filter(Boolean); if (!ks.length) continue;
+      groups.push({ code: labels[`sku:${sid}`] || "SKU", images: ks.map(url) });
+    }
+  }
   return NextResponse.json({
     error: null,
     data: {
@@ -54,6 +68,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       task_no: t?.task_no ?? null,
       task_title: t?.title ?? null,
       images,
+      groups,
       links: links.map((l) => ({ label: l.file_name, key: l.r2_key })),
     },
   });

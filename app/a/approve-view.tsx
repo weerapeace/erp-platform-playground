@@ -11,7 +11,7 @@ const getLiff = () => (typeof window !== "undefined" ? (window as unknown as { l
 const LIFF_SCRIPT = "https://static.line-scdn.net/liff/edge/2/sdk.js";
 const liffId = () => process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.env.NEXT_PUBLIC_LIFF_ID || "2010621559-NELkN0OU";
 
-type Preview = { id: string; title: string; subtask_type: string | null; status: string | null; task_no: string | null; task_title: string | null; images: string[]; links: { label: string | null; key: string | null }[] };
+type Preview = { id: string; title: string; subtask_type: string | null; status: string | null; task_no: string | null; task_title: string | null; images: string[]; groups?: { code: string; images: string[] }[]; links: { label: string | null; key: string | null }[] };
 
 function loadLiff() {
   return new Promise<void>((resolve, reject) => {
@@ -104,6 +104,8 @@ export function ApproveView({ tokenProp }: { tokenProp?: string }) {
     </div>
   );
 
+  const groups = data.groups ?? [];
+  const allImgs = [...groups.flatMap((g) => g.images), ...data.images];   // รวมทุกรูปไว้ดูเต็มจอ (กลุ่มก่อน แล้วรูปแนบงาน)
   return wrap(
     <div className="space-y-3">
       <div>
@@ -112,14 +114,40 @@ export function ApproveView({ tokenProp }: { tokenProp?: string }) {
         <p className="text-sm text-violet-700 font-medium">{data.title}</p>
       </div>
 
-      {data.images.length > 0 ? (
-        <div className="grid grid-cols-3 gap-1.5">
-          {data.images.map((src, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={i} src={src} alt="" onClick={() => setLb(i)} className="w-full h-24 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
-          ))}
-        </div>
-      ) : <p className="text-sm text-slate-400 italic">งานย่อยนี้ไม่ได้แนบรูป</p>}
+      {allImgs.length === 0 ? <p className="text-sm text-slate-400 italic">งานย่อยนี้ไม่ได้แนบรูป</p> : (() => {
+        let run = 0;   // ดัชนีรวมสำหรับเปิดดูเต็มจอ
+        return (
+          <div className="space-y-2.5">
+            {/* รูปเข้าสินค้า — จัดกลุ่มตาม Parent/SKU + รหัสกำกับ + เลขกำกับในกลุ่ม */}
+            {groups.map((g, gi) => (
+              <div key={gi}>
+                <p className="text-[10px] font-mono text-slate-600 bg-slate-100 inline-block px-1.5 py-0.5 rounded mb-1">📦 {g.code} <span className="text-slate-400">({g.images.length})</span></p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {g.images.map((src, j) => { const i = run++; return (
+                    <div key={j} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={src} alt="" onClick={() => setLb(i)} className="w-full h-24 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+                      <span className="absolute -top-1 -left-1 bg-slate-700 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center shadow">{j + 1}</span>
+                    </div>
+                  ); })}
+                </div>
+              </div>
+            ))}
+            {/* รูปแนบงานทั่วไป (ถ้ามี) */}
+            {data.images.length > 0 && (
+              <div>
+                {groups.length > 0 && <p className="text-[11px] text-slate-400 mb-1">🖼 รูปแนบงาน</p>}
+                <div className="grid grid-cols-3 gap-1.5">
+                  {data.images.map((src, j) => { const i = run++; return (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img key={j} src={src} alt="" onClick={() => setLb(i)} className="w-full h-24 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+                  ); })}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {data.links.length > 0 && (
         <div className="space-y-1">{data.links.map((l, i) => l.key ? <a key={i} href={`/api/r2-image?key=${encodeURIComponent(l.key)}`} target="_blank" rel="noreferrer" className="block text-xs text-violet-700 truncate">🔗 {l.label || l.key}</a> : null)}</div>
@@ -149,7 +177,7 @@ export function ApproveView({ tokenProp }: { tokenProp?: string }) {
       {lb >= 0 && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setLb(-1)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={data.images[lb]} alt="" className="max-h-[90vh] max-w-full object-contain rounded-lg" />
+          <img src={allImgs[lb]} alt="" className="max-h-[90vh] max-w-full object-contain rounded-lg" />
         </div>
       )}
     </div>
