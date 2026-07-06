@@ -109,8 +109,8 @@ export function SkuTagBrowser() {
   const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<string>("code");
+  const [special, setSpecial] = useState<"all" | "recent" | null>(null);   // โฟลเดอร์พิเศษ: ทั้งหมด / ล่าสุด
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);   // กรองเฉพาะ SKU ที่ข้อมูลไม่ครบ
-  const [showTrash, setShowTrash] = useState(false);             // ดู "ถังขยะ" (ตัวปิดใช้งาน) แทนตัวใช้งาน
   const [selected, setSelected] = useState<Set<string>>(new Set());   // เลือกหลายตัว (bulk)
   const [view, setView] = useState<"card" | "table">(() => {
     if (typeof window !== "undefined" && localStorage.getItem("sku-browser-view") === "table") return "table";
@@ -163,7 +163,7 @@ export function SkuTagBrowser() {
   const tagNameById = useMemo(() => new Map((tree?.tags ?? []).map((t) => [t.id, t.name])), [tree]);
   const fieldLabels = useMemo(() => new Map(availFields.map((f) => [f.key, f.label])), [availFields]);
   const extraDefs = useMemo<FieldDef[]>(() => cardFields.filter((k) => !CORE_KEYS.has(k)).map((k) => ({ key: k, label: fieldLabels.get(k) ?? k })), [cardFields, fieldLabels]);
-  const cardsMode = !!search.trim() || tagFilter.tagIds.length > 0;
+  const cardsMode = !!search.trim() || tagFilter.tagIds.length > 0 || special !== null;
   const currentGroupId = groupPath.length ? groupPath[groupPath.length - 1].id : null;
   const sort = SORTS.find((s) => s.key === sortKey) ?? SORTS[0];
   const shown = onlyIncomplete ? cards.filter((c) => cardWarnings(c).length > 0) : cards;
@@ -171,17 +171,20 @@ export function SkuTagBrowser() {
   // ดึงการ์ดหนึ่งหน้า (off = ตำแหน่งเริ่ม)
   const fetchPage = useCallback(async (off: number) => {
     const p = new URLSearchParams();
+    if (special) p.set("all", "1");   // โฟลเดอร์ ทั้งหมด/ล่าสุด — โชว์ทุกรายการ (ไม่กรองแท็ก)
     if (tagFilter.tagIds.length) p.set("family_ids", tagFilter.tagIds.join(","));
     if (search.trim()) p.set("search", search.trim());
-    p.set("sort", sort.by); p.set("dir", sort.dir);
+    // "ล่าสุด" = เรียงตามแก้ไขล่าสุดเสมอ · อื่น ๆ ใช้การเรียงที่เลือก
+    const eBy = special === "recent" ? "updated_at" : sort.by;
+    const eDir = special === "recent" ? "desc" : sort.dir;
+    p.set("sort", eBy); p.set("dir", eDir);
     p.set("limit", String(LIMIT)); p.set("offset", String(off));
     p.set("entity", entity);
-    if (showTrash) p.set("scope", "trashed");
     const extra = cardFields.filter((k) => !CORE_KEYS.has(k));
     if (extra.length) p.set("fields", extra.join(","));
     const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
     return { cards: (j.cards ?? []) as SkuCard[], total: Number(j.total ?? 0) };
-  }, [tagFilter, search, sort, cardFields, entity, showTrash]);
+  }, [tagFilter, search, sort, cardFields, entity, special]);
 
   // โหลดหน้าแรกใหม่เมื่อเปลี่ยน filter/search/sort
   useEffect(() => {
@@ -204,22 +207,23 @@ export function SkuTagBrowser() {
   const childTags   = (tree?.tags   ?? []).filter((t) => t.group_id === currentGroupId);
 
   // ผูกการเดินเข้ากลุ่ม/แท็กกับประวัติเบราว์เซอร์ → ปุ่ม Back ย้อนทีละชั้น (ไม่เด้งออกหน้าเลย)
-  const pushNav = useCallback((gp: Crumb[], tf: TagFilterValue) => {
-    setGroupPath(gp); setTagFilter(tf);
-    try { window.history.pushState({ __skuNav: { gp, tf } }, ""); } catch { /* ignore */ }
+  const pushNav = useCallback((gp: Crumb[], tf: TagFilterValue, sp: "all" | "recent" | null = null) => {
+    setGroupPath(gp); setTagFilter(tf); setSpecial(sp);
+    try { window.history.pushState({ __skuNav: { gp, tf, sp } }, ""); } catch { /* ignore */ }
   }, []);
   useEffect(() => {
     const onPop = (e: PopStateEvent) => {
-      const s = (e.state as { __skuNav?: { gp: Crumb[]; tf: TagFilterValue } } | null)?.__skuNav;
-      setGroupPath(s?.gp ?? []); setTagFilter(s?.tf ?? EMPTY_FILTER);   // ไม่มี state ของเรา = กลับถึงราก
+      const s = (e.state as { __skuNav?: { gp: Crumb[]; tf: TagFilterValue; sp?: "all" | "recent" | null } } | null)?.__skuNav;
+      setGroupPath(s?.gp ?? []); setTagFilter(s?.tf ?? EMPTY_FILTER); setSpecial(s?.sp ?? null);   // ไม่มี state ของเรา = กลับถึงราก
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  const openGroup = (g: BrowseGroup) => pushNav([...groupPath, { id: g.id, name: g.name }], EMPTY_FILTER);
-  const openTag   = (t: BrowseTag)   => pushNav(groupPath, { tagIds: [t.id], none: false });
-  const goRoot    = () => { setSearch(""); pushNav([], EMPTY_FILTER); };
+  const openGroup   = (g: BrowseGroup) => pushNav([...groupPath, { id: g.id, name: g.name }], EMPTY_FILTER);
+  const openTag     = (t: BrowseTag)   => pushNav(groupPath, { tagIds: [t.id], none: false });
+  const openSpecial = (kind: "all" | "recent") => { setSearch(""); pushNav([], EMPTY_FILTER, kind); };
+  const goRoot      = () => { setSearch(""); pushNav([], EMPTY_FILTER); };
   const goCrumb   = (i: number) => pushNav(groupPath.slice(0, i + 1), EMPTY_FILTER);
   const clearTags = () => pushNav(groupPath, EMPTY_FILTER);
 
@@ -255,7 +259,6 @@ export function SkuTagBrowser() {
       if (tagFilter.tagIds.length) p.set("family_ids", tagFilter.tagIds.join(","));
       if (search.trim()) p.set("search", search.trim());
       p.set("entity", entity); p.set("ids", "1");
-      if (showTrash) p.set("scope", "trashed");
       const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
       const ids = (j.ids ?? []) as string[];
       setSelected(new Set(ids));
@@ -356,6 +359,12 @@ export function SkuTagBrowser() {
             <button onClick={clearTags} className="text-slate-400 hover:text-rose-500 text-xs ml-1">✕</button>
           </>
         )}
+        {special && (
+          <span className="flex items-center gap-1">
+            <span className="text-slate-300">›</span>
+            <span className="text-slate-700 font-medium">{special === "all" ? "📋 ทั้งหมด" : "🕒 ล่าสุด"}</span>
+          </span>
+        )}
         {!cardsMode && groupPath.map((c, i) => (
           <span key={c.id} className="flex items-center gap-1">
             <span className="text-slate-300">›</span>
@@ -382,9 +391,6 @@ export function SkuTagBrowser() {
                 </div>
                 <button onClick={() => setOnlyIncomplete((v) => !v)}
                   className={`h-8 px-2.5 text-[12px] rounded-lg border ${onlyIncomplete ? "bg-amber-50 border-amber-300 text-amber-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>⚠️ เฉพาะข้อมูลไม่ครบ</button>
-                <button onClick={() => { setShowTrash((v) => !v); setSelected(new Set()); }}
-                  title={showTrash ? "กลับไปดูรายการที่ใช้งาน" : "ดูรายการในถังขยะ (ปิดใช้งาน)"}
-                  className={`h-8 px-2.5 text-[12px] rounded-lg border ${showTrash ? "bg-rose-50 border-rose-300 text-rose-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🗑 ถังขยะ{showTrash ? " (กำลังดู)" : ""}</button>
                 <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
                   <span>เรียง</span>
                   <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white">
@@ -421,6 +427,22 @@ export function SkuTagBrowser() {
         (childGroups.length === 0 && childTags.length === 0)
           ? <div className="text-center py-16 text-slate-400 text-sm">ยังไม่มีกลุ่มย่อย/แท็กในนี้</div>
           : <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
+              {currentGroupId === null && (
+                <>
+                  <button onClick={() => openSpecial("all")}
+                    className="text-left rounded-xl border border-indigo-200 bg-indigo-50/40 p-3.5 hover:border-indigo-400 hover:shadow-sm transition">
+                    <div className="flex items-center justify-between"><span className="text-2xl">📋</span><span className="text-indigo-300">›</span></div>
+                    <p className="text-sm font-medium text-slate-800 mt-1">ทั้งหมด</p>
+                    <p className="text-[11px] text-indigo-500">ดูทุกรายการ →</p>
+                  </button>
+                  <button onClick={() => openSpecial("recent")}
+                    className="text-left rounded-xl border border-indigo-200 bg-indigo-50/40 p-3.5 hover:border-indigo-400 hover:shadow-sm transition">
+                    <div className="flex items-center justify-between"><span className="text-2xl">🕒</span><span className="text-indigo-300">›</span></div>
+                    <p className="text-sm font-medium text-slate-800 mt-1">ล่าสุด</p>
+                    <p className="text-[11px] text-indigo-500">สร้าง/แก้ไขล่าสุด →</p>
+                  </button>
+                </>
+              )}
               {childGroups.map((g) => (
                 <button key={g.id} onClick={() => openGroup(g)}
                   className="text-left rounded-xl border border-slate-200 bg-white p-3.5 hover:border-indigo-300 hover:shadow-sm transition">
