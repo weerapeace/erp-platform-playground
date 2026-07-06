@@ -77,6 +77,7 @@ export default function QcWarehousePage() {
   const [shopGroup, setShopGroup] = useState<"none" | "shelf" | "status" | "brand">("shelf");
   const [shopTab, setShopTab] = useState<"flow" | "shelf">("flow");   // แท็บย่อยในช้อป: รับ-ส่งงาน / ของในชั้น
   const [lineSettingsOpen, setLineSettingsOpen] = useState(false);   // ป๊อปตั้งค่าแจ้งเตือน LINE
+  const [isMax, setIsMax] = useState(false);   // เต็มจอ — คลุมทับเมนูซ้าย/บน
   const [atDesks, setAtDesks] = useState<QcDeskCard[]>([]);   // งานที่จ่ายไปที่โต๊ะ (ยังทำอยู่) — โชว์ในมุมมองช้อป
   const [histOpen, setHistOpen] = useState(false);
   const [histSearch, setHistSearch] = useState("");
@@ -97,6 +98,9 @@ export default function QcWarehousePage() {
     finally { setLoading(false); }
   }, [toast]);
   useEffect(() => { void load(); }, [load]);
+  // จำสถานะเต็มจอ/ซ่อนเมนู ต่อผู้ใช้ (กดครั้งเดียว = ซ่อนตลอดครั้งหน้า)
+  useEffect(() => { try { if (localStorage.getItem("qc-fullscreen") === "1") setIsMax(true); } catch { /* ignore */ } }, []);
+  const toggleMax = () => setIsMax((m) => { const n = !m; try { localStorage.setItem("qc-fullscreen", n ? "1" : "0"); } catch { /* ignore */ } return n; });
 
   const defectShelf = useMemo(() => shelves.find((s) => s.kind === "defect") ?? null, [shelves]);
   const storeShelves = useMemo(() => shelves.filter((s) => s.kind === "store"), [shelves]);
@@ -445,7 +449,7 @@ export default function QcWarehousePage() {
   };
 
   return (
-    <div className="max-w-[1700px] mx-auto px-5 py-5">
+    <div className={isMax ? "fixed inset-0 z-40 bg-white overflow-auto px-5 py-4" : "max-w-[1700px] mx-auto px-5 py-5"}>
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">🏭 โกดัง QC</h1>
@@ -464,6 +468,7 @@ export default function QcWarehousePage() {
           <button onClick={() => setLineSettingsOpen(true)} title="ตั้งค่ากลุ่ม LINE + ข้อความแจ้งเตือน" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🔔 แจ้งเตือน</button>
           <button onClick={() => { setHistSearch(""); setHistOpen(true); void loadHist(""); }} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📋 ประวัติของเสีย</button>
           <button onClick={() => void load()} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⟳</button>
+          <button onClick={toggleMax} title={isMax ? "ย่อกลับ (โชว์เมนู)" : "เต็มจอ (ซ่อนเมนูซ้าย/บน)"} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{isMax ? "🗗" : "⛶"}</button>
         </div>
       </div>
 
