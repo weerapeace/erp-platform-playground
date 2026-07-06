@@ -18,10 +18,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!id) return NextResponse.json({ error: "ต้องมี id" }, { status: 400 });
   const a = supabaseAdmin();
 
-  // SKU ลูก (นับ + ดึงบางส่วนไปคิดสต๊อก)
-  const { data: skus } = await a.from("skus_v2").select("id, code, is_active").eq("parent_sku_id", id);
+  // SKU ลูก (นับ + ดึงบางส่วนไปคิดสต๊อก) + รหัส parent (ไว้ match ยอดขาย)
+  const [{ data: skus }, { data: pRow }] = await Promise.all([
+    a.from("skus_v2").select("id, code, is_active").eq("parent_sku_id", id),
+    a.from("parent_skus_v2").select("code").eq("id", id).maybeSingle(),
+  ]);
   const skuRows = (skus ?? []) as { id: string; code: string; is_active: boolean }[];
   const skuIds = skuRows.map((s) => s.id);
+  const parentCode = (pRow as { code?: string } | null)?.code ?? "";
+  const allCodes = [...new Set([parentCode, ...skuRows.map((s) => s.code)].filter(Boolean))];
 
   const [
     draftsTotal, draftsPublished, matchedTotal, storeTotal,
@@ -60,9 +65,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       .map((p) => ({ ...p, live: liveSet.has(p.id) }));
   }
 
+  // ยอดขายรายวัน (จาก marketing_product_daily — นำเข้าจาก marketplace) match ด้วยรหัสสินค้า
+  const salesByDay: Record<string, { sales: number; units: number }> = {};
+  let salesTotal = 0, unitsTotal = 0;
+  if (allCodes.length) {
+    const { data: md } = await a.from("marketing_product_daily")
+      .select("date, sales, units, internal_sku").in("internal_sku", allCodes);
+    for (const r of ((md ?? []) as { date: string; sales: number | null; units: number | null }[])) {
+      const d = String(r.date).slice(0, 10);
+      if (!salesByDay[d]) salesByDay[d] = { sales: 0, units: 0 };
+      salesByDay[d].sales += Number(r.sales ?? 0);
+      salesByDay[d].units += Number(r.units ?? 0);
+      salesTotal += Number(r.sales ?? 0);
+      unitsTotal += Number(r.units ?? 0);
+    }
+  }
+  const salesDays = Object.entries(salesByDay).map(([date, v]) => ({ date, ...v })).sort((x, y) => x.date.localeCompare(y.date)).slice(-30);
+
   return NextResponse.json({
     skus: { total: skuRows.length, active: skuRows.filter((s) => s.is_active).length },
     stockOnHand,
+    sales: { hasData: salesDays.length > 0, total: salesTotal, units: unitsTotal, days: salesDays },
+    parentCode,
     platforms: { drafts: draftsTotal, published: draftsPublished, matched: matchedTotal, chips: platformChips },
     store: { listings: storeTotal },
     creative: { tasks: tasksTotal + linkedTasks, content: contentTotal, projects: projectSkusTotal, boards: boardItemsTotal },

@@ -17,6 +17,12 @@ export default function PlatformSkuPage() {
   const [brandId, setBrandId] = useState("");
   const [items, setItems] = useState<Item[]>([]);
   const [q, setQ] = useState("");
+  // รับ ?q= จาก URL (drill-down จากภาพรวมสินค้า) — ตั้งค่าคำค้นเริ่มต้น
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const urlQ = new URLSearchParams(window.location.search).get("q");
+    if (urlQ) setQ(urlQ);
+  }, []);
   const [platformFilter, setPlatformFilter] = useState("");   // กรองเฉพาะที่ขายบนช่องนี้
   const [limit, setLimit] = useState(100);
   const [loading, setLoading] = useState(false);
