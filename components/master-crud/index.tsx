@@ -879,16 +879,27 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     return k.includes("sku") && !k.includes("parent") ? "sku" : "parent_sku";
   }, [config.moduleKey, config.apiPath]);
   const [familyTemplates, setFamilyTemplates] = useState<Record<string, FamilyTemplate>>({});
+  const familyNameToIdRef = useRef<Record<string, string>>({});   // ชื่อ family (lowercase) → id (สำหรับ auto-fill จาก Brand/หมวด)
   useEffect(() => {
     if (familyM2mFields.length === 0) return;
     cachedJson<{ data?: Record<string, unknown>[]; rows?: Record<string, unknown>[] }>(`/api/master-v2/product_families?limit=500&include_inactive=true`)
       .then((j) => {
         const m: Record<string, FamilyTemplate> = {};
-        for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) m[String(r.id)] = scopedTpl(r.template as FamilyTemplateRaw, tplScope);
+        const nameMap: Record<string, string> = {};
+        for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) {
+          m[String(r.id)] = scopedTpl(r.template as FamilyTemplateRaw, tplScope);
+          const nm = String(r.name ?? "").trim().toLowerCase();
+          if (nm && !nameMap[nm]) nameMap[nm] = String(r.id);
+        }
         setFamilyTemplates(m);
+        familyNameToIdRef.current = nameMap;
       })
       .catch(() => {});
   }, [familyM2mFields.length, tplScope]);
+  // Auto-fill Product Family จาก Brand + หมวด (จับคู่ "ชื่อ") — เติมให้เมื่อเลือก แต่ผู้ใช้ลบเองได้
+  // เก็บ label ที่เพิ่งเลือกจาก RelationPicker (fresh) + ค่า *_label เดิมจาก GET
+  const pickedLabelsRef = useRef<Record<string, string>>({});
+  const prevRelRef = useRef<Record<string, string>>({});   // ค่า id ครั้งก่อนของ brand_id/category_id (กันเติมซ้ำ + เคารพการลบเอง)
 
   // ids ของแท็กที่เลือกในฟอร์มปัจจุบัน → รวมเทมเพลต union (โชว์ชนะซ่อน)
   const selectedFamilyIds = useMemo(() => {
@@ -923,6 +934,32 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     if (Object.keys(patch).length) setForm((p) => ({ ...p, ...patch }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familyKey, modalOpen, drawerMode]);
+
+  // รีเซ็ต label/prev ที่จำไว้ เมื่อเปิด record ใหม่ (กันเอา label ของ record ก่อนมาใช้ผิด)
+  useEffect(() => { pickedLabelsRef.current = {}; prevRelRef.current = {}; }, [editingId, modalOpen]);
+
+  // Auto-fill Product Family: เลือก Brand/หมวด (Category Id) → เติมแท็กที่ "ชื่อตรงกัน" ให้อัตโนมัติ (ลบเองได้)
+  // เติมเฉพาะตอนผู้ใช้ "เพิ่งเลือก" ในเซสชันนี้ (มี label สดใน pickedLabelsRef) — ไม่เติมตอนเปิด record + ไม่ทับการลบเอง
+  useEffect(() => {
+    if (!modalOpen || drawerMode !== "edit" || familyM2mFields.length === 0) return;
+    const fkey = familyM2mFields[0].key;
+    const loaded = Array.isArray(form[fkey]);
+    const current = loaded ? (form[fkey] as unknown[]).map(String) : [];
+    const nameMap = familyNameToIdRef.current;
+    const add: string[] = [];
+    for (const relKey of ["brand_id", "category_id"]) {
+      const idStr = form[relKey] == null ? "" : String(form[relKey]);
+      if (prevRelRef.current[relKey] === idStr) continue;   // ฟิลด์นี้ไม่เปลี่ยน → ข้าม (เคารพการลบเอง)
+      prevRelRef.current[relKey] = idStr;
+      if (!loaded || !idStr) continue;                       // ยังไม่โหลด m2m / ไม่มีค่า → แค่จำ prev
+      const label = (pickedLabelsRef.current[relKey] ?? "").trim().toLowerCase();  // เฉพาะที่ "เพิ่งเลือก"
+      if (!label) continue;
+      const famId = nameMap[label];
+      if (famId && !current.includes(famId) && !add.includes(famId)) add.push(famId);
+    }
+    if (add.length) updateForm({ [fkey]: [...current, ...add] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.brand_id, form.category_id, modalOpen, drawerMode]);
 
   // field ถูกซ่อน/บังคับโดยเทมเพลตไหม (โชว์ชนะซ่อน)
   const tplHidden = useCallback((f: FieldDef) => {
@@ -1882,7 +1919,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           <div className="mt-0.5">
             <RelationPicker
               value={(v as string) || null}
-              onChange={(val) => updateForm({ [f.key]: val })}
+              onChange={(val, opt) => { updateForm({ [f.key]: val }); if (opt?.label) pickedLabelsRef.current[f.key] = opt.label; }}
               config={f.relationConfig}
               placeholder={f.placeholder ?? `— เลือก ${f.label} —`}
               required={f.required}
