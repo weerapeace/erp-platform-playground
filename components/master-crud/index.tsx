@@ -45,6 +45,7 @@ const ParentWebListings = dynamic(() => import("@/components/parent-web-listings
 const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-tab").then((m) => m.ParentPlatformsTab), { ssr: false });
 const CentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker), { ssr: false });
 const InlineCentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.InlineCentralCategoryPicker), { ssr: false });
+const Parent360Overview = dynamic(() => import("@/components/parent-360-overview").then((m) => m.Parent360Overview), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -2779,6 +2780,7 @@ export function MasterRecordDrawer({
       // Parent SKU → แท็บ "🛍 เว็บไซต์" (จัดการการขายบนเว็บร้านออนไลน์ได้ในแท็บ)
       extraTabs: moduleKey === "parent-skus-v2"
         ? [
+            { key: "overview", label: "ภาพรวม", icon: "📊", render: ({ recordId }) => <Parent360Overview parentId={recordId} /> },
             { key: "web", label: "เว็บไซต์", icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> },
             { key: "platforms", label: "แพลตฟอร์ม", icon: "🏬", render: ({ recordId }) => <ParentPlatformsTab parentId={recordId} /> },
           ]
