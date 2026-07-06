@@ -40,3 +40,20 @@ export async function GET(
   const enriched = await enrichCustomer(request, data);
   return NextResponse.json({ data: enriched, error: null });
 }
+
+// แก้ไขใบวางบิล (ร่างเท่านั้น) — แก้ header + เลือก SO ใหม่ได้
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  let body: { header?: Record<string, unknown>; so_ids?: string[]; actor?: string };
+  try { body = await request.json(); }
+  catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_billing_note_update", {
+    p_id: id, p_header: body.header ?? {}, p_so_ids: body.so_ids ?? null, p_actor: body.actor ?? null,
+  });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ id: data, error: null });
+}

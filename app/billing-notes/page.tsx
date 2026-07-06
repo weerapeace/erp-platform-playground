@@ -37,7 +37,8 @@ export default function BillingNotesPage() {
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
 
-  // create
+  // create/edit
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving,    setSaving]    = useState(false);
   const [formErr,   setFormErr]   = useState<string | null>(null);
@@ -74,8 +75,20 @@ export default function BillingNotesPage() {
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
   const openCreate = () => {
+    setEditingId(null);
     setCustomer(null); setBillDate(new Date().toISOString().slice(0, 10)); setDueDate("");
     setNote(""); setPicked([]); setFormErr(null); setModalOpen(true);
+  };
+
+  // แก้ไข (ร่างเท่านั้น) → เติมฟอร์มจากรายละเอียด
+  const openEdit = (d: BillingNoteDetail) => {
+    setEditingId(d.id);
+    setCustomer(d.customer_id ? ({ id: d.customer_id, code: d.customer_code ?? null, name: d.customer_name ?? "" } as CustomerPickerValue) : null);
+    setBillDate(d.bill_date ? String(d.bill_date).slice(0, 10) : new Date().toISOString().slice(0, 10));
+    setDueDate(d.due_date ? String(d.due_date).slice(0, 10) : "");
+    setNote(d.note ?? "");
+    setPicked(d.lines.map(l => ({ id: l.so_id ?? "", so_number: l.so_number ?? "(ร่าง)", grand_total: Number(l.total_amount) || 0 })).filter(p => p.id));
+    setFormErr(null); setDetailOpen(false); setModalOpen(true);
   };
 
   const openDetail = async (id: string) => {
@@ -122,8 +135,8 @@ export default function BillingNotesPage() {
     if (!customer) { setFormErr("ไม่พบลูกค้า — เลือกใบกำกับภาษีก่อน"); return; }
     setSaving(true); setFormErr(null);
     try {
-      const res = await apiFetch("/api/billing-notes", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const res = await apiFetch(editingId ? `/api/billing-notes/${editingId}` : "/api/billing-notes", {
+        method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           header: {
             customer_id: customer.id, customer_name: customer.name, customer_code: customer.code,
@@ -135,7 +148,7 @@ export default function BillingNotesPage() {
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash("สร้างใบวางบิลแล้ว");
+      flash(editingId ? "บันทึกแล้ว" : "สร้างใบวางบิลแล้ว");
       setModalOpen(false);
       await fetchList();
     } catch (err) { setFormErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
@@ -225,9 +238,9 @@ export default function BillingNotesPage() {
         {toast && <div className="fixed bottom-6 right-6 px-4 py-3 bg-emerald-600 text-white rounded-lg shadow-lg text-sm">✓ {toast}</div>}
       </div>
 
-      {/* Create */}
+      {/* Create / Edit */}
       <ERPModal open={modalOpen} onClose={() => !saving && setModalOpen(false)} size="xl"
-        title="สร้างใบวางบิล"
+        title={editingId ? "แก้ไขใบวางบิล" : "สร้างใบวางบิล"}
         description="เลือกใบกำกับภาษีของลูกค้ารายเดียวกัน ระบบจะรวมยอดให้อัตโนมัติ"
         footer={
           <>
@@ -236,7 +249,7 @@ export default function BillingNotesPage() {
               <span className="font-mono text-lg font-semibold tabular-nums text-blue-700">{baht(pickedTotal)}</span>
             </div>
             <button onClick={() => setModalOpen(false)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-            <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "สร้างใบวางบิล"}</button>
+            <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "สร้างใบวางบิล"}</button>
           </>
         }>
         <div className="space-y-4">
@@ -313,6 +326,9 @@ export default function BillingNotesPage() {
             {detail.bill_number && (
               <a href={`/print/billing-note/${detail.id}`} target="_blank" rel="noopener noreferrer"
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center">🧾 พิมพ์ใบวางบิล</a>
+            )}
+            {detail.status === "draft" && (
+              <button onClick={() => openEdit(detail)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">✎ แก้ไข</button>
             )}
             {detail.status === "draft" && (
               <button onClick={() => transition(detail.id, "issue")} disabled={wfLoading} className="h-9 px-4 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">📤 วางบิล</button>
