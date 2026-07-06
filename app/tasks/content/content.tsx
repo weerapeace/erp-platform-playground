@@ -25,7 +25,7 @@ import {
   getRecommendedTimes, saveRecommendedTimes, type RecommendedTimes,
   listContentAttachments, addContentAttachment, deleteContentAttachment,
   getPlatformSettings, savePlatformSettings, getLinkPreview,
-  getMetaStatus, publishToPlatform, type MetaConnStatus,
+  getMetaStatus, publishToPlatform, igFinalize, type MetaConnStatus, type PostMediaRef,
   getCaptionConfig, saveCaptionConfig, defaultHashtags, resolvePrompt,
   type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus,
   type BrandOption, type Hashtag, type CaptionTemplate, type CaptionConfig,
@@ -527,16 +527,42 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const setPlatPostedUrl = (platform: string, url: string) =>
     setPostedLinks((prev) => { const n = { ...prev }; if (url.trim()) n[platform] = url; else delete n[platform]; return n; });
   const persistPostedLinks = () => void updateContent(contentId, { posted_links: postedLinks }).catch((e) => pushToast("error", (e as Error).message));
-  // ยิงโพสต์จริง (เฟส 2 — Facebook) เรียกจากป๊อปอัปยืนยัน · รองรับหลายรูป + ตั้งเวลา
-  const runPublish = async (platform: string, captionText: string, imageKeys: string[], scheduledUnix: number | null) => {
-    const label = platform === "facebook" ? "Facebook" : platformLabel(platform);
+  // media ที่เลือกลงโพสต์ได้ (รูป/วิดีโอแนบ + รูปจากงาน · ตัดซ้ำ) + ชนิดต่อ key
+  const postImages: PostImage[] = (() => {
+    const seen = new Set<string>(); const out: PostImage[] = [];
+    for (const a of attachments) if ((a.kind === "image" || a.kind === "video") && a.r2_key && !seen.has(a.r2_key)) { seen.add(a.r2_key); out.push({ key: a.r2_key, label: a.label ?? a.file_name ?? null, type: a.kind === "video" ? "video" : "image" }); }
+    for (const im of taskMedia.images) if (im.key && !seen.has(im.key)) { seen.add(im.key); out.push({ key: im.key, label: im.label ?? null, type: "image" }); }
+    return out;
+  })();
+  const mediaTypeOf = (k: string): "image" | "video" => postImages.find((m) => m.key === k)?.type ?? "image";
+  const contentImageKeys = attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => a.r2_key as string);
+
+  // ยิงโพสต์จริง (Facebook/Instagram) จากป๊อปยืนยัน · รูป/วิดีโอ/อัลบั้ม + ตั้งเวลา(FB) · IG Reels = ตามเช็กสถานะ
+  const runPublish = async (platform: string, captionText: string, selectedKeys: string[], scheduledUnix: number | null) => {
+    const label = platform === "facebook" ? "Facebook" : "Instagram";
+    // เลือกวิดีโอ → โพสต์เป็นวิดีโอ (ตัวแรก) · ไม่งั้น = รูปทั้งหมด
+    const videoKey = selectedKeys.find((k) => mediaTypeOf(k) === "video");
+    const media: PostMediaRef[] = videoKey ? [{ key: videoKey, type: "video" }] : selectedKeys.map((k) => ({ key: k, type: "image" as const }));
     setPosting(platform);
     try {
-      const { url, scheduled } = await publishToPlatform(contentId, platform, captionText, imageKeys, scheduledUnix ?? undefined);
-      setPostStatus((prev) => ({ ...prev, [platform]: scheduled ? "scheduled" : "posted" }));
-      setPostedLinks((prev) => ({ ...prev, [platform]: url }));
-      pushToast("success", scheduled ? t(`ตั้งเวลาโพสต์บน ${label} แล้ว ⏰`, `Scheduled on ${label} ⏰`) : t(`โพสต์ขึ้น ${label} แล้ว 🎉`, `Posted to ${label} 🎉`));
+      const res = await publishToPlatform(contentId, platform, captionText, media, scheduledUnix ?? undefined);
       setPostModal(null);
+      if (res.processing && res.creationId) {
+        // IG Reels: ตามเช็กสถานะจนพร้อม (สูงสุด ~2.5 นาที)
+        const cid = res.creationId;
+        pushToast("info", t("Instagram กำลังประมวลผลวิดีโอ… รอสักครู่", "Instagram is processing the video…"));
+        let done = false;
+        for (let i = 0; i < 30 && !done; i++) {
+          await new Promise((r) => setTimeout(r, 5000));
+          const f = await igFinalize(contentId, cid);
+          if (f.url) { setPostStatus((p) => ({ ...p, [platform]: "posted" })); setPostedLinks((p) => ({ ...p, [platform]: f.url as string })); pushToast("success", t("โพสต์ Reels ขึ้น Instagram แล้ว 🎉", "Reel posted to Instagram 🎉")); done = true; }
+        }
+        if (!done) pushToast("info", t("วิดีโอยังประมวลผลอยู่ — IG จะโพสต์ให้เมื่อพร้อม (เช็กที่ IG ภายหลัง)", "Still processing — IG will post it once ready"));
+      } else {
+        setPostStatus((prev) => ({ ...prev, [platform]: res.scheduled ? "scheduled" : "posted" }));
+        setPostedLinks((prev) => ({ ...prev, [platform]: res.url }));
+        pushToast("success", res.scheduled ? t(`ตั้งเวลาโพสต์บน ${label} แล้ว ⏰`, `Scheduled on ${label} ⏰`) : t(`โพสต์ขึ้น ${label} แล้ว 🎉`, `Posted to ${label} 🎉`));
+      }
     } catch (e) { pushToast("error", (e as Error).message); }
     finally { setPosting(null); }
   };
@@ -548,14 +574,6 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     else pushToast("info", t("คัดลอกแคปชั่นแล้ว · ยังไม่ได้ตั้งลิงก์หน้าโพสต์ (⚙️ ตั้งค่าแพลตฟอร์ม)", "Caption copied · no post link set (⚙️ Platform settings)"));
     setPostModal(null);
   };
-  // รูปที่เลือกลงโพสต์ได้ (รูปแนบคอนเทนต์ + รูปจากงาน · ตัดซ้ำ)
-  const postImages: PostImage[] = (() => {
-    const seen = new Set<string>(); const out: PostImage[] = [];
-    for (const a of attachments) if (a.kind === "image" && a.r2_key && !seen.has(a.r2_key)) { seen.add(a.r2_key); out.push({ key: a.r2_key, label: a.label ?? null }); }
-    for (const im of taskMedia.images) if (im.key && !seen.has(im.key)) { seen.add(im.key); out.push({ key: im.key, label: im.label ?? null }); }
-    return out;
-  })();
-  const contentImageKeys = attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => a.r2_key as string);
   // "ใช้ทั้งหมด": เปิดป๊อปให้เลือกโหมด (ถ้าช่องต้นทางยังว่างก็ไม่ต้องเปิด)
   const openApplyAll = (fromPlatform: string) => {
     const src = caps.find((c) => c.platform === fromPlatform);
@@ -865,7 +883,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={c.platform === "facebook" && !!metaStatus.facebook?.connected} autoLabel={c.platform === "facebook" ? "Facebook" : undefined} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -887,7 +905,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       {postModal && (
         <PostConfirmModal
           platform={postModal.platform}
-          connected={postModal.platform === "facebook" && !!metaStatus.facebook?.connected}
+          connected={(postModal.platform === "facebook" && !!metaStatus.facebook?.connected) || (postModal.platform === "instagram" && !!metaStatus.instagram?.connected)}
+          allowSchedule={postModal.platform === "facebook"}
           pageName={metaStatus.facebook?.page_name}
           captionText={postModal.captionText}
           images={postImages}

@@ -434,10 +434,20 @@ export async function getMetaStatus(brandId: string): Promise<MetaConnStatus> {
   try { return (await apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(brandId)}`).then((r) => r.json())) as MetaConnStatus; }
   catch { return {}; }
 }
-// ยิงโพสต์คอนเทนต์ขึ้นแพลตฟอร์มจริง (ตอนนี้ facebook) — เลือกได้หลายรูป + ตั้งเวลา (unix วินาที, 0=ทันที) · คืนลิงก์+ตั้งเวลาไหม
-export async function publishToPlatform(contentId: string, platform: string, captionText: string, imageKeys: string[], scheduledTime?: number): Promise<{ url: string; scheduled: boolean }> {
-  const j = await jsonOrThrow(await apiFetch("/api/meta/publish", { method: "POST", body: JSON.stringify({ content_id: contentId, platform, caption_text: captionText, image_keys: imageKeys, scheduled_time: scheduledTime ?? 0 }) }));
-  return { url: String((j as { url?: string }).url ?? ""), scheduled: !!(j as { scheduled?: boolean }).scheduled };
+// ยิงโพสต์คอนเทนต์ขึ้นแพลตฟอร์มจริง (facebook/instagram) — media หลายชิ้น (รูป/วิดีโอ) + ตั้งเวลา (unix, 0=ทันที)
+// คืน: url+scheduled · หรือ processing+creationId (IG วิดีโอ ต้องไปตามเช็กที่ igFinalize)
+export type PostMediaRef = { key: string; type: "image" | "video" };
+export type PublishResult = { url: string; scheduled: boolean; processing: boolean; creationId?: string };
+export async function publishToPlatform(contentId: string, platform: string, captionText: string, media: PostMediaRef[], scheduledTime?: number): Promise<PublishResult> {
+  const j = await jsonOrThrow(await apiFetch("/api/meta/publish", { method: "POST", body: JSON.stringify({ content_id: contentId, platform, caption_text: captionText, media, scheduled_time: scheduledTime ?? 0 }) }));
+  const r = j as { url?: string; scheduled?: boolean; processing?: boolean; creation_id?: string };
+  return { url: String(r.url ?? ""), scheduled: !!r.scheduled, processing: !!r.processing, creationId: r.creation_id };
+}
+// IG Reels: ตามเช็กสถานะ container แล้วเผยแพร่เมื่อพร้อม (client เรียกซ้ำ) · คืน url เมื่อเสร็จ / processing=true ระหว่างรอ
+export async function igFinalize(contentId: string, creationId: string): Promise<{ url?: string; processing: boolean }> {
+  const j = await jsonOrThrow(await apiFetch("/api/meta/ig-finalize", { method: "POST", body: JSON.stringify({ content_id: contentId, creation_id: creationId }) }));
+  const r = j as { url?: string; processing?: boolean };
+  return { url: r.url, processing: !!r.processing };
 }
 
 // ---- เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์) — เก็บ ui_config key 'creative_recommended_times' ----

@@ -14,11 +14,13 @@ const APP_ID = () => (process.env.META_APP_ID ?? "").trim();
 const APP_SECRET = () => (process.env.META_APP_SECRET ?? "").trim();
 export function metaConfigured(): boolean { return !!(APP_ID() && APP_SECRET()); }
 
-// สิทธิ์ที่ขอตอนเชื่อมต่อ — เฟสแรกขอเฉพาะ Facebook (IG เพิ่มเมื่อผ่านรีวิว)
+// สิทธิ์ที่ขอตอนเชื่อมต่อ
 export const FB_SCOPES = ["pages_show_list", "pages_read_engagement", "pages_manage_posts", "business_management"];
+export const IG_SCOPES = ["instagram_basic", "instagram_content_publish"];
+export const CONNECT_SCOPES = [...FB_SCOPES, ...IG_SCOPES];   // ขอทั้ง FB + IG ทีเดียว (IG โพสต์บัญชีตัวเองในโหมดพัฒนาได้ · ถ้าเมต้าขอรีวิว/ยืนยันธุรกิจค่อยทำ)
 
 // URL หน้าอนุญาต (OAuth dialog) ของ Facebook
-export function metaAuthUrl(redirectUri: string, state: string, scopes: string[] = FB_SCOPES): string {
+export function metaAuthUrl(redirectUri: string, state: string, scopes: string[] = CONNECT_SCOPES): string {
   const q = new URLSearchParams({ client_id: APP_ID(), redirect_uri: redirectUri, state, response_type: "code", scope: scopes.join(",") });
   return `https://www.facebook.com/${META_VER}/dialog/oauth?${q.toString()}`;
 }
@@ -95,4 +97,79 @@ export async function fbPublish(pageId: string, pageToken: string, message: stri
   withSchedule(b);
   const j = await graph(`${META_API}/${pageId}/feed`, { method: "POST", body: b });
   return result(String(j.id ?? ""));
+}
+
+// โพสต์วิดีโอขึ้น Facebook Page (/videos file_url) — รองรับตั้งเวลาเหมือนรูป
+export async function fbPublishVideo(pageId: string, pageToken: string, description: string, videoUrl: string, scheduledTime?: number): Promise<{ url: string; id: string; scheduled: boolean }> {
+  const scheduled = !!scheduledTime && scheduledTime > 0;
+  const b = new URLSearchParams({ file_url: videoUrl, description, access_token: pageToken });
+  if (scheduled) { b.set("published", "false"); b.set("scheduled_publish_time", String(scheduledTime)); }
+  const j = await graph(`${META_API}/${pageId}/videos`, { method: "POST", body: b });
+  const id = String(j.id ?? "");
+  return { id, url: id ? `https://www.facebook.com/${id}` : "", scheduled };
+}
+
+// ============================================================
+// Instagram (ผ่านเพจที่ผูก IG Business) — 2 ขั้น: สร้าง "container" → media_publish
+//  รูปเดียว/อัลบั้ม = เร็ว (สร้าง+เผยแพร่ในคำขอเดียว) · วิดีโอ (Reels) = ช้า ต้องรอ IG ประมวลผล → poll แยก
+// ============================================================
+
+// สร้าง container รูป (is_carousel_item=true ถ้าเป็นรูปในอัลบั้ม)
+async function igImageContainer(igId: string, token: string, imageUrl: string, caption?: string, carouselItem?: boolean): Promise<string> {
+  const b = new URLSearchParams({ image_url: imageUrl, access_token: token });
+  if (caption) b.set("caption", caption);
+  if (carouselItem) b.set("is_carousel_item", "true");
+  const j = await graph(`${META_API}/${igId}/media`, { method: "POST", body: b });
+  return String(j.id ?? "");
+}
+
+// สถานะ container (FINISHED = พร้อมเผยแพร่ · IN_PROGRESS = กำลังประมวลผล · ERROR = พัง)
+export async function igContainerStatus(token: string, creationId: string): Promise<string> {
+  const j = await graph(`${META_API}/${creationId}?fields=status_code&access_token=${encodeURIComponent(token)}`);
+  return String(j.status_code ?? "");
+}
+
+// รอ container พร้อม (ใช้กับรูป/อัลบั้ม — เสร็จไว) จำกัดเวลาไม่ให้ค้าง
+async function igWaitReady(token: string, creationId: string, tries = 6, delayMs = 2000): Promise<void> {
+  for (let i = 0; i < tries; i++) {
+    const st = await igContainerStatus(token, creationId).catch(() => "");
+    if (st === "FINISHED") return;
+    if (st === "ERROR") throw new Error("Instagram ประมวลผลรูปไม่สำเร็จ");
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  // ไม่เสร็จในเวลา — ลองเผยแพร่ต่อ (บางเคส FINISHED ช้าเล็กน้อย)
+}
+
+// เผยแพร่ container ที่พร้อมแล้ว → คืน media id + ลิงก์
+export async function igPublish(igId: string, token: string, creationId: string): Promise<{ url: string; id: string }> {
+  const b = new URLSearchParams({ creation_id: creationId, access_token: token });
+  const j = await graph(`${META_API}/${igId}/media_publish`, { method: "POST", body: b });
+  const id = String(j.id ?? "");
+  return { id, url: id ? `https://www.instagram.com/` : "" };   // permalink จริงต้องดึงเพิ่ม — คืนลิงก์ IG ทั่วไปพอ
+}
+
+// โพสต์รูป IG (เดี่ยว/อัลบั้ม) แบบครบขั้นในคำขอเดียว (รูปเสร็จไว)
+export async function igPublishImages(igId: string, token: string, caption: string, imageUrls: string[]): Promise<{ url: string; id: string }> {
+  if (imageUrls.length === 0) throw new Error("Instagram ต้องมีรูปอย่างน้อย 1 รูป");
+  if (imageUrls.length === 1) {
+    const cid = await igImageContainer(igId, token, imageUrls[0], caption);
+    await igWaitReady(token, cid);
+    return igPublish(igId, token, cid);
+  }
+  // อัลบั้ม (สูงสุด 10 รูป): สร้าง child ทุกใบ → container พาเรนต์ CAROUSEL → เผยแพร่
+  const children: string[] = [];
+  for (const url of imageUrls.slice(0, 10)) children.push(await igImageContainer(igId, token, url, undefined, true));
+  for (const cid of children) await igWaitReady(token, cid);
+  const b = new URLSearchParams({ media_type: "CAROUSEL", caption, access_token: token });
+  children.forEach((cid, i) => b.set(`children[${i}]`, cid));
+  const j = await graph(`${META_API}/${igId}/media`, { method: "POST", body: b });
+  const parent = String(j.id ?? "");
+  return igPublish(igId, token, parent);
+}
+
+// สร้าง container วิดีโอ Reels — คืน creation_id (ผู้เรียกต้อง poll สถานะ แล้วค่อย igPublish)
+export async function igCreateReels(igId: string, token: string, videoUrl: string, caption: string): Promise<string> {
+  const b = new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption, access_token: token });
+  const j = await graph(`${META_API}/${igId}/media`, { method: "POST", body: b });
+  return String(j.id ?? "");
 }
