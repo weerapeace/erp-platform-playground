@@ -85,6 +85,8 @@ export function DispatchShop({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [splits, setSplits] = useState<Record<string, Record<string, number>>>({});   // itemId → craftId → qty
   const [markReady, setMarkReady] = useState<Record<string, boolean>>({});             // itemId → mark ตัด/เตรียมครบ
+  const [rates, setRates] = useState<Record<string, number>>({});                       // itemId → ค่าแรง/ชิ้น (บังคับ >0)
+  const [saveBom, setSaveBom] = useState(false);                                        // บันทึกค่าแรงกลับเข้า BOM (ราคากลาง)
 
   const selDept = departments.find((d) => d.id === dept) ?? null;
   const isHire = !!selDept && /เหมา/.test(selDept.name);   // แผนกช่างเหมา = ต้องระบุช่าง
@@ -136,11 +138,14 @@ export function DispatchShop({
     if (items.length === 0) { toast.error("ตะกร้าว่าง (หรือจำนวนเป็น 0)"); return; }
     const initSplit: Record<string, Record<string, number>> = {};
     const initMark: Record<string, boolean> = {};
+    const initRates: Record<string, number> = {};
+    let anyZero = false;
     for (const m of items) {
       initSplit[m.id] = craftIds.length > 0 ? evenSplit(cart[m.id] || 0, craftIds) : { __dept__: cart[m.id] || 0 };
       initMark[m.id] = false;
+      const r = laborByMo[m.mo_no] ?? 0; initRates[m.id] = r; if (!(r > 0)) anyZero = true;
     }
-    setSplits(initSplit); setMarkReady(initMark); setConfirmOpen(true);
+    setSplits(initSplit); setMarkReady(initMark); setRates(initRates); setSaveBom(anyZero); setConfirmOpen(true);
   };
 
   // คอลัมน์ในป๊อป = ช่างที่เลือก (ถ้าไม่เลือกช่าง = จ่ายทั้งแผนก 1 คอลัมน์)
@@ -149,6 +154,7 @@ export function DispatchShop({
   const confirmItems = cartItems.filter((m) => (cart[m.id] || 0) > 0);
   const anyOver = confirmItems.some((m) => itemSum(m.id) > m.remaining + 0.0001);
   const totalWO = confirmItems.reduce((n, m) => n + cols.filter((c) => (splits[m.id]?.[c.id] || 0) > 0).length, 0);
+  const missingRate = confirmItems.some((m) => itemSum(m.id) > 0 && !((rates[m.id] ?? 0) > 0));   // มีใบที่จ่ายแต่ยังไม่ใส่ค่าแรง
 
   const doDispatch = async () => {
     const craftById = new Map(craftsmen.map((c) => [c.id, c]));
@@ -156,6 +162,7 @@ export function DispatchShop({
     let ok = 0; const fails: string[] = [];
     for (const m of confirmItems) {
       let dispatched = 0;
+      const rate = rates[m.id] ?? 0;
       for (const c of cols) {
         const qty = splits[m.id]?.[c.id] || 0;
         if (qty <= 0) continue;
@@ -166,7 +173,7 @@ export function DispatchShop({
               stage: stageOfDept(selDept!.name), department_id: selDept!.id, department_name: selDept!.name,
               assignee_type: craft ? "craftsman" : "department", assignee_id: craft?.id ?? null, assignee_name: craft?.name ?? selDept!.name,
               qty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: due || m.due_date || null,
-              note: `จากใบสั่งผลิต ${m.mo_no}`, labor_cost: (laborByMo[m.mo_no] ?? 0) > 0 ? (laborByMo[m.mo_no] ?? 0) * qty : null }) });
+              note: `จากใบสั่งผลิต ${m.mo_no}`, labor_cost: rate > 0 ? rate * qty : null }) });
           const j = await res.json(); if (j.error) throw new Error(j.error);
           ok++; dispatched += qty;
         } catch { fails.push(`${m.mo_no}·${craft?.name ?? "แผนก"}`); }
@@ -174,6 +181,10 @@ export function DispatchShop({
       // ติ๊ก "ตัด/เตรียมครบ" → mark ทั้งใบ (หลังจ่ายสำเร็จอย่างน้อยบางส่วน)
       if (markReady[m.id] && dispatched > 0) {
         await apiFetch(`/api/mo/${encodeURIComponent(m.id)}/mark-ready`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ready: true }) }).catch(() => {});
+      }
+      // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง) ถ้าติ๊กไว้
+      if (saveBom && dispatched > 0 && rate > 0 && m.product_sku) {
+        await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product_sku: m.product_sku, rate }) }).catch(() => {});
       }
     }
     setSaving(false); setConfirmOpen(false);
@@ -353,7 +364,8 @@ export function DispatchShop({
       <ERPModal open={confirmOpen} onClose={() => !saving && setConfirmOpen(false)} size="xl" title="ยืนยันจ่ายงาน"
         footer={<>
           <button onClick={() => setConfirmOpen(false)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-          <button onClick={() => void doDispatch()} disabled={saving || anyOver || totalWO === 0}
+          <button onClick={() => void doDispatch()} disabled={saving || anyOver || totalWO === 0 || missingRate}
+            title={missingRate ? "ต้องใส่ค่าแรง/ชิ้น ทุกใบก่อนจ่าย" : ""}
             className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? "กำลังจ่าย…" : `ยืนยันจ่าย (${totalWO} ใบจ่ายงาน)`}</button>
         </>}>
         <div className="space-y-2">
@@ -371,6 +383,7 @@ export function DispatchShop({
                   <th className="text-left px-2 py-1.5 font-medium sticky left-0 bg-slate-50">สินค้า</th>
                   {cols.map((c) => <th key={c.id} className="px-2 py-1.5 font-medium text-center whitespace-nowrap">{c.id === "__dept__" ? "จำนวน" : c.name}</th>)}
                   <th className="px-2 py-1.5 font-medium text-center">รวม</th>
+                  <th className="px-2 py-1.5 font-medium text-center whitespace-nowrap">ค่าแรง/ชิ้น *</th>
                   <th className="px-2 py-1.5 font-medium text-center whitespace-nowrap">ตัด/เตรียมครบ</th>
                 </tr>
               </thead>
@@ -392,6 +405,11 @@ export function DispatchShop({
                         </td>
                       ))}
                       <td className={`px-2 py-1.5 text-center tabular-nums font-semibold ${over ? "text-rose-600" : "text-slate-700"}`}>{fmt(sum)}</td>
+                      <td className="px-1 py-1 text-center">
+                        <input type="number" min={0} step="any" value={rates[m.id] ?? 0}
+                          onChange={(e) => setRates((s) => ({ ...s, [m.id]: Math.max(0, Number(e.target.value) || 0) }))}
+                          className={`w-16 h-8 px-1.5 text-xs text-right border rounded ${sum > 0 && !((rates[m.id] ?? 0) > 0) ? "border-rose-400 bg-rose-50" : "border-slate-200"}`} />
+                      </td>
                       <td className="px-2 py-1.5 text-center">
                         {m.ready
                           ? <span className="text-[10px] text-emerald-600">พร้อมแล้ว</span>
@@ -404,9 +422,14 @@ export function DispatchShop({
             </table>
           </div>
           {anyOver && <p className="text-[11px] text-rose-600">⚠️ มีบางรายการจำนวนรวมเกิน “คงเหลือ” — แก้จำนวนก่อนจ่าย</p>}
+          {missingRate && <p className="text-[11px] text-rose-600">⚠️ ต้องใส่ <b>ค่าแรง/ชิ้น</b> ทุกใบที่จ่าย (ห้ามเป็น 0)</p>}
+          <label className="flex items-center gap-2 text-[11px] text-slate-600 cursor-pointer w-fit">
+            <input type="checkbox" checked={saveBom} onChange={(e) => setSaveBom(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+            💾 บันทึกค่าแรงที่กรอกกลับเข้า BOM (ราคากลาง/ชิ้น) — ครั้งหน้าจะเติมให้อัตโนมัติ
+          </label>
           <p className="text-[11px] text-slate-400">
             แต่ละช่องคือจำนวนที่ช่างคนนั้นได้ (แบ่งเท่ากันให้ก่อน แก้เองได้) · ช่องเป็น 0 = ไม่จ่ายให้คนนั้น ·
-            ติ๊ก “ตัด/เตรียมครบ” = ทำเครื่องหมายทั้งใบว่าตัด+เตรียมเสร็จตอนจ่าย
+            ค่าแรงเติมราคากลางจาก BOM ให้ก่อน (แก้ได้) · ติ๊ก “ตัด/เตรียมครบ” = ทำเครื่องหมายทั้งใบตอนจ่าย
           </p>
         </div>
       </ERPModal>
