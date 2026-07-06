@@ -83,3 +83,27 @@ export async function lazGetOrderItems(gateway: string, accessToken: string, ord
   for (const o of rows) out[String(o.order_id)] = o.order_items ?? [];
   return out;
 }
+
+// ---- หมวดหมู่ + คุณสมบัติสินค้า (ใช้ทำระบบลงสินค้า) ----
+export type LazCategoryNode = { category_id: number | string; name: string; leaf: boolean; children?: LazCategoryNode[] };
+// ต้นไม้หมวดหมู่ทั้งหมด (คำเดียวได้ทั้งต้น)
+export async function lazGetCategoryTree(gateway: string, accessToken: string): Promise<LazCategoryNode[]> {
+  const j = await lazApiGet(gateway, "/category/tree/get", accessToken, {});
+  return (j.data as LazCategoryNode[]) ?? [];
+}
+
+export type LazAttribute = { name: string; label: string; required: boolean; input_type: string; is_sale_prop: boolean; options: string[] };
+const truthy = (v: unknown) => v === 1 || v === true || String(v) === "1" || String(v) === "true";
+// คุณสมบัติที่หมวดนี้ต้องการ (name/label/บังคับ/ชนิด input/ตัวเลือก)
+export async function lazGetCategoryAttributes(gateway: string, accessToken: string, categoryId: string): Promise<LazAttribute[]> {
+  const j = await lazApiGet(gateway, "/category/attributes/get", accessToken, { primary_category_id: String(categoryId) });
+  const rows = (j.data as Record<string, unknown>[]) ?? [];
+  return rows.map((a) => ({
+    name: String(a.name ?? ""),
+    label: String(a.label ?? a.name ?? ""),
+    required: truthy(a.is_mandatory),
+    input_type: String(a.input_type ?? ""),
+    is_sale_prop: truthy(a.is_sale_prop),
+    options: Array.isArray(a.options) ? (a.options as Record<string, unknown>[]).map((o) => String(o.name ?? "")).filter(Boolean) : [],
+  }));
+}
