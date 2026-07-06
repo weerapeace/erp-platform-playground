@@ -94,7 +94,7 @@ export function Parent360Overview({ parentId }: { parentId: string | null }) {
           {data.sales.hasData && <div className="text-xs text-slate-500">รวม <b className="text-emerald-700">{data.sales.total.toLocaleString()}฿</b> · {data.sales.units.toLocaleString()} ชิ้น</div>}
         </div>
         {data.sales.hasData ? <SalesBars days={data.sales.days} /> : (
-          <div className="text-xs text-slate-400 py-4 text-center">ยังไม่มีข้อมูลยอดขายของสินค้านี้ — นำเข้ายอดที่ <a href="/marketing/dashboard" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Marketing Dashboard</a> หรือเชื่อมออเดอร์จากร้าน</div>
+          <div className="text-xs text-slate-400 py-4 text-center">ยังไม่มีข้อมูลยอดขายของสินค้านี้ — อัปไฟล์ออเดอร์ที่ <a href="/master/platform-orders" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">ออเดอร์แพลตฟอร์ม</a> (จับคู่ SKU แล้วยอดจะขึ้นเอง) หรือนำเข้ายอดที่ <a href="/marketing/dashboard" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">Marketing Dashboard</a></div>
         )}
       </div>
 

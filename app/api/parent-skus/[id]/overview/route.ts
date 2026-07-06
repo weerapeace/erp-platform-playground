@@ -65,20 +65,33 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       .map((p) => ({ ...p, live: liveSet.has(p.id) }));
   }
 
-  // ยอดขายรายวัน (จาก marketing_product_daily — นำเข้าจาก marketplace) match ด้วยรหัสสินค้า
+  // ยอดขายรายวัน — รวม 2 แหล่ง: (1) ออเดอร์จริงที่นำเข้า (platform_order_items) (2) ยอดนำเข้า Marketing
   const salesByDay: Record<string, { sales: number; units: number }> = {};
   let salesTotal = 0, unitsTotal = 0;
-  if (allCodes.length) {
-    const { data: md } = await a.from("marketing_product_daily")
-      .select("date, sales, units, internal_sku").in("internal_sku", allCodes);
-    for (const r of ((md ?? []) as { date: string; sales: number | null; units: number | null }[])) {
-      const d = String(r.date).slice(0, 10);
-      if (!salesByDay[d]) salesByDay[d] = { sales: 0, units: 0 };
-      salesByDay[d].sales += Number(r.sales ?? 0);
-      salesByDay[d].units += Number(r.units ?? 0);
-      salesTotal += Number(r.sales ?? 0);
-      unitsTotal += Number(r.units ?? 0);
+  const addSale = (date: string, sales: number, units: number) => {
+    const d = String(date).slice(0, 10); if (!d) return;
+    if (!salesByDay[d]) salesByDay[d] = { sales: 0, units: 0 };
+    salesByDay[d].sales += sales; salesByDay[d].units += units;
+    salesTotal += sales; unitsTotal += units;
+  };
+  // (1) ออเดอร์จริง — order item ที่จับคู่ SKU ลูกนี้ → join วันที่สั่งซื้อ (platform_orders.ordered_at)
+  if (skuIds.length) {
+    const { data: oi } = await a.from("platform_order_items").select("order_id, qty, price").in("matched_sku_id", skuIds);
+    const items = (oi ?? []) as { order_id: string; qty: number | null; price: number | null }[];
+    if (items.length) {
+      const orderIds = [...new Set(items.map((x) => x.order_id))];
+      const dateById = new Map<string, string>();
+      for (let i = 0; i < orderIds.length; i += 300) {
+        const { data: ord } = await a.from("platform_orders").select("id, ordered_at").in("id", orderIds.slice(i, i + 300));
+        for (const o of ((ord ?? []) as { id: string; ordered_at: string | null }[])) if (o.ordered_at) dateById.set(o.id, o.ordered_at);
+      }
+      for (const it of items) { const d = dateById.get(it.order_id); if (d) addSale(d, Number(it.qty ?? 0) * Number(it.price ?? 0), Number(it.qty ?? 0)); }
     }
+  }
+  // (2) ยอดนำเข้า Marketing (marketing_product_daily) match ด้วยรหัสสินค้า
+  if (allCodes.length) {
+    const { data: md } = await a.from("marketing_product_daily").select("date, sales, units, internal_sku").in("internal_sku", allCodes);
+    for (const r of ((md ?? []) as { date: string; sales: number | null; units: number | null }[])) addSale(r.date, Number(r.sales ?? 0), Number(r.units ?? 0));
   }
   const salesDays = Object.entries(salesByDay).map(([date, v]) => ({ date, ...v })).sort((x, y) => x.date.localeCompare(y.date)).slice(-30);
 

@@ -19,6 +19,20 @@ function pick(lower: Record<string, unknown>, candidates: string[]): string | nu
   return null;
 }
 const num = (s: string | null): number | null => { if (!s) return null; const n = Number(String(s).replace(/[^0-9.\-]/g, "")); return Number.isNaN(n) ? null : n; };
+// แปลงวันที่จากไฟล์ออเดอร์ → ISO (รองรับ ISO / YYYY-MM-DD / DD-MM-YYYY / DD/MM/YYYY)
+function parseDate(s: string | null): string | null {
+  if (!s) return null;
+  const t = String(s).trim();
+  const d = new Date(t);
+  if (!Number.isNaN(d.getTime())) return d.toISOString();
+  const m = t.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
+  if (m) {
+    let yy = m[3]; if (yy.length === 2) yy = "20" + yy;
+    const iso = `${yy}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    const d2 = new Date(iso); if (!Number.isNaN(d2.getTime())) return d2.toISOString();
+  }
+  return null;
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "platform_orders.manage"); if (denied) return denied;
@@ -74,7 +88,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       order_no: g.external_order_id, customer_name: pick(lo, ["buyer username", "recipient", "customer", "ชื่อผู้รับ", "ลูกค้า"]),
       total: num(pick(lo, ["order total", "total amount", "grand total", "ยอดรวม", "ยอดสุทธิ"])),
       currency: pick(lo, ["currency", "สกุลเงิน"]), status: "new",
-      ordered_at: null, raw: g.head, created_by: user?.id ?? null,
+      ordered_at: parseDate(pick(lo, ["order creation date", "order create time", "created time", "order date", "order paid time", "paid time", "วันที่สั่งซื้อ", "วันที่ทำการสั่งซื้อ", "เวลาที่ทำการสั่งซื้อ", "วันเวลาที่สั่งซื้อ"])),
+      raw: g.head, created_by: user?.id ?? null,
     }).select("id").single();
     const orderId = (ins as { id?: string } | null)?.id;
     if (!orderId) continue;
