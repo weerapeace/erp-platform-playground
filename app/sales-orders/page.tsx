@@ -540,15 +540,13 @@ export default function SalesOrdersPage() {
                 📦 ใบส่งสินค้า
               </a>
             )}
-            {detail.status === "draft" && (
-              <>
-                <button onClick={() => openEdit(detail)}
-                  className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">✎ แก้ไข</button>
-                {canConfirm && (
-                  <button onClick={() => transition(detail.id, "confirm")} disabled={wfLoading}
-                    className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">✓ ยืนยัน</button>
-                )}
-              </>
+            {(detail.status === "draft" || detail.status === "confirmed") && (
+              <button onClick={() => openEdit(detail)}
+                className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">✎ แก้ไข</button>
+            )}
+            {detail.status === "draft" && canConfirm && (
+              <button onClick={() => transition(detail.id, "confirm")} disabled={wfLoading}
+                className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">✓ ยืนยัน</button>
             )}
             {detail.status === "confirmed" && canShip && (
               <>
