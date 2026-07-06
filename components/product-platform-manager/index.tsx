@@ -33,6 +33,17 @@ type Variant = { id: string; code: string; name: string; color: string | null; f
 type Toast = { id: number; type: "success" | "error" | "info"; msg: string };
 
 
+// สีประจำแบรนด์แต่ละแพลตฟอร์ม (fallback ตาม code ถ้าไม่ได้ตั้ง theme_color)
+const PLATFORM_COLOR: Record<string, string> = {
+  shopee: "#ee4d2d", lazada: "#f57224", tiktok: "#fe2c55", tiktok_shop: "#fe2c55",
+  instagram: "#e1306c", facebook: "#1877f2", youtube: "#ff0000", pinterest: "#e60023",
+  x: "#0f1419", line_shopping: "#06c755", line_oa: "#06c755", website: "#6366f1",
+};
+function platformColor(p: { code: string; theme_color: string | null }): string {
+  if (p.theme_color && /^#[0-9a-fA-F]{6}$/.test(p.theme_color)) return p.theme_color;
+  return PLATFORM_COLOR[p.code] ?? "#7c3aed";
+}
+
 // ค้นหา + เลือกหมวดหมู่ของแพลตฟอร์ม (จาก platform_category_options ที่นำเข้ามา) — คืนค่า "id · ชื่อ"
 function CategoryOptionPicker({ platformId, onPick }: { platformId: string; onPick: (label: string) => void }) {
   const [q, setQ] = useState("");
@@ -536,11 +547,24 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
         {loading ? <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">กำลังโหลด...</div> : (
           <>
             <div className="flex gap-1 px-4 pt-3 overflow-x-auto shrink-0 border-b border-slate-100">
-              {platforms.map((p) => (
-                <button key={p.id} onClick={() => setActive(p.id)} className={`shrink-0 px-3 py-1.5 text-sm rounded-t-lg border-b-2 transition-colors ${active === p.id ? "border-violet-500 text-violet-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
-                  <PlatformIcon code={p.code} iconKey={p.icon_key} size={16} /> {p.name_th}
-                </button>
-              ))}
+              {platforms.map((p) => {
+                const d = drafts[p.id] ?? {};
+                const onSale = d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id;
+                const hasDraft = !!(d.title || d.category_path || (d.image_keys?.length));
+                const dot = onSale ? "bg-emerald-500" : hasDraft ? "bg-blue-500" : "bg-slate-300";
+                const stLabel = onSale ? "ลงขายแล้ว" : hasDraft ? "มีร่าง" : "ยังไม่ทำ";
+                const color = platformColor(p);
+                const isActive = active === p.id;
+                return (
+                  <button key={p.id} onClick={() => setActive(p.id)} title={`${p.name_th} · ${stLabel}`}
+                    style={{ borderBottomColor: isActive ? color : `${color}40`, color: isActive ? color : undefined }}
+                    className={`shrink-0 px-3 py-1.5 text-sm rounded-t-lg border-b-2 transition-colors inline-flex items-center gap-1.5 ${isActive ? "font-medium" : "text-slate-500 hover:text-slate-700"}`}>
+                    <PlatformIcon code={p.code} iconKey={p.icon_key} size={16} />
+                    <span>{p.name_th}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+                  </button>
+                );
+              })}
               {platforms.length === 0 && <p className="text-sm text-slate-400 py-2">ยังไม่มีแพลตฟอร์มที่เปิดใช้ — เพิ่มที่ตั้งค่า</p>}
             </div>
 
