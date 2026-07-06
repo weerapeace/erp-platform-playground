@@ -13,6 +13,7 @@ import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers, recomputeTaskStatusFromSubtasks, pushTasksLineTpl, employeeLabelMap, taskLink, materializeContentSubtasks } from "@/lib/creative-tasks-server";
 import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
+import { approvalLink } from "@/lib/approval-token";
 import { renderPrompt } from "@/lib/subtask-prompt";
 
 export const dynamic = "force-dynamic";
@@ -435,7 +436,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       })));
       // แจ้งเข้ากลุ่ม LINE ของทีม ตามแม่แบบ (best-effort) — ส่งทั้งแถวงานย่อย + บริบทงาน → ใช้ {ฟิลด์ใดก็ได้}
       const submitter = user?.id ? (await employeeLabelMap(admin, [user.id])).get(user.id) ?? null : null;
-      await pushTasksLineTpl(admin, "subtask_submitted", { ...(row ?? {}), subtask: subTitle, task: taskLabel, submitter, task_no: parent?.task_no, link: taskLink(String(id)) });
+      // {link} ใน LINE = หน้าอนุมัติเล็ก (กดแล้วอนุมัติได้เลย ไม่ต้องเข้าทั้งระบบ) — deep link งานเต็มยังใช้ได้ที่ {link_full}
+      await pushTasksLineTpl(admin, "subtask_submitted", { ...(row ?? {}), subtask: subTitle, task: taskLabel, submitter, task_no: parent?.task_no, link: approvalLink(subtaskId), link_full: taskLink(String(id)) });
     } catch { /* แจ้งเตือนล้มเหลวไม่ทำให้บันทึกพัง */ }
   }
 
