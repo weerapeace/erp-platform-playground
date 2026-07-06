@@ -1385,10 +1385,10 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
           <>
             {canSubmit && !hasWork && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{hasParentTarget ? t("ใส่รูปในกล่องสินค้าอย่างน้อย 1 ก่อนกดส่งงาน", "Add at least one image to a product box before submitting") : t("แนบรูปหรือลิงก์อย่างน้อย 1 ก่อนกดส่งงาน", "Attach at least one image or link before submitting")}</p>}
             {canSubmit && hasWork && tickedNoImg.length > 0 && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">⚠ {t(`สินค้าที่ติ๊กไว้ต้องใส่รูปให้ครบก่อนส่ง: ${tickedNoImg.map((tk) => labelMapRef.current[tk] ?? tk).join(", ")}`, `Add images to all ticked products before submitting: ${tickedNoImg.map((tk) => labelMapRef.current[tk] ?? tk).join(", ")}`)}</p>}
-            {/* กล่อง "รูปแนบงาน" — โชว์เสมอ (แนบรูปงานไว้ดู/ส่งตรวจ) · แยกจาก "รูปเข้าสินค้า" ด้านล่าง */}
-            {showImages && (
+            {/* กล่อง "รูปแนบงาน" บน — ซ่อนเมื่อมีสินค้าปลายทาง (หย่อนรูปในกล่องสินค้าด้านล่างแทน) */}
+            {showImages && !hasParentTarget && (
               <div>
-                <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤1500px)", "Work images (resized ≤1500px)")}{hasParentTarget ? <span className="text-slate-300"> · {t("รูปงานสำหรับตรวจ (คนละส่วนกับรูปเข้าสินค้าด้านล่าง)", "for review — separate from product images below")}</span> : null}</p>
+                <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤1500px)", "Work images (resized ≤1500px)")}</p>
                 <ImageAttach
                   images={imageAtts.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
                   onAttach={async (r) => { await addAttachment(taskId, { kind: "image", subtask_id: sub.id, ...r }); await reload(); }}
