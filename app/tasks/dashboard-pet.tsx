@@ -7,7 +7,7 @@
 // notify=false → กลับไปเป็นรูปลอยเฉย ๆ แบบเดิม · "งานใหม่" นับจากเวลาเข้าครั้งล่าสุด (localStorage)
 // ============================================================
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
 import type { PetConfig, PetCorner } from "./overview-customizer";
@@ -67,7 +67,7 @@ const CORNER: Record<PetCorner, { pos: string; items: string; isTop: boolean; is
   tl: { pos: "top-1 left-3", items: "items-start", isTop: true, isLeft: true },
 };
 
-export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data, onAlert }: {
+export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data, onAlert, onMove }: {
   petUrl: string | null;
   lottieUrl?: string | null;
   lottieData?: unknown;
@@ -75,12 +75,34 @@ export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data,
   cfg: PetConfig;
   data: PetData;
   onAlert: (kind: PetAlertKind) => void;
+  onMove?: (pos: { x: number; y: number }) => void;   // ลาก PET แล้วเซฟตำแหน่ง (% ของการ์ด)
 }) {
   const t = useT();
   const [seen, setSeen] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [idx, setIdx] = useState(0);
   const [chat, setChat] = useState<string | null>(null);   // ข้อความคุยเล่น (พูดเป็นระยะ)
+  // ── ลาก PET ด้วยเมาส์/นิ้ว → ตำแหน่งอิสระ (% ของการ์ด) แล้วเซฟผ่าน onMove ──
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ sx: number; sy: number; moved: boolean } | null>(null);
+  const justDraggedRef = useRef(false);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const cardRect = () => (containerRef.current?.offsetParent as HTMLElement | null)?.getBoundingClientRect() ?? null;
+  const onPetPointerDown = (e: ReactPointerEvent) => { if (!onMove) return; try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ } dragRef.current = { sx: e.clientX, sy: e.clientY, moved: false }; };
+  const onPetPointerMove = (e: ReactPointerEvent) => {
+    const d = dragRef.current; if (!d) return;
+    if (!d.moved && Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) < 6) return;
+    d.moved = true;
+    const r = cardRect(); if (!r || !r.width || !r.height) return;
+    const x = Math.min(96, Math.max(2, ((e.clientX - r.left) / r.width) * 100));
+    const y = Math.min(94, Math.max(2, ((e.clientY - r.top) / r.height) * 100));
+    setDragPos({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
+  };
+  const onPetPointerUp = (e: ReactPointerEvent) => {
+    const d = dragRef.current; dragRef.current = null;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    if (d?.moved && dragPos && onMove) { justDraggedRef.current = true; onMove(dragPos); }
+  };
 
   // ครั้งแรกสุด: ตั้ง lastSeen = ตอนนี้ (ไม่งั้นงานเก่าทั้งหมดจะถูกนับเป็น "งานใหม่")
   useEffect(() => {
@@ -188,7 +210,10 @@ export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data,
   ) : null;
 
   const petEl = (
-    <button onClick={() => { if (hasAlert) setOpen((o) => !o); else setChat((c) => (c ? null : pickMsg())); if (newCount > 0) acknowledge(); }} title={t("กดดูการแจ้งเตือน / ให้ PET พูด", "Tap for alerts / make the pet talk")}
+    <button onPointerDown={onPetPointerDown} onPointerMove={onPetPointerMove} onPointerUp={onPetPointerUp}
+      onClick={() => { if (justDraggedRef.current) { justDraggedRef.current = false; return; } if (hasAlert) setOpen((o) => !o); else setChat((c) => (c ? null : pickMsg())); if (newCount > 0) acknowledge(); }}
+      title={t("กดดูการแจ้งเตือน · ลากเพื่อย้ายตำแหน่ง", "Tap for alerts · drag to move")}
+      style={onMove ? { cursor: "move", touchAction: "none" } : undefined}
       className="relative select-none focus:outline-none">
       {total > 0 && (
         <span className={`ov-badge-pulse absolute -top-1 ${corner.isLeft ? "-left-1" : "-right-1"} z-10 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow`}>{total > 99 ? "99+" : total}</span>
@@ -205,8 +230,11 @@ export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data,
     </button>
   );
 
+  const freePos = dragPos ?? ((cfg.posX != null && cfg.posY != null) ? { x: cfg.posX, y: cfg.posY } : null);
   return (
-    <div className={`absolute ${corner.pos} z-10 flex flex-col ${corner.items} gap-1`}>
+    <div ref={containerRef}
+      className={freePos ? "absolute z-20 flex flex-col items-center gap-1" : `absolute ${corner.pos} z-10 flex flex-col ${corner.items} gap-1`}
+      style={freePos ? { left: `${freePos.x}%`, top: `${freePos.y}%`, transform: "translate(-50%, -50%)" } : undefined}>
       {corner.isTop ? <>{petEl}{bubbleEl}</> : <>{bubbleEl}{petEl}</>}
     </div>
   );

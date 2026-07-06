@@ -32,7 +32,7 @@ export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: bo
 export type StatusColorMap = Record<string, { c1: string; c2?: string | null }>;
 // PET แจ้งเตือน: เปิด/ปิด + เลือกว่าจะเด้งเตือนเมื่อมีงานแบบไหน + แต่งหน้าตา/ตำแหน่ง
 export type PetCorner = "br" | "bl" | "tr" | "tl";
-export type PetConfig = { notify: boolean; overdue: boolean; review: boolean; dueToday: boolean; newTasks: boolean; corner?: PetCorner; size?: number; greeting?: string | null; emojiHappy?: string; emojiAlert?: string; frameMs?: number; messages?: string[]; chatEveryMin?: number };
+export type PetConfig = { notify: boolean; overdue: boolean; review: boolean; dueToday: boolean; newTasks: boolean; corner?: PetCorner; posX?: number; posY?: number; size?: number; greeting?: string | null; emojiHappy?: string; emojiAlert?: string; frameMs?: number; messages?: string[]; chatEveryMin?: number };
 export type FontScale = "sm" | "md" | "lg" | "xl";
 export type Density = "compact" | "normal" | "spacious";
 export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number; cardLabelSize?: number; cardValueSize?: number; cardAlign?: CardAlign; anim?: AnimTheme; statusColors?: StatusColorMap; fontFamily?: string; fontScale?: FontScale; density?: Density; cardValueColor?: string | null; cardLabelColor?: string | null; pet?: PetConfig };
@@ -617,10 +617,11 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             {/* มุม + ขนาด */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 pl-1">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-slate-500">{t("มุมที่ลอย", "Corner")}</span>
+                <span className="text-xs text-slate-500">{t("มุม (หรือลาก PET เอง)", "Corner (or drag the pet)")}</span>
                 {([["tl", "↖"], ["tr", "↗"], ["bl", "↙"], ["br", "↘"]] as const).map(([cn, arrow]) => (
-                  <button key={cn} onClick={() => setPet({ corner: cn })} className={`h-7 w-8 text-sm rounded border ${(theme.pet?.corner ?? "br") === cn ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{arrow}</button>
+                  <button key={cn} onClick={() => setPet({ corner: cn, posX: undefined, posY: undefined })} className={`h-7 w-8 text-sm rounded border ${(theme.pet?.corner ?? "br") === cn && theme.pet?.posX == null ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{arrow}</button>
                 ))}
+                {theme.pet?.posX != null && <span className="text-[10px] text-violet-500">📍 {t("ตำแหน่งเอง", "custom")}</span>}
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-500">{t("ขนาด", "Size")}</span>
