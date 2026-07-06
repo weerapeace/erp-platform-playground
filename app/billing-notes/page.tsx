@@ -91,6 +91,13 @@ export default function BillingNotesPage() {
     setFormErr(null); setDetailOpen(false); setModalOpen(true);
   };
 
+  // คัดลอก → ใบใหม่ ก๊อปลูกค้า/วันที่/หมายเหตุ แต่ต้องเลือก SO ใหม่ (SO เดิมถูกวางบิลแล้ว วางซ้ำไม่ได้)
+  const openDuplicate = (d: BillingNoteDetail) => {
+    openEdit(d);
+    setEditingId(null);
+    setPicked([]);
+  };
+
   const openDetail = async (id: string) => {
     setDetailOpen(true); setDetailLoading(true); setDetail(null);
     try {
@@ -323,6 +330,7 @@ export default function BillingNotesPage() {
         footer={detail ? (
           <>
             <button onClick={() => setDetailOpen(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
+            <button onClick={() => openDuplicate(detail)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">📋 คัดลอก</button>
             {detail.bill_number && (
               <a href={`/print/billing-note/${detail.id}`} target="_blank" rel="noopener noreferrer"
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center">🧾 พิมพ์ใบวางบิล</a>
