@@ -567,8 +567,14 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     finally { setPosting(null); }
   };
   // โหมดมือ (ยังไม่เชื่อม): คัดลอกแคปชั่น + เปิดหน้าโพสต์ให้
+  // X (Twitter): ใช้ web intent เติมข้อความให้เลย (ฟรี ไม่ใช้ API) → พี่แค่แนบรูป+โพสต์
   const manualPost = (platform: string, captionText: string) => {
     navigator.clipboard.writeText(captionText).catch(() => {});
+    if (platform === "x") {
+      window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(captionText)}`, "_blank", "noopener,noreferrer");
+      pushToast("success", t("เปิด X พร้อมเติมข้อความแล้ว — แนบรูปแล้วโพสต์ได้เลย", "Opened X with text prefilled — attach images & post"));
+      setPostModal(null); return;
+    }
     const u = (pset[platform]?.post_url ?? "").trim();
     if (u) { window.open(u, "_blank", "noopener,noreferrer"); pushToast("success", t("คัดลอกแคปชั่น + เปิดหน้าโพสต์แล้ว", "Caption copied + post page opened")); }
     else pushToast("info", t("คัดลอกแคปชั่นแล้ว · ยังไม่ได้ตั้งลิงก์หน้าโพสต์ (⚙️ ตั้งค่าแพลตฟอร์ม)", "Caption copied · no post link set (⚙️ Platform settings)"));
