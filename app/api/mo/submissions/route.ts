@@ -8,6 +8,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { notifyEvent, pushLineTpl, boardLink } from "@/lib/board-notify";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -68,6 +69,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   await admin.from("mo_work_orders").update(patch).eq("id", wo_id);
 
   await writeAudit(admin, { action: "wo.submit", entityType: "wo_submissions", entityId: wo_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { sku: wo.product_sku, qty, wage, done: newReceived >= Number(wo.qty ?? 0) } });
+
+  // แจ้งเตือน "มีงานรอ QC" (best-effort): กระดิ่ง (หัวหน้า) + LINE กลุ่ม QC
+  await notifyEvent(admin, "qc.pending", "mo_work_order", wo_id, user?.id ?? null, {
+    sku: wo.product_sku, product_name: wo.product_name ?? wo.product_sku, worker: wo.assignee_name ?? "—", qty, mo_no: wo.mo_no,
+  });
+  await pushLineTpl(admin, "qc", "qc_pending", {
+    sku: wo.product_sku ?? "", product_name: wo.product_name ?? "", worker: wo.assignee_name ?? "—", qty, link: boardLink("/master/qc-warehouse"),
+  });
+
   return NextResponse.json({ error: null, done: newReceived >= Number(wo.qty ?? 0) });
 }
 

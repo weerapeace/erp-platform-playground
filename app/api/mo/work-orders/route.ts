@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { pushLineTpl, dmEmployeeById, boardLink } from "@/lib/board-notify";
 import { guardApi } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
@@ -91,6 +92,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   await writeAudit(admin, { action: "create", entityType: "mo_work_order", entityId: wo.id, actorId: user.id,
     actorName: user.email ?? null, metadata: { wo_no: woNo, mo_no: body.mo_no, qty, stage: body.stage } });
+
+  // แจ้งเตือน (best-effort): DM ช่างที่รับงาน + LINE กลุ่มผลิต (จ่ายงานบ่อย จึงไม่เด้งกระดิ่ง)
+  const isCraft = body.assignee_type === "craftsman" && !!body.assignee_id;
+  const link = boardLink("/master/work-board");
+  await pushLineTpl(admin, "production", "wo_dispatched", {
+    sku: body.product_sku ?? "", product_name: body.product_name ?? "",
+    worker: isCraft ? (body.assignee_name ?? "") : "ทั้งแผนก", dept: body.department_name ?? "แผนก",
+    qty, due: body.due_date ?? "—", mo_no: body.mo_no, link,
+  });
+  if (isCraft) await dmEmployeeById(admin, body.assignee_id, `📤 คุณได้รับงานใหม่\n${body.product_sku ?? ""} · ${body.product_name ?? ""}\nจำนวน ${qty} ชิ้น${body.due_date ? ` · กำหนด ${body.due_date}` : ""}\n🔗 ${link}`);
+
   return NextResponse.json({ id: wo.id, wo_no: woNo, error: null });
 }
 

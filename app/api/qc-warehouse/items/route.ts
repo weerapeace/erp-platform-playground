@@ -15,6 +15,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { notifyEvent, pushLineTpl, dmEmployeeByName, boardLink } from "@/lib/board-notify";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -83,6 +84,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await admin.from("mo_work_orders").update({ qc_pulled_qty: Number(wo.qc_pulled_qty ?? 0) + good + badTotal }).eq("id", wo_id);
       for (const b of bad) await logDefect(admin, { sku: wo.product_sku, worker: wo.assignee_name, qty: b.qty, reason: b.reason, kind: "defect", mo_no: wo.mo_no });
       await writeAudit(admin, { action: "qc.receive", entityType: "qc_warehouse_items", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, good, bad: badTotal } });
+      // แจ้งเตือน "พบของเสีย" ตอนรับเข้า (best-effort): กระดิ่ง + LINE กลุ่ม QC + DM ช่าง
+      if (badTotal > 0) {
+        const reasons = bad.map((b) => `${b.reason} ${b.qty}`).join(", ");
+        const link = boardLink("/master/qc-warehouse");
+        await notifyEvent(admin, "qc.defect", "qc_warehouse_items", wo_id, actor.actorId, { sku: wo.product_sku, product_name: wo.product_name ?? wo.product_sku, reason: reasons, qty: badTotal, worker: wo.assignee_name ?? "—", mo_no: wo.mo_no });
+        await pushLineTpl(admin, "qc", "qc_defect", { sku: wo.product_sku ?? "", product_name: wo.product_name ?? "", reason: reasons, qty: badTotal, worker: wo.assignee_name ?? "—", link });
+        await dmEmployeeByName(admin, wo.assignee_name, `⚠️ งานมีของเสีย\n${wo.product_sku ?? ""} · ${wo.product_name ?? ""}\n${reasons} (${badTotal} ชิ้น)\n🔗 ${link}`);
+      }
       return NextResponse.json({ error: null });
     }
 
@@ -125,6 +134,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await admin.from("qc_warehouse_items").insert({ shelf_id: dsid, wo_id: item.wo_id, mo_no: item.mo_no, sku: item.sku, sku_name: item.sku_name, worker: item.worker, qty, status: "defect", reason });
       await logDefect(admin, { sku: item.sku, worker: item.worker, qty, reason, kind: "defect", mo_no: item.mo_no });
       await writeAudit(admin, { action: "qc.defect", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, qty, reason } });
+      // แจ้งเตือน "พบของเสีย" (best-effort): กระดิ่ง + LINE กลุ่ม QC + DM ช่าง
+      {
+        const link = boardLink("/master/qc-warehouse");
+        await notifyEvent(admin, "qc.defect", "qc_warehouse_items", item_id, actor.actorId, { sku: item.sku, product_name: item.sku_name ?? item.sku, reason, qty, worker: item.worker ?? "—", mo_no: item.mo_no });
+        await pushLineTpl(admin, "qc", "qc_defect", { sku: item.sku ?? "", product_name: item.sku_name ?? "", reason, qty, worker: item.worker ?? "—", link });
+        await dmEmployeeByName(admin, item.worker, `⚠️ งานมีของเสีย\n${item.sku ?? ""} · ${item.sku_name ?? ""}\n${reason} (${qty} ชิ้น)\n🔗 ${link}`);
+      }
       return NextResponse.json({ error: null });
     }
 
