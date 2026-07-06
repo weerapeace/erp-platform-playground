@@ -11,7 +11,7 @@ import Link from "next/link";
 type LiffSdk = { init: (o: { liffId: string }) => Promise<void>; isLoggedIn: () => boolean; login: (o?: { redirectUri?: string }) => void; getIDToken: () => string | null };
 const getLiff = () => (typeof window !== "undefined" ? (window as unknown as { liff?: LiffSdk }).liff : undefined);
 const LIFF_SCRIPT = "https://static.line-scdn.net/liff/edge/2/sdk.js";
-const liffId = () => process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.env.NEXT_PUBLIC_LIFF_ID || "";
+const liffId = () => process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.env.NEXT_PUBLIC_LIFF_ID || "2010621559-NELkN0OU";
 
 function loadLiff() {
   return new Promise<void>((resolve, reject) => {

@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
-import { verifyApprovalToken } from "@/lib/approval-token";
+import { verifyApprovalToken, APPROVE_CHANNEL_ID } from "@/lib/approval-token";
 import { verifyLineIdToken } from "@/lib/line-employee-portal-db";
 import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
 import { userIdsReviewers, recomputeTaskStatusFromSubtasks } from "@/lib/creative-tasks-server";
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ยืนยันตัวตนผ่าน LINE
   let lineSub = "";
-  try { const p = await verifyLineIdToken(body.id_token); lineSub = String((p as { sub?: string }).sub ?? ""); }
+  try { const p = await verifyLineIdToken(body.id_token, undefined, APPROVE_CHANNEL_ID); lineSub = String((p as { sub?: string }).sub ?? ""); }
   catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 401 }); }
   if (!lineSub) return NextResponse.json({ error: "ยืนยัน LINE ไม่สำเร็จ" }, { status: 401 });
 

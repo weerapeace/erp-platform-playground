@@ -84,8 +84,8 @@ function normalizeMember(row: Row) {
   };
 }
 
-export async function verifyLineIdToken(idToken: unknown, nonce?: unknown): Promise<Row> {
-  const channelId = process.env.LINE_LOGIN_CHANNEL_ID;
+export async function verifyLineIdToken(idToken: unknown, nonce?: unknown, clientId?: string): Promise<Row> {
+  const channelId = clientId || process.env.LINE_LOGIN_CHANNEL_ID;
   if (!channelId) throw new Error("ยังไม่ได้ตั้งค่า LINE_LOGIN_CHANNEL_ID ฝั่ง server");
   const token = text(idToken);
   if (!token) throw new Error("ไม่พบ LINE ID token");

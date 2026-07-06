@@ -32,7 +32,13 @@ export function verifyApprovalToken(token: string): { subtaskId: string } | null
   } catch { return null; }
 }
 
-/** ลิงก์หน้าอนุมัติเล็ก (ใส่ในข้อความ LINE) */
+// LINE Login channel + LIFF ของหน้าอนุมัติ (ตั้ง env ทับได้ · default = channel "ISG ERP Login")
+export const APPROVE_CHANNEL_ID = process.env.LINE_APPROVE_CHANNEL_ID || "2010621559";
+export const APPROVE_LIFF_ID = process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.env.NEXT_PUBLIC_LIFF_ID || "2010621559-NELkN0OU";
+
+/** ลิงก์หน้าอนุมัติเล็ก (ใส่ในข้อความ LINE) — เปิดผ่าน LIFF เพื่อ auto-login รู้ตัวตนทันที */
 export function approvalLink(subtaskId: string): string {
-  return `${APP_BASE}/a/${signApprovalToken(subtaskId)}`;
+  const token = signApprovalToken(subtaskId);
+  // LIFF จะต่อ path ที่ตามหลัง liff ID ไปที่ Endpoint (/a) → กลายเป็น /a/<token>
+  return APPROVE_LIFF_ID ? `https://liff.line.me/${APPROVE_LIFF_ID}/${token}` : `${APP_BASE}/a/${token}`;
 }

@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { verifyLineIdToken } from "@/lib/line-employee-portal-db";
+import { APPROVE_CHANNEL_ID } from "@/lib/approval-token";
 import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let body: { id_token?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   let sub = "";
-  try { const p = await verifyLineIdToken(body.id_token); sub = String((p as { sub?: string }).sub ?? ""); }
+  try { const p = await verifyLineIdToken(body.id_token, undefined, APPROVE_CHANNEL_ID); sub = String((p as { sub?: string }).sub ?? ""); }
   catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 401 }); }
   if (!sub) return NextResponse.json({ error: "ยืนยัน LINE ไม่สำเร็จ" }, { status: 401 });
 

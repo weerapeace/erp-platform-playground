@@ -12,7 +12,7 @@ type LiffSdk = { init: (o: { liffId: string }) => Promise<void>; isLoggedIn: () 
 const getLiff = () => (typeof window !== "undefined" ? (window as unknown as { liff?: LiffSdk }).liff : undefined);
 
 const LIFF_SCRIPT = "https://static.line-scdn.net/liff/edge/2/sdk.js";
-const liffId = () => process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.env.NEXT_PUBLIC_LIFF_ID || "";
+const liffId = () => process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.env.NEXT_PUBLIC_LIFF_ID || "2010621559-NELkN0OU";
 
 type Preview = { id: string; title: string; subtask_type: string | null; status: string | null; task_no: string | null; task_title: string | null; images: string[]; links: { label: string | null; key: string | null }[] };
 
