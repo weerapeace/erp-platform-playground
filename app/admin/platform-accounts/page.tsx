@@ -144,6 +144,7 @@ export default function PlatformAccountsPage() {
             const hasShop = !!(acc.label || acc.external_shop_id);
             const hasApi = p.code === "line_shopping";   // แพลตฟอร์มที่ต่อ API ได้ (ใส่ API Key + ทดสอบ)
             const isMeta = p.code === "facebook";   // Facebook = เชื่อมต่อแบบ OAuth (กดปุ่มเชื่อม) แล้วยิงโพสต์จริงได้
+            const isMetaIg = p.code === "instagram";   // Instagram = ใช้การเชื่อมของเพจ Facebook (สถานะ/ปุ่มอยู่ที่นี่ด้วย)
             return (
               <div key={p.id} className={`border rounded-xl p-3 ${acc.is_active && hasShop ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200"}`}>
                 <div className="flex items-center gap-3 flex-wrap">
@@ -193,6 +194,27 @@ export default function PlatformAccountsPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <button onClick={connectFb} disabled={!brandId} className="h-8 px-3 text-sm text-white bg-[#1877F2] rounded-lg hover:opacity-90 disabled:opacity-40">👍 เชื่อมต่อ Facebook</button>
                         <span className="text-[11px] text-slate-400">กดแล้วเข้าสู่ระบบ Facebook + เลือกเพจ → พร้อมยิงโพสต์จริงจากหน้าคอนเทนต์</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {isMetaIg && canManage && (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-100">
+                    {!metaCfg ? (
+                      <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">⚠️ ยังไม่ได้ตั้ง META_APP_ID / META_APP_SECRET ในโฮสต์</p>
+                    ) : !fb.connected ? (
+                      <p className="text-xs text-slate-500">📷 Instagram โพสต์ผ่านเพจ Facebook — ไปกด <b>“เชื่อมต่อ Facebook”</b> ที่แถว Facebook ด้านบนก่อน (ตอนอนุญาตให้เปิดสิทธิ์ Instagram ด้วย)</p>
+                    ) : fbHasIg ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] text-emerald-600 shrink-0">● พร้อมโพสต์ Instagram</span>
+                        <span className="text-sm text-slate-700">ผ่านเพจ <b>{fb.page_name}</b></span>
+                        <button onClick={connectFb} className="text-[11px] text-violet-600 underline">เชื่อมใหม่</button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        <p className="text-xs text-amber-600">⚠️ เพจ “{fb.page_name}” เชื่อมแล้ว แต่ยังไม่เจอ Instagram ที่ผูก</p>
+                        <p className="text-[11px] text-slate-500">ตรวจว่า IG เป็นบัญชี <b>Business/Professional</b> + <b>ผูกกับเพจนี้</b> (ใน Meta Business Suite) แล้วกด <b>เชื่อมใหม่</b> — คราวนี้จะขอสิทธิ์ Instagram ด้วย</p>
+                        <button onClick={connectFb} className="self-start h-8 px-3 text-sm text-white rounded-lg hover:opacity-90" style={{ background: "linear-gradient(45deg,#F58529,#DD2A7B,#8134AF)" }}>📷 เชื่อมใหม่ (รับสิทธิ์ Instagram)</button>
                       </div>
                     )}
                   </div>
