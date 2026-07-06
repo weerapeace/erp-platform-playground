@@ -3,7 +3,7 @@
 // จัดการร้าน/บัญชีแพลตฟอร์ม ต่อแบรนด์ (เฟส 2) — แต่ละแบรนด์มีร้านของตัวเองต่อแพลตฟอร์ม
 // ตั้งชื่อร้าน + shop id + เปิด/ปิด · ใช้ตอน publish เพื่อเลือกร้านตามแบรนด์ของสินค้า
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPInput } from "@/components/form";
 import { useAuth } from "@/components/auth";
@@ -28,24 +28,61 @@ export default function PlatformAccountsPage() {
   const [showGuide, setShowGuide] = useState(false);   // คู่มือขอ API Key ของ LINE SHOPPING
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
+  // สถานะเชื่อมต่อ Facebook (Meta) ต่อแบรนด์
+  type FbStatus = { connected: boolean; stage: string; page_name: string | null; pages: { id: string; name: string; ig: boolean }[] };
+  const [fb, setFb] = useState<FbStatus>({ connected: false, stage: "none", page_name: null, pages: [] });
+  const [fbHasIg, setFbHasIg] = useState(false);
+  const [metaCfg, setMetaCfg] = useState(true);   // ตั้งค่า META_APP_ID/SECRET ในโฮสต์แล้วไหม
+  const [pickPage, setPickPage] = useState("");   // เพจที่เลือก (กรณีมีหลายเพจ)
+  const brandChosen = useRef(false);   // มีการเลือกแบรนด์แล้ว (จาก query/ผู้ใช้) — กัน auto-select ทับ
 
   const load = useCallback(async (bid: string) => {
     setLoading(true);
     try {
-      const [j, kj] = await Promise.all([
+      const [j, kj, mj] = await Promise.all([
         apiFetch(`/api/platform-accounts${bid ? `?brand_id=${encodeURIComponent(bid)}` : ""}`).then((r) => r.json()),
         bid ? apiFetch(`/api/platform-credentials?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve({ keys: {} }),
+        bid ? apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve(null),
       ]);
       setPlatforms((j.platforms ?? []) as Platform[]);
       setBrands((j.brands ?? []) as Brand[]);
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
       setKeys((kj.keys ?? {}) as Record<string, boolean>);
+      if (mj) { setFb((mj.facebook ?? { connected: false, stage: "none", page_name: null, pages: [] }) as FbStatus); setFbHasIg(!!mj.instagram?.connected); setMetaCfg(mj.configured !== false); setPickPage(""); }
       setTestMsg(null);
-      if (!bid && j.brands?.[0]) setBrandId(j.brands[0].id);
+      if (!bid && !brandChosen.current && j.brands?.[0]) setBrandId(j.brands[0].id);
     } catch (e) { setMsg((e as Error).message); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(""); }, [load]);
   useEffect(() => { if (brandId) load(brandId); }, [brandId, load]);
+  // กลับมาจากการเชื่อมต่อ Facebook (OAuth) — อ่านผลจาก query แล้วล้าง URL
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const err = sp.get("meta_error"), ok = sp.get("meta_connected"), pick = sp.get("meta_pick"), brand = sp.get("brand");
+    if (brand) { brandChosen.current = true; setBrandId(brand); }
+    if (err) setMsg("❌ " + err);
+    else if (ok) setMsg("✅ เชื่อมต่อ Facebook สำเร็จ");
+    else if (pick) setMsg("มีหลายเพจ — เลือกเพจที่จะใช้โพสต์ด้านล่าง");
+    if (err || ok || pick || brand) window.history.replaceState({}, "", window.location.pathname);
+  }, []);
+
+  const connectFb = () => { if (brandId) window.location.href = `/api/meta/oauth/start?brand_id=${encodeURIComponent(brandId)}`; };
+  const selectFbPage = async () => {
+    if (!pickPage) return;
+    try {
+      const r = await apiFetch("/api/meta/select-page", { method: "POST", body: JSON.stringify({ brand_id: brandId, page_id: pickPage }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setMsg("✅ เลือกเพจแล้ว: " + (j.page_name ?? "")); await load(brandId);
+    } catch (e) { setMsg("❌ " + (e as Error).message); }
+  };
+  const disconnectFb = async () => {
+    if (!window.confirm("ตัดการเชื่อมต่อ Facebook ของแบรนด์นี้?")) return;
+    try {
+      const r = await apiFetch("/api/meta/disconnect", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setMsg("ตัดการเชื่อมต่อแล้ว"); await load(brandId);
+    } catch (e) { setMsg("❌ " + (e as Error).message); }
+  };
 
   const save = async (platform_id: string, patch: Partial<Account>) => {
     setAccounts((a) => { const prev = a[platform_id] ?? { label: null, external_shop_id: null, is_active: true }; return { ...a, [platform_id]: { ...prev, ...patch } }; });
@@ -99,6 +136,7 @@ export default function PlatformAccountsPage() {
             const acc = accounts[p.id] ?? { label: null, external_shop_id: null, is_active: false };
             const hasShop = !!(acc.label || acc.external_shop_id);
             const hasApi = p.code === "line_shopping";   // แพลตฟอร์มที่ต่อ API ได้ (ใส่ API Key + ทดสอบ)
+            const isMeta = p.code === "facebook";   // Facebook = เชื่อมต่อแบบ OAuth (กดปุ่มเชื่อม) แล้วยิงโพสต์จริงได้
             return (
               <div key={p.id} className={`border rounded-xl p-3 ${acc.is_active && hasShop ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200"}`}>
                 <div className="flex items-center gap-3 flex-wrap">
@@ -120,6 +158,36 @@ export default function PlatformAccountsPage() {
                     <button onClick={testConn} disabled={testing || !keys[p.id]} title={keys[p.id] ? "" : "ใส่ API Key ก่อน"} className="h-8 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-40">🔌 ทดสอบเชื่อมต่อ</button>
                     {testMsg && <span className="text-xs text-slate-600">{testMsg}</span>}
                     <button onClick={() => setShowGuide(true)} className="text-[11px] text-violet-600 underline shrink-0">📖 วิธีขอ API Key</button>
+                  </div>
+                )}
+                {isMeta && canManage && (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-100">
+                    {!metaCfg ? (
+                      <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">⚠️ ยังไม่ได้ตั้ง META_APP_ID / META_APP_SECRET ในโฮสต์ (Vercel) — ตั้งก่อนจึงจะเชื่อมต่อได้</p>
+                    ) : fb.connected ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[11px] text-emerald-600 shrink-0">● เชื่อมต่อแล้ว</span>
+                        <span className="text-sm text-slate-700">เพจ: <b>{fb.page_name}</b></span>
+                        {fbHasIg && <span className="text-[11px] text-pink-600 bg-pink-50 border border-pink-200 rounded-full px-2 py-0.5">มี IG ผูก (รอ Meta อนุมัติจึงโพสต์ IG ได้)</span>}
+                        <button onClick={connectFb} className="text-[11px] text-violet-600 underline">เชื่อมใหม่/เปลี่ยนเพจ</button>
+                        <button onClick={disconnectFb} className="text-[11px] text-rose-500 border border-rose-200 rounded-lg px-2 py-0.5 hover:bg-rose-50">ตัดการเชื่อมต่อ</button>
+                      </div>
+                    ) : fb.stage === "pending" && fb.pages.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-slate-500 shrink-0">เลือกเพจที่จะใช้โพสต์:</span>
+                        <select value={pickPage} onChange={(e) => setPickPage(e.target.value)} className="h-8 border border-slate-200 rounded-md px-2 text-sm bg-white min-w-[200px]">
+                          <option value="">— เลือกเพจ —</option>
+                          {fb.pages.map((pg) => <option key={pg.id} value={pg.id}>{pg.name}{pg.ig ? " (มี IG)" : ""}</option>)}
+                        </select>
+                        <button onClick={selectFbPage} disabled={!pickPage} className="h-8 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">ยืนยันเพจ</button>
+                        <button onClick={connectFb} className="text-[11px] text-violet-600 underline">เริ่มใหม่</button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button onClick={connectFb} disabled={!brandId} className="h-8 px-3 text-sm text-white bg-[#1877F2] rounded-lg hover:opacity-90 disabled:opacity-40">👍 เชื่อมต่อ Facebook</button>
+                        <span className="text-[11px] text-slate-400">กดแล้วเข้าสู่ระบบ Facebook + เลือกเพจ → พร้อมยิงโพสต์จริงจากหน้าคอนเทนต์</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

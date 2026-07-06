@@ -428,6 +428,18 @@ export async function savePlatformSettings(settings: PlatformSettings): Promise<
   await jsonOrThrow(await apiFetch("/api/creative-platform-settings", { method: "PUT", body: JSON.stringify({ settings }) }));
 }
 
+// ---- สถานะเชื่อมต่อ Meta (Facebook/Instagram) ต่อแบรนด์ — ใช้รู้ว่า "โพสต์เลย" ยิงจริงได้ไหม ----
+export type MetaConnStatus = { configured?: boolean; facebook?: { connected: boolean; page_name?: string | null }; instagram?: { connected: boolean } };
+export async function getMetaStatus(brandId: string): Promise<MetaConnStatus> {
+  try { return (await apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(brandId)}`).then((r) => r.json())) as MetaConnStatus; }
+  catch { return {}; }
+}
+// ยิงโพสต์คอนเทนต์ขึ้นแพลตฟอร์มจริง (ตอนนี้ facebook) — คืนลิงก์โพสต์
+export async function publishToPlatform(contentId: string, platform: string, captionText: string, imageKeys: string[]): Promise<{ url: string }> {
+  const j = await jsonOrThrow(await apiFetch("/api/meta/publish", { method: "POST", body: JSON.stringify({ content_id: contentId, platform, caption_text: captionText, image_keys: imageKeys }) }));
+  return { url: String((j as { url?: string }).url ?? "") };
+}
+
 // ---- เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์) — เก็บ ui_config key 'creative_recommended_times' ----
 // คีย์ = วันในสัปดาห์ตาม Date.getDay() ('0'=อาทิตย์ .. '6'=เสาร์) · ค่า = รายการเวลา [{time:"HH:MM", note?}]
 export type RecTime = { time: string; note?: string };
