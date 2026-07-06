@@ -66,7 +66,14 @@ export default function PlatformAccountsPage() {
     if (err || ok || pick || brand) window.history.replaceState({}, "", window.location.pathname);
   }, []);
 
-  const connectFb = () => { if (brandId) window.location.href = `/api/meta/oauth/start?brand_id=${encodeURIComponent(brandId)}`; };
+  const connectFb = async () => {
+    if (!brandId) return;
+    try {
+      const r = await apiFetch(`/api/meta/oauth/start?brand_id=${encodeURIComponent(brandId)}`);
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      if (j.auth_url) window.location.href = j.auth_url as string;
+    } catch (e) { setMsg("❌ " + (e as Error).message); }
+  };
   const selectFbPage = async () => {
     if (!pickPage) return;
     try {
