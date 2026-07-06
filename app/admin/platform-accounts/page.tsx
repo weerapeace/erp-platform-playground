@@ -8,8 +8,7 @@ import { apiFetch } from "@/lib/api";
 import { ERPInput } from "@/components/form";
 import { useAuth } from "@/components/auth";
 import { AppAccessGate } from "@/components/app-access-gate";
-
-const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
+import { PlatformIcon } from "@/components/platform-icon";
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string; color: string | null };
@@ -103,7 +102,7 @@ export default function PlatformAccountsPage() {
             return (
               <div key={p.id} className={`border rounded-xl p-3 ${acc.is_active && hasShop ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200"}`}>
                 <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-lg w-7 text-center shrink-0">{p.icon_key || PLATFORM_ICON[p.code] || "🏬"}</span>
+                  <span className="w-7 text-center shrink-0"><PlatformIcon code={p.code} iconKey={p.icon_key} size={22} /></span>
                   <span className="text-sm font-medium text-slate-700 w-24 shrink-0">{p.name_th}</span>
                   <ERPInput value={acc.label ?? ""} disabled={!canManage} placeholder="ชื่อร้าน (เช่น Shopee – แบรนด์ A)" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, label: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { label: e.target.value })} />
                   <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage} placeholder="Shop ID / ลิงก์ร้าน (เช่น @louismontini — ใช้ทำลิงก์สินค้า)" title="ใช้สร้างลิงก์สินค้าบนร้าน เช่น LINE: https://shop.line.me/@Shop ID/product/..." className="max-w-[280px]" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, external_shop_id: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { external_shop_id: e.target.value })} />
