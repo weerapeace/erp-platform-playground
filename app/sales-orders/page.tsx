@@ -214,6 +214,13 @@ export default function SalesOrdersPage() {
     setFormErr(null); setDetailOpen(false); setModalOpen(true);
   };
 
+  // คัดลอก → เปิดฟอร์มเหมือนแก้ไข แต่เป็นใบใหม่ (ไม่มี editingId, ล้างเลขใบกำกับให้ออกใหม่)
+  const openDuplicate = (so: SODetail) => {
+    openEdit(so);
+    setEditingId(null);
+    setForm(f => ({ ...f, tax_invoice_no: "" }));
+  };
+
   const openCreate = () => {
     const nextForm = { ...EMPTY, sale_person_name: user?.name ?? "", warehouse: defaultWarehouse, lines: [emptyLine()] };
     setEditingId(null); setForm(nextForm); setFormBaseline(formSnapshot(nextForm)); setPulledQuotes([]); setFormErr(null); setModalOpen(true);
@@ -519,6 +526,8 @@ export default function SalesOrdersPage() {
           <>
             <button onClick={() => setDetailOpen(false)}
               className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
+            <button onClick={() => openDuplicate(detail)}
+              className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">📋 คัดลอก</button>
             {detail.so_number && (
               <a href={`/print/sales-order/${detail.id}`} target="_blank" rel="noopener noreferrer"
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center">

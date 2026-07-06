@@ -105,7 +105,8 @@ export default function BillingNotesPage() {
       const add = rowsPicked.filter(r => !seen.has(r.id)).map(r => ({
         id: r.id, so_number: (r.so_number as string) ?? "(ร่าง)", grand_total: Number(r.grand_total) || 0,
       }));
-      return [...prev, ...add];
+      // เรียงจากเลขน้อยไปมาก (001 ก่อน) — ทั้งการแสดงและลำดับที่ส่งไปสร้างบิล
+      return [...prev, ...add].sort((a, b) => a.so_number.localeCompare(b.so_number, undefined, { numeric: true }));
     });
   };
   const removePicked = (id: string) => {

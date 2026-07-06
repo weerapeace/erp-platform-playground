@@ -115,6 +115,9 @@ export default function DeliveryNotesPage() {
     setFormErr(null); setDetailOpen(false); setModalOpen(true);
   };
 
+  // คัดลอก → เปิดฟอร์มเหมือนแก้ไข แต่เป็นใบใหม่ (ไม่มี editingId, ไม่อ้างอิง SO เดิม)
+  const openDuplicate = (d: DeliveryNoteDetail) => { openEdit(d); setEditingId(null); setSrcSo([]); };
+
   // ดึงจากใบขาย: ดึงรายการสินค้า+จำนวนของแต่ละ SO มารวม + ล็อกลูกค้าเดียวกัน
   const handlePicked = async (picked: SourceDocRow[]) => {
     const lockedCust = srcSo.length > 0 ? customer?.id : undefined;
@@ -300,6 +303,7 @@ export default function DeliveryNotesPage() {
         footer={detail ? (
           <>
             <button onClick={() => setDetailOpen(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
+            <button onClick={() => openDuplicate(detail)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">📋 คัดลอก</button>
             {detail.dn_number && (
               <a href={`/print/delivery-doc/${detail.id}`} target="_blank" rel="noopener noreferrer"
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center">📦 พิมพ์ใบส่งสินค้า</a>
