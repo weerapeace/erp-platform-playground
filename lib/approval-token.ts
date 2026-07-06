@@ -39,6 +39,6 @@ export const APPROVE_LIFF_ID = process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.e
 /** ลิงก์หน้าอนุมัติเล็ก (ใส่ในข้อความ LINE) — เปิดผ่าน LIFF เพื่อ auto-login รู้ตัวตนทันที */
 export function approvalLink(subtaskId: string): string {
   const token = signApprovalToken(subtaskId);
-  // LIFF จะต่อ path ที่ตามหลัง liff ID ไปที่ Endpoint (/a) → กลายเป็น /a/<token>
-  return APPROVE_LIFF_ID ? `https://liff.line.me/${APPROVE_LIFF_ID}/${token}` : `${APP_BASE}/a/${token}`;
+  // ส่ง token เป็น query — LIFF จะเด้งไปที่ Endpoint /a?token=... (มีหน้าจริง) · ถ้าไม่มี LIFF ใช้ path ตรง
+  return APPROVE_LIFF_ID ? `https://liff.line.me/${APPROVE_LIFF_ID}?token=${token}` : `${APP_BASE}/a?token=${token}`;
 }
