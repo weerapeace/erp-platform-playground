@@ -30,6 +30,10 @@ const CentralCategoryPicker = dynamic(
   () => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker),
   { ssr: false },
 );
+const InlineCentralCategoryPicker = dynamic(
+  () => import("@/components/central-category-picker").then((m) => m.InlineCentralCategoryPicker),
+  { ssr: false },
+);
 const ParentDescriptionImages = dynamic(
   () => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages),
   { ssr: false },
@@ -138,6 +142,12 @@ export default function ParentSKUsV2Page() {
       ...(CONFIG.formRenderers ?? {}),
       platform_category_id: ({ value, onChange, disabled }) => (
         <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder="— เลือกหมวดกลาง —" />
+      ),
+    },
+    detailRenderers: {
+      ...(CONFIG.detailRenderers ?? {}),
+      platform_category_id: ({ value, recordId }) => (
+        <InlineCentralCategoryPicker recordId={recordId} value={(value as string) || null} apiPath="parent-skus" />
       ),
     },
     // section พิเศษในฟอร์ม: รูป Description (มีลำดับ)

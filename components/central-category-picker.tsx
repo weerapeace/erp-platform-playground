@@ -11,6 +11,27 @@ import { apiFetch } from "@/lib/api";
 
 type Cat = { id: string; name: string };
 
+/**
+ * InlineCentralCategoryPicker — ใช้ในหน้า "ดู" (view) ของ MasterCRUD
+ *   เลือกแล้วบันทึกทันที (PATCH /api/master-v2/<apiPath>/<id> field platform_category_id)
+ */
+export function InlineCentralCategoryPicker({
+  recordId, value, apiPath = "parent-skus", field = "platform_category_id",
+}: { recordId: string | null; value: string | null; apiPath?: string; field?: string }) {
+  const [val, setVal] = useState<string | null>(value);
+  useEffect(() => { setVal(value); }, [value]);
+  const save = async (id: string | null) => {
+    setVal(id);
+    if (!recordId) return;
+    try {
+      await apiFetch(`/api/master-v2/${apiPath}/${recordId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [field]: id }),
+      });
+    } catch { /* เงียบ — ผู้ใช้ลองใหม่ได้ */ }
+  };
+  return <CentralCategoryPicker value={val} onChange={save} className="max-w-md" />;
+}
+
 export function CentralCategoryPicker({
   value, onChange, disabled, placeholder = "— เลือกหมวดกลาง —", className = "",
 }: {
