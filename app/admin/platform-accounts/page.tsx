@@ -34,21 +34,27 @@ export default function PlatformAccountsPage() {
   const [fbHasIg, setFbHasIg] = useState(false);
   const [metaCfg, setMetaCfg] = useState(true);   // ตั้งค่า META_APP_ID/SECRET ในโฮสต์แล้วไหม
   const [pickPage, setPickPage] = useState("");   // เพจที่เลือก (กรณีมีหลายเพจ)
+  // สถานะเชื่อมต่อ Lazada ต่อแบรนด์
+  type LazStatus = { connected: boolean; seller_id: string | null; short_code: string | null; country: string | null; configured: boolean };
+  const [laz, setLaz] = useState<LazStatus>({ connected: false, seller_id: null, short_code: null, country: null, configured: true });
+  const [lazSyncing, setLazSyncing] = useState(false);
   const brandChosen = useRef(false);   // มีการเลือกแบรนด์แล้ว (จาก query/ผู้ใช้) — กัน auto-select ทับ
 
   const load = useCallback(async (bid: string) => {
     setLoading(true);
     try {
-      const [j, kj, mj] = await Promise.all([
+      const [j, kj, mj, lj] = await Promise.all([
         apiFetch(`/api/platform-accounts${bid ? `?brand_id=${encodeURIComponent(bid)}` : ""}`).then((r) => r.json()),
         bid ? apiFetch(`/api/platform-credentials?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve({ keys: {} }),
         bid ? apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve(null),
+        bid ? apiFetch(`/api/lazada/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve(null),
       ]);
       setPlatforms((j.platforms ?? []) as Platform[]);
       setBrands((j.brands ?? []) as Brand[]);
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
       setKeys((kj.keys ?? {}) as Record<string, boolean>);
       if (mj) { setFb((mj.facebook ?? { connected: false, stage: "none", page_name: null, pages: [] }) as FbStatus); setFbHasIg(!!mj.instagram?.connected); setMetaCfg(mj.configured !== false); setPickPage(""); }
+      if (lj) setLaz(lj as LazStatus);
       setTestMsg(null);
       if (!bid && !brandChosen.current && j.brands?.[0]) setBrandId(j.brands[0].id);
     } catch (e) { setMsg((e as Error).message); } finally { setLoading(false); }
@@ -59,11 +65,14 @@ export default function PlatformAccountsPage() {
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const err = sp.get("meta_error"), ok = sp.get("meta_connected"), pick = sp.get("meta_pick"), brand = sp.get("brand");
+    const lazErr = sp.get("laz_error"), lazOk = sp.get("laz_connected");
     if (brand) { brandChosen.current = true; setBrandId(brand); }
     if (err) setMsg("❌ " + err);
     else if (ok) setMsg("✅ เชื่อมต่อ Facebook สำเร็จ");
     else if (pick) setMsg("มีหลายเพจ — เลือกเพจที่จะใช้โพสต์ด้านล่าง");
-    if (err || ok || pick || brand) window.history.replaceState({}, "", window.location.pathname);
+    else if (lazErr) setMsg("❌ " + lazErr);
+    else if (lazOk) setMsg("✅ เชื่อมต่อ Lazada สำเร็จ");
+    if (err || ok || pick || brand || lazErr || lazOk) window.history.replaceState({}, "", window.location.pathname);
   }, []);
 
   const connectFb = async () => {
@@ -89,6 +98,32 @@ export default function PlatformAccountsPage() {
       const j = await r.json(); if (j.error) throw new Error(j.error);
       setMsg("ตัดการเชื่อมต่อแล้ว"); await load(brandId);
     } catch (e) { setMsg("❌ " + (e as Error).message); }
+  };
+  // ---- Lazada ----
+  const connectLaz = async () => {
+    if (!brandId) return;
+    try {
+      const r = await apiFetch(`/api/lazada/oauth/start?brand_id=${encodeURIComponent(brandId)}`);
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      if (j.auth_url) window.location.href = j.auth_url as string;
+    } catch (e) { setMsg("❌ " + (e as Error).message); }
+  };
+  const disconnectLaz = async () => {
+    if (!window.confirm("ตัดการเชื่อมต่อ Lazada ของแบรนด์นี้?")) return;
+    try {
+      const r = await apiFetch("/api/lazada/disconnect", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setMsg("ตัดการเชื่อมต่อแล้ว"); await load(brandId);
+    } catch (e) { setMsg("❌ " + (e as Error).message); }
+  };
+  const syncLazOrders = async () => {
+    setLazSyncing(true); setMsg("กำลังดึงออเดอร์จาก Lazada...");
+    try {
+      const r = await apiFetch("/api/lazada/sync-orders", { method: "POST", body: JSON.stringify({ brand_id: brandId, days: 30 }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setMsg(`✅ ดึงออเดอร์เสร็จ: พบ ${j.fetched} · ใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่สินค้า ${j.matched}`);
+    } catch (e) { setMsg("❌ " + (e as Error).message); }
+    finally { setLazSyncing(false); }
   };
 
   const save = async (platform_id: string, patch: Partial<Account>) => {
@@ -145,6 +180,7 @@ export default function PlatformAccountsPage() {
             const hasApi = p.code === "line_shopping";   // แพลตฟอร์มที่ต่อ API ได้ (ใส่ API Key + ทดสอบ)
             const isMeta = p.code === "facebook";   // Facebook = เชื่อมต่อแบบ OAuth (กดปุ่มเชื่อม) แล้วยิงโพสต์จริงได้
             const isMetaIg = p.code === "instagram";   // Instagram = ใช้การเชื่อมของเพจ Facebook (สถานะ/ปุ่มอยู่ที่นี่ด้วย)
+            const isLaz = p.code === "lazada";   // Lazada = เชื่อมแบบ OAuth ดึงออเดอร์เข้าระบบ
             return (
               <div key={p.id} className={`border rounded-xl p-3 ${acc.is_active && hasShop ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200"}`}>
                 <div className="flex items-center gap-3 flex-wrap">
@@ -215,6 +251,26 @@ export default function PlatformAccountsPage() {
                         <p className="text-xs text-amber-600">⚠️ เพจ “{fb.page_name}” เชื่อมแล้ว แต่ยังไม่เจอ Instagram ที่ผูก</p>
                         <p className="text-[11px] text-slate-500">ตรวจว่า IG เป็นบัญชี <b>Business/Professional</b> + <b>ผูกกับเพจนี้</b> (ใน Meta Business Suite) แล้วกด <b>เชื่อมใหม่</b> — คราวนี้จะขอสิทธิ์ Instagram ด้วย</p>
                         <button onClick={connectFb} className="self-start h-8 px-3 text-sm text-white rounded-lg hover:opacity-90" style={{ background: "linear-gradient(45deg,#F58529,#DD2A7B,#8134AF)" }}>📷 เชื่อมใหม่ (รับสิทธิ์ Instagram)</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {isLaz && canManage && (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-100">
+                    {!laz.configured ? (
+                      <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">⚠️ ยังไม่ได้ตั้ง LAZADA_APP_KEY / LAZADA_APP_SECRET ในโฮสต์ (Vercel)</p>
+                    ) : laz.connected ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] text-emerald-600 shrink-0">● เชื่อมต่อแล้ว</span>
+                        <span className="text-sm text-slate-700">ร้าน <b>{laz.short_code || laz.seller_id}</b>{laz.country ? ` (${laz.country})` : ""}</span>
+                        <button onClick={syncLazOrders} disabled={lazSyncing} className="h-8 px-3 text-sm text-white bg-[#0F146D] rounded-lg hover:opacity-90 disabled:opacity-50">{lazSyncing ? "กำลังดึง..." : "📥 ดึงออเดอร์ (30 วัน)"}</button>
+                        <button onClick={connectLaz} className="text-[11px] text-violet-600 underline">เชื่อมใหม่</button>
+                        <button onClick={disconnectLaz} className="text-[11px] text-rose-500 border border-rose-200 rounded-lg px-2 py-0.5 hover:bg-rose-50">ตัดการเชื่อมต่อ</button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button onClick={connectLaz} disabled={!brandId} className="h-8 px-3 text-sm text-white rounded-lg hover:opacity-90 disabled:opacity-40" style={{ background: "linear-gradient(90deg,#F57224,#0F146D)" }}>🛒 เชื่อมต่อ Lazada</button>
+                        <span className="text-[11px] text-slate-400">กดแล้วเข้าสู่ระบบ Lazada Seller + อนุญาต → ดึงออเดอร์เข้าระบบได้</span>
                       </div>
                     )}
                   </div>
