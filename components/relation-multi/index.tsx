@@ -668,8 +668,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const [loaded, setLoaded] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [peek, setPeek] = useState<{ id: string; edit: boolean } | null>(null);  // กดรายการลูก → ดู/แก้ record นั้น
-  // เรียงลำดับตารางลูก (server-side) — กดหัวคอลัมน์
-  const [sort, setSort] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
+  // เรียงลำดับตารางลูก (server-side) — กดหัวคอลัมน์ · ค่าเริ่มต้น = เรียงตาม "รหัส" (code) A→Z
+  const [sort, setSort] = useState<{ col: string; dir: "asc" | "desc" } | null>({ col: titleField, dir: "asc" });
   const toggleSort = (col: string) =>
     setSort((p) => (p && p.col === col ? { col, dir: p.dir === "asc" ? "desc" : "asc" } : { col, dir: "asc" }));
   const sortArrow = (col: string) => (sort?.col === col ? (sort.dir === "asc" ? " ▲" : " ▼") : "");
