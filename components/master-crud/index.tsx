@@ -969,6 +969,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // F11B: Studio v1 (drag-drop layout builder)
   const [studioOpen, setStudioOpen] = useState(false);
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
+  // ปุ่ม "ออกแบบฟอร์ม" (Studio) วางที่แถบแท็บบนของ drawer — โผล่เฉพาะโมดูลจริง + มีสิทธิ์แก้
+  const studioHeaderBtn = config.moduleKey && canEdit ? (
+    <button type="button" onClick={() => setStudioOpen(true)} title="ออกแบบฟอร์ม/ตาราง — จัดฟิลด์ · แท็บ · เห็น preview สด"
+      className="h-7 px-2.5 text-xs font-medium border border-orange-200 text-orange-600 rounded-md hover:bg-orange-50 inline-flex items-center gap-1 whitespace-nowrap">🎨 ออกแบบฟอร์ม</button>
+  ) : undefined;
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);   // นำเข้าข้อมูล (ของกลาง)
   const [customCreateOpen, setCustomCreateOpen] = useState(false);   // UI สร้างเอง (เช่น SKU Wizard)
@@ -2461,8 +2466,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {createHeaderEl}
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"
-                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
-                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} />
+                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} headerRight={studioHeaderBtn} />
+                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} headerRight={studioHeaderBtn} />
                 ) : (
                   <div className="text-sm text-slate-300 py-8 text-center">ไม่มีข้อมูลเพิ่มเติม</div>
                 )}
@@ -2888,12 +2893,13 @@ function groupByKey(fields: FieldDef[]): Map<string, FieldDef[]> {
 
 /** กลุ่ม B: render ตาม layout (Tab → Section → columns) ใช้ทั้ง form + detail */
 function LayoutTabs({
-  layout, byGroup, renderGrid, extraTabs = [],
+  layout, byGroup, renderGrid, extraTabs = [], headerRight,
 }: {
   layout: NonNullable<FormLayout>;
   byGroup: Map<string, FieldDef[]>;
   renderGrid: (fields: FieldDef[], columns: number) => React.ReactNode;
   extraTabs?: BoundTab[];
+  headerRight?: React.ReactNode;
 }) {
   // ซ่อนแท็บที่ไม่มี field จริง (เช่นแท็บ core ฝั่งขวาที่ core ถูกเรนเดอร์แยกซ้ายแล้ว)
   const tabs = (layout.tabs ?? []).filter((t) => t.sections.some((s) => (byGroup.get(s.key)?.length ?? 0) > 0));
@@ -2914,7 +2920,7 @@ function LayoutTabs({
 
   return (
     <div>
-      {tabs.length + extraTabs.length > 1 && (
+      {(tabs.length + extraTabs.length > 1 || headerRight) && (
         <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
           {tabs.map((t) => (
             <button key={t.key} type="button" onClick={() => setActive(t.key)}
@@ -2932,6 +2938,7 @@ function LayoutTabs({
               {t.icon && <span>{t.icon}</span>}<span>{t.label}</span>
             </button>
           ))}
+          {headerRight && <div className="ml-auto shrink-0 self-center pl-2 pr-1">{headerRight}</div>}
         </div>
       )}
       {activeExtra ? (
@@ -2964,12 +2971,13 @@ function LayoutTabs({
 type BoundTab = { key: string; label: string; icon?: string; node: React.ReactNode };
 
 function FormSections({
-  fields, renderField, layout, extraTabs,
+  fields, renderField, layout, extraTabs, headerRight,
 }: {
   fields: FieldDef[];
   renderField: (f: FieldDef, maxSpan?: number) => React.ReactNode;
   layout?: FormLayout;
   extraTabs?: BoundTab[];
+  headerRight?: React.ReactNode;
 }) {
   // hooks ทั้งหมดเรียกก่อน return เสมอ (Rules of Hooks)
   const byGroup = useMemo(() => groupByKey(fields), [fields]);
@@ -2983,7 +2991,7 @@ function FormSections({
 
   // กลุ่ม B: ถ้ามี layout → ใช้ Tab → Section → columns
   if (layout?.tabs?.length) {
-    return <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} renderGrid={(fs, cols) => (
+    return <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} headerRight={headerRight} renderGrid={(fs, cols) => (
       <div className="grid grid-cols-12 gap-3">{fs.map((f) => renderField(f, cols))}</div>
     )} />;
   }
@@ -3091,13 +3099,14 @@ function CompletenessBar({ fields, values }: { fields: FieldDef[]; values: Recor
 }
 
 function DetailSections({
-  fields, renderValue, layout, values, extraTabs,
+  fields, renderValue, layout, values, extraTabs, headerRight,
 }: {
   fields: FieldDef[];
   renderValue: (f: FieldDef) => React.ReactNode;
   layout?: FormLayout;
   values?: Record<string, unknown>;
   extraTabs?: BoundTab[];
+  headerRight?: React.ReactNode;
 }) {
   const byGroup = useMemo(() => groupByKey(fields), [fields]);
   const grouped = useMemo(() =>
@@ -3134,7 +3143,7 @@ function DetailSections({
     return (
       <div className="space-y-4">
         {values && <CompletenessBar fields={fields} values={values} />}
-        <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} renderGrid={renderDl} />
+        <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} headerRight={headerRight} renderGrid={renderDl} />
       </div>
     );
   }
