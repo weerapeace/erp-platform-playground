@@ -44,20 +44,29 @@ export async function pushTasksLineTpl(admin: Admin, eventKey: string, vars: Rec
       text = text.split(link).join("");
       text = text.split("\n").filter((ln) => { const s = ln.trim(); return s && !/^(เปิดงาน|เปิดดู|เปิด|ลิงก์|link)\s*[:：]?$/i.test(s); }).join("\n").trim();
     }
-    const messages: Record<string, unknown>[] = [];
-    if (text) messages.push({ type: "text", text: text.slice(0, 4900) });
-    if (link) messages.push({
+    // helper ส่งเข้า LINE — คืน true ถ้าสำเร็จ (LINE ตอบ 200) · false ถ้าถูกตีกลับ/ล้ม
+    const doPush = async (msgs: Record<string, unknown>[]): Promise<boolean> => {
+      try {
+        const res = await fetch("https://api.line.me/v2/bot/message/push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
+          body: JSON.stringify({ to: target, messages: msgs }),
+        });
+        return res.ok;
+      } catch { return false; }
+    };
+    const textMsg = text ? { type: "text", text: text.slice(0, 4900) } : null;
+    const flexMsg = link ? {
       type: "flex", altText: "เปิดดูงาน",
-      contents: { type: "bubble", size: "micro", body: { type: "box", layout: "vertical", contents: [
-        { type: "button", style: "primary", color: "#7C3AED", height: "sm", action: { type: "uri", label: "เปิดดู", uri: link } },
+      contents: { type: "bubble", body: { type: "box", layout: "vertical", contents: [
+        { type: "button", style: "primary", color: "#7C3AED", height: "sm", action: { type: "uri", label: "เปิดดูงาน", uri: link } },
       ] } },
-    });
-    if (!messages.length) return;
-    await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ to: target, messages }),
-    });
+    } : null;
+    const combined = [textMsg, flexMsg].filter(Boolean) as Record<string, unknown>[];
+    if (!combined.length) return;
+    // ส่งชุดรวม (ข้อความ + ปุ่ม) ก่อน · ถ้าไม่ผ่าน (เช่น flex ผิดรูปแบบ → 400 ทั้งชุด) ถอยไปส่งข้อความล้วน ให้การเตือนถึงมือเสมอ
+    const ok = await doPush(combined);
+    if (!ok && textMsg) await doPush([textMsg]);
   } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
 }
 
