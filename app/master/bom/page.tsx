@@ -201,7 +201,12 @@ export default function BomWorkspacePage() {
     try {
       const vers = await fetchVersions(sku);
       const target = vers.find((v) => v.is_default) ?? vers[0];
-      if (!target) { setFormErr(`ไม่พบสูตร (BOM) ของ ${sku}`); return; }
+      if (!target) {
+        // ยังไม่มีสูตร → เปิดฟอร์มสร้างใหม่ที่เติม "สินค้าที่ผลิต" + รหัสสูตรมาให้แล้ว (ไม่ปล่อยช่องว่าง)
+        setForm({ ...emptyForm(), product_sku: sku, bom_code: verCode(sku, 1) });
+        setFormErr(`ยังไม่มีสูตร (BOM) ของ ${sku} — กรอกวัตถุดิบแล้วกดบันทึกเพื่อสร้างสูตรใหม่ได้เลย`);
+        return;
+      }
       const f = await loadFormById(target.id);
       setForm(f); setDirty(false);
     } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดสูตรไม่ได้"); }
