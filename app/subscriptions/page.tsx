@@ -289,7 +289,7 @@ export default function SubscriptionsPage() {
   return (
     <PlaygroundShell>
       <div className="min-h-full bg-gradient-to-b from-indigo-50/50 to-white">
-        <div className="max-w-6xl mx-auto p-5 sm:p-6 space-y-5">
+        <div className="max-w-[1760px] mx-auto px-4 sm:px-6 py-4 space-y-3">
           {/* หัวข้อ */}
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -307,34 +307,30 @@ export default function SubscriptionsPage() {
             )}
           </div>
 
-          {/* การ์ดสรุป */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <SummaryCard label="รวมต่อเดือน" value={fmtBaht(summary.monthly)} sub={`≈ $${(summary.monthly / (settings.exchange_rate || 1)).toFixed(0)}/เดือน`} accent="from-indigo-500 to-violet-500" icon="📅" />
-            <SummaryCard label="รวมต่อปี" value={fmtBaht(summary.yearly)} sub={`≈ $${(summary.yearly / (settings.exchange_rate || 1)).toFixed(0)}/ปี`} accent="from-violet-500 to-fuchsia-500" icon="📆" />
-            <SummaryCard label="ใช้งานอยู่" value={String(summary.activeCount)} sub={`จากทั้งหมด ${summary.total} รายการ`} accent="from-emerald-500 to-teal-500" icon="✅" />
-            <SummaryCard label="ใกล้ต่ออายุ" value={String(summary.renewing)} sub="ภายใน 30 วัน" accent="from-amber-500 to-orange-500" icon="⏰" />
-          </div>
-
-          {/* อัตราแลกเปลี่ยน */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm bg-white border border-slate-100 rounded-xl px-4 py-2.5 shadow-sm">
-            <span className="text-xs font-medium text-slate-500">อัตราแลกเปลี่ยน (บาท):</span>
-            <label className="flex items-center gap-1.5">1 USD =
+          {/* แถบสรุป + อัตราแลกเปลี่ยน (แถวเดียว ให้ตารางเหลือพื้นที่มากที่สุด) */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 bg-white border border-slate-100 rounded-xl px-4 py-2 shadow-sm">
+            <Metric icon="📅" label="ต่อเดือน" value={fmtBaht(summary.monthly)} valueClass="text-indigo-700" />
+            <Metric icon="📆" label="ต่อปี" value={fmtBaht(summary.yearly)} valueClass="text-violet-700" />
+            <Metric icon="✅" label="ใช้งาน" value={`${summary.activeCount}/${summary.total}`} valueClass="text-emerald-700" />
+            <Metric icon="⏰" label="ใกล้ต่ออายุ" value={String(summary.renewing)} valueClass="text-amber-700" />
+            <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+            <span className="text-xs font-medium text-slate-400">อัตรา (฿)</span>
+            <label className="flex items-center gap-1 text-sm text-slate-600">USD
               <input type="number" step="0.01" value={usdRate} disabled={!canEdit}
                 onChange={(e) => setUsdRate(Number(e.target.value) || 0)}
-                className="w-20 h-8 px-2 border border-slate-200 rounded-md text-sm tabular-nums disabled:bg-slate-50" /> ฿
+                className="w-16 h-8 px-2 border border-slate-200 rounded-md text-sm tabular-nums disabled:bg-slate-50" />
             </label>
-            <label className="flex items-center gap-1.5">1 EUR =
+            <label className="flex items-center gap-1 text-sm text-slate-600">EUR
               <input type="number" step="0.01" value={eurRate} disabled={!canEdit}
                 onChange={(e) => setEurRate(Number(e.target.value) || 0)}
-                className="w-20 h-8 px-2 border border-slate-200 rounded-md text-sm tabular-nums disabled:bg-slate-50" /> ฿
+                className="w-16 h-8 px-2 border border-slate-200 rounded-md text-sm tabular-nums disabled:bg-slate-50" />
             </label>
             {canEdit && rateDirty && (
               <button onClick={saveRates} disabled={savingRate}
                 className="h-8 px-3 text-xs font-medium bg-slate-800 text-white rounded-md hover:bg-slate-900 disabled:opacity-50">
-                {savingRate ? "กำลังบันทึก…" : "💾 บันทึกอัตรา"}
+                {savingRate ? "กำลังบันทึก…" : "💾 บันทึก"}
               </button>
             )}
-            {summary.wishlist > 0 && <span className="ml-auto text-xs text-indigo-500">🛒 รายการอยากซื้อ {summary.wishlist} รายการ</span>}
           </div>
 
           {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
@@ -398,14 +394,12 @@ export default function SubscriptionsPage() {
   );
 }
 
-function SummaryCard({ label, value, sub, accent, icon }: { label: string; value: string; sub: string; accent: string; icon: string }) {
+function Metric({ icon, label, value, valueClass }: { icon: string; label: string; value: string; valueClass: string }) {
   return (
-    <div className="relative overflow-hidden rounded-xl bg-white border border-slate-100 shadow-sm p-4">
-      <div className={`absolute -right-3 -top-3 w-14 h-14 rounded-full bg-gradient-to-br ${accent} opacity-10`} />
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="text-xl font-bold text-slate-800 mt-1 tabular-nums">{value}</div>
-      <div className="text-[11px] text-slate-400 mt-0.5">{sub}</div>
-      <div className="absolute right-3 top-3 text-lg opacity-70">{icon}</div>
+    <div className="flex items-center gap-1.5">
+      <span className="text-base">{icon}</span>
+      <span className="text-xs text-slate-400">{label}</span>
+      <span className={`text-sm font-bold tabular-nums ${valueClass}`}>{value}</span>
     </div>
   );
 }
