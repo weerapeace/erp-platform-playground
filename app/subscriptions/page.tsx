@@ -25,7 +25,7 @@ import { InvoicesModal } from "./invoices-modal";
 import { SubscriptionsCalendar } from "./subscriptions-calendar";
 import { WishlistView } from "./wishlist-view";
 
-type ViewMode = "list" | "calendar" | "wishlist";
+type ViewMode = "list" | "inuse" | "calendar" | "wishlist";
 
 const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
 
@@ -95,6 +95,12 @@ export default function SubscriptionsPage() {
   }, [rows, settings]);
 
   const categories = useMemo(() => rows.map((r) => r.category), [rows]);
+
+  // รายการที่ใช้อยู่ = เปิดอยู่ (active) + จ่ายประจำ (รายเดือน/รายปี) — ตัดจ่ายครั้งเดียวออก
+  const inUseRows = useMemo(
+    () => rows.filter((r) => r.active && (r.billing_cycle === "monthly" || r.billing_cycle === "yearly")),
+    [rows],
+  );
 
   // ── handlers ───────────────────────────────────────────────
   const openCreate = useCallback(() => { setEditing(null); setCreateDefaults(null); setFormOpen(true); }, []);
@@ -337,6 +343,7 @@ export default function SubscriptionsPage() {
           <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
             {([
               { k: "list", label: "📋 รายการ" },
+              { k: "inuse", label: `🟢 ใช้อยู่${inUseRows.length ? ` (${inUseRows.length})` : ""}` },
               { k: "calendar", label: "📅 ปฏิทิน" },
               { k: "wishlist", label: `🛒 อยากซื้อ${summary.wishlist ? ` (${summary.wishlist})` : ""}` },
             ] as { k: ViewMode; label: string }[]).map((t) => (
@@ -348,19 +355,22 @@ export default function SubscriptionsPage() {
           </div>
 
           {/* เนื้อหาตามมุมมอง */}
-          {view === "list" && (
+          {view === "inuse" && (
+            <p className="text-xs text-slate-500 -mb-1">รายการที่เปิดใช้งานอยู่ และจ่ายประจำ (รายเดือน/รายปี) เท่านั้น — ไม่รวมรายการปิด/จ่ายครั้งเดียว</p>
+          )}
+          {(view === "list" || view === "inuse") && (
             <DataTable
-              tableId="subscriptions"
-              data={rows}
+              tableId={view === "inuse" ? "subscriptions-inuse" : "subscriptions"}
+              data={view === "inuse" ? inUseRows : rows}
               columns={columns}
-              views={views}
+              views={view === "inuse" ? undefined : views}
               loading={loading}
               searchableKeys={["name", "category", "account_email", "notes"]}
               searchPlaceholder="ค้นหา ชื่อ / หมวดหมู่ / อีเมล…"
-              exportFilename="subscriptions"
+              exportFilename={view === "inuse" ? "subscriptions-inuse" : "subscriptions"}
               exportEntityType="subscriptions"
               pageSize={25}
-              emptyMessage="ยังไม่มีรายการ subscription"
+              emptyMessage={view === "inuse" ? "ยังไม่มีรายการที่ใช้อยู่ (รายเดือน/รายปี)" : "ยังไม่มีรายการ subscription"}
               onRowClick={canEdit ? openEdit : openInvoices}
             />
           )}
