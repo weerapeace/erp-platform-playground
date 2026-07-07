@@ -24,8 +24,9 @@ import { SubscriptionFormModal } from "./subscription-form-modal";
 import { InvoicesModal } from "./invoices-modal";
 import { SubscriptionsCalendar } from "./subscriptions-calendar";
 import { WishlistView } from "./wishlist-view";
+import { AllInvoicesView } from "./all-invoices-view";
 
-type ViewMode = "list" | "inuse" | "calendar" | "wishlist";
+type ViewMode = "list" | "inuse" | "calendar" | "wishlist" | "invoices";
 
 const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
 
@@ -342,6 +343,7 @@ export default function SubscriptionsPage() {
               { k: "inuse", label: `🟢 ใช้อยู่${inUseRows.length ? ` (${inUseRows.length})` : ""}` },
               { k: "calendar", label: "📅 ปฏิทิน" },
               { k: "wishlist", label: `🛒 อยากซื้อ${summary.wishlist ? ` (${summary.wishlist})` : ""}` },
+              { k: "invoices", label: "🧾 ใบเสร็จ" },
             ] as { k: ViewMode; label: string }[]).map((t) => (
               <button key={t.k} onClick={() => setView(t.k)}
                 className={`h-8 px-3 text-sm rounded-md transition ${view === t.k ? "bg-white shadow-sm text-indigo-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>
@@ -377,6 +379,7 @@ export default function SubscriptionsPage() {
             <WishlistView rows={rows} settings={settings} canEdit={canEdit}
               onAdd={openCreateWishlist} onEdit={openEdit} onDelete={askDelete} onPurchase={purchaseItem} />
           )}
+          {view === "invoices" && <AllInvoicesView canEdit={canEdit} />}
         </div>
       </div>
 
