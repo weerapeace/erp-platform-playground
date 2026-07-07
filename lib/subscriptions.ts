@@ -93,16 +93,64 @@ export function yearlyTHB(sub: Subscription, s: SubSettings): number {
   return 0;
 }
 
-/** จำนวนวันจากวันนี้ถึงวันต่ออายุ (บวก=อีกกี่วัน, ลบ=เลยมาแล้ว, null=ไม่มีวันที่) */
-export function daysUntil(dateStr: string | null | undefined): number | null {
+/** parse "YYYY-MM-DD" เป็น Date แบบ local (กัน timezone เลื่อนวัน) */
+function parseLocalDate(dateStr: string | null | undefined): Date | null {
   if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  d.setHours(0, 0, 0, 0);
-  return Math.round((d.getTime() - today.getTime()) / 86400000);
+  const s = String(dateStr).slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
 }
+
+function startOfToday(): Date { const t = new Date(); t.setHours(0, 0, 0, 0); return t; }
+function isoLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** จำนวนวันจากวันนี้ถึงวันที่ (บวก=อีกกี่วัน, ลบ=เลยมาแล้ว, null=ไม่มีวันที่) */
+export function daysUntil(dateStr: string | null | undefined): number | null {
+  const d = parseLocalDate(dateStr);
+  if (!d) return null;
+  d.setHours(0, 0, 0, 0);
+  return Math.round((d.getTime() - startOfToday().getTime()) / 86400000);
+}
+
+/**
+ * "รอบต่ออายุถัดไป" (ISO วันที่) — เลื่อนวันตามรอบบิลให้เป็นวันในอนาคตที่ใกล้ที่สุด
+ * - monthly: วันเดิมของทุกเดือน (วันไม่พอในเดือนสั้น → ปัดเป็นวันสุดท้าย)
+ * - yearly:  เดือน/วันเดิมของทุกปี
+ * - one-time: คงวันที่เดิม (จ่ายครั้งเดียว)
+ * ใช้ทั้งการ์ดสรุป, ตาราง, ปฏิทิน และการแจ้งเตือน (ให้ตรงกันหมด)
+ */
+export function nextRenewal(sub: Pick<Subscription, "billing_date" | "billing_cycle">): string | null {
+  const base = parseLocalDate(sub.billing_date);
+  if (!base) return null;
+  if (sub.billing_cycle === "one-time") return isoLocal(base);
+  const today = startOfToday();
+  const anchorDay = base.getDate();
+
+  const clampDay = (y: number, mIndex: number, day: number) => {
+    const dim = new Date(y, mIndex + 1, 0).getDate(); // จำนวนวันในเดือน
+    const d = new Date(y, mIndex, Math.min(day, dim)); d.setHours(0, 0, 0, 0); return d;
+  };
+
+  if (sub.billing_cycle === "monthly") {
+    for (let add = 0; add < 13; add++) {
+      const cand = clampDay(today.getFullYear(), today.getMonth() + add, anchorDay);
+      if (cand.getTime() >= today.getTime()) return isoLocal(cand);
+    }
+  } else { // yearly
+    const anchorMonth = base.getMonth();
+    for (let add = 0; add < 2; add++) {
+      const cand = clampDay(today.getFullYear() + add, anchorMonth, anchorDay);
+      if (cand.getTime() >= today.getTime()) return isoLocal(cand);
+    }
+  }
+  return isoLocal(base);
+}
+
+/** เกณฑ์วันสำหรับแจ้งเตือน (cron วิ่งวันละครั้ง → แต่ละเกณฑ์เด้งครั้งเดียว ไม่ต้อง dedupe) */
+export const RENEWAL_THRESHOLDS = [7, 3, 1, 0, -1];
 
 /** ฟอร์แมตราคาตามสกุลเงินของรายการ เช่น "$20.00" / "฿571.38" */
 export function fmtCost(cost: number, currency: Currency): string {

@@ -24,11 +24,12 @@ function fromSub(s: Subscription): SubInput {
   return { ...EMPTY, ...rest };
 }
 
-export function SubscriptionFormModal({ open, editing, categories, saving, onClose, onSave }: {
+export function SubscriptionFormModal({ open, editing, categories, saving, defaults, onClose, onSave }: {
   open: boolean;
   editing: Subscription | null;
   categories: string[];
   saving: boolean;
+  defaults?: Partial<SubInput> | null;
   onClose: () => void;
   onSave: (input: SubInput) => void;
 }) {
@@ -38,8 +39,8 @@ export function SubscriptionFormModal({ open, editing, categories, saving, onClo
 
   // เติมฟอร์มเมื่อเปิด
   useEffect(() => {
-    if (open) { setForm(editing ? fromSub(editing) : EMPTY); setDirty(false); setErr(null); }
-  }, [open, editing]);
+    if (open) { setForm(editing ? fromSub(editing) : { ...EMPTY, ...(defaults ?? {}) }); setDirty(false); setErr(null); }
+  }, [open, editing, defaults]);
 
   const set = <K extends keyof SubInput>(k: K, v: SubInput[K]) => {
     setForm((f) => ({ ...f, [k]: v }));

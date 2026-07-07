@@ -17,11 +17,15 @@ import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR } from "@/lib/swr-lite";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
-  CYCLE_LABEL, TYPE_LABEL, monthlyTHB, yearlyTHB, daysUntil, fmtCost, fmtBaht,
+  CYCLE_LABEL, TYPE_LABEL, monthlyTHB, yearlyTHB, daysUntil, nextRenewal, fmtCost, fmtBaht,
   type SubSettings, type SubInput, type Subscription,
 } from "@/lib/subscriptions";
 import { SubscriptionFormModal } from "./subscription-form-modal";
 import { InvoicesModal } from "./invoices-modal";
+import { SubscriptionsCalendar } from "./subscriptions-calendar";
+import { WishlistView } from "./wishlist-view";
+
+type ViewMode = "list" | "calendar" | "wishlist";
 
 const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
 
@@ -36,9 +40,14 @@ export default function SubscriptionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // มุมมอง: รายการ / ปฏิทิน / อยากซื้อ
+  const [view, setView] = useState<ViewMode>("list");
+  const [testingNotify, setTestingNotify] = useState(false);
+
   // ฟอร์มเพิ่ม/แก้
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Subscription | null>(null);
+  const [createDefaults, setCreateDefaults] = useState<Partial<SubInput> | null>(null);
   const [saving, setSaving] = useState(false);
 
   // ลบ
@@ -78,8 +87,8 @@ export default function SubscriptionsPage() {
     for (const s of active) {
       monthly += monthlyTHB(s, settings);
       yearly += yearlyTHB(s, settings);
-      const d = daysUntil(s.billing_date);
-      if (d !== null && d >= 0 && d <= 30 && s.billing_cycle !== "one-time") renewing++;
+      const d = daysUntil(nextRenewal(s));
+      if (d !== null && d >= 0 && d <= 30) renewing++;
     }
     const wishlist = rows.filter((r) => r.want_to_buy).length;
     return { monthly, yearly, activeCount: active.length, total: rows.length, renewing, wishlist };
@@ -88,10 +97,39 @@ export default function SubscriptionsPage() {
   const categories = useMemo(() => rows.map((r) => r.category), [rows]);
 
   // ── handlers ───────────────────────────────────────────────
-  const openCreate = useCallback(() => { setEditing(null); setFormOpen(true); }, []);
-  const openEdit = useCallback((s: Subscription) => { setEditing(s); setFormOpen(true); }, []);
+  const openCreate = useCallback(() => { setEditing(null); setCreateDefaults(null); setFormOpen(true); }, []);
+  const openCreateWishlist = useCallback(() => { setEditing(null); setCreateDefaults({ want_to_buy: true, active: false }); setFormOpen(true); }, []);
+  const openEdit = useCallback((s: Subscription) => { setEditing(s); setCreateDefaults(null); setFormOpen(true); }, []);
   const openInvoices = useCallback((s: Subscription) => setInvTarget(s), []);
   const askDelete = useCallback((s: Subscription) => setDelTarget(s), []);
+
+  // จำลองการซื้อ: ย้าย wishlist → รายการใช้งานจริง
+  const purchaseItem = useCallback(async (s: Subscription) => {
+    try {
+      const res = await apiFetch(`/api/subscriptions/${s.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ want_to_buy: false, active: true, actor: user?.name }),
+      });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      toast.success(`ย้าย "${s.name}" เป็นรายการใช้งานแล้ว`);
+      await fetchList();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); }
+  }, [user?.name, toast, fetchList]);
+
+  // ทดสอบส่งแจ้งเตือนใกล้ต่ออายุเดี๋ยวนี้ (กระดิ่ง+LINE)
+  const testNotify = useCallback(async () => {
+    setTestingNotify(true);
+    try {
+      const res = await apiFetch("/api/cron/subscriptions-renewals");
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      const n = j.due?.length ?? 0;
+      if (n > 0) toast.success(`ส่งแจ้งเตือน ${n} รายการแล้ว (กระดิ่ง${j.lineSent ? " + LINE" : ""})`);
+      else toast.info("ตอนนี้ยังไม่มีรายการใกล้ต่ออายุ (เกณฑ์ 7/3/1/0 วัน)");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ส่งไม่สำเร็จ"); }
+    finally { setTestingNotify(false); }
+  }, [toast]);
 
   const handleSave = useCallback(async (input: SubInput) => {
     setSaving(true);
@@ -172,18 +210,25 @@ export default function SubscriptionsPage() {
       cell: ({ getValue }) => { const v = getValue() as number; return <span className="text-sm font-mono tabular-nums text-slate-500">{v ? fmtBaht(v) : "—"}</span>; },
     },
     {
-      id: "billing_date", accessorKey: "billing_date", header: "ต่ออายุ", size: 130,
-      cell: ({ getValue }) => {
-        const raw = getValue() as string | null;
-        const d = daysUntil(raw);
-        if (!raw) return <span className="text-xs text-slate-300">—</span>;
-        const cls = d === null ? "text-slate-400"
+      id: "billing_date", header: "ต่ออายุ (รอบถัดไป)", size: 150,
+      accessorFn: (r) => { const d = daysUntil(nextRenewal(r)); return d ?? 999999; },
+      cell: ({ row }) => {
+        const s = row.original;
+        const nr = nextRenewal(s);
+        const d = daysUntil(nr);
+        if (!nr) return <span className="text-xs text-slate-300">—</span>;
+        const cls = d === null ? "bg-slate-100 text-slate-400"
           : d < 0 ? "bg-slate-100 text-slate-500"
           : d <= 7 ? "bg-red-100 text-red-600"
           : d <= 30 ? "bg-amber-100 text-amber-700"
           : "bg-slate-100 text-slate-600";
-        const txt = d === null ? raw : d < 0 ? `เลย ${-d} วัน` : d === 0 ? "วันนี้" : `อีก ${d} วัน`;
-        return <span className={`text-[11px] px-2 py-0.5 rounded ${cls}`}>{txt}</span>;
+        const txt = d === null ? "—" : d < 0 ? `เลย ${-d} วัน` : d === 0 ? "วันนี้" : `อีก ${d} วัน`;
+        return (
+          <div className="leading-tight">
+            <span className={`text-[11px] px-2 py-0.5 rounded ${cls}`}>{txt}</span>
+            <div className="text-[10px] text-slate-400 mt-0.5">{nr}</div>
+          </div>
+        );
       },
     },
     {
@@ -246,7 +291,13 @@ export default function SubscriptionsPage() {
               <p className="text-sm text-slate-500 mt-0.5">รวมบริการที่สมัคร (subscription) · สรุปค่าใช้จ่าย · เก็บใบเสร็จ</p>
             </div>
             {canEdit && (
-              <button onClick={openCreate} className="h-10 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-sm">+ เพิ่มรายการ</button>
+              <div className="flex items-center gap-2">
+                <button onClick={testNotify} disabled={testingNotify} title="เช็ครายการใกล้ต่ออายุแล้วส่งแจ้งเตือนเดี๋ยวนี้"
+                  className="h-10 px-3 text-sm font-medium border border-indigo-200 text-indigo-600 bg-white rounded-lg hover:bg-indigo-50 disabled:opacity-50">
+                  {testingNotify ? "กำลังส่ง…" : "🔔 ทดสอบแจ้งเตือน"}
+                </button>
+                <button onClick={openCreate} className="h-10 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-sm">+ เพิ่มรายการ</button>
+              </div>
             )}
           </div>
 
@@ -282,26 +333,49 @@ export default function SubscriptionsPage() {
 
           {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
 
-          {/* ตาราง */}
-          <DataTable
-            tableId="subscriptions"
-            data={rows}
-            columns={columns}
-            views={views}
-            loading={loading}
-            searchableKeys={["name", "category", "account_email", "notes"]}
-            searchPlaceholder="ค้นหา ชื่อ / หมวดหมู่ / อีเมล…"
-            exportFilename="subscriptions"
-            exportEntityType="subscriptions"
-            pageSize={25}
-            emptyMessage="ยังไม่มีรายการ subscription"
-            onRowClick={canEdit ? openEdit : openInvoices}
-          />
+          {/* สลับมุมมอง */}
+          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+            {([
+              { k: "list", label: "📋 รายการ" },
+              { k: "calendar", label: "📅 ปฏิทิน" },
+              { k: "wishlist", label: `🛒 อยากซื้อ${summary.wishlist ? ` (${summary.wishlist})` : ""}` },
+            ] as { k: ViewMode; label: string }[]).map((t) => (
+              <button key={t.k} onClick={() => setView(t.k)}
+                className={`h-8 px-3 text-sm rounded-md transition ${view === t.k ? "bg-white shadow-sm text-indigo-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* เนื้อหาตามมุมมอง */}
+          {view === "list" && (
+            <DataTable
+              tableId="subscriptions"
+              data={rows}
+              columns={columns}
+              views={views}
+              loading={loading}
+              searchableKeys={["name", "category", "account_email", "notes"]}
+              searchPlaceholder="ค้นหา ชื่อ / หมวดหมู่ / อีเมล…"
+              exportFilename="subscriptions"
+              exportEntityType="subscriptions"
+              pageSize={25}
+              emptyMessage="ยังไม่มีรายการ subscription"
+              onRowClick={canEdit ? openEdit : openInvoices}
+            />
+          )}
+          {view === "calendar" && (
+            <SubscriptionsCalendar rows={rows} settings={settings} onEditSub={canEdit ? openEdit : openInvoices} />
+          )}
+          {view === "wishlist" && (
+            <WishlistView rows={rows} settings={settings} canEdit={canEdit}
+              onAdd={openCreateWishlist} onEdit={openEdit} onDelete={askDelete} onPurchase={purchaseItem} />
+          )}
         </div>
       </div>
 
       {/* ป๊อปอัป */}
-      <SubscriptionFormModal open={formOpen} editing={editing} categories={categories} saving={saving}
+      <SubscriptionFormModal open={formOpen} editing={editing} categories={categories} saving={saving} defaults={createDefaults}
         onClose={() => !saving && setFormOpen(false)} onSave={handleSave} />
 
       <InvoicesModal sub={invTarget} canEdit={canEdit} onClose={() => setInvTarget(null)} />
