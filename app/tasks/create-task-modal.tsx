@@ -267,16 +267,14 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         )}
         <ERPFormSection title={t("ข้อมูลงาน","Task info")} columns={2}>
           <ERPFormField label={t("ชื่องาน","Task title")} required span={2}><ERPInput className={ctrlCls("title")} value={form.title} onChange={(e) => { markTouched("title"); updateForm({ title: e.target.value }); }} placeholder={t("เช่น ถ่ายรูปกระเป๋า Summer 8 สี","e.g. Summer bag photoshoot 8 colors")} /></ERPFormField>
-          <ERPFormField label={t("ประเภทงาน","Task type")} style={orderStyle("task_type")}><ERPSelect className={ctrlCls("task_type")} value={form.task_type} placeholder={t("— เลือกประเภท —","— select —")} options={taskTypes} onChange={(e) => { markTouched("task_type"); updateForm({ task_type: e.target.value }); }} /></ERPFormField>
+          {/* ประเภทงาน — ปักไว้ลำดับ 2 เสมอ (ต่อจากชื่องาน) ไม่ให้เลื่อนตอนกรอก */}
+          <ERPFormField label={t("ประเภทงาน","Task type")} style={{ order: 0 }}><ERPSelect className={ctrlCls("task_type")} value={form.task_type} placeholder={t("— เลือกประเภท —","— select —")} options={taskTypes} onChange={(e) => { markTouched("task_type"); updateForm({ task_type: e.target.value }); }} /></ERPFormField>
           <ERPFormField label={t("ความสำคัญ","Priority")} style={orderStyle("priority")}><ERPSelect className={ctrlCls("priority")} value={form.priority} options={priorityOptions()} onChange={(e) => { markTouched("priority"); updateForm({ priority: e.target.value as CreativePriority }); }} /></ERPFormField>
           <ERPFormField label={t("แบรนด์","Brand")} style={orderStyle("brand_id")}><ERPSelect className={ctrlCls("brand_id")} value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => { markTouched("brand_id"); updateForm({ brand_id: e.target.value }); }} /></ERPFormField>
           {!lockedCampaignId && <ERPFormField label="Campaign" style={orderStyle("campaign_id")}><ERPSelect className={ctrlCls("campaign_id")} value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => { markTouched("campaign_id"); updateForm({ campaign_id: e.target.value }); }} /></ERPFormField>}
           <ERPFormField label={t("ผู้รับผิดชอบ (เลือกได้หลายคน)","Assignee (multiple)")} span={2} style={orderStyle("assignee")}>
             <div className={wrapCls("assignee")}>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 min-w-0"><MultiUserPicker value={form.assignees} onChange={pickTaskAssignees} disableCreate /></div>
-                <TeamFill onPick={(members) => { const add = members.filter((m) => !form.assignees.some((u) => u.id === m.id)).map((m) => ({ id: m.id, name: m.name } as UserPickerValue)); if (add.length) pickTaskAssignees([...form.assignees, ...add]); }} />
-              </div>
+              <MultiUserPicker value={form.assignees} onChange={pickTaskAssignees} disableCreate />
               <p className="text-[11px] text-slate-400 mt-1">{t("เลือกแล้ว งานย่อยทุกอันจะใช้คนกลุ่มนี้อัตโนมัติ (แก้รายอันได้ในขั้นถัดไป)", "Subtasks inherit these people automatically (editable per subtask in the next step)")}</p>
             </div>
           </ERPFormField>
