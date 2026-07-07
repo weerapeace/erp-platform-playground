@@ -20,6 +20,7 @@ import { PieceworkLines, type PieceLine } from "./piecework-lines";
 import { LaborRates, type LaborLine } from "./labor-rates";
 import type { BomComponent } from "@/app/api/bom/components/route";
 import { CopyBomModal } from "./copy-bom-modal";
+import { PullSheetCostModal } from "./pull-sheet-cost-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 
 // ---- types (ตรงกับ /api/bom) ----
@@ -95,6 +96,7 @@ export default function BomWorkspacePage() {
   const [archiveTarget, setArchiveTarget] = useState<BomListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
+  const [pullSheetOpen, setPullSheetOpen] = useState(false);   // ดึงตีราคาจาก Design Sheet
   const [versions, setVersions]   = useState<BomVersionRow[]>([]);
   const [newVerOpen, setNewVerOpen] = useState(false);
   const [copyFromId, setCopyFromId] = useState<string>("");
@@ -548,8 +550,12 @@ export default function BomWorkspacePage() {
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-slate-700">รายการวัตถุดิบ</h3>
                 {canEdit && (
-                  <button type="button" onClick={() => setCopyOpen(true)}
-                    className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600">📋 คัดลอก BOM</button>
+                  <div className="flex items-center gap-1.5">
+                    <button type="button" onClick={() => setPullSheetOpen(true)} title="ดึงกว้าง/ยาว/จำนวนจากตีราคาในใบงานออกแบบ (วัตถุดิบใส่ทีหลัง)"
+                      className="h-8 px-3 text-xs font-medium border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">🧬 ดึงจาก Design Sheet</button>
+                    <button type="button" onClick={() => setCopyOpen(true)}
+                      className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600">📋 คัดลอก BOM</button>
+                  </div>
                 )}
               </div>
               <BomLineEditor lines={form.lines} onChange={(lines) => patchForm({ lines })} readonly={!canEdit} sizes={form.sizes.map((s) => s.label)} />
@@ -575,6 +581,13 @@ export default function BomWorkspacePage() {
 
             <CopyBomModal open={copyOpen} onClose={() => setCopyOpen(false)}
               onCopy={(copied) => patchForm({ lines: [...form.lines, ...copied] })} />
+
+            <PullSheetCostModal open={pullSheetOpen} onClose={() => setPullSheetOpen(false)}
+              defaultSearch={form.product_name || undefined}
+              onImport={(imported) => {
+                patchForm({ lines: [...form.lines, ...imported] });
+                toast.success(`ดึงจาก Design Sheet ${imported.length} บรรทัดเข้าสูตรแล้ว — เลือกวัตถุดิบจริงต่อได้เลย`);
+              }} />
           </div>
         )}
       </ERPModal>
