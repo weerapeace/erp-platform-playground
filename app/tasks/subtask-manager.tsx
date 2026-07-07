@@ -1178,6 +1178,18 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     const product_labels = Object.fromEntries(Object.keys(product_images).map((tk) => [tk, labelMapRef.current[tk]]).filter(([, c]) => c));
     updateSubtask(taskId, sub.id, { image_sync_targets: { parent_ids: [...pids], sku_ids: [...sids], product_images, product_labels, replace_map: rmap } }).catch(() => {});
   }, [taskId, sub.id, draftImages, replaceMap]);
+  // ปุ่ม "บันทึก" ชัดเจน — await จริง + แจ้งผล (ไม่ปิด drawer) · แก้ปัญหา persistTargets เงียบ ๆ ที่ fail แล้วไม่รู้
+  const [savingImages, setSavingImages] = useState(false);
+  const saveImages = useCallback(async () => {
+    setSavingImages(true);
+    try {
+      const product_images = Object.fromEntries(Object.entries(draftImages).map(([tk, arr]) => [tk, arr.map((x) => x.r2_key)]).filter(([, ks]) => (ks as string[]).length));
+      const product_labels = Object.fromEntries(Object.keys(product_images).map((tk) => [tk, labelMapRef.current[tk]]).filter(([, c]) => c));
+      await updateSubtask(taskId, sub.id, { image_sync_targets: { parent_ids: [...syncParentIds], sku_ids: [...syncSkuIds], product_images, product_labels, replace_map: replaceMap } });
+      pushToast("success", t("บันทึกแล้ว", "Saved"));
+    } catch (e) { pushToast("error", (e as Error).message || t("บันทึกไม่สำเร็จ", "Save failed")); }
+    finally { setSavingImages(false); }
+  }, [taskId, sub.id, draftImages, replaceMap, syncParentIds, syncSkuIds, pushToast, t]);
   const toggleSyncParent = (pid: string) => { const n = new Set(syncParentIds); n.has(pid) ? n.delete(pid) : n.add(pid); setSyncParentIds(n); persistTargets(n, syncSkuIds); };
   const toggleSyncSku = (sid: string) => {
     const n = new Set(syncSkuIds); const adding = !n.has(sid); adding ? n.add(sid) : n.delete(sid); setSyncSkuIds(n); persistTargets(syncParentIds, n);
@@ -1401,7 +1413,13 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
               <div className="border-t border-slate-100 pt-3">
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <p className="text-[11px] font-medium text-slate-500">📤 {t("ส่งรูปเข้าสินค้า (เลือกได้)", "Send images to products (optional)")}</p>
-                  <span className="text-[10px] text-slate-400 shrink-0">{(syncParentIds.size + syncSkuIds.size) > 0 ? t(`เลือก ${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`, `${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`) : t("ไม่เลือก = แนบรูปเฉย ๆ", "None = attach only")}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] text-slate-400">{(syncParentIds.size + syncSkuIds.size) > 0 ? t(`เลือก ${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`, `${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`) : t("ไม่เลือก = แนบรูปเฉย ๆ", "None = attach only")}</span>
+                    <button type="button" onClick={() => void saveImages()} disabled={savingImages}
+                      className="h-6 px-2 text-[11px] font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">
+                      {savingImages ? "⏳" : "💾"} {t("บันทึก", "Save")}
+                    </button>
+                  </div>
                 </div>
                 <p className="text-[11px] text-slate-400 mb-2">{t("ติ๊กสินค้าที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ · ไม่ติ๊ก = ไม่ส่งเข้าสินค้า", "Tick products to add the images to their gallery on approval · none = attach only")}</p>
                 <label className="flex items-center gap-1.5 text-[11px] text-slate-600 mb-2 cursor-pointer">
