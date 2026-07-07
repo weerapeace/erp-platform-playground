@@ -103,6 +103,10 @@ export default function BomWorkspacePage() {
   const [sizeTemplates, setSizeTemplates] = useState<SizeTemplate[]>([]);
   useEffect(() => { apiFetch("/api/admin/size-templates").then((r) => r.json()).then((j) => setSizeTemplates((j.data ?? []) as SizeTemplate[])).catch(() => {}); }, []);
 
+  // เปิดในกรอบแอปอื่น (iframe เช่นปุ่ม ✎ BOM ใน WorkInstruction) → ฟอร์มเต็มกรอบ ไม่ซ้อน modal + ซ่อน list
+  const [embed, setEmbed] = useState(false);
+  useEffect(() => { try { setEmbed(new URLSearchParams(window.location.search).get("embed") === "1"); } catch { /* ignore */ } }, []);
+
   // server mode — โหลดทีละหน้า + ค้นที่ server (กันค้างตอนพิมพ์ search)
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
     const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
@@ -389,6 +393,7 @@ export default function BomWorkspacePage() {
 
   return (
     <>
+      {!embed && (
       <div className="max-w-7xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -420,18 +425,20 @@ export default function BomWorkspacePage() {
           pageSize={20}
         />
       </div>
+      )}
 
-      {/* ---- BOM editor modal (header + lines) ---- */}
+      {/* ---- BOM editor modal (header + lines) — embed=1 (ใน iframe) → เต็มกรอบ ไม่ซ้อน modal ---- */}
       <ERPModal
         open={form !== null}
         onClose={() => !saving && closeForm()}
         size="xl"
+        embedded={embed}
         hasUnsavedChanges={dirty}
         title={isCreate ? "สร้างสูตรการผลิตใหม่" : `แก้สูตร: ${form?.bom_code ?? ""}`}
         footer={
           <>
-            <button onClick={closeForm} disabled={saving}
-              className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+            {!embed && <button onClick={closeForm} disabled={saving}
+              className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>}
             <button onClick={save} disabled={saving || !canEdit}
               className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {saving ? "กำลังบันทึก..." : "บันทึก"}
@@ -502,7 +509,7 @@ export default function BomWorkspacePage() {
             </div>
 
             {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
-            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} refreshKey={refreshKey} bomSkus={form.lines.map((l) => l.component_sku).filter(Boolean) as string[]}
+            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} refreshKey={refreshKey} onAfterBomEdit={() => refresh()} bomSkus={form.lines.map((l) => l.component_sku).filter(Boolean) as string[]}
               onAddMaterials={canEdit ? (mats) => {
                 const newLines = mats.map((m) => ({ ...emptyLine(), component_sku: m.code, component_name: m.name, qty: 1 }));
                 patchForm({ lines: [...form.lines, ...newLines] });

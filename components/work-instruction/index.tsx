@@ -34,7 +34,7 @@ function Row({ f, bomSkus, onEdit }: { f: SpecField; bomSkus?: string[]; onEdit?
   );
 }
 
-export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMaterials, refreshKey, className = "", defaultOpen = true }: { sku: string | null | undefined; editable?: boolean; bomSkus?: string[]; onAddMaterials?: (mats: { code: string; name: string }[]) => void; refreshKey?: number | string; className?: string; defaultOpen?: boolean }) {
+export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMaterials, refreshKey, className = "", defaultOpen = true, onAfterBomEdit }: { sku: string | null | undefined; editable?: boolean; bomSkus?: string[]; onAddMaterials?: (mats: { code: string; name: string }[]) => void; refreshKey?: number | string; className?: string; defaultOpen?: boolean; onAfterBomEdit?: () => void }) {
   const toast = useToast();
   const [spec, setSpec] = useState<ProductSpec | null>(null);
   const [loading, setLoading] = useState(false);
@@ -63,6 +63,14 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
   }, [sku, refreshKey, editable]);   // refreshKey เปลี่ยน → โหลดสเปกใหม่ (เช่น หลังบันทึก BOM)
   useEffect(() => { loadSpec(); }, [loadSpec]);
   useEffect(() => { setEditData(null); setEditField(null); }, [sku, refreshKey]);
+
+  // โหลดสเปก "สด" (ข้ามแคช) — ใช้หลังปิดป๊อปแก้ BOM เพื่อให้ค่าที่โชว์อัปเดตทันที (loadSpec โหมดดูใช้แคช)
+  const reloadSpecFresh = useCallback(() => {
+    if (!sku) return;
+    setLoading(true);
+    apiFetch(`/api/product-spec?sku=${encodeURIComponent(sku)}`).then((r) => r.json())
+      .then((j) => setSpec(j as ProductSpec)).catch(() => {}).finally(() => setLoading(false));
+  }, [sku]);
 
   const ensureEditData = async (): Promise<EditData | null> => {
     if (editData) return editData;
@@ -267,8 +275,9 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
         />
       )}
       {bomOpen && sku && (
-        <ERPModal open onClose={() => { setBomOpen(false); loadSpec(); }} size="xl" title={`✎ แก้ BOM (สูตร) — ${sku}`}>
-          <iframe src={`/master/bom?embed=1&open=${encodeURIComponent(sku)}`} className="w-full border-0 rounded-lg bg-slate-50" style={{ height: "78vh" }} title={`BOM ${sku}`} />
+        <ERPModal open onClose={() => { setBomOpen(false); reloadSpecFresh(); onAfterBomEdit?.(); }} size="xl" title={`✎ แก้ BOM (สูตร) — ${sku}`}>
+          {/* หน้า BOM ในโหมด embed = ฟอร์มเต็มกรอบ ไม่เด้ง modal ตัวเองซ้อน (กรอบเดียว = ป๊อปนี้) */}
+          <iframe src={`/master/bom?embed=1&open=${encodeURIComponent(sku)}`} className="w-full border-0 rounded-lg bg-white" style={{ height: "80vh" }} title={`BOM ${sku}`} />
         </ERPModal>
       )}
     </div>

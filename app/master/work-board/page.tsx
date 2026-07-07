@@ -1422,7 +1422,7 @@ export default function WorkBoardPage() {
                 <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${ready ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ready ? "พร้อมจ่าย ✓" : "ยังไม่พร้อม"}</span>
               </div>
               {/* รายละเอียดสั่งงาน (เหมือนหน้าแก้ใบสั่งผลิต) — พับไว้ โชว์แค่รูป+ชื่อ กดกางดูสเปกเต็ม */}
-              {checklistMO.product_sku && <WorkInstructionPanel sku={checklistMO.product_sku} editable={false} defaultOpen={false} />}
+              {checklistMO.product_sku && <WorkInstructionPanel sku={checklistMO.product_sku} editable={false} defaultOpen={false} onAfterBomEdit={() => load(true)} />}
               {/* แท็บรวม 6 หน้า — ใช้ได้ทั้งมี/ไม่มี BOM */}
               {(() => {
                 const tabBtn = (id: typeof clTab, label: string) => (

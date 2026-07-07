@@ -83,6 +83,8 @@ export interface ERPModalProps {
   resizable?: boolean;
   /** key สำหรับจำขนาดที่ผู้ใช้ปรับไว้ใน localStorage (เช่น "journal-modal") */
   storageKey?: string;
+  /** โหมดฝังในกรอบอื่น (เช่น iframe) — เต็มกรอบ ไม่มี backdrop/กล่องลอย/หัวปุ่ม (ตัวครอบภายนอกคุมหัว+ปิด) กัน popup ซ้อน popup */
+  embedded?: boolean;
 }
 
 export interface ConfirmDialogProps {
@@ -109,8 +111,6 @@ export interface DrawerProps {
   hasUnsavedChanges?: boolean;
   storageKey?: string;
   defaultWidth?: number;
-  /** ปุ่ม/ไอคอนเสริมที่หัว drawer (ซ้ายของปุ่มปิด) — เช่น ปุ่มออกแบบฟอร์ม */
-  headerActions?: React.ReactNode;
 }
 
 // ---- Size map ----
@@ -187,6 +187,7 @@ export function ERPModal({
   closeOnBackdrop = true,
   resizable = true,
   storageKey,
+  embedded = false,
 }: ERPModalProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -275,6 +276,25 @@ export function ERPModal({
   const backdropDismiss = useBackdropDismiss(closeOnBackdrop && !hasUnsavedChanges ? onClose : handleClose);
 
   if (!mounted || !open) return null;
+
+  // โหมด embedded — ฝังในกรอบอื่น (iframe) เต็มพื้นที่ ไม่มี backdrop/กล่องลอย/หัว → กัน modal ซ้อน modal
+  // ตัวครอบภายนอก (เช่น ERPModal ของ WorkInstruction) เป็นคนคุมหัวเรื่อง+ปุ่มปิด
+  if (embedded) {
+    return createPortal(
+      <div className="fixed inset-0 z-50 flex flex-col bg-white">
+        <UnsavedChangesDialog
+          open={showUnsavedWarning}
+          onStay={() => setShowUnsavedWarning(false)}
+          onLeave={() => { setShowUnsavedWarning(false); onClose(); }}
+        />
+        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        {footer && (
+          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-100 bg-white flex-shrink-0">{footer}</div>
+        )}
+      </div>,
+      document.body,
+    );
+  }
 
   // เลือกขนาด: expanded > custom dims > preset
   const usingCustom = !!dims && !expanded;
@@ -528,7 +548,6 @@ export function Drawer({
   hasUnsavedChanges = false,
   storageKey = "erp-drawer-width",
   defaultWidth,
-  headerActions,
 }: DrawerProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -621,15 +640,12 @@ export function Drawer({
             <h2 className="text-base font-semibold text-slate-900">{title}</h2>
             {description && <p className="text-sm text-slate-500 mt-0.5">{description}</p>}
           </div>
-          <div className="ml-4 flex-shrink-0 flex items-center gap-1">
-            {headerActions}
-            <button
-              onClick={handleClose}
-              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              <IconX />
-            </button>
-          </div>
+          <button
+            onClick={handleClose}
+            className="ml-4 flex-shrink-0 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+          >
+            <IconX />
+          </button>
         </div>
 
         {/* Body */}

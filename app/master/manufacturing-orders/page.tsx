@@ -578,7 +578,7 @@ export default function MoWorkspacePage() {
             {form.id && form.mo_no && <MoGroupField moNo={form.mo_no} />}
 
             {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
-            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} />}
+            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} onAfterBomEdit={() => refresh()} />}
 
             {/* preview/checklist กางสูตร — 2 แท็บ */}
             {(() => {
