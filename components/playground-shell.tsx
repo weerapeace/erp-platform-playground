@@ -418,9 +418,17 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   useEffect(() => { setFocus(FOCUS_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"))); }, [pathname]);
   const navExpanded = !navCollapsed || navHover;   // กางจริงเมื่อ ไม่พับ หรือ กำลัง hover
   // embed mode — เปิดหน้าในกรอบแอปเดี่ยว (?embed=1) → ซ่อน sidebar/แถบ App ของ shell (กันเมนูซ้อน)
+  // "ติดหนึบ": จำโหมด embed ต่อแท็บ (sessionStorage เฉพาะตอนอยู่ใน iframe) → กดลิงก์ในหน้าไปหน้าอื่น
+  // ในแอปเดี่ยวแล้ว embed ไม่หลุด (เดิม embed อยู่แค่ url แรก พอ navigate ในกรอบ chrome เต็มโผล่กลับ)
   const [embed, setEmbed] = useState(false);
   useEffect(() => {
-    try { setEmbed(new URLSearchParams(window.location.search).get("embed") === "1"); } catch { /* ignore */ }
+    try {
+      const inFrame = window.self !== window.top;                                  // อยู่ในกรอบแอปเดี่ยว
+      const urlEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
+      if (inFrame && urlEmbed) sessionStorage.setItem("erp_shell_embed", "1");     // เจอครั้งแรก → จำไว้
+      const sticky = inFrame && sessionStorage.getItem("erp_shell_embed") === "1"; // แท็บนี้เป็นแอปเดี่ยว
+      setEmbed(urlEmbed || sticky);
+    } catch { /* ignore */ }
   }, []);
   const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);
