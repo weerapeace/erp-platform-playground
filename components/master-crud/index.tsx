@@ -2434,19 +2434,29 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               <div className={`md:flex-shrink-0 md:order-1 space-y-4 ${galleryLeft ? "md:w-96" : "md:w-72"}`}>
                 {/* รูปหลัก: layout=gallery → "รูปสินค้า" (แกลเลอรีจริง รูปหลักใหญ่+รูปย่อย+อัป แบบ Design Sheet) แทนรูปปก · ไม่งั้น = รูปปกเดิม */}
                 {galleryLeft && config.mediaGallery && editingId ? (
-                  // quick edit: จัดรูปได้เลยไม่ต้องกด "แก้ไข" (readonly = แค่ไม่มีสิทธิ์)
-                  <ImageManager
-                    entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
-                    entityId={String(editingId)}
-                    actor={user?.name ?? user?.email ?? undefined}
-                    readonly={!canEdit}
-                    title={config.mediaGallery.title}
-                    description={config.mediaGallery.description}
-                    maxItems={config.mediaGallery.maxItems ?? 9}
-                    maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
-                    imageOnly={config.mediaGallery.imageOnly ?? true}
-                    layout="gallery"
-                  />
+                  <div className="space-y-3">
+                    {/* รูปปก (cover_image_r2_key) — รูปหลักที่โชว์บนการ์ด/รายการ · แยกจากแกลเลอรีรูปเพิ่มเติม */}
+                    {coverKey && (
+                      <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
+                        <span className="absolute top-1.5 left-1.5 z-10 text-[10px] bg-white/85 text-slate-500 px-1.5 py-0.5 rounded">🖼 รูปปก</span>
+                        <div className="aspect-square flex items-center justify-center"><ImageGallery r2Key={coverKey} /></div>
+                        {coverDeleteBtn}
+                      </div>
+                    )}
+                    {/* quick edit: จัดรูปได้เลยไม่ต้องกด "แก้ไข" (readonly = แค่ไม่มีสิทธิ์) */}
+                    <ImageManager
+                      entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
+                      entityId={String(editingId)}
+                      actor={user?.name ?? user?.email ?? undefined}
+                      readonly={!canEdit}
+                      title={config.mediaGallery.title}
+                      description={config.mediaGallery.description}
+                      maxItems={config.mediaGallery.maxItems ?? 9}
+                      maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
+                      imageOnly={config.mediaGallery.imageOnly ?? true}
+                      layout="gallery"
+                    />
+                  </div>
                 ) : (
                   <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
                     {coverKey
