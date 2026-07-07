@@ -46,6 +46,15 @@ export async function PATCH(request: NextRequest) {
   const { id: _d, ...patch } = body.patch as Record<string, unknown>; void _d;
   const { data, error } = await supabaseAdmin().from("erp_app_groups").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", body.id).select("*").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // ล็อกแอป (ตั้ง permission_key) → สร้างสิทธิ์ "เข้าแอป" ให้อัตโนมัติถ้ายังไม่มี (กันตั้งสิทธิ์ role แล้วขึ้น "ไม่พบ permission")
+  const pk = typeof patch.permission_key === "string" ? patch.permission_key.trim() : "";
+  if (pk) {
+    const lbl = (data as { label?: string | null } | null)?.label ?? pk;
+    await supabaseAdmin().from("erp_permissions").upsert(
+      { key: pk, label: `เข้าแอป: ${lbl}`, category: "เข้าถึง App (Apps)", description: `เห็นและเข้าใช้แอป${lbl}`, is_dangerous: false },
+      { onConflict: "key", ignoreDuplicates: true },
+    ).then(() => {}, () => {});
+  }
   return NextResponse.json({ data, error: null });
 }
 
