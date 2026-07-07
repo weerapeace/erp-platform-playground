@@ -16,6 +16,7 @@ import type { UserPickerValue, SkuPickerValue, ParentSkuPickerValue } from "@/co
 import { MultiUserPicker } from "./multi-user-picker";
 import { TeamFill } from "./team-picker";
 import { ImageInput } from "@/components/image-input";
+import { apiFetch } from "@/lib/api";
 import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
 import {
@@ -44,7 +45,7 @@ type FormState = {
   cover_image_r2_key: string;
 };
 const EMPTY_FORM: FormState = {
-  title: "", description: "", task_type: "photo_shoot", brand_id: "", campaign_id: "",
+  title: "", description: "", task_type: "", brand_id: "", campaign_id: "",
   assignees: [], reviewers: [], priority: "normal", order_date: "", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "", cover_image_r2_key: "",
 };
 
@@ -74,6 +75,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const [subs, setSubs] = useState<SubRow[]>([]);
   const [contentItems, setContentItems] = useState<TemplateContentItem[]>([]);   // คอนเทนต์พ่วงจากแม่แบบ
   const [tplDueOffset, setTplDueOffset] = useState<number | null>(null);   // กำหนดส่ง = วันที่สั่ง + X (จากแม่แบบ)
+  const [defaultReviewers, setDefaultReviewers] = useState<UserPickerValue[]>([]);   // ผู้ตรวจเริ่มต้น (ค่ากลาง ui_config)
   const [step, setStep] = useState(1);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -86,8 +88,15 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
 
   useEffect(() => {
     (async () => { try { const [b, c, tp] = await Promise.all([listBrands(), listCampaigns(), listTemplates()]); setBrands(b); setCampaigns(c); setTemplates(tp); } catch { /* ignore */ } })();
+    // ผู้ตรวจเริ่มต้น (ค่ากลาง) — prefill ตอนเปิด Wizard สร้างงานใหม่
+    apiFetch("/api/ui-config?key=creative_default_reviewers").then((r) => r.json()).then((j) => {
+      const rv = ((j.value?.reviewers ?? []) as { id: string; name: string }[]).filter((x) => x?.id);
+      if (rv.length) setDefaultReviewers(rv.map((x) => ({ id: x.id, name: x.name } as UserPickerValue)));
+    }).catch(() => {});
   }, []);
-  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr() }); setSubs([]); setContentItems([]); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);
+  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // เผื่อ default reviewers โหลดเสร็จหลังเปิด Wizard → เติมให้ถ้ายังว่าง (ไม่ทับที่แก้เอง/แม่แบบ)
+  useEffect(() => { if (open && !tplId && defaultReviewers.length && form.reviewers.length === 0 && !touched.has("reviewers")) updateForm({ reviewers: defaultReviewers }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open, defaultReviewers]);
 
   const updateForm = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
   // เลือกผู้รับผิดชอบงานแม่ → เติมให้เฉพาะงานย่อยที่ "ยังว่าง" (งานย่อยที่ template ใส่คนไว้แล้ว/แก้เองแล้ว จะไม่โดนทับ)
@@ -157,8 +166,8 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
 
   const next = () => { if (step === 2 && !form.title.trim()) { setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; } setFormErr(null); setStep((s) => Math.min(4, s + 1)); };
   const back = () => { setFormErr(null); setStep((s) => Math.max(1, s - 1)); };
-  // วันที่สั่งเปลี่ยน → คำนวณกำหนดส่งใหม่ถ้าแม่แบบตั้ง +X วันไว้
-  const setOrderDate = (v: string) => updateForm({ order_date: v, ...(tplDueOffset != null && v ? { due_date: addDaysStr(v, tplDueOffset) } : {}) });
+  // วันที่สั่งเปลี่ยน → คำนวณกำหนดส่งใหม่ (แม่แบบ +X หรือ default +3) ถ้ายังไม่แก้กำหนดส่งเอง
+  const setOrderDate = (v: string) => { const autoDue = !!v && (tplDueOffset != null || !touched.has("due_date")); updateForm({ order_date: v, ...(autoDue ? { due_date: addDaysStr(v, tplDueOffset ?? 3) } : {}) }); };
   // เทมเพลตของแบรนด์ที่เลือก (+ เทมเพลตทั่วไปที่ไม่ผูกแบรนด์)
   const brandTemplates = templates.filter((tp) => form.brand_id ? (tp.brand_id === form.brand_id || !tp.brand_id) : !tp.brand_id);
 
@@ -258,7 +267,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         )}
         <ERPFormSection title={t("ข้อมูลงาน","Task info")} columns={2}>
           <ERPFormField label={t("ชื่องาน","Task title")} required span={2}><ERPInput className={ctrlCls("title")} value={form.title} onChange={(e) => { markTouched("title"); updateForm({ title: e.target.value }); }} placeholder={t("เช่น ถ่ายรูปกระเป๋า Summer 8 สี","e.g. Summer bag photoshoot 8 colors")} /></ERPFormField>
-          <ERPFormField label={t("ประเภทงาน","Task type")} style={orderStyle("task_type")}><ERPSelect className={ctrlCls("task_type")} value={form.task_type} options={taskTypes} onChange={(e) => { markTouched("task_type"); updateForm({ task_type: e.target.value }); }} /></ERPFormField>
+          <ERPFormField label={t("ประเภทงาน","Task type")} style={orderStyle("task_type")}><ERPSelect className={ctrlCls("task_type")} value={form.task_type} placeholder={t("— เลือกประเภท —","— select —")} options={taskTypes} onChange={(e) => { markTouched("task_type"); updateForm({ task_type: e.target.value }); }} /></ERPFormField>
           <ERPFormField label={t("ความสำคัญ","Priority")} style={orderStyle("priority")}><ERPSelect className={ctrlCls("priority")} value={form.priority} options={priorityOptions()} onChange={(e) => { markTouched("priority"); updateForm({ priority: e.target.value as CreativePriority }); }} /></ERPFormField>
           <ERPFormField label={t("แบรนด์","Brand")} style={orderStyle("brand_id")}><ERPSelect className={ctrlCls("brand_id")} value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => { markTouched("brand_id"); updateForm({ brand_id: e.target.value }); }} /></ERPFormField>
           {!lockedCampaignId && <ERPFormField label="Campaign" style={orderStyle("campaign_id")}><ERPSelect className={ctrlCls("campaign_id")} value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => { markTouched("campaign_id"); updateForm({ campaign_id: e.target.value }); }} /></ERPFormField>}
@@ -273,7 +282,14 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           </ERPFormField>
           <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เลือกได้หลายคน)","Reviewer / Approver (multiple)")} style={orderStyle("reviewers")}><div className={wrapCls("reviewers")}><MultiUserPicker value={form.reviewers} onChange={(v) => updateForm({ reviewers: v })} disableCreate /></div></ERPFormField>
           <ERPFormField label={t("วันที่สั่ง","Order date")} style={orderStyle("order_date")}><ERPInput type="date" className={ctrlCls("order_date")} value={form.order_date} onChange={(e) => { markTouched("order_date"); setOrderDate(e.target.value); }} /></ERPFormField>
-          <ERPFormField label={t("กำหนดส่ง","Due date")} style={orderStyle("due_date")} hint={tplDueOffset != null ? t(`อัตโนมัติ = วันที่สั่ง + ${tplDueOffset} วัน (แก้เองได้)`, `auto = order date + ${tplDueOffset}d (editable)`) : undefined}><ERPInput type="date" className={ctrlCls("due_date")} value={form.due_date} onChange={(e) => { markTouched("due_date"); updateForm({ due_date: e.target.value }); }} /></ERPFormField>
+          <ERPFormField label={t("กำหนดส่ง","Due date")} style={orderStyle("due_date")} hint={tplDueOffset != null ? t(`อัตโนมัติ = วันที่สั่ง + ${tplDueOffset} วัน (แก้เองได้)`, `auto = order date + ${tplDueOffset}d (editable)`) : t("ค่าเริ่มต้น = วันที่สั่ง + 3 วัน · กดปุ่มลัด/แก้เองได้", "default = order date + 3 days · use quick buttons / edit")}>
+            <div className="space-y-1">
+              <ERPInput type="date" className={ctrlCls("due_date")} value={form.due_date} onChange={(e) => { markTouched("due_date"); updateForm({ due_date: e.target.value }); }} />
+              <div className="flex gap-1">
+                {[1, 3, 7].map((n) => <button key={n} type="button" title={t(`วันที่สั่ง + ${n} วัน`, `order date + ${n}d`)} onClick={() => { markTouched("due_date"); updateForm({ due_date: addDaysStr(form.order_date || todayStr(), n) }); }} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-violet-50 hover:border-violet-300">+{n} {t("วัน","d")}</button>)}
+              </div>
+            </div>
+          </ERPFormField>
           <ERPFormField label={t("โฟลเดอร์ Drive (ลิงก์)","Drive folder (link)")} span={2} style={orderStyle("drive")}><ERPInput className={ctrlCls("drive")} value={form.drive_folder_url} onChange={(e) => { markTouched("drive"); updateForm({ drive_folder_url: e.target.value }); }} placeholder="https://drive.google.com/..." /></ERPFormField>
           <ERPFormField label="Platform" span={2} style={orderStyle("platform")}>
             <div className={`flex flex-wrap gap-1.5 ${wrapCls("platform")}`}>
