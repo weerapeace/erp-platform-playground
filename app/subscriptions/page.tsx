@@ -252,12 +252,17 @@ export default function SubscriptionsPage() {
       },
     },
     {
-      id: "actions", header: "", size: 130, enableSorting: false,
+      id: "actions", header: "", size: 160, enableSorting: false,
       cell: ({ row }) => {
         const s = row.original;
+        const invLink = s.invoice_url ? (/^https?:\/\//i.test(s.invoice_url) ? s.invoice_url : `https://${s.invoice_url}`) : null;
         return (
           <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => openInvoices(s)} title="ใบเสร็จ"
+            {invLink && (
+              <a href={invLink} target="_blank" rel="noopener noreferrer" title="ไปหน้าดาวน์โหลดใบเสร็จ (ลิงก์ร้าน)"
+                className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-indigo-200 text-xs text-indigo-600 hover:bg-indigo-50">⬇️</a>
+            )}
+            <button onClick={() => openInvoices(s)} title="ใบเสร็จที่อัปโหลดไว้ (PDF)"
               className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs hover:bg-slate-50">🧾</button>
             {canEdit && (
               <>
