@@ -1,0 +1,327 @@
+"use client";
+
+/**
+ * /subscriptions — App Subscription 📝 (อยู่ในพอร์ทัล "งานอื่นๆ" /misc)
+ *
+ * รวมรายการบริการที่สมัคร (subscription), สรุปยอดต่อเดือน/ปี, แนบใบเสร็จ PDF
+ * ใช้ข้อมูลชุดเดียวกับแอปเดิม software-subscriptions.pages.dev (ตาราง subscriptions/subscription_invoices)
+ * ของกลาง: PlaygroundShell · DataTable · ERPModal/ConfirmDialog · Toast · guardApi/audit (ฝั่ง API)
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { PlaygroundShell } from "@/components/playground-shell";
+import { DataTable } from "@/components/data-table";
+import { ConfirmDialog } from "@/components/modal";
+import { useAuth, usePermission, AccessDenied } from "@/components/auth";
+import { useToast } from "@/components/toast";
+import { apiFetch } from "@/lib/api";
+import { peekSWR, mutateSWR } from "@/lib/swr-lite";
+import type { ColumnDef } from "@tanstack/react-table";
+import {
+  CYCLE_LABEL, TYPE_LABEL, monthlyTHB, yearlyTHB, daysUntil, fmtCost, fmtBaht,
+  type SubSettings, type SubInput, type Subscription,
+} from "@/lib/subscriptions";
+import { SubscriptionFormModal } from "./subscription-form-modal";
+import { InvoicesModal } from "./invoices-modal";
+
+const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
+
+export default function SubscriptionsPage() {
+  const canView = usePermission("subscriptions.view");
+  const canEdit = usePermission("subscriptions.edit");
+  const { user } = useAuth();
+  const toast = useToast();
+
+  const [rows, setRows] = useState<Subscription[]>([]);
+  const [settings, setSettings] = useState<SubSettings>(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // ฟอร์มเพิ่ม/แก้
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Subscription | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // ลบ
+  const [delTarget, setDelTarget] = useState<Subscription | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // ใบเสร็จ
+  const [invTarget, setInvTarget] = useState<Subscription | null>(null);
+
+  // อัตราแลกเปลี่ยน (แก้ได้)
+  const [usdRate, setUsdRate] = useState(DEFAULT_SETTINGS.exchange_rate);
+  const [eurRate, setEurRate] = useState(DEFAULT_SETTINGS.eur_rate);
+  const [savingRate, setSavingRate] = useState(false);
+
+  const fetchList = useCallback(async () => {
+    const cached = peekSWR<{ data: Subscription[]; settings: SubSettings }>("subscriptions:list");
+    if (cached) { setRows(cached.data); setSettings(cached.settings); setUsdRate(cached.settings.exchange_rate); setEurRate(cached.settings.eur_rate); setLoading(false); }
+    else setLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch("/api/subscriptions");
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      const data = (j.data ?? []) as Subscription[];
+      const st = (j.settings ?? DEFAULT_SETTINGS) as SubSettings;
+      setRows(data); setSettings(st); setUsdRate(st.exchange_rate); setEurRate(st.eur_rate);
+      mutateSWR("subscriptions:list", { data, settings: st });
+    } catch (e) { if (!cached) setError(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
+
+  // ── summary ────────────────────────────────────────────────
+  const summary = useMemo(() => {
+    const active = rows.filter((r) => r.active);
+    let monthly = 0, yearly = 0, renewing = 0;
+    for (const s of active) {
+      monthly += monthlyTHB(s, settings);
+      yearly += yearlyTHB(s, settings);
+      const d = daysUntil(s.billing_date);
+      if (d !== null && d >= 0 && d <= 30 && s.billing_cycle !== "one-time") renewing++;
+    }
+    const wishlist = rows.filter((r) => r.want_to_buy).length;
+    return { monthly, yearly, activeCount: active.length, total: rows.length, renewing, wishlist };
+  }, [rows, settings]);
+
+  const categories = useMemo(() => rows.map((r) => r.category), [rows]);
+
+  // ── handlers ───────────────────────────────────────────────
+  const openCreate = useCallback(() => { setEditing(null); setFormOpen(true); }, []);
+  const openEdit = useCallback((s: Subscription) => { setEditing(s); setFormOpen(true); }, []);
+  const openInvoices = useCallback((s: Subscription) => setInvTarget(s), []);
+  const askDelete = useCallback((s: Subscription) => setDelTarget(s), []);
+
+  const handleSave = useCallback(async (input: SubInput) => {
+    setSaving(true);
+    try {
+      const res = await apiFetch(editing ? `/api/subscriptions/${editing.id}` : "/api/subscriptions", {
+        method: editing ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...input, actor: user?.name }),
+      });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      toast.success(editing ? "บันทึกการแก้ไขแล้ว" : "เพิ่มรายการแล้ว");
+      setFormOpen(false);
+      await fetchList();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  }, [editing, user?.name, toast, fetchList]);
+
+  const doDelete = useCallback(async () => {
+    if (!delTarget) return;
+    setDeleting(true);
+    try {
+      const res = await apiFetch(`/api/subscriptions/${delTarget.id}`, { method: "DELETE" });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      toast.success("ลบรายการแล้ว");
+      setDelTarget(null);
+      await fetchList();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    finally { setDeleting(false); }
+  }, [delTarget, toast, fetchList]);
+
+  const saveRates = useCallback(async () => {
+    setSavingRate(true);
+    try {
+      const res = await apiFetch("/api/subscriptions/settings", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exchange_rate: usdRate, eur_rate: eurRate }),
+      });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      const st = { ...settings, exchange_rate: usdRate, eur_rate: eurRate };
+      setSettings(st); mutateSWR("subscriptions:list", { data: rows, settings: st });
+      toast.success("บันทึกอัตราแลกเปลี่ยนแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกอัตราไม่สำเร็จ"); }
+    finally { setSavingRate(false); }
+  }, [usdRate, eurRate, settings, rows, toast]);
+
+  const rateDirty = usdRate !== settings.exchange_rate || eurRate !== settings.eur_rate;
+
+  // ── columns ────────────────────────────────────────────────
+  const columns = useMemo<ColumnDef<Subscription>[]>(() => [
+    {
+      id: "name", accessorKey: "name", header: "ชื่อรายการ", size: 220,
+      cell: ({ row }) => {
+        const s = row.original;
+        return (
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-slate-800 truncate">{s.name}</div>
+            {s.account_email && <div className="text-[11px] text-slate-400 truncate">{s.account_email}</div>}
+          </div>
+        );
+      },
+    },
+    { id: "category", accessorKey: "category", header: "หมวดหมู่", size: 130,
+      cell: ({ getValue }) => <span className="text-xs text-slate-600">{(getValue() as string) || "—"}</span> },
+    { id: "type", accessorKey: "type", header: "ประเภท", size: 90,
+      cell: ({ getValue }) => <span className="text-xs text-slate-500">{TYPE_LABEL[getValue() as keyof typeof TYPE_LABEL] ?? "—"}</span> },
+    { id: "billing_cycle", accessorKey: "billing_cycle", header: "รอบบิล", size: 110,
+      cell: ({ getValue }) => <span className="text-xs text-slate-500">{CYCLE_LABEL[getValue() as keyof typeof CYCLE_LABEL] ?? "—"}</span> },
+    {
+      id: "cost", accessorKey: "cost", header: "ราคา", size: 110,
+      cell: ({ row }) => <span className="text-sm font-mono tabular-nums text-slate-700">{fmtCost(Number(row.original.cost), row.original.currency)}</span>,
+    },
+    {
+      id: "monthly_thb", header: "≈ ฿/เดือน", size: 110,
+      accessorFn: (r) => monthlyTHB(r, settings),
+      cell: ({ getValue }) => { const v = getValue() as number; return <span className="text-sm font-mono tabular-nums text-slate-500">{v ? fmtBaht(v) : "—"}</span>; },
+    },
+    {
+      id: "billing_date", accessorKey: "billing_date", header: "ต่ออายุ", size: 130,
+      cell: ({ getValue }) => {
+        const raw = getValue() as string | null;
+        const d = daysUntil(raw);
+        if (!raw) return <span className="text-xs text-slate-300">—</span>;
+        const cls = d === null ? "text-slate-400"
+          : d < 0 ? "bg-slate-100 text-slate-500"
+          : d <= 7 ? "bg-red-100 text-red-600"
+          : d <= 30 ? "bg-amber-100 text-amber-700"
+          : "bg-slate-100 text-slate-600";
+        const txt = d === null ? raw : d < 0 ? `เลย ${-d} วัน` : d === 0 ? "วันนี้" : `อีก ${d} วัน`;
+        return <span className={`text-[11px] px-2 py-0.5 rounded ${cls}`}>{txt}</span>;
+      },
+    },
+    {
+      id: "status", accessorKey: "active", header: "สถานะ", size: 150,
+      cell: ({ row }) => {
+        const s = row.original;
+        return (
+          <div className="flex flex-wrap gap-1">
+            <span className={`text-[11px] px-2 py-0.5 rounded ${s.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{s.active ? "ใช้งาน" : "ปิด"}</span>
+            {s.want_to_buy && <span className="text-[11px] px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">🛒 อยากซื้อ</span>}
+            {s.pending_cancel && <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-700">⏳ ยกเลิก</span>}
+          </div>
+        );
+      },
+    },
+    {
+      id: "actions", header: "", size: 130, enableSorting: false,
+      cell: ({ row }) => {
+        const s = row.original;
+        return (
+          <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => openInvoices(s)} title="ใบเสร็จ"
+              className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs hover:bg-slate-50">🧾</button>
+            {canEdit && (
+              <>
+                <button onClick={() => openEdit(s)} title="แก้ไข"
+                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs hover:bg-slate-50">✎</button>
+                <button onClick={() => askDelete(s)} title="ลบ"
+                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs text-slate-400 hover:bg-red-50 hover:text-red-500">🗑</button>
+              </>
+            )}
+          </div>
+        );
+      },
+    },
+  ], [settings, canEdit, openEdit, openInvoices, askDelete]);
+
+  const views = useMemo(() => [
+    { id: "all", label: "ทั้งหมด", filter: () => true },
+    { id: "active", label: "✅ ใช้งานอยู่", filter: (r: Record<string, unknown>) => r.active === true },
+    { id: "inactive", label: "💤 ปิดอยู่", filter: (r: Record<string, unknown>) => r.active === false },
+    { id: "renewing", label: "⏰ ใกล้ต่ออายุ", filter: (r: Record<string, unknown>) => {
+        const d = daysUntil(r.billing_date as string | null);
+        return r.active === true && r.billing_cycle !== "one-time" && d !== null && d >= 0 && d <= 30;
+      } },
+    { id: "wishlist", label: "🛒 อยากซื้อ", filter: (r: Record<string, unknown>) => r.want_to_buy === true },
+    { id: "cancelling", label: "⏳ กำลังยกเลิก", filter: (r: Record<string, unknown>) => r.pending_cancel === true },
+  ], []);
+
+  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
+
+  return (
+    <PlaygroundShell>
+      <div className="min-h-full bg-gradient-to-b from-indigo-50/50 to-white">
+        <div className="max-w-6xl mx-auto p-5 sm:p-6 space-y-5">
+          {/* หัวข้อ */}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-indigo-700 flex items-center gap-2">📝 App Subscription</h1>
+              <p className="text-sm text-slate-500 mt-0.5">รวมบริการที่สมัคร (subscription) · สรุปค่าใช้จ่าย · เก็บใบเสร็จ</p>
+            </div>
+            {canEdit && (
+              <button onClick={openCreate} className="h-10 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-sm">+ เพิ่มรายการ</button>
+            )}
+          </div>
+
+          {/* การ์ดสรุป */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <SummaryCard label="รวมต่อเดือน" value={fmtBaht(summary.monthly)} sub={`≈ $${(summary.monthly / (settings.exchange_rate || 1)).toFixed(0)}/เดือน`} accent="from-indigo-500 to-violet-500" icon="📅" />
+            <SummaryCard label="รวมต่อปี" value={fmtBaht(summary.yearly)} sub={`≈ $${(summary.yearly / (settings.exchange_rate || 1)).toFixed(0)}/ปี`} accent="from-violet-500 to-fuchsia-500" icon="📆" />
+            <SummaryCard label="ใช้งานอยู่" value={String(summary.activeCount)} sub={`จากทั้งหมด ${summary.total} รายการ`} accent="from-emerald-500 to-teal-500" icon="✅" />
+            <SummaryCard label="ใกล้ต่ออายุ" value={String(summary.renewing)} sub="ภายใน 30 วัน" accent="from-amber-500 to-orange-500" icon="⏰" />
+          </div>
+
+          {/* อัตราแลกเปลี่ยน */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm bg-white border border-slate-100 rounded-xl px-4 py-2.5 shadow-sm">
+            <span className="text-xs font-medium text-slate-500">อัตราแลกเปลี่ยน (บาท):</span>
+            <label className="flex items-center gap-1.5">1 USD =
+              <input type="number" step="0.01" value={usdRate} disabled={!canEdit}
+                onChange={(e) => setUsdRate(Number(e.target.value) || 0)}
+                className="w-20 h-8 px-2 border border-slate-200 rounded-md text-sm tabular-nums disabled:bg-slate-50" /> ฿
+            </label>
+            <label className="flex items-center gap-1.5">1 EUR =
+              <input type="number" step="0.01" value={eurRate} disabled={!canEdit}
+                onChange={(e) => setEurRate(Number(e.target.value) || 0)}
+                className="w-20 h-8 px-2 border border-slate-200 rounded-md text-sm tabular-nums disabled:bg-slate-50" /> ฿
+            </label>
+            {canEdit && rateDirty && (
+              <button onClick={saveRates} disabled={savingRate}
+                className="h-8 px-3 text-xs font-medium bg-slate-800 text-white rounded-md hover:bg-slate-900 disabled:opacity-50">
+                {savingRate ? "กำลังบันทึก…" : "💾 บันทึกอัตรา"}
+              </button>
+            )}
+            {summary.wishlist > 0 && <span className="ml-auto text-xs text-indigo-500">🛒 รายการอยากซื้อ {summary.wishlist} รายการ</span>}
+          </div>
+
+          {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
+
+          {/* ตาราง */}
+          <DataTable
+            tableId="subscriptions"
+            data={rows}
+            columns={columns}
+            views={views}
+            loading={loading}
+            searchableKeys={["name", "category", "account_email", "notes"]}
+            searchPlaceholder="ค้นหา ชื่อ / หมวดหมู่ / อีเมล…"
+            exportFilename="subscriptions"
+            exportEntityType="subscriptions"
+            pageSize={25}
+            emptyMessage="ยังไม่มีรายการ subscription"
+            onRowClick={canEdit ? openEdit : openInvoices}
+          />
+        </div>
+      </div>
+
+      {/* ป๊อปอัป */}
+      <SubscriptionFormModal open={formOpen} editing={editing} categories={categories} saving={saving}
+        onClose={() => !saving && setFormOpen(false)} onSave={handleSave} />
+
+      <InvoicesModal sub={invTarget} canEdit={canEdit} onClose={() => setInvTarget(null)} />
+
+      <ConfirmDialog open={!!delTarget} variant="danger" loading={deleting}
+        title="ลบรายการ subscription?"
+        message={<>ต้องการลบ <b>{delTarget?.name}</b> ออกถาวรหรือไม่?<br /><span className="text-xs text-slate-400">ใบเสร็จที่แนบไว้จะถูกลบด้วย</span></>}
+        confirmText="ลบรายการ" onClose={() => !deleting && setDelTarget(null)} onConfirm={doDelete} />
+    </PlaygroundShell>
+  );
+}
+
+function SummaryCard({ label, value, sub, accent, icon }: { label: string; value: string; sub: string; accent: string; icon: string }) {
+  return (
+    <div className="relative overflow-hidden rounded-xl bg-white border border-slate-100 shadow-sm p-4">
+      <div className={`absolute -right-3 -top-3 w-14 h-14 rounded-full bg-gradient-to-br ${accent} opacity-10`} />
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="text-xl font-bold text-slate-800 mt-1 tabular-nums">{value}</div>
+      <div className="text-[11px] text-slate-400 mt-0.5">{sub}</div>
+      <div className="absolute right-3 top-3 text-lg opacity-70">{icon}</div>
+    </div>
+  );
+}

@@ -1,0 +1,73 @@
+/**
+ * /api/subscriptions/[id] — แก้ไข / ลบ รายการ (subscriptions.edit)
+ * PATCH  → อัปเดตเฉพาะ field ที่ส่งมา
+ * DELETE → ลบรายการ + ใบเสร็จที่แนบ (row + ไฟล์ใน Storage)
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { guardApi } from "@/lib/api-auth";
+import { writeAudit } from "@/lib/audit";
+import { toSubRow, validateSubInput, type SubInput } from "@/lib/subscriptions";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await guardApi(request, "subscriptions.edit");
+  if (guard) return guard;
+  const { id } = await params;
+
+  let body: Partial<SubInput> & { actor?: string };
+  try { body = await request.json(); }
+  catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  const err = validateSubInput(body, false);
+  if (err) return NextResponse.json({ error: err }, { status: 400 });
+
+  const patch = { ...toSubRow(body), updated_at: new Date().toISOString() };
+  if (Object.keys(patch).length <= 1) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้ไข" }, { status: 400 });
+
+  const { data: auth } = await supabaseFromRequest(request).auth.getUser();
+
+  const db = supabaseAdmin();
+  const { data, error } = await db.from("subscriptions").update(patch).eq("id", id).select("*").single();
+  if (error || !data) return NextResponse.json({ error: error?.message ?? "update failed" }, { status: 500 });
+
+  await writeAudit(db, {
+    action: "update", entityType: "subscriptions", entityId: null,
+    actorId: auth?.user?.id ?? null, actorName: body.actor ?? null,
+    metadata: { sub_id: id, name: data.name, changed: Object.keys(toSubRow(body)) },
+  });
+  return NextResponse.json({ data, error: null });
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await guardApi(request, "subscriptions.edit");
+  if (guard) return guard;
+  const { id } = await params;
+
+  const { data: auth } = await supabaseFromRequest(request).auth.getUser();
+  const db = supabaseAdmin();
+
+  // ชื่อไว้ log ก่อนลบ
+  const { data: sub } = await db.from("subscriptions").select("name").eq("id", id).single();
+
+  // ลบใบเสร็จที่แนบ (ไฟล์ Storage + row) แบบ best-effort ก่อนลบรายการ
+  const { data: invs } = await db.from("subscription_invoices").select("id, file_path").eq("subscription_id", id);
+  if (invs && invs.length > 0) {
+    const paths = invs.map((i) => i.file_path as string).filter(Boolean);
+    if (paths.length) { try { await db.storage.from("invoices").remove(paths); } catch { /* ignore */ } }
+    await db.from("subscription_invoices").delete().eq("subscription_id", id);
+  }
+
+  const { error } = await db.from("subscriptions").delete().eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await writeAudit(db, {
+    action: "delete", entityType: "subscriptions", entityId: null,
+    actorId: auth?.user?.id ?? null, actorName: null,
+    metadata: { sub_id: id, name: sub?.name ?? null, invoices_removed: invs?.length ?? 0 },
+  });
+  return NextResponse.json({ ok: true, error: null });
+}

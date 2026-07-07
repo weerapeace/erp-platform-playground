@@ -42,6 +42,7 @@ export type Permission =
   | "attachments.view" | "attachments.upload" | "attachments.delete"
   | "files.upload" | "files.delete"
   | "accounting.view" | "accounting.manage" | "accounting.post"
+  | "subscriptions.view" | "subscriptions.edit"
   | "admin.users" | "admin.audit_log";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
@@ -80,6 +81,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "attachments.view", "attachments.upload", "attachments.delete",
     "files.upload", "files.delete",
     "accounting.view", "accounting.manage", "accounting.post",
+    "subscriptions.view", "subscriptions.edit",
     "admin.users", "admin.audit_log",
   ],
   manager: [
