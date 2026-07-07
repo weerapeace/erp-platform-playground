@@ -55,18 +55,23 @@ export async function pushTasksLineTpl(admin: Admin, eventKey: string, vars: Rec
         return res.ok;
       } catch { return false; }
     };
-    const textMsg = text ? { type: "text", text: text.slice(0, 4900) } : null;
-    const flexMsg = link ? {
-      type: "flex", altText: "เปิดดูงาน",
-      contents: { type: "bubble", body: { type: "box", layout: "vertical", contents: [
-        { type: "button", style: "primary", color: "#7C3AED", height: "sm", action: { type: "uri", label: "เปิดดูงาน", uri: link } },
-      ] } },
-    } : null;
-    const combined = [textMsg, flexMsg].filter(Boolean) as Record<string, unknown>[];
-    if (!combined.length) return;
-    // ส่งชุดรวม (ข้อความ + ปุ่ม) ก่อน · ถ้าไม่ผ่าน (เช่น flex ผิดรูปแบบ → 400 ทั้งชุด) ถอยไปส่งข้อความล้วน ให้การเตือนถึงมือเสมอ
-    const ok = await doPush(combined);
-    if (!ok && textMsg) await doPush([textMsg]);
+    // ⚠️ ประหยัดโควตา LINE: LINE นับโควตา "ต่อ message object" — [ข้อความ + ปุ่ม] = 2 โควตา
+    // จึงรวมทุกอย่างไว้ใน Flex bubble เดียว (ข้อความ + ปุ่มเปิดดู) = 1 ข้อความ = 1 โควตา · ถ้ามีลิงก์
+    const body = (text || "").slice(0, 4900);
+    if (link) {
+      const flexMsg = {
+        type: "flex", altText: (body.slice(0, 395) || "มีงานใหม่"),
+        contents: { type: "bubble", body: { type: "box", layout: "vertical", spacing: "md", contents: [
+          { type: "text", text: body || "มีงานใหม่", wrap: true, size: "sm", color: "#333333" },
+          { type: "button", style: "primary", color: "#7C3AED", height: "sm", action: { type: "uri", label: "เปิดดูงาน", uri: link } },
+        ] } },
+      };
+      const ok = await doPush([flexMsg]);   // 1 ข้อความ (มีปุ่มในตัว)
+      // ถ้า Flex ส่งไม่ผ่าน → ถอยไปข้อความล้วน (ใส่ลิงก์ต่อท้ายให้กดเปิดได้) · ยังเป็น 1 ข้อความเท่ากัน
+      if (!ok) await doPush([{ type: "text", text: `${body}\n${link}`.slice(0, 4900) }]);
+    } else if (body) {
+      await doPush([{ type: "text", text: body }]);
+    }
   } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
 }
 
