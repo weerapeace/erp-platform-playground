@@ -21,7 +21,7 @@ const LABEL_OVERRIDE: Record<string, string> = {
 };
 
 type PickerOpt = { id: string; label: string; secondary?: string };
-type TagOpt = { id: string; name: string; code_prefix: string; group_name: string | null };
+type TagOpt = { id: string; name: string; code_prefix: string; group_name: string | null; default_name?: string; default_uom_id?: string | null; default_uom_label?: string };
 type Suggest = { prefix: string; this_latest: string | null; this_suggested: string | null; group_latest: string | null; group_name: string | null; error?: string };
 type TagCode = { prefix: string; latest_code: string; suggested: string; count: number };
 
@@ -180,6 +180,16 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
       return s;
     });
   };
+  // เติมชื่อ/หน่วย default ของประเภทให้อัตโนมัติ (เฉพาะช่องที่ยังว่าง — ไม่ทับที่พิมพ์ไว้)
+  const prefillFromTag = (tagId: string) => {
+    const t = tags.find((x) => x.id === tagId); if (!t) return;
+    setSingle((s) => {
+      const values = { ...s.values }; const labels = { ...s.labels };
+      if (t.default_name && !String(values.name_th ?? "").trim()) values.name_th = t.default_name;
+      if (t.default_uom_id && !values.uom_id) { values.uom_id = t.default_uom_id; labels.uom_id = t.default_uom_label || ""; }
+      return { values, labels };
+    });
+  };
   const loadSuggest = useCallback((tagId: string) => {
     apiFetch(`/api/skus/code-suggest?family_tag_id=${tagId}`).then((r) => r.json()).then((j) => {
       setSug(j as Suggest);
@@ -270,7 +280,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
             <span className="text-xs text-slate-500">ประเภท (Tag) — ใช้เสนอรหัสให้</span>
             <div className="mt-0.5 flex gap-1.5">
               <div className="flex-1"><SearchableSelect value={sTag ?? ""} options={tagOptions} placeholder="— เลือกประเภท (พิมพ์ค้นหาได้) —"
-                onChange={(v) => { const nv = v || null; setSTag(nv); if (nv) loadSuggest(nv); else { setSug(null); setTagCodes([]); } }} /></div>
+                onChange={(v) => { const nv = v || null; setSTag(nv); if (nv) { loadSuggest(nv); prefillFromTag(nv); } else { setSug(null); setTagCodes([]); } }} /></div>
               {/* ℹ️ tooltip: ทุกตระกูลรหัสที่ SKU ในแท็กนี้ใช้จริง (hover ดู ไม่ใช่ปุ่มเลือก) */}
               {tagCodes.length > 0 && (
                 <div className="relative group flex items-center">
