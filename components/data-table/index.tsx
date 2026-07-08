@@ -2063,6 +2063,11 @@ export function DataTable<T extends Record<string, unknown>>({
                       })}
                     </tr>,
                   ];
+                  // D: รูปพี่น้องในกลุ่ม — variant ที่ไม่มีรูปของตัวเอง ดึงรูปของสมาชิกกลุ่มที่มีรูป
+                  const imgColId = leaf.find(c => c.columnDef.meta?.type === "image")?.id;
+                  const groupImageKey = imgColId
+                    ? (grp.map(r => r.getValue(imgColId)).find(v => v && String(v).trim()) as string | undefined)
+                    : undefined;
                   if (!collapsed) for (const row of grp) {
                     out.push(
                       <React.Fragment key={row.id}>
@@ -2071,7 +2076,7 @@ export function DataTable<T extends Record<string, unknown>>({
                           {row.getVisibleCells().map(cell => (
                             <td key={cell.id} className={`${cellPad} text-slate-700 overflow-hidden text-ellipsis`}>
                               {cell.column.columnDef.meta?.type === "image"
-                                ? <ImageThumbnail url={cell.getValue() as string | null} />
+                                ? <ImageThumbnail url={(cell.getValue() as string | null) || groupImageKey || null} />
                                 : flexRender(cell.column.columnDef.cell, cell.getContext())}
                             </td>
                           ))}
