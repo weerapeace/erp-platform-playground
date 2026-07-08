@@ -38,7 +38,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (all && !(await isManager(admin, me.id))) return NextResponse.json({ error: "เฉพาะแอดมิน", data: [] }, { status: 403 });
 
   let q = admin.from("erp_gif_library")
-    .select(all ? "id, gif_url, gif_key, title, category, is_active, sort_order" : "id, gif_url, gif_key, title, category");
+    .select(all ? "id, gif_url, gif_key, title, category, is_active, sort_order, default_message" : "id, gif_url, gif_key, title, category, default_message");
   if (!all) q = q.eq("is_active", true);
   const { data } = await q.order("sort_order", { ascending: true }).order("created_at", { ascending: false }).limit(500);
   return NextResponse.json({ data: data ?? [], error: null });
@@ -53,13 +53,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // เพิ่มลิงก์ GIF ภายนอก (แอดมิน) — JSON
   if (ctype.includes("application/json")) {
     if (!(await isManager(admin, me.id))) return NextResponse.json({ error: "เฉพาะแอดมิน" }, { status: 403 });
-    let body: { gif_url?: unknown; title?: unknown; category?: unknown };
+    let body: { gif_url?: unknown; title?: unknown; category?: unknown; default_message?: unknown };
     try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
     const url = String(body.gif_url ?? "").trim();
     if (!/^https?:\/\//i.test(url)) return NextResponse.json({ error: "ต้องเป็นลิงก์ http(s)" }, { status: 400 });
     const { data, error } = await admin.from("erp_gif_library")
-      .insert({ gif_url: url, title: String(body.title ?? "").slice(0, 80).trim() || "GIF", category: String(body.category ?? "").slice(0, 40).trim() || "ทั่วไป", uploaded_by: me.id, sort_order: 50 })
-      .select("id, gif_url, gif_key, title, category, is_active, sort_order").single();
+      .insert({ gif_url: url, title: String(body.title ?? "").slice(0, 80).trim() || "GIF", category: String(body.category ?? "").slice(0, 40).trim() || "ทั่วไป", default_message: String(body.default_message ?? "").slice(0, 500).trim() || null, uploaded_by: me.id, sort_order: 50 })
+      .select("id, gif_url, gif_key, title, category, is_active, sort_order, default_message").single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ data, error: null });
   }
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   const { data, error } = await admin.from("erp_gif_library")
     .insert({ gif_key: key, title: title || "GIF ของฉัน", category: "อัปโหลด", uploaded_by: me.id, sort_order: 100 })
-    .select("id, gif_url, gif_key, title, category, is_active, sort_order").single();
+    .select("id, gif_url, gif_key, title, category, is_active, sort_order, default_message").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ data, error: null });
 }
@@ -92,7 +92,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (!me) return NextResponse.json({ error: "ต้องเข้าสู่ระบบ" }, { status: 401 });
   const admin = supabaseAdmin();
   if (!(await isManager(admin, me.id))) return NextResponse.json({ error: "เฉพาะแอดมิน" }, { status: 403 });
-  let body: { id?: unknown; title?: unknown; category?: unknown; is_active?: unknown; sort_order?: unknown };
+  let body: { id?: unknown; title?: unknown; category?: unknown; is_active?: unknown; sort_order?: unknown; default_message?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const id = String(body.id ?? "").trim();
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
@@ -101,9 +101,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (typeof body.category === "string") patch.category = body.category.slice(0, 40).trim();
   if (typeof body.is_active === "boolean") patch.is_active = body.is_active;
   if (typeof body.sort_order === "number") patch.sort_order = Math.round(body.sort_order);
+  if (typeof body.default_message === "string") patch.default_message = body.default_message.slice(0, 500).trim() || null;
   if (!Object.keys(patch).length) return NextResponse.json({ error: "ไม่มีอะไรให้แก้" }, { status: 400 });
   const { data, error } = await admin.from("erp_gif_library").update(patch).eq("id", id)
-    .select("id, gif_url, gif_key, title, category, is_active, sort_order").single();
+    .select("id, gif_url, gif_key, title, category, is_active, sort_order, default_message").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ data, error: null });
 }

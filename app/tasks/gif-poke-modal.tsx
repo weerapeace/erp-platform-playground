@@ -16,7 +16,7 @@ import { useT } from "@/components/i18n";
 import { GifPokeSettings } from "./gif-poke-settings";
 import { GifPokeAdmin } from "./gif-poke-admin";
 
-type GifItem = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null };
+type GifItem = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null; default_message?: string | null };
 
 // GIF ไม่ใส่ &w= (ย่อจะทำอนิเมชั่นหาย) — url ภายนอกใช้ตรง, R2 key ผ่าน proxy
 export const gifItemSrc = (g: { gif_url?: string | null; gif_key?: string | null }): string | null =>
@@ -35,6 +35,7 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
   const [lib, setLib] = useState<GifItem[]>([]);
   const [loadingLib, setLoadingLib] = useState(false);
   const [selId, setSelId] = useState<string | null>(null);
+  const [msgTouched, setMsgTouched] = useState(false);   // ผู้ใช้พิมพ์ข้อความเองแล้วหรือยัง (กันทับข้อความ default)
   const [cat, setCat] = useState<string>("");   // ตัวกรองหมวด ("" = ทั้งหมด)
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -53,7 +54,7 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
 
   useEffect(() => {
     if (!open) return;
-    setErr(""); setOkMsg("");
+    setErr(""); setOkMsg(""); setMsgTouched(false);
     if (lib.length === 0) loadLib();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -82,6 +83,12 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
     finally { setUploading(false); if (fileRef.current) fileRef.current.value = ""; }
   };
 
+  // เลือก GIF → เติมข้อความ default ให้ (ถ้าผู้ใช้ยังไม่พิมพ์เอง)
+  const pickGif = (g: GifItem) => {
+    setSelId(g.id);
+    if (!msgTouched) setMessage(g.default_message ?? "");
+  };
+
   const send = async () => {
     setErr(""); setOkMsg("");
     if (!recipients.length) { setErr(t("เลือกผู้รับก่อน", "Pick a recipient first")); return; }
@@ -98,7 +105,7 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
       setOkMsg(t(`ส่งแล้ว ${j.sent} คน 🎉${skip}`, `Sent to ${j.sent} 🎉${skip}`));
       onSent?.();
       // เคลียร์ผู้รับ/ข้อความ ให้ส่งคนต่อไปได้ทันที (คง GIF/คลังไว้)
-      setRecipients([]); setMessage("");
+      setRecipients([]); setMessage(""); setMsgTouched(false);
       setTimeout(() => setOkMsg(""), 2500);
     } catch { setErr(t("ส่งไม่สำเร็จ", "Send failed")); }
     finally { setSending(false); }
@@ -166,7 +173,7 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
                 const src = gifItemSrc(g);
                 const on = g.id === selId;
                 return (
-                  <button key={g.id} onClick={() => setSelId(g.id)} title={g.title ?? ""}
+                  <button key={g.id} onClick={() => pickGif(g)} title={g.title ?? ""}
                     className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all ${on ? "border-violet-500 ring-2 ring-violet-200" : "border-slate-200 hover:border-slate-300"}`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     {src && <img src={src} alt={g.title ?? ""} className="w-full h-full object-cover" loading="lazy" />}
@@ -180,8 +187,8 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
 
         {/* ข้อความ */}
         <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">{t("ข้อความ (ไม่บังคับ)", "Message (optional)")}</label>
-          <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={2} maxLength={500}
+          <label className="block text-xs font-semibold text-slate-600 mb-1">{t("ข้อความ (เลือก GIF แล้วเติมให้อัตโนมัติ · แก้ได้)", "Message (auto-filled by GIF · editable)")}</label>
+          <textarea value={message} onChange={(e) => { setMessage(e.target.value); setMsgTouched(true); }} rows={2} maxLength={500}
             placeholder={t("เช่น เก่งมากวันนี้! 💪", "e.g. Great job today! 💪")}
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-violet-300" />
         </div>

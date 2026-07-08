@@ -11,7 +11,7 @@ import { apiFetch } from "@/lib/api";
 import { avatarSrc } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 
-type LibItem = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null; is_active: boolean; sort_order: number };
+type LibItem = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null; is_active: boolean; sort_order: number; default_message: string | null };
 const src = (g: LibItem) => avatarSrc(g.gif_url || g.gif_key || null);
 
 export function GifPokeAdmin({ open, onClose, onChanged }: { open: boolean; onClose: () => void; onChanged?: () => void }) {
@@ -104,18 +104,23 @@ export function GifPokeAdmin({ open, onClose, onChanged }: { open: boolean; onCl
             {items.map((g) => {
               const s = src(g);
               return (
-                <div key={g.id} className={`flex items-center gap-2 p-1.5 rounded-lg border ${g.is_active ? "border-slate-100" : "border-slate-100 bg-slate-50 opacity-60"}`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  {s && <img src={s} alt="" className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0" />}
-                  <input defaultValue={g.title ?? ""} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (g.title ?? "")) void patchItem(g.id, { title: v }); }}
-                    placeholder={t("ชื่อ", "Title")} className="w-32 h-8 px-2 text-sm border border-slate-200 rounded-lg" />
-                  <input defaultValue={g.category ?? ""} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (g.category ?? "")) void patchItem(g.id, { category: v }); }}
-                    placeholder={t("หมวด", "Category")} className="w-24 h-8 px-2 text-sm border border-slate-200 rounded-lg" />
-                  <input type="number" defaultValue={g.sort_order} onBlur={(e) => { const v = Math.round(Number(e.target.value)); if (v !== g.sort_order) void patchItem(g.id, { sort_order: v }); }}
-                    title={t("ลำดับ", "Order")} className="w-14 h-8 px-2 text-sm border border-slate-200 rounded-lg" />
-                  <button onClick={() => void patchItem(g.id, { is_active: !g.is_active })} title={g.is_active ? t("ซ่อน", "Hide") : t("แสดง", "Show")}
-                    className={`h-8 px-2 text-xs rounded-lg shrink-0 ${g.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>{g.is_active ? t("แสดง", "Shown") : t("ซ่อน", "Hidden")}</button>
-                  <button onClick={() => void del(g.id)} title={t("ลบ", "Delete")} className="h-8 px-2 text-xs text-red-600 hover:bg-red-50 rounded-lg shrink-0">🗑</button>
+                <div key={g.id} className={`p-2 rounded-lg border space-y-1.5 ${g.is_active ? "border-slate-100" : "border-slate-100 bg-slate-50 opacity-60"}`}>
+                  <div className="flex items-center gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    {s && <img src={s} alt="" className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0" />}
+                    <input defaultValue={g.title ?? ""} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (g.title ?? "")) void patchItem(g.id, { title: v }); }}
+                      placeholder={t("ชื่อ", "Title")} className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg" />
+                    <input defaultValue={g.category ?? ""} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (g.category ?? "")) void patchItem(g.id, { category: v }); }}
+                      placeholder={t("หมวด", "Category")} className="w-24 h-8 px-2 text-sm border border-slate-200 rounded-lg" />
+                    <input type="number" defaultValue={g.sort_order} onBlur={(e) => { const v = Math.round(Number(e.target.value)); if (v !== g.sort_order) void patchItem(g.id, { sort_order: v }); }}
+                      title={t("ลำดับ", "Order")} className="w-14 h-8 px-2 text-sm border border-slate-200 rounded-lg" />
+                    <button onClick={() => void patchItem(g.id, { is_active: !g.is_active })} title={g.is_active ? t("ซ่อน", "Hide") : t("แสดง", "Show")}
+                      className={`h-8 px-2 text-xs rounded-lg shrink-0 ${g.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>{g.is_active ? t("แสดง", "Shown") : t("ซ่อน", "Hidden")}</button>
+                    <button onClick={() => void del(g.id)} title={t("ลบ", "Delete")} className="h-8 px-2 text-xs text-red-600 hover:bg-red-50 rounded-lg shrink-0">🗑</button>
+                  </div>
+                  <input defaultValue={g.default_message ?? ""} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (g.default_message ?? "")) void patchItem(g.id, { default_message: v }); }}
+                    placeholder={t("💬 ข้อความ default (เลือก GIF นี้แล้วเติมให้อัตโนมัติ)", "💬 Default message (auto-filled when this GIF is picked)")}
+                    className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg" />
                 </div>
               );
             })}
