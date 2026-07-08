@@ -127,20 +127,21 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
     { id: "invoice_date", accessorKey: "invoice_date", header: "วันที่ตัด (ในบิล)", size: 120,
       cell: ({ getValue }) => { const d = getValue() as string | null; return <span className="text-xs text-slate-600">{d || <span className="text-slate-300">—</span>}</span>; } },
     { id: "amount", accessorKey: "amount", header: "จำนวนเงิน", size: 120,
-      cell: ({ row }) => { const inv = row.original; return inv.amount != null
-        ? <span className="text-sm font-mono tabular-nums text-slate-700">{fmtCost(Number(inv.amount), (inv.currency || "THB") as Currency)}</span>
-        : <span className="text-xs text-slate-300">—</span>; } },
+      cell: ({ row }) => { const inv = row.original; if (inv.amount == null) return <span className="text-xs text-slate-300">—</span>;
+        const neg = Number(inv.amount) < 0;
+        return <span className={`text-sm font-mono tabular-nums ${neg ? "text-red-600" : "text-slate-700"}`}>{fmtCost(Number(inv.amount), (inv.currency || "THB") as Currency)}</span>; } },
     { id: "amount_thb", header: "≈ ฿ (บาท)", size: 130,
       accessorFn: (r) => (r.amount != null ? toTHB(Number(r.amount), (r.currency || "THB") as Currency, settings) : 0),
       meta: {
         // รวมยอดท้ายตาราง (บาท) — รวมทุกแถวที่กรอง (function form เพราะเป็นคอลัมน์คำนวณ)
         summary: (rs) => {
           const t = (rs as InvoiceRow[]).reduce((a, r) => a + (r.amount != null ? toTHB(Number(r.amount), (r.currency || "THB") as Currency, settings) : 0), 0);
-          return <span className="text-indigo-700">{fmtBaht(t)}</span>;
+          return <span className={t < 0 ? "text-red-700" : "text-indigo-700"}>{fmtBaht(t)}</span>;
         },
       },
       cell: ({ row }) => { const inv = row.original; if (inv.amount == null) return <span className="text-xs text-slate-300">—</span>;
-        return <span className="text-sm font-mono tabular-nums text-indigo-600">{fmtBaht(toTHB(Number(inv.amount), (inv.currency || "THB") as Currency, settings), 2)}</span>; } },
+        const thb = toTHB(Number(inv.amount), (inv.currency || "THB") as Currency, settings);
+        return <span className={`text-sm font-mono tabular-nums ${thb < 0 ? "text-red-600" : "text-indigo-600"}`}>{fmtBaht(thb, 2)}</span>; } },
     { id: "file_name", accessorKey: "file_name", header: "ไฟล์", size: 260,
       cell: ({ getValue }) => <span className="text-sm text-slate-600 inline-flex items-center gap-1.5"><span>📄</span><span className="truncate">{getValue() as string}</span></span> },
     {
@@ -188,7 +189,7 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
             ))}
           </select>
         </label>
-        <span className="text-xs text-slate-400">แสดง {filtered.length} ใบเสร็จ · รวม ≈ <b className="text-indigo-600">{fmtBaht(totalTHB)}</b></span>
+        <span className="text-xs text-slate-400">แสดง {filtered.length} ใบเสร็จ · รวม ≈ <b className={totalTHB < 0 ? "text-red-600" : "text-indigo-600"}>{fmtBaht(totalTHB)}</b></span>
         {canEdit && unparsed > 0 && (
           <button onClick={runBackfill} disabled={backfilling}
             className="ml-auto h-9 px-3 text-xs font-medium border border-indigo-200 text-indigo-600 bg-white rounded-lg hover:bg-indigo-50 disabled:opacity-50"
