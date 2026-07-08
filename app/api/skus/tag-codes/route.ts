@@ -34,24 +34,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const ids = (links ?? []).map((l) => l.src_id as string);
   if (ids.length === 0) return NextResponse.json({ prefixes: [], total_skus: 0, error: null });
 
-  // ดึงรหัส + วันที่สร้าง (chunk กัน URL ยาว)
-  const rows: { code: string; created_at: string }[] = [];
+  // ดึงรหัส + ชื่อ + วันที่สร้าง (chunk กัน URL ยาว)
+  const rows: { code: string; name: string; created_at: string }[] = [];
   for (let i = 0; i < ids.length; i += 1000) {
-    const { data } = await admin.from("skus_v2").select("code, created_at").in("id", ids.slice(i, i + 1000));
-    for (const r of (data ?? [])) if (r.code) rows.push({ code: r.code as string, created_at: r.created_at as string });
+    const { data } = await admin.from("skus_v2").select("code, name_th, created_at").in("id", ids.slice(i, i + 1000));
+    for (const r of (data ?? [])) if (r.code) rows.push({ code: r.code as string, name: (r.name_th as string | null) ?? "", created_at: r.created_at as string });
   }
 
-  // จัดกลุ่มตามตระกูลรหัส (เฉพาะรหัสที่ลงท้ายด้วยตัวเลข)
-  type Grp = { prefix: string; count: number; latest_code: string; latest_at: string; num: number; digits: number };
+  // จัดกลุ่มตามตระกูลรหัส (เฉพาะรหัสที่ลงท้ายด้วยตัวเลข) — เก็บชื่อของ SKU ตัวล่าสุดต่อกลุ่มด้วย
+  type Grp = { prefix: string; count: number; latest_code: string; latest_name: string; latest_at: string; num: number; digits: number };
   const map = new Map<string, Grp>();
   for (const r of rows) {
     const sc = splitCode(r.code);
     if (sc.num == null) continue;             // ไม่ลงท้ายด้วยเลข = ข้าม
     const g = map.get(sc.prefix);
-    if (!g) { map.set(sc.prefix, { prefix: sc.prefix, count: 1, latest_code: r.code, latest_at: r.created_at, num: sc.num, digits: sc.digits }); }
+    if (!g) { map.set(sc.prefix, { prefix: sc.prefix, count: 1, latest_code: r.code, latest_name: r.name, latest_at: r.created_at, num: sc.num, digits: sc.digits }); }
     else {
       g.count++;
-      if (r.created_at > g.latest_at) { g.latest_at = r.created_at; g.latest_code = r.code; g.num = sc.num; g.digits = sc.digits; }
+      if (r.created_at > g.latest_at) { g.latest_at = r.created_at; g.latest_code = r.code; g.latest_name = r.name; g.num = sc.num; g.digits = sc.digits; }
     }
   }
 
@@ -61,6 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .map((g) => ({
       prefix: g.prefix,
       latest_code: g.latest_code,
+      latest_name: g.latest_name,
       suggested: g.prefix + String(g.num + 1).padStart(g.digits, "0"),
       count: g.count,
     }));

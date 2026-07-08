@@ -17,7 +17,7 @@ type PrefixRow = {
   default_name: string; default_uom_id: string | null; default_uom_label: string;
   prefix_defaults: Record<string, PrefixDefault>;
 };
-type TagCode = { prefix: string; latest_code: string; suggested: string; count: number };
+type TagCode = { prefix: string; latest_code: string; latest_name: string; suggested: string; count: number };
 
 export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
   const [rows, setRows] = useState<PrefixRow[]>([]);
@@ -49,16 +49,16 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
     setRows((l) => l.map((r) => r.id === id
       ? { ...r, prefix_defaults: { ...r.prefix_defaults, [prefix]: { ...(r.prefix_defaults[prefix] ?? { name: "", uom_id: null, uom_label: "" }), ...patch } } }
       : r));
-  // เติมค่า default ของแท็ก (ชื่อ/หน่วย ด้านบน) ให้ "ทุกตระกูลรหัส" ในแท็กนั้น
-  const fillAllPrefix = (row: PrefixRow, field: "name" | "uom") => {
+  // เติมค่าให้ "ทุกตระกูลรหัส" — name=ชื่อ default ด้านบน · latestName=ชื่อ SKU ตัวล่าสุดของแต่ละตระกูล · uom=หน่วย default
+  const fillAllPrefix = (row: PrefixRow, field: "name" | "latestName" | "uom") => {
     const codes = codesCache[row.id] ?? [];
     setRows((l) => l.map((r) => {
       if (r.id !== row.id) return r;
       const pd = { ...r.prefix_defaults };
       for (const c of codes) {
         const cur = pd[c.prefix] ?? { name: "", uom_id: null, uom_label: "" };
-        pd[c.prefix] = field === "name"
-          ? { ...cur, name: row.default_name }
+        pd[c.prefix] = field === "name" ? { ...cur, name: row.default_name }
+          : field === "latestName" ? { ...cur, name: c.latest_name || cur.name }
           : { ...cur, uom_id: row.default_uom_id, uom_label: row.default_uom_label };
       }
       return { ...r, prefix_defaults: pd };
@@ -146,6 +146,10 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
                 <div className="bg-blue-50/30 border-b border-slate-100 py-1">
                   <div className="px-5 py-0.5 flex items-center gap-1.5 flex-wrap">
                     <span className="text-[10px] text-slate-400">ตั้งชื่อ/หน่วยแยกรายตระกูล · เว้นว่าง = ใช้ค่าด้านบน{editTag !== r.id ? " · กด ✎ เพื่อแก้" : ""}</span>
+                    {editTag === r.id && (codesCache[r.id] ?? []).some((c) => c.latest_name) && (
+                      <button type="button" onClick={() => fillAllPrefix(r, "latestName")} title="ดึงชื่อ SKU ตัวล่าสุดของแต่ละตระกูลมาใส่"
+                        className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50">↓ ใช้ชื่อ SKU ล่าสุด (ทุกตระกูล)</button>
+                    )}
                     {editTag === r.id && (codesCache[r.id]?.length ?? 0) > 0 && r.default_name && (
                       <button type="button" onClick={() => fillAllPrefix(r, "name")}
                         className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-white hover:border-blue-300">↓ เติมชื่อ &ldquo;{r.default_name}&rdquo; ทุกตระกูล</button>
@@ -169,7 +173,7 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
                               <div className="text-[10px] text-slate-400 pl-3.5 truncate">ล่าสุด {c.latest_code}</div>
                             </div>
                             <div className={cPrefix} />
-                            <div className={cName}><input value={pd.name} readOnly={editTag !== r.id} onChange={(e) => setPrefixDefault(r.id, c.prefix, { name: e.target.value })} placeholder={r.default_name || "ชื่อเฉพาะตระกูลนี้"}
+                            <div className={cName}><input value={pd.name} readOnly={editTag !== r.id} onChange={(e) => setPrefixDefault(r.id, c.prefix, { name: e.target.value })} placeholder={c.latest_name || r.default_name || "ชื่อเฉพาะตระกูลนี้"}
                               className={inCls(editTag === r.id)} /></div>
                             <div className={cUom}><SearchableSelect value={pd.uom_id ?? ""} options={uomOpts} placeholder="—" disabled={editTag !== r.id} onChange={(v) => setPrefixDefault(r.id, c.prefix, { uom_id: v || null })} /></div>
                             <div className={cAct} />
