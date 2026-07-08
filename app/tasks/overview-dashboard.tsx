@@ -28,6 +28,7 @@ import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, fontStack, fontG
 import { DashboardPet, type PetAlertKind } from "./dashboard-pet";
 import { GifPokeModal } from "./gif-poke-modal";
 import { GifPokeLayer } from "./gif-poke-layer";
+import type { UserPickerValue } from "@/components/pickers";
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
@@ -74,6 +75,7 @@ export function OverviewDashboard({
   const t = useT();
   const [customizing, setCustomizing] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);   // หน้าต่างส่ง GIF จิ้มเพื่อน
+  const [gifReplyTo, setGifReplyTo] = useState<UserPickerValue | null>(null);   // ตอบกลับ → เติมผู้รับ
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [activeMetric, setActiveMetric] = useState<string | null>(null);   // การ์ดเมตริกที่กดอยู่ (กรองตาราง)
   const [typeFilter, setTypeFilter] = useState("");    // ประเภทงาน (Tab) — "" = ทั้งหมด
@@ -477,9 +479,9 @@ export function OverviewDashboard({
       <OverviewCustomizer open={customizing} theme={theme} canUpload={canUpload} isAdmin={isAdmin} onChange={onThemeChange} onClose={() => setCustomizing(false)} />
       <MetricCardsManager open={metricsOpen} metrics={metrics ?? []} onChange={onMetricsChange} onClose={() => setMetricsOpen(false)}
         typeOptions={typeOptions} brands={brands} statusOptions={statusOptions} priorityOptions={priorityOptions} />
-      {/* ส่ง GIF จิ้มเพื่อน — หน้าต่างส่ง + ตัว GIF ที่คนอื่นส่งมาวิ่งบนจอ */}
-      <GifPokeModal open={gifOpen} onClose={() => setGifOpen(false)} />
-      <GifPokeLayer userId={userId ?? null} />
+      {/* ส่ง GIF จิ้มเพื่อน — หน้าต่างส่ง + ตัว GIF ที่คนอื่นส่งมาวิ่งบนจอ (คลิกตอบกลับ = เติมผู้รับ) */}
+      <GifPokeModal open={gifOpen} onClose={() => { setGifOpen(false); setGifReplyTo(null); }} isAdmin={isAdmin} prefillRecipient={gifReplyTo} />
+      <GifPokeLayer userId={userId ?? null} onReply={(p) => { setGifReplyTo({ id: p.from_user_id, code: null, name: p.from_name ?? "" }); setGifOpen(true); }} />
       </div>
     </div>
   );

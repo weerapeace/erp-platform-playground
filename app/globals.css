@@ -54,6 +54,10 @@ body {
 @keyframes ovBadgePulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); } }
 .ov-badge-pulse { animation: ovBadgePulse 1.4s ease-in-out infinite; }
 
+/* ---- GIF จิ้มเพื่อน — เด้งลงมาตอนมาใหม่ ---- */
+@keyframes gifPokeDrop { 0% { opacity: 0; transform: translateY(-46px) scale(.5) rotate(-8deg); } 55% { opacity: 1; transform: translateY(8px) scale(1.12) rotate(3deg); } 78% { transform: translateY(-3px) scale(.97) rotate(-2deg); } 100% { transform: translateY(0) scale(1) rotate(0); } }
+.gif-poke-drop { animation: gifPokeDrop .7s cubic-bezier(.22,1,.36,1) both; }
+
 /* ---- Focus ring มาตรฐาน ---- */
 :focus-visible {
   outline: 2px solid #3b82f6;

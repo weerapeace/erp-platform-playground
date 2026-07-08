@@ -27,7 +27,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!me) return NextResponse.json({ error: "ต้องเข้าสู่ระบบ", data: [] }, { status: 401 });
   const admin = supabaseAdmin();
   const { data } = await admin.from("erp_gif_pokes")
-    .select("id, from_name, from_avatar, gif_url, gif_key, message, created_at")
+    .select("id, from_user_id, from_name, from_avatar, gif_url, gif_key, message, created_at")
     .eq("to_user_id", me.id).is("dismissed_at", null)
     .order("created_at", { ascending: true }).limit(50);
   return NextResponse.json({ data: data ?? [], error: null });
@@ -89,7 +89,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: `ส่งหาคนเหล่านี้บ่อยเกินไปแล้ว (เกิน ${HOURLY_PER_RECIPIENT} ครั้ง/ชม.)`, skipped }, { status: 429 });
   }
 
-  const rows = targets.map((to) => ({
+  // เคารพการปิดรับของผู้รับ (mute ทั้งหมด / บล็อกผู้ส่งคนนี้) — เก็บใน user_ui_prefs key=gif_poke_mute
+  type MuteVal = { muted_all?: boolean; blocked?: (string | { id?: string })[] };
+  const { data: mutes } = await admin.from("user_ui_prefs").select("user_id, value").eq("key", "gif_poke_mute").in("user_id", targets);
+  const muteMap = new Map<string, MuteVal>();
+  for (const m of (mutes ?? []) as { user_id: string; value: MuteVal | null }[]) muteMap.set(m.user_id, m.value ?? {});
+  const allowed = targets.filter((to) => {
+    const mv = muteMap.get(to); if (!mv) return true;
+    if (mv.muted_all) return false;
+    if (Array.isArray(mv.blocked) && mv.blocked.some((b) => (typeof b === "string" ? b : b?.id) === me.id)) return false;
+    return true;
+  });
+  const muted = targets.length - allowed.length;
+  if (!allowed.length) return NextResponse.json({ sent: 0, skipped: skipped + muted, error: null });
+
+  const rows = allowed.map((to) => ({
     from_user_id: me.id, from_name: fromName, from_avatar: fromAvatar,
     to_user_id: to, gif_url: gifUrl || null, gif_key: gifKey || null, message: message || null,
   }));
@@ -98,9 +112,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // แจ้งเตือนเข้ากระดิ่ง (ของกลาง notify) — best-effort
   const title = `${fromName || "เพื่อนร่วมงาน"} ส่ง GIF หาคุณ 🎁`;
-  await Promise.all(targets.map((to) => notify(admin, { userId: to, eventType: "gif_poke", title, body: message || null, linkUrl: "/tasks", priority: "low" })));
+  await Promise.all(allowed.map((to) => notify(admin, { userId: to, eventType: "gif_poke", title, body: message || null, linkUrl: "/tasks", priority: "low" })));
 
-  return NextResponse.json({ sent: targets.length, skipped, error: null });
+  return NextResponse.json({ sent: allowed.length, skipped: skipped + muted, error: null });
 }
 
 // ── PATCH: กดปิดตัวที่วิ่งอยู่ ──

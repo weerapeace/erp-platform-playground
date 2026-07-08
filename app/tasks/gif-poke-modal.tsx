@@ -13,6 +13,8 @@ import type { UserPickerValue } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
+import { GifPokeSettings } from "./gif-poke-settings";
+import { GifPokeAdmin } from "./gif-poke-admin";
 
 type GifItem = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null };
 
@@ -20,10 +22,12 @@ type GifItem = { id: string; gif_url: string | null; gif_key: string | null; tit
 export const gifItemSrc = (g: { gif_url?: string | null; gif_key?: string | null }): string | null =>
   g.gif_url || (g.gif_key ? r2ImageUrl(g.gif_key) : null);
 
-export function GifPokeModal({ open, onClose, onSent }: {
+export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient }: {
   open: boolean;
   onClose: () => void;
   onSent?: () => void;
+  isAdmin?: boolean;
+  prefillRecipient?: UserPickerValue | null;   // เปิดจากปุ่ม "ตอบกลับ" → เติมผู้รับให้เลย
 }) {
   const t = useT();
   const [recipients, setRecipients] = useState<UserPickerValue[]>([]);
@@ -36,6 +40,8 @@ export function GifPokeModal({ open, onClose, onSent }: {
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState("");
   const [okMsg, setOkMsg] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const loadLib = useCallback(() => {
@@ -51,6 +57,12 @@ export function GifPokeModal({ open, onClose, onSent }: {
     if (lib.length === 0) loadLib();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // เปิดจากปุ่ม "ตอบกลับ" → เติมผู้รับเป็นคนที่ส่งมา
+  useEffect(() => {
+    if (open && prefillRecipient) setRecipients([{ id: prefillRecipient.id, code: null, name: prefillRecipient.name }]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prefillRecipient?.id]);
 
   const cats = Array.from(new Set(lib.map((g) => g.category).filter(Boolean))) as string[];
   const shown = cat ? lib.filter((g) => g.category === cat) : lib;
@@ -93,6 +105,7 @@ export function GifPokeModal({ open, onClose, onSent }: {
   };
 
   return (
+    <>
     <ERPModal open={open} onClose={onClose} size="lg" storageKey="gif-poke"
       title={t("🎁 ส่ง GIF หาเพื่อน", "🎁 Send a GIF")}
       description={t("เลือกเพื่อน เลือก GIF ใส่ข้อความ แล้วส่งให้เขาเห็นวิ่งบนจอ", "Pick people, a GIF, a message — it'll roam their screen")}
@@ -107,6 +120,12 @@ export function GifPokeModal({ open, onClose, onSent }: {
         </>
       }>
       <div className="space-y-4">
+        {/* แถบเครื่องมือ: ตั้งค่าการรับ (ทุกคน) + จัดการคลัง (แอดมิน) */}
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={() => setSettingsOpen(true)} className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">{t("⚙ ตั้งค่าการรับ", "⚙ Settings")}</button>
+          {isAdmin && <button onClick={() => setAdminOpen(true)} className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">{t("🗂 จัดการคลัง", "🗂 Manage")}</button>}
+        </div>
+
         {/* ผู้รับ */}
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">{t("ส่งถึงใคร", "To")}</label>
@@ -182,5 +201,8 @@ export function GifPokeModal({ open, onClose, onSent }: {
         {err && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</p>}
       </div>
     </ERPModal>
+    <GifPokeSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    {isAdmin && <GifPokeAdmin open={adminOpen} onClose={() => setAdminOpen(false)} onChanged={loadLib} />}
+    </>
   );
 }
