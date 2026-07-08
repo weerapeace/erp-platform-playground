@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
 
   let q = admin.from("assets").select("*", { count: "exact" }).eq("status", status);
   if (source !== "all") q = q.eq("source", source);
-  if (artworkType) q = q.eq("artwork_type", artworkType);
+  if (artworkType) q = q.contains("artwork_types", [artworkType]);   // ชนิด m2m — เจอถ้ามีชนิดนี้อยู่ในลิสต์
   if (type) q = q.eq("asset_type", type);
   if (collectionId === "none") q = q.is("collection_id", null);
   if (collAssetIds) q = q.in("id", collAssetIds);
@@ -122,7 +122,11 @@ export async function POST(request: NextRequest) {
   const tagsRaw      = String(form.get("tags") ?? "").trim();
   const tagNames     = tagsRaw ? tagsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
   const source       = String(form.get("source") ?? "upload").trim() || "upload";
-  const artworkType  = form.get("artwork_type") ? String(form.get("artwork_type")) : null;
+  // ชนิด: รับหลายอัน (artwork_types = JSON array) หรืออันเดียว (artwork_type เดิม) — artwork_type = ตัวแรก (backward-compat)
+  const artworkTypesRaw = normalizeCodes(safeJson(String(form.get("artwork_types") ?? "")));
+  const singleType   = form.get("artwork_type") ? String(form.get("artwork_type")).trim() : "";
+  const artworkTypes = artworkTypesRaw.length ? artworkTypesRaw : (singleType ? [singleType] : []);
+  const artworkType  = artworkTypes[0] ?? null;
   const masterPath   = form.get("master_path") ? String(form.get("master_path")) : null;
   const masterUrl    = form.get("master_url")  ? String(form.get("master_url"))  : null;
   const keywords     = form.get("keywords")    ? String(form.get("keywords"))    : null;
@@ -163,7 +167,7 @@ export async function POST(request: NextRequest) {
     width:  Number.isFinite(widthRaw)  ? widthRaw  : null,
     height: Number.isFinite(heightRaw) ? heightRaw : null,
     checksum, collection_id: collectionId, uploaded_by: actor, status: "active",
-    source, artwork_type: artworkType, master_path: masterPath, master_url: masterUrl, keywords,
+    source, artwork_type: artworkType, artwork_types: artworkTypes, master_path: masterPath, master_url: masterUrl, keywords,
     sizes, parent_sku_codes: parentCodes,
   }).select("*").single();
   if (error || !ins)

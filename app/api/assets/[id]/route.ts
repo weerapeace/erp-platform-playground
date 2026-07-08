@@ -43,7 +43,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     title?: string; description?: string | null; collection_id?: string | null;
     collection_ids?: string[]; tags?: string[]; restore?: boolean;
     master_path?: string | null; master_url?: string | null; artwork_type?: string | null; keywords?: string | null;
-    sizes?: AssetSize[]; parent_sku_codes?: string[];
+    sizes?: AssetSize[]; parent_sku_codes?: string[]; artwork_types?: string[];
   };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -64,7 +64,14 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   if (body.collection_id !== undefined) patch.collection_id = body.collection_id || null;
   if (body.master_path !== undefined)   patch.master_path = body.master_path || null;
   if (body.master_url !== undefined)    patch.master_url = body.master_url || null;
-  if (body.artwork_type !== undefined)  patch.artwork_type = body.artwork_type || null;
+  if (body.artwork_types !== undefined) {   // ชนิด m2m — เก็บทั้งลิสต์ + sync artwork_type = ตัวแรก
+    const types = normalizeCodes(body.artwork_types);
+    patch.artwork_types = types;
+    patch.artwork_type = types[0] ?? null;
+  } else if (body.artwork_type !== undefined) {
+    patch.artwork_type = body.artwork_type || null;
+    patch.artwork_types = body.artwork_type ? [body.artwork_type] : [];
+  }
   if (body.keywords !== undefined)      patch.keywords = body.keywords || null;
   if (body.sizes !== undefined)            patch.sizes = normalizeSizes(body.sizes);
   if (body.parent_sku_codes !== undefined) patch.parent_sku_codes = normalizeCodes(body.parent_sku_codes);

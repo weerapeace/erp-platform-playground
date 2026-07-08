@@ -575,7 +575,8 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
   const [collectionIds, setCollectionIds] = useState<string[]>([]);
   const [masterPath, setMasterPath] = useState("");
   const [masterUrl, setMasterUrl] = useState("");
-  const [artType, setArtType] = useState("");
+  const [artTypesSel, setArtTypesSel] = useState<string[]>([]);          // ชนิดหลายอัน (m2m)
+  const [artTypeList, setArtTypeList] = useState<LookupItem[]>(artTypes);
   const [sizes, setSizes] = useState<AssetSize[]>([]);
   const [parentCodes, setParentCodes] = useState<string[]>([]);
   const [rule] = useArtworkPathRule();
@@ -591,18 +592,21 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
       if (j.error) throw new Error(j.error);
       const det = j.data as AssetDetail;
       setD(det); setTitle(det.title); setTags(det.tags ?? []); setCollectionIds(det.collection_ids ?? []);
-      setMasterPath(det.master_path ?? ""); setMasterUrl(det.master_url ?? ""); setArtType(det.artwork_type ?? ""); setKeywords(det.keywords ?? "");
+      setMasterPath(det.master_path ?? ""); setMasterUrl(det.master_url ?? ""); setKeywords(det.keywords ?? "");
+      setArtTypesSel(det.artwork_types?.length ? det.artwork_types : (det.artwork_type ? [det.artwork_type] : []));
       setSizes(det.sizes ?? []); setParentCodes(det.parent_sku_codes ?? []);
     } catch (e) { toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ"); onClose(); }
   }, [id, toast, onClose]);
   useEffect(() => { void loadDetail(); }, [loadDetail]);
+  // รวมชนิดจาก prop เข้า list (เผื่อ lookup โหลดหลัง mount) โดยไม่ทับตัวที่เพิ่งเพิ่ม inline
+  useEffect(() => { setArtTypeList((cur) => { const s = new Set(cur.map((t) => t.name)); return [...cur, ...artTypes.filter((t) => !s.has(t.name))]; }); }, [artTypes]);
 
   const save = async () => {
     setSaving(true);
     try {
       const res = await apiFetch(`/api/assets/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, tags, collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_type: artType, keywords, sizes, parent_sku_codes: parentCodes }),
+        body: JSON.stringify({ title, tags, collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_types: artTypesSel, keywords, sizes, parent_sku_codes: parentCodes }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกแล้ว"); await loadDetail(); onChanged();
@@ -713,13 +717,9 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
             </label>
 
             {d.source === "artwork" && (
-              <label className="block text-[12px] text-slate-500 mt-2">ชนิด artwork
-                <select value={artType} onChange={(e) => setArtType(e.target.value)} disabled={trashed}
-                  className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
-                  {artType && !artTypes.some((t) => t.name === artType) && <option value={artType}>{artType}</option>}
-                  {artTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
-                </select>
-              </label>
+              <div className="block text-[12px] text-slate-500 mt-2">ชนิด artwork <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน</span>
+                <div className="mt-1"><ArtTypeMultiSelect value={artTypesSel} types={artTypeList} onChange={setArtTypesSel} onCreated={(t) => setArtTypeList((c) => [...c, t])} disabled={trashed} /></div>
+              </div>
             )}
 
             <div className="grid grid-cols-2 gap-3 mt-3">
@@ -923,7 +923,8 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [title, setTitle] = useState("");
-  const [artType, setArtType] = useState(artTypes[0]?.name ?? "");
+  const [artTypesSel, setArtTypesSel] = useState<string[]>([]);          // ชนิดหลายอัน (m2m)
+  const [artTypeList, setArtTypeList] = useState<LookupItem[]>(artTypes); // สำเนาไว้ต่อท้ายเมื่อเพิ่มชนิดใหม่ในฟอร์ม
   const [masterPath, setMasterPath] = useState("");
   const [masterUrl, setMasterUrl] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -959,7 +960,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
       const fd = new FormData();
       fd.append("file", upFile);
       fd.append("source", "artwork");
-      fd.append("artwork_type", artType);
+      if (artTypesSel.length) fd.append("artwork_types", JSON.stringify(artTypesSel));
       if (title.trim()) fd.append("title", title.trim());
       if (masterPath.trim()) fd.append("master_path", masterPath.trim());
       if (masterUrl.trim()) fd.append("master_url", masterUrl.trim());
@@ -1016,12 +1017,8 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
             <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น ลายดอกไม้ PIX32"
               className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
           <div className="grid grid-cols-2 gap-2">
-            <label className="text-[12px] text-slate-500">ชนิด
-              <select value={artType} onChange={(e) => setArtType(e.target.value)}
-                className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
-                {artType && !artTypes.some((t) => t.name === artType) && <option value={artType}>{artType}</option>}
-                {artTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
-              </select></label>
+            <div className="text-[12px] text-slate-500">ชนิด <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน</span>
+              <div className="mt-0.5"><ArtTypeMultiSelect value={artTypesSel} types={artTypeList} onChange={setArtTypesSel} onCreated={(t) => setArtTypeList((c) => [...c, t])} /></div></div>
             <div className="text-[12px] text-slate-500">Group Album <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน / สร้างใหม่ได้</span>
               <div className="mt-0.5"><CollectionMultiSelect value={collectionIds} collections={cols} onChange={setCollectionIds} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
           </div>
@@ -1161,6 +1158,62 @@ function CollectionMultiSelect({ value, collections, onChange, onCreated }: {
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── เลือกชนิด Artwork หลายอัน (m2m) + เพิ่มชนิดใหม่ inline (lookup กลาง) ──
+function ArtTypeMultiSelect({ value, types, onChange, onCreated, disabled }: {
+  value: string[]; types: LookupItem[]; onChange: (v: string[]) => void; onCreated: (t: LookupItem) => void; disabled?: boolean;
+}) {
+  const toast = useToast();
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const add = (name: string) => { const n = name.trim(); if (n && !value.includes(n)) onChange([...value, n]); };
+  const remaining = types.filter((t) => !value.includes(t.name));
+  const create = async () => {
+    const n = newName.trim(); if (!n) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch("/api/lookups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lookup_type: "artwork_type", name: n }) });
+      const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || "เพิ่มชนิดไม่สำเร็จ");
+      const item: LookupItem = j.data ? { id: String(j.data.id ?? n), name: String(j.data.name ?? n) } : { id: n, name: n };
+      onCreated(item); add(item.name); setNewName(""); setCreating(false);
+      toast.success(`เพิ่มชนิด "${n}" แล้ว`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มชนิดไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {value.map((n) => (
+          <span key={n} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-indigo-50 border border-indigo-200 text-indigo-700 rounded">
+            {n}{!disabled && <button type="button" onClick={() => onChange(value.filter((x) => x !== n))} className="text-indigo-300 hover:text-rose-500 leading-none">✕</button>}
+          </span>
+        ))}
+        {value.length === 0 && <span className="text-[11px] text-slate-400">— ไม่ระบุ —</span>}
+      </div>
+      {!disabled && <div className="flex items-center gap-1.5 mt-1">
+        <select value="" onChange={(e) => { add(e.target.value); e.target.value = ""; }}
+          className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white max-w-[150px]">
+          <option value="">＋ เลือกชนิด…</option>
+          {remaining.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+        </select>
+        {!creating ? (
+          <button type="button" onClick={() => setCreating(true)}
+            className="text-[11px] px-2 py-1 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50">＋ ชนิดใหม่</button>
+        ) : (
+          <span className="inline-flex items-center gap-1">
+            <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} disabled={busy}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void create(); } if (e.key === "Escape") { setCreating(false); setNewName(""); } }}
+              placeholder="ชื่อชนิดใหม่" className="h-8 w-28 px-2 text-[12px] border border-indigo-300 rounded-lg" />
+            <button type="button" onClick={() => void create()} disabled={busy}
+              className="text-[11px] px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">เพิ่ม</button>
+            <button type="button" onClick={() => { setCreating(false); setNewName(""); }} className="text-[11px] text-slate-400 hover:text-slate-600">ยกเลิก</button>
+          </span>
+        )}
+      </div>}
     </div>
   );
 }
