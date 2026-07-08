@@ -51,6 +51,7 @@ export type CreativeTask = {
   blocker_status: string | null; blocker_reason: string | null;
   is_active: boolean;
   created_by: string | null;
+  created_by_label?: string | null;   // ชื่อผู้สร้าง (resolve ในหน้ารายละเอียด)
   created_at: string; updated_at: string;
 };
 
@@ -617,6 +618,7 @@ export type TaskTemplate = {
   default_reviewer_id?: string | null; default_reviewer_label?: string | null; due_offset_days?: number | null;
   default_reviewer_ids?: string[]; default_reviewers?: { id: string; label: string }[];   // ผู้ตรวจหลายคน
   platforms: string[] | null; steps: TemplateStep[]; content_items?: TemplateContentItem[];
+  require_parent_sku?: boolean;   // บังคับระบุ Parent SKU ตอนสร้างงาน (เช่น เพิ่มสี/แก้สี)
 };
 export type RecurringRule = {
   id: string; name: string; template_id: string | null; template_label?: string | null;

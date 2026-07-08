@@ -13,7 +13,6 @@ import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { KanbanSettingsControls } from "./kanban-settings";
 import { useCreativeStatuses } from "./use-statuses";
-import { LineSettings } from "./line-settings";
 
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
@@ -230,7 +229,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
   const t = useT();
   const { statuses } = useCreativeStatuses();
   const [busy, setBusy] = useState<string | null>(null);
-  const [tab, setTab] = useState<"theme" | "hero" | "cards" | "line">("theme");   // แยกหมวดเป็นแท็บ
+  const [tab, setTab] = useState<"theme" | "hero" | "cards">("theme");   // แยกหมวดเป็นแท็บ (LINE ย้ายไปหน้าตั้งค่าแล้ว)
   const [err, setErr] = useState<string | null>(null);
   // ธีมที่ผู้ใช้บันทึกเอง (เก็บใน user_ui_prefs key=tasks_overview_themes)
   const [saved, setSaved] = useState<{ name: string; theme: OverviewTheme }[]>([]);
@@ -319,7 +318,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
 
       {/* ===== แท็บ ===== */}
       <div className="flex items-center gap-1 mb-4 border-b border-slate-200 overflow-x-auto">
-        {([["theme", t("🎨 ธีม & สี", "🎨 Theme & colors")], ["hero", t("👋 แถบทักทาย & PET", "👋 Banner & PET")], ["cards", t("🗂 การ์ด & มุมมอง", "🗂 Cards & views")], ...(isAdmin ? [["line", t("🔔 LINE", "🔔 LINE")] as const] : [])] as const).map(([k, label]) => (
+        {([["theme", t("🎨 ธีม & สี", "🎨 Theme & colors")], ["hero", t("👋 แถบทักทาย & PET", "👋 Banner & PET")], ["cards", t("🗂 การ์ด & มุมมอง", "🗂 Cards & views")]] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`shrink-0 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === k ? "border-violet-600 text-violet-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}>{label}</button>
         ))}
@@ -747,15 +746,6 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
           })}
         </div>
       </section>
-
-      {/* ===== แจ้งเตือน LINE (แอดมิน) ===== */}
-      {isAdmin && (
-        <section hidden={tab !== "line"}>
-          <div className="text-sm font-semibold text-slate-700 mb-1">{t("แจ้งเตือนงานเข้า LINE", "LINE task notifications")}</div>
-          <p className="text-[11px] text-slate-400 mb-3">{t("เตือนเมื่อมีงานใหม่ + งานย่อยส่งมารอตรวจ (ส่งเข้ากลุ่ม LINE) · เป็นการตั้งค่าของทั้งทีม", "Alerts on new tasks + review submissions (to a LINE group) · team-wide setting")}</p>
-          <LineSettings />
-        </section>
-      )}
     </ERPModal>
   );
 }

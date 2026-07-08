@@ -250,6 +250,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               onBlur={async (e) => { const v = e.target.value.trim(); if (v && v !== d.title) { try { await updateTask(d.id, { title: v }); await refresh(); } catch (err) { pushToast("error", (err as Error).message); } } }}
               className="text-base font-semibold text-slate-900 w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-violet-400 focus:outline-none" />
             <span className="font-mono text-xs text-slate-500">{d.task_no}</span>
+            {d.created_by_label && <span className="text-xs text-slate-400 ml-2">· {t("สร้างโดย", "by")} {d.created_by_label}</span>}
           </div>
           <div className="flex items-center gap-1">
             <DrawerThemeButton theme={dth} update={dthUpdate} sections={DRAWER_SECTIONS} />

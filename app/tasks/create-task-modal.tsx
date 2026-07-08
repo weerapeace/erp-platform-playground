@@ -170,9 +170,12 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const setOrderDate = (v: string) => { const autoDue = !!v && (tplDueOffset != null || !touched.has("due_date")); updateForm({ order_date: v, ...(autoDue ? { due_date: addDaysStr(v, tplDueOffset ?? 3) } : {}) }); };
   // เทมเพลตของแบรนด์ที่เลือก (+ เทมเพลตทั่วไปที่ไม่ผูกแบรนด์)
   const brandTemplates = templates.filter((tp) => form.brand_id ? (tp.brand_id === form.brand_id || !tp.brand_id) : !tp.brand_id);
+  // เทมเพลตที่เลือกบังคับระบุ Parent SKU ไหม (เช่น เพิ่มสี/แก้สี)
+  const requireParent = !!templates.find((x) => x.id === tplId)?.require_parent_sku;
 
   const save = async () => {
     if (!form.title.trim()) { setStep(2); setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; }
+    if (requireParent && form.parents.length === 0) { setStep(4); setFormErr(t("งานนี้ต้องระบุ Parent SKU (ตระกูลสินค้า) อย่างน้อย 1 รายการ","This task requires at least one Parent SKU")); return; }
     setSaving(true); setFormErr(null);
     const subtasks = subs.filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next, type: s.type, config: s.config }));
     try {
@@ -362,11 +365,14 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
             <SkuPicker value={null} onChange={(v) => { if (v && !form.products.some((p) => p.id === v.id)) updateForm({ products: [...form.products, v] }); }} />
             {form.products.length > 0 && <div className="flex flex-wrap gap-1.5 mt-1.5">{form.products.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono text-slate-500">{p.code}</span>{p.name}<button onClick={() => updateForm({ products: form.products.filter((x) => x.id !== p.id) })} className="text-slate-400 hover:text-red-500">✕</button></span>)}</div>}
           </ERPFormField>
-          <ERPFormField label={`Parent SKU (${t("ตระกูลสินค้า","product family")})`}>
-            <ParentSkuPicker value={null} onChange={(v) => { if (v && !form.parents.some((p) => p.id === v.id)) updateForm({ parents: [...form.parents, v] }); }} />
+          <ERPFormField label={`Parent SKU (${t("ตระกูลสินค้า","product family")})`} required={requireParent}>
+            <div className={requireParent && form.parents.length === 0 ? "rounded-lg ring-1 ring-orange-300" : ""}>
+              <ParentSkuPicker value={null} onChange={(v) => { if (v && !form.parents.some((p) => p.id === v.id)) updateForm({ parents: [...form.parents, v] }); }} />
+            </div>
+            {requireParent && <p className="text-[11px] text-orange-600 mt-1">{t("งานนี้ (เช่น เพิ่มสี/แก้สี) ต้องระบุ Parent SKU","This task type requires a Parent SKU")}</p>}
             {form.parents.length > 0 && <div className="flex flex-wrap gap-1.5 mt-1.5">{form.parents.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono text-slate-500">{p.code}</span>{p.name}<button onClick={() => updateForm({ parents: form.parents.filter((x) => x.id !== p.id) })} className="text-slate-400 hover:text-red-500">✕</button></span>)}</div>}
           </ERPFormField>
-          <div className="col-span-2 text-xs text-slate-400">{t("ขั้นนี้ไม่บังคับ — เลือกได้หลายรายการ (เลือกแล้วเลือกต่อได้) กด สร้างงาน ได้เลยถ้าไม่ต้องผูกสินค้า","This step is optional — select as many as needed. Click Create task to skip linking products.")}</div>
+          <div className="col-span-2 text-xs text-slate-400">{requireParent ? t("Parent SKU จำเป็นสำหรับงานนี้ — สินค้า/SKU ยังไม่บังคับ","Parent SKU is required for this task — Product/SKU still optional") : t("ขั้นนี้ไม่บังคับ — เลือกได้หลายรายการ (เลือกแล้วเลือกต่อได้) กด สร้างงาน ได้เลยถ้าไม่ต้องผูกสินค้า","This step is optional — select as many as needed. Click Create task to skip linking products.")}</div>
         </ERPFormSection>
       )}
     </ERPModal>

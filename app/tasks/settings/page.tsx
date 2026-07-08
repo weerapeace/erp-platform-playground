@@ -18,6 +18,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { loadMySubView, saveMySubView, DEFAULT_MYSUB_VIEW, type MySubView } from "../my-subtasks-view";
 import { getParentSkuFieldOptions, getSubmitRequiredFields, saveSubmitRequiredFields, listTeams, createTeam, updateTeam, deleteTeam, type Team } from "../data";
 import { SubtaskTypeManager } from "../subtask-type-manager";
+import { LineSettings } from "../line-settings";
 import { MultiUserPicker } from "../multi-user-picker";
 import type { UserPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
@@ -26,8 +27,8 @@ import { tr } from "@/lib/lang";
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
 type MatrixRow = { role_key: string; permission_key: string };
-type Tab = "perm" | "task_type" | "platform" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit";
-const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "subtype", "status", "transition", "team", "mysub", "submit"];
+type Tab = "perm" | "task_type" | "platform" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "line";
+const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "subtype", "status", "transition", "team", "mysub", "submit", "line"];
 
 export default function TaskSettingsPage() {
   const t = useT();
@@ -62,6 +63,7 @@ export default function TaskSettingsPage() {
             <TabBtn active={tab === "team"} onClick={() => setTab("team")}>👥 {t("ทีม", "Teams")}</TabBtn>
             <TabBtn active={tab === "mysub"} onClick={() => setTab("mysub")}>🧩 {t("งานย่อยของฉัน", "My subtasks")}</TabBtn>
             <TabBtn active={tab === "submit"} onClick={() => setTab("submit")}>📤 {t("ส่งงาน", "Submit")}</TabBtn>
+            <TabBtn active={tab === "line"} onClick={() => setTab("line")}>🔔 {t("LINE", "LINE")}</TabBtn>
           </div>
         )}
       </div>
@@ -82,6 +84,15 @@ export default function TaskSettingsPage() {
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
               <div className="px-5 py-4 border-b border-slate-100"><h2 className="font-semibold text-slate-800">🧩 {t("ชนิดงานย่อย", "Subtask types")}</h2></div>
               <div className="p-5"><SubtaskTypeManager showToast={showToast} /></div>
+            </div>
+          )
+          : tab === "line" ? (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
+              <div className="px-5 py-4 border-b border-slate-100">
+                <h2 className="font-semibold text-slate-800">🔔 {t("แจ้งเตือนงานเข้า LINE", "LINE task notifications")}</h2>
+                <p className="text-xs text-slate-400 mt-0.5">{t("เตือนเมื่อมีงานใหม่ + งานย่อยส่งมารอตรวจ (ส่งเข้ากลุ่ม LINE) · เป็นการตั้งค่าของทั้งทีม", "Alerts on new tasks + review submissions (to a LINE group) · team-wide setting")}</p>
+              </div>
+              <div className="p-5"><LineSettings /></div>
             </div>
           )
           : <OptionsManager kind={tab} title={tab === "task_type" ? t("ประเภทงาน", "Task Types") : t("แพลตฟอร์ม", "Platforms")} showToast={showToast} />}

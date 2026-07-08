@@ -15,7 +15,7 @@ import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { SELECT, flattenTask } from "../shared";
 import { canTransition as canTransitionDB, getStatusMeta } from "@/lib/creative-statuses-server";
-import { notify, employeeLabelMap, employeeAuthId, subtaskAssigneesMap, setTaskAssignees, taskAssigneesMap, setTaskReviewers, taskReviewersMap } from "@/lib/creative-tasks-server";
+import { notify, employeeLabelMap, employeeAuthId, subtaskAssigneesMap, setTaskAssignees, taskAssigneesMap, setTaskReviewers, taskReviewersMap, userLabelMap } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -58,15 +58,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const subRows = (subtasks ?? []) as Record<string, unknown>[];
   // empMap (จาก row) กับ aMap (จาก subRows) อิสระต่อกัน → ยิงพร้อมกัน ลด round-trip ตอนเปิดงาน
-  const [empMap, aMap, taMap, trMap] = await Promise.all([
+  const [empMap, aMap, taMap, trMap, cbMap] = await Promise.all([
     employeeLabelMap(admin, [row.assignee_id as string, row.reviewer_id as string, row.approver_id as string, row.assigned_by_id as string]),
     subtaskAssigneesMap(admin, subRows.map((s) => String(s.id))),
     taskAssigneesMap(admin, [id]),
     taskReviewersMap(admin, [id]),
+    userLabelMap(admin, [row.created_by as string]),   // ชื่อผู้สร้าง (created_by = user_profiles.id)
   ]);
   const task = flattenTask(row, empMap);
   task.assignees = taMap.get(id) ?? [];   // ผู้รับผิดชอบหลายคน (ตั้งเอง ∪ คนเริ่มงานย่อย)
   task.reviewers = trMap.get(id) ?? [];   // ผู้ตรวจหลายคน
+  task.created_by_label = row.created_by ? (cbMap.get(String(row.created_by)) ?? null) : null;   // ชื่อผู้สร้าง
 
   // แยกไฟล์แนบ: ระดับงาน (subtask_id null) vs ระดับ subtask
   const allAtt = (attachments ?? []) as Record<string, unknown>[];

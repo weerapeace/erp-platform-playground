@@ -50,9 +50,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const ctype = request.headers.get("content-type") ?? "";
 
-  // เพิ่มลิงก์ GIF ภายนอก (แอดมิน) — JSON
+  // เพิ่มลิงก์ GIF ภายนอก (ทุกคนที่ล็อกอิน — เหมือนอัปโหลดไฟล์) — JSON
   if (ctype.includes("application/json")) {
-    if (!(await isManager(admin, me.id))) return NextResponse.json({ error: "เฉพาะแอดมิน" }, { status: 403 });
     let body: { gif_url?: unknown; title?: unknown; category?: unknown; default_message?: unknown };
     try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
     const url = String(body.gif_url ?? "").trim();

@@ -43,6 +43,8 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
   const [okMsg, setOkMsg] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");   // เพิ่ม GIF ด้วยลิงก์
+  const [addingLink, setAddingLink] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const loadLib = useCallback(() => {
@@ -81,6 +83,22 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
       setSelId(item.id); setCat("");
     } catch { setErr(t("อัปโหลดไม่สำเร็จ", "Upload failed")); }
     finally { setUploading(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+
+  // เพิ่ม GIF ด้วยลิงก์ (เข้าคลังรวม เหมือนอัปโหลดไฟล์)
+  const addLink = async () => {
+    const url = linkUrl.trim();
+    if (!/^https?:\/\//i.test(url)) { setErr(t("ต้องเป็นลิงก์ http(s) ที่ลงท้ายด้วยรูป/GIF", "Must be an http(s) image/GIF link")); return; }
+    setErr(""); setAddingLink(true);
+    try {
+      const res = await apiFetch("/api/gif-poke/library", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gif_url: url, category: "อัปโหลด" }) });
+      const j = await res.json();
+      if (!res.ok || j.error) { setErr(j.error || t("เพิ่มลิงก์ไม่สำเร็จ", "Add link failed")); return; }
+      const item = j.data as GifItem;
+      setLib((prev) => [item, ...prev]);
+      setSelId(item.id); setCat(""); setLinkUrl("");
+    } catch { setErr(t("เพิ่มลิงก์ไม่สำเร็จ", "Add link failed")); }
+    finally { setAddingLink(false); }
   };
 
   // เลือก GIF → เติมข้อความ default ให้ (ถ้าผู้ใช้ยังไม่พิมพ์เอง)
@@ -151,6 +169,16 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
                 {uploading ? t("กำลังอัปโหลด...", "Uploading...") : t("⬆ อัปโหลด GIF เอง", "⬆ Upload")}
               </button>
             </div>
+          </div>
+
+          {/* หรือวางลิงก์ GIF (เพิ่มเข้าคลังรวม) */}
+          <div className="flex items-center gap-1.5 mb-2">
+            <input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void addLink(); } }}
+              placeholder={t("หรือวางลิงก์ GIF (https://...gif)", "or paste a GIF link (https://...gif)")}
+              className="flex-1 h-7 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300" />
+            <button onClick={() => void addLink()} disabled={addingLink || !linkUrl.trim()}
+              className="h-7 px-2.5 text-xs font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-lg disabled:opacity-50">{addingLink ? "..." : t("＋ เพิ่มลิงก์", "＋ Add link")}</button>
           </div>
 
           {/* ตัวกรองหมวด */}

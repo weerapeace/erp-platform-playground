@@ -74,7 +74,7 @@ export default function TemplatesPage() {
 // ============================================================
 // Templates tab
 // ============================================================
-const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[], due_offset_days: "" };
+const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[], due_offset_days: "", require_parent_sku: false };
 
 function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) => void }) {
   const t = useT();
@@ -109,7 +109,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const setContentD = (c: TemplateContentItem[]) => { setContentItems(c); setDirty(true); };
 
   const openNew = () => { setEditId(null); setForm(EMPTY_TPL); setSteps([]); setContentItems([]); setReviewers([]); setDirty(false); setOpen(true); };
-  const openEdit = (tpl: TaskTemplate) => { setEditId(tpl.id); setForm({ name: tpl.name, task_type: tpl.task_type ?? "photo_shoot", default_priority: tpl.default_priority, brand_id: tpl.brand_id ?? "", description: tpl.description ?? "", platforms: tpl.platforms ?? [], due_offset_days: tpl.due_offset_days != null ? String(tpl.due_offset_days) : "" }); setSteps((Array.isArray(tpl.steps) ? tpl.steps : []).map(toEditStep)); setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []); setReviewers((tpl.default_reviewers && tpl.default_reviewers.length ? tpl.default_reviewers.map((r) => ({ id: r.id, name: r.label } as UserPickerValue)) : (tpl.default_reviewer_id ? [{ id: tpl.default_reviewer_id, name: tpl.default_reviewer_label ?? "" } as UserPickerValue] : []))); setDirty(false); setOpen(true); };
+  const openEdit = (tpl: TaskTemplate) => { setEditId(tpl.id); setForm({ name: tpl.name, task_type: tpl.task_type ?? "photo_shoot", default_priority: tpl.default_priority, brand_id: tpl.brand_id ?? "", description: tpl.description ?? "", platforms: tpl.platforms ?? [], due_offset_days: tpl.due_offset_days != null ? String(tpl.due_offset_days) : "", require_parent_sku: !!tpl.require_parent_sku }); setSteps((Array.isArray(tpl.steps) ? tpl.steps : []).map(toEditStep)); setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []); setReviewers((tpl.default_reviewers && tpl.default_reviewers.length ? tpl.default_reviewers.map((r) => ({ id: r.id, name: r.label } as UserPickerValue)) : (tpl.default_reviewer_id ? [{ id: tpl.default_reviewer_id, name: tpl.default_reviewer_label ?? "" } as UserPickerValue] : []))); setDirty(false); setOpen(true); };
   const togglePlat = (v: string) => setFormD((f) => ({ ...f, platforms: f.platforms.includes(v) ? f.platforms.filter((x) => x !== v) : [...f.platforms, v] }));
 
   // EditStep → body step (type-driven)
@@ -118,7 +118,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const save = async () => {
     if (!form.name.trim()) { pushToast("error", t("กรุณาใส่ชื่อเทมเพลต", "Please enter a template name")); return; }
     setSaving(true);
-    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, default_reviewer_ids: reviewers.map((r) => r.id), due_offset_days: form.due_offset_days ? Number(form.due_offset_days) : null, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map(stepBody), content_items: contentItems.filter((c) => c.title.trim()) };
+    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, default_reviewer_ids: reviewers.map((r) => r.id), due_offset_days: form.due_offset_days ? Number(form.due_offset_days) : null, require_parent_sku: form.require_parent_sku, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map(stepBody), content_items: contentItems.filter((c) => c.title.trim()) };
     try { if (editId) await updateTemplate(editId, body); else await createTemplate(body); setOpen(false); setDirty(false); pushToast("success", t("บันทึกเทมเพลตแล้ว", "Template saved")); await load(); }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setSaving(false); }
@@ -196,6 +196,12 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
           <ERPFormField label={t("แพลตฟอร์ม", "Platforms")}><div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlat(p.value)} className={`px-2 py-0.5 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>)}</div></ERPFormField>
           <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เริ่มต้น)", "Reviewer/Approver (default)")} hint={t("งานที่สร้างจากแม่แบบนี้จะตั้งผู้ตรวจเหล่านี้ให้ (เลือกได้หลายคน)", "Tasks from this template get these reviewers (multiple)")}><MultiUserPicker value={reviewers} onChange={(v) => { setReviewers(v); setDirty(true); }} disableCreate /></ERPFormField>
           <ERPFormField label={t("กำหนดส่ง = +X วัน จากวันที่สั่ง", "Due = +X days from order date")} hint={t("เว้นว่าง = ไม่ตั้งกำหนดส่งอัตโนมัติ", "Blank = no auto due date")}><ERPInput type="number" value={form.due_offset_days} placeholder={t("เช่น 7", "e.g. 7")} onChange={(e) => setFormD((f) => ({ ...f, due_offset_days: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("บังคับระบุ Parent SKU", "Require Parent SKU")} hint={t("ติ๊กสำหรับงานที่ต้องผูกตระกูลสินค้า เช่น เพิ่มสี/แก้สี — พอสร้างงานจะบังคับกรอก Parent SKU", "For tasks that must link a product family (e.g. add/edit color) — Parent SKU becomes required when creating")}>
+            <label className="flex items-center gap-2 cursor-pointer h-8">
+              <input type="checkbox" checked={form.require_parent_sku} onChange={(e) => setFormD((f) => ({ ...f, require_parent_sku: e.target.checked }))} className="w-4 h-4 accent-violet-600" />
+              <span className="text-sm text-slate-600">{form.require_parent_sku ? t("ต้องระบุ Parent SKU", "Parent SKU required") : t("ไม่บังคับ", "Optional")}</span>
+            </label>
+          </ERPFormField>
           <ERPFormField label={t("คำอธิบาย", "Description")} span={2} hint={t("กด Enter เพื่อขึ้นหัวข้อย่อยถัดไป", "Press Enter for the next bullet")}><BulletTextarea value={form.description} onChange={(v) => setFormD((f) => ({ ...f, description: v }))} placeholder={t("อธิบายงาน / เช็คลิสต์ (ทำหัวข้อย่อยได้)", "Describe the work / checklist (supports bullets)")} /></ERPFormField>
         </ERPFormSection>
         <div className="mt-4 border-t border-slate-100 pt-4">

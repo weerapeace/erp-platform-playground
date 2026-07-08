@@ -11,7 +11,7 @@ import { friendlyDbError } from "../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["name", "task_type", "default_priority", "brand_id", "default_reviewer_id", "due_offset_days", "description", "platforms", "steps", "content_items"]);
+const EDITABLE = new Set(["name", "task_type", "default_priority", "brand_id", "default_reviewer_id", "due_offset_days", "description", "platforms", "steps", "content_items", "require_parent_sku"]);
 // ผู้ตรวจหลายคน: เก็บ default_reviewer_ids (array) + sync default_reviewer_id เดี่ยว = ตัวแรก
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
