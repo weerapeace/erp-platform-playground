@@ -47,6 +47,10 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
     () => (month === "all" ? rows : rows.filter((r) => r.month === month)),
     [rows, month],
   );
+  const totalTHB = useMemo(
+    () => filtered.reduce((s, r) => s + (r.amount != null ? toTHB(Number(r.amount), (r.currency || "THB") as Currency, settings) : 0), 0),
+    [filtered, settings],
+  );
 
   const handleDelete = useCallback(async (inv: InvoiceRow) => {
     if (!confirm(`ลบใบเสร็จ "${inv.file_name}"?`)) return;
@@ -96,8 +100,15 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
       cell: ({ row }) => { const inv = row.original; return inv.amount != null
         ? <span className="text-sm font-mono tabular-nums text-slate-700">{fmtCost(Number(inv.amount), (inv.currency || "THB") as Currency)}</span>
         : <span className="text-xs text-slate-300">—</span>; } },
-    { id: "amount_thb", header: "≈ ฿ (บาท)", size: 120,
+    { id: "amount_thb", header: "≈ ฿ (บาท)", size: 130,
       accessorFn: (r) => (r.amount != null ? toTHB(Number(r.amount), (r.currency || "THB") as Currency, settings) : 0),
+      meta: {
+        // รวมยอดท้ายตาราง (บาท) — รวมทุกแถวที่กรอง (function form เพราะเป็นคอลัมน์คำนวณ)
+        summary: (rs) => {
+          const t = (rs as InvoiceRow[]).reduce((a, r) => a + (r.amount != null ? toTHB(Number(r.amount), (r.currency || "THB") as Currency, settings) : 0), 0);
+          return <span className="text-indigo-700">{fmtBaht(t)}</span>;
+        },
+      },
       cell: ({ row }) => { const inv = row.original; if (inv.amount == null) return <span className="text-xs text-slate-300">—</span>;
         return <span className="text-sm font-mono tabular-nums text-indigo-600">{fmtBaht(toTHB(Number(inv.amount), (inv.currency || "THB") as Currency, settings), 2)}</span>; } },
     { id: "file_name", accessorKey: "file_name", header: "ไฟล์", size: 260,
@@ -139,7 +150,7 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
             ))}
           </select>
         </label>
-        <span className="text-xs text-slate-400">แสดง {filtered.length} ใบเสร็จ</span>
+        <span className="text-xs text-slate-400">แสดง {filtered.length} ใบเสร็จ · รวม ≈ <b className="text-indigo-600">{fmtBaht(totalTHB)}</b></span>
         {canEdit && unparsed > 0 && (
           <button onClick={runBackfill} disabled={backfilling}
             className="ml-auto h-9 px-3 text-xs font-medium border border-indigo-200 text-indigo-600 bg-white rounded-lg hover:bg-indigo-50 disabled:opacity-50"
