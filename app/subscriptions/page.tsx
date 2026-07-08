@@ -25,6 +25,7 @@ import { InvoicesModal } from "./invoices-modal";
 import { SubscriptionsCalendar } from "./subscriptions-calendar";
 import { WishlistView } from "./wishlist-view";
 import { AllInvoicesView } from "./all-invoices-view";
+import { DownloadInvoiceModal } from "./download-invoice-modal";
 
 type ViewMode = "list" | "inuse" | "calendar" | "wishlist" | "invoices";
 
@@ -57,6 +58,8 @@ export default function SubscriptionsPage() {
 
   // ใบเสร็จ
   const [invTarget, setInvTarget] = useState<Subscription | null>(null);
+  // ป๊อปอัปช่วยดาวน์โหลดใบเสร็จ (เปิดหน้าบิล + ดูเมล/โปรไฟล์)
+  const [dlTarget, setDlTarget] = useState<Subscription | null>(null);
 
   // อัตราแลกเปลี่ยน (แก้ได้)
   const [usdRate, setUsdRate] = useState(DEFAULT_SETTINGS.exchange_rate);
@@ -255,13 +258,10 @@ export default function SubscriptionsPage() {
       id: "actions", header: "", size: 160, enableSorting: false,
       cell: ({ row }) => {
         const s = row.original;
-        const invLink = s.invoice_url ? (/^https?:\/\//i.test(s.invoice_url) ? s.invoice_url : `https://${s.invoice_url}`) : null;
         return (
           <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
-            {invLink && (
-              <a href={invLink} target="_blank" rel="noopener noreferrer" title="ไปหน้าดาวน์โหลดใบเสร็จ (ลิงก์ร้าน)"
-                className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-indigo-200 text-xs text-indigo-600 hover:bg-indigo-50">⬇️</a>
-            )}
+            <button onClick={() => setDlTarget(s)} title="ดาวน์โหลดใบเสร็จ (เปิดหน้าบิล + ดูเมล/โปรไฟล์)"
+              className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-indigo-200 text-xs text-indigo-600 hover:bg-indigo-50">⬇️</button>
             <button onClick={() => openInvoices(s)} title="ใบเสร็จที่อัปโหลดไว้ (PDF)"
               className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs hover:bg-slate-50">🧾</button>
             {canEdit && (
@@ -393,6 +393,10 @@ export default function SubscriptionsPage() {
         onClose={() => !saving && setFormOpen(false)} onSave={handleSave} />
 
       <InvoicesModal sub={invTarget} canEdit={canEdit} onClose={() => setInvTarget(null)} />
+
+      <DownloadInvoiceModal sub={dlTarget} canEdit={canEdit}
+        onClose={() => setDlTarget(null)}
+        onEdit={(s) => { setDlTarget(null); openEdit(s); }} />
 
       <ConfirmDialog open={!!delTarget} variant="danger" loading={deleting}
         title="ลบรายการ subscription?"
