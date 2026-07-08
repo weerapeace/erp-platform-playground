@@ -357,21 +357,18 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
               {/* ℹ️ tooltip: ทุกตระกูลรหัสที่ SKU ในแท็กนี้ใช้จริง (hover ดู ไม่ใช่ปุ่มเลือก) */}
               {tagCodes.length > 0 && (
                 <div className="relative group flex items-center">
-                  <span className="h-9 px-2 inline-flex items-center text-sm border border-blue-200 bg-blue-50 text-blue-600 rounded-lg cursor-help whitespace-nowrap">ℹ️ รหัสที่ใช้ ({tagCodes.length})</span>
-                  <div className="invisible group-hover:visible absolute right-0 top-full z-30 mt-1 w-72 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-xl p-2 text-xs">
-                    <div className="text-slate-400 mb-1">ตระกูลรหัสที่ใช้กับประเภทนี้ (พิมพ์รหัสเอง)</div>
-                    <table className="w-full">
-                      <tbody>
-                        {tagCodes.map((c) => (
-                          <tr key={c.prefix} className="border-t border-slate-50">
-                            <td className="py-0.5 pr-2 font-mono text-slate-700">{c.prefix}</td>
-                            <td className="py-0.5 pr-2 text-slate-500 whitespace-nowrap">ล่าสุด {c.latest_code}</td>
-                            <td className="py-0.5 pr-2 text-emerald-600 whitespace-nowrap">→ {c.suggested}</td>
-                            <td className="py-0.5 text-right text-slate-300">{c.count}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <span className="h-9 px-2 inline-flex items-center gap-1 text-sm border border-blue-200 bg-blue-50 text-blue-600 rounded-lg cursor-pointer hover:bg-blue-100 whitespace-nowrap">🔢 ตระกูลรหัส ({tagCodes.length}) ▾</span>
+                  <div className="invisible group-hover:visible absolute right-0 top-full z-30 mt-1 w-80 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-xl p-1.5 text-xs">
+                    <div className="text-slate-400 px-1 pb-1">กดเลือกตระกูลรหัสที่จะใช้ (หรือพิมพ์เอง)</div>
+                    {tagCodes.map((c) => (
+                      <button key={c.prefix} type="button" onClick={() => setSV("code", c.suggested)}
+                        className="w-full flex items-center gap-2 px-1.5 py-1 rounded hover:bg-blue-50 text-left">
+                        <span className="font-mono text-slate-700 truncate">{c.prefix}</span>
+                        <span className="text-slate-400 whitespace-nowrap">ล่าสุด {c.latest_code}</span>
+                        <span className="text-emerald-600 font-medium whitespace-nowrap ml-auto">→ {c.suggested}</span>
+                        <span className="text-slate-300 shrink-0">{c.count}</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
