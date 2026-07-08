@@ -26,6 +26,8 @@ import { MetricCardsManager } from "./metric-cards-manager";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
 import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, fontStack, fontGoogleHref, OV_ZOOM, OV_DENSITY, type OverviewTheme, type CardKey, type CardTheme, type CardAlign } from "./overview-customizer";
 import { DashboardPet, type PetAlertKind } from "./dashboard-pet";
+import { GifPokeModal } from "./gif-poke-modal";
+import { GifPokeLayer } from "./gif-poke-layer";
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
@@ -71,6 +73,7 @@ export function OverviewDashboard({
 }) {
   const t = useT();
   const [customizing, setCustomizing] = useState(false);
+  const [gifOpen, setGifOpen] = useState(false);   // หน้าต่างส่ง GIF จิ้มเพื่อน
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [activeMetric, setActiveMetric] = useState<string | null>(null);   // การ์ดเมตริกที่กดอยู่ (กรองตาราง)
   const [typeFilter, setTypeFilter] = useState("");    // ประเภทงาน (Tab) — "" = ทั้งหมด
@@ -230,6 +233,8 @@ export function OverviewDashboard({
           <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
             <div className="min-w-0">{viewSwitcher}</div>
             <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <button onClick={() => setGifOpen(true)} title={t("ส่ง GIF จิ้มเพื่อน", "Send a GIF to a colleague")}
+                className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">🎁 {t("ส่ง GIF", "Send GIF")}</button>
               <button onClick={() => setCustomizing(true)} title={t("แต่งหน้านี้ของฉัน", "Customize my overview")}
                 className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">🎨 {t("แต่งหน้า", "Customize")}</button>
               {onQuickCreate && <button onClick={onQuickCreate} title={t("เพิ่มงานเร็ว ๆ", "Quick add a task")}
@@ -472,6 +477,9 @@ export function OverviewDashboard({
       <OverviewCustomizer open={customizing} theme={theme} canUpload={canUpload} isAdmin={isAdmin} onChange={onThemeChange} onClose={() => setCustomizing(false)} />
       <MetricCardsManager open={metricsOpen} metrics={metrics ?? []} onChange={onMetricsChange} onClose={() => setMetricsOpen(false)}
         typeOptions={typeOptions} brands={brands} statusOptions={statusOptions} priorityOptions={priorityOptions} />
+      {/* ส่ง GIF จิ้มเพื่อน — หน้าต่างส่ง + ตัว GIF ที่คนอื่นส่งมาวิ่งบนจอ */}
+      <GifPokeModal open={gifOpen} onClose={() => setGifOpen(false)} />
+      <GifPokeLayer userId={userId ?? null} />
       </div>
     </div>
   );
