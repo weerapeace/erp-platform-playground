@@ -10,8 +10,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
+import { ConfirmDialog } from "@/components/modal";
+import { useToast } from "@/components/toast";
 
-type PrefixDefault = { name: string; uom_id: string | null; uom_label: string };
+type PrefixDefault = { name: string; uom_id: string | null; uom_label: string; hidden?: boolean };
 type PrefixRow = {
   id: string; name: string; code_prefix: string; group_name: string | null;
   default_name: string; default_uom_id: string | null; default_uom_label: string;
@@ -28,6 +30,10 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
   const [expanded, setExpanded] = useState<string | null>(null);          // แท็กที่กางดูรายตระกูลรหัส
   const [codesCache, setCodesCache] = useState<Record<string, TagCode[]>>({});
   const [editTag, setEditTag] = useState<string | null>(null);            // แท็กที่กำลังแก้ (อื่น ๆ = readonly ดูสะอาด)
+  const [showHidden, setShowHidden] = useState<Set<string>>(new Set());   // แท็กที่กำลังโชว์ตระกูลที่ซ่อน
+  const [untagPending, setUntagPending] = useState<{ tagId: string; tagName: string; prefix: string } | null>(null);
+  const [busyUntag, setBusyUntag] = useState(false);
+  const toast = useToast();
   // สไตล์ช่องกรอก: แก้อยู่ = มีกรอบ · ไม่แก้ = ไร้กรอบเหมือนข้อความ
   const inCls = (edit: boolean) => `w-full h-9 px-2 text-sm rounded-md ${edit ? "border border-slate-200 bg-white" : "border border-transparent bg-transparent cursor-default text-slate-700"}`;
 
@@ -63,6 +69,33 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
       }
       return { ...r, prefix_defaults: pd };
     }));
+  };
+  // ซ่อน/เลิกซ่อน ตระกูลรหัส (เก็บใน prefix_defaults[prefix].hidden) — persist ทันที ไม่แตะ SKU
+  const setHidden = async (row: PrefixRow, prefix: string, hidden: boolean) => {
+    const cur = row.prefix_defaults[prefix] ?? { name: "", uom_id: null, uom_label: "" };
+    const newPd = { ...row.prefix_defaults, [prefix]: { ...cur, hidden } };
+    setRows((l) => l.map((r) => (r.id === row.id ? { ...r, prefix_defaults: newPd } : r)));
+    try {
+      const pd = Object.fromEntries(Object.entries(newPd).map(([k, v]) => [k, { name: v.name, uom_id: v.uom_id, hidden: v.hidden }]));
+      await apiFetch("/api/skus/tag-prefix", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, prefix_defaults: pd }) });
+      toast.success(hidden ? "ซ่อนตระกูลแล้ว" : "เลิกซ่อนแล้ว");
+    } catch { toast.error("บันทึกไม่สำเร็จ"); load(); }
+  };
+  // โหลดตระกูลรหัสของแท็กใหม่ (หลังปลด SKU)
+  const reloadCodes = (tagId: string) => {
+    apiFetch(`/api/skus/tag-codes?family_tag_id=${tagId}`).then((r) => r.json())
+      .then((j) => setCodesCache((c) => ({ ...c, [tagId]: (j.prefixes ?? []) as TagCode[] }))).catch(() => {});
+  };
+  // ปลด SKU ของตระกูลนี้ออกจากแท็ก (หลังยืนยัน) — แก้ที่ต้นเหตุ
+  const doUntag = async (tagId: string, prefix: string) => {
+    setBusyUntag(true);
+    try {
+      const res = await apiFetch("/api/skus/tag-prefix/untag", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ family_tag_id: tagId, prefix }) });
+      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error ?? "ปลดไม่สำเร็จ");
+      toast.success(`ปลด ${j.removed} SKU ออกจากแท็กแล้ว`);
+      reloadCodes(tagId);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ปลดไม่สำเร็จ"); }
+    finally { setBusyUntag(false); setUntagPending(null); }
   };
   // กาง/พับ + โหลดตระกูลรหัสของแท็ก (จาก tag-codes)
   const toggleExpand = (id: string) => {
@@ -161,25 +194,45 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
                   </div>
                   {!codesCache[r.id] ? <div className="px-5 py-1.5 text-[11px] text-slate-400">กำลังโหลด…</div>
                     : codesCache[r.id].length === 0 ? <div className="px-5 py-1.5 text-[11px] text-slate-400">— ยังไม่มีตระกูลรหัสที่ใช้อยู่ —</div>
-                    : codesCache[r.id].map((c) => {
-                        const pd = r.prefix_defaults?.[c.prefix] ?? { name: "", uom_id: null, uom_label: "" };
-                        return (
-                          <div key={c.prefix} className="px-5 py-1 flex items-center gap-2">
-                            <div className={`${cTag} pl-2 min-w-0`}>
-                              <div className="flex items-center gap-1 min-w-0">
-                                <span className="text-slate-300 shrink-0">↳</span>
-                                <span className="font-mono text-[12px] text-slate-700 truncate" title={c.prefix}>{c.prefix}</span>
+                    : (() => {
+                        const all = codesCache[r.id];
+                        const hiddenCount = all.filter((c) => r.prefix_defaults?.[c.prefix]?.hidden).length;
+                        const show = showHidden.has(r.id);
+                        const vis = show ? all : all.filter((c) => !r.prefix_defaults?.[c.prefix]?.hidden);
+                        return (<>
+                          {vis.map((c) => {
+                            const pd = r.prefix_defaults?.[c.prefix] ?? { name: "", uom_id: null, uom_label: "" };
+                            return (
+                              <div key={c.prefix} className={`px-5 py-1 flex items-center gap-2 ${pd.hidden ? "opacity-50" : ""}`}>
+                                <div className={`${cTag} pl-2 min-w-0`}>
+                                  <div className="flex items-center gap-1 min-w-0">
+                                    <span className="text-slate-300 shrink-0">↳</span>
+                                    <span className="font-mono text-[12px] text-slate-700 truncate" title={c.prefix}>{c.prefix}</span>
+                                    {pd.hidden && <span className="text-[9px] text-slate-400 shrink-0">(ซ่อน)</span>}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 pl-3.5 truncate">ล่าสุด {c.latest_code}</div>
+                                </div>
+                                <div className={cPrefix} />
+                                <div className={cName}><input value={pd.name} readOnly={editTag !== r.id} onChange={(e) => setPrefixDefault(r.id, c.prefix, { name: e.target.value })} placeholder={c.latest_name || r.default_name || "ชื่อเฉพาะตระกูลนี้"}
+                                  className={inCls(editTag === r.id)} /></div>
+                                <div className={cUom}><SearchableSelect value={pd.uom_id ?? ""} options={uomOpts} placeholder="—" disabled={editTag !== r.id} onChange={(v) => setPrefixDefault(r.id, c.prefix, { uom_id: v || null })} /></div>
+                                <div className={cAct}>
+                                  {editTag === r.id && <>
+                                    <button type="button" title={pd.hidden ? "เลิกซ่อน" : "ซ่อนตระกูลนี้ (ไม่แตะ SKU)"} onClick={() => void setHidden(r, c.prefix, !pd.hidden)}
+                                      className="h-7 w-7 text-xs rounded border border-slate-200 text-slate-400 hover:bg-white">{pd.hidden ? "👁" : "🙈"}</button>
+                                    <button type="button" title="ปลด SKU ตระกูลนี้ออกจากแท็ก (แก้ที่ต้นเหตุ)" onClick={() => setUntagPending({ tagId: r.id, tagName: r.name, prefix: c.prefix })}
+                                      className="h-7 w-7 text-xs rounded border border-rose-200 text-rose-500 hover:bg-rose-50">🗑</button>
+                                  </>}
+                                </div>
                               </div>
-                              <div className="text-[10px] text-slate-400 pl-3.5 truncate">ล่าสุด {c.latest_code}</div>
-                            </div>
-                            <div className={cPrefix} />
-                            <div className={cName}><input value={pd.name} readOnly={editTag !== r.id} onChange={(e) => setPrefixDefault(r.id, c.prefix, { name: e.target.value })} placeholder={c.latest_name || r.default_name || "ชื่อเฉพาะตระกูลนี้"}
-                              className={inCls(editTag === r.id)} /></div>
-                            <div className={cUom}><SearchableSelect value={pd.uom_id ?? ""} options={uomOpts} placeholder="—" disabled={editTag !== r.id} onChange={(v) => setPrefixDefault(r.id, c.prefix, { uom_id: v || null })} /></div>
-                            <div className={cAct} />
-                          </div>
-                        );
-                      })}
+                            );
+                          })}
+                          {hiddenCount > 0 && (
+                            <button type="button" onClick={() => setShowHidden((s) => { const n = new Set(s); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })}
+                              className="px-5 py-1 text-[10px] text-slate-400 hover:text-slate-600">{show ? "▲ ซ่อนที่ซ่อนไว้อีกครั้ง" : `▾ แสดงตระกูลที่ซ่อน (${hiddenCount})`}</button>
+                          )}
+                        </>);
+                      })()}
                 </div>
               )}
             </div>
@@ -188,6 +241,12 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
         <div className="px-5 py-3 border-t border-slate-200 text-right">
           <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>
         </div>
+        {untagPending && (
+          <ConfirmDialog open onClose={() => !busyUntag && setUntagPending(null)} variant="danger" loading={busyUntag}
+            title="ปลด SKU ออกจากแท็ก"
+            message={`ปลด SKU ตระกูล "${untagPending.prefix}" ทั้งหมด ออกจากแท็ก "${untagPending.tagName}"? (SKU ยังอยู่ในระบบ แค่ไม่ผูกแท็กนี้แล้ว)`}
+            confirmText="ปลดออกจากแท็ก" onConfirm={() => void doUntag(untagPending.tagId, untagPending.prefix)} />
+        )}
       </div>
     </div>
   );

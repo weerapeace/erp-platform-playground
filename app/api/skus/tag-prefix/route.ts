@@ -21,7 +21,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .eq("is_active", true).order("name");
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
-  type PD = Record<string, { name?: string; uom_id?: string }>;
+  type PD = Record<string, { name?: string; uom_id?: string; hidden?: boolean }>;
   // รวม uom id ทั้งหมด (default + รายตระกูลรหัส) → query ชื่อครั้งเดียว
   const uomIds = new Set<string>();
   for (const t of (data ?? [])) {
@@ -37,10 +37,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const rows = (data ?? []).map((t) => {
     const pdRaw = (t.prefix_defaults ?? {}) as PD;
-    const prefix_defaults: Record<string, { name: string; uom_id: string | null; uom_label: string }> = {};
+    const prefix_defaults: Record<string, { name: string; uom_id: string | null; uom_label: string; hidden: boolean }> = {};
     for (const k of Object.keys(pdRaw)) {
       const uid = pdRaw[k]?.uom_id ?? null;
-      prefix_defaults[k] = { name: pdRaw[k]?.name ?? "", uom_id: uid, uom_label: uid ? (uomMap.get(uid) ?? "") : "" };
+      prefix_defaults[k] = { name: pdRaw[k]?.name ?? "", uom_id: uid, uom_label: uid ? (uomMap.get(uid) ?? "") : "", hidden: !!pdRaw[k]?.hidden };
     }
     return {
       id: t.id as string, name: t.name as string, code_prefix: (t.code_prefix as string | null) ?? "",
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { id?: string; code_prefix?: string; default_name?: string; default_uom_id?: string | null; prefix_defaults?: Record<string, { name?: string; uom_id?: string | null }> };
+  let body: { id?: string; code_prefix?: string; default_name?: string; default_uom_id?: string | null; prefix_defaults?: Record<string, { name?: string; uom_id?: string | null; hidden?: boolean }> };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
@@ -68,10 +68,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (body.default_name !== undefined)  patch.default_name = (body.default_name ?? "").trim() || null;
   if (body.default_uom_id !== undefined) patch.default_uom_id = body.default_uom_id || null;
   if (body.prefix_defaults !== undefined) {
-    const clean: Record<string, { name?: string; uom_id?: string }> = {};
+    const clean: Record<string, { name?: string; uom_id?: string; hidden?: boolean }> = {};
     for (const [k, v] of Object.entries(body.prefix_defaults ?? {})) {
-      const name = (v?.name ?? "").trim(); const uom = v?.uom_id || undefined;
-      if (name || uom) clean[k] = { ...(name ? { name } : {}), ...(uom ? { uom_id: uom } : {}) };
+      const name = (v?.name ?? "").trim(); const uom = v?.uom_id || undefined; const hidden = !!v?.hidden;
+      if (name || uom || hidden) clean[k] = { ...(name ? { name } : {}), ...(uom ? { uom_id: uom } : {}), ...(hidden ? { hidden: true } : {}) };
     }
     patch.prefix_defaults = clean;
   }
