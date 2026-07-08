@@ -47,7 +47,7 @@ export function SkuWizard({
   const [bId, setBId] = useState("");                                // แบรนด์ที่เลือก (ค่าเริ่มต้น = แบรนด์ของใบงาน)
   const [check, setCheck] = useState<ParentSkuCheck | null>(null);   // ผลเช็ครหัส Parent (ซ้ำ/ล่าสุด/ถัดไป/รายการที่มี)
   const [codeOpen, setCodeOpen] = useState(false);                   // เปิดลิสต์รหัสที่มี
-  const [sheetImgs, setSheetImgs] = useState<{ key: string; url: string }[]>([]);  // รูปที่แนบในใบงาน (เลือกเป็นรูปสินค้า)
+  const [sheetImgs, setSheetImgs] = useState<{ key: string; url: string; sourceLabel: string }[]>([]);  // รูปทุกแหล่งในใบงาน (แกลเลอรี/รายละเอียด/คอมเมนต์ — เลือกเป็นรูปสินค้า)
   const [pImgs, setPImgs] = useState<string[]>([]);                  // รูป Parent (R2 keys, ตัวแรก = ปก)
   const [pickOpen, setPickOpen] = useState<string | null>(null);     // ช่องรูปที่กำลังเลือก ("parent" | "row-<i>")
   const [pickPos, setPickPos] = useState<{ left: number; top: number } | null>(null);   // ตำแหน่งป๊อปอัปเลือกรูป (fixed/portal)
@@ -71,20 +71,17 @@ export function SkuWizard({
     return () => { alive = false; };
   }, [open]);
 
-  // โหลดรูปที่แนบในใบงาน → ให้เลือกเป็นรูปสินค้า · ตั้งรูปหลัก (is_primary/ตัวแรก) ให้ Parent อัตโนมัติ
+  // โหลดรูป "ทุกแหล่ง" ในใบงาน (แกลเลอรี/รายละเอียด/คอมเมนต์) ผ่าน endpoint กลาง → ตั้งรูปหลักให้ Parent อัตโนมัติ
   useEffect(() => {
     if (!open || !sheetId) return;
     let alive = true;
-    apiFetch(`/api/attachments?entity_type=design_sheet&entity_id=${encodeURIComponent(sheetId)}`)
+    apiFetch(`/api/design-sheets/${encodeURIComponent(sheetId)}/images`)
       .then((r) => r.json())
       .then((j) => {
         if (!alive || !Array.isArray(j.data)) return;
-        const imgs = (j.data as { file_path: string; content_type: string | null; is_primary: boolean }[])
-          .filter((a) => (a.content_type ?? "").startsWith("image/"))
-          // สร้าง URL จาก file_path ผ่าน proxy เสมอ (attachment เก่าบางรูป public_url เพี้ยน → รูปขาด)
-          .map((a) => ({ key: a.file_path, url: `/api/r2-image?key=${encodeURIComponent(a.file_path)}`, primary: a.is_primary }));
-        setSheetImgs(imgs.map(({ key, url }) => ({ key, url })));
-        const primary = imgs.find((i) => i.primary) ?? imgs[0];
+        const imgs = j.data as { key: string; url: string; source_label: string; is_primary: boolean }[];
+        setSheetImgs(imgs.map((a) => ({ key: a.key, url: a.url, sourceLabel: a.source_label })));
+        const primary = imgs.find((i) => i.is_primary) ?? imgs[0];   // endpoint เรียงรูปหลักแกลเลอรีมาก่อนอยู่แล้ว
         if (primary) setPImgs((cur) => (cur.length ? cur : [primary.key]));
       }).catch(() => {});
     return () => { alive = false; };
@@ -128,6 +125,12 @@ export function SkuWizard({
   // ช่องเลือกรูปจากใบงาน — เลือกได้หลายรูป (รูปแรก = ปก) · ป๊อปอัปลอย + hover ขยาย (ผ่าน ImageThumbnail)
   const imgSlot = (values: string[], onToggle: (k: string) => void, onClear: () => void, id: string) => {
     const cover = values[0];
+    // จัดกลุ่มรูปตามแหล่ง (คงลำดับที่ endpoint ส่งมา: แกลเลอรี → รายละเอียด → คอมเมนต์)
+    const groups: Array<[string, typeof sheetImgs]> = [];
+    for (const im of sheetImgs) {
+      const g = groups.find(([l]) => l === im.sourceLabel);
+      if (g) g[1].push(im); else groups.push([im.sourceLabel, [im]]);
+    }
     return (
       <div className="relative inline-block" data-imgpick>
         <button type="button" title="เลือกรูปจากใบงาน (เลือกได้หลายรูป)"
@@ -141,19 +144,26 @@ export function SkuWizard({
             style={{ position: "fixed", left: pickPos.left, top: pickPos.top, width: 236, zIndex: 1000 }}>
             {sheetImgs.length === 0 ? <div className="p-2 text-[11px] text-slate-400">ใบงานนี้ยังไม่มีรูปแนบ</div> : (
               <>
-                <div className="grid max-h-52 grid-cols-3 gap-1.5 overflow-auto">
+                <div className="max-h-52 space-y-1.5 overflow-auto">
                   <button type="button" onClick={onClear}
-                    className="flex h-16 items-center justify-center rounded border border-dashed border-slate-200 text-[10px] text-slate-400 hover:bg-slate-50">ไม่มีรูป</button>
-                  {sheetImgs.map((im) => {
-                    const idx = values.indexOf(im.key);
-                    return (
-                      <button key={im.key} type="button" onClick={() => onToggle(im.key)}
-                        className={`relative flex h-16 items-center justify-center overflow-hidden rounded border bg-white ${idx >= 0 ? "border-blue-500 ring-1 ring-blue-300" : "border-slate-200 hover:border-blue-300"}`}>
-                        <ImageThumbnail url={im.url} size={54} />
-                        {idx >= 0 && <span className="absolute left-0.5 top-0.5 z-10 rounded bg-blue-600 px-1 text-[9px] font-medium text-white">{idx === 0 ? "ปก" : idx + 1}</span>}
-                      </button>
-                    );
-                  })}
+                    className="flex h-8 w-full items-center justify-center rounded border border-dashed border-slate-200 text-[10px] text-slate-400 hover:bg-slate-50">✕ ไม่เลือกรูป</button>
+                  {groups.map(([label, imgs]) => (
+                    <div key={label}>
+                      {groups.length > 1 && <div className="px-0.5 pb-0.5 text-[9px] font-medium text-slate-400">{label}</div>}
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {imgs.map((im) => {
+                          const idx = values.indexOf(im.key);
+                          return (
+                            <button key={im.key} type="button" onClick={() => onToggle(im.key)}
+                              className={`relative flex h-16 items-center justify-center overflow-hidden rounded border bg-white ${idx >= 0 ? "border-blue-500 ring-1 ring-blue-300" : "border-slate-200 hover:border-blue-300"}`}>
+                              <ImageThumbnail url={im.url} size={54} />
+                              {idx >= 0 && <span className="absolute left-0.5 top-0.5 z-10 rounded bg-blue-600 px-1 text-[9px] font-medium text-white">{idx === 0 ? "ปก" : idx + 1}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
                 <div className="mt-1 flex items-center justify-between px-1">
                   <span className="text-[10px] text-slate-400">เลือกหลายรูปได้ · แรก=ปก · ชี้เมาส์ดูใหญ่</span>
