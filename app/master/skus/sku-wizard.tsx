@@ -30,7 +30,8 @@ const codeAt = (b: CodeBase, n: number) => (b.pad > 0 ? b.prefix + String(n).pad
 type TagCtx = { fabric_widths: number[]; sellers: { id: string; name: string | null; count: number }[] };
 
 type PickerOpt = { id: string; label: string; secondary?: string };
-type TagOpt = { id: string; name: string; code_prefix: string; group_name: string | null; default_name?: string; default_uom_id?: string | null; default_uom_label?: string };
+type PrefixDefault = { name?: string; uom_id?: string | null; uom_label?: string };
+type TagOpt = { id: string; name: string; code_prefix: string; group_name: string | null; default_name?: string; default_uom_id?: string | null; default_uom_label?: string; prefix_defaults?: Record<string, PrefixDefault> };
 type Suggest = { prefix: string; this_latest: string | null; this_suggested: string | null; group_latest: string | null; group_name: string | null; error?: string };
 type TagCode = { prefix: string; latest_code: string; suggested: string; count: number };
 
@@ -227,6 +228,21 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
       return { values, labels };
     });
   };
+  // เดี่ยว: คลิกเลือกตระกูลรหัส → ตั้งรหัส + เติมชื่อ/หน่วยจาก default ของตระกูลนั้น (fallback ค่ารวมของแท็ก)
+  const selectCodeFamily = (prefix: string, suggested: string) => {
+    const t = sTag ? tags.find((x) => x.id === sTag) : null;
+    const pd = t?.prefix_defaults?.[prefix];
+    const name = pd?.name || t?.default_name || "";
+    const uomId = pd?.uom_id || t?.default_uom_id || null;
+    const uomLabel = pd?.uom_id ? (pd?.uom_label || "") : (t?.default_uom_label || "");
+    setSingle((s) => {
+      const values = { ...s.values }; const labels = { ...s.labels };
+      values.code = suggested;
+      if (name && !String(values.name_th ?? "").trim()) values.name_th = name;
+      if (uomId && !values.uom_id) { values.uom_id = uomId; labels.uom_id = uomLabel; }
+      return { values, labels };
+    });
+  };
   const loadSuggest = useCallback((tagId: string) => {
     apiFetch(`/api/skus/code-suggest?family_tag_id=${tagId}`).then((r) => r.json()).then((j) => {
       setSug(j as Suggest);
@@ -241,29 +257,47 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
   const [lines, setLines] = useState<Row[]>([blankRow(), blankRow(), blankRow()]);
   const [bTag, setBTag] = useState<string | null>(null);
   const [batchBase, setBatchBase] = useState<CodeBase | null>(null);   // ฐานรหัสรัน (prefix+เลข) ของประเภทที่เลือก
+  const [batchCodes, setBatchCodes] = useState<TagCode[]>([]);         // ตระกูลรหัสของประเภท (ให้เลือกในชุด)
+  const [bCodePrefix, setBCodePrefix] = useState<string | null>(null); // ตระกูลรหัสที่เลือกในชุด
   const [colMenu, setColMenu] = useState(false);
 
-  // เลือกประเภททั้งชุด → เติมรหัสรันทุกแถว (แถวแรก=เลขถัดไป, ถัดไป+1) + ชื่อ/หน่วย default + โหลด context
+  // เลือกประเภททั้งชุด → โหลด "ตระกูลรหัส" ให้เลือก (มีตัวเดียว=ใช้เลย, หลายตัว=เลือกได้ ตั้งค่าเริ่ม=ล่าสุด)
   const applyBatchTag = (tagId: string | null) => {
-    setBTag(tagId);
-    if (!tagId) { setBatchBase(null); return; }
+    setBTag(tagId); setBCodePrefix(null); setBatchBase(null); setBatchCodes([]);
+    if (!tagId) return;
     loadContext(tagId);
-    const tag = tags.find((t) => t.id === tagId);
-    apiFetch(`/api/skus/code-suggest?family_tag_id=${tagId}`).then((r) => r.json()).then((j: Suggest) => {
-      const base = j.this_suggested ? splitCode(j.this_suggested) : null;
-      setBatchBase(base);
-      setLines((l) => l.map((r, i) => {
-        const values = { ...r.values }; const labels = { ...r.labels };
-        if (base) values.code = codeAt(base, base.num + i);
-        if (tag?.default_name && !String(values.name_th ?? "").trim()) values.name_th = tag.default_name;
-        if (tag?.default_uom_id && !values.uom_id) { values.uom_id = tag.default_uom_id; labels.uom_id = tag.default_uom_label || ""; }
-        return { values, labels };
-      }));
+    apiFetch(`/api/skus/tag-codes?family_tag_id=${tagId}`).then((r) => r.json()).then((j) => {
+      const codes = (j.prefixes ?? []) as TagCode[];
+      setBatchCodes(codes);
+      if (codes.length) applyBatchCode(codes[0].prefix, codes, tagId);
     }).catch(() => {});
+  };
+  // เลือกตระกูลรหัส (ชุด) → เติมรหัสรันทุกแถว (เลขถัดไป+i) + ชื่อ/หน่วยจาก default ของตระกูล
+  const applyBatchCode = (prefix: string, codes?: TagCode[], tagId?: string | null) => {
+    const list = codes ?? batchCodes;
+    const fam = list.find((c) => c.prefix === prefix); if (!fam) return;
+    setBCodePrefix(prefix);
+    const base = splitCode(fam.suggested); setBatchBase(base);
+    const tag = (tagId ?? bTag) ? tags.find((t) => t.id === (tagId ?? bTag)) : null;
+    const pd = tag?.prefix_defaults?.[prefix];
+    const name = pd?.name || tag?.default_name || "";
+    const uomId = pd?.uom_id || tag?.default_uom_id || null;
+    const uomLabel = pd?.uom_id ? (pd?.uom_label || "") : (tag?.default_uom_label || "");
+    setLines((l) => l.map((r, i) => {
+      const values = { ...r.values }; const labels = { ...r.labels };
+      values.code = codeAt(base, base.num + i);
+      if (name && !String(values.name_th ?? "").trim()) values.name_th = name;
+      if (uomId && !values.uom_id) { values.uom_id = uomId; labels.uom_id = uomLabel; }
+      return { values, labels };
+    }));
   };
   // เพิ่มแถว → รหัสรันต่อ (max เลขในชุด+1) + ชื่อ/หน่วย default (กฎเดียวกับเดี่ยว)
   const addBatchRow = () => setLines((l) => {
     const tag = bTag ? tags.find((t) => t.id === bTag) : null;
+    const pd = bCodePrefix ? tag?.prefix_defaults?.[bCodePrefix] : undefined;
+    const name = pd?.name || tag?.default_name || "";
+    const uomId = pd?.uom_id || tag?.default_uom_id || null;
+    const uomLabel = pd?.uom_id ? (pd?.uom_label || "") : (tag?.default_uom_label || "");
     const values: Record<string, unknown> = {}; const labels: Record<string, string> = {};
     if (batchBase) {
       let maxN = batchBase.num - 1;
@@ -273,8 +307,8 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
       }
       values.code = codeAt(batchBase, maxN + 1);
     }
-    if (tag?.default_name) values.name_th = tag.default_name;
-    if (tag?.default_uom_id) { values.uom_id = tag.default_uom_id; labels.uom_id = tag.default_uom_label || ""; }
+    if (name) values.name_th = name;
+    if (uomId) { values.uom_id = uomId; labels.uom_id = uomLabel; }
     return [...l, { values, labels }];
   });
   const setCell = (i: number, k: string, v: unknown, lbl?: string) => setLines((l) => l.map((x, idx) => idx === i ? ({ values: { ...x.values, [k]: v }, labels: lbl !== undefined ? { ...x.labels, [k]: lbl } : x.labels }) : x));
@@ -284,7 +318,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
     return l.map((x, i) => i === 0 ? x : ({ values: { ...x.values, [k]: v }, labels: { ...x.labels, [k]: lbl } }));
   });
 
-  const reset = () => { setSingle(blankRow()); setSug(null); setTagCodes([]); setSTag(null); setLines([blankRow(), blankRow(), blankRow()]); setBTag(null); setCtx({ fabric_widths: [], sellers: [] }); setBatchBase(null); };
+  const reset = () => { setSingle(blankRow()); setSug(null); setTagCodes([]); setSTag(null); setLines([blankRow(), blankRow(), blankRow()]); setBTag(null); setCtx({ fabric_widths: [], sellers: [] }); setBatchBase(null); setBatchCodes([]); setBCodePrefix(null); };
   const close = () => { if (saving) return; reset(); onClose(); };
 
   const submit = async (rows: Row[], tagId: string | null) => {
@@ -361,7 +395,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
                   <div className="invisible group-hover:visible absolute right-0 top-full z-30 mt-1 w-80 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-xl p-1.5 text-xs">
                     <div className="text-slate-400 px-1 pb-1">กดเลือกตระกูลรหัสที่จะใช้ (หรือพิมพ์เอง)</div>
                     {tagCodes.map((c) => (
-                      <button key={c.prefix} type="button" onClick={() => setSV("code", c.suggested)}
+                      <button key={c.prefix} type="button" onClick={() => selectCodeFamily(c.prefix, c.suggested)}
                         className="w-full flex items-center gap-2 px-1.5 py-1 rounded hover:bg-blue-50 text-left">
                         <span className="font-mono text-slate-700 truncate">{c.prefix}</span>
                         <span className="text-slate-400 whitespace-nowrap">ล่าสุด {c.latest_code}</span>
@@ -434,6 +468,12 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
           <div className="flex flex-wrap items-end gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
             <label className="block"><span className="text-xs text-slate-500">ประเภท (Tag) ทั้งชุด</span>
               <div className="mt-0.5 w-48"><SearchableSelect value={bTag ?? ""} options={tagOptions} placeholder="— ไม่ระบุ (ค้นหาได้) —" onChange={(v) => applyBatchTag(v || null)} /></div></label>
+            {batchCodes.length > 1 && (
+              <label className="block"><span className="text-xs text-slate-500">ตระกูลรหัส *</span>
+                <div className="mt-0.5 w-48"><SearchableSelect value={bCodePrefix ?? ""} placeholder="— เลือกตระกูล —"
+                  options={batchCodes.map((c) => ({ value: c.prefix, label: c.prefix, sub: `ถัดไป ${c.suggested}` }))}
+                  onChange={(v) => v && applyBatchCode(v)} /></div></label>
+            )}
             <button type="button" onClick={() => setPrefixMgr(true)} title="ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท"
               className="h-8 px-3 text-sm border border-slate-200 rounded text-slate-600 hover:bg-white whitespace-nowrap">⚙️ จัดการรหัสนำหน้า</button>
             {/* ตัวเลือกคอลัมน์ (จากทะเบียน field) */}
