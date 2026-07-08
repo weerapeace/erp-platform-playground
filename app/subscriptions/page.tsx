@@ -17,7 +17,7 @@ import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR } from "@/lib/swr-lite";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
-  CYCLE_LABEL, TYPE_LABEL, monthlyTHB, yearlyTHB, daysUntil, nextRenewal, fmtCost, fmtBaht,
+  CYCLE_LABEL, TYPE_LABEL, monthlyTHB, yearlyTHB, daysUntil, nextRenewal, fmtCost, fmtBaht, subStatusLabel,
   type SubSettings, type SubInput, type Subscription,
 } from "@/lib/subscriptions";
 import { SubscriptionFormModal } from "./subscription-form-modal";
@@ -27,7 +27,7 @@ import { WishlistView } from "./wishlist-view";
 import { AllInvoicesView } from "./all-invoices-view";
 import { DownloadInvoiceModal } from "./download-invoice-modal";
 
-type ViewMode = "list" | "inuse" | "calendar" | "wishlist" | "invoices";
+type ViewMode = "list" | "inuse" | "personal" | "calendar" | "wishlist" | "invoices";
 
 const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
 
@@ -105,6 +105,8 @@ export default function SubscriptionsPage() {
     () => rows.filter((r) => r.active && (r.billing_cycle === "monthly" || r.billing_cycle === "yearly")),
     [rows],
   );
+  // ส่วนตัว = ประเภท personal
+  const personalRows = useMemo(() => rows.filter((r) => r.type === "personal"), [rows]);
 
   // ── handlers ───────────────────────────────────────────────
   const openCreate = useCallback(() => { setEditing(null); setCreateDefaults(null); setFormOpen(true); }, []);
@@ -205,9 +207,12 @@ export default function SubscriptionsPage() {
       },
     },
     { id: "category", accessorKey: "category", header: "หมวดหมู่", size: 130,
+      meta: { filterable: true, filterType: "select", filterLabel: "หมวดหมู่" },
       cell: ({ getValue }) => <span className="text-xs text-slate-600">{(getValue() as string) || "—"}</span> },
-    { id: "type", accessorKey: "type", header: "ประเภท", size: 90,
-      cell: ({ getValue }) => <span className="text-xs text-slate-500">{TYPE_LABEL[getValue() as keyof typeof TYPE_LABEL] ?? "—"}</span> },
+    { id: "type", header: "ประเภท", size: 90,
+      accessorFn: (r) => TYPE_LABEL[r.type] ?? r.type,
+      meta: { filterable: true, filterType: "select", filterLabel: "ประเภท" },
+      cell: ({ getValue }) => <span className="text-xs text-slate-500">{(getValue() as string) || "—"}</span> },
     { id: "billing_cycle", accessorKey: "billing_cycle", header: "รอบบิล", size: 110,
       cell: ({ getValue }) => <span className="text-xs text-slate-500">{CYCLE_LABEL[getValue() as keyof typeof CYCLE_LABEL] ?? "—"}</span> },
     {
@@ -242,7 +247,9 @@ export default function SubscriptionsPage() {
       },
     },
     {
-      id: "status", accessorKey: "active", header: "สถานะ", size: 150,
+      id: "status", header: "สถานะ", size: 160,
+      accessorFn: (r) => subStatusLabel(r),
+      meta: { filterable: true, filterType: "select", filterLabel: "สถานะ" },
       cell: ({ row }) => {
         const s = row.original;
         return (
@@ -346,6 +353,7 @@ export default function SubscriptionsPage() {
             {([
               { k: "list", label: "📋 รายการ" },
               { k: "inuse", label: `🟢 ใช้อยู่${inUseRows.length ? ` (${inUseRows.length})` : ""}` },
+              { k: "personal", label: `👤 ส่วนตัว${personalRows.length ? ` (${personalRows.length})` : ""}` },
               { k: "calendar", label: "📅 ปฏิทิน" },
               { k: "wishlist", label: `🛒 อยากซื้อ${summary.wishlist ? ` (${summary.wishlist})` : ""}` },
               { k: "invoices", label: "🧾 ใบเสร็จ" },
@@ -361,19 +369,22 @@ export default function SubscriptionsPage() {
           {view === "inuse" && (
             <p className="text-xs text-slate-500 -mb-1">รายการที่เปิดใช้งานอยู่ และจ่ายประจำ (รายเดือน/รายปี) เท่านั้น — ไม่รวมรายการปิด/จ่ายครั้งเดียว</p>
           )}
-          {(view === "list" || view === "inuse") && (
+          {view === "personal" && (
+            <p className="text-xs text-slate-500 -mb-1">เฉพาะรายการประเภท &quot;ส่วนตัว&quot;</p>
+          )}
+          {(view === "list" || view === "inuse" || view === "personal") && (
             <DataTable
-              tableId={view === "inuse" ? "subscriptions-inuse" : "subscriptions"}
-              data={view === "inuse" ? inUseRows : rows}
+              tableId={view === "inuse" ? "subscriptions-inuse" : view === "personal" ? "subscriptions-personal" : "subscriptions"}
+              data={view === "inuse" ? inUseRows : view === "personal" ? personalRows : rows}
               columns={columns}
-              views={view === "inuse" ? undefined : views}
+              views={view === "list" ? views : undefined}
               loading={loading}
               searchableKeys={["name", "category", "account_email", "notes"]}
               searchPlaceholder="ค้นหา ชื่อ / หมวดหมู่ / อีเมล…"
-              exportFilename={view === "inuse" ? "subscriptions-inuse" : "subscriptions"}
+              exportFilename={view === "inuse" ? "subscriptions-inuse" : view === "personal" ? "subscriptions-personal" : "subscriptions"}
               exportEntityType="subscriptions"
               pageSize={25}
-              emptyMessage={view === "inuse" ? "ยังไม่มีรายการที่ใช้อยู่ (รายเดือน/รายปี)" : "ยังไม่มีรายการ subscription"}
+              emptyMessage={view === "inuse" ? "ยังไม่มีรายการที่ใช้อยู่ (รายเดือน/รายปี)" : view === "personal" ? "ยังไม่มีรายการส่วนตัว" : "ยังไม่มีรายการ subscription"}
               onRowClick={canEdit ? openEdit : openInvoices}
             />
           )}

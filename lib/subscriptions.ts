@@ -153,6 +153,15 @@ export function nextRenewal(sub: Pick<Subscription, "billing_date" | "billing_cy
 /** เกณฑ์วันสำหรับแจ้งเตือน (cron วิ่งวันละครั้ง → แต่ละเกณฑ์เด้งครั้งเดียว ไม่ต้อง dedupe) */
 export const RENEWAL_THRESHOLDS = [7, 3, 1, 0, -1];
 
+/** ป้ายสถานะแบบข้อความ (ใช้ filter/group/แสดง) — รวม active/pending_cancel/want_to_buy เป็นค่าเดียว */
+export function subStatusLabel(s: Pick<Subscription, "active" | "pending_cancel" | "want_to_buy">): string {
+  if (s.want_to_buy) return "อยากซื้อ";
+  if (!s.active && s.pending_cancel) return "ยกเลิกแล้ว";
+  if (!s.active) return "ปิด";
+  if (s.pending_cancel) return "กำลังยกเลิก";
+  return "ใช้งาน";
+}
+
 /** ฟอร์แมตราคาตามสกุลเงินของรายการ เช่น "$20.00" / "฿571.38" */
 export function fmtCost(cost: number, currency: Currency): string {
   return `${CURRENCY_SYMBOL[currency] ?? ""}${Number(cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

@@ -47,7 +47,8 @@ export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
 
   const genBat = () => {
     if (!sub || !invLink || !sub.chrome_profile_dir) return;
-    downloadTextFile(`chrome-${sanitizeName(sub.name)}.bat`, makeBat(sub.chrome_profile_dir, invLink));
+    const suffix = sub.chrome_profile ? `-${sanitizeName(sub.chrome_profile)}` : sub.account_email ? `-${sanitizeName(sub.account_email)}` : "";
+    downloadTextFile(`chrome-${sanitizeName(sub.name)}${suffix}.bat`, makeBat(sub.chrome_profile_dir, invLink));
     toast.success("ดาวน์โหลดไฟล์แล้ว — ดับเบิลคลิกเพื่อเปิด Chrome");
   };
 
