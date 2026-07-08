@@ -43,12 +43,14 @@ export type CanvasSketchControls = {
 };
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, collab = false,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, collab = false, stickyTop,
 }: {
   entityType: string;
   entityId:   string;
   editable?:  boolean;
   height?:    string;
+  /** ทำแถบเครื่องมือ "ล็อกค้างบน" (sticky) ที่ระยะห่างจากบนจอ (px) — เว้นว่าง = ไม่ล็อก */
+  stickyTop?: number;
   /** เปิด realtime หลายคนพร้อมกัน (ผ่าน Supabase Broadcast — ไม่กิน Cloudflare CPU) */
   collab?:    boolean;
   /** แจ้งสถานะ "มีแก้ค้าง" ขึ้นไปข้างนอก (ใช้เตือนก่อนปิด popup) */
@@ -708,7 +710,8 @@ export function CanvasSketch({
 
   return (
     <div className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={`flex flex-wrap items-center gap-2${stickyTop != null ? " sticky z-30 bg-white/95 backdrop-blur border-b border-slate-100 py-1.5 -mx-1 px-1" : ""}`}
+        style={stickyTop != null ? { top: stickyTop } : undefined}>
         <span className="text-xs text-slate-400 flex-1 min-w-[200px]">
           🖼 วางรูป = copy แล้วกด Ctrl+V ในกระดาน · ⬛ กล่อง=R · ➡ ลูกศร=A · 🔤 ข้อความ=T · ✏ วาด=P
         </span>

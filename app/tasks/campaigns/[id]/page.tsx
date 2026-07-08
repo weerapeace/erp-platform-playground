@@ -351,7 +351,7 @@ export default function CampaignCanvasPage() {
       <div className="px-8 py-6">
         <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
           {/* realtime ผ่าน Supabase Broadcast (ไม่กิน Cloudflare CPU) + เซฟกันทับด้วย version-guard */}
-          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 180px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={syncTaskCards} collab />
+          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 180px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={syncTaskCards} collab stickyTop={128} />
 
           {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
           {dragPanelOpen && (
