@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table";
+import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -30,6 +31,10 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
   const [month, setMonth] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [backfilling, setBackfilling] = useState(false);
+  // แก้ค่าใบเสร็จเอง (ตอนระบบอ่านผิด)
+  const [editInv, setEditInv] = useState<InvoiceRow | null>(null);
+  const [ef, setEf] = useState<{ amount: string; currency: string; invoice_date: string }>({ amount: "", currency: "THB", invoice_date: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,6 +69,29 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
       setRows((prev) => prev.filter((r) => r.id !== inv.id));
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   }, [toast]);
+
+  const openEditInv = useCallback((inv: InvoiceRow) => {
+    setEditInv(inv);
+    setEf({ amount: inv.amount != null ? String(inv.amount) : "", currency: inv.currency || "THB", invoice_date: inv.invoice_date ?? "" });
+  }, []);
+
+  const saveEdit = useCallback(async () => {
+    if (!editInv) return;
+    setSavingEdit(true);
+    try {
+      const res = await apiFetch(`/api/subscriptions/${editInv.subscription_id}/invoices/${editInv.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: ef.amount.trim() === "" ? null : Number(ef.amount), currency: ef.currency, invoice_date: ef.invoice_date || null }),
+      });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      const u = j.data as InvoiceRow;
+      setRows((prev) => prev.map((r) => (r.id === editInv.id ? { ...r, amount: u.amount, currency: u.currency, invoice_date: u.invoice_date, parsed_at: u.parsed_at } : r)));
+      toast.success("แก้ไขแล้ว");
+      setEditInv(null);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไขไม่สำเร็จ"); }
+    finally { setSavingEdit(false); }
+  }, [editInv, ef, toast]);
 
   const unparsed = useMemo(() => rows.filter((r) => !r.parsed_at).length, [rows]);
 
@@ -116,7 +144,7 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
     { id: "file_name", accessorKey: "file_name", header: "ไฟล์", size: 260,
       cell: ({ getValue }) => <span className="text-sm text-slate-600 inline-flex items-center gap-1.5"><span>📄</span><span className="truncate">{getValue() as string}</span></span> },
     {
-      id: "actions", header: "", size: 160, enableSorting: false,
+      id: "actions", header: "", size: 190, enableSorting: false,
       cell: ({ row }) => {
         const inv = row.original;
         return (
@@ -130,14 +158,18 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
               </>
             ) : <span className="text-xs text-slate-300">—</span>}
             {canEdit && (
-              <button onClick={() => handleDelete(inv)} title="ลบ"
-                className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs text-slate-400 hover:bg-red-50 hover:text-red-500">🗑</button>
+              <>
+                <button onClick={() => openEditInv(inv)} title="แก้ไขจำนวนเงิน/วันที่"
+                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs hover:bg-slate-50">✎</button>
+                <button onClick={() => handleDelete(inv)} title="ลบ"
+                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs text-slate-400 hover:bg-red-50 hover:text-red-500">🗑</button>
+              </>
             )}
           </div>
         );
       },
     },
-  ], [canEdit, handleDelete, settings]);
+  ], [canEdit, handleDelete, openEditInv, settings]);
 
   return (
     <div className="space-y-3">
@@ -178,6 +210,42 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
         pageSize={25}
         emptyMessage="ยังไม่มีใบเสร็จ — อัปโหลดได้ที่ปุ่ม 🧾 ของแต่ละรายการ"
       />
+
+      {/* แก้ค่าจากบิลเอง (ตอนระบบอ่านผิด) */}
+      <ERPModal open={!!editInv} onClose={() => !savingEdit && setEditInv(null)} size="sm"
+        title="แก้ไขค่าจากบิล" description={editInv ? `${editInv.sub_name ?? ""} · ${editInv.file_name}` : undefined}
+        footer={
+          <>
+            <button onClick={() => setEditInv(null)} disabled={savingEdit} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+            <button onClick={saveEdit} disabled={savingEdit} className="h-9 px-5 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{savingEdit ? "กำลังบันทึก…" : "บันทึก"}</button>
+          </>
+        }>
+        {editInv && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              <label className="col-span-2 block">
+                <span className="text-xs font-medium text-slate-600">จำนวนเงิน</span>
+                <input type="number" step="0.01" value={ef.amount} onChange={(e) => setEf({ ...ef, amount: e.target.value })}
+                  placeholder="เว้นว่าง = ไม่ระบุ"
+                  className="mt-1 h-10 w-full px-3 rounded-lg border border-slate-200 text-sm tabular-nums outline-none focus:border-indigo-400" />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">สกุลเงิน</span>
+                <select value={ef.currency} onChange={(e) => setEf({ ...ef, currency: e.target.value })}
+                  className="mt-1 h-10 w-full px-2 rounded-lg border border-slate-200 text-sm bg-white outline-none focus:border-indigo-400">
+                  {["THB", "USD", "EUR"].map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+            </div>
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">วันที่ตัด (ในบิล)</span>
+              <input type="date" value={ef.invoice_date} onChange={(e) => setEf({ ...ef, invoice_date: e.target.value })}
+                className="mt-1 h-10 w-full px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-indigo-400" />
+            </label>
+            <p className="text-[11px] text-slate-400">แก้เองแล้วปุ่ม &ldquo;🔄 อ่านบิลที่แนบ&rdquo; จะไม่ทับค่านี้</p>
+          </div>
+        )}
+      </ERPModal>
     </div>
   );
 }
