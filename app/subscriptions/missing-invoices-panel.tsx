@@ -17,12 +17,12 @@ function fmtMonth(ym: string): string {
   return names[idx] ? `${names[idx]} ${Number(y) + 543}` : ym;
 }
 
-export function MissingInvoicesPanel({ canEdit, refreshKey }: { canEdit: boolean; refreshKey?: number }) {
+export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter }: { canEdit: boolean; refreshKey?: number; monthFilter?: string }) {
   const toast = useToast();
   const [items, setItems] = useState<MissingInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null); // key ที่กำลังข้าม
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true); // default ซ่อน
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,11 +52,14 @@ export function MissingInvoicesPanel({ canEdit, refreshKey }: { canEdit: boolean
     finally { setBusy(null); }
   };
 
+  // โชว์ตามเดือนที่เลือกในตัวกรอง (ถ้าเลือกเดือนเจาะจง)
+  const shown = monthFilter && monthFilter !== "all" ? items.filter((i) => i.month === monthFilter) : items;
+
   if (loading) return null;
-  if (items.length === 0) {
+  if (shown.length === 0) {
     return (
       <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-2.5 text-sm text-emerald-700">
-        ✅ ครบทุกเดือนแล้ว — ไม่มีบิลที่ขาด (ตรวจรายการ รายเดือน + งาน ย้อน 3 เดือน)
+        ✅ ครบแล้ว — ไม่มีบิลที่ขาด{monthFilter && monthFilter !== "all" ? " (เดือนที่เลือก)" : " (รายเดือน + งาน ย้อน 3 เดือน)"}
       </div>
     );
   }
@@ -64,7 +67,7 @@ export function MissingInvoicesPanel({ canEdit, refreshKey }: { canEdit: boolean
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50/50 overflow-hidden">
       <button onClick={() => setCollapsed((c) => !c)} className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-amber-50">
-        <span className="text-sm font-semibold text-amber-800">⚠️ บิลที่ยังขาด <span className="ml-1 px-2 py-0.5 rounded-full bg-amber-500 text-white text-xs">{items.length}</span></span>
+        <span className="text-sm font-semibold text-amber-800">⚠️ บิลที่ยังขาด <span className="ml-1 px-2 py-0.5 rounded-full bg-amber-500 text-white text-xs">{shown.length}</span></span>
         <span className="text-amber-500 text-xs">{collapsed ? "▸ แสดง" : "▾ ซ่อน"}</span>
       </button>
 
@@ -72,7 +75,7 @@ export function MissingInvoicesPanel({ canEdit, refreshKey }: { canEdit: boolean
         <div className="px-3 pb-3">
           <p className="text-[11px] text-amber-600 px-1 mb-1.5">รายการ รายเดือน + เปิดใช้งาน + งาน ที่ยังไม่มีใบเสร็จ (ย้อน 3 เดือน) · กดโหลด .bat ไปเอาบิล แล้วอัปโหลดที่ปุ่ม 🧾 ของรายการนั้น หรือกด &ldquo;ข้ามบิล&rdquo; ถ้าเดือนนั้นไม่มีบิล</p>
           <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
-          {items.map((it) => {
+          {shown.map((it) => {
             const key = `${it.subscription_id}|${it.month}`;
             const link = subInvoiceUrl(it);
             return (

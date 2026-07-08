@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { extractPdfFields } from "@/lib/parse-pdf-server";
 import type { SubInvoice } from "@/lib/subscriptions";
 
 export const dynamic = "force-dynamic";
@@ -63,13 +64,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const path = `${id}/${month}/${safeName}`;
 
   const db = supabaseAdmin();
+  const buf = await file.arrayBuffer();
   const { error: upErr } = await db.storage.from("invoices")
-    .upload(path, await file.arrayBuffer(), { upsert: true, contentType: "application/pdf" });
+    .upload(path, buf, { upsert: true, contentType: "application/pdf" });
   if (upErr) return NextResponse.json({ error: `อัปโหลดไม่สำเร็จ: ${upErr.message}` }, { status: 500 });
+
+  // อ่านข้อความใน PDF เก็บ ยอด/สกุลเงิน/วันที่ (best-effort — บิลรูปอ่านไม่ได้ก็ปล่อย null)
+  const parsed = await extractPdfFields(buf);
 
   const invId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const { data: row, error: dbErr } = await db.from("subscription_invoices").insert({
     id: invId, subscription_id: id, month, file_name: safeName, file_path: path,
+    amount: parsed.amount, currency: parsed.currency ?? "", invoice_date: parsed.dateISO, parsed_at: new Date().toISOString(),
   }).select("*").single();
   if (dbErr || !row) return NextResponse.json({ error: dbErr?.message ?? "บันทึกไม่สำเร็จ" }, { status: 500 });
 

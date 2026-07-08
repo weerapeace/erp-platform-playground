@@ -9,7 +9,7 @@ import { DataTable } from "@/components/data-table";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import type { ColumnDef } from "@tanstack/react-table";
-import type { SubInvoice } from "@/lib/subscriptions";
+import { toTHB, fmtBaht, fmtCost, type SubSettings, type SubInvoice, type Currency } from "@/lib/subscriptions";
 import { MissingInvoicesPanel } from "./missing-invoices-panel";
 
 type InvoiceRow = SubInvoice & { sub_name: string | null; sub_email: string | null; sub_profile: string | null };
@@ -21,12 +21,13 @@ function fmtMonth(ym: string): string {
   return names[idx] ? `${names[idx]} ${Number(y) + 543}` : ym;
 }
 
-export function AllInvoicesView({ canEdit }: { canEdit: boolean }) {
+export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; settings: SubSettings }) {
   const toast = useToast();
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [months, setMonths] = useState<string[]>([]);
   const [month, setMonth] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  const [backfilling, setBackfilling] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,6 +59,26 @@ export function AllInvoicesView({ canEdit }: { canEdit: boolean }) {
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   }, [toast]);
 
+  const unparsed = useMemo(() => rows.filter((r) => !r.parsed_at).length, [rows]);
+
+  // อ่าน PDF ที่แนบไว้แล้ว (ย้อนหลัง) — วนจนหมด
+  const runBackfill = useCallback(async () => {
+    setBackfilling(true);
+    try {
+      let total = 0, withData = 0, guard = 0;
+      while (guard++ < 20) {
+        const res = await apiFetch("/api/subscriptions/invoices/parse-existing", { method: "POST" });
+        const j = await res.json();
+        if (j.error) throw new Error(j.error);
+        total += j.processed ?? 0; withData += j.withData ?? 0;
+        if ((j.remaining ?? 0) <= 0 || (j.processed ?? 0) === 0) break;
+      }
+      toast.success(`อ่านบิลแล้ว ${total} ใบ · พบข้อมูล ${withData} ใบ`);
+      await load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "อ่านไม่สำเร็จ"); }
+    finally { setBackfilling(false); }
+  }, [toast, load]);
+
   const columns = useMemo<ColumnDef<InvoiceRow>[]>(() => [
     { id: "month", accessorKey: "month", header: "เดือน", size: 120,
       cell: ({ getValue }) => <span className="text-sm text-slate-700">{fmtMonth(getValue() as string)}</span> },
@@ -69,7 +90,17 @@ export function AllInvoicesView({ canEdit }: { canEdit: boolean }) {
         const inv = row.original;
         return <span className="text-xs text-slate-500 truncate block" title={inv.sub_email ?? ""}>{inv.sub_profile || inv.sub_email || "—"}</span>;
       } },
-    { id: "file_name", accessorKey: "file_name", header: "ไฟล์", size: 300,
+    { id: "invoice_date", accessorKey: "invoice_date", header: "วันที่ตัด (ในบิล)", size: 120,
+      cell: ({ getValue }) => { const d = getValue() as string | null; return <span className="text-xs text-slate-600">{d || <span className="text-slate-300">—</span>}</span>; } },
+    { id: "amount", accessorKey: "amount", header: "จำนวนเงิน", size: 120,
+      cell: ({ row }) => { const inv = row.original; return inv.amount != null
+        ? <span className="text-sm font-mono tabular-nums text-slate-700">{fmtCost(Number(inv.amount), (inv.currency || "THB") as Currency)}</span>
+        : <span className="text-xs text-slate-300">—</span>; } },
+    { id: "amount_thb", header: "≈ ฿ (บาท)", size: 120,
+      accessorFn: (r) => (r.amount != null ? toTHB(Number(r.amount), (r.currency || "THB") as Currency, settings) : 0),
+      cell: ({ row }) => { const inv = row.original; if (inv.amount == null) return <span className="text-xs text-slate-300">—</span>;
+        return <span className="text-sm font-mono tabular-nums text-indigo-600">{fmtBaht(toTHB(Number(inv.amount), (inv.currency || "THB") as Currency, settings), 2)}</span>; } },
+    { id: "file_name", accessorKey: "file_name", header: "ไฟล์", size: 260,
       cell: ({ getValue }) => <span className="text-sm text-slate-600 inline-flex items-center gap-1.5"><span>📄</span><span className="truncate">{getValue() as string}</span></span> },
     {
       id: "actions", header: "", size: 120, enableSorting: false,
@@ -89,12 +120,12 @@ export function AllInvoicesView({ canEdit }: { canEdit: boolean }) {
         );
       },
     },
-  ], [canEdit, handleDelete]);
+  ], [canEdit, handleDelete, settings]);
 
   return (
     <div className="space-y-3">
       {/* บิลที่ยังขาด */}
-      <MissingInvoicesPanel canEdit={canEdit} refreshKey={rows.length} />
+      <MissingInvoicesPanel canEdit={canEdit} refreshKey={rows.length} monthFilter={month} />
 
       {/* ตัวกรองเดือน */}
       <div className="flex flex-wrap items-center gap-3">
@@ -109,6 +140,13 @@ export function AllInvoicesView({ canEdit }: { canEdit: boolean }) {
           </select>
         </label>
         <span className="text-xs text-slate-400">แสดง {filtered.length} ใบเสร็จ</span>
+        {canEdit && unparsed > 0 && (
+          <button onClick={runBackfill} disabled={backfilling}
+            className="ml-auto h-9 px-3 text-xs font-medium border border-indigo-200 text-indigo-600 bg-white rounded-lg hover:bg-indigo-50 disabled:opacity-50"
+            title="อ่านไฟล์ PDF ที่แนบไว้แล้ว เพื่อดึงวันที่/ยอดเงิน">
+            {backfilling ? "กำลังอ่าน…" : `🔄 อ่านบิลที่แนบ (${unparsed})`}
+          </button>
+        )}
       </div>
 
       <DataTable

@@ -396,7 +396,7 @@ export default function SubscriptionsPage() {
             <WishlistView rows={rows} settings={settings} canEdit={canEdit}
               onAdd={openCreateWishlist} onEdit={openEdit} onDelete={askDelete} onPurchase={purchaseItem} />
           )}
-          {view === "invoices" && <AllInvoicesView canEdit={canEdit} />}
+          {view === "invoices" && <AllInvoicesView canEdit={canEdit} settings={settings} />}
         </div>
       </div>
 

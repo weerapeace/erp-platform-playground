@@ -52,6 +52,11 @@ export type SubInvoice = {
   file_path: string;
   uploaded_at: string;
   url?: string | null; // signed url (เติมจาก API)
+  // อ่านจากใน PDF (parse-invoice)
+  amount?: number | null;
+  currency?: string | null;
+  invoice_date?: string | null; // วันที่ในบิล (วันที่ตัด)
+  parsed_at?: string | null;    // null = ยังไม่เคยอ่าน
 };
 
 export const CYCLE_LABEL: Record<BillingCycle, string> = {
