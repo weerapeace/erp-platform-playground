@@ -28,6 +28,7 @@ export default function PlatformAccountsPage() {
   const [showGuide, setShowGuide] = useState(false);   // คู่มือขอ API Key ของ LINE SHOPPING
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
+  const [editPlat, setEditPlat] = useState<string | null>(null);   // แพลตฟอร์มที่กำลังแก้ (ชื่อร้าน/Shop ID) — กันเผลอพิมพ์
   // สถานะเชื่อมต่อ Facebook (Meta) ต่อแบรนด์
   type FbStatus = { connected: boolean; stage: string; page_name: string | null; pages: { id: string; name: string; ig: boolean }[] };
   const [fb, setFb] = useState<FbStatus>({ connected: false, stage: "none", page_name: null, pages: [] });
@@ -186,9 +187,20 @@ export default function PlatformAccountsPage() {
                 <div className="flex items-center gap-3 flex-wrap">
                   <span className="w-7 text-center shrink-0"><PlatformIcon code={p.code} iconKey={p.icon_key} size={22} /></span>
                   <span className="text-sm font-medium text-slate-700 w-24 shrink-0">{p.name_th}</span>
-                  <ERPInput value={acc.label ?? ""} disabled={!canManage} placeholder="ชื่อร้าน (เช่น Shopee – แบรนด์ A)" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, label: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { label: e.target.value })} />
-                  <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage} placeholder="Shop ID / ลิงก์ร้าน (เช่น @louismontini — ใช้ทำลิงก์สินค้า)" title="ใช้สร้างลิงก์สินค้าบนร้าน เช่น LINE: https://shop.line.me/@Shop ID/product/..." className="max-w-[280px]" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, external_shop_id: e.target.value } }))} onBlur={(e) => canManage && save(p.id, { external_shop_id: e.target.value })} />
+                  <ERPInput value={acc.label ?? ""} disabled={!canManage || editPlat !== p.id} placeholder="ชื่อร้าน (เช่น Shopee – แบรนด์ A)" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, label: e.target.value } }))} />
+                  <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage || editPlat !== p.id} placeholder="Shop ID / ลิงก์ร้าน (เช่น @louismontini — ใช้ทำลิงก์สินค้า)" title="ใช้สร้างลิงก์สินค้าบนร้าน เช่น LINE: https://shop.line.me/@Shop ID/product/..." className="max-w-[280px]" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, external_shop_id: e.target.value } }))} />
                   <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0"><input type="checkbox" disabled={!canManage} checked={acc.is_active} onChange={(e) => save(p.id, { is_active: e.target.checked })} />เปิด</label>
+                  {canManage && (editPlat === p.id ? (
+                    <span className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => { void save(p.id, { label: acc.label, external_shop_id: acc.external_shop_id }); setEditPlat(null); }}
+                        className="h-8 px-3 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">💾 บันทึก</button>
+                      <button onClick={() => { setEditPlat(null); void load(brandId); }}
+                        className="h-8 px-2 text-xs text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setEditPlat(p.id)} title="แก้ชื่อร้าน / Shop ID"
+                      className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">✎ แก้ไข</button>
+                  ))}
                 </div>
                 {hasApi && canManage && (
                   <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-2">

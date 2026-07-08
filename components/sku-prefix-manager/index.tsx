@@ -27,6 +27,9 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
   const [uomOpts, setUomOpts] = useState<SelectOption[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);          // แท็กที่กางดูรายตระกูลรหัส
   const [codesCache, setCodesCache] = useState<Record<string, TagCode[]>>({});
+  const [editTag, setEditTag] = useState<string | null>(null);            // แท็กที่กำลังแก้ (อื่น ๆ = readonly ดูสะอาด)
+  // สไตล์ช่องกรอก: แก้อยู่ = มีกรอบ · ไม่แก้ = ไร้กรอบเหมือนข้อความ
+  const inCls = (edit: boolean) => `w-full h-9 px-2 text-sm rounded-md ${edit ? "border border-slate-200 bg-white" : "border border-transparent bg-transparent cursor-default text-slate-700"}`;
 
   const load = useCallback(() => {
     apiFetch("/api/skus/tag-prefix").then((r) => r.json()).then((j) => setRows((j.data ?? []) as PrefixRow[])).catch(() => {});
@@ -120,29 +123,34 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
                   <div className="text-sm text-slate-800 truncate leading-tight">{r.name}
                     {r.group_name && <span className="text-[10px] text-slate-400 font-normal ml-1.5">{r.group_name}</span>}</div>
                 </div>
-                <div className={cPrefix}><input value={r.code_prefix} onChange={(e) => setField(r.id, { code_prefix: e.target.value })} placeholder="LEA-SAF-"
-                  className="w-full h-9 px-2 text-sm font-mono border border-slate-200 rounded-md" /></div>
-                <div className={cName}><input value={r.default_name} onChange={(e) => setField(r.id, { default_name: e.target.value })} placeholder="ชื่อเริ่มต้น"
-                  className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md" /></div>
-                <div className={cUom}><SearchableSelect value={r.default_uom_id ?? ""} options={uomOpts} placeholder="—" onChange={(v) => setField(r.id, { default_uom_id: v || null })} /></div>
+                <div className={cPrefix}><input value={r.code_prefix} readOnly={editTag !== r.id} onChange={(e) => setField(r.id, { code_prefix: e.target.value })} placeholder="LEA-SAF-"
+                  className={`${inCls(editTag === r.id)} font-mono`} /></div>
+                <div className={cName}><input value={r.default_name} readOnly={editTag !== r.id} onChange={(e) => setField(r.id, { default_name: e.target.value })} placeholder="ชื่อเริ่มต้น"
+                  className={inCls(editTag === r.id)} /></div>
+                <div className={cUom}><SearchableSelect value={r.default_uom_id ?? ""} options={uomOpts} placeholder="—" disabled={editTag !== r.id} onChange={(v) => setField(r.id, { default_uom_id: v || null })} /></div>
                 <div className={cAct}>
                   <button onClick={() => toggleExpand(r.id)} title="ตั้งค่าแยกรายตระกูลรหัส"
                     className={`h-9 px-2 text-[11px] rounded-md border whitespace-nowrap ${expanded === r.id ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                     {expanded === r.id ? "▾" : "▸"} ตระกูล{Object.keys(r.prefix_defaults ?? {}).length ? ` ${Object.keys(r.prefix_defaults).length}` : ""}</button>
-                  <button onClick={() => save(r)} disabled={saving === r.id} title="บันทึก"
-                    className="h-9 w-9 shrink-0 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{saving === r.id ? "…" : "💾"}</button>
+                  {editTag === r.id ? (
+                    <button onClick={() => { void save(r); setEditTag(null); }} disabled={saving === r.id} title="บันทึก"
+                      className="h-9 w-9 shrink-0 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{saving === r.id ? "…" : "💾"}</button>
+                  ) : (
+                    <button onClick={() => setEditTag(r.id)} title="แก้ไข"
+                      className="h-9 w-9 shrink-0 text-sm rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50">✎</button>
+                  )}
                 </div>
               </div>
               {/* กางรายตระกูลรหัส — คอลัมน์ตรงกับหัวตาราง */}
               {expanded === r.id && (
                 <div className="bg-blue-50/30 border-b border-slate-100 py-1">
                   <div className="px-5 py-0.5 flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] text-slate-400">ตั้งชื่อ/หน่วยแยกรายตระกูล · เว้นว่าง = ใช้ค่าด้านบน</span>
-                    {(codesCache[r.id]?.length ?? 0) > 0 && r.default_name && (
+                    <span className="text-[10px] text-slate-400">ตั้งชื่อ/หน่วยแยกรายตระกูล · เว้นว่าง = ใช้ค่าด้านบน{editTag !== r.id ? " · กด ✎ เพื่อแก้" : ""}</span>
+                    {editTag === r.id && (codesCache[r.id]?.length ?? 0) > 0 && r.default_name && (
                       <button type="button" onClick={() => fillAllPrefix(r, "name")}
                         className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-white hover:border-blue-300">↓ เติมชื่อ &ldquo;{r.default_name}&rdquo; ทุกตระกูล</button>
                     )}
-                    {(codesCache[r.id]?.length ?? 0) > 0 && r.default_uom_id && (
+                    {editTag === r.id && (codesCache[r.id]?.length ?? 0) > 0 && r.default_uom_id && (
                       <button type="button" onClick={() => fillAllPrefix(r, "uom")}
                         className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-white hover:border-blue-300">↓ เติมหน่วย{r.default_uom_label ? ` "${r.default_uom_label}"` : ""} ทุกตระกูล</button>
                     )}
@@ -161,9 +169,9 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
                               <div className="text-[10px] text-slate-400 pl-3.5 truncate">ล่าสุด {c.latest_code}</div>
                             </div>
                             <div className={cPrefix} />
-                            <div className={cName}><input value={pd.name} onChange={(e) => setPrefixDefault(r.id, c.prefix, { name: e.target.value })} placeholder={r.default_name || "ชื่อเฉพาะตระกูลนี้"}
-                              className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" /></div>
-                            <div className={cUom}><SearchableSelect value={pd.uom_id ?? ""} options={uomOpts} placeholder="—" onChange={(v) => setPrefixDefault(r.id, c.prefix, { uom_id: v || null })} /></div>
+                            <div className={cName}><input value={pd.name} readOnly={editTag !== r.id} onChange={(e) => setPrefixDefault(r.id, c.prefix, { name: e.target.value })} placeholder={r.default_name || "ชื่อเฉพาะตระกูลนี้"}
+                              className={inCls(editTag === r.id)} /></div>
+                            <div className={cUom}><SearchableSelect value={pd.uom_id ?? ""} options={uomOpts} placeholder="—" disabled={editTag !== r.id} onChange={(v) => setPrefixDefault(r.id, c.prefix, { uom_id: v || null })} /></div>
                             <div className={cAct} />
                           </div>
                         );
