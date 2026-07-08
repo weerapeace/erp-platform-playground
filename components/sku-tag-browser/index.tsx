@@ -13,7 +13,7 @@ import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { useToast } from "@/components/toast";
-import { ERPModal } from "@/components/modal";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 // ของกลาง bulk edit — type อย่างเดียว (ไม่กิน runtime); ตัว modal โหลดแบบ dynamic ด้านล่าง (กัน data-table เข้า bundle หน้านี้)
@@ -133,6 +133,7 @@ export function SkuTagBrowser() {
   const [selectingAll, setSelectingAll] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);               // เปิดฟอร์มเพิ่ม (SKU=Wizard / Parent=modal เล็ก)
+  const [copyPending, setCopyPending] = useState<{ id: string; code: string } | null>(null);  // ยืนยันก่อนคัดลอก
   const [peekId, setPeekId] = useState<string | null>(null);   // คลิกการ์ด/แถว → drawer เก่าตัวจริง (ของกลาง: ดู/แก้ทุกฟิลด์)
 
   // ชุดฟิลด์การ์ด (ครั้งเดียว)
@@ -206,6 +207,17 @@ export function SkuTagBrowser() {
     catch { /* ignore */ } finally { setLoadingMore(false); }
   };
   const reloadFirst = async () => { try { const r = await fetchPage(0); setCards(r.cards); setTotal(r.total); } catch { /* ignore */ } };
+  // คัดลอก SKU (หลังยืนยัน) → รีเฟรช + เด้งเปิดตัวใหม่ที่เพิ่งสร้าง
+  const doCopy = async (id: string) => {
+    try {
+      const res = await apiFetch("/api/skus/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? "คัดลอกไม่สำเร็จ");
+      toast.success(`คัดลอกเป็น ${j.code} แล้ว — เปิดให้แก้ไขต่อได้เลย`);
+      await reloadFirst();
+      if (j.id) setPeekId(String(j.id));   // เด้งไปที่ SKU ตัวใหม่
+    } catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกไม่สำเร็จ"); }
+  };
 
   const childGroups = (tree?.groups ?? []).filter((g) => g.parent_group_id === currentGroupId);
   const childTags   = (tree?.tags   ?? []).filter((t) => t.group_id === currentGroupId);
@@ -346,6 +358,11 @@ export function SkuTagBrowser() {
       {/* ฟอร์มเพิ่ม: SKU = Wizard เต็ม · Parent = modal เล็ก */}
       {addOpen && entity === "skus" && <SkuWizard open onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
       {addOpen && entity === "parent-skus" && <ParentSkuCreateModal onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
+      {copyPending && (
+        <ConfirmDialog open onClose={() => setCopyPending(null)}
+          title="คัดลอก SKU" message={`คัดลอก "${copyPending.code}" เป็น SKU ตัวใหม่? (รหัสจะตั้งให้อัตโนมัติ แก้รายละเอียดได้ภายหลัง)`}
+          confirmText="คัดลอก" onConfirm={() => { const id = copyPending.id; setCopyPending(null); void doCopy(id); }} />
+      )}
       {/* search + กรองแท็ก (ของกลาง) + ปรับการ์ด */}
       <div className="flex items-center gap-2 mb-3">
         <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 h-10 flex-1 bg-white focus-within:ring-2 focus-within:ring-indigo-500">
@@ -525,14 +542,7 @@ export function SkuTagBrowser() {
               : { entityType: "skus_v2", title: "รูปภาพเพิ่มเติม", maxItems: 9, maxSizeBytes: 2 * 1024 * 1024, imageOnly: true }}
             extraRowActions={isParent ? undefined : [{
               label: "คัดลอก", icon: "⧉",
-              onClick: async (row) => {
-                try {
-                  const res = await apiFetch("/api/skus/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id }) });
-                  const j = await res.json().catch(() => ({}));
-                  if (!res.ok || j.error) throw new Error(j.error ?? "คัดลอกไม่สำเร็จ");
-                  toast.success(`คัดลอกเป็น ${j.code} แล้ว — แก้ไขรายละเอียดได้`); void reloadFirst();
-                } catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกไม่สำเร็จ"); }
-              },
+              onClick: (row) => setCopyPending({ id: String(row.id), code: String(row.code ?? row.id) }),
             }]}
             recordId={peekId}
             navIds={cards.map((c) => c.id)}

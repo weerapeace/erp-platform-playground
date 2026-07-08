@@ -46,6 +46,21 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
     setRows((l) => l.map((r) => r.id === id
       ? { ...r, prefix_defaults: { ...r.prefix_defaults, [prefix]: { ...(r.prefix_defaults[prefix] ?? { name: "", uom_id: null, uom_label: "" }), ...patch } } }
       : r));
+  // เติมค่า default ของแท็ก (ชื่อ/หน่วย ด้านบน) ให้ "ทุกตระกูลรหัส" ในแท็กนั้น
+  const fillAllPrefix = (row: PrefixRow, field: "name" | "uom") => {
+    const codes = codesCache[row.id] ?? [];
+    setRows((l) => l.map((r) => {
+      if (r.id !== row.id) return r;
+      const pd = { ...r.prefix_defaults };
+      for (const c of codes) {
+        const cur = pd[c.prefix] ?? { name: "", uom_id: null, uom_label: "" };
+        pd[c.prefix] = field === "name"
+          ? { ...cur, name: row.default_name }
+          : { ...cur, uom_id: row.default_uom_id, uom_label: row.default_uom_label };
+      }
+      return { ...r, prefix_defaults: pd };
+    }));
+  };
   // กาง/พับ + โหลดตระกูลรหัสของแท็ก (จาก tag-codes)
   const toggleExpand = (id: string) => {
     setExpanded((cur) => (cur === id ? null : id));
@@ -121,17 +136,29 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
               {/* กางรายตระกูลรหัส — คอลัมน์ตรงกับหัวตาราง */}
               {expanded === r.id && (
                 <div className="bg-blue-50/30 border-b border-slate-100 py-1">
-                  <div className="px-5 py-0.5 text-[10px] text-slate-400">ตั้งชื่อ/หน่วยแยกรายตระกูล · เว้นว่าง = ใช้ค่าด้านบน</div>
+                  <div className="px-5 py-0.5 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] text-slate-400">ตั้งชื่อ/หน่วยแยกรายตระกูล · เว้นว่าง = ใช้ค่าด้านบน</span>
+                    {(codesCache[r.id]?.length ?? 0) > 0 && r.default_name && (
+                      <button type="button" onClick={() => fillAllPrefix(r, "name")}
+                        className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-white hover:border-blue-300">↓ เติมชื่อ &ldquo;{r.default_name}&rdquo; ทุกตระกูล</button>
+                    )}
+                    {(codesCache[r.id]?.length ?? 0) > 0 && r.default_uom_id && (
+                      <button type="button" onClick={() => fillAllPrefix(r, "uom")}
+                        className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-white hover:border-blue-300">↓ เติมหน่วย{r.default_uom_label ? ` "${r.default_uom_label}"` : ""} ทุกตระกูล</button>
+                    )}
+                  </div>
                   {!codesCache[r.id] ? <div className="px-5 py-1.5 text-[11px] text-slate-400">กำลังโหลด…</div>
                     : codesCache[r.id].length === 0 ? <div className="px-5 py-1.5 text-[11px] text-slate-400">— ยังไม่มีตระกูลรหัสที่ใช้อยู่ —</div>
                     : codesCache[r.id].map((c) => {
                         const pd = r.prefix_defaults?.[c.prefix] ?? { name: "", uom_id: null, uom_label: "" };
                         return (
                           <div key={c.prefix} className="px-5 py-1 flex items-center gap-2">
-                            <div className={`${cTag} flex items-center gap-1.5 pl-2`}>
-                              <span className="text-slate-300 shrink-0">↳</span>
-                              <span className="font-mono text-[12px] text-slate-600 truncate">{c.prefix}</span>
-                              <span className="text-[10px] text-slate-400 shrink-0 whitespace-nowrap">ล่าสุด {c.latest_code}</span>
+                            <div className={`${cTag} pl-2 min-w-0`}>
+                              <div className="flex items-center gap-1 min-w-0">
+                                <span className="text-slate-300 shrink-0">↳</span>
+                                <span className="font-mono text-[12px] text-slate-700 truncate" title={c.prefix}>{c.prefix}</span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 pl-3.5 truncate">ล่าสุด {c.latest_code}</div>
                             </div>
                             <div className={cPrefix} />
                             <div className={cName}><input value={pd.name} onChange={(e) => setPrefixDefault(r.id, c.prefix, { name: e.target.value })} placeholder={r.default_name || "ชื่อเฉพาะตระกูลนี้"}
