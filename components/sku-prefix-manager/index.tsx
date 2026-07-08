@@ -73,63 +73,71 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
     return !s || r.name.toLowerCase().includes(s) || (r.group_name ?? "").toLowerCase().includes(s) || r.code_prefix.toLowerCase().includes(s);
   });
 
+  // ความกว้างคอลัมน์ (ให้ทุกแถว/หัวตารางตรงกัน — ลดความลายตา)
+  const cTag = "flex-1 min-w-0", cPrefix = "w-28 shrink-0", cName = "flex-[1.6] min-w-0", cUom = "w-32 shrink-0", cAct = "w-[120px] shrink-0 flex items-center justify-end gap-1";
+
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-2xl max-h-[88vh] flex flex-col bg-white rounded-xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-3xl max-h-[88vh] flex flex-col bg-white rounded-xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-3 border-b border-slate-200">
           <h3 className="text-sm font-semibold text-slate-800">🔢 ค่าเริ่มต้น SKU ต่อประเภท</h3>
-          <p className="text-[11px] text-slate-500 mt-0.5">ตั้งครั้งเดียวต่อประเภท — <b>รหัสนำหน้า</b> (เช่น <code>LEA-SAF-</code> → LEA-SAF-028) · <b>ชื่อ default</b> · <b>หน่วย default</b> → Wizard เติมให้อัตโนมัติ</p>
+          <p className="text-[11px] text-slate-500 mt-0.5">ตั้งครั้งเดียวต่อประเภท → Wizard เติมรหัส/ชื่อ/หน่วยให้อัตโนมัติ · กด <b>▸ ตระกูล</b> เพื่อตั้งค่าแยกรายตระกูลรหัส (กรณีประเภทหนึ่งมีหลายรหัส)</p>
         </div>
         <div className="px-5 py-2 border-b border-slate-100 flex items-center gap-2">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาประเภท..." className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md" />
           <label className="flex items-center gap-1 text-xs text-slate-500"><input type="checkbox" checked={onlySet} onChange={(e) => setOnlySet(e.target.checked)} className="rounded border-slate-300" /> เฉพาะที่ตั้งแล้ว</label>
         </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+        <div className="flex-1 overflow-y-auto">
+          {/* หัวตาราง — โผล่ครั้งเดียว (ไม่ต้องมีป้ายซ้ำทุกแถว) */}
+          <div className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 px-5 py-1.5 flex items-center gap-2 text-[10px] font-semibold text-slate-400">
+            <div className={cTag}>ประเภท / ตระกูลรหัส</div>
+            <div className={cPrefix}>รหัสนำหน้า</div>
+            <div className={cName}>ชื่อ default</div>
+            <div className={cUom}>หน่วย</div>
+            <div className={cAct} />
+          </div>
           {shown.length === 0 && <div className="px-5 py-8 text-center text-xs text-slate-400">— ไม่พบประเภท —</div>}
           {shown.map((r) => (
-            <div key={r.id} className="px-5 py-2.5">
-              <div className="flex items-baseline justify-between gap-2 mb-1.5">
-                <div className="min-w-0">
-                  <span className="text-sm text-slate-800">{r.name}</span>
-                  {r.group_name && <span className="text-[10px] text-slate-400 ml-1.5">{r.group_name}</span>}
+            <div key={r.id}>
+              {/* แถวประเภท (แท็ก) */}
+              <div className="px-5 py-1.5 flex items-center gap-2 border-b border-slate-50 hover:bg-slate-50/50">
+                <div className={cTag}>
+                  <div className="text-sm text-slate-800 truncate leading-tight">{r.name}
+                    {r.group_name && <span className="text-[10px] text-slate-400 font-normal ml-1.5">{r.group_name}</span>}</div>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button onClick={() => toggleExpand(r.id)}
-                    className="h-7 px-2 text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">
-                    {expanded === r.id ? "▾" : "▸"} รายตระกูล{Object.keys(r.prefix_defaults ?? {}).length ? ` (${Object.keys(r.prefix_defaults).length})` : ""}</button>
-                  <button onClick={() => save(r)} disabled={saving === r.id}
-                    className="h-7 px-3 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{saving === r.id ? "..." : "บันทึก"}</button>
+                <div className={cPrefix}><input value={r.code_prefix} onChange={(e) => setField(r.id, { code_prefix: e.target.value })} placeholder="LEA-SAF-"
+                  className="w-full h-9 px-2 text-sm font-mono border border-slate-200 rounded-md" /></div>
+                <div className={cName}><input value={r.default_name} onChange={(e) => setField(r.id, { default_name: e.target.value })} placeholder="ชื่อเริ่มต้น"
+                  className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md" /></div>
+                <div className={cUom}><SearchableSelect value={r.default_uom_id ?? ""} options={uomOpts} placeholder="—" onChange={(v) => setField(r.id, { default_uom_id: v || null })} /></div>
+                <div className={cAct}>
+                  <button onClick={() => toggleExpand(r.id)} title="ตั้งค่าแยกรายตระกูลรหัส"
+                    className={`h-9 px-2 text-[11px] rounded-md border whitespace-nowrap ${expanded === r.id ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                    {expanded === r.id ? "▾" : "▸"} ตระกูล{Object.keys(r.prefix_defaults ?? {}).length ? ` ${Object.keys(r.prefix_defaults).length}` : ""}</button>
+                  <button onClick={() => save(r)} disabled={saving === r.id} title="บันทึก"
+                    className="h-9 w-9 shrink-0 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{saving === r.id ? "…" : "💾"}</button>
                 </div>
               </div>
-              <div className="flex items-end gap-2">
-                <label className="block"><span className="text-[10px] text-slate-400">รหัสนำหน้า</span>
-                  <input value={r.code_prefix} onChange={(e) => setField(r.id, { code_prefix: e.target.value })} placeholder="LEA-SAF-"
-                    className="mt-0.5 w-32 h-8 px-2 text-sm font-mono border border-slate-200 rounded-md" /></label>
-                <label className="block flex-1 min-w-0"><span className="text-[10px] text-slate-400">ชื่อ default</span>
-                  <input value={r.default_name} onChange={(e) => setField(r.id, { default_name: e.target.value })} placeholder="เช่น หนังซาเฟียโน่"
-                    className="mt-0.5 w-full h-8 px-2 text-sm border border-slate-200 rounded-md" /></label>
-                <label className="block w-40"><span className="text-[10px] text-slate-400">หน่วย default</span>
-                  <div className="mt-0.5"><SearchableSelect value={r.default_uom_id ?? ""} options={uomOpts} placeholder="— หน่วย —"
-                    onChange={(v) => setField(r.id, { default_uom_id: v || null })} /></div></label>
-              </div>
-              {/* กางรายตระกูลรหัส — ตั้งชื่อ/หน่วย default แยกราย prefix (แก้ปัญหา 1 แท็กมีหลายรหัสนำหน้า) */}
+              {/* กางรายตระกูลรหัส — คอลัมน์ตรงกับหัวตาราง */}
               {expanded === r.id && (
-                <div className="mt-2 pl-3 border-l-2 border-blue-100 space-y-1.5">
-                  <div className="text-[10px] text-slate-400">ตั้งชื่อ/หน่วย default แยกราย &ldquo;ตระกูลรหัส&rdquo; ที่ใช้จริงในประเภทนี้ (Wizard เลือกตระกูลแล้วเติมตามนี้ · ว่าง=ใช้ค่ารวมด้านบน)</div>
-                  {!codesCache[r.id] ? <div className="text-[11px] text-slate-400">กำลังโหลด…</div>
-                    : codesCache[r.id].length === 0 ? <div className="text-[11px] text-slate-400">— ยังไม่มีตระกูลรหัสที่ใช้อยู่ —</div>
+                <div className="bg-blue-50/30 border-b border-slate-100 py-1">
+                  <div className="px-5 py-0.5 text-[10px] text-slate-400">ตั้งชื่อ/หน่วยแยกรายตระกูล · เว้นว่าง = ใช้ค่าด้านบน</div>
+                  {!codesCache[r.id] ? <div className="px-5 py-1.5 text-[11px] text-slate-400">กำลังโหลด…</div>
+                    : codesCache[r.id].length === 0 ? <div className="px-5 py-1.5 text-[11px] text-slate-400">— ยังไม่มีตระกูลรหัสที่ใช้อยู่ —</div>
                     : codesCache[r.id].map((c) => {
                         const pd = r.prefix_defaults?.[c.prefix] ?? { name: "", uom_id: null, uom_label: "" };
                         return (
-                          <div key={c.prefix} className="flex items-end gap-2">
-                            <div className="w-36 shrink-0"><span className="text-[10px] text-slate-400">ล่าสุด {c.latest_code}</span>
-                              <div className="font-mono text-[12px] text-slate-700 truncate">{c.prefix}</div></div>
-                            <label className="block flex-1 min-w-0"><span className="text-[10px] text-slate-400">ชื่อ default</span>
-                              <input value={pd.name} onChange={(e) => setPrefixDefault(r.id, c.prefix, { name: e.target.value })} placeholder={r.default_name || "ชื่อสำหรับตระกูลนี้"}
-                                className="mt-0.5 w-full h-8 px-2 text-sm border border-slate-200 rounded-md" /></label>
-                            <label className="block w-36"><span className="text-[10px] text-slate-400">หน่วย</span>
-                              <div className="mt-0.5"><SearchableSelect value={pd.uom_id ?? ""} options={uomOpts} placeholder="— หน่วย —"
-                                onChange={(v) => setPrefixDefault(r.id, c.prefix, { uom_id: v || null })} /></div></label>
+                          <div key={c.prefix} className="px-5 py-1 flex items-center gap-2">
+                            <div className={`${cTag} flex items-center gap-1.5 pl-2`}>
+                              <span className="text-slate-300 shrink-0">↳</span>
+                              <span className="font-mono text-[12px] text-slate-600 truncate">{c.prefix}</span>
+                              <span className="text-[10px] text-slate-400 shrink-0 whitespace-nowrap">ล่าสุด {c.latest_code}</span>
+                            </div>
+                            <div className={cPrefix} />
+                            <div className={cName}><input value={pd.name} onChange={(e) => setPrefixDefault(r.id, c.prefix, { name: e.target.value })} placeholder={r.default_name || "ชื่อเฉพาะตระกูลนี้"}
+                              className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" /></div>
+                            <div className={cUom}><SearchableSelect value={pd.uom_id ?? ""} options={uomOpts} placeholder="—" onChange={(v) => setPrefixDefault(r.id, c.prefix, { uom_id: v || null })} /></div>
+                            <div className={cAct} />
                           </div>
                         );
                       })}
