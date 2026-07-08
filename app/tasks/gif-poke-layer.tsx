@@ -41,7 +41,7 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
   const t = useT();
   const [pokes, setPokes] = useState<Poke[]>([]);
   const [pos, setPos] = useState<Record<string, { x: number; y: number }>>({});
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);   // ชี้อยู่ → หยุดวิ่งให้กดปุ่มได้
   const [pinned, setPinned] = useState<Set<string>>(new Set());   // ตัวที่ลากวางไว้ (หยุดวิ่ง)
   const [dropIds, setDropIds] = useState<Set<string>>(new Set()); // ตัวที่กำลังเล่นอนิเมชั่นเด้ง
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -82,35 +82,34 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
   const queued = Math.max(0, pokes.length - shown.length);
   const shownKey = shown.map((p) => p.id).join(",");
 
-  // แจกตำแหน่งเริ่มต้นให้ตัวใหม่
+  // แจกตำแหน่งเริ่มต้นให้ตัวใหม่ (เว้นขอบ+บนไว้ให้ฟองข้อความ)
   useEffect(() => {
     setPos((prev) => {
       const next = { ...prev };
-      for (const p of shown) if (!next[p.id]) next[p.id] = { x: rnd(6, 82), y: rnd(12, 78) };
+      for (const p of shown) if (!next[p.id]) next[p.id] = { x: rnd(14, 78), y: rnd(24, 80) };
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownKey]);
 
-  // เดินไปมา — ย้ายทุก MOVE_MS (เว้นตัวที่เปิดอ่าน/ลากค้าง/ปักหมุด)
+  // เดินไปมา — ย้ายทุก MOVE_MS (เว้นตัวที่ชี้อยู่/ลากค้าง/ปักหมุด เพื่อให้กดปุ่มได้)
   useEffect(() => {
     const id = setInterval(() => {
       setPos((prev) => {
         const next = { ...prev };
         for (const p of shown) {
-          if (p.id === activeId || p.id === draggingId || pinned.has(p.id)) continue;
-          next[p.id] = { x: rnd(6, 82), y: rnd(12, 78) };
+          if (p.id === hoveredId || p.id === draggingId || pinned.has(p.id)) continue;
+          next[p.id] = { x: rnd(14, 78), y: rnd(24, 80) };
         }
         return next;
       });
     }, MOVE_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownKey, activeId, draggingId, pinned]);
+  }, [shownKey, hoveredId, draggingId, pinned]);
 
   const dismiss = (id: string) => {
     setPokes((prev) => prev.filter((p) => p.id !== id));
-    setActiveId((a) => (a === id ? null : a));
     apiFetch("/api/gif-poke", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => { /* noop */ });
   };
 
@@ -130,7 +129,6 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
     const d = dragRef.current; dragRef.current = null;
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
     if (d?.moved) { setPinned((prev) => new Set(prev).add(id)); setDraggingId(null); }   // ลากแล้ว → ปักหมุด (หยุดวิ่ง)
-    else setActiveId((a) => (a === id ? null : id));                                       // ไม่ได้ลาก = คลิก
   };
 
   if (!userId || shown.length === 0) return null;
@@ -140,38 +138,38 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
       {shown.map((p) => {
         const src = gifSrc(p);
         const pp = pos[p.id] ?? { x: 50, y: 50 };
-        const active = p.id === activeId;
         const dragging = p.id === draggingId;
+        const hovered = p.id === hoveredId;
+        const still = dragging || hovered || pinned.has(p.id);   // อยู่นิ่ง (ชี้/ลาก/ปักหมุด) → กดปุ่มได้ง่าย
         const av = avatarSrc(p.from_avatar, 48);
-        const innerCls = dropIds.has(p.id) ? "gif-poke-drop" : dragging ? "" : "ov-pet-float";
+        const innerCls = dropIds.has(p.id) ? "gif-poke-drop" : (dragging || hovered) ? "" : "ov-pet-float";
         return (
-          <div key={p.id} className="absolute pointer-events-auto" style={{ left: `${pp.x}%`, top: `${pp.y}%`, transition: dragging ? "none" : `left ${MOVE_MS}ms linear, top ${MOVE_MS}ms linear` }}>
-            {active && (
-              <div className="ov-bubble-pop absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-56 max-w-[72vw]">
-                <div className="bg-white rounded-2xl shadow-xl border border-slate-100 p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    {av ? <img src={av} alt="" className="w-6 h-6 rounded-full object-cover" /> : <span className="w-6 h-6 rounded-full bg-violet-100 flex items-center justify-center text-xs">🎁</span>}
-                    <span className="text-xs font-semibold text-slate-700 truncate">{p.from_name || t("เพื่อนร่วมงาน", "A colleague")}</span>
-                  </div>
-                  {p.message && <p className="text-sm text-slate-600 whitespace-pre-wrap break-words">{p.message}</p>}
-                  <div className="flex gap-1.5 mt-2">
-                    {onReply && p.from_user_id && (
-                      <button onClick={() => { onReply(p); setActiveId(null); }} className="flex-1 h-8 rounded-lg border border-violet-200 text-violet-700 text-xs font-bold hover:bg-violet-50">{t("↩ ตอบกลับ", "↩ Reply")}</button>
-                    )}
-                    <button onClick={() => dismiss(p.id)} className="flex-1 h-8 rounded-lg bg-violet-600 text-white text-xs font-bold hover:bg-violet-700">{t("ปิด 💜", "Thanks 💜")}</button>
-                  </div>
+          <div key={p.id} className="absolute pointer-events-auto"
+            style={{ left: `${pp.x}%`, top: `${pp.y}%`, transition: still ? "none" : `left ${MOVE_MS}ms linear, top ${MOVE_MS}ms linear` }}
+            onMouseEnter={() => setHoveredId(p.id)} onMouseLeave={() => setHoveredId((h) => (h === p.id ? null : h))}>
+            {/* ฟองข้อความ — ขึ้นเองอัตโนมัติ (ไม่ต้องคลิก) */}
+            <div className="ov-bubble-pop absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-52 max-w-[72vw]">
+              <div className="bg-white rounded-2xl shadow-xl border border-slate-100 p-2.5">
+                <div className="flex items-center gap-2 mb-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  {av ? <img src={av} alt="" className="w-5 h-5 rounded-full object-cover" /> : <span className="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center text-[11px]">🎁</span>}
+                  <span className="text-[11px] font-semibold text-slate-700 truncate">{p.from_name || t("เพื่อนร่วมงาน", "A colleague")}</span>
+                </div>
+                {p.message && <p className="text-sm text-slate-600 whitespace-pre-wrap break-words">{p.message}</p>}
+                <div className="flex gap-1.5 mt-2">
+                  {onReply && p.from_user_id && (
+                    <button onClick={() => onReply(p)} className="flex-1 h-7 rounded-lg border border-violet-200 text-violet-700 text-xs font-bold hover:bg-violet-50">{t("↩ ตอบกลับ", "↩ Reply")}</button>
+                  )}
+                  <button onClick={() => dismiss(p.id)} className="flex-1 h-7 rounded-lg bg-violet-600 text-white text-xs font-bold hover:bg-violet-700">{t("ปิด 💜", "Thanks 💜")}</button>
                 </div>
               </div>
-            )}
+            </div>
             <button
               onPointerDown={onDown(p.id)} onPointerMove={onMove(p.id)} onPointerUp={onUp(p.id)}
               title={p.from_name ? t(`จาก ${p.from_name} · ลากเพื่อย้าย`, `from ${p.from_name} · drag to move`) : t("ลากเพื่อย้าย", "drag to move")}
               className={`relative block focus:outline-none ${innerCls}`} style={{ width: SIZE, height: SIZE, cursor: "grab", touchAction: "none" }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {src && <img src={src} alt="" className="w-full h-full object-contain drop-shadow-lg select-none" draggable={false} />}
-              {!active && p.message && <span className="absolute -top-1 -right-1 bg-violet-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center shadow">💬</span>}
-              {pinned.has(p.id) && <span className="absolute -bottom-1 -right-1 text-[11px]">📌</span>}
             </button>
           </div>
         );
