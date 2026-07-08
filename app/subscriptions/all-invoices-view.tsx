@@ -13,7 +13,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { toTHB, fmtBaht, fmtCost, type SubSettings, type SubInvoice, type Currency } from "@/lib/subscriptions";
 import { MissingInvoicesPanel } from "./missing-invoices-panel";
 
-type InvoiceRow = SubInvoice & { sub_name: string | null; sub_email: string | null; sub_profile: string | null };
+type InvoiceRow = SubInvoice & { sub_name: string | null; sub_email: string | null; sub_profile: string | null; sub_card_name: string | null };
 
 function fmtMonth(ym: string): string {
   const [y, m] = (ym ?? "").split("-");
@@ -118,6 +118,8 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
       cell: ({ getValue }) => <span className="text-sm text-slate-700">{fmtMonth(getValue() as string)}</span> },
     { id: "sub_name", accessorKey: "sub_name", header: "รายการ", size: 220,
       cell: ({ getValue }) => <span className="text-sm font-medium text-slate-800">{(getValue() as string) || "—"}</span> },
+    { id: "sub_card_name", accessorKey: "sub_card_name", header: "ชื่อในบิลบัตร", size: 170,
+      cell: ({ getValue }) => { const v = getValue() as string | null; return v ? <span className="text-xs text-slate-600">{v}</span> : <span className="text-xs text-slate-300">—</span>; } },
     { id: "profile", accessorKey: "sub_profile", header: "โปรไฟล์/บัญชี", size: 200,
       meta: { filterable: true, filterType: "select", filterLabel: "โปรไฟล์/บัญชี" },
       cell: ({ row }) => {
@@ -204,7 +206,7 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
         data={filtered}
         columns={columns}
         loading={loading}
-        searchableKeys={["sub_name", "sub_profile", "sub_email", "file_name", "month"]}
+        searchableKeys={["sub_name", "sub_card_name", "sub_profile", "sub_email", "file_name", "month"]}
         searchPlaceholder="ค้นหา รายการ / ชื่อไฟล์…"
         exportFilename="subscription-invoices"
         exportEntityType="subscription_invoices"

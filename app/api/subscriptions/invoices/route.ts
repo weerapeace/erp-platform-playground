@@ -13,7 +13,7 @@ export const revalidate = 0;
 
 const SIGNED_TTL = 60 * 60;
 
-type InvoiceWithSub = SubInvoice & { sub_name: string | null; sub_email: string | null; sub_profile: string | null };
+type InvoiceWithSub = SubInvoice & { sub_name: string | null; sub_email: string | null; sub_profile: string | null; sub_card_name: string | null };
 
 export async function GET(request: NextRequest) {
   const guard = await guardApi(request, "subscriptions.view");
@@ -28,11 +28,14 @@ export async function GET(request: NextRequest) {
 
   // ชื่อรายการ (subscription) — ดึงเป็นชุดเดียวแล้ว map
   const subIds = Array.from(new Set(rows.map((r) => r.subscription_id).filter(Boolean)));
-  const subById: Record<string, { name: string; email: string; profile: string }> = {};
+  const subById: Record<string, { name: string; email: string; profile: string; card: string }> = {};
   if (subIds.length) {
-    const { data: subs } = await db.from("subscriptions").select("id, name, account_email, chrome_profile").in("id", subIds);
+    const { data: subs } = await db.from("subscriptions").select("id, name, account_email, chrome_profile, card_statement_name").in("id", subIds);
     (subs ?? []).forEach((s) => {
-      subById[s.id as string] = { name: (s.name as string) ?? "", email: (s.account_email as string) ?? "", profile: (s.chrome_profile as string) ?? "" };
+      subById[s.id as string] = {
+        name: (s.name as string) ?? "", email: (s.account_email as string) ?? "",
+        profile: (s.chrome_profile as string) ?? "", card: (s.card_statement_name as string) ?? "",
+      };
     });
   }
 
@@ -51,6 +54,7 @@ export async function GET(request: NextRequest) {
       sub_name: info?.name ?? null,
       sub_email: info?.email || null,
       sub_profile: info?.profile || null,
+      sub_card_name: info?.card || null,
       url: urlByPath[r.file_path] ?? null,
     };
   });
