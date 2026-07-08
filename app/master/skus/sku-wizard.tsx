@@ -20,6 +20,15 @@ const LABEL_OVERRIDE: Record<string, string> = {
   standard_price: "ราคาซื้อ", rmb_cost: "ราคาซื้อ (หยวน) RMB", fabric_width_cm: "หน้ากว้าง",
 };
 
+// แยกรหัสเป็น prefix + เลขท้าย (เช่น "LEA-SAF-028" → {prefix:"LEA-SAF-", num:28, pad:3})
+type CodeBase = { prefix: string; num: number; pad: number };
+const splitCode = (code: string): CodeBase => {
+  const m = code.match(/^(.*?)(\d+)$/);
+  return m ? { prefix: m[1], num: parseInt(m[2], 10), pad: m[2].length } : { prefix: code, num: 0, pad: 0 };
+};
+const codeAt = (b: CodeBase, n: number) => (b.pad > 0 ? b.prefix + String(n).padStart(b.pad, "0") : "");
+type TagCtx = { fabric_widths: number[]; sellers: { id: string; name: string | null; count: number }[] };
+
 type PickerOpt = { id: string; label: string; secondary?: string };
 type TagOpt = { id: string; name: string; code_prefix: string; group_name: string | null; default_name?: string; default_uom_id?: string | null; default_uom_label?: string };
 type Suggest = { prefix: string; this_latest: string | null; this_suggested: string | null; group_latest: string | null; group_name: string | null; error?: string };
@@ -34,9 +43,10 @@ const COLS_LS = "sku-wizard-batch-cols";
 const SKIP_COLS = new Set(["id", "is_active", "sale_ok", "purchase_ok", "created_at", "updated_at", "attribute_values", "cover_image_r2_key", "odoo_form_details", "odoo_form_synced_at"]);
 
 // ---- ตัวเลือกแบบค้นหา (async) จาก picker กลาง ----
-function AsyncPick({ table, label, secondary, value, valueLabel, onChange, placeholder }: {
+function AsyncPick({ table, label, secondary, value, valueLabel, onChange, placeholder, pinned }: {
   table: string; label: string; secondary?: string;
   value: string | null; valueLabel?: string; onChange: (id: string | null, lbl: string) => void; placeholder: string;
+  pinned?: { id: string; label: string }[];   // รายการ "ใช้บ่อย" ปักหมุดบนสุด (⭐)
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -74,13 +84,31 @@ function AsyncPick({ table, label, secondary, value, valueLabel, onChange, place
               className="w-full h-8 px-2 text-sm border-b border-slate-100 focus:outline-none" />
             <div className="max-h-56 overflow-y-auto py-1">
               {value && <button type="button" onClick={() => { onChange(null, ""); setOpen(false); }} className="w-full px-3 py-1.5 text-left text-xs text-rose-500 hover:bg-rose-50">✕ ล้าง</button>}
-              {opts.map((o) => (
+              {/* ⭐ ใช้บ่อยในประเภทนี้ — ปักหมุดบนสุด */}
+              {(() => {
+                const s = q.trim().toLowerCase();
+                const pf = (pinned ?? []).filter((p) => !s || p.label.toLowerCase().includes(s));
+                if (pf.length === 0) return null;
+                return (
+                  <>
+                    <div className="px-3 pt-1 pb-0.5 text-[10px] text-amber-600">⭐ ใช้บ่อยในประเภทนี้</div>
+                    {pf.map((p) => (
+                      <button key={"pin-" + p.id} type="button" onClick={() => { onChange(p.id, p.label); setOpen(false); setQ(""); }}
+                        className="w-full px-3 py-1.5 text-left text-sm hover:bg-amber-50 truncate flex items-center gap-1">
+                        <span className="text-amber-500 shrink-0">⭐</span><span className="truncate">{p.label}</span>
+                      </button>
+                    ))}
+                    <div className="border-t border-slate-100 my-1" />
+                  </>
+                );
+              })()}
+              {opts.filter((o) => !(pinned ?? []).some((p) => p.id === o.id)).map((o) => (
                 <button key={o.id} type="button" onClick={() => { onChange(o.id, o.label); setOpen(false); setQ(""); }}
                   className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50 truncate">
                   {o.label}{o.secondary ? <span className="text-slate-400"> · {o.secondary}</span> : null}
                 </button>
               ))}
-              {opts.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">— ไม่พบ —</div>}
+              {opts.length === 0 && (pinned ?? []).length === 0 && <div className="px-3 py-2 text-xs text-slate-400">— ไม่พบ —</div>}
             </div>
         </div>
       )}
@@ -113,6 +141,15 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
     value: t.id, label: t.name,
     sub: `${t.group_name ? t.group_name + " · " : ""}${t.code_prefix ? t.code_prefix : "ยังไม่ตั้งรหัส"}`,
   })), [tags]);
+
+  // context ของประเภท (หน้ากว้าง/ผู้ขายที่ใช้บ่อย) — ใช้ทั้งเดี่ยว/ชุด
+  const [ctx, setCtx] = useState<TagCtx>({ fabric_widths: [], sellers: [] });
+  const loadContext = useCallback((tagId: string) => {
+    apiFetch(`/api/skus/tag-context?family_tag_id=${tagId}`).then((r) => r.json())
+      .then((j) => setCtx({ fabric_widths: j.fabric_widths ?? [], sellers: j.sellers ?? [] }))
+      .catch(() => setCtx({ fabric_widths: [], sellers: [] }));
+  }, []);
+  const sellerPins = useMemo(() => ctx.sellers.map((s) => ({ id: s.id, label: s.name ?? "(ไม่มีชื่อ)" })), [ctx.sellers]);
 
   // โหลดประเภท(แท็ก) ทั้งหมด (รวมที่ยังไม่ตั้ง prefix) — ใช้ tag-prefix
   const loadTags = useCallback(() => {
@@ -203,7 +240,43 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
   // ---------- โหมดชุด ----------
   const [lines, setLines] = useState<Row[]>([blankRow(), blankRow(), blankRow()]);
   const [bTag, setBTag] = useState<string | null>(null);
+  const [batchBase, setBatchBase] = useState<CodeBase | null>(null);   // ฐานรหัสรัน (prefix+เลข) ของประเภทที่เลือก
   const [colMenu, setColMenu] = useState(false);
+
+  // เลือกประเภททั้งชุด → เติมรหัสรันทุกแถว (แถวแรก=เลขถัดไป, ถัดไป+1) + ชื่อ/หน่วย default + โหลด context
+  const applyBatchTag = (tagId: string | null) => {
+    setBTag(tagId);
+    if (!tagId) { setBatchBase(null); return; }
+    loadContext(tagId);
+    const tag = tags.find((t) => t.id === tagId);
+    apiFetch(`/api/skus/code-suggest?family_tag_id=${tagId}`).then((r) => r.json()).then((j: Suggest) => {
+      const base = j.this_suggested ? splitCode(j.this_suggested) : null;
+      setBatchBase(base);
+      setLines((l) => l.map((r, i) => {
+        const values = { ...r.values }; const labels = { ...r.labels };
+        if (base) values.code = codeAt(base, base.num + i);
+        if (tag?.default_name && !String(values.name_th ?? "").trim()) values.name_th = tag.default_name;
+        if (tag?.default_uom_id && !values.uom_id) { values.uom_id = tag.default_uom_id; labels.uom_id = tag.default_uom_label || ""; }
+        return { values, labels };
+      }));
+    }).catch(() => {});
+  };
+  // เพิ่มแถว → รหัสรันต่อ (max เลขในชุด+1) + ชื่อ/หน่วย default (กฎเดียวกับเดี่ยว)
+  const addBatchRow = () => setLines((l) => {
+    const tag = bTag ? tags.find((t) => t.id === bTag) : null;
+    const values: Record<string, unknown> = {}; const labels: Record<string, string> = {};
+    if (batchBase) {
+      let maxN = batchBase.num - 1;
+      for (const r of l) {
+        const c = String(r.values.code ?? "");
+        if (c.startsWith(batchBase.prefix)) { const m = c.slice(batchBase.prefix.length).match(/^(\d+)/); if (m) maxN = Math.max(maxN, parseInt(m[1], 10)); }
+      }
+      values.code = codeAt(batchBase, maxN + 1);
+    }
+    if (tag?.default_name) values.name_th = tag.default_name;
+    if (tag?.default_uom_id) { values.uom_id = tag.default_uom_id; labels.uom_id = tag.default_uom_label || ""; }
+    return [...l, { values, labels }];
+  });
   const setCell = (i: number, k: string, v: unknown, lbl?: string) => setLines((l) => l.map((x, idx) => idx === i ? ({ values: { ...x.values, [k]: v }, labels: lbl !== undefined ? { ...x.labels, [k]: lbl } : x.labels }) : x));
   const fillDown = (k: string) => setLines((l) => {
     if (l.length === 0) return l;
@@ -211,7 +284,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
     return l.map((x, i) => i === 0 ? x : ({ values: { ...x.values, [k]: v }, labels: { ...x.labels, [k]: lbl } }));
   });
 
-  const reset = () => { setSingle(blankRow()); setSug(null); setTagCodes([]); setSTag(null); setLines([blankRow(), blankRow(), blankRow()]); setBTag(null); };
+  const reset = () => { setSingle(blankRow()); setSug(null); setTagCodes([]); setSTag(null); setLines([blankRow(), blankRow(), blankRow()]); setBTag(null); setCtx({ fabric_widths: [], sellers: [] }); setBatchBase(null); };
   const close = () => { if (saving) return; reset(); onClose(); };
 
   const submit = async (rows: Row[], tagId: string | null) => {
@@ -249,7 +322,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
         <div className="flex justify-between w-full">
           <button onClick={() => setStep("choose")} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">← ย้อนกลับ</button>
           <div className="flex gap-2">
-            {step === "batch" && <button onClick={() => setLines((l) => [...l, blankRow()])} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">＋ เพิ่มแถว</button>}
+            {step === "batch" && <button onClick={addBatchRow} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">＋ เพิ่มแถว</button>}
             <button onClick={close} disabled={saving} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
             <button onClick={() => step === "single" ? submit([single], sTag) : submit(lines, bTag)} disabled={saving}
               className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังสร้าง..." : "สร้าง SKU"}</button>
@@ -280,7 +353,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
             <span className="text-xs text-slate-500">ประเภท (Tag) — ใช้เสนอรหัสให้</span>
             <div className="mt-0.5 flex gap-1.5">
               <div className="flex-1"><SearchableSelect value={sTag ?? ""} options={tagOptions} placeholder="— เลือกประเภท (พิมพ์ค้นหาได้) —"
-                onChange={(v) => { const nv = v || null; setSTag(nv); if (nv) { loadSuggest(nv); prefillFromTag(nv); } else { setSug(null); setTagCodes([]); } }} /></div>
+                onChange={(v) => { const nv = v || null; setSTag(nv); if (nv) { loadSuggest(nv); prefillFromTag(nv); loadContext(nv); } else { setSug(null); setTagCodes([]); setCtx({ fabric_widths: [], sellers: [] }); } }} /></div>
               {/* ℹ️ tooltip: ทุกตระกูลรหัสที่ SKU ในแท็กนี้ใช้จริง (hover ดู ไม่ใช่ปุ่มเลือก) */}
               {tagCodes.length > 0 && (
                 <div className="relative group flex items-center">
@@ -328,11 +401,20 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
             <label className="block"><span className="text-xs text-slate-500">สี</span>
               <input value={(single.values.color as string) ?? ""} onChange={(e) => setSV("color", e.target.value)} placeholder="ดำ/แดง..." className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
             <label className="block"><span className="text-xs text-slate-500">หน้ากว้าง (ซม. — กรณีผ้า)</span>
-              <input type="number" step="any" value={(single.values.fabric_width_cm as string) ?? ""} onChange={(e) => setSV("fabric_width_cm", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
+              <input type="number" step="any" value={(single.values.fabric_width_cm as string) ?? ""} onChange={(e) => setSV("fabric_width_cm", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" />
+              {ctx.fabric_widths.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 mt-1">
+                  <span className="text-[10px] text-slate-400">ใช้บ่อย:</span>
+                  {ctx.fabric_widths.map((w) => (
+                    <button key={w} type="button" onClick={() => setSV("fabric_width_cm", String(w))}
+                      className="px-1.5 py-0.5 text-[11px] rounded border border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50">{w}</button>
+                  ))}
+                </div>
+              )}</label>
             <label className="block"><span className="text-xs text-slate-500">หน่วย (Uom)</span>
               <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => setSV("uom_id", id, lbl)} placeholder="เลือกหน่วย" /></div></label>
             <label className="block"><span className="text-xs text-slate-500">ผู้ขาย</span>
-              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="partners_v2" label="name_th" secondary="code" value={(single.values.seller_partner_id as string) ?? null} valueLabel={single.labels.seller_partner_id} onChange={(id, lbl) => setSV("seller_partner_id", id, lbl)} placeholder="เลือกผู้ขาย" /></div></label>
+              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="partners_v2" label="name_th" secondary="code" pinned={sellerPins} value={(single.values.seller_partner_id as string) ?? null} valueLabel={single.labels.seller_partner_id} onChange={(id, lbl) => setSV("seller_partner_id", id, lbl)} placeholder="เลือกผู้ขาย" /></div></label>
             <label className="block"><span className="text-xs text-slate-500">ราคาซื้อ</span>
               <input type="number" step="any" value={(single.values.standard_price as string) ?? ""} onChange={(e) => setSV("standard_price", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" />
               <span className="block text-[10px] text-slate-400 mt-0.5">คำนวณจาก ราคาซื้อหยวน × {rmbRate} (แก้ทับเองได้)</span></label>
@@ -354,7 +436,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
         <div className="space-y-3">
           <div className="flex flex-wrap items-end gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
             <label className="block"><span className="text-xs text-slate-500">ประเภท (Tag) ทั้งชุด</span>
-              <div className="mt-0.5 w-48"><SearchableSelect value={bTag ?? ""} options={tagOptions} placeholder="— ไม่ระบุ (ค้นหาได้) —" onChange={(v) => setBTag(v || null)} /></div></label>
+              <div className="mt-0.5 w-48"><SearchableSelect value={bTag ?? ""} options={tagOptions} placeholder="— ไม่ระบุ (ค้นหาได้) —" onChange={(v) => applyBatchTag(v || null)} /></div></label>
             <button type="button" onClick={() => setPrefixMgr(true)} title="ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท"
               className="h-8 px-3 text-sm border border-slate-200 rounded text-slate-600 hover:bg-white whitespace-nowrap">⚙️ จัดการรหัสนำหน้า</button>
             {/* ตัวเลือกคอลัมน์ (จากทะเบียน field) */}
