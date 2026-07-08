@@ -13,6 +13,12 @@ import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { SkuPrefixManager } from "@/components/sku-prefix-manager";
+import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
+
+// ป้ายชื่อคอลัมน์ที่ override จากทะเบียน (ให้ตรงภาษาคน) — ใช้ทั้งเดี่ยว/ชุด
+const LABEL_OVERRIDE: Record<string, string> = {
+  standard_price: "ราคาซื้อ", rmb_cost: "ราคาซื้อ (หยวน) RMB", fabric_width_cm: "หน้ากว้าง",
+};
 
 type PickerOpt = { id: string; label: string; secondary?: string };
 type TagOpt = { id: string; name: string; code_prefix: string; group_name: string | null };
@@ -93,6 +99,20 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
   const [catalog, setCatalog] = useState<ColDef[]>([]);
   const [prefixMgr, setPrefixMgr] = useState(false);   // ป๊อปจัดการรหัสนำหน้า
   const [saving, setSaving] = useState(false);
+  const [rmbRate, setRmbRate] = useState(5.2);         // เรตหยวน→บาท (ui_config rmb_to_thb_rate, default 5.2)
+
+  // โหลดเรตหยวน→บาท ตอนเปิด
+  useEffect(() => {
+    if (!open) return;
+    apiFetch("/api/ui-config?key=rmb_to_thb_rate").then((r) => r.json())
+      .then((j) => { const rr = Number((j.value ?? {}).rate); if (Number.isFinite(rr) && rr > 0) setRmbRate(rr); }).catch(() => {});
+  }, [open]);
+
+  // ตัวเลือกประเภท (แท็ก) สำหรับ SearchableSelect
+  const tagOptions = useMemo<SelectOption[]>(() => tags.map((t) => ({
+    value: t.id, label: t.name,
+    sub: `${t.group_name ? t.group_name + " · " : ""}${t.code_prefix ? t.code_prefix : "ยังไม่ตั้งรหัส"}`,
+  })), [tags]);
 
   // โหลดประเภท(แท็ก) ทั้งหมด (รวมที่ยังไม่ตั้ง prefix) — ใช้ tag-prefix
   const loadTags = useCallback(() => {
@@ -144,6 +164,22 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
   const [tagCodes, setTagCodes] = useState<TagCode[]>([]);   // ทุกตระกูลรหัสที่ใช้กับแท็กนี้ (tooltip)
   const [single, setSingle] = useState<Row>(blankRow());
   const setSV = (k: string, v: unknown, lbl?: string) => setSingle((s) => ({ values: { ...s.values, [k]: v }, labels: lbl !== undefined ? { ...s.labels, [k]: lbl } : s.labels }));
+  // กรอกราคาซื้อหยวน (rmb_cost) → คำนวณราคาซื้อ (standard_price) = หยวน × เรต อัตโนมัติ (แก้ทับเองได้)
+  const onRmbChange = (v: string) => setSingle((s) => {
+    const values: Record<string, unknown> = { ...s.values, rmb_cost: v };
+    if (v.trim() !== "" && rmbRate > 0 && Number.isFinite(Number(v))) values.standard_price = String(Math.round(Number(v) * rmbRate * 100) / 100);
+    return { ...s, values };
+  });
+  // บันทึกเรต (global) + คำนวณราคาซื้อใหม่ถ้ามีราคาหยวนอยู่
+  const saveRate = async () => {
+    try { await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "rmb_to_thb_rate", value: { rate: rmbRate } }) }); } catch { /* ไม่ขัดจังหวะผู้ใช้ */ }
+    setSingle((s) => {
+      const rmb = s.values.rmb_cost;
+      if (rmb != null && String(rmb).trim() !== "" && rmbRate > 0 && Number.isFinite(Number(rmb)))
+        return { ...s, values: { ...s.values, standard_price: String(Math.round(Number(rmb) * rmbRate * 100) / 100) } };
+      return s;
+    });
+  };
   const loadSuggest = useCallback((tagId: string) => {
     apiFetch(`/api/skus/code-suggest?family_tag_id=${tagId}`).then((r) => r.json()).then((j) => {
       setSug(j as Suggest);
@@ -233,11 +269,8 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
           <div>
             <span className="text-xs text-slate-500">ประเภท (Tag) — ใช้เสนอรหัสให้</span>
             <div className="mt-0.5 flex gap-1.5">
-              <select value={sTag ?? ""} onChange={(e) => { const v = e.target.value || null; setSTag(v); if (v) loadSuggest(v); else { setSug(null); setTagCodes([]); } }}
-                className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
-                <option value="">— เลือกประเภท —</option>
-                {tags.map((t) => <option key={t.id} value={t.id}>{t.group_name ? `${t.group_name} · ` : ""}{t.name} {t.code_prefix ? `(${t.code_prefix})` : "— ยังไม่ตั้งรหัส"}</option>)}
-              </select>
+              <div className="flex-1"><SearchableSelect value={sTag ?? ""} options={tagOptions} placeholder="— เลือกประเภท (พิมพ์ค้นหาได้) —"
+                onChange={(v) => { const nv = v || null; setSTag(nv); if (nv) loadSuggest(nv); else { setSug(null); setTagCodes([]); } }} /></div>
               {/* ℹ️ tooltip: ทุกตระกูลรหัสที่ SKU ในแท็กนี้ใช้จริง (hover ดู ไม่ใช่ปุ่มเลือก) */}
               {tagCodes.length > 0 && (
                 <div className="relative group flex items-center">
@@ -290,10 +323,17 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
               <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => setSV("uom_id", id, lbl)} placeholder="เลือกหน่วย" /></div></label>
             <label className="block"><span className="text-xs text-slate-500">ผู้ขาย</span>
               <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="partners_v2" label="name_th" secondary="code" value={(single.values.seller_partner_id as string) ?? null} valueLabel={single.labels.seller_partner_id} onChange={(id, lbl) => setSV("seller_partner_id", id, lbl)} placeholder="เลือกผู้ขาย" /></div></label>
-            <label className="block"><span className="text-xs text-slate-500">Standard Price</span>
-              <input type="number" step="any" value={(single.values.standard_price as string) ?? ""} onChange={(e) => setSV("standard_price", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
-            <label className="block"><span className="text-xs text-slate-500">RMB Cost</span>
-              <input type="number" step="any" value={(single.values.rmb_cost as string) ?? ""} onChange={(e) => setSV("rmb_cost", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
+            <label className="block"><span className="text-xs text-slate-500">ราคาซื้อ</span>
+              <input type="number" step="any" value={(single.values.standard_price as string) ?? ""} onChange={(e) => setSV("standard_price", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" />
+              <span className="block text-[10px] text-slate-400 mt-0.5">คำนวณจาก ราคาซื้อหยวน × {rmbRate} (แก้ทับเองได้)</span></label>
+            <label className="block"><span className="text-xs text-slate-500">ราคาซื้อ (หยวน) RMB</span>
+              <input type="number" step="any" value={(single.values.rmb_cost as string) ?? ""} onChange={(e) => onRmbChange(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
+            <div className="col-span-2 flex items-center gap-1.5 text-[11px] text-slate-400">
+              <span>เรตหยวน→บาท:</span>
+              <input type="number" step="any" value={rmbRate} onChange={(e) => setRmbRate(Number(e.target.value) || 0)} onBlur={saveRate}
+                title="ตั้งเรตแปลงหยวนเป็นบาท (ใช้ร่วมทั้งระบบ) · บันทึกเมื่อออกจากช่อง" className="w-16 h-7 px-1.5 text-right border border-slate-200 rounded" />
+              <span>× ราคาซื้อหยวน = ราคาซื้อ (บาท)</span>
+            </div>
           </div>
           <p className="text-[11px] text-slate-400">Barcode จะตั้งให้เท่ากับรหัส SKU อัตโนมัติ</p>
         </div>
@@ -304,10 +344,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
         <div className="space-y-3">
           <div className="flex flex-wrap items-end gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
             <label className="block"><span className="text-xs text-slate-500">ประเภท (Tag) ทั้งชุด</span>
-              <select value={bTag ?? ""} onChange={(e) => setBTag(e.target.value || null)} className="mt-0.5 h-8 px-2 text-sm border border-slate-200 rounded bg-white">
-                <option value="">— ไม่ระบุ —</option>
-                {tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select></label>
+              <div className="mt-0.5 w-48"><SearchableSelect value={bTag ?? ""} options={tagOptions} placeholder="— ไม่ระบุ (ค้นหาได้) —" onChange={(v) => setBTag(v || null)} /></div></label>
             <button type="button" onClick={() => setPrefixMgr(true)} title="ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท"
               className="h-8 px-3 text-sm border border-slate-200 rounded text-slate-600 hover:bg-white whitespace-nowrap">⚙️ จัดการรหัสนำหน้า</button>
             {/* ตัวเลือกคอลัมน์ (จากทะเบียน field) */}
@@ -327,7 +364,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
                         <input type="checkbox" checked={on} disabled={c.key === "code"}
                           onChange={(e) => saveColKeys(e.target.checked ? [...colKeys, c.key] : colKeys.filter((k) => k !== c.key))}
                           className="h-4 w-4 accent-blue-600" />
-                        <span className="truncate">{c.label}</span>
+                        <span className="truncate">{LABEL_OVERRIDE[c.key] ?? c.label}</span>
                         <span className="ml-auto text-[10px] text-slate-300">{c.type}</span>
                       </label>
                     );
@@ -345,7 +382,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
                   <th className="border border-slate-200 px-1 py-1 w-8">#</th>
                   {shownCols.map((c) => (
                     <th key={c.key} className="border border-slate-200 px-2 py-1 text-left min-w-[120px] whitespace-nowrap">
-                      {c.label}{c.key === "code" ? " *" : ""}{" "}
+                      {LABEL_OVERRIDE[c.key] ?? c.label}{c.key === "code" ? " *" : ""}{" "}
                       {c.key !== "code" && <button type="button" onClick={() => fillDown(c.key)} title="เติมลงล่าง" className="text-blue-500 hover:text-blue-700">↓</button>}
                     </th>
                   ))}

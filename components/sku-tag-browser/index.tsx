@@ -15,6 +15,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
+import { SkuWizard } from "@/app/master/skus/sku-wizard";
 // ของกลาง bulk edit — type อย่างเดียว (ไม่กิน runtime); ตัว modal โหลดแบบ dynamic ด้านล่าง (กัน data-table เข้า bundle หน้านี้)
 import type { BulkEditField } from "@/components/data-table";
 import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
@@ -129,6 +130,7 @@ export function SkuTagBrowser() {
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);               // เปิดฟอร์มเพิ่ม (SKU=Wizard / Parent=modal เล็ก)
   const [peekId, setPeekId] = useState<string | null>(null);   // คลิกการ์ด/แถว → drawer เก่าตัวจริง (ของกลาง: ดู/แก้ทุกฟิลด์)
 
   // ชุดฟิลด์การ์ด (ครั้งเดียว)
@@ -333,7 +335,15 @@ export function SkuTagBrowser() {
           <button onClick={() => setEntity("skus")} className={`h-9 px-4 text-sm ${entity === "skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🏷️ SKU</button>
           <button onClick={() => setEntity("parent-skus")} className={`h-9 px-4 text-sm border-l border-slate-200 ${entity === "parent-skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>📦 Parent SKU</button>
         </div>
+        {/* ปุ่มเพิ่ม — ตามแท็บที่เปิด */}
+        <button onClick={() => setAddOpen(true)}
+          className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap">
+          ＋ เพิ่ม {entity === "parent-skus" ? "Parent SKU" : "SKU"}
+        </button>
       </div>
+      {/* ฟอร์มเพิ่ม: SKU = Wizard เต็ม · Parent = modal เล็ก */}
+      {addOpen && entity === "skus" && <SkuWizard open onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
+      {addOpen && entity === "parent-skus" && <ParentSkuCreateModal onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
       {/* search + กรองแท็ก (ของกลาง) + ปรับการ์ด */}
       <div className="flex items-center gap-2 mb-3">
         <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 h-10 flex-1 bg-white focus-within:ring-2 focus-within:ring-indigo-500">
@@ -702,3 +712,58 @@ function CardCustomizeModal({ value, avail, onClose, onSave, onReset }: {
 }
 
 // (คลิกการ์ด/แถว → ใช้ MasterRecordDrawer ของกลาง = drawer เก่าตัวจริงของ MasterCRUD)
+
+// ── เพิ่ม Parent SKU (modal เล็ก) — SKU ใช้ Wizard เต็ม, Parent ใช้ตัวนี้ ──
+const PARENT_FAMILIES: [string, string][] = [
+  ["general", "ทั่วไป"], ["bag", "กระเป๋า"], ["belt", "เข็มขัด"], ["jewelry", "เครื่องประดับ"], ["spare", "อะไหล่"],
+];
+function ParentSkuCreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const toast = useToast();
+  const [code, setCode] = useState("");
+  const [nameTh, setNameTh] = useState("");
+  const [brandId, setBrandId] = useState("");
+  const [family, setFamily] = useState("general");
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    apiFetch("/api/brands").then((r) => r.json()).then((j) => { if (Array.isArray(j.data)) setBrands(j.data as { id: string; name: string }[]); }).catch(() => {});
+  }, []);
+  const save = async () => {
+    if (!code.trim()) { toast.error("กรอกรหัส Parent SKU"); return; }
+    if (!nameTh.trim()) { toast.error("กรอกชื่อสินค้า"); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch("/api/master-v2/parent-skus", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: code.trim(), name_th: nameTh.trim(), brand_id: brandId || null, product_family: family, is_active: true }),
+      });
+      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || "สร้างไม่สำเร็จ");
+      toast.success("สร้าง Parent SKU แล้ว"); onCreated();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  };
+  return (
+    <ERPModal open onClose={() => !saving && onClose()} size="md" title="＋ เพิ่ม Parent SKU"
+      footer={<div className="flex justify-end gap-2 w-full">
+        <button onClick={() => !saving && onClose()} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? "กำลังสร้าง…" : "สร้าง"}</button>
+      </div>}>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block"><span className="text-xs text-slate-500">รหัส Parent SKU *</span>
+          <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="เช่น CVB16" className="mt-0.5 w-full h-9 px-2 text-sm font-mono border border-slate-200 rounded-lg" /></label>
+        <label className="block"><span className="text-xs text-slate-500">ชื่อสินค้า (ไทย) *</span>
+          <input value={nameTh} onChange={(e) => setNameTh(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
+        <label className="block"><span className="text-xs text-slate-500">แบรนด์</span>
+          <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+            <option value="">— ไม่ระบุ —</option>
+            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select></label>
+        <label className="block"><span className="text-xs text-slate-500">หมวดสินค้า</span>
+          <select value={family} onChange={(e) => setFamily(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+            {PARENT_FAMILIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select></label>
+      </div>
+      <p className="text-[11px] text-slate-400 mt-2">สร้างแล้วแก้รายละเอียดเพิ่ม (รูป/ราคา/แท็ก) ได้ที่การ์ด</p>
+    </ERPModal>
+  );
+}

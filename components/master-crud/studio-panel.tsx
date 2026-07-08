@@ -1350,6 +1350,7 @@ function CanvasTab({ t, active, editable, editApi, onClick }: {
     useSortable({ id: `tabsort:${t.key}` });
   const named = t.key.startsWith("tab_");
   const canDrag = editable && editApi;
+  const [editing, setEditing] = useState(false);   // ดับเบิลคลิกชื่อ = เข้าโหมดแก้
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
   return (
     <div ref={setNodeRef} style={style} onClick={onClick}
@@ -1361,9 +1362,14 @@ function CanvasTab({ t, active, editable, editApi, onClick }: {
             className="cursor-grab active:cursor-grabbing touch-none select-none px-0.5 -ml-0.5 hover:text-orange-600">{iconNode(t.icon)}</span>
         : iconNode(t.icon)}
       {canDrag
-        ? <input value={t.label} onClick={(e)=>e.stopPropagation()}
-            onChange={(e)=> named ? editApi!.renameTab(t.label, e.target.value) : editApi!.renameSection(t.entries[0][0].key, e.target.value)}
-            className="bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 w-24 focus:outline-none" />
+        ? (editing
+            ? <input autoFocus value={t.label} onClick={(e)=>e.stopPropagation()}
+                onChange={(e)=> named ? editApi!.renameTab(t.label, e.target.value) : editApi!.renameSection(t.entries[0][0].key, e.target.value)}
+                onBlur={()=>setEditing(false)}
+                onKeyDown={(e)=>{ if(e.key==="Enter"||e.key==="Escape"){ e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
+                className="bg-white border border-orange-300 rounded px-1 w-28 focus:outline-none" />
+            : <span onDoubleClick={(e)=>{ e.stopPropagation(); setEditing(true); }} title="ดับเบิลคลิกเพื่อเปลี่ยนชื่อ"
+                className="px-1 border border-transparent hover:border-slate-200 hover:bg-white/70 rounded cursor-text">{t.label}</span>)
         : <span>{t.label}</span>}
     </div>
   );
