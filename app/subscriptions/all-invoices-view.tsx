@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SubInvoice } from "@/lib/subscriptions";
+import { MissingInvoicesPanel } from "./missing-invoices-panel";
 
 type InvoiceRow = SubInvoice & { sub_name: string | null; sub_email: string | null; sub_profile: string | null };
 
@@ -92,6 +93,9 @@ export function AllInvoicesView({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div className="space-y-3">
+      {/* บิลที่ยังขาด */}
+      <MissingInvoicesPanel canEdit={canEdit} refreshKey={rows.length} />
+
       {/* ตัวกรองเดือน */}
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm text-slate-600">

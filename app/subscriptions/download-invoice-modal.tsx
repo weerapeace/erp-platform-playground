@@ -8,25 +8,7 @@
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import type { Subscription } from "@/lib/subscriptions";
-
-const normUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : `https://${u}`);
-
-function sanitizeName(n: string): string {
-  return (n || "subscription").replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 40) || "subscription";
-}
-// ไฟล์ .bat (Windows) เปิด Chrome โปรไฟล์ที่ระบุ + หน้าบิล — ดับเบิลคลิกเพื่อรัน
-function makeBat(profileDir: string, url: string): string {
-  const safeUrl = url.replace(/%/g, "%%"); // escape % สำหรับ batch
-  return `@echo off\r\nstart "" chrome --profile-directory="${profileDir}" "${safeUrl}"\r\n`;
-}
-function downloadTextFile(filename: string, content: string): void {
-  const blob = new Blob([content], { type: "application/octet-stream" });
-  const href = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = href; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(href);
-}
+import { normUrl, subInvoiceUrl, canMakeBat, downloadSubBat } from "@/lib/subs-bat";
 
 export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
   sub: Subscription | null;
@@ -36,9 +18,9 @@ export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
 }) {
   const toast = useToast();
   const open = !!sub;
-  const invLink = sub?.invoice_url ? normUrl(sub.invoice_url) : null;
+  const invLink = sub ? subInvoiceUrl(sub) : null;
   const profileLink = sub?.chrome_profile_url ? normUrl(sub.chrome_profile_url) : null;
-  const canBat = !!(sub?.chrome_profile_dir && invLink);
+  const canBat = !!(sub && canMakeBat(sub));
 
   const copy = async (text: string, what: string) => {
     try { await navigator.clipboard.writeText(text); toast.success(`คัดลอก${what}แล้ว`); }
@@ -46,10 +28,7 @@ export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
   };
 
   const genBat = () => {
-    if (!sub || !invLink || !sub.chrome_profile_dir) return;
-    const suffix = sub.chrome_profile ? `-${sanitizeName(sub.chrome_profile)}` : sub.account_email ? `-${sanitizeName(sub.account_email)}` : "";
-    downloadTextFile(`chrome-${sanitizeName(sub.name)}${suffix}.bat`, makeBat(sub.chrome_profile_dir, invLink));
-    toast.success("ดาวน์โหลดไฟล์แล้ว — ดับเบิลคลิกเพื่อเปิด Chrome");
+    if (sub && downloadSubBat(sub)) toast.success("ดาวน์โหลดไฟล์แล้ว — ดับเบิลคลิกเพื่อเปิด Chrome");
   };
 
   return (
