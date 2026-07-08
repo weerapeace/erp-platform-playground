@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const ALLOWED = new Set(["image/gif", "image/webp", "image/png", "image/jpeg"]);
-const MAX = 3 * 1024 * 1024;   // 3MB — GIF ใหญ่เกินทำจอหน่วง
+const MAX = 4 * 1024 * 1024;   // 4MB — ใหญ่กว่านี้ Vercel ปัด body ตก (~4.5MB) ให้ใช้ "เพิ่มลิงก์" แทน · GIF ใหญ่ทำจอหน่วงด้วย
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 

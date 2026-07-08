@@ -61,14 +61,18 @@ export function GifPokeAdmin({ open, onClose, onChanged }: { open: boolean; onCl
   };
 
   const upload = async (file: File) => {
+    // เช็กขนาดก่อนส่ง — ไฟล์ใหญ่ Vercel ปัด body ตกก่อนถึงเซิร์ฟเวอร์ (ขึ้น error กว้าง ๆ)
+    if (file.size > 4 * 1024 * 1024) { setErr(t("ไฟล์ใหญ่เกิน 4MB — ย่อไฟล์ หรือใช้ 'เพิ่มลิงก์' แทน", "File over 4MB — shrink it or use 'Add link'")); return; }
     setErr(""); setBusy(true);
     try {
       const fd = new FormData(); fd.append("file", file);
       const res = await apiFetch("/api/gif-poke/library", { method: "POST", body: fd });
-      const j = await res.json();
-      if (!res.ok || j.error) { setErr(j.error || t("อัปโหลดไม่สำเร็จ", "Upload failed")); return; }
+      let j: { data?: LibItem; error?: string } = {};
+      try { j = await res.json(); } catch { /* body ไม่ใช่ JSON (เช่น Vercel ปัดไฟล์ใหญ่ตก) */ }
+      if (!res.ok || j.error) { setErr(j.error || t(`อัปโหลดไม่สำเร็จ (${res.status})${res.status === 413 ? " — ไฟล์ใหญ่เกิน" : ""}`, `Upload failed (${res.status})`)); return; }
+      if (!j.data) { setErr(t("อัปโหลดไม่สำเร็จ", "Upload failed")); return; }
       dirty.current = true; setItems((prev) => [j.data as LibItem, ...prev]);
-    } catch { setErr(t("อัปโหลดไม่สำเร็จ", "Upload failed")); }
+    } catch { setErr(t("อัปโหลดไม่สำเร็จ — เชื่อมต่อไม่ได้", "Upload failed — network error")); }
     finally { setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
   };
 

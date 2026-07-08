@@ -16,6 +16,7 @@ import { suppressUnload } from "@/lib/canvas-unload-guard";
 import { ERPModal } from "@/components/modal";
 import { ERPInput } from "@/components/form";
 import { useAuth } from "@/components/auth";
+import { GifPokeLayer } from "../../gif-poke-layer";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { CampaignDrawer, CAMPAIGN_STATUS } from "../campaign-drawer";
@@ -313,6 +314,8 @@ export default function CampaignCanvasPage() {
 
   return (
     <StandaloneShell title={name} icon="📣" accent="violet">
+      {/* GIF จิ้มเพื่อน — โผล่วิ่งบนหน้านี้ด้วย (ดูข้อความ/กดปิด · ตอบกลับทำที่หน้าแรก) */}
+      <GifPokeLayer userId={user?.id ?? null} />
       {/* Top bar (sticky) -- อยู่ใต้หัวบาร์หลัก (top-14) */}
       <div className="bg-white border-b border-slate-200 px-8 py-4 sticky top-14 z-20">
         <div className="flex items-center justify-between gap-4 flex-wrap">
