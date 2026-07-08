@@ -106,7 +106,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `ไฟล์ใหญ่เกิน ${Math.round(ASSET_MAX_BYTES / 1024 / 1024)}MB` }, { status: 400 });
 
   const title        = String(form.get("title") ?? "").trim() || file.name;
-  const collectionId = form.get("collection_id") ? String(form.get("collection_id")) : null;
+  // อัลบั้ม: รับหลายอัน (collection_ids = JSON array) หรืออันเดียว (collection_id เดิม) — เก็บผ่าน asset_collection_map (m2m)
+  const collectionIdsRaw = String(form.get("collection_ids") ?? "").trim();
+  let collectionIds: string[];
+  if (collectionIdsRaw) {
+    const parsed = safeJson(collectionIdsRaw);
+    collectionIds = Array.isArray(parsed) ? parsed.map((v) => String(v)).filter(Boolean) : [];
+  } else {
+    collectionIds = form.get("collection_id") ? [String(form.get("collection_id"))] : [];
+  }
+  const collectionId = collectionIds[0] ?? null;   // อัลบั้มหลัก (sync ลง assets.collection_id ให้ฟิลเตอร์ "ไม่อยู่อัลบั้ม" ทำงาน)
   const actor        = form.get("actor") ? String(form.get("actor")) : null;
   const widthRaw     = form.get("width")  ? Number(form.get("width"))  : NaN;
   const heightRaw    = form.get("height") ? Number(form.get("height")) : NaN;
@@ -132,7 +141,7 @@ export async function POST(request: NextRequest) {
   const dup = dupRes.data;
   if (dup) {
     if (tagNames.length) await attachTags(admin, dup.id as string, tagNames);
-    if (collectionId) await admin.from("asset_collection_map").upsert({ asset_id: dup.id as string, collection_id: collectionId }, { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
+    for (const cid of collectionIds) await admin.from("asset_collection_map").upsert({ asset_id: dup.id as string, collection_id: cid }, { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
     return NextResponse.json({ data: await rowOf(admin, dup as Parameters<typeof rowOf>[1]), duplicate: true, error: null });
   }
 
@@ -161,7 +170,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "บันทึกข้อมูลไฟล์ไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });
 
   if (tagNames.length) await attachTags(admin, ins.id as string, tagNames);
-  if (collectionId) await admin.from("asset_collection_map").upsert({ asset_id: ins.id as string, collection_id: collectionId }, { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
+  for (const cid of collectionIds) await admin.from("asset_collection_map").upsert({ asset_id: ins.id as string, collection_id: cid }, { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
 
   await writeAudit(admin, {
     action: "create", entityType: "asset", entityId: ins.id as string,

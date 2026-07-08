@@ -19,6 +19,7 @@ import { downscaleImageWidth } from "@/lib/image-resize";
 import { downloadImagesAsZip } from "@/lib/zip";
 import { type AssetRow, type AssetDetail, type AssetUsage, type AssetSize } from "@/app/api/assets/shared";
 import { BrandAlbumBrowser } from "./brand-album";
+import { HoverPreview } from "@/components/hover-image";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetTag } from "@/app/api/assets/tags/route";
 
@@ -413,14 +414,17 @@ function AssetCard({ a, selected, onToggle, onOpen }: {
           ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white/90 border-slate-300 text-transparent group-hover:text-slate-300"}`}
       >✓</button>
       <button onClick={onOpen} className="block w-full text-left">
-        <div className="h-28 bg-slate-100 flex items-center justify-center overflow-hidden">
-          {isImage(a) && !broken ? (
-            <img src={withImageWidth(a.url, 320) ?? a.url} alt={a.title} loading="lazy" onError={() => setBroken(true)}
-              className="w-full h-full object-cover" />
-          ) : (
-            <span className="text-3xl">{TYPE_ICON[a.asset_type]}</span>
-          )}
-        </div>
+        <HoverPreview url={isImage(a) && !broken ? a.url : null} previewW={440}>
+          {/* กรอบ 1:1 — รูปแสดงเต็มทั้งใบ (object-contain) ไม่ตัดขอบ/ตัวหนังสือ */}
+          <div className="aspect-square bg-slate-50 flex items-center justify-center overflow-hidden">
+            {isImage(a) && !broken ? (
+              <img src={withImageWidth(a.url, 320) ?? a.url} alt={a.title} loading="lazy" onError={() => setBroken(true)}
+                className="max-w-full max-h-full object-contain" />
+            ) : (
+              <span className="text-3xl">{TYPE_ICON[a.asset_type]}</span>
+            )}
+          </div>
+        </HoverPreview>
         <div className="px-2 py-1.5">
           <p className="text-[12px] font-medium text-slate-700 truncate">{a.title}</p>
           <p className="text-[10px] text-slate-400 mt-0.5">
@@ -926,7 +930,8 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
   const [keywords, setKeywords] = useState("");
   const [sizes, setSizes] = useState<AssetSize[]>([]);
   const [parentCodes, setParentCodes] = useState<string[]>([]);
-  const [collectionId, setCollectionId] = useState("");
+  const [collectionIds, setCollectionIds] = useState<string[]>([]);      // อัลบั้มหลายอัน (m2m)
+  const [cols, setCols] = useState<AssetCollection[]>(collections);       // สำเนาไว้ต่อท้ายเมื่อสร้างอัลบั้มใหม่ในฟอร์ม
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [ruleOpen, setRuleOpen] = useState(false);
@@ -937,7 +942,12 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
   const pick = (f: File | null) => {
     setFile(f);
     setPreview(f && f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
-    if (f && !title) setTitle(f.name.replace(/\.[^.]+$/, ""));
+    if (f) {
+      if (!title) setTitle(f.name.replace(/\.[^.]+$/, ""));
+      // เติม path เริ่มต้น = โฟลเดอร์มาตรฐาน + ชื่อไฟล์ (แก้ต่อได้ — เบราว์เซอร์อ่าน path จริงของไฟล์ในเครื่องไม่ได้)
+      const base = rule.base_paths[0];
+      if (base && !masterPath.trim()) setMasterPath(`${base.replace(/[\\/]+$/, "")}\\${f.name}`);
+    }
   };
 
   const save = async () => {
@@ -957,7 +967,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
       if (tags.length) fd.append("tags", tags.join(","));
       if (sizes.length) fd.append("sizes", JSON.stringify(sizes));
       if (parentCodes.length) fd.append("parent_sku_codes", JSON.stringify(parentCodes));
-      if (collectionId) fd.append("collection_id", collectionId);
+      if (collectionIds.length) fd.append("collection_ids", JSON.stringify(collectionIds));
       if (actor) fd.append("actor", actor);
       if (upFile.type.startsWith("image/")) {
         const dim = await new Promise<{ w: number; h: number } | null>((res) => {
@@ -1012,12 +1022,8 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
                 {artType && !artTypes.some((t) => t.name === artType) && <option value={artType}>{artType}</option>}
                 {artTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
               </select></label>
-            <label className="text-[12px] text-slate-500">Group Album
-              <select value={collectionId} onChange={(e) => setCollectionId(e.target.value)}
-                className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
-                <option value="">— ไม่ระบุ —</option>
-                {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select></label>
+            <div className="text-[12px] text-slate-500">Group Album <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน / สร้างใหม่ได้</span>
+              <div className="mt-0.5"><CollectionMultiSelect value={collectionIds} collections={cols} onChange={setCollectionIds} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
           </div>
           <div className="text-[12px] text-slate-500">แท็ก <span className="text-[10px] text-slate-400">— กดเลือกในป๊อปอัป</span>
             <div className="mt-0.5"><TagPickerField value={tags} onChange={setTags} /></div></div>
@@ -1098,6 +1104,63 @@ function TagChips({ value, onChange }: { value: string[]; onChange: (v: string[]
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── เลือก Group Album หลายอัน (m2m) + สร้างอัลบั้มใหม่ inline ──
+function CollectionMultiSelect({ value, collections, onChange, onCreated }: {
+  value: string[]; collections: AssetCollection[]; onChange: (v: string[]) => void; onCreated: (c: AssetCollection) => void;
+}) {
+  const toast = useToast();
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const nameOf = (id: string) => collections.find((c) => c.id === id)?.name ?? id;
+  const add = (id: string) => { if (id && !value.includes(id)) onChange([...value, id]); };
+  const remaining = collections.filter((c) => !value.includes(c.id));
+  const create = async () => {
+    const n = newName.trim(); if (!n) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch("/api/assets/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) });
+      const j = await r.json(); if (!r.ok || j.error || !j.data) throw new Error(j.error || "สร้างอัลบั้มไม่สำเร็จ");
+      const col = j.data as AssetCollection;
+      onCreated(col); onChange([...value, col.id]); setNewName(""); setCreating(false);
+      toast.success(`สร้างอัลบั้ม "${n}" แล้ว`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างอัลบั้มไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {value.map((id) => (
+          <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-emerald-50 border border-emerald-200 text-emerald-700 rounded">
+            {nameOf(id)}<button type="button" onClick={() => onChange(value.filter((x) => x !== id))} className="text-emerald-300 hover:text-rose-500 leading-none">✕</button>
+          </span>
+        ))}
+        {value.length === 0 && <span className="text-[11px] text-slate-400">— ไม่ระบุ —</span>}
+      </div>
+      <div className="flex items-center gap-1.5 mt-1">
+        <select value="" onChange={(e) => { add(e.target.value); e.target.value = ""; }}
+          className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white max-w-[150px]">
+          <option value="">＋ เลือกอัลบั้ม…</option>
+          {remaining.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        {!creating ? (
+          <button type="button" onClick={() => setCreating(true)}
+            className="text-[11px] px-2 py-1 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">＋ อัลบั้มใหม่</button>
+        ) : (
+          <span className="inline-flex items-center gap-1">
+            <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} disabled={busy}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void create(); } if (e.key === "Escape") { setCreating(false); setNewName(""); } }}
+              placeholder="ชื่ออัลบั้มใหม่" className="h-8 w-32 px-2 text-[12px] border border-emerald-300 rounded-lg" />
+            <button type="button" onClick={() => void create()} disabled={busy}
+              className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">เพิ่ม</button>
+            <button type="button" onClick={() => { setCreating(false); setNewName(""); }} className="text-[11px] text-slate-400 hover:text-slate-600">ยกเลิก</button>
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -1190,7 +1253,7 @@ function SizesEditor({ value, onChange, disabled }: { value: AssetSize[]; onChan
         </div>
       ))}
       {disabled && value.length === 0 && <span className="text-[11px] text-slate-400">—</span>}
-      {!disabled && <button type="button" onClick={() => onChange([...value, { label: "", w: null, h: null, unit: "cm" }])}
+      {!disabled && <button type="button" onClick={() => onChange([...value, { label: `ขนาด #${value.length + 1}`, w: null, h: null, unit: "cm" }])}
         className="self-start text-[12px] text-indigo-600 hover:underline">＋ เพิ่มไซส์</button>}
     </div>
   );
