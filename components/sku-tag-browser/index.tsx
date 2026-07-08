@@ -56,7 +56,9 @@ const LIMIT = 60;   // โหลดหน้าละ 60 (เดิม 120) — 
 
 const SORTS = [
   { key: "code",       label: "รหัส (A→Z)",     by: "code",       dir: "asc"  },
+  { key: "code_desc",  label: "รหัส (Z→A)",     by: "code",       dir: "desc" },
   { key: "name",       label: "ชื่อ (A→Z)",      by: "name_th",    dir: "asc"  },
+  { key: "name_desc",  label: "ชื่อ (Z→A)",      by: "name_th",    dir: "desc" },
   { key: "price_desc", label: "ราคา (สูง→ต่ำ)",  by: "list_price", dir: "desc" },
   { key: "price_asc",  label: "ราคา (ต่ำ→สูง)",  by: "list_price", dir: "asc"  },
   { key: "newest",     label: "ใหม่ล่าสุด",      by: "created_at", dir: "desc" },

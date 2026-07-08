@@ -1062,7 +1062,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     // จัดกลุ่มแถวตาม field (เช่น สี) — มีหัวกลุ่มคั่น · ไม่มี list_group_field = ตารางแบนเหมือนเดิม
     const groupField = config.list_group_field;
     const colCount = (imageField ? 1 : 0) + 1 + subFields.length + 1;
-    const renderDataRow = (r: Record<string, unknown>, opts?: { indent?: number; lead?: ReactNode; trail?: ReactNode }) => (
+    const renderDataRow = (r: Record<string, unknown>, opts?: { indent?: number; lead?: ReactNode; trail?: ReactNode; groupImg?: string }) => {
+      const rowImg = imageField ? (r2img(r[imageField]) || opts?.groupImg) : undefined;   // ไม่มีรูปของตัวเอง → ใช้รูปตัวแทนของกลุ่มสี
+      return (
       <tr key={String(r.id)}
         className={`group cursor-pointer ${dropRowId === String(r.id) ? "bg-indigo-50 ring-1 ring-indigo-300" : opts?.indent ? "hover:bg-blue-50/40 bg-slate-50/40" : "hover:bg-blue-50/40"}`}
         title={canDropImages ? "ลากรูปมาวางเพื่อเพิ่มรูปให้รายการนี้" : undefined}
@@ -1075,8 +1077,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             <div className={`relative w-8 h-8 rounded bg-slate-50 border overflow-hidden flex items-center justify-center ${dropRowId === String(r.id) ? "border-indigo-400" : "border-slate-100"}`}>
               {uploadingRowId === String(r.id)
                 ? <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />
-                : r2img(r[imageField])
-                  ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(r[imageField])!} alt="" className="w-full h-full object-cover" />
+                : rowImg
+                  ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={rowImg} alt="" className="w-full h-full object-cover" />
                   : <span className="text-slate-300 text-xs">📦</span>}
             </div>
           </td>
@@ -1121,7 +1123,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             className="w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
         </td>
       </tr>
-    );
+      );
+    };
     const hasVariant = (r: Record<string, unknown>) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !!(av && av.variant_option); };
     const addVariantBtn = (base: Record<string, unknown>) => canAdd ? (
       <button type="button" title="เพิ่มแบบ/ไซส์ให้สีนี้" onClick={(e) => { e.stopPropagation(); setVariantBase(base); }}
@@ -1136,6 +1139,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       for (const [label, grs] of groups.entries()) {
         const base = grs.find((r) => !hasVariant(r));
         const subs = base ? grs.filter((r) => r !== base) : grs;
+        // รูปตัวแทนของกลุ่มสี = รูปตัวแรกในกลุ่มที่มีรูป → ตัวที่ไม่มีรูปดึงไปใช้
+        const groupImg = imageField ? (grs.map((x) => r2img(x[imageField])).find(Boolean) || undefined) : undefined;
         if (base) {
           const id = String(base.id);
           const isColl = collapsed.has(id);
@@ -1144,8 +1149,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
               onClick={(e) => { e.stopPropagation(); setCollapsed((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); }}
               className="w-5 h-5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center text-[10px]">{isColl ? "▶" : "▼"}</button>
           ) : <span className="w-5 inline-block" />;
-          out.push(renderDataRow(base, { lead: toggle, trail: <>{subs.length > 0 && <span className="text-[10px] text-slate-400">({subs.length})</span>} {addVariantBtn(base)}</> }));
-          if (!isColl) for (const s of subs) out.push(renderDataRow(s, { indent: 1 }));
+          out.push(renderDataRow(base, { lead: toggle, trail: <>{subs.length > 0 && <span className="text-[10px] text-slate-400">({subs.length})</span>} {addVariantBtn(base)}</>, groupImg }));
+          if (!isColl) for (const s of subs) out.push(renderDataRow(s, { indent: 1, groupImg }));
         } else {
           out.push(
             <tr key={`grp-${label}`} className="bg-slate-100/70 border-t border-slate-200">
@@ -1154,7 +1159,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
               </td>
             </tr>,
           );
-          for (const r of grs) out.push(renderDataRow(r, { indent: 1 }));
+          for (const r of grs) out.push(renderDataRow(r, { indent: 1, groupImg }));
         }
       }
       return out;
