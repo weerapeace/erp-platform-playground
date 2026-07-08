@@ -13,7 +13,7 @@ export const revalidate = 0;
 
 const SIGNED_TTL = 60 * 60;
 
-type InvoiceWithSub = SubInvoice & { sub_name: string | null };
+type InvoiceWithSub = SubInvoice & { sub_name: string | null; sub_email: string | null; sub_profile: string | null };
 
 export async function GET(request: NextRequest) {
   const guard = await guardApi(request, "subscriptions.view");
@@ -28,10 +28,12 @@ export async function GET(request: NextRequest) {
 
   // ชื่อรายการ (subscription) — ดึงเป็นชุดเดียวแล้ว map
   const subIds = Array.from(new Set(rows.map((r) => r.subscription_id).filter(Boolean)));
-  const nameById: Record<string, string> = {};
+  const subById: Record<string, { name: string; email: string; profile: string }> = {};
   if (subIds.length) {
-    const { data: subs } = await db.from("subscriptions").select("id, name").in("id", subIds);
-    (subs ?? []).forEach((s) => { nameById[s.id as string] = (s.name as string) ?? ""; });
+    const { data: subs } = await db.from("subscriptions").select("id, name, account_email, chrome_profile").in("id", subIds);
+    (subs ?? []).forEach((s) => {
+      subById[s.id as string] = { name: (s.name as string) ?? "", email: (s.account_email as string) ?? "", profile: (s.chrome_profile as string) ?? "" };
+    });
   }
 
   // ลิงก์เปิดไฟล์ (signed url) เป็นชุด
@@ -42,11 +44,16 @@ export async function GET(request: NextRequest) {
     (signed ?? []).forEach((s) => { if (s.path && s.signedUrl) urlByPath[s.path] = s.signedUrl; });
   }
 
-  const data: InvoiceWithSub[] = rows.map((r) => ({
-    ...r,
-    sub_name: nameById[r.subscription_id] ?? null,
-    url: urlByPath[r.file_path] ?? null,
-  }));
+  const data: InvoiceWithSub[] = rows.map((r) => {
+    const info = subById[r.subscription_id];
+    return {
+      ...r,
+      sub_name: info?.name ?? null,
+      sub_email: info?.email || null,
+      sub_profile: info?.profile || null,
+      url: urlByPath[r.file_path] ?? null,
+    };
+  });
 
   const months = Array.from(new Set(rows.map((r) => r.month).filter(Boolean))).sort((a, b) => b.localeCompare(a));
 

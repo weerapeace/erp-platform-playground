@@ -11,7 +11,7 @@ import { apiFetch } from "@/lib/api";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SubInvoice } from "@/lib/subscriptions";
 
-type InvoiceRow = SubInvoice & { sub_name: string | null };
+type InvoiceRow = SubInvoice & { sub_name: string | null; sub_email: string | null; sub_profile: string | null };
 
 function fmtMonth(ym: string): string {
   const [y, m] = (ym ?? "").split("-");
@@ -60,8 +60,14 @@ export function AllInvoicesView({ canEdit }: { canEdit: boolean }) {
   const columns = useMemo<ColumnDef<InvoiceRow>[]>(() => [
     { id: "month", accessorKey: "month", header: "เดือน", size: 120,
       cell: ({ getValue }) => <span className="text-sm text-slate-700">{fmtMonth(getValue() as string)}</span> },
-    { id: "sub_name", accessorKey: "sub_name", header: "รายการ", size: 240,
+    { id: "sub_name", accessorKey: "sub_name", header: "รายการ", size: 220,
       cell: ({ getValue }) => <span className="text-sm font-medium text-slate-800">{(getValue() as string) || "—"}</span> },
+    { id: "profile", accessorKey: "sub_profile", header: "โปรไฟล์/บัญชี", size: 200,
+      meta: { filterable: true, filterType: "select", filterLabel: "โปรไฟล์/บัญชี" },
+      cell: ({ row }) => {
+        const inv = row.original;
+        return <span className="text-xs text-slate-500 truncate block" title={inv.sub_email ?? ""}>{inv.sub_profile || inv.sub_email || "—"}</span>;
+      } },
     { id: "file_name", accessorKey: "file_name", header: "ไฟล์", size: 300,
       cell: ({ getValue }) => <span className="text-sm text-slate-600 inline-flex items-center gap-1.5"><span>📄</span><span className="truncate">{getValue() as string}</span></span> },
     {
@@ -106,7 +112,7 @@ export function AllInvoicesView({ canEdit }: { canEdit: boolean }) {
         data={filtered}
         columns={columns}
         loading={loading}
-        searchableKeys={["sub_name", "file_name", "month"]}
+        searchableKeys={["sub_name", "sub_profile", "sub_email", "file_name", "month"]}
         searchPlaceholder="ค้นหา รายการ / ชื่อไฟล์…"
         exportFilename="subscription-invoices"
         exportEntityType="subscription_invoices"

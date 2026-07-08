@@ -101,8 +101,9 @@ export default function SubscriptionsPage() {
   const categories = useMemo(() => rows.map((r) => r.category), [rows]);
 
   // รายการที่ใช้อยู่ = เปิดอยู่ (active) + จ่ายประจำ (รายเดือน/รายปี) — ตัดจ่ายครั้งเดียวออก
+  // ใช้อยู่ = เปิดอยู่ + จ่ายประจำ (รายเดือน/รายปี) + ประเภท "งาน" เท่านั้น (ไม่เอาส่วนตัว)
   const inUseRows = useMemo(
-    () => rows.filter((r) => r.active && (r.billing_cycle === "monthly" || r.billing_cycle === "yearly")),
+    () => rows.filter((r) => r.active && r.type === "work" && (r.billing_cycle === "monthly" || r.billing_cycle === "yearly")),
     [rows],
   );
   // ส่วนตัว = ประเภท personal
@@ -367,7 +368,7 @@ export default function SubscriptionsPage() {
 
           {/* เนื้อหาตามมุมมอง */}
           {view === "inuse" && (
-            <p className="text-xs text-slate-500 -mb-1">รายการที่เปิดใช้งานอยู่ และจ่ายประจำ (รายเดือน/รายปี) เท่านั้น — ไม่รวมรายการปิด/จ่ายครั้งเดียว</p>
+            <p className="text-xs text-slate-500 -mb-1">เฉพาะ &quot;งาน&quot; ที่เปิดใช้งานอยู่ และจ่ายประจำ (รายเดือน/รายปี) — ไม่รวมส่วนตัว/รายการปิด/จ่ายครั้งเดียว</p>
           )}
           {view === "personal" && (
             <p className="text-xs text-slate-500 -mb-1">เฉพาะรายการประเภท &quot;ส่วนตัว&quot;</p>
