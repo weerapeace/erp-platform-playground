@@ -11,6 +11,23 @@ import type { Subscription } from "@/lib/subscriptions";
 
 const normUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : `https://${u}`);
 
+function sanitizeName(n: string): string {
+  return (n || "subscription").replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 40) || "subscription";
+}
+// ไฟล์ .bat (Windows) เปิด Chrome โปรไฟล์ที่ระบุ + หน้าบิล — ดับเบิลคลิกเพื่อรัน
+function makeBat(profileDir: string, url: string): string {
+  const safeUrl = url.replace(/%/g, "%%"); // escape % สำหรับ batch
+  return `@echo off\r\nstart "" chrome --profile-directory="${profileDir}" "${safeUrl}"\r\n`;
+}
+function downloadTextFile(filename: string, content: string): void {
+  const blob = new Blob([content], { type: "application/octet-stream" });
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(href);
+}
+
 export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
   sub: Subscription | null;
   canEdit: boolean;
@@ -21,10 +38,17 @@ export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
   const open = !!sub;
   const invLink = sub?.invoice_url ? normUrl(sub.invoice_url) : null;
   const profileLink = sub?.chrome_profile_url ? normUrl(sub.chrome_profile_url) : null;
+  const canBat = !!(sub?.chrome_profile_dir && invLink);
 
   const copy = async (text: string, what: string) => {
     try { await navigator.clipboard.writeText(text); toast.success(`คัดลอก${what}แล้ว`); }
     catch { toast.error("คัดลอกไม่สำเร็จ"); }
+  };
+
+  const genBat = () => {
+    if (!sub || !invLink || !sub.chrome_profile_dir) return;
+    downloadTextFile(`chrome-${sanitizeName(sub.name)}.bat`, makeBat(sub.chrome_profile_dir, invLink));
+    toast.success("ดาวน์โหลดไฟล์แล้ว — ดับเบิลคลิกเพื่อเปิด Chrome");
   };
 
   return (
@@ -63,6 +87,27 @@ export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
               )}
             </div>
           )}
+
+          {/* เปิดใน Chrome โปรไฟล์ที่ถูก (ไฟล์ลัด .bat) */}
+          <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+            <div className="text-xs font-medium text-slate-600">🖥️ เปิดใน Chrome โปรไฟล์ที่ถูก (ไฟล์ลัด)</div>
+            {canBat ? (
+              <>
+                <button onClick={genBat}
+                  className="h-9 w-full rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-900">
+                  ⬇️ ดาวน์โหลดไฟล์เปิด Chrome (.bat)
+                </button>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  ดับเบิลคลิกไฟล์ที่โหลด → Chrome เปิดโปรไฟล์ <b>{sub.chrome_profile_dir}</b> + หน้าบิลให้เลย
+                  <br />ครั้งแรกถ้า Windows เตือน กด &ldquo;More info &rarr; Run anyway&rdquo;
+                </p>
+              </>
+            ) : (
+              <p className="text-[11px] text-amber-600">
+                ต้องมีทั้ง <b>ลิงก์หน้าบิล</b> และ <b>โฟลเดอร์โปรไฟล์ Chrome</b> ก่อน{canEdit && " — กด ✎ แก้ไขเพื่อเพิ่ม"}
+              </p>
+            )}
+          </div>
 
           {profileLink && (
             <a href={profileLink} target="_blank" rel="noopener noreferrer"

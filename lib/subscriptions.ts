@@ -22,6 +22,7 @@ export type Subscription = {
   billing_date: string | null;
   chrome_profile: string;
   chrome_profile_url: string;
+  chrome_profile_dir: string; // โฟลเดอร์โปรไฟล์ Chrome จริง เช่น "Profile 3" / "Default" (สำหรับสร้างไฟล์เปิด Chrome)
   invoice_url: string;
   notes: string;
   active: boolean;
@@ -173,6 +174,7 @@ export function toSubRow(input: Partial<SubInput>): Record<string, unknown> {
   if (input.billing_date !== undefined) row.billing_date = input.billing_date || null; // date คงเป็น null ได้
   if (input.chrome_profile !== undefined) row.chrome_profile = input.chrome_profile ?? "";
   if (input.chrome_profile_url !== undefined) row.chrome_profile_url = input.chrome_profile_url ?? "";
+  if (input.chrome_profile_dir !== undefined) row.chrome_profile_dir = input.chrome_profile_dir ?? "";
   if (input.invoice_url !== undefined) row.invoice_url = input.invoice_url ?? "";
   if (input.notes !== undefined) row.notes = input.notes ?? "";
   if (input.active !== undefined) row.active = !!input.active;

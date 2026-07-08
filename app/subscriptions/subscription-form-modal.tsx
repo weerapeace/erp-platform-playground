@@ -14,7 +14,7 @@ const INP = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg outline
 
 const EMPTY: SubInput = {
   name: "", category: "", billing_cycle: "monthly", cost: 0, currency: "THB",
-  billing_date: null, chrome_profile: "", chrome_profile_url: "", invoice_url: "",
+  billing_date: null, chrome_profile: "", chrome_profile_url: "", chrome_profile_dir: "", invoice_url: "",
   notes: "", active: true, type: "personal", account_email: "", card_last4: "",
   pending_cancel: false, want_to_buy: false,
 };
@@ -123,8 +123,12 @@ export function SubscriptionFormModal({ open, editing, categories, saving, defau
           <Field label="บัตร 4 ตัวท้าย">
             <input value={form.card_last4} onChange={(e) => set("card_last4", e.target.value)} placeholder="เช่น 1234" maxLength={4} className={INP} />
           </Field>
-          <Field label="โปรไฟล์ Chrome">
+          <Field label="โปรไฟล์ Chrome (ชื่อเล่น)">
             <input value={form.chrome_profile} onChange={(e) => set("chrome_profile", e.target.value)} className={INP} />
+          </Field>
+          <Field label="โฟลเดอร์โปรไฟล์ Chrome (สำหรับปุ่มเปิด Chrome)">
+            <input value={form.chrome_profile_dir} onChange={(e) => set("chrome_profile_dir", e.target.value)} placeholder="เช่น Profile 3, Default" className={INP} />
+            <span className="mt-1 block text-[11px] text-slate-400">ดูได้ที่ Chrome → เปิดโปรไฟล์นั้น → พิมพ์ chrome://version ที่ช่อง URL → ดูบรรทัด &quot;Profile Path&quot; (ท้ายสุดคือชื่อโฟลเดอร์)</span>
           </Field>
           <Field label="ลิงก์โปรไฟล์ Chrome">
             <input value={form.chrome_profile_url} onChange={(e) => set("chrome_profile_url", e.target.value)} placeholder="https://…" className={INP} />
