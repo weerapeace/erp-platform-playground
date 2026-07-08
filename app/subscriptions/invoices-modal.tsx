@@ -31,6 +31,24 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
   const [uploading, setUploading] = useState(false);
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const fileRef = useRef<HTMLInputElement>(null);
+  // อ่านบิลอัตโนมัติ (ฟรี — อ่านข้อความใน PDF)
+  const [detecting, setDetecting] = useState(false);
+  const [detected, setDetected] = useState<{ amount: number | null; currency: string | null; month: string | null; hasText: boolean } | null>(null);
+
+  const onPickFile = async (file: File) => {
+    setDetected(null);
+    const isPdf = /pdf/i.test(file.type) || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) return;
+    setDetecting(true);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const res = await apiFetch("/api/subscriptions/parse-invoice", { method: "POST", body: fd });
+      const j = await res.json();
+      setDetected({ amount: j.amount ?? null, currency: j.currency ?? null, month: j.month ?? null, hasText: !!j.hasText });
+      if (j.month) setMonth(j.month); // เติมเดือนให้อัตโนมัติ (แก้ได้)
+    } catch { /* เงียบ — อ่านไม่ได้ก็เลือกเดือนเอง */ }
+    finally { setDetecting(false); }
+  };
 
   const fetchInvoices = useCallback(async (subId: string) => {
     setLoading(true);
@@ -45,7 +63,7 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
   }, [toast]);
 
   useEffect(() => {
-    if (sub) { setInvoices([]); fetchInvoices(sub.id); setMonth(new Date().toISOString().slice(0, 7)); }
+    if (sub) { setInvoices([]); setDetected(null); fetchInvoices(sub.id); setMonth(new Date().toISOString().slice(0, 7)); }
   }, [sub, fetchInvoices]);
 
   const handleUpload = async () => {
@@ -63,6 +81,7 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
       if (j.error) throw new Error(j.error);
       toast.success("อัปโหลดใบเสร็จแล้ว");
       if (fileRef.current) fileRef.current.value = "";
+      setDetected(null);
       setInvoices((prev) => [j.data as SubInvoice, ...prev]);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ");
@@ -108,6 +127,7 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
               <label className="flex-[2] min-w-[160px]">
                 <span className="block text-xs font-medium text-slate-600 mb-1">ไฟล์ PDF</span>
                 <input ref={fileRef} type="file" accept="application/pdf,.pdf"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) onPickFile(f); }}
                   className="h-9 w-full text-sm file:mr-2 file:h-7 file:rounded-md file:border-0 file:bg-indigo-100 file:px-2 file:text-indigo-700 file:text-xs" />
               </label>
               <button onClick={handleUpload} disabled={uploading}
@@ -115,6 +135,26 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
                 {uploading ? "กำลังอัปโหลด…" : "⬆ อัปโหลด"}
               </button>
             </div>
+
+            {/* ผลอ่านบิลอัตโนมัติ (ฟรี — อ่านข้อความใน PDF) */}
+            {detecting ? (
+              <div className="mt-2 text-[11px] text-slate-400">🔍 กำลังอ่านบิล…</div>
+            ) : detected ? (
+              <div className="mt-2 text-[11px]">
+                {detected.hasText === false ? (
+                  <span className="text-amber-600">อ่านอัตโนมัติไม่ได้ (บิลน่าจะเป็นรูป/สแกน) — เลือกเดือนเอง</span>
+                ) : (detected.month || detected.amount) ? (
+                  <span className="text-emerald-600">
+                    🔍 อ่านจากบิล:
+                    {detected.month ? <> 📅 เดือน {detected.month}</> : null}
+                    {detected.amount ? <> · 💰 {detected.currency ?? ""}{detected.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</> : null}
+                    <span className="text-slate-400"> (เติมเดือนให้แล้ว แก้ได้)</span>
+                  </span>
+                ) : (
+                  <span className="text-slate-400">อ่านบิลแล้วแต่ไม่พบวันที่/ยอด — เลือกเดือนเอง</span>
+                )}
+              </div>
+            ) : null}
           </div>
         )}
 
