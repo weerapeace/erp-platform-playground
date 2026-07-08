@@ -42,6 +42,7 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
   const [pokes, setPokes] = useState<Poke[]>([]);
   const [pos, setPos] = useState<Record<string, { x: number; y: number }>>({});
   const [hoveredId, setHoveredId] = useState<string | null>(null);   // ชี้อยู่ → หยุดวิ่งให้กดปุ่มได้
+  const [hidden, setHidden] = useState<Set<string>>(new Set());   // กดที่ GIF = ซ่อน/โชว์ฟองข้อความ
   const [pinned, setPinned] = useState<Set<string>>(new Set());   // ตัวที่ลากวางไว้ (หยุดวิ่ง)
   const [dropIds, setDropIds] = useState<Set<string>>(new Set()); // ตัวที่กำลังเล่นอนิเมชั่นเด้ง
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -129,6 +130,7 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
     const d = dragRef.current; dragRef.current = null;
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
     if (d?.moved) { setPinned((prev) => new Set(prev).add(id)); setDraggingId(null); }   // ลากแล้ว → ปักหมุด (หยุดวิ่ง)
+    else setHidden((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });   // กด (ไม่ลาก) = ซ่อน/โชว์ฟอง
   };
 
   if (!userId || shown.length === 0) return null;
@@ -147,7 +149,8 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
           <div key={p.id} className="absolute pointer-events-auto"
             style={{ left: `${pp.x}%`, top: `${pp.y}%`, transition: still ? "none" : `left ${MOVE_MS}ms linear, top ${MOVE_MS}ms linear` }}
             onMouseEnter={() => setHoveredId(p.id)} onMouseLeave={() => setHoveredId((h) => (h === p.id ? null : h))}>
-            {/* ฟองข้อความ — ขึ้นเองอัตโนมัติ (ไม่ต้องคลิก) */}
+            {/* ฟองข้อความ — ขึ้นเองอัตโนมัติ · กดที่ GIF เพื่อปิด/เปิด */}
+            {!hidden.has(p.id) && (
             <div className="ov-bubble-pop absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-52 max-w-[72vw]">
               <div className="bg-white rounded-2xl shadow-xl border border-slate-100 p-2.5">
                 <div className="flex items-center gap-2 mb-1">
@@ -164,9 +167,10 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
                 </div>
               </div>
             </div>
+            )}
             <button
               onPointerDown={onDown(p.id)} onPointerMove={onMove(p.id)} onPointerUp={onUp(p.id)}
-              title={p.from_name ? t(`จาก ${p.from_name} · ลากเพื่อย้าย`, `from ${p.from_name} · drag to move`) : t("ลากเพื่อย้าย", "drag to move")}
+              title={p.from_name ? t(`จาก ${p.from_name} · กดปิด/เปิดข้อความ · ลากเพื่อย้าย`, `from ${p.from_name} · tap to toggle message · drag to move`) : t("กดปิด/เปิดข้อความ · ลากเพื่อย้าย", "tap to toggle · drag to move")}
               className={`relative block focus:outline-none ${innerCls}`} style={{ width: SIZE, height: SIZE, cursor: "grab", touchAction: "none" }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {src && <img src={src} alt="" className="w-full h-full object-contain drop-shadow-lg select-none" draggable={false} />}
