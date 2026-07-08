@@ -32,6 +32,7 @@ export default function MiscPortalPage() {
   const router = useRouter();
 
   const [items, setItems] = useState<MenuItem[]>([]);
+  const [appGroups, setAppGroups] = useState<{ key: string; default_href: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [manage, setManage] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
@@ -49,11 +50,15 @@ export default function MiscPortalPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch("/api/menu?all=1");
-      const j = await res.json();
-      const all = (j.data ?? []) as MenuItem[];
+      const [mj, aj] = await Promise.all([
+        apiFetch("/api/menu?all=1").then((r) => r.json()),
+        apiFetch("/api/menu/apps").then((r) => r.json()).catch(() => ({ data: [] })),
+      ]);
+      const all = (mj.data ?? []) as MenuItem[];
       setItems(all.filter((m) => (m.app_keys ?? []).includes("misc") && m.href !== "/misc")
         .sort((a, b) => a.sort_order - b.sort_order));
+      setAppGroups(((aj.data ?? []) as { key: string; default_href: string | null }[])
+        .map((a) => ({ key: a.key, default_href: a.default_href })));
     } catch { /* ignore */ }
     setLoading(false);
   }, []);
@@ -67,6 +72,10 @@ export default function MiscPortalPage() {
   // เปิดแอปแบบ embed (อยู่ใน standalone shell — เนื้อหาไม่โผล่ ERP nav)
   const openTile = (m: MenuItem) => {
     if (manage) { setForm({ id: m.id, label: m.label, icon: m.icon ?? "🧩", icon_url: m.icon_url }); return; }
+    // การ์ดที่เป็น "แอปเดี่ยว" (มี app group ที่ default_href ตรงกับ href นี้) → เปิด standalone ที่หน้าต่างบนสุด
+    // เพื่อให้ URL/manifest เป็นของแอปนั้นเอง (ติดตั้ง PWA ได้ชื่อ/ไอคอนถูกตัว ไม่ใช่ "งานอื่นๆ")
+    const ag = appGroups.find((a) => a.default_href && a.default_href === m.href);
+    if (ag) { (window.top ?? window).location.href = `/app/${ag.key}`; return; }
     router.push(`${m.href}${m.href.includes("?") ? "&" : "?"}embed=1`);
   };
 
