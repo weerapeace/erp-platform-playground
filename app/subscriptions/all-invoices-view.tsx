@@ -20,6 +20,8 @@ function fmtMonth(ym: string): string {
   const idx = parseInt(m, 10) - 1;
   return names[idx] ? `${names[idx]} ${Number(y) + 543}` : ym;
 }
+// signed url + บังคับดาวน์โหลด (Supabase รองรับ ?download=ชื่อไฟล์)
+const dlUrl = (u: string, n: string) => `${u}${u.includes("?") ? "&" : "?"}download=${encodeURIComponent(n)}`;
 
 export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; settings: SubSettings }) {
   const toast = useToast();
@@ -114,15 +116,19 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
     { id: "file_name", accessorKey: "file_name", header: "ไฟล์", size: 260,
       cell: ({ getValue }) => <span className="text-sm text-slate-600 inline-flex items-center gap-1.5"><span>📄</span><span className="truncate">{getValue() as string}</span></span> },
     {
-      id: "actions", header: "", size: 120, enableSorting: false,
+      id: "actions", header: "", size: 160, enableSorting: false,
       cell: ({ row }) => {
         const inv = row.original;
         return (
           <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
-            {inv.url
-              ? <a href={inv.url} target="_blank" rel="noopener noreferrer"
+            {inv.url ? (
+              <>
+                <a href={inv.url} target="_blank" rel="noopener noreferrer" title="เปิดดู"
                   className="h-7 px-2.5 inline-flex items-center rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">🔗 เปิด</a>
-              : <span className="text-xs text-slate-300">—</span>}
+                <a href={dlUrl(inv.url, inv.file_name)} title="ดาวน์โหลดไฟล์"
+                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">⬇</a>
+              </>
+            ) : <span className="text-xs text-slate-300">—</span>}
             {canEdit && (
               <button onClick={() => handleDelete(inv)} title="ลบ"
                 className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs text-slate-400 hover:bg-red-50 hover:text-red-500">🗑</button>

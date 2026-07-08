@@ -176,10 +176,14 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
                     <div key={inv.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2">
                       <span className="text-lg flex-shrink-0">📄</span>
                       <span className="flex-1 min-w-0 truncate text-sm text-slate-700" title={inv.file_name}>{inv.file_name}</span>
-                      {inv.url
-                        ? <a href={inv.url} target="_blank" rel="noopener noreferrer"
+                      {inv.url ? (
+                        <>
+                          <a href={inv.url} target="_blank" rel="noopener noreferrer" title="เปิดดู"
                             className="h-7 px-2.5 inline-flex items-center rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">🔗 เปิด</a>
-                        : <span className="text-xs text-slate-300">—</span>}
+                          <a href={`${inv.url}${inv.url.includes("?") ? "&" : "?"}download=${encodeURIComponent(inv.file_name)}`} title="ดาวน์โหลด"
+                            className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">⬇</a>
+                        </>
+                      ) : <span className="text-xs text-slate-300">—</span>}
                       {canEdit && (
                         <button onClick={() => handleDelete(inv)} title="ลบ"
                           className="h-7 w-7 inline-flex items-center justify-center rounded-md text-slate-300 hover:bg-red-50 hover:text-red-500">🗑</button>
