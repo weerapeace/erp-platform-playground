@@ -61,6 +61,7 @@ export function AssetLibrary() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [newColOpen, setNewColOpen] = useState(false);
   const [artworkAddOpen, setArtworkAddOpen] = useState(false);
+  const [massOpen, setMassOpen] = useState(false);   // โหมด MASS: เพิ่ม Artwork หลายรายการแบบตาราง inline
   const [manageTypesOpen, setManageTypesOpen] = useState(false);
   const [bulkTrashOpen, setBulkTrashOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
@@ -204,6 +205,11 @@ export function AssetLibrary() {
               className="w-56 h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
+          {source === "artwork" && (
+            <button onClick={() => setMassOpen(true)}
+              className="h-9 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap"
+            >📋 เพิ่มหลายรูป</button>
+          )}
           <button
             onClick={() => source === "artwork" ? setArtworkAddOpen(true) : setUploadOpen(true)}
             className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap"
@@ -359,6 +365,11 @@ export function AssetLibrary() {
         <ArtworkAddModal actor={actor} artTypes={artTypes} collections={collections}
           onClose={() => setArtworkAddOpen(false)}
           onDone={async () => { setArtworkAddOpen(false); await load(); await loadMeta(); }} />
+      )}
+      {massOpen && (
+        <MassArtworkModal actor={actor} artTypes={artTypes} collections={collections}
+          onClose={() => setMassOpen(false)}
+          onDone={async () => { setMassOpen(false); await load(); await loadMeta(); }} />
       )}
       {manageTypesOpen && (
         <ManageTypesModal types={artTypes} onClose={() => setManageTypesOpen(false)}
@@ -1064,6 +1075,149 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
           className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
 
       {ruleOpen && <ArtworkPathRuleModal rule={rule} onClose={() => setRuleOpen(false)} onSaved={reloadRule} />}
+    </ERPModal>
+  );
+}
+
+// ── เพิ่ม Artwork หลายรูปพร้อมกัน (ตาราง inline) — ลากหลายไฟล์ → 1 แถว/ไฟล์ → แก้แล้วบันทึกทีเดียว ──
+type MassRow = { id: number; file: File; preview: string | null; name: string; types: string[]; path: string; url: string };
+function MassArtworkModal({ actor, artTypes, collections, onClose, onDone }: {
+  actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void;
+}) {
+  const toast = useToast();
+  const [rows, setRows] = useState<MassRow[]>([]);
+  const [cols, setCols] = useState<AssetCollection[]>(collections);
+  const [artTypeList, setArtTypeList] = useState<LookupItem[]>(artTypes);
+  const [batchAlbums, setBatchAlbums] = useState<string[]>([]);   // อัลบั้มใช้กับทั้งชุด
+  const [batchTypes, setBatchTypes] = useState<string[]>([]);     // ชนิดเริ่มต้น → กดใส่ให้ทุกแถว
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [rule] = useArtworkPathRule();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const idRef = useRef(0);
+  const base = rule.base_paths[0];
+
+  const makeRow = (f: File): MassRow => ({
+    id: ++idRef.current, file: f,
+    preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
+    name: f.name.replace(/\.[^.]+$/, ""), types: [...batchTypes],
+    path: base ? `${base.replace(/[\\/]+$/, "")}\\${f.name}` : "", url: "",
+  });
+  const addFiles = (files: FileList | File[]) => {
+    const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (imgs.length) setRows((r) => [...r, ...imgs.map(makeRow)]);
+    else toast.error("รับเฉพาะไฟล์รูปภาพ (JPG/PNG/…)");
+  };
+  const setRow = (id: number, patch: Partial<MassRow>) => setRows((r) => r.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const applyTypesToAll = () => setRows((r) => r.map((x) => ({ ...x, types: [...batchTypes] })));
+
+  const save = async () => {
+    if (rows.length === 0) { toast.error("ยังไม่มีรายการ — ลากไฟล์รูปเข้ามาก่อน"); return; }
+    const missing = rows.filter((r) => !r.path.trim() && !r.url.trim());
+    if (missing.length) { toast.error(`มี ${missing.length} แถวยังไม่ใส่ที่อยู่ไฟล์ต้นฉบับ (path หรือ ลิงก์)`); return; }
+    setBusy(true); setProgress({ done: 0, total: rows.length });
+    let ok = 0, fail = 0;
+    for (const r of rows) {
+      try {
+        const upFile = await downscaleImageWidth(r.file, 1200);
+        const fd = new FormData();
+        fd.append("file", upFile); fd.append("source", "artwork");
+        if (r.name.trim()) fd.append("title", r.name.trim());
+        if (r.types.length) fd.append("artwork_types", JSON.stringify(r.types));
+        if (r.path.trim()) fd.append("master_path", r.path.trim());
+        if (r.url.trim()) fd.append("master_url", r.url.trim());
+        if (batchAlbums.length) fd.append("collection_ids", JSON.stringify(batchAlbums));
+        if (actor) fd.append("actor", actor);
+        const res = await apiFetch("/api/assets", { method: "POST", body: fd });
+        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "");
+        ok++;
+      } catch { fail++; }
+      setProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
+    }
+    setBusy(false); setProgress(null);
+    if (ok) { toast.success(`เพิ่ม ${ok} รูปแล้ว${fail ? ` · ล้มเหลว ${fail}` : ""}`); onDone(); }
+    else toast.error(`เพิ่มไม่สำเร็จ (${fail} รายการ)`);
+  };
+
+  return (
+    <ERPModal open onClose={() => !busy && onClose()} title="📋 เพิ่ม Artwork หลายรูป (ตาราง)" size="xl"
+      description="ลากไฟล์รูปหลายไฟล์เข้ามา → ได้ 1 แถวต่อ 1 รูป (ชื่อ+path เติมอัตโนมัติ) → แก้ในตาราง แล้วบันทึกทีเดียว"
+      footer={
+        <div className="flex items-center justify-between w-full">
+          <span className="text-[12px] text-slate-400">{progress ? `กำลังบันทึก ${progress.done}/${progress.total}…` : `${rows.length} รายการ`}</span>
+          <div className="flex gap-2">
+            <button onClick={() => !busy && onClose()} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={save} disabled={busy || rows.length === 0} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : `บันทึกทั้งหมด (${rows.length})`}</button>
+          </div>
+        </div>
+      }>
+      {/* โซนลากไฟล์หลายไฟล์ */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); }}
+        onClick={() => inputRef.current?.click()}
+        className={`cursor-pointer rounded-xl border-2 border-dashed flex items-center justify-center py-4 mb-3 text-center ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50"}`}>
+        <div><span className="text-2xl">🎨</span><p className="text-[12px] text-slate-500 mt-1">ลากไฟล์รูปหลายไฟล์มาที่นี่ / คลิกเพื่อเลือกหลายไฟล์</p></div>
+        <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }} />
+      </div>
+
+      {/* ตั้งค่าทั้งชุด */}
+      <div className="grid grid-cols-2 gap-3 mb-3 p-2.5 rounded-lg bg-slate-50 border border-slate-100">
+        <div className="text-[12px] text-slate-500">อัลบั้ม (ใช้กับทุกแถว)
+          <div className="mt-0.5"><CollectionMultiSelect value={batchAlbums} collections={cols} onChange={setBatchAlbums} onCreated={(c) => setCols((cur) => [...cur, c])} /></div>
+        </div>
+        <div className="text-[12px] text-slate-500 flex flex-col">ชนิดเริ่มต้น
+          <div className="mt-0.5"><ArtTypeMultiSelect value={batchTypes} types={artTypeList} onChange={setBatchTypes} onCreated={(t) => setArtTypeList((c) => [...c, t])} /></div>
+          {rows.length > 0 && batchTypes.length > 0 && <button type="button" onClick={applyTypesToAll} className="self-start mt-1 text-[11px] text-indigo-600 hover:underline">→ ใส่ชนิดนี้ให้ทุกแถว</button>}
+        </div>
+      </div>
+
+      {/* ตาราง inline */}
+      {rows.length === 0 ? (
+        <div className="py-6 text-center text-slate-400 text-[13px]">ยังไม่มีรายการ — ลากไฟล์เข้ามาด้านบน</div>
+      ) : (
+        <div className="overflow-x-auto border border-slate-200 rounded-lg">
+          <table className="w-full text-sm border-collapse min-w-[760px]">
+            <thead>
+              <tr className="bg-slate-50 text-xs text-slate-500">
+                <th className="border-b border-slate-200 px-2 py-1.5 w-14 text-center">รูป</th>
+                <th className="border-b border-slate-200 px-2 py-1.5 text-left min-w-[140px]">ชื่อ</th>
+                <th className="border-b border-slate-200 px-2 py-1.5 text-left min-w-[180px]">ชนิด</th>
+                <th className="border-b border-slate-200 px-2 py-1.5 text-left min-w-[220px]">path ต้นฉบับ / ลิงก์</th>
+                <th className="border-b border-slate-200 px-1 py-1.5 w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="align-top">
+                  <td className="border-b border-slate-100 px-2 py-1.5 text-center">
+                    {r.preview ? <img src={r.preview} alt="" className="w-11 h-11 object-contain rounded border border-slate-200 bg-slate-50 mx-auto" /> : <span className="text-xl">🎨</span>}
+                  </td>
+                  <td className="border-b border-slate-100 px-2 py-1.5">
+                    <input value={r.name} onChange={(e) => setRow(r.id, { name: e.target.value })}
+                      className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded" />
+                  </td>
+                  <td className="border-b border-slate-100 px-2 py-1.5">
+                    <ArtTypeMultiSelect value={r.types} types={artTypeList} onChange={(v) => setRow(r.id, { types: v })} onCreated={(t) => setArtTypeList((c) => [...c, t])} />
+                  </td>
+                  <td className="border-b border-slate-100 px-2 py-1.5">
+                    <input value={r.path} onChange={(e) => setRow(r.id, { path: e.target.value })} placeholder={base ? "path NAS…" : "\\\\nas\\… หรือ Z:\\…"}
+                      className="w-full h-8 px-2 text-[11px] font-mono border border-slate-200 rounded mb-1" />
+                    <input value={r.url} onChange={(e) => setRow(r.id, { url: e.target.value })} placeholder="ลิงก์ Drive / Synology (ถ้ามี)"
+                      className="w-full h-8 px-2 text-[11px] border border-slate-200 rounded" />
+                  </td>
+                  <td className="border-b border-slate-100 px-1 py-1.5 text-center">
+                    <button type="button" onClick={() => setRows((list) => list.filter((x) => x.id !== r.id))} disabled={busy} title="ลบแถว"
+                      className="h-7 w-7 text-rose-500 hover:bg-rose-50 rounded">🗑</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </ERPModal>
   );
 }
