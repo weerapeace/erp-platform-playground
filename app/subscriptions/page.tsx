@@ -207,6 +207,8 @@ export default function SubscriptionsPage() {
         );
       },
     },
+    { id: "card_statement_name", accessorKey: "card_statement_name", header: "ชื่อในบิลบัตร", size: 180,
+      cell: ({ getValue }) => { const v = getValue() as string; return v ? <span className="text-xs text-slate-600">{v}</span> : <span className="text-xs text-slate-300">—</span>; } },
     { id: "category", accessorKey: "category", header: "หมวดหมู่", size: 130,
       meta: { filterable: true, filterType: "select", filterLabel: "หมวดหมู่" },
       cell: ({ getValue }) => <span className="text-xs text-slate-600">{(getValue() as string) || "—"}</span> },
@@ -380,7 +382,7 @@ export default function SubscriptionsPage() {
               columns={columns}
               views={view === "list" ? views : undefined}
               loading={loading}
-              searchableKeys={["name", "category", "account_email", "notes"]}
+              searchableKeys={["name", "card_statement_name", "category", "account_email", "notes"]}
               searchPlaceholder="ค้นหา ชื่อ / หมวดหมู่ / อีเมล…"
               exportFilename={view === "inuse" ? "subscriptions-inuse" : view === "personal" ? "subscriptions-personal" : "subscriptions"}
               exportEntityType="subscriptions"

@@ -15,7 +15,7 @@ const INP = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg outline
 const EMPTY: SubInput = {
   name: "", category: "", billing_cycle: "monthly", cost: 0, currency: "THB",
   billing_date: null, chrome_profile: "", chrome_profile_url: "", chrome_profile_dir: "", invoice_url: "",
-  notes: "", active: true, type: "personal", account_email: "", card_last4: "",
+  notes: "", active: true, type: "personal", account_email: "", card_last4: "", card_statement_name: "",
   pending_cancel: false, want_to_buy: false,
 };
 
@@ -122,6 +122,9 @@ export function SubscriptionFormModal({ open, editing, categories, saving, defau
           </Field>
           <Field label="บัตร 4 ตัวท้าย">
             <input value={form.card_last4} onChange={(e) => set("card_last4", e.target.value)} placeholder="เช่น 1234" maxLength={4} className={INP} />
+          </Field>
+          <Field label="ชื่อในบิลบัตรเครดิต (ไว้เทียบสเตทเมนต์)" className="md:col-span-2">
+            <input value={form.card_statement_name} onChange={(e) => set("card_statement_name", e.target.value)} placeholder="เช่น ADOBE *PHOTOSHOP, GOOGLE *Cloud" className={INP} />
           </Field>
           <Field label="โปรไฟล์ Chrome (ชื่อเล่น)">
             <input value={form.chrome_profile} onChange={(e) => set("chrome_profile", e.target.value)} className={INP} />

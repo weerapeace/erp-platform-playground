@@ -29,6 +29,7 @@ export type Subscription = {
   type: SubType;
   account_email: string;
   card_last4: string;
+  card_statement_name: string; // ชื่อที่ขึ้นในบิลบัตรเครดิต (ไว้เทียบกับสเตทเมนต์)
   pending_cancel: boolean;
   want_to_buy: boolean;
   created_at?: string;
@@ -195,6 +196,7 @@ export function toSubRow(input: Partial<SubInput>): Record<string, unknown> {
   if (input.type !== undefined) row.type = input.type;
   if (input.account_email !== undefined) row.account_email = input.account_email ?? "";
   if (input.card_last4 !== undefined) row.card_last4 = input.card_last4 ?? "";
+  if (input.card_statement_name !== undefined) row.card_statement_name = input.card_statement_name ?? "";
   if (input.pending_cancel !== undefined) row.pending_cancel = !!input.pending_cancel;
   if (input.want_to_buy !== undefined) row.want_to_buy = !!input.want_to_buy;
   return row;
