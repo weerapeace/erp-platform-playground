@@ -61,6 +61,22 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
   const ungrouped = tags.filter((t) => (!t.group_id || !groupById.has(t.group_id)) && matchTag(t));
 
   const toggleTag = (id: string) => onChange({ ...value, tagIds: value.tagIds.includes(id) ? value.tagIds.filter((x) => x !== id) : [...value.tagIds, id] });
+  // เลือก/ยกเลิก "ทั้งกลุ่ม" (ทุกแท็กในกลุ่ม/กลุ่มย่อยพร้อมกัน)
+  const toggleGroup = (ids: string[]) => {
+    const allOn = ids.length > 0 && ids.every((id) => value.tagIds.includes(id));
+    const set = new Set(value.tagIds);
+    ids.forEach((id) => (allOn ? set.delete(id) : set.add(id)));
+    onChange({ ...value, tagIds: [...set] });
+  };
+  // checkbox หัวกลุ่ม (กดเลือกทั้งกลุ่ม)
+  const GroupCheck = (ids: string[]) => {
+    if (manage || ids.length === 0) return null;
+    const on = ids.every((id) => value.tagIds.includes(id));
+    return (
+      <button type="button" onClick={(e) => { e.stopPropagation(); toggleGroup(ids); }} title="เลือกทั้งกลุ่ม"
+        className={`inline-flex items-center justify-center w-4 h-4 rounded border text-[10px] shrink-0 ${on ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 text-transparent hover:border-blue-400"}`}>✓</button>
+    );
+  };
   const clearAll = () => onChange({ tagIds: [], none: false });
 
   // โหมดตั้งค่า: toggle flag ต่อแท็ก (เก็บลง product_families → default ของทุกคน) ผ่าน API กลาง (audit)
@@ -145,16 +161,21 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
                 const direct = tagsOf(g.id);
                 const subs = subsOf(g.id).map((s) => ({ s, t: tagsOf(s.id) }));
                 if (direct.length === 0 && subs.every((x) => x.t.length === 0)) return null;
+                const allIds = [...direct.map((t) => t.id), ...subs.flatMap((x) => x.t.map((t) => t.id))];
                 return (
                   <div key={g.id} className="border border-slate-100 rounded-lg">
                     <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                      {GroupCheck(allIds)}
                       {g.color && <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: g.color }} />}{g.icon && <span>{g.icon}</span>}{g.name}
+                      {!manage && <span className="ml-auto text-[10px] text-slate-400 font-normal">เลือกทั้งกลุ่ม</span>}
                     </div>
                     <div className="p-1">
                       {direct.map(TagRow)}
                       {subs.filter((x) => x.t.length > 0).map(({ s, t }) => (
                         <div key={s.id} className="mt-1">
-                          <div className="px-2 py-0.5 text-xs font-medium text-slate-500">↳ {s.icon ? s.icon + " " : ""}{s.name}</div>
+                          <div className="px-2 py-0.5 text-xs font-medium text-slate-500 flex items-center gap-1.5">
+                            {GroupCheck(t.map((x) => x.id))}↳ {s.icon ? s.icon + " " : ""}{s.name}
+                          </div>
                           {t.map(TagRow)}
                         </div>
                       ))}
