@@ -281,8 +281,9 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
                   : platParents.map((p) => (
                     <div key={p.id} className="border-t border-slate-100 pt-2 first:border-0 first:pt-0">
                       <p className="text-sm font-semibold text-slate-700"><span className="font-mono text-[11px] text-slate-400">{p.code}</span> {p.name_platform || p.name_th}</p>
-                      {p.introduction?.trim() && <div className="mt-1"><p className="text-[11px] text-slate-400">Introduction</p><p className="text-sm text-slate-600 whitespace-pre-wrap">{p.introduction}</p></div>}
-                      {p.description?.trim() && <div className="mt-1"><p className="text-[11px] text-slate-400">Description</p><p className="text-sm text-slate-600 whitespace-pre-wrap">{p.description}</p></div>}
+                      {/* โชว์ intro/desc แยกเฉพาะตอน "ไม่ได้" อยู่ใน fields (กันซ้ำ — fields มี intro/desc/ชื่อ/warranty/weight อยู่แล้ว) */}
+                      {p.introduction?.trim() && !(p.fields ?? []).some((f) => f.key === "introduction") && <div className="mt-1"><p className="text-[11px] text-slate-400">Introduction</p><p className="text-sm text-slate-600 whitespace-pre-wrap">{p.introduction}</p></div>}
+                      {p.description?.trim() && !(p.fields ?? []).some((f) => f.key === "description") && <div className="mt-1"><p className="text-[11px] text-slate-400">Description</p><p className="text-sm text-slate-600 whitespace-pre-wrap">{p.description}</p></div>}
                       {(p.fields ?? []).map((f) => (
                         <div key={f.key} className="mt-1"><p className="text-[11px] text-slate-400">{f.label}</p><p className={`text-sm whitespace-pre-wrap ${f.empty ? "text-amber-600 italic" : "text-slate-600"}`}>{f.empty ? t("(ยังไม่กรอก)", "(empty)") : f.value}</p></div>
                       ))}

@@ -235,6 +235,11 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
   const [saved, setSaved] = useState<{ name: string; theme: OverviewTheme }[]>([]);
   const [newName, setNewName] = useState("");
   const [teamMsg, setTeamMsg] = useState<string | null>(null);
+  const [undoStack, setUndoStack] = useState<OverviewTheme[]>([]);   // เก็บธีมก่อนกดพรีเซ็ต/ธีมที่บันทึก → กดย้อนกลับได้ (กันเผลอกดแล้วของหาย)
+
+  // เปลี่ยนธีมทั้งชุด (พรีเซ็ต/ธีมที่บันทึก) — snapshot ธีมเดิมไว้ก่อน เพื่อ "ย้อนกลับ"
+  const applyFullTheme = (next: OverviewTheme) => { setUndoStack((s) => [...s, theme].slice(-15)); onChange(next); };
+  const undoTheme = () => { setUndoStack((s) => { if (!s.length) return s; onChange(s[s.length - 1]); return s.slice(0, -1); }); };
 
   // (แอดมิน) ตั้งธีมปัจจุบันเป็นค่าเริ่มต้นของทีม — เก็บ ui_config (global) คนที่ยังไม่เคยแต่งจะได้ธีมนี้
   const setTeamDefault = async () => {
@@ -326,10 +331,17 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
 
       {/* ===== ธีมสำเร็จรูป (preset) ===== */}
       <section hidden={tab !== "theme"} className="mb-5">
-        <div className="text-sm font-semibold text-slate-700 mb-2">{t("ธีมสำเร็จรูป (กดเปลี่ยนทั้งหน้า)", "Preset themes (one-click)")}</div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm font-semibold text-slate-700">{t("ธีมสำเร็จรูป (กดเปลี่ยนทั้งหน้า)", "Preset themes (one-click)")}</div>
+          {undoStack.length > 0 && (
+            <button onClick={undoTheme} title={t("ย้อนธีมกลับก่อนกดพรีเซ็ต", "Undo theme change")}
+              className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">↩ {t("ย้อนกลับ", "Undo")}{undoStack.length > 1 ? ` (${undoStack.length})` : ""}</button>
+          )}
+        </div>
+        <p className="text-[11px] text-amber-600 mb-2">⚠ {t("กดพรีเซ็ตจะเปลี่ยนทั้งหน้า (ทับที่แต่งไว้) — เผลอกดใช้ปุ่ม ↩ ย้อนกลับได้", "Presets replace your whole setup — use ↩ Undo if you tapped by accident")}</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {PRESETS.map((p) => (
-            <button key={p.key} onClick={() => onChange(p.theme)} title={p.name()}
+            <button key={p.key} onClick={() => applyFullTheme(p.theme)} title={p.name()}
               className="rounded-lg border border-slate-200 overflow-hidden text-left hover:border-violet-300 hover:shadow-sm transition">
               <div className="h-10" style={{ background: `linear-gradient(135deg, ${p.c1}, ${p.c2})` }} />
               <div className="px-2 py-1 text-xs font-medium text-slate-700">{p.name()}</div>
@@ -355,7 +367,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
               <span className="text-[11px] text-slate-400">{t("ธีมของฉัน", "My themes")}:</span>
               {saved.map((s) => (
                 <span key={s.name} className="inline-flex items-center gap-1 text-xs rounded-full border border-slate-200 bg-white pl-2.5 pr-1 py-0.5">
-                  <button onClick={() => onChange(s.theme)} className="text-slate-700 hover:text-violet-700">{s.name}</button>
+                  <button onClick={() => applyFullTheme(s.theme)} className="text-slate-700 hover:text-violet-700">{s.name}</button>
                   <button onClick={() => persistSaved(saved.filter((x) => x.name !== s.name))} className="text-slate-300 hover:text-red-500" title={t("ลบ", "Delete")}>✕</button>
                 </span>
               ))}
