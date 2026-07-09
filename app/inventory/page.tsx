@@ -21,6 +21,11 @@ const MOVE_TYPE: Record<string, { icon: string; label: string; color: string }> 
   adjust:   { icon: "⚖️", label: "ปรับ stock", color: "bg-amber-50 text-amber-700" },
 };
 
+// โซนคลัง — อีโมจิ + ลำดับ ตามประเภท (kind) สำหรับแท็บกรองคลัง
+const KIND_EMOJI: Record<string, string> = { raw: "🟠", wip: "🔵", fg: "🟢", scrap: "🔴", sales: "🏬", general: "📦" };
+const KIND_ORDER: Record<string, number> = { raw: 1, wip: 2, fg: 3, scrap: 4, sales: 5, general: 6 };
+type WhTab = { id: string; code: string; name: string; kind: string };
+
 const fmtQty   = (n: number) => Number(n).toLocaleString("th-TH");
 const fmtMoney = (n: number) => "฿" + Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2 });
 
@@ -67,7 +72,8 @@ export default function InventoryPage() {
   const [formErr, setFormErr] = useState<string | null>(null);
 
   // filter
-  const [filterWh, setFilterWh] = useState<WarehousePickerValue | null>(null);
+  const [filterWh, setFilterWh] = useState<string | null>(null);   // warehouse id (null = ทั้งหมด)
+  const [whTabs, setWhTabs] = useState<WhTab[]>([]);
   const [showLowOnly, setShowLowOnly] = useState(false);
 
   // toast
@@ -78,14 +84,14 @@ export default function InventoryPage() {
     setLoading(true); setError(null);
     try {
       if (tab === "movements") {
-        const qs = filterWh ? `?warehouse_id=${filterWh.id}` : "";
+        const qs = filterWh ? `?warehouse_id=${filterWh}` : "";
         const res = await apiFetch(`/api/inventory/movements${qs}`);
         const json: MovementsResponse = await res.json();
         if (json.error) throw new Error(json.error);
         setMoves(json.data);
       } else if (tab === "stock") {
         const params = new URLSearchParams();
-        if (filterWh) params.set("warehouse_id", filterWh.id);
+        if (filterWh) params.set("warehouse_id", filterWh);
         if (showLowOnly) params.set("low_stock", "true");
         const res = await apiFetch(`/api/inventory/balances?${params}`);
         const json: BalancesResponse = await res.json();
@@ -157,6 +163,18 @@ export default function InventoryPage() {
   };
 
   useEffect(() => { if (canView) fetchData(); }, [canView, fetchData]);
+
+  // โหลดรายชื่อคลังไว้ทำแท็บกรอง (ครั้งเดียว) — เรียงตามประเภทโซน RAW→WIP→FG→SCRAP→ขาย
+  useEffect(() => {
+    apiFetch("/api/master/warehouses?limit=100").then((r) => r.json())
+      .then((j) => {
+        const rows = ((j.data ?? []) as Array<Record<string, unknown>>)
+          .filter((w) => w.active !== false)
+          .map((w) => ({ id: String(w.id), code: String(w.code ?? ""), name: String(w.name ?? w.code ?? ""), kind: String(w.kind ?? "general") }));
+        rows.sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9) || a.code.localeCompare(b.code));
+        setWhTabs(rows);
+      }).catch(() => {});
+  }, []);
 
   // (การเช็คสิทธิ์ย้ายไปหลัง hooks ทั้งหมด บรรทัดล่าง — กัน React #310 hooks ไม่เท่ากัน)
 
@@ -382,18 +400,27 @@ export default function InventoryPage() {
           </div>
 
           <div className="flex-1" />
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">กรองคลัง:</span>
-            <div className="w-48">
-              <WarehousePicker value={filterWh} onChange={setFilterWh} placeholder="ทุกคลัง" />
-            </div>
-          </div>
           {tab === "stock" && (
             <label className="flex items-center gap-2 text-xs text-slate-600">
               <input type="checkbox" checked={showLowOnly} onChange={e => setShowLowOnly(e.target.checked)} className="rounded border-slate-300" />
               เฉพาะ Out of Stock
             </label>
           )}
+        </div>
+
+        {/* แท็บกรองคลัง (โซน) — คลิกง่ายกว่า dropdown */}
+        <div className="mb-4 flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs text-slate-400 mr-0.5">คลัง:</span>
+          <button onClick={() => setFilterWh(null)}
+            className={`h-8 px-3 text-xs font-medium rounded-lg border transition-colors ${filterWh === null ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+            ทั้งหมด
+          </button>
+          {whTabs.map((w) => (
+            <button key={w.id} onClick={() => setFilterWh(w.id)} title={w.code}
+              className={`h-8 px-3 text-xs font-medium rounded-lg border transition-colors ${filterWh === w.id ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+              {KIND_EMOJI[w.kind] ?? "📦"} {w.name}
+            </button>
+          ))}
         </div>
 
         {/* Summary cards (stock tab) */}
