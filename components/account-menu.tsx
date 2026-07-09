@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { useAuth, roleLabel } from "@/components/auth";
 import { ThemeSync } from "@/components/theme-sync";
 import { ProfileEditor } from "@/components/profile-editor";
+import { SecurityDevices } from "@/components/security-devices";
 import { ERPModal } from "@/components/modal";
 import { getTheme, setTheme } from "@/lib/theme";
 
@@ -20,6 +21,7 @@ export function AccountMenu({ onDark = false }: { onDark?: boolean } = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);   // ความปลอดภัยเป็น popup (ไม่ออกจากแอป)
   const [cur, setCur] = useState<string | null>(getTheme());
   if (!user) return null;
 
@@ -47,8 +49,11 @@ export function AccountMenu({ onDark = false }: { onDark?: boolean } = {}) {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl z-50 py-1">
             <div className="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 truncate">{user.email}</div>
-            <button type="button" onClick={() => { setOpen(false); router.push("/dashboard"); }}
-              className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">🏠 Dashboard ของฉัน</button>
+            {/* Dashboard ของฉัน — ซ่อนเมื่ออยู่ในแอป (onDark) เพราะจะพาออกจากแอป */}
+            {!onDark && (
+              <button type="button" onClick={() => { setOpen(false); router.push("/dashboard"); }}
+                className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">🏠 Dashboard ของฉัน</button>
+            )}
             <button type="button" onClick={() => { setOpen(false); setProfileOpen(true); }}
               className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 border-t border-slate-100">👤 โปรไฟล์ของฉัน (แก้ชื่อ/รูป)</button>
 
@@ -71,7 +76,7 @@ export function AccountMenu({ onDark = false }: { onDark?: boolean } = {}) {
 
             <button type="button" onClick={() => { setOpen(false); setProfileOpen(true); }}
               className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 border-t border-slate-100">🔑 เปลี่ยนรหัสผ่าน/PIN</button>
-            <button type="button" onClick={() => { setOpen(false); router.push("/account/security"); }}
+            <button type="button" onClick={() => { setOpen(false); setSecurityOpen(true); }}
               className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 border-t border-slate-100">🔐 ความปลอดภัย (อุปกรณ์ที่เข้าใช้)</button>
             <button onClick={async () => { setOpen(false); await logout(); router.push("/login"); }}
               className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 border-t border-slate-100">ออกจากระบบ</button>
@@ -82,6 +87,11 @@ export function AccountMenu({ onDark = false }: { onDark?: boolean } = {}) {
       {/* ป๊อปอัปแก้โปรไฟล์ — ในที่เดียว ไม่ต้องเปลี่ยนหน้า */}
       <ERPModal open={profileOpen} onClose={() => setProfileOpen(false)} title="👤 โปรไฟล์ของฉัน" size="md" storageKey="profile-editor">
         <ProfileEditor />
+      </ERPModal>
+
+      {/* ความปลอดภัย — popup (ไม่ออกจากแอป) */}
+      <ERPModal open={securityOpen} onClose={() => setSecurityOpen(false)} title="🔐 ความปลอดภัย — อุปกรณ์ที่เข้าสู่ระบบ" size="lg" storageKey="security-devices">
+        <SecurityDevices />
       </ERPModal>
     </div>
   );
