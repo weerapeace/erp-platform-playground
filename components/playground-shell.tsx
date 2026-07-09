@@ -112,17 +112,6 @@ export const navGroups = [
   },
   {
     phase: 2,
-    label: "📦 Inventory (Phase 3)",
-    items: [
-      { href: "/master/stock-locations",   icon: "📍", labelTH: "Stock Locations" },
-      { href: "/master/stock-lots",        icon: "🏷️", labelTH: "Stock Lots" },
-      { href: "/master/stock-lpns",        icon: "📦", labelTH: "Stock LPN + QR" },
-      { href: "/master/stock-counts",      icon: "🔢", labelTH: "Stock Count" },
-      { href: "/master/stock-adjustments", icon: "⚖️", labelTH: "Stock Adjustments" },
-    ],
-  },
-  {
-    phase: 2,
     label: "📐 BOM & MRP (Phase 4,6)",
     items: [
       { href: "/master/bom-headers",           icon: "📐", labelTH: "BOM (สูตรผลิต)" },

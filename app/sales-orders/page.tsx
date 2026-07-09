@@ -151,10 +151,10 @@ export default function SalesOrdersPage() {
   }, []);
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
-  // โหลดคลังหลัก (WH-MAIN) ไว้เป็นค่าเริ่มต้นตอนสร้าง SO — แคชไว้ ไม่ยิงซ้ำทุกครั้งที่เข้าหน้า
+  // โหลดโซนสินค้าสำเร็จ (WH-FG) ไว้เป็นค่าเริ่มต้นตอนสร้าง SO — ขายตัดจาก FG · แคชไว้ ไม่ยิงซ้ำ
   useEffect(() => {
     if (!canView) return;
-    const apply = (list: WarehousePickerValue[]) => { const main = list.find(w => w.code === "WH-MAIN") ?? null; if (main) setDefaultWarehouse(main); };
+    const apply = (list: WarehousePickerValue[]) => { const main = list.find(w => w.code === "WH-FG") ?? null; if (main) setDefaultWarehouse(main); };
     const cached = peekSWR<WarehousePickerValue[]>("warehouses:list");
     if (cached) { apply(cached); return; }
     apiFetch("/api/master/warehouses?limit=50")

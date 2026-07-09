@@ -206,10 +206,10 @@ export default function ReceiveGoodsPage() {
   // โหลดทุกแท็บ — แท็บ PO ใช้ข้อมูล pending นับ "รายการรอรับ" บนการ์ดใบ PO
   useEffect(() => { void loadPending(tab === "done" ? "done" : "pending"); }, [tab, loadPending]);
 
-  // default คลังปลายทาง = คลังหลัก (WH-MAIN)
+  // default คลังปลายทาง = โซนวัตถุดิบ (WH-RAW) — ของจาก PO เข้าวัตถุดิบ (เลือกโซนอื่นได้)
   useEffect(() => {
     apiFetch("/api/master/warehouses?limit=50").then((r) => r.json())
-      .then((j) => { const m = ((j.data ?? []) as WarehousePickerValue[]).find((w) => w.code === "WH-MAIN"); if (m) setRecvWh(m); })
+      .then((j) => { const m = ((j.data ?? []) as WarehousePickerValue[]).find((w) => w.code === "WH-RAW"); if (m) setRecvWh(m); })
       .catch(() => {});
   }, []);
   // สลับแท็บ → ล้างร้านที่เลือกไว้ (รายชื่อร้านของแต่ละแท็บไม่เหมือนกัน)

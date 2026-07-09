@@ -114,16 +114,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // 3.5) รับเข้าสต็อก — ลงบัญชีเดินสต๊อก (ledger แยกคลัง) type "in" เข้าคลังปลายทาง
   // เฉพาะ "ของดี" (qty_received) · ของเสีย/บรรทัดไม่มี SKU จริง → ข้าม
-  // คลังปลายทาง: ใช้ที่เลือกมา หรือ default คลังหลัก (WH-MAIN)
+  // คลังปลายทาง: ใช้ที่เลือกมา หรือ default โซนวัตถุดิบ (WH-RAW)
   let toWarehouseId = body.warehouse_id ?? null;
   if (!toWarehouseId) {
-    const { data: mainWh } = await admin.from("erp_playground_warehouses").select("id").eq("code", "WH-MAIN").maybeSingle();
+    const { data: mainWh } = await admin.from("erp_playground_warehouses").select("id").eq("code", "WH-RAW").maybeSingle();
     toWarehouseId = (mainWh as { id?: string } | null)?.id ?? null;
   }
   let stockedLines = 0;
   const stockWarnings: string[] = [];
   if (!toWarehouseId) {
-    stockWarnings.push("ไม่พบคลังปลายทาง (WH-MAIN) — ยังไม่ได้บวกสต๊อก");
+    stockWarnings.push("ไม่พบคลังปลายทาง (WH-RAW) — ยังไม่ได้บวกสต๊อก");
   } else {
     for (const l of valid) {
       const pl = lineById.get(String(l.po_line_id));
