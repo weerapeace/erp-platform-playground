@@ -57,7 +57,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const { data: poLines, error: plErr } = await admin
     .from("purchase_order_lines_v2")
-    .select("id, item_sku_id, item_name, qty, uom, qty_received, qty_defective")
+    .select("id, item_sku_id, item_name, qty, uom, qty_received, qty_defective, price_est, currency")
     .eq("po_id", poId);
   if (plErr) return NextResponse.json({ error: plErr.message }, { status: 500 });
   const lineById = new Map((poLines ?? []).map((l) => [String(l.id), l as Record<string, unknown>]));
@@ -125,18 +125,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!toWarehouseId) {
     stockWarnings.push("ไม่พบคลังปลายทาง (WH-RAW) — ยังไม่ได้บวกสต๊อก");
   } else {
+    // ต้นทุน: ราคาซื้อจาก PO (price_est เฉพาะสกุลบาท) ก่อน → ไม่มี ใช้ต้นทุนมาตรฐาน (skus_v2.standard_price)
+    const skuIds = [...new Set(valid.map((l) => lineById.get(String(l.po_line_id))?.item_sku_id).filter(Boolean))] as string[];
+    const { data: skuCosts } = skuIds.length ? await admin.from("skus_v2").select("id, standard_price").in("id", skuIds) : { data: [] as Record<string, unknown>[] };
+    const stdMap = new Map(((skuCosts ?? []) as Record<string, unknown>[]).map((s) => [String(s.id), num(s.standard_price)]));
     for (const l of valid) {
       const pl = lineById.get(String(l.po_line_id));
       if (!pl || !pl.item_sku_id) continue;
       const recQty = num(l.qty_received);
       if (recQty <= 0) continue;
+      // สกุลต่างประเทศ (เช่นหยวน) ไม่เอา price_est มาปนบาท → ใช้ต้นทุนมาตรฐานแทน
+      const cur = String(pl.currency ?? "").toUpperCase();
+      const isTHB = !cur || ["THB", "บาท", "BAHT"].includes(cur);
+      const poPrice = num(pl.price_est);
+      const unitCost = isTHB && poPrice > 0 ? poPrice : (stdMap.get(String(pl.item_sku_id)) ?? 0);
       const { error: stkErr } = await admin.rpc("erp_stock_post_internal", {
         p_movement_type:   "in",
         p_product_id:      pl.item_sku_id as string,
         p_to_warehouse_id: toWarehouseId,
         p_from_warehouse_id: null,
         p_qty:             recQty,
-        p_unit_cost:       0,
+        p_unit_cost:       unitCost,
         p_reference_type:  "goods_receipt",
         p_reference_id:    gr.id,
         p_reference_label: grNo,
