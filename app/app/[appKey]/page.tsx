@@ -16,6 +16,7 @@ import { ShellPresentContext } from "@/components/playground-shell";
 import { PwaInstallButton } from "@/components/pwa-install-button";
 import { NotificationBell } from "@/components/notification-bell";
 import { LangToggle } from "@/components/i18n";
+import { AccountMenu } from "@/components/account-menu";
 import { appHeaderStyle } from "@/lib/app-header-theme";
 
 const MasterPage = dynamic(() => import("@/components/master-page").then((m) => m.MasterPage), {
@@ -172,7 +173,7 @@ export default function StandaloneApp() {
             <PwaInstallButton />
             <div className="text-white"><LangToggle /></div>
             <div className="text-white"><NotificationBell /></div>
-            <Link href="/account/security" title="ตั้งค่าบัญชี" className="text-xs opacity-90 hover:opacity-100 hidden sm:block truncate max-w-[110px] hover:underline">{user.name}</Link>
+            <AccountMenu onDark />
           </div>
         </div>
       </header>

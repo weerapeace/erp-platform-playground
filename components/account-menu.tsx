@@ -15,7 +15,7 @@ import { getTheme, setTheme } from "@/lib/theme";
 
 const SWATCHES = ["#7c3aed", "#2563eb", "#0891b2", "#059669", "#ea580c", "#e11d48", "#475569"];
 
-export function AccountMenu() {
+export function AccountMenu({ onDark = false }: { onDark?: boolean } = {}) {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -30,16 +30,16 @@ export function AccountMenu() {
     <div className="relative">
       <ThemeSync />
       <button onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 h-9 pl-1.5 pr-2 rounded-lg hover:bg-slate-50 transition-colors">
+        className={`flex items-center gap-2 h-9 pl-1.5 pr-2 rounded-lg transition-colors ${onDark ? "hover:bg-white/15" : "hover:bg-slate-50"}`}>
         {avatar
           // eslint-disable-next-line @next/next/no-img-element
-          ? <img src={avatar} alt="" className="w-7 h-7 rounded-full object-cover border border-slate-200" />
-          : <span className="w-7 h-7 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center text-xs font-semibold">{(user.name || user.email).charAt(0).toUpperCase()}</span>}
+          ? <img src={avatar} alt="" className={`w-7 h-7 rounded-full object-cover border ${onDark ? "border-white/40" : "border-slate-200"}`} />
+          : <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${onDark ? "bg-white/20 text-white" : "bg-violet-100 text-violet-700"}`}>{(user.name || user.email).charAt(0).toUpperCase()}</span>}
         <span className="leading-tight text-right hidden sm:block">
-          <span className="block text-xs font-medium text-slate-700 truncate max-w-[120px]">{user.name}</span>
-          <span className="block text-[10px] text-slate-400">{roleLabel(user.role)}</span>
+          <span className={`block text-xs font-medium truncate max-w-[120px] ${onDark ? "text-white" : "text-slate-700"}`}>{user.name}</span>
+          <span className={`block text-[10px] ${onDark ? "text-white/70" : "text-slate-400"}`}>{roleLabel(user.role)}</span>
         </span>
-        <span className="text-slate-400 text-xs">⋯</span>
+        <span className={`text-xs ${onDark ? "text-white/70" : "text-slate-400"}`}>⋯</span>
       </button>
 
       {open && (
