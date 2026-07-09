@@ -27,13 +27,17 @@ const ROLE_COLOR: Record<string, string> = {
   red: "bg-red-100 text-red-700 border-red-300",
 };
 
-export function AppAccessModal({ app, actor, canEditRoles = true, onClose, onChanged, onFlash }: {
+export function AppAccessModal({ app, actor, canEditRoles = true, onClose, onChanged, onFlash, saveLock, lockKey, titleLabel, subjectWord = "แอป" }: {
   app: AppLite;
   actor?: string;
   canEditRoles?: boolean;   // ต้องมี admin.roles ถึงจะแก้สิทธิ์ตำแหน่งได้ (ยกเว้นรายคนใช้ admin.users)
   onClose: () => void;
   onChanged: (patch: { permission_key: string | null }) => void;   // sync แถวแอปในหน้าหลัก
   onFlash: (m: string) => void;
+  saveLock?: (newKey: string | null) => Promise<{ error?: string | null }>;   // ของกลาง: ยิงบันทึก permission_key เอง (เมนูย่อยใช้ /api/menu แทน /api/menu/apps)
+  lockKey?: string;         // key ที่จะใช้ตอนล็อก (default = app.<key>)
+  titleLabel?: string;      // ชื่อบนหัวป๊อปอัป (default = "ตั้งสิทธิ์เข้าแอป «...»")
+  subjectWord?: string;     // คำเรียก ("แอป" / "เมนู") ในข้อความ
 }) {
   const [permKey, setPermKey] = useState<string | null>(app.permission_key);
   const [roles, setRoles] = useState<RoleDef[]>([]);
@@ -48,7 +52,7 @@ export function AppAccessModal({ app, actor, canEditRoles = true, onClose, onCha
 
   // key สำหรับล็อก: ใช้ของเดิมถ้ามี (กันแอปที่ใช้ key ร่วม เช่น dispatch→app.production เพี้ยน)
   // ถ้าแอปยังไม่เคยล็อก → derive app.<key> ให้ (china-pay → app.china_pay)
-  const lockKeyRef = useRef(app.permission_key || `app.${app.key.replace(/-/g, "_")}`);
+  const lockKeyRef = useRef(app.permission_key || lockKey || `app.${app.key.replace(/-/g, "_")}`);
   const locked = !!permKey;
 
   const loadRoles = useCallback(async () => {
@@ -87,9 +91,11 @@ export function AppAccessModal({ app, actor, canEditRoles = true, onClose, onCha
   const toggleLock = async (on: boolean) => {
     setBusy("lock"); setErr(null);
     const newKey = on ? lockKeyRef.current : null;
-    const j = await apiFetch("/api/menu/apps", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: app.id, patch: { permission_key: newKey } }) }).then((r) => r.json());
+    const j = saveLock
+      ? await saveLock(newKey)
+      : await apiFetch("/api/menu/apps", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: app.id, patch: { permission_key: newKey } }) }).then((r) => r.json());
     if (j.error) setErr(j.error);
-    else { setPermKey(newKey); onChanged({ permission_key: newKey }); onFlash(on ? "ล็อกแอปแล้ว — เฉพาะคนมีสิทธิ์เข้าได้" : "ปลดล็อก — ทุกคนเข้าได้"); }
+    else { setPermKey(newKey); onChanged({ permission_key: newKey }); onFlash(on ? `ล็อก${subjectWord}แล้ว — เฉพาะคนมีสิทธิ์เข้าได้` : "ปลดล็อก — ทุกคนเข้าได้"); }
     setBusy(null);
   };
 
@@ -124,7 +130,7 @@ export function AppAccessModal({ app, actor, canEditRoles = true, onClose, onCha
 
   return (
     <ERPModal open onClose={onClose} size="lg"
-      title={`ตั้งสิทธิ์เข้าแอป «${app.label}»`}
+      title={titleLabel ?? `ตั้งสิทธิ์เข้าแอป «${app.label}»`}
       footer={<button onClick={onClose} className="h-9 px-4 text-sm font-medium bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200">ปิด</button>}>
 
       {err && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between">⚠ {err}<button onClick={() => setErr(null)} className="text-red-400 hover:text-red-700">✕</button></div>}
@@ -144,7 +150,7 @@ export function AppAccessModal({ app, actor, canEditRoles = true, onClose, onCha
       {loading ? (
         <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
       ) : !locked ? (
-        <p className="mt-4 text-sm text-slate-400 text-center py-6">แอปนี้ยังไม่ได้ล็อก — กด <b>เริ่มล็อกสิทธิ์</b> เพื่อกำหนดว่าใครเข้าได้</p>
+        <p className="mt-4 text-sm text-slate-400 text-center py-6">{subjectWord}นี้ยังไม่ได้ล็อก — กด <b>เริ่มล็อกสิทธิ์</b> เพื่อกำหนดว่าใครเห็น/เข้าได้</p>
       ) : (
         <div className="mt-4 space-y-5">
           {/* ตำแหน่ง */}

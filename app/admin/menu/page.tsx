@@ -52,6 +52,7 @@ export default function MenuManagerPage() {
   const [addNew, setAddNew] = useState(false);          // สลับโหมดสร้างเมนูใหม่ในป๊อปอัป
   const [showAddApp, setShowAddApp] = useState(false);
   const [accessApp, setAccessApp] = useState<AppGroup | null>(null);   // ป๊อปอัป "ใครเข้าแอปได้"
+  const [accessMenu, setAccessMenu] = useState<{ id: string; label: string; href: string; permission_key: string | null } | null>(null);   // ป๊อปอัป "ใครเห็นเมนู"
   const [uploadingApp, setUploadingApp] = useState(false);
   const [origin, setOrigin] = useState("");
   const dragId = useRef<string | null>(null);
@@ -727,8 +728,12 @@ export default function MenuManagerPage() {
                               <input list="section-list" defaultValue={it.section} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== it.section) patch(it.id!, { section: v }); }} className="w-36 h-7 px-2 border border-slate-200 rounded" /></label>
                             <label className="flex items-center gap-1.5 text-slate-600"><input type="checkbox" checked={it.show_in_sidebar} onChange={(e) => patch(it.id!, { show_in_sidebar: e.target.checked })} /> แถบเมนูซ้าย</label>
                             <label className="flex items-center gap-1.5 text-slate-600"><input type="checkbox" checked={it.show_in_launcher} onChange={(e) => patch(it.id!, { show_in_launcher: e.target.checked })} /> หน้ารวมแอป</label>
-                            <label className="flex items-center gap-1.5 text-slate-600">ใครเห็น
-                              <input defaultValue={it.permission_key ?? ""} list="perm-list" placeholder="ทุกคน" onBlur={(e) => patch(it.id!, { permission_key: e.target.value.trim() || null })} className="w-40 h-7 px-2 border border-slate-200 rounded" /></label>
+                            <span className="flex items-center gap-1.5 text-slate-600">ใครเห็น
+                              <button type="button" onClick={() => setAccessMenu({ id: it.id!, label: it.label, href: it.href, permission_key: it.permission_key ?? null })}
+                                title="ตั้งสิทธิ์ (role / รายคน)"
+                                className={`h-7 px-2 rounded border text-[11px] font-medium max-w-[10rem] truncate ${it.permission_key ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"}`}>
+                                {it.permission_key ? `🔒 ${it.permission_key}` : "🌐 ทุกคน"} →
+                              </button></span>
                             <label className="flex items-center gap-1.5 text-slate-600">ผูกหน้าข้อมูล
                               <select value={it.module_key ?? ""} onChange={(e) => patch(it.id!, { module_key: e.target.value || null })} className="w-36 h-7 px-1 border border-slate-200 rounded bg-white">
                                 <option value="">— ไม่ผูก —</option>
@@ -826,6 +831,28 @@ export default function MenuManagerPage() {
             onFlash={flash}
           />
         )}
+
+        {/* ป๊อปอัป: ใครเห็นเมนูย่อยนี้ (role + รายคน) — reuse AppAccessModal ยิงลง /api/menu */}
+        {accessMenu && (() => {
+          const slug = "menu." + (accessMenu.href || accessMenu.id).replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase();
+          return (
+            <AppAccessModal
+              app={{ id: accessMenu.id, key: slug, label: accessMenu.label, permission_key: accessMenu.permission_key }}
+              lockKey={slug}
+              titleLabel={`ตั้งสิทธิ์เห็นเมนู «${accessMenu.label}»`}
+              subjectWord="เมนู"
+              actor={user?.name}
+              canEditRoles={canRoles}
+              saveLock={async (newKey) => {
+                const j = await apiFetch("/api/menu", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: accessMenu.id, patch: { permission_key: newKey } }) }).then((r) => r.json());
+                return { error: j.error };
+              }}
+              onClose={() => setAccessMenu(null)}
+              onChanged={(p) => { setRows((rs) => rs.map((r) => (r.id === accessMenu.id ? { ...r, permission_key: p.permission_key } : r))); setAccessMenu((m) => (m ? { ...m, permission_key: p.permission_key } : m)); }}
+              onFlash={flash}
+            />
+          );
+        })()}
 
         <datalist id="perm-list">
           {["admin.users", "products.view", "products.edit", "purchase_requests.view", "purchase_requests.approve", "sales.view", "inventory.view"].map((p) => <option key={p} value={p} />)}
