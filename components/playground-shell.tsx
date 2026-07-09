@@ -197,6 +197,7 @@ export type MenuRow = {
   permission_key: string | null; is_active: boolean;
   app_keys?: string[];   // โมดูลใหญ่ (App) ที่เมนูนี้สังกัด — many-to-many
   module_key?: string | null;   // โมดูลที่เมนูนี้ผูก (สำหรับหมวด ⚙ ตั้งค่า) — ตั้งที่ /admin/menu
+  parent_id?: string | null;   // เมนูแม่ — ถ้ามี เมนูนี้เป็นลูกโผล่ใน dropdown ของแม่ (null = เมนูหลัก)
 };
 
 // โมดูลใหญ่ (App) — tabs บนสุด
@@ -244,11 +245,21 @@ export const DEFAULT_MENU_ITEMS: MenuRow[] = navGroups.flatMap((g, gi) =>
   })),
 );
 
+// รายการเมนูใน sidebar — leaf หรือ "เมนูแม่" (มี children → กางเป็นชั้น)
+type NavItem = { id?: string; href: string; icon: string; labelTH: string; permission?: string | null; children?: NavItem[] };
+type NavGroup = { label: string; icon?: string | null; iconUrl?: string | null; items: NavItem[] };
+
 // จัด MenuRow[] (จากทะเบียน) → กลุ่มสำหรับ render sidebar
 // ลำดับ + ไอคอนหมวด: ใช้ทะเบียนหมวด (secMeta ต่อแอป) ถ้ามี ไม่งั้น fallback section_order ของ item (ไม่มีไอคอน)
-function groupMenuRows(rows: MenuRow[], secMeta?: Map<string, SectionMeta>): { label: string; icon?: string | null; iconUrl?: string | null; items: { href: string; icon: string; labelTH: string; permission?: string | null }[] }[] {
+// เมนูซ้อนชั้น: เมนูที่มี parent_id (แม่อยู่ในลิสต์) → ไม่ขึ้น top-level แต่ไปเป็น children ของแม่
+function groupMenuRows(rows: MenuRow[], secMeta?: Map<string, SectionMeta>): NavGroup[] {
+  const toItem = (r: MenuRow): NavItem => ({ id: r.id, href: r.href, icon: r.icon ?? "•", labelTH: r.label, permission: r.permission_key });
+  const childrenByParent = new Map<string, MenuRow[]>();
+  const idSet = new Set(rows.map((r) => r.id));
+  for (const r of rows) if (r.parent_id && idSet.has(r.parent_id)) { const a = childrenByParent.get(r.parent_id) ?? []; a.push(r); childrenByParent.set(r.parent_id, a); }
   const bySection = new Map<string, { order: number; items: MenuRow[] }>();
   for (const r of rows) {
+    if (r.parent_id && idSet.has(r.parent_id)) continue;   // เป็นลูก → ข้าม (ไปอยู่ใต้แม่)
     const meta = secMeta?.get(r.section);
     const g = bySection.get(r.section) ?? { order: meta?.order ?? r.section_order, items: [] };
     g.items.push(r); bySection.set(r.section, g);
@@ -259,8 +270,10 @@ function groupMenuRows(rows: MenuRow[], secMeta?: Map<string, SectionMeta>): { l
       label,
       icon: secMeta?.get(label)?.icon ?? null,
       iconUrl: secMeta?.get(label)?.iconUrl ?? null,
-      items: g.items.sort((a, b) => a.sort_order - b.sort_order)
-        .map((r) => ({ href: r.href, icon: r.icon ?? "•", labelTH: r.label, permission: r.permission_key })),
+      items: g.items.sort((a, b) => a.sort_order - b.sort_order).map((r) => {
+        const kids = (childrenByParent.get(r.id!) ?? []).sort((a, b) => a.sort_order - b.sort_order).map(toItem);
+        return kids.length ? { ...toItem(r), children: kids } : toItem(r);
+      }),
     }));
 }
 
@@ -287,7 +300,7 @@ const ROUTE_APP_FALLBACK: { prefix: string; app: string }[] = [
 ];
 
 // default groups (fallback) → รูปแบบเดียวกับ groupMenuRows
-const DEFAULT_GROUPS = navGroups.map((g) => ({
+const DEFAULT_GROUPS: NavGroup[] = navGroups.map((g) => ({
   label: g.label,
   items: g.items.map((it) => ({ href: it.href, icon: it.icon, labelTH: it.labelTH, permission: null as string | null })),
 }));
@@ -400,6 +413,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     else if (typeof window !== "undefined" && window.innerWidth < 1024) setNavCollapsed(true);   // จอเล็ก → พับให้
   }, []);
   const toggleNavCollapsed = () => setNavCollapsed((c) => { const n = !c; localStorage.setItem("nav_collapsed", n ? "1" : "0"); return n; });
+  // เมนูแม่ที่กางอยู่ใน sidebar (accordion) — เก็บชุด id
+  const [openNav, setOpenNav] = useState<Set<string>>(() => new Set());
+  const toggleNav = (id: string) => setOpenNav((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   // focus mode — บางหน้า (บอร์ดจ่ายงาน) ซ่อน sidebar + แถบ App ให้ทำงานเต็มจอ (มีปุ่ม toggle กางคืน)
   const onFocusRoute = FOCUS_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
@@ -513,18 +529,46 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     const secMeta = new Map<string, SectionMeta>();
     if (activeApp) for (const s of sections) if (s.app_key === activeApp) secMeta.set(s.name, { icon: s.icon, iconUrl: s.icon_url, order: s.sort_order });
     const groups = rows ? groupMenuRows(rows, secMeta) : DEFAULT_GROUPS;
+    const okPerm = (p?: string | null) => !p || can(p as Parameters<typeof can>[0]);
     return groups
       .map((g) => ({
         label: g.label,
         icon: (g as { icon?: string | null }).icon ?? null,
         iconUrl: (g as { iconUrl?: string | null }).iconUrl ?? null,
-        items: g.items.filter((it) => !it.permission || can(it.permission as Parameters<typeof can>[0])),
+        // กรองสิทธิ์: เมนูแม่กรองลูกด้วย (ลูกที่ไม่มีสิทธิ์ = ซ่อน) แล้วค่อยกรองตัวแม่/leaf เอง
+        items: g.items
+          .map((it) => it.children ? { ...it, children: it.children.filter((c) => okPerm(c.permission)) } : it)
+          .filter((it) => okPerm(it.permission)),
       }))
       .filter((g) => g.items.length > 0);
   })();
 
   // เมนูของแอปปัจจุบัน (flatten) → ใช้ทำแถบล่างบนมือถือ/แท็บเล็ต (< xl) แทน side rail
   const bottomItems = navGroupsToShow.flatMap((g) => g.items).slice(0, 4);
+
+  // วาดเมนู leaf (ลิงก์เดี่ยว) ใน sidebar — ใช้ทั้งเมนูปกติและลูกของเมนูแม่ (child = ย่อหน้าเข้า)
+  const renderLeaf = (item: NavItem, child = false) => {
+    const isActive = pathname === item.href;
+    const isReady = readySections.includes(item.href);
+    const isStandalone = STANDALONE_HREFS.has(item.href);
+    return (
+      <Link key={item.href} href={item.href}
+        target={isStandalone ? "_blank" : undefined} rel={isStandalone ? "noopener" : undefined}
+        title={!navExpanded ? item.labelTH : isStandalone ? "เปิดเป็นแอปแยกในแท็บใหม่" : undefined}
+        className={`flex items-center gap-2.5 py-2 rounded-lg text-sm transition-colors ${navExpanded ? (child ? "px-2" : "px-2.5") : "px-0 justify-center"} ${
+          isActive ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+        }`}>
+        <span className={`${child ? "text-sm" : "text-base"} leading-none relative`}>{item.icon}
+          {!navExpanded && isReady && !isActive && <span className="absolute -top-0.5 -right-1 w-1.5 h-1.5 bg-emerald-400 rounded-full" />}
+        </span>
+        {navExpanded && <>
+          <span className="flex-1 leading-tight">{item.labelTH}</span>
+          {isStandalone && <span className="text-[11px] text-slate-400 flex-shrink-0" aria-hidden>↗</span>}
+          {isReady && !isActive && <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full flex-shrink-0" />}
+        </>}
+      </Link>
+    );
+  };
 
   // ---- App access guard (เฟส 2) — กันเข้าตรง URL เข้า app ที่ไม่มีสิทธิ์ ----
   // หา "app ของหน้าที่เปิดอยู่" จาก pathname (เมนู → ROUTE_APP_FALLBACK)
@@ -716,31 +760,23 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
                 : <div className="mx-2 mb-1 border-t border-slate-100" />}
               <div className="space-y-0.5">
                 {group.items.map((item) => {
-                  const isActive = pathname === item.href;
-                  const isReady = readySections.includes(item.href);
-                  const isStandalone = STANDALONE_HREFS.has(item.href);
+                  const kids = item.children ?? [];
+                  if (kids.length === 0) return renderLeaf(item);                       // leaf ปกติ
+                  if (!navExpanded)                                                      // พับ → คลี่แม่+ลูกเป็นไอคอนเรียง
+                    return <div key={item.id ?? item.href} className="space-y-0.5">{renderLeaf(item)}{kids.map((c) => renderLeaf(c))}</div>;
+                  // เมนูแม่ (กางได้) — เปิดเมื่อกดค้าง หรือหน้าปัจจุบันเป็นลูก
+                  const open = openNav.has(item.id ?? item.href) || kids.some((c) => pathname === c.href);
+                  const parentActive = pathname === item.href;
                   return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      target={isStandalone ? "_blank" : undefined}
-                      rel={isStandalone ? "noopener" : undefined}
-                      title={!navExpanded ? item.labelTH : isStandalone ? "เปิดเป็นแอปแยกในแท็บใหม่" : undefined}
-                      className={`flex items-center gap-2.5 py-2 rounded-lg text-sm transition-colors ${navExpanded ? "px-2.5" : "px-0 justify-center"} ${
-                        isActive
-                          ? "bg-blue-50 text-blue-700 font-medium"
-                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      <span className="text-base leading-none relative">{item.icon}
-                        {!navExpanded && isReady && !isActive && <span className="absolute -top-0.5 -right-1 w-1.5 h-1.5 bg-emerald-400 rounded-full" />}
-                      </span>
-                      {navExpanded && <>
-                        <span className="flex-1 leading-tight">{item.labelTH}</span>
-                        {isStandalone && <span className="text-[11px] text-slate-400 flex-shrink-0" aria-hidden>↗</span>}
-                        {isReady && !isActive && <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full flex-shrink-0" />}
-                      </>}
-                    </Link>
+                    <div key={item.id ?? item.href}>
+                      <button onClick={() => toggleNav(item.id ?? item.href)}
+                        className={`w-full flex items-center gap-2.5 py-2 px-2.5 rounded-lg text-sm transition-colors ${parentActive ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}>
+                        <span className="text-base leading-none">{item.icon}</span>
+                        <span className="flex-1 leading-tight text-left">{item.labelTH}</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`flex-shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
+                      </button>
+                      {open && <div className="ml-4 pl-2 mt-0.5 border-l border-slate-200 space-y-0.5">{kids.map((c) => renderLeaf(c, true))}</div>}
+                    </div>
                   );
                 })}
               </div>

@@ -22,6 +22,7 @@ export type MenuItem = {
   icon: string | null; label: string; href: string;
   show_in_sidebar: boolean; show_in_launcher: boolean;
   permission_key: string | null; is_active: boolean;
+  parent_id?: string | null;   // เมนูแม่ (null = เมนูหลัก)
 };
 
 async function requireAdmin(request: NextRequest): Promise<string | null> {

@@ -282,6 +282,19 @@ export default function MenuManagerPage() {
   };
   const sectionNames = useMemo(() => [...new Set(rows.map((r) => r.section))], [rows]);
 
+  // ---------- เมนูแม่-ลูก (nested / dropdown) ----------
+  // แม่ → ลูกทั้งหมด (จัดตาม parent_id) · lookup ป้ายชื่อจาก id
+  const childrenByParent = useMemo(() => {
+    const m = new Map<string, MenuRow[]>();
+    for (const r of rows) if (r.parent_id) { const a = m.get(r.parent_id) ?? []; a.push(r); m.set(r.parent_id, a); }
+    return m;
+  }, [rows]);
+  const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
+  // เมนูที่เลือกเป็น "แม่" ได้: เมนูหลัก (ยังไม่มีแม่) ในแอปเดียวกัน ไม่ใช่ตัวเอง — กันซ้อนเกิน 2 ชั้น
+  const eligibleParents = useCallback((it: MenuRow) => rows.filter((r) =>
+    r.id !== it.id && !r.parent_id && (sel === ALL || (r.app_keys ?? []).includes(sel))
+  ), [rows, sel]);
+
   // หมวด (ไอคอน/ลำดับ) ของแอปที่เลือก → map ตามชื่อหมวด (เฉพาะเมื่อเลือกแอป ไม่ใช่ "ทุกเมนู")
   const secByName = useMemo(() => {
     const m = new Map<string, MenuSection>();
@@ -697,7 +710,11 @@ export default function MenuManagerPage() {
                           <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none" title="ลากเพื่อเรียงลำดับ">⠿</span>
                           <Ico icon={it.icon} iconUrl={it.icon_url} size={18} />
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm text-slate-800 truncate flex items-center gap-1.5">{it.label}{!it.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-400">พักไว้</span>}</div>
+                            <div className="text-sm text-slate-800 truncate flex items-center gap-1.5 flex-wrap">{it.label}
+                              {!it.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-400">พักไว้</span>}
+                              {childrenByParent.has(it.id!) && <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 whitespace-nowrap">▾ เมนูแม่ · {childrenByParent.get(it.id!)!.length}</span>}
+                              {it.parent_id && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 whitespace-nowrap">↳ ใต้ {rowById.get(it.parent_id)?.label ?? "—"}</span>}
+                            </div>
                             <code className="text-[10px] text-slate-400">{it.href}</code>
                             {sel === ALL && apps.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1">
@@ -724,8 +741,18 @@ export default function MenuManagerPage() {
                               <ImageInput compact value={it.icon_url ?? null} onChange={(key) => patch(it.id!, { icon_url: key })} folder="menu-icons" />
                               <span className="text-slate-400">หรือ</span>
                               <input defaultValue={it.icon ?? ""} onBlur={(e) => patch(it.id!, { icon: e.target.value })} placeholder="🛒" title="อิโมจิ (ใช้เมื่อไม่มีรูป)" className="w-12 h-7 px-1 text-center text-base border border-slate-200 rounded" /></div>
-                            <label className="flex items-center gap-1.5 text-slate-600">หมวด
+                            <label className="flex items-center gap-1.5 text-slate-600">{it.parent_id ? "หัวข้อใน dropdown" : "หมวด"}
                               <input list="section-list" defaultValue={it.section} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== it.section) patch(it.id!, { section: v }); }} className="w-36 h-7 px-2 border border-slate-200 rounded" /></label>
+                            {/* เมนูแม่ (nested / เปิด dropdown) */}
+                            {childrenByParent.has(it.id!) ? (
+                              <span className="flex items-center gap-1.5 text-violet-700 font-medium">▾ เมนูนี้เป็นเมนูแม่ (กดแล้วเปิด dropdown · มีลูก {childrenByParent.get(it.id!)!.length} รายการ)</span>
+                            ) : (
+                              <label className="flex items-center gap-1.5 text-slate-600">อยู่ใต้เมนู
+                                <select value={it.parent_id ?? ""} onChange={(e) => patch(it.id!, { parent_id: e.target.value || null })} className="w-40 h-7 px-1 border border-slate-200 rounded bg-white">
+                                  <option value="">— เมนูหลัก —</option>
+                                  {eligibleParents(it).map((p) => <option key={p.id} value={p.id!}>{p.icon} {p.label}</option>)}
+                                </select></label>
+                            )}
                             <label className="flex items-center gap-1.5 text-slate-600"><input type="checkbox" checked={it.show_in_sidebar} onChange={(e) => patch(it.id!, { show_in_sidebar: e.target.checked })} /> แถบเมนูซ้าย</label>
                             <label className="flex items-center gap-1.5 text-slate-600"><input type="checkbox" checked={it.show_in_launcher} onChange={(e) => patch(it.id!, { show_in_launcher: e.target.checked })} /> หน้ารวมแอป</label>
                             <span className="flex items-center gap-1.5 text-slate-600">ใครเห็น

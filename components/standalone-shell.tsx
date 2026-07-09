@@ -11,7 +11,7 @@
 // - collapsible: หัวบาร์พับเก็บ (เหลือแถบบางๆ) เลื่อนเมาส์ไปขอบบนค่อยโชว์ → กระดานเต็มจอ
 // ============================================================
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Logo, BRAND } from "@/components/brand";
 import { NotificationBell } from "@/components/notification-bell";
 import { GlobalSearch } from "@/components/global-search";
@@ -30,6 +30,20 @@ export function StandaloneShell({
   const t = useT();
   const [searchOpen, setSearchOpen] = useState(false);
   const dot = { violet: "bg-violet-500", blue: "bg-blue-500", emerald: "bg-emerald-500", slate: "bg-slate-500" }[accent];
+
+  // embed mode — เมื่อหน้านี้ถูกฝังในกรอบแอปเดี่ยว (/app/<key> ส่ง ?embed=1) ให้ซ่อนหัวบาร์ของตัวเอง
+  // กันหัวบาร์ซ้อนกัน 2 อัน (เชลล์แอปเดี่ยวมีหัวบาร์ + แท็บของแอปอยู่แล้ว) — ทำแบบเดียวกับ PlaygroundShell
+  // "ติดหนึบ": จำโหมด embed ต่อแท็บ (sessionStorage) → กดลิงก์ไปหน้าอื่นในกรอบแล้ว embed ไม่หลุด
+  const [embed, setEmbed] = useState(false);
+  useEffect(() => {
+    try {
+      const inFrame = window.self !== window.top;
+      const urlEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
+      if (inFrame && urlEmbed) sessionStorage.setItem("erp_shell_embed", "1");
+      const sticky = inFrame && sessionStorage.getItem("erp_shell_embed") === "1";
+      setEmbed(urlEmbed || sticky);
+    } catch { /* ignore */ }
+  }, []);
 
   const headerInner = (
     <>
@@ -67,6 +81,11 @@ export function StandaloneShell({
       </div>
     </>
   );
+
+  // embed mode: ฝังอยู่ในเชลล์แอปเดี่ยวแล้ว → โชว์แค่เนื้อหา ไม่มีหัวบาร์ (หัวบาร์ + แท็บมาจากเชลล์แอปเดี่ยว)
+  if (embed) {
+    return <div className="min-h-screen flex flex-col bg-slate-50"><main className="flex-1 flex flex-col">{children}</main></div>;
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
