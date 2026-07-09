@@ -27,13 +27,25 @@ const splitCode = (code: string): CodeBase => {
   return m ? { prefix: m[1], num: parseInt(m[2], 10), pad: m[2].length } : { prefix: code, num: 0, pad: 0 };
 };
 const codeAt = (b: CodeBase, n: number) => (b.pad > 0 ? b.prefix + String(n).padStart(b.pad, "0") : "");
+
+// แม่แบบชื่อ: [สี] = ช่องสี · [รหัส] = เลขหลัง # (หรือเลขท้ายรหัส)
+const PLACEHOLDER_RE = /\[สี\]|\[รหัส\]/;
+const applyNameTemplate = (tpl: string, color: string, code: string): string => {
+  const codeNum = code.includes("#") ? (code.split("#").pop() ?? "") : (code.match(/(\d+)$/)?.[1] ?? "");
+  let out = tpl;
+  if (color.trim()) out = out.replace(/\[สี\]/g, color.trim());
+  if (codeNum) out = out.replace(/\[รหัส\]/g, codeNum);
+  return out;
+};
 type TagCtx = { fabric_widths: number[]; sellers: { id: string; name: string | null; count: number }[] };
 
 type PickerOpt = { id: string; label: string; secondary?: string };
 type PrefixDefault = { name?: string; uom_id?: string | null; uom_label?: string };
 type TagOpt = { id: string; name: string; code_prefix: string; group_name: string | null; default_name?: string; default_uom_id?: string | null; default_uom_label?: string; prefix_defaults?: Record<string, PrefixDefault> };
 type Suggest = { prefix: string; this_latest: string | null; this_suggested: string | null; group_latest: string | null; group_name: string | null; error?: string };
-type TagCode = { prefix: string; latest_code: string; suggested: string; count: number };
+type TagCode = { prefix: string; latest_code: string; suggested: string; count: number;
+  latest_name?: string; latest_seller_id?: string | null; latest_seller_name?: string;
+  latest_standard_price?: number | null; latest_rmb_cost?: number | null; latest_fabric_width?: number | null };
 
 // คอลัมน์จากทะเบียน field (ไม่ hardcode)
 type ColDef = { key: string; label: string; type: "text" | "number" | "boolean" | "relation"; rel?: { table: string; label: string; secondary?: string } };
@@ -228,18 +240,23 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
       return { values, labels };
     });
   };
-  // เดี่ยว: คลิกเลือกตระกูลรหัส → ตั้งรหัส + เติมชื่อ/หน่วยจาก default ของตระกูลนั้น (fallback ค่ารวมของแท็ก)
-  const selectCodeFamily = (prefix: string, suggested: string) => {
+  // เดี่ยว: คลิกเลือกตระกูลรหัส → ตั้งรหัส + เติมชื่อ/หน่วย(default) + ผู้ขาย/ราคา/หน้ากว้าง (จาก SKU ตัวล่าสุดในตระกูล)
+  const selectCodeFamily = (c: TagCode) => {
     const t = sTag ? tags.find((x) => x.id === sTag) : null;
-    const pd = t?.prefix_defaults?.[prefix];
+    const pd = t?.prefix_defaults?.[c.prefix];
     const name = pd?.name || t?.default_name || "";
     const uomId = pd?.uom_id || t?.default_uom_id || null;
     const uomLabel = pd?.uom_id ? (pd?.uom_label || "") : (t?.default_uom_label || "");
     setSingle((s) => {
       const values = { ...s.values }; const labels = { ...s.labels };
-      values.code = suggested;
+      values.code = c.suggested;
       if (name && !String(values.name_th ?? "").trim()) values.name_th = name;
       if (uomId && !values.uom_id) { values.uom_id = uomId; labels.uom_id = uomLabel; }
+      // C: ดึงค่าจาก SKU ตัวก่อนหน้า (ล่าสุดในตระกูล) — เฉพาะช่องที่ยังว่าง
+      if (c.latest_seller_id && !values.seller_partner_id) { values.seller_partner_id = c.latest_seller_id; labels.seller_partner_id = c.latest_seller_name || ""; }
+      if (c.latest_standard_price != null && !String(values.standard_price ?? "").trim()) values.standard_price = String(c.latest_standard_price);
+      if (c.latest_rmb_cost != null && !String(values.rmb_cost ?? "").trim()) values.rmb_cost = String(c.latest_rmb_cost);
+      if (c.latest_fabric_width != null && !String(values.fabric_width_cm ?? "").trim()) values.fabric_width_cm = String(c.latest_fabric_width);
       return { values, labels };
     });
   };
@@ -288,6 +305,11 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
       values.code = codeAt(base, base.num + i);
       if (name && !String(values.name_th ?? "").trim()) values.name_th = name;
       if (uomId && !values.uom_id) { values.uom_id = uomId; labels.uom_id = uomLabel; }
+      // ดึงค่าจาก SKU ตัวล่าสุดในตระกูล (เฉพาะช่องว่าง)
+      if (fam.latest_seller_id && !values.seller_partner_id) { values.seller_partner_id = fam.latest_seller_id; labels.seller_partner_id = fam.latest_seller_name || ""; }
+      if (fam.latest_standard_price != null && !String(values.standard_price ?? "").trim()) values.standard_price = String(fam.latest_standard_price);
+      if (fam.latest_rmb_cost != null && !String(values.rmb_cost ?? "").trim()) values.rmb_cost = String(fam.latest_rmb_cost);
+      if (fam.latest_fabric_width != null && !String(values.fabric_width_cm ?? "").trim()) values.fabric_width_cm = String(fam.latest_fabric_width);
       return { values, labels };
     }));
   };
@@ -309,6 +331,12 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
     }
     if (name) values.name_th = name;
     if (uomId) { values.uom_id = uomId; labels.uom_id = uomLabel; }
+    // ดึงค่าจาก SKU ตัวล่าสุดในตระกูล (กฎเดียวกับเดี่ยว)
+    const fam = bCodePrefix ? batchCodes.find((c) => c.prefix === bCodePrefix) : undefined;
+    if (fam?.latest_seller_id) { values.seller_partner_id = fam.latest_seller_id; labels.seller_partner_id = fam.latest_seller_name || ""; }
+    if (fam?.latest_standard_price != null) values.standard_price = String(fam.latest_standard_price);
+    if (fam?.latest_rmb_cost != null) values.rmb_cost = String(fam.latest_rmb_cost);
+    if (fam?.latest_fabric_width != null) values.fabric_width_cm = String(fam.latest_fabric_width);
     return [...l, { values, labels }];
   });
   const setCell = (i: number, k: string, v: unknown, lbl?: string) => setLines((l) => l.map((x, idx) => idx === i ? ({ values: { ...x.values, [k]: v }, labels: lbl !== undefined ? { ...x.labels, [k]: lbl } : x.labels }) : x));
@@ -324,11 +352,19 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
   const submit = async (rows: Row[], tagId: string | null) => {
     const valid = rows.filter((r) => String(r.values.code ?? "").trim());
     if (valid.length === 0) { toast.error("กรอกรหัส SKU อย่างน้อย 1 ตัว"); return; }
+    // B: แทนแม่แบบชื่อ [สี]/[รหัส] → ค่าจริง แล้วตรวจว่าไม่มี placeholder ค้าง
+    const built = valid.map((r) => {
+      const nm = applyNameTemplate(String(r.values.name_th ?? ""), String(r.values.color ?? ""), String(r.values.code ?? ""));
+      const values = { ...r.values }; values.name_th = nm;
+      return { ...r, values };
+    });
+    const bad = built.find((r) => PLACEHOLDER_RE.test(String(r.values.name_th ?? "")));
+    if (bad) { toast.error(`ชื่อ SKU "${bad.values.code}" ยังมี [สี] หรือ [รหัส] ที่ยังไม่เติม — กรอกสี/รหัสให้ครบก่อน`); return; }
     setSaving(true);
     try {
       const res = await apiFetch("/api/skus/wizard-create", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: valid.map((r) => ({ values: r.values, family_tag_ids: [tagId].filter(Boolean) })) }),
+        body: JSON.stringify({ rows: built.map((r) => ({ values: r.values, family_tag_ids: [tagId].filter(Boolean) })) }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(`สร้าง ${j.created} SKU แล้ว`);
@@ -394,15 +430,21 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
                   <span className="h-9 px-2 inline-flex items-center gap-1 text-sm border border-blue-200 bg-blue-50 text-blue-600 rounded-lg cursor-pointer hover:bg-blue-100 whitespace-nowrap">🔢 ตระกูลรหัส ({tagCodes.length}) ▾</span>
                   <div className="invisible group-hover:visible absolute right-0 top-full z-30 mt-1 w-80 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-xl p-1.5 text-xs">
                     <div className="text-slate-400 px-1 pb-1">กดเลือกตระกูลรหัสที่จะใช้ (หรือพิมพ์เอง)</div>
-                    {tagCodes.map((c) => (
-                      <button key={c.prefix} type="button" onClick={() => selectCodeFamily(c.prefix, c.suggested)}
-                        className="w-full flex items-center gap-2 px-1.5 py-1 rounded hover:bg-blue-50 text-left">
-                        <span className="font-mono text-slate-700 truncate">{c.prefix}</span>
-                        <span className="text-slate-400 whitespace-nowrap">ล่าสุด {c.latest_code}</span>
-                        <span className="text-emerald-600 font-medium whitespace-nowrap ml-auto">→ {c.suggested}</span>
-                        <span className="text-slate-300 shrink-0">{c.count}</span>
-                      </button>
-                    ))}
+                    {tagCodes.map((c) => {
+                      const dn = (sTag ? tags.find((x) => x.id === sTag)?.prefix_defaults?.[c.prefix]?.name : "") || "";
+                      return (
+                        <button key={c.prefix} type="button" onClick={() => selectCodeFamily(c)}
+                          className="w-full flex flex-col gap-0.5 px-1.5 py-1 rounded hover:bg-blue-50 text-left">
+                          <div className="flex items-center gap-2 w-full">
+                            <span className="font-mono text-slate-700 shrink-0">{c.prefix}</span>
+                            {dn && <span className="text-slate-500 truncate">{dn}</span>}
+                            <span className="text-emerald-600 font-medium whitespace-nowrap ml-auto shrink-0">→ {c.suggested}</span>
+                            <span className="text-slate-300 shrink-0">{c.count}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate">ล่าสุด {c.latest_code}{c.latest_name ? ` · ${c.latest_name}` : ""}</div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -427,8 +469,15 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
           <div className="grid grid-cols-2 gap-2">
             <label className="block"><span className="text-xs text-slate-500">รหัส SKU *</span>
               <input value={(single.values.code as string) ?? ""} onChange={(e) => setSV("code", e.target.value)} placeholder="เช่น LEA-SAF-028" className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
-            <label className="block"><span className="text-xs text-slate-500">ชื่อ (ไทย)</span>
-              <input value={(single.values.name_th as string) ?? ""} onChange={(e) => setSV("name_th", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
+            <label className="block"><span className="text-xs text-slate-500">ชื่อ (ไทย) <span className="text-[10px] text-slate-400">— ใส่ [สี] [รหัส] เป็นตัวแปรได้</span></span>
+              <input value={(single.values.name_th as string) ?? ""} onChange={(e) => setSV("name_th", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" />
+              {(() => {
+                const nm = String(single.values.name_th ?? "");
+                if (!PLACEHOLDER_RE.test(nm)) return null;
+                const preview = applyNameTemplate(nm, String(single.values.color ?? ""), String(single.values.code ?? ""));
+                const left = PLACEHOLDER_RE.test(preview);
+                return <span className={`block text-[10px] mt-0.5 ${left ? "text-amber-600" : "text-emerald-600"}`}>→ {preview}{left ? " · ยังไม่ครบ (กรอกสี/รหัส)" : ""}</span>;
+              })()}</label>
             <label className="block"><span className="text-xs text-slate-500">สี</span>
               <input value={(single.values.color as string) ?? ""} onChange={(e) => setSV("color", e.target.value)} placeholder="ดำ/แดง..." className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
             <label className="block"><span className="text-xs text-slate-500">หน้ากว้าง (ซม. — กรณีผ้า)</span>

@@ -34,37 +34,56 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const ids = (links ?? []).map((l) => l.src_id as string);
   if (ids.length === 0) return NextResponse.json({ prefixes: [], total_skus: 0, error: null });
 
-  // ดึงรหัส + ชื่อ + วันที่สร้าง (chunk กัน URL ยาว)
-  const rows: { code: string; name: string; created_at: string }[] = [];
+  // ดึงรหัส + ชื่อ + ค่าของ SKU (ผู้ขาย/ราคา/หน้ากว้าง) + วันที่สร้าง (chunk กัน URL ยาว)
+  type Sku = { code: string; name: string; seller: string | null; std: number | null; rmb: number | null; fw: number | null; created_at: string };
+  const rows: Sku[] = [];
   for (let i = 0; i < ids.length; i += 1000) {
-    const { data } = await admin.from("skus_v2").select("code, name_th, created_at").in("id", ids.slice(i, i + 1000));
-    for (const r of (data ?? [])) if (r.code) rows.push({ code: r.code as string, name: (r.name_th as string | null) ?? "", created_at: r.created_at as string });
+    const { data } = await admin.from("skus_v2")
+      .select("code, name_th, seller_partner_id, standard_price, rmb_cost, fabric_width_cm, created_at").in("id", ids.slice(i, i + 1000));
+    for (const r of (data ?? [])) if (r.code) rows.push({
+      code: r.code as string, name: (r.name_th as string | null) ?? "",
+      seller: (r.seller_partner_id as string | null) ?? null,
+      std: (r.standard_price as number | null) ?? null, rmb: (r.rmb_cost as number | null) ?? null,
+      fw: (r.fabric_width_cm as number | null) ?? null, created_at: r.created_at as string,
+    });
   }
 
-  // จัดกลุ่มตามตระกูลรหัส (เฉพาะรหัสที่ลงท้ายด้วยตัวเลข) — เก็บชื่อของ SKU ตัวล่าสุดต่อกลุ่มด้วย
-  type Grp = { prefix: string; count: number; latest_code: string; latest_name: string; latest_at: string; num: number; digits: number };
+  // จัดกลุ่มตามตระกูลรหัส — เก็บค่าของ SKU ตัวล่าสุดต่อกลุ่มด้วย (ชื่อ/ผู้ขาย/ราคา/หน้ากว้าง)
+  type Grp = { prefix: string; count: number; latest: Sku; latest_at: string; num: number; digits: number };
   const map = new Map<string, Grp>();
   for (const r of rows) {
     const sc = splitCode(r.code);
     if (sc.num == null) continue;             // ไม่ลงท้ายด้วยเลข = ข้าม
     const g = map.get(sc.prefix);
-    if (!g) { map.set(sc.prefix, { prefix: sc.prefix, count: 1, latest_code: r.code, latest_name: r.name, latest_at: r.created_at, num: sc.num, digits: sc.digits }); }
+    if (!g) { map.set(sc.prefix, { prefix: sc.prefix, count: 1, latest: r, latest_at: r.created_at, num: sc.num, digits: sc.digits }); }
     else {
       g.count++;
-      if (r.created_at > g.latest_at) { g.latest_at = r.created_at; g.latest_code = r.code; g.latest_name = r.name; g.num = sc.num; g.digits = sc.digits; }
+      if (r.created_at > g.latest_at) { g.latest_at = r.created_at; g.latest = r; g.num = sc.num; g.digits = sc.digits; }
     }
   }
 
-  const prefixes = [...map.values()]
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 20)
-    .map((g) => ({
-      prefix: g.prefix,
-      latest_code: g.latest_code,
-      latest_name: g.latest_name,
-      suggested: g.prefix + String(g.num + 1).padStart(g.digits, "0"),
-      count: g.count,
-    }));
+  const top = [...map.values()].sort((a, b) => b.count - a.count).slice(0, 20);
+
+  // แปลงผู้ขายของ SKU ล่าสุด → ชื่อร้าน
+  const sellerIds = [...new Set(top.map((g) => g.latest.seller).filter(Boolean))] as string[];
+  const sellerMap = new Map<string, string>();
+  if (sellerIds.length) {
+    const { data: p } = await admin.from("partners_v2").select("id, name_th").in("id", sellerIds);
+    for (const x of (p ?? []) as { id: string; name_th: string | null }[]) sellerMap.set(x.id, x.name_th ?? "");
+  }
+
+  const prefixes = top.map((g) => ({
+    prefix: g.prefix,
+    latest_code: g.latest.code,
+    latest_name: g.latest.name,
+    latest_seller_id: g.latest.seller,
+    latest_seller_name: g.latest.seller ? (sellerMap.get(g.latest.seller) ?? "") : "",
+    latest_standard_price: g.latest.std,
+    latest_rmb_cost: g.latest.rmb,
+    latest_fabric_width: g.latest.fw,
+    suggested: g.prefix + String(g.num + 1).padStart(g.digits, "0"),
+    count: g.count,
+  }));
 
   return NextResponse.json({ prefixes, total_skus: rows.length, error: null });
 }
