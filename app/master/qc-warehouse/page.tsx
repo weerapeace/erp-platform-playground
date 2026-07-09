@@ -159,7 +159,8 @@ export default function QcWarehousePage() {
   const [sendEditWorker, setSendEditWorker] = useState(false);
   const [sendCart, setSendCart] = useState<Record<string, { qty: number; wage: number; saveBom: boolean; worker: string; workerId: string | null }>>({});
   const [sendSaving, setSendSaving] = useState(false);
-  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendWage(String(Math.round(w.rate * remain * 100) / 100)); setSendSaveBom(w.rate <= 0); setSendWorker(w.worker ?? ""); setSendWorkerId(craftsmen.find((c) => c.name === w.worker)?.id ?? null); setSendEditWorker(false); };
+  // ค่าแรง = ต่อชิ้น (default = ราคากลาง/ชิ้น จาก BOM) — ระบบคูณจำนวนเป็นยอดรวมตอนบันทึก
+  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendWage(String(Math.round(w.rate * 100) / 100)); setSendSaveBom(w.rate <= 0); setSendWorker(w.worker ?? ""); setSendWorkerId(craftsmen.find((c) => c.name === w.worker)?.id ?? null); setSendEditWorker(false); };
   // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง — ไม่ระบุช่าง) ผ่านของกลาง /api/bom/labor-rates (หา BOM จาก product_sku ให้เอง)
   const saveBomRate = async (sku: string | null, perUnit: number) => {
     if (!sku || !(perUnit > 0)) return;
@@ -170,20 +171,22 @@ export default function QcWarehousePage() {
     catch (e) { return e instanceof Error ? e.message : "ส่งงานไม่สำเร็จ"; }
   };
   const submitSendNow = async () => {
-    if (!sendModal) return; const qty = num(sendQty); const wage = Number(sendWage) || 0;
+    if (!sendModal) return; const qty = num(sendQty); const perPiece = Number(sendWage) || 0;
     if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    if (!(wage > 0)) { toast.error("กรุณาใส่ค่าแรงผลิตก่อนส่งงาน"); return; }
-    setSendSaving(true); const err = await postSubmission(sendModal.id, qty, wage, sendWorker, sendWorkerId);
-    if (!err && sendSaveBom && qty > 0 && wage > 0) await saveBomRate(sendModal.sku, Math.round((wage / qty) * 100) / 100);
+    if (!(perPiece > 0)) { toast.error("กรุณาใส่ค่าแรงผลิต (ต่อชิ้น) ก่อนส่งงาน"); return; }
+    const total = Math.round(perPiece * qty * 100) / 100;   // ยอดรวมที่บันทึกจริง = /ชิ้น × จำนวน
+    setSendSaving(true); const err = await postSubmission(sendModal.id, qty, total, sendWorker, sendWorkerId);
+    if (!err && sendSaveBom && perPiece > 0) await saveBomRate(sendModal.sku, perPiece);
     setSendSaving(false);
     if (err) { toast.error(err); return; }
-    toast.success(`ส่งงานแล้ว → เข้างานรอ QC${sendSaveBom && wage > 0 ? " · บันทึกค่าแรงเข้า BOM" : ""}`); setSendModal(null); await load();
+    toast.success(`ส่งงานแล้ว → เข้างานรอ QC${sendSaveBom && perPiece > 0 ? " · บันทึกค่าแรงเข้า BOM" : ""}`); setSendModal(null); await load();
   };
   const addSendCart = () => {
-    if (!sendModal) return; const qty = num(sendQty); const wage = Number(sendWage) || 0;
+    if (!sendModal) return; const qty = num(sendQty); const perPiece = Number(sendWage) || 0;
     if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    if (!(wage > 0)) { toast.error("กรุณาใส่ค่าแรงผลิตก่อนใส่ตะกร้า"); return; }
-    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, wage, saveBom: sendSaveBom, worker: sendWorker, workerId: sendWorkerId } })); setSendModal(null);
+    if (!(perPiece > 0)) { toast.error("กรุณาใส่ค่าแรงผลิต (ต่อชิ้น) ก่อนใส่ตะกร้า"); return; }
+    const total = Math.round(perPiece * qty * 100) / 100;   // เก็บยอดรวมในตะกร้า (submitSendCart หาร qty กลับเป็น/ชิ้นตอนบันทึก BOM)
+    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, wage: total, saveBom: sendSaveBom, worker: sendWorker, workerId: sendWorkerId } })); setSendModal(null);
   };
   const removeSendCart = (woId: string) => setSendCart((c) => { const n = { ...c }; delete n[woId]; return n; });
   const submitSendCart = async () => {
@@ -841,13 +844,13 @@ export default function QcWarehousePage() {
         {sendModal && (() => {
           const remain = Math.max(0, sendModal.qty - sendModal.received_qty);
           const qtyNum = num(sendQty);
-          const wageNum = Number(sendWage) || 0;
-          const perUnit = qtyNum > 0 ? Math.round((wageNum / qtyNum) * 100) / 100 : 0;
+          const perUnit = Number(sendWage) || 0;                 // ช่องค่าแรง = ต่อชิ้น
+          const totalWage = Math.round(perUnit * qtyNum * 100) / 100;   // ยอดรวม = /ชิ้น × จำนวน
           const std = Math.round(sendModal.rate * 100) / 100;   // ราคากลาง/ชิ้น (BOM)
           const overQty = qtyNum > remain;                       // ส่งเกินยอดที่เหลือ
           const overCeil = perUnit > WAGE_CEIL;                   // ค่าแรง/ชิ้นเกินเพดาน
           const diffStd = !overCeil && std > 0 && perUnit > 0 && Math.abs(perUnit - std) >= 0.5;   // ต่างจากราคากลาง
-          const noWage = !(wageNum > 0);
+          const noWage = !(perUnit > 0);
           return (
             <div className="space-y-3">
               <div className="flex items-center gap-2">
@@ -873,19 +876,19 @@ export default function QcWarehousePage() {
 
               <div className="grid grid-cols-2 gap-2">
                 <label className="block"><span className="text-[11px] text-slate-500">จำนวนที่ส่ง</span>
-                  <input type="number" min={0} value={sendQty} autoFocus onFocus={(e) => e.target.select()} onChange={(e) => { setSendQty(e.target.value); setSendWage(String(Math.round(sendModal.rate * num(e.target.value) * 100) / 100)); }}
+                  <input type="number" min={0} value={sendQty} autoFocus onFocus={(e) => e.target.select()} onChange={(e) => setSendQty(e.target.value)}
                     className={`w-full h-10 mt-0.5 px-2 text-sm text-right border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${overQty ? "border-amber-400 bg-amber-50" : "border-slate-200"}`} /></label>
-                <label className="block"><span className="text-[11px] text-slate-500">ค่าแรงผลิต (บาท) <span className="text-rose-500">*</span></span>
+                <label className="block"><span className="text-[11px] text-slate-500">ค่าแรงผลิต (บาท/ชิ้น) <span className="text-rose-500">*</span></span>
                   <input type="number" min={0} step="any" value={sendWage} onChange={(e) => setSendWage(e.target.value)}
                     className={`w-full h-10 mt-0.5 px-2 text-sm text-right border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${noWage ? "border-rose-300 bg-rose-50" : (overCeil || diffStd) ? "border-amber-400 bg-amber-50" : "border-slate-200"}`} /></label>
               </div>
 
-              {/* ค่าแรงต่อชิ้นที่คำนวณได้ (โปร่งใส — บอกว่าทำไมเตือน/ไม่เตือน) */}
-              {qtyNum > 0 && wageNum > 0 && (
+              {/* ยอดรวมที่คำนวณได้ (ช่องค่าแรงเป็นต่อชิ้น) — โปร่งใส + บอกว่าทำไมเตือน/ไม่เตือน */}
+              {qtyNum > 0 && perUnit > 0 && (
                 <div className="text-[11px] text-slate-500 -mt-1">
-                  ค่าแรง ≈ <b className={overCeil || diffStd ? "text-amber-700" : "text-slate-700"}>{fmt(perUnit)}</b> บาท/ชิ้น
-                  {std > 0 ? <> · ราคากลาง {fmt(std)}/ชิ้น</> : <> · ยังไม่มีราคากลาง</>}
-                  {" · "}เพดานเตือน {fmt(WAGE_CEIL)}/ชิ้น
+                  รวม = <b className="text-slate-700">{fmt(totalWage)}</b> บาท ({fmt(qtyNum)} ชิ้น × {fmt(perUnit)}/ชิ้น)
+                  {std > 0 ? <> · ราคากลาง {fmt(std)}/ชิ้น</> : null}
+                  {" · "}เพดาน {fmt(WAGE_CEIL)}/ชิ้น
                 </div>
               )}
 
