@@ -37,6 +37,13 @@ const applyNameTemplate = (tpl: string, color: string, code: string): string => 
   if (codeNum) out = out.replace(/\[รหัส\]/g, codeNum);
   return out;
 };
+// ตัด placeholder ออกให้เหลือชื่อสะอาดไว้โชว์ (เช่น "ผ้าไนล่อนสี[สี] #[รหัส]" → "ผ้าไนล่อน")
+const cleanNameLabel = (tpl: string): string =>
+  (tpl || "")
+    .replace(/\s*สี\s*\[สี\]/g, "")   // "สี[สี]" (มีคำว่า สี นำ) → ตัดทั้งก้อน
+    .replace(/\s*#\s*\[รหัส\]/g, "")  // " #[รหัส]" → ตัดทั้งก้อน
+    .replace(/\[สี\]/g, "").replace(/\[รหัส\]/g, "")
+    .replace(/\s+/g, " ").trim();
 type TagCtx = { fabric_widths: number[]; sellers: { id: string; name: string | null; count: number }[] };
 
 type PickerOpt = { id: string; label: string; secondary?: string };
@@ -430,21 +437,22 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
                   <span className="h-9 px-2 inline-flex items-center gap-1 text-sm border border-blue-200 bg-blue-50 text-blue-600 rounded-lg cursor-pointer hover:bg-blue-100 whitespace-nowrap">🔢 ตระกูลรหัส ({tagCodes.length}) ▾</span>
                   <div className="invisible group-hover:visible absolute right-0 top-full z-30 mt-1 w-80 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-xl p-1.5 text-xs">
                     <div className="text-slate-400 px-1 pb-1">กดเลือกตระกูลรหัสที่จะใช้ (หรือพิมพ์เอง)</div>
-                    {tagCodes.map((c) => {
-                      const dn = (sTag ? tags.find((x) => x.id === sTag)?.prefix_defaults?.[c.prefix]?.name : "") || "";
+                    {(() => { const tagObj = sTag ? tags.find((x) => x.id === sTag) : undefined; return tagCodes.map((c) => {
+                      // ชื่อ default (สะอาด): รายตระกูล → ของประเภท → ว่าง
+                      const dn = cleanNameLabel(tagObj?.prefix_defaults?.[c.prefix]?.name || tagObj?.default_name || "");
                       return (
                         <button key={c.prefix} type="button" onClick={() => selectCodeFamily(c)}
                           className="w-full flex flex-col gap-0.5 px-1.5 py-1 rounded hover:bg-blue-50 text-left">
                           <div className="flex items-center gap-2 w-full">
-                            <span className="font-mono text-slate-700 shrink-0">{c.prefix}</span>
-                            {dn && <span className="text-slate-500 truncate">{dn}</span>}
+                            <span className="font-mono text-slate-500 text-[11px] shrink-0">{c.prefix}</span>
+                            {dn && <span className="text-slate-800 font-medium truncate">{dn}</span>}
                             <span className="text-emerald-600 font-medium whitespace-nowrap ml-auto shrink-0">→ {c.suggested}</span>
                             <span className="text-slate-300 shrink-0">{c.count}</span>
                           </div>
-                          <div className="text-[10px] text-slate-400 truncate">ล่าสุด {c.latest_code}{c.latest_name ? ` · ${c.latest_name}` : ""}</div>
+                          <div className="text-[10px] text-slate-400 truncate">ล่าสุด {c.latest_code}{!dn && c.latest_name ? ` · ${c.latest_name}` : ""}</div>
                         </button>
                       );
-                    })}
+                    }); })()}
                   </div>
                 </div>
               )}
@@ -520,7 +528,9 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
             {batchCodes.length > 1 && (
               <label className="block"><span className="text-xs text-slate-500">ตระกูลรหัส *</span>
                 <div className="mt-0.5 w-48"><SearchableSelect value={bCodePrefix ?? ""} placeholder="— เลือกตระกูล —"
-                  options={batchCodes.map((c) => ({ value: c.prefix, label: c.prefix, sub: `ถัดไป ${c.suggested}` }))}
+                  options={batchCodes.map((c) => { const bt = bTag ? tags.find((x) => x.id === bTag) : undefined;
+                    const dn = cleanNameLabel(bt?.prefix_defaults?.[c.prefix]?.name || bt?.default_name || "");
+                    return { value: c.prefix, label: dn ? `${dn} · ${c.prefix}` : c.prefix, sub: `ถัดไป ${c.suggested}` }; })}
                   onChange={(v) => v && applyBatchCode(v)} /></div></label>
             )}
             <button type="button" onClick={() => setPrefixMgr(true)} title="ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท"
