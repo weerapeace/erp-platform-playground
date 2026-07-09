@@ -63,7 +63,8 @@ export async function GET(request: NextRequest) {
 
   let q = admin.from("assets").select("*", { count: "exact" }).eq("status", status);
   if (source !== "all") q = q.eq("source", source);
-  if (artworkType) q = q.contains("artwork_types", [artworkType]);   // ชนิด m2m — เจอถ้ามีชนิดนี้อยู่ในลิสต์
+  // ชนิด artwork (jsonb) — ต้องส่งเป็น JSON string '["x"]' ไม่ใช่ JS array (ไม่งั้น supabase-js ส่ง '{x}' แล้ว jsonb parse พัง)
+  if (artworkType) q = q.contains("artwork_types", JSON.stringify([artworkType]));
   if (type) q = q.eq("asset_type", type);
   if (collectionId === "none") q = q.is("collection_id", null);
   if (collAssetIds) q = q.in("id", collAssetIds);
