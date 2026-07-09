@@ -11,7 +11,7 @@
  * ใช้ของกลาง: API master-v2 (list) + m2m-links (ผูก/ดึงแท็ก bulk)
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { FamilyNavTabs } from "@/components/family-nav-tabs";
@@ -30,7 +30,49 @@ const ENTITIES = {
 type EntityKey = keyof typeof ENTITIES;
 const TAG_MODULE = "product_families";
 
-function recImg(k: string | null) { return k ? `/api/r2-image?key=${encodeURIComponent(k)}` : null; }
+function recImg(k: string | null) { return k ? `/api/r2-image?key=${encodeURIComponent(k)}&w=96` : null; }
+
+const EMPTY_TAGS: string[] = [];   // อ้างอิงเดียวสำหรับการ์ดที่ยังไม่มีแท็ก (ไม่งั้น memo พังทุกใบ)
+
+// การ์ดสินค้า (memo) — กดใส่ตะกร้า/เอาออก แล้ว re-render แค่ใบที่เปลี่ยน ไม่ลามทั้งกระดาน
+const RecCard = memo(function RecCard({ r, tags, tagLabel, mode, inCart, checked, onAdd, onRemove, onToggle, onDragStart }: {
+  r: Rec; tags: string[]; tagLabel: (id: string) => string; mode: "pool" | "cart";
+  inCart?: boolean; checked?: boolean;
+  onAdd?: (r: Rec) => void; onRemove?: (id: string) => void; onToggle?: (id: string) => void; onDragStart: (id: string) => void;
+}) {
+  const img = recImg(r.image);
+  return (
+    <div draggable onDragStart={() => onDragStart(r.id)}
+      className={`bg-white border rounded-lg p-2 flex flex-col gap-1.5 cursor-grab active:cursor-grabbing hover:border-blue-300 ${checked ? "border-blue-400 ring-1 ring-blue-300" : "border-slate-200"}`}>
+      <div className="flex gap-2">
+        {mode === "cart" && (
+          <input type="checkbox" checked={!!checked} onChange={() => onToggle?.(r.id)}
+            onClick={(e) => e.stopPropagation()} className="mt-0.5 h-4 w-4 accent-blue-600 shrink-0" />
+        )}
+        {img
+          ? <img src={img} alt="" loading="lazy" className="w-12 h-12 rounded object-cover bg-slate-100 shrink-0" />
+          : <div className="w-12 h-12 rounded bg-slate-100 shrink-0" />}
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-sm text-slate-800 truncate">{r.code}</div>
+          <div className="text-[11px] text-slate-400 line-clamp-2">{r.name}</div>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1 min-h-[18px]">
+        {tags.length === 0 && <span className="text-[10px] text-slate-300">— ยังไม่มีแท็ก —</span>}
+        {tags.map((tid) => (
+          <span key={tid} className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100">{tagLabel(tid)}</span>
+        ))}
+      </div>
+      {mode === "pool"
+        ? <button onClick={() => onAdd?.(r)} disabled={inCart}
+            className="h-7 text-xs rounded-md bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700 disabled:opacity-40">
+            {inCart ? "✓ อยู่ในตะกร้า" : "+ ใส่ตะกร้า"}
+          </button>
+        : <button onClick={() => onRemove?.(r.id)}
+            className="h-7 text-xs rounded-md text-slate-500 hover:bg-red-50 hover:text-red-600">✕ เอาออก</button>}
+    </div>
+  );
+});
 
 export default function TagsManagerPage() {
   const [entity, setEntity] = useState<EntityKey>("parent-skus");
@@ -111,7 +153,8 @@ export default function TagsManagerPage() {
 
   const cartIds = useMemo(() => new Set(cart.map((c) => c.id)), [cart]);
 
-  const addToCart = (r: Rec) => setCart((c) => (c.some((x) => x.id === r.id) ? c : [...c, r]));
+  const addToCart = useCallback((r: Rec) => setCart((c) => (c.some((x) => x.id === r.id) ? c : [...c, r])), []);
+  const onDragRec = useCallback((id: string) => { dragRef.current = { type: "rec", id }; }, []);
   const addManyToCart = (recs: Rec[]) => setCart((c) => { const have = new Set(c.map((x) => x.id)); const add = recs.filter((r) => !have.has(r.id)); return add.length ? [...c, ...add] : c; });
   const [selectingAll, setSelectingAll] = useState(false);
   // เลือกทั้งหมดที่ตรง "คำค้นหา" (ทุกหน้า) → ใส่ตะกร้า
@@ -128,8 +171,8 @@ export default function TagsManagerPage() {
       loadTagMap(recs.map((r) => r.id));
     } catch { alert("เลือกทั้งหมดไม่สำเร็จ"); } finally { setSelectingAll(false); }
   };
-  const removeFromCart = (id: string) => { setCart((c) => c.filter((x) => x.id !== id)); setCartSel((p) => { const n = new Set(p); n.delete(id); return n; }); };
-  const toggleCartSel = (id: string) => setCartSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const removeFromCart = useCallback((id: string) => { setCart((c) => c.filter((x) => x.id !== id)); setCartSel((p) => { const n = new Set(p); n.delete(id); return n; }); }, []);
+  const toggleCartSel = useCallback((id: string) => setCartSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }), []);
   const removeSelectedFromCart = () => { setCart((c) => c.filter((x) => !cartSel.has(x.id))); setCartSel(new Set()); };
   const addTag = (id: string) => setTagSet((s) => {
     if (s.includes(id)) return s;
@@ -335,36 +378,6 @@ export default function TagsManagerPage() {
     return q ? cart.filter((r) => r.code.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)) : cart;
   }, [cart, cartSearch]);
 
-  // ---- การ์ดสินค้า (ใช้ทั้ง 2 ฝั่ง) ----
-  const Card = ({ r, action, sel }: { r: Rec; action: React.ReactNode; sel?: { checked: boolean; onToggle: () => void } }) => {
-    const tags = tagMap[r.id] ?? [];
-    return (
-      <div draggable onDragStart={() => { dragRef.current = { type: "rec", id: r.id }; }}
-        className={`bg-white border rounded-lg p-2 flex flex-col gap-1.5 cursor-grab active:cursor-grabbing hover:border-blue-300 ${sel?.checked ? "border-blue-400 ring-1 ring-blue-300" : "border-slate-200"}`}>
-        <div className="flex gap-2">
-          {sel && (
-            <input type="checkbox" checked={sel.checked} onChange={sel.onToggle}
-              onClick={(e) => e.stopPropagation()} className="mt-0.5 h-4 w-4 accent-blue-600 shrink-0" />
-          )}
-          {recImg(r.image)
-            ? <img src={recImg(r.image)!} alt="" className="w-12 h-12 rounded object-cover bg-slate-100 shrink-0" />
-            : <div className="w-12 h-12 rounded bg-slate-100 shrink-0" />}
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold text-sm text-slate-800 truncate">{r.code}</div>
-            <div className="text-[11px] text-slate-400 line-clamp-2">{r.name}</div>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-1 min-h-[18px]">
-          {tags.length === 0 && <span className="text-[10px] text-slate-300">— ยังไม่มีแท็ก —</span>}
-          {tags.map((tid) => (
-            <span key={tid} className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100">{tagLabel(tid)}</span>
-          ))}
-        </div>
-        {action}
-      </div>
-    );
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <FamilyNavTabs active="tags" />
@@ -496,14 +509,10 @@ export default function TagsManagerPage() {
           <div className="flex-1 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
             {loadingPool && <div className="text-xs text-slate-400 py-4 text-center col-span-full">กำลังโหลด…</div>}
             {!loadingPool && shownPool.length === 0 && <div className="text-xs text-slate-400 py-4 text-center col-span-full">ไม่พบรายการ</div>}
-            {shownPool.map((r) => {
-              const inCart = cartIds.has(r.id);
-              return <Card key={r.id} r={r} action={
-                <button onClick={() => addToCart(r)} disabled={inCart}
-                  className="h-7 text-xs rounded-md bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700 disabled:opacity-40">
-                  {inCart ? "✓ อยู่ในตะกร้า" : "+ ใส่ตะกร้า"}
-                </button>} />;
-            })}
+            {shownPool.map((r) => (
+              <RecCard key={r.id} r={r} tags={tagMap[r.id] ?? EMPTY_TAGS} tagLabel={tagLabel}
+                mode="pool" inCart={cartIds.has(r.id)} onAdd={addToCart} onDragStart={onDragRec} />
+            ))}
           </div>
         </div>
 
@@ -559,8 +568,8 @@ export default function TagsManagerPage() {
           <div className="flex-1 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
             {cart.length === 0 && <div className="text-xs text-slate-400 py-6 text-center col-span-full">ลาก หรือกด “+ ใส่ตะกร้า” จากคลังด้านซ้าย</div>}
             {shownCart.map((r) => (
-              <Card key={r.id} r={r} sel={{ checked: cartSel.has(r.id), onToggle: () => toggleCartSel(r.id) }} action={
-                <button onClick={() => removeFromCart(r.id)} className="h-7 text-xs rounded-md text-slate-500 hover:bg-red-50 hover:text-red-600">✕ เอาออก</button>} />
+              <RecCard key={r.id} r={r} tags={tagMap[r.id] ?? EMPTY_TAGS} tagLabel={tagLabel}
+                mode="cart" checked={cartSel.has(r.id)} onRemove={removeFromCart} onToggle={toggleCartSel} onDragStart={onDragRec} />
             ))}
           </div>
         </div>
