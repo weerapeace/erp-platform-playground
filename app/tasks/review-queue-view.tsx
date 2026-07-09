@@ -47,7 +47,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [pickOpen, setPickOpen] = useState(false);
   // รูปเดิมในสินค้า (แกลเลอรีจริง) ต่อปลายทาง — โชว์ให้ผู้ตรวจเห็นก่อนอนุมัติ · tk = "parent:<id>"/"sku:<id>"
-  const [destGalleries, setDestGalleries] = useState<Record<string, { r2_key?: string; url?: string }[]>>({});
+  const [destGalleries, setDestGalleries] = useState<Record<string, { r2_key?: string; url?: string; slot_id?: string; slot?: number }[]>>({});
   const [galLb, setGalLb] = useState<{ images: { url: string; label: string | null }[]; index: number }>({ images: [], index: -1 });   // ซูมรูปเดิมในสินค้า (แยกจาก imgs งานส่ง)
   const [platParents, setPlatParents] = useState<PlatParent[] | null>(null);   // รายละเอียด Platform ที่ส่ง (งานเขียนคำอธิบาย)
 
@@ -77,9 +77,9 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
     // ดึง "รูปเดิมในสินค้า" ของทุกปลายทาง มาโชว์ — งานรูปคำอธิบาย (description_media) ดึงจาก "รูป Description" ไม่ใช่แกลเลอรีหลัก
     const isDesc = r.approve_target === "description_media";
     const fetchGal = (owner: string) => apiFetch(`/api/creative-tasks/${r.task_id}/subtasks?gallery=${owner}`).then((x) => x.json())
-      .then((gj) => { if (gj.galleries) setDestGalleries((prev) => ({ ...prev, ...(gj.galleries as Record<string, { r2_key: string }[]>) })); }).catch(() => {});
+      .then((gj) => { if (gj.galleries) setDestGalleries((prev) => ({ ...prev, ...(gj.galleries as Record<string, { r2_key: string; slot_id?: string; slot?: number }[]>) })); }).catch(() => {});
     const fetchDescGal = (pid: string) => apiFetch(`/api/creative-tasks/${r.task_id}/subtasks?descgallery=parent:${pid}`).then((x) => x.json())
-      .then((gj) => { if (gj.desc_galleries) setDestGalleries((prev) => ({ ...prev, ...(gj.desc_galleries as Record<string, { url: string }[]>) })); }).catch(() => {});
+      .then((gj) => { if (gj.desc_galleries) setDestGalleries((prev) => ({ ...prev, ...(gj.desc_galleries as Record<string, { url: string; slot_id?: string; slot?: number }[]>) })); }).catch(() => {});
     if (isDesc) {
       for (const p of r.dest?.parents ?? []) void fetchDescGal(p.id);   // รูป Description เป็นระดับ Parent
     } else {
@@ -134,15 +134,25 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
 
   const lbImages = imgs.map((im) => ({ url: r2ImageUrl(im.r2_key, 1600) ?? "", label: im.file_name }));
 
-  // รูปที่คนทำ "ส่งมารอบนี้" — จาก image_sync_targets (product_images/sku_images) จัดกลุ่มตาม Parent/SKU + รหัส
+  // รูปที่คนทำ "ส่งมารอบนี้" — จาก image_sync_targets (product_images/sku_images) จัดกลุ่มตาม Parent/SKU + รหัส · tk=คีย์ปลายทาง (ใช้ lookup replace_map/แกลเลอรี)
   const submittedGroups = useMemo(() => {
-    const ist = active?.image_sync_targets; if (!ist) return [] as { code: string; keys: string[] }[];
+    const ist = active?.image_sync_targets; if (!ist) return [] as { code: string; tk: string; keys: string[] }[];
     const labels = ist.product_labels ?? {};
-    const gs: { code: string; keys: string[] }[] = [];
-    for (const [tk, keys] of Object.entries(ist.product_images ?? {})) { const ks = (keys ?? []).filter(Boolean); if (ks.length) gs.push({ code: labels[tk] || (tk.startsWith("parent:") ? "Parent SKU" : "SKU"), keys: ks }); }
-    for (const [sid, keys] of Object.entries(ist.sku_images ?? {})) { const ks = (keys ?? []).filter(Boolean); if (ks.length) gs.push({ code: labels[`sku:${sid}`] || "SKU", keys: ks }); }
+    const gs: { code: string; tk: string; keys: string[] }[] = [];
+    for (const [tk, keys] of Object.entries(ist.product_images ?? {})) { const ks = (keys ?? []).filter(Boolean); if (ks.length) gs.push({ code: labels[tk] || (tk.startsWith("parent:") ? "Parent SKU" : "SKU"), tk, keys: ks }); }
+    for (const [sid, keys] of Object.entries(ist.sku_images ?? {})) { const ks = (keys ?? []).filter(Boolean); if (ks.length) gs.push({ code: labels[`sku:${sid}`] || "SKU", tk: `sku:${sid}`, keys: ks }); }
     return gs;
   }, [active]);
+
+  // "รูปนี้แทนช่องไหน" — จาก replace_map[tk][r2_key] = slot_id (หรือ "desc:"+slot_id) · คืนเลขลำดับช่องเดิม (1-based) หรือ null
+  const replacedSlotNo = (tk: string, key: string): number | null => {
+    const rv = active?.image_sync_targets?.replace_map?.[tk]?.[key];
+    if (!rv || rv === "new" || rv === "desc:new") return null;
+    const slotId = rv.startsWith("desc:") ? rv.slice(5) : rv;
+    const gal = destGalleries[tk] ?? [];
+    const idx = gal.findIndex((s) => s.slot_id === slotId);
+    return idx >= 0 ? idx + 1 : 0;   // 0 = แทนรูปเดิม แต่ยังหาลำดับไม่เจอ (แกลเลอรียังไม่โหลด)
+  };
 
   return (
     <div className="space-y-2">
@@ -241,11 +251,21 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
                 {submittedGroups.map((g, gi) => (
                   <div key={gi}>
                     <p className="text-[10px] font-mono text-slate-600 bg-white border border-slate-200 inline-block px-1.5 py-0.5 rounded mb-1">📦 {g.code} <span className="text-slate-400">({g.keys.length})</span></p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {g.keys.map((k, i) => (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img key={i} src={r2ImageUrl(k, 200) ?? ""} alt="" onClick={() => setGalLb({ images: g.keys.map((x) => ({ url: r2ImageUrl(x, 1600) ?? "", label: g.code })), index: i })} title={t("กดดูเต็มจอ", "Click to view full")} className="h-16 w-16 rounded object-cover border border-slate-200 cursor-zoom-in" />
-                      ))}
+                    <div className="flex flex-wrap gap-2">
+                      {g.keys.map((k, i) => { const rep = replacedSlotNo(g.tk, k); return (
+                        <div key={i} className="relative">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={r2ImageUrl(k, 200) ?? ""} alt="" onClick={() => setGalLb({ images: g.keys.map((x) => ({ url: r2ImageUrl(x, 1600) ?? "", label: g.code })), index: i })} title={t("กดดูเต็มจอ", "Click to view full")} className="h-16 w-16 rounded object-cover border border-slate-200 cursor-zoom-in" />
+                          {/* เลขลำดับที่ส่ง */}
+                          <span className="absolute -top-1.5 -left-1.5 bg-violet-600 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center shadow">{i + 1}</span>
+                          {/* แทนช่องเดิมลำดับไหน (ถ้ามี) */}
+                          {rep !== null && (
+                            <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap bg-amber-500 text-white text-[9px] font-bold rounded-full px-1.5 py-0.5 shadow" title={t("รูปนี้แทนรูปเดิมในสินค้า", "Replaces an existing product image")}>
+                              {rep > 0 ? t(`🔁 แทน #${rep}`, `🔁 → #${rep}`) : t("🔁 แทนรูปเดิม", "🔁 replaces")}
+                            </span>
+                          )}
+                        </div>
+                      ); })}
                     </div>
                   </div>
                 ))}
