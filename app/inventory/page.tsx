@@ -158,7 +158,7 @@ export default function InventoryPage() {
 
   useEffect(() => { if (canView) fetchData(); }, [canView, fetchData]);
 
-  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
+  // (การเช็คสิทธิ์ย้ายไปหลัง hooks ทั้งหมด บรรทัดล่าง — กัน React #310 hooks ไม่เท่ากัน)
 
   const openCreate = (type: "in"|"out"|"transfer"|"adjust") => {
     setMovType(type); setProduct(null); setFromWh(null); setToWh(null);
