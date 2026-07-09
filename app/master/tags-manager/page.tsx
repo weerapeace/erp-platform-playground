@@ -74,6 +74,48 @@ const RecCard = memo(function RecCard({ r, tags, tagLabel, mode, inCart, checked
   );
 });
 
+// แถวตาราง (memo) — มุมมองตาราง กะทัดรัด เห็นได้เยอะกว่า
+const RecRow = memo(function RecRow({ r, tags, tagLabel, mode, inCart, checked, onAdd, onRemove, onToggle, onDragStart }: {
+  r: Rec; tags: string[]; tagLabel: (id: string) => string; mode: "pool" | "cart";
+  inCart?: boolean; checked?: boolean;
+  onAdd?: (r: Rec) => void; onRemove?: (id: string) => void; onToggle?: (id: string) => void; onDragStart: (id: string) => void;
+}) {
+  const img = recImg(r.image);
+  return (
+    <tr draggable onDragStart={() => onDragStart(r.id)}
+      className={`border-b border-slate-100 hover:bg-blue-50/40 cursor-grab active:cursor-grabbing ${checked ? "bg-blue-50" : ""}`}>
+      {mode === "cart" && (
+        <td className="px-2 py-1 w-8">
+          <input type="checkbox" checked={!!checked} onChange={() => onToggle?.(r.id)}
+            onClick={(e) => e.stopPropagation()} className="h-4 w-4 accent-blue-600 align-middle" />
+        </td>
+      )}
+      <td className="px-2 py-1 w-10">
+        {img
+          ? <img src={img} alt="" loading="lazy" className="w-8 h-8 rounded object-cover bg-slate-100" />
+          : <div className="w-8 h-8 rounded bg-slate-100" />}
+      </td>
+      <td className="px-2 py-1 font-semibold text-slate-800 whitespace-nowrap">{r.code}</td>
+      <td className="px-2 py-1"><div className="text-[12px] text-slate-500 max-w-[200px] truncate" title={r.name}>{r.name}</div></td>
+      <td className="px-2 py-1">
+        <div className="flex flex-wrap gap-1">
+          {tags.length === 0 ? <span className="text-[10px] text-slate-300">—</span>
+            : tags.map((tid) => <span key={tid} className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100">{tagLabel(tid)}</span>)}
+        </div>
+      </td>
+      <td className="px-2 py-1 text-right whitespace-nowrap">
+        {mode === "pool"
+          ? <button onClick={() => onAdd?.(r)} disabled={inCart}
+              className="h-7 px-2 text-xs rounded-md bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700 disabled:opacity-40">
+              {inCart ? "✓ อยู่ในตะกร้า" : "+ ใส่"}
+            </button>
+          : <button onClick={() => onRemove?.(r.id)}
+              className="h-7 px-2 text-xs rounded-md text-slate-500 hover:bg-red-50 hover:text-red-600">✕ เอาออก</button>}
+      </td>
+    </tr>
+  );
+});
+
 export default function TagsManagerPage() {
   const [entity, setEntity] = useState<EntityKey>("parent-skus");
   const cfg = ENTITIES[entity];
@@ -82,6 +124,9 @@ export default function TagsManagerPage() {
   const [pool, setPool] = useState<Rec[]>([]);
   const [search, setSearch] = useState("");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [view, setView] = useState<"card" | "table">("card");   // มุมมอง การ์ด/ตาราง (จำใน localStorage)
+  useEffect(() => { const v = typeof window !== "undefined" ? localStorage.getItem("tagsmgr_view") : null; if (v === "table" || v === "card") setView(v); }, []);
+  const changeView = (v: "card" | "table") => { setView(v); try { localStorage.setItem("tagsmgr_view", v); } catch { /* ignore */ } };
   const [filterSel, setFilterSel] = useState<TagFilterValue>({ tagIds: [], none: false });
   const [groups, setGroups] = useState<Grp[]>([]);
   const [loadingPool, setLoadingPool] = useState(false);
@@ -486,6 +531,10 @@ export default function TagsManagerPage() {
             <span className="text-xs text-slate-400">({total.toLocaleString()})</span>
             <div className="flex-1" />
             <TagGroupFilter value={filterSel} onChange={setFilterSel} />
+            <div className="inline-flex rounded-md border border-slate-200 overflow-hidden" title="สลับมุมมอง การ์ด/ตาราง">
+              <button onClick={() => changeView("card")} className={`h-7 px-2 text-xs ${view === "card" ? "bg-blue-50 text-blue-700" : "bg-white text-slate-500 hover:bg-slate-50"}`}>▦ การ์ด</button>
+              <button onClick={() => changeView("table")} className={`h-7 px-2 text-xs border-l border-slate-200 ${view === "table" ? "bg-blue-50 text-blue-700" : "bg-white text-slate-500 hover:bg-slate-50"}`}>☰ ตาราง</button>
+            </div>
             <button onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))} className="text-xs px-2 h-7 rounded border border-slate-200 text-slate-600 hover:bg-slate-50 bg-white">
               รหัส {sortDir === "asc" ? "↑" : "↓"}
             </button>
@@ -506,14 +555,40 @@ export default function TagsManagerPage() {
               </button>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
-            {loadingPool && <div className="text-xs text-slate-400 py-4 text-center col-span-full">กำลังโหลด…</div>}
-            {!loadingPool && shownPool.length === 0 && <div className="text-xs text-slate-400 py-4 text-center col-span-full">ไม่พบรายการ</div>}
-            {shownPool.map((r) => (
-              <RecCard key={r.id} r={r} tags={tagMap[r.id] ?? EMPTY_TAGS} tagLabel={tagLabel}
-                mode="pool" inCart={cartIds.has(r.id)} onAdd={addToCart} onDragStart={onDragRec} />
-            ))}
-          </div>
+          {view === "card" ? (
+            <div className="flex-1 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
+              {loadingPool && <div className="text-xs text-slate-400 py-4 text-center col-span-full">กำลังโหลด…</div>}
+              {!loadingPool && shownPool.length === 0 && <div className="text-xs text-slate-400 py-4 text-center col-span-full">ไม่พบรายการ</div>}
+              {shownPool.map((r) => (
+                <RecCard key={r.id} r={r} tags={tagMap[r.id] ?? EMPTY_TAGS} tagLabel={tagLabel}
+                  mode="pool" inCart={cartIds.has(r.id)} onAdd={addToCart} onDragStart={onDragRec} />
+              ))}
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              {loadingPool && <div className="text-xs text-slate-400 py-4 text-center">กำลังโหลด…</div>}
+              {!loadingPool && shownPool.length === 0 && <div className="text-xs text-slate-400 py-4 text-center">ไม่พบรายการ</div>}
+              {!loadingPool && shownPool.length > 0 && (
+                <table className="w-full border-collapse">
+                  <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] text-slate-400">
+                    <tr className="border-b border-slate-200">
+                      <th className="px-2 py-1.5 text-left font-medium">รูป</th>
+                      <th className="px-2 py-1.5 text-left font-medium">รหัส</th>
+                      <th className="px-2 py-1.5 text-left font-medium">ชื่อ</th>
+                      <th className="px-2 py-1.5 text-left font-medium">แท็ก</th>
+                      <th className="px-2 py-1.5 text-right font-medium"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shownPool.map((r) => (
+                      <RecRow key={r.id} r={r} tags={tagMap[r.id] ?? EMPTY_TAGS} tagLabel={tagLabel}
+                        mode="pool" inCart={cartIds.has(r.id)} onAdd={addToCart} onDragStart={onDragRec} />
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ขวา: ตะกร้า */}
@@ -565,13 +640,39 @@ export default function TagsManagerPage() {
               </div>
             </div>
           )}
-          <div className="flex-1 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
-            {cart.length === 0 && <div className="text-xs text-slate-400 py-6 text-center col-span-full">ลาก หรือกด “+ ใส่ตะกร้า” จากคลังด้านซ้าย</div>}
-            {shownCart.map((r) => (
-              <RecCard key={r.id} r={r} tags={tagMap[r.id] ?? EMPTY_TAGS} tagLabel={tagLabel}
-                mode="cart" checked={cartSel.has(r.id)} onRemove={removeFromCart} onToggle={toggleCartSel} onDragStart={onDragRec} />
-            ))}
-          </div>
+          {view === "card" ? (
+            <div className="flex-1 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
+              {cart.length === 0 && <div className="text-xs text-slate-400 py-6 text-center col-span-full">ลาก หรือกด “+ ใส่ตะกร้า” จากคลังด้านซ้าย</div>}
+              {shownCart.map((r) => (
+                <RecCard key={r.id} r={r} tags={tagMap[r.id] ?? EMPTY_TAGS} tagLabel={tagLabel}
+                  mode="cart" checked={cartSel.has(r.id)} onRemove={removeFromCart} onToggle={toggleCartSel} onDragStart={onDragRec} />
+              ))}
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              {cart.length === 0 && <div className="text-xs text-slate-400 py-6 text-center">ลาก หรือกด “+ ใส่ตะกร้า” จากคลังด้านซ้าย</div>}
+              {shownCart.length > 0 && (
+                <table className="w-full border-collapse">
+                  <thead className="sticky top-0 z-10 bg-white text-[11px] text-slate-400">
+                    <tr className="border-b border-slate-200">
+                      <th className="px-2 py-1.5 text-left font-medium w-8"></th>
+                      <th className="px-2 py-1.5 text-left font-medium">รูป</th>
+                      <th className="px-2 py-1.5 text-left font-medium">รหัส</th>
+                      <th className="px-2 py-1.5 text-left font-medium">ชื่อ</th>
+                      <th className="px-2 py-1.5 text-left font-medium">แท็ก</th>
+                      <th className="px-2 py-1.5 text-right font-medium"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shownCart.map((r) => (
+                      <RecRow key={r.id} r={r} tags={tagMap[r.id] ?? EMPTY_TAGS} tagLabel={tagLabel}
+                        mode="cart" checked={cartSel.has(r.id)} onRemove={removeFromCart} onToggle={toggleCartSel} onDragStart={onDragRec} />
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
