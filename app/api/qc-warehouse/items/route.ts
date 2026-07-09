@@ -83,6 +83,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const ins = await admin.from("qc_warehouse_items").insert(rows);
       if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 400 });
       await admin.from("mo_work_orders").update({ qc_pulled_qty: Number(wo.qc_pulled_qty ?? 0) + good + badTotal }).eq("id", wo_id);
+      // B2: ของดี → +FG (สินค้าสำเร็จเข้า WH-FG) + backflush วัตถุดิบออกจาก WIP (best-effort ไม่บล็อค QC)
+      if (good > 0) { try { await admin.rpc("erp_qc_receive_to_fg", { p_wo_id: wo_id, p_good_qty: good, p_actor: actor.actorName }); } catch (e) { console.error("[qc.receive] +FG ไม่สำเร็จ:", e instanceof Error ? e.message : e); } }
       for (const b of bad) await logDefect(admin, { sku: wo.product_sku, worker: wo.assignee_name, qty: b.qty, reason: b.reason, kind: "defect", mo_no: wo.mo_no });
       await writeAudit(admin, { action: "qc.receive", entityType: "qc_warehouse_items", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, good, bad: badTotal } });
       // แจ้งเตือน "พบของเสีย" ตอนรับเข้า (best-effort): กระดิ่ง + LINE กลุ่ม QC + DM ช่าง
@@ -238,6 +240,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (qty < 1) return NextResponse.json({ error: "จำนวนต้องมากกว่า 0" }, { status: 400 });
       const { error } = await admin.from("qc_warehouse_items").insert({ shelf_id, sku, sku_name, qty, status: "good", source, worker });
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      // B2: ใส่ของเข้าชั้นเอง (นับเอง/ยอดยกมา) → +FG
+      try { await admin.rpc("erp_fg_manual_in", { p_sku_code: sku, p_qty: qty, p_actor: actor.actorName }); } catch (e) { console.error("[qc.add_manual] +FG:", e instanceof Error ? e.message : e); }
       await writeAudit(admin, { action: "qc.add_manual", entityType: "qc_warehouse_items", entityId: shelf_id, ...actor, metadata: { sku, qty, source } });
       return NextResponse.json({ error: null });
     }
@@ -256,6 +260,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const ins = parsed.map((r) => ({ shelf_id, sku: r.sku, sku_name: nameMap.get(r.sku) ?? r.sku, qty: r.qty, status: "good", source }));
       const { error } = await admin.from("qc_warehouse_items").insert(ins);
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      // B2: นำเข้าหลายรายการ → +FG แต่ละตัว
+      try { for (const r of parsed) await admin.rpc("erp_fg_manual_in", { p_sku_code: r.sku, p_qty: r.qty, p_actor: actor.actorName }); } catch (e) { console.error("[qc.add_bulk] +FG:", e instanceof Error ? e.message : e); }
       await writeAudit(admin, { action: "qc.add_bulk", entityType: "qc_warehouse_items", entityId: shelf_id, ...actor, metadata: { count: ins.length, source } });
       return NextResponse.json({ error: null, count: ins.length });
     }
