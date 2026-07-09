@@ -182,6 +182,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       else await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       if (good > 0) await admin.from("qc_warehouse_items").insert({ shelf_id, wo_id: item.wo_id, mo_no: item.mo_no, sku: item.sku, sku_name: item.sku_name, worker: item.worker, qty: good, status: "good" });
       if (scrap > 0) await logDefect(admin, { sku: item.sku, worker: item.worker, qty: scrap, reason: item.reason, kind: "scrap", mo_no: item.mo_no });
+      // เฟส E+: ปรับ ledger — ซ่อมได้ SCRAP→FG · ซ่อมไม่ได้ ตัดทิ้งจาก SCRAP (best-effort)
+      try { await admin.rpc("erp_qc_repair_receive", { p_sku_code: item.sku, p_good_qty: good, p_scrap_qty: scrap, p_actor: actor.actorName }); } catch (e) { console.error("[qc.repair_receive] ledger:", e instanceof Error ? e.message : e); }
       await writeAudit(admin, { action: "qc.repair", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sub: "receive", good, scrap } });
       return NextResponse.json({ error: null });
     }

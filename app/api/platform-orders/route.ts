@@ -17,9 +17,11 @@ export const revalidate = 0;
 const STATUSES = ["new", "confirmed", "packed", "shipped", "cancelled"];
 
 async function defaultWarehouse(admin: ReturnType<typeof supabaseAdmin>): Promise<string | null> {
-  // ขายออนไลน์ตัดจากโซนสินค้าสำเร็จ (WH-FG) — โกดังขายออนไลน์แยกทำเฟสหลัง
-  const { data: main } = await admin.from("erp_playground_warehouses").select("id").eq("code", "WH-FG").maybeSingle();
-  if ((main as { id?: string } | null)?.id) return String((main as { id: string }).id);
+  // ขายออนไลน์ตัดจากโกดังออนไลน์ (WH-ONLINE) · ถ้ายังไม่มีของในนั้นใช้โซนสินค้าสำเร็จ (WH-FG)
+  for (const code of ["WH-ONLINE", "WH-FG"]) {
+    const { data } = await admin.from("erp_playground_warehouses").select("id").eq("code", code).maybeSingle();
+    if ((data as { id?: string } | null)?.id) return String((data as { id: string }).id);
+  }
   const { data: any1 } = await admin.from("erp_playground_warehouses").select("id").limit(1).maybeSingle();
   return (any1 as { id?: string } | null)?.id ?? null;
 }
@@ -74,7 +76,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (newStatus === "confirmed" && !order.stock_deducted) {
     const wh = await defaultWarehouse(admin);
     const { data: items } = await admin.from("platform_order_items").select("matched_sku_id, qty, name, sku_code").eq("order_id", id);
-    if (!wh) warnings.push("ไม่พบโซนสินค้าสำเร็จ (WH-FG) — ยังไม่ได้ตัดสต๊อก");
+    if (!wh) warnings.push("ไม่พบคลังออนไลน์ (WH-ONLINE) — ยังไม่ได้ตัดสต๊อก");
     else {
       for (const it of ((items ?? []) as Record<string, unknown>[])) {
         if (!it.matched_sku_id) { warnings.push(`${it.sku_code ?? it.name ?? "?"}: จับคู่ SKU ไม่ได้ ข้ามการตัดสต๊อก`); continue; }
