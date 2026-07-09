@@ -10,7 +10,7 @@ import { ERPInput, ERPSelect } from "@/components/form";
 import { UserPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "./multi-user-picker";
-import { ImageAttach, uploadResizedImage } from "@/components/image-attach";
+import { ImageAttach, ImageAttachKeys, uploadResizedImage } from "@/components/image-attach";
 import { RichTextEditor } from "@/components/rich-text";
 import dynamic from "next/dynamic";
 // คลังไฟล์กลาง (DAM) — เลือกรูปที่มีอยู่แล้วมาแนบ · dynamic กันลาก bundle ใหญ่
@@ -313,6 +313,12 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   </div>
                 </div>
               )}
+
+              {/* แนบรูป (บรีฟ/อ้างอิง) — อยู่ใต้รายละเอียด · แสดงเสมอ (คนละชุดกับรูปแนบระดับงานด้านล่าง) */}
+              <div>
+                <p className="text-xs text-slate-400 mb-1">🖼 {t("แนบรูป (บรีฟ/อ้างอิง)", "Images (brief/reference)")}</p>
+                <ImageAttachKeys value={d.reference_images ?? []} onChange={(keys) => { void saveQuick({ reference_images: keys }, true); }} folder="creative-tasks" maxSize={800} />
+              </div>
 
               {/* งานย่อย (การ์ด) — ของกลางจัดการสด · ถ้าไม่มีจะมีปุ่มเพิ่มในตัว */}
               <SubtaskManager taskId={d.id} brandId={d.brand_id} subCardStyle={subCardBgStyle(dth)} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />

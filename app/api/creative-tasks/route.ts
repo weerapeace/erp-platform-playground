@@ -90,7 +90,7 @@ type CreateBody = {
   assignee_id?: string | null; assignee_ids?: string[]; reviewer_id?: string | null; reviewer_ids?: string[]; approver_id?: string | null; assigned_by_id?: string | null;
   start_date?: string | null; due_date?: string | null;
   asset_status?: string | null; platforms?: string[] | null;
-  drive_folder_url?: string | null; cover_image_r2_key?: string | null;
+  drive_folder_url?: string | null; cover_image_r2_key?: string | null; reference_images?: string[];
   subtasks?: { title: string; title_en?: string | null; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: Record<string, unknown> }[];
   content_items?: { title: string; post_type?: string | null; platforms?: string[]; assignee_id?: string | null; assignee_ids?: string[] }[];   // คอนเทนต์พ่วงจากแม่แบบ → สร้างผูกงานอัตโนมัติ
 };
@@ -118,6 +118,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     approver_id: body.approver_id || null, assigned_by_id: body.assigned_by_id || user?.id || null, start_date: body.start_date || null, due_date: body.due_date || null,
     asset_status: body.asset_status || "missing", platforms: body.platforms ?? [],
     drive_folder_url: body.drive_folder_url?.trim() || null, cover_image_r2_key: body.cover_image_r2_key || null,
+    reference_images: Array.isArray(body.reference_images) ? body.reference_images.filter(Boolean) : [],
     created_by: user?.id ?? null,
   });
 

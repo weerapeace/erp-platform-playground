@@ -34,6 +34,7 @@ export type CreativeTask = {
   product_name: string | null;
   cover_image_r2_key: string | null;
   reference_html?: string | null;   // โน้ต/อ้างอิง (rich text)
+  reference_images?: string[];   // รูปประกอบ/บรีฟ (array ของ r2_key) — แสดงใต้รายละเอียด
   priority: CreativePriority;
   status: CreativeStatus;
   progress_percent: number;

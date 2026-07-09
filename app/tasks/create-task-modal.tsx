@@ -16,6 +16,7 @@ import type { UserPickerValue, SkuPickerValue, ParentSkuPickerValue } from "@/co
 import { MultiUserPicker } from "./multi-user-picker";
 import { TeamFill } from "./team-picker";
 import { ImageInput } from "@/components/image-input";
+import { ImageAttachKeys } from "@/components/image-attach";
 import { apiFetch } from "@/lib/api";
 import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
@@ -42,11 +43,11 @@ type FormState = {
   assignees: UserPickerValue[]; reviewers: UserPickerValue[];
   priority: CreativePriority; order_date: string; due_date: string;
   products: SkuPickerValue[]; parents: ParentSkuPickerValue[]; platforms: string[]; drive_folder_url: string;
-  cover_image_r2_key: string;
+  cover_image_r2_key: string; reference_images: string[];
 };
 const EMPTY_FORM: FormState = {
   title: "", description: "", task_type: "", brand_id: "", campaign_id: "",
-  assignees: [], reviewers: [], priority: "normal", order_date: "", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "", cover_image_r2_key: "",
+  assignees: [], reviewers: [], priority: "normal", order_date: "", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "", cover_image_r2_key: "", reference_images: [],
 };
 
 // แถวงานย่อยในขั้นที่ 2
@@ -188,6 +189,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         parent_sku_id: form.parents[0]?.id ?? null, parent_sku_ids: form.parents.map((p) => p.id),
         platforms: form.platforms, drive_folder_url: form.drive_folder_url.trim() || null,
         cover_image_r2_key: form.cover_image_r2_key || null,
+        reference_images: form.reference_images,
         subtasks,
         content_items: contentItems.filter((c) => c.title?.trim()),
       });
@@ -298,6 +300,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
             </div>
           </ERPFormField>
           <ERPFormField label={t("รายละเอียด","Description")} span={2} style={orderStyle("description")}><ERPTextarea className={ctrlCls("description")} value={form.description} rows={2} onChange={(e) => { markTouched("description"); updateForm({ description: e.target.value }); }} placeholder={t("อธิบายงาน/บรีฟเพิ่มเติม","Describe the task or brief")} /></ERPFormField>
+          <ERPFormField label={t("แนบรูป (บรีฟ/อ้างอิง)","Attach images (brief/reference)")} span={2}>
+            <ImageAttachKeys value={form.reference_images} onChange={(keys) => { markTouched("description"); updateForm({ reference_images: keys }); }} folder="creative-tasks" maxSize={800} />
+          </ERPFormField>
           <ERPFormField label={t("รูปปก (ไม่บังคับ — ถ้า Parent SKU มีรูป จะใช้รูปนั้นแทน)","Cover image (optional — Parent SKU image takes priority)")} span={2} style={orderStyle("cover")}>
             <div className={wrapCls("cover")}><ImageInput value={form.cover_image_r2_key || null} onChange={(k) => updateForm({ cover_image_r2_key: k ?? "" })} folder="creative-tasks" compact /></div>
           </ERPFormField>
