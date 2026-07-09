@@ -6,6 +6,7 @@ import { ERPModal } from "@/components/modal";
 import { useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR, invalidateSWR } from "@/lib/swr-lite";
+import { subscribeRefresh } from "@/lib/refresh-bus";
 import { ImageThumbnail } from "@/components/image-manager";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { readRelationLabel } from "@/lib/relation";
@@ -815,7 +816,12 @@ export function DataTable<T extends Record<string, unknown>>({
   // fetch จาก server
   // F-flicker: debounce 120ms — ตอนโหลดครั้งแรก deps หลายตัว (saved-view, layout, search)
   // ทยอยเปลี่ยนติดๆ กัน ทำให้ยิง fetch 4 รอบ = ตารางกระพริบ → รวบให้เหลือรอบเดียว
-  const prevRefreshRef = useRef(serverRefreshKey);
+  // ของกลาง refresh-bus: ปิด Popup/Drawer หลังมีการแก้ → บังคับตาราง (server mode) โหลดสด
+  const [busRefresh, setBusRefresh] = useState(0);
+  useEffect(() => subscribeRefresh(() => setBusRefresh((x) => x + 1)), []);
+  const effRefreshKey = serverRefreshKey + busRefresh;
+
+  const prevRefreshRef = useRef(effRefreshKey);
   useEffect(() => {
     if (!isServer || !serverFetch) return;
     // ไม่รอ bootstrap แล้ว — ดึงข้อมูลทันทีขนานกับการโหลดตั้งค่า (เร็วขึ้น) ·
@@ -831,9 +837,9 @@ export function DataTable<T extends Record<string, unknown>>({
     const cacheKey = tableId
       ? `dt:${tableId}:${JSON.stringify([params.page, params.pageSize, params.search, params.sortBy, params.sortDir, filtersKey])}`
       : null;
-    // หลังบันทึก/ลบ (serverRefreshKey เปลี่ยน) → บังคับโหลดสด + ล้างแคชทุกหน้าของตารางนี้ (กันเห็นของเก่าหลังแก้)
-    const forceFresh = serverRefreshKey !== prevRefreshRef.current;
-    prevRefreshRef.current = serverRefreshKey;
+    // หลังบันทึก/ลบ (serverRefreshKey หรือกริ่งกลางเปลี่ยน) → บังคับโหลดสด + ล้างแคชทุกหน้าของตารางนี้ (กันเห็นของเก่าหลังแก้)
+    const forceFresh = effRefreshKey !== prevRefreshRef.current;
+    prevRefreshRef.current = effRefreshKey;
     if (forceFresh && tableId) invalidateSWR(`dt:${tableId}:`);
     const cached = (!forceFresh && cacheKey) ? peekSWR<{ rows: T[]; total: number }>(cacheKey) : undefined;
     if (cached) { setSrvRows(cached.rows); setSrvTotal(cached.total); setSrvLoading(false); }  // โชว์ของเก่าทันที (ไม่ขึ้น skeleton)
@@ -847,7 +853,7 @@ export function DataTable<T extends Record<string, unknown>>({
     }, cached ? 0 : 120);   // มีของเก่าแล้ว → revalidate ทันที ; ไม่มี → debounce 120ms กันยิงรัว
     return () => { active = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServer, serverFetch, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey, filtersKey, tableId]);
+  }, [isServer, serverFetch, srvPage, srvPageSize, debouncedSearch, sorting, effRefreshKey, filtersKey, tableId]);
 
   // เฟส 4 (แบบ A): server mode + จัดกลุ่ม → ดึง batch ใหญ่ (cap) มาจัดกลุ่มในจอ
   useEffect(() => {
@@ -868,7 +874,7 @@ export function DataTable<T extends Record<string, unknown>>({
     }, 120);
     return () => { active = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServer, serverFetch, groupBy, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
+  }, [isServer, serverFetch, groupBy, debouncedSearch, sorting, effRefreshKey, filtersKey]);
 
   // ---- Saved Views (Supabase — owner-based, ข้ามเครื่อง) ----
   const [userViews, setUserViews] = useState<StoredView[]>([]);

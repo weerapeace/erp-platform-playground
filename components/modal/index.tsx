@@ -2,6 +2,23 @@
 
 import React, { useEffect, useCallback, useState, useRef } from "react";
 import { createPortal } from "react-dom";
+import { refreshIfDirty } from "@/lib/refresh-bus";
+
+/**
+ * useRefreshOnClose (ของกลาง) — เมื่อ overlay ปิด (open: true → false) หลังมีการบันทึก/ลบจริง
+ * สั่ง "กริ่งกลาง" ให้หน้า/ตารางที่อยู่เบื้องหลังโหลดข้อมูลใหม่เอง (แก้บั๊กหน้าไม่ refresh)
+ * แค่เปิดดูเฉย ๆ / กดยกเลิก → ไม่มีการแก้ → ไม่รีเฟรช (ประหยัด)
+ */
+function useRefreshOnClose(open: boolean) {
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open) wasOpen.current = true;
+    else if (wasOpen.current) { wasOpen.current = false; refreshIfDirty(); }
+  }, [open]);
+  // เผื่อ overlay ถูกถอดออก (unmount) ทั้งที่ยังเปิดอยู่ — เช่น peek drawer ที่ parent set peek=null
+  // (open ไม่เคยเปลี่ยนเป็น false ในตัวเดียวกัน) → cleanup ยังต้องสั่งกริ่ง
+  useEffect(() => () => { if (wasOpen.current) { wasOpen.current = false; refreshIfDirty(); } }, []);
+}
 
 /**
  * useBackdropDismiss — ปิด popup เฉพาะเมื่อ "กดเริ่ม + ปล่อย" บน backdrop จริงๆ
@@ -199,6 +216,7 @@ export function ERPModal({
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setMounted(true); }, []);
+  useRefreshOnClose(open);
 
   // โหลดขนาดที่จำไว้
   useEffect(() => {
@@ -448,6 +466,7 @@ export function ConfirmDialog({
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
+  useRefreshOnClose(open);
 
   useEffect(() => {
     if (!open) setTypedValue("");
@@ -564,6 +583,7 @@ export function Drawer({
       if (saved) setWidth(Math.max(320, Math.min(Number(saved), 1200)));
     } catch { /* ignore */ }
   }, [storageKey]);
+  useRefreshOnClose(open);
 
   useEffect(() => {
     if (!open) return;
@@ -688,6 +708,7 @@ export function ApprovalDialog({
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
+  useRefreshOnClose(open);
 
   useEffect(() => {
     if (!open) { setMode("choose"); setComment(""); setRejectReason(""); }

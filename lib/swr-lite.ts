@@ -15,6 +15,7 @@
  * หลังบันทึก/ลบ → เรียก revalidate(true) หรือ invalidateSWR("prefix")
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { subscribeRefresh } from "./refresh-bus";
 
 type Entry<T> = { data: T; at: number };
 const cache = new Map<string, Entry<unknown>>();
@@ -96,6 +97,12 @@ export function useSWRLite<T>(
     document.addEventListener("visibilitychange", fn);
     return () => { window.removeEventListener("focus", fn); document.removeEventListener("visibilitychange", fn); };
   }, [revalidate, revalidateOnFocus, key, focusStaleMs]);
+
+  // ของกลาง refresh-bus: ปิด Popup/Drawer หลังมีการแก้ → โหลดใหม่ "เงียบ ๆ" (โชว์ของเก่าไว้ก่อน ไม่กระพริบ)
+  useEffect(() => {
+    if (!key) return;
+    return subscribeRefresh(() => { void revalidate(true); });
+  }, [key, revalidate]);
 
   // โหลดใหม่อัตโนมัติเป็นรอบ (poll) — เฉพาะตอนแท็บมองเห็นอยู่ (ประหยัด/ไม่ยิงตอนซ่อน)
   useEffect(() => {

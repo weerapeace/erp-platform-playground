@@ -1,6 +1,7 @@
 "use client";
 
 import { supabaseBrowser } from "./supabase-browser";
+import { markDirty } from "./refresh-bus";
 
 /**
  * fetch wrapper ที่แนบ access_token ของ user ปัจจุบันอัตโนมัติ
@@ -24,5 +25,9 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
   // แทน %23 (=#) ในส่วน query ด้วย %20 (ช่องว่าง) ทุก request — ไม่มี param ไหนต้องการ "#" จริง
   const qi = input.indexOf("?");
   if (qi >= 0) input = input.slice(0, qi) + input.slice(qi).replace(/%23/gi, "%20");
-  return fetch(input, { ...init, headers });
+  const res = await fetch(input, { ...init, headers });
+  // ของกลาง refresh-bus: บันทึก/ลบสำเร็จ → จำไว้ว่า "มีการแก้" แล้วค่อยรีเฟรชหน้าเบื้องหลังตอนปิด Popup/Drawer
+  const method = (init.method ?? "GET").toUpperCase();
+  if (res.ok && method !== "GET" && method !== "HEAD") markDirty();
+  return res;
 }
