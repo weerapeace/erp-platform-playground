@@ -12,9 +12,15 @@
  */
 import { useState, useEffect, useRef, useLayoutEffect, useCallback, type RefObject, type ReactNode, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import dynamic from "next/dynamic";
 import { apiFetch, safeSearch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
+import { useToast } from "@/components/toast";
 import type { BomComponent } from "@/app/api/bom/components/route";
+
+// โหลดเมื่อกดปุ่มเท่านั้น (dynamic กัน bundle บวม/import วน — material-picker เป็นของกลางใช้ทุกหน้า)
+const SkuWizard = dynamic(() => import("@/app/master/skus/sku-wizard").then((m) => m.SkuWizard), { ssr: false });
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 export type { BomComponent };
 
@@ -165,20 +171,47 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
   }, [allowedGroupCodes, allowedTags]);
   useEffect(() => { if (!open) return; const t = setTimeout(() => { void load(search, 0, false); }, search ? 300 : 0); return () => clearTimeout(t); }, [open, search, load]);
 
+  // เพิ่ม/ก๊อป SKU วัตถุดิบตรงจากหน้าค้นหา (ไม่ต้องออกไปหน้าอื่น)
+  const toast = useToast();
+  const [wizardOpen, setWizardOpen] = useState(false);   // ➕ เพิ่ม SKU (Wizard เดี่ยว/ชุด)
+  const [copyMode, setCopyMode] = useState(false);       // ⧉ โหมดก๊อป: กดวัตถุดิบสักตัว = ก๊อป (ไม่ใช่เลือก)
+  const [copying, setCopying] = useState(false);
+  const [copyEditId, setCopyEditId] = useState<string | null>(null);   // เปิดตัวที่ก๊อปมาแก้สี/รหัส
+  const refreshSearch = useCallback(() => { void load(search, 0, false); }, [load, search]);
+  const doCopy = async (c: BomComponent) => {
+    setCopying(true);
+    try {
+      const r = await apiFetch("/api/skus/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id }) }).then((x) => x.json());
+      if (r.error) throw new Error(r.error);
+      setCopyMode(false);
+      setCopyEditId(r.id as string);
+      toast.success(`ก๊อปแล้ว: ${r.code} — เปลี่ยนสี/รหัสแล้วบันทึกได้เลย`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ก๊อปไม่สำเร็จ"); }
+    finally { setCopying(false); }
+  };
+
   return (
+    <>
     <ERPModal open={open} onClose={onClose} size="lg" title="🔍 ค้นหาวัตถุดิบ"
-      footer={<button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>}>
+      footer={<div className="flex items-center gap-2 w-full">
+        <button onClick={() => setWizardOpen(true)} className="h-9 px-3 text-sm font-medium border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">➕ เพิ่ม SKU</button>
+        <button onClick={() => setCopyMode((v) => !v)} className={`h-9 px-3 text-sm font-medium rounded-lg border ${copyMode ? "bg-amber-500 text-white border-amber-500" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>⧉ {copyMode ? "ยกเลิกก๊อป" : "copy SKU"}</button>
+        <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg ml-auto">ปิด</button>
+      </div>}>
       <div className="space-y-2">
+        {copyMode && <div className="px-3 py-1.5 text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">โหมดก๊อป — กดวัตถุดิบที่จะใช้เป็นต้นแบบ แล้วเปลี่ยนแค่ “สี”/รหัส (ระบบก๊อปฟิลด์อื่นให้)</div>}
         <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อวัตถุดิบ…"
           className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         <div className="grid grid-cols-2 gap-2 max-h-[55vh] overflow-y-auto pr-1">
           {items.map((c) => (
-            <button key={c.id} type="button" onClick={() => onPick(c)} className="flex items-center gap-2 p-2 border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 text-left">
+            <button key={c.id} type="button" disabled={copying} onClick={() => (copyMode ? void doCopy(c) : onPick(c))}
+              className={`flex items-center gap-2 p-2 border rounded-lg text-left disabled:opacity-50 ${copyMode ? "border-amber-200 hover:bg-amber-50 hover:border-amber-400" : "border-slate-200 hover:bg-blue-50 hover:border-blue-300"}`}>
               <Thumb k={c.image_key} size={44} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1"><code className="text-[10px] text-slate-400">{c.code}</code>{c.out_of_group && <span className="text-[9px] px-1 rounded bg-amber-100 text-amber-700">นอกกลุ่ม</span>}{c.material_type && <span className="text-[9px] px-1 rounded bg-slate-100 text-slate-500">{c.material_type}</span>}</div>
                 <div className="text-sm text-slate-700 line-clamp-2 leading-tight">{c.name}</div>
               </div>
+              {copyMode && <span className="text-[10px] text-amber-600 shrink-0">⧉ ก๊อป</span>}
             </button>
           ))}
           {!loading && items.length === 0 && <div className="col-span-2 text-center py-10 text-slate-300 text-sm">ไม่พบวัตถุดิบ</div>}
@@ -187,5 +220,12 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
         {hasMore && !loading && <button type="button" onClick={() => load(search, offset, true)} className="w-full h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">โหลดเพิ่ม</button>}
       </div>
     </ERPModal>
+
+    {/* ➕ เพิ่ม SKU — Wizard เดี่ยว/ชุด (ของกลางเดียวกับหน้า /master/skus) */}
+    {wizardOpen && <SkuWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onCreated={() => { setWizardOpen(false); refreshSearch(); toast.success("เพิ่ม SKU แล้ว — ค้นหาเจอในรายการ"); }} />}
+
+    {/* ⧉ ก๊อปแล้ว → เปิดแก้สี/รหัสทันที (บันทึกแล้วรีเฟรชรายการ) */}
+    {copyEditId && <MasterRecordDrawer moduleKey="skus-v2" apiPath="skus" recordId={copyEditId} startInEdit onClose={() => setCopyEditId(null)} onChanged={() => refreshSearch()} />}
+    </>
   );
 }

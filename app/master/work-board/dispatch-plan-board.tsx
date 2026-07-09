@@ -510,6 +510,7 @@ export function DispatchPlanBoard({
                     )}
                     {ws.map((w) => {
                   const wl = woLabor(w);
+                  const wlRate = w.qty > 0 ? wl / w.qty : 0;   // เรตต่อชิ้น (ยอดรวม ÷ จำนวน) — โชว์ที่มาของยอด
                   const canEditWO = realMode && editable && !!onUpdateWO;
                   const editing = laborEditId === w.id;
                   return (
@@ -527,8 +528,12 @@ export function DispatchPlanBoard({
                       {canEditWO
                         ? <button onClick={(e) => { e.stopPropagation(); openAssign(w, d); }} className="text-violet-600 hover:underline font-medium">👤 {w.assignee_name || "เลือกช่าง"} ✎</button>
                         : <span>{w.assignee_name ?? "—"}</span>}
-                      {" · "}{fmt(w.qty)} ชิ้น · {baht(wl)}
+                      {" · "}{fmt(w.qty)} ชิ้น
                     </div>
+                    {/* ค่าแรงรวม (ยอดรวม = จำนวน × เรต) — โชว์ที่สินค้าให้ชัด ไม่ใช่แค่เรตต่อชิ้น */}
+                    {wl > 0 && (
+                      <div className="text-[11px] text-emerald-700 font-medium truncate">💰 ค่าแรงรวม {baht(wl)} <span className="text-slate-400 font-normal">({fmt(w.qty)} × ฿{fmt(wlRate)})</span></div>
+                    )}
                     {/* #2: ใส่ค่าแรง (เฉพาะของจริง + การ์ดที่ยังไม่มีค่าแรง) — กดง่าย */}
                     {canEditWO && wl <= 0 && !editing && (
                       <button onClick={(e) => { e.stopPropagation(); setLaborEditId(w.id); setLaborEditVal(""); }}
