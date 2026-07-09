@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, useRef, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
 
 /**
@@ -211,7 +211,7 @@ export type MenuRow = {
 };
 
 // โมดูลใหญ่ (App) — tabs บนสุด
-export type AppGroup = { id?: string; key: string; label: string; icon: string | null; icon_url?: string | null; sort_order: number; permission_key: string | null; is_active: boolean; default_href?: string | null };
+export type AppGroup = { id?: string; key: string; label: string; icon: string | null; icon_url?: string | null; sort_order: number; permission_key: string | null; is_active: boolean };
 
 // หมวดเมนู (ไอคอน/ลำดับ ต่อแอป) — จาก /api/menu/sections
 export type MenuSectionRow = { app_key: string; name: string; icon: string | null; icon_url: string | null; sort_order: number };
@@ -434,6 +434,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);
   const [sections, setSections] = useState<MenuSectionRow[]>([]);   // ไอคอน/ลำดับหมวด (ต่อแอป)
   const [activeApp, setActiveAppState] = useState<string | null>(null);
+  // แอปที่ผู้ใช้ "กดแท็บเอง" → ต้องชนะ auto-sync (หน้าที่อยู่หลายแอป เช่น work-board = [dispatch,production]
+  //  เดิม sync เลือก app_keys ตัวแรกเสมอ = เด้งไป "จ่ายงาน" ทั้งที่กด "ผลิต" → ต้องกด 2 รอบ)
+  const pickedAppRef = useRef<string | null>(null);
   const setActiveApp = (k: string | null) => {
     setActiveAppState(k);
     try { if (k) localStorage.setItem("erp-active-app", k); else localStorage.removeItem("erp-active-app"); } catch { /* ignore */ }
@@ -469,14 +472,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       .filter((r) => r.is_active && r.show_in_sidebar && (r.app_keys ?? []).includes(key)
         && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0])))
       .sort((a, b) => a.sort_order - b.sort_order);
-    // 1) "หน้าแรก" ที่แอดมินตั้งไว้ใน DB (erp_app_groups.default_href) — มาก่อนเสมอ
-    //    (ต้องตรงกับเมนูที่ผู้ใช้เห็น ไม่งั้นข้ามไปใช้ค่าถัดไป)
-    const dbPref = appGroups.find((a) => a.key === key)?.default_href;
-    if (dbPref && its.some((r) => r.href === dbPref)) return dbPref;
-    // 2) override ในโค้ด (legacy) — เช่น เปิด "ผลิต" ให้ไปใบสั่งผลิต (MO) ก่อน
+    // หน้า default ของบางแอป (override ลำดับเมนู) — เช่น เปิด "ผลิต" ให้ไปใบสั่งผลิต (MO) ก่อน
     const pref = APP_DEFAULT_HREF[key];
     if (pref && its.some((r) => r.href === pref)) return pref;
-    // 3) เมนูตัวบนสุดตามลำดับ
     return its[0]?.href ?? null;
   };
 
@@ -490,6 +488,13 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     if (matches.length > 0) {
       const best = matches.sort((a, b) => (b.href?.length ?? 0) - (a.href?.length ?? 0))[0];
       const keys = best.app_keys ?? [];
+      // ผู้ใช้เพิ่งกดแท็บเอง + หน้านี้เป็นของแอปที่กด → เคารพการเลือก (กันเด้งไป app_keys ตัวแรก เช่น "จ่ายงาน")
+      const picked = pickedAppRef.current;
+      if (picked && keys.includes(picked) && appGroups.some((a) => a.key === picked)) {
+        pickedAppRef.current = null;
+        if (activeApp !== picked) setActiveApp(picked);
+        return;
+      }
       if (activeApp && keys.includes(activeApp)) return;   // App ปัจจุบันถูกต้องแล้ว → ไม่กระตุก
       target = keys.find((k) => appGroups.some((a) => a.key === k));
     } else {
@@ -776,11 +781,11 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
                     : "border-transparent text-slate-500 hover:text-slate-800"
                 }`;
                 return href ? (
-                  <Link key={a.key} href={href} onClick={() => setActiveApp(a.key)} className={cls}>
+                  <Link key={a.key} href={href} onClick={() => { pickedAppRef.current = a.key; setActiveApp(a.key); }} className={cls}>
                     <AppTabIcon icon={a.icon} iconUrl={a.icon_url} /><span>{a.label}</span>
                   </Link>
                 ) : (
-                  <button key={a.key} onClick={() => setActiveApp(a.key)} className={cls}>
+                  <button key={a.key} onClick={() => { pickedAppRef.current = a.key; setActiveApp(a.key); }} className={cls}>
                     <AppTabIcon icon={a.icon} iconUrl={a.icon_url} /><span>{a.label}</span>
                   </button>
                 );

@@ -19,6 +19,7 @@ type ShopMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; remaining: number; due_date: string | null;
   image_url: string | null; brand: string | null; brand_color: string | null; ready: boolean;
+  color?: string | null;   // สี (color_th ก่อน ไม่มีใช้ color) — โชว์ต่อท้ายชื่อ
 };
 type ShopDept = { id: string; name: string };
 type ShopCraftsman = { id: string; name: string; code: string | null; department_id?: string | null };
@@ -211,7 +212,7 @@ export function DispatchShop({
                 ? <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span>
                 : <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span>}
             </div>
-            <div className="text-[11px] text-slate-500 truncate">{m.product_name}</div>
+            <div className="text-[11px] text-slate-500 truncate">{m.product_name}{m.color ? <span className="text-slate-400"> · {m.color}</span> : null}</div>
             <div className="text-[10px] text-slate-400 font-mono truncate">{m.mo_no}</div>
           </div>
           {canDispatch && <input type="checkbox" checked={inCart} onClick={(e) => e.stopPropagation()} onChange={() => toggleCart(m)} className="shrink-0 w-4 h-4 accent-indigo-600 mt-0.5" />}

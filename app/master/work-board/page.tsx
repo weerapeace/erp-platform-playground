@@ -46,7 +46,7 @@ type Labor = { prod_plan: number; prod_actual: number; piece_plan: number; piece
 type PendingMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; dispatched: number; remaining: number; due_date: string | null; status: string;
-  image_url: string | null; brand: string | null; brand_color: string | null;
+  image_url: string | null; brand: string | null; brand_color: string | null; color?: string | null;
   prep_done: boolean; cut_done: boolean;
   // Phase 2: เช็กลิสต์วัตถุดิบจาก BOM
   has_bom: boolean; prep_total: number; prep_ready: number; cut_total: number; cut_ready: number; ready: boolean;

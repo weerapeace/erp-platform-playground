@@ -13,7 +13,7 @@ type ShopWO = {
   id: string; wo_no: string; mo_no: string; product_sku: string | null; product_name: string | null;
   department_id: string | null; department_name: string | null; assignee_name: string | null;
   qty: number; received_qty: number; status: string; due_date: string | null;
-  image_url?: string | null; brand_color?: string | null;
+  image_url?: string | null; brand_color?: string | null; color?: string | null;
 };
 type ShopDept = { id: string; name: string };
 
@@ -86,7 +86,7 @@ export function DeskShop({ workOrders, departments, onOpenWO }: {
               <span className="text-sm font-semibold text-slate-800 truncate">{w.product_sku}</span>
               <span className={`shrink-0 text-[9px] px-1.5 py-0.5 rounded-full ${st.c}`}>{st.t}</span>
             </div>
-            <div className="text-[11px] text-slate-500 truncate">{w.product_name}</div>
+            <div className="text-[11px] text-slate-500 truncate">{w.product_name}{w.color ? <span className="text-slate-400"> · {w.color}</span> : null}</div>
             <div className="text-[10px] text-slate-400 font-mono truncate">{w.wo_no} · {w.mo_no}</div>
             <div className="text-[11px] text-slate-500 truncate">👤 {w.assignee_name ?? w.department_name ?? "—"}</div>
           </div>
