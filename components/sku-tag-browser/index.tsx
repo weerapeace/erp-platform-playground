@@ -104,7 +104,8 @@ function toBulkField(f: RegField): BulkEditField | null {
   return { key: col, label: f.field_label, type: "text" };
 }
 
-export function SkuTagBrowser() {
+export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" | "pick"; onPickSku?: (skuId: string) => void } = {}) {
+  const pick = mode === "pick";   // โหมดเลือกสินค้า (หน้าขอซื้อ) — กดการ์ด → onPickSku แทนเปิด drawer แก้ไข
   const toast = useToast();
   const [entity, setEntity] = useState<"skus" | "parent-skus">("skus");   // ดูตาม SKU หรือ Parent SKU (ของกลางตัวเดียว)
   const [tree, setTree] = useState<BrowseTree | null>(null);
@@ -343,7 +344,8 @@ export function SkuTagBrowser() {
 
   return (
     <div>
-      {/* สลับ SKU / Parent SKU (ของกลางตัวเดียว — แท็ก/กลุ่มชุดเดียวกัน) */}
+      {/* สลับ SKU / Parent SKU + ปุ่มเพิ่ม — ซ่อนในโหมดเลือก (pick) เพราะขอซื้อได้เฉพาะ SKU */}
+      {!pick && (
       <div className="flex items-center gap-1 mb-3">
         <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
           <button onClick={() => setEntity("skus")} className={`h-9 px-4 text-sm ${entity === "skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🏷️ SKU</button>
@@ -355,6 +357,7 @@ export function SkuTagBrowser() {
           ＋ เพิ่ม {entity === "parent-skus" ? "Parent SKU" : "SKU"}
         </button>
       </div>
+      )}
       {/* ฟอร์มเพิ่ม: SKU = Wizard เต็ม · Parent = modal เล็ก */}
       {addOpen && entity === "skus" && <SkuWizard open onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
       {addOpen && entity === "parent-skus" && <ParentSkuCreateModal onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
@@ -373,8 +376,8 @@ export function SkuTagBrowser() {
           {search && <button onClick={() => setSearch("")} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>}
         </div>
         <TagGroupFilter value={tagFilter} onChange={setTagFilter} label="กรองแท็ก" showNone={false} />
-        <button onClick={() => setCustomizeOpen(true)}
-          className="h-10 px-3 text-[13px] border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ ปรับการ์ด</button>
+        {!pick && <button onClick={() => setCustomizeOpen(true)}
+          className="h-10 px-3 text-[13px] border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ ปรับการ์ด</button>}
       </div>
 
       {/* breadcrumb */}
@@ -410,10 +413,10 @@ export function SkuTagBrowser() {
             <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
               <p className="text-[12px] text-slate-400">{total.toLocaleString("th-TH")} รายการ (แสดง {(onlyIncomplete ? shown.length : cards.length).toLocaleString("th-TH")})</p>
               <div className="flex items-center gap-2 flex-wrap">
-                <button onClick={allShownSelected ? clearSel : selectAllShown}
+                {!pick && <button onClick={allShownSelected ? clearSel : selectAllShown}
                   className={`h-8 px-2.5 text-[12px] rounded-lg border ${allShownSelected ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                   {allShownSelected ? "☑ เลือกแล้ว" : "☐ เลือกทั้งหมด"}
-                </button>
+                </button>}
                 <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden">
                   <button onClick={() => setViewPersist("card")} className={`h-8 px-2.5 text-[12px] ${view === "card" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>▦ การ์ด</button>
                   <button onClick={() => setViewPersist("table")} className={`h-8 px-2.5 text-[12px] border-l border-slate-200 ${view === "table" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>☰ ตาราง</button>
@@ -432,12 +435,12 @@ export function SkuTagBrowser() {
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">ไม่มีรายการที่ข้อมูลไม่ครบในที่โหลดมา 🎉</div>
               : view === "table"
-                ? <SkuTable rows={shown} selected={selected} selectMode={selectMode} onToggle={toggleSel} onOpen={(id) => setPeekId(id)} />
+                ? <SkuTable rows={shown} selected={selected} selectMode={selectMode} onToggle={toggleSel} onOpen={(id) => { if (pick) { onPickSku?.(id); return; } setPeekId(id); }} />
                 : <div className="grid gap-3 select-none" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
                     {shown.map((c) => (
                       <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs}
                         selected={selected.has(c.id)} selectMode={selectMode}
-                        onClick={() => { if (justDragged.current || selectMode) return; setPeekId(c.id); }}
+                        onClick={() => { if (justDragged.current || selectMode) return; if (pick) { onPickSku?.(c.id); return; } setPeekId(c.id); }}
                         onPointerDownCard={() => { if (selectMode) beginDrag(c.id, selected.has(c.id)); }}
                         onPointerDownHandle={() => beginDrag(c.id, selected.has(c.id))}
                         onPointerEnter={() => dragOver(c.id)} />

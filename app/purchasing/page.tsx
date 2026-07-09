@@ -16,6 +16,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
+import { SkuTagBrowser } from "@/components/sku-tag-browser";
 import { RecordFormModal } from "@/components/record-form-modal";
 import { ERPModal, useBackdropDismiss } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -399,6 +400,15 @@ export default function PurchasingShopPage() {
     return mapped;
   }, [mapSku, exclParam]);
 
+  // เลือกสินค้าจากแท็บ "ตาม Tags" (SkuTagBrowser โหมด pick) → ดึง SKU เต็มแล้วเปิดป๊อปเพิ่มลงใบขอซื้อ
+  const openSkuById = useCallback(async (skuId: string) => {
+    try {
+      const [card] = await fetchSkusByIds([skuId]);
+      if (!card || !card.sku) { toast.error("สินค้านี้เพิ่มลงใบขอซื้อไม่ได้ (อาจถูกตั้งเป็นห้ามขอซื้อ)"); return; }
+      setConfirmSku(card);
+    } catch { toast.error("โหลดสินค้าไม่สำเร็จ"); }
+  }, [fetchSkusByIds, toast]);
+
   // ข้อ 3: กำกับลำดับคำขอ — แสดงเฉพาะผลของคำค้นล่าสุด (กัน race คำขอเก่ามาทับ)
   const reqIdRef = useRef(0);
   const fetchCards = useCallback(async (pg: number) => {
@@ -767,28 +777,11 @@ export default function PurchasingShopPage() {
             </>
           )}
 
-          {/* โหมด "ตาม Tags": เลือกแท็ก → โชว์สินค้าในแท็กนั้น (ของกลาง TagGroupFilter + RPC) */}
+          {/* โหมด "ตาม Tags": นำทางด้วยโฟลเดอร์ประเภทสินค้าทางขวา (SkuTagBrowser) */}
           {source === "tags" && (
-            <div className="space-y-2">
-              <p className="text-xs text-slate-500 leading-relaxed">เลือกแท็ก (ประเภทสินค้า) เพื่อดูเฉพาะสินค้าในแท็กนั้น</p>
-              <TagGroupFilter label="เลือกแท็ก" showNone={false}
-                value={{ tagIds: tagsSel, none: false }}
-                onChange={(v) => setTagsSel(v.tagIds)}
-                manageFlag={{ field: "hide_in_purchasing", onLabel: "🙈 ห้ามขอซื้อ", offLabel: "👁 โชว์", permission: "products.edit" }}
-                onManaged={() => { void reloadHiddenTags(); }} />
-              {tagsSel.length > 0 ? (
-                <div className="flex flex-wrap gap-1 pt-1">
-                  {tagsSel.map(tid => (
-                    <span key={tid} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[11px] border border-indigo-100">
-                      {tagNames[tid] ?? "…"}
-                      <button type="button" onClick={() => setTagsSel(s => s.filter(x => x !== tid))} className="text-indigo-400 hover:text-red-500">✕</button>
-                    </span>
-                  ))}
-                  <button type="button" onClick={() => setTagsSel([])} className="text-[11px] text-slate-400 hover:text-red-500 ml-1">ล้างทั้งหมด</button>
-                </div>
-              ) : (
-                <p className="text-xs text-slate-300">ยังไม่ได้เลือกแท็ก</p>
-              )}
+            <div className="text-xs text-slate-500 leading-relaxed space-y-2">
+              <p>👉 เลือก <b>โฟลเดอร์ประเภทสินค้า</b> ทางขวา แล้วกดการ์ดสินค้าเพื่อเพิ่มลงใบขอซื้อ</p>
+              <p className="text-slate-400">มีช่องค้นหา/กรองแท็กอยู่ในแถบด้านขวาแล้ว</p>
             </div>
           )}
         </aside>
@@ -845,6 +838,13 @@ export default function PurchasingShopPage() {
             <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between gap-3">
               <span>⚠ โหลดสินค้าไม่สำเร็จ: {error}</span>
               <button onClick={() => void fetchCards(page)} className="h-8 px-3 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 flex-shrink-0">ลองใหม่</button>
+            </div>
+          )}
+
+          {/* แท็บ "ตาม Tags": โฟลเดอร์ประเภทสินค้า (ของกลาง SkuTagBrowser โหมด pick) — กดการ์ด = เพิ่มลงใบขอซื้อ */}
+          {source === "tags" && (
+            <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+              <SkuTagBrowser mode="pick" onPickSku={openSkuById} />
             </div>
           )}
 
@@ -923,8 +923,8 @@ export default function PurchasingShopPage() {
             </div>
           )}
 
-          {/* การ์ดสินค้าทั่วไป (ทุกโหมดยกเว้น "ใบสั่งผลิต") */}
-          {source !== "mo" && (<>
+          {/* การ์ดสินค้าทั่วไป (ทุกโหมดยกเว้น "ใบสั่งผลิต" และ "ตาม Tags" ที่ใช้ SkuTagBrowser) */}
+          {source !== "mo" && source !== "tags" && (<>
           {/* responsive: iPhone (<sm) 2 คอลัมน์ตายตัว · iPad+ ใช้ค่าที่ตั้ง (--cols, default 4 ปรับได้บนหัว) */}
           <div className={`grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))] transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ "--cols": cols } as CSSProperties}>
             {cards.map(c => (
@@ -990,7 +990,7 @@ export default function PurchasingShopPage() {
             ))}
             {!loading && !error && cards.length === 0 && (
               <div className="col-span-full text-center text-slate-300 py-16">
-                {source === "tags" && tagsSel.length === 0 ? "👈 เลือกแท็กทางซ้ายเพื่อดูสินค้าในแท็กนั้น" : "ไม่พบสินค้า"}
+                ไม่พบสินค้า
               </div>
             )}
           </div>
@@ -1001,7 +1001,7 @@ export default function PurchasingShopPage() {
           {!loading && cards.length > 0 && (
             <div className="flex items-center justify-center gap-6 py-6 flex-wrap">
               {/* เลื่อนหน้า — ตัวควบคุมหลัก (เฉพาะ SKU ที่แบ่งหน้าฝั่ง server) */}
-              {(source === "sku" || source === "tags") && total > PAGE && (
+              {source === "sku" && total > PAGE && (
                 <div className="flex items-center gap-2">
                   <button onClick={() => goToPage(page - 1)} disabled={page <= 0}
                     className="h-10 px-4 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">◀ หน้าก่อน</button>
