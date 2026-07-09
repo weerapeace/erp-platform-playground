@@ -119,6 +119,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (!item) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
       const del = await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       if (del.error) return NextResponse.json({ error: del.error.message }, { status: 400 });
+      // เคลียร์ส่งออก: ตัด/ย้าย FG — sell → −FG (ขายหน้าร้าน/ออนไลน์) · sales_wh → ย้าย FG → คลังขาย (best-effort, เฉพาะของดี)
+      if (item.status !== "defect") { try { await admin.rpc("erp_qc_ship", { p_sku_code: item.sku, p_qty: item.qty, p_mode: String(body.mode ?? "sell"), p_dest_name: body.wh ? String(body.wh) : null, p_actor: actor.actorName }); } catch (e) { console.error("[qc.ship] ตัด/ย้าย FG:", e instanceof Error ? e.message : e); } }
       await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: item.qty, mode: body.mode, wh: body.wh } });
       return NextResponse.json({ error: null });
     }
