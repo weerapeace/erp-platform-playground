@@ -170,6 +170,25 @@ export default function MenuManagerPage() {
       flash("อัปโหลดรูปแถบแล้ว — กดบันทึกเพื่อใช้");
     } catch (e) { setErr(String(e)); } finally { setUploadingApp(false); }
   };
+  // A2: ซ่อน/โชว์แอป (is_active) — บันทึกทันที
+  const toggleAppActive = async (a: AppGroup) => {
+    await patchApp(a.id!, { is_active: !(a.is_active !== false) });
+  };
+  // A1: ลากเรียงลำดับแอป (sort_order) — reassign แล้ว persist เฉพาะที่เปลี่ยน
+  const dragAppId = useRef<string | null>(null);
+  const moveApp = async (fromId: string, toId: string) => {
+    if (!fromId || fromId === toId) return;
+    const orig = new Map(apps.map((a) => [a.id, a.sort_order]));
+    const arr = [...apps];
+    const fi = arr.findIndex((a) => a.id === fromId), ti = arr.findIndex((a) => a.id === toId);
+    if (fi < 0 || ti < 0) return;
+    const [moved] = arr.splice(fi, 1); arr.splice(ti, 0, moved);
+    const reordered = arr.map((a, i) => ({ ...a, sort_order: (i + 1) * 10 }));
+    setApps(reordered);   // optimistic
+    await Promise.all(reordered.filter((a) => orig.get(a.id) !== a.sort_order)
+      .map((a) => apiFetch("/api/menu/apps", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: a.id, patch: { sort_order: a.sort_order } }) })))
+      .catch(() => reloadKeepDraft());
+  };
   const addApp = async () => {
     if (!naApp.key.trim() || !naApp.label.trim()) { setErr("กรอกรหัส (key) + ชื่อแอป"); return; }
     const j = await apiFetch("/api/menu/apps", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -429,11 +448,21 @@ export default function MenuManagerPage() {
         <div className="text-xs font-medium text-slate-500 mb-1.5">เลือกแอปที่จะจัดเมนู</div>
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <button onClick={() => { setSel(ALL); setShowAppCfg(false); setExpanded(null); }} className={pill(sel === ALL)}>📋 ทุกเมนู</button>
-          {apps.map((a) => (
-            <button key={a.id} onClick={() => { setSel(a.key); setShowAppCfg(false); setExpanded(null); }} className={pill(sel === a.key)}>
-              <Ico icon={a.icon} iconUrl={a.icon_url} size={16} /> {a.label}
-            </button>
-          ))}
+          {apps.map((a) => {
+            const hidden = a.is_active === false;
+            return (
+              <button key={a.id} draggable
+                onDragStart={() => { dragAppId.current = a.id ?? null; }}
+                onDragEnd={() => { dragAppId.current = null; }}
+                onDragOver={(e) => { if (dragAppId.current && dragAppId.current !== a.id) e.preventDefault(); }}
+                onDrop={(e) => { e.preventDefault(); const from = dragAppId.current; dragAppId.current = null; if (from && a.id) void moveApp(from, a.id); }}
+                onClick={() => { setSel(a.key); setShowAppCfg(false); setExpanded(null); }}
+                title={hidden ? "ซ่อนอยู่ · ลากเพื่อเรียง" : "ลากเพื่อเรียง"}
+                className={`${pill(sel === a.key)} ${hidden ? "opacity-40" : ""} cursor-grab active:cursor-grabbing`}>
+                <Ico icon={a.icon} iconUrl={a.icon_url} size={16} /> {a.label}{hidden && " 🚫"}
+              </button>
+            );
+          })}
           <button onClick={() => setShowAddApp((s) => !s)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dashed border-slate-300 text-sm text-slate-500 hover:bg-slate-50">＋ เพิ่มแอป</button>
         </div>
         {showAddApp && (
@@ -549,6 +578,11 @@ export default function MenuManagerPage() {
                       {appMenuForDefault.map((m) => <option key={m.id} value={m.href}>{m.icon} {m.label}</option>)}
                     </select>
                   </div>
+                  {/* A2: ซ่อน/โชว์แอป (บันทึกทันที) */}
+                  <button onClick={() => void toggleAppActive(selectedApp)}
+                    className={`h-8 px-3 text-xs font-medium rounded border ${selectedApp.is_active === false ? "bg-slate-100 text-slate-500 border-slate-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+                    {selectedApp.is_active === false ? "🚫 ซ่อนอยู่ (กดเพื่อแสดง)" : "👁 แสดงอยู่ (กดเพื่อซ่อน)"}
+                  </button>
                 </div>
 
                 {/* บันทึก / ยกเลิก (รวมชื่อ/ไอคอน/สี/หน้าแรก) */}
