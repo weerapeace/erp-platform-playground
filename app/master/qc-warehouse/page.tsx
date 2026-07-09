@@ -9,7 +9,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import { usePermission, AccessDenied } from "@/components/auth";
+import { usePermission, useAuth, AccessDenied } from "@/components/auth";
+import { HoverImage } from "@/components/hover-image";
 import { SkuPicker } from "@/components/pickers";
 import type { SkuPickerValue } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
@@ -25,6 +26,7 @@ const sourceLabel = (s?: string | null) => !s || s === "production" ? "ผลิ
 const WAREHOUSES = ["โกดังขายหลัก", "โกดังสาขา 1", "โกดังออนไลน์ (E-commerce)"];
 const PALETTE = ["#60a5fa", "#34d399", "#f472b6", "#fb923c", "#a78bfa", "#22d3ee", "#facc15"];
 const SHELF_CAP = 20;   // โชว์ไม่เกิน 20 ใบต่อชั้น ที่เหลือกด "+เพิ่มเติม"
+const WAGE_CEIL = 200;  // เพดานเตือนค่าแรง/ชิ้น (บาท) — เกินนี้เตือน (แก้ตัวเลขที่นี่ที่เดียว)
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const num = (v: number | string) => Math.max(0, Math.floor(Number(v) || 0));
 const prodColor = (sku: string | null) => { let h = 0; for (const c of sku ?? "") h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; };
@@ -50,15 +52,18 @@ type ShelfWithItems = QcShelf & { items: QcItem[] };
 type BadRow = { id: string; reasonId: string; qty: number };
 const rid = () => Math.random().toString(36).slice(2, 9);
 
+// รูปย่อ: มีรูป → HoverImage (ของกลาง: ชี้ดูรูปใหญ่ / กดซูมเต็มจอ) · ไม่มีรูป → กล่องสีแบรนด์
 function Thumb({ k, color, size = 44 }: { k?: string | null; color: string; size?: number }) {
   const u = imgUrl(k);
   return u
-    ? <img src={u} alt="" className="rounded-md object-cover border border-slate-200 shrink-0" style={{ width: size, height: size }} />
+    ? <HoverImage url={u} size={size} rounded="rounded-md" />
     : <div className="rounded-md shrink-0 border border-slate-200 flex items-center justify-center text-white text-[9px] font-medium" style={{ width: size, height: size, background: color }}>รูป</div>;
 }
 
 export default function QcWarehousePage() {
   const canView = usePermission("qc.view");
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [shelves, setShelves] = useState<ShelfWithItems[]>([]);
@@ -149,22 +154,26 @@ export default function QcWarehousePage() {
   const [sendQty, setSendQty] = useState("");
   const [sendWage, setSendWage] = useState("");
   const [sendSaveBom, setSendSaveBom] = useState(false);   // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง)
-  const [sendCart, setSendCart] = useState<Record<string, { qty: number; wage: number; saveBom: boolean }>>({});
+  const [sendWorker, setSendWorker] = useState("");        // ช่างที่ผลิต (แก้ได้ กรณีลงผิด)
+  const [sendWorkerId, setSendWorkerId] = useState<string | null>(null);
+  const [sendEditWorker, setSendEditWorker] = useState(false);
+  const [sendCart, setSendCart] = useState<Record<string, { qty: number; wage: number; saveBom: boolean; worker: string; workerId: string | null }>>({});
   const [sendSaving, setSendSaving] = useState(false);
-  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendWage(String(Math.round(w.rate * remain * 100) / 100)); setSendSaveBom(w.rate <= 0); };
+  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendWage(String(Math.round(w.rate * remain * 100) / 100)); setSendSaveBom(w.rate <= 0); setSendWorker(w.worker ?? ""); setSendWorkerId(craftsmen.find((c) => c.name === w.worker)?.id ?? null); setSendEditWorker(false); };
   // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง — ไม่ระบุช่าง) ผ่านของกลาง /api/bom/labor-rates (หา BOM จาก product_sku ให้เอง)
   const saveBomRate = async (sku: string | null, perUnit: number) => {
     if (!sku || !(perUnit > 0)) return;
     try { await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product_sku: sku, rate: perUnit }) }); } catch { /* ignore */ }
   };
-  const postSubmission = async (woId: string, qty: number, wage: number): Promise<string | null> => {
-    try { const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: woId, qty, wage }) }); const j = await res.json(); return (j.error as string) ?? null; }
+  const postSubmission = async (woId: string, qty: number, wage: number, worker?: string | null, workerId?: string | null): Promise<string | null> => {
+    try { const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: woId, qty, wage, worker: worker ?? null, worker_id: workerId ?? null, allow_over: true }) }); const j = await res.json(); return (j.error as string) ?? null; }
     catch (e) { return e instanceof Error ? e.message : "ส่งงานไม่สำเร็จ"; }
   };
   const submitSendNow = async () => {
     if (!sendModal) return; const qty = num(sendQty); const wage = Number(sendWage) || 0;
     if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    setSendSaving(true); const err = await postSubmission(sendModal.id, qty, wage);
+    if (!(wage > 0)) { toast.error("กรุณาใส่ค่าแรงผลิตก่อนส่งงาน"); return; }
+    setSendSaving(true); const err = await postSubmission(sendModal.id, qty, wage, sendWorker, sendWorkerId);
     if (!err && sendSaveBom && qty > 0 && wage > 0) await saveBomRate(sendModal.sku, Math.round((wage / qty) * 100) / 100);
     setSendSaving(false);
     if (err) { toast.error(err); return; }
@@ -173,14 +182,15 @@ export default function QcWarehousePage() {
   const addSendCart = () => {
     if (!sendModal) return; const qty = num(sendQty); const wage = Number(sendWage) || 0;
     if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, wage, saveBom: sendSaveBom } })); setSendModal(null);
+    if (!(wage > 0)) { toast.error("กรุณาใส่ค่าแรงผลิตก่อนใส่ตะกร้า"); return; }
+    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, wage, saveBom: sendSaveBom, worker: sendWorker, workerId: sendWorkerId } })); setSendModal(null);
   };
   const removeSendCart = (woId: string) => setSendCart((c) => { const n = { ...c }; delete n[woId]; return n; });
   const submitSendCart = async () => {
     const ids = Object.keys(sendCart); if (ids.length === 0) return;
     setSendSaving(true); let ok = 0; const fails: string[] = [];
     for (const id of ids) {
-      const d = sendCart[id]; const err = await postSubmission(id, d.qty, d.wage);
+      const d = sendCart[id]; const err = await postSubmission(id, d.qty, d.wage, d.worker, d.workerId);
       if (!err) { ok++; if (d.saveBom && d.qty > 0 && d.wage > 0) { const w = atDesks.find((x) => x.id === id); await saveBomRate(w?.sku ?? null, Math.round((d.wage / d.qty) * 100) / 100); } }
       else fails.push(id);
     }
@@ -200,6 +210,8 @@ export default function QcWarehousePage() {
   const [recvBad, setRecvBad] = useState<BadRow[]>([]);
   const [reasonMgr, setReasonMgr] = useState(false);
   const [newReason, setNewReason] = useState("");
+  const [showAddReason, setShowAddReason] = useState(false);   // เพิ่มชนิดสาเหตุแบบเร็ว ในป๊อปรับเข้า
+  const [returnWo, setReturnWo] = useState<QcQueueCard | null>(null);   // คืนงานกลับให้ช่าง (กรณีรับผิด)
   const [ship, setShip] = useState<QcItem | null>(null);
   const [shipMode, setShipMode] = useState<"sell" | "sales_wh">("sales_wh");
   const [shipWh, setShipWh] = useState(WAREHOUSES[0]);
@@ -271,6 +283,8 @@ export default function QcWarehousePage() {
   const openFromRepair = (item: QcItem) => { setFromRepair(item); setFrGood(item.qty); setFrScrap(0); setFrShelf(storeShelves[0]?.id ?? ""); };
   const submitFromRepair = async () => { if (!fromRepair) return; if (await act("/api/qc-warehouse/items", { action: "repair_receive", item_id: fromRepair.id, good: num(frGood), scrap: num(frScrap), shelf_id: frShelf })) { toast.success("รับจากซ่อมแล้ว"); setFromRepair(null); } };
   const returnQueue = async (item: QcItem) => { if (await act("/api/qc-warehouse/items", { action: "return_queue", item_id: item.id })) { toast.success("ย้ายกลับงานรอ QC แล้ว"); setDetail(null); } };
+  // คืนงานรอ QC กลับไปให้ช่างแก้/ทำใหม่ (กรณีรับผิด) — ลดยอดรับกลับ + เปิดใบกลับบนบอร์ด + แจ้งช่าง
+  const submitReturnWorker = async () => { if (!returnWo) return; if (await act("/api/qc-warehouse/items", { action: "return_worker", wo_id: returnWo.wo_id })) { toast.success("คืนงานกลับให้ช่างแล้ว"); setReturnWo(null); setDetail(null); } };
 
   const openAddShelf = () => { setShelfName(""); setShelfKind("store"); setShelfModal({ mode: "add" }); };
   const openEditShelf = (shelf: ShelfWithItems) => { setShelfName(shelf.name); setShelfKind(shelf.kind); setShelfModal({ mode: "edit", shelf }); };
@@ -301,6 +315,8 @@ export default function QcWarehousePage() {
     }
   };
   const addReason = async () => { const name = newReason.trim(); if (!name) return; if (await reqJson("/api/qc-warehouse/reasons", "POST", { name })) setNewReason(""); };
+  // เพิ่มชนิดสาเหตุแบบเร็วจากในป๊อปรับเข้า (ไม่ต้องเปิดหน้าจัดการ) — เพิ่มแล้วโผล่ในตัวเลือกทันที
+  const addReasonInline = async () => { const name = newReason.trim(); if (!name) { toast.error("พิมพ์ชื่อสาเหตุก่อน"); return; } if (await reqJson("/api/qc-warehouse/reasons", "POST", { name })) { setNewReason(""); setShowAddReason(false); toast.success(`เพิ่มสาเหตุ "${name}" แล้ว`); } };
   const editReason = (id: string, name: string) => setReasons((rs) => rs.map((r) => r.id === id ? { ...r, name } : r));
   const saveReason = (id: string, name: string) => reqJson("/api/qc-warehouse/reasons", "PATCH", { id, name });
   const removeReason = (id: string) => reqJson(`/api/qc-warehouse/reasons?id=${id}`, "DELETE");
@@ -454,7 +470,7 @@ export default function QcWarehousePage() {
           <button onClick={() => { void saveDefView(view); toast.success("ตั้งเป็นมุมมองเริ่มต้นของคุณแล้ว"); }}
             title={defView === view ? "มุมมองนี้เป็นค่าเริ่มต้นของคุณเมื่อเปิดหน้า" : "ตั้งมุมมองนี้เป็นค่าเริ่มต้นเมื่อเปิดหน้า (เฉพาะคุณ)"}
             className={`h-9 px-2.5 text-sm rounded-lg border ${defView === view ? "border-amber-300 bg-amber-50 text-amber-600" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>{defView === view ? "⭐" : "☆"}</button>
-          <button onClick={() => setLineSettingsOpen(true)} title="ตั้งค่ากลุ่ม LINE + ข้อความแจ้งเตือน" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🔔 แจ้งเตือน</button>
+          {isAdmin && <button onClick={() => setLineSettingsOpen(true)} title="ตั้งค่ากลุ่ม LINE + ข้อความแจ้งเตือน (เฉพาะแอดมิน)" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🔔 แจ้งเตือน</button>}
           <button onClick={() => { setHistSearch(""); setHistOpen(true); void loadHist(""); }} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📋 ประวัติของเสีย</button>
           <button onClick={() => void load()} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⟳</button>
           <button onClick={toggleMax} title={isMax ? "ย่อกลับ (โชว์เมนู)" : "เต็มจอ (ซ่อนเมนูซ้าย/บน)"} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{isMax ? "🗗" : "⛶"}</button>
@@ -611,11 +627,11 @@ export default function QcWarehousePage() {
                       ? <div className="text-center py-6 text-[12px] text-slate-300">ไม่มีงานรอรับเข้า (งานที่ช่างส่งกลับจากบอร์ดจ่ายงานจะมาโชว์ที่นี่)</div>
                       : <div className={gridCls}>{queueFiltered.map(renderQueueCard)}</div>}
                   </div>
-                  {/* 🪑 จ่ายไปที่โต๊ะ — กดส่งงาน */}
+                  {/* 🪑 งานรอรับเข้า QC (งานที่จ่ายไปที่โต๊ะ ยังทำอยู่) — กดส่งงาน */}
                   <div>
-                    <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">🪑 จ่ายไปที่โต๊ะ (กดการ์ดเพื่อส่งงาน) <span className="text-slate-400 font-normal">({deskFiltered.length})</span></div>
+                    <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">🪑 งานรอรับเข้า QC (กดการ์ดเพื่อส่งงาน) <span className="text-slate-400 font-normal">({deskFiltered.length})</span></div>
                     {deskFiltered.length === 0
-                      ? <div className="text-center py-6 text-[12px] text-slate-300">ยังไม่มีงานที่จ่ายไปที่โต๊ะ — งานที่จ่ายให้ช่างที่โต๊ะ (บนบอร์ดจ่ายงาน) จะมาโชว์ที่นี่ แล้วไหลเข้า QC เมื่อช่างส่งงาน</div>
+                      ? <div className="text-center py-6 text-[12px] text-slate-300">ยังไม่มีงานรอรับเข้า QC — งานที่จ่ายให้ช่างที่โต๊ะ (บนบอร์ดจ่ายงาน) จะมาโชว์ที่นี่ กดการ์ดเพื่อส่งงานเข้า QC</div>
                       : <div className={gridCls}>{deskFiltered.map(renderDeskCard)}</div>}
                   </div>
                 </>
@@ -714,7 +730,18 @@ export default function QcWarehousePage() {
                     <button onClick={() => setRecvBad((rs) => rs.filter((x) => x.id !== r.id))} className="text-slate-400 hover:text-rose-600 px-1">✕</button>
                   </div>
                 ))}
-                <button onClick={() => setRecvBad((rs) => [...rs, { id: rid(), reasonId: reasons[0]?.id ?? "", qty: 1 }])} disabled={!defectShelf} className="text-[11px] text-rose-600 hover:text-rose-700 disabled:text-slate-300">+ เพิ่มสาเหตุของเสีย</button>
+                <div className="flex items-center gap-3 flex-wrap pt-0.5">
+                  <button onClick={() => setRecvBad((rs) => [...rs, { id: rid(), reasonId: reasons[0]?.id ?? "", qty: 1 }])} disabled={!defectShelf} className="text-[11px] text-rose-600 hover:text-rose-700 disabled:text-slate-300">+ เพิ่มสาเหตุของเสีย</button>
+                  {showAddReason ? (
+                    <span className="flex items-center gap-1">
+                      <input value={newReason} onChange={(e) => setNewReason(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addReasonInline()} autoFocus placeholder="ชื่อสาเหตุใหม่…" className="h-7 px-2 text-[12px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 w-40" />
+                      <button onClick={addReasonInline} className="h-7 px-2 text-[11px] bg-indigo-600 text-white rounded-md hover:bg-indigo-700">เพิ่ม</button>
+                      <button onClick={() => { setShowAddReason(false); setNewReason(""); }} className="text-slate-400 hover:text-slate-600 px-0.5">✕</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setShowAddReason(true)} className="text-[11px] text-indigo-600 hover:text-indigo-700">+ เพิ่มชนิดสาเหตุใหม่</button>
+                  )}
+                </div>
               </div>
             </div>
             <div className="text-[11px] text-slate-400">รวม {fmt(num(recvGood) + recvBadTotal)} / {fmt(recv.card.remaining)} ชิ้น</div>
@@ -813,6 +840,14 @@ export default function QcWarehousePage() {
         </> : undefined}>
         {sendModal && (() => {
           const remain = Math.max(0, sendModal.qty - sendModal.received_qty);
+          const qtyNum = num(sendQty);
+          const wageNum = Number(sendWage) || 0;
+          const perUnit = qtyNum > 0 ? Math.round((wageNum / qtyNum) * 100) / 100 : 0;
+          const std = Math.round(sendModal.rate * 100) / 100;   // ราคากลาง/ชิ้น (BOM)
+          const overQty = qtyNum > remain;                       // ส่งเกินยอดที่เหลือ
+          const overCeil = perUnit > WAGE_CEIL;                   // ค่าแรง/ชิ้นเกินเพดาน
+          const diffStd = !overCeil && std > 0 && perUnit > 0 && Math.abs(perUnit - std) >= 0.5;   // ต่างจากราคากลาง
+          const noWage = !(wageNum > 0);
           return (
             <div className="space-y-3">
               <div className="flex items-center gap-2">
@@ -820,14 +855,40 @@ export default function QcWarehousePage() {
                 <div className="min-w-0"><div className="text-sm font-semibold text-slate-800 truncate">{sendModal.name || sendModal.sku}</div><div className="text-[11px] text-slate-400 font-mono truncate">{sendModal.sku} · {sendModal.mo_no} · 🪑 {sendModal.department_name ?? "—"}</div></div>
               </div>
               <div className="text-[11px] text-slate-500">จ่ายไป {fmt(sendModal.qty)} · ส่งกลับแล้ว {fmt(sendModal.received_qty)} · <b className="text-indigo-600">เหลือส่ง {fmt(remain)}</b></div>
+
+              {/* ช่างที่ผลิต — แก้ได้ (กรณีลงผิด แก้ตรงตอนรับ) */}
+              <div className="text-[12px]">
+                <span className="text-slate-500">👷 ช่างที่ผลิต: </span>
+                {sendEditWorker ? (
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <div className="flex-1"><SearchableSelect value={sendWorkerId ?? ""} onChange={(v) => { const c = craftsmen.find((x) => x.id === v); setSendWorkerId(v || null); if (c) setSendWorker(c.name); }} placeholder={sendWorker || "— เลือกช่าง —"}
+                      options={craftsmen.map((c) => ({ value: c.id, label: `👷 ${c.code ? `[${c.code}] ` : ""}${c.name}`, searchText: `${c.code ?? ""} ${c.name}` }))} /></div>
+                    <button onClick={() => { setSendEditWorker(false); setSendWorker(sendModal.worker ?? ""); setSendWorkerId(craftsmen.find((c) => c.name === sendModal.worker)?.id ?? null); }} className="text-[11px] text-slate-400 hover:text-slate-600 px-1">คืนค่าเดิม</button>
+                  </div>
+                ) : (
+                  <><b className="text-slate-700">{sendWorker || "—"}</b>
+                    <button onClick={() => setSendEditWorker(true)} className="ml-1.5 text-[11px] text-indigo-600 hover:underline">✏️ แก้</button></>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <label className="block"><span className="text-[11px] text-slate-500">จำนวนที่ส่ง</span>
-                  <input type="number" min={0} max={remain} value={sendQty} autoFocus onFocus={(e) => e.target.select()} onChange={(e) => { setSendQty(e.target.value); setSendWage(String(Math.round(sendModal.rate * num(e.target.value) * 100) / 100)); }}
-                    className="w-full h-10 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" /></label>
-                <label className="block"><span className="text-[11px] text-slate-500">ค่าแรงผลิต (บาท)</span>
+                  <input type="number" min={0} value={sendQty} autoFocus onFocus={(e) => e.target.select()} onChange={(e) => { setSendQty(e.target.value); setSendWage(String(Math.round(sendModal.rate * num(e.target.value) * 100) / 100)); }}
+                    className={`w-full h-10 mt-0.5 px-2 text-sm text-right border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${overQty ? "border-amber-400 bg-amber-50" : "border-slate-200"}`} /></label>
+                <label className="block"><span className="text-[11px] text-slate-500">ค่าแรงผลิต (บาท) <span className="text-rose-500">*</span></span>
                   <input type="number" min={0} step="any" value={sendWage} onChange={(e) => setSendWage(e.target.value)}
-                    className="w-full h-10 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
+                    className={`w-full h-10 mt-0.5 px-2 text-sm text-right border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${noWage ? "border-rose-300 bg-rose-50" : (overCeil || diffStd) ? "border-amber-400 bg-amber-50" : "border-slate-200"}`} /></label>
               </div>
+
+              {/* เตือน (ไม่บล็อค — ยังกดส่งได้) */}
+              {(overQty || overCeil || diffStd) && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 space-y-0.5">
+                  {overQty && <div className="text-[11px] text-amber-700">⚠️ ส่ง {fmt(qtyNum)} เกินยอดที่เหลือ ({fmt(remain)}) — ส่งได้ แต่โปรดตรวจสอบ</div>}
+                  {overCeil && <div className="text-[11px] text-amber-700">⚠️ ค่าแรง {fmt(perUnit)}/ชิ้น สูงเกินเพดาน {fmt(WAGE_CEIL)} บาท/ชิ้น</div>}
+                  {diffStd && <div className="text-[11px] text-amber-700">⚠️ ค่าแรง {fmt(perUnit)}/ชิ้น ต่างจากราคากลาง ({fmt(std)}/ชิ้น)</div>}
+                </div>
+              )}
+
               <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer w-fit">
                 <input type="checkbox" checked={sendSaveBom} onChange={(e) => setSendSaveBom(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
                 💾 บันทึกค่าแรงนี้กลับเข้า BOM (ราคากลาง/ชิ้น)
@@ -836,6 +897,19 @@ export default function QcWarehousePage() {
             </div>
           );
         })()}
+      </ERPModal>
+
+      {/* คืนงานกลับให้ช่าง (กรณีรับผิด) */}
+      <ERPModal open={returnWo !== null} onClose={() => setReturnWo(null)} size="sm" title="↩️ คืนงานกลับให้ช่าง"
+        footer={<><button onClick={() => setReturnWo(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
+          <button onClick={() => void submitReturnWorker()} className="h-9 px-4 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600">ยืนยันคืนงาน</button></>}>
+        {returnWo && (
+          <div className="space-y-2 text-sm text-slate-600">
+            <div className="text-[12px] text-slate-500"><b className="text-slate-700">{returnWo.name || returnWo.sku}</b> · {returnWo.sku} · {returnWo.mo_no}</div>
+            <p>คืนงาน <b className="text-amber-700">{fmt(returnWo.remaining)} ชิ้น</b> กลับไปให้ช่าง <b>{returnWo.worker ?? "—"}</b> แก้ไข/ทำใหม่ ใช่ไหม?</p>
+            <p className="text-[11px] text-slate-400">งานจะกลับไปอยู่ที่ “งานรอรับเข้า QC” ให้ช่างส่งใหม่ · ระบบจะแจ้งช่างให้ทราบ · ค่าแรงรอบที่คืนจะถูกดึงกลับ</p>
+          </div>
+        )}
       </ERPModal>
 
       <BoardLineSettings open={lineSettingsOpen} onClose={() => setLineSettingsOpen(false)} />
@@ -1004,11 +1078,14 @@ export default function QcWarehousePage() {
                 </div>
               )}
               {detail.kind === "queue" && (
-                <div className="pt-1 border-t border-slate-100"><div className="text-[11px] text-slate-500 mb-1.5">📦 รับเข้าชั้น</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {storeShelves.map((s) => (<button key={s.id} onClick={() => { const card = detail.card; setDetail(null); openReceive(card, s); }} className="text-[12px] px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">🗄️ {s.name}</button>))}
-                    {storeShelves.length === 0 && <span className="text-[11px] text-rose-500">ยังไม่มีชั้นเก็บ</span>}
-                  </div></div>
+                <div className="pt-1 border-t border-slate-100 space-y-2">
+                  <div><div className="text-[11px] text-slate-500 mb-1.5">📦 รับเข้าชั้น</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {storeShelves.map((s) => (<button key={s.id} onClick={() => { const card = detail.card; setDetail(null); openReceive(card, s); }} className="text-[12px] px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">🗄️ {s.name}</button>))}
+                      {storeShelves.length === 0 && <span className="text-[11px] text-rose-500">ยังไม่มีชั้นเก็บ</span>}
+                    </div></div>
+                  <button onClick={() => { const c = detail.card; setDetail(null); setReturnWo(c); }} className="w-full text-[12px] px-2.5 py-1.5 rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50">↩️ คืนงานกลับให้ช่าง (กรณีรับผิด)</button>
+                </div>
               )}
               {detail.kind === "item" && detail.shelf.kind === "defect" && (
                 <div className="pt-1 border-t border-slate-100">

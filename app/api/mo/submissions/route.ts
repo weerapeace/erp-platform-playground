@@ -43,6 +43,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const wo_id = String(body.wo_id ?? "");
   const qty = n(body.qty);
   const wage = body.wage == null || body.wage === "" ? null : n(body.wage);
+  // แก้ช่างที่ผลิต (กรณีลงผิด แก้ตรงตอนส่ง) — ไม่ส่งมา = ใช้ช่างเดิมของใบงาน
+  const overrideWorker = body.worker == null || String(body.worker).trim() === "" ? null : String(body.worker).trim();
+  const overrideWorkerId = body.worker_id ? String(body.worker_id) : null;
+  const allowOver = body.allow_over === true;   // อนุญาตส่งเกินยอดที่จ่าย (เฉพาะจอ QC ที่เตือนสีเหลืองแล้ว) — จอบอร์ดจ่ายงานไม่ส่ง flag นี้ = คงเดิม
   if (!wo_id) return NextResponse.json({ error: "missing wo_id" }, { status: 400 });
   if (qty <= 0) return NextResponse.json({ error: "จำนวนต้องมากกว่า 0" }, { status: 400 });
   if (wage == null) return NextResponse.json({ error: "กรุณาใส่ค่าแรงก่อนส่งงาน" }, { status: 400 });
@@ -51,31 +55,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: wo } = await admin.from("mo_work_orders").select("id, wo_no, mo_no, product_sku, product_name, assignee_id, assignee_type, assignee_name, department_name, qty, received_qty, due_date").eq("id", wo_id).single();
   if (!wo) return NextResponse.json({ error: "ไม่พบใบจ่ายงาน" }, { status: 404 });
 
-  const newReceived = Number(wo.received_qty ?? 0) + qty;
+  // ช่างที่ผลิตจริง (ใช้ที่แก้ ถ้ามี ไม่งั้นช่างเดิม) — สำหรับบันทึก + แจ้งเตือน
+  const effWorker = overrideWorker ?? (wo.assignee_name as string | null);
+  const effWorkerId = overrideWorkerId ?? (wo.assignee_type === "craftsman" ? wo.assignee_id : null);
+
+  // ส่งเกินยอดที่จ่าย: บล็อคเหมือนเดิม เว้นแต่ allow_over (จอ QC อนุญาต + เตือนสีเหลืองแล้ว)
   const remaining = Number(wo.qty ?? 0) - Number(wo.received_qty ?? 0);
-  if (qty > remaining) return NextResponse.json({ error: `ส่งเกินจำนวนที่เหลือ (${remaining})` }, { status: 400 });
+  if (qty > remaining && !allowOver) return NextResponse.json({ error: `ส่งเกินจำนวนที่เหลือ (${remaining})` }, { status: 400 });
+  const newReceived = Number(wo.received_qty ?? 0) + qty;
 
   // 1) บันทึกการส่งงานรายครั้ง
   const { error: insErr } = await admin.from("wo_submissions").insert({
     wo_id, wo_no: wo.wo_no, mo_no: wo.mo_no, sku: wo.product_sku, sku_name: wo.product_name ?? wo.product_sku,
-    craftsman_id: wo.assignee_type === "craftsman" ? wo.assignee_id : null, craftsman_name: wo.assignee_name, department_name: wo.department_name,
+    craftsman_id: effWorkerId, craftsman_name: effWorker, department_name: wo.department_name,
     qty, wage, due_date: wo.due_date, created_by: user?.id ?? null, created_by_name: user?.email ?? null,
   });
   if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
 
-  // 2) อัปเดตใบจ่ายงาน — บวกยอดส่ง + ค่าแรง + ปิดใบถ้าส่งครบ
+  // 2) อัปเดตใบจ่ายงาน — บวกยอดส่ง + ค่าแรง + ปิดใบถ้าส่งครบ + แก้ช่างถ้ามีการแก้
   const patch: Record<string, unknown> = { received_qty: newReceived, labor_cost: wage };
+  if (overrideWorker) { patch.assignee_name = effWorker; if (overrideWorkerId) { patch.assignee_id = overrideWorkerId; patch.assignee_type = "craftsman"; } }
   if (newReceived >= Number(wo.qty ?? 0)) patch.status = "done";
   await admin.from("mo_work_orders").update(patch).eq("id", wo_id);
 
-  await writeAudit(admin, { action: "wo.submit", entityType: "wo_submissions", entityId: wo_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { sku: wo.product_sku, qty, wage, done: newReceived >= Number(wo.qty ?? 0) } });
+  await writeAudit(admin, { action: "wo.submit", entityType: "wo_submissions", entityId: wo_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { sku: wo.product_sku, qty, wage, worker: effWorker, worker_changed: !!overrideWorker, done: newReceived >= Number(wo.qty ?? 0) } });
 
   // แจ้งเตือน "มีงานรอ QC" (best-effort): กระดิ่ง (หัวหน้า) + LINE กลุ่ม QC
   await notifyEvent(admin, "qc.pending", "mo_work_order", wo_id, user?.id ?? null, {
-    sku: wo.product_sku, product_name: wo.product_name ?? wo.product_sku, worker: wo.assignee_name ?? "—", qty, mo_no: wo.mo_no,
+    sku: wo.product_sku, product_name: wo.product_name ?? wo.product_sku, worker: effWorker ?? "—", qty, mo_no: wo.mo_no,
   });
   await pushLineTpl(admin, "qc", "qc_pending", {
-    sku: wo.product_sku ?? "", product_name: wo.product_name ?? "", worker: wo.assignee_name ?? "—", qty, link: boardLink("/master/qc-warehouse"),
+    sku: wo.product_sku ?? "", product_name: wo.product_name ?? "", worker: effWorker ?? "—", qty, link: boardLink("/master/qc-warehouse"),
   });
 
   return NextResponse.json({ error: null, done: newReceived >= Number(wo.qty ?? 0) });

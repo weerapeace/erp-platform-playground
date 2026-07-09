@@ -9,6 +9,7 @@
  *   repair_cancel { item_id }                                     → ยกเลิกซ่อม
  *   repair_receive{ item_id, good, scrap, shelf_id }              → รับจากซ่อม (ดี→ชั้น, เสีย→ทิ้ง)
  *   return_queue  { item_id }                                     → ย้ายกลับงานรอ QC (คืน qc_pulled_qty)
+ *   return_worker { wo_id }                                       → คืนงานรอ QC กลับให้ช่าง (ลด received_qty ส่วนที่ยังไม่ดึงเข้า QC + เปิดใบกลับ)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -23,7 +24,7 @@ export const revalidate = 0;
 const num = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
 const PERM: Record<string, string> = {
   receive: "qc.receive", move: "qc.move", ship: "qc.ship", to_defect: "qc.defect",
-  repair_send: "qc.repair", repair_cancel: "qc.repair", repair_receive: "qc.repair", return_queue: "qc.move",
+  repair_send: "qc.repair", repair_cancel: "qc.repair", repair_receive: "qc.repair", return_queue: "qc.move", return_worker: "qc.move",
   add_manual: "qc.receive", add_bulk: "qc.receive",
 };
 
@@ -188,6 +189,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (wo) await admin.from("mo_work_orders").update({ qc_pulled_qty: Math.max(0, Number(wo.qc_pulled_qty ?? 0) - Number(item.qty)) }).eq("id", item.wo_id);
       }
       await writeAudit(admin, { action: "qc.move", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sub: "return_queue", qty: item.qty } });
+      return NextResponse.json({ error: null });
+    }
+
+    // ── คืนงานรอ QC กลับให้ช่าง (กรณีรับผิด) ──
+    // ลด received_qty เฉพาะส่วนที่ยังไม่ดึงเข้า QC (received_qty − qc_pulled_qty) + เปิดใบกลับ → การ์ดกลับไปที่ "งานรอรับเข้า QC"
+    if (action === "return_worker") {
+      const wo_id = String(body.wo_id ?? "");
+      const { data: wo } = await admin.from("mo_work_orders").select("id, mo_no, product_sku, product_name, assignee_name, qty, received_qty, qc_pulled_qty, status").eq("id", wo_id).single();
+      if (!wo) return NextResponse.json({ error: "ไม่พบใบจ่ายงาน" }, { status: 404 });
+      const remaining = Number(wo.received_qty ?? 0) - Number(wo.qc_pulled_qty ?? 0);
+      if (remaining <= 0) return NextResponse.json({ error: "ไม่มีงานรอรับเข้าที่จะคืน" }, { status: 400 });
+
+      // ลบรายการส่งงานล่าสุด (ใหม่สุดก่อน) ให้ครอบคลุมยอดที่คืน — กันค่าแรงนับซ้ำ
+      const { data: subs } = await admin.from("wo_submissions").select("id, qty").eq("wo_id", wo_id).order("created_at", { ascending: false });
+      let toRemove = remaining; const delIds: string[] = [];
+      for (const s of (subs ?? []) as { id: string; qty: number }[]) {
+        if (toRemove <= 0) break;
+        const sq = Number(s.qty);
+        if (sq <= toRemove) { delIds.push(s.id); toRemove -= sq; }
+        else { await admin.from("wo_submissions").update({ qty: sq - toRemove }).eq("id", s.id); toRemove = 0; }
+      }
+      if (delIds.length) await admin.from("wo_submissions").delete().in("id", delIds);
+
+      const newReceived = Math.max(0, Number(wo.received_qty ?? 0) - remaining);
+      const patch: Record<string, unknown> = { received_qty: newReceived };
+      if (wo.status === "done" && newReceived < Number(wo.qty ?? 0)) patch.status = "dispatched";   // เปิดใบกลับ → การ์ดกลับมาบนบอร์ด/โต๊ะ
+      await admin.from("mo_work_orders").update(patch).eq("id", wo_id);
+      await writeAudit(admin, { action: "qc.return_worker", entityType: "mo_work_orders", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, qty: remaining } });
+      // แจ้งช่างว่างานถูกตีกลับ (best-effort)
+      {
+        const link = boardLink("/master/qc-warehouse");
+        await dmEmployeeByName(admin, wo.assignee_name, `↩️ งานถูกตีกลับให้แก้/ทำใหม่\n${wo.product_sku ?? ""} · ${wo.product_name ?? ""}\nจำนวน ${remaining} ชิ้น\n🔗 ${link}`);
+      }
       return NextResponse.json({ error: null });
     }
 
