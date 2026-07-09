@@ -880,6 +880,15 @@ export default function QcWarehousePage() {
                     className={`w-full h-10 mt-0.5 px-2 text-sm text-right border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${noWage ? "border-rose-300 bg-rose-50" : (overCeil || diffStd) ? "border-amber-400 bg-amber-50" : "border-slate-200"}`} /></label>
               </div>
 
+              {/* ค่าแรงต่อชิ้นที่คำนวณได้ (โปร่งใส — บอกว่าทำไมเตือน/ไม่เตือน) */}
+              {qtyNum > 0 && wageNum > 0 && (
+                <div className="text-[11px] text-slate-500 -mt-1">
+                  ค่าแรง ≈ <b className={overCeil || diffStd ? "text-amber-700" : "text-slate-700"}>{fmt(perUnit)}</b> บาท/ชิ้น
+                  {std > 0 ? <> · ราคากลาง {fmt(std)}/ชิ้น</> : <> · ยังไม่มีราคากลาง</>}
+                  {" · "}เพดานเตือน {fmt(WAGE_CEIL)}/ชิ้น
+                </div>
+              )}
+
               {/* เตือน (ไม่บล็อค — ยังกดส่งได้) */}
               {(overQty || overCeil || diffStd) && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 space-y-0.5">
