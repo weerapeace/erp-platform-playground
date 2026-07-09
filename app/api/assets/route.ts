@@ -71,7 +71,16 @@ export async function GET(request: NextRequest) {
   if (search) {
     for (const raw of search.split(/\s+/)) {
       const t = sanitizeToken(raw);
-      if (t) q = q.or(`title.ilike.%${t}%,file_name.ilike.%${t}%,description.ilike.%${t}%,keywords.ilike.%${t}%`);
+      if (!t) continue;
+      // เสริม: หา asset ที่ token ตรงกับ Parent SKU / ชนิด artwork / แท็ก (jsonb + m2m ผ่าน RPC)
+      let extraIds: string[] = [];
+      try {
+        const { data: hit } = await admin.rpc("search_asset_ids", { tok: t });
+        extraIds = (hit ?? []).map((x: { asset_id: string }) => x.asset_id).slice(0, 2000);
+      } catch { /* ค้นหาเสริมล้มเหลว → ใช้แค่ค้นข้อความปกติ */ }
+      const orParts = [`title.ilike.%${t}%`, `file_name.ilike.%${t}%`, `description.ilike.%${t}%`, `keywords.ilike.%${t}%`];
+      if (extraIds.length) orParts.push(`id.in.(${extraIds.join(",")})`);
+      q = q.or(orParts.join(","));
     }
   }
   q = q.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
