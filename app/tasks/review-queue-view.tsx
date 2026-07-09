@@ -20,6 +20,17 @@ import { useT } from "@/components/i18n";
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 type Img = { r2_key: string; file_name: string | null };
 type Dest = { id: string; code: string };
+// รายละเอียด Platform ที่คนทำส่ง (งานเขียนคำอธิบาย) — โหลดจาก ?platform=1 เหมือนป๊อปส่งงาน
+type PlatParent = { id: string; code: string; name_th: string; name_platform: string; introduction: string; description: string; english_description: string; fields?: { key: string; label: string; value: string; empty: boolean }[] };
+
+// รูปที่ส่งมา (แนบ attachment หรือ image_sync_targets) — ใช้ทำ thumbnail + จำนวนในตาราง
+const submittedKeys = (r: ReviewQueueItem): string[] => {
+  if (r.images.length) return r.images.map((im) => im.r2_key);
+  const ist = r.image_sync_targets; const out: string[] = [];
+  for (const keys of Object.values(ist?.product_images ?? {})) out.push(...(keys ?? []).filter(Boolean));
+  for (const keys of Object.values(ist?.sku_images ?? {})) out.push(...(keys ?? []).filter(Boolean));
+  return out;
+};
 
 export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   const t = useT();
@@ -38,6 +49,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   // รูปเดิมในสินค้า (แกลเลอรีจริง) ต่อปลายทาง — โชว์ให้ผู้ตรวจเห็นก่อนอนุมัติ · tk = "parent:<id>"/"sku:<id>"
   const [destGalleries, setDestGalleries] = useState<Record<string, { r2_key?: string; url?: string }[]>>({});
   const [galLb, setGalLb] = useState<{ images: { url: string; label: string | null }[]; index: number }>({ images: [], index: -1 });   // ซูมรูปเดิมในสินค้า (แยกจาก imgs งานส่ง)
+  const [platParents, setPlatParents] = useState<PlatParent[] | null>(null);   // รายละเอียด Platform ที่ส่ง (งานเขียนคำอธิบาย)
 
   const pushToast = useCallback((type: Toast["type"], message: string) => {
     const id = Date.now() + Math.random(); setToasts((p) => [...p, { id, type, message }]);
@@ -56,6 +68,12 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
     setConfirmApprove(false);
     setLb(-1);
     setDestGalleries({});
+    // งานเขียนคำอธิบาย (sku_description) → โหลดรายละเอียด Platform ที่ส่ง มาโชว์ในป๊อปตรวจ
+    setPlatParents(null);
+    if (r.approve_target === "sku_description") {
+      apiFetch(`/api/creative-tasks/${r.task_id}/subtasks?platform=1`).then((x) => x.json())
+        .then((j) => setPlatParents((j.parents as PlatParent[]) ?? [])).catch(() => setPlatParents([]));
+    }
     // ดึง "รูปเดิมในสินค้า" ของทุกปลายทาง มาโชว์ — งานรูปคำอธิบาย (description_media) ดึงจาก "รูป Description" ไม่ใช่แกลเลอรีหลัก
     const isDesc = r.approve_target === "description_media";
     const fetchGal = (owner: string) => apiFetch(`/api/creative-tasks/${r.task_id}/subtasks?gallery=${owner}`).then((x) => x.json())
@@ -116,6 +134,16 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
 
   const lbImages = imgs.map((im) => ({ url: r2ImageUrl(im.r2_key, 1600) ?? "", label: im.file_name }));
 
+  // รูปที่คนทำ "ส่งมารอบนี้" — จาก image_sync_targets (product_images/sku_images) จัดกลุ่มตาม Parent/SKU + รหัส
+  const submittedGroups = useMemo(() => {
+    const ist = active?.image_sync_targets; if (!ist) return [] as { code: string; keys: string[] }[];
+    const labels = ist.product_labels ?? {};
+    const gs: { code: string; keys: string[] }[] = [];
+    for (const [tk, keys] of Object.entries(ist.product_images ?? {})) { const ks = (keys ?? []).filter(Boolean); if (ks.length) gs.push({ code: labels[tk] || (tk.startsWith("parent:") ? "Parent SKU" : "SKU"), keys: ks }); }
+    for (const [sid, keys] of Object.entries(ist.sku_images ?? {})) { const ks = (keys ?? []).filter(Boolean); if (ks.length) gs.push({ code: labels[`sku:${sid}`] || "SKU", keys: ks }); }
+    return gs;
+  }, [active]);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -164,13 +192,13 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
                         <td className="px-3 py-2 align-top hidden sm:table-cell">{r.brand_label ? <span className="inline-flex items-center gap-1 text-xs text-slate-600"><span className="h-2 w-2 rounded-full" style={{ background: r.brand_color || "#cbd5e1" }} />{r.brand_label}</span> : <span className="text-slate-300">—</span>}</td>
                         <td className="px-3 py-2 align-top hidden md:table-cell">{r.assignees.length ? <AssigneeStack list={r.assignees} size={22} /> : <span className="text-slate-300">—</span>}</td>
                         <td className="px-3 py-2 align-top">
-                          {r.images.length ? (
+                          {(() => { const ks = submittedKeys(r); return ks.length ? (
                             <button onClick={() => openItem(r)} className="inline-flex items-center gap-1">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={r2ImageUrl(r.images[0].r2_key, 80) ?? ""} alt="" className="h-9 w-9 rounded object-cover border border-slate-200" />
-                              {r.images.length > 1 && <span className="text-[11px] text-slate-400">+{r.images.length - 1}</span>}
+                              <img src={r2ImageUrl(ks[0], 80) ?? ""} alt="" className="h-9 w-9 rounded object-cover border border-slate-200" />
+                              {ks.length > 1 && <span className="text-[11px] text-slate-400">+{ks.length - 1}</span>}
                             </button>
-                          ) : <span className="text-xs text-slate-300">{t("ไม่มีรูป", "none")}</span>}
+                          ) : r.approve_target === "sku_description" ? <span className="text-xs text-slate-400">📝 {t("รายละเอียด", "details")}</span> : <span className="text-xs text-slate-300">{t("ไม่มีรูป", "none")}</span>; })()}
                         </td>
                         <td className="px-3 py-2 align-top text-right">
                           <button onClick={() => openItem(r)} className="h-8 px-3 text-xs font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600">🔎 {t("ดูงาน", "View")}</button>
@@ -206,6 +234,43 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
               </div>
             )}
 
+            {/* รูปที่ "ส่งมารอบนี้" (จาก image_sync_targets) — จัดกลุ่มตาม Parent/SKU + รหัส (ดูอย่างเดียว) */}
+            {submittedGroups.length > 0 && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 space-y-2">
+                <p className="text-xs font-semibold text-violet-700">🖼 {t("รูปที่ส่งมารอบนี้ (รอตรวจ)", "Submitted this round")}</p>
+                {submittedGroups.map((g, gi) => (
+                  <div key={gi}>
+                    <p className="text-[10px] font-mono text-slate-600 bg-white border border-slate-200 inline-block px-1.5 py-0.5 rounded mb-1">📦 {g.code} <span className="text-slate-400">({g.keys.length})</span></p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {g.keys.map((k, i) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={i} src={r2ImageUrl(k, 200) ?? ""} alt="" onClick={() => setGalLb({ images: g.keys.map((x) => ({ url: r2ImageUrl(x, 1600) ?? "", label: g.code })), index: i })} title={t("กดดูเต็มจอ", "Click to view full")} className="h-16 w-16 rounded object-cover border border-slate-200 cursor-zoom-in" />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* รายละเอียด Platform ที่ส่ง (งานเขียนคำอธิบาย) — ดูอย่างเดียว */}
+            {active.approve_target === "sku_description" && (
+              <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                <p className="text-xs font-semibold text-slate-500">📝 {t("รายละเอียด Platform ที่ส่ง", "Submitted platform details")}</p>
+                {platParents === null ? <p className="text-xs text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
+                  : platParents.length === 0 ? <p className="text-xs text-slate-300 italic">{t("ไม่มีข้อมูล", "none")}</p>
+                  : platParents.map((p) => (
+                    <div key={p.id} className="border-t border-slate-100 pt-2 first:border-0 first:pt-0">
+                      <p className="text-sm font-semibold text-slate-700"><span className="font-mono text-[11px] text-slate-400">{p.code}</span> {p.name_platform || p.name_th}</p>
+                      {p.introduction?.trim() && <div className="mt-1"><p className="text-[11px] text-slate-400">Introduction</p><p className="text-sm text-slate-600 whitespace-pre-wrap">{p.introduction}</p></div>}
+                      {p.description?.trim() && <div className="mt-1"><p className="text-[11px] text-slate-400">Description</p><p className="text-sm text-slate-600 whitespace-pre-wrap">{p.description}</p></div>}
+                      {(p.fields ?? []).map((f) => (
+                        <div key={f.key} className="mt-1"><p className="text-[11px] text-slate-400">{f.label}</p><p className={`text-sm whitespace-pre-wrap ${f.empty ? "text-amber-600 italic" : "text-slate-600"}`}>{f.empty ? t("(ยังไม่กรอก)", "(empty)") : f.value}</p></div>
+                      ))}
+                    </div>
+                  ))}
+              </div>
+            )}
+
             {/* รูป — เรียงลำดับได้ (↑↓ = ลำดับในอัลบั้มสินค้าตอนอนุมัติ) */}
             {imgs.length ? (
               <div>
@@ -224,7 +289,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
                   ))}
                 </div>
               </div>
-            ) : <p className="text-sm text-slate-400 italic">{t("งานย่อยนี้ไม่ได้แนบรูป", "No images attached")}</p>}
+            ) : (submittedGroups.length > 0 || active.approve_target === "sku_description") ? null : <p className="text-sm text-slate-400 italic">{t("งานย่อยนี้ไม่ได้แนบรูป", "No images attached")}</p>}
 
             {/* ปลายทางรูป — Parent SKU + SKU (เลือกได้) */}
             <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
