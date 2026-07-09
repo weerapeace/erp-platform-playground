@@ -23,7 +23,8 @@ type Item = {
   reason?: string | null;          // เหตุผลที่ขอซื้อ (ข้อความ — เลือกจาก lookup หรือ "ใบสั่งผลิต MO-xxx")
   used_for_sku_id?: string | null; used_for_label?: string | null;
   is_urgent?: boolean; needed_date?: string | null;
-  source_mo_no?: string | null;   // เลขใบสั่งผลิตต้นทาง (ถ้ามาจาก MO)
+  source_mo_no?: string | null;   // เลขใบสั่งผลิตต้นทาง (ตัวหลัก — ถ้ามาจาก MO)
+  source_mo_nos?: string[] | null; // ใบสั่งผลิตต้นทางทั้งหมด (m2m — 1 ของ ใช้ได้หลายใบสั่งผลิต)
 };
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -61,6 +62,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   for (const it of items) {
     const { data: prNo, error: numErr } = await admin.rpc("erp_next_number", { p_key: "pr" });
     if (numErr || !prNo) return NextResponse.json({ error: "ออกเลขใบขอซื้อไม่สำเร็จ: " + (numErr?.message ?? "") }, { status: 500 });
+    // ผูกใบสั่งผลิตหลายใบ (m2m): normalize เป็น array + ตัวหลัก = ตัวแรก (ให้โค้ดเดิมที่อ่าน source_mo_no ทำงานต่อ)
+    const moNos = ((Array.isArray(it.source_mo_nos) && it.source_mo_nos.length ? it.source_mo_nos : (it.source_mo_no ? [it.source_mo_no] : [])).filter(Boolean)) as string[];
+    const moPrimary = moNos[0] ?? null;
     rows.push({
       pr_no: prNo, requester: actor, status: "waiting", order_date: orderDate,
       item_sku_id: it.sku_id ?? null, item_name: it.item_name ?? null,
@@ -70,7 +74,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       reason: it.reason ?? null,
       used_for_sku_id: it.used_for_sku_id ?? null, used_for_label: it.used_for_label ?? null,
       is_urgent: it.is_urgent === true, needed_date: it.needed_date || null,
-      source_mo_no: it.source_mo_no ?? null,
+      source_mo_no: moPrimary,
+      source_mo_nos: moNos.length ? moNos : null,
     });
   }
 
@@ -99,14 +104,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const fmtCur = (v: number, c: string) => c === "THB" ? `฿${Math.round(v).toLocaleString("th-TH")}` : `${Math.round(v).toLocaleString("th-TH")} ${c}`;
     const totalStr = Object.entries(byCur).filter(([, v]) => v > 0).map(([c, v]) => fmtCur(v, c)).join(" + ") || "—";
     // เหตุผลของแต่ละรายการ — ถ้าเป็นใบสั่งผลิต ดึงรหัส SKU ของ MO มาโชว์ด้วย
-    const moNos = [...new Set(items.map((i) => i.source_mo_no).filter(Boolean))] as string[];
+    const moNos = [...new Set(items.flatMap((i) => (i.source_mo_nos?.length ? i.source_mo_nos : (i.source_mo_no ? [i.source_mo_no] : []))).filter(Boolean))] as string[];
     const skuByMo = new Map<string, string>();
     if (moNos.length) {
       const { data: moRows } = await admin.from("manufacturing_orders").select("mo_no, product_sku").in("mo_no", moNos);
       for (const m of moRows ?? []) if (m.product_sku) skuByMo.set(String(m.mo_no), String(m.product_sku));
     }
     const reasonOf = (i: Item): string => {
-      if (i.source_mo_no) { const sku = skuByMo.get(String(i.source_mo_no)); return `🏭 ใบสั่งผลิต ${i.source_mo_no}${sku ? ` (${sku})` : ""}`; }
+      const nos = (i.source_mo_nos?.length ? i.source_mo_nos : (i.source_mo_no ? [i.source_mo_no] : [])).filter(Boolean) as string[];
+      if (nos.length) return `🏭 ใบสั่งผลิต ${nos.map((no) => { const sku = skuByMo.get(String(no)); return `${no}${sku ? ` (${sku})` : ""}`; }).join(", ")}`;
       if (i.reason) return `📋 ${i.reason}`;
       return "";
     };

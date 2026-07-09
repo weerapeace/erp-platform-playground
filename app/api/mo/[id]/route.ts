@@ -29,7 +29,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     supabase.from("mo_material_summary").select("*").eq("mo_no", moNo).eq("is_active", true)
       .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true }),
     supabaseAdmin().from("purchase_requests_v2").select("item_name, qty, status")
-      .eq("source_mo_no", moNo).eq("is_active", true).not("status", "in", "(rejected,cancelled)"),
+      .contains("source_mo_nos", [moNo]).eq("is_active", true).not("status", "in", "(rejected,cancelled)"),   // m2m: เช็กทุกใบที่ผูก MO นี้
     productSku
       ? supabase.from("skus_v2").select("cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").eq("code", productSku).maybeSingle()
       : Promise.resolve({ data: null }),

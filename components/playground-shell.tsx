@@ -211,7 +211,7 @@ export type MenuRow = {
 };
 
 // โมดูลใหญ่ (App) — tabs บนสุด
-export type AppGroup = { id?: string; key: string; label: string; icon: string | null; icon_url?: string | null; sort_order: number; permission_key: string | null; is_active: boolean };
+export type AppGroup = { id?: string; key: string; label: string; icon: string | null; icon_url?: string | null; sort_order: number; permission_key: string | null; is_active: boolean; default_href?: string | null };
 
 // หมวดเมนู (ไอคอน/ลำดับ ต่อแอป) — จาก /api/menu/sections
 export type MenuSectionRow = { app_key: string; name: string; icon: string | null; icon_url: string | null; sort_order: number };
@@ -469,9 +469,14 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       .filter((r) => r.is_active && r.show_in_sidebar && (r.app_keys ?? []).includes(key)
         && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0])))
       .sort((a, b) => a.sort_order - b.sort_order);
-    // หน้า default ของบางแอป (override ลำดับเมนู) — เช่น เปิด "ผลิต" ให้ไปใบสั่งผลิต (MO) ก่อน
+    // 1) "หน้าแรก" ที่แอดมินตั้งไว้ใน DB (erp_app_groups.default_href) — มาก่อนเสมอ
+    //    (ต้องตรงกับเมนูที่ผู้ใช้เห็น ไม่งั้นข้ามไปใช้ค่าถัดไป)
+    const dbPref = appGroups.find((a) => a.key === key)?.default_href;
+    if (dbPref && its.some((r) => r.href === dbPref)) return dbPref;
+    // 2) override ในโค้ด (legacy) — เช่น เปิด "ผลิต" ให้ไปใบสั่งผลิต (MO) ก่อน
     const pref = APP_DEFAULT_HREF[key];
     if (pref && its.some((r) => r.href === pref)) return pref;
+    // 3) เมนูตัวบนสุดตามลำดับ
     return its[0]?.href ?? null;
   };
 

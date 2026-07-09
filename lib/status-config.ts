@@ -65,7 +65,12 @@ const NEUTRAL: StatusStyle = { label: "", ...FAM.slate };
  *   "purchase-orders-v2": { waiting: { label: "รอสั่งซื้อ" } },
  */
 export const MODULE_STATUS_OVERRIDES: Record<string, Record<string, Partial<StatusStyle>>> = {
-  // (ยังไม่มี override — โมดูลทั้งหมดใช้ป้ายมาตรฐานเดียวกัน)
+  // ใบขอซื้อ (จัดซื้อ) — สีตามที่เจ้าของขอ เฉพาะหน้านี้ (ไม่กระทบโมดูลอื่น):
+  //   รออนุมัติ = แดง · ออกใบสั่งซื้อแล้ว = เหลือง (amber = โทนเหลือง)
+  "purchase-requests-v2": {
+    waiting:     { ...FAM.red },
+    rfq_created: { ...FAM.amber },
+  },
 };
 
 /** ดึงป้าย/สีของสถานะ — ระบุ moduleKey เพื่อใช้ override รายโมดูล (ถ้ามี) */

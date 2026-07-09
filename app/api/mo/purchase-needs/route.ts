@@ -37,7 +37,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const [{ data: sums }, { data: prs }] = await Promise.all([
     admin.from("mo_material_summary").select("id, mo_no, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready").in("mo_no", moNos).eq("is_active", true),
-    admin.from("purchase_requests_v2").select("item_name, qty, source_mo_no").in("source_mo_no", moNos).eq("is_active", true).not("status", "in", "(rejected,cancelled)"),
+    admin.from("purchase_requests_v2").select("item_name, qty, source_mo_nos").overlaps("source_mo_nos", moNos).eq("is_active", true).not("status", "in", "(rejected,cancelled)"),   // m2m: ใบขอซื้อที่ผูก MO ใด ๆ ในชุดนี้
   ]);
 
   // รูปสินค้า (cover SKU, fallback Parent) — ดึงครั้งเดียวสำหรับทั้งวัตถุดิบและสินค้าของ MO
@@ -58,12 +58,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ขอซื้อไปแล้ว ต่อ (ใบ, รหัสวัตถุดิบ)
   const requested = new Map<string, number>();   // key = mo_no|code
+  const moNoSet = new Set(moNos);
   for (const p of (prs ?? []) as Record<string, unknown>[]) {
     const m = /^\[([^\]]+)\]/.exec(String(p.item_name ?? ""));
     const code = m ? m[1] : String(p.item_name ?? "");
     if (!code) continue;
-    const k = `${String(p.source_mo_no)}|${code}`;
-    requested.set(k, (requested.get(k) ?? 0) + (Number(p.qty) || 0));
+    // 1 ใบขอซื้ออาจผูกหลายใบสั่งผลิต → นับ "ขอแล้ว" ให้ทุก MO ที่ผูก (ของใช้ร่วมกัน m2m)
+    const nos = Array.isArray(p.source_mo_nos) ? (p.source_mo_nos as string[]) : [];
+    for (const mo of nos) {
+      if (!moNoSet.has(String(mo))) continue;
+      const k = `${String(mo)}|${code}`;
+      requested.set(k, (requested.get(k) ?? 0) + (Number(p.qty) || 0));
+    }
   }
 
   // จัดกลุ่มตามวัตถุดิบ

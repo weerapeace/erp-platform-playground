@@ -15,6 +15,7 @@ import { RejectedPanel } from "./orders/approval";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
+import { SkuWizard } from "@/app/master/skus/sku-wizard";
 import { RecordFormModal } from "@/components/record-form-modal";
 import { ERPModal, useBackdropDismiss } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -31,9 +32,10 @@ const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
 type Variation = { key: string; label: string; color: string | null; seller: string; country: string; price: number; currency: string; uom: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null };
-type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string; reason?: string | null; usedForId?: string | null; usedForLabel?: string | null; urgent?: boolean; useDate?: string | null; sourceMoNo?: string | null };
+type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string; reason?: string | null; usedForId?: string | null; usedForLabel?: string | null; urgent?: boolean; useDate?: string | null; sourceMoNo?: string | null; sourceMoNos?: string[] | null };
 // เหตุผลที่ขอซื้อ (บังคับในป๊อป "เพิ่มลงใบขอซื้อ") — 2 โหมด: เลือกเหตุผล (ข้อความ) หรือ อ้างใบสั่งผลิต
-type ReasonPick = { text: string; moNo: string | null; moLabel: string | null };
+// รองรับผูกหลายใบสั่งผลิต (m2m) — moNo/moLabel = ตัวหลัก (ตัวแรก) คงไว้ให้โค้ดเดิม, moNos/moLabels = ครบทุกใบ
+type ReasonPick = { text: string; moNo: string | null; moLabel: string | null; moNos: string[]; moLabels: string[] };
 type Source = "sku" | "group" | "favorite" | "frequent" | "tags" | "mo";
 
 // แท็บ "ใบสั่งผลิต": วัตถุดิบที่ต้องซื้อ 1 ตัว (ของใบใดใบหนึ่ง)
@@ -129,6 +131,7 @@ export default function PurchasingShopPage() {
   const [confirmSku, setConfirmSku] = useState<Card | null>(null);
   // ฟอร์มเพิ่ม/แก้ไขสินค้า (SKU) แบบ popup — initial/copyFromCode ใช้ตอน "คัดลอกสินค้า"
   const [skuForm, setSkuForm] = useState<{ mode: "create" | "edit"; id?: string; initial?: Record<string, unknown>; copyFromCode?: string } | null>(null);
+  const [skuWizard, setSkuWizard] = useState(false);      // Wizard เพิ่ม SKU (ของกลาง — ตัวเดียวกับหน้า SKU)
   // ตัวเลือกสินค้าที่จะคัดลอก (เลือกจากรายการในหน้านี้)
   const [copyPickerOpen, setCopyPickerOpen] = useState(false);
   const [copyQuery, setCopyQuery] = useState("");
@@ -305,7 +308,7 @@ export default function PurchasingShopPage() {
       image: null, variationId: null, skuRef: mat.code, skuId: null, note: `จากใบสั่งผลิต ${moSel.mo_no}`,
       reason: `ใบสั่งผลิต ${moSel.mo_no}`,
       usedForId: null, usedForLabel: moSel.product_label, urgent: false, useDate: moSel.due_date || null,
-      sourceMoNo: moSel.mo_no,
+      sourceMoNo: moSel.mo_no, sourceMoNos: [moSel.mo_no],
     }]);
     setMoMatQty(null);
     toast.success(`เพิ่ม ${label} ลงตะกร้าแล้ว`);
@@ -618,7 +621,7 @@ export default function PurchasingShopPage() {
   };
   const addSku = (c: Card, qty: number, note: string, reason: ReasonPick, urgent?: boolean, useDate?: string | null) => {
     const s = c.sku!;
-    setCart(p => [...p, { label: c.name, qty, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, skuId: c.id, note, reason: reason.text || null, usedForId: null, usedForLabel: reason.moLabel ?? null, urgent: !!urgent, useDate: useDate || null, sourceMoNo: reason.moNo ?? null }]);
+    setCart(p => [...p, { label: c.name, qty, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, skuId: c.id, note, reason: reason.text || null, usedForId: null, usedForLabel: reason.moLabel ?? null, urgent: !!urgent, useDate: useDate || null, sourceMoNo: reason.moNo ?? null, sourceMoNos: reason.moNos.length ? reason.moNos : null }]);
     setConfirmSku(null);
   };
 
@@ -654,7 +657,8 @@ export default function PurchasingShopPage() {
             used_for_sku_id: null,                                          // เลิกใช้ "ใช้กับสินค้า (ปลายทาง)" แล้ว
             used_for_label:  l.usedForLabel ?? null,                        // คงไว้สำหรับ label ใบสั่งผลิต (ถ้ามาจาก MO)
             is_urgent: l.urgent === true, needed_date: l.useDate || null,
-            source_mo_no: l.sourceMoNo ?? null,                              // ผูกใบสั่งผลิต → บอร์ดเด้ง "ขอแล้ว"
+            source_mo_no: l.sourceMoNo ?? null,                              // ผูกใบสั่งผลิต (ตัวหลัก) → บอร์ดเด้ง "ขอแล้ว"
+            source_mo_nos: l.sourceMoNos ?? null,                            // ผูกใบสั่งผลิตครบทุกใบ (m2m)
           })),
         }),
       });
@@ -831,7 +835,7 @@ export default function PurchasingShopPage() {
                 className="h-9 px-3 text-xs font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 flex-shrink-0">📋 คัดลอกสินค้า</button>
             )}
             {source === "sku" && (
-              <button onClick={() => setSkuForm({ mode: "create" })}
+              <button onClick={() => setSkuWizard(true)}
                 className="h-9 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex-shrink-0">＋ เพิ่มสินค้า</button>
             )}
           </div>
@@ -1173,7 +1177,12 @@ export default function PurchasingShopPage() {
           onEdit={() => setSkuForm({ mode: "edit", id: confirmSku.id })} />
       )}
 
-      {/* ฟอร์มเพิ่ม/แก้ไขสินค้า (SKU) */}
+      {/* เพิ่มสินค้าใหม่ (SKU) — ใช้ Wizard ของกลาง (ตัวเดียวกับหน้า /master/skus): เลือกประเภท+ตัวช่วยรหัส
+          สร้างเสร็จ → รีเฟรชการ์ด แล้วผู้ใช้กดการ์ดใส่ตะกร้าได้ */}
+      <SkuWizard open={skuWizard} onClose={() => setSkuWizard(false)}
+        onCreated={() => { setSkuWizard(false); setPage(0); void fetchCards(0); }} />
+
+      {/* แก้ไข/คัดลอกสินค้า (SKU) — ยังใช้ฟอร์มเดิม (Wizard ยังไม่รองรับแก้ไข/คัดลอก) */}
       {skuForm && (
         <SkuFormModal mode={skuForm.mode} skuId={skuForm.id} initial={skuForm.initial} copyFromCode={skuForm.copyFromCode}
           onClose={() => setSkuForm(null)}
@@ -1366,8 +1375,14 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
 // สถานะใบสั่งผลิตที่ถือว่า "ปิดแล้ว" → ไม่ให้เลือกเป็นเหตุผลขอซื้อ
 const MO_CLOSED = new Set(["completed", "done", "closed", "cancelled", "canceled"]);
 
-// MoReasonPicker — เลือกใบสั่งผลิตที่ "ยังเปิดอยู่" เป็นเหตุผลขอซื้อ (ดึงจาก /api/mo, กรองสถานะปิดฝั่ง client)
-function MoReasonPicker({ value, onPick }: { value: { no: string; label: string } | null; onPick: (v: { no: string; label: string } | null) => void }) {
+// MoReasonPicker — เลือกใบสั่งผลิตที่ "ยังเปิดอยู่" (เลือกได้หลายใบ m2m) เป็นเหตุผลขอซื้อ (ดึงจาก /api/mo, กรองสถานะปิดฝั่ง client)
+function MoReasonPicker({ value, onPick }: { value: { no: string; label: string }[]; onPick: (v: { no: string; label: string }[]) => void }) {
+  const isSel = (no: string) => value.some((s) => s.no === no);
+  const toggle = (m: MoListItem) => {
+    const label = `${m.mo_no}${m.product_sku ? ` · ${m.product_sku}` : ""}${m.product_name ? ` (${m.product_name})` : ""}`;
+    if (isSel(m.mo_no)) onPick(value.filter((s) => s.no !== m.mo_no));
+    else onPick([...value, { no: m.mo_no, label }]);   // ไม่ปิด dropdown → เลือกต่อได้หลายใบ
+  };
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<MoListItem[] | null>(null);
@@ -1399,18 +1414,21 @@ function MoReasonPicker({ value, onPick }: { value: { no: string; label: string 
   }, [open]);
   return (
     <div className="relative" ref={ref}>
-      {value ? (
-        <div className="flex items-center gap-2 h-9 px-2 border border-slate-200 rounded-md bg-slate-50">
-          <span className="text-sm text-slate-700 truncate flex-1">🏭 {value.label}</span>
-          <button type="button" onClick={() => setOpen(o => !o)} className="text-xs text-blue-600 hover:underline shrink-0">เปลี่ยน</button>
-          <button type="button" onClick={() => onPick(null)} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
+      {/* ชิปใบสั่งผลิตที่เลือก (ลบได้รายใบ) */}
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-1.5">
+          {value.map((s) => (
+            <span key={s.no} className="inline-flex items-center gap-1 max-w-full text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full pl-2 pr-1 py-0.5">
+              <span className="truncate">🏭 {s.label}</span>
+              <button type="button" onClick={() => onPick(value.filter((x) => x.no !== s.no))} className="text-blue-400 hover:text-red-500 shrink-0">✕</button>
+            </span>
+          ))}
         </div>
-      ) : (
-        <button type="button" onClick={() => setOpen(o => !o)}
-          className="w-full h-9 px-3 text-sm text-left text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-blue-300 hover:text-blue-600">
-          + เลือกใบสั่งผลิต (ที่ยังเปิดอยู่)
-        </button>
       )}
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full h-9 px-3 text-sm text-left text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-blue-300 hover:text-blue-600">
+        + {value.length ? "เพิ่มใบสั่งผลิตอีก" : "เลือกใบสั่งผลิต (ที่ยังเปิดอยู่)"}
+      </button>
       {open && rect && typeof document !== "undefined" && createPortal(
         (() => {
           // ลอยแบบ fixed (portal) ทับโมดอล → ไม่โดน overflow ตัด ไม่ต้องเลื่อนดู
@@ -1425,14 +1443,25 @@ function MoReasonPicker({ value, onPick }: { value: { no: string; label: string 
                 className="w-full h-9 px-3 text-sm border-b border-slate-100 outline-none sticky top-0 bg-white" />
               {loading && <div className="px-3 py-3 text-xs text-slate-400">กำลังโหลด…</div>}
               {!loading && rows && rows.length === 0 && <div className="px-3 py-3 text-xs text-slate-300">— ไม่พบใบสั่งผลิตที่ยังเปิด —</div>}
-              {!loading && (rows ?? []).map(m => (
-                <button key={m.id} type="button"
-                  onClick={() => { onPick({ no: m.mo_no, label: `${m.mo_no}${m.product_sku ? ` · ${m.product_sku}` : ""}${m.product_name ? ` (${m.product_name})` : ""}` }); setOpen(false); }}
-                  className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-50 last:border-0">
-                  <div className="text-sm font-medium text-slate-700">{m.mo_no}</div>
-                  <div className="text-xs text-slate-500 truncate">{m.product_sku ?? ""}{m.product_name ? ` · ${m.product_name}` : ""}{m.status ? ` · ${m.status}` : ""}</div>
+              {!loading && (rows ?? []).map(m => {
+                const sel = isSel(m.mo_no);
+                return (
+                  <button key={m.id} type="button" onClick={() => toggle(m)}
+                    className={`w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-50 last:border-0 flex items-center gap-2 ${sel ? "bg-blue-50/70" : ""}`}>
+                    <span className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center text-[10px] font-bold ${sel ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 text-transparent"}`}>✓</span>
+                    <span className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-slate-700">{m.mo_no}</div>
+                      <div className="text-xs text-slate-500 truncate">{m.product_sku ?? ""}{m.product_name ? ` · ${m.product_name}` : ""}{m.status ? ` · ${m.status}` : ""}</div>
+                    </span>
+                  </button>
+                );
+              })}
+              {value.length > 0 && (
+                <button type="button" onClick={() => setOpen(false)}
+                  className="w-full text-center py-2 text-xs font-medium text-blue-600 hover:bg-blue-50 border-t border-slate-100 sticky bottom-0 bg-white">
+                  ✓ เสร็จ ({value.length} ใบ)
                 </button>
-              ))}
+              )}
             </div>
           );
         })(),
@@ -1449,17 +1478,21 @@ function ConfirmSku({ card, rate, stockQty, dupOrders, onClose, onAdd, onEdit, o
   const [reasonMode, setReasonMode] = useState<"reason" | "mo">("reason");
   const [reasonId, setReasonId] = useState<string | null>(null);    // id ของ lookup (ให้ RelationPicker แสดงผล)
   const [reasonText, setReasonText] = useState("");                 // ข้อความเหตุผล (เก็บลงใบ ไม่ใช่ id)
-  const [moPick, setMoPick] = useState<{ no: string; label: string } | null>(null);
+  const [moPicks, setMoPicks] = useState<{ no: string; label: string }[]>([]);   // ผูกได้หลายใบสั่งผลิต (m2m)
   const [editImg, setEditImg] = useState(false);   // เปิดโหมดแก้รูปในป๊อปนี้
   const [urgent, setUrgent] = useState(false);     // ⚡ ส่งด่วน
   const [useDate, setUseDate] = useState("");       // วันที่ใช้งาน (ไม่บังคับ)
   const s = card.sku!;
   // บังคับเลือกเหตุผลก่อนเพิ่มลงตะกร้า
-  const reasonValid = reasonMode === "reason" ? !!reasonText : !!moPick;
-  const buildReason = (): ReasonPick =>
-    reasonMode === "mo" && moPick
-      ? { text: `ใบสั่งผลิต ${moPick.no}`, moNo: moPick.no, moLabel: moPick.label }
-      : { text: reasonText, moNo: null, moLabel: null };
+  const reasonValid = reasonMode === "reason" ? !!reasonText : moPicks.length > 0;
+  const buildReason = (): ReasonPick => {
+    if (reasonMode === "mo" && moPicks.length) {
+      const nos = moPicks.map((m) => m.no);
+      const labels = moPicks.map((m) => m.label);
+      return { text: `ใบสั่งผลิต ${nos.join(", ")}`, moNo: nos[0], moLabel: labels[0], moNos: nos, moLabels: labels };
+    }
+    return { text: reasonText, moNo: null, moLabel: null, moNos: [], moLabels: [] };
+  };
   return (
     <ERPModal open onClose={onClose} size="md" storageKey="pr-add-item" title="เพิ่มลงใบขอซื้อ"
       footer={
@@ -1547,7 +1580,7 @@ function ConfirmSku({ card, rate, stockQty, dupOrders, onClose, onAdd, onEdit, o
               config={{ target_table: "erp_lookups", target_label_field: "name", lookup_type: "pr_reason" }}
               placeholder="เลือกเหตุผล (พิมพ์เพื่อเพิ่มใหม่)" required hasError={!reasonText} />
           ) : (
-            <MoReasonPicker value={moPick} onPick={setMoPick} />
+            <MoReasonPicker value={moPicks} onPick={setMoPicks} />
           )}
           {!reasonValid && <p className="mt-1 text-[11px] text-rose-500">* ต้องเลือกเหตุผลก่อนจึงเพิ่มลงตะกร้าได้</p>}
         </div>

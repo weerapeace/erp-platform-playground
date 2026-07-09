@@ -24,7 +24,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const { data: prs, error } = await admin.from("purchase_requests_v2")
     .select("id, pr_no, item_name, qty, uom, status, is_urgent, needed_date, po_id")
-    .eq("source_mo_no", moNo).eq("is_active", true)
+    .contains("source_mo_nos", [moNo]).eq("is_active", true)   // m2m: ทุกใบขอซื้อที่ผูก MO นี้
     .order("created_at", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
