@@ -13,9 +13,10 @@ import { apiFetch } from "@/lib/api";
 import { ImageInput } from "@/components/image-input";
 import { DEFAULT_MENU_ITEMS, type MenuRow, type AppGroup as BaseAppGroup } from "@/components/playground-shell";
 import { AppAccessModal } from "./app-access-modal";
+import { appHeaderStyle } from "@/lib/app-header-theme";
 import type { MenuSection } from "@/app/api/menu/sections/route";
 
-type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null; default_href?: string | null };
+type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null; default_href?: string | null };
 const ALL = "__all__";
 
 // ไอคอน (รูปอัปโหลด icon_url > emoji)
@@ -132,13 +133,13 @@ export default function MenuManagerPage() {
   // ---------- App (โมดูลใหญ่ / PWA) ----------
   const [naApp, setNaApp] = useState({ key: "", label: "", icon: "📦" });
   // ---- ตั้งค่าแอป: แก้แบบ "ร่าง" แล้วกดบันทึกทีเดียว (ชื่อ/ไอคอน/สี/หน้าแรก) ----
-  const [appForm, setAppForm] = useState({ label: "", icon: "", icon_url: null as string | null, theme_color: null as string | null, default_href: null as string | null });
+  const [appForm, setAppForm] = useState({ label: "", icon: "", icon_url: null as string | null, theme_color: null as string | null, theme_color2: null as string | null, header_image: null as string | null, header_style: "gradient" as string, default_href: null as string | null });
   const [appDelText, setAppDelText] = useState("");   // พิมพ์รหัสแอปยืนยันก่อนลบ (กันเผลอ)
   const [appDelOpen, setAppDelOpen] = useState(false); // เปิด "โซนอันตราย" ลบแอป
   // sync ร่างจากแอปที่เลือก (รีเซ็ตเมื่อสลับแอป / โหลด apps ใหม่ เช่นหลังบันทึก)
   useEffect(() => {
     const a = apps.find((x) => x.key === sel);
-    if (a) setAppForm({ label: a.label, icon: a.icon ?? "", icon_url: a.icon_url ?? null, theme_color: a.theme_color ?? null, default_href: a.default_href ?? null });
+    if (a) setAppForm({ label: a.label, icon: a.icon ?? "", icon_url: a.icon_url ?? null, theme_color: a.theme_color ?? null, theme_color2: a.theme_color2 ?? null, header_image: a.header_image ?? null, header_style: a.header_style ?? "gradient", default_href: a.default_href ?? null });
     setAppDelText(""); setAppDelOpen(false);
   }, [sel, apps]);
 
@@ -156,6 +157,17 @@ export default function MenuManagerPage() {
       if (j.error || !j.r2_key) throw new Error(j.error || "อัปโหลดไม่สำเร็จ");
       setAppForm((f) => ({ ...f, icon_url: j.r2_key }));
       flash("อัปโหลดไอคอนแล้ว — กดบันทึกเพื่อใช้");
+    } catch (e) { setErr(String(e)); } finally { setUploadingApp(false); }
+  };
+  // อัปโหลดรูปพื้นหลังแถบบน (โหมด image) → เก็บลงร่าง (รอกดบันทึก)
+  const uploadHeaderImage = async (file: File) => {
+    setUploadingApp(true); setErr(null);
+    try {
+      const fd = new FormData(); fd.append("file", file); fd.append("folder", "app-headers");
+      const j = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then((r) => r.json());
+      if (j.error || !j.r2_key) throw new Error(j.error || "อัปโหลดไม่สำเร็จ");
+      setAppForm((f) => ({ ...f, header_image: j.r2_key, header_style: "image" }));
+      flash("อัปโหลดรูปแถบแล้ว — กดบันทึกเพื่อใช้");
     } catch (e) { setErr(String(e)); } finally { setUploadingApp(false); }
   };
   const addApp = async () => {
@@ -228,6 +240,9 @@ export default function MenuManagerPage() {
     || appForm.icon !== (selectedApp.icon ?? "")
     || appForm.icon_url !== (selectedApp.icon_url ?? null)
     || appForm.theme_color !== (selectedApp.theme_color ?? null)
+    || appForm.theme_color2 !== (selectedApp.theme_color2 ?? null)
+    || appForm.header_image !== (selectedApp.header_image ?? null)
+    || appForm.header_style !== (selectedApp.header_style ?? "gradient")
     || appForm.default_href !== (selectedApp.default_href ?? null)
   );
   const saveApp = async () => {
@@ -235,13 +250,14 @@ export default function MenuManagerPage() {
     if (!appForm.label.trim()) { setErr("กรอกชื่อแอป"); return; }
     await patchApp(selectedApp.id!, {
       label: appForm.label.trim(), icon: appForm.icon || null, icon_url: appForm.icon_url,
-      theme_color: appForm.theme_color, default_href: appForm.default_href,
+      theme_color: appForm.theme_color, theme_color2: appForm.theme_color2, header_image: appForm.header_image, header_style: appForm.header_style,
+      default_href: appForm.default_href,
     });
     flash("บันทึกตั้งค่าแอปแล้ว");
   };
   const cancelApp = () => {
     if (!selectedApp) return;
-    setAppForm({ label: selectedApp.label, icon: selectedApp.icon ?? "", icon_url: selectedApp.icon_url ?? null, theme_color: selectedApp.theme_color ?? null, default_href: selectedApp.default_href ?? null });
+    setAppForm({ label: selectedApp.label, icon: selectedApp.icon ?? "", icon_url: selectedApp.icon_url ?? null, theme_color: selectedApp.theme_color ?? null, theme_color2: selectedApp.theme_color2 ?? null, header_image: selectedApp.header_image ?? null, header_style: selectedApp.header_style ?? "gradient", default_href: selectedApp.default_href ?? null });
     setAppDelText(""); setAppDelOpen(false);
   };
   const sectionNames = useMemo(() => [...new Set(rows.map((r) => r.section))], [rows]);
@@ -469,6 +485,43 @@ export default function MenuManagerPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500">สีแอป</span>
                     <input type="color" value={appForm.theme_color || "#2563eb"} onChange={(e) => setAppForm((f) => ({ ...f, theme_color: e.target.value }))} className="w-9 h-8 p-0 border border-slate-200 rounded cursor-pointer" />
+                  </div>
+                </div>
+
+                {/* แถบบนของแอป (App shell header) — 3 โหมด: สีเดียว / ไล่สี / รูป */}
+                <div className="pt-2 border-t border-blue-100 space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-500 whitespace-nowrap">🎨 แถบบนของแอป</span>
+                    {(["solid", "gradient", "image"] as const).map((m) => (
+                      <button key={m} type="button" onClick={() => setAppForm((f) => ({ ...f, header_style: m }))}
+                        className={`h-7 px-2.5 text-xs rounded border ${appForm.header_style === m ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                        {m === "solid" ? "สีเดียว" : m === "gradient" ? "ไล่สี" : "รูป"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {(appForm.header_style === "solid" || appForm.header_style === "gradient") && (
+                      <label className="flex items-center gap-1 text-xs text-slate-500">สีเริ่ม
+                        <input type="color" value={appForm.theme_color || "#2563eb"} onChange={(e) => setAppForm((f) => ({ ...f, theme_color: e.target.value }))} className="w-8 h-7 p-0 border border-slate-200 rounded cursor-pointer" /></label>
+                    )}
+                    {appForm.header_style === "gradient" && (
+                      <label className="flex items-center gap-1 text-xs text-slate-500">สีปลาย
+                        <input type="color" value={appForm.theme_color2 || appForm.theme_color || "#4f46e5"} onChange={(e) => setAppForm((f) => ({ ...f, theme_color2: e.target.value }))} className="w-8 h-7 p-0 border border-slate-200 rounded cursor-pointer" /></label>
+                    )}
+                    {appForm.header_style === "image" && (
+                      <>
+                        <label className={`h-7 px-2.5 leading-7 text-xs font-medium rounded cursor-pointer ${uploadingApp ? "bg-slate-200 text-slate-400" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
+                          {uploadingApp ? "กำลังอัป…" : appForm.header_image ? "เปลี่ยนรูป" : "⬆ อัปรูปพื้นหลัง"}
+                          <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={uploadingApp}
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadHeaderImage(f); e.target.value = ""; }} />
+                        </label>
+                        {appForm.header_image && <button type="button" onClick={() => setAppForm((f) => ({ ...f, header_image: null }))} className="text-[11px] text-rose-500 hover:underline">ล้างรูป</button>}
+                      </>
+                    )}
+                    {/* พรีวิวแถบ */}
+                    <div className="h-8 flex-1 min-w-[140px] rounded-md border border-slate-200 overflow-hidden flex items-center px-2.5 gap-1.5 text-xs text-white font-semibold" style={appHeaderStyle(appForm)}>
+                      <Ico icon={appForm.icon} iconUrl={appForm.icon_url} size={16} /> {appForm.label || "ตัวอย่างแถบ"}
+                    </div>
                   </div>
                 </div>
 

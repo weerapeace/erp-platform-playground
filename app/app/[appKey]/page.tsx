@@ -14,6 +14,9 @@ import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { ShellPresentContext } from "@/components/playground-shell";
 import { PwaInstallButton } from "@/components/pwa-install-button";
+import { NotificationBell } from "@/components/notification-bell";
+import { LangToggle } from "@/components/i18n";
+import { appHeaderStyle } from "@/lib/app-header-theme";
 
 const MasterPage = dynamic(() => import("@/components/master-page").then((m) => m.MasterPage), {
   ssr: false, loading: () => <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
@@ -28,7 +31,15 @@ function MItemIcon({ it, cls }: { it: MenuItem; cls: string }) {
   }
   return <span className={`text-xl flex-shrink-0`}>{it.icon ?? "•"}</span>;
 }
-type AppGroup = { key: string; label: string; icon: string | null; permission_key: string | null; default_href: string | null };
+type AppGroup = { key: string; label: string; icon: string | null; icon_url?: string | null; permission_key: string | null; default_href: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null };
+// ไอคอนแอป: รูปอัปโหลด (icon_url) > emoji
+function AppIcon({ app, size = 22 }: { app: AppGroup | null; size?: number }) {
+  if (app?.icon_url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={`/api/r2-image?key=${encodeURIComponent(app.icon_url)}&w=64`} alt="" className="rounded object-contain shrink-0" style={{ width: size, height: size }} />;
+  }
+  return <span className="shrink-0 leading-none" style={{ fontSize: size }}>{app?.icon ?? "🧩"}</span>;
+}
 
 export default function StandaloneApp() {
   const appKey = String(useParams().appKey ?? "");
@@ -134,18 +145,34 @@ export default function StandaloneApp() {
   return (
     // h-dvh + flex column: header บน · เนื้อหาเต็มกว้าง · เมนูแบบพับ-ขยาย (iPad: ☰ drawer ซ้าย · มือถือ: แถบล่าง)
     <div className="h-[100dvh] flex flex-col bg-slate-100 overflow-hidden">
-      <header className="flex-shrink-0 z-20 bg-gradient-to-r from-blue-700 to-indigo-600 text-white px-4 flex items-center justify-between"
-        style={{ paddingTop: "env(safe-area-inset-top)" }}>
-        <div className="py-3 flex items-center gap-2 w-full min-w-0">
-          {/* ปุ่มพับ-ขยายเมนู (iPad/จอกว้าง) — มือถือใช้แถบล่างแทน */}
+      <header className="flex-shrink-0 z-20 text-white px-3 sm:px-4"
+        style={{ ...appHeaderStyle(app ?? {}), paddingTop: "env(safe-area-inset-top)" }}>
+        <div className="py-2.5 flex items-center gap-2 w-full min-w-0">
+          {/* ปุ่มเมนู (จอกว้าง) — ใช้ตอนเมนูเยอะ/มือถือใช้แถบล่าง */}
           {items.length > 0 && (
             <button onClick={() => setMoreOpen(true)} aria-label="เปิดเมนู"
-              className="hidden md:flex items-center justify-center h-9 w-9 -ml-1 rounded-lg hover:bg-white/15 text-xl flex-shrink-0">☰</button>
+              className="md:hidden flex items-center justify-center h-9 w-9 -ml-1 rounded-lg hover:bg-white/15 text-xl flex-shrink-0">☰</button>
           )}
-          <div className="font-semibold text-lg truncate flex-1 min-w-0">{app?.icon ?? "🧩"} {app?.label ?? appKey}</div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <AppIcon app={app} size={24} />
+          <div className="font-semibold text-lg truncate flex-shrink-0 max-w-[40vw] md:max-w-none">{app?.label ?? appKey}</div>
+
+          {/* เมนูเป็นแท็บบนแถบ (จอกว้าง) — เลื่อนได้ถ้าเยอะ */}
+          {items.length > 0 && (
+            <nav className="hidden md:flex items-center gap-0.5 ml-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+              {items.map((it, i) => (
+                <button key={it.href} onClick={() => goto(i)} title={it.label}
+                  className={`shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-sm whitespace-nowrap transition-colors ${active === i ? "bg-white/25 font-semibold" : "text-white/85 hover:bg-white/12"}`}>
+                  <MItemIcon it={it} cls="w-4 h-4" /> {it.label}
+                </button>
+              ))}
+            </nav>
+          )}
+
+          <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
             <PwaInstallButton />
-            <div className="text-xs opacity-90 hidden sm:block truncate max-w-[120px]">{user.name}</div>
+            <div className="text-white"><LangToggle /></div>
+            <div className="text-white"><NotificationBell /></div>
+            <Link href="/account/security" title="ตั้งค่าบัญชี" className="text-xs opacity-90 hover:opacity-100 hidden sm:block truncate max-w-[110px] hover:underline">{user.name}</Link>
           </div>
         </div>
       </header>
