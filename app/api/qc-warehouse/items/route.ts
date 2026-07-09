@@ -85,6 +85,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await admin.from("mo_work_orders").update({ qc_pulled_qty: Number(wo.qc_pulled_qty ?? 0) + good + badTotal }).eq("id", wo_id);
       // B2: ของดี → +FG (สินค้าสำเร็จเข้า WH-FG) + backflush วัตถุดิบออกจาก WIP (best-effort ไม่บล็อค QC)
       if (good > 0) { try { await admin.rpc("erp_qc_receive_to_fg", { p_wo_id: wo_id, p_good_qty: good, p_actor: actor.actorName }); } catch (e) { console.error("[qc.receive] +FG ไม่สำเร็จ:", e instanceof Error ? e.message : e); } }
+      // B3: ของเสีย → +SCRAP (โซนของเสีย) + backflush วัตถุดิบ (best-effort)
+      if (badTotal > 0) { try { await admin.rpc("erp_qc_receive_scrap", { p_wo_id: wo_id, p_bad_qty: badTotal, p_reason: bad.map((b) => `${b.reason} ${b.qty}`).join(", "), p_actor: actor.actorName }); } catch (e) { console.error("[qc.receive] +SCRAP ไม่สำเร็จ:", e instanceof Error ? e.message : e); } }
       for (const b of bad) await logDefect(admin, { sku: wo.product_sku, worker: wo.assignee_name, qty: b.qty, reason: b.reason, kind: "defect", mo_no: wo.mo_no });
       await writeAudit(admin, { action: "qc.receive", entityType: "qc_warehouse_items", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, good, bad: badTotal } });
       // แจ้งเตือน "พบของเสีย" ตอนรับเข้า (best-effort): กระดิ่ง + LINE กลุ่ม QC + DM ช่าง
@@ -136,6 +138,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       else await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       await admin.from("qc_warehouse_items").insert({ shelf_id: dsid, wo_id: item.wo_id, mo_no: item.mo_no, sku: item.sku, sku_name: item.sku_name, worker: item.worker, qty, status: "defect", reason });
       await logDefect(admin, { sku: item.sku, worker: item.worker, qty, reason, kind: "defect", mo_no: item.mo_no });
+      // B3: ของดีถูกคัดเป็นเสีย → ย้ายสต๊อก FG → SCRAP (best-effort)
+      try { await admin.rpc("erp_fg_to_scrap", { p_sku_code: item.sku, p_qty: qty, p_reason: reason, p_actor: actor.actorName }); } catch (e) { console.error("[qc.to_defect] FG→SCRAP:", e instanceof Error ? e.message : e); }
       await writeAudit(admin, { action: "qc.defect", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, qty, reason } });
       // แจ้งเตือน "พบของเสีย" (best-effort): กระดิ่ง + LINE กลุ่ม QC + DM ช่าง
       {
@@ -190,6 +194,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const { data: wo } = await admin.from("mo_work_orders").select("qc_pulled_qty").eq("id", item.wo_id).single();
         if (wo) await admin.from("mo_work_orders").update({ qc_pulled_qty: Math.max(0, Number(wo.qc_pulled_qty ?? 0) - Number(item.qty)) }).eq("id", item.wo_id);
       }
+      // B3: ดึงกลับ → คืนสต๊อก (−FG/−SCRAP + คืนวัตถุดิบเข้า WIP)
+      try { await admin.rpc("erp_qc_reverse_item", { p_wo_id: item.wo_id ?? null, p_sku_code: item.sku, p_qty: item.qty, p_is_defect: item.status === "defect", p_actor: actor.actorName }); } catch (e) { console.error("[qc.return_queue] คืนสต๊อก:", e instanceof Error ? e.message : e); }
       await writeAudit(admin, { action: "qc.move", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sub: "return_queue", qty: item.qty } });
       return NextResponse.json({ error: null });
     }
