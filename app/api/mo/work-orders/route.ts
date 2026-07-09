@@ -93,6 +93,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   await writeAudit(admin, { action: "create", entityType: "mo_work_order", entityId: wo.id, actorId: user.id,
     actorName: user.email ?? null, metadata: { wo_no: woNo, mo_no: body.mo_no, qty, stage: body.stage } });
 
+  // B1: จ่ายงานใบแรกของ MO → ย้ายวัตถุดิบตาม BOM จาก WH-RAW → WH-WIP อัตโนมัติ (ระดับ MO ครั้งเดียว)
+  // best-effort — ถ้าย้ายไม่สำเร็จ (ไม่มี BOM/คลัง) ก็ให้การจ่ายงานสำเร็จไปก่อน ไม่บล็อค
+  try {
+    const { data: mo } = await admin.from("manufacturing_orders")
+      .select("id, materials_issued").eq("mo_no", body.mo_no).maybeSingle();
+    const moRow = mo as { id?: string; materials_issued?: boolean } | null;
+    if (moRow?.id && !moRow.materials_issued) {
+      await admin.rpc("erp_mo_issue_to_wip", { p_mo_id: moRow.id, p_actor: user.email ?? null });
+    }
+  } catch (e) { console.error("[dispatch] ย้ายวัตถุดิบเข้า WIP ไม่สำเร็จ:", e instanceof Error ? e.message : e); }
+
   // แจ้งเตือน (best-effort): DM ช่างที่รับงาน + LINE กลุ่มผลิต (จ่ายงานบ่อย จึงไม่เด้งกระดิ่ง)
   const isCraft = body.assignee_type === "craftsman" && !!body.assignee_id;
   const link = boardLink("/master/work-board");
