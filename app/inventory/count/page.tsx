@@ -3,10 +3,10 @@
 /**
  * นับสต๊อก (/inventory/count) — เปิดรอบนับ → ถ่ายยอดปัจจุบัน → กรอกจำนวนจริง → เทียบส่วนต่าง → ปรับอัตโนมัติ
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ConfirmDialog } from "@/components/modal";
-import { WarehousePicker } from "@/components/pickers";
+import { WarehousePicker, SkuPicker } from "@/components/pickers";
 import type { WarehousePickerValue } from "@/components/pickers";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -39,6 +39,9 @@ export default function CountPage() {
   const [counted, setCounted] = useState<Record<string, string>>({});
   const [confirmApply, setConfirmApply] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [scanCode, setScanCode] = useState("");
+  const [addKey, setAddKey] = useState(0);
+  const scanRef = useRef<HTMLInputElement>(null);
 
   const loadSessions = useCallback(async () => {
     setLoading(true); setError(null);
@@ -95,6 +98,38 @@ export default function CountPage() {
       await openSession(active.session.id);
     } catch (e) { setError(e instanceof Error ? e.message : "ปรับไม่สำเร็จ"); }
     finally { setApplying(false); }
+  };
+
+  const upsertLine = (line: CountLine) => {
+    setActive((a) => {
+      if (!a) return a;
+      const has = a.lines.some((l) => l.id === line.id);
+      return { ...a, lines: has ? a.lines.map((l) => (l.id === line.id ? line : l)) : [line, ...a.lines] };
+    });
+    setCounted((m) => ({ ...m, [line.id]: line.counted_qty == null ? "" : String(line.counted_qty) }));
+  };
+  const doScan = async () => {
+    const code = scanCode.trim();
+    if (!code || !active) return;
+    setScanCode("");
+    try {
+      const res = await apiFetch("/api/inventory/count", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "scan", count_id: active.session.id, code }) });
+      const j = await res.json();
+      if (j.error) { setError(j.error); return; }
+      if (!j.found) { setError(`ไม่พบบาร์โค้ด/รหัส: ${code}`); return; }
+      upsertLine(j.line); setError(null);
+      flash(`✓ ${j.line.product_sku} — นับแล้ว ${fmt(j.line.counted_qty)}`);
+    } catch { setError("สแกนไม่สำเร็จ"); }
+    finally { scanRef.current?.focus(); }
+  };
+  const addLine = async (productId: string) => {
+    if (!active) return;
+    try {
+      const res = await apiFetch("/api/inventory/count", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "add_line", count_id: active.session.id, product_id: productId }) });
+      const j = await res.json();
+      if (j.error) { setError(j.error); return; }
+      upsertLine(j.line); setAddKey((k) => k + 1); flash("เพิ่มสินค้าแล้ว");
+    } catch { setError("เพิ่มไม่สำเร็จ"); }
   };
 
   if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
@@ -187,6 +222,24 @@ export default function CountPage() {
               <div><span className="text-[11px] text-slate-400">สถานะ</span><div><span className={`text-[11px] px-2 py-0.5 rounded border ${(STATUS[active.session.status] ?? STATUS.counting).cls}`}>{(STATUS[active.session.status] ?? STATUS.counting).label}</span></div></div>
               <div><span className="text-[11px] text-slate-400">รายการ</span><div className="text-sm">{active.lines.length} SKU</div></div>
             </div>
+
+            {/* สแกนบาร์โค้ด + เพิ่มสินค้า */}
+            {!isApplied && (
+              <div className="mb-3 p-3 bg-blue-50/60 border border-blue-200 rounded-xl flex items-end gap-3 flex-wrap">
+                <div className="flex-1 min-w-[240px]">
+                  <span className="text-xs font-medium text-slate-600">📷 สแกนบาร์โค้ด (นับ +1 อัตโนมัติ)</span>
+                  <input ref={scanRef} value={scanCode} autoFocus
+                    onChange={(e) => setScanCode(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void doScan(); } }}
+                    placeholder="ยิงบาร์โค้ด หรือพิมพ์รหัส SKU แล้วกด Enter"
+                    className="mt-1 w-full h-10 px-3 border border-blue-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-200" />
+                </div>
+                <div className="w-60">
+                  <span className="text-xs font-medium text-slate-600">➕ หรือค้นหาเพิ่มสินค้า</span>
+                  <div className="mt-1"><SkuPicker key={addKey} value={null} onChange={(v) => { if (v) void addLine(v.id); }} /></div>
+                </div>
+              </div>
+            )}
 
             {/* ตารางนับ */}
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">

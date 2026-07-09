@@ -85,5 +85,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ adjusted: data, error: null });
   }
 
+  // สแกนบาร์โค้ด → หา SKU + นับ +1 (เพิ่ม line ถ้ายังไม่มี)
+  if (action === "scan") {
+    const denied = await guardApi(request, "stock.view"); if (denied) return denied;
+    if (!body.count_id || !body.code) return NextResponse.json({ error: "ต้องมี count_id + code" }, { status: 400 });
+    const { data, error } = await admin.rpc("erp_stock_count_scan", { p_count_id: body.count_id, p_code: String(body.code).trim() });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+    if (!row?.found) return NextResponse.json({ found: false, error: null });
+    return NextResponse.json({ found: true, line: { id: row.line_id, product_sku: row.product_sku, product_name: row.product_name, system_qty: Number(row.sys_qty), counted_qty: Number(row.cnt_qty) }, error: null });
+  }
+
+  // เพิ่มสินค้าเข้ารอบนับด้วยมือ (เลือกจาก picker)
+  if (action === "add_line") {
+    const denied = await guardApi(request, "stock.view"); if (denied) return denied;
+    const count_id = body.count_id as string | undefined, product_id = body.product_id as string | undefined;
+    if (!count_id || !product_id) return NextResponse.json({ error: "ต้องมี count_id + product_id" }, { status: 400 });
+    const { data: exist } = await admin.from("erp_stock_count_lines").select("id, product_sku, product_name, system_qty, counted_qty").eq("count_id", count_id).eq("product_id", product_id).maybeSingle();
+    if (exist) return NextResponse.json({ line: exist, error: null });
+    const { data: sku } = await admin.from("skus_v2").select("code, name_th").eq("id", product_id).maybeSingle();
+    const { data: c } = await admin.from("erp_stock_counts").select("warehouse_id").eq("id", count_id).maybeSingle();
+    const whId = (c as { warehouse_id?: string } | null)?.warehouse_id;
+    let sysQty = 0;
+    if (whId) { const { data: bal } = await admin.from("erp_playground_stock_balances").select("qty_on_hand").eq("product_id", product_id).eq("warehouse_id", whId).maybeSingle(); sysQty = Number((bal as { qty_on_hand?: number } | null)?.qty_on_hand ?? 0); }
+    const skuRow = sku as { code?: string; name_th?: string } | null;
+    const { data: inserted, error } = await admin.from("erp_stock_count_lines")
+      .insert({ count_id, product_id, product_sku: skuRow?.code ?? null, product_name: skuRow?.name_th ?? skuRow?.code ?? null, system_qty: sysQty, counted_qty: null })
+      .select("id, product_sku, product_name, system_qty, counted_qty").single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ line: inserted, error: null });
+  }
+
   return NextResponse.json({ error: "ไม่รู้จัก action" }, { status: 400 });
 }
