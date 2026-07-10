@@ -1017,10 +1017,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [studioOpen, setStudioOpen] = useState(false);
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
   // ปุ่ม "ออกแบบฟอร์ม" (Studio) — ไอคอนที่หัว drawer ข้างซ้ายปุ่มปิด · โผล่เฉพาะโมดูลจริง + มีสิทธิ์แก้
-  const studioHeaderBtn = config.moduleKey && canEdit ? (
-    <button type="button" onClick={() => setStudioOpen(true)} title="ออกแบบฟอร์ม/ตาราง — จัดฟิลด์ · แท็บ · เห็น preview สด"
-      className="p-1.5 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors text-base leading-none">🎨</button>
-  ) : undefined;
+  // render-prop (() => ReactNode) ให้ตรงกับ prop headerActions ของ Drawer
+  const studioHeaderBtn = config.moduleKey && canEdit
+    ? () => (
+        <button type="button" onClick={() => setStudioOpen(true)} title="ออกแบบฟอร์ม/ตาราง — จัดฟิลด์ · แท็บ · เห็น preview สด"
+          className="p-1.5 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors text-base leading-none">🎨</button>
+      )
+    : undefined;
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);   // นำเข้าข้อมูล (ของกลาง)
   const [customCreateOpen, setCustomCreateOpen] = useState(false);   // UI สร้างเอง (เช่น SKU Wizard)
