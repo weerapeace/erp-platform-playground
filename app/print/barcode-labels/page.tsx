@@ -138,20 +138,21 @@ export default function BarcodeLabelsPrintPage() {
   if (custom) {
     const { codeH, font } = autoCodeMetrics(custom.labelH);
     const cols = Math.max(1, Math.floor(custom.cols));
+    const offX = custom.offsetX ?? 0;   // จูนตำแหน่ง (mm) +ขวา -ซ้าย
+    const offY = custom.offsetY ?? 0;   // +ลง -ขึ้น
     if (custom.mode === "roll" && (custom.rollSplit ?? "row") === "row") {
-      // Roll แยกทีละแถว — แต่ละแถว (cols ดวง) = 1 หน้า ขนาด = rollWidth × สูง 1 แถว
-      // เหมาะกับเครื่องพิมพ์ฉลากที่ป้อนทีละดวง/แถว — ขนาดหน้าตรงกับ media 1 หน่วย ไม่โดน Chrome ตัดแบ่ง
-      const rowH = custom.mTop + custom.labelH + custom.mBottom;
-      pageCss = `@page { size: ${custom.rollWidth}mm ${rowH}mm; margin: 0; }`;
+      // Roll แยกทีละแถว — แต่ละแถว (cols ดวง) = 1 หน้า สูง = "ระยะพิทช์" (labelH + ช่องไฟแนวตั้ง)
+      // = ระยะเลื่อนกระดาษ 1 ดวงพอดี → ไม่มีดริฟต์สะสม, ตรงรอยตัดทุกดวง
+      const pitchY = custom.labelH + custom.gapY;
+      pageCss = `@page { size: ${custom.rollWidth}mm ${pitchY}mm; margin: 0; }`;
       const rowsArr: PrintItem[][] = [];
       for (let i = 0; i < labels.length; i += cols) rowsArr.push(labels.slice(i, i + cols));
       sheetCount = rowsArr.length;
       body = <>{rowsArr.map((row, ri) => (
-        <div key={ri} className="rollpage" style={{ width: `${custom.rollWidth}mm`, height: `${rowH}mm`, overflow: "hidden",
-          paddingTop: `${custom.mTop}mm`, paddingBottom: `${custom.mBottom}mm`, paddingLeft: `${custom.mLeft}mm`, paddingRight: `${custom.mRight}mm`,
-          boxSizing: "border-box" }}>
+        <div key={ri} className="rollpage" style={{ width: `${custom.rollWidth}mm`, height: `${pitchY}mm`, overflow: "hidden",
+          paddingLeft: `${custom.mLeft + offX}mm`, paddingTop: `${custom.mTop + offY}mm`, boxSizing: "border-box" }}>
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, ${custom.labelW}mm)`, height: `${custom.labelH}mm`,
-            columnGap: `${custom.gapX}mm`, justifyContent: "center" }}>
+            columnGap: `${custom.gapX}mm`, justifyContent: "start" }}>
             {row.map((it, li) => <Label key={li} it={it} opts={opts} codeH={codeH} font={font} qr={qrOf(it)} />)}
           </div>
         </div>
@@ -164,10 +165,10 @@ export default function BarcodeLabelsPrintPage() {
       pageCss = `@page { size: ${custom.rollWidth}mm ${totalH}mm; margin: 0; }`;
       body = (
         <div className="rollsheet" style={{ width: `${custom.rollWidth}mm`, height: `${totalH}mm`, overflow: "hidden",
-          paddingTop: `${custom.mTop}mm`, paddingBottom: `${custom.mBottom}mm`, paddingLeft: `${custom.mLeft}mm`, paddingRight: `${custom.mRight}mm`,
+          paddingLeft: `${custom.mLeft + offX}mm`, paddingRight: `${custom.mRight}mm`, paddingTop: `${custom.mTop + offY}mm`, paddingBottom: `${custom.mBottom}mm`,
           boxSizing: "border-box" }}>
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, ${custom.labelW}mm)`,
-            gridAutoRows: `${custom.labelH}mm`, columnGap: `${custom.gapX}mm`, rowGap: `${custom.gapY}mm`, justifyContent: "center" }}>
+            gridAutoRows: `${custom.labelH}mm`, columnGap: `${custom.gapX}mm`, rowGap: `${custom.gapY}mm`, justifyContent: "start" }}>
             {labels.map((it, li) => <Label key={li} it={it} opts={opts} codeH={codeH} font={font} qr={qrOf(it)} />)}
           </div>
         </div>
@@ -184,10 +185,10 @@ export default function BarcodeLabelsPrintPage() {
       pageCss = `@page { size: A4; margin: 0; }`;
       body = <>{pages.map((pg, pi) => (
         <div key={pi} className="sheet" style={{ width: "210mm", height: "297mm",
-          paddingTop: `${custom.mTop}mm`, paddingBottom: `${custom.mBottom}mm`, paddingLeft: `${custom.mLeft}mm`, paddingRight: `${custom.mRight}mm`,
+          paddingTop: `${custom.mTop + offY}mm`, paddingBottom: `${custom.mBottom}mm`, paddingLeft: `${custom.mLeft + offX}mm`, paddingRight: `${custom.mRight}mm`,
           boxSizing: "border-box" }}>
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, ${custom.labelW}mm)`,
-            gridAutoRows: `${custom.labelH}mm`, columnGap: `${custom.gapX}mm`, rowGap: `${custom.gapY}mm`, justifyContent: "center" }}>
+            gridAutoRows: `${custom.labelH}mm`, columnGap: `${custom.gapX}mm`, rowGap: `${custom.gapY}mm`, justifyContent: "start" }}>
             {pg.map((it, li) => <Label key={li} it={it} opts={opts} codeH={codeH} font={font} qr={qrOf(it)} />)}
           </div>
         </div>

@@ -222,6 +222,22 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
                   </div>
                 </>
               )}
+              {/* จูนตำแหน่ง — ขยับทุกดวงพร้อมกันให้ตรงรอยตัด */}
+              <div className="border-t border-slate-100 pt-2">
+                <div className="text-[11px] text-slate-500 mb-1">🎯 จูนตำแหน่ง (ถ้าพิมพ์ยังไม่ตรงรอยตัด — ค่อย ๆ ปรับทีละ 0.5–1mm)</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-[11px] text-slate-500">เลื่อนแนวนอน (mm) +ขวา −ซ้าย</span>
+                    <input type="number" step={0.5} value={c.offsetX ?? 0} onChange={(e) => setCustom({ offsetX: Number(e.target.value) })}
+                      className="h-8 px-2 text-sm border border-slate-200 rounded-md" />
+                  </label>
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-[11px] text-slate-500">เลื่อนแนวตั้ง (mm) +ลง −ขึ้น</span>
+                    <input type="number" step={0.5} value={c.offsetY ?? 0} onChange={(e) => setCustom({ offsetY: Number(e.target.value) })}
+                      className="h-8 px-2 text-sm border border-slate-200 rounded-md" />
+                  </label>
+                </div>
+              </div>
             </div>
           ); })()}
         </div>

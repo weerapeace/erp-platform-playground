@@ -33,11 +33,13 @@ export type CustomLayout = {
   mTop: number; mBottom: number; mLeft: number; mRight: number;  // ระยะขอบ (mm)
   rollWidth: number;                                       // ความกว้าง roll (mm) — ใช้เมื่อ mode = roll
   rollSplit?: "continuous" | "row";                        // roll: หน้าเดียวยาว / แยกทีละแถว (เครื่องพิมพ์ฉลากป้อนทีละดวง)
+  offsetX?: number; offsetY?: number;                      // จูนตำแหน่ง (mm) — ขยับทุกดวงให้ตรงรอยตัด (+ขวา/ลง, -ซ้าย/ขึ้น)
 };
 
 export const DEFAULT_CUSTOM: CustomLayout = {
   mode: "a4", labelW: 50, labelH: 30, cols: 3, gapX: 2, gapY: 2,
   mTop: 8, mBottom: 8, mLeft: 8, mRight: 8, rollWidth: 100, rollSplit: "row",
+  offsetX: 0, offsetY: 0,
 };
 
 // ขนาด QR/บาร์โค้ด + ฟอนต์ อัตโนมัติจากความสูงสติ๊กเกอร์ (เลย์เอาต์กำหนดเอง)
