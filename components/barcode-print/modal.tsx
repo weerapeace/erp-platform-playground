@@ -10,7 +10,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import {
   LABEL_PRESETS, getPreset, PRINT_PAYLOAD_KEY, QR_LOGO_KEY, MAX_LABELS,
-  DEFAULT_CUSTOM, LAYOUT_TEMPLATES_KEY, rollDriverSize,
+  DEFAULT_CUSTOM, LAYOUT_TEMPLATES_KEY, DEFAULT_TEMPLATE_KEY, rollDriverSize,
   type PrintOpts, type CustomLayout, type SavedTemplate,
 } from "./labels";
 
@@ -28,13 +28,25 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
     logoMode: "none", logo: null, codeColor: "#000000", showBorder: true,
   });
   const [templates, setTemplates] = useState<SavedTemplate[]>([]);
+  const [defaultTpl, setDefaultTpl] = useState<string | null>(null);
 
-  // โหลดแม่แบบเลย์เอาต์ที่บันทึกไว้
+  // โหลดแม่แบบ + ถ้ามีค่าเริ่มต้น (⭐) ใช้เลยตอนเปิด
   useEffect(() => {
     if (!open) return;
-    try { const raw = localStorage.getItem(LAYOUT_TEMPLATES_KEY); if (raw) setTemplates(JSON.parse(raw) as SavedTemplate[]); } catch { /* ignore */ }
+    let tpls: SavedTemplate[] = [];
+    try { const raw = localStorage.getItem(LAYOUT_TEMPLATES_KEY); if (raw) tpls = JSON.parse(raw) as SavedTemplate[]; } catch { /* ignore */ }
+    setTemplates(tpls);
+    let def: string | null = null;
+    try { def = localStorage.getItem(DEFAULT_TEMPLATE_KEY); } catch { /* ignore */ }
+    setDefaultTpl(def);
+    if (def) { const t = tpls.find((x) => x.name === def); if (t?.opts) setOpts({ ...t.opts }); else if (t?.layout) setOpts((o) => ({ ...o, custom: { ...t.layout! } })); }
   }, [open]);
   const saveTemplates = (list: SavedTemplate[]) => { setTemplates(list); try { localStorage.setItem(LAYOUT_TEMPLATES_KEY, JSON.stringify(list)); } catch { /* ignore */ } };
+  const setDefault = (name: string) => {
+    const next = defaultTpl === name ? null : name;
+    setDefaultTpl(next);
+    try { if (next) localStorage.setItem(DEFAULT_TEMPLATE_KEY, next); else localStorage.removeItem(DEFAULT_TEMPLATE_KEY); } catch { /* ignore */ }
+  };
 
   const usePreset = () => setOpts((o) => ({ ...o, custom: null }));
   const useCustom = () => setOpts((o) => ({ ...o, custom: o.custom ?? { ...DEFAULT_CUSTOM } }));
@@ -63,7 +75,7 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
       .then((j) => setRows(((j.data ?? []) as Omit<Row, "qty">[]).map((d) => ({ ...d, qty: 1 }))))
       .catch(() => toast.error("โหลดข้อมูลไม่สำเร็จ"))
       .finally(() => setLoading(false));
-    try { const l = localStorage.getItem(QR_LOGO_KEY); if (l) setOpts((o) => ({ ...o, logo: l })); } catch { /* ignore */ }
+    try { const l = localStorage.getItem(QR_LOGO_KEY); if (l) setOpts((o) => (o.logo ? o : { ...o, logo: l })); } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, idsKey, entity]);
 
@@ -173,12 +185,14 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
           {templates.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {templates.map((t) => (
-                <span key={t.name} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-600">
+                <span key={t.name} className={`inline-flex items-center gap-1 pl-1 pr-2 py-0.5 rounded-full text-[11px] ${defaultTpl === t.name ? "bg-amber-50 text-amber-800 border border-amber-300" : "bg-slate-100 text-slate-600"}`}>
+                  <button onClick={() => setDefault(t.name)} title="ตั้งเป็นค่าเริ่มต้น (เปิดมาใช้เลย)" className={defaultTpl === t.name ? "text-amber-500" : "text-slate-300 hover:text-amber-400"}>{defaultTpl === t.name ? "★" : "☆"}</button>
                   {t.name}<button onClick={() => deleteTemplate(t.name)} title="ลบแม่แบบ" className="text-slate-400 hover:text-red-500">✕</button>
                 </span>
               ))}
             </div>
           )}
+          {defaultTpl && <div className="text-[11px] text-amber-700">⭐ ค่าเริ่มต้น: {defaultTpl} — เปิดหน้านี้ครั้งหน้าจะใช้แม่แบบนี้เลย</div>}
 
           {!opts.custom ? (
             <select value={opts.preset} onChange={(e) => setOpts((o) => ({ ...o, preset: e.target.value }))}

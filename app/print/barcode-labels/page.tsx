@@ -10,9 +10,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import {
-  getPreset, autoCodeMetrics, rollDriverSize, DEFAULT_CUSTOM, LABEL_PRESETS,
-  PRINT_PAYLOAD_KEY, LAYOUT_TEMPLATES_KEY, MAX_LABELS,
-  type PrintPayload, type PrintItem, type PrintOpts, type CustomLayout, type SavedTemplate,
+  getPreset, autoCodeMetrics, resolveSizes, rollDriverSize, DEFAULT_CUSTOM, LABEL_PRESETS,
+  PRINT_PAYLOAD_KEY, LAYOUT_TEMPLATES_KEY, DEFAULT_TEMPLATE_KEY, MAX_LABELS,
+  type PrintPayload, type PrintItem, type PrintOpts, type CustomLayout, type SavedTemplate, type ElemSizes,
 } from "@/components/barcode-print/labels";
 
 const loadImg = (src: string): Promise<HTMLImageElement> =>
@@ -56,24 +56,25 @@ function Barcode({ value, heightMm, color = "#000000" }: { value: string; height
 
 function Label({ it, opts, codeH, font, qr }: { it: PrintItem; opts: PrintOpts; codeH: number; font: number; qr?: string }) {
   const hasText = opts.showCode || opts.showName || opts.showPrice;
+  const sz = resolveSizes(opts.sizes, codeH, font);
   return (
     <div style={{ border: opts.showBorder ? "0.4px dashed #dcdcdc" : "none", display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", gap: "0.5mm", overflow: "hidden", padding: "1mm", boxSizing: "border-box" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "1.5mm", maxWidth: "100%" }}>
-        {opts.showQR && qr && <img src={qr} alt="" style={{ height: `${codeH}mm`, width: `${codeH}mm` }} />}
-        {opts.showBarcode && <Barcode value={it.barcode || it.code} heightMm={codeH * 0.8} color={opts.codeColor} />}
+        {opts.showQR && qr && <img src={qr} alt="" style={{ height: `${sz.qr}mm`, width: `${sz.qr}mm` }} />}
+        {opts.showBarcode && <Barcode value={it.barcode || it.code} heightMm={sz.barcodeH} color={opts.codeColor} />}
       </div>
       {hasText && (
         <div style={{ textAlign: "center", lineHeight: 1.12, maxWidth: "100%", overflow: "hidden" }}>
           {opts.showCode && (
-            <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: `${font}pt`,
+            <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: `${sz.fontCode}pt`,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.code}</div>
           )}
           {opts.showName && it.name && (
-            <div style={{ fontSize: `${font * 0.85}pt`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.name}</div>
+            <div style={{ fontSize: `${sz.fontName}pt`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.name}</div>
           )}
           {opts.showPrice && it.price != null && it.price > 0 && (
-            <div style={{ fontSize: `${font}pt`, fontWeight: 600 }}>฿{Number(it.price).toLocaleString("th-TH")}</div>
+            <div style={{ fontSize: `${sz.fontPrice}pt`, fontWeight: 600 }}>฿{Number(it.price).toLocaleString("th-TH")}</div>
           )}
         </div>
       )}
@@ -130,8 +131,19 @@ export default function BarcodeLabelsPrintPage() {
 
   // แม่แบบ (เก็บทุกค่า) — ใช้ localStorage ร่วมกับ modal
   const [templates, setTemplates] = useState<SavedTemplate[]>([]);
-  useEffect(() => { try { const raw = localStorage.getItem(LAYOUT_TEMPLATES_KEY); if (raw) setTemplates(JSON.parse(raw) as SavedTemplate[]); } catch { /* ignore */ } }, []);
+  const [defaultTpl, setDefaultTpl] = useState<string | null>(null);
+  useEffect(() => {
+    try { const raw = localStorage.getItem(LAYOUT_TEMPLATES_KEY); if (raw) setTemplates(JSON.parse(raw) as SavedTemplate[]); } catch { /* ignore */ }
+    try { setDefaultTpl(localStorage.getItem(DEFAULT_TEMPLATE_KEY)); } catch { /* ignore */ }
+  }, []);
   const persistTemplates = (list: SavedTemplate[]) => { setTemplates(list); try { localStorage.setItem(LAYOUT_TEMPLATES_KEY, JSON.stringify(list)); } catch { /* ignore */ } };
+  const setDefault = (name: string) => {
+    const next = defaultTpl === name ? null : name;
+    setDefaultTpl(next);
+    try { if (next) localStorage.setItem(DEFAULT_TEMPLATE_KEY, next); else localStorage.removeItem(DEFAULT_TEMPLATE_KEY); } catch { /* ignore */ }
+  };
+  const updateSizes = (patch: Partial<ElemSizes>) =>
+    setPayload((p) => (p ? { ...p, opts: { ...p.opts, sizes: { ...(p.opts.sizes ?? {}), ...patch } } } : p));
   const saveTemplate = () => {
     if (!payload) return;
     const name = window.prompt("ตั้งชื่อแม่แบบ (เก็บทุกค่า):", "แม่แบบของฉัน");
@@ -161,6 +173,9 @@ export default function BarcodeLabelsPrintPage() {
   const custom = opts.custom;
   const capped = labels.length >= MAX_LABELS;
   const qrOf = (it: PrintItem) => qrMap[`${it.barcode || it.code}|${logoForItem(it, opts) ?? ""}`];
+  // ขนาด default ตามเลย์เอาต์ (ไว้โชว์ในช่องปรับขนาด)
+  const autoCM = custom ? autoCodeMetrics(custom.labelH) : { codeH: getPreset(opts.preset).codeH, font: getPreset(opts.preset).font };
+  const rs = resolveSizes(opts.sizes, autoCM.codeH, autoCM.font);
 
   // ── เลย์เอาต์กำหนดเอง ──
   let body: ReactNode;
@@ -307,11 +322,15 @@ export default function BarcodeLabelsPrintPage() {
             </select>
             <button onClick={saveTemplate} style={{ height: 30, padding: "0 10px", fontSize: 12, borderRadius: 6, border: "1px solid #c7d2fe", background: "#eef2ff", color: "#4338ca", cursor: "pointer" }}>💾 บันทึกเป็นแม่แบบ</button>
             {templates.map((t) => (
-              <span key={t.name} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, fontSize: 11, background: "#f1f5f9", color: "#475569" }}>
-                {t.name}<button onClick={() => persistTemplates(templates.filter((x) => x.name !== t.name))} title="ลบ" style={{ border: "none", background: "none", color: "#94a3b8", cursor: "pointer" }}>✕</button>
+              <span key={t.name} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 6px 2px 4px", borderRadius: 999, fontSize: 11,
+                background: defaultTpl === t.name ? "#fffbeb" : "#f1f5f9", color: "#475569", border: defaultTpl === t.name ? "1px solid #fcd34d" : "1px solid transparent" }}>
+                <button onClick={() => setDefault(t.name)} title="ตั้งเป็นค่าเริ่มต้น (เปิดมาใช้เลย)" style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13, color: defaultTpl === t.name ? "#f59e0b" : "#cbd5e1" }}>{defaultTpl === t.name ? "★" : "☆"}</button>
+                {t.name}
+                <button onClick={() => persistTemplates(templates.filter((x) => x.name !== t.name))} title="ลบ" style={{ border: "none", background: "none", color: "#94a3b8", cursor: "pointer" }}>✕</button>
               </span>
             ))}
           </div>
+          {defaultTpl && <div style={{ fontSize: 11, color: "#b45309", marginTop: -4 }}>⭐ ค่าเริ่มต้น: {defaultTpl} — เปิดหน้าพิมพ์ครั้งหน้าจะใช้แม่แบบนี้อัตโนมัติ</div>}
           {/* แสดงอะไร + สี */}
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
             <strong style={{ fontSize: 12, color: "#94a3b8" }}>แสดง</strong>
@@ -324,6 +343,16 @@ export default function BarcodeLabelsPrintPage() {
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#334155" }}>สีโค้ด
               <input type="color" value={opts.codeColor} onChange={(e) => updateOpts({ codeColor: e.target.value })} style={{ width: 34, height: 26, cursor: "pointer" }} />
             </label>
+          </div>
+          {/* ปรับขนาดแต่ละองค์ประกอบ (พรีวิวเปลี่ยนสด) */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <strong style={{ fontSize: 12, color: "#94a3b8", alignSelf: "center" }}>ขนาด</strong>
+            {opts.showQR && numF("QR (mm)", rs.qr, (v) => updateSizes({ qr: v }))}
+            {opts.showBarcode && numF("บาร์โค้ดสูง (mm)", rs.barcodeH, (v) => updateSizes({ barcodeH: v }))}
+            {opts.showCode && numF("อักษร รหัส (pt)", rs.fontCode, (v) => updateSizes({ fontCode: v }))}
+            {opts.showName && numF("อักษร ชื่อ (pt)", rs.fontName, (v) => updateSizes({ fontName: v }))}
+            {opts.showPrice && numF("อักษร ราคา (pt)", rs.fontPrice, (v) => updateSizes({ fontPrice: v }))}
+            <button onClick={() => updateOpts({ sizes: undefined })} style={{ height: 30, padding: "0 10px", fontSize: 12, borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", color: "#64748b", cursor: "pointer" }}>↺ ขนาดอัตโนมัติ</button>
           </div>
           {custom ? (
             <>

@@ -50,10 +50,24 @@ export function autoCodeMetrics(labelH: number): { codeH: number; font: number }
   };
 }
 
+// ขนาดแต่ละองค์ประกอบ (ปรับเองได้ — ถ้าไม่ตั้ง ใช้อัตโนมัติจากความสูงป้าย)
+export type ElemSizes = { qr?: number; barcodeH?: number; fontCode?: number; fontName?: number; fontPrice?: number };
+const r1 = (n: number) => Math.round(n * 10) / 10;
+export function resolveSizes(sz: ElemSizes | undefined, codeH: number, font: number) {
+  return {
+    qr:        sz?.qr        ?? r1(codeH),
+    barcodeH:  sz?.barcodeH  ?? r1(codeH * 0.8),
+    fontCode:  sz?.fontCode  ?? r1(font),
+    fontName:  sz?.fontName  ?? r1(font * 0.85),
+    fontPrice: sz?.fontPrice ?? r1(font),
+  };
+}
+
 // แม่แบบ — เก็บ "ทุกค่า" (opts เต็ม: โค้ดที่พิมพ์/โชว์ใต้โค้ด/เลย์เอาต์/สี/โลโก้)
 // layout = ของเก่า (เก็บแค่ CustomLayout) — อ่านได้เพื่อ backward-compat
 export type SavedTemplate = { name: string; opts?: PrintOpts; layout?: CustomLayout };
 export const LAYOUT_TEMPLATES_KEY = "barcode_layout_templates";   // localStorage — แม่แบบที่บันทึกไว้
+export const DEFAULT_TEMPLATE_KEY = "barcode_default_template";    // localStorage — ชื่อแม่แบบเริ่มต้น (⭐ เปิดมาใช้เลย)
 
 // ขนาดกระดาษ USER ที่ควรตั้งในไดรเวอร์เครื่องพิมพ์ฉลาก (โหมด Roll แยกทีละแถว = กว้าง roll × 1 แถว)
 export function rollDriverSize(c: CustomLayout): { w: number; h: number } {
@@ -73,6 +87,7 @@ export type PrintOpts = {
   logo: string | null;     // data URL โลโก้กลาง QR (ใช้เมื่อ logoMode = single)
   codeColor: string;       // สีของ QR + บาร์โค้ด (default ดำ)
   showBorder: boolean;     // แสดงเส้นตัด (ขอบดวง)
+  sizes?: ElemSizes;       // ปรับขนาด QR/บาร์โค้ด/ตัวอักษรเอง (ไม่ตั้ง = อัตโนมัติ)
 };
 
 export type PrintItem = { code: string; barcode: string; name: string; price: number | null; qty: number; brandLogo?: string | null };
