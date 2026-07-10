@@ -5,7 +5,7 @@
 // ใช้ที่: หน้า /tasks (ปุ่ม 📚 ความรู้) · เก็บเป็น HTML ผ่าน RichTextEditor กลาง
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listKnowledge, createKnowledge, updateKnowledge, deleteKnowledge, type KnowledgePage } from "./data";
 import { RichTextEditor } from "@/components/rich-text";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
@@ -22,6 +22,28 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<{ title: string; body_html: string }>({ title: "", body_html: "" });
   const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);        // มีแก้ไขที่ยังไม่บันทึก
+  const [savedAt, setSavedAt] = useState<number | null>(null);   // เวลาบันทึกอัตโนมัติล่าสุด
+  const savingRef = useRef(false);                  // กันบันทึกซ้อน
+
+  // บันทึกอัตโนมัติ (เงียบ ไม่ปิดโหมดแก้/ไม่ reload) — เก็บใน ref ให้ interval เรียกตัวล่าสุดเสมอ
+  const autoSaveRef = useRef<() => void>(() => {});
+  autoSaveRef.current = () => {
+    if (!active || savingRef.current || !dirty || !editing) return;
+    savingRef.current = true;
+    const id = active.id;
+    const body = { title: draft.title.trim() || t("ไม่มีชื่อ", "Untitled"), body_html: draft.body_html };
+    void updateKnowledge(id, body)
+      .then(() => { setDirty(false); setSavedAt(Date.now()); setPages((ps) => ps.map((p) => (p.id === id ? { ...p, title: body.title, body_html: body.body_html } : p))); })
+      .catch(() => { /* เงียบ — ลองใหม่รอบหน้า */ })
+      .finally(() => { savingRef.current = false; });
+  };
+  // เดินนาฬิกา auto-save ทุก 10 วิ ระหว่างแก้อยู่
+  useEffect(() => {
+    if (!editing) return;
+    const iv = setInterval(() => autoSaveRef.current(), 10000);
+    return () => clearInterval(iv);
+  }, [editing]);
 
   const load = useCallback(async () => {
     try { const ps = await listKnowledge(); setPages(ps); setActiveId((cur) => cur ?? ps[0]?.id ?? null); }
@@ -32,17 +54,19 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
 
   const active = pages.find((p) => p.id === activeId) ?? null;
 
-  const startEdit = () => { if (!active) return; setDraft({ title: active.title, body_html: active.body_html ?? "" }); setEditing(true); };
+  const startEdit = () => { if (!active) return; setDraft({ title: active.title, body_html: active.body_html ?? "" }); setDirty(false); setSavedAt(null); setEditing(true); };
   const save = async () => {
     if (!active) return; setBusy(true);
-    try { await updateKnowledge(active.id, { title: draft.title.trim() || t("ไม่มีชื่อ","Untitled"), body_html: draft.body_html }); setEditing(false); await load(); pushToast("success", t("บันทึกแล้ว","Saved")); }
+    try { await updateKnowledge(active.id, { title: draft.title.trim() || t("ไม่มีชื่อ","Untitled"), body_html: draft.body_html }); setDirty(false); setEditing(false); await load(); pushToast("success", t("บันทึกแล้ว","Saved")); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
   const addPage = async () => {
     setBusy(true);
-    try { const p = await createKnowledge(t("หน้าใหม่","New page")); await load(); setActiveId(p.id); setDraft({ title: p.title, body_html: "" }); setEditing(true); }
+    try { const p = await createKnowledge(t("หน้าใหม่","New page")); await load(); setActiveId(p.id); setDraft({ title: p.title, body_html: "" }); setDirty(false); setSavedAt(null); setEditing(true); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
+  // ปิด drawer — ถ้ากำลังแก้และมีของค้าง บันทึกให้ก่อน (fire-and-forget)
+  const handleClose = () => { if (editing && dirty) autoSaveRef.current(); onClose(); };
   const remove = async () => {
     if (!active || !window.confirm(`${t("ลบหน้า","Delete page")} "${active.title}" ?`)) return;
     setBusy(true);
@@ -52,13 +76,13 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/20 z-40" onClick={handleClose} />
       <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
         {/* ที่จับลากปรับความกว้าง (ขอบซ้าย) */}
         <div onMouseDown={startResize} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-400/40 active:bg-violet-400/60 z-[60]" />
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <h3 className="text-base font-semibold text-slate-900">📚 {t("คลังความรู้","Knowledge")}</h3>
-          <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
+          <button onClick={handleClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
         </div>
 
         <div className="flex-1 flex min-h-0">
@@ -83,12 +107,14 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
               <p className="text-sm text-slate-400 italic">{t("เลือกหน้าจากรายการด้านซ้าย","Select a page from the list on the left")}</p>
             ) : editing ? (
               <div className="space-y-3">
-                <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                <input value={draft.title} onChange={(e) => { setDraft({ ...draft, title: e.target.value }); setDirty(true); }}
                   className="w-full text-lg font-semibold border border-slate-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-violet-200" placeholder={t("หัวข้อ","Title")} />
-                <RichTextEditor value={draft.body_html} onChange={(html) => setDraft({ ...draft, body_html: html })} minHeight={320} placeholder={t("พิมพ์เนื้อหา ใส่หัวข้อ/ลิสต์/ลิงก์/รูปได้...","Type content — headings, lists, links, images...")} />
-                <div className="flex gap-2">
+                <RichTextEditor value={draft.body_html} onChange={(html) => { setDraft({ ...draft, body_html: html }); setDirty(true); }} minHeight={320} placeholder={t("พิมพ์เนื้อหา ใส่หัวข้อ/ลิสต์/ลิงก์/รูปได้...","Type content — headings, lists, links, images...")} />
+                <div className="flex items-center gap-2">
                   <button onClick={save} disabled={busy} className="px-4 h-9 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50">{busy ? t("กำลังบันทึก...","Saving...") : t("บันทึก","Save")}</button>
-                  <button onClick={() => setEditing(false)} disabled={busy} className="px-4 h-9 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">{t("ยกเลิก","Cancel")}</button>
+                  <button onClick={() => { autoSaveRef.current(); setEditing(false); }} disabled={busy} className="px-4 h-9 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">{t("ปิดแก้ไข","Done")}</button>
+                  {/* สถานะบันทึกอัตโนมัติ (ทุก 10 วิ) */}
+                  <span className="text-xs text-slate-400">{dirty ? `💾 ${t("มีแก้ไข — จะบันทึกอัตโนมัติใน 10 วิ","Unsaved — auto-saves in 10s")}` : savedAt ? `✓ ${t("บันทึกอัตโนมัติแล้ว","Auto-saved")}` : t("บันทึกอัตโนมัติทุก 10 วิ","Auto-saves every 10s")}</span>
                   <button onClick={remove} disabled={busy} className="ml-auto px-3 h-9 rounded-lg text-sm text-red-600 hover:bg-red-50">{t("ลบหน้า","Delete page")}</button>
                 </div>
               </div>
