@@ -50,8 +50,15 @@ export function autoCodeMetrics(labelH: number): { codeH: number; font: number }
   };
 }
 
-export type SavedTemplate = { name: string; layout: CustomLayout };
-export const LAYOUT_TEMPLATES_KEY = "barcode_layout_templates";   // localStorage — แม่แบบเลย์เอาต์ที่บันทึกไว้
+// แม่แบบ — เก็บ "ทุกค่า" (opts เต็ม: โค้ดที่พิมพ์/โชว์ใต้โค้ด/เลย์เอาต์/สี/โลโก้)
+// layout = ของเก่า (เก็บแค่ CustomLayout) — อ่านได้เพื่อ backward-compat
+export type SavedTemplate = { name: string; opts?: PrintOpts; layout?: CustomLayout };
+export const LAYOUT_TEMPLATES_KEY = "barcode_layout_templates";   // localStorage — แม่แบบที่บันทึกไว้
+
+// ขนาดกระดาษ USER ที่ควรตั้งในไดรเวอร์เครื่องพิมพ์ฉลาก (โหมด Roll แยกทีละแถว = กว้าง roll × 1 แถว)
+export function rollDriverSize(c: CustomLayout): { w: number; h: number } {
+  return { w: c.rollWidth, h: Math.round((c.labelH + c.gapY) * 10) / 10 };
+}
 
 export type PrintOpts = {
   showQR: boolean;

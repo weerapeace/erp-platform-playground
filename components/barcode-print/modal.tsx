@@ -10,7 +10,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import {
   LABEL_PRESETS, getPreset, PRINT_PAYLOAD_KEY, QR_LOGO_KEY, MAX_LABELS,
-  DEFAULT_CUSTOM, LAYOUT_TEMPLATES_KEY,
+  DEFAULT_CUSTOM, LAYOUT_TEMPLATES_KEY, rollDriverSize,
   type PrintOpts, type CustomLayout, type SavedTemplate,
 } from "./labels";
 
@@ -41,13 +41,17 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
   const setCustom = (patch: Partial<CustomLayout>) => setOpts((o) => ({ ...o, custom: { ...(o.custom ?? DEFAULT_CUSTOM), ...patch } }));
 
   const saveAsTemplate = () => {
-    if (!opts.custom) return;
-    const name = window.prompt("ตั้งชื่อแม่แบบเลย์เอาต์:", `ป้าย ${opts.custom.labelW}×${opts.custom.labelH}mm`);
+    const dflt = opts.custom ? `ป้าย ${opts.custom.labelW}×${opts.custom.labelH}mm` : "แม่แบบของฉัน";
+    const name = window.prompt("ตั้งชื่อแม่แบบ (เก็บทุกค่า):", dflt);
     if (!name?.trim()) return;
-    const list = [...templates.filter((t) => t.name !== name.trim()), { name: name.trim(), layout: { ...opts.custom } }];
+    const list = [...templates.filter((t) => t.name !== name.trim()), { name: name.trim(), opts: { ...opts } }];
     saveTemplates(list); toast.success(`บันทึกแม่แบบ "${name.trim()}" แล้ว`);
   };
-  const applyTemplate = (name: string) => { const t = templates.find((x) => x.name === name); if (t) setOpts((o) => ({ ...o, custom: { ...t.layout } })); };
+  const applyTemplate = (name: string) => {
+    const t = templates.find((x) => x.name === name); if (!t) return;
+    if (t.opts) setOpts({ ...t.opts });                                  // แม่แบบใหม่ = เก็บทุกค่า
+    else if (t.layout) setOpts((o) => ({ ...o, custom: { ...t.layout! } }));   // แม่แบบเก่า = เฉพาะ layout
+  };
   const deleteTemplate = (name: string) => saveTemplates(templates.filter((t) => t.name !== name));
 
   const idsKey = ids.join(",");
@@ -156,6 +160,26 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
             </div>
           </div>
 
+          {/* แม่แบบ (เก็บทุกค่า) — โหลด/บันทึก/ลบ ใช้ได้ทุกโหมด */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <select value="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); e.currentTarget.value = ""; }}
+              className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white">
+              <option value="">📁 โหลดแม่แบบ…</option>
+              {templates.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+            </select>
+            <button onClick={saveAsTemplate} className="h-8 px-2.5 text-xs rounded-md border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">💾 บันทึกเป็นแม่แบบ</button>
+            <span className="text-[11px] text-slate-400">เก็บทุกค่า (โค้ด/โชว์/เลย์เอาต์)</span>
+          </div>
+          {templates.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {templates.map((t) => (
+                <span key={t.name} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-600">
+                  {t.name}<button onClick={() => deleteTemplate(t.name)} title="ลบแม่แบบ" className="text-slate-400 hover:text-red-500">✕</button>
+                </span>
+              ))}
+            </div>
+          )}
+
           {!opts.custom ? (
             <select value={opts.preset} onChange={(e) => setOpts((o) => ({ ...o, preset: e.target.value }))}
               className="w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
@@ -163,24 +187,6 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
             </select>
           ) : (() => { const c = opts.custom!; return (
             <div className="space-y-3">
-              {/* แม่แบบ */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <select value="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); e.currentTarget.value = ""; }}
-                  className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white">
-                  <option value="">📁 โหลดแม่แบบ…</option>
-                  {templates.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
-                </select>
-                <button onClick={saveAsTemplate} className="h-8 px-2.5 text-xs rounded-md border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">💾 บันทึกเป็นแม่แบบ</button>
-              </div>
-              {templates.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {templates.map((t) => (
-                    <span key={t.name} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-600">
-                      {t.name}<button onClick={() => deleteTemplate(t.name)} title="ลบแม่แบบ" className="text-slate-400 hover:text-red-500">✕</button>
-                    </span>
-                  ))}
-                </div>
-              )}
               {/* โหมด */}
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-slate-500">พิมพ์ลง</span>
@@ -220,6 +226,13 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
                     </div>
                     <span className="text-[11px] text-slate-400">แยกทีละแถว = เหมาะกับเครื่องพิมพ์ฉลาก</span>
                   </div>
+                  {/* บอกค่าที่ต้องตั้งในไดรเวอร์ (จำไว้ตั้งเครื่องอื่น) */}
+                  {(c.rollSplit ?? "row") === "row" && (() => { const ds = rollDriverSize(c); return (
+                    <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-2 py-1.5">
+                      🖨️ <b>ตั้งขนาดกระดาษในไดรเวอร์เครื่องพิมพ์ (USER):</b> กว้าง <b>{ds.w}</b> × สูง <b>{ds.h}</b> mm
+                      <span className="text-amber-600"> (= กว้าง roll × 1 แถว · ประเภท: ฉลากแบบตัดตามรอย)</span>
+                    </div>
+                  ); })()}
                 </>
               )}
               {/* จูนตำแหน่ง — ขยับทุกดวงพร้อมกันให้ตรงรอยตัด */}

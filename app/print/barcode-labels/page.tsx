@@ -10,8 +10,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import {
-  getPreset, autoCodeMetrics, DEFAULT_CUSTOM, LABEL_PRESETS, PRINT_PAYLOAD_KEY, MAX_LABELS,
-  type PrintPayload, type PrintItem, type PrintOpts, type CustomLayout,
+  getPreset, autoCodeMetrics, rollDriverSize, DEFAULT_CUSTOM, LABEL_PRESETS,
+  PRINT_PAYLOAD_KEY, LAYOUT_TEMPLATES_KEY, MAX_LABELS,
+  type PrintPayload, type PrintItem, type PrintOpts, type CustomLayout, type SavedTemplate,
 } from "@/components/barcode-print/labels";
 
 const loadImg = (src: string): Promise<HTMLImageElement> =>
@@ -126,6 +127,22 @@ export default function BarcodeLabelsPrintPage() {
   const updateOpts = (patch: Partial<PrintOpts>) => setPayload((p) => (p ? { ...p, opts: { ...p.opts, ...patch } } : p));
   const updateCustom = (patch: Partial<CustomLayout>) =>
     setPayload((p) => (p ? { ...p, opts: { ...p.opts, custom: { ...(p.opts.custom ?? DEFAULT_CUSTOM), ...patch } } } : p));
+
+  // แม่แบบ (เก็บทุกค่า) — ใช้ localStorage ร่วมกับ modal
+  const [templates, setTemplates] = useState<SavedTemplate[]>([]);
+  useEffect(() => { try { const raw = localStorage.getItem(LAYOUT_TEMPLATES_KEY); if (raw) setTemplates(JSON.parse(raw) as SavedTemplate[]); } catch { /* ignore */ } }, []);
+  const persistTemplates = (list: SavedTemplate[]) => { setTemplates(list); try { localStorage.setItem(LAYOUT_TEMPLATES_KEY, JSON.stringify(list)); } catch { /* ignore */ } };
+  const saveTemplate = () => {
+    if (!payload) return;
+    const name = window.prompt("ตั้งชื่อแม่แบบ (เก็บทุกค่า):", "แม่แบบของฉัน");
+    if (!name?.trim()) return;
+    persistTemplates([...templates.filter((t) => t.name !== name.trim()), { name: name.trim(), opts: { ...payload.opts } }]);
+  };
+  const applyTemplate = (name: string) => {
+    const t = templates.find((x) => x.name === name); if (!t) return;
+    if (t.opts) updateOpts({ ...t.opts });
+    else if (t.layout) updateCustom({ ...t.layout });
+  };
 
   const labels = useMemo(() => {
     if (!payload) return [];
@@ -281,6 +298,20 @@ export default function BarcodeLabelsPrintPage() {
       {showSettings && (
         <div className="no-print" style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px",
           display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* แม่แบบ (เก็บทุกค่า) */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 12, color: "#94a3b8" }}>แม่แบบ</strong>
+            <select value="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); e.currentTarget.value = ""; }} style={{ ...inputStyle, width: "auto" }}>
+              <option value="">📁 โหลด…</option>
+              {templates.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+            </select>
+            <button onClick={saveTemplate} style={{ height: 30, padding: "0 10px", fontSize: 12, borderRadius: 6, border: "1px solid #c7d2fe", background: "#eef2ff", color: "#4338ca", cursor: "pointer" }}>💾 บันทึกเป็นแม่แบบ</button>
+            {templates.map((t) => (
+              <span key={t.name} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, fontSize: 11, background: "#f1f5f9", color: "#475569" }}>
+                {t.name}<button onClick={() => persistTemplates(templates.filter((x) => x.name !== t.name))} title="ลบ" style={{ border: "none", background: "none", color: "#94a3b8", cursor: "pointer" }}>✕</button>
+              </span>
+            ))}
+          </div>
           {/* แสดงอะไร + สี */}
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
             <strong style={{ fontSize: 12, color: "#94a3b8" }}>แสดง</strong>
@@ -317,6 +348,12 @@ export default function BarcodeLabelsPrintPage() {
                   </div>
                 )}
               </div>
+              {custom.mode === "roll" && (custom.rollSplit ?? "row") === "row" && (() => { const ds = rollDriverSize(custom); return (
+                <div style={{ fontSize: 12, background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", borderRadius: 6, padding: "6px 10px" }}>
+                  🖨️ <b>ตั้งขนาดกระดาษในไดรเวอร์เครื่องพิมพ์ (USER):</b> กว้าง <b>{ds.w}</b> × สูง <b>{ds.h}</b> mm
+                  <span style={{ color: "#b45309" }}> · ประเภท: ฉลากแบบตัดตามรอย (ไว้จำตอนตั้งเครื่องอื่น)</span>
+                </div>
+              ); })()}
               <div style={{ fontSize: 11, color: "#94a3b8" }}>💡 แก้แล้วพรีวิวเปลี่ยนทันที · ปรับ 🎯 จูนตำแหน่ง ทีละ 0.5–1mm ให้ตรงรอยตัด แล้วกดพิมพ์</div>
             </>
           ) : (
