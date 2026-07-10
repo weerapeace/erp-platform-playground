@@ -33,6 +33,8 @@ const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").
 });
 // ป๊อปอัป bulk edit ของกลาง — โหลดเฉพาะตอนกด "แก้ไขข้อมูล" (data-table ใหญ่ ไม่เอาเข้า bundle หน้านี้)
 const BulkEditAllModal = nextDynamic(() => import("@/components/data-table").then((m) => ({ default: m.BulkEditAllModal })), { ssr: false });
+// ป๊อปอัปพิมพ์บาร์โค้ด/QR — โหลดเฉพาะตอนกด (jsbarcode/qrcode ไม่เข้า bundle หน้านี้)
+const BarcodePrintModal = nextDynamic(() => import("@/components/barcode-print/modal").then((m) => ({ default: m.BarcodePrintModal })), { ssr: false });
 
 type Crumb = { id: string; name: string };
 
@@ -116,6 +118,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
   const [special, setSpecial] = useState<"all" | "recent" | null>(null);   // โฟลเดอร์พิเศษ: ทั้งหมด / ล่าสุด
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);   // กรองเฉพาะ SKU ที่ข้อมูลไม่ครบ
   const [selected, setSelected] = useState<Set<string>>(new Set());   // เลือกหลายตัว (bulk)
+  const [printOpen, setPrintOpen] = useState(false);                  // ป๊อปอัปพิมพ์บาร์โค้ด/QR
   const [view, setView] = useState<"card" | "table">(() => {
     if (typeof window !== "undefined" && localStorage.getItem("sku-browser-view") === "table") return "table";
     return "card";
@@ -514,6 +517,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
           <button onClick={() => bulkStatus(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">เปิดใช้งาน</button>
           <button onClick={() => bulkStatus(false)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">ปิดใช้งาน</button>
           <button onClick={exportCsv} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">⬇ Export CSV</button>
+          <button onClick={() => setPrintOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">🏷️ พิมพ์บาร์โค้ด</button>
           <button onClick={clearSel} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
         </div>
       )}
@@ -530,6 +534,9 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
       )}
       {customizeOpen && (
         <CardCustomizeModal value={cardFields} avail={availFields} onClose={() => setCustomizeOpen(false)} onSave={saveCard} onReset={resetCard} />
+      )}
+      {printOpen && (
+        <BarcodePrintModal open={printOpen} onClose={() => setPrintOpen(false)} ids={[...selected]} entity={entity} />
       )}
       {peekId && (() => {
         const isParent = entity === "parent-skus";
