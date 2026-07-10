@@ -14,6 +14,7 @@ import {
   PRINT_PAYLOAD_KEY, LAYOUT_TEMPLATES_KEY, DEFAULT_TEMPLATE_KEY, MAX_LABELS,
   type PrintPayload, type PrintItem, type PrintOpts, type CustomLayout, type SavedTemplate, type ElemSizes,
 } from "@/components/barcode-print/labels";
+import { TemplateMenu } from "@/components/barcode-print/template-menu";
 
 const loadImg = (src: string): Promise<HTMLImageElement> =>
   new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src; });
@@ -141,6 +142,18 @@ export default function BarcodeLabelsPrintPage() {
     const next = defaultTpl === name ? null : name;
     setDefaultTpl(next);
     try { if (next) localStorage.setItem(DEFAULT_TEMPLATE_KEY, next); else localStorage.removeItem(DEFAULT_TEMPLATE_KEY); } catch { /* ignore */ }
+  };
+  const askDelete = (name: string) => {
+    if (!window.confirm(`ลบแม่แบบ "${name}" ?\n(ลบแล้วเรียกคืนไม่ได้)`)) return;
+    persistTemplates(templates.filter((x) => x.name !== name));
+    if (defaultTpl === name) setDefault(name);   // เคลียร์ค่าเริ่มต้นถ้าลบตัวที่เป็น default
+  };
+  const askRename = (name: string) => {
+    const nn = window.prompt("เปลี่ยนชื่อแม่แบบเป็น:", name);
+    if (!nn?.trim() || nn.trim() === name) return;
+    const t = templates.find((x) => x.name === name); if (!t) return;
+    persistTemplates([...templates.filter((x) => x.name !== name && x.name !== nn.trim()), { ...t, name: nn.trim() }]);
+    if (defaultTpl === name) { setDefaultTpl(nn.trim()); try { localStorage.setItem(DEFAULT_TEMPLATE_KEY, nn.trim()); } catch { /* ignore */ } }
   };
   const updateSizes = (patch: Partial<ElemSizes>) =>
     setPayload((p) => (p ? { ...p, opts: { ...p.opts, sizes: { ...(p.opts.sizes ?? {}), ...patch } } } : p));
@@ -321,14 +334,7 @@ export default function BarcodeLabelsPrintPage() {
               {templates.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
             </select>
             <button onClick={saveTemplate} style={{ height: 30, padding: "0 10px", fontSize: 12, borderRadius: 6, border: "1px solid #c7d2fe", background: "#eef2ff", color: "#4338ca", cursor: "pointer" }}>💾 บันทึกเป็นแม่แบบ</button>
-            {templates.map((t) => (
-              <span key={t.name} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 6px 2px 4px", borderRadius: 999, fontSize: 11,
-                background: defaultTpl === t.name ? "#fffbeb" : "#f1f5f9", color: "#475569", border: defaultTpl === t.name ? "1px solid #fcd34d" : "1px solid transparent" }}>
-                <button onClick={() => setDefault(t.name)} title="ตั้งเป็นค่าเริ่มต้น (เปิดมาใช้เลย)" style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13, color: defaultTpl === t.name ? "#f59e0b" : "#cbd5e1" }}>{defaultTpl === t.name ? "★" : "☆"}</button>
-                {t.name}
-                <button onClick={() => persistTemplates(templates.filter((x) => x.name !== t.name))} title="ลบ" style={{ border: "none", background: "none", color: "#94a3b8", cursor: "pointer" }}>✕</button>
-              </span>
-            ))}
+            <TemplateMenu templates={templates} defaultTpl={defaultTpl} onLoad={applyTemplate} onSetDefault={setDefault} onRename={askRename} onDelete={askDelete} />
           </div>
           {defaultTpl && <div style={{ fontSize: 11, color: "#b45309", marginTop: -4 }}>⭐ ค่าเริ่มต้น: {defaultTpl} — เปิดหน้าพิมพ์ครั้งหน้าจะใช้แม่แบบนี้อัตโนมัติ</div>}
           {/* แสดงอะไร + สี */}
