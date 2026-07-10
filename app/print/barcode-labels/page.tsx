@@ -10,8 +10,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import {
-  getPreset, autoCodeMetrics, PRINT_PAYLOAD_KEY, MAX_LABELS,
-  type PrintPayload, type PrintItem, type PrintOpts,
+  getPreset, autoCodeMetrics, DEFAULT_CUSTOM, LABEL_PRESETS, PRINT_PAYLOAD_KEY, MAX_LABELS,
+  type PrintPayload, type PrintItem, type PrintOpts, type CustomLayout,
 } from "@/components/barcode-print/labels";
 
 const loadImg = (src: string): Promise<HTMLImageElement> =>
@@ -93,10 +93,14 @@ export default function BarcodeLabelsPrintPage() {
     } catch { setMissing(true); }
   }, []);
 
+  // สร้าง QR ใหม่เฉพาะเมื่อค่าที่เกี่ยว QR เปลี่ยน (ปรับ layout/จูนตำแหน่ง จะไม่ต้อง regen)
+  const qrDepKey = payload
+    ? [payload.opts.showQR, payload.opts.logoMode, payload.opts.logo, payload.opts.codeColor,
+       ...payload.items.map((i) => `${i.barcode || i.code}~${i.brandLogo ?? ""}`)].join("|")
+    : "";
   useEffect(() => {
     if (!payload || !payload.opts.showQR) return;
     const o = payload.opts;
-    // key = ค่า + โลโก้ (โหมดแบรนด์ = โลโก้ต่างกันต่อดวง) — สร้างครั้งเดียวต่อ key
     const jobs = new Map<string, { text: string; logo: string | null }>();
     for (const it of payload.items) {
       const text = it.barcode || it.code;
@@ -110,7 +114,18 @@ export default function BarcodeLabelsPrintPage() {
       if (!cancelled) setQrMap(map);
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrDepKey]);
+
+  // จำค่าที่แก้ (เผื่อ refresh) — เขียนกลับ sessionStorage
+  useEffect(() => {
+    if (payload) { try { sessionStorage.setItem(PRINT_PAYLOAD_KEY, JSON.stringify(payload)); } catch { /* ignore */ } }
   }, [payload]);
+
+  const [showSettings, setShowSettings] = useState(false);
+  const updateOpts = (patch: Partial<PrintOpts>) => setPayload((p) => (p ? { ...p, opts: { ...p.opts, ...patch } } : p));
+  const updateCustom = (patch: Partial<CustomLayout>) =>
+    setPayload((p) => (p ? { ...p, opts: { ...p.opts, custom: { ...(p.opts.custom ?? DEFAULT_CUSTOM), ...patch } } } : p));
 
   const labels = useMemo(() => {
     if (!payload) return [];
@@ -212,6 +227,22 @@ export default function BarcodeLabelsPrintPage() {
     ))}</>;
   }
 
+  // ── ตัวช่วย UI ของ panel ตั้งค่า (inline style ให้เข้ากับหน้าพิมพ์) ──
+  const inputStyle = { height: 30, padding: "0 8px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 13, width: 88 } as const;
+  const numF = (label: string, value: number, on: (v: number) => void, hi?: boolean) => (
+    <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+      <span style={{ color: hi ? "#4f46e5" : "#64748b", fontWeight: hi ? 600 : 400 }}>{label}</span>
+      <input type="number" step={0.5} value={value} onChange={(e) => on(Number(e.target.value))} style={inputStyle} />
+    </label>
+  );
+  const chkF = (label: string, val: boolean, on: (v: boolean) => void) => (
+    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#334155", cursor: "pointer" }}>
+      <input type="checkbox" checked={val} onChange={(e) => on(e.target.checked)} /> {label}
+    </label>
+  );
+  const segStyle = (active: boolean) => ({ height: 28, padding: "0 10px", fontSize: 12, borderRadius: 6,
+    border: "1px solid #e2e8f0", background: active ? "#eef2ff" : "#fff", color: active ? "#4338ca" : "#64748b", cursor: "pointer" } as const);
+
   return (
     <div>
       <style>{`
@@ -240,9 +271,63 @@ export default function BarcodeLabelsPrintPage() {
         </span>
         {capped && <span style={{ color: "#b45309", fontSize: 12 }}>⚠️ เกิน {MAX_LABELS} ดวง — พิมพ์แค่ {MAX_LABELS} ดวงแรก</span>}
         <div style={{ flex: 1 }} />
+        <button onClick={() => setShowSettings((s) => !s)} style={{ height: 34, padding: "0 14px",
+          background: showSettings ? "#eef2ff" : "#fff", color: showSettings ? "#4338ca" : "#475569",
+          border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 14, cursor: "pointer" }}>⚙️ ตั้งค่า</button>
         <button onClick={() => window.print()} style={{ height: 34, padding: "0 16px", background: "#4f46e5", color: "#fff",
           border: "none", borderRadius: 8, fontSize: 14, cursor: "pointer" }}>🖨️ พิมพ์ / บันทึก PDF</button>
       </div>
+
+      {showSettings && (
+        <div className="no-print" style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px",
+          display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* แสดงอะไร + สี */}
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+            <strong style={{ fontSize: 12, color: "#94a3b8" }}>แสดง</strong>
+            {chkF("QR", opts.showQR, (v) => updateOpts({ showQR: v }))}
+            {chkF("บาร์โค้ด", opts.showBarcode, (v) => updateOpts({ showBarcode: v }))}
+            {chkF("รหัส", opts.showCode, (v) => updateOpts({ showCode: v }))}
+            {chkF("ชื่อ", opts.showName, (v) => updateOpts({ showName: v }))}
+            {chkF("ราคา", opts.showPrice, (v) => updateOpts({ showPrice: v }))}
+            {chkF("เส้นตัด", opts.showBorder, (v) => updateOpts({ showBorder: v }))}
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#334155" }}>สีโค้ด
+              <input type="color" value={opts.codeColor} onChange={(e) => updateOpts({ codeColor: e.target.value })} style={{ width: 34, height: 26, cursor: "pointer" }} />
+            </label>
+          </div>
+          {custom ? (
+            <>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                {numF("กว้าง (mm)", custom.labelW, (v) => updateCustom({ labelW: v }))}
+                {numF("สูง (mm)", custom.labelH, (v) => updateCustom({ labelH: v }))}
+                {numF("ต่อแถว", custom.cols, (v) => updateCustom({ cols: Math.max(1, Math.floor(v)) }))}
+                {numF("ช่องไฟ นอน", custom.gapX, (v) => updateCustom({ gapX: v }))}
+                {numF("ช่องไฟ ตั้ง", custom.gapY, (v) => updateCustom({ gapY: v }))}
+                {numF("ขอบซ้าย", custom.mLeft, (v) => updateCustom({ mLeft: v }))}
+                {numF("ขอบบน", custom.mTop, (v) => updateCustom({ mTop: v }))}
+                {custom.mode === "roll" && numF("กว้าง Roll", custom.rollWidth, (v) => updateCustom({ rollWidth: v }))}
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                {numF("🎯 เลื่อน X (+ขวา −ซ้าย)", custom.offsetX ?? 0, (v) => updateCustom({ offsetX: v }), true)}
+                {numF("🎯 เลื่อน Y (+ลง −ขึ้น)", custom.offsetY ?? 0, (v) => updateCustom({ offsetY: v }), true)}
+                {custom.mode === "roll" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 12, color: "#64748b" }}>พิมพ์แบบ</span>
+                    <button onClick={() => updateCustom({ rollSplit: "row" })} style={segStyle((custom.rollSplit ?? "row") === "row")}>แยกทีละแถว</button>
+                    <button onClick={() => updateCustom({ rollSplit: "continuous" })} style={segStyle(custom.rollSplit === "continuous")}>ต่อเนื่อง</button>
+                  </div>
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>💡 แก้แล้วพรีวิวเปลี่ยนทันที · ปรับ 🎯 จูนตำแหน่ง ทีละ 0.5–1mm ให้ตรงรอยตัด แล้วกดพิมพ์</div>
+            </>
+          ) : (
+            <label style={{ fontSize: 13, color: "#334155", display: "flex", alignItems: "center", gap: 8 }}>เลย์เอาต์
+              <select value={opts.preset} onChange={(e) => updateOpts({ preset: e.target.value })} style={{ ...inputStyle, width: "auto" }}>
+                {LABEL_PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+      )}
 
       <div style={{ padding: "12px 0" }}>{body}</div>
     </div>
