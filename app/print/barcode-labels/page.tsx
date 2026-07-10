@@ -1,16 +1,17 @@
 "use client";
 
 /**
- * หน้าพิมพ์บาร์โค้ด/QR แบบ batch (เฟส 1)
- * รับ payload จาก sessionStorage (ตั้งค่าจาก modal ในหน้า SKU) → วางลง A4 → กดพิมพ์
+ * หน้าพิมพ์บาร์โค้ด/QR แบบ batch (เฟส 1 + 2)
+ * รับ payload จาก sessionStorage (ตั้งค่าจาก modal ในหน้า SKU) → วางลงกระดาษ → กดพิมพ์
  * โค้ด: QR (lib qrcode + โลโก้กลาง) · บาร์โค้ด Code128 (lib jsbarcode)
+ * เลย์เอาต์: A4 สำเร็จรูป (preset) หรือ กำหนดเอง (custom: A4/Roll + ขนาด/ต่อแถว/ระยะขอบ)
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import {
-  getPreset, PRINT_PAYLOAD_KEY, MAX_LABELS,
-  type PrintPayload, type PrintItem, type PrintOpts, type LabelPreset,
+  getPreset, autoCodeMetrics, PRINT_PAYLOAD_KEY, MAX_LABELS,
+  type PrintPayload, type PrintItem, type PrintOpts,
 } from "@/components/barcode-print/labels";
 
 const loadImg = (src: string): Promise<HTMLImageElement> =>
@@ -45,26 +46,26 @@ function Barcode({ value, heightMm }: { value: string; heightMm: number }) {
   return <svg ref={ref} style={{ height: `${heightMm}mm`, maxWidth: "100%" }} />;
 }
 
-function Label({ it, opts, preset, qr }: { it: PrintItem; opts: PrintOpts; preset: LabelPreset; qr?: string }) {
+function Label({ it, opts, codeH, font, qr }: { it: PrintItem; opts: PrintOpts; codeH: number; font: number; qr?: string }) {
   const hasText = opts.showCode || opts.showName || opts.showPrice;
   return (
     <div style={{ border: "0.4px dashed #dcdcdc", display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", gap: "0.5mm", overflow: "hidden", padding: "1mm", boxSizing: "border-box" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "1.5mm", maxWidth: "100%" }}>
-        {opts.showQR && qr && <img src={qr} alt="" style={{ height: `${preset.codeH}mm`, width: `${preset.codeH}mm` }} />}
-        {opts.showBarcode && <Barcode value={it.barcode || it.code} heightMm={preset.codeH * 0.8} />}
+        {opts.showQR && qr && <img src={qr} alt="" style={{ height: `${codeH}mm`, width: `${codeH}mm` }} />}
+        {opts.showBarcode && <Barcode value={it.barcode || it.code} heightMm={codeH * 0.8} />}
       </div>
       {hasText && (
         <div style={{ textAlign: "center", lineHeight: 1.12, maxWidth: "100%", overflow: "hidden" }}>
           {opts.showCode && (
-            <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: `${preset.font}pt`,
+            <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: `${font}pt`,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.code}</div>
           )}
           {opts.showName && it.name && (
-            <div style={{ fontSize: `${preset.font * 0.85}pt`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.name}</div>
+            <div style={{ fontSize: `${font * 0.85}pt`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.name}</div>
           )}
           {opts.showPrice && it.price != null && it.price > 0 && (
-            <div style={{ fontSize: `${preset.font}pt`, fontWeight: 600 }}>฿{Number(it.price).toLocaleString("th-TH")}</div>
+            <div style={{ fontSize: `${font}pt`, fontWeight: 600 }}>฿{Number(it.price).toLocaleString("th-TH")}</div>
           )}
         </div>
       )}
@@ -85,7 +86,6 @@ export default function BarcodeLabelsPrintPage() {
     } catch { setMissing(true); }
   }, []);
 
-  // สร้าง QR ครั้งเดียวต่อค่าที่ไม่ซ้ำ (+โลโก้)
   useEffect(() => {
     if (!payload || !payload.opts.showQR) return;
     const uniq = Array.from(new Set(payload.items.map((i) => i.barcode || i.code)));
@@ -111,16 +111,75 @@ export default function BarcodeLabelsPrintPage() {
   if (missing) return <div style={{ padding: 40, textAlign: "center", color: "#64748b" }}>ไม่พบข้อมูลสำหรับพิมพ์ — กรุณากลับไปเลือกสินค้าแล้วกด “พิมพ์บาร์โค้ด” ใหม่</div>;
   if (!payload) return <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>กำลังเตรียม…</div>;
 
-  const preset = getPreset(payload.opts.preset);
-  const perPage = preset.cols * preset.rows;
-  const pages: PrintItem[][] = [];
-  for (let i = 0; i < labels.length; i += perPage) pages.push(labels.slice(i, i + perPage));
+  const opts = payload.opts;
+  const custom = opts.custom;
   const capped = labels.length >= MAX_LABELS;
+  const qrOf = (it: PrintItem) => qrMap[it.barcode || it.code];
+
+  // ── เลย์เอาต์กำหนดเอง ──
+  let body: ReactNode;
+  let pageCss: string;
+  let sheetCount = 0;
+
+  if (custom) {
+    const { codeH, font } = autoCodeMetrics(custom.labelH);
+    const cols = Math.max(1, Math.floor(custom.cols));
+    if (custom.mode === "roll") {
+      // Roll: ความกว้าง = rollWidth, ความยาวต่อเนื่อง (auto) — ไหลลงเรื่อย ๆ
+      pageCss = `@page { size: ${custom.rollWidth}mm auto; margin: 0; }`;
+      body = (
+        <div className="sheet" style={{ width: `${custom.rollWidth}mm`,
+          paddingTop: `${custom.mTop}mm`, paddingBottom: `${custom.mBottom}mm`, paddingLeft: `${custom.mLeft}mm`, paddingRight: `${custom.mRight}mm`,
+          boxSizing: "border-box" }}>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, ${custom.labelW}mm)`,
+            gridAutoRows: `${custom.labelH}mm`, columnGap: `${custom.gapX}mm`, rowGap: `${custom.gapY}mm`, justifyContent: "center" }}>
+            {labels.map((it, li) => <Label key={li} it={it} opts={opts} codeH={codeH} font={font} qr={qrOf(it)} />)}
+          </div>
+        </div>
+      );
+      sheetCount = 1;
+    } else {
+      // A4 กำหนดขนาดสติ๊กเกอร์เอง — คำนวณจำนวนแถวต่อแผ่นจากพื้นที่ที่เหลือ
+      const availH = 297 - custom.mTop - custom.mBottom;
+      const rowsPerPage = Math.max(1, Math.floor((availH + custom.gapY) / (custom.labelH + custom.gapY)));
+      const perPage = cols * rowsPerPage;
+      const pages: PrintItem[][] = [];
+      for (let i = 0; i < labels.length; i += perPage) pages.push(labels.slice(i, i + perPage));
+      sheetCount = pages.length;
+      pageCss = `@page { size: A4; margin: 0; }`;
+      body = <>{pages.map((pg, pi) => (
+        <div key={pi} className="sheet" style={{ width: "210mm", height: "297mm",
+          paddingTop: `${custom.mTop}mm`, paddingBottom: `${custom.mBottom}mm`, paddingLeft: `${custom.mLeft}mm`, paddingRight: `${custom.mRight}mm`,
+          boxSizing: "border-box" }}>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, ${custom.labelW}mm)`,
+            gridAutoRows: `${custom.labelH}mm`, columnGap: `${custom.gapX}mm`, rowGap: `${custom.gapY}mm`, justifyContent: "center" }}>
+            {pg.map((it, li) => <Label key={li} it={it} opts={opts} codeH={codeH} font={font} qr={qrOf(it)} />)}
+          </div>
+        </div>
+      ))}</>;
+    }
+  } else {
+    // ── เลย์เอาต์สำเร็จรูป A4 (เฟส 1) — ช่องเท่า ๆ กัน ──
+    const preset = getPreset(opts.preset);
+    const perPage = preset.cols * preset.rows;
+    const pages: PrintItem[][] = [];
+    for (let i = 0; i < labels.length; i += perPage) pages.push(labels.slice(i, i + perPage));
+    sheetCount = pages.length;
+    pageCss = `@page { size: A4; margin: 0; }`;
+    body = <>{pages.map((pg, pi) => (
+      <div key={pi} className="sheet" style={{ width: "210mm", height: "297mm", padding: `${preset.margin}mm`, boxSizing: "border-box" }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${preset.cols}, 1fr)`, gridTemplateRows: `repeat(${preset.rows}, 1fr)`,
+          gap: `${preset.gap}mm`, width: "100%", height: "100%" }}>
+          {pg.map((it, li) => <Label key={li} it={it} opts={opts} codeH={preset.codeH} font={preset.font} qr={qrOf(it)} />)}
+        </div>
+      </div>
+    ))}</>;
+  }
 
   return (
     <div>
       <style>{`
-        @page { size: A4; margin: 0; }
+        ${pageCss}
         @media print { .no-print { display: none !important; } .sheet { page-break-after: always; } }
         body { background: #f1f5f9; }
         .sheet { background: #fff; margin: 0 auto 8mm; box-shadow: 0 1px 6px rgba(0,0,0,.12); }
@@ -130,23 +189,16 @@ export default function BarcodeLabelsPrintPage() {
       <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 10, background: "#fff", borderBottom: "1px solid #e2e8f0",
         padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 15 }}>🏷️ พิมพ์บาร์โค้ด</strong>
-        <span style={{ color: "#64748b", fontSize: 13 }}>{labels.length.toLocaleString("th-TH")} ดวง · {pages.length} แผ่น</span>
+        <span style={{ color: "#64748b", fontSize: 13 }}>
+          {labels.length.toLocaleString("th-TH")} ดวง · {custom?.mode === "roll" ? "โหมด Roll (ต่อเนื่อง)" : `${sheetCount} แผ่น`}
+        </span>
         {capped && <span style={{ color: "#b45309", fontSize: 12 }}>⚠️ เกิน {MAX_LABELS} ดวง — พิมพ์แค่ {MAX_LABELS} ดวงแรก</span>}
         <div style={{ flex: 1 }} />
         <button onClick={() => window.print()} style={{ height: 34, padding: "0 16px", background: "#4f46e5", color: "#fff",
           border: "none", borderRadius: 8, fontSize: 14, cursor: "pointer" }}>🖨️ พิมพ์ / บันทึก PDF</button>
       </div>
 
-      <div style={{ padding: "12px 0" }}>
-        {pages.map((pg, pi) => (
-          <div key={pi} className="sheet" style={{ width: "210mm", height: "297mm", padding: `${preset.margin}mm`, boxSizing: "border-box" }}>
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${preset.cols}, 1fr)`, gridTemplateRows: `repeat(${preset.rows}, 1fr)`,
-              gap: `${preset.gap}mm`, width: "100%", height: "100%" }}>
-              {pg.map((it, li) => <Label key={li} it={it} opts={payload.opts} preset={preset} qr={qrMap[it.barcode || it.code]} />)}
-            </div>
-          </div>
-        ))}
-      </div>
+      <div style={{ padding: "12px 0" }}>{body}</div>
     </div>
   );
 }

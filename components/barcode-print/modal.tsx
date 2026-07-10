@@ -10,7 +10,8 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import {
   LABEL_PRESETS, getPreset, PRINT_PAYLOAD_KEY, QR_LOGO_KEY, MAX_LABELS,
-  type PrintOpts,
+  DEFAULT_CUSTOM, LAYOUT_TEMPLATES_KEY,
+  type PrintOpts, type CustomLayout, type SavedTemplate,
 } from "./labels";
 
 type Row = { id: string; code: string; barcode: string; name: string; price: number | null; qty: number };
@@ -23,8 +24,30 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
   const [rows, setRows] = useState<Row[]>([]);
   const [globalQty, setGlobalQty] = useState(1);
   const [opts, setOpts] = useState<PrintOpts>({
-    showQR: true, showBarcode: true, showCode: true, showName: false, showPrice: false, preset: "a4-3x8", logo: null,
+    showQR: true, showBarcode: true, showCode: true, showName: false, showPrice: false, preset: "a4-3x8", custom: null, logo: null,
   });
+  const [templates, setTemplates] = useState<SavedTemplate[]>([]);
+
+  // โหลดแม่แบบเลย์เอาต์ที่บันทึกไว้
+  useEffect(() => {
+    if (!open) return;
+    try { const raw = localStorage.getItem(LAYOUT_TEMPLATES_KEY); if (raw) setTemplates(JSON.parse(raw) as SavedTemplate[]); } catch { /* ignore */ }
+  }, [open]);
+  const saveTemplates = (list: SavedTemplate[]) => { setTemplates(list); try { localStorage.setItem(LAYOUT_TEMPLATES_KEY, JSON.stringify(list)); } catch { /* ignore */ } };
+
+  const usePreset = () => setOpts((o) => ({ ...o, custom: null }));
+  const useCustom = () => setOpts((o) => ({ ...o, custom: o.custom ?? { ...DEFAULT_CUSTOM } }));
+  const setCustom = (patch: Partial<CustomLayout>) => setOpts((o) => ({ ...o, custom: { ...(o.custom ?? DEFAULT_CUSTOM), ...patch } }));
+
+  const saveAsTemplate = () => {
+    if (!opts.custom) return;
+    const name = window.prompt("ตั้งชื่อแม่แบบเลย์เอาต์:", `ป้าย ${opts.custom.labelW}×${opts.custom.labelH}mm`);
+    if (!name?.trim()) return;
+    const list = [...templates.filter((t) => t.name !== name.trim()), { name: name.trim(), layout: { ...opts.custom } }];
+    saveTemplates(list); toast.success(`บันทึกแม่แบบ "${name.trim()}" แล้ว`);
+  };
+  const applyTemplate = (name: string) => { const t = templates.find((x) => x.name === name); if (t) setOpts((o) => ({ ...o, custom: { ...t.layout } })); };
+  const deleteTemplate = (name: string) => saveTemplates(templates.filter((t) => t.name !== name));
 
   const idsKey = ids.join(",");
   useEffect(() => {
@@ -40,9 +63,19 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
   }, [open, idsKey, entity]);
 
   const total = useMemo(() => rows.reduce((s, r) => s + (r.qty > 0 ? r.qty : 0), 0), [rows]);
-  const preset = getPreset(opts.preset);
-  const sheets = Math.ceil(Math.min(total, MAX_LABELS) / (preset.cols * preset.rows)) || 0;
   const isParent = entity === "parent-skus";
+  // จำนวนดวงต่อแผ่น (ประมาณ) — สำเร็จรูป หรือ กำหนดเอง A4
+  const perPage = useMemo(() => {
+    if (opts.custom) {
+      if (opts.custom.mode === "roll") return null;   // roll = ต่อเนื่อง ไม่นับแผ่น
+      const cols = Math.max(1, Math.floor(opts.custom.cols));
+      const rowsPer = Math.max(1, Math.floor((297 - opts.custom.mTop - opts.custom.mBottom + opts.custom.gapY) / (opts.custom.labelH + opts.custom.gapY)));
+      return cols * rowsPer;
+    }
+    const p = getPreset(opts.preset);
+    return p.cols * p.rows;
+  }, [opts.custom, opts.preset]);
+  const sheets = perPage ? (Math.ceil(Math.min(total, MAX_LABELS) / perPage) || 0) : 0;
 
   const setQty = (id: string, q: number) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, qty: Math.max(0, Math.min(999, Math.floor(q || 0))) } : r)));
   const applyGlobal = () => setRows((rs) => rs.map((r) => ({ ...r, qty: Math.max(0, Math.min(999, Math.floor(globalQty || 0))) })));
@@ -73,13 +106,20 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
       {label}{note && <span className="text-xs text-slate-400">{note}</span>}
     </label>
   );
+  const num = (label: string, value: number, on: (v: number) => void) => (
+    <label className="flex flex-col gap-0.5">
+      <span className="text-[11px] text-slate-500">{label}</span>
+      <input type="number" value={value} min={0} step={0.5} onChange={(e) => on(Number(e.target.value))}
+        className="h-8 px-2 text-sm border border-slate-200 rounded-md w-full" />
+    </label>
+  );
 
   return (
     <ERPModal open={open} onClose={onClose} title="🏷️ พิมพ์บาร์โค้ด / QR" size="lg"
       description={`เลือกไว้ ${ids.length.toLocaleString("th-TH")} รายการ`}
       footer={
         <div className="flex items-center gap-2 w-full">
-          <span className="text-sm text-slate-500">รวม <b className="text-slate-800">{total.toLocaleString("th-TH")}</b> ดวง · ~{sheets} แผ่น</span>
+          <span className="text-sm text-slate-500">รวม <b className="text-slate-800">{total.toLocaleString("th-TH")}</b> ดวง · {opts.custom?.mode === "roll" ? "Roll (ต่อเนื่อง)" : `~${sheets} แผ่น`}</span>
           <div className="flex-1" />
           <button onClick={onClose} className="h-9 px-4 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">ยกเลิก</button>
           <button onClick={generate} disabled={loading || total === 0}
@@ -103,29 +143,87 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* เลย์เอาต์ */}
-          <div>
-            <label className="text-xs font-medium text-slate-500">เลย์เอาต์กระดาษ (A4)</label>
-            <select value={opts.preset} onChange={(e) => setOpts((o) => ({ ...o, preset: e.target.value }))}
-              className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
-              {LABEL_PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
-          </div>
-          {/* โลโก้กลาง QR */}
-          <div>
-            <label className="text-xs font-medium text-slate-500">โลโก้กลาง QR (ไม่บังคับ)</label>
-            <div className="mt-1 flex items-center gap-2">
-              {opts.logo
-                ? <img src={opts.logo} alt="logo" className="w-9 h-9 rounded border border-slate-200 object-contain bg-white" />
-                : <div className="w-9 h-9 rounded border border-dashed border-slate-300 bg-slate-50" />}
-              <label className="h-9 px-3 inline-flex items-center text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer">
-                เลือกรูป
-                <input type="file" accept="image/*" className="hidden" onChange={(e) => onLogoFile(e.target.files?.[0] ?? null)} />
-              </label>
-              {opts.logo && <button onClick={clearLogo} className="text-xs text-slate-400 hover:text-red-500">ล้าง</button>}
+        {/* เลย์เอาต์ */}
+        <div className="border border-slate-200 rounded-lg p-3 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500">เลย์เอาต์</span>
+            <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-sm">
+              <button onClick={usePreset} className={`h-8 px-3 ${!opts.custom ? "bg-indigo-50 text-indigo-700 font-medium" : "bg-white text-slate-500 hover:bg-slate-50"}`}>A4 สำเร็จรูป</button>
+              <button onClick={useCustom} className={`h-8 px-3 border-l border-slate-200 ${opts.custom ? "bg-indigo-50 text-indigo-700 font-medium" : "bg-white text-slate-500 hover:bg-slate-50"}`}>กำหนดเอง</button>
             </div>
           </div>
+
+          {!opts.custom ? (
+            <select value={opts.preset} onChange={(e) => setOpts((o) => ({ ...o, preset: e.target.value }))}
+              className="w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+              {LABEL_PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+          ) : (() => { const c = opts.custom!; return (
+            <div className="space-y-3">
+              {/* แม่แบบ */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <select value="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); e.currentTarget.value = ""; }}
+                  className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                  <option value="">📁 โหลดแม่แบบ…</option>
+                  {templates.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+                </select>
+                <button onClick={saveAsTemplate} className="h-8 px-2.5 text-xs rounded-md border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">💾 บันทึกเป็นแม่แบบ</button>
+              </div>
+              {templates.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {templates.map((t) => (
+                    <span key={t.name} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-600">
+                      {t.name}<button onClick={() => deleteTemplate(t.name)} title="ลบแม่แบบ" className="text-slate-400 hover:text-red-500">✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {/* โหมด */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-500">พิมพ์ลง</span>
+                <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-sm">
+                  <button onClick={() => setCustom({ mode: "a4" })} className={`h-8 px-3 ${c.mode === "a4" ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-500 hover:bg-slate-50"}`}>กระดาษ A4</button>
+                  <button onClick={() => setCustom({ mode: "roll" })} className={`h-8 px-3 border-l border-slate-200 ${c.mode === "roll" ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-500 hover:bg-slate-50"}`}>Roll sticker</button>
+                </div>
+              </div>
+              {/* ขนาดสติ๊กเกอร์ + ต่อแถว */}
+              <div className="grid grid-cols-3 gap-2">
+                {num("กว้าง (mm)", c.labelW, (v) => setCustom({ labelW: v }))}
+                {num("ยาว/สูง (mm)", c.labelH, (v) => setCustom({ labelH: v }))}
+                {num("จำนวนต่อแถว", c.cols, (v) => setCustom({ cols: Math.max(1, Math.floor(v)) }))}
+              </div>
+              {/* ช่องไฟระหว่างดวง */}
+              <div className="grid grid-cols-2 gap-2">
+                {num("ช่องไฟ แนวนอน (mm)", c.gapX, (v) => setCustom({ gapX: v }))}
+                {num("ช่องไฟ แนวตั้ง (mm)", c.gapY, (v) => setCustom({ gapY: v }))}
+              </div>
+              {/* ระยะขอบ */}
+              <div className="grid grid-cols-4 gap-2">
+                {num("ขอบบน", c.mTop, (v) => setCustom({ mTop: v }))}
+                {num("ขอบล่าง", c.mBottom, (v) => setCustom({ mBottom: v }))}
+                {num("ขอบซ้าย", c.mLeft, (v) => setCustom({ mLeft: v }))}
+                {num("ขอบขวา", c.mRight, (v) => setCustom({ mRight: v }))}
+              </div>
+              {c.mode === "roll" && (
+                <div className="grid grid-cols-3 gap-2">
+                  {num("ความกว้าง Roll (mm)", c.rollWidth, (v) => setCustom({ rollWidth: v }))}
+                </div>
+              )}
+            </div>
+          ); })()}
+        </div>
+
+        {/* โลโก้กลาง QR */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-slate-500">โลโก้กลาง QR (ไม่บังคับ)</span>
+          {opts.logo
+            ? <img src={opts.logo} alt="logo" className="w-9 h-9 rounded border border-slate-200 object-contain bg-white" />
+            : <div className="w-9 h-9 rounded border border-dashed border-slate-300 bg-slate-50" />}
+          <label className="h-8 px-3 inline-flex items-center text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer">
+            เลือกรูป
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => onLogoFile(e.target.files?.[0] ?? null)} />
+          </label>
+          {opts.logo && <button onClick={clearLogo} className="text-xs text-slate-400 hover:text-red-500">ล้าง</button>}
         </div>
 
         {/* จำนวน */}

@@ -24,6 +24,32 @@ export const LABEL_PRESETS: LabelPreset[] = [
 export const getPreset = (key: string): LabelPreset =>
   LABEL_PRESETS.find((p) => p.key === key) ?? LABEL_PRESETS[1];
 
+// เฟส 2: เลย์เอาต์กำหนดเอง — ขนาดสติ๊กเกอร์/ต่อแถว/ระยะขอบ + โหมด A4 หรือ Roll
+export type CustomLayout = {
+  mode: "a4" | "roll";
+  labelW: number; labelH: number;                          // ขนาดสติ๊กเกอร์ (mm)
+  cols: number;                                            // จำนวนต่อแถว
+  gapX: number; gapY: number;                              // ช่องไฟระหว่างดวง (mm)
+  mTop: number; mBottom: number; mLeft: number; mRight: number;  // ระยะขอบ (mm)
+  rollWidth: number;                                       // ความกว้าง roll (mm) — ใช้เมื่อ mode = roll
+};
+
+export const DEFAULT_CUSTOM: CustomLayout = {
+  mode: "a4", labelW: 50, labelH: 30, cols: 3, gapX: 2, gapY: 2,
+  mTop: 8, mBottom: 8, mLeft: 8, mRight: 8, rollWidth: 100,
+};
+
+// ขนาด QR/บาร์โค้ด + ฟอนต์ อัตโนมัติจากความสูงสติ๊กเกอร์ (เลย์เอาต์กำหนดเอง)
+export function autoCodeMetrics(labelH: number): { codeH: number; font: number } {
+  return {
+    codeH: Math.max(6, Math.min(labelH * 0.55, 32)),
+    font: Math.max(4, Math.min(labelH * 0.20, 10)),
+  };
+}
+
+export type SavedTemplate = { name: string; layout: CustomLayout };
+export const LAYOUT_TEMPLATES_KEY = "barcode_layout_templates";   // localStorage — แม่แบบเลย์เอาต์ที่บันทึกไว้
+
 export type PrintOpts = {
   showQR: boolean;
   showBarcode: boolean;    // Code128 (สแกนรหัส SKU ที่เป็นตัวอักษรได้)
@@ -31,6 +57,7 @@ export type PrintOpts = {
   showName: boolean;
   showPrice: boolean;
   preset: string;
+  custom: CustomLayout | null;   // ถ้าไม่ null = ใช้เลย์เอาต์กำหนดเอง (แทน preset)
   logo: string | null;     // data URL โลโก้กลาง QR (ถ้ามี)
 };
 
