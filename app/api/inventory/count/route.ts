@@ -116,5 +116,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ line: inserted, error: null });
   }
 
+  // ลบรายการออกจากรอบนับ (เช่นสแกน/เพิ่มผิด)
+  if (action === "delete_line") {
+    const denied = await guardApi(request, "stock.view"); if (denied) return denied;
+    if (!body.line_id) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 400 });
+    const { error } = await admin.from("erp_stock_count_lines").delete().eq("id", body.line_id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: null });
+  }
+
   return NextResponse.json({ error: "ไม่รู้จัก action" }, { status: 400 });
 }

@@ -131,6 +131,16 @@ export default function CountPage() {
       upsertLine(j.line); setAddKey((k) => k + 1); flash("เพิ่มสินค้าแล้ว");
     } catch { setError("เพิ่มไม่สำเร็จ"); }
   };
+  const deleteLine = async (lineId: string) => {
+    if (!active) return;
+    setActive((a) => (a ? { ...a, lines: a.lines.filter((l) => l.id !== lineId) } : a));
+    setCounted((m) => { const n = { ...m }; delete n[lineId]; return n; });
+    try {
+      const res = await apiFetch("/api/inventory/count", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete_line", line_id: lineId }) });
+      const j = await res.json();
+      if (j.error) { setError(j.error); await openSession(active.session.id); }
+    } catch { await openSession(active.session.id); }
+  };
 
   if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
@@ -250,10 +260,11 @@ export default function CountPage() {
                   <th className="text-right font-medium px-3 py-2">ยอดระบบ</th>
                   <th className="text-right font-medium px-3 py-2 w-28">นับได้จริง</th>
                   <th className="text-right font-medium px-3 py-2">ส่วนต่าง</th>
+                  <th className="px-2 py-2 w-8"></th>
                 </tr></thead>
                 <tbody>
                   {active.lines.length === 0 ? (
-                    <tr><td colSpan={5} className="px-3 py-10 text-center text-slate-400">คลังนี้ไม่มีสินค้าให้นับ</td></tr>
+                    <tr><td colSpan={6} className="px-3 py-10 text-center text-slate-400">คลังนี้ไม่มีสินค้าให้นับ</td></tr>
                   ) : active.lines.map((l) => {
                     const c = counted[l.id];
                     const has = c !== "" && c != null;
@@ -272,6 +283,9 @@ export default function CountPage() {
                         </td>
                         <td className={`px-3 py-1.5 text-right tabular-nums font-mono text-xs ${!has ? "text-slate-300" : diff === 0 ? "text-slate-400" : diff > 0 ? "text-emerald-600" : "text-red-600"}`}>
                           {has ? (diff > 0 ? `+${fmt(diff)}` : fmt(diff)) : "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          {!isApplied && <button onClick={() => deleteLine(l.id)} title="ลบรายการนี้ออกจากรอบนับ" className="text-slate-300 hover:text-red-500 transition-colors p-1">🗑</button>}
                         </td>
                       </tr>
                     );
