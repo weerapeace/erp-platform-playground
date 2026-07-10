@@ -138,8 +138,26 @@ export default function BarcodeLabelsPrintPage() {
   if (custom) {
     const { codeH, font } = autoCodeMetrics(custom.labelH);
     const cols = Math.max(1, Math.floor(custom.cols));
-    if (custom.mode === "roll") {
-      // Roll: หน้าเดียวต่อเนื่อง — กว้าง = rollWidth, สูง = พอดีเนื้อหา
+    if (custom.mode === "roll" && (custom.rollSplit ?? "row") === "row") {
+      // Roll แยกทีละแถว — แต่ละแถว (cols ดวง) = 1 หน้า ขนาด = rollWidth × สูง 1 แถว
+      // เหมาะกับเครื่องพิมพ์ฉลากที่ป้อนทีละดวง/แถว — ขนาดหน้าตรงกับ media 1 หน่วย ไม่โดน Chrome ตัดแบ่ง
+      const rowH = custom.mTop + custom.labelH + custom.mBottom;
+      pageCss = `@page { size: ${custom.rollWidth}mm ${rowH}mm; margin: 0; }`;
+      const rowsArr: PrintItem[][] = [];
+      for (let i = 0; i < labels.length; i += cols) rowsArr.push(labels.slice(i, i + cols));
+      sheetCount = rowsArr.length;
+      body = <>{rowsArr.map((row, ri) => (
+        <div key={ri} className="rollpage" style={{ width: `${custom.rollWidth}mm`, height: `${rowH}mm`, overflow: "hidden",
+          paddingTop: `${custom.mTop}mm`, paddingBottom: `${custom.mBottom}mm`, paddingLeft: `${custom.mLeft}mm`, paddingRight: `${custom.mRight}mm`,
+          boxSizing: "border-box" }}>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, ${custom.labelW}mm)`, height: `${custom.labelH}mm`,
+            columnGap: `${custom.gapX}mm`, justifyContent: "center" }}>
+            {row.map((it, li) => <Label key={li} it={it} opts={opts} codeH={codeH} font={font} qr={qrOf(it)} />)}
+          </div>
+        </div>
+      ))}</>;
+    } else if (custom.mode === "roll") {
+      // Roll หน้าเดียวต่อเนื่อง — กว้าง = rollWidth, สูง = พอดีเนื้อหา
       // ⚠️ ต้องระบุความสูงเป็นตัวเลขจริง (ไม่ใช่ auto) ไม่งั้น Chrome ทิ้ง @page แล้วเด้งเป็น A4 (กว้างเกิน + เกินหน้า)
       const nRows = Math.ceil(labels.length / cols) || 1;
       const totalH = custom.mTop + custom.mBottom + nRows * custom.labelH + Math.max(0, nRows - 1) * custom.gapY;
@@ -200,13 +218,14 @@ export default function BarcodeLabelsPrintPage() {
         @media print {
           .no-print { display: none !important; }
           .sheet { page-break-after: always; }          /* A4 หลายแผ่น = ขึ้นหน้าใหม่ */
-          .rollsheet { page-break-after: avoid; }        /* Roll = หน้าเดียวต่อเนื่อง ไม่ต้องขึ้นหน้าใหม่ */
+          .rollpage { page-break-after: always; }        /* Roll แยกทีละแถว = แต่ละแถวขึ้นหน้าใหม่ */
+          .rollsheet { page-break-after: avoid; }        /* Roll ต่อเนื่อง = หน้าเดียว */
         }
         html, body { background: #f1f5f9; }
-        .sheet, .rollsheet { background: #fff; margin: 0 auto 8mm; box-shadow: 0 1px 6px rgba(0,0,0,.12); }
+        .sheet, .rollsheet, .rollpage { background: #fff; margin: 0 auto 8mm; box-shadow: 0 1px 6px rgba(0,0,0,.12); }
         @media print {
           html, body { background: #fff; }
-          .sheet, .rollsheet { box-shadow: none; margin: 0; }
+          .sheet, .rollsheet, .rollpage { box-shadow: none; margin: 0; }
         }
       `}</style>
 
@@ -214,7 +233,9 @@ export default function BarcodeLabelsPrintPage() {
         padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 15 }}>🏷️ พิมพ์บาร์โค้ด</strong>
         <span style={{ color: "#64748b", fontSize: 13 }}>
-          {labels.length.toLocaleString("th-TH")} ดวง · {custom?.mode === "roll" ? "โหมด Roll (ต่อเนื่อง)" : `${sheetCount} แผ่น`}
+          {labels.length.toLocaleString("th-TH")} ดวง · {custom?.mode === "roll"
+            ? ((custom.rollSplit ?? "row") === "row" ? `${sheetCount} แถว (Roll)` : "Roll ต่อเนื่อง (1 หน้ายาว)")
+            : `${sheetCount} แผ่น`}
         </span>
         {capped && <span style={{ color: "#b45309", fontSize: 12 }}>⚠️ เกิน {MAX_LABELS} ดวง — พิมพ์แค่ {MAX_LABELS} ดวงแรก</span>}
         <div style={{ flex: 1 }} />

@@ -120,7 +120,9 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
       description={`เลือกไว้ ${ids.length.toLocaleString("th-TH")} รายการ`}
       footer={
         <div className="flex items-center gap-2 w-full">
-          <span className="text-sm text-slate-500">รวม <b className="text-slate-800">{total.toLocaleString("th-TH")}</b> ดวง · {opts.custom?.mode === "roll" ? "Roll (ต่อเนื่อง)" : `~${sheets} แผ่น`}</span>
+          <span className="text-sm text-slate-500">รวม <b className="text-slate-800">{total.toLocaleString("th-TH")}</b> ดวง · {opts.custom?.mode === "roll"
+            ? ((opts.custom.rollSplit ?? "row") === "row" ? `${Math.ceil(total / Math.max(1, Math.floor(opts.custom.cols)))} แถว` : "Roll ต่อเนื่อง")
+            : `~${sheets} แผ่น`}</span>
           <div className="flex-1" />
           <button onClick={onClose} className="h-9 px-4 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">ยกเลิก</button>
           <button onClick={generate} disabled={loading || total === 0}
@@ -206,9 +208,19 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
                 {num("ขอบขวา", c.mRight, (v) => setCustom({ mRight: v }))}
               </div>
               {c.mode === "roll" && (
-                <div className="grid grid-cols-3 gap-2">
-                  {num("ความกว้าง Roll (mm)", c.rollWidth, (v) => setCustom({ rollWidth: v }))}
-                </div>
+                <>
+                  <div className="grid grid-cols-3 gap-2">
+                    {num("ความกว้าง Roll (mm)", c.rollWidth, (v) => setCustom({ rollWidth: v }))}
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] text-slate-500">พิมพ์แบบ</span>
+                    <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-sm">
+                      <button onClick={() => setCustom({ rollSplit: "row" })} className={`h-8 px-3 ${(c.rollSplit ?? "row") === "row" ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-500 hover:bg-slate-50"}`}>แยกทีละแถว</button>
+                      <button onClick={() => setCustom({ rollSplit: "continuous" })} className={`h-8 px-3 border-l border-slate-200 ${c.rollSplit === "continuous" ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-500 hover:bg-slate-50"}`}>ต่อเนื่องยาว</button>
+                    </div>
+                    <span className="text-[11px] text-slate-400">แยกทีละแถว = เหมาะกับเครื่องพิมพ์ฉลาก</span>
+                  </div>
+                </>
               )}
             </div>
           ); })()}
