@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { ERPModal } from "@/components/modal";
@@ -25,6 +26,9 @@ const MOVE_TYPE: Record<string, { icon: string; label: string; color: string }> 
 const KIND_EMOJI: Record<string, string> = { raw: "🟠", wip: "🔵", fg: "🟢", scrap: "🔴", sales: "🏬", general: "📦" };
 const KIND_ORDER: Record<string, number> = { raw: 1, wip: 2, fg: 3, scrap: 4, sales: 5, general: 6 };
 type WhTab = { id: string; code: string; name: string; kind: string };
+
+// drawer ดูรายละเอียดสินค้า (ของกลาง MasterRecordDrawer) — dynamic กัน import วน
+const SkuDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 const fmtQty   = (n: number) => Number(n).toLocaleString("th-TH");
 const fmtMoney = (n: number) => "฿" + Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2 });
@@ -75,6 +79,8 @@ export default function InventoryPage() {
   const [filterWh, setFilterWh] = useState<string | null>(null);   // warehouse id (null = ทั้งหมด)
   const [whTabs, setWhTabs] = useState<WhTab[]>([]);
   const [showLowOnly, setShowLowOnly] = useState(false);
+  const [peekSku, setPeekSku] = useState<string | null>(null);   // คลิกสินค้า → เปิด drawer
+  const [adjustCurrent, setAdjustCurrent] = useState<number | null>(null);   // โมดัลปรับ: ยอดปัจจุบัน
 
   // toast
   const [toast, setToast] = useState<string | null>(null);
@@ -176,6 +182,16 @@ export default function InventoryPage() {
       }).catch(() => {});
   }, []);
 
+  // โมดัลปรับ: โชว์ยอดปัจจุบันของสินค้า+คลังที่เลือก (ดึงจากยอดคงเหลือจริง)
+  useEffect(() => {
+    if (movType !== "adjust" || !modalOpen || !product || !toWh) { setAdjustCurrent(null); return; }
+    let active = true;
+    apiFetch(`/api/inventory/balances?warehouse_id=${toWh.id}`).then((r) => r.json())
+      .then((j) => { if (!active) return; const b = ((j.data ?? []) as StockBalance[]).find((x) => x.product_id === product.id); setAdjustCurrent(b ? b.qty_on_hand : 0); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [movType, modalOpen, product, toWh]);
+
   // (การเช็คสิทธิ์ย้ายไปหลัง hooks ทั้งหมด บรรทัดล่าง — กัน React #310 hooks ไม่เท่ากัน)
 
   const openCreate = (type: "in"|"out"|"transfer"|"adjust") => {
@@ -236,10 +252,10 @@ export default function InventoryPage() {
     {
       id: "product_name", accessorKey: "product_name", header: "สินค้า", size: 240,
       cell: ({ row }) => (
-        <div>
-          {row.original.product_sku && <code className="text-[10px] text-slate-400 font-mono">{row.original.product_sku}</code>}
-          <div className="text-sm">{row.original.product_name}</div>
-        </div>
+        <button onClick={() => setPeekSku(row.original.product_id)} className="text-left group">
+          {row.original.product_sku && <code className="text-[10px] text-slate-400 font-mono group-hover:text-blue-500">{row.original.product_sku}</code>}
+          <div className="text-sm text-slate-700 group-hover:text-blue-600 underline decoration-dotted decoration-slate-300 group-hover:decoration-blue-400">{row.original.product_name}</div>
+        </button>
       ),
     },
     {
@@ -280,10 +296,10 @@ export default function InventoryPage() {
     {
       id: "product_name", accessorKey: "product_name", header: "สินค้า", size: 260,
       cell: ({ row }) => (
-        <div>
-          <code className="text-[10px] text-slate-400 font-mono">{row.original.product_sku}</code>
-          <div className="text-sm">{row.original.product_name}</div>
-        </div>
+        <button onClick={() => setPeekSku(row.original.product_id)} className="text-left group">
+          <code className="text-[10px] text-slate-400 font-mono group-hover:text-blue-500">{row.original.product_sku}</code>
+          <div className="text-sm text-slate-700 group-hover:text-blue-600 underline decoration-dotted decoration-slate-300 group-hover:decoration-blue-400">{row.original.product_name}</div>
+        </button>
       ),
     },
     {
@@ -539,6 +555,12 @@ export default function InventoryPage() {
             </div>
           )}
 
+          {movType === "adjust" && adjustCurrent != null && (
+            <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+              ยอดปัจจุบันในคลังนี้: <span className="font-mono font-semibold">{fmtQty(adjustCurrent)}</span> — กรอกจำนวนใหม่ที่นับได้ด้านล่าง
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className="text-xs font-medium text-slate-600">
@@ -636,6 +658,7 @@ export default function InventoryPage() {
           </div>
         )}
       </ERPModal>
+      {peekSku && <SkuDrawer moduleKey="skus-v2" recordId={peekSku} onClose={() => setPeekSku(null)} />}
     </PlaygroundShell>
   );
 }
