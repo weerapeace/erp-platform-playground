@@ -30,6 +30,9 @@ type WhTab = { id: string; code: string; name: string; kind: string };
 // drawer ดูรายละเอียดสินค้า (ของกลาง MasterRecordDrawer) — dynamic กัน import วน
 const SkuDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
+type RefWorker = { assignee_name: string | null; stage: string | null; qty: number };
+type RefDetail = { kind: string; mo_no?: string | null; workers?: RefWorker[]; wo?: Record<string, unknown> | null; gr?: Record<string, unknown> | null };
+
 const fmtQty   = (n: number) => Number(n).toLocaleString("th-TH");
 const fmtMoney = (n: number) => "฿" + Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2 });
 
@@ -81,6 +84,10 @@ export default function InventoryPage() {
   const [showLowOnly, setShowLowOnly] = useState(false);
   const [peekSku, setPeekSku] = useState<string | null>(null);   // คลิกสินค้า → เปิด drawer
   const [adjustCurrent, setAdjustCurrent] = useState<number | null>(null);   // โมดัลปรับ: ยอดปัจจุบัน
+  const [moveDetail, setMoveDetail] = useState<StockMovement | null>(null);  // คลิก movement → popup ที่มา
+  const [refDetail, setRefDetail] = useState<RefDetail | null>(null);
+  const [balHist, setBalHist] = useState<StockBalance | null>(null);         // คลิก balance → ประวัติ
+  const [balMoves, setBalMoves] = useState<StockMovement[]>([]);
 
   // toast
   const [toast, setToast] = useState<string | null>(null);
@@ -192,6 +199,25 @@ export default function InventoryPage() {
     return () => { active = false; };
   }, [movType, modalOpen, product, toWh]);
 
+  // คลิก movement → โหลด "ที่มา" (จ่ายงานให้โต๊ะ/ช่าง / ใบรับของ)
+  useEffect(() => {
+    if (!moveDetail) { setRefDetail(null); return; }
+    let active = true;
+    apiFetch(`/api/inventory/ref-detail?ref_type=${encodeURIComponent(moveDetail.reference_type ?? "")}&ref_id=${moveDetail.reference_id ?? ""}`)
+      .then((r) => r.json()).then((j) => { if (active) setRefDetail(j); }).catch(() => {});
+    return () => { active = false; };
+  }, [moveDetail]);
+
+  // คลิก balance → โหลดประวัติการเคลื่อนไหวของ SKU ในคลังนั้น
+  const openBalHist = useCallback(async (b: StockBalance) => {
+    setBalHist(b); setBalMoves([]);
+    try {
+      const res = await apiFetch(`/api/inventory/movements?product_id=${b.product_id}&warehouse_id=${b.warehouse_id}`);
+      const j = await res.json();
+      setBalMoves(j.error ? [] : (j.data as StockMovement[]));
+    } catch { setBalMoves([]); }
+  }, []);
+
   // (การเช็คสิทธิ์ย้ายไปหลัง hooks ทั้งหมด บรรทัดล่าง — กัน React #310 hooks ไม่เท่ากัน)
 
   const openCreate = (type: "in"|"out"|"transfer"|"adjust") => {
@@ -262,10 +288,9 @@ export default function InventoryPage() {
       id: "warehouses", header: "คลัง", size: 200,
       cell: ({ row }) => {
         const f = row.original.from_warehouse_code, t = row.original.to_warehouse_code;
-        if (f && t) return <span className="text-xs">{f} → {t}</span>;
-        if (t)      return <span className="text-xs">→ {t}</span>;
-        if (f)      return <span className="text-xs">{f} →</span>;
-        return <span className="text-slate-300">—</span>;
+        const label = f && t ? `${f} → ${t}` : t ? `→ ${t}` : f ? `${f} →` : null;
+        if (!label) return <span className="text-slate-300">—</span>;
+        return <button onClick={() => setMoveDetail(row.original)} className="text-xs text-slate-600 hover:text-blue-600 underline decoration-dotted decoration-slate-300 hover:decoration-blue-400">{label}</button>;
       },
     },
     {
@@ -481,10 +506,13 @@ export default function InventoryPage() {
             exportFilename="stock-balances"
             exportEntityType="erp_playground_stock_balance"
             canCheck={(p) => can(p as Parameters<typeof can>[0])}
-            rowActions={canAdjust ? [
-              { label: "ตั้งชั้นวาง", icon: "📍", onClick: (b) => openLocModal(b) },
-              { label: "ตั้งจุดสั่งซื้อ", icon: "⚙", onClick: (b) => openMinFromBalance(b) },
-            ] : []}
+            rowActions={[
+              { label: "ดูที่มา/ประวัติ", icon: "📜", onClick: (b: StockBalance) => openBalHist(b) },
+              ...(canAdjust ? [
+                { label: "ตั้งชั้นวาง", icon: "📍", onClick: (b: StockBalance) => openLocModal(b) },
+                { label: "ตั้งจุดสั่งซื้อ", icon: "⚙", onClick: (b: StockBalance) => openMinFromBalance(b) },
+              ] : []),
+            ]}
             pageSize={30}
           />
         ) : (
@@ -658,6 +686,72 @@ export default function InventoryPage() {
           </div>
         )}
       </ERPModal>
+      {/* ที่มาของ movement (คลิกคลัง A→B) — จ่ายงานให้โต๊ะ/ช่างไหน / ใบรับของ */}
+      <ERPModal open={moveDetail !== null} onClose={() => setMoveDetail(null)} size="md" title="📜 รายละเอียดการเคลื่อนไหว">
+        {moveDetail && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div><span className="text-slate-400">ประเภท</span><div className="text-sm">{MOVE_TYPE[moveDetail.movement_type]?.icon} {MOVE_TYPE[moveDetail.movement_type]?.label}</div></div>
+              <div><span className="text-slate-400">วันที่</span><div className="text-sm">{moveDetail.movement_date}</div></div>
+              <div className="col-span-2"><span className="text-slate-400">สินค้า</span><div className="text-sm"><code className="text-[11px] text-slate-500">{moveDetail.product_sku}</code> {moveDetail.product_name}</div></div>
+              <div><span className="text-slate-400">จำนวน</span><div className="text-sm font-mono">{fmtQty(moveDetail.qty)} {moveDetail.unit}</div></div>
+              <div><span className="text-slate-400">คลัง</span><div className="text-sm">{moveDetail.from_warehouse_code ?? ""}{moveDetail.from_warehouse_code && moveDetail.to_warehouse_code ? " → " : ""}{moveDetail.to_warehouse_code ?? ""}</div></div>
+              <div><span className="text-slate-400">อ้างอิง</span><div className="text-sm">{moveDetail.reference_label ?? "—"}</div></div>
+              <div><span className="text-slate-400">ผู้ทำ</span><div className="text-sm">{moveDetail.performed_by ?? "—"}</div></div>
+            </div>
+            {refDetail?.kind === "dispatch" && (
+              <div className="border-t border-slate-100 pt-3">
+                <div className="text-xs font-medium text-slate-600 mb-1.5">👷 จ่ายงานให้ {refDetail.mo_no && <span className="text-slate-400">(MO {refDetail.mo_no})</span>}</div>
+                {(refDetail.workers ?? []).length === 0 ? <div className="text-xs text-slate-400">— ไม่มีข้อมูลใบจ่ายงาน —</div> : (
+                  <div className="space-y-1">{(refDetail.workers ?? []).map((w, i) => (
+                    <div key={i} className="flex justify-between items-center text-xs bg-slate-50 rounded-lg px-2.5 py-1.5">
+                      <span>🪑 {w.assignee_name ?? "—"}{w.stage && <span className="text-slate-400"> · {w.stage}</span>}</span>
+                      <span className="font-mono text-slate-500">{fmtQty(w.qty)} ชิ้น</span>
+                    </div>))}</div>
+                )}
+              </div>
+            )}
+            {refDetail?.kind === "qc" && refDetail.wo && (
+              <div className="border-t border-slate-100 pt-3 text-xs">
+                <div className="font-medium text-slate-600 mb-1">👷 จากใบจ่ายงาน</div>
+                <div className="bg-slate-50 rounded-lg px-2.5 py-1.5">🪑 {String((refDetail.wo).assignee_name ?? "—")} · MO {String((refDetail.wo).mo_no ?? "")}</div>
+              </div>
+            )}
+            {refDetail?.kind === "receipt" && refDetail.gr && (
+              <div className="border-t border-slate-100 pt-3 text-xs">
+                <div className="font-medium text-slate-600 mb-1">📥 จากใบรับของ</div>
+                <div className="bg-slate-50 rounded-lg px-2.5 py-1.5">{String((refDetail.gr).gr_no ?? "")} · PO {String((refDetail.gr).po_no ?? "")} · {String((refDetail.gr).seller_name ?? "")}</div>
+              </div>
+            )}
+          </div>
+        )}
+      </ERPModal>
+
+      {/* ประวัติ/ที่มาของยอดคงเหลือ (คลิก balance) */}
+      <ERPModal open={balHist !== null} onClose={() => setBalHist(null)} size="lg"
+        title={balHist ? `📜 ที่มา/ประวัติ — ${balHist.product_sku}` : ""}
+        description={balHist ? `${balHist.warehouse_name} · คงเหลือ ${fmtQty(balHist.qty_on_hand)} ${balHist.uom ?? ""}` : undefined}>
+        {balMoves.length === 0 ? (
+          <div className="py-8 text-center text-slate-400 text-sm">ยังไม่มีการเคลื่อนไหวในคลังนี้</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-slate-400 border-b border-slate-100">
+                <th className="text-left px-2 py-1.5">วันที่</th><th className="text-left px-2 py-1.5">ประเภท</th><th className="text-left px-2 py-1.5">คลัง</th><th className="text-right px-2 py-1.5">จำนวน</th><th className="text-left px-2 py-1.5">อ้างอิง</th>
+              </tr></thead>
+              <tbody>{balMoves.map((m) => (
+                <tr key={m.id} className="border-b border-slate-50">
+                  <td className="px-2 py-1.5">{m.movement_date}</td>
+                  <td className="px-2 py-1.5">{MOVE_TYPE[m.movement_type]?.icon} {MOVE_TYPE[m.movement_type]?.label}</td>
+                  <td className="px-2 py-1.5">{m.from_warehouse_code ?? ""}{m.from_warehouse_code && m.to_warehouse_code ? "→" : ""}{m.to_warehouse_code ?? ""}</td>
+                  <td className="px-2 py-1.5 text-right font-mono">{fmtQty(m.qty)} {m.unit}</td>
+                  <td className="px-2 py-1.5 text-slate-500">{m.reference_label ?? "—"}</td>
+                </tr>))}</tbody>
+            </table>
+          </div>
+        )}
+      </ERPModal>
+
       {peekSku && <SkuDrawer moduleKey="skus-v2" recordId={peekSku} onClose={() => setPeekSku(null)} />}
     </PlaygroundShell>
   );
