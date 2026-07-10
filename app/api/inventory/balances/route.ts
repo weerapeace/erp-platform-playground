@@ -15,6 +15,7 @@ export type StockBalance = {
   total_value:      number;
   location_code:    string | null;
   last_movement_at: string | null;
+  uom:              string | null;   // หน่วยจริงของสินค้า (จาก skus_v2.uom_id → uoms.name)
 };
 
 export type BalancesResponse = { data: StockBalance[]; error: string | null };

@@ -303,11 +303,11 @@ export default function InventoryPage() {
       ),
     },
     {
-      id: "qty_on_hand", accessorKey: "qty_on_hand", header: "คงเหลือ", size: 100,
+      id: "qty_on_hand", accessorKey: "qty_on_hand", header: "คงเหลือ", size: 110,
       cell: ({ getValue, row }) => {
         const n = getValue() as number;
         const cls = n <= 0 ? "text-red-700" : n < 10 ? "text-amber-700" : "text-slate-800";
-        return <span className={`tabular-nums font-mono ${cls}`}>{fmtQty(n)}</span>;
+        return <span className={`tabular-nums font-mono ${cls}`}>{fmtQty(n)}{row.original.uom && <span className="text-[10px] text-slate-400 ml-1 font-sans">{row.original.uom}</span>}</span>;
       },
     },
     {
