@@ -139,10 +139,13 @@ export default function BarcodeLabelsPrintPage() {
     const { codeH, font } = autoCodeMetrics(custom.labelH);
     const cols = Math.max(1, Math.floor(custom.cols));
     if (custom.mode === "roll") {
-      // Roll: ความกว้าง = rollWidth, ความยาวต่อเนื่อง (auto) — ไหลลงเรื่อย ๆ
-      pageCss = `@page { size: ${custom.rollWidth}mm auto; margin: 0; }`;
+      // Roll: หน้าเดียวต่อเนื่อง — กว้าง = rollWidth, สูง = พอดีเนื้อหา
+      // ⚠️ ต้องระบุความสูงเป็นตัวเลขจริง (ไม่ใช่ auto) ไม่งั้น Chrome ทิ้ง @page แล้วเด้งเป็น A4 (กว้างเกิน + เกินหน้า)
+      const nRows = Math.ceil(labels.length / cols) || 1;
+      const totalH = custom.mTop + custom.mBottom + nRows * custom.labelH + Math.max(0, nRows - 1) * custom.gapY;
+      pageCss = `@page { size: ${custom.rollWidth}mm ${totalH}mm; margin: 0; }`;
       body = (
-        <div className="sheet" style={{ width: `${custom.rollWidth}mm`,
+        <div className="rollsheet" style={{ width: `${custom.rollWidth}mm`, height: `${totalH}mm`, overflow: "hidden",
           paddingTop: `${custom.mTop}mm`, paddingBottom: `${custom.mBottom}mm`, paddingLeft: `${custom.mLeft}mm`, paddingRight: `${custom.mRight}mm`,
           boxSizing: "border-box" }}>
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, ${custom.labelW}mm)`,
@@ -194,10 +197,17 @@ export default function BarcodeLabelsPrintPage() {
     <div>
       <style>{`
         ${pageCss}
-        @media print { .no-print { display: none !important; } .sheet { page-break-after: always; } }
-        body { background: #f1f5f9; }
-        .sheet { background: #fff; margin: 0 auto 8mm; box-shadow: 0 1px 6px rgba(0,0,0,.12); }
-        @media print { .sheet { box-shadow: none; margin: 0; } }
+        @media print {
+          .no-print { display: none !important; }
+          .sheet { page-break-after: always; }          /* A4 หลายแผ่น = ขึ้นหน้าใหม่ */
+          .rollsheet { page-break-after: avoid; }        /* Roll = หน้าเดียวต่อเนื่อง ไม่ต้องขึ้นหน้าใหม่ */
+        }
+        html, body { background: #f1f5f9; }
+        .sheet, .rollsheet { background: #fff; margin: 0 auto 8mm; box-shadow: 0 1px 6px rgba(0,0,0,.12); }
+        @media print {
+          html, body { background: #fff; }
+          .sheet, .rollsheet { box-shadow: none; margin: 0; }
+        }
       `}</style>
 
       <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 10, background: "#fff", borderBottom: "1px solid #e2e8f0",
