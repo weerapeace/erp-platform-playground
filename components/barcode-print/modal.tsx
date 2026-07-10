@@ -14,7 +14,7 @@ import {
   type PrintOpts, type CustomLayout, type SavedTemplate,
 } from "./labels";
 
-type Row = { id: string; code: string; barcode: string; name: string; price: number | null; qty: number };
+type Row = { id: string; code: string; barcode: string; name: string; price: number | null; brandLogo: string | null; qty: number };
 
 export function BarcodePrintModal({ open, onClose, ids, entity }: {
   open: boolean; onClose: () => void; ids: string[]; entity: "skus" | "parent-skus";
@@ -24,7 +24,8 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
   const [rows, setRows] = useState<Row[]>([]);
   const [globalQty, setGlobalQty] = useState(1);
   const [opts, setOpts] = useState<PrintOpts>({
-    showQR: true, showBarcode: true, showCode: true, showName: false, showPrice: false, preset: "a4-3x8", custom: null, logo: null,
+    showQR: true, showBarcode: true, showCode: true, showName: false, showPrice: false, preset: "a4-3x8", custom: null,
+    logoMode: "none", logo: null, codeColor: "#000000", showBorder: true,
   });
   const [templates, setTemplates] = useState<SavedTemplate[]>([]);
 
@@ -83,14 +84,14 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
   const onLogoFile = (file: File | null) => {
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => { const d = String(reader.result); setOpts((o) => ({ ...o, logo: d })); try { localStorage.setItem(QR_LOGO_KEY, d); } catch { /* ignore */ } };
+    reader.onload = () => { const d = String(reader.result); setOpts((o) => ({ ...o, logo: d, logoMode: "single" })); try { localStorage.setItem(QR_LOGO_KEY, d); } catch { /* ignore */ } };
     reader.readAsDataURL(file);
   };
   const clearLogo = () => { setOpts((o) => ({ ...o, logo: null })); try { localStorage.removeItem(QR_LOGO_KEY); } catch { /* ignore */ } };
 
   const generate = () => {
     if (!opts.showQR && !opts.showBarcode) { toast.error("เลือกอย่างน้อย 1 อย่าง: QR หรือ บาร์โค้ด"); return; }
-    const items = rows.filter((r) => r.qty > 0).map((r) => ({ code: r.code, barcode: r.barcode, name: r.name, price: r.price, qty: r.qty }));
+    const items = rows.filter((r) => r.qty > 0).map((r) => ({ code: r.code, barcode: r.barcode, name: r.name, price: r.price, qty: r.qty, brandLogo: r.brandLogo }));
     if (items.length === 0) { toast.error("ยังไม่มีรายการที่จะพิมพ์ (ใส่จำนวน ≥ 1)"); return; }
     if (total > MAX_LABELS) toast.warning(`เกิน ${MAX_LABELS.toLocaleString("th-TH")} ดวง — จะพิมพ์แค่ ${MAX_LABELS.toLocaleString("th-TH")} ดวงแรก`);
     try {
@@ -213,17 +214,43 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
           ); })()}
         </div>
 
-        {/* โลโก้กลาง QR */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-slate-500">โลโก้กลาง QR (ไม่บังคับ)</span>
-          {opts.logo
-            ? <img src={opts.logo} alt="logo" className="w-9 h-9 rounded border border-slate-200 object-contain bg-white" />
-            : <div className="w-9 h-9 rounded border border-dashed border-slate-300 bg-slate-50" />}
-          <label className="h-8 px-3 inline-flex items-center text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer">
-            เลือกรูป
-            <input type="file" accept="image/*" className="hidden" onChange={(e) => onLogoFile(e.target.files?.[0] ?? null)} />
-          </label>
-          {opts.logo && <button onClick={clearLogo} className="text-xs text-slate-400 hover:text-red-500">ล้าง</button>}
+        {/* โลโก้กลาง QR + สี/เส้น */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* โลโก้ */}
+          <div className="border border-slate-200 rounded-lg p-3 space-y-2">
+            <div className="text-xs font-medium text-slate-500">โลโก้กลาง QR</div>
+            <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-sm">
+              {(["none", "single", "brand"] as const).map((m, i) => (
+                <button key={m} onClick={() => setOpts((o) => ({ ...o, logoMode: m }))}
+                  className={`h-8 px-3 ${i > 0 ? "border-l border-slate-200" : ""} ${opts.logoMode === m ? "bg-indigo-50 text-indigo-700 font-medium" : "bg-white text-slate-500 hover:bg-slate-50"}`}>
+                  {m === "none" ? "ไม่มี" : m === "single" ? "อัปโหลดเอง" : "ตามแบรนด์"}
+                </button>
+              ))}
+            </div>
+            {opts.logoMode === "single" && (
+              <div className="flex items-center gap-2">
+                {opts.logo
+                  ? <img src={opts.logo} alt="logo" className="w-9 h-9 rounded border border-slate-200 object-contain bg-white" />
+                  : <div className="w-9 h-9 rounded border border-dashed border-slate-300 bg-slate-50" />}
+                <label className="h-8 px-3 inline-flex items-center text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer">
+                  เลือกรูป
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => onLogoFile(e.target.files?.[0] ?? null)} />
+                </label>
+                {opts.logo && <button onClick={clearLogo} className="text-xs text-slate-400 hover:text-red-500">ล้าง</button>}
+              </div>
+            )}
+            {opts.logoMode === "brand" && <div className="text-[11px] text-slate-400">ดึงโลโก้แบรนด์ของสินค้าแต่ละตัวให้อัตโนมัติ (ตัวที่ไม่มีแบรนด์/โลโก้ = ไม่ใส่)</div>}
+          </div>
+          {/* สี & เส้น */}
+          <div className="border border-slate-200 rounded-lg p-3 space-y-2">
+            <div className="text-xs font-medium text-slate-500">สี & เส้น</div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              สีโค้ด
+              <input type="color" value={opts.codeColor} onChange={(e) => setOpts((o) => ({ ...o, codeColor: e.target.value }))} className="h-7 w-10 border border-slate-200 rounded cursor-pointer" />
+              {opts.codeColor.toLowerCase() !== "#000000" && <button onClick={() => setOpts((o) => ({ ...o, codeColor: "#000000" }))} className="text-xs text-slate-400 hover:text-slate-600">รีเซ็ตดำ</button>}
+            </label>
+            {chk("แสดงเส้นตัด (ขอบดวง)", opts.showBorder, (v) => setOpts((o) => ({ ...o, showBorder: v })))}
+          </div>
         </div>
 
         {/* จำนวน */}

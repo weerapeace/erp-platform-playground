@@ -17,9 +17,16 @@ import {
 const loadImg = (src: string): Promise<HTMLImageElement> =>
   new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src; });
 
-// สร้าง QR (data URL) — วางโลโก้กลางได้ (error-correction สูงเลยยังสแกนได้)
-async function makeQR(text: string, logo: string | null, size = 240): Promise<string> {
-  const url = await QRCode.toDataURL(text || " ", { errorCorrectionLevel: "H", margin: 1, width: size });
+// โลโก้ที่จะวางกลาง QR ของแต่ละดวง (ตาม logoMode)
+function logoForItem(it: PrintItem, o: PrintOpts): string | null {
+  if (o.logoMode === "single") return o.logo;
+  if (o.logoMode === "brand") return it.brandLogo ? `/api/r2-image?key=${encodeURIComponent(it.brandLogo)}&w=120` : null;
+  return null;
+}
+
+// สร้าง QR (data URL) — วางโลโก้กลางได้ (error-correction สูงเลยยังสแกนได้) + สีกำหนดได้
+async function makeQR(text: string, logo: string | null, color = "#000000", size = 240): Promise<string> {
+  const url = await QRCode.toDataURL(text || " ", { errorCorrectionLevel: "H", margin: 1, width: size, color: { dark: color, light: "#ffffff" } });
   if (!logo) return url;
   try {
     const canvas = document.createElement("canvas");
@@ -36,24 +43,24 @@ async function makeQR(text: string, logo: string | null, size = 240): Promise<st
   } catch { return url; }
 }
 
-function Barcode({ value, heightMm }: { value: string; heightMm: number }) {
+function Barcode({ value, heightMm, color = "#000000" }: { value: string; heightMm: number; color?: string }) {
   const ref = useRef<SVGSVGElement>(null);
   useEffect(() => {
     if (!ref.current) return;
-    try { JsBarcode(ref.current, value || " ", { format: "CODE128", displayValue: false, height: heightMm * 3.78, width: 1.3, margin: 0 }); }
+    try { JsBarcode(ref.current, value || " ", { format: "CODE128", displayValue: false, height: heightMm * 3.78, width: 1.3, margin: 0, lineColor: color }); }
     catch { /* ค่าที่ Code128 ไม่รองรับ (หายากมาก) */ }
-  }, [value, heightMm]);
+  }, [value, heightMm, color]);
   return <svg ref={ref} style={{ height: `${heightMm}mm`, maxWidth: "100%" }} />;
 }
 
 function Label({ it, opts, codeH, font, qr }: { it: PrintItem; opts: PrintOpts; codeH: number; font: number; qr?: string }) {
   const hasText = opts.showCode || opts.showName || opts.showPrice;
   return (
-    <div style={{ border: "0.4px dashed #dcdcdc", display: "flex", flexDirection: "column", alignItems: "center",
+    <div style={{ border: opts.showBorder ? "0.4px dashed #dcdcdc" : "none", display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", gap: "0.5mm", overflow: "hidden", padding: "1mm", boxSizing: "border-box" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "1.5mm", maxWidth: "100%" }}>
         {opts.showQR && qr && <img src={qr} alt="" style={{ height: `${codeH}mm`, width: `${codeH}mm` }} />}
-        {opts.showBarcode && <Barcode value={it.barcode || it.code} heightMm={codeH * 0.8} />}
+        {opts.showBarcode && <Barcode value={it.barcode || it.code} heightMm={codeH * 0.8} color={opts.codeColor} />}
       </div>
       {hasText && (
         <div style={{ textAlign: "center", lineHeight: 1.12, maxWidth: "100%", overflow: "hidden" }}>
@@ -88,11 +95,18 @@ export default function BarcodeLabelsPrintPage() {
 
   useEffect(() => {
     if (!payload || !payload.opts.showQR) return;
-    const uniq = Array.from(new Set(payload.items.map((i) => i.barcode || i.code)));
+    const o = payload.opts;
+    // key = ค่า + โลโก้ (โหมดแบรนด์ = โลโก้ต่างกันต่อดวง) — สร้างครั้งเดียวต่อ key
+    const jobs = new Map<string, { text: string; logo: string | null }>();
+    for (const it of payload.items) {
+      const text = it.barcode || it.code;
+      const logo = logoForItem(it, o);
+      jobs.set(`${text}|${logo ?? ""}`, { text, logo });
+    }
     let cancelled = false;
     (async () => {
       const map: Record<string, string> = {};
-      for (const val of uniq) map[val] = await makeQR(val, payload.opts.logo);
+      for (const [key, j] of jobs) map[key] = await makeQR(j.text, j.logo, o.codeColor);
       if (!cancelled) setQrMap(map);
     })();
     return () => { cancelled = true; };
@@ -114,7 +128,7 @@ export default function BarcodeLabelsPrintPage() {
   const opts = payload.opts;
   const custom = opts.custom;
   const capped = labels.length >= MAX_LABELS;
-  const qrOf = (it: PrintItem) => qrMap[it.barcode || it.code];
+  const qrOf = (it: PrintItem) => qrMap[`${it.barcode || it.code}|${logoForItem(it, opts) ?? ""}`];
 
   // ── เลย์เอาต์กำหนดเอง ──
   let body: ReactNode;

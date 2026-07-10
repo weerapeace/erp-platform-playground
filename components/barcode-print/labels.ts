@@ -58,10 +58,14 @@ export type PrintOpts = {
   showPrice: boolean;
   preset: string;
   custom: CustomLayout | null;   // ถ้าไม่ null = ใช้เลย์เอาต์กำหนดเอง (แทน preset)
-  logo: string | null;     // data URL โลโก้กลาง QR (ถ้ามี)
+  // เฟส 3
+  logoMode: "none" | "single" | "brand";   // ไม่มี / อัปโหลดเดียว / ตามแบรนด์อัตโนมัติ
+  logo: string | null;     // data URL โลโก้กลาง QR (ใช้เมื่อ logoMode = single)
+  codeColor: string;       // สีของ QR + บาร์โค้ด (default ดำ)
+  showBorder: boolean;     // แสดงเส้นตัด (ขอบดวง)
 };
 
-export type PrintItem = { code: string; barcode: string; name: string; price: number | null; qty: number };
+export type PrintItem = { code: string; barcode: string; name: string; price: number | null; qty: number; brandLogo?: string | null };
 export type PrintPayload = { items: PrintItem[]; opts: PrintOpts };
 
 export const PRINT_PAYLOAD_KEY = "barcode_print_payload";   // sessionStorage — ส่ง payload ไปหน้าพิมพ์
