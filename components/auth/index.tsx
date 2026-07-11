@@ -48,6 +48,8 @@ export type Permission =
   | "loan_schedules.view" | "loan_schedules.create" | "loan_schedules.edit" | "loan_schedules.delete"
   | "loan_installments.view"
   | "loan_payments.view" | "loan_payments.create" | "loan_payments.edit" | "loan_payments.delete"
+  | "od_facilities.view" | "od_facilities.create" | "od_facilities.edit" | "od_facilities.delete"
+  | "od_statements.import" | "od_transactions.view" | "od_daily.view"
   | "admin.users" | "admin.audit_log";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
