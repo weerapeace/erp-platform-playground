@@ -50,6 +50,7 @@ export type Permission =
   | "loan_payments.view" | "loan_payments.create" | "loan_payments.edit" | "loan_payments.delete"
   | "od_facilities.view" | "od_facilities.create" | "od_facilities.edit" | "od_facilities.delete"
   | "od_statements.import" | "od_transactions.view" | "od_daily.view"
+  | "od_interest.view" | "od_interest.reconcile"
   | "admin.users" | "admin.audit_log";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
