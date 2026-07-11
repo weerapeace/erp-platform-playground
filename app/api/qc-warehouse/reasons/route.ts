@@ -9,6 +9,15 @@ import { guardApi } from "@/lib/api-auth";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// รายการสาเหตุกลาง (active) — ให้ ParentIssuesPanel/ที่อื่นดึงไปทำ dropdown ได้เอง
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "qc.view"); if (denied) return denied;
+  const { data, error } = await supabaseAdmin().from("qc_defect_reasons")
+    .select("id, name").eq("is_active", true).order("sort_order", { ascending: true });
+  if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
+  return NextResponse.json({ data: data ?? [], error: null });
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "qc.defect"); if (denied) return denied;
   const body = await request.json().catch(() => ({}));
