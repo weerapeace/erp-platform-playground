@@ -43,9 +43,7 @@ import type { StudioField } from "@/components/master-crud/studio-panel";
 const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-tab").then((m) => m.ParentPlatformsTab), { ssr: false });
-const CentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker), { ssr: false });
-const InlineCentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.InlineCentralCategoryPicker), { ssr: false });
-const Parent360Overview = dynamic(() => import("@/components/parent-360-overview").then((m) => m.Parent360Overview), { ssr: false });
+const ParentIssuesPanel = dynamic(() => import("@/components/parent-issues-panel").then((m) => m.ParentIssuesPanel), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -422,8 +420,6 @@ export type MasterCRUDConfig = {
   cellRenderers?: Record<string, (value: unknown, row?: Record<string, unknown>) => React.ReactNode>;
   /** custom field ในฟอร์ม (key → renderForm) — merge เข้า field จาก Registry ได้ (คู่กับ cellRenderers) */
   formRenderers?: Record<string, FieldDef["renderForm"]>;
-  /** custom field ในหน้า "ดู" (key → renderDetail) — merge เข้า field จาก Registry ได้ (คู่กับ formRenderers) */
-  detailRenderers?: Record<string, FieldDef["renderDetail"]>;
   /** แถบ custom เหนือฟอร์ม "ตอนสร้างใหม่" เท่านั้น (เช่น แม่แบบ) — รับค่าฟอร์มปัจจุบัน + setter */
   createFormHeader?: (ctx: { form: Record<string, unknown>; updateForm: (patch: Partial<Record<string, unknown>>) => void }) => React.ReactNode;
   /** ปุ่ม/ลิงก์เพิ่มเติมบนหัวหน้า (ซ้ายของ ปรับแต่ง/นำเข้า/เพิ่ม) เช่น "พิมพ์ฟอร์ม" */
@@ -447,11 +443,6 @@ export type MasterCRUDConfig = {
   hideActiveStatus?: boolean;
   /** ปิดปุ่มลบถาวรสำหรับเอกสารที่ต้องเก็บประวัติ เช่น Payroll Periods */
   allowPermanentDelete?: boolean;
-  /** กล่องลบ: โชว์ "สิ่งที่ผูกอยู่" + ตัวเลือกลบพ่วง (เช่น Parent SKU: รูป/ตัวลูก) · apply เรียกก่อนลบตัวหลัก */
-  deleteExtras?: {
-    fetch: (id: string) => Promise<{ items: { icon: string; label: string; count: number }[]; options: { key: string; label: string }[] }>;
-    apply: (id: string, selected: Record<string, boolean>, mode: "soft" | "hard") => Promise<void>;
-  };
   /** จำนวน row ที่ดึงตอนโหลด (client mode, default 200) */
   pageLimit?: number;
   /** hook หลังบันทึก parent สำเร็จ ใช้กับข้อมูลลูกที่มากับฟอร์ม เช่น วันหยุดประจำงวด */
@@ -651,15 +642,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   }, [user]);
 
   const effectiveFields: FieldDef[] = useMemo(() => {
-    // ของกลาง: merge custom renderForm/renderDetail จาก config เข้าทุก field (รวมที่มาจาก Registry)
+    // ของกลาง: merge custom renderForm จาก config.formRenderers เข้าทุก field (รวมที่มาจาก Registry)
     const applyFormRenderers = (fields: FieldDef[]): FieldDef[] =>
-      (config.formRenderers || config.detailRenderers)
-        ? fields.map((f) => {
-            let nf = f;
-            if (config.formRenderers?.[f.key]) nf = { ...nf, renderForm: config.formRenderers[f.key] };
-            if (config.detailRenderers?.[f.key]) nf = { ...nf, renderDetail: config.detailRenderers[f.key] };
-            return nf;
-          })
+      config.formRenderers
+        ? fields.map((f) => (config.formRenderers![f.key] ? { ...f, renderForm: config.formRenderers![f.key] } : f))
         : fields;
     if (registryFields && registryFields.length > 0) {
       const fromRegistry = registryFields
@@ -678,7 +664,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       return applyFormRenderers([...fromRegistry, ...configOnlyFields]);
     }
     return applyFormRenderers(config.fields ?? []);
-  }, [registryFields, config.fields, config.cellRenderers, config.formRenderers, config.detailRenderers, can, roleOk]);
+  }, [registryFields, config.fields, config.cellRenderers, config.formRenderers, can, roleOk]);
 
   // auto-derive searchKeys จาก Registry ถ้ามี
   const effectiveSearchKeys: string[] = useMemo(() => {
@@ -780,7 +766,6 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [error,   setError]   = useState<string | null>(null);
   const [validationRules, setValidationRules] = useState<Record<string, ValidationRule>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
-  const [dupHit, setDupHit] = useState<{ field: string; value: string } | null>(null);   // ค่าซ้ำล่าสุด (ไฮไลต์ฟิลด์ + ปุ่มดูตัวที่ซ้ำ)
 
   // load validation rules once
   useEffect(() => { loadValidationRules().then(setValidationRules); }, []);
@@ -880,27 +865,16 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     return k.includes("sku") && !k.includes("parent") ? "sku" : "parent_sku";
   }, [config.moduleKey, config.apiPath]);
   const [familyTemplates, setFamilyTemplates] = useState<Record<string, FamilyTemplate>>({});
-  const familyNameToIdRef = useRef<Record<string, string>>({});   // ชื่อ family (lowercase) → id (สำหรับ auto-fill จาก Brand/หมวด)
   useEffect(() => {
     if (familyM2mFields.length === 0) return;
     cachedJson<{ data?: Record<string, unknown>[]; rows?: Record<string, unknown>[] }>(`/api/master-v2/product_families?limit=500&include_inactive=true`)
       .then((j) => {
         const m: Record<string, FamilyTemplate> = {};
-        const nameMap: Record<string, string> = {};
-        for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) {
-          m[String(r.id)] = scopedTpl(r.template as FamilyTemplateRaw, tplScope);
-          const nm = String(r.name ?? "").trim().toLowerCase();
-          if (nm && !nameMap[nm]) nameMap[nm] = String(r.id);
-        }
+        for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) m[String(r.id)] = scopedTpl(r.template as FamilyTemplateRaw, tplScope);
         setFamilyTemplates(m);
-        familyNameToIdRef.current = nameMap;
       })
       .catch(() => {});
   }, [familyM2mFields.length, tplScope]);
-  // Auto-fill Product Family จาก Brand + หมวด (จับคู่ "ชื่อ") — เติมให้เมื่อเลือก แต่ผู้ใช้ลบเองได้
-  // เก็บ label ที่เพิ่งเลือกจาก RelationPicker (fresh) + ค่า *_label เดิมจาก GET
-  const pickedLabelsRef = useRef<Record<string, string>>({});
-  const prevRelRef = useRef<Record<string, string>>({});   // ค่า id ครั้งก่อนของ brand_id/category_id (กันเติมซ้ำ + เคารพการลบเอง)
 
   // ids ของแท็กที่เลือกในฟอร์มปัจจุบัน → รวมเทมเพลต union (โชว์ชนะซ่อน)
   const selectedFamilyIds = useMemo(() => {
@@ -936,32 +910,6 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familyKey, modalOpen, drawerMode]);
 
-  // รีเซ็ต label/prev ที่จำไว้ เมื่อเปิด record ใหม่ (กันเอา label ของ record ก่อนมาใช้ผิด)
-  useEffect(() => { pickedLabelsRef.current = {}; prevRelRef.current = {}; }, [editingId, modalOpen]);
-
-  // Auto-fill Product Family: เลือก Brand/หมวด (Category Id) → เติมแท็กที่ "ชื่อตรงกัน" ให้อัตโนมัติ (ลบเองได้)
-  // เติมเฉพาะตอนผู้ใช้ "เพิ่งเลือก" ในเซสชันนี้ (มี label สดใน pickedLabelsRef) — ไม่เติมตอนเปิด record + ไม่ทับการลบเอง
-  useEffect(() => {
-    if (!modalOpen || drawerMode !== "edit" || familyM2mFields.length === 0) return;
-    const fkey = familyM2mFields[0].key;
-    const loaded = Array.isArray(form[fkey]);
-    const current = loaded ? (form[fkey] as unknown[]).map(String) : [];
-    const nameMap = familyNameToIdRef.current;
-    const add: string[] = [];
-    for (const relKey of ["brand_id", "category_id"]) {
-      const idStr = form[relKey] == null ? "" : String(form[relKey]);
-      if (prevRelRef.current[relKey] === idStr) continue;   // ฟิลด์นี้ไม่เปลี่ยน → ข้าม (เคารพการลบเอง)
-      prevRelRef.current[relKey] = idStr;
-      if (!loaded || !idStr) continue;                       // ยังไม่โหลด m2m / ไม่มีค่า → แค่จำ prev
-      const label = (pickedLabelsRef.current[relKey] ?? "").trim().toLowerCase();  // เฉพาะที่ "เพิ่งเลือก"
-      if (!label) continue;
-      const famId = nameMap[label];
-      if (famId && !current.includes(famId) && !add.includes(famId)) add.push(famId);
-    }
-    if (add.length) updateForm({ [fkey]: [...current, ...add] });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.brand_id, form.category_id, modalOpen, drawerMode]);
-
   // field ถูกซ่อน/บังคับโดยเทมเพลตไหม (โชว์ชนะซ่อน)
   const tplHidden = useCallback((f: FieldDef) => {
     if (mergedTemplate.show.has(f.key)) return false;
@@ -982,8 +930,6 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // delete dialog (ลบชั่วคราว / ลบถาวร)
   const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
   const [deleteMode, setDeleteMode] = useState<"soft" | "hard">("soft");
-  const [deleteInfo, setDeleteInfo] = useState<{ items: { icon: string; label: string; count: number }[]; options: { key: string; label: string }[] } | null>(null);
-  const [deleteOpts, setDeleteOpts] = useState<Record<string, boolean>>({});   // ตัวเลือกลบพ่วงที่ติ๊ก
   const [deleteText, setDeleteText] = useState("");
   const [deleting, setDeleting] = useState(false);
 
@@ -1016,14 +962,6 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // F11B: Studio v1 (drag-drop layout builder)
   const [studioOpen, setStudioOpen] = useState(false);
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
-  // ปุ่ม "ออกแบบฟอร์ม" (Studio) — ไอคอนที่หัว drawer ข้างซ้ายปุ่มปิด · โผล่เฉพาะโมดูลจริง + มีสิทธิ์แก้
-  // render-prop (() => ReactNode) ให้ตรงกับ prop headerActions ของ Drawer
-  const studioHeaderBtn = config.moduleKey && canEdit
-    ? () => (
-        <button type="button" onClick={() => setStudioOpen(true)} title="ออกแบบฟอร์ม/ตาราง — จัดฟิลด์ · แท็บ · เห็น preview สด"
-          className="p-1.5 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors text-base leading-none">🎨</button>
-      )
-    : undefined;
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);   // นำเข้าข้อมูล (ของกลาง)
   const [customCreateOpen, setCustomCreateOpen] = useState(false);   // UI สร้างเอง (เช่น SKU Wizard)
@@ -1264,28 +1202,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const tryClose = () => { if (drawerMode === "edit" && dirty) setConfirmDiscard(true); else setModalOpen(false); };
   const discard  = () => { setConfirmDiscard(false); setModalOpen(false); setDirty(false); };
   // F11: สลับเข้าโหมดแก้ไข
-  const switchToEdit = () => { setDrawerMode("edit"); setFormErr(null); setFieldErrors({}); setDupHit(null); };
-
-  // เปิดดู "รายการที่ซ้ำ" กับค่าที่กรอก (หา id จากค่าที่ซ้ำ → เปิด drawer ตัวนั้น)
-  const gotoDup = async () => {
-    const mk = config.moduleKey;
-    if (!dupHit || !mk) return;
-    try {
-      const flt = encodeURIComponent(JSON.stringify({ [dupHit.field]: { type: "text", value: dupHit.value } }));
-      const j = await apiFetch(`${apiBase}${config.apiPath}?limit=20&filters=${flt}`).then((r) => r.json());
-      const rows = (j.data ?? j.rows ?? []) as Record<string, unknown>[];
-      const hit = rows.find((r) => String(r[dupHit.field]) === String(dupHit.value)) ?? rows[0];
-      if (hit?.id) setPeek({ moduleKey: mk, id: String(hit.id) });
-      else fail("ไม่พบรายการที่ซ้ำ (อาจถูกปิดใช้งาน/ลบไปแล้ว)");
-    } catch { fail("ค้นหารายการที่ซ้ำไม่สำเร็จ"); }
-  };
-  const formErrBanner = (mb: boolean) => (drawerMode === "edit" && formErr) ? (
-    <div className={`${mb ? "mb-3 " : ""}px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2 flex-wrap`}>
-      <span className="flex-1 min-w-0">⚠ {formErr}</span>
-      {dupHit && config.moduleKey && <button type="button" onClick={gotoDup}
-        className="flex-shrink-0 h-6 px-2 rounded border border-red-300 bg-white text-red-700 hover:bg-red-100 font-medium">👁 ดูตัวที่ซ้ำ</button>}
-    </div>
-  ) : null;
+  const switchToEdit = () => { setDrawerMode("edit"); setFormErr(null); setFieldErrors({}); };
 
   const save = async () => {
     // 1. รัน validation rules per field — Sprint 13: skip field ที่ condition ไม่ผ่าน
@@ -1309,7 +1226,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       setFormErr("มี field ที่ยังไม่ผ่านการตรวจ — ดูข้อความใต้แต่ละ field");
       return;
     }
-    setSaving(true); setFormErr(null); setDupHit(null);
+    setSaving(true); setFormErr(null);
     try {
       // serialize fields:
       //   REST mode (v2): proper types (number → number, boolean → boolean)
@@ -1342,11 +1259,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         body: JSON.stringify({ ...serialized, actor: user?.name }),
       });
       const json = await res.json();
-      if (json.error) {
-        // ค่าซ้ำ (unique) → ไฮไลต์ฟิลด์นั้นแดง + เก็บไว้ให้ปุ่ม "ดูตัวที่ซ้ำ"
-        if (json.dup?.field) { setFieldErrors({ [json.dup.field]: [`ค่านี้ซ้ำ — มี “${json.dup.value}” อยู่แล้วในระบบ`] }); setDupHit(json.dup as { field: string; value: string }); }
-        throw new Error(json.error);
-      }
+      if (json.error) throw new Error(json.error);
       flash(editingId ? "บันทึกแล้ว" : "สร้างใหม่แล้ว");
       setDirty(false);
       // ผูก/ถอดลิงก์ m2m ให้ตรงกับที่เลือก (widget mirror ค่าเข้า form แล้ว) — ทั้งสร้างและแก้ไข
@@ -1417,10 +1330,6 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     if (deleteMode === "hard" && deleteText.trim() !== "ลบ") { setError('พิมพ์คำว่า "ลบ" เพื่อยืนยันการลบถาวร'); return; }
     setDeleting(true); setError(null);
     try {
-      // ลบพ่วง (รูป/ตัวลูก) ก่อนลบตัวหลัก — สำคัญตอนลบถาวร (ลูกต้องไปก่อน กัน FK)
-      if (config.deleteExtras && (deleteOpts.images || deleteOpts.children)) {
-        await config.deleteExtras.apply(String(deleteTarget.id), deleteOpts, deleteMode);
-      }
       const url = `${apiBase}${config.apiPath}/${deleteTarget.id}?actor=${encodeURIComponent(user?.name ?? "")}${deleteMode === "hard" ? "&hard=1" : ""}`;
       const res = await apiFetch(url, { method: "DELETE" });
       const json = await res.json();
@@ -1433,10 +1342,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     } catch (err) { const m = err instanceof Error ? err.message : "ลบไม่สำเร็จ"; setError(m); fail(m); }
     finally { setDeleting(false); }
   };
-  const openDelete = (r: Row) => {
-    setDeleteTarget(r); setDeleteMode("soft"); setDeleteText(""); setError(null); setDeleteInfo(null); setDeleteOpts({});
-    if (config.deleteExtras) config.deleteExtras.fetch(String(r.id)).then(setDeleteInfo).catch(() => {});   // โชว์สิ่งที่ผูก + ตัวเลือกลบพ่วง
-  };
+  const openDelete = (r: Row) => { setDeleteTarget(r); setDeleteMode("soft"); setDeleteText(""); setError(null); };
   const restore = async (r: Row) => {
     try {
       const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}`, {
@@ -1923,7 +1829,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           <div className="mt-0.5">
             <RelationPicker
               value={(v as string) || null}
-              onChange={(val, opt) => { updateForm({ [f.key]: val }); if (opt?.label) pickedLabelsRef.current[f.key] = opt.label; }}
+              onChange={(val) => updateForm({ [f.key]: val })}
               config={f.relationConfig}
               placeholder={f.placeholder ?? `— เลือก ${f.label} —`}
               required={f.required}
@@ -2305,7 +2211,6 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         onClose={discard}
         size="lg"
         hasUnsavedChanges={drawerMode === "edit" && dirty}
-        headerActions={studioHeaderBtn}
         title={
           drawerMode === "view"
             ? (editingId ? `${config.title}` : `เพิ่ม ${config.title}`)
@@ -2407,7 +2312,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   </div>
                 )}
                 {renderDetailHero(visibleFields)}
-                {formErrBanner(false)}
+                {drawerMode === "edit" && formErr && (
+                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
+                )}
                 {/* Layout คุมทุก field (รวม core) */}
                 {createHeaderEl}
                 {drawerMode === "view"
@@ -2422,7 +2329,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             return (
               <div className="space-y-4">
                 {renderDetailHero(visibleFields)}
-                {formErrBanner(false)}
+                {drawerMode === "edit" && formErr && (
+                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
+                )}
                 {createHeaderEl}
                 {drawerMode === "view"
                   ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
@@ -2437,29 +2346,19 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               <div className={`md:flex-shrink-0 md:order-1 space-y-4 ${galleryLeft ? "md:w-96" : "md:w-72"}`}>
                 {/* รูปหลัก: layout=gallery → "รูปสินค้า" (แกลเลอรีจริง รูปหลักใหญ่+รูปย่อย+อัป แบบ Design Sheet) แทนรูปปก · ไม่งั้น = รูปปกเดิม */}
                 {galleryLeft && config.mediaGallery && editingId ? (
-                  <div className="space-y-3">
-                    {/* รูปปก (cover_image_r2_key) — รูปหลักที่โชว์บนการ์ด/รายการ · แยกจากแกลเลอรีรูปเพิ่มเติม */}
-                    {coverKey && (
-                      <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
-                        <span className="absolute top-1.5 left-1.5 z-10 text-[10px] bg-white/85 text-slate-500 px-1.5 py-0.5 rounded">🖼 รูปปก</span>
-                        <div className="aspect-square flex items-center justify-center"><ImageGallery r2Key={coverKey} /></div>
-                        {coverDeleteBtn}
-                      </div>
-                    )}
-                    {/* quick edit: จัดรูปได้เลยไม่ต้องกด "แก้ไข" (readonly = แค่ไม่มีสิทธิ์) */}
-                    <ImageManager
-                      entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
-                      entityId={String(editingId)}
-                      actor={user?.name ?? user?.email ?? undefined}
-                      readonly={!canEdit}
-                      title={config.mediaGallery.title}
-                      description={config.mediaGallery.description}
-                      maxItems={config.mediaGallery.maxItems ?? 9}
-                      maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
-                      imageOnly={config.mediaGallery.imageOnly ?? true}
-                      layout="gallery"
-                    />
-                  </div>
+                  // quick edit: จัดรูปได้เลยไม่ต้องกด "แก้ไข" (readonly = แค่ไม่มีสิทธิ์)
+                  <ImageManager
+                    entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
+                    entityId={String(editingId)}
+                    actor={user?.name ?? user?.email ?? undefined}
+                    readonly={!canEdit}
+                    title={config.mediaGallery.title}
+                    description={config.mediaGallery.description}
+                    maxItems={config.mediaGallery.maxItems ?? 9}
+                    maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
+                    imageOnly={config.mediaGallery.imageOnly ?? true}
+                    layout="gallery"
+                  />
                 ) : (
                   <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
                     {coverKey
@@ -2523,7 +2422,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
               <div className="flex-1 min-w-0 md:order-2">
                 {detailLoading && drawerMode === "view" && <div className="text-xs text-slate-400 mb-2">⏳ กำลังโหลด...</div>}
-                {formErrBanner(true)}
+                {drawerMode === "edit" && formErr && (
+                  <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
+                )}
                 {createHeaderEl}
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"
@@ -2606,26 +2507,6 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   <label className="text-xs text-slate-600">พิมพ์ <code className="px-1 bg-slate-100 rounded text-red-600 font-mono">ลบ</code> เพื่อยืนยัน</label>
                   <input value={deleteText} onChange={(e) => setDeleteText(e.target.value)} autoFocus placeholder="ลบ"
                     className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-red-400" />
-                </div>
-              )}
-              {deleteInfo && (deleteInfo.items.length > 0 || deleteInfo.options.length > 0) && (
-                <div className="pt-1 space-y-2">
-                  {deleteInfo.items.length > 0 && (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-                      <div className="text-[11px] font-medium text-slate-500 mb-1">สิ่งที่ผูกอยู่กับรายการนี้</div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1">
-                        {deleteInfo.items.map((it) => (
-                          <span key={it.label} className="text-xs text-slate-600">{it.icon} {it.label} <b className="text-slate-800">{it.count}</b></span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {deleteInfo.options.map((opt) => (
-                    <label key={opt.key} className="flex gap-2 items-start px-1 cursor-pointer">
-                      <input type="checkbox" checked={!!deleteOpts[opt.key]} onChange={(e) => setDeleteOpts((p) => ({ ...p, [opt.key]: e.target.checked }))} className="mt-0.5" />
-                      <span className="text-xs text-slate-700">{opt.label}</span>
-                    </label>
-                  ))}
                 </div>
               )}
               {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">⚠ {error}</div>}
@@ -2774,18 +2655,6 @@ export function MasterRecordDrawer({
       icon, activeField: "is_active", serverMode: true,
       permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
-      // Parent SKU → ช่อง "หมวดกลางสำหรับลงขาย" (platform_category_id) ใช้ picker ค้นหา+เพิ่มในตัว
-      // ทั้งโหมดแก้ไข (formRenderers) และโหมดดู (detailRenderers = บันทึกทันที)
-      formRenderers: moduleKey === "parent-skus-v2" ? {
-        platform_category_id: ({ value, onChange, disabled }) => (
-          <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder="— เลือกหมวดกลาง —" />
-        ),
-      } : undefined,
-      detailRenderers: moduleKey === "parent-skus-v2" ? {
-        platform_category_id: ({ value, recordId }) => (
-          <InlineCentralCategoryPicker recordId={recordId} value={(value as string) || null} apiPath="parent-skus" />
-        ),
-      } : undefined,
       // Parent SKU → ช่อง "รูป Description" ในฟอร์ม (เหมือนหน้า master page โดยตรง)
       extraFormSection: moduleKey === "parent-skus-v2"
         ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
@@ -2793,9 +2662,9 @@ export function MasterRecordDrawer({
       // Parent SKU → แท็บ "🛍 เว็บไซต์" (จัดการการขายบนเว็บร้านออนไลน์ได้ในแท็บ)
       extraTabs: moduleKey === "parent-skus-v2"
         ? [
-            { key: "overview", label: "ภาพรวม", icon: "📊", render: ({ recordId }) => <Parent360Overview parentId={recordId} /> },
             { key: "web", label: "เว็บไซต์", icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> },
             { key: "platforms", label: "แพลตฟอร์ม", icon: "🏬", render: ({ recordId }) => <ParentPlatformsTab parentId={recordId} /> },
+            { key: "issues", label: "ปัญหา", icon: "⚠️", render: ({ recordId }) => <div className="p-3"><ParentIssuesPanel parentSkuId={recordId} editable bare /></div> },
           ]
         : undefined,
     };
@@ -2967,13 +2836,12 @@ function groupByKey(fields: FieldDef[]): Map<string, FieldDef[]> {
 
 /** กลุ่ม B: render ตาม layout (Tab → Section → columns) ใช้ทั้ง form + detail */
 function LayoutTabs({
-  layout, byGroup, renderGrid, extraTabs = [], headerRight,
+  layout, byGroup, renderGrid, extraTabs = [],
 }: {
   layout: NonNullable<FormLayout>;
   byGroup: Map<string, FieldDef[]>;
   renderGrid: (fields: FieldDef[], columns: number) => React.ReactNode;
   extraTabs?: BoundTab[];
-  headerRight?: React.ReactNode;
 }) {
   // ซ่อนแท็บที่ไม่มี field จริง (เช่นแท็บ core ฝั่งขวาที่ core ถูกเรนเดอร์แยกซ้ายแล้ว)
   const tabs = (layout.tabs ?? []).filter((t) => t.sections.some((s) => (byGroup.get(s.key)?.length ?? 0) > 0));
@@ -2994,7 +2862,7 @@ function LayoutTabs({
 
   return (
     <div>
-      {(tabs.length + extraTabs.length > 1 || headerRight) && (
+      {tabs.length + extraTabs.length > 1 && (
         <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
           {tabs.map((t) => (
             <button key={t.key} type="button" onClick={() => setActive(t.key)}
@@ -3012,7 +2880,6 @@ function LayoutTabs({
               {t.icon && <span>{t.icon}</span>}<span>{t.label}</span>
             </button>
           ))}
-          {headerRight && <div className="ml-auto shrink-0 self-center pl-2 pr-1">{headerRight}</div>}
         </div>
       )}
       {activeExtra ? (
@@ -3045,13 +2912,12 @@ function LayoutTabs({
 type BoundTab = { key: string; label: string; icon?: string; node: React.ReactNode };
 
 function FormSections({
-  fields, renderField, layout, extraTabs, headerRight,
+  fields, renderField, layout, extraTabs,
 }: {
   fields: FieldDef[];
   renderField: (f: FieldDef, maxSpan?: number) => React.ReactNode;
   layout?: FormLayout;
   extraTabs?: BoundTab[];
-  headerRight?: React.ReactNode;
 }) {
   // hooks ทั้งหมดเรียกก่อน return เสมอ (Rules of Hooks)
   const byGroup = useMemo(() => groupByKey(fields), [fields]);
@@ -3065,7 +2931,7 @@ function FormSections({
 
   // กลุ่ม B: ถ้ามี layout → ใช้ Tab → Section → columns
   if (layout?.tabs?.length) {
-    return <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} headerRight={headerRight} renderGrid={(fs, cols) => (
+    return <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} renderGrid={(fs, cols) => (
       <div className="grid grid-cols-12 gap-3">{fs.map((f) => renderField(f, cols))}</div>
     )} />;
   }
@@ -3173,14 +3039,13 @@ function CompletenessBar({ fields, values }: { fields: FieldDef[]; values: Recor
 }
 
 function DetailSections({
-  fields, renderValue, layout, values, extraTabs, headerRight,
+  fields, renderValue, layout, values, extraTabs,
 }: {
   fields: FieldDef[];
   renderValue: (f: FieldDef) => React.ReactNode;
   layout?: FormLayout;
   values?: Record<string, unknown>;
   extraTabs?: BoundTab[];
-  headerRight?: React.ReactNode;
 }) {
   const byGroup = useMemo(() => groupByKey(fields), [fields]);
   const grouped = useMemo(() =>
@@ -3217,7 +3082,7 @@ function DetailSections({
     return (
       <div className="space-y-4">
         {values && <CompletenessBar fields={fields} values={values} />}
-        <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} headerRight={headerRight} renderGrid={renderDl} />
+        <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} renderGrid={renderDl} />
       </div>
     );
   }

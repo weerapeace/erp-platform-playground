@@ -14,10 +14,11 @@ import type { ParentIssue } from "@/app/api/parent-sku-issues/route";
 
 type Reason = { id: string; name: string };
 
-export function ParentIssuesPanel({ sku, parentSkuId, editable = false }: {
+export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = false }: {
   sku?: string | null;
   parentSkuId?: string | null;
   editable?: boolean;
+  bare?: boolean;   // true = ไม่มีเส้นคั่นบน (ใช้เป็นแท็บ/หน้าเต็ม) · false = ต่อท้ายเนื้อหาอื่นในป๊อป
 }) {
   const toast = useToast();
   const [items, setItems] = useState<ParentIssue[]>([]);
@@ -69,7 +70,7 @@ export function ParentIssuesPanel({ sku, parentSkuId, editable = false }: {
   if (!sku && !parentSkuId) return null;
 
   return (
-    <div className="pt-1 border-t border-slate-100">
+    <div className={bare ? "" : "pt-1 border-t border-slate-100"}>
       <div className="text-[11px] text-slate-500 mb-1.5">⚠️ ปัญหาของสินค้านี้ (รวมทุกสี){items.length > 0 ? ` (${items.length})` : ""}</div>
       {items.length === 0 && !loading && <div className="text-[11px] text-slate-300 mb-1">— ยังไม่มีปัญหาที่บันทึกไว้ —</div>}
       {items.length > 0 && (
