@@ -9,7 +9,6 @@
  *   repair_cancel { item_id }                                     → ยกเลิกซ่อม
  *   repair_receive{ item_id, good, scrap, shelf_id }              → รับจากซ่อม (ดี→ชั้น, เสีย→ทิ้ง)
  *   return_queue  { item_id }                                     → ย้ายกลับงานรอ QC (คืน qc_pulled_qty)
- *   return_worker { wo_id }                                       → คืนงานรอ QC กลับให้ช่าง (ลด received_qty ส่วนที่ยังไม่ดึงเข้า QC + เปิดใบกลับ)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -24,7 +23,7 @@ export const revalidate = 0;
 const num = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
 const PERM: Record<string, string> = {
   receive: "qc.receive", move: "qc.move", ship: "qc.ship", to_defect: "qc.defect",
-  repair_send: "qc.repair", repair_cancel: "qc.repair", repair_receive: "qc.repair", return_queue: "qc.move", return_worker: "qc.move",
+  repair_send: "qc.repair", repair_cancel: "qc.repair", repair_receive: "qc.repair", return_queue: "qc.move",
   add_manual: "qc.receive", add_bulk: "qc.receive",
 };
 
@@ -43,6 +42,27 @@ async function logDefect(admin: Admin, e: { sku?: string | null; worker?: string
     let defect_no: string | null = null;
     try { const { data } = await admin.rpc("erp_next_number", { p_key: "qc_defect", p_branch: null }); defect_no = (data as string) ?? null; } catch { /* no rule */ }
     await admin.from("defect_logs").insert({ defect_no, source_job: e.mo_no ?? null, defect_type: e.reason ?? null, qty: e.qty, cause: e.reason ?? null, sku: e.sku ?? null, worker: e.worker ?? null, kind: e.kind, mo_no: e.mo_no ?? null });
+  } catch { /* best-effort */ }
+}
+
+// เชื่อมอัตโนมัติ: QC บันทึกของเสีย → เพิ่มเข้า "รายการปัญหา" ของ Parent SKU (แชร์ทุกสี) — best-effort + กันซ้ำ
+async function logParentIssue(admin: Admin, actor: { actorId: string | null; actorName: string | null }, e: { sku?: string | null; reason?: string | null }) {
+  try {
+    const sku = String(e.sku ?? "").trim();
+    const reason = String(e.reason ?? "").trim();
+    if (!sku || !reason || reason === "ไม่ระบุ") return;
+    const { data: s } = await admin.from("skus_v2").select("parent_sku_id").eq("code", sku).maybeSingle();
+    const parentId = (s as { parent_sku_id: string | null } | null)?.parent_sku_id ?? null;
+    if (!parentId) return;
+    // ปัญหาข้อความเดียวกัน (active) มีแล้ว → ไม่เพิ่มซ้ำ
+    const { data: dup } = await admin.from("parent_sku_issues").select("id").eq("parent_sku_id", parentId).eq("is_active", true).ilike("problem_text", reason).maybeSingle();
+    if (dup) return;
+    // จับ reason_id ถ้าชื่อสาเหตุตรงกับพิกลิสต์กลาง
+    const { data: r } = await admin.from("qc_defect_reasons").select("id").eq("is_active", true).ilike("name", reason).maybeSingle();
+    await admin.from("parent_sku_issues").insert({
+      parent_sku_id: parentId, reason_id: (r as { id: string } | null)?.id ?? null,
+      problem_text: reason, source: "qc", created_by: actor.actorId, created_by_name: actor.actorName,
+    });
   } catch { /* best-effort */ }
 }
 
@@ -83,11 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const ins = await admin.from("qc_warehouse_items").insert(rows);
       if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 400 });
       await admin.from("mo_work_orders").update({ qc_pulled_qty: Number(wo.qc_pulled_qty ?? 0) + good + badTotal }).eq("id", wo_id);
-      // B2: ของดี → +FG (สินค้าสำเร็จเข้า WH-FG) + backflush วัตถุดิบออกจาก WIP (best-effort ไม่บล็อค QC)
-      if (good > 0) { try { await admin.rpc("erp_qc_receive_to_fg", { p_wo_id: wo_id, p_good_qty: good, p_actor: actor.actorName }); } catch (e) { console.error("[qc.receive] +FG ไม่สำเร็จ:", e instanceof Error ? e.message : e); } }
-      // B3: ของเสีย → +SCRAP (โซนของเสีย) + backflush วัตถุดิบ (best-effort)
-      if (badTotal > 0) { try { await admin.rpc("erp_qc_receive_scrap", { p_wo_id: wo_id, p_bad_qty: badTotal, p_reason: bad.map((b) => `${b.reason} ${b.qty}`).join(", "), p_actor: actor.actorName }); } catch (e) { console.error("[qc.receive] +SCRAP ไม่สำเร็จ:", e instanceof Error ? e.message : e); } }
-      for (const b of bad) await logDefect(admin, { sku: wo.product_sku, worker: wo.assignee_name, qty: b.qty, reason: b.reason, kind: "defect", mo_no: wo.mo_no });
+      for (const b of bad) { await logDefect(admin, { sku: wo.product_sku, worker: wo.assignee_name, qty: b.qty, reason: b.reason, kind: "defect", mo_no: wo.mo_no }); await logParentIssue(admin, actor, { sku: wo.product_sku, reason: b.reason }); }
       await writeAudit(admin, { action: "qc.receive", entityType: "qc_warehouse_items", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, good, bad: badTotal } });
       // แจ้งเตือน "พบของเสีย" ตอนรับเข้า (best-effort): กระดิ่ง + LINE กลุ่ม QC + DM ช่าง
       if (badTotal > 0) {
@@ -119,8 +135,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (!item) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
       const del = await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       if (del.error) return NextResponse.json({ error: del.error.message }, { status: 400 });
-      // เคลียร์ส่งออก: ตัด/ย้าย FG — sell → −FG (ขายหน้าร้าน/ออนไลน์) · sales_wh → ย้าย FG → คลังขาย (best-effort, เฉพาะของดี)
-      if (item.status !== "defect") { try { await admin.rpc("erp_qc_ship", { p_sku_code: item.sku, p_qty: item.qty, p_mode: String(body.mode ?? "sell"), p_dest_name: body.wh ? String(body.wh) : null, p_actor: actor.actorName }); } catch (e) { console.error("[qc.ship] ตัด/ย้าย FG:", e instanceof Error ? e.message : e); } }
       await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: item.qty, mode: body.mode, wh: body.wh } });
       return NextResponse.json({ error: null });
     }
@@ -140,8 +154,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       else await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       await admin.from("qc_warehouse_items").insert({ shelf_id: dsid, wo_id: item.wo_id, mo_no: item.mo_no, sku: item.sku, sku_name: item.sku_name, worker: item.worker, qty, status: "defect", reason });
       await logDefect(admin, { sku: item.sku, worker: item.worker, qty, reason, kind: "defect", mo_no: item.mo_no });
-      // B3: ของดีถูกคัดเป็นเสีย → ย้ายสต๊อก FG → SCRAP (best-effort)
-      try { await admin.rpc("erp_fg_to_scrap", { p_sku_code: item.sku, p_qty: qty, p_reason: reason, p_actor: actor.actorName }); } catch (e) { console.error("[qc.to_defect] FG→SCRAP:", e instanceof Error ? e.message : e); }
+      await logParentIssue(admin, actor, { sku: item.sku, reason });
       await writeAudit(admin, { action: "qc.defect", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, qty, reason } });
       // แจ้งเตือน "พบของเสีย" (best-effort): กระดิ่ง + LINE กลุ่ม QC + DM ช่าง
       {
@@ -182,8 +195,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       else await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       if (good > 0) await admin.from("qc_warehouse_items").insert({ shelf_id, wo_id: item.wo_id, mo_no: item.mo_no, sku: item.sku, sku_name: item.sku_name, worker: item.worker, qty: good, status: "good" });
       if (scrap > 0) await logDefect(admin, { sku: item.sku, worker: item.worker, qty: scrap, reason: item.reason, kind: "scrap", mo_no: item.mo_no });
-      // เฟส E+: ปรับ ledger — ซ่อมได้ SCRAP→FG · ซ่อมไม่ได้ ตัดทิ้งจาก SCRAP (best-effort)
-      try { await admin.rpc("erp_qc_repair_receive", { p_sku_code: item.sku, p_good_qty: good, p_scrap_qty: scrap, p_actor: actor.actorName }); } catch (e) { console.error("[qc.repair_receive] ledger:", e instanceof Error ? e.message : e); }
       await writeAudit(admin, { action: "qc.repair", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sub: "receive", good, scrap } });
       return NextResponse.json({ error: null });
     }
@@ -198,42 +209,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const { data: wo } = await admin.from("mo_work_orders").select("qc_pulled_qty").eq("id", item.wo_id).single();
         if (wo) await admin.from("mo_work_orders").update({ qc_pulled_qty: Math.max(0, Number(wo.qc_pulled_qty ?? 0) - Number(item.qty)) }).eq("id", item.wo_id);
       }
-      // B3: ดึงกลับ → คืนสต๊อก (−FG/−SCRAP + คืนวัตถุดิบเข้า WIP)
-      try { await admin.rpc("erp_qc_reverse_item", { p_wo_id: item.wo_id ?? null, p_sku_code: item.sku, p_qty: item.qty, p_is_defect: item.status === "defect", p_actor: actor.actorName }); } catch (e) { console.error("[qc.return_queue] คืนสต๊อก:", e instanceof Error ? e.message : e); }
       await writeAudit(admin, { action: "qc.move", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sub: "return_queue", qty: item.qty } });
-      return NextResponse.json({ error: null });
-    }
-
-    // ── คืนงานรอ QC กลับให้ช่าง (กรณีรับผิด) ──
-    // ลด received_qty เฉพาะส่วนที่ยังไม่ดึงเข้า QC (received_qty − qc_pulled_qty) + เปิดใบกลับ → การ์ดกลับไปที่ "งานรอรับเข้า QC"
-    if (action === "return_worker") {
-      const wo_id = String(body.wo_id ?? "");
-      const { data: wo } = await admin.from("mo_work_orders").select("id, mo_no, product_sku, product_name, assignee_name, qty, received_qty, qc_pulled_qty, status").eq("id", wo_id).single();
-      if (!wo) return NextResponse.json({ error: "ไม่พบใบจ่ายงาน" }, { status: 404 });
-      const remaining = Number(wo.received_qty ?? 0) - Number(wo.qc_pulled_qty ?? 0);
-      if (remaining <= 0) return NextResponse.json({ error: "ไม่มีงานรอรับเข้าที่จะคืน" }, { status: 400 });
-
-      // ลบรายการส่งงานล่าสุด (ใหม่สุดก่อน) ให้ครอบคลุมยอดที่คืน — กันค่าแรงนับซ้ำ
-      const { data: subs } = await admin.from("wo_submissions").select("id, qty").eq("wo_id", wo_id).order("created_at", { ascending: false });
-      let toRemove = remaining; const delIds: string[] = [];
-      for (const s of (subs ?? []) as { id: string; qty: number }[]) {
-        if (toRemove <= 0) break;
-        const sq = Number(s.qty);
-        if (sq <= toRemove) { delIds.push(s.id); toRemove -= sq; }
-        else { await admin.from("wo_submissions").update({ qty: sq - toRemove }).eq("id", s.id); toRemove = 0; }
-      }
-      if (delIds.length) await admin.from("wo_submissions").delete().in("id", delIds);
-
-      const newReceived = Math.max(0, Number(wo.received_qty ?? 0) - remaining);
-      const patch: Record<string, unknown> = { received_qty: newReceived };
-      if (wo.status === "done" && newReceived < Number(wo.qty ?? 0)) patch.status = "dispatched";   // เปิดใบกลับ → การ์ดกลับมาบนบอร์ด/โต๊ะ
-      await admin.from("mo_work_orders").update(patch).eq("id", wo_id);
-      await writeAudit(admin, { action: "qc.return_worker", entityType: "mo_work_orders", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, qty: remaining } });
-      // แจ้งช่างว่างานถูกตีกลับ (best-effort)
-      {
-        const link = boardLink("/master/qc-warehouse");
-        await dmEmployeeByName(admin, wo.assignee_name, `↩️ งานถูกตีกลับให้แก้/ทำใหม่\n${wo.product_sku ?? ""} · ${wo.product_name ?? ""}\nจำนวน ${remaining} ชิ้น\n🔗 ${link}`);
-      }
       return NextResponse.json({ error: null });
     }
 
@@ -250,8 +226,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (qty < 1) return NextResponse.json({ error: "จำนวนต้องมากกว่า 0" }, { status: 400 });
       const { error } = await admin.from("qc_warehouse_items").insert({ shelf_id, sku, sku_name, qty, status: "good", source, worker });
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-      // B2: ใส่ของเข้าชั้นเอง (นับเอง/ยอดยกมา) → +FG
-      try { await admin.rpc("erp_fg_manual_in", { p_sku_code: sku, p_qty: qty, p_actor: actor.actorName }); } catch (e) { console.error("[qc.add_manual] +FG:", e instanceof Error ? e.message : e); }
       await writeAudit(admin, { action: "qc.add_manual", entityType: "qc_warehouse_items", entityId: shelf_id, ...actor, metadata: { sku, qty, source } });
       return NextResponse.json({ error: null });
     }
@@ -270,8 +244,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const ins = parsed.map((r) => ({ shelf_id, sku: r.sku, sku_name: nameMap.get(r.sku) ?? r.sku, qty: r.qty, status: "good", source }));
       const { error } = await admin.from("qc_warehouse_items").insert(ins);
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-      // B2: นำเข้าหลายรายการ → +FG แต่ละตัว
-      try { for (const r of parsed) await admin.rpc("erp_fg_manual_in", { p_sku_code: r.sku, p_qty: r.qty, p_actor: actor.actorName }); } catch (e) { console.error("[qc.add_bulk] +FG:", e instanceof Error ? e.message : e); }
       await writeAudit(admin, { action: "qc.add_bulk", entityType: "qc_warehouse_items", entityId: shelf_id, ...actor, metadata: { count: ins.length, source } });
       return NextResponse.json({ error: null, count: ins.length });
     }

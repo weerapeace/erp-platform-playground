@@ -19,6 +19,7 @@ import type { MoListItem } from "@/app/api/mo/route";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import { WorkInstructionPanel } from "@/components/work-instruction";
+import { ParentIssuesPanel } from "@/components/parent-issues-panel";
 import { MoStockActions } from "@/components/mo-stock-actions";
 
 type Version = { id: string; version: string | null; bom_code: string; is_default: boolean };
@@ -579,6 +580,13 @@ export default function MoWorkspacePage() {
 
             {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
             {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} onAfterBomEdit={() => refresh()} />}
+
+            {/* รายการปัญหาของสินค้า (ผูก Parent SKU — โชว์ปัญหาที่เคยเกิด, เพิ่มได้) */}
+            {form.product_sku && (
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <ParentIssuesPanel sku={form.product_sku} editable={canEdit} bare />
+              </div>
+            )}
 
             {/* preview/checklist กางสูตร — 2 แท็บ */}
             {(() => {
