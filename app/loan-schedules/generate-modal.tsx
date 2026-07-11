@@ -1,0 +1,115 @@
+"use client";
+// ปุ่มสร้างตารางผ่อนอัตโนมัติ — ใช้เป็น customCreate ของหน้า /loan-schedules
+import { useEffect, useState } from "react";
+import { ERPModal } from "@/components/modal";
+import { ERPFormField, ERPInput, ERPSelect } from "@/components/form";
+import { apiFetch } from "@/lib/api";
+
+type ContractOpt = { id: string; loan_code: string; loan_name: string };
+
+const METHOD_OPTS = [
+  { value: "equal_installment", label: "งวดเท่ากัน (Equal Installment)" },
+  { value: "equal_principal", label: "เงินต้นเท่ากัน (Equal Principal)" },
+  { value: "interest_only", label: "จ่ายดอกเบี้ยอย่างเดียว (Interest Only)" },
+];
+
+export function GenerateScheduleModal({
+  open, onClose, onCreated,
+}: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  const [contracts, setContracts] = useState<ContractOpt[]>([]);
+  const [loadingList, setLoadingList] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const [f, setF] = useState({ contract_id: "", method: "equal_installment", start_date: "", num: "", reason: "" });
+
+  useEffect(() => {
+    if (!open) return;
+    setErr("");
+    setLoadingList(true);
+    apiFetch("/api/master-v2/loan-contracts?limit=500")
+      .then((r) => r.json())
+      .then((j) => {
+        const rows = (j?.data ?? []) as Record<string, unknown>[];
+        setContracts(rows.map((r) => ({ id: String(r.id), loan_code: String(r.loan_code ?? ""), loan_name: String(r.loan_name ?? "") })));
+      })
+      .catch(() => setErr("โหลดรายชื่อสัญญาไม่สำเร็จ"))
+      .finally(() => setLoadingList(false));
+  }, [open]);
+
+  const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
+
+  const submit = async () => {
+    setErr("");
+    if (!f.contract_id) { setErr("กรุณาเลือกสัญญาเงินกู้"); return; }
+    const n = Math.floor(Number(f.num));
+    if (!n || n < 1) { setErr("กรุณาระบุจำนวนงวด"); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch("/api/loan-schedule/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contract_id: f.contract_id, method: f.method, start_date: f.start_date || null, num: n, reason: f.reason }),
+      });
+      const j = await res.json();
+      if (!res.ok || j?.error) { setErr(j?.error || "สร้างตารางไม่สำเร็จ"); setSaving(false); return; }
+      setSaving(false);
+      setF({ contract_id: "", method: "equal_installment", start_date: "", num: "", reason: "" });
+      onCreated();
+    } catch {
+      setErr("เกิดข้อผิดพลาดในการเชื่อมต่อ");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ERPModal
+      open={open}
+      onClose={onClose}
+      title="สร้างตารางผ่อนอัตโนมัติ"
+      description="เลือกสัญญา + วิธีคิด แล้วระบบจะสร้างตารางงวดให้ · เวอร์ชันเดิมจะกลายเป็น 'เก่า (superseded)' ไม่ถูกลบ"
+      size="md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+          <button onClick={submit} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            {saving ? "กำลังสร้าง..." : "สร้างตารางผ่อน"}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {err && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {err}</div>}
+
+        <ERPFormField label="สัญญาเงินกู้" required hint="เงินต้น + อัตราดอกเบี้ยจะดึงจากสัญญาที่เลือก">
+          <ERPSelect
+            value={f.contract_id}
+            onChange={(e) => set("contract_id", e.target.value)}
+            options={contracts.map((c) => ({ value: c.id, label: `${c.loan_code} — ${c.loan_name}` }))}
+            placeholder={loadingList ? "กำลังโหลด..." : "— เลือกสัญญา —"}
+          />
+        </ERPFormField>
+
+        <ERPFormField label="วิธีคิดตารางผ่อน" required>
+          <ERPSelect value={f.method} onChange={(e) => set("method", e.target.value)} options={METHOD_OPTS} />
+        </ERPFormField>
+
+        <div className="grid grid-cols-2 gap-4">
+          <ERPFormField label="จำนวนงวด (เดือน)" required>
+            <ERPInput type="number" value={f.num} onChange={(e) => set("num", e.target.value)} placeholder="เช่น 60" />
+          </ERPFormField>
+          <ERPFormField label="งวดแรกเริ่ม (วันที่)" hint="เว้นว่าง = วันนี้">
+            <ERPInput type="date" value={f.start_date} onChange={(e) => set("start_date", e.target.value)} />
+          </ERPFormField>
+        </div>
+
+        <ERPFormField label="เหตุผล / หมายเหตุ" hint="เช่น เปิดสัญญา / ปรับดอกเบี้ยใหม่">
+          <ERPInput value={f.reason} onChange={(e) => set("reason", e.target.value)} placeholder="ระบุเหตุผลของตารางเวอร์ชันนี้" />
+        </ERPFormField>
+
+        <p className="text-xs text-slate-400">
+          หมายเหตุ: งวดที่งวดสุดท้ายระบบจะปัดเศษให้เงินต้นคงเหลือเป็น 0 พอดี · ตารางเก่าจะถูกเก็บเป็นประวัติ (ไม่ทับ)
+        </p>
+      </div>
+    </ERPModal>
+  );
+}
