@@ -44,6 +44,7 @@ export type Permission =
   | "accounting.view" | "accounting.manage" | "accounting.post"
   | "subscriptions.view" | "subscriptions.edit"
   | "loan_contracts.view" | "loan_contracts.create" | "loan_contracts.edit" | "loan_contracts.delete" | "loan_contracts.export"
+  | "loan_drawdowns.view" | "loan_drawdowns.create" | "loan_drawdowns.edit" | "loan_drawdowns.delete"
   | "admin.users" | "admin.audit_log";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
