@@ -60,6 +60,15 @@ const CONFIG: MasterCRUDConfig = {
     create: "loan_contracts.create",
     edit:   "loan_contracts.edit",
   },
+  mediaGallery: {
+    entityType: "loan_contract",
+    title: "เอกสารสัญญา",
+    description: "แนบไฟล์สัญญา / หนังสืออนุมัติ / สลิปการจ่าย (PDF หรือรูป)",
+    maxItems: 20,
+    maxSizeBytes: 10 * 1024 * 1024,
+    imageOnly: false,
+    layout: "grid",
+  },
   cellRenderers: {
     loan_type: (v) => {
       const k = String(v ?? "");
