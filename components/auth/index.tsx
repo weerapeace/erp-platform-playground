@@ -43,6 +43,7 @@ export type Permission =
   | "files.upload" | "files.delete"
   | "accounting.view" | "accounting.manage" | "accounting.post"
   | "subscriptions.view" | "subscriptions.edit"
+  | "loan_contracts.view" | "loan_contracts.create" | "loan_contracts.edit" | "loan_contracts.delete" | "loan_contracts.export"
   | "admin.users" | "admin.audit_log";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
