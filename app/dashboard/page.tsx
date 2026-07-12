@@ -233,7 +233,7 @@ export default function DashboardPage() {
     <PlaygroundShell>
       {/* ---- Header ---- */}
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-4xl mx-auto w-full flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
               สวัสดี {firstName || "ผู้ใช้"} 👋
@@ -255,7 +255,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="px-4 sm:px-8 py-5 space-y-5 max-w-4xl">
+      <div className="px-4 sm:px-8 py-5 space-y-5 max-w-4xl mx-auto w-full">
         {/* ทางเข้าแอปเป้าหมาย */}
         <GoalsEntryCard />
 
