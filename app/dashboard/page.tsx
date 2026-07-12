@@ -15,6 +15,8 @@ import { SystemCards, type SystemApp } from "./system-cards";
 import { DashboardCalendar } from "./dashboard-calendar";
 import { PanelConfigModal } from "./panel-config-modal";
 import { systemForEvent, type DashboardPanel } from "@/lib/dashboard-systems";
+import { KpiStrip } from "./kpi-strip";
+import { layoutForRole, type DashboardLayout, type DashboardView } from "@/lib/dashboard-widgets";
 
 // ---- Event type → icon (ครอบคลุม event ที่ไหลเข้ามาจริง) ----
 const EVENT_ICON: Record<string, string> = {
@@ -78,8 +80,11 @@ export default function DashboardPage() {
   const router = useRouter();
 
   // ---- แดชบอร์ดรวมทุกระบบ: view + scope + ระบบ + ตั้งค่าการ์ด ----
-  const [view, setView]   = useState<"systems" | "calendar" | "list">("systems");
+  const [view, setView]   = useState<DashboardView>("systems");
   const [scope, setScope] = useState<"mine" | "team">("mine");
+  const [layouts, setLayouts] = useState<DashboardLayout[]>([]);   // หน้าแดชบอร์ดต่อ role (เฟส 3)
+  const [layoutsLoaded, setLayoutsLoaded] = useState(false);
+  const viewInitRef = useRef(false);   // ตั้งมุมมองเริ่มต้นจาก layout ของ role แค่ครั้งเดียว
   const [apps, setApps]   = useState<(SystemApp & { permission_key: string | null })[]>([]);
   const [panels, setPanels] = useState<DashboardPanel[]>([]);
   const [metrics, setMetrics] = useState<Record<string, number>>({});   // "งานค้างจริง" ต่อระบบ (เฟส 4)
@@ -97,6 +102,10 @@ export default function DashboardPage() {
     apiFetch("/api/dashboard/metrics").then((r) => r.json())
       .then((j) => setMetrics((j.data ?? {}) as Record<string, number>))
       .catch(() => { /* ไม่มีเลขจริง = โชว์แค่จำนวนแจ้งเตือน */ });
+    apiFetch("/api/dashboard/layouts").then((r) => r.json())
+      .then((j) => setLayouts((j.data ?? []) as DashboardLayout[]))
+      .catch(() => { /* ไม่มี layout = ใช้ค่าเริ่มต้น */ })
+      .finally(() => setLayoutsLoaded(true));
   }, []);
 
   // ---- notifications (งานของฉัน) ----
@@ -278,6 +287,14 @@ export default function DashboardPage() {
   // เปิดงาน: ของฉัน = mark read + ไป · ทีม = ไปอย่างเดียว (ไม่แตะสถานะคนอื่น)
   const openAny = (n: Notification) => { if (scope === "mine") openItem(n); else if (n.link_url) router.push(n.link_url); };
 
+  // หน้าแดชบอร์ดตาม role (เฟส 3): widget เสริม + มุมมองเริ่มต้น (ไม่มี layout = ค่าเริ่มต้นเดิม)
+  const myLayout = useMemo(() => layoutForRole(layouts, user?.role), [layouts, user]);
+  useEffect(() => {
+    if (viewInitRef.current || !user || !layoutsLoaded) return;
+    setView(myLayout.default_view);
+    viewInitRef.current = true;
+  }, [user, layoutsLoaded, myLayout]);
+
   return (
     <PlaygroundShell>
       {/* ---- Header ---- */}
@@ -305,8 +322,14 @@ export default function DashboardPage() {
       </div>
 
       <div className="px-4 sm:px-8 py-5 space-y-5 max-w-4xl mx-auto w-full">
-        {/* ทางเข้าแอปเป้าหมาย */}
-        <GoalsEntryCard />
+        {/* ---- widget เสริม (เรียง/เปิด-ปิด ตามหน้าแดชบอร์ดของตำแหน่ง — เฟส 3) ---- */}
+        {myLayout.widgets.map((w) => {
+          if (w === "goals") return <GoalsEntryCard key="goals" />;
+          if (w === "kpi") return <KpiStrip key="kpi" unread={unread} metrics={metrics} apps={visibleApps} />;
+          if (w === "focus") return (scope === "mine" && view !== "calendar" && focusItems.length > 0)
+            ? <FocusBand key="focus" items={focusItems} onOpen={openItem} /> : null;
+          return null;
+        })}
 
         {/* ---- view switcher + สลับของฉัน/ทีม ---- */}
         <div className="flex items-center gap-2 flex-wrap">
@@ -327,11 +350,6 @@ export default function DashboardPage() {
             <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline px-2">อ่านทั้งหมด</button>
           )}
         </div>
-
-        {/* ---- 🎯 โฟกัสวันนี้ (เฉพาะงานของฉัน) ---- */}
-        {scope === "mine" && view !== "calendar" && focusItems.length > 0 && (
-          <FocusBand items={focusItems} onOpen={openItem} />
-        )}
 
         {/* ---- เนื้อหาตามโหมด ---- */}
         {view === "systems" ? (
