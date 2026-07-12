@@ -11,6 +11,10 @@ import { apiFetch } from "@/lib/api";
 import type { Notification, NotificationsResponse, TeamNotification, TeamNotificationsResponse } from "@/app/api/notifications/route";
 import type { DashboardStats, DashboardResponse } from "@/app/api/dashboard/route";
 import type { AuditLogsResponse } from "@/app/api/audit-logs/route";
+import { SystemCards, type SystemApp } from "./system-cards";
+import { DashboardCalendar } from "./dashboard-calendar";
+import { PanelConfigModal } from "./panel-config-modal";
+import { systemForEvent, type DashboardPanel } from "@/lib/dashboard-systems";
 
 // ---- Event type → icon (ครอบคลุม event ที่ไหลเข้ามาจริง) ----
 const EVENT_ICON: Record<string, string> = {
@@ -70,8 +74,26 @@ function snoozePresets(): { label: string; until: string }[] {
 type Tab = "unread" | "pinned" | "all" | "snoozed" | "team";
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const router = useRouter();
+
+  // ---- แดชบอร์ดรวมทุกระบบ: view + scope + ระบบ + ตั้งค่าการ์ด ----
+  const [view, setView]   = useState<"systems" | "calendar" | "list">("systems");
+  const [scope, setScope] = useState<"mine" | "team">("mine");
+  const [apps, setApps]   = useState<(SystemApp & { permission_key: string | null })[]>([]);
+  const [panels, setPanels] = useState<DashboardPanel[]>([]);
+  const [configApp, setConfigApp] = useState<SystemApp | null>(null);
+  const [listFilter, setListFilter] = useState<string | null>(null);   // กรอง list ตามระบบ (จาก "ดูทั้งหมด")
+
+  useEffect(() => {
+    apiFetch("/api/menu/apps").then((r) => r.json())
+      .then((j) => setApps(((j.data ?? []) as (SystemApp & { permission_key: string | null; is_active?: boolean })[])
+        .filter((a) => a.is_active !== false && a.key !== "home")))
+      .catch(() => { /* ใช้แบบไม่มีการ์ดระบบไปก่อน */ });
+    apiFetch("/api/dashboard/panels").then((r) => r.json())
+      .then((j) => setPanels((j.data ?? []) as DashboardPanel[]))
+      .catch(() => { /* ไม่มีตั้งค่า = ใช้ค่าเริ่มต้น */ });
+  }, []);
 
   // ---- notifications (งานของฉัน) ----
   const [items, setItems]     = useState<Notification[]>([]);
@@ -190,8 +212,9 @@ export default function DashboardPage() {
     else if (tab === "pinned")  list = items.filter(isPinned);
     else if (tab === "snoozed") list = items.filter(isSnoozed);
     else                        list = items.filter(n => !isSnoozed(n));
+    if (listFilter) list = list.filter(n => systemForEvent(n.event_type) === listFilter);
     return [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [items, tab]);
+  }, [items, tab, listFilter]);
 
   const groups = useMemo(() => {
     const map = new Map<string, Notification[]>();
@@ -229,6 +252,20 @@ export default function DashboardPage() {
 
   const firstName = user?.name?.split(" ")[0] ?? "";
 
+  // ---- ระบบที่ user เห็นได้ (ต่อยอดสิทธิ์แอปเดิม + ตั้งค่าซ่อน/role override) ----
+  const panelMap = useMemo(() => new Map(panels.map(p => [p.app_key, p])), [panels]);
+  const visibleApps = useMemo(() => apps.filter(a => {
+    const p = panelMap.get(a.key);
+    if (p?.hidden) return false;
+    if (p?.visible_roles && p.visible_roles.length && user?.role !== "admin" && !p.visible_roles.includes(user?.role ?? "")) return false;
+    if (a.permission_key && !can(a.permission_key as Parameters<typeof can>[0])) return false;
+    return true;
+  }), [apps, panelMap, user, can]);
+  const isAdmin = user?.role === "admin" || can("admin.users" as Parameters<typeof can>[0]);
+  const scopeList: Notification[] = scope === "team" ? teamItems : items;
+  // เปิดงาน: ของฉัน = mark read + ไป · ทีม = ไปอย่างเดียว (ไม่แตะสถานะคนอื่น)
+  const openAny = (n: Notification) => { if (scope === "mine") openItem(n); else if (n.link_url) router.push(n.link_url); };
+
   return (
     <PlaygroundShell>
       {/* ---- Header ---- */}
@@ -259,59 +296,89 @@ export default function DashboardPage() {
         {/* ทางเข้าแอปเป้าหมาย */}
         <GoalsEntryCard />
 
-        {/* ---- 🎯 โฟกัสวันนี้ ---- */}
-        {tab !== "team" && focusItems.length > 0 && (
-          <FocusBand items={focusItems} onOpen={openItem} />
-        )}
-
-        {/* ---- Tabs ---- */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <TabBtn active={tab === "unread"}  onClick={() => setTab("unread")}  label="ยังไม่อ่าน" count={counts.unread} />
-          <TabBtn active={tab === "pinned"}  onClick={() => setTab("pinned")}  label="📌 ปักหมุด"  count={counts.pinned} />
-          <TabBtn active={tab === "all"}     onClick={() => setTab("all")}     label="ทั้งหมด" />
-          <TabBtn active={tab === "snoozed"} onClick={() => setTab("snoozed")} label="💤 เลื่อนไว้" count={counts.snoozed} />
+        {/* ---- view switcher + สลับของฉัน/ทีม ---- */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
+            {([["systems", "🗂️ การ์ดระบบ"], ["calendar", "📅 ปฏิทิน"], ["list", "📋 รายการ"]] as const).map(([v, l]) => (
+              <button key={v} onClick={() => { setView(v); if (v !== "list") setListFilter(null); }}
+                className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${view === v ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{l}</button>
+            ))}
+          </div>
           {teamAllowed && (
-            <TabBtn active={tab === "team"} onClick={() => setTab("team")} label="👥 ภาพรวมทีม" />
+            <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
+              <button onClick={() => setScope("mine")} className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${scope === "mine" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🙋 ของฉัน</button>
+              <button onClick={() => setScope("team")} className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${scope === "team" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>👥 ทีม</button>
+            </div>
           )}
           <div className="flex-1" />
-          {tab !== "team" && counts.unread > 0 && (
+          {view === "list" && scope === "mine" && counts.unread > 0 && (
             <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline px-2">อ่านทั้งหมด</button>
           )}
         </div>
 
-        {/* ---- Notification feed ---- */}
-        {tab === "team" ? (
-          <TeamView items={teamItems} loading={teamLoading}
-            onOpen={(n) => { if (n.link_url) router.push(n.link_url); }} />
-        ) : errN ? (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 flex items-center justify-between">
-            <span>{errN}</span>
-            <button onClick={loadNotifications} className="text-red-600 underline shrink-0 ml-3">ลองใหม่</button>
-          </div>
-        ) : loadingN && items.length === 0 ? (
-          <div className="space-y-2">
-            {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 bg-white rounded-xl border border-slate-200 animate-pulse" />)}
-          </div>
-        ) : visible.length === 0 ? (
-          <EmptyState tab={tab} />
+        {/* ---- 🎯 โฟกัสวันนี้ (เฉพาะงานของฉัน) ---- */}
+        {scope === "mine" && view !== "calendar" && focusItems.length > 0 && (
+          <FocusBand items={focusItems} onOpen={openItem} />
+        )}
+
+        {/* ---- เนื้อหาตามโหมด ---- */}
+        {view === "systems" ? (
+          <SystemCards apps={visibleApps} list={scopeList} panels={panelMap} team={scope === "team"} isAdmin={isAdmin}
+            onOpen={openAny}
+            onConfig={isAdmin ? (k) => setConfigApp(visibleApps.find(a => a.key === k) ?? null) : undefined}
+            onSeeAll={(k) => { setView("list"); setListFilter(k); setTab("all"); }} />
+        ) : view === "calendar" ? (
+          <DashboardCalendar apps={visibleApps} list={scopeList} team={scope === "team"} onOpen={openAny} />
+        ) : scope === "team" ? (
+          <TeamView items={teamItems} loading={teamLoading} onOpen={(n) => { if (n.link_url) router.push(n.link_url); }} />
         ) : (
-          <div className="space-y-5">
-            {groups.map(([label, list]) => (
-              <div key={label}>
-                <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">{label}</div>
-                <div className="space-y-2">
-                  {list.map(n => (
-                    <NotifRow key={n.id} n={n}
-                      snoozeOpen={snoozeOpen === n.id}
-                      onOpen={() => openItem(n)}
-                      onTogglePin={() => togglePin(n)}
-                      onSnoozeMenu={() => setSnoozeOpen(o => o === n.id ? null : n.id)}
-                      onSnooze={(until) => snooze(n, until)} />
-                  ))}
-                </div>
+          <>
+            {listFilter && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-500">กรองระบบ:</span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-700 rounded-full">
+                  {visibleApps.find(a => a.key === listFilter)?.label ?? listFilter}
+                  <button onClick={() => setListFilter(null)} className="hover:text-blue-900">✕</button>
+                </span>
               </div>
-            ))}
-          </div>
+            )}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <TabBtn active={tab === "unread"}  onClick={() => setTab("unread")}  label="ยังไม่อ่าน" count={counts.unread} />
+              <TabBtn active={tab === "pinned"}  onClick={() => setTab("pinned")}  label="📌 ปักหมุด"  count={counts.pinned} />
+              <TabBtn active={tab === "all"}     onClick={() => setTab("all")}     label="ทั้งหมด" />
+              <TabBtn active={tab === "snoozed"} onClick={() => setTab("snoozed")} label="💤 เลื่อนไว้" count={counts.snoozed} />
+            </div>
+            {errN ? (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 flex items-center justify-between">
+                <span>{errN}</span>
+                <button onClick={loadNotifications} className="text-red-600 underline shrink-0 ml-3">ลองใหม่</button>
+              </div>
+            ) : loadingN && items.length === 0 ? (
+              <div className="space-y-2">
+                {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 bg-white rounded-xl border border-slate-200 animate-pulse" />)}
+              </div>
+            ) : visible.length === 0 ? (
+              <EmptyState tab={tab} />
+            ) : (
+              <div className="space-y-5">
+                {groups.map(([label, list]) => (
+                  <div key={label}>
+                    <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">{label}</div>
+                    <div className="space-y-2">
+                      {list.map(n => (
+                        <NotifRow key={n.id} n={n}
+                          snoozeOpen={snoozeOpen === n.id}
+                          onOpen={() => openItem(n)}
+                          onTogglePin={() => togglePin(n)}
+                          onSnoozeMenu={() => setSnoozeOpen(o => o === n.id ? null : n.id)}
+                          onSnooze={(until) => snooze(n, until)} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {/* ---- ภาพรวมระบบ (ของเดิม พับเก็บได้) ---- */}
@@ -328,6 +395,13 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* ⚙️ ตั้งค่าการ์ดระบบ (แอดมิน) */}
+      {configApp && (
+        <PanelConfigModal app={configApp} panel={panelMap.get(configApp.key)}
+          onClose={() => setConfigApp(null)}
+          onSaved={(p) => setPanels((ps) => [...ps.filter((x) => x.app_key !== p.app_key), p])} />
+      )}
     </PlaygroundShell>
   );
 }
