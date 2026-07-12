@@ -2049,6 +2049,8 @@ export function DataTable<T extends Record<string, unknown>>({
                               {gFieldLabel && <span className="text-slate-400 font-normal">{gFieldLabel}:</span>}
                               {key === "" ? <span className="text-slate-400 font-normal">ไม่ระบุ</span> : (headerCell ? flexRender(headerCell.column.columnDef.cell, headerCell.getContext()) : key)}
                               <span className="text-xs font-normal text-slate-500">({grp.length})</span>
+                              <span onClick={(e) => e.stopPropagation()} className="text-slate-300 hover:text-slate-500 text-xs cursor-help font-normal"
+                                title={"นี่คือ “หัวกลุ่ม” จากการจัดกลุ่ม — แถวที่เยื้องด้านล่างคือสมาชิกกลุ่มเดียวกัน ไม่ใช่ “ลูก” ของแถวหัว\n(แถวหัว = สมาชิกตัวแรกที่ระบบหยิบมาโชว์)\n\nอยากเอาออก/ไม่ให้จัดกลุ่ม: กดปุ่ม “จัดกลุ่มแล้ว” ด้านบนตาราง → เลือก “— ไม่จัดกลุ่ม —”"}>ⓘ</span>
                             </span>
                           );
                         } else if (col.id !== "__actions__") {
