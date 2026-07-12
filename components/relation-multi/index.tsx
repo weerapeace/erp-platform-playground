@@ -1137,20 +1137,28 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       for (const r of rows) { const k = (String(r[groupField] ?? "").trim() || "— ไม่ระบุ —"); const arr = groups.get(k); if (arr) arr.push(r); else groups.set(k, [r]); }
       const out: ReactNode[] = [];
       for (const [label, grs] of groups.entries()) {
-        const base = grs.find((r) => !hasVariant(r));
-        const subs = base ? grs.filter((r) => r !== base) : grs;
+        const variants = grs.filter((r) => hasVariant(r));       // ตัวที่เป็น "แบบ/ไซส์" จริง (มี variant_option)
+        const bases = grs.filter((r) => !hasVariant(r));          // ตัวฐาน (ไม่มี option)
         // รูปตัวแทนของกลุ่มสี = รูปตัวแรกในกลุ่มที่มีรูป → ตัวที่ไม่มีรูปดึงไปใช้
         const groupImg = imageField ? (grs.map((x) => r2img(x[imageField])).find(Boolean) || undefined) : undefined;
+        // ⚠️ ถ้าในกลุ่มไม่มี option จริงเลย → แสดงแบนทุกตัว (ไม่เอาตัวแรกมาเป็น "แม่" ให้ตัวอื่นซ้อน)
+        //    กันกรณี SKU ยังไม่ตั้งสี → ตกไปกองรวมกลุ่ม "ไม่ระบุ" แล้วดูเหมือนเป็นลูกของตัวแรก
+        if (variants.length === 0) {
+          for (const r of grs) out.push(renderDataRow(r));
+          continue;
+        }
+        const base = bases[0];
         if (base) {
           const id = String(base.id);
           const isColl = collapsed.has(id);
-          const toggle = subs.length > 0 ? (
+          const toggle = (
             <button type="button" title={isColl ? "ขยาย" : "พับ"}
               onClick={(e) => { e.stopPropagation(); setCollapsed((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); }}
               className="w-5 h-5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center text-[10px]">{isColl ? "▶" : "▼"}</button>
-          ) : <span className="w-5 inline-block" />;
-          out.push(renderDataRow(base, { lead: toggle, trail: <>{subs.length > 0 && <span className="text-[10px] text-slate-400">({subs.length})</span>} {addVariantBtn(base)}</>, groupImg }));
-          if (!isColl) for (const s of subs) out.push(renderDataRow(s, { indent: 1, groupImg }));
+          );
+          out.push(renderDataRow(base, { lead: toggle, trail: <><span className="text-[10px] text-slate-400">({variants.length})</span> {addVariantBtn(base)}</>, groupImg }));
+          if (!isColl) for (const s of variants) out.push(renderDataRow(s, { indent: 1, groupImg }));
+          for (const b of bases.slice(1)) out.push(renderDataRow(b));   // ตัวฐานอื่นในกลุ่ม (ถ้ามี) แสดงแบน
         } else {
           out.push(
             <tr key={`grp-${label}`} className="bg-slate-100/70 border-t border-slate-200">
