@@ -5,7 +5,7 @@
 // จัดกลุ่มแจ้งเตือน (จาก erp_notifications) → การ์ดต่อระบบ (app_key)
 // ระบบที่มีงานค้าง = การ์ดเต็ม · ระบบที่เคลียร์แล้ว = ยุบเป็นแถวเดียว
 // ============================================================
-import { systemForEvent, eventEnabled, type DashboardPanel } from "@/lib/dashboard-systems";
+import { systemForEvent, eventEnabled, colorForSystem, METRIC_LABEL, type DashboardPanel } from "@/lib/dashboard-systems";
 import type { Notification, TeamNotification } from "@/app/api/notifications/route";
 
 export type SystemApp = { key: string; label: string; icon: string | null; icon_url?: string | null };
@@ -45,14 +45,16 @@ type Props = {
   apps: SystemApp[];              // ระบบที่ user เห็นได้ (page กรองสิทธิ์มาแล้ว)
   list: Notification[];           // งานของฉัน หรือ งานทีม (Notification-shaped)
   panels: Map<string, DashboardPanel>;
+  metrics?: Record<string, number>;   // "งานค้างจริง" ต่อระบบ (เฟส 4) — เลขจริงจากตารางแต่ละระบบ
   team?: boolean;                 // โหมดทีม → โชว์ชื่อผู้รับ
   isAdmin?: boolean;
   onOpen: (n: Notification) => void;
+  onDone?: (n: Notification) => void;  // ✓ ปิดงาน (mark read) — เฉพาะงานของฉัน
   onConfig?: (appKey: string) => void;
   onSeeAll?: (appKey: string) => void;
 };
 
-export function SystemCards({ apps, list, panels, team, isAdmin, onOpen, onConfig, onSeeAll }: Props) {
+export function SystemCards({ apps, list, panels, metrics, team, isAdmin, onOpen, onDone, onConfig, onSeeAll }: Props) {
   // จัดกลุ่มแจ้งเตือน (เฉพาะงานค้าง) → ระบบ
   const bySystem = new Map<string, Notification[]>();
   for (const n of list) {
@@ -95,8 +97,13 @@ export function SystemCards({ apps, list, panels, team, isAdmin, onOpen, onConfi
                 )}
               </div>
               <div className="flex items-center gap-2 mb-3 flex-wrap">
-                <span className="inline-flex items-baseline gap-1.5 bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full">
-                  <b className="text-sm text-slate-800">{items.length}</b> งานค้าง
+                {metrics && metrics[app.key] != null && METRIC_LABEL[app.key] && (
+                  <span className="inline-flex items-baseline gap-1.5 text-white text-xs px-2.5 py-1 rounded-full" style={{ background: colorForSystem(app.key) }} title="ตัวเลขจริงจากระบบ">
+                    <b className="text-sm">{metrics[app.key]}</b> {METRIC_LABEL[app.key]}
+                  </span>
+                )}
+                <span className="inline-flex items-baseline gap-1.5 bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full" title="งานแจ้งเตือนที่ยังไม่จัดการ">
+                  <b className="text-sm text-slate-800">{items.length}</b> แจ้งเตือน
                 </span>
                 {overdue > 0 && (
                   <span className="inline-flex items-baseline gap-1.5 bg-red-50 text-red-600 text-xs px-2.5 py-1 rounded-full">
@@ -104,21 +111,26 @@ export function SystemCards({ apps, list, panels, team, isAdmin, onOpen, onConfi
                   </span>
                 )}
               </div>
-              <div className="space-y-1.5 flex-1">
+              <div className="space-y-1 flex-1">
                 {top.map((n) => (
-                  <button key={n.id} onClick={() => onOpen(n)}
-                    className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded-lg hover:bg-slate-50">
-                    <span className="text-sm shrink-0">{n.pinned_at ? "📌" : "•"}</span>
-                    <span className="flex-1 min-w-0 text-[13px] text-slate-700 truncate">
-                      {n.title}
-                      {team && (n as TeamNotification).recipient_name && (
-                        <span className="text-slate-400"> · {(n as TeamNotification).recipient_name}</span>
+                  <div key={n.id} className="flex items-center gap-1 rounded-lg hover:bg-slate-50">
+                    <button onClick={() => onOpen(n)} className="flex-1 min-w-0 flex items-center gap-2 text-left px-2 py-1.5">
+                      <span className="text-sm shrink-0">{n.pinned_at ? "📌" : "•"}</span>
+                      <span className="flex-1 min-w-0 text-[13px] text-slate-700 truncate">
+                        {n.title}
+                        {team && (n as TeamNotification).recipient_name && (
+                          <span className="text-slate-400"> · {(n as TeamNotification).recipient_name}</span>
+                        )}
+                      </span>
+                      {n.due_at && (
+                        <span className={`text-[11px] shrink-0 ${isOverdue(n) ? "text-red-600 font-medium" : "text-slate-400"}`}>{dueLabel(n.due_at)}</span>
                       )}
-                    </span>
-                    {n.due_at && (
-                      <span className={`text-[11px] shrink-0 ${isOverdue(n) ? "text-red-600 font-medium" : "text-slate-400"}`}>{dueLabel(n.due_at)}</span>
+                    </button>
+                    {onDone && (
+                      <button onClick={() => onDone(n)} title="ทำเสร็จแล้ว (เอาออกจากงานค้าง)"
+                        className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-emerald-100 hover:text-emerald-600">✓</button>
                     )}
-                  </button>
+                  </div>
                 ))}
               </div>
               {onSeeAll && (

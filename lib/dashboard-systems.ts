@@ -41,6 +41,11 @@ export const EVENT_LABEL: Record<string, string> = {
 export const eventLabel = (t: string) => EVENT_LABEL[t] ?? t;
 export const systemForEvent = (t: string): string => EVENT_SYSTEM[t] ?? "misc";
 
+// ป้าย "งานค้างจริง" ต่อระบบ (เฟส 4) — คู่กับ RPC erp_dashboard_metrics()
+export const METRIC_LABEL: Record<string, string> = {
+  purchasing: "รออนุมัติ", sales: "รอยืนยัน", production: "กำลังผลิต", qc: "ของเสีย", tasks: "งานในระบบ",
+};
+
 // สีประจำระบบ (ใช้ในปฏิทิน + จุดสถานะการ์ด) — ต่อ app_key
 export const SYSTEM_COLOR: Record<string, string> = {
   purchasing: "#378ADD", tasks: "#7F77DD", design: "#7F77DD", qc: "#1D9E75",

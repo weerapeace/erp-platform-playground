@@ -82,6 +82,7 @@ export default function DashboardPage() {
   const [scope, setScope] = useState<"mine" | "team">("mine");
   const [apps, setApps]   = useState<(SystemApp & { permission_key: string | null })[]>([]);
   const [panels, setPanels] = useState<DashboardPanel[]>([]);
+  const [metrics, setMetrics] = useState<Record<string, number>>({});   // "งานค้างจริง" ต่อระบบ (เฟส 4)
   const [configApp, setConfigApp] = useState<SystemApp | null>(null);
   const [listFilter, setListFilter] = useState<string | null>(null);   // กรอง list ตามระบบ (จาก "ดูทั้งหมด")
 
@@ -93,6 +94,9 @@ export default function DashboardPage() {
     apiFetch("/api/dashboard/panels").then((r) => r.json())
       .then((j) => setPanels((j.data ?? []) as DashboardPanel[]))
       .catch(() => { /* ไม่มีตั้งค่า = ใช้ค่าเริ่มต้น */ });
+    apiFetch("/api/dashboard/metrics").then((r) => r.json())
+      .then((j) => setMetrics((j.data ?? {}) as Record<string, number>))
+      .catch(() => { /* ไม่มีเลขจริง = โชว์แค่จำนวนแจ้งเตือน */ });
   }, []);
 
   // ---- notifications (งานของฉัน) ----
@@ -176,6 +180,14 @@ export default function DashboardPage() {
       patch({ id: n.id });
     }
     if (n.link_url) router.push(n.link_url);
+  };
+
+  // ✓ ปิดงานจากการ์ด (mark read แต่ไม่เปิดหน้า) — เอาออกจาก "งานค้าง"
+  const markDone = (n: Notification) => {
+    if (n.read_at) return;
+    setItems(p => p.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
+    setUnread(c => Math.max(0, c - 1));
+    patch({ id: n.id });
   };
 
   const togglePin = (n: Notification) => {
@@ -323,8 +335,9 @@ export default function DashboardPage() {
 
         {/* ---- เนื้อหาตามโหมด ---- */}
         {view === "systems" ? (
-          <SystemCards apps={visibleApps} list={scopeList} panels={panelMap} team={scope === "team"} isAdmin={isAdmin}
+          <SystemCards apps={visibleApps} list={scopeList} panels={panelMap} metrics={metrics} team={scope === "team"} isAdmin={isAdmin}
             onOpen={openAny}
+            onDone={scope === "mine" ? markDone : undefined}
             onConfig={isAdmin ? (k) => setConfigApp(visibleApps.find(a => a.key === k) ?? null) : undefined}
             onSeeAll={(k) => { setView("list"); setListFilter(k); setTab("all"); }} />
         ) : view === "calendar" ? (
