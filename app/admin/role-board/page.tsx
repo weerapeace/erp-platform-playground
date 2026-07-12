@@ -5,7 +5,7 @@
 // เสริมหน้า /admin/roles-permissions (ตารางติ๊กเทคนิค) — ตัวนี้เห็นภาพ + แก้ได้
 // reuse /api/admin/roles (roles+permissions+matrix, PATCH toggle) + /api/menu/apps
 // ============================================================
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied, roleLabel } from "@/components/auth";
@@ -14,6 +14,7 @@ import type { RolesPermissionsResponse, PermissionDef } from "@/app/api/admin/ro
 import type { AdminUser } from "@/app/api/admin/users/route";
 import type { UserOverride } from "@/app/api/admin/user-permissions/route";
 import { ALL_WIDGETS, WIDGET_META, layoutForRole, type DashboardLayout, type DashboardView } from "@/lib/dashboard-widgets";
+import type { DashboardPanel } from "@/lib/dashboard-systems";
 
 type AppLite = { key: string; label: string; icon: string | null; icon_url?: string | null; permission_key: string | null; is_active?: boolean };
 
@@ -72,21 +73,25 @@ export default function RoleBoardPage() {
   const [personId, setPersonId] = useState<string>("");
   const [personEff, setPersonEff] = useState<{ role_key: string | null; eff: Set<string>; ov: Map<string, "grant" | "revoke"> } | null>(null);
   const [layoutRows, setLayoutRows] = useState<DashboardLayout[]>([]);
+  const [panelRows, setPanelRows] = useState<DashboardPanel[]>([]);   // ตั้งค่าการ์ดระบบ (ซ่อน/ใครเห็น)
+  const dragW = useRef<string | null>(null);   // widget ที่กำลังลาก
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 1800); };
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      const [rp, aj, lj] = await Promise.all([
+      const [rp, aj, lj, pj] = await Promise.all([
         apiFetch("/api/admin/roles").then((r) => r.json()) as Promise<RolesPermissionsResponse>,
         apiFetch("/api/menu/apps").then((r) => r.json()),
         apiFetch("/api/dashboard/layouts").then((r) => r.json()),
+        apiFetch("/api/dashboard/panels").then((r) => r.json()),
       ]);
       if (rp.error) throw new Error(rp.error);
       setData(rp);
       setApps(((aj.data ?? []) as AppLite[]).filter((a) => a.is_active !== false && a.key !== "home"));
       setLayoutRows((lj.data ?? []) as DashboardLayout[]);
+      setPanelRows((pj.data ?? []) as DashboardPanel[]);
       const g: Record<string, Set<string>> = {};
       for (const { role_key, permission_key } of rp.matrix) (g[role_key] ??= new Set()).add(permission_key);
       setGranted(g);
@@ -149,10 +154,49 @@ export default function RoleBoardPage() {
     } catch (e) { setErr(e instanceof Error ? e.message : "บันทึกไม่ได้"); void load(); }
   };
   const toggleWidget = (w: string) => saveLayout({ widgets: curLayout.widgets.includes(w) ? curLayout.widgets.filter((x) => x !== w) : [...curLayout.widgets, w] });
-  const moveWidget = (w: string, dir: -1 | 1) => {
-    const arr = [...curLayout.widgets]; const i = arr.indexOf(w); const j = i + dir;
-    if (i < 0 || j < 0 || j >= arr.length) return;
-    [arr[i], arr[j]] = [arr[j], arr[i]]; saveLayout({ widgets: arr });
+  // ลากวาง widget (จริง) — วางทับตัวไหน = แทรกก่อนตัวนั้น
+  const reorderWidget = (target: string) => {
+    const from = dragW.current; dragW.current = null;
+    if (!from || from === target) return;
+    const arr = [...curLayout.widgets]; const fi = arr.indexOf(from), ti = arr.indexOf(target);
+    if (fi < 0 || ti < 0) return;
+    arr.splice(fi, 1); arr.splice(ti, 0, from);
+    saveLayout({ widgets: arr });
+  };
+
+  // ---- ซ่อน/แสดงการ์ดระบบต่อตำแหน่ง (เขียน erp_dashboard_panels.visible_roles/hidden) ----
+  const rolesWithApp = (app: AppLite): string[] =>
+    (data?.roles ?? []).filter((r) => r.active && (!app.permission_key || granted[r.key]?.has(app.permission_key!))).map((r) => r.key);
+  const panelOf = (key: string) => panelRows.find((p) => p.app_key === key);
+  const roleSeesCard = (app: AppLite): boolean => {
+    const p = panelOf(app.key);
+    if (p?.hidden) return false;
+    if (p?.visible_roles && p.visible_roles.length) return roleKey === "admin" || p.visible_roles.includes(roleKey);
+    return !app.permission_key || has(app.permission_key);   // ค่าเริ่มต้น = ตามสิทธิ์เข้าแอป
+  };
+  const savePanel = async (appKey: string, patch: Partial<DashboardPanel>) => {
+    setPanelRows((rows) => {
+      const others = rows.filter((r) => r.app_key !== appKey);
+      const base = rows.find((r) => r.app_key === appKey) ?? { app_key: appKey, hidden: false, visible_roles: null, enabled_events: null, sort_order: null };
+      return [...others, { ...base, ...patch, app_key: appKey }];
+    });
+    try {
+      const j = await apiFetch("/api/dashboard/panels", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ app_key: appKey, patch }) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      flash("บันทึกการ์ดแล้ว");
+    } catch (e) { setErr(e instanceof Error ? e.message : "บันทึกไม่ได้"); void load(); }
+  };
+  // สลับซ่อน/แสดงการ์ดของ "ตำแหน่งที่เลือก" — คำนวณ visible_roles (whitelist) ให้ถูก (ว่าง=ซ่อนหมด, ครบ=ตามสิทธิ์แอป)
+  const toggleCard = (app: AppLite) => {
+    if (!canEdit || roleKey === "admin" || !app.permission_key) return;
+    const all = rolesWithApp(app);
+    const p = panelOf(app.key);
+    const current = p?.hidden ? [] : (p?.visible_roles && p.visible_roles.length ? p.visible_roles : all);
+    const sees = current.includes(roleKey);
+    const next = (sees ? current.filter((r) => r !== roleKey) : [...current, roleKey]).filter((r) => all.includes(r));
+    if (next.length === 0) return void savePanel(app.key, { hidden: true, visible_roles: null });
+    if (next.length === all.length) return void savePanel(app.key, { hidden: false, visible_roles: null });
+    void savePanel(app.key, { hidden: false, visible_roles: next });
   };
 
   // ---- เฟส 2: มุมมองรายคน (สิทธิ์จริง = สิทธิ์ตำแหน่ง + override เฉพาะคน) ----
@@ -257,22 +301,32 @@ export default function RoleBoardPage() {
                   </div>
                 </section>
 
-                {/* 2. การ์ดระบบบนแดชบอร์ด (derived) */}
+                {/* 2. การ์ดระบบบนแดชบอร์ด (ซ่อน/แสดงต่อตำแหน่ง) */}
                 <section className="bg-white border border-slate-200 rounded-xl p-4">
-                  <div className="flex items-baseline gap-2 mb-3">
+                  <div className="flex items-baseline gap-2 mb-1">
                     <span className="text-[15px] font-semibold text-slate-800">🗂️ การ์ดระบบบนแดชบอร์ด</span>
-                    <span className="text-xs text-slate-400">(เห็นบน /dashboard — ตามแอปที่เข้าได้)</span>
+                    <span className="text-xs text-slate-400">(เห็นบน /dashboard{canEdit && roleKey !== "admin" ? " · กดสลับซ่อน/แสดง" : ""})</span>
                   </div>
-                  {cardsSeen.length === 0 ? <div className="text-xs text-slate-300">ยังไม่เห็นการ์ดระบบใด</div> : (
-                    <div className="flex flex-wrap gap-2">
-                      {cardsSeen.map((a) => (
-                        <span key={a.key} className="inline-flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full px-2.5 py-1">
-                          <AppIco app={a} size={15} /> {a.label}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <p className="text-[11px] text-slate-400 mt-2">ซ่อน/แสดงการ์ดเฉพาะบางตำแหน่ง ปรับได้ที่ปุ่ม ⚙️ บนการ์ดแต่ละใบใน /dashboard</p>
+                  <p className="text-[11px] text-slate-400 mb-3">{roleKey === "admin" ? "ผู้ดูแลระบบเห็นทุกการ์ดเสมอ" : "การ์ดขึ้นตามแอปที่เข้าได้ — ปิดตัวไหน = ซ่อนเฉพาะตำแหน่งนี้"}</p>
+                  {(() => {
+                    const cands = apps.filter((a) => !a.permission_key || has(a.permission_key));
+                    if (cands.length === 0) return <div className="text-xs text-slate-300">ยังไม่มีการ์ด (ตำแหน่งนี้ยังเข้าแอปไม่ได้)</div>;
+                    return (
+                      <div className="flex flex-wrap gap-2">
+                        {cands.map((a) => {
+                          const on = roleKey === "admin" || roleSeesCard(a);
+                          const editable = canEdit && roleKey !== "admin" && !!a.permission_key;
+                          return (
+                            <button key={a.key} disabled={!editable} onClick={() => toggleCard(a)}
+                              title={editable ? (on ? "แสดงอยู่ (กดเพื่อซ่อน)" : "ซ่อนอยู่ (กดเพื่อแสดง)") : undefined}
+                              className={`inline-flex items-center gap-1.5 text-xs rounded-full px-2.5 py-1 border ${on ? "bg-slate-50 border-slate-200 text-slate-700" : "bg-white border-slate-200 text-slate-300 line-through"} ${editable ? "hover:border-blue-300 cursor-pointer" : "cursor-default"}`}>
+                              <AppIco app={a} size={15} /> {a.label}{!on && " 🚫"}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </section>
 
                 {/* 3. หน้าที่ (ทำอะไรได้) */}
@@ -330,20 +384,21 @@ export default function RoleBoardPage() {
                       </button>
                     ))}
                   </div>
-                  <div className="text-xs text-slate-500 mb-1.5">widget ที่แสดง (บน→ล่าง)</div>
-                  <div className="space-y-1.5">
-                    {curLayout.widgets.map((w, i) => {
+                  <div className="text-xs text-slate-500 mb-1.5">widget ที่แสดง{canEdit ? " (ลากเรียง บน→ล่าง)" : " (บน→ล่าง)"}</div>
+                  <div className="space-y-1.5" onDragOver={(e) => { if (dragW.current) e.preventDefault(); }}>
+                    {curLayout.widgets.map((w) => {
                       const meta = WIDGET_META[w as keyof typeof WIDGET_META];
                       if (!meta) return null;
                       return (
-                        <div key={w} className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg">
+                        <div key={w} draggable={canEdit}
+                          onDragStart={() => { dragW.current = w; }} onDragEnd={() => { dragW.current = null; }}
+                          onDragOver={(e) => { if (dragW.current) e.preventDefault(); }}
+                          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); reorderWidget(w); }}
+                          className={`flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg ${canEdit ? "cursor-grab active:cursor-grabbing" : ""}`}>
+                          {canEdit && <span className="text-slate-300 select-none text-lg leading-none" title="ลากเพื่อเรียง">⠿</span>}
                           <span className="text-lg">{meta.icon}</span>
                           <div className="flex-1 min-w-0"><div className="text-sm text-slate-700">{meta.label}</div><div className="text-[11px] text-slate-400 truncate">{meta.desc}</div></div>
-                          {canEdit && <>
-                            <button onClick={() => moveWidget(w, -1)} disabled={i === 0} className="w-7 h-7 rounded text-slate-400 hover:bg-white disabled:opacity-30">↑</button>
-                            <button onClick={() => moveWidget(w, 1)} disabled={i === curLayout.widgets.length - 1} className="w-7 h-7 rounded text-slate-400 hover:bg-white disabled:opacity-30">↓</button>
-                            <button onClick={() => toggleWidget(w)} title="เอาออก" className="w-7 h-7 rounded text-rose-400 hover:bg-rose-50">✕</button>
-                          </>}
+                          {canEdit && <button onClick={() => toggleWidget(w)} title="เอาออก" className="w-7 h-7 rounded text-rose-400 hover:bg-rose-50">✕</button>}
                         </div>
                       );
                     })}
