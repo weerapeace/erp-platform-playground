@@ -55,6 +55,13 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
 
   const setStatus = async (status: string) => { try { await updateCampaign(campaignId, { status }); await load(); onChanged?.(); pushToast("success", t("อัปเดตสถานะแล้ว", "Status updated")); } catch (e) { pushToast("error", (e as Error).message); } };
 
+  // คัดลอกลิงก์หน้ากระดานแคมเปญ (เอาไปวางแล้วเปิดเข้าแคมเปญนี้ได้เลย)
+  const copyLink = async () => {
+    const url = `${window.location.origin}/tasks/campaigns/${campaignId}`;
+    try { await navigator.clipboard.writeText(url); pushToast("success", t("คัดลอกลิงก์แล้ว", "Link copied")); }
+    catch { window.prompt(t("คัดลอกลิงก์นี้", "Copy this link"), url); }
+  };
+
   const summaryItems = useMemo(() => detail ? Object.entries(detail.summary).sort((a, b) => b[1] - a[1]) : [], [detail]);
 
   return (
@@ -71,6 +78,7 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                 <span className="text-xs text-slate-500">{detail.task_count} {t("งานในแคมเปญ", "tasks in campaign")}</span>
               </div>
               <div className="flex items-center gap-1">
+                <button onClick={copyLink} title={t("คัดลอกลิงก์แคมเปญ (เปิดเข้าหน้านี้ได้เลย)", "Copy campaign link")} className="h-8 px-2.5 flex items-center gap-1 rounded-md text-sm text-slate-600 hover:text-violet-700 hover:bg-violet-50 border border-slate-200">🔗 {t("คัดลอกลิงก์", "Copy link")}</button>
                 {!editing && <button onClick={startEdit} className="h-8 px-2.5 flex items-center gap-1 rounded-md text-sm text-slate-600 hover:text-violet-700 hover:bg-violet-50 border border-slate-200">✏️ {t("แก้ไข", "Edit")}</button>}
                 <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
               </div>

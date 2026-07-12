@@ -18,7 +18,7 @@ import { HoverPreview } from "@/components/hover-image";
 import { AssigneeStack } from "./assignee-avatar";
 import { taskTypeLabel } from "./use-options";
 import { TaskTypeChip } from "./task-type-chip";
-import { statusMeta, type Status } from "./use-statuses";
+import { statusMeta, isTerminal, type Status } from "./use-statuses";
 import { PRIORITY_META, priorityLabel, isOverdue, type CreativeTask, type CreativePriority, type BrandOption } from "./data";
 import type { KanbanTheme, KanbanGroupBy, StatusColorMap, AnimTheme } from "./overview-customizer";
 import { ovStatusBg } from "./overview-customizer";
@@ -45,7 +45,8 @@ function CardBody({ task, cfg, dragging }: { task: CreativeTask; cfg: KanbanThem
   useT();   // subscribe ภาษา
   const pr = PRIORITY_META[task.priority as CreativePriority];
   const overdue = isOverdue(task);
-  const cover = cfg.cover ? coverKey(task) : null;
+  // คอลัมน์ที่จบแล้ว (เสร็จ/ยกเลิก) ไม่โชว์รูปปก — เหลือแค่ตัวอักษร+ผู้รับผิดชอบ
+  const cover = cfg.cover && !isTerminal(task.status) ? coverKey(task) : null;
   const coverUrl = cover ? r2ImageUrl(cover, 320) : null;
   // กรอบสีตามแบรนด์ (ถ้าเปิด + แบรนด์มีสี hex)
   const bc = task.brand_color;
