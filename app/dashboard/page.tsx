@@ -16,6 +16,7 @@ import { DashboardCalendar } from "./dashboard-calendar";
 import { PanelConfigModal } from "./panel-config-modal";
 import { systemForEvent, type DashboardPanel } from "@/lib/dashboard-systems";
 import { KpiStrip } from "./kpi-strip";
+import { PinnedWidget, RecentWidget, AgendaWidget, FinanceWidget, ActivityWidget, TeamWidget, ShortcutsWidget, StatWidget, SalesChartWidget } from "./widgets";
 import { layoutForRole, type DashboardLayout, type DashboardView } from "@/lib/dashboard-widgets";
 
 // ---- Event type → icon (ครอบคลุม event ที่ไหลเข้ามาจริง) ----
@@ -88,6 +89,7 @@ export default function DashboardPage() {
   const [apps, setApps]   = useState<(SystemApp & { permission_key: string | null })[]>([]);
   const [panels, setPanels] = useState<DashboardPanel[]>([]);
   const [metrics, setMetrics] = useState<Record<string, number>>({});   // "งานค้างจริง" ต่อระบบ (เฟส 4)
+  const [salesTrend, setSalesTrend] = useState<{ d: string; sales: number }[]>([]);   // widget กราฟยอดขาย
   const [configApp, setConfigApp] = useState<SystemApp | null>(null);
   const [listFilter, setListFilter] = useState<string | null>(null);   // กรอง list ตามระบบ (จาก "ดูทั้งหมด")
 
@@ -106,6 +108,9 @@ export default function DashboardPage() {
       .then((j) => setLayouts((j.data ?? []) as DashboardLayout[]))
       .catch(() => { /* ไม่มี layout = ใช้ค่าเริ่มต้น */ })
       .finally(() => setLayoutsLoaded(true));
+    apiFetch("/api/dashboard/sales-trend").then((r) => r.json())
+      .then((j) => setSalesTrend((j.data ?? []) as { d: string; sales: number }[]))
+      .catch(() => { /* ไม่มีข้อมูลยอดขาย */ });
   }, []);
 
   // ---- notifications (งานของฉัน) ----
@@ -328,6 +333,16 @@ export default function DashboardPage() {
           if (w === "kpi") return <KpiStrip key="kpi" unread={unread} metrics={metrics} apps={visibleApps} />;
           if (w === "focus") return (scope === "mine" && view !== "calendar" && focusItems.length > 0)
             ? <FocusBand key="focus" items={focusItems} onOpen={openItem} /> : null;
+          if (w === "pinned") return <PinnedWidget key="pinned" items={items} onOpen={openItem} />;
+          if (w === "recent") return <RecentWidget key="recent" items={items} onOpen={openItem} />;
+          if (w === "agenda") return <AgendaWidget key="agenda" items={items} onOpen={openItem} />;
+          if (w === "finance") return <FinanceWidget key="finance" items={items} onOpen={openItem} />;
+          if (w === "activity") return <ActivityWidget key="activity" activity={activity} />;
+          if (w === "team") return teamAllowed ? <TeamWidget key="team" teamItems={teamItems} /> : null;
+          if (w === "shortcuts") return <ShortcutsWidget key="shortcuts" apps={visibleApps} />;
+          if (w === "lowstock") return <StatWidget key="lowstock" icon="📦" title="สต๊อกใกล้หมด" value={stats?.products_low_stock ?? 0} unit="รายการ" href="/inventory" hint="สินค้าต่ำกว่าขั้นต่ำ" />;
+          if (w === "production") return <StatWidget key="production" icon="🏭" title="สถานะผลิต" value={metrics.production ?? 0} unit="งานยังไม่เสร็จ" href="/master/manufacturing-orders" />;
+          if (w === "saleschart") return <SalesChartWidget key="saleschart" data={salesTrend} />;
           return null;
         })}
 
