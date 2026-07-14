@@ -7,6 +7,8 @@
 // ============================================================
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { writeAudit } from "@/lib/audit";
+import { r2GetObject } from "@/lib/r2";
+import { driveConfigured, driveUploadFile, resolveCoverFolderId } from "@/lib/google-drive";
 
 // replace_map: targetKey ("parent:<id>" / "sku:<id>") → { attachmentR2Key → slotId ที่จะแทน (หรือ "new" = เพิ่มรูปใหม่) }
 // product_images: targetKey ("parent:<id>" / "sku:<id>") → รูป (r2_key) เฉพาะสินค้านั้น (กล่องต่อสินค้า) · ใช้ replace_map[tk] เพื่อเลือกแทน/เพิ่ม
@@ -98,6 +100,7 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
   const isMediaType = target === "sku_media" || target === "description_media" || target === "cover";
 
   let pushed = 0; const skipped: string[] = [];
+  const coverDriveUploads: { r2Key: string; code: string }[] = [];   // เฟส 3: รูปปกที่อนุมัติ → เก็บลง Google Drive (02_cover)
   const ledger: Record<string, unknown>[] = [];
   const now = new Date().toISOString();
   const base = { subtask_id: subtask.id, task_id: subtask.task_id, type_key: subtask.subtask_type ?? null, created_by: opts.actorId ?? null, created_at: now, active: true };
@@ -173,6 +176,7 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
             const prev = (cur?.cover_image_r2_key as string | null) ?? null;
             await admin.from(tg.table).update({ cover_image_r2_key: imageKeys[0] }).eq("id", tg.id);
             ledger.push({ ...base, target_kind: "cover", target_table: tg.table, target_id: tg.id, ref: "cover_image_r2_key", prev_value: prev, new_value: imageKeys[0] }); pushed++;
+            coverDriveUploads.push({ r2Key: imageKeys[0], code: `${tg.ownerType === "parent_sku" ? "parent" : "sku"}-${tg.id}` });
           }
         } else if (target !== "cover" && !productImageEntries.length) {
           // legacy: ไม่มีกล่องรูปต่อสินค้า (product_images) → ใช้รูป "แนบงาน" ดันเข้าสินค้าที่ติ๊ก
@@ -200,6 +204,7 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
           const prev = (cur?.cover_image_r2_key as string | null) ?? null;
           if (prev !== k0) await admin.from(table).update({ cover_image_r2_key: k0 }).eq("id", id);
           ledger.push({ ...base, target_kind: "cover", target_table: table, target_id: id, ref: "cover_image_r2_key", prev_value: prev, new_value: k0 }); pushed++;
+          coverDriveUploads.push({ r2Key: k0, code: (sel?.product_labels?.[tk] as string) || `${pfx}-${id}` });
         } else {
           await applyKeysToTarget(ownerType, table, id, keys.filter(Boolean), rmap[tk] ?? {});
         }
@@ -210,7 +215,23 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
 
     if (ledger.length) await admin.from("erp_subtask_sync").insert(ledger);
     if (!pushed) skipped.push("no_images");
-    await writeAudit(admin, { action: "subtask:sync", entityType: "creative_subtask", entityId: subtask.id, actorId: opts.actorId ?? null, actorName: null, metadata: { target, mode: "selection", pushed, sku_image_skus: skuImageEntries.length, skipped } });
+    // เฟส 3: เก็บรูปปกที่อนุมัติลง Google Drive [01] Catalogs/02_Contents/02_cover (best-effort — พลาดไม่กระทบการอนุมัติ)
+    if (target === "cover" && coverDriveUploads.length && driveConfigured()) {
+      try {
+        const folderId = await resolveCoverFolderId();
+        if (folderId) for (const up of coverDriveUploads) {
+          try {
+            const obj = await r2GetObject(up.r2Key);
+            if (!obj) continue;
+            const bytes = new Uint8Array(await new Response(obj.body as ReadableStream).arrayBuffer());
+            const ext = (up.r2Key.split(".").pop() || "").toLowerCase();
+            const name = ext && ext.length <= 4 ? `${up.code}.${ext}` : (up.code || up.r2Key.split("/").pop() || "cover");
+            await driveUploadFile(name, obj.httpMetadata?.contentType || "image/jpeg", bytes, folderId);
+          } catch (e) { console.error("[drive] cover upload failed:", e); }
+        }
+      } catch (e) { console.error("[drive] cover folder resolve failed:", e); }
+    }
+    await writeAudit(admin, { action: "subtask:sync", entityType: "creative_subtask", entityId: subtask.id, actorId: opts.actorId ?? null, actorName: null, metadata: { target, mode: "selection", pushed, sku_image_skus: skuImageEntries.length, skipped, cover_drive: coverDriveUploads.length } });
     return { pushed, skipped };
   }
 

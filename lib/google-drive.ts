@@ -52,6 +52,44 @@ export async function driveCreateFolder(name: string, parentId = DRIVE_ROOT_FOLD
   return { id: j.id as string, webViewLink: (j.webViewLink as string) || `https://drive.google.com/drive/folders/${j.id}` };
 }
 
+/** ค้นหาโฟลเดอร์ตามชื่อ (ในโฟลเดอร์แม่ถ้าระบุ parentId) → คืน id หรือ null · ครอบทั้ง My Drive(ที่แชร์ให้ SA)/Shared Drive */
+export async function driveFindFolder(name: string, parentId?: string): Promise<string | null> {
+  const token = await getAccessToken();
+  const esc = name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const q = [`name = '${esc}'`, "mimeType = 'application/vnd.google-apps.folder'", "trashed = false", parentId ? `'${parentId}' in parents` : ""].filter(Boolean).join(" and ");
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name)&pageSize=5`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const j = await res.json().catch(() => ({}));
+  const files = (j.files as { id: string }[] | undefined) ?? [];
+  return files[0]?.id ?? null;
+}
+
+/** หาโฟลเดอร์ตามชื่อในโฟลเดอร์แม่ — ไม่มีก็สร้างให้ → คืน id */
+export async function driveEnsureFolder(name: string, parentId: string): Promise<string> {
+  const found = await driveFindFolder(name, parentId);
+  if (found) return found;
+  return (await driveCreateFolder(name, parentId)).id;
+}
+
+/**
+ * โฟลเดอร์เก็บรูปปก: [01] Catalogs > 02_Contents > 02_cover (แคชผลไว้ในหน่วยความจำ) → คืน id หรือ null
+ * "[01] Catalogs" = env GOOGLE_DRIVE_CATALOGS_FOLDER_ID (ถ้าตั้ง) ไม่งั้นค้นหาตามชื่อ (ต้องแชร์โฟลเดอร์นี้ให้ service account)
+ */
+let coverFolderCache: string | null = null;
+export async function resolveCoverFolderId(): Promise<string | null> {
+  if (coverFolderCache) return coverFolderCache;
+  if (!driveConfigured()) return null;
+  try {
+    let catalogsId = (process.env.GOOGLE_DRIVE_CATALOGS_FOLDER_ID || "").trim() || null;
+    if (!catalogsId) catalogsId = await driveFindFolder("[01] Catalogs");
+    if (!catalogsId) { console.error("[drive] ไม่พบโฟลเดอร์ '[01] Catalogs' — แชร์ให้ service account แล้วหรือยัง? (หรือตั้ง env GOOGLE_DRIVE_CATALOGS_FOLDER_ID)"); return null; }
+    const contentsId = await driveEnsureFolder("02_Contents", catalogsId);
+    const coverId = await driveEnsureFolder("02_cover", contentsId);
+    coverFolderCache = coverId;
+    return coverId;
+  } catch (e) { console.error("[drive] resolveCoverFolderId failed:", e); return null; }
+}
+
 /** อัปไฟล์ขึ้นโฟลเดอร์ (multipart) → คืน { id, webViewLink } · ใช้เฟสอัปไฟล์ */
 export async function driveUploadFile(name: string, mimeType: string, data: ArrayBuffer | Uint8Array, parentId: string): Promise<{ id: string; webViewLink: string }> {
   const token = await getAccessToken();
