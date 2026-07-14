@@ -166,14 +166,15 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
       const order = sel?.image_order;
       if (order && order.length) imageKeys = imageKeys.slice().sort((a, b) => { const ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib); });
       if (imageKeys.length) {
-        if (target === "cover") {
+        if (target === "cover" && !productImageEntries.length) {
+          // fallback งานเปลี่ยนปก: ไม่มีรูปต่อสินค้า (product_images) แต่ติ๊กสินค้า + มีรูปแนบงาน → ใช้รูปแนบงาน[0] ตั้งเป็นปกให้ทุกตัวที่ติ๊ก
           for (const tg of selTargets) {
             const { data: cur } = await admin.from(tg.table).select("cover_image_r2_key").eq("id", tg.id).maybeSingle();
             const prev = (cur?.cover_image_r2_key as string | null) ?? null;
             await admin.from(tg.table).update({ cover_image_r2_key: imageKeys[0] }).eq("id", tg.id);
             ledger.push({ ...base, target_kind: "cover", target_table: tg.table, target_id: tg.id, ref: "cover_image_r2_key", prev_value: prev, new_value: imageKeys[0] }); pushed++;
           }
-        } else if (!productImageEntries.length) {
+        } else if (target !== "cover" && !productImageEntries.length) {
           // legacy: ไม่มีกล่องรูปต่อสินค้า (product_images) → ใช้รูป "แนบงาน" ดันเข้าสินค้าที่ติ๊ก
           // ถ้ามี product_images (โหมดใหม่) ให้ข้าม เพื่อกันรูปแนบงานเข้าสินค้าซ้ำโดยไม่ตั้งใจ
           const rmap = sel?.replace_map ?? {};
@@ -184,7 +185,7 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
         }
       }
     }
-    // (2) รูปเฉพาะต่อสินค้า (กล่องต่อ Parent/SKU) → แทน/เพิ่ม ตาม replace_map ของ tk นั้น
+    // (2) รูปเฉพาะต่อสินค้า (กล่องต่อ Parent/SKU) → cover: ตั้งเป็นปกของสินค้านั้น (รูปเดี่ยว/สินค้า) · อื่น ๆ: แทน/เพิ่มแกลเลอรี ตาม replace_map
     {
       const rmap = sel?.replace_map ?? {};
       for (const [tk, keys] of productImageEntries) {
@@ -192,7 +193,16 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
         if (!id) continue;
         const ownerType = pfx === "parent" ? "parent_sku" : "product_sku";
         const table = pfx === "parent" ? "parent_skus_v2" : "skus_v2";
-        await applyKeysToTarget(ownerType, table, id, keys.filter(Boolean), rmap[tk] ?? {});
+        if (target === "cover") {
+          // งานเปลี่ยนปก: ใช้รูปแรกของสินค้านั้นเป็นปก (cover_image_r2_key) — ไม่ยัดเข้าแกลเลอรี
+          const k0 = keys.filter(Boolean)[0]; if (!k0) continue;
+          const { data: cur } = await admin.from(table).select("cover_image_r2_key").eq("id", id).maybeSingle();
+          const prev = (cur?.cover_image_r2_key as string | null) ?? null;
+          if (prev !== k0) await admin.from(table).update({ cover_image_r2_key: k0 }).eq("id", id);
+          ledger.push({ ...base, target_kind: "cover", target_table: table, target_id: id, ref: "cover_image_r2_key", prev_value: prev, new_value: k0 }); pushed++;
+        } else {
+          await applyKeysToTarget(ownerType, table, id, keys.filter(Boolean), rmap[tk] ?? {});
+        }
       }
     }
     // (3) รูปร่างต่อ SKU (โครงเดิม sku_images, append อย่างเดียว) → แกลเลอรีของ SKU นั้น + ตั้งปกถ้าว่าง

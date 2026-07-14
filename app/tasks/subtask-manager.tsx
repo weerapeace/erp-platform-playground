@@ -1415,7 +1415,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
             {showImages && (
               <div className="border-t border-slate-100 pt-3">
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  <p className="text-[11px] font-medium text-slate-500">📤 {t("ส่งรูปเข้าสินค้า (เลือกได้)", "Send images to products (optional)")}</p>
+                  <p className="text-[11px] font-medium text-slate-500">{approveTarget === "cover" ? `🖼️ ${t("รูปปกต่อสินค้า (1 รูป/สินค้า)", "Cover image per product (1 each)")}` : `📤 ${t("ส่งรูปเข้าสินค้า (เลือกได้)", "Send images to products (optional)")}`}</p>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-[10px] text-slate-400">{(syncParentIds.size + syncSkuIds.size) > 0 ? t(`เลือก ${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`, `${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`) : t("ไม่เลือก = แนบรูปเฉย ๆ", "None = attach only")}</span>
                     <button type="button" onClick={() => void saveImages()} disabled={savingImages}
@@ -1424,7 +1424,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                     </button>
                   </div>
                 </div>
-                <p className="text-[11px] text-slate-400 mb-2">{t("ติ๊กสินค้าที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ · ไม่ติ๊ก = ไม่ส่งเข้าสินค้า", "Tick products to add the images to their gallery on approval · none = attach only")}</p>
+                <p className="text-[11px] text-slate-400 mb-2">{approveTarget === "cover" ? t("ติ๊ก Parent SKU ที่จะเปลี่ยนปก แล้วใส่รูปปก 1 รูปต่อสินค้า → อนุมัติแล้วตั้งเป็นปกให้อัตโนมัติ (ใช้รูปแรก)", "Tick Parent SKUs to re-cover, add 1 cover image each → set as cover on approval (first image)") : t("ติ๊กสินค้าที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ · ไม่ติ๊ก = ไม่ส่งเข้าสินค้า", "Tick products to add the images to their gallery on approval · none = attach only")}</p>
                 <label className="flex items-center gap-1.5 text-[11px] text-slate-600 mb-2 cursor-pointer">
                   <input type="checkbox" checked={noParent} onChange={(e) => setNoParent(e.target.checked)} className="h-3.5 w-3.5 rounded border-slate-300 text-amber-600 cursor-pointer" />
                   {t("ไม่ต้องแนบ Parent SKU (งานนี้ไม่ส่งเข้าสินค้า)", "No Parent SKU needed (don't send to products)")}
