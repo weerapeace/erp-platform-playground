@@ -351,9 +351,8 @@ export default function CampaignCanvasPage() {
         const plat = data.platform as string | undefined;
         if (plat) {
           const cap = c.captions.find((x) => x.platform === plat)?.caption ?? null;
-          const platKey = c.platform_images?.[plat]?.[0];   // รูปที่เลือกไว้สำหรับแพลตฟอร์มนี้ (ถ้ามี) มาก่อนรูปหน้าปกรวม
-          const platCover = platKey ? (r2ImageUrl(platKey, 480) ?? cover) : cover;
-          return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap), data: { title: c.title, platform: plat }, imageUrl: platCover };
+          const platKey = c.platform_images?.[plat]?.[0];   // โชว์เฉพาะรูปที่เลือกของแพลตฟอร์มนี้เท่านั้น · ไม่เลือก = ไม่มีรูป (null → เอารูปออก)
+          return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap), data: { title: c.title, platform: plat }, imageUrl: platKey ? r2ImageUrl(platKey, 480) : null };
         }
         return { text: contentCardText({ content_no: c.content_no, title: c.title, platforms: c.platforms ?? [], status: c.status, scheduled_at: c.scheduled_at, caption: c.captions[0]?.caption ?? null }), data: { title: c.title, platforms: c.platforms ?? [] }, imageUrl: cover };
       } catch { return null; }

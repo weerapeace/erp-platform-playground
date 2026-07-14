@@ -412,57 +412,80 @@ export function CanvasSketch({
           if (imgEl && (imgEl.customData as Record<string, unknown> | undefined)?._coverUrl === u.imageUrl) continue;  // รูปเดิมอยู่แล้ว ไม่ต้องโหลด/สลับใหม่ (กันไฟล์สะสม)
           const r = await resolveImg(u.imageUrl); if (r) { gidImage.set(gid, r); gidUrl.set(gid, u.imageUrl); }
         }
-        // กลุ่มที่ขอรูปแต่ยัง "ไม่มี" image element → ต้องเพิ่มใหม่ (ต้องใช้ lib แปลง skeleton)
-        const addGids = [...gidImage.keys()].filter((gid) => !(groups.get(gid) ?? []).some((e) => e.type === "image"));
-        const lib: any = addGids.length ? await import("@excalidraw/excalidraw") : null;
-
-        const PAD = 8, IMG_H = 150;
+        const PAD = 8, MAXH = 300;   // MAXH = ความสูงรูปสูงสุดบนการ์ด (กันการ์ดสูงเกินไป)
         const removeIds = new Set<string>();
-        // จัดรูปให้พอดีกรอบแบบคงสัดส่วน (object-contain) + จัดกึ่งกลาง
+        // จัดรูปให้พอดีกรอบแบบคงสัดส่วน (object-contain) + จัดกึ่งกลางแนวนอน
         const fitBox = (bx: number, by: number, bw: number, bh: number, ratio?: number) => {
           if (!ratio || bw <= 0 || bh <= 0) return { x: bx, y: by, width: bw, height: bh };
           let w = bw, h = bw / ratio; if (h > bh) { h = bh; w = bh * ratio; }
           return { x: bx + (bw - w) / 2, y: by + (bh - h) / 2, width: w, height: h };
         };
 
+        // จัดเลย์เอาต์การ์ดใหม่ (เฉพาะการ์ดที่มีรูปเข้ามาเกี่ยว): รูปบนสุด (เต็มกว้างการ์ด คงสัดส่วน) → ข้อความล่างรูป → กรอบสูงพอดี
+        // ครอบทั้ง เพิ่ม/สลับ/เอารูปออก + แก้ข้อความ → กันรูปล้นกรอบ + กล่องขยาย/หดตามรูปเสมอ (คำนวณใหม่ทุกครั้ง = idempotent)
+        type Lay = { imgBox?: { x: number; y: number; width: number; height: number }; removeImg?: boolean; addImg?: boolean; textY: number; rectH: number };
+        const layout = new Map<string, Lay>();
+        for (const [gid, u] of updates) {
+          const gEls = groups.get(gid) ?? [];
+          const rect = gEls.find((e) => e.type === "rectangle"); if (!rect) continue;   // ไม่มีกรอบ = ไม่ใช่การ์ดแบบมีกล่อง (ข้ามการจัดเลย์เอาต์)
+          const existingImg = gEls.find((e) => e.type === "image");
+          const img = gidImage.get(gid);            // มี = เพิ่ง resolve รูปใหม่ (เพิ่ม/สลับ)
+          const clearing = gidClear.has(gid);       // สั่งเอารูปออก
+          if (!img && !clearing && !existingImg) continue;   // การ์ดข้อความล้วน → ปล่อยให้ logic เดิมจัดการ
+          const rx = rect.x ?? 0, ry = rect.y ?? 0, rw = rect.width ?? 0;
+          const textEl = gEls.find((e) => e.type === "text");
+          const txt = (u.text != null ? u.text : (textEl?.text ?? "")) as string;
+          const fs = textEl?.fontSize ?? 14;
+          const textH = Math.round(Math.max(1, txt.split("\n").length) * fs * 1.25);
+          let imgBox: Lay["imgBox"]; let imgBlock = 0; let removeImg = false; let addImg = false;
+          if (clearing) { removeImg = !!existingImg; }
+          else if (img) { imgBox = fitBox(rx + PAD, ry + PAD, rw - PAD * 2, MAXH, img.ratio); imgBlock = imgBox.height + PAD; addImg = !existingImg; }   // รูปใหม่ fit ตามสัดส่วนจริง
+          else if (existingImg) {   // รูปเดิมไม่เปลี่ยน (เช่นแก้แค่แคปชั่น) → re-fit ให้เต็มกว้างด้วยสัดส่วนจากขนาดปัจจุบัน (ไม่ต้องโหลดไฟล์ใหม่)
+            const iw0 = existingImg.width ?? 0, ih0 = existingImg.height ?? 0;
+            imgBox = fitBox(rx + PAD, ry + PAD, rw - PAD * 2, MAXH, ih0 > 0 ? iw0 / ih0 : undefined);
+            imgBlock = imgBox.height + PAD;
+          }
+          layout.set(gid, { imgBox, removeImg, addImg, textY: ry + PAD + imgBlock, rectH: PAD + imgBlock + textH + PAD });
+        }
+
         const next = els.map((el) => {
           const gid = el?.groupIds?.[0]; const u = gid ? updates.get(gid) : undefined; if (!u) return el;
           const merged = { ...el.customData, ...(u.data ?? {}) };
+          const lay = gid ? layout.get(gid) : undefined;
           const img = gid ? gidImage.get(gid) : undefined;
-          const clearing = gid ? gidClear.has(gid) : false;
-          // การ์ดนี้กำลัง "เพิ่มรูปใหม่" (ขอรูป + ยังไม่มี image element) → ต้องเลื่อนข้อความลง + ขยายกล่อง
-          const addingHere = !!img && !(groups.get(gid!) ?? []).some((e) => e.type === "image");
           if (el.type === "image") {
-            if (clearing) { removeIds.add(el.id); return el; }
-            if (img) return { ...el, fileId: img.fileId, version: (el.version ?? 0) + 1, customData: { ...merged, _coverUrl: gidUrl.get(gid!) } };  // สลับรูป
+            if (lay?.removeImg) { removeIds.add(el.id); return el; }
+            if (lay?.imgBox) {
+              const geo = { x: lay.imgBox.x, y: lay.imgBox.y, width: lay.imgBox.width, height: lay.imgBox.height };
+              return img
+                ? { ...el, ...geo, fileId: img.fileId, version: (el.version ?? 0) + 1, customData: { ...merged, _coverUrl: gidUrl.get(gid!) } }   // สลับรูป + จัดกรอบใหม่
+                : { ...el, ...geo, customData: merged };                                                                                          // รูปเดิม จัด/ปรับขนาดให้เต็มกว้าง
+            }
             return { ...el, customData: merged };
           }
           if (el.type === "text") {
             let base: any = el;
             if (u.text != null) { const lines = u.text.split("\n").length; const fs = el.fontSize ?? 14; base = { ...el, text: u.text, originalText: u.text, height: Math.round(lines * fs * 1.25) }; }
-            if (addingHere) base = { ...base, y: (base.y ?? 0) + IMG_H + PAD };
+            if (lay) base = { ...base, y: lay.textY };
             return { ...base, customData: merged };
           }
           if (el.type === "rectangle") {
             let base: any = el;
-            if (u.text != null) { const lines = u.text.split("\n").length; base = { ...el, height: 40 + lines * 18 }; }
-            if (addingHere) base = { ...base, height: (base.height ?? 0) + IMG_H + PAD };
+            if (lay) base = { ...el, height: lay.rectH };
+            else if (u.text != null) { const lines = u.text.split("\n").length; base = { ...el, height: 40 + lines * 18 }; }
             return { ...base, customData: merged };
           }
           return { ...el, customData: merged };
         });
 
-        // เพิ่ม image element ใหม่ให้กลุ่มที่ขอรูป (วางแถบบนสุดของกล่อง)
+        // เพิ่ม image element ใหม่ให้การ์ดที่ยังไม่มีรูป (ตำแหน่ง/ขนาดจาก layout ที่คำนวณไว้)
+        const addList = [...layout.entries()].filter(([, l]) => l.addImg && l.imgBox);
+        const lib: any = addList.length ? await import("@excalidraw/excalidraw") : null;
         const addedEls: any[] = [];
-        for (const gid of addGids) {
-          const img = gidImage.get(gid); if (!img || !lib) continue;
-          const gEls = groups.get(gid) ?? [];
-          const minX = Math.min(...gEls.map((e) => e.x ?? 0));
-          const minY = Math.min(...gEls.map((e) => e.y ?? 0));
-          const maxX = Math.max(...gEls.map((e) => (e.x ?? 0) + (e.width ?? 0)));
-          const box = fitBox(minX + PAD, minY + PAD, Math.max(40, maxX - minX - PAD * 2), IMG_H, img.ratio);
-          const d0 = { ...((gEls[0]?.customData ?? {}) as Record<string, unknown>), _coverUrl: gidUrl.get(gid) };
-          const skel = [{ type: "image", fileId: img.fileId, x: box.x, y: box.y, width: box.width, height: box.height, groupIds: [gid], customData: d0 }];
+        for (const [gid, l] of addList) {
+          const img = gidImage.get(gid); if (!img || !lib || !l.imgBox) continue;
+          const d0 = { ...((groups.get(gid)?.[0]?.customData ?? {}) as Record<string, unknown>), _coverUrl: gidUrl.get(gid) };
+          const skel = [{ type: "image", fileId: img.fileId, x: l.imgBox.x, y: l.imgBox.y, width: l.imgBox.width, height: l.imgBox.height, groupIds: [gid], customData: d0 }];
           try { for (const e of lib.convertToExcalidrawElements(skel)) addedEls.push(e); } catch (e) { console.error("[canvas-sketch] add image failed:", e); }
         }
 

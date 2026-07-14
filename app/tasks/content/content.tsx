@@ -1113,6 +1113,7 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [tplOpen, setTplOpen] = useState(false);   // พับปุ่มเลือกแม่แบบไว้ก่อน
+  const [imgEdit, setImgEdit] = useState(false);   // โหมดเลือกรูป (ปกติโชว์เฉพาะรูปที่เลือก · กดแล้วกางเลือก)
   const useCaption = setting?.use_caption !== false;
   const useHashtags = setting?.use_hashtags !== false;
   const postUrl = (setting?.post_url ?? "").trim();
@@ -1176,23 +1177,44 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, o
           <pre className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
         </div>
       )}
-      {/* เลือกรูป/วิดีโอ สำหรับแพลตฟอร์มนี้ (ไม่ต้องกดโพสต์ก่อน) — รูปที่เลือกไปโชว์บนการ์ดย่อยบนกระดาน + เป็น default ตอนโพสต์ */}
+      {/* รูปสำหรับแพลตฟอร์มนี้ — ปกติโชว์เฉพาะรูปที่เลือก · กด "เลือก/แก้รูป" เพื่อกางเลือก (รูปที่เลือกไปโชว์บนการ์ดย่อย + default ตอนโพสต์) */}
       <div className="mt-2.5 pt-2 border-t border-slate-100">
-        <p className="text-[11px] text-slate-400 mb-1.5">🖼 {t("รูปสำหรับแพลตฟอร์มนี้", "Images for this platform")}{postImages.length ? ` — ${t("เลือกแล้ว", "selected")} ${selectedImages.length}/${postImages.length}` : ""}</p>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[11px] text-slate-400">🖼 {t("รูปสำหรับแพลตฟอร์มนี้", "Images for this platform")}{postImages.length ? ` — ${t("เลือกแล้ว", "selected")} ${selectedImages.length}` : ""}</p>
+          {postImages.length > 0 && (
+            <button type="button" onClick={() => setImgEdit((v) => !v)} className="text-[11px] font-medium text-violet-700 hover:underline">
+              {imgEdit ? `✓ ${t("เสร็จ", "Done")}` : `✏️ ${t("เลือก/แก้รูป", "Choose images")}`}
+            </button>
+          )}
+        </div>
         {postImages.length === 0
           ? <p className="text-[11px] text-slate-300 italic">{t("ยังไม่มีรูป — แนบที่ส่วน “แนบเพิ่มเอง” หรือผูกงานก่อน", "No media yet — attach in “Attach” section or link a task first")}</p>
-          : (
-            <div className="flex flex-wrap gap-1.5">
-              {postImages.map((im) => { const on = selectedImages.includes(im.key); return (
-                <button key={im.key} type="button" onClick={() => onToggleImage?.(im.key)} title={im.label ?? ""} className={`relative h-14 w-14 rounded-md overflow-hidden border-2 transition-all ${on ? "border-violet-500 ring-1 ring-violet-300" : "border-slate-200 opacity-70 hover:opacity-100"}`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r2ImageUrl(im.key, 120) ?? ""} alt="" className="w-full h-full object-cover" />
-                  {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
-                  {on && <span className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-violet-600 text-white text-[10px] flex items-center justify-center shadow">✓</span>}
-                </button>
-              ); })}
-            </div>
-          )}
+          : imgEdit
+            ? (   // โหมดเลือก: โชว์รูปทั้งหมดให้ติ๊ก (เลือก/ยกเลิก)
+              <div className="flex flex-wrap gap-1.5">
+                {postImages.map((im) => { const on = selectedImages.includes(im.key); return (
+                  <button key={im.key} type="button" onClick={() => onToggleImage?.(im.key)} title={im.label ?? ""} className={`relative h-14 w-14 rounded-md overflow-hidden border-2 transition-all ${on ? "border-violet-500 ring-1 ring-violet-300" : "border-slate-200 opacity-60 hover:opacity-100"}`}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={r2ImageUrl(im.key, 120) ?? ""} alt="" className="w-full h-full object-cover" />
+                    {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
+                    {on && <span className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-violet-600 text-white text-[10px] flex items-center justify-center shadow">✓</span>}
+                  </button>
+                ); })}
+              </div>
+            )
+            : selectedImages.length === 0
+              ? <p className="text-[11px] text-slate-300 italic">{t("ยังไม่เลือกรูป — กด “เลือก/แก้รูป”", "No image selected — click “Choose images”")}</p>
+              : (   // โหมดปกติ: โชว์เฉพาะรูปที่เลือก (ซ่อนรูปที่ไม่เลือก)
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedImages.map((key) => { const im = postImages.find((p) => p.key === key); if (!im) return null; return (
+                    <div key={key} className="relative h-16 w-16 rounded-md overflow-hidden border border-violet-300">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={r2ImageUrl(key, 140) ?? ""} alt="" className="w-full h-full object-cover" />
+                      {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
+                    </div>
+                  ); })}
+                </div>
+              )}
       </div>
       {/* แถบโพสต์ (เฟส 1 = โพสต์มือ): สถานะต่อแพลตฟอร์ม + ปุ่มโพสต์เลย + ลิงก์ที่ลง */}
       <div className="mt-2.5 pt-2 border-t border-slate-100">
