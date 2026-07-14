@@ -24,7 +24,7 @@ import { CreateTaskModal, type CreatedTask } from "../../create-task-modal";
 import { TaskDetailDrawer } from "../../task-detail-drawer";
 import { applyTaskTransition } from "../../task-actions";
 import { useCreativeOptions } from "../../use-options";
-import { getCampaign, updateCampaign, deleteTask, createContent, listBrands, listSubtasks, POST_TYPES, type CampaignDetail, type CreativeTask, type BrandOption } from "../../data";
+import { getCampaign, updateCampaign, deleteTask, createContent, getContent, listBrands, listSubtasks, POST_TYPES, type CampaignDetail, type CreativeTask, type BrandOption } from "../../data";
 import { ContentDrawer } from "../../content/content";
 import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow } from "@/app/api/assets/shared";
@@ -107,16 +107,42 @@ function assetCardSkeleton(a: AssetRow, fields: AssetFieldKey[]): Record<string,
   return els;
 }
 
-// การ์ดคอนเทนต์บน Excalidraw -- customData (ดับเบิลคลิกเปิด)
-function contentCardSkeleton(c: { id: string; content_no: string; title: string; platforms: string[] }): Record<string, unknown>[] {
+// ข้อความบนการ์ดคอนเทนต์ (รวม) — ใช้ทั้งตอนสร้าง + ตอน sync (refreshCards)
+type ContentCardInfo = { content_no?: string | null; title?: string | null; platforms?: string[]; status?: string | null; scheduled_at?: string | null; caption?: string | null };
+function contentCardText(c: ContentCardInfo): string {
+  const platLine = (c.platforms ?? []).length ? (c.platforms ?? []).join(" · ") : "—";
+  const sched = c.scheduled_at ? `🗓 ${String(c.scheduled_at).slice(0, 16).replace("T", " ")}\n` : "";
+  const st = c.status ? ` · ${c.status}` : "";
+  const cap = (c.caption ?? "").trim();
+  const capLine = cap ? `\n\n📝 ${cap.slice(0, 120)}${cap.length > 120 ? "…" : ""}` : "";
+  return `📱 ${c.title ?? ""}\n${c.content_no ?? ""}${st}\n${sched}แพลตฟอร์ม: ${platLine}${capLine}`;
+}
+// ข้อความบนการ์ดรายแพลตฟอร์ม
+function perPlatformCardText(c: ContentCardInfo, platform: string, caption?: string | null): string {
+  const cap = (caption ?? "").trim();
+  const capLine = cap ? `\n\n${cap.slice(0, 140)}${cap.length > 140 ? "…" : ""}` : "\n\n— ยังไม่มีแคปชั่น —";
+  const st = c.status ? ` · ${c.status}` : "";
+  return `📱 ${platform}\n${c.title ?? ""}\n${c.content_no ?? ""}${st}${capLine}`;
+}
+
+// การ์ดคอนเทนต์ (รวม) บน Excalidraw -- customData (ดับเบิลคลิกเปิด Drawer)
+function contentCardSkeleton(c: { id: string; content_no: string; title: string; platforms: string[]; status?: string | null; scheduled_at?: string | null }): Record<string, unknown>[] {
   const gid = `content-${c.id}-${Math.random().toString(36).slice(2, 7)}`;
   const data = { kind: "content", id: c.id, content_no: c.content_no, title: c.title, platforms: c.platforms };
-  const platLine = c.platforms.length ? c.platforms.join(" · ") : "—";
-  const text = `📱 ${c.title}\n${c.content_no}\n\nแพลตฟอร์ม:\n${platLine}`;
-  const W = 250, H = 150;
+  const W = 260, H = 180;
   return [
     { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#fff7ed", strokeColor: "#f59e0b", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
-    { type: "text", x: 14, y: 14, width: W - 28, text, fontSize: 14, strokeColor: "#b45309", groupIds: [gid], customData: data },
+    { type: "text", x: 14, y: 14, width: W - 28, text: contentCardText(c), fontSize: 14, strokeColor: "#b45309", groupIds: [gid], customData: data },
+  ];
+}
+// การ์ดคอนเทนต์ "รายแพลตฟอร์ม" — ผูก content เดียวกัน (มี platform ใน customData)
+function perPlatformCardSkeleton(c: { id: string; content_no: string; title: string; status?: string | null }, platform: string): Record<string, unknown>[] {
+  const gid = `content-${c.id}-${platform}-${Math.random().toString(36).slice(2, 6)}`;
+  const data = { kind: "content", id: c.id, content_no: c.content_no, title: c.title, platform, platforms: [platform] };
+  const W = 240, H = 160;
+  return [
+    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#fffbeb", strokeColor: "#f59e0b", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
+    { type: "text", x: 12, y: 12, width: W - 24, text: perPlatformCardText(c, platform), fontSize: 13, strokeColor: "#b45309", groupIds: [gid], customData: data },
   ];
 }
 
@@ -167,7 +193,7 @@ export default function CampaignCanvasPage() {
   const [sectionOpen, setSectionOpen] = useState(false); // ป๊อปอัปเลือก Section
   const [sectionName, setSectionName] = useState("");
   const [contentOpen, setContentOpen] = useState(false); // modal สร้างคอนเทนต์
-  const [cForm, setCForm] = useState({ title: "", post_type: "image", platforms: [] as string[], scheduled_at: "" });
+  const [cForm, setCForm] = useState({ title: "", post_type: "image", platforms: [] as string[], scheduled_at: "", cardMode: "combined" as "combined" | "per_platform" });
   const [contentView, setContentView] = useState<Record<string, unknown> | null>(null); // การ์ดคอนเทนต์ที่กดดู
   const [folderOpen, setFolderOpen] = useState(false); // modal การ์ดโฟลเดอร์
   const [fForm, setFForm] = useState({ label: "", path: "" });
@@ -242,8 +268,16 @@ export default function CampaignCanvasPage() {
     if (!cForm.title.trim()) { pushToast("error", t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
     try {
       const { id: cid, content_no } = await createContent({ title: cForm.title.trim(), campaign_id: id, post_type: cForm.post_type, platforms: cForm.platforms, scheduled_at: cForm.scheduled_at || null, status: "draft" });
-      sketchRef.current?.insert(contentCardSkeleton({ id: cid, content_no, title: cForm.title.trim(), platforms: cForm.platforms }));
-      setContentOpen(false); setCForm({ title: "", post_type: "image", platforms: [], scheduled_at: "" });
+      const base = { id: cid, content_no, title: cForm.title.trim(), status: "draft" };
+      if (cForm.cardMode === "per_platform" && cForm.platforms.length) {
+        // วาง 1 การ์ด/แพลตฟอร์ม (เรียงแนวนอน) — ผูก content เดียวกัน
+        const all: Record<string, unknown>[] = [];
+        cForm.platforms.forEach((p, i) => { const dx = i * 270; for (const el of perPlatformCardSkeleton(base, p)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
+        sketchRef.current?.insert(all);
+      } else {
+        sketchRef.current?.insert(contentCardSkeleton({ ...base, platforms: cForm.platforms, scheduled_at: cForm.scheduled_at || null }));
+      }
+      setContentOpen(false); setCForm({ title: "", post_type: "image", platforms: [], scheduled_at: "", cardMode: "combined" });
       pushToast("success", t(`สร้างคอนเทนต์ ${content_no} + วางการ์ดแล้ว`, `Created content ${content_no} and placed card`));
     } catch (e) { pushToast("error", (e as Error).message); }
   };
@@ -307,6 +341,22 @@ export default function CampaignCanvasPage() {
       return { text, data: { subtasks: subs.map((s) => ({ title: s.title })) } };
     });
   }, []);
+  // ③ ซิงค์การ์ดคอนเทนต์ (ข้อความ: แคปชั่นย่อ/เวลาโพสต์/สถานะ) — สะท้อนการแก้ใน Drawer
+  const syncContentCards = useCallback(() => {
+    sketchRef.current?.refreshCards(async ({ kind, id, data }) => {
+      if (kind !== "content" || !id) return null;
+      try {
+        const c = await getContent(id);
+        const plat = data.platform as string | undefined;
+        if (plat) {
+          const cap = c.captions.find((x) => x.platform === plat)?.caption ?? null;
+          return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap), data: { title: c.title, platform: plat } };
+        }
+        return { text: contentCardText({ content_no: c.content_no, title: c.title, platforms: c.platforms ?? [], status: c.status, scheduled_at: c.scheduled_at, caption: c.captions[0]?.caption ?? null }), data: { title: c.title, platforms: c.platforms ?? [] } };
+      } catch { return null; }
+    });
+  }, []);
+  const onBoardReady = useCallback(() => { syncTaskCards(); syncContentCards(); }, [syncTaskCards, syncContentCards]);
 
   if (err) return <StandaloneShell title={t("แคมเปญ", "Campaign")} icon="📣" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
 
@@ -352,7 +402,7 @@ export default function CampaignCanvasPage() {
         <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
           {/* realtime ผ่าน Supabase Broadcast (ไม่กิน Cloudflare CPU) + เซฟกันทับด้วย version-guard */}
           {/* ความสูงพอดี viewport → หน้าไม่เลื่อน → toolbox ของกระดานไม่มุด/จม (กระดานเลื่อนในตัวเองได้อยู่แล้ว) */}
-          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 205px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={syncTaskCards} collab stickyTop={128} />
+          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 205px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onBoardReady} collab stickyTop={128} />
 
           {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
           {dragPanelOpen && (
@@ -503,6 +553,14 @@ export default function CampaignCanvasPage() {
           </div>
           <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platforms")}</label>
             <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => { const on = cForm.platforms.includes(p.value); return <button key={p.value} type="button" onClick={() => setCForm((f) => ({ ...f, platforms: on ? f.platforms.filter((x) => x !== p.value) : [...f.platforms, p.value] }))} className={`px-2.5 py-1 rounded-full text-xs border ${on ? "bg-amber-600 text-white border-amber-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>; })}</div>
+          </div>
+          <div><label className="text-xs text-slate-400">{t("แบบการ์ด", "Card style")}</label>
+            <div className="flex gap-1.5 mt-1">
+              {([["combined", `📱 ${t("การ์ดรวม", "Combined")}`], ["per_platform", `🔀 ${t("แยกรายแพลตฟอร์ม", "Per platform")}`]] as const).map(([v, lbl]) => (
+                <button key={v} type="button" onClick={() => setCForm((f) => ({ ...f, cardMode: v }))} className={`px-2.5 py-1 rounded-full text-xs border ${cForm.cardMode === v ? "bg-amber-600 text-white border-amber-600" : "bg-white text-slate-600 border-slate-200"}`}>{lbl}</button>
+              ))}
+            </div>
+            {cForm.cardMode === "per_platform" && <p className="text-[11px] text-slate-400 mt-1">{t("วาง 1 การ์ด/แพลตฟอร์ม · ทุกใบผูก content เดียวกัน (แก้ที่ Drawer)", "One card per platform · all linked to the same content (edit in Drawer)")}</p>}
           </div>
           <p className="text-xs text-slate-400">{t(`สร้างแบบย่อ — รายละเอียด/caption แก้ต่อได้ที่ "เปิดเต็ม" ในการ์ด`, `Quick create — edit details/caption later via "Open full" on the card`)}</p>
         </div>
