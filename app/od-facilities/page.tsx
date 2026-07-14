@@ -37,6 +37,7 @@ const CONFIG: MasterCRUDConfig = {
   title:       "วงเงิน OD",
   description: "วงเงินเบิกเกินบัญชี — ยอดใช้/utilization คิดจาก Statement ที่นำเข้า",
   icon:        "🏦",
+  formLayout:  "sections",
   activeField: "is_active",
   exportEntityType: "od_facilities",
   permissions: {

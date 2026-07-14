@@ -36,6 +36,7 @@ const CONFIG: MasterCRUDConfig = {
   title:       "กระทบยอดดอกเบี้ย OD",
   description: "เทียบดอกเบี้ยประมาณการ vs ที่ธนาคารหักจริง — กรอกช่อง 'ธนาคารหักจริง' แล้วระบบเทียบให้",
   icon:        "📈",
+  formLayout:  "sections",
   activeField: "is_active",
   exportEntityType: "od_interest_reconciliations",
   permissions: {

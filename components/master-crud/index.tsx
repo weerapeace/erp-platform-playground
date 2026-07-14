@@ -245,6 +245,8 @@ const GROUP_CONFIG: Record<string, { label: string; icon: string; defaultOpen: b
   supplier:  { label: "ผู้จำหน่าย",     icon: "🏭", defaultOpen: true, order: 35 },
   content:   { label: "เนื้อหา",        icon: "📝", defaultOpen: true, order: 40 },
   pricing:   { label: "ราคา & ต้นทุน",  icon: "💰", defaultOpen: true, order: 50 },
+  money:     { label: "เงินต้น & ดอกเบี้ย", icon: "💰", defaultOpen: true, order: 51 },
+  period:    { label: "ระยะเวลา",        icon: "📅", defaultOpen: true, order: 53 },
   pay:       { label: "ค่าจ้าง",         icon: "💰", defaultOpen: true, order: 52 },
   term:      { label: "ระยะเวลา/สถานะ", icon: "📅", defaultOpen: true, order: 54 },
   media:     { label: "รูปภาพ/ไฟล์",    icon: "🖼️", defaultOpen: true, order: 55 },
@@ -401,6 +403,8 @@ export type MasterCRUDConfig = {
   title:          string;
   description?:   string;
   icon?:          string;
+  /** เลย์เอาต์ฟอร์ม: "tabs" (ค่าเริ่มต้น = แบ่งกลุ่มเป็นแท็บ) หรือ "sections" (ทุกกลุ่มเรียงลงมาหน้าเดียว เลื่อนดู) */
+  formLayout?:    "tabs" | "sections";
   /** permission keys */
   permissions: {
     view:   Permission;
@@ -2319,7 +2323,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {createHeaderEl}
                 {drawerMode === "view"
                   ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
-                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} />}
+                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />}
               </div>
             );
           }
@@ -2335,7 +2339,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {createHeaderEl}
                 {drawerMode === "view"
                   ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
-                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} />}
+                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />}
               </div>
             );
           }
@@ -2429,7 +2433,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"
                     ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
-                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} />
+                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />
                 ) : (
                   <div className="text-sm text-slate-300 py-8 text-center">ไม่มีข้อมูลเพิ่มเติม</div>
                 )}
@@ -2912,12 +2916,14 @@ function LayoutTabs({
 type BoundTab = { key: string; label: string; icon?: string; node: React.ReactNode };
 
 function FormSections({
-  fields, renderField, layout, extraTabs,
+  fields, renderField, layout, extraTabs, sectionMode,
 }: {
   fields: FieldDef[];
   renderField: (f: FieldDef, maxSpan?: number) => React.ReactNode;
   layout?: FormLayout;
   extraTabs?: BoundTab[];
+  /** true = แสดงทุกกลุ่มเรียงลงมาเป็น section (หน้าเดียว เลื่อนดู) แทนแท็บ */
+  sectionMode?: boolean;
 }) {
   // hooks ทั้งหมดเรียกก่อน return เสมอ (Rules of Hooks)
   const byGroup = useMemo(() => groupByKey(fields), [fields]);
@@ -2934,6 +2940,28 @@ function FormSections({
     return <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} renderGrid={(fs, cols) => (
       <div className="grid grid-cols-12 gap-3">{fs.map((f) => renderField(f, cols))}</div>
     )} />;
+  }
+
+  // sectionMode: ทุกกลุ่มเรียงลงมาเป็น section หัวข้อ (ไม่มีแท็บ) — เลื่อนดูหน้าเดียว
+  if (sectionMode && grouped.length > 1) {
+    return (
+      <div className="space-y-6 pt-1">
+        {grouped.map(([groupKey, groupFields]) => {
+          const cfg = getGroupConfig(groupKey);
+          return (
+            <section key={groupKey}>
+              <div className="flex items-center gap-1.5 pb-2 mb-3 border-b border-slate-100">
+                <span>{cfg.icon}</span>
+                <span className="text-sm font-semibold text-slate-700">{cfg.label}</span>
+              </div>
+              <div className="grid grid-cols-12 gap-3">
+                {groupFields.map((f) => renderField(f, 2))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    );
   }
 
   // fallback (เดิม): group_key = tab, grid 2 คอลัมน์
