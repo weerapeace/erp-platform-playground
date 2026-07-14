@@ -36,7 +36,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./use-statuses";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue, priorityLabel, approvalLabel, assetLabel,
-  getTask, updateTask, transitionTask, addComment, addAttachment, deleteAttachment,
+  getTask, updateTask, transitionTask, addComment, addAttachment, deleteAttachment, createTaskDriveFolder,
   type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption, type SubtaskAssignee,
 } from "./data";
 
@@ -136,6 +136,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const t = useT();
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  const [driveBusy, setDriveBusy] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [mentionUsers, setMentionUsers] = useState<UserPickerValue[]>([]);   // แจ้งเตือนถึงใครบ้างเมื่อส่งคอมเมนต์
   const [mentionAdding, setMentionAdding] = useState<UserPickerValue | null>(null);
@@ -343,6 +344,19 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   </div>
                 ) : null;
               })()}
+
+              {/* สร้างโฟลเดอร์ Google Drive ของงาน (ถ้ายังไม่มี) */}
+              {!d.drive_folder_url && (
+                <button disabled={driveBusy}
+                  onClick={async () => {
+                    setDriveBusy(true);
+                    try { const r = await createTaskDriveFolder(d.id); pushToast("success", r.existed ? t("มีโฟลเดอร์อยู่แล้ว", "Folder already exists") : t("สร้างโฟลเดอร์ Drive แล้ว", "Drive folder created")); if (r.url) window.open(r.url, "_blank"); await load(); }
+                    catch (e) { pushToast("error", (e as Error).message); } finally { setDriveBusy(false); }
+                  }}
+                  className="text-xs px-2.5 py-1 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:text-violet-700 hover:border-violet-300 hover:bg-violet-50 disabled:opacity-50">
+                  {driveBusy ? t("กำลังสร้าง...", "Creating...") : `📁 ${t("สร้างโฟลเดอร์ Drive", "Create Drive folder")}`}
+                </button>
+              )}
 
               {/* ลิงก์ผลงาน */}
               {(d.drive_folder_url || d.final_asset_url || d.published_url) && (

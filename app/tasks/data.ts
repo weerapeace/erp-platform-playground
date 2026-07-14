@@ -174,6 +174,14 @@ export async function deleteTask(id: string): Promise<void> {
   await jsonOrThrow(await apiFetch(`/api/creative-tasks/${id}`, { method: "DELETE" }));
 }
 
+// สร้าง (หรือคืนของเดิม) โฟลเดอร์ Google Drive ของงาน → คืนลิงก์
+export async function createTaskDriveFolder(id: string): Promise<{ url: string; existed: boolean }> {
+  const res = await apiFetch(`/api/creative-tasks/${id}/drive-folder`, { method: "POST" });
+  const j = await res.json();
+  if (!res.ok || j.error) throw new Error(j.error || "สร้างโฟลเดอร์ไม่สำเร็จ");
+  return { url: j.url as string, existed: !!j.existed };
+}
+
 // ---- ฟิลด์ Parent SKU ที่ต้องกรอกก่อนส่งงาน (ค่ากลาง) ----
 // ตัวเลือกฟิลด์ = ดึง "ทุกฟิลด์ Parent SKU" จาก field registry กลาง (ไม่ hardcode)
 export async function getParentSkuFieldOptions(): Promise<{ col: string; label: string }[]> {
