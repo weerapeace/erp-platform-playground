@@ -76,7 +76,9 @@ export async function driveEnsureFolder(name: string, parentId: string): Promise
  * "[01] Catalogs" = env GOOGLE_DRIVE_CATALOGS_FOLDER_ID (ถ้าตั้ง) ไม่งั้นค้นหาตามชื่อ (ต้องแชร์โฟลเดอร์นี้ให้ service account)
  */
 let coverFolderCache: string | null = null;
-export async function resolveCoverFolderId(): Promise<string | null> {
+export async function resolveCoverFolderId(overrideFolderId?: string | null): Promise<string | null> {
+  const ov = (overrideFolderId || "").trim();
+  if (ov) return ov;   // ผู้ใช้ตั้งโฟลเดอร์เองที่หน้าตั้งค่า → ใช้ตรง ๆ
   if (coverFolderCache) return coverFolderCache;
   if (!driveConfigured()) return null;
   try {
@@ -88,6 +90,17 @@ export async function resolveCoverFolderId(): Promise<string | null> {
     coverFolderCache = coverId;
     return coverId;
   } catch (e) { console.error("[drive] resolveCoverFolderId failed:", e); return null; }
+}
+
+/** อ่านข้อมูลโฟลเดอร์ตาม id (ตรวจว่าเข้าถึงได้ + เป็นโฟลเดอร์) → คืน { id, name, webViewLink } หรือ null */
+export async function driveGetFolder(id: string): Promise<{ id: string; name: string; webViewLink: string } | null> {
+  const fid = (id || "").trim(); if (!fid) return null;
+  const token = await getAccessToken();
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fid)}?supportsAllDrives=true&fields=id,name,webViewLink,mimeType`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.id || j.mimeType !== "application/vnd.google-apps.folder") return null;
+  return { id: j.id as string, name: (j.name as string) ?? "", webViewLink: (j.webViewLink as string) || `https://drive.google.com/drive/folders/${j.id}` };
 }
 
 /** อัปไฟล์ขึ้นโฟลเดอร์ (multipart) → คืน { id, webViewLink } · ใช้เฟสอัปไฟล์ */

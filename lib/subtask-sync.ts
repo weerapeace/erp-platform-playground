@@ -218,7 +218,10 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
     // เฟส 3: เก็บรูปปกที่อนุมัติลง Google Drive [01] Catalogs/02_Contents/02_cover (best-effort — พลาดไม่กระทบการอนุมัติ)
     if (target === "cover" && coverDriveUploads.length && driveConfigured()) {
       try {
-        const folderId = await resolveCoverFolderId();
+        // โฟลเดอร์ปลายทาง: ผู้ใช้ตั้งเองที่หน้าตั้งค่า (cover_drive_folder) มาก่อน ไม่งั้นใช้ค่าเริ่มต้น [01] Catalogs/02_Contents/02_cover
+        let overrideFolder: string | null = null;
+        try { const { data: cs } = await admin.from("china_app_settings").select("sval").eq("skey", "cover_drive_folder").maybeSingle(); overrideFolder = ((cs?.sval as { folder_id?: string } | null)?.folder_id) || null; } catch { /* ใช้ค่าเริ่มต้น */ }
+        const folderId = await resolveCoverFolderId(overrideFolder);
         if (folderId) for (const up of coverDriveUploads) {
           try {
             const obj = await r2GetObject(up.r2Key);
