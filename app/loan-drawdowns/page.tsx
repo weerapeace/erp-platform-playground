@@ -39,6 +39,7 @@ const CONFIG: MasterCRUDConfig = {
   description: "บันทึกการเบิกเงินแต่ละครั้ง — เมื่อยืนยันแล้ว ระบบคิดยอดเบิกสะสม/เงินต้นคงเหลือในสัญญาให้อัตโนมัติ",
   icon:        "💵",
   formLayout:  "sections",
+  defaultShowAllColumns: false,
   activeField: "is_active",
   exportEntityType: "loan_drawdowns",
   permissions: {

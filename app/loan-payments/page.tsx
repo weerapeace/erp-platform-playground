@@ -36,6 +36,7 @@ const CONFIG: MasterCRUDConfig = {
   description: "บันทึกการจ่ายแต่ละครั้ง — ระบบตัดยอดเข้าดอกเบี้ย/เงินต้นตามงวดให้อัตโนมัติ",
   icon:        "💸",
   formLayout:  "sections",
+  defaultShowAllColumns: false,
   activeField: "is_active",
   exportEntityType: "loan_payments",
   permissions: {

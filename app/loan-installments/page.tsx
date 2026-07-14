@@ -36,6 +36,7 @@ const CONFIG: MasterCRUDConfig = {
   activeField: "is_active",
   exportEntityType: "loan_installments",
   readOnly:    true,
+  defaultShowAllColumns: false,
   permissions: {
     view:   "loan_installments.view",
     create: "loan_installments.view",

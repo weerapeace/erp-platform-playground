@@ -29,6 +29,7 @@ const CONFIG: MasterCRUDConfig = {
   activeField: "is_active",
   exportEntityType: "od_daily_balances",
   readOnly:    true,
+  defaultShowAllColumns: false,
   permissions: {
     view:   "od_daily.view",
     create: "od_daily.view",

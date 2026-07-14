@@ -34,6 +34,7 @@ const CONFIG: MasterCRUDConfig = {
   description: "ตารางผ่อนชำระของแต่ละสัญญา — เก็บเป็นเวอร์ชัน ไม่ทับของเก่า",
   icon:        "📅",
   formLayout:  "sections",
+  defaultShowAllColumns: false,
   activeField: "is_active",
   exportEntityType: "loan_schedule_versions",
   permissions: {

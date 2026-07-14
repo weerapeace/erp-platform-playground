@@ -54,6 +54,7 @@ const CONFIG: MasterCRUDConfig = {
   description: "ทะเบียนเงินกู้ทั้งหมด — จัดการ field ที่ /admin/schema-sync (โมดูล: สัญญาเงินกู้)",
   icon:        "📄",
   formLayout:  "sections",
+  defaultShowAllColumns: false,
   activeField: "is_active",
   exportEntityType: "loan_contracts",
   permissions: {

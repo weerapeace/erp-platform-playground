@@ -1000,14 +1000,23 @@ export function DataTable<T extends Record<string, unknown>>({
   // Hide auto-detected columns by default (once on first detection)
   const autoHiddenRef = useRef<Set<string>>(new Set());
   useEffect(() => {
+    const extraSet = new Set(extraDataKeys);
     const newKeys = extraDataKeys.filter(k => !autoHiddenRef.current.has(k));
-    if (newKeys.length === 0) return;
+    // แก้ race: คีย์ที่เรา "auto-ซ่อน" ไว้ตอน columns ยังโหลดไม่เสร็จ (registry มาทีหลัง data)
+    // เมื่อกลายเป็นคอลัมน์จริงแล้ว (หลุดจาก extra) ต้องคืนให้โชว์ ไม่งั้นคอลัมน์หายถาวร
+    const recovered = [...autoHiddenRef.current].filter(k => !extraSet.has(k));
+    if (newKeys.length === 0 && recovered.length === 0) return;
     newKeys.forEach(k => autoHiddenRef.current.add(k));
+    recovered.forEach(k => autoHiddenRef.current.delete(k));
     setColumnVisibility(prev => {
       const updated = { ...prev };
       let changed = false;
       newKeys.forEach(k => {
         if (!(k in updated)) { updated[k] = false; changed = true; }
+      });
+      recovered.forEach(k => {
+        // คืนเฉพาะที่ยังเป็น false (เราซ่อนเอง) — ถ้าผู้ใช้ตั้งโชว์เองไว้แล้วไม่ต้องแตะ
+        if (updated[k] === false) { delete updated[k]; changed = true; }
       });
       return changed ? updated : prev;
     });

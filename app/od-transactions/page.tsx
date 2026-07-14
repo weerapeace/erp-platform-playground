@@ -31,6 +31,7 @@ const CONFIG: MasterCRUDConfig = {
   activeField: "is_active",
   exportEntityType: "od_transactions",
   readOnly:    true,
+  defaultShowAllColumns: false,
   permissions: {
     view:   "od_transactions.view",
     create: "od_transactions.view",
