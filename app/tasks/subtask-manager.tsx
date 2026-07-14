@@ -1301,7 +1301,10 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const anyDraft = Object.values(draftImages).some((a) => a.length > 0);    // มีรูปในกล่องสินค้าไหม
   const hasWork = attachCount > 0 || anyDraft;                              // แนบรูป/ลิงก์ หรือหย่อนรูปในกล่องสินค้าก็นับ
   // สินค้าที่ติ๊กไว้แต่ยังไม่ใส่รูป — ติ๊กแล้วต้องแนบรูป ไม่งั้นส่งไม่ได้
-  const tickedTks = [...[...syncParentIds].map((id) => `parent:${id}`), ...[...syncSkuIds].map((id) => `sku:${id}`)];
+  // ⚠️ งานรูป Description: รูปอยู่ที่ "Parent" เท่านั้น → เช็กเฉพาะ Parent (SKU ที่ติ๊กไม่ต้องมีรูป ไม่งั้นส่งไม่ได้)
+  const tickedTks = isDescTask
+    ? [...syncParentIds].map((id) => `parent:${id}`)
+    : [...[...syncParentIds].map((id) => `parent:${id}`), ...[...syncSkuIds].map((id) => `sku:${id}`)];
   const tickedNoImg = tickedTks.filter((tk) => (draftImages[tk] ?? []).length === 0);
   const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : (hasWork && (!needProductTarget || hasProductTarget) && tickedNoImg.length === 0));
 
