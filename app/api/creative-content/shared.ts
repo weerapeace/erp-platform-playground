@@ -2,7 +2,7 @@
 import { employeeLabelMap } from "@/lib/creative-tasks-server";
 
 export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sku_id, parent_sku_id, product_name, post_type,
-  platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, post_status, note,
+  platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, post_status, platform_images, note,
   discount_value, discount_is_percent, color_source,
   is_template, is_active, created_at, updated_at, assignee_id, assignee_ids,
   brand:brands!brand_id(name, color, shop_channels),

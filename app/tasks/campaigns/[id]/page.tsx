@@ -28,7 +28,7 @@ import { getCampaign, updateCampaign, deleteTask, createContent, getContent, lis
 import { ContentDrawer } from "../../content/content";
 import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow } from "@/app/api/assets/shared";
-import { withImageWidth } from "@/lib/r2-image";
+import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
 
 // โหลดของกลาง Excalidraw แบบ dynamic -- ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
@@ -351,7 +351,9 @@ export default function CampaignCanvasPage() {
         const plat = data.platform as string | undefined;
         if (plat) {
           const cap = c.captions.find((x) => x.platform === plat)?.caption ?? null;
-          return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap), data: { title: c.title, platform: plat }, imageUrl: cover };
+          const platKey = c.platform_images?.[plat]?.[0];   // รูปที่เลือกไว้สำหรับแพลตฟอร์มนี้ (ถ้ามี) มาก่อนรูปหน้าปกรวม
+          const platCover = platKey ? (r2ImageUrl(platKey, 480) ?? cover) : cover;
+          return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap), data: { title: c.title, platform: plat }, imageUrl: platCover };
         }
         return { text: contentCardText({ content_no: c.content_no, title: c.title, platforms: c.platforms ?? [], status: c.status, scheduled_at: c.scheduled_at, caption: c.captions[0]?.caption ?? null }), data: { title: c.title, platforms: c.platforms ?? [] }, imageUrl: cover };
       } catch { return null; }
