@@ -888,7 +888,9 @@ export function CanvasSketch({
           showDeprecatedFonts   // โชว์ฟอนต์ครบ 8 ตัว (Virgil/Helvetica/Cascadia/Liberation) → แมปเป็นฟอนต์ไทย 8 แบบ
           viewModeEnabled={!(editable && serverCanEdit)}
           excalidrawAPI={(a: any) => { apiRef.current = a; }}
-          initialData={scene ? { elements: scene.elements as any, files: scene.files as any, scrollToContent: true } : undefined}
+          initialData={scene
+            ? { elements: scene.elements as any, files: scene.files as any, appState: { objectsSnapModeEnabled: true }, scrollToContent: true }
+            : { appState: { objectsSnapModeEnabled: true } }}
           onChange={(elements: any, appState: any, files: any) => {
             // จับ snapshot — แต่ "อย่า" ให้ตอน Excalidraw เคลียร์เป็นว่าง (teardown/ปิดหน้า) มาทับ snapshot ดี (กันเซฟว่าง)
             const hasLive = (elements as any[]).some((e) => !e.isDeleted);
