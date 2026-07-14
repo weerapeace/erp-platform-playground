@@ -5,8 +5,51 @@
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { defaultLineTemplate, renderLineTemplate } from "@/lib/creative-line-templates";
+import { driveConfigured, driveCreateFolder, driveUploadFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
+import { r2GetObject } from "@/lib/r2";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
+
+// ===== Google Drive: โฟลเดอร์/ไฟล์ต่องาน =====
+/** โฟลเดอร์ Drive ของงาน — สร้างถ้ายังไม่มี → {id,url} · null ถ้ายังไม่ตั้งค่า Drive */
+export async function ensureDriveFolderForTask(admin: Admin, taskId: string): Promise<{ id: string; url: string } | null> {
+  if (!driveConfigured()) return null;
+  const { data } = await admin.from("erp_creative_tasks").select("task_no, title, drive_folder_id, drive_folder_url").eq("id", taskId).maybeSingle();
+  const t = data as { task_no?: string | null; title?: string | null; drive_folder_id?: string | null; drive_folder_url?: string | null } | null;
+  if (!t) return null;
+  if (t.drive_folder_id && t.drive_folder_url) return { id: t.drive_folder_id, url: t.drive_folder_url };
+  const name = `${t.task_no ?? ""} ${t.title ?? ""}`.trim() || "งาน";
+  const f = await driveCreateFolder(name, DRIVE_ROOT_FOLDER_ID);
+  await admin.from("erp_creative_tasks").update({ drive_folder_url: f.webViewLink, drive_folder_id: f.id }).eq("id", taskId);
+  return { id: f.id, url: f.webViewLink };
+}
+
+type DriveAtt = { id: string; r2_key?: string | null; file_name?: string | null; content_type?: string | null; drive_file_id?: string | null };
+/** อัปไฟล์แนบ 1 ชิ้นขึ้นโฟลเดอร์ Drive (ข้ามถ้าเคยอัปแล้ว/ไม่มี r2_key) — คืน true ถ้าอัปสำเร็จ */
+export async function uploadAttachmentToDrive(admin: Admin, folderId: string, att: DriveAtt): Promise<boolean> {
+  if (!att.r2_key || att.drive_file_id) return false;
+  const obj = await r2GetObject(att.r2_key);
+  if (!obj) return false;
+  const bytes = new Uint8Array(await new Response(obj.body as ReadableStream).arrayBuffer());
+  const name = att.file_name || att.r2_key.split("/").pop() || "file";
+  const mime = att.content_type || obj.httpMetadata?.contentType || "application/octet-stream";
+  const f = await driveUploadFile(name, mime, bytes, folderId);
+  await admin.from("erp_creative_attachments").update({ drive_file_id: f.id }).eq("id", att.id);
+  return true;
+}
+
+/** สร้างโฟลเดอร์ (ถ้ายังไม่มี) + อัปไฟล์แนบทั้งหมดที่ยังไม่ขึ้น Drive — best-effort ต่อไฟล์ */
+export async function syncTaskFilesToDrive(admin: Admin, taskId: string): Promise<{ url: string | null; uploaded: number; configured: boolean }> {
+  if (!driveConfigured()) return { url: null, uploaded: 0, configured: false };
+  const folder = await ensureDriveFolderForTask(admin, taskId);
+  if (!folder) return { url: null, uploaded: 0, configured: true };
+  const { data: atts } = await admin.from("erp_creative_attachments").select("id, r2_key, file_name, content_type, drive_file_id").eq("task_id", taskId);
+  let uploaded = 0;
+  for (const a of (atts ?? []) as DriveAtt[]) {
+    try { if (await uploadAttachmentToDrive(admin, folder.id, a)) uploaded++; } catch { /* ข้ามไฟล์ที่พลาด */ }
+  }
+  return { url: folder.url, uploaded, configured: true };
+}
 
 /**
  * แจ้งเตือนเข้ากลุ่ม LINE ของทีม Creative (reuse line_config ของ china-pay)

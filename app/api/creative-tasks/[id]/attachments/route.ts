@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
+import { uploadAttachmentToDrive } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -45,6 +46,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }).select("*").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   await writeAudit(admin, { action: "attachment:add", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { kind, label: body.label } });
+
+  // อัปไฟล์ขึ้น Google Drive อัตโนมัติ — เฉพาะงานที่ "เปิด Drive ไว้แล้ว" (มีโฟลเดอร์) · best-effort ไม่กระทบการแนบ
+  if (r2Key) {
+    try {
+      const { data: tk } = await admin.from("erp_creative_tasks").select("drive_folder_id").eq("id", id).maybeSingle();
+      const fid = (tk as { drive_folder_id?: string | null } | null)?.drive_folder_id;
+      if (fid) await uploadAttachmentToDrive(admin, fid, { id: (row as { id: string }).id, r2_key: r2Key, file_name: (body.file_name as string) || null, content_type: (body.content_type as string) || null, drive_file_id: null });
+    } catch { /* เงียบ — ซิงค์ทีหลังได้ */ }
+  }
   return NextResponse.json({ data: row, error: null });
 }
 
