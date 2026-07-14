@@ -863,6 +863,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               </div>
             </CSection>)}
 
+            {/* แนบเพิ่มเอง: รูป/วิดีโอ/ลิงก์ ของคอนเทนต์เอง (แยกจาก "รูปจากงาน") — รูปที่แนบจะขึ้นบนการ์ดกระดานด้วย */}
+            {!isHidden(dth, "attach") && (
+            <CSection title={cLabelOf("attach")} order={cOrderOf("attach")} collapsed={coll("attach")} onToggle={() => toggleColl("attach")}
+              right={<span className="text-[11px] text-slate-400">{attachments.length} {t("ไฟล์", "files")}</span>}>
+              <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onDelete={onDelAttachment} pushToast={pushToast} />
+            </CSection>)}
+
 
             {/* published url — ปักไว้ล่างสุดเสมอ */}
             {(status === "published") && <div style={{ order: 999 }}><label className="text-xs text-slate-400">{t("ลิงก์โพสต์ที่เผยแพร่", "Published Post URL")}</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
