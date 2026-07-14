@@ -538,6 +538,15 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       return next;
     });
   };
+  // ตั้งรูปที่เลือกให้เป็น "รูปใหญ่" (ย้ายไปหน้าสุด · [0]=รูปใหญ่บนการ์ดย่อย) — บันทึกทันที
+  const setPlatformMainImage = (platform: string, key: string) => {
+    setPlatformImages((prev) => {
+      const cur = prev[platform] ?? []; if (!cur.includes(key) || cur[0] === key) return prev;
+      const next = { ...prev, [platform]: [key, ...cur.filter((k) => k !== key)] };
+      void updateContent(contentId, { platform_images: next }).catch((e) => pushToast("error", (e as Error).message));
+      return next;
+    });
+  };
   // media ที่เลือกลงโพสต์ได้ (รูป/วิดีโอแนบ + รูปจากงาน · ตัดซ้ำ) + ชนิดต่อ key
   const postImages: PostImage[] = (() => {
     const seen = new Set<string>(); const out: PostImage[] = [];
@@ -907,7 +916,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -1110,7 +1119,7 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [tplOpen, setTplOpen] = useState(false);   // พับปุ่มเลือกแม่แบบไว้ก่อน
   const [imgEdit, setImgEdit] = useState(false);   // โหมดเลือกรูป (ปกติโชว์เฉพาะรูปที่เลือก · กดแล้วกางเลือก)
@@ -1204,13 +1213,16 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, o
             )
             : selectedImages.length === 0
               ? <p className="text-[11px] text-slate-300 italic">{t("ยังไม่เลือกรูป — กด “เลือก/แก้รูป”", "No image selected — click “Choose images”")}</p>
-              : (   // โหมดปกติ: โชว์เฉพาะรูปที่เลือก (ซ่อนรูปที่ไม่เลือก)
+              : (   // โหมดปกติ: โชว์เฉพาะรูปที่เลือก (ซ่อนรูปที่ไม่เลือก) · รูปแรก=รูปใหญ่ · รูปอื่นชี้แล้วตั้งเป็นรูปใหญ่ได้
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedImages.map((key) => { const im = postImages.find((p) => p.key === key); if (!im) return null; return (
-                    <div key={key} className="relative h-16 w-16 rounded-md overflow-hidden border border-violet-300">
+                  {selectedImages.map((key, idx) => { const im = postImages.find((p) => p.key === key); if (!im) return null; const isMain = idx === 0; return (
+                    <div key={key} className={`group/mi relative h-16 w-16 rounded-md overflow-hidden border-2 ${isMain ? "border-violet-500" : "border-slate-200"}`}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={r2ImageUrl(key, 140) ?? ""} alt="" className="w-full h-full object-cover" />
                       {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
+                      {isMain
+                        ? <span className="absolute top-0.5 left-0.5 text-[8px] bg-violet-600 text-white px-1 rounded shadow">⭐ {t("รูปใหญ่", "Main")}</span>
+                        : onSetMain && <button type="button" onClick={() => onSetMain(key)} title={t("ตั้งเป็นรูปใหญ่", "Set as main")} className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-[9px] font-medium opacity-0 group-hover/mi:opacity-100 transition-opacity">⭐ {t("ตั้งเป็นรูปใหญ่", "Set main")}</button>}
                     </div>
                   ); })}
                 </div>

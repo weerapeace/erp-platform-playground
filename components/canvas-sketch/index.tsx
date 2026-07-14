@@ -38,9 +38,9 @@ export type CanvasSketchControls = {
   isDirty: () => boolean; save: () => Promise<void>; discard: () => void;
   insert: (skeletons: Record<string, unknown>[]) => Promise<void>;
   listCards: () => { kind: string; data: Record<string, unknown> }[];
-  /** ซิงค์การ์ดสด — builder คืน {text?, data?, imageUrl?} เพื่ออัปเดตข้อความ/รูป/snapshot
-   *  imageUrl: ใส่ URL รูป = โชว์/เปลี่ยนรูปบนการ์ด (เพิ่ม image ให้อัตโนมัติถ้ายังไม่มี) · null/"" = เอารูปออก · undefined = ไม่ยุ่งกับรูป */
-  refreshCards: (builder: (card: { kind: string; id: string; data: Record<string, unknown> }) => Promise<{ text?: string; data?: Record<string, unknown>; imageUrl?: string | null } | null>) => Promise<void>;
+  /** ซิงค์การ์ดสด — builder คืน {text?, data?, imageUrl?, images?} เพื่ออัปเดตข้อความ/รูป/snapshot
+   *  imageUrl: URL รูปเดียว · images: หลายรูป [รูปใหญ่, รูปเล็ก...] (รูปแรก=รูปใหญ่บนสุด ที่เหลือ=รูปเล็กแถวล่าง) · [] / null / "" = เอารูปออก · undefined = ไม่ยุ่งกับรูป */
+  refreshCards: (builder: (card: { kind: string; id: string; data: Record<string, unknown> }) => Promise<{ text?: string; data?: Record<string, unknown>; imageUrl?: string | null; images?: string[] | null } | null>) => Promise<void>;
 };
 
 export function CanvasSketch({
@@ -382,7 +382,7 @@ export function CanvasSketch({
           const arr = groups.get(gid) ?? []; arr.push(el); groups.set(gid, arr);
         }
         // 1) เรียก builder ต่อกลุ่ม → เก็บผล (ข้อความ/รูป/snapshot)
-        const updates = new Map<string, { text?: string; data?: Record<string, unknown>; imageUrl?: string | null }>();
+        const updates = new Map<string, { text?: string; data?: Record<string, unknown>; imageUrl?: string | null; images?: string[] | null }>();
         for (const [gid, arr] of groups) {
           const d = arr[0].customData as Record<string, unknown>;
           try { const res = await builder({ kind: String(d.kind), id: String(d.id ?? ""), data: d }); if (res) updates.set(gid, res); }
@@ -402,17 +402,7 @@ export function CanvasSketch({
             const out = { fileId, ratio }; imgCache.set(url, out); return out;
           } catch (e) { console.error("[canvas-sketch] refresh image failed:", e); return null; }
         };
-        const gidImage = new Map<string, { fileId: string; ratio?: number }>();
-        const gidUrl = new Map<string, string>();
-        const gidClear = new Set<string>();
-        for (const [gid, u] of updates) {
-          if (u.imageUrl === undefined) continue;                 // ไม่ยุ่งกับรูป
-          if (!u.imageUrl) { gidClear.add(gid); continue; }        // สั่งเอารูปออก
-          const imgEl = (groups.get(gid) ?? []).find((e) => e.type === "image");
-          if (imgEl && (imgEl.customData as Record<string, unknown> | undefined)?._coverUrl === u.imageUrl) continue;  // รูปเดิมอยู่แล้ว ไม่ต้องโหลด/สลับใหม่ (กันไฟล์สะสม)
-          const r = await resolveImg(u.imageUrl); if (r) { gidImage.set(gid, r); gidUrl.set(gid, u.imageUrl); }
-        }
-        const PAD = 8, MAXH = 300;   // MAXH = ความสูงรูปสูงสุดบนการ์ด (กันการ์ดสูงเกินไป)
+        const PAD = 8, MAXH = 300, THUMB = 46, GAP = 6;   // MAXH=สูงรูปใหญ่สุด · THUMB=ขนาดรูปเล็กแถวล่าง
         const removeIds = new Set<string>();
         // จัดรูปให้พอดีกรอบแบบคงสัดส่วน (object-contain) + จัดกึ่งกลางแนวนอน
         const fitBox = (bx: number, by: number, bw: number, bh: number, ratio?: number) => {
@@ -420,49 +410,69 @@ export function CanvasSketch({
           let w = bw, h = bw / ratio; if (h > bh) { h = bh; w = bh * ratio; }
           return { x: bx + (bw - w) / 2, y: by + (bh - h) / 2, width: w, height: h };
         };
+        // เจตนาเรื่องรูปต่อการ์ด: images (หลายรูป) มาก่อน · ไม่งั้นแปลงจาก imageUrl (รูปเดียว) · [] = เอารูปออก · ไม่ส่ง = ไม่ยุ่ง
+        const gidUrls = new Map<string, string[]>();
+        for (const [gid, u] of updates) {
+          if (u.images !== undefined) gidUrls.set(gid, (u.images ?? []).filter(Boolean));
+          else if (u.imageUrl !== undefined) gidUrls.set(gid, u.imageUrl ? [u.imageUrl] : []);
+        }
 
-        // จัดเลย์เอาต์การ์ดใหม่ (เฉพาะการ์ดที่มีรูปเข้ามาเกี่ยว): รูปบนสุด (เต็มกว้างการ์ด คงสัดส่วน) → ข้อความล่างรูป → กรอบสูงพอดี
-        // ครอบทั้ง เพิ่ม/สลับ/เอารูปออก + แก้ข้อความ → กันรูปล้นกรอบ + กล่องขยาย/หดตามรูปเสมอ (คำนวณใหม่ทุกครั้ง = idempotent)
-        type Lay = { imgBox?: { x: number; y: number; width: number; height: number }; removeImg?: boolean; addImg?: boolean; textY: number; rectH: number };
-        const layout = new Map<string, Lay>();
+        // จัดเลย์เอาต์การ์ด (deterministic): รูปใหญ่บนสุด (เต็มกว้าง คงสัดส่วน) → แถวรูปเล็ก → ข้อความ → กรอบสูงพอดี
+        // เทียบ _imagesSig บน rect: เปลี่ยนชุดรูป → rebuild image (reuse fileId ตาม url กันไฟล์บวม) · เท่าเดิม → คงรูป จัดแค่ข้อความ/กรอบ
+        let lib: any = null;
+        const rebuilt = new Map<string, any[]>();      // gid → image element ใหม่ (หลัง rebuild)
+        const finalLay = new Map<string, { textY: number; rectH: number; sig?: string }>();
         for (const [gid, u] of updates) {
           const gEls = groups.get(gid) ?? [];
-          const rect = gEls.find((e) => e.type === "rectangle"); if (!rect) continue;   // ไม่มีกรอบ = ไม่ใช่การ์ดแบบมีกล่อง (ข้ามการจัดเลย์เอาต์)
-          const existingImg = gEls.find((e) => e.type === "image");
-          const img = gidImage.get(gid);            // มี = เพิ่ง resolve รูปใหม่ (เพิ่ม/สลับ)
-          const clearing = gidClear.has(gid);       // สั่งเอารูปออก
-          if (!img && !clearing && !existingImg) continue;   // การ์ดข้อความล้วน → ปล่อยให้ logic เดิมจัดการ
+          const rect = gEls.find((e) => e.type === "rectangle"); if (!rect) continue;   // ไม่มีกรอบ = ไม่ใช่การ์ดแบบมีกล่อง
+          const existingImgs = gEls.filter((e) => e.type === "image");
+          const urls = gidUrls.get(gid);               // undefined = builder ไม่ยุ่งกับรูป
+          if (urls === undefined && existingImgs.length === 0) continue;   // การ์ดข้อความล้วน → ปล่อย logic เดิม
           const rx = rect.x ?? 0, ry = rect.y ?? 0, rw = rect.width ?? 0;
           const textEl = gEls.find((e) => e.type === "text");
           const txt = (u.text != null ? u.text : (textEl?.text ?? "")) as string;
           const fs = textEl?.fontSize ?? 14;
           const textH = Math.round(Math.max(1, txt.split("\n").length) * fs * 1.25);
-          let imgBox: Lay["imgBox"]; let imgBlock = 0; let removeImg = false; let addImg = false;
-          if (clearing) { removeImg = !!existingImg; }
-          else if (img) { imgBox = fitBox(rx + PAD, ry + PAD, rw - PAD * 2, MAXH, img.ratio); imgBlock = imgBox.height + PAD; addImg = !existingImg; }   // รูปใหม่ fit ตามสัดส่วนจริง
-          else if (existingImg) {   // รูปเดิมไม่เปลี่ยน (เช่นแก้แค่แคปชั่น) → re-fit ให้เต็มกว้างด้วยสัดส่วนจากขนาดปัจจุบัน (ไม่ต้องโหลดไฟล์ใหม่)
-            const iw0 = existingImg.width ?? 0, ih0 = existingImg.height ?? 0;
-            imgBox = fitBox(rx + PAD, ry + PAD, rw - PAD * 2, MAXH, ih0 > 0 ? iw0 / ih0 : undefined);
-            imgBlock = imgBox.height + PAD;
+          const curSig = (rect.customData?._imagesSig as string | undefined) ?? "__none__";
+          const newSig = (urls ?? []).join("|");
+          let imgBlock = 0; let sig: string | undefined;
+
+          if (urls !== undefined && newSig !== curSig) {
+            // เปลี่ยนชุดรูป → ลบรูปเดิมทั้งหมด แล้วสร้างใหม่ (reuse fileId ตาม url เดิม)
+            for (const e of existingImgs) removeIds.add(e.id);
+            sig = newSig;
+            const urlFile = new Map<string, { fileId: string; ratio?: number }>();
+            for (const e of existingImgs) { const uu = (e.customData?._imgUrl ?? e.customData?._coverUrl) as string | undefined; if (uu && e.fileId) urlFile.set(uu, { fileId: e.fileId, ratio: (e.width && e.height) ? e.width / e.height : undefined }); }
+            const resolved: { url: string; fileId: string; ratio?: number }[] = [];
+            for (const url of urls) { const rf = urlFile.get(url) ?? await resolveImg(url); if (rf) resolved.push({ url, ...rf }); }
+            if (resolved.length) {
+              if (!lib) lib = await import("@excalidraw/excalidraw");
+              const d0 = (gEls[0]?.customData ?? {}) as Record<string, unknown>;
+              const mainBox = fitBox(rx + PAD, ry + PAD, rw - PAD * 2, MAXH, resolved[0].ratio);
+              const skels: any[] = [{ type: "image", fileId: resolved[0].fileId, x: mainBox.x, y: mainBox.y, width: mainBox.width, height: mainBox.height, groupIds: [gid], customData: { ...d0, _imgUrl: resolved[0].url, _imgRole: "main" } }];
+              const maxThumbs = Math.max(0, Math.floor((rw - PAD * 2 + GAP) / (THUMB + GAP)));   // จำนวนรูปเล็กที่พอดี 1 แถว
+              const shown = resolved.slice(1, 1 + maxThumbs);
+              const thumbY = ry + PAD + mainBox.height + PAD;
+              shown.forEach((th, i) => skels.push({ type: "image", fileId: th.fileId, x: rx + PAD + i * (THUMB + GAP), y: thumbY, width: THUMB, height: THUMB, groupIds: [gid], customData: { ...d0, _imgUrl: th.url, _imgRole: "thumb" } }));
+              imgBlock = mainBox.height + PAD + (shown.length ? THUMB + PAD : 0);
+              const created: any[] = [];
+              try { for (const e of lib.convertToExcalidrawElements(skels)) created.push(e); } catch (e) { console.error("[canvas-sketch] build images failed:", e); }
+              rebuilt.set(gid, created);
+            } else rebuilt.set(gid, []);
+          } else if (existingImgs.length) {
+            // ชุดรูปเท่าเดิม → คงรูปไว้ · คำนวณ imgBlock จากรูปเดิม เพื่อจัดข้อความ/กรอบให้พอดี
+            const main = existingImgs.find((e) => e.customData?._imgRole === "main") ?? existingImgs[0];
+            const hasThumb = existingImgs.some((e) => e.customData?._imgRole === "thumb") || existingImgs.length > 1;
+            imgBlock = (main?.height ?? 0) + PAD + (hasThumb ? THUMB + PAD : 0);
           }
-          layout.set(gid, { imgBox, removeImg, addImg, textY: ry + PAD + imgBlock, rectH: PAD + imgBlock + textH + PAD });
+          finalLay.set(gid, { textY: ry + PAD + imgBlock, rectH: PAD + imgBlock + textH + PAD, sig });
         }
 
         const next = els.map((el) => {
           const gid = el?.groupIds?.[0]; const u = gid ? updates.get(gid) : undefined; if (!u) return el;
+          if (removeIds.has(el.id)) return el;   // รูปเก่าที่จะถูกลบ (กรองออกตอนท้าย)
           const merged = { ...el.customData, ...(u.data ?? {}) };
-          const lay = gid ? layout.get(gid) : undefined;
-          const img = gid ? gidImage.get(gid) : undefined;
-          if (el.type === "image") {
-            if (lay?.removeImg) { removeIds.add(el.id); return el; }
-            if (lay?.imgBox) {
-              const geo = { x: lay.imgBox.x, y: lay.imgBox.y, width: lay.imgBox.width, height: lay.imgBox.height };
-              return img
-                ? { ...el, ...geo, fileId: img.fileId, version: (el.version ?? 0) + 1, customData: { ...merged, _coverUrl: gidUrl.get(gid!) } }   // สลับรูป + จัดกรอบใหม่
-                : { ...el, ...geo, customData: merged };                                                                                          // รูปเดิม จัด/ปรับขนาดให้เต็มกว้าง
-            }
-            return { ...el, customData: merged };
-          }
+          const lay = gid ? finalLay.get(gid) : undefined;
           if (el.type === "text") {
             let base: any = el;
             if (u.text != null) { const lines = u.text.split("\n").length; const fs = el.fontSize ?? 14; base = { ...el, text: u.text, originalText: u.text, height: Math.round(lines * fs * 1.25) }; }
@@ -470,24 +480,14 @@ export function CanvasSketch({
             return { ...base, customData: merged };
           }
           if (el.type === "rectangle") {
-            let base: any = el;
-            if (lay) base = { ...el, height: lay.rectH };
-            else if (u.text != null) { const lines = u.text.split("\n").length; base = { ...el, height: 40 + lines * 18 }; }
-            return { ...base, customData: merged };
+            if (lay) return { ...el, height: lay.rectH, customData: { ...merged, _imagesSig: lay.sig !== undefined ? lay.sig : (el.customData?._imagesSig ?? undefined) } };
+            if (u.text != null) { const lines = u.text.split("\n").length; return { ...el, height: 40 + lines * 18, customData: merged }; }
+            return { ...el, customData: merged };
           }
-          return { ...el, customData: merged };
+          return { ...el, customData: merged };   // รูปที่คงไว้ / element อื่น
         });
 
-        // เพิ่ม image element ใหม่ให้การ์ดที่ยังไม่มีรูป (ตำแหน่ง/ขนาดจาก layout ที่คำนวณไว้)
-        const addList = [...layout.entries()].filter(([, l]) => l.addImg && l.imgBox);
-        const lib: any = addList.length ? await import("@excalidraw/excalidraw") : null;
-        const addedEls: any[] = [];
-        for (const [gid, l] of addList) {
-          const img = gidImage.get(gid); if (!img || !lib || !l.imgBox) continue;
-          const d0 = { ...((groups.get(gid)?.[0]?.customData ?? {}) as Record<string, unknown>), _coverUrl: gidUrl.get(gid) };
-          const skel = [{ type: "image", fileId: img.fileId, x: l.imgBox.x, y: l.imgBox.y, width: l.imgBox.width, height: l.imgBox.height, groupIds: [gid], customData: d0 }];
-          try { for (const e of lib.convertToExcalidrawElements(skel)) addedEls.push(e); } catch (e) { console.error("[canvas-sketch] add image failed:", e); }
-        }
+        const addedEls: any[] = [...rebuilt.values()].flat();
 
         api.updateScene({ elements: [...next.filter((e) => !removeIds.has(e.id)), ...addedEls] });
         if (editable) queueSave();
