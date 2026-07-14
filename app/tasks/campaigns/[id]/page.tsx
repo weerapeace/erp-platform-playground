@@ -347,12 +347,13 @@ export default function CampaignCanvasPage() {
       if (kind !== "content" || !id) return null;
       try {
         const c = await getContent(id);
+        const cover = c.cover_image_url ?? null;   // รูปหน้าปก (สื่อแนบ/SKU/งาน) — โผล่บนการ์ด + อัปเดตเมื่อแนบรูปทีหลัง
         const plat = data.platform as string | undefined;
         if (plat) {
           const cap = c.captions.find((x) => x.platform === plat)?.caption ?? null;
-          return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap), data: { title: c.title, platform: plat } };
+          return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap), data: { title: c.title, platform: plat }, imageUrl: cover };
         }
-        return { text: contentCardText({ content_no: c.content_no, title: c.title, platforms: c.platforms ?? [], status: c.status, scheduled_at: c.scheduled_at, caption: c.captions[0]?.caption ?? null }), data: { title: c.title, platforms: c.platforms ?? [] } };
+        return { text: contentCardText({ content_no: c.content_no, title: c.title, platforms: c.platforms ?? [], status: c.status, scheduled_at: c.scheduled_at, caption: c.captions[0]?.caption ?? null }), data: { title: c.title, platforms: c.platforms ?? [] }, imageUrl: cover };
       } catch { return null; }
     });
   }, []);
@@ -566,7 +567,7 @@ export default function CampaignCanvasPage() {
         </div>
       </ERPModal>
 
-      {contentView && <ContentDrawer contentId={String(contentView.id ?? "")} brands={brands} onClose={() => setContentView(null)} onChanged={() => {}} pushToast={pushToast} />}
+      {contentView && <ContentDrawer contentId={String(contentView.id ?? "")} brands={brands} onClose={() => { setContentView(null); syncContentCards(); }} onChanged={() => syncContentCards()} pushToast={pushToast} />}
 
       {drawerOpen && <CampaignDrawer campaignId={id} onClose={() => setDrawerOpen(false)} onChanged={load} pushToast={pushToast} />}
 

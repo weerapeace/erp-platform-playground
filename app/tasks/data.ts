@@ -323,6 +323,7 @@ export type ContentItem = {
   sku_id: string | null; sku_code: string | null; sku_name: string | null; sku_color: string | null; sku_color_en?: string | null; sku_color_th?: string | null; sku_price: number | null; sku_fake_price?: number | null; product_name: string | null;
   color_source?: string | null;   // 'th' | 'en' — ภาษาที่ใช้แสดง {color}
   parent_sku_id?: string | null; parent_sku_code?: string | null; parent_sku_name?: string | null;
+  cover_image_url?: string | null;   // รูปหน้าปก (resolve จากสื่อแนบ/SKU/งาน) — ใช้โชว์บนการ์ดกระดานแคมเปญ
   post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
   scheduled_at: string | null; published_at: string | null; published_url: string | null;
   product_links: { platform: string; url: string }[]; posted_links?: Record<string, string> | null; post_status?: Record<string, string> | null; note: string | null; is_template?: boolean; updated_at: string;

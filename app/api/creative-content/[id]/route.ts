@@ -13,6 +13,18 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { SELECT, flattenContent, attachAssignees } from "../shared";
+import { r2ImageUrl } from "@/lib/r2-image";
+
+// รูปหน้าปกของคอนเทนต์ (ให้การ์ดบนกระดานแคมเปญโชว์รูป) — ลำดับ: สื่อที่แนบ(รูป) → รูป SKU → รูปงานที่ผูก
+async function resolveContentCover(admin: ReturnType<typeof supabaseAdmin>, contentId: string, flat: Record<string, unknown>): Promise<string | null> {
+  const { data: att } = await admin.from("erp_creative_attachments").select("r2_key").eq("content_id", contentId).eq("kind", "image").not("r2_key", "is", null).order("created_at", { ascending: true }).limit(1);
+  if (att?.[0]?.r2_key) return r2ImageUrl(String(att[0].r2_key), 480);
+  const skuId = flat.sku_id as string | null;
+  if (skuId) { const { data: sk } = await admin.from("skus_v2").select("cover_image_r2_key").eq("id", skuId).maybeSingle(); if (sk?.cover_image_r2_key) return r2ImageUrl(String(sk.cover_image_r2_key), 480); }
+  const taskId = flat.task_id as string | null;
+  if (taskId) { const { data: tk } = await admin.from("erp_creative_tasks").select("cover_image_r2_key").eq("id", taskId).maybeSingle(); if (tk?.cover_image_r2_key) return r2ImageUrl(String(tk.cover_image_r2_key), 480); }
+  return null;
+}
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,7 +41,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { data: caps } = await admin.from("erp_creative_content_captions").select("*").eq("content_id", id).order("sort_order", { ascending: true });
   const flat = flattenContent(data as Record<string, unknown>);
   await attachAssignees(admin, [flat]);
-  return NextResponse.json({ data: { ...flat, captions: caps ?? [] }, error: null });
+  const cover_image_url = await resolveContentCover(admin, id, flat);
+  return NextResponse.json({ data: { ...flat, captions: caps ?? [], cover_image_url }, error: null });
 }
 
 type Caption = { platform: string; caption?: string | null; hashtags?: string | null; caption_type?: string | null };

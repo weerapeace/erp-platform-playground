@@ -38,8 +38,9 @@ export type CanvasSketchControls = {
   isDirty: () => boolean; save: () => Promise<void>; discard: () => void;
   insert: (skeletons: Record<string, unknown>[]) => Promise<void>;
   listCards: () => { kind: string; data: Record<string, unknown> }[];
-  /** ซิงค์ข้อความบนการ์ดสด — builder คืน {text, data?} เพื่ออัปเดตข้อความ+snapshot (เช่น งานย่อยล่าสุด) */
-  refreshCards: (builder: (card: { kind: string; id: string; data: Record<string, unknown> }) => Promise<{ text: string; data?: Record<string, unknown> } | null>) => Promise<void>;
+  /** ซิงค์การ์ดสด — builder คืน {text?, data?, imageUrl?} เพื่ออัปเดตข้อความ/รูป/snapshot
+   *  imageUrl: ใส่ URL รูป = โชว์/เปลี่ยนรูปบนการ์ด (เพิ่ม image ให้อัตโนมัติถ้ายังไม่มี) · null/"" = เอารูปออก · undefined = ไม่ยุ่งกับรูป */
+  refreshCards: (builder: (card: { kind: string; id: string; data: Record<string, unknown> }) => Promise<{ text?: string; data?: Record<string, unknown>; imageUrl?: string | null } | null>) => Promise<void>;
 };
 
 export function CanvasSketch({
@@ -370,7 +371,7 @@ export function CanvasSketch({
         }
         return out;
       },
-      // ซิงค์ข้อความบนการ์ดสด: ไล่กลุ่ม (group) ที่เป็นการ์ด → builder คืนข้อความใหม่ → อัปเดต text + ปรับสูงกล่อง
+      // ซิงค์การ์ดสด: ไล่กลุ่ม (group) → builder คืน {text?, data?, imageUrl?} → อัปเดตข้อความ + รูป + snapshot
       refreshCards: async (builder) => {
         const api = apiRef.current; if (!api) return;
         const els = api.getSceneElements() as any[];
@@ -380,21 +381,92 @@ export function CanvasSketch({
           if (!gid || !d?.kind) continue;
           const arr = groups.get(gid) ?? []; arr.push(el); groups.set(gid, arr);
         }
-        const updates = new Map<string, { text: string; data?: Record<string, unknown> }>();
+        // 1) เรียก builder ต่อกลุ่ม → เก็บผล (ข้อความ/รูป/snapshot)
+        const updates = new Map<string, { text?: string; data?: Record<string, unknown>; imageUrl?: string | null }>();
         for (const [gid, arr] of groups) {
           const d = arr[0].customData as Record<string, unknown>;
-          try { const res = await builder({ kind: String(d.kind), id: String(d.id ?? ""), data: d }); if (res && res.text != null) updates.set(gid, res); }
+          try { const res = await builder({ kind: String(d.kind), id: String(d.id ?? ""), data: d }); if (res) updates.set(gid, res); }
           catch { /* ข้ามการ์ดที่ดึงไม่ได้ */ }
         }
         if (updates.size === 0) return;
+
+        // 2) รูป: โหลด url → ลงทะเบียนไฟล์ (แคชตาม url) → คืน fileId + อัตราส่วนจริง
+        const imgCache = new Map<string, { fileId: string; ratio?: number }>();
+        const resolveImg = async (url: string): Promise<{ fileId: string; ratio?: number } | null> => {
+          const hit = imgCache.get(url); if (hit) return hit;
+          try {
+            const fileId = `f${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+            api.addFiles([{ id: fileId, dataURL: url, mimeType: "image/png", created: Date.now() }]);
+            let ratio: number | undefined;
+            try { const dim = await new Promise<{ w: number; h: number }>((resolve, reject) => { const im = new Image(); im.onload = () => resolve({ w: im.naturalWidth || 1, h: im.naturalHeight || 1 }); im.onerror = reject; im.src = url; }); if (dim.h > 0) ratio = dim.w / dim.h; } catch { /* ใช้กรอบเดิม */ }
+            const out = { fileId, ratio }; imgCache.set(url, out); return out;
+          } catch (e) { console.error("[canvas-sketch] refresh image failed:", e); return null; }
+        };
+        const gidImage = new Map<string, { fileId: string; ratio?: number }>();
+        const gidUrl = new Map<string, string>();
+        const gidClear = new Set<string>();
+        for (const [gid, u] of updates) {
+          if (u.imageUrl === undefined) continue;                 // ไม่ยุ่งกับรูป
+          if (!u.imageUrl) { gidClear.add(gid); continue; }        // สั่งเอารูปออก
+          const imgEl = (groups.get(gid) ?? []).find((e) => e.type === "image");
+          if (imgEl && (imgEl.customData as Record<string, unknown> | undefined)?._coverUrl === u.imageUrl) continue;  // รูปเดิมอยู่แล้ว ไม่ต้องโหลด/สลับใหม่ (กันไฟล์สะสม)
+          const r = await resolveImg(u.imageUrl); if (r) { gidImage.set(gid, r); gidUrl.set(gid, u.imageUrl); }
+        }
+        // กลุ่มที่ขอรูปแต่ยัง "ไม่มี" image element → ต้องเพิ่มใหม่ (ต้องใช้ lib แปลง skeleton)
+        const addGids = [...gidImage.keys()].filter((gid) => !(groups.get(gid) ?? []).some((e) => e.type === "image"));
+        const lib: any = addGids.length ? await import("@excalidraw/excalidraw") : null;
+
+        const PAD = 8, IMG_H = 150;
+        const removeIds = new Set<string>();
+        // จัดรูปให้พอดีกรอบแบบคงสัดส่วน (object-contain) + จัดกึ่งกลาง
+        const fitBox = (bx: number, by: number, bw: number, bh: number, ratio?: number) => {
+          if (!ratio || bw <= 0 || bh <= 0) return { x: bx, y: by, width: bw, height: bh };
+          let w = bw, h = bw / ratio; if (h > bh) { h = bh; w = bh * ratio; }
+          return { x: bx + (bw - w) / 2, y: by + (bh - h) / 2, width: w, height: h };
+        };
+
         const next = els.map((el) => {
           const gid = el?.groupIds?.[0]; const u = gid ? updates.get(gid) : undefined; if (!u) return el;
           const merged = { ...el.customData, ...(u.data ?? {}) };
-          if (el.type === "text") { const lines = u.text.split("\n").length; const fs = el.fontSize ?? 14; return { ...el, text: u.text, originalText: u.text, height: Math.round(lines * fs * 1.25), customData: merged }; }
-          if (el.type === "rectangle") { const lines = u.text.split("\n").length; return { ...el, height: 40 + lines * 18, customData: merged }; }
+          const img = gid ? gidImage.get(gid) : undefined;
+          const clearing = gid ? gidClear.has(gid) : false;
+          // การ์ดนี้กำลัง "เพิ่มรูปใหม่" (ขอรูป + ยังไม่มี image element) → ต้องเลื่อนข้อความลง + ขยายกล่อง
+          const addingHere = !!img && !(groups.get(gid!) ?? []).some((e) => e.type === "image");
+          if (el.type === "image") {
+            if (clearing) { removeIds.add(el.id); return el; }
+            if (img) return { ...el, fileId: img.fileId, version: (el.version ?? 0) + 1, customData: { ...merged, _coverUrl: gidUrl.get(gid!) } };  // สลับรูป
+            return { ...el, customData: merged };
+          }
+          if (el.type === "text") {
+            let base: any = el;
+            if (u.text != null) { const lines = u.text.split("\n").length; const fs = el.fontSize ?? 14; base = { ...el, text: u.text, originalText: u.text, height: Math.round(lines * fs * 1.25) }; }
+            if (addingHere) base = { ...base, y: (base.y ?? 0) + IMG_H + PAD };
+            return { ...base, customData: merged };
+          }
+          if (el.type === "rectangle") {
+            let base: any = el;
+            if (u.text != null) { const lines = u.text.split("\n").length; base = { ...el, height: 40 + lines * 18 }; }
+            if (addingHere) base = { ...base, height: (base.height ?? 0) + IMG_H + PAD };
+            return { ...base, customData: merged };
+          }
           return { ...el, customData: merged };
         });
-        api.updateScene({ elements: next });
+
+        // เพิ่ม image element ใหม่ให้กลุ่มที่ขอรูป (วางแถบบนสุดของกล่อง)
+        const addedEls: any[] = [];
+        for (const gid of addGids) {
+          const img = gidImage.get(gid); if (!img || !lib) continue;
+          const gEls = groups.get(gid) ?? [];
+          const minX = Math.min(...gEls.map((e) => e.x ?? 0));
+          const minY = Math.min(...gEls.map((e) => e.y ?? 0));
+          const maxX = Math.max(...gEls.map((e) => (e.x ?? 0) + (e.width ?? 0)));
+          const box = fitBox(minX + PAD, minY + PAD, Math.max(40, maxX - minX - PAD * 2), IMG_H, img.ratio);
+          const d0 = { ...((gEls[0]?.customData ?? {}) as Record<string, unknown>), _coverUrl: gidUrl.get(gid) };
+          const skel = [{ type: "image", fileId: img.fileId, x: box.x, y: box.y, width: box.width, height: box.height, groupIds: [gid], customData: d0 }];
+          try { for (const e of lib.convertToExcalidrawElements(skel)) addedEls.push(e); } catch (e) { console.error("[canvas-sketch] add image failed:", e); }
+        }
+
+        api.updateScene({ elements: [...next.filter((e) => !removeIds.has(e.id)), ...addedEls] });
         if (editable) queueSave();
       },
     };
