@@ -15,6 +15,7 @@ import { useRefetchOnFocus } from "@/lib/use-refetch-on-focus";
 import { ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
 import { UserPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
+import { MultiUserPicker } from "../multi-user-picker";
 import { RichTextEditor } from "@/components/rich-text";
 
 export const CAMPAIGN_STATUS: { value: string; label: () => string; cls: string }[] = [
@@ -31,7 +32,7 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null); // งานที่กดเปิด (งานเต็มทับขึ้นมา)
   const [editing, setEditing] = useState(false);
-  const [ef, setEf] = useState<{ name: string; brand_id: string; owner: UserPickerValue | null; start_date: string; end_date: string; objective: string; detail_html: string } | null>(null);
+  const [ef, setEf] = useState<{ name: string; brand_id: string; owner: UserPickerValue | null; start_date: string; end_date: string; objective: string; detail_html: string; visibility: string; sharedUsers: UserPickerValue[] } | null>(null);
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => { try { setDetail(await getCampaign(campaignId)); } catch (e) { pushToast("error", (e as Error).message); } }, [campaignId, pushToast]);
@@ -41,12 +42,12 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
   const startEdit = async () => {
     const c = detail?.campaign; if (!c) return;
     if (!brands.length) { try { setBrands(await listBrands()); } catch { /* ignore */ } }
-    setEf({ name: c.name, brand_id: c.brand_id ?? "", owner: c.owner_id ? ({ id: c.owner_id, name: c.owner_label ?? "" } as UserPickerValue) : null, start_date: c.start_date ?? "", end_date: c.end_date ?? "", objective: c.objective ?? "", detail_html: c.detail_html ?? "" });
+    setEf({ name: c.name, brand_id: c.brand_id ?? "", owner: c.owner_id ? ({ id: c.owner_id, name: c.owner_label ?? "" } as UserPickerValue) : null, start_date: c.start_date ?? "", end_date: c.end_date ?? "", objective: c.objective ?? "", detail_html: c.detail_html ?? "", visibility: c.visibility ?? "team", sharedUsers: (c.shared_users ?? []).map((u) => ({ id: u.id, code: null, name: u.name })) });
     setEditing(true);
   };
   const saveEdit = async () => {
     if (!ef) return; setBusy(true);
-    try { await updateCampaign(campaignId, { name: ef.name.trim(), brand_id: ef.brand_id || null, owner_id: ef.owner?.id ?? null, start_date: ef.start_date || null, end_date: ef.end_date || null, objective: ef.objective.trim() || null, detail_html: ef.detail_html || null }); setEditing(false); await load(); onChanged?.(); pushToast("success", t("บันทึกแล้ว", "Saved")); }
+    try { await updateCampaign(campaignId, { name: ef.name.trim(), brand_id: ef.brand_id || null, owner_id: ef.owner?.id ?? null, start_date: ef.start_date || null, end_date: ef.end_date || null, objective: ef.objective.trim() || null, detail_html: ef.detail_html || null, visibility: ef.visibility, shared_user_ids: ef.visibility === "shared" ? ef.sharedUsers.map((u) => u.id) : [] }); setEditing(false); await load(); onChanged?.(); pushToast("success", t("บันทึกแล้ว", "Saved")); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
 
@@ -96,6 +97,19 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                   </div>
                   <div><label className="text-xs text-slate-400">{t("วัตถุประสงค์", "Objective")}</label><ERPTextarea rows={2} value={ef.objective} onChange={(e) => setEf({ ...ef, objective: e.target.value })} /></div>
                   <div><label className="text-xs text-slate-400 mb-1 block">{t("รายละเอียด (จัดรูปแบบได้)", "Details (rich text)")}</label><RichTextEditor value={ef.detail_html} onChange={(html) => setEf({ ...ef, detail_html: html })} placeholder={t("พิมพ์รายละเอียดแคมเปญ ใส่หัวข้อ/ลิสต์/ลิงก์ได้...", "Type campaign details, add headings / lists / links...")} /></div>
+                  {/* การมองเห็น: ทั้งทีม / ส่วนตัว / แชร์เฉพาะคน */}
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">{t("การมองเห็น", "Visibility")}</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {([["team", `👥 ${t("ทั้งทีม", "Team")}`], ["private", `🔒 ${t("ส่วนตัว", "Private")}`], ["shared", `🔗 ${t("แชร์เฉพาะคน", "Shared")}`]] as const).map(([v, lbl]) => (
+                        <button key={v} type="button" onClick={() => setEf({ ...ef, visibility: v })} className={`h-8 px-3 text-xs rounded-lg border ${ef.visibility === v ? "bg-violet-600 text-white border-violet-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{lbl}</button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">{ef.visibility === "private" ? t("เห็นเฉพาะเจ้าของ (+ผู้ดูแลระบบ)", "Only owner (+admins)") : ef.visibility === "shared" ? t("เห็นเฉพาะเจ้าของ + คนที่เลือก (+ผู้ดูแลระบบ)", "Owner + selected people (+admins)") : t("เห็นได้ทั้งทีม", "Everyone in the team")}</p>
+                    {ef.visibility === "shared" && (
+                      <div className="mt-1.5"><MultiUserPicker value={ef.sharedUsers} onChange={(v) => setEf({ ...ef, sharedUsers: v })} disableCreate /></div>
+                    )}
+                  </div>
                   <div className="flex gap-2 pt-1">
                     <button onClick={saveEdit} disabled={busy} className="px-4 h-9 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50">{busy ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
                     <button onClick={() => setEditing(false)} disabled={busy} className="px-4 h-9 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>

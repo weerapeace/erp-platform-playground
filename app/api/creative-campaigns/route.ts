@@ -25,13 +25,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const includeInactive = searchParams.get("include_inactive") === "1";
 
   const admin = supabaseAdmin();
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const me = user?.id ?? "";
+  // แอดมิน/ผู้จัดการ เห็นทุกแคมเปญ · คนอื่นเห็นเฉพาะ ทั้งทีม / ของตัวเอง / ที่แชร์ให้
+  const { data: prof } = me ? await admin.from("user_profiles").select("role").eq("id", me).maybeSingle() : { data: null };
+  const isManager = ["admin", "manager"].includes((prof as { role?: string } | null)?.role ?? "");
+
   let q = admin.from("erp_creative_campaigns")
-    .select("id, name, brand_id, objective, status, start_date, end_date, owner_id, note, is_active, updated_at, brand:brands!brand_id(name, color)", { count: "exact" })
+    .select("id, name, brand_id, objective, status, start_date, end_date, owner_id, note, is_active, updated_at, visibility, brand:brands!brand_id(name, color)", { count: "exact" })
     .order("updated_at", { ascending: false })
     .limit(500);
   if (!includeInactive) q = q.eq("is_active", true);
   if (search) q = q.ilike("name", `%${search}%`);
   if (status) q = q.eq("status", status);
+  if (!isManager && me) q = q.or(`visibility.eq.team,owner_id.eq.${me},created_by.eq.${me},shared_user_ids.cs.{${me}}`);
 
   const { data, error, count } = await q;
   if (error) return NextResponse.json({ data: [], total: 0, error: friendlyDbError(error.message) }, { status: 500 });
@@ -47,6 +54,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       start_date: (r.start_date as string) ?? null, end_date: (r.end_date as string) ?? null,
       owner_id: (r.owner_id as string) ?? null, owner_label: ownerMap.get(String(r.owner_id)) ?? null,
       note: (r.note as string) ?? null, is_active: !!r.is_active, updated_at: String(r.updated_at),
+      visibility: (r.visibility as string) ?? "team",
     };
   });
   return NextResponse.json({ data: items, total: count ?? items.length, error: null });
@@ -56,6 +64,7 @@ type CreateBody = {
   name?: string; brand_id?: string | null; objective?: string | null;
   status?: string; start_date?: string | null; end_date?: string | null;
   owner_id?: string | null; note?: string | null;
+  visibility?: string; shared_user_ids?: string[];
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -72,6 +81,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     name, brand_id: body.brand_id || null, objective: body.objective?.trim() || null,
     status: body.status || "active", start_date: body.start_date || null, end_date: body.end_date || null,
     owner_id: body.owner_id || null, note: body.note?.trim() || null, created_by: user?.id ?? null,
+    visibility: ["private", "shared", "team"].includes(body.visibility ?? "") ? body.visibility : "team",
+    shared_user_ids: Array.isArray(body.shared_user_ids) ? body.shared_user_ids.filter(Boolean) : [],
   }).select("id, name").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 

@@ -95,6 +95,8 @@ export type Campaign = {
   id: string; name: string; brand_id: string | null; brand_label: string | null; brand_color: string | null;
   objective: string | null; status: string; start_date: string | null; end_date: string | null;
   owner_id: string | null; owner_label: string | null; note: string | null; detail_html?: string | null;
+  visibility?: string;   // team | private | shared
+  shared_user_ids?: string[]; shared_users?: { id: string; name: string }[];
 };
 
 export type BrandOption = { id: string; name: string; color: string | null; logo_url?: string | null };

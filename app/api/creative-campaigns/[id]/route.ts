@@ -12,12 +12,12 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { SELECT, flattenTask } from "../../creative-tasks/shared";
-import { employeeLabelMap } from "@/lib/creative-tasks-server";
+import { employeeLabelMap, userLabelMap } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["name", "brand_id", "objective", "status", "start_date", "end_date", "owner_id", "note", "detail_html"]);
+const EDITABLE = new Set(["name", "brand_id", "objective", "status", "start_date", "end_date", "owner_id", "note", "detail_html", "visibility", "shared_user_ids"]);
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
@@ -40,6 +40,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const c = camp as Record<string, unknown>;
   const b = (Array.isArray(c.brand) ? c.brand[0] : c.brand) as { name?: string; color?: string | null } | null;
   const ownerMap = await employeeLabelMap(admin, [c.owner_id as string]);
+  const sharedIds = (Array.isArray(c.shared_user_ids) ? c.shared_user_ids : []) as string[];
+  const sharedMap = sharedIds.length ? await userLabelMap(admin, sharedIds) : new Map<string, string>();
   const campaign = {
     id: String(c.id), name: String(c.name), brand_id: (c.brand_id as string) ?? null,
     brand_label: b?.name ?? null, brand_color: b?.color ?? null,
@@ -47,6 +49,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     start_date: (c.start_date as string) ?? null, end_date: (c.end_date as string) ?? null,
     owner_id: (c.owner_id as string) ?? null, owner_label: ownerMap.get(String(c.owner_id)) ?? null,
     note: (c.note as string) ?? null, detail_html: (c.detail_html as string) ?? null, is_active: !!c.is_active,
+    visibility: (c.visibility as string) ?? "team",
+    shared_user_ids: sharedIds,
+    shared_users: sharedIds.map((uid) => ({ id: uid, name: sharedMap.get(uid) ?? "" })),
   };
   return NextResponse.json({ data: { campaign, tasks, summary, task_count: tasks.length }, error: null });
 }
