@@ -26,7 +26,7 @@ import {
   listContentAttachments, addContentAttachment, deleteContentAttachment,
   getPlatformSettings, savePlatformSettings, getLinkPreview,
   getMetaStatus, publishToPlatform, igFinalize, type MetaConnStatus, type PostMediaRef,
-  getCaptionConfig, saveCaptionConfig, defaultHashtags, resolvePrompt,
+  getCaptionConfig, saveCaptionConfig, defaultHashtags, resolvePrompt, resolveBrandFromProduct,
   type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus,
   type BrandOption, type Hashtag, type CaptionTemplate, type CaptionConfig,
   type ContentAttachment, type PlatformSettings, type PlatformSetting, type LinkPreview,
@@ -149,6 +149,7 @@ export function ContentPageView() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">← {t("งาน", "Tasks")}</a>
+            <a href="/tasks/content-calendar" className="h-10 px-4 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">🗓️ {t("ปฏิทิน", "Calendar")}</a>
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างคอนเทนต์", "Create Content")}</button>
           </div>
         </div>
@@ -399,6 +400,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [capCfg, setCapCfg] = useState<CaptionConfig>({});   // พรอมต์ + แฮชแท็กเริ่มต้น
   const [cfgOpen, setCfgOpen] = useState(false);   // โมดอลตั้งค่าพรอมต์/แฮชแท็ก
   const [hashOpen, setHashOpen] = useState(false);   // โมดอลจัดการคลังแฮชแท็ก
+  // แบรนด์ของคอนเทนต์ — ดึงจากสินค้าอัตโนมัติ (เมื่อยังว่าง) แต่แก้เองได้
+  const [brandId, setBrandId] = useState<string | null>(null);
+  const [brandTouched, setBrandTouched] = useState(false);   // ผู้ใช้เลือกแบรนด์เอง → ไม่ให้ auto-fill ทับ
   // สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี
   const [sku, setSku] = useState<SkuPickerValue | null>(null);
   const [parent, setParent] = useState<ParentSkuPickerValue | null>(null);
@@ -449,6 +453,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       setDiscountPct(!!detail.discount_is_percent);
       setSku(detail.sku_id ? { id: detail.sku_id, code: detail.sku_code ?? "", name: detail.sku_name ?? detail.product_name ?? "", color: detail.sku_color, list_price: detail.sku_price, fake_price: detail.sku_fake_price ?? null } : null);
       setParent(detail.parent_sku_id ? { id: detail.parent_sku_id, code: detail.parent_sku_code ?? "", name: detail.parent_sku_name ?? "" } : null);
+      setBrandId(detail.brand_id ?? null); setBrandTouched(false);
       setColorSource(detail.color_source === "en" ? "en" : "th");
       // เตรียม caption ให้ครบทุกแพลตฟอร์มของคอนเทนต์ — แพลตฟอร์มที่ยังไม่มีแคปชั่น เติมแฮชแท็กเริ่มต้นให้
       const cfg = await getCaptionConfig().catch(() => ({} as CaptionConfig));
@@ -466,7 +471,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const loadPset = useCallback(async () => { try { setPset(await getPlatformSettings()); } catch { /* ว่าง */ } }, []);
   useEffect(() => { loadPset(); }, [loadPset]);
   // เชื่อมต่อ Meta ของแบรนด์นี้ (รู้ว่าปุ่ม "โพสต์เลย" ยิง Facebook จริงได้ไหม)
-  useEffect(() => { const b = d?.brand_id; if (!b) { setMetaStatus({}); return; } let live = true; getMetaStatus(b).then((s) => { if (live) setMetaStatus(s); }); return () => { live = false; }; }, [d?.brand_id]);
+  useEffect(() => { const b = brandId; if (!b) { setMetaStatus({}); return; } let live = true; getMetaStatus(b).then((s) => { if (live) setMetaStatus(s); }); return () => { live = false; }; }, [brandId]);
 
   // ดึงรูป/ลิงก์จากงานย่อยของงานที่ผูกไว้ — โชว์ทั้งที่ยังไม่อนุมัติ (มีป้ายสถานะกำกับ), ตัดซ้ำ
   const loadTaskMedia = useCallback(async () => {
@@ -515,8 +520,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   // โหลดแม่แบบ + ช่องทางร้านของแบรนด์คอนเทนต์
   const loadTemplates = useCallback(async () => {
-    try { const r = await getCaptionTemplates(d?.brand_id ?? null); setTemplates(r.templates); setShopChannels(r.shop_channels); } catch { /* ใช้ค่าว่าง */ }
-  }, [d?.brand_id]);
+    try { const r = await getCaptionTemplates(brandId); setTemplates(r.templates); setShopChannels(r.shop_channels); } catch { /* ใช้ค่าว่าง */ }
+  }, [brandId]);
   useEffect(() => { if (d) loadTemplates(); }, [d, loadTemplates]);
 
   const setCap = (platform: string, patch: Partial<ContentCaption>) => setCaps((cs) => cs.map((c) => c.platform === platform ? { ...c, ...patch } : c));
@@ -630,6 +635,16 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   // เลือก Parent SKU → ดึงสีของ SKU ลูกทั้งหมดมารวม
   useEffect(() => { if (!parent?.id) { setChildren([]); return; } let live = true; getParentSkuChildren(parent.id).then((cs) => { if (live) { setChildren(cs); setPriceSkuId((prev) => prev || cs[0]?.id || ""); } }).catch(() => {}); return () => { live = false; }; }, [parent?.id]);
+
+  // เลือกสินค้า → เดาแบรนด์ให้อัตโนมัติ (เฉพาะตอนยังไม่มีแบรนด์ + ผู้ใช้ยังไม่ได้เลือกเอง)
+  useEffect(() => {
+    if (brandTouched || brandId) return;
+    const pid = parent?.id ?? null; const sid = sku?.id ?? null;
+    if (!pid && !sid) return;
+    let live = true;
+    resolveBrandFromProduct({ parentSkuId: pid, skuId: sid }).then((bid) => { if (live && bid) setBrandId(bid); });
+    return () => { live = false; };
+  }, [parent?.id, sku?.id, brandTouched, brandId]);
   useEffect(() => { getRecommendedTimes().then(setRecTimes).catch(() => {}); }, []);
 
   // ดึงสินค้า (SKU/Parent) จากงานที่ผูกไว้
@@ -698,7 +713,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   // คัดลอกพรอมต์ตั้งต้น (เติมตัวแปรสินค้าให้แล้ว) ไปวางใน AI เขียนแคปชั่นต่อ
   const copyPrompt = async () => {
-    const raw = resolvePrompt(capCfg, d?.brand_id ?? null);
+    const raw = resolvePrompt(capCfg, brandId);
     if (!raw.trim()) { pushToast("info", t("ยังไม่ได้ตั้งพรอมต์ — กด ✍️ ตั้งค่า", "No prompt set — click ✍️ Config")); setCfgOpen(true); return; }
     const text = renderCaption(raw, { caption: "", hashtags: "", ...sharedVars });
     try { await navigator.clipboard.writeText(text); pushToast("success", t("คัดลอกพรอมต์แล้ว", "Prompt copied")); }
@@ -711,7 +726,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       await updateContent(contentId, {
         status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null, assignee_ids: assignees.map((a) => a.id), color_source: colorSource,
         post_status: postStatus, posted_links: postedLinks, platform_images: platformImages,
-        sku_id: sku?.id ?? null, parent_sku_id: parent?.id ?? null, product_name: sku?.name ?? d?.product_name ?? null,
+        brand_id: brandId || null, sku_id: sku?.id ?? null, parent_sku_id: parent?.id ?? null, product_name: sku?.name ?? d?.product_name ?? null,
         discount_value: discountValue === "" ? null : Number(discountValue), discount_is_percent: discountPct,
         product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })),
       });
@@ -723,7 +738,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const saveAsTemplate = async () => {
     if (!d) return;
     try {
-      await createContent({ is_template: true, title: `${d.title} (เทมเพลต)`, post_type: d.post_type, platforms: d.platforms ?? [], brand_id: d.brand_id, captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })) });
+      await createContent({ is_template: true, title: `${d.title} (เทมเพลต)`, post_type: d.post_type, platforms: d.platforms ?? [], brand_id: brandId, captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })) });
       pushToast("success", t("บันทึกเป็นเทมเพลตแล้ว ✓ (เลือกใช้ได้ตอนสร้างคอนเทนต์)", "Saved as template ✓ (available when creating content)")); onChanged();
     } catch (e) { pushToast("error", (e as Error).message); }
   };
@@ -740,6 +755,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} /><div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
 
   const contentPlatforms = d.platforms ?? [];
+  const brandLabel = brands.find((b) => b.id === brandId)?.name ?? null;   // ชื่อแบรนด์ที่เลือกสด ๆ (ให้โมดอลตั้งค่าแคปชั่น/แฮชแท็กตามแบรนด์นี้)
   // จอกว้าง → แยก "รูปจากงาน" เป็นคอลัมน์ซ้ายสุด (3 คอลัมน์: รูป | ข้อมูล | แคปชั่น) · มือถือ = เป็น section ในสแต็ก
   const imagesInLeftPane = isWide && !!d.task_id && !isHidden(dth, "task_media");
   const taskImagesGallery = (cols: string) => (
@@ -824,6 +840,18 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             {!isHidden(dth, "product") && (
             <CSection title={cLabelOf("product")} order={cOrderOf("product")} collapsed={coll("product")} onToggle={() => toggleColl("product")}
               right={d.task_id ? <button onClick={(e) => { e.stopPropagation(); pullFromTask(); }} disabled={pullBusy} className="text-xs text-violet-700 hover:underline disabled:opacity-50">{pullBusy ? t("กำลังดึง…", "Pulling…") : t("⬇ ดึงสินค้าจากงาน", "⬇ Pull from task")}</button> : undefined}>
+              {/* แบรนด์ — ดึงจากสินค้าอัตโนมัติ (เมื่อยังว่าง) แก้เองได้ */}
+              <div className="mb-3">
+                <label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label>
+                <div className="flex items-center gap-2">
+                  <span className="h-3.5 w-3.5 rounded-full border border-slate-200 shrink-0" style={{ background: (brands.find((b) => b.id === brandId)?.color) || "#e2e8f0" }} />
+                  <select value={brandId ?? ""} onChange={(e) => { setBrandTouched(true); setBrandId(e.target.value || null); }} className="flex-1 h-9 border border-slate-200 rounded-lg px-2 text-sm bg-white">
+                    <option value="">{t("— เดาจากสินค้าอัตโนมัติ —", "— Auto from product —")}</option>
+                    {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+                <p className="text-[11px] text-slate-300 mt-1">{t("เลือก SKU/Parent SKU แล้วระบบเติมแบรนด์ให้ · แก้เองได้", "Pick a SKU/Parent SKU and the brand fills in · editable")}</p>
+              </div>
               <div className="grid grid-cols-2 gap-3 items-start">
                 <div>
                   <div className="flex items-center justify-between h-5"><label className="text-xs text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label></div>
@@ -926,7 +954,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -941,11 +969,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         </div>
       </div>
 
-      {cfgOpen && <CaptionConfigModal cfg={capCfg} brandId={d.brand_id} brandLabel={d.brand_label} platforms={platforms} onClose={() => setCfgOpen(false)} onSaved={(v) => { setCapCfg(v); setCfgOpen(false); }} pushToast={pushToast} />}
-      {tplSettingsOpen && <CaptionTemplateSettings brandId={d.brand_id} brandLabel={d.brand_label} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
+      {cfgOpen && <CaptionConfigModal cfg={capCfg} brandId={brandId} brandLabel={brandLabel} platforms={platforms} onClose={() => setCfgOpen(false)} onSaved={(v) => { setCapCfg(v); setCfgOpen(false); }} pushToast={pushToast} />}
+      {tplSettingsOpen && <CaptionTemplateSettings brandId={brandId} brandLabel={brandLabel} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
       {recOpen && <RecommendedTimesModal initial={recTimes} onClose={() => setRecOpen(false)} onSaved={(v) => { setRecTimes(v); setRecOpen(false); }} pushToast={pushToast} />}
-      {hashOpen && <HashtagLibraryModal brandId={d.brand_id} onClose={() => setHashOpen(false)} pushToast={pushToast} />}
+      {hashOpen && <HashtagLibraryModal brandId={brandId} onClose={() => setHashOpen(false)} pushToast={pushToast} />}
       {postModal && (
         <PostConfirmModal
           platform={postModal.platform}

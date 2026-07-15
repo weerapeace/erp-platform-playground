@@ -333,6 +333,18 @@ export type ContentItem = {
   assignee_ids?: string[] | null; assignees?: { id: string; name: string }[];   // ผู้รับผิดชอบหลายคน (m2m)
 };
 
+// หาแบรนด์จากสินค้าที่เลือก (Parent SKU หรือ SKU เดี่ยว) — ให้ฟอร์มคอนเทนต์เติมแบรนด์อัตโนมัติ
+export async function resolveBrandFromProduct(p: { parentSkuId?: string | null; skuId?: string | null }): Promise<string | null> {
+  const q = new URLSearchParams();
+  if (p.parentSkuId) q.set("parent_sku_id", p.parentSkuId);
+  else if (p.skuId) q.set("sku_id", p.skuId);
+  if (![...q.keys()].length) return null;
+  try {
+    const j = await jsonOrThrow(await apiFetch(`/api/creative-content/resolve-brand?${q.toString()}`));
+    return (j.data as { brand_id: string | null } | null)?.brand_id ?? null;
+  } catch { return null; }
+}
+
 // ดึงสีของ SKU ลูกทั้งหมดใต้ Parent SKU (รวมไม่ซ้ำ เช่น ["ดำ","น้ำตาล","แดง"])
 export async function getParentSkuColors(parentId: string): Promise<string[]> {
   const res = await apiFetch(`/api/pickers/skus?parent_sku_id=${parentId}&limit=50`);
