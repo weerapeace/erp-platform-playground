@@ -954,6 +954,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
   const [pathAuto, setPathAuto] = useState(true);   // path ยังตามชื่ออัตโนมัติอยู่ไหม (ผู้ใช้แก้เอง = หยุด)
   const [srcFiles, setSrcFiles] = useState<File[]>([]);   // ไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Drive
   const [driveOn, setDriveOn] = useState(false);
+  const [driveProg, setDriveProg] = useState({ done: 0, total: 0 });   // สถานะอัป Drive
   const srcInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
 
@@ -967,11 +968,14 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
     const res = await apiFetch("/api/drive", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: nm, artworkType: artTypesSel[0], files: items.map((x) => ({ filename: x.filename, mime: x.mime })) }) });
     const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "เตรียมอัป Drive ไม่สำเร็จ");
+    setDriveProg({ done: 0, total: items.length });
     for (let i = 0; i < items.length; i++) {
       const up = j.uploads?.[i]; if (!up?.uploadUrl) continue;
       const put = await fetch(up.uploadUrl, { method: "PUT", body: items[i].file });
       if (!put.ok) throw new Error(`อัปไฟล์ ${items[i].filename} ขึ้น Drive ไม่สำเร็จ (${put.status})`);
+      setDriveProg({ done: i + 1, total: items.length });
     }
+    setDriveProg({ done: 0, total: 0 });
     return String(j.folderLink ?? "");
   };
 
@@ -1038,10 +1042,12 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
     <ERPModal open onClose={onClose} title="เพิ่ม Artwork ลงคลัง" size="xl"
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-[12px] text-slate-400">รูปตัวอย่างเล็กพอ — ไฟล์ใหญ่ .ai/.psd เก็บที่ NAS</span>
+          <span className="text-[12px] text-slate-400">
+            {driveProg.total > 0 ? `📤 อัปขึ้น Drive ${driveProg.done}/${driveProg.total}…` : "รูปตัวอย่างเล็กพอ — ไฟล์ใหญ่ .ai/.psd เก็บที่ NAS/Drive"}
+          </span>
           <div className="flex gap-2">
             <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
+            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? (driveProg.total > 0 ? `อัป Drive ${driveProg.done}/${driveProg.total}…` : "กำลังบันทึก…") : "บันทึก"}</button>
           </div>
         </div>
       }>
@@ -1643,6 +1649,53 @@ function pathMatchesRule(path: string, basePaths: string[]): boolean {
   return basePaths.some((b) => b.trim() && p.startsWith(norm(b)));
 }
 
+// แม็ป ชนิดงาน → โฟลเดอร์ Google Drive (โชว์เมื่อ Drive ตั้งค่าแล้ว)
+function DriveFolderMap() {
+  const toast = useToast();
+  const [types, setTypes] = useState<string[]>([]);
+  const [driveOn, setDriveOn] = useState(false);
+  const [label, setLabel] = useState<Record<string, string>>({});
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  useEffect(() => {
+    apiFetch("/api/lookups?type=artwork_type").then((r) => r.json())
+      .then((j) => setTypes(((j.data ?? []) as { name: string }[]).map((x) => x.name).filter(Boolean))).catch(() => {});
+    apiFetch("/api/drive/folders").then((r) => r.json()).then((j) => {
+      setDriveOn(!!j.configured);
+      const d: Record<string, string> = {}, l: Record<string, string> = {};
+      for (const r of (j.data ?? []) as { artwork_type: string; folder_id: string; folder_label: string | null }[]) { d[r.artwork_type] = r.folder_id; l[r.artwork_type] = r.folder_label ?? ""; }
+      setDraft(d); setLabel(l);
+    }).catch(() => {});
+  }, []);
+  const saveOne = async (t: string) => {
+    const fid = (draft[t] ?? "").trim();
+    try {
+      if (!fid) { await apiFetch(`/api/drive/folders?artwork_type=${encodeURIComponent(t)}`, { method: "DELETE" }); setLabel((m) => { const n = { ...m }; delete n[t]; return n; }); toast.success("ล้างแม็ปแล้ว"); return; }
+      const res = await apiFetch("/api/drive/folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ artwork_type: t, folder_id: fid }) });
+      const j = await res.json(); if (!res.ok || j.error) { toast.error(j.error || "บันทึกไม่สำเร็จ"); return; }
+      setLabel((m) => ({ ...m, [t]: j.folder_label ?? "" })); toast.success("บันทึก + ตรวจโฟลเดอร์แล้ว");
+    } catch { toast.error("บันทึกไม่สำเร็จ"); }
+  };
+  if (!driveOn) return null;
+  return (
+    <div className="mt-4 pt-3 border-t border-slate-100">
+      <p className="text-[12px] text-slate-600 font-medium">📁 โฟลเดอร์ Drive ตามชนิดงาน</p>
+      <p className="text-[11px] text-slate-400 mb-2">ใส่ folder id ของ Google Drive ต่อชนิด (ปล่อยว่าง = ใช้โฟลเดอร์ฐาน) · ต้องแชร์โฟลเดอร์ให้ service account ก่อน</p>
+      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+        {types.map((t) => (
+          <div key={t} className="flex items-center gap-2">
+            <span className="w-24 text-[12px] text-slate-600 truncate shrink-0" title={t}>{t}</span>
+            <input value={draft[t] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [t]: e.target.value }))} placeholder="folder id"
+              className="flex-1 h-8 px-2 text-[12px] font-mono border border-slate-200 rounded" />
+            {label[t] && <span className="text-[11px] text-emerald-600 truncate max-w-[90px] shrink-0" title={label[t]}>✓ {label[t]}</span>}
+            <button type="button" onClick={() => saveOne(t)} className="h-8 px-2 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">บันทึก</button>
+          </div>
+        ))}
+        {types.length === 0 && <p className="text-[11px] text-slate-400">ยังไม่มีชนิดงาน</p>}
+      </div>
+    </div>
+  );
+}
+
 // ตั้งค่าโฟลเดอร์มาตรฐาน (admin) — หลาย path ได้ (บรรทัดละ 1)
 function ArtworkPathRuleModal({ rule, onClose, onSaved }: { rule: PathRule; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
@@ -1667,6 +1720,7 @@ function ArtworkPathRuleModal({ rule, onClose, onSaved }: { rule: PathRule; onCl
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} spellCheck={false}
         placeholder={"G:\\Shared drives\\Louis Montini\\[4] Assets\\4. Artworks\n\\\\nas\\Artwork"}
         className="w-full px-3 py-2 text-[12px] font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+      <DriveFolderMap />
     </ERPModal>
   );
 }
