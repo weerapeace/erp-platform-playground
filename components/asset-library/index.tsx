@@ -463,6 +463,13 @@ function AssetCard({ a, selected, onToggle, onOpen }: {
         className={`absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-md border flex items-center justify-center text-[11px] ${selected
           ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white/90 border-slate-300 text-transparent group-hover:text-slate-300"}`}
       >✓</button>
+      {/* ป้ายเตือน "ยังไม่ครบ" (เฉพาะ Artwork) — ไม่มีโฟลเดอร์ Drive / ยังไม่ใส่ขนาด */}
+      {a.source === "artwork" && (
+        <div className="absolute top-1.5 right-1.5 z-10 flex flex-col items-end gap-1 pointer-events-none">
+          {!/\/folders\//.test(a.master_url ?? "") && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-100 text-amber-700 border border-amber-200 shadow-sm">📁 ไม่มีโฟลเดอร์</span>}
+          {!a.sizes?.length && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-rose-100 text-rose-700 border border-rose-200 shadow-sm">📐 ไม่มีขนาด</span>}
+        </div>
+      )}
       <button onClick={onOpen} className="block w-full text-left">
         <HoverPreview url={isImage(a) && !broken ? a.url : null} previewW={440}>
           {/* กรอบ 1:1 — รูปแสดงเต็มทั้งใบ (object-contain) ไม่ตัดขอบ/ตัวหนังสือ */}
