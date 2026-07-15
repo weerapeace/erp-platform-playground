@@ -15,15 +15,17 @@ import { listContent, listBrands, listCampaigns, listContentTemplates, listBrand
 import { ContentDrawer } from "../content/content";
 import { ContentCreateModal } from "../content/content-create-modal";
 import { BrandStyleModal } from "./brand-style-modal";
-import { platformLabel } from "../use-options";
+import { platformLabel, useCreativeOptions } from "../use-options";
 import { r2ImageUrl } from "@/lib/r2-image";
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
 export function ContentCalendarView() {
   const t = useT();
+  const { platforms } = useCreativeOptions();
   const [detailId, setDetailId] = useState<string | null>(null);
   const [brandFilter, setBrandFilter] = useState<string>("all");   // "all" | brandId
+  const [platformFilter, setPlatformFilter] = useState<string>("all");   // "all" | platform value
   const [offset, setOffset] = useState(0);                          // เลื่อนเดือน (0 = เดือนนี้)
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -54,10 +56,14 @@ export function ContentCalendarView() {
   // เปิด drawer จากลิงก์ ?content=<id>
   useEffect(() => { const cid = new URLSearchParams(window.location.search).get("content"); if (cid) setDetailId(cid); }, []);
 
-  // กรองตามแบรนด์ที่เลือก (ไม่รวมแม่แบบ)
+  // กรองตามแบรนด์ + แพลตฟอร์มที่เลือก (ไม่รวมแม่แบบ)
   const filtered = useMemo(
-    () => items.filter((c) => !c.is_template && (brandFilter === "all" || c.brand_id === brandFilter)),
-    [items, brandFilter],
+    () => items.filter((c) =>
+      !c.is_template
+      && (brandFilter === "all" || c.brand_id === brandFilter)
+      && (platformFilter === "all" || (c.platforms ?? []).includes(platformFilter)),
+    ),
+    [items, brandFilter, platformFilter],
   );
 
   // เดือนที่กำลังดู
@@ -124,6 +130,10 @@ export function ContentCalendarView() {
     `inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium border transition-colors ${
       active ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"
     }`;
+  const platCls = (active: boolean) =>
+    `h-7 px-2.5 rounded-full text-xs font-medium border transition-colors ${
+      active ? "bg-slate-700 text-white border-slate-700" : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
+    }`;
 
   // การ์ดคอนเทนต์ (ใช้ทั้งในปฏิทินและกล่องค้าง)
   const Chip = ({ c, showTime }: { c: ContentItem; showTime?: boolean }) => {
@@ -175,6 +185,15 @@ export function ContentCalendarView() {
           {brandFilter !== "all" && !(activeStyle?.accent_color || activeStyle?.bg_image_key) && (
             <button onClick={() => setStyleBrandId(brandFilter)} className="inline-flex items-center gap-1 h-8 px-3 rounded-full text-sm text-slate-400 border border-dashed border-slate-300 hover:border-violet-300 hover:text-violet-700">🎨 {t("แต่งหน้าแท็บนี้", "Style this tab")}</button>
           )}
+        </div>
+
+        {/* กรองแพลตฟอร์ม (ใช้ร่วมกับแท็บแบรนด์ได้) */}
+        <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
+          <span className="text-xs text-slate-400 mr-0.5">{t("แพลตฟอร์ม", "Platform")}:</span>
+          <button onClick={() => setPlatformFilter("all")} className={platCls(platformFilter === "all")}>{t("ทั้งหมด", "All")}</button>
+          {platforms.map((p) => (
+            <button key={p.value} onClick={() => setPlatformFilter(p.value)} className={platCls(platformFilter === p.value)}>{p.label}</button>
+          ))}
         </div>
       </div>
 
