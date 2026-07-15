@@ -142,6 +142,7 @@ export async function POST(request: NextRequest) {
   const keywords     = form.get("keywords")    ? String(form.get("keywords"))    : null;
   const sizes        = normalizeSizes(safeJson(String(form.get("sizes") ?? "")));            // หลายไซส์ (artwork)
   const parentCodes  = normalizeCodes(safeJson(String(form.get("parent_sku_codes") ?? "")));  // Parent SKU ที่ใช้
+  const brandId      = form.get("brand_id") ? String(form.get("brand_id")) : null;             // แบรนด์ของ artwork
 
   const admin  = supabaseAdmin();
   const buffer = await file.arrayBuffer();
@@ -178,7 +179,7 @@ export async function POST(request: NextRequest) {
     height: Number.isFinite(heightRaw) ? heightRaw : null,
     checksum, collection_id: collectionId, uploaded_by: actor, status: "active",
     source, artwork_type: artworkType, artwork_types: artworkTypes, master_path: masterPath, master_url: masterUrl, keywords,
-    sizes, parent_sku_codes: parentCodes,
+    sizes, parent_sku_codes: parentCodes, brand_id: brandId,
   }).select("*").single();
   if (error || !ins)
     return NextResponse.json({ error: "บันทึกข้อมูลไฟล์ไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });

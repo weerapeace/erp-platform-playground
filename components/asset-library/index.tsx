@@ -956,7 +956,10 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
   const [driveOn, setDriveOn] = useState(false);
   const [driveProg, setDriveProg] = useState({ done: 0, total: 0 });   // สถานะอัป Drive
   const srcInputRef = useRef<HTMLInputElement>(null);
+  const [brandId, setBrandId] = useState("");
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
+  useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands((j.data ?? []) as { id: string; name: string }[])).catch(() => {}); }, []);
 
   // อัปไฟล์ต้นฉบับขึ้น Google Drive "ผ่านแอป" (เลี่ยง CORS) — สร้างโฟลเดอร์ตามชื่อ + ตั้งชื่อไฟล์ตามชื่อ → คืนลิงก์โฟลเดอร์
   const MAX_PROXY = 4 * 1024 * 1024;   // ไฟล์เล็ก ≤4MB อัปผ่านแอป · ใหญ่กว่า = อัปเอง (ลิมิต body Vercel)
@@ -971,6 +974,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
       const fd = new FormData();
       fd.append("name", nm);
       if (artTypesSel[0]) fd.append("artworkType", artTypesSel[0]);
+      if (brandId) fd.append("brand_id", brandId);
       if (folderId) fd.append("folderId", folderId);
       if (x) { fd.append("filename", x.filename); fd.append("file", x.file); }
       const res = await apiFetch("/api/drive/upload", { method: "POST", body: fd });
@@ -1007,6 +1011,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
 
   const save = async () => {
     if (!file) { toast.error("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)"); return; }
+    if (!brandId) { toast.error("เลือกแบรนด์ก่อน"); return; }
     const willDrive = srcFiles.length > 0 && driveOn;
     if (!masterPath.trim() && !masterUrl.trim() && !willDrive) { toast.error("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS / ลิงก์ / โยนไฟล์ขึ้น Drive)"); return; }
     setBusy(true);
@@ -1020,6 +1025,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
       fd.append("file", upFile);
       fd.append("source", "artwork");
       if (artTypesSel.length) fd.append("artwork_types", JSON.stringify(artTypesSel));
+      if (brandId) fd.append("brand_id", brandId);
       if (title.trim()) fd.append("title", title.trim());
       if (masterPath.trim()) fd.append("master_path", masterPath.trim());
       if (effUrl) fd.append("master_url", effUrl);
@@ -1077,6 +1083,12 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
           <label className="text-[12px] text-slate-500">ชื่อ
             <input value={title} onChange={(e) => { const v = e.target.value; setTitle(v); if (pathAuto) setMasterPath(buildPath(v, fileExt)); }} placeholder="เช่น ลายดอกไม้ PIX32"
               className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
+          <label className="text-[12px] text-slate-500">แบรนด์ <span className="text-red-500">*</span>
+            <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
+              className={`mt-0.5 w-full h-9 px-3 text-sm border rounded-lg bg-white ${brandId ? "border-slate-200" : "border-amber-300"}`}>
+              <option value="">— เลือกแบรนด์ —</option>
+              {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select></label>
           <div className="grid grid-cols-2 gap-2">
             <div className="text-[12px] text-slate-500">ชนิด <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน</span>
               <div className="mt-0.5"><ArtTypeMultiSelect value={artTypesSel} types={artTypeList} onChange={setArtTypesSel} onCreated={(t) => setArtTypeList((c) => [...c, t])} /></div></div>
@@ -1656,50 +1668,81 @@ function pathMatchesRule(path: string, basePaths: string[]): boolean {
   return basePaths.some((b) => b.trim() && p.startsWith(norm(b)));
 }
 
-// แม็ป ชนิดงาน → โฟลเดอร์ Google Drive (โชว์เมื่อ Drive ตั้งค่าแล้ว)
+// ตั้งค่าโฟลเดอร์ Drive: แบรนด์ → โฟลเดอร์ฐาน · ชนิด → ชื่อซับโฟลเดอร์ (โชว์เมื่อ Drive ตั้งค่าแล้ว)
 function DriveFolderMap() {
   const toast = useToast();
-  const [types, setTypes] = useState<string[]>([]);
   const [driveOn, setDriveOn] = useState(false);
-  const [label, setLabel] = useState<Record<string, string>>({});
-  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [types, setTypes] = useState<string[]>([]);
+  const [bDraft, setBDraft] = useState<Record<string, string>>({});   // brand_id → folder id
+  const [bLabel, setBLabel] = useState<Record<string, string>>({});   // brand_id → ชื่อโฟลเดอร์ (ตรวจแล้ว)
+  const [tDraft, setTDraft] = useState<Record<string, string>>({});   // type → subfolder name
   useEffect(() => {
-    apiFetch("/api/lookups?type=artwork_type").then((r) => r.json())
-      .then((j) => setTypes(((j.data ?? []) as { name: string }[]).map((x) => x.name).filter(Boolean))).catch(() => {});
-    apiFetch("/api/drive/folders").then((r) => r.json()).then((j) => {
+    apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands((j.data ?? []) as { id: string; name: string }[])).catch(() => {});
+    apiFetch("/api/lookups?type=artwork_type").then((r) => r.json()).then((j) => setTypes(((j.data ?? []) as { name: string }[]).map((x) => x.name).filter(Boolean))).catch(() => {});
+    apiFetch("/api/drive/brand-folders").then((r) => r.json()).then((j) => {
       setDriveOn(!!j.configured);
       const d: Record<string, string> = {}, l: Record<string, string> = {};
-      for (const r of (j.data ?? []) as { artwork_type: string; folder_id: string; folder_label: string | null }[]) { d[r.artwork_type] = r.folder_id; l[r.artwork_type] = r.folder_label ?? ""; }
-      setDraft(d); setLabel(l);
+      for (const r of (j.data ?? []) as { brand_id: string; folder_id: string; folder_label: string | null }[]) { d[r.brand_id] = r.folder_id; l[r.brand_id] = r.folder_label ?? ""; }
+      setBDraft(d); setBLabel(l);
+    }).catch(() => {});
+    apiFetch("/api/drive/folders").then((r) => r.json()).then((j) => {
+      const d: Record<string, string> = {};
+      for (const r of (j.data ?? []) as { artwork_type: string; subfolder_name: string | null }[]) d[r.artwork_type] = r.subfolder_name ?? "";
+      setTDraft(d);
     }).catch(() => {});
   }, []);
-  const saveOne = async (t: string) => {
-    const fid = (draft[t] ?? "").trim();
+  const saveBrand = async (id: string) => {
+    const fid = (bDraft[id] ?? "").trim();
     try {
-      if (!fid) { await apiFetch(`/api/drive/folders?artwork_type=${encodeURIComponent(t)}`, { method: "DELETE" }); setLabel((m) => { const n = { ...m }; delete n[t]; return n; }); toast.success("ล้างแม็ปแล้ว"); return; }
-      const res = await apiFetch("/api/drive/folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ artwork_type: t, folder_id: fid }) });
+      if (!fid) { await apiFetch(`/api/drive/brand-folders?brand_id=${encodeURIComponent(id)}`, { method: "DELETE" }); setBLabel((m) => { const n = { ...m }; delete n[id]; return n; }); toast.success("ล้างแล้ว"); return; }
+      const res = await apiFetch("/api/drive/brand-folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: id, folder_id: fid }) });
       const j = await res.json(); if (!res.ok || j.error) { toast.error(j.error || "บันทึกไม่สำเร็จ"); return; }
-      setLabel((m) => ({ ...m, [t]: j.folder_label ?? "" })); toast.success("บันทึก + ตรวจโฟลเดอร์แล้ว");
+      setBLabel((m) => ({ ...m, [id]: j.folder_label ?? "" })); toast.success("บันทึก + ตรวจโฟลเดอร์แล้ว");
+    } catch { toast.error("บันทึกไม่สำเร็จ"); }
+  };
+  const saveType = async (t: string) => {
+    try {
+      const res = await apiFetch("/api/drive/folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ artwork_type: t, subfolder_name: tDraft[t] ?? "" }) });
+      const j = await res.json(); if (!res.ok || j.error) { toast.error(j.error || "บันทึกไม่สำเร็จ"); return; }
+      toast.success("บันทึกแล้ว");
     } catch { toast.error("บันทึกไม่สำเร็จ"); }
   };
   if (!driveOn) return null;
   return (
-    <div className="mt-4 pt-3 border-t border-slate-100">
-      <p className="text-[12px] text-slate-600 font-medium">📁 โฟลเดอร์ Drive ตามชนิดงาน</p>
-      <p className="text-[11px] text-slate-400 mb-2">ใส่ folder id ของ Google Drive ต่อชนิด (ปล่อยว่าง = ใช้โฟลเดอร์ฐาน) · ต้องแชร์โฟลเดอร์ให้ service account ก่อน</p>
-      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-        {types.map((t) => (
-          <div key={t} className="flex items-center gap-2">
-            <span className="w-24 text-[12px] text-slate-600 truncate shrink-0" title={t}>{t}</span>
-            <input value={draft[t] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [t]: e.target.value }))} placeholder="folder id"
-              className="flex-1 h-8 px-2 text-[12px] font-mono border border-slate-200 rounded" />
-            {label[t] && <span className="text-[11px] text-emerald-600 truncate max-w-[90px] shrink-0" title={label[t]}>✓ {label[t]}</span>}
-            <button type="button" onClick={() => saveOne(t)} className="h-8 px-2 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">บันทึก</button>
-          </div>
-        ))}
-        {types.length === 0 && <p className="text-[11px] text-slate-400">ยังไม่มีชนิดงาน</p>}
+    <>
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <p className="text-[12px] text-slate-600 font-medium">📁 โฟลเดอร์ Drive ตามแบรนด์ (folder id ฐานของแต่ละแบรนด์)</p>
+        <p className="text-[11px] text-slate-400 mb-2">ต้องแชร์โฟลเดอร์ให้ service account ก่อน · ปล่อยว่าง = ใช้โฟลเดอร์แม่</p>
+        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+          {brands.map((b) => (
+            <div key={b.id} className="flex items-center gap-2">
+              <span className="w-28 text-[12px] text-slate-600 truncate shrink-0" title={b.name}>{b.name}</span>
+              <input value={bDraft[b.id] ?? ""} onChange={(e) => setBDraft((d) => ({ ...d, [b.id]: e.target.value }))} placeholder="folder id"
+                className="flex-1 h-8 px-2 text-[12px] font-mono border border-slate-200 rounded" />
+              {bLabel[b.id] && <span className="text-[11px] text-emerald-600 truncate max-w-[90px] shrink-0" title={bLabel[b.id]}>✓ {bLabel[b.id]}</span>}
+              <button type="button" onClick={() => saveBrand(b.id)} className="h-8 px-2 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">บันทึก</button>
+            </div>
+          ))}
+          {brands.length === 0 && <p className="text-[11px] text-slate-400">ยังไม่มีแบรนด์</p>}
+        </div>
       </div>
-    </div>
+      <div className="mt-3 pt-3 border-t border-slate-100">
+        <p className="text-[12px] text-slate-600 font-medium">🗂️ ชื่อซับโฟลเดอร์ตามชนิด (ใต้โฟลเดอร์แบรนด์)</p>
+        <p className="text-[11px] text-slate-400 mb-2">เช่น โลโก้ → “01_Logo” · ปล่อยว่าง = ใช้ชื่อชนิดเป็นชื่อซับ</p>
+        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+          {types.map((t) => (
+            <div key={t} className="flex items-center gap-2">
+              <span className="w-24 text-[12px] text-slate-600 truncate shrink-0" title={t}>{t}</span>
+              <input value={tDraft[t] ?? ""} onChange={(e) => setTDraft((d) => ({ ...d, [t]: e.target.value }))} placeholder={t}
+                className="flex-1 h-8 px-2 text-[12px] border border-slate-200 rounded" />
+              <button type="button" onClick={() => saveType(t)} className="h-8 px-2 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">บันทึก</button>
+            </div>
+          ))}
+          {types.length === 0 && <p className="text-[11px] text-slate-400">ยังไม่มีชนิดงาน</p>}
+        </div>
+      </div>
+    </>
   );
 }
 

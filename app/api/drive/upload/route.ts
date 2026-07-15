@@ -25,12 +25,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     let folderId = String(form.get("folderId") ?? "").trim();
     if (!folderId) {
-      let parent = DRIVE_ROOT_FOLDER_ID;
+      const admin = supabaseAdmin();
+      // 1) โฟลเดอร์ฐานของแบรนด์ (ไม่มีแม็ป = โฟลเดอร์แม่)
+      let brandFolder = DRIVE_ROOT_FOLDER_ID;
+      const brandId = String(form.get("brand_id") ?? "").trim();
+      if (brandId) { const { data } = await admin.from("erp_brand_drive_folders").select("folder_id").eq("brand_id", brandId).maybeSingle(); if (data?.folder_id) brandFolder = String(data.folder_id); }
+      // 2) ซับโฟลเดอร์ตามชนิด (แม็ปชื่อซับ เช่น โลโก้→"01_Logo" · ไม่มี = ใช้ชื่อชนิด)
+      let parent = brandFolder;
       const artType = String(form.get("artworkType") ?? "").trim();
       if (artType) {
-        const { data } = await supabaseAdmin().from("erp_artwork_drive_folders").select("folder_id").eq("artwork_type", artType).maybeSingle();
-        if (data?.folder_id) parent = String(data.folder_id);
+        const { data } = await admin.from("erp_artwork_drive_folders").select("subfolder_name").eq("artwork_type", artType).maybeSingle();
+        const subName = (data?.subfolder_name || artType).trim();
+        if (subName) parent = await driveEnsureFolder(subName, brandFolder);
       }
+      // 3) โฟลเดอร์ตามชื่องาน
       folderId = await driveEnsureFolder(name, parent);
     }
     const file = form.get("file") as File | null;
