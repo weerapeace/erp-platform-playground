@@ -104,7 +104,10 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
       {templates.length > 0 && (
         <div className="mb-4">
-          <div className="text-sm text-slate-600 mb-1.5">📋 {t("เริ่มจากเทมเพลต:", "Start from template:")}</div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-sm text-slate-600">📋 {t("เริ่มจากเทมเพลต:", "Start from template:")}</span>
+            <a href="/tasks/content?view=templates" className="text-xs text-violet-600 hover:underline">⚙️ {t("จัดการ/ตั้งไอคอนแม่แบบ", "Manage templates")}</a>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <button type="button" onClick={() => applyTemplate("")}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left ${tplId === "" ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300" : "border-slate-200 hover:border-violet-300"}`}>
