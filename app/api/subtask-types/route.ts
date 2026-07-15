@@ -10,6 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { friendlyDbError } from "../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let q = supabaseAdmin().from("erp_subtask_types").select("*").order("sort_order", { ascending: true });
   if (!includeInactive) q = q.eq("is_active", true);
   const { data, error } = await q;
-  if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   return NextResponse.json({ data: data ?? [], error: null });
 }
 
@@ -43,7 +44,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   for (const [k, v] of Object.entries(body.patch)) if (EDITABLE.has(k)) patch[k] = v;
   const admin = supabaseAdmin();
   const { error } = await admin.from("erp_subtask_types").update(patch).eq("key", key);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   await writeAudit(admin, { action: "update", entityType: "subtask_type", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { key, changes: Object.keys(patch).filter((k) => k !== "updated_at") } });
   return NextResponse.json({ ok: true, error: null });
 }
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   for (const [k, v] of Object.entries(body.patch ?? {})) if (EDITABLE.has(k)) row[k] = v;
   const admin = supabaseAdmin();
   const { error } = await admin.from("erp_subtask_types").insert(row);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   await writeAudit(admin, { action: "create", entityType: "subtask_type", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { key, label_th } });
   return NextResponse.json({ ok: true, error: null });
 }

@@ -87,6 +87,13 @@ export default function CampaignsPage() {
       <div className="px-8 py-6">
         {loading ? (
           <div className="py-20 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
+        ) : campaignsSWR.error && campaigns.length === 0 ? (
+          <div className="bg-white rounded-xl border border-red-200 p-12 text-center">
+            <div className="text-4xl mb-3">⚠️</div>
+            <p className="text-slate-700 font-medium">{t("โหลดข้อมูลไม่สำเร็จ", "Failed to load")}</p>
+            <p className="text-slate-400 text-sm mt-1">{t("เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา", "Connection or network problem")}</p>
+            <button onClick={() => void load()} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">↻ {t("ลองใหม่", "Retry")}</button>
+          </div>
         ) : campaigns.length === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
             <div className="text-4xl mb-3">📣</div>

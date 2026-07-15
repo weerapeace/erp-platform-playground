@@ -131,13 +131,19 @@ export default function TasksPage() {
   // โหลดข้อมูลแบบ stale-while-revalidate (ของกลาง) — กลับเข้าหน้านี้ใหม่ = โชว์ทันที แล้วอัปเดตเงียบ
   // poll ทุก 20 วิ (เฉพาะตอนเปิดแท็บ) → งานที่คนอื่น/เครื่องอื่นแก้ อัปเดตเองไม่ต้อง refresh
   const tasksSWR = useSWRLite("creative:tasks:all", () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }), { refreshMs: 20000, timeoutMs: 15000 });
-  const mineSWR = useSWRLite("creative:tasks:mine", () => listTasks({ mine: true }), { refreshMs: 20000, timeoutMs: 15000 });
   const subsSWR = useSWRLite("creative:my-subtasks", () => listMySubtasks(), { refreshMs: 20000, timeoutMs: 15000 });
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
   const tasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);
-  const myTasks = useMemo(() => mineSWR.data ?? [], [mineSWR.data]);
   const mySubs = useMemo(() => subsSWR.data ?? [], [subsSWR.data]);
+  // "งานของฉัน" คำนวณจากข้อมูลที่โหลดมาแล้ว (งานที่ฉันเป็นผู้รับผิดชอบ ∪ งานที่มีงานย่อยของฉัน)
+  // — ตัด query mine ที่ยิงซ้ำทุก 20 วิ ออก (นิยามเดียวกับ server taskIdsForUser)
+  const myTasks = useMemo(() => {
+    const uid = user?.id;
+    if (!uid) return [];
+    const subTaskIds = new Set(mySubs.map((s) => s.task_id));
+    return tasks.filter((tk) => subTaskIds.has(tk.id) || tk.assignee_id === uid || (tk.assignees ?? []).some((a) => a.id === uid));
+  }, [tasks, mySubs, user?.id]);
   const brands = useMemo(() => brandsSWR.data ?? [], [brandsSWR.data]);
   const campaigns = useMemo(() => campaignsSWR.data ?? [], [campaignsSWR.data]);
   const loading = tasksSWR.loading; // โชว์ skeleton เฉพาะตอนยังไม่เคยมีข้อมูลจริง
@@ -155,7 +161,7 @@ export default function TasksPage() {
 
   // เรียลไทม์ (ของกลาง Supabase broadcast — ไม่แตะ RLS ตารางงาน): มีคนแก้ → ทุกจอ revalidate เอง ไม่ต้อง refresh
   const chRef = useRef<ReturnType<typeof supabaseBrowser.channel> | null>(null);
-  const revalidateAll = useCallback(() => { void tasksSWR.revalidate(true); void mineSWR.revalidate(true); void subsSWR.revalidate(true); }, [tasksSWR, mineSWR, subsSWR]);
+  const revalidateAll = useCallback(() => { void tasksSWR.revalidate(true); void subsSWR.revalidate(true); }, [tasksSWR, subsSWR]);
   useEffect(() => {
     const ch = supabaseBrowser.channel("creative-board", { config: { broadcast: { self: false } } });
     ch.on("broadcast", { event: "changed" }, () => revalidateAll()).subscribe();
@@ -165,9 +171,9 @@ export default function TasksPage() {
 
   // หลังบันทึก/ลบ → โหลดงานใหม่ + กระจาย broadcast ให้จออื่นอัปเดตทันที
   const reload = useCallback(async () => {
-    await Promise.all([tasksSWR.revalidate(true), mineSWR.revalidate(true), subsSWR.revalidate(true)]);
+    await Promise.all([tasksSWR.revalidate(true), subsSWR.revalidate(true)]);
     try { chRef.current?.send({ type: "broadcast", event: "changed", payload: {} }); } catch { /* noop */ }
-  }, [tasksSWR, mineSWR, subsSWR]);
+  }, [tasksSWR, subsSWR]);
 
   // ธีมหน้าภาพรวม "ของฉัน" — มีธีมส่วนตัวใช้เลย · ไม่มี → ใช้ธีมเริ่มต้นของทีม (ถ้าแอดมินตั้งไว้)
   useEffect(() => {
@@ -194,8 +200,10 @@ export default function TasksPage() {
   }, []);
 
   // "รอตรวจ" = จำนวนงานย่อยที่ส่งมาในคิว (ไม่ใช่งานสถานะ need_review) — ให้ตรงกับตารางคิว
+  // ยิงเฉพาะเมื่อข้อมูลงานเปลี่ยนจริง (ลายเซ็น จำนวน+updated_at ล่าสุด) — ไม่ยิงซ้ำทุก poll ที่ข้อมูลเท่าเดิม
+  const tasksStamp = useMemo(() => `${tasks.length}:${tasks[0]?.updated_at ?? ""}`, [tasks]);
   const [reviewPending, setReviewPending] = useState<number | null>(null);
-  useEffect(() => { void apiFetch("/api/creative-tasks/review-queue?count=1").then((r) => r.json()).then((j) => { if (typeof j.pending === "number") setReviewPending(j.pending); }).catch(() => {}); }, [tasks]);
+  useEffect(() => { void apiFetch("/api/creative-tasks/review-queue?count=1").then((r) => r.json()).then((j) => { if (typeof j.pending === "number") setReviewPending(j.pending); }).catch(() => {}); }, [tasksStamp]);   // eslint-disable-line react-hooks/exhaustive-deps
   const counts = useMemo(() => ({
     total: tasks.length,
     mine: myTasks.length,

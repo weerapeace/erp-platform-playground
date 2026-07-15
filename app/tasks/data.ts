@@ -416,6 +416,16 @@ export async function updateContent(id: string, patch: Record<string, unknown>):
 export async function deleteContent(id: string): Promise<void> {
   await jsonOrThrow(await apiFetch(`/api/creative-content/${id}`, { method: "DELETE" }));
 }
+// ลบหลายรายการทีเดียว (คำขอเดียว — ไม่วนยิงทีละตัว) + คืนจำนวนที่สำเร็จ
+export async function bulkDeleteContent(ids: string[]): Promise<{ success: number; failed: number }> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-content/bulk", { method: "POST", body: JSON.stringify({ action: "delete", ids }) }));
+  return { success: (j.success as number) ?? 0, failed: (j.failed as number) ?? 0 };
+}
+// แก้หลายงานทีเดียว (คำขอเดียว) + รายงานผลต่อรายการ
+export async function bulkUpdateTasks(items: { id: string; changes: Record<string, unknown> }[]): Promise<{ success: number; failed: number; failures: { id: string; error: string }[] }> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-tasks/bulk", { method: "POST", body: JSON.stringify({ items }) }));
+  return { success: (j.success as number) ?? 0, failed: (j.failed as number) ?? 0, failures: (j.failures as { id: string; error: string }[]) ?? [] };
+}
 
 // ---- Hashtags ----
 export async function listHashtags(p: { search?: string; brand_id?: string; platform?: string; category?: string } = {}): Promise<Hashtag[]> {

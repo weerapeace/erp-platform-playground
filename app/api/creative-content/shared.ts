@@ -2,6 +2,22 @@
 import { employeeLabelMap } from "@/lib/creative-tasks-server";
 import { r2ImageUrl } from "@/lib/r2-image";
 
+// ── ตรวจข้อมูลคอนเทนต์ก่อนบันทึก (ใช้ทั้ง POST/PATCH) — คืนข้อความ error หรือ null ──
+const CONTENT_STATUSES = new Set(["draft", "ready", "scheduled", "published", "cancelled"]);
+export function validateContentFields(body: Record<string, unknown>): string | null {
+  if (body.status != null && body.status !== "" && !CONTENT_STATUSES.has(String(body.status)))
+    return "สถานะคอนเทนต์ไม่ถูกต้อง";
+  if (body.scheduled_at != null && body.scheduled_at !== "" && (typeof body.scheduled_at !== "string" || Number.isNaN(Date.parse(body.scheduled_at))))
+    return "รูปแบบวันเวลาตั้งโพสต์ไม่ถูกต้อง";
+  if (body.discount_value != null && body.discount_value !== "") {
+    const n = Number(body.discount_value);
+    if (Number.isNaN(n) || n < 0) return "ส่วนลดต้องเป็นตัวเลขและไม่ติดลบ";
+  }
+  if (body.title != null && typeof body.title === "string" && body.title.length > 500)
+    return "ชื่อคอนเทนต์ยาวเกินไป (ไม่เกิน 500 ตัวอักษร)";
+  return null;
+}
+
 export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sku_id, parent_sku_id, product_name, post_type,
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, post_status, platform_images, note,
   discount_value, discount_is_percent, color_source,

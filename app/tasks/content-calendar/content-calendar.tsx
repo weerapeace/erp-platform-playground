@@ -52,6 +52,8 @@ export function ContentCalendarView() {
   const campaigns = campaignsSWR.data ?? [];
   const templates = templatesSWR.data ?? [];
   const styleMap = useMemo(() => Object.fromEntries((stylesSWR.data ?? []).map((s) => [s.brand_id, s])) as Record<string, BrandCalStyle>, [stylesSWR.data]);
+  const loading = itemsSWR.loading;
+  const loadError = !!itemsSWR.error && items.length === 0;   // โหลดพลาด + ไม่มีข้อมูลเก่า → โชว์หน้าผิดพลาด
   const [styleBrandId, setStyleBrandId] = useState<string | null>(null);   // แบรนด์ที่กำลังแต่งหน้า
   const reload = useCallback(() => { void itemsSWR.revalidate(true); }, [itemsSWR]);
   // เปิด drawer จากลิงก์ ?content=<id>
@@ -217,6 +219,17 @@ export function ContentCalendarView() {
       </div>
 
       <div className="px-4 sm:px-8 py-6">
+        {/* สถานะโหลด/ผิดพลาด — โหลดพลาดต้องไม่โชว์เป็นปฏิทินว่าง */}
+        {loading && <div className="py-16 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>}
+        {!loading && loadError && (
+          <div className="bg-white rounded-xl border border-red-200 p-12 text-center">
+            <div className="text-4xl mb-3">⚠️</div>
+            <p className="text-slate-700 font-medium">{t("โหลดข้อมูลไม่สำเร็จ", "Failed to load")}</p>
+            <p className="text-slate-400 text-sm mt-1">{t("เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา", "Connection or network problem")}</p>
+            <button onClick={() => void itemsSWR.revalidate(true)} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">↻ {t("ลองใหม่", "Retry")}</button>
+          </div>
+        )}
+        {!loading && !loadError && (<>
         {/* แบนเนอร์แบรนด์ (แต่งหน้า) */}
         {activeStyle && (activeStyle.accent_color || activeStyle.bg_image_key) && (() => {
           const accent = activeStyle.accent_color || "#7c3aed";
@@ -317,6 +330,7 @@ export function ContentCalendarView() {
             )}
           </div>
         </div>
+        </>)}
       </div>
 
       {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={reload} pushToast={pushToast} />}

@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { SELECT, flattenContent, attachAssignees } from "../shared";
+import { SELECT, flattenContent, attachAssignees, validateContentFields } from "../shared";
 import { r2ImageUrl } from "@/lib/r2-image";
 
 // รูปหน้าปกของคอนเทนต์ (ให้การ์ดบนกระดานแคมเปญโชว์รูป) — ลำดับ: สื่อที่แนบ(รูป) → รูป SKU → รูปงานที่ผูก
@@ -56,6 +56,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const admin = supabaseAdmin();
+  // ── ล็อกคอนเทนต์ที่ "เผยแพร่แล้ว" — แก้เนื้อหาหลักไม่ได้ (แก้ได้เฉพาะสถานะโพสต์/ลิงก์/โน้ต) จนกว่าจะย้อนสถานะ ──
+  const LOCKED_WHEN_PUBLISHED = ["title", "brand_id", "campaign_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "discount_value", "discount_is_percent", "captions", "color_source"];
+  const { data: curC } = await admin.from("erp_creative_content").select("status").eq("id", id).maybeSingle();
+  const curStatus = (curC as { status?: string } | null)?.status ?? "";
+  const unlocking = "status" in body && body.status !== "published";   // กำลังย้อนสถานะออกจากเผยแพร่ = ปลดล็อก
+  if (curStatus === "published" && !unlocking) {
+    const touched = LOCKED_WHEN_PUBLISHED.filter((k) => k in body);
+    if (touched.length) return NextResponse.json({ error: "คอนเทนต์นี้เผยแพร่แล้ว — แก้เนื้อหาไม่ได้ ต้องเปลี่ยนสถานะกลับก่อน" }, { status: 400 });
+  }
+  // ── ตรวจข้อมูลก่อนบันทึก ──
+  const cErr = validateContentFields(body);
+  if (cErr) return NextResponse.json({ error: cErr }, { status: 400 });
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const [k, v] of Object.entries(body)) if (EDITABLE.has(k)) patch[k] = v === "" ? null : v;
   if (Array.isArray(body.product_links)) patch.product_links = body.product_links;

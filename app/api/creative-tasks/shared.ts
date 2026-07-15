@@ -1,5 +1,25 @@
 /** ของใช้ร่วมของ creative-tasks API (แยกจาก route.ts — route ต้อง export แค่ handler) */
 
+// ── ตรวจข้อมูลงานก่อนบันทึก (ใช้ทั้ง POST สร้าง + PATCH แก้) — คืนข้อความ error หรือ null ──
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const PRIORITIES = new Set(["urgent", "high", "normal", "low"]);
+export function validateTaskFields(body: Record<string, unknown>): string | null {
+  for (const k of ["start_date", "due_date"] as const) {
+    const v = body[k];
+    if (v != null && v !== "" && (typeof v !== "string" || !DATE_RE.test(v) || Number.isNaN(Date.parse(v))))
+      return `รูปแบบ${k === "start_date" ? "วันที่สั่ง" : "กำหนดส่ง"}ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)`;
+  }
+  if (body.priority != null && body.priority !== "" && !PRIORITIES.has(String(body.priority)))
+    return "ค่าความสำคัญไม่ถูกต้อง";
+  if (body.progress_percent != null && body.progress_percent !== "") {
+    const n = Number(body.progress_percent);
+    if (Number.isNaN(n) || n < 0 || n > 100) return "เปอร์เซ็นต์ความคืบหน้าต้องอยู่ระหว่าง 0-100";
+  }
+  if (body.title != null && typeof body.title === "string" && body.title.length > 500)
+    return "ชื่องานยาวเกินไป (ไม่เกิน 500 ตัวอักษร)";
+  return null;
+}
+
 export const SELECT = `id, task_no, title, description, task_type, brand_id, campaign_id, sku_id, parent_sku_id,
   product_name, priority, status, progress_percent, assignee_id, reviewer_id, approver_id, assigned_by_id,
   start_date, due_date, completed_at, approval_status, asset_status, platforms,

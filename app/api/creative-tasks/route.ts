@@ -15,7 +15,7 @@ import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
 import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser, setTaskReviewers, pushTasksLineTpl, taskLink, materializeContentSubtasks } from "@/lib/creative-tasks-server";
-import { SELECT, flattenTask } from "./shared";
+import { SELECT, flattenTask, validateTaskFields } from "./shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -103,6 +103,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const title = (body.title ?? "").trim();
   if (!title) return NextResponse.json({ error: "กรุณาใส่ชื่องาน" }, { status: 400 });
+  const vErr = validateTaskFields(body as Record<string, unknown>);
+  if (vErr) return NextResponse.json({ error: vErr }, { status: 400 });
 
   const admin = supabaseAdmin();
   const status = (body.status as string) || (await defaultStatusKey(admin));

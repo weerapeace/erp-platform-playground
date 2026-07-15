@@ -5,7 +5,9 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 import { driveConfigured } from "@/lib/google-drive";
 import { syncTaskFilesToDrive } from "@/lib/creative-tasks-server";
 
@@ -23,8 +25,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const r = await syncTaskFilesToDrive(admin, id);
+    // side-effect ภายนอก (สร้างโฟลเดอร์/อัปไฟล์ขึ้น Drive) → บันทึกประวัติ
+    const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+    await writeAudit(admin, { action: "drive_folder_sync", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { url: r.url, uploaded: r.uploaded } });
     return NextResponse.json({ url: r.url, uploaded: r.uploaded, error: null });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    return NextResponse.json({ error: `เชื่อม Google Drive ไม่สำเร็จ — ลองใหม่อีกครั้ง (${(e as Error).message})` }, { status: 500 });
   }
 }

@@ -343,6 +343,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // ย้อนสถานะงานย่อยที่ "อนุมัติแล้ว" (เช่น approved → submitted) — เฉพาะ admin/ผจก./ผู้ตรวจ
   if (wasApproved && patch.status && patch.status !== "approved" && !(isManager || isReviewer || await canPerm(request, "task_subtask.approve")))
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์ย้อนสถานะงานย่อยที่อนุมัติแล้ว" }, { status: 403 });
+  // ── กฎเส้นทางสถานะงานย่อย (server-side) — กันข้ามขั้น เช่น todo → approved โดยไม่ผ่านส่งงาน ──
+  // (UI แสดงเฉพาะปุ่มที่ถูกต้องอยู่แล้ว — ตรงนี้กันยิงตรง/บั๊ก · สถานะเก่า/ไม่รู้จัก = ปล่อยผ่านกันข้อมูลค้าง)
+  if (typeof patch.status === "string") {
+    const SUB_TRANSITIONS: Record<string, string[]> = {
+      todo: ["in_progress", "submitted", "canceled"],
+      in_progress: ["todo", "submitted", "canceled"],
+      submitted: ["approved", "revision_requested", "canceled"],
+      revision_requested: ["in_progress", "submitted", "canceled"],
+      approved: ["submitted", "revision_requested", "canceled", "posted", "done"],
+      canceled: ["todo", "in_progress"],
+      posted: ["approved"],
+      done: ["approved", "submitted"],
+    };
+    const fromSt = ((curSub as { status?: string } | null)?.status) ?? "";
+    const toSt = patch.status as string;
+    const allowed = SUB_TRANSITIONS[fromSt];
+    if (toSt !== fromSt && allowed && !allowed.includes(toSt))
+      return NextResponse.json({ error: `เปลี่ยนสถานะงานย่อยจาก "${fromSt}" ไป "${toSt}" ไม่ได้ (ข้ามขั้นตอน)` }, { status: 400 });
+  }
 
   if (Array.isArray(body.assignee_ids)) {
     const { data: curA } = await admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId);

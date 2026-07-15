@@ -20,7 +20,7 @@ import { arrangeMySubtasks, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subt
 import { isTerminal, statusMeta, type Status } from "./use-statuses";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { TaskTypeChip } from "./task-type-chip";
-import { isOverdue, updateTask, PRIORITY_META, priorityLabel, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
+import { isOverdue, updateTask, bulkUpdateTasks, PRIORITY_META, priorityLabel, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
 import { matchMetric, type MetricDef } from "./metrics";
 import { MetricCardsManager } from "./metric-cards-manager";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
@@ -159,10 +159,18 @@ export function OverviewDashboard({
     { key: "due_date", label: t("กำหนดส่ง (YYYY-MM-DD)", "Due date (YYYY-MM-DD)"), type: "text" as const },
   ], [t, taskTypes, brands]);
   const onBulkEdit = async (edits: { row: CreativeTask; changes: Record<string, unknown> }[]) => {
-    let success = 0, failed = 0;
-    for (const e of edits) { try { await updateTask(e.row.id, e.changes); success++; } catch { failed++; } }
-    if (onChanged) await onChanged();
-    return { success, failed };
+    // แก้ทีเดียวหลายงานผ่าน bulk endpoint (คำขอเดียว) — ไม่วนยิงทีละงาน
+    try {
+      const r = await bulkUpdateTasks(edits.map((e) => ({ id: e.row.id, changes: e.changes })));
+      if (onChanged) await onChanged();
+      return { success: r.success, failed: r.failed };
+    } catch {
+      // endpoint ใช้ไม่ได้ (เช่นยังไม่ deploy) → fallback ยิงรายตัวแบบเดิม
+      let success = 0, failed = 0;
+      for (const e of edits) { try { await updateTask(e.row.id, e.changes); success++; } catch { failed++; } }
+      if (onChanged) await onChanged();
+      return { success, failed };
+    }
   };
 
   // นับงานที่ยังไม่ปิดต่อแคมเปญ + แคมเปญที่กำลังทำ

@@ -13,7 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { SELECT, flattenTask } from "../shared";
+import { SELECT, flattenTask, validateTaskFields } from "../shared";
 import { canTransition as canTransitionDB, getStatusMeta } from "@/lib/creative-statuses-server";
 import { notify, employeeLabelMap, employeeAuthId, subtaskAssigneesMap, setTaskAssignees, taskAssigneesMap, setTaskReviewers, taskReviewersMap, userLabelMap } from "@/lib/creative-tasks-server";
 
@@ -139,6 +139,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     auditAction = `task_${action}`;
     notifyTarget = { empId: (current.assignee_id as string) ?? null, eventType: `task_${action}`, title: `${label}: ${current.title}` };
   } else {
+    // ── ล็อกงานที่ปิดจบแล้ว (สถานะ terminal เช่น เสร็จ/ยกเลิก) — ห้ามแก้ฟิลด์ทั่วไป ต้องย้อนสถานะก่อน ──
+    const curMeta = await getStatusMeta(admin, String(current.status));
+    if (curMeta?.is_terminal)
+      return NextResponse.json({ error: `งานนี้ปิดแล้ว (สถานะ "${curMeta.label}") — ย้อนสถานะก่อนจึงจะแก้ไขได้` }, { status: 400 });
+    // ── ตรวจข้อมูลก่อนบันทึก (วันที่/ความสำคัญ/เปอร์เซ็นต์) — กันข้อมูลเพี้ยนเข้า DB ──
+    const vErr = validateTaskFields(body);
+    if (vErr) return NextResponse.json({ error: vErr }, { status: 400 });
     // แก้ฟิลด์ทั่วไป — เฉพาะ field ที่อนุญาต
     for (const [k, v] of Object.entries(body)) {
       if (k === "action" || k === "actor") continue;

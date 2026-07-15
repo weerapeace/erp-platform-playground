@@ -19,7 +19,7 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import { r2ImageUrl } from "@/lib/r2-image";
 import {
   CONTENT_STATUS_META, contentStatusLabel, postTypeLabel,
-  listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
+  listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent, bulkDeleteContent,
   listCampaigns, listBrands, listHashtags, createHashtag, deleteHashtag, getTask, listSubtasks,
   getCaptionTemplates, saveCaptionTemplates, getParentSkuColors, getParentSkuChildren, type ParentSkuChild,
   getRecommendedTimes, saveRecommendedTimes, type RecommendedTimes,
@@ -90,6 +90,7 @@ export function ContentPageView() {
   const brands = brandsSWR.data ?? [];
   const campaigns = campaignsSWR.data ?? [];
   const loading = itemsSWR.loading;
+  const loadError = !!itemsSWR.error && items.length === 0;   // โหลดพลาด + ไม่มีข้อมูลเก่า → โชว์หน้าผิดพลาด (ไม่ใช่ "ว่าง")
   const load = useCallback(async () => { await itemsSWR.revalidate(true); }, [itemsSWR]);
   const reloadTemplates = useCallback(async () => { await templatesSWR.revalidate(true); }, [templatesSWR]);
   // เปิด drawer คอนเทนต์อัตโนมัติจากลิงก์ /tasks/content?content=<id> (กดมาจากการ์ดบน Canvas)
@@ -101,7 +102,12 @@ export function ContentPageView() {
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const bulkDelete = async () => {
     setBulkBusy(true);
-    try { const ids = [...selected]; for (const id of ids) await deleteContent(id); pushToast("info", t(`ลบ ${ids.length} รายการแล้ว`, `Deleted ${ids.length}`)); setSelected(new Set()); if (detailId && selected.has(detailId)) setDetailId(null); await load(); }
+    try {
+      const ids = [...selected];
+      const r = await bulkDeleteContent(ids);   // ลบทีเดียวหลายรายการ (คำขอเดียว) + รายงานผล
+      pushToast(r.failed > 0 ? "error" : "info", r.failed > 0 ? t(`ลบสำเร็จ ${r.success} · ล้มเหลว ${r.failed}`, `Deleted ${r.success} · failed ${r.failed}`) : t(`ลบ ${r.success} รายการแล้ว`, `Deleted ${r.success}`));
+      setSelected(new Set()); if (detailId && selected.has(detailId)) setDetailId(null); await load();
+    }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBulkBusy(false); setBulkConfirm(false); }
   };
   // สร้างแม่แบบคอนเทนต์เปล่า → เปิด drawer ให้กรอกแคปชั่น/แพลตฟอร์ม
@@ -141,6 +147,14 @@ export function ContentPageView() {
 
       <div className="px-4 sm:px-8 py-6">
         {loading ? <div className="py-20 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
+          : loadError ? (
+            <div className="bg-white rounded-xl border border-red-200 p-12 text-center">
+              <div className="text-4xl mb-3">⚠️</div>
+              <p className="text-slate-700 font-medium">{t("โหลดข้อมูลไม่สำเร็จ", "Failed to load")}</p>
+              <p className="text-slate-400 text-sm mt-1">{t("เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา", "Connection or network problem")}</p>
+              <button onClick={() => void load()} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">↻ {t("ลองใหม่", "Retry")}</button>
+            </div>
+          )
           : view === "templates" ? (
             <div>
               <div className="flex items-center justify-between mb-4">
