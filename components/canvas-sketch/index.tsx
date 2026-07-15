@@ -40,7 +40,7 @@ export type CanvasSketchControls = {
   listCards: () => { kind: string; data: Record<string, unknown> }[];
   /** ซิงค์การ์ดสด — builder คืน {text?, data?, imageUrl?, images?} เพื่ออัปเดตข้อความ/รูป/snapshot
    *  imageUrl: URL รูปเดียว · images: หลายรูป [รูปใหญ่, รูปเล็ก...] (รูปแรก=รูปใหญ่บนสุด ที่เหลือ=รูปเล็กแถวล่าง) · [] / null / "" = เอารูปออก · undefined = ไม่ยุ่งกับรูป */
-  refreshCards: (builder: (card: { kind: string; id: string; data: Record<string, unknown> }) => Promise<{ text?: string; data?: Record<string, unknown>; imageUrl?: string | null; images?: string[] | null } | null>) => Promise<void>;
+  refreshCards: (builder: (card: { kind: string; id: string; data: Record<string, unknown> }) => Promise<{ text?: string; data?: Record<string, unknown>; imageUrl?: string | null; images?: string[] | null; stroke?: string | null } | null>) => Promise<void>;
 };
 
 export function CanvasSketch({
@@ -382,7 +382,7 @@ export function CanvasSketch({
           const arr = groups.get(gid) ?? []; arr.push(el); groups.set(gid, arr);
         }
         // 1) เรียก builder ต่อกลุ่ม → เก็บผล (ข้อความ/รูป/snapshot)
-        const updates = new Map<string, { text?: string; data?: Record<string, unknown>; imageUrl?: string | null; images?: string[] | null }>();
+        const updates = new Map<string, { text?: string; data?: Record<string, unknown>; imageUrl?: string | null; images?: string[] | null; stroke?: string | null }>();
         for (const [gid, arr] of groups) {
           const d = arr[0].customData as Record<string, unknown>;
           try { const res = await builder({ kind: String(d.kind), id: String(d.id ?? ""), data: d }); if (res) updates.set(gid, res); }
@@ -480,9 +480,10 @@ export function CanvasSketch({
             return { ...base, customData: merged };
           }
           if (el.type === "rectangle") {
-            if (lay) return { ...el, height: lay.rectH, customData: { ...merged, _imagesSig: lay.sig !== undefined ? lay.sig : (el.customData?._imagesSig ?? undefined) } };
-            if (u.text != null) { const lines = u.text.split("\n").length; return { ...el, height: 40 + lines * 18, customData: merged }; }
-            return { ...el, customData: merged };
+            const sp = u.stroke ? { strokeColor: u.stroke } : {};   // เปลี่ยนสีขอบการ์ดตามสถานะ (เช่น โพสต์แล้ว=เขียว)
+            if (lay) return { ...el, ...sp, height: lay.rectH, customData: { ...merged, _imagesSig: lay.sig !== undefined ? lay.sig : (el.customData?._imagesSig ?? undefined) } };
+            if (u.text != null) { const lines = u.text.split("\n").length; return { ...el, ...sp, height: 40 + lines * 18, customData: merged }; }
+            return { ...el, ...sp, customData: merged };
           }
           return { ...el, customData: merged };   // รูปที่คงไว้ / element อื่น
         });

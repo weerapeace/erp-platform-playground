@@ -117,12 +117,21 @@ function contentCardText(c: ContentCardInfo): string {
   const capLine = cap ? `\n\n📝 ${cap.slice(0, 120)}${cap.length > 120 ? "…" : ""}` : "";
   return `📱 ${c.title ?? ""}\n${c.content_no ?? ""}${st}\n${sched}แพลตฟอร์ม: ${platLine}${capLine}`;
 }
-// ข้อความบนการ์ดรายแพลตฟอร์ม
-function perPlatformCardText(c: ContentCardInfo, platform: string, caption?: string | null): string {
+// สถานะโพสต์ต่อแพลตฟอร์ม (post_status[platform]) → บรรทัดเด่น + สีขอบการ์ด
+function postStatusStyle(s?: string | null): { line: string; stroke: string } {
+  switch (s) {
+    case "posted": return { line: "✅ โพสต์แล้ว", stroke: "#16a34a" };       // เขียว
+    case "scheduled": return { line: "⏰ ตั้งเวลาโพสต์แล้ว", stroke: "#2563eb" }; // น้ำเงิน
+    case "skip": return { line: "⏭️ ข้ามแพลตฟอร์มนี้", stroke: "#94a3b8" };    // เทา
+    default: return { line: "🟠 ยังไม่โพสต์", stroke: "#f59e0b" };            // ส้ม (ค่าเริ่มต้น)
+  }
+}
+// ข้อความบนการ์ดรายแพลตฟอร์ม — สถานะโพสต์เด่นบนสุด
+function perPlatformCardText(c: ContentCardInfo, platform: string, caption?: string | null, postStatus?: string | null): string {
   const cap = (caption ?? "").trim();
   const capLine = cap ? `\n\n${cap.slice(0, 140)}${cap.length > 140 ? "…" : ""}` : "\n\n— ยังไม่มีแคปชั่น —";
   const st = c.status ? ` · ${c.status}` : "";
-  return `📱 ${platform}\n${c.title ?? ""}\n${c.content_no ?? ""}${st}${capLine}`;
+  return `${postStatusStyle(postStatus).line}\n📱 ${platform}\n${c.title ?? ""}\n${c.content_no ?? ""}${st}${capLine}`;
 }
 
 // การ์ดคอนเทนต์ (รวม) บน Excalidraw -- customData (ดับเบิลคลิกเปิด Drawer)
@@ -353,7 +362,8 @@ export default function CampaignCanvasPage() {
           const cap = c.captions.find((x) => x.platform === plat)?.caption ?? null;
           // รูปที่เลือกของแพลตฟอร์มนี้ (เรียง: [0]=รูปใหญ่, ที่เหลือ=รูปเล็กแถวล่าง) · ไม่เลือก = [] → เอารูปออก
           const images = (c.platform_images?.[plat] ?? []).map((k) => r2ImageUrl(k, 480)).filter(Boolean) as string[];
-          return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap), data: { title: c.title, platform: plat }, images };
+          const ps = c.post_status?.[plat] ?? null;   // สถานะโพสต์ต่อแพลตฟอร์ม → โชว์เด่น + สีขอบ
+          return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap, ps), data: { title: c.title, platform: plat }, images, stroke: postStatusStyle(ps).stroke };
         }
         return { text: contentCardText({ content_no: c.content_no, title: c.title, platforms: c.platforms ?? [], status: c.status, scheduled_at: c.scheduled_at, caption: c.captions[0]?.caption ?? null }), data: { title: c.title, platforms: c.platforms ?? [] }, imageUrl: cover };
       } catch { return null; }
