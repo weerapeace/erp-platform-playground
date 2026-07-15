@@ -1079,7 +1079,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
   const [ruleOpen, setRuleOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [rule, , reloadRule] = useArtworkPathRule();
-  const pathWarn = !!masterPath.trim() && !pathMatchesRule(masterPath, rule.base_paths);
+  const { brandBase, typeSub } = useDriveFolderMaps();
   const [fileExt, setFileExt] = useState("");
   const [pathAuto, setPathAuto] = useState(true);   // path ยังตามชื่ออัตโนมัติอยู่ไหม (ผู้ใช้แก้เอง = หยุด)
   const [srcFiles, setSrcFiles] = useState<File[]>([]);   // ไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Drive
@@ -1090,6 +1090,9 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
+  // path ต้นฉบับผิดโฟลเดอร์ไหม — ยอมทั้งกฎกลาง + ฐานในเครื่องของแบรนด์
+  const allowedBases = brandId && brandBase[brandId] ? [...rule.base_paths, brandBase[brandId]] : rule.base_paths;
+  const pathWarn = !!masterPath.trim() && !pathMatchesRule(masterPath, allowedBases);
 
   // อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Google Drive "ผ่านแอป" (ของกลาง uploadArtworkToDrive) → คืนลิงก์โฟลเดอร์
   const uploadSourcesToDrive = async (): Promise<string> => {
@@ -1102,7 +1105,10 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
     return folderLink;
   };
 
-  const buildPath = (name: string, ext: string) => {
+  // เติม path ต้นฉบับอัตโนมัติ: มีฐานตามแบรนด์ → <ฐาน>\<ซับชนิด>\<ชื่องาน> (จบที่โฟลเดอร์) · ไม่มี → กฎกลางเดิม (path ไฟล์)
+  const buildPath = (name: string, ext = fileExt) => {
+    const bp = brandFolderPath(name, brandId, artTypesSel[0], brandBase, typeSub);
+    if (bp) return bp;
     const base = rule.base_paths[0]; if (!base) return "";
     return name.trim() ? `${base.replace(/[\\/]+$/, "")}\\${name.trim()}${ext}` : "";
   };
@@ -1116,13 +1122,14 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
       setFileExt(ext);
       const nm = title.trim() || nameNoExt;
       if (!title.trim()) setTitle(nameNoExt);   // ดึงชื่อจากชื่อไฟล์ (ถ้ายังไม่มีชื่อ)
-      // เติม path = โฟลเดอร์มาตรฐาน + ชื่อ + นามสกุล (ตามชื่อในฟอร์ม — เบราว์เซอร์อ่าน path จริงไม่ได้)
       if (pathAuto) setMasterPath(buildPath(nm, ext));
     }
   };
 
   // ลากรูปมาวางบนหน้าคลัง → เปิด popup พร้อมรูปที่ลากมา
   useEffect(() => { if (initialFile) pick(initialFile); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // เลือกแบรนด์/ชนิด หรือแม็ปโหลดเสร็จ → เติม path ตามแบรนด์ใหม่ (ถ้ายัง auto อยู่)
+  useEffect(() => { if (pathAuto && title.trim()) setMasterPath(buildPath(title)); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [brandId, artTypesSel, brandBase, typeSub]);
 
   const save = async () => {
     if (!file) { toast.error("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)"); return; }
@@ -1284,7 +1291,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
 }
 
 // ── เพิ่ม Artwork หลายรูปพร้อมกัน (ตาราง inline) — ลากหลายไฟล์ → 1 แถว/ไฟล์ → แก้แล้วบันทึกทีเดียว ──
-type MassRow = { id: number; file: File; preview: string | null; name: string; types: string[]; path: string; url: string; srcFiles: File[]; sizes: AssetSize[]; parentCodes: string[] };
+type MassRow = { id: number; file: File; preview: string | null; name: string; types: string[]; path: string; url: string; srcFiles: File[]; sizes: AssetSize[]; parentCodes: string[]; pathAuto: boolean };
 function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initialFiles }: {
   actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFiles?: File[] | null;
 }) {
@@ -1301,19 +1308,28 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [rule] = useArtworkPathRule();
+  const { brandBase, typeSub } = useDriveFolderMaps();
   const inputRef = useRef<HTMLInputElement>(null);
   const idRef = useRef(0);
   const base = rule.base_paths[0];
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
 
-  const makeRow = (f: File): MassRow => ({
-    id: ++idRef.current, file: f,
-    preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
-    name: f.name.replace(/\.[^.]+$/, ""), types: [...batchTypes],
-    path: base ? `${base.replace(/[\\/]+$/, "")}\\${f.name}` : "", url: "",
-    srcFiles: [], sizes: [], parentCodes: [],
-  });
+  // path ต้นฉบับตามแบรนด์: <ฐานในเครื่อง>\<ซับชนิด>\<ชื่องาน> (จบที่โฟลเดอร์) · ไม่มีฐานแบรนด์ → กฎกลาง\<ชื่องาน>
+  const massPath = (name: string, types: string[]) => {
+    const bp = brandFolderPath(name, batchBrandId, types[0], brandBase, typeSub);
+    if (bp) return bp;
+    return base && name.trim() ? `${base.replace(/[\\/]+$/, "")}\\${name.trim()}` : "";
+  };
+  const makeRow = (f: File): MassRow => {
+    const name = f.name.replace(/\.[^.]+$/, ""); const types = [...batchTypes];
+    return {
+      id: ++idRef.current, file: f,
+      preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
+      name, types, path: massPath(name, types), url: "",
+      srcFiles: [], sizes: [], parentCodes: [], pathAuto: true,
+    };
+  };
   const addFiles = (files: FileList | File[]) => {
     const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
     if (imgs.length) setRows((r) => [...r, ...imgs.map(makeRow)]);
@@ -1321,8 +1337,13 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   };
   // ลากหลายรูปมาวางบนหน้าคลัง → เปิด popup พร้อมรูปทั้งหมด
   useEffect(() => { if (initialFiles?.length) addFiles(initialFiles); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // เลือกแบรนด์ หรือแม็ปโหลดเสร็จ → เติม path ตามแบรนด์ให้แถวที่ยัง auto อยู่
+  useEffect(() => { setRows((rs) => rs.map((x) => x.pathAuto ? { ...x, path: massPath(x.name, x.types) } : x)); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [batchBrandId, brandBase, typeSub]);
   const setRow = (id: number, patch: Partial<MassRow>) => setRows((r) => r.map((x) => (x.id === id ? { ...x, ...patch } : x)));
-  const applyTypesToAll = () => setRows((r) => r.map((x) => ({ ...x, types: [...batchTypes] })));
+  // แก้ชื่อ/ชนิด → เติม path ใหม่ถ้ายัง auto · แก้ path เอง → หยุด auto
+  const setName = (id: number, v: string) => setRows((r) => r.map((x) => x.id === id ? { ...x, name: v, path: x.pathAuto ? massPath(v, x.types) : x.path } : x));
+  const setTypes = (id: number, v: string[]) => setRows((r) => r.map((x) => x.id === id ? { ...x, types: v, path: x.pathAuto ? massPath(x.name, v) : x.path } : x));
+  const applyTypesToAll = () => setRows((r) => r.map((x) => ({ ...x, types: [...batchTypes], path: x.pathAuto ? massPath(x.name, [...batchTypes]) : x.path })));
 
   const save = async () => {
     if (rows.length === 0) { toast.error("ยังไม่มีรายการ — ลากไฟล์รูปเข้ามาก่อน"); return; }
@@ -1419,18 +1440,18 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
                   : <span className="text-2xl shrink-0">🎨</span>}
                 <div className="flex-1 min-w-0 space-y-1.5">
                   <div className="flex items-center gap-2">
-                    <input value={r.name} onChange={(e) => setRow(r.id, { name: e.target.value })} placeholder="ชื่อรูป"
+                    <input value={r.name} onChange={(e) => setName(r.id, e.target.value)} placeholder="ชื่อรูป"
                       className="flex-1 h-8 px-2 text-[12px] border border-slate-200 rounded" />
                     <button type="button" onClick={() => setRows((list) => list.filter((x) => x.id !== r.id))} disabled={busy} title="ลบรูปนี้"
                       className="h-7 w-7 text-rose-500 hover:bg-rose-50 rounded shrink-0">🗑</button>
                   </div>
-                  <ArtTypeMultiSelect value={r.types} types={artTypeList} onChange={(v) => setRow(r.id, { types: v })} onCreated={(t) => setArtTypeList((c) => [...c, t])} />
+                  <ArtTypeMultiSelect value={r.types} types={artTypeList} onChange={(v) => setTypes(r.id, v)} onCreated={(t) => setArtTypeList((c) => [...c, t])} />
                 </div>
               </div>
 
               {/* path ต้นฉบับ / ลิงก์ */}
               <div className="grid grid-cols-2 gap-2 mt-2">
-                <input value={r.path} onChange={(e) => setRow(r.id, { path: e.target.value })} placeholder={base ? "path NAS…" : "\\\\nas\\… หรือ Z:\\…"}
+                <input value={r.path} onChange={(e) => setRow(r.id, { path: e.target.value, pathAuto: false })} placeholder={base ? "path NAS…" : "\\\\nas\\… หรือ Z:\\…"}
                   className="h-8 px-2 text-[11px] font-mono border border-slate-200 rounded" />
                 <input value={r.url} onChange={(e) => setRow(r.id, { url: e.target.value })} placeholder="ลิงก์ Drive / Synology (ถ้ามี)"
                   className="h-8 px-2 text-[11px] border border-slate-200 rounded" />
@@ -1836,6 +1857,40 @@ function pathMatchesRule(path: string, basePaths: string[]): boolean {
   return basePaths.some((b) => b.trim() && p.startsWith(norm(b)));
 }
 
+// ต่อ path แบบ Windows: base คงรูป (drive letter / UNC) + ต่อชั้นถัด ๆ ด้วย "\" ข้ามชั้นที่ว่าง
+function winJoin(base: string, ...rest: string[]): string {
+  const b = base.trim().replace(/[\\/]+$/, "");
+  const tail = rest.map((p) => p.trim().replace(/^[\\/]+|[\\/]+$/g, "")).filter(Boolean);
+  return [b, ...tail].filter(Boolean).join("\\");
+}
+
+// แม็ป แบรนด์ → path ในเครื่อง (ฐาน) + ชนิด → ชื่อซับโฟลเดอร์ (ใช้ auto-fill master_path ให้ตรงโครง Drive)
+function useDriveFolderMaps(): { brandBase: Record<string, string>; typeSub: Record<string, string> } {
+  const [brandBase, setBrandBase] = useState<Record<string, string>>({});
+  const [typeSub, setTypeSub] = useState<Record<string, string>>({});
+  useEffect(() => {
+    apiFetch("/api/drive/brand-folders").then((r) => r.json()).then((j) => {
+      const m: Record<string, string> = {};
+      for (const r of (j.data ?? []) as { brand_id: string; local_base_path?: string | null }[]) if (r.local_base_path) m[r.brand_id] = r.local_base_path;
+      setBrandBase(m);
+    }).catch(() => {});
+    apiFetch("/api/drive/folders").then((r) => r.json()).then((j) => {
+      const m: Record<string, string> = {};
+      for (const r of (j.data ?? []) as { artwork_type: string; subfolder_name?: string | null }[]) if (r.subfolder_name) m[r.artwork_type] = r.subfolder_name;
+      setTypeSub(m);
+    }).catch(() => {});
+  }, []);
+  return { brandBase, typeSub };
+}
+// สร้าง path โฟลเดอร์ต้นฉบับตามแบรนด์: <ฐานในเครื่อง> \ <ซับตามชนิด> \ <ชื่องาน> (จบที่โฟลเดอร์ — ไม่ใส่นามสกุล)
+// ไม่มีฐานของแบรนด์ = คืน "" (ให้ผู้เรียก fallback ไปกฎเดิม)
+function brandFolderPath(name: string, brandId: string, firstType: string | undefined, brandBase: Record<string, string>, typeSub: Record<string, string>): string {
+  const nm = name.trim(); if (!nm) return "";
+  const base = brandId ? brandBase[brandId] : ""; if (!base) return "";
+  const sub = firstType ? (typeSub[firstType] || firstType) : "";
+  return winJoin(base, sub, nm);
+}
+
 // ตั้งค่าโฟลเดอร์ Drive: แบรนด์ → โฟลเดอร์ฐาน · ชนิด → ชื่อซับโฟลเดอร์ (โชว์เมื่อ Drive ตั้งค่าแล้ว)
 function DriveFolderMap() {
   const toast = useToast();
@@ -1844,15 +1899,16 @@ function DriveFolderMap() {
   const [types, setTypes] = useState<string[]>([]);
   const [bDraft, setBDraft] = useState<Record<string, string>>({});   // brand_id → folder id
   const [bLabel, setBLabel] = useState<Record<string, string>>({});   // brand_id → ชื่อโฟลเดอร์ (ตรวจแล้ว)
+  const [bLocal, setBLocal] = useState<Record<string, string>>({});   // brand_id → path ในเครื่อง (ฐาน)
   const [tDraft, setTDraft] = useState<Record<string, string>>({});   // type → subfolder name
   useEffect(() => {
     apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {});
     apiFetch("/api/lookups?type=artwork_type").then((r) => r.json()).then((j) => setTypes(((j.data ?? []) as { name: string }[]).map((x) => x.name).filter(Boolean))).catch(() => {});
     apiFetch("/api/drive/brand-folders").then((r) => r.json()).then((j) => {
       setDriveOn(!!j.configured);
-      const d: Record<string, string> = {}, l: Record<string, string> = {};
-      for (const r of (j.data ?? []) as { brand_id: string; folder_id: string; folder_label: string | null }[]) { d[r.brand_id] = r.folder_id; l[r.brand_id] = r.folder_label ?? ""; }
-      setBDraft(d); setBLabel(l);
+      const d: Record<string, string> = {}, l: Record<string, string> = {}, lo: Record<string, string> = {};
+      for (const r of (j.data ?? []) as { brand_id: string; folder_id: string | null; folder_label: string | null; local_base_path: string | null }[]) { d[r.brand_id] = r.folder_id ?? ""; l[r.brand_id] = r.folder_label ?? ""; lo[r.brand_id] = r.local_base_path ?? ""; }
+      setBDraft(d); setBLabel(l); setBLocal(lo);
     }).catch(() => {});
     apiFetch("/api/drive/folders").then((r) => r.json()).then((j) => {
       const d: Record<string, string> = {};
@@ -1862,11 +1918,12 @@ function DriveFolderMap() {
   }, []);
   const saveBrand = async (id: string) => {
     const fid = (bDraft[id] ?? "").trim();
+    const lbp = (bLocal[id] ?? "").trim();
     try {
-      if (!fid) { await apiFetch(`/api/drive/brand-folders?brand_id=${encodeURIComponent(id)}`, { method: "DELETE" }); setBLabel((m) => { const n = { ...m }; delete n[id]; return n; }); toast.success("ล้างแล้ว"); return; }
-      const res = await apiFetch("/api/drive/brand-folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: id, folder_id: fid }) });
+      if (!fid && !lbp) { await apiFetch(`/api/drive/brand-folders?brand_id=${encodeURIComponent(id)}`, { method: "DELETE" }); setBLabel((m) => { const n = { ...m }; delete n[id]; return n; }); toast.success("ล้างแล้ว"); return; }
+      const res = await apiFetch("/api/drive/brand-folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: id, folder_id: fid, local_base_path: lbp }) });
       const j = await res.json(); if (!res.ok || j.error) { toast.error(j.error || "บันทึกไม่สำเร็จ"); return; }
-      setBLabel((m) => ({ ...m, [id]: j.folder_label ?? "" })); toast.success("บันทึก + ตรวจโฟลเดอร์แล้ว");
+      setBLabel((m) => ({ ...m, [id]: j.folder_label ?? "" })); toast.success("บันทึกแล้ว");
     } catch { toast.error("บันทึกไม่สำเร็จ"); }
   };
   const saveType = async (t: string) => {
@@ -1880,16 +1937,26 @@ function DriveFolderMap() {
   return (
     <>
       <div className="mt-4 pt-3 border-t border-slate-100">
-        <p className="text-[12px] text-slate-600 font-medium">📁 โฟลเดอร์ Drive ตามแบรนด์ (folder id ฐานของแต่ละแบรนด์)</p>
-        <p className="text-[11px] text-slate-400 mb-2">ต้องแชร์โฟลเดอร์ให้ service account ก่อน · ปล่อยว่าง = ใช้โฟลเดอร์แม่</p>
-        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+        <p className="text-[12px] text-slate-600 font-medium">📁 โฟลเดอร์ตามแบรนด์ (Drive folder id + path ในเครื่อง)</p>
+        <p className="text-[11px] text-slate-400 mb-2">Drive folder id = ที่อัปไฟล์ขึ้น (ต้องแชร์ให้ service account) · path ในเครื่อง = ฐานสำหรับเติมช่อง “path ต้นฉบับ” อัตโนมัติ เช่น <span className="font-mono">G:\Shared drives\Louis Montini\[01] Catalogs\01_Assets\[01] Louis Montini</span></p>
+        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
           {brands.map((b) => (
-            <div key={b.id} className="flex items-center gap-2">
-              <span className="w-28 text-[12px] text-slate-600 truncate shrink-0" title={b.name}>{b.name}</span>
-              <input value={bDraft[b.id] ?? ""} onChange={(e) => setBDraft((d) => ({ ...d, [b.id]: e.target.value }))} placeholder="folder id"
-                className="flex-1 h-8 px-2 text-[12px] font-mono border border-slate-200 rounded" />
-              {bLabel[b.id] && <span className="text-[11px] text-emerald-600 truncate max-w-[90px] shrink-0" title={bLabel[b.id]}>✓ {bLabel[b.id]}</span>}
-              <button type="button" onClick={() => saveBrand(b.id)} className="h-8 px-2 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">บันทึก</button>
+            <div key={b.id} className="rounded-lg border border-slate-100 bg-slate-50/60 p-2">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="flex-1 text-[12px] text-slate-700 font-medium truncate" title={b.name}>{b.name}</span>
+                {bLabel[b.id] && <span className="text-[11px] text-emerald-600 truncate max-w-[120px] shrink-0" title={bLabel[b.id]}>✓ {bLabel[b.id]}</span>}
+                <button type="button" onClick={() => saveBrand(b.id)} className="h-7 px-2.5 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">บันทึก</button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-24 text-[11px] text-slate-400 shrink-0">Drive folder id</span>
+                <input value={bDraft[b.id] ?? ""} onChange={(e) => setBDraft((d) => ({ ...d, [b.id]: e.target.value }))} placeholder="ปล่อยว่าง = ใช้โฟลเดอร์แม่"
+                  className="flex-1 h-7 px-2 text-[12px] font-mono border border-slate-200 rounded" />
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="w-24 text-[11px] text-slate-400 shrink-0">path ในเครื่อง</span>
+                <input value={bLocal[b.id] ?? ""} onChange={(e) => setBLocal((d) => ({ ...d, [b.id]: e.target.value }))} placeholder="G:\Shared drives\…\[01] Louis Montini"
+                  className="flex-1 h-7 px-2 text-[12px] font-mono border border-slate-200 rounded" />
+              </div>
             </div>
           ))}
           {brands.length === 0 && <p className="text-[11px] text-slate-400">ยังไม่มีแบรนด์</p>}
