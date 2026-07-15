@@ -684,8 +684,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     const cur = scheduledAt.slice(11, 16);
     const items = (recTimes[String(day)] ?? []).filter((it) => it.time && it.time !== cur);
     if (!items.length) return null;
-    return { items, label: ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."][day] };
-  }, [scheduledAt, recTimes]);
+    return { items, label: t(["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."][day], ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]) };
+  }, [scheduledAt, recTimes, t]);
   const applyRecommendedTime = (tm: string) => setScheduledAt(`${scheduledAt.slice(0, 10)}T${tm}`);
   // ตัวแปรสินค้าที่ใช้ร่วมทุก caption (ไม่รวม caption/hashtags ที่ต่างกันต่อแพลตฟอร์ม)
   const sharedVars = useMemo(() => ({

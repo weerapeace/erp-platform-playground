@@ -7,7 +7,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useT } from "@/components/i18n";
+import { useT, useLang } from "@/components/i18n";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { StandaloneShell } from "@/components/standalone-shell";
@@ -29,6 +29,10 @@ import { ContentDrawer } from "../../content/content";
 import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow } from "@/app/api/assets/shared";
 import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
+import { getLang } from "@/lib/lang";
+
+// แปลข้อความบน "การ์ด" (ฟังก์ชัน module-level ไม่มี hook) — อ่านภาษาปัจจุบันตรง ๆ · การ์ดจะ re-sync ตอนสลับภาษา
+const tt = (th: string, en: string) => (getLang() === "en" ? en : th);
 
 // โหลดของกลาง Excalidraw แบบ dynamic -- ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
@@ -42,7 +46,7 @@ type Toast = { id: number; type: "success" | "error" | "info"; message: string }
 type ParentSkuVal = { id: string; code: string; name: string; image_url: string | null };
 
 // โซนสำเร็จรูปสำหรับกระดานแคมเปญ
-const SECTION_PRESETS = ["Brainstorming (ไอเดีย)", "Reference", "Information (ข้อมูล)", "Products (สินค้าใน Campaign)", "Tasks (งาน)"];
+const sectionPresets = (): string[] => [tt("ไอเดีย (Brainstorming)", "Brainstorming"), "Reference", tt("ข้อมูล (Information)", "Information"), tt("สินค้าใน Campaign", "Products in Campaign"), tt("งาน (Tasks)", "Tasks")];
 
 // การ์ด SKU บน Excalidraw: รูป(บน) + ข้อความ(ล่าง) ในกล่อง -- customData = snapshot สำหรับ drawer (ดับเบิลคลิกการ์ดเปิด)
 function skuCardSkeleton(s: SkuPickerValue): Record<string, unknown>[] {
@@ -115,21 +119,21 @@ function contentCardText(c: ContentCardInfo): string {
   const st = c.status ? ` · ${c.status}` : "";
   const cap = (c.caption ?? "").trim();
   const capLine = cap ? `\n\n📝 ${cap.slice(0, 120)}${cap.length > 120 ? "…" : ""}` : "";
-  return `📱 ${c.title ?? ""}\n${c.content_no ?? ""}${st}\n${sched}แพลตฟอร์ม: ${platLine}${capLine}`;
+  return `📱 ${c.title ?? ""}\n${c.content_no ?? ""}${st}\n${sched}${tt("แพลตฟอร์ม", "Platforms")}: ${platLine}${capLine}`;
 }
 // สถานะโพสต์ต่อแพลตฟอร์ม (post_status[platform]) → บรรทัดเด่น + สีขอบการ์ด
 function postStatusStyle(s?: string | null): { line: string; stroke: string } {
   switch (s) {
-    case "posted": return { line: "✅ โพสต์แล้ว", stroke: "#16a34a" };       // เขียว
-    case "scheduled": return { line: "⏰ ตั้งเวลาโพสต์แล้ว", stroke: "#2563eb" }; // น้ำเงิน
-    case "skip": return { line: "⏭️ ข้ามแพลตฟอร์มนี้", stroke: "#94a3b8" };    // เทา
-    default: return { line: "🟠 ยังไม่โพสต์", stroke: "#f59e0b" };            // ส้ม (ค่าเริ่มต้น)
+    case "posted": return { line: `✅ ${tt("โพสต์แล้ว", "Posted")}`, stroke: "#16a34a" };       // เขียว
+    case "scheduled": return { line: `⏰ ${tt("ตั้งเวลาโพสต์แล้ว", "Scheduled")}`, stroke: "#2563eb" }; // น้ำเงิน
+    case "skip": return { line: `⏭️ ${tt("ข้ามแพลตฟอร์มนี้", "Skipped")}`, stroke: "#94a3b8" };    // เทา
+    default: return { line: `🟠 ${tt("ยังไม่โพสต์", "Not posted")}`, stroke: "#f59e0b" };            // ส้ม (ค่าเริ่มต้น)
   }
 }
 // ข้อความบนการ์ดรายแพลตฟอร์ม — สถานะโพสต์เด่นบนสุด
 function perPlatformCardText(c: ContentCardInfo, platform: string, caption?: string | null, postStatus?: string | null): string {
   const cap = (caption ?? "").trim();
-  const capLine = cap ? `\n\n${cap.slice(0, 140)}${cap.length > 140 ? "…" : ""}` : "\n\n— ยังไม่มีแคปชั่น —";
+  const capLine = cap ? `\n\n${cap.slice(0, 140)}${cap.length > 140 ? "…" : ""}` : `\n\n— ${tt("ยังไม่มีแคปชั่น", "No caption yet")} —`;
   const st = c.status ? ` · ${c.status}` : "";
   return `${postStatusStyle(postStatus).line}\n📱 ${platform}\n${c.title ?? ""}\n${c.content_no ?? ""}${st}${capLine}`;
 }
@@ -174,9 +178,9 @@ function taskCardSkeleton(t: CreatedTask): Record<string, unknown>[] {
   const data = { kind: "task", id: t.id, task_no: t.task_no, title: t.title, subtasks: t.subtasks };
   const shown = t.subtasks.slice(0, 6);
   const subLines = t.subtasks.length
-    ? shown.map((s) => `☐ ${s.title}`).join("\n") + (t.subtasks.length > 6 ? `\n… อีก ${t.subtasks.length - 6}` : "")
-    : "— ยังไม่มีงานย่อย —";
-  const text = `✅ ${t.title}\n${t.task_no}\n\nงานย่อย (${t.subtasks.length})\n${subLines}`;
+    ? shown.map((s) => `☐ ${s.title}`).join("\n") + (t.subtasks.length > 6 ? `\n… ${tt("อีก", "+")} ${t.subtasks.length - 6}` : "")
+    : `— ${tt("ยังไม่มีงานย่อย", "No subtasks yet")} —`;
+  const text = `✅ ${t.title}\n${t.task_no}\n\n${tt("งานย่อย", "Subtasks")} (${t.subtasks.length})\n${subLines}`;
   const W = 260, H = 96 + (Math.max(shown.length, 1) + (t.subtasks.length > 6 ? 1 : 0)) * 19;
   return [
     { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#f5f3ff", strokeColor: "#8b5cf6", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
@@ -344,9 +348,9 @@ export default function CampaignCanvasPage() {
       const subs = await listSubtasks(id);
       const shown = subs.slice(0, 6);
       const subLines = subs.length
-        ? shown.map((s) => `${(s.status === "approved" || s.status === "posted" || s.status === "done") ? "☑" : "☐"} ${s.title}`).join("\n") + (subs.length > 6 ? `\n… อีก ${subs.length - 6}` : "")
-        : "— ยังไม่มีงานย่อย —";
-      const text = `✅ ${data.title ?? ""}\n${data.task_no ?? ""}\n\nงานย่อย (${subs.length})\n${subLines}`;
+        ? shown.map((s) => `${(s.status === "approved" || s.status === "posted" || s.status === "done") ? "☑" : "☐"} ${s.title}`).join("\n") + (subs.length > 6 ? `\n… ${tt("อีก", "+")} ${subs.length - 6}` : "")
+        : `— ${tt("ยังไม่มีงานย่อย", "No subtasks yet")} —`;
+      const text = `✅ ${data.title ?? ""}\n${data.task_no ?? ""}\n\n${tt("งานย่อย", "Subtasks")} (${subs.length})\n${subLines}`;
       return { text, data: { subtasks: subs.map((s) => ({ title: s.title })) } };
     });
   }, []);
@@ -370,6 +374,10 @@ export default function CampaignCanvasPage() {
     });
   }, []);
   const onBoardReady = useCallback(() => { syncTaskCards(); syncContentCards(); }, [syncTaskCards, syncContentCards]);
+  // สลับภาษา → รีเฟรชข้อความบนการ์ด (การ์ดเป็น snapshot · ข้าม mount แรก ให้ onReady จัดการ)
+  const { lang } = useLang();
+  const langMountRef = useRef(false);
+  useEffect(() => { if (!langMountRef.current) { langMountRef.current = true; return; } syncTaskCards(); syncContentCards(); }, [lang, syncTaskCards, syncContentCards]);
 
   if (err) return <StandaloneShell title={t("แคมเปญ", "Campaign")} icon="📣" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
 
@@ -506,7 +514,7 @@ export default function CampaignCanvasPage() {
         <div className="space-y-3">
           <p className="text-xs text-slate-400">{t("เลือกโซนสำเร็จรูป (กดแล้ววางบนกระดานเลย)", "Choose a preset section (click to place it on the board)")}</p>
           <div className="grid grid-cols-1 gap-1.5">
-            {SECTION_PRESETS.map((s) => (
+            {sectionPresets().map((s) => (
               <button key={s} onClick={() => insertSection(s)} className="w-full text-left h-10 px-3 rounded-lg border border-slate-200 text-sm text-slate-700 hover:border-violet-300 hover:bg-violet-50/40">{s}</button>
             ))}
           </div>

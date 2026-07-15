@@ -22,6 +22,7 @@ import "@excalidraw/excalidraw/index.css";
 import "./thai-fonts.css";   // เติมฟอนต์ไทยให้ family ของ Excalidraw (unicode-range เฉพาะไทย)
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
+import { useT } from "@/components/i18n";
 import { avatarSrc } from "@/lib/r2-image";
 import { isUnloadSuppressed } from "@/lib/canvas-unload-guard";
 import { useCanvasRealtime } from "./use-canvas-realtime";
@@ -29,7 +30,7 @@ import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mer
 
 const Excalidraw = dynamic(async () => (await import("@excalidraw/excalidraw")).Excalidraw, {
   ssr: false,
-  loading: () => <div className="h-full flex items-center justify-center text-slate-400 text-sm">กำลังโหลดกระดาน...</div>,
+  loading: () => <div className="h-full flex items-center justify-center text-slate-400 text-sm">Loading board...</div>,
 });
 
 /** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
@@ -63,6 +64,7 @@ export function CanvasSketch({
   /** เรียกครั้งเดียวเมื่อกระดานโหลดเสร็จพร้อมใช้ (ใช้ซิงค์การ์ดสด ฯลฯ) */
   onReady?: () => void;
 }) {
+  const t = useT();
   const [scene, setScene] = useState<Scene | "loading">("loading");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [savedAt, setSavedAt] = useState<string | null>(null); // เวลาเซฟล่าสุด (โชว์ให้รู้ว่าบันทึกแล้วทุกครั้ง)
@@ -651,7 +653,7 @@ export function CanvasSketch({
   // ล้างกระดานทั้งหมด (ตั้งใจ) — มาร์คทุกชิ้นเป็นลบ + เซฟว่าง (ข้ามตัวกันเซฟว่าง) + ซิงค์ให้คนอื่น
   const clearBoard = () => {
     const api = apiRef.current; if (!api) return;
-    if (!window.confirm("ล้างกระดานทั้งหมด? ลบทุกอย่างออก (กู้คืนไม่ได้)")) return;
+    if (!window.confirm(t("ล้างกระดานทั้งหมด? ลบทุกอย่างออก (กู้คืนไม่ได้)", "Clear the whole board? Deletes everything (cannot undo)"))) return;
     const all = api.getSceneElementsIncludingDeleted() as any[];
     const cleared = all.map((e) => e.isDeleted ? e : { ...e, isDeleted: true, version: (e.version ?? 0) + 1 });
     api.updateScene({ elements: cleared });
@@ -699,7 +701,7 @@ export function CanvasSketch({
       const st = api.getAppState();
       const center = lib.viewportCoordsToSceneCoords(
         { clientX: (st.offsetLeft ?? 0) + (st.width ?? 800) / 2, clientY: (st.offsetTop ?? 0) + (st.height ?? 600) / 2 }, st);
-      const authorName = user?.name || "ไม่ทราบชื่อ";
+      const authorName = user?.name || t("ไม่ทราบชื่อ", "Unknown");
       const color = user?.id ? userColor(user.id) : "#eab308";
       const when = new Date().toLocaleString("th-TH", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
       const full = `💬 ${authorName} · ${when}\n${body}`;
@@ -768,7 +770,7 @@ export function CanvasSketch({
       const b = toScene(Math.max(c0.x, c1.x), Math.max(c0.y, c1.y));
       const inside = (api.getSceneElements() as any[]).filter((el) =>
         !el.isDeleted && el.x < b.x && el.x + (el.width || 0) > a.x && el.y < b.y && el.y + (el.height || 0) > a.y);
-      if (!inside.length) { setCapArmed(false); setCapBox(null); setCapMsg(null); setTimeout(() => window.alert("ไม่มีอะไรในกรอบที่เลือก ลองลากคลุมใหม่"), 0); return; }
+      if (!inside.length) { setCapArmed(false); setCapBox(null); setCapMsg(null); setTimeout(() => window.alert(t("ไม่มีอะไรในกรอบที่เลือก ลองลากคลุมใหม่", "Nothing inside the selected area — try again")), 0); return; }
       const lib: any = await import("@excalidraw/excalidraw");
       const blob: Blob = await lib.exportToBlob({
         elements: inside, files: api.getFiles(), mimeType: "image/jpeg", quality: 0.92, maxWidthOrHeight: 1600,
@@ -788,20 +790,20 @@ export function CanvasSketch({
       fd.append("folder", "canvas-line");
       fd.append("no_library", "1"); // รูปแคป — ไม่ลงคลังกลาง
       const up = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-      const uj = await up.json(); if (uj.error || !uj.r2_key) throw new Error(uj.error || "อัปโหลดรูปไม่สำเร็จ");
+      const uj = await up.json(); if (uj.error || !uj.r2_key) throw new Error(uj.error || t("อัปโหลดรูปไม่สำเร็จ", "Image upload failed"));
       const res = await apiFetch("/api/canvas-line/send", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image_key: uj.r2_key, caption: capCaption, entity_type: entityType, entity_id: entityId }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      setCapMsg("✓ ส่งเข้ากลุ่ม LINE แล้ว");
+      setCapMsg(t("✓ ส่งเข้ากลุ่ม LINE แล้ว", "✓ Sent to LINE group"));
       setTimeout(() => closeCap(), 1200);
-    } catch (e) { setCapMsg("⚠ " + ((e as Error).message || "ส่งไม่สำเร็จ")); }
+    } catch (e) { setCapMsg("⚠ " + ((e as Error).message || t("ส่งไม่สำเร็จ", "Send failed"))); }
     finally { setCapSending(false); }
   };
 
   if (scene === "loading") {
-    return <div className="flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl" style={{ height }}>กำลังโหลดกระดาน...</div>;
+    return <div className="flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl" style={{ height }}>{t("กำลังโหลดกระดาน...", "Loading board...")}</div>;
   }
 
   return (
@@ -809,11 +811,11 @@ export function CanvasSketch({
       <div className={`flex flex-wrap items-center gap-2${stickyTop != null ? " sticky z-30 bg-white/95 backdrop-blur border-b border-slate-100 py-1.5 -mx-1 px-1" : ""}`}
         style={stickyTop != null ? { top: stickyTop } : undefined}>
         <span className="text-xs text-slate-400 flex-1 min-w-[200px]">
-          🖼 วางรูป = copy แล้วกด Ctrl+V ในกระดาน · ⬛ กล่อง=R · ➡ ลูกศร=A · 🔤 ข้อความ=T · ✏ วาด=P
+          {t("🖼 วางรูป = copy แล้วกด Ctrl+V ในกระดาน · ⬛ กล่อง=R · ➡ ลูกศร=A · 🔤 ข้อความ=T · ✏ วาด=P", "🖼 Paste image = copy then Ctrl+V on board · ⬛ Box=R · ➡ Arrow=A · 🔤 Text=T · ✏ Draw=P")}
         </span>
         {editable && serverCanEdit && selFont != null && (
           <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5">
-            <span className="text-slate-400">ขนาดอักษร</span>
+            <span className="text-slate-400">{t("ขนาดอักษร", "Font size")}</span>
             <button onClick={() => { setFont(selFont - 2); blurActive(); }} className="h-5 w-5 rounded hover:bg-slate-100">−</button>
             <input type="number" value={selFont} onChange={(e) => { const v = parseInt(e.target.value || "0", 10); if (v) setFont(v); }} className="w-12 h-6 text-center border border-slate-200 rounded" />
             <button onClick={() => { setFont(selFont + 2); blurActive(); }} className="h-5 w-5 rounded hover:bg-slate-100">＋</button>
@@ -821,35 +823,35 @@ export function CanvasSketch({
         )}
         {editable && serverCanEdit && selFont != null && (
           <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5">
-            <span className="text-slate-400">รายการ</span>
-            <button onClick={() => { listifySelected("bullet"); blurActive(); }} title="ทำหัวข้อย่อย (•) ให้ข้อความที่เลือก" className="h-5 px-1.5 rounded hover:bg-slate-100">• –</button>
-            <button onClick={() => { listifySelected("number"); blurActive(); }} title="ใส่เลขลำดับ (1. 2. 3.) ให้ข้อความที่เลือก" className="h-5 px-1.5 rounded hover:bg-slate-100">1.</button>
+            <span className="text-slate-400">{t("รายการ", "List")}</span>
+            <button onClick={() => { listifySelected("bullet"); blurActive(); }} title={t("ทำหัวข้อย่อย (•) ให้ข้อความที่เลือก", "Bullet the selected text")} className="h-5 px-1.5 rounded hover:bg-slate-100">• –</button>
+            <button onClick={() => { listifySelected("number"); blurActive(); }} title={t("ใส่เลขลำดับ (1. 2. 3.) ให้ข้อความที่เลือก", "Number the selected text")} className="h-5 px-1.5 rounded hover:bg-slate-100">1.</button>
           </span>
         )}
         {editable && serverCanEdit && selFont != null && (
-          <button onClick={() => { void translateSelected(); blurActive(); }} disabled={translating} title="แปลข้อความที่เลือก ไทย↔อังกฤษ (วางกล่องใหม่ข้างๆ)"
+          <button onClick={() => { void translateSelected(); blurActive(); }} disabled={translating} title={t("แปลข้อความที่เลือก ไทย↔อังกฤษ (วางกล่องใหม่ข้างๆ)", "Translate selected text TH↔EN (places a copy beside it)")}
             className="inline-flex items-center gap-1 text-[11px] text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50 disabled:opacity-50">
-            {translating ? "⏳ กำลังแปล..." : "🌐 แปลภาษา"}
+            {translating ? t("⏳ กำลังแปล...", "⏳ Translating...") : t("🌐 แปลภาษา", "🌐 Translate")}
           </button>
         )}
         {editable && serverCanEdit && (
           <div className="relative">
-            <button onClick={() => setNoteOpen((o) => !o)} title="เพิ่มโน้ตคอมเมนต์ (มีชื่อคุณ + เวลา กำกับ)"
+            <button onClick={() => setNoteOpen((o) => !o)} title={t("เพิ่มโน้ตคอมเมนต์ (มีชื่อคุณ + เวลา กำกับ)", "Add a comment note (with your name + time)")}
               className="inline-flex items-center gap-1 text-[11px] text-amber-700 border border-amber-200 rounded-md px-2 py-0.5 hover:bg-amber-50">
-              💬 คอมเมนต์
+              💬 {t("คอมเมนต์", "Comment")}
             </button>
             {noteOpen && (
               <div className="absolute right-0 top-full mt-1 z-30 w-64 bg-white border border-slate-200 rounded-lg shadow-xl p-2">
                 {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
                 <textarea autoFocus value={noteText} onChange={(e) => setNoteText(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitNote(); } else if (e.key === "Escape") setNoteOpen(false); }}
-                  rows={3} placeholder="พิมพ์คอมเมนต์... (Ctrl+Enter = วาง)"
+                  rows={3} placeholder={t("พิมพ์คอมเมนต์... (Ctrl+Enter = วาง)", "Type a comment... (Ctrl+Enter to place)")}
                   className="w-full text-sm border border-slate-200 rounded-md p-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-amber-300" />
                 <div className="flex items-center justify-between mt-1.5">
-                  <span className="text-[10px] text-slate-400">ใส่ชื่อ {user?.name || "คุณ"} + เวลาให้อัตโนมัติ</span>
+                  <span className="text-[10px] text-slate-400">{t("ใส่ชื่อ", "Adds")} {user?.name || t("คุณ", "you")} {t("+ เวลาให้อัตโนมัติ", "+ time automatically")}</span>
                   <div className="flex gap-1">
-                    <button onClick={() => { setNoteOpen(false); setNoteText(""); }} className="h-6 px-2 text-[11px] text-slate-500 rounded hover:bg-slate-100">ยกเลิก</button>
-                    <button onClick={submitNote} disabled={!noteText.trim()} className="h-6 px-2 text-[11px] text-white bg-amber-600 rounded hover:bg-amber-700 disabled:opacity-50">วางโน้ต</button>
+                    <button onClick={() => { setNoteOpen(false); setNoteText(""); }} className="h-6 px-2 text-[11px] text-slate-500 rounded hover:bg-slate-100">{t("ยกเลิก", "Cancel")}</button>
+                    <button onClick={submitNote} disabled={!noteText.trim()} className="h-6 px-2 text-[11px] text-white bg-amber-600 rounded hover:bg-amber-700 disabled:opacity-50">{t("วางโน้ต", "Place note")}</button>
                   </div>
                 </div>
               </div>
@@ -857,22 +859,22 @@ export function CanvasSketch({
           </div>
         )}
         {editable && serverCanEdit && (
-          <button onClick={() => { setCapArmed(true); setCapMsg(null); blurActive(); }} title="ลากคลุมพื้นที่ → ส่งรูปเข้ากลุ่ม LINE งาน"
+          <button onClick={() => { setCapArmed(true); setCapMsg(null); blurActive(); }} title={t("ลากคลุมพื้นที่ → ส่งรูปเข้ากลุ่ม LINE งาน", "Drag to select an area → send image to the LINE work group")}
             className={`inline-flex items-center gap-1 text-[11px] border rounded-md px-2 py-0.5 ${capArmed ? "text-white bg-green-600 border-green-600" : "text-green-700 border-green-200 hover:bg-green-50"}`}>
-            📷 {capArmed ? "ลากคลุมพื้นที่..." : "ส่ง LINE"}
+            📷 {capArmed ? t("ลากคลุมพื้นที่...", "Drag to select...") : t("ส่ง LINE", "Send LINE")}
           </button>
         )}
         {editable && serverCanEdit && (
-          <button onClick={() => { clearBoard(); blurActive(); }} title="ล้างกระดานทั้งหมด (ลบทุกอย่างออก)"
+          <button onClick={() => { clearBoard(); blurActive(); }} title={t("ล้างกระดานทั้งหมด (ลบทุกอย่างออก)", "Clear the whole board (delete everything)")}
             className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-600 border border-slate-200 hover:border-rose-200 rounded-md px-2 py-0.5">
-            🗑 ล้าง
+            🗑 {t("ล้าง", "Clear")}
           </button>
         )}
         {collab && peerList.length > 0 && (
-          <span className="inline-flex items-center gap-1.5 border border-emerald-200 bg-emerald-50 rounded-md px-2 py-0.5" title="คนที่กำลังดู/แก้กระดานนี้พร้อมคุณ">
+          <span className="inline-flex items-center gap-1.5 border border-emerald-200 bg-emerald-50 rounded-md px-2 py-0.5" title={t("คนที่กำลังดู/แก้กระดานนี้พร้อมคุณ", "People viewing/editing this board with you")}>
             <span className="flex -space-x-1.5">
               {peerList.slice(0, 6).map((p) => (
-                <span key={p.id} title={`${p.name}${p.editing ? " · กำลังแก้อยู่" : ""}`}
+                <span key={p.id} title={`${p.name}${p.editing ? t(" · กำลังแก้อยู่", " · editing") : ""}`}
                   className="relative inline-flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-white text-[9px] font-bold text-white overflow-hidden"
                   style={{ backgroundColor: p.color }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -882,10 +884,10 @@ export function CanvasSketch({
               ))}
             </span>
             {peerList.length > 6 && <span className="text-[11px] text-slate-500">+{peerList.length - 6}</span>}
-            <span className="text-[11px] text-emerald-700 font-medium">{peerList.length} คนออนไลน์</span>
+            <span className="text-[11px] text-emerald-700 font-medium">{peerList.length} {t("คนออนไลน์", "online")}</span>
           </span>
         )}
-        {editable && !serverCanEdit && <span className="text-[11px] inline-flex items-center gap-1 text-amber-600">👁 อ่านอย่างเดียว (ไม่มีสิทธิ์แก้)</span>}
+        {editable && !serverCanEdit && <span className="text-[11px] inline-flex items-center gap-1 text-amber-600">{t("👁 อ่านอย่างเดียว (ไม่มีสิทธิ์แก้)", "👁 Read-only (no edit permission)")}</span>}
       </div>
       <div ref={wrapRef} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height }}>
         {/* tooltip ลอยตอนชี้การ์ดที่มี customData.tooltip (เช่น การ์ดโฟลเดอร์) */}
@@ -899,12 +901,12 @@ export function CanvasSketch({
               saveState === "error" ? "text-rose-600 border-rose-200"
               : saveState === "saving" ? "text-blue-600 border-blue-200"
               : "text-emerald-600 border-emerald-200"}`}>
-              {saveState === "saving" ? "⏳ กำลังบันทึก..."
-              : saveState === "error" ? "⚠ บันทึกไม่สำเร็จ"
-              : savedAt ? `✓ บันทึกแล้ว${lastMerged ? " (รวมงานกับคนอื่น)" : ""} · ${savedAt}`
+              {saveState === "saving" ? t("⏳ กำลังบันทึก...", "⏳ Saving...")
+              : saveState === "error" ? t("⚠ บันทึกไม่สำเร็จ", "⚠ Save failed")
+              : savedAt ? `${t("✓ บันทึกแล้ว", "✓ Saved")}${lastMerged ? t(" (รวมงานกับคนอื่น)", " (merged with others)") : ""} · ${savedAt}`
               : ""}
             </span>
-            {saveState === "error" && <button onClick={() => void doSave(true)} className="h-6 px-2 text-[11px] bg-blue-600 text-white rounded-md hover:bg-blue-700 shadow-sm">ลองใหม่</button>}
+            {saveState === "error" && <button onClick={() => void doSave(true)} className="h-6 px-2 text-[11px] bg-blue-600 text-white rounded-md hover:bg-blue-700 shadow-sm">{t("ลองใหม่", "Retry")}</button>}
           </div>
         )}
         <Excalidraw
@@ -943,7 +945,7 @@ export function CanvasSketch({
         {/* โหมดลากคลุมพื้นที่เพื่อแคปส่ง LINE — overlay จับเมาส์ทับกระดาน */}
         {capArmed && !capModal && (
           <div className="absolute inset-0 z-40 cursor-crosshair" onMouseDown={onCapDown} onMouseMove={onCapMove} onMouseUp={onCapUp}>
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-slate-900/85 text-white text-[11px] px-3 py-1.5 rounded-full pointer-events-none whitespace-nowrap">ลากคลุมพื้นที่ที่จะส่ง LINE · Esc = ยกเลิก</div>
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-slate-900/85 text-white text-[11px] px-3 py-1.5 rounded-full pointer-events-none whitespace-nowrap">{t("ลากคลุมพื้นที่ที่จะส่ง LINE · Esc = ยกเลิก", "Drag the area to send to LINE · Esc = cancel")}</div>
             {capBox && <div className="absolute border-2 border-green-500 bg-green-400/15 pointer-events-none" style={{ left: capBox.x, top: capBox.y, width: capBox.w, height: capBox.h }} />}
           </div>
         )}
@@ -952,15 +954,15 @@ export function CanvasSketch({
       {capModal && typeof document !== "undefined" && createPortal(
         <div className="fixed inset-0 z-[9998] bg-black/50 flex items-center justify-center p-4" onClick={() => { if (!capSending) closeCap(); }}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-sm font-semibold text-slate-800 mb-2">📷 ส่งรูปเข้ากลุ่ม LINE งาน</h3>
+            <h3 className="text-sm font-semibold text-slate-800 mb-2">{t("📷 ส่งรูปเข้ากลุ่ม LINE งาน", "📷 Send image to LINE work group")}</h3>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={capModal.url} alt="preview" className="w-full max-h-64 object-contain rounded-lg border border-slate-200 bg-slate-50" />
-            <textarea value={capCaption} onChange={(e) => setCapCaption(e.target.value)} rows={2} placeholder="ข้อความประกอบ (ไม่ใส่ก็ได้)"
+            <textarea value={capCaption} onChange={(e) => setCapCaption(e.target.value)} rows={2} placeholder={t("ข้อความประกอบ (ไม่ใส่ก็ได้)", "Caption (optional)")}
               className="mt-2 w-full text-sm border border-slate-200 rounded-md p-2 resize-none focus:outline-none focus:ring-1 focus:ring-green-300" />
             {capMsg && <p className={`text-xs mt-1.5 ${capMsg.startsWith("✓") ? "text-emerald-600" : "text-rose-600"}`}>{capMsg}</p>}
             <div className="flex justify-end gap-2 mt-3">
-              <button onClick={closeCap} disabled={capSending} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-              <button onClick={() => void sendCapture()} disabled={capSending} className="h-9 px-4 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50">{capSending ? "กำลังส่ง..." : "ส่งเข้า LINE"}</button>
+              <button onClick={closeCap} disabled={capSending} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{t("ยกเลิก", "Cancel")}</button>
+              <button onClick={() => void sendCapture()} disabled={capSending} className="h-9 px-4 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50">{capSending ? t("กำลังส่ง...", "Sending...") : t("ส่งเข้า LINE", "Send to LINE")}</button>
             </div>
           </div>
         </div>, document.body)}
