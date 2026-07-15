@@ -106,6 +106,10 @@ export default function BrandsPage() {
                   <input type="checkbox" checked={!!b.is_customer_job} onChange={(e) => patchBrand(b.id, { is_customer_job: e.target.checked })} />
                   <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">👤 งานลูกค้า</span>
                 </label>
+                <label className="flex items-center gap-1.5 text-[12px] text-slate-600 cursor-pointer shrink-0" title="ซ่อนแบรนด์นี้จากตัวเลือกในคลัง Artwork">
+                  <input type="checkbox" checked={!!b.hide_in_artwork} onChange={(e) => patchBrand(b.id, { hide_in_artwork: e.target.checked })} />
+                  <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">🙈 ซ่อน Artwork</span>
+                </label>
                 <button onClick={() => { setEditingId(b.id); setEditName(b.name); }} title="แก้ชื่อ"
                   className="shrink-0 w-7 h-7 flex items-center justify-center rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">✎</button>
                 <button onClick={() => void deleteBrand(b.id, b.name)} title="ลบแบรนด์"

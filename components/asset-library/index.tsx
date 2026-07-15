@@ -959,7 +959,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
   const [brandId, setBrandId] = useState("");
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
-  useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands((j.data ?? []) as { id: string; name: string }[])).catch(() => {}); }, []);
+  useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
 
   // อัปไฟล์ต้นฉบับขึ้น Google Drive "ผ่านแอป" (เลี่ยง CORS) — สร้างโฟลเดอร์ตามชื่อ + ตั้งชื่อไฟล์ตามชื่อ → คืนลิงก์โฟลเดอร์
   const MAX_PROXY = 4 * 1024 * 1024;   // ไฟล์เล็ก ≤4MB อัปผ่านแอป · ใหญ่กว่า = อัปเอง (ลิมิต body Vercel)
@@ -1678,7 +1678,7 @@ function DriveFolderMap() {
   const [bLabel, setBLabel] = useState<Record<string, string>>({});   // brand_id → ชื่อโฟลเดอร์ (ตรวจแล้ว)
   const [tDraft, setTDraft] = useState<Record<string, string>>({});   // type → subfolder name
   useEffect(() => {
-    apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands((j.data ?? []) as { id: string; name: string }[])).catch(() => {});
+    apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {});
     apiFetch("/api/lookups?type=artwork_type").then((r) => r.json()).then((j) => setTypes(((j.data ?? []) as { name: string }[]).map((x) => x.name).filter(Boolean))).catch(() => {});
     apiFetch("/api/drive/brand-folders").then((r) => r.json()).then((j) => {
       setDriveOn(!!j.configured);
