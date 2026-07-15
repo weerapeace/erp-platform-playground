@@ -39,6 +39,8 @@ export type CanvasSketchControls = {
   isDirty: () => boolean; save: () => Promise<void>; discard: () => void;
   insert: (skeletons: Record<string, unknown>[]) => Promise<void>;
   listCards: () => { kind: string; data: Record<string, unknown> }[];
+  /** ลบการ์ด (ทั้งกลุ่ม) ที่ตรงเงื่อนไข match — เช่นลบการ์ดคอนเทนต์ทั้งหมดของ content id หนึ่งเมื่อคอนเทนต์ถูกลบ */
+  removeCards: (match: (card: { kind: string; id: string; data: Record<string, unknown> }) => boolean) => void;
   /** ซิงค์การ์ดสด — builder คืน {text?, data?, imageUrl?, images?} เพื่ออัปเดตข้อความ/รูป/snapshot
    *  imageUrl: URL รูปเดียว · images: หลายรูป [รูปใหญ่, รูปเล็ก...] (รูปแรก=รูปใหญ่บนสุด ที่เหลือ=รูปเล็กแถวล่าง) · [] / null / "" = เอารูปออก · undefined = ไม่ยุ่งกับรูป */
   refreshCards: (builder: (card: { kind: string; id: string; data: Record<string, unknown> }) => Promise<{ text?: string; data?: Record<string, unknown>; imageUrl?: string | null; images?: string[] | null; stroke?: string | null } | null>) => Promise<void>;
@@ -372,6 +374,22 @@ export function CanvasSketch({
           seen.add(key); out.push({ kind: String(d.kind), data: d });
         }
         return out;
+      },
+      // ลบการ์ดทั้งกลุ่มที่ match (เช่น content id ที่ถูกลบ) → เอา element ในกลุ่มนั้นออกจาก scene
+      removeCards: (match) => {
+        const api = apiRef.current; if (!api) return;
+        const els = api.getSceneElements() as any[];
+        const removeGids = new Set<string>();
+        for (const el of els) {
+          const gid = el?.groupIds?.[0]; const d = el?.customData as Record<string, unknown> | undefined;
+          if (!gid || !d?.kind) continue;
+          if (removeGids.has(gid)) continue;
+          try { if (match({ kind: String(d.kind), id: String(d.id ?? ""), data: d })) removeGids.add(gid); } catch { /* ข้าม */ }
+        }
+        if (!removeGids.size) return;
+        const next = els.filter((el) => { const gid = el?.groupIds?.[0]; return !(gid && removeGids.has(gid)); });
+        api.updateScene({ elements: next });
+        if (editable) queueSave();
       },
       // ซิงค์การ์ดสด: ไล่กลุ่ม (group) → builder คืน {text?, data?, imageUrl?} → อัปเดตข้อความ + รูป + snapshot
       refreshCards: async (builder) => {

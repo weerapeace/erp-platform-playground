@@ -587,7 +587,7 @@ export default function CampaignCanvasPage() {
         </div>
       </ERPModal>
 
-      {contentView && <ContentDrawer contentId={String(contentView.id ?? "")} brands={brands} onClose={() => { setContentView(null); syncContentCards(); }} onChanged={() => syncContentCards()} pushToast={pushToast} />}
+      {contentView && <ContentDrawer contentId={String(contentView.id ?? "")} brands={brands} onClose={() => { setContentView(null); syncContentCards(); }} onChanged={() => syncContentCards()} onDeleted={(cid) => { sketchRef.current?.removeCards((c) => c.kind === "content" && String(c.data.id ?? "") === cid); pushToast("info", t("เอาการ์ดคอนเทนต์ออกจากกระดานแล้ว", "Removed content card from board")); }} pushToast={pushToast} />}
 
       {drawerOpen && <CampaignDrawer campaignId={id} onClose={() => setDrawerOpen(false)} onChanged={load} pushToast={pushToast} />}
 
