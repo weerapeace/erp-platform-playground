@@ -57,9 +57,9 @@ export function ContentPageView() {
   const t = useT();
   const { platforms } = useCreativeOptions();
   const [view, setView] = useState<"list" | "table" | "calendar" | "templates">(() => {
-    if (typeof window === "undefined") return "list";
+    if (typeof window === "undefined") return "table";
     const v = new URLSearchParams(window.location.search).get("view");
-    return v === "templates" || v === "calendar" || v === "table" ? v : "list";
+    return v === "templates" || v === "calendar" || v === "list" ? v : "table";   // default = ตาราง
   });
   const [detailId, setDetailId] = useState<string | null>(null);
   const [delTarget, setDelTarget] = useState<ContentItem | null>(null);
@@ -189,6 +189,7 @@ export function ContentPageView() {
                       <th className="text-left px-3 py-2 font-medium">{t("สถานะ", "Status")}</th>
                       <th className="text-left px-3 py-2 font-medium">{t("เลขที่", "No.")}</th>
                       <th className="text-left px-3 py-2 font-medium">{t("ชื่อ", "Title")}</th>
+                      <th className="text-left px-3 py-2 font-medium">{t("งาน", "Task")}</th>
                       <th className="text-left px-3 py-2 font-medium">{t("แบรนด์", "Brand")}</th>
                       <th className="text-left px-3 py-2 font-medium">{t("ประเภท", "Type")}</th>
                       <th className="text-left px-3 py-2 font-medium">{t("แพลตฟอร์ม", "Platforms")}</th>
@@ -203,6 +204,7 @@ export function ContentPageView() {
                         <td className="px-3 py-2"><StatusBadge status={c.status} /></td>
                         <td className="px-3 py-2 font-mono text-[11px] text-slate-400 whitespace-nowrap">{c.content_no}</td>
                         <td className="px-3 py-2 font-medium text-slate-800 max-w-[220px] truncate">{c.title}</td>
+                        <td className="px-3 py-2 text-slate-500 max-w-[170px] truncate">{c.task_label ? <span className="inline-flex items-center gap-1" title={c.task_no ?? undefined}>📋 {c.task_label}</span> : "—"}</td>
                         <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{c.brand_label ? <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span> : "—"}</td>
                         <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{c.post_type ? postTypeLabel(c.post_type) : "—"}</td>
                         <td className="px-3 py-2"><div className="flex flex-wrap gap-1">{(c.platforms ?? []).map((p) => <span key={p} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{platformLabel(p)}</span>)}</div></td>

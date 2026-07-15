@@ -327,7 +327,7 @@ export type ContentCaption = { id?: string; platform: string; caption: string | 
 export type ContentItem = {
   [key: string]: unknown;
   id: string; content_no: string | null; title: string;
-  task_id?: string | null;
+  task_id?: string | null; task_label?: string | null; task_no?: string | null; task_cover_url?: string | null;   // งานที่ผูก (ชื่อ/เลข/รูปปกงาน)
   campaign_id: string | null; campaign_label: string | null;
   brand_id: string | null; brand_label: string | null; brand_color: string | null;
   sku_id: string | null; sku_code: string | null; sku_name: string | null; sku_color: string | null; sku_color_en?: string | null; sku_color_th?: string | null; sku_price: number | null; sku_fake_price?: number | null; product_name: string | null;

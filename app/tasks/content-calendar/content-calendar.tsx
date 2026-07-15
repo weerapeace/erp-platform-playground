@@ -123,11 +123,15 @@ export function ContentCalendarView() {
   const Chip = ({ c, showTime }: { c: ContentItem; showTime?: boolean }) => {
     const m = CONTENT_STATUS_META[c.status] ?? CONTENT_STATUS_META.draft;
     const plats = (c.platforms ?? []).slice(0, 3).map((p) => platformLabel(p)).join(" · ");
+    const skuTxt = c.parent_sku_code || c.sku_code || "";
+    const tip = [c.title, c.task_label && `📋 ${c.task_label}`, skuTxt, plats].filter(Boolean).join(" · ");
     return (
       <button draggable onDragStart={() => startDrag(c)} onDragEnd={() => { dragRef.current = null; setOverKey(null); }}
-        onClick={(e) => { e.stopPropagation(); setDetailId(c.id); }} title={`${c.title}${plats ? ` · ${plats}` : ""}`}
+        onClick={(e) => { e.stopPropagation(); setDetailId(c.id); }} title={tip}
         className={`w-full text-left text-[10px] leading-tight px-1.5 py-1 rounded border flex items-center gap-1 cursor-pointer ${m.cls}`}>
-        <span className="h-2 w-2 rounded-full shrink-0" style={{ background: brandColor(c.brand_id) }} />
+        {c.task_cover_url
+          ? <img src={c.task_cover_url} alt="" className="h-3.5 w-3.5 rounded object-cover shrink-0" />
+          : <span className="h-2 w-2 rounded-full shrink-0" style={{ background: brandColor(c.brand_id) }} />}
         <span className="truncate">{showTime && c.scheduled_at ? `${c.scheduled_at.slice(11, 16)} ` : ""}{c.title}</span>
       </button>
     );
@@ -246,18 +250,25 @@ export function ContentCalendarView() {
               <div className="text-center text-xs text-slate-300 py-6">{t("ไม่มีงานค้าง 🎉", "All scheduled 🎉")}</div>
             ) : (
               <div className="space-y-1.5 max-h-[560px] overflow-y-auto pr-0.5">
-                {unscheduled.map((c) => (
-                  <div key={c.id} draggable onDragStart={() => startDrag(c)} onDragEnd={() => { dragRef.current = null; setOverKey(null); }}
-                    onClick={() => setDetailId(c.id)}
-                    className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 cursor-pointer hover:border-violet-300 flex items-center gap-2">
-                    <span className="text-slate-300 shrink-0" title={t("ลากเพื่อจัดวัน", "Drag to schedule")}>⠿</span>
-                    <span className="h-2 w-2 rounded-full shrink-0" style={{ background: brandColor(c.brand_id) }} />
-                    <div className="min-w-0">
-                      <div className="text-xs font-medium text-slate-700 truncate">{c.title}</div>
-                      <div className="text-[10px] text-slate-400 truncate">{c.brand_label ?? c.sku_code ?? c.campaign_label ?? c.content_no ?? ""}</div>
+                {unscheduled.map((c) => {
+                  const skuTxt = c.parent_sku_code || c.sku_code || null;
+                  const meta = [skuTxt, c.brand_label].filter(Boolean).join(" · ");
+                  return (
+                    <div key={c.id} draggable onDragStart={() => startDrag(c)} onDragEnd={() => { dragRef.current = null; setOverKey(null); }}
+                      onClick={() => setDetailId(c.id)}
+                      className="bg-white border border-slate-200 rounded-lg p-1.5 cursor-pointer hover:border-violet-300 flex items-center gap-2">
+                      <span className="text-slate-300 shrink-0" title={t("ลากเพื่อจัดวัน", "Drag to schedule")}>⠿</span>
+                      {c.task_cover_url
+                        ? <img src={c.task_cover_url} alt="" className="h-9 w-9 rounded object-cover border border-slate-200 shrink-0" />
+                        : <span className="h-9 w-9 rounded bg-slate-100 flex items-center justify-center shrink-0"><span className="h-2.5 w-2.5 rounded-full" style={{ background: brandColor(c.brand_id) }} /></span>}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium text-slate-700 truncate">{c.title}</div>
+                        {c.task_label && <div className="text-[10px] text-violet-500 truncate">📋 {c.task_label}</div>}
+                        {meta && <div className="text-[10px] text-slate-400 truncate">{meta}</div>}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

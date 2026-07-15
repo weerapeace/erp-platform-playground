@@ -1,5 +1,6 @@
 /** ของใช้ร่วมของ creative-content API (แยกจาก route.ts — route ต้อง export แค่ handler) */
 import { employeeLabelMap } from "@/lib/creative-tasks-server";
+import { r2ImageUrl } from "@/lib/r2-image";
 
 export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sku_id, parent_sku_id, product_name, post_type,
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, post_status, platform_images, note,
@@ -9,6 +10,7 @@ export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sk
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, fake_price),
   parent:parent_skus_v2!parent_sku_id(code, name_th),
+  task:erp_creative_tasks!task_id(title, task_no, cover_image_r2_key),
   assignee:user_profiles!assignee_id(display_name, username, email)`;
 
 export function flattenContent(r: Record<string, unknown>): Record<string, unknown> {
@@ -16,9 +18,13 @@ export function flattenContent(r: Record<string, unknown>): Record<string, unkno
   const c = (Array.isArray(r.campaign) ? r.campaign[0] : r.campaign) as { name?: string } | null;
   const s = (Array.isArray(r.sku) ? r.sku[0] : r.sku) as { code?: string; name_th?: string; color?: string | null; color_th?: string | null; list_price?: number | null; fake_price?: number | null } | null;
   const par = (Array.isArray(r.parent) ? r.parent[0] : r.parent) as { code?: string; name_th?: string } | null;
+  const tk = (Array.isArray(r.task) ? r.task[0] : r.task) as { title?: string; task_no?: string; cover_image_r2_key?: string | null } | null;
   const asg = (Array.isArray(r.assignee) ? r.assignee[0] : r.assignee) as { display_name?: string | null; username?: string | null; email?: string | null } | null;
   const out: Record<string, unknown> = { ...r };
-  delete out.brand; delete out.campaign; delete out.sku; delete out.parent; delete out.assignee;
+  delete out.brand; delete out.campaign; delete out.sku; delete out.parent; delete out.task; delete out.assignee;
+  out.task_label = tk?.title ?? null;
+  out.task_no = tk?.task_no ?? null;
+  out.task_cover_url = tk?.cover_image_r2_key ? r2ImageUrl(String(tk.cover_image_r2_key), 320) : null;
   out.assignee_label = asg ? (asg.display_name || asg.username || asg.email || "").trim() || null : null;
   out.brand_label = b?.name ?? null;
   out.brand_color = b?.color ?? null;
