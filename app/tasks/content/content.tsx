@@ -11,14 +11,14 @@ import { useSWRLite } from "@/lib/swr-lite";
 import { renderCaption, computeRealPrice, CAPTION_VARS, type ShopChannel } from "@/lib/caption-template";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
-import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
+import { ERPInput, ERPTextarea } from "@/components/form";
 import { SkuPicker, ParentSkuPicker, UserPicker } from "@/components/pickers";
 import type { SkuPickerValue, ParentSkuPickerValue, UserPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { r2ImageUrl } from "@/lib/r2-image";
 import {
-  CONTENT_STATUS_META, POST_TYPES, contentStatusLabel, postTypeLabel,
+  CONTENT_STATUS_META, contentStatusLabel, postTypeLabel,
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
   listCampaigns, listBrands, listHashtags, createHashtag, deleteHashtag, getTask, listSubtasks,
   getCaptionTemplates, saveCaptionTemplates, getParentSkuColors, getParentSkuChildren, type ParentSkuChild,
@@ -34,6 +34,7 @@ import {
 import { useCreativeOptions, platformLabel } from "../use-options";
 import { PlatformChip } from "../platform-chip";
 import { PostConfirmModal, type PostImage } from "./post-confirm-modal";
+import { ContentCreateModal } from "./content-create-modal";
 import { MultiUserPicker } from "../multi-user-picker";
 import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -52,8 +53,6 @@ function StatusBadge({ status }: { status: ContentStatus }) {
   return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{contentStatusLabel(status)}</span>;
 }
 
-const EMPTY_FORM = { title: "", post_type: "image", status: "draft" as ContentStatus, brand_id: "", campaign_id: "", scheduled_at: "", product: null as SkuPickerValue | null, platforms: [] as string[], note: "" };
-
 export function ContentPageView() {
   const t = useT();
   const { platforms } = useCreativeOptions();
@@ -69,14 +68,8 @@ export function ContentPageView() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // create modal
+  // create modal (ฟอร์ม/logic ย้ายไปของกลาง ContentCreateModal แล้ว)
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [tplId, setTplId] = useState("");
-  const [tplCaptions, setTplCaptions] = useState<ContentCaption[]>([]);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [formErr, setFormErr] = useState<string | null>(null);
 
   const pushToast = useCallback((type: Toast["type"], message: string) => {
     const id = Date.now() + Math.random();
@@ -99,30 +92,7 @@ export function ContentPageView() {
   // เปิด drawer คอนเทนต์อัตโนมัติจากลิงก์ /tasks/content?content=<id> (กดมาจากการ์ดบน Canvas)
   useEffect(() => { const cid = new URLSearchParams(window.location.search).get("content"); if (cid) setDetailId(cid); }, []);
 
-  const upd = (patch: Partial<typeof EMPTY_FORM>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
-  const togglePlatform = (v: string) => upd({ platforms: form.platforms.includes(v) ? form.platforms.filter((x) => x !== v) : [...form.platforms, v] });
-  const openCreate = () => { setForm(EMPTY_FORM); setTplId(""); setTplCaptions([]); setDirty(false); setFormErr(null); setOpen(true); };
-  const applyTemplate = async (tid: string) => {
-    setTplId(tid);
-    if (!tid) { setTplCaptions([]); return; }
-    try { const d = await getContent(tid); upd({ post_type: d.post_type ?? "image", platforms: d.platforms ?? [], brand_id: d.brand_id ?? "", note: d.note ?? "" }); setTplCaptions(d.captions ?? []); }
-    catch (e) { pushToast("error", (e as Error).message); }
-  };
-
-  const save = async () => {
-    if (!form.title.trim()) { setFormErr(t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
-    setSaving(true); setFormErr(null);
-    try {
-      const { content_no } = await createContent({
-        title: form.title.trim(), campaign_id: form.campaign_id || null, brand_id: form.brand_id || null,
-        sku_id: form.product?.id ?? null, product_name: form.product?.name ?? null, post_type: form.post_type || null,
-        platforms: form.platforms, status: form.status, scheduled_at: form.scheduled_at || null, note: form.note.trim() || null,
-        captions: tplCaptions.length ? form.platforms.map((p) => { const c = tplCaptions.find((x) => x.platform === p); return { platform: p, caption: c?.caption ?? null, hashtags: c?.hashtags ?? null, caption_type: c?.caption_type ?? "short" }; }) : undefined,
-      });
-      setOpen(false); setDirty(false); pushToast("success", t(`สร้างคอนเทนต์ ${content_no} แล้ว`, `Content ${content_no} created`)); await load();
-    } catch (e) { setFormErr((e as Error).message); }
-    finally { setSaving(false); }
-  };
+  const openCreate = () => setOpen(true);
 
   const onDelete = async () => { if (!delTarget) return; try { await deleteContent(delTarget.id); pushToast("info", t("ลบแล้ว", "Deleted")); if (detailId === delTarget.id) setDetailId(null); await load(); await reloadTemplates(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDelTarget(null); } };
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -266,36 +236,8 @@ export function ContentPageView() {
           )}
       </div>
 
-      {/* create modal */}
-      <ERPModal open={open} onClose={() => setOpen(false)} title={t("สร้างคอนเทนต์ใหม่", "Create New Content")} size="lg" hasUnsavedChanges={dirty}
-        footer={<>
-          <button onClick={() => setOpen(false)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-          <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("สร้าง", "Create")}</button>
-        </>}>
-        {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
-        {templates.length > 0 && (
-          <div className="mb-4 flex items-center gap-2 bg-violet-50/60 border border-violet-100 rounded-lg px-3 py-2">
-            <span className="text-sm text-slate-600 shrink-0">📋 {t("เริ่มจากเทมเพลต:", "Start from template:")}</span>
-            <select value={tplId} onChange={(e) => applyTemplate(e.target.value)} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm bg-white">
-              <option value="">{t("— ไม่ใช้เทมเพลต —", "— No template —")}</option>
-              {templates.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-            </select>
-          </div>
-        )}
-        <ERPFormSection title={t("ข้อมูลคอนเทนต์", "Content Details")} columns={2}>
-          <ERPFormField label={t("ชื่อคอนเทนต์", "Content Title")} required span={2}><ERPInput value={form.title} onChange={(e) => upd({ title: e.target.value })} placeholder={t("เช่น โปรโมต Heart Bag สีชมพู 7.7", "e.g. Promote Heart Bag Pink 7.7")} /></ERPFormField>
-          <ERPFormField label={t("ประเภทโพสต์", "Post Type")}><ERPSelect value={form.post_type} options={POST_TYPES.map((p) => ({ value: p.value, label: postTypeLabel(p.value) }))} onChange={(e) => upd({ post_type: e.target.value })} /></ERPFormField>
-          <ERPFormField label={t("สถานะ", "Status")}><ERPSelect value={form.status} options={Object.keys(CONTENT_STATUS_META).map((v) => ({ value: v, label: contentStatusLabel(v as ContentStatus) }))} onChange={(e) => upd({ status: e.target.value as ContentStatus })} /></ERPFormField>
-          <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => upd({ brand_id: e.target.value })} /></ERPFormField>
-          <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
-          <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")}><ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} /></ERPFormField>
-          <ERPFormField label={t("สินค้า/SKU (ถ้ามี)", "Product/SKU (if any)")}><SkuPicker value={form.product} onChange={(v) => upd({ product: v })} /></ERPFormField>
-          <ERPFormField label={t("แพลตฟอร์ม", "Platforms")} span={2}>
-            <div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}</div>
-          </ERPFormField>
-          <ERPFormField label={t("โน้ต/บรีฟ", "Note/Brief")} span={2}><ERPTextarea value={form.note} rows={2} onChange={(e) => upd({ note: e.target.value })} /></ERPFormField>
-        </ERPFormSection>
-      </ERPModal>
+      <ContentCreateModal open={open} onClose={() => setOpen(false)} onCreated={() => { setOpen(false); load(); }}
+        brands={brands} campaigns={campaigns} templates={templates} pushToast={pushToast} />
 
       {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => { load(); reloadTemplates(); }} onDelete={(c) => setDelTarget(c)} pushToast={pushToast} />}
 

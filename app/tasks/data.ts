@@ -310,6 +310,16 @@ export async function listBrands(): Promise<BrandOption[]> {
     .map((b) => ({ id: b.id, name: b.name, color: b.color, logo_url: b.logo_url ?? null }));
 }
 
+// ---- แต่งหน้าแท็บแบรนด์ในปฏิทินคอนเทนต์ (ต่อแบรนด์ · /api/content-calendar/brand-styles) ----
+export type BrandCalStyle = { brand_id: string; accent_color: string | null; bg_image_key: string | null };
+export async function listBrandCalStyles(): Promise<BrandCalStyle[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/content-calendar/brand-styles"));
+  return (j.data as BrandCalStyle[]) ?? [];
+}
+export async function saveBrandCalStyle(s: BrandCalStyle): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/content-calendar/brand-styles", { method: "PUT", body: JSON.stringify(s) }));
+}
+
 // ============================================================
 // Content / Social
 // ============================================================
