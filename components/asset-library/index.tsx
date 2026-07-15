@@ -950,15 +950,25 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
   const inputRef = useRef<HTMLInputElement>(null);
   const [rule, , reloadRule] = useArtworkPathRule();
   const pathWarn = !!masterPath.trim() && !pathMatchesRule(masterPath, rule.base_paths);
+  const [fileExt, setFileExt] = useState("");
+  const [pathAuto, setPathAuto] = useState(true);   // path ยังตามชื่ออัตโนมัติอยู่ไหม (ผู้ใช้แก้เอง = หยุด)
+
+  const buildPath = (name: string, ext: string) => {
+    const base = rule.base_paths[0]; if (!base) return "";
+    return name.trim() ? `${base.replace(/[\\/]+$/, "")}\\${name.trim()}${ext}` : "";
+  };
 
   const pick = (f: File | null) => {
     setFile(f);
     setPreview(f && f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
     if (f) {
-      if (!title) setTitle(f.name.replace(/\.[^.]+$/, ""));
-      // เติม path เริ่มต้น = โฟลเดอร์มาตรฐาน + ชื่อไฟล์ (แก้ต่อได้ — เบราว์เซอร์อ่าน path จริงของไฟล์ในเครื่องไม่ได้)
-      const base = rule.base_paths[0];
-      if (base && !masterPath.trim()) setMasterPath(`${base.replace(/[\\/]+$/, "")}\\${f.name}`);
+      const nameNoExt = f.name.replace(/\.[^.]+$/, "");
+      const ext = f.name.match(/\.[^.]+$/)?.[0] ?? "";
+      setFileExt(ext);
+      const nm = title.trim() || nameNoExt;
+      if (!title.trim()) setTitle(nameNoExt);   // ดึงชื่อจากชื่อไฟล์ (ถ้ายังไม่มีชื่อ)
+      // เติม path = โฟลเดอร์มาตรฐาน + ชื่อ + นามสกุล (ตามชื่อในฟอร์ม — เบราว์เซอร์อ่าน path จริงไม่ได้)
+      if (pathAuto) setMasterPath(buildPath(nm, ext));
     }
   };
 
@@ -1025,7 +1035,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
         </div>
         <div className="flex flex-col gap-2">
           <label className="text-[12px] text-slate-500">ชื่อ
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น ลายดอกไม้ PIX32"
+            <input value={title} onChange={(e) => { const v = e.target.value; setTitle(v); if (pathAuto) setMasterPath(buildPath(v, fileExt)); }} placeholder="เช่น ลายดอกไม้ PIX32"
               className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
           <div className="grid grid-cols-2 gap-2">
             <div className="text-[12px] text-slate-500">ชนิด <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน</span>
@@ -1058,8 +1068,8 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
         </div>
         <label className="block text-[12px] text-slate-500">path NAS / โฟลเดอร์
           <span className="ml-1 text-slate-300" title="ใส่ที่อยู่เต็มของไฟล์/โฟลเดอร์ต้นฉบับบนเครื่อง เช่น G:\Shared drives\Louis Montini\[4] Assets\4. Artworks\PIX32-02_v3.ai">ⓘ</span>
-          <input value={masterPath} onChange={(e) => setMasterPath(e.target.value)}
-            title="ที่อยู่เต็มของไฟล์ต้นฉบับ — ควรอยู่ใต้โฟลเดอร์มาตรฐานที่ตั้งไว้"
+          <input value={masterPath} onChange={(e) => { setMasterPath(e.target.value); setPathAuto(false); }}
+            title="ที่อยู่เต็มของไฟล์ต้นฉบับ — ควรอยู่ใต้โฟลเดอร์มาตรฐานที่ตั้งไว้ · แก้เองแล้วจะไม่ตามชื่ออัตโนมัติ"
             placeholder={rule.base_paths[0] ? `${rule.base_paths[0]}\\…` : "\\\\nas\\Artwork\\PIX\\PIX32-02_v3.ai  หรือ  Z:\\Artwork\\…"}
             className={`mt-0.5 w-full h-9 px-3 text-[12px] border rounded-lg font-mono focus:outline-none focus:ring-2 ${pathWarn ? "border-amber-300 focus:ring-amber-400 bg-amber-50/40" : "border-slate-200 focus:ring-indigo-500"}`} /></label>
         {pathWarn && (
