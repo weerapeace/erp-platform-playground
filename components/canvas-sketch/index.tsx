@@ -375,19 +375,20 @@ export function CanvasSketch({
         }
         return out;
       },
-      // ลบการ์ดทั้งกลุ่มที่ match (เช่น content id ที่ถูกลบ) → เอา element ในกลุ่มนั้นออกจาก scene
+      // ลบการ์ดทั้งกลุ่มที่ match (เช่น content id ที่ถูกลบ) → mark isDeleted + bump version
+      // ⚠️ ต้อง isDeleted (ไม่ใช่ filter ทิ้ง) ไม่งั้น collab merge (mergeById เก็บ version สูงกว่า) จะดึงการ์ดกลับมา
       removeCards: (match) => {
         const api = apiRef.current; if (!api) return;
-        const els = api.getSceneElements() as any[];
+        const all = ((api.getSceneElementsIncludingDeleted?.() ?? api.getSceneElements()) as any[]);
         const removeGids = new Set<string>();
-        for (const el of els) {
+        for (const el of all) {
+          if (el?.isDeleted) continue;
           const gid = el?.groupIds?.[0]; const d = el?.customData as Record<string, unknown> | undefined;
-          if (!gid || !d?.kind) continue;
-          if (removeGids.has(gid)) continue;
+          if (!gid || !d?.kind || removeGids.has(gid)) continue;
           try { if (match({ kind: String(d.kind), id: String(d.id ?? ""), data: d })) removeGids.add(gid); } catch { /* ข้าม */ }
         }
         if (!removeGids.size) return;
-        const next = els.filter((el) => { const gid = el?.groupIds?.[0]; return !(gid && removeGids.has(gid)); });
+        const next = all.map((el) => { const gid = el?.groupIds?.[0]; return (gid && removeGids.has(gid) && !el.isDeleted) ? { ...el, isDeleted: true, version: (el.version ?? 0) + 1 } : el; });
         api.updateScene({ elements: next });
         if (editable) queueSave();
       },
