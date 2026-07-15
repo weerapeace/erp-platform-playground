@@ -600,7 +600,13 @@ export type SubtaskStepConfig = {
   content_template_id?: string;    // แม่แบบคอนเทนต์ที่ใช้ตอนสร้าง
   post_type?: string;              // ประเภทคอนเทนต์
   platform_notes?: Record<string, string>;   // หมายเหตุ/รายละเอียดงาน ต่อแพลตฟอร์ม (เฉพาะคอนเทนต์นี้)
+  arrange_print?: ArrangePrintSpec;   // งานเรียงพิมพ์: รูป Artwork + ขนาด+จำนวนต่อรูป
 };
+
+// งานเรียงพิมพ์ (Arrange Print) — เก็บใน subtask.config.arrange_print
+export type ArrangeOrderLine = { label: string; w: number | null; h: number | null; unit: string; qty: number };   // 1 ขนาด + จำนวน
+export type ArrangePrintItem = { asset_id: string; r2_key: string; title: string; orders: ArrangeOrderLine[] };     // 1 รูป + หลายขนาด
+export type ArrangePrintSpec = { items: ArrangePrintItem[] };
 export type TemplateStep = { type?: string; title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; assignee_labels?: string[]; config?: SubtaskStepConfig };
 
 export async function listSubtaskTypes(all = false): Promise<SubtaskType[]> {

@@ -23,7 +23,16 @@ import { useT } from "@/components/i18n";
 import {
   PRIORITY_META, priorityLabel, createTask, listCampaigns, listBrands, listTemplates,
   type CreativePriority, type Campaign, type BrandOption, type TaskTemplate, type SubtaskStepConfig, type TemplateContentItem,
+  type ArrangePrintSpec,
 } from "./data";
+import { AssetPicker } from "@/components/asset-picker";
+import type { AssetRow, AssetSize } from "@/app/api/assets/shared";
+import { withImageWidth } from "@/lib/r2-image";
+
+// งานเรียงพิมพ์ (UI state): 1 รูป + ขนาดที่มีให้เลือก (จากคลัง) + ขนาดที่สั่ง (พร้อมจำนวน)
+type ArrangeItem = { asset_id: string; r2_key: string; title: string; url: string; available: AssetSize[]; orders: { label: string; w: number | null; h: number | null; unit: string; qty: number }[] };
+const sizeKey = (s: { label?: string; w: number | null; h: number | null; unit: string }) => `${(s.label ?? "").trim()}|${s.w}|${s.h}|${s.unit}`;
+const sizeText = (s: { label?: string; w: number | null; h: number | null; unit: string }) => (s.label?.trim() ? s.label : (s.w != null || s.h != null ? `${s.w ?? "?"}×${s.h ?? "?"} ${s.unit}` : "—"));
 
 const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 
@@ -81,6 +90,8 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const [formErr, setFormErr] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [arrangeItems, setArrangeItems] = useState<ArrangeItem[]>([]);   // งานเรียงพิมพ์: รูป+ขนาด+จำนวน
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false);
   // ช่องที่ผู้ใช้ "แตะเอง" ในขั้นข้อมูลงาน — ช่องที่ยังไม่แตะ (ยังเป็นค่าเริ่มต้น) = กล่องเทาอ่อน · ช่องว่าง = กล่องส้มอ่อน + ดันขึ้นบน
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [emptySnap, setEmptySnap] = useState<Set<string>>(new Set());   // ช่องที่ว่างตอน "เข้าขั้นข้อมูลงาน" (snapshot กันเด้งไปมาระหว่างพิมพ์)
@@ -95,7 +106,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       if (rv.length) setDefaultReviewers(rv.map((x) => ({ id: x.id, name: x.name } as UserPickerValue)));
     }).catch(() => {});
   }, []);
-  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setAssetPickerOpen(false); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);   // eslint-disable-line react-hooks/exhaustive-deps
   // เผื่อ default reviewers โหลดเสร็จหลังเปิด Wizard → เติมให้ถ้ายังว่าง (ไม่ทับที่แก้เอง/แม่แบบ)
   useEffect(() => { if (open && !tplId && defaultReviewers.length && form.reviewers.length === 0 && !touched.has("reviewers")) updateForm({ reviewers: defaultReviewers }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open, defaultReviewers]);
 
@@ -139,6 +150,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const applyTemplate = (id: string) => {
     setTplId(id); setDirty(true); setTouched(new Set());   // เปลี่ยนแม่แบบ/แบรนด์ = ตั้งค่าเริ่มต้นใหม่ → กลับเป็นสีเทาหมด
     const tpl = templates.find((x) => x.id === id);
+    setArrangeItems([]);   // เปลี่ยนแม่แบบ → ล้างรายการเรียงพิมพ์
     if (!tpl) { setSubs([]); setContentItems([]); setTplDueOffset(null); return; }
     const offset = tpl.due_offset_days ?? null;
     setTplDueOffset(offset);
@@ -165,6 +177,35 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const patchSub = (i: number, p: Partial<SubRow>) => { setSubs((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...p } : r))); setDirty(true); };
   const removeSub = (i: number) => { setSubs((rows) => rows.filter((_, idx) => idx !== i)); setDirty(true); };
 
+  // ── งานเรียงพิมพ์: เพิ่มรูป / ลบรูป / ติ๊กขนาด / ตั้งจำนวน / เพิ่มขนาดใหม่ (save กลับ asset) ──
+  const addArrangeAssets = (assets: AssetRow[]) => {
+    setArrangeItems((prev) => {
+      const seen = new Set(prev.map((x) => x.asset_id));
+      const add = assets.filter((a) => !seen.has(a.id)).map((a) => ({ asset_id: a.id, r2_key: a.r2_key, title: a.title, url: a.url, available: a.sizes ?? [], orders: [] as ArrangeItem["orders"] }));
+      return [...prev, ...add];
+    });
+    setDirty(true);
+  };
+  const removeArrangeItem = (idx: number) => { setArrangeItems((p) => p.filter((_, i) => i !== idx)); setDirty(true); };
+  const toggleArrangeSize = (idx: number, s: AssetSize) => {
+    setArrangeItems((prev) => prev.map((it, i) => {
+      if (i !== idx) return it;
+      const has = it.orders.some((o) => sizeKey(o) === sizeKey(s));
+      const orders = has ? it.orders.filter((o) => sizeKey(o) !== sizeKey(s)) : [...it.orders, { label: s.label, w: s.w, h: s.h, unit: s.unit, qty: 1 }];
+      return { ...it, orders };
+    }));
+    setDirty(true);
+  };
+  const setArrangeQty = (idx: number, orderIdx: number, qty: number) => setArrangeItems((prev) => prev.map((it, i) => i === idx ? { ...it, orders: it.orders.map((o, j) => j === orderIdx ? { ...o, qty } : o) } : it));
+  const addArrangeSize = async (idx: number, s: AssetSize) => {
+    const it = arrangeItems[idx]; if (!it) return;
+    const nextAvail = [...it.available, s];
+    setArrangeItems((prev) => prev.map((x, i) => i === idx ? { ...x, available: nextAvail, orders: [...x.orders, { label: s.label, w: s.w, h: s.h, unit: s.unit, qty: 1 }] } : x));
+    setDirty(true);
+    try { await apiFetch(`/api/assets/${it.asset_id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sizes: nextAvail }) }); pushToast("success", t("เพิ่มขนาด + บันทึกกลับคลังรูปแล้ว", "Size added and saved to library")); }
+    catch (e) { pushToast("error", (e as Error).message); }
+  };
+
   const next = () => { if (step === 2 && !form.title.trim()) { setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; } setFormErr(null); setStep((s) => Math.min(4, s + 1)); };
   const back = () => { setFormErr(null); setStep((s) => Math.max(1, s - 1)); };
   // วันที่สั่งเปลี่ยน → คำนวณกำหนดส่งใหม่ (แม่แบบ +X หรือ default +3) ถ้ายังไม่แก้กำหนดส่งเอง
@@ -173,12 +214,15 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const brandTemplates = templates.filter((tp) => form.brand_id ? (tp.brand_id === form.brand_id || !tp.brand_id) : !tp.brand_id);
   // เทมเพลตที่เลือกบังคับระบุ Parent SKU ไหม (เช่น เพิ่มสี/แก้สี)
   const requireParent = !!templates.find((x) => x.id === tplId)?.require_parent_sku;
+  // งานเรียงพิมพ์ (มีงานย่อยชนิด arrange_print) → ขั้น "งานย่อย" แสดง UI เลือกรูป+ขนาด+จำนวนแทน
+  const isArrangePrint = subs.some((s) => s.type === "arrange_print");
 
   const save = async () => {
     if (!form.title.trim()) { setStep(2); setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; }
     if (requireParent && form.parents.length === 0) { setStep(4); setFormErr(t("งานนี้ต้องระบุ Parent SKU (ตระกูลสินค้า) อย่างน้อย 1 รายการ","This task requires at least one Parent SKU")); return; }
     setSaving(true); setFormErr(null);
-    const subtasks = subs.filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next, type: s.type, config: s.config }));
+    const arrangeConfig: ArrangePrintSpec = { items: arrangeItems.map((it) => ({ asset_id: it.asset_id, r2_key: it.r2_key, title: it.title, orders: it.orders })) };
+    const subtasks = subs.filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next, type: s.type, config: s.type === "arrange_print" ? { ...s.config, arrange_print: arrangeConfig } : s.config }));
     try {
       const { id, task_no } = await createTask({
         title: form.title.trim(), description: form.description.trim() || null, task_type: form.task_type || null,
@@ -309,8 +353,34 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         </ERPFormSection>
       </>)}
 
-      {/* STEP 3 — งานย่อย */}
-      {step === 3 && (
+      {/* STEP 3A — งานเรียงพิมพ์ (เลือกรูป Artwork + ขนาด + จำนวน) */}
+      {step === 3 && isArrangePrint && (
+        <div>
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="text-base">🖨️</span>
+            <p className="text-sm font-semibold text-slate-700">{t("งานเรียงพิมพ์ — เลือกรูปแล้วกำหนดขนาด/จำนวน", "Arrange print — pick images, set sizes/qty")}</p>
+          </div>
+          <p className="text-xs text-slate-400 mb-3">{t("แต่ละรูปเลือกได้หลายขนาด · ขนาดดึงจากคลัง Artwork · เพิ่มขนาดใหม่ได้", "Each image: multiple sizes · from Artwork library · add new sizes")}</p>
+          <button type="button" onClick={() => setAssetPickerOpen(true)} className="w-full border border-dashed border-violet-300 rounded-xl py-2.5 text-sm font-medium text-violet-700 bg-violet-50/50 hover:bg-violet-50 mb-3">🖼️ ＋ {t("เลือกรูปจาก Artwork (เลือกได้หลายรูป)", "Pick images from Artwork (multiple)")}</button>
+          {arrangeItems.length === 0 ? (
+            <div className="border border-dashed border-slate-200 rounded-lg p-6 text-center text-sm text-slate-400">{t("ยังไม่ได้เลือกรูป — กดปุ่มด้านบนเพื่อเลือกจากคลัง Artwork", "No images yet — pick from the Artwork library")}</div>
+          ) : (
+            <div className="space-y-2 max-h-[42vh] overflow-y-auto pr-1">
+              {arrangeItems.map((it, i) => <ArrangeImageCard key={it.asset_id} item={it} onToggleSize={(s) => toggleArrangeSize(i, s)} onSetQty={(oi, q) => setArrangeQty(i, oi, q)} onAddSize={(s) => addArrangeSize(i, s)} onRemove={() => removeArrangeItem(i)} />)}
+            </div>
+          )}
+          {arrangeItems.length > 0 && (
+            <div className="mt-3 bg-slate-50 rounded-lg px-3 py-2 text-xs text-slate-600 flex gap-4 flex-wrap">
+              <span>{t("รูป", "Images")} <b className="text-slate-800">{arrangeItems.length}</b></span>
+              <span>{t("รายการขนาด", "Size lines")} <b className="text-slate-800">{arrangeItems.reduce((n, it) => n + it.orders.length, 0)}</b></span>
+              <span>{t("รวมจำนวน", "Total qty")} <b className="text-slate-800">{arrangeItems.reduce((n, it) => n + it.orders.reduce((m, o) => m + (o.qty || 0), 0), 0).toLocaleString()}</b> {t("ชิ้น", "pcs")}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* STEP 3 — งานย่อย (งานปกติ) */}
+      {step === 3 && !isArrangePrint && (
         <div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-slate-600">{t("งานย่อย","Subtasks")} {subs.length > 0 && <span className="text-slate-400">· {t("ติ๊กเลือกอันที่จะสร้าง / แก้ผู้รับผิดชอบได้","Check the ones to create / edit assignees")}</span>}</p>
@@ -380,7 +450,77 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           <div className="col-span-2 text-xs text-slate-400">{requireParent ? t("Parent SKU จำเป็นสำหรับงานนี้ — สินค้า/SKU ยังไม่บังคับ","Parent SKU is required for this task — Product/SKU still optional") : t("ขั้นนี้ไม่บังคับ — เลือกได้หลายรายการ (เลือกแล้วเลือกต่อได้) กด สร้างงาน ได้เลยถ้าไม่ต้องผูกสินค้า","This step is optional — select as many as needed. Click Create task to skip linking products.")}</div>
         </ERPFormSection>
       )}
+
+      {/* ตัวเลือกรูป Artwork (งานเรียงพิมพ์) */}
+      {assetPickerOpen && <AssetPicker open onClose={() => setAssetPickerOpen(false)} multiple typeFilter="image" title={t("เลือกรูป Artwork สำหรับเรียงพิมพ์","Pick Artwork images")} contextLabel={form.title || undefined} onSelect={addArrangeAssets} />}
     </ERPModal>
+  );
+}
+
+// การ์ดรูป 1 รูปในงานเรียงพิมพ์ — ติ๊กขนาด (จากคลัง) + ใส่จำนวน + เพิ่มขนาดใหม่ (save กลับ asset)
+function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove }: {
+  item: ArrangeItem;
+  onToggleSize: (s: AssetSize) => void;
+  onSetQty: (orderIdx: number, qty: number) => void;
+  onAddSize: (s: AssetSize) => void;
+  onRemove: () => void;
+}) {
+  const t = useT();
+  const [adding, setAdding] = useState(false);
+  const [nl, setNl] = useState(""); const [nw, setNw] = useState(""); const [nh, setNh] = useState(""); const [nu, setNu] = useState<AssetSize["unit"]>("cm");
+  const orderIdxOf = (s: AssetSize) => item.orders.findIndex((o) => sizeKey(o) === sizeKey(s));
+  const submitSize = () => {
+    const w = nw === "" ? null : Number(nw); const h = nh === "" ? null : Number(nh);
+    if (!nl.trim() && w == null && h == null) return;
+    onAddSize({ label: nl.trim(), w, h, unit: nu });
+    setNl(""); setNw(""); setNh(""); setAdding(false);
+  };
+  return (
+    <div className="border border-slate-200 rounded-xl p-3">
+      <div className="flex items-start gap-3">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={withImageWidth(item.url, 120) ?? item.url} alt="" className="h-14 w-14 rounded-lg object-cover border border-slate-200 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium text-slate-800 truncate">{item.title}</span>
+            <button type="button" onClick={onRemove} className="text-slate-300 hover:text-red-500 text-sm shrink-0" title={t("เอารูปออก","Remove")}>✕</button>
+          </div>
+          <p className="text-[11px] text-slate-400 mb-1.5">{t("ขนาดที่จะสั่ง (ติ๊กเลือก + ใส่จำนวน)","Sizes to order (tick + qty)")}</p>
+          <div className="space-y-1.5">
+            {item.available.length === 0 && !adding && <p className="text-[11px] text-slate-400 italic">{t("รูปนี้ยังไม่มีขนาดในคลัง — กดเพิ่มขนาด","No sizes in library yet — add one")}</p>}
+            {item.available.map((s, si) => {
+              const oi = orderIdxOf(s); const sel = oi >= 0;
+              return (
+                <div key={si} className="flex items-center gap-2 flex-wrap">
+                  <button type="button" onClick={() => onToggleSize(s)} className={`inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 border ${sel ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>
+                    {sel && <span>✓</span>}{sizeText(s)}
+                  </button>
+                  {sel && (
+                    <>
+                      <span className="text-[11px] text-slate-400">{t("จำนวน","Qty")}</span>
+                      <input type="number" min={0} value={item.orders[oi].qty} onChange={(e) => onSetQty(oi, Math.max(0, Number(e.target.value) || 0))} className="w-20 h-8 border border-slate-200 rounded-md px-2 text-sm text-center" />
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            {adding ? (
+              <div className="flex items-center gap-1.5 flex-wrap bg-slate-50 rounded-lg p-2">
+                <input value={nl} onChange={(e) => setNl(e.target.value)} placeholder={t("ชื่อ (เช่น เล็ก)","label")} className="w-24 h-8 border border-slate-200 rounded-md px-2 text-sm" />
+                <input value={nw} onChange={(e) => setNw(e.target.value)} placeholder={t("กว้าง","W")} inputMode="decimal" className="w-14 h-8 border border-slate-200 rounded-md px-2 text-sm" />
+                <span className="text-slate-400">×</span>
+                <input value={nh} onChange={(e) => setNh(e.target.value)} placeholder={t("ยาว","H")} inputMode="decimal" className="w-14 h-8 border border-slate-200 rounded-md px-2 text-sm" />
+                <select value={nu} onChange={(e) => setNu(e.target.value as AssetSize["unit"])} className="h-8 border border-slate-200 rounded-md px-1 text-sm"><option value="cm">cm</option><option value="mm">mm</option><option value="in">in</option><option value="px">px</option></select>
+                <button type="button" onClick={submitSize} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded-md hover:bg-violet-700">{t("เพิ่ม","Add")}</button>
+                <button type="button" onClick={() => setAdding(false)} className="h-8 px-2 text-xs text-slate-500">{t("ยกเลิก","Cancel")}</button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setAdding(true)} className="text-xs text-violet-700 hover:underline">＋ {t("เพิ่มขนาดใหม่ (บันทึกกลับคลังรูป)","Add new size (saved to library)")}</button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
