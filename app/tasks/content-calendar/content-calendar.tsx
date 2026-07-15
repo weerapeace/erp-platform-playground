@@ -11,7 +11,7 @@ import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { useSWRLite } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { useT } from "@/components/i18n";
-import { listContent, listBrands, listCampaigns, listContentTemplates, listBrandCalStyles, updateContent, CONTENT_STATUS_META, type ContentItem, type BrandCalStyle } from "../data";
+import { listContent, listBrands, listCampaigns, listContentTemplates, listBrandCalStyles, updateContent, CONTENT_STATUS_META, contentStatusLabel, type ContentItem, type BrandCalStyle, type ContentStatus } from "../data";
 import { ContentDrawer } from "../content/content";
 import { ContentCreateModal } from "../content/content-create-modal";
 import { BrandStyleModal } from "./brand-style-modal";
@@ -26,6 +26,7 @@ export function ContentCalendarView() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [brandFilter, setBrandFilter] = useState<string>("all");   // "all" | brandId
   const [platformFilter, setPlatformFilter] = useState<string>("all");   // "all" | platform value
+  const [statusFilter, setStatusFilter] = useState<string>("all");   // "all" | สถานะคอนเทนต์
   const [offset, setOffset] = useState(0);                          // เลื่อนเดือน (0 = เดือนนี้)
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -56,14 +57,15 @@ export function ContentCalendarView() {
   // เปิด drawer จากลิงก์ ?content=<id>
   useEffect(() => { const cid = new URLSearchParams(window.location.search).get("content"); if (cid) setDetailId(cid); }, []);
 
-  // กรองตามแบรนด์ + แพลตฟอร์มที่เลือก (ไม่รวมแม่แบบ)
+  // กรองตามแบรนด์ + แพลตฟอร์ม + สถานะที่เลือก (ไม่รวมแม่แบบ)
   const filtered = useMemo(
     () => items.filter((c) =>
       !c.is_template
       && (brandFilter === "all" || c.brand_id === brandFilter)
-      && (platformFilter === "all" || (c.platforms ?? []).includes(platformFilter)),
+      && (platformFilter === "all" || (c.platforms ?? []).includes(platformFilter))
+      && (statusFilter === "all" || c.status === statusFilter),
     ),
-    [items, brandFilter, platformFilter],
+    [items, brandFilter, platformFilter, statusFilter],
   );
 
   // เดือนที่กำลังดู
@@ -131,7 +133,7 @@ export function ContentCalendarView() {
       active ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"
     }`;
   const platCls = (active: boolean) =>
-    `h-7 px-2.5 rounded-full text-xs font-medium border transition-colors ${
+    `inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-xs font-medium border transition-colors ${
       active ? "bg-slate-700 text-white border-slate-700" : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
     }`;
 
@@ -187,12 +189,29 @@ export function ContentCalendarView() {
           )}
         </div>
 
-        {/* กรองแพลตฟอร์ม (ใช้ร่วมกับแท็บแบรนด์ได้) */}
+        {/* กรองแพลตฟอร์ม (โลโก้) — ใช้ร่วมกับแท็บแบรนด์ได้ */}
         <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
           <span className="text-xs text-slate-400 mr-0.5">{t("แพลตฟอร์ม", "Platform")}:</span>
           <button onClick={() => setPlatformFilter("all")} className={platCls(platformFilter === "all")}>{t("ทั้งหมด", "All")}</button>
-          {platforms.map((p) => (
-            <button key={p.value} onClick={() => setPlatformFilter(p.value)} className={platCls(platformFilter === p.value)}>{p.label}</button>
+          {platforms.map((p) => {
+            const img = p.icon_key ? r2ImageUrl(p.icon_key, 32) : null;
+            return (
+              <button key={p.value} onClick={() => setPlatformFilter(p.value)} className={platCls(platformFilter === p.value)} title={p.label}>
+                {img ? <img src={img} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : p.icon ? <span className="leading-none">{p.icon}</span> : null}
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* กรองสถานะคอนเทนต์ */}
+        <div className="flex items-center gap-1.5 flex-wrap mt-2">
+          <span className="text-xs text-slate-400 mr-0.5">{t("สถานะ", "Status")}:</span>
+          <button onClick={() => setStatusFilter("all")} className={platCls(statusFilter === "all")}>{t("ทั้งหมด", "All")}</button>
+          {(Object.keys(CONTENT_STATUS_META) as ContentStatus[]).map((s) => (
+            <button key={s} onClick={() => setStatusFilter(s)} className={platCls(statusFilter === s)}>
+              <span className={`h-2 w-2 rounded-full ${CONTENT_STATUS_META[s].dot}`} />{contentStatusLabel(s)}
+            </button>
           ))}
         </div>
       </div>
