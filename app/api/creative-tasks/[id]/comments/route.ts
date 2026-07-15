@@ -24,7 +24,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
+  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;   // เขียนคอมเมนต์ = สิทธิ์แก้ไข (ไม่ใช่แค่ดู)
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   let body: { body?: string; mentions?: string[] };

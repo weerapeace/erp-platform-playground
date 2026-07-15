@@ -397,7 +397,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const { data } = await admin.from("erp_creative_subtasks").select("*").eq("id", subtaskId).maybeSingle();
     row = data as Record<string, unknown> | null;
   }
-  await writeAudit(admin, { action: "subtask:update", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { subtask_id: subtaskId } });
+  // บันทึกประวัติแยกตามการกระทำ — อนุมัติ/ขอแก้/ยกเลิก/ส่งงาน เห็นชัดใน audit log (ไม่รวมเป็น "update" หมด)
+  const fromStatus = ((curSub as { status?: string } | null)?.status) ?? null;
+  const toStatus = typeof patch.status === "string" ? patch.status : null;
+  const auditAction = toStatus === "approved" ? "subtask:approve"
+    : toStatus === "revision_requested" ? "subtask:revise"
+    : toStatus === "canceled" ? "subtask:cancel"
+    : toStatus === "submitted" ? "subtask:submit"
+    : toStatus && toStatus !== fromStatus ? "subtask:status" : "subtask:update";
+  await writeAudit(admin, {
+    action: auditAction, entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { subtask_id: subtaskId, subtask_title: (row?.title as string) ?? null, ...(toStatus ? { status_from: fromStatus, status_to: toStatus } : {}), changes: Object.keys(patch).filter((k) => k !== "updated_at") },
+  });
 
   // ⑥ Sync เข้าสินค้า (best-effort) — อนุมัติ → ส่งรูป/ข้อความเข้า Parent SKU/SKU · ขอแก้/ยกเลิก → ถอดกลับ
   const reason = typeof body.comment === "string" ? body.comment.trim() : "";
@@ -455,11 +466,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
   const { id } = await params;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const subtaskId = new URL(request.url).searchParams.get("subtask_id") ?? "";
   if (!subtaskId) return NextResponse.json({ error: "subtask_id required" }, { status: 400 });
   const admin = supabaseAdmin();
+  // เก็บชื่อ/สถานะก่อนลบ — ไว้ใน audit log ให้ตามรอยได้ว่าลบอะไรไป
+  const { data: cur } = await admin.from("erp_creative_subtasks").select("title, status, subtask_type").eq("id", subtaskId).eq("task_id", id).maybeSingle();
   const { error } = await admin.from("erp_creative_subtasks").delete().eq("id", subtaskId).eq("task_id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  await writeAudit(admin, {
+    action: "subtask:delete", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { subtask_id: subtaskId, subtask_title: (cur as { title?: string } | null)?.title ?? null, status: (cur as { status?: string } | null)?.status ?? null, subtask_type: (cur as { subtask_type?: string } | null)?.subtask_type ?? null },
+  });
   try { await recomputeTaskStatusFromSubtasks(admin, id); } catch { /* best-effort */ }
   return NextResponse.json({ success: true, error: null });
 }
