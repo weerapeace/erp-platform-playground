@@ -7,7 +7,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { driveConfigured, driveEnsureFolder, driveGetFolder, driveUploadFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
+import { driveConfigured, driveGetFolder, driveUploadFile } from "@/lib/google-drive";
+import { resolveArtworkDriveFolder } from "@/lib/artwork-drive";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,21 +26,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     let folderId = String(form.get("folderId") ?? "").trim();
     if (!folderId) {
-      const admin = supabaseAdmin();
-      // 1) โฟลเดอร์ฐานของแบรนด์ (ไม่มีแม็ป = โฟลเดอร์แม่)
-      let brandFolder = DRIVE_ROOT_FOLDER_ID;
-      const brandId = String(form.get("brand_id") ?? "").trim();
-      if (brandId) { const { data } = await admin.from("erp_brand_drive_folders").select("folder_id").eq("brand_id", brandId).maybeSingle(); if (data?.folder_id) brandFolder = String(data.folder_id); }
-      // 2) ซับโฟลเดอร์ตามชนิด (แม็ปชื่อซับ เช่น โลโก้→"01_Logo" · ไม่มี = ใช้ชื่อชนิด)
-      let parent = brandFolder;
-      const artType = String(form.get("artworkType") ?? "").trim();
-      if (artType) {
-        const { data } = await admin.from("erp_artwork_drive_folders").select("subfolder_name").eq("artwork_type", artType).maybeSingle();
-        const subName = (data?.subfolder_name || artType).trim();
-        if (subName) parent = await driveEnsureFolder(subName, brandFolder);
-      }
-      // 3) โฟลเดอร์ตามชื่องาน
-      folderId = await driveEnsureFolder(name, parent);
+      // ของกลาง: [โฟลเดอร์แบรนด์] > [ซับตามชนิด] > [ชื่องาน]
+      folderId = await resolveArtworkDriveFolder(supabaseAdmin(), {
+        brandId: String(form.get("brand_id") ?? "").trim(),
+        artworkType: String(form.get("artworkType") ?? "").trim(),
+        name,
+      });
     }
     const file = form.get("file") as File | null;
     if (file) {

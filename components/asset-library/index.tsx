@@ -70,6 +70,9 @@ export function AssetLibrary() {
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [brandReload, setBrandReload] = useState(0);   // bump เพื่อรีเฟรชมุมมอง "ดูตามแบรนด์"
+  const [driveOn, setDriveOn] = useState(false);
+  const [bulkDriveBusy, setBulkDriveBusy] = useState(false);
+  useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
   const [searchFolders, setSearchFolders] = useState<{ id: string; code: string; name: string }[]>([]);   // โฟลเดอร์ Parent ที่ตรงคำค้น
   const [brandOpenParent, setBrandOpenParent] = useState<string | null>(null);   // กดโฟลเดอร์จากผลค้นหา → เปิด parent ในมุมมองแบรนด์
   const searching = search.trim().length > 0;
@@ -185,6 +188,19 @@ export function AssetLibrary() {
   };
   const bulkTag = (tag: string) => { setBulkTagOpen(false); void bulkApi({ action: "tag", asset_ids: Array.from(selected), tag }, `ติดแท็ก “${tag}” ให้ ${selected.size} ไฟล์แล้ว`); };
   const bulkMove = (collectionId: string) => { setBulkMoveOpen(false); void bulkApi({ action: "move", asset_ids: Array.from(selected), collection_id: collectionId || null }, `อัปเดตอัลบั้ม ${selected.size} ไฟล์แล้ว`); };
+
+  // ── สร้างโฟลเดอร์ Drive + ก็อปรูป preview ให้ทุกไฟล์ที่เลือก (ทีเดียว) ──
+  const bulkDriveFolders = async () => {
+    const ids = Array.from(selected); if (!ids.length) return;
+    setBulkDriveBusy(true);
+    try {
+      const res = await apiFetch("/api/assets/drive-folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ทำไม่สำเร็จ");
+      toast.success(`สร้างโฟลเดอร์ ${j.created} ไฟล์${j.skipped ? ` · ข้าม(มีแล้ว) ${j.skipped}` : ""}${j.failed ? ` · ล้มเหลว ${j.failed}` : ""}`);
+      clearSel(); await load(); await loadMeta();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ทำไม่สำเร็จ"); }
+    finally { setBulkDriveBusy(false); }
+  };
 
   const selCount = selected.size;
 
@@ -370,6 +386,7 @@ export function AssetLibrary() {
           <span className="text-sm font-medium">เลือก {selCount} ไฟล์</span>
           {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
           {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 จัดอัลบั้ม</button>}
+          {!trash && driveOn && <button onClick={bulkDriveFolders} disabled={bulkDriveBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkDriveBusy ? "กำลังสร้าง…" : "🗂️ สร้าง Folder Drive"}</button>}
           <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
           <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
         </div>
