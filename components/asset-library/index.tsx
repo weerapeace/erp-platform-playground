@@ -1114,7 +1114,17 @@ function BulkEditRow({ on, setOn, label, children }: { on: boolean; setOn: (v: b
   );
 }
 
-// ── แก้หลายรายการพร้อมกัน (bulk edit) — ติ๊กเลือกฟิลด์ที่จะแก้ · เฉพาะที่ติ๊กจะถูกแทนที่ · แท็ก = เพิ่มเข้าไป ──
+// สวิตช์โหมด "ใส่ค่าเดียว (ทุกไฟล์)" ↔ "แก้แยกแต่ละไฟล์"
+function BulkModeToggle({ mode, setMode }: { mode: "all" | "each"; setMode: (m: "all" | "each") => void }) {
+  return (
+    <div className="inline-flex items-center gap-0.5 bg-slate-100 rounded-lg p-0.5 text-[11px]">
+      <button type="button" onClick={() => setMode("all")} className={`px-2.5 h-6 rounded-md ${mode === "all" ? "bg-white shadow-sm font-medium text-slate-800" : "text-slate-500"}`}>ใส่ค่าเดียว (ทุกไฟล์)</button>
+      <button type="button" onClick={() => setMode("each")} className={`px-2.5 h-6 rounded-md ${mode === "each" ? "bg-white shadow-sm font-medium text-slate-800" : "text-slate-500"}`}>แก้แยกแต่ละไฟล์</button>
+    </div>
+  );
+}
+
+// ── แก้หลายรายการพร้อมกัน (bulk edit) — ติ๊กเลือกฟิลด์ที่จะแก้ · ขนาด/Parent SKU เลือก "รวม" หรือ "แยกรายไฟล์" ได้ ──
 function BulkEditModal({ ids, artTypes, onClose, onDone }: {
   ids: string[]; artTypes: LookupItem[]; onClose: () => void; onDone: () => void;
 }) {
@@ -1124,33 +1134,67 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
   const [busy, setBusy] = useState(false);
   const [enBrand, setEnBrand] = useState(false); const [brandId, setBrandId] = useState("");
   const [enType, setEnType] = useState(false); const [types, setTypes] = useState<string[]>([]);
-  const [enSize, setEnSize] = useState(false); const [sizes, setSizes] = useState<AssetSize[]>([]);
-  const [enParent, setEnParent] = useState(false); const [parents, setParents] = useState<string[]>([]);
+  const [enSize, setEnSize] = useState(false); const [sizes, setSizes] = useState<AssetSize[]>([]); const [sizeMode, setSizeMode] = useState<"all" | "each">("all");
+  const [enParent, setEnParent] = useState(false); const [parents, setParents] = useState<string[]>([]); const [parentMode, setParentMode] = useState<"all" | "each">("all");
   const [enTags, setEnTags] = useState(false); const [tags, setTags] = useState<string[]>([]);
   const [enKw, setEnKw] = useState(false); const [kw, setKw] = useState("");
+  // ข้อมูลไฟล์รายใบ (โหมดแก้แยก)
+  const [items, setItems] = useState<{ id: string; title: string; url: string; isImg: boolean }[] | null>(null);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [pfSizes, setPfSizes] = useState<Record<string, AssetSize[]>>({});
+  const [pfParents, setPfParents] = useState<Record<string, string[]>>({});
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
 
+  const needPerFile = (enSize && sizeMode === "each") || (enParent && parentMode === "each");
+  // เข้าโหมด "แก้แยก" ครั้งแรก → โหลดไฟล์ที่เลือกมาแก้ทีละใบ (ดึงค่าปัจจุบันมา prefill)
+  useEffect(() => {
+    if (!needPerFile || items !== null || itemsLoading) return;
+    setItemsLoading(true);
+    Promise.all(ids.map((id) => apiFetch(`/api/assets/${id}`).then((r) => r.json()).then((j) => j.data as AssetDetail).catch(() => null)))
+      .then((got) => {
+        const list = got.filter(Boolean) as AssetDetail[];
+        setItems(list.map((d) => ({ id: d.id, title: d.title, url: d.url, isImg: isImage(d) })));
+        const s: Record<string, AssetSize[]> = {}, p: Record<string, string[]> = {};
+        for (const d of list) { s[d.id] = d.sizes ?? []; p[d.id] = d.parent_sku_codes ?? []; }
+        setPfSizes(s); setPfParents(p);
+      })
+      .finally(() => setItemsLoading(false));
+  }, [needPerFile, items, itemsLoading, ids]);
+
   const save = async () => {
+    // ฟิลด์ "รวม" (ค่าเดียวทุกไฟล์) → bulk action edit
     const fields: Record<string, unknown> = {};
     if (enBrand) fields.brand_id = brandId || null;
     if (enType) fields.artwork_types = types;
-    if (enSize) fields.sizes = sizes;
-    if (enParent) fields.parent_sku_codes = parents;
     if (enKw) fields.keywords = kw.trim();
     if (enTags) fields.add_tags = tags;
-    if (!Object.keys(fields).length) { toast.error("ติ๊กเลือกฟิลด์ที่จะแก้ก่อน"); return; }
+    if (enSize && sizeMode === "all") fields.sizes = sizes;
+    if (enParent && parentMode === "all") fields.parent_sku_codes = parents;
+    const anyShared = Object.keys(fields).length > 0;
+    if (!anyShared && !needPerFile) { toast.error("ติ๊กเลือกฟิลด์ที่จะแก้ก่อน"); return; }
     setBusy(true);
     try {
-      const res = await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "edit", asset_ids: ids, fields }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "แก้ไม่สำเร็จ");
-      toast.success(`แก้ ${j.count ?? ids.length} ไฟล์แล้ว`); onDone();
+      if (anyShared) {
+        const res = await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "edit", asset_ids: ids, fields }) });
+        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "แก้ไม่สำเร็จ");
+      }
+      // ฟิลด์ "แยกรายไฟล์" → PATCH ทีละใบ
+      if (needPerFile && items) {
+        for (const it of items) {
+          const patch: Record<string, unknown> = {};
+          if (enSize && sizeMode === "each") patch.sizes = pfSizes[it.id] ?? [];
+          if (enParent && parentMode === "each") patch.parent_sku_codes = pfParents[it.id] ?? [];
+          if (Object.keys(patch).length) await apiFetch(`/api/assets/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+        }
+      }
+      toast.success(`แก้ ${ids.length} ไฟล์แล้ว`); onDone();
     } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
     finally { setBusy(false); }
   };
 
   return (
     <ERPModal open onClose={onClose} title={`✏️ แก้ ${ids.length} ไฟล์พร้อมกัน`} size="lg"
-      description="ติ๊กเฉพาะฟิลด์ที่ต้องการแก้ — ฟิลด์ที่ติ๊กจะถูกแทนที่ทุกไฟล์ · แท็ก = เพิ่มเข้าไป (ไม่ลบของเดิม)"
+      description="ติ๊กเฉพาะฟิลด์ที่จะแก้ · ขนาด/Parent SKU เลือกได้ว่า “ใส่ค่าเดียวทุกไฟล์” หรือ “แก้แยกแต่ละไฟล์” · แท็ก = เพิ่มเข้าไป"
       footer={
         <div className="flex items-center justify-between w-full">
           <span className="text-[12px] text-amber-600">จะแก้ {ids.length} ไฟล์ที่เลือก</span>
@@ -1170,11 +1214,17 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
         <BulkEditRow on={enType} setOn={setEnType} label="ชนิด (แทนที่ของเดิม)">
           <ArtTypeMultiSelect value={types} types={artTypeList} onChange={setTypes} onCreated={(t) => setArtTypeList((c) => [...c, t])} />
         </BulkEditRow>
-        <BulkEditRow on={enSize} setOn={setEnSize} label="ขนาด (กว้าง × สูง — แทนที่ของเดิม)">
-          <SizesEditor value={sizes} onChange={setSizes} />
+        <BulkEditRow on={enSize} setOn={setEnSize} label="ขนาด (กว้าง × สูง)">
+          <BulkModeToggle mode={sizeMode} setMode={setSizeMode} />
+          {sizeMode === "all"
+            ? <div className="mt-1.5"><SizesEditor value={sizes} onChange={setSizes} /><p className="text-[10px] text-slate-400 mt-1">ใส่ค่าเดียว → แทนที่ทุกไฟล์</p></div>
+            : <p className="text-[11px] text-indigo-600 mt-1.5">↓ แก้ขนาดแยกแต่ละไฟล์ในส่วนล่าง</p>}
         </BulkEditRow>
-        <BulkEditRow on={enParent} setOn={setEnParent} label="Parent SKU (แทนที่ของเดิม)">
-          <ParentSkuField value={parents} onChange={setParents} />
+        <BulkEditRow on={enParent} setOn={setEnParent} label="Parent SKU">
+          <BulkModeToggle mode={parentMode} setMode={setParentMode} />
+          {parentMode === "all"
+            ? <div className="mt-1.5"><ParentSkuField value={parents} onChange={setParents} /><p className="text-[10px] text-slate-400 mt-1">เลือกชุดเดียว → แทนที่ทุกไฟล์</p></div>
+            : <p className="text-[11px] text-indigo-600 mt-1.5">↓ แก้ Parent SKU แยกแต่ละไฟล์ในส่วนล่าง</p>}
         </BulkEditRow>
         <BulkEditRow on={enTags} setOn={setEnTags} label="แท็ก (เพิ่มเข้าไป)">
           <TagPickerField value={tags} onChange={setTags} />
@@ -1183,6 +1233,33 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
           <input value={kw} onChange={(e) => setKw(e.target.value)} placeholder="เช่น flower ดอกไม้ summer"
             className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
         </BulkEditRow>
+
+        {needPerFile && (
+          <div className="rounded-lg border border-indigo-200 bg-indigo-50/20 p-2.5">
+            <p className="text-[12px] font-medium text-slate-700 mb-2">🗂️ แก้รายไฟล์ ({ids.length} ไฟล์)
+              {enSize && sizeMode === "each" ? " · ขนาด" : ""}{enParent && parentMode === "each" ? " · Parent SKU" : ""}</p>
+            {itemsLoading || items === null ? (
+              <p className="text-[12px] text-slate-400 py-4 text-center">กำลังโหลดไฟล์ที่เลือก…</p>
+            ) : (
+              <div className="space-y-2 max-h-[46vh] overflow-y-auto pr-1">
+                {items.map((it) => (
+                  <div key={it.id} className="rounded-lg border border-slate-200 bg-white p-2">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      {it.isImg ? <img src={withImageWidth(it.url, 80) ?? it.url} alt="" className="w-9 h-9 object-contain rounded border border-slate-200 bg-slate-50 shrink-0" /> : <span className="text-xl shrink-0">🎨</span>}
+                      <span className="text-[12px] text-slate-700 truncate">{it.title}</span>
+                    </div>
+                    {enSize && sizeMode === "each" && (
+                      <div className="mb-1.5"><p className="text-[10px] text-slate-400 mb-0.5">📐 ขนาด (กว้าง × สูง)</p><SizesEditor value={pfSizes[it.id] ?? []} onChange={(v) => setPfSizes((m) => ({ ...m, [it.id]: v }))} /></div>
+                    )}
+                    {enParent && parentMode === "each" && (
+                      <div><p className="text-[10px] text-slate-400 mb-0.5">📦 Parent SKU</p><ParentSkuField value={pfParents[it.id] ?? []} onChange={(v) => setPfParents((m) => ({ ...m, [it.id]: v }))} /></div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </ERPModal>
   );
