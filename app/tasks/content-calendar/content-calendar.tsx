@@ -214,7 +214,7 @@ export function ContentCalendarView() {
                 const isToday = key === todayKey;
                 const isOver = overKey === key;
                 return (
-                  <div key={day} onClick={() => openCreate(`${key}T10:00`)}
+                  <div key={day} onClick={() => openCreate(key)}
                     onDragOver={(e) => { e.preventDefault(); if (overKey !== key) setOverKey(key); }}
                     onDragLeave={() => setOverKey((k) => (k === key ? null : k))}
                     onDrop={() => onDropDay(key)}

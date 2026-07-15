@@ -53,6 +53,8 @@ function StatusBadge({ status }: { status: ContentStatus }) {
   return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{contentStatusLabel(status)}</span>;
 }
 
+const TEMPLATE_ICONS = ["🧩", "📢", "🖼️", "✨", "🎬", "🛍️", "🔥", "💡", "🏷️", "🎁", "📸", "🎥", "⭐", "💥", "📝", "🛒", "💬", "🎨", "👗", "👜", "💄", "🌸", "🎀", "📦", "🚀", "❤️", "🏆", "🎯", "📱", "🎉"];
+
 export function ContentPageView() {
   const t = useT();
   const { platforms } = useCreativeOptions();
@@ -70,6 +72,7 @@ export function ContentPageView() {
 
   // create modal (ฟอร์ม/logic ย้ายไปของกลาง ContentCreateModal แล้ว)
   const [open, setOpen] = useState(false);
+  const [iconEditId, setIconEditId] = useState<string | null>(null);   // แม่แบบที่กำลังเปลี่ยนไอคอน
 
   const pushToast = useCallback((type: Toast["type"], message: string) => {
     const id = Date.now() + Math.random();
@@ -106,6 +109,11 @@ export function ContentPageView() {
     const name = window.prompt(t("ชื่อแม่แบบคอนเทนต์", "Content template name"));
     if (!name?.trim()) return;
     try { const { id } = await createContent({ title: name.trim(), is_template: true }); await reloadTemplates(); setDetailId(id); pushToast("success", t("สร้างแม่แบบแล้ว", "Template created")); }
+    catch (e) { pushToast("error", (e as Error).message); }
+  };
+  // เปลี่ยนไอคอนแม่แบบ (emoji) — บันทึกทันที
+  const setTemplateIcon = async (id: string, icon: string | null) => {
+    try { await updateContent(id, { template_icon: icon }); await reloadTemplates(); setIconEditId(null); pushToast("success", t("เปลี่ยนไอคอนแล้ว", "Icon updated")); }
     catch (e) { pushToast("error", (e as Error).message); }
   };
 
@@ -149,9 +157,11 @@ export function ContentPageView() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {templates.map((c) => (
                     <div key={c.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 hover:shadow transition-colors">
-                      <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2.5">
+                        <button onClick={() => setIconEditId(c.id)} title={t("เปลี่ยนไอคอน", "Change icon")}
+                          className="h-11 w-11 shrink-0 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-2xl hover:border-violet-300 hover:bg-violet-50">{c.template_icon || "🧩"}</button>
                         <button onClick={() => setDetailId(c.id)} className="min-w-0 text-left flex-1">
-                          <span className="text-[10px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">🧩 {t("แม่แบบ", "Template")}</span>
+                          <span className="text-[10px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{t("แม่แบบ", "Template")}</span>
                           <p className="text-base font-semibold text-slate-800 leading-snug line-clamp-2 mt-1.5">{c.title}</p>
                           <div className="flex flex-wrap gap-1 mt-2">{(c.platforms ?? []).map((p) => <span key={p} className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{platformLabel(p)}</span>)}</div>
                         </button>
@@ -240,6 +250,14 @@ export function ContentPageView() {
 
       <ContentCreateModal open={open} onClose={() => setOpen(false)} onCreated={() => { setOpen(false); load(); }}
         brands={brands} campaigns={campaigns} templates={templates} pushToast={pushToast} />
+
+      <ERPModal open={!!iconEditId} onClose={() => setIconEditId(null)} title={t("เลือกไอคอนแม่แบบ", "Pick template icon")} size="sm"
+        footer={<button onClick={() => setIconEditId(null)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>}>
+        <div className="grid grid-cols-6 gap-2">
+          {TEMPLATE_ICONS.map((e) => <button key={e} onClick={() => iconEditId && setTemplateIcon(iconEditId, e)} className="h-11 rounded-lg border border-slate-200 text-2xl hover:border-violet-400 hover:bg-violet-50">{e}</button>)}
+        </div>
+        <button onClick={() => iconEditId && setTemplateIcon(iconEditId, null)} className="mt-3 text-sm text-slate-500 hover:underline">{t("ใช้ค่าเริ่มต้น (🧩)", "Use default (🧩)")}</button>
+      </ERPModal>
 
       {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => { load(); reloadTemplates(); }} onDelete={(c) => setDelTarget(c)} pushToast={pushToast} />}
 

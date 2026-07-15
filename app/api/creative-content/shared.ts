@@ -5,7 +5,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sku_id, parent_sku_id, product_name, post_type,
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, post_status, platform_images, note,
   discount_value, discount_is_percent, color_source,
-  is_template, is_active, created_at, updated_at, assignee_id, assignee_ids,
+  is_template, template_icon, is_active, created_at, updated_at, assignee_id, assignee_ids,
   brand:brands!brand_id(name, color, shop_channels),
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, fake_price),

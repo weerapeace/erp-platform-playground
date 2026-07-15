@@ -6,15 +6,15 @@
 // รองรับ prefill: แบรนด์ (จากแท็บ) + วันตั้งโพสต์ (จากช่องวันที่คลิก)
 // ============================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "../use-options";
 import {
-  createContent, getContent, CONTENT_STATUS_META, POST_TYPES, contentStatusLabel, postTypeLabel,
-  type ContentItem, type ContentCaption, type ContentStatus, type BrandOption,
+  createContent, getContent, getRecommendedTimes, CONTENT_STATUS_META, POST_TYPES, contentStatusLabel, postTypeLabel,
+  type ContentItem, type ContentCaption, type ContentStatus, type BrandOption, type RecommendedTimes,
 } from "../data";
 
 type CampaignOpt = { id: string; name: string };
@@ -40,16 +40,37 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
+  const [recTimes, setRecTimes] = useState<RecommendedTimes>({});   // เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์)
+  const recRef = useRef<RecommendedTimes>({});
+  useEffect(() => { getRecommendedTimes().then((r) => { setRecTimes(r); recRef.current = r; }).catch(() => {}); }, []);
 
-  // เปิดใหม่ทุกครั้ง → รีเซ็ตฟอร์ม + เติมค่า default (แบรนด์จากแท็บ / วันจากช่องที่คลิก)
+  // เปิดใหม่ทุกครั้ง → รีเซ็ตฟอร์ม + เติมค่า default (แบรนด์จากแท็บ / วันจากช่องที่คลิก + เวลาแนะนำ)
   useEffect(() => {
     if (!open) return;
-    setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: defaultDate ?? "" });
+    let sched = defaultDate ?? "";
+    if (sched && !sched.includes("T")) {   // ส่งมาเป็นวันล้วน → เติมเวลาแนะนำของวันนั้นให้ (ไม่มีก็ 10:00)
+      const day = new Date(`${sched}T00:00:00`).getDay();
+      const rec = (recRef.current[String(day)] ?? [])[0]?.time;
+      sched = `${sched}T${rec || "10:00"}`;
+    }
+    setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched });
     setTplId(""); setTplCaptions([]); setDirty(false); setFormErr(null);
   }, [open, defaultBrandId, defaultDate]);
 
   const upd = (patch: Partial<Form>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
   const togglePlatform = (v: string) => upd({ platforms: form.platforms.includes(v) ? form.platforms.filter((x) => x !== v) : [...form.platforms, v] });
+  // เวลาแนะนำของวันที่เลือกโพสต์ (ปุ่มกดใช้ได้ทันที) — เหมือนใน drawer
+  const schedRec = useMemo(() => {
+    const dpart = form.scheduled_at.slice(0, 10);
+    if (dpart.length < 10) return null;
+    const day = new Date(`${dpart}T00:00:00`).getDay();
+    const cur = form.scheduled_at.slice(11, 16);
+    const items = (recTimes[String(day)] ?? []).filter((it) => it.time && it.time !== cur);
+    if (!items.length) return null;
+    const labels = [t("อา.", "Sun"), t("จ.", "Mon"), t("อ.", "Tue"), t("พ.", "Wed"), t("พฤ.", "Thu"), t("ศ.", "Fri"), t("ส.", "Sat")];
+    return { items, label: labels[day] };
+  }, [form.scheduled_at, recTimes, t]);
+  const applyRecTime = (tm: string) => { const d = form.scheduled_at.slice(0, 10) || new Date().toISOString().slice(0, 10); upd({ scheduled_at: `${d}T${tm}` }); };
   const applyTemplate = async (tid: string) => {
     setTplId(tid);
     if (!tid) { setTplCaptions([]); return; }
@@ -82,12 +103,22 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       </>}>
       {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
       {templates.length > 0 && (
-        <div className="mb-4 flex items-center gap-2 bg-violet-50/60 border border-violet-100 rounded-lg px-3 py-2">
-          <span className="text-sm text-slate-600 shrink-0">📋 {t("เริ่มจากเทมเพลต:", "Start from template:")}</span>
-          <select value={tplId} onChange={(e) => applyTemplate(e.target.value)} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm bg-white">
-            <option value="">{t("— ไม่ใช้เทมเพลต —", "— No template —")}</option>
-            {templates.map((tp) => <option key={tp.id} value={tp.id}>{tp.title}</option>)}
-          </select>
+        <div className="mb-4">
+          <div className="text-sm text-slate-600 mb-1.5">📋 {t("เริ่มจากเทมเพลต:", "Start from template:")}</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <button type="button" onClick={() => applyTemplate("")}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left ${tplId === "" ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300" : "border-slate-200 hover:border-violet-300"}`}>
+              <span className="text-lg shrink-0">🚫</span>
+              <span className="truncate text-slate-500">{t("ไม่ใช้เทมเพลต", "No template")}</span>
+            </button>
+            {templates.map((tp) => (
+              <button key={tp.id} type="button" onClick={() => applyTemplate(tp.id)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left ${tplId === tp.id ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300" : "border-slate-200 hover:border-violet-300"}`}>
+                <span className="text-lg shrink-0">{tp.template_icon || "🧩"}</span>
+                <span className="truncate font-medium text-slate-700">{tp.title}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
       <ERPFormSection title={t("ข้อมูลคอนเทนต์", "Content Details")} columns={2}>
@@ -96,7 +127,17 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         <ERPFormField label={t("สถานะ", "Status")}><ERPSelect value={form.status} options={Object.keys(CONTENT_STATUS_META).map((v) => ({ value: v, label: contentStatusLabel(v as ContentStatus) }))} onChange={(e) => upd({ status: e.target.value as ContentStatus })} /></ERPFormField>
         <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => upd({ brand_id: e.target.value })} /></ERPFormField>
         <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
-        <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")}><ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} /></ERPFormField>
+        <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")}>
+          <ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} />
+          {schedRec && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-violet-400">💡 {t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
+              {schedRec.items.map((it) => (
+                <button key={it.time} type="button" onClick={() => applyRecTime(it.time)} title={it.note || t("เวลาแนะนำ", "Suggested time")} className="inline-flex items-center gap-0.5 text-[11px] text-violet-700 bg-white border border-violet-200 rounded-full px-2.5 py-1 hover:bg-violet-100">{it.time}{it.note ? <span className="text-violet-300">ⓘ</span> : null}</button>
+              ))}
+            </div>
+          )}
+        </ERPFormField>
         <ERPFormField label={t("สินค้า/SKU (ถ้ามี)", "Product/SKU (if any)")}><SkuPicker value={form.product} onChange={(v) => upd({ product: v })} /></ERPFormField>
         <ERPFormField label={t("แพลตฟอร์ม", "Platforms")} span={2}>
           <div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}</div>
