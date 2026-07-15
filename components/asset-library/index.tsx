@@ -69,6 +69,7 @@ export function AssetLibrary() {
   const [bulkTrashOpen, setBulkTrashOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [brandReload, setBrandReload] = useState(0);   // bump เพื่อรีเฟรชมุมมอง "ดูตามแบรนด์"
   const [driveOn, setDriveOn] = useState(false);
   const [bulkDriveBusy, setBulkDriveBusy] = useState(false);
@@ -204,7 +205,7 @@ export function AssetLibrary() {
 
   const selCount = selected.size;
 
-  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || manageTypesOpen;
+  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || manageTypesOpen;
   const onPageDrop = (e: React.DragEvent) => {
     setPageDrag(false);
     if (anyModalOpen) return;
@@ -372,7 +373,7 @@ export function AssetLibrary() {
           ) : (
             <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
               {rows.map((a) => (
-                <AssetCard key={a.id} a={a} selected={selected.has(a.id)}
+                <AssetCard key={a.id} a={a} selected={selected.has(a.id)} selectionMode={selCount > 0}
                   onToggle={() => toggleSel(a.id)} onOpen={() => setDetailId(a.id)} />
               ))}
             </div>
@@ -384,6 +385,7 @@ export function AssetLibrary() {
       {selCount > 0 && (
         <div className="sticky bottom-4 mt-4 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto">
           <span className="text-sm font-medium">เลือก {selCount} ไฟล์</span>
+          {!trash && <button onClick={() => setBulkEditOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">✏️ แก้หลายรายการ</button>}
           {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
           {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 จัดอัลบั้ม</button>}
           {!trash && driveOn && <button onClick={bulkDriveFolders} disabled={bulkDriveBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkDriveBusy ? "กำลังสร้าง…" : "🗂️ สร้าง Folder Drive"}</button>}
@@ -432,6 +434,9 @@ export function AssetLibrary() {
       />
       {bulkTagOpen && <BulkTagModal count={selCount} tags={tags} onClose={() => setBulkTagOpen(false)} onApply={bulkTag} />}
       {bulkMoveOpen && <BulkMoveModal count={selCount} collections={collections} onClose={() => setBulkMoveOpen(false)} onApply={bulkMove} />}
+      {bulkEditOpen && <BulkEditModal ids={Array.from(selected)} artTypes={artTypes}
+        onClose={() => setBulkEditOpen(false)}
+        onDone={async () => { setBulkEditOpen(false); clearSel(); await load(); await loadMeta(); }} />}
     </div>
   );
 }
@@ -452,16 +457,17 @@ function SideItem({ active, onClick, label, count, icon }: {
   );
 }
 
-function AssetCard({ a, selected, onToggle, onOpen }: {
-  a: AssetRow; selected: boolean; onToggle: () => void; onOpen: () => void;
+function AssetCard({ a, selected, selectionMode, onToggle, onOpen }: {
+  a: AssetRow; selected: boolean; selectionMode: boolean; onToggle: () => void; onOpen: () => void;
 }) {
   const [broken, setBroken] = useState(false);
   return (
     <div className={`group relative rounded-xl border overflow-hidden bg-white ${selected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200"}`}>
+      {/* ในโหมดเลือก (มีของเลือกอยู่แล้ว): กล่องติ๊กใหญ่ขึ้น + โชว์ตลอด กดง่าย */}
       <button
         onClick={(e) => { e.stopPropagation(); onToggle(); }}
-        className={`absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-md border flex items-center justify-center text-[11px] ${selected
-          ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white/90 border-slate-300 text-transparent group-hover:text-slate-300"}`}
+        className={`absolute top-1.5 left-1.5 z-10 rounded-md border flex items-center justify-center ${selectionMode ? "w-7 h-7 text-sm" : "w-5 h-5 text-[11px]"} ${selected
+          ? "bg-indigo-600 border-indigo-600 text-white" : selectionMode ? "bg-white border-slate-400 text-slate-300 shadow-sm" : "bg-white/90 border-slate-300 text-transparent group-hover:text-slate-300"}`}
       >✓</button>
       {/* ป้ายเตือน "ยังไม่ครบ" (เฉพาะ Artwork) — ไม่มีโฟลเดอร์ Drive / ยังไม่ใส่ขนาด */}
       {a.source === "artwork" && (
@@ -470,7 +476,7 @@ function AssetCard({ a, selected, onToggle, onOpen }: {
           {!a.sizes?.length && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-rose-100 text-rose-700 border border-rose-200 shadow-sm">📐 ไม่มีขนาด</span>}
         </div>
       )}
-      <button onClick={onOpen} className="block w-full text-left">
+      <button onClick={selectionMode ? (e) => { e.stopPropagation(); onToggle(); } : onOpen} className="block w-full text-left">
         <HoverPreview url={isImage(a) && !broken ? a.url : null} previewW={440}>
           {/* กรอบ 1:1 — รูปแสดงเต็มทั้งใบ (object-contain) ไม่ตัดขอบ/ตัวหนังสือ */}
           <div className="aspect-square bg-slate-50 flex items-center justify-center overflow-hidden">
@@ -1060,6 +1066,92 @@ function BulkMoveModal({ count, collections, onClose, onApply }: {
           {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </label>
+    </ERPModal>
+  );
+}
+
+// แถวฟิลด์ใน bulk edit — ติ๊กเปิด/ปิดการแก้ฟิลด์ (module-level กัน remount ตอนพิมพ์)
+function BulkEditRow({ on, setOn, label, children }: { on: boolean; setOn: (v: boolean) => void; label: string; children: React.ReactNode }) {
+  return (
+    <div className={`rounded-lg border p-2.5 ${on ? "border-indigo-200 bg-indigo-50/30" : "border-slate-200"}`}>
+      <label className="flex items-center gap-2 text-[12px] font-medium text-slate-700 cursor-pointer">
+        <input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} /> {label}
+      </label>
+      {on && <div className="mt-2">{children}</div>}
+    </div>
+  );
+}
+
+// ── แก้หลายรายการพร้อมกัน (bulk edit) — ติ๊กเลือกฟิลด์ที่จะแก้ · เฉพาะที่ติ๊กจะถูกแทนที่ · แท็ก = เพิ่มเข้าไป ──
+function BulkEditModal({ ids, artTypes, onClose, onDone }: {
+  ids: string[]; artTypes: LookupItem[]; onClose: () => void; onDone: () => void;
+}) {
+  const toast = useToast();
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [artTypeList, setArtTypeList] = useState<LookupItem[]>(artTypes);
+  const [busy, setBusy] = useState(false);
+  const [enBrand, setEnBrand] = useState(false); const [brandId, setBrandId] = useState("");
+  const [enType, setEnType] = useState(false); const [types, setTypes] = useState<string[]>([]);
+  const [enSize, setEnSize] = useState(false); const [sizes, setSizes] = useState<AssetSize[]>([]);
+  const [enParent, setEnParent] = useState(false); const [parents, setParents] = useState<string[]>([]);
+  const [enTags, setEnTags] = useState(false); const [tags, setTags] = useState<string[]>([]);
+  const [enKw, setEnKw] = useState(false); const [kw, setKw] = useState("");
+  useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
+
+  const save = async () => {
+    const fields: Record<string, unknown> = {};
+    if (enBrand) fields.brand_id = brandId || null;
+    if (enType) fields.artwork_types = types;
+    if (enSize) fields.sizes = sizes;
+    if (enParent) fields.parent_sku_codes = parents;
+    if (enKw) fields.keywords = kw.trim();
+    if (enTags) fields.add_tags = tags;
+    if (!Object.keys(fields).length) { toast.error("ติ๊กเลือกฟิลด์ที่จะแก้ก่อน"); return; }
+    setBusy(true);
+    try {
+      const res = await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "edit", asset_ids: ids, fields }) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "แก้ไม่สำเร็จ");
+      toast.success(`แก้ ${j.count ?? ids.length} ไฟล์แล้ว`); onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <ERPModal open onClose={onClose} title={`✏️ แก้ ${ids.length} ไฟล์พร้อมกัน`} size="lg"
+      description="ติ๊กเฉพาะฟิลด์ที่ต้องการแก้ — ฟิลด์ที่ติ๊กจะถูกแทนที่ทุกไฟล์ · แท็ก = เพิ่มเข้าไป (ไม่ลบของเดิม)"
+      footer={
+        <div className="flex items-center justify-between w-full">
+          <span className="text-[12px] text-amber-600">จะแก้ {ids.length} ไฟล์ที่เลือก</span>
+          <div className="flex gap-2">
+            <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : `บันทึก ${ids.length} ไฟล์`}</button>
+          </div>
+        </div>
+      }>
+      <div className="space-y-2.5">
+        <BulkEditRow on={enBrand} setOn={setEnBrand} label="แบรนด์">
+          <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
+            <option value="">— ไม่มีแบรนด์ —</option>
+            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </BulkEditRow>
+        <BulkEditRow on={enType} setOn={setEnType} label="ชนิด (แทนที่ของเดิม)">
+          <ArtTypeMultiSelect value={types} types={artTypeList} onChange={setTypes} onCreated={(t) => setArtTypeList((c) => [...c, t])} />
+        </BulkEditRow>
+        <BulkEditRow on={enSize} setOn={setEnSize} label="ขนาด (กว้าง × สูง — แทนที่ของเดิม)">
+          <SizesEditor value={sizes} onChange={setSizes} />
+        </BulkEditRow>
+        <BulkEditRow on={enParent} setOn={setEnParent} label="Parent SKU (แทนที่ของเดิม)">
+          <ParentSkuField value={parents} onChange={setParents} />
+        </BulkEditRow>
+        <BulkEditRow on={enTags} setOn={setEnTags} label="แท็ก (เพิ่มเข้าไป)">
+          <TagPickerField value={tags} onChange={setTags} />
+        </BulkEditRow>
+        <BulkEditRow on={enKw} setOn={setEnKw} label="คำค้นเพิ่มเติม (keyword — แทนที่ของเดิม)">
+          <input value={kw} onChange={(e) => setKw(e.target.value)} placeholder="เช่น flower ดอกไม้ summer"
+            className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
+        </BulkEditRow>
+      </div>
     </ERPModal>
   );
 }

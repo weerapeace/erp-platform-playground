@@ -9,16 +9,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
-import { actorId } from "../shared";
+import { actorId, normalizeCodes, normalizeSizes } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+type BulkEditFields = {
+  brand_id?: string | null; artwork_types?: unknown; sizes?: unknown;
+  parent_sku_codes?: unknown; keywords?: string | null; add_tags?: string[];
+};
 
 export async function POST(request: NextRequest) {
   const denied = await guardApi(request, "assets.edit");
   if (denied) return denied;
 
-  let b: { action?: string; asset_ids?: string[]; tag?: string; collection_id?: string | null };
+  let b: { action?: string; asset_ids?: string[]; tag?: string; collection_id?: string | null; fields?: BulkEditFields };
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const action = b.action;
@@ -63,6 +68,30 @@ export async function POST(request: NextRequest) {
     } else {
       const { error } = await admin.from("asset_tag_map").delete().eq("tag_id", tagId).in("asset_id", ids);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+  } else if (action === "edit") {
+    // แก้หลายฟิลด์พร้อมกัน — เฉพาะฟิลด์ที่ส่งมา (ค่าเดิมถูกแทนที่ · แท็ก = เพิ่มเข้าไป ไม่ลบของเดิม)
+    const f = b.fields ?? {};
+    const patch: Record<string, unknown> = {};
+    if (f.brand_id !== undefined) patch.brand_id = f.brand_id || null;
+    if (f.artwork_types !== undefined) { const t = normalizeCodes(f.artwork_types); patch.artwork_types = t; patch.artwork_type = t[0] ?? null; }
+    if (f.sizes !== undefined) patch.sizes = normalizeSizes(f.sizes);
+    if (f.parent_sku_codes !== undefined) patch.parent_sku_codes = normalizeCodes(f.parent_sku_codes);
+    if (f.keywords !== undefined) patch.keywords = f.keywords || null;
+    if (Object.keys(patch).length) {
+      patch.updated_at = new Date().toISOString();
+      const { error } = await admin.from("assets").update(patch).in("id", ids);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    // เพิ่มแท็ก (merge — ไม่ลบแท็กเดิม)
+    if (Array.isArray(f.add_tags)) {
+      for (const name of [...new Set(f.add_tags.map((s) => String(s).trim()).filter(Boolean))]) {
+        let tagId: string | null = null;
+        const { data: ex } = await admin.from("asset_tags").select("id").eq("name", name).maybeSingle();
+        if (ex?.id) tagId = ex.id as string;
+        else { const { data: created } = await admin.from("asset_tags").insert({ name }).select("id").maybeSingle(); tagId = (created?.id as string) ?? null; }
+        if (tagId) await admin.from("asset_tag_map").upsert(ids.map((asset_id) => ({ asset_id, tag_id: tagId })), { onConflict: "asset_id,tag_id", ignoreDuplicates: true });
+      }
     }
   } else {
     return NextResponse.json({ error: "action ไม่ถูกต้อง" }, { status: 400 });
