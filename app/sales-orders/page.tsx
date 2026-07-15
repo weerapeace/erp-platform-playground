@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
-import { DataTable } from "@/components/data-table";
+import { DataTable, type BulkAction } from "@/components/data-table";
 import { AttachmentPanel } from "@/components/attachment-panel";
 import { ERPModal } from "@/components/modal";
 import { CustomerPicker, WarehousePicker, EmployeePicker, RecordPeekLink } from "@/components/pickers";
@@ -383,6 +383,31 @@ export default function SalesOrdersPage() {
     finally { setWfLoading(false); }
   };
 
+  // ---- Bulk actions (ติ๊กหลายใบ → ยืนยัน / พิมพ์ทีเดียว) ----
+  const bulkConfirm = async (rows: SOListItem[]) => {
+    const drafts = rows.filter(r => r.status === "draft");
+    if (drafts.length === 0) { flash("ไม่มี SO ร่างให้ยืนยัน (ยืนยันได้เฉพาะใบร่าง)"); return; }
+    if (!confirm(`ยืนยัน ${drafts.length} ใบ? — ระบบจะออกเลขและจองสต๊อกตามรายการ`)) return;
+    setWfLoading(true);
+    let ok = 0, fail = 0;
+    for (const r of drafts) {
+      try {
+        const res = await apiFetch(`/api/sales-orders/${r.id}/transition`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "confirm", actor: user?.name }),
+        });
+        const j = await res.json(); if (j.error) throw new Error(j.error); ok++;
+      } catch { fail++; }
+    }
+    setWfLoading(false);
+    flash(`ยืนยันแล้ว ${ok} ใบ${fail ? ` · ล้มเหลว ${fail}` : ""}`);
+    await fetchList();
+  };
+  const bulkActions: BulkAction<SOListItem>[] = [
+    { label: "🧾 พิมพ์ใบกำกับภาษี", onClick: (rows) => { if (rows.length) window.open(`/print/sales-order-bulk?ids=${rows.map(r => r.id).join(",")}`, "_blank"); } },
+    { label: "✓ ยืนยัน SO", onClick: (rows) => { void bulkConfirm(rows); } },
+  ];
+
   // ---- Columns ----
   const columns: ColumnDef<SOListItem>[] = useMemo(() => [
     {
@@ -512,6 +537,7 @@ export default function SalesOrdersPage() {
           exportFilename="sales-orders"
           exportEntityType="erp_playground_so"
           canCheck={(p) => can(p as Parameters<typeof can>[0])}
+          bulkActions={bulkActions}
           pageSize={20}
           onRowClick={(r) => openDetail(r.id)}
         />
