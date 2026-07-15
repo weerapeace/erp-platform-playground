@@ -6,9 +6,10 @@
  */
 import crypto from "crypto";
 
-const CLIENT_EMAIL = (process.env.GOOGLE_SA_CLIENT_EMAIL || "").trim();
+// รับได้ทั้งชื่อเดิมและชื่อสำรอง (เผื่อตั้ง env คนละชื่อ)
+const CLIENT_EMAIL = (process.env.GOOGLE_SA_CLIENT_EMAIL || process.env.GOOGLE_SA_EMAIL || "").trim();
 const PRIVATE_KEY = (process.env.GOOGLE_SA_PRIVATE_KEY || "").replace(/\\n/g, "\n").trim();
-export const DRIVE_ROOT_FOLDER_ID = (process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || "1Fv2HTcbcfXY_LfKF120pATNokF-N61a5").trim();
+export const DRIVE_ROOT_FOLDER_ID = (process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.GOOGLE_SHARED_DRIVE_ID || "1Fv2HTcbcfXY_LfKF120pATNokF-N61a5").trim();
 
 /** ตั้งค่าครบพร้อมใช้ไหม (มีอีเมล + กุญแจ) */
 export function driveConfigured(): boolean { return !!CLIENT_EMAIL && !!PRIVATE_KEY; }
@@ -118,4 +119,21 @@ export async function driveUploadFile(name: string, mimeType: string, data: Arra
   const j = await res.json().catch(() => ({}));
   if (!res.ok || !j.id) throw new Error(`อัปไฟล์ขึ้น Drive ไม่สำเร็จ: ${j.error?.message || res.status}`);
   return { id: j.id as string, webViewLink: (j.webViewLink as string) || `https://drive.google.com/file/d/${j.id}/view` };
+}
+
+/**
+ * เริ่ม resumable upload session → คืน "upload URL" ให้เบราว์เซอร์ PUT ไฟล์ตรงเข้า Drive
+ * (สำหรับไฟล์ใหญ่ — เลี่ยงลิมิตขนาด body ของเซิร์ฟเวอร์ Vercel)
+ */
+export async function driveCreateResumableSession(name: string, mimeType: string, parentId: string): Promise<string> {
+  const token = await getAccessToken();
+  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": mimeType || "application/octet-stream" },
+    body: JSON.stringify({ name, parents: [parentId] }),
+  });
+  if (!res.ok) throw new Error(`เริ่ม upload session ไม่สำเร็จ: ${res.status} ${(await res.text()).slice(0, 200)}`);
+  const loc = res.headers.get("location");
+  if (!loc) throw new Error("ไม่ได้ upload URL จาก Drive");
+  return loc;
 }

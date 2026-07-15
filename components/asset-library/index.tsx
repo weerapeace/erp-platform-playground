@@ -952,6 +952,28 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
   const pathWarn = !!masterPath.trim() && !pathMatchesRule(masterPath, rule.base_paths);
   const [fileExt, setFileExt] = useState("");
   const [pathAuto, setPathAuto] = useState(true);   // path ยังตามชื่ออัตโนมัติอยู่ไหม (ผู้ใช้แก้เอง = หยุด)
+  const [srcFiles, setSrcFiles] = useState<File[]>([]);   // ไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Drive
+  const [driveOn, setDriveOn] = useState(false);
+  const srcInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
+
+  // อัปไฟล์ต้นฉบับขึ้น Google Drive (สร้างโฟลเดอร์ตามชื่อ + ตั้งชื่อไฟล์ตามชื่อ) → คืนลิงก์โฟลเดอร์
+  const uploadSourcesToDrive = async (): Promise<string> => {
+    const nm = title.trim() || "artwork";
+    const items = srcFiles.map((f, i) => {
+      const ext = f.name.match(/\.[^.]+$/)?.[0] ?? "";
+      return { file: f, filename: `${nm}${i > 0 ? `_${i + 1}` : ""}${ext}`, mime: f.type || "application/octet-stream" };
+    });
+    const res = await apiFetch("/api/drive", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: nm, artworkType: artTypesSel[0], files: items.map((x) => ({ filename: x.filename, mime: x.mime })) }) });
+    const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "เตรียมอัป Drive ไม่สำเร็จ");
+    for (let i = 0; i < items.length; i++) {
+      const up = j.uploads?.[i]; if (!up?.uploadUrl) continue;
+      const put = await fetch(up.uploadUrl, { method: "PUT", body: items[i].file });
+      if (!put.ok) throw new Error(`อัปไฟล์ ${items[i].filename} ขึ้น Drive ไม่สำเร็จ (${put.status})`);
+    }
+    return String(j.folderLink ?? "");
+  };
 
   const buildPath = (name: string, ext: string) => {
     const base = rule.base_paths[0]; if (!base) return "";
@@ -974,9 +996,14 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
 
   const save = async () => {
     if (!file) { toast.error("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)"); return; }
-    if (!masterPath.trim() && !masterUrl.trim()) { toast.error("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS หรือ ลิงก์ Google Drive)"); return; }
+    const willDrive = srcFiles.length > 0 && driveOn;
+    if (!masterPath.trim() && !masterUrl.trim() && !willDrive) { toast.error("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS / ลิงก์ / โยนไฟล์ขึ้น Drive)"); return; }
     setBusy(true);
     try {
+      // อัปไฟล์ต้นฉบับขึ้น Drive ก่อน (ได้ลิงก์โฟลเดอร์มาเติมให้)
+      let effUrl = masterUrl.trim();
+      if (willDrive) { const link = await uploadSourcesToDrive(); if (link) { effUrl = link; setMasterUrl(link); } }
+
       const upFile = await downscaleImageWidth(file, 1200);   // ย่อด้านกว้าง ≤ 1200px ตอนอัป
       const fd = new FormData();
       fd.append("file", upFile);
@@ -984,7 +1011,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
       if (artTypesSel.length) fd.append("artwork_types", JSON.stringify(artTypesSel));
       if (title.trim()) fd.append("title", title.trim());
       if (masterPath.trim()) fd.append("master_path", masterPath.trim());
-      if (masterUrl.trim()) fd.append("master_url", masterUrl.trim());
+      if (effUrl) fd.append("master_url", effUrl);
       if (keywords.trim()) fd.append("keywords", keywords.trim());
       if (tags.length) fd.append("tags", tags.join(","));
       if (sizes.length) fd.append("sizes", JSON.stringify(sizes));
@@ -1078,6 +1105,33 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
         <label className="block text-[12px] text-slate-500 mt-2">ลิงก์ Google Drive / Synology <span className="text-slate-300" title="ลิงก์ที่เปิดได้จากที่ไหนก็ได้ (นอกออฟฟิศ) — ไม่ใส่ก็ได้ถ้ามี path NAS แล้ว">ⓘ</span>
           <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder="https://drive.google.com/…  หรือ  ลิงก์ Synology Drive"
             className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
+
+        {/* โยนไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Google Drive อัตโนมัติ */}
+        {driveOn && (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <span className="text-[12px] text-slate-500">📤 หรือ โยนไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Google Drive ให้อัตโนมัติ</span>
+            <div onClick={() => srcInputRef.current?.click()}
+              onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
+              onDragOver={(e) => e.preventDefault()}
+              className="mt-1 border border-dashed border-slate-300 rounded-lg px-3 py-3 text-center text-[12px] text-slate-400 hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer">
+              + ลากไฟล์มาวาง หรือคลิกเลือก
+              <input ref={srcInputRef} type="file" multiple className="hidden"
+                onChange={(e) => { if (e.target.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.target.files!)]); e.target.value = ""; }} />
+            </div>
+            {srcFiles.length > 0 && (
+              <div className="mt-1.5 space-y-1">
+                {srcFiles.map((f, i) => (
+                  <div key={i} className="flex items-center gap-2 text-[12px] bg-slate-50 border border-slate-200 rounded px-2 py-1">
+                    <span className="flex-1 truncate">📄 {f.name}</span>
+                    <span className="text-slate-400 shrink-0">{(f.size / 1024 / 1024).toFixed(1)}MB</span>
+                    <button type="button" onClick={() => setSrcFiles((p) => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
+                  </div>
+                ))}
+                <p className="text-[11px] text-slate-400">จะสร้างโฟลเดอร์ชื่อ “{title.trim() || "(ใส่ชื่อก่อน)"}” + ตั้งชื่อไฟล์ตามชื่องาน + เติมลิงก์ Drive ให้อัตโนมัติ</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <label className="block text-[12px] text-slate-500 mt-3">คำค้นเพิ่มเติม (keyword) <span className="text-[10px] text-slate-400">— คำพ้อง/ชื่ออื่น พิมพ์แล้วเจอ</span>
