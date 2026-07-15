@@ -716,16 +716,16 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
     finally { setReplacing(false); }
   };
 
-  // อัปไฟล์ต้นฉบับขึ้น Drive ย้อนหลัง + ก็อปรูป preview (ดึงรูปจาก R2 มาก็อป ไม่ลบของเดิม) → เก็บลิงก์โฟลเดอร์ทันที
+  // สร้างโฟลเดอร์ Drive + ก็อปรูป preview (จาก R2 ไม่ลบของเดิม) + อัปไฟล์ต้นฉบับถ้ามี → เก็บลิงก์โฟลเดอร์ทันที
+  // ใช้ได้ทั้งกรณีมีไฟล์ต้นฉบับ และกรณี "แค่สร้างโฟลเดอร์ + ดึง preview" (ไม่แนบไฟล์)
   const doDriveUpload = async () => {
-    if (!srcFiles.length) { toast.error("โยนไฟล์ต้นฉบับก่อน"); return; }
     if (!brandId) { toast.error("เลือกแบรนด์ก่อน (ไว้จัดโฟลเดอร์)"); return; }
     if (!d) return;
     setDriveBusy(true);
     try {
       let previewFile: File | null = null;
       if (isImage(d)) {
-        try { const r = await apiFetch(d.url); const blob = await r.blob(); previewFile = new File([blob], `${(title.trim() || d.file_name)}.png`, { type: blob.type || "image/png" }); } catch { /* ไม่มี preview ก็ยังอัปต้นฉบับได้ */ }
+        try { const r = await apiFetch(d.url); const blob = await r.blob(); previewFile = new File([blob], `${(title.trim() || d.file_name)}.png`, { type: blob.type || "image/png" }); } catch { /* ไม่มี preview ก็ยังสร้างโฟลเดอร์ได้ */ }
       }
       const { folderLink, largeCount } = await uploadArtworkToDrive({
         name: title.trim() || d.file_name, artworkType: artTypesSel[0], brandId, srcFiles, previewFile,
@@ -735,7 +735,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
       if (folderLink) {
         setMasterUrl(folderLink);
         await apiFetch(`/api/assets/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ master_url: folderLink }) });
-        toast.success("อัปขึ้น Drive + เก็บลิงก์แล้ว"); setSrcFiles([]); await loadDetail(); onChanged();
+        toast.success(srcFiles.length ? "อัปขึ้น Drive + เก็บลิงก์แล้ว" : "สร้างโฟลเดอร์ + ดึงรูป preview แล้ว"); setSrcFiles([]); await loadDetail(); onChanged();
       }
     } catch (e) { toast.error(e instanceof Error ? e.message : "อัป Drive ไม่สำเร็จ"); }
     finally { setDriveBusy(false); setDriveProg({ done: 0, total: 0 }); }
@@ -879,12 +879,15 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
                           <button type="button" onClick={() => setSrcFiles((p) => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
                         </div>
                       ))}
-                      <button type="button" onClick={doDriveUpload} disabled={driveBusy || !brandId}
-                        className="w-full h-8 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                        {driveBusy ? (driveProg.total ? `กำลังอัป ${driveProg.done}/${driveProg.total}…` : "กำลังอัป…") : "⬆ อัปขึ้น Drive + เก็บลิงก์"}
-                      </button>
                     </div>
                   )}
+                  {/* ปุ่มโชว์เสมอ: มีไฟล์ = อัป+สร้างโฟลเดอร์+ดึง preview · ไม่มีไฟล์ = แค่สร้างโฟลเดอร์ + ดึง preview */}
+                  <button type="button" onClick={doDriveUpload} disabled={driveBusy || !brandId}
+                    className="w-full h-8 mt-1.5 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                    {driveBusy ? (driveProg.total ? `กำลังอัป ${driveProg.done}/${driveProg.total}…` : "กำลังทำ…")
+                      : srcFiles.length > 0 ? "⬆ อัปขึ้น Drive + เก็บลิงก์" : "📁 สร้างโฟลเดอร์ + ดึงรูป preview"}
+                  </button>
+                  {!srcFiles.length && <p className="text-[11px] text-slate-400 mt-1">ยังไม่แนบไฟล์ต้นฉบับก็กดได้ — จะสร้างโฟลเดอร์ Drive + ก็อปรูปตัวอย่างเข้าไปให้ แล้วค่อยลากไฟล์ .ai เข้าเองทีหลัง</p>}
                 </div>
               )}
             </div>
@@ -1151,6 +1154,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
   const save = async () => {
     if (!file) { toast.error("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)"); return; }
     if (!brandId) { toast.error("เลือกแบรนด์ก่อน"); return; }
+    if (!artTypesSel.length) { toast.error("เลือกชนิด artwork ก่อน"); return; }
     const willDrive = srcFiles.length > 0 && driveOn;
     if (!masterPath.trim() && !masterUrl.trim() && !willDrive) { toast.error("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS / ลิงก์ / โยนไฟล์ขึ้น Drive)"); return; }
     setBusy(true);
@@ -1229,8 +1233,8 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
               {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select></label>
           <div className="grid grid-cols-2 gap-2">
-            <div className="text-[12px] text-slate-500">ชนิด <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน</span>
-              <div className="mt-0.5"><ArtTypeMultiSelect value={artTypesSel} types={artTypeList} onChange={setArtTypesSel} onCreated={(t) => setArtTypeList((c) => [...c, t])} /></div></div>
+            <div className="text-[12px] text-slate-500">ชนิด <span className="text-red-500">*</span> <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน</span>
+              <div className={`mt-0.5 rounded-lg ${artTypesSel.length ? "" : "ring-1 ring-amber-300"}`}><ArtTypeMultiSelect value={artTypesSel} types={artTypeList} onChange={setArtTypesSel} onCreated={(t) => setArtTypeList((c) => [...c, t])} /></div></div>
             <div className="text-[12px] text-slate-500">Group Album <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน / สร้างใหม่ได้</span>
               <div className="mt-0.5"><CollectionMultiSelect value={collectionIds} collections={cols} onChange={setCollectionIds} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
           </div>
