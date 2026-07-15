@@ -1389,6 +1389,9 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   const setName = (id: number, v: string) => setRows((r) => r.map((x) => x.id === id ? { ...x, name: v, path: x.pathAuto ? massPath(v, x.types) : x.path } : x));
   const setTypes = (id: number, v: string[]) => setRows((r) => r.map((x) => x.id === id ? { ...x, types: v, path: x.pathAuto ? massPath(x.name, v) : x.path } : x));
   const applyTypesToAll = () => setRows((r) => r.map((x) => ({ ...x, types: [...batchTypes], path: x.pathAuto ? massPath(x.name, [...batchTypes]) : x.path })));
+  // copy ค่าของใบหนึ่ง → ใส่ทุกใบ (ขนาด deep-copy กัน state ปนกัน)
+  const applySizesToAll = (sizes: AssetSize[]) => setRows((r) => r.map((x) => ({ ...x, sizes: sizes.map((s) => ({ ...s })) })));
+  const applyParentsToAll = (codes: string[]) => setRows((r) => r.map((x) => ({ ...x, parentCodes: [...codes] })));
 
   const save = async () => {
     if (rows.length === 0) { toast.error("ยังไม่มีรายการ — ลากไฟล์รูปเข้ามาก่อน"); return; }
@@ -1529,11 +1532,17 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
               {/* ขนาด + Parent SKU (รายรูป) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-2">
                 <div>
-                  <p className="text-[11px] text-slate-500 mb-1">📐 ขนาด (กว้าง × สูง)</p>
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="text-[11px] text-slate-500">📐 ขนาด (กว้าง × สูง)</p>
+                    {r.sizes.length > 0 && rows.length > 1 && <button type="button" onClick={() => applySizesToAll(r.sizes)} className="text-[10px] text-indigo-600 hover:underline">→ ใส่ทุกใบ</button>}
+                  </div>
                   <SizesEditor value={r.sizes} onChange={(v) => setRow(r.id, { sizes: v })} />
                 </div>
                 <div>
-                  <p className="text-[11px] text-slate-500 mb-1">📦 Parent SKU ที่ใช้</p>
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="text-[11px] text-slate-500">📦 Parent SKU ที่ใช้</p>
+                    {r.parentCodes.length > 0 && rows.length > 1 && <button type="button" onClick={() => applyParentsToAll(r.parentCodes)} className="text-[10px] text-indigo-600 hover:underline">→ ใส่ทุกใบ</button>}
+                  </div>
                   <ParentSkuField value={r.parentCodes} onChange={(v) => setRow(r.id, { parentCodes: v })} />
                 </div>
               </div>
