@@ -763,7 +763,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
 
             {d.source === "artwork" && (
               <>
-                <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📐 ขนาด (กว้าง × ยาว)</p><SizesEditor value={sizes} onChange={setSizes} disabled={trashed} /></div>
+                <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📐 ขนาด (กว้าง × สูง)</p><SizesEditor value={sizes} onChange={setSizes} disabled={trashed} /></div>
                 <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📦 Parent SKU ที่ใช้</p><ParentSkuField value={parentCodes} onChange={setParentCodes} disabled={trashed} /></div>
               </>
             )}
@@ -1102,7 +1102,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
 
       {/* ขนาด (หลายไซส์ + ชื่อกำกับ + หน่วย) */}
       <div className="mt-3 pt-3 border-t border-slate-100">
-        <p className="text-[12px] font-medium text-slate-600 mb-1.5">📐 ขนาด (กว้าง × ยาว) <span className="text-[10px] text-slate-400 font-normal">— เพิ่มได้หลายไซส์ ใส่ชื่อกำกับ + เลือกหน่วยต่อไซส์</span></p>
+        <p className="text-[12px] font-medium text-slate-600 mb-1.5">📐 ขนาด (กว้าง × สูง) <span className="text-[10px] text-slate-400 font-normal">— เพิ่มได้หลายไซส์ ใส่ชื่อกำกับ + เลือกหน่วยต่อไซส์</span></p>
         <SizesEditor value={sizes} onChange={setSizes} />
       </div>
 
@@ -1523,7 +1523,7 @@ function ManageTypesModal({ types, onClose, onChanged }: { types: LookupItem[]; 
   );
 }
 
-// ── ตัวแก้ "หลายไซส์" (กว้าง×ยาว + ชื่อกำกับ + หน่วยต่อไซส์) ──
+// ── ตัวแก้ "หลายไซส์" (กว้าง×สูง + ชื่อกำกับ + หน่วยต่อไซส์) ──
 const SIZE_UNITS: { v: AssetSize["unit"]; label: string }[] = [
   { v: "cm", label: "ซม." }, { v: "mm", label: "มม." }, { v: "in", label: "นิ้ว" }, { v: "px", label: "px" },
 ];
@@ -1540,7 +1540,7 @@ function SizesEditor({ value, onChange, disabled }: { value: AssetSize[]; onChan
             placeholder="กว้าง" className="w-16 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
           <span className="text-slate-400 text-xs">×</span>
           <input type="number" value={s.h ?? ""} onChange={(e) => set(i, { h: numOrNull(e.target.value) })} disabled={disabled}
-            placeholder="ยาว" className="w-16 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
+            placeholder="สูง" className="w-16 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
           <select value={s.unit} onChange={(e) => set(i, { unit: e.target.value as AssetSize["unit"] })} disabled={disabled}
             className="h-8 px-1 text-[12px] border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
             {SIZE_UNITS.map((u) => <option key={u.v} value={u.v}>{u.label}</option>)}
