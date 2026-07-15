@@ -77,7 +77,13 @@ export function ContentCalendarView() {
     return map;
   }, [filtered]);
   const unscheduled = useMemo(
-    () => filtered.filter((c) => !c.scheduled_at).sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "")),
+    () => filtered.filter((c) => !c.scheduled_at).sort((a, b) => {
+      // เรียงตามชื่องาน (task) — งานเดียวกันอยู่ติดกัน, ไม่มีงานไว้ท้ายสุด, เลข-ในรหัสเรียงแบบธรรมชาติ (PIX9 ก่อน PIX33)
+      const ta = (a.task_label ?? "").trim(), tb = (b.task_label ?? "").trim();
+      if (!ta !== !tb) return ta ? -1 : 1;
+      const byTask = ta.localeCompare(tb, "th", { numeric: true });
+      return byTask !== 0 ? byTask : (a.title ?? "").localeCompare(b.title ?? "", "th", { numeric: true });
+    }),
     [filtered],
   );
   const scheduledThisMonth = useMemo(
