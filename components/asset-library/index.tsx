@@ -618,6 +618,14 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
   const [replacing, setReplacing] = useState(false);
   const [zoom, setZoom] = useState(false);   // กดรูป → ดูเต็มจอ
   const replaceRef = useRef<HTMLInputElement>(null);
+  // เพิ่มไฟล์ต้นฉบับขึ้น Drive ย้อนหลัง (บางทีตอนสร้างลืมใส่) — สร้างโฟลเดอร์ + ก็อปรูป preview ให้
+  const [driveOn, setDriveOn] = useState(false);
+  const [brandId, setBrandId] = useState("");
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [srcFiles, setSrcFiles] = useState<File[]>([]);
+  const [driveBusy, setDriveBusy] = useState(false);
+  const [driveProg, setDriveProg] = useState({ done: 0, total: 0 });
+  const srcInputRef = useRef<HTMLInputElement>(null);
 
   const loadDetail = useCallback(async () => {
     try {
@@ -627,10 +635,12 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
       setD(det); setTitle(det.title); setTags(det.tags ?? []); setCollectionIds(det.collection_ids ?? []);
       setMasterPath(det.master_path ?? ""); setMasterUrl(det.master_url ?? ""); setKeywords(det.keywords ?? "");
       setArtTypesSel(det.artwork_types?.length ? det.artwork_types : (det.artwork_type ? [det.artwork_type] : []));
-      setSizes(det.sizes ?? []); setParentCodes(det.parent_sku_codes ?? []);
+      setSizes(det.sizes ?? []); setParentCodes(det.parent_sku_codes ?? []); setBrandId(det.brand_id ?? "");
     } catch (e) { toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ"); onClose(); }
   }, [id, toast, onClose]);
   useEffect(() => { void loadDetail(); }, [loadDetail]);
+  useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
+  useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
   // รวมชนิดจาก prop เข้า list (เผื่อ lookup โหลดหลัง mount) โดยไม่ทับตัวที่เพิ่งเพิ่ม inline
   useEffect(() => { setArtTypeList((cur) => { const s = new Set(cur.map((t) => t.name)); return [...cur, ...artTypes.filter((t) => !s.has(t.name))]; }); }, [artTypes]);
 
@@ -701,6 +711,31 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
       toast.success("แทนที่ไฟล์แล้ว"); await loadDetail(); onChanged();
     } catch (e) { toast.error(e instanceof Error ? e.message : "แทนที่ไม่สำเร็จ"); }
     finally { setReplacing(false); }
+  };
+
+  // อัปไฟล์ต้นฉบับขึ้น Drive ย้อนหลัง + ก็อปรูป preview (ดึงรูปจาก R2 มาก็อป ไม่ลบของเดิม) → เก็บลิงก์โฟลเดอร์ทันที
+  const doDriveUpload = async () => {
+    if (!srcFiles.length) { toast.error("โยนไฟล์ต้นฉบับก่อน"); return; }
+    if (!brandId) { toast.error("เลือกแบรนด์ก่อน (ไว้จัดโฟลเดอร์)"); return; }
+    if (!d) return;
+    setDriveBusy(true);
+    try {
+      let previewFile: File | null = null;
+      if (isImage(d)) {
+        try { const r = await apiFetch(d.url); const blob = await r.blob(); previewFile = new File([blob], `${(title.trim() || d.file_name)}.png`, { type: blob.type || "image/png" }); } catch { /* ไม่มี preview ก็ยังอัปต้นฉบับได้ */ }
+      }
+      const { folderLink, largeCount } = await uploadArtworkToDrive({
+        name: title.trim() || d.file_name, artworkType: artTypesSel[0], brandId, srcFiles, previewFile,
+        onProgress: (done, total) => setDriveProg({ done, total }),
+      });
+      if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์แล้วลากขึ้นเอง`);
+      if (folderLink) {
+        setMasterUrl(folderLink);
+        await apiFetch(`/api/assets/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ master_url: folderLink }) });
+        toast.success("อัปขึ้น Drive + เก็บลิงก์แล้ว"); setSrcFiles([]); await loadDetail(); onChanged();
+      }
+    } catch (e) { toast.error(e instanceof Error ? e.message : "อัป Drive ไม่สำเร็จ"); }
+    finally { setDriveBusy(false); setDriveProg({ done: 0, total: 0 }); }
   };
 
   const trashed = d?.status === "trashed";
@@ -814,6 +849,41 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
               <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} disabled={trashed}
                 placeholder="ลิงก์ Google Drive / Synology (เปิดได้ทุกที่) — ไม่ใส่ก็ได้"
                 className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg mt-1.5 disabled:bg-slate-50" />
+
+              {/* เพิ่มไฟล์ต้นฉบับขึ้น Drive ย้อนหลัง (ลืมใส่ตอนสร้าง) → สร้างโฟลเดอร์ + ก็อปรูปตัวอย่างให้อัตโนมัติ */}
+              {driveOn && !trashed && (
+                <div className="mt-2.5 pt-2.5 border-t border-dashed border-slate-200">
+                  <p className="text-[12px] font-medium text-slate-600 mb-1">📤 เพิ่มไฟล์ต้นฉบับขึ้น Drive <span className="text-[10px] text-slate-400 font-normal">— สร้างโฟลเดอร์ + ก็อปรูปตัวอย่างให้อัตโนมัติ</span></p>
+                  <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
+                    className={`w-full h-8 px-2 text-[12px] border rounded-lg bg-white mb-1.5 ${brandId ? "border-slate-200" : "border-amber-300"}`}>
+                    <option value="">— เลือกแบรนด์ (ไว้จัดโฟลเดอร์) —</option>
+                    {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                  <div onClick={() => srcInputRef.current?.click()}
+                    onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
+                    onDragOver={(e) => e.preventDefault()}
+                    className="border border-dashed border-slate-300 rounded-lg px-3 py-2.5 text-center text-[12px] text-slate-400 hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer">
+                    + ลากไฟล์ AI/PSD/PDF มาวาง หรือคลิกเลือก
+                    <input ref={srcInputRef} type="file" multiple className="hidden"
+                      onChange={(e) => { if (e.target.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.target.files!)]); e.target.value = ""; }} />
+                  </div>
+                  {srcFiles.length > 0 && (
+                    <div className="mt-1.5 space-y-1">
+                      {srcFiles.map((f, i) => (
+                        <div key={i} className="flex items-center gap-2 text-[12px] bg-slate-50 border border-slate-200 rounded px-2 py-1">
+                          <span className="flex-1 truncate">📄 {f.name}</span>
+                          <span className="text-slate-400 shrink-0">{(f.size / 1024 / 1024).toFixed(1)}MB</span>
+                          <button type="button" onClick={() => setSrcFiles((p) => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
+                        </div>
+                      ))}
+                      <button type="button" onClick={doDriveUpload} disabled={driveBusy || !brandId}
+                        className="w-full h-8 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                        {driveBusy ? (driveProg.total ? `กำลังอัป ${driveProg.done}/${driveProg.total}…` : "กำลังอัป…") : "⬆ อัปขึ้น Drive + เก็บลิงก์"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <UsageList usages={d.usages} />
@@ -950,6 +1020,44 @@ function BulkMoveModal({ count, collections, onClose, onApply }: {
   );
 }
 
+// ── ของกลาง: อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Google Drive (ใช้ทั้งตอนสร้างใหม่ + หน้ารายละเอียด) ──
+// สร้างโฟลเดอร์ตามชื่องาน (ใต้แบรนด์/ชนิด) → ตั้งชื่อไฟล์ตามชื่องาน → ก็อปรูปตัวอย่างเข้าโฟลเดอร์ด้วย (เปิดดูลายจาก Drive ได้เลย)
+const DRIVE_MAX_PROXY = 4 * 1024 * 1024;   // ไฟล์ ≤4MB อัปผ่านแอป · ใหญ่กว่า = อัปเอง (ลิมิต body Vercel)
+const drivePreviewExt = (f: File) => f.type === "image/jpeg" ? ".jpg" : f.type === "image/webp" ? ".webp" : (f.name.match(/\.[^.]+$/)?.[0] || ".png");
+async function uploadArtworkToDrive(opts: {
+  name: string; artworkType?: string; brandId?: string;
+  srcFiles: File[]; previewFile?: File | null;
+  onProgress?: (done: number, total: number) => void;
+}): Promise<{ folderLink: string; largeCount: number }> {
+  const nm = opts.name.trim() || "artwork";
+  const named = opts.srcFiles.map((f, i) => ({ file: f, filename: `${nm}${i > 0 ? `_${i + 1}` : ""}${f.name.match(/\.[^.]+$/)?.[0] ?? ""}` }));
+  const small = named.filter((x) => x.file.size <= DRIVE_MAX_PROXY);
+  const large = named.filter((x) => x.file.size > DRIVE_MAX_PROXY);
+
+  let folderId = "", folderLink = "";
+  const doUpload = async (x: { file: File; filename: string } | null) => {
+    const fd = new FormData();
+    fd.append("name", nm);
+    if (opts.artworkType) fd.append("artworkType", opts.artworkType);
+    if (opts.brandId) fd.append("brand_id", opts.brandId);
+    if (folderId) fd.append("folderId", folderId);
+    if (x) { fd.append("filename", x.filename); fd.append("file", x.file); }
+    const res = await apiFetch("/api/drive/upload", { method: "POST", body: fd });
+    const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "อัป Drive ไม่สำเร็จ");
+    folderId = j.folderId; folderLink = j.folderLink;
+  };
+
+  opts.onProgress?.(0, small.length);
+  for (let i = 0; i < small.length; i++) { await doUpload(small[i]); opts.onProgress?.(i + 1, small.length); }
+  if (!folderId && (large.length || opts.previewFile)) await doUpload(null);   // ยังไม่มีโฟลเดอร์ → สร้างก่อน
+  // ก็อปรูป preview เข้าโฟลเดอร์เดียวกัน (best-effort — พังไม่ทำให้ทั้งงานพัง · ชื่อ = <ชื่องาน>.png)
+  if (opts.previewFile && folderId) {
+    try { await doUpload({ file: opts.previewFile, filename: `${nm}${drivePreviewExt(opts.previewFile)}` }); } catch { /* ปล่อยผ่าน */ }
+  }
+  opts.onProgress?.(0, 0);
+  return { folderLink, largeCount: large.length };
+}
+
 // ── เพิ่ม Artwork ลงบัตร (รูป + ชนิด + ชื่อ + แท็ก + ไซส์ + location + อัลบั้ม + Parent SKU + keyword) ──
 function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initialFile }: { actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFile?: File | null }) {
   const toast = useToast();
@@ -983,32 +1091,14 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
 
-  // อัปไฟล์ต้นฉบับขึ้น Google Drive "ผ่านแอป" (เลี่ยง CORS) — สร้างโฟลเดอร์ตามชื่อ + ตั้งชื่อไฟล์ตามชื่อ → คืนลิงก์โฟลเดอร์
-  const MAX_PROXY = 4 * 1024 * 1024;   // ไฟล์เล็ก ≤4MB อัปผ่านแอป · ใหญ่กว่า = อัปเอง (ลิมิต body Vercel)
+  // อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Google Drive "ผ่านแอป" (ของกลาง uploadArtworkToDrive) → คืนลิงก์โฟลเดอร์
   const uploadSourcesToDrive = async (): Promise<string> => {
-    const nm = title.trim() || "artwork";
-    const named = srcFiles.map((f, i) => ({ file: f, filename: `${nm}${i > 0 ? `_${i + 1}` : ""}${f.name.match(/\.[^.]+$/)?.[0] ?? ""}` }));
-    const small = named.filter((x) => x.file.size <= MAX_PROXY);
-    const large = named.filter((x) => x.file.size > MAX_PROXY);
-
-    let folderId = "", folderLink = "";
-    const doUpload = async (x: { file: File; filename: string } | null) => {
-      const fd = new FormData();
-      fd.append("name", nm);
-      if (artTypesSel[0]) fd.append("artworkType", artTypesSel[0]);
-      if (brandId) fd.append("brand_id", brandId);
-      if (folderId) fd.append("folderId", folderId);
-      if (x) { fd.append("filename", x.filename); fd.append("file", x.file); }
-      const res = await apiFetch("/api/drive/upload", { method: "POST", body: fd });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "อัป Drive ไม่สำเร็จ");
-      folderId = j.folderId; folderLink = j.folderLink;
-    };
-
-    setDriveProg({ done: 0, total: small.length });
-    for (let i = 0; i < small.length; i++) { await doUpload(small[i]); setDriveProg({ done: i + 1, total: small.length }); }
-    if (!folderId && large.length) await doUpload(null);   // มีแต่ไฟล์ใหญ่ → สร้างโฟลเดอร์อย่างเดียว
-    setDriveProg({ done: 0, total: 0 });
-    if (large.length) toast.warning(`ไฟล์ใหญ่ ${large.length} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive จากลิงก์แล้วลากขึ้นเอง`);
+    const previewFile = file ? await downscaleImageWidth(file, 1200) : null;   // รูปตัวอย่าง (ย่อ ≤1200) ก็อปเข้าโฟลเดอร์ด้วย
+    const { folderLink, largeCount } = await uploadArtworkToDrive({
+      name: title, artworkType: artTypesSel[0], brandId, srcFiles, previewFile,
+      onProgress: (done, total) => setDriveProg({ done, total }),
+    });
+    if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive จากลิงก์แล้วลากขึ้นเอง`);
     return folderLink;
   };
 

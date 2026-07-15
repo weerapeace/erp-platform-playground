@@ -29,7 +29,8 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
     .order("created_at", { ascending: false });
 
   const collection_ids = await loadCollectionIds(admin, id);
-  const detail: AssetDetail = { ...base, usages: (u ?? []) as AssetUsage[], collection_ids };
+  const brand_id = ((data as { brand_id?: string | null }).brand_id) ?? null;   // ใช้จัดโฟลเดอร์ Drive ตามแบรนด์เดิม
+  const detail: AssetDetail = { ...base, usages: (u ?? []) as AssetUsage[], collection_ids, brand_id };
   return NextResponse.json({ data: detail, error: null });
 }
 

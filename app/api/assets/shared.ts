@@ -69,7 +69,7 @@ export type AssetUsage = {
   created_at: string;
 };
 
-export type AssetDetail = AssetRow & { usages: AssetUsage[]; collection_ids: string[] };
+export type AssetDetail = AssetRow & { usages: AssetUsage[]; collection_ids: string[]; brand_id: string | null };
 
 /** dict columns ที่ดึงจากตาราง assets */
 type AssetDbRow = {
