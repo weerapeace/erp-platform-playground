@@ -958,25 +958,32 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
   const srcInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
 
-  // อัปไฟล์ต้นฉบับขึ้น Google Drive (สร้างโฟลเดอร์ตามชื่อ + ตั้งชื่อไฟล์ตามชื่อ) → คืนลิงก์โฟลเดอร์
+  // อัปไฟล์ต้นฉบับขึ้น Google Drive "ผ่านแอป" (เลี่ยง CORS) — สร้างโฟลเดอร์ตามชื่อ + ตั้งชื่อไฟล์ตามชื่อ → คืนลิงก์โฟลเดอร์
+  const MAX_PROXY = 4 * 1024 * 1024;   // ไฟล์เล็ก ≤4MB อัปผ่านแอป · ใหญ่กว่า = อัปเอง (ลิมิต body Vercel)
   const uploadSourcesToDrive = async (): Promise<string> => {
     const nm = title.trim() || "artwork";
-    const items = srcFiles.map((f, i) => {
-      const ext = f.name.match(/\.[^.]+$/)?.[0] ?? "";
-      return { file: f, filename: `${nm}${i > 0 ? `_${i + 1}` : ""}${ext}`, mime: f.type || "application/octet-stream" };
-    });
-    const res = await apiFetch("/api/drive", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: nm, artworkType: artTypesSel[0], files: items.map((x) => ({ filename: x.filename, mime: x.mime })) }) });
-    const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "เตรียมอัป Drive ไม่สำเร็จ");
-    setDriveProg({ done: 0, total: items.length });
-    for (let i = 0; i < items.length; i++) {
-      const up = j.uploads?.[i]; if (!up?.uploadUrl) continue;
-      const put = await fetch(up.uploadUrl, { method: "PUT", body: items[i].file });
-      if (!put.ok) throw new Error(`อัปไฟล์ ${items[i].filename} ขึ้น Drive ไม่สำเร็จ (${put.status})`);
-      setDriveProg({ done: i + 1, total: items.length });
-    }
+    const named = srcFiles.map((f, i) => ({ file: f, filename: `${nm}${i > 0 ? `_${i + 1}` : ""}${f.name.match(/\.[^.]+$/)?.[0] ?? ""}` }));
+    const small = named.filter((x) => x.file.size <= MAX_PROXY);
+    const large = named.filter((x) => x.file.size > MAX_PROXY);
+
+    let folderId = "", folderLink = "";
+    const doUpload = async (x: { file: File; filename: string } | null) => {
+      const fd = new FormData();
+      fd.append("name", nm);
+      if (artTypesSel[0]) fd.append("artworkType", artTypesSel[0]);
+      if (folderId) fd.append("folderId", folderId);
+      if (x) { fd.append("filename", x.filename); fd.append("file", x.file); }
+      const res = await apiFetch("/api/drive/upload", { method: "POST", body: fd });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "อัป Drive ไม่สำเร็จ");
+      folderId = j.folderId; folderLink = j.folderLink;
+    };
+
+    setDriveProg({ done: 0, total: small.length });
+    for (let i = 0; i < small.length; i++) { await doUpload(small[i]); setDriveProg({ done: i + 1, total: small.length }); }
+    if (!folderId && large.length) await doUpload(null);   // มีแต่ไฟล์ใหญ่ → สร้างโฟลเดอร์อย่างเดียว
     setDriveProg({ done: 0, total: 0 });
-    return String(j.folderLink ?? "");
+    if (large.length) toast.warning(`ไฟล์ใหญ่ ${large.length} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive จากลิงก์แล้วลากขึ้นเอง`);
+    return folderLink;
   };
 
   const buildPath = (name: string, ext: string) => {
