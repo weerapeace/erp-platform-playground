@@ -62,6 +62,9 @@ export function AssetLibrary() {
   const [newColOpen, setNewColOpen] = useState(false);
   const [artworkAddOpen, setArtworkAddOpen] = useState(false);
   const [massOpen, setMassOpen] = useState(false);   // โหมด MASS: เพิ่ม Artwork หลายรายการแบบตาราง inline
+  const [pendingFile, setPendingFile] = useState<File | null>(null);    // ลาก 1 รูปมาวาง → เปิด Artwork พร้อมรูป
+  const [pendingFiles, setPendingFiles] = useState<File[] | null>(null); // ลากหลายรูป → เปิดเพิ่มหลายรูป
+  const [pageDrag, setPageDrag] = useState(false);
   const [manageTypesOpen, setManageTypesOpen] = useState(false);
   const [bulkTrashOpen, setBulkTrashOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
@@ -185,8 +188,27 @@ export function AssetLibrary() {
 
   const selCount = selected.size;
 
+  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || manageTypesOpen;
+  const onPageDrop = (e: React.DragEvent) => {
+    setPageDrag(false);
+    if (anyModalOpen) return;
+    const imgs = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
+    if (!imgs.length) return;
+    e.preventDefault();
+    if (imgs.length === 1) { setPendingFile(imgs[0]); setArtworkAddOpen(true); }
+    else { setPendingFiles(imgs); setMassOpen(true); }
+  };
+
   return (
-    <div className="max-w-[1200px] mx-auto px-5 py-5">
+    <div className="max-w-[1200px] mx-auto px-5 py-5 relative"
+      onDragOver={(e) => { if (anyModalOpen) return; if (Array.from(e.dataTransfer.types).includes("Files")) { e.preventDefault(); setPageDrag(true); } }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setPageDrag(false); }}
+      onDrop={onPageDrop}>
+      {pageDrag && (
+        <div className="absolute inset-2 z-40 bg-indigo-500/10 border-2 border-dashed border-indigo-400 rounded-xl flex items-center justify-center pointer-events-none">
+          <div className="bg-white px-4 py-2 rounded-lg shadow text-sm text-indigo-700 font-medium">🎨 วางรูปที่นี่ → เพิ่ม Artwork · หลายรูป = เพิ่มหลายรูป</div>
+        </div>
+      )}
       {/* header */}
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
@@ -362,14 +384,14 @@ export function AssetLibrary() {
         />
       )}
       {artworkAddOpen && (
-        <ArtworkAddModal actor={actor} artTypes={artTypes} collections={collections}
-          onClose={() => setArtworkAddOpen(false)}
-          onDone={async () => { setArtworkAddOpen(false); await load(); await loadMeta(); }} />
+        <ArtworkAddModal actor={actor} artTypes={artTypes} collections={collections} initialFile={pendingFile}
+          onClose={() => { setArtworkAddOpen(false); setPendingFile(null); }}
+          onDone={async () => { setArtworkAddOpen(false); setPendingFile(null); await load(); await loadMeta(); }} />
       )}
       {massOpen && (
-        <MassArtworkModal actor={actor} artTypes={artTypes} collections={collections}
-          onClose={() => setMassOpen(false)}
-          onDone={async () => { setMassOpen(false); await load(); await loadMeta(); }} />
+        <MassArtworkModal actor={actor} artTypes={artTypes} collections={collections} initialFiles={pendingFiles}
+          onClose={() => { setMassOpen(false); setPendingFiles(null); }}
+          onDone={async () => { setMassOpen(false); setPendingFiles(null); await load(); await loadMeta(); }} />
       )}
       {manageTypesOpen && (
         <ManageTypesModal types={artTypes} onClose={() => setManageTypesOpen(false)}
@@ -929,7 +951,7 @@ function BulkMoveModal({ count, collections, onClose, onApply }: {
 }
 
 // ── เพิ่ม Artwork ลงบัตร (รูป + ชนิด + ชื่อ + แท็ก + ไซส์ + location + อัลบั้ม + Parent SKU + keyword) ──
-function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void }) {
+function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initialFile }: { actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFile?: File | null }) {
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -1008,6 +1030,9 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
       if (pathAuto) setMasterPath(buildPath(nm, ext));
     }
   };
+
+  // ลากรูปมาวางบนหน้าคลัง → เปิด popup พร้อมรูปที่ลากมา
+  useEffect(() => { if (initialFile) pick(initialFile); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const save = async () => {
     if (!file) { toast.error("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)"); return; }
@@ -1170,8 +1195,8 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
 
 // ── เพิ่ม Artwork หลายรูปพร้อมกัน (ตาราง inline) — ลากหลายไฟล์ → 1 แถว/ไฟล์ → แก้แล้วบันทึกทีเดียว ──
 type MassRow = { id: number; file: File; preview: string | null; name: string; types: string[]; path: string; url: string };
-function MassArtworkModal({ actor, artTypes, collections, onClose, onDone }: {
-  actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void;
+function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initialFiles }: {
+  actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFiles?: File[] | null;
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<MassRow[]>([]);
@@ -1198,6 +1223,8 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone }: {
     if (imgs.length) setRows((r) => [...r, ...imgs.map(makeRow)]);
     else toast.error("รับเฉพาะไฟล์รูปภาพ (JPG/PNG/…)");
   };
+  // ลากหลายรูปมาวางบนหน้าคลัง → เปิด popup พร้อมรูปทั้งหมด
+  useEffect(() => { if (initialFiles?.length) addFiles(initialFiles); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   const setRow = (id: number, patch: Partial<MassRow>) => setRows((r) => r.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   const applyTypesToAll = () => setRows((r) => r.map((x) => ({ ...x, types: [...batchTypes] })));
 
