@@ -42,7 +42,9 @@ export function AssetLibrary() {
 
   const [rows, setRows] = useState<AssetRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);   // หน้าปัจจุบัน (0-based)
   const [loading, setLoading] = useState(true);
+  const PAGE_SIZE = 60;
 
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
@@ -100,6 +102,8 @@ export function AssetLibrary() {
       // ค้นหา = หาทั้งหมดทุกที่มา (อัปเอง/Artwork/รูปสินค้า) ไม่ต้องเลือกเมนูซ้าย · ไม่ค้นหา = ตามที่มาที่เลือก
       p.set("source", isSearch ? "all" : source);
       if (!isSearch && artworkType) p.set("artwork_type", artworkType);
+      p.set("limit", String(PAGE_SIZE));
+      p.set("offset", String(page * PAGE_SIZE));
       const res = await apiFetch(`/api/assets?${p.toString()}`);
       const j = await res.json();
       if (j.error) throw new Error(j.error);
@@ -107,7 +111,7 @@ export function AssetLibrary() {
       setTotal(j.total ?? 0);
     } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดคลังไม่สำเร็จ"); }
     finally { setLoading(false); }
-  }, [search, type, collectionId, tag, trash, source, artworkType, toast]);
+  }, [search, type, collectionId, tag, trash, source, artworkType, page, toast]);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -124,6 +128,10 @@ export function AssetLibrary() {
   useEffect(() => { void loadMeta(); }, [loadMeta]);
   useEffect(() => { setSelected(new Set()); }, [type, collectionId, tag, trash, source]);
   useEffect(() => { setArtworkType(""); }, [source]);   // เปลี่ยนหมวด → ล้างฟิลเตอร์ชนิด artwork
+  useEffect(() => { setPage(0); }, [search, type, collectionId, tag, trash, source, artworkType]);   // เปลี่ยนฟิลเตอร์/ค้นหา → กลับหน้าแรก
+  const goPage = (p: number) => { setPage(p); if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" }); };
+  // อยู่หน้าที่เกินช่วง (เช่นลบจนเหลือน้อย) → เด้งกลับหน้าสุดท้ายที่มีจริง
+  useEffect(() => { if (!loading && page > 0 && rows.length === 0 && total > 0) setPage(Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)); }, [loading, page, rows.length, total]);
 
   // ค้นหา → หาโฟลเดอร์สินค้า (Parent SKU) ที่ตรงคำค้นด้วย (กดแล้วกระโดดเข้ามุมมองแบรนด์)
   useEffect(() => {
@@ -358,6 +366,9 @@ export function AssetLibrary() {
               </div>
             </div>
           )}
+          {!showBrandView && !loading && total > 0 && (
+            <div className="mb-3"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} /></div>
+          )}
           {showBrandView ? (
             <BrandAlbumBrowser reloadKey={brandReload} openParentId={brandOpenParent} />
           ) : loading ? (
@@ -377,6 +388,9 @@ export function AssetLibrary() {
                   onToggle={() => toggleSel(a.id)} onOpen={() => setDetailId(a.id)} />
               ))}
             </div>
+          )}
+          {!showBrandView && !loading && total > 0 && rows.length > 0 && (
+            <div className="mt-4"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} /></div>
           )}
         </main>
       </div>
@@ -454,6 +468,24 @@ function SideItem({ active, onClick, label, count, icon }: {
       <span className="truncate flex-1">{label}</span>
       {count != null && count > 0 && <span className="text-[11px] text-slate-400">{count}</span>}
     </button>
+  );
+}
+
+// แถบเลื่อนหน้า + บอกจำนวนทั้งหมด/หน้า (ใช้ทั้งบน+ล่างของกริด)
+function Pager({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (p: number) => void }) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const from = total === 0 ? 0 : page * pageSize + 1;
+  const to = Math.min(total, (page + 1) * pageSize);
+  return (
+    <div className="flex items-center justify-between gap-3 flex-wrap text-[12px] text-slate-500">
+      <span>ทั้งหมด <b className="text-slate-700">{total.toLocaleString()}</b> ไฟล์ · แสดง {from.toLocaleString()}–{to.toLocaleString()} · หน้า <b className="text-slate-700">{page + 1}</b>/{pages}</span>
+      <div className="flex items-center gap-1.5">
+        <button onClick={() => onPage(page - 1)} disabled={page <= 0}
+          className="h-8 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">‹ ก่อนหน้า</button>
+        <button onClick={() => onPage(page + 1)} disabled={page >= pages - 1}
+          className="h-8 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">ถัดไป ›</button>
+      </div>
+    </div>
   );
 }
 
