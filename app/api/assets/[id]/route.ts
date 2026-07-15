@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { driveConfigured, driveTrashFolder, parseDriveFolderId } from "@/lib/google-drive";
 import { type AssetDetail, type AssetUsage, type AssetSize, rowOf, attachTags, actorId, loadCollectionIds, setCollections, normalizeSizes, normalizeCodes } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -102,6 +103,7 @@ export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: 
   const { id } = await ctx.params;
 
   const admin = supabaseAdmin();
+  const wantDrive = new URL(request.url).searchParams.get("drive") === "1";   // ลบโฟลเดอร์ Drive ด้วยไหม (ผู้ใช้ติ๊ก)
 
   // กันลบไฟล์ที่ยังถูกใช้อยู่ (offer sheet/แคมเปญ/สินค้า ฯลฯ)
   const { count } = await admin.from("asset_usages").select("id", { count: "exact", head: true }).eq("asset_id", id);
@@ -109,10 +111,18 @@ export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: 
     return NextResponse.json(
       { error: `ลบไม่ได้ — ไฟล์นี้ถูกใช้อยู่ ${count} ที่ กรุณาเอาออกจากที่ใช้งานก่อน` }, { status: 409 });
 
+  // ทิ้งโฟลเดอร์ใน Drive ลงถังขยะ Drive (best-effort — กู้คืนได้ ไม่ลบถาวร) ก่อนย้าย asset ลงถังขยะ
+  let driveTrashed = false;
+  if (wantDrive) {
+    const { data: a } = await admin.from("assets").select("master_url").eq("id", id).maybeSingle();
+    const fid = parseDriveFolderId((a?.master_url as string) ?? "");
+    if (fid && driveConfigured()) { try { driveTrashed = await driveTrashFolder(fid); } catch { driveTrashed = false; } }
+  }
+
   const { error } = await admin.from("assets")
     .update({ status: "trashed", trashed_at: new Date().toISOString() }).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  await writeAudit(admin, { action: "delete", entityType: "asset", entityId: id, actorId: await actorId(request) });
-  return NextResponse.json({ ok: true, error: null });
+  await writeAudit(admin, { action: "delete", entityType: "asset", entityId: id, actorId: await actorId(request), metadata: { drive_trashed: driveTrashed } });
+  return NextResponse.json({ ok: true, driveTrashed, error: null });
 }

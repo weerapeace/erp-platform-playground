@@ -104,6 +104,25 @@ export async function driveGetFolder(id: string): Promise<{ id: string; name: st
   return { id: j.id as string, name: (j.name as string) ?? "", webViewLink: (j.webViewLink as string) || `https://drive.google.com/drive/folders/${j.id}` };
 }
 
+/** ดึง folder id จากลิงก์ Drive (…/folders/<id>) — ลิงก์ที่ไม่ใช่ folders = null */
+export function parseDriveFolderId(url: string): string | null {
+  const m = (url || "").match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+
+/** ย้ายโฟลเดอร์ (พร้อมไฟล์ข้างใน) ไป "ถังขยะของ Drive" — กู้คืนได้ ไม่ลบถาวร (คืน true ถ้าสำเร็จ) */
+export async function driveTrashFolder(id: string): Promise<boolean> {
+  const fid = (id || "").trim(); if (!fid) return false;
+  const token = await getAccessToken();
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fid)}?supportsAllDrives=true`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ trashed: true }),
+  });
+  return res.ok;
+}
+
 /** อัปไฟล์ขึ้นโฟลเดอร์ (multipart) → คืน { id, webViewLink } · ใช้เฟสอัปไฟล์ */
 export async function driveUploadFile(name: string, mimeType: string, data: ArrayBuffer | Uint8Array, parentId: string): Promise<{ id: string; webViewLink: string }> {
   const token = await getAccessToken();

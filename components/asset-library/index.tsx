@@ -615,6 +615,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
   const [rule] = useArtworkPathRule();
   const [saving, setSaving] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
+  const [alsoDrive, setAlsoDrive] = useState(false);   // ตอนลบ: ทิ้งโฟลเดอร์ Drive ด้วยไหม
   const [replacing, setReplacing] = useState(false);
   const [zoom, setZoom] = useState(false);   // กดรูป → ดูเต็มจอ
   const replaceRef = useRef<HTMLInputElement>(null);
@@ -660,9 +661,11 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
   const trash = async () => {
     setConfirmTrash(false);
     try {
-      const res = await apiFetch(`/api/assets/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/assets/${id}${alsoDrive ? "?drive=1" : ""}`, { method: "DELETE" });
       const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ลบไม่สำเร็จ");
-      toast.success("ย้ายลงถังขยะแล้ว"); onChanged(); onClose();
+      toast.success(j.driveTrashed ? "ย้ายลงถังขยะ + ทิ้งโฟลเดอร์ Drive แล้ว" : "ย้ายลงถังขยะแล้ว");
+      if (alsoDrive && !j.driveTrashed) toast.warning("ลบไฟล์ในคลังแล้ว แต่ทิ้งโฟลเดอร์ Drive ไม่สำเร็จ — ลองลบใน Drive เอง");
+      onChanged(); onClose();
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   };
 
@@ -759,7 +762,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
           <div className="flex gap-2">
             {trashed
               ? <button onClick={restore} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">♻ กู้คืน</button>
-              : <button onClick={() => setConfirmTrash(true)} className="h-9 px-3 text-sm text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50">🗑️ ลบ</button>}
+              : <button onClick={() => { setAlsoDrive(false); setConfirmTrash(true); }} className="h-9 px-3 text-sm text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50">🗑️ ลบ</button>}
             {!trashed && <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? "บันทึก…" : "บันทึก"}</button>}
           </div>
         </div>
@@ -892,7 +895,21 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
       )}
 
       <ConfirmDialog open={confirmTrash} onClose={() => setConfirmTrash(false)} onConfirm={trash}
-        title="ย้ายไฟล์ลงถังขยะ?" message="กู้คืนได้ภายใน 30 วัน" confirmText="ย้ายลงถังขยะ" variant="danger" />
+        title="ย้ายไฟล์ลงถังขยะ?" confirmText="ย้ายลงถังขยะ" variant="danger"
+        message={
+          <div>
+            <p>ไฟล์นี้จะถูกย้ายลงถังขยะ — กู้คืนได้ภายใน 30 วัน</p>
+            {/\/folders\//.test(masterUrl) && (
+              <label className="flex items-start gap-2 mt-3 p-2.5 rounded-lg bg-rose-50 border border-rose-200 cursor-pointer">
+                <input type="checkbox" checked={alsoDrive} onChange={(e) => setAlsoDrive(e.target.checked)} className="mt-0.5 shrink-0" />
+                <span className="text-[12px] text-rose-700">
+                  <b>ลบโฟลเดอร์ใน Google Drive ด้วย</b>
+                  <span className="block text-[11px] text-rose-600 mt-0.5">โฟลเดอร์ + ไฟล์ต้นฉบับข้างในจะถูกย้ายไป “ถังขยะของ Drive” (ยังกู้คืนได้ในถังขยะ Drive ~30 วัน)</span>
+                </span>
+              </label>
+            )}
+          </div>
+        } />
 
       {zoom && d && isImage(d) && (
         <div className="fixed inset-0 z-[300] bg-black/85 flex items-center justify-center p-6" onClick={() => setZoom(false)}>
