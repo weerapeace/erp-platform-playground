@@ -726,6 +726,15 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       pushToast("success", t("บันทึกเป็นเทมเพลตแล้ว ✓ (เลือกใช้ได้ตอนสร้างคอนเทนต์)", "Saved as template ✓ (available when creating content)")); onChanged();
     } catch (e) { pushToast("error", (e as Error).message); }
   };
+  // ลบคอนเทนต์นี้ (มีปุ่มใน footer เมื่อไม่ได้ส่ง onDelete มาจากหน้า list) — ยืนยันก่อนลบเสมอ
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const doDelete = async () => {
+    setDeleting(true);
+    try { await deleteContent(contentId); pushToast("success", t("ลบคอนเทนต์แล้ว", "Content deleted")); onChanged(); onClose(); }
+    catch (e) { pushToast("error", (e as Error).message); }
+    finally { setDeleting(false); setConfirmDel(false); }
+  };
 
   if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} /><div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
 
@@ -924,8 +933,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         </div>
 
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2">
-          {!d.is_template && <button onClick={saveAsTemplate} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 mr-auto">💾 {t("บันทึกเป็นเทมเพลต", "Save as Template")}</button>}
-          <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+          {!onDelete && <button onClick={() => setConfirmDel(true)} disabled={deleting} className="h-9 px-3 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50">🗑 {t("ลบ", "Delete")}</button>}
+          {!d.is_template && <button onClick={saveAsTemplate} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">💾 {t("บันทึกเป็นเทมเพลต", "Save as Template")}</button>}
+          <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 ml-auto">{t("ปิด", "Close")}</button>
           <button onClick={save} disabled={saving} style={{ background: btnBg(dth) }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
         </div>
       </div>
@@ -964,6 +974,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       )}
       <ImageLightbox images={taskMedia.images.map((im) => ({ url: r2ImageUrl(im.key, 1600) ?? "", label: im.label }))} index={tmLb} onClose={() => setTmLb(-1)} onIndex={setTmLb} />
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
+      <ConfirmDialog open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={doDelete}
+        title={t("ลบคอนเทนต์", "Delete Content")} message={<span>{t("ต้องการลบ", "Delete")} <span className="font-semibold">{d.title}</span> {t("ใช่ไหม? (ลบแล้วกู้คืนไม่ได้)", "? (cannot be undone)")}</span>} confirmText={deleting ? "..." : t("ลบ", "Delete")} variant="danger" />
     </>
   );
 }
