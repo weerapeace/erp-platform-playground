@@ -28,6 +28,8 @@ import {
   listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent, getPlatformSettings, savePlatformSettings,
   type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem, type PlatformSettings,
 } from "./data";
+import { ArrangePrintEditor, itemsFromSpec, specFromItems, arrangeTotalQty, arrangeSizeKey, type ArrangeItem } from "./arrange-print-editor";
+import type { AssetSize } from "@/app/api/assets/shared";
 
 // ตัวแก้สินค้ากลาง (ของกลาง) — เปิดแก้ Parent SKU จากป๊อปอัปส่งงาน · dynamic กัน import วน + ลด bundle
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -38,6 +40,48 @@ const ContentDrawer = dynamic(() => import("./content/content").then((m) => m.Co
 export { AssigneeAvatar, AssigneeChip };
 
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
+
+// งานเรียงพิมพ์ในหน้างาน — แสดง/แก้รายการ (รูป+ขนาด+จำนวน) + บันทึกลง subtask.config
+function ArrangePrintSubtaskPanel({ sub, taskId, reload, pushToast }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn }) {
+  const t = useT();
+  const spec = sub.config?.arrange_print;
+  const [items, setItems] = useState<ArrangeItem[]>(() => itemsFromSpec(spec));
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  // โหลดขนาดจริงจากคลังของแต่ละรูป → เติมตัวเลือกขนาดให้ครบ (ครั้งเดียวตอนเปิด)
+  useEffect(() => {
+    let live = true;
+    const ids = [...new Set((spec?.items ?? []).map((i) => i.asset_id))];
+    if (ids.length === 0) return;
+    (async () => {
+      const map: Record<string, AssetSize[]> = {};
+      await Promise.all(ids.map(async (id) => { try { const r = await apiFetch(`/api/assets/${id}`); const j = await r.json(); if (Array.isArray(j.data?.sizes)) map[id] = j.data.sizes as AssetSize[]; } catch { /* ข้าม */ } }));
+      if (!live) return;
+      setItems((prev) => prev.map((it) => {
+        const avail = [...it.available]; const seen = new Set(avail.map(arrangeSizeKey));
+        for (const s of (map[it.asset_id] ?? [])) { const k = arrangeSizeKey(s); if (!seen.has(k)) { seen.add(k); avail.push(s); } }
+        return { ...it, available: avail };
+      }));
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const save = async () => {
+    setSaving(true);
+    try { await updateSubtask(taskId, sub.id, { config: { ...(sub.config ?? {}), arrange_print: specFromItems(items) } }); await reload(); setDirty(false); pushToast("success", t("บันทึกรายการเรียงพิมพ์แล้ว", "Arrange print saved")); }
+    catch (e) { pushToast("error", (e as Error).message); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div className="rounded-lg border border-sky-100 bg-sky-50/40 p-2.5 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-slate-700">🖨️ {t("รายการเรียงพิมพ์", "Arrange print")} <span className="text-slate-400">· {items.length} {t("รูป", "img")} · {arrangeTotalQty(items).toLocaleString()} {t("ชิ้น", "pcs")}</span></p>
+        <button onClick={save} disabled={saving || !dirty} className="h-7 px-3 text-[11px] font-medium text-white bg-sky-600 rounded-md hover:bg-sky-700 disabled:opacity-40 shrink-0">{saving ? "⏳" : "💾"} {t("บันทึก", "Save")}</button>
+      </div>
+      <ArrangePrintEditor items={items} onChange={(it) => { setItems(it); setDirty(true); }} pushToast={pushToast} contextLabel={sub.title} />
+    </div>
+  );
+}
 type TypeMeta = Record<string, SubtaskType>;
 
 // ป้ายปลายทางตอนอนุมัติ (อ่านง่าย)
@@ -478,6 +522,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               ))}
             </div>
           )}
+          {sub.subtask_type === "arrange_print" && <ArrangePrintSubtaskPanel sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} />}
           {(st === "revision_requested" || st === "canceled") && ((sub.config as Record<string, unknown> | undefined)?.review_note as string | undefined) && (
             <p className="text-[11px] text-orange-600">📝 {st === "canceled" ? t("เหตุผลยกเลิก", "Cancel reason") : t("ขอแก้", "Revision")}: {(sub.config as Record<string, unknown>).review_note as string}</p>
           )}
