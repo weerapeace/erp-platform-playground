@@ -30,6 +30,8 @@ import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow } from "@/app/api/assets/shared";
 import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
 import { getLang } from "@/lib/lang";
+import { computeGrid, indexToCol } from "@/lib/canvas-formula";
+import { TableDrawer } from "../../table-drawer";
 
 // แปลข้อความบน "การ์ด" (ฟังก์ชัน module-level ไม่มี hook) — อ่านภาษาปัจจุบันตรง ๆ · การ์ดจะ re-sync ตอนสลับภาษา
 const tt = (th: string, en: string) => (getLang() === "en" ? en : th);
@@ -189,6 +191,41 @@ function folderCardSkeleton(f: { path: string; label: string }): Record<string, 
   ];
 }
 
+// การ์ดตารางคำนวณบน Excalidraw: วาด grid (หัวคอลัมน์ A B C / หัวแถว 1 2 3 / ช่องค่าที่คำนวณแล้ว) -- ดับเบิลคลิกเปิดสเปรดชีต
+type CanvasTable = { id: string; title: string; data: string[][] };
+function tableCardSkeleton(t: CanvasTable): Record<string, unknown>[] {
+  const gid = `table-${t.id}-${Math.random().toString(36).slice(2, 7)}`;
+  const data0 = { kind: "table", id: t.id, title: t.title };
+  const grid = Array.isArray(t.data) ? t.data : [];
+  const R = Math.max(1, grid.length);
+  const C = Math.max(1, grid.reduce((m, r) => Math.max(m, r?.length ?? 0), 0));
+  const computed = computeGrid(grid);
+  const CW = 90, CH = 26, HW = 30, TITLEH = 26;
+  const W = HW + C * CW, H = TITLEH + (R + 1) * CH;
+  const els: Record<string, unknown>[] = [
+    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ffffff", strokeColor: "#0f766e", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data0 },
+    { type: "text", x: 8, y: 5, width: W - 16, text: `▦ ${t.title || tt("ตาราง", "Table")}`, fontSize: 14, strokeColor: "#0f766e", groupIds: [gid], customData: data0 },
+  ];
+  const gy = TITLEH;
+  const headerCell = (x: number, y: number, w: number, text: string) => {
+    els.push({ type: "rectangle", x, y, width: w, height: CH, backgroundColor: "#f1f5f9", strokeColor: "#cbd5e1", fillStyle: "solid", groupIds: [gid], customData: data0 });
+    if (text) els.push({ type: "text", x: x + 4, y: y + 7, width: w - 8, text, fontSize: 11, strokeColor: "#64748b", groupIds: [gid], customData: data0 });
+  };
+  headerCell(0, gy, HW, "");
+  for (let c = 0; c < C; c++) headerCell(HW + c * CW, gy, CW, indexToCol(c));
+  for (let r = 0; r < R; r++) {
+    const ry = gy + (r + 1) * CH;
+    headerCell(0, ry, HW, String(r + 1));
+    for (let c = 0; c < C; c++) {
+      const cx = HW + c * CW;
+      els.push({ type: "rectangle", x: cx, y: ry, width: CW, height: CH, backgroundColor: "#ffffff", strokeColor: "#e2e8f0", fillStyle: "solid", groupIds: [gid], customData: data0 });
+      const val = (computed[r]?.[c] ?? "").toString();
+      if (val) els.push({ type: "text", x: cx + 5, y: ry + 7, width: CW - 10, text: val.length > 14 ? val.slice(0, 13) + "…" : val, fontSize: 12, strokeColor: "#1e293b", groupIds: [gid], customData: data0 });
+    }
+  }
+  return els;
+}
+
 // การ์ดงานบน Excalidraw: ชื่อ + รายการ subtask (snapshot) -- customData (ดับเบิลคลิกการ์ดเปิด drawer จัดการสด)
 function taskCardSkeleton(t: CreatedTask): Record<string, unknown>[] {
   const gid = `task-${t.id}-${Math.random().toString(36).slice(2, 7)}`;
@@ -225,6 +262,7 @@ export default function CampaignCanvasPage() {
   const [contentOpen, setContentOpen] = useState(false); // modal สร้างคอนเทนต์
   const [cForm, setCForm] = useState({ title: "", post_type: "image", platforms: [] as string[], scheduled_at: "", cardMode: "combined" as "combined" | "per_platform" });
   const [contentView, setContentView] = useState<Record<string, unknown> | null>(null); // การ์ดคอนเทนต์ที่กดดู
+  const [tableView, setTableView] = useState<Record<string, unknown> | null>(null); // การ์ดตารางที่กดดู (เปิดสเปรดชีต)
   const [folderOpen, setFolderOpen] = useState(false); // modal การ์ดโฟลเดอร์
   const [fForm, setFForm] = useState({ label: "", path: "" });
   const [parentOpen, setParentOpen] = useState(false);  // modal การ์ด Parent SKU
@@ -331,7 +369,16 @@ export default function CampaignCanvasPage() {
     pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = เปิดโฟลเดอร์
-  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); else if (data.kind === "asset") setAssetView(data); }, [openFolder]);
+  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); else if (data.kind === "asset") setAssetView(data); else if (data.kind === "table") setTableView(data); }, [openFolder]);
+  // สร้างตารางคำนวณใหม่ → วางการ์ดบนกระดาน
+  const createTableCard = async () => {
+    try {
+      const j = await apiFetch("/api/canvas-tables", { method: "POST", body: JSON.stringify({}) }).then((r) => r.json());
+      if (j.error) { pushToast("error", j.error); return; }
+      sketchRef.current?.insert(tableCardSkeleton({ id: j.id, title: j.title, data: j.data }));
+      pushToast("success", t("วางตารางคำนวณแล้ว — ดับเบิลคลิกเพื่อกรอก/ใส่สูตร", "Table placed — double-click to edit / add formulas"));
+    } catch (e) { pushToast("error", (e as Error).message); }
+  };
   // workflow/ลบงาน สำหรับ TaskDetailDrawer เต็มบน canvas
   const moveTask = useCallback(async (task: CreativeTask, toKey: string) => { await applyTaskTransition(task, toKey, { pushToast }); }, [pushToast]);
   const removeTask = useCallback(async (tid: string) => { try { await deleteTask(tid); pushToast("info", t("ลบงานแล้ว", "Task deleted")); setTaskView(null); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast, t]);
@@ -425,6 +472,7 @@ export default function CampaignCanvasPage() {
             <button onClick={() => setTaskOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">✅ Task Card</button>
             <button onClick={openDragPanel} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">🧲 {t("ลากงานเข้า", "Drag tasks in")}</button>
             <button onClick={() => setContentOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50">📱 Content Card</button>
+            <button onClick={createTableCard} className="h-9 px-3 inline-flex items-center text-sm font-medium text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-50">▦ {t("ตาราง", "Table")}</button>
             <button onClick={() => setFolderOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-cyan-700 border border-cyan-200 rounded-lg hover:bg-cyan-50">📁 {t("โฟลเดอร์", "Folder")}</button>
             <button onClick={() => { setAssetSel([]); setAssetOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-pink-700 border border-pink-200 rounded-lg hover:bg-pink-50">🖼️ {t("รูปจากคลัง", "Library image")}</button>
             <button onClick={openCards} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂️ {t("การ์ดบนกระดาน", "Cards on board")}</button>
@@ -605,6 +653,10 @@ export default function CampaignCanvasPage() {
       </ERPModal>
 
       {contentView && <ContentDrawer contentId={String(contentView.id ?? "")} brands={brands} onClose={() => { setContentView(null); syncContentCards(); }} onChanged={() => syncContentCards()} onDeleted={(cid) => { sketchRef.current?.removeCards((c) => c.kind === "content" && String(c.data.id ?? "") === cid); pushToast("info", t("เอาการ์ดคอนเทนต์ออกจากกระดานแล้ว", "Removed content card from board")); }} pushToast={pushToast} />}
+      {tableView && <TableDrawer tableId={String(tableView.id ?? "")} onClose={() => setTableView(null)}
+        onSaved={(tb) => { void sketchRef.current?.replaceCard((c) => c.kind === "table" && String(c.data.id ?? "") === tb.id, tableCardSkeleton(tb)); }}
+        onDeleted={(tid) => { sketchRef.current?.removeCards((c) => c.kind === "table" && String(c.data.id ?? "") === tid); pushToast("info", t("เอาตารางออกจากกระดานแล้ว", "Removed table from board")); }}
+        pushToast={pushToast} />}
 
       {drawerOpen && <CampaignDrawer campaignId={id} onClose={() => setDrawerOpen(false)} onChanged={load} pushToast={pushToast} />}
 

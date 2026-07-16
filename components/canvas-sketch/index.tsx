@@ -41,6 +41,8 @@ export type CanvasSketchControls = {
   listCards: () => { kind: string; data: Record<string, unknown> }[];
   /** ลบการ์ด (ทั้งกลุ่ม) ที่ตรงเงื่อนไข match — เช่นลบการ์ดคอนเทนต์ทั้งหมดของ content id หนึ่งเมื่อคอนเทนต์ถูกลบ */
   removeCards: (match: (card: { kind: string; id: string; data: Record<string, unknown> }) => boolean) => void;
+  /** แทนที่การ์ดที่ match ด้วย skeleton ใหม่ (ลบเดิม + วางใหม่ที่ตำแหน่งเดิม) — ใช้ตอนแก้ตารางแล้ว render การ์ดใหม่ */
+  replaceCard: (match: (card: { kind: string; id: string; data: Record<string, unknown> }) => boolean, skeletons: Record<string, unknown>[]) => Promise<void>;
   /** ซิงค์การ์ดสด — builder คืน {text?, data?, imageUrl?, images?} เพื่ออัปเดตข้อความ/รูป/snapshot
    *  imageUrl: URL รูปเดียว · images: หลายรูป [รูปใหญ่, รูปเล็ก...] (รูปแรก=รูปใหญ่บนสุด ที่เหลือ=รูปเล็กแถวล่าง) · [] / null / "" = เอารูปออก · undefined = ไม่ยุ่งกับรูป */
   refreshCards: (builder: (card: { kind: string; id: string; data: Record<string, unknown> }) => Promise<{ text?: string; data?: Record<string, unknown>; imageUrl?: string | null; images?: string[] | null; stroke?: string | null } | null>) => Promise<void>;
@@ -391,6 +393,28 @@ export function CanvasSketch({
         const next = all.map((el) => { const gid = el?.groupIds?.[0]; return (gid && removeGids.has(gid) && !el.isDeleted) ? { ...el, isDeleted: true, version: (el.version ?? 0) + 1 } : el; });
         api.updateScene({ elements: next });
         if (editable) queueSave();
+      },
+      // แทนที่การ์ดที่ match ด้วย skeleton ใหม่ (ลบเดิม+วางที่ตำแหน่งเดิม) — ใช้ re-render ตารางหลังแก้
+      replaceCard: async (match, skeletons) => {
+        const api = apiRef.current; if (!api || !skeletons?.length) return;
+        const all = ((api.getSceneElementsIncludingDeleted?.() ?? api.getSceneElements()) as any[]);
+        let gid: string | null = null;
+        for (const el of all) {
+          if (el?.isDeleted || gid) continue;
+          const g = el?.groupIds?.[0]; const d = el?.customData as Record<string, unknown> | undefined;
+          if (!g || !d?.kind) continue;
+          try { if (match({ kind: String(d.kind), id: String(d.id ?? ""), data: d })) gid = g; } catch { /* ข้าม */ }
+        }
+        if (!gid) return;
+        const groupEls = all.filter((e) => e?.groupIds?.[0] === gid && !e.isDeleted);
+        const minX = Math.min(...groupEls.map((e) => e.x ?? 0)), minY = Math.min(...groupEls.map((e) => e.y ?? 0));
+        const next = all.map((e) => (e?.groupIds?.[0] === gid && !e.isDeleted) ? { ...e, isDeleted: true, version: (e.version ?? 0) + 1 } : e);
+        try {
+          const lib: any = await import("@excalidraw/excalidraw");
+          const placed = skeletons.map((s) => ({ ...s, x: (Number(s.x) || 0) + minX, y: (Number(s.y) || 0) + minY }));
+          api.updateScene({ elements: [...next, ...lib.convertToExcalidrawElements(placed)] });
+          if (editable) queueSave();
+        } catch (e) { console.error("[canvas-sketch] replaceCard failed:", e); }
       },
       // ซิงค์การ์ดสด: ไล่กลุ่ม (group) → builder คืน {text?, data?, imageUrl?} → อัปเดตข้อความ + รูป + snapshot
       refreshCards: async (builder) => {
