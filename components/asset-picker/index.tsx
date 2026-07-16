@@ -35,9 +35,10 @@ export type AssetPickerProps = {
   title?: string;
   contextLabel?: string;           // ข้อความบอกว่าเลือกให้ record ไหน
   defaultSource?: string;          // ที่มาเริ่มต้น เช่น "artwork" (เปิดมาที่คลัง Artwork เลย)
+  defaultSearch?: string;          // คำค้นเริ่มต้น (เปิดมากรองรายการที่เกี่ยวข้องเลย)
 };
 
-export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, title, contextLabel, defaultSource }: AssetPickerProps) {
+export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, title, contextLabel, defaultSource, defaultSearch }: AssetPickerProps) {
   const toast = useToast();
   const [tab, setTab] = useState<"library" | "upload">("library");
   const [rows, setRows] = useState<AssetRow[]>([]);
@@ -45,7 +46,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [total, setTotal] = useState(0);              // จำนวนทั้งหมด (จาก API) — ใช้รู้ว่ามีให้โหลดเพิ่มไหม
   const [loadingMore, setLoadingMore] = useState(false);
   const PAGE = 120;
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(defaultSearch ?? "");
   const [type, setType] = useState(typeFilter ?? "");
   const [source, setSource] = useState(defaultSource ?? "");          // ที่มา: ""=อัปเอง · artwork · odoo_product · all
   const [collectionId, setCollectionId] = useState(""); // อัลบั้ม
@@ -56,7 +57,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [actor, setActor] = useState<string | null>(null);
 
   useEffect(() => { supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {}); }, []);
-  useEffect(() => { if (open) { setSelected(new Map()); setTab("library"); setSearch(""); setType(typeFilter ?? ""); setSource(defaultSource ?? ""); setCollectionId(""); setTagId(""); } }, [open, typeFilter, defaultSource]);
+  useEffect(() => { if (open) { setSelected(new Map()); setTab("library"); setSearch(defaultSearch ?? ""); setType(typeFilter ?? ""); setSource(defaultSource ?? ""); setCollectionId(""); setTagId(""); } }, [open, typeFilter, defaultSource, defaultSearch]);
 
   // โหลดรายการอัลบั้ม + แท็ก (ไว้ทำตัวกรอง) — ครั้งเดียวตอนเปิด
   useEffect(() => {

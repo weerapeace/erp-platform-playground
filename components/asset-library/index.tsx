@@ -474,6 +474,7 @@ export function AssetLibrary() {
         onDone={async () => { setBulkEditOpen(false); clearSel(); await load(); await loadMeta(); }} />}
       {/* bulk: เลือกรูปต้นทาง (ที่มีโฟลเดอร์ Drive) → ผูกทุกรูปที่เลือกเข้าโฟลเดอร์เดียวกัน */}
       <AssetPicker open={bulkLinkOpen} onClose={() => setBulkLinkOpen(false)} typeFilter="image" defaultSource="artwork"
+        defaultSearch={commonNameSeed(rows.filter((r) => selected.has(r.id)).map((r) => r.title))}
         title="เลือกรูปต้นทางที่มีโฟลเดอร์ Drive แล้ว" contextLabel={`ผูก ${selCount} รูปที่เลือกเข้าโฟลเดอร์เดียวกัน`}
         onSelect={(assets) => { if (assets[0]) void bulkLinkFolder(assets[0]); }} />
     </div>
@@ -557,6 +558,24 @@ async function estimateSizeCm(file: File): Promise<{ w: number; h: number; px: {
   const dpi = fromImage ? (dpiRaw as number) : DEFAULT_DPI;
   const r2 = (n: number) => Math.round(n * 100) / 100;
   return { w: r2(dims.w / dpi * 2.54), h: r2(dims.h / dpi * 2.54), px: dims, dpi, fromImage };
+}
+
+// หาคำร่วมนำหน้าของชื่อรูปที่เลือก (เช่น "Cherry Rose Pattern 2/3" → "Cherry Rose Pattern") ใช้เป็นคำค้นเริ่มต้น
+function commonNameSeed(titles: string[]): string {
+  const clean = titles.map((t) => (t || "").trim()).filter(Boolean);
+  if (!clean.length) return "";
+  const wordsOf = (s: string) => s.split(/[\s_]+/).filter(Boolean);
+  let common = wordsOf(clean[0]);
+  for (const t of clean.slice(1)) {
+    const w = wordsOf(t);
+    let i = 0;
+    while (i < common.length && i < w.length && common[i].toLowerCase() === w[i].toLowerCase()) i++;
+    common = common.slice(0, i);
+    if (!common.length) break;
+  }
+  if (!common.length) return wordsOf(clean[0])[0] ?? "";   // ไม่มีคำร่วม → คำแรกของตัวแรก
+  while (common.length > 1 && /^\d+$/.test(common[common.length - 1])) common.pop();   // ตัดเลขล้วนท้าย
+  return common.join(" ");
 }
 
 // แถบเลื่อนหน้า + บอกจำนวนทั้งหมด/หน้า (ใช้ทั้งบน+ล่างของกริด)
@@ -1135,6 +1154,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
 
       {/* เลือกรูปต้นทางเพื่อผูกโฟลเดอร์เดียวกัน (โหมด 📎 ใช้โฟลเดอร์เดียวกับรูปอื่น) */}
       <AssetPicker open={linkPickerOpen} onClose={() => setLinkPickerOpen(false)} typeFilter="image" defaultSource="artwork"
+        defaultSearch={commonNameSeed([d?.title ?? title])}
         title="เลือกรูปที่มีโฟลเดอร์ Drive แล้ว" contextLabel="ผูกโฟลเดอร์เดียวกับรูปนี้"
         onSelect={(assets) => { if (assets[0]) void linkToSharedFolder(assets[0]); }} />
     </ERPModal>
