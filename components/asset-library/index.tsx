@@ -471,6 +471,69 @@ function SideItem({ active, onClick, label, count, icon }: {
   );
 }
 
+// ── แกะขนาดจริง (cm) จากรูป: px ÷ DPI × 2.54 ──
+const DEFAULT_DPI = 300;   // ค่ามาตรฐานเมื่อรูปไม่ได้ฝัง DPI ไว้ (งานเรา export ขนาดจริง 300 DPI)
+// อ่าน DPI ที่ฝังในไฟล์รูป (JPEG JFIF/APP0 · PNG pHYs) — ไม่มี = null
+async function readImageDpi(file: File): Promise<number | null> {
+  try {
+    const buf = new Uint8Array(await file.slice(0, 65536).arrayBuffer());   // อ่านหัวไฟล์พอ (metadata อยู่ต้นไฟล์)
+    // PNG: signature 89 50 4E 47
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+      let p = 8;
+      while (p + 12 <= buf.length) {
+        const len = (buf[p] << 24) | (buf[p + 1] << 16) | (buf[p + 2] << 8) | buf[p + 3];
+        const type = String.fromCharCode(buf[p + 4], buf[p + 5], buf[p + 6], buf[p + 7]);
+        if (type === "pHYs") {
+          const ppuX = (buf[p + 8] << 24) | (buf[p + 9] << 16) | (buf[p + 10] << 8) | buf[p + 11];
+          const unit = buf[p + 16];
+          return unit === 1 && ppuX > 0 ? Math.round(ppuX * 0.0254) : null;   // per meter → per inch
+        }
+        if (type === "IDAT" || type === "IEND") break;
+        p += 12 + len;
+      }
+      return null;
+    }
+    // JPEG: FF D8 → หา APP0 (JFIF) เอา density
+    if (buf[0] === 0xff && buf[1] === 0xd8) {
+      let p = 2;
+      while (p + 4 < buf.length) {
+        if (buf[p] !== 0xff) { p++; continue; }
+        const marker = buf[p + 1];
+        if (marker === 0xda) break;   // start of scan → หมด metadata
+        const len = (buf[p + 2] << 8) | buf[p + 3];
+        if (marker === 0xe0) {   // APP0
+          const s = p + 4;
+          if (buf[s] === 0x4a && buf[s + 1] === 0x46 && buf[s + 2] === 0x49 && buf[s + 3] === 0x46) {   // "JFIF"
+            const units = buf[s + 7];
+            const xden = (buf[s + 8] << 8) | buf[s + 9];
+            if (units === 1 && xden > 0) return xden;                         // dots/inch
+            if (units === 2 && xden > 0) return Math.round(xden * 2.54);      // dots/cm → inch
+          }
+        }
+        p += 2 + len;
+      }
+      return null;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+// ประเมินขนาดจริง (cm) จากรูป — เชื่อ DPI จากรูปเฉพาะที่ดูเป็นงานพิมพ์ (≥150) ไม่งั้นใช้ค่ามาตรฐาน
+async function estimateSizeCm(file: File): Promise<{ w: number; h: number; px: { w: number; h: number }; dpi: number; fromImage: boolean } | null> {
+  if (!file.type.startsWith("image/")) return null;
+  const dims = await new Promise<{ w: number; h: number } | null>((res) => {
+    const img = new Image(); const u = URL.createObjectURL(file);
+    img.onload = () => { res({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(u); };
+    img.onerror = () => { res(null); URL.revokeObjectURL(u); };
+    img.src = u;
+  });
+  if (!dims || !dims.w || !dims.h) return null;
+  const dpiRaw = await readImageDpi(file);
+  const fromImage = !!dpiRaw && dpiRaw >= 150;
+  const dpi = fromImage ? (dpiRaw as number) : DEFAULT_DPI;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  return { w: r2(dims.w / dpi * 2.54), h: r2(dims.h / dpi * 2.54), px: dims, dpi, fromImage };
+}
+
 // แถบเลื่อนหน้า + บอกจำนวนทั้งหมด/หน้า (ใช้ทั้งบน+ล่างของกริด)
 function Pager({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (p: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -1316,6 +1379,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
   const [tags, setTags] = useState<string[]>([]);
   const [keywords, setKeywords] = useState("");
   const [sizes, setSizes] = useState<AssetSize[]>([]);
+  const [sizeHint, setSizeHint] = useState<{ px: { w: number; h: number }; dpi: number; fromImage: boolean } | null>(null);   // ที่มาของขนาดที่แกะจากรูป
   const [parentCodes, setParentCodes] = useState<string[]>([]);
   const [collectionIds, setCollectionIds] = useState<string[]>([]);      // อัลบั้มหลายอัน (m2m)
   const [cols, setCols] = useState<AssetCollection[]>(collections);       // สำเนาไว้ต่อท้ายเมื่อสร้างอัลบั้มใหม่ในฟอร์ม
@@ -1368,6 +1432,14 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
       const nm = title.trim() || nameNoExt;
       if (!title.trim()) setTitle(nameNoExt);   // ดึงชื่อจากชื่อไฟล์ (ถ้ายังไม่มีชื่อ)
       if (pathAuto) setMasterPath(buildPath(nm, ext));
+      // แกะขนาดจริง (cm) จากรูป → เติมช่องขนาดให้ (เฉพาะตอนว่าง · เป็นค่าประมาณ แก้ได้)
+      if (f.type.startsWith("image/")) {
+        estimateSizeCm(f).then((est) => {
+          if (!est) return;
+          setSizeHint({ px: est.px, dpi: est.dpi, fromImage: est.fromImage });
+          setSizes((cur) => cur.length ? cur : [{ label: "", w: est.w, h: est.h, unit: "cm" }]);
+        });
+      }
     }
   };
 
@@ -1471,6 +1543,9 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
       {/* ขนาด (หลายไซส์ + ชื่อกำกับ + หน่วย) */}
       <div className="mt-3 pt-3 border-t border-slate-100">
         <p className="text-[12px] font-medium text-slate-600 mb-1.5">📐 ขนาด (กว้าง × สูง) <span className="text-[10px] text-slate-400 font-normal">— เพิ่มได้หลายไซส์ ใส่ชื่อกำกับ + เลือกหน่วยต่อไซส์</span></p>
+        {sizeHint && (
+          <p className="text-[11px] text-slate-400 mb-1">📷 จากรูป {sizeHint.px.w}×{sizeHint.px.h} px @ {sizeHint.dpi} DPI {sizeHint.fromImage ? "(อ่านจากไฟล์)" : "(ใช้ค่ามาตรฐาน 300)"} → เติมขนาด cm ให้เป็น<b>ค่าประมาณ</b> แก้ได้</p>
+        )}
         <SizesEditor value={sizes} onChange={setSizes} />
       </div>
 
@@ -1578,8 +1653,16 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   };
   const addFiles = (files: FileList | File[]) => {
     const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
-    if (imgs.length) setRows((r) => [...r, ...imgs.map(makeRow)]);
-    else toast.error("รับเฉพาะไฟล์รูปภาพ (JPG/PNG/…)");
+    if (!imgs.length) { toast.error("รับเฉพาะไฟล์รูปภาพ (JPG/PNG/…)"); return; }
+    const newRows = imgs.map(makeRow);
+    setRows((r) => [...r, ...newRows]);
+    // แกะขนาดจริง (cm) จากแต่ละรูป → เติมช่องขนาด (เฉพาะแถวที่ยังว่าง · ค่าประมาณ แก้ได้)
+    for (const row of newRows) {
+      estimateSizeCm(row.file).then((est) => {
+        if (!est) return;
+        setRows((rs) => rs.map((x) => x.id === row.id && x.sizes.length === 0 ? { ...x, sizes: [{ label: "", w: est.w, h: est.h, unit: "cm" }] } : x));
+      });
+    }
   };
   // ลากหลายรูปมาวางบนหน้าคลัง → เปิด popup พร้อมรูปทั้งหมด
   useEffect(() => { if (initialFiles?.length) addFiles(initialFiles); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
