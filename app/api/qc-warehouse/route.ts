@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { friendlyDbError } from "../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -91,7 +92,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const [sh, it, rs, wo, sc, ad] = await Promise.all([
     admin.from("qc_shelves").select("id,name,kind,sort_order").eq("is_active", true).order("sort_order"),
-    admin.from("qc_warehouse_items").select("id,shelf_id,wo_id,mo_no,sku,sku_name,worker,qty,status,reason,repair_by,source").order("created_at"),
+    admin.from("qc_warehouse_items").select("id,shelf_id,wo_id,mo_no,sku,sku_name,worker,qty,status,reason,repair_by,source").order("created_at").limit(10000),   // กันโตแบบไร้เพดาน (เดิมไม่มี limit)
     admin.from("qc_defect_reasons").select("id,name").eq("is_active", true).order("sort_order"),
     admin.from("mo_work_orders").select("id,mo_no,product_sku,product_name,assignee_name,assignee_id,assignee_type,received_qty,qc_pulled_qty,due_date").eq("is_active", true).gt("received_qty", 0),
     admin.from("qc_sources").select("id,name").eq("is_active", true).order("sort_order"),
@@ -99,7 +100,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     admin.from("mo_work_orders").select("id,wo_no,mo_no,product_sku,product_name,department_name,assignee_name,qty,received_qty,status,due_date,labor_cost").eq("is_active", true).neq("status", "done"),
   ]);
   const err = sh.error || it.error || rs.error || wo.error || sc.error || ad.error;
-  if (err) return NextResponse.json({ error: err.message }, { status: 500 });
+  if (err) return NextResponse.json({ error: friendlyDbError(err.message) }, { status: 500 });
 
   // รูป + แบรนด์ ต่อ SKU (จากของบนชั้น + งานในคิว + งานในโต๊ะ)
   const skus = Array.from(new Set([...(it.data ?? []).map((i) => i.sku as string | null), ...(wo.data ?? []).map((w) => w.product_sku as string | null), ...(ad.data ?? []).map((w) => w.product_sku as string | null)].filter((s): s is string => !!s)));

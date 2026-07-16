@@ -269,11 +269,13 @@ export default function WorkBoardPage() {
   const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
 
   // silent=true → refresh เบื้องหลัง ไม่โชว์สปินเนอร์เต็มจอ (ใช้หลังปิดป๊อปอัป/ทำ action เพื่อให้ลื่น)
+  const [loadError, setLoadError] = useState(false);   // โหลดบอร์ดพลาด → โชว์ error+ลองใหม่ (ไม่ใช่บอร์ดว่าง)
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try { const res = await apiFetch("/api/mo/work-board"); const j = await res.json();
-      if (!j.error) setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], pendingPiece: j.pending_piece ?? [] });
-    } catch { /* ignore */ } finally { if (!silent) setLoading(false); }
+      if (!j.error) { setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], pendingPiece: j.pending_piece ?? [] }); setLoadError(false); }
+      else if (!silent) setLoadError(true);
+    } catch { if (!silent) setLoadError(true); } finally { if (!silent) setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
   // กลุ่ม D: โหลดรายการแผนจ่ายงาน
@@ -1039,7 +1041,14 @@ export default function WorkBoardPage() {
       )}
 
       {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด…</div>
-        : viewMode === "purchase" ? (
+        : loadError ? (
+        <div className="text-center py-20">
+          <div className="text-4xl mb-3">⚠️</div>
+          <p className="text-slate-700 font-medium">โหลดบอร์ดไม่สำเร็จ</p>
+          <p className="text-slate-400 text-sm mt-1">เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา — ไม่ใช่ว่าไม่มีงาน</p>
+          <button onClick={() => void load()} className="mt-4 h-9 px-4 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700">↻ ลองใหม่</button>
+        </div>
+      ) : viewMode === "purchase" ? (
         <PurchaseNeeds canEdit={canEdit} onOpenMo={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "table" ? (
         <BoardTable pending={board.pending} workOrders={board.workOrders} onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />

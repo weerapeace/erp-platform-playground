@@ -779,6 +779,7 @@ export function DataTable<T extends Record<string, unknown>>({
   // ---- Server-side state ----
   const [srvRows,     setSrvRows]     = useState<T[]>([]);
   const [srvTotal,    setSrvTotal]    = useState(0);
+  const [srvError,    setSrvError]    = useState(false);   // โหลด (server mode) พลาด + ไม่มีของเก่า → โชว์ "โหลดพลาด" แทน "ไม่พบข้อมูล"
   // เริ่มเป็น true ใน server mode → โชว์ skeleton ต่อเนื่องตั้งแต่ mount จนข้อมูลรอบแรกมา (ไม่มีตารางเปล่าแวบ)
   const [srvLoading,  setSrvLoading]  = useState(isServer);
   // เฟส 4 (แบบ A): batch ใหญ่สำหรับจัดกลุ่ม server mode
@@ -847,8 +848,8 @@ export function DataTable<T extends Record<string, unknown>>({
     const t = setTimeout(() => {
       if (!active) return;
       serverFetch(params)
-        .then(r => { if (!active) return; setSrvRows(r.rows); setSrvTotal(r.total); if (cacheKey) mutateSWR(cacheKey, r); })
-        .catch(() => { if (active && !cached) { setSrvRows([]); setSrvTotal(0); } })   // มีของเก่าอยู่ → คงไว้ ไม่ล้างเป็นว่าง
+        .then(r => { if (!active) return; setSrvRows(r.rows); setSrvTotal(r.total); setSrvError(false); if (cacheKey) mutateSWR(cacheKey, r); })
+        .catch(() => { if (active && !cached) { setSrvRows([]); setSrvTotal(0); setSrvError(true); } })   // มีของเก่าอยู่ → คงไว้ ไม่ล้างเป็นว่าง · ไม่มี → ตั้งธง error (ไม่โชว์เป็น "ไม่พบข้อมูล")
         .finally(() => { if (active) setSrvLoading(false); });
     }, cached ? 0 : 120);   // มีของเก่าแล้ว → revalidate ทันที ; ไม่มี → debounce 120ms กันยิงรัว
     return () => { active = false; clearTimeout(t); };
@@ -1916,7 +1917,7 @@ export function DataTable<T extends Record<string, unknown>>({
           <ErrorState message={error} onRetry={onRetry} />
         ) : viewMode === "cards" ? (
           filteredData.length === 0 ? (
-            <div className="py-16"><EmptyState message={emptyMessage} /></div>
+            <div className="py-16">{srvError ? <ErrorState message="โหลดข้อมูลไม่สำเร็จ — เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา" onRetry={() => setBusRefresh((x) => x + 1)} /> : <EmptyState message={emptyMessage} />}</div>
           ) : (
             <CardsView<T>
               // F28: card ใช้ rows ที่ paginate แล้ว (เหมือน table) — ไม่ render ทั้ง 1,471
@@ -2009,7 +2010,7 @@ export function DataTable<T extends Record<string, unknown>>({
                 const grows = (isServer ? table.getCoreRowModel() : table.getSortedRowModel()).rows;
                 const leaf = table.getVisibleLeafColumns();
                 if (grows.length === 0) return (
-                  <tr><td colSpan={tableColumns.length} className="py-16 text-center"><EmptyState message={emptyMessage} /></td></tr>
+                  <tr><td colSpan={tableColumns.length} className="py-16 text-center">{srvError ? <ErrorState message="โหลดข้อมูลไม่สำเร็จ — เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา" onRetry={() => setBusRefresh((x) => x + 1)} /> : <EmptyState message={emptyMessage} />}</td></tr>
                 );
                 const order: string[] = [];
                 const groups = new Map<string, typeof grows>();
@@ -2113,7 +2114,7 @@ export function DataTable<T extends Record<string, unknown>>({
               })() : table.getRowModel().rows.length === 0 ? (
                 <tr>
                   <td colSpan={tableColumns.length} className="py-16 text-center">
-                    <EmptyState message={emptyMessage} />
+                    {srvError ? <ErrorState message="โหลดข้อมูลไม่สำเร็จ — เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา" onRetry={() => setBusRefresh((x) => x + 1)} /> : <EmptyState message={emptyMessage} />}
                   </td>
                 </tr>
               ) : (

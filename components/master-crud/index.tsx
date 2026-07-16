@@ -1263,7 +1263,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         body: JSON.stringify({ ...serialized, actor: user?.name }),
       });
       const json = await res.json();
-      if (json.error) throw new Error(json.error);
+      if (json.error) {
+        // ค่าซ้ำ (23505): server แนบ dup:{field,value} → ไฮไลต์ช่องที่ซ้ำในฟอร์ม (เดิมโชว์แค่ข้อความรวม)
+        const dup = json.dup as { field?: string; value?: string } | undefined;
+        if (dup?.field) setFieldErrors((prev) => ({ ...prev, [dup.field as string]: [`ค่านี้ซ้ำกับที่มีอยู่แล้ว${dup.value ? ` ("${dup.value}")` : ""}`] }));
+        throw new Error(json.error);
+      }
       flash(editingId ? "บันทึกแล้ว" : "สร้างใหม่แล้ว");
       setDirty(false);
       // ผูก/ถอดลิงก์ m2m ให้ตรงกับที่เลือก (widget mirror ค่าเข้า form แล้ว) — ทั้งสร้างและแก้ไข
@@ -1494,10 +1499,17 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         label: "🗑 ลบที่เลือก (ชั่วคราว)",
         onClick: async (selected: Row[]) => {
           if (!confirm(`ลบชั่วคราว ${selected.length} ราย? (ซ่อนไว้ กู้คืนได้)`)) return;
+          // เก็บผลรายตัว — พังบางรายต้องบอก (เดิมขึ้น "สำเร็จ" เสมอแม้พัง)
+          let ok = 0; const fails: string[] = [];
           for (const r of selected) {
-            await apiFetch(`${apiBase}${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
+            try {
+              const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
+              const j = await res.json().catch(() => ({}));
+              if (j.error) fails.push(String(j.error)); else ok++;
+            } catch (e) { fails.push(String((e as Error).message ?? e)); }
           }
-          flash(`ลบชั่วคราว ${selected.length} ราย`);
+          flash(`ลบชั่วคราว ${ok} ราย${fails.length ? ` · ล้มเหลว ${fails.length}` : ""}`);
+          if (fails.length) fail(`ลบไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`);
           await refreshData();
         },
       },
@@ -1508,13 +1520,19 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           const targets = selected.filter((r) => !r[activeField]);
           if (targets.length === 0) { fail("ไม่มีรายการที่ถูกลบในรายการที่เลือก"); return; }
           if (!confirm(`กู้คืน ${targets.length} ราย กลับมาใช้งาน?`)) return;
+          let ok = 0; const fails: string[] = [];
           for (const r of targets) {
-            await apiFetch(`${apiBase}${config.apiPath}/${r.id}`, {
-              method: "PATCH", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ [activeField]: isRest ? true : "true", actor: user?.name }),
-            });
+            try {
+              const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}`, {
+                method: "PATCH", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ [activeField]: isRest ? true : "true", actor: user?.name }),
+              });
+              const j = await res.json().catch(() => ({}));
+              if (j.error) fails.push(String(j.error)); else ok++;
+            } catch (e) { fails.push(String((e as Error).message ?? e)); }
           }
-          flash(`กู้คืน ${targets.length} ราย`);
+          flash(`กู้คืน ${ok} ราย${fails.length ? ` · ล้มเหลว ${fails.length}` : ""}`);
+          if (fails.length) fail(`กู้คืนไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`);
           await refreshData();
         },
       },
@@ -1692,12 +1710,27 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       });
       if (res.ok) {
         const json = await res.json().catch(() => null);
-        if (json && json.error) { setError(json.error); fail(json.error); return { success: 0, failed: total }; }
+        if (json && json.error) {
+          // server พังกลางคัน — อ่านจำนวนที่ทำสำเร็จไปแล้ว (affected) มารายงานจริง (เดิมบอกล้มเหลวทั้งหมด)
+          const done = Number(json.affected ?? 0);
+          setError(json.error); fail(json.error);
+          if (done > 0) await refreshData();
+          return { success: done, failed: total - done };
+        }
         if (json) {
           const success = (json.affected as number) ?? total;
           await refreshData();
           flash(`แก้ ${success} ราย`);
           return { success, failed: total - success };
+        }
+      } else {
+        // 400 จาก route จริง (พังกลางคัน) จะมี affected แนบมา → รายงานตามจริง ไม่ fallback ยิงซ้ำ
+        const json = await res.json().catch(() => null);
+        if (json && json.error && typeof json.affected === "number") {
+          const done = Number(json.affected);
+          setError(json.error); fail(json.error);
+          if (done > 0) await refreshData();
+          return { success: done, failed: total - done };
         }
       }
       // res ไม่ ok (เช่น 404/405 — surface ไม่มี route bulk-update) หรือ body ว่าง → fall back

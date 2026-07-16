@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { friendlyDbError } from "../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const { data: mx } = await admin.from("qc_shelves").select("sort_order").order("sort_order", { ascending: false }).limit(1).maybeSingle();
   const { error } = await admin.from("qc_shelves").insert({ name, kind: cleanKind(body.kind), sort_order: Number(mx?.sort_order ?? 0) + 10 });
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   return NextResponse.json({ error: null });
 }
 
@@ -34,7 +35,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("name" in body) patch.name = String(body.name ?? "").trim();
   if ("kind" in body) patch.kind = cleanKind(body.kind);
   const { error } = await supabaseAdmin().from("qc_shelves").update(patch).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   return NextResponse.json({ error: null });
 }
 
@@ -45,6 +46,6 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const { count } = await admin.from("qc_warehouse_items").select("id", { count: "exact", head: true }).eq("shelf_id", id);
   if ((count ?? 0) > 0) return NextResponse.json({ error: "ย้ายของออกจากชั้นนี้ก่อนถึงจะลบได้" }, { status: 400 });
   const { error } = await admin.from("qc_shelves").delete().eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   return NextResponse.json({ error: null });
 }

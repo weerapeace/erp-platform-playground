@@ -436,6 +436,15 @@ function buildRelationResolves(flds: FieldRow[]): RelationResolve[] {
     });
 }
 
+/** ฟิลด์บังคับของตาราง (จากทะเบียน field กลาง erp_module_fields.is_required) — ตรวจฝั่ง server ก่อนเขียน */
+export async function requiredColumnsFor(admin: ReturnType<typeof supabaseAdmin>, table: string): Promise<string[]> {
+  const { data: mod } = await admin.from("erp_modules").select("id").eq("table_name", table).maybeSingle();
+  if (!mod) return [];
+  const { data: flds } = await admin.from("erp_module_fields")
+    .select("column_name").eq("module_id", mod.id).eq("is_active", true).eq("is_required", true);
+  return ((flds ?? []) as { column_name: string | null }[]).map((f) => f.column_name).filter(Boolean) as string[];
+}
+
 export async function resolveEntity(entity: string): Promise<EntityConfig | null> {
   const cached = _entityCache.get(entity);
   if (cached && Date.now() - cached.at < ENTITY_TTL) return cached.cfg;
@@ -664,6 +673,11 @@ async function _POST(
 
   // ใช้ supabaseAdmin (service-role bypass RLS) — sprint 8 จะใส่ erp_can() check
   const admin = supabaseAdmin();
+
+  // ตรวจฟิลด์บังคับฝั่ง server (จากทะเบียน field กลาง) — เดิมเช็กแค่ในฟอร์ม ยิง API ตรงหลุดได้
+  const requiredCols = await requiredColumnsFor(admin, cfg.table);
+  const missing = requiredCols.filter((k) => payload[k] === undefined || payload[k] === null || payload[k] === "");
+  if (missing.length) return NextResponse.json({ error: `กรอกข้อมูลไม่ครบ: ${missing.join(", ")}` }, { status: 400 });
 
   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้แก้ไม่ได้ออกก่อนเขียน
   const access = await getFieldAccess(request, admin, cfg.table);

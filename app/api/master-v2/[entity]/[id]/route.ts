@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { resolveEntity, resolveRelationLabels, friendlyDbError, parseDupError } from "../route";
+import { resolveEntity, resolveRelationLabels, friendlyDbError, parseDupError, requiredColumnsFor } from "../route";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { timeRoute } from "@/lib/api-timing";
@@ -86,6 +86,11 @@ async function _PATCH(
 
   // ใช้ supabaseAdmin (service-role bypass RLS)
   const admin = supabaseAdmin();
+
+  // กันตั้งฟิลด์บังคับ (ทะเบียน field กลาง) เป็นค่าว่าง — เดิมเช็กแค่ฝั่งฟอร์ม
+  const requiredCols = await requiredColumnsFor(admin, cfg.table);
+  const blanked = requiredCols.filter((k) => k in patch && (patch[k] === null || patch[k] === ""));
+  if (blanked.length) return NextResponse.json({ error: `ฟิลด์บังคับห้ามเว้นว่าง: ${blanked.join(", ")}` }, { status: 400 });
 
   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้แก้ไม่ได้ออกก่อนเขียน
   const access = await getFieldAccess(request, admin, cfg.table);

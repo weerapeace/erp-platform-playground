@@ -21,11 +21,14 @@ type SkuInfo = { image_url: string | null; brand: string | null; brand_color: st
 async function skuInfoMap(admin: ReturnType<typeof supabaseAdmin>, skus: string[]): Promise<Map<string, SkuInfo>> {
   const map = new Map<string, SkuInfo>();
   const list = [...new Set(skus.filter(Boolean))];
-  for (let i = 0; i < list.length; i += 300) {
-    const chunk = list.slice(i, i + 300);
-    const { data } = await admin.from("skus_v2")
+  // ยิงทุก chunk ขนานกัน (เดิมรอทีละ chunk — SKU เยอะ = หลายรอบต่อคิว ทำบอร์ดเปิดช้า)
+  const chunks: string[][] = [];
+  for (let i = 0; i < list.length; i += 300) chunks.push(list.slice(i, i + 300));
+  const results = await Promise.all(chunks.map((chunk) =>
+    admin.from("skus_v2")
       .select("code, cover_image_r2_key, color_th, color, parent:parent_skus_v2!parent_sku_id ( brand:brands!brand_id ( name, color ) )")
-      .in("code", chunk);
+      .in("code", chunk)));
+  for (const { data } of results) {
     for (const s of (data ?? []) as Record<string, unknown>[]) {
       const parent = (Array.isArray(s.parent) ? s.parent[0] : s.parent) as { brand?: unknown } | null;
       const brand = (parent && (Array.isArray(parent.brand) ? parent.brand[0] : parent.brand)) as { name?: string; color?: string } | null;

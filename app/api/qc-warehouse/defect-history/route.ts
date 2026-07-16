@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { friendlyDbError } from "../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,6 +25,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (sku) q = q.eq("sku", sku);
   if (search) q = q.or(`sku.ilike.%${search}%,worker.ilike.%${search}%,defect_type.ilike.%${search}%`);
   const { data, error } = await q;
-  if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   return NextResponse.json({ data: data ?? [], error: null });
 }

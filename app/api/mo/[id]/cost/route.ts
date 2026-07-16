@@ -6,8 +6,11 @@
  * ของกลาง: guardApi(products.view) + supabaseAdmin
  */
 import { NextRequest, NextResponse } from "next/server";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { writeAudit } from "@/lib/audit";
+import { friendlyDbError } from "../../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -93,13 +96,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   return NextResponse.json({ data, error: null });
 }
 
-// บันทึกค่าทดลองคำนวณต้นทุน (cost_scenario) ต่อใบ
+// บันทึกค่าทดลองคำนวณต้นทุน (cost_scenario) ต่อใบ — เรื่องเงิน ต้องตามรอยได้
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
   let body: { scenario?: CostScenario | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
-  const { error } = await supabaseAdmin().from("manufacturing_orders").update({ cost_scenario: body.scenario ?? null }).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  const admin = supabaseAdmin();
+  const { error } = await admin.from("manufacturing_orders").update({ cost_scenario: body.scenario ?? null }).eq("id", id);
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  await writeAudit(admin, { action: "update_cost_scenario", entityType: "manufacturing_order", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { cleared: body.scenario == null } });
   return NextResponse.json({ data: { ok: true }, error: null });
 }

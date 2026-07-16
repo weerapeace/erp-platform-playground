@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const denied = await guardApi(_request, "products.view"); if (denied) return denied;   // เดิมไม่เช็กสิทธิ์ (แถมอ่าน PR ผ่าน service role)
   const { id } = await params;
   const supabase = supabaseFromRequest(_request);
   const { data: header, error } = await supabase.from("manufacturing_orders").select("*").eq("id", id).single();

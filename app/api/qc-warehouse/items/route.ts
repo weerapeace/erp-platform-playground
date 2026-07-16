@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { writeAudit } from "@/lib/audit";
 import { notifyEvent, pushLineTpl, dmEmployeeByName, boardLink } from "@/lib/board-notify";
 
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         for (const b of bad) rows.push({ ...base, shelf_id: dsid, qty: b.qty, status: "defect", reason: b.reason });
       }
       const ins = await admin.from("qc_warehouse_items").insert(rows);
-      if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 400 });
+      if (ins.error) return NextResponse.json({ error: friendlyDbError(ins.error.message) }, { status: 400 });
       await admin.from("mo_work_orders").update({ qc_pulled_qty: Number(wo.qc_pulled_qty ?? 0) + good + badTotal }).eq("id", wo_id);
       for (const b of bad) { await logDefect(admin, { sku: wo.product_sku, worker: wo.assignee_name, qty: b.qty, reason: b.reason, kind: "defect", mo_no: wo.mo_no }); await logParentIssue(admin, actor, { sku: wo.product_sku, reason: b.reason }); }
       await writeAudit(admin, { action: "qc.receive", entityType: "qc_warehouse_items", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, good, bad: badTotal } });
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const { data: shelf } = await admin.from("qc_shelves").select("kind").eq("id", shelf_id).single();
       if (shelf?.kind === "defect") return NextResponse.json({ error: "ย้ายเข้าชั้นของเสียโดยตรงไม่ได้" }, { status: 400 });
       const up = await admin.from("qc_warehouse_items").update({ shelf_id, updated_at: new Date().toISOString() }).eq("id", item_id);
-      if (up.error) return NextResponse.json({ error: up.error.message }, { status: 400 });
+      if (up.error) return NextResponse.json({ error: friendlyDbError(up.error.message) }, { status: 400 });
       await writeAudit(admin, { action: "qc.move", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { shelf_id } });
       return NextResponse.json({ error: null });
     }
@@ -134,7 +135,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const item = await getItem(admin, item_id);
       if (!item) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
       const del = await admin.from("qc_warehouse_items").delete().eq("id", item_id);
-      if (del.error) return NextResponse.json({ error: del.error.message }, { status: 400 });
+      if (del.error) return NextResponse.json({ error: friendlyDbError(del.error.message) }, { status: 400 });
       await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: item.qty, mode: body.mode, wh: body.wh } });
       return NextResponse.json({ error: null });
     }
@@ -171,14 +172,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const item_id = String(body.item_id ?? "");
       const repair_by = String(body.repair_by ?? "");
       const up = await admin.from("qc_warehouse_items").update({ status: "repairing", repair_by, updated_at: new Date().toISOString() }).eq("id", item_id);
-      if (up.error) return NextResponse.json({ error: up.error.message }, { status: 400 });
+      if (up.error) return NextResponse.json({ error: friendlyDbError(up.error.message) }, { status: 400 });
       await writeAudit(admin, { action: "qc.repair", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sub: "send", repair_by } });
       return NextResponse.json({ error: null });
     }
     if (action === "repair_cancel") {
       const item_id = String(body.item_id ?? "");
       const up = await admin.from("qc_warehouse_items").update({ status: "defect", repair_by: null, updated_at: new Date().toISOString() }).eq("id", item_id);
-      if (up.error) return NextResponse.json({ error: up.error.message }, { status: 400 });
+      if (up.error) return NextResponse.json({ error: friendlyDbError(up.error.message) }, { status: 400 });
       return NextResponse.json({ error: null });
     }
 
@@ -225,7 +226,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (!sku) return NextResponse.json({ error: "เลือกสินค้าก่อน" }, { status: 400 });
       if (qty < 1) return NextResponse.json({ error: "จำนวนต้องมากกว่า 0" }, { status: 400 });
       const { error } = await admin.from("qc_warehouse_items").insert({ shelf_id, sku, sku_name, qty, status: "good", source, worker });
-      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
       await writeAudit(admin, { action: "qc.add_manual", entityType: "qc_warehouse_items", entityId: shelf_id, ...actor, metadata: { sku, qty, source } });
       return NextResponse.json({ error: null });
     }
@@ -243,7 +244,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const nameMap = new Map((sk ?? []).map((s) => [s.code as string, s.name_th as string]));
       const ins = parsed.map((r) => ({ shelf_id, sku: r.sku, sku_name: nameMap.get(r.sku) ?? r.sku, qty: r.qty, status: "good", source }));
       const { error } = await admin.from("qc_warehouse_items").insert(ins);
-      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
       await writeAudit(admin, { action: "qc.add_bulk", entityType: "qc_warehouse_items", entityId: shelf_id, ...actor, metadata: { count: ins.length, source } });
       return NextResponse.json({ error: null, count: ins.length });
     }

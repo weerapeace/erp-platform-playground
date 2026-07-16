@@ -8,7 +8,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { friendlyDbError } from "../../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,7 +24,11 @@ type PatchBody = {
   stage?: string; due_date?: string | null; note?: string | null; labor_cost?: number | null;
 };
 
+// สถานะใบจ่ายงานที่ระบบรู้จัก — กันตั้งค่ามั่วผ่าน API
+const WO_STATUSES = new Set(["dispatched", "partial_return", "done", "cancelled"]);
+
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;   // สิทธิ์เดียวกับเส้นสร้าง/แก้แบบรวม (เดิมแค่ login = ช่องโหว่)
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
@@ -32,6 +38,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const admin = supabaseAdmin();
   const { data: cur, error: exErr } = await admin.from("mo_work_orders").select("id, wo_no, mo_no, qty, received_qty, status").eq("id", id).single();
   if (exErr) return NextResponse.json({ error: "ไม่พบใบจ่ายงาน" }, { status: 404 });
+  // ใบที่ "ยกเลิก" แล้ว ล็อกทุกฟิลด์ — แก้ได้ทางเดียวคือคืนสถานะกลับมาก่อน (status: dispatched)
+  const curStatus = String((cur as { status?: string }).status ?? "");
+  if (curStatus === "cancelled" && body.status !== "dispatched")
+    return NextResponse.json({ error: "ใบจ่ายงานนี้ถูกยกเลิกแล้ว — คืนสถานะเป็น \"จ่ายงาน\" ก่อนจึงจะแก้ไขได้" }, { status: 400 });
+  if (body.status != null && !WO_STATUSES.has(String(body.status)))
+    return NextResponse.json({ error: "สถานะใบจ่ายงานไม่ถูกต้อง" }, { status: 400 });
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (body.qty != null)           patch.qty = num(body.qty);
@@ -55,7 +67,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.status != null) patch.status = body.status;  // ตั้งสถานะตรง ๆ override ได้
 
   const { error } = await admin.from("mo_work_orders").update(patch).eq("id", id);
-  if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ: " + error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
   await writeAudit(admin, { action: "update", entityType: "mo_work_order", entityId: id, actorId: user.id,
     actorName: user.email ?? null, metadata: { wo_no: (cur as { wo_no: string }).wo_no, ...patch } });
@@ -63,12 +75,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;   // สิทธิ์เดียวกับเส้นสร้าง (เดิมแค่ login = ช่องโหว่)
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
   const admin = supabaseAdmin();
   const { error } = await admin.from("mo_work_orders").update({ is_active: false, status: "cancelled", updated_at: new Date().toISOString() }).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   await writeAudit(admin, { action: "delete", entityType: "mo_work_order", entityId: id, actorId: user.id, actorName: user.email ?? null });
   return NextResponse.json({ data: { archived: true }, error: null });
 }

@@ -6,6 +6,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { writeAudit } from "@/lib/audit";
+import { friendlyDbError } from "../master-v2/[entity]/route";
 
 const FLOW_FIELDS = ["name", "icon", "description", "sort_order", "is_active"];
 const STEP_FIELDS = ["flow_id", "step_no", "title", "icon", "files_note", "storage_label", "storage_kind", "link_url", "sort_order", "is_active"];
@@ -56,13 +58,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const row: Record<string, unknown> = { ...pick(body, FLOW_FIELDS), flow_key: `flow_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}` };
     if (!row.name) return NextResponse.json({ error: "ต้องมีชื่องาน" }, { status: 400 });
     const { data, error } = await admin.from("erp_work_flows").insert(row).select().single();
-    return NextResponse.json({ data, error: error?.message ?? null }, { status: error ? 400 : 200 });
+    return NextResponse.json({ data, error: error ? friendlyDbError(error.message) : null }, { status: error ? 400 : 200 });
   }
   // step
   const row = pick(body, STEP_FIELDS);
   if (!row.flow_id || !row.title) return NextResponse.json({ error: "ต้องมี flow_id + ชื่อขั้นตอน" }, { status: 400 });
   const { data, error } = await admin.from("erp_work_flow_steps").insert(row).select().single();
-  return NextResponse.json({ data, error: error?.message ?? null }, { status: error ? 400 : 200 });
+  return NextResponse.json({ data, error: error ? friendlyDbError(error.message) : null }, { status: error ? 400 : 200 });
 }
 
 // แก้ไข flow หรือ step (body: { target, id, patch })
@@ -74,7 +76,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const isFlow = body.target === "flow";
   const clean = { ...pick(body.patch, isFlow ? FLOW_FIELDS : STEP_FIELDS), updated_at: new Date().toISOString() };
   const { error } = await supabaseAdmin().from(isFlow ? "erp_work_flows" : "erp_work_flow_steps").update(clean).eq("id", body.id);
-  return NextResponse.json({ error: error?.message ?? null }, { status: error ? 400 : 200 });
+  return NextResponse.json({ error: error ? friendlyDbError(error.message) : null }, { status: error ? 400 : 200 });
 }
 
 // ลบ flow (พร้อมขั้นตอน — FK cascade) หรือ step · ?target=flow|step&id=...
@@ -83,6 +85,11 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const sp = new URL(request.url).searchParams;
   const id = sp.get("id"); const isFlow = sp.get("target") === "flow";
   if (!id) return NextResponse.json({ error: "ต้องมี id" }, { status: 400 });
-  const { error } = await supabaseAdmin().from(isFlow ? "erp_work_flows" : "erp_work_flow_steps").delete().eq("id", id);
-  return NextResponse.json({ error: error?.message ?? null }, { status: error ? 400 : 200 });
+  const admin = supabaseAdmin();
+  const { error } = await admin.from(isFlow ? "erp_work_flows" : "erp_work_flow_steps").delete().eq("id", id);
+  if (!error) {   // ลบถาวร (FK cascade) → ต้องตามรอยได้
+    const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+    await writeAudit(admin, { action: "delete", entityType: isFlow ? "work_flow" : "work_flow_step", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { hard: true } });
+  }
+  return NextResponse.json({ error: error ? friendlyDbError(error.message) : null }, { status: error ? 400 : 200 });
 }

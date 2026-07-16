@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { friendlyDbError } from "../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "qc.view"); if (denied) return denied;
   const { data, error } = await supabaseAdmin().from("qc_defect_reasons")
     .select("id, name").eq("is_active", true).order("sort_order", { ascending: true });
-  if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   return NextResponse.json({ data: data ?? [], error: null });
 }
 
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const { data: mx } = await admin.from("qc_defect_reasons").select("sort_order").order("sort_order", { ascending: false }).limit(1).maybeSingle();
   const { error } = await admin.from("qc_defect_reasons").insert({ name, sort_order: Number(mx?.sort_order ?? 0) + 10 });
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   return NextResponse.json({ error: null });
 }
 
@@ -36,7 +37,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const id = String(body.id ?? "");
   if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
   const { error } = await supabaseAdmin().from("qc_defect_reasons").update({ name: String(body.name ?? "").trim() }).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   return NextResponse.json({ error: null });
 }
 
@@ -44,6 +45,6 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "qc.defect"); if (denied) return denied;
   const id = new URL(request.url).searchParams.get("id") ?? "";
   const { error } = await supabaseAdmin().from("qc_defect_reasons").update({ is_active: false }).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   return NextResponse.json({ error: null });
 }

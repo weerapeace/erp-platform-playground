@@ -7,8 +7,10 @@
  * ของกลาง: guardApi products.edit/delete · supabaseAdmin · r2MoveToTrash
  */
 import { NextRequest, NextResponse } from "next/server";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { writeAudit } from "@/lib/audit";
 import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 
 export const dynamic = "force-dynamic";
@@ -64,10 +66,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const admin = supabaseAdmin();
   const hard = body.mode === "hard";
+  // ลบถาวร (hard) = destructive → ต้องมีสิทธิ์ลบ ไม่ใช่แค่แก้ไข
+  if (hard) { const denyDel = await guardApi(request, "products.delete"); if (denyDel) return denyDel; }
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  let imagesRemoved = 0, childrenAffected = 0;   // นับไว้เขียน audit ท้ายสุด
 
   // 1) รูป — แกลเลอรี (parent+ลูก) → R2 trash · Description assets → trashed (เฉพาะที่ไม่ถูกใช้ที่อื่น)
   if (body.images) {
     const { atts } = await galleryAttachments(admin, id);
+    imagesRemoved = atts.length;
     const r2ok = await isR2Configured();
     for (const a of atts) {
       await admin.from("erp_playground_attachments").delete().eq("id", a.id);
@@ -88,6 +95,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   // 2) ตัวลูก — ลบถาวร (hard) หรือ ปิดใช้งาน (soft) · ทำก่อนลบ parent เสมอ (กัน FK)
   if (body.children) {
+    const { count } = await admin.from("skus_v2").select("id", { count: "exact", head: true }).eq("parent_sku_id", id);
+    childrenAffected = count ?? 0;
     if (hard) {
       const { error } = await admin.from("skus_v2").delete().eq("parent_sku_id", id);
       if (error) return NextResponse.json({ error: `ลบตัวลูกไม่สำเร็จ: ${error.message} (อาจมีสต๊อก/ออเดอร์อ้างถึง)` }, { status: 400 });
@@ -97,5 +106,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
   }
 
+  // ลบพ่วง = destructive → ต้องตามรอยได้ว่าใครลบอะไรไปเท่าไหร่
+  await writeAudit(admin, {
+    action: hard ? "delete_related_hard" : "delete_related", entityType: "parent_sku", entityId: id,
+    actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { mode: hard ? "hard" : "soft", images_removed: body.images ? imagesRemoved : 0, children_affected: body.children ? childrenAffected : 0 },
+  });
   return NextResponse.json({ ok: true, error: null });
 }
