@@ -2264,3 +2264,16 @@ function ArtworkPathRuleModal({ rule, onClose, onSaved }: { rule: PathRule; onCl
     </ERPModal>
   );
 }
+
+// ── ของกลาง: เปิดป๊อปอัปรายละเอียด/แก้ไฟล์คลังกลาง จากที่ไหนก็ได้ (โหลด collections/artTypes/actor ให้เอง) ──
+export function AssetDetailPopup({ assetId, onClose, onChanged }: { assetId: string; onClose: () => void; onChanged?: () => void }) {
+  const [actor, setActor] = useState<string | null>(null);
+  const [collections, setCollections] = useState<AssetCollection[]>([]);
+  const [artTypes, setArtTypes] = useState<LookupItem[]>([]);
+  useEffect(() => {
+    supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {});
+    apiFetch("/api/assets/collections").then((r) => r.json()).then((j) => setCollections((j.data ?? []) as AssetCollection[])).catch(() => {});
+    apiFetch("/api/lookups?type=artwork_type").then((r) => r.json()).then((j) => setArtTypes(((j.data ?? []) as { id: string; name: string }[]).map((r) => ({ id: r.id, name: r.name })))).catch(() => {});
+  }, []);
+  return <DetailModal id={assetId} actor={actor} collections={collections} artTypes={artTypes} onClose={onClose} onChanged={() => onChanged?.()} />;
+}

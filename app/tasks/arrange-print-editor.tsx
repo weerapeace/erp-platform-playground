@@ -7,12 +7,16 @@
 // ============================================================
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow, AssetSize } from "@/app/api/assets/shared";
-import { withImageWidth } from "@/lib/r2-image";
+import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import type { ArrangePrintSpec } from "./data";
+
+// ป๊อปอัปรายละเอียด/แก้ไฟล์คลังกลาง (กดรูปในการ์ด) — dynamic กัน bundle asset-library ลากเข้า tasks
+const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
 
 export type ArrangeOrder = { label: string; w: number | null; h: number | null; unit: string; qty: number };
 export type ArrangeItem = { asset_id: string; r2_key: string; title: string; url: string; available: AssetSize[]; orders: ArrangeOrder[] };
@@ -36,14 +40,16 @@ export function specFromItems(items: ArrangeItem[]): ArrangePrintSpec {
 }
 export const arrangeTotalQty = (items: ArrangeItem[]) => items.reduce((n, it) => n + it.orders.reduce((m, o) => m + (o.qty || 0), 0), 0);
 
-export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel }: {
+export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, collapseSizes = true }: {
   items: ArrangeItem[];
   onChange: (items: ArrangeItem[]) => void;
   pushToast: (type: "success" | "error" | "info", m: string) => void;
   contextLabel?: string;
+  collapseSizes?: boolean;   // พับซ่อนขนาดที่ยังไม่เลือก (default) · ตอนสร้างงานใน Wizard ส่ง false = โชว์หมด
 }) {
   const t = useT();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [detailAssetId, setDetailAssetId] = useState<string | null>(null);   // กดรูป → เปิดป๊อปอัปแก้ไฟล์คลังกลาง
 
   const addAssets = (assets: AssetRow[]) => {
     const seen = new Set(items.map((x) => x.asset_id));
@@ -72,7 +78,7 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel }:
         <div className="border border-dashed border-slate-200 rounded-lg p-6 text-center text-sm text-slate-400">{t("ยังไม่ได้เลือกรูป — กดปุ่มด้านบนเพื่อเลือกจากคลัง Artwork", "No images yet — pick from the Artwork library")}</div>
       ) : (
         <div className="space-y-2">
-          {items.map((it, i) => <ArrangeImageCard key={it.asset_id} item={it} onToggleSize={(s) => toggleSize(i, s)} onSetQty={(oi, q) => setQty(i, oi, q)} onAddSize={(s) => addSize(i, s)} onRemove={() => removeItem(i)} />)}
+          {items.map((it, i) => <ArrangeImageCard key={it.asset_id} item={it} collapseSizes={collapseSizes} onOpenDetail={() => setDetailAssetId(it.asset_id)} onToggleSize={(s) => toggleSize(i, s)} onSetQty={(oi, q) => setQty(i, oi, q)} onAddSize={(s) => addSize(i, s)} onRemove={() => removeItem(i)} />)}
         </div>
       )}
       {items.length > 0 && (
@@ -83,17 +89,20 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel }:
         </div>
       )}
       {pickerOpen && <AssetPicker open onClose={() => setPickerOpen(false)} multiple typeFilter="image" defaultSource="artwork" title={t("เลือกรูป Artwork สำหรับเรียงพิมพ์", "Pick Artwork images")} contextLabel={contextLabel} onSelect={addAssets} />}
+      {detailAssetId && <AssetDetailPopup assetId={detailAssetId} onClose={() => setDetailAssetId(null)} />}
     </div>
   );
 }
 
 // การ์ดรูป 1 รูป — ติ๊กขนาด (จากคลัง) + ใส่จำนวน + เพิ่มขนาดใหม่ (save กลับ asset)
-function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove }: {
+function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, onOpenDetail, collapseSizes = true }: {
   item: ArrangeItem;
   onToggleSize: (s: AssetSize) => void;
   onSetQty: (orderIdx: number, qty: number) => void;
   onAddSize: (s: AssetSize) => void;
   onRemove: () => void;
+  onOpenDetail: () => void;
+  collapseSizes?: boolean;
 }) {
   const t = useT();
   const [adding, setAdding] = useState(false);
@@ -113,8 +122,10 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove }:
   return (
     <div className="border border-slate-200 rounded-xl p-3">
       <div className="flex items-start gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={withImageWidth(item.url, 120) ?? item.url} alt="" className="h-14 w-14 rounded-lg object-cover border border-slate-200 shrink-0" />
+        {/* กดรูป = เปิดป๊อปอัปแก้ไฟล์คลังกลาง · ชี้ค้าง = ดูรูปใหญ่ (HoverImage) */}
+        <button type="button" onClick={onOpenDetail} title={t("กดดู/แก้ไฟล์ในคลัง · ชี้ค้างดูรูปใหญ่", "Open in library · hover to preview")} className="shrink-0 rounded-lg overflow-hidden border border-slate-200 hover:ring-2 hover:ring-violet-300 leading-[0]">
+          <HoverImage url={item.url} size={56} previewSize={340} rounded="rounded-lg" alt={item.title} />
+        </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-medium text-slate-800 truncate">{item.title}</span>
@@ -133,16 +144,16 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove }:
                 <input type="number" min={0} value={item.orders[oi].qty} onChange={(e) => onSetQty(oi, Math.max(0, Number(e.target.value) || 0))} className="w-20 h-8 border border-slate-200 rounded-md px-2 text-sm text-center" />
               </div>
             ); })}
-            {/* ขนาดที่ยังไม่เลือก — พับซ่อน กดปุ่มกาง */}
+            {/* ขนาดที่ยังไม่เลือก — Wizard (collapseSizes=false) โชว์หมด · หน้างานพับซ่อน กดปุ่มกาง */}
             {unselected.length > 0 && (
-              showAll ? (
+              (showAll || !collapseSizes) ? (
                 <div className="flex flex-wrap gap-1.5 pt-0.5">
                   {unselected.map((s) => { const dim = chipDim(s); return (
                     <button key={arrangeSizeKey(s)} type="button" onClick={() => onToggleSize(s)} className="inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 border bg-white text-slate-600 border-slate-200 hover:border-violet-300">
                       {arrangeSizeText(s)}{dim && <span className="text-slate-400">· {dim}</span>}
                     </button>
                   ); })}
-                  <button type="button" onClick={() => setShowAll(false)} className="text-[11px] text-slate-400 hover:underline px-1">▲ {t("พับ", "Collapse")}</button>
+                  {collapseSizes && <button type="button" onClick={() => setShowAll(false)} className="text-[11px] text-slate-400 hover:underline px-1">▲ {t("พับ", "Collapse")}</button>}
                 </div>
               ) : (
                 <button type="button" onClick={() => setShowAll(true)} className="text-[11px] text-violet-600 hover:underline">▾ {t(`เลือกขนาดอื่น (${unselected.length})`, `More sizes (${unselected.length})`)}</button>

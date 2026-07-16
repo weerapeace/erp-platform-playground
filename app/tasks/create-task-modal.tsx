@@ -412,7 +412,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           </div>
 
           <div className="max-h-[40vh] overflow-y-auto pr-1">
-            <ArrangePrintEditor items={arrangeItems} onChange={onArrangeChange} pushToast={pushToast} contextLabel={combinedTitle || undefined} />
+            <ArrangePrintEditor items={arrangeItems} onChange={onArrangeChange} pushToast={pushToast} contextLabel={combinedTitle || undefined} collapseSizes={false} />
           </div>
         </div>
       )}
