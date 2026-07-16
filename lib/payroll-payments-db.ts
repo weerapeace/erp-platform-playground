@@ -801,6 +801,97 @@ export async function reorderPaymentBatchLines(batchId: string, orderedIds: stri
   return getPaymentBatchDetail(batchId);
 }
 
+// รายชื่อพนักงานที่ "เพิ่มเข้ารอบจ่ายนี้ได้" — active + มีสัญญาปัจจุบัน + ยังไม่อยู่ในรอบ
+// พร้อมยอดเริ่มต้นกลางเดือน (default_mid_month_advance_amount) ให้ดึงมากรอกอัตโนมัติ
+export async function listAddablePaymentEmployees(batchId: string) {
+  const admin = supabaseAdmin();
+  const { data: batchRows, error } = await admin.from("payment_batches").select("*").eq("id", batchId).limit(1);
+  if (error) throw new Error(error.message);
+  const batch = batchRows?.[0] as Row | undefined;
+  if (!batch) throw new Error("ไม่พบชุดจ่ายเงิน");
+
+  const { data: existing, error: exErr } = await admin.from("payment_batch_lines").select("employee_id").eq("payment_batch_id", batchId);
+  if (exErr) throw new Error(exErr.message);
+  const inBatch = new Set(((existing ?? []) as Row[]).map((line) => text(line.employee_id)).filter(Boolean));
+
+  const [activeEmployees, activeContracts, settings] = await Promise.all([
+    admin.from("employees").select("id, employee_code, first_name, last_name, nickname, employment_status").eq("employment_status", "active"),
+    admin.from("employee_contracts").select("employee_id, is_current, status, contract_type, wage_type").eq("is_current", true).eq("status", "active"),
+    admin.from("employee_payroll_settings").select("employee_id, default_mid_month_advance_amount"),
+  ]);
+  if (activeEmployees.error) throw new Error(activeEmployees.error.message);
+  if (activeContracts.error) throw new Error(activeContracts.error.message);
+  if (settings.error) throw new Error(settings.error.message);
+
+  const contractByEmp = new Map(((activeContracts.data ?? []) as Row[]).map((c) => [text(c.employee_id), c]));
+  const defaultByEmp = new Map(((settings.data ?? []) as Row[]).map((s) => [text(s.employee_id), money(s.default_mid_month_advance_amount)]));
+  const activeEmpRows = (activeEmployees.data ?? []) as Row[];
+  const maps = await employeeAndBankMaps(activeEmpRows.map((emp) => text(emp.id)).filter(Boolean));
+
+  const employees = activeEmpRows.flatMap((emp) => {
+    const employeeId = text(emp.id);
+    if (!employeeId || inBatch.has(employeeId) || !contractByEmp.has(employeeId)) return [];
+    const contract = contractByEmp.get(employeeId) ?? {};
+    const bank = maps.bankByEmp[employeeId] ?? {};
+    return [{
+      employee_id: employeeId,
+      employee_code: text(emp.employee_code),
+      employee_name: employeeName(emp),
+      contract_type: text(contract.contract_type),
+      wage_type: text(contract.wage_type),
+      default_amount: defaultByEmp.get(employeeId) ?? 0,
+      bank_name: text(bank.bank_name),
+      bank_account_no: text(bank.account_no),
+    }];
+  });
+  employees.sort((a, b) => `${a.employee_code} ${a.employee_name}`.localeCompare(`${b.employee_code} ${b.employee_name}`, "th"));
+  return { batch_id: batchId, batch_status: text(batch.status), employees };
+}
+
+// เพิ่มพนักงาน 1 คนเข้ารอบจ่ายที่สร้างแล้ว (เฉพาะรอบ "ร่าง") — บรรทัดจ่ายแบบกรอกยอดเอง
+export async function addPaymentBatchLine(batchId: string, employeeId: string, paidAmount: unknown, actor: Actor = {}) {
+  const admin = supabaseAdmin();
+  const { data: batchRows, error } = await admin.from("payment_batches").select("*").eq("id", batchId).limit(1);
+  if (error) throw new Error(error.message);
+  const batch = batchRows?.[0] as Row | undefined;
+  if (!batch) throw new Error("ไม่พบชุดจ่ายเงิน");
+  if (text(batch.status) !== "draft") throw new Error("เพิ่มพนักงานได้เฉพาะรอบจ่ายที่เป็นร่าง");
+  const empId = text(employeeId);
+  if (!empId) throw new Error("ต้องเลือกพนักงาน");
+
+  const { data: dup, error: dupErr } = await admin
+    .from("payment_batch_lines").select("id").eq("payment_batch_id", batchId).eq("employee_id", empId).limit(1);
+  if (dupErr) throw new Error(dupErr.message);
+  if (dup?.length) throw new Error("พนักงานคนนี้อยู่ในรอบจ่ายนี้แล้ว");
+
+  const periodId = text(batch.payroll_period_id);
+  const { data: settingRows } = await admin.from("employee_payroll_settings").select("id").eq("employee_id", empId).limit(1);
+  const settingId = settingRows?.[0] ? text((settingRows[0] as Row).id) : null;
+
+  const { data: maxRows } = await admin
+    .from("payment_batch_lines").select("sort_order").eq("payment_batch_id", batchId)
+    .order("sort_order", { ascending: false, nullsFirst: false }).limit(1);
+  const maxSort = maxRows?.[0] ? Number((maxRows[0] as Row).sort_order) : NaN;
+  const nextSort = Number.isFinite(maxSort) ? maxSort + 1 : 0;
+
+  const draft = buildMidMonthPaymentLine({
+    payroll_period_id: periodId,
+    employee_id: empId,
+    setting_id: settingId,
+    amount: paidAmount,
+    note: "เพิ่มเข้ารอบภายหลัง",
+  });
+  const { error: insErr } = await admin.from("payment_batch_lines").insert({ payment_batch_id: batchId, ...draft, sort_order: nextSort });
+  if (insErr) throw new Error(insErr.message);
+
+  await writeAudit(admin, {
+    action: "add_payment_batch_line", entityType: "payment_batch_lines",
+    actorId: actor.actorId, actorName: actor.actorName,
+    metadata: { batch_id: batchId, employee_id: empId, paid_amount: money(paidAmount) },
+  });
+  return getPaymentBatchDetail(batchId);
+}
+
 export async function exportPaymentBatchCsv(batchId: string, actor: Actor = {}) {
   const admin = supabaseAdmin();
   const detail = await getPaymentBatchDetail(batchId);

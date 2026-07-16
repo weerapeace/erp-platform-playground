@@ -59,6 +59,16 @@ type BatchLine = {
 
 type Detail = { batch: Batch; lines: BatchLine[] };
 type Preview = { batch_type: string; existing_count?: number; lines: BatchLine[]; candidates?: BatchLine[]; totals: { line_count: number; paid_amount: number } };
+type AddableEmp = {
+  employee_id: string;
+  employee_code: string;
+  employee_name: string;
+  contract_type?: string | null;
+  wage_type?: string | null;
+  default_amount: number;
+  bank_name?: string;
+  bank_account_no?: string;
+};
 type PaymentReportColumn = "employee" | "bank" | "account_name" | "account_no" | "amount" | "status";
 
 const BATCH_TYPE: Record<string, string> = { month_end: "สิ้นเดือน", mid_month: "กลางเดือน", special: "พิเศษ", bank: "โอนธนาคาร", cash: "เงินสด" };
@@ -152,6 +162,14 @@ export default function PayrollPaymentsPage() {
   const [addEmployeeId, setAddEmployeeId] = useState("");
   const [addAmount, setAddAmount] = useState(0);
   const [addMode, setAddMode] = useState<"temporary" | "default">("temporary");
+
+  // เพิ่มพนักงานเข้ารอบที่สร้างแล้ว (เฉพาะรอบร่าง)
+  const [addPanelOpen, setAddPanelOpen] = useState(false);
+  const [addableList, setAddableList] = useState<AddableEmp[]>([]);
+  const [addableLoading, setAddableLoading] = useState(false);
+  const [addLineEmpId, setAddLineEmpId] = useState("");
+  const [addLineAmount, setAddLineAmount] = useState(0);
+  const [addLineBusy, setAddLineBusy] = useState(false);
 
   const loadBatches = useCallback(async (pid: string) => {
     if (!pid) return;
@@ -422,6 +440,78 @@ export default function PayrollPaymentsPage() {
     await Promise.all([loadDetail(detail.batch.id), loadBatches(periodId), refreshPeriods()]);
   }
 
+  // แก้ยอดในตารางแบบ inline (พิมพ์ในช่องได้เลย) — optimistic ไม่ reload เต็ม
+  async function saveLineAmount(lineId: string, amount: number) {
+    if (!detail) return;
+    const batchId = detail.batch.id;
+    const nextLines = detail.lines.map((line) => line.id === lineId ? { ...line, paid_amount: amount } : line);
+    setDetail({ ...detail, lines: nextLines });
+    const total = nextLines.reduce((sum, line) => sum + (Number(line.paid_amount) || 0), 0);
+    setBatches((rows) => rows.map((row) => row.id === batchId ? { ...row, paid_amount: total } : row));
+    setErr(null);
+    try {
+      const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(batchId)}/line`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ line_id: lineId, paid_amount: amount }),
+      }).then((res) => res.json());
+      if (json.error) throw new Error(json.error);
+      setMsg("บันทึกยอดแล้ว");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "แก้ยอดไม่สำเร็จ");
+      await loadDetail(batchId);   // rollback ด้วยข้อมูลจริง
+    }
+  }
+
+  const loadAddable = useCallback(async (batchId: string) => {
+    setAddableLoading(true);
+    try {
+      const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(batchId)}/addable`).then((res) => res.json());
+      if (json.error) throw new Error(json.error);
+      setAddableList((json.data?.employees ?? []) as AddableEmp[]);
+    } catch (e) {
+      setAddableList([]);
+      setErr(e instanceof Error ? e.message : "โหลดรายชื่อพนักงานไม่สำเร็จ");
+    } finally {
+      setAddableLoading(false);
+    }
+  }, []);
+
+  function openAddPanel() {
+    if (!detail) return;
+    setAddLineEmpId("");
+    setAddLineAmount(0);
+    setAddPanelOpen(true);
+    setMsg(null);
+    setErr(null);
+    void loadAddable(detail.batch.id);
+  }
+
+  async function doAddEmployee() {
+    if (!detail || !addLineEmpId) return;
+    const batchId = detail.batch.id;
+    setAddLineBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(batchId)}/line`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employee_id: addLineEmpId, paid_amount: addLineAmount }),
+      }).then((res) => res.json());
+      if (json.error) throw new Error(json.error);
+      setDetail(json.data as Detail);
+      setMsg("เพิ่มพนักงานเข้ารอบแล้ว");
+      setAddLineEmpId("");
+      setAddLineAmount(0);
+      await Promise.all([loadBatches(periodId), loadAddable(batchId)]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "เพิ่มพนักงานไม่สำเร็จ");
+    } finally {
+      setAddLineBusy(false);
+    }
+  }
+
   async function saveOrder(orderedIds: string[]) {
     if (!detail) return;
     setErr(null);
@@ -624,6 +714,12 @@ export default function PayrollPaymentsPage() {
                   ))}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {detail.batch.status === "draft" && (
+                    <button type="button" onClick={openAddPanel}
+                      className="h-9 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">
+                      ➕ เพิ่มพนักงาน
+                    </button>
+                  )}
                   <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600">
                     <input type="checkbox" checked={hideZeroPaymentLines} onChange={(event) => setHideZeroPaymentLines(event.target.checked)} />
                     ซ่อนยอด 0
@@ -644,6 +740,7 @@ export default function PayrollPaymentsPage() {
               onCopyAccount={copyAccountNo}
               editable={detail.batch.status === "draft"}
               onSaveLine={saveLine}
+              onSaveAmount={saveLineAmount}
               onReorder={saveOrder}
             />
           </>
@@ -835,6 +932,55 @@ export default function PayrollPaymentsPage() {
           )}
         </div>
       </ERPModal>
+
+      <ERPModal
+        open={addPanelOpen}
+        onClose={() => !addLineBusy && setAddPanelOpen(false)}
+        size="md"
+        title="เพิ่มพนักงานเข้ารอบจ่าย"
+        description="เลือกพนักงานที่ยังไม่อยู่ในรอบนี้ ระบบดึงยอดเริ่มต้นมาให้ แก้ได้ (เฉพาะรอบร่าง)"
+        footer={
+          <div className="flex w-full items-center justify-between">
+            <button onClick={() => setAddPanelOpen(false)} disabled={addLineBusy} className="h-9 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">ปิด</button>
+            <button onClick={doAddEmployee} disabled={addLineBusy || !addLineEmpId} className="h-9 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">
+              {addLineBusy ? "กำลังเพิ่ม…" : "เพิ่มเข้ารอบ"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {addableLoading ? (
+            <div className="rounded-lg border border-slate-200 p-6 text-center text-sm text-slate-400">กำลังโหลดรายชื่อ…</div>
+          ) : addableList.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">พนักงานที่ใช้งานอยู่ทุกคนอยู่ในรอบนี้แล้ว</div>
+          ) : (
+            <>
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-slate-500">พนักงาน</span>
+                <select value={addLineEmpId} onChange={(e) => {
+                  const id = e.target.value;
+                  const emp = addableList.find((x) => x.employee_id === id);
+                  setAddLineEmpId(id);
+                  setAddLineAmount(Number(emp?.default_amount ?? 0) || 0);
+                }} className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm">
+                  <option value="">เลือกพนักงาน</option>
+                  {addableList.map((emp) => (
+                    <option key={emp.employee_id} value={emp.employee_id}>
+                      {emp.employee_code || "-"} - {emp.employee_name}{emp.default_amount ? ` (ค่าเริ่มต้น ${baht(emp.default_amount)})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-slate-500">ยอดจ่าย (บาท)</span>
+                <input type="number" min={0} step="0.01" value={addLineAmount} onChange={(e) => setAddLineAmount(Number(e.target.value) || 0)}
+                  className="h-10 w-full rounded-lg border border-slate-300 px-3 text-right text-sm tabular-nums" />
+                <span className="mt-1 block text-[11px] text-slate-400">ดึงยอดเริ่มต้นของคนนั้นมาให้ ปรับได้ตามจริงของเดือนนี้</span>
+              </label>
+            </>
+          )}
+        </div>
+      </ERPModal>
     </div>
   );
 }
@@ -874,6 +1020,7 @@ function PaymentLinesTable({
   onCopyAccount,
   editable = false,
   onSaveLine,
+  onSaveAmount,
   onReorder,
 }: {
   lines: BatchLine[];
@@ -882,6 +1029,7 @@ function PaymentLinesTable({
   onCopyAccount: (accountNo: string) => void;
   editable?: boolean;
   onSaveLine?: (lineId: string, patch: Record<string, unknown>) => Promise<void>;
+  onSaveAmount?: (lineId: string, amount: number) => Promise<void>;
   onReorder?: (orderedIds: string[]) => Promise<void>;
 }) {
   const headerAlign = (column: PaymentReportColumn) => {
@@ -1069,7 +1217,13 @@ function PaymentLinesTable({
                   }
 
                   if (column.key === "amount") {
-                    return <td key={column.key} className="px-3 py-2 text-right font-semibold tabular-nums">{baht(line.paid_amount)}</td>;
+                    return (
+                      <td key={column.key} className="px-3 py-2 text-right">
+                        {editable && line.id && onSaveAmount
+                          ? <AmountCell line={line} onSave={onSaveAmount} />
+                          : <span className="font-semibold tabular-nums">{baht(line.paid_amount)}</span>}
+                      </td>
+                    );
                   }
 
                   return <td key={column.key} className="px-3 py-2 text-center">{badge(line.status ?? "draft")}</td>;
@@ -1128,6 +1282,32 @@ function PaymentLinesTable({
         )}
       </ERPModal>
     </div>
+  );
+}
+
+// ช่องยอดจ่ายแบบแก้ในตารางได้เลย — บันทึกตอนออกจากช่อง (blur) หรือกด Enter
+function AmountCell({ line, onSave }: { line: BatchLine; onSave: (lineId: string, amount: number) => Promise<void> }) {
+  const [val, setVal] = useState(String(Number(line.paid_amount) || 0));
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setVal(String(Number(line.paid_amount) || 0)); }, [line.paid_amount]);
+  const commit = async () => {
+    if (!line.id) return;
+    const amount = Math.round((Number(val) || 0) * 100) / 100;
+    if (amount === (Number(line.paid_amount) || 0)) return;
+    setSaving(true);
+    try { await onSave(line.id, amount); } finally { setSaving(false); }
+  };
+  return (
+    <input
+      type="number"
+      step="0.01"
+      value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      disabled={saving}
+      className="h-8 w-28 rounded-lg border border-slate-300 px-2 text-right text-sm tabular-nums focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200 disabled:opacity-50"
+    />
   );
 }
 
