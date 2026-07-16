@@ -35,11 +35,19 @@ export function sceneSig(els: { id?: string; version?: number }[]): string {
   return `${els.length}:${h}`;
 }
 
-// รวมชิ้นงาน 2 ฝั่งต่อ id — เอาตัว version ใหม่กว่า (รองรับลบด้วย isDeleted) · เสมอกัน = เก็บฝั่ง a (ของเรา)
+// รวมชิ้นงาน 2 ฝั่งต่อ id — "การลบชนะ" ก่อน (กันลบแล้วเด้งกลับ) ไม่งั้นเอา version ใหม่กว่า · เสมอกัน = เก็บฝั่ง a (ของเรา)
 export function mergeById(a: any[], b: any[]): any[] {
   const map = new Map<string, any>();
-  for (const e of a) if (e?.id) map.set(e.id, e);
-  for (const e of b) { if (!e?.id) continue; const cur = map.get(e.id); if (!cur || (e.version ?? 0) > (cur.version ?? 0)) map.set(e.id, e); }
+  const put = (e: any) => {
+    if (!e?.id) return;
+    const cur = map.get(e.id);
+    if (!cur) { map.set(e.id, e); return; }
+    if (cur.isDeleted && !e.isDeleted) return;                       // ตัวใน map ลบแล้ว → คงลบไว้ (การลบชนะ)
+    if (e.isDeleted && !cur.isDeleted) { map.set(e.id, e); return; } // ตัวใหม่ลบ → ลบตาม
+    if ((e.version ?? 0) > (cur.version ?? 0)) map.set(e.id, e);     // สถานะลบเท่ากัน → เลือก version ใหม่กว่า
+  };
+  for (const e of a) put(e);
+  for (const e of b) put(e);
   return [...map.values()];
 }
 

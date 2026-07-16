@@ -89,7 +89,10 @@ export function useCanvasRealtime({
       if (!r?.id) continue;
       lastVerRef.current.set(r.id, Math.max(lastVerRef.current.get(r.id) ?? -1, r.version ?? 0)); // จำว่ารับแล้ว → ไม่ส่งกลับ
       const cur = byId.get(r.id);
-      if (!cur || (r.version ?? 0) > (cur.version ?? 0)) { byId.set(r.id, r); changed = true; }
+      if (!cur) { byId.set(r.id, r); changed = true; continue; }
+      if (cur.isDeleted && !r.isDeleted) continue;                                   // local ลบแล้ว → คงลบไว้ (การลบชนะ กันเด้งกลับ)
+      if (r.isDeleted && !cur.isDeleted) { byId.set(r.id, r); changed = true; continue; }  // remote ลบ → ลบตาม
+      if ((r.version ?? 0) > (cur.version ?? 0)) { byId.set(r.id, r); changed = true; }     // สถานะลบเท่ากัน → version ใหม่กว่า
     }
     if (!changed) return;
     const merged = [...byId.values()];
