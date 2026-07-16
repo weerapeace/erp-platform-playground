@@ -566,6 +566,27 @@ export function CanvasSketch({
   // ล้อเมาส์ = ซูมเข้าหาตำแหน่งเมาส์ (shift+ล้อ = เลื่อนแนวนอนตามปกติ) + ดับเบิลคลิกการ์ด → เปิด drawer
   const wrapRef = useRef<HTMLDivElement>(null);
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null); // tooltip ลอยตอนชี้การ์ดที่มี customData.tooltip
+
+  // เต็มจอพอดี: วัดตำแหน่งบน "จริง" ของกล่องกระดาน → คำนวณความสูงให้จบพอดีขอบล่างจอ → หน้าไม่ต้องเลื่อน (scroll)
+  // → แถบเครื่องมือ Excalidraw ไม่ถูกแถบ sticky ด้านบนบัง ("มุด/จม") · วัดจริงจึงปรับตาม shell (เว็บหลัก/แอปเดี่ยว) อัตโนมัติ
+  // ทำเฉพาะโหมดกระดานเต็ม (stickyTop != null); โหมดฝังใน drawer ยังใช้ height ที่ส่งมา
+  const [autoH, setAutoH] = useState<number | null>(null);
+  useEffect(() => {
+    if (stickyTop == null || typeof window === "undefined") return;
+    const measure = () => {
+      const el = wrapRef.current; if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const absTop = rect.top + window.scrollY;                 // ระยะจากบนสุดเอกสารถึงบนกล่อง (คงที่แม้กำลังเลื่อน)
+      const absBottom = rect.bottom + window.scrollY;
+      const below = Math.max(0, document.documentElement.scrollHeight - absBottom); // ของที่อยู่ "ใต้" กล่อง (padding/footer) — คงที่ไม่ขึ้นกับความสูงกล่อง
+      setAutoH(Math.max(360, Math.round(window.innerHeight - absTop - below - 4)));  // ให้ขอบล่างเอกสารพอดีจอ → ไม่มี scroll → toolbox ไม่มุด
+    };
+    measure();
+    const raf = requestAnimationFrame(measure); // เผื่อ layout ยังไม่นิ่งตอน mount แรก
+    window.addEventListener("resize", measure);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", measure); };
+    // วัดใหม่เมื่อสิ่งที่ทำให้แถบเครื่องมือด้านบน "สูงเปลี่ยน" เปลี่ยน (แถวขนาดอักษรตอนเลือกข้อความ / ป้ายเพื่อนออนไลน์ที่ wrap เป็น 2 บรรทัด)
+  }, [stickyTop, scene, selFont, serverCanEdit, peerList.length]);
   useEffect(() => {
     const el = wrapRef.current; if (!el) return;
     const onWheel = (e: WheelEvent) => {
@@ -932,7 +953,7 @@ export function CanvasSketch({
         )}
         {editable && !serverCanEdit && <span className="text-[11px] inline-flex items-center gap-1 text-amber-600">{t("👁 อ่านอย่างเดียว (ไม่มีสิทธิ์แก้)", "👁 Read-only (no edit permission)")}</span>}
       </div>
-      <div ref={wrapRef} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height }}>
+      <div ref={wrapRef} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height: autoH != null ? autoH : height }}>
         {/* tooltip ลอยตอนชี้การ์ดที่มี customData.tooltip (เช่น การ์ดโฟลเดอร์) */}
         {tip && (
           <div className="absolute z-20 pointer-events-none px-2 py-1 rounded-md bg-slate-800 text-white text-[11px] shadow-lg whitespace-nowrap max-w-[260px] truncate" style={{ left: tip.x + 12, top: tip.y + 12 }}>{tip.text}</div>
