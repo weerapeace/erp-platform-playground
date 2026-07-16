@@ -117,7 +117,7 @@ export function AssetLibrary() {
   const loadMeta = useCallback(async () => {
     try {
       const [c, t, a] = await Promise.all([
-        apiFetch("/api/assets/collections"), apiFetch("/api/assets/tags"), apiFetch("/api/lookups?type=artwork_type"),
+        apiFetch("/api/assets/collections"), apiFetch("/api/assets/tags"), apiFetch(`/api/lookups?type=artwork_type&_=${Date.now()}`),
       ]);
       setCollections((await c.json()).data ?? []);
       setTags((await t.json()).data ?? []);
@@ -2058,7 +2058,8 @@ function ManageTypesModal({ types, onClose, onChanged }: { types: LookupItem[]; 
 
   const reload = async () => {
     try {
-      const r = await apiFetch("/api/lookups?type=artwork_type"); const j = await r.json();
+      // bust cache — GET /api/lookups ตั้ง max-age=600 ไม่งั้นได้ลิสต์เก่าหลังเพิ่ม/ลบ/แก้ (ดูเหมือนทำไม่ได้)
+      const r = await apiFetch(`/api/lookups?type=artwork_type&_=${Date.now()}`); const j = await r.json();
       setItems(((j.data ?? []) as { id: string; name: string }[]).map((x) => ({ id: x.id, name: x.name })));
     } catch { /* ignore */ }
     onChanged();
