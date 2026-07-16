@@ -19,6 +19,8 @@ export type ArrangeItem = { asset_id: string; r2_key: string; title: string; url
 
 export const arrangeSizeKey = (s: { label?: string; w: number | null; h: number | null; unit: string }) => `${(s.label ?? "").trim()}|${s.w}|${s.h}|${s.unit}`;
 export const arrangeSizeText = (s: { label?: string; w: number | null; h: number | null; unit: string }) => (s.label?.trim() ? s.label : (s.w != null || s.h != null ? `${s.w ?? "?"}×${s.h ?? "?"} ${s.unit}` : "—"));
+// มิติกว้าง×สูง (ถ้ามี) — โชว์กำกับต่อท้ายชื่อ
+export const arrangeSizeDim = (s: { w: number | null; h: number | null; unit: string }) => (s.w != null || s.h != null ? `${s.w ?? "?"}×${s.h ?? "?"} ${s.unit}` : "");
 
 // spec (จาก subtask.config) → items · sizesByAsset = ขนาดจริงจากคลัง (เติมตัวเลือกให้ครบ)
 export function itemsFromSpec(spec: ArrangePrintSpec | undefined, sizesByAsset?: Record<string, AssetSize[]>): ArrangeItem[] {
@@ -95,8 +97,13 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove }:
 }) {
   const t = useT();
   const [adding, setAdding] = useState(false);
+  const [showAll, setShowAll] = useState(false);   // พับ/กางขนาดที่ยังไม่ได้เลือก
   const [nl, setNl] = useState(""); const [nw, setNw] = useState(""); const [nh, setNh] = useState(""); const [nu, setNu] = useState<AssetSize["unit"]>("cm");
   const orderIdxOf = (s: AssetSize) => item.orders.findIndex((o) => arrangeSizeKey(o) === arrangeSizeKey(s));
+  // แยกขนาดที่เลือกแล้ว (โชว์บนสุด) กับที่ยังไม่เลือก (พับซ่อน)
+  const selected = item.available.filter((s) => orderIdxOf(s) >= 0);
+  const unselected = item.available.filter((s) => orderIdxOf(s) < 0);
+  const chipDim = (s: AssetSize) => { const d = arrangeSizeDim(s); return d && s.label?.trim() ? d : ""; };   // มีชื่อ + มีมิติ → โชว์มิติต่อท้าย
   const submitSize = () => {
     const w = nw === "" ? null : Number(nw); const h = nh === "" ? null : Number(nh);
     if (!nl.trim() && w == null && h == null) return;
@@ -116,22 +123,31 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove }:
           <p className="text-[11px] text-slate-400 mb-1.5">{t("ขนาดที่จะสั่ง (ติ๊กเลือก + ใส่จำนวน)", "Sizes to order (tick + qty)")}</p>
           <div className="space-y-1.5">
             {item.available.length === 0 && !adding && <p className="text-[11px] text-slate-400 italic">{t("รูปนี้ยังไม่มีขนาดในคลัง — กดเพิ่มขนาด", "No sizes in library yet — add one")}</p>}
-            {item.available.map((s, si) => {
-              const oi = orderIdxOf(s); const sel = oi >= 0;
-              return (
-                <div key={si} className="flex items-center gap-2 flex-wrap">
-                  <button type="button" onClick={() => onToggleSize(s)} className={`inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 border ${sel ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>
-                    {sel && <span>✓</span>}{arrangeSizeText(s)}
-                  </button>
-                  {sel && (
-                    <>
-                      <span className="text-[11px] text-slate-400">{t("จำนวน", "Qty")}</span>
-                      <input type="number" min={0} value={item.orders[oi].qty} onChange={(e) => onSetQty(oi, Math.max(0, Number(e.target.value) || 0))} className="w-20 h-8 border border-slate-200 rounded-md px-2 text-sm text-center" />
-                    </>
-                  )}
+            {/* ขนาดที่เลือกแล้ว — โชว์บนสุด + ช่องจำนวน */}
+            {selected.map((s) => { const oi = orderIdxOf(s); const dim = chipDim(s); return (
+              <div key={arrangeSizeKey(s)} className="flex items-center gap-2 flex-wrap">
+                <button type="button" onClick={() => onToggleSize(s)} className="inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 border bg-violet-600 text-white border-violet-600">
+                  <span>✓</span>{arrangeSizeText(s)}{dim && <span className="text-violet-200">· {dim}</span>}
+                </button>
+                <span className="text-[11px] text-slate-400">{t("จำนวน", "Qty")}</span>
+                <input type="number" min={0} value={item.orders[oi].qty} onChange={(e) => onSetQty(oi, Math.max(0, Number(e.target.value) || 0))} className="w-20 h-8 border border-slate-200 rounded-md px-2 text-sm text-center" />
+              </div>
+            ); })}
+            {/* ขนาดที่ยังไม่เลือก — พับซ่อน กดปุ่มกาง */}
+            {unselected.length > 0 && (
+              showAll ? (
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {unselected.map((s) => { const dim = chipDim(s); return (
+                    <button key={arrangeSizeKey(s)} type="button" onClick={() => onToggleSize(s)} className="inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 border bg-white text-slate-600 border-slate-200 hover:border-violet-300">
+                      {arrangeSizeText(s)}{dim && <span className="text-slate-400">· {dim}</span>}
+                    </button>
+                  ); })}
+                  <button type="button" onClick={() => setShowAll(false)} className="text-[11px] text-slate-400 hover:underline px-1">▲ {t("พับ", "Collapse")}</button>
                 </div>
-              );
-            })}
+              ) : (
+                <button type="button" onClick={() => setShowAll(true)} className="text-[11px] text-violet-600 hover:underline">▾ {t(`เลือกขนาดอื่น (${unselected.length})`, `More sizes (${unselected.length})`)}</button>
+              )
+            )}
             {adding ? (
               <div className="flex items-center gap-1.5 flex-wrap bg-slate-50 rounded-lg p-2">
                 <input value={nl} onChange={(e) => setNl(e.target.value)} placeholder={t("ชื่อ (เช่น เล็ก)", "label")} className="w-24 h-8 border border-slate-200 rounded-md px-2 text-sm" />
