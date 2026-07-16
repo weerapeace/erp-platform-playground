@@ -452,7 +452,8 @@ export function AssetLibrary() {
       )}
       {detailId && (
         <DetailModal
-          id={detailId} actor={actor} collections={collections} artTypes={artTypes}
+          key={detailId} id={detailId} actor={actor} collections={collections} artTypes={artTypes}
+          ids={rows.map((r) => r.id)} onNavigate={(nid) => setDetailId(nid)}
           onClose={() => setDetailId(null)}
           onChanged={async () => { setBrandReload((k) => k + 1); await load(); await loadMeta(); }}
         />
@@ -746,9 +747,14 @@ function UploadModal({ actor, collections, onClose, onDone }: {
 }
 
 // ── รายละเอียดไฟล์ ──
-function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
+function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids, onNavigate }: {
   id: string; actor: string | null; collections: AssetCollection[]; artTypes: LookupItem[]; onClose: () => void; onChanged: () => void;
+  ids?: string[]; onNavigate?: (id: string) => void;
 }) {
+  // เลื่อนดูรูปก่อนหน้า/ถัดไป (ตามลำดับในกริด) โดยไม่ต้องปิด-เปิด
+  const navIdx = ids ? ids.indexOf(id) : -1;
+  const prevId = navIdx > 0 ? ids![navIdx - 1] : null;
+  const nextId = ids && navIdx >= 0 && navIdx < ids.length - 1 ? ids![navIdx + 1] : null;
   const toast = useToast();
   const [d, setD] = useState<AssetDetail | null>(null);
   const [title, setTitle] = useState("");
@@ -942,6 +948,15 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
           </div>
         </div>
       }>
+      {/* ปุ่มเลื่อนดูรูปก่อนหน้า/ถัดไป (ลอยข้างจอ) */}
+      {onNavigate && prevId && (
+        <button onClick={() => onNavigate(prevId)} title="รูปก่อนหน้า"
+          className="fixed left-3 top-1/2 -translate-y-1/2 z-[60] w-11 h-11 rounded-full bg-white shadow-lg border border-slate-200 text-slate-600 text-2xl leading-none flex items-center justify-center hover:bg-slate-50">‹</button>
+      )}
+      {onNavigate && nextId && (
+        <button onClick={() => onNavigate(nextId)} title="รูปถัดไป"
+          className="fixed right-3 top-1/2 -translate-y-1/2 z-[60] w-11 h-11 rounded-full bg-white shadow-lg border border-slate-200 text-slate-600 text-2xl leading-none flex items-center justify-center hover:bg-slate-50">›</button>
+      )}
       {!d ? (
         <div className="py-12 text-center text-slate-400 text-sm">กำลังโหลด…</div>
       ) : (
