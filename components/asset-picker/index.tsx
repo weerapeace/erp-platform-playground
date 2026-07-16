@@ -34,16 +34,17 @@ export type AssetPickerProps = {
   typeFilter?: AssetType;          // ล็อกให้เลือกได้เฉพาะชนิดนี้ (เช่น "image")
   title?: string;
   contextLabel?: string;           // ข้อความบอกว่าเลือกให้ record ไหน
+  defaultSource?: string;          // ที่มาเริ่มต้น เช่น "artwork" (เปิดมาที่คลัง Artwork เลย)
 };
 
-export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, title, contextLabel }: AssetPickerProps) {
+export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, title, contextLabel, defaultSource }: AssetPickerProps) {
   const toast = useToast();
   const [tab, setTab] = useState<"library" | "upload">("library");
   const [rows, setRows] = useState<AssetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [type, setType] = useState(typeFilter ?? "");
-  const [source, setSource] = useState("");          // ที่มา: ""=อัปเอง · artwork · odoo_product · all
+  const [source, setSource] = useState(defaultSource ?? "");          // ที่มา: ""=อัปเอง · artwork · odoo_product · all
   const [collectionId, setCollectionId] = useState(""); // อัลบั้ม
   const [tagId, setTagId] = useState("");            // แท็ก
   const [collections, setCollections] = useState<{ id: string; name: string; count: number }[]>([]);
@@ -52,7 +53,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [actor, setActor] = useState<string | null>(null);
 
   useEffect(() => { supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {}); }, []);
-  useEffect(() => { if (open) { setSelected(new Map()); setTab("library"); setSearch(""); setType(typeFilter ?? ""); setSource(""); setCollectionId(""); setTagId(""); } }, [open, typeFilter]);
+  useEffect(() => { if (open) { setSelected(new Map()); setTab("library"); setSearch(""); setType(typeFilter ?? ""); setSource(defaultSource ?? ""); setCollectionId(""); setTagId(""); } }, [open, typeFilter, defaultSource]);
 
   // โหลดรายการอัลบั้ม + แท็ก (ไว้ทำตัวกรอง) — ครั้งเดียวตอนเปิด
   useEffect(() => {
@@ -167,7 +168,13 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
                       {a.asset_type === "image" ? <img src={withImageWidth(a.url, 240) ?? a.url} alt={a.title} loading="lazy" className="w-full h-full object-cover" />
                         : <span className="text-2xl">{TYPE_ICON[a.asset_type]}</span>}
                     </div>
-                    <p className="text-[10px] px-1.5 py-1 truncate">{a.title}</p>
+                    <p className="text-[10px] px-1.5 pt-1 truncate">{a.title}</p>
+                    {/* ขนาดที่ตั้งไว้ (artwork sizes) — เห็นก่อนเลือกว่ารูปนี้มีขนาดอะไรบ้าง */}
+                    {(a.sizes?.length ?? 0) > 0 ? (
+                      <p className="text-[9px] px-1.5 pb-1 text-indigo-500 truncate">
+                        📐 {a.sizes.slice(0, 2).map((s) => s.label?.trim() || (s.w != null || s.h != null ? `${s.w ?? "?"}×${s.h ?? "?"}${s.unit}` : "")).filter(Boolean).join(" · ")}{a.sizes.length > 2 ? ` +${a.sizes.length - 2}` : ""}
+                      </p>
+                    ) : <span className="block pb-1" />}
                   </button>
                 );
               })}

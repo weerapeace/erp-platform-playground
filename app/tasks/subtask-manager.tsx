@@ -1339,7 +1339,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const platformReady = parents !== null && parents.length > 0 && parents.every((p) => (p.missing?.length ?? 0) === 0);
   // โหมดแนบรูป: ต้องเลือกสินค้าปลายทาง (Parent SKU/SKU) อย่างน้อย 1 ก่อนส่ง — เว้นแต่ติ๊ก "ไม่ต้องแนบ"
   const hasProductTarget = syncParentIds.size > 0 || syncSkuIds.size > 0;
-  const needProductTarget = showImages && !platformConfirm && !noParent;
+  const isArrange = sub.subtask_type === "arrange_print";   // งานเรียงพิมพ์: ส่งงานเป็นลิงก์ Drive — ไม่ผูกสินค้า/ไม่บังคับ Parent SKU
+  const needProductTarget = showImages && !platformConfirm && !noParent && !isArrange;
   const isDescTask = approveTarget === "description_media";                 // งานรูปคำอธิบาย → โชว์แค่ Description
   const hideDescOption = hasDescSibling && !isDescTask;                     // มีงานย่อยรูปคำอธิบายแยกอยู่แล้ว → งานนี้ไม่ต้องโชว์ตัวเลือก Description ซ้ำ
   const hasParentTarget = !noParent && displayParents.length > 0;           // มีสินค้าปลายทาง → ซ่อนกล่อง "รูปแนบงาน" บน
@@ -1456,8 +1457,12 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                   pushToast={pushToast} maxSize={1500} />
               </div>
             )}
-            {/* ── ส่งรูปเข้าสินค้า (เลือกได้) — ติ๊ก Parent/SKU ที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ ── */}
-            {showImages && (
+            {/* งานเรียงพิมพ์ — ส่งงานเป็นลิงก์ Google Drive (ไม่ต้องผูกสินค้า) */}
+            {isArrange && canSubmit && (
+              <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">🖨️ {t("งานเรียงพิมพ์: วางลิงก์ Google Drive ของไฟล์ที่เรียงเสร็จในช่องลิงก์ด้านล่าง แล้วกดส่งงานได้เลย", "Arrange print: paste the Google Drive link of the arranged file below, then submit")}</p>
+            )}
+            {/* ── ส่งรูปเข้าสินค้า (เลือกได้) — ติ๊ก Parent/SKU ที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ ── (งานเรียงพิมพ์ไม่เกี่ยวกับสินค้า → ซ่อน) */}
+            {showImages && !isArrange && (
               <div className="border-t border-slate-100 pt-3">
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <p className="text-[11px] font-medium text-slate-500">{approveTarget === "cover" ? `🖼️ ${t("รูปปกต่อสินค้า (1 รูป/สินค้า)", "Cover image per product (1 each)")}` : `📤 ${t("ส่งรูปเข้าสินค้า (เลือกได้)", "Send images to products (optional)")}`}</p>

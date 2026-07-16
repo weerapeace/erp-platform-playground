@@ -80,7 +80,7 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel }:
           <span>{t("รวมจำนวน", "Total qty")} <b className="text-slate-800">{arrangeTotalQty(items).toLocaleString()}</b> {t("ชิ้น", "pcs")}</span>
         </div>
       )}
-      {pickerOpen && <AssetPicker open onClose={() => setPickerOpen(false)} multiple typeFilter="image" title={t("เลือกรูป Artwork สำหรับเรียงพิมพ์", "Pick Artwork images")} contextLabel={contextLabel} onSelect={addAssets} />}
+      {pickerOpen && <AssetPicker open onClose={() => setPickerOpen(false)} multiple typeFilter="image" defaultSource="artwork" title={t("เลือกรูป Artwork สำหรับเรียงพิมพ์", "Pick Artwork images")} contextLabel={contextLabel} onSelect={addAssets} />}
     </div>
   );
 }
