@@ -21,7 +21,7 @@ import { apiFetch } from "@/lib/api";
 import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
 import {
-  PRIORITY_META, priorityLabel, createTask, listCampaigns, listBrands, listTemplates,
+  PRIORITY_META, priorityLabel, createTask, listTasks, listCampaigns, listBrands, listTemplates,
   type CreativePriority, type Campaign, type BrandOption, type TaskTemplate, type SubtaskStepConfig, type TemplateContentItem,
 } from "./data";
 import { ArrangePrintEditor, specFromItems, type ArrangeItem } from "./arrange-print-editor";
@@ -83,6 +83,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [arrangeItems, setArrangeItems] = useState<ArrangeItem[]>([]);   // งานเรียงพิมพ์: รูป+ขนาด+จำนวน
+  const [printedName, setPrintedName] = useState("");   // งานเรียงพิมพ์: ชื่อเสริม (ต่อท้ายชื่อ Printed_YYYY_MM_DD-#)
   // ช่องที่ผู้ใช้ "แตะเอง" ในขั้นข้อมูลงาน — ช่องที่ยังไม่แตะ (ยังเป็นค่าเริ่มต้น) = กล่องเทาอ่อน · ช่องว่าง = กล่องส้มอ่อน + ดันขึ้นบน
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [emptySnap, setEmptySnap] = useState<Set<string>>(new Set());   // ช่องที่ว่างตอน "เข้าขั้นข้อมูลงาน" (snapshot กันเด้งไปมาระหว่างพิมพ์)
@@ -97,7 +98,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       if (rv.length) setDefaultReviewers(rv.map((x) => ({ id: x.id, name: x.name } as UserPickerValue)));
     }).catch(() => {});
   }, []);
-  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);   // eslint-disable-line react-hooks/exhaustive-deps
   // เผื่อ default reviewers โหลดเสร็จหลังเปิด Wizard → เติมให้ถ้ายังว่าง (ไม่ทับที่แก้เอง/แม่แบบ)
   useEffect(() => { if (open && !tplId && defaultReviewers.length && form.reviewers.length === 0 && !touched.has("reviewers")) updateForm({ reviewers: defaultReviewers }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open, defaultReviewers]);
 
@@ -141,8 +142,19 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const applyTemplate = (id: string) => {
     setTplId(id); setDirty(true); setTouched(new Set());   // เปลี่ยนแม่แบบ/แบรนด์ = ตั้งค่าเริ่มต้นใหม่ → กลับเป็นสีเทาหมด
     const tpl = templates.find((x) => x.id === id);
-    setArrangeItems([]);   // เปลี่ยนแม่แบบ → ล้างรายการเรียงพิมพ์
+    setArrangeItems([]); setPrintedName("");   // เปลี่ยนแม่แบบ → ล้างรายการเรียงพิมพ์/ชื่อเสริม
     if (!tpl) { setSubs([]); setContentItems([]); setTplDueOffset(null); return; }
+    // งานเรียงพิมพ์ → ตั้งชื่ออัตโนมัติ Printed_YYYY_MM_DD-# (# = เลขรันของวันนั้น นับจากงานเดิม)
+    if ((tpl.steps ?? []).some((s) => s.type === "arrange_print")) {
+      const d = new Date();
+      const prefix = `Printed_${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, "0")}_${String(d.getDate()).padStart(2, "0")}-`;
+      setForm((p) => ({ ...p, title: `${prefix}1` }));
+      listTasks({ search: prefix, include_inactive: true }).then((rows) => {
+        const nums = rows.map((r) => { const m = String(r.title ?? "").match(/-(\d+)/); return String(r.title ?? "").startsWith(prefix) && m ? Number(m[1]) : 0; });
+        const next = Math.max(0, ...nums) + 1;
+        setForm((p) => (String(p.title).startsWith(prefix) ? { ...p, title: `${prefix}${next}` } : p));
+      }).catch(() => { /* ใช้ -1 ไปก่อน */ });
+    }
     const offset = tpl.due_offset_days ?? null;
     setTplDueOffset(offset);
     setForm((p) => ({
@@ -171,8 +183,18 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   // เปลี่ยนรายการเรียงพิมพ์ (จากของกลาง ArrangePrintEditor) → mark dirty
   const onArrangeChange = (items: ArrangeItem[]) => { setArrangeItems(items); setDirty(true); };
 
-  const next = () => { if (step === 2 && !form.title.trim()) { setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; } setFormErr(null); setStep((s) => Math.min(4, s + 1)); };
-  const back = () => { setFormErr(null); setStep((s) => Math.max(1, s - 1)); };
+  const next = () => {
+    if (step === 2 && !form.title.trim()) { setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; }
+    setFormErr(null);
+    // งานเรียงพิมพ์: ข้ามขั้น "ข้อมูลงาน" ไปขั้นเรียงพิมพ์เลย (ข้อมูลย่อรวมอยู่ในขั้นนั้น)
+    if (step === 1 && isArrangePrint) { setStep(3); return; }
+    setStep((s) => Math.min(4, s + 1));
+  };
+  const back = () => {
+    setFormErr(null);
+    if (step === 3 && isArrangePrint) { setStep(1); return; }
+    setStep((s) => Math.max(1, s - 1));
+  };
   // วันที่สั่งเปลี่ยน → คำนวณกำหนดส่งใหม่ (แม่แบบ +X หรือ default +3) ถ้ายังไม่แก้กำหนดส่งเอง
   const setOrderDate = (v: string) => { const autoDue = !!v && (tplDueOffset != null || !touched.has("due_date")); updateForm({ order_date: v, ...(autoDue ? { due_date: addDaysStr(v, tplDueOffset ?? 3) } : {}) }); };
   // เทมเพลตของแบรนด์ที่เลือก (+ เทมเพลตทั่วไปที่ไม่ผูกแบรนด์)
@@ -181,6 +203,12 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const requireParent = !!templates.find((x) => x.id === tplId)?.require_parent_sku;
   // งานเรียงพิมพ์ (มีงานย่อยชนิด arrange_print) → ขั้น "งานย่อย" แสดง UI เลือกรูป+ขนาด+จำนวนแทน
   const isArrangePrint = subs.some((s) => s.type === "arrange_print");
+  // ชื่อเต็มงานเรียงพิมพ์ = ชื่ออัตโนมัติ + ชื่อเสริม (ใช้เป็นชื่องานจริงตอนบันทึก + ปุ่มคัดลอก)
+  const combinedTitle = `${form.title.trim()}${printedName.trim() ? `_${printedName.trim()}` : ""}`;
+  const copyCombined = async () => {
+    try { await navigator.clipboard.writeText(combinedTitle); pushToast("success", t("คัดลอกชื่อเต็มแล้ว", "Full name copied")); }
+    catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); }
+  };
 
   const save = async () => {
     if (!form.title.trim()) { setStep(2); setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; }
@@ -188,9 +216,10 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     setSaving(true); setFormErr(null);
     const arrangeConfig = specFromItems(arrangeItems);
     const subtasks = subs.filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next, type: s.type, config: s.type === "arrange_print" ? { ...s.config, arrange_print: arrangeConfig } : s.config }));
+    const effTitle = isArrangePrint ? combinedTitle : form.title.trim();   // เรียงพิมพ์ = ชื่ออัตโนมัติ + ชื่อเสริม
     try {
       const { id, task_no } = await createTask({
-        title: form.title.trim(), description: form.description.trim() || null, task_type: form.task_type || null,
+        title: effTitle, description: form.description.trim() || null, task_type: form.task_type || null,
         brand_id: form.brand_id || null, campaign_id: (lockedCampaignId ?? form.campaign_id) || null,
         assignee_ids: form.assignees.map((a) => a.id), assignee_id: form.assignees[0]?.id ?? null, reviewer_ids: form.reviewers.map((r) => r.id),
         priority: form.priority, start_date: form.order_date || null, due_date: form.due_date || null,
@@ -203,7 +232,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         content_items: contentItems.filter((c) => c.title?.trim()),
       });
       setDirty(false);
-      onCreated({ id, task_no, title: form.title.trim(), subtasks: subtasks.map((s) => ({ title: s.title })) });
+      onCreated({ id, task_no, title: effTitle, subtasks: subtasks.map((s) => ({ title: s.title })) });
       onClose();
     } catch (e) { setFormErr((e as Error).message); pushToast("error", (e as Error).message); }
     finally { setSaving(false); }
@@ -215,18 +244,22 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       footer={<>
         {step > 1 && <button onClick={back} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 mr-auto">← {t("ย้อนกลับ","Back")}</button>}
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก","Cancel")}</button>
-        {step < 4
+        {step < (isArrangePrint ? 3 : 4)
           ? <button onClick={next} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">{t("ถัดไป","Next")} →</button>
           : <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...","Saving...") : t("สร้างงาน","Create task")}</button>}
       </>}
     >
-      {/* step indicator */}
+      {/* step indicator — งานเรียงพิมพ์เหลือ 2 ขั้น (แบรนด์/เทมเพลต → เรียงพิมพ์) */}
       <div className="flex items-center gap-2 mb-4">
-        {STEPS.map((label, i) => { const n = i + 1; const active = n === step; const done = n < step; return (
-          <div key={STEPS_TH[i]} className="flex items-center gap-2">
+        {(isArrangePrint ? [STEPS[0], t("เรียงพิมพ์", "Arrange print")] : STEPS).map((label, i) => {
+          const cur = isArrangePrint ? (step === 1 ? 1 : 2) : step;
+          const count = isArrangePrint ? 2 : STEPS.length;
+          const n = i + 1; const active = n === cur; const done = n < cur;
+          return (
+          <div key={`${i}-${label}`} className="flex items-center gap-2">
             <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ${active ? "bg-violet-600 text-white" : done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-400"}`}>{done ? "✓" : n}</span>
             <span className={`text-sm ${active ? "font-semibold text-slate-800" : "text-slate-400"}`}>{label}</span>
-            {n < STEPS.length && <span className="text-slate-300">—</span>}
+            {n < count && <span className="text-slate-300">—</span>}
           </div>
         ); })}
       </div>
@@ -326,8 +359,60 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
             <p className="text-sm font-semibold text-slate-700">{t("งานเรียงพิมพ์ — เลือกรูปแล้วกำหนดขนาด/จำนวน", "Arrange print — pick images, set sizes/qty")}</p>
           </div>
           <p className="text-xs text-slate-400 mb-3">{t("แต่ละรูปเลือกได้หลายขนาด · ขนาดดึงจากคลัง Artwork · เพิ่มขนาดใหม่ได้", "Each image: multiple sizes · from Artwork library · add new sizes")}</p>
-          <div className="max-h-[46vh] overflow-y-auto pr-1">
-            <ArrangePrintEditor items={arrangeItems} onChange={onArrangeChange} pushToast={pushToast} contextLabel={form.title || undefined} />
+
+          {/* ข้อมูลงานแบบย่อ (รวมขั้น "ข้อมูลงาน" มาไว้ที่นี่ — โชว์เฉพาะที่จำเป็นกับงานเรียงพิมพ์) */}
+          <div className="border border-slate-200 rounded-xl p-3 mb-3 space-y-2.5 bg-slate-50/40">
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-[11px] text-slate-400">{t("ชื่องาน (ตั้งอัตโนมัติ)", "Task name (auto)")}</label>
+                <ERPInput value={form.title} onChange={(e) => updateForm({ title: e.target.value })} className="font-mono" />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400">{t("ชื่อเสริม (ไม่บังคับ)", "Optional name")}</label>
+                <ERPInput value={printedName} onChange={(e) => { setPrintedName(e.target.value); setDirty(true); }} placeholder={t("เช่น ลายแมว Leo", "e.g. Leo pattern")} />
+              </div>
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-400">{t("ชื่อเต็ม (ชื่องาน + ชื่อเสริม)", "Full name")}</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-9 px-3 flex items-center text-sm font-mono bg-white border border-slate-200 rounded-lg truncate">{combinedTitle}</div>
+                <button type="button" onClick={copyCombined} title={t("คัดลอกชื่อเต็ม", "Copy full name")} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">📋 {t("คัดลอก", "Copy")}</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-[11px] text-slate-400">{t("ประเภทงาน", "Task type")}</label>
+                <ERPSelect value={form.task_type} placeholder={t("— เลือกประเภท —","— select —")} options={taskTypes} onChange={(e) => updateForm({ task_type: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400">{t("ความสำคัญ", "Priority")}</label>
+                <ERPSelect value={form.priority} options={priorityOptions()} onChange={(e) => updateForm({ priority: e.target.value as CreativePriority })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-[11px] text-slate-400">{t("ผู้รับผิดชอบ", "Assignees")}</label>
+                <MultiUserPicker value={form.assignees} onChange={pickTaskAssignees} disableCreate />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400">{t("ผู้ตรวจ/อนุมัติ", "Reviewers")}</label>
+                <MultiUserPicker value={form.reviewers} onChange={(v) => updateForm({ reviewers: v })} disableCreate />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-[11px] text-slate-400">{t("วันที่สั่ง", "Order date")}</label>
+                <ERPInput type="date" value={form.order_date} onChange={(e) => setOrderDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400">{t("กำหนดส่ง", "Due date")}</label>
+                <ERPInput type="date" value={form.due_date} onChange={(e) => updateForm({ due_date: e.target.value })} />
+              </div>
+            </div>
+          </div>
+
+          <div className="max-h-[40vh] overflow-y-auto pr-1">
+            <ArrangePrintEditor items={arrangeItems} onChange={onArrangeChange} pushToast={pushToast} contextLabel={combinedTitle || undefined} />
           </div>
         </div>
       )}
