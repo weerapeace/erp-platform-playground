@@ -848,48 +848,64 @@ export async function listAddablePaymentEmployees(batchId: string) {
   return { batch_id: batchId, batch_status: text(batch.status), employees };
 }
 
-// เพิ่มพนักงาน 1 คนเข้ารอบจ่ายที่สร้างแล้ว (เฉพาะรอบ "ร่าง") — บรรทัดจ่ายแบบกรอกยอดเอง
-export async function addPaymentBatchLine(batchId: string, employeeId: string, paidAmount: unknown, actor: Actor = {}) {
+// เพิ่มพนักงานหลายคนเข้ารอบจ่ายที่สร้างแล้ว (เฉพาะรอบ "ร่าง") — บรรทัดจ่ายแบบกรอกยอดเอง
+// items = [{ employee_id, paid_amount }] · ข้ามคนที่อยู่ในรอบแล้ว/ซ้ำ · คืน added/skipped
+export async function addPaymentBatchLines(batchId: string, items: Array<{ employee_id?: string; paid_amount?: unknown }>, actor: Actor = {}) {
   const admin = supabaseAdmin();
   const { data: batchRows, error } = await admin.from("payment_batches").select("*").eq("id", batchId).limit(1);
   if (error) throw new Error(error.message);
   const batch = batchRows?.[0] as Row | undefined;
   if (!batch) throw new Error("ไม่พบชุดจ่ายเงิน");
   if (text(batch.status) !== "draft") throw new Error("เพิ่มพนักงานได้เฉพาะรอบจ่ายที่เป็นร่าง");
-  const empId = text(employeeId);
-  if (!empId) throw new Error("ต้องเลือกพนักงาน");
 
-  const { data: dup, error: dupErr } = await admin
-    .from("payment_batch_lines").select("id").eq("payment_batch_id", batchId).eq("employee_id", empId).limit(1);
-  if (dupErr) throw new Error(dupErr.message);
-  if (dup?.length) throw new Error("พนักงานคนนี้อยู่ในรอบจ่ายนี้แล้ว");
+  // dedup ภายใน items เอง
+  const seen = new Set<string>();
+  const cleanItems: Array<{ employee_id: string; paid_amount: unknown }> = [];
+  for (const it of items ?? []) {
+    const empId = text(it.employee_id);
+    if (!empId || seen.has(empId)) continue;
+    seen.add(empId);
+    cleanItems.push({ employee_id: empId, paid_amount: it.paid_amount });
+  }
+  if (!cleanItems.length) throw new Error("ยังไม่ได้เลือกพนักงาน");
+
+  // กันซ้ำกับคนที่อยู่ในรอบแล้ว
+  const { data: existing, error: exErr } = await admin.from("payment_batch_lines").select("employee_id").eq("payment_batch_id", batchId);
+  if (exErr) throw new Error(exErr.message);
+  const inBatch = new Set(((existing ?? []) as Row[]).map((line) => text(line.employee_id)).filter(Boolean));
+  const toAdd = cleanItems.filter((it) => !inBatch.has(it.employee_id));
+  if (!toAdd.length) throw new Error("พนักงานที่เลือกอยู่ในรอบจ่ายนี้แล้วทั้งหมด");
 
   const periodId = text(batch.payroll_period_id);
-  const { data: settingRows } = await admin.from("employee_payroll_settings").select("id").eq("employee_id", empId).limit(1);
-  const settingId = settingRows?.[0] ? text((settingRows[0] as Row).id) : null;
+  const empIds = toAdd.map((it) => it.employee_id);
+  const { data: settingRows } = await admin.from("employee_payroll_settings").select("id, employee_id").in("employee_id", empIds);
+  const settingByEmp = new Map(((settingRows ?? []) as Row[]).map((s) => [text(s.employee_id), text(s.id)]));
 
   const { data: maxRows } = await admin
     .from("payment_batch_lines").select("sort_order").eq("payment_batch_id", batchId)
     .order("sort_order", { ascending: false, nullsFirst: false }).limit(1);
   const maxSort = maxRows?.[0] ? Number((maxRows[0] as Row).sort_order) : NaN;
-  const nextSort = Number.isFinite(maxSort) ? maxSort + 1 : 0;
+  let nextSort = Number.isFinite(maxSort) ? maxSort + 1 : 0;
 
-  const draft = buildMidMonthPaymentLine({
-    payroll_period_id: periodId,
-    employee_id: empId,
-    setting_id: settingId,
-    amount: paidAmount,
-    note: "เพิ่มเข้ารอบภายหลัง",
+  const rows = toAdd.map((it) => {
+    const draft = buildMidMonthPaymentLine({
+      payroll_period_id: periodId,
+      employee_id: it.employee_id,
+      setting_id: settingByEmp.get(it.employee_id) ?? null,
+      amount: it.paid_amount,
+      note: "เพิ่มเข้ารอบภายหลัง",
+    });
+    return { payment_batch_id: batchId, ...draft, sort_order: nextSort++ };
   });
-  const { error: insErr } = await admin.from("payment_batch_lines").insert({ payment_batch_id: batchId, ...draft, sort_order: nextSort });
+  const { error: insErr } = await admin.from("payment_batch_lines").insert(rows);
   if (insErr) throw new Error(insErr.message);
 
   await writeAudit(admin, {
     action: "add_payment_batch_line", entityType: "payment_batch_lines",
     actorId: actor.actorId, actorName: actor.actorName,
-    metadata: { batch_id: batchId, employee_id: empId, paid_amount: money(paidAmount) },
+    metadata: { batch_id: batchId, employee_count: rows.length, employee_ids: empIds },
   });
-  return getPaymentBatchDetail(batchId);
+  return { ...(await getPaymentBatchDetail(batchId)), added: rows.length, skipped: cleanItems.length - toAdd.length };
 }
 
 export async function exportPaymentBatchCsv(batchId: string, actor: Actor = {}) {

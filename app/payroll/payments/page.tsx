@@ -167,8 +167,8 @@ export default function PayrollPaymentsPage() {
   const [addPanelOpen, setAddPanelOpen] = useState(false);
   const [addableList, setAddableList] = useState<AddableEmp[]>([]);
   const [addableLoading, setAddableLoading] = useState(false);
-  const [addLineEmpId, setAddLineEmpId] = useState("");
-  const [addLineAmount, setAddLineAmount] = useState(0);
+  const [addSel, setAddSel] = useState<Record<string, { checked: boolean; amount: number }>>({});
+  const [addSearch, setAddSearch] = useState("");
   const [addLineBusy, setAddLineBusy] = useState(false);
 
   const loadBatches = useCallback(async (pid: string) => {
@@ -468,9 +468,12 @@ export default function PayrollPaymentsPage() {
     try {
       const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(batchId)}/addable`).then((res) => res.json());
       if (json.error) throw new Error(json.error);
-      setAddableList((json.data?.employees ?? []) as AddableEmp[]);
+      const emps = (json.data?.employees ?? []) as AddableEmp[];
+      setAddableList(emps);
+      setAddSel(Object.fromEntries(emps.map((emp) => [emp.employee_id, { checked: false, amount: Number(emp.default_amount) || 0 }])));
     } catch (e) {
       setAddableList([]);
+      setAddSel({});
       setErr(e instanceof Error ? e.message : "โหลดรายชื่อพนักงานไม่สำเร็จ");
     } finally {
       setAddableLoading(false);
@@ -479,16 +482,24 @@ export default function PayrollPaymentsPage() {
 
   function openAddPanel() {
     if (!detail) return;
-    setAddLineEmpId("");
-    setAddLineAmount(0);
+    setAddSel({});
+    setAddSearch("");
+    setAddableList([]);
     setAddPanelOpen(true);
     setMsg(null);
     setErr(null);
     void loadAddable(detail.batch.id);
   }
 
-  async function doAddEmployee() {
-    if (!detail || !addLineEmpId) return;
+  const setAddRow = (empId: string, patch: Partial<{ checked: boolean; amount: number }>) =>
+    setAddSel((prev) => ({ ...prev, [empId]: { ...(prev[empId] ?? { checked: false, amount: 0 }), ...patch } }));
+
+  async function doAddEmployees() {
+    if (!detail) return;
+    const items = Object.entries(addSel)
+      .filter(([, value]) => value.checked)
+      .map(([employee_id, value]) => ({ employee_id, paid_amount: value.amount }));
+    if (!items.length) return;
     const batchId = detail.batch.id;
     setAddLineBusy(true);
     setErr(null);
@@ -497,14 +508,15 @@ export default function PayrollPaymentsPage() {
       const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(batchId)}/line`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employee_id: addLineEmpId, paid_amount: addLineAmount }),
+        body: JSON.stringify({ lines: items }),
       }).then((res) => res.json());
       if (json.error) throw new Error(json.error);
       setDetail(json.data as Detail);
-      setMsg("เพิ่มพนักงานเข้ารอบแล้ว");
-      setAddLineEmpId("");
-      setAddLineAmount(0);
-      await Promise.all([loadBatches(periodId), loadAddable(batchId)]);
+      const added = Number((json.data as { added?: number })?.added ?? items.length);
+      const skipped = Number((json.data as { skipped?: number })?.skipped ?? 0);
+      setMsg(`เพิ่มพนักงานเข้ารอบแล้ว ${added} คน${skipped ? ` (ข้าม ${skipped} คนที่อยู่ในรอบแล้ว)` : ""}`);
+      setAddPanelOpen(false);
+      await loadBatches(periodId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "เพิ่มพนักงานไม่สำเร็จ");
     } finally {
@@ -572,6 +584,14 @@ export default function PayrollPaymentsPage() {
     other: detailLinesForReport.other.reduce((sum, line) => sum + paymentLineAmount(line), 0),
   };
   const visiblePaymentReportColumns = paymentReportColumns.filter((column) => paymentReportVisibleColumns[column.key]);
+  const addSelectedList = Object.values(addSel).filter((value) => value.checked);
+  const addSelectedCount = addSelectedList.length;
+  const addSelectedTotal = addSelectedList.reduce((sum, value) => sum + (Number(value.amount) || 0), 0);
+  const visibleAddable = useMemo(() => {
+    const q = addSearch.trim().toLowerCase();
+    if (!q) return addableList;
+    return addableList.filter((emp) => [emp.employee_code, emp.employee_name].join(" ").toLowerCase().includes(q));
+  }, [addableList, addSearch]);
 
   async function copyAccountNo(accountNo: string) {
     const value = accountNo.trim();
@@ -936,15 +956,18 @@ export default function PayrollPaymentsPage() {
       <ERPModal
         open={addPanelOpen}
         onClose={() => !addLineBusy && setAddPanelOpen(false)}
-        size="md"
+        size="lg"
         title="เพิ่มพนักงานเข้ารอบจ่าย"
-        description="เลือกพนักงานที่ยังไม่อยู่ในรอบนี้ ระบบดึงยอดเริ่มต้นมาให้ แก้ได้ (เฉพาะรอบร่าง)"
+        description="ติ๊กเลือกได้หลายคนพร้อมกัน · ระบบดึงยอดเริ่มต้นมาให้ ปรับได้ต่อคน (เฉพาะรอบร่าง)"
         footer={
-          <div className="flex w-full items-center justify-between">
-            <button onClick={() => setAddPanelOpen(false)} disabled={addLineBusy} className="h-9 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">ปิด</button>
-            <button onClick={doAddEmployee} disabled={addLineBusy || !addLineEmpId} className="h-9 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">
-              {addLineBusy ? "กำลังเพิ่ม…" : "เพิ่มเข้ารอบ"}
-            </button>
+          <div className="flex w-full flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-slate-500">เลือก {addSelectedCount.toLocaleString("th-TH")} คน · รวม {baht(addSelectedTotal)}</div>
+            <div className="flex gap-2">
+              <button onClick={() => setAddPanelOpen(false)} disabled={addLineBusy} className="h-9 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">ปิด</button>
+              <button onClick={doAddEmployees} disabled={addLineBusy || addSelectedCount === 0} className="h-9 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">
+                {addLineBusy ? "กำลังเพิ่ม…" : `เพิ่ม ${addSelectedCount || ""} คนเข้ารอบ`}
+              </button>
+            </div>
           </div>
         }
       >
@@ -955,28 +978,53 @@ export default function PayrollPaymentsPage() {
             <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">พนักงานที่ใช้งานอยู่ทุกคนอยู่ในรอบนี้แล้ว</div>
           ) : (
             <>
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-slate-500">พนักงาน</span>
-                <select value={addLineEmpId} onChange={(e) => {
-                  const id = e.target.value;
-                  const emp = addableList.find((x) => x.employee_id === id);
-                  setAddLineEmpId(id);
-                  setAddLineAmount(Number(emp?.default_amount ?? 0) || 0);
-                }} className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm">
-                  <option value="">เลือกพนักงาน</option>
-                  {addableList.map((emp) => (
-                    <option key={emp.employee_id} value={emp.employee_id}>
-                      {emp.employee_code || "-"} - {emp.employee_name}{emp.default_amount ? ` (ค่าเริ่มต้น ${baht(emp.default_amount)})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-slate-500">ยอดจ่าย (บาท)</span>
-                <input type="number" min={0} step="0.01" value={addLineAmount} onChange={(e) => setAddLineAmount(Number(e.target.value) || 0)}
-                  className="h-10 w-full rounded-lg border border-slate-300 px-3 text-right text-sm tabular-nums" />
-                <span className="mt-1 block text-[11px] text-slate-400">ดึงยอดเริ่มต้นของคนนั้นมาให้ ปรับได้ตามจริงของเดือนนี้</span>
-              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input value={addSearch} onChange={(e) => setAddSearch(e.target.value)} placeholder="ค้นหารหัส / ชื่อพนักงาน" className="h-9 min-w-[180px] flex-1 rounded-lg border border-slate-300 px-3 text-sm" />
+                <button type="button" onClick={() => setAddSel((prev) => {
+                  const next = { ...prev };
+                  visibleAddable.forEach((emp) => { next[emp.employee_id] = { checked: true, amount: next[emp.employee_id]?.amount ?? (Number(emp.default_amount) || 0) }; });
+                  return next;
+                })} className="h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50">เลือกที่เห็น</button>
+                <button type="button" onClick={() => setAddSel((prev) => {
+                  const next = { ...prev };
+                  visibleAddable.forEach((emp) => { next[emp.employee_id] = { checked: false, amount: next[emp.employee_id]?.amount ?? (Number(emp.default_amount) || 0) }; });
+                  return next;
+                })} className="h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50">ล้างที่เห็น</button>
+              </div>
+              <div className="max-h-[420px] overflow-auto rounded-lg border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
+                    <tr>
+                      <th className="w-10 px-3 py-2" />
+                      <th className="px-3 py-2 text-left">พนักงาน</th>
+                      <th className="px-3 py-2 text-right">ยอดจ่าย (บาท)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleAddable.map((emp) => {
+                      const row = addSel[emp.employee_id] ?? { checked: false, amount: Number(emp.default_amount) || 0 };
+                      return (
+                        <tr key={emp.employee_id} className={`border-t border-slate-100 ${row.checked ? "bg-emerald-50/60" : "hover:bg-slate-50"}`}>
+                          <td className="px-3 py-2 text-center">
+                            <input type="checkbox" checked={row.checked} onChange={(e) => setAddRow(emp.employee_id, { checked: e.target.checked })} />
+                          </td>
+                          <td className="px-3 py-2 cursor-pointer" onClick={() => setAddRow(emp.employee_id, { checked: !row.checked })}>
+                            <div className="font-medium text-slate-800">{emp.employee_name || "-"}</div>
+                            <div className="font-mono text-xs text-slate-400">{emp.employee_code || "-"}{emp.default_amount ? ` · ค่าเริ่มต้น ${baht(emp.default_amount)}` : ""}</div>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <input type="number" min={0} step="0.01" value={row.amount}
+                              onChange={(e) => setAddRow(emp.employee_id, { amount: Number(e.target.value) || 0, checked: true })}
+                              className="h-9 w-32 rounded-lg border border-slate-300 px-2 text-right text-sm tabular-nums" />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!visibleAddable.length && <tr><td colSpan={3} className="px-3 py-8 text-center text-sm text-slate-400">ไม่พบพนักงานตามคำค้น</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <div className="text-[11px] text-slate-400">พิมพ์ยอดในช่องจะติ๊กเลือกให้อัตโนมัติ · ค่าเริ่มต้นดึงจากการตั้งค่ารายคน ปรับได้ตามจริงของเดือนนี้</div>
             </>
           )}
         </div>
