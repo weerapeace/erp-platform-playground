@@ -19,6 +19,7 @@ import { downscaleImageWidth } from "@/lib/image-resize";
 import { downloadImagesAsZip } from "@/lib/zip";
 import { type AssetRow, type AssetDetail, type AssetUsage, type AssetSize } from "@/app/api/assets/shared";
 import { BrandAlbumBrowser } from "./brand-album";
+import { AssetPicker } from "@/components/asset-picker";
 import { HoverPreview } from "@/components/hover-image";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetTag } from "@/app/api/assets/tags/route";
@@ -752,6 +753,10 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
   const [driveBusy, setDriveBusy] = useState(false);
   const [driveProg, setDriveProg] = useState({ done: 0, total: 0 });
   const srcInputRef = useRef<HTMLInputElement>(null);
+  // โหมดปลายทาง Drive: สร้างโฟลเดอร์ใหม่ vs ใช้โฟลเดอร์เดียวกับรูปอื่น (ไม่อยากสร้างหลายโฟลเดอร์)
+  const [driveMode, setDriveMode] = useState<"new" | "shared">("new");
+  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
+  const [linkBusy, setLinkBusy] = useState(false);
 
   const loadDetail = useCallback(async () => {
     try {
@@ -866,6 +871,22 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
     finally { setDriveBusy(false); setDriveProg({ done: 0, total: 0 }); }
   };
 
+  // ผูกไฟล์นี้เข้าโฟลเดอร์ Drive เดียวกับรูปที่เลือก (ไม่สร้างโฟลเดอร์ใหม่) + ก็อปรูป preview เข้าไปด้วย
+  const linkToSharedFolder = async (src: AssetRow) => {
+    if (!d) return;
+    if (src.id === id) { toast.error("เลือกรูปอื่นที่ไม่ใช่รูปนี้"); return; }
+    if (!/\/folders\//.test(src.master_url ?? "")) { toast.error(`รูป “${src.title || src.file_name}” ยังไม่มีโฟลเดอร์ Drive — เลือกรูปที่มีโฟลเดอร์แล้ว`); return; }
+    setLinkBusy(true);
+    try {
+      const res = await apiFetch("/api/assets/drive-folders/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, source_id: src.id }) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ผูกโฟลเดอร์ไม่สำเร็จ");
+      if (j.folderLink) { setMasterUrl(j.folderLink); await loadDetail(); onChanged(); }
+      toast.success(`ผูกโฟลเดอร์เดียวกับ “${src.title || src.file_name}” แล้ว`);
+      setLinkPickerOpen(false);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ผูกโฟลเดอร์ไม่สำเร็จ"); }
+    finally { setLinkBusy(false); }
+  };
+
   const trashed = d?.status === "trashed";
   const pathWarn = !trashed && !!masterPath.trim() && !pathMatchesRule(masterPath, rule.base_paths);
 
@@ -978,41 +999,62 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
                 placeholder="ลิงก์ Google Drive / Synology (เปิดได้ทุกที่) — ไม่ใส่ก็ได้"
                 className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg mt-1.5 disabled:bg-slate-50" />
 
-              {/* เพิ่มไฟล์ต้นฉบับขึ้น Drive ย้อนหลัง (ลืมใส่ตอนสร้าง) → สร้างโฟลเดอร์ + ก็อปรูปตัวอย่างให้อัตโนมัติ */}
+              {/* เพิ่มไฟล์ต้นฉบับขึ้น Drive ย้อนหลัง (ลืมใส่ตอนสร้าง) → สร้างโฟลเดอร์ใหม่ หรือ ใช้โฟลเดอร์เดียวกับรูปอื่น */}
               {driveOn && !trashed && (
                 <div className="mt-2.5 pt-2.5 border-t border-dashed border-slate-200">
-                  <p className="text-[12px] font-medium text-slate-600 mb-1">📤 เพิ่มไฟล์ต้นฉบับขึ้น Drive <span className="text-[10px] text-slate-400 font-normal">— สร้างโฟลเดอร์ + ก็อปรูปตัวอย่างให้อัตโนมัติ</span></p>
-                  <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
-                    className={`w-full h-8 px-2 text-[12px] border rounded-lg bg-white mb-1.5 ${brandId ? "border-slate-200" : "border-amber-300"}`}>
-                    <option value="">— เลือกแบรนด์ (ไว้จัดโฟลเดอร์) —</option>
-                    {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                  <div onClick={() => srcInputRef.current?.click()}
-                    onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
-                    onDragOver={(e) => e.preventDefault()}
-                    className="border border-dashed border-slate-300 rounded-lg px-3 py-2.5 text-center text-[12px] text-slate-400 hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer">
-                    + ลากไฟล์ AI/PSD/PDF มาวาง หรือคลิกเลือก
-                    <input ref={srcInputRef} type="file" multiple className="hidden"
-                      onChange={(e) => { if (e.target.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.target.files!)]); e.target.value = ""; }} />
+                  <p className="text-[12px] font-medium text-slate-600 mb-1.5">📤 ไฟล์ต้นฉบับบน Drive</p>
+                  {/* เลือกปลายทาง: โฟลเดอร์ใหม่ vs ใช้โฟลเดอร์เดียวกับรูปอื่น (ไม่อยากสร้างหลายโฟลเดอร์) */}
+                  <div className="flex gap-1 mb-2 p-0.5 bg-slate-100 rounded-lg">
+                    <button type="button" onClick={() => setDriveMode("new")}
+                      className={`flex-1 h-7 text-[11px] font-medium rounded-md transition ${driveMode === "new" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🆕 โฟลเดอร์ใหม่</button>
+                    <button type="button" onClick={() => setDriveMode("shared")}
+                      className={`flex-1 h-7 text-[11px] font-medium rounded-md transition ${driveMode === "shared" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>📎 ใช้โฟลเดอร์เดียวกับรูปอื่น</button>
                   </div>
-                  {srcFiles.length > 0 && (
-                    <div className="mt-1.5 space-y-1">
-                      {srcFiles.map((f, i) => (
-                        <div key={i} className="flex items-center gap-2 text-[12px] bg-slate-50 border border-slate-200 rounded px-2 py-1">
-                          <span className="flex-1 truncate">📄 {f.name}</span>
-                          <span className="text-slate-400 shrink-0">{(f.size / 1024 / 1024).toFixed(1)}MB</span>
-                          <button type="button" onClick={() => setSrcFiles((p) => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
+
+                  {driveMode === "new" ? (
+                    <>
+                      <p className="text-[10px] text-slate-400 mb-1.5">สร้างโฟลเดอร์ใหม่ + ก็อปรูปตัวอย่างให้อัตโนมัติ</p>
+                      <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
+                        className={`w-full h-8 px-2 text-[12px] border rounded-lg bg-white mb-1.5 ${brandId ? "border-slate-200" : "border-amber-300"}`}>
+                        <option value="">— เลือกแบรนด์ (ไว้จัดโฟลเดอร์) —</option>
+                        {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                      <div onClick={() => srcInputRef.current?.click()}
+                        onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
+                        onDragOver={(e) => e.preventDefault()}
+                        className="border border-dashed border-slate-300 rounded-lg px-3 py-2.5 text-center text-[12px] text-slate-400 hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer">
+                        + ลากไฟล์ AI/PSD/PDF มาวาง หรือคลิกเลือก
+                        <input ref={srcInputRef} type="file" multiple className="hidden"
+                          onChange={(e) => { if (e.target.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.target.files!)]); e.target.value = ""; }} />
+                      </div>
+                      {srcFiles.length > 0 && (
+                        <div className="mt-1.5 space-y-1">
+                          {srcFiles.map((f, i) => (
+                            <div key={i} className="flex items-center gap-2 text-[12px] bg-slate-50 border border-slate-200 rounded px-2 py-1">
+                              <span className="flex-1 truncate">📄 {f.name}</span>
+                              <span className="text-slate-400 shrink-0">{(f.size / 1024 / 1024).toFixed(1)}MB</span>
+                              <button type="button" onClick={() => setSrcFiles((p) => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      )}
+                      {/* ปุ่มโชว์เสมอ: มีไฟล์ = อัป+สร้างโฟลเดอร์+ดึง preview · ไม่มีไฟล์ = แค่สร้างโฟลเดอร์ + ดึง preview */}
+                      <button type="button" onClick={doDriveUpload} disabled={driveBusy || !brandId}
+                        className="w-full h-8 mt-1.5 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                        {driveBusy ? (driveProg.total ? `กำลังอัป ${driveProg.done}/${driveProg.total}…` : "กำลังทำ…")
+                          : srcFiles.length > 0 ? "⬆ อัปขึ้น Drive + เก็บลิงก์" : "📁 สร้างโฟลเดอร์ + ดึงรูป preview"}
+                      </button>
+                      {!srcFiles.length && <p className="text-[11px] text-slate-400 mt-1">ยังไม่แนบไฟล์ต้นฉบับก็กดได้ — จะสร้างโฟลเดอร์ Drive + ก็อปรูปตัวอย่างเข้าไปให้ แล้วค่อยลากไฟล์ .ai เข้าเองทีหลัง</p>}
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[10px] text-slate-400 mb-1.5">เลือกรูปที่มีโฟลเดอร์อยู่แล้ว → ผูกรูปนี้เข้าโฟลเดอร์เดียวกัน + ก็อปรูปตัวอย่างของรูปนี้เข้าไปด้วย (ไม่สร้างโฟลเดอร์ใหม่)</p>
+                      <button type="button" onClick={() => setLinkPickerOpen(true)} disabled={linkBusy}
+                        className="w-full h-8 text-[12px] font-medium border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-50">
+                        {linkBusy ? "กำลังผูกโฟลเดอร์…" : "📎 เลือกรูปที่มีโฟลเดอร์แล้ว"}
+                      </button>
+                    </>
                   )}
-                  {/* ปุ่มโชว์เสมอ: มีไฟล์ = อัป+สร้างโฟลเดอร์+ดึง preview · ไม่มีไฟล์ = แค่สร้างโฟลเดอร์ + ดึง preview */}
-                  <button type="button" onClick={doDriveUpload} disabled={driveBusy || !brandId}
-                    className="w-full h-8 mt-1.5 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                    {driveBusy ? (driveProg.total ? `กำลังอัป ${driveProg.done}/${driveProg.total}…` : "กำลังทำ…")
-                      : srcFiles.length > 0 ? "⬆ อัปขึ้น Drive + เก็บลิงก์" : "📁 สร้างโฟลเดอร์ + ดึงรูป preview"}
-                  </button>
-                  {!srcFiles.length && <p className="text-[11px] text-slate-400 mt-1">ยังไม่แนบไฟล์ต้นฉบับก็กดได้ — จะสร้างโฟลเดอร์ Drive + ก็อปรูปตัวอย่างเข้าไปให้ แล้วค่อยลากไฟล์ .ai เข้าเองทีหลัง</p>}
                 </div>
               )}
             </div>
@@ -1046,6 +1088,11 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
             className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/90 text-slate-700 text-lg flex items-center justify-center hover:bg-white">✕</button>
         </div>
       )}
+
+      {/* เลือกรูปต้นทางเพื่อผูกโฟลเดอร์เดียวกัน (โหมด 📎 ใช้โฟลเดอร์เดียวกับรูปอื่น) */}
+      <AssetPicker open={linkPickerOpen} onClose={() => setLinkPickerOpen(false)} typeFilter="image" defaultSource="artwork"
+        title="เลือกรูปที่มีโฟลเดอร์ Drive แล้ว" contextLabel="ผูกโฟลเดอร์เดียวกับรูปนี้"
+        onSelect={(assets) => { if (assets[0]) void linkToSharedFolder(assets[0]); }} />
     </ERPModal>
   );
 }
@@ -1335,14 +1382,15 @@ const drivePreviewExt = (f: File) => f.type === "image/jpeg" ? ".jpg" : f.type =
 async function uploadArtworkToDrive(opts: {
   name: string; artworkType?: string; brandId?: string;
   srcFiles: File[]; previewFile?: File | null;
+  folderId?: string;   // ส่งมา = อัปเข้าโฟลเดอร์นี้เลย (ไม่สร้างใหม่) — ใช้ตอน "หลายรูป โฟลเดอร์เดียว"
   onProgress?: (done: number, total: number) => void;
-}): Promise<{ folderLink: string; largeCount: number }> {
+}): Promise<{ folderId: string; folderLink: string; largeCount: number }> {
   const nm = opts.name.trim() || "artwork";
   const named = opts.srcFiles.map((f, i) => ({ file: f, filename: `${nm}${i > 0 ? `_${i + 1}` : ""}${f.name.match(/\.[^.]+$/)?.[0] ?? ""}` }));
   const small = named.filter((x) => x.file.size <= DRIVE_MAX_PROXY);
   const large = named.filter((x) => x.file.size > DRIVE_MAX_PROXY);
 
-  let folderId = "", folderLink = "";
+  let folderId = opts.folderId ?? "", folderLink = "";
   const doUpload = async (x: { file: File; filename: string } | null) => {
     const fd = new FormData();
     fd.append("name", nm);
@@ -1363,7 +1411,7 @@ async function uploadArtworkToDrive(opts: {
     try { await doUpload({ file: opts.previewFile, filename: `${nm}${drivePreviewExt(opts.previewFile)}` }); } catch { /* ปล่อยผ่าน */ }
   }
   opts.onProgress?.(0, 0);
-  return { folderLink, largeCount: large.length };
+  return { folderId, folderLink, largeCount: large.length };
 }
 
 // ── เพิ่ม Artwork ลงบัตร (รูป + ชนิด + ชื่อ + แท็ก + ไซส์ + location + อัลบั้ม + Parent SKU + keyword) ──
@@ -1625,6 +1673,7 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   const [batchBrandId, setBatchBrandId] = useState("");           // แบรนด์ใช้กับทุกรูป (จัดโฟลเดอร์ Drive + เก็บ brand_id)
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   const [driveOn, setDriveOn] = useState(false);
+  const [oneFolder, setOneFolder] = useState(false);   // รูปชุดนี้ใช้โฟลเดอร์ Drive เดียวกัน (แทนที่จะสร้างแยกทุกใบ)
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -1680,18 +1729,24 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   const save = async () => {
     if (rows.length === 0) { toast.error("ยังไม่มีรายการ — ลากไฟล์รูปเข้ามาก่อน"); return; }
     if (!batchBrandId) { toast.error("เลือกแบรนด์ก่อน (ใช้กับทุกรูป)"); return; }
+    // โหมดโฟลเดอร์เดียว = ทุกใบได้ลิงก์ Drive อยู่แล้ว → ไม่ต้องมี path/ลิงก์เอง
     // แถวที่ไม่มี path/ลิงก์ แต่มีไฟล์ต้นฉบับให้อัปขึ้น Drive ก็ถือว่าครบ (ได้ลิงก์โฟลเดอร์มาเติมให้)
-    const missing = rows.filter((r) => !r.path.trim() && !r.url.trim() && !(driveOn && r.srcFiles.length > 0));
+    const missing = (driveOn && oneFolder) ? [] : rows.filter((r) => !r.path.trim() && !r.url.trim() && !(driveOn && r.srcFiles.length > 0));
     if (missing.length) { toast.error(`มี ${missing.length} แถวยังไม่ใส่ที่อยู่ไฟล์ต้นฉบับ (path / ลิงก์ / โยนไฟล์ขึ้น Drive)`); return; }
     setBusy(true); setProgress({ done: 0, total: rows.length });
     let ok = 0, fail = 0, largeTotal = 0;
+    let sharedFolderId = "";   // โหมดโฟลเดอร์เดียว: ใบแรกสร้างโฟลเดอร์ → ใบต่อ ๆ ไปอัปเข้าโฟลเดอร์นี้
     for (const r of rows) {
       try {
         const upFile = await downscaleImageWidth(r.file, 1200);   // ย่อด้านกว้าง ≤1200px (ใช้ทั้งอัป R2 + preview บน Drive)
-        // อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Drive (ถ้ามีไฟล์แนบ) → ได้ลิงก์โฟลเดอร์
+        // อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Drive → ได้ลิงก์โฟลเดอร์ (โฟลเดอร์เดียว = ทุกใบ · แยก = เฉพาะใบมีไฟล์แนบ)
         let effUrl = r.url.trim();
-        if (driveOn && r.srcFiles.length > 0) {
-          const { folderLink, largeCount } = await uploadArtworkToDrive({ name: r.name, artworkType: r.types[0], brandId: batchBrandId, srcFiles: r.srcFiles, previewFile: upFile });
+        if (driveOn && (oneFolder || r.srcFiles.length > 0)) {
+          const { folderId, folderLink, largeCount } = await uploadArtworkToDrive({
+            name: r.name, artworkType: r.types[0], brandId: batchBrandId, srcFiles: r.srcFiles, previewFile: upFile,
+            folderId: oneFolder ? sharedFolderId : "",
+          });
+          if (oneFolder && folderId) sharedFolderId = folderId;
           if (folderLink) effUrl = folderLink; largeTotal += largeCount;
         }
         const fd = new FormData();
@@ -1748,6 +1803,12 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
             <option value="">— เลือกแบรนด์ —</option>
             {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select></label>
+        {driveOn && (
+          <label className="flex items-start gap-2 text-[12px] text-slate-600 cursor-pointer select-none">
+            <input type="checkbox" checked={oneFolder} onChange={(e) => setOneFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
+            <span>📎 รูปชุดนี้ใช้โฟลเดอร์ Drive เดียวกัน <span className="text-[10px] text-slate-400">— สร้างโฟลเดอร์เดียว เก็บทุกรูปในนี้ (ก็อปรูปตัวอย่าง + ไฟล์ต้นฉบับที่แนบ) แทนที่จะแยกโฟลเดอร์ทุกใบ</span></span>
+          </label>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div className="text-[12px] text-slate-500">อัลบั้ม (ใช้กับทุกแถว)
             <div className="mt-0.5"><CollectionMultiSelect value={batchAlbums} collections={cols} onChange={setBatchAlbums} onCreated={(c) => setCols((cur) => [...cur, c])} /></div>
