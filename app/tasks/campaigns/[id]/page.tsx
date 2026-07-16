@@ -34,6 +34,21 @@ import { getLang } from "@/lib/lang";
 // แปลข้อความบน "การ์ด" (ฟังก์ชัน module-level ไม่มี hook) — อ่านภาษาปัจจุบันตรง ๆ · การ์ดจะ re-sync ตอนสลับภาษา
 const tt = (th: string, en: string) => (getLang() === "en" ? en : th);
 
+// ตัดชื่อยาวขึ้นบรรทัดใหม่ให้พอดีกล่องการ์ด (Excalidraw ไม่ตัดบรรทัดเอง) — ไทยไม่มีเว้นวรรค→ตัดตามตัวอักษร · อังกฤษ→ตัดที่ช่องว่างถ้าได้ · เกิน maxLines ใส่ …
+function wrapCardText(s: string | null | undefined, maxChars = 26, maxLines = 2): string {
+  const str = (s ?? "").trim(); if (!str) return "";
+  const lines: string[] = []; let rest = str;
+  while (rest.length && lines.length < maxLines) {
+    if (rest.length <= maxChars) { lines.push(rest); rest = ""; break; }
+    let cut = rest.lastIndexOf(" ", maxChars);
+    if (cut <= maxChars * 0.5) cut = maxChars;   // ไม่มีช่องว่างเหมาะ (ไทย) → ตัดตามตัวอักษร
+    lines.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).trimStart();
+  }
+  if (rest) lines[lines.length - 1] = (lines[lines.length - 1] ?? "").slice(0, maxChars - 1).trimEnd() + "…";
+  return lines.join("\n");
+}
+
 // โหลดของกลาง Excalidraw แบบ dynamic -- ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
   ssr: false,
@@ -53,9 +68,10 @@ function skuCardSkeleton(s: SkuPickerValue): Record<string, unknown>[] {
   const gid = `sku-${s.id}-${Math.random().toString(36).slice(2, 7)}`;
   const data = { kind: "sku", id: s.id, code: s.code, name: s.name, color: s.color ?? null, price: s.list_price ?? null, image_url: s.image_url ?? null };
   const hasImg = !!s.image_url;
-  const W = 230, imgH = 170, txtY = hasImg ? imgH + 18 : 14, H = hasImg ? imgH + 86 : 96;
   const priceLine = [s.color, s.list_price != null ? `${Number(s.list_price).toLocaleString()}฿` : null].filter(Boolean).join("  ·  ");
-  const text = [`📦 ${s.code}`, s.name, priceLine].filter(Boolean).join("\n");
+  const text = [`📦 ${s.code}`, wrapCardText(s.name, 24, 2), priceLine].filter(Boolean).join("\n");
+  const lineCount = text ? text.split("\n").length : 1;
+  const W = 230, imgH = 170, txtY = hasImg ? imgH + 18 : 14, H = txtY + lineCount * 20 + 12;   // กล่องสูงตามจำนวนบรรทัด (ชื่อ wrap ได้)
   const els: Record<string, unknown>[] = [
     { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ffffff", strokeColor: "#7c3aed", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
   ];
@@ -69,8 +85,9 @@ function parentSkuCardSkeleton(s: ParentSkuVal): Record<string, unknown>[] {
   const gid = `parent_sku-${s.id}-${Math.random().toString(36).slice(2, 7)}`;
   const data = { kind: "parent_sku", id: s.id, code: s.code, name: s.name, image_url: s.image_url ?? null };
   const hasImg = !!s.image_url;
-  const W = 230, imgH = 170, txtY = hasImg ? imgH + 18 : 14, H = hasImg ? imgH + 70 : 80;
-  const text = [`🧬 ${s.code}`, s.name].filter(Boolean).join("\n");
+  const text = [`🧬 ${s.code}`, wrapCardText(s.name, 24, 2)].filter(Boolean).join("\n");
+  const lineCount = text ? text.split("\n").length : 1;
+  const W = 230, imgH = 170, txtY = hasImg ? imgH + 18 : 14, H = txtY + lineCount * 20 + 12;   // กล่องสูงตามจำนวนบรรทัด (ชื่อ wrap ได้)
   const els: Record<string, unknown>[] = [
     { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ffffff", strokeColor: "#0d9488", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
   ];
