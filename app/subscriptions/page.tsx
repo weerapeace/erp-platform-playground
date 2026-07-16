@@ -26,8 +26,9 @@ import { SubscriptionsCalendar } from "./subscriptions-calendar";
 import { WishlistView } from "./wishlist-view";
 import { AllInvoicesView } from "./all-invoices-view";
 import { DownloadInvoiceModal } from "./download-invoice-modal";
+import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, type BoardGroupBy } from "./subscriptions-board";
 
-type ViewMode = "list" | "inuse" | "personal" | "calendar" | "wishlist" | "invoices";
+type ViewMode = "list" | "inuse" | "personal" | "calendar" | "wishlist" | "invoices" | "board";
 
 const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
 
@@ -42,9 +43,11 @@ export default function SubscriptionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // มุมมอง: รายการ / ปฏิทิน / อยากซื้อ
+  // มุมมอง: รายการ / ปฏิทิน / อยากซื้อ / บอร์ด
   const [view, setView] = useState<ViewMode>("list");
   const [testingNotify, setTestingNotify] = useState(false);
+  const [boardGroupBy, setBoardGroupBy] = useState<BoardGroupBy>("status");
+  const [boardType, setBoardType] = useState<"all" | "work" | "personal">("all");
 
   // ฟอร์มเพิ่ม/แก้
   const [formOpen, setFormOpen] = useState(false);
@@ -129,6 +132,24 @@ export default function SubscriptionsPage() {
       await fetchList();
     } catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); }
   }, [user?.name, toast, fetchList]);
+
+  // ลากการ์ดในบอร์ดข้ามคอลัมน์ → เปลี่ยนค่า (สถานะ/หมวด/ประเภท/รอบบิล) แบบ optimistic
+  const boardMove = useCallback(async (sub: Subscription, toKey: string) => {
+    const patch = boardPatchFor(boardGroupBy, toKey);
+    if (!Object.keys(patch).length) return;
+    setRows((prev) => prev.map((r) => (r.id === sub.id ? { ...r, ...patch } : r)));
+    try {
+      const res = await apiFetch(`/api/subscriptions/${sub.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...patch, actor: user?.name }),
+      });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ย้ายการ์ดไม่สำเร็จ");
+      await fetchList();   // rollback ด้วยข้อมูลจริง
+    }
+  }, [boardGroupBy, user?.name, toast, fetchList]);
 
   // ทดสอบส่งแจ้งเตือนใกล้ต่ออายุเดี๋ยวนี้ (กระดิ่ง+LINE)
   const testNotify = useCallback(async () => {
@@ -360,6 +381,7 @@ export default function SubscriptionsPage() {
               { k: "calendar", label: "📅 ปฏิทิน" },
               { k: "wishlist", label: `🛒 อยากซื้อ${summary.wishlist ? ` (${summary.wishlist})` : ""}` },
               { k: "invoices", label: "🧾 ใบเสร็จ" },
+              { k: "board", label: "🗂 บอร์ด" },
             ] as { k: ViewMode; label: string }[]).map((t) => (
               <button key={t.k} onClick={() => setView(t.k)}
                 className={`h-8 px-3 text-sm rounded-md transition ${view === t.k ? "bg-white shadow-sm text-indigo-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>
@@ -399,6 +421,33 @@ export default function SubscriptionsPage() {
               onAdd={openCreateWishlist} onEdit={openEdit} onDelete={askDelete} onPurchase={purchaseItem} />
           )}
           {view === "invoices" && <AllInvoicesView canEdit={canEdit} settings={settings} />}
+          {view === "board" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex bg-slate-100 rounded-lg p-1 text-xs">
+                  {([["all", "ทั้งหมด"], ["work", "งาน"], ["personal", "ส่วนตัว"]] as const).map(([k, l]) => (
+                    <button key={k} onClick={() => setBoardType(k)}
+                      className={`px-3 py-1.5 rounded-md transition ${boardType === k ? "bg-white shadow-sm text-indigo-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>{l}</button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 ml-1">
+                  <span>จัดกลุ่มตาม:</span>
+                  <select value={boardGroupBy} onChange={(e) => setBoardGroupBy(e.target.value as BoardGroupBy)}
+                    className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-700">
+                    {GROUP_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                  </select>
+                </div>
+                {canEdit && <span className="text-[11px] text-slate-400 ml-auto hidden sm:inline">ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยน{GROUP_OPTIONS.find((o) => o.key === boardGroupBy)?.label} · คลิกการ์ดเพื่อแก้</span>}
+              </div>
+              <SubscriptionsBoard
+                rows={boardType === "all" ? rows : rows.filter((r) => r.type === boardType)}
+                settings={settings}
+                groupBy={boardGroupBy}
+                onEdit={canEdit ? openEdit : openInvoices}
+                onMove={canEdit ? boardMove : () => {}}
+              />
+            </div>
+          )}
         </div>
       </div>
 
