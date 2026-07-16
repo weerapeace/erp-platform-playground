@@ -36,9 +36,10 @@ export type AssetPickerProps = {
   contextLabel?: string;           // ข้อความบอกว่าเลือกให้ record ไหน
   defaultSource?: string;          // ที่มาเริ่มต้น เช่น "artwork" (เปิดมาที่คลัง Artwork เลย)
   defaultSearch?: string;          // คำค้นเริ่มต้น (เปิดมากรองรายการที่เกี่ยวข้องเลย)
+  requireDriveFolder?: boolean;    // โชว์เฉพาะรูปที่มีโฟลเดอร์ Drive แล้ว (เลือกรูปต้นทางเพื่อผูกโฟลเดอร์)
 };
 
-export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, title, contextLabel, defaultSource, defaultSearch }: AssetPickerProps) {
+export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, title, contextLabel, defaultSource, defaultSearch, requireDriveFolder }: AssetPickerProps) {
   const toast = useToast();
   const [tab, setTab] = useState<"library" | "upload">("library");
   const [rows, setRows] = useState<AssetRow[]>([]);
@@ -75,8 +76,9 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
     // ที่มา: เลือกเอง → ใช้ค่านั้น · ไม่เลือก → ค้น/กรองอัลบั้ม/แท็ก = รวมทุกที่มา ไม่งั้นเฉพาะรูปอัปเอง
     const eff = source || ((search || collectionId || tagId) ? "all" : "upload");
     p.set("source", eff);
+    if (requireDriveFolder) p.set("has_folder", "1");   // โชว์เฉพาะรูปที่มีโฟลเดอร์ Drive แล้ว
     return p;
-  }, [search, type, source, collectionId, tagId]);
+  }, [search, type, source, collectionId, tagId, requireDriveFolder]);
   const load = useCallback(async () => {   // โหลดหน้าแรก (รีเซ็ตตอนเปลี่ยนตัวกรอง/ค้นหา)
     setLoading(true);
     try {

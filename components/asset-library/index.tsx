@@ -75,6 +75,8 @@ export function AssetLibrary() {
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkLinkOpen, setBulkLinkOpen] = useState(false);   // เลือกรูปต้นทางเพื่อผูกโฟลเดอร์เดียวกัน (bulk)
   const [bulkLinkBusy, setBulkLinkBusy] = useState(false);
+  const [linkSource, setLinkSource] = useState<AssetRow | null>(null);   // รูปต้นทางที่เลือก (รอ confirm)
+  const [linkConfirmOpen, setLinkConfirmOpen] = useState(false);
   const [brandReload, setBrandReload] = useState(0);   // bump เพื่อรีเฟรชมุมมอง "ดูตามแบรนด์"
   const [driveOn, setDriveOn] = useState(false);
   const [bulkDriveBusy, setBulkDriveBusy] = useState(false);
@@ -473,10 +475,17 @@ export function AssetLibrary() {
         onClose={() => setBulkEditOpen(false)}
         onDone={async () => { setBulkEditOpen(false); clearSel(); await load(); await loadMeta(); }} />}
       {/* bulk: เลือกรูปต้นทาง (ที่มีโฟลเดอร์ Drive) → ผูกทุกรูปที่เลือกเข้าโฟลเดอร์เดียวกัน */}
-      <AssetPicker open={bulkLinkOpen} onClose={() => setBulkLinkOpen(false)} typeFilter="image" defaultSource="artwork"
+      <AssetPicker open={bulkLinkOpen} onClose={() => setBulkLinkOpen(false)} typeFilter="image" defaultSource="artwork" requireDriveFolder
         defaultSearch={commonNameSeed(rows.filter((r) => selected.has(r.id)).map((r) => r.title))}
         title="เลือกรูปต้นทางที่มีโฟลเดอร์ Drive แล้ว" contextLabel={`ผูก ${selCount} รูปที่เลือกเข้าโฟลเดอร์เดียวกัน`}
-        onSelect={(assets) => { if (assets[0]) void bulkLinkFolder(assets[0]); }} />
+        onSelect={(assets) => { const s = assets[0]; if (s) { setBulkLinkOpen(false); setLinkSource(s); setLinkConfirmOpen(true); } }} />
+      {/* ยืนยันก่อนผูก — โชว์ชื่อโฟลเดอร์ปลายทาง */}
+      <ConfirmDialog open={linkConfirmOpen} onClose={() => setLinkConfirmOpen(false)}
+        onConfirm={() => { setLinkConfirmOpen(false); if (linkSource) void bulkLinkFolder(linkSource); }}
+        title="ผูกเข้าโฟลเดอร์นี้?" confirmText="ผูกโฟลเดอร์"
+        message={linkSource
+          ? `จะผูก ${Array.from(selected).filter((x) => x !== linkSource.id).length} รูปเข้าโฟลเดอร์ “${driveFolderNameOf(linkSource)}” (เดียวกับ “${linkSource.title || linkSource.file_name}”) + ก็อปรูปตัวอย่างของแต่ละรูปเข้าไปด้วย`
+          : ""} />
     </div>
   );
 }
@@ -559,6 +568,10 @@ async function estimateSizeCm(file: File): Promise<{ w: number; h: number; px: {
   const r2 = (n: number) => Math.round(n * 100) / 100;
   return { w: r2(dims.w / dpi * 2.54), h: r2(dims.h / dpi * 2.54), px: dims, dpi, fromImage };
 }
+
+// ชื่อโฟลเดอร์ Drive ของรูป = ชั้นสุดท้ายของ master_path (ตามโครง …\<ชื่อโฟลเดอร์>) · ไม่มี = ชื่อรูป
+const driveFolderNameOf = (a: { master_path?: string | null; title?: string | null; file_name?: string }) =>
+  (a.master_path || "").split(/[\\/]+/).filter(Boolean).pop() || a.title || a.file_name || "โฟลเดอร์";
 
 // หาคำร่วมนำหน้าของชื่อรูปที่เลือก (เช่น "Cherry Rose Pattern 2/3" → "Cherry Rose Pattern") ใช้เป็นคำค้นเริ่มต้น
 function commonNameSeed(titles: string[]): string {
@@ -805,6 +818,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
   const [driveMode, setDriveMode] = useState<"new" | "shared">("new");
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [linkBusy, setLinkBusy] = useState(false);
+  const [linkConfirmSrc, setLinkConfirmSrc] = useState<AssetRow | null>(null);   // รูปต้นทางที่เลือก (รอ confirm)
   const { brandBase, typeSub } = useDriveFolderMaps();
   const [pathAuto, setPathAuto] = useState(true);   // path ต้นฉบับตามโฟลเดอร์อัตโนมัติ (พิมพ์แก้เอง = หยุด)
 
@@ -1153,10 +1167,15 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
       )}
 
       {/* เลือกรูปต้นทางเพื่อผูกโฟลเดอร์เดียวกัน (โหมด 📎 ใช้โฟลเดอร์เดียวกับรูปอื่น) */}
-      <AssetPicker open={linkPickerOpen} onClose={() => setLinkPickerOpen(false)} typeFilter="image" defaultSource="artwork"
+      <AssetPicker open={linkPickerOpen} onClose={() => setLinkPickerOpen(false)} typeFilter="image" defaultSource="artwork" requireDriveFolder
         defaultSearch={commonNameSeed([d?.title ?? title])}
         title="เลือกรูปที่มีโฟลเดอร์ Drive แล้ว" contextLabel="ผูกโฟลเดอร์เดียวกับรูปนี้"
-        onSelect={(assets) => { if (assets[0]) void linkToSharedFolder(assets[0]); }} />
+        onSelect={(assets) => { const s = assets[0]; if (s) { setLinkPickerOpen(false); setLinkConfirmSrc(s); } }} />
+      {/* ยืนยันก่อนผูก — โชว์ชื่อโฟลเดอร์ปลายทาง */}
+      <ConfirmDialog open={!!linkConfirmSrc} onClose={() => setLinkConfirmSrc(null)}
+        onConfirm={() => { const s = linkConfirmSrc; setLinkConfirmSrc(null); if (s) void linkToSharedFolder(s); }}
+        title="ผูกเข้าโฟลเดอร์นี้?" confirmText="ผูกโฟลเดอร์"
+        message={linkConfirmSrc ? `จะผูกรูปนี้เข้าโฟลเดอร์ “${driveFolderNameOf(linkConfirmSrc)}” (เดียวกับ “${linkConfirmSrc.title || linkConfirmSrc.file_name}”) + ก็อปรูปตัวอย่างเข้าไปด้วย` : ""} />
     </ERPModal>
   );
 }
