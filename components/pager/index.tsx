@@ -1,0 +1,44 @@
+"use client";
+/**
+ * Pager — แถบแบ่งหน้าแบบของกลาง (ใช้ซ้ำได้ทุกหน้า)
+ * - บอกจำนวนทั้งหมด + ช่วงที่แสดง
+ * - ปุ่ม « หน้าแรก · ‹ ก่อนหน้า · ถัดไป › · » หน้าสุดท้าย
+ * - พิมพ์เลขหน้าเพื่อกระโดดไปได้ (Enter/ออกจากช่อง)
+ *
+ * page = 0-based (หน้าแรก = 0) · onPage คืน index หน้าใหม่ (0-based)
+ */
+import { useEffect, useState } from "react";
+
+export function Pager({ page, pageSize, total, onPage, unitLabel = "รายการ" }: {
+  page: number; pageSize: number; total: number; onPage: (p: number) => void; unitLabel?: string;
+}) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const from = total === 0 ? 0 : page * pageSize + 1;
+  const to = Math.min(total, (page + 1) * pageSize);
+  const [draft, setDraft] = useState(String(page + 1));
+  useEffect(() => { setDraft(String(page + 1)); }, [page]);   // sync ช่องพิมพ์ตามหน้าจริง
+
+  const go = (p: number) => { const c = Math.min(pages - 1, Math.max(0, p)); if (c !== page) onPage(c); };
+  const commit = () => { const n = parseInt(draft, 10); if (!isNaN(n)) go(n - 1); setDraft(String(page + 1)); };
+  const btn = "h-8 min-w-[2rem] px-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600";
+
+  return (
+    <div className="flex items-center justify-between gap-3 flex-wrap text-[12px] text-slate-500">
+      <span>ทั้งหมด <b className="text-slate-700">{total.toLocaleString()}</b> {unitLabel} · แสดง {from.toLocaleString()}–{to.toLocaleString()}</span>
+      <div className="flex items-center gap-1.5">
+        <button type="button" className={btn} onClick={() => go(0)} disabled={page <= 0} title="หน้าแรก">«</button>
+        <button type="button" className={btn} onClick={() => go(page - 1)} disabled={page <= 0}>‹ ก่อนหน้า</button>
+        <span className="flex items-center gap-1 px-1">หน้า
+          <input value={draft} inputMode="numeric"
+            onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ""))}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); (e.target as HTMLInputElement).blur(); } }}
+            onBlur={commit}
+            className="w-12 h-8 px-1 text-center border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <span className="text-slate-400">/ {pages}</span>
+        </span>
+        <button type="button" className={btn} onClick={() => go(page + 1)} disabled={page >= pages - 1}>ถัดไป ›</button>
+        <button type="button" className={btn} onClick={() => go(pages - 1)} disabled={page >= pages - 1} title="หน้าสุดท้าย">»</button>
+      </div>
+    </div>
+  );
+}

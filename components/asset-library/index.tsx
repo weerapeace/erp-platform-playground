@@ -20,6 +20,7 @@ import { downloadImagesAsZip } from "@/lib/zip";
 import { type AssetRow, type AssetDetail, type AssetUsage, type AssetSize } from "@/app/api/assets/shared";
 import { BrandAlbumBrowser } from "./brand-album";
 import { AssetPicker } from "@/components/asset-picker";
+import { Pager } from "@/components/pager";
 import { HoverPreview } from "@/components/hover-image";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetTag } from "@/app/api/assets/tags/route";
@@ -388,7 +389,7 @@ export function AssetLibrary() {
             </div>
           )}
           {!showBrandView && !loading && total > 0 && (
-            <div className="mb-3"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} /></div>
+            <div className="mb-3"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel="ไฟล์" /></div>
           )}
           {showBrandView ? (
             <BrandAlbumBrowser reloadKey={brandReload} openParentId={brandOpenParent} />
@@ -411,7 +412,7 @@ export function AssetLibrary() {
             </div>
           )}
           {!showBrandView && !loading && total > 0 && rows.length > 0 && (
-            <div className="mt-4"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} /></div>
+            <div className="mt-4"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel="ไฟล์" /></div>
           )}
         </main>
       </div>
@@ -591,23 +592,6 @@ function commonNameSeed(titles: string[]): string {
   return common.join(" ");
 }
 
-// แถบเลื่อนหน้า + บอกจำนวนทั้งหมด/หน้า (ใช้ทั้งบน+ล่างของกริด)
-function Pager({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (p: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / pageSize));
-  const from = total === 0 ? 0 : page * pageSize + 1;
-  const to = Math.min(total, (page + 1) * pageSize);
-  return (
-    <div className="flex items-center justify-between gap-3 flex-wrap text-[12px] text-slate-500">
-      <span>ทั้งหมด <b className="text-slate-700">{total.toLocaleString()}</b> ไฟล์ · แสดง {from.toLocaleString()}–{to.toLocaleString()} · หน้า <b className="text-slate-700">{page + 1}</b>/{pages}</span>
-      <div className="flex items-center gap-1.5">
-        <button onClick={() => onPage(page - 1)} disabled={page <= 0}
-          className="h-8 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">‹ ก่อนหน้า</button>
-        <button onClick={() => onPage(page + 1)} disabled={page >= pages - 1}
-          className="h-8 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">ถัดไป ›</button>
-      </div>
-    </div>
-  );
-}
 
 function AssetCard({ a, selected, selectionMode, onToggle, onOpen }: {
   a: AssetRow; selected: boolean; selectionMode: boolean; onToggle: () => void; onOpen: () => void;
