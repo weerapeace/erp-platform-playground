@@ -1485,7 +1485,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
         estimateSizeCm(f).then((est) => {
           if (!est) return;
           setSizeHint({ px: est.px, dpi: est.dpi, fromImage: est.fromImage });
-          setSizes((cur) => cur.length ? cur : [{ label: "", w: est.w, h: est.h, unit: "cm" }]);
+          setSizes((cur) => cur.length ? cur : [{ label: "ขนาด #1", w: est.w, h: est.h, unit: "cm" }]);
         });
       }
     }
@@ -1709,7 +1709,7 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
     for (const row of newRows) {
       estimateSizeCm(row.file).then((est) => {
         if (!est) return;
-        setRows((rs) => rs.map((x) => x.id === row.id && x.sizes.length === 0 ? { ...x, sizes: [{ label: "", w: est.w, h: est.h, unit: "cm" }] } : x));
+        setRows((rs) => rs.map((x) => x.id === row.id && x.sizes.length === 0 ? { ...x, sizes: [{ label: "ขนาด #1", w: est.w, h: est.h, unit: "cm" }] } : x));
       });
     }
   };
