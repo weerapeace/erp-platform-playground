@@ -4,7 +4,7 @@
 // เก็บใน erp_dashboard_layouts · ไม่มีแถว = ใช้ DEFAULT_LAYOUT (เหมือนเดิม)
 // ============================================================
 
-export type DashboardView = "systems" | "calendar" | "list";
+export type DashboardView = "systems" | "calendar" | "list" | "executive";
 
 export type DashboardLayout = {
   role_key: string;

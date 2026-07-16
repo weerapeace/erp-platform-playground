@@ -16,6 +16,7 @@ import { DashboardCalendar } from "./dashboard-calendar";
 import { PanelConfigModal } from "./panel-config-modal";
 import { systemForEvent, type DashboardPanel } from "@/lib/dashboard-systems";
 import { KpiStrip } from "./kpi-strip";
+import { ExecutiveView } from "./executive-view";
 import { PinnedWidget, RecentWidget, AgendaWidget, FinanceWidget, ActivityWidget, TeamWidget, ShortcutsWidget, StatWidget, SalesChartWidget } from "./widgets";
 import { layoutForRole, type DashboardLayout, type DashboardView } from "@/lib/dashboard-widgets";
 
@@ -328,7 +329,8 @@ export default function DashboardPage() {
 
       <div className="px-4 sm:px-8 py-5 space-y-5 max-w-4xl mx-auto w-full">
         {/* ---- widget เสริม (เรียง/เปิด-ปิด ตามหน้าแดชบอร์ดของตำแหน่ง — เฟส 3) ---- */}
-        {myLayout.widgets.map((w) => {
+        {/* มุมมองผู้บริหารเป็นหน้าเต็มของตัวเอง ไม่โชว์ widget strip ซ้ำ */}
+        {view !== "executive" && myLayout.widgets.map((w) => {
           if (w === "goals") return <GoalsEntryCard key="goals" />;
           if (w === "kpi") return <KpiStrip key="kpi" unread={unread} metrics={metrics} apps={visibleApps} />;
           if (w === "focus") return (scope === "mine" && view !== "calendar" && focusItems.length > 0)
@@ -349,7 +351,10 @@ export default function DashboardPage() {
         {/* ---- view switcher + สลับของฉัน/ทีม ---- */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
-            {([["systems", "🗂️ การ์ดระบบ"], ["calendar", "📅 ปฏิทิน"], ["list", "📋 รายการ"]] as const).map(([v, l]) => (
+            {([
+              ...(isAdmin ? [["executive", "👔 ผู้บริหาร"]] : []),
+              ["systems", "🗂️ การ์ดระบบ"], ["calendar", "📅 ปฏิทิน"], ["list", "📋 รายการ"],
+            ] as [DashboardView, string][]).map(([v, l]) => (
               <button key={v} onClick={() => { setView(v); if (v !== "list") setListFilter(null); }}
                 className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${view === v ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{l}</button>
             ))}
@@ -367,7 +372,9 @@ export default function DashboardPage() {
         </div>
 
         {/* ---- เนื้อหาตามโหมด ---- */}
-        {view === "systems" ? (
+        {view === "executive" ? (
+          <ExecutiveView salesTrend={salesTrend} />
+        ) : view === "systems" ? (
           <SystemCards apps={visibleApps} list={scopeList} panels={panelMap} metrics={metrics} team={scope === "team"} isAdmin={isAdmin}
             onOpen={openAny}
             onDone={scope === "mine" ? markDone : undefined}
@@ -427,8 +434,8 @@ export default function DashboardPage() {
           </>
         )}
 
-        {/* ---- ภาพรวมระบบ (ของเดิม พับเก็บได้) ---- */}
-        <div className="pt-2">
+        {/* ---- ภาพรวมระบบ (ของเดิม พับเก็บได้) — ซ่อนในมุมมองผู้บริหาร ---- */}
+        {view !== "executive" && <div className="pt-2">
           <button onClick={() => setShowOverview(s => !s)}
             className="w-full flex items-center justify-between px-4 py-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
             <span className="text-sm font-semibold text-slate-700">📊 ภาพรวมระบบ (สินค้า / ใบขอซื้อ)</span>
@@ -439,7 +446,7 @@ export default function DashboardPage() {
               <SystemOverview stats={stats} activity={activity} err={errStats} onRetry={loadOverview} />
             </div>
           )}
-        </div>
+        </div>}
       </div>
 
       {/* ⚙️ ตั้งค่าการ์ดระบบ (แอดมิน) */}
