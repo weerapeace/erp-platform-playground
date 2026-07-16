@@ -73,6 +73,8 @@ export function AssetLibrary() {
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkLinkOpen, setBulkLinkOpen] = useState(false);   // เลือกรูปต้นทางเพื่อผูกโฟลเดอร์เดียวกัน (bulk)
+  const [bulkLinkBusy, setBulkLinkBusy] = useState(false);
   const [brandReload, setBrandReload] = useState(0);   // bump เพื่อรีเฟรชมุมมอง "ดูตามแบรนด์"
   const [driveOn, setDriveOn] = useState(false);
   const [bulkDriveBusy, setBulkDriveBusy] = useState(false);
@@ -214,7 +216,23 @@ export function AssetLibrary() {
 
   const selCount = selected.size;
 
-  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || manageTypesOpen;
+  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || manageTypesOpen;
+
+  // ── ผูกหลายรูปที่เลือกเข้าโฟลเดอร์ Drive เดียวกับรูปต้นทาง (bulk) ──
+  const bulkLinkFolder = async (source: AssetRow) => {
+    const ids = Array.from(selected).filter((x) => x !== source.id);
+    setBulkLinkOpen(false);
+    if (!/\/folders\//.test(source.master_url ?? "")) { toast.error(`รูป “${source.title || source.file_name}” ยังไม่มีโฟลเดอร์ Drive — เลือกรูปที่มีโฟลเดอร์แล้ว`); return; }
+    if (!ids.length) { toast.error("ไม่มีรูปอื่นให้ผูก (เลือกรูปที่ยังไม่มีโฟลเดอร์ด้วย)"); return; }
+    setBulkLinkBusy(true);
+    try {
+      const res = await apiFetch("/api/assets/drive-folders/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, source_id: source.id, follow_path: true }) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ผูกโฟลเดอร์ไม่สำเร็จ");
+      toast.success(`ผูก ${j.count ?? ids.length} รูปเข้าโฟลเดอร์เดียวกับ “${source.title || source.file_name}” แล้ว`);
+      clearSel(); await load(); await loadMeta();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ผูกโฟลเดอร์ไม่สำเร็จ"); }
+    finally { setBulkLinkBusy(false); }
+  };
   const onPageDrop = (e: React.DragEvent) => {
     setPageDrag(false);
     if (anyModalOpen) return;
@@ -404,6 +422,7 @@ export function AssetLibrary() {
           {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
           {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 จัดอัลบั้ม</button>}
           {!trash && driveOn && <button onClick={bulkDriveFolders} disabled={bulkDriveBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkDriveBusy ? "กำลังสร้าง…" : "🗂️ สร้าง Folder Drive"}</button>}
+          {!trash && driveOn && <button onClick={() => setBulkLinkOpen(true)} disabled={bulkLinkBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkLinkBusy ? "กำลังผูก…" : "📎 ใช้โฟลเดอร์เดียวกัน"}</button>}
           <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
           <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
         </div>
@@ -452,6 +471,10 @@ export function AssetLibrary() {
       {bulkEditOpen && <BulkEditModal ids={Array.from(selected)} artTypes={artTypes}
         onClose={() => setBulkEditOpen(false)}
         onDone={async () => { setBulkEditOpen(false); clearSel(); await load(); await loadMeta(); }} />}
+      {/* bulk: เลือกรูปต้นทาง (ที่มีโฟลเดอร์ Drive) → ผูกทุกรูปที่เลือกเข้าโฟลเดอร์เดียวกัน */}
+      <AssetPicker open={bulkLinkOpen} onClose={() => setBulkLinkOpen(false)} typeFilter="image" defaultSource="artwork"
+        title="เลือกรูปต้นทางที่มีโฟลเดอร์ Drive แล้ว" contextLabel={`ผูก ${selCount} รูปที่เลือกเข้าโฟลเดอร์เดียวกัน`}
+        onSelect={(assets) => { if (assets[0]) void bulkLinkFolder(assets[0]); }} />
     </div>
   );
 }
@@ -757,6 +780,8 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
   const [driveMode, setDriveMode] = useState<"new" | "shared">("new");
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [linkBusy, setLinkBusy] = useState(false);
+  const { brandBase, typeSub } = useDriveFolderMaps();
+  const [pathAuto, setPathAuto] = useState(true);   // path ต้นฉบับตามโฟลเดอร์อัตโนมัติ (พิมพ์แก้เอง = หยุด)
 
   const loadDetail = useCallback(async () => {
     try {
@@ -864,7 +889,11 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
       if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์แล้วลากขึ้นเอง`);
       if (folderLink) {
         setMasterUrl(folderLink);
-        await apiFetch(`/api/assets/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ master_url: folderLink }) });
+        // path ต้นฉบับตามโฟลเดอร์ใหม่ (ถ้ายัง auto) = <ฐานแบรนด์>\<ซับชนิด>\<ชื่องาน>
+        const newPath = pathAuto ? brandFolderPath(title.trim() || d.file_name, brandId, artTypesSel[0], brandBase, typeSub) : "";
+        const patch: Record<string, unknown> = { master_url: folderLink };
+        if (newPath) { patch.master_path = newPath; setMasterPath(newPath); }
+        await apiFetch(`/api/assets/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
         toast.success(srcFiles.length ? "อัปขึ้น Drive + เก็บลิงก์แล้ว" : "สร้างโฟลเดอร์ + ดึงรูป preview แล้ว"); setSrcFiles([]); await loadDetail(); onChanged();
       }
     } catch (e) { toast.error(e instanceof Error ? e.message : "อัป Drive ไม่สำเร็จ"); }
@@ -878,9 +907,9 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
     if (!/\/folders\//.test(src.master_url ?? "")) { toast.error(`รูป “${src.title || src.file_name}” ยังไม่มีโฟลเดอร์ Drive — เลือกรูปที่มีโฟลเดอร์แล้ว`); return; }
     setLinkBusy(true);
     try {
-      const res = await apiFetch("/api/assets/drive-folders/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, source_id: src.id }) });
+      const res = await apiFetch("/api/assets/drive-folders/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, source_id: src.id, follow_path: pathAuto }) });
       const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ผูกโฟลเดอร์ไม่สำเร็จ");
-      if (j.folderLink) { setMasterUrl(j.folderLink); await loadDetail(); onChanged(); }
+      if (j.folderLink) { setMasterUrl(j.folderLink); await loadDetail(); onChanged(); }   // path ตามโฟลเดอร์ (server เซ็ตให้เมื่อ follow_path) → loadDetail สะท้อน
       toast.success(`ผูกโฟลเดอร์เดียวกับ “${src.title || src.file_name}” แล้ว`);
       setLinkPickerOpen(false);
     } catch (e) { toast.error(e instanceof Error ? e.message : "ผูกโฟลเดอร์ไม่สำเร็จ"); }
@@ -986,7 +1015,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
 
             <div className="mt-3 pt-3 border-t border-slate-100">
               <p className="text-[12px] font-medium text-slate-600 mb-1.5">📁 ไฟล์ต้นฉบับ <span className="text-[10px] text-slate-400 font-normal">— คลังเก็บแค่ “ที่อยู่/ลิงก์” ไม่ได้เก็บไฟล์ใหญ่ (อยู่ NAS หรือ Drive ก็ได้)</span></p>
-              <input value={masterPath} onChange={(e) => setMasterPath(e.target.value)} disabled={trashed}
+              <input value={masterPath} onChange={(e) => { setMasterPath(e.target.value); setPathAuto(false); }} disabled={trashed}
                 placeholder="\\nas\Artwork\PIX\PIX32-02_v3.ai  หรือ  Z:\Artwork\…"
                 className={`w-full h-8 px-2 text-[12px] border rounded-lg font-mono disabled:bg-slate-50 ${pathWarn ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`} />
               {pathWarn && <p className="text-[11px] text-amber-600 mt-1">⚠ ไม่ได้อยู่ในโฟลเดอร์มาตรฐาน — ควรเก็บใต้ <b className="font-mono">{rule.base_paths.join(" หรือ ")}</b></p>}
