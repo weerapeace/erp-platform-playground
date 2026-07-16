@@ -42,6 +42,9 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [tab, setTab] = useState<"library" | "upload">("library");
   const [rows, setRows] = useState<AssetRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [total, setTotal] = useState(0);              // จำนวนทั้งหมด (จาก API) — ใช้รู้ว่ามีให้โหลดเพิ่มไหม
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE = 120;
   const [search, setSearch] = useState("");
   const [type, setType] = useState(typeFilter ?? "");
   const [source, setSource] = useState(defaultSource ?? "");          // ที่มา: ""=อัปเอง · artwork · odoo_product · all
@@ -62,22 +65,33 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
     apiFetch("/api/assets/tags").then((r) => r.json()).then((j) => setTags(j.data ?? [])).catch(() => {});
   }, [open]);
 
-  const load = useCallback(async () => {
+  const buildParams = useCallback((off: number) => {
+    const p = new URLSearchParams({ status: "active", limit: String(PAGE), offset: String(off) });
+    if (search) p.set("search", search);
+    if (type) p.set("type", type);
+    if (collectionId) p.set("collection_id", collectionId);
+    if (tagId) p.set("tag", tagId);
+    // ที่มา: เลือกเอง → ใช้ค่านั้น · ไม่เลือก → ค้น/กรองอัลบั้ม/แท็ก = รวมทุกที่มา ไม่งั้นเฉพาะรูปอัปเอง
+    const eff = source || ((search || collectionId || tagId) ? "all" : "upload");
+    p.set("source", eff);
+    return p;
+  }, [search, type, source, collectionId, tagId]);
+  const load = useCallback(async () => {   // โหลดหน้าแรก (รีเซ็ตตอนเปลี่ยนตัวกรอง/ค้นหา)
     setLoading(true);
     try {
-      const p = new URLSearchParams({ status: "active", limit: "120" });
-      if (search) p.set("search", search);
-      if (type) p.set("type", type);
-      if (collectionId) p.set("collection_id", collectionId);
-      if (tagId) p.set("tag", tagId);
-      // ที่มา: เลือกเอง → ใช้ค่านั้น · ไม่เลือก → ค้น/กรองอัลบั้ม/แท็ก = รวมทุกที่มา ไม่งั้นเฉพาะรูปอัปเอง
-      const eff = source || ((search || collectionId || tagId) ? "all" : "upload");
-      p.set("source", eff);
-      const res = await apiFetch(`/api/assets?${p.toString()}`);
+      const res = await apiFetch(`/api/assets?${buildParams(0).toString()}`);
       const j = await res.json();
-      setRows(j.data ?? []);
+      setRows(j.data ?? []); setTotal(j.total ?? (j.data?.length ?? 0));
     } catch { /* ignore */ } finally { setLoading(false); }
-  }, [search, type, source, collectionId, tagId]);
+  }, [buildParams]);
+  const loadMore = useCallback(async () => {   // โหลดหน้าถัดไป (ต่อท้าย)
+    setLoadingMore(true);
+    try {
+      const res = await apiFetch(`/api/assets?${buildParams(rows.length).toString()}`);
+      const j = await res.json();
+      setRows((r) => [...r, ...((j.data ?? []) as AssetRow[])]); setTotal(j.total ?? 0);
+    } catch { /* ignore */ } finally { setLoadingMore(false); }
+  }, [buildParams, rows.length]);
   useEffect(() => { if (open) void load(); }, [open, load]);
 
   const pick = (a: AssetRow) => {
@@ -178,6 +192,14 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
                   </button>
                 );
               })}
+              {rows.length < total && (
+                <div style={{ gridColumn: "1 / -1" }} className="flex justify-center py-2">
+                  <button onClick={() => void loadMore()} disabled={loadingMore}
+                    className="h-9 px-4 text-sm font-medium text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-50">
+                    {loadingMore ? "กำลังโหลด…" : `▾ โหลดเพิ่ม (${rows.length}/${total})`}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </>
