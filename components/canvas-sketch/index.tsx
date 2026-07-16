@@ -573,18 +573,31 @@ export function CanvasSketch({
   const [autoH, setAutoH] = useState<number | null>(null);
   useEffect(() => {
     if (stickyTop == null || typeof window === "undefined") return;
+    let raf = 0;
     const measure = () => {
       const el = wrapRef.current; if (!el) return;
       const rect = el.getBoundingClientRect();
       const absTop = rect.top + window.scrollY;                 // ระยะจากบนสุดเอกสารถึงบนกล่อง (คงที่แม้กำลังเลื่อน)
-      const absBottom = rect.bottom + window.scrollY;
-      const below = Math.max(0, document.documentElement.scrollHeight - absBottom); // ของที่อยู่ "ใต้" กล่อง (padding/footer) — คงที่ไม่ขึ้นกับความสูงกล่อง
-      setAutoH(Math.max(360, Math.round(window.innerHeight - absTop - below - 4)));  // ให้ขอบล่างเอกสารพอดีจอ → ไม่มี scroll → toolbox ไม่มุด
+      const below = Math.max(0, document.documentElement.scrollHeight - (rect.bottom + window.scrollY)); // ของที่อยู่ "ใต้" กล่อง (padding/footer)
+      let h = window.innerHeight - absTop - below - 4;          // เป้าหมาย: ให้ขอบล่างเอกสารพอดีจอ (เต็มสวย)
+      // ตาข่ายกันพลาด: ถ้าตอนนี้เอกสาร "ล้นจอ" จริง (below วัดพลาดเพราะ layout ยังไม่นิ่ง/ฝังใน iframe) → หดกล่องตามค่าที่ล้นจริง
+      // → รับประกันไม่มี scroll เสมอ · รอบถัดไปที่ layout นิ่งแล้วค่อยวัด below ใหม่ให้พอดี
+      const overflow = document.documentElement.scrollHeight - window.innerHeight;
+      if (overflow > 0) h = Math.min(h, rect.height - overflow - 2);
+      h = Math.max(360, Math.round(h));
+      setAutoH((prev) => (prev === h ? prev : h));              // เท่าเดิม = ไม่ setState ซ้ำ (กัน ResizeObserver วนลูป)
     };
-    measure();
-    const raf = requestAnimationFrame(measure); // เผื่อ layout ยังไม่นิ่งตอน mount แรก
-    window.addEventListener("resize", measure);
-    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", measure); };
+    const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
+    schedule();
+    window.addEventListener("resize", schedule);
+    // แก้ตัวเองอัตโนมัติ: ถ้าครั้งแรกวัด "สูงเกิน" (footer/เนื้อหามาทีหลัง จน layout ยังไม่นิ่ง) → ขนาดเอกสารเปลี่ยน → วัดใหม่จนพอดี
+    // (จับที่ body เพราะความสูง body โตตามเนื้อหา ต่างจาก documentElement) — สำคัญมากตอนฝังใน iframe แอปเดี่ยวที่ layout นิ่งช้ากว่า
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(schedule);
+      try { ro.observe(document.body); } catch { /* ignore */ }
+    }
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", schedule); ro?.disconnect(); };
     // วัดใหม่เมื่อสิ่งที่ทำให้แถบเครื่องมือด้านบน "สูงเปลี่ยน" เปลี่ยน (แถวขนาดอักษรตอนเลือกข้อความ / ป้ายเพื่อนออนไลน์ที่ wrap เป็น 2 บรรทัด)
   }, [stickyTop, scene, selFont, serverCanEdit, peerList.length]);
   useEffect(() => {
