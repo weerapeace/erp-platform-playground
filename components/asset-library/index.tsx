@@ -80,7 +80,7 @@ export function AssetLibrary() {
   const [linkConfirmOpen, setLinkConfirmOpen] = useState(false);
   const [brandReload, setBrandReload] = useState(0);   // bump เพื่อรีเฟรชมุมมอง "ดูตามแบรนด์"
   const [driveOn, setDriveOn] = useState(false);
-  const [bulkDriveBusy, setBulkDriveBusy] = useState(false);
+  const [bulkFolderOpen, setBulkFolderOpen] = useState(false);   // สร้างโฟลเดอร์ Drive (แยก/รวม) หลายรูป
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
   const [searchFolders, setSearchFolders] = useState<{ id: string; code: string; name: string }[]>([]);   // โฟลเดอร์ Parent ที่ตรงคำค้น
   const [brandOpenParent, setBrandOpenParent] = useState<string | null>(null);   // กดโฟลเดอร์จากผลค้นหา → เปิด parent ในมุมมองแบรนด์
@@ -204,22 +204,9 @@ export function AssetLibrary() {
   const bulkTag = (tag: string) => { setBulkTagOpen(false); void bulkApi({ action: "tag", asset_ids: Array.from(selected), tag }, `ติดแท็ก “${tag}” ให้ ${selected.size} ไฟล์แล้ว`); };
   const bulkMove = (collectionId: string) => { setBulkMoveOpen(false); void bulkApi({ action: "move", asset_ids: Array.from(selected), collection_id: collectionId || null }, `อัปเดตอัลบั้ม ${selected.size} ไฟล์แล้ว`); };
 
-  // ── สร้างโฟลเดอร์ Drive + ก็อปรูป preview ให้ทุกไฟล์ที่เลือก (ทีเดียว) ──
-  const bulkDriveFolders = async () => {
-    const ids = Array.from(selected); if (!ids.length) return;
-    setBulkDriveBusy(true);
-    try {
-      const res = await apiFetch("/api/assets/drive-folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ทำไม่สำเร็จ");
-      toast.success(`สร้างโฟลเดอร์ ${j.created} ไฟล์${j.skipped ? ` · ข้าม(มีแล้ว) ${j.skipped}` : ""}${j.failed ? ` · ล้มเหลว ${j.failed}` : ""}`);
-      clearSel(); await load(); await loadMeta();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ทำไม่สำเร็จ"); }
-    finally { setBulkDriveBusy(false); }
-  };
-
   const selCount = selected.size;
 
-  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || manageTypesOpen;
+  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen;
 
   // ── ผูกหลายรูปที่เลือกเข้าโฟลเดอร์ Drive เดียวกับรูปต้นทาง (bulk) ──
   const bulkLinkFolder = async (source: AssetRow) => {
@@ -424,7 +411,7 @@ export function AssetLibrary() {
           {!trash && <button onClick={() => setBulkEditOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">✏️ แก้หลายรายการ</button>}
           {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
           {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 จัดอัลบั้ม</button>}
-          {!trash && driveOn && <button onClick={bulkDriveFolders} disabled={bulkDriveBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkDriveBusy ? "กำลังสร้าง…" : "🗂️ สร้าง Folder Drive"}</button>}
+          {!trash && driveOn && <button onClick={() => setBulkFolderOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗂️ สร้าง Folder Drive</button>}
           {!trash && driveOn && <button onClick={() => setBulkLinkOpen(true)} disabled={bulkLinkBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkLinkBusy ? "กำลังผูก…" : "📎 ใช้โฟลเดอร์เดียวกัน"}</button>}
           <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
           <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
@@ -475,6 +462,9 @@ export function AssetLibrary() {
       {bulkEditOpen && <BulkEditModal ids={Array.from(selected)} artTypes={artTypes}
         onClose={() => setBulkEditOpen(false)}
         onDone={async () => { setBulkEditOpen(false); clearSel(); await load(); await loadMeta(); }} />}
+      {bulkFolderOpen && <BulkFolderModal ids={Array.from(selected)} firstAsset={rows.find((r) => selected.has(r.id)) ?? null}
+        onClose={() => setBulkFolderOpen(false)}
+        onDone={async () => { setBulkFolderOpen(false); clearSel(); await load(); await loadMeta(); }} />}
       {/* bulk: เลือกรูปต้นทาง (ที่มีโฟลเดอร์ Drive) → ผูกทุกรูปที่เลือกเข้าโฟลเดอร์เดียวกัน */}
       <AssetPicker open={bulkLinkOpen} onClose={() => setBulkLinkOpen(false)} typeFilter="image" defaultSource="artwork" requireDriveFolder
         defaultSearch={commonNameSeed(rows.filter((r) => selected.has(r.id)).map((r) => r.title))}
@@ -1438,6 +1428,75 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
           </div>
         )}
       </div>
+    </ERPModal>
+  );
+}
+
+// ── สร้างโฟลเดอร์ Drive หลายรูป — เลือก "แยก (รูปละโฟลเดอร์)" หรือ "รวมเป็นโฟลเดอร์เดียว" (ตั้งชื่อได้) ──
+function BulkFolderModal({ ids, firstAsset, onClose, onDone }: {
+  ids: string[]; firstAsset: AssetRow | null; onClose: () => void; onDone: () => void;
+}) {
+  const toast = useToast();
+  const { brandBase, typeSub } = useDriveFolderMaps();
+  const [mode, setMode] = useState<"separate" | "combined">("separate");
+  const [folderName, setFolderName] = useState(firstAsset?.title ?? "");   // default = ชื่อรูปแรก
+  const [brandId, setBrandId] = useState("");
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const artType = firstAsset?.artwork_types?.[0] ?? firstAsset?.artwork_type ?? undefined;
+  useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
+  // ดึงแบรนด์จากรูปแรกมาเป็นค่าเริ่มต้น (ไว้จัดที่ตั้งโฟลเดอร์รวม)
+  useEffect(() => { if (firstAsset) apiFetch(`/api/assets/${firstAsset.id}`).then((r) => r.json()).then((j) => { if (j.data?.brand_id) setBrandId(j.data.brand_id); }).catch(() => {}); }, [firstAsset]);
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      if (mode === "separate") {
+        const res = await apiFetch("/api/assets/drive-folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ทำไม่สำเร็จ");
+        toast.success(`สร้างโฟลเดอร์ ${j.created} ไฟล์${j.skipped ? ` · ข้าม(มีแล้ว) ${j.skipped}` : ""}${j.failed ? ` · ล้มเหลว ${j.failed}` : ""}`);
+      } else {
+        const nm = folderName.trim(); if (!nm) { toast.error("ตั้งชื่อโฟลเดอร์ก่อน"); setBusy(false); return; }
+        const master_path = brandFolderPath(nm, brandId, artType, brandBase, typeSub);   // path ในเครื่องตามแบรนด์/ชนิด/ชื่อ
+        const res = await apiFetch("/api/assets/drive-folders/combined", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, brand_id: brandId || undefined, artwork_type: artType, folder_name: nm, master_path: master_path || undefined }) });
+        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ทำไม่สำเร็จ");
+        toast.success(`สร้างโฟลเดอร์ “${nm}” + ใส่ ${j.count ?? ids.length} รูปแล้ว`);
+      }
+      onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ทำไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <ERPModal open onClose={onClose} title={`🗂️ สร้างโฟลเดอร์ Drive (${ids.length} รูป)`} size="sm"
+      footer={
+        <div className="flex justify-end gap-2 w-full">
+          <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+          <button onClick={run} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? "กำลังทำ…" : "สร้าง"}</button>
+        </div>
+      }>
+      <div className="flex gap-1 mb-3 p-0.5 bg-slate-100 rounded-lg">
+        <button type="button" onClick={() => setMode("separate")}
+          className={`flex-1 h-8 text-[12px] font-medium rounded-md transition ${mode === "separate" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🗂️ แยก (รูปละโฟลเดอร์)</button>
+        <button type="button" onClick={() => setMode("combined")}
+          className={`flex-1 h-8 text-[12px] font-medium rounded-md transition ${mode === "combined" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>📦 รวมโฟลเดอร์เดียว</button>
+      </div>
+
+      {mode === "separate" ? (
+        <p className="text-[12px] text-slate-500">แต่ละรูปจะได้โฟลเดอร์ Drive ของตัวเอง (ตามชื่อรูป + แบรนด์/ชนิดของรูปนั้น) · รูปที่มีโฟลเดอร์อยู่แล้วจะข้าม</p>
+      ) : (
+        <div className="space-y-2.5">
+          <p className="text-[12px] text-slate-500">สร้างโฟลเดอร์ Drive <b>1 อัน</b> แล้วเอาทุกรูปที่เลือกใส่เข้าไป (ก็อปรูปตัวอย่างให้ด้วย)</p>
+          <label className="block text-[12px] text-slate-500">ชื่อโฟลเดอร์ <span className="text-red-500">*</span>
+            <input value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="เช่น Cherry Collection"
+              className={`mt-0.5 w-full h-9 px-3 text-sm border rounded-lg ${folderName.trim() ? "border-slate-200" : "border-amber-300"}`} /></label>
+          <label className="block text-[12px] text-slate-500">แบรนด์ (ไว้จัดที่ตั้งโฟลเดอร์)
+            <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+              <option value="">— โฟลเดอร์แม่ (ไม่จัดตามแบรนด์) —</option>
+              {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select></label>
+        </div>
+      )}
     </ERPModal>
   );
 }
