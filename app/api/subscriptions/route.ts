@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { toSubRow, validateSubInput, type SubInput, type SubSettings } from "@/lib/subscriptions";
 
@@ -27,8 +27,11 @@ export async function GET(request: NextRequest) {
   if (guard) return guard;
 
   const db = supabaseAdmin();
+
+  // ความเป็นส่วนตัว: หน้าหลักแสดงเฉพาะรายการ "งาน/ของบริษัท" (เห็นทั้งองค์กร)
+  // รายการ "ส่วนตัว" ถูกแยกไปหน้า /subscriptions/personal (ดูเฉพาะเจ้าของ + คนที่ถูกแชร์)
   const [{ data: rows, error }, { data: st }] = await Promise.all([
-    db.from("subscriptions").select("*").order("name"),
+    db.from("subscriptions").select("*").neq("type", "personal").order("name"),
     db.from("app_settings").select("exchange_rate, eur_rate, display_currency").eq("id", 1).single(),
   ]);
   if (error) return NextResponse.json({ data: [], settings: DEFAULT_SETTINGS, error: error.message }, { status: 500 });
@@ -45,7 +48,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const guard = await guardApi(request, "subscriptions.edit");
+  // สิทธิ์ขั้นต่ำ = view (สร้าง "รายการส่วนตัวของตัวเอง" ได้) · รายการงานต้องมีสิทธิ์ edit เพิ่ม
+  const guard = await guardApi(request, "subscriptions.view");
   if (guard) return guard;
 
   let body: Partial<SubInput> & { actor?: string };
@@ -56,8 +60,9 @@ export async function POST(request: NextRequest) {
   if (err) return NextResponse.json({ error: err }, { status: 400 });
 
   const { data: auth } = await supabaseFromRequest(request).auth.getUser();
+  const me = auth?.user?.id ?? null;
 
-  const row = {
+  const row: Record<string, unknown> = {
     id: genId(),
     // ค่าเริ่มต้นให้ครบทุก NOT NULL แม้ฟอร์มไม่ส่งมา
     category: "Other", billing_cycle: "monthly", cost: 0, currency: "THB",
@@ -66,6 +71,13 @@ export async function POST(request: NextRequest) {
     account_email: "", card_last4: "",
     ...toSubRow(body),
   };
+  // รายการส่วนตัว = เจ้าของคือคนที่สร้างเสมอ (ไม่เชื่อ owner_id จาก client) · งาน = ไม่มีเจ้าของ
+  row.owner_id = row.type === "personal" ? me : null;
+
+  // รายการงาน (ของบริษัท) ต้องมีสิทธิ์ edit จริง
+  if (row.type !== "personal" && !(await apiCan(request, "subscriptions.edit"))) {
+    return NextResponse.json({ error: "ต้องมีสิทธิ์แก้ไข (subscriptions.edit) สำหรับรายการงาน" }, { status: 403 });
+  }
 
   const db = supabaseAdmin();
   const { data, error } = await db.from("subscriptions").insert(row).select("*").single();

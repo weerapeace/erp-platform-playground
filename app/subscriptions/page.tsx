@@ -8,6 +8,7 @@
  * ของกลาง: PlaygroundShell · DataTable · ERPModal/ConfirmDialog · Toast · guardApi/audit (ฝั่ง API)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { ConfirmDialog } from "@/components/modal";
@@ -28,7 +29,7 @@ import { AllInvoicesView } from "./all-invoices-view";
 import { DownloadInvoiceModal } from "./download-invoice-modal";
 import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, type BoardGroupBy } from "./subscriptions-board";
 
-type ViewMode = "list" | "inuse" | "personal" | "calendar" | "wishlist" | "invoices" | "board";
+type ViewMode = "list" | "inuse" | "calendar" | "wishlist" | "invoices" | "board";
 
 const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
 
@@ -47,7 +48,7 @@ export default function SubscriptionsPage() {
   const [view, setView] = useState<ViewMode>("list");
   const [testingNotify, setTestingNotify] = useState(false);
   const [boardGroupBy, setBoardGroupBy] = useState<BoardGroupBy>("status");
-  const [boardType, setBoardType] = useState<"all" | "work" | "personal">("all");
+  const [boardType, setBoardType] = useState<"all" | "work">("all");
 
   // ฟอร์มเพิ่ม/แก้
   const [formOpen, setFormOpen] = useState(false);
@@ -109,9 +110,6 @@ export default function SubscriptionsPage() {
     () => rows.filter((r) => r.active && r.type === "work" && (r.billing_cycle === "monthly" || r.billing_cycle === "yearly")),
     [rows],
   );
-  // ส่วนตัว = ประเภท personal
-  const personalRows = useMemo(() => rows.filter((r) => r.type === "personal"), [rows]);
-
   // ── handlers ───────────────────────────────────────────────
   const openCreate = useCallback(() => { setEditing(null); setCreateDefaults(null); setFormOpen(true); }, []);
   const openCreateWishlist = useCallback(() => { setEditing(null); setCreateDefaults({ want_to_buy: true, active: false }); setFormOpen(true); }, []);
@@ -373,43 +371,46 @@ export default function SubscriptionsPage() {
           {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
 
           {/* สลับมุมมอง */}
-          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-            {([
-              { k: "list", label: "📋 รายการ" },
-              { k: "inuse", label: `🟢 ใช้อยู่${inUseRows.length ? ` (${inUseRows.length})` : ""}` },
-              { k: "personal", label: `👤 ส่วนตัว${personalRows.length ? ` (${personalRows.length})` : ""}` },
-              { k: "calendar", label: "📅 ปฏิทิน" },
-              { k: "wishlist", label: `🛒 อยากซื้อ${summary.wishlist ? ` (${summary.wishlist})` : ""}` },
-              { k: "invoices", label: "🧾 ใบเสร็จ" },
-              { k: "board", label: "🗂 บอร์ด" },
-            ] as { k: ViewMode; label: string }[]).map((t) => (
-              <button key={t.k} onClick={() => setView(t.k)}
-                className={`h-8 px-3 text-sm rounded-md transition ${view === t.k ? "bg-white shadow-sm text-indigo-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>
-                {t.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+              {([
+                { k: "list", label: "📋 รายการ" },
+                { k: "inuse", label: `🟢 ใช้อยู่${inUseRows.length ? ` (${inUseRows.length})` : ""}` },
+                { k: "calendar", label: "📅 ปฏิทิน" },
+                { k: "wishlist", label: `🛒 อยากซื้อ${summary.wishlist ? ` (${summary.wishlist})` : ""}` },
+                { k: "invoices", label: "🧾 ใบเสร็จ" },
+                { k: "board", label: "🗂 บอร์ด" },
+              ] as { k: ViewMode; label: string }[]).map((t) => (
+                <button key={t.k} onClick={() => setView(t.k)}
+                  className={`h-8 px-3 text-sm rounded-md transition ${view === t.k ? "bg-white shadow-sm text-indigo-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {/* รายการส่วนตัวแยกเป็นหน้าเฉพาะตัว (ตาม user + แชร์ให้คนดูได้) */}
+            <Link href="/subscriptions/personal"
+              className="h-8 px-3 inline-flex items-center text-sm rounded-lg border border-violet-200 text-violet-700 bg-white hover:bg-violet-50">
+              👤 ส่วนตัว →
+            </Link>
           </div>
 
           {/* เนื้อหาตามมุมมอง */}
           {view === "inuse" && (
             <p className="text-xs text-slate-500 -mb-1">เฉพาะ &quot;งาน&quot; ที่เปิดใช้งานอยู่ และจ่ายประจำ (รายเดือน/รายปี) — ไม่รวมส่วนตัว/รายการปิด/จ่ายครั้งเดียว</p>
           )}
-          {view === "personal" && (
-            <p className="text-xs text-slate-500 -mb-1">เฉพาะรายการประเภท &quot;ส่วนตัว&quot;</p>
-          )}
-          {(view === "list" || view === "inuse" || view === "personal") && (
+          {(view === "list" || view === "inuse") && (
             <DataTable
-              tableId={view === "inuse" ? "subscriptions-inuse" : view === "personal" ? "subscriptions-personal" : "subscriptions"}
-              data={view === "inuse" ? inUseRows : view === "personal" ? personalRows : rows}
+              tableId={view === "inuse" ? "subscriptions-inuse" : "subscriptions"}
+              data={view === "inuse" ? inUseRows : rows}
               columns={columns}
               views={view === "list" ? views : undefined}
               loading={loading}
               searchableKeys={["name", "card_statement_name", "category", "account_email", "notes"]}
               searchPlaceholder="ค้นหา ชื่อ / หมวดหมู่ / อีเมล…"
-              exportFilename={view === "inuse" ? "subscriptions-inuse" : view === "personal" ? "subscriptions-personal" : "subscriptions"}
+              exportFilename={view === "inuse" ? "subscriptions-inuse" : "subscriptions"}
               exportEntityType="subscriptions"
               pageSize={25}
-              emptyMessage={view === "inuse" ? "ยังไม่มีรายการที่ใช้อยู่ (รายเดือน/รายปี)" : view === "personal" ? "ยังไม่มีรายการส่วนตัว" : "ยังไม่มีรายการ subscription"}
+              emptyMessage={view === "inuse" ? "ยังไม่มีรายการที่ใช้อยู่ (รายเดือน/รายปี)" : "ยังไม่มีรายการ subscription"}
               onRowClick={canEdit ? openEdit : openInvoices}
             />
           )}
@@ -425,7 +426,7 @@ export default function SubscriptionsPage() {
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="inline-flex bg-slate-100 rounded-lg p-1 text-xs">
-                  {([["all", "ทั้งหมด"], ["work", "งาน"], ["personal", "ส่วนตัว"]] as const).map(([k, l]) => (
+                  {([["all", "ทั้งหมด"], ["work", "งาน"]] as const).map(([k, l]) => (
                     <button key={k} onClick={() => setBoardType(k)}
                       className={`px-3 py-1.5 rounded-md transition ${boardType === k ? "bg-white shadow-sm text-indigo-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>{l}</button>
                   ))}

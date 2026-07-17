@@ -15,8 +15,8 @@ const INP = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg outline
 const EMPTY: SubInput = {
   name: "", category: "", billing_cycle: "monthly", cost: 0, currency: "THB",
   billing_date: null, chrome_profile: "", chrome_profile_url: "", chrome_profile_dir: "", invoice_url: "",
-  notes: "", active: true, type: "personal", account_email: "", card_last4: "", card_statement_name: "",
-  pending_cancel: false, want_to_buy: false,
+  notes: "", active: true, type: "work", account_email: "", card_last4: "", card_statement_name: "",
+  pending_cancel: false, want_to_buy: false, owner_id: null,
 };
 
 function fromSub(s: Subscription): SubInput {

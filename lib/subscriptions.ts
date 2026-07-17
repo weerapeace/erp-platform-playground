@@ -32,6 +32,7 @@ export type Subscription = {
   card_statement_name: string; // ชื่อที่ขึ้นในบิลบัตรเครดิต (ไว้เทียบกับสเตทเมนต์)
   pending_cancel: boolean;
   want_to_buy: boolean;
+  owner_id: string | null; // เจ้าของรายการ "ส่วนตัว" (null = งาน/ของบริษัท เห็นทั้งองค์กร)
   created_at?: string;
   updated_at?: string;
 };
@@ -199,6 +200,7 @@ export function toSubRow(input: Partial<SubInput>): Record<string, unknown> {
   if (input.card_statement_name !== undefined) row.card_statement_name = input.card_statement_name ?? "";
   if (input.pending_cancel !== undefined) row.pending_cancel = !!input.pending_cancel;
   if (input.want_to_buy !== undefined) row.want_to_buy = !!input.want_to_buy;
+  if (input.owner_id !== undefined) row.owner_id = input.owner_id || null;
   return row;
 }
 
