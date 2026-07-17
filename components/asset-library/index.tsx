@@ -21,6 +21,7 @@ import { type AssetRow, type AssetDetail, type AssetUsage, type AssetSize } from
 import { BrandAlbumBrowser } from "./brand-album";
 import { AssetPicker } from "@/components/asset-picker";
 import { Pager } from "@/components/pager";
+import { Spinner, LoadingOverlay } from "@/components/spinner";
 import { HoverPreview } from "@/components/hover-image";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetTag } from "@/app/api/assets/tags/route";
@@ -465,6 +466,7 @@ export function AssetLibrary() {
       {bulkFolderOpen && <BulkFolderModal ids={Array.from(selected)} firstAsset={rows.find((r) => selected.has(r.id)) ?? null}
         onClose={() => setBulkFolderOpen(false)}
         onDone={async () => { setBulkFolderOpen(false); clearSel(); await load(); await loadMeta(); }} />}
+      {bulkLinkBusy && <LoadingOverlay message="กำลังผูกโฟลเดอร์ + ก็อปรูป… อาจใช้เวลาสักครู่" />}
       {/* bulk: เลือกรูปต้นทาง (ที่มีโฟลเดอร์ Drive) → ผูกทุกรูปที่เลือกเข้าโฟลเดอร์เดียวกัน */}
       <AssetPicker open={bulkLinkOpen} onClose={() => setBulkLinkOpen(false)} typeFilter="image" defaultSource="artwork" requireDriveFolder
         defaultSearch={commonNameSeed(rows.filter((r) => selected.has(r.id)).map((r) => r.title))}
@@ -964,6 +966,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
         <button onClick={() => onNavigate(nextId)} title="รูปถัดไป"
           className="fixed right-3 top-1/2 -translate-y-1/2 z-[60] w-11 h-11 rounded-full bg-white shadow-lg border border-slate-200 text-slate-600 text-2xl leading-none flex items-center justify-center hover:bg-slate-50">›</button>
       )}
+      {(driveBusy || linkBusy) && <LoadingOverlay message={linkBusy ? "กำลังผูกโฟลเดอร์ + ก็อปรูป…" : "กำลังทำงานกับ Drive… อาจใช้เวลาสักครู่"} />}
       {!d ? (
         <div className="py-12 text-center text-slate-400 text-sm">กำลังโหลด…</div>
       ) : (
@@ -1091,7 +1094,8 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
                       )}
                       {/* ปุ่มโชว์เสมอ: มีไฟล์ = อัป+สร้างโฟลเดอร์+ดึง preview · ไม่มีไฟล์ = แค่สร้างโฟลเดอร์ + ดึง preview */}
                       <button type="button" onClick={doDriveUpload} disabled={driveBusy || !brandId}
-                        className="w-full h-8 mt-1.5 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                        className="w-full h-8 mt-1.5 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center justify-center gap-2">
+                        {driveBusy && <Spinner size={13} />}
                         {driveBusy ? (driveProg.total ? `กำลังอัป ${driveProg.done}/${driveProg.total}…` : "กำลังทำ…")
                           : srcFiles.length > 0 ? "⬆ อัปขึ้น Drive + เก็บลิงก์" : "📁 สร้างโฟลเดอร์ + ดึงรูป preview"}
                       </button>
@@ -1101,8 +1105,8 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
                     <>
                       <p className="text-[10px] text-slate-400 mb-1.5">เลือกรูปที่มีโฟลเดอร์อยู่แล้ว → ผูกรูปนี้เข้าโฟลเดอร์เดียวกัน + ก็อปรูปตัวอย่างของรูปนี้เข้าไปด้วย (ไม่สร้างโฟลเดอร์ใหม่)</p>
                       <button type="button" onClick={() => setLinkPickerOpen(true)} disabled={linkBusy}
-                        className="w-full h-8 text-[12px] font-medium border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-50">
-                        {linkBusy ? "กำลังผูกโฟลเดอร์…" : "📎 เลือกรูปที่มีโฟลเดอร์แล้ว"}
+                        className="w-full h-8 text-[12px] font-medium border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-50 inline-flex items-center justify-center gap-2">
+                        {linkBusy && <Spinner size={13} />}{linkBusy ? "กำลังผูกโฟลเดอร์…" : "📎 เลือกรูปที่มีโฟลเดอร์แล้ว"}
                       </button>
                     </>
                   )}
@@ -1367,10 +1371,11 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
           <span className="text-[12px] text-amber-600">จะแก้ {ids.length} ไฟล์ที่เลือก</span>
           <div className="flex gap-2">
             <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : `บันทึก ${ids.length} ไฟล์`}</button>
+            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{busy ? "กำลังบันทึก…" : `บันทึก ${ids.length} ไฟล์`}</button>
           </div>
         </div>
       }>
+      {busy && <LoadingOverlay message="กำลังบันทึก…" />}
       <div className="space-y-2.5">
         <BulkEditRow on={enBrand} setOn={setEnBrand} label="แบรนด์">
           <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
@@ -1472,9 +1477,10 @@ function BulkFolderModal({ ids, firstAsset, onClose, onDone }: {
       footer={
         <div className="flex justify-end gap-2 w-full">
           <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={run} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? "กำลังทำ…" : "สร้าง"}</button>
+          <button onClick={run} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{busy ? "กำลังทำ…" : "สร้าง"}</button>
         </div>
       }>
+      {busy && <LoadingOverlay message={mode === "combined" ? "กำลังสร้างโฟลเดอร์ + ก็อปรูป… อาจใช้เวลาสักครู่" : "กำลังสร้างโฟลเดอร์ทีละรูป… อาจใช้เวลาสักครู่"} />}
       <div className="flex gap-1 mb-3 p-0.5 bg-slate-100 rounded-lg">
         <button type="button" onClick={() => setMode("separate")}
           className={`flex-1 h-8 text-[12px] font-medium rounded-md transition ${mode === "separate" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🗂️ แยก (รูปละโฟลเดอร์)</button>
