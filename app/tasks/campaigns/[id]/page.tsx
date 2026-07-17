@@ -247,6 +247,16 @@ export default function CampaignCanvasPage() {
   const id = String(useParams().id);
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // ฝังอยู่ใน iframe ของแอปเดี่ยว (/app/tasks) จะ "ไม่มีหัวบาร์ 56px" → ต้องลดระยะ sticky ของแถบบน
+  // ไม่งั้น sticky ที่ตั้ง top เผื่อหัวบาร์ไว้จะถูกดันลงมาทับแถบเครื่องมือกระดาน (toolbox "จม")
+  const [embed, setEmbed] = useState(false);
+  useEffect(() => {
+    try {
+      const inFrame = window.self !== window.top;
+      const urlEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
+      setEmbed(urlEmbed || (inFrame && sessionStorage.getItem("erp_shell_embed") === "1"));
+    } catch { /* ignore */ }
+  }, []);
   const [boardKey, setBoardKey] = useState(0); // เปลี่ยนเพื่อรีโหลดกระดานล่าสุด (แทน F5 ที่เด้งหน้าแรก)
   const [refreshing, setRefreshing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -452,7 +462,7 @@ export default function CampaignCanvasPage() {
       {/* GIF จิ้มเพื่อน — โผล่วิ่งบนหน้านี้ด้วย (ดูข้อความ/กดปิด · ตอบกลับทำที่หน้าแรก) */}
       <GifPokeLayer userId={user?.id ?? null} />
       {/* Top bar (sticky) -- อยู่ใต้หัวบาร์หลัก (top-14) */}
-      <div className="bg-white border-b border-slate-200 px-8 py-4 sticky top-14 z-20">
+      <div className={`bg-white border-b border-slate-200 px-8 py-4 sticky z-20 ${embed ? "top-0" : "top-14"}`}>
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3 min-w-0">
             <a href="/tasks" title={t("กลับหน้าแรก (คลิกกลาง = เปิดแท็บใหม่)", "Home (middle-click = new tab)")} className="h-8 px-2.5 inline-flex items-center gap-1 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">🏠 <span className="hidden sm:inline">{t("หน้าแรก", "Home")}</span></a>
@@ -488,7 +498,7 @@ export default function CampaignCanvasPage() {
         <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
           {/* realtime ผ่าน Supabase Broadcast (ไม่กิน Cloudflare CPU) + เซฟกันทับด้วย version-guard */}
           {/* ความสูงพอดี viewport → หน้าไม่เลื่อน → toolbox ของกระดานไม่มุด/จม (กระดานเลื่อนในตัวเองได้อยู่แล้ว) */}
-          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 205px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onBoardReady} collab stickyTop={128} />
+          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 205px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onBoardReady} collab stickyTop={embed ? 72 : 128} />
 
           {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
           {dragPanelOpen && (
