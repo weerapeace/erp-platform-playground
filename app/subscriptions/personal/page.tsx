@@ -18,13 +18,14 @@ import { apiFetch } from "@/lib/api";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
   CYCLE_LABEL, monthlyTHB, yearlyTHB, daysUntil, nextRenewal, fmtCost, fmtBaht, subStatusLabel,
-  type SubSettings, type SubInput, type Subscription,
+  type SubSettings, type SubInput, type Subscription, type StreamingService,
 } from "@/lib/subscriptions";
 import { SubscriptionFormModal } from "../subscription-form-modal";
 import { InvoicesModal } from "../invoices-modal";
 import { DownloadInvoiceModal } from "../download-invoice-modal";
 import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, type BoardGroupBy } from "../subscriptions-board";
 import { PersonalShareModal, type ShareUser } from "../personal-share-modal";
+import { StreamingView } from "./streaming-view";
 
 type SharedSub = Subscription & { owner_label?: string };
 const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
@@ -38,11 +39,12 @@ export default function PersonalSubscriptionsPage() {
   const [mine, setMine] = useState<Subscription[]>([]);
   const [shared, setShared] = useState<SharedSub[]>([]);
   const [sharedWith, setSharedWith] = useState<ShareUser[]>([]);
+  const [services, setServices] = useState<StreamingService[]>([]);
   const [settings, setSettings] = useState<SubSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [view, setView] = useState<"list" | "board">("list");
+  const [view, setView] = useState<"list" | "board" | "streaming">("list");
   const [boardGroupBy, setBoardGroupBy] = useState<BoardGroupBy>("status");
 
   // ป๊อปอัป
@@ -64,6 +66,7 @@ export default function PersonalSubscriptionsPage() {
       setMine((j.mine ?? []) as Subscription[]);
       setShared((j.shared ?? []) as SharedSub[]);
       setSharedWith((j.sharedWith ?? []) as ShareUser[]);
+      setServices((j.services ?? []) as StreamingService[]);
       setSettings((j.settings ?? DEFAULT_SETTINGS) as SubSettings);
     } catch (e) { setError(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
     finally { setLoading(false); }
@@ -80,6 +83,46 @@ export default function PersonalSubscriptionsPage() {
   }, [mine, settings]);
 
   const categories = useMemo(() => mine.map((r) => r.category), [mine]);
+  const serviceMap = useMemo(() => new Map(services.map((s) => [s.id, s.name])), [services]);
+
+  // ── streaming catalog ──────────────────────────────────────
+  const addStreaming = useCallback(async (name: string): Promise<StreamingService | null> => {
+    try {
+      const res = await apiFetch("/api/subscriptions/streaming-services", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, actor: user?.name }),
+      });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      const svc = j.data as StreamingService;
+      setServices((prev) => [...prev, svc].sort((a, b) => a.name.localeCompare(b.name)));
+      return svc;
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); return null; }
+  }, [user?.name, toast]);
+
+  const renameStreaming = useCallback(async (id: string, name: string) => {
+    try {
+      const res = await apiFetch(`/api/subscriptions/streaming-services/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, actor: user?.name }),
+      });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      setServices((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)).sort((a, b) => a.name.localeCompare(b.name)));
+      toast.success("เปลี่ยนชื่อแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
+  }, [user?.name, toast]);
+
+  const deleteStreaming = useCallback(async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/subscriptions/streaming-services/${id}`, { method: "DELETE" });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      setServices((prev) => prev.filter((s) => s.id !== id));
+      await fetchData(); // อัปเดต mine.streaming ที่ถูกถอด id ออก
+      toast.success("ลบบริการแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+  }, [fetchData, toast]);
 
   // ── handlers ───────────────────────────────────────────────
   const openCreate = useCallback(() => { setEditing(null); setFormOpen(true); }, []);
@@ -135,7 +178,7 @@ export default function PersonalSubscriptionsPage() {
   }, [boardGroupBy, user?.name, toast, fetchData]);
 
   // ── columns ────────────────────────────────────────────────
-  const baseColumns = useCallback((opts: { owner?: boolean; actions?: boolean; canEdit?: boolean }): ColumnDef<SharedSub>[] => {
+  const baseColumns = useCallback((opts: { owner?: boolean; actions?: boolean; canEdit?: boolean; streaming?: boolean }): ColumnDef<SharedSub>[] => {
     const cols: ColumnDef<SharedSub>[] = [
       {
         id: "name", accessorKey: "name", header: "ชื่อรายการ", size: 220,
@@ -197,6 +240,20 @@ export default function PersonalSubscriptionsPage() {
           );
         } },
     );
+    if (opts.streaming) {
+      cols.push({
+        id: "streaming", header: "📺 Streaming", size: 200, enableSorting: false,
+        cell: ({ row }) => {
+          const ids = (row.original.streaming ?? []).filter((id) => serviceMap.has(id));
+          if (!ids.length) return <span className="text-xs text-slate-300">—</span>;
+          return (
+            <div className="flex flex-wrap gap-1">
+              {ids.map((id) => <span key={id} className="text-[11px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">{serviceMap.get(id)}</span>)}
+            </div>
+          );
+        },
+      });
+    }
     if (opts.actions) {
       cols.push({
         id: "actions", header: "", size: opts.canEdit ? 160 : 90, enableSorting: false,
@@ -222,9 +279,9 @@ export default function PersonalSubscriptionsPage() {
       });
     }
     return cols;
-  }, [settings, openEdit]);
+  }, [settings, openEdit, serviceMap]);
 
-  const mineColumns = useMemo(() => baseColumns({ actions: true, canEdit: true }), [baseColumns]);
+  const mineColumns = useMemo(() => baseColumns({ actions: true, canEdit: true, streaming: services.length > 0 }), [baseColumns, services.length]);
   const sharedColumns = useMemo(() => baseColumns({ owner: true, actions: true, canEdit: false }), [baseColumns]);
 
   if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
@@ -268,7 +325,7 @@ export default function PersonalSubscriptionsPage() {
 
           {/* สลับมุมมอง */}
           <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-            {([{ k: "list", label: "📋 ตาราง" }, { k: "board", label: "🗂 บอร์ด" }] as { k: "list" | "board"; label: string }[]).map((t) => (
+            {([{ k: "list", label: "📋 ตาราง" }, { k: "board", label: "🗂 บอร์ด" }, { k: "streaming", label: `📺 Streaming${services.length ? ` (${services.length})` : ""}` }] as { k: "list" | "board" | "streaming"; label: string }[]).map((t) => (
               <button key={t.k} onClick={() => setView(t.k)}
                 className={`h-8 px-3 text-sm rounded-md transition ${view === t.k ? "bg-white shadow-sm text-violet-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>
                 {t.label}
@@ -305,6 +362,10 @@ export default function PersonalSubscriptionsPage() {
               <SubscriptionsBoard rows={mine} settings={settings} groupBy={boardGroupBy} onEdit={openEdit} onMove={boardMove} />
             </div>
           )}
+          {view === "streaming" && (
+            <StreamingView services={services} mine={mine}
+              onAdd={addStreaming} onRename={renameStreaming} onDelete={deleteStreaming} onEditSub={openEdit} />
+          )}
 
           {/* แชร์ให้ฉัน (view-only) */}
           {shared.length > 0 && (
@@ -330,6 +391,7 @@ export default function PersonalSubscriptionsPage() {
 
       {/* ป๊อปอัป */}
       <SubscriptionFormModal open={formOpen} editing={editing} categories={categories} saving={saving} defaults={PERSONAL_DEFAULTS}
+        streamingServices={services} onQuickAddStreaming={addStreaming}
         onClose={() => !saving && setFormOpen(false)} onSave={handleSave} />
 
       <InvoicesModal sub={invTarget?.sub ?? null} canEdit={invTarget?.canEdit ?? false} onClose={() => setInvTarget(null)} />

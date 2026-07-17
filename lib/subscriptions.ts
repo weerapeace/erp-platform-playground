@@ -33,8 +33,16 @@ export type Subscription = {
   pending_cancel: boolean;
   want_to_buy: boolean;
   owner_id: string | null; // เจ้าของรายการ "ส่วนตัว" (null = งาน/ของบริษัท เห็นทั้งองค์กร)
+  streaming: string[];      // id ของบริการ streaming ที่รายการนี้แถม (เฉพาะรายการส่วนตัว)
   created_at?: string;
   updated_at?: string;
+};
+
+/** บริการ streaming ในคลังของผู้ใช้ (เช่น iQIYI, WeTV, Netflix) */
+export type StreamingService = {
+  id: string;
+  name: string;
+  sort_order?: number;
 };
 
 /** ค่าที่รับจากฟอร์ม (ยังไม่มี id ตอนสร้าง) */
@@ -201,6 +209,7 @@ export function toSubRow(input: Partial<SubInput>): Record<string, unknown> {
   if (input.pending_cancel !== undefined) row.pending_cancel = !!input.pending_cancel;
   if (input.want_to_buy !== undefined) row.want_to_buy = !!input.want_to_buy;
   if (input.owner_id !== undefined) row.owner_id = input.owner_id || null;
+  if (input.streaming !== undefined) row.streaming = Array.isArray(input.streaming) ? input.streaming.filter(Boolean) : [];
   return row;
 }
 

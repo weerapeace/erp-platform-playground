@@ -31,13 +31,14 @@ export async function GET(request: NextRequest) {
   const db = supabaseAdmin();
 
   if (!me) {
-    return NextResponse.json({ mine: [], shared: [], sharedWith: [], settings: DEFAULT_SETTINGS, error: null });
+    return NextResponse.json({ mine: [], shared: [], sharedWith: [], services: [], settings: DEFAULT_SETTINGS, error: null });
   }
 
-  // ใครแชร์ลิสต์ให้ฉันดู (viewer = me) · ฉันแชร์ให้ใคร (owner = me)
-  const [{ data: sharedToMe }, { data: iShareTo }, { data: st }] = await Promise.all([
+  // ใครแชร์ลิสต์ให้ฉันดู (viewer = me) · ฉันแชร์ให้ใคร (owner = me) · คลัง streaming ของฉัน
+  const [{ data: sharedToMe }, { data: iShareTo }, { data: streamingSvcs }, { data: st }] = await Promise.all([
     db.from("subscription_personal_shares").select("owner_id").eq("viewer_id", me),
     db.from("subscription_personal_shares").select("viewer_id").eq("owner_id", me),
+    db.from("subscription_streaming_services").select("id, name, sort_order").eq("owner_id", me).order("sort_order").order("name"),
     db.from("app_settings").select("exchange_rate, eur_rate, display_currency").eq("id", 1).single(),
   ]);
   const sharedOwnerIds = [...new Set((sharedToMe ?? []).map((r) => String(r.owner_id)).filter(Boolean))];
@@ -60,6 +61,7 @@ export async function GET(request: NextRequest) {
     .filter((r) => r.owner_id && r.owner_id !== me)
     .map((r) => ({ ...r, owner_label: labelMap.get(String(r.owner_id)) ?? "ผู้ใช้อื่น" }));
   const sharedWith = viewerIds.map((id) => ({ id, name: labelMap.get(id) ?? id }));
+  const services = (streamingSvcs ?? []) as { id: string; name: string; sort_order: number }[];
 
   const settings: SubSettings = st
     ? {
@@ -69,5 +71,5 @@ export async function GET(request: NextRequest) {
       }
     : DEFAULT_SETTINGS;
 
-  return NextResponse.json({ mine, shared, sharedWith, settings, error: null });
+  return NextResponse.json({ mine, shared, sharedWith, services, settings, error: null });
 }

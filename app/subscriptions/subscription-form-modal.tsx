@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import {
   CYCLE_LABEL, TYPE_LABEL, validateSubInput,
-  type BillingCycle, type Currency, type SubInput, type SubType, type Subscription,
+  type BillingCycle, type Currency, type SubInput, type SubType, type Subscription, type StreamingService,
 } from "@/lib/subscriptions";
 
 const INP = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 bg-white";
@@ -16,7 +16,7 @@ const EMPTY: SubInput = {
   name: "", category: "", billing_cycle: "monthly", cost: 0, currency: "THB",
   billing_date: null, chrome_profile: "", chrome_profile_url: "", chrome_profile_dir: "", invoice_url: "",
   notes: "", active: true, type: "work", account_email: "", card_last4: "", card_statement_name: "",
-  pending_cancel: false, want_to_buy: false, owner_id: null,
+  pending_cancel: false, want_to_buy: false, owner_id: null, streaming: [],
 };
 
 function fromSub(s: Subscription): SubInput {
@@ -24,22 +24,46 @@ function fromSub(s: Subscription): SubInput {
   return { ...EMPTY, ...rest };
 }
 
-export function SubscriptionFormModal({ open, editing, categories, saving, defaults, onClose, onSave }: {
+export function SubscriptionFormModal({ open, editing, categories, saving, defaults, streamingServices, onQuickAddStreaming, onClose, onSave }: {
   open: boolean;
   editing: Subscription | null;
   categories: string[];
   saving: boolean;
   defaults?: Partial<SubInput> | null;
+  /** ถ้าส่งมา (ไม่ null) = โหมดส่วนตัว → โชว์ section เลือก streaming */
+  streamingServices?: StreamingService[] | null;
+  /** เพิ่ม streaming ใหม่เข้าคลัง (คืน service ที่สร้าง) — หน้าเรียก API เอง */
+  onQuickAddStreaming?: (name: string) => Promise<StreamingService | null>;
   onClose: () => void;
   onSave: (input: SubInput) => void;
 }) {
   const [form, setForm] = useState<SubInput>(EMPTY);
   const [dirty, setDirty] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [newStreaming, setNewStreaming] = useState("");
+  const [addingStreaming, setAddingStreaming] = useState(false);
+
+  const toggleStreaming = (id: string) => {
+    setForm((f) => {
+      const has = f.streaming.includes(id);
+      return { ...f, streaming: has ? f.streaming.filter((x) => x !== id) : [...f.streaming, id] };
+    });
+    setDirty(true);
+  };
+
+  const quickAddStreaming = async () => {
+    const name = newStreaming.trim();
+    if (!name || !onQuickAddStreaming) return;
+    setAddingStreaming(true);
+    try {
+      const svc = await onQuickAddStreaming(name);
+      if (svc) { setForm((f) => ({ ...f, streaming: [...f.streaming, svc.id] })); setDirty(true); setNewStreaming(""); }
+    } finally { setAddingStreaming(false); }
+  };
 
   // เติมฟอร์มเมื่อเปิด
   useEffect(() => {
-    if (open) { setForm(editing ? fromSub(editing) : { ...EMPTY, ...(defaults ?? {}) }); setDirty(false); setErr(null); }
+    if (open) { setForm(editing ? fromSub(editing) : { ...EMPTY, ...(defaults ?? {}) }); setDirty(false); setErr(null); setNewStreaming(""); }
   }, [open, editing, defaults]);
 
   const set = <K extends keyof SubInput>(k: K, v: SubInput[K]) => {
@@ -115,6 +139,40 @@ export function SubscriptionFormModal({ open, editing, categories, saving, defau
           <Check label="🛒 อยากซื้อ (ยังไม่ได้ซื้อ)" checked={form.want_to_buy} onChange={(v) => set("want_to_buy", v)} />
           <Check label="⏳ กำลังจะยกเลิก" checked={form.pending_cancel} onChange={(v) => set("pending_cancel", v)} />
         </div>
+
+        {/* Streaming ที่ได้ (เฉพาะโหมดส่วนตัว = ส่ง streamingServices มา) */}
+        {streamingServices && (
+          <div className="rounded-lg bg-violet-50/60 border border-violet-100 px-3 py-2.5 space-y-2">
+            <div className="text-xs font-medium text-violet-700">📺 Streaming ที่ได้จากรายการนี้</div>
+            {streamingServices.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {streamingServices.map((s) => {
+                  const on = form.streaming.includes(s.id);
+                  return (
+                    <button key={s.id} type="button" onClick={() => toggleStreaming(s.id)}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                      {on ? "✓ " : ""}{s.name}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400">ยังไม่มีบริการในคลัง — เพิ่มด้านล่าง หรือที่มุมมอง 📺 Streaming</p>
+            )}
+            {onQuickAddStreaming && (
+              <div className="flex items-center gap-1.5">
+                <input value={newStreaming} onChange={(e) => setNewStreaming(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); quickAddStreaming(); } }}
+                  placeholder="เพิ่มบริการใหม่ เช่น iQIYI, WeTV, Netflix"
+                  className="flex-1 h-8 px-2.5 text-sm border border-slate-200 rounded-lg bg-white outline-none focus:border-violet-400" />
+                <button type="button" onClick={quickAddStreaming} disabled={!newStreaming.trim() || addingStreaming}
+                  className="h-8 px-3 text-xs font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
+                  {addingStreaming ? "…" : "＋ เพิ่ม"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3">
           <Field label="อีเมลบัญชี">
