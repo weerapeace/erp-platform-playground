@@ -29,7 +29,7 @@ import { AllInvoicesView } from "./all-invoices-view";
 import { DownloadInvoiceModal } from "./download-invoice-modal";
 import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, type BoardGroupBy } from "./subscriptions-board";
 
-type ViewMode = "list" | "inuse" | "calendar" | "wishlist" | "invoices" | "board";
+type ViewMode = "list" | "inuse" | "onetime" | "calendar" | "wishlist" | "invoices" | "board";
 
 const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
 
@@ -110,6 +110,11 @@ export default function SubscriptionsPage() {
     () => rows.filter((r) => r.active && r.type === "work" && (r.billing_cycle === "monthly" || r.billing_cycle === "yearly")),
     [rows],
   );
+  // ซื้อขาด = จ่ายครั้งเดียว (one-time) — แยกออกจาก "ใช้อยู่" และบอร์ด (ไม่ใช่ค่าใช้จ่ายประจำ)
+  const oneTimeRows = useMemo(() => rows.filter((r) => r.billing_cycle === "one-time"), [rows]);
+  // บอร์ด = เฉพาะรายการที่เป็นค่าประจำ (ตัดซื้อขาดออก)
+  const boardRows = useMemo(() => rows.filter((r) => r.billing_cycle !== "one-time"), [rows]);
+
   // ── handlers ───────────────────────────────────────────────
   const openCreate = useCallback(() => { setEditing(null); setCreateDefaults(null); setFormOpen(true); }, []);
   const openCreateWishlist = useCallback(() => { setEditing(null); setCreateDefaults({ want_to_buy: true, active: false }); setFormOpen(true); }, []);
@@ -376,6 +381,7 @@ export default function SubscriptionsPage() {
               {([
                 { k: "list", label: "📋 รายการ" },
                 { k: "inuse", label: `🟢 ใช้อยู่${inUseRows.length ? ` (${inUseRows.length})` : ""}` },
+                { k: "onetime", label: `💳 ซื้อขาด${oneTimeRows.length ? ` (${oneTimeRows.length})` : ""}` },
                 { k: "calendar", label: "📅 ปฏิทิน" },
                 { k: "wishlist", label: `🛒 อยากซื้อ${summary.wishlist ? ` (${summary.wishlist})` : ""}` },
                 { k: "invoices", label: "🧾 ใบเสร็จ" },
@@ -398,19 +404,22 @@ export default function SubscriptionsPage() {
           {view === "inuse" && (
             <p className="text-xs text-slate-500 -mb-1">เฉพาะ &quot;งาน&quot; ที่เปิดใช้งานอยู่ และจ่ายประจำ (รายเดือน/รายปี) — ไม่รวมส่วนตัว/รายการปิด/จ่ายครั้งเดียว</p>
           )}
-          {(view === "list" || view === "inuse") && (
+          {view === "onetime" && (
+            <p className="text-xs text-slate-500 -mb-1">รายการ &quot;ซื้อขาด&quot; จ่ายครั้งเดียว (ไม่ใช่ค่าใช้จ่ายประจำ) — แยกออกจาก &quot;ใช้อยู่&quot; และบอร์ด</p>
+          )}
+          {(view === "list" || view === "inuse" || view === "onetime") && (
             <DataTable
-              tableId={view === "inuse" ? "subscriptions-inuse" : "subscriptions"}
-              data={view === "inuse" ? inUseRows : rows}
+              tableId={view === "inuse" ? "subscriptions-inuse" : view === "onetime" ? "subscriptions-onetime" : "subscriptions"}
+              data={view === "inuse" ? inUseRows : view === "onetime" ? oneTimeRows : rows}
               columns={columns}
               views={view === "list" ? views : undefined}
               loading={loading}
               searchableKeys={["name", "card_statement_name", "category", "account_email", "notes"]}
               searchPlaceholder="ค้นหา ชื่อ / หมวดหมู่ / อีเมล…"
-              exportFilename={view === "inuse" ? "subscriptions-inuse" : "subscriptions"}
+              exportFilename={view === "inuse" ? "subscriptions-inuse" : view === "onetime" ? "subscriptions-onetime" : "subscriptions"}
               exportEntityType="subscriptions"
               pageSize={25}
-              emptyMessage={view === "inuse" ? "ยังไม่มีรายการที่ใช้อยู่ (รายเดือน/รายปี)" : "ยังไม่มีรายการ subscription"}
+              emptyMessage={view === "inuse" ? "ยังไม่มีรายการที่ใช้อยู่ (รายเดือน/รายปี)" : view === "onetime" ? "ยังไม่มีรายการซื้อขาด (จ่ายครั้งเดียว)" : "ยังไม่มีรายการ subscription"}
               onRowClick={canEdit ? openEdit : openInvoices}
             />
           )}
@@ -441,7 +450,7 @@ export default function SubscriptionsPage() {
                 {canEdit && <span className="text-[11px] text-slate-400 ml-auto hidden sm:inline">ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยน{GROUP_OPTIONS.find((o) => o.key === boardGroupBy)?.label} · คลิกการ์ดเพื่อแก้</span>}
               </div>
               <SubscriptionsBoard
-                rows={boardType === "all" ? rows : rows.filter((r) => r.type === boardType)}
+                rows={boardType === "all" ? boardRows : boardRows.filter((r) => r.type === boardType)}
                 settings={settings}
                 groupBy={boardGroupBy}
                 onEdit={canEdit ? openEdit : openInvoices}
