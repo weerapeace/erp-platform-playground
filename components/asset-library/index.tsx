@@ -795,6 +795,9 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkConfirmSrc, setLinkConfirmSrc] = useState<AssetRow | null>(null);   // รูปต้นทางที่เลือก (รอ confirm)
+  const [renameOpen, setRenameOpen] = useState(false);   // เปลี่ยนชื่อโฟลเดอร์ Drive (มีผลกับทุกรูปที่ใช้โฟลเดอร์นี้)
+  const [renameName, setRenameName] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
   const { brandBase, typeSub } = useDriveFolderMaps();
   const [pathAuto, setPathAuto] = useState(true);   // path ต้นฉบับตามโฟลเดอร์อัตโนมัติ (พิมพ์แก้เอง = หยุด)
 
@@ -931,6 +934,20 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
     finally { setLinkBusy(false); }
   };
 
+  // เปลี่ยนชื่อโฟลเดอร์ Drive จริง + อัปเดต path ของ "ทุกรูปที่ใช้โฟลเดอร์นี้"
+  const doRenameFolder = async () => {
+    const nm = renameName.trim();
+    if (!nm) { toast.error("ใส่ชื่อใหม่ก่อน"); return; }
+    setRenameBusy(true);
+    try {
+      const res = await apiFetch("/api/assets/drive-folders/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder_url: masterUrl, new_name: nm }) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "เปลี่ยนชื่อไม่สำเร็จ");
+      toast.success(`เปลี่ยนชื่อโฟลเดอร์เป็น “${nm}” แล้ว · อัปเดต ${j.count ?? 1} รูปที่ใช้โฟลเดอร์นี้`);
+      setRenameOpen(false); await loadDetail(); onChanged();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เปลี่ยนชื่อไม่สำเร็จ"); }
+    finally { setRenameBusy(false); }
+  };
+
   const trashed = d?.status === "trashed";
   const pathWarn = !trashed && !!masterPath.trim() && !pathMatchesRule(masterPath, rule.base_paths);
 
@@ -1048,6 +1065,10 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
                 <button onClick={copyPath} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-40">📋 คัดลอก path</button>
                 <button onClick={openFolder} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100 disabled:opacity-40">📂 เปิดโฟลเดอร์</button>
                 {masterUrl && <a href={masterUrl} target="_blank" rel="noreferrer" className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 flex items-center">🌐 เปิดต้นฉบับ</a>}
+                {!trashed && /\/folders\//.test(masterUrl) && (
+                  <button onClick={() => { setRenameName(driveFolderNameOf({ master_path: masterPath, title: d?.title, file_name: d?.file_name })); setRenameOpen(true); }}
+                    className="h-7 px-2.5 text-[11px] border border-amber-200 text-amber-700 bg-amber-50 rounded-md hover:bg-amber-100">✏️ เปลี่ยนชื่อโฟลเดอร์</button>
+                )}
               </div>
               <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} disabled={trashed}
                 placeholder="ลิงก์ Google Drive / Synology (เปิดได้ทุกที่) — ไม่ใส่ก็ได้"
@@ -1149,6 +1170,20 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
         defaultSearch={commonNameSeed([d?.title ?? title])}
         title="เลือกรูปที่มีโฟลเดอร์ Drive แล้ว" contextLabel="ผูกโฟลเดอร์เดียวกับรูปนี้"
         onSelect={(assets) => { const s = assets[0]; if (s) { setLinkPickerOpen(false); setLinkConfirmSrc(s); } }} />
+      {/* เปลี่ยนชื่อโฟลเดอร์ Drive — มีผลกับทุกรูปที่ใช้โฟลเดอร์นี้ */}
+      <ConfirmDialog open={renameOpen} onClose={() => setRenameOpen(false)} onConfirm={doRenameFolder}
+        title="เปลี่ยนชื่อโฟลเดอร์ต้นฉบับ" confirmText={renameBusy ? "กำลังเปลี่ยน…" : "เปลี่ยนชื่อ"} loading={renameBusy}
+        message={
+          <div>
+            <p className="mb-2">เปลี่ยนชื่อโฟลเดอร์ใน Google Drive จริง — และอัปเดต path ให้<b>ทุกรูปที่ใช้โฟลเดอร์นี้</b>ด้วย</p>
+            <input value={renameName} onChange={(e) => setRenameName(e.target.value)} autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter" && !renameBusy) void doRenameFolder(); }}
+              placeholder="ชื่อโฟลเดอร์ใหม่"
+              className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <p className="text-[11px] text-slate-400 mt-1.5">ไฟล์ข้างในไม่ถูกแตะ · ชื่อรูปในคลังไม่เปลี่ยน (เปลี่ยนแค่ชื่อโฟลเดอร์)</p>
+          </div>
+        } />
+
       {/* ยืนยันก่อนผูก — โชว์ชื่อโฟลเดอร์ปลายทาง */}
       <ConfirmDialog open={!!linkConfirmSrc} onClose={() => setLinkConfirmSrc(null)}
         onConfirm={() => { const s = linkConfirmSrc; setLinkConfirmSrc(null); if (s) void linkToSharedFolder(s); }}

@@ -110,6 +110,19 @@ export function parseDriveFolderId(url: string): string | null {
   return m ? m[1] : null;
 }
 
+/** เปลี่ยนชื่อโฟลเดอร์ใน Drive (คืน true ถ้าสำเร็จ) */
+export async function driveRenameFolder(id: string, name: string): Promise<boolean> {
+  const fid = (id || "").trim(); const nm = (name || "").trim();
+  if (!fid || !nm) return false;
+  const token = await getAccessToken();
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fid)}?supportsAllDrives=true`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: nm }),
+  });
+  return res.ok;
+}
+
 /** ย้ายโฟลเดอร์ (พร้อมไฟล์ข้างใน) ไป "ถังขยะของ Drive" — กู้คืนได้ ไม่ลบถาวร (คืน true ถ้าสำเร็จ) */
 export async function driveTrashFolder(id: string): Promise<boolean> {
   const fid = (id || "").trim(); if (!fid) return false;
