@@ -2497,7 +2497,8 @@ function DriveFolderMap() {
     try {
       const res = await apiFetch("/api/drive/folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ artwork_type: t, subfolder_name: tDraft[t] ?? "" }) });
       const j = await res.json(); if (!res.ok || j.error) { toast.error(j.error || "บันทึกไม่สำเร็จ"); return; }
-      toast.success("บันทึกแล้ว");
+      const extra = [j.renamed ? `เปลี่ยนชื่อโฟลเดอร์ Drive ${j.renamed}` : "", j.pathUpdated ? `อัปเดต path ${j.pathUpdated} รูป` : ""].filter(Boolean).join(" · ");
+      toast.success(extra ? `บันทึกแล้ว · ${extra}` : "บันทึกแล้ว");
     } catch { toast.error("บันทึกไม่สำเร็จ"); }
   };
   if (!driveOn) return null;
