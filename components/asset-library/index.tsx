@@ -244,6 +244,20 @@ export function AssetLibrary() {
           <div className="bg-white px-4 py-2 rounded-lg shadow text-sm text-indigo-700 font-medium">🎨 วางรูปที่นี่ → เพิ่ม Artwork · หลายรูป = เพิ่มหลายรูป</div>
         </div>
       )}
+      {/* bulk bar — ลอยอยู่บนสุด (sticky) เมื่อมีการเลือกไฟล์ */}
+      {selCount > 0 && (
+        <div className="sticky top-2 z-30 mb-3 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto flex-wrap justify-center">
+          <span className="text-sm font-medium">เลือก {selCount} ไฟล์</span>
+          {!trash && <button onClick={() => setBulkEditOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">✏️ แก้หลายรายการ</button>}
+          {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
+          {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 จัดอัลบั้ม</button>}
+          {!trash && driveOn && <button onClick={() => setBulkFolderOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗂️ สร้าง Folder Drive</button>}
+          {!trash && driveOn && <button onClick={() => setBulkLinkOpen(true)} disabled={bulkLinkBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkLinkBusy ? "กำลังผูก…" : "📎 ใช้โฟลเดอร์เดียวกัน"}</button>}
+          <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
+          <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
+        </div>
+      )}
+
       {/* header */}
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
@@ -404,20 +418,6 @@ export function AssetLibrary() {
           )}
         </main>
       </div>
-
-      {/* bulk bar */}
-      {selCount > 0 && (
-        <div className="sticky bottom-4 mt-4 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto">
-          <span className="text-sm font-medium">เลือก {selCount} ไฟล์</span>
-          {!trash && <button onClick={() => setBulkEditOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">✏️ แก้หลายรายการ</button>}
-          {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
-          {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 จัดอัลบั้ม</button>}
-          {!trash && driveOn && <button onClick={() => setBulkFolderOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗂️ สร้าง Folder Drive</button>}
-          {!trash && driveOn && <button onClick={() => setBulkLinkOpen(true)} disabled={bulkLinkBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkLinkBusy ? "กำลังผูก…" : "📎 ใช้โฟลเดอร์เดียวกัน"}</button>}
-          <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
-          <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
-        </div>
-      )}
 
       {/* modals */}
       {uploadOpen && (
