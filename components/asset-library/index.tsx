@@ -660,11 +660,18 @@ function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder 
             {formatBytes(a.size_bytes)}
             {a.usage_count > 0 ? ` · ใช้อยู่ ${a.usage_count} ที่` : a.status === "active" ? " · ยังไม่ถูกใช้" : ""}
           </p>
-          {onSameFolder && a.source === "artwork" && /\/folders\//.test(a.master_url ?? "") && (
-            <button type="button" title="ดูรูปทั้งหมดในโฟลเดอร์ Drive เดียวกัน"
-              onClick={(e) => { e.stopPropagation(); const m = (a.master_url ?? "").match(/\/folders\/([a-zA-Z0-9_-]+)/); if (m) onSameFolder(m[1], driveFolderNameOf(a)); }}
-              className="text-[10px] text-indigo-600 hover:underline shrink-0">📁 โฟลเดอร์</button>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/^https?:\/\//i.test(a.master_url ?? "") && (
+              <a href={(a.master_url ?? "").trim()} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                title="เปิดโฟลเดอร์/ไฟล์ต้นฉบับบน Google Drive"
+                className="text-[10px] text-emerald-600 hover:underline">↗ {/drive\.google\.com|\/folders\//i.test(a.master_url ?? "") ? "Drive" : "เปิด"}</a>
+            )}
+            {onSameFolder && a.source === "artwork" && /\/folders\//.test(a.master_url ?? "") && (
+              <button type="button" title="ดูรูปทั้งหมดในโฟลเดอร์ Drive เดียวกัน"
+                onClick={(e) => { e.stopPropagation(); const m = (a.master_url ?? "").match(/\/folders\/([a-zA-Z0-9_-]+)/); if (m) onSameFolder(m[1], driveFolderNameOf(a)); }}
+                className="text-[10px] text-indigo-600 hover:underline">📁 โฟลเดอร์</button>
+            )}
+          </div>
         </div>
       </div>
     </div>
