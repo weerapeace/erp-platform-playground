@@ -103,7 +103,13 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
       setRows((r) => [...r, ...((j.data ?? []) as AssetRow[])]); setTotal(j.total ?? 0);
     } catch { /* ignore */ } finally { setLoadingMore(false); }
   }, [buildParams, rows.length]);
-  useEffect(() => { if (open) void load(); }, [open, load]);
+  // โหมดล็อกอัลบั้ม: ข้ามโหลดแรก (collectionId ยังว่าง) จนกว่าจะ resolve ชื่อ→id ได้
+  // ไม่งั้นโหลด "ทุกรูป" (collectionId="") จะยิงก่อน แล้ว response มาทับผลที่กรองอัลบั้มแล้ว (race → โชว์ทุกรูป)
+  useEffect(() => {
+    if (!open) return;
+    if (lockCollectionName && !collectionId) { setLoading(true); return; }
+    void load();
+  }, [open, load, lockCollectionName, collectionId]);
 
   const pick = (a: AssetRow) => {
     setSelected((m) => {
