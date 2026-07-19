@@ -2357,7 +2357,7 @@ function DriveScanModal({ onClose, onDone }: { onClose: () => void; onDone: () =
           <span className="text-[12px] text-slate-400">{folders ? `ยังไม่เชื่อม ${folders.length} · เลือก ${sel.size}` : ""}</span>
           <div className="flex gap-2">
             <button onClick={onClose} disabled={importing} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
-            <button onClick={doImport} disabled={importing || !sel.size} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{importing && <Spinner />}{importing ? "กำลังนำเข้า…" : `นำเข้า ${sel.size} รายการ`}</button>
+            <button onClick={doImport} disabled={importing || !sel.size} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{importing && <Spinner />}{importing ? "กำลังนำเข้า…" : `นำเข้า ${sel.size} โฟลเดอร์`}</button>
           </div>
         </div>
       }>

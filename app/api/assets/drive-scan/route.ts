@@ -38,8 +38,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const subToType = new Map<string, string>();
   for (const r of (tf ?? []) as { artwork_type: string; subfolder_name: string | null }[]) if (r.subfolder_name) subToType.set(r.subfolder_name.trim(), r.artwork_type);
 
-  // โฟลเดอร์ที่เชื่อมแล้ว (folder id จาก master_url ของ asset ทั้งหมด)
-  const { data: linked } = await admin.from("assets").select("master_url").like("master_url", "%/folders/%");
+  // โฟลเดอร์ที่เชื่อมแล้ว (folder id จาก master_url ของ asset ที่ยังใช้งาน — ลบ(trashed)ไม่นับ ให้โผล่มาเชื่อมใหม่ได้)
+  const { data: linked } = await admin.from("assets").select("master_url").eq("status", "active").like("master_url", "%/folders/%");
   const linkedSet = new Set<string>();
   for (const a of (linked ?? []) as { master_url: string | null }[]) { const id = parseDriveFolderId(a.master_url ?? ""); if (id) linkedSet.add(id); }
 

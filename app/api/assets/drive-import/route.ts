@@ -19,6 +19,22 @@ export const maxDuration = 60;
 
 type Folder = { folderId: string; folderName: string; folderLink?: string; artworkType?: string; master_path?: string };
 
+const IMG_RE = /^image\/(png|jpe?g|webp|gif)$/i;   // เฉพาะไฟล์รูปจริง (กัน .psd/.ai ที่ mime ขึ้นต้น image/ เหมือนกัน)
+
+// ย่อรูปฝั่ง server เหลือกว้าง ≤1200px (คง png/webp · อื่น→jpeg) · gif/svg ไม่ย่อ · sharp พังก็คืนของเดิม
+async function downscaleServer(bytes: Uint8Array, mime: string, maxW = 1200): Promise<{ bytes: Uint8Array; mime: string }> {
+  if (/gif|svg/i.test(mime)) return { bytes, mime };
+  try {
+    const sharp = (await import("sharp")).default;
+    const meta = await sharp(bytes).metadata();
+    if (!meta.width || meta.width <= maxW) return { bytes, mime };
+    const fmt = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpeg";
+    const p = sharp(bytes).rotate().resize({ width: maxW, withoutEnlargement: true });
+    const out = fmt === "png" ? await p.png().toBuffer() : fmt === "webp" ? await p.webp({ quality: 80 }).toBuffer() : await p.jpeg({ quality: 85 }).toBuffer();
+    return { bytes: new Uint8Array(out), mime: `image/${fmt}` };
+  } catch { return { bytes, mime }; }
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "assets.upload"); if (denied) return denied;
   if (!driveConfigured()) return NextResponse.json({ error: "ยังไม่ได้ตั้งค่า Google Drive" }, { status: 503 });
@@ -33,37 +49,42 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let imported = 0, skipped = 0, failed = 0;
   const results: { folderId: string; ok: boolean; skipped?: boolean; reason?: string }[] = [];
 
+  const actor = await actorId(request);
+  const artworkTypeOf = (f: Folder) => (f.artworkType || "").trim() || null;
+  const folderLinkOf = (f: Folder) => f.folderLink || `https://drive.google.com/drive/folders/${f.folderId}`;
+
   for (const f of folders) {
-    const name = (f.folderName || "artwork").trim();
+    const folderName = (f.folderName || "artwork").trim();
     try {
-      const imgs = await driveListImages(f.folderId);
-      // เลือกรูป preview: ชื่อตรงกับโฟลเดอร์ก่อน · ไม่งั้นรูปแรก
-      const pick = imgs.find((x) => x.name.replace(/\.[^.]+$/, "").trim() === name) || imgs[0];
-      if (!pick) { skipped++; results.push({ folderId: f.folderId, ok: false, skipped: true, reason: "no-image" }); continue; }
+      const imgs = (await driveListImages(f.folderId)).filter((x) => IMG_RE.test(x.mimeType));   // เฉพาะไฟล์รูปจริง
+      if (!imgs.length) { skipped++; results.push({ folderId: f.folderId, ok: false, skipped: true, reason: "no-image" }); continue; }
 
-      const dl = await driveDownloadFile(pick.id);
-      if (!dl) { failed++; results.push({ folderId: f.folderId, ok: false, reason: "download-failed" }); continue; }
-
-      const checksum = await sha256Hex(dl.bytes.buffer as ArrayBuffer);
-      const ext = extOf(pick.name);
-      const r2Key = `library/${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext ? "." + ext : ""}`;
-      await r2PutObject(r2Key, dl.bytes, dl.mimeType || "image/png");
-
-      const artworkType = (f.artworkType || "").trim() || null;
-      const { error } = await admin.from("assets").insert({
-        title: name, file_name: pick.name, r2_key: r2Key, asset_type: detectAssetType(dl.mimeType, pick.name),
-        content_type: dl.mimeType || null, ext: ext || null, size_bytes: dl.bytes.byteLength,
-        checksum, uploaded_by: await actorId(request), status: "active",
-        source: "artwork", artwork_type: artworkType, artwork_types: artworkType ? [artworkType] : [],
-        master_path: (f.master_path || "").trim() || null,
-        master_url: (f.folderLink || `https://drive.google.com/drive/folders/${f.folderId}`),
-        brand_id: brandId,
-      });
-      if (error) { failed++; results.push({ folderId: f.folderId, ok: false, reason: error.message }); continue; }
-      imported++; results.push({ folderId: f.folderId, ok: true });
+      let folderOk = 0;
+      for (const img of imgs) {   // นำเข้าทุกรูปในโฟลเดอร์ (หลายสี = หลายบัตร)
+        try {
+          const dl = await driveDownloadFile(img.id);
+          if (!dl) { failed++; continue; }
+          const { bytes, mime } = await downscaleServer(dl.bytes, dl.mimeType || "image/png", 1200);   // ย่อ ≤1200px
+          const title = img.name.replace(/\.[^.]+$/, "").trim() || folderName;   // ชื่อบัตร = ชื่อไฟล์รูป (แยกแต่ละสี)
+          const ext = extOf(img.name) || (mime.split("/")[1] ?? "");
+          const r2Key = `library/${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext ? "." + ext : ""}`;
+          await r2PutObject(r2Key, bytes, mime);
+          const at = artworkTypeOf(f);
+          const { error } = await admin.from("assets").insert({
+            title, file_name: img.name, r2_key: r2Key, asset_type: detectAssetType(mime, img.name),
+            content_type: mime || null, ext: ext || null, size_bytes: bytes.byteLength,
+            checksum: await sha256Hex(bytes.buffer as ArrayBuffer), uploaded_by: actor, status: "active",
+            source: "artwork", artwork_type: at, artwork_types: at ? [at] : [],
+            master_path: (f.master_path || "").trim() || null, master_url: folderLinkOf(f), brand_id: brandId,
+          });
+          if (error) { failed++; continue; }
+          imported++; folderOk++;
+        } catch { failed++; }
+      }
+      results.push({ folderId: f.folderId, ok: folderOk > 0 });
     } catch (e) { failed++; results.push({ folderId: f.folderId, ok: false, reason: e instanceof Error ? e.message : "error" }); }
   }
 
-  await writeAudit(admin, { action: "create", entityType: "asset", actorId: await actorId(request), metadata: { drive_import: { imported, skipped, failed } } });
+  await writeAudit(admin, { action: "create", entityType: "asset", actorId: actor, metadata: { drive_import: { imported, skipped, failed } } });
   return NextResponse.json({ imported, skipped, failed, results, error: null });
 }
