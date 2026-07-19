@@ -32,6 +32,7 @@ import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
 import { TaskContentTab } from "./task-content-tab";
 import { HoverImage } from "@/components/hover-image";
+import { InfoHint } from "@/components/info-hint";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./use-statuses";
 import {
@@ -347,15 +348,27 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
               {/* สร้างโฟลเดอร์ Google Drive + อัปไฟล์แนบขึ้น Drive (ถ้ายังไม่มีโฟลเดอร์) */}
               {!d.drive_folder_url && (
-                <button disabled={driveBusy}
-                  onClick={async () => {
-                    setDriveBusy(true);
-                    try { const r = await syncTaskDrive(d.id); pushToast("success", t(`สร้างโฟลเดอร์ + อัป ${r.uploaded} ไฟล์ขึ้น Drive แล้ว`, `Folder created + ${r.uploaded} file(s) uploaded`)); if (r.url) window.open(r.url, "_blank"); await load(); }
-                    catch (e) { pushToast("error", (e as Error).message); } finally { setDriveBusy(false); }
-                  }}
-                  className="text-xs px-2.5 py-1 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:text-violet-700 hover:border-violet-300 hover:bg-violet-50 disabled:opacity-50">
-                  {driveBusy ? t("กำลังทำ...", "Working...") : `📁 ${t("สร้างโฟลเดอร์ + อัปไฟล์ขึ้น Drive", "Create Drive folder + upload files")}`}
-                </button>
+                <div className="inline-flex items-center gap-1.5">
+                  <button disabled={driveBusy}
+                    onClick={async () => {
+                      setDriveBusy(true);
+                      try { const r = await syncTaskDrive(d.id); pushToast("success", t(`สร้างโฟลเดอร์ + อัป ${r.uploaded} ไฟล์ขึ้น Drive แล้ว`, `Folder created + ${r.uploaded} file(s) uploaded`)); if (r.url) window.open(r.url, "_blank"); await load(); }
+                      catch (e) { pushToast("error", (e as Error).message); } finally { setDriveBusy(false); }
+                    }}
+                    className="text-xs px-2.5 py-1 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:text-violet-700 hover:border-violet-300 hover:bg-violet-50 disabled:opacity-50">
+                    {driveBusy ? t("กำลังทำ...", "Working...") : `📁 ${t("สร้างโฟลเดอร์ + อัปไฟล์ขึ้น Drive", "Create Drive folder + upload files")}`}
+                  </button>
+                  <InfoHint label={t("ปุ่มนี้ทำอะไร", "What this button does")}>
+                    <b className="text-slate-800">📁 {t("ปุ่มนี้ทำอะไร", "What this button does")}</b>
+                    <ul className="mt-1 list-disc pl-4 space-y-0.5">
+                      <li>{t('สร้างโฟลเดอร์ใน Google Drive (Shared Drive) ชื่อ "เลขงาน + ชื่องาน" เช่น ', 'Creates a Google Drive folder (Shared Drive) named "task no. + title", e.g. ')}<span className="text-slate-500">{d.task_no ?? "CT-…"} {d.title}</span></li>
+                      <li>{t("อัปไฟล์แนบทั้งหมดของงานนี้ขึ้นโฟลเดอร์นั้นให้อัตโนมัติ", "Uploads all of this task's attached files into that folder automatically")}</li>
+                      <li>{t("มีโฟลเดอร์อยู่แล้วจะไม่สร้างซ้ำ · ไฟล์ที่อัปแล้วจะไม่อัปซ้ำ (กดซ้ำได้ปลอดภัย)", "Won't create a duplicate folder · won't re-upload files already uploaded (safe to re-run)")}</li>
+                      <li>{t('เสร็จแล้วเปิดโฟลเดอร์ให้ทันที และปุ่มจะเปลี่ยนเป็น "โฟลเดอร์ Drive" + "ซิงค์ไฟล์"', 'Opens the folder when done; the button then becomes "Drive Folder" + "Sync files"')}</li>
+                    </ul>
+                    <div className="mt-1.5 text-[10px] text-slate-400">{t("ต้องตั้งค่า Google Drive ในระบบก่อน (ผู้ดูแล) · บันทึกประวัติทุกครั้ง", "Requires Google Drive to be configured (admin) · every run is logged")}</div>
+                  </InfoHint>
+                </div>
               )}
 
               {/* ลิงก์ผลงาน */}
