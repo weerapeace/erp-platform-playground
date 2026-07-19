@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
   const limit  = Math.min(Number(sp.get("limit") ?? 60) || 60, 200);
   const offset = Number(sp.get("offset") ?? 0) || 0;
   const hasFolder = sp.get("has_folder") === "1";   // เฉพาะที่มีโฟลเดอร์ Drive แล้ว (master_url มี /folders/)
+  const folder    = (sp.get("folder") ?? "").replace(/[^a-zA-Z0-9_-]/g, "");   // เฉพาะรูปในโฟลเดอร์ Drive นี้ (folder id)
 
   const admin = supabaseAdmin();
 
@@ -71,6 +72,7 @@ export async function GET(request: NextRequest) {
   if (collAssetIds) q = q.in("id", collAssetIds);
   if (tagAssetIds) q = q.in("id", tagAssetIds);
   if (hasFolder) q = q.like("master_url", "%/folders/%");   // มีโฟลเดอร์ Drive แล้วเท่านั้น
+  if (folder) q = q.like("master_url", `%/folders/${folder}%`);   // เฉพาะรูปในโฟลเดอร์ Drive นี้
   if (search) {
     for (const raw of search.split(/\s+/)) {
       const t = sanitizeToken(raw);

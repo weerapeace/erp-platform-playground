@@ -50,6 +50,7 @@ export function AssetLibrary() {
   const PAGE_SIZE = 60;
 
   const [search, setSearch] = useState("");
+  const [folderFilter, setFolderFilter] = useState<{ id: string; label: string } | null>(null);   // ดูรูปในโฟลเดอร์ Drive เดียวกัน
   const [type, setType] = useState("");
   const [collectionId, setCollectionId] = useState<string | null>(null); // null=ทั้งหมด, "none"=ไม่อยู่อัลบั้ม
   const [tag, setTag] = useState<string | null>(null);
@@ -86,9 +87,9 @@ export function AssetLibrary() {
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
   const [searchFolders, setSearchFolders] = useState<{ id: string; code: string; name: string }[]>([]);   // โฟลเดอร์ Parent ที่ตรงคำค้น
   const [brandOpenParent, setBrandOpenParent] = useState<string | null>(null);   // กดโฟลเดอร์จากผลค้นหา → เปิด parent ในมุมมองแบรนด์
-  const searching = search.trim().length > 0;
+  const searching = search.trim().length > 0 && !folderFilter;
   const byBrand = source === "by-brand";
-  const showBrandView = byBrand && !searching;   // ค้นหา = โชว์ผลค้นหาทั่วทั้งคลังแทนมุมมองแบรนด์
+  const showBrandView = byBrand && !searching && !folderFilter;   // ค้นหา/ดูโฟลเดอร์ = ใช้กริดปกติ
 
   useEffect(() => {
     supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {});
@@ -96,6 +97,18 @@ export function AssetLibrary() {
 
   // ── โหลดรายการไฟล์ ──
   const load = useCallback(async () => {
+    // โหมดดูรูปในโฟลเดอร์ Drive เดียวกัน — ข้ามฟิลเตอร์อื่น
+    if (folderFilter) {
+      setLoading(true);
+      try {
+        const p = new URLSearchParams({ status: "active", source: "all", folder: folderFilter.id, limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) });
+        const res = await apiFetch(`/api/assets?${p.toString()}`); const j = await res.json();
+        if (j.error) throw new Error(j.error);
+        setRows(j.data ?? []); setTotal(j.total ?? 0);
+      } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดคลังไม่สำเร็จ"); }
+      finally { setLoading(false); }
+      return;
+    }
     const isSearch = search.trim().length > 0;
     // มุมมองแบรนด์: ถ้าไม่ได้ค้นหา ปล่อยให้ BrandAlbumBrowser จัดการ (API แยก)
     if (source === "by-brand" && !isSearch) { setRows([]); setTotal(0); setLoading(false); return; }
@@ -119,7 +132,7 @@ export function AssetLibrary() {
       setTotal(j.total ?? 0);
     } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดคลังไม่สำเร็จ"); }
     finally { setLoading(false); }
-  }, [search, type, collectionId, tag, trash, source, artworkType, page, toast]);
+  }, [search, type, collectionId, tag, trash, source, artworkType, folderFilter, page, toast]);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -136,7 +149,8 @@ export function AssetLibrary() {
   useEffect(() => { void loadMeta(); }, [loadMeta]);
   useEffect(() => { setSelected(new Set()); }, [type, collectionId, tag, trash, source]);
   useEffect(() => { setArtworkType(""); }, [source]);   // เปลี่ยนหมวด → ล้างฟิลเตอร์ชนิด artwork
-  useEffect(() => { setPage(0); }, [search, type, collectionId, tag, trash, source, artworkType]);   // เปลี่ยนฟิลเตอร์/ค้นหา → กลับหน้าแรก
+  useEffect(() => { setPage(0); }, [search, type, collectionId, tag, trash, source, artworkType, folderFilter]);   // เปลี่ยนฟิลเตอร์/ค้นหา → กลับหน้าแรก
+  useEffect(() => { setFolderFilter(null); }, [search, type, collectionId, tag, trash, source, artworkType]);   // ยุ่งกับฟิลเตอร์อื่น = ออกจากโหมดดูโฟลเดอร์
   const goPage = (p: number) => { setPage(p); if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" }); };
   // อยู่หน้าที่เกินช่วง (เช่นลบจนเหลือน้อย) → เด้งกลับหน้าสุดท้ายที่มีจริง
   useEffect(() => { if (!loading && page > 0 && rows.length === 0 && total > 0) setPage(Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)); }, [loading, page, rows.length, total]);
@@ -350,6 +364,12 @@ export function AssetLibrary() {
 
         {/* grid */}
         <main className="flex-1 min-w-0">
+          {folderFilter && (
+            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-2">
+              <p className="text-[12px] text-indigo-700">📁 รูปในโฟลเดอร์เดียวกับ “<b>{folderFilter.label}</b>” · {total.toLocaleString("th-TH")} รูป</p>
+              <button onClick={() => setFolderFilter(null)} className="text-[12px] text-indigo-600 hover:underline">✕ ออกจากมุมมองโฟลเดอร์</button>
+            </div>
+          )}
           {searching && (
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
               <p className="text-[12px] text-slate-500">🔍 ผลค้นหา “<b>{search.trim()}</b>” ทั้งคลัง · {total.toLocaleString("th-TH")} ไฟล์</p>
@@ -398,7 +418,8 @@ export function AssetLibrary() {
             <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
               {rows.map((a) => (
                 <AssetCard key={a.id} a={a} selected={selected.has(a.id)} selectionMode={selCount > 0}
-                  onToggle={() => toggleSel(a.id)} onOpen={() => setDetailId(a.id)} />
+                  onToggle={() => toggleSel(a.id)} onOpen={() => setDetailId(a.id)}
+                  onSameFolder={(id, label) => setFolderFilter({ id, label })} />
               ))}
             </div>
           )}
@@ -592,8 +613,8 @@ function commonNameSeed(titles: string[]): string {
 }
 
 
-function AssetCard({ a, selected, selectionMode, onToggle, onOpen }: {
-  a: AssetRow; selected: boolean; selectionMode: boolean; onToggle: () => void; onOpen: () => void;
+function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder }: {
+  a: AssetRow; selected: boolean; selectionMode: boolean; onToggle: () => void; onOpen: () => void; onSameFolder?: (id: string, label: string) => void;
 }) {
   const [broken, setBroken] = useState(false);
   return (
@@ -623,14 +644,21 @@ function AssetCard({ a, selected, selectionMode, onToggle, onOpen }: {
             )}
           </div>
         </HoverPreview>
-        <div className="px-2 py-1.5">
-          <p className="text-[12px] font-medium text-slate-700 truncate">{a.title}</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">
+      </button>
+      <div className="px-2 py-1.5 cursor-pointer" onClick={selectionMode ? () => onToggle() : onOpen}>
+        <p className="text-[12px] font-medium text-slate-700 truncate">{a.title}</p>
+        <div className="flex items-center justify-between gap-1 mt-0.5">
+          <p className="text-[10px] text-slate-400 truncate">
             {formatBytes(a.size_bytes)}
             {a.usage_count > 0 ? ` · ใช้อยู่ ${a.usage_count} ที่` : a.status === "active" ? " · ยังไม่ถูกใช้" : ""}
           </p>
+          {onSameFolder && a.source === "artwork" && /\/folders\//.test(a.master_url ?? "") && (
+            <button type="button" title="ดูรูปทั้งหมดในโฟลเดอร์ Drive เดียวกัน"
+              onClick={(e) => { e.stopPropagation(); const m = (a.master_url ?? "").match(/\/folders\/([a-zA-Z0-9_-]+)/); if (m) onSameFolder(m[1], driveFolderNameOf(a)); }}
+              className="text-[10px] text-indigo-600 hover:underline shrink-0">📁 โฟลเดอร์</button>
+          )}
         </div>
-      </button>
+      </div>
     </div>
   );
 }
