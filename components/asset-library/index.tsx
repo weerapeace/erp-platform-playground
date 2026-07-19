@@ -244,20 +244,6 @@ export function AssetLibrary() {
           <div className="bg-white px-4 py-2 rounded-lg shadow text-sm text-indigo-700 font-medium">🎨 วางรูปที่นี่ → เพิ่ม Artwork · หลายรูป = เพิ่มหลายรูป</div>
         </div>
       )}
-      {/* bulk bar — ลอยอยู่บนสุด (sticky) เมื่อมีการเลือกไฟล์ */}
-      {selCount > 0 && (
-        <div className="sticky top-2 z-30 mb-3 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto flex-wrap justify-center">
-          <span className="text-sm font-medium">เลือก {selCount} ไฟล์</span>
-          {!trash && <button onClick={() => setBulkEditOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">✏️ แก้หลายรายการ</button>}
-          {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
-          {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 จัดอัลบั้ม</button>}
-          {!trash && driveOn && <button onClick={() => setBulkFolderOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗂️ สร้าง Folder Drive</button>}
-          {!trash && driveOn && <button onClick={() => setBulkLinkOpen(true)} disabled={bulkLinkBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkLinkBusy ? "กำลังผูก…" : "📎 ใช้โฟลเดอร์เดียวกัน"}</button>}
-          <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
-          <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
-        </div>
-      )}
-
       {/* header */}
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
@@ -418,6 +404,20 @@ export function AssetLibrary() {
           )}
         </main>
       </div>
+
+      {/* bulk bar — อยู่ล่าง (ที่เดิม) · z สูง ลอยอยู่หน้าสุดไม่โดนบัง */}
+      {selCount > 0 && (
+        <div className="sticky bottom-4 z-40 mt-4 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto flex-wrap justify-center">
+          <span className="text-sm font-medium">เลือก {selCount} ไฟล์</span>
+          {!trash && <button onClick={() => setBulkEditOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">✏️ แก้หลายรายการ</button>}
+          {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
+          {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 จัดอัลบั้ม</button>}
+          {!trash && driveOn && <button onClick={() => setBulkFolderOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗂️ สร้าง Folder Drive</button>}
+          {!trash && driveOn && <button onClick={() => setBulkLinkOpen(true)} disabled={bulkLinkBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkLinkBusy ? "กำลังผูก…" : "📎 ใช้โฟลเดอร์เดียวกัน"}</button>}
+          <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
+          <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
+        </div>
+      )}
 
       {/* modals */}
       {uploadOpen && (
@@ -1550,9 +1550,11 @@ async function uploadArtworkToDrive(opts: {
   name: string; artworkType?: string; brandId?: string;
   srcFiles: File[]; previewFile?: File | null;
   folderId?: string;   // ส่งมา = อัปเข้าโฟลเดอร์นี้เลย (ไม่สร้างใหม่) — ใช้ตอน "หลายรูป โฟลเดอร์เดียว"
+  folderName?: string; // ตั้งชื่อโฟลเดอร์แยกจากชื่อไฟล์ (โหมดโฟลเดอร์รวม — ไฟล์ยังชื่อตามรูปแต่ละใบ)
   onProgress?: (done: number, total: number) => void;
 }): Promise<{ folderId: string; folderLink: string; largeCount: number }> {
   const nm = opts.name.trim() || "artwork";
+  const folderNm = opts.folderName?.trim() || nm;   // ชื่อโฟลเดอร์ (ตั้งแยกได้) · ไม่ตั้ง = ชื่อไฟล์
   const named = opts.srcFiles.map((f, i) => ({ file: f, filename: `${nm}${i > 0 ? `_${i + 1}` : ""}${f.name.match(/\.[^.]+$/)?.[0] ?? ""}` }));
   const small = named.filter((x) => x.file.size <= DRIVE_MAX_PROXY);
   const large = named.filter((x) => x.file.size > DRIVE_MAX_PROXY);
@@ -1560,7 +1562,7 @@ async function uploadArtworkToDrive(opts: {
   let folderId = opts.folderId ?? "", folderLink = "";
   const doUpload = async (x: { file: File; filename: string } | null) => {
     const fd = new FormData();
-    fd.append("name", nm);
+    fd.append("name", folderNm);
     if (opts.artworkType) fd.append("artworkType", opts.artworkType);
     if (opts.brandId) fd.append("brand_id", opts.brandId);
     if (folderId) fd.append("folderId", folderId);
@@ -1841,6 +1843,7 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   const [driveOn, setDriveOn] = useState(false);
   const [oneFolder, setOneFolder] = useState(false);   // รูปชุดนี้ใช้โฟลเดอร์ Drive เดียวกัน (แทนที่จะสร้างแยกทุกใบ)
+  const [oneFolderName, setOneFolderName] = useState("");   // ชื่อโฟลเดอร์รวม (default = ชื่อร่วม/รูปแรก)
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -1900,6 +1903,9 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
     // แถวที่ไม่มี path/ลิงก์ แต่มีไฟล์ต้นฉบับให้อัปขึ้น Drive ก็ถือว่าครบ (ได้ลิงก์โฟลเดอร์มาเติมให้)
     const missing = (driveOn && oneFolder) ? [] : rows.filter((r) => !r.path.trim() && !r.url.trim() && !(driveOn && r.srcFiles.length > 0));
     if (missing.length) { toast.error(`มี ${missing.length} แถวยังไม่ใส่ที่อยู่ไฟล์ต้นฉบับ (path / ลิงก์ / โยนไฟล์ขึ้น Drive)`); return; }
+    // ชื่อโฟลเดอร์รวม (โหมดโฟลเดอร์เดียว) = ที่ตั้งไว้ · ไม่ตั้ง = ชื่อร่วมของรูป/รูปแรก
+    const combinedName = oneFolderName.trim() || commonNameSeed(rows.map((r) => r.name)) || rows[0]?.name?.trim() || "artwork";
+    const combinedPath = oneFolder ? massPath(combinedName, rows[0]?.types ?? []) : "";   // path ชี้โฟลเดอร์รวม (ทุกใบเหมือนกัน)
     setBusy(true); setProgress({ done: 0, total: rows.length });
     let ok = 0, fail = 0, largeTotal = 0;
     let sharedFolderId = "";   // โหมดโฟลเดอร์เดียว: ใบแรกสร้างโฟลเดอร์ → ใบต่อ ๆ ไปอัปเข้าโฟลเดอร์นี้
@@ -1911,7 +1917,7 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
         if (driveOn && (oneFolder || r.srcFiles.length > 0)) {
           const { folderId, folderLink, largeCount } = await uploadArtworkToDrive({
             name: r.name, artworkType: r.types[0], brandId: batchBrandId, srcFiles: r.srcFiles, previewFile: upFile,
-            folderId: oneFolder ? sharedFolderId : "",
+            folderId: oneFolder ? sharedFolderId : "", folderName: oneFolder ? combinedName : undefined,
           });
           if (oneFolder && folderId) sharedFolderId = folderId;
           if (folderLink) effUrl = folderLink; largeTotal += largeCount;
@@ -1921,7 +1927,8 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
         fd.append("brand_id", batchBrandId);
         if (r.name.trim()) fd.append("title", r.name.trim());
         if (r.types.length) fd.append("artwork_types", JSON.stringify(r.types));
-        if (r.path.trim()) fd.append("master_path", r.path.trim());
+        const effPath = oneFolder && combinedPath ? combinedPath : r.path.trim();   // โหมดรวม = path ชี้โฟลเดอร์รวม
+        if (effPath) fd.append("master_path", effPath);
         if (effUrl) fd.append("master_url", effUrl);
         if (r.sizes.length) fd.append("sizes", JSON.stringify(r.sizes));
         if (r.parentCodes.length) fd.append("parent_sku_codes", JSON.stringify(r.parentCodes));
@@ -1971,10 +1978,18 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
             {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select></label>
         {driveOn && (
-          <label className="flex items-start gap-2 text-[12px] text-slate-600 cursor-pointer select-none">
-            <input type="checkbox" checked={oneFolder} onChange={(e) => setOneFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
-            <span>📎 รูปชุดนี้ใช้โฟลเดอร์ Drive เดียวกัน <span className="text-[10px] text-slate-400">— สร้างโฟลเดอร์เดียว เก็บทุกรูปในนี้ (ก็อปรูปตัวอย่าง + ไฟล์ต้นฉบับที่แนบ) แทนที่จะแยกโฟลเดอร์ทุกใบ</span></span>
-          </label>
+          <div>
+            <label className="flex items-start gap-2 text-[12px] text-slate-600 cursor-pointer select-none">
+              <input type="checkbox" checked={oneFolder} onChange={(e) => setOneFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
+              <span>📎 รูปชุดนี้ใช้โฟลเดอร์ Drive เดียวกัน <span className="text-[10px] text-slate-400">— สร้างโฟลเดอร์เดียว เก็บทุกรูปในนี้ (ก็อปรูปตัวอย่าง + ไฟล์ต้นฉบับที่แนบ) แทนที่จะแยกโฟลเดอร์ทุกใบ</span></span>
+            </label>
+            {oneFolder && (
+              <label className="block text-[12px] text-slate-500 mt-1.5 ml-6">ชื่อโฟลเดอร์รวม <span className="text-[10px] text-slate-400">— ไม่ตั้ง = ใช้ชื่อร่วมของรูป/รูปแรก</span>
+                <input value={oneFolderName} onChange={(e) => setOneFolderName(e.target.value)}
+                  placeholder={commonNameSeed(rows.map((r) => r.name)) || rows[0]?.name || "เช่น Tabby Brown Cat"}
+                  className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
+            )}
+          </div>
         )}
         <div className="grid grid-cols-2 gap-3">
           <div className="text-[12px] text-slate-500">อัลบั้ม (ใช้กับทุกแถว)
