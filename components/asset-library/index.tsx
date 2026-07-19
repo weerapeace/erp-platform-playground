@@ -71,6 +71,7 @@ export function AssetLibrary() {
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null); // ลากหลายรูป → เปิดเพิ่มหลายรูป
   const [pageDrag, setPageDrag] = useState(false);
   const [manageTypesOpen, setManageTypesOpen] = useState(false);
+  const [driveScanOpen, setDriveScanOpen] = useState(false);   // หาโฟลเดอร์ Drive ที่ยังไม่เชื่อม
   const [bulkTrashOpen, setBulkTrashOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
@@ -207,7 +208,7 @@ export function AssetLibrary() {
 
   const selCount = selected.size;
 
-  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen;
+  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen;
 
   // ── ผูกหลายรูปที่เลือกเข้าโฟลเดอร์ Drive เดียวกับรูปต้นทาง (bulk) ──
   const bulkLinkFolder = async (source: AssetRow) => {
@@ -287,6 +288,8 @@ export function AssetLibrary() {
               ))}
               <button onClick={() => setManageTypesOpen(true)}
                 className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">⚙️ จัดการชนิด</button>
+              {driveOn && <button onClick={() => setDriveScanOpen(true)}
+                className="h-8 px-2.5 text-[12px] rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">🔍 หาใน Drive ที่ยังไม่เชื่อม</button>}
             </>
           : TYPE_FILTERS.map((f) => (
               <button key={f.key} onClick={() => setType(f.key)}
@@ -440,6 +443,10 @@ export function AssetLibrary() {
       {manageTypesOpen && (
         <ManageTypesModal types={artTypes} onClose={() => setManageTypesOpen(false)}
           onChanged={async () => { await loadMeta(); }} />
+      )}
+      {driveScanOpen && (
+        <DriveScanModal onClose={() => setDriveScanOpen(false)}
+          onDone={async () => { setDriveScanOpen(false); await load(); await loadMeta(); }} />
       )}
       {detailId && (
         <DetailModal
@@ -2298,6 +2305,100 @@ function ManageTypesModal({ types, onClose, onChanged }: { types: LookupItem[]; 
         <button onClick={add} disabled={busy || !newName.trim()} className="h-8 px-3 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">＋ เพิ่ม</button>
       </div>
       <p className="text-[10px] text-slate-400 mt-2">แก้ชื่อ: พิมพ์ทับในช่องแล้วคลิกที่อื่นเพื่อบันทึก · ลบแล้วงานเดิมยังเก็บชื่อชนิดไว้</p>
+    </ERPModal>
+  );
+}
+
+// ── หาโฟลเดอร์ Drive ที่ยังไม่เชื่อม (สแกน + นำเข้า) ──
+type ScanFolder = { folderId: string; folderName: string; folderLink: string; typeSubName: string; artworkType: string; master_path: string };
+function DriveScanModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [brandId, setBrandId] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const [folders, setFolders] = useState<ScanFolder[] | null>(null);
+  const [scanned, setScanned] = useState(0);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
+  useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
+
+  const scan = async () => {
+    if (!brandId) { toast.error("เลือกแบรนด์ก่อน"); return; }
+    setScanning(true); setFolders(null); setSel(new Set());
+    try {
+      const res = await apiFetch("/api/assets/drive-scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: brandId }) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "สแกนไม่สำเร็จ");
+      const fs = (j.folders ?? []) as ScanFolder[];
+      setFolders(fs); setScanned(j.scanned ?? 0); setSel(new Set(fs.map((f) => f.folderId)));   // default เลือกทั้งหมด
+    } catch (e) { toast.error(e instanceof Error ? e.message : "สแกนไม่สำเร็จ"); }
+    finally { setScanning(false); }
+  };
+
+  const doImport = async () => {
+    const picked = (folders ?? []).filter((f) => sel.has(f.folderId));
+    if (!picked.length) { toast.error("เลือกโฟลเดอร์ที่จะนำเข้าก่อน"); return; }
+    setImporting(true);
+    try {
+      const res = await apiFetch("/api/assets/drive-import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: brandId, folders: picked }) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "นำเข้าไม่สำเร็จ");
+      toast.success(`นำเข้า ${j.imported} รายการ${j.skipped ? ` · ข้าม(ไม่มีรูป) ${j.skipped}` : ""}${j.failed ? ` · ล้มเหลว ${j.failed}` : ""}`);
+      onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "นำเข้าไม่สำเร็จ"); }
+    finally { setImporting(false); }
+  };
+
+  const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  return (
+    <ERPModal open onClose={onClose} title="🔍 หาโฟลเดอร์ใน Drive ที่ยังไม่เชื่อม" size="lg"
+      description="เลือกแบรนด์ → สแกนโฟลเดอร์ใน Drive → นำเข้าอันที่ยังไม่มีบัตรในคลัง (ดึงรูปตัวอย่างในโฟลเดอร์มาสร้างบัตรให้)"
+      footer={
+        <div className="flex items-center justify-between w-full">
+          <span className="text-[12px] text-slate-400">{folders ? `ยังไม่เชื่อม ${folders.length} · เลือก ${sel.size}` : ""}</span>
+          <div className="flex gap-2">
+            <button onClick={onClose} disabled={importing} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
+            <button onClick={doImport} disabled={importing || !sel.size} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{importing && <Spinner />}{importing ? "กำลังนำเข้า…" : `นำเข้า ${sel.size} รายการ`}</button>
+          </div>
+        </div>
+      }>
+      {(scanning || importing) && <LoadingOverlay message={scanning ? "กำลังสแกน Drive…" : "กำลังนำเข้า + ดึงรูป…"} />}
+      <div className="flex items-end gap-2 mb-3">
+        <label className="flex-1 text-[12px] text-slate-500">แบรนด์
+          <select value={brandId} onChange={(e) => { setBrandId(e.target.value); setFolders(null); }}
+            className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
+            <option value="">— เลือกแบรนด์ —</option>
+            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select></label>
+        <button onClick={scan} disabled={scanning || !brandId} className="h-9 px-4 text-sm font-medium border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-50">🔍 สแกน</button>
+      </div>
+
+      {folders === null ? (
+        <p className="text-[12px] text-slate-400 py-8 text-center">เลือกแบรนด์แล้วกด “สแกน”</p>
+      ) : folders.length === 0 ? (
+        <p className="text-[13px] text-emerald-600 py-8 text-center">🎉 ทุกโฟลเดอร์เชื่อมแล้ว (สแกน {scanned} โฟลเดอร์)</p>
+      ) : (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[12px] text-slate-600">เจอ <b>{folders.length}</b> โฟลเดอร์ที่ยังไม่เชื่อม (จาก {scanned})</p>
+            <div className="flex gap-2 text-[11px]">
+              <button onClick={() => setSel(new Set(folders.map((f) => f.folderId)))} className="text-indigo-600 hover:underline">เลือกทั้งหมด</button>
+              <button onClick={() => setSel(new Set())} className="text-slate-500 hover:underline">ไม่เลือก</button>
+            </div>
+          </div>
+          <div className="space-y-1 max-h-[46vh] overflow-y-auto pr-1">
+            {folders.map((f) => (
+              <label key={f.folderId} className={`flex items-center gap-2 rounded-lg border p-2 cursor-pointer ${sel.has(f.folderId) ? "border-indigo-300 bg-indigo-50/40" : "border-slate-200"}`}>
+                <input type="checkbox" checked={sel.has(f.folderId)} onChange={() => toggle(f.folderId)} className="w-4 h-4 accent-indigo-600 shrink-0" />
+                <span className="flex-1 min-w-0">
+                  <span className="text-[13px] text-slate-700 truncate block">📁 {f.folderName}</span>
+                  <span className="text-[10px] text-slate-400 font-mono truncate block">{f.typeSubName}{f.artworkType && f.artworkType !== f.typeSubName ? ` · ${f.artworkType}` : ""}</span>
+                </span>
+                <a href={f.folderLink} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-[11px] text-indigo-600 hover:underline shrink-0">เปิด ›</a>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
     </ERPModal>
   );
 }

@@ -65,6 +65,43 @@ export async function driveFindFolder(name: string, parentId?: string): Promise<
   return files[0]?.id ?? null;
 }
 
+/** ไล่โฟลเดอร์ลูก (folders) ในโฟลเดอร์แม่ → [{id,name}] (รองรับ paging) */
+export async function driveListChildFolders(parentId: string): Promise<{ id: string; name: string }[]> {
+  const token = await getAccessToken();
+  const q = [`'${parentId}' in parents`, "mimeType = 'application/vnd.google-apps.folder'", "trashed = false"].join(" and ");
+  const out: { id: string; name: string }[] = [];
+  let pageToken = "";
+  do {
+    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=nextPageToken,files(id,name)&pageSize=1000&orderBy=name${pageToken ? `&pageToken=${pageToken}` : ""}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const j = await res.json().catch(() => ({}));
+    for (const f of (j.files ?? []) as { id: string; name: string }[]) out.push({ id: f.id, name: f.name });
+    pageToken = (j.nextPageToken as string) ?? "";
+  } while (pageToken);
+  return out;
+}
+
+/** ไฟล์รูปในโฟลเดอร์ (image/*) → [{id,name,mimeType}] (สูงสุด 20) */
+export async function driveListImages(parentId: string): Promise<{ id: string; name: string; mimeType: string }[]> {
+  const token = await getAccessToken();
+  const q = [`'${parentId}' in parents`, "mimeType contains 'image/'", "trashed = false"].join(" and ");
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,mimeType,size)&pageSize=20&orderBy=name`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const j = await res.json().catch(() => ({}));
+  return (j.files ?? []) as { id: string; name: string; mimeType: string }[];
+}
+
+/** โหลดไฟล์จาก Drive → { bytes, mimeType, name } หรือ null */
+export async function driveDownloadFile(fileId: string): Promise<{ bytes: Uint8Array; mimeType: string; name: string } | null> {
+  const token = await getAccessToken();
+  const meta = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=name,mimeType`, { headers: { Authorization: `Bearer ${token}` } });
+  const m = await meta.json().catch(() => ({} as Record<string, unknown>));
+  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!dl.ok) return null;
+  const bytes = new Uint8Array(await dl.arrayBuffer());
+  return { bytes, mimeType: (m.mimeType as string) || "image/png", name: (m.name as string) || "preview" };
+}
+
 /** หาโฟลเดอร์ตามชื่อในโฟลเดอร์แม่ — ไม่มีก็สร้างให้ → คืน id */
 export async function driveEnsureFolder(name: string, parentId: string): Promise<string> {
   const found = await driveFindFolder(name, parentId);
