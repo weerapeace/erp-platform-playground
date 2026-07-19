@@ -81,14 +81,15 @@ export async function driveListChildFolders(parentId: string): Promise<{ id: str
   return out;
 }
 
-/** ไฟล์รูปในโฟลเดอร์ (image/*) → [{id,name,mimeType}] (สูงสุด 20) */
-export async function driveListImages(parentId: string): Promise<{ id: string; name: string; mimeType: string }[]> {
+/** ไฟล์รูปในโฟลเดอร์ (image/*) → [{id,name,mimeType,width,height}] (px จาก imageMediaMetadata · สูงสุด 20) */
+export async function driveListImages(parentId: string): Promise<{ id: string; name: string; mimeType: string; width?: number; height?: number }[]> {
   const token = await getAccessToken();
   const q = [`'${parentId}' in parents`, "mimeType contains 'image/'", "trashed = false"].join(" and ");
-  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,mimeType,size)&pageSize=20&orderBy=name`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,mimeType,size,imageMediaMetadata(width,height))&pageSize=20&orderBy=name`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const j = await res.json().catch(() => ({}));
-  return (j.files ?? []) as { id: string; name: string; mimeType: string }[];
+  return ((j.files ?? []) as { id: string; name: string; mimeType: string; imageMediaMetadata?: { width?: number; height?: number } }[])
+    .map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, width: f.imageMediaMetadata?.width, height: f.imageMediaMetadata?.height }));
 }
 
 /** โหลดไฟล์จาก Drive → { bytes, mimeType, name } หรือ null */

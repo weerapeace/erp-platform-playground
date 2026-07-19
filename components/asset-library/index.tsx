@@ -2329,6 +2329,8 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
   const [batchAlbums, setBatchAlbums] = useState<string[]>([]);
   const [batchTags, setBatchTags] = useState<string[]>([]);
   const [batchKw, setBatchKw] = useState("");
+  const [batchTypes, setBatchTypes] = useState<string[]>([]);       // ชนิด → ใส่ทุกใบ
+  const [batchParents, setBatchParents] = useState<string[]>([]);   // Parent SKU → ใส่ทุกใบ
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
   useEffect(() => { apiFetch("/api/assets/collections").then((r) => r.json()).then((j) => setCols((j.data ?? []) as AssetCollection[])).catch(() => {}); }, []);
   useEffect(() => { setArtTypeList((cur) => { const s = new Set(cur.map((t) => t.name)); return [...cur, ...artTypes.filter((t) => !s.has(t.name))]; }); }, [artTypes]);
@@ -2353,10 +2355,12 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
     try {
       const res = await apiFetch("/api/drive/folder-images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder_ids: picked.map((f) => f.folderId) }) });
       const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ดึงรูปไม่สำเร็จ");
-      const imgMap = (j.images ?? {}) as Record<string, { id: string; name: string }[]>;
+      const imgMap = (j.images ?? {}) as Record<string, { id: string; name: string; width?: number; height?: number }[]>;
+      const r2 = (v: number) => Math.round(v * 100) / 100;
+      const sizesFrom = (w?: number, h?: number): AssetSize[] => (w && h) ? [{ label: "ขนาด #1", w: r2(w / DEFAULT_DPI * 2.54), h: r2(h / DEFAULT_DPI * 2.54), unit: "cm" }] : [];   // px÷300×2.54 (งาน export 300 DPI)
       const newRows: ImportRow[] = []; let n = 0;
       for (const f of picked) for (const img of (imgMap[f.folderId] ?? [])) {
-        newRows.push({ key: `r${n++}`, folderName: f.folderName, folderLink: f.folderLink, master_path: f.master_path, fileId: img.id, fileName: img.name, title: img.name.replace(/\.[^.]+$/, "").trim() || f.folderName, types: f.artworkType ? [f.artworkType] : [], sizes: [], parentCodes: [] });
+        newRows.push({ key: `r${n++}`, folderName: f.folderName, folderLink: f.folderLink, master_path: f.master_path, fileId: img.id, fileName: img.name, title: img.name.replace(/\.[^.]+$/, "").trim() || f.folderName, types: f.artworkType ? [f.artworkType] : [], sizes: sizesFrom(img.width, img.height), parentCodes: [] });
       }
       if (!newRows.length) { toast.error("โฟลเดอร์ที่เลือกไม่มีไฟล์รูป"); return; }
       setRows(newRows); setStep("form");
@@ -2456,6 +2460,18 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
             <label className="block text-[12px] text-slate-500">คำค้นเพิ่มเติม (keyword)
               <input value={batchKw} onChange={(e) => setBatchKw(e.target.value)} placeholder="เช่น flower ดอกไม้ summer"
                 className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 border-t border-slate-200/70">
+              <div className="text-[12px] text-slate-500">
+                <div className="flex items-center gap-2">ชนิด (ใส่ทุกใบ)
+                  {batchTypes.length > 0 && rows.length > 0 && <button type="button" onClick={() => setRows((rs) => rs.map((r) => ({ ...r, types: [...batchTypes] })))} className="text-[10px] text-indigo-600 hover:underline">→ ใส่ทุกใบ</button>}</div>
+                <div className="mt-0.5"><ArtTypeMultiSelect value={batchTypes} types={artTypeList} onChange={setBatchTypes} onCreated={(t) => setArtTypeList((c) => [...c, t])} /></div>
+              </div>
+              <div className="text-[12px] text-slate-500">
+                <div className="flex items-center gap-2">Parent SKU (ใส่ทุกใบ)
+                  {batchParents.length > 0 && rows.length > 0 && <button type="button" onClick={() => setRows((rs) => rs.map((r) => ({ ...r, parentCodes: [...batchParents] })))} className="text-[10px] text-indigo-600 hover:underline">→ ใส่ทุกใบ</button>}</div>
+                <div className="mt-0.5"><ParentSkuField value={batchParents} onChange={setBatchParents} /></div>
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2.5 max-h-[52vh] overflow-y-auto pr-1">

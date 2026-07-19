@@ -21,9 +21,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const ids = [...new Set((Array.isArray(body.folder_ids) ? body.folder_ids : []).map(String).filter(Boolean))].slice(0, 50);
   if (!ids.length) return NextResponse.json({ error: "ไม่มีรายการ" }, { status: 400 });
 
-  const images: Record<string, { id: string; name: string }[]> = {};
+  const images: Record<string, { id: string; name: string; width?: number; height?: number }[]> = {};
   for (const fid of ids) {
-    try { images[fid] = (await driveListImages(fid)).filter((x) => IMG_RE.test(x.mimeType)).map((x) => ({ id: x.id, name: x.name })); }
+    try { images[fid] = (await driveListImages(fid)).filter((x) => IMG_RE.test(x.mimeType)).map((x) => ({ id: x.id, name: x.name, width: x.width, height: x.height })); }
     catch { images[fid] = []; }
   }
   return NextResponse.json({ images, error: null });
