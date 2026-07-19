@@ -245,8 +245,13 @@ export function AssetLibrary() {
     const imgs = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
     if (!imgs.length) return;
     e.preventDefault();
-    if (imgs.length === 1) { setPendingFile(imgs[0]); setArtworkAddOpen(true); }
-    else { setPendingFiles(imgs); setMassOpen(true); }
+    // มุมมอง Artwork → ฟอร์ม Artwork · มุมมองอื่น (รูปที่อัปเอง ฯลฯ) → ฟอร์มอัปรูปธรรมดา
+    if (source === "artwork") {
+      if (imgs.length === 1) { setPendingFile(imgs[0]); setArtworkAddOpen(true); }
+      else { setPendingFiles(imgs); setMassOpen(true); }
+    } else {
+      setPendingFiles(imgs); setUploadOpen(true);
+    }
   };
 
   return (
@@ -283,7 +288,7 @@ export function AssetLibrary() {
             >📋 เพิ่มหลายรูป</button>
           )}
           <button
-            onClick={() => source === "artwork" ? setArtworkAddOpen(true) : setUploadOpen(true)}
+            onClick={() => { if (source === "artwork") setArtworkAddOpen(true); else { setPendingFiles(null); setUploadOpen(true); } }}
             className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap"
           >{source === "artwork" ? "🎨 เพิ่ม Artwork" : "⬆ อัปโหลด"}</button>
         </div>
@@ -454,9 +459,9 @@ export function AssetLibrary() {
       {/* modals */}
       {uploadOpen && (
         <UploadModal
-          actor={actor} collections={collections}
-          onClose={() => setUploadOpen(false)}
-          onDone={async () => { setUploadOpen(false); await load(); await loadMeta(); }}
+          actor={actor} collections={collections} initialFiles={pendingFiles}
+          onClose={() => { setUploadOpen(false); setPendingFiles(null); }}
+          onDone={async () => { setUploadOpen(false); setPendingFiles(null); await load(); await loadMeta(); }}
         />
       )}
       {artworkAddOpen && (
@@ -681,8 +686,8 @@ function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder 
 // ── อัปโหลด (ลากวาง) ──
 type UpItem = { file: File; status: "pending" | "uploading" | "done" | "dup" | "error"; msg?: string };
 
-function UploadModal({ actor, collections, onClose, onDone }: {
-  actor: string | null; collections: AssetCollection[]; onClose: () => void; onDone: () => void;
+function UploadModal({ actor, collections, onClose, onDone, initialFiles }: {
+  actor: string | null; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFiles?: File[] | null;
 }) {
   const toast = useToast();
   const [items, setItems] = useState<UpItem[]>([]);
@@ -696,6 +701,8 @@ function UploadModal({ actor, collections, onClose, onDone }: {
     const arr = Array.from(files).map((file) => ({ file, status: "pending" as const }));
     setItems((s) => [...s, ...arr]);
   };
+  // ลากไฟล์มาวางบนหน้าคลัง (มุมมองรูปที่อัปเอง) → เปิดฟอร์มพร้อมไฟล์ที่ลากมา
+  useEffect(() => { if (initialFiles?.length) addFiles(initialFiles); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const imgDims = (file: File): Promise<{ w: number; h: number } | null> =>
     new Promise((res) => {
