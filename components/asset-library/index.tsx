@@ -2490,7 +2490,7 @@ function DriveFolderMap() {
       if (!fid && !lbp) { await apiFetch(`/api/drive/brand-folders?brand_id=${encodeURIComponent(id)}`, { method: "DELETE" }); setBLabel((m) => { const n = { ...m }; delete n[id]; return n; }); toast.success("ล้างแล้ว"); return; }
       const res = await apiFetch("/api/drive/brand-folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: id, folder_id: fid, local_base_path: lbp }) });
       const j = await res.json(); if (!res.ok || j.error) { toast.error(j.error || "บันทึกไม่สำเร็จ"); return; }
-      setBLabel((m) => ({ ...m, [id]: j.folder_label ?? "" })); toast.success("บันทึกแล้ว");
+      setBLabel((m) => ({ ...m, [id]: j.folder_label ?? "" })); toast.success(j.pathUpdated ? `บันทึกแล้ว · อัปเดต path ${j.pathUpdated} รูปตามฐานใหม่` : "บันทึกแล้ว");
     } catch { toast.error("บันทึกไม่สำเร็จ"); }
   };
   const saveType = async (t: string) => {
