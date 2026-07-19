@@ -13,6 +13,7 @@ import { syncTaskFilesToDrive } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 300;   // อัปหลายรูป (แกลเลอรี Parent+child SKU) ใช้เวลานาน — กัน timeout
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
