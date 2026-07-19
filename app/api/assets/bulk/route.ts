@@ -17,6 +17,7 @@ export const revalidate = 0;
 type BulkEditFields = {
   brand_id?: string | null; artwork_types?: unknown; sizes?: unknown;
   parent_sku_codes?: unknown; keywords?: string | null; add_tags?: string[];
+  master_path?: string | null; master_url?: string | null;
 };
 
 export async function POST(request: NextRequest) {
@@ -78,6 +79,8 @@ export async function POST(request: NextRequest) {
     if (f.sizes !== undefined) patch.sizes = normalizeSizes(f.sizes);
     if (f.parent_sku_codes !== undefined) patch.parent_sku_codes = normalizeCodes(f.parent_sku_codes);
     if (f.keywords !== undefined) patch.keywords = f.keywords || null;
+    if (f.master_path !== undefined) patch.master_path = (f.master_path ?? "").trim() || null;
+    if (f.master_url !== undefined) patch.master_url = (f.master_url ?? "").trim() || null;
     if (Object.keys(patch).length) {
       patch.updated_at = new Date().toISOString();
       const { error } = await admin.from("assets").update(patch).in("id", ids);

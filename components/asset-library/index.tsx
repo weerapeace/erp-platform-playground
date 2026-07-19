@@ -400,7 +400,15 @@ export function AssetLibrary() {
             </div>
           )}
           {!showBrandView && !loading && total > 0 && (
-            <div className="mb-3"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel="ไฟล์" /></div>
+            <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
+              {rows.length > 0
+                ? <button onClick={() => { const all = rows.every((r) => selected.has(r.id)); setSelected(all ? new Set() : new Set(rows.map((r) => r.id))); }}
+                    className="h-8 px-3 text-[12px] rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 shrink-0">
+                    {rows.every((r) => selected.has(r.id)) ? "☑ ล้างที่เลือก" : `☐ เลือกทั้งหมดในหน้านี้ (${rows.length})`}
+                  </button>
+                : <span />}
+              <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel="ไฟล์" />
+            </div>
           )}
           {showBrandView ? (
             <BrandAlbumBrowser reloadKey={brandReload} openParentId={brandOpenParent} />
@@ -1379,14 +1387,17 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
   const [enParent, setEnParent] = useState(false); const [parents, setParents] = useState<string[]>([]); const [parentMode, setParentMode] = useState<"all" | "each">("all");
   const [enTags, setEnTags] = useState(false); const [tags, setTags] = useState<string[]>([]);
   const [enKw, setEnKw] = useState(false); const [kw, setKw] = useState("");
+  const [enLoc, setEnLoc] = useState(false); const [locMode, setLocMode] = useState<"all" | "each">("each"); const [locPath, setLocPath] = useState(""); const [locUrl, setLocUrl] = useState("");
   // ข้อมูลไฟล์รายใบ (โหมดแก้แยก)
   const [items, setItems] = useState<{ id: string; title: string; url: string; isImg: boolean }[] | null>(null);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [pfSizes, setPfSizes] = useState<Record<string, AssetSize[]>>({});
   const [pfParents, setPfParents] = useState<Record<string, string[]>>({});
+  const [pfPath, setPfPath] = useState<Record<string, string>>({});
+  const [pfUrl, setPfUrl] = useState<Record<string, string>>({});
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
 
-  const needPerFile = (enSize && sizeMode === "each") || (enParent && parentMode === "each");
+  const needPerFile = (enSize && sizeMode === "each") || (enParent && parentMode === "each") || (enLoc && locMode === "each");
   // เข้าโหมด "แก้แยก" ครั้งแรก → โหลดไฟล์ที่เลือกมาแก้ทีละใบ (ดึงค่าปัจจุบันมา prefill)
   useEffect(() => {
     if (!needPerFile || items !== null || itemsLoading) return;
@@ -1395,9 +1406,9 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
       .then((got) => {
         const list = got.filter(Boolean) as AssetDetail[];
         setItems(list.map((d) => ({ id: d.id, title: d.title, url: d.url, isImg: isImage(d) })));
-        const s: Record<string, AssetSize[]> = {}, p: Record<string, string[]> = {};
-        for (const d of list) { s[d.id] = d.sizes ?? []; p[d.id] = d.parent_sku_codes ?? []; }
-        setPfSizes(s); setPfParents(p);
+        const s: Record<string, AssetSize[]> = {}, p: Record<string, string[]> = {}, pa: Record<string, string> = {}, u: Record<string, string> = {};
+        for (const d of list) { s[d.id] = d.sizes ?? []; p[d.id] = d.parent_sku_codes ?? []; pa[d.id] = d.master_path ?? ""; u[d.id] = d.master_url ?? ""; }
+        setPfSizes(s); setPfParents(p); setPfPath(pa); setPfUrl(u);
       })
       .finally(() => setItemsLoading(false));
   }, [needPerFile, items, itemsLoading, ids]);
@@ -1411,6 +1422,7 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
     if (enTags) fields.add_tags = tags;
     if (enSize && sizeMode === "all") fields.sizes = sizes;
     if (enParent && parentMode === "all") fields.parent_sku_codes = parents;
+    if (enLoc && locMode === "all") { fields.master_path = locPath.trim(); fields.master_url = locUrl.trim(); }
     const anyShared = Object.keys(fields).length > 0;
     if (!anyShared && !needPerFile) { toast.error("ติ๊กเลือกฟิลด์ที่จะแก้ก่อน"); return; }
     setBusy(true);
@@ -1425,6 +1437,7 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
           const patch: Record<string, unknown> = {};
           if (enSize && sizeMode === "each") patch.sizes = pfSizes[it.id] ?? [];
           if (enParent && parentMode === "each") patch.parent_sku_codes = pfParents[it.id] ?? [];
+          if (enLoc && locMode === "each") { patch.master_path = (pfPath[it.id] ?? "").trim() || null; patch.master_url = (pfUrl[it.id] ?? "").trim() || null; }
           if (Object.keys(patch).length) await apiFetch(`/api/assets/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
         }
       }
@@ -1475,11 +1488,21 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
           <input value={kw} onChange={(e) => setKw(e.target.value)} placeholder="เช่น flower ดอกไม้ summer"
             className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
         </BulkEditRow>
+        <BulkEditRow on={enLoc} setOn={setEnLoc} label="ที่เก็บไฟล์ต้นฉบับ (path / ลิงก์โฟลเดอร์)">
+          <BulkModeToggle mode={locMode} setMode={setLocMode} />
+          {locMode === "all"
+            ? <div className="mt-1.5 space-y-1.5">
+                <input value={locPath} onChange={(e) => setLocPath(e.target.value)} placeholder="path เช่น G:\Shared drives\…\Bow (Purple)" className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
+                <input value={locUrl} onChange={(e) => setLocUrl(e.target.value)} placeholder="ลิงก์โฟลเดอร์ Drive (https://drive.google.com/…)" className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
+                <p className="text-[10px] text-slate-400">ใส่ค่าเดียว → แทนที่ทุกไฟล์ (เว้นว่าง = ล้างค่า)</p>
+              </div>
+            : <p className="text-[11px] text-indigo-600 mt-1.5">↓ แก้ path/ลิงก์แยกแต่ละไฟล์ในส่วนล่าง</p>}
+        </BulkEditRow>
 
         {needPerFile && (
           <div className="rounded-lg border border-indigo-200 bg-indigo-50/20 p-2.5">
             <p className="text-[12px] font-medium text-slate-700 mb-2">🗂️ แก้รายไฟล์ ({ids.length} ไฟล์)
-              {enSize && sizeMode === "each" ? " · ขนาด" : ""}{enParent && parentMode === "each" ? " · Parent SKU" : ""}</p>
+              {enSize && sizeMode === "each" ? " · ขนาด" : ""}{enParent && parentMode === "each" ? " · Parent SKU" : ""}{enLoc && locMode === "each" ? " · ที่เก็บไฟล์" : ""}</p>
             {itemsLoading || items === null ? (
               <p className="text-[12px] text-slate-400 py-4 text-center">กำลังโหลดไฟล์ที่เลือก…</p>
             ) : (
@@ -1495,6 +1518,13 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
                     )}
                     {enParent && parentMode === "each" && (
                       <div><p className="text-[10px] text-slate-400 mb-0.5">📦 Parent SKU</p><ParentSkuField value={pfParents[it.id] ?? []} onChange={(v) => setPfParents((m) => ({ ...m, [it.id]: v }))} /></div>
+                    )}
+                    {enLoc && locMode === "each" && (
+                      <div className="mt-1.5 space-y-1">
+                        <p className="text-[10px] text-slate-400 mb-0.5">📁 ที่เก็บไฟล์ต้นฉบับ</p>
+                        <input value={pfPath[it.id] ?? ""} onChange={(e) => setPfPath((m) => ({ ...m, [it.id]: e.target.value }))} placeholder="path เช่น G:\Shared drives\…" className="w-full h-8 px-2.5 text-[11px] border border-slate-200 rounded-lg" />
+                        <input value={pfUrl[it.id] ?? ""} onChange={(e) => setPfUrl((m) => ({ ...m, [it.id]: e.target.value }))} placeholder="ลิงก์โฟลเดอร์ Drive" className="w-full h-8 px-2.5 text-[11px] border border-slate-200 rounded-lg" />
+                      </div>
                     )}
                   </div>
                 ))}
