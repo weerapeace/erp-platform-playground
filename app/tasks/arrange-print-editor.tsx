@@ -13,13 +13,20 @@ import type { AssetRow, AssetSize } from "@/app/api/assets/shared";
 import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
-import type { ArrangePrintSpec } from "./data";
+import type { ArrangePrintSpec, ArrangeBaseItem } from "./data";
 
 // ป๊อปอัปรายละเอียด/แก้ไฟล์คลังกลาง (กดรูปในการ์ด) — dynamic กัน bundle asset-library ลากเข้า tasks
 const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
 
 export type ArrangeOrder = { label: string; w: number | null; h: number | null; unit: string; qty: number };
 export type ArrangeItem = { asset_id: string; r2_key: string; title: string; url: string; available: AssetSize[]; orders: ArrangeOrder[] };
+// รูปฐาน (จากอัลบั้ม DFT UV Printed) + รายละเอียด เพิ่ม/ลบ ต่อรูป
+export type ArrangeBase = { asset_id: string; r2_key: string; title: string; url: string; add: string; remove: string };
+export const DFT_UV_COLLECTION_NAME = "งานพิมพ์ DFT UV (Printed)";   // อัลบั้มรูปฐานสำหรับงานเรียงพิมพ์
+export function basesFromSpec(spec: ArrangePrintSpec | undefined): ArrangeBase[] {
+  return (spec?.bases ?? []).map((b) => ({ asset_id: b.asset_id, r2_key: b.r2_key, title: b.title, url: `/api/r2-image?key=${encodeURIComponent(b.r2_key)}`, add: b.add ?? "", remove: b.remove ?? "" }));
+}
+export const specBasesFrom = (bases: ArrangeBase[]): ArrangeBaseItem[] => bases.map((b) => ({ asset_id: b.asset_id, r2_key: b.r2_key, title: b.title, add: b.add.trim(), remove: b.remove.trim() }));
 
 export const arrangeSizeKey = (s: { label?: string; w: number | null; h: number | null; unit: string }) => `${(s.label ?? "").trim()}|${s.w}|${s.h}|${s.unit}`;
 export const arrangeSizeText = (s: { label?: string; w: number | null; h: number | null; unit: string }) => (s.label?.trim() ? s.label : (s.w != null || s.h != null ? `${s.w ?? "?"}×${s.h ?? "?"} ${s.unit}` : "—"));
@@ -40,16 +47,26 @@ export function specFromItems(items: ArrangeItem[]): ArrangePrintSpec {
 }
 export const arrangeTotalQty = (items: ArrangeItem[]) => items.reduce((n, it) => n + it.orders.reduce((m, o) => m + (o.qty || 0), 0), 0);
 
-export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, collapseSizes = true }: {
+export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, collapseSizes = true, bases, onBasesChange }: {
   items: ArrangeItem[];
   onChange: (items: ArrangeItem[]) => void;
   pushToast: (type: "success" | "error" | "info", m: string) => void;
   contextLabel?: string;
   collapseSizes?: boolean;   // พับซ่อนขนาดที่ยังไม่เลือก (default) · ตอนสร้างงานใน Wizard ส่ง false = โชว์หมด
+  bases?: ArrangeBase[];                          // รูปฐาน (DFT UV Printed) — ส่งมาพร้อม onBasesChange ถึงจะโชว์บล็อกรูปฐาน
+  onBasesChange?: (bases: ArrangeBase[]) => void;
 }) {
   const t = useT();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [basePickerOpen, setBasePickerOpen] = useState(false);
   const [detailAssetId, setDetailAssetId] = useState<string | null>(null);   // กดรูป → เปิดป๊อปอัปแก้ไฟล์คลังกลาง
+  const addBases = (assets: AssetRow[]) => {
+    if (!onBasesChange) return;
+    const cur = bases ?? [];
+    const seen = new Set(cur.map((x) => x.asset_id));
+    const add = assets.filter((a) => !seen.has(a.id)).map((a) => ({ asset_id: a.id, r2_key: a.r2_key, title: a.title, url: a.url, add: "", remove: "" }));
+    if (add.length) onBasesChange([...cur, ...add]);
+  };
 
   const addAssets = (assets: AssetRow[]) => {
     const seen = new Set(items.map((x) => x.asset_id));
@@ -73,6 +90,24 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
 
   return (
     <div>
+      {/* บล็อกรูปฐาน (DFT UV Printed) — โชว์เมื่อส่ง onBasesChange · วางก่อนบล็อกเลือกรูป Artwork */}
+      {onBasesChange && (
+        <div className="mb-4">
+          <div className="text-xs font-semibold text-slate-500 mb-1.5">🧱 {t("รูปฐาน (จาก DFT UV Printed)", "Base images (from DFT UV Printed)")}</div>
+          <button type="button" onClick={() => setBasePickerOpen(true)} className="w-full border border-dashed border-teal-300 rounded-xl py-2.5 text-sm font-medium text-teal-700 bg-teal-50/50 hover:bg-teal-50 mb-2">🧱 ＋ {t("เลือกฐานรูปจากอัลบั้ม DFT UV (Printed)", "Pick base images from DFT UV (Printed)")}</button>
+          {(bases ?? []).length === 0 ? (
+            <div className="border border-dashed border-slate-200 rounded-lg p-4 text-center text-xs text-slate-400">{t("ยังไม่ได้เลือกรูปฐาน (ถ้ามี) — กดปุ่มด้านบน", "No base images yet (optional) — use the button above")}</div>
+          ) : (
+            <div className="space-y-2">
+              {(bases ?? []).map((b, i) => (
+                <ArrangeBaseCard key={b.asset_id} base={b} onOpenDetail={() => setDetailAssetId(b.asset_id)}
+                  onChange={(patch) => onBasesChange((bases ?? []).map((x, j) => j === i ? { ...x, ...patch } : x))}
+                  onRemove={() => onBasesChange((bases ?? []).filter((_, j) => j !== i))} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <button type="button" onClick={() => setPickerOpen(true)} className="w-full border border-dashed border-violet-300 rounded-xl py-2.5 text-sm font-medium text-violet-700 bg-violet-50/50 hover:bg-violet-50 mb-3">🖼️ ＋ {t("เลือกรูปจาก Artwork (เลือกได้หลายรูป)", "Pick images from Artwork (multiple)")}</button>
       {items.length === 0 ? (
         <div className="border border-dashed border-slate-200 rounded-lg p-6 text-center text-sm text-slate-400">{t("ยังไม่ได้เลือกรูป — กดปุ่มด้านบนเพื่อเลือกจากคลัง Artwork", "No images yet — pick from the Artwork library")}</div>
@@ -89,6 +124,7 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
         </div>
       )}
       {pickerOpen && <AssetPicker open onClose={() => setPickerOpen(false)} multiple typeFilter="image" defaultSource="artwork" title={t("เลือกรูป Artwork สำหรับเรียงพิมพ์", "Pick Artwork images")} contextLabel={contextLabel} onSelect={addAssets} />}
+      {basePickerOpen && <AssetPicker open onClose={() => setBasePickerOpen(false)} multiple typeFilter="image" lockCollectionName={DFT_UV_COLLECTION_NAME} title={t("เลือกฐานรูป (DFT UV Printed)", "Pick base images (DFT UV Printed)")} contextLabel={contextLabel} onSelect={addBases} />}
       {detailAssetId && <AssetDetailPopup assetId={detailAssetId} onClose={() => setDetailAssetId(null)} />}
     </div>
   );
@@ -172,6 +208,45 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, o
             ) : (
               <button type="button" onClick={() => setAdding(true)} className="text-xs text-violet-700 hover:underline">＋ {t("เพิ่มขนาดใหม่ (บันทึกกลับคลังรูป)", "Add new size (saved to library)")}</button>
             )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// การ์ดรูปฐาน 1 รูป — รูปย่อ + 2 ช่อง: ➕ เพิ่มอะไร / ➖ ลบอะไร จากรูปฐานนี้
+function ArrangeBaseCard({ base, onChange, onRemove, onOpenDetail }: {
+  base: ArrangeBase;
+  onChange: (patch: Partial<ArrangeBase>) => void;
+  onRemove: () => void;
+  onOpenDetail: () => void;
+}) {
+  const t = useT();
+  return (
+    <div className="border border-slate-200 rounded-xl p-3">
+      <div className="flex items-start gap-3">
+        <button type="button" onClick={onOpenDetail} title={t("กดดู/แก้ไฟล์ในคลัง · ชี้ค้างดูรูปใหญ่", "Open in library · hover to preview")} className="shrink-0 rounded-lg overflow-hidden border border-slate-200 hover:ring-2 hover:ring-teal-300 leading-[0]">
+          <HoverImage url={base.url} size={56} previewSize={340} rounded="rounded-lg" alt={base.title} />
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium text-slate-800 truncate">{base.title}</span>
+            <button type="button" onClick={onRemove} className="text-slate-300 hover:text-red-500 text-sm shrink-0" title={t("เอารูปฐานออก", "Remove base")}>✕</button>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-2 mt-1.5">
+            <label className="block">
+              <span className="text-[11px] font-medium text-emerald-700">➕ {t("เพิ่มอะไรจากรูปฐาน", "Add to base")}</span>
+              <textarea value={base.add} onChange={(e) => onChange({ add: e.target.value })} rows={2}
+                placeholder={t("เช่น เพิ่มโลโก้มุมขวา, เพิ่มข้อความ...", "e.g. add logo top-right, add text...")}
+                className="mt-0.5 w-full text-sm border border-slate-200 rounded-md px-2 py-1 resize-y focus:outline-none focus:ring-1 focus:ring-emerald-300" />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-medium text-rose-700">➖ {t("ลบอะไรจากรูปฐาน", "Remove from base")}</span>
+              <textarea value={base.remove} onChange={(e) => onChange({ remove: e.target.value })} rows={2}
+                placeholder={t("เช่น ลบลายน้ำ, ลบข้อความเดิม...", "e.g. remove watermark, remove old text...")}
+                className="mt-0.5 w-full text-sm border border-slate-200 rounded-md px-2 py-1 resize-y focus:outline-none focus:ring-1 focus:ring-rose-300" />
+            </label>
           </div>
         </div>
       </div>

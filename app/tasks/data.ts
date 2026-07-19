@@ -616,7 +616,9 @@ export type SubtaskStepConfig = {
 // งานเรียงพิมพ์ (Arrange Print) — เก็บใน subtask.config.arrange_print
 export type ArrangeOrderLine = { label: string; w: number | null; h: number | null; unit: string; qty: number };   // 1 ขนาด + จำนวน
 export type ArrangePrintItem = { asset_id: string; r2_key: string; title: string; orders: ArrangeOrderLine[] };     // 1 รูป + หลายขนาด
-export type ArrangePrintSpec = { items: ArrangePrintItem[] };
+// รูปฐาน (จากอัลบั้ม "งานพิมพ์ DFT UV (Printed)") + รายละเอียด "เพิ่ม/ลบ" อะไรจากรูปฐานนี้ (ต่อรูป)
+export type ArrangeBaseItem = { asset_id: string; r2_key: string; title: string; add: string; remove: string };
+export type ArrangePrintSpec = { items: ArrangePrintItem[]; bases?: ArrangeBaseItem[] };
 export type TemplateStep = { type?: string; title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; assignee_labels?: string[]; config?: SubtaskStepConfig };
 
 export async function listSubtaskTypes(all = false): Promise<SubtaskType[]> {

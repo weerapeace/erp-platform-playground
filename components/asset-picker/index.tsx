@@ -37,9 +37,10 @@ export type AssetPickerProps = {
   defaultSource?: string;          // ที่มาเริ่มต้น เช่น "artwork" (เปิดมาที่คลัง Artwork เลย)
   defaultSearch?: string;          // คำค้นเริ่มต้น (เปิดมากรองรายการที่เกี่ยวข้องเลย)
   requireDriveFolder?: boolean;    // โชว์เฉพาะรูปที่มีโฟลเดอร์ Drive แล้ว (เลือกรูปต้นทางเพื่อผูกโฟลเดอร์)
+  lockCollectionName?: string;     // ล็อกให้เลือกได้เฉพาะอัลบั้มชื่อนี้ (ซ่อนตัวกรอง+แท็บอัปโหลด) เช่น "งานพิมพ์ DFT UV (Printed)"
 };
 
-export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, title, contextLabel, defaultSource, defaultSearch, requireDriveFolder }: AssetPickerProps) {
+export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, title, contextLabel, defaultSource, defaultSearch, requireDriveFolder, lockCollectionName }: AssetPickerProps) {
   const toast = useToast();
   const [tab, setTab] = useState<"library" | "upload">("library");
   const [rows, setRows] = useState<AssetRow[]>([]);
@@ -66,6 +67,13 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
     apiFetch("/api/assets/collections").then((r) => r.json()).then((j) => setCollections(j.data ?? [])).catch(() => {});
     apiFetch("/api/assets/tags").then((r) => r.json()).then((j) => setTags(j.data ?? [])).catch(() => {});
   }, [open]);
+
+  // โหมดล็อกอัลบั้ม: เมื่ออัลบั้มโหลดเสร็จ → หา id จากชื่อแล้วบังคับเลือกอัลบั้มนั้น (ตัวกรอง/แท็บอัปโหลดถูกซ่อนใน UI)
+  useEffect(() => {
+    if (!open || !lockCollectionName) return;
+    const c = collections.find((x) => x.name === lockCollectionName);
+    if (c && c.id !== collectionId) setCollectionId(c.id);
+  }, [open, lockCollectionName, collections]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const buildParams = useCallback((off: number) => {
     const p = new URLSearchParams({ status: "active", limit: String(PAGE), offset: String(off) });
@@ -130,8 +138,10 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
       <div className="flex gap-4 border-b border-slate-200 mb-3">
         <button onClick={() => setTab("library")}
           className={`pb-2 text-sm ${tab === "library" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}>📁 เลือกจากคลัง</button>
-        <button onClick={() => setTab("upload")}
-          className={`pb-2 text-sm ${tab === "upload" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}>⬆ อัปโหลดใหม่</button>
+        {!lockCollectionName && (
+          <button onClick={() => setTab("upload")}
+            className={`pb-2 text-sm ${tab === "upload" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}>⬆ อัปโหลดใหม่</button>
+        )}
       </div>
 
       {tab === "library" ? (
@@ -145,7 +155,12 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
                 className={`h-8 px-2.5 text-[12px] rounded-lg border ${type === f.key ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "bg-white border-slate-200 text-slate-600"}`}>{f.label}</button>
             ))}
           </div>
-          {/* ตัวกรอง: ที่มา (หมวด) · อัลบั้ม · แท็ก */}
+          {/* ตัวกรอง: ที่มา (หมวด) · อัลบั้ม · แท็ก — ซ่อนเมื่อล็อกอัลบั้ม (โชว์ป้ายอัลบั้มแทน) */}
+          {lockCollectionName ? (
+            <div className="mb-3">
+              <span className="inline-flex items-center gap-1.5 h-8 px-2.5 text-[12px] rounded-lg border border-teal-200 bg-teal-50 text-teal-700">📚 อัลบั้ม: {lockCollectionName}</span>
+            </div>
+          ) : (
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <select value={source} onChange={(e) => setSource(e.target.value)} title="ที่มา"
               className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -169,6 +184,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
                 className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">ล้างตัวกรอง</button>
             )}
           </div>
+          )}
           {loading ? (
             <div className="py-12 text-center text-slate-400 text-sm">กำลังโหลด…</div>
           ) : rows.length === 0 ? (

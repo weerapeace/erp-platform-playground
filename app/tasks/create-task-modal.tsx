@@ -24,7 +24,7 @@ import {
   PRIORITY_META, priorityLabel, createTask, listTasks, listCampaigns, listBrands, listTemplates,
   type CreativePriority, type Campaign, type BrandOption, type TaskTemplate, type SubtaskStepConfig, type TemplateContentItem,
 } from "./data";
-import { ArrangePrintEditor, specFromItems, type ArrangeItem } from "./arrange-print-editor";
+import { ArrangePrintEditor, specFromItems, specBasesFrom, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
 
 const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 
@@ -83,6 +83,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [arrangeItems, setArrangeItems] = useState<ArrangeItem[]>([]);   // งานเรียงพิมพ์: รูป+ขนาด+จำนวน
+  const [arrangeBases, setArrangeBases] = useState<ArrangeBase[]>([]);   // งานเรียงพิมพ์: รูปฐาน (DFT UV Printed) + เพิ่ม/ลบต่อรูป
   const [printedName, setPrintedName] = useState("");   // งานเรียงพิมพ์: ชื่อเสริม (ต่อท้ายชื่อ Printed_YYYY_MM_DD-#)
   // ช่องที่ผู้ใช้ "แตะเอง" ในขั้นข้อมูลงาน — ช่องที่ยังไม่แตะ (ยังเป็นค่าเริ่มต้น) = กล่องเทาอ่อน · ช่องว่าง = กล่องส้มอ่อน + ดันขึ้นบน
   const [touched, setTouched] = useState<Set<string>>(new Set());
@@ -98,7 +99,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       if (rv.length) setDefaultReviewers(rv.map((x) => ({ id: x.id, name: x.name } as UserPickerValue)));
     }).catch(() => {});
   }, []);
-  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setArrangeBases([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);   // eslint-disable-line react-hooks/exhaustive-deps
   // เผื่อ default reviewers โหลดเสร็จหลังเปิด Wizard → เติมให้ถ้ายังว่าง (ไม่ทับที่แก้เอง/แม่แบบ)
   useEffect(() => { if (open && !tplId && defaultReviewers.length && form.reviewers.length === 0 && !touched.has("reviewers")) updateForm({ reviewers: defaultReviewers }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open, defaultReviewers]);
 
@@ -142,7 +143,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const applyTemplate = (id: string) => {
     setTplId(id); setDirty(true); setTouched(new Set());   // เปลี่ยนแม่แบบ/แบรนด์ = ตั้งค่าเริ่มต้นใหม่ → กลับเป็นสีเทาหมด
     const tpl = templates.find((x) => x.id === id);
-    setArrangeItems([]); setPrintedName("");   // เปลี่ยนแม่แบบ → ล้างรายการเรียงพิมพ์/ชื่อเสริม
+    setArrangeItems([]); setArrangeBases([]); setPrintedName("");   // เปลี่ยนแม่แบบ → ล้างรายการเรียงพิมพ์/รูปฐาน/ชื่อเสริม
     if (!tpl) { setSubs([]); setContentItems([]); setTplDueOffset(null); return; }
     // งานเรียงพิมพ์ → ตั้งชื่ออัตโนมัติ Printed_YYYY_MM_DD-# (# = เลขรันของวันนั้น นับจากงานเดิม)
     if ((tpl.steps ?? []).some((s) => s.type === "arrange_print")) {
@@ -182,6 +183,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
 
   // เปลี่ยนรายการเรียงพิมพ์ (จากของกลาง ArrangePrintEditor) → mark dirty
   const onArrangeChange = (items: ArrangeItem[]) => { setArrangeItems(items); setDirty(true); };
+  const onArrangeBasesChange = (b: ArrangeBase[]) => { setArrangeBases(b); setDirty(true); };
 
   const next = () => {
     if (step === 2 && !form.title.trim()) { setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; }
@@ -214,7 +216,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     if (!form.title.trim()) { setStep(2); setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; }
     if (requireParent && form.parents.length === 0) { setStep(4); setFormErr(t("งานนี้ต้องระบุ Parent SKU (ตระกูลสินค้า) อย่างน้อย 1 รายการ","This task requires at least one Parent SKU")); return; }
     setSaving(true); setFormErr(null);
-    const arrangeConfig = specFromItems(arrangeItems);
+    const arrangeConfig = { ...specFromItems(arrangeItems), bases: specBasesFrom(arrangeBases) };
     const subtasks = subs.filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next, type: s.type, config: s.type === "arrange_print" ? { ...s.config, arrange_print: arrangeConfig } : s.config }));
     const effTitle = isArrangePrint ? combinedTitle : form.title.trim();   // เรียงพิมพ์ = ชื่ออัตโนมัติ + ชื่อเสริม
     try {
@@ -412,7 +414,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           </div>
 
           <div className="max-h-[40vh] overflow-y-auto pr-1">
-            <ArrangePrintEditor items={arrangeItems} onChange={onArrangeChange} pushToast={pushToast} contextLabel={combinedTitle || undefined} collapseSizes={false} />
+            <ArrangePrintEditor items={arrangeItems} onChange={onArrangeChange} bases={arrangeBases} onBasesChange={onArrangeBasesChange} pushToast={pushToast} contextLabel={combinedTitle || undefined} collapseSizes={false} />
           </div>
         </div>
       )}
