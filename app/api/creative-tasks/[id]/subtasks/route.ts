@@ -159,7 +159,9 @@ async function loadGalleries(admin: ReturnType<typeof supabaseAdmin>, ownerType:
   return out;
 }
 
-const EDITABLE = new Set(["title", "title_en", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order", "image_sync_targets"]);
+// หมายเหตุ: "config" ต้องอยู่ในนี้ ไม่งั้น PATCH จะทิ้ง config → กด 💾 ในงาน (arrange_print/platform_notes) ไม่บันทึก
+// ผู้เรียกทุกที่ส่ง config "เต็ม" (…sub.config + คีย์ที่แก้) จึงเป็นการแทนที่ทั้งก้อนอย่างปลอดภัย
+const EDITABLE = new Set(["title", "title_en", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order", "image_sync_targets", "config"]);
 
 // อ่าน role ของผู้ใช้ปัจจุบัน (admin/manager/...) — ใช้คุมสิทธิ์ละเอียดของงานย่อย
 async function currentRole(request: NextRequest): Promise<string> {
