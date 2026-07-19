@@ -28,8 +28,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const r = await syncTaskFilesToDrive(admin, id);
     // side-effect ภายนอก (สร้างโฟลเดอร์/อัปไฟล์ขึ้น Drive) → บันทึกประวัติ
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-    await writeAudit(admin, { action: "drive_folder_sync", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { url: r.url, uploaded: r.uploaded } });
-    return NextResponse.json({ url: r.url, uploaded: r.uploaded, error: null });
+    await writeAudit(admin, { action: "drive_folder_sync", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { url: r.url, uploaded: r.uploaded, archived: r.archived } });
+    return NextResponse.json({ url: r.url, uploaded: r.uploaded, archived: r.archived, error: null });
   } catch (e) {
     return NextResponse.json({ error: `เชื่อม Google Drive ไม่สำเร็จ — ลองใหม่อีกครั้ง (${(e as Error).message})` }, { status: 500 });
   }

@@ -5,7 +5,7 @@
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { defaultLineTemplate, renderLineTemplate } from "@/lib/creative-line-templates";
-import { driveConfigured, driveCreateFolder, driveUploadFile, driveEnsureFolder, driveListImages, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
+import { driveConfigured, driveCreateFolder, driveUploadFile, driveEnsureFolder, driveListImages, driveListChildFolders, driveMoveFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
 import { r2GetObject } from "@/lib/r2";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -39,15 +39,15 @@ export async function uploadAttachmentToDrive(admin: Admin, folderId: string, at
 }
 
 /** สร้างโฟลเดอร์ (ถ้ายังไม่มี) + อัปไฟล์แนบทั้งหมดที่ยังไม่ขึ้น Drive — best-effort ต่อไฟล์ (แบบเดิม/แบน) */
-async function syncTaskFilesFlat(admin: Admin, taskId: string): Promise<{ url: string | null; uploaded: number; configured: boolean }> {
+async function syncTaskFilesFlat(admin: Admin, taskId: string): Promise<{ url: string | null; uploaded: number; archived: number; configured: boolean }> {
   const folder = await ensureDriveFolderForTask(admin, taskId);
-  if (!folder) return { url: null, uploaded: 0, configured: true };
+  if (!folder) return { url: null, uploaded: 0, archived: 0, configured: true };
   const { data: atts } = await admin.from("erp_creative_attachments").select("id, r2_key, file_name, content_type, drive_file_id").eq("task_id", taskId);
   let uploaded = 0;
   for (const a of (atts ?? []) as DriveAtt[]) {
     try { if (await uploadAttachmentToDrive(admin, folder.id, a)) uploaded++; } catch { /* ข้ามไฟล์ที่พลาด */ }
   }
-  return { url: folder.url, uploaded, configured: true };
+  return { url: folder.url, uploaded, archived: 0, configured: true };
 }
 
 /**
@@ -55,11 +55,11 @@ async function syncTaskFilesFlat(admin: Admin, taskId: string): Promise<{ url: s
  * - แบรนด์ของงาน "มี" โฟลเดอร์แม่ (ตั้งใน /tasks/settings) → โครงต่อ Parent SKU/child SKU + routing (เฟส 2)
  * - ไม่มี → แบบเดิม (1 โฟลเดอร์แบน)
  */
-export async function syncTaskFilesToDrive(admin: Admin, taskId: string): Promise<{ url: string | null; uploaded: number; configured: boolean }> {
-  if (!driveConfigured()) return { url: null, uploaded: 0, configured: false };
+export async function syncTaskFilesToDrive(admin: Admin, taskId: string): Promise<{ url: string | null; uploaded: number; archived: number; configured: boolean }> {
+  if (!driveConfigured()) return { url: null, uploaded: 0, archived: 0, configured: false };
   const { data: t } = await admin.from("erp_creative_tasks")
     .select("id, task_no, title, brand_id, parent_sku_id").eq("id", taskId).maybeSingle();
-  if (!t) return { url: null, uploaded: 0, configured: true };
+  if (!t) return { url: null, uploaded: 0, archived: 0, configured: true };
   const task = t as { id: string; task_no?: string | null; title?: string | null; brand_id?: string | null; parent_sku_id?: string | null };
   const brandParentId = await getBrandParentFolderId(admin, task.brand_id);
   if (brandParentId) return { ...(await syncTaskStructured(admin, task, brandParentId)), configured: true };
@@ -91,29 +91,46 @@ async function galleryImages(admin: Admin, entityType: "parent_skus_v2" | "skus_
   const { data } = await admin.from("erp_playground_attachments").select("file_path, file_name, content_type").eq("entity_type", entityType).eq("entity_id", entityId).order("sort_order");
   return ((data ?? []) as GalleryImg[]).filter((g) => g.file_path);
 }
-/** อัปรูปแกลเลอรี (จาก R2 file_path) เข้าโฟลเดอร์ — ข้ามชื่อไฟล์ที่มีอยู่แล้ว (กันซ้ำตอนกดซ้ำ) · คืนจำนวนที่อัป */
-async function uploadGalleryToFolder(folderId: string, imgs: GalleryImg[]): Promise<number> {
-  if (imgs.length === 0) return 0;
-  let existing: Set<string>;
-  try { existing = new Set((await driveListImages(folderId)).map((i) => i.name)); } catch { existing = new Set(); }
-  const todo = imgs.filter((g) => { const n = g.file_name || g.file_path.split("/").pop() || "file"; if (existing.has(n)) return false; existing.add(n); return true; });
+/**
+ * อัปรูปแกลเลอรี (จาก R2 file_path) เข้าโฟลเดอร์ + เก็บเวอร์ชัน (เฟส 3):
+ * - ไฟล์เก่าที่ "ถูกแทน" (มีในโฟลเดอร์ แต่ชื่อไม่อยู่ในชุดรูปใหม่ = งานแก้เปลี่ยนรูป) → ย้ายไป subfolder `Ver.N` (N เพิ่มเรื่อย ๆ) ก่อน
+ * - รูปใหม่ที่ยังไม่มีชื่อในโฟลเดอร์ → อัปเข้า (ขนาน) · รูปชื่อเดิมที่ไม่เปลี่ยน → คงไว้ ไม่ทำซ้ำ
+ * คืน { uploaded, archived }
+ */
+async function replaceGalleryInFolder(folderId: string, imgs: GalleryImg[]): Promise<{ uploaded: number; archived: number }> {
+  let existing: { id: string; name: string }[] = [];
+  try { existing = await driveListImages(folderId); } catch { existing = []; }
+  const nameOf = (g: GalleryImg) => g.file_name || g.file_path.split("/").pop() || "file";
+  const galleryNames = new Set(imgs.map(nameOf));
+  const existingNames = new Set(existing.map((e) => e.name));
+  // ไฟล์เก่าที่ถูกแทน (ไม่อยู่ในชุดรูปใหม่) → เก็บเข้า Ver.N
+  const toArchive = existing.filter((e) => !galleryNames.has(e.name));
+  let archived = 0;
+  if (toArchive.length) {
+    let verFolders: { id: string; name: string }[] = [];
+    try { verFolders = await driveListChildFolders(folderId); } catch { verFolders = []; }
+    const maxN = verFolders.reduce((m, f) => { const x = /^Ver\.(\d+)$/.exec(f.name); return x ? Math.max(m, Number(x[1])) : m; }, 0);
+    const verId = await driveEnsureFolder(`Ver.${maxN + 1}`, folderId);
+    for (const f of toArchive) { try { if (await driveMoveFile(f.id, verId, folderId)) archived++; } catch { /* ข้าม */ } }
+  }
+  // รูปใหม่ (ชื่อยังไม่มีในโฟลเดอร์) → อัปขนาน
+  const todo = imgs.filter((g) => !existingNames.has(nameOf(g)));
   const results = await Promise.all(todo.map(async (g) => {
     try {
       const obj = await r2GetObject(g.file_path); if (!obj) return 0;
       const bytes = new Uint8Array(await new Response(obj.body as ReadableStream).arrayBuffer());
-      const name = g.file_name || g.file_path.split("/").pop() || "file";
-      await driveUploadFile(name, g.content_type || obj.httpMetadata?.contentType || "image/jpeg", bytes, folderId);
+      await driveUploadFile(nameOf(g), g.content_type || obj.httpMetadata?.contentType || "image/jpeg", bytes, folderId);
       return 1;
     } catch { return 0; }
   }));
-  return results.reduce((a: number, b: number) => a + b, 0);
+  return { uploaded: results.reduce((a: number, b: number) => a + b, 0), archived };
 }
 
 async function syncTaskStructured(
   admin: Admin,
   task: { id: string; task_no?: string | null; title?: string | null; parent_sku_id?: string | null },
   brandParentId: string,
-): Promise<{ url: string; uploaded: number }> {
+): Promise<{ url: string; uploaded: number; archived: number }> {
   // child SKU (id+code) ของ Parent SKU
   const { data: kids } = task.parent_sku_id
     ? await admin.from("skus_v2").select("id, code").eq("parent_sku_id", task.parent_sku_id).order("code")
@@ -129,13 +146,17 @@ async function syncTaskStructured(
   const topUrl = `https://drive.google.com/drive/folders/${topId}`;
   await admin.from("erp_creative_tasks").update({ drive_folder_id: topId, drive_folder_url: topUrl }).eq("id", task.id);
 
-  let uploaded = 0;
+  let uploaded = 0, archived = 0;
+  const runGallery = async (folderId: string, entityType: "parent_skus_v2" | "skus_v2", entityId: string) => {
+    const r = await replaceGalleryInFolder(folderId, await galleryImages(admin, entityType, entityId));
+    uploaded += r.uploaded; archived += r.archived;
+  };
   // รูปสินค้า Parent → "Parent SKU"
-  if (task.parent_sku_id) uploaded += await uploadGalleryToFolder(parentF, await galleryImages(admin, "parent_skus_v2", task.parent_sku_id));
+  if (task.parent_sku_id) await runGallery(parentF, "parent_skus_v2", task.parent_sku_id);
   // รูปสินค้าแต่ละ child → "SKU/<code>"
   for (const c of children) {
     const cf = await driveEnsureFolder(c.code as string, skuF);
-    uploaded += await uploadGalleryToFolder(cf, await galleryImages(admin, "skus_v2", c.id));
+    await runGallery(cf, "skus_v2", c.id);
   }
   // ไฟล์แนบงาน → งานย่อยชนิด description → "[01] Description" · อื่น ๆ → "Parent SKU"
   const { data: subs } = await admin.from("erp_creative_subtasks").select("id, subtask_type").eq("task_id", task.id);
@@ -145,7 +166,7 @@ async function syncTaskStructured(
     const dest = a.subtask_id && descSubIds.has(a.subtask_id) ? descF : parentF;
     try { if (await uploadAttachmentToDrive(admin, dest, a)) uploaded++; } catch { /* ข้าม */ }
   }
-  return { url: topUrl, uploaded };
+  return { url: topUrl, uploaded, archived };
 }
 
 /**

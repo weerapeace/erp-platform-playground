@@ -92,6 +92,14 @@ export async function driveListImages(parentId: string): Promise<{ id: string; n
     .map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, width: f.imageMediaMetadata?.width, height: f.imageMediaMetadata?.height }));
 }
 
+/** ย้ายไฟล์ไปโฟลเดอร์อื่น (เปลี่ยน parent เดิม→ใหม่) — คืน true ถ้าสำเร็จ · ใช้เก็บไฟล์เก่าเข้า Ver.x ตอนงานแก้ */
+export async function driveMoveFile(fileId: string, addParentId: string, removeParentId: string): Promise<boolean> {
+  const token = await getAccessToken();
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?addParents=${encodeURIComponent(addParentId)}&removeParents=${encodeURIComponent(removeParentId)}&supportsAllDrives=true&fields=id`;
+  const res = await fetch(url, { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}" });
+  return res.ok;
+}
+
 /** โหลดไฟล์จาก Drive → { bytes, mimeType, name } หรือ null */
 export async function driveDownloadFile(fileId: string): Promise<{ bytes: Uint8Array; mimeType: string; name: string } | null> {
   const token = await getAccessToken();

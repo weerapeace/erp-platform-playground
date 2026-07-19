@@ -352,7 +352,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   <button disabled={driveBusy}
                     onClick={async () => {
                       setDriveBusy(true);
-                      try { const r = await syncTaskDrive(d.id); pushToast("success", t(`สร้างโฟลเดอร์ + อัป ${r.uploaded} ไฟล์ขึ้น Drive แล้ว`, `Folder created + ${r.uploaded} file(s) uploaded`)); if (r.url) window.open(r.url, "_blank"); await load(); }
+                      try { const r = await syncTaskDrive(d.id); pushToast("success", t(`สร้างโฟลเดอร์ + อัป ${r.uploaded} ไฟล์ขึ้น Drive แล้ว${r.archived ? ` · เก็บเวอร์ชันเก่า ${r.archived} ไฟล์ (Ver.)` : ""}`, `Folder created + ${r.uploaded} file(s) uploaded${r.archived ? ` · ${r.archived} old archived (Ver.)` : ""}`)); if (r.url) window.open(r.url, "_blank"); await load(); }
                       catch (e) { pushToast("error", (e as Error).message); } finally { setDriveBusy(false); }
                     }}
                     className="text-xs px-2.5 py-1 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:text-violet-700 hover:border-violet-300 hover:bg-violet-50 disabled:opacity-50">
@@ -376,7 +376,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 <div className="flex flex-wrap gap-2">
                   {d.drive_folder_url && <a href={d.drive_folder_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">📁 {t("โฟลเดอร์ Drive", "Drive Folder")}</a>}
                   {d.drive_folder_url && <button disabled={driveBusy}
-                    onClick={async () => { setDriveBusy(true); try { const r = await syncTaskDrive(d.id); pushToast("success", t(`ซิงค์แล้ว — อัปเพิ่ม ${r.uploaded} ไฟล์`, `Synced — ${r.uploaded} new file(s)`)); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDriveBusy(false); } }}
+                    onClick={async () => { setDriveBusy(true); try { const r = await syncTaskDrive(d.id); pushToast("success", t(`ซิงค์แล้ว — อัปเพิ่ม ${r.uploaded} ไฟล์${r.archived ? ` · เก็บเวอร์ชันเก่า ${r.archived}` : ""}`, `Synced — ${r.uploaded} new${r.archived ? ` · ${r.archived} archived` : ""}`)); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDriveBusy(false); } }}
                     className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-slate-500 hover:text-violet-700 hover:bg-violet-50 disabled:opacity-50" title={t("อัปไฟล์แนบที่ยังไม่ขึ้น Drive", "Upload attachments not yet on Drive")}>{driveBusy ? "..." : `⬆ ${t("ซิงค์ไฟล์", "Sync files")}`}</button>}
                   {d.final_asset_url && <a href={d.final_asset_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🖼 {t("ไฟล์จริง", "Final Asset")}</a>}
                   {d.published_url && <a href={d.published_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🔗 {t("ลิงก์ที่เผยแพร่", "Published Link")}</a>}
