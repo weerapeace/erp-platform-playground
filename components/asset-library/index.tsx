@@ -1352,12 +1352,13 @@ function BulkMoveModal({ count, collections, onClose, onApply }: {
 }
 
 // แถวฟิลด์ใน bulk edit — ติ๊กเปิด/ปิดการแก้ฟิลด์ (module-level กัน remount ตอนพิมพ์)
-function BulkEditRow({ on, setOn, label, children }: { on: boolean; setOn: (v: boolean) => void; label: string; children: React.ReactNode }) {
+function BulkEditRow({ on, setOn, label, preview, children }: { on: boolean; setOn: (v: boolean) => void; label: string; preview?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className={`rounded-lg border p-2.5 ${on ? "border-indigo-200 bg-indigo-50/30" : "border-slate-200"}`}>
       <label className="flex items-center gap-2 text-[12px] font-medium text-slate-700 cursor-pointer">
         <input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} /> {label}
       </label>
+      {preview != null && <div className="mt-1 pl-6 text-[11px] text-slate-500">เดิม: {preview}</div>}
       {on && <div className="mt-2">{children}</div>}
     </div>
   );
@@ -1388,9 +1389,11 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
   const [enTags, setEnTags] = useState(false); const [tags, setTags] = useState<string[]>([]);
   const [enKw, setEnKw] = useState(false); const [kw, setKw] = useState("");
   const [enLoc, setEnLoc] = useState(false); const [locMode, setLocMode] = useState<"all" | "each">("each"); const [locPath, setLocPath] = useState(""); const [locUrl, setLocUrl] = useState("");
-  // ข้อมูลไฟล์รายใบ (โหมดแก้แยก)
-  const [items, setItems] = useState<{ id: string; title: string; url: string; isImg: boolean }[] | null>(null);
+  // ข้อมูลไฟล์รายใบ (ดึงค่าเดิมมาโชว์ + prefill ตอนแก้)
+  type BEItem = { id: string; title: string; url: string; isImg: boolean; brandId: string; types: string[]; sizes: AssetSize[]; parents: string[]; keywords: string; path: string; masterUrl: string };
+  const [items, setItems] = useState<BEItem[] | null>(null);
   const [itemsLoading, setItemsLoading] = useState(false);
+  const [prefilled, setPrefilled] = useState(false);
   const [pfSizes, setPfSizes] = useState<Record<string, AssetSize[]>>({});
   const [pfParents, setPfParents] = useState<Record<string, string[]>>({});
   const [pfPath, setPfPath] = useState<Record<string, string>>({});
@@ -1398,20 +1401,61 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
 
   const needPerFile = (enSize && sizeMode === "each") || (enParent && parentMode === "each") || (enLoc && locMode === "each");
-  // เข้าโหมด "แก้แยก" ครั้งแรก → โหลดไฟล์ที่เลือกมาแก้ทีละใบ (ดึงค่าปัจจุบันมา prefill)
+  const PREFILL_CAP = 40;   // ดึงค่าเดิมอัตโนมัติเมื่อไฟล์ไม่เยอะ (กันยิงเยอะเกิน)
+  const wantLoad = needPerFile || ids.length <= PREFILL_CAP;
+  // โหลดไฟล์ที่เลือก → เก็บค่าเดิมทุกฟิลด์ (ไว้โชว์ "เดิม: …" + prefill + แก้แยกรายไฟล์)
   useEffect(() => {
-    if (!needPerFile || items !== null || itemsLoading) return;
+    if (!wantLoad || items !== null || itemsLoading) return;
     setItemsLoading(true);
     Promise.all(ids.map((id) => apiFetch(`/api/assets/${id}`).then((r) => r.json()).then((j) => j.data as AssetDetail).catch(() => null)))
       .then((got) => {
         const list = got.filter(Boolean) as AssetDetail[];
-        setItems(list.map((d) => ({ id: d.id, title: d.title, url: d.url, isImg: isImage(d) })));
+        setItems(list.map((d) => ({ id: d.id, title: d.title, url: d.url, isImg: isImage(d), brandId: d.brand_id ?? "", types: d.artwork_types ?? [], sizes: d.sizes ?? [], parents: d.parent_sku_codes ?? [], keywords: d.keywords ?? "", path: d.master_path ?? "", masterUrl: d.master_url ?? "" })));
         const s: Record<string, AssetSize[]> = {}, p: Record<string, string[]> = {}, pa: Record<string, string> = {}, u: Record<string, string> = {};
         for (const d of list) { s[d.id] = d.sizes ?? []; p[d.id] = d.parent_sku_codes ?? []; pa[d.id] = d.master_path ?? ""; u[d.id] = d.master_url ?? ""; }
         setPfSizes(s); setPfParents(p); setPfPath(pa); setPfUrl(u);
       })
       .finally(() => setItemsLoading(false));
-  }, [needPerFile, items, itemsLoading, ids]);
+  }, [wantLoad, items, itemsLoading, ids]);
+
+  // ค่าเดิม "ร่วม" ของไฟล์ที่เลือก (ต่างกัน = mixed) — ไว้โชว์ + prefill
+  const cur = (() => {
+    if (!items || items.length === 0) return null;
+    const oneStr = (get: (i: BEItem) => string) => { const vs = items.map(get); return { mixed: new Set(vs).size > 1, value: vs[0] }; };
+    const oneArr = <T,>(get: (i: BEItem) => T[], keyOf: (v: T[]) => string) => { const vs = items.map(get); return { mixed: new Set(vs.map(keyOf)).size > 1, value: vs[0] }; };
+    const sortKey = (v: string[]) => JSON.stringify([...v].sort());
+    return {
+      brand: oneStr((i) => i.brandId),
+      types: oneArr((i) => i.types, sortKey),
+      sizes: oneArr((i) => i.sizes, (v) => JSON.stringify(v)),
+      parents: oneArr((i) => i.parents, sortKey),
+      keywords: oneStr((i) => i.keywords),
+      path: oneStr((i) => i.path),
+      url: oneStr((i) => i.masterUrl),
+    };
+  })();
+  // เติมค่าเดิมลงช่องแก้ (ครั้งเดียว) — เฉพาะฟิลด์ที่ทุกไฟล์ค่าตรงกัน
+  useEffect(() => {
+    if (!cur || prefilled) return;
+    if (!cur.brand.mixed) setBrandId(cur.brand.value);
+    if (!cur.types.mixed) setTypes(cur.types.value);
+    if (!cur.sizes.mixed) setSizes(cur.sizes.value);
+    if (!cur.parents.mixed) setParents(cur.parents.value);
+    if (!cur.keywords.mixed) setKw(cur.keywords.value);
+    if (!cur.path.mixed) setLocPath(cur.path.value);
+    if (!cur.url.mixed) setLocUrl(cur.url.value);
+    setPrefilled(true);
+  }, [cur, prefilled]);
+
+  // ป้ายค่าเดิมแต่ละฟิลด์ (โชว์ใต้ชื่อฟิลด์)
+  const mixedTag = <span className="text-amber-600">ค่าต่างกัน ({ids.length} ไฟล์)</span>;
+  const brandLabel = (id: string) => id ? (brands.find((b) => b.id === id)?.name ?? "แบรนด์อื่น") : "— ไม่มีแบรนด์ —";
+  const sizeLabel = (ss: AssetSize[]) => ss.length ? ss.map((s) => `${s.w}×${s.h} ${s.unit}`).join(", ") : "—";
+  const prev = (field: keyof NonNullable<typeof cur>, render: (v: never) => React.ReactNode): React.ReactNode => {
+    if (itemsLoading) return <span className="text-slate-400">กำลังโหลดค่าเดิม…</span>;
+    if (!cur) return ids.length > PREFILL_CAP ? <span className="text-slate-400">ไฟล์เยอะ — ไม่ดึงค่าเดิม</span> : null;
+    const f = cur[field]; return f.mixed ? mixedTag : render(f.value as never);
+  };
 
   const save = async () => {
     // ฟิลด์ "รวม" (ค่าเดียวทุกไฟล์) → bulk action edit
@@ -1460,22 +1504,22 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
       }>
       {busy && <LoadingOverlay message="กำลังบันทึก…" />}
       <div className="space-y-2.5">
-        <BulkEditRow on={enBrand} setOn={setEnBrand} label="แบรนด์">
+        <BulkEditRow on={enBrand} setOn={setEnBrand} label="แบรนด์" preview={prev("brand", (v: string) => brandLabel(v))}>
           <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
             <option value="">— ไม่มีแบรนด์ —</option>
             {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </BulkEditRow>
-        <BulkEditRow on={enType} setOn={setEnType} label="ชนิด (แทนที่ของเดิม)">
+        <BulkEditRow on={enType} setOn={setEnType} label="ชนิด (แทนที่ของเดิม)" preview={prev("types", (v: string[]) => (v.length ? v.join(", ") : "—"))}>
           <ArtTypeMultiSelect value={types} types={artTypeList} onChange={setTypes} onCreated={(t) => setArtTypeList((c) => [...c, t])} />
         </BulkEditRow>
-        <BulkEditRow on={enSize} setOn={setEnSize} label="ขนาด (กว้าง × สูง)">
+        <BulkEditRow on={enSize} setOn={setEnSize} label="ขนาด (กว้าง × สูง)" preview={prev("sizes", (v: AssetSize[]) => sizeLabel(v))}>
           <BulkModeToggle mode={sizeMode} setMode={setSizeMode} />
           {sizeMode === "all"
             ? <div className="mt-1.5"><SizesEditor value={sizes} onChange={setSizes} /><p className="text-[10px] text-slate-400 mt-1">ใส่ค่าเดียว → แทนที่ทุกไฟล์</p></div>
             : <p className="text-[11px] text-indigo-600 mt-1.5">↓ แก้ขนาดแยกแต่ละไฟล์ในส่วนล่าง</p>}
         </BulkEditRow>
-        <BulkEditRow on={enParent} setOn={setEnParent} label="Parent SKU">
+        <BulkEditRow on={enParent} setOn={setEnParent} label="Parent SKU" preview={prev("parents", (v: string[]) => (v.length ? v.join(", ") : "—"))}>
           <BulkModeToggle mode={parentMode} setMode={setParentMode} />
           {parentMode === "all"
             ? <div className="mt-1.5"><ParentSkuField value={parents} onChange={setParents} /><p className="text-[10px] text-slate-400 mt-1">เลือกชุดเดียว → แทนที่ทุกไฟล์</p></div>
@@ -1484,11 +1528,12 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
         <BulkEditRow on={enTags} setOn={setEnTags} label="แท็ก (เพิ่มเข้าไป)">
           <TagPickerField value={tags} onChange={setTags} />
         </BulkEditRow>
-        <BulkEditRow on={enKw} setOn={setEnKw} label="คำค้นเพิ่มเติม (keyword — แทนที่ของเดิม)">
+        <BulkEditRow on={enKw} setOn={setEnKw} label="คำค้นเพิ่มเติม (keyword — แทนที่ของเดิม)" preview={prev("keywords", (v: string) => v || "—")}>
           <input value={kw} onChange={(e) => setKw(e.target.value)} placeholder="เช่น flower ดอกไม้ summer"
             className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
         </BulkEditRow>
-        <BulkEditRow on={enLoc} setOn={setEnLoc} label="ที่เก็บไฟล์ต้นฉบับ (path / ลิงก์โฟลเดอร์)">
+        <BulkEditRow on={enLoc} setOn={setEnLoc} label="ที่เก็บไฟล์ต้นฉบับ (path / ลิงก์โฟลเดอร์)"
+          preview={prev("path", (v: string) => <>{v || "—"}{cur && !cur.url.mixed && cur.url.value ? <span className="text-slate-400"> · มีลิงก์โฟลเดอร์</span> : null}</>)}>
           <BulkModeToggle mode={locMode} setMode={setLocMode} />
           {locMode === "all"
             ? <div className="mt-1.5 space-y-1.5">
