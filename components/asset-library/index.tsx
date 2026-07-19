@@ -672,7 +672,7 @@ function UploadModal({ actor, collections, onClose, onDone }: {
       if (next[i].status === "done" || next[i].status === "dup") { done++; continue; }
       next[i] = { ...next[i], status: "uploading" }; setItems([...next]);
       try {
-        const upFile = await downscaleImageWidth(next[i].file, 1200);   // ย่อด้านกว้าง ≤ 1200px ตอนอัป
+        const upFile = await downscaleImageWidth(next[i].file, 1600);   // ย่อด้านกว้าง ≤ 1600px ตอนอัป
         const fd = new FormData();
         fd.append("file", upFile);
         if (tagsStr.trim()) fd.append("tags", tagsStr.trim());
@@ -1558,7 +1558,7 @@ async function previewForDrive(file: File): Promise<File> {
   if (!file.type.startsWith("image/")) return file;
   if (file.size <= DRIVE_MAX_PROXY) return file;   // เต็มขนาด
   for (const w of [3000, 2200, 1600]) { const d = await downscaleImageWidth(file, w); if (d.size <= DRIVE_MAX_PROXY) return d; }
-  return await downscaleImageWidth(file, 1200);
+  return await downscaleImageWidth(file, 1600);
 }
 async function uploadArtworkToDrive(opts: {
   name: string; artworkType?: string; brandId?: string;
@@ -1691,7 +1691,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
       let effUrl = masterUrl.trim();
       if (willDrive) { const link = await uploadSourcesToDrive(); if (link) { effUrl = link; setMasterUrl(link); } }
 
-      const upFile = await downscaleImageWidth(file, 1200);   // ย่อด้านกว้าง ≤ 1200px ตอนอัป
+      const upFile = await downscaleImageWidth(file, 1600);   // ย่อด้านกว้าง ≤ 1600px ตอนอัป
       const fd = new FormData();
       fd.append("file", upFile);
       fd.append("source", "artwork");
@@ -1925,7 +1925,7 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
     let sharedFolderId = "";   // โหมดโฟลเดอร์เดียว: ใบแรกสร้างโฟลเดอร์ → ใบต่อ ๆ ไปอัปเข้าโฟลเดอร์นี้
     for (const r of rows) {
       try {
-        const upFile = await downscaleImageWidth(r.file, 1200);   // ย่อด้านกว้าง ≤1200px (ใช้ทั้งอัป R2 + preview บน Drive)
+        const upFile = await downscaleImageWidth(r.file, 1600);   // ย่อด้านกว้าง ≤1600px (อัป R2)
         // อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Drive → ได้ลิงก์โฟลเดอร์ (โฟลเดอร์เดียว = ทุกใบ · แยก = เฉพาะใบมีไฟล์แนบ)
         let effUrl = r.url.trim();
         if (driveOn && (oneFolder || r.srcFiles.length > 0)) {

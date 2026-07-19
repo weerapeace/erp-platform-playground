@@ -23,8 +23,8 @@ export const maxDuration = 60;
 
 type Item = { fileId?: string; fileName?: string; folderLink?: string; master_path?: string; title?: string; artwork_types?: unknown; sizes?: unknown; parent_sku_codes?: unknown };
 
-// ย่อรูปฝั่ง server เหลือกว้าง ≤1200px (คง png/webp · อื่น→jpeg) · gif/svg ไม่ย่อ · sharp พังก็คืนของเดิม
-async function downscaleServer(bytes: Uint8Array, mime: string, maxW = 1200): Promise<{ bytes: Uint8Array; mime: string }> {
+// ย่อรูปฝั่ง server เหลือกว้าง ≤1600px (คง png/webp · อื่น→jpeg) · gif/svg ไม่ย่อ · sharp พังก็คืนของเดิม
+async function downscaleServer(bytes: Uint8Array, mime: string, maxW = 1600): Promise<{ bytes: Uint8Array; mime: string }> {
   if (/gif|svg/i.test(mime)) return { bytes, mime };
   try {
     const sharp = (await import("sharp")).default;
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     try {
       const dl = await driveDownloadFile(fileId);
       if (!dl) { failed++; results.push({ fileId, ok: false, reason: "download-failed" }); continue; }
-      const { bytes, mime } = await downscaleServer(dl.bytes, dl.mimeType || "image/png", 1200);
+      const { bytes, mime } = await downscaleServer(dl.bytes, dl.mimeType || "image/png", 1600);
       const fileName = (it.fileName || dl.name || "image").trim();
       const title = (it.title || "").trim() || fileName.replace(/\.[^.]+$/, "").trim() || "artwork";
       const artworkTypes = normalizeCodes(it.artwork_types);
