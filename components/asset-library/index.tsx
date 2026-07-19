@@ -2368,7 +2368,7 @@ function ManageTypesModal({ types, onClose, onChanged }: { types: LookupItem[]; 
 }
 
 // ── หาโฟลเดอร์ Drive ที่ยังไม่เชื่อม → สแกน → กรอกรายละเอียด → นำเข้า ──
-type ScanFolder = { folderId: string; folderName: string; folderLink: string; typeSubName: string; artworkType: string; master_path: string };
+type ScanFolder = { folderId: string; folderName: string; folderLink: string; typeSubName: string; artworkType: string; master_path: string; newCount?: number; total?: number };
 type ImportRow = { key: string; folderName: string; folderLink: string; master_path: string; fileId: string; fileName: string; title: string; types: string[]; sizes: AssetSize[]; parentCodes: string[] };
 function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[]; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
@@ -2389,6 +2389,7 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
   const [batchKw, setBatchKw] = useState("");
   const [batchTypes, setBatchTypes] = useState<string[]>([]);       // ชนิด → ใส่ทุกใบ
   const [batchParents, setBatchParents] = useState<string[]>([]);   // Parent SKU → ใส่ทุกใบ
+  const [impProg, setImpProg] = useState<{ done: number; total: number } | null>(null);   // ความคืบหน้านำเข้า (ยิงทีละชุด)
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
   useEffect(() => { apiFetch("/api/assets/collections").then((r) => r.json()).then((j) => setCols((j.data ?? []) as AssetCollection[])).catch(() => {}); }, []);
   useEffect(() => { setArtTypeList((cur) => { const s = new Set(cur.map((t) => t.name)); return [...cur, ...artTypes.filter((t) => !s.has(t.name))]; }); }, [artTypes]);
@@ -2411,7 +2412,7 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
     if (!picked.length) { toast.error("เลือกโฟลเดอร์ก่อน"); return; }
     setLoadingImgs(true);
     try {
-      const res = await apiFetch("/api/drive/folder-images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder_ids: picked.map((f) => f.folderId) }) });
+      const res = await apiFetch("/api/drive/folder-images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder_ids: picked.map((f) => f.folderId), only_new: true }) });
       const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ดึงรูปไม่สำเร็จ");
       const imgMap = (j.images ?? {}) as Record<string, { id: string; name: string; width?: number; height?: number }[]>;
       const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -2420,7 +2421,7 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
       for (const f of picked) for (const img of (imgMap[f.folderId] ?? [])) {
         newRows.push({ key: `r${n++}`, folderName: f.folderName, folderLink: f.folderLink, master_path: f.master_path, fileId: img.id, fileName: img.name, title: img.name.replace(/\.[^.]+$/, "").trim() || f.folderName, types: f.artworkType ? [f.artworkType] : [], sizes: sizesFrom(img.width, img.height), parentCodes: [] });
       }
-      if (!newRows.length) { toast.error("โฟลเดอร์ที่เลือกไม่มีไฟล์รูป"); return; }
+      if (!newRows.length) { toast.error("ไม่มีรูปใหม่ที่ยังไม่ลงในโฟลเดอร์ที่เลือก"); return; }
       setRows(newRows); setStep("form");
     } catch (e) { toast.error(e instanceof Error ? e.message : "ดึงรูปไม่สำเร็จ"); }
     finally { setLoadingImgs(false); }
@@ -2428,29 +2429,44 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
 
   const setRow = (key: string, patch: Partial<ImportRow>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
+  // นำเข้า — ยิงทีละชุด (4 รูป/รอบ) กัน timeout รูปเยอะ · อ่าน response แบบกัน JSON พัง
   const doImport = async () => {
     if (!rows.length) { toast.error("ไม่มีรายการ"); return; }
     setImporting(true);
+    const items = rows.map((r) => ({ fileId: r.fileId, fileName: r.fileName, folderLink: r.folderLink, master_path: r.master_path, title: r.title, artwork_types: r.types, sizes: r.sizes, parent_sku_codes: r.parentCodes }));
+    const CHUNK = 4;
+    let imported = 0, failed = 0;
     try {
-      const items = rows.map((r) => ({ fileId: r.fileId, fileName: r.fileName, folderLink: r.folderLink, master_path: r.master_path, title: r.title, artwork_types: r.types, sizes: r.sizes, parent_sku_codes: r.parentCodes }));
-      const res = await apiFetch("/api/assets/drive-import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: brandId, items, tags: batchTags, keywords: batchKw.trim(), collection_ids: batchAlbums }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "นำเข้าไม่สำเร็จ");
-      toast.success(`นำเข้า ${j.imported} รูปแล้ว${j.failed ? ` · ล้มเหลว ${j.failed}` : ""}`);
+      for (let i = 0; i < items.length; i += CHUNK) {
+        setImpProg({ done: i, total: items.length });
+        const slice = items.slice(i, i + CHUNK);
+        const res = await apiFetch("/api/assets/drive-import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: brandId, items: slice, tags: batchTags, keywords: batchKw.trim(), collection_ids: batchAlbums }) });
+        const txt = await res.text();
+        let j: { imported?: number; failed?: number; error?: string };
+        try { j = txt ? JSON.parse(txt) : {}; }
+        catch { throw new Error(res.status >= 500 ? "เซิร์ฟเวอร์ทำงานนานเกินไป — ลองแบ่งนำเข้าน้อยลง" : (txt.slice(0, 100) || "ตอบกลับไม่ถูกต้อง")); }
+        if (!res.ok || j.error) throw new Error(j.error || "นำเข้าไม่สำเร็จ");
+        imported += j.imported ?? 0; failed += j.failed ?? 0;
+      }
+      setImpProg(null);
+      toast.success(`นำเข้า ${imported} รูปแล้ว${failed ? ` · ล้มเหลว ${failed}` : ""}`);
       onDone();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "นำเข้าไม่สำเร็จ"); }
-    finally { setImporting(false); }
+    } catch (e) {
+      setImpProg(null);
+      toast.error(`${e instanceof Error ? e.message : "นำเข้าไม่สำเร็จ"}${imported ? ` (นำเข้าไปแล้ว ${imported} ก่อนหยุด)` : ""}`);
+    } finally { setImporting(false); }
   };
 
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const busy = scanning || loadingImgs || importing;
 
   return (
-    <ERPModal open onClose={onClose} title="🔍 หาโฟลเดอร์ใน Drive ที่ยังไม่เชื่อม" size="xl"
-      description={step === "scan" ? "เลือกแบรนด์ → สแกน → เลือกโฟลเดอร์ที่ยังไม่มีบัตร → กรอกรายละเอียดก่อนนำเข้า" : "กรอกรายละเอียดแต่ละรูป (เหมือนเพิ่มรูปใหม่) แล้วนำเข้า"}
+    <ERPModal open onClose={onClose} title="🔍 หารูปใน Drive ที่ยังไม่ลงคลัง" size="xl"
+      description={step === "scan" ? "เลือกแบรนด์ → สแกน → เลือกโฟลเดอร์ที่มีรูปยังไม่ลง → กรอกรายละเอียดก่อนนำเข้า" : "กรอกรายละเอียดแต่ละรูป (เหมือนเพิ่มรูปใหม่) แล้วนำเข้า"}
       footer={
         step === "scan" ? (
           <div className="flex items-center justify-between w-full">
-            <span className="text-[12px] text-slate-400">{folders ? `ยังไม่เชื่อม ${folders.length} · เลือก ${sel.size}` : ""}</span>
+            <span className="text-[12px] text-slate-400">{folders ? `มีรูปใหม่ ${folders.length} โฟลเดอร์ · เลือก ${sel.size}` : ""}</span>
             <div className="flex gap-2">
               <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
               <button onClick={toForm} disabled={busy || !sel.size} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">ถัดไป — กรอกรายละเอียด ({sel.size})</button>
@@ -2463,7 +2479,7 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
           </div>
         )
       }>
-      {busy && <LoadingOverlay message={scanning ? "กำลังสแกน Drive…" : loadingImgs ? "กำลังดึงรายการรูป…" : "กำลังนำเข้า + ดึงรูป…"} />}
+      {busy && <LoadingOverlay message={scanning ? "กำลังสแกน Drive…" : loadingImgs ? "กำลังดึงรายการรูป…" : impProg ? `กำลังนำเข้า ${impProg.done}/${impProg.total} รูป…` : "กำลังนำเข้า + ดึงรูป…"} />}
 
       {step === "scan" ? (
         <>
@@ -2479,11 +2495,11 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
           {folders === null ? (
             <p className="text-[12px] text-slate-400 py-8 text-center">เลือกแบรนด์แล้วกด “สแกน”</p>
           ) : folders.length === 0 ? (
-            <p className="text-[13px] text-emerald-600 py-8 text-center">🎉 ทุกโฟลเดอร์เชื่อมแล้ว (สแกน {scanned} โฟลเดอร์)</p>
+            <p className="text-[13px] text-emerald-600 py-8 text-center">🎉 รูปในโฟลเดอร์ลงคลังครบแล้ว (สแกน {scanned} โฟลเดอร์)</p>
           ) : (
             <>
               <div className="flex items-center justify-between mb-2">
-                <p className="text-[12px] text-slate-600">เจอ <b>{folders.length}</b> โฟลเดอร์ที่ยังไม่เชื่อม (จาก {scanned})</p>
+                <p className="text-[12px] text-slate-600">เจอ <b>{folders.length}</b> โฟลเดอร์ที่มีรูปยังไม่ลง (จาก {scanned})</p>
                 <div className="flex gap-2 text-[11px]">
                   <button onClick={() => setSel(new Set(folders.map((f) => f.folderId)))} className="text-indigo-600 hover:underline">เลือกทั้งหมด</button>
                   <button onClick={() => setSel(new Set())} className="text-slate-500 hover:underline">ไม่เลือก</button>
@@ -2497,6 +2513,11 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
                       <span className="text-[13px] text-slate-700 truncate block">📁 {f.folderName}</span>
                       <span className="text-[10px] text-slate-400 font-mono truncate block">{f.typeSubName}{f.artworkType && f.artworkType !== f.typeSubName ? ` · ${f.artworkType}` : ""}</span>
                     </span>
+                    {f.newCount != null && (
+                      <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200" title={`ในโฟลเดอร์มี ${f.total ?? "?"} รูป`}>
+                        +{f.newCount} รูปใหม่{f.total != null && f.total > f.newCount ? ` / ${f.total}` : ""}
+                      </span>
+                    )}
                     <a href={f.folderLink} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-[11px] text-indigo-600 hover:underline shrink-0">เปิด ›</a>
                   </label>
                 ))}
