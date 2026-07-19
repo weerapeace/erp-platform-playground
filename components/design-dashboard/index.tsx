@@ -178,6 +178,7 @@ export function DesignDashboard() {
   const [openSheetId, setOpenSheetId] = useState<string | null>(null);   // เปิด popup รายละเอียดในตัวบอร์ด
   const [createOpen, setCreateOpen] = useState(false);                   // เปิด popup สร้างงานใหม่
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
+  const [viewMode, setViewMode] = useState<"board" | "gallery">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี)
   const [brandLogos, setBrandLogos] = useState<Record<string, string>>({});   // brand id → logo R2 key (จาก /api/brands)
   const [othersOpen, setOthersOpen] = useState(false);                        // ดรอปดาวน์ "แบรนด์อื่นๆ"
   // โหลดโลโก้แบรนด์ (จาก /master/brands → brands.logo_url) มาโชว์ในการ์ดแบรนด์แถวบน
@@ -210,6 +211,16 @@ export function DesignDashboard() {
   const saveBrandPrefs = (next: { order: string[]; hidden: string[] }) => {
     setBrandPrefs(next);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_brand_prefs", value: next }) }).catch(() => {});
+  };
+  // จำมุมมองที่เลือกไว้รายคน (บอร์ด/การ์ดรูปใหญ่)
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=design_dashboard_view_mode").then((r) => r.json())
+      .then((j) => { const v = j?.value; if (v === "board" || v === "gallery") setViewMode(v); })
+      .catch(() => {});
+  }, []);
+  const changeViewMode = (mode: "board" | "gallery") => {
+    setViewMode(mode);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_view_mode", value: mode }) }).catch(() => {});
   };
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -365,6 +376,12 @@ export function DesignDashboard() {
     ...column,
     sheets: filteredSheets.filter((sheet) => sheet.status === column.key),
   }));
+  // ป้ายสถานะสำหรับมุมมองการ์ด (ไม่มีคอลัมน์ → โชว์สถานะเป็น badge บนการ์ด)
+  const statusInfo = useMemo(() => {
+    const m = new Map<string, { label: string; color: string }>();
+    for (const c of statusColumns) m.set(c.key, { label: c.label, color: c.color });
+    return m;
+  }, [statusColumns]);
 
   // ── Brand Theme (ระบบกลาง) — ใช้ของกลาง useBrandTheme + <BrandThemedShell> (หน้าอื่น reuse ได้เหมือนกัน) ──
   const [themeBuilderOpen, setThemeBuilderOpen] = useState(false);
@@ -654,6 +671,13 @@ export function DesignDashboard() {
                       className={`h-9 rounded-md border px-3 text-xs font-medium transition ${quickFilter === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
                   ))}
                 </div>
+                {/* สลับมุมมอง: บอร์ด Kanban ↔ การ์ดรูปใหญ่ (แกลเลอรี) — จำค่ารายคน */}
+                <div className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
+                  {([["board", "🗂️ บอร์ด"], ["gallery", "🖼️ การ์ดรูปใหญ่"]] as const).map(([key, label]) => (
+                    <button key={key} type="button" onClick={() => changeViewMode(key)}
+                      className={`h-8 rounded px-2.5 text-xs font-medium transition ${viewMode === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+                  ))}
+                </div>
               </div>
 
               {loading ? (
@@ -664,6 +688,71 @@ export function DesignDashboard() {
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-slate-200 bg-white/70 p-8 text-center text-sm text-slate-400">
                   <BrandSlot theme={brandTheme} id="page_empty" />
                   ยังไม่มีใบงานสำหรับตัวกรองนี้
+                </div>
+              ) : viewMode === "gallery" ? (
+                /* ── มุมมองการ์ดรูปใหญ่ (แกลเลอรี): เห็นรูปงานเต็มใบ ไม่โดนตัด · เรียงตามอัปเดตล่าสุด ── */
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                  {filteredSheets.map((sheet) => {
+                    const brandColor = safeColor(sheet.brand_color);
+                    const coverUrl = sheetCoverUrl(sheet);
+                    const st = statusInfo.get(sheet.status);
+                    return (
+                      <div
+                        key={sheet.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openDetail(sheet.id)}
+                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDetail(sheet.id); } }}
+                        data-gg-task-card
+                        title={`${sheet.code} • ${sheet.name}`}
+                        className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-amber-300"
+                      >
+                        <BrandSlot theme={brandTheme} id="task_corner" />
+                        {coverUrl ? (
+                          <HoverPreview url={sheet.cover_url} previewW={640}>
+                            {/* รูปเต็มใบ (object-contain) ไม่ crop — กรอบ 1:1 */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              data-gg-cover
+                              src={coverUrl}
+                              alt={sheet.name}
+                              loading="lazy"
+                              decoding="async"
+                              className="aspect-square w-full bg-slate-50 object-contain"
+                            />
+                          </HoverPreview>
+                        ) : (
+                          <div data-gg-cover className="flex aspect-square w-full items-center justify-center" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
+                            <BrandSlot theme={brandTheme} id="task_placeholder" size="max-h-16" />
+                          </div>
+                        )}
+                        <div className="flex flex-1 flex-col gap-1 p-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />
+                            <span className="font-mono text-[10px] text-slate-400">{sheet.code}</span>
+                          </div>
+                          <div className="line-clamp-2 text-xs font-semibold text-slate-800">{sheet.name}</div>
+                          {st && (
+                            <span className="inline-flex w-fit items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ color: st.color, backgroundColor: `${st.color}1a` }}>
+                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: st.color }} />
+                              {st.label}
+                            </span>
+                          )}
+                          <div className="mt-auto flex items-center justify-between gap-1.5 pt-0.5">
+                            <span className="truncate text-[10px] text-slate-400">{sheet.brand_name ?? "ไม่ระบุ"}</span>
+                            <CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} />
+                          </div>
+                          {(sheet.has_cost || sheet.has_quote || sheet.parent_count > 0) && (
+                            <div className="flex flex-wrap gap-1 text-[9px] text-slate-400">
+                              {sheet.has_cost && <span className="rounded bg-violet-50 px-1 py-0.5 text-violet-600">ตีราคา</span>}
+                              {sheet.has_quote && <span className="rounded bg-indigo-50 px-1 py-0.5 text-indigo-600">มีราคา</span>}
+                              {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1 py-0.5 text-emerald-600">มี SKU</span>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="overflow-x-auto pb-2">
