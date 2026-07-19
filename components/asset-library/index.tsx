@@ -460,17 +460,20 @@ export function AssetLibrary() {
       {uploadOpen && (
         <UploadModal
           actor={actor} collections={collections} initialFiles={pendingFiles}
+          defaultCollectionId={collectionId && collectionId !== "none" ? collectionId : null}
           onClose={() => { setUploadOpen(false); setPendingFiles(null); }}
           onDone={async () => { setUploadOpen(false); setPendingFiles(null); await load(); await loadMeta(); }}
         />
       )}
       {artworkAddOpen && (
         <ArtworkAddModal actor={actor} artTypes={artTypes} collections={collections} initialFile={pendingFile}
+          defaultCollectionIds={collectionId && collectionId !== "none" ? [collectionId] : []}
           onClose={() => { setArtworkAddOpen(false); setPendingFile(null); }}
           onDone={async () => { setArtworkAddOpen(false); setPendingFile(null); await load(); await loadMeta(); }} />
       )}
       {massOpen && (
         <MassArtworkModal actor={actor} artTypes={artTypes} collections={collections} initialFiles={pendingFiles}
+          defaultAlbums={collectionId && collectionId !== "none" ? [collectionId] : []}
           onClose={() => { setMassOpen(false); setPendingFiles(null); }}
           onDone={async () => { setMassOpen(false); setPendingFiles(null); await load(); await loadMeta(); }} />
       )}
@@ -686,13 +689,13 @@ function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder 
 // ── อัปโหลด (ลากวาง) ──
 type UpItem = { file: File; status: "pending" | "uploading" | "done" | "dup" | "error"; msg?: string };
 
-function UploadModal({ actor, collections, onClose, onDone, initialFiles }: {
-  actor: string | null; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFiles?: File[] | null;
+function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaultCollectionId }: {
+  actor: string | null; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFiles?: File[] | null; defaultCollectionId?: string | null;
 }) {
   const toast = useToast();
   const [items, setItems] = useState<UpItem[]>([]);
   const [tagsStr, setTagsStr] = useState("");
-  const [collectionId, setCollectionId] = useState("");
+  const [collectionId, setCollectionId] = useState(defaultCollectionId ?? "");   // เปิดอยู่ในอัลบั้มไหน → ตั้งให้เลย
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1715,7 +1718,7 @@ async function uploadArtworkToDrive(opts: {
 }
 
 // ── เพิ่ม Artwork ลงบัตร (รูป + ชนิด + ชื่อ + แท็ก + ไซส์ + location + อัลบั้ม + Parent SKU + keyword) ──
-function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initialFile }: { actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFile?: File | null }) {
+function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initialFile, defaultCollectionIds }: { actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFile?: File | null; defaultCollectionIds?: string[] }) {
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -1729,7 +1732,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
   const [sizes, setSizes] = useState<AssetSize[]>([]);
   const [sizeHint, setSizeHint] = useState<{ px: { w: number; h: number }; dpi: number; fromImage: boolean } | null>(null);   // ที่มาของขนาดที่แกะจากรูป
   const [parentCodes, setParentCodes] = useState<string[]>([]);
-  const [collectionIds, setCollectionIds] = useState<string[]>([]);      // อัลบั้มหลายอัน (m2m)
+  const [collectionIds, setCollectionIds] = useState<string[]>(defaultCollectionIds ?? []);      // อัลบั้มหลายอัน (m2m) · เปิดอยู่ในอัลบั้มไหน → ตั้งให้เลย
   const [cols, setCols] = useState<AssetCollection[]>(collections);       // สำเนาไว้ต่อท้ายเมื่อสร้างอัลบั้มใหม่ในฟอร์ม
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -1975,14 +1978,14 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
 
 // ── เพิ่ม Artwork หลายรูปพร้อมกัน (ตาราง inline) — ลากหลายไฟล์ → 1 แถว/ไฟล์ → แก้แล้วบันทึกทีเดียว ──
 type MassRow = { id: number; file: File; preview: string | null; name: string; types: string[]; path: string; url: string; srcFiles: File[]; sizes: AssetSize[]; parentCodes: string[]; pathAuto: boolean };
-function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initialFiles }: {
-  actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFiles?: File[] | null;
+function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initialFiles, defaultAlbums }: {
+  actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFiles?: File[] | null; defaultAlbums?: string[];
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<MassRow[]>([]);
   const [cols, setCols] = useState<AssetCollection[]>(collections);
   const [artTypeList, setArtTypeList] = useState<LookupItem[]>(artTypes);
-  const [batchAlbums, setBatchAlbums] = useState<string[]>([]);   // อัลบั้มใช้กับทั้งชุด
+  const [batchAlbums, setBatchAlbums] = useState<string[]>(defaultAlbums ?? []);   // อัลบั้มใช้กับทั้งชุด · เปิดอยู่ในอัลบั้มไหน → ตั้งให้เลย
   const [batchTypes, setBatchTypes] = useState<string[]>([]);     // ชนิดเริ่มต้น → กดใส่ให้ทุกแถว
   const [batchBrandId, setBatchBrandId] = useState("");           // แบรนด์ใช้กับทุกรูป (จัดโฟลเดอร์ Drive + เก็บ brand_id)
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
