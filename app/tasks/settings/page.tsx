@@ -20,6 +20,7 @@ import { getParentSkuFieldOptions, getSubmitRequiredFields, saveSubmitRequiredFi
 import { SubtaskTypeManager } from "../subtask-type-manager";
 import { LineSettings } from "../line-settings";
 import { DriveFolderSettings } from "../drive-folder-settings";
+import { BrandDriveFolders } from "../brand-drive-folders";
 import { MultiUserPicker } from "../multi-user-picker";
 import type { UserPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
@@ -28,8 +29,8 @@ import { tr } from "@/lib/lang";
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
 type MatrixRow = { role_key: string; permission_key: string };
-type Tab = "perm" | "task_type" | "platform" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "line" | "drive";
-const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "subtype", "status", "transition", "team", "mysub", "submit", "line", "drive"];
+type Tab = "perm" | "task_type" | "platform" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "line" | "drive" | "brand_drive";
+const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "subtype", "status", "transition", "team", "mysub", "submit", "line", "drive", "brand_drive"];
 
 export default function TaskSettingsPage() {
   const t = useT();
@@ -66,6 +67,7 @@ export default function TaskSettingsPage() {
             <TabBtn active={tab === "submit"} onClick={() => setTab("submit")}>📤 {t("ส่งงาน", "Submit")}</TabBtn>
             <TabBtn active={tab === "line"} onClick={() => setTab("line")}>🔔 {t("LINE", "LINE")}</TabBtn>
             <TabBtn active={tab === "drive"} onClick={() => setTab("drive")}>🗂️ {t("โฟลเดอร์ปก", "Cover folder")}</TabBtn>
+            <TabBtn active={tab === "brand_drive"} onClick={() => setTab("brand_drive")}>🏷️ {t("โฟลเดอร์ต่อแบรนด์", "Brand folders")}</TabBtn>
           </div>
         )}
       </div>
@@ -102,6 +104,7 @@ export default function TaskSettingsPage() {
               <div className="p-5"><DriveFolderSettings /></div>
             </div>
           )
+          : tab === "brand_drive" ? <BrandDriveFolders />
           : <OptionsManager kind={tab} title={tab === "task_type" ? t("ประเภทงาน", "Task Types") : t("แพลตฟอร์ม", "Platforms")} showToast={showToast} />}
       </div>
 
