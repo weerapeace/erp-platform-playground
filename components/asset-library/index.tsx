@@ -1546,6 +1546,13 @@ function BulkFolderModal({ ids, firstAsset, onClose, onDone }: {
 // สร้างโฟลเดอร์ตามชื่องาน (ใต้แบรนด์/ชนิด) → ตั้งชื่อไฟล์ตามชื่องาน → ก็อปรูปตัวอย่างเข้าโฟลเดอร์ด้วย (เปิดดูลายจาก Drive ได้เลย)
 const DRIVE_MAX_PROXY = 4 * 1024 * 1024;   // ไฟล์ ≤4MB อัปผ่านแอป · ใหญ่กว่า = อัปเอง (ลิมิต body Vercel)
 const drivePreviewExt = (f: File) => f.type === "image/jpeg" ? ".jpg" : f.type === "image/webp" ? ".webp" : (f.name.match(/\.[^.]+$/)?.[0] || ".png");
+// รูป preview สำหรับก็อปลง Drive: เต็มขนาดถ้า ≤4MB · เกินก็ย่อลงให้พอดี 4MB (คลัง R2 ยังย่อ 1200 แยกต่างหาก)
+async function previewForDrive(file: File): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+  if (file.size <= DRIVE_MAX_PROXY) return file;   // เต็มขนาด
+  for (const w of [3000, 2200, 1600]) { const d = await downscaleImageWidth(file, w); if (d.size <= DRIVE_MAX_PROXY) return d; }
+  return await downscaleImageWidth(file, 1200);
+}
 async function uploadArtworkToDrive(opts: {
   name: string; artworkType?: string; brandId?: string;
   srcFiles: File[]; previewFile?: File | null;
@@ -1622,7 +1629,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
 
   // อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Google Drive "ผ่านแอป" (ของกลาง uploadArtworkToDrive) → คืนลิงก์โฟลเดอร์
   const uploadSourcesToDrive = async (): Promise<string> => {
-    const previewFile = file ? await downscaleImageWidth(file, 1200) : null;   // รูปตัวอย่าง (ย่อ ≤1200) ก็อปเข้าโฟลเดอร์ด้วย
+    const previewFile = file ? await previewForDrive(file) : null;   // รูปตัวอย่างลง Drive: เต็มขนาดถ้า ≤4MB
     const { folderLink, largeCount } = await uploadArtworkToDrive({
       name: title, artworkType: artTypesSel[0], brandId, srcFiles, previewFile,
       onProgress: (done, total) => setDriveProg({ done, total }),
@@ -1915,8 +1922,9 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
         // อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Drive → ได้ลิงก์โฟลเดอร์ (โฟลเดอร์เดียว = ทุกใบ · แยก = เฉพาะใบมีไฟล์แนบ)
         let effUrl = r.url.trim();
         if (driveOn && (oneFolder || r.srcFiles.length > 0)) {
+          const drivePreview = await previewForDrive(r.file);   // preview ลง Drive เต็มขนาดถ้า ≤4MB (R2 ใช้ upFile ย่อ 1200)
           const { folderId, folderLink, largeCount } = await uploadArtworkToDrive({
-            name: r.name, artworkType: r.types[0], brandId: batchBrandId, srcFiles: r.srcFiles, previewFile: upFile,
+            name: r.name, artworkType: r.types[0], brandId: batchBrandId, srcFiles: r.srcFiles, previewFile: drivePreview,
             folderId: oneFolder ? sharedFolderId : "", folderName: oneFolder ? combinedName : undefined,
           });
           if (oneFolder && folderId) sharedFolderId = folderId;
