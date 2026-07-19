@@ -1727,6 +1727,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
   const [pathAuto, setPathAuto] = useState(true);   // path ยังตามชื่ออัตโนมัติอยู่ไหม (ผู้ใช้แก้เอง = หยุด)
   const [srcFiles, setSrcFiles] = useState<File[]>([]);   // ไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Drive
   const [driveOn, setDriveOn] = useState(false);
+  const [autoFolder, setAutoFolder] = useState(true);     // default: สร้างโฟลเดอร์ Drive + ก็อปรูปตัวอย่างให้เลย
   const [driveProg, setDriveProg] = useState({ done: 0, total: 0 });   // สถานะอัป Drive
   const srcInputRef = useRef<HTMLInputElement>(null);
   const [brandId, setBrandId] = useState("");
@@ -1786,11 +1787,13 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
     if (!file) { toast.error("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)"); return; }
     if (!brandId) { toast.error("เลือกแบรนด์ก่อน"); return; }
     if (!artTypesSel.length) { toast.error("เลือกชนิด artwork ก่อน"); return; }
-    const willDrive = srcFiles.length > 0 && driveOn;
-    if (!masterPath.trim() && !masterUrl.trim() && !willDrive) { toast.error("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS / ลิงก์ / โยนไฟล์ขึ้น Drive)"); return; }
+    // สร้างโฟลเดอร์ Drive เมื่อ: มีไฟล์ต้นฉบับโยนขึ้น หรือ ติ๊ก "สร้างอัตโนมัติ" และยังไม่มีลิงก์เอง
+    const willAutoFolder = driveOn && autoFolder && !masterUrl.trim();
+    const willDrive = driveOn && (srcFiles.length > 0 || willAutoFolder);
+    if (!masterPath.trim() && !masterUrl.trim() && !willDrive) { toast.error("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS / ลิงก์ / สร้างโฟลเดอร์ Drive)"); return; }
     setBusy(true);
     try {
-      // อัปไฟล์ต้นฉบับขึ้น Drive ก่อน (ได้ลิงก์โฟลเดอร์มาเติมให้)
+      // สร้างโฟลเดอร์ Drive + ก็อปรูปตัวอย่าง (+ อัปไฟล์ต้นฉบับถ้ามี) → ได้ลิงก์โฟลเดอร์มาเติมให้
       let effUrl = masterUrl.trim();
       if (willDrive) { const link = await uploadSourcesToDrive(); if (link) { effUrl = link; setMasterUrl(link); } }
 
@@ -1908,10 +1911,21 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
           <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder="https://drive.google.com/…  หรือ  ลิงก์ Synology Drive"
             className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
 
-        {/* โยนไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Google Drive อัตโนมัติ */}
+        {/* สร้างโฟลเดอร์ Drive อัตโนมัติ + โยนไฟล์ต้นฉบับ */}
         {driveOn && (
           <div className="mt-3 pt-3 border-t border-slate-100">
-            <span className="text-[12px] text-slate-500">📤 หรือ โยนไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Google Drive ให้อัตโนมัติ</span>
+            <label className="flex items-start gap-2 cursor-pointer rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5">
+              <input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
+              <span className="text-[12px] text-slate-700">
+                🗂️ <b>สร้างโฟลเดอร์ Drive ให้อัตโนมัติ</b> + ก็อปรูปตัวอย่างเข้าไป
+                <span className="block text-[11px] text-slate-500 mt-0.5">
+                  {autoFolder
+                    ? <>จะสร้างโฟลเดอร์ชื่อ “{title.trim() || "(ใส่ชื่อก่อน)"}” แล้วเติมลิงก์ Drive ให้ · {masterUrl.trim() ? "มีลิงก์เองแล้ว จะไม่สร้างซ้ำ" : "ไม่ต้องไปสร้างทีหลัง"}</>
+                    : "ปิดอยู่ — ต้องใส่ path/ลิงก์เอง หรือไปสร้างโฟลเดอร์ทีหลัง"}
+                </span>
+              </span>
+            </label>
+            <span className="block mt-3 text-[12px] text-slate-500">📤 หรือ โยนไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Google Drive ให้อัตโนมัติ</span>
             <div onClick={() => srcInputRef.current?.click()}
               onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
               onDragOver={(e) => e.preventDefault()}
