@@ -33,6 +33,7 @@ import { PlatformChip } from "./platform-chip";
 import { TaskContentTab } from "./task-content-tab";
 import { HoverImage } from "@/components/hover-image";
 import { InfoHint } from "@/components/info-hint";
+import { DriveFolderModal } from "./drive-folder-modal";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./use-statuses";
 import {
@@ -138,6 +139,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [driveBusy, setDriveBusy] = useState(false);
+  const [driveModalOpen, setDriveModalOpen] = useState(false);   // popup ยืนยันก่อนสร้างโฟลเดอร์ (เฟส B)
   const [commentText, setCommentText] = useState("");
   const [mentionUsers, setMentionUsers] = useState<UserPickerValue[]>([]);   // แจ้งเตือนถึงใครบ้างเมื่อส่งคอมเมนต์
   const [mentionAdding, setMentionAdding] = useState<UserPickerValue | null>(null);
@@ -349,12 +351,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               {/* สร้างโฟลเดอร์ Google Drive + อัปไฟล์แนบขึ้น Drive (ถ้ายังไม่มีโฟลเดอร์) */}
               {!d.drive_folder_url && (
                 <div className="inline-flex items-center gap-1.5">
-                  <button disabled={driveBusy}
-                    onClick={async () => {
-                      setDriveBusy(true);
-                      try { const r = await syncTaskDrive(d.id); pushToast("success", t(`สร้างโฟลเดอร์ + อัป ${r.uploaded} ไฟล์ขึ้น Drive แล้ว${r.archived ? ` · เก็บเวอร์ชันเก่า ${r.archived} ไฟล์ (Ver.)` : ""}`, `Folder created + ${r.uploaded} file(s) uploaded${r.archived ? ` · ${r.archived} old archived (Ver.)` : ""}`)); if (r.url) window.open(r.url, "_blank"); await load(); }
-                      catch (e) { pushToast("error", (e as Error).message); } finally { setDriveBusy(false); }
-                    }}
+                  <button disabled={driveBusy} onClick={() => setDriveModalOpen(true)}
                     className="text-xs px-2.5 py-1 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:text-violet-700 hover:border-violet-300 hover:bg-violet-50 disabled:opacity-50">
                     {driveBusy ? t("กำลังทำ...", "Working...") : `📁 ${t("สร้างโฟลเดอร์ + อัปไฟล์ขึ้น Drive", "Create Drive folder + upload files")}`}
                   </button>
@@ -369,6 +366,16 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                     <div className="mt-1.5 text-[10px] text-slate-400">{t("ต้องตั้งค่า Google Drive ในระบบก่อน (ผู้ดูแล) · บันทึกประวัติทุกครั้ง", "Requires Google Drive to be configured (admin) · every run is logged")}</div>
                   </InfoHint>
                 </div>
+              )}
+              {driveModalOpen && (
+                <DriveFolderModal taskId={d.id} onClose={() => setDriveModalOpen(false)}
+                  pushToast={pushToast}
+                  onDone={async (r) => {
+                    setDriveModalOpen(false);
+                    pushToast("success", t(`สร้างโฟลเดอร์ + อัป ${r.uploaded} ไฟล์ขึ้น Drive แล้ว${r.archived ? ` · เก็บเวอร์ชันเก่า ${r.archived} ไฟล์ (Ver.)` : ""}`, `Folder created + ${r.uploaded} file(s) uploaded${r.archived ? ` · ${r.archived} old archived (Ver.)` : ""}`));
+                    if (r.url) window.open(r.url, "_blank");
+                    await load();
+                  }} />
               )}
 
               {/* ลิงก์ผลงาน */}

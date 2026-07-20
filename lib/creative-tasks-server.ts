@@ -5,7 +5,7 @@
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { defaultLineTemplate, renderLineTemplate } from "@/lib/creative-line-templates";
-import { driveConfigured, driveCreateFolder, driveGetFolder, driveUploadFile, driveEnsureFolder, driveListImages, driveListChildFolders, driveMoveFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
+import { driveConfigured, driveCreateFolder, driveGetFolder, driveUploadFile, driveEnsureFolder, driveFindFolder, driveListImages, driveListChildFolders, driveMoveFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
 import { r2GetObject } from "@/lib/r2";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -58,24 +58,66 @@ async function syncTaskFilesFlat(admin: Admin, taskId: string): Promise<{ url: s
  * - แบรนด์ของงาน "มี" โฟลเดอร์แม่ (ตั้งใน /tasks/settings) → โครงต่อ Parent SKU/child SKU + routing (เฟส 2)
  * - ไม่มี → แบบเดิม (1 โฟลเดอร์แบน)
  */
-export async function syncTaskFilesToDrive(admin: Admin, taskId: string): Promise<{ url: string | null; uploaded: number; archived: number; configured: boolean }> {
+export type DriveSyncOpts = { destinationName?: string; folderName?: string };
+export async function syncTaskFilesToDrive(admin: Admin, taskId: string, opts?: DriveSyncOpts): Promise<{ url: string | null; uploaded: number; archived: number; configured: boolean }> {
   if (!driveConfigured()) return { url: null, uploaded: 0, archived: 0, configured: false };
   const { data: t } = await admin.from("erp_creative_tasks")
     .select("id, task_no, title, brand_id, parent_sku_id").eq("id", taskId).maybeSingle();
   if (!t) return { url: null, uploaded: 0, archived: 0, configured: true };
   const task = t as { id: string; task_no?: string | null; title?: string | null; brand_id?: string | null; parent_sku_id?: string | null };
   const brandParentId = await getBrandParentFolderId(admin, task.brand_id);
-  if (brandParentId) return { ...(await syncTaskStructured(admin, task, brandParentId)), configured: true };
+  if (brandParentId) return { ...(await syncTaskStructured(admin, task, brandParentId, opts)), configured: true };
   return await syncTaskFilesFlat(admin, taskId);
 }
 
 // ===== เฟส 2: โครงโฟลเดอร์ต่อแบรนด์/SKU =====
 /** โฟลเดอร์แม่ Drive ของแบรนด์ (ตั้งใน /tasks/settings แท็บ "โฟลเดอร์ต่อแบรนด์") — null ถ้ายังไม่ตั้ง */
 async function getBrandParentFolderId(admin: Admin, brandId: string | null | undefined): Promise<string | null> {
+  return (await getBrandParentFolder(admin, brandId))?.folder_id || null;
+}
+async function getBrandParentFolder(admin: Admin, brandId: string | null | undefined): Promise<{ folder_id: string; name: string } | null> {
   if (!brandId) return null;
   const { data } = await admin.from("china_app_settings").select("sval").eq("skey", "brand_drive_folders").maybeSingle();
-  const map = ((data as { sval?: Record<string, { folder_id?: string }> } | null)?.sval ?? {}) as Record<string, { folder_id?: string }>;
-  return map[brandId]?.folder_id || null;
+  const map = ((data as { sval?: Record<string, { folder_id?: string; name?: string }> } | null)?.sval ?? {}) as Record<string, { folder_id?: string; name?: string }>;
+  const c = map[brandId];
+  return c?.folder_id ? { folder_id: c.folder_id, name: c.name ?? "" } : null;
+}
+
+// รหัส Parent SKU (ชื่อโฟลเดอร์บนสุดที่แนะนำ) ของงาน — จาก child code
+async function taskParentCode(admin: Admin, task: { task_no?: string | null; title?: string | null; parent_sku_id?: string | null }): Promise<string> {
+  const { data: kids } = task.parent_sku_id ? await admin.from("skus_v2").select("code").eq("parent_sku_id", task.parent_sku_id) : { data: [] as { code: string | null }[] };
+  const codes = ((kids ?? []) as { code: string | null }[]).map((k) => k.code).filter((c): c is string => !!c);
+  return deriveParentCode(codes, task.task_no || task.title || "งาน");
+}
+
+/** ข้อมูลสำหรับ popup ยืนยันสร้างโฟลเดอร์ (เฉพาะแบรนด์ที่ตั้งโฟลเดอร์แม่ = โหมดโครงสร้าง) */
+export async function driveFolderCreateInfo(admin: Admin, taskId: string): Promise<{
+  configured: boolean; structured: boolean; parent_name?: string; suggested_name?: string; suggested_destination?: string; destinations?: { id: string; name: string }[];
+}> {
+  if (!driveConfigured()) return { configured: false, structured: false };
+  const { data: t } = await admin.from("erp_creative_tasks").select("brand_id, parent_sku_id, task_no, title").eq("id", taskId).maybeSingle();
+  if (!t) return { configured: false, structured: false };
+  const task = t as { brand_id?: string | null; parent_sku_id?: string | null; task_no?: string | null; title?: string | null };
+  const bp = await getBrandParentFolder(admin, task.brand_id);
+  if (!bp) return { configured: true, structured: false };   // ไม่มีโฟลเดอร์แบรนด์ → โหมดแบน (popup ยืนยันเฉย ๆ)
+  const suggested = await taskParentCode(admin, task);
+  let destinations: { id: string; name: string }[] = [];
+  try { destinations = await driveListChildFolders(bp.folder_id); } catch { destinations = []; }
+  // โฟลเดอร์ปลายทางที่แนะนำ = โฟลเดอร์ย่อยที่ชื่อเป็น "คำนำหน้า" ของรหัส (เช่น "TTM" ของ "TTM119") · เอาที่ยาวสุด
+  const suggested_destination = destinations.map((d) => d.name).filter((n) => n && suggested.startsWith(n) && n !== suggested).sort((a, b) => b.length - a.length)[0] || "";
+  return { configured: true, structured: true, parent_name: bp.name, suggested_name: suggested, suggested_destination, destinations };
+}
+
+/** เช็กว่ามีโฟลเดอร์ชื่อ folderName อยู่แล้วในปลายทาง (destinationName ใต้โฟลเดอร์แบรนด์) หรือยัง */
+export async function driveFolderExists(admin: Admin, taskId: string, destinationName: string, folderName: string): Promise<boolean> {
+  const name = (folderName || "").trim(); if (!name) return false;
+  const { data: t } = await admin.from("erp_creative_tasks").select("brand_id").eq("id", taskId).maybeSingle();
+  const bp = await getBrandParentFolder(admin, (t as { brand_id?: string | null } | null)?.brand_id);
+  if (!bp) return false;
+  let parent = bp.folder_id;
+  const dest = (destinationName || "").trim();
+  if (dest) { const f = await driveFindFolder(dest, bp.folder_id); if (!f) return false; parent = f; }
+  return !!(await driveFindFolder(name, parent));
 }
 
 /** ชื่อโฟลเดอร์บนสุด = "โค้ด Parent SKU" — เดาจาก child code (ตัดท้าย -0X) ตัวที่พบบ่อยสุด · ไม่มี child → fallback */
@@ -154,6 +196,7 @@ async function syncTaskStructured(
   admin: Admin,
   task: { id: string; task_no?: string | null; title?: string | null; parent_sku_id?: string | null },
   brandParentId: string,
+  opts?: DriveSyncOpts,
 ): Promise<{ url: string; uploaded: number; archived: number }> {
   // child SKU (id+code) ของ Parent SKU
   const { data: kids } = task.parent_sku_id
@@ -162,8 +205,11 @@ async function syncTaskStructured(
   const children = ((kids ?? []) as { id: string; code: string | null }[]).filter((c): c is { id: string; code: string } => !!c.code);
   const parentCode = deriveParentCode(children.map((c) => c.code), task.task_no || task.title || "งาน");
 
-  // โครงแบน: <parentCode>/ { [01] Description, <parentCode> (รูป Parent), <childCode>… (child ตรง ๆ ไม่มี "SKU" ครอบ) }
-  const topId = await driveEnsureFolder(parentCode, brandParentId);
+  // popup: เลือกโฟลเดอร์ปลายทาง (เช่น TTM) ใต้โฟลเดอร์แบรนด์ + ตั้งชื่อโฟลเดอร์บนสุดเองได้
+  const parentFolder = opts?.destinationName?.trim() ? await driveEnsureFolder(opts.destinationName.trim(), brandParentId) : brandParentId;
+  const topName = opts?.folderName?.trim() || parentCode;
+  // โครงแบน: <topName>/ { [01] Description, <parentCode> (รูป Parent), <childCode>… (child ตรง ๆ ไม่มี "SKU" ครอบ) }
+  const topId = await driveEnsureFolder(topName, parentFolder);
   const descF = await driveEnsureFolder("[01] Description", topId);
   const parentF = await driveEnsureFolder(parentCode, topId);   // โฟลเดอร์รูป Parent = รหัส (เปลี่ยนจาก "Parent SKU")
   const topUrl = `https://drive.google.com/drive/folders/${topId}`;

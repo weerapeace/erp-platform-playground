@@ -177,11 +177,20 @@ export async function deleteTask(id: string): Promise<void> {
 }
 
 // สร้างโฟลเดอร์ Google Drive ของงาน (ถ้ายังไม่มี) + อัปไฟล์แนบที่ยังไม่ขึ้น Drive → คืนลิงก์ + จำนวนที่อัป
-export async function syncTaskDrive(id: string): Promise<{ url: string | null; uploaded: number; archived: number }> {
-  const res = await apiFetch(`/api/creative-tasks/${id}/drive-folder`, { method: "POST" });
+export async function syncTaskDrive(id: string, opts?: { destination_name?: string; folder_name?: string }): Promise<{ url: string | null; uploaded: number; archived: number }> {
+  const res = await apiFetch(`/api/creative-tasks/${id}/drive-folder`, { method: "POST", body: opts ? JSON.stringify(opts) : undefined });
   const j = await res.json();
   if (!res.ok || j.error) throw new Error(j.error || "สร้างโฟลเดอร์/อัปไฟล์ไม่สำเร็จ");
   return { url: (j.url as string) ?? null, uploaded: Number(j.uploaded ?? 0), archived: Number(j.archived ?? 0) };
+}
+export type DriveFolderInfo = { configured: boolean; structured: boolean; parent_name?: string; suggested_name?: string; suggested_destination?: string; destinations?: { id: string; name: string }[] };
+export async function driveFolderInfo(id: string): Promise<DriveFolderInfo> {
+  return await apiFetch(`/api/creative-tasks/${id}/drive-folder`).then((r) => r.json());
+}
+export async function driveFolderCheckDup(id: string, destination: string, folderName: string): Promise<boolean> {
+  const p = new URLSearchParams({ check: "1", destination, folder_name: folderName });
+  const j = await apiFetch(`/api/creative-tasks/${id}/drive-folder?${p.toString()}`).then((r) => r.json());
+  return !!j.exists;
 }
 
 // ---- ฟิลด์ Parent SKU ที่ต้องกรอกก่อนส่งงาน (ค่ากลาง) ----
