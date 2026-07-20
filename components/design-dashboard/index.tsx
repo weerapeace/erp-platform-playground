@@ -761,8 +761,9 @@ export function DesignDashboard() {
                   })}
                 </div>
               ) : (
-                <div className="overflow-x-auto pb-2">
-                  <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${boardColumns.length}, minmax(160px, 1fr))` }}>
+                <div className="overflow-x-auto px-1 pb-2">
+                  {/* เห็นครบทุกคอลัมน์พอดีจอ (minmax(0,1fr) = คอลัมน์หดพอดี ไม่ต้องเลื่อนแนวนอน) · gap-4 เว้นช่องไฟ */}
+                  <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${boardColumns.length}, minmax(0, 1fr))` }}>
                     {boardColumns.map((column, index) => {
                       const expanded = expandedCols.has(column.key);
                       const shown = expanded ? column.sheets : column.sheets.slice(0, 8);
@@ -807,7 +808,7 @@ export function DesignDashboard() {
                                   onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
                                   aria-busy={isMoving}
                                   title="Drag to change status or click to open"
-                                  className={`relative block overflow-hidden rounded-lg border border-slate-200 bg-white p-2 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-amber-300 ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : "cursor-grab active:cursor-grabbing"}`}
+                                  className={`relative block overflow-hidden rounded-lg border border-slate-200 bg-white p-2.5 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-amber-300 ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : "cursor-grab active:cursor-grabbing"}`}
                                 >
                                   <BrandSlot theme={brandTheme} id="task_corner" />
                                   {coverUrl ? (
@@ -819,11 +820,11 @@ export function DesignDashboard() {
                                         alt={sheet.name}
                                         loading="lazy"
                                         decoding="async"
-                                        className="mb-2 h-16 w-full rounded-md border border-slate-100 bg-slate-50 object-cover"
+                                        className="mb-2 aspect-square w-full rounded-md border border-slate-100 bg-slate-50 object-contain"
                                       />
                                     </HoverPreview>
                                   ) : (
-                                    <div data-gg-cover className="mb-2 flex h-16 items-center justify-center overflow-hidden rounded-md border border-slate-100" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
+                                    <div data-gg-cover className="mb-2 flex aspect-square items-center justify-center overflow-hidden rounded-md border border-slate-100" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
                                       <BrandSlot theme={brandTheme} id="task_placeholder" size="max-h-14" />
                                     </div>
                                   )}
@@ -831,7 +832,7 @@ export function DesignDashboard() {
                                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />
                                     <span className="font-mono text-[11px] text-slate-400">{sheet.code}</span>
                                   </div>
-                                  <div className="mt-0.5 min-h-[32px] text-xs font-semibold text-slate-800">{sheet.name}</div>
+                                  <div className="mt-0.5 min-h-[34px] text-[13px] font-semibold leading-snug text-slate-800">{sheet.name}</div>
                                   {sheet.note && (
                                     <div className="mt-1 line-clamp-2 rounded bg-amber-50/70 px-1.5 py-1 text-[11px] leading-snug text-slate-600" title={sheet.note}>📝 {sheet.note}</div>
                                   )}
