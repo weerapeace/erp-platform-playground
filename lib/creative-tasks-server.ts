@@ -5,7 +5,7 @@
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { defaultLineTemplate, renderLineTemplate } from "@/lib/creative-line-templates";
-import { driveConfigured, driveCreateFolder, driveGetFolder, driveUploadFile, driveEnsureFolder, driveFindFolder, driveListImages, driveListChildFolders, driveMoveFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
+import { driveConfigured, driveCreateFolder, driveGetFolder, driveUploadFile, driveEnsureFolder, driveFindFolder, driveListImages, driveListChildFolders, driveMoveFile, driveTrashFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
 import { r2GetObject } from "@/lib/r2";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -147,7 +147,7 @@ function extOf(fileName: string | null, contentType: string | null): string {
   return "jpg";
 }
 type UploadFile = { r2Key: string; name: string; mime: string };
-// ตั้งชื่อรูปเป็นเลขลำดับ เริ่มที่ start (Parent/Description=1 · SKU=0) ตามลำดับรูป
+// ตั้งชื่อรูปเป็นเลขลำดับ เริ่มที่ start (Parent=0 [รูป0=ปก] · Description=1 · child SKU=1) ตามลำดับรูป
 function numbered(imgs: GalleryImg[], start: number): UploadFile[] {
   return imgs.map((g, i) => ({ r2Key: g.file_path, name: `${start + i}.${extOf(g.file_name, g.content_type)}`, mime: g.content_type || "image/jpeg" }));
 }
@@ -192,6 +192,32 @@ async function replaceFolderImages(folderId: string, files: UploadFile[]): Promi
   return { uploaded: results.reduce((a: number, b: number) => a + b, 0), archived };
 }
 
+// เทียบว่ารายการ r2 key เหมือนเดิมไหม (รวมลำดับ เพราะลำดับมีผลกับเลขรูป 0,1,2)
+function sameKeys(a: string[] | undefined, b: string[]): boolean {
+  if (!a || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+// วางไฟล์แบบ "ทับไปเลย" (ไม่ทำ Ver) — มีไฟล์ชื่อเดิมอยู่ → ทิ้งลงถังขยะก่อน แล้วอัปใหม่
+// ใช้กับรูปปกหลวมข้าง top (ตามที่เจ้าของสั่ง: รูปข้างนอกไม่ต้องทำ Ver.1 ทับไปเลย)
+async function overwriteFiles(folderId: string, files: UploadFile[]): Promise<{ uploaded: number }> {
+  let existing: { id: string; name: string }[] = [];
+  try { existing = await driveListImages(folderId); } catch { existing = []; }
+  const byName = new Map(existing.map((e) => [e.name, e.id]));
+  const results = await Promise.all(files.map(async (f) => {
+    try {
+      const oldId = byName.get(f.name);
+      if (oldId) { try { await driveTrashFile(oldId); } catch { /* ข้าม */ } }
+      const obj = await r2GetObject(f.r2Key); if (!obj) return 0;
+      const bytes = new Uint8Array(await new Response(obj.body as ReadableStream).arrayBuffer());
+      await driveUploadFile(f.name, f.mime || obj.httpMetadata?.contentType || "image/jpeg", bytes, folderId);
+      return 1;
+    } catch { return 0; }
+  }));
+  return { uploaded: results.reduce((a: number, b: number) => a + b, 0) };
+}
+
 async function syncTaskStructured(
   admin: Admin,
   task: { id: string; task_no?: string | null; title?: string | null; parent_sku_id?: string | null },
@@ -213,26 +239,50 @@ async function syncTaskStructured(
   const descF = await driveEnsureFolder("[01] Description", topId);
   const parentF = await driveEnsureFolder(parentCode, topId);   // โฟลเดอร์รูป Parent = รหัส (เปลี่ยนจาก "Parent SKU")
   const topUrl = `https://drive.google.com/drive/folders/${topId}`;
+
+  // manifest ครั้งก่อน (จำ r2 key ต่อโฟลเดอร์) — เชื่อได้เฉพาะถ้าโฟลเดอร์บนสุดยังเป็นตัวเดิม
+  // (ถ้าของเก่าถูกลบ driveEnsureFolder จะสร้างใหม่ = id เปลี่ยน → ถือว่าเริ่มใหม่ อัปครบ)
+  const { data: mrow } = await admin.from("erp_creative_tasks").select("drive_folder_id, drive_sync_manifest").eq("id", task.id).maybeSingle();
+  const prevTopId = (mrow?.drive_folder_id as string | null) ?? null;
+  const prevManifest: Record<string, string[]> = (prevTopId === topId ? ((mrow?.drive_sync_manifest as Record<string, string[]> | null) ?? {}) : {});
+  const nextManifest: Record<string, string[]> = { ...prevManifest };
   await admin.from("erp_creative_tasks").update({ drive_folder_id: topId, drive_folder_url: topUrl }).eq("id", task.id);
 
   let uploaded = 0, archived = 0;
-  const run = async (folderId: string, files: UploadFile[]) => { const r = await replaceFolderImages(folderId, files); uploaded += r.uploaded; archived += r.archived; };
+  // ซิงค์โฟลเดอร์แบบ "เทียบก่อน แก้เฉพาะที่เปลี่ยน": รายการรูป (r2 key + ลำดับ) เหมือนเดิม → ข้าม · เปลี่ยน → เก็บ Ver เก่า + วางใหม่
+  const syncFolder = async (key: string, folderId: string, imgs: GalleryImg[], start: number) => {
+    const keys = imgs.map((g) => g.file_path);
+    if (sameKeys(prevManifest[key], keys)) return;   // ไม่เปลี่ยน → ไม่ทำอะไร (ไม่มี Ver ซ้ำซ้อน)
+    const r = await replaceFolderImages(folderId, numbered(imgs, start));
+    uploaded += r.uploaded; archived += r.archived;
+    nextManifest[key] = keys;
+  };
 
-  // Description (asset_usages) → ชื่อ 1,2,3 · Parent gallery → ชื่อ 1,2,3
+  // Description → 1,2,3 · Parent gallery → 0,1,2,3 (รูป 0 = ปกของ Parent)
   if (task.parent_sku_id) {
-    await run(descF, numbered(await descriptionImages(admin, task.parent_sku_id), 1));
-    await run(parentF, numbered(await galleryImages(admin, "parent_skus_v2", task.parent_sku_id), 1));
+    await syncFolder("desc", descF, await descriptionImages(admin, task.parent_sku_id), 1);
+    await syncFolder("parent", parentF, await galleryImages(admin, "parent_skus_v2", task.parent_sku_id), 0);
   }
-  // child แต่ละตัว (ตรงใต้ top) → ชื่อ 0,1,2,3 · + รูปสำเนา (รูปแรก) วางข้าง top ชื่อ <code>.<ext>
+  // child แต่ละตัว → 1,2,3 (ไม่มี 0 · ปก = ไฟล์หลวมข้างนอก) · เก็บรูปสำเนา (รูปแรก) ไว้วางข้าง top
   const covers: UploadFile[] = [];
+  const coverKeys: string[] = [];
   for (const c of children) {
     const cf = await driveEnsureFolder(c.code, topId);
     const imgs = await galleryImages(admin, "skus_v2", c.id);
-    await run(cf, numbered(imgs, 0));
-    if (imgs.length) covers.push({ r2Key: imgs[0].file_path, name: `${c.code}.${extOf(imgs[0].file_name, imgs[0].content_type)}`, mime: imgs[0].content_type || "image/jpeg" });
+    await syncFolder(`child:${c.code}`, cf, imgs, 1);
+    if (imgs.length) {
+      covers.push({ r2Key: imgs[0].file_path, name: `${c.code}.${extOf(imgs[0].file_name, imgs[0].content_type)}`, mime: imgs[0].content_type || "image/jpeg" });
+      coverKeys.push(`${c.code}=${imgs[0].file_path}`);
+    }
   }
-  // รูปสำเนาหน้าโฟลเดอร์ SKU (ไฟล์หลวมใน top) — เก็บเวอร์ชันด้วย
-  await run(topId, covers);
+  // รูปปกหลวมข้าง top — "ทับไปเลย" ไม่ทำ Ver · ข้ามถ้าปกไม่เปลี่ยน
+  if (!sameKeys(prevManifest["covers"], coverKeys)) {
+    const r = await overwriteFiles(topId, covers);
+    uploaded += r.uploaded;
+    nextManifest["covers"] = coverKeys;
+  }
+
+  await admin.from("erp_creative_tasks").update({ drive_sync_manifest: nextManifest }).eq("id", task.id);
   return { url: topUrl, uploaded, archived };
 }
 

@@ -183,6 +183,9 @@ export async function driveTrashFolder(id: string): Promise<boolean> {
   return res.ok;
 }
 
+/** ทิ้งไฟล์ลงถังขยะตาม id (Drive ใช้ endpoint เดียวกับโฟลเดอร์) — ใช้ตอน "ทับ" ไฟล์ปกเดิม */
+export async function driveTrashFile(id: string): Promise<boolean> { return driveTrashFolder(id); }
+
 /** อัปไฟล์ขึ้นโฟลเดอร์ (multipart) → คืน { id, webViewLink } · ใช้เฟสอัปไฟล์ */
 export async function driveUploadFile(name: string, mimeType: string, data: ArrayBuffer | Uint8Array, parentId: string): Promise<{ id: string; webViewLink: string }> {
   const token = await getAccessToken();
