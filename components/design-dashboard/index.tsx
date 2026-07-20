@@ -832,7 +832,7 @@ export function DesignDashboard() {
                                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />
                                     <span className="font-mono text-[11px] text-slate-400">{sheet.code}</span>
                                   </div>
-                                  <div className="mt-0.5 min-h-[34px] text-[13px] font-semibold leading-snug text-slate-800">{sheet.name}</div>
+                                  <div className="mt-0.5 line-clamp-2 h-[34px] text-[13px] font-semibold leading-snug text-slate-800" title={sheet.name}>{sheet.name}</div>
                                   <div className="mt-1 h-[44px] overflow-hidden">
                                     {sheet.note && (
                                       <div className="line-clamp-2 rounded bg-amber-50/70 px-1.5 py-1 text-[11px] leading-snug text-slate-600" title={sheet.note}>📝 {sheet.note}</div>
@@ -841,9 +841,9 @@ export function DesignDashboard() {
                                       <div className="mt-1 line-clamp-1 text-[11px] leading-snug text-slate-400" title={sheet.detail_excerpt}>{sheet.detail_excerpt}</div>
                                     )}
                                   </div>
-                                  <div className="mt-2 flex items-center justify-between gap-2">
+                                  <div className="mt-2 flex h-[18px] items-center justify-between gap-2 whitespace-nowrap">
                                     <span className="truncate text-[11px] text-slate-400">{sheet.brand_name ?? "ไม่ระบุ"}</span>
-                                    <CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} />
+                                    <span className="shrink-0"><CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>
                                   </div>
                                   <div className="mt-2 flex h-[20px] items-center gap-1 overflow-hidden text-[10px] text-slate-400">
                                     {sheet.has_cost && <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-600">ตีราคาแล้ว</span>}
