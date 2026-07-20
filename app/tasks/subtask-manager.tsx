@@ -1110,7 +1110,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const [busy, setBusy] = useState(false);
   const [applyingTk, setApplyingTk] = useState<string | null>(null);   // กำลังใส่รูปเข้าสินค้าตัวไหน
   const [parents, setParents] = useState<PlatformParent[] | null>(null);
-  const [skusByParent, setSkusByParent] = useState<Record<string, { id: string; code: string; name: string; image_key: string | null; color: string | null }[]>>({});
+  const [skusByParent, setSkusByParent] = useState<Record<string, { id: string; code: string; name: string; image_key: string | null; color: string | null; color_en: string | null }[]>>({});
   const [editParentId, setEditParentId] = useState<string | null>(null);                       // เปิดตัวแก้ Parent SKU กลาง
   const [skuEditor, setSkuEditor] = useState<{ recordId: string | null; parentId: string } | null>(null); // เปิดตัวแก้ SKU กลาง (recordId null = สร้างใหม่)
   // ── ปลายทางรูป (โหมดแนบรูป): ติ๊กเลือก Parent/SKU ที่จะดันรูปเข้าตอนอนุมัติ ──
@@ -1147,8 +1147,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       const entries = await Promise.all(ps.map(async (p) => {
         try {
           const sj = await apiFetch(`/api/pickers/skus?parent_sku_id=${encodeURIComponent(p.id)}&limit=50`).then((r) => r.json());
-          return [p.id, ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? ""), image_key: s.image_key ? String(s.image_key) : null, color: s.color ? String(s.color) : null }))] as const;
-        } catch { return [p.id, [] as { id: string; code: string; name: string; image_key: string | null; color: string | null }[]] as const; }
+          return [p.id, ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? ""), image_key: s.image_key ? String(s.image_key) : null, color: s.color ? String(s.color) : null, color_en: s.color_en ? String(s.color_en) : null }))] as const;
+        } catch { return [p.id, [] as { id: string; code: string; name: string; image_key: string | null; color: string | null; color_en: string | null }[]] as const; }
       }));
       setSkusByParent((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
     } catch { setParents([]); }
@@ -1174,7 +1174,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const reloadSkusFor = useCallback(async (pid: string) => {
     try {
       const sj = await apiFetch(`/api/pickers/skus?parent_sku_id=${encodeURIComponent(pid)}&limit=50`).then((r) => r.json());
-      setSkusByParent((m) => ({ ...m, [pid]: ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? ""), image_key: s.image_key ? String(s.image_key) : null, color: s.color ? String(s.color) : null })) }));
+      setSkusByParent((m) => ({ ...m, [pid]: ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? ""), image_key: s.image_key ? String(s.image_key) : null, color: s.color ? String(s.color) : null, color_en: s.color_en ? String(s.color_en) : null })) }));
     } catch { /* noop */ }
   }, []);
   // รีเฟรชแกลเลอรีของสินค้าตัวเดียว (หลังกู้คืนเวอร์ชันเก่า) — tk = "parent:<id>" / "sku:<id>"
@@ -1517,7 +1517,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                               <input type="checkbox" checked={son} onChange={() => toggleSyncSku(s.id)} className="h-3.5 w-3.5 rounded border-slate-300 text-amber-600 cursor-pointer" />
                               <HoverImage url={thumb} size={26} rounded="rounded" fallback="📦" />
                               <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
-                              {s.color && <span className="text-[10px] text-slate-500 shrink-0 bg-slate-50 border border-slate-200 rounded px-1">🎨 {s.color}</span>}
+                              {(s.color || s.color_en) && <span className="text-[10px] text-slate-500 shrink-0 bg-slate-50 border border-slate-200 rounded px-1">🎨 {t(s.color ?? s.color_en ?? "", s.color_en ?? s.color ?? "")}</span>}
                               <span className="text-slate-700 truncate flex-1">{s.name}</span>
                               <button type="button" onClick={() => setSkuEditor({ recordId: s.id, parentId: p.id })} className="text-violet-600 hover:underline shrink-0">✏️</button>
                             </div>
