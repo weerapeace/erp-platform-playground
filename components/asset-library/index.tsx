@@ -2466,23 +2466,45 @@ function ArtTypeMultiSelect({ value, types, onChange, onCreated, disabled }: {
   );
 }
 
-// ── รายการ Artwork ในแผ่นงานพิมพ์ + จำนวนต่อชิ้น (เลือกหลายรายการผ่าน AssetPicker ของกลาง) ──
+// ── รายการ Artwork ในแผ่นงานพิมพ์ + ไซส์ + จำนวน (เลือกหลายรายการผ่าน AssetPicker ของกลาง) ──
+//    ไซส์ = "SKU" ของ artwork (1 ลายมีหลายไซส์) → ลายเดียวกันคนละไซส์ = คนละแถวได้ (ปุ่ม ⧉)
+const sizeText = (s: AssetSize | null | undefined) => (s ? `${s.label ? `${s.label} · ` : ""}${s.w ?? "?"}×${s.h ?? "?"} ${s.unit}` : "");
 function PrintItemsField({ value, onChange, disabled }: { value: PrintItem[]; onChange: (v: PrintItem[]) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [availById, setAvailById] = useState<Record<string, AssetSize[]>>({});   // ไซส์ที่ artwork แต่ละลายมี (ไว้ทำ dropdown)
   const totalQty = value.reduce((s, i) => s + (Number(i.qty) || 0), 0);
+
+  // โหลดไซส์ของลายที่ยังไม่รู้ (ตอนเปิดของเดิมมาแก้)
+  useEffect(() => {
+    const missing = [...new Set(value.map((i) => i.asset_id))].filter((id) => !(id in availById));
+    if (!missing.length) return;
+    let alive = true;
+    Promise.all(missing.map((id) => apiFetch(`/api/assets/${id}`).then((r) => r.json()).then((j) => [id, (j.data?.sizes ?? []) as AssetSize[]] as const).catch(() => [id, [] as AssetSize[]] as const)))
+      .then((pairs) => { if (alive) setAvailById((m) => ({ ...m, ...Object.fromEntries(pairs) })); });
+    return () => { alive = false; };
+  }, [value, availById]);
 
   const addPicked = (rows: AssetRow[]) => {
     const have = new Set(value.map((i) => i.asset_id));
-    const added = rows.filter((r) => !have.has(r.id)).map((r) => ({ asset_id: r.id, title: r.title || r.file_name, url: r.url ?? null, qty: 1 }));
+    const fresh = rows.filter((r) => !have.has(r.id));
+    setAvailById((m) => ({ ...m, ...Object.fromEntries(rows.map((r) => [r.id, r.sizes ?? []])) }));
+    const added: PrintItem[] = fresh.map((r) => ({
+      asset_id: r.id, title: r.title || r.file_name, url: r.url ?? null,
+      size: (r.sizes ?? []).length === 1 ? r.sizes[0] : null,   // มีไซส์เดียว → เลือกให้เลย
+      qty: 1,
+    }));
     if (added.length) onChange([...value, ...added]);
     setOpen(false);
   };
-  const setQty = (id: string, q: number) => onChange(value.map((i) => (i.asset_id === id ? { ...i, qty: Math.max(1, Math.round(q) || 1) } : i)));
+
+  const patchAt = (idx: number, p: Partial<PrintItem>) => onChange(value.map((it, i) => (i === idx ? { ...it, ...p } : it)));
+  const removeAt = (idx: number) => onChange(value.filter((_, i) => i !== idx));
+  const dupAt = (idx: number) => onChange([...value.slice(0, idx + 1), { ...value[idx], size: null, qty: 1 }, ...value.slice(idx + 1)]);
 
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[12px] text-slate-500">🎨 Artwork ในแผ่นนี้ {value.length > 0 && <span className="text-slate-400">({value.length} ลาย · รวม {totalQty} ชิ้น)</span>}</span>
+        <span className="text-[12px] text-slate-500">🎨 Artwork ในแผ่นนี้ {value.length > 0 && <span className="text-slate-400">({value.length} รายการ · รวม {totalQty} ชิ้น)</span>}</span>
         {!disabled && <button type="button" onClick={() => setOpen(true)}
           className="text-[11px] px-2 py-0.5 rounded-full border border-violet-300 text-violet-700 hover:bg-violet-50">＋ เลือก Artwork</button>}
       </div>
@@ -2491,21 +2513,41 @@ function PrintItemsField({ value, onChange, disabled }: { value: PrintItem[]; on
         <p className="text-[11px] text-slate-400">ยังไม่ได้เลือก Artwork</p>
       ) : (
         <div className="space-y-1">
-          {value.map((it) => (
-            <div key={it.asset_id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1">
-              {it.url
-                // eslint-disable-next-line @next/next/no-img-element
-                ? <img src={withImageWidth(it.url, 80) ?? it.url} alt="" className="w-8 h-8 rounded object-contain border border-slate-200 bg-slate-50 shrink-0" />
-                : <span className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-300 text-xs shrink-0">🎨</span>}
-              <span className="flex-1 min-w-0 text-[12px] text-slate-700 truncate" title={it.title}>{it.title}</span>
-              <input type="number" min={1} value={it.qty} disabled={disabled}
-                onChange={(e) => setQty(it.asset_id, Number(e.target.value))}
-                className="w-16 h-7 px-2 text-[12px] text-center border border-slate-200 rounded-lg disabled:bg-slate-50" />
-              <span className="text-[10px] text-slate-400 shrink-0">ชิ้น</span>
-              {!disabled && <button type="button" onClick={() => onChange(value.filter((x) => x.asset_id !== it.asset_id))}
-                className="text-slate-400 hover:text-red-500 shrink-0 text-sm" title="เอาออก">✕</button>}
-            </div>
-          ))}
+          {value.map((it, idx) => {
+            const avail = availById[it.asset_id] ?? [];
+            const curKey = it.size ? sizeText(it.size) : "";
+            const needSize = avail.length > 1 && !it.size;   // มีหลายไซส์แต่ยังไม่เลือก → เตือน
+            return (
+              <div key={`${it.asset_id}-${idx}`} className={`flex items-center gap-2 rounded-lg border px-2 py-1 ${needSize ? "border-amber-300 bg-amber-50/40" : "border-slate-200 bg-white"}`}>
+                {it.url
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={withImageWidth(it.url, 80) ?? it.url} alt="" className="w-8 h-8 rounded object-contain border border-slate-200 bg-slate-50 shrink-0" />
+                  : <span className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-300 text-xs shrink-0">🎨</span>}
+                <span className="flex-1 min-w-0 text-[12px] text-slate-700 truncate" title={it.title}>{it.title}</span>
+
+                {/* ไซส์ที่ใช้ (เหมือนเลือก SKU ของลายนี้) */}
+                {avail.length > 0 ? (
+                  <select value={curKey} disabled={disabled}
+                    onChange={(e) => patchAt(idx, { size: avail.find((s) => sizeText(s) === e.target.value) ?? null })}
+                    className={`h-7 px-1.5 text-[11px] border rounded-lg bg-white max-w-[9.5rem] ${needSize ? "border-amber-400 text-amber-700" : "border-slate-200"}`}>
+                    <option value="">— เลือกไซส์ —</option>
+                    {avail.map((s) => <option key={sizeText(s)} value={sizeText(s)}>{sizeText(s)}</option>)}
+                  </select>
+                ) : (
+                  <span className="text-[10px] text-slate-400 shrink-0">{it.size ? sizeText(it.size) : "ลายนี้ยังไม่ใส่ไซส์"}</span>
+                )}
+
+                <input type="number" min={1} value={it.qty} disabled={disabled}
+                  onChange={(e) => patchAt(idx, { qty: Math.max(1, Math.round(Number(e.target.value)) || 1) })}
+                  className="w-14 h-7 px-2 text-[12px] text-center border border-slate-200 rounded-lg disabled:bg-slate-50" />
+                <span className="text-[10px] text-slate-400 shrink-0">ชิ้น</span>
+                {!disabled && <>
+                  <button type="button" onClick={() => dupAt(idx)} className="text-slate-400 hover:text-indigo-600 shrink-0 text-xs" title="เพิ่มลายนี้อีกไซส์">⧉</button>
+                  <button type="button" onClick={() => removeAt(idx)} className="text-slate-400 hover:text-red-500 shrink-0 text-sm" title="เอาออก">✕</button>
+                </>}
+              </div>
+            );
+          })}
         </div>
       )}
 

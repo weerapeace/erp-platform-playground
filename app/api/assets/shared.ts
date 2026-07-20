@@ -25,14 +25,16 @@ export function normalizeSizes(v: unknown): AssetSize[] {
     return { label: String(o.label ?? ""), w: num(o.w), h: num(o.h), unit };
   }).filter((s) => s.label || s.w != null || s.h != null);
 }
-/** รายการ Artwork ในแผ่นงานพิมพ์ + จำนวน (source='print') */
-export type PrintItem = { asset_id: string; title: string; url: string | null; qty: number };
+/** รายการ Artwork ในแผ่นงานพิมพ์ + ไซส์ที่ใช้ + จำนวน (source='print')
+ *  ไซส์ = "SKU" ของ artwork (artwork 1 ลายมีหลายไซส์) → ลายเดียวกันคนละไซส์ = คนละแถวได้ */
+export type PrintItem = { asset_id: string; title: string; url: string | null; size: AssetSize | null; qty: number };
 export function normalizePrintItems(v: unknown): PrintItem[] {
   if (!Array.isArray(v)) return [];
   return v.map((x) => {
     const o = (x ?? {}) as Record<string, unknown>;
     const qty = Math.max(1, Math.round(Number(o.qty) || 1));
-    return { asset_id: String(o.asset_id ?? "").trim(), title: String(o.title ?? ""), url: o.url ? String(o.url) : null, qty };
+    const size = normalizeSizes(o.size ? [o.size] : [])[0] ?? null;
+    return { asset_id: String(o.asset_id ?? "").trim(), title: String(o.title ?? ""), url: o.url ? String(o.url) : null, size, qty };
   }).filter((i) => i.asset_id);
 }
 /** normalize parent_sku_codes jsonb → string[] */
