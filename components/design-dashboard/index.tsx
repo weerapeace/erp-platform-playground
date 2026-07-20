@@ -762,7 +762,7 @@ export function DesignDashboard() {
                   })}
                 </div>
               ) : (
-                {/* ห้ามใส่ overflow-* ที่กรอบนี้ — จะทำให้หัวคอลัมน์ sticky ยึดกับกรอบแทนหน้าจอ (คอลัมน์พอดีจอแล้ว ไม่ต้อง scroll แนวนอน) */}
+                /* ห้ามใส่ overflow-* ที่กรอบนี้ — จะทำให้หัวคอลัมน์ sticky ยึดกับกรอบแทนหน้าจอ (คอลัมน์พอดีจอแล้ว ไม่ต้อง scroll แนวนอน) */
                 <div className="px-1 pb-2">
                   {/* เห็นครบทุกคอลัมน์พอดีจอ (minmax(0,1fr) = คอลัมน์หดพอดี ไม่ต้องเลื่อนแนวนอน) · gap-4 เว้นช่องไฟ */}
                   <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${boardColumns.length}, minmax(0, 1fr))` }}>
