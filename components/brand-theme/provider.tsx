@@ -39,12 +39,15 @@ export function useBrandTheme(brandId: string | null | undefined, reloadKey?: nu
 }
 
 // เปลือกหน้าที่ทาธีม + เลเยอร์ตกแต่งมุมหน้า + provide context (รับ theme ตรง ๆ)
+// ⚠️ ใช้ overflow-x-clip (ไม่ใช่ overflow-hidden) — overflow:hidden สร้าง scroll container
+//    ทำให้ position:sticky ของลูก (เช่นหัวคอลัมน์บอร์ด) ตายเงียบ · clip ตัดได้โดยไม่สร้าง scrollport
+//    (เลเยอร์ตกแต่งด้านล่างมี overflow-hidden ของตัวเองอยู่แล้ว จึงไม่ต้องพึ่งตัวนอก)
 export function BrandThemedShell({ theme, className = "", children }: {
   theme: BrandTheme; className?: string; children: ReactNode;
 }) {
   return (
     <BrandThemeContext.Provider value={theme}>
-      <div className={`brand-themed relative min-h-screen overflow-hidden ${className}`.trim()} style={brandRootStyle(theme)}>
+      <div className={`brand-themed relative min-h-screen overflow-x-clip ${className}`.trim()} style={brandRootStyle(theme)}>
         <BrandThemeStyles />
         {/* เลเยอร์ตกแต่งมุมหน้า (หลัง content · ไม่บังคลิก · ซ่อนบนมือถือ) */}
         <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
