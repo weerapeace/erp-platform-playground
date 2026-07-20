@@ -23,6 +23,7 @@ import { AssetPicker } from "@/components/asset-picker";
 import { Pager } from "@/components/pager";
 import { Spinner, LoadingOverlay } from "@/components/spinner";
 import { HoverPreview } from "@/components/hover-image";
+import { ParentSkuMultiPickerModal } from "@/components/parent-sku-multi-picker";
 import { runBackgroundTask } from "@/lib/background-tasks";
 import { useRefresh, triggerRefresh } from "@/lib/refresh-bus";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
@@ -2719,58 +2720,14 @@ function ParentSkuField({ value, onChange, disabled }: { value: string[]; onChan
         {!disabled && <button type="button" onClick={() => setOpen(true)}
           className="text-[11px] px-2 py-0.5 rounded-full border border-violet-300 text-violet-700 hover:bg-violet-50">＋ เลือก Parent SKU</button>}
       </div>
-      {open && <ParentSkuPickerModal selected={value} onClose={() => setOpen(false)}
-        onConfirm={(codes) => { onChange([...new Set([...value, ...codes])]); setOpen(false); }} />}
+      {/* ของกลาง: ค้น + ไล่ดูทั้งหมด + แบ่งหน้า (Pager) — เลิกใช้ picker เขียนเองที่ตัดแค่ 40 รายการ */}
+      <ParentSkuMultiPickerModal open={open} onClose={() => setOpen(false)} excludeCodes={value}
+        title="เลือก Parent SKU ที่ใช้ artwork นี้"
+        onConfirm={(items) => { onChange([...new Set([...value, ...items.map((x) => x.code)])]); setOpen(false); }} />
     </div>
   );
 }
 
-function ParentSkuPickerModal({ selected, onClose, onConfirm }: { selected: string[]; onClose: () => void; onConfirm: (codes: string[]) => void }) {
-  const [q, setQ] = useState("");
-  const [rows, setRows] = useState<{ id: string; code: string; name: string; image: string | null }[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const search = useCallback(async (term: string) => {
-    setLoading(true);
-    try {
-      const p = new URLSearchParams({ entity: "parent-skus", search: term, limit: "40" });
-      const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
-      setRows(((j.cards ?? []) as { id: string; code: string; name: string; image: string | null }[]).map((c) => ({ id: c.id, code: c.code, name: c.name, image: c.image })));
-    } catch { /* ignore */ } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { const t = setTimeout(() => { if (q.trim()) void search(q.trim()); else setRows([]); }, 250); return () => clearTimeout(t); }, [q, search]);
-  const toggle = (code: string) => setPicked((s) => { const n = new Set(s); if (n.has(code)) n.delete(code); else n.add(code); return n; });
-  return (
-    <ERPModal open onClose={onClose} title="เลือก Parent SKU ที่ใช้ artwork นี้" size="md"
-      footer={<div className="flex justify-end gap-2 w-full">
-        <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-        <button onClick={() => onConfirm([...picked])} disabled={picked.size === 0}
-          className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">เพิ่ม {picked.size || ""}</button>
-      </div>}>
-      <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="พิมพ์รหัส/ชื่อ Parent SKU…"
-        className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-      <div className="max-h-[46vh] overflow-auto flex flex-col gap-1">
-        {loading ? <div className="py-8 text-center text-slate-400 text-sm">กำลังค้น…</div>
-          : rows.length === 0 ? <div className="py-8 text-center text-slate-400 text-sm">{q.trim() ? "ไม่พบ" : "พิมพ์เพื่อค้นหา Parent SKU"}</div>
-          : rows.map((r) => {
-              const already = selected.includes(r.code);
-              const on = already || picked.has(r.code);
-              return (
-                <button key={r.id} type="button" disabled={already} onClick={() => toggle(r.code)}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-left disabled:opacity-60 ${on ? "bg-indigo-50 border-indigo-300" : "border-slate-200 hover:bg-slate-50"}`}>
-                  <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0 ${on ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 text-transparent"}`}>✓</span>
-                  {r.image ? <img src={withImageWidth(r.image, 80) ?? r.image} alt="" className="w-8 h-8 rounded object-cover border border-slate-200" />
-                    : <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-300 text-xs">📦</div>}
-                  <span className="font-mono text-[12px] text-slate-700">{r.code}</span>
-                  <span className="text-[12px] text-slate-500 truncate flex-1">{r.name}</span>
-                  {already && <span className="text-[10px] text-slate-400 shrink-0">เลือกแล้ว</span>}
-                </button>
-              );
-            })}
-      </div>
-    </ERPModal>
-  );
-}
 
 // ── เลือกแท็กแบบ "ปุ่มกด" (เก็บความรกของชิป/ตัวช่วยไว้ในป๊อปอัป) ──
 function TagPickerField({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
