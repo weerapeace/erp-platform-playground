@@ -8,6 +8,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
+import { supabaseBrowser } from "@/lib/supabase-browser";
+import { RECORD_FILES_BUCKET, RECORD_FILES_MAX } from "@/lib/record-files";
+
+// อ่าน response แบบกัน "ไม่ใช่ JSON" (เช่น 413 Request Entity Too Large คืนข้อความเปล่า)
+async function readJson(res: Response): Promise<Record<string, unknown>> {
+  const txt = await res.text();
+  try { return txt ? JSON.parse(txt) as Record<string, unknown> : {}; }
+  catch { throw new Error(res.status === 413 ? "ไฟล์ใหญ่เกินที่เซิร์ฟเวอร์รับได้" : (txt.slice(0, 80) || `ผิดพลาด (${res.status})`)); }
+}
 
 type RecordFile = {
   id: string; file_name: string; content_type: string | null; size_bytes: number | null;
@@ -46,7 +55,7 @@ export function RecordFilesField({ entityType, entityId, actor, readonly, title,
   const [dragOver, setDragOver] = useState(false);
   const [delTarget, setDelTarget] = useState<RecordFile | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const maxBytes = maxSizeBytes ?? 25 * 1024 * 1024;
+  const maxBytes = maxSizeBytes ?? RECORD_FILES_MAX;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,16 +79,28 @@ export function RecordFilesField({ entityType, entityId, actor, readonly, title,
       setProg({ done: i, total: arr.length });
       if (f.size > maxBytes) { fail++; toast.error(`"${f.name}" ใหญ่เกิน ${Math.round(maxBytes / 1024 / 1024)}MB`); continue; }
       try {
-        const fd = new FormData();
-        fd.append("file", f);
-        fd.append("entity_type", entityType);
-        fd.append("entity_id", entityId);
-        if (actor) fd.append("actor", actor);
-        const res = await apiFetch("/api/record-files", { method: "POST", body: fd });
-        const j = await res.json();
-        if (!res.ok || j.error) throw new Error(j.error || "อัปโหลดไม่สำเร็จ");
+        // 1) ขอสิทธิ์อัปตรงเข้า Supabase Storage (ไฟล์ไม่วิ่งผ่านเซิร์ฟเวอร์ → ไม่ติดลิมิต ~4.5MB ของ Vercel)
+        const signRes = await apiFetch("/api/record-files/sign-upload", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entity_type: entityType, entity_id: entityId, file_name: f.name }),
+        });
+        const sj = await readJson(signRes);
+        if (!signRes.ok || sj.error || !sj.path || !sj.token) throw new Error((sj.error as string) || "ขอสิทธิ์อัปโหลดไม่สำเร็จ");
+
+        // 2) อัปไฟล์ตรงเข้า Storage
+        const { error: upErr } = await supabaseBrowser.storage.from(RECORD_FILES_BUCKET)
+          .uploadToSignedUrl(sj.path as string, sj.token as string, f, { contentType: f.type || undefined });
+        if (upErr) throw new Error(upErr.message || "อัปโหลดเข้าที่เก็บไฟล์ไม่สำเร็จ");
+
+        // 3) บันทึกทะเบียนไฟล์ (JSON เล็ก ๆ)
+        const regRes = await apiFetch("/api/record-files", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entity_type: entityType, entity_id: entityId, storage_path: sj.path, file_name: f.name, content_type: f.type, size_bytes: f.size, actor }),
+        });
+        const rj = await readJson(regRes);
+        if (!regRes.ok || rj.error) throw new Error((rj.error as string) || "บันทึกไม่สำเร็จ");
         ok++;
-      } catch (e) { fail++; toast.error(e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ"); }
+      } catch (e) { fail++; toast.error(`"${f.name}": ${e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ"}`); }
     }
     setProg(null); setBusy(false);
     if (ok) toast.success(`แนบไฟล์แล้ว ${ok} ไฟล์${fail ? ` · ล้มเหลว ${fail}` : ""}`);
@@ -91,8 +112,8 @@ export function RecordFilesField({ entityType, entityId, actor, readonly, title,
     const f = delTarget; setDelTarget(null); setBusy(true);
     try {
       const res = await apiFetch(`/api/record-files/${f.id}${actor ? `?actor=${encodeURIComponent(actor)}` : ""}`, { method: "DELETE" });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) throw new Error(j.error || "ลบไม่สำเร็จ");
+      const j = await readJson(res);
+      if (!res.ok || j.error) throw new Error((j.error as string) || "ลบไม่สำเร็จ");
       setFiles((cur) => cur.filter((x) => x.id !== f.id));
       toast.success("ลบไฟล์แล้ว");
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
@@ -141,7 +162,7 @@ export function RecordFilesField({ entityType, entityId, actor, readonly, title,
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               className={`cursor-pointer rounded-lg border border-dashed px-3 py-3 text-center text-[12px] ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50 hover:border-indigo-300 hover:bg-indigo-50/40"} ${busy ? "opacity-50 pointer-events-none" : ""}`}>
-              {busy ? "กำลังอัป…" : "+ ลากไฟล์มาวาง หรือคลิกเลือก"}
+              {busy ? "กำลังอัป…" : `+ ลากไฟล์มาวาง หรือคลิกเลือก (ไม่เกิน ${Math.round(maxBytes / 1024 / 1024)}MB/ไฟล์)`}
               <input ref={inputRef} type="file" multiple className="hidden"
                 onChange={(e) => { if (e.target.files?.length) void addFiles(e.target.files); e.target.value = ""; }} />
             </div>

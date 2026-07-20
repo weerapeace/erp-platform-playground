@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const RECORD_FILES_BUCKET = "record-files";
 export const RECORD_FILES_SIGNED_TTL = 60 * 60;   // signed URL อายุ 1 ชม.
-export const RECORD_FILES_MAX = 25 * 1024 * 1024;  // 25MB/ไฟล์ (ตรงกับ file_size_limit ของ bucket)
+export const RECORD_FILES_MAX = 50 * 1024 * 1024;  // 50MB/ไฟล์ (ตรงกับ file_size_limit ของ bucket) — อัปตรงเข้า Storage ข้ามลิมิต body ของ Vercel
 
 export type RecordFileRow = {
   id: string; entity_type: string; entity_id: string; bucket: string;

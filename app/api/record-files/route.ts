@@ -41,26 +41,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({ data: rows.map((r) => ({ ...r, url: urlByPath[r.storage_path] ?? null })), error: null });
 }
 
+/**
+ * POST — บันทึกทะเบียนไฟล์ "หลังเบราว์เซอร์อัปไฟล์ตรงเข้า Storage แล้ว" (body เป็น JSON เล็ก ๆ)
+ *   body { entity_type, entity_id, storage_path, file_name, content_type?, size_bytes?, actor? }
+ *   (ตัวไฟล์ไม่ผ่าน route นี้ → ไม่ติดลิมิต body ~4.5MB ของ Vercel)
+ */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
-  let form: FormData; try { form = await request.formData(); } catch { return NextResponse.json({ error: "รูปแบบข้อมูลไม่ถูกต้อง" }, { status: 400 }); }
-  const file = form.get("file");
-  const entityType = String(form.get("entity_type") ?? "").trim();
-  const entityId = String(form.get("entity_id") ?? "").trim();
-  const actor = String(form.get("actor") ?? "").trim() || null;
-  if (!(file instanceof File)) return NextResponse.json({ error: "ไม่มีไฟล์" }, { status: 400 });
+  let body: { entity_type?: string; entity_id?: string; storage_path?: string; file_name?: string; content_type?: string; size_bytes?: number; actor?: string };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "รูปแบบข้อมูลไม่ถูกต้อง" }, { status: 400 }); }
+
+  const entityType = String(body.entity_type ?? "").trim();
+  const entityId = String(body.entity_id ?? "").trim();
+  const storagePath = String(body.storage_path ?? "").trim();
+  const fileName = String(body.file_name ?? "").trim() || "file";
+  const sizeBytes = Number(body.size_bytes ?? 0) || null;
+  const actor = String(body.actor ?? "").trim() || null;
   if (!entityType || !UUID_RE.test(entityId)) return NextResponse.json({ error: "ระบุ record ไม่ถูกต้อง" }, { status: 400 });
-  if (file.size > RECORD_FILES_MAX) return NextResponse.json({ error: `ไฟล์ใหญ่เกิน ${Math.round(RECORD_FILES_MAX / 1024 / 1024)}MB` }, { status: 400 });
+  // กันยัด path มั่ว — ต้องอยู่ใต้โฟลเดอร์ของ record นี้เท่านั้น
+  if (!storagePath || !storagePath.startsWith(`${entityType}/${entityId}/`)) return NextResponse.json({ error: "ที่อยู่ไฟล์ไม่ถูกต้อง" }, { status: 400 });
+  if (sizeBytes && sizeBytes > RECORD_FILES_MAX) return NextResponse.json({ error: `ไฟล์ใหญ่เกิน ${Math.round(RECORD_FILES_MAX / 1024 / 1024)}MB` }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const ext = (file.name.match(/\.[^.]+$/)?.[0] ?? "").toLowerCase();
-  const rand = Math.random().toString(36).slice(2, 8);
-  const path = `${entityType}/${entityId}/${Date.now()}-${rand}${ext}`;
-  const buf = await file.arrayBuffer();
-  const { error: upErr } = await admin.storage.from(RECORD_FILES_BUCKET)
-    .upload(path, buf, { upsert: false, contentType: file.type || "application/octet-stream" });
-  if (upErr) return NextResponse.json({ error: `อัปโหลดไม่สำเร็จ: ${upErr.message}` }, { status: 500 });
-
   // sort_order = max+1 ต่อ record
   const { data: mx } = await admin.from("erp_record_files").select("sort_order")
     .eq("entity_type", entityType).eq("entity_id", entityId)
@@ -68,16 +70,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const nextOrder = ((mx?.sort_order as number | undefined) ?? -1) + 1;
 
   const { data: ins, error } = await admin.from("erp_record_files").insert({
-    entity_type: entityType, entity_id: entityId, bucket: RECORD_FILES_BUCKET, storage_path: path,
-    file_name: file.name || "file", content_type: file.type || null, size_bytes: file.size,
+    entity_type: entityType, entity_id: entityId, bucket: RECORD_FILES_BUCKET, storage_path: storagePath,
+    file_name: fileName, content_type: (body.content_type ?? "").trim() || null, size_bytes: sizeBytes,
     sort_order: nextOrder, uploaded_by: actor,
   }).select("*").single();
   if (error || !ins) {
-    try { await admin.storage.from(RECORD_FILES_BUCKET).remove([path]); } catch { /* rollback storage */ }
+    try { await admin.storage.from(RECORD_FILES_BUCKET).remove([storagePath]); } catch { /* ลบไฟล์ที่อัปค้างไว้ */ }
     return NextResponse.json({ error: error?.message || "บันทึกไม่สำเร็จ" }, { status: 500 });
   }
 
-  await writeAudit(admin, { action: "create", entityType: "record_file", entityId: ins.id as string, actorId: actor, metadata: { entity_type: entityType, entity_id: entityId, file_name: file.name } });
-  const { data: signed } = await admin.storage.from(RECORD_FILES_BUCKET).createSignedUrl(path, RECORD_FILES_SIGNED_TTL);
+  await writeAudit(admin, { action: "create", entityType: "record_file", entityId: ins.id as string, actorId: actor, metadata: { entity_type: entityType, entity_id: entityId, file_name: fileName } });
+  const { data: signed } = await admin.storage.from(RECORD_FILES_BUCKET).createSignedUrl(storagePath, RECORD_FILES_SIGNED_TTL);
   return NextResponse.json({ data: { ...ins, url: signed?.signedUrl ?? null }, error: null });
 }
