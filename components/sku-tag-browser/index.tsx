@@ -39,6 +39,21 @@ const BarcodePrintModal = nextDynamic(() => import("@/components/barcode-print/m
 
 type Crumb = { id: string; name: string };
 
+// ── สถานะการเดินเก็บใน history.state (__skuNav) — รอดตอน refresh + ปุ่ม Back ย้อนได้ ──
+type SkuNav = { gp: Crumb[]; tf: TagFilterValue; sp?: "all" | "recent" | null; page?: number; en?: "skus" | "parent-skus" };
+function savedNav(): SkuNav | null {
+  if (typeof window === "undefined") return null;
+  try { return (window.history.state as { __skuNav?: SkuNav } | null)?.__skuNav ?? null; } catch { return null; }
+}
+// อัปเดตสถานะในรายการประวัติปัจจุบัน (ไม่เพิ่มรายการใหม่) — ใช้ตอนเปลี่ยนหน้า/สลับชนิด
+function patchNav(p: Partial<SkuNav>): void {
+  if (typeof window === "undefined") return;
+  try {
+    const cur = savedNav() ?? { gp: [], tf: EMPTY_FILTER };
+    window.history.replaceState({ ...(window.history.state ?? {}), __skuNav: { ...cur, ...p } }, "");
+  } catch { /* ignore */ }
+}
+
 const CARD_FIELDS: { key: string; label: string }[] = [
   { key: "image",  label: "รูป" }, { key: "code", label: "รหัส" }, { key: "name", label: "ชื่อ" },
   { key: "price",  label: "ราคาขาย" }, { key: "stock", label: "สต๊อกคงเหลือ" }, { key: "tags", label: "แท็ก" }, { key: "status", label: "สถานะ" },
@@ -110,13 +125,16 @@ function toBulkField(f: RegField): BulkEditField | null {
 export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" | "pick"; onPickSku?: (skuId: string) => void } = {}) {
   const pick = mode === "pick";   // โหมดเลือกสินค้า (หน้าขอซื้อ) — กดการ์ด → onPickSku แทนเปิด drawer แก้ไข
   const toast = useToast();
-  const [entity, setEntity] = useState<"skus" | "parent-skus">("skus");   // ดูตาม SKU หรือ Parent SKU (ของกลางตัวเดียว)
+  // สถานะการเดิน (กลุ่ม/แท็ก/หน้า/ชนิด) เก็บใน history.state → refresh แล้วอยู่ที่เดิม + ปุ่ม Back ย้อนได้
+  const nav0 = savedNav();
+  const [entity, setEntity] = useState<"skus" | "parent-skus">(nav0?.en ?? "skus");   // ดูตาม SKU หรือ Parent SKU (ของกลางตัวเดียว)
+  const entityRef = useRef(entity); entityRef.current = entity;   // ให้ pushNav อ่านค่าล่าสุดโดยไม่ต้องผูก dep
   const [tree, setTree] = useState<BrowseTree | null>(null);
-  const [groupPath, setGroupPath] = useState<Crumb[]>([]);
-  const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);
+  const [groupPath, setGroupPath] = useState<Crumb[]>(nav0?.gp ?? []);
+  const [tagFilter, setTagFilter] = useState<TagFilterValue>(nav0?.tf ?? EMPTY_FILTER);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<string>("code");
-  const [special, setSpecial] = useState<"all" | "recent" | null>(null);   // โฟลเดอร์พิเศษ: ทั้งหมด / ล่าสุด
+  const [special, setSpecial] = useState<"all" | "recent" | null>(nav0?.sp ?? null);   // โฟลเดอร์พิเศษ: ทั้งหมด / ล่าสุด
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);   // กรองเฉพาะ SKU ที่ข้อมูลไม่ครบ
   const [selected, setSelected] = useState<Set<string>>(new Set());   // เลือกหลายตัว (bulk)
   const [printOpen, setPrintOpen] = useState(false);                  // ป๊อปอัปพิมพ์บาร์โค้ด/QR
@@ -128,7 +146,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
 
   const [cards, setCards] = useState<SkuCard[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);   // แบ่งหน้า (0-based) — ใช้ Pager ของกลาง แทน "โหลดเพิ่ม"
+  const [page, setPage] = useState(nav0?.page ?? 0);   // แบ่งหน้า (0-based) — ใช้ Pager ของกลาง แทน "โหลดเพิ่ม"
   const [loadingCards, setLoadingCards] = useState(false);
 
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_CARD_FIELDS);
@@ -196,8 +214,12 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
     return { cards: (j.cards ?? []) as SkuCard[], total: Number(j.total ?? 0) };
   }, [tagFilter, search, sort, cardFields, entity, special]);
 
-  // เปลี่ยน filter/search/sort → กลับหน้าแรก
-  useEffect(() => { setPage(0); }, [fetchPage]);
+  // เปลี่ยน filter/search/sort → กลับหน้าแรก (ข้ามรอบแรก ไม่งั้นหน้าที่กู้คืนมาตอน refresh จะโดนรีเซ็ต)
+  const firstFetchRef = useRef(true);
+  useEffect(() => {
+    if (firstFetchRef.current) { firstFetchRef.current = false; return; }
+    setPage(0); patchNav({ page: 0 });
+  }, [fetchPage]);
 
   // โหลดหน้าปัจจุบัน (แทนที่รายการเดิม — ไม่ต่อท้ายแบบ "โหลดเพิ่ม")
   useEffect(() => {
@@ -209,7 +231,10 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
     return () => { alive = false; };
   }, [cardsMode, fetchPage, page]);
 
-  const goPage = (p: number) => { setPage(p); if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const goPage = (p: number) => {
+    setPage(p); patchNav({ page: p });   // จำหน้าไว้ใน history → refresh แล้วยังอยู่หน้าเดิม
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const reloadFirst = async () => { try { const r = await fetchPage(page * LIMIT); setCards(r.cards); setTotal(r.total); } catch { /* ignore */ } };
   // คัดลอก SKU (หลังยืนยัน) → รีเฟรช + เด้งเปิดตัวใหม่ที่เพิ่งสร้าง
   const doCopy = async (id: string) => {
@@ -228,13 +253,14 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
 
   // ผูกการเดินเข้ากลุ่ม/แท็กกับประวัติเบราว์เซอร์ → ปุ่ม Back ย้อนทีละชั้น (ไม่เด้งออกหน้าเลย)
   const pushNav = useCallback((gp: Crumb[], tf: TagFilterValue, sp: "all" | "recent" | null = null) => {
-    setGroupPath(gp); setTagFilter(tf); setSpecial(sp);
-    try { window.history.pushState({ __skuNav: { gp, tf, sp } }, ""); } catch { /* ignore */ }
+    setGroupPath(gp); setTagFilter(tf); setSpecial(sp); setPage(0);   // เดินที่ใหม่ = เริ่มหน้า 1
+    try { window.history.pushState({ __skuNav: { gp, tf, sp, page: 0, en: entityRef.current } }, ""); } catch { /* ignore */ }
   }, []);
   useEffect(() => {
     const onPop = (e: PopStateEvent) => {
-      const s = (e.state as { __skuNav?: { gp: Crumb[]; tf: TagFilterValue; sp?: "all" | "recent" | null } } | null)?.__skuNav;
+      const s = (e.state as { __skuNav?: SkuNav } | null)?.__skuNav;
       setGroupPath(s?.gp ?? []); setTagFilter(s?.tf ?? EMPTY_FILTER); setSpecial(s?.sp ?? null);   // ไม่มี state ของเรา = กลับถึงราก
+      setPage(s?.page ?? 0); if (s?.en) setEntity(s.en);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -351,8 +377,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
       {!pick && (
       <div className="flex items-center gap-1 mb-3">
         <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
-          <button onClick={() => setEntity("skus")} className={`h-9 px-4 text-sm ${entity === "skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🏷️ SKU</button>
-          <button onClick={() => setEntity("parent-skus")} className={`h-9 px-4 text-sm border-l border-slate-200 ${entity === "parent-skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>📦 Parent SKU</button>
+          <button onClick={() => { setEntity("skus"); patchNav({ en: "skus", page: 0 }); }} className={`h-9 px-4 text-sm ${entity === "skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🏷️ SKU</button>
+          <button onClick={() => { setEntity("parent-skus"); patchNav({ en: "parent-skus", page: 0 }); }} className={`h-9 px-4 text-sm border-l border-slate-200 ${entity === "parent-skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>📦 Parent SKU</button>
         </div>
         {/* ปุ่มเพิ่ม — ตามแท็บที่เปิด */}
         <button onClick={() => setAddOpen(true)}
