@@ -458,7 +458,8 @@ export function DesignDashboard() {
 
   return (
     <BrandThemedShell theme={brandTheme}>
-      <div className="w-full px-3 py-4 sm:px-5 lg:px-6 lg:py-5">
+      {/* ขอบซ้าย-ขวาแคบ (เจ้าของขอ) — เนื้อหาใช้ความกว้างจอได้เต็มขึ้น */}
+      <div className="w-full px-2 py-4 sm:px-3 lg:py-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex items-start gap-2">
             <BrandSlot theme={brandTheme} id="header_left" className="shrink-0 mt-1" />
