@@ -94,35 +94,56 @@ async function galleryImages(admin: Admin, entityType: "parent_skus_v2" | "skus_
   const { data } = await admin.from("erp_playground_attachments").select("file_path, file_name, content_type").eq("entity_type", entityType).eq("entity_id", entityId).order("sort_order");
   return ((data ?? []) as GalleryImg[]).filter((g) => g.file_path);
 }
+// นามสกุลไฟล์ (จากชื่อ หรือ content-type) — ใช้ตั้งชื่อรูปเป็นเลขลำดับ (1.jpg, 2.png…)
+function extOf(fileName: string | null, contentType: string | null): string {
+  const m = /\.([a-zA-Z0-9]+)$/.exec(fileName ?? "");
+  if (m) return m[1].toLowerCase();
+  const ct = (contentType ?? "").toLowerCase();
+  if (ct.includes("png")) return "png";
+  if (ct.includes("webp")) return "webp";
+  if (ct.includes("gif")) return "gif";
+  return "jpg";
+}
+type UploadFile = { r2Key: string; name: string; mime: string };
+// ตั้งชื่อรูปเป็นเลขลำดับ เริ่มที่ start (Parent/Description=1 · SKU=0) ตามลำดับรูป
+function numbered(imgs: GalleryImg[], start: number): UploadFile[] {
+  return imgs.map((g, i) => ({ r2Key: g.file_path, name: `${start + i}.${extOf(g.file_name, g.content_type)}`, mime: g.content_type || "image/jpeg" }));
+}
+
+// รูป "Description" ของ Parent SKU — จาก asset_usages (module=parent_sku_description) → assets (r2_key) เรียงตาม sort_order
+async function descriptionImages(admin: Admin, parentId: string): Promise<GalleryImg[]> {
+  const { data: u } = await admin.from("asset_usages").select("asset_id, sort_order, created_at")
+    .eq("module", "parent_sku_description").eq("record_id", parentId)
+    .order("sort_order", { ascending: true, nullsFirst: false }).order("created_at", { ascending: true });
+  const ids = ((u ?? []) as { asset_id: string }[]).map((x) => x.asset_id);
+  if (ids.length === 0) return [];
+  const { data: assets } = await admin.from("assets").select("id, r2_key, file_name, content_type").in("id", [...new Set(ids)]);
+  const byId = new Map(((assets ?? []) as { id: string; r2_key: string | null; file_name: string | null; content_type: string | null }[]).map((a) => [a.id, a]));
+  return ids.map((id) => byId.get(id)).filter((a): a is NonNullable<typeof a> => !!a && !!a.r2_key)
+    .map((a) => ({ file_path: a.r2_key as string, file_name: a.file_name, content_type: a.content_type }));
+}
+
 /**
- * อัปรูปแกลเลอรี (จาก R2 file_path) เข้าโฟลเดอร์ + เก็บเวอร์ชัน (เฟส 3):
- * - ไฟล์เก่าที่ "ถูกแทน" (มีในโฟลเดอร์ แต่ชื่อไม่อยู่ในชุดรูปใหม่ = งานแก้เปลี่ยนรูป) → ย้ายไป subfolder `Ver.N` (N เพิ่มเรื่อย ๆ) ก่อน
- * - รูปใหม่ที่ยังไม่มีชื่อในโฟลเดอร์ → อัปเข้า (ขนาน) · รูปชื่อเดิมที่ไม่เปลี่ยน → คงไว้ ไม่ทำซ้ำ
+ * วางรูปในโฟลเดอร์แบบ "กดซ้ำ = เก็บเวอร์ชัน" (ตามที่เจ้าของเลือก · เพราะชื่อไฟล์เป็นเลขลำดับ เทียบด้วยชื่อไม่ได้):
+ * - มีรูปเดิมอยู่ → ย้ายทั้งหมดเข้า subfolder `Ver.N` (N เพิ่มเรื่อย ๆ) ก่อน · แล้ววางรูปชุดใหม่ (ชื่อตามที่ตั้งมา) · อัปขนาน
  * คืน { uploaded, archived }
  */
-async function replaceGalleryInFolder(folderId: string, imgs: GalleryImg[]): Promise<{ uploaded: number; archived: number }> {
+async function replaceFolderImages(folderId: string, files: UploadFile[]): Promise<{ uploaded: number; archived: number }> {
   let existing: { id: string; name: string }[] = [];
   try { existing = await driveListImages(folderId); } catch { existing = []; }
-  const nameOf = (g: GalleryImg) => g.file_name || g.file_path.split("/").pop() || "file";
-  const galleryNames = new Set(imgs.map(nameOf));
-  const existingNames = new Set(existing.map((e) => e.name));
-  // ไฟล์เก่าที่ถูกแทน (ไม่อยู่ในชุดรูปใหม่) → เก็บเข้า Ver.N
-  const toArchive = existing.filter((e) => !galleryNames.has(e.name));
   let archived = 0;
-  if (toArchive.length) {
+  if (existing.length) {
     let verFolders: { id: string; name: string }[] = [];
     try { verFolders = await driveListChildFolders(folderId); } catch { verFolders = []; }
     const maxN = verFolders.reduce((m, f) => { const x = /^Ver\.(\d+)$/.exec(f.name); return x ? Math.max(m, Number(x[1])) : m; }, 0);
     const verId = await driveEnsureFolder(`Ver.${maxN + 1}`, folderId);
-    for (const f of toArchive) { try { if (await driveMoveFile(f.id, verId, folderId)) archived++; } catch { /* ข้าม */ } }
+    for (const e of existing) { try { if (await driveMoveFile(e.id, verId, folderId)) archived++; } catch { /* ข้าม */ } }
   }
-  // รูปใหม่ (ชื่อยังไม่มีในโฟลเดอร์) → อัปขนาน
-  const todo = imgs.filter((g) => !existingNames.has(nameOf(g)));
-  const results = await Promise.all(todo.map(async (g) => {
+  const results = await Promise.all(files.map(async (f) => {
     try {
-      const obj = await r2GetObject(g.file_path); if (!obj) return 0;
+      const obj = await r2GetObject(f.r2Key); if (!obj) return 0;
       const bytes = new Uint8Array(await new Response(obj.body as ReadableStream).arrayBuffer());
-      await driveUploadFile(nameOf(g), g.content_type || obj.httpMetadata?.contentType || "image/jpeg", bytes, folderId);
+      await driveUploadFile(f.name, f.mime || obj.httpMetadata?.contentType || "image/jpeg", bytes, folderId);
       return 1;
     } catch { return 0; }
   }));
@@ -138,37 +159,34 @@ async function syncTaskStructured(
   const { data: kids } = task.parent_sku_id
     ? await admin.from("skus_v2").select("id, code").eq("parent_sku_id", task.parent_sku_id).order("code")
     : { data: [] as { id: string; code: string }[] };
-  const children = ((kids ?? []) as { id: string; code: string | null }[]).filter((c) => c.code);
-  const parentCode = deriveParentCode(children.map((c) => c.code as string), task.task_no || task.title || "งาน");
+  const children = ((kids ?? []) as { id: string; code: string | null }[]).filter((c): c is { id: string; code: string } => !!c.code);
+  const parentCode = deriveParentCode(children.map((c) => c.code), task.task_no || task.title || "งาน");
 
-  // โครงโฟลเดอร์ (find-or-create → กดซ้ำไม่สร้างซ้ำ)
+  // โครงแบน: <parentCode>/ { [01] Description, <parentCode> (รูป Parent), <childCode>… (child ตรง ๆ ไม่มี "SKU" ครอบ) }
   const topId = await driveEnsureFolder(parentCode, brandParentId);
-  const parentF = await driveEnsureFolder("Parent SKU", topId);
-  const skuF = await driveEnsureFolder("SKU", topId);
   const descF = await driveEnsureFolder("[01] Description", topId);
+  const parentF = await driveEnsureFolder(parentCode, topId);   // โฟลเดอร์รูป Parent = รหัส (เปลี่ยนจาก "Parent SKU")
   const topUrl = `https://drive.google.com/drive/folders/${topId}`;
   await admin.from("erp_creative_tasks").update({ drive_folder_id: topId, drive_folder_url: topUrl }).eq("id", task.id);
 
   let uploaded = 0, archived = 0;
-  const runGallery = async (folderId: string, entityType: "parent_skus_v2" | "skus_v2", entityId: string) => {
-    const r = await replaceGalleryInFolder(folderId, await galleryImages(admin, entityType, entityId));
-    uploaded += r.uploaded; archived += r.archived;
-  };
-  // รูปสินค้า Parent → "Parent SKU"
-  if (task.parent_sku_id) await runGallery(parentF, "parent_skus_v2", task.parent_sku_id);
-  // รูปสินค้าแต่ละ child → "SKU/<code>"
+  const run = async (folderId: string, files: UploadFile[]) => { const r = await replaceFolderImages(folderId, files); uploaded += r.uploaded; archived += r.archived; };
+
+  // Description (asset_usages) → ชื่อ 1,2,3 · Parent gallery → ชื่อ 1,2,3
+  if (task.parent_sku_id) {
+    await run(descF, numbered(await descriptionImages(admin, task.parent_sku_id), 1));
+    await run(parentF, numbered(await galleryImages(admin, "parent_skus_v2", task.parent_sku_id), 1));
+  }
+  // child แต่ละตัว (ตรงใต้ top) → ชื่อ 0,1,2,3 · + รูปสำเนา (รูปแรก) วางข้าง top ชื่อ <code>.<ext>
+  const covers: UploadFile[] = [];
   for (const c of children) {
-    const cf = await driveEnsureFolder(c.code as string, skuF);
-    await runGallery(cf, "skus_v2", c.id);
+    const cf = await driveEnsureFolder(c.code, topId);
+    const imgs = await galleryImages(admin, "skus_v2", c.id);
+    await run(cf, numbered(imgs, 0));
+    if (imgs.length) covers.push({ r2Key: imgs[0].file_path, name: `${c.code}.${extOf(imgs[0].file_name, imgs[0].content_type)}`, mime: imgs[0].content_type || "image/jpeg" });
   }
-  // ไฟล์แนบงาน → งานย่อยชนิด description → "[01] Description" · อื่น ๆ → "Parent SKU"
-  const { data: subs } = await admin.from("erp_creative_subtasks").select("id, subtask_type").eq("task_id", task.id);
-  const descSubIds = new Set(((subs ?? []) as { id: string; subtask_type: string | null }[]).filter((s) => (s.subtask_type ?? "").includes("description")).map((s) => s.id));
-  const { data: atts } = await admin.from("erp_creative_attachments").select("id, r2_key, file_name, content_type, drive_file_id, subtask_id").eq("task_id", task.id);
-  for (const a of ((atts ?? []) as (DriveAtt & { subtask_id?: string | null })[])) {
-    const dest = a.subtask_id && descSubIds.has(a.subtask_id) ? descF : parentF;
-    try { if (await uploadAttachmentToDrive(admin, dest, a)) uploaded++; } catch { /* ข้าม */ }
-  }
+  // รูปสำเนาหน้าโฟลเดอร์ SKU (ไฟล์หลวมใน top) — เก็บเวอร์ชันด้วย
+  await run(topId, covers);
   return { url: topUrl, uploaded, archived };
 }
 
