@@ -15,6 +15,7 @@ import { guardApi } from "@/lib/api-auth";
 import { timeRoute } from "@/lib/api-timing";
 import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
 import { r2MoveToTrash } from "@/lib/r2";
+import { deleteRecordFilesFor } from "@/lib/record-files";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -158,9 +159,12 @@ async function _DELETE(
     // ลบถาวร — ลบจริงออกจาก Supabase
     const { error } = await admin.from(cfg.table).delete().eq("id", id);
     if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 409 });
+    // ลบไฟล์แนบ (Supabase Storage + ทะเบียน) ของ record นี้ตามไปด้วย — เฉพาะลบถาวร (cascade)
+    let filesDeleted = 0;
+    try { filesDeleted = await deleteRecordFilesFor(admin, cfg.table, id); } catch { /* best-effort */ }
     await writeAudit(admin, {
       action: "delete_permanent", entityType: cfg.table, entityId: id,
-      actorId: user.id, actorName: user.email ?? null, metadata: { entity },
+      actorId: user.id, actorName: user.email ?? null, metadata: { entity, files_deleted: filesDeleted },
     });
     return NextResponse.json({ data: { deleted: true }, error: null });
   }

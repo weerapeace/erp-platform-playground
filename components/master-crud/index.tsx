@@ -26,6 +26,7 @@ import type { FormField, FieldRegistryV2Response, FormLayout } from "@/app/api/a
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { ImageManager } from "@/components/image-manager";
+import { RecordFilesField } from "@/components/record-files";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { LayoutEditorModal } from "@/components/layout-editor";
 import { RelationMany2Many, RelationOne2Many, MasterDetailRelation } from "@/components/relation-multi";
@@ -461,6 +462,14 @@ export type MasterCRUDConfig = {
     imageOnly?: boolean;
     /** เลย์เอาต์: grid (ค่าเริ่มต้น) หรือ gallery (รูปหลักใหญ่บน + รูปย่อยล่าง แบบ Design Sheet) */
     layout?: "grid" | "gallery";
+  };
+  /** ไฟล์แนบราย record (ของกลาง) — เก็บใน Supabase Storage · ลบ record ถาวร → ลบไฟล์ตามไปด้วย */
+  fileAttachments?: {
+    entityType?: string;
+    title?: string;
+    description?: string;
+    maxItems?: number;
+    maxSizeBytes?: number;
   };
   /** section พิเศษในฟอร์ม (เช่น รูป Description ของ Parent SKU) — render เมื่อเปิดฟอร์ม */
   extraFormSection?: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode;
@@ -2457,6 +2466,26 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 </div>
               )}
 
+              {/* ไฟล์แนบราย record (ของกลาง) — เก็บใน Supabase Storage, ลบ record ถาวร=ลบไฟล์ตาม */}
+              {config.fileAttachments && (
+                <div className="w-full md:order-5 rounded-xl border border-slate-200 bg-white p-3">
+                  {editingId ? (
+                    <RecordFilesField
+                      entityType={config.fileAttachments.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
+                      entityId={String(editingId)}
+                      actor={user?.name ?? user?.email ?? undefined}
+                      readonly={!canEdit}
+                      title={config.fileAttachments.title}
+                      description={config.fileAttachments.description}
+                      maxItems={config.fileAttachments.maxItems}
+                      maxSizeBytes={config.fileAttachments.maxSizeBytes}
+                    />
+                  ) : (
+                    <div className="text-xs text-slate-400 text-center py-3">บันทึกรายการก่อน แล้วค่อยแนบไฟล์</div>
+                  )}
+                </div>
+              )}
+
               <div className="flex-1 min-w-0 md:order-2">
                 {detailLoading && drawerMode === "view" && <div className="text-xs text-slate-400 mb-2">⏳ กำลังโหลด...</div>}
                 {drawerMode === "edit" && formErr && (
@@ -2692,6 +2721,8 @@ export function MasterRecordDrawer({
       icon, activeField: "is_active", serverMode: true,
       permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
+      // สินค้า (Parent/SKU) → ช่อง "ไฟล์แนบ" (Supabase Storage · ลบ record ถาวร=ลบไฟล์ตาม) ทุกที่ที่เปิด drawer
+      fileAttachments: productEntity ? { entityType: productEntity, title: "ไฟล์แนบ" } : undefined,
       // Parent SKU → ช่อง "รูป Description" ในฟอร์ม (เหมือนหน้า master page โดยตรง)
       extraFormSection: moduleKey === "parent-skus-v2"
         ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />

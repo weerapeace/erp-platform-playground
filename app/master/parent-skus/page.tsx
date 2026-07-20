@@ -100,6 +100,11 @@ const CONFIG: MasterCRUDConfig = {
     imageOnly: true,
     layout: "gallery",   // รูปหลักใหญ่บน + รูปย่อยล่าง (แบบ Design Sheet) ตามที่เจ้าของขอ
   },
+  fileAttachments: {
+    entityType: "parent_skus_v2",
+    title: "ไฟล์แนบ",
+    description: "แนบไฟล์งาน (PDF/AI/PSD ฯลฯ) เก็บใน Supabase · ลบสินค้าถาวรจะลบไฟล์ตามไปด้วย",
+  },
   permissions: {
     view:   "products.view",
     create: "products.create",
