@@ -12,6 +12,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
 import { usePermission } from "@/components/auth";
 import { RecordTasksButton } from "@/components/record-tasks";
+import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import { wfIconSlotId } from "@/lib/brand-theme";
 import { BrandSlot } from "@/components/brand-theme/slots";
 import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provider";
@@ -179,6 +180,7 @@ export function DesignDashboard() {
   const [createOpen, setCreateOpen] = useState(false);                   // เปิด popup สร้างงานใหม่
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
   const [viewMode, setViewMode] = useState<"board" | "gallery">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี)
+  const { cols: galleryCols, setCols: setGalleryCols, gridStyle: galleryGridStyle } = useGalleryColumns("design-dashboard", 6);   // จำนวนการ์ดต่อแถว (ของกลาง จำรายคน)
   const [brandLogos, setBrandLogos] = useState<Record<string, string>>({});   // brand id → logo R2 key (จาก /api/brands)
   const [othersOpen, setOthersOpen] = useState(false);                        // ดรอปดาวน์ "แบรนด์อื่นๆ"
   // โหลดโลโก้แบรนด์ (จาก /master/brands → brands.logo_url) มาโชว์ในการ์ดแบรนด์แถวบน
@@ -671,8 +673,12 @@ export function DesignDashboard() {
                       className={`h-9 rounded-md border px-3 text-xs font-medium transition ${quickFilter === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
                   ))}
                 </div>
+                {/* เลือกจำนวนการ์ดต่อแถว (ของกลาง) — เฉพาะมุมมองแกลเลอรี */}
+                {viewMode === "gallery" && (
+                  <GalleryColumnsControl cols={galleryCols} onChange={setGalleryCols} className="ml-auto" />
+                )}
                 {/* สลับมุมมอง: บอร์ด Kanban ↔ การ์ดรูปใหญ่ (แกลเลอรี) — จำค่ารายคน */}
-                <div className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
+                <div className={`flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5 ${viewMode === "gallery" ? "" : "ml-auto"}`}>
                   {([["board", "🗂️ บอร์ด"], ["gallery", "🖼️ การ์ดรูปใหญ่"]] as const).map(([key, label]) => (
                     <button key={key} type="button" onClick={() => changeViewMode(key)}
                       className={`h-8 rounded px-2.5 text-xs font-medium transition ${viewMode === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
@@ -690,8 +696,8 @@ export function DesignDashboard() {
                   ยังไม่มีใบงานสำหรับตัวกรองนี้
                 </div>
               ) : viewMode === "gallery" ? (
-                /* ── มุมมองการ์ดรูปใหญ่ (แกลเลอรี): เห็นรูปงานเต็มใบ ไม่โดนตัด · เรียงตามอัปเดตล่าสุด ── */
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                /* ── มุมมองการ์ดรูปใหญ่ (แกลเลอรี): เห็นรูปงานเต็มใบ ไม่โดนตัด · จำนวนต่อแถวเลือกได้ · เรียงตามอัปเดตล่าสุด ── */
+                <div style={galleryGridStyle}>
                   {filteredSheets.map((sheet) => {
                     const brandColor = safeColor(sheet.brand_color);
                     const coverUrl = sheetCoverUrl(sheet);
