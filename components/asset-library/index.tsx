@@ -701,6 +701,7 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
   const [items, setItems] = useState<UpItem[]>([]);
   const [tagsStr, setTagsStr] = useState("");
   const [collectionId, setCollectionId] = useState(defaultCollectionId ?? "");   // เปิดอยู่ในอัลบั้มไหน → ตั้งให้เลย
+  const [resizeW, setResizeW] = useState(1200);   // ย่อด้านกว้างก่อนอัป (0 = ขนาดจริง) · ไฟล์ที่ไม่ใช่รูปไม่ถูกย่ออยู่แล้ว
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -730,7 +731,8 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
       if (next[i].status === "done" || next[i].status === "dup") { done++; continue; }
       next[i] = { ...next[i], status: "uploading" }; setItems([...next]);
       try {
-        const upFile = await downscaleImageWidth(next[i].file, 1600);   // ย่อด้านกว้าง ≤ 1600px ตอนอัป
+        // ย่อด้านกว้างตามที่เลือก (0 = ขนาดจริง ไม่ย่อ) · ไฟล์ที่ไม่ใช่รูป/เล็กกว่าอยู่แล้ว = ผ่านไปเลย
+        const upFile = resizeW > 0 ? await downscaleImageWidth(next[i].file, resizeW) : next[i].file;
         const fd = new FormData();
         fd.append("file", upFile);
         if (tagsStr.trim()) fd.append("tags", tagsStr.trim());
@@ -799,6 +801,20 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
           ))}
         </div>
       )}
+
+      {/* ย่อขนาดรูปก่อนอัป — ประหยัดพื้นที่/โหลดเร็ว · เลือก "ขนาดจริง" ถ้าต้องเก็บไฟล์เต็ม */}
+      <div className="mb-3">
+        <p className="text-[12px] text-slate-500 mb-1">ย่อขนาดรูปก่อนอัป <span className="text-[10px] text-slate-400">(ด้านกว้าง · ไฟล์ที่ไม่ใช่รูปไม่ถูกย่อ)</span></p>
+        <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+          {[{ w: 800, label: "800px" }, { w: 1200, label: "1200px" }, { w: 1600, label: "1600px" }, { w: 0, label: "ขนาดจริง" }].map((o, i) => (
+            <button key={o.w} type="button" onClick={() => setResizeW(o.w)} disabled={busy}
+              className={`h-8 px-3 text-[12px] ${i > 0 ? "border-l border-slate-200" : ""} ${resizeW === o.w ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"} disabled:opacity-50`}>
+              {resizeW === o.w ? "✓ " : ""}{o.label}
+            </button>
+          ))}
+        </div>
+        {resizeW === 0 && <p className="text-[11px] text-amber-600 mt-1">⚠ เก็บขนาดจริง — ไฟล์ใหญ่ขึ้น (ไม่เกิน 25MB/ไฟล์)</p>}
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="text-[12px] text-slate-500">
