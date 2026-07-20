@@ -24,6 +24,7 @@ import { Pager } from "@/components/pager";
 import { Spinner, LoadingOverlay } from "@/components/spinner";
 import { HoverPreview } from "@/components/hover-image";
 import { ParentSkuMultiPickerModal } from "@/components/parent-sku-multi-picker";
+import { DriveFolderFiles } from "@/components/drive-folder-files";
 import { runBackgroundTask } from "@/lib/background-tasks";
 import { useRefresh, triggerRefresh } from "@/lib/refresh-bus";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
@@ -860,6 +861,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkConfirmSrc, setLinkConfirmSrc] = useState<AssetRow | null>(null);   // รูปต้นทางที่เลือก (รอ confirm)
   const [renameOpen, setRenameOpen] = useState(false);   // เปลี่ยนชื่อโฟลเดอร์ Drive (มีผลกับทุกรูปที่ใช้โฟลเดอร์นี้)
+  const [driveFilesKey, setDriveFilesKey] = useState(0);   // bump = สั่งโหลดรายการไฟล์ในโฟลเดอร์ใหม่ (หลังอัปไฟล์ขึ้น Drive)
   const [renameName, setRenameName] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
   const { brandBase, typeSub } = useDriveFolderMaps();
@@ -976,7 +978,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
         const patch: Record<string, unknown> = { master_url: folderLink };
         if (newPath) { patch.master_path = newPath; setMasterPath(newPath); }
         await apiFetch(`/api/assets/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
-        toast.success(srcFiles.length ? "อัปขึ้น Drive + เก็บลิงก์แล้ว" : "สร้างโฟลเดอร์ + ดึงรูป preview แล้ว"); setSrcFiles([]); await loadDetail(); onChanged();
+        toast.success(srcFiles.length ? "อัปขึ้น Drive + เก็บลิงก์แล้ว" : "สร้างโฟลเดอร์ + ดึงรูป preview แล้ว"); setSrcFiles([]); setDriveFilesKey((k) => k + 1); await loadDetail(); onChanged();
       }
     } catch (e) { toast.error(e instanceof Error ? e.message : "อัป Drive ไม่สำเร็จ"); }
     finally { setDriveBusy(false); setDriveProg({ done: 0, total: 0 }); }
@@ -1137,6 +1139,9 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
               <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} disabled={trashed}
                 placeholder="ลิงก์ Google Drive / Synology (เปิดได้ทุกที่) — ไม่ใส่ก็ได้"
                 className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg mt-1.5 disabled:bg-slate-50" />
+
+              {/* ในโฟลเดอร์นี้มีไฟล์อะไรบ้าง (ของกลาง) — โหลดเองแบบไม่บล็อก + ปุ่มเปิดทีละไฟล์ใน Drive */}
+              {/\/folders\//.test(masterUrl) && <DriveFolderFiles folder={masterUrl} reloadKey={driveFilesKey} />}
 
               {/* เพิ่มไฟล์ต้นฉบับขึ้น Drive ย้อนหลัง (ลืมใส่ตอนสร้าง) → สร้างโฟลเดอร์ใหม่ หรือ ใช้โฟลเดอร์เดียวกับรูปอื่น */}
               {driveOn && !trashed && (

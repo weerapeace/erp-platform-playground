@@ -92,6 +92,17 @@ export async function driveListImages(parentId: string): Promise<{ id: string; n
     .map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, width: f.imageMediaMetadata?.width, height: f.imageMediaMetadata?.height }));
 }
 
+/** ไฟล์ทุกชนิดในโฟลเดอร์ (ไม่รวมโฟลเดอร์ย่อย) → ไว้โชว์ว่าในโฟลเดอร์มีไฟล์อะไรบ้าง + ลิงก์เปิดใน Drive */
+export async function driveListFiles(parentId: string): Promise<{ id: string; name: string; mimeType: string; size?: number; webViewLink?: string; modifiedTime?: string }[]> {
+  const token = await getAccessToken();
+  const q = [`'${parentId}' in parents`, "mimeType != 'application/vnd.google-apps.folder'", "trashed = false"].join(" and ");
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,mimeType,size,webViewLink,modifiedTime)&pageSize=100&orderBy=name`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const j = await res.json().catch(() => ({}));
+  return ((j.files ?? []) as { id: string; name: string; mimeType: string; size?: string; webViewLink?: string; modifiedTime?: string }[])
+    .map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, size: f.size ? Number(f.size) : undefined, webViewLink: f.webViewLink, modifiedTime: f.modifiedTime }));
+}
+
 /** ย้ายไฟล์ไปโฟลเดอร์อื่น (เปลี่ยน parent เดิม→ใหม่) — คืน true ถ้าสำเร็จ · ใช้เก็บไฟล์เก่าเข้า Ver.x ตอนงานแก้ */
 export async function driveMoveFile(fileId: string, addParentId: string, removeParentId: string): Promise<boolean> {
   const token = await getAccessToken();
