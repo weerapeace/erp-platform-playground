@@ -25,6 +25,16 @@ export function normalizeSizes(v: unknown): AssetSize[] {
     return { label: String(o.label ?? ""), w: num(o.w), h: num(o.h), unit };
   }).filter((s) => s.label || s.w != null || s.h != null);
 }
+/** รายการ Artwork ในแผ่นงานพิมพ์ + จำนวน (source='print') */
+export type PrintItem = { asset_id: string; title: string; url: string | null; qty: number };
+export function normalizePrintItems(v: unknown): PrintItem[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const qty = Math.max(1, Math.round(Number(o.qty) || 1));
+    return { asset_id: String(o.asset_id ?? "").trim(), title: String(o.title ?? ""), url: o.url ? String(o.url) : null, qty };
+  }).filter((i) => i.asset_id);
+}
 /** normalize parent_sku_codes jsonb → string[] */
 export function normalizeCodes(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
@@ -53,6 +63,7 @@ export type AssetRow = {
   master_url: string | null;    // ลิงก์เว็บ NAS (Synology) เปิดจากนอกออฟฟิศ
   source: string;               // upload | odoo_product | artwork | print
   print_type: string | null;    // ประเภทงานพิมพ์ (DTF/UV/…) — เฉพาะ source='print' · ตั้งค่าที่ erp_print_types
+  print_items: PrintItem[];     // Artwork ที่อยู่ในแผ่น + จำนวนต่อชิ้น (เฉพาะ source='print')
   artwork_type: string | null;  // ชนิดหลัก (ตัวแรก) — คงไว้เพื่อ backward-compat + ที่อื่นที่อ่าน field เดิม
   artwork_types: string[];      // ชนิดทั้งหมด (m2m) — โลโก้/ลายพิมพ์/แพทเทิร์น/ม็อกอัป/... (เฉพาะ artwork)
   keywords: string | null;      // คำค้นเพิ่มเติม (คำพ้อง/ชื่ออื่น) — รวมเข้า search
@@ -81,7 +92,7 @@ type AssetDbRow = {
   uploaded_by: string | null; created_at: string;
   master_path: string | null; master_url: string | null;
   source: string; artwork_type: string | null; keywords: string | null;
-  print_type?: string | null;
+  print_type?: string | null; print_items?: unknown;
   sizes?: unknown; parent_sku_codes?: unknown; artwork_types?: unknown;
 };
 
@@ -114,6 +125,7 @@ export function buildRow(r: AssetDbRow, tags: string[], usageCount: number): Ass
     master_url: r.master_url,
     source: r.source,
     print_type: r.print_type ?? null,
+    print_items: normalizePrintItems(r.print_items),
     artwork_type: r.artwork_type,
     artwork_types: normalizeCodes(r.artwork_types),
     keywords: r.keywords,

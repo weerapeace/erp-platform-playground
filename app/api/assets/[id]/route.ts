@@ -8,7 +8,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { driveConfigured, driveTrashFolder, parseDriveFolderId } from "@/lib/google-drive";
-import { type AssetDetail, type AssetUsage, type AssetSize, rowOf, attachTags, actorId, loadCollectionIds, setCollections, normalizeSizes, normalizeCodes } from "../shared";
+import { type AssetDetail, type AssetUsage, type AssetSize, rowOf, attachTags, actorId, loadCollectionIds, setCollections, normalizeSizes, normalizeCodes, normalizePrintItems } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -45,7 +45,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     title?: string; description?: string | null; collection_id?: string | null;
     collection_ids?: string[]; tags?: string[]; restore?: boolean;
     master_path?: string | null; master_url?: string | null; artwork_type?: string | null; keywords?: string | null;
-    sizes?: AssetSize[]; parent_sku_codes?: string[]; artwork_types?: string[]; print_type?: string | null;
+    sizes?: AssetSize[]; parent_sku_codes?: string[]; artwork_types?: string[]; print_type?: string | null; print_items?: unknown;
   };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -72,14 +72,13 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     patch.artwork_type = types[0] ?? null;
   } else if (body.artwork_type !== undefined) {
     patch.artwork_type = body.artwork_type || null;
-  }
-  if (body.print_type !== undefined) {   // ประเภทงานพิมพ์ (DTF/UV/…)
-    patch.print_type = body.print_type || null;
     patch.artwork_types = body.artwork_type ? [body.artwork_type] : [];
   }
+  if (body.print_type !== undefined) patch.print_type = body.print_type || null;   // ประเภทงานพิมพ์ (DTF/UV/…)
   if (body.keywords !== undefined)      patch.keywords = body.keywords || null;
   if (body.sizes !== undefined)            patch.sizes = normalizeSizes(body.sizes);
   if (body.parent_sku_codes !== undefined) patch.parent_sku_codes = normalizeCodes(body.parent_sku_codes);
+  if (body.print_items !== undefined)      patch.print_items = normalizePrintItems(body.print_items);
 
   const { error } = await admin.from("assets").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

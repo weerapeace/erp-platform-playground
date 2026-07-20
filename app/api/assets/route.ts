@@ -12,7 +12,7 @@ import { r2PutObject, isR2Configured } from "@/lib/r2";
 import { detectAssetType, extOf, sha256Hex, ASSET_MAX_BYTES } from "@/lib/assets";
 import {
   type AssetRow, buildRow, sanitizeToken, loadTags, loadUsageCounts, attachTags, rowOf, actorId,
-  normalizeSizes, normalizeCodes,
+  normalizeSizes, normalizeCodes, normalizePrintItems,
 } from "./shared";
 
 /** parse JSON อย่างปลอดภัย (form ส่ง sizes/parent_sku_codes มาเป็น JSON string) */
@@ -144,6 +144,7 @@ export async function POST(request: NextRequest) {
   const artworkTypes = artworkTypesRaw.length ? artworkTypesRaw : (singleType ? [singleType] : []);
   const artworkType  = artworkTypes[0] ?? null;
   const printType    = String(form.get("print_type") ?? "").trim() || null;   // ประเภทงานพิมพ์ (เฉพาะ source='print')
+  const printItems   = normalizePrintItems(safeJson(String(form.get("print_items") ?? "")));   // Artwork ในแผ่น + จำนวน
   const masterPath   = form.get("master_path") ? String(form.get("master_path")) : null;
   const masterUrl    = form.get("master_url")  ? String(form.get("master_url"))  : null;
   const keywords     = form.get("keywords")    ? String(form.get("keywords"))    : null;
@@ -185,7 +186,7 @@ export async function POST(request: NextRequest) {
     width:  Number.isFinite(widthRaw)  ? widthRaw  : null,
     height: Number.isFinite(heightRaw) ? heightRaw : null,
     checksum, collection_id: collectionId, uploaded_by: actor, status: "active",
-    source, artwork_type: artworkType, artwork_types: artworkTypes, print_type: printType, master_path: masterPath, master_url: masterUrl, keywords,
+    source, artwork_type: artworkType, artwork_types: artworkTypes, print_type: printType, print_items: printItems, master_path: masterPath, master_url: masterUrl, keywords,
     sizes, parent_sku_codes: parentCodes, brand_id: brandId,
   }).select("*").single();
   if (error || !ins)

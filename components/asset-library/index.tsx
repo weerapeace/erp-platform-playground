@@ -17,7 +17,7 @@ import { ASSET_TYPE_LABEL, formatBytes, type AssetType } from "@/lib/assets";
 import { withImageWidth } from "@/lib/r2-image";
 import { downscaleImageWidth } from "@/lib/image-resize";
 import { downloadImagesAsZip } from "@/lib/zip";
-import { type AssetRow, type AssetDetail, type AssetUsage, type AssetSize } from "@/app/api/assets/shared";
+import { type AssetRow, type AssetDetail, type AssetUsage, type AssetSize, type PrintItem } from "@/app/api/assets/shared";
 import { BrandAlbumBrowser } from "./brand-album";
 import { AssetPicker } from "@/components/asset-picker";
 import { Pager } from "@/components/pager";
@@ -924,6 +924,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
   const [driveFilesKey, setDriveFilesKey] = useState(0);   // bump = สั่งโหลดรายการไฟล์ในโฟลเดอร์ใหม่ (หลังอัปไฟล์ขึ้น Drive)
   const [renameName, setRenameName] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
+  const [printItems, setPrintItems] = useState<PrintItem[]>([]);   // Artwork ในแผ่น + จำนวน (source='print')
   const { brandBase, typeSub } = useDriveFolderMaps();
   const [pathAuto, setPathAuto] = useState(true);   // path ต้นฉบับตามโฟลเดอร์อัตโนมัติ (พิมพ์แก้เอง = หยุด)
 
@@ -936,6 +937,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
       setMasterPath(det.master_path ?? ""); setMasterUrl(det.master_url ?? ""); setKeywords(det.keywords ?? "");
       setArtTypesSel(det.artwork_types?.length ? det.artwork_types : (det.artwork_type ? [det.artwork_type] : []));
       setSizes(det.sizes ?? []); setParentCodes(det.parent_sku_codes ?? []); setBrandId(det.brand_id ?? "");
+      setPrintItems(det.print_items ?? []);
     } catch (e) { toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ"); onClose(); }
   }, [id, toast, onClose]);
   useEffect(() => { void loadDetail(); }, [loadDetail]);
@@ -949,7 +951,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
     try {
       const res = await apiFetch(`/api/assets/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, tags, collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_types: artTypesSel, keywords, sizes, parent_sku_codes: parentCodes }),
+        body: JSON.stringify({ title, tags, collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_types: artTypesSel, keywords, sizes, parent_sku_codes: parentCodes, ...(d?.source === "print" ? { print_items: printItems } : {}) }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกแล้ว"); await loadDetail(); onChanged();
@@ -1164,9 +1166,15 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
                 placeholder="คำพ้อง/ชื่ออื่น เช่น flower ดอกไม้ summer"
                 className="mt-1 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" /></label>
 
-            {d.source === "artwork" && (
+            {(d.source === "artwork" || d.source === "print") && (
               <>
-                <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📐 ขนาด (กว้าง × สูง)</p><SizesEditor value={sizes} onChange={setSizes} disabled={trashed} /></div>
+                <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📐 {d.source === "print" ? "ขนาดแผ่น" : "ขนาด (กว้าง × สูง)"}</p><SizesEditor value={sizes} onChange={setSizes} disabled={trashed} /></div>
+                {/* งานพิมพ์: Artwork ในแผ่น + จำนวน (แก้แล้วกด "บันทึก") */}
+                {d.source === "print" && (
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <PrintItemsField value={printItems} onChange={setPrintItems} disabled={trashed} />
+                  </div>
+                )}
                 <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📦 Parent SKU ที่ใช้</p><ParentSkuField value={parentCodes} onChange={setParentCodes} disabled={trashed} /></div>
               </>
             )}
@@ -2458,6 +2466,55 @@ function ArtTypeMultiSelect({ value, types, onChange, onCreated, disabled }: {
   );
 }
 
+// ── รายการ Artwork ในแผ่นงานพิมพ์ + จำนวนต่อชิ้น (เลือกหลายรายการผ่าน AssetPicker ของกลาง) ──
+function PrintItemsField({ value, onChange, disabled }: { value: PrintItem[]; onChange: (v: PrintItem[]) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const totalQty = value.reduce((s, i) => s + (Number(i.qty) || 0), 0);
+
+  const addPicked = (rows: AssetRow[]) => {
+    const have = new Set(value.map((i) => i.asset_id));
+    const added = rows.filter((r) => !have.has(r.id)).map((r) => ({ asset_id: r.id, title: r.title || r.file_name, url: r.url ?? null, qty: 1 }));
+    if (added.length) onChange([...value, ...added]);
+    setOpen(false);
+  };
+  const setQty = (id: string, q: number) => onChange(value.map((i) => (i.asset_id === id ? { ...i, qty: Math.max(1, Math.round(q) || 1) } : i)));
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[12px] text-slate-500">🎨 Artwork ในแผ่นนี้ {value.length > 0 && <span className="text-slate-400">({value.length} ลาย · รวม {totalQty} ชิ้น)</span>}</span>
+        {!disabled && <button type="button" onClick={() => setOpen(true)}
+          className="text-[11px] px-2 py-0.5 rounded-full border border-violet-300 text-violet-700 hover:bg-violet-50">＋ เลือก Artwork</button>}
+      </div>
+
+      {value.length === 0 ? (
+        <p className="text-[11px] text-slate-400">ยังไม่ได้เลือก Artwork</p>
+      ) : (
+        <div className="space-y-1">
+          {value.map((it) => (
+            <div key={it.asset_id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1">
+              {it.url
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={withImageWidth(it.url, 80) ?? it.url} alt="" className="w-8 h-8 rounded object-contain border border-slate-200 bg-slate-50 shrink-0" />
+                : <span className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-300 text-xs shrink-0">🎨</span>}
+              <span className="flex-1 min-w-0 text-[12px] text-slate-700 truncate" title={it.title}>{it.title}</span>
+              <input type="number" min={1} value={it.qty} disabled={disabled}
+                onChange={(e) => setQty(it.asset_id, Number(e.target.value))}
+                className="w-16 h-7 px-2 text-[12px] text-center border border-slate-200 rounded-lg disabled:bg-slate-50" />
+              <span className="text-[10px] text-slate-400 shrink-0">ชิ้น</span>
+              {!disabled && <button type="button" onClick={() => onChange(value.filter((x) => x.asset_id !== it.asset_id))}
+                className="text-slate-400 hover:text-red-500 shrink-0 text-sm" title="เอาออก">✕</button>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <AssetPicker open={open} onClose={() => setOpen(false)} onSelect={addPicked} multiple typeFilter="image"
+        defaultSource="artwork" title="เลือก Artwork ที่อยู่ในแผ่นนี้" />
+    </div>
+  );
+}
+
 // ── เพิ่มงานพิมพ์ (DTF/UV) — รูป preview + ไฟล์ .ai/.pdf ขึ้นโฟลเดอร์ Drive + ประเภท/ขนาดแผ่น ──
 function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds, onClose, onDone }: {
   actor: string | null; printTypes: PrintType[]; collections: AssetCollection[];
@@ -2473,6 +2530,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   const [brandId, setBrandId] = useState("");
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   const [srcFiles, setSrcFiles] = useState<File[]>([]);         // ไฟล์พิมพ์ .ai/.pdf → Drive
+  const [printItems, setPrintItems] = useState<PrintItem[]>([]); // Artwork ในแผ่น + จำนวน
   const [parentCodes, setParentCodes] = useState<string[]>([]);
   const [collectionIds, setCollectionIds] = useState<string[]>(defaultCollectionIds ?? []);
   const [cols, setCols] = useState<AssetCollection[]>(collections);
@@ -2534,6 +2592,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
       if (effPath) fd.append("master_path", effPath);
       if (effUrl) fd.append("master_url", effUrl);
       if (sizes.length) fd.append("sizes", JSON.stringify(sizes));
+      if (printItems.length) fd.append("print_items", JSON.stringify(printItems));
       if (parentCodes.length) fd.append("parent_sku_codes", JSON.stringify(parentCodes));
       if (collectionIds.length) fd.append("collection_ids", JSON.stringify(collectionIds));
       if (tags.length) fd.append("tags", tags.join(","));
@@ -2631,6 +2690,10 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
               )}
             </div>
           )}
+
+          <div className="rounded-lg border border-slate-200 p-2">
+            <PrintItemsField value={printItems} onChange={setPrintItems} />
+          </div>
 
           <div className="text-[12px] text-slate-500">📦 Parent SKU ที่อยู่ในแผ่นนี้ <span className="text-[10px] text-slate-400">(ไม่บังคับ)</span>
             <div className="mt-0.5"><ParentSkuField value={parentCodes} onChange={setParentCodes} /></div>
