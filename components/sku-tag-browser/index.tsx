@@ -15,6 +15,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { useToast } from "@/components/toast";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
+import { Pager } from "@/components/pager";
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 // ของกลาง bulk edit — type อย่างเดียว (ไม่กิน runtime); ตัว modal โหลดแบบ dynamic ด้านล่าง (กัน data-table เข้า bundle หน้านี้)
 import type { BulkEditField } from "@/components/data-table";
@@ -127,8 +128,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
 
   const [cards, setCards] = useState<SkuCard[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);   // แบ่งหน้า (0-based) — ใช้ Pager ของกลาง แทน "โหลดเพิ่ม"
   const [loadingCards, setLoadingCards] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
 
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_CARD_FIELDS);
   const [availFields, setAvailFields] = useState<FieldDef[]>([]);   // ฟิลด์ SKU ทั้งหมด (จาก Field Registry — ไม่ hardcode)
@@ -195,22 +196,21 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
     return { cards: (j.cards ?? []) as SkuCard[], total: Number(j.total ?? 0) };
   }, [tagFilter, search, sort, cardFields, entity, special]);
 
-  // โหลดหน้าแรกใหม่เมื่อเปลี่ยน filter/search/sort
+  // เปลี่ยน filter/search/sort → กลับหน้าแรก
+  useEffect(() => { setPage(0); }, [fetchPage]);
+
+  // โหลดหน้าปัจจุบัน (แทนที่รายการเดิม — ไม่ต่อท้ายแบบ "โหลดเพิ่ม")
   useEffect(() => {
     if (!cardsMode) { setCards([]); setTotal(0); return; }
     let alive = true;
     setLoadingCards(true); setSelected(new Set());
-    fetchPage(0).then((r) => { if (!alive) return; setCards(r.cards); setTotal(r.total); })
+    fetchPage(page * LIMIT).then((r) => { if (!alive) return; setCards(r.cards); setTotal(r.total); })
       .catch(() => {}).finally(() => { if (alive) setLoadingCards(false); });
     return () => { alive = false; };
-  }, [cardsMode, fetchPage]);
+  }, [cardsMode, fetchPage, page]);
 
-  const loadMore = async () => {
-    setLoadingMore(true);
-    try { const r = await fetchPage(cards.length); setCards((prev) => [...prev, ...r.cards]); setTotal(r.total); }
-    catch { /* ignore */ } finally { setLoadingMore(false); }
-  };
-  const reloadFirst = async () => { try { const r = await fetchPage(0); setCards(r.cards); setTotal(r.total); } catch { /* ignore */ } };
+  const goPage = (p: number) => { setPage(p); if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const reloadFirst = async () => { try { const r = await fetchPage(page * LIMIT); setCards(r.cards); setTotal(r.total); } catch { /* ignore */ } };
   // คัดลอก SKU (หลังยืนยัน) → รีเฟรช + เด้งเปิดตัวใหม่ที่เพิ่งสร้าง
   const doCopy = async (id: string) => {
     try {
@@ -413,8 +413,13 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
         loadingCards ? <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>
         : cards.length === 0 ? <div className="text-center py-16 text-slate-400 text-sm">ไม่พบ SKU</div>
         : <>
+            {total > LIMIT && (
+              <div className="mb-2 pb-2 border-b border-slate-100">
+                <Pager page={page} pageSize={LIMIT} total={total} onPage={goPage} unitLabel={entity === "parent-skus" ? "Parent SKU" : "SKU"} />
+              </div>
+            )}
             <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-              <p className="text-[12px] text-slate-400">{total.toLocaleString("th-TH")} รายการ (แสดง {(onlyIncomplete ? shown.length : cards.length).toLocaleString("th-TH")})</p>
+              <p className="text-[12px] text-slate-400">{total.toLocaleString("th-TH")} รายการ{onlyIncomplete ? ` · ข้อมูลไม่ครบในหน้านี้ ${shown.length.toLocaleString("th-TH")}` : ""}</p>
               <div className="flex items-center gap-2 flex-wrap">
                 {!pick && <button onClick={allShownSelected ? clearSel : selectAllShown}
                   className={`h-8 px-2.5 text-[12px] rounded-lg border ${allShownSelected ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
@@ -434,9 +439,9 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
                 </div>
               </div>
             </div>
-            {onlyIncomplete && <p className="text-[11px] text-amber-600 mb-2">กรองจากที่โหลดมา {cards.length.toLocaleString("th-TH")} ตัว — กด “โหลดเพิ่ม” ด้านล่างเพื่อตรวจตัวที่เหลือ</p>}
+            {onlyIncomplete && <p className="text-[11px] text-amber-600 mb-2">กรองเฉพาะในหน้านี้ ({cards.length.toLocaleString("th-TH")} ตัว) — เลื่อนหน้าด้านล่างเพื่อตรวจหน้าถัดไป</p>}
             {shown.length === 0
-              ? <div className="text-center py-12 text-slate-400 text-sm">ไม่มีรายการที่ข้อมูลไม่ครบในที่โหลดมา 🎉</div>
+              ? <div className="text-center py-12 text-slate-400 text-sm">หน้านี้ไม่มีรายการที่ข้อมูลไม่ครบ 🎉</div>
               : view === "table"
                 ? <SkuTable rows={shown} selected={selected} selectMode={selectMode} onToggle={toggleSel} onOpen={(id) => { if (pick) { onPickSku?.(id); return; } setPeekId(id); }} />
                 : <div className="grid gap-3 select-none" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
@@ -449,12 +454,9 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
                         onPointerEnter={() => dragOver(c.id)} />
                     ))}
                   </div>}
-            {cards.length < total && (
-              <div className="text-center mt-4">
-                <button onClick={loadMore} disabled={loadingMore}
-                  className="h-9 px-5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-                  {loadingMore ? "กำลังโหลด…" : `โหลดเพิ่ม (เหลือ ${(total - cards.length).toLocaleString("th-TH")})`}
-                </button>
+            {total > LIMIT && (
+              <div className="mt-4 pt-3 border-t border-slate-100">
+                <Pager page={page} pageSize={LIMIT} total={total} onPage={goPage} unitLabel={entity === "parent-skus" ? "Parent SKU" : "SKU"} />
               </div>
             )}
           </>
