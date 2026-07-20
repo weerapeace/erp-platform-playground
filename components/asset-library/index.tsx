@@ -23,6 +23,8 @@ import { AssetPicker } from "@/components/asset-picker";
 import { Pager } from "@/components/pager";
 import { Spinner, LoadingOverlay } from "@/components/spinner";
 import { HoverPreview } from "@/components/hover-image";
+import { runBackgroundTask } from "@/lib/background-tasks";
+import { useRefresh, triggerRefresh } from "@/lib/refresh-bus";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetTag } from "@/app/api/assets/tags/route";
 
@@ -147,6 +149,7 @@ export function AssetLibrary() {
 
   useEffect(() => { const t = setTimeout(() => { void load(); }, 250); return () => clearTimeout(t); }, [load]);   // debounce กันยิงทุกคีย์
   useEffect(() => { void loadMeta(); }, [loadMeta]);
+  useRefresh(() => { void load(); void loadMeta(); });   // งานเบื้องหลัง (เพิ่ม Artwork หลายรูป) เสร็จ → รีเฟรชลิสต์
   useEffect(() => { setSelected(new Set()); }, [type, collectionId, tag, trash, source]);
   useEffect(() => { setArtworkType(""); }, [source]);   // เปลี่ยนหมวด → ล้างฟิลเตอร์ชนิด artwork
   useEffect(() => { setPage(0); }, [search, type, collectionId, tag, trash, source, artworkType, folderFilter]);   // เปลี่ยนฟิลเตอร์/ค้นหา → กลับหน้าแรก
@@ -1992,8 +1995,6 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   const [driveOn, setDriveOn] = useState(false);
   const [oneFolder, setOneFolder] = useState(false);   // รูปชุดนี้ใช้โฟลเดอร์ Drive เดียวกัน (แทนที่จะสร้างแยกทุกใบ)
   const [oneFolderName, setOneFolderName] = useState("");   // ชื่อโฟลเดอร์รวม (default = ชื่อร่วม/รูปแรก)
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [rule] = useArtworkPathRule();
   const { brandBase, typeSub } = useDriveFolderMaps();
@@ -2054,56 +2055,67 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
     // ชื่อโฟลเดอร์รวม (โหมดโฟลเดอร์เดียว) = ที่ตั้งไว้ · ไม่ตั้ง = ชื่อร่วมของรูป/รูปแรก
     const combinedName = oneFolderName.trim() || commonNameSeed(rows.map((r) => r.name)) || rows[0]?.name?.trim() || "artwork";
     const combinedPath = oneFolder ? massPath(combinedName, rows[0]?.types ?? []) : "";   // path ชี้โฟลเดอร์รวม (ทุกใบเหมือนกัน)
-    setBusy(true); setProgress({ done: 0, total: rows.length });
-    let ok = 0, fail = 0, largeTotal = 0;
-    let sharedFolderId = "";   // โหมดโฟลเดอร์เดียว: ใบแรกสร้างโฟลเดอร์ → ใบต่อ ๆ ไปอัปเข้าโฟลเดอร์นี้
-    for (const r of rows) {
-      try {
-        const upFile = await downscaleImageWidth(r.file, 1600);   // ย่อด้านกว้าง ≤1600px (อัป R2)
-        // อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Drive → ได้ลิงก์โฟลเดอร์ (โฟลเดอร์เดียว = ทุกใบ · แยก = เฉพาะใบมีไฟล์แนบ)
-        let effUrl = r.url.trim();
-        if (driveOn && (oneFolder || r.srcFiles.length > 0)) {
-          const drivePreview = await previewForDrive(r.file);   // preview ลง Drive เต็มขนาดถ้า ≤4MB (R2 ใช้ upFile ย่อ 1200)
-          const { folderId, folderLink, largeCount } = await uploadArtworkToDrive({
-            name: r.name, artworkType: r.types[0], brandId: batchBrandId, srcFiles: r.srcFiles, previewFile: drivePreview,
-            folderId: oneFolder ? sharedFolderId : "", folderName: oneFolder ? combinedName : undefined,
-          });
-          if (oneFolder && folderId) sharedFolderId = folderId;
-          if (folderLink) effUrl = folderLink; largeTotal += largeCount;
+
+    // snapshot ค่าที่ต้องใช้ (โมดัลปิดแล้วยังทำงานต่อได้) → ส่งงานไปวิ่งเบื้องหลัง + โชว์กล่องสถานะมุมจอ
+    const jobRows = rows, jobBrand = batchBrandId, jobAlbums = batchAlbums, jobDrive = driveOn, jobOneFolder = oneFolder;
+    runBackgroundTask({
+      label: `เพิ่ม Artwork ${jobRows.length} รูป`,
+      total: jobRows.length,
+      run: async (report) => {
+        let ok = 0, fail = 0, largeTotal = 0;
+        let sharedFolderId = "";   // โหมดโฟลเดอร์เดียว: ใบแรกสร้างโฟลเดอร์ → ใบต่อ ๆ ไปอัปเข้าโฟลเดอร์นี้
+        for (let i = 0; i < jobRows.length; i++) {
+          const r = jobRows[i];
+          try {
+            const upFile = await downscaleImageWidth(r.file, 1600);   // ย่อด้านกว้าง ≤1600px (อัป R2)
+            // อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Drive → ได้ลิงก์โฟลเดอร์ (โฟลเดอร์เดียว = ทุกใบ · แยก = เฉพาะใบมีไฟล์แนบ)
+            let effUrl = r.url.trim();
+            if (jobDrive && (jobOneFolder || r.srcFiles.length > 0)) {
+              const drivePreview = await previewForDrive(r.file);
+              const { folderId, folderLink, largeCount } = await uploadArtworkToDrive({
+                name: r.name, artworkType: r.types[0], brandId: jobBrand, srcFiles: r.srcFiles, previewFile: drivePreview,
+                folderId: jobOneFolder ? sharedFolderId : "", folderName: jobOneFolder ? combinedName : undefined,
+              });
+              if (jobOneFolder && folderId) sharedFolderId = folderId;
+              if (folderLink) effUrl = folderLink; largeTotal += largeCount;
+            }
+            const fd = new FormData();
+            fd.append("file", upFile); fd.append("source", "artwork");
+            fd.append("brand_id", jobBrand);
+            if (r.name.trim()) fd.append("title", r.name.trim());
+            if (r.types.length) fd.append("artwork_types", JSON.stringify(r.types));
+            const effPath = jobOneFolder && combinedPath ? combinedPath : r.path.trim();
+            if (effPath) fd.append("master_path", effPath);
+            if (effUrl) fd.append("master_url", effUrl);
+            if (r.sizes.length) fd.append("sizes", JSON.stringify(r.sizes));
+            if (r.parentCodes.length) fd.append("parent_sku_codes", JSON.stringify(r.parentCodes));
+            if (jobAlbums.length) fd.append("collection_ids", JSON.stringify(jobAlbums));
+            if (actor) fd.append("actor", actor);
+            const res = await apiFetch("/api/assets", { method: "POST", body: fd });
+            const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "");
+            ok++;
+          } catch { fail++; }
+          report(i + 1);
         }
-        const fd = new FormData();
-        fd.append("file", upFile); fd.append("source", "artwork");
-        fd.append("brand_id", batchBrandId);
-        if (r.name.trim()) fd.append("title", r.name.trim());
-        if (r.types.length) fd.append("artwork_types", JSON.stringify(r.types));
-        const effPath = oneFolder && combinedPath ? combinedPath : r.path.trim();   // โหมดรวม = path ชี้โฟลเดอร์รวม
-        if (effPath) fd.append("master_path", effPath);
-        if (effUrl) fd.append("master_url", effUrl);
-        if (r.sizes.length) fd.append("sizes", JSON.stringify(r.sizes));
-        if (r.parentCodes.length) fd.append("parent_sku_codes", JSON.stringify(r.parentCodes));
-        if (batchAlbums.length) fd.append("collection_ids", JSON.stringify(batchAlbums));
-        if (actor) fd.append("actor", actor);
-        const res = await apiFetch("/api/assets", { method: "POST", body: fd });
-        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "");
-        ok++;
-      } catch { fail++; }
-      setProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
-    }
-    setBusy(false); setProgress(null);
-    if (largeTotal) toast.warning(`ไฟล์ใหญ่ ${largeTotal} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
-    if (ok) { toast.success(`เพิ่ม ${ok} รูปแล้ว${fail ? ` · ล้มเหลว ${fail}` : ""}`); onDone(); }
-    else toast.error(`เพิ่มไม่สำเร็จ (${fail} รายการ)`);
+        triggerRefresh();   // เสร็จ → รีเฟรชลิสต์คลัง
+        const parts = [`เพิ่ม ${ok} รูป`];
+        if (fail) parts.push(`ล้มเหลว ${fail}`);
+        if (largeTotal) parts.push(`ไฟล์ใหญ่ ${largeTotal} ต้องลากขึ้น Drive เอง`);
+        return { ok, fail, message: parts.join(" · ") };
+      },
+    });
+    onDone();   // ปิดโมดัลทันที — งานวิ่งต่อเบื้องหลัง
   };
 
   return (
-    <ERPModal open onClose={() => !busy && onClose()} title="📋 เพิ่ม Artwork หลายรูป" size="xl"
-      description="ลากไฟล์รูปหลายไฟล์เข้ามา → ได้ 1 การ์ดต่อ 1 รูป (เลือกแบรนด์ใช้ทุกรูป · แต่ละรูปแนบไฟล์ต้นฉบับ/ใส่ขนาด/Parent SKU ได้) → บันทึกทีเดียว"
+    <ERPModal open onClose={onClose} title="📋 เพิ่ม Artwork หลายรูป" size="xl"
+      description="ลากไฟล์รูปหลายไฟล์เข้ามา → ได้ 1 การ์ดต่อ 1 รูป (เลือกแบรนด์ใช้ทุกรูป · แต่ละรูปแนบไฟล์ต้นฉบับ/ใส่ขนาด/Parent SKU ได้) → กดบันทึกแล้วปิดได้เลย งานวิ่งเบื้องหลัง"
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-[12px] text-slate-400">{progress ? `กำลังบันทึก ${progress.done}/${progress.total}…` : `${rows.length} รายการ`}</span>
+          <span className="text-[12px] text-slate-400">{rows.length} รายการ · บันทึกแล้ววิ่งเบื้องหลัง (ดูสถานะมุมจอ)</span>
           <div className="flex gap-2">
-            <button onClick={() => !busy && onClose()} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={save} disabled={busy || rows.length === 0} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : `บันทึกทั้งหมด (${rows.length})`}</button>
+            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={save} disabled={rows.length === 0} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">บันทึกทั้งหมด ({rows.length})</button>
           </div>
         </div>
       }>
@@ -2166,7 +2178,7 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
                   <div className="flex items-center gap-2">
                     <input value={r.name} onChange={(e) => setName(r.id, e.target.value)} placeholder="ชื่อรูป"
                       className="flex-1 h-8 px-2 text-[12px] border border-slate-200 rounded" />
-                    <button type="button" onClick={() => setRows((list) => list.filter((x) => x.id !== r.id))} disabled={busy} title="ลบรูปนี้"
+                    <button type="button" onClick={() => setRows((list) => list.filter((x) => x.id !== r.id))} title="ลบรูปนี้"
                       className="h-7 w-7 text-rose-500 hover:bg-rose-50 rounded shrink-0">🗑</button>
                   </div>
                   <ArtTypeMultiSelect value={r.types} types={artTypeList} onChange={(v) => setTypes(r.id, v)} onCreated={(t) => setArtTypeList((c) => [...c, t])} />
