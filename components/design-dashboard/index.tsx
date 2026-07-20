@@ -779,12 +779,10 @@ export function DesignDashboard() {
                           onDragEnter={(event) => handleColumnDragOver(event, column)}
                           onDragLeave={(event) => handleColumnDragLeave(event, column)}
                           onDrop={(event) => handleColumnDrop(event, column)}
-                          className={`relative rounded-xl transition-colors ${isDropTarget ? "bg-amber-50/70 ring-2 ring-amber-300 ring-offset-2" : ""}`}
+                          className={`relative rounded-xl p-2 transition-colors ${isDropTarget ? "bg-amber-50/70 ring-2 ring-amber-300 ring-offset-2" : ""}`}
+                          style={isDropTarget ? undefined : { background: `${column.color}12`, border: `1px solid ${column.color}26` }}
                         >
-                          {index < boardColumns.length - 1 && (
-                            <div data-gg-connector className="absolute left-[62%] top-8 h-px w-[76%] bg-gradient-to-r from-amber-300 via-amber-200 to-transparent shadow-[0_0_12px_rgba(245,158,11,0.45)]" />
-                          )}
-                          <div data-gg-column-header className="relative mb-3 rounded-lg border px-2 py-2 text-center shadow-sm" style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%)` }}>
+                          <div data-gg-column-header className="sticky top-16 z-10 mb-3 rounded-lg border px-2 py-2 text-center shadow-sm" style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%), #ffffff` }}>
                             <BrandSlot theme={brandTheme} id={wfIconSlotId(column.key)} w={96} size="w-7 h-7" className="absolute left-1 top-1" />
                             <div data-gg-column-dot className="mx-auto mb-1 h-3 w-3 rounded-full shadow-[0_0_16px_rgba(245,158,11,0.65)]" style={{ backgroundColor: column.color }} />
                             <div className="truncate text-xs font-semibold text-slate-800" title={column.label}>{column.label}</div>
@@ -834,17 +832,19 @@ export function DesignDashboard() {
                                     <span className="font-mono text-[11px] text-slate-400">{sheet.code}</span>
                                   </div>
                                   <div className="mt-0.5 min-h-[34px] text-[13px] font-semibold leading-snug text-slate-800">{sheet.name}</div>
-                                  {sheet.note && (
-                                    <div className="mt-1 line-clamp-2 rounded bg-amber-50/70 px-1.5 py-1 text-[11px] leading-snug text-slate-600" title={sheet.note}>📝 {sheet.note}</div>
-                                  )}
-                                  {sheet.detail_excerpt && (
-                                    <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-slate-400" title={sheet.detail_excerpt}>{sheet.detail_excerpt}</div>
-                                  )}
+                                  <div className="mt-1 h-[44px] overflow-hidden">
+                                    {sheet.note && (
+                                      <div className="line-clamp-2 rounded bg-amber-50/70 px-1.5 py-1 text-[11px] leading-snug text-slate-600" title={sheet.note}>📝 {sheet.note}</div>
+                                    )}
+                                    {sheet.detail_excerpt && (
+                                      <div className="mt-1 line-clamp-1 text-[11px] leading-snug text-slate-400" title={sheet.detail_excerpt}>{sheet.detail_excerpt}</div>
+                                    )}
+                                  </div>
                                   <div className="mt-2 flex items-center justify-between gap-2">
                                     <span className="truncate text-[11px] text-slate-400">{sheet.brand_name ?? "ไม่ระบุ"}</span>
                                     <CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} />
                                   </div>
-                                  <div className="mt-2 flex gap-1 text-[10px] text-slate-400">
+                                  <div className="mt-2 flex min-h-[18px] gap-1 text-[10px] text-slate-400">
                                     {sheet.has_cost && <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-600">ตีราคาแล้ว</span>}
                                     {sheet.has_quote && <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-600">มีราคา</span>}
                                     {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-600">มี SKU</span>}
