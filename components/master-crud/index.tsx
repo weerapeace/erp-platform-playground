@@ -786,6 +786,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // form drawer
   const [modalOpen,   setModalOpen]   = useState(false);
   const [editingId,   setEditingId]   = useState<string | null>(null);
+  // Parent SKU ไม่มีรูปของตัวเอง → รูปตัวอย่างจาก SKU ลูกตัวแรก (โชว์ในกล่องแกลเลอรีตอนว่าง)
+  const [parentFallbackImg, setParentFallbackImg] = useState<string | null>(null);
+  useEffect(() => {
+    if (config.mediaGallery?.entityType !== "parent_skus_v2" || !editingId) { setParentFallbackImg(null); return; }
+    let cancelled = false;
+    apiFetch(`/api/parent-skus/${editingId}/first-child-image`).then((r) => r.json())
+      .then((j) => { if (!cancelled) setParentFallbackImg((j.url as string) ?? null); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [editingId, config.mediaGallery?.entityType]);
   // แถวที่แสดงในตาราง (ตามลำดับ) — ใช้ปุ่มเลื่อนรายการก่อนหน้า/ถัดไปในป๊อปอัป
   const navRowsRef = useRef<Row[]>([]);
 
@@ -2404,6 +2413,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
                     imageOnly={config.mediaGallery.imageOnly ?? true}
                     layout="gallery"
+                    fallbackImageUrl={parentFallbackImg}
+                    fallbackLabel="รูปตัวอย่างจาก SKU ลูก"
                   />
                 ) : (
                   <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
@@ -2450,6 +2461,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                       maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
                       imageOnly={config.mediaGallery.imageOnly ?? true}
                       layout={config.mediaGallery.layout ?? "grid"}
+                      fallbackImageUrl={parentFallbackImg}
+                      fallbackLabel="รูปตัวอย่างจาก SKU ลูก"
                     />
                   ) : (
                     <div className="text-xs text-slate-400 text-center py-3">

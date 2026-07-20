@@ -586,10 +586,11 @@ function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPo
         title="เลือก / ลากคลุมเพื่อเลือกหลายรายการ"
         className={`absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-md border flex items-center justify-center text-[11px] cursor-pointer ${selected ? "bg-indigo-600 border-indigo-600 text-white" : selectMode ? "bg-white border-slate-300 text-slate-300" : "bg-white/90 border-slate-300 text-transparent hover:text-slate-300"}`}>✓</span>
       {has("image") && (
-        <div className="h-32 bg-slate-100 flex items-center justify-center overflow-hidden">
+        <div className="relative h-32 bg-slate-100 flex items-center justify-center overflow-hidden">
           {c.image
             ? <img src={withImageWidth(c.image, 320) ?? c.image} alt={c.code} loading="lazy" draggable={false} className="w-full h-full object-contain" />
             : <span className="text-3xl text-slate-300">🏷️</span>}
+          {c.image_from_child && <span className="absolute bottom-1 left-1 text-[9px] px-1 py-0.5 rounded bg-slate-800/70 text-white" title="Parent ยังไม่มีรูปของตัวเอง — โชว์รูปจาก SKU ลูก">ตัวอย่างจากลูก</span>}
         </div>
       )}
       <div className="p-2.5">

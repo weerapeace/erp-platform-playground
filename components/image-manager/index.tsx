@@ -110,6 +110,8 @@ export function ImageManager({
   title,
   description,
   layout = "grid",
+  fallbackImageUrl = null,
+  fallbackLabel,
 }: {
   entityType: string;
   entityId:   string;
@@ -122,6 +124,9 @@ export function ImageManager({
   description?: string;
   /** "grid" (เริ่มต้น) = กริดเต็มความกว้าง · "gallery" = รูปย่อฝั่งซ้าย + พรีวิวใหญ่ฝั่งขวา */
   layout?: "grid" | "gallery";
+  /** รูปตัวอย่าง (read-only) โชว์เมื่อยังไม่มีรูปจริง เช่น Parent ยืมรูปจาก SKU ลูก */
+  fallbackImageUrl?: string | null;
+  fallbackLabel?: string;
 }) {
   const [items,   setItems]   = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -425,6 +430,13 @@ export function ImageManager({
                   <span className="text-xs text-blue-600 underline">เปิดไฟล์</span>
                 </a>
               )
+            ) : fallbackImageUrl ? (
+              // ยังไม่มีรูปของตัวเอง → โชว์รูปตัวอย่าง (เช่น Parent ยืมรูปจาก SKU ลูก) แบบจาง + ป้ายบอก
+              <div className="relative w-full h-full flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={withImageWidth(fallbackImageUrl, 1024) ?? fallbackImageUrl} alt="ตัวอย่าง" className="max-w-full max-h-[340px] object-contain opacity-70" />
+                <span className="absolute bottom-1.5 left-1.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-800/70 text-white">{fallbackLabel ?? "รูปตัวอย่าง"}</span>
+              </div>
             ) : <span className="text-sm text-slate-300 py-10">{readonly ? "ไม่มีรูป" : "ยังไม่มีรูป — ลากมาวางด้านล่าง"}</span>}
           </div>
           {items.length > 0 && (

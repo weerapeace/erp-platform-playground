@@ -18,6 +18,7 @@ export type BrowseTag   = { id: string; name: string; group_id: string | null; s
 export type BrowseTree  = { groups: BrowseGroup[]; tags: BrowseTag[] };
 export type SkuCard = {
   id: string; code: string; name: string; image: string | null;
+  image_from_child?: boolean;   // รูปนี้มาจาก SKU ลูก (Parent ไม่มีรูปของตัวเอง) — ไว้ใส่ป้ายตัวอย่าง
   list_price: number | null; qty_on_hand: number | null; is_active: boolean; tags: string[];
   has_bom: boolean;   // มีสูตร BOM ไหม (ไว้เตือน "ข้อมูลไม่ครบ")
   variant_count?: number | null;     // จำนวน SKU ลูก (เฉพาะ Parent SKU — แทนราคา/สต๊อก)
@@ -139,6 +140,7 @@ export async function GET(request: NextRequest) {
   const bomSet  = new Set<string>();
   const tagMap  = new Map<string, string[]>();
   const variant = new Map<string, number>();   // จำนวน SKU ลูก ต่อ Parent
+  const childCover = new Map<string, string>();   // รูปปกของ SKU ลูกตัวแรก (fallback ตอน Parent ไม่มีรูป)
 
   if (ids.length) {
     let linkData: { src_id: string; tgt_id: string }[] = [];
@@ -154,10 +156,13 @@ export async function GET(request: NextRequest) {
     } else {
       const [linkRes, varRes] = await Promise.all([
         admin.from(ENT.junction).select("src_id, tgt_id").in("src_id", ids),
-        admin.from("skus_v2").select("parent_sku_id").in("parent_sku_id", ids),   // นับ SKU ลูกต่อ Parent
+        admin.from("skus_v2").select("parent_sku_id, cover_image_r2_key").in("parent_sku_id", ids).order("code", { ascending: true }),   // นับ SKU ลูก + รูปปกลูกตัวแรก
       ]);
       linkData = (linkRes.data ?? []) as { src_id: string; tgt_id: string }[];
-      for (const v of ((varRes.data ?? []) as { parent_sku_id: string | null }[])) if (v.parent_sku_id) variant.set(v.parent_sku_id, (variant.get(v.parent_sku_id) ?? 0) + 1);
+      for (const v of ((varRes.data ?? []) as { parent_sku_id: string | null; cover_image_r2_key: string | null }[])) if (v.parent_sku_id) {
+        variant.set(v.parent_sku_id, (variant.get(v.parent_sku_id) ?? 0) + 1);
+        if (v.cover_image_r2_key && !childCover.has(v.parent_sku_id)) childCover.set(v.parent_sku_id, v.cover_image_r2_key);   // ลูกตัวแรก (เรียงตาม code) ที่มีรูป
+      }
     }
 
     // ชื่อแท็ก (m2m → product_families.name)
@@ -173,14 +178,20 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const cards: SkuCard[] = rows.map((r) => ({
+  const cards: SkuCard[] = rows.map((r) => {
+    // Parent ไม่มีรูปของตัวเอง → ใช้รูปปกของ SKU ลูกตัวแรกเป็น preview
+    const coverKey = r.cover_image_r2_key || (ENT.hasPrice ? null : childCover.get(r.id) ?? null);
+    const imageFromChild = !r.cover_image_r2_key && !!coverKey;
+    return {
     id: r.id, code: r.code, name: (r.name_th as string) ?? "",
-    image: r.cover_image_r2_key ? `/api/r2-image?key=${encodeURIComponent(r.cover_image_r2_key)}` : null,
+    image: coverKey ? `/api/r2-image?key=${encodeURIComponent(coverKey)}` : null,
+    image_from_child: imageFromChild,
     list_price: ENT.hasPrice ? (r.list_price ?? null) : null,
     qty_on_hand: ENT.hasPrice ? (stock.has(r.id) ? (stock.get(r.id) as number) : null) : null,
     variant_count: ENT.hasPrice ? null : (variant.get(r.id) ?? 0),
     is_active: r.is_active, tags: tagMap.get(r.id) ?? [], has_bom: ENT.hasPrice ? bomSet.has(r.code) : false,
     extra: extraCols.length ? Object.fromEntries(extraCols.map((col) => [col, r[col] ?? null])) : undefined,
-  }));
+    };
+  });
   return NextResponse.json({ cards, total, error: null });
 }
