@@ -34,6 +34,7 @@ import { TaskContentTab } from "./task-content-tab";
 import { HoverImage } from "@/components/hover-image";
 import { InfoHint } from "@/components/info-hint";
 import { DriveFolderModal } from "./drive-folder-modal";
+import { runBgJob } from "@/lib/bg-jobs";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./use-statuses";
 import {
@@ -370,11 +371,21 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               {driveModalOpen && (
                 <DriveFolderModal taskId={d.id} onClose={() => setDriveModalOpen(false)}
                   pushToast={pushToast}
-                  onDone={async (r) => {
-                    setDriveModalOpen(false);
-                    pushToast("success", t(`สร้างโฟลเดอร์ + อัป ${r.uploaded} ไฟล์ขึ้น Drive แล้ว${r.archived ? ` · เก็บเวอร์ชันเก่า ${r.archived} ไฟล์ (Ver.)` : ""}`, `Folder created + ${r.uploaded} file(s) uploaded${r.archived ? ` · ${r.archived} old archived (Ver.)` : ""}`));
-                    if (r.url) window.open(r.url, "_blank");
-                    await load();
+                  onStart={(opts, folderLabel) => {
+                    // ปิด popup แล้วไปทำที่เบื้องหลัง — โชว์ชิปงานมุมจอ (ผู้ใช้ทำอย่างอื่นต่อได้)
+                    runBgJob(
+                      folderLabel,
+                      () => syncTaskDrive(d.id, opts),
+                      {
+                        hint: t("กำลังสร้างโฟลเดอร์ + อัปไฟล์ขึ้น Drive…", "Creating folder + uploading to Drive…"),
+                        onError: (e) => pushToast("error", e.message),
+                        onDone: (r) => {
+                          pushToast("success", t(`สร้างโฟลเดอร์ + อัป ${r.uploaded} ไฟล์ขึ้น Drive แล้ว${r.archived ? ` · เก็บเวอร์ชันเก่า ${r.archived} ไฟล์ (Ver.)` : ""}`, `Folder created + ${r.uploaded} file(s) uploaded${r.archived ? ` · ${r.archived} old archived (Ver.)` : ""}`));
+                          void load();   // รีเฟรช drawer ให้ขึ้นลิงก์โฟลเดอร์ (ถ้ายังเปิดอยู่)
+                          return { detail: t(`อัป ${r.uploaded} รูป${r.archived ? ` · เก็บเก่า ${r.archived}` : ""}`, `${r.uploaded} files${r.archived ? ` · ${r.archived} archived` : ""}`), href: r.url ?? undefined };
+                        },
+                      },
+                    );
                   }} />
               )}
 

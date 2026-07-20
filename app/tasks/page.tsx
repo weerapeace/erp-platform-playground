@@ -31,6 +31,7 @@ import { apiFetch } from "@/lib/api";
 import { applyTaskTransition } from "./task-actions";
 import { OverviewDashboard } from "./overview-dashboard";
 import { ConnectionError } from "@/components/connection-error";
+import { BgJobsDock } from "@/components/bg-jobs-dock";
 import { arrangeMySubtasks, loadMySubView, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
 import { DEFAULT_THEME, mergeTheme, type OverviewTheme } from "./overview-customizer";
 import { type MetricDef } from "./metrics";
@@ -353,6 +354,7 @@ export default function TasksPage() {
       {knowledgeOpen && <KnowledgeDrawer onClose={() => setKnowledgeOpen(false)} canEdit={user?.role === "admin" || user?.role === "manager"} pushToast={pushToast} />}
 
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((p) => p.filter((t) => t.id !== id))} />
+      <BgJobsDock />
     </StandaloneShell>
   );
 }
