@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
   const status       = sp.get("status") ?? "active";
   const source       = sp.get("source") ?? "upload";   // upload | odoo_product | artwork | all
   const artworkType  = sp.get("artwork_type");
+  const printType    = sp.get("print_type");   // กรองตามประเภทงานพิมพ์ (source=print)
   const limit  = Math.min(Number(sp.get("limit") ?? 60) || 60, 200);
   const offset = Number(sp.get("offset") ?? 0) || 0;
   const hasFolder = sp.get("has_folder") === "1";   // เฉพาะที่มีโฟลเดอร์ Drive แล้ว (master_url มี /folders/)
@@ -67,6 +68,7 @@ export async function GET(request: NextRequest) {
   if (source !== "all") q = q.eq("source", source);
   // ชนิด artwork (jsonb) — ต้องส่งเป็น JSON string '["x"]' ไม่ใช่ JS array (ไม่งั้น supabase-js ส่ง '{x}' แล้ว jsonb parse พัง)
   if (artworkType) q = q.contains("artwork_types", JSON.stringify([artworkType]));
+  if (printType) q = q.eq("print_type", printType);
   if (type) q = q.eq("asset_type", type);
   if (collectionId === "none") q = q.is("collection_id", null);
   if (collAssetIds) q = q.in("id", collAssetIds);
@@ -141,6 +143,7 @@ export async function POST(request: NextRequest) {
   const singleType   = form.get("artwork_type") ? String(form.get("artwork_type")).trim() : "";
   const artworkTypes = artworkTypesRaw.length ? artworkTypesRaw : (singleType ? [singleType] : []);
   const artworkType  = artworkTypes[0] ?? null;
+  const printType    = String(form.get("print_type") ?? "").trim() || null;   // ประเภทงานพิมพ์ (เฉพาะ source='print')
   const masterPath   = form.get("master_path") ? String(form.get("master_path")) : null;
   const masterUrl    = form.get("master_url")  ? String(form.get("master_url"))  : null;
   const keywords     = form.get("keywords")    ? String(form.get("keywords"))    : null;
@@ -154,7 +157,7 @@ export async function POST(request: NextRequest) {
 
   // กันไฟล์ซ้ำ — ถ้าไฟล์เดิม (เนื้อหาเดียวกัน) ยังอยู่ในคลัง ใช้ตัวเดิม ไม่เก็บซ้ำ
   // (ยกเว้น artwork = บัตรแยกเสมอ แม้รูปตัวอย่างซ้ำ เพราะ path/ชนิดต่างกัน)
-  const dupRes = source === "artwork"
+  const dupRes = (source === "artwork" || source === "print")
     ? { data: null as Record<string, unknown> | null }
     : await admin.from("assets").select("*").eq("checksum", checksum).eq("status", "active").limit(1).maybeSingle();
   const dup = dupRes.data;
@@ -182,7 +185,7 @@ export async function POST(request: NextRequest) {
     width:  Number.isFinite(widthRaw)  ? widthRaw  : null,
     height: Number.isFinite(heightRaw) ? heightRaw : null,
     checksum, collection_id: collectionId, uploaded_by: actor, status: "active",
-    source, artwork_type: artworkType, artwork_types: artworkTypes, master_path: masterPath, master_url: masterUrl, keywords,
+    source, artwork_type: artworkType, artwork_types: artworkTypes, print_type: printType, master_path: masterPath, master_url: masterUrl, keywords,
     sizes, parent_sku_codes: parentCodes, brand_id: brandId,
   }).select("*").single();
   if (error || !ins)

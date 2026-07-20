@@ -27,6 +27,7 @@ import { ParentSkuMultiPickerModal } from "@/components/parent-sku-multi-picker"
 import { DriveFolderFiles } from "@/components/drive-folder-files";
 import { runBackgroundTask } from "@/lib/background-tasks";
 import { useRefresh, triggerRefresh } from "@/lib/refresh-bus";
+import type { PrintType } from "@/app/api/print-types/route";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetTag } from "@/app/api/assets/tags/route";
 
@@ -59,9 +60,13 @@ export function AssetLibrary() {
   const [collectionId, setCollectionId] = useState<string | null>(null); // null=ทั้งหมด, "none"=ไม่อยู่อัลบั้ม
   const [tag, setTag] = useState<string | null>(null);
   const [trash, setTrash] = useState(false);
-  const [source, setSource] = useState("upload");   // upload = อัปเอง · artwork · odoo_product
+  const [source, setSource] = useState("upload");   // upload = อัปเอง · artwork · print (งานพิมพ์) · odoo_product
   const [artworkType, setArtworkType] = useState("");   // ฟิลเตอร์ชนิด artwork
   const [artTypes, setArtTypes] = useState<LookupItem[]>([]);   // รายการชนิด (lookup)
+  const [printType, setPrintType] = useState("");   // ฟิลเตอร์ประเภทงานพิมพ์ (DTF/UV)
+  const [printTypes, setPrintTypes] = useState<PrintType[]>([]);   // ประเภทงานพิมพ์ (ตั้งค่าเองได้)
+  const [printAddOpen, setPrintAddOpen] = useState(false);
+  const [managePrintOpen, setManagePrintOpen] = useState(false);
 
   const [collections, setCollections] = useState<AssetCollection[]>([]);
   const [tags, setTags] = useState<AssetTag[]>([]);
@@ -127,6 +132,7 @@ export function AssetLibrary() {
       // ค้นหา = หาทั้งหมดทุกที่มา (อัปเอง/Artwork/รูปสินค้า) ไม่ต้องเลือกเมนูซ้าย · ไม่ค้นหา = ตามที่มาที่เลือก
       p.set("source", isSearch ? "all" : source);
       if (!isSearch && artworkType) p.set("artwork_type", artworkType);
+      if (!isSearch && printType) p.set("print_type", printType);
       p.set("limit", String(PAGE_SIZE));
       p.set("offset", String(page * PAGE_SIZE));
       const res = await apiFetch(`/api/assets?${p.toString()}`);
@@ -136,7 +142,7 @@ export function AssetLibrary() {
       setTotal(j.total ?? 0);
     } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดคลังไม่สำเร็จ"); }
     finally { setLoading(false); }
-  }, [search, type, collectionId, tag, trash, source, artworkType, folderFilter, page, toast]);
+  }, [search, type, collectionId, tag, trash, source, artworkType, printType, folderFilter, page, toast]);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -147,15 +153,17 @@ export function AssetLibrary() {
       setTags((await t.json()).data ?? []);
       setArtTypes(((await a.json()).data ?? []).map((r: { id: string; name: string }) => ({ id: r.id, name: r.name })));
     } catch { /* ignore */ }
+    // ประเภทงานพิมพ์ (ตั้งค่าเองได้) — โหลดแยก ไม่ให้พังทั้งก้อนถ้า API ยังไม่พร้อม
+    try { setPrintTypes(((await (await apiFetch("/api/print-types")).json()).data ?? []) as PrintType[]); } catch { /* ignore */ }
   }, []);
 
   useEffect(() => { const t = setTimeout(() => { void load(); }, 250); return () => clearTimeout(t); }, [load]);   // debounce กันยิงทุกคีย์
   useEffect(() => { void loadMeta(); }, [loadMeta]);
   useRefresh(() => { void load(); void loadMeta(); });   // งานเบื้องหลัง (เพิ่ม Artwork หลายรูป) เสร็จ → รีเฟรชลิสต์
   useEffect(() => { setSelected(new Set()); }, [type, collectionId, tag, trash, source]);
-  useEffect(() => { setArtworkType(""); }, [source]);   // เปลี่ยนหมวด → ล้างฟิลเตอร์ชนิด artwork
-  useEffect(() => { setPage(0); }, [search, type, collectionId, tag, trash, source, artworkType, folderFilter]);   // เปลี่ยนฟิลเตอร์/ค้นหา → กลับหน้าแรก
-  useEffect(() => { setFolderFilter(null); }, [search, type, collectionId, tag, trash, source, artworkType]);   // ยุ่งกับฟิลเตอร์อื่น = ออกจากโหมดดูโฟลเดอร์
+  useEffect(() => { setArtworkType(""); setPrintType(""); }, [source]);   // เปลี่ยนหมวด → ล้างฟิลเตอร์ชนิด
+  useEffect(() => { setPage(0); }, [search, type, collectionId, tag, trash, source, artworkType, printType, folderFilter]);   // เปลี่ยนฟิลเตอร์/ค้นหา → กลับหน้าแรก
+  useEffect(() => { setFolderFilter(null); }, [search, type, collectionId, tag, trash, source, artworkType, printType]);   // ยุ่งกับฟิลเตอร์อื่น = ออกจากโหมดดูโฟลเดอร์
   const goPage = (p: number) => { setPage(p); if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" }); };
   // อยู่หน้าที่เกินช่วง (เช่นลบจนเหลือน้อย) → เด้งกลับหน้าสุดท้ายที่มีจริง
   useEffect(() => { if (!loading && page > 0 && rows.length === 0 && total > 0) setPage(Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)); }, [loading, page, rows.length, total]);
@@ -227,7 +235,7 @@ export function AssetLibrary() {
 
   const selCount = selected.size;
 
-  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen;
+  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen || printAddOpen || managePrintOpen;
 
   // ── ผูกหลายรูปที่เลือกเข้าโฟลเดอร์ Drive เดียวกับรูปต้นทาง (bulk) ──
   const bulkLinkFolder = async (source: AssetRow) => {
@@ -293,9 +301,13 @@ export function AssetLibrary() {
             >📋 เพิ่มหลายรูป</button>
           )}
           <button
-            onClick={() => { if (source === "artwork") setArtworkAddOpen(true); else { setPendingFiles(null); setUploadOpen(true); } }}
+            onClick={() => {
+              if (source === "artwork") setArtworkAddOpen(true);
+              else if (source === "print") setPrintAddOpen(true);
+              else { setPendingFiles(null); setUploadOpen(true); }
+            }}
             className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap"
-          >{source === "artwork" ? "🎨 เพิ่ม Artwork" : "⬆ อัปโหลด"}</button>
+          >{source === "artwork" ? "🎨 เพิ่ม Artwork" : source === "print" ? "🖨 เพิ่มงานพิมพ์" : "⬆ อัปโหลด"}</button>
         </div>
       </div>
 
@@ -314,6 +326,17 @@ export function AssetLibrary() {
                 className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">⚙️ จัดการชนิด</button>
               {driveOn && <button onClick={() => setDriveScanOpen(true)}
                 className="h-8 px-2.5 text-[12px] rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">🔍 หาใน Drive ที่ยังไม่เชื่อม</button>}
+            </>
+          : source === "print"
+          ? <>
+              {[{ key: "", label: "ทั้งหมด" }, ...printTypes.map((t) => ({ key: t.code, label: t.name }))].map((f) => (
+                <button key={f.key || "all"} onClick={() => setPrintType(f.key)}
+                  className={`h-8 px-3 text-[13px] rounded-lg border ${printType === f.key
+                    ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium"
+                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{f.label}</button>
+              ))}
+              <button onClick={() => setManagePrintOpen(true)}
+                className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">⚙️ จัดการประเภทงานพิมพ์</button>
             </>
           : TYPE_FILTERS.map((f) => (
               <button key={f.key} onClick={() => setType(f.key)}
@@ -342,6 +365,7 @@ export function AssetLibrary() {
           <div className="flex flex-col gap-0.5 mb-4">
             <SideItem active={source === "upload"} onClick={() => setSource("upload")} label="รูปที่อัปเอง" icon="📤" />
             <SideItem active={source === "artwork"} onClick={() => setSource("artwork")} label="Artwork" icon="🎨" />
+            <SideItem active={source === "print"} onClick={() => setSource("print")} label="งานพิมพ์" icon="🖨" />
             <SideItem active={source === "odoo_product"} onClick={() => setSource("odoo_product")} label="รูปสินค้า (Odoo)" icon="🛍️" />
           </div>
           <div className="flex items-center justify-between mb-1.5">
@@ -429,6 +453,7 @@ export function AssetLibrary() {
               {searching ? `ไม่พบไฟล์ที่ตรงกับ “${search.trim()}”`
                 : trash ? "ถังขยะว่าง"
                 : source === "artwork" ? "ยังไม่มี Artwork — กด “เพิ่ม Artwork” เพื่อลงบัตรงานออกแบบ (รูปตัวอย่าง + path ไฟล์ต้นฉบับ)"
+                : source === "print" ? "ยังไม่มีงานพิมพ์ — กด “เพิ่มงานพิมพ์” เพื่อลงรูป preview + ไฟล์ .ai/.pdf สำหรับส่งพิมพ์"
                 : source === "odoo_product" ? "ยังไม่มีรูปสินค้านำเข้า"
                 : "ยังไม่มีไฟล์ในคลัง — กด “อัปโหลด” เพื่อเริ่มเก็บไฟล์"}
             </div>
@@ -484,6 +509,16 @@ export function AssetLibrary() {
       )}
       {manageTypesOpen && (
         <ManageTypesModal types={artTypes} onClose={() => setManageTypesOpen(false)}
+          onChanged={async () => { await loadMeta(); }} />
+      )}
+      {printAddOpen && (
+        <PrintJobAddModal actor={actor} printTypes={printTypes} collections={collections}
+          defaultCollectionIds={collectionId && collectionId !== "none" ? [collectionId] : []}
+          onClose={() => setPrintAddOpen(false)}
+          onDone={async () => { setPrintAddOpen(false); await load(); await loadMeta(); }} />
+      )}
+      {managePrintOpen && (
+        <ManagePrintTypesModal types={printTypes} onClose={() => setManagePrintOpen(false)}
           onChanged={async () => { await loadMeta(); }} />
       )}
       {driveScanOpen && (
@@ -653,6 +688,13 @@ function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder 
           {!a.sizes?.length && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-rose-100 text-rose-700 border border-rose-200 shadow-sm">📐 ไม่มีขนาด</span>}
         </div>
       )}
+      {/* งานพิมพ์: ป้ายประเภท (DTF/UV) + เตือนถ้ายังไม่มีไฟล์พิมพ์ */}
+      {a.source === "print" && (
+        <div className="absolute top-1.5 right-1.5 z-10 flex flex-col items-end gap-1 pointer-events-none">
+          {a.print_type && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-violet-100 text-violet-700 border border-violet-200 shadow-sm">🖨 {a.print_type}</span>}
+          {!/\/folders\//.test(a.master_url ?? "") && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-100 text-amber-700 border border-amber-200 shadow-sm">⚠ ยังไม่มีไฟล์พิมพ์</span>}
+        </div>
+      )}
       <button onClick={selectionMode ? (e) => { e.stopPropagation(); onToggle(); } : onOpen} className="block w-full text-left">
         <HoverPreview url={isImage(a) && !broken ? a.url : null} previewW={440}>
           {/* กรอบ 1:1 — รูปแสดงเต็มทั้งใบ (object-contain) ไม่ตัดขอบ/ตัวหนังสือ */}
@@ -671,7 +713,9 @@ function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder 
         <div className="flex items-center justify-between gap-1 mt-0.5">
           <p className="text-[10px] text-slate-400 truncate">
             {formatBytes(a.size_bytes)}
-            {a.usage_count > 0 ? ` · ใช้อยู่ ${a.usage_count} ที่` : a.status === "active" ? " · ยังไม่ถูกใช้" : ""}
+            {a.source === "print"
+              ? (a.sizes?.length ? ` · ${a.sizes[0].w}×${a.sizes[0].h} ${a.sizes[0].unit}` : "")
+              : a.usage_count > 0 ? ` · ใช้อยู่ ${a.usage_count} ที่` : a.status === "active" ? " · ยังไม่ถูกใช้" : ""}
           </p>
           <div className="flex items-center gap-1.5 shrink-0">
             {/^https?:\/\//i.test(a.master_url ?? "") && (
@@ -2411,6 +2455,292 @@ function ArtTypeMultiSelect({ value, types, onChange, onCreated, disabled }: {
         )}
       </div>}
     </div>
+  );
+}
+
+// ── เพิ่มงานพิมพ์ (DTF/UV) — รูป preview + ไฟล์ .ai/.pdf ขึ้นโฟลเดอร์ Drive + ประเภท/ขนาดแผ่น ──
+function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds, onClose, onDone }: {
+  actor: string | null; printTypes: PrintType[]; collections: AssetCollection[];
+  defaultCollectionIds?: string[]; onClose: () => void; onDone: () => void;
+}) {
+  const toast = useToast();
+  const { brandBase, typeSub } = useDriveFolderMaps();
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [ptype, setPtype] = useState("");                       // ประเภทงานพิมพ์ (code)
+  const [sizes, setSizes] = useState<AssetSize[]>([]);
+  const [brandId, setBrandId] = useState("");
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [srcFiles, setSrcFiles] = useState<File[]>([]);         // ไฟล์พิมพ์ .ai/.pdf → Drive
+  const [parentCodes, setParentCodes] = useState<string[]>([]);
+  const [collectionIds, setCollectionIds] = useState<string[]>(defaultCollectionIds ?? []);
+  const [cols, setCols] = useState<AssetCollection[]>(collections);
+  const [tags, setTags] = useState<string[]>([]);
+  const [keywords, setKeywords] = useState("");
+  const [driveOn, setDriveOn] = useState(false);
+  const [autoFolder, setAutoFolder] = useState(true);
+  const [driveProg, setDriveProg] = useState({ done: 0, total: 0 });
+  const [busy, setBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const srcInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
+  useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
+
+  // เลือกประเภท → เติมขนาดเริ่มต้นให้ (แก้ทับได้ · ไม่ทับถ้าใส่ขนาดเองแล้ว)
+  const pickType = (code: string) => {
+    setPtype(code);
+    const t = printTypes.find((x) => x.code === code);
+    if (t?.default_w && t?.default_h) {
+      const one: AssetSize = { label: "ขนาดแผ่น", w: Number(t.default_w), h: Number(t.default_h), unit: (t.unit || "cm") as AssetSize["unit"] };
+      setSizes((cur) => (cur.length ? cur : [one]));
+    }
+  };
+
+  const pick = (f: File | null) => {
+    setFile(f);
+    setPreview(f && f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
+    if (f && !title.trim()) setTitle(f.name.replace(/\.[^.]+$/, ""));
+  };
+
+  const save = async () => {
+    if (!file) { toast.error("แนบรูป preview ของงานพิมพ์ก่อน"); return; }
+    if (!ptype) { toast.error("เลือกประเภทงานพิมพ์ (DTF/UV) ก่อน"); return; }
+    setBusy(true);
+    try {
+      // มีไฟล์พิมพ์ หรือติ๊กสร้างโฟลเดอร์ → สร้างโฟลเดอร์ Drive + ก็อป preview + อัปไฟล์พิมพ์
+      let effUrl = "", effPath = "";
+      if (driveOn && (srcFiles.length > 0 || autoFolder)) {
+        const nm = title.trim() || file.name.replace(/\.[^.]+$/, "") || "งานพิมพ์";
+        const previewFile = await previewForDrive(file);
+        const { folderLink, largeCount } = await uploadArtworkToDrive({
+          name: nm, artworkType: ptype, brandId, srcFiles, previewFile,
+          onProgress: (done, total) => setDriveProg({ done, total }),
+        });
+        if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
+        if (folderLink) effUrl = folderLink;
+        effPath = brandFolderPath(nm, brandId, ptype, brandBase, typeSub);
+      }
+
+      const upFile = await downscaleImageWidth(file, 1600);
+      const fd = new FormData();
+      fd.append("file", upFile);
+      fd.append("source", "print");
+      fd.append("print_type", ptype);
+      if (title.trim()) fd.append("title", title.trim());
+      if (brandId) fd.append("brand_id", brandId);
+      if (effPath) fd.append("master_path", effPath);
+      if (effUrl) fd.append("master_url", effUrl);
+      if (sizes.length) fd.append("sizes", JSON.stringify(sizes));
+      if (parentCodes.length) fd.append("parent_sku_codes", JSON.stringify(parentCodes));
+      if (collectionIds.length) fd.append("collection_ids", JSON.stringify(collectionIds));
+      if (tags.length) fd.append("tags", tags.join(","));
+      if (keywords.trim()) fd.append("keywords", keywords.trim());
+      if (actor) fd.append("actor", actor);
+      const res = await apiFetch("/api/assets", { method: "POST", body: fd });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      toast.success("เพิ่มงานพิมพ์แล้ว"); onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(false); setDriveProg({ done: 0, total: 0 }); }
+  };
+
+  return (
+    <ERPModal open onClose={() => !busy && onClose()} title="🖨 เพิ่มงานพิมพ์" size="lg"
+      description="รูป preview ของแผ่น + ไฟล์ .ai/.pdf สำหรับส่งพิมพ์ (ใส่ทีหลังได้) + ประเภท/ขนาดแผ่น"
+      footer={
+        <div className="flex items-center justify-between w-full">
+          <span className="text-[12px] text-slate-400">{driveProg.total > 0 ? `📤 อัปขึ้น Drive ${driveProg.done}/${driveProg.total}…` : "ไฟล์พิมพ์เก็บบน Drive · รูป preview เก็บในคลัง"}</span>
+          <div className="flex gap-2">
+            <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
+          </div>
+        </div>
+      }>
+      {busy && <LoadingOverlay message="กำลังบันทึกงานพิมพ์…" />}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* ซ้าย: รูป preview */}
+        <div>
+          <div onClick={() => inputRef.current?.click()}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) pick(f); }}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            className={`cursor-pointer rounded-xl border-2 border-dashed aspect-square flex items-center justify-center overflow-hidden ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50"}`}>
+            {preview
+              // eslint-disable-next-line @next/next/no-img-element
+              ? <img src={preview} alt="" className="max-w-full max-h-full object-contain" />
+              : <span className="text-[12px] text-slate-400 text-center px-4">ลากรูป preview ของแผ่นมาวาง<br />หรือคลิกเลือก</span>}
+            <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0] ?? null)} />
+          </div>
+          <label className="block text-[12px] text-slate-500 mt-2">ชื่องาน
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น DTF 60cm. ช้างใบใหญ่"
+              className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
+        </div>
+
+        {/* ขวา: ประเภท/ขนาด/ไฟล์พิมพ์ */}
+        <div className="space-y-2.5">
+          <div className="text-[12px] text-slate-500">ประเภทงานพิมพ์ <span className="text-rose-500">*</span>
+            <div className="flex gap-1 mt-1 flex-wrap">
+              {printTypes.length === 0 && <span className="text-[11px] text-amber-600">ยังไม่มีประเภท — ตั้งค่าที่ปุ่ม ⚙️ ก่อน</span>}
+              {printTypes.map((t) => (
+                <button key={t.id} type="button" onClick={() => pickType(t.code)}
+                  className={`h-8 px-3 text-[12px] rounded-lg border ${ptype === t.code ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                  {t.name}{t.default_w && t.default_h ? <span className="text-slate-400 ml-1">{t.default_w}×{t.default_h}</span> : null}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="text-[12px] text-slate-500">ขนาดแผ่น <span className="text-[10px] text-slate-400">— เติมให้ตามประเภท แก้ได้</span>
+            <div className="mt-1"><SizesEditor value={sizes} onChange={setSizes} /></div>
+          </div>
+
+          <label className="block text-[12px] text-slate-500">แบรนด์ <span className="text-[10px] text-slate-400">(ใช้จัดที่ตั้งโฟลเดอร์ Drive)</span>
+            <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
+              <option value="">— ไม่ระบุ —</option>
+              {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select></label>
+
+          {driveOn && (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
+                <span className="text-[12px] text-slate-700">🗂️ <b>สร้างโฟลเดอร์ Drive ให้อัตโนมัติ</b> + ก็อปรูป preview เข้าไป</span>
+              </label>
+              <span className="block mt-2 text-[12px] text-slate-500">📎 ไฟล์พิมพ์ (.ai / .pdf) <span className="text-[10px] text-slate-400">— ไม่ใส่ตอนนี้ก็ได้</span></span>
+              <div onClick={() => srcInputRef.current?.click()}
+                onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
+                onDragOver={(e) => e.preventDefault()}
+                className="mt-1 border border-dashed border-slate-300 rounded-lg px-3 py-2.5 text-center text-[12px] text-slate-400 hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer">
+                + ลากไฟล์พิมพ์มาวาง หรือคลิกเลือก
+                <input ref={srcInputRef} type="file" multiple className="hidden"
+                  onChange={(e) => { if (e.target.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.target.files!)]); e.target.value = ""; }} />
+              </div>
+              {srcFiles.length > 0 && (
+                <div className="mt-1.5 space-y-1">
+                  {srcFiles.map((f, i) => (
+                    <div key={i} className="flex items-center gap-2 text-[12px] bg-white border border-slate-200 rounded px-2 py-1">
+                      <span className="flex-1 truncate">📄 {f.name}</span>
+                      <span className="text-slate-400 shrink-0">{(f.size / 1024 / 1024).toFixed(1)}MB</span>
+                      <button type="button" onClick={() => setSrcFiles((p) => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="text-[12px] text-slate-500">📦 Parent SKU ที่อยู่ในแผ่นนี้ <span className="text-[10px] text-slate-400">(ไม่บังคับ)</span>
+            <div className="mt-0.5"><ParentSkuField value={parentCodes} onChange={setParentCodes} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="text-[12px] text-slate-500">อัลบั้ม
+              <div className="mt-0.5"><CollectionMultiSelect value={collectionIds} collections={cols} onChange={setCollectionIds} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
+            <div className="text-[12px] text-slate-500">แท็ก
+              <div className="mt-0.5"><TagPickerField value={tags} onChange={setTags} /></div></div>
+          </div>
+          <label className="block text-[12px] text-slate-500">คำค้นเพิ่มเติม
+            <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="เช่น ช้าง งานพิมพ์ ลูกค้า A"
+              className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
+        </div>
+      </div>
+    </ERPModal>
+  );
+}
+
+// ── จัดการประเภทงานพิมพ์ (DTF/UV/…) + ขนาดเริ่มต้นต่อประเภท — ตั้งค่าเองได้ ไม่ต้องแก้โค้ด ──
+function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType[]; onClose: () => void; onChanged: () => Promise<void> | void }) {
+  const toast = useToast();
+  const [rows, setRows] = useState<PrintType[]>(types);
+  const [busy, setBusy] = useState(false);
+  const [nc, setNc] = useState({ code: "", name: "", w: "", h: "", unit: "cm" });
+  const [delTarget, setDelTarget] = useState<PrintType | null>(null);
+
+  const reload = async () => {
+    try { const j = await (await apiFetch(`/api/print-types?_=${Date.now()}`)).json(); setRows((j.data ?? []) as PrintType[]); } catch { /* ignore */ }
+    await onChanged();
+  };
+
+  const add = async () => {
+    const code = nc.code.trim(); if (!code) { toast.error("ใส่รหัสประเภทก่อน (เช่น DTF)"); return; }
+    setBusy(true);
+    try {
+      const res = await apiFetch("/api/print-types", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, name: nc.name.trim() || code, default_w: nc.w, default_h: nc.h, unit: nc.unit }) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "เพิ่มไม่สำเร็จ");
+      setNc({ code: "", name: "", w: "", h: "", unit: "cm" }); toast.success(`เพิ่ม “${code}” แล้ว`); await reload();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
+  const patch = async (t: PrintType, body: Record<string, unknown>) => {
+    try {
+      const res = await apiFetch(`/api/print-types/${t.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "แก้ไม่สำเร็จ");
+      await reload();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
+  };
+
+  const doDelete = async () => {
+    const t = delTarget; if (!t) return; setDelTarget(null); setBusy(true);
+    try {
+      const res = await apiFetch(`/api/print-types/${t.id}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || "ลบไม่สำเร็จ");
+      toast.success(`ปิดใช้ “${t.code}” แล้ว`); await reload();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
+  const inp = "h-8 px-2 text-[12px] border border-slate-200 rounded-lg";
+  return (
+    <ERPModal open onClose={onClose} title="⚙️ ประเภทงานพิมพ์" size="md"
+      description="ตั้งขนาดเริ่มต้นต่อประเภท — เลือกประเภทตอนเพิ่มงานพิมพ์แล้วจะเติมขนาดให้เอง (แก้ทับได้)"
+      footer={<div className="flex justify-end w-full"><button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button></div>}>
+      <div className="space-y-1.5 mb-3">
+        <div className="flex items-center gap-2 text-[10px] text-slate-400 px-1">
+          <span className="w-20">รหัส</span><span className="flex-1">ชื่อที่แสดง</span><span className="w-32">ขนาดเริ่มต้น</span><span className="w-6" />
+        </div>
+        {rows.length === 0 && <p className="text-[12px] text-slate-400 py-3 text-center">ยังไม่มีประเภทงานพิมพ์</p>}
+        {rows.map((t) => (
+          <div key={t.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+            <span className="w-20 font-mono text-[12px] text-slate-700 truncate">{t.code}</span>
+            <input defaultValue={t.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== t.name) void patch(t, { name: v }); }}
+              className={`${inp} flex-1`} />
+            <div className="w-32 flex items-center gap-1">
+              <input defaultValue={t.default_w ?? ""} inputMode="decimal" placeholder="กว้าง"
+                onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(t.default_w ?? "")) void patch(t, { default_w: v }); }}
+                className={`${inp} w-12 text-center`} />
+              <span className="text-slate-300 text-[11px]">×</span>
+              <input defaultValue={t.default_h ?? ""} inputMode="decimal" placeholder="สูง"
+                onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(t.default_h ?? "")) void patch(t, { default_h: v }); }}
+                className={`${inp} w-12 text-center`} />
+              <span className="text-[10px] text-slate-400">{t.unit}</span>
+            </div>
+            <button onClick={() => setDelTarget(t)} disabled={busy} className="w-6 text-slate-400 hover:text-red-500 text-sm" title="ปิดใช้ประเภทนี้">🗑</button>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-lg border border-dashed border-slate-300 p-2.5">
+        <p className="text-[11px] font-medium text-slate-500 mb-1.5">+ เพิ่มประเภทใหม่</p>
+        <div className="flex items-center gap-2">
+          <input value={nc.code} onChange={(e) => setNc((s) => ({ ...s, code: e.target.value }))} placeholder="รหัส เช่น SCREEN" className={`${inp} w-24`} />
+          <input value={nc.name} onChange={(e) => setNc((s) => ({ ...s, name: e.target.value }))} placeholder="ชื่อที่แสดง" className={`${inp} flex-1`} />
+          <input value={nc.w} onChange={(e) => setNc((s) => ({ ...s, w: e.target.value }))} inputMode="decimal" placeholder="กว้าง" className={`${inp} w-14 text-center`} />
+          <span className="text-slate-300 text-[11px]">×</span>
+          <input value={nc.h} onChange={(e) => setNc((s) => ({ ...s, h: e.target.value }))} inputMode="decimal" placeholder="สูง" className={`${inp} w-14 text-center`} />
+          <button onClick={add} disabled={busy} className="h-8 px-3 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">เพิ่ม</button>
+        </div>
+      </div>
+
+      {delTarget && (
+        <ConfirmDialog open title="ปิดใช้ประเภทนี้?" variant="danger" confirmText="ปิดใช้"
+          message={`“${delTarget.code}” จะไม่โผล่ให้เลือกอีก · งานพิมพ์เดิมที่ใช้ประเภทนี้ยังอยู่ครบ`}
+          onConfirm={doDelete} onClose={() => setDelTarget(null)} />
+      )}
+    </ERPModal>
   );
 }
 

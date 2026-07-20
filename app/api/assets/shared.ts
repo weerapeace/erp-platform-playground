@@ -51,7 +51,8 @@ export type AssetRow = {
   created_at: string;
   master_path: string | null;   // path ไฟล์ต้นฉบับบน NAS (\\nas\... หรือ Z:\...)
   master_url: string | null;    // ลิงก์เว็บ NAS (Synology) เปิดจากนอกออฟฟิศ
-  source: string;               // upload | odoo_product | artwork
+  source: string;               // upload | odoo_product | artwork | print
+  print_type: string | null;    // ประเภทงานพิมพ์ (DTF/UV/…) — เฉพาะ source='print' · ตั้งค่าที่ erp_print_types
   artwork_type: string | null;  // ชนิดหลัก (ตัวแรก) — คงไว้เพื่อ backward-compat + ที่อื่นที่อ่าน field เดิม
   artwork_types: string[];      // ชนิดทั้งหมด (m2m) — โลโก้/ลายพิมพ์/แพทเทิร์น/ม็อกอัป/... (เฉพาะ artwork)
   keywords: string | null;      // คำค้นเพิ่มเติม (คำพ้อง/ชื่ออื่น) — รวมเข้า search
@@ -80,6 +81,7 @@ type AssetDbRow = {
   uploaded_by: string | null; created_at: string;
   master_path: string | null; master_url: string | null;
   source: string; artwork_type: string | null; keywords: string | null;
+  print_type?: string | null;
   sizes?: unknown; parent_sku_codes?: unknown; artwork_types?: unknown;
 };
 
@@ -111,6 +113,7 @@ export function buildRow(r: AssetDbRow, tags: string[], usageCount: number): Ass
     master_path: r.master_path,
     master_url: r.master_url,
     source: r.source,
+    print_type: r.print_type ?? null,
     artwork_type: r.artwork_type,
     artwork_types: normalizeCodes(r.artwork_types),
     keywords: r.keywords,

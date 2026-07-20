@@ -45,7 +45,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     title?: string; description?: string | null; collection_id?: string | null;
     collection_ids?: string[]; tags?: string[]; restore?: boolean;
     master_path?: string | null; master_url?: string | null; artwork_type?: string | null; keywords?: string | null;
-    sizes?: AssetSize[]; parent_sku_codes?: string[]; artwork_types?: string[];
+    sizes?: AssetSize[]; parent_sku_codes?: string[]; artwork_types?: string[]; print_type?: string | null;
   };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -72,6 +72,9 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     patch.artwork_type = types[0] ?? null;
   } else if (body.artwork_type !== undefined) {
     patch.artwork_type = body.artwork_type || null;
+  }
+  if (body.print_type !== undefined) {   // ประเภทงานพิมพ์ (DTF/UV/…)
+    patch.print_type = body.print_type || null;
     patch.artwork_types = body.artwork_type ? [body.artwork_type] : [];
   }
   if (body.keywords !== undefined)      patch.keywords = body.keywords || null;
