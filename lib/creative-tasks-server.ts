@@ -5,7 +5,7 @@
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { defaultLineTemplate, renderLineTemplate } from "@/lib/creative-line-templates";
-import { driveConfigured, driveCreateFolder, driveUploadFile, driveEnsureFolder, driveListImages, driveListChildFolders, driveMoveFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
+import { driveConfigured, driveCreateFolder, driveGetFolder, driveUploadFile, driveEnsureFolder, driveListImages, driveListChildFolders, driveMoveFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
 import { r2GetObject } from "@/lib/r2";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -17,7 +17,10 @@ export async function ensureDriveFolderForTask(admin: Admin, taskId: string): Pr
   const { data } = await admin.from("erp_creative_tasks").select("task_no, title, drive_folder_id, drive_folder_url").eq("id", taskId).maybeSingle();
   const t = data as { task_no?: string | null; title?: string | null; drive_folder_id?: string | null; drive_folder_url?: string | null } | null;
   if (!t) return null;
-  if (t.drive_folder_id && t.drive_folder_url) return { id: t.drive_folder_id, url: t.drive_folder_url };
+  // มีโฟลเดอร์เดิม → เช็กว่ายังอยู่จริง (ไม่ถูกลบ/trashed) ก่อนใช้ · ถ้าถูกลบไปแล้ว → สร้างใหม่ (self-heal)
+  if (t.drive_folder_id && t.drive_folder_url) {
+    try { if (await driveGetFolder(t.drive_folder_id)) return { id: t.drive_folder_id, url: t.drive_folder_url }; } catch { /* เช็กไม่ได้ → ถือว่ายังอยู่ กันสร้างซ้ำโดยไม่ตั้งใจ */ return { id: t.drive_folder_id, url: t.drive_folder_url }; }
+  }
   const name = `${t.task_no ?? ""} ${t.title ?? ""}`.trim() || "งาน";
   const f = await driveCreateFolder(name, DRIVE_ROOT_FOLDER_ID);
   await admin.from("erp_creative_tasks").update({ drive_folder_url: f.webViewLink, drive_folder_id: f.id }).eq("id", taskId);

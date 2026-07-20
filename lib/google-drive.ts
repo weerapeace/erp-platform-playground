@@ -143,10 +143,11 @@ export async function resolveCoverFolderId(overrideFolderId?: string | null): Pr
 export async function driveGetFolder(id: string): Promise<{ id: string; name: string; webViewLink: string } | null> {
   const fid = (id || "").trim(); if (!fid) return null;
   const token = await getAccessToken();
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fid)}?supportsAllDrives=true&fields=id,name,webViewLink,mimeType`;
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fid)}?supportsAllDrives=true&fields=id,name,webViewLink,mimeType,trashed`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok || !j.id || j.mimeType !== "application/vnd.google-apps.folder") return null;
+  // โฟลเดอร์ที่ถูกลบ (trashed) = ถือว่าไม่มี → คืน null (ให้ผู้เรียกสร้างใหม่ / reject ลิงก์ที่ลบแล้ว)
+  if (!res.ok || !j.id || j.mimeType !== "application/vnd.google-apps.folder" || j.trashed) return null;
   return { id: j.id as string, name: (j.name as string) ?? "", webViewLink: (j.webViewLink as string) || `https://drive.google.com/drive/folders/${j.id}` };
 }
 
