@@ -1765,6 +1765,7 @@ async function uploadArtworkToDrive(opts: {
   folderName?: string; // ตั้งชื่อโฟลเดอร์แยกจากชื่อไฟล์ (โหมดโฟลเดอร์รวม — ไฟล์ยังชื่อตามรูปแต่ละใบ)
   subpath?: string;    // path ซ้อนชั้นเอง (เช่น "Printed/DTF" ของงานพิมพ์) แทนการแม็ปตามชนิด
   rootFolderId?: string;   // โฟลเดอร์แม่เฉพาะ (งานพิมพ์ไปโฟลเดอร์เดียวไม่สนแบรนด์)
+  flat?: boolean;      // ไม่สร้างโฟลเดอร์ชื่องาน → ไฟล์ลงในซับตรง ๆ (งานพิมพ์)
   onProgress?: (done: number, total: number) => void;
 }): Promise<{ folderId: string; folderLink: string; largeCount: number }> {
   const nm = opts.name.trim() || "artwork";
@@ -1780,6 +1781,7 @@ async function uploadArtworkToDrive(opts: {
     if (opts.artworkType) fd.append("artworkType", opts.artworkType);
     if (opts.subpath) fd.append("subpath", opts.subpath);
     if (opts.rootFolderId) fd.append("root_folder_id", opts.rootFolderId);
+    if (opts.flat) fd.append("flat", "1");
     if (opts.brandId) fd.append("brand_id", opts.brandId);
     if (folderId) fd.append("folderId", folderId);
     if (x) { fd.append("filename", x.filename); fd.append("file", x.file); }
@@ -2575,6 +2577,8 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   const [ptype, setPtype] = useState("");                       // ประเภทงานพิมพ์ (code)
   const [subpath, setSubpath] = useState("");                   // โฟลเดอร์ Drive ที่จะเก็บ (แก้เองได้ · default จากประเภท)
   const [subpathTouched, setSubpathTouched] = useState(false);  // ผู้ใช้แก้ path เองแล้ว = ไม่ override ตอนสลับประเภท
+  const [groupFolder, setGroupFolder] = useState("");           // โฟลเดอร์ย่อยเลือกได้ (เช่น goodgoods) — ไม่ใส่ = ไฟล์ลงในซับตรง ๆ
+  const [groupOptions, setGroupOptions] = useState<string[]>([]); // โฟลเดอร์ย่อยที่มีอยู่แล้ว (ทำ dropdown)
   const [sizes, setSizes] = useState<AssetSize[]>([]);
   const [brandId, setBrandId] = useState("");
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
@@ -2597,6 +2601,15 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
   // โฟลเดอร์แม่เฉพาะของงานพิมพ์ (ตั้งที่ ⚙️) — งานพิมพ์ทุกชิ้นไปที่นี่ ไม่สนแบรนด์
   useEffect(() => { apiFetch("/api/ui-config?key=print_drive_root").then((r) => r.json()).then((j) => setPrintRoot({ folder_id: String(j.value?.folder_id ?? ""), local_base_path: String(j.value?.local_base_path ?? "") })).catch(() => {}); }, []);
+  // โฟลเดอร์ย่อยที่มีอยู่แล้วใต้ [ราก]/[subpath] → ทำ dropdown เลือก (พิมพ์ชื่อใหม่ = สร้างใหม่)
+  useEffect(() => {
+    if (!driveOn) return;
+    const sub = subpath.trim() || ptype; if (!sub) { setGroupOptions([]); return; }
+    let alive = true;
+    apiFetch(`/api/drive/group-folders?root=${encodeURIComponent(printRoot.folder_id)}&subpath=${encodeURIComponent(sub)}`)
+      .then((r) => r.json()).then((j) => { if (alive) setGroupOptions((j.folders ?? []) as string[]); }).catch(() => {});
+    return () => { alive = false; };
+  }, [driveOn, subpath, ptype, printRoot.folder_id]);
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
 
   // เลือกประเภท → เติมขนาด + โฟลเดอร์เริ่มต้นให้ (แก้ทับได้ · ไม่ทับถ้าแก้เองแล้ว)
@@ -2625,18 +2638,19 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
       let effUrl = "", effPath = "";
       if (driveOn && (srcFiles.length > 0 || autoFolder)) {
         const nm = title.trim() || file.name.replace(/\.[^.]+$/, "") || "งานพิมพ์";
-        const effSub = subpath.trim() || ptype;   // โฟลเดอร์ที่ตั้งในฟอร์ม (default จากประเภท) เช่น "Printed/DTF"
+        // โฟลเดอร์ = ซับ(Printed/DTF) + โฟลเดอร์ย่อยที่เลือก (เช่น goodgoods) · flat = ไฟล์ลงในโฟลเดอร์นี้ตรง ๆ ไม่สร้างโฟลเดอร์ชื่องาน
+        const effSub = [subpath.trim() || ptype, groupFolder.trim()].filter(Boolean).join("/");
         const previewFile = await previewForDrive(file);
         const { folderLink, largeCount } = await uploadArtworkToDrive({
-          name: nm, brandId, srcFiles, previewFile, subpath: effSub,
+          name: nm, brandId, srcFiles, previewFile, subpath: effSub, flat: true,
           rootFolderId: printRoot.folder_id || undefined,   // งานพิมพ์ไปโฟลเดอร์แม่เฉพาะ (ถ้าตั้งไว้)
           onProgress: (done, total) => setDriveProg({ done, total }),
         });
         if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
         if (folderLink) effUrl = folderLink;
-        // path ในเครื่อง: ใช้ฐานของงานพิมพ์ถ้าตั้งไว้ ไม่งั้นฐานแบรนด์ → \Printed\DTF\<ชื่องาน>
+        // path ในเครื่อง: ฐานงานพิมพ์ (ถ้าตั้ง) ไม่งั้นฐานแบรนด์ → \Printed\DTF\<โฟลเดอร์ย่อย> (flat: ไม่มีโฟลเดอร์ชื่องาน)
         const base = printRoot.local_base_path.trim() || brandBase[brandId] || "";
-        effPath = base ? [base.replace(/[\\/]+$/, ""), ...effSub.split(/[\\/]+/).filter(Boolean), nm].join("\\") : "";
+        effPath = base ? [base.replace(/[\\/]+$/, ""), ...effSub.split(/[\\/]+/).filter(Boolean)].join("\\") : "";
       }
 
       const upFile = await downscaleImageWidth(file, 1600);
@@ -2729,14 +2743,19 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
                 <HelpButton guideKey="drive-link" />
               </div>
 
-              {/* โฟลเดอร์ที่จะเก็บ (แก้เองได้) + ตัวอย่างที่อยู่เต็ม */}
+              {/* โฟลเดอร์ที่จะเก็บ (แก้เองได้) + โฟลเดอร์ย่อยเลือกได้ + ตัวอย่างที่อยู่เต็ม */}
               {autoFolder && (
-                <div className="mt-2">
+                <div className="mt-2 space-y-1.5">
                   <label className="block text-[11px] text-slate-500">📁 โฟลเดอร์ Drive ที่จะเก็บ <span className="text-[10px] text-slate-400">(ใส่ / เพื่อซ้อนชั้น · เว้นว่าง = ใช้รหัสประเภท)</span>
                     <input value={subpath} onChange={(e) => { setSubpath(e.target.value); setSubpathTouched(true); }} placeholder="เช่น Printed/DTF"
                       className="mt-0.5 w-full h-8 px-2.5 text-[12px] border border-slate-200 rounded-lg font-mono" /></label>
-                  <p className="text-[10px] text-slate-400 mt-1 truncate">
-                    จะเก็บที่: <span className="font-mono text-slate-500">{[printRoot.folder_id ? "📁 โฟลเดอร์งานพิมพ์" : (brands.find((b) => b.id === brandId)?.name || "โฟลเดอร์แม่"), ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), title.trim() || "(ชื่องาน)"].join(" › ")}</span>
+                  <label className="block text-[11px] text-slate-500">📂 โฟลเดอร์ย่อย <span className="text-[10px] text-slate-400">(เลือกที่มี หรือพิมพ์ใหม่ · เว้นว่าง = ไฟล์ลงใน {subpath.trim() || ptype || "DTF"} ตรง ๆ)</span>
+                    <input value={groupFolder} onChange={(e) => setGroupFolder(e.target.value)} list="print-group-folders" placeholder="เช่น goodgoods"
+                      className="mt-0.5 w-full h-8 px-2.5 text-[12px] border border-slate-200 rounded-lg font-mono" />
+                    <datalist id="print-group-folders">{groupOptions.map((f) => <option key={f} value={f} />)}</datalist>
+                  </label>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    ไฟล์จะเก็บที่: <span className="font-mono text-slate-500">{[printRoot.folder_id ? "📁 โฟลเดอร์งานพิมพ์" : (brands.find((b) => b.id === brandId)?.name || "โฟลเดอร์แม่"), ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), ...(groupFolder.trim() ? [groupFolder.trim()] : [])].join(" › ")} <span className="text-slate-400">(ไฟล์อยู่ในนี้ ไม่สร้างโฟลเดอร์ชื่องาน)</span></span>
                   </p>
                 </div>
               )}

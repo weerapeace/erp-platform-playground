@@ -2,7 +2,7 @@
  * ของกลางฝั่งเซิร์ฟเวอร์ — จัดโฟลเดอร์ Drive ของ artwork ให้ตรงโครง [แบรนด์] > [ซับตามชนิด] > [ชื่องาน]
  * ใช้ทั้ง /api/drive/upload (อัปทีละใบ) และ /api/assets/drive-folders (bulk สร้างโฟลเดอร์ + ก็อป preview)
  */
-import { driveEnsureFolder, driveUploadFile, DRIVE_ROOT_FOLDER_ID } from "./google-drive";
+import { driveEnsureFolder, driveUploadFile, driveFindFolder, driveListChildFolders, DRIVE_ROOT_FOLDER_ID } from "./google-drive";
 import { supabaseAdmin } from "./supabase-admin";
 import { r2GetObject } from "./r2";
 
@@ -15,10 +15,28 @@ async function ensureSubPath(parent: string, subpath: string): Promise<string> {
   return cur;
 }
 
+/** เดินหาโฟลเดอร์ตาม path (ไม่สร้าง) → คืน folderId ชั้นล่างสุด หรือ null ถ้าไม่มี */
+async function findSubPath(parent: string, subpath: string): Promise<string | null> {
+  let cur = parent;
+  for (const seg of subpath.split(/[\\/]+/).map((s) => s.trim()).filter(Boolean)) {
+    const id = await driveFindFolder(seg, cur); if (!id) return null; cur = id;
+  }
+  return cur;
+}
+
+/** ชื่อโฟลเดอร์ย่อยที่มีอยู่แล้วใต้ [ราก]/[subpath] → ไว้ทำ dropdown "เลือกโฟลเดอร์" (ไม่สร้างอะไร) */
+export async function listDriveGroupFolders(rootFolderId: string | null, subpath: string): Promise<string[]> {
+  const root = (rootFolderId ?? "").trim() || DRIVE_ROOT_FOLDER_ID;
+  const base = (subpath ?? "").trim() ? await findSubPath(root, subpath) : root;
+  if (!base) return [];
+  return (await driveListChildFolders(base)).map((f) => f.name).sort((a, b) => a.localeCompare(b, "th"));
+}
+
 /** หา/สร้างโฟลเดอร์ Drive: [โฟลเดอร์แม่] > [ซับ] > [ชื่องาน] → คืน folderId
  *  subpathOverride = ใส่ path ซ้อนชั้นเอง (เช่น "Printed/DTF" ของงานพิมพ์) แทนการแม็ปตามชนิด artwork
- *  rootFolderId    = โฟลเดอร์แม่เฉพาะ (เช่น "โฟลเดอร์แม่ของงานพิมพ์") → ใช้ตัวนี้เป็นราก ไม่สนแบรนด์ */
-export async function resolveArtworkDriveFolder(admin: Admin, opts: { brandId?: string | null; artworkType?: string | null; name: string; subpathOverride?: string | null; rootFolderId?: string | null }): Promise<string> {
+ *  rootFolderId    = โฟลเดอร์แม่เฉพาะ (เช่น "โฟลเดอร์แม่ของงานพิมพ์") → ใช้ตัวนี้เป็นราก ไม่สนแบรนด์
+ *  flat = true     = ไม่สร้างโฟลเดอร์ตามชื่องาน → เอาไฟล์ลงในโฟลเดอร์ซับตรง ๆ (งานพิมพ์: files พอใน Printed/DTF) */
+export async function resolveArtworkDriveFolder(admin: Admin, opts: { brandId?: string | null; artworkType?: string | null; name: string; subpathOverride?: string | null; rootFolderId?: string | null; flat?: boolean }): Promise<string> {
   let brandFolder = (opts.rootFolderId ?? "").trim() || DRIVE_ROOT_FOLDER_ID;
   if (!(opts.rootFolderId ?? "").trim() && opts.brandId) {
     const { data } = await admin.from("erp_brand_drive_folders").select("folder_id").eq("brand_id", opts.brandId).maybeSingle();
@@ -36,6 +54,7 @@ export async function resolveArtworkDriveFolder(admin: Admin, opts: { brandId?: 
       if (subName) parent = await driveEnsureFolder(subName, brandFolder);
     }
   }
+  if (opts.flat) return parent;   // ไม่สร้างโฟลเดอร์ชื่องาน → ไฟล์ลงในโฟลเดอร์ซับตรง ๆ
   return driveEnsureFolder(opts.name.trim() || "artwork", parent);
 }
 

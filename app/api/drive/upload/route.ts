@@ -32,6 +32,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         artworkType: String(form.get("artworkType") ?? "").trim(),
         subpathOverride: String(form.get("subpath") ?? "").trim() || null,
         rootFolderId: String(form.get("root_folder_id") ?? "").trim() || null,   // งานพิมพ์: โฟลเดอร์แม่เฉพาะ
+        flat: String(form.get("flat") ?? "") === "1",                            // งานพิมพ์: ไฟล์ลงในซับตรง ๆ ไม่สร้างโฟลเดอร์ชื่องาน
         name,
       });
     }
