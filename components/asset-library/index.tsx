@@ -1319,9 +1319,9 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
       )}
 
       {/* เลือกรูปต้นทางเพื่อผูกโฟลเดอร์เดียวกัน (โหมด 📎 ใช้โฟลเดอร์เดียวกับรูปอื่น) */}
-      <AssetPicker open={linkPickerOpen} onClose={() => setLinkPickerOpen(false)} typeFilter="image" defaultSource="artwork" requireDriveFolder
+      <AssetPicker open={linkPickerOpen} onClose={() => setLinkPickerOpen(false)} typeFilter="image" defaultSource={d?.source === "print" ? "print" : "artwork"} requireDriveFolder
         defaultSearch={commonNameSeed([d?.title ?? title])}
-        title="เลือกรูปที่มีโฟลเดอร์ Drive แล้ว" contextLabel="ผูกโฟลเดอร์เดียวกับรูปนี้"
+        title={d?.source === "print" ? "เลือกงานพิมพ์ที่มีโฟลเดอร์ Drive แล้ว" : "เลือกรูปที่มีโฟลเดอร์ Drive แล้ว"} contextLabel="ผูกโฟลเดอร์เดียวกับงานนี้"
         onSelect={(assets) => { const s = assets[0]; if (s) { setLinkPickerOpen(false); setLinkConfirmSrc(s); } }} />
       {/* เปลี่ยนชื่อโฟลเดอร์ Drive — มีผลกับทุกรูปที่ใช้โฟลเดอร์นี้ */}
       <ConfirmDialog open={renameOpen} onClose={() => setRenameOpen(false)} onConfirm={doRenameFolder}
@@ -2595,6 +2595,9 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   const [groupFolder, setGroupFolder] = useState("");           // โฟลเดอร์ย่อยเลือกได้ (เช่น goodgoods) — ไม่ใส่ = ไฟล์ลงในซับตรง ๆ
   const [groupOptions, setGroupOptions] = useState<string[]>([]); // โฟลเดอร์ย่อยที่มีอยู่แล้ว (ทำ dropdown)
   const [groupOpen, setGroupOpen] = useState(false);            // เปิด dropdown โฟลเดอร์ย่อย
+  const [driveDest, setDriveDest] = useState<"new" | "shared">("new");   // สร้างโฟลเดอร์ใหม่ vs ลงโฟลเดอร์เดียวกับงานที่มีแล้ว
+  const [sharedFolder, setSharedFolder] = useState<{ id: string; url: string; label: string } | null>(null);
+  const [sharePickerOpen, setSharePickerOpen] = useState(false);
   const [resizeW, setResizeW] = useState(1200);                 // ย่อรูป preview ก่อนเก็บคลัง (0 = ขนาดจริง)
   const [sizes, setSizes] = useState<AssetSize[]>([]);
   const [brandId, setBrandId] = useState("");
@@ -2655,21 +2658,32 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
     try {
       // มีไฟล์พิมพ์ หรือติ๊กสร้างโฟลเดอร์ → สร้างโฟลเดอร์ Drive + ก็อป preview + อัปไฟล์พิมพ์
       let effUrl = "", effPath = "";
-      if (driveOn && (srcFiles.length > 0 || autoFolder)) {
+      const useShared = driveOn && driveDest === "shared" && !!sharedFolder;
+      if (useShared || (driveOn && (srcFiles.length > 0 || autoFolder))) {
         const nm = title.trim() || file.name.replace(/\.[^.]+$/, "") || "งานพิมพ์";
-        // โฟลเดอร์ = ซับ(Printed/DTF) + โฟลเดอร์ย่อยที่เลือก (เช่น goodgoods) แล้วสร้างโฟลเดอร์ตามชื่องานข้างใน
-        const effSub = [subpath.trim() || ptype, groupFolder.trim()].filter(Boolean).join("/");
         const previewFile = await previewForDrive(file);
-        const { folderLink, largeCount } = await uploadArtworkToDrive({
-          name: nm, brandId, srcFiles, previewFile, subpath: effSub,
-          rootFolderId: printRoot.folder_id || undefined,   // งานพิมพ์ไปโฟลเดอร์แม่เฉพาะ (ถ้าตั้งไว้)
-          onProgress: (done, total) => setDriveProg({ done, total }),
-        });
-        if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
-        if (folderLink) effUrl = folderLink;
-        // path ในเครื่อง: ฐานงานพิมพ์ (ถ้าตั้ง) ไม่งั้นฐานแบรนด์ → \Printed\DTF\<โฟลเดอร์ย่อย>\<ชื่องาน>
-        const base = printRoot.local_base_path.trim() || brandBase[brandId] || "";
-        effPath = base ? [base.replace(/[\\/]+$/, ""), ...effSub.split(/[\\/]+/).filter(Boolean), nm].join("\\") : "";
+        if (useShared && sharedFolder) {
+          // ลงโฟลเดอร์เดียวกับงานที่มีแล้ว (ไฟล์อยู่รวม ไม่สร้างโฟลเดอร์ใหม่)
+          const { folderLink, largeCount } = await uploadArtworkToDrive({
+            name: nm, srcFiles, previewFile, folderId: sharedFolder.id,
+            onProgress: (done, total) => setDriveProg({ done, total }),
+          });
+          if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
+          effUrl = folderLink || sharedFolder.url;
+        } else {
+          // โฟลเดอร์ = ซับ(Printed/DTF) + โฟลเดอร์ย่อยที่เลือก (เช่น goodgoods) แล้วสร้างโฟลเดอร์ตามชื่องานข้างใน
+          const effSub = [subpath.trim() || ptype, groupFolder.trim()].filter(Boolean).join("/");
+          const { folderLink, largeCount } = await uploadArtworkToDrive({
+            name: nm, brandId, srcFiles, previewFile, subpath: effSub,
+            rootFolderId: printRoot.folder_id || undefined,   // งานพิมพ์ไปโฟลเดอร์แม่เฉพาะ (ถ้าตั้งไว้)
+            onProgress: (done, total) => setDriveProg({ done, total }),
+          });
+          if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
+          if (folderLink) effUrl = folderLink;
+          // path ในเครื่อง: ฐานงานพิมพ์ (ถ้าตั้ง) ไม่งั้นฐานแบรนด์ → \Printed\DTF\<โฟลเดอร์ย่อย>\<ชื่องาน>
+          const base = printRoot.local_base_path.trim() || brandBase[brandId] || "";
+          effPath = base ? [base.replace(/[\\/]+$/, ""), ...effSub.split(/[\\/]+/).filter(Boolean), nm].join("\\") : "";
+        }
       }
 
       const upFile = resizeW > 0 ? await downscaleImageWidth(file, resizeW) : file;   // ย่อรูป preview ตามที่เลือก (0 = ขนาดจริง)
@@ -2766,13 +2780,35 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
 
           {driveOn && (
             <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5">
-              <div className="flex items-start justify-between gap-2">
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
-                  <span className="text-[12px] text-slate-700">🗂️ <b>สร้างโฟลเดอร์ Drive ให้อัตโนมัติ</b> + ก็อปรูป preview เข้าไป</span>
-                </label>
+              {/* เลือกปลายทาง: โฟลเดอร์ใหม่ (ตามชื่องาน) vs ลงโฟลเดอร์เดียวกับงานที่มีแล้ว */}
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex gap-1 p-0.5 bg-white rounded-lg border border-slate-200">
+                  <button type="button" onClick={() => setDriveDest("new")}
+                    className={`h-7 px-2.5 text-[11px] font-medium rounded-md ${driveDest === "new" ? "bg-indigo-50 text-indigo-700" : "text-slate-500"}`}>🆕 โฟลเดอร์ใหม่</button>
+                  <button type="button" onClick={() => setDriveDest("shared")}
+                    className={`h-7 px-2.5 text-[11px] font-medium rounded-md ${driveDest === "shared" ? "bg-indigo-50 text-indigo-700" : "text-slate-500"}`}>📎 ใช้โฟลเดอร์เดียวกับงานที่มีแล้ว</button>
+                </div>
                 <HelpButton guideKey="drive-link" />
               </div>
+
+              {driveDest === "shared" ? (
+                <div className="space-y-1.5">
+                  {sharedFolder ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 px-2 py-1.5">
+                      <span className="text-[12px] text-slate-700 flex-1 min-w-0 truncate">📁 {sharedFolder.label}</span>
+                      <button type="button" onClick={() => setSharePickerOpen(true)} className="text-[11px] text-indigo-600 hover:underline shrink-0">เปลี่ยน</button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setSharePickerOpen(true)} className="w-full h-9 text-[12px] border border-dashed border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50">＋ เลือกงานพิมพ์ที่มีโฟลเดอร์แล้ว</button>
+                  )}
+                  <p className="text-[10px] text-slate-500">ไฟล์ของงานนี้จะไปอยู่ในโฟลเดอร์เดียวกับงานที่เลือก (ไม่สร้างโฟลเดอร์ใหม่)</p>
+                </div>
+              ) : (
+              <>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
+                <span className="text-[12px] text-slate-700">🗂️ <b>สร้างโฟลเดอร์ Drive ให้อัตโนมัติ</b> + ก็อปรูป preview เข้าไป</span>
+              </label>
 
               {/* โฟลเดอร์ที่จะเก็บ (แก้เองได้) + โฟลเดอร์ย่อยเลือกได้ + ตัวอย่างที่อยู่เต็ม */}
               {autoFolder && (
@@ -2807,6 +2843,8 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
                     จะเก็บที่: <span className="font-mono text-slate-500">{[printRoot.folder_id ? "📁 โฟลเดอร์งานพิมพ์" : (brands.find((b) => b.id === brandId)?.name || "โฟลเดอร์แม่"), ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), ...(groupFolder.trim() ? [groupFolder.trim()] : []), title.trim() || "(ชื่องาน)"].join(" › ")}</span>
                   </p>
                 </div>
+              )}
+              </>
               )}
 
               <span className="block mt-2 text-[12px] text-slate-500">📎 ไฟล์พิมพ์ (.ai / .pdf) <span className="text-[10px] text-slate-400">— ไม่ใส่ตอนนี้ก็ได้</span></span>
@@ -2850,6 +2888,11 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
               className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
         </div>
       </div>
+
+      {/* เลือกงานพิมพ์ที่มีโฟลเดอร์แล้ว → ใช้โฟลเดอร์เดียวกัน */}
+      <AssetPicker open={sharePickerOpen} onClose={() => setSharePickerOpen(false)} typeFilter="image" defaultSource="print" requireDriveFolder
+        title="เลือกงานพิมพ์ที่มีโฟลเดอร์ Drive แล้ว" contextLabel="ใช้โฟลเดอร์เดียวกับงานนี้"
+        onSelect={(assets) => { const s = assets[0]; if (s) { const m = (s.master_url ?? "").match(/\/folders\/([a-zA-Z0-9_-]+)/); if (m) setSharedFolder({ id: m[1], url: s.master_url ?? "", label: s.title || s.file_name }); } setSharePickerOpen(false); }} />
     </ERPModal>
   );
 }
@@ -2868,6 +2911,8 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   const [group, setGroup] = useState("");                       // โฟลเดอร์ย่อยใช้ทั้งชุด (แถวเว้นว่าง = ใช้ตัวนี้)
   const [groupOptions, setGroupOptions] = useState<string[]>([]);
+  const [massShared, setMassShared] = useState<{ id: string; url: string; label: string } | null>(null);   // ทุกงานลงโฟลเดอร์เดียวกับงานที่เลือก
+  const [massSharePickerOpen, setMassSharePickerOpen] = useState(false);
   const [collectionIds, setCollectionIds] = useState<string[]>(defaultCollectionIds ?? []);
   const [cols, setCols] = useState<AssetCollection[]>(collections);
   const [tags, setTags] = useState<string[]>([]);
@@ -2908,7 +2953,7 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
     if (!rows.length) { toast.error("ลากรูป preview ของแผ่นเข้ามาก่อน"); return; }
     if (!ptype) { toast.error("เลือกประเภทงานพิมพ์ก่อน (ใช้ทั้งชุด)"); return; }
     setBusy(true);
-    const jobRows = rows, jType = ptype, jSub = subOf(), jBrand = brandId, jGroup = group.trim(), jAlbums = collectionIds, jTags = tags, jResize = resizeW, jDrive = driveOn && autoFolder, jRoot = printRoot;
+    const jobRows = rows, jType = ptype, jSub = subOf(), jBrand = brandId, jGroup = group.trim(), jAlbums = collectionIds, jTags = tags, jResize = resizeW, jDrive = driveOn && autoFolder, jRoot = printRoot, jShared = massShared;
     const base = jRoot.local_base_path.trim() || brandBase[jBrand] || "";
     runBackgroundTask({
       label: `เพิ่มงานพิมพ์ ${jobRows.length} งาน`,
@@ -2921,7 +2966,12 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
             const nm = r.name.trim() || r.file.name.replace(/\.[^.]+$/, "") || "งานพิมพ์";
             const effSub = [jSub, (r.group.trim() || jGroup)].filter(Boolean).join("/");
             let effUrl = "", effPath = "";
-            if (jDrive) {
+            if (driveOn && jShared) {
+              // ทุกงานลงโฟลเดอร์เดียวกับงานที่เลือก (ไฟล์อยู่รวม)
+              const previewFile = await previewForDrive(r.file);
+              const { folderLink, largeCount } = await uploadArtworkToDrive({ name: nm, srcFiles: r.srcFiles, previewFile, folderId: jShared.id });
+              largeTotal += largeCount; effUrl = folderLink || jShared.url;
+            } else if (jDrive) {
               const previewFile = await previewForDrive(r.file);
               const { folderLink, largeCount } = await uploadArtworkToDrive({ name: nm, brandId: jBrand, srcFiles: r.srcFiles, previewFile, subpath: effSub, rootFolderId: jRoot.folder_id || undefined });
               largeTotal += largeCount; if (folderLink) effUrl = folderLink;
@@ -2993,10 +3043,24 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
               <option value="">— ไม่ระบุ —</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select></label>
           <label className="text-[12px] text-slate-500">📂 โฟลเดอร์ย่อย (ทั้งชุด)
-            <input value={group} onChange={(e) => setGroup(e.target.value)} list="mass-print-groups" placeholder="เช่น goodgoods (เว้นว่าง = ลงใน DTF ตรง ๆ)"
-              className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg font-mono" />
+            <input value={group} onChange={(e) => setGroup(e.target.value)} disabled={!!massShared} list="mass-print-groups" placeholder="เช่น goodgoods (เว้นว่าง = ลงใน DTF ตรง ๆ)"
+              className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg font-mono disabled:bg-slate-100" />
             <datalist id="mass-print-groups">{groupOptions.map((f) => <option key={f} value={f} />)}</datalist></label>
         </div>
+        {/* ทุกงานลงโฟลเดอร์เดียวกับงานที่มีแล้ว (ไฟล์อยู่รวม) */}
+        {driveOn && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {massShared ? (
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 px-2 py-1.5 text-[12px] text-slate-700">
+                <span>📎 ทุกงานลงโฟลเดอร์: <b>{massShared.label}</b></span>
+                <button type="button" onClick={() => setMassSharePickerOpen(true)} className="text-[11px] text-indigo-600 hover:underline">เปลี่ยน</button>
+                <button type="button" onClick={() => setMassShared(null)} className="text-[11px] text-slate-400 hover:text-red-500">✕ ยกเลิก</button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setMassSharePickerOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">📎 ทุกงานลงโฟลเดอร์เดียวกับงานที่มีแล้ว</button>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="text-[12px] text-slate-500">อัลบั้ม<div className="mt-0.5"><CollectionMultiSelect value={collectionIds} collections={cols} onChange={setCollectionIds} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
           <div className="text-[12px] text-slate-500">แท็ก<div className="mt-0.5"><TagPickerField value={tags} onChange={setTags} /></div></div>
@@ -3039,6 +3103,10 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
           ))}
         </div>
       )}
+
+      <AssetPicker open={massSharePickerOpen} onClose={() => setMassSharePickerOpen(false)} typeFilter="image" defaultSource="print" requireDriveFolder
+        title="เลือกงานพิมพ์ที่มีโฟลเดอร์ Drive แล้ว" contextLabel="ทุกงานในชุดนี้ลงโฟลเดอร์เดียวกับงานนี้"
+        onSelect={(assets) => { const s = assets[0]; if (s) { const m = (s.master_url ?? "").match(/\/folders\/([a-zA-Z0-9_-]+)/); if (m) setMassShared({ id: m[1], url: s.master_url ?? "", label: s.title || s.file_name }); } setMassSharePickerOpen(false); }} />
     </ERPModal>
   );
 }
