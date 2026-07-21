@@ -177,7 +177,7 @@ export default function CostCalculatorPage() {
   if (!canView) return <AccessDenied />;
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+    <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">🧮 คำนวณต้นทุนสินค้า</h1>
           <p className="text-sm text-slate-500 mt-0.5">เลือกสินค้า → คิดต้นทุน/กำไร + ลองว่า “จ่ายงานกี่บาท / ทำกี่วัน” → บันทึกเป็นต้นทุนมาตรฐาน</p>
@@ -198,26 +198,9 @@ export default function CostCalculatorPage() {
         {loading && <div className="text-center text-slate-400 py-8 text-sm">กำลังคิดต้นทุน…</div>}
 
         {inputs && d && (
-          <>
-            {/* สรุปต่อชิ้น */}
-            <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-              <div className="px-3 py-1.5 bg-slate-50 text-[11px] font-semibold text-slate-500 flex justify-between"><span>สรุปต่อชิ้น</span><span>จำนวน {fmt(qty)} ชิ้น</span></div>
-              <div className="divide-y divide-slate-50 text-sm">
-                <Row label="💵 ราคาขาย / ชิ้น" amount={d.sell} strong cls="text-slate-800" />
-                <Row label="วัตถุดิบ / ชิ้น" amount={d.matPP} neg sub={inputs.missing_price > 0 ? `⚠️ ${inputs.missing_price} รายการยังไม่มีราคา` : undefined} />
-                <Row label={laborModeLabel(sc.labor_mode)} amount={d.laborPP} neg
-                  sub={sc.labor_mode === "system" ? `ค่าแรงกลาง ฿${fmt(d.central)}` : sc.labor_mode === "table" ? (d.tableCalc === "target" ? `เสร็จใน ≤ ${fmt(d.maxDays)} วัน` : d.daysNeeded > 0 ? `ทำ ${fmt(Math.ceil(d.daysNeeded))} วัน` : undefined) : sc.labor_mode === "target" ? "งบที่จ่ายได้ตามเป้าหมาย" : `${d.effPieceJobs.length} งานเหมา`} />
-                {d.extrasPP > 0 && <Row label="ค่าอื่นๆ / ชิ้น" amount={d.extrasPP} neg />}
-                <Row label="= กำไร / ชิ้น" amount={d.profitPP} neg={d.profitPP < 0} strong cls={d.profitPP >= 0 ? "text-emerald-700" : "text-rose-600"} sub={`${d.marginPct}% ของราคาขาย`} />
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {[["ยอดขายรวม", d.salesTotal, "text-slate-800"], ["ต้นทุนรวม", d.costTotal, "text-slate-800"], ["กำไรรวม", d.profitTotal, d.profitPP >= 0 ? "text-emerald-700" : "text-rose-600"]].map(([l, v, c]) => (
-                <div key={l as string} className="rounded-lg bg-white border border-slate-200 px-2 py-2 text-center">
-                  <div className="text-[10px] text-slate-400">{l as string}</div><div className={`text-sm font-bold tabular-nums ${c as string}`}>฿{fmt(v as number)}</div>
-                </div>
-              ))}
-            </div>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] items-start">
+            {/* ซ้าย: ตัวคำนวณ (เป้าหมาย/ค่าแรง/วัตถุดิบ) */}
+            <div className="space-y-4 min-w-0">
 
             {/* 🧮 ค่าแรง — งบเป้าหมาย (บนสุด) + โหมดจ่ายจริงเทียบงบ */}
             <div className="border border-indigo-100 bg-indigo-50/40 rounded-xl p-3 space-y-2.5">
@@ -367,6 +350,28 @@ export default function CostCalculatorPage() {
                 </div>
               )}
             </div>
+            </div>{/* ปิดคอลัมน์ซ้าย */}
+
+            {/* ขวา: สรุป (ติดหนึบเลื่อนตาม) */}
+            <div className="space-y-3 lg:sticky lg:top-4">
+            <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+              <div className="px-3 py-1.5 bg-slate-50 text-[11px] font-semibold text-slate-500 flex justify-between"><span>สรุปต่อชิ้น</span><span>จำนวน {fmt(qty)} ชิ้น</span></div>
+              <div className="divide-y divide-slate-50 text-sm">
+                <Row label="💵 ราคาขาย / ชิ้น" amount={d.sell} strong cls="text-slate-800" />
+                <Row label="วัตถุดิบ / ชิ้น" amount={d.matPP} neg sub={inputs.missing_price > 0 ? `⚠️ ${inputs.missing_price} รายการยังไม่มีราคา` : undefined} />
+                <Row label={laborModeLabel(sc.labor_mode)} amount={d.laborPP} neg
+                  sub={sc.labor_mode === "system" ? `ค่าแรงกลาง ฿${fmt(d.central)}` : sc.labor_mode === "table" ? (d.tableCalc === "target" ? `เสร็จใน ≤ ${fmt(d.maxDays)} วัน` : d.daysNeeded > 0 ? `ทำ ${fmt(Math.ceil(d.daysNeeded))} วัน` : undefined) : `${d.effPieceJobs.length} งานเหมา`} />
+                {d.extrasPP > 0 && <Row label="ค่าอื่นๆ / ชิ้น" amount={d.extrasPP} neg />}
+                <Row label="= กำไร / ชิ้น" amount={d.profitPP} neg={d.profitPP < 0} strong cls={d.profitPP >= 0 ? "text-emerald-700" : "text-rose-600"} sub={`${d.marginPct}% ของราคาขาย`} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {[["ยอดขายรวม", d.salesTotal, "text-slate-800"], ["ต้นทุนรวม", d.costTotal, "text-slate-800"], ["กำไรรวม", d.profitTotal, d.profitPP >= 0 ? "text-emerald-700" : "text-rose-600"]].map(([l, v, c]) => (
+                <div key={l as string} className="rounded-lg bg-white border border-slate-200 px-2 py-2 text-center">
+                  <div className="text-[10px] text-slate-400">{l as string}</div><div className={`text-sm font-bold tabular-nums ${c as string}`}>฿{fmt(v as number)}</div>
+                </div>
+              ))}
+            </div>
 
             {/* บันทึกเป็นต้นทุนมาตรฐาน */}
             {canEdit && (
@@ -384,6 +389,7 @@ export default function CostCalculatorPage() {
                 {savedSku && <div>✓ มีต้นทุนเฉพาะ SKU นี้ (override) แล้ว · โดย {savedSku.created_by_name?.split("@")[0] ?? "—"}</div>}
               </div>
             )}
+            </div>{/* ปิดคอลัมน์ขวา */}
 
             {/* เลือกวัตถุดิบทดแทน (เก็บใน scenario) */}
             {subFor && (
@@ -394,7 +400,7 @@ export default function CostCalculatorPage() {
                 </div>
               </ERPModal>
             )}
-          </>
+          </div>
         )}
     </div>
   );
