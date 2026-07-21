@@ -21,6 +21,7 @@ import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
 import { WorkflowStatusManager } from "@/components/workflow-status-manager";
 import { SkuWizard } from "@/app/master/design-sheets/sku-wizard";
 import { BomFromCostWizard } from "./bom-from-cost-wizard";
+import { BomToCostWizard, type BomPulledLine } from "./bom-to-cost-wizard";
 import { ToQuotationModal } from "@/app/master/design-sheets/to-quotation-modal";
 import { QuotationCartDrawer } from "@/app/master/design-sheets/quotation-cart-drawer";
 
@@ -871,6 +872,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [statusMgr, setStatusMgr] = useState(false);   // ป๊อปอัปจัดการสถานะงาน
   const [skuWizard, setSkuWizard] = useState(false);   // Wizard สร้าง SKU
   const [bomWizard, setBomWizard] = useState(false);   // Wizard ดึงตีราคา → สร้างสูตร BOM
+  const [bomPull, setBomPull] = useState(false);       // Wizard ดึงโครงจาก BOM → ตีราคา (คู่กลับ)
   const [toQuote, setToQuote] = useState(false);       // ส่งไปใบเสนอราคา (ระบบขาย)
   const [cartId, setCartId] = useState<string | null>(null);   // ตะกร้าใบเสนอราคาปัจจุบัน
   const [cartLabel, setCartLabel] = useState<string | null>(null);
@@ -1777,6 +1779,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   {canEdit && form?.id && <button onClick={() => setCopyFromOpen(true)} title="คัดลอกตีราคาจากใบงานอื่น"
                     className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📄 Copy จากใบอื่น</button>}
                   {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
+                  {canEdit && <button onClick={() => setBomPull(true)} title="ดึงชนิด/กว้าง/ยาว/จำนวน จากสูตร BOM มาตีราคา (วัสดุ+ราคาเลือกเอง)"
+                    className="h-8 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50">🧬⬇ ดึงจาก BOM</button>}
                   {canEdit && <button onClick={() => setBomWizard(true)} title="ดึงกว้าง/ยาว/จำนวนจากตีราคาไปสร้างสูตรการผลิต (วัตถุดิบใส่ทีหลัง)"
                     className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">🧬 สร้างสูตร BOM</button>}
                 </div>
@@ -1995,6 +1999,30 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           width_cm: r.width_cm, length_cm: r.length_cm, pieces: r.pieces,
           face_width_cm: r.face_width_cm, waste_percent: r.waste_percent, qty: r.qty, uom: r.uom,
         }))} />
+
+      {/* Wizard คู่กลับ: ดึงโครงจาก BOM (ชนิด/กว้าง/ยาว/จำนวน) → ต่อท้ายบรรทัดตีราคาแท็บที่กำลังดู (วัสดุ+ราคาเลือกเอง) */}
+      {form?.id && (
+        <BomToCostWizard open={bomPull} onClose={() => setBomPull(false)} sheetId={form.id}
+          tabLabel={costParent === "" ? "ทั่วไป" : costParent}
+          onApply={(pulled: BomPulledLine[], srcLabel) => {
+            if (pulled.length === 0) return;
+            const rows = pulled.map((p, i) => recomputeRow({
+              key: `bp${Date.now()}_${i}`,
+              parent_code: costParent || null,
+              item_id: null, item_name: null,
+              group_name: p.material_type, group_code: null,
+              calc_method: null,
+              width_cm: p.width_cm, length_cm: p.length_cm, pieces: p.pieces,
+              face_width_cm: p.face_width_cm, waste_percent: p.waste_percent, divisor: null,
+              qty: null, uom: p.uom, unit_price: null, amount: null,
+              note: p.ref_name ? `อ้างอิง BOM: ${p.ref_name}` : null,
+              sort_order: costLines.length + i + 1,
+            } as CostRow));
+            setCostLines((prev) => [...prev, ...rows]);
+            setCostDirty(true);
+            toast.success(`ดึงจาก BOM ${srcLabel} มา ${rows.length} บรรทัด — เลือกวัสดุ/ใส่ราคาต่อได้เลย`);
+          }} />
+      )}
 
       {/* ส่งสินค้าไปใบเสนอราคา (ระบบขาย) — หย่อนเข้าตะกร้า หรือเริ่มใบใหม่ */}
       {form?.id && (
