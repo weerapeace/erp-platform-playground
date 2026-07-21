@@ -2571,6 +2571,8 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   const [preview, setPreview] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [ptype, setPtype] = useState("");                       // ประเภทงานพิมพ์ (code)
+  const [subpath, setSubpath] = useState("");                   // โฟลเดอร์ Drive ที่จะเก็บ (แก้เองได้ · default จากประเภท)
+  const [subpathTouched, setSubpathTouched] = useState(false);  // ผู้ใช้แก้ path เองแล้ว = ไม่ override ตอนสลับประเภท
   const [sizes, setSizes] = useState<AssetSize[]>([]);
   const [brandId, setBrandId] = useState("");
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
@@ -2592,7 +2594,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
 
-  // เลือกประเภท → เติมขนาดเริ่มต้นให้ (แก้ทับได้ · ไม่ทับถ้าใส่ขนาดเองแล้ว)
+  // เลือกประเภท → เติมขนาด + โฟลเดอร์เริ่มต้นให้ (แก้ทับได้ · ไม่ทับถ้าแก้เองแล้ว)
   const pickType = (code: string) => {
     setPtype(code);
     const t = printTypes.find((x) => x.code === code);
@@ -2600,6 +2602,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
       const one: AssetSize = { label: "ขนาดแผ่น", w: Number(t.default_w), h: Number(t.default_h), unit: (t.unit || "cm") as AssetSize["unit"] };
       setSizes((cur) => (cur.length ? cur : [one]));
     }
+    if (!subpathTouched) setSubpath((t?.drive_subpath ?? "").trim() || code);   // default โฟลเดอร์ตามประเภท
   };
 
   const pick = (f: File | null) => {
@@ -2617,17 +2620,17 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
       let effUrl = "", effPath = "";
       if (driveOn && (srcFiles.length > 0 || autoFolder)) {
         const nm = title.trim() || file.name.replace(/\.[^.]+$/, "") || "งานพิมพ์";
-        const subpath = (printTypes.find((t) => t.code === ptype)?.drive_subpath ?? "").trim() || ptype;   // เช่น "Printed/DTF"
+        const effSub = subpath.trim() || ptype;   // โฟลเดอร์ที่ตั้งในฟอร์ม (default จากประเภท) เช่น "Printed/DTF"
         const previewFile = await previewForDrive(file);
         const { folderLink, largeCount } = await uploadArtworkToDrive({
-          name: nm, brandId, srcFiles, previewFile, subpath,
+          name: nm, brandId, srcFiles, previewFile, subpath: effSub,
           onProgress: (done, total) => setDriveProg({ done, total }),
         });
         if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
         if (folderLink) effUrl = folderLink;
         // path ในเครื่องให้ตรงโครง Drive: <ฐานแบรนด์>\Printed\DTF\<ชื่องาน>
         const base = brandBase[brandId] || "";
-        effPath = base ? [base.replace(/[\\/]+$/, ""), ...subpath.split(/[\\/]+/).filter(Boolean), nm].join("\\") : "";
+        effPath = base ? [base.replace(/[\\/]+$/, ""), ...effSub.split(/[\\/]+/).filter(Boolean), nm].join("\\") : "";
       }
 
       const upFile = await downscaleImageWidth(file, 1600);
@@ -2719,6 +2722,19 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
                 </label>
                 <HelpButton guideKey="drive-link" />
               </div>
+
+              {/* โฟลเดอร์ที่จะเก็บ (แก้เองได้) + ตัวอย่างที่อยู่เต็ม */}
+              {autoFolder && (
+                <div className="mt-2">
+                  <label className="block text-[11px] text-slate-500">📁 โฟลเดอร์ Drive ที่จะเก็บ <span className="text-[10px] text-slate-400">(ใส่ / เพื่อซ้อนชั้น · เว้นว่าง = ใช้รหัสประเภท)</span>
+                    <input value={subpath} onChange={(e) => { setSubpath(e.target.value); setSubpathTouched(true); }} placeholder="เช่น Printed/DTF"
+                      className="mt-0.5 w-full h-8 px-2.5 text-[12px] border border-slate-200 rounded-lg font-mono" /></label>
+                  <p className="text-[10px] text-slate-400 mt-1 truncate">
+                    จะเก็บที่: <span className="font-mono text-slate-500">{[brands.find((b) => b.id === brandId)?.name || "โฟลเดอร์แม่", ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), title.trim() || "(ชื่องาน)"].join(" › ")}</span>
+                  </p>
+                </div>
+              )}
+
               <span className="block mt-2 text-[12px] text-slate-500">📎 ไฟล์พิมพ์ (.ai / .pdf) <span className="text-[10px] text-slate-400">— ไม่ใส่ตอนนี้ก็ได้</span></span>
               <div onClick={() => srcInputRef.current?.click()}
                 onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
