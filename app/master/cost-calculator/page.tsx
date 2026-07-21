@@ -267,10 +267,16 @@ export default function CostCalculatorPage() {
                     <div key={i} className="flex items-center gap-1.5 flex-wrap">
                       <input list="pw-jobs" value={j.label} disabled={!canEdit} onChange={(e) => setJob(i, { label: e.target.value })} placeholder="เลือก/พิมพ์ชื่องาน เช่น เย็บ" className="flex-1 min-w-[100px] h-8 px-2 text-sm border border-slate-200 rounded-lg" />
                       <input type="number" step="any" value={j.rate || ""} disabled={!canEdit} onChange={(e) => setJob(i, { rate: Number(e.target.value) || 0 })} placeholder="฿/ชิ้น" className={numIn} />
-                      <span className="text-[11px] text-slate-400">×{fmt(j.qty_per)}</span>
+                      <span className="text-[11px] text-slate-400">×</span>
+                      <input type="number" step="any" value={j.qty_per || ""} disabled={!canEdit} onChange={(e) => setJob(i, { qty_per: Number(e.target.value) || 1 })} placeholder="จำนวน" title="จำนวนครั้ง/ชิ้น (บางงานทำหลายชิ้น)" className="w-16 h-8 px-1.5 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                      <span className="text-[11px] text-slate-500 tabular-nums w-16 text-right">= ฿{fmt((Number(j.rate) || 0) * (Number(j.qty_per) || 1))}</span>
                       {canEdit && <button onClick={() => delJob(i)} className="text-rose-400 hover:text-rose-600 text-sm">✕</button>}
                     </div>
                   ))}
+                  <div className="flex items-center justify-between border-t border-indigo-100 pt-1.5 text-sm">
+                    <span className="text-slate-500 text-[12px]">รวมค่าแรงเหมา ({effJobs.length} งาน)</span>
+                    <span className="tabular-nums font-semibold text-slate-700">฿{fmt(d.pieceJobsPP)}/ชิ้น · รวม ฿{fmt(d.pieceJobsPP * qty)}</span>
+                  </div>
                   {canEdit && (
                     <div className="flex items-center gap-2 flex-wrap pt-0.5">
                       <button onClick={addJob} className="text-[11px] text-indigo-600 hover:text-indigo-700">＋ เพิ่มงานเหมา</button>
