@@ -7,7 +7,6 @@
  * สูตรคิด = ของกลาง lib/cost-calc (ตัวเดียวกับแท็บต้นทุนใน MO)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PlaygroundShell } from "@/components/playground-shell";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -95,11 +94,10 @@ export default function CostCalculatorPage() {
     </div>
   );
 
-  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
+  if (!canView) return <AccessDenied />;
 
   return (
-    <PlaygroundShell>
-      <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+    <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">🧮 คำนวณต้นทุนสินค้า</h1>
           <p className="text-sm text-slate-500 mt-0.5">เลือกสินค้า → คิดต้นทุน/กำไร + ลองว่า “จ่ายงานกี่บาท / ทำกี่วัน” → บันทึกเป็นต้นทุนมาตรฐาน</p>
@@ -219,7 +217,6 @@ export default function CostCalculatorPage() {
             )}
           </>
         )}
-      </div>
-    </PlaygroundShell>
+    </div>
   );
 }
