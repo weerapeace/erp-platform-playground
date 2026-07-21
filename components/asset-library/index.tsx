@@ -2579,6 +2579,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   const [subpathTouched, setSubpathTouched] = useState(false);  // ผู้ใช้แก้ path เองแล้ว = ไม่ override ตอนสลับประเภท
   const [groupFolder, setGroupFolder] = useState("");           // โฟลเดอร์ย่อยเลือกได้ (เช่น goodgoods) — ไม่ใส่ = ไฟล์ลงในซับตรง ๆ
   const [groupOptions, setGroupOptions] = useState<string[]>([]); // โฟลเดอร์ย่อยที่มีอยู่แล้ว (ทำ dropdown)
+  const [resizeW, setResizeW] = useState(1200);                 // ย่อรูป preview ก่อนเก็บคลัง (0 = ขนาดจริง)
   const [sizes, setSizes] = useState<AssetSize[]>([]);
   const [brandId, setBrandId] = useState("");
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
@@ -2653,7 +2654,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
         effPath = base ? [base.replace(/[\\/]+$/, ""), ...effSub.split(/[\\/]+/).filter(Boolean)].join("\\") : "";
       }
 
-      const upFile = await downscaleImageWidth(file, 1600);
+      const upFile = resizeW > 0 ? await downscaleImageWidth(file, resizeW) : file;   // ย่อรูป preview ตามที่เลือก (0 = ขนาดจริง)
       const fd = new FormData();
       fd.append("file", upFile);
       fd.append("source", "print");
@@ -2703,6 +2704,18 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
               ? <img src={preview} alt="" className="max-w-full max-h-full object-contain" />
               : <span className="text-[12px] text-slate-400 text-center px-4">ลากรูป preview ของแผ่นมาวาง<br />หรือคลิกเลือก</span>}
             <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0] ?? null)} />
+          </div>
+          {/* ย่อขนาดรูป preview ก่อนเก็บคลัง (ไฟล์ส่งพิมพ์บน Drive ไม่โดนย่อ) */}
+          <div className="mt-2">
+            <p className="text-[11px] text-slate-500 mb-1">ย่อขนาดรูป preview <span className="text-[10px] text-slate-400">(ด้านกว้าง)</span></p>
+            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+              {[{ w: 800, label: "800px" }, { w: 1200, label: "1200px" }, { w: 1600, label: "1600px" }, { w: 0, label: "ขนาดจริง" }].map((o, i) => (
+                <button key={o.w} type="button" onClick={() => setResizeW(o.w)} disabled={busy}
+                  className={`h-8 px-2.5 text-[12px] ${i > 0 ? "border-l border-slate-200" : ""} ${resizeW === o.w ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"} disabled:opacity-50`}>
+                  {resizeW === o.w ? "✓ " : ""}{o.label}
+                </button>
+              ))}
+            </div>
           </div>
           <label className="block text-[12px] text-slate-500 mt-2">ชื่องาน
             <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น DTF 60cm. ช้างใบใหญ่"
