@@ -45,6 +45,7 @@ export default function CostCalculatorPage() {
   const [centralOverride, setCentralOverride] = useState<number | null>(null);   // แก้ค่าแรงกลางในหน้า (ก่อนบันทึกกลับ BOM)
   const [savingCentral, setSavingCentral] = useState(false);
   const [subFor, setSubFor] = useState<MoCostMaterial | null>(null);             // วัตถุดิบที่กำลังเลือกตัวแทน (เปิด picker)
+  const [openMat, setOpenMat] = useState<Record<string, boolean>>({});           // แถววัสดุที่กางดูรายย่อย
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
   const [craftsmen, setCraftsmen] = useState<{ id: string; name: string; department_id?: string | null }[]>([]);
   const [jobNames, setJobNames] = useState<string[]>([]);                        // ชื่องานเหมา distinct (dropdown)
@@ -108,15 +109,15 @@ export default function CostCalculatorPage() {
   const clearSub = (origSku: string) => setSc((s) => ({ ...s, substitutes: (s.substitutes ?? []).filter((x) => x.orig_sku !== origSku) }));
   const subMap = useMemo(() => new Map((sc.substitutes ?? []).map((x) => [x.orig_sku, x])), [sc.substitutes]);
 
-  // จับกลุ่ม "ตามวัตถุดิบ" — รวมบรรทัดวัสดุตัวเดียวกันเป็นแถวเดียว (บวกจำนวน) เรียงตามราค���มาก→น้อย
+  // จับกลุ่ม "ตามวัตถุดิบ" — รวมบรรทัดวัสดุตัวเดียวกันเป็นแถวเดียว (บวกจำนวน) + เก็บรายย่อยไว้กดขยาย
   const matRows = useMemo(() => {
-    if (!inputs) return [] as MoCostMaterial[];
-    const g = new Map<string, MoCostMaterial>();
+    if (!inputs) return [] as { key: string; main: MoCostMaterial; lines: MoCostMaterial[] }[];
+    const g = new Map<string, { key: string; main: MoCostMaterial; lines: MoCostMaterial[] }>();
     for (const m of inputs.materials) {
       const key = m.sku || m.name || "?";
       const ex = g.get(key);
-      if (ex) ex.qty_per = Math.round((ex.qty_per + m.qty_per) * 10000) / 10000;
-      else g.set(key, { ...m });
+      if (ex) { ex.main.qty_per = Math.round((ex.main.qty_per + m.qty_per) * 10000) / 10000; ex.lines.push(m); }
+      else g.set(key, { key, main: { ...m }, lines: [m] });
     }
     return [...g.values()];
   }, [inputs]);
@@ -246,18 +247,36 @@ export default function CostCalculatorPage() {
               {sc.labor_mode === "piece" && (
                 <div className="space-y-1.5">
                   <datalist id="pw-jobs">{jobNames.map((n) => <option key={n} value={n} />)}</datalist>
-                  {effJobs.map((j, i) => (
-                    <div key={i} className="flex items-center gap-1.5 flex-wrap">
-                      <input list="pw-jobs" value={j.label} disabled={!canEdit} onChange={(e) => setJob(i, { label: e.target.value })} placeholder="เลือก/พิมพ์ชื่องาน เช่น เย็บ" className="flex-1 min-w-[100px] h-8 px-2 text-sm border border-slate-200 rounded-lg" />
-                      <input type="number" step="any" value={j.rate || ""} disabled={!canEdit} onChange={(e) => setJob(i, { rate: Number(e.target.value) || 0 })} placeholder="฿/ชิ้น" className={numIn} />
-                      <span className="text-[11px] text-slate-400">×</span>
-                      <input type="number" step="any" value={j.qty_per || ""} disabled={!canEdit} onChange={(e) => setJob(i, { qty_per: Number(e.target.value) || 1 })} placeholder="จำนวน" title="จำนวนครั้ง/ชิ้น (บางงานทำหลายชิ้น)" className="w-16 h-8 px-1.5 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
-                      <span className="text-[11px] text-slate-500 tabular-nums w-16 text-right">= ฿{fmt((Number(j.rate) || 0) * (Number(j.qty_per) || 1))}</span>
-                      {canEdit && <button onClick={() => delJob(i)} className="text-rose-400 hover:text-rose-600 text-sm">✕</button>}
-                    </div>
-                  ))}
+                  {effJobs.map((j, i) => {
+                    const smIn = "w-16 h-8 px-1.5 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50";
+                    const jobPP = j.kind === "table"
+                      ? (qty > 0 && (Number(j.workdays) || 0) > 0 ? ((Number(j.salary) || 0) / (Number(j.workdays) || 1)) * (Number(j.days) || 0) / qty : 0)
+                      : (Number(j.rate) || 0) * (Number(j.qty_per) || 1);
+                    return (
+                      <div key={i} className="border border-slate-100 rounded-lg p-1.5 space-y-1 bg-white">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <input list="pw-jobs" value={j.label} disabled={!canEdit} onChange={(e) => setJob(i, { label: e.target.value })} placeholder="เลือก/พิมพ์ชื่องาน เช่น เย็บ" className="flex-1 min-w-[90px] h-8 px-2 text-sm border border-slate-200 rounded-lg" />
+                          <button type="button" disabled={!canEdit} onClick={() => setJob(i, { kind: j.kind === "table" ? "piece" : "table" })} title="สลับชนิดงาน" className="h-8 px-2 text-[11px] rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">{j.kind === "table" ? "🪑 โต๊ะ" : "✂️ ชิ้น"}</button>
+                          <span className="text-[11px] text-slate-500 tabular-nums w-20 text-right">= ฿{fmt(jobPP)}/ชิ้น</span>
+                          {canEdit && <button onClick={() => delJob(i)} className="text-rose-400 hover:text-rose-600 text-sm">✕</button>}
+                        </div>
+                        {j.kind === "piece" ? (
+                          <div className="flex items-center gap-1.5 flex-wrap text-[12px] text-slate-500 pl-1">
+                            <input type="number" step="any" value={j.rate || ""} disabled={!canEdit} onChange={(e) => setJob(i, { rate: Number(e.target.value) || 0 })} placeholder="฿/ชิ้น" className={smIn} /> ฿/ชิ้น ×
+                            <input type="number" step="any" value={j.qty_per || ""} disabled={!canEdit} onChange={(e) => setJob(i, { qty_per: Number(e.target.value) || 1 })} placeholder="จำนวน" title="จำนวนครั้ง/ชิ้น" className={smIn} /> ครั้ง
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 flex-wrap text-[12px] text-slate-500 pl-1">
+                            เงินเดือน <input type="number" step="any" value={j.salary || ""} disabled={!canEdit} onChange={(e) => setJob(i, { salary: Number(e.target.value) || 0 })} className={smIn} /> ÷ ทำงาน
+                            <input type="number" value={j.workdays || ""} disabled={!canEdit} onChange={(e) => setJob(i, { workdays: Number(e.target.value) || 0 })} className={smIn} /> วัน/เดือน × ใช้
+                            <input type="number" step="any" value={j.days || ""} disabled={!canEdit} onChange={(e) => setJob(i, { days: Number(e.target.value) || 0 })} className={smIn} /> วัน
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   <div className="flex items-center justify-between border-t border-indigo-100 pt-1.5 text-sm">
-                    <span className="text-slate-500 text-[12px]">รวมค่าแรงเหมา ({effJobs.length} งาน)</span>
+                    <span className="text-slate-500 text-[12px]">รวมค่าแรง ({effJobs.length} งาน · เหมา+โต๊ะ)</span>
                     <span className="tabular-nums font-semibold text-slate-700">฿{fmt(d.pieceJobsPP)}/ชิ้น · รวม ฿{fmt(d.pieceJobsPP * qty)}</span>
                   </div>
                   {canEdit && (
@@ -326,23 +345,42 @@ export default function CostCalculatorPage() {
               </button>
               {showMat && (
                 <div className="border-t border-slate-100 divide-y divide-slate-50 text-[12px]">
-                  {matRows.map((m) => ({ m, sub: m.sku ? subMap.get(m.sku) : undefined }))
-                    .map((x) => ({ ...x, unit: x.sub ? x.sub.unit_cost : x.m.unit_cost }))
-                    .sort((a, b) => (b.unit * b.m.qty_per) - (a.unit * a.m.qty_per))
-                    .map(({ m, sub, unit }, i) => {
-                      const linePP = Math.round(unit * m.qty_per * 100) / 100;
+                  {matRows.map((row) => {
+                      const m = row.main; const sub = m.sku ? subMap.get(m.sku) : undefined;
+                      const unit = sub ? sub.unit_cost : m.unit_cost;
+                      return { row, m, sub, unit, linePP: Math.round(unit * m.qty_per * 100) / 100 };
+                    })
+                    .sort((a, b) => b.linePP - a.linePP)
+                    .map(({ row, m, sub, unit, linePP }) => {
+                      const open = !!openMat[row.key]; const multi = row.lines.length > 1;
                       return (
-                        <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5">
-                          <span className="min-w-0 truncate">
-                            {sub ? <span className="text-indigo-700">🔁 {sub.sub_name} <span className="text-[10px] text-indigo-400">(แทน {m.name})</span></span> : <span className="text-slate-600">{m.name || m.sku}</span>}
-                            <span className="text-slate-300"> ×{fmt(m.qty_per)}</span>
-                          </span>
-                          <span className="flex items-center gap-2 shrink-0">
-                            <span className={`tabular-nums ${unit > 0 ? "text-slate-600" : "text-amber-600"}`}>{unit > 0 ? `฿${fmt(linePP)}` : "ยังไม่มีราคา"}</span>
-                            {canEdit && m.sku && (sub
-                              ? <button onClick={() => clearSub(m.sku!)} title="คืนวัสดุเดิม" className="text-[10px] text-slate-400 hover:text-rose-500">คืนเดิม</button>
-                              : <button onClick={() => setSubFor(m)} title="ใช้วัตถุดิบทดแทน" className="text-[13px] text-indigo-400 hover:text-indigo-700">🔁</button>)}
-                          </span>
+                        <div key={row.key}>
+                          <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+                            <button type="button" onClick={() => multi && setOpenMat((s) => ({ ...s, [row.key]: !s[row.key] }))} className={`min-w-0 truncate text-left flex items-center gap-1 ${multi ? "cursor-pointer" : "cursor-default"}`}>
+                              {multi && <span className="text-slate-300 text-[9px] shrink-0">{open ? "▼" : "▶"}</span>}
+                              {sub ? <span className="text-indigo-700 truncate">🔁 {sub.sub_name} <span className="text-[10px] text-indigo-400">(แทน {m.name})</span></span> : <span className="text-slate-600 truncate">{m.name || m.sku}</span>}
+                              <span className="text-slate-300 shrink-0"> ×{fmt(m.qty_per)}{multi ? ` · ${row.lines.length} จุด` : ""}</span>
+                            </button>
+                            <span className="flex items-center gap-2 shrink-0">
+                              <span className="text-right leading-tight">
+                                <span className={`tabular-nums block ${unit > 0 ? "text-slate-600" : "text-amber-600"}`}>{unit > 0 ? `฿${fmt(linePP)}` : "ยังไม่มีราคา"}</span>
+                                {unit > 0 && <span className="text-[10px] text-slate-400 block">฿{fmt(unit)}/{m.uom || "หน่วย"}</span>}
+                              </span>
+                              {canEdit && m.sku && (sub
+                                ? <button onClick={() => clearSub(m.sku!)} title="คืนวัสดุเดิม" className="text-[10px] text-slate-400 hover:text-rose-500">คืนเดิม</button>
+                                : <button onClick={() => setSubFor(m)} title="ใช้วัตถุดิบทดแทน" className="text-[13px] text-indigo-400 hover:text-indigo-700">🔁</button>)}
+                            </span>
+                          </div>
+                          {open && multi && (
+                            <div className="bg-slate-50/70 px-3 py-1 space-y-0.5">
+                              {row.lines.map((ln, li) => (
+                                <div key={li} className="flex items-center justify-between text-[11px] text-slate-500">
+                                  <span>• จุดที่ {li + 1} · ×{fmt(ln.qty_per)}</span>
+                                  <span className="tabular-nums">฿{fmt(Math.round(unit * ln.qty_per * 100) / 100)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
