@@ -66,6 +66,17 @@ const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", de
 // บรรทัดตีราคา (เฟส 4) — row ฝั่งหน้าจอ = CostLine + key ชั่วคราว (+ group_code สำหรับเช็คชนิดชิ้น)
 type CostRow = CostLine & { key: string; group_code?: string | null };
 const METHOD_LABEL: Record<string, string> = { area_face: "พื้นที่÷หน้ากว้าง", area_100: "พื้นที่÷100", length: "ความยาว", count: "นับชิ้น", manual: "พิมพ์เอง" };
+
+// หมายเหตุที่บรรทัด "ดึงจาก BOM" ใส่ไว้ = อ้างอิงชื่อวัสดุเดิม → ใช้เป็นคำค้นตั้งต้นตอนเลือกวัสดุ
+const BOM_REF_NOTE_PREFIX = "อ้างอิง BOM: ";
+function bomRefSearchSeed(note: string | null | undefined): string {
+  const s = (note ?? "").trim();
+  if (!s.startsWith(BOM_REF_NOTE_PREFIX)) return "";
+  let name = s.slice(BOM_REF_NOTE_PREFIX.length).trim();
+  const p = name.indexOf("(");   // ตัดวงเล็บรายละเอียด (เช่น "( 1 ม้วน = 50 หลา )") ออก เหลือชื่อหลัก
+  if (p > 0) name = name.slice(0, p).trim();
+  return name;
+}
 const fmtQty = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-TH", { maximumFractionDigits: 4 }));
 const fmtBaht = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const pkey = (s: string | null | undefined) => s ?? "";   // ข้อ 7: คีย์แท็บ Parent ของบรรทัดตีราคา ("" = ทั่วไป)
@@ -1226,6 +1237,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             <div className="flex items-center gap-1">
               <div className="flex-1 min-w-0">
                 <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!fullEdit} placeholder="— เลือกกลุ่ม / วัสดุ —"
+                  initialQuery={!r.item_id ? bomRefSearchSeed(r.note) : undefined}
                   options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
                   onChange={(val) => {
                     const it = priceItems.find((p) => p.id === val);
@@ -1503,7 +1515,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบสั่งตัวอย่าง</a>
               <a href={`/print/design-sheet-quote/${form.id}`} target="_blank" rel="noreferrer"
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบเสนอราคา</a>
-              <a href={`/print/design-sheet-cost/${form.id}`} target="_blank" rel="noreferrer"
+              <a href={`/print/design-sheet-cost/${form.id}${costParent ? `?parent=${encodeURIComponent(costParent)}` : ""}`} target="_blank" rel="noreferrer"
+                title={costParent ? `พิมพ์เฉพาะไซส์ "${costParent}" (เปลี่ยนได้ในหน้าพิมพ์)` : "พิมพ์ใบตีราคาต้นทุน"}
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบตีราคา</a>
               {canCreate && (
                 <button onClick={() => setSkuWizard(true)} title="สร้าง Parent SKU + SKU ลูก จากใบงานนี้"
@@ -2015,7 +2028,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               width_cm: p.width_cm, length_cm: p.length_cm, pieces: p.pieces,
               face_width_cm: p.face_width_cm, waste_percent: p.waste_percent, divisor: null,
               qty: null, uom: p.uom, unit_price: null, amount: null,
-              note: p.ref_name ? `อ้างอิง BOM: ${p.ref_name}` : null,
+              note: p.ref_name ? `${BOM_REF_NOTE_PREFIX}${p.ref_name}` : null,
               sort_order: costLines.length + i + 1,
             } as CostRow));
             setCostLines((prev) => [...prev, ...rows]);

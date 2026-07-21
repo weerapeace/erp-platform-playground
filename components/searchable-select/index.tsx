@@ -17,7 +17,7 @@ export type SelectOption = { value: string; label: string; badge?: string; sub?:
 type Pos = { left: number; top: number; width: number; openUp: boolean };
 
 export function SearchableSelect({
-  value, options, onChange, placeholder = "— เลือก —", disabled, className, onCreate, createLabel = "เพิ่มใหม่",
+  value, options, onChange, placeholder = "— เลือก —", disabled, className, onCreate, createLabel = "เพิ่มใหม่", initialQuery,
 }: {
   value: string;
   options: SelectOption[];
@@ -28,9 +28,12 @@ export function SearchableSelect({
   /** ถ้าค้นแล้วไม่เจอ → โชว์ปุ่ม "+ สร้าง <คำค้น>" (ของกลาง: ใช้สร้างรายการใหม่ทันทีจาก dropdown) */
   onCreate?: (query: string) => void;
   createLabel?: string;
+  /** เปิด dropdown มาพร้อมคำค้นตั้งต้น (เช่น ดึงชื่อจากหมายเหตุ) — ผู้ใช้ลบ/แก้ได้ */
+  initialQuery?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const openMenu = () => { setQ(initialQuery ?? ""); setOpen(true); };   // seed คำค้นทุกครั้งที่เปิด
   const [pos, setPos] = useState<Pos | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const cur = options.find((o) => o.value === value);
@@ -68,7 +71,7 @@ export function SearchableSelect({
 
   return (
     <div className={`relative ${className ?? ""}`}>
-      <button ref={btnRef} type="button" disabled={disabled} onClick={() => setOpen((o) => !o)}
+      <button ref={btnRef} type="button" disabled={disabled} onClick={() => (open ? close() : openMenu())}
         className="w-full h-9 px-2 text-sm text-left border border-slate-200 rounded-md bg-white flex items-center gap-1 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-blue-500">
         <span className="flex-1 min-w-0 truncate">
           {cur ? <>{cur.label}{cur.badge ? ` ${cur.badge}` : ""}</> : <span className="text-slate-400">{placeholder}</span>}
