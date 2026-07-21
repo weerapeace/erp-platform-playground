@@ -1786,7 +1786,8 @@ function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, craft
   const [bomSaving, setBomSaving] = useState(false);
   useEffect(() => {
     if (!cost) return;
-    const s = cost.scenario;
+    // ใบนี้เคยคิดแล้ว → ใช้ของใบ · ยังไม่เคย → ดึง "ต้นทุนมาตรฐานของสินค้า" มาเป็นค่าตั้งต้น
+    const s = cost.scenario ?? cost.default_scenario ?? null;
     setSc(s ? { labor_mode: s.labor_mode ?? "system", piece_rate: Number(s.piece_rate) || 0,
       piece_jobs: Array.isArray(s.piece_jobs) ? s.piece_jobs.map(normPieceJob) : undefined,
       table: { salary: Number(s.table?.salary) || 0, workdays: Number(s.table?.workdays) || 26, capacity: Number(s.table?.capacity) || 0, dept_name: s.table?.dept_name ?? "", calc: s.table?.calc === "target" ? "target" : "days", days: Number(s.table?.days) || 0, target_pp: Number(s.table?.target_pp) || 0, pick_mode: s.table?.pick_mode === "workers" ? "workers" : "table", worker_ids: Array.isArray(s.table?.worker_ids) ? s.table.worker_ids : [] },
@@ -1842,6 +1843,19 @@ function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, craft
     try { const r = await apiFetch(`/api/mo/${encodeURIComponent(moId)}/cost`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scenario: sc }) }); const j = await r.json(); if (j.error) throw new Error(j.error); toast.success("บันทึกการคำนวณแล้ว"); }
     catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
+  };
+  // บันทึกการคิดนี้กลับเป็น "ต้นทุนมาตรฐาน" ของสินค้า (รุ่น/ทุกสี) → module คำนวณต้นทุน + ใบอื่นดึงไปใช้
+  const [savingStd, setSavingStd] = useState(false);
+  const saveToProduct = async () => {
+    if (!cost?.parent_code) { toast.error("สินค้านี้ไม่มี Parent SKU"); return; }
+    setSavingStd(true);
+    try {
+      const summary = { material_pp: matPP, labor_pp: laborPP, extras_pp: extrasPP, cost_pp: costPP, sell, profit_pp: profitPP, margin_pct: marginPct };
+      const r = await apiFetch("/api/product-costings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ target_type: "parent", target_code: cost.parent_code, qty_basis: qty, scenario: sc, summary }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast.success(`บันทึกเป็นต้นทุนมาตรฐานของรุ่น (${cost.parent_code}) แล้ว`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSavingStd(false); }
   };
   const setTable = (p: Partial<CostScenario["table"]>) => setSc((s) => ({ ...s, table: { ...s.table, ...p } }));
   const setExtra = (i: number, p: Partial<CostScenario["extras"][number]>) => setSc((s) => ({ ...s, extras: s.extras.map((e, idx) => idx === i ? { ...e, ...p } : e) }));
@@ -1902,7 +1916,10 @@ function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, craft
       <div className="border border-indigo-100 bg-indigo-50/40 rounded-xl p-3 space-y-2.5">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-semibold text-slate-700">🧮 ทดลองคำนวณ</span>
-          {canEdit && <button onClick={() => void save()} disabled={saving} className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? "บันทึก…" : "💾 บันทึก"}</button>}
+          <div className="flex items-center gap-1.5">
+            {canEdit && cost.parent_code && <button onClick={() => void saveToProduct()} disabled={savingStd} title="บันทึกการคิดนี้เป็นต้นทุนมาตรฐานของสินค้า (ทุกสี) → ใบอื่นดึงไปใช้ได้" className="h-8 px-3 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50">{savingStd ? "…" : "→ ต้นทุนมาตรฐาน"}</button>}
+            {canEdit && <button onClick={() => void save()} disabled={saving} className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? "บันทึก…" : "💾 บันทึกใบนี้"}</button>}
+          </div>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[11px] text-slate-500">ใช้ค่าแรง:</span>

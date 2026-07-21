@@ -45,7 +45,9 @@ export type MoCost = {
   materials: MoCostMaterial[]; missing_price: number;
   central_rate: number;               // ค่าแรงกลาง/ชิ้น (เพดานห้ามเกิน)
   est_labor_total: number; est_labor_pp: number;   // ค่าแรงผลิตที่ตั้งจริง (รวม/ต่อชิ้น)
-  scenario: CostScenario | null;      // ค่าทดลองที่บันทึกไว้
+  scenario: CostScenario | null;      // ค่าทดลองที่บันทึกไว้ (ต่อใบนี้)
+  parent_code: string | null;         // รหัส Parent SKU (ไว้บันทึกกลับเป็นต้นทุนมาตรฐาน)
+  default_scenario: CostScenario | null;   // ต้นทุนมาตรฐานของสินค้า (ใช้เป็นค่าตั้งต้นถ้าใบนี้ยังไม่เคยคิด)
 };
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -88,10 +90,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const est_labor_total = num(m.est_labor_cost);
   const est_labor_pp = qty > 0 ? r4(est_labor_total / qty) : 0;
 
+  // Parent SKU + ต้นทุนมาตรฐานของสินค้า (module คำนวณต้นทุน) — ใช้เป็นค่าตั้งต้นถ้าใบนี้ยังไม่เคยคิด
+  let parent_code: string | null = null;
+  let default_scenario: CostScenario | null = null;
+  if (m.product_sku) {
+    const { data: sk } = await admin.from("skus_v2").select("parent_sku_id").eq("code", String(m.product_sku)).maybeSingle();
+    const pid = (sk as { parent_sku_id?: string } | null)?.parent_sku_id ?? null;
+    if (pid) { const { data: pp } = await admin.from("parent_skus_v2").select("code").eq("id", pid).maybeSingle(); parent_code = (pp as { code?: string } | null)?.code ?? null; }
+    if (!m.cost_scenario) {
+      const pick = async (type: string, code: string): Promise<CostScenario | null> => {
+        if (!code) return null;
+        const { data } = await admin.from("product_costings").select("scenario").eq("target_type", type).eq("target_code", code).eq("is_current", true).eq("is_active", true).maybeSingle();
+        return (data as { scenario?: CostScenario } | null)?.scenario ?? null;
+      };
+      default_scenario = (await pick("sku", String(m.product_sku))) ?? (parent_code ? await pick("parent", parent_code) : null);
+    }
+  }
+
   const data: MoCost = {
     product_sku: (m.product_sku as string) ?? null, product_name: (m.product_name as string) ?? null, qty,
     sell_price, material_cost_pp, materials, missing_price, central_rate, est_labor_total, est_labor_pp,
     scenario: (m.cost_scenario as CostScenario) ?? null,
+    parent_code, default_scenario,
   };
   return NextResponse.json({ data, error: null });
 }
