@@ -26,10 +26,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     let folderId = String(form.get("folderId") ?? "").trim();
     if (!folderId) {
-      // ของกลาง: [โฟลเดอร์แบรนด์] > [ซับตามชนิด] > [ชื่องาน]
+      // ของกลาง: [โฟลเดอร์แบรนด์] > [ซับ] > [ชื่องาน] · subpath = path ซ้อนชั้นเอง (งานพิมพ์ "Printed/DTF")
       folderId = await resolveArtworkDriveFolder(supabaseAdmin(), {
         brandId: String(form.get("brand_id") ?? "").trim(),
         artworkType: String(form.get("artworkType") ?? "").trim(),
+        subpathOverride: String(form.get("subpath") ?? "").trim() || null,
         name,
       });
     }

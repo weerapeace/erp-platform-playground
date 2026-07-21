@@ -8,19 +8,32 @@ import { r2GetObject } from "./r2";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
-/** หา/สร้างโฟลเดอร์ Drive ของ artwork: [โฟลเดอร์แบรนด์] > [ซับตามชนิด] > [ชื่องาน] → คืน folderId */
-export async function resolveArtworkDriveFolder(admin: Admin, opts: { brandId?: string | null; artworkType?: string | null; name: string }): Promise<string> {
+/** สร้างชั้นโฟลเดอร์ตาม path ซ้อนชั้น (เช่น "Printed/DTF") ใต้ parent → คืน folderId ชั้นล่างสุด */
+async function ensureSubPath(parent: string, subpath: string): Promise<string> {
+  let cur = parent;
+  for (const seg of subpath.split(/[\\/]+/).map((s) => s.trim()).filter(Boolean)) cur = await driveEnsureFolder(seg, cur);
+  return cur;
+}
+
+/** หา/สร้างโฟลเดอร์ Drive: [โฟลเดอร์แบรนด์] > [ซับ] > [ชื่องาน] → คืน folderId
+ *  subpathOverride = ใส่ path ซ้อนชั้นเอง (เช่น "Printed/DTF" ของงานพิมพ์) แทนการแม็ปตามชนิด artwork */
+export async function resolveArtworkDriveFolder(admin: Admin, opts: { brandId?: string | null; artworkType?: string | null; name: string; subpathOverride?: string | null }): Promise<string> {
   let brandFolder = DRIVE_ROOT_FOLDER_ID;
   if (opts.brandId) {
     const { data } = await admin.from("erp_brand_drive_folders").select("folder_id").eq("brand_id", opts.brandId).maybeSingle();
     if (data?.folder_id) brandFolder = String(data.folder_id);
   }
   let parent = brandFolder;
-  const at = (opts.artworkType ?? "").trim();
-  if (at) {
-    const { data } = await admin.from("erp_artwork_drive_folders").select("subfolder_name").eq("artwork_type", at).maybeSingle();
-    const subName = (data?.subfolder_name || at).trim();
-    if (subName) parent = await driveEnsureFolder(subName, brandFolder);
+  const override = (opts.subpathOverride ?? "").trim();
+  if (override) {
+    parent = await ensureSubPath(brandFolder, override);
+  } else {
+    const at = (opts.artworkType ?? "").trim();
+    if (at) {
+      const { data } = await admin.from("erp_artwork_drive_folders").select("subfolder_name").eq("artwork_type", at).maybeSingle();
+      const subName = (data?.subfolder_name || at).trim();
+      if (subName) parent = await driveEnsureFolder(subName, brandFolder);
+    }
   }
   return driveEnsureFolder(opts.name.trim() || "artwork", parent);
 }

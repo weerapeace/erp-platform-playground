@@ -25,6 +25,7 @@ import { Spinner, LoadingOverlay } from "@/components/spinner";
 import { HoverPreview } from "@/components/hover-image";
 import { ParentSkuMultiPickerModal } from "@/components/parent-sku-multi-picker";
 import { DriveFolderFiles } from "@/components/drive-folder-files";
+import { HelpButton } from "@/components/help-guides";
 import { runBackgroundTask } from "@/lib/background-tasks";
 import { useRefresh, triggerRefresh } from "@/lib/refresh-bus";
 import type { PrintType } from "@/app/api/print-types/route";
@@ -1214,7 +1215,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
               {/* เพิ่มไฟล์ต้นฉบับขึ้น Drive ย้อนหลัง (ลืมใส่ตอนสร้าง) → สร้างโฟลเดอร์ใหม่ หรือ ใช้โฟลเดอร์เดียวกับรูปอื่น */}
               {driveOn && !trashed && (
                 <div className="mt-2.5 pt-2.5 border-t border-dashed border-slate-200">
-                  <p className="text-[12px] font-medium text-slate-600 mb-1.5">📤 ไฟล์ต้นฉบับบน Drive</p>
+                  <p className="text-[12px] font-medium text-slate-600 mb-1.5 flex items-center justify-between">📤 ไฟล์ต้นฉบับบน Drive <HelpButton guideKey="drive-link" /></p>
                   {/* เลือกปลายทาง: โฟลเดอร์ใหม่ vs ใช้โฟลเดอร์เดียวกับรูปอื่น (ไม่อยากสร้างหลายโฟลเดอร์) */}
                   <div className="flex gap-1 mb-2 p-0.5 bg-slate-100 rounded-lg">
                     <button type="button" onClick={() => setDriveMode("new")}
@@ -1762,6 +1763,7 @@ async function uploadArtworkToDrive(opts: {
   srcFiles: File[]; previewFile?: File | null;
   folderId?: string;   // ส่งมา = อัปเข้าโฟลเดอร์นี้เลย (ไม่สร้างใหม่) — ใช้ตอน "หลายรูป โฟลเดอร์เดียว"
   folderName?: string; // ตั้งชื่อโฟลเดอร์แยกจากชื่อไฟล์ (โหมดโฟลเดอร์รวม — ไฟล์ยังชื่อตามรูปแต่ละใบ)
+  subpath?: string;    // path ซ้อนชั้นเอง (เช่น "Printed/DTF" ของงานพิมพ์) แทนการแม็ปตามชนิด
   onProgress?: (done: number, total: number) => void;
 }): Promise<{ folderId: string; folderLink: string; largeCount: number }> {
   const nm = opts.name.trim() || "artwork";
@@ -1775,6 +1777,7 @@ async function uploadArtworkToDrive(opts: {
     const fd = new FormData();
     fd.append("name", folderNm);
     if (opts.artworkType) fd.append("artworkType", opts.artworkType);
+    if (opts.subpath) fd.append("subpath", opts.subpath);
     if (opts.brandId) fd.append("brand_id", opts.brandId);
     if (folderId) fd.append("folderId", folderId);
     if (x) { fd.append("filename", x.filename); fd.append("file", x.file); }
@@ -2614,14 +2617,17 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
       let effUrl = "", effPath = "";
       if (driveOn && (srcFiles.length > 0 || autoFolder)) {
         const nm = title.trim() || file.name.replace(/\.[^.]+$/, "") || "งานพิมพ์";
+        const subpath = (printTypes.find((t) => t.code === ptype)?.drive_subpath ?? "").trim() || ptype;   // เช่น "Printed/DTF"
         const previewFile = await previewForDrive(file);
         const { folderLink, largeCount } = await uploadArtworkToDrive({
-          name: nm, artworkType: ptype, brandId, srcFiles, previewFile,
+          name: nm, brandId, srcFiles, previewFile, subpath,
           onProgress: (done, total) => setDriveProg({ done, total }),
         });
         if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
         if (folderLink) effUrl = folderLink;
-        effPath = brandFolderPath(nm, brandId, ptype, brandBase, typeSub);
+        // path ในเครื่องให้ตรงโครง Drive: <ฐานแบรนด์>\Printed\DTF\<ชื่องาน>
+        const base = brandBase[brandId] || "";
+        effPath = base ? [base.replace(/[\\/]+$/, ""), ...subpath.split(/[\\/]+/).filter(Boolean), nm].join("\\") : "";
       }
 
       const upFile = await downscaleImageWidth(file, 1600);
@@ -2706,10 +2712,13 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
 
           {driveOn && (
             <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5">
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
-                <span className="text-[12px] text-slate-700">🗂️ <b>สร้างโฟลเดอร์ Drive ให้อัตโนมัติ</b> + ก็อปรูป preview เข้าไป</span>
-              </label>
+              <div className="flex items-start justify-between gap-2">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
+                  <span className="text-[12px] text-slate-700">🗂️ <b>สร้างโฟลเดอร์ Drive ให้อัตโนมัติ</b> + ก็อปรูป preview เข้าไป</span>
+                </label>
+                <HelpButton guideKey="drive-link" />
+              </div>
               <span className="block mt-2 text-[12px] text-slate-500">📎 ไฟล์พิมพ์ (.ai / .pdf) <span className="text-[10px] text-slate-400">— ไม่ใส่ตอนนี้ก็ได้</span></span>
               <div onClick={() => srcInputRef.current?.click()}
                 onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
@@ -2760,7 +2769,7 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
   const toast = useToast();
   const [rows, setRows] = useState<PrintType[]>(types);
   const [busy, setBusy] = useState(false);
-  const [nc, setNc] = useState({ code: "", name: "", w: "", h: "", unit: "cm" });
+  const [nc, setNc] = useState({ code: "", name: "", w: "", h: "", unit: "cm", sub: "" });
   const [delTarget, setDelTarget] = useState<PrintType | null>(null);
 
   const reload = async () => {
@@ -2773,9 +2782,9 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
     setBusy(true);
     try {
       const res = await apiFetch("/api/print-types", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, name: nc.name.trim() || code, default_w: nc.w, default_h: nc.h, unit: nc.unit }) });
+        body: JSON.stringify({ code, name: nc.name.trim() || code, default_w: nc.w, default_h: nc.h, unit: nc.unit, drive_subpath: nc.sub }) });
       const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "เพิ่มไม่สำเร็จ");
-      setNc({ code: "", name: "", w: "", h: "", unit: "cm" }); toast.success(`เพิ่ม “${code}” แล้ว`); await reload();
+      setNc({ code: "", name: "", w: "", h: "", unit: "cm", sub: "" }); toast.success(`เพิ่ม “${code}” แล้ว`); await reload();
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); }
     finally { setBusy(false); }
   };
@@ -2804,26 +2813,31 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
       description="ตั้งขนาดเริ่มต้นต่อประเภท — เลือกประเภทตอนเพิ่มงานพิมพ์แล้วจะเติมขนาดให้เอง (แก้ทับได้)"
       footer={<div className="flex justify-end w-full"><button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button></div>}>
       <div className="space-y-1.5 mb-3">
-        <div className="flex items-center gap-2 text-[10px] text-slate-400 px-1">
-          <span className="w-20">รหัส</span><span className="flex-1">ชื่อที่แสดง</span><span className="w-32">ขนาดเริ่มต้น</span><span className="w-6" />
-        </div>
         {rows.length === 0 && <p className="text-[12px] text-slate-400 py-3 text-center">ยังไม่มีประเภทงานพิมพ์</p>}
         {rows.map((t) => (
-          <div key={t.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
-            <span className="w-20 font-mono text-[12px] text-slate-700 truncate">{t.code}</span>
-            <input defaultValue={t.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== t.name) void patch(t, { name: v }); }}
-              className={`${inp} flex-1`} />
-            <div className="w-32 flex items-center gap-1">
-              <input defaultValue={t.default_w ?? ""} inputMode="decimal" placeholder="กว้าง"
-                onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(t.default_w ?? "")) void patch(t, { default_w: v }); }}
-                className={`${inp} w-12 text-center`} />
-              <span className="text-slate-300 text-[11px]">×</span>
-              <input defaultValue={t.default_h ?? ""} inputMode="decimal" placeholder="สูง"
-                onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(t.default_h ?? "")) void patch(t, { default_h: v }); }}
-                className={`${inp} w-12 text-center`} />
-              <span className="text-[10px] text-slate-400">{t.unit}</span>
+          <div key={t.id} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+            <div className="flex items-center gap-2">
+              <span className="w-20 font-mono text-[12px] text-slate-700 truncate">{t.code}</span>
+              <input defaultValue={t.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== t.name) void patch(t, { name: v }); }}
+                className={`${inp} flex-1`} placeholder="ชื่อที่แสดง" />
+              <div className="flex items-center gap-1">
+                <input defaultValue={t.default_w ?? ""} inputMode="decimal" placeholder="กว้าง"
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(t.default_w ?? "")) void patch(t, { default_w: v }); }}
+                  className={`${inp} w-12 text-center`} />
+                <span className="text-slate-300 text-[11px]">×</span>
+                <input defaultValue={t.default_h ?? ""} inputMode="decimal" placeholder="สูง"
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(t.default_h ?? "")) void patch(t, { default_h: v }); }}
+                  className={`${inp} w-12 text-center`} />
+                <span className="text-[10px] text-slate-400">{t.unit}</span>
+              </div>
+              <button onClick={() => setDelTarget(t)} disabled={busy} className="w-6 text-slate-400 hover:text-red-500 text-sm" title="ปิดใช้ประเภทนี้">🗑</button>
             </div>
-            <button onClick={() => setDelTarget(t)} disabled={busy} className="w-6 text-slate-400 hover:text-red-500 text-sm" title="ปิดใช้ประเภทนี้">🗑</button>
+            <div className="flex items-center gap-1.5 mt-1 pl-[5.5rem]">
+              <span className="text-[10px] text-slate-400 shrink-0">📁 โฟลเดอร์ Drive</span>
+              <input defaultValue={t.drive_subpath ?? ""} placeholder="เช่น Printed/DTF (เว้นว่าง = ใช้รหัส)"
+                onBlur={(e) => { const v = e.target.value.trim(); if (v !== (t.drive_subpath ?? "")) void patch(t, { drive_subpath: v }); }}
+                className={`${inp} flex-1 font-mono`} />
+            </div>
           </div>
         ))}
       </div>
@@ -2836,6 +2850,9 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
           <input value={nc.w} onChange={(e) => setNc((s) => ({ ...s, w: e.target.value }))} inputMode="decimal" placeholder="กว้าง" className={`${inp} w-14 text-center`} />
           <span className="text-slate-300 text-[11px]">×</span>
           <input value={nc.h} onChange={(e) => setNc((s) => ({ ...s, h: e.target.value }))} inputMode="decimal" placeholder="สูง" className={`${inp} w-14 text-center`} />
+        </div>
+        <div className="flex items-center gap-2 mt-1.5">
+          <input value={nc.sub} onChange={(e) => setNc((s) => ({ ...s, sub: e.target.value }))} placeholder="📁 โฟลเดอร์ Drive เช่น Printed/SCREEN" className={`${inp} flex-1 font-mono`} />
           <button onClick={add} disabled={busy} className="h-8 px-3 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">เพิ่ม</button>
         </div>
       </div>

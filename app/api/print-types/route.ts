@@ -10,13 +10,14 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type PrintType = { id: string; code: string; name: string; default_w: number | null; default_h: number | null; unit: string; sort_order: number };
+export type PrintType = { id: string; code: string; name: string; default_w: number | null; default_h: number | null; unit: string; drive_subpath: string | null; sort_order: number };
+const SEL = "id, code, name, default_w, default_h, unit, drive_subpath, sort_order";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "assets.view"); if (denied) return denied;
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("erp_print_types")
-    .select("id, code, name, default_w, default_h, unit, sort_order")
+    .select(SEL)
     .eq("is_active", true).order("sort_order", { ascending: true }).order("code", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
   return NextResponse.json({ data: (data ?? []) as PrintType[], error: null });
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "assets.manage"); if (denied) return denied;
-  let b: { code?: string; name?: string; default_w?: number | string | null; default_h?: number | string | null; unit?: string };
+  let b: { code?: string; name?: string; default_w?: number | string | null; default_h?: number | string | null; unit?: string; drive_subpath?: string };
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const code = String(b.code ?? "").trim();
@@ -36,8 +37,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await admin.from("erp_print_types").insert({
     code, name: String(b.name ?? "").trim() || code,
     default_w: num(b.default_w), default_h: num(b.default_h), unit: String(b.unit ?? "cm").trim() || "cm",
+    drive_subpath: String(b.drive_subpath ?? "").trim() || null,
     sort_order: ((mx?.sort_order as number | undefined) ?? 0) + 1,
-  }).select("id, code, name, default_w, default_h, unit, sort_order").single();
+  }).select(SEL).single();
   if (error) return NextResponse.json({ error: /duplicate|unique/i.test(error.message) ? `มีประเภท "${code}" อยู่แล้ว` : error.message }, { status: 400 });
   return NextResponse.json({ data: data as PrintType, error: null });
 }
