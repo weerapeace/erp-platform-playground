@@ -45,6 +45,17 @@ export default function CostCalculatorPage() {
   const [centralOverride, setCentralOverride] = useState<number | null>(null);   // แก้ค่าแรงกลางในหน้า (ก่อนบันทึกกลับ BOM)
   const [savingCentral, setSavingCentral] = useState(false);
   const [subFor, setSubFor] = useState<MoCostMaterial | null>(null);             // วัตถุดิบที่กำลังเลือกตัวแทน (เปิด picker)
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  const [craftsmen, setCraftsmen] = useState<{ id: string; name: string; department_id?: string | null }[]>([]);
+  const [jobNames, setJobNames] = useState<string[]>([]);                        // ชื่องานเหมา distinct (dropdown)
+  const [pullSku, setPullSku] = useState<SkuPickerValue | null>(null);           // เลือกรุ่นอื่นดึงงานเหมา
+
+  // โหลดตัวเลือกจ่ายโต๊ะ (แผนก/ช่าง) + รายชื่องานเหมา — ครั้งเดียว
+  useEffect(() => {
+    apiFetch("/api/mo/departments").then((r) => r.json()).then((j) => setDepartments((j.data ?? j.departments ?? []) as { id: string; name: string }[])).catch(() => {});
+    apiFetch("/api/mo/assignees").then((r) => r.json()).then((j) => setCraftsmen((j.data ?? j.assignees ?? []) as { id: string; name: string; department_id?: string | null }[])).catch(() => {});
+    apiFetch("/api/bom/piecework?names=1").then((r) => r.json()).then((j) => setJobNames((j.names ?? []) as string[])).catch(() => {});
+  }, []);
 
   const load = useCallback(async (code: string) => {
     setLoading(true); setInputs(null); setCentralOverride(null);
@@ -56,7 +67,9 @@ export default function CostCalculatorPage() {
       setSavedSku((j.saved?.sku ?? null) as Saved);
       // ค่าตั้งต้น scenario: override SKU > default Parent > ว่าง · qty จากที่บันทึกไว้
       const eff = (j.saved?.sku ?? j.saved?.parent) as Saved;
-      setSc(normScenario(eff?.scenario ?? null));
+      const loadedSc = normScenario(eff?.scenario ?? null);
+      if (loadedSc.labor_mode === "target") loadedSc.labor_mode = "system";   // target = งบบนสุดแล้ว ไม่ใช่โหมดจ่าย
+      setSc(loadedSc);
       setQty(eff?.qty_basis && eff.qty_basis > 0 ? Number(eff.qty_basis) : 1);
     } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
     finally { setLoading(false); }
@@ -95,14 +108,18 @@ export default function CostCalculatorPage() {
   const clearSub = (origSku: string) => setSc((s) => ({ ...s, substitutes: (s.substitutes ?? []).filter((x) => x.orig_sku !== origSku) }));
   const subMap = useMemo(() => new Map((sc.substitutes ?? []).map((x) => [x.orig_sku, x])), [sc.substitutes]);
 
-  // จัดกลุ่มวัตถุดิบตามชนิด (เหมือน BOM) + ราคารวมต่อกลุ่ม (ใช้ราคาตัวแทนถ้ามี)
-  const matGroups = useMemo(() => {
-    if (!inputs) return [] as { name: string; lines: MoCostMaterial[]; subtotal: number }[];
-    const g = new Map<string, MoCostMaterial[]>();
-    for (const m of inputs.materials) { const k = m.material_type || "ไม่ระบุชนิด"; (g.get(k) ?? g.set(k, []).get(k)!).push(m); }
-    const unitOf = (m: MoCostMaterial) => (m.sku && subMap.has(m.sku) ? subMap.get(m.sku)!.unit_cost : m.unit_cost);
-    return [...g.entries()].map(([name, lines]) => ({ name, lines, subtotal: Math.round(lines.reduce((a, m) => a + unitOf(m) * m.qty_per, 0) * 100) / 100 }));
-  }, [inputs, subMap]);
+  // จับกลุ่ม "ตามวัตถุดิบ" — รวมบรรทัดวัสดุตัวเดียวกันเป็นแถวเดียว (บวกจำนวน) เรียงตามราค���มาก→น้อย
+  const matRows = useMemo(() => {
+    if (!inputs) return [] as MoCostMaterial[];
+    const g = new Map<string, MoCostMaterial>();
+    for (const m of inputs.materials) {
+      const key = m.sku || m.name || "?";
+      const ex = g.get(key);
+      if (ex) ex.qty_per = Math.round((ex.qty_per + m.qty_per) * 10000) / 10000;
+      else g.set(key, { ...m });
+    }
+    return [...g.values()];
+  }, [inputs]);
 
   const save = async () => {
     if (!inputs || !d) return;
@@ -126,6 +143,24 @@ export default function CostCalculatorPage() {
   const setJob = (i: number, p: Partial<PieceJob>) => setSc((s) => ({ ...s, piece_jobs: effJobs.map((j, idx) => idx === i ? { ...j, ...p } : j) }));
   const addJob = () => setSc((s) => ({ ...s, piece_jobs: [...effJobs, { label: "", kind: "piece", rate: 0, qty_per: 1, salary: 0, workdays: 26, days: 0, dept_name: "" }] }));
   const delJob = (i: number) => setSc((s) => ({ ...s, piece_jobs: effJobs.filter((_, idx) => idx !== i) }));
+  // ดึงงานเหมาจากสูตรของรุ่นอื่น (reuse /api/product-costings → system_piece)
+  const pullPiecework = async (code: string) => {
+    try {
+      const j = await apiFetch(`/api/product-costings?sku=${encodeURIComponent(code)}`).then((r) => r.json());
+      const sp = (j.inputs?.system_piece ?? []) as { job_name: string; rate: number; qty_per: number }[];
+      if (!sp.length) { toast.info(`${code} ไม่มีงานเหมาในสูตร`); return; }
+      setSc((s) => ({ ...s, piece_jobs: sp.map((r) => ({ label: r.job_name, kind: "piece" as const, rate: r.rate, qty_per: r.qty_per || 1, salary: 0, workdays: 26, days: 0, dept_name: "" })) }));
+      toast.success(`ดึงงานเหมาจาก ${code} แล้ว (${sp.length} งาน)`);
+    } catch { toast.error("ดึงงานเหมาไม่สำเร็จ"); }
+  };
+  // เลือกพนักงานรายคน (จ่ายโต๊ะ) → ให้ server รวมเงินเดือน แล้วตั้งเป็นเงินเดือนรวม
+  const toggleWorker = (id: string) => {
+    const cur = sc.table.worker_ids ?? [];
+    const ids = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    setSc((s) => ({ ...s, table: { ...s.table, worker_ids: ids } }));
+    void apiFetch(`/api/mo/worker-wage?ids=${encodeURIComponent(ids.join(","))}`).then((r) => r.json())
+      .then((j) => { if (!j.error) setSc((s) => ({ ...s, table: { ...s.table, salary: Number(j.total) || 0 } })); }).catch(() => {});
+  };
 
   const numIn = "w-24 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50";
   const modeBtn = (id: CostScenario["labor_mode"], label: string) => (
@@ -184,12 +219,37 @@ export default function CostCalculatorPage() {
               ))}
             </div>
 
-            {/* 🧮 ค่าแรง — 3 โหมด */}
+            {/* 🧮 ค่าแรง — งบเป้าหมาย (บนสุด) + โหมดจ่ายจริงเทียบงบ */}
             <div className="border border-indigo-100 bg-indigo-50/40 rounded-xl p-3 space-y-2.5">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[11px] text-slate-500">ใช้ค่าแรง:</span>
-                {modeBtn("system", "ตามระบบ")}{modeBtn("piece", "งานเหมา/ชิ้น")}{modeBtn("table", "จ่ายโต๊ะ (เงินเดือน)")}{modeBtn("target", "🎯 ตามเป้าหมาย")}
+              {/* 🎯 งบเป้าหมาย: ตั้งกำไร/ต้นทุนที่อยากได้ → งบค่าแรงที่จ่ายได้ */}
+              <div className="rounded-lg bg-white border border-emerald-200 p-2.5 space-y-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap text-sm">
+                  <span className="text-[11px] font-medium text-emerald-700">🎯 อยากได้:</span>
+                  {([["margin_pct", "กำไร %"], ["profit_pp", "กำไร ฿/ชิ้น"], ["cost_pp", "ต้นทุน ฿/ชิ้น"]] as const).map(([t, l]) => (
+                    <button key={t} type="button" disabled={!canEdit} onClick={() => setTgt({ type: t })} className={`h-7 px-2 text-xs rounded-lg border ${(sc.target?.type ?? "margin_pct") === t ? "bg-emerald-600 text-white border-emerald-600" : "bg-white border-slate-200"}`}>{l}</button>
+                  ))}
+                  <input type="number" step="any" disabled={!canEdit} value={sc.target?.value ?? ""} onChange={(e) => setTgt({ value: Number(e.target.value) || 0 })} placeholder={(sc.target?.type ?? "margin_pct") === "margin_pct" ? "%" : "฿"} className={numIn} />
+                  {sc.target && <button onClick={() => setSc((s) => ({ ...s, target: null }))} className="text-[11px] text-slate-400 hover:text-rose-500">ล้าง</button>}
+                </div>
+                {sc.target && (
+                  <div className="flex items-center justify-between text-sm border-t border-emerald-100 pt-1.5">
+                    <span className="text-slate-600">💰 จ่ายค่าแรงได้ไม่เกิน</span>
+                    <span className="text-right"><b className={d.targetLaborPP >= 0 ? "text-emerald-700" : "text-rose-600"}>฿{fmt(d.targetLaborPP)}</b><span className="text-[11px] text-slate-400">/ชิ้น · รวม ฿{fmt(Math.max(0, d.targetLaborPP) * qty)}</span></span>
+                  </div>
+                )}
               </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] text-slate-500">จ่ายจริงแบบ:</span>
+                {modeBtn("system", "ตามระบบ")}{modeBtn("piece", "งานเหมา/ชิ้น")}{modeBtn("table", "จ่ายโต๊ะ (เงินเดือน)")}
+              </div>
+
+              {/* เทียบงบ: โหมดจ่ายจริง ใช้เท่าไร เทียบกับงบเป้าหมาย */}
+              {sc.target && (
+                <div className={`text-[11px] px-2 py-1 rounded-md ${d.laborPP <= d.targetLaborPP + 0.001 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                  โหมดนี้ใช้ค่าแรง <b>฿{fmt(d.laborPP)}</b>/ชิ้น · {d.laborPP <= d.targetLaborPP + 0.001 ? `✓ เหลืองบ ฿${fmt(d.targetLaborPP - d.laborPP)}` : `⚠️ เกินงบ ฿${fmt(d.laborPP - d.targetLaborPP)} → กำไรจะไม่ถึงเป้า`}
+                </div>
+              )}
 
               {/* ตามระบบ: แก้ค่าแรงกลาง + บันทึกกลับ BOM */}
               {sc.labor_mode === "system" && (
@@ -200,43 +260,59 @@ export default function CostCalculatorPage() {
                 </div>
               )}
 
-              {/* ตามเป้าหมาย: ใส่กำไร/ต้นทุนที่อยากได้ → งบค่าแรงที่จ่ายได้ */}
-              {sc.labor_mode === "target" && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-1.5 flex-wrap text-sm">
-                    <span className="text-[11px] text-slate-500">อยากได้:</span>
-                    {([["margin_pct", "กำไร %"], ["profit_pp", "กำไร ฿/ชิ้น"], ["cost_pp", "ต้นทุน ฿/ชิ้น"]] as const).map(([t, l]) => (
-                      <button key={t} type="button" disabled={!canEdit} onClick={() => setTgt({ type: t })} className={`h-7 px-2 text-xs rounded-lg border ${(sc.target?.type ?? "margin_pct") === t ? "bg-indigo-600 text-white border-indigo-600" : "bg-white border-slate-200"}`}>{l}</button>
-                    ))}
-                    <input type="number" step="any" disabled={!canEdit} value={sc.target?.value || ""} onChange={(e) => setTgt({ value: Number(e.target.value) || 0 })} placeholder={(sc.target?.type ?? "margin_pct") === "margin_pct" ? "%" : "฿"} className={numIn} />
-                  </div>
-                  <div className="rounded-lg bg-white border border-emerald-200 px-3 py-2 flex items-center justify-between">
-                    <span className="text-sm text-slate-600">💰 จ่ายค่าแรงได้ไม่เกิน</span>
-                    <span className="text-right"><b className={`text-base ${d.targetLaborPP >= 0 ? "text-emerald-700" : "text-rose-600"}`}>฿{fmt(d.targetLaborPP)}</b><span className="text-[11px] text-slate-400">/ชิ้น · รวม ฿{fmt(d.laborBudgetTotal)}</span></span>
-                  </div>
-                  {d.targetLaborPP < 0 && <p className="text-[11px] text-rose-500">เป้าหมายนี้สูงเกินไป (ต้นทุนวัสดุอย่างเดียวก็เกินแล้ว)</p>}
-                </div>
-              )}
-
               {sc.labor_mode === "piece" && (
                 <div className="space-y-1.5">
+                  <datalist id="pw-jobs">{jobNames.map((n) => <option key={n} value={n} />)}</datalist>
                   {effJobs.map((j, i) => (
                     <div key={i} className="flex items-center gap-1.5 flex-wrap">
-                      <input value={j.label} disabled={!canEdit} onChange={(e) => setJob(i, { label: e.target.value })} placeholder="ชื่องาน เช่น เย็บ" className="flex-1 min-w-[100px] h-8 px-2 text-sm border border-slate-200 rounded-lg" />
+                      <input list="pw-jobs" value={j.label} disabled={!canEdit} onChange={(e) => setJob(i, { label: e.target.value })} placeholder="เลือก/พิมพ์ชื่องาน เช่น เย็บ" className="flex-1 min-w-[100px] h-8 px-2 text-sm border border-slate-200 rounded-lg" />
                       <input type="number" step="any" value={j.rate || ""} disabled={!canEdit} onChange={(e) => setJob(i, { rate: Number(e.target.value) || 0 })} placeholder="฿/ชิ้น" className={numIn} />
                       <span className="text-[11px] text-slate-400">×{fmt(j.qty_per)}</span>
                       {canEdit && <button onClick={() => delJob(i)} className="text-rose-400 hover:text-rose-600 text-sm">✕</button>}
                     </div>
                   ))}
-                  {canEdit && <button onClick={addJob} className="text-[11px] text-indigo-600 hover:text-indigo-700">＋ เพิ่มงานเหมา</button>}
+                  {canEdit && (
+                    <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                      <button onClick={addJob} className="text-[11px] text-indigo-600 hover:text-indigo-700">＋ เพิ่มงานเหมา</button>
+                      <span className="text-slate-300">·</span>
+                      <div className="min-w-[190px]"><SkuPicker value={pullSku} onChange={(v) => { if (v?.code) void pullPiecework(v.code); setPullSku(null); }} placeholder="📋 ดึงงานเหมาจากรุ่นอื่น…" /></div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {sc.labor_mode === "table" && (
+              {sc.labor_mode === "table" && (() => {
+                const pickMode = sc.table.pick_mode ?? "table";
+                const workerIds = sc.table.worker_ids ?? [];
+                const pill = (on: boolean) => `h-7 px-2 text-xs rounded-lg border ${on ? "bg-indigo-600 text-white border-indigo-600" : "bg-white border-slate-200"}`;
+                return (
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5 flex-wrap text-sm">
-                    <label className="flex items-center gap-1">เงินเดือนโต๊ะ <input type="number" step="any" value={sc.table.salary || ""} disabled={!canEdit} onChange={(e) => setTable({ salary: Number(e.target.value) || 0 })} className={numIn} /></label>
+                    <span className="text-[11px] text-slate-500">เลือก:</span>
+                    <button type="button" disabled={!canEdit} onClick={() => setTable({ pick_mode: "table" })} className={pill(pickMode === "table")}>โต๊ะทั้งตัว</button>
+                    <button type="button" disabled={!canEdit} onClick={() => setTable({ pick_mode: "workers" })} className={pill(pickMode === "workers")}>เลือกพนักงาน</button>
+                    {pickMode === "table" && (
+                      <select value={sc.table.dept_name ?? ""} disabled={!canEdit} onChange={(e) => setTable({ dept_name: e.target.value })} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                        <option value="">— เลือกโต๊ะ —</option>
+                        {departments.map((dp) => <option key={dp.id} value={dp.name}>{dp.name}</option>)}
+                      </select>
+                    )}
+                  </div>
+                  {pickMode === "workers" && (
+                    <div className="border border-slate-200 rounded-lg max-h-36 overflow-auto p-1.5">
+                      {craftsmen.length === 0 && <div className="text-[11px] text-slate-400 px-1 py-2 text-center">— ไม่มีรายชื่อพนักงาน —</div>}
+                      {craftsmen.map((c) => (
+                        <label key={c.id} className="flex items-center gap-2 text-[12px] px-1 py-0.5 hover:bg-slate-50 rounded cursor-pointer">
+                          <input type="checkbox" checked={workerIds.includes(c.id)} disabled={!canEdit} onChange={() => toggleWorker(c.id)} className="accent-indigo-600" />
+                          <span className="truncate">{c.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5 flex-wrap text-sm">
+                    <label className="flex items-center gap-1">เงินเดือน{pickMode === "workers" ? "รวม" : "โต๊ะ"} <input type="number" step="any" value={sc.table.salary || ""} disabled={!canEdit || pickMode === "workers"} onChange={(e) => setTable({ salary: Number(e.target.value) || 0 })} className={numIn} /></label>
                     <label className="flex items-center gap-1">วันทำงาน/เดือน <input type="number" value={sc.table.workdays || ""} disabled={!canEdit} onChange={(e) => setTable({ workdays: Number(e.target.value) || 0 })} className={numIn} /></label>
+                    {pickMode === "workers" && <span className="text-[11px] text-slate-400">เลือก {workerIds.length} คน (รวมเงินเดือนอัตโนมัติ)</span>}
                   </div>
                   <div className="flex items-center gap-1.5 flex-wrap text-sm">
                     <span className="text-[11px] text-slate-500">คิดจาก:</span>
@@ -250,44 +326,37 @@ export default function CostCalculatorPage() {
                     ค่าแรง/วัน ≈ ฿{fmt(d.dailyPay)} · {d.tableCalc === "target" ? `งบนี้ทำได้ ≤ ${fmt(d.maxDays)} วัน` : `รวม ${fmt(d.daysNeeded)} วัน = จ่ายค่าแรง ฿${fmt(d.laborBudgetTotal)}`}
                   </div>
                 </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* วัตถุดิบ — จับกลุ่มตามชนิด + ราคารวมต่อกลุ่ม (เหมือน BOM) + ตัวแทน */}
             <div className="rounded-xl border border-slate-200 bg-white">
               <button onClick={() => setShowMat((v) => !v)} className="w-full px-3 py-2 flex items-center justify-between text-sm text-slate-600">
-                <span>📦 วัตถุดิบ ({inputs.materials.length}) · รวม <b className="text-slate-700">฿{fmt(d.matPP)}</b>/ชิ้น</span><span className="text-slate-400">{showMat ? "▲" : "▼"}</span>
+                <span>📦 วัตถุดิบ ({matRows.length} ชนิด) · รวม <b className="text-slate-700">฿{fmt(d.matPP)}</b>/ชิ้น</span><span className="text-slate-400">{showMat ? "▲" : "▼"}</span>
               </button>
               {showMat && (
-                <div className="border-t border-slate-100">
-                  {matGroups.map((g) => (
-                    <div key={g.name} className="border-b border-slate-50 last:border-0">
-                      <div className="flex items-center justify-between px-3 py-1 bg-slate-50/70 text-[11px] font-medium text-slate-500">
-                        <span>{g.name} ({g.lines.length})</span><span className="tabular-nums">฿{fmt(g.subtotal)}</span>
-                      </div>
-                      <div className="divide-y divide-slate-50 text-[12px]">
-                        {g.lines.map((m, i) => {
-                          const sub = m.sku ? subMap.get(m.sku) : undefined;
-                          const unit = sub ? sub.unit_cost : m.unit_cost;
-                          const linePP = Math.round(unit * m.qty_per * 100) / 100;
-                          return (
-                            <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5">
-                              <span className="min-w-0 truncate">
-                                {sub ? <span className="text-indigo-700">🔁 {sub.sub_name} <span className="text-[10px] text-indigo-400">(แทน {m.name})</span></span> : <span className="text-slate-600">{m.name || m.sku}</span>}
-                                <span className="text-slate-300"> ×{fmt(m.qty_per)}</span>
-                              </span>
-                              <span className="flex items-center gap-2 shrink-0">
-                                <span className={`tabular-nums ${unit > 0 ? "text-slate-600" : "text-amber-600"}`}>{unit > 0 ? `฿${fmt(linePP)}` : "ยังไม่มีราคา"}</span>
-                                {canEdit && m.sku && (sub
-                                  ? <button onClick={() => clearSub(m.sku!)} title="คืนวัสดุเดิม" className="text-[10px] text-slate-400 hover:text-rose-500">คืนเดิม</button>
-                                  : <button onClick={() => setSubFor(m)} title="ใช้วัตถุดิบทดแทน" className="text-[13px] text-indigo-400 hover:text-indigo-700">🔁</button>)}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
+                <div className="border-t border-slate-100 divide-y divide-slate-50 text-[12px]">
+                  {matRows.map((m) => ({ m, sub: m.sku ? subMap.get(m.sku) : undefined }))
+                    .map((x) => ({ ...x, unit: x.sub ? x.sub.unit_cost : x.m.unit_cost }))
+                    .sort((a, b) => (b.unit * b.m.qty_per) - (a.unit * a.m.qty_per))
+                    .map(({ m, sub, unit }, i) => {
+                      const linePP = Math.round(unit * m.qty_per * 100) / 100;
+                      return (
+                        <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                          <span className="min-w-0 truncate">
+                            {sub ? <span className="text-indigo-700">🔁 {sub.sub_name} <span className="text-[10px] text-indigo-400">(แทน {m.name})</span></span> : <span className="text-slate-600">{m.name || m.sku}</span>}
+                            <span className="text-slate-300"> ×{fmt(m.qty_per)}</span>
+                          </span>
+                          <span className="flex items-center gap-2 shrink-0">
+                            <span className={`tabular-nums ${unit > 0 ? "text-slate-600" : "text-amber-600"}`}>{unit > 0 ? `฿${fmt(linePP)}` : "ยังไม่มีราคา"}</span>
+                            {canEdit && m.sku && (sub
+                              ? <button onClick={() => clearSub(m.sku!)} title="คืนวัสดุเดิม" className="text-[10px] text-slate-400 hover:text-rose-500">คืนเดิม</button>
+                              : <button onClick={() => setSubFor(m)} title="ใช้วัตถุดิบทดแทน" className="text-[13px] text-indigo-400 hover:text-indigo-700">🔁</button>)}
+                          </span>
+                        </div>
+                      );
+                    })}
                   {inputs.materials.length === 0 && <div className="px-3 py-4 text-center text-slate-400 text-[12px]">— ไม่มีวัตถุดิบใน BOM —</div>}
                 </div>
               )}

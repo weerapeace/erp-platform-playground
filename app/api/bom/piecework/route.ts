@@ -22,7 +22,14 @@ const num = (v: unknown, d = 0) => { const n = Number(v); return isFinite(n) ? n
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
-  const bomCode = (new URL(request.url).searchParams.get("bom_code") ?? "").trim();
+  const sp = new URL(request.url).searchParams;
+  // ?names=1 → รายชื่องานเหมา distinct ทั้งระบบ (ทำ dropdown ในเครื่องคิดต้นทุน)
+  if (sp.get("names")) {
+    const { data } = await supabaseAdmin().from("bom_piecework_lines").select("job_name").eq("is_active", true).limit(5000);
+    const names = [...new Set((data ?? []).map((r) => String((r as { job_name?: string }).job_name ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th"));
+    return NextResponse.json({ names, error: null });
+  }
+  const bomCode = (sp.get("bom_code") ?? "").trim();
   if (!bomCode) return NextResponse.json({ data: [], error: null });
   const { data, error } = await supabaseAdmin()
     .from("bom_piecework_lines").select("id, job_id, job_name, rate, note, is_detail, qty_per, sequence")
