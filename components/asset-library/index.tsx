@@ -2795,6 +2795,7 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
   const [delTarget, setDelTarget] = useState<PrintType | null>(null);
   const [root, setRoot] = useState<{ folder_id: string; local_base_path: string }>({ folder_id: "", local_base_path: "" });
   const [rootBusy, setRootBusy] = useState(false);
+  const [rootEdit, setRootEdit] = useState(false);   // ตั้งค่าแล้ว = โชว์แบบ readonly มีปุ่มแก้ไข
 
   useEffect(() => { apiFetch("/api/ui-config?key=print_drive_root").then((r) => r.json()).then((j) => setRoot({ folder_id: String(j.value?.folder_id ?? ""), local_base_path: String(j.value?.local_base_path ?? "") })).catch(() => {}); }, []);
   const saveRoot = async (next: { folder_id: string; local_base_path: string }) => {
@@ -2843,18 +2844,37 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
     <ERPModal open onClose={onClose} title="⚙️ ประเภทงานพิมพ์" size="md"
       description="ตั้งขนาดเริ่มต้นต่อประเภท — เลือกประเภทตอนเพิ่มงานพิมพ์แล้วจะเติมขนาดให้เอง (แก้ทับได้)"
       footer={<div className="flex justify-end w-full"><button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button></div>}>
-      {/* โฟลเดอร์แม่ของงานพิมพ์ — งานพิมพ์ทุกชิ้นไปที่นี่ (ไม่สนแบรนด์) */}
+      {/* โฟลเดอร์แม่ของงานพิมพ์ — งานพิมพ์ทุกชิ้นไปที่นี่ (ไม่สนแบรนด์) · ตั้งแล้ว = readonly + ปุ่มแก้ */}
       <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5 mb-3">
-        <p className="text-[12px] font-medium text-slate-700 mb-1 flex items-center gap-1.5">📁 โฟลเดอร์แม่ของงานพิมพ์ <HelpButton guideKey="drive-setup" label="ตั้งค่า Drive" /></p>
-        <p className="text-[10px] text-slate-500 mb-1.5">งานพิมพ์ทุกชิ้นจะเก็บใต้โฟลเดอร์นี้ (ไม่แยกตามแบรนด์) · ต้องแชร์โฟลเดอร์นี้ให้ Service Account เดิมก่อน</p>
-        <label className="block text-[11px] text-slate-500">Folder ID <span className="text-slate-300">(จาก URL หลัง /folders/)</span>
-          <input defaultValue={root.folder_id} onBlur={(e) => { const v = e.target.value.trim(); if (v !== root.folder_id) { const nx = { ...root, folder_id: v }; setRoot(nx); void saveRoot(nx); } }}
-            placeholder="เช่น 1mCsDfY-E15CHm46_Vvwg9U" className={`${inp} font-mono mt-0.5`} /></label>
-        <label className="block text-[11px] text-slate-500 mt-1.5">path ในเครื่อง <span className="text-slate-300">(ถ้ามี — ไว้ทำ path ต้นฉบับ)</span>
-          <input defaultValue={root.local_base_path} onBlur={(e) => { const v = e.target.value.trim(); if (v !== root.local_base_path) { const nx = { ...root, local_base_path: v }; setRoot(nx); void saveRoot(nx); } }}
-            placeholder="เช่น G:\Shared drives\Printed" className={`${inp} font-mono mt-0.5`} /></label>
-        {rootBusy && <p className="text-[10px] text-indigo-500 mt-1">กำลังบันทึก…</p>}
-        {!root.folder_id && <p className="text-[10px] text-amber-600 mt-1">⚠ ยังไม่ตั้ง — งานพิมพ์จะไปโฟลเดอร์แม่หลัก/ตามแบรนด์แทน</p>}
+        <div className="flex items-center justify-between gap-1.5 mb-1">
+          <p className="text-[12px] font-medium text-slate-700 flex items-center gap-1.5">📁 โฟลเดอร์แม่ของงานพิมพ์ <HelpButton guideKey="drive-setup" label="ตั้งค่า Drive" /></p>
+          {root.folder_id && !rootEdit && <button type="button" onClick={() => setRootEdit(true)} className="text-[11px] text-indigo-600 hover:underline shrink-0">✏️ แก้ไข</button>}
+        </div>
+        {root.folder_id && !rootEdit ? (
+          // โหมดอ่าน — ตั้งค่าแล้ว
+          <div className="space-y-0.5">
+            <p className="text-[11px] text-slate-500">Folder ID: <span className="font-mono text-slate-700">{root.folder_id}</span></p>
+            {root.local_base_path && <p className="text-[11px] text-slate-500">path ในเครื่อง: <span className="font-mono text-slate-700">{root.local_base_path}</span></p>}
+            <p className="text-[10px] text-emerald-600 mt-0.5">✓ งานพิมพ์ทุกชิ้นจะเก็บใต้โฟลเดอร์นี้ (ไม่แยกตามแบรนด์)</p>
+          </div>
+        ) : (
+          // โหมดแก้ไข
+          <>
+            <p className="text-[10px] text-slate-500 mb-1.5">งานพิมพ์ทุกชิ้นจะเก็บใต้โฟลเดอร์นี้ (ไม่แยกตามแบรนด์) · ต้องแชร์โฟลเดอร์นี้ให้ Service Account เดิมก่อน</p>
+            <label className="block text-[11px] text-slate-500">Folder ID <span className="text-slate-300">(จาก URL หลัง /folders/)</span>
+              <input defaultValue={root.folder_id} onBlur={(e) => { const v = e.target.value.trim(); if (v !== root.folder_id) { const nx = { ...root, folder_id: v }; setRoot(nx); void saveRoot(nx); } }}
+                placeholder="เช่น 1mCsDfY-E15CHm46_Vvwg9U" className={`${inp} font-mono mt-0.5`} /></label>
+            <label className="block text-[11px] text-slate-500 mt-1.5">path ในเครื่อง <span className="text-slate-300">(ถ้ามี — ไว้ทำ path ต้นฉบับ)</span>
+              <input defaultValue={root.local_base_path} onBlur={(e) => { const v = e.target.value.trim(); if (v !== root.local_base_path) { const nx = { ...root, local_base_path: v }; setRoot(nx); void saveRoot(nx); } }}
+                placeholder="เช่น G:\Shared drives\Printed" className={`${inp} font-mono mt-0.5`} /></label>
+            <div className="flex items-center justify-between mt-1">
+              {rootBusy ? <span className="text-[10px] text-indigo-500">กำลังบันทึก…</span>
+                : !root.folder_id ? <span className="text-[10px] text-amber-600">⚠ ยังไม่ตั้ง — งานพิมพ์จะไปโฟลเดอร์แม่หลัก/ตามแบรนด์แทน</span>
+                : <span />}
+              {root.folder_id && <button type="button" onClick={() => setRootEdit(false)} className="text-[11px] text-slate-500 hover:text-slate-700">เสร็จ</button>}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="space-y-1.5 mb-3">
