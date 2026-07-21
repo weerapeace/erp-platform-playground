@@ -7,7 +7,7 @@
  * โหมดค่าแรง: system(ตามระบบ) · piece(งานเหมา/ชิ้น) · table(จ่ายโต๊ะ เงินเดือน)
  * โหมด table 2 ทาง: ใส่จำนวนวัน→ได้ค่าแรง · ใส่ค่าแรงเป้าหมาย(target_pp)→ได้วันสูงสุด
  */
-import type { CostScenario, PieceJob } from "@/app/api/mo/[id]/cost/route";
+import type { CostScenario, PieceJob, CostSubstitute, MoCostMaterial } from "@/app/api/mo/[id]/cost/route";
 
 const numOf = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 
@@ -15,7 +15,7 @@ const numOf = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0;
 export const DEFAULT_SCENARIO: CostScenario = {
   labor_mode: "system", piece_rate: 0, piece_jobs: [],
   table: { salary: 0, workdays: 26, capacity: 0, dept_name: "", calc: "days", days: 0, target_pp: 0, pick_mode: "table", worker_ids: [] },
-  extras: [],
+  extras: [], target: null, substitutes: [],
 };
 
 // normalize งานเหมา 1 รายการ (กันค่าหาย/ผิดชนิด)
@@ -40,6 +40,11 @@ export function normScenario(s: CostScenario | null | undefined): CostScenario {
       worker_ids: Array.isArray(s.table?.worker_ids) ? s.table!.worker_ids! : [],
     },
     extras: Array.isArray(s.extras) ? s.extras : [],
+    target: s.target && (s.target.type === "margin_pct" || s.target.type === "profit_pp" || s.target.type === "cost_pp")
+      ? { type: s.target.type, value: numOf(s.target.value) } : null,
+    substitutes: Array.isArray(s.substitutes)
+      ? s.substitutes.map((x): CostSubstitute => ({ orig_sku: String(x.orig_sku ?? ""), sub_sku: String(x.sub_sku ?? ""), sub_name: String(x.sub_name ?? ""), unit_cost: numOf(x.unit_cost) })).filter((x) => x.orig_sku && x.sub_sku)
+      : [],
   };
 }
 
@@ -49,10 +54,11 @@ export type SystemPiece = { job_name: string; rate: number; qty_per: number };
 export type CostInputs = {
   qty: number;
   sell_price: number;           // ราคาขาย/ชิ้น (list_price)
-  material_cost_pp: number;     // ต้นทุนวัตถุดิบ/ชิ้น (Σ ใช้/ชิ้น × standard_price)
+  material_cost_pp: number;     // ต้นทุนวัตถุดิบ/ชิ้น (Σ ใช้/ชิ้น × standard_price) — ใช้ถ้าไม่ส่ง materials
   central_rate: number;         // ค่าแรงกลาง/ชิ้น (เพดาน)
   est_labor_pp: number;         // ค่าแรงผลิตจริง/ชิ้น (ตั้งไว้)
   system_piece?: SystemPiece[]; // งานเหมาจาก BOM (โหมด system + fallback piece)
+  materials?: MoCostMaterial[]; // รายการวัตถุดิบ (ถ้าส่งมา → คิด matPP ใหม่ + ใช้ substitutes ได้)
 };
 
 export type CostDerived = {
@@ -61,6 +67,7 @@ export type CostDerived = {
   sysPiecePP: number; systemLaborPP: number;
   effPieceJobs: PieceJob[]; pieceJobsPP: number;
   dailyPay: number; tableCalc: "days" | "target"; tablePP: number; maxDays: number; daysNeeded: number;
+  targetProfitPP: number; targetLaborPP: number;
   laborPP: number; extrasPP: number; costPP: number; profitPP: number; marginPct: number;
   // ยอดรวมทั้งใบ/ล็อต
   salesTotal: number; costTotal: number; profitTotal: number; laborBudgetTotal: number;
@@ -75,7 +82,17 @@ export function deriveCost(inp: CostInputs, scenario: CostScenario): CostDerived
   const sc = normScenario(scenario);
   const qty = numOf(inp.qty);
   const sell = numOf(inp.sell_price);
-  const matPP = numOf(inp.material_cost_pp);
+  // ต้นทุนวัตถุดิบ: ถ้าส่ง materials มา → คิดใหม่ (ใช้ราคาตัวแทนถ้ามี substitute) ไม่งั้นใช้ค่าที่ส่งมา
+  let matPP = numOf(inp.material_cost_pp);
+  const subs = sc.substitutes ?? [];
+  if (inp.materials && inp.materials.length) {
+    const subMap = new Map(subs.map((x) => [x.orig_sku, x]));
+    matPP = Math.round(inp.materials.reduce((a, m) => {
+      const sub = m.sku ? subMap.get(m.sku) : undefined;
+      const unit = sub ? numOf(sub.unit_cost) : numOf(m.unit_cost);
+      return a + unit * numOf(m.qty_per);
+    }, 0) * 10000) / 10000;
+  }
   const central = numOf(inp.central_rate);
   const estPP = numOf(inp.est_labor_pp);
   const overCeiling = central > 0 && estPP > central + 0.0001;
@@ -97,8 +114,17 @@ export function deriveCost(inp: CostInputs, scenario: CostScenario): CostDerived
   const maxDays = tableCalc === "target" && dailyPay > 0 ? Math.floor((tablePP * qty) / dailyPay) : 0;
   const daysNeeded = tableCalc === "days" ? numOf(t.days) : maxDays;
 
-  const laborPP = sc.labor_mode === "piece" ? pieceJobsPP : sc.labor_mode === "table" ? tablePP : systemLaborPP;
   const extrasPP = sc.extras.reduce((a, e) => a + (e.per === "mo" ? (qty > 0 ? numOf(e.amount) / qty : 0) : numOf(e.amount)), 0);
+  // โหมด target: ใส่เป้าหมาย (กำไร%/กำไร฿/ต้นทุน฿) → งบค่าแรงที่จ่ายได้ = ขาย − วัสดุ − ค่าอื่น − กำไรเป้าหมาย
+  const tg = sc.target;
+  const targetProfitPP = tg
+    ? (tg.type === "margin_pct" ? sell * (numOf(tg.value) / 100) : tg.type === "profit_pp" ? numOf(tg.value) : sell - numOf(tg.value))
+    : 0;
+  const targetLaborPP = Math.round((sell - matPP - extrasPP - targetProfitPP) * 10000) / 10000;
+  const laborPP = sc.labor_mode === "piece" ? pieceJobsPP
+    : sc.labor_mode === "table" ? tablePP
+    : sc.labor_mode === "target" ? targetLaborPP
+    : systemLaborPP;
   const costPP = matPP + laborPP + extrasPP;
   const profitPP = sell - costPP;
   const marginPct = sell > 0 ? Math.round((profitPP / sell) * 1000) / 10 : 0;
@@ -107,10 +133,11 @@ export function deriveCost(inp: CostInputs, scenario: CostScenario): CostDerived
     qty, sell, matPP, central, estPP, estUsed, overCeiling,
     sysPiecePP, systemLaborPP, effPieceJobs, pieceJobsPP,
     dailyPay, tableCalc, tablePP, maxDays, daysNeeded,
+    targetProfitPP, targetLaborPP,
     laborPP, extrasPP, costPP, profitPP, marginPct,
     salesTotal: sell * qty, costTotal: costPP * qty, profitTotal: profitPP * qty, laborBudgetTotal: laborPP * qty,
   };
 }
 
 export const laborModeLabel = (m: CostScenario["labor_mode"]) =>
-  m === "piece" ? "ค่าแรงเหมา / ชิ้น" : m === "table" ? "ค่าแรงจ่ายโต๊ะ / ชิ้น" : "ค่าแรง (ตามระบบ) / ชิ้น";
+  m === "piece" ? "ค่าแรงเหมา / ชิ้น" : m === "table" ? "ค่าแรงจ่ายโต๊ะ / ชิ้น" : m === "target" ? "งบค่าแรงที่จ่ายได้ / ชิ้น" : "ค่าแรง (ตามระบบ) / ชิ้น";

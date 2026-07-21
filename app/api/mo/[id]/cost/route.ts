@@ -30,13 +30,18 @@ export type PieceJob = {
   days: number;        // kind=table: จำนวนวันที่ใช้ทำงานนี้
   dept_name: string;   // kind=table: ชื่อโต๊ะ (แสดง)
 };
+// วัตถุดิบทดแทน (ตัวแทน) — แทนวัสดุรหัส orig_sku ด้วย sub_sku ตอนคิดต้นทุน (ไม่แตะ BOM จริง)
+export type CostSubstitute = { orig_sku: string; sub_sku: string; sub_name: string; unit_cost: number };
 export type CostScenario = {
-  labor_mode: "system" | "piece" | "table";          // ใช้ค่าแรงแบบไหน
+  labor_mode: "system" | "piece" | "table" | "target";  // ใช้ค่าแรงแบบไหน (+target=คิดย้อนจากกำไร/ต้นทุนเป้าหมาย)
   piece_rate: number;                                 // (legacy) งานเหมา/ชิ้น ช่องเดียวเดิม
   piece_jobs?: PieceJob[];                            // ใหม่: รายการงานเหมา (โหมด piece)
   // โหมดจ่ายโต๊ะ: เลือกทั้งโต๊ะ หรือ เลือกบางคน (multi-pick) → เงินเดือนรวม · 2 ทาง (ใส่วัน หรือ ใส่ค่าแรงเป้าหมาย→ได้วันสูงสุด)
   table: { salary: number; workdays: number; capacity: number; dept_name?: string; calc?: "days" | "target"; days?: number; target_pp?: number; pick_mode?: "table" | "workers"; worker_ids?: string[] };
   extras: { label: string; amount: number; per: "piece" | "mo" }[];   // ค่าส่ง/ค่าจิปาถะ ฯลฯ
+  // โหมด target: ใส่เป้าหมาย → คิดงบค่าแรงที่จ่ายได้
+  target?: { type: "margin_pct" | "profit_pp" | "cost_pp"; value: number } | null;
+  substitutes?: CostSubstitute[];                     // วัตถุดิบทดแทน (คิดต้นทุนด้วยราคาตัวแทน)
 };
 export type MoCost = {
   product_sku: string | null; product_name: string | null; qty: number;

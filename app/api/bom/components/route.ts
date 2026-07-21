@@ -23,6 +23,7 @@ export type BomComponent = {
   uom_id: string | null;
   uom_name: string | null;
   image_key: string | null;         // cover_image_r2_key (โชว์ thumbnail)
+  standard_price: number | null;    // ต้นทุน/หน่วย (ไว้คิดต้นทุน/วัตถุดิบทดแทน)
   out_of_group?: boolean;           // รหัสตรงแต่อยู่นอกกลุ่มที่กรอง (โชว์ป้าย "นอกกลุ่ม")
 };
 
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? search.split(/[\s\-_#/.,()]+/).map((t) => t.replace(/[%_()*,]/g, "")).filter(Boolean).slice(0, 6)
     : [];
 
-  const SELECT = "id, code, name_th, fabric_width_cm, cover_image_r2_key, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )";
+  const SELECT = "id, code, name_th, fabric_width_cm, cover_image_r2_key, standard_price, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )";
   const mapRow = (r: Record<string, unknown>): BomComponent => {
     const g = (Array.isArray(r.grp) ? r.grp[0] : r.grp) as GroupEmbed;
     const u = (Array.isArray(r.uom) ? r.uom[0] : r.uom) as UomEmbed;
@@ -72,6 +73,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       material_type: g?.name ?? null, loss_percent: g?.loss_percent != null ? Number(g.loss_percent) : null,
       fabric_width_cm: r.fabric_width_cm != null ? Number(r.fabric_width_cm) : null,
       uom_id: (r.uom_id as string) ?? null, uom_name: u?.name ?? null, image_key: (r.cover_image_r2_key as string) ?? null,
+      standard_price: r.standard_price != null ? Number(r.standard_price) : null,
     };
   };
 
