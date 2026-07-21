@@ -46,6 +46,9 @@ export default function CostCalculatorPage() {
   const [savingCentral, setSavingCentral] = useState(false);
   const [subFor, setSubFor] = useState<MoCostMaterial | null>(null);             // วัตถุดิบที่กำลังเลือกตัวแทน (เปิด picker)
   const [openMat, setOpenMat] = useState<Record<string, boolean>>({});           // แถววัสดุที่กางดูรายย่อย
+  const [easyMode, setEasyMode] = useState(false);                               // 📱 โหมดง่าย (ตัวใหญ่ กดง่าย) — จำต่อเครื่อง
+  useEffect(() => { try { setEasyMode(localStorage.getItem("cost-easy") === "1"); } catch { /* ignore */ } }, []);
+  const toggleEasy = () => setEasyMode((v) => { const n = !v; try { localStorage.setItem("cost-easy", n ? "1" : "0"); } catch { /* ignore */ } return n; });
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
   const [craftsmen, setCraftsmen] = useState<{ id: string; name: string; department_id?: string | null }[]>([]);
   const [jobNames, setJobNames] = useState<string[]>([]);                        // ชื่องานเหมา distinct (dropdown)
@@ -179,9 +182,12 @@ export default function CostCalculatorPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-800">🧮 คำนวณต้นทุนสินค้า</h1>
-          <p className="text-sm text-slate-500 mt-0.5">เลือกสินค้า → คิดต้นทุน/กำไร + ลองว่า “จ่ายงานกี่บาท / ทำกี่วัน” → บันทึกเป็นต้นทุนมาตรฐาน</p>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-800">🧮 คำนวณต้นทุนสินค้า</h1>
+            {!easyMode && <p className="text-sm text-slate-500 mt-0.5 hidden sm:block">เลือกสินค้า → คิดต้นทุน/กำไร + ลองว่า “จ่ายงานกี่บาท / ทำกี่วัน” → บันทึกเป็นต้นทุนมาตรฐาน</p>}
+          </div>
+          <button onClick={toggleEasy} title="สลับโหมดหน้าจอ" className={`shrink-0 h-10 px-4 text-sm font-medium rounded-xl border-2 ${easyMode ? "bg-indigo-600 text-white border-indigo-600" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{easyMode ? "🖥 โหมดปกติ" : "📱 โหมดง่าย"}</button>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
@@ -191,14 +197,123 @@ export default function CostCalculatorPage() {
             <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 pt-1">
               {inputs.parent_code && <span>รุ่น (Parent): <b className="text-slate-700">{inputs.parent_code}</b></span>}
               <span>สูตร: {inputs.bom_code ? <b className="text-slate-700">{inputs.bom_code}</b> : <span className="text-amber-600">— ยังไม่มี BOM —</span>}</span>
-              <label className="flex items-center gap-1">จำนวน (ต่อล็อต): <input type="number" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Number(e.target.value) || 1))} className="w-20 h-7 px-2 text-right border border-slate-200 rounded-lg" /></label>
+              {!easyMode && <label className="flex items-center gap-1">จำนวน (ต่อล็อต): <input type="number" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Number(e.target.value) || 1))} className="w-20 h-7 px-2 text-right border border-slate-200 rounded-lg" /></label>}
             </div>
           )}
         </div>
 
         {loading && <div className="text-center text-slate-400 py-8 text-sm">กำลังคิดต้นทุน…</div>}
 
-        {inputs && d && (
+        {inputs && d && (easyMode ? (
+          /* ===== 📱 โหมดง่าย (ตัวใหญ่ กดง่าย เลื่อนยาว) ===== */
+          <div className="space-y-3">
+            {/* จำนวน */}
+            <div className="rounded-2xl border-2 border-slate-200 bg-white p-4">
+              <div className="text-base font-semibold text-slate-600 mb-2">จำนวนที่ทำ</div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setQty((q) => Math.max(1, q - 10))} className="w-14 h-14 rounded-2xl bg-slate-100 text-3xl font-bold text-slate-600 active:bg-slate-200">−</button>
+                <input type="number" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Number(e.target.value) || 1))} className="w-28 h-14 text-center text-2xl font-bold border-2 border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                <button onClick={() => setQty((q) => q + 10)} className="w-14 h-14 rounded-2xl bg-slate-100 text-3xl font-bold text-slate-600 active:bg-slate-200">+</button>
+                <span className="text-lg text-slate-400">ชิ้น</span>
+              </div>
+            </div>
+
+            {/* ผลลัพธ์ */}
+            <div className="grid grid-cols-3 gap-3">
+              {([["💵 ราคาขาย", d.sell, "text-slate-800"], ["📦 ต้นทุน", d.costPP, "text-slate-800"], ["💰 กำไร", d.profitPP, d.profitPP >= 0 ? "text-emerald-700" : "text-rose-600"]] as const).map(([l, v, c]) => (
+                <div key={l} className="rounded-2xl border-2 border-slate-200 bg-white p-3 text-center">
+                  <div className="text-sm text-slate-500">{l}/ชิ้น</div>
+                  <div className={`text-2xl font-bold tabular-nums ${c}`}>฿{fmt(v)}</div>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-2xl bg-emerald-50 border-2 border-emerald-200 p-4 text-center">
+              <div className="text-base text-emerald-700">กำไรรวม {fmt(qty)} ชิ้น</div>
+              <div className={`text-4xl font-extrabold tabular-nums ${d.profitTotal >= 0 ? "text-emerald-700" : "text-rose-600"}`}>฿{fmt(d.profitTotal)}</div>
+              <div className="text-sm text-slate-500 mt-0.5">กำไร {d.marginPct}% · ยอดขายรวม ฿{fmt(d.salesTotal)}</div>
+            </div>
+
+            {/* อยากได้กำไร (preset) */}
+            <div className="rounded-2xl border-2 border-slate-200 bg-white p-4 space-y-3">
+              <div className="text-base font-semibold text-slate-600">อยากได้กำไรเท่าไร? <span className="text-sm font-normal text-slate-400">(ไม่บังคับ)</span></div>
+              <div className="flex gap-2 flex-wrap">
+                {[30, 40, 50, 60].map((p) => {
+                  const on = sc.target?.type === "margin_pct" && sc.target?.value === p;
+                  return <button key={p} disabled={!canEdit} onClick={() => setSc((s) => ({ ...s, target: { type: "margin_pct", value: p } }))} className={`h-14 px-5 rounded-2xl text-lg font-bold border-2 ${on ? "bg-emerald-600 text-white border-emerald-600" : "bg-white border-slate-200 text-slate-600"}`}>{p}%</button>;
+                })}
+                {sc.target && <button disabled={!canEdit} onClick={() => setSc((s) => ({ ...s, target: null }))} className="h-14 px-4 rounded-2xl text-base border-2 border-slate-200 text-slate-400">ไม่ตั้ง</button>}
+              </div>
+              {sc.target && (
+                <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-center">
+                  <div className="text-sm text-slate-600">💰 จ่ายค่าแรงได้ไม่เกิน</div>
+                  <div className={`text-3xl font-extrabold ${d.targetLaborPP >= 0 ? "text-emerald-700" : "text-rose-600"}`}>฿{fmt(d.targetLaborPP)}<span className="text-base font-normal text-slate-400">/ชิ้น</span></div>
+                </div>
+              )}
+            </div>
+
+            {/* จ่ายค่าแรงจริง */}
+            <div className="rounded-2xl border-2 border-slate-200 bg-white p-4 space-y-3">
+              <div className="text-base font-semibold text-slate-600">จ่ายค่าแรงแบบไหน</div>
+              <div className="grid grid-cols-3 gap-2">
+                {([["system", "🏭 ตามระบบ"], ["piece", "✂️ เหมา/ชิ้น"], ["table", "🪑 จ่ายโต๊ะ"]] as const).map(([m, l]) => (
+                  <button key={m} disabled={!canEdit} onClick={() => setSc((s) => ({ ...s, labor_mode: m }))} className={`h-16 rounded-2xl text-base font-bold border-2 ${sc.labor_mode === m ? "bg-indigo-600 text-white border-indigo-600" : "bg-white border-slate-200 text-slate-600"}`}>{l}</button>
+                ))}
+              </div>
+              {sc.labor_mode === "system" && (
+                <div className="flex items-center gap-2 flex-wrap text-lg">
+                  <span className="text-slate-600">ค่าแรงกลาง</span>
+                  <input type="number" step="any" disabled={!canEdit} value={centralOverride ?? inputs.central_rate ?? ""} onChange={(e) => setCentralOverride(Number(e.target.value) || 0)} className="w-28 h-12 px-3 text-right border-2 border-slate-200 rounded-xl" />
+                  <span className="text-slate-400 text-base">฿/ชิ้น</span>
+                  {canEdit && inputs.bom_code && <button onClick={() => void saveCentral()} disabled={savingCentral} className="h-12 px-4 text-base border-2 border-emerald-300 text-emerald-700 rounded-xl">💾 บันทึกเข้าสูตร</button>}
+                </div>
+              )}
+              {sc.labor_mode === "piece" && (
+                <div className="space-y-2">
+                  <datalist id="pw-jobs-e">{jobNames.map((n) => <option key={n} value={n} />)}</datalist>
+                  {effJobs.map((j, i) => (
+                    <div key={i} className="flex items-center gap-2 flex-wrap">
+                      <input list="pw-jobs-e" value={j.label} disabled={!canEdit} onChange={(e) => setJob(i, { label: e.target.value })} placeholder="ชื่องาน" className="flex-1 min-w-[120px] h-12 px-3 text-base border-2 border-slate-200 rounded-xl" />
+                      <input type="number" step="any" value={j.rate || ""} disabled={!canEdit} onChange={(e) => setJob(i, { rate: Number(e.target.value) || 0 })} placeholder="฿/ชิ้น" className="w-24 h-12 px-3 text-base text-right border-2 border-slate-200 rounded-xl" />
+                      <span className="text-slate-400">×</span>
+                      <input type="number" step="any" value={j.qty_per || ""} disabled={!canEdit} onChange={(e) => setJob(i, { qty_per: Number(e.target.value) || 1 })} className="w-16 h-12 px-2 text-base text-right border-2 border-slate-200 rounded-xl" />
+                      {canEdit && <button onClick={() => delJob(i)} className="w-10 h-12 text-rose-400 text-lg">✕</button>}
+                    </div>
+                  ))}
+                  {canEdit && <button onClick={addJob} className="h-11 px-4 text-base text-indigo-600 border-2 border-indigo-200 rounded-xl">＋ เพิ่มงาน</button>}
+                </div>
+              )}
+              {sc.labor_mode === "table" && (
+                <div className="flex items-center gap-2 flex-wrap text-base">
+                  <span className="text-slate-600">เงินเดือนโต๊ะ</span>
+                  <input type="number" step="any" disabled={!canEdit} value={sc.table.salary || ""} onChange={(e) => setTable({ salary: Number(e.target.value) || 0 })} className="w-28 h-12 px-3 text-right border-2 border-slate-200 rounded-xl" />
+                  <span className="text-slate-600">ทำงาน</span>
+                  <input type="number" disabled={!canEdit} value={sc.table.workdays || ""} onChange={(e) => setTable({ workdays: Number(e.target.value) || 0 })} className="w-20 h-12 px-3 text-right border-2 border-slate-200 rounded-xl" />
+                  <span className="text-slate-600">วัน · ใช้ทำงานนี้</span>
+                  <input type="number" step="any" disabled={!canEdit} value={sc.table.days || ""} onChange={(e) => setTable({ days: Number(e.target.value) || 0, calc: "days" })} className="w-20 h-12 px-3 text-right border-2 border-slate-200 rounded-xl" />
+                  <span className="text-slate-600">วัน</span>
+                </div>
+              )}
+              {sc.target && (
+                <div className={`rounded-xl px-3 py-2 text-base font-medium ${d.laborPP <= d.targetLaborPP + 0.001 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                  ใช้ค่าแรง ฿{fmt(d.laborPP)}/ชิ้น · {d.laborPP <= d.targetLaborPP + 0.001 ? `✓ ไม่เกินงบ` : `⚠️ เกินงบ ฿${fmt(d.laborPP - d.targetLaborPP)}`}
+                </div>
+              )}
+            </div>
+
+            {/* บันทึก */}
+            {canEdit && (
+              <div className="space-y-2 pt-1">
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => setTarget("parent")} disabled={!inputs.parent_code} className={`h-14 rounded-2xl text-base font-medium border-2 ${target === "parent" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white border-slate-200 text-slate-600"} disabled:opacity-40`}>ทั้งรุ่น (ทุกสี)</button>
+                  <button onClick={() => setTarget("sku")} className={`h-14 rounded-2xl text-base font-medium border-2 ${target === "sku" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white border-slate-200 text-slate-600"}`}>เฉพาะสีนี้</button>
+                </div>
+                <button onClick={() => void save()} disabled={saving} className="w-full h-16 rounded-2xl text-xl font-bold bg-emerald-600 text-white active:bg-emerald-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "💾 บันทึกต้นทุน"}</button>
+              </div>
+            )}
+
+            <button onClick={toggleEasy} className="w-full text-slate-400 text-sm py-3">ดูแบบละเอียด (โหมดปกติ) →</button>
+          </div>
+        ) : (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] items-start">
             {/* ซ้าย: ตัวคำนวณ (เป้าหมาย/ค่าแรง/วัตถุดิบ) */}
             <div className="space-y-4 min-w-0">
@@ -439,7 +554,7 @@ export default function CostCalculatorPage() {
               </ERPModal>
             )}
           </div>
-        )}
+        ))}
     </div>
   );
 }
