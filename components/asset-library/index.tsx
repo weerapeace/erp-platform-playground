@@ -1764,6 +1764,7 @@ async function uploadArtworkToDrive(opts: {
   folderId?: string;   // ส่งมา = อัปเข้าโฟลเดอร์นี้เลย (ไม่สร้างใหม่) — ใช้ตอน "หลายรูป โฟลเดอร์เดียว"
   folderName?: string; // ตั้งชื่อโฟลเดอร์แยกจากชื่อไฟล์ (โหมดโฟลเดอร์รวม — ไฟล์ยังชื่อตามรูปแต่ละใบ)
   subpath?: string;    // path ซ้อนชั้นเอง (เช่น "Printed/DTF" ของงานพิมพ์) แทนการแม็ปตามชนิด
+  rootFolderId?: string;   // โฟลเดอร์แม่เฉพาะ (งานพิมพ์ไปโฟลเดอร์เดียวไม่สนแบรนด์)
   onProgress?: (done: number, total: number) => void;
 }): Promise<{ folderId: string; folderLink: string; largeCount: number }> {
   const nm = opts.name.trim() || "artwork";
@@ -1778,6 +1779,7 @@ async function uploadArtworkToDrive(opts: {
     fd.append("name", folderNm);
     if (opts.artworkType) fd.append("artworkType", opts.artworkType);
     if (opts.subpath) fd.append("subpath", opts.subpath);
+    if (opts.rootFolderId) fd.append("root_folder_id", opts.rootFolderId);
     if (opts.brandId) fd.append("brand_id", opts.brandId);
     if (folderId) fd.append("folderId", folderId);
     if (x) { fd.append("filename", x.filename); fd.append("file", x.file); }
@@ -2588,10 +2590,13 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   const [driveProg, setDriveProg] = useState({ done: 0, total: 0 });
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [printRoot, setPrintRoot] = useState<{ folder_id: string; local_base_path: string }>({ folder_id: "", local_base_path: "" });
   const inputRef = useRef<HTMLInputElement>(null);
   const srcInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
+  // โฟลเดอร์แม่เฉพาะของงานพิมพ์ (ตั้งที่ ⚙️) — งานพิมพ์ทุกชิ้นไปที่นี่ ไม่สนแบรนด์
+  useEffect(() => { apiFetch("/api/ui-config?key=print_drive_root").then((r) => r.json()).then((j) => setPrintRoot({ folder_id: String(j.value?.folder_id ?? ""), local_base_path: String(j.value?.local_base_path ?? "") })).catch(() => {}); }, []);
   useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
 
   // เลือกประเภท → เติมขนาด + โฟลเดอร์เริ่มต้นให้ (แก้ทับได้ · ไม่ทับถ้าแก้เองแล้ว)
@@ -2624,12 +2629,13 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
         const previewFile = await previewForDrive(file);
         const { folderLink, largeCount } = await uploadArtworkToDrive({
           name: nm, brandId, srcFiles, previewFile, subpath: effSub,
+          rootFolderId: printRoot.folder_id || undefined,   // งานพิมพ์ไปโฟลเดอร์แม่เฉพาะ (ถ้าตั้งไว้)
           onProgress: (done, total) => setDriveProg({ done, total }),
         });
         if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
         if (folderLink) effUrl = folderLink;
-        // path ในเครื่องให้ตรงโครง Drive: <ฐานแบรนด์>\Printed\DTF\<ชื่องาน>
-        const base = brandBase[brandId] || "";
+        // path ในเครื่อง: ใช้ฐานของงานพิมพ์ถ้าตั้งไว้ ไม่งั้นฐานแบรนด์ → \Printed\DTF\<ชื่องาน>
+        const base = printRoot.local_base_path.trim() || brandBase[brandId] || "";
         effPath = base ? [base.replace(/[\\/]+$/, ""), ...effSub.split(/[\\/]+/).filter(Boolean), nm].join("\\") : "";
       }
 
@@ -2730,7 +2736,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
                     <input value={subpath} onChange={(e) => { setSubpath(e.target.value); setSubpathTouched(true); }} placeholder="เช่น Printed/DTF"
                       className="mt-0.5 w-full h-8 px-2.5 text-[12px] border border-slate-200 rounded-lg font-mono" /></label>
                   <p className="text-[10px] text-slate-400 mt-1 truncate">
-                    จะเก็บที่: <span className="font-mono text-slate-500">{[brands.find((b) => b.id === brandId)?.name || "โฟลเดอร์แม่", ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), title.trim() || "(ชื่องาน)"].join(" › ")}</span>
+                    จะเก็บที่: <span className="font-mono text-slate-500">{[printRoot.folder_id ? "📁 โฟลเดอร์งานพิมพ์" : (brands.find((b) => b.id === brandId)?.name || "โฟลเดอร์แม่"), ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), title.trim() || "(ชื่องาน)"].join(" › ")}</span>
                   </p>
                 </div>
               )}
@@ -2787,6 +2793,15 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
   const [busy, setBusy] = useState(false);
   const [nc, setNc] = useState({ code: "", name: "", w: "", h: "", unit: "cm", sub: "" });
   const [delTarget, setDelTarget] = useState<PrintType | null>(null);
+  const [root, setRoot] = useState<{ folder_id: string; local_base_path: string }>({ folder_id: "", local_base_path: "" });
+  const [rootBusy, setRootBusy] = useState(false);
+
+  useEffect(() => { apiFetch("/api/ui-config?key=print_drive_root").then((r) => r.json()).then((j) => setRoot({ folder_id: String(j.value?.folder_id ?? ""), local_base_path: String(j.value?.local_base_path ?? "") })).catch(() => {}); }, []);
+  const saveRoot = async (next: { folder_id: string; local_base_path: string }) => {
+    setRootBusy(true);
+    try { await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "print_drive_root", value: next }) }); }
+    catch { toast.error("บันทึกโฟลเดอร์แม่ไม่สำเร็จ"); } finally { setRootBusy(false); }
+  };
 
   const reload = async () => {
     try { const j = await (await apiFetch(`/api/print-types?_=${Date.now()}`)).json(); setRows((j.data ?? []) as PrintType[]); } catch { /* ignore */ }
@@ -2828,6 +2843,20 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
     <ERPModal open onClose={onClose} title="⚙️ ประเภทงานพิมพ์" size="md"
       description="ตั้งขนาดเริ่มต้นต่อประเภท — เลือกประเภทตอนเพิ่มงานพิมพ์แล้วจะเติมขนาดให้เอง (แก้ทับได้)"
       footer={<div className="flex justify-end w-full"><button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button></div>}>
+      {/* โฟลเดอร์แม่ของงานพิมพ์ — งานพิมพ์ทุกชิ้นไปที่นี่ (ไม่สนแบรนด์) */}
+      <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5 mb-3">
+        <p className="text-[12px] font-medium text-slate-700 mb-1 flex items-center gap-1.5">📁 โฟลเดอร์แม่ของงานพิมพ์ <HelpButton guideKey="drive-setup" label="ตั้งค่า Drive" /></p>
+        <p className="text-[10px] text-slate-500 mb-1.5">งานพิมพ์ทุกชิ้นจะเก็บใต้โฟลเดอร์นี้ (ไม่แยกตามแบรนด์) · ต้องแชร์โฟลเดอร์นี้ให้ Service Account เดิมก่อน</p>
+        <label className="block text-[11px] text-slate-500">Folder ID <span className="text-slate-300">(จาก URL หลัง /folders/)</span>
+          <input defaultValue={root.folder_id} onBlur={(e) => { const v = e.target.value.trim(); if (v !== root.folder_id) { const nx = { ...root, folder_id: v }; setRoot(nx); void saveRoot(nx); } }}
+            placeholder="เช่น 1mCsDfY-E15CHm46_Vvwg9U" className={`${inp} font-mono mt-0.5`} /></label>
+        <label className="block text-[11px] text-slate-500 mt-1.5">path ในเครื่อง <span className="text-slate-300">(ถ้ามี — ไว้ทำ path ต้นฉบับ)</span>
+          <input defaultValue={root.local_base_path} onBlur={(e) => { const v = e.target.value.trim(); if (v !== root.local_base_path) { const nx = { ...root, local_base_path: v }; setRoot(nx); void saveRoot(nx); } }}
+            placeholder="เช่น G:\Shared drives\Printed" className={`${inp} font-mono mt-0.5`} /></label>
+        {rootBusy && <p className="text-[10px] text-indigo-500 mt-1">กำลังบันทึก…</p>}
+        {!root.folder_id && <p className="text-[10px] text-amber-600 mt-1">⚠ ยังไม่ตั้ง — งานพิมพ์จะไปโฟลเดอร์แม่หลัก/ตามแบรนด์แทน</p>}
+      </div>
+
       <div className="space-y-1.5 mb-3">
         {rows.length === 0 && <p className="text-[12px] text-slate-400 py-3 text-center">ยังไม่มีประเภทงานพิมพ์</p>}
         {rows.map((t) => (

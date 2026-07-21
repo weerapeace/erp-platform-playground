@@ -31,6 +31,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         brandId: String(form.get("brand_id") ?? "").trim(),
         artworkType: String(form.get("artworkType") ?? "").trim(),
         subpathOverride: String(form.get("subpath") ?? "").trim() || null,
+        rootFolderId: String(form.get("root_folder_id") ?? "").trim() || null,   // งานพิมพ์: โฟลเดอร์แม่เฉพาะ
         name,
       });
     }

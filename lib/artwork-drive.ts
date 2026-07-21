@@ -15,11 +15,12 @@ async function ensureSubPath(parent: string, subpath: string): Promise<string> {
   return cur;
 }
 
-/** หา/สร้างโฟลเดอร์ Drive: [โฟลเดอร์แบรนด์] > [ซับ] > [ชื่องาน] → คืน folderId
- *  subpathOverride = ใส่ path ซ้อนชั้นเอง (เช่น "Printed/DTF" ของงานพิมพ์) แทนการแม็ปตามชนิด artwork */
-export async function resolveArtworkDriveFolder(admin: Admin, opts: { brandId?: string | null; artworkType?: string | null; name: string; subpathOverride?: string | null }): Promise<string> {
-  let brandFolder = DRIVE_ROOT_FOLDER_ID;
-  if (opts.brandId) {
+/** หา/สร้างโฟลเดอร์ Drive: [โฟลเดอร์แม่] > [ซับ] > [ชื่องาน] → คืน folderId
+ *  subpathOverride = ใส่ path ซ้อนชั้นเอง (เช่น "Printed/DTF" ของงานพิมพ์) แทนการแม็ปตามชนิด artwork
+ *  rootFolderId    = โฟลเดอร์แม่เฉพาะ (เช่น "โฟลเดอร์แม่ของงานพิมพ์") → ใช้ตัวนี้เป็นราก ไม่สนแบรนด์ */
+export async function resolveArtworkDriveFolder(admin: Admin, opts: { brandId?: string | null; artworkType?: string | null; name: string; subpathOverride?: string | null; rootFolderId?: string | null }): Promise<string> {
+  let brandFolder = (opts.rootFolderId ?? "").trim() || DRIVE_ROOT_FOLDER_ID;
+  if (!(opts.rootFolderId ?? "").trim() && opts.brandId) {
     const { data } = await admin.from("erp_brand_drive_folders").select("folder_id").eq("brand_id", opts.brandId).maybeSingle();
     if (data?.folder_id) brandFolder = String(data.folder_id);
   }
