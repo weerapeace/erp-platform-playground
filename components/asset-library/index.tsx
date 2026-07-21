@@ -2579,6 +2579,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   const [subpathTouched, setSubpathTouched] = useState(false);  // ผู้ใช้แก้ path เองแล้ว = ไม่ override ตอนสลับประเภท
   const [groupFolder, setGroupFolder] = useState("");           // โฟลเดอร์ย่อยเลือกได้ (เช่น goodgoods) — ไม่ใส่ = ไฟล์ลงในซับตรง ๆ
   const [groupOptions, setGroupOptions] = useState<string[]>([]); // โฟลเดอร์ย่อยที่มีอยู่แล้ว (ทำ dropdown)
+  const [groupOpen, setGroupOpen] = useState(false);            // เปิด dropdown โฟลเดอร์ย่อย
   const [resizeW, setResizeW] = useState(1200);                 // ย่อรูป preview ก่อนเก็บคลัง (0 = ขนาดจริง)
   const [sizes, setSizes] = useState<AssetSize[]>([]);
   const [brandId, setBrandId] = useState("");
@@ -2762,11 +2763,29 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
                   <label className="block text-[11px] text-slate-500">📁 โฟลเดอร์ Drive ที่จะเก็บ <span className="text-[10px] text-slate-400">(ใส่ / เพื่อซ้อนชั้น · เว้นว่าง = ใช้รหัสประเภท)</span>
                     <input value={subpath} onChange={(e) => { setSubpath(e.target.value); setSubpathTouched(true); }} placeholder="เช่น Printed/DTF"
                       className="mt-0.5 w-full h-8 px-2.5 text-[12px] border border-slate-200 rounded-lg font-mono" /></label>
-                  <label className="block text-[11px] text-slate-500">📂 โฟลเดอร์ย่อย <span className="text-[10px] text-slate-400">(เลือกที่มี หรือพิมพ์ใหม่ · เว้นว่าง = ไฟล์ลงใน {subpath.trim() || ptype || "DTF"} ตรง ๆ)</span>
-                    <input value={groupFolder} onChange={(e) => setGroupFolder(e.target.value)} list="print-group-folders" placeholder="เช่น goodgoods"
-                      className="mt-0.5 w-full h-8 px-2.5 text-[12px] border border-slate-200 rounded-lg font-mono" />
-                    <datalist id="print-group-folders">{groupOptions.map((f) => <option key={f} value={f} />)}</datalist>
-                  </label>
+                  <div className="text-[11px] text-slate-500">📂 โฟลเดอร์ย่อย <span className="text-[10px] text-slate-400">(เลือกที่มี หรือพิมพ์ใหม่ · เว้นว่าง = ไฟล์ลงใน {subpath.trim() || ptype || "DTF"} ตรง ๆ)</span>
+                    <div className="relative mt-0.5">
+                      <input value={groupFolder} onChange={(e) => { setGroupFolder(e.target.value); setGroupOpen(true); }}
+                        onFocus={() => setGroupOpen(true)} onBlur={() => setTimeout(() => setGroupOpen(false), 150)}
+                        placeholder="เช่น goodgoods" className="w-full h-8 pl-2.5 pr-7 text-[12px] border border-slate-200 rounded-lg font-mono" />
+                      <button type="button" onMouseDown={(e) => { e.preventDefault(); setGroupOpen((v) => !v); }}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[10px]" title="เลือกโฟลเดอร์ที่มี">▾</button>
+                      {groupOpen && (() => {
+                        const q = groupFolder.trim().toLowerCase();
+                        const opts = groupOptions.filter((f) => !q || f.toLowerCase().includes(q));
+                        return (
+                          <div className="absolute z-20 left-0 right-0 mt-1 max-h-44 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+                            {groupFolder.trim() && <button type="button" onMouseDown={() => { setGroupOpen(false); }} className="w-full text-left px-2.5 py-1 text-[12px] text-indigo-600 hover:bg-indigo-50">＋ สร้างใหม่ “{groupFolder.trim()}”</button>}
+                            {opts.length === 0 && !groupFolder.trim() && <p className="px-2.5 py-1.5 text-[11px] text-slate-400">ยังไม่มีโฟลเดอร์ย่อย — พิมพ์เพื่อสร้างใหม่</p>}
+                            {opts.map((f) => (
+                              <button key={f} type="button" onMouseDown={() => { setGroupFolder(f); setGroupOpen(false); }}
+                                className={`w-full text-left px-2.5 py-1 text-[12px] hover:bg-slate-50 ${groupFolder === f ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-700"}`}>📂 {f}</button>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
                   <p className="text-[10px] text-slate-400 truncate">
                     จะเก็บที่: <span className="font-mono text-slate-500">{[printRoot.folder_id ? "📁 โฟลเดอร์งานพิมพ์" : (brands.find((b) => b.id === brandId)?.name || "โฟลเดอร์แม่"), ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), ...(groupFolder.trim() ? [groupFolder.trim()] : []), title.trim() || "(ชื่องาน)"].join(" › ")}</span>
                   </p>
