@@ -2639,19 +2639,19 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
       let effUrl = "", effPath = "";
       if (driveOn && (srcFiles.length > 0 || autoFolder)) {
         const nm = title.trim() || file.name.replace(/\.[^.]+$/, "") || "งานพิมพ์";
-        // โฟลเดอร์ = ซับ(Printed/DTF) + โฟลเดอร์ย่อยที่เลือก (เช่น goodgoods) · flat = ไฟล์ลงในโฟลเดอร์นี้ตรง ๆ ไม่สร้างโฟลเดอร์ชื่องาน
+        // โฟลเดอร์ = ซับ(Printed/DTF) + โฟลเดอร์ย่อยที่เลือก (เช่น goodgoods) แล้วสร้างโฟลเดอร์ตามชื่องานข้างใน
         const effSub = [subpath.trim() || ptype, groupFolder.trim()].filter(Boolean).join("/");
         const previewFile = await previewForDrive(file);
         const { folderLink, largeCount } = await uploadArtworkToDrive({
-          name: nm, brandId, srcFiles, previewFile, subpath: effSub, flat: true,
+          name: nm, brandId, srcFiles, previewFile, subpath: effSub,
           rootFolderId: printRoot.folder_id || undefined,   // งานพิมพ์ไปโฟลเดอร์แม่เฉพาะ (ถ้าตั้งไว้)
           onProgress: (done, total) => setDriveProg({ done, total }),
         });
         if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
         if (folderLink) effUrl = folderLink;
-        // path ในเครื่อง: ฐานงานพิมพ์ (ถ้าตั้ง) ไม่งั้นฐานแบรนด์ → \Printed\DTF\<โฟลเดอร์ย่อย> (flat: ไม่มีโฟลเดอร์ชื่องาน)
+        // path ในเครื่อง: ฐานงานพิมพ์ (ถ้าตั้ง) ไม่งั้นฐานแบรนด์ → \Printed\DTF\<โฟลเดอร์ย่อย>\<ชื่องาน>
         const base = printRoot.local_base_path.trim() || brandBase[brandId] || "";
-        effPath = base ? [base.replace(/[\\/]+$/, ""), ...effSub.split(/[\\/]+/).filter(Boolean)].join("\\") : "";
+        effPath = base ? [base.replace(/[\\/]+$/, ""), ...effSub.split(/[\\/]+/).filter(Boolean), nm].join("\\") : "";
       }
 
       const upFile = resizeW > 0 ? await downscaleImageWidth(file, resizeW) : file;   // ย่อรูป preview ตามที่เลือก (0 = ขนาดจริง)
@@ -2768,7 +2768,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
                     <datalist id="print-group-folders">{groupOptions.map((f) => <option key={f} value={f} />)}</datalist>
                   </label>
                   <p className="text-[10px] text-slate-400 truncate">
-                    ไฟล์จะเก็บที่: <span className="font-mono text-slate-500">{[printRoot.folder_id ? "📁 โฟลเดอร์งานพิมพ์" : (brands.find((b) => b.id === brandId)?.name || "โฟลเดอร์แม่"), ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), ...(groupFolder.trim() ? [groupFolder.trim()] : [])].join(" › ")} <span className="text-slate-400">(ไฟล์อยู่ในนี้ ไม่สร้างโฟลเดอร์ชื่องาน)</span></span>
+                    จะเก็บที่: <span className="font-mono text-slate-500">{[printRoot.folder_id ? "📁 โฟลเดอร์งานพิมพ์" : (brands.find((b) => b.id === brandId)?.name || "โฟลเดอร์แม่"), ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), ...(groupFolder.trim() ? [groupFolder.trim()] : []), title.trim() || "(ชื่องาน)"].join(" › ")}</span>
                   </p>
                 </div>
               )}
