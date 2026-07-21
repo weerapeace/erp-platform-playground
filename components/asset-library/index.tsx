@@ -67,6 +67,7 @@ export function AssetLibrary() {
   const [printType, setPrintType] = useState("");   // ฟิลเตอร์ประเภทงานพิมพ์ (DTF/UV)
   const [printTypes, setPrintTypes] = useState<PrintType[]>([]);   // ประเภทงานพิมพ์ (ตั้งค่าเองได้)
   const [printAddOpen, setPrintAddOpen] = useState(false);
+  const [massPrintOpen, setMassPrintOpen] = useState(false);   // เพิ่มงานพิมพ์หลายงาน (ตาราง)
   const [managePrintOpen, setManagePrintOpen] = useState(false);
 
   const [collections, setCollections] = useState<AssetCollection[]>([]);
@@ -236,7 +237,7 @@ export function AssetLibrary() {
 
   const selCount = selected.size;
 
-  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen || printAddOpen || managePrintOpen;
+  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen || printAddOpen || massPrintOpen || managePrintOpen;
 
   // ── ผูกหลายรูปที่เลือกเข้าโฟลเดอร์ Drive เดียวกับรูปต้นทาง (bulk) ──
   const bulkLinkFolder = async (source: AssetRow) => {
@@ -259,10 +260,13 @@ export function AssetLibrary() {
     const imgs = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
     if (!imgs.length) return;
     e.preventDefault();
-    // มุมมอง Artwork → ฟอร์ม Artwork · มุมมองอื่น (รูปที่อัปเอง ฯลฯ) → ฟอร์มอัปรูปธรรมดา
+    // มุมมอง Artwork → ฟอร์ม Artwork · งานพิมพ์ → ฟอร์มงานพิมพ์ · อื่น ๆ → ฟอร์มอัปรูปธรรมดา
     if (source === "artwork") {
       if (imgs.length === 1) { setPendingFile(imgs[0]); setArtworkAddOpen(true); }
       else { setPendingFiles(imgs); setMassOpen(true); }
+    } else if (source === "print") {
+      if (imgs.length === 1) { setPendingFile(imgs[0]); setPrintAddOpen(true); }
+      else { setPendingFiles(imgs); setMassPrintOpen(true); }
     } else {
       setPendingFiles(imgs); setUploadOpen(true);
     }
@@ -300,6 +304,11 @@ export function AssetLibrary() {
             <button onClick={() => setMassOpen(true)}
               className="h-9 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap"
             >📋 เพิ่มหลายรูป</button>
+          )}
+          {source === "print" && (
+            <button onClick={() => setMassPrintOpen(true)}
+              className="h-9 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap"
+            >📋 เพิ่มหลายงาน</button>
           )}
           <button
             onClick={() => {
@@ -513,10 +522,16 @@ export function AssetLibrary() {
           onChanged={async () => { await loadMeta(); }} />
       )}
       {printAddOpen && (
-        <PrintJobAddModal actor={actor} printTypes={printTypes} collections={collections}
+        <PrintJobAddModal actor={actor} printTypes={printTypes} collections={collections} initialFile={pendingFile}
           defaultCollectionIds={collectionId && collectionId !== "none" ? [collectionId] : []}
-          onClose={() => setPrintAddOpen(false)}
-          onDone={async () => { setPrintAddOpen(false); await load(); await loadMeta(); }} />
+          onClose={() => { setPrintAddOpen(false); setPendingFile(null); }}
+          onDone={async () => { setPrintAddOpen(false); setPendingFile(null); await load(); await loadMeta(); }} />
+      )}
+      {massPrintOpen && (
+        <MassPrintModal actor={actor} printTypes={printTypes} collections={collections} initialFiles={pendingFiles}
+          defaultCollectionIds={collectionId && collectionId !== "none" ? [collectionId] : []}
+          onClose={() => { setMassPrintOpen(false); setPendingFiles(null); }}
+          onDone={async () => { setMassPrintOpen(false); setPendingFiles(null); await load(); await loadMeta(); }} />
       )}
       {managePrintOpen && (
         <ManagePrintTypesModal types={printTypes} onClose={() => setManagePrintOpen(false)}
@@ -2565,9 +2580,9 @@ function PrintItemsField({ value, onChange, disabled }: { value: PrintItem[]; on
 }
 
 // ── เพิ่มงานพิมพ์ (DTF/UV) — รูป preview + ไฟล์ .ai/.pdf ขึ้นโฟลเดอร์ Drive + ประเภท/ขนาดแผ่น ──
-function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds, onClose, onDone }: {
+function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds, initialFile, onClose, onDone }: {
   actor: string | null; printTypes: PrintType[]; collections: AssetCollection[];
-  defaultCollectionIds?: string[]; onClose: () => void; onDone: () => void;
+  defaultCollectionIds?: string[]; initialFile?: File | null; onClose: () => void; onDone: () => void;
 }) {
   const toast = useToast();
   const { brandBase, typeSub } = useDriveFolderMaps();
@@ -2630,6 +2645,8 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
     setPreview(f && f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
     if (f && !title.trim()) setTitle(f.name.replace(/\.[^.]+$/, ""));
   };
+  // ลากรูปมาวางบนหน้างานพิมพ์ → เปิด popup พร้อมรูป
+  useEffect(() => { if (initialFile) pick(initialFile); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const save = async () => {
     if (!file) { toast.error("แนบรูป preview ของงานพิมพ์ก่อน"); return; }
@@ -2833,6 +2850,195 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
               className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
         </div>
       </div>
+    </ERPModal>
+  );
+}
+
+// ── เพิ่มงานพิมพ์หลายงาน (ตาราง) — 1 รูป/แถว · ประเภทตัวเดียวทั้งชุด · ต่อแถวใส่ Artwork+จำนวนได้ · บันทึกวิ่ง background ──
+type MassPrintRow = { id: number; file: File; preview: string | null; name: string; sizes: AssetSize[]; group: string; srcFiles: File[]; printItems: PrintItem[] };
+function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, initialFiles, onClose, onDone }: {
+  actor: string | null; printTypes: PrintType[]; collections: AssetCollection[];
+  defaultCollectionIds?: string[]; initialFiles?: File[] | null; onClose: () => void; onDone: () => void;
+}) {
+  const toast = useToast();
+  const { brandBase } = useDriveFolderMaps();
+  const [rows, setRows] = useState<MassPrintRow[]>([]);
+  const [ptype, setPtype] = useState("");                       // ประเภทงานพิมพ์ ใช้ทั้งชุด
+  const [brandId, setBrandId] = useState("");
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [group, setGroup] = useState("");                       // โฟลเดอร์ย่อยใช้ทั้งชุด (แถวเว้นว่าง = ใช้ตัวนี้)
+  const [groupOptions, setGroupOptions] = useState<string[]>([]);
+  const [collectionIds, setCollectionIds] = useState<string[]>(defaultCollectionIds ?? []);
+  const [cols, setCols] = useState<AssetCollection[]>(collections);
+  const [tags, setTags] = useState<string[]>([]);
+  const [driveOn, setDriveOn] = useState(false);
+  const [autoFolder, setAutoFolder] = useState(true);
+  const [resizeW, setResizeW] = useState(1200);
+  const [printRoot, setPrintRoot] = useState<{ folder_id: string; local_base_path: string }>({ folder_id: "", local_base_path: "" });
+  const [busy, setBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const idRef = useRef(1);
+
+  useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
+  useEffect(() => { apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string; hide_in_artwork?: boolean }[]).filter((b) => !b.hide_in_artwork))).catch(() => {}); }, []);
+  useEffect(() => { apiFetch("/api/ui-config?key=print_drive_root").then((r) => r.json()).then((j) => setPrintRoot({ folder_id: String(j.value?.folder_id ?? ""), local_base_path: String(j.value?.local_base_path ?? "") })).catch(() => {}); }, []);
+
+  const subOf = () => (printTypes.find((t) => t.code === ptype)?.drive_subpath ?? "").trim() || ptype;   // เช่น Printed/DTF
+  const defSize = (): AssetSize[] => { const t = printTypes.find((x) => x.code === ptype); return t?.default_w && t?.default_h ? [{ label: "ขนาดแผ่น", w: Number(t.default_w), h: Number(t.default_h), unit: (t.unit || "cm") as AssetSize["unit"] }] : []; };
+  useEffect(() => {   // โฟลเดอร์ย่อยที่มี → dropdown ทั้งชุด
+    if (!driveOn || !ptype) { setGroupOptions([]); return; }
+    let alive = true;
+    apiFetch(`/api/drive/group-folders?root=${encodeURIComponent(printRoot.folder_id)}&subpath=${encodeURIComponent(subOf())}`)
+      .then((r) => r.json()).then((j) => { if (alive) setGroupOptions((j.folders ?? []) as string[]); }).catch(() => {});
+    return () => { alive = false; };
+  }, [driveOn, ptype, printRoot.folder_id]);
+
+  const addFiles = (list: FileList | File[]) => {
+    const arr = Array.from(list).filter((f) => f.type.startsWith("image/"));
+    if (!arr.length) return;
+    setRows((cur) => [...cur, ...arr.map((f) => ({ id: idRef.current++, file: f, preview: URL.createObjectURL(f), name: f.name.replace(/\.[^.]+$/, ""), sizes: defSize(), group: "", srcFiles: [], printItems: [] as PrintItem[] }))]);
+  };
+  useEffect(() => { if (initialFiles?.length) addFiles(initialFiles); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  const setRow = (id: number, patch: Partial<MassPrintRow>) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  // เลือกประเภท → เติมขนาดให้แถวที่ยังว่าง
+  const pickType = (code: string) => { setPtype(code); const t = printTypes.find((x) => x.code === code); if (t?.default_w && t?.default_h) { const one: AssetSize = { label: "ขนาดแผ่น", w: Number(t.default_w), h: Number(t.default_h), unit: (t.unit || "cm") as AssetSize["unit"] }; setRows((rs) => rs.map((r) => (r.sizes.length ? r : { ...r, sizes: [one] }))); } };
+
+  const save = () => {
+    if (!rows.length) { toast.error("ลากรูป preview ของแผ่นเข้ามาก่อน"); return; }
+    if (!ptype) { toast.error("เลือกประเภทงานพิมพ์ก่อน (ใช้ทั้งชุด)"); return; }
+    setBusy(true);
+    const jobRows = rows, jType = ptype, jSub = subOf(), jBrand = brandId, jGroup = group.trim(), jAlbums = collectionIds, jTags = tags, jResize = resizeW, jDrive = driveOn && autoFolder, jRoot = printRoot;
+    const base = jRoot.local_base_path.trim() || brandBase[jBrand] || "";
+    runBackgroundTask({
+      label: `เพิ่มงานพิมพ์ ${jobRows.length} งาน`,
+      total: jobRows.length,
+      run: async (report) => {
+        let ok = 0, fail = 0, largeTotal = 0;
+        for (let i = 0; i < jobRows.length; i++) {
+          const r = jobRows[i];
+          try {
+            const nm = r.name.trim() || r.file.name.replace(/\.[^.]+$/, "") || "งานพิมพ์";
+            const effSub = [jSub, (r.group.trim() || jGroup)].filter(Boolean).join("/");
+            let effUrl = "", effPath = "";
+            if (jDrive) {
+              const previewFile = await previewForDrive(r.file);
+              const { folderLink, largeCount } = await uploadArtworkToDrive({ name: nm, brandId: jBrand, srcFiles: r.srcFiles, previewFile, subpath: effSub, rootFolderId: jRoot.folder_id || undefined });
+              largeTotal += largeCount; if (folderLink) effUrl = folderLink;
+              effPath = base ? [base.replace(/[\\/]+$/, ""), ...effSub.split(/[\\/]+/).filter(Boolean), nm].join("\\") : "";
+            }
+            const upFile = jResize > 0 ? await downscaleImageWidth(r.file, jResize) : r.file;
+            const fd = new FormData();
+            fd.append("file", upFile); fd.append("source", "print"); fd.append("print_type", jType);
+            fd.append("title", nm);
+            if (jBrand) fd.append("brand_id", jBrand);
+            if (effPath) fd.append("master_path", effPath);
+            if (effUrl) fd.append("master_url", effUrl);
+            if (r.sizes.length) fd.append("sizes", JSON.stringify(r.sizes));
+            if (r.printItems.length) fd.append("print_items", JSON.stringify(r.printItems));
+            if (jAlbums.length) fd.append("collection_ids", JSON.stringify(jAlbums));
+            if (jTags.length) fd.append("tags", jTags.join(","));
+            if (actor) fd.append("actor", actor);
+            const res = await apiFetch("/api/assets", { method: "POST", body: fd });
+            const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "");
+            ok++;
+          } catch { fail++; }
+          report(i + 1);
+        }
+        triggerRefresh();
+        const parts = [`เพิ่ม ${ok} งาน`]; if (fail) parts.push(`ล้มเหลว ${fail}`); if (largeTotal) parts.push(`ไฟล์ใหญ่ ${largeTotal} ต้องลากขึ้น Drive เอง`);
+        return { ok, fail, message: parts.join(" · ") };
+      },
+    });
+    onDone();
+  };
+
+  return (
+    <ERPModal open onClose={onClose} title="📋 เพิ่มงานพิมพ์หลายงาน" size="xl"
+      description="ลากรูป preview หลายแผ่น → 1 การ์ด/แผ่น · ตั้งประเภท/แบรนด์/โฟลเดอร์ใช้ทั้งชุด · ต่อแถวใส่ชื่อ/ขนาด/Artwork ได้ → กดบันทึกแล้วปิดได้เลย งานวิ่งเบื้องหลัง"
+      footer={
+        <div className="flex items-center justify-between w-full">
+          <span className="text-[12px] text-slate-400">{rows.length} งาน · บันทึกแล้ววิ่งเบื้องหลัง (ดูสถานะมุมจอ)</span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={save} disabled={rows.length === 0} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">บันทึกทั้งหมด ({rows.length})</button>
+          </div>
+        </div>
+      }>
+      {/* โซนลากไฟล์ */}
+      <div onClick={() => inputRef.current?.click()}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); }}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
+        className={`cursor-pointer rounded-xl border-2 border-dashed flex items-center justify-center py-4 mb-3 text-center text-[12px] ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50 text-slate-400"}`}>
+        + ลากรูป preview ของแผ่นหลายไฟล์มาวาง หรือคลิกเลือก
+        <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }} />
+      </div>
+
+      {/* ตั้งค่าทั้งชุด */}
+      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 space-y-2.5 mb-3">
+        <p className="text-[11px] font-medium text-slate-500">ใช้กับทุกงาน</p>
+        <div className="text-[12px] text-slate-500">ประเภทงานพิมพ์ <span className="text-rose-500">*</span>
+          <div className="flex gap-1 mt-1 flex-wrap">
+            {printTypes.length === 0 && <span className="text-[11px] text-amber-600">ยังไม่มีประเภท — ตั้งที่ ⚙️ ก่อน</span>}
+            {printTypes.map((t) => (
+              <button key={t.id} type="button" onClick={() => pickType(t.code)}
+                className={`h-8 px-3 text-[12px] rounded-lg border ${ptype === t.code ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                {t.name}{t.default_w && t.default_h ? <span className="text-slate-400 ml-1">{t.default_w}×{t.default_h}</span> : null}</button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label className="text-[12px] text-slate-500">แบรนด์
+            <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
+              <option value="">— ไม่ระบุ —</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select></label>
+          <label className="text-[12px] text-slate-500">📂 โฟลเดอร์ย่อย (ทั้งชุด)
+            <input value={group} onChange={(e) => setGroup(e.target.value)} list="mass-print-groups" placeholder="เช่น goodgoods (เว้นว่าง = ลงใน DTF ตรง ๆ)"
+              className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg font-mono" />
+            <datalist id="mass-print-groups">{groupOptions.map((f) => <option key={f} value={f} />)}</datalist></label>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="text-[12px] text-slate-500">อัลบั้ม<div className="mt-0.5"><CollectionMultiSelect value={collectionIds} collections={cols} onChange={setCollectionIds} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
+          <div className="text-[12px] text-slate-500">แท็ก<div className="mt-0.5"><TagPickerField value={tags} onChange={setTags} /></div></div>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap pt-1 border-t border-slate-200/70">
+          {driveOn && <label className="flex items-center gap-1.5 text-[12px] text-slate-600"><input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="w-4 h-4 accent-indigo-600" />🗂️ สร้างโฟลเดอร์ Drive อัตโนมัติ</label>}
+          <span className="text-[11px] text-slate-400">ย่อ preview:</span>
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+            {[{ w: 800, l: "800" }, { w: 1200, l: "1200" }, { w: 1600, l: "1600" }, { w: 0, l: "จริง" }].map((o, i) => (
+              <button key={o.w} type="button" onClick={() => setResizeW(o.w)} className={`h-7 px-2 text-[11px] ${i > 0 ? "border-l border-slate-200" : ""} ${resizeW === o.w ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500"}`}>{o.l}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* แถวรายงาน */}
+      {rows.length === 0 ? <p className="text-[12px] text-slate-400 py-4 text-center">ยังไม่มีรูป — ลากเข้ามาด้านบน</p> : (
+        <div className="space-y-2 max-h-[42vh] overflow-y-auto pr-1">
+          {rows.map((r) => (
+            <div key={r.id} className="rounded-lg border border-slate-200 bg-white p-2">
+              <div className="flex items-start gap-2 mb-1.5">
+                {r.preview
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={r.preview} alt="" className="w-12 h-12 object-contain rounded border border-slate-200 bg-slate-50 shrink-0" />
+                  : <span className="text-2xl shrink-0">🖨</span>}
+                <div className="flex-1 min-w-0 space-y-1">
+                  <input value={r.name} onChange={(e) => setRow(r.id, { name: e.target.value })} placeholder="ชื่องาน"
+                    className="w-full h-8 px-2.5 text-[12px] border border-slate-200 rounded-lg" />
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-slate-400 shrink-0">ขนาด</span>
+                    <div className="flex-1"><SizesEditor value={r.sizes} onChange={(v) => setRow(r.id, { sizes: v })} /></div>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setRows((rs) => rs.filter((x) => x.id !== r.id))} className="text-slate-400 hover:text-red-500 shrink-0" title="เอาออก">✕</button>
+              </div>
+              <div className="pl-14">
+                <PrintItemsField value={r.printItems} onChange={(v) => setRow(r.id, { printItems: v })} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </ERPModal>
   );
 }
