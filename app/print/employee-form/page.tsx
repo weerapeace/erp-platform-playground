@@ -122,6 +122,23 @@ function SkillSettings({ open, onClose, onChanged }: { open: boolean; onClose: (
     } catch (e) { setMsg(`ลบไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); } finally { setBusy(false); }
   }
 
+  // เลื่อนลำดับขึ้น/ลง — reindex sort_order ให้เรียง 0..n (กันค่าชนกัน) แล้ว PATCH เฉพาะแถวที่เปลี่ยน
+  async function move(idx: number, dir: -1 | 1) {
+    const j = idx + dir;
+    if (j < 0 || j >= rows.length) return;
+    const next = [...rows];
+    [next[idx], next[j]] = [next[j], next[idx]];
+    const reindexed = next.map((r, i) => ({ ...r, sort: i }));
+    const changed = reindexed.filter((r) => { const b = rows.find((x) => x.id === r.id); return b && b.sort !== r.sort; });
+    setRows(reindexed); // optimistic
+    setBusy(true); setMsg(null);
+    try {
+      for (const r of changed) await write(`/api/lookups/${encodeURIComponent(r.id)}`, { method: "PATCH", body: JSON.stringify({ sort_order: r.sort }) });
+      await onChanged(); // อัปเดตลำดับ checkbox ในฟอร์มด้วย
+    } catch (e) { setMsg(`สลับลำดับไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); await reload(); }
+    finally { setBusy(false); }
+  }
+
   async function addRow() {
     if (!draft.th.trim()) { setMsg("กรุณากรอกชื่อทักษะ (ไทย)"); return; }
     setBusy(true); setMsg(null);
@@ -143,12 +160,18 @@ function SkillSettings({ open, onClose, onChanged }: { open: boolean; onClose: (
       storageKey="employee-skill-settings"
       footer={<button onClick={onClose} className="h-9 rounded-lg bg-slate-800 px-4 text-sm font-medium text-white hover:bg-slate-900">เสร็จสิ้น</button>}
     >
-      <div className="mb-1 grid grid-cols-[1fr_1fr_1fr_auto] gap-2 px-1 text-[11px] font-semibold text-slate-400">
-        <span>ไทย</span><span>English</span><span>พม่า / မြန်မာ</span><span className="pr-1 text-right">แสดง · จัดการ</span>
+      <div className="mb-1 grid grid-cols-[20px_1fr_1fr_1fr_auto] gap-2 px-1 text-[11px] font-semibold text-slate-400">
+        <span /><span>ไทย</span><span>English</span><span>พม่า / မြန်မာ</span><span className="pr-1 text-right">แสดง · จัดการ</span>
       </div>
       <div className="space-y-1.5">
-        {rows.map((r) => (
-          <div key={r.id} className={`grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-2 rounded-lg ${r.active ? "" : "bg-slate-50 opacity-60"}`}>
+        {rows.map((r, idx) => (
+          <div key={r.id} className={`grid grid-cols-[20px_1fr_1fr_1fr_auto] items-center gap-2 rounded-lg ${r.active ? "" : "bg-slate-50 opacity-60"}`}>
+            <div className="flex flex-col items-center">
+              <button onClick={() => move(idx, -1)} disabled={busy || idx === 0} title="เลื่อนขึ้น"
+                className="h-[18px] w-5 leading-none text-[11px] text-slate-400 hover:text-slate-700 disabled:opacity-20">▲</button>
+              <button onClick={() => move(idx, 1)} disabled={busy || idx === rows.length - 1} title="เลื่อนลง"
+                className="h-[18px] w-5 leading-none text-[11px] text-slate-400 hover:text-slate-700 disabled:opacity-20">▼</button>
+            </div>
             <input value={r.th} onChange={(e) => setField(r.id, "th", e.target.value)} className="h-9 rounded-lg border border-slate-300 px-2 text-sm" />
             <input value={r.en} onChange={(e) => setField(r.id, "en", e.target.value)} className="h-9 rounded-lg border border-slate-300 px-2 text-sm" />
             <input value={r.my} onChange={(e) => setField(r.id, "my", e.target.value)} className="h-9 rounded-lg border border-slate-300 px-2 text-sm" />
@@ -169,7 +192,8 @@ function SkillSettings({ open, onClose, onChanged }: { open: boolean; onClose: (
 
       <div className="mt-4 rounded-lg border border-dashed border-slate-300 p-3">
         <div className="mb-2 text-xs font-semibold text-slate-500">＋ เพิ่มทักษะใหม่</div>
-        <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
+        <div className="grid grid-cols-[20px_1fr_1fr_1fr_auto] gap-2">
+          <span />
           <input value={draft.th} onChange={(e) => setDraft((d) => ({ ...d, th: e.target.value }))} placeholder="ไทย (จำเป็น)" className="h-9 rounded-lg border border-slate-300 px-2 text-sm" />
           <input value={draft.en} onChange={(e) => setDraft((d) => ({ ...d, en: e.target.value }))} placeholder="English" className="h-9 rounded-lg border border-slate-300 px-2 text-sm" />
           <input value={draft.my} onChange={(e) => setDraft((d) => ({ ...d, my: e.target.value }))} placeholder="พม่า" className="h-9 rounded-lg border border-slate-300 px-2 text-sm" />
