@@ -87,6 +87,7 @@ export function AssetLibrary() {
   const [pageDrag, setPageDrag] = useState(false);
   const [manageTypesOpen, setManageTypesOpen] = useState(false);
   const [driveScanOpen, setDriveScanOpen] = useState(false);   // หาโฟลเดอร์ Drive ที่ยังไม่เชื่อม
+  const [folderScan, setFolderScan] = useState<{ folderId: string; folderName: string; folderLink: string } | null>(null);   // หารูปยังไม่ลง เฉพาะโฟลเดอร์ที่กำลังดู
   const [bulkTrashOpen, setBulkTrashOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
@@ -119,7 +120,7 @@ export function AssetLibrary() {
         const res = await apiFetch(`/api/assets?${p.toString()}`); const j = await res.json();
         if (j.error) throw new Error(j.error);
         setRows(j.data ?? []); setTotal(j.total ?? 0);
-      } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดคลังไม่สำเร็จ"); }
+      } catch (e) { toast.error(e instanceof Error ? e.message : t("โหลดคลังไม่สำเร็จ", "Failed to load the library")); }
       finally { setLoading(false); }
       return;
     }
@@ -145,7 +146,7 @@ export function AssetLibrary() {
       if (j.error) throw new Error(j.error);
       setRows(j.data ?? []);
       setTotal(j.total ?? 0);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดคลังไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("โหลดคลังไม่สำเร็จ", "Failed to load the library")); }
     finally { setLoading(false); }
   }, [search, type, collectionId, tag, trash, source, artworkType, printType, folderFilter, page, toast]);
 
@@ -195,14 +196,14 @@ export function AssetLibrary() {
     const clean = (t: string) => (t || "").replace(/[\\/:*?"<>|]+/g, "_").trim();
     const guessExt = (t: string) => (/\.[a-z0-9]{2,5}$/i.test(t || "") ? "" : ".jpg");
     const imgs = rows.filter((r) => isImage(r)).map((r, i) => ({ url: r.url, name: `${String(i + 1).padStart(2, "0")}_${clean(r.title) || "image"}${guessExt(r.title)}` }));
-    if (imgs.length === 0) { toast.error("ไม่มีรูปในผลค้นหานี้"); return; }
+    if (imgs.length === 0) { toast.error(t("ไม่มีรูปในผลค้นหานี้", "No images in these results")); return; }
     setZipBusy(true); setZipMsg("");
     try {
-      const n = await downloadImagesAsZip(imgs, `ค้นหา-${search.trim() || "รูป"}`,
-        (done, total) => setZipMsg(total ? `กำลังโหลดรูป ${Math.min(done + 1, total)}/${total}…` : "กำลังบีบไฟล์…"));
-      if (n > 0) toast.success(`ดาวน์โหลด ${n} รูปเป็น zip แล้ว`);
-      else toast.error("ดาวน์โหลดรูปไม่สำเร็จ");
-    } catch { toast.error("ดาวน์โหลดไม่สำเร็จ"); }
+      const n = await downloadImagesAsZip(imgs, `${t("ค้นหา", "search")}-${search.trim() || t("รูป", "images")}`,
+        (done, total) => setZipMsg(total ? `${t("กำลังโหลดรูป", "Loading images")} ${Math.min(done + 1, total)}/${total}…` : t("กำลังบีบไฟล์…", "Compressing…")));
+      if (n > 0) toast.success(`${t("ดาวน์โหลด", "Downloaded")} ${n} ${t("รูปเป็น zip แล้ว", "images as zip")}`);
+      else toast.error(t("ดาวน์โหลดรูปไม่สำเร็จ", "Failed to download images"));
+    } catch { toast.error(t("ดาวน์โหลดไม่สำเร็จ", "Download failed")); }
     finally { setZipBusy(false); setZipMsg(""); }
   };
 
@@ -223,8 +224,8 @@ export function AssetLibrary() {
     }
     clearSel();
     await load(); await loadMeta();
-    if (blocked) toast.error(`ลบ ${ok} ไฟล์ · ข้าม ${blocked} ไฟล์ (ยังถูกใช้อยู่)`);
-    else toast.success(`ย้าย ${ok} ไฟล์ลงถังขยะแล้ว`);
+    if (blocked) toast.error(`${t("ลบ", "Deleted")} ${ok} ${t("ไฟล์ · ข้าม", "files · skipped")} ${blocked} ${t("ไฟล์ (ยังถูกใช้อยู่)", "files (still in use)")}`);
+    else toast.success(`${t("ย้าย", "Moved")} ${ok} ${t("ไฟล์ลงถังขยะแล้ว", "files to trash")}`);
   };
 
   // ── ติดแท็ก / ย้ายอัลบั้ม หลายไฟล์พร้อมกัน ──
@@ -233,28 +234,28 @@ export function AssetLibrary() {
       const res = await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(okMsg); clearSel(); await load(); await loadMeta();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ทำรายการไม่สำเร็จ", "Action failed")); }
   };
-  const bulkTag = (tag: string) => { setBulkTagOpen(false); void bulkApi({ action: "tag", asset_ids: Array.from(selected), tag }, `ติดแท็ก “${tag}” ให้ ${selected.size} ไฟล์แล้ว`); };
-  const bulkMove = (collectionId: string) => { setBulkMoveOpen(false); void bulkApi({ action: "move", asset_ids: Array.from(selected), collection_id: collectionId || null }, `อัปเดตอัลบั้ม ${selected.size} ไฟล์แล้ว`); };
+  const bulkTag = (tag: string) => { setBulkTagOpen(false); void bulkApi({ action: "tag", asset_ids: Array.from(selected), tag }, `${t("ติดแท็ก", "Tagged")} “${tag}” ${t("ให้", "on")} ${selected.size} ${t("ไฟล์แล้ว", "files")}`); };
+  const bulkMove = (collectionId: string) => { setBulkMoveOpen(false); void bulkApi({ action: "move", asset_ids: Array.from(selected), collection_id: collectionId || null }, `${t("อัปเดตอัลบั้ม", "Updated album for")} ${selected.size} ${t("ไฟล์แล้ว", "files")}`); };
 
   const selCount = selected.size;
 
-  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen || printAddOpen || massPrintOpen || managePrintOpen;
+  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen || !!folderScan || printAddOpen || massPrintOpen || managePrintOpen;
 
   // ── ผูกหลายรูปที่เลือกเข้าโฟลเดอร์ Drive เดียวกับรูปต้นทาง (bulk) ──
   const bulkLinkFolder = async (source: AssetRow) => {
     const ids = Array.from(selected).filter((x) => x !== source.id);
     setBulkLinkOpen(false);
-    if (!/\/folders\//.test(source.master_url ?? "")) { toast.error(`รูป “${source.title || source.file_name}” ยังไม่มีโฟลเดอร์ Drive — เลือกรูปที่มีโฟลเดอร์แล้ว`); return; }
-    if (!ids.length) { toast.error("ไม่มีรูปอื่นให้ผูก (เลือกรูปที่ยังไม่มีโฟลเดอร์ด้วย)"); return; }
+    if (!/\/folders\//.test(source.master_url ?? "")) { toast.error(`${t("รูป", "Image")} “${source.title || source.file_name}” ${t("ยังไม่มีโฟลเดอร์ Drive — เลือกรูปที่มีโฟลเดอร์แล้ว", "has no Drive folder yet — pick an image that already has a folder")}`); return; }
+    if (!ids.length) { toast.error(t("ไม่มีรูปอื่นให้ผูก (เลือกรูปที่ยังไม่มีโฟลเดอร์ด้วย)", "No other images to link (also select images without a folder)")); return; }
     setBulkLinkBusy(true);
     try {
       const res = await apiFetch("/api/assets/drive-folders/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, source_id: source.id, follow_path: true }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ผูกโฟลเดอร์ไม่สำเร็จ");
-      toast.success(`ผูก ${j.count ?? ids.length} รูปเข้าโฟลเดอร์เดียวกับ “${source.title || source.file_name}” แล้ว`);
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("ผูกโฟลเดอร์ไม่สำเร็จ", "Failed to link folder"));
+      toast.success(`${t("ผูก", "Linked")} ${j.count ?? ids.length} ${t("รูปเข้าโฟลเดอร์เดียวกับ", "images into the same folder as")} “${source.title || source.file_name}”`);
       clearSel(); await load(); await loadMeta();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ผูกโฟลเดอร์ไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ผูกโฟลเดอร์ไม่สำเร็จ", "Failed to link folder")); }
     finally { setBulkLinkBusy(false); }
   };
   const onPageDrop = (e: React.DragEvent) => {
@@ -421,7 +422,16 @@ export function AssetLibrary() {
           {folderFilter && (
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-2">
               <p className="text-[12px] text-indigo-700">{t("📁 รูปในโฟลเดอร์เดียวกับ", "📁 Images in the same folder as")} “<b>{folderFilter.label}</b>” · {total.toLocaleString("th-TH")} {t("รูป", "images")}</p>
-              <button onClick={() => setFolderFilter(null)} className="text-[12px] text-indigo-600 hover:underline">{t("✕ ออกจากมุมมองโฟลเดอร์", "✕ Exit folder view")}</button>
+              <div className="flex items-center gap-3">
+                {driveOn && (
+                  <button onClick={() => setFolderScan({ folderId: folderFilter.id, folderName: folderFilter.label, folderLink: `https://drive.google.com/drive/folders/${folderFilter.id}` })}
+                    title={t("สแกนหารูปในโฟลเดอร์นี้ที่ยังไม่ได้ลงคลัง แล้วนำเข้า", "Scan this folder for images not yet in the library and import them")}
+                    className="h-7 px-2.5 text-[11px] font-medium rounded-lg border border-indigo-300 text-indigo-700 bg-white hover:bg-indigo-100 whitespace-nowrap">
+                    {t("🔍 หารูปที่ยังไม่ลงในโฟลเดอร์นี้", "🔍 Find unlinked in this folder")}
+                  </button>
+                )}
+                <button onClick={() => setFolderFilter(null)} className="text-[12px] text-indigo-600 hover:underline">{t("✕ ออกจากมุมมองโฟลเดอร์", "✕ Exit folder view")}</button>
+              </div>
             </div>
           )}
           {searching && (
@@ -461,7 +471,7 @@ export function AssetLibrary() {
                     {rows.every((r) => selected.has(r.id)) ? t("☑ ล้างที่เลือก", "☑ Clear selection") : `${t("☐ เลือกทั้งหมดในหน้านี้", "☐ Select all on this page")} (${rows.length})`}
                   </button>
                 : <span />}
-              <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel="ไฟล์" />
+              <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel={t("ไฟล์", "files")} />
             </div>
           )}
           {showBrandView ? (
@@ -487,7 +497,7 @@ export function AssetLibrary() {
             </div>
           )}
           {!showBrandView && !loading && total > 0 && rows.length > 0 && (
-            <div className="mt-4"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel="ไฟล์" /></div>
+            <div className="mt-4"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel={t("ไฟล์", "files")} /></div>
           )}
         </main>
       </div>
@@ -501,7 +511,7 @@ export function AssetLibrary() {
           {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("📁 จัดอัลบั้ม", "📁 Organize album")}</button>}
           {!trash && driveOn && <button onClick={() => setBulkFolderOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("🗂️ สร้าง Folder Drive", "🗂️ Create Drive folder")}</button>}
           {!trash && driveOn && <button onClick={() => setBulkLinkOpen(true)} disabled={bulkLinkBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkLinkBusy ? t("กำลังผูก…", "Linking…") : t("📎 ใช้โฟลเดอร์เดียวกัน", "📎 Use same folder")}</button>}
-          <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
+          <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("🗑️ ลบ", "🗑️ Delete")}</button>
           <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">{t("ยกเลิก", "Cancel")}</button>
         </div>
       )}
@@ -551,6 +561,10 @@ export function AssetLibrary() {
         <DriveScanModal artTypes={artTypes} onClose={() => setDriveScanOpen(false)}
           onDone={async () => { setDriveScanOpen(false); await load(); await loadMeta(); }} />
       )}
+      {folderScan && (
+        <DriveScanModal artTypes={artTypes} presetFolder={folderScan} onClose={() => setFolderScan(null)}
+          onDone={async () => { setFolderScan(null); await load(); await loadMeta(); }} />
+      )}
       {detailId && (
         <DetailModal
           key={detailId} id={detailId} actor={actor} collections={collections} artTypes={artTypes}
@@ -576,7 +590,7 @@ export function AssetLibrary() {
       {bulkFolderOpen && <BulkFolderModal ids={Array.from(selected)} firstAsset={rows.find((r) => selected.has(r.id)) ?? null}
         onClose={() => setBulkFolderOpen(false)}
         onDone={async () => { setBulkFolderOpen(false); clearSel(); await load(); await loadMeta(); }} />}
-      {bulkLinkBusy && <LoadingOverlay message="กำลังผูกโฟลเดอร์ + ก็อปรูป… อาจใช้เวลาสักครู่" />}
+      {bulkLinkBusy && <LoadingOverlay message={t("กำลังผูกโฟลเดอร์ + ก็อปรูป… อาจใช้เวลาสักครู่", "Linking folder + copying images… this may take a moment")} />}
       {/* bulk: เลือกรูปต้นทาง (ที่มีโฟลเดอร์ Drive) → ผูกทุกรูปที่เลือกเข้าโฟลเดอร์เดียวกัน */}
       <AssetPicker open={bulkLinkOpen} onClose={() => setBulkLinkOpen(false)} typeFilter="image" defaultSource="artwork" requireDriveFolder
         defaultSearch={commonNameSeed(rows.filter((r) => selected.has(r.id)).map((r) => r.title))}
@@ -795,7 +809,7 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
     });
 
   const upload = async () => {
-    if (items.length === 0) { toast.error("ยังไม่ได้เลือกไฟล์"); return; }
+    if (items.length === 0) { toast.error(t("ยังไม่ได้เลือกไฟล์", "No files selected yet")); return; }
     setBusy(true);
     let done = 0;
     const next = [...items];
@@ -833,7 +847,7 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
         <div className="flex items-center justify-between w-full">
           <span className="text-[12px] text-slate-400">{t("รองรับ รูป / PDF / ไฟล์ออกแบบ / วิดีโอ · ไม่เกิน 25MB ต่อไฟล์", "Supports images / PDF / design files / video · max 25MB per file")}</span>
           <div className="flex gap-2">
-            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
+            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
             <button onClick={upload} disabled={busy || items.length === 0}
               className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
               {busy ? t("กำลังอัป…", "Uploading…") : t("บันทึกเข้าคลัง", "Save to library")}
@@ -967,7 +981,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
       setArtTypesSel(det.artwork_types?.length ? det.artwork_types : (det.artwork_type ? [det.artwork_type] : []));
       setSizes(det.sizes ?? []); setParentCodes(det.parent_sku_codes ?? []); setBrandId(det.brand_id ?? "");
       setPrintItems(det.print_items ?? []);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ"); onClose(); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เปิดไฟล์ไม่สำเร็จ", "Failed to open file")); onClose(); }
   }, [id, toast, onClose]);
   useEffect(() => { void loadDetail(); }, [loadDetail]);
   useEffect(() => { apiFetch("/api/drive").then((r) => r.json()).then((j) => setDriveOn(!!j.configured)).catch(() => {}); }, []);
@@ -983,8 +997,8 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
         body: JSON.stringify({ title, tags, collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_types: artTypesSel, keywords, sizes, parent_sku_codes: parentCodes, ...(d?.source === "print" ? { print_items: printItems } : {}) }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("บันทึกแล้ว"); await loadDetail(); onChanged();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+      toast.success(t("บันทึกแล้ว", "Saved")); await loadDetail(); onChanged();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setSaving(false); }
   };
 
@@ -992,11 +1006,11 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
     setConfirmTrash(false);
     try {
       const res = await apiFetch(`/api/assets/${id}${alsoDrive ? "?drive=1" : ""}`, { method: "DELETE" });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ลบไม่สำเร็จ");
-      toast.success(j.driveTrashed ? "ย้ายลงถังขยะ + ทิ้งโฟลเดอร์ Drive แล้ว" : "ย้ายลงถังขยะแล้ว");
-      if (alsoDrive && !j.driveTrashed) toast.warning("ลบไฟล์ในคลังแล้ว แต่ทิ้งโฟลเดอร์ Drive ไม่สำเร็จ — ลองลบใน Drive เอง");
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("ลบไม่สำเร็จ", "Delete failed"));
+      toast.success(j.driveTrashed ? t("ย้ายลงถังขยะ + ทิ้งโฟลเดอร์ Drive แล้ว", "Moved to trash + Drive folder deleted") : t("ย้ายลงถังขยะแล้ว", "Moved to trash"));
+      if (alsoDrive && !j.driveTrashed) toast.warning(t("ลบไฟล์ในคลังแล้ว แต่ทิ้งโฟลเดอร์ Drive ไม่สำเร็จ — ลองลบใน Drive เอง", "Deleted from library, but failed to trash the Drive folder — try deleting it in Drive yourself"));
       onChanged(); onClose();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ลบไม่สำเร็จ", "Delete failed")); }
   };
 
   const restore = async () => {
@@ -1005,20 +1019,20 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restore: true }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("กู้คืนแล้ว"); onChanged(); onClose();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "กู้คืนไม่สำเร็จ"); }
+      toast.success(t("กู้คืนแล้ว", "Restored")); onChanged(); onClose();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("กู้คืนไม่สำเร็จ", "Restore failed")); }
   };
 
   const copyLink = () => {
     if (!d) return;
     navigator.clipboard?.writeText(window.location.origin + d.url).then(
-      () => toast.success("คัดลอกลิงก์แล้ว"), () => toast.error("คัดลอกไม่สำเร็จ"));
+      () => toast.success(t("คัดลอกลิงก์แล้ว", "Link copied")), () => toast.error(t("คัดลอกไม่สำเร็จ", "Copy failed")));
   };
   const copyPath = () => {
     if (!masterPath) return;
     navigator.clipboard?.writeText(masterPath).then(
-      () => toast.success("คัดลอก path แล้ว — เปิด File Explorer แล้ววาง (Ctrl+V) ที่ช่องที่อยู่"),
-      () => toast.error("คัดลอกไม่สำเร็จ"));
+      () => toast.success(t("คัดลอก path แล้ว — เปิด File Explorer แล้ววาง (Ctrl+V) ที่ช่องที่อยู่", "Path copied — open File Explorer and paste (Ctrl+V) into the address bar")),
+      () => toast.error(t("คัดลอกไม่สำเร็จ", "Copy failed")));
   };
   // เปิดโฟลเดอร์ผ่าน custom protocol (ต้องติดตั้ง "ตัวเปิดโฟลเดอร์" ครั้งเดียว/เครื่อง) — ถ้ายังไม่ติดตั้งจะไม่เกิดอะไร ใช้ปุ่มคัดลอกแทน
   const openFolder = () => { if (masterPath) window.location.href = "erpfolder:" + encodeURIComponent(masterPath); };
@@ -1040,16 +1054,16 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
         if (dim) { fd.append("width", String(dim.w)); fd.append("height", String(dim.h)); }
       }
       const res = await apiFetch(`/api/assets/${id}/replace`, { method: "POST", body: fd });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "แทนที่ไม่สำเร็จ");
-      toast.success("แทนที่ไฟล์แล้ว"); await loadDetail(); onChanged();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "แทนที่ไม่สำเร็จ"); }
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("แทนที่ไม่สำเร็จ", "Replace failed"));
+      toast.success(t("แทนที่ไฟล์แล้ว", "File replaced")); await loadDetail(); onChanged();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("แทนที่ไม่สำเร็จ", "Replace failed")); }
     finally { setReplacing(false); }
   };
 
   // สร้างโฟลเดอร์ Drive + ก็อปรูป preview (จาก R2 ไม่ลบของเดิม) + อัปไฟล์ต้นฉบับถ้ามี → เก็บลิงก์โฟลเดอร์ทันที
   // ใช้ได้ทั้งกรณีมีไฟล์ต้นฉบับ และกรณี "แค่สร้างโฟลเดอร์ + ดึง preview" (ไม่แนบไฟล์)
   const doDriveUpload = async () => {
-    if (!brandId) { toast.error("เลือกแบรนด์ก่อน (ไว้จัดโฟลเดอร์)"); return; }
+    if (!brandId) { toast.error(t("เลือกแบรนด์ก่อน (ไว้จัดโฟลเดอร์)", "Select a brand first (to organize the folder)")); return; }
     if (!d) return;
     setDriveBusy(true);
     try {
@@ -1061,7 +1075,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
         name: title.trim() || d.file_name, artworkType: artTypesSel[0], brandId, srcFiles, previewFile,
         onProgress: (done, total) => setDriveProg({ done, total }),
       });
-      if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์แล้วลากขึ้นเอง`);
+      if (largeCount) toast.warning(`${t("ไฟล์ใหญ่", "Large file")} ${largeCount} ${t("ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์แล้วลากขึ้นเอง", "files weren't auto-uploaded (over 4MB) — open the folder and drag them up yourself")}`);
       if (folderLink) {
         setMasterUrl(folderLink);
         // path ต้นฉบับตามโฟลเดอร์ใหม่ (ถ้ายัง auto) = <ฐานแบรนด์>\<ซับชนิด>\<ชื่องาน>
@@ -1069,39 +1083,39 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
         const patch: Record<string, unknown> = { master_url: folderLink };
         if (newPath) { patch.master_path = newPath; setMasterPath(newPath); }
         await apiFetch(`/api/assets/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
-        toast.success(srcFiles.length ? "อัปขึ้น Drive + เก็บลิงก์แล้ว" : "สร้างโฟลเดอร์ + ดึงรูป preview แล้ว"); setSrcFiles([]); setDriveFilesKey((k) => k + 1); await loadDetail(); onChanged();
+        toast.success(srcFiles.length ? t("อัปขึ้น Drive + เก็บลิงก์แล้ว", "Uploaded to Drive + link saved") : t("สร้างโฟลเดอร์ + ดึงรูป preview แล้ว", "Folder created + preview pulled")); setSrcFiles([]); setDriveFilesKey((k) => k + 1); await loadDetail(); onChanged();
       }
-    } catch (e) { toast.error(e instanceof Error ? e.message : "อัป Drive ไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("อัป Drive ไม่สำเร็จ", "Drive upload failed")); }
     finally { setDriveBusy(false); setDriveProg({ done: 0, total: 0 }); }
   };
 
   // ผูกไฟล์นี้เข้าโฟลเดอร์ Drive เดียวกับรูปที่เลือก (ไม่สร้างโฟลเดอร์ใหม่) + ก็อปรูป preview เข้าไปด้วย
   const linkToSharedFolder = async (src: AssetRow) => {
     if (!d) return;
-    if (src.id === id) { toast.error("เลือกรูปอื่นที่ไม่ใช่รูปนี้"); return; }
-    if (!/\/folders\//.test(src.master_url ?? "")) { toast.error(`รูป “${src.title || src.file_name}” ยังไม่มีโฟลเดอร์ Drive — เลือกรูปที่มีโฟลเดอร์แล้ว`); return; }
+    if (src.id === id) { toast.error(t("เลือกรูปอื่นที่ไม่ใช่รูปนี้", "Pick a different image, not this one")); return; }
+    if (!/\/folders\//.test(src.master_url ?? "")) { toast.error(`${t("รูป", "Image")} “${src.title || src.file_name}” ${t("ยังไม่มีโฟลเดอร์ Drive — เลือกรูปที่มีโฟลเดอร์แล้ว", "has no Drive folder yet — pick an image that already has a folder")}`); return; }
     setLinkBusy(true);
     try {
       const res = await apiFetch("/api/assets/drive-folders/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, source_id: src.id, follow_path: pathAuto }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ผูกโฟลเดอร์ไม่สำเร็จ");
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("ผูกโฟลเดอร์ไม่สำเร็จ", "Failed to link folder"));
       if (j.folderLink) { setMasterUrl(j.folderLink); await loadDetail(); onChanged(); }   // path ตามโฟลเดอร์ (server เซ็ตให้เมื่อ follow_path) → loadDetail สะท้อน
-      toast.success(`ผูกโฟลเดอร์เดียวกับ “${src.title || src.file_name}” แล้ว`);
+      toast.success(`${t("ผูกโฟลเดอร์เดียวกับ", "Linked to the same folder as")} “${src.title || src.file_name}” ${t("แล้ว", "")}`);
       setLinkPickerOpen(false);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ผูกโฟลเดอร์ไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ผูกโฟลเดอร์ไม่สำเร็จ", "Failed to link folder")); }
     finally { setLinkBusy(false); }
   };
 
   // เปลี่ยนชื่อโฟลเดอร์ Drive จริง + อัปเดต path ของ "ทุกรูปที่ใช้โฟลเดอร์นี้"
   const doRenameFolder = async () => {
     const nm = renameName.trim();
-    if (!nm) { toast.error("ใส่ชื่อใหม่ก่อน"); return; }
+    if (!nm) { toast.error(t("ใส่ชื่อใหม่ก่อน", "Enter a new name first")); return; }
     setRenameBusy(true);
     try {
       const res = await apiFetch("/api/assets/drive-folders/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder_url: masterUrl, new_name: nm }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "เปลี่ยนชื่อไม่สำเร็จ");
-      toast.success(`เปลี่ยนชื่อโฟลเดอร์เป็น “${nm}” แล้ว · อัปเดต ${j.count ?? 1} รูปที่ใช้โฟลเดอร์นี้`);
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("เปลี่ยนชื่อไม่สำเร็จ", "Rename failed"));
+      toast.success(`${t("เปลี่ยนชื่อโฟลเดอร์เป็น", "Renamed folder to")} “${nm}” ${t("แล้ว · อัปเดต", "· updated")} ${j.count ?? 1} ${t("รูปที่ใช้โฟลเดอร์นี้", "images using this folder")}`);
       setRenameOpen(false); await loadDetail(); onChanged();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เปลี่ยนชื่อไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เปลี่ยนชื่อไม่สำเร็จ", "Rename failed")); }
     finally { setRenameBusy(false); }
   };
 
@@ -1109,68 +1123,68 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
   const pathWarn = !trashed && !!masterPath.trim() && !pathMatchesRule(masterPath, rule.base_paths);
 
   return (
-    <ERPModal open onClose={onClose} title={d?.file_name ?? "รายละเอียดไฟล์"} size="xl"
+    <ERPModal open onClose={onClose} title={d?.file_name ?? t("รายละเอียดไฟล์", "File details")} size="xl"
       footer={
         <div className="flex items-center justify-between w-full gap-2">
           <div className="flex gap-2">
-            {d && <a href={d.url} target="_blank" rel="noreferrer" className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 flex items-center">⬇ ดาวน์โหลด</a>}
-            <button onClick={copyLink} className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">🔗 คัดลอกลิงก์</button>
+            {d && <a href={d.url} target="_blank" rel="noreferrer" className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 flex items-center">{t("⬇ ดาวน์โหลด", "⬇ Download")}</a>}
+            <button onClick={copyLink} className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("🔗 คัดลอกลิงก์", "🔗 Copy link")}</button>
             {!trashed && (
               <button onClick={() => replaceRef.current?.click()} disabled={replacing}
                 className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">
-                {replacing ? "กำลังแทนที่…" : "🔄 แทนที่ไฟล์"}</button>
+                {replacing ? t("กำลังแทนที่…", "Replacing…") : t("🔄 แทนที่ไฟล์", "🔄 Replace file")}</button>
             )}
             <input ref={replaceRef} type="file" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void doReplace(f); e.currentTarget.value = ""; }} />
           </div>
           <div className="flex gap-2">
             {trashed
-              ? <button onClick={restore} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">♻ กู้คืน</button>
-              : <button onClick={() => { setAlsoDrive(false); setConfirmTrash(true); }} className="h-9 px-3 text-sm text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50">🗑️ ลบ</button>}
-            {!trashed && <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? "บันทึก…" : "บันทึก"}</button>}
+              ? <button onClick={restore} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">{t("♻ กู้คืน", "♻ Restore")}</button>
+              : <button onClick={() => { setAlsoDrive(false); setConfirmTrash(true); }} className="h-9 px-3 text-sm text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50">{t("🗑️ ลบ", "🗑️ Delete")}</button>}
+            {!trashed && <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? t("บันทึก…", "Saving…") : t("บันทึก", "Save")}</button>}
           </div>
         </div>
       }>
       {/* ปุ่มเลื่อนดูรูปก่อนหน้า/ถัดไป (ลอยข้างจอ) */}
       {onNavigate && prevId && (
-        <button onClick={() => onNavigate(prevId)} title="รูปก่อนหน้า"
+        <button onClick={() => onNavigate(prevId)} title={t("รูปก่อนหน้า", "Previous image")}
           className="fixed left-3 top-1/2 -translate-y-1/2 z-[60] w-11 h-11 rounded-full bg-white shadow-lg border border-slate-200 text-slate-600 text-2xl leading-none flex items-center justify-center hover:bg-slate-50">‹</button>
       )}
       {onNavigate && nextId && (
-        <button onClick={() => onNavigate(nextId)} title="รูปถัดไป"
+        <button onClick={() => onNavigate(nextId)} title={t("รูปถัดไป", "Next image")}
           className="fixed right-3 top-1/2 -translate-y-1/2 z-[60] w-11 h-11 rounded-full bg-white shadow-lg border border-slate-200 text-slate-600 text-2xl leading-none flex items-center justify-center hover:bg-slate-50">›</button>
       )}
-      {(driveBusy || linkBusy) && <LoadingOverlay message={linkBusy ? "กำลังผูกโฟลเดอร์ + ก็อปรูป…" : "กำลังทำงานกับ Drive… อาจใช้เวลาสักครู่"} />}
+      {(driveBusy || linkBusy) && <LoadingOverlay message={linkBusy ? t("กำลังผูกโฟลเดอร์ + ก็อปรูป…", "Linking folder + copying images…") : t("กำลังทำงานกับ Drive… อาจใช้เวลาสักครู่", "Working with Drive… this may take a moment")} />}
       {!d ? (
-        <div className="py-12 text-center text-slate-400 text-sm">กำลังโหลด…</div>
+        <div className="py-12 text-center text-slate-400 text-sm">{t("กำลังโหลด…", "Loading…")}</div>
       ) : (
         <div className="flex gap-4 flex-wrap">
           <div className="flex-1 min-w-[200px] bg-slate-100 rounded-xl flex items-center justify-center min-h-[240px] overflow-hidden">
             {isImage(d) ? (
-              <button type="button" onClick={() => setZoom(true)} title="กดเพื่อดูรูปใหญ่"
+              <button type="button" onClick={() => setZoom(true)} title={t("กดเพื่อดูรูปใหญ่", "Click to view larger")}
                 className="group relative w-full h-full min-h-[240px] flex items-center justify-center cursor-zoom-in">
                 <img src={withImageWidth(d.url, 768) ?? d.url} alt={d.title} className="max-w-full max-h-[360px] object-contain" />
-                <span className="absolute bottom-2 right-2 text-[11px] px-2 py-0.5 rounded-md bg-black/55 text-white opacity-0 group-hover:opacity-100 transition pointer-events-none">🔍 ดูรูปใหญ่</span>
+                <span className="absolute bottom-2 right-2 text-[11px] px-2 py-0.5 rounded-md bg-black/55 text-white opacity-0 group-hover:opacity-100 transition pointer-events-none">{t("🔍 ดูรูปใหญ่", "🔍 View larger")}</span>
               </button>
             ) : <div className="text-center"><div className="text-5xl">{TYPE_ICON[d.asset_type]}</div><p className="text-[11px] text-slate-400 mt-2">{(d.ext ?? "").toUpperCase()}</p></div>}
           </div>
 
           <div className="flex-1 min-w-[240px]">
-            <label className="text-[12px] text-slate-500">ชื่อไฟล์
+            <label className="text-[12px] text-slate-500">{t("ชื่อไฟล์", "File name")}
               <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={trashed}
                 className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
             </label>
 
             {d.source === "artwork" && (
-              <div className="block text-[12px] text-slate-500 mt-2">ชนิด artwork <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน</span>
+              <div className="block text-[12px] text-slate-500 mt-2">{t("ชนิด artwork", "Artwork type")} <span className="text-[10px] text-slate-400">{t("— เลือกได้หลายอัน", "— multiple allowed")}</span>
                 <div className="mt-1"><ArtTypeMultiSelect value={artTypesSel} types={artTypeList} onChange={setArtTypesSel} onCreated={(t) => setArtTypeList((c) => [...c, t])} disabled={trashed} /></div>
               </div>
             )}
 
             <div className="grid grid-cols-2 gap-3 mt-3">
-              <div className="text-[12px] text-slate-500">อัลบั้ม <span className="text-[10px] text-slate-400">(เลือกได้หลายอัน)</span>
+              <div className="text-[12px] text-slate-500">{t("อัลบั้ม", "Album")} <span className="text-[10px] text-slate-400">{t("(เลือกได้หลายอัน)", "(multiple allowed)")}</span>
                 <div className="mt-1 flex flex-wrap gap-1.5">
-                  {collections.length === 0 && <span className="text-[11px] text-slate-400">ยังไม่มีอัลบั้ม</span>}
+                  {collections.length === 0 && <span className="text-[11px] text-slate-400">{t("ยังไม่มีอัลบั้ม", "No albums yet")}</span>}
                   {collections.map((c) => {
                     const on = collectionIds.includes(c.id);
                     return (
@@ -1185,56 +1199,56 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
                   })}
                 </div>
               </div>
-              <div className="text-[12px] text-slate-500">แท็ก
+              <div className="text-[12px] text-slate-500">{t("แท็ก", "Tags")}
                 <div className="mt-1">{trashed ? <span className="text-[11px] text-slate-400">{tags.join(", ") || "—"}</span> : <TagPickerField value={tags} onChange={setTags} />}</div>
               </div>
             </div>
 
-            <label className="block text-[12px] text-slate-500 mt-3">คำค้นเพิ่มเติม (keyword)
+            <label className="block text-[12px] text-slate-500 mt-3">{t("คำค้นเพิ่มเติม (keyword)", "Extra keywords")}
               <input value={keywords} onChange={(e) => setKeywords(e.target.value)} disabled={trashed}
-                placeholder="คำพ้อง/ชื่ออื่น เช่น flower ดอกไม้ summer"
+                placeholder={t("คำพ้อง/ชื่ออื่น เช่น flower ดอกไม้ summer", "synonyms/other names e.g. flower summer")}
                 className="mt-1 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" /></label>
 
             {(d.source === "artwork" || d.source === "print") && (
               <>
-                <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📐 {d.source === "print" ? "ขนาดแผ่น" : "ขนาด (กว้าง × สูง)"}</p><SizesEditor value={sizes} onChange={setSizes} disabled={trashed} /></div>
+                <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📐 {d.source === "print" ? t("ขนาดแผ่น", "Sheet size") : t("ขนาด (กว้าง × สูง)", "Size (W × H)")}</p><SizesEditor value={sizes} onChange={setSizes} disabled={trashed} /></div>
                 {/* งานพิมพ์: Artwork ในแผ่น + จำนวน (แก้แล้วกด "บันทึก") */}
                 {d.source === "print" && (
                   <div className="mt-3 pt-3 border-t border-slate-100">
                     <PrintItemsField value={printItems} onChange={setPrintItems} disabled={trashed} />
                   </div>
                 )}
-                <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📦 Parent SKU ที่ใช้</p><ParentSkuField value={parentCodes} onChange={setParentCodes} disabled={trashed} /></div>
+                <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">{t("📦 Parent SKU ที่ใช้", "📦 Parent SKUs used")}</p><ParentSkuField value={parentCodes} onChange={setParentCodes} disabled={trashed} /></div>
               </>
             )}
 
             <table className="w-full text-[12px] mt-3">
               <tbody>
-                <Meta label="ชนิด" value={ASSET_TYPE_LABEL[d.asset_type]} />
-                <Meta label="ขนาด" value={formatBytes(d.size_bytes)} />
-                {d.width && d.height ? <Meta label="ความละเอียด" value={`${d.width} × ${d.height}`} /> : null}
-                <Meta label="ผู้อัป" value={d.uploaded_by ?? "—"} />
-                <Meta label="วันที่อัป" value={new Date(d.created_at).toLocaleString("th-TH")} />
+                <Meta label={t("ชนิด", "Type")} value={ASSET_TYPE_LABEL[d.asset_type]} />
+                <Meta label={t("ขนาด", "Size")} value={formatBytes(d.size_bytes)} />
+                {d.width && d.height ? <Meta label={t("ความละเอียด", "Resolution")} value={`${d.width} × ${d.height}`} /> : null}
+                <Meta label={t("ผู้อัป", "Uploaded by")} value={d.uploaded_by ?? "—"} />
+                <Meta label={t("วันที่อัป", "Uploaded at")} value={new Date(d.created_at).toLocaleString("th-TH")} />
               </tbody>
             </table>
 
             <div className="mt-3 pt-3 border-t border-slate-100">
-              <p className="text-[12px] font-medium text-slate-600 mb-1.5">📁 ไฟล์ต้นฉบับ <span className="text-[10px] text-slate-400 font-normal">— คลังเก็บแค่ “ที่อยู่/ลิงก์” ไม่ได้เก็บไฟล์ใหญ่ (อยู่ NAS หรือ Drive ก็ได้)</span></p>
+              <p className="text-[12px] font-medium text-slate-600 mb-1.5">{t("📁 ไฟล์ต้นฉบับ", "📁 Source file")} <span className="text-[10px] text-slate-400 font-normal">{t("— คลังเก็บแค่ “ที่อยู่/ลิงก์” ไม่ได้เก็บไฟล์ใหญ่ (อยู่ NAS หรือ Drive ก็ได้)", "— the library only stores the “location/link”, not the large file (it can live on NAS or Drive)")}</span></p>
               <input value={masterPath} onChange={(e) => { setMasterPath(e.target.value); setPathAuto(false); }} disabled={trashed}
-                placeholder="\\nas\Artwork\PIX\PIX32-02_v3.ai  หรือ  Z:\Artwork\…"
+                placeholder={t("\\\\nas\\Artwork\\PIX\\PIX32-02_v3.ai  หรือ  Z:\\Artwork\\…", "\\\\nas\\Artwork\\PIX\\PIX32-02_v3.ai  or  Z:\\Artwork\\…")}
                 className={`w-full h-8 px-2 text-[12px] border rounded-lg font-mono disabled:bg-slate-50 ${pathWarn ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`} />
-              {pathWarn && <p className="text-[11px] text-amber-600 mt-1">⚠ ไม่ได้อยู่ในโฟลเดอร์มาตรฐาน — ควรเก็บใต้ <b className="font-mono">{rule.base_paths.join(" หรือ ")}</b></p>}
+              {pathWarn && <p className="text-[11px] text-amber-600 mt-1">{t("⚠ ไม่ได้อยู่ในโฟลเดอร์มาตรฐาน — ควรเก็บใต้", "⚠ Not under a standard folder — should be stored under")} <b className="font-mono">{rule.base_paths.join(t(" หรือ ", " or "))}</b></p>}
               <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                <button onClick={copyPath} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-40">📋 คัดลอก path</button>
-                <button onClick={openFolder} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100 disabled:opacity-40">📂 เปิดโฟลเดอร์</button>
-                {masterUrl && <a href={masterUrl} target="_blank" rel="noreferrer" className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 flex items-center">🌐 เปิดต้นฉบับ</a>}
+                <button onClick={copyPath} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-40">{t("📋 คัดลอก path", "📋 Copy path")}</button>
+                <button onClick={openFolder} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100 disabled:opacity-40">{t("📂 เปิดโฟลเดอร์", "📂 Open folder")}</button>
+                {masterUrl && <a href={masterUrl} target="_blank" rel="noreferrer" className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 flex items-center">{t("🌐 เปิดต้นฉบับ", "🌐 Open source")}</a>}
                 {!trashed && /\/folders\//.test(masterUrl) && (
                   <button onClick={() => { setRenameName(driveFolderNameOf({ master_path: masterPath, title: d?.title, file_name: d?.file_name })); setRenameOpen(true); }}
-                    className="h-7 px-2.5 text-[11px] border border-amber-200 text-amber-700 bg-amber-50 rounded-md hover:bg-amber-100">✏️ เปลี่ยนชื่อโฟลเดอร์</button>
+                    className="h-7 px-2.5 text-[11px] border border-amber-200 text-amber-700 bg-amber-50 rounded-md hover:bg-amber-100">{t("✏️ เปลี่ยนชื่อโฟลเดอร์", "✏️ Rename folder")}</button>
                 )}
               </div>
               <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} disabled={trashed}
-                placeholder="ลิงก์ Google Drive / Synology (เปิดได้ทุกที่) — ไม่ใส่ก็ได้"
+                placeholder={t("ลิงก์ Google Drive / Synology (เปิดได้ทุกที่) — ไม่ใส่ก็ได้", "Google Drive / Synology link (opens anywhere) — optional")}
                 className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg mt-1.5 disabled:bg-slate-50" />
 
               {/* ในโฟลเดอร์นี้มีไฟล์อะไรบ้าง (ของกลาง) — โหลดเองแบบไม่บล็อก + ปุ่มเปิดทีละไฟล์ใน Drive */}
@@ -1243,28 +1257,28 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
               {/* เพิ่มไฟล์ต้นฉบับขึ้น Drive ย้อนหลัง (ลืมใส่ตอนสร้าง) → สร้างโฟลเดอร์ใหม่ หรือ ใช้โฟลเดอร์เดียวกับรูปอื่น */}
               {driveOn && !trashed && (
                 <div className="mt-2.5 pt-2.5 border-t border-dashed border-slate-200">
-                  <p className="text-[12px] font-medium text-slate-600 mb-1.5 flex items-center justify-between">📤 ไฟล์ต้นฉบับบน Drive <HelpButton guideKey="drive-link" /></p>
+                  <p className="text-[12px] font-medium text-slate-600 mb-1.5 flex items-center justify-between">{t("📤 ไฟล์ต้นฉบับบน Drive", "📤 Source files on Drive")} <HelpButton guideKey="drive-link" /></p>
                   {/* เลือกปลายทาง: โฟลเดอร์ใหม่ vs ใช้โฟลเดอร์เดียวกับรูปอื่น (ไม่อยากสร้างหลายโฟลเดอร์) */}
                   <div className="flex gap-1 mb-2 p-0.5 bg-slate-100 rounded-lg">
                     <button type="button" onClick={() => setDriveMode("new")}
-                      className={`flex-1 h-7 text-[11px] font-medium rounded-md transition ${driveMode === "new" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🆕 โฟลเดอร์ใหม่</button>
+                      className={`flex-1 h-7 text-[11px] font-medium rounded-md transition ${driveMode === "new" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{t("🆕 โฟลเดอร์ใหม่", "🆕 New folder")}</button>
                     <button type="button" onClick={() => setDriveMode("shared")}
-                      className={`flex-1 h-7 text-[11px] font-medium rounded-md transition ${driveMode === "shared" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>📎 ใช้โฟลเดอร์เดียวกับรูปอื่น</button>
+                      className={`flex-1 h-7 text-[11px] font-medium rounded-md transition ${driveMode === "shared" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{t("📎 ใช้โฟลเดอร์เดียวกับรูปอื่น", "📎 Use another image's folder")}</button>
                   </div>
 
                   {driveMode === "new" ? (
                     <>
-                      <p className="text-[10px] text-slate-400 mb-1.5">สร้างโฟลเดอร์ใหม่ + ก็อปรูปตัวอย่างให้อัตโนมัติ</p>
+                      <p className="text-[10px] text-slate-400 mb-1.5">{t("สร้างโฟลเดอร์ใหม่ + ก็อปรูปตัวอย่างให้อัตโนมัติ", "Create a new folder + auto-copy the preview image")}</p>
                       <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
                         className={`w-full h-8 px-2 text-[12px] border rounded-lg bg-white mb-1.5 ${brandId ? "border-slate-200" : "border-amber-300"}`}>
-                        <option value="">— เลือกแบรนด์ (ไว้จัดโฟลเดอร์) —</option>
+                        <option value="">{t("— เลือกแบรนด์ (ไว้จัดโฟลเดอร์) —", "— Select brand (to organize the folder) —")}</option>
                         {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                       <div onClick={() => srcInputRef.current?.click()}
                         onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
                         onDragOver={(e) => e.preventDefault()}
                         className="border border-dashed border-slate-300 rounded-lg px-3 py-2.5 text-center text-[12px] text-slate-400 hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer">
-                        + ลากไฟล์ AI/PSD/PDF มาวาง หรือคลิกเลือก
+                        {t("+ ลากไฟล์ AI/PSD/PDF มาวาง หรือคลิกเลือก", "+ Drag AI/PSD/PDF files here or click to choose")}
                         <input ref={srcInputRef} type="file" multiple className="hidden"
                           onChange={(e) => { if (e.target.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.target.files!)]); e.target.value = ""; }} />
                       </div>
@@ -1283,17 +1297,17 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
                       <button type="button" onClick={doDriveUpload} disabled={driveBusy || !brandId}
                         className="w-full h-8 mt-1.5 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center justify-center gap-2">
                         {driveBusy && <Spinner size={13} />}
-                        {driveBusy ? (driveProg.total ? `กำลังอัป ${driveProg.done}/${driveProg.total}…` : "กำลังทำ…")
-                          : srcFiles.length > 0 ? "⬆ อัปขึ้น Drive + เก็บลิงก์" : "📁 สร้างโฟลเดอร์ + ดึงรูป preview"}
+                        {driveBusy ? (driveProg.total ? `${t("กำลังอัป", "Uploading")} ${driveProg.done}/${driveProg.total}…` : t("กำลังทำ…", "Working…"))
+                          : srcFiles.length > 0 ? t("⬆ อัปขึ้น Drive + เก็บลิงก์", "⬆ Upload to Drive + save link") : t("📁 สร้างโฟลเดอร์ + ดึงรูป preview", "📁 Create folder + pull preview")}
                       </button>
-                      {!srcFiles.length && <p className="text-[11px] text-slate-400 mt-1">ยังไม่แนบไฟล์ต้นฉบับก็กดได้ — จะสร้างโฟลเดอร์ Drive + ก็อปรูปตัวอย่างเข้าไปให้ แล้วค่อยลากไฟล์ .ai เข้าเองทีหลัง</p>}
+                      {!srcFiles.length && <p className="text-[11px] text-slate-400 mt-1">{t("ยังไม่แนบไฟล์ต้นฉบับก็กดได้ — จะสร้างโฟลเดอร์ Drive + ก็อปรูปตัวอย่างเข้าไปให้ แล้วค่อยลากไฟล์ .ai เข้าเองทีหลัง", "You can click even without attaching source files — it will create a Drive folder + copy the preview in, then you can drag the .ai file in later")}</p>}
                     </>
                   ) : (
                     <>
-                      <p className="text-[10px] text-slate-400 mb-1.5">เลือกรูปที่มีโฟลเดอร์อยู่แล้ว → ผูกรูปนี้เข้าโฟลเดอร์เดียวกัน + ก็อปรูปตัวอย่างของรูปนี้เข้าไปด้วย (ไม่สร้างโฟลเดอร์ใหม่)</p>
+                      <p className="text-[10px] text-slate-400 mb-1.5">{t("เลือกรูปที่มีโฟลเดอร์อยู่แล้ว → ผูกรูปนี้เข้าโฟลเดอร์เดียวกัน + ก็อปรูปตัวอย่างของรูปนี้เข้าไปด้วย (ไม่สร้างโฟลเดอร์ใหม่)", "Pick an image that already has a folder → link this image into the same folder + copy this image's preview in (no new folder created)")}</p>
                       <button type="button" onClick={() => setLinkPickerOpen(true)} disabled={linkBusy}
                         className="w-full h-8 text-[12px] font-medium border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-50 inline-flex items-center justify-center gap-2">
-                        {linkBusy && <Spinner size={13} />}{linkBusy ? "กำลังผูกโฟลเดอร์…" : "📎 เลือกรูปที่มีโฟลเดอร์แล้ว"}
+                        {linkBusy && <Spinner size={13} />}{linkBusy ? t("กำลังผูกโฟลเดอร์…", "Linking folder…") : t("📎 เลือกรูปที่มีโฟลเดอร์แล้ว", "📎 Pick an image that has a folder")}
                       </button>
                     </>
                   )}
@@ -1307,16 +1321,16 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
       )}
 
       <ConfirmDialog open={confirmTrash} onClose={() => setConfirmTrash(false)} onConfirm={trash}
-        title="ย้ายไฟล์ลงถังขยะ?" confirmText="ย้ายลงถังขยะ" variant="danger"
+        title={t("ย้ายไฟล์ลงถังขยะ?", "Move file to trash?")} confirmText={t("ย้ายลงถังขยะ", "Move to trash")} variant="danger"
         message={
           <div>
-            <p>ไฟล์นี้จะถูกย้ายลงถังขยะ — กู้คืนได้ภายใน 30 วัน</p>
+            <p>{t("ไฟล์นี้จะถูกย้ายลงถังขยะ — กู้คืนได้ภายใน 30 วัน", "This file will be moved to trash — recoverable within 30 days")}</p>
             {/\/folders\//.test(masterUrl) && (
               <label className="flex items-start gap-2 mt-3 p-2.5 rounded-lg bg-rose-50 border border-rose-200 cursor-pointer">
                 <input type="checkbox" checked={alsoDrive} onChange={(e) => setAlsoDrive(e.target.checked)} className="mt-0.5 shrink-0" />
                 <span className="text-[12px] text-rose-700">
-                  <b>ลบโฟลเดอร์ใน Google Drive ด้วย</b>
-                  <span className="block text-[11px] text-rose-600 mt-0.5">โฟลเดอร์ + ไฟล์ต้นฉบับข้างในจะถูกย้ายไป “ถังขยะของ Drive” (ยังกู้คืนได้ในถังขยะ Drive ~30 วัน)</span>
+                  <b>{t("ลบโฟลเดอร์ใน Google Drive ด้วย", "Also delete the folder in Google Drive")}</b>
+                  <span className="block text-[11px] text-rose-600 mt-0.5">{t("โฟลเดอร์ + ไฟล์ต้นฉบับข้างในจะถูกย้ายไป “ถังขยะของ Drive” (ยังกู้คืนได้ในถังขยะ Drive ~30 วัน)", "The folder + source files inside will be moved to “Drive trash” (still recoverable in Drive trash for ~30 days)")}</span>
                 </span>
               </label>
             )}
@@ -1326,7 +1340,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
       {zoom && d && isImage(d) && (
         <div className="fixed inset-0 z-[300] bg-black/85 flex items-center justify-center p-6" onClick={() => setZoom(false)}>
           <img src={d.url} alt={d.title} className="max-w-full max-h-full object-contain rounded-lg" />
-          <button onClick={() => setZoom(false)} title="ปิด"
+          <button onClick={() => setZoom(false)} title={t("ปิด", "Close")}
             className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/90 text-slate-700 text-lg flex items-center justify-center hover:bg-white">✕</button>
         </div>
       )}
@@ -1334,27 +1348,27 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
       {/* เลือกรูปต้นทางเพื่อผูกโฟลเดอร์เดียวกัน (โหมด 📎 ใช้โฟลเดอร์เดียวกับรูปอื่น) */}
       <AssetPicker open={linkPickerOpen} onClose={() => setLinkPickerOpen(false)} typeFilter="image" defaultSource={d?.source === "print" ? "print" : "artwork"} requireDriveFolder
         defaultSearch={commonNameSeed([d?.title ?? title])}
-        title={d?.source === "print" ? "เลือกงานพิมพ์ที่มีโฟลเดอร์ Drive แล้ว" : "เลือกรูปที่มีโฟลเดอร์ Drive แล้ว"} contextLabel="ผูกโฟลเดอร์เดียวกับงานนี้"
+        title={d?.source === "print" ? t("เลือกงานพิมพ์ที่มีโฟลเดอร์ Drive แล้ว", "Select a print job that already has a Drive folder") : t("เลือกรูปที่มีโฟลเดอร์ Drive แล้ว", "Select an image that already has a Drive folder")} contextLabel={t("ผูกโฟลเดอร์เดียวกับงานนี้", "Link to the same folder as this item")}
         onSelect={(assets) => { const s = assets[0]; if (s) { setLinkPickerOpen(false); setLinkConfirmSrc(s); } }} />
       {/* เปลี่ยนชื่อโฟลเดอร์ Drive — มีผลกับทุกรูปที่ใช้โฟลเดอร์นี้ */}
       <ConfirmDialog open={renameOpen} onClose={() => setRenameOpen(false)} onConfirm={doRenameFolder}
-        title="เปลี่ยนชื่อโฟลเดอร์ต้นฉบับ" confirmText={renameBusy ? "กำลังเปลี่ยน…" : "เปลี่ยนชื่อ"} loading={renameBusy}
+        title={t("เปลี่ยนชื่อโฟลเดอร์ต้นฉบับ", "Rename source folder")} confirmText={renameBusy ? t("กำลังเปลี่ยน…", "Renaming…") : t("เปลี่ยนชื่อ", "Rename")} loading={renameBusy}
         message={
           <div>
-            <p className="mb-2">เปลี่ยนชื่อโฟลเดอร์ใน Google Drive จริง — และอัปเดต path ให้<b>ทุกรูปที่ใช้โฟลเดอร์นี้</b>ด้วย</p>
+            <p className="mb-2">{t("เปลี่ยนชื่อโฟลเดอร์ใน Google Drive จริง — และอัปเดต path ให้", "Rename the actual folder in Google Drive — and update the path for")}<b>{t("ทุกรูปที่ใช้โฟลเดอร์นี้", "all images using this folder")}</b>{t("ด้วย", " too")}</p>
             <input value={renameName} onChange={(e) => setRenameName(e.target.value)} autoFocus
               onKeyDown={(e) => { if (e.key === "Enter" && !renameBusy) void doRenameFolder(); }}
-              placeholder="ชื่อโฟลเดอร์ใหม่"
+              placeholder={t("ชื่อโฟลเดอร์ใหม่", "New folder name")}
               className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-            <p className="text-[11px] text-slate-400 mt-1.5">ไฟล์ข้างในไม่ถูกแตะ · ชื่อรูปในคลังไม่เปลี่ยน (เปลี่ยนแค่ชื่อโฟลเดอร์)</p>
+            <p className="text-[11px] text-slate-400 mt-1.5">{t("ไฟล์ข้างในไม่ถูกแตะ · ชื่อรูปในคลังไม่เปลี่ยน (เปลี่ยนแค่ชื่อโฟลเดอร์)", "Files inside are untouched · image names in the library don't change (only the folder name changes)")}</p>
           </div>
         } />
 
       {/* ยืนยันก่อนผูก — โชว์ชื่อโฟลเดอร์ปลายทาง */}
       <ConfirmDialog open={!!linkConfirmSrc} onClose={() => setLinkConfirmSrc(null)}
         onConfirm={() => { const s = linkConfirmSrc; setLinkConfirmSrc(null); if (s) void linkToSharedFolder(s); }}
-        title="ผูกเข้าโฟลเดอร์นี้?" confirmText="ผูกโฟลเดอร์"
-        message={linkConfirmSrc ? `จะผูกรูปนี้เข้าโฟลเดอร์ “${driveFolderNameOf(linkConfirmSrc)}” (เดียวกับ “${linkConfirmSrc.title || linkConfirmSrc.file_name}”) + ก็อปรูปตัวอย่างเข้าไปด้วย` : ""} />
+        title={t("ผูกเข้าโฟลเดอร์นี้?", "Link into this folder?")} confirmText={t("ผูกโฟลเดอร์", "Link folder")}
+        message={linkConfirmSrc ? `${t("จะผูกรูปนี้เข้าโฟลเดอร์", "Will link this image into folder")} “${driveFolderNameOf(linkConfirmSrc)}” (${t("เดียวกับ", "same as")} “${linkConfirmSrc.title || linkConfirmSrc.file_name}”) + ${t("ก็อปรูปตัวอย่างเข้าไปด้วย", "and copy the preview in too")}` : ""} />
     </ERPModal>
   );
 }
@@ -1371,10 +1385,10 @@ function Meta({ label, value }: { label: string; value: string }) {
 function UsageList({ usages }: { usages: AssetUsage[] }) {
   const t = useT();
   if (usages.length === 0)
-    return <p className="text-[12px] text-slate-400 mt-3 pt-3 border-t border-slate-100">ยังไม่ถูกใช้ที่ไหน — ลบได้</p>;
+    return <p className="text-[12px] text-slate-400 mt-3 pt-3 border-t border-slate-100">{t("ยังไม่ถูกใช้ที่ไหน — ลบได้", "Not used anywhere — can be deleted")}</p>;
   return (
     <div className="mt-3 pt-3 border-t border-slate-100">
-      <p className="text-[12px] font-medium text-slate-600 mb-1.5">🔗 ถูกใช้อยู่ {usages.length} ที่ <span className="text-[11px] text-slate-400 font-normal">— ลบไม่ได้จนกว่าจะเอาออกจากที่ใช้งาน</span></p>
+      <p className="text-[12px] font-medium text-slate-600 mb-1.5">{t("🔗 ถูกใช้อยู่", "🔗 In use at")} {usages.length} {t("ที่", "places")} <span className="text-[11px] text-slate-400 font-normal">{t("— ลบไม่ได้จนกว่าจะเอาออกจากที่ใช้งาน", "— can't delete until removed from where it's used")}</span></p>
       <div className="flex flex-col gap-1">
         {usages.map((u, i) => (
           <div key={i} className="text-[12px] text-slate-600">
@@ -1393,28 +1407,28 @@ function NewCollectionModal({ onClose, onDone }: { onClose: () => void; onDone: 
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const create = async () => {
-    if (!name.trim()) { toast.error("ใส่ชื่ออัลบั้มก่อน"); return; }
+    if (!name.trim()) { toast.error(t("ใส่ชื่ออัลบั้มก่อน", "Enter an album name first")); return; }
     setBusy(true);
     try {
       const res = await apiFetch("/api/assets/collections", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("สร้างอัลบั้มแล้ว"); onDone();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างไม่สำเร็จ"); }
+      toast.success(t("สร้างอัลบั้มแล้ว", "Album created")); onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("สร้างไม่สำเร็จ", "Create failed")); }
     finally { setBusy(false); }
   };
   return (
-    <ERPModal open onClose={onClose} title="สร้างอัลบั้มใหม่" size="sm"
+    <ERPModal open onClose={onClose} title={t("สร้างอัลบั้มใหม่", "New album")} size="sm"
       footer={
         <div className="flex justify-end gap-2 w-full">
-          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={create} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">สร้าง</button>
+          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={create} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{t("สร้าง", "Create")}</button>
         </div>
       }>
-      <label className="text-[12px] text-slate-500">ชื่ออัลบั้ม
+      <label className="text-[12px] text-slate-500">{t("ชื่ออัลบั้ม", "Album name")}
         <input value={name} onChange={(e) => setName(e.target.value)} autoFocus onKeyDown={(e) => e.key === "Enter" && create()}
-          placeholder="เช่น รูปสินค้าใหม่ Q2"
+          placeholder={t("เช่น รูปสินค้าใหม่ Q2", "e.g. New product images Q2")}
           className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
       </label>
     </ERPModal>
@@ -1429,16 +1443,16 @@ function BulkTagModal({ count, tags, onClose, onApply }: {
   const [name, setName] = useState("");
   const apply = () => { if (name.trim()) onApply(name.trim()); };
   return (
-    <ERPModal open onClose={onClose} title={`ติดแท็กให้ ${count} ไฟล์`} size="sm"
+    <ERPModal open onClose={onClose} title={`${t("ติดแท็กให้", "Tag")} ${count} ${t("ไฟล์", "files")}`} size="sm"
       footer={
         <div className="flex justify-end gap-2 w-full">
-          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={apply} disabled={!name.trim()} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">ติดแท็ก</button>
+          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={apply} disabled={!name.trim()} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{t("ติดแท็ก", "Add tag")}</button>
         </div>
       }>
-      <label className="text-[12px] text-slate-500">ชื่อแท็ก (มีอยู่แล้วหรือพิมพ์ใหม่)
+      <label className="text-[12px] text-slate-500">{t("ชื่อแท็ก (มีอยู่แล้วหรือพิมพ์ใหม่)", "Tag name (existing or type a new one)")}
         <input value={name} onChange={(e) => setName(e.target.value)} autoFocus onKeyDown={(e) => e.key === "Enter" && apply()}
-          placeholder="เช่น โปรโมชั่น"
+          placeholder={t("เช่น โปรโมชั่น", "e.g. promotion")}
           className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
       </label>
       {tags.length > 0 && (
@@ -1460,17 +1474,17 @@ function BulkMoveModal({ count, collections, onClose, onApply }: {
   const t = useT();
   const [col, setCol] = useState("");
   return (
-    <ERPModal open onClose={onClose} title={`เพิ่ม ${count} ไฟล์เข้าอัลบั้ม`} size="sm"
+    <ERPModal open onClose={onClose} title={`${t("เพิ่ม", "Add")} ${count} ${t("ไฟล์เข้าอัลบั้ม", "files to album")}`} size="sm"
       footer={
         <div className="flex justify-end gap-2 w-full">
-          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={() => onApply(col)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">ตกลง</button>
+          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={() => onApply(col)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">{t("ตกลง", "OK")}</button>
         </div>
       }>
-      <label className="text-[12px] text-slate-500">เลือกอัลบั้ม (asset อยู่ได้หลายอัลบั้ม)
+      <label className="text-[12px] text-slate-500">{t("เลือกอัลบั้ม (asset อยู่ได้หลายอัลบั้ม)", "Select album (an asset can be in multiple albums)")}
         <select value={col} onChange={(e) => setCol(e.target.value)}
           className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          <option value="">— เอาออกจากทุกอัลบั้ม —</option>
+          <option value="">{t("— เอาออกจากทุกอัลบั้ม —", "— Remove from all albums —")}</option>
           {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </label>
@@ -1486,7 +1500,7 @@ function BulkEditRow({ on, setOn, label, preview, children }: { on: boolean; set
       <label className="flex items-center gap-2 text-[12px] font-medium text-slate-700 cursor-pointer">
         <input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} /> {label}
       </label>
-      {preview != null && <div className="mt-1 pl-6 text-[11px] text-slate-500">เดิม: {preview}</div>}
+      {preview != null && <div className="mt-1 pl-6 text-[11px] text-slate-500">{t("เดิม:", "Was:")} {preview}</div>}
       {on && <div className="mt-2">{children}</div>}
     </div>
   );
@@ -1497,8 +1511,8 @@ function BulkModeToggle({ mode, setMode }: { mode: "all" | "each"; setMode: (m: 
   const t = useT();
   return (
     <div className="inline-flex items-center gap-0.5 bg-slate-100 rounded-lg p-0.5 text-[11px]">
-      <button type="button" onClick={() => setMode("all")} className={`px-2.5 h-6 rounded-md ${mode === "all" ? "bg-white shadow-sm font-medium text-slate-800" : "text-slate-500"}`}>ใส่ค่าเดียว (ทุกไฟล์)</button>
-      <button type="button" onClick={() => setMode("each")} className={`px-2.5 h-6 rounded-md ${mode === "each" ? "bg-white shadow-sm font-medium text-slate-800" : "text-slate-500"}`}>แก้แยกแต่ละไฟล์</button>
+      <button type="button" onClick={() => setMode("all")} className={`px-2.5 h-6 rounded-md ${mode === "all" ? "bg-white shadow-sm font-medium text-slate-800" : "text-slate-500"}`}>{t("ใส่ค่าเดียว (ทุกไฟล์)", "One value (all files)")}</button>
+      <button type="button" onClick={() => setMode("each")} className={`px-2.5 h-6 rounded-md ${mode === "each" ? "bg-white shadow-sm font-medium text-slate-800" : "text-slate-500"}`}>{t("แก้แยกแต่ละไฟล์", "Edit each file")}</button>
     </div>
   );
 }
@@ -1578,12 +1592,12 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
   }, [cur, prefilled]);
 
   // ป้ายค่าเดิมแต่ละฟิลด์ (โชว์ใต้ชื่อฟิลด์)
-  const mixedTag = <span className="text-amber-600">ค่าต่างกัน ({ids.length} ไฟล์)</span>;
-  const brandLabel = (id: string) => id ? (brands.find((b) => b.id === id)?.name ?? "แบรนด์อื่น") : "— ไม่มีแบรนด์ —";
+  const mixedTag = <span className="text-amber-600">{t("ค่าต่างกัน", "Values differ")} ({ids.length} {t("ไฟล์", "files")})</span>;
+  const brandLabel = (id: string) => id ? (brands.find((b) => b.id === id)?.name ?? t("แบรนด์อื่น", "Other brand")) : t("— ไม่มีแบรนด์ —", "— No brand —");
   const sizeLabel = (ss: AssetSize[]) => ss.length ? ss.map((s) => `${s.w}×${s.h} ${s.unit}`).join(", ") : "—";
   const prev = (field: keyof NonNullable<typeof cur>, render: (v: never) => React.ReactNode): React.ReactNode => {
-    if (itemsLoading) return <span className="text-slate-400">กำลังโหลดค่าเดิม…</span>;
-    if (!cur) return ids.length > PREFILL_CAP ? <span className="text-slate-400">ไฟล์เยอะ — ไม่ดึงค่าเดิม</span> : null;
+    if (itemsLoading) return <span className="text-slate-400">{t("กำลังโหลดค่าเดิม…", "Loading current values…")}</span>;
+    if (!cur) return ids.length > PREFILL_CAP ? <span className="text-slate-400">{t("ไฟล์เยอะ — ไม่ดึงค่าเดิม", "Many files — not loading current values")}</span> : null;
     const f = cur[field]; return f.mixed ? mixedTag : render(f.value as never);
   };
 
@@ -1598,12 +1612,12 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
     if (enParent && parentMode === "all") fields.parent_sku_codes = parents;
     if (enLoc && locMode === "all") { fields.master_path = locPath.trim(); fields.master_url = locUrl.trim(); }
     const anyShared = Object.keys(fields).length > 0;
-    if (!anyShared && !needPerFile) { toast.error("ติ๊กเลือกฟิลด์ที่จะแก้ก่อน"); return; }
+    if (!anyShared && !needPerFile) { toast.error(t("ติ๊กเลือกฟิลด์ที่จะแก้ก่อน", "Check the fields you want to edit first")); return; }
     setBusy(true);
     try {
       if (anyShared) {
         const res = await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "edit", asset_ids: ids, fields }) });
-        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "แก้ไม่สำเร็จ");
+        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("แก้ไม่สำเร็จ", "Edit failed"));
       }
       // ฟิลด์ "แยกรายไฟล์" → PATCH ทีละใบ
       if (needPerFile && items) {
@@ -1615,71 +1629,71 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
           if (Object.keys(patch).length) await apiFetch(`/api/assets/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
         }
       }
-      toast.success(`แก้ ${ids.length} ไฟล์แล้ว`); onDone();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
+      toast.success(`${t("แก้", "Edited")} ${ids.length} ${t("ไฟล์แล้ว", "files")}`); onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("แก้ไม่สำเร็จ", "Edit failed")); }
     finally { setBusy(false); }
   };
 
   return (
-    <ERPModal open onClose={onClose} title={`✏️ แก้ ${ids.length} ไฟล์พร้อมกัน`} size="lg"
-      description="ติ๊กเฉพาะฟิลด์ที่จะแก้ · ขนาด/Parent SKU เลือกได้ว่า “ใส่ค่าเดียวทุกไฟล์” หรือ “แก้แยกแต่ละไฟล์” · แท็ก = เพิ่มเข้าไป"
+    <ERPModal open onClose={onClose} title={`✏️ ${t("แก้", "Edit")} ${ids.length} ${t("ไฟล์พร้อมกัน", "files at once")}`} size="lg"
+      description={t("ติ๊กเฉพาะฟิลด์ที่จะแก้ · ขนาด/Parent SKU เลือกได้ว่า “ใส่ค่าเดียวทุกไฟล์” หรือ “แก้แยกแต่ละไฟล์” · แท็ก = เพิ่มเข้าไป", "Check only the fields you want to edit · Size/Parent SKU can be “one value for all files” or “edit each file” · Tags = added on")}
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-[12px] text-amber-600">จะแก้ {ids.length} ไฟล์ที่เลือก</span>
+          <span className="text-[12px] text-amber-600">{t("จะแก้", "Will edit")} {ids.length} {t("ไฟล์ที่เลือก", "selected files")}</span>
           <div className="flex gap-2">
-            <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{busy ? "กำลังบันทึก…" : `บันทึก ${ids.length} ไฟล์`}</button>
+            <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{busy ? t("กำลังบันทึก…", "Saving…") : `${t("บันทึก", "Save")} ${ids.length} ${t("ไฟล์", "files")}`}</button>
           </div>
         </div>
       }>
-      {busy && <LoadingOverlay message="กำลังบันทึก…" />}
+      {busy && <LoadingOverlay message={t("กำลังบันทึก…", "Saving…")} />}
       <div className="space-y-2.5">
-        <BulkEditRow on={enBrand} setOn={setEnBrand} label="แบรนด์" preview={prev("brand", (v: string) => brandLabel(v))}>
+        <BulkEditRow on={enBrand} setOn={setEnBrand} label={t("แบรนด์", "Brand")} preview={prev("brand", (v: string) => brandLabel(v))}>
           <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
-            <option value="">— ไม่มีแบรนด์ —</option>
+            <option value="">{t("— ไม่มีแบรนด์ —", "— No brand —")}</option>
             {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </BulkEditRow>
-        <BulkEditRow on={enType} setOn={setEnType} label="ชนิด (แทนที่ของเดิม)" preview={prev("types", (v: string[]) => (v.length ? v.join(", ") : "—"))}>
+        <BulkEditRow on={enType} setOn={setEnType} label={t("ชนิด (แทนที่ของเดิม)", "Type (replaces existing)")} preview={prev("types", (v: string[]) => (v.length ? v.join(", ") : "—"))}>
           <ArtTypeMultiSelect value={types} types={artTypeList} onChange={setTypes} onCreated={(t) => setArtTypeList((c) => [...c, t])} />
         </BulkEditRow>
-        <BulkEditRow on={enSize} setOn={setEnSize} label="ขนาด (กว้าง × สูง)" preview={prev("sizes", (v: AssetSize[]) => sizeLabel(v))}>
+        <BulkEditRow on={enSize} setOn={setEnSize} label={t("ขนาด (กว้าง × สูง)", "Size (W × H)")} preview={prev("sizes", (v: AssetSize[]) => sizeLabel(v))}>
           <BulkModeToggle mode={sizeMode} setMode={setSizeMode} />
           {sizeMode === "all"
-            ? <div className="mt-1.5"><SizesEditor value={sizes} onChange={setSizes} /><p className="text-[10px] text-slate-400 mt-1">ใส่ค่าเดียว → แทนที่ทุกไฟล์</p></div>
-            : <p className="text-[11px] text-indigo-600 mt-1.5">↓ แก้ขนาดแยกแต่ละไฟล์ในส่วนล่าง</p>}
+            ? <div className="mt-1.5"><SizesEditor value={sizes} onChange={setSizes} /><p className="text-[10px] text-slate-400 mt-1">{t("ใส่ค่าเดียว → แทนที่ทุกไฟล์", "One value → replace all files")}</p></div>
+            : <p className="text-[11px] text-indigo-600 mt-1.5">{t("↓ แก้ขนาดแยกแต่ละไฟล์ในส่วนล่าง", "↓ Edit size per file in the section below")}</p>}
         </BulkEditRow>
         <BulkEditRow on={enParent} setOn={setEnParent} label="Parent SKU" preview={prev("parents", (v: string[]) => (v.length ? v.join(", ") : "—"))}>
           <BulkModeToggle mode={parentMode} setMode={setParentMode} />
           {parentMode === "all"
-            ? <div className="mt-1.5"><ParentSkuField value={parents} onChange={setParents} /><p className="text-[10px] text-slate-400 mt-1">เลือกชุดเดียว → แทนที่ทุกไฟล์</p></div>
-            : <p className="text-[11px] text-indigo-600 mt-1.5">↓ แก้ Parent SKU แยกแต่ละไฟล์ในส่วนล่าง</p>}
+            ? <div className="mt-1.5"><ParentSkuField value={parents} onChange={setParents} /><p className="text-[10px] text-slate-400 mt-1">{t("เลือกชุดเดียว → แทนที่ทุกไฟล์", "Pick one set → replace all files")}</p></div>
+            : <p className="text-[11px] text-indigo-600 mt-1.5">{t("↓ แก้ Parent SKU แยกแต่ละไฟล์ในส่วนล่าง", "↓ Edit Parent SKU per file in the section below")}</p>}
         </BulkEditRow>
-        <BulkEditRow on={enTags} setOn={setEnTags} label="แท็ก (เพิ่มเข้าไป)">
+        <BulkEditRow on={enTags} setOn={setEnTags} label={t("แท็ก (เพิ่มเข้าไป)", "Tags (add)")}>
           <TagPickerField value={tags} onChange={setTags} />
         </BulkEditRow>
-        <BulkEditRow on={enKw} setOn={setEnKw} label="คำค้นเพิ่มเติม (keyword — แทนที่ของเดิม)" preview={prev("keywords", (v: string) => v || "—")}>
-          <input value={kw} onChange={(e) => setKw(e.target.value)} placeholder="เช่น flower ดอกไม้ summer"
+        <BulkEditRow on={enKw} setOn={setEnKw} label={t("คำค้นเพิ่มเติม (keyword — แทนที่ของเดิม)", "Extra keywords (replaces existing)")} preview={prev("keywords", (v: string) => v || "—")}>
+          <input value={kw} onChange={(e) => setKw(e.target.value)} placeholder={t("เช่น flower ดอกไม้ summer", "e.g. flower summer")}
             className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
         </BulkEditRow>
-        <BulkEditRow on={enLoc} setOn={setEnLoc} label="ที่เก็บไฟล์ต้นฉบับ (path / ลิงก์โฟลเดอร์)"
-          preview={prev("path", (v: string) => <>{v || "—"}{cur && !cur.url.mixed && cur.url.value ? <span className="text-slate-400"> · มีลิงก์โฟลเดอร์</span> : null}</>)}>
+        <BulkEditRow on={enLoc} setOn={setEnLoc} label={t("ที่เก็บไฟล์ต้นฉบับ (path / ลิงก์โฟลเดอร์)", "Source file location (path / folder link)")}
+          preview={prev("path", (v: string) => <>{v || "—"}{cur && !cur.url.mixed && cur.url.value ? <span className="text-slate-400"> {t("· มีลิงก์โฟลเดอร์", "· has folder link")}</span> : null}</>)}>
           <BulkModeToggle mode={locMode} setMode={setLocMode} />
           {locMode === "all"
             ? <div className="mt-1.5 space-y-1.5">
-                <input value={locPath} onChange={(e) => setLocPath(e.target.value)} placeholder="path เช่น G:\Shared drives\…\Bow (Purple)" className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
-                <input value={locUrl} onChange={(e) => setLocUrl(e.target.value)} placeholder="ลิงก์โฟลเดอร์ Drive (https://drive.google.com/…)" className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
-                <p className="text-[10px] text-slate-400">ใส่ค่าเดียว → แทนที่ทุกไฟล์ (เว้นว่าง = ล้างค่า)</p>
+                <input value={locPath} onChange={(e) => setLocPath(e.target.value)} placeholder={t("path เช่น G:\Shared drives\…\Bow (Purple)", "path e.g. G:\Shared drives\…\Bow (Purple)")} className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
+                <input value={locUrl} onChange={(e) => setLocUrl(e.target.value)} placeholder={t("ลิงก์โฟลเดอร์ Drive (https://drive.google.com/…)", "Drive folder link (https://drive.google.com/…)")} className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" />
+                <p className="text-[10px] text-slate-400">{t("ใส่ค่าเดียว → แทนที่ทุกไฟล์ (เว้นว่าง = ล้างค่า)", "One value → replace all files (blank = clear)")}</p>
               </div>
-            : <p className="text-[11px] text-indigo-600 mt-1.5">↓ แก้ path/ลิงก์แยกแต่ละไฟล์ในส่วนล่าง</p>}
+            : <p className="text-[11px] text-indigo-600 mt-1.5">{t("↓ แก้ path/ลิงก์แยกแต่ละไฟล์ในส่วนล่าง", "↓ Edit path/link per file in the section below")}</p>}
         </BulkEditRow>
 
         {needPerFile && (
           <div className="rounded-lg border border-indigo-200 bg-indigo-50/20 p-2.5">
-            <p className="text-[12px] font-medium text-slate-700 mb-2">🗂️ แก้รายไฟล์ ({ids.length} ไฟล์)
-              {enSize && sizeMode === "each" ? " · ขนาด" : ""}{enParent && parentMode === "each" ? " · Parent SKU" : ""}{enLoc && locMode === "each" ? " · ที่เก็บไฟล์" : ""}</p>
+            <p className="text-[12px] font-medium text-slate-700 mb-2">{t("🗂️ แก้รายไฟล์", "🗂️ Edit per file")} ({ids.length} {t("ไฟล์", "files")})
+              {enSize && sizeMode === "each" ? t(" · ขนาด", " · Size") : ""}{enParent && parentMode === "each" ? " · Parent SKU" : ""}{enLoc && locMode === "each" ? t(" · ที่เก็บไฟล์", " · Location") : ""}</p>
             {itemsLoading || items === null ? (
-              <p className="text-[12px] text-slate-400 py-4 text-center">กำลังโหลดไฟล์ที่เลือก…</p>
+              <p className="text-[12px] text-slate-400 py-4 text-center">{t("กำลังโหลดไฟล์ที่เลือก…", "Loading selected files…")}</p>
             ) : (
               <div className="space-y-2 max-h-[46vh] overflow-y-auto pr-1">
                 {items.map((it) => (
@@ -1689,16 +1703,16 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
                       <span className="text-[12px] text-slate-700 truncate">{it.title}</span>
                     </div>
                     {enSize && sizeMode === "each" && (
-                      <div className="mb-1.5"><p className="text-[10px] text-slate-400 mb-0.5">📐 ขนาด (กว้าง × สูง)</p><SizesEditor value={pfSizes[it.id] ?? []} onChange={(v) => setPfSizes((m) => ({ ...m, [it.id]: v }))} /></div>
+                      <div className="mb-1.5"><p className="text-[10px] text-slate-400 mb-0.5">{t("📐 ขนาด (กว้าง × สูง)", "📐 Size (W × H)")}</p><SizesEditor value={pfSizes[it.id] ?? []} onChange={(v) => setPfSizes((m) => ({ ...m, [it.id]: v }))} /></div>
                     )}
                     {enParent && parentMode === "each" && (
                       <div><p className="text-[10px] text-slate-400 mb-0.5">📦 Parent SKU</p><ParentSkuField value={pfParents[it.id] ?? []} onChange={(v) => setPfParents((m) => ({ ...m, [it.id]: v }))} /></div>
                     )}
                     {enLoc && locMode === "each" && (
                       <div className="mt-1.5 space-y-1">
-                        <p className="text-[10px] text-slate-400 mb-0.5">📁 ที่เก็บไฟล์ต้นฉบับ</p>
-                        <input value={pfPath[it.id] ?? ""} onChange={(e) => setPfPath((m) => ({ ...m, [it.id]: e.target.value }))} placeholder="path เช่น G:\Shared drives\…" className="w-full h-8 px-2.5 text-[11px] border border-slate-200 rounded-lg" />
-                        <input value={pfUrl[it.id] ?? ""} onChange={(e) => setPfUrl((m) => ({ ...m, [it.id]: e.target.value }))} placeholder="ลิงก์โฟลเดอร์ Drive" className="w-full h-8 px-2.5 text-[11px] border border-slate-200 rounded-lg" />
+                        <p className="text-[10px] text-slate-400 mb-0.5">{t("📁 ที่เก็บไฟล์ต้นฉบับ", "📁 Source file location")}</p>
+                        <input value={pfPath[it.id] ?? ""} onChange={(e) => setPfPath((m) => ({ ...m, [it.id]: e.target.value }))} placeholder={t("path เช่น G:\Shared drives\…", "path e.g. G:\Shared drives\…")} className="w-full h-8 px-2.5 text-[11px] border border-slate-200 rounded-lg" />
+                        <input value={pfUrl[it.id] ?? ""} onChange={(e) => setPfUrl((m) => ({ ...m, [it.id]: e.target.value }))} placeholder={t("ลิงก์โฟลเดอร์ Drive", "Drive folder link")} className="w-full h-8 px-2.5 text-[11px] border border-slate-200 rounded-lg" />
                       </div>
                     )}
                   </div>
@@ -1734,47 +1748,47 @@ function BulkFolderModal({ ids, firstAsset, onClose, onDone }: {
     try {
       if (mode === "separate") {
         const res = await apiFetch("/api/assets/drive-folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
-        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ทำไม่สำเร็จ");
-        toast.success(`สร้างโฟลเดอร์ ${j.created} ไฟล์${j.skipped ? ` · ข้าม(มีแล้ว) ${j.skipped}` : ""}${j.failed ? ` · ล้มเหลว ${j.failed}` : ""}`);
+        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("ทำไม่สำเร็จ", "Action failed"));
+        toast.success(`${t("สร้างโฟลเดอร์", "Created folder for")} ${j.created} ${t("ไฟล์", "files")}${j.skipped ? ` · ${t("ข้าม(มีแล้ว)", "skipped (existing)")} ${j.skipped}` : ""}${j.failed ? ` · ${t("ล้มเหลว", "failed")} ${j.failed}` : ""}`);
       } else {
-        const nm = folderName.trim(); if (!nm) { toast.error("ตั้งชื่อโฟลเดอร์ก่อน"); setBusy(false); return; }
+        const nm = folderName.trim(); if (!nm) { toast.error(t("ตั้งชื่อโฟลเดอร์ก่อน", "Name the folder first")); setBusy(false); return; }
         const master_path = brandFolderPath(nm, brandId, artType, brandBase, typeSub);   // path ในเครื่องตามแบรนด์/ชนิด/ชื่อ
         const res = await apiFetch("/api/assets/drive-folders/combined", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, brand_id: brandId || undefined, artwork_type: artType, folder_name: nm, master_path: master_path || undefined }) });
-        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ทำไม่สำเร็จ");
-        toast.success(`สร้างโฟลเดอร์ “${nm}” + ใส่ ${j.count ?? ids.length} รูปแล้ว`);
+        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("ทำไม่สำเร็จ", "Action failed"));
+        toast.success(`${t("สร้างโฟลเดอร์", "Created folder")} “${nm}” + ${t("ใส่", "added")} ${j.count ?? ids.length} ${t("รูปแล้ว", "images")}`);
       }
       onDone();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ทำไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ทำไม่สำเร็จ", "Action failed")); }
     finally { setBusy(false); }
   };
 
   return (
-    <ERPModal open onClose={onClose} title={`🗂️ สร้างโฟลเดอร์ Drive (${ids.length} รูป)`} size="sm"
+    <ERPModal open onClose={onClose} title={`🗂️ ${t("สร้างโฟลเดอร์ Drive", "Create Drive folder")} (${ids.length} ${t("รูป", "images")})`} size="sm"
       footer={
         <div className="flex justify-end gap-2 w-full">
-          <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={run} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{busy ? "กำลังทำ…" : "สร้าง"}</button>
+          <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={run} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{busy ? t("กำลังทำ…", "Working…") : t("สร้าง", "Create")}</button>
         </div>
       }>
-      {busy && <LoadingOverlay message={mode === "combined" ? "กำลังสร้างโฟลเดอร์ + ก็อปรูป… อาจใช้เวลาสักครู่" : "กำลังสร้างโฟลเดอร์ทีละรูป… อาจใช้เวลาสักครู่"} />}
+      {busy && <LoadingOverlay message={mode === "combined" ? t("กำลังสร้างโฟลเดอร์ + ก็อปรูป… อาจใช้เวลาสักครู่", "Creating folder + copying images… this may take a moment") : t("กำลังสร้างโฟลเดอร์ทีละรูป… อาจใช้เวลาสักครู่", "Creating a folder per image… this may take a moment")} />}
       <div className="flex gap-1 mb-3 p-0.5 bg-slate-100 rounded-lg">
         <button type="button" onClick={() => setMode("separate")}
-          className={`flex-1 h-8 text-[12px] font-medium rounded-md transition ${mode === "separate" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🗂️ แยก (รูปละโฟลเดอร์)</button>
+          className={`flex-1 h-8 text-[12px] font-medium rounded-md transition ${mode === "separate" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{t("🗂️ แยก (รูปละโฟลเดอร์)", "🗂️ Separate (one folder per image)")}</button>
         <button type="button" onClick={() => setMode("combined")}
-          className={`flex-1 h-8 text-[12px] font-medium rounded-md transition ${mode === "combined" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>📦 รวมโฟลเดอร์เดียว</button>
+          className={`flex-1 h-8 text-[12px] font-medium rounded-md transition ${mode === "combined" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{t("📦 รวมโฟลเดอร์เดียว", "📦 One combined folder")}</button>
       </div>
 
       {mode === "separate" ? (
-        <p className="text-[12px] text-slate-500">แต่ละรูปจะได้โฟลเดอร์ Drive ของตัวเอง (ตามชื่อรูป + แบรนด์/ชนิดของรูปนั้น) · รูปที่มีโฟลเดอร์อยู่แล้วจะข้าม</p>
+        <p className="text-[12px] text-slate-500">{t("แต่ละรูปจะได้โฟลเดอร์ Drive ของตัวเอง (ตามชื่อรูป + แบรนด์/ชนิดของรูปนั้น) · รูปที่มีโฟลเดอร์อยู่แล้วจะข้าม", "Each image gets its own Drive folder (by image name + that image's brand/type) · images that already have a folder are skipped")}</p>
       ) : (
         <div className="space-y-2.5">
-          <p className="text-[12px] text-slate-500">สร้างโฟลเดอร์ Drive <b>1 อัน</b> แล้วเอาทุกรูปที่เลือกใส่เข้าไป (ก็อปรูปตัวอย่างให้ด้วย)</p>
-          <label className="block text-[12px] text-slate-500">ชื่อโฟลเดอร์ <span className="text-red-500">*</span>
-            <input value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="เช่น Cherry Collection"
+          <p className="text-[12px] text-slate-500">{t("สร้างโฟลเดอร์ Drive", "Create a Drive folder")} <b>{t("1 อัน", "(just one)")}</b> {t("แล้วเอาทุกรูปที่เลือกใส่เข้าไป (ก็อปรูปตัวอย่างให้ด้วย)", "then put all selected images in it (previews copied too)")}</p>
+          <label className="block text-[12px] text-slate-500">{t("ชื่อโฟลเดอร์", "Folder name")} <span className="text-red-500">*</span>
+            <input value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder={t("เช่น Cherry Collection", "e.g. Cherry Collection")}
               className={`mt-0.5 w-full h-9 px-3 text-sm border rounded-lg ${folderName.trim() ? "border-slate-200" : "border-amber-300"}`} /></label>
-          <label className="block text-[12px] text-slate-500">แบรนด์ (ไว้จัดที่ตั้งโฟลเดอร์)
+          <label className="block text-[12px] text-slate-500">{t("แบรนด์ (ไว้จัดที่ตั้งโฟลเดอร์)", "Brand (to place the folder)")}
             <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
-              <option value="">— โฟลเดอร์แม่ (ไม่จัดตามแบรนด์) —</option>
+              <option value="">{t("— โฟลเดอร์แม่ (ไม่จัดตามแบรนด์) —", "— Parent folder (not organized by brand) —")}</option>
               {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select></label>
         </div>
@@ -1884,7 +1898,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
       folderId: targetFolder?.id || undefined,   // ลากเข้ามุมมองโฟลเดอร์ → อัปเข้าโฟลเดอร์นั้นเลย
       onProgress: (done, total) => setDriveProg({ done, total }),
     });
-    if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive จากลิงก์แล้วลากขึ้นเอง`);
+    if (largeCount) toast.warning(`${t("ไฟล์ใหญ่", "Large file")} ${largeCount} ${t("ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive จากลิงก์แล้วลากขึ้นเอง", "files weren't auto-uploaded (over 4MB) — open the Drive folder from the link and drag them up yourself")}`);
     return folderLink;
   };
 
@@ -1923,13 +1937,13 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
   useEffect(() => { if (pathAuto && title.trim()) setMasterPath(buildPath(title)); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [brandId, artTypesSel, brandBase, typeSub]);
 
   const save = async () => {
-    if (!file) { toast.error("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)"); return; }
-    if (!brandId) { toast.error("เลือกแบรนด์ก่อน"); return; }
-    if (!artTypesSel.length) { toast.error("เลือกชนิด artwork ก่อน"); return; }
+    if (!file) { toast.error(t("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)", "Attach a preview image first (export JPG/PNG from the design)")); return; }
+    if (!brandId) { toast.error(t("เลือกแบรนด์ก่อน", "Select a brand first")); return; }
+    if (!artTypesSel.length) { toast.error(t("เลือกชนิด artwork ก่อน", "Select an artwork type first")); return; }
     // สร้างโฟลเดอร์ Drive เมื่อ: มีไฟล์ต้นฉบับโยนขึ้น หรือ ติ๊ก "สร้างอัตโนมัติ" และยังไม่มีลิงก์เอง · มีโฟลเดอร์ปลายทาง = อัปเข้าเลย
     const willAutoFolder = driveOn && (autoFolder && !masterUrl.trim() || !!targetFolder);
     const willDrive = driveOn && (srcFiles.length > 0 || willAutoFolder);
-    if (!masterPath.trim() && !masterUrl.trim() && !willDrive) { toast.error("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS / ลิงก์ / สร้างโฟลเดอร์ Drive)"); return; }
+    if (!masterPath.trim() && !masterUrl.trim() && !willDrive) { toast.error(t("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS / ลิงก์ / สร้างโฟลเดอร์ Drive)", "Enter at least one source-file location (NAS path / link / create Drive folder)")); return; }
     setBusy(true);
     try {
       // สร้างโฟลเดอร์ Drive + ก็อปรูปตัวอย่าง (+ อัปไฟล์ต้นฉบับถ้ามี) → ได้ลิงก์โฟลเดอร์มาเติมให้
@@ -1961,22 +1975,22 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
         if (dim) { fd.append("width", String(dim.w)); fd.append("height", String(dim.h)); }
       }
       const res = await apiFetch("/api/assets", { method: "POST", body: fd });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-      toast.success("เพิ่ม Artwork ลงคลังแล้ว"); onDone();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Save failed"));
+      toast.success(t("เพิ่ม Artwork ลงคลังแล้ว", "Artwork added to library")); onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setBusy(false); }
   };
 
   return (
-    <ERPModal open onClose={onClose} title="เพิ่ม Artwork ลงคลัง" size="xl"
+    <ERPModal open onClose={onClose} title={t("เพิ่ม Artwork ลงคลัง", "Add Artwork to library")} size="xl"
       footer={
         <div className="flex items-center justify-between w-full">
           <span className="text-[12px] text-slate-400">
-            {driveProg.total > 0 ? `📤 อัปขึ้น Drive ${driveProg.done}/${driveProg.total}…` : "รูปตัวอย่างเล็กพอ — ไฟล์ใหญ่ .ai/.psd เก็บที่ NAS/Drive"}
+            {driveProg.total > 0 ? `${t("📤 อัปขึ้น Drive", "📤 Uploading to Drive")} ${driveProg.done}/${driveProg.total}…` : t("รูปตัวอย่างเล็กพอ — ไฟล์ใหญ่ .ai/.psd เก็บที่ NAS/Drive", "Preview is small enough — large .ai/.psd files stay on NAS/Drive")}
           </span>
           <div className="flex gap-2">
-            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? (driveProg.total > 0 ? `อัป Drive ${driveProg.done}/${driveProg.total}…` : "กำลังบันทึก…") : "บันทึก"}</button>
+            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? (driveProg.total > 0 ? `${t("อัป Drive", "Drive upload")} ${driveProg.done}/${driveProg.total}…` : t("กำลังบันทึก…", "Saving…")) : t("บันทึก", "Save")}</button>
           </div>
         </div>
       }>
@@ -1992,68 +2006,68 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
           style={{ minHeight: 150 }}>
           {preview
             ? <img src={preview} alt="" className="max-w-full max-h-44 object-contain" />
-            : <div className="text-center py-6"><div className="text-3xl">🎨</div><p className="text-[12px] text-slate-500 mt-1">วางรูปตัวอย่าง / คลิกเลือก</p></div>}
+            : <div className="text-center py-6"><div className="text-3xl">🎨</div><p className="text-[12px] text-slate-500 mt-1">{t("วางรูปตัวอย่าง / คลิกเลือก", "Drop a preview / click to choose")}</p></div>}
           <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); }} />
         </div>
         <div className="flex flex-col gap-2">
-          <label className="text-[12px] text-slate-500">ชื่อ
-            <input value={title} onChange={(e) => { const v = e.target.value; setTitle(v); if (pathAuto) setMasterPath(buildPath(v, fileExt)); }} placeholder="เช่น ลายดอกไม้ PIX32"
+          <label className="text-[12px] text-slate-500">{t("ชื่อ", "Name")}
+            <input value={title} onChange={(e) => { const v = e.target.value; setTitle(v); if (pathAuto) setMasterPath(buildPath(v, fileExt)); }} placeholder={t("เช่น ลายดอกไม้ PIX32", "e.g. Floral pattern PIX32")}
               className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
-          <label className="text-[12px] text-slate-500">แบรนด์ <span className="text-red-500">*</span>
+          <label className="text-[12px] text-slate-500">{t("แบรนด์", "Brand")} <span className="text-red-500">*</span>
             <select value={brandId} onChange={(e) => setBrandId(e.target.value)}
               className={`mt-0.5 w-full h-9 px-3 text-sm border rounded-lg bg-white ${brandId ? "border-slate-200" : "border-amber-300"}`}>
-              <option value="">— เลือกแบรนด์ —</option>
+              <option value="">{t("— เลือกแบรนด์ —", "— Select brand —")}</option>
               {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select></label>
           <div className="grid grid-cols-2 gap-2">
-            <div className="text-[12px] text-slate-500">ชนิด <span className="text-red-500">*</span> <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน</span>
+            <div className="text-[12px] text-slate-500">{t("ชนิด", "Type")} <span className="text-red-500">*</span> <span className="text-[10px] text-slate-400">{t("— เลือกได้หลายอัน", "— multiple allowed")}</span>
               <div className={`mt-0.5 rounded-lg ${artTypesSel.length ? "" : "ring-1 ring-amber-300"}`}><ArtTypeMultiSelect value={artTypesSel} types={artTypeList} onChange={setArtTypesSel} onCreated={(t) => setArtTypeList((c) => [...c, t])} /></div></div>
-            <div className="text-[12px] text-slate-500">Group Album <span className="text-[10px] text-slate-400">— เลือกได้หลายอัน / สร้างใหม่ได้</span>
+            <div className="text-[12px] text-slate-500">Group Album <span className="text-[10px] text-slate-400">{t("— เลือกได้หลายอัน / สร้างใหม่ได้", "— multiple allowed / can create new")}</span>
               <div className="mt-0.5"><CollectionMultiSelect value={collectionIds} collections={cols} onChange={setCollectionIds} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
           </div>
-          <div className="text-[12px] text-slate-500">แท็ก <span className="text-[10px] text-slate-400">— กดเลือกในป๊อปอัป</span>
+          <div className="text-[12px] text-slate-500">{t("แท็ก", "Tags")} <span className="text-[10px] text-slate-400">{t("— กดเลือกในป๊อปอัป", "— select in the popup")}</span>
             <div className="mt-0.5"><TagPickerField value={tags} onChange={setTags} /></div></div>
         </div>
       </div>
 
       {/* ขนาด (หลายไซส์ + ชื่อกำกับ + หน่วย) */}
       <div className="mt-3 pt-3 border-t border-slate-100">
-        <p className="text-[12px] font-medium text-slate-600 mb-1.5">📐 ขนาด (กว้าง × สูง) <span className="text-[10px] text-slate-400 font-normal">— เพิ่มได้หลายไซส์ ใส่ชื่อกำกับ + เลือกหน่วยต่อไซส์</span></p>
+        <p className="text-[12px] font-medium text-slate-600 mb-1.5">{t("📐 ขนาด (กว้าง × สูง)", "📐 Size (W × H)")} <span className="text-[10px] text-slate-400 font-normal">{t("— เพิ่มได้หลายไซส์ ใส่ชื่อกำกับ + เลือกหน่วยต่อไซส์", "— add multiple sizes, label them + choose a unit per size")}</span></p>
         {sizeHint && (
-          <p className="text-[11px] text-slate-400 mb-1">📷 จากรูป {sizeHint.px.w}×{sizeHint.px.h} px @ {sizeHint.dpi} DPI {sizeHint.fromImage ? "(อ่านจากไฟล์)" : "(ใช้ค่ามาตรฐาน 300)"} → เติมขนาด cm ให้เป็น<b>ค่าประมาณ</b> แก้ได้</p>
+          <p className="text-[11px] text-slate-400 mb-1">{t("📷 จากรูป", "📷 From image")} {sizeHint.px.w}×{sizeHint.px.h} px @ {sizeHint.dpi} DPI {sizeHint.fromImage ? t("(อ่านจากไฟล์)", "(read from file)") : t("(ใช้ค่ามาตรฐาน 300)", "(using default 300)")} {t("→ เติมขนาด cm ให้เป็น", "→ cm size filled in as an")}<b>{t("ค่าประมาณ", "estimate")}</b> {t("แก้ได้", "editable")}</p>
         )}
         <SizesEditor value={sizes} onChange={setSizes} />
       </div>
 
       {/* Parent SKU ที่ใช้ */}
       <div className="mt-3 pt-3 border-t border-slate-100">
-        <p className="text-[12px] font-medium text-slate-600 mb-1.5">📦 Parent SKU ที่ใช้ artwork นี้</p>
+        <p className="text-[12px] font-medium text-slate-600 mb-1.5">{t("📦 Parent SKU ที่ใช้ artwork นี้", "📦 Parent SKUs that use this artwork")}</p>
         <ParentSkuField value={parentCodes} onChange={setParentCodes} />
       </div>
 
       {targetFolder && (
         <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-[12px] text-emerald-800">
-          📎 จะเพิ่มเข้าโฟลเดอร์เดียวกับ <b>“{targetFolder.label}”</b> — รูป/ไฟล์ต้นฉบับจะไปอยู่ในโฟลเดอร์นี้ (ไม่สร้างโฟลเดอร์ใหม่)
+          {t("📎 จะเพิ่มเข้าโฟลเดอร์เดียวกับ", "📎 Will be added to the same folder as")} <b>“{targetFolder.label}”</b> {t("— รูป/ไฟล์ต้นฉบับจะไปอยู่ในโฟลเดอร์นี้ (ไม่สร้างโฟลเดอร์ใหม่)", "— the image/source files go into this folder (no new folder created)")}
         </div>
       )}
 
       {/* location ไฟล์ต้นฉบับ + tooltip + จับผิดโฟลเดอร์ */}
       <div className="mt-3 pt-3 border-t border-slate-100">
         <div className="flex items-center justify-between mb-1">
-          <p className="text-[12px] font-medium text-slate-600">📁 ที่เก็บไฟล์ต้นฉบับ <span className="text-[10px] text-slate-400 font-normal">— ใส่อย่างน้อย 1 อย่าง (path NAS หรือ ลิงก์)</span></p>
-          <button type="button" onClick={() => setRuleOpen(true)} className="text-[11px] text-indigo-600 hover:underline">⚙️ ตั้งโฟลเดอร์มาตรฐาน</button>
+          <p className="text-[12px] font-medium text-slate-600">{t("📁 ที่เก็บไฟล์ต้นฉบับ", "📁 Source file location")} <span className="text-[10px] text-slate-400 font-normal">{t("— ใส่อย่างน้อย 1 อย่าง (path NAS หรือ ลิงก์)", "— enter at least one (NAS path or link)")}</span></p>
+          <button type="button" onClick={() => setRuleOpen(true)} className="text-[11px] text-indigo-600 hover:underline">{t("⚙️ ตั้งโฟลเดอร์มาตรฐาน", "⚙️ Set standard folder")}</button>
         </div>
-        <label className="block text-[12px] text-slate-500">path NAS / โฟลเดอร์
-          <span className="ml-1 text-slate-300" title="ใส่ที่อยู่เต็มของไฟล์/โฟลเดอร์ต้นฉบับบนเครื่อง เช่น G:\Shared drives\Louis Montini\[4] Assets\4. Artworks\PIX32-02_v3.ai">ⓘ</span>
+        <label className="block text-[12px] text-slate-500">{t("path NAS / โฟลเดอร์", "NAS path / folder")}
+          <span className="ml-1 text-slate-300" title={t("ใส่ที่อยู่เต็มของไฟล์/โฟลเดอร์ต้นฉบับบนเครื่อง เช่น G:\\Shared drives\\Louis Montini\\[4] Assets\\4. Artworks\\PIX32-02_v3.ai", "Enter the full path of the source file/folder on the machine, e.g. G:\\Shared drives\\Louis Montini\\[4] Assets\\4. Artworks\\PIX32-02_v3.ai")}>ⓘ</span>
           <input value={masterPath} onChange={(e) => { setMasterPath(e.target.value); setPathAuto(false); }}
-            title="ที่อยู่เต็มของไฟล์ต้นฉบับ — ควรอยู่ใต้โฟลเดอร์มาตรฐานที่ตั้งไว้ · แก้เองแล้วจะไม่ตามชื่ออัตโนมัติ"
-            placeholder={rule.base_paths[0] ? `${rule.base_paths[0]}\\…` : "\\\\nas\\Artwork\\PIX\\PIX32-02_v3.ai  หรือ  Z:\\Artwork\\…"}
+            title={t("ที่อยู่เต็มของไฟล์ต้นฉบับ — ควรอยู่ใต้โฟลเดอร์มาตรฐานที่ตั้งไว้ · แก้เองแล้วจะไม่ตามชื่ออัตโนมัติ", "Full path of the source file — should be under the configured standard folder · editing it manually stops auto-naming")}
+            placeholder={rule.base_paths[0] ? `${rule.base_paths[0]}\\…` : t("\\\\nas\\Artwork\\PIX\\PIX32-02_v3.ai  หรือ  Z:\\Artwork\\…", "\\\\nas\\Artwork\\PIX\\PIX32-02_v3.ai  or  Z:\\Artwork\\…")}
             className={`mt-0.5 w-full h-9 px-3 text-[12px] border rounded-lg font-mono focus:outline-none focus:ring-2 ${pathWarn ? "border-amber-300 focus:ring-amber-400 bg-amber-50/40" : "border-slate-200 focus:ring-indigo-500"}`} /></label>
         {pathWarn && (
-          <p className="text-[11px] text-amber-600 mt-1">⚠ ที่อยู่นี้ไม่ได้อยู่ในโฟลเดอร์มาตรฐาน — ควรเก็บไว้ใต้ <b className="font-mono">{rule.base_paths.join(" หรือ ")}</b> (เพิ่มได้ แต่เช็คว่าตั้งใจ)</p>
+          <p className="text-[11px] text-amber-600 mt-1">{t("⚠ ที่อยู่นี้ไม่ได้อยู่ในโฟลเดอร์มาตรฐาน — ควรเก็บไว้ใต้", "⚠ This location isn't under a standard folder — should be stored under")} <b className="font-mono">{rule.base_paths.join(t(" หรือ ", " or "))}</b> {t("(เพิ่มได้ แต่เช็คว่าตั้งใจ)", "(allowed, but make sure it's intended)")}</p>
         )}
-        <label className="block text-[12px] text-slate-500 mt-2">ลิงก์ Google Drive / Synology <span className="text-slate-300" title="ลิงก์ที่เปิดได้จากที่ไหนก็ได้ (นอกออฟฟิศ) — ไม่ใส่ก็ได้ถ้ามี path NAS แล้ว">ⓘ</span>
-          <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder="https://drive.google.com/…  หรือ  ลิงก์ Synology Drive"
+        <label className="block text-[12px] text-slate-500 mt-2">{t("ลิงก์ Google Drive / Synology", "Google Drive / Synology link")} <span className="text-slate-300" title={t("ลิงก์ที่เปิดได้จากที่ไหนก็ได้ (นอกออฟฟิศ) — ไม่ใส่ก็ได้ถ้ามี path NAS แล้ว", "A link that opens anywhere (outside the office) — optional if you already have a NAS path")}>ⓘ</span>
+          <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder={t("https://drive.google.com/…  หรือ  ลิงก์ Synology Drive", "https://drive.google.com/…  or  Synology Drive link")}
             className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
 
         {/* สร้างโฟลเดอร์ Drive อัตโนมัติ + โยนไฟล์ต้นฉบับ */}
@@ -2062,20 +2076,20 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
             <label className="flex items-start gap-2 cursor-pointer rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5">
               <input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
               <span className="text-[12px] text-slate-700">
-                🗂️ <b>สร้างโฟลเดอร์ Drive ให้อัตโนมัติ</b> + ก็อปรูปตัวอย่างเข้าไป
+                🗂️ <b>{t("สร้างโฟลเดอร์ Drive ให้อัตโนมัติ", "Auto-create a Drive folder")}</b> {t("+ ก็อปรูปตัวอย่างเข้าไป", "+ copy the preview into it")}
                 <span className="block text-[11px] text-slate-500 mt-0.5">
                   {autoFolder
-                    ? <>จะสร้างโฟลเดอร์ชื่อ “{title.trim() || "(ใส่ชื่อก่อน)"}” แล้วเติมลิงก์ Drive ให้ · {masterUrl.trim() ? "มีลิงก์เองแล้ว จะไม่สร้างซ้ำ" : "ไม่ต้องไปสร้างทีหลัง"}</>
-                    : "ปิดอยู่ — ต้องใส่ path/ลิงก์เอง หรือไปสร้างโฟลเดอร์ทีหลัง"}
+                    ? <>{t("จะสร้างโฟลเดอร์ชื่อ", "Will create a folder named")} “{title.trim() || t("(ใส่ชื่อก่อน)", "(enter a name first)")}” {t("แล้วเติมลิงก์ Drive ให้ ·", "then fill in the Drive link ·")} {masterUrl.trim() ? t("มีลิงก์เองแล้ว จะไม่สร้างซ้ำ", "you already have a link, won't create a duplicate") : t("ไม่ต้องไปสร้างทีหลัง", "no need to create it later")}</>
+                    : t("ปิดอยู่ — ต้องใส่ path/ลิงก์เอง หรือไปสร้างโฟลเดอร์ทีหลัง", "Off — enter a path/link yourself or create the folder later")}
                 </span>
               </span>
             </label>
-            <span className="block mt-3 text-[12px] text-slate-500">📤 หรือ โยนไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Google Drive ให้อัตโนมัติ</span>
+            <span className="block mt-3 text-[12px] text-slate-500">{t("📤 หรือ โยนไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Google Drive ให้อัตโนมัติ", "📤 Or drop source files (AI/PSD/PDF) → auto-upload to Google Drive")}</span>
             <div onClick={() => srcInputRef.current?.click()}
               onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
               onDragOver={(e) => e.preventDefault()}
               className="mt-1 border border-dashed border-slate-300 rounded-lg px-3 py-3 text-center text-[12px] text-slate-400 hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer">
-              + ลากไฟล์มาวาง หรือคลิกเลือก
+              {t("+ ลากไฟล์มาวาง หรือคลิกเลือก", "+ Drag files here or click to choose")}
               <input ref={srcInputRef} type="file" multiple className="hidden"
                 onChange={(e) => { if (e.target.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.target.files!)]); e.target.value = ""; }} />
             </div>
@@ -2088,15 +2102,15 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
                     <button type="button" onClick={() => setSrcFiles((p) => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
                   </div>
                 ))}
-                <p className="text-[11px] text-slate-400">จะสร้างโฟลเดอร์ชื่อ “{title.trim() || "(ใส่ชื่อก่อน)"}” + ตั้งชื่อไฟล์ตามชื่องาน + เติมลิงก์ Drive ให้อัตโนมัติ</p>
+                <p className="text-[11px] text-slate-400">{t("จะสร้างโฟลเดอร์ชื่อ", "Will create a folder named")} “{title.trim() || t("(ใส่ชื่อก่อน)", "(enter a name first)")}” {t("+ ตั้งชื่อไฟล์ตามชื่องาน + เติมลิงก์ Drive ให้อัตโนมัติ", "+ name files after the job + auto-fill the Drive link")}</p>
               </div>
             )}
           </div>
         )}
       </div>
 
-      <label className="block text-[12px] text-slate-500 mt-3">คำค้นเพิ่มเติม (keyword) <span className="text-[10px] text-slate-400">— คำพ้อง/ชื่ออื่น พิมพ์แล้วเจอ</span>
-        <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="เช่น flower ดอกไม้ summer ฤดูร้อน"
+      <label className="block text-[12px] text-slate-500 mt-3">{t("คำค้นเพิ่มเติม (keyword)", "Extra keywords")} <span className="text-[10px] text-slate-400">{t("— คำพ้อง/ชื่ออื่น พิมพ์แล้วเจอ", "— synonyms/other names, type to find")}</span>
+        <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={t("เช่น flower ดอกไม้ summer ฤดูร้อน", "e.g. flower summer")}
           className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
 
       {ruleOpen && <ArtworkPathRuleModal rule={rule} onClose={() => setRuleOpen(false)} onSaved={reloadRule} />}
@@ -2147,7 +2161,7 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   };
   const addFiles = (files: FileList | File[]) => {
     const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
-    if (!imgs.length) { toast.error("รับเฉพาะไฟล์รูปภาพ (JPG/PNG/…)"); return; }
+    if (!imgs.length) { toast.error(t("รับเฉพาะไฟล์รูปภาพ (JPG/PNG/…)", "Only image files are accepted (JPG/PNG/…)")); return; }
     const newRows = imgs.map(makeRow);
     setRows((r) => [...r, ...newRows]);
     // แกะขนาดจริง (cm) จากแต่ละรูป → เติมช่องขนาด (เฉพาะแถวที่ยังว่าง · ค่าประมาณ แก้ได้)
@@ -2172,12 +2186,12 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   const applyParentsToAll = (codes: string[]) => setRows((r) => r.map((x) => ({ ...x, parentCodes: [...codes] })));
 
   const save = async () => {
-    if (rows.length === 0) { toast.error("ยังไม่มีรายการ — ลากไฟล์รูปเข้ามาก่อน"); return; }
-    if (!batchBrandId) { toast.error("เลือกแบรนด์ก่อน (ใช้กับทุกรูป)"); return; }
+    if (rows.length === 0) { toast.error(t("ยังไม่มีรายการ — ลากไฟล์รูปเข้ามาก่อน", "No items yet — drag image files in first")); return; }
+    if (!batchBrandId) { toast.error(t("เลือกแบรนด์ก่อน (ใช้กับทุกรูป)", "Select a brand first (applies to all images)")); return; }
     // โหมดโฟลเดอร์เดียว = ทุกใบได้ลิงก์ Drive อยู่แล้ว → ไม่ต้องมี path/ลิงก์เอง
     // แถวที่ไม่มี path/ลิงก์ แต่มีไฟล์ต้นฉบับให้อัปขึ้น Drive ก็ถือว่าครบ (ได้ลิงก์โฟลเดอร์มาเติมให้)
     const missing = (driveOn && (oneFolder || targetFolder)) ? [] : rows.filter((r) => !r.path.trim() && !r.url.trim() && !(driveOn && r.srcFiles.length > 0));
-    if (missing.length) { toast.error(`มี ${missing.length} แถวยังไม่ใส่ที่อยู่ไฟล์ต้นฉบับ (path / ลิงก์ / โยนไฟล์ขึ้น Drive)`); return; }
+    if (missing.length) { toast.error(`${missing.length} ${t("แถวยังไม่ใส่ที่อยู่ไฟล์ต้นฉบับ (path / ลิงก์ / โยนไฟล์ขึ้น Drive)", "rows have no source-file location yet (path / link / drop files to Drive)")}`); return; }
     // ชื่อโฟลเดอร์รวม (โหมดโฟลเดอร์เดียว) = ที่ตั้งไว้ · ไม่ตั้ง = ชื่อร่วมของรูป/รูปแรก
     const combinedName = oneFolderName.trim() || commonNameSeed(rows.map((r) => r.name)) || rows[0]?.name?.trim() || "artwork";
     const combinedPath = oneFolder ? massPath(combinedName, rows[0]?.types ?? []) : "";   // path ชี้โฟลเดอร์รวม (ทุกใบเหมือนกัน)
@@ -2185,7 +2199,7 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
     // snapshot ค่าที่ต้องใช้ (โมดัลปิดแล้วยังทำงานต่อได้) → ส่งงานไปวิ่งเบื้องหลัง + โชว์กล่องสถานะมุมจอ
     const jobRows = rows, jobBrand = batchBrandId, jobAlbums = batchAlbums, jobDrive = driveOn, jobOneFolder = oneFolder || !!targetFolder, jobTarget = targetFolder;
     runBackgroundTask({
-      label: `เพิ่ม Artwork ${jobRows.length} รูป`,
+      label: `${t("เพิ่ม Artwork", "Add Artwork")} ${jobRows.length} ${t("รูป", "images")}`,
       total: jobRows.length,
       run: async (report) => {
         let ok = 0, fail = 0, largeTotal = 0;
@@ -2224,9 +2238,9 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
           report(i + 1);
         }
         triggerRefresh();   // เสร็จ → รีเฟรชลิสต์คลัง
-        const parts = [`เพิ่ม ${ok} รูป`];
-        if (fail) parts.push(`ล้มเหลว ${fail}`);
-        if (largeTotal) parts.push(`ไฟล์ใหญ่ ${largeTotal} ต้องลากขึ้น Drive เอง`);
+        const parts = [`${t("เพิ่ม", "Added")} ${ok} ${t("รูป", "images")}`];
+        if (fail) parts.push(`${t("ล้มเหลว", "failed")} ${fail}`);
+        if (largeTotal) parts.push(`${t("ไฟล์ใหญ่", "Large file")} ${largeTotal} ${t("ต้องลากขึ้น Drive เอง", "must be dragged to Drive manually")}`);
         return { ok, fail, message: parts.join(" · ") };
       },
     });
@@ -2234,20 +2248,20 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
   };
 
   return (
-    <ERPModal open onClose={onClose} title="📋 เพิ่ม Artwork หลายรูป" size="xl"
-      description="ลากไฟล์รูปหลายไฟล์เข้ามา → ได้ 1 การ์ดต่อ 1 รูป (เลือกแบรนด์ใช้ทุกรูป · แต่ละรูปแนบไฟล์ต้นฉบับ/ใส่ขนาด/Parent SKU ได้) → กดบันทึกแล้วปิดได้เลย งานวิ่งเบื้องหลัง"
+    <ERPModal open onClose={onClose} title={t("📋 เพิ่ม Artwork หลายรูป", "📋 Add multiple Artwork")} size="xl"
+      description={t("ลากไฟล์รูปหลายไฟล์เข้ามา → ได้ 1 การ์ดต่อ 1 รูป (เลือกแบรนด์ใช้ทุกรูป · แต่ละรูปแนบไฟล์ต้นฉบับ/ใส่ขนาด/Parent SKU ได้) → กดบันทึกแล้วปิดได้เลย งานวิ่งเบื้องหลัง", "Drag in several image files → get one card per image (pick a brand for all · each image can attach source files/sizes/Parent SKU) → click save and close, the job runs in the background")}
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-[12px] text-slate-400">{rows.length} รายการ · บันทึกแล้ววิ่งเบื้องหลัง (ดูสถานะมุมจอ)</span>
+          <span className="text-[12px] text-slate-400">{rows.length} {t("รายการ · บันทึกแล้ววิ่งเบื้องหลัง (ดูสถานะมุมจอ)", "items · saving runs in the background (see status in the corner)")}</span>
           <div className="flex gap-2">
-            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={save} disabled={rows.length === 0} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">บันทึกทั้งหมด ({rows.length})</button>
+            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+            <button onClick={save} disabled={rows.length === 0} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{t("บันทึกทั้งหมด", "Save all")} ({rows.length})</button>
           </div>
         </div>
       }>
       {targetFolder && (
         <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-[12px] text-emerald-800">
-          📎 ทุกรูปจะเพิ่มเข้าโฟลเดอร์เดียวกับ <b>“{targetFolder.label}”</b> (ไม่สร้างโฟลเดอร์ใหม่)
+          {t("📎 ทุกรูปจะเพิ่มเข้าโฟลเดอร์เดียวกับ", "📎 All images will be added to the same folder as")} <b>“{targetFolder.label}”</b> {t("(ไม่สร้างโฟลเดอร์ใหม่)", "(no new folder created)")}
         </div>
       )}
       {/* โซนลากไฟล์หลายไฟล์ */}
@@ -2257,46 +2271,46 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
         onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); }}
         onClick={() => inputRef.current?.click()}
         className={`cursor-pointer rounded-xl border-2 border-dashed flex items-center justify-center py-4 mb-3 text-center ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50"}`}>
-        <div><span className="text-2xl">🎨</span><p className="text-[12px] text-slate-500 mt-1">ลากไฟล์รูปหลายไฟล์มาที่นี่ / คลิกเพื่อเลือกหลายไฟล์</p></div>
+        <div><span className="text-2xl">🎨</span><p className="text-[12px] text-slate-500 mt-1">{t("ลากไฟล์รูปหลายไฟล์มาที่นี่ / คลิกเพื่อเลือกหลายไฟล์", "Drag several image files here / click to choose multiple")}</p></div>
         <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }} />
       </div>
 
       {/* ตั้งค่าทั้งชุด */}
       <div className="mb-3 p-2.5 rounded-lg bg-slate-50 border border-slate-100 space-y-3">
-        <label className="block text-[12px] text-slate-500">แบรนด์ <span className="text-red-500">*</span> <span className="text-[10px] text-slate-400">— ใช้กับทุกรูป (จัดโฟลเดอร์ Drive + เก็บกับทุกใบ)</span>
+        <label className="block text-[12px] text-slate-500">{t("แบรนด์", "Brand")} <span className="text-red-500">*</span> <span className="text-[10px] text-slate-400">{t("— ใช้กับทุกรูป (จัดโฟลเดอร์ Drive + เก็บกับทุกใบ)", "— applies to all images (organize the Drive folder + saved on each)")}</span>
           <select value={batchBrandId} onChange={(e) => setBatchBrandId(e.target.value)}
             className={`mt-0.5 w-full h-9 px-3 text-sm border rounded-lg bg-white ${batchBrandId ? "border-slate-200" : "border-amber-300"}`}>
-            <option value="">— เลือกแบรนด์ —</option>
+            <option value="">{t("— เลือกแบรนด์ —", "— Select brand —")}</option>
             {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select></label>
         {driveOn && (
           <div>
             <label className="flex items-start gap-2 text-[12px] text-slate-600 cursor-pointer select-none">
               <input type="checkbox" checked={oneFolder} onChange={(e) => setOneFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
-              <span>📎 รูปชุดนี้ใช้โฟลเดอร์ Drive เดียวกัน <span className="text-[10px] text-slate-400">— สร้างโฟลเดอร์เดียว เก็บทุกรูปในนี้ (ก็อปรูปตัวอย่าง + ไฟล์ต้นฉบับที่แนบ) แทนที่จะแยกโฟลเดอร์ทุกใบ</span></span>
+              <span>{t("📎 รูปชุดนี้ใช้โฟลเดอร์ Drive เดียวกัน", "📎 This batch uses the same Drive folder")} <span className="text-[10px] text-slate-400">{t("— สร้างโฟลเดอร์เดียว เก็บทุกรูปในนี้ (ก็อปรูปตัวอย่าง + ไฟล์ต้นฉบับที่แนบ) แทนที่จะแยกโฟลเดอร์ทุกใบ", "— create one folder holding all images (previews + attached source files) instead of a separate folder per image")}</span></span>
             </label>
             {oneFolder && (
-              <label className="block text-[12px] text-slate-500 mt-1.5 ml-6">ชื่อโฟลเดอร์รวม <span className="text-[10px] text-slate-400">— ไม่ตั้ง = ใช้ชื่อร่วมของรูป/รูปแรก</span>
+              <label className="block text-[12px] text-slate-500 mt-1.5 ml-6">{t("ชื่อโฟลเดอร์รวม", "Combined folder name")} <span className="text-[10px] text-slate-400">{t("— ไม่ตั้ง = ใช้ชื่อร่วมของรูป/รูปแรก", "— leave blank = use the images' common name/first image")}</span>
                 <input value={oneFolderName} onChange={(e) => setOneFolderName(e.target.value)}
-                  placeholder={commonNameSeed(rows.map((r) => r.name)) || rows[0]?.name || "เช่น Tabby Brown Cat"}
+                  placeholder={commonNameSeed(rows.map((r) => r.name)) || rows[0]?.name || t("เช่น Tabby Brown Cat", "e.g. Tabby Brown Cat")}
                   className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
             )}
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
-          <div className="text-[12px] text-slate-500">อัลบั้ม (ใช้กับทุกแถว)
+          <div className="text-[12px] text-slate-500">{t("อัลบั้ม (ใช้กับทุกแถว)", "Album (applies to all rows)")}
             <div className="mt-0.5"><CollectionMultiSelect value={batchAlbums} collections={cols} onChange={setBatchAlbums} onCreated={(c) => setCols((cur) => [...cur, c])} /></div>
           </div>
-          <div className="text-[12px] text-slate-500 flex flex-col">ชนิดเริ่มต้น
+          <div className="text-[12px] text-slate-500 flex flex-col">{t("ชนิดเริ่มต้น", "Default type")}
             <div className="mt-0.5"><ArtTypeMultiSelect value={batchTypes} types={artTypeList} onChange={setBatchTypes} onCreated={(t) => setArtTypeList((c) => [...c, t])} /></div>
-            {rows.length > 0 && batchTypes.length > 0 && <button type="button" onClick={applyTypesToAll} className="self-start mt-1 text-[11px] text-indigo-600 hover:underline">→ ใส่ชนิดนี้ให้ทุกแถว</button>}
+            {rows.length > 0 && batchTypes.length > 0 && <button type="button" onClick={applyTypesToAll} className="self-start mt-1 text-[11px] text-indigo-600 hover:underline">{t("→ ใส่ชนิดนี้ให้ทุกแถว", "→ Apply this type to all rows")}</button>}
           </div>
         </div>
       </div>
 
       {/* การ์ดรายรูป — 1 ใบ/รูป: ชื่อ+ชนิด · path/ลิงก์ · ไฟล์ต้นฉบับ→Drive · ขนาด · Parent SKU */}
       {rows.length === 0 ? (
-        <div className="py-6 text-center text-slate-400 text-[13px]">ยังไม่มีรายการ — ลากไฟล์เข้ามาด้านบน</div>
+        <div className="py-6 text-center text-slate-400 text-[13px]">{t("ยังไม่มีรายการ — ลากไฟล์เข้ามาด้านบน", "No items yet — drag files in above")}</div>
       ) : (
         <div className="space-y-2.5">
           {rows.map((r) => (
@@ -2307,9 +2321,9 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
                   : <span className="text-2xl shrink-0">🎨</span>}
                 <div className="flex-1 min-w-0 space-y-1.5">
                   <div className="flex items-center gap-2">
-                    <input value={r.name} onChange={(e) => setName(r.id, e.target.value)} placeholder="ชื่อรูป"
+                    <input value={r.name} onChange={(e) => setName(r.id, e.target.value)} placeholder={t("ชื่อรูป", "Image name")}
                       className="flex-1 h-8 px-2 text-[12px] border border-slate-200 rounded" />
-                    <button type="button" onClick={() => setRows((list) => list.filter((x) => x.id !== r.id))} title="ลบรูปนี้"
+                    <button type="button" onClick={() => setRows((list) => list.filter((x) => x.id !== r.id))} title={t("ลบรูปนี้", "Remove this image")}
                       className="h-7 w-7 text-rose-500 hover:bg-rose-50 rounded shrink-0">🗑</button>
                   </div>
                   <ArtTypeMultiSelect value={r.types} types={artTypeList} onChange={(v) => setTypes(r.id, v)} onCreated={(t) => setArtTypeList((c) => [...c, t])} />
@@ -2318,20 +2332,20 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
 
               {/* path ต้นฉบับ / ลิงก์ */}
               <div className="grid grid-cols-2 gap-2 mt-2">
-                <input value={r.path} onChange={(e) => setRow(r.id, { path: e.target.value, pathAuto: false })} placeholder={base ? "path NAS…" : "\\\\nas\\… หรือ Z:\\…"}
+                <input value={r.path} onChange={(e) => setRow(r.id, { path: e.target.value, pathAuto: false })} placeholder={base ? "path NAS…" : t("\\\\nas\\… หรือ Z:\\…", "\\\\nas\\… or Z:\\…")}
                   className="h-8 px-2 text-[11px] font-mono border border-slate-200 rounded" />
-                <input value={r.url} onChange={(e) => setRow(r.id, { url: e.target.value })} placeholder="ลิงก์ Drive / Synology (ถ้ามี)"
+                <input value={r.url} onChange={(e) => setRow(r.id, { url: e.target.value })} placeholder={t("ลิงก์ Drive / Synology (ถ้ามี)", "Drive / Synology link (if any)")}
                   className="h-8 px-2 text-[11px] border border-slate-200 rounded" />
               </div>
 
               {/* แนบไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Drive + ก็อปรูปตัวอย่าง */}
               {driveOn && (
                 <div className="mt-2">
-                  <p className="text-[11px] text-slate-500 mb-1">📤 ไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Drive + ก็อปรูปตัวอย่างให้อัตโนมัติ</p>
+                  <p className="text-[11px] text-slate-500 mb-1">{t("📤 ไฟล์ต้นฉบับ (AI/PSD/PDF) → อัปขึ้น Drive + ก็อปรูปตัวอย่างให้อัตโนมัติ", "📤 Source files (AI/PSD/PDF) → auto-upload to Drive + copy the preview")}</p>
                   <label onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setRow(r.id, { srcFiles: [...r.srcFiles, ...Array.from(e.dataTransfer.files)] }); }}
                     onDragOver={(e) => e.preventDefault()}
                     className="block border border-dashed border-slate-300 rounded-lg px-3 py-2 text-center text-[11px] text-slate-400 hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer">
-                    + ลากไฟล์มาวาง / คลิกเลือก
+                    {t("+ ลากไฟล์มาวาง / คลิกเลือก", "+ Drag files here / click to choose")}
                     <input type="file" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) setRow(r.id, { srcFiles: [...r.srcFiles, ...Array.from(e.target.files!)] }); e.target.value = ""; }} />
                   </label>
                   {r.srcFiles.length > 0 && (
@@ -2352,15 +2366,15 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-2">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <p className="text-[11px] text-slate-500">📐 ขนาด (กว้าง × สูง)</p>
-                    {r.sizes.length > 0 && rows.length > 1 && <button type="button" onClick={() => applySizesToAll(r.sizes)} className="text-[10px] text-indigo-600 hover:underline">→ ใส่ทุกใบ</button>}
+                    <p className="text-[11px] text-slate-500">{t("📐 ขนาด (กว้าง × สูง)", "📐 Size (W × H)")}</p>
+                    {r.sizes.length > 0 && rows.length > 1 && <button type="button" onClick={() => applySizesToAll(r.sizes)} className="text-[10px] text-indigo-600 hover:underline">{t("→ ใส่ทุกใบ", "→ Apply to all")}</button>}
                   </div>
                   <SizesEditor value={r.sizes} onChange={(v) => setRow(r.id, { sizes: v })} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <p className="text-[11px] text-slate-500">📦 Parent SKU ที่ใช้</p>
-                    {r.parentCodes.length > 0 && rows.length > 1 && <button type="button" onClick={() => applyParentsToAll(r.parentCodes)} className="text-[10px] text-indigo-600 hover:underline">→ ใส่ทุกใบ</button>}
+                    <p className="text-[11px] text-slate-500">{t("📦 Parent SKU ที่ใช้", "📦 Parent SKUs used")}</p>
+                    {r.parentCodes.length > 0 && rows.length > 1 && <button type="button" onClick={() => applyParentsToAll(r.parentCodes)} className="text-[10px] text-indigo-600 hover:underline">{t("→ ใส่ทุกใบ", "→ Apply to all")}</button>}
                   </div>
                   <ParentSkuField value={r.parentCodes} onChange={(v) => setRow(r.id, { parentCodes: v })} />
                 </div>
@@ -2393,11 +2407,11 @@ function TagChips({ value, onChange }: { value: string[]; onChange: (v: string[]
             {t}<button type="button" onClick={() => remove(t)} className="hover:bg-white/25 rounded-full w-4 h-4 leading-none flex items-center justify-center">✕</button>
           </span>
         ))}
-        {value.length === 0 && <span className="text-[11px] text-slate-400">ยังไม่มีแท็ก</span>}
+        {value.length === 0 && <span className="text-[11px] text-slate-400">{t("ยังไม่มีแท็ก", "No tags yet")}</span>}
       </div>
       <input value={input} onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(input); } }}
-        placeholder="พิมพ์แท็ก + Enter / เลือกจากด้านล่าง"
+        placeholder={t("พิมพ์แท็ก + Enter / เลือกจากด้านล่าง", "Type a tag + Enter / pick from below")}
         className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg" />
       {suggest.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1">
@@ -2428,11 +2442,11 @@ function CollectionMultiSelect({ value, collections, onChange, onCreated }: {
     setBusy(true);
     try {
       const r = await apiFetch("/api/assets/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) });
-      const j = await r.json(); if (!r.ok || j.error || !j.data) throw new Error(j.error || "สร้างอัลบั้มไม่สำเร็จ");
+      const j = await r.json(); if (!r.ok || j.error || !j.data) throw new Error(j.error || t("สร้างอัลบั้มไม่สำเร็จ", "Failed to create album"));
       const col = j.data as AssetCollection;
       onCreated(col); onChange([...value, col.id]); setNewName(""); setCreating(false);
-      toast.success(`สร้างอัลบั้ม "${n}" แล้ว`);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างอัลบั้มไม่สำเร็จ"); }
+      toast.success(`${t("สร้างอัลบั้ม", "Created album")} "${n}"`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("สร้างอัลบั้มไม่สำเร็จ", "Failed to create album")); }
     finally { setBusy(false); }
   };
   return (
@@ -2443,25 +2457,25 @@ function CollectionMultiSelect({ value, collections, onChange, onCreated }: {
             {nameOf(id)}<button type="button" onClick={() => onChange(value.filter((x) => x !== id))} className="text-emerald-300 hover:text-rose-500 leading-none">✕</button>
           </span>
         ))}
-        {value.length === 0 && <span className="text-[11px] text-slate-400">— ไม่ระบุ —</span>}
+        {value.length === 0 && <span className="text-[11px] text-slate-400">{t("— ไม่ระบุ —", "— None —")}</span>}
       </div>
       <div className="flex items-center gap-1.5 mt-1">
         <select value="" onChange={(e) => { add(e.target.value); e.target.value = ""; }}
           className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white max-w-[150px]">
-          <option value="">＋ เลือกอัลบั้ม…</option>
+          <option value="">{t("＋ เลือกอัลบั้ม…", "＋ Choose album…")}</option>
           {remaining.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         {!creating ? (
           <button type="button" onClick={() => setCreating(true)}
-            className="text-[11px] px-2 py-1 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">＋ อัลบั้มใหม่</button>
+            className="text-[11px] px-2 py-1 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">{t("＋ อัลบั้มใหม่", "＋ New album")}</button>
         ) : (
           <span className="inline-flex items-center gap-1">
             <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} disabled={busy}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void create(); } if (e.key === "Escape") { setCreating(false); setNewName(""); } }}
-              placeholder="ชื่ออัลบั้มใหม่" className="h-8 w-32 px-2 text-[12px] border border-emerald-300 rounded-lg" />
+              placeholder={t("ชื่ออัลบั้มใหม่", "New album name")} className="h-8 w-32 px-2 text-[12px] border border-emerald-300 rounded-lg" />
             <button type="button" onClick={() => void create()} disabled={busy}
-              className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">เพิ่ม</button>
-            <button type="button" onClick={() => { setCreating(false); setNewName(""); }} className="text-[11px] text-slate-400 hover:text-slate-600">ยกเลิก</button>
+              className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">{t("เพิ่ม", "Add")}</button>
+            <button type="button" onClick={() => { setCreating(false); setNewName(""); }} className="text-[11px] text-slate-400 hover:text-slate-600">{t("ยกเลิก", "Cancel")}</button>
           </span>
         )}
       </div>
@@ -2485,11 +2499,11 @@ function ArtTypeMultiSelect({ value, types, onChange, onCreated, disabled }: {
     setBusy(true);
     try {
       const r = await apiFetch("/api/lookups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lookup_type: "artwork_type", name: n }) });
-      const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || "เพิ่มชนิดไม่สำเร็จ");
+      const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || t("เพิ่มชนิดไม่สำเร็จ", "Failed to add type"));
       const item: LookupItem = j.data ? { id: String(j.data.id ?? n), name: String(j.data.name ?? n) } : { id: n, name: n };
       onCreated(item); add(item.name); setNewName(""); setCreating(false);
-      toast.success(`เพิ่มชนิด "${n}" แล้ว`);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มชนิดไม่สำเร็จ"); }
+      toast.success(`${t("เพิ่มชนิด", "Added type")} "${n}"`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เพิ่มชนิดไม่สำเร็จ", "Failed to add type")); }
     finally { setBusy(false); }
   };
   return (
@@ -2500,25 +2514,25 @@ function ArtTypeMultiSelect({ value, types, onChange, onCreated, disabled }: {
             {n}{!disabled && <button type="button" onClick={() => onChange(value.filter((x) => x !== n))} className="text-indigo-300 hover:text-rose-500 leading-none">✕</button>}
           </span>
         ))}
-        {value.length === 0 && <span className="text-[11px] text-slate-400">— ไม่ระบุ —</span>}
+        {value.length === 0 && <span className="text-[11px] text-slate-400">{t("— ไม่ระบุ —", "— None —")}</span>}
       </div>
       {!disabled && <div className="flex items-center gap-1.5 mt-1">
         <select value="" onChange={(e) => { add(e.target.value); e.target.value = ""; }}
           className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white max-w-[150px]">
-          <option value="">＋ เลือกชนิด…</option>
+          <option value="">{t("＋ เลือกชนิด…", "＋ Choose type…")}</option>
           {remaining.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
         </select>
         {!creating ? (
           <button type="button" onClick={() => setCreating(true)}
-            className="text-[11px] px-2 py-1 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50">＋ ชนิดใหม่</button>
+            className="text-[11px] px-2 py-1 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50">{t("＋ ชนิดใหม่", "＋ New type")}</button>
         ) : (
           <span className="inline-flex items-center gap-1">
             <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} disabled={busy}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void create(); } if (e.key === "Escape") { setCreating(false); setNewName(""); } }}
-              placeholder="ชื่อชนิดใหม่" className="h-8 w-28 px-2 text-[12px] border border-indigo-300 rounded-lg" />
+              placeholder={t("ชื่อชนิดใหม่", "New type name")} className="h-8 w-28 px-2 text-[12px] border border-indigo-300 rounded-lg" />
             <button type="button" onClick={() => void create()} disabled={busy}
-              className="text-[11px] px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">เพิ่ม</button>
-            <button type="button" onClick={() => { setCreating(false); setNewName(""); }} className="text-[11px] text-slate-400 hover:text-slate-600">ยกเลิก</button>
+              className="text-[11px] px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">{t("เพิ่ม", "Add")}</button>
+            <button type="button" onClick={() => { setCreating(false); setNewName(""); }} className="text-[11px] text-slate-400 hover:text-slate-600">{t("ยกเลิก", "Cancel")}</button>
           </span>
         )}
       </div>}
@@ -2565,13 +2579,13 @@ function PrintItemsField({ value, onChange, disabled }: { value: PrintItem[]; on
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[12px] text-slate-500">🎨 Artwork ในแผ่นนี้ {value.length > 0 && <span className="text-slate-400">({value.length} รายการ · รวม {totalQty} ชิ้น)</span>}</span>
+        <span className="text-[12px] text-slate-500">{t("🎨 Artwork ในแผ่นนี้", "🎨 Artwork on this sheet")} {value.length > 0 && <span className="text-slate-400">({value.length} {t("รายการ · รวม", "items · total")} {totalQty} {t("ชิ้น", "pcs")})</span>}</span>
         {!disabled && <button type="button" onClick={() => setOpen(true)}
-          className="text-[11px] px-2 py-0.5 rounded-full border border-violet-300 text-violet-700 hover:bg-violet-50">＋ เลือก Artwork</button>}
+          className="text-[11px] px-2 py-0.5 rounded-full border border-violet-300 text-violet-700 hover:bg-violet-50">{t("＋ เลือก Artwork", "＋ Select Artwork")}</button>}
       </div>
 
       {value.length === 0 ? (
-        <p className="text-[11px] text-slate-400">ยังไม่ได้เลือก Artwork</p>
+        <p className="text-[11px] text-slate-400">{t("ยังไม่ได้เลือก Artwork", "No Artwork selected")}</p>
       ) : (
         <div className="space-y-1">
           {value.map((it, idx) => {
@@ -2591,20 +2605,20 @@ function PrintItemsField({ value, onChange, disabled }: { value: PrintItem[]; on
                   <select value={curKey} disabled={disabled}
                     onChange={(e) => patchAt(idx, { size: avail.find((s) => sizeText(s) === e.target.value) ?? null })}
                     className={`h-7 px-1.5 text-[11px] border rounded-lg bg-white max-w-[9.5rem] ${needSize ? "border-amber-400 text-amber-700" : "border-slate-200"}`}>
-                    <option value="">— เลือกไซส์ —</option>
+                    <option value="">{t("— เลือกไซส์ —", "— Select size —")}</option>
                     {avail.map((s) => <option key={sizeText(s)} value={sizeText(s)}>{sizeText(s)}</option>)}
                   </select>
                 ) : (
-                  <span className="text-[10px] text-slate-400 shrink-0">{it.size ? sizeText(it.size) : "ลายนี้ยังไม่ใส่ไซส์"}</span>
+                  <span className="text-[10px] text-slate-400 shrink-0">{it.size ? sizeText(it.size) : t("ลายนี้ยังไม่ใส่ไซส์", "no size set for this design")}</span>
                 )}
 
                 <input type="number" min={1} value={it.qty} disabled={disabled}
                   onChange={(e) => patchAt(idx, { qty: Math.max(1, Math.round(Number(e.target.value)) || 1) })}
                   className="w-14 h-7 px-2 text-[12px] text-center border border-slate-200 rounded-lg disabled:bg-slate-50" />
-                <span className="text-[10px] text-slate-400 shrink-0">ชิ้น</span>
+                <span className="text-[10px] text-slate-400 shrink-0">{t("ชิ้น", "pcs")}</span>
                 {!disabled && <>
-                  <button type="button" onClick={() => dupAt(idx)} className="text-slate-400 hover:text-indigo-600 shrink-0 text-xs" title="เพิ่มลายนี้อีกไซส์">⧉</button>
-                  <button type="button" onClick={() => removeAt(idx)} className="text-slate-400 hover:text-red-500 shrink-0 text-sm" title="เอาออก">✕</button>
+                  <button type="button" onClick={() => dupAt(idx)} className="text-slate-400 hover:text-indigo-600 shrink-0 text-xs" title={t("เพิ่มลายนี้อีกไซส์", "Add another size for this design")}>⧉</button>
+                  <button type="button" onClick={() => removeAt(idx)} className="text-slate-400 hover:text-red-500 shrink-0 text-sm" title={t("เอาออก", "Remove")}>✕</button>
                 </>}
               </div>
             );
@@ -2613,7 +2627,7 @@ function PrintItemsField({ value, onChange, disabled }: { value: PrintItem[]; on
       )}
 
       <AssetPicker open={open} onClose={() => setOpen(false)} onSelect={addPicked} multiple typeFilter="image"
-        defaultSource="artwork" title="เลือก Artwork ที่อยู่ในแผ่นนี้" />
+        defaultSource="artwork" title={t("เลือก Artwork ที่อยู่ในแผ่นนี้", "Select the Artwork on this sheet")} />
     </div>
   );
 }
@@ -2692,8 +2706,8 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   useEffect(() => { if (initialFile) pick(initialFile); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const save = async () => {
-    if (!file) { toast.error("แนบรูป preview ของงานพิมพ์ก่อน"); return; }
-    if (!ptype) { toast.error("เลือกประเภทงานพิมพ์ (DTF/UV) ก่อน"); return; }
+    if (!file) { toast.error(t("แนบรูป preview ของงานพิมพ์ก่อน", "Attach the print job's preview image first")); return; }
+    if (!ptype) { toast.error(t("เลือกประเภทงานพิมพ์ (DTF/UV) ก่อน", "Select a print type (DTF/UV) first")); return; }
     setBusy(true);
     try {
       // มีไฟล์พิมพ์ หรือติ๊กสร้างโฟลเดอร์ → สร้างโฟลเดอร์ Drive + ก็อป preview + อัปไฟล์พิมพ์
@@ -2708,7 +2722,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
             name: nm, srcFiles, previewFile, folderId: sharedFolder.id,
             onProgress: (done, total) => setDriveProg({ done, total }),
           });
-          if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
+          if (largeCount) toast.warning(`${t("ไฟล์ใหญ่", "Large file")} ${largeCount} ${t("ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง", "files weren't auto-uploaded (over 4MB) — open the Drive folder and drag them up yourself")}`);
           effUrl = folderLink || sharedFolder.url;
         } else {
           // โฟลเดอร์ = ซับ(Printed/DTF) + โฟลเดอร์ย่อยที่เลือก (เช่น goodgoods) แล้วสร้างโฟลเดอร์ตามชื่องานข้างใน
@@ -2718,7 +2732,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
             rootFolderId: printRoot.folder_id || undefined,   // งานพิมพ์ไปโฟลเดอร์แม่เฉพาะ (ถ้าตั้งไว้)
             onProgress: (done, total) => setDriveProg({ done, total }),
           });
-          if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง`);
+          if (largeCount) toast.warning(`${t("ไฟล์ใหญ่", "Large file")} ${largeCount} ${t("ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive แล้วลากขึ้นเอง", "files weren't auto-uploaded (over 4MB) — open the Drive folder and drag them up yourself")}`);
           if (folderLink) effUrl = folderLink;
           // path ในเครื่อง: ฐานงานพิมพ์ (ถ้าตั้ง) ไม่งั้นฐานแบรนด์ → \Printed\DTF\<โฟลเดอร์ย่อย>\<ชื่องาน>
           const base = printRoot.local_base_path.trim() || brandBase[brandId] || "";
@@ -2743,25 +2757,25 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
       if (keywords.trim()) fd.append("keywords", keywords.trim());
       if (actor) fd.append("actor", actor);
       const res = await apiFetch("/api/assets", { method: "POST", body: fd });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-      toast.success("เพิ่มงานพิมพ์แล้ว"); onDone();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Save failed"));
+      toast.success(t("เพิ่มงานพิมพ์แล้ว", "Print job added")); onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setBusy(false); setDriveProg({ done: 0, total: 0 }); }
   };
 
   return (
-    <ERPModal open onClose={() => !busy && onClose()} title="🖨 เพิ่มงานพิมพ์" size="lg"
-      description="รูป preview ของแผ่น + ไฟล์ .ai/.pdf สำหรับส่งพิมพ์ (ใส่ทีหลังได้) + ประเภท/ขนาดแผ่น"
+    <ERPModal open onClose={() => !busy && onClose()} title={t("🖨 เพิ่มงานพิมพ์", "🖨 Add print job")} size="lg"
+      description={t("รูป preview ของแผ่น + ไฟล์ .ai/.pdf สำหรับส่งพิมพ์ (ใส่ทีหลังได้) + ประเภท/ขนาดแผ่น", "The sheet's preview image + .ai/.pdf files for printing (can add later) + type/sheet size")}
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-[12px] text-slate-400">{driveProg.total > 0 ? `📤 อัปขึ้น Drive ${driveProg.done}/${driveProg.total}…` : "ไฟล์พิมพ์เก็บบน Drive · รูป preview เก็บในคลัง"}</span>
+          <span className="text-[12px] text-slate-400">{driveProg.total > 0 ? `${t("📤 อัปขึ้น Drive", "📤 Uploading to Drive")} ${driveProg.done}/${driveProg.total}…` : t("ไฟล์พิมพ์เก็บบน Drive · รูป preview เก็บในคลัง", "Print files stored on Drive · preview stored in the library")}</span>
           <div className="flex gap-2">
-            <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
+            <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
           </div>
         </div>
       }>
-      {busy && <LoadingOverlay message="กำลังบันทึกงานพิมพ์…" />}
+      {busy && <LoadingOverlay message={t("กำลังบันทึกงานพิมพ์…", "Saving print job…")} />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* ซ้าย: รูป preview */}
@@ -2774,12 +2788,12 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
             {preview
               // eslint-disable-next-line @next/next/no-img-element
               ? <img src={preview} alt="" className="max-w-full max-h-full object-contain" />
-              : <span className="text-[12px] text-slate-400 text-center px-4">ลากรูป preview ของแผ่นมาวาง<br />หรือคลิกเลือก</span>}
+              : <span className="text-[12px] text-slate-400 text-center px-4">{t("ลากรูป preview ของแผ่นมาวาง", "Drop the sheet's preview image here")}<br />{t("หรือคลิกเลือก", "or click to choose")}</span>}
             <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0] ?? null)} />
           </div>
           {/* ย่อขนาดรูป preview ก่อนเก็บคลัง (ไฟล์ส่งพิมพ์บน Drive ไม่โดนย่อ) */}
           <div className="mt-2">
-            <p className="text-[11px] text-slate-500 mb-1">ย่อขนาดรูป preview <span className="text-[10px] text-slate-400">(ด้านกว้าง)</span></p>
+            <p className="text-[11px] text-slate-500 mb-1">{t("ย่อขนาดรูป preview", "Shrink preview image")} <span className="text-[10px] text-slate-400">{t("(ด้านกว้าง)", "(width)")}</span></p>
             <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
               {[{ w: 800, label: "800px" }, { w: 1200, label: "1200px" }, { w: 1600, label: "1600px" }, { w: 0, label: t("ขนาดจริง", "Full size") }].map((o, i) => (
                 <button key={o.w} type="button" onClick={() => setResizeW(o.w)} disabled={busy}
@@ -2789,16 +2803,16 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
               ))}
             </div>
           </div>
-          <label className="block text-[12px] text-slate-500 mt-2">ชื่องาน
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น DTF 60cm. ช้างใบใหญ่"
+          <label className="block text-[12px] text-slate-500 mt-2">{t("ชื่องาน", "Job name")}
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("เช่น DTF 60cm. ช้างใบใหญ่", "e.g. DTF 60cm. large elephant")}
               className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
         </div>
 
         {/* ขวา: ประเภท/ขนาด/ไฟล์พิมพ์ */}
         <div className="space-y-2.5">
-          <div className="text-[12px] text-slate-500">ประเภทงานพิมพ์ <span className="text-rose-500">*</span>
+          <div className="text-[12px] text-slate-500">{t("ประเภทงานพิมพ์", "Print type")} <span className="text-rose-500">*</span>
             <div className="flex gap-1 mt-1 flex-wrap">
-              {printTypes.length === 0 && <span className="text-[11px] text-amber-600">ยังไม่มีประเภท — ตั้งค่าที่ปุ่ม ⚙️ ก่อน</span>}
+              {printTypes.length === 0 && <span className="text-[11px] text-amber-600">{t("ยังไม่มีประเภท — ตั้งค่าที่ปุ่ม ⚙️ ก่อน", "No types yet — set them up with the ⚙️ button first")}</span>}
               {printTypes.map((t) => (
                 <button key={t.id} type="button" onClick={() => pickType(t.code)}
                   className={`h-8 px-3 text-[12px] rounded-lg border ${ptype === t.code ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
@@ -2808,11 +2822,11 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
             </div>
           </div>
 
-          <div className="text-[12px] text-slate-500">ขนาดแผ่น <span className="text-[10px] text-slate-400">— เติมให้ตามประเภท แก้ได้</span>
+          <div className="text-[12px] text-slate-500">{t("ขนาดแผ่น", "Sheet size")} <span className="text-[10px] text-slate-400">{t("— เติมให้ตามประเภท แก้ได้", "— filled from the type, editable")}</span>
             <div className="mt-1"><SizesEditor value={sizes} onChange={setSizes} /></div>
           </div>
 
-          <label className="block text-[12px] text-slate-500">แบรนด์ <span className="text-[10px] text-slate-400">(ใช้จัดที่ตั้งโฟลเดอร์ Drive)</span>
+          <label className="block text-[12px] text-slate-500">{t("แบรนด์", "Brand")} <span className="text-[10px] text-slate-400">{t("(ใช้จัดที่ตั้งโฟลเดอร์ Drive)", "(used to place the Drive folder)")}</span>
             <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
               <option value="">{t("— ไม่ระบุ —", "— None —")}</option>
               {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -2824,9 +2838,9 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
               <div className="flex items-center justify-between gap-2 mb-2">
                 <div className="flex gap-1 p-0.5 bg-white rounded-lg border border-slate-200">
                   <button type="button" onClick={() => setDriveDest("new")}
-                    className={`h-7 px-2.5 text-[11px] font-medium rounded-md ${driveDest === "new" ? "bg-indigo-50 text-indigo-700" : "text-slate-500"}`}>🆕 โฟลเดอร์ใหม่</button>
+                    className={`h-7 px-2.5 text-[11px] font-medium rounded-md ${driveDest === "new" ? "bg-indigo-50 text-indigo-700" : "text-slate-500"}`}>{t("🆕 โฟลเดอร์ใหม่", "🆕 New folder")}</button>
                   <button type="button" onClick={() => setDriveDest("shared")}
-                    className={`h-7 px-2.5 text-[11px] font-medium rounded-md ${driveDest === "shared" ? "bg-indigo-50 text-indigo-700" : "text-slate-500"}`}>📎 ใช้โฟลเดอร์เดียวกับงานที่มีแล้ว</button>
+                    className={`h-7 px-2.5 text-[11px] font-medium rounded-md ${driveDest === "shared" ? "bg-indigo-50 text-indigo-700" : "text-slate-500"}`}>{t("📎 ใช้โฟลเดอร์เดียวกับงานที่มีแล้ว", "📎 Use an existing job's folder")}</button>
                 </div>
                 <HelpButton guideKey="drive-link" />
               </div>
@@ -2836,40 +2850,40 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
                   {sharedFolder ? (
                     <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 px-2 py-1.5">
                       <span className="text-[12px] text-slate-700 flex-1 min-w-0 truncate">📁 {sharedFolder.label}</span>
-                      <button type="button" onClick={() => setSharePickerOpen(true)} className="text-[11px] text-indigo-600 hover:underline shrink-0">เปลี่ยน</button>
+                      <button type="button" onClick={() => setSharePickerOpen(true)} className="text-[11px] text-indigo-600 hover:underline shrink-0">{t("เปลี่ยน", "Change")}</button>
                     </div>
                   ) : (
-                    <button type="button" onClick={() => setSharePickerOpen(true)} className="w-full h-9 text-[12px] border border-dashed border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50">＋ เลือกงานพิมพ์ที่มีโฟลเดอร์แล้ว</button>
+                    <button type="button" onClick={() => setSharePickerOpen(true)} className="w-full h-9 text-[12px] border border-dashed border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50">{t("＋ เลือกงานพิมพ์ที่มีโฟลเดอร์แล้ว", "＋ Pick a print job that has a folder")}</button>
                   )}
-                  <p className="text-[10px] text-slate-500">ไฟล์ของงานนี้จะไปอยู่ในโฟลเดอร์เดียวกับงานที่เลือก (ไม่สร้างโฟลเดอร์ใหม่)</p>
+                  <p className="text-[10px] text-slate-500">{t("ไฟล์ของงานนี้จะไปอยู่ในโฟลเดอร์เดียวกับงานที่เลือก (ไม่สร้างโฟลเดอร์ใหม่)", "This job's files will go into the same folder as the selected job (no new folder created)")}</p>
                 </div>
               ) : (
               <>
               <label className="flex items-start gap-2 cursor-pointer">
                 <input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
-                <span className="text-[12px] text-slate-700">🗂️ <b>สร้างโฟลเดอร์ Drive ให้อัตโนมัติ</b> + ก็อปรูป preview เข้าไป</span>
+                <span className="text-[12px] text-slate-700">🗂️ <b>{t("สร้างโฟลเดอร์ Drive ให้อัตโนมัติ", "Auto-create a Drive folder")}</b> {t("+ ก็อปรูป preview เข้าไป", "+ copy the preview into it")}</span>
               </label>
 
               {/* โฟลเดอร์ที่จะเก็บ (แก้เองได้) + โฟลเดอร์ย่อยเลือกได้ + ตัวอย่างที่อยู่เต็ม */}
               {autoFolder && (
                 <div className="mt-2 space-y-1.5">
-                  <label className="block text-[11px] text-slate-500">📁 โฟลเดอร์ Drive ที่จะเก็บ <span className="text-[10px] text-slate-400">(ใส่ / เพื่อซ้อนชั้น · เว้นว่าง = ใช้รหัสประเภท)</span>
-                    <input value={subpath} onChange={(e) => { setSubpath(e.target.value); setSubpathTouched(true); }} placeholder="เช่น Printed/DTF"
+                  <label className="block text-[11px] text-slate-500">{t("📁 โฟลเดอร์ Drive ที่จะเก็บ", "📁 Drive folder to store in")} <span className="text-[10px] text-slate-400">{t("(ใส่ / เพื่อซ้อนชั้น · เว้นว่าง = ใช้รหัสประเภท)", "(use / to nest · blank = use the type code)")}</span>
+                    <input value={subpath} onChange={(e) => { setSubpath(e.target.value); setSubpathTouched(true); }} placeholder={t("เช่น Printed/DTF", "e.g. Printed/DTF")}
                       className="mt-0.5 w-full h-8 px-2.5 text-[12px] border border-slate-200 rounded-lg font-mono" /></label>
-                  <div className="text-[11px] text-slate-500">📂 โฟลเดอร์ย่อย <span className="text-[10px] text-slate-400">(เลือกที่มี หรือพิมพ์ใหม่ · เว้นว่าง = ไฟล์ลงใน {subpath.trim() || ptype || "DTF"} ตรง ๆ)</span>
+                  <div className="text-[11px] text-slate-500">{t("📂 โฟลเดอร์ย่อย", "📂 Subfolder")} <span className="text-[10px] text-slate-400">{t("(เลือกที่มี หรือพิมพ์ใหม่ · เว้นว่าง = ไฟล์ลงใน", "(pick existing or type new · blank = files go directly into")} {subpath.trim() || ptype || "DTF"} {t("ตรง ๆ)", ")")}</span>
                     <div className="relative mt-0.5">
                       <input value={groupFolder} onChange={(e) => { setGroupFolder(e.target.value); setGroupOpen(true); }}
                         onFocus={() => setGroupOpen(true)} onBlur={() => setTimeout(() => setGroupOpen(false), 150)}
-                        placeholder="เช่น goodgoods" className="w-full h-8 pl-2.5 pr-7 text-[12px] border border-slate-200 rounded-lg font-mono" />
+                        placeholder={t("เช่น goodgoods", "e.g. goodgoods")} className="w-full h-8 pl-2.5 pr-7 text-[12px] border border-slate-200 rounded-lg font-mono" />
                       <button type="button" onMouseDown={(e) => { e.preventDefault(); setGroupOpen((v) => !v); }}
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[10px]" title="เลือกโฟลเดอร์ที่มี">▾</button>
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[10px]" title={t("เลือกโฟลเดอร์ที่มี", "Pick an existing folder")}>▾</button>
                       {groupOpen && (() => {
                         const q = groupFolder.trim().toLowerCase();
                         const opts = groupOptions.filter((f) => !q || f.toLowerCase().includes(q));
                         return (
                           <div className="absolute z-20 left-0 right-0 mt-1 max-h-44 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg py-1">
-                            {groupFolder.trim() && <button type="button" onMouseDown={() => { setGroupOpen(false); }} className="w-full text-left px-2.5 py-1 text-[12px] text-indigo-600 hover:bg-indigo-50">＋ สร้างใหม่ “{groupFolder.trim()}”</button>}
-                            {opts.length === 0 && !groupFolder.trim() && <p className="px-2.5 py-1.5 text-[11px] text-slate-400">ยังไม่มีโฟลเดอร์ย่อย — พิมพ์เพื่อสร้างใหม่</p>}
+                            {groupFolder.trim() && <button type="button" onMouseDown={() => { setGroupOpen(false); }} className="w-full text-left px-2.5 py-1 text-[12px] text-indigo-600 hover:bg-indigo-50">{t("＋ สร้างใหม่", "＋ Create new")} “{groupFolder.trim()}”</button>}
+                            {opts.length === 0 && !groupFolder.trim() && <p className="px-2.5 py-1.5 text-[11px] text-slate-400">{t("ยังไม่มีโฟลเดอร์ย่อย — พิมพ์เพื่อสร้างใหม่", "No subfolders yet — type to create a new one")}</p>}
                             {opts.map((f) => (
                               <button key={f} type="button" onMouseDown={() => { setGroupFolder(f); setGroupOpen(false); }}
                                 className={`w-full text-left px-2.5 py-1 text-[12px] hover:bg-slate-50 ${groupFolder === f ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-700"}`}>📂 {f}</button>
@@ -2880,19 +2894,19 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
                     </div>
                   </div>
                   <p className="text-[10px] text-slate-400 truncate">
-                    จะเก็บที่: <span className="font-mono text-slate-500">{[printRoot.folder_id ? "📁 โฟลเดอร์งานพิมพ์" : (brands.find((b) => b.id === brandId)?.name || "โฟลเดอร์แม่"), ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), ...(groupFolder.trim() ? [groupFolder.trim()] : []), title.trim() || "(ชื่องาน)"].join(" › ")}</span>
+                    {t("จะเก็บที่:", "Will store at:")} <span className="font-mono text-slate-500">{[printRoot.folder_id ? t("📁 โฟลเดอร์งานพิมพ์", "📁 Print folder") : (brands.find((b) => b.id === brandId)?.name || t("โฟลเดอร์แม่", "Parent folder")), ...(subpath.trim() || ptype || "").split(/[\\/]+/).filter(Boolean), ...(groupFolder.trim() ? [groupFolder.trim()] : []), title.trim() || t("(ชื่องาน)", "(job name)")].join(" › ")}</span>
                   </p>
                 </div>
               )}
               </>
               )}
 
-              <span className="block mt-2 text-[12px] text-slate-500">📎 ไฟล์พิมพ์ (.ai / .pdf) <span className="text-[10px] text-slate-400">— ไม่ใส่ตอนนี้ก็ได้</span></span>
+              <span className="block mt-2 text-[12px] text-slate-500">{t("📎 ไฟล์พิมพ์ (.ai / .pdf)", "📎 Print files (.ai / .pdf)")} <span className="text-[10px] text-slate-400">{t("— ไม่ใส่ตอนนี้ก็ได้", "— optional for now")}</span></span>
               <div onClick={() => srcInputRef.current?.click()}
                 onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.dataTransfer.files)]); }}
                 onDragOver={(e) => e.preventDefault()}
                 className="mt-1 border border-dashed border-slate-300 rounded-lg px-3 py-2.5 text-center text-[12px] text-slate-400 hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer">
-                + ลากไฟล์พิมพ์มาวาง หรือคลิกเลือก
+                {t("+ ลากไฟล์พิมพ์มาวาง หรือคลิกเลือก", "+ Drag print files here or click to choose")}
                 <input ref={srcInputRef} type="file" multiple className="hidden"
                   onChange={(e) => { if (e.target.files?.length) setSrcFiles((p) => [...p, ...Array.from(e.target.files!)]); e.target.value = ""; }} />
               </div>
@@ -2914,24 +2928,24 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
             <PrintItemsField value={printItems} onChange={setPrintItems} />
           </div>
 
-          <div className="text-[12px] text-slate-500">📦 Parent SKU ที่อยู่ในแผ่นนี้ <span className="text-[10px] text-slate-400">(ไม่บังคับ)</span>
+          <div className="text-[12px] text-slate-500">{t("📦 Parent SKU ที่อยู่ในแผ่นนี้", "📦 Parent SKUs on this sheet")} <span className="text-[10px] text-slate-400">{t("(ไม่บังคับ)", "(optional)")}</span>
             <div className="mt-0.5"><ParentSkuField value={parentCodes} onChange={setParentCodes} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="text-[12px] text-slate-500">อัลบั้ม
+            <div className="text-[12px] text-slate-500">{t("อัลบั้ม", "Album")}
               <div className="mt-0.5"><CollectionMultiSelect value={collectionIds} collections={cols} onChange={setCollectionIds} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
-            <div className="text-[12px] text-slate-500">แท็ก
+            <div className="text-[12px] text-slate-500">{t("แท็ก", "Tags")}
               <div className="mt-0.5"><TagPickerField value={tags} onChange={setTags} /></div></div>
           </div>
-          <label className="block text-[12px] text-slate-500">คำค้นเพิ่มเติม
-            <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="เช่น ช้าง งานพิมพ์ ลูกค้า A"
+          <label className="block text-[12px] text-slate-500">{t("คำค้นเพิ่มเติม", "Extra keywords")}
+            <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={t("เช่น ช้าง งานพิมพ์ ลูกค้า A", "e.g. elephant print customer A")}
               className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
         </div>
       </div>
 
       {/* เลือกงานพิมพ์ที่มีโฟลเดอร์แล้ว → ใช้โฟลเดอร์เดียวกัน */}
       <AssetPicker open={sharePickerOpen} onClose={() => setSharePickerOpen(false)} typeFilter="image" defaultSource="print" requireDriveFolder
-        title="เลือกงานพิมพ์ที่มีโฟลเดอร์ Drive แล้ว" contextLabel="ใช้โฟลเดอร์เดียวกับงานนี้"
+        title={t("เลือกงานพิมพ์ที่มีโฟลเดอร์ Drive แล้ว", "Select a print job that already has a Drive folder")} contextLabel={t("ใช้โฟลเดอร์เดียวกับงานนี้", "Use the same folder as this job")}
         onSelect={(assets) => { const s = assets[0]; if (s) { const m = (s.master_url ?? "").match(/\/folders\/([a-zA-Z0-9_-]+)/); if (m) setSharedFolder({ id: m[1], url: s.master_url ?? "", label: s.title || s.file_name }); } setSharePickerOpen(false); }} />
     </ERPModal>
   );
@@ -2991,13 +3005,13 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
   const pickType = (code: string) => { setPtype(code); const t = printTypes.find((x) => x.code === code); if (t?.default_w && t?.default_h) { const one: AssetSize = { label: "ขนาดแผ่น", w: Number(t.default_w), h: Number(t.default_h), unit: (t.unit || "cm") as AssetSize["unit"] }; setRows((rs) => rs.map((r) => (r.sizes.length ? r : { ...r, sizes: [one] }))); } };
 
   const save = () => {
-    if (!rows.length) { toast.error("ลากรูป preview ของแผ่นเข้ามาก่อน"); return; }
-    if (!ptype) { toast.error("เลือกประเภทงานพิมพ์ก่อน (ใช้ทั้งชุด)"); return; }
+    if (!rows.length) { toast.error(t("ลากรูป preview ของแผ่นเข้ามาก่อน", "Drag the sheets' preview images in first")); return; }
+    if (!ptype) { toast.error(t("เลือกประเภทงานพิมพ์ก่อน (ใช้ทั้งชุด)", "Select a print type first (applies to the whole batch)")); return; }
     setBusy(true);
     const jobRows = rows, jType = ptype, jSub = subOf(), jBrand = brandId, jGroup = group.trim(), jAlbums = collectionIds, jTags = tags, jResize = resizeW, jDrive = driveOn && autoFolder, jRoot = printRoot, jShared = massShared;
     const base = jRoot.local_base_path.trim() || brandBase[jBrand] || "";
     runBackgroundTask({
-      label: `เพิ่มงานพิมพ์ ${jobRows.length} งาน`,
+      label: `${t("เพิ่มงานพิมพ์", "Add print jobs")} ${jobRows.length} ${t("งาน", "jobs")}`,
       total: jobRows.length,
       run: async (report) => {
         let ok = 0, fail = 0, largeTotal = 0;
@@ -3037,7 +3051,7 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
           report(i + 1);
         }
         triggerRefresh();
-        const parts = [`เพิ่ม ${ok} งาน`]; if (fail) parts.push(`ล้มเหลว ${fail}`); if (largeTotal) parts.push(`ไฟล์ใหญ่ ${largeTotal} ต้องลากขึ้น Drive เอง`);
+        const parts = [`${t("เพิ่ม", "Added")} ${ok} ${t("งาน", "jobs")}`]; if (fail) parts.push(`${t("ล้มเหลว", "failed")} ${fail}`); if (largeTotal) parts.push(`${t("ไฟล์ใหญ่", "Large file")} ${largeTotal} ${t("ต้องลากขึ้น Drive เอง", "must be dragged to Drive manually")}`);
         return { ok, fail, message: parts.join(" · ") };
       },
     });
@@ -3045,14 +3059,14 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
   };
 
   return (
-    <ERPModal open onClose={onClose} title="📋 เพิ่มงานพิมพ์หลายงาน" size="xl"
-      description="ลากรูป preview หลายแผ่น → 1 การ์ด/แผ่น · ตั้งประเภท/แบรนด์/โฟลเดอร์ใช้ทั้งชุด · ต่อแถวใส่ชื่อ/ขนาด/Artwork ได้ → กดบันทึกแล้วปิดได้เลย งานวิ่งเบื้องหลัง"
+    <ERPModal open onClose={onClose} title={t("📋 เพิ่มงานพิมพ์หลายงาน", "📋 Add multiple print jobs")} size="xl"
+      description={t("ลากรูป preview หลายแผ่น → 1 การ์ด/แผ่น · ตั้งประเภท/แบรนด์/โฟลเดอร์ใช้ทั้งชุด · ต่อแถวใส่ชื่อ/ขนาด/Artwork ได้ → กดบันทึกแล้วปิดได้เลย งานวิ่งเบื้องหลัง", "Drag in several sheet previews → one card per sheet · set type/brand/folder for the whole batch · per row add name/size/Artwork → click save and close, the job runs in the background")}
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-[12px] text-slate-400">{rows.length} งาน · บันทึกแล้ววิ่งเบื้องหลัง (ดูสถานะมุมจอ)</span>
+          <span className="text-[12px] text-slate-400">{rows.length} {t("งาน · บันทึกแล้ววิ่งเบื้องหลัง (ดูสถานะมุมจอ)", "jobs · saving runs in the background (see status in the corner)")}</span>
           <div className="flex gap-2">
-            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={save} disabled={rows.length === 0} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">บันทึกทั้งหมด ({rows.length})</button>
+            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+            <button onClick={save} disabled={rows.length === 0} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{t("บันทึกทั้งหมด", "Save all")} ({rows.length})</button>
           </div>
         </div>
       }>
@@ -3061,16 +3075,16 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
         onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); }}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
         className={`cursor-pointer rounded-xl border-2 border-dashed flex items-center justify-center py-4 mb-3 text-center text-[12px] ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50 text-slate-400"}`}>
-        + ลากรูป preview ของแผ่นหลายไฟล์มาวาง หรือคลิกเลือก
+        {t("+ ลากรูป preview ของแผ่นหลายไฟล์มาวาง หรือคลิกเลือก", "+ Drag several sheet preview files here or click to choose")}
         <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }} />
       </div>
 
       {/* ตั้งค่าทั้งชุด */}
       <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 space-y-2.5 mb-3">
-        <p className="text-[11px] font-medium text-slate-500">ใช้กับทุกงาน</p>
-        <div className="text-[12px] text-slate-500">ประเภทงานพิมพ์ <span className="text-rose-500">*</span>
+        <p className="text-[11px] font-medium text-slate-500">{t("ใช้กับทุกงาน", "Applies to all jobs")}</p>
+        <div className="text-[12px] text-slate-500">{t("ประเภทงานพิมพ์", "Print type")} <span className="text-rose-500">*</span>
           <div className="flex gap-1 mt-1 flex-wrap">
-            {printTypes.length === 0 && <span className="text-[11px] text-amber-600">ยังไม่มีประเภท — ตั้งที่ ⚙️ ก่อน</span>}
+            {printTypes.length === 0 && <span className="text-[11px] text-amber-600">{t("ยังไม่มีประเภท — ตั้งที่ ⚙️ ก่อน", "No types yet — set them up with ⚙️ first")}</span>}
             {printTypes.map((t) => (
               <button key={t.id} type="button" onClick={() => pickType(t.code)}
                 className={`h-8 px-3 text-[12px] rounded-lg border ${ptype === t.code ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
@@ -3079,12 +3093,12 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label className="text-[12px] text-slate-500">แบรนด์
+          <label className="text-[12px] text-slate-500">{t("แบรนด์", "Brand")}
             <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
               <option value="">{t("— ไม่ระบุ —", "— None —")}</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select></label>
-          <label className="text-[12px] text-slate-500">📂 โฟลเดอร์ย่อย (ทั้งชุด)
-            <input value={group} onChange={(e) => setGroup(e.target.value)} disabled={!!massShared} list="mass-print-groups" placeholder="เช่น goodgoods (เว้นว่าง = ลงใน DTF ตรง ๆ)"
+          <label className="text-[12px] text-slate-500">{t("📂 โฟลเดอร์ย่อย (ทั้งชุด)", "📂 Subfolder (whole batch)")}
+            <input value={group} onChange={(e) => setGroup(e.target.value)} disabled={!!massShared} list="mass-print-groups" placeholder={t("เช่น goodgoods (เว้นว่าง = ลงใน DTF ตรง ๆ)", "e.g. goodgoods (blank = go directly into DTF)")}
               className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg font-mono disabled:bg-slate-100" />
             <datalist id="mass-print-groups">{groupOptions.map((f) => <option key={f} value={f} />)}</datalist></label>
         </div>
@@ -3093,24 +3107,24 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
           <div className="flex items-center gap-2 flex-wrap">
             {massShared ? (
               <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 px-2 py-1.5 text-[12px] text-slate-700">
-                <span>📎 ทุกงานลงโฟลเดอร์: <b>{massShared.label}</b></span>
-                <button type="button" onClick={() => setMassSharePickerOpen(true)} className="text-[11px] text-indigo-600 hover:underline">เปลี่ยน</button>
-                <button type="button" onClick={() => setMassShared(null)} className="text-[11px] text-slate-400 hover:text-red-500">✕ ยกเลิก</button>
+                <span>{t("📎 ทุกงานลงโฟลเดอร์:", "📎 All jobs to folder:")} <b>{massShared.label}</b></span>
+                <button type="button" onClick={() => setMassSharePickerOpen(true)} className="text-[11px] text-indigo-600 hover:underline">{t("เปลี่ยน", "Change")}</button>
+                <button type="button" onClick={() => setMassShared(null)} className="text-[11px] text-slate-400 hover:text-red-500">{t("✕ ยกเลิก", "✕ Cancel")}</button>
               </div>
             ) : (
-              <button type="button" onClick={() => setMassSharePickerOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">📎 ทุกงานลงโฟลเดอร์เดียวกับงานที่มีแล้ว</button>
+              <button type="button" onClick={() => setMassSharePickerOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">{t("📎 ทุกงานลงโฟลเดอร์เดียวกับงานที่มีแล้ว", "📎 All jobs into an existing job's folder")}</button>
             )}
           </div>
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="text-[12px] text-slate-500">อัลบั้ม<div className="mt-0.5"><CollectionMultiSelect value={collectionIds} collections={cols} onChange={setCollectionIds} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
-          <div className="text-[12px] text-slate-500">แท็ก<div className="mt-0.5"><TagPickerField value={tags} onChange={setTags} /></div></div>
+          <div className="text-[12px] text-slate-500">{t("อัลบั้ม", "Album")}<div className="mt-0.5"><CollectionMultiSelect value={collectionIds} collections={cols} onChange={setCollectionIds} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
+          <div className="text-[12px] text-slate-500">{t("แท็ก", "Tags")}<div className="mt-0.5"><TagPickerField value={tags} onChange={setTags} /></div></div>
         </div>
         <div className="flex items-center gap-3 flex-wrap pt-1 border-t border-slate-200/70">
-          {driveOn && <label className="flex items-center gap-1.5 text-[12px] text-slate-600"><input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="w-4 h-4 accent-indigo-600" />🗂️ สร้างโฟลเดอร์ Drive อัตโนมัติ</label>}
-          <span className="text-[11px] text-slate-400">ย่อ preview:</span>
+          {driveOn && <label className="flex items-center gap-1.5 text-[12px] text-slate-600"><input type="checkbox" checked={autoFolder} onChange={(e) => setAutoFolder(e.target.checked)} className="w-4 h-4 accent-indigo-600" />{t("🗂️ สร้างโฟลเดอร์ Drive อัตโนมัติ", "🗂️ Auto-create Drive folder")}</label>}
+          <span className="text-[11px] text-slate-400">{t("ย่อ preview:", "Shrink preview:")}</span>
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
-            {[{ w: 800, l: "800" }, { w: 1200, l: "1200" }, { w: 1600, l: "1600" }, { w: 0, l: "จริง" }].map((o, i) => (
+            {[{ w: 800, l: "800" }, { w: 1200, l: "1200" }, { w: 1600, l: "1600" }, { w: 0, l: t("จริง", "Full") }].map((o, i) => (
               <button key={o.w} type="button" onClick={() => setResizeW(o.w)} className={`h-7 px-2 text-[11px] ${i > 0 ? "border-l border-slate-200" : ""} ${resizeW === o.w ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500"}`}>{o.l}</button>
             ))}
           </div>
@@ -3118,7 +3132,7 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
       </div>
 
       {/* แถวรายงาน */}
-      {rows.length === 0 ? <p className="text-[12px] text-slate-400 py-4 text-center">ยังไม่มีรูป — ลากเข้ามาด้านบน</p> : (
+      {rows.length === 0 ? <p className="text-[12px] text-slate-400 py-4 text-center">{t("ยังไม่มีรูป — ลากเข้ามาด้านบน", "No images yet — drag them in above")}</p> : (
         <div className="space-y-2 max-h-[42vh] overflow-y-auto pr-1">
           {rows.map((r) => (
             <div key={r.id} className="rounded-lg border border-slate-200 bg-white p-2">
@@ -3128,14 +3142,14 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
                   ? <img src={r.preview} alt="" className="w-12 h-12 object-contain rounded border border-slate-200 bg-slate-50 shrink-0" />
                   : <span className="text-2xl shrink-0">🖨</span>}
                 <div className="flex-1 min-w-0 space-y-1">
-                  <input value={r.name} onChange={(e) => setRow(r.id, { name: e.target.value })} placeholder="ชื่องาน"
+                  <input value={r.name} onChange={(e) => setRow(r.id, { name: e.target.value })} placeholder={t("ชื่องาน", "Job name")}
                     className="w-full h-8 px-2.5 text-[12px] border border-slate-200 rounded-lg" />
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] text-slate-400 shrink-0">ขนาด</span>
+                    <span className="text-[10px] text-slate-400 shrink-0">{t("ขนาด", "Size")}</span>
                     <div className="flex-1"><SizesEditor value={r.sizes} onChange={(v) => setRow(r.id, { sizes: v })} /></div>
                   </div>
                 </div>
-                <button type="button" onClick={() => setRows((rs) => rs.filter((x) => x.id !== r.id))} className="text-slate-400 hover:text-red-500 shrink-0" title="เอาออก">✕</button>
+                <button type="button" onClick={() => setRows((rs) => rs.filter((x) => x.id !== r.id))} className="text-slate-400 hover:text-red-500 shrink-0" title={t("เอาออก", "Remove")}>✕</button>
               </div>
               <div className="pl-14">
                 <PrintItemsField value={r.printItems} onChange={(v) => setRow(r.id, { printItems: v })} />
@@ -3146,7 +3160,7 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
       )}
 
       <AssetPicker open={massSharePickerOpen} onClose={() => setMassSharePickerOpen(false)} typeFilter="image" defaultSource="print" requireDriveFolder
-        title="เลือกงานพิมพ์ที่มีโฟลเดอร์ Drive แล้ว" contextLabel="ทุกงานในชุดนี้ลงโฟลเดอร์เดียวกับงานนี้"
+        title={t("เลือกงานพิมพ์ที่มีโฟลเดอร์ Drive แล้ว", "Select a print job that already has a Drive folder")} contextLabel={t("ทุกงานในชุดนี้ลงโฟลเดอร์เดียวกับงานนี้", "All jobs in this batch into this job's folder")}
         onSelect={(assets) => { const s = assets[0]; if (s) { const m = (s.master_url ?? "").match(/\/folders\/([a-zA-Z0-9_-]+)/); if (m) setMassShared({ id: m[1], url: s.master_url ?? "", label: s.title || s.file_name }); } setMassSharePickerOpen(false); }} />
     </ERPModal>
   );
@@ -3168,7 +3182,7 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
   const saveRoot = async (next: { folder_id: string; local_base_path: string }) => {
     setRootBusy(true);
     try { await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "print_drive_root", value: next }) }); }
-    catch { toast.error("บันทึกโฟลเดอร์แม่ไม่สำเร็จ"); } finally { setRootBusy(false); }
+    catch { toast.error(t("บันทึกโฟลเดอร์แม่ไม่สำเร็จ", "Failed to save parent folder")); } finally { setRootBusy(false); }
   };
 
   const reload = async () => {
@@ -3177,96 +3191,96 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
   };
 
   const add = async () => {
-    const code = nc.code.trim(); if (!code) { toast.error("ใส่รหัสประเภทก่อน (เช่น DTF)"); return; }
+    const code = nc.code.trim(); if (!code) { toast.error(t("ใส่รหัสประเภทก่อน (เช่น DTF)", "Enter a type code first (e.g. DTF)")); return; }
     setBusy(true);
     try {
       const res = await apiFetch("/api/print-types", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, name: nc.name.trim() || code, default_w: nc.w, default_h: nc.h, unit: nc.unit, drive_subpath: nc.sub }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "เพิ่มไม่สำเร็จ");
-      setNc({ code: "", name: "", w: "", h: "", unit: "cm", sub: "" }); toast.success(`เพิ่ม “${code}” แล้ว`); await reload();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); }
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("เพิ่มไม่สำเร็จ", "Failed to add"));
+      setNc({ code: "", name: "", w: "", h: "", unit: "cm", sub: "" }); toast.success(`${t("เพิ่ม", "Added")} “${code}”`); await reload();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เพิ่มไม่สำเร็จ", "Failed to add")); }
     finally { setBusy(false); }
   };
 
-  const patch = async (t: PrintType, body: Record<string, unknown>) => {
+  const patch = async (pt: PrintType, body: Record<string, unknown>) => {
     try {
-      const res = await apiFetch(`/api/print-types/${t.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "แก้ไม่สำเร็จ");
+      const res = await apiFetch(`/api/print-types/${pt.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("แก้ไม่สำเร็จ", "Edit failed"));
       await reload();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("แก้ไม่สำเร็จ", "Edit failed")); }
   };
 
   const doDelete = async () => {
-    const t = delTarget; if (!t) return; setDelTarget(null); setBusy(true);
+    const dt = delTarget; if (!dt) return; setDelTarget(null); setBusy(true);
     try {
-      const res = await apiFetch(`/api/print-types/${t.id}`, { method: "DELETE" });
-      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || "ลบไม่สำเร็จ");
-      toast.success(`ปิดใช้ “${t.code}” แล้ว`); await reload();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+      const res = await apiFetch(`/api/print-types/${dt.id}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || t("ลบไม่สำเร็จ", "Delete failed"));
+      toast.success(`${t("ปิดใช้", "Disabled")} “${dt.code}”`); await reload();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ลบไม่สำเร็จ", "Delete failed")); }
     finally { setBusy(false); }
   };
 
   const inp = "h-8 px-2 text-[12px] border border-slate-200 rounded-lg";
   return (
-    <ERPModal open onClose={onClose} title="⚙️ ประเภทงานพิมพ์" size="md"
-      description="ตั้งขนาดเริ่มต้นต่อประเภท — เลือกประเภทตอนเพิ่มงานพิมพ์แล้วจะเติมขนาดให้เอง (แก้ทับได้)"
-      footer={<div className="flex justify-end w-full"><button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button></div>}>
+    <ERPModal open onClose={onClose} title={t("⚙️ ประเภทงานพิมพ์", "⚙️ Print types")} size="md"
+      description={t("ตั้งขนาดเริ่มต้นต่อประเภท — เลือกประเภทตอนเพิ่มงานพิมพ์แล้วจะเติมขนาดให้เอง (แก้ทับได้)", "Set a default size per type — picking a type when adding a print job fills in the size for you (overridable)")}
+      footer={<div className="flex justify-end w-full"><button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button></div>}>
       {/* โฟลเดอร์แม่ของงานพิมพ์ — งานพิมพ์ทุกชิ้นไปที่นี่ (ไม่สนแบรนด์) · ตั้งแล้ว = readonly + ปุ่มแก้ */}
       <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5 mb-3">
         <div className="flex items-center justify-between gap-1.5 mb-1">
-          <p className="text-[12px] font-medium text-slate-700 flex items-center gap-1.5">📁 โฟลเดอร์แม่ของงานพิมพ์ <HelpButton guideKey="drive-setup" label="ตั้งค่า Drive" /></p>
-          {root.folder_id && !rootEdit && <button type="button" onClick={() => setRootEdit(true)} className="text-[11px] text-indigo-600 hover:underline shrink-0">✏️ แก้ไข</button>}
+          <p className="text-[12px] font-medium text-slate-700 flex items-center gap-1.5">{t("📁 โฟลเดอร์แม่ของงานพิมพ์", "📁 Print jobs parent folder")} <HelpButton guideKey="drive-setup" label={t("ตั้งค่า Drive", "Set up Drive")} /></p>
+          {root.folder_id && !rootEdit && <button type="button" onClick={() => setRootEdit(true)} className="text-[11px] text-indigo-600 hover:underline shrink-0">{t("✏️ แก้ไข", "✏️ Edit")}</button>}
         </div>
         {root.folder_id && !rootEdit ? (
           // โหมดอ่าน — ตั้งค่าแล้ว
           <div className="space-y-0.5">
             <p className="text-[11px] text-slate-500">Folder ID: <span className="font-mono text-slate-700">{root.folder_id}</span></p>
-            {root.local_base_path && <p className="text-[11px] text-slate-500">path ในเครื่อง: <span className="font-mono text-slate-700">{root.local_base_path}</span></p>}
-            <p className="text-[10px] text-emerald-600 mt-0.5">✓ งานพิมพ์ทุกชิ้นจะเก็บใต้โฟลเดอร์นี้ (ไม่แยกตามแบรนด์)</p>
+            {root.local_base_path && <p className="text-[11px] text-slate-500">{t("path ในเครื่อง:", "Local path:")} <span className="font-mono text-slate-700">{root.local_base_path}</span></p>}
+            <p className="text-[10px] text-emerald-600 mt-0.5">{t("✓ งานพิมพ์ทุกชิ้นจะเก็บใต้โฟลเดอร์นี้ (ไม่แยกตามแบรนด์)", "✓ Every print job is stored under this folder (not split by brand)")}</p>
           </div>
         ) : (
           // โหมดแก้ไข
           <>
-            <p className="text-[10px] text-slate-500 mb-1.5">งานพิมพ์ทุกชิ้นจะเก็บใต้โฟลเดอร์นี้ (ไม่แยกตามแบรนด์) · ต้องแชร์โฟลเดอร์นี้ให้ Service Account เดิมก่อน</p>
-            <label className="block text-[11px] text-slate-500">Folder ID <span className="text-slate-300">(จาก URL หลัง /folders/)</span>
+            <p className="text-[10px] text-slate-500 mb-1.5">{t("งานพิมพ์ทุกชิ้นจะเก็บใต้โฟลเดอร์นี้ (ไม่แยกตามแบรนด์) · ต้องแชร์โฟลเดอร์นี้ให้ Service Account เดิมก่อน", "Every print job is stored under this folder (not split by brand) · share this folder with the same Service Account first")}</p>
+            <label className="block text-[11px] text-slate-500">Folder ID <span className="text-slate-300">{t("(จาก URL หลัง /folders/)", "(from the URL after /folders/)")}</span>
               <input defaultValue={root.folder_id} onBlur={(e) => { const v = e.target.value.trim(); if (v !== root.folder_id) { const nx = { ...root, folder_id: v }; setRoot(nx); void saveRoot(nx); } }}
-                placeholder="เช่น 1mCsDfY-E15CHm46_Vvwg9U" className={`${inp} font-mono mt-0.5`} /></label>
-            <label className="block text-[11px] text-slate-500 mt-1.5">path ในเครื่อง <span className="text-slate-300">(ถ้ามี — ไว้ทำ path ต้นฉบับ)</span>
+                placeholder={t("เช่น 1mCsDfY-E15CHm46_Vvwg9U", "e.g. 1mCsDfY-E15CHm46_Vvwg9U")} className={`${inp} font-mono mt-0.5`} /></label>
+            <label className="block text-[11px] text-slate-500 mt-1.5">{t("path ในเครื่อง", "Local path")} <span className="text-slate-300">{t("(ถ้ามี — ไว้ทำ path ต้นฉบับ)", "(if any — used to build the source path)")}</span>
               <input defaultValue={root.local_base_path} onBlur={(e) => { const v = e.target.value.trim(); if (v !== root.local_base_path) { const nx = { ...root, local_base_path: v }; setRoot(nx); void saveRoot(nx); } }}
-                placeholder="เช่น G:\Shared drives\Printed" className={`${inp} font-mono mt-0.5`} /></label>
+                placeholder={t("เช่น G:\Shared drives\Printed", "e.g. G:\Shared drives\Printed")} className={`${inp} font-mono mt-0.5`} /></label>
             <div className="flex items-center justify-between mt-1">
-              {rootBusy ? <span className="text-[10px] text-indigo-500">กำลังบันทึก…</span>
-                : !root.folder_id ? <span className="text-[10px] text-amber-600">⚠ ยังไม่ตั้ง — งานพิมพ์จะไปโฟลเดอร์แม่หลัก/ตามแบรนด์แทน</span>
+              {rootBusy ? <span className="text-[10px] text-indigo-500">{t("กำลังบันทึก…", "Saving…")}</span>
+                : !root.folder_id ? <span className="text-[10px] text-amber-600">{t("⚠ ยังไม่ตั้ง — งานพิมพ์จะไปโฟลเดอร์แม่หลัก/ตามแบรนด์แทน", "⚠ Not set yet — print jobs will go to the main parent folder / by brand instead")}</span>
                 : <span />}
-              {root.folder_id && <button type="button" onClick={() => setRootEdit(false)} className="text-[11px] text-slate-500 hover:text-slate-700">เสร็จ</button>}
+              {root.folder_id && <button type="button" onClick={() => setRootEdit(false)} className="text-[11px] text-slate-500 hover:text-slate-700">{t("เสร็จ", "Done")}</button>}
             </div>
           </>
         )}
       </div>
 
       <div className="space-y-1.5 mb-3">
-        {rows.length === 0 && <p className="text-[12px] text-slate-400 py-3 text-center">ยังไม่มีประเภทงานพิมพ์</p>}
+        {rows.length === 0 && <p className="text-[12px] text-slate-400 py-3 text-center">{t("ยังไม่มีประเภทงานพิมพ์", "No print types yet")}</p>}
         {rows.map((pt) => (
           <div key={pt.id} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
             <div className="flex items-center gap-2">
               <span className="w-20 font-mono text-[12px] text-slate-700 truncate">{pt.code}</span>
               <input defaultValue={pt.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== pt.name) void patch(pt, { name: v }); }}
-                className={`${inp} flex-1`} placeholder="ชื่อที่แสดง" />
+                className={`${inp} flex-1`} placeholder={t("ชื่อที่แสดง", "Display name")} />
               <div className="flex items-center gap-1">
-                <input defaultValue={pt.default_w ?? ""} inputMode="decimal" placeholder="กว้าง"
+                <input defaultValue={pt.default_w ?? ""} inputMode="decimal" placeholder={t("กว้าง", "Width")}
                   onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(pt.default_w ?? "")) void patch(pt, { default_w: v }); }}
                   className={`${inp} w-12 text-center`} />
                 <span className="text-slate-300 text-[11px]">×</span>
-                <input defaultValue={pt.default_h ?? ""} inputMode="decimal" placeholder="สูง"
+                <input defaultValue={pt.default_h ?? ""} inputMode="decimal" placeholder={t("สูง", "Height")}
                   onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(pt.default_h ?? "")) void patch(pt, { default_h: v }); }}
                   className={`${inp} w-12 text-center`} />
                 <span className="text-[10px] text-slate-400">{pt.unit}</span>
               </div>
-              <button onClick={() => setDelTarget(pt)} disabled={busy} className="w-6 text-slate-400 hover:text-red-500 text-sm" title="ปิดใช้ประเภทนี้">🗑</button>
+              <button onClick={() => setDelTarget(pt)} disabled={busy} className="w-6 text-slate-400 hover:text-red-500 text-sm" title={t("ปิดใช้ประเภทนี้", "Disable this type")}>🗑</button>
             </div>
             <div className="flex items-center gap-1.5 mt-1 pl-[5.5rem]">
-              <span className="text-[10px] text-slate-400 shrink-0">📁 โฟลเดอร์ Drive</span>
-              <input defaultValue={pt.drive_subpath ?? ""} placeholder="เช่น Printed/DTF (เว้นว่าง = ใช้รหัส)"
+              <span className="text-[10px] text-slate-400 shrink-0">{t("📁 โฟลเดอร์ Drive", "📁 Drive folder")}</span>
+              <input defaultValue={pt.drive_subpath ?? ""} placeholder={t("เช่น Printed/DTF (เว้นว่าง = ใช้รหัส)", "e.g. Printed/DTF (blank = use the code)")}
                 onBlur={(e) => { const v = e.target.value.trim(); if (v !== (pt.drive_subpath ?? "")) void patch(pt, { drive_subpath: v }); }}
                 className={`${inp} flex-1 font-mono`} />
             </div>
@@ -3275,23 +3289,23 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
       </div>
 
       <div className="rounded-lg border border-dashed border-slate-300 p-2.5">
-        <p className="text-[11px] font-medium text-slate-500 mb-1.5">+ เพิ่มประเภทใหม่</p>
+        <p className="text-[11px] font-medium text-slate-500 mb-1.5">{t("+ เพิ่มประเภทใหม่", "+ Add a new type")}</p>
         <div className="flex items-center gap-2">
-          <input value={nc.code} onChange={(e) => setNc((s) => ({ ...s, code: e.target.value }))} placeholder="รหัส เช่น SCREEN" className={`${inp} w-24`} />
-          <input value={nc.name} onChange={(e) => setNc((s) => ({ ...s, name: e.target.value }))} placeholder="ชื่อที่แสดง" className={`${inp} flex-1`} />
-          <input value={nc.w} onChange={(e) => setNc((s) => ({ ...s, w: e.target.value }))} inputMode="decimal" placeholder="กว้าง" className={`${inp} w-14 text-center`} />
+          <input value={nc.code} onChange={(e) => setNc((s) => ({ ...s, code: e.target.value }))} placeholder={t("รหัส เช่น SCREEN", "code, e.g. SCREEN")} className={`${inp} w-24`} />
+          <input value={nc.name} onChange={(e) => setNc((s) => ({ ...s, name: e.target.value }))} placeholder={t("ชื่อที่แสดง", "Display name")} className={`${inp} flex-1`} />
+          <input value={nc.w} onChange={(e) => setNc((s) => ({ ...s, w: e.target.value }))} inputMode="decimal" placeholder={t("กว้าง", "Width")} className={`${inp} w-14 text-center`} />
           <span className="text-slate-300 text-[11px]">×</span>
-          <input value={nc.h} onChange={(e) => setNc((s) => ({ ...s, h: e.target.value }))} inputMode="decimal" placeholder="สูง" className={`${inp} w-14 text-center`} />
+          <input value={nc.h} onChange={(e) => setNc((s) => ({ ...s, h: e.target.value }))} inputMode="decimal" placeholder={t("สูง", "Height")} className={`${inp} w-14 text-center`} />
         </div>
         <div className="flex items-center gap-2 mt-1.5">
-          <input value={nc.sub} onChange={(e) => setNc((s) => ({ ...s, sub: e.target.value }))} placeholder="📁 โฟลเดอร์ Drive เช่น Printed/SCREEN" className={`${inp} flex-1 font-mono`} />
-          <button onClick={add} disabled={busy} className="h-8 px-3 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">เพิ่ม</button>
+          <input value={nc.sub} onChange={(e) => setNc((s) => ({ ...s, sub: e.target.value }))} placeholder={t("📁 โฟลเดอร์ Drive เช่น Printed/SCREEN", "📁 Drive folder, e.g. Printed/SCREEN")} className={`${inp} flex-1 font-mono`} />
+          <button onClick={add} disabled={busy} className="h-8 px-3 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{t("เพิ่ม", "Add")}</button>
         </div>
       </div>
 
       {delTarget && (
-        <ConfirmDialog open title="ปิดใช้ประเภทนี้?" variant="danger" confirmText="ปิดใช้"
-          message={`“${delTarget.code}” จะไม่โผล่ให้เลือกอีก · งานพิมพ์เดิมที่ใช้ประเภทนี้ยังอยู่ครบ`}
+        <ConfirmDialog open title={t("ปิดใช้ประเภทนี้?", "Disable this type?")} variant="danger" confirmText={t("ปิดใช้", "Disable")}
+          message={`“${delTarget.code}” ${t("จะไม่โผล่ให้เลือกอีก · งานพิมพ์เดิมที่ใช้ประเภทนี้ยังอยู่ครบ", "won't appear for selection anymore · existing print jobs using this type stay intact")}`}
           onConfirm={doDelete} onClose={() => setDelTarget(null)} />
       )}
     </ERPModal>
@@ -3320,44 +3334,44 @@ function ManageTypesModal({ types, onClose, onChanged }: { types: LookupItem[]; 
     try {
       const r = await apiFetch("/api/lookups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lookup_type: "artwork_type", name: n }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
-      setNewName(""); await reload(); toast.success("เพิ่มชนิดแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); } finally { setBusy(false); }
+      setNewName(""); await reload(); toast.success(t("เพิ่มชนิดแล้ว", "Type added"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เพิ่มไม่สำเร็จ", "Failed to add")); } finally { setBusy(false); }
   };
   const rename = async (id: string, name: string) => {
     const n = name.trim(); if (!n) return;
     try {
       const r = await apiFetch(`/api/lookups/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) });
       const j = await r.json(); if (j.error) throw new Error(j.error); await reload();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("แก้ไม่สำเร็จ", "Edit failed")); }
   };
   const del = async (id: string) => {
     try {
       const r = await apiFetch(`/api/lookups/${id}`, { method: "DELETE" });
       const j = await r.json().catch(() => ({})); if (j.error) throw new Error(j.error);
-      await reload(); toast.success("ลบแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+      await reload(); toast.success(t("ลบแล้ว", "Deleted"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ลบไม่สำเร็จ", "Delete failed")); }
   };
 
   return (
-    <ERPModal open onClose={onClose} title="จัดการชนิด Artwork" size="sm"
-      footer={<div className="flex justify-end w-full"><button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button></div>}>
+    <ERPModal open onClose={onClose} title={t("จัดการชนิด Artwork", "Manage Artwork types")} size="sm"
+      footer={<div className="flex justify-end w-full"><button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button></div>}>
       <div className="flex flex-col gap-1.5 mb-3">
         {items.map((it) => (
           <div key={it.id} className="flex items-center gap-2">
             <input defaultValue={it.name}
               onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== it.name) void rename(it.id, v); }}
               className="flex-1 h-8 px-2 text-[13px] border border-slate-200 rounded-lg" />
-            <button onClick={() => del(it.id)} className="h-8 px-2.5 text-[12px] text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50">ลบ</button>
+            <button onClick={() => del(it.id)} className="h-8 px-2.5 text-[12px] text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50">{t("ลบ", "Delete")}</button>
           </div>
         ))}
-        {items.length === 0 && <p className="text-[12px] text-slate-400">ยังไม่มีชนิด — เพิ่มด้านล่าง</p>}
+        {items.length === 0 && <p className="text-[12px] text-slate-400">{t("ยังไม่มีชนิด — เพิ่มด้านล่าง", "No types yet — add one below")}</p>}
       </div>
       <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
-        <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder="ชนิดใหม่ เช่น แบนเนอร์"
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder={t("ชนิดใหม่ เช่น แบนเนอร์", "new type, e.g. banner")}
           className="flex-1 h-8 px-2 text-[13px] border border-slate-200 rounded-lg" />
-        <button onClick={add} disabled={busy || !newName.trim()} className="h-8 px-3 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">＋ เพิ่ม</button>
+        <button onClick={add} disabled={busy || !newName.trim()} className="h-8 px-3 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{t("＋ เพิ่ม", "＋ Add")}</button>
       </div>
-      <p className="text-[10px] text-slate-400 mt-2">แก้ชื่อ: พิมพ์ทับในช่องแล้วคลิกที่อื่นเพื่อบันทึก · ลบแล้วงานเดิมยังเก็บชื่อชนิดไว้</p>
+      <p className="text-[10px] text-slate-400 mt-2">{t("แก้ชื่อ: พิมพ์ทับในช่องแล้วคลิกที่อื่นเพื่อบันทึก · ลบแล้วงานเดิมยังเก็บชื่อชนิดไว้", "Rename: type over the field then click elsewhere to save · after deleting, existing items keep their type name")}</p>
     </ERPModal>
   );
 }
@@ -3365,7 +3379,7 @@ function ManageTypesModal({ types, onClose, onChanged }: { types: LookupItem[]; 
 // ── หาโฟลเดอร์ Drive ที่ยังไม่เชื่อม → สแกน → กรอกรายละเอียด → นำเข้า ──
 type ScanFolder = { folderId: string; folderName: string; folderLink: string; typeSubName: string; artworkType: string; master_path: string; newCount?: number; total?: number };
 type ImportRow = { key: string; folderName: string; folderLink: string; master_path: string; fileId: string; fileName: string; title: string; types: string[]; sizes: AssetSize[]; parentCodes: string[] };
-function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[]; onClose: () => void; onDone: () => void }) {
+function DriveScanModal({ artTypes, presetFolder, onClose, onDone }: { artTypes: LookupItem[]; presetFolder?: { folderId: string; folderName: string; folderLink: string } | null; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   const [brandId, setBrandId] = useState("");
@@ -3374,8 +3388,8 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
   const [folders, setFolders] = useState<ScanFolder[] | null>(null);
   const [scanned, setScanned] = useState(0);
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [step, setStep] = useState<"scan" | "form">("scan");
-  const [loadingImgs, setLoadingImgs] = useState(false);
+  const [step, setStep] = useState<"scan" | "form">(presetFolder ? "form" : "scan");   // preset = เจาะโฟลเดอร์เดียว ข้ามขั้นสแกน
+  const [loadingImgs, setLoadingImgs] = useState(!!presetFolder);
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [importing, setImporting] = useState(false);
   const [artTypeList, setArtTypeList] = useState<LookupItem[]>(artTypes);
@@ -3391,25 +3405,23 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
   useEffect(() => { setArtTypeList((cur) => { const s = new Set(cur.map((t) => t.name)); return [...cur, ...artTypes.filter((t) => !s.has(t.name))]; }); }, [artTypes]);
 
   const scan = async () => {
-    if (!brandId) { toast.error("เลือกแบรนด์ก่อน"); return; }
+    if (!brandId) { toast.error(t("เลือกแบรนด์ก่อน", "Select a brand first")); return; }
     setScanning(true); setFolders(null); setSel(new Set()); setStep("scan");
     try {
       const res = await apiFetch("/api/assets/drive-scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: brandId }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "สแกนไม่สำเร็จ");
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("สแกนไม่สำเร็จ", "Scan failed"));
       const fs = (j.folders ?? []) as ScanFolder[];
       setFolders(fs); setScanned(j.scanned ?? 0); setSel(new Set(fs.map((f) => f.folderId)));
-    } catch (e) { toast.error(e instanceof Error ? e.message : "สแกนไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("สแกนไม่สำเร็จ", "Scan failed")); }
     finally { setScanning(false); }
   };
 
-  // ไปขั้นกรอกรายละเอียด: ดึงรูปในโฟลเดอร์ที่เลือก → สร้างแถวฟอร์ม (1 แถว/รูป)
-  const toForm = async () => {
-    const picked = (folders ?? []).filter((f) => sel.has(f.folderId));
-    if (!picked.length) { toast.error("เลือกโฟลเดอร์ก่อน"); return; }
+  // ดึงรูปในโฟลเดอร์ที่เลือก (เฉพาะที่ยังไม่ลงคลัง) → สร้างแถวฟอร์ม (1 แถว/รูป) · คืน true ถ้ามีรูปใหม่
+  const buildRows = async (picked: ScanFolder[]): Promise<boolean> => {
     setLoadingImgs(true);
     try {
       const res = await apiFetch("/api/drive/folder-images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder_ids: picked.map((f) => f.folderId), only_new: true }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ดึงรูปไม่สำเร็จ");
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || t("ดึงรูปไม่สำเร็จ", "Failed to fetch images"));
       const imgMap = (j.images ?? {}) as Record<string, { id: string; name: string; width?: number; height?: number }[]>;
       const r2 = (v: number) => Math.round(v * 100) / 100;
       const sizesFrom = (w?: number, h?: number): AssetSize[] => (w && h) ? [{ label: "ขนาด #1", w: r2(w / DEFAULT_DPI * 2.54), h: r2(h / DEFAULT_DPI * 2.54), unit: "cm" }] : [];   // px÷300×2.54 (งาน export 300 DPI)
@@ -3417,17 +3429,36 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
       for (const f of picked) for (const img of (imgMap[f.folderId] ?? [])) {
         newRows.push({ key: `r${n++}`, folderName: f.folderName, folderLink: f.folderLink, master_path: f.master_path, fileId: img.id, fileName: img.name, title: img.name.replace(/\.[^.]+$/, "").trim() || f.folderName, types: f.artworkType ? [f.artworkType] : [], sizes: sizesFrom(img.width, img.height), parentCodes: [] });
       }
-      if (!newRows.length) { toast.error("ไม่มีรูปใหม่ที่ยังไม่ลงในโฟลเดอร์ที่เลือก"); return; }
-      setRows(newRows); setStep("form");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ดึงรูปไม่สำเร็จ"); }
+      if (!newRows.length) { toast.error(t("ไม่มีรูปใหม่ที่ยังไม่ลงในโฟลเดอร์นี้ — ลงครบแล้ว", "No new images left to add in this folder — all done")); return false; }
+      setRows(newRows); setStep("form"); return true;
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ดึงรูปไม่สำเร็จ", "Failed to fetch images")); return false; }
     finally { setLoadingImgs(false); }
   };
+
+  // ไปขั้นกรอกรายละเอียด (โหมดสแกนทั้งแบรนด์): เอาโฟลเดอร์ที่ติ๊กไว้
+  const toForm = async () => {
+    const picked = (folders ?? []).filter((f) => sel.has(f.folderId));
+    if (!picked.length) { toast.error(t("เลือกโฟลเดอร์ก่อน", "Select a folder first")); return; }
+    await buildRows(picked);
+  };
+
+  // โหมดเจาะโฟลเดอร์เดียว (จากมุมมองโฟลเดอร์) → ดึงรูปยังไม่ลงของโฟลเดอร์นั้นทันที ไม่มีรูปใหม่ก็ปิด
+  const presetRan = useRef(false);
+  useEffect(() => {
+    if (!presetFolder || presetRan.current) return;
+    presetRan.current = true;
+    (async () => {
+      const ok = await buildRows([{ folderId: presetFolder.folderId, folderName: presetFolder.folderName, folderLink: presetFolder.folderLink, typeSubName: "", artworkType: "", master_path: "" }]);
+      if (!ok) onClose();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetFolder]);
 
   const setRow = (key: string, patch: Partial<ImportRow>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
   // นำเข้า — ยิงทีละชุด (4 รูป/รอบ) กัน timeout รูปเยอะ · อ่าน response แบบกัน JSON พัง
   const doImport = async () => {
-    if (!rows.length) { toast.error("ไม่มีรายการ"); return; }
+    if (!rows.length) { toast.error(t("ไม่มีรายการ", "Nothing to import")); return; }
     setImporting(true);
     const items = rows.map((r) => ({ fileId: r.fileId, fileName: r.fileName, folderLink: r.folderLink, master_path: r.master_path, title: r.title, artwork_types: r.types, sizes: r.sizes, parent_sku_codes: r.parentCodes }));
     const CHUNK = 4;
@@ -3440,16 +3471,16 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
         const txt = await res.text();
         let j: { imported?: number; failed?: number; error?: string };
         try { j = txt ? JSON.parse(txt) : {}; }
-        catch { throw new Error(res.status >= 500 ? "เซิร์ฟเวอร์ทำงานนานเกินไป — ลองแบ่งนำเข้าน้อยลง" : (txt.slice(0, 100) || "ตอบกลับไม่ถูกต้อง")); }
-        if (!res.ok || j.error) throw new Error(j.error || "นำเข้าไม่สำเร็จ");
+        catch { throw new Error(res.status >= 500 ? t("เซิร์ฟเวอร์ทำงานนานเกินไป — ลองแบ่งนำเข้าน้อยลง", "The server took too long — try importing fewer at a time") : (txt.slice(0, 100) || t("ตอบกลับไม่ถูกต้อง", "Invalid response"))); }
+        if (!res.ok || j.error) throw new Error(j.error || t("นำเข้าไม่สำเร็จ", "Import failed"));
         imported += j.imported ?? 0; failed += j.failed ?? 0;
       }
       setImpProg(null);
-      toast.success(`นำเข้า ${imported} รูปแล้ว${failed ? ` · ล้มเหลว ${failed}` : ""}`);
+      toast.success(`${t("นำเข้า", "Imported")} ${imported} ${t("รูปแล้ว", "images")}${failed ? ` · ${t("ล้มเหลว", "failed")} ${failed}` : ""}`);
       onDone();
     } catch (e) {
       setImpProg(null);
-      toast.error(`${e instanceof Error ? e.message : "นำเข้าไม่สำเร็จ"}${imported ? ` (นำเข้าไปแล้ว ${imported} ก่อนหยุด)` : ""}`);
+      toast.error(`${e instanceof Error ? e.message : t("นำเข้าไม่สำเร็จ", "Import failed")}${imported ? ` ${t("(นำเข้าไปแล้ว", "(imported")} ${imported} ${t("ก่อนหยุด)", "before stopping)")}` : ""}`);
     } finally { setImporting(false); }
   };
 
@@ -3457,48 +3488,48 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
   const busy = scanning || loadingImgs || importing;
 
   return (
-    <ERPModal open onClose={onClose} title="🔍 หารูปใน Drive ที่ยังไม่ลงคลัง" size="xl"
-      description={step === "scan" ? "เลือกแบรนด์ → สแกน → เลือกโฟลเดอร์ที่มีรูปยังไม่ลง → กรอกรายละเอียดก่อนนำเข้า" : "กรอกรายละเอียดแต่ละรูป (เหมือนเพิ่มรูปใหม่) แล้วนำเข้า"}
+    <ERPModal open onClose={onClose} title={presetFolder ? `${t("🔍 หารูปที่ยังไม่ลงในโฟลเดอร์", "🔍 Find images not yet added in folder")} “${presetFolder.folderName}”` : t("🔍 หารูปใน Drive ที่ยังไม่ลงคลัง", "🔍 Find Drive images not yet in the library")} size="xl"
+      description={presetFolder ? t("รูปในโฟลเดอร์นี้ที่ยังไม่ได้ลงคลัง — กรอกรายละเอียดแล้วนำเข้าได้เลย", "Images in this folder not yet in the library — fill in details and import") : step === "scan" ? t("เลือกแบรนด์ → สแกน → เลือกโฟลเดอร์ที่มีรูปยังไม่ลง → กรอกรายละเอียดก่อนนำเข้า", "Pick a brand → scan → select folders with images not yet added → fill in details before importing") : t("กรอกรายละเอียดแต่ละรูป (เหมือนเพิ่มรูปใหม่) แล้วนำเข้า", "Fill in details for each image (like adding a new image), then import")}
       footer={
         step === "scan" ? (
           <div className="flex items-center justify-between w-full">
-            <span className="text-[12px] text-slate-400">{folders ? `มีรูปใหม่ ${folders.length} โฟลเดอร์ · เลือก ${sel.size}` : ""}</span>
+            <span className="text-[12px] text-slate-400">{folders ? `${t("มีรูปใหม่", "New images in")} ${folders.length} ${t("โฟลเดอร์ · เลือก", "folders · selected")} ${sel.size}` : ""}</span>
             <div className="flex gap-2">
-              <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
-              <button onClick={toForm} disabled={busy || !sel.size} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">ถัดไป — กรอกรายละเอียด ({sel.size})</button>
+              <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+              <button onClick={toForm} disabled={busy || !sel.size} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{t("ถัดไป — กรอกรายละเอียด", "Next — fill in details")} ({sel.size})</button>
             </div>
           </div>
         ) : (
           <div className="flex items-center justify-between w-full">
-            <button onClick={() => setStep("scan")} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">‹ กลับ</button>
-            <button onClick={doImport} disabled={busy || !rows.length} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{importing && <Spinner />}{importing ? "กำลังนำเข้า…" : `นำเข้า ${rows.length} รูป`}</button>
+            <button onClick={() => (presetFolder ? onClose() : setStep("scan"))} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{presetFolder ? t("ปิด", "Close") : t("‹ กลับ", "‹ Back")}</button>
+            <button onClick={doImport} disabled={busy || !rows.length} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{importing && <Spinner />}{importing ? t("กำลังนำเข้า…", "Importing…") : `${t("นำเข้า", "Import")} ${rows.length} ${t("รูป", "images")}`}</button>
           </div>
         )
       }>
-      {busy && <LoadingOverlay message={scanning ? "กำลังสแกน Drive…" : loadingImgs ? "กำลังดึงรายการรูป…" : impProg ? `กำลังนำเข้า ${impProg.done}/${impProg.total} รูป…` : "กำลังนำเข้า + ดึงรูป…"} />}
+      {busy && <LoadingOverlay message={scanning ? t("กำลังสแกน Drive…", "Scanning Drive…") : loadingImgs ? t("กำลังดึงรายการรูป…", "Loading image list…") : impProg ? `${t("กำลังนำเข้า", "Importing")} ${impProg.done}/${impProg.total} ${t("รูป…", "images…")}` : t("กำลังนำเข้า + ดึงรูป…", "Importing + fetching images…")} />}
 
       {step === "scan" ? (
         <>
           <div className="flex items-end gap-2 mb-3">
-            <label className="flex-1 text-[12px] text-slate-500">แบรนด์
+            <label className="flex-1 text-[12px] text-slate-500">{t("แบรนด์", "Brand")}
               <select value={brandId} onChange={(e) => { setBrandId(e.target.value); setFolders(null); }}
                 className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
-                <option value="">— เลือกแบรนด์ —</option>
+                <option value="">{t("— เลือกแบรนด์ —", "— Select brand —")}</option>
                 {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select></label>
-            <button onClick={scan} disabled={scanning || !brandId} className="h-9 px-4 text-sm font-medium border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-50">🔍 สแกน</button>
+            <button onClick={scan} disabled={scanning || !brandId} className="h-9 px-4 text-sm font-medium border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-50">{t("🔍 สแกน", "🔍 Scan")}</button>
           </div>
           {folders === null ? (
-            <p className="text-[12px] text-slate-400 py-8 text-center">เลือกแบรนด์แล้วกด “สแกน”</p>
+            <p className="text-[12px] text-slate-400 py-8 text-center">{t("เลือกแบรนด์แล้วกด “สแกน”", "Pick a brand then click “Scan”")}</p>
           ) : folders.length === 0 ? (
-            <p className="text-[13px] text-emerald-600 py-8 text-center">🎉 รูปในโฟลเดอร์ลงคลังครบแล้ว (สแกน {scanned} โฟลเดอร์)</p>
+            <p className="text-[13px] text-emerald-600 py-8 text-center">{t("🎉 รูปในโฟลเดอร์ลงคลังครบแล้ว (สแกน", "🎉 All images in the folders are in the library (scanned")} {scanned} {t("โฟลเดอร์)", "folders)")}</p>
           ) : (
             <>
               <div className="flex items-center justify-between mb-2">
-                <p className="text-[12px] text-slate-600">เจอ <b>{folders.length}</b> โฟลเดอร์ที่มีรูปยังไม่ลง (จาก {scanned})</p>
+                <p className="text-[12px] text-slate-600">{t("เจอ", "Found")} <b>{folders.length}</b> {t("โฟลเดอร์ที่มีรูปยังไม่ลง (จาก", "folders with images not yet added (of")} {scanned})</p>
                 <div className="flex gap-2 text-[11px]">
-                  <button onClick={() => setSel(new Set(folders.map((f) => f.folderId)))} className="text-indigo-600 hover:underline">เลือกทั้งหมด</button>
-                  <button onClick={() => setSel(new Set())} className="text-slate-500 hover:underline">ไม่เลือก</button>
+                  <button onClick={() => setSel(new Set(folders.map((f) => f.folderId)))} className="text-indigo-600 hover:underline">{t("เลือกทั้งหมด", "Select all")}</button>
+                  <button onClick={() => setSel(new Set())} className="text-slate-500 hover:underline">{t("ไม่เลือก", "Clear")}</button>
                 </div>
               </div>
               <div className="space-y-1 max-h-[46vh] overflow-y-auto pr-1">
@@ -3510,11 +3541,11 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
                       <span className="text-[10px] text-slate-400 font-mono truncate block">{f.typeSubName}{f.artworkType && f.artworkType !== f.typeSubName ? ` · ${f.artworkType}` : ""}</span>
                     </span>
                     {f.newCount != null && (
-                      <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200" title={`ในโฟลเดอร์มี ${f.total ?? "?"} รูป`}>
-                        +{f.newCount} รูปใหม่{f.total != null && f.total > f.newCount ? ` / ${f.total}` : ""}
+                      <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200" title={`${t("ในโฟลเดอร์มี", "Folder has")} ${f.total ?? "?"} ${t("รูป", "images")}`}>
+                        +{f.newCount} {t("รูปใหม่", "new")}{f.total != null && f.total > f.newCount ? ` / ${f.total}` : ""}
                       </span>
                     )}
-                    <a href={f.folderLink} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-[11px] text-indigo-600 hover:underline shrink-0">เปิด ›</a>
+                    <a href={f.folderLink} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-[11px] text-indigo-600 hover:underline shrink-0">{t("เปิด ›", "Open ›")}</a>
                   </label>
                 ))}
               </div>
@@ -3525,25 +3556,25 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
         <div className="space-y-3">
           {/* batch ใช้กับทุกรูป */}
           <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 space-y-2.5">
-            <p className="text-[11px] font-medium text-slate-500">ใช้กับทุกรูป</p>
+            <p className="text-[11px] font-medium text-slate-500">{t("ใช้กับทุกรูป", "Applies to all images")}</p>
             <div className="grid grid-cols-2 gap-3">
-              <div className="text-[12px] text-slate-500">อัลบั้ม
+              <div className="text-[12px] text-slate-500">{t("อัลบั้ม", "Album")}
                 <div className="mt-0.5"><CollectionMultiSelect value={batchAlbums} collections={cols} onChange={setBatchAlbums} onCreated={(c) => setCols((cur) => [...cur, c])} /></div></div>
-              <div className="text-[12px] text-slate-500">แท็ก
+              <div className="text-[12px] text-slate-500">{t("แท็ก", "Tags")}
                 <div className="mt-0.5"><TagPickerField value={batchTags} onChange={setBatchTags} /></div></div>
             </div>
-            <label className="block text-[12px] text-slate-500">คำค้นเพิ่มเติม (keyword)
-              <input value={batchKw} onChange={(e) => setBatchKw(e.target.value)} placeholder="เช่น flower ดอกไม้ summer"
+            <label className="block text-[12px] text-slate-500">{t("คำค้นเพิ่มเติม (keyword)", "Extra keywords")}
+              <input value={batchKw} onChange={(e) => setBatchKw(e.target.value)} placeholder={t("เช่น flower ดอกไม้ summer", "e.g. flower summer")}
                 className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 border-t border-slate-200/70">
               <div className="text-[12px] text-slate-500">
-                <div className="flex items-center gap-2">ชนิด (ใส่ทุกใบ)
-                  {batchTypes.length > 0 && rows.length > 0 && <button type="button" onClick={() => setRows((rs) => rs.map((r) => ({ ...r, types: [...batchTypes] })))} className="text-[10px] text-indigo-600 hover:underline">→ ใส่ทุกใบ</button>}</div>
+                <div className="flex items-center gap-2">{t("ชนิด (ใส่ทุกใบ)", "Type (apply to all)")}
+                  {batchTypes.length > 0 && rows.length > 0 && <button type="button" onClick={() => setRows((rs) => rs.map((r) => ({ ...r, types: [...batchTypes] })))} className="text-[10px] text-indigo-600 hover:underline">{t("→ ใส่ทุกใบ", "→ Apply to all")}</button>}</div>
                 <div className="mt-0.5"><ArtTypeMultiSelect value={batchTypes} types={artTypeList} onChange={setBatchTypes} onCreated={(t) => setArtTypeList((c) => [...c, t])} /></div>
               </div>
               <div className="text-[12px] text-slate-500">
-                <div className="flex items-center gap-2">Parent SKU (ใส่ทุกใบ)
-                  {batchParents.length > 0 && rows.length > 0 && <button type="button" onClick={() => setRows((rs) => rs.map((r) => ({ ...r, parentCodes: [...batchParents] })))} className="text-[10px] text-indigo-600 hover:underline">→ ใส่ทุกใบ</button>}</div>
+                <div className="flex items-center gap-2">Parent SKU {t("(ใส่ทุกใบ)", "(apply to all)")}
+                  {batchParents.length > 0 && rows.length > 0 && <button type="button" onClick={() => setRows((rs) => rs.map((r) => ({ ...r, parentCodes: [...batchParents] })))} className="text-[10px] text-indigo-600 hover:underline">{t("→ ใส่ทุกใบ", "→ Apply to all")}</button>}</div>
                 <div className="mt-0.5"><ParentSkuField value={batchParents} onChange={setBatchParents} /></div>
               </div>
             </div>
@@ -3558,9 +3589,9 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
                     className="w-14 h-14 object-contain rounded border border-slate-200 bg-slate-50 shrink-0" />
                   <div className="flex-1 min-w-0 space-y-1.5">
                     <div className="flex items-center gap-2">
-                      <input value={r.title} onChange={(e) => setRow(r.key, { title: e.target.value })} placeholder="ชื่อรูป"
+                      <input value={r.title} onChange={(e) => setRow(r.key, { title: e.target.value })} placeholder={t("ชื่อรูป", "Image name")}
                         className="flex-1 h-8 px-2 text-[12px] border border-slate-200 rounded" />
-                      <button type="button" onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))} title="เอาออก"
+                      <button type="button" onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))} title={t("เอาออก", "Remove")}
                         className="h-7 w-7 text-rose-500 hover:bg-rose-50 rounded shrink-0">🗑</button>
                     </div>
                     <ArtTypeMultiSelect value={r.types} types={artTypeList} onChange={(v) => setRow(r.key, { types: v })} onCreated={(t) => setArtTypeList((c) => [...c, t])} />
@@ -3568,8 +3599,8 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-2">
-                  <div><p className="text-[11px] text-slate-500 mb-1">📐 ขนาด (กว้าง × สูง)</p><SizesEditor value={r.sizes} onChange={(v) => setRow(r.key, { sizes: v })} /></div>
-                  <div><p className="text-[11px] text-slate-500 mb-1">📦 Parent SKU ที่ใช้</p><ParentSkuField value={r.parentCodes} onChange={(v) => setRow(r.key, { parentCodes: v })} /></div>
+                  <div><p className="text-[11px] text-slate-500 mb-1">{t("📐 ขนาด (กว้าง × สูง)", "📐 Size (W × H)")}</p><SizesEditor value={r.sizes} onChange={(v) => setRow(r.key, { sizes: v })} /></div>
+                  <div><p className="text-[11px] text-slate-500 mb-1">{t("📦 Parent SKU ที่ใช้", "📦 Parent SKUs used")}</p><ParentSkuField value={r.parentCodes} onChange={(v) => setRow(r.key, { parentCodes: v })} /></div>
                 </div>
               </div>
             ))}
@@ -3593,12 +3624,12 @@ function SizesEditor({ value, onChange, disabled }: { value: AssetSize[]; onChan
       {value.map((s, i) => (
         <div key={i} className="flex items-center gap-1.5">
           <input value={s.label} onChange={(e) => set(i, { label: e.target.value })} disabled={disabled}
-            placeholder="ชื่อไซส์ เช่น ป้ายใหญ่" className="flex-1 min-w-0 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
+            placeholder={t("ชื่อไซส์ เช่น ป้ายใหญ่", "size name, e.g. large label")} className="flex-1 min-w-0 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
           <input type="number" value={s.w ?? ""} onChange={(e) => set(i, { w: numOrNull(e.target.value) })} disabled={disabled}
-            placeholder="กว้าง" className="w-16 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
+            placeholder={t("กว้าง", "Width")} className="w-16 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
           <span className="text-slate-400 text-xs">×</span>
           <input type="number" value={s.h ?? ""} onChange={(e) => set(i, { h: numOrNull(e.target.value) })} disabled={disabled}
-            placeholder="สูง" className="w-16 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
+            placeholder={t("สูง", "Height")} className="w-16 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
           <select value={s.unit} onChange={(e) => set(i, { unit: e.target.value as AssetSize["unit"] })} disabled={disabled}
             className="h-8 px-1 text-[12px] border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
             {SIZE_UNITS.map((u) => <option key={u.v} value={u.v}>{t(u.label, u.en)}</option>)}
@@ -3608,7 +3639,7 @@ function SizesEditor({ value, onChange, disabled }: { value: AssetSize[]; onChan
       ))}
       {disabled && value.length === 0 && <span className="text-[11px] text-slate-400">—</span>}
       {!disabled && <button type="button" onClick={() => onChange([...value, { label: `ขนาด #${value.length + 1}`, w: null, h: null, unit: "cm" }])}
-        className="self-start text-[12px] text-indigo-600 hover:underline">＋ เพิ่มไซส์</button>}
+        className="self-start text-[12px] text-indigo-600 hover:underline">{t("＋ เพิ่มไซส์", "＋ Add size")}</button>}
     </div>
   );
 }
@@ -3625,13 +3656,13 @@ function ParentSkuField({ value, onChange, disabled }: { value: string[]; onChan
             {c}{!disabled && <button type="button" onClick={() => onChange(value.filter((x) => x !== c))} className="text-violet-300 hover:text-rose-500 leading-none">✕</button>}
           </span>
         ))}
-        {value.length === 0 && <span className="text-[11px] text-slate-400">ยังไม่ผูก Parent SKU</span>}
+        {value.length === 0 && <span className="text-[11px] text-slate-400">{t("ยังไม่ผูก Parent SKU", "No Parent SKU linked")}</span>}
         {!disabled && <button type="button" onClick={() => setOpen(true)}
-          className="text-[11px] px-2 py-0.5 rounded-full border border-violet-300 text-violet-700 hover:bg-violet-50">＋ เลือก Parent SKU</button>}
+          className="text-[11px] px-2 py-0.5 rounded-full border border-violet-300 text-violet-700 hover:bg-violet-50">{t("＋ เลือก Parent SKU", "＋ Select Parent SKU")}</button>}
       </div>
       {/* ของกลาง: ค้น + ไล่ดูทั้งหมด + แบ่งหน้า (Pager) — เลิกใช้ picker เขียนเองที่ตัดแค่ 40 รายการ */}
       <ParentSkuMultiPickerModal open={open} onClose={() => setOpen(false)} excludeCodes={value}
-        title="เลือก Parent SKU ที่ใช้ artwork นี้"
+        title={t("เลือก Parent SKU ที่ใช้ artwork นี้", "Select Parent SKUs that use this artwork")}
         onConfirm={(items) => { onChange([...new Set([...value, ...items.map((x) => x.code)])]); setOpen(false); }} />
     </div>
   );
@@ -3650,13 +3681,13 @@ function TagPickerField({ value, onChange }: { value: string[]; onChange: (v: st
             {t}<button type="button" onClick={() => onChange(value.filter((x) => x !== t))} className="hover:bg-white/25 rounded-full w-3.5 h-3.5 leading-none flex items-center justify-center">✕</button>
           </span>
         ))}
-        {value.length === 0 && <span className="text-[11px] text-slate-400">ยังไม่มีแท็ก</span>}
+        {value.length === 0 && <span className="text-[11px] text-slate-400">{t("ยังไม่มีแท็ก", "No tags yet")}</span>}
         <button type="button" onClick={() => setOpen(true)}
-          className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-300 text-indigo-700 hover:bg-indigo-50">🏷️ เลือกแท็ก</button>
+          className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-300 text-indigo-700 hover:bg-indigo-50">{t("🏷️ เลือกแท็ก", "🏷️ Select tags")}</button>
       </div>
       {open && (
-        <ERPModal open onClose={() => setOpen(false)} title="เลือก / เพิ่มแท็ก" size="sm"
-          footer={<div className="flex justify-end w-full"><button onClick={() => setOpen(false)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">เสร็จ</button></div>}>
+        <ERPModal open onClose={() => setOpen(false)} title={t("เลือก / เพิ่มแท็ก", "Select / add tags")} size="sm"
+          footer={<div className="flex justify-end w-full"><button onClick={() => setOpen(false)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">{t("เสร็จ", "Done")}</button></div>}>
           <TagChips value={value} onChange={onChange} />
         </ERPModal>
       )}
@@ -3748,62 +3779,62 @@ function DriveFolderMap() {
     const fid = (bDraft[id] ?? "").trim();
     const lbp = (bLocal[id] ?? "").trim();
     try {
-      if (!fid && !lbp) { await apiFetch(`/api/drive/brand-folders?brand_id=${encodeURIComponent(id)}`, { method: "DELETE" }); setBLabel((m) => { const n = { ...m }; delete n[id]; return n; }); toast.success("ล้างแล้ว"); return; }
+      if (!fid && !lbp) { await apiFetch(`/api/drive/brand-folders?brand_id=${encodeURIComponent(id)}`, { method: "DELETE" }); setBLabel((m) => { const n = { ...m }; delete n[id]; return n; }); toast.success(t("ล้างแล้ว", "Cleared")); return; }
       const res = await apiFetch("/api/drive/brand-folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: id, folder_id: fid, local_base_path: lbp }) });
-      const j = await res.json(); if (!res.ok || j.error) { toast.error(j.error || "บันทึกไม่สำเร็จ"); return; }
-      setBLabel((m) => ({ ...m, [id]: j.folder_label ?? "" })); toast.success(j.pathUpdated ? `บันทึกแล้ว · อัปเดต path ${j.pathUpdated} รูปตามฐานใหม่` : "บันทึกแล้ว");
-    } catch { toast.error("บันทึกไม่สำเร็จ"); }
+      const j = await res.json(); if (!res.ok || j.error) { toast.error(j.error || t("บันทึกไม่สำเร็จ", "Save failed")); return; }
+      setBLabel((m) => ({ ...m, [id]: j.folder_label ?? "" })); toast.success(j.pathUpdated ? `${t("บันทึกแล้ว · อัปเดต path", "Saved · updated path for")} ${j.pathUpdated} ${t("รูปตามฐานใหม่", "images to the new base")}` : t("บันทึกแล้ว", "Saved"));
+    } catch { toast.error(t("บันทึกไม่สำเร็จ", "Save failed")); }
   };
-  const saveType = async (t: string) => {
+  const saveType = async (at: string) => {
     try {
-      const res = await apiFetch("/api/drive/folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ artwork_type: t, subfolder_name: tDraft[t] ?? "" }) });
-      const j = await res.json(); if (!res.ok || j.error) { toast.error(j.error || "บันทึกไม่สำเร็จ"); return; }
-      const extra = [j.renamed ? `เปลี่ยนชื่อโฟลเดอร์ Drive ${j.renamed}` : "", j.pathUpdated ? `อัปเดต path ${j.pathUpdated} รูป` : ""].filter(Boolean).join(" · ");
-      toast.success(extra ? `บันทึกแล้ว · ${extra}` : "บันทึกแล้ว");
-    } catch { toast.error("บันทึกไม่สำเร็จ"); }
+      const res = await apiFetch("/api/drive/folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ artwork_type: at, subfolder_name: tDraft[at] ?? "" }) });
+      const j = await res.json(); if (!res.ok || j.error) { toast.error(j.error || t("บันทึกไม่สำเร็จ", "Save failed")); return; }
+      const extra = [j.renamed ? `${t("เปลี่ยนชื่อโฟลเดอร์ Drive", "Renamed Drive folder")} ${j.renamed}` : "", j.pathUpdated ? `${t("อัปเดต path", "updated path")} ${j.pathUpdated} ${t("รูป", "images")}` : ""].filter(Boolean).join(" · ");
+      toast.success(extra ? `${t("บันทึกแล้ว ·", "Saved ·")} ${extra}` : t("บันทึกแล้ว", "Saved"));
+    } catch { toast.error(t("บันทึกไม่สำเร็จ", "Save failed")); }
   };
   if (!driveOn) return null;
   return (
     <>
       <div className="mt-4 pt-3 border-t border-slate-100">
-        <p className="text-[12px] text-slate-600 font-medium">📁 โฟลเดอร์ตามแบรนด์ (Drive folder id + path ในเครื่อง)</p>
-        <p className="text-[11px] text-slate-400 mb-2">Drive folder id = ที่อัปไฟล์ขึ้น (ต้องแชร์ให้ service account) · path ในเครื่อง = ฐานสำหรับเติมช่อง “path ต้นฉบับ” อัตโนมัติ เช่น <span className="font-mono">G:\Shared drives\Louis Montini\[01] Catalogs\01_Assets\[01] Louis Montini</span></p>
+        <p className="text-[12px] text-slate-600 font-medium">{t("📁 โฟลเดอร์ตามแบรนด์ (Drive folder id + path ในเครื่อง)", "📁 Folder by brand (Drive folder id + local path)")}</p>
+        <p className="text-[11px] text-slate-400 mb-2">{t("Drive folder id = ที่อัปไฟล์ขึ้น (ต้องแชร์ให้ service account) · path ในเครื่อง = ฐานสำหรับเติมช่อง “path ต้นฉบับ” อัตโนมัติ เช่น", "Drive folder id = where files are uploaded (must be shared with the service account) · local path = base for auto-filling the “source path” field, e.g.")} <span className="font-mono">G:\Shared drives\Louis Montini\[01] Catalogs\01_Assets\[01] Louis Montini</span></p>
         <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
           {brands.map((b) => (
             <div key={b.id} className="rounded-lg border border-slate-100 bg-slate-50/60 p-2">
               <div className="flex items-center gap-2 mb-1">
                 <span className="flex-1 text-[12px] text-slate-700 font-medium truncate" title={b.name}>{b.name}</span>
                 {bLabel[b.id] && <span className="text-[11px] text-emerald-600 truncate max-w-[120px] shrink-0" title={bLabel[b.id]}>✓ {bLabel[b.id]}</span>}
-                <button type="button" onClick={() => saveBrand(b.id)} className="h-7 px-2.5 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">บันทึก</button>
+                <button type="button" onClick={() => saveBrand(b.id)} className="h-7 px-2.5 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">{t("บันทึก", "Save")}</button>
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-24 text-[11px] text-slate-400 shrink-0">Drive folder id</span>
-                <input value={bDraft[b.id] ?? ""} onChange={(e) => setBDraft((d) => ({ ...d, [b.id]: e.target.value }))} placeholder="ปล่อยว่าง = ใช้โฟลเดอร์แม่"
+                <input value={bDraft[b.id] ?? ""} onChange={(e) => setBDraft((d) => ({ ...d, [b.id]: e.target.value }))} placeholder={t("ปล่อยว่าง = ใช้โฟลเดอร์แม่", "leave blank = use parent folder")}
                   className="flex-1 h-7 px-2 text-[12px] font-mono border border-slate-200 rounded" />
               </div>
               <div className="flex items-center gap-2 mt-1">
-                <span className="w-24 text-[11px] text-slate-400 shrink-0">path ในเครื่อง</span>
+                <span className="w-24 text-[11px] text-slate-400 shrink-0">{t("path ในเครื่อง", "Local path")}</span>
                 <input value={bLocal[b.id] ?? ""} onChange={(e) => setBLocal((d) => ({ ...d, [b.id]: e.target.value }))} placeholder="G:\Shared drives\…\[01] Louis Montini"
                   className="flex-1 h-7 px-2 text-[12px] font-mono border border-slate-200 rounded" />
               </div>
             </div>
           ))}
-          {brands.length === 0 && <p className="text-[11px] text-slate-400">ยังไม่มีแบรนด์</p>}
+          {brands.length === 0 && <p className="text-[11px] text-slate-400">{t("ยังไม่มีแบรนด์", "No brands yet")}</p>}
         </div>
       </div>
       <div className="mt-3 pt-3 border-t border-slate-100">
-        <p className="text-[12px] text-slate-600 font-medium">🗂️ ชื่อซับโฟลเดอร์ตามชนิด (ใต้โฟลเดอร์แบรนด์)</p>
-        <p className="text-[11px] text-slate-400 mb-2">เช่น โลโก้ → “01_Logo” · ปล่อยว่าง = ใช้ชื่อชนิดเป็นชื่อซับ</p>
+        <p className="text-[12px] text-slate-600 font-medium">{t("🗂️ ชื่อซับโฟลเดอร์ตามชนิด (ใต้โฟลเดอร์แบรนด์)", "🗂️ Subfolder name by type (under the brand folder)")}</p>
+        <p className="text-[11px] text-slate-400 mb-2">{t("เช่น โลโก้ → “01_Logo” · ปล่อยว่าง = ใช้ชื่อชนิดเป็นชื่อซับ", "e.g. logo → “01_Logo” · blank = use the type name as the subfolder")}</p>
         <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
           {types.map((ty) => (
             <div key={ty} className="flex items-center gap-2">
               <span className="w-24 text-[12px] text-slate-600 truncate shrink-0" title={ty}>{ty}</span>
               <input value={tDraft[ty] ?? ""} onChange={(e) => setTDraft((d) => ({ ...d, [ty]: e.target.value }))} placeholder={ty}
                 className="flex-1 h-8 px-2 text-[12px] border border-slate-200 rounded" />
-              <button type="button" onClick={() => saveType(ty)} className="h-8 px-2 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">บันทึก</button>
+              <button type="button" onClick={() => saveType(ty)} className="h-8 px-2 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">{t("บันทึก", "Save")}</button>
             </div>
           ))}
-          {types.length === 0 && <p className="text-[11px] text-slate-400">ยังไม่มีชนิดงาน</p>}
+          {types.length === 0 && <p className="text-[11px] text-slate-400">{t("ยังไม่มีชนิดงาน", "No work types yet")}</p>}
         </div>
       </div>
     </>
@@ -3821,17 +3852,17 @@ function ArtworkPathRuleModal({ rule, onClose, onSaved }: { rule: PathRule; onCl
     try {
       const base_paths = text.split("\n").map((s) => s.trim()).filter(Boolean);
       const res = await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "artwork_path_rule", value: { base_paths } }) });
-      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-      toast.success("บันทึกโฟลเดอร์มาตรฐานแล้ว"); onSaved(); onClose();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); } finally { setBusy(false); }
+      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Save failed"));
+      toast.success(t("บันทึกโฟลเดอร์มาตรฐานแล้ว", "Standard folders saved")); onSaved(); onClose();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); } finally { setBusy(false); }
   };
   return (
-    <ERPModal open onClose={onClose} title="ตั้งค่าโฟลเดอร์มาตรฐานของ Artwork" size="md"
+    <ERPModal open onClose={onClose} title={t("ตั้งค่าโฟลเดอร์มาตรฐานของ Artwork", "Configure standard Artwork folders")} size="md"
       footer={<div className="flex justify-end gap-2 w-full">
-        <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-        <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? "บันทึก…" : "บันทึก"}</button>
+        <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+        <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? t("บันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
       </div>}>
-      <p className="text-[12px] text-slate-500 mb-2">artwork ทุกอันควรเก็บใต้โฟลเดอร์เหล่านี้ — ถ้า path ที่กรอกไม่ขึ้นต้นด้วยอันใดอันหนึ่ง ระบบจะ <b className="text-amber-600">เตือน</b> (ไม่บล็อก). ใส่ได้หลายโฟลเดอร์ บรรทัดละ 1</p>
+      <p className="text-[12px] text-slate-500 mb-2">{t("artwork ทุกอันควรเก็บใต้โฟลเดอร์เหล่านี้ — ถ้า path ที่กรอกไม่ขึ้นต้นด้วยอันใดอันหนึ่ง ระบบจะ", "All artwork should be stored under these folders — if the entered path doesn't start with one of them, the system will")} <b className="text-amber-600">{t("เตือน", "warn")}</b> {t("(ไม่บล็อก). ใส่ได้หลายโฟลเดอร์ บรรทัดละ 1", "(not blocking). Enter multiple folders, one per line")}</p>
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} spellCheck={false}
         placeholder={"G:\\Shared drives\\Louis Montini\\[4] Assets\\4. Artworks\n\\\\nas\\Artwork"}
         className="w-full px-3 py-2 text-[12px] font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
