@@ -9,6 +9,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,7 +35,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ data: null, error: "ไม่มีสิทธิ์ดูสรุปแผนก" }, { status: 403 });
   }
 
-  const { data, error } = await supabase.rpc("erp_admin_dept_overview");
+  // ผ่าน gate admin แล้ว → เรียก RPC ผ่าน service-role (RPC ถูกจำกัดให้ service_role เท่านั้น กัน user เรียกตรง)
+  const { data, error } = await supabaseAdmin().rpc("erp_admin_dept_overview");
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
   return NextResponse.json(
     { data: (data ?? null) as DeptOverview | null, error: null },
