@@ -12,6 +12,7 @@ import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { downloadImagesAsZip } from "@/lib/zip";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
 
 type Brand = { brand_id: string | null; brand_name: string; brand_color: string | null; parent_count: number; image_count: number };
 type ParentRow = { parent_id: string; code: string; name_th: string | null; parent_img: number; sku_count: number; sku_img: number; desc_img: number };
@@ -37,7 +38,8 @@ function Thumb({ a, onOpen }: { a: Img; onOpen: () => void }) {
 }
 
 function Grid({ items, onOpen }: { items: Img[]; onOpen: (a: Img) => void }) {
-  if (items.length === 0) return <p className="text-[12px] text-slate-400 py-2">— ยังไม่มีรูป —</p>;
+  const t = useT();
+  if (items.length === 0) return <p className="text-[12px] text-slate-400 py-2">{t("— ยังไม่มีรูป —", "— No images —")}</p>;
   return (
     <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, 104px)" }}>
       {items.map((a) => <Thumb key={a.id} a={a} onOpen={() => onOpen(a)} />)}
@@ -53,6 +55,7 @@ function Crumb({ label, onClick, last }: { label: string; onClick?: () => void; 
 
 export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: number; openParentId?: string | null }) {
   const toast = useToast();
+  const t = useT();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -71,16 +74,16 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
   const downloadAllZip = useCallback(async () => {
     const pid = detail?.parent?.id; const code = detail?.parent?.code || "images";
     if (!pid || zipBusy) return;
-    setZipBusy(true); setZipMsg("กำลังรวบรวมรูป…");
+    setZipBusy(true); setZipMsg(t("กำลังรวบรวมรูป…", "Gathering images…"));
     try {
       const j = await apiFetch(`/api/assets/brand-tree?mode=all-images&parent_id=${pid}`).then((r) => r.json());
       const imgs = (j.images ?? []) as { url: string; name: string }[];
-      if (imgs.length === 0) { toast.error("ยังไม่มีรูปให้ดาวน์โหลด"); return; }
-      const n = await downloadImagesAsZip(imgs, `${code}-รูปทั้งหมด`,
-        (done, total) => setZipMsg(total ? `กำลังโหลดรูป ${Math.min(done + 1, total)}/${total}…` : "กำลังบีบไฟล์…"));
-      if (n > 0) toast.success(`ดาวน์โหลด ${n} รูปเป็น zip แล้ว`);
-      else toast.error("ดาวน์โหลดรูปไม่สำเร็จ");
-    } catch { toast.error("ดาวน์โหลดไม่สำเร็จ"); }
+      if (imgs.length === 0) { toast.error(t("ยังไม่มีรูปให้ดาวน์โหลด", "No images to download")); return; }
+      const n = await downloadImagesAsZip(imgs, `${code}-${t("รูปทั้งหมด", "all-images")}`,
+        (done, total) => setZipMsg(total ? `${t("กำลังโหลดรูป", "Loading images")} ${Math.min(done + 1, total)}/${total}…` : t("กำลังบีบไฟล์…", "Compressing…")));
+      if (n > 0) toast.success(`${t("ดาวน์โหลด", "Downloaded")} ${n} ${t("รูปเป็น zip แล้ว", "images as zip")}`);
+      else toast.error(t("ดาวน์โหลดรูปไม่สำเร็จ", "Failed to download images"));
+    } catch { toast.error(t("ดาวน์โหลดไม่สำเร็จ", "Download failed")); }
     finally { setZipBusy(false); setZipMsg(""); }
   }, [detail, zipBusy, toast]);
 
@@ -142,7 +145,7 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
 
   const crumbs = (
     <div className="flex items-center gap-1.5 text-[13px] mb-3 flex-wrap">
-      <Crumb label="🏷️ ทุกแบรนด์" onClick={backToBrands} last={!brand && !detail && !loadingDetail} />
+      <Crumb label={t("🏷️ ทุกแบรนด์", "🏷️ All brands")} onClick={backToBrands} last={!brand && !detail && !loadingDetail} />
       {brand && <><span className="text-slate-300">›</span><Crumb label={brand.brand_name} onClick={backToParents} last={!detail} /></>}
       {detail?.parent && <><span className="text-slate-300">›</span><Crumb label={`${detail.parent.code} · ${detail.parent.name}`} last /></>}
     </div>
@@ -153,7 +156,7 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
     <div className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-6" onClick={() => setLightbox(null)}>
       <img src={lightbox.url} alt={lightbox.title} className="max-w-full max-h-full object-contain rounded-lg" />
       <a href={lightbox.url} download={lightbox.title || "image"} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-        className="absolute top-4 left-4 h-9 px-3 rounded-lg bg-white/90 text-slate-700 text-sm font-medium flex items-center gap-1 hover:bg-white">⬇ ดาวน์โหลด</a>
+        className="absolute top-4 left-4 h-9 px-3 rounded-lg bg-white/90 text-slate-700 text-sm font-medium flex items-center gap-1 hover:bg-white">{t("⬇ ดาวน์โหลด", "⬇ Download")}</a>
       <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/90 text-slate-700 text-lg flex items-center justify-center hover:bg-white">✕</button>
     </div>
   );
@@ -163,23 +166,23 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
     return (
       <div>
         {crumbs}
-        {loadingDetail || !detail ? <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div> : (
+        {loadingDetail || !detail ? <div className="py-10 text-center text-slate-400 text-sm">{t("กำลังโหลด…", "Loading…")}</div> : (
           <div className="flex flex-col gap-5">
             <div className="flex items-center justify-between gap-2 flex-wrap -mb-1">
-              <p className="text-[12px] text-slate-400">กดรูปเพื่อดูใหญ่ · กดโฟลเดอร์ SKU เพื่อกางดูรูป</p>
-              <button onClick={downloadAllZip} disabled={zipBusy} title="โหลดรูปทั้งหมดของสินค้านี้เป็นไฟล์ zip"
+              <p className="text-[12px] text-slate-400">{t("กดรูปเพื่อดูใหญ่ · กดโฟลเดอร์ SKU เพื่อกางดูรูป", "Click an image to enlarge · click a SKU folder to expand its images")}</p>
+              <button onClick={downloadAllZip} disabled={zipBusy} title={t("โหลดรูปทั้งหมดของสินค้านี้เป็นไฟล์ zip", "Download all images of this product as a zip")}
                 className="h-8 px-3 text-[12px] font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 whitespace-nowrap">
-                {zipBusy ? (zipMsg || "กำลังเตรียม…") : "⬇ ดาวน์โหลดทั้งหมด (zip)"}
+                {zipBusy ? (zipMsg || t("กำลังเตรียม…", "Preparing…")) : t("⬇ ดาวน์โหลดทั้งหมด (zip)", "⬇ Download all (zip)")}
               </button>
             </div>
             <section>
-              <p className="text-[13px] font-medium text-slate-700 mb-2">🖼️ รูปที่ลงใน Parent SKU <span className="text-slate-400 font-normal">({fmt(detail.parentImages.length)}) · รูปหลักก่อน</span></p>
+              <p className="text-[13px] font-medium text-slate-700 mb-2">{t("🖼️ รูปที่ลงใน Parent SKU", "🖼️ Images on the Parent SKU")} <span className="text-slate-400 font-normal">({fmt(detail.parentImages.length)}) · {t("รูปหลักก่อน", "primary first")}</span></p>
               <Grid items={detail.parentImages} onOpen={setLightbox} />
             </section>
 
             <section>
-              <p className="text-[13px] font-medium text-slate-700 mb-2">📂 SKUs <span className="text-slate-400 font-normal">({fmt(detail.skus.length)} ตัวที่มีรูป)</span></p>
-              {detail.skus.length === 0 ? <p className="text-[12px] text-slate-400">— SKU ลูกยังไม่มีรูป —</p> : (
+              <p className="text-[13px] font-medium text-slate-700 mb-2">📂 SKUs <span className="text-slate-400 font-normal">({fmt(detail.skus.length)} {t("ตัวที่มีรูป", "with images")})</span></p>
+              {detail.skus.length === 0 ? <p className="text-[12px] text-slate-400">{t("— SKU ลูกยังไม่มีรูป —", "— Child SKUs have no images —")}</p> : (
                 <div className="flex flex-col gap-1.5">
                   {detail.skus.map((s) => {
                     const open = openSku.has(s.id);
@@ -192,12 +195,12 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
                           <span className="font-mono text-[12px] text-slate-700">{s.code}</span>
                           {s.color && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-pink-50 text-pink-600 border border-pink-200 shrink-0">🎨 {s.color}</span>}
                           <span className="text-[12px] text-slate-500 truncate flex-1">{s.name}</span>
-                          <span className="text-[11px] text-slate-400">{fmt(s.img_count)} รูป</span>
+                          <span className="text-[11px] text-slate-400">{fmt(s.img_count)} {t("รูป", "images")}</span>
                         </button>
                         {open && (
                           <div className="px-3 pb-3">
                             {skuLoading.has(s.id) || imgs === undefined
-                              ? <p className="text-[12px] text-slate-400 py-2">กำลังโหลด…</p>
+                              ? <p className="text-[12px] text-slate-400 py-2">{t("กำลังโหลด…", "Loading…")}</p>
                               : <Grid items={imgs} onOpen={setLightbox} />}
                           </div>
                         )}
@@ -211,7 +214,7 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
             <section>
               <p className="text-[13px] font-medium text-slate-700 mb-2">📂 Description <span className="text-slate-400 font-normal">({fmt(detail.description.length)})</span></p>
               {detail.description.length === 0
-                ? <p className="text-[12px] text-slate-400">— ยังไม่มีรูป Description — <span className="text-slate-300">(เพิ่มได้ที่ฟอร์ม Parent SKU → ช่อง “รูป Description”)</span></p>
+                ? <p className="text-[12px] text-slate-400">{t("— ยังไม่มีรูป Description —", "— No Description images —")} <span className="text-slate-300">{t("(เพิ่มได้ที่ฟอร์ม Parent SKU → ช่อง “รูป Description”)", "(add them in the Parent SKU form → “Description images” field)")}</span></p>
                 : <Grid items={detail.description} onOpen={setLightbox} />}
             </section>
           </div>
@@ -226,8 +229,8 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
     return (
       <div>
         {crumbs}
-        {loadingParents ? <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
-          : parents.length === 0 ? <div className="py-10 text-center text-slate-400 text-sm">ยังไม่มี Parent SKU ที่มีรูปในแบรนด์นี้</div>
+        {loadingParents ? <div className="py-10 text-center text-slate-400 text-sm">{t("กำลังโหลด…", "Loading…")}</div>
+          : parents.length === 0 ? <div className="py-10 text-center text-slate-400 text-sm">{t("ยังไม่มี Parent SKU ที่มีรูปในแบรนด์นี้", "No Parent SKU with images in this brand yet")}</div>
           : (
             <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
               {parents.map((p) => (
@@ -255,8 +258,8 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
   return (
     <div>
       {crumbs}
-      {loadingBrands ? <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
-        : brands.length === 0 ? <div className="py-10 text-center text-slate-400 text-sm">ยังไม่มีรูปที่ผูกกับสินค้า</div>
+      {loadingBrands ? <div className="py-10 text-center text-slate-400 text-sm">{t("กำลังโหลด…", "Loading…")}</div>
+        : brands.length === 0 ? <div className="py-10 text-center text-slate-400 text-sm">{t("ยังไม่มีรูปที่ผูกกับสินค้า", "No images linked to products yet")}</div>
         : (
           <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
             {brands.map((b) => (
@@ -267,7 +270,7 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
                   <span className="text-slate-300">›</span>
                 </div>
                 <p className="text-sm font-medium text-slate-800 mt-1 truncate">{b.brand_name}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">{fmt(b.parent_count)} Parent · {fmt(b.image_count)} รูป</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">{fmt(b.parent_count)} Parent · {fmt(b.image_count)} {t("รูป", "images")}</p>
               </button>
             ))}
           </div>
