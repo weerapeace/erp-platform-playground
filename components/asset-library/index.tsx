@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { ASSET_TYPE_LABEL, formatBytes, type AssetType } from "@/lib/assets";
@@ -33,12 +34,12 @@ import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetTag } from "@/app/api/assets/tags/route";
 
 const TYPE_ICON: Record<AssetType, string> = { image: "🖼️", design: "🎨", document: "📄", video: "🎬", other: "📦" };
-const TYPE_FILTERS: { key: string; label: string }[] = [
-  { key: "", label: "ทั้งหมด" },
-  { key: "image", label: "🖼️ รูปภาพ" },
-  { key: "design", label: "🎨 ไฟล์ออกแบบ" },
-  { key: "document", label: "📄 เอกสาร" },
-  { key: "video", label: "🎬 วิดีโอ" },
+const TYPE_FILTERS: { key: string; label: string; en: string }[] = [
+  { key: "", label: "ทั้งหมด", en: "All" },
+  { key: "image", label: "🖼️ รูปภาพ", en: "🖼️ Images" },
+  { key: "design", label: "🎨 ไฟล์ออกแบบ", en: "🎨 Design files" },
+  { key: "document", label: "📄 เอกสาร", en: "📄 Documents" },
+  { key: "video", label: "🎬 วิดีโอ", en: "🎬 Videos" },
 ];
 
 type LookupItem = { id: string; name: string };   // ชนิด artwork จาก lookup กลาง (erp_lookups type=artwork_type)
@@ -46,6 +47,7 @@ type LookupItem = { id: string; name: string };   // ชนิด artwork จา
 const isImage = (a: { asset_type: AssetType }) => a.asset_type === "image";
 
 export function AssetLibrary() {
+  const t = useT();
   const toast = useToast();
   const [actor, setActor] = useState<string | null>(null);
 
@@ -81,6 +83,7 @@ export function AssetLibrary() {
   const [massOpen, setMassOpen] = useState(false);   // โหมด MASS: เพิ่ม Artwork หลายรายการแบบตาราง inline
   const [pendingFile, setPendingFile] = useState<File | null>(null);    // ลาก 1 รูปมาวาง → เปิด Artwork พร้อมรูป
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null); // ลากหลายรูป → เปิดเพิ่มหลายรูป
+  const [pendingTargetFolder, setPendingTargetFolder] = useState<{ id: string; url: string; label: string } | null>(null); // ลากเข้ามุมมองโฟลเดอร์ → เพิ่มเข้าโฟลเดอร์นั้น
   const [pageDrag, setPageDrag] = useState(false);
   const [manageTypesOpen, setManageTypesOpen] = useState(false);
   const [driveScanOpen, setDriveScanOpen] = useState(false);   // หาโฟลเดอร์ Drive ที่ยังไม่เชื่อม
@@ -260,6 +263,13 @@ export function AssetLibrary() {
     const imgs = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
     if (!imgs.length) return;
     e.preventDefault();
+    // อยู่ในมุมมองโฟลเดอร์เดียวกัน → เพิ่มเข้าโฟลเดอร์นั้นเลย (Artwork ผูกโฟลเดอร์ Drive เดิม)
+    if (folderFilter) {
+      setPendingTargetFolder({ id: folderFilter.id, url: `https://drive.google.com/drive/folders/${folderFilter.id}`, label: folderFilter.label });
+      if (imgs.length === 1) { setPendingFile(imgs[0]); setArtworkAddOpen(true); }
+      else { setPendingFiles(imgs); setMassOpen(true); }
+      return;
+    }
     // มุมมอง Artwork → ฟอร์ม Artwork · งานพิมพ์ → ฟอร์มงานพิมพ์ · อื่น ๆ → ฟอร์มอัปรูปธรรมดา
     if (source === "artwork") {
       if (imgs.length === 1) { setPendingFile(imgs[0]); setArtworkAddOpen(true); }
@@ -279,15 +289,15 @@ export function AssetLibrary() {
       onDrop={onPageDrop}>
       {pageDrag && (
         <div className="absolute inset-2 z-40 bg-indigo-500/10 border-2 border-dashed border-indigo-400 rounded-xl flex items-center justify-center pointer-events-none">
-          <div className="bg-white px-4 py-2 rounded-lg shadow text-sm text-indigo-700 font-medium">🎨 วางรูปที่นี่ → เพิ่ม Artwork · หลายรูป = เพิ่มหลายรูป</div>
+          <div className="bg-white px-4 py-2 rounded-lg shadow text-sm text-indigo-700 font-medium">{t("🎨 วางรูปที่นี่ → เพิ่ม Artwork · หลายรูป = เพิ่มหลายรูป", "🎨 Drop images here → add Artwork · multiple images = add several")}</div>
         </div>
       )}
       {/* header */}
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-800">🖼️ คลังไฟล์กลาง</h1>
+          <h1 className="text-2xl font-semibold text-slate-800">{t("🖼️ คลังไฟล์กลาง", "🖼️ Asset library")}</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            อัปไฟล์ครั้งเดียว เก็บที่เดียว ค้น/แท็ก/จัดอัลบั้ม แล้วหยิบไปใช้ซ้ำได้ทุกที่ · {total} ไฟล์
+            {t("อัปไฟล์ครั้งเดียว เก็บที่เดียว ค้น/แท็ก/จัดอัลบั้ม แล้วหยิบไปใช้ซ้ำได้ทุกที่", "Upload once, store once, search/tag/organize into albums, then reuse anywhere")} · {total} {t("ไฟล์", "files")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -296,19 +306,19 @@ export function AssetLibrary() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && load()}
-              placeholder="ค้นหา ชื่อไฟล์ / คำอธิบาย…"
+              placeholder={t("ค้นหา ชื่อไฟล์ / คำอธิบาย…", "Search file name / description…")}
               className="w-56 h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
           {source === "artwork" && (
             <button onClick={() => setMassOpen(true)}
               className="h-9 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap"
-            >📋 เพิ่มหลายรูป</button>
+            >{t("📋 เพิ่มหลายรูป", "📋 Add multiple")}</button>
           )}
           {source === "print" && (
             <button onClick={() => setMassPrintOpen(true)}
               className="h-9 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap"
-            >📋 เพิ่มหลายงาน</button>
+            >{t("📋 เพิ่มหลายงาน", "📋 Add multiple jobs")}</button>
           )}
           <button
             onClick={() => {
@@ -317,7 +327,7 @@ export function AssetLibrary() {
               else { setPendingFiles(null); setUploadOpen(true); }
             }}
             className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap"
-          >{source === "artwork" ? "🎨 เพิ่ม Artwork" : source === "print" ? "🖨 เพิ่มงานพิมพ์" : "⬆ อัปโหลด"}</button>
+          >{source === "artwork" ? t("🎨 เพิ่ม Artwork", "🎨 Add Artwork") : source === "print" ? t("🖨 เพิ่มงานพิมพ์", "🖨 Add print job") : t("⬆ อัปโหลด", "⬆ Upload")}</button>
         </div>
       </div>
 
@@ -326,33 +336,33 @@ export function AssetLibrary() {
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         {source === "artwork"
           ? <>
-              {[{ key: "", label: "ทั้งหมด" }, ...artTypes.map((t) => ({ key: t.name, label: t.name }))].map((f) => (
+              {[{ key: "", label: t("ทั้งหมด", "All") }, ...artTypes.map((t) => ({ key: t.name, label: t.name }))].map((f) => (
                 <button key={f.key || "all"} onClick={() => setArtworkType(f.key)}
                   className={`h-8 px-3 text-[13px] rounded-lg border ${artworkType === f.key
                     ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium"
                     : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{f.label}</button>
               ))}
               <button onClick={() => setManageTypesOpen(true)}
-                className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">⚙️ จัดการชนิด</button>
+                className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">{t("⚙️ จัดการชนิด", "⚙️ Manage types")}</button>
               {driveOn && <button onClick={() => setDriveScanOpen(true)}
-                className="h-8 px-2.5 text-[12px] rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">🔍 หาใน Drive ที่ยังไม่เชื่อม</button>}
+                className="h-8 px-2.5 text-[12px] rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">{t("🔍 หาใน Drive ที่ยังไม่เชื่อม", "🔍 Find unlinked in Drive")}</button>}
             </>
           : source === "print"
           ? <>
-              {[{ key: "", label: "ทั้งหมด" }, ...printTypes.map((t) => ({ key: t.code, label: t.name }))].map((f) => (
+              {[{ key: "", label: t("ทั้งหมด", "All") }, ...printTypes.map((t) => ({ key: t.code, label: t.name }))].map((f) => (
                 <button key={f.key || "all"} onClick={() => setPrintType(f.key)}
                   className={`h-8 px-3 text-[13px] rounded-lg border ${printType === f.key
                     ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium"
                     : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{f.label}</button>
               ))}
               <button onClick={() => setManagePrintOpen(true)}
-                className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">⚙️ จัดการประเภทงานพิมพ์</button>
+                className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">{t("⚙️ จัดการประเภทงานพิมพ์", "⚙️ Manage print types")}</button>
             </>
           : TYPE_FILTERS.map((f) => (
               <button key={f.key} onClick={() => setType(f.key)}
                 className={`h-8 px-3 text-[13px] rounded-lg border ${type === f.key
                   ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium"
-                  : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{f.label}</button>
+                  : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{t(f.label, f.en)}</button>
             ))}
         <div className="flex-1" />
         <button
@@ -360,31 +370,31 @@ export function AssetLibrary() {
           className={`h-8 px-3 text-[13px] rounded-lg border ${trash
             ? "bg-rose-50 border-rose-300 text-rose-700 font-medium"
             : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
-        >🗑️ ถังขยะ</button>
+        >{t("🗑️ ถังขยะ", "🗑️ Trash")}</button>
       </div>
       )}
 
       <div className="flex gap-4 items-start">
         {/* sidebar */}
         <aside className="w-44 shrink-0 hidden md:block">
-          <p className="text-[11px] font-medium text-slate-400 mb-1.5">มุมมอง</p>
+          <p className="text-[11px] font-medium text-slate-400 mb-1.5">{t("มุมมอง", "View")}</p>
           <div className="flex flex-col gap-0.5 mb-4">
-            <SideItem active={source === "by-brand"} onClick={() => setSource("by-brand")} label="ดูตามแบรนด์" icon="🏷️" />
+            <SideItem active={source === "by-brand"} onClick={() => setSource("by-brand")} label={t("ดูตามแบรนด์", "By brand")} icon="🏷️" />
           </div>
-          <p className="text-[11px] font-medium text-slate-400 mb-1.5">ที่มา</p>
+          <p className="text-[11px] font-medium text-slate-400 mb-1.5">{t("ที่มา", "Source")}</p>
           <div className="flex flex-col gap-0.5 mb-4">
-            <SideItem active={source === "upload"} onClick={() => setSource("upload")} label="รูปที่อัปเอง" icon="📤" />
+            <SideItem active={source === "upload"} onClick={() => setSource("upload")} label={t("รูปที่อัปเอง", "My uploads")} icon="📤" />
             <SideItem active={source === "artwork"} onClick={() => setSource("artwork")} label="Artwork" icon="🎨" />
-            <SideItem active={source === "print"} onClick={() => setSource("print")} label="งานพิมพ์" icon="🖨" />
-            <SideItem active={source === "odoo_product"} onClick={() => setSource("odoo_product")} label="รูปสินค้า (Odoo)" icon="🛍️" />
+            <SideItem active={source === "print"} onClick={() => setSource("print")} label={t("งานพิมพ์", "Print jobs")} icon="🖨" />
+            <SideItem active={source === "odoo_product"} onClick={() => setSource("odoo_product")} label={t("รูปสินค้า (Odoo)", "Product images (Odoo)")} icon="🛍️" />
           </div>
           <div className="flex items-center justify-between mb-1.5">
-            <p className="text-[11px] font-medium text-slate-400">อัลบั้ม</p>
-            <button onClick={() => setNewColOpen(true)} className="text-[11px] text-indigo-600 hover:underline">＋ ใหม่</button>
+            <p className="text-[11px] font-medium text-slate-400">{t("อัลบั้ม", "Albums")}</p>
+            <button onClick={() => setNewColOpen(true)} className="text-[11px] text-indigo-600 hover:underline">{t("＋ ใหม่", "＋ New")}</button>
           </div>
           <div className="flex flex-col gap-0.5 mb-4">
-            <SideItem active={collectionId === null} onClick={() => setCollectionId(null)} label="ทั้งหมด" />
-            <SideItem active={collectionId === "none"} onClick={() => setCollectionId("none")} label="ไม่อยู่อัลบั้ม" />
+            <SideItem active={collectionId === null} onClick={() => setCollectionId(null)} label={t("ทั้งหมด", "All")} />
+            <SideItem active={collectionId === "none"} onClick={() => setCollectionId("none")} label={t("ไม่อยู่อัลบั้ม", "No album")} />
             {collections.map((c) => (
               <SideItem key={c.id} active={collectionId === c.id} onClick={() => setCollectionId(c.id)}
                 label={c.name} count={c.count} icon="📁" />
@@ -392,7 +402,7 @@ export function AssetLibrary() {
           </div>
           {tags.length > 0 && (
             <>
-              <p className="text-[11px] font-medium text-slate-400 mb-1.5">แท็ก</p>
+              <p className="text-[11px] font-medium text-slate-400 mb-1.5">{t("แท็ก", "Tags")}</p>
               <div className="flex flex-wrap gap-1.5">
                 {tags.map((t) => (
                   <button key={t.id} onClick={() => setTag(tag === t.id ? null : t.id)}
@@ -410,24 +420,24 @@ export function AssetLibrary() {
         <main className="flex-1 min-w-0">
           {folderFilter && (
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-2">
-              <p className="text-[12px] text-indigo-700">📁 รูปในโฟลเดอร์เดียวกับ “<b>{folderFilter.label}</b>” · {total.toLocaleString("th-TH")} รูป</p>
-              <button onClick={() => setFolderFilter(null)} className="text-[12px] text-indigo-600 hover:underline">✕ ออกจากมุมมองโฟลเดอร์</button>
+              <p className="text-[12px] text-indigo-700">{t("📁 รูปในโฟลเดอร์เดียวกับ", "📁 Images in the same folder as")} “<b>{folderFilter.label}</b>” · {total.toLocaleString("th-TH")} {t("รูป", "images")}</p>
+              <button onClick={() => setFolderFilter(null)} className="text-[12px] text-indigo-600 hover:underline">{t("✕ ออกจากมุมมองโฟลเดอร์", "✕ Exit folder view")}</button>
             </div>
           )}
           {searching && (
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-              <p className="text-[12px] text-slate-500">🔍 ผลค้นหา “<b>{search.trim()}</b>” ทั้งคลัง · {total.toLocaleString("th-TH")} ไฟล์</p>
+              <p className="text-[12px] text-slate-500">{t("🔍 ผลค้นหา", "🔍 Search results")} “<b>{search.trim()}</b>” {t("ทั้งคลัง", "in whole library")} · {total.toLocaleString("th-TH")} {t("ไฟล์", "files")}</p>
               {rows.some((r) => isImage(r)) && (
-                <button onClick={downloadSearchZip} disabled={zipBusy} title="โหลดรูปทั้งหมดในผลค้นหานี้เป็นไฟล์ zip"
+                <button onClick={downloadSearchZip} disabled={zipBusy} title={t("โหลดรูปทั้งหมดในผลค้นหานี้เป็นไฟล์ zip", "Download all images in these results as a zip")}
                   className="h-7 px-2.5 text-[11px] font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 whitespace-nowrap">
-                  {zipBusy ? (zipMsg || "กำลังเตรียม…") : "⬇ ดาวน์โหลดรูปผลค้นหา (zip)"}
+                  {zipBusy ? (zipMsg || t("กำลังเตรียม…", "Preparing…")) : t("⬇ ดาวน์โหลดรูปผลค้นหา (zip)", "⬇ Download result images (zip)")}
                 </button>
               )}
             </div>
           )}
           {searching && searchFolders.length > 0 && (
             <div className="mb-4">
-              <p className="text-[12px] font-medium text-slate-600 mb-1.5">📂 อัลบั้มสินค้า (Parent SKU) ที่ตรงคำค้น — กดเพื่อเปิดดูรูปทั้งหมดแบบ “ดูตามแบรนด์”</p>
+              <p className="text-[12px] font-medium text-slate-600 mb-1.5">{t("📂 อัลบั้มสินค้า (Parent SKU) ที่ตรงคำค้น — กดเพื่อเปิดดูรูปทั้งหมดแบบ “ดูตามแบรนด์”", "📂 Product albums (Parent SKU) matching your search — click to open all images in “By brand” view")}</p>
               <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
                 {searchFolders.map((f) => (
                   <button key={f.id} onClick={() => openFolder(f.id)}
@@ -437,7 +447,7 @@ export function AssetLibrary() {
                       <span className="font-mono text-[12px] text-slate-700">{f.code}</span>
                       <span className="block text-[11px] text-slate-500 truncate">{f.name}</span>
                     </span>
-                    <span className="text-[10px] text-indigo-600 font-medium shrink-0 whitespace-nowrap">เปิดอัลบั้ม ›</span>
+                    <span className="text-[10px] text-indigo-600 font-medium shrink-0 whitespace-nowrap">{t("เปิดอัลบั้ม ›", "Open album ›")}</span>
                   </button>
                 ))}
               </div>
@@ -448,7 +458,7 @@ export function AssetLibrary() {
               {rows.length > 0
                 ? <button onClick={() => { const all = rows.every((r) => selected.has(r.id)); setSelected(all ? new Set() : new Set(rows.map((r) => r.id))); }}
                     className="h-8 px-3 text-[12px] rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 shrink-0">
-                    {rows.every((r) => selected.has(r.id)) ? "☑ ล้างที่เลือก" : `☐ เลือกทั้งหมดในหน้านี้ (${rows.length})`}
+                    {rows.every((r) => selected.has(r.id)) ? t("☑ ล้างที่เลือก", "☑ Clear selection") : `${t("☐ เลือกทั้งหมดในหน้านี้", "☐ Select all on this page")} (${rows.length})`}
                   </button>
                 : <span />}
               <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel="ไฟล์" />
@@ -457,15 +467,15 @@ export function AssetLibrary() {
           {showBrandView ? (
             <BrandAlbumBrowser reloadKey={brandReload} openParentId={brandOpenParent} />
           ) : loading ? (
-            <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>
+            <div className="text-center py-16 text-slate-400 text-sm">{t("กำลังโหลด…", "Loading…")}</div>
           ) : rows.length === 0 ? (
             <div className="text-center py-16 text-slate-400 text-sm">
-              {searching ? `ไม่พบไฟล์ที่ตรงกับ “${search.trim()}”`
-                : trash ? "ถังขยะว่าง"
-                : source === "artwork" ? "ยังไม่มี Artwork — กด “เพิ่ม Artwork” เพื่อลงบัตรงานออกแบบ (รูปตัวอย่าง + path ไฟล์ต้นฉบับ)"
-                : source === "print" ? "ยังไม่มีงานพิมพ์ — กด “เพิ่มงานพิมพ์” เพื่อลงรูป preview + ไฟล์ .ai/.pdf สำหรับส่งพิมพ์"
-                : source === "odoo_product" ? "ยังไม่มีรูปสินค้านำเข้า"
-                : "ยังไม่มีไฟล์ในคลัง — กด “อัปโหลด” เพื่อเริ่มเก็บไฟล์"}
+              {searching ? `${t("ไม่พบไฟล์ที่ตรงกับ", "No files match")} “${search.trim()}”`
+                : trash ? t("ถังขยะว่าง", "Trash is empty")
+                : source === "artwork" ? t("ยังไม่มี Artwork — กด “เพิ่ม Artwork” เพื่อลงบัตรงานออกแบบ (รูปตัวอย่าง + path ไฟล์ต้นฉบับ)", "No Artwork yet — click “Add Artwork” to create a design card (preview image + source file path)")
+                : source === "print" ? t("ยังไม่มีงานพิมพ์ — กด “เพิ่มงานพิมพ์” เพื่อลงรูป preview + ไฟล์ .ai/.pdf สำหรับส่งพิมพ์", "No print jobs yet — click “Add print job” to add a preview image + .ai/.pdf files for printing")
+                : source === "odoo_product" ? t("ยังไม่มีรูปสินค้านำเข้า", "No imported product images")
+                : t("ยังไม่มีไฟล์ในคลัง — กด “อัปโหลด” เพื่อเริ่มเก็บไฟล์", "No files in the library — click “Upload” to start storing files")}
             </div>
           ) : (
             <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
@@ -485,14 +495,14 @@ export function AssetLibrary() {
       {/* bulk bar — อยู่ล่าง (ที่เดิม) · z สูง ลอยอยู่หน้าสุดไม่โดนบัง */}
       {selCount > 0 && (
         <div className="sticky bottom-4 z-40 mt-4 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto flex-wrap justify-center">
-          <span className="text-sm font-medium">เลือก {selCount} ไฟล์</span>
-          {!trash && <button onClick={() => setBulkEditOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">✏️ แก้หลายรายการ</button>}
-          {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
-          {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 จัดอัลบั้ม</button>}
-          {!trash && driveOn && <button onClick={() => setBulkFolderOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗂️ สร้าง Folder Drive</button>}
-          {!trash && driveOn && <button onClick={() => setBulkLinkOpen(true)} disabled={bulkLinkBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkLinkBusy ? "กำลังผูก…" : "📎 ใช้โฟลเดอร์เดียวกัน"}</button>}
+          <span className="text-sm font-medium">{t("เลือก", "Selected")} {selCount} {t("ไฟล์", "files")}</span>
+          {!trash && <button onClick={() => setBulkEditOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("✏️ แก้หลายรายการ", "✏️ Edit many")}</button>}
+          {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("🏷️ ติดแท็ก", "🏷️ Add tag")}</button>}
+          {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("📁 จัดอัลบั้ม", "📁 Organize album")}</button>}
+          {!trash && driveOn && <button onClick={() => setBulkFolderOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("🗂️ สร้าง Folder Drive", "🗂️ Create Drive folder")}</button>}
+          {!trash && driveOn && <button onClick={() => setBulkLinkOpen(true)} disabled={bulkLinkBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkLinkBusy ? t("กำลังผูก…", "Linking…") : t("📎 ใช้โฟลเดอร์เดียวกัน", "📎 Use same folder")}</button>}
           <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
-          <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
+          <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">{t("ยกเลิก", "Cancel")}</button>
         </div>
       )}
 
@@ -506,16 +516,16 @@ export function AssetLibrary() {
         />
       )}
       {artworkAddOpen && (
-        <ArtworkAddModal actor={actor} artTypes={artTypes} collections={collections} initialFile={pendingFile}
+        <ArtworkAddModal actor={actor} artTypes={artTypes} collections={collections} initialFile={pendingFile} targetFolder={pendingTargetFolder}
           defaultCollectionIds={collectionId && collectionId !== "none" ? [collectionId] : []}
-          onClose={() => { setArtworkAddOpen(false); setPendingFile(null); }}
-          onDone={async () => { setArtworkAddOpen(false); setPendingFile(null); await load(); await loadMeta(); }} />
+          onClose={() => { setArtworkAddOpen(false); setPendingFile(null); setPendingTargetFolder(null); }}
+          onDone={async () => { setArtworkAddOpen(false); setPendingFile(null); setPendingTargetFolder(null); await load(); await loadMeta(); }} />
       )}
       {massOpen && (
-        <MassArtworkModal actor={actor} artTypes={artTypes} collections={collections} initialFiles={pendingFiles}
+        <MassArtworkModal actor={actor} artTypes={artTypes} collections={collections} initialFiles={pendingFiles} targetFolder={pendingTargetFolder}
           defaultAlbums={collectionId && collectionId !== "none" ? [collectionId] : []}
-          onClose={() => { setMassOpen(false); setPendingFiles(null); }}
-          onDone={async () => { setMassOpen(false); setPendingFiles(null); await load(); await loadMeta(); }} />
+          onClose={() => { setMassOpen(false); setPendingFiles(null); setPendingTargetFolder(null); }}
+          onDone={async () => { setMassOpen(false); setPendingFiles(null); setPendingTargetFolder(null); await load(); await loadMeta(); }} />
       )}
       {manageTypesOpen && (
         <ManageTypesModal types={artTypes} onClose={() => setManageTypesOpen(false)}
@@ -555,8 +565,8 @@ export function AssetLibrary() {
       )}
       <ConfirmDialog
         open={bulkTrashOpen} onClose={() => setBulkTrashOpen(false)} onConfirm={bulkTrash}
-        title="ย้ายไฟล์ลงถังขยะ?" message={`จะย้าย ${selCount} ไฟล์ลงถังขยะ (กู้คืนได้ 30 วัน) — ไฟล์ที่ยังถูกใช้อยู่จะถูกข้าม`}
-        confirmText="ย้ายลงถังขยะ" variant="danger"
+        title={t("ย้ายไฟล์ลงถังขยะ?", "Move files to trash?")} message={`${t("จะย้าย", "Will move")} ${selCount} ${t("ไฟล์ลงถังขยะ (กู้คืนได้ 30 วัน) — ไฟล์ที่ยังถูกใช้อยู่จะถูกข้าม", "files to trash (recoverable for 30 days) — files still in use will be skipped")}`}
+        confirmText={t("ย้ายลงถังขยะ", "Move to trash")} variant="danger"
       />
       {bulkTagOpen && <BulkTagModal count={selCount} tags={tags} onClose={() => setBulkTagOpen(false)} onApply={bulkTag} />}
       {bulkMoveOpen && <BulkMoveModal count={selCount} collections={collections} onClose={() => setBulkMoveOpen(false)} onApply={bulkMove} />}
@@ -570,14 +580,14 @@ export function AssetLibrary() {
       {/* bulk: เลือกรูปต้นทาง (ที่มีโฟลเดอร์ Drive) → ผูกทุกรูปที่เลือกเข้าโฟลเดอร์เดียวกัน */}
       <AssetPicker open={bulkLinkOpen} onClose={() => setBulkLinkOpen(false)} typeFilter="image" defaultSource="artwork" requireDriveFolder
         defaultSearch={commonNameSeed(rows.filter((r) => selected.has(r.id)).map((r) => r.title))}
-        title="เลือกรูปต้นทางที่มีโฟลเดอร์ Drive แล้ว" contextLabel={`ผูก ${selCount} รูปที่เลือกเข้าโฟลเดอร์เดียวกัน`}
+        title={t("เลือกรูปต้นทางที่มีโฟลเดอร์ Drive แล้ว", "Select a source image that already has a Drive folder")} contextLabel={`${t("ผูก", "Link")} ${selCount} ${t("รูปที่เลือกเข้าโฟลเดอร์เดียวกัน", "selected images into the same folder")}`}
         onSelect={(assets) => { const s = assets[0]; if (s) { setBulkLinkOpen(false); setLinkSource(s); setLinkConfirmOpen(true); } }} />
       {/* ยืนยันก่อนผูก — โชว์ชื่อโฟลเดอร์ปลายทาง */}
       <ConfirmDialog open={linkConfirmOpen} onClose={() => setLinkConfirmOpen(false)}
         onConfirm={() => { setLinkConfirmOpen(false); if (linkSource) void bulkLinkFolder(linkSource); }}
-        title="ผูกเข้าโฟลเดอร์นี้?" confirmText="ผูกโฟลเดอร์"
+        title={t("ผูกเข้าโฟลเดอร์นี้?", "Link into this folder?")} confirmText={t("ผูกโฟลเดอร์", "Link folder")}
         message={linkSource
-          ? `จะผูก ${Array.from(selected).filter((x) => x !== linkSource.id).length} รูปเข้าโฟลเดอร์ “${driveFolderNameOf(linkSource)}” (เดียวกับ “${linkSource.title || linkSource.file_name}”) + ก็อปรูปตัวอย่างของแต่ละรูปเข้าไปด้วย`
+          ? `${t("จะผูก", "Will link")} ${Array.from(selected).filter((x) => x !== linkSource.id).length} ${t("รูปเข้าโฟลเดอร์", "images into folder")} “${driveFolderNameOf(linkSource)}” (${t("เดียวกับ", "same as")} “${linkSource.title || linkSource.file_name}”) + ${t("ก็อปรูปตัวอย่างของแต่ละรูปเข้าไปด้วย", "and copy each image's preview into it too")}`
           : ""} />
     </div>
   );
@@ -688,6 +698,7 @@ function commonNameSeed(titles: string[]): string {
 function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder }: {
   a: AssetRow; selected: boolean; selectionMode: boolean; onToggle: () => void; onOpen: () => void; onSameFolder?: (id: string, label: string) => void;
 }) {
+  const t = useT();
   const [broken, setBroken] = useState(false);
   return (
     <div className={`group relative rounded-xl border overflow-hidden bg-white ${selected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200"}`}>
@@ -700,15 +711,15 @@ function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder 
       {/* ป้ายเตือน "ยังไม่ครบ" (เฉพาะ Artwork) — ไม่มีโฟลเดอร์ Drive / ยังไม่ใส่ขนาด */}
       {a.source === "artwork" && (
         <div className="absolute top-1.5 right-1.5 z-10 flex flex-col items-end gap-1 pointer-events-none">
-          {!/\/folders\//.test(a.master_url ?? "") && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-100 text-amber-700 border border-amber-200 shadow-sm">📁 ไม่มีโฟลเดอร์</span>}
-          {!a.sizes?.length && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-rose-100 text-rose-700 border border-rose-200 shadow-sm">📐 ไม่มีขนาด</span>}
+          {!/\/folders\//.test(a.master_url ?? "") && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-100 text-amber-700 border border-amber-200 shadow-sm">{t("📁 ไม่มีโฟลเดอร์", "📁 No folder")}</span>}
+          {!a.sizes?.length && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-rose-100 text-rose-700 border border-rose-200 shadow-sm">{t("📐 ไม่มีขนาด", "📐 No size")}</span>}
         </div>
       )}
       {/* งานพิมพ์: ป้ายประเภท (DTF/UV) + เตือนถ้ายังไม่มีไฟล์พิมพ์ */}
       {a.source === "print" && (
         <div className="absolute top-1.5 right-1.5 z-10 flex flex-col items-end gap-1 pointer-events-none">
           {a.print_type && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-violet-100 text-violet-700 border border-violet-200 shadow-sm">🖨 {a.print_type}</span>}
-          {!/\/folders\//.test(a.master_url ?? "") && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-100 text-amber-700 border border-amber-200 shadow-sm">⚠ ยังไม่มีไฟล์พิมพ์</span>}
+          {!/\/folders\//.test(a.master_url ?? "") && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-100 text-amber-700 border border-amber-200 shadow-sm">{t("⚠ ยังไม่มีไฟล์พิมพ์", "⚠ No print file")}</span>}
         </div>
       )}
       <button onClick={selectionMode ? (e) => { e.stopPropagation(); onToggle(); } : onOpen} className="block w-full text-left">
@@ -731,18 +742,18 @@ function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder 
             {formatBytes(a.size_bytes)}
             {a.source === "print"
               ? (a.sizes?.length ? ` · ${a.sizes[0].w}×${a.sizes[0].h} ${a.sizes[0].unit}` : "")
-              : a.usage_count > 0 ? ` · ใช้อยู่ ${a.usage_count} ที่` : a.status === "active" ? " · ยังไม่ถูกใช้" : ""}
+              : a.usage_count > 0 ? ` · ${t("ใช้อยู่", "in use at")} ${a.usage_count} ${t("ที่", "places")}` : a.status === "active" ? t(" · ยังไม่ถูกใช้", " · not used yet") : ""}
           </p>
           <div className="flex items-center gap-1.5 shrink-0">
             {/^https?:\/\//i.test(a.master_url ?? "") && (
               <a href={(a.master_url ?? "").trim()} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-                title="เปิดโฟลเดอร์/ไฟล์ต้นฉบับบน Google Drive"
-                className="text-[10px] text-emerald-600 hover:underline">↗ {/drive\.google\.com|\/folders\//i.test(a.master_url ?? "") ? "Drive" : "เปิด"}</a>
+                title={t("เปิดโฟลเดอร์/ไฟล์ต้นฉบับบน Google Drive", "Open source folder/file on Google Drive")}
+                className="text-[10px] text-emerald-600 hover:underline">↗ {/drive\.google\.com|\/folders\//i.test(a.master_url ?? "") ? "Drive" : t("เปิด", "Open")}</a>
             )}
             {onSameFolder && a.source === "artwork" && /\/folders\//.test(a.master_url ?? "") && (
-              <button type="button" title="ดูรูปทั้งหมดในโฟลเดอร์ Drive เดียวกัน"
+              <button type="button" title={t("ดูรูปทั้งหมดในโฟลเดอร์ Drive เดียวกัน", "View all images in the same Drive folder")}
                 onClick={(e) => { e.stopPropagation(); const m = (a.master_url ?? "").match(/\/folders\/([a-zA-Z0-9_-]+)/); if (m) onSameFolder(m[1], driveFolderNameOf(a)); }}
-                className="text-[10px] text-indigo-600 hover:underline">📁 โฟลเดอร์</button>
+                className="text-[10px] text-indigo-600 hover:underline">{t("📁 โฟลเดอร์", "📁 Folder")}</button>
             )}
           </div>
         </div>
@@ -758,6 +769,7 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
   actor: string | null; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFiles?: File[] | null; defaultCollectionId?: string | null;
 }) {
   const toast = useToast();
+  const t = useT();
   const [items, setItems] = useState<UpItem[]>([]);
   const [tagsStr, setTagsStr] = useState("");
   const [collectionId, setCollectionId] = useState(defaultCollectionId ?? "");   // เปิดอยู่ในอัลบั้มไหน → ตั้งให้เลย
@@ -802,29 +814,29 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
         if (d) { fd.append("width", String(d.w)); fd.append("height", String(d.h)); }
         const res = await apiFetch("/api/assets", { method: "POST", body: fd });
         const j = await res.json();
-        if (!res.ok || j.error) throw new Error(j.error || "อัปโหลดไม่สำเร็จ");
-        next[i] = { ...next[i], status: j.duplicate ? "dup" : "done", msg: j.duplicate ? "มีอยู่แล้ว — ใช้ตัวเดิม" : undefined };
+        if (!res.ok || j.error) throw new Error(j.error || t("อัปโหลดไม่สำเร็จ", "Upload failed"));
+        next[i] = { ...next[i], status: j.duplicate ? "dup" : "done", msg: j.duplicate ? t("มีอยู่แล้ว — ใช้ตัวเดิม", "Already exists — reused") : undefined };
         done++;
       } catch (e) {
-        next[i] = { ...next[i], status: "error", msg: e instanceof Error ? e.message : "ผิดพลาด" };
+        next[i] = { ...next[i], status: "error", msg: e instanceof Error ? e.message : t("ผิดพลาด", "Error") };
       }
       setItems([...next]);
     }
     setBusy(false);
-    toast.success(`อัปโหลดเสร็จ ${done}/${items.length} ไฟล์`);
+    toast.success(`${t("อัปโหลดเสร็จ", "Uploaded")} ${done}/${items.length} ${t("ไฟล์", "files")}`);
     if (done > 0) onDone();
   };
 
   return (
-    <ERPModal open onClose={onClose} title="อัปโหลดไฟล์เข้าคลัง" size="lg"
+    <ERPModal open onClose={onClose} title={t("อัปโหลดไฟล์เข้าคลัง", "Upload files to library")} size="lg"
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-[12px] text-slate-400">รองรับ รูป / PDF / ไฟล์ออกแบบ / วิดีโอ · ไม่เกิน 25MB ต่อไฟล์</span>
+          <span className="text-[12px] text-slate-400">{t("รองรับ รูป / PDF / ไฟล์ออกแบบ / วิดีโอ · ไม่เกิน 25MB ต่อไฟล์", "Supports images / PDF / design files / video · max 25MB per file")}</span>
           <div className="flex gap-2">
             <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
             <button onClick={upload} disabled={busy || items.length === 0}
               className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-              {busy ? "กำลังอัป…" : "บันทึกเข้าคลัง"}
+              {busy ? t("กำลังอัป…", "Uploading…") : t("บันทึกเข้าคลัง", "Save to library")}
             </button>
           </div>
         </div>
@@ -837,8 +849,8 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
         className={`cursor-pointer rounded-xl border-2 border-dashed p-6 text-center mb-3 ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50"}`}
       >
         <div className="text-3xl mb-1">⬆️</div>
-        <p className="text-sm font-medium text-slate-700">ลากไฟล์มาวางที่นี่</p>
-        <p className="text-[12px] text-slate-400">หรือ คลิกเพื่อเลือกไฟล์</p>
+        <p className="text-sm font-medium text-slate-700">{t("ลากไฟล์มาวางที่นี่", "Drag files here")}</p>
+        <p className="text-[12px] text-slate-400">{t("หรือ คลิกเพื่อเลือกไฟล์", "or click to choose files")}</p>
         <input ref={inputRef} type="file" multiple className="hidden"
           onChange={(e) => e.target.files && addFiles(e.target.files)} />
       </div>
@@ -854,8 +866,8 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
                 it.status === "error" ? "text-rose-600" :
                 it.status === "uploading" ? "text-indigo-600" : "text-slate-400"
               }>
-                {it.status === "done" ? "✓ เสร็จ" : it.status === "dup" ? "ซ้ำ — ใช้ตัวเดิม" :
-                 it.status === "error" ? `✕ ${it.msg ?? "ผิดพลาด"}` : it.status === "uploading" ? "กำลังอัป…" : formatBytes(it.file.size)}
+                {it.status === "done" ? t("✓ เสร็จ", "✓ Done") : it.status === "dup" ? t("ซ้ำ — ใช้ตัวเดิม", "Duplicate — reused") :
+                 it.status === "error" ? `✕ ${it.msg ?? t("ผิดพลาด", "Error")}` : it.status === "uploading" ? t("กำลังอัป…", "Uploading…") : formatBytes(it.file.size)}
               </span>
             </div>
           ))}
@@ -864,29 +876,29 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
 
       {/* ย่อขนาดรูปก่อนอัป — ประหยัดพื้นที่/โหลดเร็ว · เลือก "ขนาดจริง" ถ้าต้องเก็บไฟล์เต็ม */}
       <div className="mb-3">
-        <p className="text-[12px] text-slate-500 mb-1">ย่อขนาดรูปก่อนอัป <span className="text-[10px] text-slate-400">(ด้านกว้าง · ไฟล์ที่ไม่ใช่รูปไม่ถูกย่อ)</span></p>
+        <p className="text-[12px] text-slate-500 mb-1">{t("ย่อขนาดรูปก่อนอัป", "Shrink image before upload")} <span className="text-[10px] text-slate-400">{t("(ด้านกว้าง · ไฟล์ที่ไม่ใช่รูปไม่ถูกย่อ)", "(width · non-image files aren't shrunk)")}</span></p>
         <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
-          {[{ w: 800, label: "800px" }, { w: 1200, label: "1200px" }, { w: 1600, label: "1600px" }, { w: 0, label: "ขนาดจริง" }].map((o, i) => (
+          {[{ w: 800, label: "800px" }, { w: 1200, label: "1200px" }, { w: 1600, label: "1600px" }, { w: 0, label: t("ขนาดจริง", "Full size") }].map((o, i) => (
             <button key={o.w} type="button" onClick={() => setResizeW(o.w)} disabled={busy}
               className={`h-8 px-3 text-[12px] ${i > 0 ? "border-l border-slate-200" : ""} ${resizeW === o.w ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"} disabled:opacity-50`}>
               {resizeW === o.w ? "✓ " : ""}{o.label}
             </button>
           ))}
         </div>
-        {resizeW === 0 && <p className="text-[11px] text-amber-600 mt-1">⚠ เก็บขนาดจริง — ไฟล์ใหญ่ขึ้น (ไม่เกิน 25MB/ไฟล์)</p>}
+        {resizeW === 0 && <p className="text-[11px] text-amber-600 mt-1">{t("⚠ เก็บขนาดจริง — ไฟล์ใหญ่ขึ้น (ไม่เกิน 25MB/ไฟล์)", "⚠ Keeping full size — larger files (max 25MB/file)")}</p>}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="text-[12px] text-slate-500">
-          แท็ก (คั่นด้วย ,)
-          <input value={tagsStr} onChange={(e) => setTagsStr(e.target.value)} placeholder="สินค้า, กระเป๋า"
+          {t("แท็ก (คั่นด้วย ,)", "Tags (comma-separated)")}
+          <input value={tagsStr} onChange={(e) => setTagsStr(e.target.value)} placeholder={t("สินค้า, กระเป๋า", "product, bag")}
             className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
         </label>
         <label className="text-[12px] text-slate-500">
-          อัลบั้ม
+          {t("อัลบั้ม", "Album")}
           <select value={collectionId} onChange={(e) => setCollectionId(e.target.value)}
             className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="">— ไม่ระบุ —</option>
+            <option value="">{t("— ไม่ระบุ —", "— None —")}</option>
             {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </label>
@@ -901,6 +913,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
   ids?: string[]; onNavigate?: (id: string) => void;
 }) {
   // เลื่อนดูรูปก่อนหน้า/ถัดไป (ตามลำดับในกริด) โดยไม่ต้องปิด-เปิด
+  const t = useT();
   const navIdx = ids ? ids.indexOf(id) : -1;
   const prevId = navIdx > 0 ? ids![navIdx - 1] : null;
   const nextId = ids && navIdx >= 0 && navIdx < ids.length - 1 ? ids![navIdx + 1] : null;
@@ -1356,6 +1369,7 @@ function Meta({ label, value }: { label: string; value: string }) {
 }
 
 function UsageList({ usages }: { usages: AssetUsage[] }) {
+  const t = useT();
   if (usages.length === 0)
     return <p className="text-[12px] text-slate-400 mt-3 pt-3 border-t border-slate-100">ยังไม่ถูกใช้ที่ไหน — ลบได้</p>;
   return (
@@ -1375,6 +1389,7 @@ function UsageList({ usages }: { usages: AssetUsage[] }) {
 // ── สร้างอัลบั้มใหม่ ──
 function NewCollectionModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const toast = useToast();
+  const t = useT();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const create = async () => {
@@ -1410,6 +1425,7 @@ function NewCollectionModal({ onClose, onDone }: { onClose: () => void; onDone: 
 function BulkTagModal({ count, tags, onClose, onApply }: {
   count: number; tags: AssetTag[]; onClose: () => void; onApply: (tag: string) => void;
 }) {
+  const t = useT();
   const [name, setName] = useState("");
   const apply = () => { if (name.trim()) onApply(name.trim()); };
   return (
@@ -1441,6 +1457,7 @@ function BulkTagModal({ count, tags, onClose, onApply }: {
 function BulkMoveModal({ count, collections, onClose, onApply }: {
   count: number; collections: AssetCollection[]; onClose: () => void; onApply: (collectionId: string) => void;
 }) {
+  const t = useT();
   const [col, setCol] = useState("");
   return (
     <ERPModal open onClose={onClose} title={`เพิ่ม ${count} ไฟล์เข้าอัลบั้ม`} size="sm"
@@ -1463,6 +1480,7 @@ function BulkMoveModal({ count, collections, onClose, onApply }: {
 
 // แถวฟิลด์ใน bulk edit — ติ๊กเปิด/ปิดการแก้ฟิลด์ (module-level กัน remount ตอนพิมพ์)
 function BulkEditRow({ on, setOn, label, preview, children }: { on: boolean; setOn: (v: boolean) => void; label: string; preview?: React.ReactNode; children: React.ReactNode }) {
+  const t = useT();
   return (
     <div className={`rounded-lg border p-2.5 ${on ? "border-indigo-200 bg-indigo-50/30" : "border-slate-200"}`}>
       <label className="flex items-center gap-2 text-[12px] font-medium text-slate-700 cursor-pointer">
@@ -1476,6 +1494,7 @@ function BulkEditRow({ on, setOn, label, preview, children }: { on: boolean; set
 
 // สวิตช์โหมด "ใส่ค่าเดียว (ทุกไฟล์)" ↔ "แก้แยกแต่ละไฟล์"
 function BulkModeToggle({ mode, setMode }: { mode: "all" | "each"; setMode: (m: "all" | "each") => void }) {
+  const t = useT();
   return (
     <div className="inline-flex items-center gap-0.5 bg-slate-100 rounded-lg p-0.5 text-[11px]">
       <button type="button" onClick={() => setMode("all")} className={`px-2.5 h-6 rounded-md ${mode === "all" ? "bg-white shadow-sm font-medium text-slate-800" : "text-slate-500"}`}>ใส่ค่าเดียว (ทุกไฟล์)</button>
@@ -1492,6 +1511,7 @@ function BulkEditModal({ ids, artTypes, onClose, onDone }: {
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   const [artTypeList, setArtTypeList] = useState<LookupItem[]>(artTypes);
   const [busy, setBusy] = useState(false);
+  const t = useT();
   const [enBrand, setEnBrand] = useState(false); const [brandId, setBrandId] = useState("");
   const [enType, setEnType] = useState(false); const [types, setTypes] = useState<string[]>([]);
   const [enSize, setEnSize] = useState(false); const [sizes, setSizes] = useState<AssetSize[]>([]); const [sizeMode, setSizeMode] = useState<"all" | "each">("all");
@@ -1698,6 +1718,7 @@ function BulkFolderModal({ ids, firstAsset, onClose, onDone }: {
 }) {
   const toast = useToast();
   const { brandBase, typeSub } = useDriveFolderMaps();
+  const t = useT();
   const [mode, setMode] = useState<"separate" | "combined">("separate");
   const [folderName, setFolderName] = useState(firstAsset?.title ?? "");   // default = ชื่อรูปแรก
   const [brandId, setBrandId] = useState("");
@@ -1817,7 +1838,7 @@ async function uploadArtworkToDrive(opts: {
 }
 
 // ── เพิ่ม Artwork ลงบัตร (รูป + ชนิด + ชื่อ + แท็ก + ไซส์ + location + อัลบั้ม + Parent SKU + keyword) ──
-function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initialFile, defaultCollectionIds }: { actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFile?: File | null; defaultCollectionIds?: string[] }) {
+function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initialFile, defaultCollectionIds, targetFolder }: { actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFile?: File | null; defaultCollectionIds?: string[]; targetFolder?: { id: string; url: string; label: string } | null }) {
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -1835,6 +1856,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
   const [cols, setCols] = useState<AssetCollection[]>(collections);       // สำเนาไว้ต่อท้ายเมื่อสร้างอัลบั้มใหม่ในฟอร์ม
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const t = useT();
   const [ruleOpen, setRuleOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [rule, , reloadRule] = useArtworkPathRule();
@@ -1859,6 +1881,7 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
     const previewFile = file ? await previewForDrive(file) : null;   // รูปตัวอย่างลง Drive: เต็มขนาดถ้า ≤4MB
     const { folderLink, largeCount } = await uploadArtworkToDrive({
       name: title, artworkType: artTypesSel[0], brandId, srcFiles, previewFile,
+      folderId: targetFolder?.id || undefined,   // ลากเข้ามุมมองโฟลเดอร์ → อัปเข้าโฟลเดอร์นั้นเลย
       onProgress: (done, total) => setDriveProg({ done, total }),
     });
     if (largeCount) toast.warning(`ไฟล์ใหญ่ ${largeCount} ไฟล์ยังไม่อัปอัตโนมัติ (เกิน 4MB) — เปิดโฟลเดอร์ Drive จากลิงก์แล้วลากขึ้นเอง`);
@@ -1894,8 +1917,8 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
     }
   };
 
-  // ลากรูปมาวางบนหน้าคลัง → เปิด popup พร้อมรูปที่ลากมา
-  useEffect(() => { if (initialFile) pick(initialFile); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // ลากรูปมาวางบนหน้าคลัง → เปิด popup พร้อมรูปที่ลากมา · มีโฟลเดอร์ปลายทาง (ลากเข้ามุมมองโฟลเดอร์) → ตั้งลิงก์ให้เลย
+  useEffect(() => { if (initialFile) pick(initialFile); if (targetFolder) setMasterUrl(targetFolder.url); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   // เลือกแบรนด์/ชนิด หรือแม็ปโหลดเสร็จ → เติม path ตามแบรนด์ใหม่ (ถ้ายัง auto อยู่)
   useEffect(() => { if (pathAuto && title.trim()) setMasterPath(buildPath(title)); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [brandId, artTypesSel, brandBase, typeSub]);
 
@@ -1903,8 +1926,8 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
     if (!file) { toast.error("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)"); return; }
     if (!brandId) { toast.error("เลือกแบรนด์ก่อน"); return; }
     if (!artTypesSel.length) { toast.error("เลือกชนิด artwork ก่อน"); return; }
-    // สร้างโฟลเดอร์ Drive เมื่อ: มีไฟล์ต้นฉบับโยนขึ้น หรือ ติ๊ก "สร้างอัตโนมัติ" และยังไม่มีลิงก์เอง
-    const willAutoFolder = driveOn && autoFolder && !masterUrl.trim();
+    // สร้างโฟลเดอร์ Drive เมื่อ: มีไฟล์ต้นฉบับโยนขึ้น หรือ ติ๊ก "สร้างอัตโนมัติ" และยังไม่มีลิงก์เอง · มีโฟลเดอร์ปลายทาง = อัปเข้าเลย
+    const willAutoFolder = driveOn && (autoFolder && !masterUrl.trim() || !!targetFolder);
     const willDrive = driveOn && (srcFiles.length > 0 || willAutoFolder);
     if (!masterPath.trim() && !masterUrl.trim() && !willDrive) { toast.error("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS / ลิงก์ / สร้างโฟลเดอร์ Drive)"); return; }
     setBusy(true);
@@ -2008,6 +2031,12 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
         <ParentSkuField value={parentCodes} onChange={setParentCodes} />
       </div>
 
+      {targetFolder && (
+        <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-[12px] text-emerald-800">
+          📎 จะเพิ่มเข้าโฟลเดอร์เดียวกับ <b>“{targetFolder.label}”</b> — รูป/ไฟล์ต้นฉบับจะไปอยู่ในโฟลเดอร์นี้ (ไม่สร้างโฟลเดอร์ใหม่)
+        </div>
+      )}
+
       {/* location ไฟล์ต้นฉบับ + tooltip + จับผิดโฟลเดอร์ */}
       <div className="mt-3 pt-3 border-t border-slate-100">
         <div className="flex items-center justify-between mb-1">
@@ -2077,10 +2106,11 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone, initia
 
 // ── เพิ่ม Artwork หลายรูปพร้อมกัน (ตาราง inline) — ลากหลายไฟล์ → 1 แถว/ไฟล์ → แก้แล้วบันทึกทีเดียว ──
 type MassRow = { id: number; file: File; preview: string | null; name: string; types: string[]; path: string; url: string; srcFiles: File[]; sizes: AssetSize[]; parentCodes: string[]; pathAuto: boolean };
-function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initialFiles, defaultAlbums }: {
-  actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFiles?: File[] | null; defaultAlbums?: string[];
+function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initialFiles, defaultAlbums, targetFolder }: {
+  actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void; initialFiles?: File[] | null; defaultAlbums?: string[]; targetFolder?: { id: string; url: string; label: string } | null;
 }) {
   const toast = useToast();
+  const t = useT();
   const [rows, setRows] = useState<MassRow[]>([]);
   const [cols, setCols] = useState<AssetCollection[]>(collections);
   const [artTypeList, setArtTypeList] = useState<LookupItem[]>(artTypes);
@@ -2146,20 +2176,20 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
     if (!batchBrandId) { toast.error("เลือกแบรนด์ก่อน (ใช้กับทุกรูป)"); return; }
     // โหมดโฟลเดอร์เดียว = ทุกใบได้ลิงก์ Drive อยู่แล้ว → ไม่ต้องมี path/ลิงก์เอง
     // แถวที่ไม่มี path/ลิงก์ แต่มีไฟล์ต้นฉบับให้อัปขึ้น Drive ก็ถือว่าครบ (ได้ลิงก์โฟลเดอร์มาเติมให้)
-    const missing = (driveOn && oneFolder) ? [] : rows.filter((r) => !r.path.trim() && !r.url.trim() && !(driveOn && r.srcFiles.length > 0));
+    const missing = (driveOn && (oneFolder || targetFolder)) ? [] : rows.filter((r) => !r.path.trim() && !r.url.trim() && !(driveOn && r.srcFiles.length > 0));
     if (missing.length) { toast.error(`มี ${missing.length} แถวยังไม่ใส่ที่อยู่ไฟล์ต้นฉบับ (path / ลิงก์ / โยนไฟล์ขึ้น Drive)`); return; }
     // ชื่อโฟลเดอร์รวม (โหมดโฟลเดอร์เดียว) = ที่ตั้งไว้ · ไม่ตั้ง = ชื่อร่วมของรูป/รูปแรก
     const combinedName = oneFolderName.trim() || commonNameSeed(rows.map((r) => r.name)) || rows[0]?.name?.trim() || "artwork";
     const combinedPath = oneFolder ? massPath(combinedName, rows[0]?.types ?? []) : "";   // path ชี้โฟลเดอร์รวม (ทุกใบเหมือนกัน)
 
     // snapshot ค่าที่ต้องใช้ (โมดัลปิดแล้วยังทำงานต่อได้) → ส่งงานไปวิ่งเบื้องหลัง + โชว์กล่องสถานะมุมจอ
-    const jobRows = rows, jobBrand = batchBrandId, jobAlbums = batchAlbums, jobDrive = driveOn, jobOneFolder = oneFolder;
+    const jobRows = rows, jobBrand = batchBrandId, jobAlbums = batchAlbums, jobDrive = driveOn, jobOneFolder = oneFolder || !!targetFolder, jobTarget = targetFolder;
     runBackgroundTask({
       label: `เพิ่ม Artwork ${jobRows.length} รูป`,
       total: jobRows.length,
       run: async (report) => {
         let ok = 0, fail = 0, largeTotal = 0;
-        let sharedFolderId = "";   // โหมดโฟลเดอร์เดียว: ใบแรกสร้างโฟลเดอร์ → ใบต่อ ๆ ไปอัปเข้าโฟลเดอร์นี้
+        let sharedFolderId = jobTarget?.id ?? "";   // โหมดโฟลเดอร์เดียว: ใบแรกสร้างโฟลเดอร์ → ใบต่อ ๆ ไปอัปเข้าโฟลเดอร์นี้ · มีปลายทาง=อัปเข้าเลย
         for (let i = 0; i < jobRows.length; i++) {
           const r = jobRows[i];
           try {
@@ -2215,6 +2245,11 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
           </div>
         </div>
       }>
+      {targetFolder && (
+        <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-[12px] text-emerald-800">
+          📎 ทุกรูปจะเพิ่มเข้าโฟลเดอร์เดียวกับ <b>“{targetFolder.label}”</b> (ไม่สร้างโฟลเดอร์ใหม่)
+        </div>
+      )}
       {/* โซนลากไฟล์หลายไฟล์ */}
       <div
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -2340,6 +2375,7 @@ function MassArtworkModal({ actor, artTypes, collections, onClose, onDone, initi
 
 // ── ตัวเลือกแท็กแบบ chips (m2m) — เลือกของเดิม + เพิ่มใหม่ ──
 function TagChips({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const t = useT();
   const [all, setAll] = useState<string[]>([]);
   const [input, setInput] = useState("");
   useEffect(() => {
@@ -2383,6 +2419,7 @@ function CollectionMultiSelect({ value, collections, onChange, onCreated }: {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
+  const t = useT();
   const nameOf = (id: string) => collections.find((c) => c.id === id)?.name ?? id;
   const add = (id: string) => { if (id && !value.includes(id)) onChange([...value, id]); };
   const remaining = collections.filter((c) => !value.includes(c.id));
@@ -2441,6 +2478,7 @@ function ArtTypeMultiSelect({ value, types, onChange, onCreated, disabled }: {
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const add = (name: string) => { const n = name.trim(); if (n && !value.includes(n)) onChange([...value, n]); };
+  const t = useT();
   const remaining = types.filter((t) => !value.includes(t.name));
   const create = async () => {
     const n = newName.trim(); if (!n) return;
@@ -2493,6 +2531,7 @@ function ArtTypeMultiSelect({ value, types, onChange, onCreated, disabled }: {
 const sizeText = (s: AssetSize | null | undefined) => (s ? `${s.label ? `${s.label} · ` : ""}${s.w ?? "?"}×${s.h ?? "?"} ${s.unit}` : "");
 function PrintItemsField({ value, onChange, disabled }: { value: PrintItem[]; onChange: (v: PrintItem[]) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
+  const t = useT();
   const [availById, setAvailById] = useState<Record<string, AssetSize[]>>({});   // ไซส์ที่ artwork แต่ละลายมี (ไว้ทำ dropdown)
   const totalQty = value.reduce((s, i) => s + (Number(i.qty) || 0), 0);
 
@@ -2589,6 +2628,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [title, setTitle] = useState("");
+  const t = useT();
   const [ptype, setPtype] = useState("");                       // ประเภทงานพิมพ์ (code)
   const [subpath, setSubpath] = useState("");                   // โฟลเดอร์ Drive ที่จะเก็บ (แก้เองได้ · default จากประเภท)
   const [subpathTouched, setSubpathTouched] = useState(false);  // ผู้ใช้แก้ path เองแล้ว = ไม่ override ตอนสลับประเภท
@@ -2741,7 +2781,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
           <div className="mt-2">
             <p className="text-[11px] text-slate-500 mb-1">ย่อขนาดรูป preview <span className="text-[10px] text-slate-400">(ด้านกว้าง)</span></p>
             <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
-              {[{ w: 800, label: "800px" }, { w: 1200, label: "1200px" }, { w: 1600, label: "1600px" }, { w: 0, label: "ขนาดจริง" }].map((o, i) => (
+              {[{ w: 800, label: "800px" }, { w: 1200, label: "1200px" }, { w: 1600, label: "1600px" }, { w: 0, label: t("ขนาดจริง", "Full size") }].map((o, i) => (
                 <button key={o.w} type="button" onClick={() => setResizeW(o.w)} disabled={busy}
                   className={`h-8 px-2.5 text-[12px] ${i > 0 ? "border-l border-slate-200" : ""} ${resizeW === o.w ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"} disabled:opacity-50`}>
                   {resizeW === o.w ? "✓ " : ""}{o.label}
@@ -2774,7 +2814,7 @@ function PrintJobAddModal({ actor, printTypes, collections, defaultCollectionIds
 
           <label className="block text-[12px] text-slate-500">แบรนด์ <span className="text-[10px] text-slate-400">(ใช้จัดที่ตั้งโฟลเดอร์ Drive)</span>
             <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
-              <option value="">— ไม่ระบุ —</option>
+              <option value="">{t("— ไม่ระบุ —", "— None —")}</option>
               {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select></label>
 
@@ -2904,6 +2944,7 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
   defaultCollectionIds?: string[]; initialFiles?: File[] | null; onClose: () => void; onDone: () => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const { brandBase } = useDriveFolderMaps();
   const [rows, setRows] = useState<MassPrintRow[]>([]);
   const [ptype, setPtype] = useState("");                       // ประเภทงานพิมพ์ ใช้ทั้งชุด
@@ -3040,7 +3081,7 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="text-[12px] text-slate-500">แบรนด์
             <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white">
-              <option value="">— ไม่ระบุ —</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              <option value="">{t("— ไม่ระบุ —", "— None —")}</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select></label>
           <label className="text-[12px] text-slate-500">📂 โฟลเดอร์ย่อย (ทั้งชุด)
             <input value={group} onChange={(e) => setGroup(e.target.value)} disabled={!!massShared} list="mass-print-groups" placeholder="เช่น goodgoods (เว้นว่าง = ลงใน DTF ตรง ๆ)"
@@ -3114,6 +3155,7 @@ function MassPrintModal({ actor, printTypes, collections, defaultCollectionIds, 
 // ── จัดการประเภทงานพิมพ์ (DTF/UV/…) + ขนาดเริ่มต้นต่อประเภท — ตั้งค่าเองได้ ไม่ต้องแก้โค้ด ──
 function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType[]; onClose: () => void; onChanged: () => Promise<void> | void }) {
   const toast = useToast();
+  const t = useT();
   const [rows, setRows] = useState<PrintType[]>(types);
   const [busy, setBusy] = useState(false);
   const [nc, setNc] = useState({ code: "", name: "", w: "", h: "", unit: "cm", sub: "" });
@@ -3204,28 +3246,28 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
 
       <div className="space-y-1.5 mb-3">
         {rows.length === 0 && <p className="text-[12px] text-slate-400 py-3 text-center">ยังไม่มีประเภทงานพิมพ์</p>}
-        {rows.map((t) => (
-          <div key={t.id} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+        {rows.map((pt) => (
+          <div key={pt.id} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5">
             <div className="flex items-center gap-2">
-              <span className="w-20 font-mono text-[12px] text-slate-700 truncate">{t.code}</span>
-              <input defaultValue={t.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== t.name) void patch(t, { name: v }); }}
+              <span className="w-20 font-mono text-[12px] text-slate-700 truncate">{pt.code}</span>
+              <input defaultValue={pt.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== pt.name) void patch(pt, { name: v }); }}
                 className={`${inp} flex-1`} placeholder="ชื่อที่แสดง" />
               <div className="flex items-center gap-1">
-                <input defaultValue={t.default_w ?? ""} inputMode="decimal" placeholder="กว้าง"
-                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(t.default_w ?? "")) void patch(t, { default_w: v }); }}
+                <input defaultValue={pt.default_w ?? ""} inputMode="decimal" placeholder="กว้าง"
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(pt.default_w ?? "")) void patch(pt, { default_w: v }); }}
                   className={`${inp} w-12 text-center`} />
                 <span className="text-slate-300 text-[11px]">×</span>
-                <input defaultValue={t.default_h ?? ""} inputMode="decimal" placeholder="สูง"
-                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(t.default_h ?? "")) void patch(t, { default_h: v }); }}
+                <input defaultValue={pt.default_h ?? ""} inputMode="decimal" placeholder="สูง"
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== String(pt.default_h ?? "")) void patch(pt, { default_h: v }); }}
                   className={`${inp} w-12 text-center`} />
-                <span className="text-[10px] text-slate-400">{t.unit}</span>
+                <span className="text-[10px] text-slate-400">{pt.unit}</span>
               </div>
-              <button onClick={() => setDelTarget(t)} disabled={busy} className="w-6 text-slate-400 hover:text-red-500 text-sm" title="ปิดใช้ประเภทนี้">🗑</button>
+              <button onClick={() => setDelTarget(pt)} disabled={busy} className="w-6 text-slate-400 hover:text-red-500 text-sm" title="ปิดใช้ประเภทนี้">🗑</button>
             </div>
             <div className="flex items-center gap-1.5 mt-1 pl-[5.5rem]">
               <span className="text-[10px] text-slate-400 shrink-0">📁 โฟลเดอร์ Drive</span>
-              <input defaultValue={t.drive_subpath ?? ""} placeholder="เช่น Printed/DTF (เว้นว่าง = ใช้รหัส)"
-                onBlur={(e) => { const v = e.target.value.trim(); if (v !== (t.drive_subpath ?? "")) void patch(t, { drive_subpath: v }); }}
+              <input defaultValue={pt.drive_subpath ?? ""} placeholder="เช่น Printed/DTF (เว้นว่าง = ใช้รหัส)"
+                onBlur={(e) => { const v = e.target.value.trim(); if (v !== (pt.drive_subpath ?? "")) void patch(pt, { drive_subpath: v }); }}
                 className={`${inp} flex-1 font-mono`} />
             </div>
           </div>
@@ -3259,6 +3301,7 @@ function ManagePrintTypesModal({ types, onClose, onChanged }: { types: PrintType
 // ── จัดการชนิด Artwork (lookup กลาง: เพิ่ม/แก้/ลบ) ──
 function ManageTypesModal({ types, onClose, onChanged }: { types: LookupItem[]; onClose: () => void; onChanged: () => void }) {
   const toast = useToast();
+  const t = useT();
   const [items, setItems] = useState<LookupItem[]>(types);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3326,6 +3369,7 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
   const toast = useToast();
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   const [brandId, setBrandId] = useState("");
+  const t = useT();
   const [scanning, setScanning] = useState(false);
   const [folders, setFolders] = useState<ScanFolder[] | null>(null);
   const [scanned, setScanned] = useState(0);
@@ -3537,10 +3581,11 @@ function DriveScanModal({ artTypes, onClose, onDone }: { artTypes: LookupItem[];
 }
 
 // ── ตัวแก้ "หลายไซส์" (กว้าง×สูง + ชื่อกำกับ + หน่วยต่อไซส์) ──
-const SIZE_UNITS: { v: AssetSize["unit"]; label: string }[] = [
-  { v: "cm", label: "ซม." }, { v: "mm", label: "มม." }, { v: "in", label: "นิ้ว" }, { v: "px", label: "px" },
+const SIZE_UNITS: { v: AssetSize["unit"]; label: string; en: string }[] = [
+  { v: "cm", label: "ซม.", en: "cm" }, { v: "mm", label: "มม.", en: "mm" }, { v: "in", label: "นิ้ว", en: "in" }, { v: "px", label: "px", en: "px" },
 ];
 function SizesEditor({ value, onChange, disabled }: { value: AssetSize[]; onChange: (v: AssetSize[]) => void; disabled?: boolean }) {
+  const t = useT();
   const set = (i: number, patch: Partial<AssetSize>) => onChange(value.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const numOrNull = (s: string) => (s.trim() === "" ? null : Number(s));
   return (
@@ -3556,7 +3601,7 @@ function SizesEditor({ value, onChange, disabled }: { value: AssetSize[]; onChan
             placeholder="สูง" className="w-16 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
           <select value={s.unit} onChange={(e) => set(i, { unit: e.target.value as AssetSize["unit"] })} disabled={disabled}
             className="h-8 px-1 text-[12px] border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
-            {SIZE_UNITS.map((u) => <option key={u.v} value={u.v}>{u.label}</option>)}
+            {SIZE_UNITS.map((u) => <option key={u.v} value={u.v}>{t(u.label, u.en)}</option>)}
           </select>
           {!disabled && <button type="button" onClick={() => onChange(value.filter((_, j) => j !== i))} className="text-slate-300 hover:text-rose-500 text-sm px-1">✕</button>}
         </div>
@@ -3570,6 +3615,7 @@ function SizesEditor({ value, onChange, disabled }: { value: AssetSize[]; onChan
 
 // ── เลือก Parent SKU ที่ใช้ (multi) — ค้นจาก /api/sku-browser?entity=parent-skus ──
 function ParentSkuField({ value, onChange, disabled }: { value: string[]; onChange: (v: string[]) => void; disabled?: boolean }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -3594,6 +3640,7 @@ function ParentSkuField({ value, onChange, disabled }: { value: string[]; onChan
 
 // ── เลือกแท็กแบบ "ปุ่มกด" (เก็บความรกของชิป/ตัวช่วยไว้ในป๊อปอัป) ──
 function TagPickerField({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -3674,6 +3721,7 @@ function brandFolderPath(name: string, brandId: string, firstType: string | unde
 // ตั้งค่าโฟลเดอร์ Drive: แบรนด์ → โฟลเดอร์ฐาน · ชนิด → ชื่อซับโฟลเดอร์ (โชว์เมื่อ Drive ตั้งค่าแล้ว)
 function DriveFolderMap() {
   const toast = useToast();
+  const t = useT();
   const [driveOn, setDriveOn] = useState(false);
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   const [types, setTypes] = useState<string[]>([]);
@@ -3747,12 +3795,12 @@ function DriveFolderMap() {
         <p className="text-[12px] text-slate-600 font-medium">🗂️ ชื่อซับโฟลเดอร์ตามชนิด (ใต้โฟลเดอร์แบรนด์)</p>
         <p className="text-[11px] text-slate-400 mb-2">เช่น โลโก้ → “01_Logo” · ปล่อยว่าง = ใช้ชื่อชนิดเป็นชื่อซับ</p>
         <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-          {types.map((t) => (
-            <div key={t} className="flex items-center gap-2">
-              <span className="w-24 text-[12px] text-slate-600 truncate shrink-0" title={t}>{t}</span>
-              <input value={tDraft[t] ?? ""} onChange={(e) => setTDraft((d) => ({ ...d, [t]: e.target.value }))} placeholder={t}
+          {types.map((ty) => (
+            <div key={ty} className="flex items-center gap-2">
+              <span className="w-24 text-[12px] text-slate-600 truncate shrink-0" title={ty}>{ty}</span>
+              <input value={tDraft[ty] ?? ""} onChange={(e) => setTDraft((d) => ({ ...d, [ty]: e.target.value }))} placeholder={ty}
                 className="flex-1 h-8 px-2 text-[12px] border border-slate-200 rounded" />
-              <button type="button" onClick={() => saveType(t)} className="h-8 px-2 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">บันทึก</button>
+              <button type="button" onClick={() => saveType(ty)} className="h-8 px-2 text-[11px] rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0">บันทึก</button>
             </div>
           ))}
           {types.length === 0 && <p className="text-[11px] text-slate-400">ยังไม่มีชนิดงาน</p>}
@@ -3765,6 +3813,7 @@ function DriveFolderMap() {
 // ตั้งค่าโฟลเดอร์มาตรฐาน (admin) — หลาย path ได้ (บรรทัดละ 1)
 function ArtworkPathRuleModal({ rule, onClose, onSaved }: { rule: PathRule; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
+  const t = useT();
   const [text, setText] = useState(rule.base_paths.join("\n"));
   const [busy, setBusy] = useState(false);
   const save = async () => {
