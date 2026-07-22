@@ -9,6 +9,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import type { ExecutiveResponse, ExecutiveSummary } from "@/app/api/dashboard/executive/route";
+import type { DeptOverview } from "@/app/api/dashboard/dept-overview/route";
 
 const baht  = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
 const bahtC = (n: number) => {
@@ -31,14 +32,20 @@ function Dot({ real }: { real: boolean }) {
 
 export function ExecutiveView({ salesTrend = [] }: { salesTrend?: { d: string; sales: number }[] }) {
   const [data, setData]       = useState<ExecutiveSummary | null>(null);
+  const [dept, setDept]       = useState<DeptOverview | null>(null);   // สรุปต่อแผนก (ของกลาง)
   const [loading, setLoading] = useState(true);
   const [err, setErr]         = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true); setErr(null);
-    apiFetch("/api/dashboard/executive")
-      .then((r) => r.json())
-      .then((j: ExecutiveResponse) => { if (j.error) setErr(j.error); else setData(j.data); })
+    Promise.all([
+      apiFetch("/api/dashboard/executive").then((r) => r.json()) as Promise<ExecutiveResponse>,
+      apiFetch("/api/dashboard/dept-overview").then((r) => r.json()).catch(() => ({ data: null })),
+    ])
+      .then(([j, d]) => {
+        if (j.error) setErr(j.error); else setData(j.data);
+        setDept((d?.data ?? null) as DeptOverview | null);
+      })
       .catch(() => setErr("โหลดข้อมูลผู้บริหารไม่ได้ กรุณาลองใหม่"))
       .finally(() => setLoading(false));
   }, []);
@@ -95,6 +102,10 @@ export function ExecutiveView({ salesTrend = [] }: { salesTrend?: { d: string; s
 
       {/* ---- กราฟยอดขาย 14 วัน ---- */}
       <SalesBars data={salesTrend} />
+
+      {/* ---- แยกตามแผนก (ตัวเลขสำคัญ + กดเจาะเข้าดู) ---- */}
+      <SectionLabel>แยกตามแผนก</SectionLabel>
+      <DeptGrid s={s} f={f} o={o} dept={dept} />
 
       {/* ---- การเงิน ---- */}
       <SectionLabel>การเงิน</SectionLabel>
@@ -181,6 +192,79 @@ function FinCard({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div className="text-[13px] font-semibold text-slate-500 -mb-1 px-0.5">{children}</div>;
+}
+
+// ---- การ์ดแผนก (ของกลาง): หัวข้อ + ปุ่มเจาะเข้าดู + ตัวเลขสำคัญ ----
+type DeptStat = { v: React.ReactNode; l: string; tone?: "danger" | "warning" };
+
+function DeptCard({ icon, title, href, stats }: { icon: string; title: string; href: string; stats: DeptStat[] }) {
+  const toneColor = (t?: DeptStat["tone"]) =>
+    t === "danger" ? "text-red-600" : t === "warning" ? "text-amber-600" : "text-slate-800";
+  return (
+    <Link href={href} className="block bg-white border border-slate-200 rounded-xl p-4 hover:border-slate-300 hover:shadow-sm transition-all">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-lg leading-none">{icon}</span>
+        <span className="text-sm font-semibold text-slate-800 flex-1 truncate">{title}</span>
+        <span className="text-xs text-blue-600 shrink-0">ดูทั้งหมด →</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {stats.map((st, i) => (
+          <div key={i}>
+            <div className={`text-xl font-bold tabular-nums ${toneColor(st.tone)}`}>{st.v}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">{st.l}</div>
+          </div>
+        ))}
+      </div>
+    </Link>
+  );
+}
+
+// ---- 6 การ์ดแผนก: ผลิต / ซื้อ / ขาย / QC / Design / จัดการงาน ----
+function DeptGrid({ s, f, o, dept }: {
+  s: ExecutiveSummary["sales"]; f: ExecutiveSummary["finance"]; o: ExecutiveSummary["ops"];
+  dept: DeptOverview | null;
+}) {
+  const p = dept?.production, pu = dept?.purchasing, sa = dept?.sales, q = dept?.qc, d = dept?.design, t = dept?.tasks;
+  const n  = (x?: number) => (x ?? 0).toLocaleString("th-TH");
+  const gt0 = (x?: number) => (x ?? 0) > 0;
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <DeptCard icon="🏭" title="ผลิต" href="/master/production-dashboard" stats={[
+        { v: n(p?.in_production), l: "กำลังผลิต (ใบ)" },
+        { v: n(p?.unassigned),   l: "ยังไม่แจกงาน" },
+        { v: n(o.mo_overdue),    l: "เลยกำหนด", tone: gt0(o.mo_overdue) ? "danger" : undefined },
+        { v: bahtC(p?.labor_month ?? 0), l: "ค่าแรงเดือนนี้" },
+      ]} />
+      <DeptCard icon="🛒" title="ซื้อ (จัดซื้อ)" href="/purchasing/dashboard" stats={[
+        { v: n(o.pr_waiting),       l: "ขอซื้อรออนุมัติ", tone: gt0(o.pr_waiting) ? "warning" : undefined },
+        { v: n(pu?.awaiting_goods), l: "รอของเข้า" },
+        { v: bahtC(f.ap_unpaid),    l: "ค้างจ่าย", tone: gt0(f.ap_unpaid) ? "danger" : undefined },
+        { v: bahtC(pu?.spend_month ?? 0), l: "ยอดซื้อเดือนนี้" },
+      ]} />
+      <DeptCard icon="💰" title="ขาย" href="/sales-orders" stats={[
+        { v: bahtC(s.internal_month), l: "ยอดขายเดือนนี้" },
+        { v: n(f.ar_count),           l: "ใบวางบิลค้าง", tone: gt0(f.ar_count) ? "warning" : undefined },
+        { v: n(sa?.orders_month),     l: "ออเดอร์เดือนนี้" },
+        { v: bahtC(f.ar_due),         l: "ลูกหนี้ค้างเก็บ" },
+      ]} />
+      <DeptCard icon="✅" title="QC" href="/master/qc-warehouse" stats={[
+        { v: n(o.qc_defect),      l: "ของเสียค้าง", tone: gt0(o.qc_defect) ? "danger" : undefined },
+        { v: n(q?.pending_check), l: "งานรอตรวจ", tone: gt0(q?.pending_check) ? "warning" : undefined },
+      ]} />
+      <DeptCard icon="🎨" title="Design (ออกแบบ)" href="/master/design-dashboard" stats={[
+        { v: n(d?.due_soon),  l: "ใกล้ครบกำหนด", tone: gt0(d?.due_soon) ? "danger" : undefined },
+        { v: n(d?.designing), l: "กำลังออกแบบ" },
+        { v: n(d?.quoted),    l: "รอส่งลูกค้า" },
+        { v: n(d?.revising),  l: "กำลังแก้ไข" },
+      ]} />
+      <DeptCard icon="🗂️" title="จัดการงาน" href="/tasks" stats={[
+        { v: n(t?.total_active),   l: "งานทั้งหมด" },
+        { v: n(t?.review_pending), l: "รอตรวจ/อนุมัติ", tone: gt0(t?.review_pending) ? "warning" : undefined },
+        { v: n(t?.overdue),        l: "เกินกำหนด", tone: gt0(t?.overdue) ? "danger" : undefined },
+        { v: n(t?.done_month),     l: "เสร็จเดือนนี้" },
+      ]} />
+    </div>
+  );
 }
 
 // ---- กราฟแท่งยอดขาย 14 วัน (reuse ข้อมูล /api/dashboard/sales-trend) ----
