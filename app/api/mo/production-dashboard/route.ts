@@ -15,23 +15,34 @@ export const revalidate = 0;
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-// รูป/แบรนด์ต่อ SKU (mirror ของ /api/mo/work-board — pure helper, ถ้าจะใช้ซ้ำที่ 3 แห่งค่อยแยกเป็น lib)
-type SkuInfo = { image_url: string | null; brand: string | null; brand_color: string | null };
+// รูป/แบรนด์/หมวดสินค้าต่อ SKU (mirror ของ /api/mo/work-board — pure helper, ถ้าจะใช้ซ้ำที่ 3 แห่งค่อยแยกเป็น lib)
+type SkuInfo = { image_url: string | null; brand: string | null; brand_color: string | null; category: string | null };
 async function skuInfoMap(admin: ReturnType<typeof supabaseAdmin>, skus: string[]): Promise<Map<string, SkuInfo>> {
   const map = new Map<string, SkuInfo>();
   const list = [...new Set(skus.filter(Boolean))];
+  // เก็บดิบก่อน (code → ข้อมูล + category_id) แล้วค่อยแปลง category_id → ชื่อหมวดสินค้า
+  const raw: { code: string; image_url: string | null; brand: string | null; brand_color: string | null; category_id: string | null }[] = [];
   for (let i = 0; i < list.length; i += 300) {
     const chunk = list.slice(i, i + 300);
     const { data } = await admin.from("skus_v2")
-      .select("code, cover_image_r2_key, parent:parent_skus_v2!parent_sku_id ( brand:brands!brand_id ( name, color ) )")
+      .select("code, cover_image_r2_key, parent:parent_skus_v2!parent_sku_id ( category_id, brand:brands!brand_id ( name, color ) )")
       .in("code", chunk);
     for (const s of (data ?? []) as Record<string, unknown>[]) {
-      const parent = (Array.isArray(s.parent) ? s.parent[0] : s.parent) as { brand?: unknown } | null;
+      const parent = (Array.isArray(s.parent) ? s.parent[0] : s.parent) as { brand?: unknown; category_id?: string | null } | null;
       const brand = (parent && (Array.isArray(parent.brand) ? parent.brand[0] : parent.brand)) as { name?: string; color?: string } | null;
       const key = s.cover_image_r2_key as string | null;
-      map.set(String(s.code), { image_url: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null, brand: brand?.name ?? null, brand_color: brand?.color ?? null });
+      raw.push({ code: String(s.code), image_url: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null, brand: brand?.name ?? null, brand_color: brand?.color ?? null, category_id: (parent?.category_id as string) ?? null });
     }
   }
+  // แปลง category_id → ชื่อหมวดสินค้า (product_categories) แล้วรวมเข้า map
+  const catIds = [...new Set(raw.map((r) => r.category_id).filter(Boolean) as string[])];
+  const catName = new Map<string, string>();
+  for (let i = 0; i < catIds.length; i += 300) {
+    const chunk = catIds.slice(i, i + 300);
+    const { data } = await admin.from("product_categories").select("id, name").in("id", chunk);
+    for (const c of (data ?? []) as Record<string, unknown>[]) catName.set(String(c.id), String(c.name));
+  }
+  for (const r of raw) map.set(r.code, { image_url: r.image_url, brand: r.brand, brand_color: r.brand_color, category: r.category_id ? (catName.get(r.category_id) ?? null) : null });
   return map;
 }
 
@@ -39,6 +50,7 @@ export type ProdJobCategory = "unassigned" | "in_production" | "piecework" | "do
 export type ProductionJob = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   image_url: string | null; brand: string | null; brand_color: string | null;
+  category: string | null;              // หมวดสินค้า (ประเภท) เช่น กระเป๋า / กระเป๋าสตางค์ / เข็มขัด
   qty: number; dispatched: number; received: number; remaining: number;
   progress_pct: number;                 // รับคืนแล้วกี่ % ของจำนวน
   due_date: string | null; status: string | null;
@@ -106,7 +118,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (dispatched - received > 0.0001) categories.push("in_production");
     if (pieceworkMo.has(moNo)) categories.push("piecework");
     if (qty > 0 && received >= qty - 0.0001) categories.push("done_waiting");
-    const inf = info.get(String(m.product_sku)) ?? { image_url: null, brand: null, brand_color: null };
+    const inf = info.get(String(m.product_sku)) ?? { image_url: null, brand: null, brand_color: null, category: null };
     counts.all += 1;
     if (categories.includes("unassigned")) counts.unassigned += 1;
     if (categories.includes("in_production")) counts.in_production += 1;

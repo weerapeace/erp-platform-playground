@@ -36,14 +36,15 @@ function StatusBadge({ status }: { status: string | null }) {
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${s.bg} ${s.text} ${s.border}`}>{s.label}</span>;
 }
 
-// จัดกลุ่ม (โหมดการ์ด) — แบรนด์ / สถานะ / เดือนกำหนดส่ง
-type GroupField = "mo_group" | "brand" | "status" | "due_month";
+// จัดกลุ่ม (โหมดการ์ด) — แบรนด์ / หมวดสินค้า / สถานะ / เดือนกำหนดส่ง
+type GroupField = "mo_group" | "brand" | "category" | "status" | "due_month";
 const GROUP_FIELDS: { key: GroupField; label: string }[] = [
-  { key: "mo_group", label: "ใบสั่งงาน (ชุด)" }, { key: "brand", label: "แบรนด์" }, { key: "status", label: "สถานะ" }, { key: "due_month", label: "เดือนกำหนดส่ง" },
+  { key: "mo_group", label: "ใบสั่งงาน (ชุด)" }, { key: "brand", label: "แบรนด์" }, { key: "category", label: "หมวดสินค้า (ประเภท)" }, { key: "status", label: "สถานะ" }, { key: "due_month", label: "เดือนกำหนดส่ง" },
 ];
 const groupValueOf = (j: ProductionJob, f: GroupField): string =>
   f === "mo_group" ? (j.mo_group || "— ยังไม่จับชุด —")
   : f === "brand" ? (j.brand || "— ไม่มีแบรนด์ —")
+  : f === "category" ? (j.category || "— ไม่มีหมวด —")
   : f === "status" ? (j.status ? getStatusStyle(j.status).label : "—")
   : (j.due_date ? new Date(j.due_date).toLocaleDateString("th-TH", { year: "numeric", month: "long" }) : "— ไม่มีกำหนดส่ง —");
 
@@ -254,6 +255,7 @@ const COLUMNS: ColumnDef<ProductionJob>[] = [
   { accessorKey: "product_name", header: "ชื่อสินค้า", size: 220, cell: ({ getValue }) => <span className="text-sm text-slate-700 line-clamp-2">{(getValue() as string) || "—"}</span> },
   { accessorKey: "mo_no", header: "ใบสั่งผลิต", size: 150, cell: ({ getValue }) => <span className="font-mono text-[11px] text-slate-400">{(getValue() as string) || "—"}</span> },
   { accessorKey: "brand", header: "แบรนด์", size: 120, meta: { filterable: true }, cell: ({ row }) => row.original.brand ? <span className="inline-flex items-center gap-1.5 text-sm text-slate-700"><span className="h-2.5 w-2.5 rounded-full" style={{ background: row.original.brand_color || "#cbd5e1" }} />{row.original.brand}</span> : <span className="text-slate-300">—</span> },
+  { accessorKey: "category", header: "หมวด (ประเภท)", size: 130, meta: { filterable: true }, cell: ({ getValue }) => { const v = getValue() as string | null; return v ? <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{v}</span> : <span className="text-slate-300">—</span>; } },
   { accessorKey: "qty", header: "จำนวน", size: 80, cell: ({ getValue }) => <span className="tabular-nums text-sm text-slate-600">{fmt(getValue() as number)}</span> },
   { accessorKey: "progress_pct", header: "คืบหน้า", size: 120, cell: ({ row }) => { const v = row.original.progress_pct; return <div className="flex items-center gap-1.5"><div className="h-1.5 w-14 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-400" style={{ width: `${v}%` }} /></div><span className="text-[11px] text-slate-400 tabular-nums">{fmt(row.original.received)}/{fmt(row.original.qty)}</span></div>; } },
   { accessorKey: "remaining", header: "เหลือจ่าย", size: 90, cell: ({ getValue }) => { const v = getValue() as number; return v > 0 ? <span className="tabular-nums text-sm font-semibold text-indigo-600">{fmt(v)}</span> : <span className="text-slate-300">—</span>; } },
@@ -402,13 +404,13 @@ export default function ProductionDashboardPage() {
               loading={loading}
               error={error ?? undefined}
               tableId="production-dashboard"
-              searchPlaceholder="ค้นหา SKU / ชื่อ / ใบสั่งผลิต / แบรนด์"
-              searchableKeys={["product_sku", "product_name", "mo_no", "brand"]}
+              searchPlaceholder="ค้นหา SKU / ชื่อ / ใบสั่งผลิต / แบรนด์ / หมวด"
+              searchableKeys={["product_sku", "product_name", "mo_no", "brand", "category"]}
               onRowClick={setSelectedJob}
               emptyMessage={cat === "all" ? "ยังไม่มีงานผลิต" : "ไม่มีงานในกลุ่มนี้"}
               enableCards
               defaultViewMode="cards"
-              cardConfig={{ primary: "product_name", subtitle: "product_sku", image: "image_url", badges: ["status"], lines: ["brand", "mo_no", "due_date", "dept_names"], imageHeight: "md" }}
+              cardConfig={{ primary: "product_name", subtitle: "product_sku", image: "image_url", badges: ["status"], lines: ["brand", "category", "mo_no", "due_date", "dept_names"], imageHeight: "md" }}
               exportFilename="production-dashboard"
             />
           )}
