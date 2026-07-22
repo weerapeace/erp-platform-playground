@@ -8,10 +8,13 @@
  * page = 0-based (หน้าแรก = 0) · onPage คืน index หน้าใหม่ (0-based)
  */
 import { useEffect, useState } from "react";
+import { useT } from "@/components/i18n";
 
-export function Pager({ page, pageSize, total, onPage, unitLabel = "รายการ" }: {
+export function Pager({ page, pageSize, total, onPage, unitLabel }: {
   page: number; pageSize: number; total: number; onPage: (p: number) => void; unitLabel?: string;
 }) {
+  const t = useT();
+  const unit = unitLabel ?? t("รายการ", "items");
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const from = total === 0 ? 0 : page * pageSize + 1;
   const to = Math.min(total, (page + 1) * pageSize);
@@ -24,11 +27,11 @@ export function Pager({ page, pageSize, total, onPage, unitLabel = "รายก
 
   return (
     <div className="flex items-center justify-between gap-3 flex-wrap text-[12px] text-slate-500">
-      <span>ทั้งหมด <b className="text-slate-700">{total.toLocaleString()}</b> {unitLabel} · แสดง {from.toLocaleString()}–{to.toLocaleString()}</span>
+      <span>{t("ทั้งหมด", "Total")} <b className="text-slate-700">{total.toLocaleString()}</b> {unit} · {t("แสดง", "showing")} {from.toLocaleString()}–{to.toLocaleString()}</span>
       <div className="flex items-center gap-1.5">
-        <button type="button" className={btn} onClick={() => go(0)} disabled={page <= 0} title="หน้าแรก">«</button>
-        <button type="button" className={btn} onClick={() => go(page - 1)} disabled={page <= 0}>‹ ก่อนหน้า</button>
-        <span className="flex items-center gap-1 px-1">หน้า
+        <button type="button" className={btn} onClick={() => go(0)} disabled={page <= 0} title={t("หน้าแรก", "First page")}>«</button>
+        <button type="button" className={btn} onClick={() => go(page - 1)} disabled={page <= 0}>‹ {t("ก่อนหน้า", "Prev")}</button>
+        <span className="flex items-center gap-1 px-1">{t("หน้า", "Page")}
           <input value={draft} inputMode="numeric"
             onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ""))}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); (e.target as HTMLInputElement).blur(); } }}
@@ -36,8 +39,8 @@ export function Pager({ page, pageSize, total, onPage, unitLabel = "รายก
             className="w-12 h-8 px-1 text-center border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           <span className="text-slate-400">/ {pages}</span>
         </span>
-        <button type="button" className={btn} onClick={() => go(page + 1)} disabled={page >= pages - 1}>ถัดไป ›</button>
-        <button type="button" className={btn} onClick={() => go(pages - 1)} disabled={page >= pages - 1} title="หน้าสุดท้าย">»</button>
+        <button type="button" className={btn} onClick={() => go(page + 1)} disabled={page >= pages - 1}>{t("ถัดไป", "Next")} ›</button>
+        <button type="button" className={btn} onClick={() => go(pages - 1)} disabled={page >= pages - 1} title={t("หน้าสุดท้าย", "Last page")}>»</button>
       </div>
     </div>
   );
