@@ -18,6 +18,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
+import { pushLineText } from "@/lib/board-notify";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -165,6 +166,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     actorName:  actor,
     metadata:   { gr_no: grNo, po_no: po.po_no, lines: grLines.length, po_status: poStatus, stocked_lines: stockedLines },
   });
+
+  // ---- เตือนไลน์: "รับของเข้า" → กลุ่มรับของ (fallback กลุ่มขอซื้อ) · best-effort ----
+  try {
+    const statusTh = poStatus === "received" ? "รับครบแล้ว ✅" : poStatus === "partial" ? "รับบางส่วน (ยังไม่ครบ)" : "รับแล้ว";
+    const lineText = `📥 รับของเข้าแล้ว · ${grNo}\nPO ${po.po_no} · ${po.seller_name}\nรับ ${grLines.length} รายการ · เข้าสต๊อก ${stockedLines} รายการ\nสถานะใบสั่งซื้อ: ${statusTh}\nผู้รับ: ${body.receiver ?? actor}`;
+    await pushLineText(admin, ["goods_receipt", "purchase_request"], lineText);
+  } catch (e) { console.warn("[receive] LINE notify failed:", e); }
 
   return NextResponse.json({ ok: true, gr_no: grNo, po_status: poStatus, line_count: grLines.length, stocked_lines: stockedLines, stock_warnings: stockWarnings, error: null });
 }

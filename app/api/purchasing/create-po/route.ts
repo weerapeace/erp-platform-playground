@@ -15,6 +15,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
+import { pushLineText } from "@/lib/board-notify";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -173,6 +174,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     created.push({ id: po.id, po_no: poNo, seller_name: seller, currency, grand_total: grandTotal, line_count: items.length });
   }
+
+  // ---- เตือนไลน์: "สั่งซื้อแล้ว" (ออก PO) → กลุ่มสั่งซื้อ (fallback กลุ่มขอซื้อ) · best-effort ----
+  try {
+    const n = created.length;
+    const fmtCur = (v: number, c: string) => (c || "THB").toUpperCase() === "THB"
+      ? `฿${Math.round(v).toLocaleString("th-TH")}` : `${Math.round(v).toLocaleString("th-TH")} ${c}`;
+    const poLines = created.map((c) => `• ${c.po_no} · ${c.seller_name} · ${fmtCur(c.grand_total, c.currency)} (${c.line_count} รายการ)`);
+    const lineText = `🧾 สั่งซื้อแล้ว ${n} ใบ\nโดย: ${actor}\n${poLines.join("\n")}\n→ เปิดแอปจัดซื้อเพื่อติดตามของเข้า`;
+    await pushLineText(admin, ["purchase_order", "purchase_request"], lineText);
+  } catch (e) { console.warn("[create-po] LINE notify failed:", e); }
 
   return NextResponse.json({ ok: true, created, error: null });
 }

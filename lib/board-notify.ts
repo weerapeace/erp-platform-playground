@@ -54,6 +54,19 @@ export async function pushLineTpl(admin: Admin, slot: string, eventKey: string, 
   } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
 }
 
+/** ส่งข้อความ LINE เข้า "กลุ่มแรกที่ตั้งค่าไว้" ตามลำดับ groupKeys (เช่น ['goods_receipt','purchase_request'])
+ *  ใช้กับเหตุการณ์จัดซื้อ (ออก PO / รับของ) — ถ้ายังไม่ตั้งกลุ่มเฉพาะ จะ fallback ไปกลุ่มขอซื้อที่มีอยู่ */
+export async function pushLineText(admin: Admin, groupKeys: string[], text: string): Promise<void> {
+  try {
+    const cfg = await lineCfg(admin);
+    if (!cfg.token || !text.trim()) return;
+    let target = "";
+    for (const k of groupKeys) { const g = cfg.groups?.[k]; if (g) { target = g; break; } }
+    if (!target) return;
+    await linePush(cfg.token, target, text);
+  } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
+}
+
 /** DM ช่างรายคน ผ่าน employees.id → line_user_id */
 export async function dmEmployeeById(admin: Admin, employeeId: string | null | undefined, text: string): Promise<void> {
   if (!employeeId) return;
