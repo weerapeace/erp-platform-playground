@@ -67,6 +67,10 @@ export type LineItemsGridProps<T> = {
   defaultSort?:  { key: string; dir: "asc" | "desc" } | null;
   /** โหมดกะทัดรัด — แถว/ตัวอักษรเล็กลง เหมาะกับตารางอ่านอย่างเดียวรายการเยอะ */
   dense?:        boolean;
+  /** เปิดช่องติ๊กเลือกหลายแถว (+ ติ๊กหัว = เลือกทั้งหมด) เพื่อแก้/ลบแบบ mass */
+  selectable?:   boolean;
+  /** แถบเครื่องมือ mass — แสดงเมื่อมีแถวถูกเลือก · คืนปุ่มการกระทำ (grid ห่อจำนวน+ยกเลิกให้) */
+  bulkBar?:      (selectedRows: T[], clear: () => void) => React.ReactNode;
 };
 
 type SortState = { key: string; dir: "asc" | "desc" } | null;
@@ -79,13 +83,33 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
   groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", footer, addExtra, storageKey,
-  stickyHeader = false, maxHeight, defaultSort = null, dense = false,
+  stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar,
 }: LineItemsGridProps<T>) {
   const [sort, setSort]       = useState<SortState>(defaultSort);
   const [groupBy, setGroupBy] = useState<string>("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [widths, setWidths]   = useState<Record<string, number>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set());   // แถวที่ติ๊กเลือก (rowId)
   const gridRef = useRef<HTMLDivElement>(null);
+
+  // ตัด id ที่หายไปออกจาก selection เมื่อ rows เปลี่ยน (สลับแท็บ/ลบแถว) → กันเลือกค้าง
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const ids = new Set(rows.map(rowId));
+      let changed = false; const next = new Set<string>();
+      for (const id of prev) { if (ids.has(id)) next.add(id); else changed = true; }
+      return changed ? next : prev;
+    });
+  }, [rows]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectedRows = useMemo(() => rows.filter((r) => selected.has(rowId(r))), [rows, selected]); // eslint-disable-line react-hooks/exhaustive-deps
+  const clearSel = useCallback(() => setSelected(new Set()), []);
+  const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const allRowIds = rows.map(rowId);
+  const allSelected = allRowIds.length > 0 && allRowIds.every((id) => selected.has(id));
+  const someSelected = selected.size > 0 && !allSelected;
+  const toggleSelAll = () => setSelected(allSelected ? new Set() : new Set(allRowIds));
 
   // โหลด/จำความกว้างคอลัมน์ (localStorage)
   useEffect(() => {
@@ -107,17 +131,18 @@ export function LineItemsGrid<T>({
 
   const template = useMemo(() => {
     const parts: string[] = [];
+    if (selectable) parts.push("32px");
     if (canDrag) parts.push("28px");
     for (const c of columns) parts.push(widths[c.key] ? `${widths[c.key]}px` : (c.width ? `${c.width}px` : `minmax(${c.minWidth ?? 120}px, 1fr)`));
     if (!readonly) parts.push(onDuplicate ? "64px" : "36px");
     return parts.join(" ");
-  }, [columns, canDrag, readonly, widths, onDuplicate]);
+  }, [columns, canDrag, readonly, widths, onDuplicate, selectable]);
 
   const minWidth = useMemo(() => {
-    let w = (canDrag ? 28 : 0) + (readonly ? 0 : (onDuplicate ? 64 : 36));
+    let w = (selectable ? 32 : 0) + (canDrag ? 28 : 0) + (readonly ? 0 : (onDuplicate ? 64 : 36));
     for (const c of columns) w += baseWidth(c);
     return w;
-  }, [columns, canDrag, readonly, widths]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [columns, canDrag, readonly, widths, selectable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const update = (id: string, patch: Partial<T>) => onChange(rows.map((r) => (rowId(r) === id ? { ...r, ...patch } : r)));
   const remove = (id: string) => onChange(rows.filter((r) => rowId(r) !== id));
@@ -248,6 +273,16 @@ export function LineItemsGrid<T>({
         </div>
       )}
 
+      {/* แถบเครื่องมือ mass — โผล่เมื่อมีแถวถูกเลือก */}
+      {selectable && bulkBar && selected.size > 0 && !readonly && (
+        <div className="flex items-center gap-2 flex-wrap bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
+          <span className="text-sm font-medium text-indigo-700">✓ เลือก {selected.size} บรรทัด</span>
+          <span className="w-px h-5 bg-indigo-200" />
+          {bulkBar(selectedRows, clearSel)}
+          <button type="button" onClick={clearSel} className="ml-auto h-8 px-3 text-sm text-slate-500 border border-slate-200 rounded-lg hover:bg-white">ยกเลิก</button>
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <div className="text-center py-6 border-2 border-dashed border-slate-200 rounded-lg">
           <p className="text-sm text-slate-400 mb-2">{emptyText}</p>
@@ -262,6 +297,13 @@ export function LineItemsGrid<T>({
             {/* header */}
             <div style={{ gridTemplateColumns: template }}
               className={`grid bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 ${stickyHeader ? "sticky top-0 z-20" : ""}`}>
+              {selectable && (
+                <span className="flex items-center justify-center">
+                  <input type="checkbox" aria-label="เลือกทั้งหมด" checked={allSelected} disabled={readonly || rows.length === 0}
+                    ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                    onChange={toggleSelAll} className="h-4 w-4 accent-indigo-600 cursor-pointer" />
+                </span>
+              )}
               {canDrag && <span />}
               {columns.map((c) => (
                 <div key={c.key} className="relative border-r border-slate-100 last:border-r-0">
@@ -305,6 +347,7 @@ export function LineItemsGrid<T>({
                   ) : (
                     <GridRow key={rowId(d.row)} id={rowId(d.row)} template={template} canDrag={canDrag} readonly={readonly}
                       columns={columns} row={d.row} dense={dense}
+                      selectable={selectable} selected={selected.has(rowId(d.row))} onToggleSelect={() => toggleSel(rowId(d.row))}
                       onUpdate={(patch) => update(rowId(d.row), patch)} onRemove={() => remove(rowId(d.row))}
                       onDuplicate={onDuplicate ? () => duplicate(rowId(d.row)) : undefined} />
                   ),
@@ -334,10 +377,12 @@ export function LineItemsGrid<T>({
 // ---- single sortable row ----
 function GridRow<T>({
   id, template, canDrag, readonly, columns, row, onUpdate, onRemove, onDuplicate, dense = false,
+  selectable = false, selected = false, onToggleSelect,
 }: {
   id: string; template: string; canDrag: boolean; readonly: boolean;
   columns: LineColumn<T>[]; row: T;
   onUpdate: (patch: Partial<T>) => void; onRemove: () => void; onDuplicate?: () => void; dense?: boolean;
+  selectable?: boolean; selected?: boolean; onToggleSelect?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !canDrag });
   const style: React.CSSProperties = {
@@ -347,7 +392,13 @@ function GridRow<T>({
     opacity: isDragging ? 0.5 : 1,
   };
   return (
-    <div ref={setNodeRef} style={style} className="grid items-center border-b border-slate-100 bg-white hover:bg-slate-50/60">
+    <div ref={setNodeRef} style={style} className={`grid items-center border-b border-slate-100 ${selected ? "bg-indigo-50/60" : "bg-white hover:bg-slate-50/60"}`}>
+      {selectable && (
+        <span className="flex items-center justify-center">
+          <input type="checkbox" aria-label="เลือกแถวนี้" checked={selected} disabled={readonly}
+            onChange={() => onToggleSelect?.()} className="h-4 w-4 accent-indigo-600 cursor-pointer" />
+        </span>
+      )}
       {canDrag && (
         <button type="button" {...attributes} {...listeners}
           className="h-9 flex items-center justify-center text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing" title="ลากเพื่อเรียงลำดับ">⠿</button>

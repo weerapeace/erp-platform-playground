@@ -134,6 +134,19 @@ function rowFromItem(it: PriceItem, idx: number): CostRow {
   });
 }
 
+/** patch ตอน "เลือกวัสดุ" ให้บรรทัดที่มีอยู่ — คงขนาด/จำนวนเดิม เปลี่ยนแค่วัสดุ/ชนิด/ราคา (ใช้ทั้งเลือกทีละแถว + bulk) */
+function costItemPatch(it: PriceItem, r: CostRow): Partial<CostRow> {
+  const piece = isPieceGroup(it.group_code, it.group_name);
+  return {
+    item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code,
+    price_basis: piece ? null : "manual", calc_method: it.calc_method,
+    waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
+    pieces: piece ? (r.pieces ?? 1) : r.pieces,
+    uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
+    unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit,
+  };
+}
+
 // ราคาฐานของกลุ่มตามที่เลือก (avg/set/latest) — ถ้าค่าที่เลือกไม่มี → ถอยใช้ค่าเฉลี่ย
 function groupBasisPrice(g: PriceGroup, basis: string | null): number | null {
   if (basis === "set") return g.set_price ?? g.avg_price;
@@ -425,9 +438,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [newQOffered, setNewQOffered] = useState("");  // ราคาที่เสนอ (ใช้อันนี้)
   const [newQStatus, setNewQStatus] = useState("pending");
   const [newQNote, setNewQNote] = useState("");
+  const [newQParent, setNewQParent] = useState("");   // ไซส์/แท็บที่จะเสนอราคา ("" = ทั่วไป)
   const [qSaving, setQSaving] = useState(false);
   const [editQid, setEditQid] = useState<string | null>(null);
-  const [editQ, setEditQ] = useState({ quote_date: "", price: "", offered: "", note: "" });
+  const [editQ, setEditQ] = useState({ quote_date: "", price: "", offered: "", note: "", parent_code: "" });
   const [delQuote, setDelQuote] = useState<DesignSheetQuote | null>(null);
 
   // ---- เฟส 4: ตีราคา ----
@@ -451,6 +465,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const costTotal  = curLines.reduce((s, r) => s + (r.amount || 0), 0);   // ต้นทุนวัสดุของ Parent นี้
   const extraTotal = costExtra.reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const grandTotal = costTotal + extraTotal;                              // ต้นทุนสินค้าของ Parent นี้ (รวมทั้งหมด)
+  // ต้นทุนสินค้ารวม (วัสดุ+ค่าใช้จ่าย) ของไซส์/แท็บใด ๆ — ใช้เด้งราคาตอนเสนอราคาตามไซส์
+  const totalForParent = useCallback((key: string) => {
+    const mat = costLines.filter((r) => pkey(r.parent_code) === key).reduce((s, r) => s + (r.amount || 0), 0);
+    const ex = (costExtraMap[key] ?? []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+    return Math.round((mat + ex) * 100) / 100;
+  }, [costLines, costExtraMap]);
   // ราคาที่เสนอ (ผ่านแล้ว) ล่าสุด — ใช้เป็นราคาตั้งต้นใน Wizard สร้าง SKU
   const offeredPrice = useMemo<number | null>(() => {
     const val = (q: DesignSheetQuote) => (q.offered_price ?? q.price);
@@ -459,6 +479,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     if (pool.length === 0) return null;
     return val(pool.reduce((a, b) => (b.round > a.round ? b : a))) ?? null;
   }, [quotes]);
+  // เลือกไซส์ในฟอร์มเสนอราคา → เด้ง "ราคาจากตีราคา" ของไซส์นั้น + ตั้ง "ราคาที่เสนอ" เท่ากัน (แก้ต่อได้)
+  useEffect(() => {
+    const t = totalForParent(newQParent);
+    const s = t > 0 ? String(t) : "";
+    setNewQPrice(s); setNewQOffered(s);
+  }, [newQParent, totalForParent]);
   // ต้นทุนวัสดุแยกตามชนิด (สำหรับการ์ดสรุป)
   const costByGroup = useMemo(() => {
     const m = new Map<string, number>();
@@ -477,6 +503,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     }
     return tabs;
   }, [form?.parent_sku_codes, form?.parent_sku_drafts, costLines]);
+  // ป้ายไซส์ของรอบเสนอราคา (null = รอบเก่าไม่ระบุ · "" = ทั่วไป)
+  const quoteSizeLabel = (code: string | null) =>
+    code == null ? "—" : code === "" ? "ทั่วไป" : (costParentTabs.find((t) => t.key === code)?.label ?? code);
 
   // ---- เฟส 5: ตั้ง Parent SKU + ตัวเช็ครหัส ----
   const [skuCheck, setSkuCheck] = useState<ParentSkuCheck | null>(null);
@@ -773,7 +802,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     try {
       // price = ราคาจากตีราคา (อ้างอิง), offered_price = ตั้งต้นเท่ายอดตีราคา (แก้ทีหลังได้)
       const res = await apiFetch(`/api/design-sheets/${form.id}/quotes`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: todayStr(), price: total, offered_price: total, status: "pending", note: "จากตีราคา" }) });
+        body: JSON.stringify({ quote_date: todayStr(), price: total, offered_price: total, status: "pending", note: "จากตีราคา", parent_code: costParent }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       await loadCq(form.id);
       setModalTab("quotes");
@@ -831,7 +860,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       // ถ้าไม่กรอกราคาที่เสนอ ใช้ราคาจากตีราคาแทน
       const offered = newQOffered !== "" ? Number(newQOffered) : (newQPrice !== "" ? Number(newQPrice) : null);
       const res = await apiFetch(`/api/design-sheets/${form.id}/quotes`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: newQDate || todayStr(), price: newQPrice === "" ? null : Number(newQPrice), offered_price: offered, status: newQStatus, note: newQNote || null }) });
+        body: JSON.stringify({ quote_date: newQDate || todayStr(), price: newQPrice === "" ? null : Number(newQPrice), offered_price: offered, status: newQStatus, note: newQNote || null, parent_code: newQParent }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       setNewQPrice(""); setNewQOffered(""); setNewQNote(""); setNewQStatus("pending"); setNewQDate(todayStr());
       await loadCq(form.id); toast.success(`เพิ่มรอบเสนอราคา ครั้งที่ ${j.round} แล้ว`);
@@ -850,12 +879,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch (e) { setQuotes(prev); toast.error(e instanceof Error ? e.message : "เปลี่ยนสถานะไม่สำเร็จ"); }
   };
 
-  const startEditQuote = (q: DesignSheetQuote) => { setEditQid(q.id); setEditQ({ quote_date: q.quote_date ?? "", price: q.price != null ? String(q.price) : "", offered: q.offered_price != null ? String(q.offered_price) : "", note: q.note ?? "" }); };
+  const startEditQuote = (q: DesignSheetQuote) => { setEditQid(q.id); setEditQ({ quote_date: q.quote_date ?? "", price: q.price != null ? String(q.price) : "", offered: q.offered_price != null ? String(q.offered_price) : "", note: q.note ?? "", parent_code: q.parent_code ?? "" }); };
   const saveEditQuote = async () => {
     if (!form?.id || !editQid) return;
     try {
       const res = await apiFetch(`/api/design-sheets/${form.id}/quotes/${editQid}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: editQ.quote_date || null, price: editQ.price === "" ? null : Number(editQ.price), offered_price: editQ.offered === "" ? null : Number(editQ.offered), note: editQ.note || null }) });
+        body: JSON.stringify({ quote_date: editQ.quote_date || null, price: editQ.price === "" ? null : Number(editQ.price), offered_price: editQ.offered === "" ? null : Number(editQ.offered), note: editQ.note || null, parent_code: editQ.parent_code }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       setEditQid(null); await loadCq(form.id); toast.success("แก้รอบเสนอราคาแล้ว");
     } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
@@ -1223,15 +1252,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         const g = inGroupMode ? priceGroups.find((x) => x.code === r.group_code) : undefined;
         const item = r.item_id ? priceItems.find((x) => x.id === r.item_id) : undefined;
         // เลือกวัสดุ: เก็บ group_code ไว้เป็นป้าย/ตรวจชนิดชิ้น · ราคาเริ่มต้น = กรอกเอง (manual)
-        const applyItem = (it: PriceItem) => {
-          const piece = isPieceGroup(it.group_code, it.group_name);
-          u({ item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code,
-              price_basis: piece ? null : "manual", calc_method: it.calc_method,
-              waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
-              pieces: piece ? (r.pieces ?? 1) : r.pieces,
-              uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
-              unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit });
-        };
+        const applyItem = (it: PriceItem) => u(costItemPatch(it, r));
         return (
           <div className="space-y-1">
             <div className="flex items-center gap-1">
@@ -1826,6 +1847,34 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 addLabel="＋ เพิ่มบรรทัดตีราคา"
                 emptyText="ยังไม่มีบรรทัดตีราคา — กดเพิ่มบรรทัดแล้วเลือกวัสดุ"
                 onDuplicate={(r) => recomputeRow({ ...r, key: `d${Date.now()}_${Math.round(Math.random() * 1e6)}` })}
+                selectable={fullEdit}
+                bulkBar={(sel, clear) => {
+                  const keys = new Set(sel.map((r) => r.key));
+                  // ตั้งวัสดุให้ทุกแถวที่เลือก — คงขนาด/จำนวนเดิม คำนวณ ชนิด/ปริมาณ/ราคา ใหม่ (คงการเลือกไว้ให้เห็นผล)
+                  const applyBulkItem = (it: PriceItem) => {
+                    setCostLines((prev) => prev.map((r) => (keys.has(r.key) ? recomputeRow({ ...r, ...costItemPatch(it, r) }) : r)));
+                    setCostDirty(true);
+                    toast.success(`ตั้งวัสดุ "${it.name}" ให้ ${keys.size} บรรทัดแล้ว`);
+                  };
+                  return (
+                    <>
+                      <div className="w-56">
+                        <SearchableSelect value="" placeholder="🧰 ตั้งวัสดุให้ที่เลือก…"
+                          options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
+                          onChange={(val) => { const it = priceItems.find((p) => p.id === val); if (it) applyBulkItem(it); }}
+                          onCreate={(q) => void createPriceItemInline(q, applyBulkItem)} createLabel="เพิ่มวัสดุใหม่" />
+                      </div>
+                      <button type="button"
+                        onClick={() => {
+                          if (!window.confirm(`ลบ ${keys.size} บรรทัดที่เลือก?`)) return;
+                          setCostLines((prev) => prev.filter((r) => !keys.has(r.key)));
+                          setCostDirty(true); clear();
+                          toast.success(`ลบ ${keys.size} บรรทัดแล้ว`);
+                        }}
+                        className="h-8 px-3 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50">🗑 ลบที่เลือก ({sel.length})</button>
+                    </>
+                  );
+                }}
               />
 
 
@@ -1905,6 +1954,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               {canEdit && (
                 <div className="flex flex-wrap gap-1.5 items-center p-2 bg-slate-50 border border-slate-200 rounded-lg">
                   <input type="date" value={newQDate} onChange={(e) => setNewQDate(e.target.value)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg w-36" />
+                  <select value={newQParent} onChange={(e) => setNewQParent(e.target.value)} title="เสนอราคาสำหรับไซส์/รายการไหน — เลือกแล้วเด้งราคาจากตีราคาของไซส์นั้นให้"
+                    className="h-8 px-2 text-sm border border-slate-200 rounded-lg">
+                    {costParentTabs.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                  </select>
                   <input type="number" min={0} step="any" value={newQPrice} onChange={(e) => setNewQPrice(e.target.value)} placeholder="ราคาจากตีราคา" title="ราคาอ้างอิงจากการตีราคา"
                     className="h-8 px-2 text-sm text-right border border-slate-200 rounded-lg w-32" />
                   <input type="number" min={0} step="any" value={newQOffered} onChange={(e) => setNewQOffered(e.target.value)} placeholder="ราคาที่เสนอ" title="ราคาที่เสนอลูกค้าจริง (ใช้อันนี้) — เว้นว่าง = ใช้ราคาจากตีราคา"
@@ -1923,6 +1976,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     <tr className="bg-slate-50 text-xs text-slate-500">
                       <th className="border border-slate-200 px-2 py-1.5 w-14">ครั้งที่</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-32">วันที่เสนอ</th>
+                      <th className="border border-slate-200 px-2 py-1.5 w-24">ไซส์</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-28 text-right text-slate-400">ราคาจากตีราคา</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-28 text-right bg-blue-50 text-blue-600">ราคาที่เสนอ</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-28">สถานะ</th>
@@ -1940,6 +1994,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                           <td className="border border-slate-200 px-2 py-1 text-center">
                             {editing ? <input type="date" value={editQ.quote_date} onChange={(e) => setEditQ({ ...editQ, quote_date: e.target.value })} className="h-7 px-1 text-sm border border-slate-200 rounded" />
                               : <span className="text-slate-600">{formatDate(q.quote_date)}</span>}
+                          </td>
+                          <td className="border border-slate-200 px-2 py-1 text-center">
+                            {editing ? (
+                              <select value={editQ.parent_code} onChange={(e) => setEditQ({ ...editQ, parent_code: e.target.value })} className="h-7 px-1 text-xs border border-slate-200 rounded">
+                                {costParentTabs.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                              </select>
+                            ) : <span className="text-xs text-slate-500">{quoteSizeLabel(q.parent_code)}</span>}
                           </td>
                           <td className="border border-slate-200 px-2 py-1 text-right tabular-nums text-slate-400">
                             {editing ? <input type="number" min={0} step="any" value={editQ.price} onChange={(e) => setEditQ({ ...editQ, price: e.target.value })} className="h-7 px-1 w-24 text-sm text-right border border-slate-200 rounded" />

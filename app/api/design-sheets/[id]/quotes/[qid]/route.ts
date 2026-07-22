@@ -19,7 +19,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id, qid } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { quote_date?: string; price?: number | null; offered_price?: number | null; status?: string; note?: string | null };
+  let body: { quote_date?: string; price?: number | null; offered_price?: number | null; status?: string; note?: string | null; parent_code?: string | null };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -46,6 +46,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     patch.status = body.status;
   }
   if (body.note !== undefined) patch.note = body.note?.trim() || null;
+  if (body.parent_code !== undefined) patch.parent_code = body.parent_code == null ? null : String(body.parent_code);
 
   const admin = supabaseAdmin();
   const { data: row, error } = await admin.from("design_sheet_quotes").update(patch)
