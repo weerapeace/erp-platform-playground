@@ -55,13 +55,13 @@ const DEFAULT_COST_EXTRA: CostExtra[] = [
 type FormState = {
   id: string | null; code: string;
   name: string; brand_id: string; detail: string; note: string;
-  status: string; order_date: string; deadline: string; drive_link: string;
+  status: string; order_date: string; deadline: string; appointment_date: string; drive_link: string;
   parent_sku_codes: string[];   // ตั้งได้หลาย Parent SKU (รหัสจริง)
   parent_sku_drafts: string[];  // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
 };
 const todayStr = () => new Date().toISOString().slice(0, 10);
 // วันที่สั่ง default = วันนี้ (แก้ได้)
-const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", drive_link: "", parent_sku_codes: [], parent_sku_drafts: [] });
+const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", appointment_date: "", drive_link: "", parent_sku_codes: [], parent_sku_drafts: [] });
 
 // บรรทัดตีราคา (เฟส 4) — row ฝั่งหน้าจอ = CostLine + key ชั่วคราว (+ group_code สำหรับเช็คชนิดชิ้น)
 type CostRow = CostLine & { key: string; group_code?: string | null };
@@ -1055,7 +1055,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       setForm({
         id: d.id, code: d.code ?? "", name: d.name ?? "", brand_id: d.brand_id ?? "",
         detail: d.detail ?? "", note: d.note ?? "", status: d.status ?? "design",
-        order_date: d.order_date ?? "", deadline: d.deadline ?? "", drive_link: d.drive_link ?? "",
+        order_date: d.order_date ?? "", deadline: d.deadline ?? "", appointment_date: d.appointment_date ?? "", drive_link: d.drive_link ?? "",
         parent_sku_codes: pCodes,
         parent_sku_drafts: Array.isArray(d.parent_sku_drafts) ? (d.parent_sku_drafts as string[]) : [],
       });
@@ -1124,7 +1124,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     setSaving(true); setFormErr(null);
     const payload = {
       name: form.name.trim(), brand_id: form.brand_id || null, detail: form.detail || null, note: form.note || null,
-      status: form.status, order_date: form.order_date || null, deadline: form.deadline || null, drive_link: form.drive_link || null,
+      status: form.status, order_date: form.order_date || null, deadline: form.deadline || null, appointment_date: form.appointment_date || null, drive_link: form.drive_link || null,
       parent_sku_codes: parentCodes,
       parent_sku_drafts: form.parent_sku_drafts,
     };
@@ -1624,6 +1624,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               <label className="block">
                 <span className="text-[11px] text-slate-500">Deadline</span>
                 <input type="date" value={form.deadline} onChange={(e) => patch({ deadline: e.target.value })} disabled={!canEdit}
+                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-slate-500">วันนัด / วันได้ตัวอย่าง</span>
+                <input type="date" value={form.appointment_date} onChange={(e) => patch({ appointment_date: e.target.value })} disabled={!canEdit}
                   className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
               </label>
             </div>

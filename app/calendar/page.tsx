@@ -21,6 +21,7 @@ const ymd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.
 const MODULES: { key: string; label: string; color: string }[] = [
   { key: "production", label: "ผลิต", color: "#6366f1" },
   { key: "purchasing", label: "ของเข้า", color: "#f59e0b" },
+  { key: "qc", label: "ส่ง QC", color: "#f43f5e" },
   { key: "billing", label: "ใบวางบิล", color: "#10b981" },
   { key: "sales", label: "ขาย/ส่งของ", color: "#ec4899" },
   { key: "design", label: "Design", color: "#8b5cf6" },

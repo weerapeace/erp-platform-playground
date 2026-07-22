@@ -128,7 +128,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 // ---- POST create ----
 type CreateBody = {
   name?: string; brand_id?: string | null; detail?: string | null; note?: string | null;
-  status?: string; order_date?: string | null; deadline?: string | null; drive_link?: string | null;
+  status?: string; order_date?: string | null; deadline?: string | null; appointment_date?: string | null; drive_link?: string | null;
   parent_sku_code?: string | null;        // เดิม (รหัสเดี่ยว) — ยังรองรับเพื่อ backward compat
   parent_sku_codes?: string[];            // ใหม่ — หลายรหัส
   parent_sku_drafts?: string[];           // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
@@ -180,6 +180,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: row, error } = await admin.from("design_sheets").insert({
     code, name, brand_id: body.brand_id || null, detail: body.detail ?? null, note: body.note ?? null,
     status, order_date: body.order_date || null, deadline: body.deadline || null,
+    appointment_date: body.appointment_date || null,
     drive_link: body.drive_link?.trim() || null,
     parent_sku_codes: parentCodes, parent_sku_code: parentCodes[0] ?? null,   // เก็บ array + ตัวแรก (backward compat)
     parent_sku_drafts: parentDrafts,

@@ -44,7 +44,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 type CostExtra = { label: string; amount: number };
 type PatchBody = {
   name?: string; brand_id?: string | null; detail?: string | null; note?: string | null;
-  status?: string; order_date?: string | null; deadline?: string | null; drive_link?: string | null;
+  status?: string; order_date?: string | null; deadline?: string | null; appointment_date?: string | null; drive_link?: string | null;
   is_active?: boolean; parent_sku_code?: string | null; parent_sku_codes?: string[];
   cost_extra?: CostExtra[] | Record<string, CostExtra[]>;   // array (เดิม) หรือ object แยกตาม Parent (ข้อ 7)
   parent_sku_drafts?: string[];   // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
@@ -76,6 +76,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.note !== undefined)       patch.note = body.note ?? null;
   if (body.order_date !== undefined) patch.order_date = body.order_date || null;
   if (body.deadline !== undefined)   patch.deadline = body.deadline || null;
+  if (body.appointment_date !== undefined) patch.appointment_date = body.appointment_date || null;
   if (body.drive_link !== undefined) patch.drive_link = body.drive_link?.trim() || null;
   if (body.is_active !== undefined)  patch.is_active = !!body.is_active;
   if (body.cost_extra !== undefined) {
