@@ -424,16 +424,17 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
   const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
   // รูปที่เพิ่มเข้าสินค้า (โชว์บนการ์ด) — จัดกลุ่มตามสินค้า + ป้ายรหัส (product_labels) · รวม sku_images เดิม
-  const ist = sub.image_sync_targets as { product_images?: Record<string, string[]>; product_labels?: Record<string, string>; sku_images?: Record<string, string[]> } | null;
+  const ist = sub.image_sync_targets as { product_images?: Record<string, string[]>; product_labels?: Record<string, string>; sku_images?: Record<string, string[]>; parent_ids?: string[]; sku_ids?: string[] } | null;
+  const istLabels = ist?.product_labels ?? {};   // route เติมรหัสจริงให้ทุก target แล้ว (parent + ลูก)
+  // แถวสินค้า = "สินค้าปลายทางทั้งหมด" (parent + ลูกทุกตัว) — parent/ลูกที่ไม่มีรูปส่งรอบนี้ก็ยังโชว์แกลเลอรี save
   const productGroups: { key: string; label: string; keys: string[] }[] = [];
-  for (const [tk, keys] of Object.entries(ist?.product_images ?? {})) {
-    const ks = (keys as string[]).filter(Boolean); if (!ks.length) continue;
-    productGroups.push({ key: tk, label: ist?.product_labels?.[tk] || (tk.startsWith("parent:") ? "Parent SKU" : "SKU"), keys: ks });
-  }
-  for (const [sid, keys] of Object.entries(ist?.sku_images ?? {})) { const ks = (keys as string[]).filter(Boolean); if (ks.length) productGroups.push({ key: `legacy:${sid}`, label: ist?.product_labels?.[`sku:${sid}`] || "SKU", keys: ks }); }
-  // เรียง Parent ก่อน แล้วตามด้วย SKU (รูปในกลุ่มเรียงตามลำดับที่จัดไว้อยู่แล้ว)
-  productGroups.sort((a, b) => (a.key.startsWith("parent:") ? 0 : 1) - (b.key.startsWith("parent:") ? 0 : 1));
-  const skuImgKeys = productGroups.flatMap((g) => g.keys);   // แบน ๆ ไว้ทำ lightbox/ดัชนี
+  const seenGroup = new Set<string>();
+  const pushGroup = (key: string, fallback: string, keys: string[]) => { if (seenGroup.has(key)) return; seenGroup.add(key); productGroups.push({ key, label: (istLabels[key] || fallback).trim(), keys: (keys ?? []).filter(Boolean) }); };
+  for (const pid of ist?.parent_ids ?? []) pushGroup(`parent:${pid}`, "Parent SKU", ist?.product_images?.[`parent:${pid}`] ?? []);   // parent ขึ้นก่อน
+  for (const sid of ist?.sku_ids ?? []) pushGroup(`sku:${sid}`, "SKU", ist?.product_images?.[`sku:${sid}`] ?? []);
+  for (const [tk, keys] of Object.entries(ist?.product_images ?? {})) pushGroup(tk, tk.startsWith("parent:") ? "Parent SKU" : "SKU", keys as string[]);   // เผื่อคีย์ที่ไม่อยู่ใน parent_ids/sku_ids (งานเก่า)
+  for (const [sid, keys] of Object.entries(ist?.sku_images ?? {})) { if (!seenGroup.has(`sku:${sid}`)) pushGroup(`legacy:${sid}`, "SKU", keys as string[]); }
+  const skuImgKeys = productGroups.flatMap((g) => g.keys);   // แบน ๆ ไว้ทำ lightbox/ดัชนี (เฉพาะรูปส่งรอบนี้)
   // ดึงแกลเลอรีรูปสินค้าจริง (ที่ save แล้ว) ของแต่ละ SKU/Parent มาโชว์คู่กับรูปที่ส่งรอบนี้ (ป้าย ✓ saved)
   useEffect(() => {
     const owners = new Set<string>();
@@ -584,7 +585,11 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               <div className="space-y-1.5">
                 <p className="text-[11px] text-slate-400">📦 {t("รูปเข้าสินค้า", "Product images")} <span className="text-emerald-600">· ✓ {t("= บันทึกในแกลเลอรีแล้ว", "= saved in gallery")}</span></p>
                 {productGroups.map((g) => {
-                  const base = imageAtts.length + skuImgKeys.indexOf(g.keys[0]);   // ดัชนีเริ่มของกลุ่มนี้ใน cardImages
+                  const lookup = g.key.startsWith("legacy:") ? `sku:${g.key.slice(7)}` : g.key;
+                  const submitted = new Set(g.keys);
+                  const savedList = (savedGalleries[lookup] ?? []).filter((s) => s.r2_key && !submitted.has(s.r2_key));
+                  if (g.keys.length === 0 && savedList.length === 0) return null;   // ไม่มีทั้งรูปส่งใหม่และรูป save → ข้าม
+                  const base = g.keys.length ? imageAtts.length + skuImgKeys.indexOf(g.keys[0]) : 0;   // ดัชนีเริ่มของกลุ่มนี้ใน cardImages
                   return (
                     <div key={g.key}>
                       <p className="text-[10px] font-mono text-slate-500 bg-slate-100 inline-block px-1.5 py-0.5 rounded mb-1">{g.label}</p>
@@ -597,17 +602,13 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
                           </div>
                         ))}
                         {/* รูปที่ save ในแกลเลอรีสินค้าจริงแล้ว — ป้าย ✓ เขียว (กดเปิดเต็มในแท็บใหม่) */}
-                        {(() => {
-                          const lookup = g.key.startsWith("legacy:") ? `sku:${g.key.slice(7)}` : g.key;
-                          const submitted = new Set(g.keys);
-                          return (savedGalleries[lookup] ?? []).filter((s) => s.r2_key && !submitted.has(s.r2_key)).map((s) => (
-                            <div key={`saved-${s.r2_key}`} className="relative">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={`/api/r2-image?key=${encodeURIComponent(s.r2_key as string)}&w=160`} alt="" onClick={() => window.open(`/api/r2-image?key=${encodeURIComponent(s.r2_key as string)}`, "_blank")} title={t("บันทึกในแกลเลอรีแล้ว · กดดูเต็ม", "Saved in gallery · click to view")} className="h-12 w-12 rounded object-cover border-2 border-emerald-300 cursor-zoom-in" />
-                              <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center shadow" title={t("บันทึกแล้ว", "Saved")}>✓</span>
-                            </div>
-                          ));
-                        })()}
+                        {savedList.map((s) => (
+                          <div key={`saved-${s.r2_key}`} className="relative">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={`/api/r2-image?key=${encodeURIComponent(s.r2_key as string)}&w=160`} alt="" onClick={() => window.open(`/api/r2-image?key=${encodeURIComponent(s.r2_key as string)}`, "_blank")} title={t("บันทึกในแกลเลอรีแล้ว · กดดูเต็ม", "Saved in gallery · click to view")} className="h-12 w-12 rounded object-cover border-2 border-emerald-300 cursor-zoom-in" />
+                            <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center shadow" title={t("บันทึกแล้ว", "Saved")}>✓</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   );
