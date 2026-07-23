@@ -14,6 +14,7 @@ import { ERPModal } from "@/components/modal";
 import { ImageInput } from "@/components/image-input";
 import { SupplierWizard } from "@/components/supplier-wizard";
 import { SupplierPicker } from "@/components/supplier-picker";
+import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
 import nextDynamic from "next/dynamic";
 import { ApproveActions, RejectedPanel, DeleteButton, BulkApproveBar } from "./approval";
@@ -1166,6 +1167,8 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
   const [syncCount, setSyncCount] = useState(0);
   const [skuEdit, setSkuEdit] = useState(false);          // popup แก้สินค้า (SKU จริง) — RelationPeek โหมดแก้เร็ว
   const skuChanged = useRef(false);                       // แก้ SKU แล้ว → ปิดเมื่อไหร่ค่อยรีเฟรชหน้า
+  const [changeSkuOpen, setChangeSkuOpen] = useState(false);   // เปิด picker "เปลี่ยนสินค้า"
+  const [swap, setSwap] = useState<{ id: string; name: string; code: string; uom: string } | null>(null);   // สินค้าใหม่ที่เลือก (มีผลเมื่อกด "บันทึก")
 
   // เดา id ร้านจากชื่อเดิม เมื่อรายชื่อร้านโหลดเสร็จ (PR เก็บแค่ชื่อ)
   useEffect(() => {
@@ -1201,12 +1204,34 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
     } catch { return false; }
   };
 
+  // เปลี่ยนสินค้าของรายการนี้เป็น SKU อื่น — ดึงข้อมูล SKU ใหม่มาอัปเดตราคา/หน่วย/รูป (มีผลเมื่อกด "บันทึก")
+  const onPickNewSku = useCallback(async (v: SkuPickerValue | null) => {
+    setChangeSkuOpen(false);
+    if (!v) return;
+    try {
+      const j = await apiFetch(`/api/master-v2/skus/${v.id}`).then((r) => r.json());
+      const s = (j.data ?? {}) as Record<string, unknown>;
+      const rmb = Number(s.rmb_cost) || 0;
+      const isYuan = rmb > 0;   // สินค้าจีน = มีราคาหยวน → ใช้ ¥
+      setSwap({ id: v.id, name: String(s.name_th ?? v.name), code: String(s.code ?? v.code), uom: String(s.uom_label ?? v.uom_name ?? "") });
+      setImgKey((s.cover_image_r2_key as string) ?? v.image_key ?? null);
+      setPrice(String(isYuan ? rmb : (Number(s.list_price) || Number(s.standard_price) || 0)));
+      setCur(isYuan ? "RMB" : "THB");
+    } catch {
+      setSwap({ id: v.id, name: v.name, code: v.code, uom: v.uom_name ?? "" });
+      setImgKey(v.image_key ?? null);
+      if (v.list_price != null) setPrice(String(v.list_price));
+    }
+    toast.success('เลือกสินค้าใหม่แล้ว — กด "บันทึก" เพื่อยืนยันการเปลี่ยน');
+  }, [toast]);
+
   const save = async () => {
     setSaving(true);
     try {
       const res = await apiFetch(`/api/master-v2/purchase-requests-v2/${row.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qty: Number(qty) || 0, price_est: Number(price) || 0, note: note || null, seller_name: seller || null, currency: cur, actor: user?.name }),
+        body: JSON.stringify({ qty: Number(qty) || 0, price_est: Number(price) || 0, note: note || null, seller_name: seller || null, currency: cur, actor: user?.name,
+          ...(swap ? { item_sku_id: swap.id, item_name: swap.name, uom: swap.uom || row.uom || null } : {}) }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
@@ -1237,11 +1262,29 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
             <div className="text-xs text-slate-400">{row.code || "—"}</div>
           </div>
           {row.item_sku_id && (
-            <button type="button" onClick={() => setSkuEdit(true)}
-              title="แก้ข้อมูลสินค้าตัวจริง (มีผลกับทุกใบที่ใช้สินค้านี้)"
-              className="h-7 px-2.5 text-xs font-medium rounded-md border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 shrink-0">✎ แก้ไขสินค้า</button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button type="button" onClick={() => setChangeSkuOpen((o) => !o)}
+                title="เปลี่ยนรายการนี้เป็นสินค้าอื่น (เลือก SKU ใหม่)"
+                className="h-7 px-2.5 text-xs font-medium rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100">🔄 เปลี่ยนสินค้า</button>
+              <button type="button" onClick={() => setSkuEdit(true)}
+                title="ดู/แก้รายละเอียดสินค้าตัวจริง (มีผลกับทุกใบที่ใช้สินค้านี้)"
+                className="h-7 px-2.5 text-xs font-medium rounded-md border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">📄 รายละเอียดสินค้า</button>
+            </div>
           )}
         </div>
+        {/* เปลี่ยนสินค้า: เลือก SKU อื่นมาแทนในรายการนี้ (จำนวน/หมายเหตุเดิมคงไว้ · มีผลเมื่อกดบันทึก) */}
+        {changeSkuOpen && row.item_sku_id && (
+          <div className="px-2.5 py-2 rounded-md bg-slate-50 border border-slate-200 space-y-1.5">
+            <div className="text-[11px] text-slate-500">เลือกสินค้าที่จะใช้แทน:</div>
+            <SkuPicker value={null} onChange={onPickNewSku} placeholder="ค้นหา SKU (รหัส / ชื่อ)..." />
+          </div>
+        )}
+        {swap && (
+          <div className="px-2.5 py-1.5 rounded-md bg-blue-50 border border-blue-200 text-[11px] text-blue-700 flex items-center gap-1.5 flex-wrap">
+            🔄 จะเปลี่ยนเป็น <b>{stripCode(swap.name)}</b> <span className="text-blue-400">({swap.code || "—"})</span> — กด &quot;บันทึก&quot; เพื่อยืนยัน
+            <button type="button" onClick={() => setSwap(null)} className="ml-auto text-blue-400 hover:text-red-500 underline">ยกเลิกการเปลี่ยน</button>
+          </div>
+        )}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย)</label>
           <SupplierPicker value={sellerId} suppliers={suppliers}
