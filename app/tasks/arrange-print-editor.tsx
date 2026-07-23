@@ -188,22 +188,20 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, o
     setNl(""); setNw(""); setNh(""); setAdding(false);
   };
   return (
-    <div className="border border-slate-200 rounded-xl p-3">
-      <div className="flex items-start gap-3">
-        {/* รูป + ปุ่มคัดลอก path / เปิด Drive (ไฟล์ต้นฉบับ) · กดรูป = เปิดป๊อปอัปแก้ไฟล์คลังกลาง · ชี้ค้าง = ดูรูปใหญ่ */}
-        <div className="shrink-0 flex flex-col items-center gap-1 w-[64px]">
-          <button type="button" onClick={onOpenDetail} title={t("กดดู/แก้ไฟล์ในคลัง · ชี้ค้างดูรูปใหญ่", "Open in library · hover to preview")} className="rounded-lg overflow-hidden border border-slate-200 hover:ring-2 hover:ring-violet-300 leading-[0]">
-            <HoverImage url={item.url} size={56} previewSize={340} rounded="rounded-lg" alt={item.title} />
-          </button>
-          {item.master_path && <button type="button" onClick={copyPath} title={item.master_path} className="w-full text-[10px] text-slate-500 hover:text-violet-700 border border-slate-200 rounded px-1 py-0.5 truncate">📋 {t("คัดลอก path", "Copy path")}</button>}
-          {item.master_url && <a href={item.master_url} target="_blank" rel="noopener noreferrer" title={t("เปิดโฟลเดอร์บน Google Drive", "Open on Google Drive")} className="w-full text-[10px] text-center text-violet-700 hover:underline border border-slate-200 rounded px-1 py-0.5">📁 Drive</a>}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium text-slate-800 truncate">{item.title}</span>
-            <button type="button" onClick={onRemove} className="text-slate-300 hover:text-red-500 text-sm shrink-0" title={t("เอารูปออก", "Remove")}>✕</button>
-          </div>
-          <p className="text-[11px] text-slate-400 mb-1.5">{t("ขนาดที่จะสั่ง (ติ๊กเลือก + ใส่จำนวน)", "Sizes to order (tick + qty)")}</p>
+    <div className="flex items-stretch gap-2">
+      {/* กล่องที่ 1 — รูป (+ คัดลอก path / เปิด Drive) · กดรูป = เปิดป๊อปอัปแก้ไฟล์คลังกลาง · ชี้ค้าง = ดูรูปใหญ่ */}
+      <div className="relative w-[124px] shrink-0 border border-slate-200 rounded-xl p-2.5 bg-slate-50/40 flex flex-col items-center gap-1.5">
+        <button type="button" onClick={onRemove} className="absolute top-1 right-1 text-slate-300 hover:text-red-500 text-sm leading-none" title={t("เอารูปออก", "Remove")}>✕</button>
+        <button type="button" onClick={onOpenDetail} title={t("กดดู/แก้ไฟล์ในคลัง · ชี้ค้างดูรูปใหญ่", "Open in library · hover to preview")} className="rounded-lg overflow-hidden border border-slate-200 hover:ring-2 hover:ring-violet-300 leading-[0]">
+          <HoverImage url={item.url} size={80} previewSize={340} rounded="rounded-lg" alt={item.title} />
+        </button>
+        <span className="w-full text-[11px] font-medium text-slate-700 text-center leading-tight line-clamp-2" title={item.title}>{item.title}</span>
+        {item.master_path && <button type="button" onClick={copyPath} title={item.master_path} className="w-full text-[10px] text-slate-500 hover:text-violet-700 border border-slate-200 rounded px-1 py-0.5 truncate">📋 {t("คัดลอก path", "Copy path")}</button>}
+        {item.master_url && <a href={item.master_url} target="_blank" rel="noopener noreferrer" title={t("เปิดโฟลเดอร์บน Google Drive", "Open on Google Drive")} className="w-full text-[10px] text-center text-violet-700 hover:underline border border-slate-200 rounded px-1 py-0.5">📁 Drive</a>}
+      </div>
+      {/* กล่องที่ 2 — ขนาด/จำนวน */}
+      <div className="flex-1 min-w-0 border border-slate-200 rounded-xl p-2.5">
+        <p className="text-[11px] text-slate-400 mb-1.5">{t("ขนาดที่จะสั่ง (ติ๊กเลือก + ใส่จำนวน)", "Sizes to order (tick + qty)")}</p>
           <div className="space-y-1.5">
             {item.available.length === 0 && !adding && <p className="text-[11px] text-slate-400 italic">{t("รูปนี้ยังไม่มีขนาดในคลัง — กดเพิ่มขนาด", "No sizes in library yet — add one")}</p>}
             {/* ขนาดที่เลือกแล้ว — โชว์บนสุด + ช่องจำนวน */}
@@ -247,7 +245,6 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, o
           </div>
         </div>
       </div>
-    </div>
   );
 }
 
