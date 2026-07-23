@@ -38,43 +38,57 @@ function StatusBadge({ status }: { status: string | null }) {
 }
 
 // จัดกลุ่ม (โหมดการ์ด) — แบรนด์ / หมวดสินค้า / สถานะ / เดือนกำหนดส่ง
-type GroupField = "mo_group" | "brand" | "category" | "status" | "due_month";
+type GroupField = "mo_group" | "brand" | "category" | "desk" | "status" | "due_month";
 const GROUP_FIELDS: { key: GroupField; label: string }[] = [
-  { key: "mo_group", label: "ใบสั่งงาน (ชุด)" }, { key: "brand", label: "แบรนด์" }, { key: "category", label: "หมวดสินค้า (ประเภท)" }, { key: "status", label: "สถานะ" }, { key: "due_month", label: "เดือนกำหนดส่ง" },
+  { key: "mo_group", label: "ใบสั่งงาน (ชุด)" }, { key: "brand", label: "แบรนด์" }, { key: "category", label: "หมวดสินค้า (ประเภท)" }, { key: "desk", label: "โต๊ะที่ผลิต" }, { key: "status", label: "สถานะ" }, { key: "due_month", label: "เดือนกำหนดส่ง" },
 ];
 const groupValueOf = (j: ProductionJob, f: GroupField): string =>
   f === "mo_group" ? (j.mo_group || "— ยังไม่จับชุด —")
   : f === "brand" ? (j.brand || "— ไม่มีแบรนด์ —")
   : f === "category" ? (j.category || "— ไม่มีหมวด —")
+  : f === "desk" ? (j.dept_names || j.worker_names || "— ยังไม่มีโต๊ะ —")
   : f === "status" ? (j.status ? getStatusStyle(j.status).label : "—")
   : (j.due_date ? new Date(j.due_date).toLocaleDateString("th-TH", { year: "numeric", month: "long" }) : "— ไม่มีกำหนดส่ง —");
 
-// การ์ดงาน 1 ใบ (โหมดจัดกลุ่ม/ปฏิทิน) — คลิกเปิดรายละเอียด
-function JobCard({ j, onClick }: { j: ProductionJob; onClick?: () => void }) {
+// การ์ดงาน 1 ใบ (โหมดจัดกลุ่ม/ปฏิทิน) — คลิกเปิดรายละเอียด · vertical = การ์ดแนวตั้ง (รูปบน)
+function JobCard({ j, onClick, vertical }: { j: ProductionJob; onClick?: () => void; vertical?: boolean }) {
+  const info = (
+    <>
+      <div className="flex items-start justify-between gap-1">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-800 line-clamp-2 leading-snug">{j.product_name || j.product_sku || "—"}</div>
+          <div className="font-mono text-[10px] text-slate-400 truncate">{j.product_sku} · {j.mo_no}</div>
+        </div>
+        <StatusBadge status={j.status} />
+      </div>
+      <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 flex-wrap">
+        {j.brand && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: j.brand_color || "#cbd5e1" }} />{j.brand}</span>}
+        <span>จำนวน {fmt(j.qty)}</span>
+        {j.remaining > 0 && <span className="text-indigo-600 font-medium">เหลือจ่าย {fmt(j.remaining)}</span>}
+        {j.due_date && <span className={dueTone(j.due_date)}>{isOverdue(j.due_date) && "⚠ "}ส่ง {new Date(j.due_date).toLocaleDateString("th-TH")}</span>}
+      </div>
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <div className="h-1.5 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-400" style={{ width: `${j.progress_pct}%` }} /></div>
+        <span className="text-[10px] text-slate-400 tabular-nums shrink-0">{fmt(j.received)}/{fmt(j.qty)}</span>
+      </div>
+      {(j.worker_names || j.dept_names) && <div className="mt-1 text-[10px] text-slate-400 truncate">🔨 {j.worker_names || j.dept_names}</div>}
+    </>
+  );
+  if (vertical) {
+    return (
+      <div onClick={onClick} className={`rounded-xl border border-slate-200 bg-white overflow-hidden hover:shadow-sm transition-shadow ${onClick ? "cursor-pointer hover:border-blue-300" : ""}`}>
+        <div className="bg-slate-50 flex items-center justify-center border-b border-slate-100" style={{ aspectRatio: "1 / 1" }}>
+          <HoverImage url={j.image_url} size={132} previewSize={280} />
+        </div>
+        <div className="p-2.5">{info}</div>
+      </div>
+    );
+  }
   return (
     <div onClick={onClick} className={`rounded-xl border border-slate-200 bg-white p-2.5 hover:shadow-sm transition-shadow ${onClick ? "cursor-pointer hover:border-blue-300" : ""}`}>
       <div className="flex gap-2.5">
         <HoverImage url={j.image_url} size={48} previewSize={260} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-1">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-slate-800 line-clamp-2 leading-snug">{j.product_name || j.product_sku || "—"}</div>
-              <div className="font-mono text-[10px] text-slate-400 truncate">{j.product_sku} · {j.mo_no}</div>
-            </div>
-            <StatusBadge status={j.status} />
-          </div>
-          <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 flex-wrap">
-            {j.brand && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: j.brand_color || "#cbd5e1" }} />{j.brand}</span>}
-            <span>จำนวน {fmt(j.qty)}</span>
-            {j.remaining > 0 && <span className="text-indigo-600 font-medium">เหลือจ่าย {fmt(j.remaining)}</span>}
-            {j.due_date && <span className={dueTone(j.due_date)}>{isOverdue(j.due_date) && "⚠ "}ส่ง {new Date(j.due_date).toLocaleDateString("th-TH")}</span>}
-          </div>
-          <div className="mt-1.5 flex items-center gap-1.5">
-            <div className="h-1.5 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-400" style={{ width: `${j.progress_pct}%` }} /></div>
-            <span className="text-[10px] text-slate-400 tabular-nums shrink-0">{fmt(j.received)}/{fmt(j.qty)}</span>
-          </div>
-          {(j.worker_names || j.dept_names) && <div className="mt-1 text-[10px] text-slate-400 truncate">🔨 {j.worker_names || j.dept_names}</div>}
-        </div>
+        <div className="min-w-0 flex-1">{info}</div>
       </div>
     </div>
   );
@@ -255,6 +269,7 @@ export default function ProductionDashboardPage() {
   const [gSearch, setGSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());   // กลุ่มที่พับอยู่
   const [view, setView] = useState<"list" | "calendar" | "game">("list");
+  const [cardDir, setCardDir] = useState<"h" | "v">("h");   // การ์ดแนวนอน/แนวตั้ง (โหมดจัดกลุ่ม)
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null);
 
   useEffect(() => {
@@ -381,6 +396,10 @@ export default function ProductionDashboardPage() {
               {groups.length > 0 && (() => { const allC = collapsed.size >= groups.length; return (
                 <button onClick={() => setCollapsed(allC ? new Set() : new Set(groups.map(([l]) => l)))} className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 shrink-0">{allC ? "▾ กางทั้งหมด" : "▸ พับทั้งหมด"}</button>
               ); })()}
+              <div className="inline-flex border border-slate-200 rounded-lg overflow-hidden shrink-0 ml-auto" title="ทิศทางการ์ด">
+                <button onClick={() => setCardDir("h")} className={`h-8 px-2.5 text-sm ${cardDir === "h" ? "bg-blue-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>▭ แนวนอน</button>
+                <button onClick={() => setCardDir("v")} className={`h-8 px-2.5 text-sm border-l border-slate-200 ${cardDir === "v" ? "bg-blue-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>▯ แนวตั้ง</button>
+              </div>
             </>}
             {!grouped && <span className="text-[11px] text-slate-400">ติ๊ก “จัดกลุ่ม” เพื่อดูการ์ดแยกกลุ่ม · หรือใช้ปุ่มสลับ ตาราง/การ์ด + ค้นหาในตารางด้านล่าง</span>}
           </div>
@@ -400,8 +419,8 @@ export default function ProductionDashboardPage() {
                       <span className="text-xs text-slate-400 bg-slate-100 rounded-full px-2 py-0.5 shrink-0">{items.length}</span>
                     </button>
                     {open && (
-                      <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
-                        {items.map((j) => <JobCard key={j.id} j={j} onClick={() => setSelectedJob(j)} />)}
+                      <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardDir === "v" ? "150px" : "260px"}, 1fr))` }}>
+                        {items.map((j) => <JobCard key={j.id} j={j} onClick={() => setSelectedJob(j)} vertical={cardDir === "v"} />)}
                       </div>
                     )}
                   </div>
