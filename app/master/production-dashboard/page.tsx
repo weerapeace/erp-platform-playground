@@ -333,6 +333,9 @@ export default function ProductionDashboardPage() {
     }
   };
 
+  // กดการ์ด → เปิดเช็กลิสต์เตรียม/ตัด (modal ตัวจริงในบอร์ดจ่ายงาน) ผ่าน ?mo=id
+  const openJob = (j: ProductionJob) => router.push(`/master/work-board?mo=${j.id}`);
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between gap-3">
@@ -383,7 +386,7 @@ export default function ProductionDashboardPage() {
 
         {/* เนื้อหา */}
         <main className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-3">
-          {view === "game" ? <GameView jobs={jobs} counts={counts} /> : view === "calendar" ? <CalendarView jobs={shown} onJobClick={setSelectedJob} onSchedule={setDue} onToggleDelivery={toggleDelivery} /> : <>
+          {view === "game" ? <GameView jobs={jobs} counts={counts} /> : view === "calendar" ? <CalendarView jobs={shown} onJobClick={openJob} onSchedule={setDue} onToggleDelivery={toggleDelivery} /> : <>
           <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="w-4 h-4 accent-blue-600" /> จัดกลุ่ม
@@ -420,7 +423,7 @@ export default function ProductionDashboardPage() {
                     </button>
                     {open && (
                       <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardDir === "v" ? "150px" : "260px"}, 1fr))` }}>
-                        {items.map((j) => <JobCard key={j.id} j={j} onClick={() => setSelectedJob(j)} vertical={cardDir === "v"} />)}
+                        {items.map((j) => <JobCard key={j.id} j={j} onClick={() => openJob(j)} vertical={cardDir === "v"} />)}
                       </div>
                     )}
                   </div>
@@ -436,7 +439,7 @@ export default function ProductionDashboardPage() {
               tableId="production-dashboard"
               searchPlaceholder="ค้นหา SKU / ชื่อ / ใบสั่งผลิต / แบรนด์ / หมวด"
               searchableKeys={["product_sku", "product_name", "mo_no", "brand", "category"]}
-              onRowClick={setSelectedJob}
+              onRowClick={openJob}
               emptyMessage={cat === "all" ? "ยังไม่มีงานผลิต" : "ไม่มีงานในกลุ่มนี้"}
               enableCards
               defaultViewMode="cards"

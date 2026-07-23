@@ -7,7 +7,8 @@
  * ลากการ์ด MO ปล่อยในโซนแผนก = popup จ่ายงาน · ลากใบจ่ายงานข้ามแผนก = ย้ายแผนก
  * ซ่อน MO เมื่อจ่ายครบ · ซ่อนใบจ่ายงานเมื่อรับครบ · กรอบสีแบรนด์ + ปุ่มตั้งสี
  */
-import { useState, useEffect, useCallback, useMemo, useRef, type PointerEvent as RPE } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense, type PointerEvent as RPE } from "react";
+import { useSearchParams } from "next/navigation";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -124,6 +125,15 @@ const stageOfDept = (name: string) => (name.includes("ตัด") || name.includ
 type Zone = { key: string; label: string; kind: "pending" | "dept"; dept?: Dept; accent: string; moCards: PendingMO[]; woCards: WorkOrder[] };
 
 export default function WorkBoardPage() {
+  // ห่อ Suspense เพราะ WorkBoardPageInner ใช้ useSearchParams (เปิดงานจาก ?mo=)
+  return (
+    <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}>
+      <WorkBoardPageInner />
+    </Suspense>
+  );
+}
+
+function WorkBoardPageInner() {
   const canView = usePermission("products.view");
   const canEdit = usePermission("products.edit");
   // สิทธิ์ "จ่ายงานเข้าแผนก" แยกต่างหาก — ตั้งค่ารายตำแหน่งได้ที่ /admin/roles-permissions
@@ -894,6 +904,16 @@ export default function WorkBoardPage() {
     }
   }, [canEdit, toast]);
   const closeChecklist = useCallback(() => { setChecklistMO(null); setClWO(null); setDelArmed(false); void load(true); }, [load]);
+
+  // เปิดเช็กลิสต์งานจาก URL (?mo=<id>) — ใช้ตอนกดการ์ดจากหน้า Dashboard ผลิต (เปิด modal ตัวจริงตัวเดียวกัน)
+  const searchParams = useSearchParams();
+  const openedFromUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    const moId = searchParams.get("mo");
+    if (!moId || openedFromUrlRef.current === moId) return;
+    const mo = board.pending.find((x) => x.id === moId);
+    if (mo) { openedFromUrlRef.current = moId; setClWO(null); setChecklistMO(mo); }
+  }, [searchParams, board.pending]);
   const deleteMO = useCallback(async (mo: PendingMO) => {
     try {
       const res = await apiFetch(`/api/mo/${mo.id}`, { method: "DELETE" });
