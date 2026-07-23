@@ -16,6 +16,7 @@ import type { MasterCRUDConfig } from "@/components/master-crud";
 import { money, statusBadge, PAY_STATUS } from "@/components/payroll/cells";
 import { ContractPeekCell } from "@/components/payroll/contract-peek-cell";
 import { RecordPeekCell } from "@/components/payroll/record-peek-cell";
+import { employeeSkillsRenderer } from "../employee-skills-field";
 
 // render แต่ละแถวใน drawer (ค่าประจำ / เงินเดือน / สลิป)
 const peekRecurring = (r: Record<string, unknown>) => (
@@ -169,6 +170,10 @@ const CONFIG: MasterCRUDConfig = {
   defaultShowAllColumns: true,
   // registry override fields[] เมื่อโหลดสำเร็จ; cellRenderers ประคองของพิเศษไว้
   cellRenderers: employeeCellRenderers,
+  // ช่องติ๊ก "ทักษะ/ความสามารถ" (custom render — คลังทักษะ 3 ภาษา จาก erp_lookups)
+  formRenderers: { skills: employeeSkillsRenderer },
+  // ไฟล์แนบราย record (แนบใบกรอกประวัติ / สำเนาบัตร / พาสปอร์ต ฯลฯ)
+  fileAttachments: { entityType: "payroll-employees", title: "📎 ไฟล์แนบ / เอกสาร", description: "แนบใบกรอกประวัติ / สำเนาบัตร / พาสปอร์ต ฯลฯ" },
   // fields[] ด้านล่าง = fallback ถ้าโหลดทะเบียนไม่ได้
   fields: [
     { key: "employee_code", label: "รหัส",        type: "text",   colSize: 100, placeholder: "อัตโนมัติ", groupKey: "core", order: 10 },

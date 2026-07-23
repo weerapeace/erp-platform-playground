@@ -9,6 +9,12 @@ import { useEffect, useState, useCallback, useMemo, useRef, type PointerEvent as
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import type { DeptHistory } from "@/app/api/payroll/board/history/route";
+import { MasterRecordDrawer } from "@/components/master-crud";
+import { employeeSkillsRenderer } from "../employee-skills-field";
+
+// ไฟล์แนบ + ช่องติ๊กทักษะ สำหรับ drawer พนักงานเต็ม (เปิดจากบอร์ด) — ให้เหมือนหน้าตาราง
+const EMP_FILE_ATTACH = { entityType: "payroll-employees", title: "📎 ไฟล์แนบ / เอกสาร", description: "แนบใบกรอกประวัติ / สำเนาบัตร / พาสปอร์ต ฯลฯ" };
+const EMP_FORM_RENDERERS = { skills: employeeSkillsRenderer };
 
 type Card = {
   id: string; employee_code: string; nickname: string; full_name: string;
@@ -43,6 +49,7 @@ export default function PayrollBoardPage() {
   const [saving, setSaving] = useState(false);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<Card | null>(null);
+  const [empId, setEmpId] = useState<string | null>(null);   // เปิด drawer ข้อมูลพนักงานเต็ม
 
   // pointer drag
   const dragRef = useRef<{ card: Card; fromZone: string; sx: number; sy: number } | null>(null);
@@ -208,7 +215,21 @@ export default function PayrollBoardPage() {
         </div>
       )}
 
-      {sel && <CardDrawer c={sel} onClose={() => setSel(null)} />}
+      {sel && <CardDrawer c={sel} onClose={() => setSel(null)} onOpenFull={() => setEmpId(sel.id)} />}
+
+      {/* drawer ข้อมูลพนักงานเต็ม (ของกลาง) — ช่องทั้งหมดจากทะเบียน field + ไฟล์แนบ + ทักษะ */}
+      {empId && (
+        <MasterRecordDrawer
+          moduleKey="payroll-employees" recordId={empId}
+          apiBase="/api/payroll/core/" apiPath="employees"
+          title="ข้อมูลพนักงาน" icon="👤"
+          permissions={{ view: "employees.view", create: "employees.create", edit: "employees.edit" }}
+          fileAttachments={EMP_FILE_ATTACH}
+          formRenderers={EMP_FORM_RENDERERS}
+          onClose={() => setEmpId(null)}
+          onChanged={() => void load()}
+        />
+      )}
     </div>
   );
 }
@@ -235,7 +256,7 @@ function EmployeeCard({ c, onDown, dragging }: { c: Card; onDown: (e: RPE) => vo
   );
 }
 
-function CardDrawer({ c, onClose }: { c: Card; onClose: () => void }) {
+function CardDrawer({ c, onClose, onOpenFull }: { c: Card; onClose: () => void; onOpenFull: () => void }) {
   const col = COLOR_CLS[c.color] ?? COLOR_CLS.slate;
   const [hist, setHist] = useState<DeptHistory[]>([]);
   useEffect(() => {
@@ -274,9 +295,14 @@ function CardDrawer({ c, onClose }: { c: Card; onClose: () => void }) {
               </div>
             </div>
           )}
-          <div className="pt-3 flex gap-2">
-            <Link href="/payroll/employees" className="flex-1 h-10 inline-flex items-center justify-center text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800">📋 แก้ในตาราง</Link>
-            <Link href="/payroll/warnings" className="flex-1 h-10 inline-flex items-center justify-center text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">⚠️ ใบเตือน</Link>
+          <div className="pt-3 space-y-2">
+            <button onClick={onOpenFull} className="w-full h-10 inline-flex items-center justify-center gap-1.5 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+              👤 เปิดข้อมูลพนักงาน (ทั้งหมด)
+            </button>
+            <div className="flex gap-2">
+              <Link href="/payroll/employees" className="flex-1 h-10 inline-flex items-center justify-center text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">📋 ตาราง</Link>
+              <Link href="/payroll/warnings" className="flex-1 h-10 inline-flex items-center justify-center text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">⚠️ ใบเตือน</Link>
+            </div>
           </div>
         </div>
       </div>

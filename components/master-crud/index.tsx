@@ -2701,6 +2701,7 @@ function prettifyModuleKey(k: string): string {
 export function MasterRecordDrawer({
   moduleKey, recordId, onClose, onChanged, startInEdit, createDefaults, createTitle,
   apiPath, apiBase, title, icon, mediaGallery, permissions, extraRowActions, cellRenderers, navIds,
+  formRenderers, fileAttachments,
 }: {
   moduleKey: string;
   recordId: string | null;        // null = สร้างใหม่
@@ -2719,6 +2720,8 @@ export function MasterRecordDrawer({
   extraRowActions?: MasterCRUDConfig["extraRowActions"];
   cellRenderers?: MasterCRUDConfig["cellRenderers"];
   navIds?: string[];
+  formRenderers?: MasterCRUDConfig["formRenderers"];
+  fileAttachments?: MasterCRUDConfig["fileAttachments"];
 }) {
   const { user } = useAuth();
   const actor = user?.name ?? user?.email ?? undefined;
@@ -2735,9 +2738,9 @@ export function MasterRecordDrawer({
       title: title ?? createTitle ?? prettifyModuleKey(moduleKey),
       icon, activeField: "is_active", serverMode: true,
       permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
-      mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
-      // สินค้า (Parent/SKU) → ช่อง "ไฟล์แนบ" (Supabase Storage · ลบ record ถาวร=ลบไฟล์ตาม) ทุกที่ที่เปิด drawer
-      fileAttachments: productEntity ? { entityType: productEntity, title: "ไฟล์แนบ" } : undefined,
+      mediaGallery: mg, extraRowActions, cellRenderers, createDefaults, formRenderers,
+      // ไฟล์แนบ: ผู้เรียกส่ง fileAttachments มาได้ตรงๆ (เช่น payroll พนักงาน) · fallback = สินค้า (Parent/SKU)
+      fileAttachments: fileAttachments ?? (productEntity ? { entityType: productEntity, title: "ไฟล์แนบ" } : undefined),
       // Parent SKU → ช่อง "รูป Description" ในฟอร์ม (เหมือนหน้า master page โดยตรง)
       extraFormSection: moduleKey === "parent-skus-v2"
         ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
@@ -2751,7 +2754,7 @@ export function MasterRecordDrawer({
           ]
         : undefined,
     };
-  }, [apiBase, apiPath, moduleKey, title, createTitle, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults, actor]);
+  }, [apiBase, apiPath, moduleKey, title, createTitle, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults, actor, formRenderers, fileAttachments]);
 
   // ผูก drawer กับปุ่มย้อนกลับเบราว์เซอร์ (ของกลาง): กด Back ปิด drawer ทีละชั้น ไม่หลุดออกจากหน้า
   // ปุ่มปิด/Esc/แตะนอก → requestClose() (วิ่งผ่านประวัติ) → ปิดชั้นบนสุด

@@ -33,6 +33,10 @@ const WRITABLE = new Set([
   // งาน/เงินเดือน
   "employment_status", "start_date", "resign_date", "payroll_register_base_salary",
   "scanner_employee_code", "payslip_language", "notes",
+  // ธนาคาร (registry มีฟิลด์อยู่แล้ว แต่เดิมไม่อยู่ใน WRITABLE → กรอกแล้วไม่เซฟ)
+  "bank_name", "bank_account_no", "bank_account_name", "bank_branch",
+  // หัวหน้า + ทักษะรายคน (text[] ของ erp_lookups employee_skill)
+  "supervisor_name", "skills",
   // ตำแหน่ง/สังกัด (relation picker → เก็บ FK id ตรง)
   "position_id", "cost_center_id", "department_id",
 ]);
@@ -180,6 +184,10 @@ async function toColumns(body: Record<string, unknown>): Promise<Record<string, 
   // department_name (select) → department_id (FK)
   if ("department_name" in body) {
     out.department_id = await nameToDeptId(String(body.department_name ?? ""));
+  }
+  // skills เป็น text[] — ฟอร์ม default อาจส่ง "" (string) → บังคับเป็น array กัน error "malformed array literal"
+  if ("skills" in out) {
+    out.skills = Array.isArray(out.skills) ? (out.skills as unknown[]).filter(Boolean).map(String) : [];
   }
   // ช่องว่าง → null สำหรับ uuid(_id)/date/timestamp ทั้งหมด (กัน error type uuid/date: "")
   nullifyEmpty(out);
