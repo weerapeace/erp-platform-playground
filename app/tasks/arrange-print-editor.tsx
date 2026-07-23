@@ -45,7 +45,7 @@ export function sizeDimDisplay(s: { w: number | null; h: number | null; unit: st
   const { w, h, unit } = s;
   if (w != null && h != null) return `${w}×${h} ${unit}`;
   if (w != null) return `${t("กว้าง", "Width")} ${w} ${unit}`;
-  if (h != null) return `${t("ยาว", "Length")} ${h} ${unit}`;
+  if (h != null) return `${t("สูง", "Height")} ${h} ${unit}`;
   return "";
 }
 
@@ -236,7 +236,7 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, o
                 <input value={nl} onChange={(e) => setNl(e.target.value)} placeholder={t("ชื่อ (เช่น เล็ก)", "label")} className="w-24 h-8 border border-slate-200 rounded-md px-2 text-sm" />
                 <input value={nw} onChange={(e) => setNw(e.target.value)} placeholder={t("กว้าง", "W")} inputMode="decimal" className="w-14 h-8 border border-slate-200 rounded-md px-2 text-sm" />
                 <span className="text-slate-400">×</span>
-                <input value={nh} onChange={(e) => setNh(e.target.value)} placeholder={t("ยาว", "H")} inputMode="decimal" className="w-14 h-8 border border-slate-200 rounded-md px-2 text-sm" />
+                <input value={nh} onChange={(e) => setNh(e.target.value)} placeholder={t("สูง", "H")} inputMode="decimal" className="w-14 h-8 border border-slate-200 rounded-md px-2 text-sm" />
                 <select value={nu} onChange={(e) => setNu(e.target.value as AssetSize["unit"])} className="h-8 border border-slate-200 rounded-md px-1 text-sm"><option value="cm">cm</option><option value="mm">mm</option><option value="in">in</option><option value="px">px</option></select>
                 <button type="button" onClick={submitSize} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded-md hover:bg-violet-700">{t("เพิ่ม", "Add")}</button>
                 <button type="button" onClick={() => setAdding(false)} className="h-8 px-2 text-xs text-slate-500">{t("ยกเลิก", "Cancel")}</button>
