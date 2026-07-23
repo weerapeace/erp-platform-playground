@@ -202,16 +202,16 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // ---- การ์ดแผนก (ของกลาง): หัวข้อ + ปุ่มเจาะเข้าดู + ตัวเลขสำคัญ ----
 type DeptStat = { v: React.ReactNode; l: string; tone?: "danger" | "warning" };
-type DeptDrill = { key: string; label: string; icon: string; stats: DeptStat[] };   // ข้อมูลเปิด Popup (KPI + รายการ)
+type DeptDrill = { key: string; label: string; icon: string; stats: DeptStat[]; embedUrl?: string };   // ข้อมูลเปิด Popup (KPI+รายการ หรือ ฝังหน้าเต็ม)
 const statTone = (t?: DeptStat["tone"]) =>
   t === "danger" ? "text-red-600" : t === "warning" ? "text-amber-600" : "text-slate-800";
 
-function DeptCard({ icon, title, href, dept, onOpen, stats }: {
+function DeptCard({ icon, title, href, dept, onOpen, stats, embed }: {
   icon: string; title: string; href: string; dept: string;
-  onOpen: (d: DeptDrill) => void; stats: DeptStat[];
+  onOpen: (d: DeptDrill) => void; stats: DeptStat[]; embed?: boolean;
 }) {
   return (
-    <div onClick={() => onOpen({ key: dept, label: title, icon, stats })}
+    <div onClick={() => onOpen({ key: dept, label: title, icon, stats, embedUrl: embed ? href : undefined })}
       className="block bg-white border border-slate-200 rounded-xl p-4 hover:border-slate-300 hover:shadow-sm transition-all cursor-pointer">
       <div className="flex items-center gap-2 mb-3">
         <span className="text-lg leading-none">{icon}</span>
@@ -241,7 +241,7 @@ function DeptGrid({ s, f, o, dept, onOpen }: {
   const gt0 = (x?: number) => (x ?? 0) > 0;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-      <DeptCard icon="🏭" title="ผลิต" href="/master/production-dashboard" dept="production" onOpen={onOpen} stats={[
+      <DeptCard icon="🏭" title="ผลิต" href="/master/production-dashboard" dept="production" onOpen={onOpen} embed stats={[
         { v: n(p?.in_production), l: "กำลังผลิต (ใบ)" },
         { v: n(p?.unassigned),   l: "ยังไม่แจกงาน" },
         { v: n(o.mo_overdue),    l: "เลยกำหนด", tone: gt0(o.mo_overdue) ? "danger" : undefined },
@@ -286,16 +286,34 @@ function DeptItemsModal({ dept, onClose }: { dept: DeptDrill; onClose: () => voi
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (dept.embedUrl) { setLoading(false); return; }   // โหมดฝังหน้า → ไม่ต้องดึงรายการ
     setLoading(true);
     apiFetch(`/api/dashboard/dept-items?dept=${dept.key}`)
       .then((r) => r.json())
       .then((j) => setGroups((j.data ?? []) as DeptItemGroup[]))
       .catch(() => setGroups([]))
       .finally(() => setLoading(false));
-  }, [dept.key]);
+  }, [dept.key, dept.embedUrl]);
 
   const go = (link: string) => { onClose(); router.push(link); };
   const totalItems = (groups ?? []).reduce((sum, g) => sum + g.items.length, 0);
+
+  // โหมดฝังหน้าเต็ม (iframe) — เปิดแดชบอร์ดจริงของแผนกใน Popup (shell ซ่อนเมนูให้เองด้วย ?embed=1)
+  if (dept.embedUrl) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-2 sm:p-6" onClick={onClose}>
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-slate-100 shrink-0">
+            <span className="text-xl">{dept.icon}</span>
+            <div className="text-base font-semibold text-slate-800 flex-1 truncate">{dept.label}</div>
+            <a href={dept.embedUrl} target="_blank" rel="noopener" className="text-xs text-blue-600 hover:underline mr-1 shrink-0">เปิดเต็มจอ ↗</a>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg text-slate-400 hover:bg-slate-100 flex items-center justify-center shrink-0">✕</button>
+          </div>
+          <iframe src={`${dept.embedUrl}?embed=1`} title={dept.label} className="flex-1 w-full border-0" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={onClose}>
