@@ -408,6 +408,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const [cardLb, setCardLb] = useState(-1); // ดูรูปบนการ์ดเต็มจอ
   const [busy, setBusy] = useState(false);
   const [reviseOpen, setReviseOpen] = useState(false); // ป๊อปอัปขอแก้
+  const [savedGalleries, setSavedGalleries] = useState<Record<string, { r2_key?: string; url?: string; slot_id?: string; slot?: number }[]>>({});  // แกลเลอรีรูปสินค้าจริง (save แล้ว) ต่อ SKU/Parent
   const attachCount = sub.attachments?.length ?? 0;
   const st = sub.status;
   // ชนิดงานย่อย + ความสามารถ (config ทับ registry · legacy ไม่มีค่า = อนุญาตหมด)
@@ -433,6 +434,23 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   // เรียง Parent ก่อน แล้วตามด้วย SKU (รูปในกลุ่มเรียงตามลำดับที่จัดไว้อยู่แล้ว)
   productGroups.sort((a, b) => (a.key.startsWith("parent:") ? 0 : 1) - (b.key.startsWith("parent:") ? 0 : 1));
   const skuImgKeys = productGroups.flatMap((g) => g.keys);   // แบน ๆ ไว้ทำ lightbox/ดัชนี
+  // ดึงแกลเลอรีรูปสินค้าจริง (ที่ save แล้ว) ของแต่ละ SKU/Parent มาโชว์คู่กับรูปที่ส่งรอบนี้ (ป้าย ✓ saved)
+  useEffect(() => {
+    const owners = new Set<string>();
+    for (const g of productGroups) {
+      if (g.key.startsWith("parent:")) owners.add(`parent_sku:${g.key.slice(7)}`);
+      else if (g.key.startsWith("sku:")) owners.add(`product_sku:${g.key.slice(4)}`);
+      else if (g.key.startsWith("legacy:")) owners.add(`product_sku:${g.key.slice(7)}`);
+    }
+    if (owners.size === 0) return;
+    let live = true;
+    owners.forEach((o) => {
+      apiFetch(`/api/creative-tasks/${taskId}/subtasks?gallery=${encodeURIComponent(o)}`).then((r) => r.json())
+        .then((j) => { if (live && j?.galleries) setSavedGalleries((prev) => ({ ...prev, ...(j.galleries as Record<string, { r2_key: string }[]>) })); }).catch(() => { /* ข้าม */ });
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId, sub.id]);
   // รวมรูปทั้งหมดบนการ์ด (รูปงาน + รูปเข้าสินค้า) ไว้กดดูเต็มจอ/เลื่อน
   const cardImages: LightboxImage[] = [
     ...imageAtts.map((a) => ({ url: `/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}&w=1600`, label: a.file_name ?? t("รูปแนบงาน", "Work image") })),
@@ -564,7 +582,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
             {/* รูปเข้าสินค้า — จัดกลุ่มตามสินค้า + ป้ายรหัส (เช่น BSAC007) · กดดูเต็มจอ */}
             {productGroups.length > 0 && (
               <div className="space-y-1.5">
-                <p className="text-[11px] text-slate-400">📦 {t("รูปเข้าสินค้า", "Product images")}</p>
+                <p className="text-[11px] text-slate-400">📦 {t("รูปเข้าสินค้า", "Product images")} <span className="text-emerald-600">· ✓ {t("= บันทึกในแกลเลอรีแล้ว", "= saved in gallery")}</span></p>
                 {productGroups.map((g) => {
                   const base = imageAtts.length + skuImgKeys.indexOf(g.keys[0]);   // ดัชนีเริ่มของกลุ่มนี้ใน cardImages
                   return (
@@ -574,10 +592,22 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
                         {g.keys.map((k, j) => (
                           <div key={k} className="relative">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={`/api/r2-image?key=${encodeURIComponent(k)}&w=160`} alt="" onClick={() => setCardLb(base + j)} title={t("กดดูเต็มจอ", "Click to view full")} className="h-12 w-12 rounded object-cover border border-amber-200 cursor-zoom-in" />
+                            <img src={`/api/r2-image?key=${encodeURIComponent(k)}&w=160`} alt="" onClick={() => setCardLb(base + j)} title={t("รูปที่ส่งรอบนี้ · กดดูเต็มจอ", "Submitted this round · click to view")} className="h-12 w-12 rounded object-cover border border-amber-200 cursor-zoom-in" />
                             <span className="absolute -top-1 -left-1 bg-slate-700 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center shadow">{j + 1}</span>
                           </div>
                         ))}
+                        {/* รูปที่ save ในแกลเลอรีสินค้าจริงแล้ว — ป้าย ✓ เขียว (กดเปิดเต็มในแท็บใหม่) */}
+                        {(() => {
+                          const lookup = g.key.startsWith("legacy:") ? `sku:${g.key.slice(7)}` : g.key;
+                          const submitted = new Set(g.keys);
+                          return (savedGalleries[lookup] ?? []).filter((s) => s.r2_key && !submitted.has(s.r2_key)).map((s) => (
+                            <div key={`saved-${s.r2_key}`} className="relative">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={`/api/r2-image?key=${encodeURIComponent(s.r2_key as string)}&w=160`} alt="" onClick={() => window.open(`/api/r2-image?key=${encodeURIComponent(s.r2_key as string)}`, "_blank")} title={t("บันทึกในแกลเลอรีแล้ว · กดดูเต็ม", "Saved in gallery · click to view")} className="h-12 w-12 rounded object-cover border-2 border-emerald-300 cursor-zoom-in" />
+                              <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center shadow" title={t("บันทึกแล้ว", "Saved")}>✓</span>
+                            </div>
+                          ));
+                        })()}
                       </div>
                     </div>
                   );
