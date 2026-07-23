@@ -25,6 +25,7 @@ import {
   type CreativePriority, type Campaign, type BrandOption, type TaskTemplate, type SubtaskStepConfig, type TemplateContentItem,
 } from "./data";
 import { ArrangePrintEditor, specFromItems, specBasesFrom, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
+import type { ArrangePrintType } from "./data";
 
 const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 
@@ -84,6 +85,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const [saving, setSaving] = useState(false);
   const [arrangeItems, setArrangeItems] = useState<ArrangeItem[]>([]);   // งานเรียงพิมพ์: รูป+ขนาด+จำนวน
   const [arrangeBases, setArrangeBases] = useState<ArrangeBase[]>([]);   // งานเรียงพิมพ์: รูปฐาน (DFT UV Printed) + เพิ่ม/ลบต่อรูป
+  const [arrangePrintType, setArrangePrintType] = useState<ArrangePrintType | null>(null);   // งานเรียงพิมพ์: ประเภทแผ่นพิมพ์ (DTF/UV)
   const [printedName, setPrintedName] = useState("");   // งานเรียงพิมพ์: ชื่อเสริม (ต่อท้ายชื่อ Printed_YYYY_MM_DD-#)
   // ช่องที่ผู้ใช้ "แตะเอง" ในขั้นข้อมูลงาน — ช่องที่ยังไม่แตะ (ยังเป็นค่าเริ่มต้น) = กล่องเทาอ่อน · ช่องว่าง = กล่องส้มอ่อน + ดันขึ้นบน
   const [touched, setTouched] = useState<Set<string>>(new Set());
@@ -216,7 +218,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     if (!form.title.trim()) { setStep(2); setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; }
     if (requireParent && form.parents.length === 0) { setStep(4); setFormErr(t("งานนี้ต้องระบุ Parent SKU (ตระกูลสินค้า) อย่างน้อย 1 รายการ","This task requires at least one Parent SKU")); return; }
     setSaving(true); setFormErr(null);
-    const arrangeConfig = { ...specFromItems(arrangeItems), bases: specBasesFrom(arrangeBases) };
+    const arrangeConfig = { ...specFromItems(arrangeItems), bases: specBasesFrom(arrangeBases), print_type: arrangePrintType };
     const subtasks = subs.filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next, type: s.type, config: s.type === "arrange_print" ? { ...s.config, arrange_print: arrangeConfig } : s.config }));
     const effTitle = isArrangePrint ? combinedTitle : form.title.trim();   // เรียงพิมพ์ = ชื่ออัตโนมัติ + ชื่อเสริม
     try {
@@ -414,7 +416,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           </div>
 
           <div className="max-h-[40vh] overflow-y-auto pr-1">
-            <ArrangePrintEditor items={arrangeItems} onChange={onArrangeChange} bases={arrangeBases} onBasesChange={onArrangeBasesChange} pushToast={pushToast} contextLabel={combinedTitle || undefined} collapseSizes={false} />
+            <ArrangePrintEditor items={arrangeItems} onChange={onArrangeChange} bases={arrangeBases} onBasesChange={onArrangeBasesChange} printType={arrangePrintType} onPrintTypeChange={setArrangePrintType} pushToast={pushToast} contextLabel={combinedTitle || undefined} collapseSizes={false} />
           </div>
         </div>
       )}

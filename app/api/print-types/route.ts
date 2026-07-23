@@ -4,7 +4,7 @@
  *   POST → เพิ่มประเภทใหม่ { code, name, default_w, default_h, unit }
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,9 @@ export type PrintType = { id: string; code: string; name: string; default_w: num
 const SEL = "id, code, name, default_w, default_h, unit, drive_subpath, sort_order";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "assets.view"); if (denied) return denied;
+  // อ่านได้ทั้งคนใช้คลัง (assets.view) และคนสร้างงานเรียงพิมพ์ (tasks.view) — เป็น lookup กลาง
+  if (!(await apiCan(request, "assets.view")) && !(await apiCan(request, "tasks.view")))
+    return NextResponse.json({ data: [], error: "ต้องเข้าสู่ระบบและมีสิทธิ์ใช้งาน (assets.view หรือ tasks.view)" }, { status: 401 });
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("erp_print_types")
     .select(SEL)

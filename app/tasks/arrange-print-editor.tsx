@@ -6,14 +6,15 @@
 // controlled: รับ items + onChange · เพิ่มขนาดใหม่ = PATCH /api/assets/[id] (save กลับ asset)
 // ============================================================
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow, AssetSize } from "@/app/api/assets/shared";
 import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
-import type { ArrangePrintSpec, ArrangeBaseItem } from "./data";
+import type { ArrangePrintSpec, ArrangeBaseItem, ArrangePrintType, PrintTypeRow } from "./data";
+import { listPrintTypes, createPrintType, updatePrintType, deletePrintType } from "./data";
 
 // ป๊อปอัปรายละเอียด/แก้ไฟล์คลังกลาง (กดรูปในการ์ด) — dynamic กัน bundle asset-library ลากเข้า tasks
 const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
@@ -62,7 +63,7 @@ export function specFromItems(items: ArrangeItem[]): ArrangePrintSpec {
 }
 export const arrangeTotalQty = (items: ArrangeItem[]) => items.reduce((n, it) => n + it.orders.reduce((m, o) => m + (o.qty || 0), 0), 0);
 
-export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, collapseSizes = true, bases, onBasesChange }: {
+export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, collapseSizes = true, bases, onBasesChange, printType, onPrintTypeChange }: {
   items: ArrangeItem[];
   onChange: (items: ArrangeItem[]) => void;
   pushToast: (type: "success" | "error" | "info", m: string) => void;
@@ -70,6 +71,8 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
   collapseSizes?: boolean;   // พับซ่อนขนาดที่ยังไม่เลือก (default) · ตอนสร้างงานใน Wizard ส่ง false = โชว์หมด
   bases?: ArrangeBase[];                          // รูปฐาน (DFT UV Printed) — ส่งมาพร้อม onBasesChange ถึงจะโชว์บล็อกรูปฐาน
   onBasesChange?: (bases: ArrangeBase[]) => void;
+  printType?: ArrangePrintType | null;           // ประเภทแผ่นพิมพ์ (DTF/UV) — ส่งมาพร้อม onPrintTypeChange ถึงจะโชว์ช่องเลือก
+  onPrintTypeChange?: (pt: ArrangePrintType | null) => void;
 }) {
   const t = useT();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -105,6 +108,13 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
 
   return (
     <div>
+      {/* ประเภทแผ่นพิมพ์ (DTF/UV) — โชว์เมื่อส่ง onPrintTypeChange · เลือก/แก้/เพิ่มได้ */}
+      {onPrintTypeChange && (
+        <div className="mb-4">
+          <div className="text-xs font-semibold text-slate-500 mb-1.5">🖨️ {t("ประเภทแผ่นพิมพ์", "Print sheet type")}</div>
+          <PrintTypeField value={printType ?? null} onChange={onPrintTypeChange} pushToast={pushToast} />
+        </div>
+      )}
       {/* บล็อกรูปฐาน (DFT UV Printed) — โชว์เมื่อส่ง onBasesChange · วางก่อนบล็อกเลือกรูป Artwork */}
       {onBasesChange && (
         <div className="mb-4">
@@ -267,6 +277,102 @@ function ArrangeBaseCard({ base, onChange, onRemove, onOpenDetail }: {
           </label>
         </div>
       </div>
+    </div>
+  );
+}
+
+const ptDim = (w: number | null, h: number | null, unit: string) => (w != null && h != null ? `${w}×${h} ${unit}` : w != null ? `${w} ${unit}` : h != null ? `${h} ${unit}` : "");
+
+// เลือกประเภทแผ่นพิมพ์ (DTF/UV) เป็นชิป + ปุ่ม ⚙️ จัดการ (แก้/เพิ่ม/ลบ) — เก็บ snapshot กลับผ่าน onChange
+function PrintTypeField({ value, onChange, pushToast }: {
+  value: ArrangePrintType | null;
+  onChange: (pt: ArrangePrintType | null) => void;
+  pushToast: (type: "success" | "error" | "info", m: string) => void;
+}) {
+  const t = useT();
+  const [types, setTypes] = useState<PrintTypeRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [managing, setManaging] = useState(false);
+  const load = () => { setLoading(true); listPrintTypes().then(setTypes).catch((e) => pushToast("error", (e as Error).message)).finally(() => setLoading(false)); };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  const pick = (ty: PrintTypeRow) => onChange({ id: ty.id, code: ty.code, name: ty.name, w: ty.default_w, h: ty.default_h, unit: ty.unit });
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {loading ? <span className="text-xs text-slate-400">{t("กำลังโหลด...", "Loading...")}</span>
+          : types.length === 0 ? <span className="text-xs text-slate-400">{t("ยังไม่มีประเภท — กด ⚙️ เพิ่ม", "No types yet — use ⚙️ to add")}</span>
+          : types.map((ty) => {
+            const on = value?.id ? value.id === ty.id : value?.code === ty.code;
+            const d = ptDim(ty.default_w, ty.default_h, ty.unit);
+            return (
+              <button key={ty.id} type="button" onClick={() => pick(ty)}
+                className={`inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>
+                {on && <span>✓</span>}<b>{ty.code}</b>{d && <span className={on ? "text-violet-200" : "text-slate-400"}>{d}</span>}
+              </button>
+            );
+          })}
+        {value && <button type="button" onClick={() => onChange(null)} className="text-[11px] text-slate-400 hover:text-red-500 px-1">✕ {t("ล้าง", "Clear")}</button>}
+        <button type="button" onClick={() => setManaging((s) => !s)} className="text-[11px] text-slate-500 hover:text-violet-700 px-1">⚙️ {t("จัดการ", "Manage")}</button>
+      </div>
+      {managing && <PrintTypeManager types={types} onChanged={load} pushToast={pushToast} />}
+    </div>
+  );
+}
+
+function PrintTypeManager({ types, onChanged, pushToast }: {
+  types: PrintTypeRow[];
+  onChanged: () => void;
+  pushToast: (type: "success" | "error" | "info", m: string) => void;
+}) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [nc, setNc] = useState({ code: "", name: "", w: "", h: "", unit: "cm" });
+  const num = (v: string) => (v.trim() === "" ? null : Number(v));
+  const inp = "h-8 border border-slate-200 rounded-md px-2 text-sm";
+  const add = async () => {
+    if (!nc.code.trim()) { pushToast("error", t("ใส่รหัส (เช่น DTF)", "Enter a code (e.g. DTF)")); return; }
+    setBusy(true);
+    try { await createPrintType({ code: nc.code.trim(), name: nc.name.trim() || nc.code.trim(), default_w: num(nc.w), default_h: num(nc.h), unit: nc.unit }); setNc({ code: "", name: "", w: "", h: "", unit: "cm" }); onChanged(); pushToast("success", t("เพิ่มประเภทแล้ว", "Type added")); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-2 border border-slate-200 rounded-lg p-2.5 bg-slate-50/60 space-y-2">
+      {types.map((ty) => <PrintTypeRowEdit key={ty.id} ty={ty} onChanged={onChanged} pushToast={pushToast} />)}
+      <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-200">
+        <input value={nc.code} onChange={(e) => setNc((s) => ({ ...s, code: e.target.value }))} placeholder={t("รหัส", "code")} className={`w-20 ${inp}`} />
+        <input value={nc.name} onChange={(e) => setNc((s) => ({ ...s, name: e.target.value }))} placeholder={t("ชื่อ", "name")} className={`w-28 ${inp}`} />
+        <input value={nc.w} onChange={(e) => setNc((s) => ({ ...s, w: e.target.value }))} placeholder={t("กว้าง", "W")} inputMode="decimal" className={`w-14 ${inp}`} />
+        <span className="text-slate-400">×</span>
+        <input value={nc.h} onChange={(e) => setNc((s) => ({ ...s, h: e.target.value }))} placeholder={t("ยาว", "H")} inputMode="decimal" className={`w-14 ${inp}`} />
+        <select value={nc.unit} onChange={(e) => setNc((s) => ({ ...s, unit: e.target.value }))} className={`${inp} px-1`}><option value="cm">cm</option><option value="mm">mm</option><option value="in">in</option></select>
+        <button type="button" disabled={busy} onClick={add} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded-md hover:bg-violet-700 disabled:opacity-50">＋ {t("เพิ่ม", "Add")}</button>
+      </div>
+    </div>
+  );
+}
+
+function PrintTypeRowEdit({ ty, onChanged, pushToast }: {
+  ty: PrintTypeRow;
+  onChanged: () => void;
+  pushToast: (type: "success" | "error" | "info", m: string) => void;
+}) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [f, setF] = useState({ code: ty.code, name: ty.name, w: ty.default_w?.toString() ?? "", h: ty.default_h?.toString() ?? "", unit: ty.unit });
+  const num = (v: string) => (v.trim() === "" ? null : Number(v));
+  const inp = "h-8 border border-slate-200 rounded-md px-2 text-sm";
+  const save = async () => { setBusy(true); try { await updatePrintType(ty.id, { code: f.code.trim(), name: f.name.trim() || f.code.trim(), default_w: num(f.w), default_h: num(f.h), unit: f.unit }); onChanged(); pushToast("success", t("บันทึกแล้ว", "Saved")); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+  const del = async () => { if (!window.confirm(t(`ลบประเภท "${ty.code}"?`, `Delete type "${ty.code}"?`))) return; setBusy(true); try { await deletePrintType(ty.id); onChanged(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <input value={f.code} onChange={(e) => setF((s) => ({ ...s, code: e.target.value }))} className={`w-20 ${inp}`} />
+      <input value={f.name} onChange={(e) => setF((s) => ({ ...s, name: e.target.value }))} className={`w-28 ${inp}`} />
+      <input value={f.w} onChange={(e) => setF((s) => ({ ...s, w: e.target.value }))} inputMode="decimal" className={`w-14 ${inp}`} />
+      <span className="text-slate-400">×</span>
+      <input value={f.h} onChange={(e) => setF((s) => ({ ...s, h: e.target.value }))} inputMode="decimal" className={`w-14 ${inp}`} />
+      <select value={f.unit} onChange={(e) => setF((s) => ({ ...s, unit: e.target.value }))} className={`${inp} px-1`}><option value="cm">cm</option><option value="mm">mm</option><option value="in">in</option></select>
+      <button type="button" disabled={busy} onClick={save} className="h-8 px-2 text-xs text-violet-700 hover:underline disabled:opacity-50">{t("บันทึก", "Save")}</button>
+      <button type="button" disabled={busy} onClick={del} className="h-8 px-2 text-xs text-slate-400 hover:text-red-500 disabled:opacity-50" title={t("ลบ", "Delete")}>🗑</button>
     </div>
   );
 }

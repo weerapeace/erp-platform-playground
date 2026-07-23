@@ -627,7 +627,30 @@ export type ArrangeOrderLine = { label: string; w: number | null; h: number | nu
 export type ArrangePrintItem = { asset_id: string; r2_key: string; title: string; orders: ArrangeOrderLine[] };     // 1 รูป + หลายขนาด
 // รูปฐาน (จากอัลบั้ม "งานพิมพ์ DFT UV (Printed)") + รายละเอียด "เพิ่ม/ลบ" อะไรจากรูปฐานนี้ (ต่อรูป)
 export type ArrangeBaseItem = { asset_id: string; r2_key: string; title: string; add: string; remove: string };
-export type ArrangePrintSpec = { items: ArrangePrintItem[]; bases?: ArrangeBaseItem[] };
+// ประเภทแผ่นพิมพ์ที่เลือกให้งานนี้ (snapshot จาก erp_print_types — เก็บค่าไว้แม้ประเภทถูกแก้/ลบ)
+export type ArrangePrintType = { id?: string | null; code: string; name: string; w: number | null; h: number | null; unit: string };
+export type ArrangePrintSpec = { items: ArrangePrintItem[]; bases?: ArrangeBaseItem[]; print_type?: ArrangePrintType | null };
+
+// ประเภทแผ่นพิมพ์ (DTF/UV) — ใช้ร่วมกับหน้าคลัง (ตาราง erp_print_types ผ่าน /api/print-types)
+export type PrintTypeRow = { id: string; code: string; name: string; default_w: number | null; default_h: number | null; unit: string; drive_subpath: string | null; sort_order: number };
+export async function listPrintTypes(): Promise<PrintTypeRow[]> {
+  const j = await apiFetch("/api/print-types").then((r) => r.json());
+  if (j.error) throw new Error(j.error);
+  return (j.data as PrintTypeRow[]) ?? [];
+}
+export async function createPrintType(b: { code: string; name: string; default_w: number | null; default_h: number | null; unit: string }): Promise<PrintTypeRow> {
+  const j = await apiFetch("/api/print-types", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
+  if (j.error) throw new Error(j.error);
+  return j.data as PrintTypeRow;
+}
+export async function updatePrintType(id: string, patch: Partial<{ code: string; name: string; default_w: number | null; default_h: number | null; unit: string }>): Promise<void> {
+  const j = await apiFetch(`/api/print-types/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }).then((r) => r.json());
+  if (j.error) throw new Error(j.error);
+}
+export async function deletePrintType(id: string): Promise<void> {
+  const j = await apiFetch(`/api/print-types/${id}`, { method: "DELETE" }).then((r) => r.json());
+  if (j.error) throw new Error(j.error);
+}
 export type TemplateStep = { type?: string; title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; assignee_labels?: string[]; config?: SubtaskStepConfig };
 
 export async function listSubtaskTypes(all = false): Promise<SubtaskType[]> {
