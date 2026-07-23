@@ -623,7 +623,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     setRegistryLoading(true);
     try {
       const url = `/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`;
-      const r = await apiFetch(url);
+      // no-store: registry GET ตั้ง Cache-Control max-age=300 → หลังเพิ่ง toggle/save ต้องดึงสด
+      // ไม่งั้น browser คืนของเก่า → ติ๊ก "เลือก field กรอง" แล้ว checkbox/facet ไม่อัปเดตจนกว่า reload
+      const r = await apiFetch(url, { cache: "no-store" });
       const res = (await r.json()) as FieldRegistryV2Response;
       if (!res.error) {
         setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); setPrimaryField(res.primary_field ?? null);
