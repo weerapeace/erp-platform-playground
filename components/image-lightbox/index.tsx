@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState, type WheelEvent as RWheelEvent, type MouseEvent as RMouseEvent, type TouchEvent as RTouchEvent } from "react";
 import { createPortal } from "react-dom";
+import { copyImageToClipboard, downloadImageAsJpg, canCopyImage } from "@/lib/image-clipboard";
 
 export type LightboxImage = { url: string; label?: string | null };
 
@@ -46,6 +47,7 @@ export function ImageLightbox({ images, index, onClose, onIndex }: {
   const pinch = useRef<{ dist: number; scale: number } | null>(null);
   const touchX = useRef<number | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "ok" | "err">("idle");
 
   const reset = useCallback(() => { setScale(1); setTx(0); setTy(0); }, []);
   const go = useCallback((delta: number) => {
@@ -123,38 +125,25 @@ export function ImageLightbox({ images, index, onClose, onIndex }: {
 
   const bgClick = () => { if (zoomed || moved.current) return; onClose(); };
 
-  // ดาวน์โหลดรูปปัจจุบันเป็น JPG — วาดลง canvas แล้ว export image/jpeg
-  // (ขอรูปเต็มความละเอียดโดยตัด &w= ที่ย่อไว้สำหรับพรีวิวออกก่อน)
-  const downloadJpg = (e: RMouseEvent) => {
+  // รูปเต็มความละเอียด (ตัด &w= ที่ย่อไว้สำหรับพรีวิวออกก่อน)
+  const fullUrl = () => cur.url.replace(/([?&])w=\d+/, "$1").replace(/[?&]$/, "");
+
+  // ดาวน์โหลดรูปปัจจุบันเป็น JPG (ของกลาง lib/image-clipboard) · รูปข้ามโดเมนไม่มี CORS → เปิดแท็บใหม่แทน
+  const downloadJpg = async (e: RMouseEvent) => {
     e.stopPropagation();
     if (downloading) return;
     setDownloading(true);
-    const fullUrl = cur.url.replace(/([?&])w=\d+/, "$1").replace(/[?&]$/, "");
-    const name = jpgFileName(cur);
-    const done = () => setDownloading(false);
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      try {
-        const c = document.createElement("canvas");
-        c.width = img.naturalWidth; c.height = img.naturalHeight;
-        const ctx = c.getContext("2d");
-        if (!ctx) throw new Error("no ctx");
-        ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, c.width, c.height); // JPG ไม่มีพื้นโปร่ง → พื้นขาว
-        ctx.drawImage(img, 0, 0);
-        c.toBlob((blob) => {
-          if (blob) {
-            const href = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-            setTimeout(() => URL.revokeObjectURL(href), 1000);
-          } else { window.open(fullUrl, "_blank"); } // เผื่อ export ไม่ได้ → เปิดรูปเดิมแทน
-          done();
-        }, "image/jpeg", 0.95);
-      } catch { window.open(fullUrl, "_blank"); done(); } // รูปข้ามโดเมนไม่มี CORS → เปิดแท็บใหม่แทน
-    };
-    img.onerror = () => { window.open(fullUrl, "_blank"); done(); };
-    img.src = fullUrl;
+    const url = fullUrl();
+    try { await downloadImageAsJpg(url, jpgFileName(cur)); }
+    catch { window.open(url, "_blank"); }
+    finally { setDownloading(false); }
+  };
+
+  // คัดลอกรูปปัจจุบันลงคลิปบอร์ด
+  const copyImg = async (e: RMouseEvent) => {
+    e.stopPropagation();
+    try { await copyImageToClipboard(fullUrl()); setCopyState("ok"); } catch { setCopyState("err"); }
+    setTimeout(() => setCopyState("idle"), 1400);
   };
 
   // z-[9999] + portal ไป body → ลอยทับทุกอย่าง (modal/drawer) ไม่จมหลัง popup ที่เปิดอยู่
@@ -171,6 +160,7 @@ export function ImageLightbox({ images, index, onClose, onIndex }: {
         <button onClick={(e) => { e.stopPropagation(); setScale((s) => { const n = clampScale(s / 1.3); if (n === 1) reset(); return n; }); }} title="ซูมออก (−)" className="h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-xl">−</button>
         <button onClick={(e) => { e.stopPropagation(); setScale((s) => clampScale(s * 1.3)); }} title="ซูมเข้า (+)" className="h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-xl">＋</button>
         {zoomed && <button onClick={(e) => { e.stopPropagation(); reset(); }} title="พอดีจอ (0)" className="h-10 px-3 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-sm">⤢</button>}
+        {canCopyImage() && <button onClick={copyImg} title="คัดลอกรูปลงคลิปบอร์ด (Ctrl+V วางได้)" className="h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-lg">{copyState === "ok" ? "✓" : copyState === "err" ? "✕" : "📋"}</button>}
         <button onClick={downloadJpg} disabled={downloading} title="ดาวน์โหลดรูปนี้เป็น JPG" className="h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-lg disabled:opacity-50">{downloading ? "…" : "⬇"}</button>
         <button onClick={(e) => { e.stopPropagation(); onClose(); }} title="ปิด (Esc)" className="h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-xl">✕</button>
       </div>

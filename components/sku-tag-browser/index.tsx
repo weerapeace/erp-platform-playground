@@ -171,8 +171,11 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
   }, []);
   // ต้นไม้แท็ก + ฟิลด์ทะเบียน + รีเซ็ตการเดิน — เปลี่ยนเมื่อสลับ entity (SKU/Parent)
   // คงคำค้นไว้ (ไม่ setSearch("")) → พิมพ์ WK44 แล้วสลับ SKU↔Parent ยังค้นต่อในอีกฝั่ง
+  // ⚠️ รอบแรก (mount/refresh) ต้อง "ไม่" รีเซ็ต ไม่งั้นจะล้างกลุ่ม/แท็ก/หน้าที่กู้คืนจาก history ทิ้ง → เด้งกลับหน้าแรก
+  const firstEntityRef = useRef(true);
   useEffect(() => {
-    setGroupPath([]); setTagFilter(EMPTY_FILTER);
+    if (firstEntityRef.current) { firstEntityRef.current = false; }   // refresh — คงการเดินที่ restore มา
+    else { setGroupPath([]); setTagFilter(EMPTY_FILTER); patchNav({ gp: [], tf: EMPTY_FILTER }); }   // สลับ SKU↔Parent จริง — เริ่มเดินใหม่
     apiFetch(`/api/sku-browser?entity=${entity}`).then((r) => r.json()).then((j) => setTree(j.tree ?? { groups: [], tags: [] })).catch(() => {});
     apiFetch(`/api/admin/field-registry-v2?module=${entity === "parent-skus" ? "parent-skus-v2" : "skus-v2"}`).then((r) => r.json())
       .then((j) => {

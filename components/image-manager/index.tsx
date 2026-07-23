@@ -9,6 +9,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { downscaleImageWidth } from "@/lib/image-resize";
 import { AssetPicker } from "@/components/asset-picker";
 import { ConfirmDialog } from "@/components/modal";
+import { copyImageToClipboard, downloadImageAsJpg, canCopyImage } from "@/lib/image-clipboard";
 
 // ============================================================
 // ImageThumbnail — รูปเล็กในตาราง + hover ขยาย (component กลาง)
@@ -22,6 +23,39 @@ export function printImageWindow(url: string) {
   if (!w) { alert("เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปแล้วลองใหม่ หรือกด ↗ เปิดเต็มแล้วสั่งพิมพ์เอง"); return; }
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>พิมพ์รูป</title><style>@page{margin:8mm}html,body{margin:0;padding:0}img{max-width:100%;max-height:100vh;display:block;margin:0 auto}</style></head><body><img src="${safe}" onload="setTimeout(function(){window.focus();window.print();},60)"></body></html>`);
   w.document.close();
+}
+
+// ปุ่มคัดลอกรูปลงคลิปบอร์ด (ของกลาง · ใช้ helper lib/image-clipboard) — โชว์ ✓ ชั่วครู่ · ซ่อนถ้าเบราว์เซอร์ไม่รองรับ
+function CopyImgBtn({ url, className }: { url: string; className?: string }) {
+  const [state, setState] = useState<"idle" | "ok" | "err">("idle");
+  if (!canCopyImage()) return null;
+  const onClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try { await copyImageToClipboard(url); setState("ok"); } catch { setState("err"); }
+    setTimeout(() => setState("idle"), 1400);
+  };
+  return (
+    <button type="button" onClick={onClick} title="คัดลอกรูปลงคลิปบอร์ด (Ctrl+V วางได้)" className={className}>
+      {state === "ok" ? "✓ คัดลอกแล้ว" : state === "err" ? "✕ คัดลอกไม่ได้" : "📋 คัดลอก"}
+    </button>
+  );
+}
+
+// ปุ่มดาวน์โหลดรูปเป็น JPG (ของกลาง) — fallback เปิดแท็บใหม่ถ้า export ไม่ได้
+function DownloadJpgBtn({ url, filename, className }: { url: string; filename: string; className?: string }) {
+  const [busy, setBusy] = useState(false);
+  const onClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    try { await downloadImageAsJpg(url, filename); } catch { window.open(url, "_blank"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <button type="button" onClick={onClick} disabled={busy} title="ดาวน์โหลดรูปเป็น JPG" className={className}>
+      {busy ? "…" : "⬇ JPG"}
+    </button>
+  );
 }
 
 export function ImageThumbnail({ url, size = 40, alt = "", enlargeable = false }: { url?: string | null; size?: number; alt?: string; enlargeable?: boolean }) {
@@ -417,7 +451,10 @@ export function ImageManager({
       ) : layout === "gallery" ? (
         // แกลเลอรีแนวตั้ง (เหมาะกับคอลัมน์แคบ): พรีวิวรูปใหญ่ด้านบน + รูปย่อด้านล่าง
         <div className="space-y-2">
-          <div className="w-full min-h-[220px] rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
+          <div className="relative w-full min-h-[220px] rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
+            {selected && isImage(selected.content_type) && (
+              <CopyImgBtn url={selected.public_url} className="absolute top-2 right-2 z-10 h-7 px-2 flex items-center gap-1 rounded-md bg-white/90 border border-slate-200 text-slate-600 text-[11px] font-medium hover:bg-white shadow-sm" />
+            )}
             {selected ? (
               isImage(selected.content_type) ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -482,10 +519,14 @@ export function ImageManager({
       {mounted && lbImage && createPortal(
         <div className="fixed inset-0 z-[10000] bg-black/90 flex items-center justify-center select-none"
           onClick={() => setLightboxId(null)}>
-          <button onClick={() => setLightboxId(null)} title="ปิด (Esc)"
-            className="absolute top-3 right-3 h-10 w-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/25 text-white text-xl">✕</button>
-          <button onClick={(e) => { e.stopPropagation(); printImageWindow(withImageWidth(lbImage.public_url, 2000) ?? lbImage.public_url); }} title="พิมพ์เฉพาะรูปนี้"
-            className="absolute top-3 right-16 h-10 px-3 flex items-center justify-center gap-1 rounded-full bg-white/10 hover:bg-white/25 text-white text-sm">🖨 พิมพ์</button>
+          <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+            <CopyImgBtn url={lbImage.public_url} className="h-10 px-3 flex items-center justify-center gap-1 rounded-full bg-white/10 hover:bg-white/25 text-white text-sm whitespace-nowrap" />
+            <DownloadJpgBtn url={lbImage.public_url} filename={lbImage.file_name} className="h-10 px-3 flex items-center justify-center gap-1 rounded-full bg-white/10 hover:bg-white/25 text-white text-sm whitespace-nowrap disabled:opacity-50" />
+            <button onClick={() => printImageWindow(withImageWidth(lbImage.public_url, 2000) ?? lbImage.public_url)} title="พิมพ์เฉพาะรูปนี้"
+              className="h-10 px-3 flex items-center justify-center gap-1 rounded-full bg-white/10 hover:bg-white/25 text-white text-sm whitespace-nowrap">🖨 พิมพ์</button>
+            <button onClick={() => setLightboxId(null)} title="ปิด (Esc)"
+              className="h-10 w-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/25 text-white text-xl">✕</button>
+          </div>
           {imageItems.length > 1 && (
             <>
               <button onClick={(e) => { e.stopPropagation(); lbStep(-1); }} title="ก่อนหน้า (←)"
