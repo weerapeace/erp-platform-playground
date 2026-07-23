@@ -32,7 +32,7 @@ export function useT() {
 export function LangToggle({ className = "" }: { className?: string }) {
   const { lang, setLang } = useLang();
   return (
-    <button onClick={() => setLang(lang === "th" ? "en" : "th")} title={lang === "th" ? "Switch to English" : "เปลี่ยนเป็นภาษาไทย"}
+    <button onClick={() => { setLang(lang === "th" ? "en" : "th"); if (typeof window !== "undefined") window.location.reload(); }} title={lang === "th" ? "Switch to English" : "เปลี่ยนเป็นภาษาไทย"}
       className={`h-9 px-2.5 flex items-center gap-1 text-xs font-semibold rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors ${className}`}>
       <span className={lang === "th" ? "text-violet-700" : "text-slate-400"}>TH</span>
       <span className="text-slate-300">/</span>
