@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { useT } from "@/components/i18n";
 
 type Img = { id: string; r2_key: string | null; file_name?: string | null };
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
@@ -46,6 +47,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 8
   pushToast: ToastFn;
   maxSize?: number;   // ด้านยาวสุดที่ย่อก่อนอัป (ดีฟอลต์ 800)
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [lbIndex, setLbIndex] = useState(-1);   // รูปที่กำลังเปิดดูเต็มจอ (-1 = ปิด)
   const fileRef = useRef<HTMLInputElement>(null);
@@ -82,7 +84,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 8
         onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) void handleFiles(e.dataTransfer.files); }}
         className="border border-dashed border-slate-300 rounded-lg p-2.5 text-center text-xs text-slate-400">
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) void handleFiles(e.target.files); e.target.value = ""; }} />
-        {busy ? "⏳ กำลังอัปโหลด..." : <>📎 ลากรูปมาวาง · วาง Ctrl+V · <button onClick={() => fileRef.current?.click()} className="text-violet-700 underline">เลือกไฟล์</button> <span className="text-slate-300">(ย่อ ≤{maxSize}px ให้อัตโนมัติ)</span></>}
+        {busy ? t("⏳ กำลังอัปโหลด...", "⏳ Uploading...") : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span></>}
       </div>
       {images.length > 0 && (
         <div className="grid grid-cols-4 gap-2 mt-2">
@@ -111,6 +113,7 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
   maxSize?: number;
   disabled?: boolean;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [lbIndex, setLbIndex] = useState(-1);
@@ -153,7 +156,7 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
         onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) void handleFiles(e.dataTransfer.files); }}
         className="border border-dashed border-slate-300 rounded-lg p-2.5 text-center text-xs text-slate-400">
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) void handleFiles(e.target.files); e.target.value = ""; }} />
-        {busy ? "⏳ กำลังอัปโหลด..." : <>📎 ลากรูปมาวาง · วาง Ctrl+V · <button type="button" onClick={() => fileRef.current?.click()} className="text-violet-700 underline">เลือกไฟล์</button> <span className="text-slate-300">(ย่อ ≤{maxSize}px ให้อัตโนมัติ)</span></>}
+        {busy ? t("⏳ กำลังอัปโหลด...", "⏳ Uploading...") : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button type="button" onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span></>}
       </div>
       {err && <p className="text-[11px] text-red-500 mt-1">{err}</p>}
       {value.length > 0 && (

@@ -33,6 +33,21 @@ export const arrangeSizeText = (s: { label?: string; w: number | null; h: number
 // มิติกว้าง×สูง (ถ้ามี) — โชว์กำกับต่อท้ายชื่อ
 export const arrangeSizeDim = (s: { w: number | null; h: number | null; unit: string }) => (s.w != null || s.h != null ? `${s.w ?? "?"}×${s.h ?? "?"} ${s.unit}` : "");
 
+// แสดงผลขนาด (รองรับ TH/EN) — label auto "ขนาด #N" → "Size #N" · มิติเดียวโชว์ กว้าง/ยาว แทน "×?"
+type SizeTFn = (th: string, en: string) => string;
+export function sizeLabelDisplay(label: string | undefined, t: SizeTFn): string {
+  const l = (label ?? "").trim();
+  const m = /^ขนาด\s*#?\s*(\d+)$/.exec(l);
+  return m ? t(`ขนาด #${m[1]}`, `Size #${m[1]}`) : l;
+}
+export function sizeDimDisplay(s: { w: number | null; h: number | null; unit: string }, t: SizeTFn): string {
+  const { w, h, unit } = s;
+  if (w != null && h != null) return `${w}×${h} ${unit}`;
+  if (w != null) return `${t("กว้าง", "Width")} ${w} ${unit}`;
+  if (h != null) return `${t("ยาว", "Length")} ${h} ${unit}`;
+  return "";
+}
+
 // spec (จาก subtask.config) → items · sizesByAsset = ขนาดจริงจากคลัง (เติมตัวเลือกให้ครบ)
 export function itemsFromSpec(spec: ArrangePrintSpec | undefined, sizesByAsset?: Record<string, AssetSize[]>): ArrangeItem[] {
   return (spec?.items ?? []).map((it) => {
@@ -148,7 +163,8 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, o
   // แยกขนาดที่เลือกแล้ว (โชว์บนสุด) กับที่ยังไม่เลือก (พับซ่อน)
   const selected = item.available.filter((s) => orderIdxOf(s) >= 0);
   const unselected = item.available.filter((s) => orderIdxOf(s) < 0);
-  const chipDim = (s: AssetSize) => { const d = arrangeSizeDim(s); return d && s.label?.trim() ? d : ""; };   // มีชื่อ + มีมิติ → โชว์มิติต่อท้าย
+  const mainText = (s: AssetSize) => (s.label?.trim() ? sizeLabelDisplay(s.label, t) : (sizeDimDisplay(s, t) || "—"));   // ข้อความหลัก = ชื่อ (แปล) หรือมิติ ถ้าไม่มีชื่อ
+  const chipDim = (s: AssetSize) => (s.label?.trim() ? sizeDimDisplay(s, t) : "");   // มีชื่อ → โชว์มิติต่อท้าย (มิติเดียว = กว้าง/ยาว)
   const submitSize = () => {
     const w = nw === "" ? null : Number(nw); const h = nh === "" ? null : Number(nh);
     if (!nl.trim() && w == null && h == null) return;
@@ -174,7 +190,7 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, o
             {selected.map((s) => { const oi = orderIdxOf(s); const dim = chipDim(s); return (
               <div key={arrangeSizeKey(s)} className="flex items-center gap-2 flex-wrap">
                 <button type="button" onClick={() => onToggleSize(s)} className="inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 border bg-violet-600 text-white border-violet-600">
-                  <span>✓</span>{arrangeSizeText(s)}{dim && <span className="text-violet-200">· {dim}</span>}
+                  <span>✓</span>{mainText(s)}{dim && <span className="text-violet-200">· {dim}</span>}
                 </button>
                 <span className="text-[11px] text-slate-400">{t("จำนวน", "Qty")}</span>
                 <input type="number" min={0} value={item.orders[oi].qty} onChange={(e) => onSetQty(oi, Math.max(0, Number(e.target.value) || 0))} className="w-20 h-8 border border-slate-200 rounded-md px-2 text-sm text-center" />
@@ -186,7 +202,7 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, o
                 <div className="flex flex-wrap gap-1.5 pt-0.5">
                   {unselected.map((s) => { const dim = chipDim(s); return (
                     <button key={arrangeSizeKey(s)} type="button" onClick={() => onToggleSize(s)} className="inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 border bg-white text-slate-600 border-slate-200 hover:border-violet-300">
-                      {arrangeSizeText(s)}{dim && <span className="text-slate-400">· {dim}</span>}
+                      {mainText(s)}{dim && <span className="text-slate-400">· {dim}</span>}
                     </button>
                   ); })}
                   {collapseSizes && <button type="button" onClick={() => setShowAll(false)} className="text-[11px] text-slate-400 hover:underline px-1">▲ {t("พับ", "Collapse")}</button>}
