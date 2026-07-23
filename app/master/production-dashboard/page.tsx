@@ -100,6 +100,7 @@ function CalendarView({ jobs, onJobClick, onSchedule }: {
       onSchedule={onSchedule}
       filters={filters}
       getFilter={(j) => j.brand ?? undefined}
+      getSearchText={(j) => `${j.product_sku ?? ""} ${j.product_name ?? ""} ${j.mo_no} ${j.brand ?? ""}`}
       backlogTitle="ยังไม่ลงวันที่ส่ง"
       hint="ลากการ์ดจากกล่องขวา → วางบนวัน = ตั้งวันกำหนดส่ง · ลากกลับกล่อง = เอาวันออก"
       renderChip={(j) => {
