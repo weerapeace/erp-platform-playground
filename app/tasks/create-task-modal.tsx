@@ -364,8 +364,10 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           </div>
           <p className="text-xs text-slate-400 mb-3">{t("แต่ละรูปเลือกได้หลายขนาด · ขนาดดึงจากคลัง Artwork · เพิ่มขนาดใหม่ได้", "Each image: multiple sizes · from Artwork library · add new sizes")}</p>
 
-          {/* ข้อมูลงานแบบย่อ (รวมขั้น "ข้อมูลงาน" มาไว้ที่นี่ — โชว์เฉพาะที่จำเป็นกับงานเรียงพิมพ์) */}
-          <div className="border border-slate-200 rounded-xl p-3 mb-3 space-y-2.5 bg-slate-50/40">
+          {/* 2 คอลัมน์: ซ้าย = ข้อมูลงาน · ขวา = ประเภทแผ่นพิมพ์/รูปฐาน/Artwork (จอแคบยุบเป็นบน-ล่าง) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+          {/* ซ้าย — ข้อมูลงานแบบย่อ (รวมขั้น "ข้อมูลงาน") */}
+          <div className="border border-slate-200 rounded-xl p-3 space-y-2.5 bg-slate-50/40">
             <div className="grid grid-cols-2 gap-2.5">
               <div>
                 <label className="text-[11px] text-slate-400">{t("ชื่องาน (ตั้งอัตโนมัติ)", "Task name (auto)")}</label>
@@ -415,8 +417,10 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
             </div>
           </div>
 
-          <div className="max-h-[40vh] overflow-y-auto pr-1">
+          {/* ขวา — ประเภทแผ่นพิมพ์ + รูปฐาน + Artwork (กล่องแยก) */}
+          <div className="border border-violet-200 rounded-xl p-3 bg-violet-50/30 lg:max-h-[62vh] lg:overflow-y-auto">
             <ArrangePrintEditor items={arrangeItems} onChange={onArrangeChange} bases={arrangeBases} onBasesChange={onArrangeBasesChange} printType={arrangePrintType} onPrintTypeChange={setArrangePrintType} pushToast={pushToast} contextLabel={combinedTitle || undefined} collapseSizes={false} />
+          </div>
           </div>
         </div>
       )}
