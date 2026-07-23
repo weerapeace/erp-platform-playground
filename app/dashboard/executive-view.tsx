@@ -108,7 +108,7 @@ export function ExecutiveView({ salesTrend = [] }: { salesTrend?: { d: string; s
 
       {/* ---- แยกตามแผนก (ตัวเลขสำคัญ + กดเจาะเข้าดู) ---- */}
       <SectionLabel>แยกตามแผนก</SectionLabel>
-      <p className="text-[11px] text-slate-400 -mt-1 px-0.5">กดที่การ์ดเพื่อดู &ldquo;รายการที่ต้องจัดการ&rdquo; · หรือ &ldquo;ดูทั้งหมด →&rdquo; เพื่อเปิดหน้าเต็ม</p>
+      <p className="text-[11px] text-slate-400 -mt-1 px-0.5">กดที่การ์ดเพื่อเปิดแดชบอร์ดของแผนกนั้นในหน้าต่าง · หรือ &ldquo;ดูทั้งหมด →&rdquo; เพื่อเปิดหน้าเต็ม</p>
       <DeptGrid s={s} f={f} o={o} dept={dept} onOpen={(d) => setOpenDept(d)} />
 
       {/* ---- การเงิน ---- */}
@@ -247,29 +247,29 @@ function DeptGrid({ s, f, o, dept, onOpen }: {
         { v: n(o.mo_overdue),    l: "เลยกำหนด", tone: gt0(o.mo_overdue) ? "danger" : undefined },
         { v: bahtC(p?.labor_month ?? 0), l: "ค่าแรงเดือนนี้" },
       ]} />
-      <DeptCard icon="🛒" title="ซื้อ (จัดซื้อ)" href="/purchasing/dashboard" dept="purchasing" onOpen={onOpen} stats={[
+      <DeptCard icon="🛒" title="ซื้อ (จัดซื้อ)" href="/purchasing/dashboard" dept="purchasing" onOpen={onOpen} embed stats={[
         { v: n(o.pr_waiting),       l: "ขอซื้อรออนุมัติ", tone: gt0(o.pr_waiting) ? "warning" : undefined },
         { v: n(pu?.awaiting_goods), l: "รอของเข้า" },
         { v: bahtC(f.ap_unpaid),    l: "ค้างจ่าย", tone: gt0(f.ap_unpaid) ? "danger" : undefined },
         { v: bahtC(pu?.spend_month ?? 0), l: "ยอดซื้อเดือนนี้" },
       ]} />
-      <DeptCard icon="💰" title="ขาย" href="/sales-orders" dept="sales" onOpen={onOpen} stats={[
+      <DeptCard icon="💰" title="ขาย" href="/sales-orders" dept="sales" onOpen={onOpen} embed stats={[
         { v: bahtC(s.internal_month), l: "ยอดขายเดือนนี้" },
         { v: n(f.ar_count),           l: "ใบวางบิลค้าง", tone: gt0(f.ar_count) ? "warning" : undefined },
         { v: n(sa?.orders_month),     l: "ออเดอร์เดือนนี้" },
         { v: bahtC(f.ar_due),         l: "ลูกหนี้ค้างเก็บ" },
       ]} />
-      <DeptCard icon="✅" title="QC" href="/master/qc-warehouse" dept="qc" onOpen={onOpen} stats={[
+      <DeptCard icon="✅" title="QC" href="/master/qc-warehouse" dept="qc" onOpen={onOpen} embed stats={[
         { v: n(o.qc_defect),      l: "ของเสียค้าง", tone: gt0(o.qc_defect) ? "danger" : undefined },
         { v: n(q?.pending_check), l: "งานรอตรวจ", tone: gt0(q?.pending_check) ? "warning" : undefined },
       ]} />
-      <DeptCard icon="🎨" title="Design (ออกแบบ)" href="/master/design-dashboard" dept="design" onOpen={onOpen} stats={[
+      <DeptCard icon="🎨" title="Design (ออกแบบ)" href="/master/design-dashboard" dept="design" onOpen={onOpen} embed stats={[
         { v: n(d?.due_soon),  l: "ใกล้ครบกำหนด", tone: gt0(d?.due_soon) ? "danger" : undefined },
         { v: n(d?.designing), l: "กำลังออกแบบ" },
         { v: n(d?.quoted),    l: "รอส่งลูกค้า" },
         { v: n(d?.revising),  l: "กำลังแก้ไข" },
       ]} />
-      <DeptCard icon="🗂️" title="จัดการงาน" href="/tasks" dept="tasks" onOpen={onOpen} stats={[
+      <DeptCard icon="🗂️" title="จัดการงาน" href="/tasks" dept="tasks" onOpen={onOpen} embed stats={[
         { v: n(t?.total_active),   l: "งานทั้งหมด" },
         { v: n(t?.review_pending), l: "รอตรวจ/อนุมัติ", tone: gt0(t?.review_pending) ? "warning" : undefined },
         { v: n(t?.overdue),        l: "เกินกำหนด", tone: gt0(t?.overdue) ? "danger" : undefined },
