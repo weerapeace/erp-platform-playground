@@ -20,7 +20,7 @@ import { listPrintTypes, createPrintType, updatePrintType, deletePrintType } fro
 const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
 
 export type ArrangeOrder = { label: string; w: number | null; h: number | null; unit: string; qty: number };
-export type ArrangeItem = { asset_id: string; r2_key: string; title: string; url: string; available: AssetSize[]; orders: ArrangeOrder[] };
+export type ArrangeItem = { asset_id: string; r2_key: string; title: string; url: string; available: AssetSize[]; orders: ArrangeOrder[]; master_path?: string | null; master_url?: string | null };
 // รูปฐาน (จากอัลบั้ม DFT UV Printed) + รายละเอียด เพิ่ม/ลบ ต่อรูป
 export type ArrangeBase = { asset_id: string; r2_key: string; title: string; url: string; add: string; remove: string };
 export const DFT_UV_COLLECTION_NAME = "งานพิมพ์ DFT UV (Printed)";   // อัลบั้มรูปฐานสำหรับงานเรียงพิมพ์
@@ -88,7 +88,7 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
 
   const addAssets = (assets: AssetRow[]) => {
     const seen = new Set(items.map((x) => x.asset_id));
-    const add = assets.filter((a) => !seen.has(a.id)).map((a) => ({ asset_id: a.id, r2_key: a.r2_key, title: a.title, url: a.url, available: a.sizes ?? [], orders: [] as ArrangeOrder[] }));
+    const add = assets.filter((a) => !seen.has(a.id)).map((a) => ({ asset_id: a.id, r2_key: a.r2_key, title: a.title, url: a.url, available: a.sizes ?? [], orders: [] as ArrangeOrder[], master_path: a.master_path ?? null, master_url: a.master_url ?? null }));
     if (add.length) onChange([...items, ...add]);
   };
   const removeItem = (idx: number) => onChange(items.filter((_, i) => i !== idx));
@@ -138,7 +138,7 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
         <div className="border border-dashed border-slate-200 rounded-lg p-6 text-center text-sm text-slate-400">{t("ยังไม่ได้เลือกรูป — กดปุ่มด้านบนเพื่อเลือกจากคลัง Artwork", "No images yet — pick from the Artwork library")}</div>
       ) : (
         <div className="space-y-2">
-          {items.map((it, i) => <ArrangeImageCard key={it.asset_id} item={it} collapseSizes={collapseSizes} onOpenDetail={() => setDetailAssetId(it.asset_id)} onToggleSize={(s) => toggleSize(i, s)} onSetQty={(oi, q) => setQty(i, oi, q)} onAddSize={(s) => addSize(i, s)} onRemove={() => removeItem(i)} />)}
+          {items.map((it, i) => <ArrangeImageCard key={it.asset_id} item={it} collapseSizes={collapseSizes} pushToast={pushToast} onOpenDetail={() => setDetailAssetId(it.asset_id)} onToggleSize={(s) => toggleSize(i, s)} onSetQty={(oi, q) => setQty(i, oi, q)} onAddSize={(s) => addSize(i, s)} onRemove={() => removeItem(i)} />)}
         </div>
       )}
       {items.length > 0 && (
@@ -156,7 +156,7 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
 }
 
 // การ์ดรูป 1 รูป — ติ๊กขนาด (จากคลัง) + ใส่จำนวน + เพิ่มขนาดใหม่ (save กลับ asset)
-function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, onOpenDetail, collapseSizes = true }: {
+function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, onOpenDetail, collapseSizes = true, pushToast }: {
   item: ArrangeItem;
   onToggleSize: (s: AssetSize) => void;
   onSetQty: (orderIdx: number, qty: number) => void;
@@ -164,8 +164,14 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, o
   onRemove: () => void;
   onOpenDetail: () => void;
   collapseSizes?: boolean;
+  pushToast: (type: "success" | "error" | "info", m: string) => void;
 }) {
   const t = useT();
+  const copyPath = async () => {
+    if (!item.master_path) return;
+    try { await navigator.clipboard.writeText(item.master_path); pushToast("success", t("คัดลอก path แล้ว", "Path copied")); }
+    catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); }
+  };
   const [adding, setAdding] = useState(false);
   const [showAll, setShowAll] = useState(false);   // พับ/กางขนาดที่ยังไม่ได้เลือก
   const [nl, setNl] = useState(""); const [nw, setNw] = useState(""); const [nh, setNh] = useState(""); const [nu, setNu] = useState<AssetSize["unit"]>("cm");
@@ -184,10 +190,14 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, o
   return (
     <div className="border border-slate-200 rounded-xl p-3">
       <div className="flex items-start gap-3">
-        {/* กดรูป = เปิดป๊อปอัปแก้ไฟล์คลังกลาง · ชี้ค้าง = ดูรูปใหญ่ (HoverImage) */}
-        <button type="button" onClick={onOpenDetail} title={t("กดดู/แก้ไฟล์ในคลัง · ชี้ค้างดูรูปใหญ่", "Open in library · hover to preview")} className="shrink-0 rounded-lg overflow-hidden border border-slate-200 hover:ring-2 hover:ring-violet-300 leading-[0]">
-          <HoverImage url={item.url} size={56} previewSize={340} rounded="rounded-lg" alt={item.title} />
-        </button>
+        {/* รูป + ปุ่มคัดลอก path / เปิด Drive (ไฟล์ต้นฉบับ) · กดรูป = เปิดป๊อปอัปแก้ไฟล์คลังกลาง · ชี้ค้าง = ดูรูปใหญ่ */}
+        <div className="shrink-0 flex flex-col items-center gap-1 w-[64px]">
+          <button type="button" onClick={onOpenDetail} title={t("กดดู/แก้ไฟล์ในคลัง · ชี้ค้างดูรูปใหญ่", "Open in library · hover to preview")} className="rounded-lg overflow-hidden border border-slate-200 hover:ring-2 hover:ring-violet-300 leading-[0]">
+            <HoverImage url={item.url} size={56} previewSize={340} rounded="rounded-lg" alt={item.title} />
+          </button>
+          {item.master_path && <button type="button" onClick={copyPath} title={item.master_path} className="w-full text-[10px] text-slate-500 hover:text-violet-700 border border-slate-200 rounded px-1 py-0.5 truncate">📋 {t("คัดลอก path", "Copy path")}</button>}
+          {item.master_url && <a href={item.master_url} target="_blank" rel="noopener noreferrer" title={t("เปิดโฟลเดอร์บน Google Drive", "Open on Google Drive")} className="w-full text-[10px] text-center text-violet-700 hover:underline border border-slate-200 rounded px-1 py-0.5">📁 Drive</a>}
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-medium text-slate-800 truncate">{item.title}</span>

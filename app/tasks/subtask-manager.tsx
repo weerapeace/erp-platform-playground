@@ -57,12 +57,14 @@ function ArrangePrintSubtaskPanel({ sub, taskId, reload, pushToast }: { sub: Cre
     if (ids.length === 0) return;
     (async () => {
       const map: Record<string, AssetSize[]> = {};
-      await Promise.all(ids.map(async (id) => { try { const r = await apiFetch(`/api/assets/${id}`); const j = await r.json(); if (Array.isArray(j.data?.sizes)) map[id] = j.data.sizes as AssetSize[]; } catch { /* ข้าม */ } }));
+      const masterMap: Record<string, { path: string | null; url: string | null }> = {};
+      await Promise.all(ids.map(async (id) => { try { const r = await apiFetch(`/api/assets/${id}`); const j = await r.json(); if (Array.isArray(j.data?.sizes)) map[id] = j.data.sizes as AssetSize[]; if (j.data) masterMap[id] = { path: j.data.master_path ?? null, url: j.data.master_url ?? null }; } catch { /* ข้าม */ } }));
       if (!live) return;
       setItems((prev) => prev.map((it) => {
         const avail = [...it.available]; const seen = new Set(avail.map(arrangeSizeKey));
         for (const s of (map[it.asset_id] ?? [])) { const k = arrangeSizeKey(s); if (!seen.has(k)) { seen.add(k); avail.push(s); } }
-        return { ...it, available: avail };
+        const m = masterMap[it.asset_id];
+        return { ...it, available: avail, ...(m ? { master_path: m.path, master_url: m.url } : {}) };
       }));
     })();
     return () => { live = false; };
