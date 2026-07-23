@@ -17,7 +17,7 @@ export type SchedFilter = { value: string; label: string; color?: string };
 
 export function ScheduleBoard<T extends { id: string }>({
   items, getDate, onSchedule, renderCard, renderChip,
-  filters, getFilter, getSearchText, backlogTitle = "ยังไม่ลงวันที่", hint, maxPerDay = 3,
+  filters, getFilter, getSearchText, dayFooter, backlogTitle = "ยังไม่ลงวันที่", hint, maxPerDay = 3,
 }: {
   items: T[];
   getDate: (i: T) => string | null;
@@ -27,6 +27,7 @@ export function ScheduleBoard<T extends { id: string }>({
   filters?: SchedFilter[];
   getFilter?: (i: T) => string | undefined;
   getSearchText?: (i: T) => string;          // ข้อความให้ค้นหาในกล่อง backlog
+  dayFooter?: (items: T[]) => React.ReactNode;   // สรุปท้ายช่องวัน (เช่น จำนวนรวม)
   backlogTitle?: string;
   hint?: string;
   maxPerDay?: number;
@@ -120,6 +121,7 @@ export function ScheduleBoard<T extends { id: string }>({
                   {dayItems.slice(0, maxPerDay).map((it) => <div key={it.id} {...dragProps(it)} onClick={(e) => e.stopPropagation()}>{renderChip(it)}</div>)}
                   {dayItems.length > maxPerDay && <div className="text-[10px] text-slate-400 px-1">+{dayItems.length - maxPerDay} อื่น ๆ</div>}
                 </div>
+                {dayFooter && dayItems.length > 0 && <div className="mt-0.5">{dayFooter(dayItems)}</div>}
               </div>
             );
           })}

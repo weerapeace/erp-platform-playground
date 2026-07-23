@@ -1,8 +1,8 @@
 /**
- * POST /api/mo/set-due-date — ตั้ง/ล้าง "วันกำหนดส่ง" (due_date) ของใบสั่งผลิต
- * ใช้โดยปฏิทินผลิต (ลากการ์ดวางบนวัน → เซ็ตวัน · ลากออกกล่อง → ล้างวัน)
+ * POST /api/mo/set-delivery — ตั้ง/ยกเลิก "นัดส่งลูกค้าแล้ว" (delivery_confirmed) ของใบสั่งผลิต
+ * ใช้คู่กับ due_date: due_date = วันกำหนด · delivery_confirmed = ยืนยันนัดส่งลูกค้าจริงหรือแค่ deadline
  *
- * body: { id: string, due_date: string | null }   // due_date = "YYYY-MM-DD" หรือ null
+ * body: { id: string, confirmed: boolean }
  * ของกลาง: guardApi(products.edit) + supabaseAdmin + writeAudit
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -18,23 +18,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { id?: string; due_date?: string | null };
+  let body: { id?: string; confirmed?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const id = body.id;
   if (!id) return NextResponse.json({ error: "ไม่ระบุใบสั่งผลิต" }, { status: 400 });
-  const due = body.due_date ? String(body.due_date).slice(0, 10) : null;   // YYYY-MM-DD หรือ null
+  const confirmed = body.confirmed === true;
 
   const admin = supabaseAdmin();
-  const patch: Record<string, unknown> = { due_date: due };
-  if (!due) patch.delivery_confirmed = false;   // ไม่มีวันกำหนด = ไม่มีนัดส่งลูกค้า
   const { data, error } = await admin
-    .from("manufacturing_orders").update(patch).eq("id", id).select("id, mo_no").single();
+    .from("manufacturing_orders").update({ delivery_confirmed: confirmed }).eq("id", id).select("id, mo_no").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   await writeAudit(admin, {
     action: "update", entityType: "manufacturing_orders", entityId: id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { field: "due_date", due_date: due, mo_no: data?.mo_no },
+    metadata: { field: "delivery_confirmed", delivery_confirmed: confirmed, mo_no: data?.mo_no },
   });
   return NextResponse.json({ ok: true, error: null });
 }

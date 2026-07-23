@@ -54,6 +54,7 @@ export type ProductionJob = {
   qty: number; dispatched: number; received: number; remaining: number;
   progress_pct: number;                 // รับคืนแล้วกี่ % ของจำนวน
   due_date: string | null; status: string | null;
+  delivery_confirmed: boolean;          // ยืนยันนัดส่งลูกค้าแล้ว (true) vs แค่ deadline (false)
   mo_group: string | null;              // ชุดใบสั่งงาน (mo_groups)
   categories: ProdJobCategory[];
   dept_names: string | null;            // โต๊ะ/แผนกที่กำลังทำ (รวมชื่อ)
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const [{ data: mos }, { data: wos }, { data: pcs }, { data: grps }] = await Promise.all([
-    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, created_at")
+    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, delivery_confirmed, created_at")
       .eq("is_active", true).neq("status", "cancelled").order("created_at", { ascending: false }).limit(1000),
     admin.from("mo_work_orders").select("mo_no, qty, received_qty, status, department_name, assignee_name").eq("is_active", true).limit(3000),
     admin.from("mo_piecework").select("mo_no").eq("is_active", true).limit(3000),
@@ -129,6 +130,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ...inf, qty, dispatched, received, remaining,
       progress_pct: qty > 0 ? Math.min(100, Math.round((received / qty) * 100)) : 0,
       due_date: (m.due_date as string) ?? null, status: (m.status as string) ?? null,
+      delivery_confirmed: !!m.delivery_confirmed,
       mo_group: groupOfMo.get(moNo) ?? null,
       categories, dept_names: deptsByMo.get(moNo) ? [...deptsByMo.get(moNo)!].join(", ") : null,
       worker_names: workersByMo.get(moNo) ? [...workersByMo.get(moNo)!].join(", ") : null,

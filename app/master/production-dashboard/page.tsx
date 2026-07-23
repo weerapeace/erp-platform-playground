@@ -81,10 +81,11 @@ function JobCard({ j, onClick }: { j: ProductionJob; onClick?: () => void }) {
 }
 
 // ── ปฏิทิน — งานตามกำหนดส่ง + ลากวางตั้งวัน (ใช้ ScheduleBoard ของกลาง) ──
-function CalendarView({ jobs, onJobClick, onSchedule }: {
+function CalendarView({ jobs, onJobClick, onSchedule, onToggleDelivery }: {
   jobs: ProductionJob[];
   onJobClick: (j: ProductionJob) => void;
   onSchedule: (j: ProductionJob, date: string | null) => void;
+  onToggleDelivery: (j: ProductionJob) => void;
 }) {
   // filter ตามแบรนด์ (จากงานที่มี)
   const filters = useMemo<SchedFilter[]>(() => {
@@ -102,17 +103,35 @@ function CalendarView({ jobs, onJobClick, onSchedule }: {
       getFilter={(j) => j.brand ?? undefined}
       getSearchText={(j) => `${j.product_sku ?? ""} ${j.product_name ?? ""} ${j.mo_no} ${j.brand ?? ""}`}
       backlogTitle="ยังไม่ลงวันที่ส่ง"
-      hint="ลากการ์ดจากกล่องขวา → วางบนวัน = ตั้งวันกำหนดส่ง · ลากกลับกล่อง = เอาวันออก"
+      hint="ลากการ์ดจากกล่องขวา → วางบนวัน = ตั้งวันกำหนดส่ง · ลากกลับกล่อง = เอาวันออก · กดปุ่มในการ์ด = ยืนยันนัดส่งลูกค้า (สีแดง)"
+      dayFooter={(items) => {
+        const total = items.reduce((a, j) => a + j.qty, 0);
+        const hasDeliv = items.some((j) => j.delivery_confirmed);
+        return <div className={`text-[9px] px-1 tabular-nums ${hasDeliv ? "text-red-600 font-semibold" : "text-slate-400"}`}>รวม {fmt(total)} ชิ้น</div>;
+      }}
       renderChip={(j) => {
         const s = j.status ? getStatusStyle(j.status) : null;
+        const conf = j.delivery_confirmed;
         return (
           <div onClick={() => onJobClick(j)} title={j.product_name ?? j.product_sku ?? j.mo_no ?? ""}
-            className={`text-[9px] leading-tight truncate rounded px-1 py-0.5 ${s ? `${s.bg} ${s.text}` : "bg-slate-100 text-slate-500"}`}>
-            {j.product_sku || j.mo_no}
+            className={`text-[9px] leading-tight rounded px-1 py-0.5 flex items-center gap-1 ${conf ? "bg-red-50 text-red-700 font-bold" : s ? `${s.bg} ${s.text}` : "bg-slate-100 text-slate-500"}`}>
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${conf ? "bg-red-500" : "bg-slate-400"}`} />
+            <span className="truncate flex-1">{j.product_sku || j.mo_no}</span>
+            <span className={`shrink-0 tabular-nums ${conf ? "text-red-700 font-bold" : "text-slate-400"}`}>×{fmt(j.qty)}</span>
           </div>
         );
       }}
-      renderCard={(j) => <JobCard j={j} onClick={() => onJobClick(j)} />}
+      renderCard={(j) => (
+        <div>
+          <JobCard j={j} onClick={() => onJobClick(j)} />
+          {j.due_date && (
+            <button onClick={(e) => { e.stopPropagation(); onToggleDelivery(j); }}
+              className={`mt-1 w-full text-xs py-1 rounded-lg border transition-colors ${j.delivery_confirmed ? "bg-red-50 border-red-300 text-red-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+              {j.delivery_confirmed ? "🚚 นัดส่งลูกค้าแล้ว ✓ (กดยกเลิก)" : "＋ ตั้งเป็นนัดส่งลูกค้า"}
+            </button>
+          )}
+        </div>
+      )}
     />
   );
 }
@@ -283,6 +302,22 @@ export default function ProductionDashboardPage() {
     }
   };
 
+  // กดยืนยัน/ยกเลิก "นัดส่งลูกค้า" (optimistic + เซฟจริง)
+  const toggleDelivery = async (job: ProductionJob) => {
+    const next = !job.delivery_confirmed;
+    setJobs((js) => js.map((j) => (j.id === job.id ? { ...j, delivery_confirmed: next } : j)));
+    try {
+      const r = await apiFetch("/api/mo/set-delivery", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: job.id, confirmed: next }),
+      });
+      const j = await r.json();
+      if (j.error) throw new Error(j.error);
+    } catch {
+      setJobs((js) => js.map((x) => (x.id === job.id ? { ...x, delivery_confirmed: !next } : x)));
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between gap-3">
@@ -333,7 +368,7 @@ export default function ProductionDashboardPage() {
 
         {/* เนื้อหา */}
         <main className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-3">
-          {view === "game" ? <GameView jobs={jobs} counts={counts} /> : view === "calendar" ? <CalendarView jobs={shown} onJobClick={setSelectedJob} onSchedule={setDue} /> : <>
+          {view === "game" ? <GameView jobs={jobs} counts={counts} /> : view === "calendar" ? <CalendarView jobs={shown} onJobClick={setSelectedJob} onSchedule={setDue} onToggleDelivery={toggleDelivery} /> : <>
           <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="w-4 h-4 accent-blue-600" /> จัดกลุ่ม
