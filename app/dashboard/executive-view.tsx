@@ -37,7 +37,7 @@ export function ExecutiveView({ salesTrend = [] }: { salesTrend?: { d: string; s
   const [dept, setDept]       = useState<DeptOverview | null>(null);   // สรุปต่อแผนก (ของกลาง)
   const [loading, setLoading] = useState(true);
   const [err, setErr]         = useState<string | null>(null);
-  const [openDept, setOpenDept] = useState<{ key: string; label: string; icon: string } | null>(null);   // Popup รายการที่ต้องจัดการ
+  const [openDept, setOpenDept] = useState<DeptDrill | null>(null);   // Popup mini-dashboard ต่อแผนก (KPI + รายการ)
 
   const load = useCallback(() => {
     setLoading(true); setErr(null);
@@ -202,15 +202,16 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // ---- การ์ดแผนก (ของกลาง): หัวข้อ + ปุ่มเจาะเข้าดู + ตัวเลขสำคัญ ----
 type DeptStat = { v: React.ReactNode; l: string; tone?: "danger" | "warning" };
+type DeptDrill = { key: string; label: string; icon: string; stats: DeptStat[] };   // ข้อมูลเปิด Popup (KPI + รายการ)
+const statTone = (t?: DeptStat["tone"]) =>
+  t === "danger" ? "text-red-600" : t === "warning" ? "text-amber-600" : "text-slate-800";
 
 function DeptCard({ icon, title, href, dept, onOpen, stats }: {
   icon: string; title: string; href: string; dept: string;
-  onOpen: (d: { key: string; label: string; icon: string }) => void; stats: DeptStat[];
+  onOpen: (d: DeptDrill) => void; stats: DeptStat[];
 }) {
-  const toneColor = (t?: DeptStat["tone"]) =>
-    t === "danger" ? "text-red-600" : t === "warning" ? "text-amber-600" : "text-slate-800";
   return (
-    <div onClick={() => onOpen({ key: dept, label: title, icon })}
+    <div onClick={() => onOpen({ key: dept, label: title, icon, stats })}
       className="block bg-white border border-slate-200 rounded-xl p-4 hover:border-slate-300 hover:shadow-sm transition-all cursor-pointer">
       <div className="flex items-center gap-2 mb-3">
         <span className="text-lg leading-none">{icon}</span>
@@ -220,7 +221,7 @@ function DeptCard({ icon, title, href, dept, onOpen, stats }: {
       <div className="grid grid-cols-2 gap-3">
         {stats.map((st, i) => (
           <div key={i}>
-            <div className={`text-xl font-bold tabular-nums ${toneColor(st.tone)}`}>{st.v}</div>
+            <div className={`text-xl font-bold tabular-nums ${statTone(st.tone)}`}>{st.v}</div>
             <div className="text-[11px] text-slate-500 mt-0.5">{st.l}</div>
           </div>
         ))}
@@ -233,7 +234,7 @@ function DeptCard({ icon, title, href, dept, onOpen, stats }: {
 function DeptGrid({ s, f, o, dept, onOpen }: {
   s: ExecutiveSummary["sales"]; f: ExecutiveSummary["finance"]; o: ExecutiveSummary["ops"];
   dept: DeptOverview | null;
-  onOpen: (d: { key: string; label: string; icon: string }) => void;
+  onOpen: (d: DeptDrill) => void;
 }) {
   const p = dept?.production, pu = dept?.purchasing, sa = dept?.sales, q = dept?.qc, d = dept?.design, t = dept?.tasks;
   const n  = (x?: number) => (x ?? 0).toLocaleString("th-TH");
@@ -279,7 +280,7 @@ function DeptGrid({ s, f, o, dept, onOpen }: {
 }
 
 // ---- Popup: รายการที่ต้องจัดการ ต่อแผนก (กดจากการ์ด) ----
-function DeptItemsModal({ dept, onClose }: { dept: { key: string; label: string; icon: string }; onClose: () => void }) {
+function DeptItemsModal({ dept, onClose }: { dept: DeptDrill; onClose: () => void }) {
   const router = useRouter();
   const [groups, setGroups] = useState<DeptItemGroup[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -307,7 +308,19 @@ function DeptItemsModal({ dept, onClose }: { dept: { key: string; label: string;
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-lg text-slate-400 hover:bg-slate-100 flex items-center justify-center">✕</button>
         </div>
-        <div className="p-4 max-h-[70vh] overflow-y-auto space-y-4">
+
+        {/* แถวตัวเลขสรุป (mini-dashboard ของแผนก) */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-4 pt-3">
+          {dept.stats.map((st, i) => (
+            <div key={i} className="bg-slate-50 rounded-lg px-3 py-2">
+              <div className={`text-lg font-bold tabular-nums ${statTone(st.tone)}`}>{st.v}</div>
+              <div className="text-[11px] text-slate-500 leading-tight">{st.l}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="p-4 max-h-[60vh] overflow-y-auto space-y-4">
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">รายการที่ต้องจัดการ</div>
           {loading ? (
             <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-12 bg-slate-50 rounded-lg animate-pulse" />)}</div>
           ) : (groups ?? []).length === 0 ? (
