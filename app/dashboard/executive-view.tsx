@@ -284,6 +284,13 @@ function DeptItemsModal({ dept, onClose }: { dept: DeptDrill; onClose: () => voi
   const router = useRouter();
   const [groups, setGroups] = useState<DeptItemGroup[] | null>(null);
   const [loading, setLoading] = useState(true);
+  // ขนาด Popup (เล็ก/กลาง/เต็ม) — จำค่าใน localStorage
+  const [size, setSize] = useState<"md" | "lg" | "full">(() => {
+    if (typeof window === "undefined") return "lg";
+    const s = localStorage.getItem("erp_dept_popup_size");
+    return s === "md" || s === "lg" || s === "full" ? s : "lg";
+  });
+  const setSz = (s: "md" | "lg" | "full") => { setSize(s); try { localStorage.setItem("erp_dept_popup_size", s); } catch { /* ignore */ } };
 
   useEffect(() => {
     if (dept.embedUrl) { setLoading(false); return; }   // โหมดฝังหน้า → ไม่ต้องดึงรายการ
@@ -300,12 +307,20 @@ function DeptItemsModal({ dept, onClose }: { dept: DeptDrill; onClose: () => voi
 
   // โหมดฝังหน้าเต็ม (iframe) — เปิดแดชบอร์ดจริงของแผนกใน Popup (shell ซ่อนเมนูให้เองด้วย ?embed=1)
   if (dept.embedUrl) {
+    const sizeCls = size === "full" ? "max-w-[98vw] h-[96vh]" : size === "md" ? "max-w-3xl h-[74vh]" : "max-w-6xl h-[90vh]";
     return (
-      <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-2 sm:p-6" onClick={onClose}>
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-slate-100 shrink-0">
+      <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-2 sm:p-4" onClick={onClose}>
+        <div className={`bg-white rounded-2xl shadow-xl w-full ${sizeCls} flex flex-col overflow-hidden`} onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-100 shrink-0">
             <span className="text-xl">{dept.icon}</span>
             <div className="text-base font-semibold text-slate-800 flex-1 truncate">{dept.label}</div>
+            {/* ปรับขนาด Popup */}
+            <div className="hidden sm:inline-flex items-center rounded-lg border border-slate-200 overflow-hidden mr-1 shrink-0">
+              {([["md", "เล็ก"], ["lg", "กลาง"], ["full", "เต็ม"]] as const).map(([s, lbl]) => (
+                <button key={s} onClick={() => setSz(s)}
+                  className={`px-2 py-1 text-xs ${size === s ? "bg-slate-100 text-slate-800 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>{lbl}</button>
+              ))}
+            </div>
             <a href={dept.embedUrl} target="_blank" rel="noopener" className="text-xs text-blue-600 hover:underline mr-1 shrink-0">เปิดเต็มจอ ↗</a>
             <button onClick={onClose} className="w-8 h-8 rounded-lg text-slate-400 hover:bg-slate-100 flex items-center justify-center shrink-0">✕</button>
           </div>
