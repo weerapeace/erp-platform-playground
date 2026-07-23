@@ -224,30 +224,31 @@ function ArrangeBaseCard({ base, onChange, onRemove, onOpenDetail }: {
 }) {
   const t = useT();
   return (
-    <div className="border border-slate-200 rounded-xl p-3">
-      <div className="flex items-start gap-3">
-        <button type="button" onClick={onOpenDetail} title={t("กดดู/แก้ไฟล์ในคลัง · ชี้ค้างดูรูปใหญ่", "Open in library · hover to preview")} className="shrink-0 rounded-lg overflow-hidden border border-slate-200 hover:ring-2 hover:ring-teal-300 leading-[0]">
-          <HoverImage url={base.url} size={56} previewSize={340} rounded="rounded-lg" alt={base.title} />
+    <div className="flex items-stretch gap-2">
+      {/* กล่องที่ 1 — เลือกรูป (รูปฐาน) */}
+      <div className="relative w-[124px] shrink-0 border border-slate-200 rounded-xl p-2.5 bg-slate-50/40 flex flex-col items-center gap-1.5">
+        <button type="button" onClick={onRemove} className="absolute top-1 right-1 text-slate-300 hover:text-red-500 text-sm leading-none" title={t("เอารูปฐานออก", "Remove base")}>✕</button>
+        <button type="button" onClick={onOpenDetail} title={t("กดดู/แก้ไฟล์ในคลัง · ชี้ค้างดูรูปใหญ่", "Open in library · hover to preview")} className="rounded-lg overflow-hidden border border-slate-200 hover:ring-2 hover:ring-teal-300 leading-[0]">
+          <HoverImage url={base.url} size={80} previewSize={340} rounded="rounded-lg" alt={base.title} />
         </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium text-slate-800 truncate">{base.title}</span>
-            <button type="button" onClick={onRemove} className="text-slate-300 hover:text-red-500 text-sm shrink-0" title={t("เอารูปฐานออก", "Remove base")}>✕</button>
-          </div>
-          <div className="grid sm:grid-cols-2 gap-2 mt-1.5">
-            <label className="block">
-              <span className="text-[11px] font-medium text-emerald-700">➕ {t("เพิ่มอะไรจากรูปฐาน", "Add to base")}</span>
-              <textarea value={base.add} onChange={(e) => onChange({ add: e.target.value })} rows={2}
-                placeholder={t("เช่น เพิ่มโลโก้มุมขวา, เพิ่มข้อความ...", "e.g. add logo top-right, add text...")}
-                className="mt-0.5 w-full text-sm border border-slate-200 rounded-md px-2 py-1 resize-y focus:outline-none focus:ring-1 focus:ring-emerald-300" />
-            </label>
-            <label className="block">
-              <span className="text-[11px] font-medium text-rose-700">➖ {t("ลบอะไรจากรูปฐาน", "Remove from base")}</span>
-              <textarea value={base.remove} onChange={(e) => onChange({ remove: e.target.value })} rows={2}
-                placeholder={t("เช่น ลบลายน้ำ, ลบข้อความเดิม...", "e.g. remove watermark, remove old text...")}
-                className="mt-0.5 w-full text-sm border border-slate-200 rounded-md px-2 py-1 resize-y focus:outline-none focus:ring-1 focus:ring-rose-300" />
-            </label>
-          </div>
+        <span className="w-full text-[11px] font-medium text-slate-700 text-center leading-tight line-clamp-2" title={base.title}>{base.title}</span>
+      </div>
+      {/* กล่องที่ 2 — รายละเอียด (เพิ่ม/ลบ จากรูปฐาน) */}
+      <div className="flex-1 min-w-0 border border-slate-200 rounded-xl p-2.5">
+        <div className="text-[11px] font-semibold text-slate-400 mb-1.5">{t("รายละเอียด (เพิ่ม/ลบ จากรูปฐาน)", "Details (add/remove from base)")}</div>
+        <div className="grid sm:grid-cols-2 gap-2">
+          <label className="block">
+            <span className="text-[11px] font-medium text-emerald-700">➕ {t("เพิ่มอะไรจากรูปฐาน", "Add to base")}</span>
+            <textarea value={base.add} onChange={(e) => onChange({ add: e.target.value })} rows={2}
+              placeholder={t("เช่น เพิ่มโลโก้มุมขวา, เพิ่มข้อความ...", "e.g. add logo top-right, add text...")}
+              className="mt-0.5 w-full text-sm border border-slate-200 rounded-md px-2 py-1 resize-y focus:outline-none focus:ring-1 focus:ring-emerald-300" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-medium text-rose-700">➖ {t("ลบอะไรจากรูปฐาน", "Remove from base")}</span>
+            <textarea value={base.remove} onChange={(e) => onChange({ remove: e.target.value })} rows={2}
+              placeholder={t("เช่น ลบลายน้ำ, ลบข้อความเดิม...", "e.g. remove watermark, remove old text...")}
+              className="mt-0.5 w-full text-sm border border-slate-200 rounded-md px-2 py-1 resize-y focus:outline-none focus:ring-1 focus:ring-rose-300" />
+          </label>
         </div>
       </div>
     </div>
