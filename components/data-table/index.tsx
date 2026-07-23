@@ -1026,20 +1026,22 @@ export function DataTable<T extends Record<string, unknown>>({
   // ---- Filterable fields (auto-build from column meta) ----
   const filterableFromColumns = useMemo<FilterableField[]>(() => {
     // F27: server mode ก็ใช้ filter ได้ (ส่งไปกรองที่ server)
+    // หมายเหตุ: การกรอง "ไม่ผูก" กับการโชว์คอลัมน์ — field ที่ตั้ง filterable ต้องขึ้นเป็นตัวกรองเสมอ
+    // แม้คอลัมน์จะถูกซ่อน (เช่น เพศ/สัญชาติ ที่เลือกผ่านปุ่ม "เลือก field กรอง") ไม่งั้นติ๊กแล้วไม่โผล่
     return columns.reduce<FilterableField[]>((acc, col) => {
       if (!col.meta?.filterable) return acc;
       const colId = String(
         (col as unknown as Record<string, unknown>).accessorKey ??
         (col as unknown as Record<string, unknown>).id ?? ""
       );
-      if (!colId || columnVisibility[colId] === false) return acc;
+      if (!colId) return acc;
       const label = typeof col.header === "string" ? col.header : (col.meta.filterLabel ?? colId);
       const type: FilterFieldType = col.meta.filterOptions ? "select"
         : (col.meta.filterType ?? inferFilterType(colId, data as Record<string, unknown>[]));
       acc.push({ key: colId, label, type, options: col.meta.filterOptions });
       return acc;
     }, []);
-  }, [columns, columnVisibility, data]);
+  }, [columns, data]);
 
   const activeFilterCount = useMemo(
     () => filterableFromColumns.filter(f => isColFilterActive(colFilterValues[f.key])).length,
