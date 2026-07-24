@@ -1804,6 +1804,8 @@ function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, craft
   const [sc, setSc] = useState<CostScenario>(DEFAULT_SC);
   const [saving, setSaving] = useState(false);
   const [bomSaving, setBomSaving] = useState(false);
+  // ⚠️ hooks ทุกตัวต้องอยู่เหนือ early return (cost === null) ไม่งั้น React error #310
+  const [savingStd, setSavingStd] = useState(false);
   useEffect(() => {
     if (!cost) return;
     // ใบนี้เคยคิดแล้ว → ใช้ของใบ · ยังไม่เคย → ดึง "ต้นทุนมาตรฐานของสินค้า" มาเป็นค่าตั้งต้น
@@ -1865,7 +1867,6 @@ function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, craft
     finally { setSaving(false); }
   };
   // บันทึกการคิดนี้กลับเป็น "ต้นทุนมาตรฐาน" ของสินค้า (รุ่น/ทุกสี) → module คำนวณต้นทุน + ใบอื่นดึงไปใช้
-  const [savingStd, setSavingStd] = useState(false);
   const saveToProduct = async () => {
     if (!cost?.parent_code) { toast.error("สินค้านี้ไม่มี Parent SKU"); return; }
     setSavingStd(true);
