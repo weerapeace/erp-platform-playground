@@ -253,6 +253,9 @@ function DrillModal({ drill, onClose }: { drill: { type: string; seller?: string
   const [q, setQ] = useState("");
   const [seller, setSeller] = useState("");
   const [groupMo, setGroupMo] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);           // กดปุ่มแล้วรีโหลดลิสต์
+  const [busy, setBusy] = useState<Set<string>>(new Set()); // แถวที่กำลังทำรายการ
+  const [err, setErr] = useState<string | null>(null);
   const open = drill !== null;
   const fixedSeller = drill?.type === "supplier" ? (drill.seller ?? "") : "";
 
@@ -270,7 +273,20 @@ function DrillModal({ drill, onClose }: { drill: { type: string; seller?: string
         .then((j) => { if (!j.error) setData(j); }).catch(() => {}).finally(() => setLoading(false));
     }, 250);
     return () => clearTimeout(t);
-  }, [open, drill, fixedSeller, seller, q]);
+  }, [open, drill, fixedSeller, seller, q, reloadKey]);
+
+  // ปุ่มทำงานในลิสต์ (อนุมัติ / จ่ายแล้ว) → ยิง API แล้วรีโหลด
+  const act = async (id: string, fn: () => Promise<Response>) => {
+    setErr(null); setBusy((b) => new Set(b).add(id));
+    try {
+      const r = await fn(); const j = await r.json();
+      if (j.error) throw new Error(j.error);
+      setReloadKey((k) => k + 1);
+    } catch (e) { setErr(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); }
+    finally { setBusy((b) => { const n = new Set(b); n.delete(id); return n; }); }
+  };
+  const approve = (id: string) => act(id, () => apiFetch("/api/purchasing/pr-approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pr_ids: [id], action: "approve" }) }));
+  const markPaid = (id: string) => act(id, () => apiFetch("/api/purchasing/mark-paid", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }));
 
   const canGroupMo = drill?.type === "waiting";
   const rows = data?.rows ?? [];
@@ -298,6 +314,8 @@ function DrillModal({ drill, onClose }: { drill: { type: string; seller?: string
           )}
         </div>
 
+        {err && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">{err}</div>}
+
         {loading && rows.length === 0 ? <div className="py-10 text-center text-sm text-slate-400">กำลังโหลด...</div>
           : rows.length === 0 ? <div className="py-10 text-center text-sm text-slate-300">— ไม่มีรายการ —</div>
           : (
@@ -307,12 +325,23 @@ function DrillModal({ drill, onClose }: { drill: { type: string; seller?: string
                   {gk && <div className="text-[11px] font-medium text-slate-400 px-1 pb-1 sticky top-0 bg-white">{gk} <span className="text-slate-300">({grows.length})</span></div>}
                   <div className="space-y-1">
                     {grows.map((r) => (
-                      <div key={r.id} className="flex items-start justify-between gap-3 px-2 py-1.5 rounded-lg border border-slate-100 hover:bg-slate-50">
-                        <div className="min-w-0">
+                      <div key={r.id} className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg border border-slate-100 hover:bg-slate-50">
+                        <div className="min-w-0 flex-1">
                           <div className="text-sm text-slate-700 truncate">{r.primary}</div>
                           <div className="text-[11px] text-slate-400 truncate">{r.secondary}</div>
                         </div>
                         <div className="text-xs text-slate-600 text-right shrink-0 tabular-nums">{r.right}</div>
+                        {drill?.type === "waiting" && (
+                          <button disabled={busy.has(r.id)} onClick={() => approve(r.id)}
+                            className="shrink-0 h-7 px-2.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">{busy.has(r.id) ? "..." : "✓ อนุมัติ"}</button>
+                        )}
+                        {drill?.type === "pending_receive" && (
+                          <Link href="/purchasing/receive" className="shrink-0 h-7 px-2.5 leading-7 text-xs rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50">รับของ →</Link>
+                        )}
+                        {drill?.type === "unpaid" && (
+                          <button disabled={busy.has(r.id)} onClick={() => markPaid(r.id)}
+                            className="shrink-0 h-7 px-2.5 text-xs rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">{busy.has(r.id) ? "..." : "💰 จ่ายแล้ว"}</button>
+                        )}
                       </div>
                     ))}
                   </div>
