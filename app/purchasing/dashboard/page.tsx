@@ -9,6 +9,8 @@ import { useEffect, useState, useRef, Fragment } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ERPModal } from "@/components/modal";
+import { Pager } from "@/components/pager";
+import { SortTh, sortRows, type SortState } from "@/components/sort-th";
 import { apiFetch } from "@/lib/api";
 import type { DrillRow } from "@/app/api/purchasing/dashboard/list/route";
 
@@ -261,6 +263,19 @@ export default function PurchasingDashboardPage() {
 const isYuan = (c?: string | null) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").toUpperCase());
 const unitStr = (r: DrillRow) => isYuan(r.currency) ? `¥${(r.unit_price ?? 0).toLocaleString()}` : baht(r.unit_price ?? 0);
 type DrillView = "card" | "table" | "list";
+// คีย์ที่ใช้เรียงในตาราง (ของกลาง sortRows)
+const sortVal = (r: DrillRow, k: string): string | number | null | undefined => {
+  switch (k) {
+    case "name": return r.primary;
+    case "code": return r.code;
+    case "seller": return r.seller ?? undefined;
+    case "qty": return r.qty;
+    case "price": return r.unit_price_thb;
+    case "order": return r.order_date ?? undefined;
+    case "remain": return r.remain;
+    default: return undefined;
+  }
+};
 
 function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string } | null; onClose: () => void }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -268,22 +283,29 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
   const [seller, setSeller] = useState("");
-  const [groupMo, setGroupMo] = useState(false);
-  const [view, setView] = useState<DrillView>("card");      // มุมมองรายการรอซื้อ
+  const [grouped, setGrouped] = useState(false);
+  const [view, setView] = useState<DrillView>("card");      // มุมมอง (การ์ด/ตาราง/รายการ)
+  const [sort, setSort] = useState<SortState>(null);         // เรียงในตาราง
+  const [page, setPage] = useState(0);                       // เลื่อนหน้า (0-based)
+  const [pageSize, setPageSize] = useState(20);
   const [reloadKey, setReloadKey] = useState(0);            // กดปุ่มแล้วรีโหลดลิสต์
   const [busy, setBusy] = useState<Set<string>>(new Set());  // แถวที่กำลังทำรายการ
   const [err, setErr] = useState<string | null>(null);
   const [openOrder, setOpenOrder] = useState<string | null>(null);  // แถวที่กำลังกรอก "สั่ง"
   const [orderQty, setOrderQty] = useState("");
-  const [openLink, setOpenLink] = useState<string | null>(null);    // แถวที่กำลังใส่ลิงก์
-  const [linkUrl, setLinkUrl] = useState("");
+  const [detail, setDetail] = useState<DrillRow | null>(null);      // popup รายละเอียด
+  const [linkDraft, setLinkDraft] = useState("");                   // ช่องกรอกลิงก์ใน popup
   const open = drill !== null;
   const isWaiting = drill?.type === "waiting";
+  const isReceive = drill?.type === "pending_receive";
+  const isRich = isWaiting || isReceive;
   const fixedSeller = drill?.type === "supplier" ? (drill.seller ?? "") : "";
 
-  useEffect(() => { if (open) { setQ(""); setSeller(""); setGroupMo(false); setView("card"); setData(null); setOpenOrder(null); setOpenLink(null); } }, [open, drill?.type, drill?.seller]);
+  useEffect(() => { if (open) { setQ(""); setSeller(""); setGrouped(false); setView("card"); setSort(null); setPage(0); setData(null); setOpenOrder(null); setDetail(null); } }, [open, drill?.type, drill?.seller]);
   // เลื่อนหน้าจอมาที่แผงเมื่อเปิด/สลับการ์ด (โดยเฉพาะเวลากดจากการ์ดด้านล่าง)
   useEffect(() => { if (open) panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }, [open, drill?.type, drill?.seller]);
+  // กลับหน้าแรกเมื่อเปลี่ยนตัวกรอง/เรียง/มุมมอง
+  useEffect(() => { setPage(0); }, [q, seller, grouped, view, sort?.key, sort?.dir, pageSize]);
 
   useEffect(() => {
     if (!open || !drill) return;
@@ -312,110 +334,111 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const approve = (id: string) => act(id, () => apiFetch("/api/purchasing/pr-approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pr_ids: [id], action: "approve" }) }));
   const markPaid = (id: string) => act(id, () => apiFetch("/api/purchasing/mark-paid", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }));
 
-  const startOrder = (r: DrillRow) => { setOpenLink(null); setOpenOrder(r.id); setOrderQty(String(r.qty ?? "")); };
+  const startOrder = (r: DrillRow) => { setOpenOrder(r.id); setOrderQty(String(r.qty ?? "")); };
   const confirmOrder = async (r: DrillRow) => {
     await act(r.id, () => apiFetch("/api/purchasing/pr-quick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, mark_ordered: true, qty: orderQty === "" ? null : Number(orderQty) }) }));
     setOpenOrder(null);
   };
-  const startLink = (r: DrillRow) => { setOpenOrder(null); setOpenLink(r.id); setLinkUrl(r.purchase_url ?? ""); };
-  const confirmLink = async (r: DrillRow, url: string) => {
+  const openDetail = (r: DrillRow) => { setDetail(r); setLinkDraft(r.purchase_url ?? ""); };
+  const saveLink = async (r: DrillRow, url: string) => {
     await act(r.id, () => apiFetch("/api/purchasing/pr-quick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, purchase_url: url.trim() }) }));
-    setOpenLink(null);
+    setDetail((d) => (d ? { ...d, purchase_url: url.trim() || null } : d));
   };
 
-  const canGroupMo = isWaiting;
+  // ---- เรียง + แบ่งหน้า + จัดกลุ่ม ----
   const rows = data?.rows ?? [];
-  const groups = groupMo
-    ? Object.entries(rows.reduce((m: Record<string, DrillRow[]>, r) => { const k = r.mo_no || "— ไม่มีใบสั่งงาน —"; (m[k] ??= []).push(r); return m; }, {}))
-    : [["", rows] as [string, DrillRow[]]];
+  const sorted = sortRows(rows, sort, sortVal);
+  const total = sorted.length;
+  const curPage = Math.min(page, Math.max(0, Math.ceil(total / pageSize) - 1));   // กันหน้าเกินช่วงหลังรายการลด
+  const pageRows = sorted.slice(curPage * pageSize, (curPage + 1) * pageSize);
+  const groupKey = (r: DrillRow) => isReceive ? (r.seller || "— ไม่ระบุร้าน —") : (r.mo_no || "— ไม่มีใบสั่งงาน —");
+  const groups: [string, DrillRow[]][] = grouped
+    ? Object.entries(pageRows.reduce((m: Record<string, DrillRow[]>, r) => { (m[groupKey(r)] ??= []).push(r); return m; }, {}))
+    : [["", pageRows]];
 
-  // ---- รูปย่อ + ป้ายรหัส/สั่งแล้ว (ใช้ซ้ำในการ์ด/ตาราง) ----
+  // ---- รูปย่อ ----
   const Thumb = ({ url, size }: { url?: string | null; size: string }) => url
     ? <img src={url} alt="" className={`${size} rounded-lg object-cover border border-slate-100 shrink-0 bg-slate-50`} />
     : <div className={`${size} rounded-lg bg-slate-100 flex items-center justify-center text-slate-300 shrink-0`}>📦</div>;
 
-  // ---- ปุ่มจัดการ (อนุมัติ / สั่ง / ลิงก์) ----
-  const Actions = ({ r }: { r: DrillRow }) => (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      <button disabled={busy.has(r.id)} onClick={() => approve(r.id)}
-        className="h-7 px-2.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">{busy.has(r.id) ? "..." : "✓ อนุมัติ"}</button>
-      <button disabled={busy.has(r.id)} onClick={() => startOrder(r)}
-        className={`h-7 px-2.5 text-xs rounded-lg border ${r.order_date ? "border-emerald-200 text-emerald-700 bg-emerald-50" : "border-amber-200 text-amber-700 hover:bg-amber-50"}`}>
-        {r.order_date ? `✓ สั่งแล้ว ${r.order_date}` : "🛒 สั่ง"}</button>
-      {r.purchase_url && <a href={r.purchase_url} target="_blank" rel="noopener" className="h-7 px-2.5 leading-7 text-xs rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50">🔗 เปิดลิงก์ ↗</a>}
-      <button disabled={busy.has(r.id)} onClick={() => startLink(r)}
-        className="h-7 px-2.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">{r.purchase_url ? "แก้ลิงก์" : "🔗 ใส่ลิงก์"}</button>
+  // ---- ปุ่มด่วน: waiting = อนุมัติ + สั่ง · pending = รับของ (ลิงก์/รายละเอียด อยู่ใน popup) ----
+  const Actions = ({ r }: { r: DrillRow }) => {
+    if (isReceive) return (
+      <Link href="/purchasing/receive" onClick={(e) => e.stopPropagation()} className="h-7 px-2.5 leading-7 text-xs rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50 shrink-0">รับของ →</Link>
+    );
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+        <button disabled={busy.has(r.id)} onClick={() => approve(r.id)}
+          className="h-7 px-2.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">{busy.has(r.id) ? "..." : "✓ อนุมัติ"}</button>
+        <button disabled={busy.has(r.id)} onClick={() => startOrder(r)}
+          className={`h-7 px-2.5 text-xs rounded-lg border ${r.order_date ? "border-emerald-200 text-emerald-700 bg-emerald-50" : "border-amber-200 text-amber-700 hover:bg-amber-50"}`}>
+          {r.order_date ? `✓ สั่งแล้ว ${r.order_date}` : "🛒 สั่ง"}</button>
+      </div>
+    );
+  };
+
+  // ---- แผงกรอก "สั่ง" (โผล่ใต้แถว) ----
+  const OrderEditor = ({ r }: { r: DrillRow }) => openOrder === r.id ? (
+    <div className="mt-2 flex items-center gap-2 flex-wrap bg-amber-50 border border-amber-200 rounded-lg p-2" onClick={(e) => e.stopPropagation()}>
+      <span className="text-xs text-amber-800">จำนวนที่สั่ง</span>
+      <input type="number" min={0} value={orderQty} onChange={(e) => setOrderQty(e.target.value)}
+        className="h-7 w-24 px-2 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400" />
+      <span className="text-xs text-slate-500">{r.uom}</span>
+      <span className="text-[11px] text-slate-400">· วันสั่ง = วันนี้</span>
+      <button disabled={busy.has(r.id)} onClick={() => confirmOrder(r)} className="h-7 px-3 text-xs font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">ยืนยันสั่ง</button>
+      <button onClick={() => setOpenOrder(null)} className="h-7 px-2.5 text-xs text-slate-500 hover:underline">ยกเลิก</button>
     </div>
-  );
+  ) : null;
 
-  // ---- แผงกรอก "สั่ง" / "ลิงก์" (โผล่ใต้แถวที่เปิด) ----
-  const Editors = ({ r }: { r: DrillRow }) => (<>
-    {openOrder === r.id && (
-      <div className="mt-2 flex items-center gap-2 flex-wrap bg-amber-50 border border-amber-200 rounded-lg p-2">
-        <span className="text-xs text-amber-800">จำนวนที่สั่ง</span>
-        <input type="number" min={0} value={orderQty} onChange={(e) => setOrderQty(e.target.value)}
-          className="h-7 w-24 px-2 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400" />
-        <span className="text-xs text-slate-500">{r.uom}</span>
-        <span className="text-[11px] text-slate-400">· วันสั่ง = วันนี้</span>
-        <button disabled={busy.has(r.id)} onClick={() => confirmOrder(r)} className="h-7 px-3 text-xs font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">ยืนยันสั่ง</button>
-        <button onClick={() => setOpenOrder(null)} className="h-7 px-2.5 text-xs text-slate-500 hover:underline">ยกเลิก</button>
-      </div>
-    )}
-    {openLink === r.id && (
-      <div className="mt-2 flex items-center gap-2 flex-wrap bg-blue-50 border border-blue-200 rounded-lg p-2">
-        <input type="url" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="วางลิงก์ Taobao / 1688 / ฯลฯ"
-          className="h-7 flex-1 min-w-[160px] px-2 text-xs border border-blue-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
-        <button disabled={busy.has(r.id)} onClick={() => confirmLink(r, linkUrl)} className="h-7 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
-        {r.purchase_url && <button disabled={busy.has(r.id)} onClick={() => confirmLink(r, "")} className="h-7 px-2.5 text-xs text-rose-600 hover:underline">ล้าง</button>}
-        <button onClick={() => setOpenLink(null)} className="h-7 px-2.5 text-xs text-slate-500 hover:underline">ยกเลิก</button>
-      </div>
-    )}
-  </>);
-
-  // ---- การ์ด (รูป + รหัส + เหตุผล + MO + ราคา/หน่วย + วันสั่ง + ปุ่ม) ----
+  // ---- การ์ดกระชับ (กดที่การ์ด = เปิดรายละเอียด · ปุ่มด่วนอยู่ล่าง) ----
   const Cards = ({ grows }: { grows: DrillRow[] }) => (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       {grows.map((r) => (
-        <div key={r.id} className={`rounded-xl border p-3 ${r.order_date ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200"}`}>
-          <div className="flex gap-3">
-            <Thumb url={r.image_url} size="w-14 h-14" />
+        <div key={r.id} className={`rounded-xl border p-2.5 ${r.order_date ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200"}`}>
+          <button type="button" onClick={() => openDetail(r)} className="w-full flex gap-2.5 text-left group">
+            <Thumb url={r.image_url} size="w-12 h-12" />
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between gap-2">
-                <div className="text-sm font-medium text-slate-800 leading-snug break-words">{r.primary}</div>
+                <div className="text-sm font-medium text-slate-800 leading-snug break-words group-hover:text-blue-700">{r.primary}</div>
                 {r.order_date && <span className="shrink-0 text-[10px] font-medium text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">✓ สั่งแล้ว</span>}
               </div>
               <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                 {r.code && <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">{r.code}</span>}
-                {r.mo_no && <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">🏭 {r.mo_no}</span>}
+                {isReceive ? (r.po_no && <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">📄 {r.po_no}</span>)
+                  : (r.mo_no && <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">🏭 {r.mo_no}</span>)}
               </div>
-              <div className="text-[11px] text-slate-400 mt-1 truncate">🏪 {r.seller || "—"} · {r.requester || "—"}</div>
-              {r.reason && <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">📝 {r.reason}</div>}
               <div className="text-xs text-slate-700 mt-1 tabular-nums">
-                {unitStr(r)}<span className="text-slate-400">/{r.uom || "หน่วย"}</span> × {(r.qty ?? 0).toLocaleString()} = <span className="font-medium">{baht(r.line_total_thb ?? 0)}</span>
-                {isYuan(r.currency) && <span className="text-slate-400"> (แปลงบาท)</span>}
+                {isReceive
+                  ? <>ค้าง <span className="font-medium text-blue-700">{(r.remain ?? 0).toLocaleString()}</span>/{(r.qty ?? 0).toLocaleString()} {r.uom} <span className="text-slate-400">· {r.seller || "—"}</span></>
+                  : <>{unitStr(r)}<span className="text-slate-400">/{r.uom || "หน่วย"}</span> × {(r.qty ?? 0).toLocaleString()} = <span className="font-medium">{baht(r.line_total_thb ?? 0)}</span></>}
               </div>
             </div>
+          </button>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <Actions r={r} />
+            <span className="text-[10px] text-slate-300 group-hover:text-slate-400 shrink-0">กดดูรายละเอียด</span>
           </div>
-          <div className="mt-2"><Actions r={r} /></div>
-          <Editors r={r} />
+          <OrderEditor r={r} />
         </div>
       ))}
     </div>
   );
 
-  // ---- ตาราง (โชว์รูป + รหัส) ----
+  // ---- ตาราง (คลิกหัวคอลัมน์ = เรียง · คลิกชื่อ = รายละเอียด) ----
   const Table = ({ grows }: { grows: DrillRow[] }) => (
     <div className="overflow-x-auto">
       <table className="w-full text-xs border-collapse">
         <thead>
-          <tr className="text-[11px] text-slate-400 border-b border-slate-100 text-left">
-            <th className="py-1.5 pr-2 font-medium">รูป</th>
-            <th className="py-1.5 pr-2 font-medium">ชื่อ / รหัส</th>
-            <th className="py-1.5 pr-2 font-medium">ร้าน · MO</th>
-            <th className="py-1.5 pr-2 font-medium text-right">จำนวน</th>
-            <th className="py-1.5 pr-2 font-medium text-right">ราคา/หน่วย</th>
-            <th className="py-1.5 pr-2 font-medium">สั่งเมื่อ</th>
-            <th className="py-1.5 font-medium">จัดการ</th>
+          <tr className="text-[11px] text-slate-400 border-b border-slate-100">
+            <th className="py-1.5 pr-2 font-medium text-left">รูป</th>
+            <SortTh label="ชื่อ / รหัส" k="name" sort={sort} onSort={setSort} />
+            <SortTh label={isReceive ? "ร้าน · PO" : "ร้าน · MO"} k="seller" sort={sort} onSort={setSort} />
+            <SortTh label="จำนวน" k="qty" sort={sort} onSort={setSort} align="right" />
+            {isReceive
+              ? <SortTh label="ค้างรับ" k="remain" sort={sort} onSort={setSort} align="right" />
+              : <SortTh label="ราคา/หน่วย" k="price" sort={sort} onSort={setSort} align="right" />}
+            {!isReceive && <SortTh label="สั่งเมื่อ" k="order" sort={sort} onSort={setSort} />}
+            <th className="py-1.5 font-medium text-left">จัดการ</th>
           </tr>
         </thead>
         <tbody>
@@ -424,17 +447,19 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
               <tr className="border-b border-slate-50 hover:bg-slate-50 align-top">
                 <td className="py-1.5 pr-2"><Thumb url={r.image_url} size="w-10 h-10" /></td>
                 <td className="py-1.5 pr-2 min-w-[140px]">
-                  <div className="text-slate-700 break-words">{r.primary}</div>
+                  <button type="button" onClick={() => openDetail(r)} className="text-left text-slate-700 hover:text-blue-700 break-words">{r.primary}</button>
                   {r.code && <div className="text-[10px] font-mono text-slate-400">{r.code}</div>}
                 </td>
-                <td className="py-1.5 pr-2 text-slate-500">{r.seller || "—"}{r.mo_no && <div className="text-[10px] text-indigo-500">🏭 {r.mo_no}</div>}</td>
+                <td className="py-1.5 pr-2 text-slate-500">{r.seller || "—"}{isReceive ? (r.po_no && <div className="text-[10px] text-slate-400">📄 {r.po_no}</div>) : (r.mo_no && <div className="text-[10px] text-indigo-500">🏭 {r.mo_no}</div>)}</td>
                 <td className="py-1.5 pr-2 text-right tabular-nums whitespace-nowrap">{(r.qty ?? 0).toLocaleString()} {r.uom}</td>
-                <td className="py-1.5 pr-2 text-right tabular-nums whitespace-nowrap">{unitStr(r)}</td>
-                <td className="py-1.5 pr-2 whitespace-nowrap">{r.order_date ? <span className="text-emerald-600">✓ {r.order_date}</span> : <span className="text-slate-300">—</span>}</td>
+                {isReceive
+                  ? <td className="py-1.5 pr-2 text-right tabular-nums whitespace-nowrap text-blue-700">{(r.remain ?? 0).toLocaleString()}</td>
+                  : <td className="py-1.5 pr-2 text-right tabular-nums whitespace-nowrap">{unitStr(r)}</td>}
+                {!isReceive && <td className="py-1.5 pr-2 whitespace-nowrap">{r.order_date ? <span className="text-emerald-600">✓ {r.order_date}</span> : <span className="text-slate-300">—</span>}</td>}
                 <td className="py-1.5"><Actions r={r} /></td>
               </tr>
-              {(openOrder === r.id || openLink === r.id) && (
-                <tr><td colSpan={7} className="pb-2"><Editors r={r} /></td></tr>
+              {openOrder === r.id && (
+                <tr><td colSpan={isReceive ? 6 : 7} className="pb-2"><OrderEditor r={r} /></td></tr>
               )}
             </Fragment>
           ))}
@@ -462,15 +487,15 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
               {data?.sellers.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           )}
-          {canGroupMo && (
+          {isRich && (
             <label className="flex items-center gap-1.5 text-xs text-slate-600 whitespace-nowrap">
-              <input type="checkbox" checked={groupMo} onChange={(e) => setGroupMo(e.target.checked)} className="rounded border-slate-300" /> 🏭 ตามใบสั่งงาน
+              <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="rounded border-slate-300" /> {isReceive ? "🏪 ตามร้านค้า" : "🏭 ตามใบสั่งงาน"}
             </label>
           )}
         </div>
 
-        {/* สลับมุมมอง (เฉพาะรายการรอซื้อ) */}
-        {isWaiting && (
+        {/* สลับมุมมอง */}
+        {isRich && (
           <div className="inline-flex bg-slate-100 rounded-lg p-0.5 text-xs">
             {([["card", "🗂️ การ์ด"], ["table", "📊 ตาราง"], ["list", "📋 รายการ"]] as [DrillView, string][]).map(([v, l]) => (
               <button key={v} onClick={() => setView(v)} className={`px-2.5 py-1 rounded-md font-medium ${view === v ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>{l}</button>
@@ -487,28 +512,25 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
               {groups.map(([gk, grows]) => (
                 <div key={gk || "_"}>
                   {gk && <div className="text-[11px] font-medium text-slate-400 px-1 pb-1 sticky top-0 bg-white z-10">{gk} <span className="text-slate-300">({grows.length})</span></div>}
-                  {isWaiting && view === "card" ? <Cards grows={grows} />
-                    : isWaiting && view === "table" ? <Table grows={grows} />
+                  {isRich && view === "card" ? <Cards grows={grows} />
+                    : isRich && view === "table" ? <Table grows={grows} />
                     : (
                       <div className="space-y-1">
                         {grows.map((r) => (
                           <div key={r.id}>
                             <div className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg border border-slate-100 hover:bg-slate-50">
-                              <div className="min-w-0 flex-1">
-                                <div className="text-sm text-slate-700 truncate">{r.primary}{isWaiting && r.code && <span className="text-[10px] font-mono text-slate-400 ml-1.5">{r.code}</span>}</div>
+                              <button type="button" onClick={() => isRich ? openDetail(r) : undefined} className={`min-w-0 flex-1 text-left ${isRich ? "hover:text-blue-700" : ""}`}>
+                                <div className="text-sm text-slate-700 truncate">{r.primary}{isRich && r.code && <span className="text-[10px] font-mono text-slate-400 ml-1.5">{r.code}</span>}</div>
                                 <div className="text-[11px] text-slate-400 truncate">{r.secondary}{isWaiting && r.order_date && <span className="text-emerald-600"> · ✓ สั่งแล้ว {r.order_date}</span>}</div>
-                              </div>
+                              </button>
                               <div className="text-xs text-slate-600 text-right shrink-0 tabular-nums">{r.right}</div>
-                              {isWaiting && <Actions r={r} />}
-                              {drill?.type === "pending_receive" && (
-                                <Link href="/purchasing/receive" className="shrink-0 h-7 px-2.5 leading-7 text-xs rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50">รับของ →</Link>
-                              )}
-                              {drill?.type === "unpaid" && (
-                                <button disabled={busy.has(r.id)} onClick={() => markPaid(r.id)}
-                                  className="shrink-0 h-7 px-2.5 text-xs rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">{busy.has(r.id) ? "..." : "💰 จ่ายแล้ว"}</button>
-                              )}
+                              {isRich ? <Actions r={r} />
+                                : drill?.type === "unpaid" ? (
+                                  <button disabled={busy.has(r.id)} onClick={() => markPaid(r.id)}
+                                    className="shrink-0 h-7 px-2.5 text-xs rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">{busy.has(r.id) ? "..." : "💰 จ่ายแล้ว"}</button>
+                                ) : null}
                             </div>
-                            {isWaiting && <Editors r={r} />}
+                            {isWaiting && <OrderEditor r={r} />}
                           </div>
                         ))}
                       </div>
@@ -518,13 +540,99 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
             </div>
           )}
 
+        {/* เลื่อนหน้า (ของกลาง) */}
+        {total > 0 && (
+          <div className="pt-1 border-t border-slate-100">
+            <Pager page={curPage} pageSize={pageSize} total={total} onPage={setPage} onPageSize={setPageSize} pageSizes={[10, 20, 50]} unitLabel="รายการ" />
+          </div>
+        )}
+
         {data?.link && (
-          <div className="pt-1 text-right border-t border-slate-100">
+          <div className="text-right">
             <Link href={data.link.href} className="text-sm text-blue-600 hover:underline">{data.link.label} →</Link>
           </div>
         )}
       </div>
+
+      {/* popup รายละเอียด (กดจากการ์ด/แถว) */}
+      {detail && (
+        <DetailModal r={detail} type={drill?.type ?? ""} onClose={() => setDetail(null)}
+          linkDraft={linkDraft} setLinkDraft={setLinkDraft} onSaveLink={saveLink} busy={busy.has(detail.id)} />
+      )}
     </div>
+  );
+}
+
+// ---- popup รายละเอียดใบขอซื้อ / บรรทัดค้างรับเข้า (อ่านอย่างเดียว + แก้ลิงก์สำหรับรอซื้อ) ----
+function DetailModal({ r, type, onClose, linkDraft, setLinkDraft, onSaveLink, busy }: {
+  r: DrillRow; type: string; onClose: () => void;
+  linkDraft: string; setLinkDraft: (s: string) => void; onSaveLink: (r: DrillRow, url: string) => Promise<void>; busy: boolean;
+}) {
+  const isReceive = type === "pending_receive";
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="flex items-start gap-2 py-1 border-b border-slate-50 last:border-0">
+      <span className="text-xs text-slate-400 w-24 shrink-0">{label}</span>
+      <span className="text-xs text-slate-700 flex-1 min-w-0 break-words">{children}</span>
+    </div>
+  );
+  return (
+    <ERPModal open onClose={onClose} size="md" title="รายละเอียด">
+      <div className="space-y-3">
+        <div className="flex gap-3">
+          {r.image_url
+            ? <img src={r.image_url} alt="" className="w-24 h-24 rounded-xl object-cover border border-slate-100 shrink-0 bg-slate-50" />
+            : <div className="w-24 h-24 rounded-xl bg-slate-100 flex items-center justify-center text-slate-300 shrink-0 text-3xl">📦</div>}
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-slate-800 break-words">{r.primary}</div>
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              {r.code && <span className="text-[11px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">{r.code}</span>}
+              {r.order_date && !isReceive && <span className="text-[11px] font-medium text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">✓ สั่งแล้ว {r.order_date}</span>}
+            </div>
+            <div className="text-sm text-slate-800 mt-1.5 tabular-nums">
+              {isReceive
+                ? <>รับแล้ว {(r.received ?? 0).toLocaleString()}/{(r.qty ?? 0).toLocaleString()} · <span className="text-blue-700 font-medium">ค้าง {(r.remain ?? 0).toLocaleString()} {r.uom}</span></>
+                : <>{unitStr(r)}<span className="text-slate-400">/{r.uom || "หน่วย"}</span> × {(r.qty ?? 0).toLocaleString()} = <span className="font-semibold">{baht(r.line_total_thb ?? 0)}</span></>}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-100 px-3 py-1.5">
+          <Row label="ร้านค้า">{r.seller || "—"}</Row>
+          {isReceive ? <>
+            <Row label="ใบสั่งซื้อ">{r.po_no || "—"}</Row>
+            <Row label="วันสั่ง">{r.order_date || "—"}</Row>
+          </> : <>
+            <Row label="ผู้ขอ">{r.requester || "—"}</Row>
+            {r.mo_no && <Row label="ใบสั่งงาน">🏭 {r.mo_no}</Row>}
+            {r.reason && <Row label="เหตุผล">{r.reason}</Row>}
+            {r.needed_date && <Row label="ต้องใช้ก่อน">{r.needed_date}</Row>}
+            {r.note && <Row label="หมายเหตุ">{r.note}</Row>}
+            {r.created_at && <Row label="สร้างเมื่อ">{new Date(r.created_at).toLocaleDateString("th-TH")}</Row>}
+          </>}
+        </div>
+
+        {/* ลิงก์สั่งซื้อ (แก้ได้ เฉพาะใบขอซื้อ) */}
+        {!isReceive && (
+          <div className="rounded-lg bg-blue-50/60 border border-blue-100 p-2.5">
+            <div className="text-xs font-medium text-slate-600 mb-1.5 flex items-center gap-1.5">🔗 ลิงก์สั่งซื้อ
+              {r.purchase_url && <a href={r.purchase_url} target="_blank" rel="noopener" className="text-blue-600 hover:underline">เปิด ↗</a>}
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="url" value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} placeholder="วางลิงก์ Taobao / 1688 / ฯลฯ"
+                className="h-8 flex-1 min-w-0 px-2 text-xs border border-blue-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+              <button disabled={busy} onClick={() => onSaveLink(r, linkDraft)} className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
+              {r.purchase_url && <button disabled={busy} onClick={() => { setLinkDraft(""); onSaveLink(r, ""); }} className="h-8 px-2 text-xs text-rose-600 hover:underline">ล้าง</button>}
+            </div>
+          </div>
+        )}
+
+        {isReceive && (
+          <div className="text-right">
+            <Link href="/purchasing/receive" className="text-sm text-blue-600 hover:underline">ไปหน้ารับของ →</Link>
+          </div>
+        )}
+      </div>
+    </ERPModal>
   );
 }
 

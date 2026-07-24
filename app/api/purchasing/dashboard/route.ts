@@ -27,8 +27,8 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
   const [rateRes, prRes, poRes, lineRes] = await Promise.all([
     admin.from("daily_rates").select("rate").order("rate_date", { ascending: false }).limit(1).maybeSingle(),
     admin.from("purchase_requests_v2").select("id, status, requester, price_est, currency, seller_name, created_at, order_date, is_active").limit(5000),
-    admin.from("purchase_orders_v2").select("status, payment_status, currency, grand_total, seller_name, order_date").limit(5000),
-    admin.from("purchase_order_lines_v2").select("qty, qty_received, line_status").limit(20000),
+    admin.from("purchase_orders_v2").select("id, status, payment_status, currency, grand_total, seller_name, order_date").limit(5000),
+    admin.from("purchase_order_lines_v2").select("po_id, qty, qty_received, line_status, is_active").limit(20000),
   ]);
   const rmbRate = num((rateRes.data as { rate?: number } | null)?.rate) || 5;
   const toThb = (amount: number, currency: unknown) => amount * (isCNY(currency) ? rmbRate : 1);
@@ -90,9 +90,12 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
     .sort((a, b) => b.thb - a.thb)
     .slice(0, 5);
 
-  // ── ค้างรับเข้า: บรรทัด PO ที่ยังรับไม่ครบ + ยังไม่ปิด (lines ดึงมาพร้อมกันแล้วด้านบน) ──
+  // ── ค้างรับเข้า: บรรทัด PO ที่ยังรับไม่ครบ + ยังไม่ปิด (นับเฉพาะ PO ที่ commit แล้ว + บรรทัดที่ยัง active — ให้ตรงกับรายการจริง) ──
+  const committedIds = new Set(committed.map((p) => String(p.id)));
   let pendingReceive = 0;
   for (const l of (lineRes.data ?? []) as Record<string, unknown>[]) {
+    if (l.is_active === false) continue;
+    if (!committedIds.has(String(l.po_id))) continue;
     const st = l.line_status as string | null;
     if (st === "received" || st === "short_closed") continue;
     if (Math.max(0, num(l.qty) - num(l.qty_received)) > 0) pendingReceive++;

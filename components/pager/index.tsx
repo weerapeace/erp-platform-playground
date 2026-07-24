@@ -6,12 +6,14 @@
  * - พิมพ์เลขหน้าเพื่อกระโดดไปได้ (Enter/ออกจากช่อง)
  *
  * page = 0-based (หน้าแรก = 0) · onPage คืน index หน้าใหม่ (0-based)
+ * เลือกจำนวนต่อหน้าได้ ถ้าส่ง onPageSize + pageSizes มา (ไม่ส่ง = ไม่โชว์ตัวเลือก)
  */
 import { useEffect, useState } from "react";
 import { useT } from "@/components/i18n";
 
-export function Pager({ page, pageSize, total, onPage, unitLabel }: {
+export function Pager({ page, pageSize, total, onPage, unitLabel, onPageSize, pageSizes }: {
   page: number; pageSize: number; total: number; onPage: (p: number) => void; unitLabel?: string;
+  onPageSize?: (s: number) => void; pageSizes?: number[];
 }) {
   const t = useT();
   const unit = unitLabel ?? t("รายการ", "items");
@@ -27,7 +29,15 @@ export function Pager({ page, pageSize, total, onPage, unitLabel }: {
 
   return (
     <div className="flex items-center justify-between gap-3 flex-wrap text-[12px] text-slate-500">
-      <span>{t("ทั้งหมด", "Total")} <b className="text-slate-700">{total.toLocaleString()}</b> {unit} · {t("แสดง", "showing")} {from.toLocaleString()}–{to.toLocaleString()}</span>
+      <span className="flex items-center gap-2">
+        {t("ทั้งหมด", "Total")} <b className="text-slate-700">{total.toLocaleString()}</b> {unit} · {t("แสดง", "showing")} {from.toLocaleString()}–{to.toLocaleString()}
+        {onPageSize && (
+          <select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))}
+            className="h-7 px-1.5 border border-slate-200 rounded-lg bg-white text-[12px] text-slate-600">
+            {(pageSizes ?? [10, 20, 50]).map((s) => <option key={s} value={s}>{s}/{t("หน้า", "page")}</option>)}
+          </select>
+        )}
+      </span>
       <div className="flex items-center gap-1.5">
         <button type="button" className={btn} onClick={() => go(0)} disabled={page <= 0} title={t("หน้าแรก", "First page")}>«</button>
         <button type="button" className={btn} onClick={() => go(page - 1)} disabled={page <= 0}>‹ {t("ก่อนหน้า", "Prev")}</button>
