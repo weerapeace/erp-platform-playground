@@ -2268,6 +2268,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         onClose={discard}
         size="lg"
         hasUnsavedChanges={drawerMode === "edit" && dirty}
+        headerActions={config.moduleKey && canEdit && drawerMode === "view" ? () => (
+          <button type="button" onClick={() => { discard(); setStudioOpen(true); }}
+            title="ออกแบบฟิลด์/ฟอร์มของโมดูลนี้ (เพิ่ม/แก้/ซ่อนฟิลด์ · แอดมิน)"
+            className="h-8 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-600 hover:bg-orange-50 inline-flex items-center gap-1 whitespace-nowrap">🎨 ออกแบบฟิลด์</button>
+        ) : undefined}
         title={
           drawerMode === "view"
             ? (editingId ? `${config.title}` : `เพิ่ม ${config.title}`)
