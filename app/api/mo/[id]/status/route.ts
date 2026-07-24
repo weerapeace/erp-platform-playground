@@ -18,9 +18,10 @@ export type MoStatusDesk = {
   desk: string; qty: number; labor_total: number; rate_per_piece: number;
   dispatch_date: string | null; days_since: number | null; received: number;
 };
-export type MoStatusMissing = { sku: string | null; name: string; required: number; on_hand: number; to_purchase: number; uom: string | null };
+export type MoStatusMissing = { sku: string | null; name: string; required: number; on_hand: number; to_purchase: number; uom: string | null; purchase_status: string | null };
 export type MoStatusCut = { sku: string | null; name: string; block: string | null; pieces: number };
 export type MoStatusPiece = { job: string; assignee: string | null; rate: number; qty: number; total: number; done: boolean };
+export type MoStatusPurchase = { item_name: string; qty: number; uom: string | null; pr_no: string | null; po_no: string | null; label: string; tone: "wait" | "ordered" | "done"; is_urgent: boolean };
 
 export type MoStatus = {
   mo_no: string; product_sku: string | null; product_name: string | null; qty: number;
@@ -37,6 +38,7 @@ export type MoStatus = {
   desks: MoStatusDesk[];           // โต๊ะที่จ่าย (ขั้น 6/7)
   labor_total: number;             // รวมค่าแรงทั้งใบ
   piecework: MoStatusPiece[];      // งานเหมา (กล่องล่าง)
+  purchases: MoStatusPurchase[];   // สถานะของซื้อ (PR/PO ที่ผูกใบนี้)
 };
 
 const n = (v: unknown) => { const x = Number(v); return isFinite(x) ? x : 0; };
@@ -52,7 +54,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!mo) return NextResponse.json({ data: null, error: "ไม่พบใบสั่งผลิต" }, { status: 404 });
   const moNo = String(mo.mo_no);
 
-  const [matsR, wosR, pcsR] = await Promise.all([
+  const [matsR, wosR, pcsR, prsR] = await Promise.all([
     admin.from("mo_materials")
       .select("component_sku, component_name, required_qty, uom, on_hand_qty, to_purchase_qty, is_ready, cut_block_code, cut_done, pieces")
       .eq("mo_no", moNo).eq("is_active", true),
@@ -61,11 +63,46 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       .eq("mo_no", moNo).eq("is_active", true),
     admin.from("mo_piecework")
       .select("job_name, assignee_name, rate, total_qty, status").eq("mo_no", moNo).eq("is_active", true),
+    admin.from("purchase_requests_v2")
+      .select("pr_no, item_name, qty, uom, status, is_urgent, po_id")
+      .contains("source_mo_nos", [moNo]).eq("is_active", true).order("created_at", { ascending: true }),
   ]);
 
   const mats = (matsR.data ?? []) as Record<string, unknown>[];
   const wos = ((wosR.data ?? []) as Record<string, unknown>[]).filter((w) => w.status !== "cancelled");
   const pcs = (pcsR.data ?? []) as Record<string, unknown>[];
+
+  // ---- สถานะของซื้อ (PR/PO ที่ผูกใบนี้) + label + จับคู่กับของที่ขาดตามชื่อ ----
+  const prs = (prsR.data ?? []) as Record<string, unknown>[];
+  const poIds = [...new Set(prs.map((p) => p.po_id).filter(Boolean))] as string[];
+  const poMap = new Map<string, { po_no: string; status: string; expected_date: string | null }>();
+  if (poIds.length) {
+    const { data: pos } = await admin.from("purchase_orders_v2").select("id, po_no, status, expected_date").in("id", poIds);
+    for (const po of (pos ?? []) as Record<string, unknown>[]) poMap.set(String(po.id), { po_no: String(po.po_no ?? ""), status: String(po.status ?? ""), expected_date: (po.expected_date as string) ?? null });
+  }
+  const fmtD = (dt: string | null) => dt ? new Date(dt + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : "";
+  const purchases: MoStatusPurchase[] = prs.map((p) => {
+    const po = p.po_id ? poMap.get(String(p.po_id)) : undefined;
+    const prSt = String(p.status ?? "");
+    let label = "ขอซื้อแล้ว"; let tone: MoStatusPurchase["tone"] = "wait";
+    if (!po) {
+      if (prSt === "waiting") label = "🛒 ขอซื้อ — รออนุมัติ";
+      else if (prSt === "approved") label = "✅ อนุมัติแล้ว — รอออก PO";
+      else if (prSt === "rejected") label = "❌ ถูกปฏิเสธ";
+    } else {
+      const eta = po.expected_date ? ` · เข้า ${fmtD(po.expected_date)}` : "";
+      if (po.status === "draft") { label = `🧾 ออก PO แล้ว (ยังไม่สั่ง)${eta}`; tone = "wait"; }
+      else if (po.status === "received") { label = "📦 ของเข้าแล้ว"; tone = "done"; }
+      else { label = `🚚 สั่งซื้อแล้ว${eta}`; tone = "ordered"; }
+    }
+    return { item_name: String(p.item_name ?? ""), qty: n(p.qty), uom: (p.uom as string) ?? null, pr_no: (p.pr_no as string) ?? null, po_no: po?.po_no ?? null, label, tone, is_urgent: !!p.is_urgent };
+  });
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
+  const purchaseFor = (name: string): string | null => {
+    const b = norm(name); if (!b) return null;
+    const hit = purchases.find((pu) => { const a = norm(pu.item_name); return !!a && (a.includes(b) || b.includes(a)); });
+    return hit?.label ?? null;
+  };
 
   // ---- เตรียม / ตัด ----
   const prepTotal = mats.length;
@@ -132,12 +169,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     remaining_to_dispatch: Math.max(0, qty - dispatched),
     remaining_to_receive: Math.max(0, qty - received),
     last_receive_date: null,
-    missing: mats.filter((m) => m.is_ready !== true).slice(0, 100).map((m) => ({
-      sku: (m.component_sku as string) ?? null,
-      name: String(m.component_name ?? m.component_sku ?? "—"),
-      required: n(m.required_qty), on_hand: n(m.on_hand_qty), to_purchase: n(m.to_purchase_qty),
-      uom: (m.uom as string) ?? null,
-    })),
+    missing: mats.filter((m) => m.is_ready !== true).slice(0, 100).map((m) => {
+      const nm = String(m.component_name ?? m.component_sku ?? "—");
+      return {
+        sku: (m.component_sku as string) ?? null, name: nm,
+        required: n(m.required_qty), on_hand: n(m.on_hand_qty), to_purchase: n(m.to_purchase_qty),
+        uom: (m.uom as string) ?? null, purchase_status: purchaseFor(nm),
+      };
+    }),
     pending_cut: cutLines.filter((m) => m.cut_done !== true).slice(0, 100).map((m) => ({
       sku: (m.component_sku as string) ?? null,
       name: String(m.component_name ?? m.component_sku ?? "—"),
@@ -152,6 +191,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       total: Math.round(n(p.rate) * n(p.total_qty) * 100) / 100,
       done: p.status === "done",
     })),
+    purchases,
   };
 
   return NextResponse.json({ data, error: null }, { headers: { "Cache-Control": "private, max-age=15" } });

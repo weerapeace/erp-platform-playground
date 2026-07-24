@@ -26,6 +26,13 @@ const TONE: Record<number, string> = {
   9: "bg-emerald-50 text-emerald-700 border-emerald-200",
 };
 
+// สีตามสถานะของซื้อ: รอ=เหลือง · สั่งแล้ว=น้ำเงิน · ของเข้า=เขียว
+const PU_TONE: Record<string, string> = {
+  wait: "text-amber-700 bg-amber-50/60 border-amber-100",
+  ordered: "text-blue-700 bg-blue-50/60 border-blue-100",
+  done: "text-emerald-700 bg-emerald-50/60 border-emerald-100",
+};
+
 function Bar({ label, done, total }: { label: string; done: number; total: number }) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const ok = total > 0 && done >= total;
@@ -106,10 +113,13 @@ export function MoStatusModal({ moId, onClose, onOpenChecklist }: {
             <Sec title={`ของที่ยังไม่ครบ (${d.missing.length} รายการ)`}>
               <div className="max-h-44 overflow-y-auto space-y-1">
                 {d.missing.map((m, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs bg-rose-50/60 border border-rose-100 rounded-lg px-2 py-1.5">
-                    <span className="flex-1 min-w-0 truncate text-slate-700">{m.name}</span>
-                    <span className="tabular-nums text-slate-500 shrink-0">ต้องใช้ {fmt(m.required)}{m.uom ? ` ${m.uom}` : ""}</span>
-                    {m.to_purchase > 0 && <span className="tabular-nums text-rose-700 font-medium shrink-0">ต้องซื้อ {fmt(m.to_purchase)}</span>}
+                  <div key={i} className="text-xs bg-rose-50/60 border border-rose-100 rounded-lg px-2 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="flex-1 min-w-0 truncate text-slate-700">{m.name}</span>
+                      <span className="tabular-nums text-slate-500 shrink-0">ต้องใช้ {fmt(m.required)}{m.uom ? ` ${m.uom}` : ""}</span>
+                      {m.to_purchase > 0 && <span className="tabular-nums text-rose-700 font-medium shrink-0">ต้องซื้อ {fmt(m.to_purchase)}</span>}
+                    </div>
+                    {m.purchase_status && <div className="text-[11px] text-slate-500 mt-0.5">{m.purchase_status}</div>}
                   </div>
                 ))}
               </div>
@@ -124,6 +134,19 @@ export function MoStatusModal({ moId, onClose, onOpenChecklist }: {
                     <span className="flex-1 min-w-0 truncate text-slate-700">{c.name}</span>
                     {c.block && <span className="text-slate-400 shrink-0">{c.block}</span>}
                     <span className="tabular-nums text-amber-700 font-medium shrink-0">{fmt(c.pieces)} ชิ้น</span>
+                  </div>
+                ))}
+              </div>
+            </Sec>
+          )}
+
+          {d.purchases.length > 0 && (
+            <Sec title={`สถานะของซื้อ (${d.purchases.length})`}>
+              <div className="max-h-40 overflow-y-auto space-y-1">
+                {d.purchases.map((p, i) => (
+                  <div key={i} className={`flex items-center gap-2 text-xs border rounded-lg px-2 py-1.5 ${PU_TONE[p.tone] ?? "border-slate-100"}`}>
+                    <span className="flex-1 min-w-0 truncate">{p.is_urgent && <span className="text-rose-600">⚡ </span>}{p.item_name}</span>
+                    <span className="shrink-0 font-medium">{p.label}</span>
                   </div>
                 ))}
               </div>
