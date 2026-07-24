@@ -373,7 +373,7 @@ export default function DashboardPage() {
 
         {/* ---- เนื้อหาตามโหมด ---- */}
         {view === "executive" ? (
-          <ExecutiveView salesTrend={salesTrend} />
+          <ExecutiveView />
         ) : view === "systems" ? (
           <SystemCards apps={visibleApps} list={scopeList} panels={panelMap} metrics={metrics} team={scope === "team"} isAdmin={isAdmin}
             onOpen={openAny}

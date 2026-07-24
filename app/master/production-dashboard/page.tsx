@@ -5,8 +5,8 @@
  * แถบ filter ซ้าย (5 กลุ่ม + ตัวเลขนับ) · DataTable กลาง (สลับ ตาราง/การ์ด + ค้นหา) · ปฏิทิน=เฟส 2
  * ของกลาง: DataTable, HoverImage, getStatusStyle, PlaygroundShell (ผ่าน /master/layout)
  */
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table";
 import { HoverImage } from "@/components/hover-image";
@@ -306,8 +306,9 @@ const COLUMNS: ColumnDef<ProductionJob>[] = [
   { accessorKey: "status", header: "สถานะ", size: 120, cell: ({ getValue }) => <StatusBadge status={getValue() as string | null} /> },
 ];
 
-export default function ProductionDashboardPage() {
+function ProductionDashboardInner() {
   const router = useRouter();
+  const sp = useSearchParams();
   const [jobs, setJobs] = useState<ProductionJob[]>([]);
   const [counts, setCounts] = useState<ProductionDashboardResponse["counts"]>({ all: 0, unassigned: 0, in_production: 0, piecework: 0, done_waiting: 0 });
   const [loading, setLoading] = useState(true);
@@ -317,7 +318,7 @@ export default function ProductionDashboardPage() {
   const [groupField, setGroupField] = useState<GroupField>("brand");
   const [gSearch, setGSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());   // กลุ่มที่พับอยู่
-  const [view, setView] = useState<"list" | "calendar" | "game">("list");
+  const [view, setView] = useState<"list" | "calendar" | "game">(() => { const v = sp.get("view"); return v === "calendar" || v === "game" ? v : "list"; });
   const [cardDir, setCardDir] = useState<"h" | "v">("h");   // การ์ดแนวนอน/แนวตั้ง (โหมดจัดกลุ่ม)
   const [statusMoId, setStatusMoId] = useState<string | null>(null);   // Popup สถานะงาน
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null);
@@ -545,4 +546,9 @@ export default function ProductionDashboardPage() {
       </ERPModal>
     </div>
   );
+}
+
+// useSearchParams ต้องอยู่ใน Suspense (Next.js) — เปิดโหมดปฏิทินได้ผ่าน ?view=calendar (ใช้ฝังในหน้าผู้บริหาร)
+export default function ProductionDashboardPage() {
+  return <Suspense fallback={null}><ProductionDashboardInner /></Suspense>;
 }

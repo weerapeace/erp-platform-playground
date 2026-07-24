@@ -34,7 +34,7 @@ function Dot({ real }: { real: boolean }) {
   );
 }
 
-export function ExecutiveView({ salesTrend = [] }: { salesTrend?: { d: string; sales: number }[] }) {
+export function ExecutiveView() {
   const [data, setData]       = useState<ExecutiveSummary | null>(null);
   const [dept, setDept]       = useState<DeptOverview | null>(null);   // สรุปต่อแผนก (ของกลาง)
   const [loading, setLoading] = useState(true);
@@ -112,8 +112,8 @@ export function ExecutiveView({ salesTrend = [] }: { salesTrend?: { d: string; s
              hint="เงินกู้ + OD ที่ใช้ไป" />
       </div>
 
-      {/* ---- กราฟยอดขาย 14 วัน ---- */}
-      <SalesBars data={salesTrend} />
+      {/* ---- ปฏิทินผลิต / จัดซื้อ (แท็บสลับ · ฝังหน้าปฏิทินจริง) ---- */}
+      <CalendarTabs />
 
       {/* ---- แยกตามแผนก (ตัวเลขสำคัญ + กดเจาะเข้าดู) ---- */}
       <SectionLabel>แยกตามแผนก</SectionLabel>
@@ -376,34 +376,22 @@ function DeptItemsModal({ dept, onClose }: { dept: DeptDrill; onClose: () => voi
   );
 }
 
-// ---- กราฟแท่งยอดขาย 14 วัน (reuse ข้อมูล /api/dashboard/sales-trend) ----
-function SalesBars({ data }: { data: { d: string; sales: number }[] }) {
-  const vals = data.map((x) => Number(x.sales) || 0);
-  const total = vals.reduce((s, v) => s + v, 0);
-  const max = Math.max(1, ...vals);
+// ---- แท็บปฏิทินผลิต / จัดซื้อ (ฝังหน้าปฏิทินจริง · single-source เหมือนการ์ดแผนก) ----
+function CalendarTabs() {
+  const [tab, setTab] = useState<"prod" | "buy">("prod");
+  const src = tab === "prod" ? "/master/production-dashboard?embed=1&view=calendar" : "/purchasing/calendar?embed=1";
+  const full = tab === "prod" ? "/master/production-dashboard" : "/purchasing/calendar";
+  const btn = (on: boolean) => `px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${on ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`;
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-semibold text-slate-700">ยอดขายออนไลน์ 14 วันล่าสุด</span>
-        <span className="text-xs text-slate-400">รวม {baht(total)}</span>
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
+        <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
+          <button onClick={() => setTab("prod")} className={btn(tab === "prod")}>🏭 ปฏิทินผลิต</button>
+          <button onClick={() => setTab("buy")} className={btn(tab === "buy")}>🛒 ปฏิทินจัดซื้อ</button>
+        </div>
+        <a href={full} target="_blank" rel="noopener" className="ml-auto text-xs text-blue-600 hover:underline">เปิดเต็ม ↗</a>
       </div>
-      {vals.length === 0 || total === 0 ? (
-        <div className="text-xs text-slate-300 py-6 text-center">ยังไม่มีข้อมูลยอดขายรายวัน (ป้อนไฟล์ยอดขายที่หน้าการตลาด)</div>
-      ) : (
-        <>
-          <div className="flex items-end gap-1 h-24">
-            {vals.map((v, i) => (
-              <div key={i} className="flex-1 bg-blue-500/80 hover:bg-blue-600 rounded-t transition-colors"
-                style={{ height: `${Math.max(3, (v / max) * 100)}%` }}
-                title={`${data[i] ? new Date(data[i].d).toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : ""}: ${baht(v)}`} />
-            ))}
-          </div>
-          <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-            <span>{data[0] && new Date(data[0].d).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}</span>
-            <span>{data[data.length - 1] && new Date(data[data.length - 1].d).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}</span>
-          </div>
-        </>
-      )}
+      <iframe key={tab} src={src} title={tab === "prod" ? "ปฏิทินผลิต" : "ปฏิทินจัดซื้อ"} className="w-full border-0 bg-slate-50" style={{ height: 540 }} />
     </div>
   );
 }
