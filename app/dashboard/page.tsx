@@ -18,6 +18,8 @@ import { KpiStrip } from "./kpi-strip";
 import { ExecutiveView } from "./executive-view";
 import { EmbedModal } from "@/components/embed-modal";
 import { CalendarTabs } from "@/components/calendar-tabs";
+import { Pager } from "@/components/pager";
+import { SortTh, sortRows, type SortState } from "@/components/sort-th";
 import { PinnedWidget, RecentWidget, AgendaWidget, FinanceWidget, ActivityWidget, TeamWidget, ShortcutsWidget, StatWidget, SalesChartWidget } from "./widgets";
 import { layoutForRole, type DashboardLayout, type DashboardView } from "@/lib/dashboard-widgets";
 
@@ -329,7 +331,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="px-4 sm:px-8 py-5 space-y-5 max-w-4xl mx-auto w-full">
+      <div className={`px-4 sm:px-8 py-5 space-y-5 mx-auto w-full ${view === "list" && listMode === "action" && isAdmin ? "max-w-6xl" : "max-w-4xl"}`}>
         {/* ---- widget เสริม (เรียง/เปิด-ปิด ตามหน้าแดชบอร์ดของตำแหน่ง — เฟส 3) ---- */}
         {/* มุมมองผู้บริหารเป็นหน้าเต็มของตัวเอง ไม่โชว์ widget strip ซ้ำ */}
         {view !== "executive" && myLayout.widgets.map((w) => {
@@ -604,16 +606,30 @@ type ActionItem = { title: string; subtitle: string; link: string };
 type ActionGroup = { key: string; label: string; link: string; items: ActionItem[] };
 type ActionModule = { dept: string; label: string; icon: string; total: number; groups: ActionGroup[] };
 
+type FlatAction = ActionItem & { cat: string; catKey: string };
+const actionVal = (it: FlatAction, k: string): string => k === "cat" ? it.cat : k === "subtitle" ? (it.subtitle ?? "") : it.title;
+
 function ActionCenter({ onOpen }: { onOpen: (url: string, title: string) => void }) {
   const [mods, setMods] = useState<ActionModule[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [modTab, setModTab] = useState("");            // module ที่เลือก
+  const [q, setQ] = useState("");
+  const [cat, setCat] = useState("all");               // กรองตามหมวดย่อย
+  const [grouped, setGrouped] = useState(false);
+  const [view, setView] = useState<"card" | "table">("card");
+  const [sort, setSort] = useState<SortState>(null);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
+
   useEffect(() => {
     let alive = true;
     apiFetch("/api/dashboard/action-items").then(r => r.json())
-      .then(j => { if (!alive) return; if (j.error) setErr(j.error); else setMods((j.modules ?? []) as ActionModule[]); })
+      .then(j => { if (!alive) return; if (j.error) { setErr(j.error); } else { const ms = (j.modules ?? []) as ActionModule[]; setMods(ms); setModTab(t => t || ms[0]?.dept || ""); } })
       .catch(() => { if (alive) setErr("โหลดรายการไม่ได้"); });
     return () => { alive = false; };
   }, []);
+  useEffect(() => { setQ(""); setCat("all"); setSort(null); setPage(0); }, [modTab]);
+  useEffect(() => { setPage(0); }, [q, cat, grouped, view, sort?.key, sort?.dir, pageSize]);
 
   if (err) return <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 text-center">{err}</div>;
   if (!mods) return <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-28 bg-white rounded-xl border border-slate-200 animate-pulse" />)}</div>;
@@ -622,39 +638,108 @@ function ActionCenter({ onOpen }: { onOpen: (url: string, title: string) => void
       <div className="text-4xl mb-3 opacity-40">🎉</div><p className="text-sm text-slate-400">ไม่มีงานที่ต้องจัดการ</p>
     </div>
   );
-  return (
-    <div className="space-y-4">
-      {mods.map(m => (
-        <div key={m.dept} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/60">
-            <span className="text-base leading-none">{m.icon}</span>
-            <span className="text-sm font-semibold text-slate-800">{m.label}</span>
-            <span className="text-[11px] text-slate-400">{m.total} รายการที่ต้องจัดการ</span>
+
+  const active = mods.find(m => m.dept === modTab) ?? mods[0];
+  const flat: FlatAction[] = active.groups.flatMap(g => g.items.map(it => ({ ...it, cat: g.label, catKey: g.key })));
+  const hit = (s: string) => !q || s.toLowerCase().includes(q.toLowerCase());
+  const filtered = flat.filter(it => (cat === "all" || it.catKey === cat) && (hit(it.title) || hit(it.subtitle ?? "")));
+  const sorted = sortRows(filtered, sort, actionVal);
+  const total = sorted.length;
+  const curPage = Math.min(page, Math.max(0, Math.ceil(total / pageSize) - 1));
+  const pageRows = sorted.slice(curPage * pageSize, (curPage + 1) * pageSize);
+  const groups: [string, FlatAction[]][] = grouped
+    ? Object.entries(pageRows.reduce((mm: Record<string, FlatAction[]>, it) => { (mm[it.cat] ??= []).push(it); return mm; }, {}))
+    : [["", pageRows]];
+
+  const Cards = ({ rows }: { rows: FlatAction[] }) => (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+      {rows.map((it, i) => (
+        <button key={i} onClick={() => onOpen(it.link, it.title)} className="text-left rounded-xl border border-slate-200 bg-white p-3 hover:border-slate-300 hover:shadow-sm transition-all">
+          <div className="flex items-start justify-between gap-2">
+            <div className="text-sm font-medium text-slate-800 break-words leading-snug">{it.title}</div>
+            {!grouped && <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">{it.cat}</span>}
           </div>
-          <div className="divide-y divide-slate-50">
-            {m.groups.map(g => (
-              <div key={g.key} className="px-4 py-2.5">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs font-semibold text-slate-600">{g.label} <span className="text-slate-400 font-normal">({g.items.length})</span></span>
-                  <button onClick={() => onOpen(g.link, `${m.label} · ${g.label}`)} className="text-xs text-blue-600 hover:underline shrink-0">ดูทั้งหมด →</button>
-                </div>
-                <div className="space-y-1">
-                  {g.items.slice(0, 5).map((it, i) => (
-                    <button key={i} onClick={() => onOpen(it.link, it.title)}
-                      className="w-full text-left px-3 py-1.5 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition-colors">
-                      <div className="text-sm text-slate-800 truncate">{it.title}</div>
-                      {it.subtitle && <div className="text-[11px] text-slate-400 truncate">{it.subtitle}</div>}
-                    </button>
-                  ))}
-                  {g.items.length > 5 && (
-                    <button onClick={() => onOpen(g.link, `${m.label} · ${g.label}`)} className="text-[11px] text-slate-500 hover:underline px-1.5 pt-0.5">+ อีก {g.items.length - 5} รายการ →</button>
-                  )}
-                </div>
-              </div>
+          {it.subtitle && <div className="text-[11px] text-slate-400 mt-1 truncate">{it.subtitle}</div>}
+        </button>
+      ))}
+    </div>
+  );
+  const Table = ({ rows }: { rows: FlatAction[] }) => (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr className="text-[11px] text-slate-400 border-b border-slate-100">
+            <SortTh label="ชื่อ" k="title" sort={sort} onSort={setSort} />
+            {!grouped && <SortTh label="หมวดย่อย" k="cat" sort={sort} onSort={setSort} />}
+            <SortTh label="รายละเอียด" k="subtitle" sort={sort} onSort={setSort} />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((it, i) => (
+            <tr key={i} onClick={() => onOpen(it.link, it.title)} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
+              <td className="py-1.5 pr-2 text-slate-700 break-words min-w-[160px]">{it.title}</td>
+              {!grouped && <td className="py-1.5 pr-2 text-slate-500 whitespace-nowrap">{it.cat}</td>}
+              <td className="py-1.5 text-slate-400">{it.subtitle}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      {/* แท็บ module */}
+      <div className="flex items-center gap-1.5 flex-wrap px-3 py-2.5 border-b border-slate-100 bg-slate-50/60">
+        {mods.map(m => (
+          <button key={m.dept} onClick={() => setModTab(m.dept)}
+            className={`text-xs sm:text-sm px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${m.dept === active.dept ? "bg-white text-slate-800 shadow-sm border border-slate-200" : "text-slate-500 hover:bg-white/70"}`}>
+            <span>{m.icon}</span>{m.label}
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${m.dept === active.dept ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"}`}>{m.total}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="p-3 space-y-3">
+        {/* เครื่องมือ: ค้นหา · กรองหมวด · จัดกลุ่ม · view */}
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาชื่อ / รายละเอียด..."
+            className="flex-1 min-w-[160px] h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          {active.groups.length > 1 && (
+            <select value={cat} onChange={e => setCat(e.target.value)} className="h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white max-w-[180px]">
+              <option value="all">ทุกหมวด</option>
+              {active.groups.map(g => <option key={g.key} value={g.key}>{g.label} ({g.items.length})</option>)}
+            </select>
+          )}
+          {active.groups.length > 1 && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-600 whitespace-nowrap">
+              <input type="checkbox" checked={grouped} onChange={e => setGrouped(e.target.checked)} className="rounded border-slate-300" /> จัดกลุ่มหมวด
+            </label>
+          )}
+          <div className="inline-flex bg-slate-100 rounded-lg p-0.5 text-xs ml-auto">
+            {(["card", "table"] as const).map(v => (
+              <button key={v} onClick={() => setView(v)} className={`px-2.5 py-1 rounded-md font-medium ${view === v ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>{v === "card" ? "🗂️ การ์ด" : "📊 ตาราง"}</button>
             ))}
           </div>
         </div>
-      ))}
+
+        {total === 0 ? <div className="py-10 text-center text-sm text-slate-300">— ไม่พบรายการ —</div> : (
+          <div className="space-y-3 max-h-[58vh] overflow-y-auto">
+            {groups.map(([gk, rows]) => (
+              <div key={gk || "_"}>
+                {gk && <div className="text-[11px] font-semibold text-slate-500 px-1 pb-1 sticky top-0 bg-white z-10">{gk} <span className="text-slate-300 font-normal">({rows.length})</span></div>}
+                {view === "card" ? <Cards rows={rows} /> : <Table rows={rows} />}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {total > 0 && (
+          <div className="pt-1 border-t border-slate-100">
+            <Pager page={curPage} pageSize={pageSize} total={total} onPage={setPage} onPageSize={setPageSize} pageSizes={[10, 20, 50]} unitLabel="รายการ" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
