@@ -263,6 +263,9 @@ export default function PurchasingDashboardPage() {
 // แผงเจาะรายการเบื้องหลังตัวเลข/ร้าน (กางในหน้า) — ค้นหา + เลือกร้าน + จัดกลุ่มตามใบสั่งงาน + view การ์ด/ตาราง + ปุ่มสั่ง/ลิงก์
 const isYuan = (c?: string | null) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").toUpperCase());
 const unitStr = (r: DrillRow) => isYuan(r.currency) ? `¥${(r.unit_price ?? 0).toLocaleString()}` : baht(r.unit_price ?? 0);
+// ของออนไลน์ (Taobao/1688) ถึงจะนับ "ลิงก์" เป็นข้อมูลไม่ครบ — ร้านทั่วไปไม่ต้องมีลิงก์
+const rowOnline = (r: DrillRow) => /taobao|tao ?bao|1688/i.test(r.seller ?? "") || !!r.purchase_url;
+const shownMissing = (r: DrillRow) => (r.missing ?? []).filter((m) => m !== "link" || rowOnline(r));
 type DrillView = "card" | "table" | "list";
 // คีย์ที่ใช้เรียงในตาราง (ของกลาง sortRows)
 const sortVal = (r: DrillRow, k: string): string | number | null | undefined => {
@@ -436,7 +439,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
                 {r.code && <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">{r.code}</span>}
                 {isReceive ? (r.po_no && <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">📄 {r.po_no}</span>)
                   : (r.mo_no && <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">🏭 {r.mo_no}</span>)}
-                {(r.missing?.length ?? 0) > 0 && <span className="text-[10px] font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">⚠️ ข้อมูลไม่ครบ</span>}
+                {shownMissing(r).length > 0 && <span className="text-[10px] font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">⚠️ ข้อมูลไม่ครบ</span>}
               </div>
               <div className="text-xs text-slate-700 mt-1 tabular-nums">
                 {isReceive
@@ -481,7 +484,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
                   <button type="button" onClick={() => openDetail(r)} className="text-left text-slate-700 hover:text-blue-700 break-words">{r.primary}</button>
                   <div className="flex items-center gap-1.5">
                     {r.code && <span className="text-[10px] font-mono text-slate-400">{r.code}</span>}
-                    {(r.missing?.length ?? 0) > 0 && <span className="text-[10px] text-amber-600" title="ข้อมูลไม่ครบ">⚠️</span>}
+                    {shownMissing(r).length > 0 && <span className="text-[10px] text-amber-600" title="ข้อมูลไม่ครบ">⚠️</span>}
                   </div>
                 </td>
                 <td className="py-1.5 pr-2 text-slate-500">{r.seller || "—"}{isReceive ? (r.po_no && <div className="text-[10px] text-slate-400">📄 {r.po_no}</div>) : (r.mo_no && <div className="text-[10px] text-indigo-500">🏭 {r.mo_no}</div>)}</td>
@@ -554,7 +557,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
                           <div key={r.id}>
                             <div className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg border border-slate-100 hover:bg-slate-50">
                               <button type="button" onClick={() => isRich ? openDetail(r) : undefined} className={`min-w-0 flex-1 text-left ${isRich ? "hover:text-blue-700" : ""}`}>
-                                <div className="text-sm text-slate-700 truncate">{r.primary}{isRich && r.code && <span className="text-[10px] font-mono text-slate-400 ml-1.5">{r.code}</span>}{isRich && (r.missing?.length ?? 0) > 0 && <span className="text-[10px] text-amber-600 ml-1" title="ข้อมูลไม่ครบ">⚠️</span>}</div>
+                                <div className="text-sm text-slate-700 truncate">{r.primary}{isRich && r.code && <span className="text-[10px] font-mono text-slate-400 ml-1.5">{r.code}</span>}{isRich && shownMissing(r).length > 0 && <span className="text-[10px] text-amber-600 ml-1" title="ข้อมูลไม่ครบ">⚠️</span>}</div>
                                 <div className="text-[11px] text-slate-400 truncate">{r.secondary}{isWaiting && r.order_date && <span className="text-emerald-600"> · ✓ สั่งแล้ว {r.order_date}</span>}</div>
                               </button>
                               <div className="text-xs text-slate-600 text-right shrink-0 tabular-nums">{r.right}</div>
@@ -624,6 +627,9 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
   const [showLink, setShowLink] = useState(looksTaobao);
   const [showLink2, setShowLink2] = useState(/taobao|tao ?bao|1688/i.test(r.alt_seller ?? "") || !!r.alt_link);
   const fileRef = useRef<HTMLInputElement>(null);
+  // ลิงก์นับว่า "ขาด" เฉพาะเมื่อกด Taobao (เป็นของออนไลน์) เท่านั้น
+  const effMissing = missing.filter((m) => m !== "link" || showLink);
+  const source1Incomplete = effMissing.some((m) => ["seller", "price", "link"].includes(m));
   const box = (on: boolean) => `rounded-lg border p-2.5 ${on ? "border-amber-300 bg-amber-50/60" : "border-slate-100"}`;
   const saveBtn = "h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50";
   const inEdit = (f: string) => miss(f) || editing.has(f);
@@ -671,9 +677,9 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
           </div>
         </div>
 
-        {missing.length > 0 && (
+        {effMissing.length > 0 && (
           <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-            ⚠️ ข้อมูลไม่ครบ: <b>{missing.map((m) => MISS_LABEL[m] ?? m).join(" · ")}</b> — เติมด้านล่าง บันทึกกลับ SKU + เอกสารให้เลย
+            ⚠️ ข้อมูลไม่ครบ: <b>{effMissing.map((m) => MISS_LABEL[m] ?? m).join(" · ")}</b> — เติมด้านล่าง บันทึกกลับ SKU + เอกสารให้เลย
           </div>
         )}
 
@@ -713,7 +719,7 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
           <div className="rounded-xl border border-slate-200 overflow-hidden">
             <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-[11px] font-medium text-slate-500 flex items-center justify-between">
               <span>🛒 แหล่งซื้อที่ 1 (หลัก)</span>
-              {(r.missing?.length ?? 0) > 0 && <span className="text-amber-600">⚠️ ยังไม่ครบ</span>}
+              {source1Incomplete && <span className="text-amber-600">⚠️ ยังไม่ครบ</span>}
             </div>
             <div className="divide-y divide-slate-50 text-xs">
               {/* ร้าน */}
@@ -782,7 +788,7 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
                     <CurToggle val={s2.currency} onChange={(c) => setS2((v) => ({ ...v, currency: c }))} />
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <button onClick={() => setShowLink2((v) => !v)}
+                    <button onClick={() => { const nv = !showLink2; setShowLink2(nv); if (nv && !s2.seller.trim()) setS2((s) => ({ ...s, seller: "Tao Bao" })); }}
                       className={`text-[11px] px-2 py-0.5 rounded-full border shrink-0 ${showLink2 ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🛒 Taobao</button>
                     {showLink2
                       ? <input type="url" value={s2.link} onChange={(e) => setS2((v) => ({ ...v, link: e.target.value }))} placeholder="ลิงก์ร้านที่ 2"
