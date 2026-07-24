@@ -61,7 +61,7 @@ type PendItem = {
   receive_count: number;                                          // รับมาแล้วกี่ครั้ง (ใบรับ GR)
   payment_status: string; paid_date: string | null; ship_before_pay: boolean; duration_days: number | null;  // สถานะจ่ายเงิน + ค้างมากี่วัน
 };
-type PendSort = "eta" | "order" | "name" | "seller" | "remaining";
+type PendSort = "eta" | "order" | "name" | "seller" | "remaining" | "recv" | "def" | "status" | "ordered" | "received" | "defective";
 type PendGroup = "none" | "shop" | "eta" | "po" | "mo";
 type SortDir = "asc" | "desc";
 
@@ -161,7 +161,7 @@ export default function ReceiveGoodsPage() {
     if (typeof window === "undefined") return;
     const v = localStorage.getItem(PEND_VIEW_KEY); if (v === "card" || v === "table") setPendView(v);
     const c = Number(localStorage.getItem(PEND_COLS_KEY)); if (COL_OPTIONS.includes(c)) setPendCols(c);
-    const s = localStorage.getItem(PEND_SORT_KEY); if (["eta","order","name","seller","remaining"].includes(s ?? "")) setPendSort(s as PendSort);
+    const s = localStorage.getItem(PEND_SORT_KEY); if (["eta","order","name","seller","remaining","recv","def","status","ordered","received","defective"].includes(s ?? "")) setPendSort(s as PendSort);
     const d = localStorage.getItem(PEND_DIR_KEY); if (d === "asc" || d === "desc") setPendDir(d);
     const ps = Number(localStorage.getItem(PEND_PSIZE_KEY)); if (PAGE_SIZES.includes(ps)) setPendPageSize(ps);
     const pv = localStorage.getItem(PO_VIEW_KEY); if (pv === "card" || pv === "table") setPoView(pv);
@@ -297,15 +297,24 @@ export default function ReceiveGoodsPage() {
       return va !== vb ? (va < vb ? -1 : 1) : byName(a, b);
     };
     const bySeller = (a: PendItem, b: PendItem) => (a.seller_name || "").localeCompare(b.seller_name || "", "th") || byName(a, b);
-    const byRemaining = (a: PendItem, b: PendItem) => (num(a.remaining) - num(b.remaining)) || byName(a, b);
-    const cmp = pendSort === "name" ? byName
+    const byNum = (f: (x: PendItem) => number) => (a: PendItem, b: PendItem) => (f(a) - f(b)) || byName(a, b);
+    const recvOf = (x: PendItem) => num(pendInputs[x.id]?.recv);
+    const defOf = (x: PendItem) => num(pendInputs[x.id]?.def);
+    const cmp =
+        pendSort === "name" ? byName
       : pendSort === "seller" ? bySeller
-      : pendSort === "remaining" ? byRemaining
+      : pendSort === "remaining" ? byNum((x) => num(x.remaining))
+      : pendSort === "recv" ? byNum(recvOf)
+      : pendSort === "def" ? byNum(defOf)
+      : pendSort === "ordered" ? byNum((x) => num(x.qty))
+      : pendSort === "received" ? byNum((x) => num(x.qty_received))
+      : pendSort === "defective" ? byNum((x) => num(x.qty_defective))
+      : pendSort === "status" ? ((a: PendItem, b: PendItem) => (a.line_status || "").localeCompare(b.line_status || "", "th") || byName(a, b))
       : pendSort === "order" ? byDate("order_date")
       : byDate("expected_date");
     const sorted = [...filtered].sort(cmp);
     return pendDir === "desc" ? sorted.reverse() : sorted;
-  }, [pend, pendQ, pendSort, pendDir, activeShop, activeMo, tab]);
+  }, [pend, pendQ, pendSort, pendDir, activeShop, activeMo, tab, pendInputs]);
 
   // รายชื่อร้าน (list ซ้ายมือ) — นับจากข้อมูลแท็บปัจจุบัน
   const pendShops = useMemo(() => {
@@ -349,7 +358,7 @@ export default function ReceiveGoodsPage() {
       cell: (p) => <span className="text-xs text-slate-500">{p.expected_date ? formatDate(p.expected_date) : "—"}</span> },
     { key: "pend", header: "รอรับ", width: "9rem", align: "right", sortValue: (p) => p.pendCount,
       cell: (p) => <span className="text-blue-700 font-medium tabular-nums">{p.pendCount.toLocaleString()} รายการ</span> },
-    { key: "status", header: "สถานะ", width: "7rem", align: "center",
+    { key: "status", header: "สถานะ", width: "7rem", align: "center", sortValue: (p) => p.status,
       cell: (p) => { const b = PO_BADGE[p.status] ?? { text: p.status, cls: "bg-slate-100 text-slate-600 border-slate-200" }; return <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>; } },
   ], []);
 
@@ -514,6 +523,18 @@ export default function ReceiveGoodsPage() {
     </div>
   );
 
+  // แถบแบ่งหน้า (ของกลาง) = ต่อหน้า 50/100/200 + Pager · โชว์บน+ล่าง ตอน "ไม่จัดกลุ่ม"
+  const pendPagerBar = (!isGrouped && !pendLoading && shownPend.length > 0) ? (
+    <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap">
+      <label className="flex items-center gap-1.5 text-xs text-slate-500 shrink-0">ต่อหน้า
+        <select value={pendPageSize} onChange={(e) => changePendPageSize(Number(e.target.value))} className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white">
+          {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </label>
+      <div className="flex-1 min-w-[220px]"><Pager page={pendPage} pageSize={pendPageSize} total={shownPend.length} onPage={setPendPage} unitLabel="รายการ" /></div>
+    </div>
+  ) : null;
+
   return (
     <PlaygroundShell>
       <div className="p-6 max-w-7xl mx-auto">
@@ -651,13 +672,6 @@ export default function ReceiveGoodsPage() {
                   </select>
                 </label>
               )}
-              {!isGrouped && (
-                <label className="flex items-center gap-1.5 text-xs text-slate-500">ต่อหน้า
-                  <select value={pendPageSize} onChange={(e) => changePendPageSize(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
-                    {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </label>
-              )}
               {pendView === "card" && !doneMode && (
                 <button onClick={() => setDesignOpen(true)} title="เลือกข้อมูลที่โชว์บนการ์ด" className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">🎨 ออกแบบการ์ด</button>
               )}
@@ -671,6 +685,9 @@ export default function ReceiveGoodsPage() {
                 <button onClick={() => changePendView("table")} className={`h-9 px-3 border-l border-slate-200 ${pendView === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
               </div>
             </div>
+
+            {/* แถบแบ่งหน้า — บนสุด */}
+            {pendPagerBar && <div className="mb-3">{pendPagerBar}</div>}
 
             {pendLoading ? (
               <div className="py-16 text-center text-slate-400 text-sm">กำลังโหลด…</div>
@@ -774,17 +791,17 @@ export default function ReceiveGoodsPage() {
                         <th className="text-left px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("order")} className="inline-flex items-center hover:text-slate-700">วันที่สั่ง{sortArrow("order")}</button></th>
                         {doneMode ? (
                           <>
-                            <th className="text-left px-3 py-2 font-medium">สถานะ</th>
-                            <th className="text-right px-3 py-2 font-medium">สั่ง</th>
-                            <th className="text-right px-3 py-2 font-medium">รับแล้ว</th>
-                            <th className="text-right px-3 py-2 font-medium">เสีย/ผิด</th>
+                            <th className="text-left px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center hover:text-slate-700">สถานะ{sortArrow("status")}</button></th>
+                            <th className="text-right px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("ordered")} className="inline-flex items-center hover:text-slate-700">สั่ง{sortArrow("ordered")}</button></th>
+                            <th className="text-right px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("received")} className="inline-flex items-center hover:text-slate-700">รับแล้ว{sortArrow("received")}</button></th>
+                            <th className="text-right px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("defective")} className="inline-flex items-center hover:text-slate-700">เสีย/ผิด{sortArrow("defective")}</button></th>
                           </>
                         ) : (
                           <>
                             <th className="text-left px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("eta")} className="inline-flex items-center hover:text-slate-700">คาดเข้า{sortArrow("eta")}</button></th>
                             <th className="text-right px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("remaining")} className="inline-flex items-center hover:text-slate-700">คงเหลือ{sortArrow("remaining")}</button></th>
-                            <th className="px-3 py-2 font-medium">รับครั้งนี้</th>
-                            <th className="px-3 py-2 font-medium">เสีย/ผิด</th>
+                            <th className="text-center px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("recv")} className="inline-flex items-center hover:text-slate-700">รับครั้งนี้{sortArrow("recv")}</button></th>
+                            <th className="text-center px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("def")} className="inline-flex items-center hover:text-slate-700">เสีย/ผิด{sortArrow("def")}</button></th>
                           </>
                         )}
                       </tr>
@@ -847,12 +864,8 @@ export default function ReceiveGoodsPage() {
               </div>
             )}
 
-            {/* แถบแบ่งหน้า (ของกลาง) — โชว์เมื่อไม่จัดกลุ่มและมีมากกว่า 1 หน้า */}
-            {!isGrouped && !pendLoading && shownPend.length > pendPageSize && (
-              <div className="mt-3 bg-white border border-slate-200 rounded-xl px-3 py-2">
-                <Pager page={pendPage} pageSize={pendPageSize} total={shownPend.length} onPage={setPendPage} unitLabel="รายการ" />
-              </div>
-            )}
+            {/* แถบแบ่งหน้า — ล่างสุด */}
+            {pendPagerBar && <div className="mt-3">{pendPagerBar}</div>}
 
             {/* แถบตะกร้า — แตะรายการเพื่อใส่จำนวน แล้วกดยืนยัน (เปิดฟอร์ม: วันที่+แนบเอกสาร+ผู้รับ) */}
             {!doneMode && cartCount > 0 && (
