@@ -13,6 +13,7 @@ import type { ExecutiveResponse, ExecutiveSummary } from "@/app/api/dashboard/ex
 import type { DeptOverview } from "@/app/api/dashboard/dept-overview/route";
 import type { DeptItemGroup } from "@/app/api/dashboard/dept-items/route";
 import { ResizableModal } from "@/components/resizable-modal";
+import { LineConsole } from "@/components/line-console";
 
 const baht  = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
 const bahtC = (n: number) => {
@@ -39,6 +40,7 @@ export function ExecutiveView({ salesTrend = [] }: { salesTrend?: { d: string; s
   const [loading, setLoading] = useState(true);
   const [err, setErr]         = useState<string | null>(null);
   const [openDept, setOpenDept] = useState<DeptDrill | null>(null);   // Popup mini-dashboard ต่อแผนก (KPI + รายการ)
+  const [lineOpen, setLineOpen] = useState(false);                    // ศูนย์จัดการ LINE รวมทุกระบบ
 
   const load = useCallback(() => {
     setLoading(true); setErr(null);
@@ -84,13 +86,19 @@ export function ExecutiveView({ salesTrend = [] }: { salesTrend?: { d: string; s
 
   return (
     <div className="space-y-5">
-      {/* legend */}
+      {/* legend + ปุ่มศูนย์ LINE */}
       <div className="flex items-center gap-4 text-xs text-slate-500">
         <span className="inline-flex items-center gap-1.5"><Dot real /> ข้อมูลจริงพร้อม</span>
         <span className="inline-flex items-center gap-1.5"><Dot real={false} /> ต้องเชื่อมข้อมูลเพิ่ม / ชุดตัวอย่าง</span>
-        <span className="ml-auto text-slate-400 hidden sm:inline">
-          อัปเดต {new Date(data.as_of).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} · เรต ¥1 = ฿{data.fx_rate}
-        </span>
+        <div className="ml-auto flex items-center gap-3">
+          <button onClick={() => setLineOpen(true)}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors">
+            🔔 ศูนย์ LINE
+          </button>
+          <span className="text-slate-400 hidden sm:inline">
+            อัปเดต {new Date(data.as_of).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} · เรต ¥1 = ฿{data.fx_rate}
+          </span>
+        </div>
       </div>
 
       {/* ---- KPI ผลประกอบการ ---- */}
@@ -155,6 +163,7 @@ export function ExecutiveView({ salesTrend = [] }: { salesTrend?: { d: string; s
       </p>
 
       {openDept && <DeptItemsModal dept={openDept} onClose={() => setOpenDept(null)} />}
+      <LineConsole open={lineOpen} onClose={() => setLineOpen(false)} />
     </div>
   );
 }

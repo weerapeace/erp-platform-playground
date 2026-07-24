@@ -146,9 +146,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // ② LINE → กลุ่ม "ขอซื้อ" (groups.purchase_request → fallback กลุ่มหลัก) · ใช้บอท/โทเคนเดิม
     const { data: lc } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-    const cfg = (lc?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string> };
+    const cfg = (lc?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; disabled_events?: Record<string, boolean> };
     const target = cfg.groups?.purchase_request || "";   // เฉพาะกลุ่มขอซื้อที่ตั้งไว้ (ไม่ fallback กลุ่มอื่น)
-    if (cfg.token && target) {
+    const evOn = cfg.disabled_events?.pr_created !== true;   // ปิดจากศูนย์ LINE → ไม่ส่ง
+    if (cfg.token && target && evOn) {
       const lineText = `🛒 ใบขอซื้อใหม่ ${n} ใบ\nผู้ขอ: ${actor}\n${itemLines.join("\n")}\nจำนวนรวม: ${totalQty.toLocaleString()} ชิ้น\nยอดรวม: ${totalStr}${urgent ? "\n⚡ มีรายการด่วน" : ""}\n→ เปิดแอปจัดซื้อเพื่ออนุมัติ`;
       await fetch("https://api.line.me/v2/bot/message/push", {
         method: "POST",

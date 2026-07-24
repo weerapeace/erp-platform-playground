@@ -171,7 +171,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const statusTh = poStatus === "received" ? "รับครบแล้ว ✅" : poStatus === "partial" ? "รับบางส่วน (ยังไม่ครบ)" : "รับแล้ว";
     const lineText = `📥 รับของเข้าแล้ว · ${grNo}\nPO ${po.po_no} · ${po.seller_name}\nรับ ${grLines.length} รายการ · เข้าสต๊อก ${stockedLines} รายการ\nสถานะใบสั่งซื้อ: ${statusTh}\nผู้รับ: ${body.receiver ?? actor}`;
-    await pushLineText(admin, ["goods_receipt", "purchase_request"], lineText);
+    await pushLineText(admin, ["goods_receipt", "purchase_request"], lineText, "goods_received");
   } catch (e) { console.warn("[receive] LINE notify failed:", e); }
 
   return NextResponse.json({ ok: true, gr_no: grNo, po_status: poStatus, line_count: grLines.length, stocked_lines: stockedLines, stock_warnings: stockWarnings, error: null });

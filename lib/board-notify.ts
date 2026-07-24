@@ -6,9 +6,10 @@
  * reuse: china_app_settings.line_config (token/groups/templates) + RPC erp_notify_for_event
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
+import { lineEventEnabled } from "@/lib/line-registry";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
-type LineCfg = { token?: string; group_id?: string; groups?: Record<string, string>; templates?: Record<string, string> };
+type LineCfg = { token?: string; group_id?: string; groups?: Record<string, string>; templates?: Record<string, string>; disabled_events?: Record<string, boolean> };
 
 const appBase = () => (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "https://erp-platform-playground.vercel.app").replace(/\/$/, "");
 export const boardLink = (path: string): string => `${appBase()}${path}`;
@@ -45,6 +46,7 @@ async function linePush(token: string, to: string, text: string): Promise<void> 
 export async function pushLineTpl(admin: Admin, slot: string, eventKey: string, vars: Record<string, unknown>): Promise<void> {
   try {
     const cfg = await lineCfg(admin);
+    if (!lineEventEnabled(cfg.disabled_events, eventKey)) return;   // ปิดจากศูนย์ LINE → ไม่ส่ง
     const target = cfg.groups?.[slot] || "";
     if (!cfg.token || !target) return;
     const tplRaw = (cfg.templates?.[eventKey] && cfg.templates[eventKey].trim()) || DEFAULT_TPL[eventKey] || "";
@@ -56,9 +58,10 @@ export async function pushLineTpl(admin: Admin, slot: string, eventKey: string, 
 
 /** ส่งข้อความ LINE เข้า "กลุ่มแรกที่ตั้งค่าไว้" ตามลำดับ groupKeys (เช่น ['goods_receipt','purchase_request'])
  *  ใช้กับเหตุการณ์จัดซื้อ (ออก PO / รับของ) — ถ้ายังไม่ตั้งกลุ่มเฉพาะ จะ fallback ไปกลุ่มขอซื้อที่มีอยู่ */
-export async function pushLineText(admin: Admin, groupKeys: string[], text: string): Promise<void> {
+export async function pushLineText(admin: Admin, groupKeys: string[], text: string, eventKey?: string): Promise<void> {
   try {
     const cfg = await lineCfg(admin);
+    if (eventKey && !lineEventEnabled(cfg.disabled_events, eventKey)) return;   // ปิดจากศูนย์ LINE → ไม่ส่ง
     if (!cfg.token || !text.trim()) return;
     let target = "";
     for (const k of groupKeys) { const g = cfg.groups?.[k]; if (g) { target = g; break; } }

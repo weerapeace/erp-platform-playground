@@ -28,14 +28,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-  const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; routing?: Record<string, string> };
+  const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; routing?: Record<string, string>; disabled_events?: Record<string, boolean> };
 
   // ตารางจับคู่ "เหตุการณ์ → กลุ่ม" (ตั้งเองได้ในหน้าตั้งค่า) — ค่าเริ่มต้นตามที่เคยฟิกซ์ไว้
   const DEFAULT_ROUTING: Record<string, string> = { rate: "transfers", china_bill: "bills", transfer: "transfers", test: "test" };
   const routing = { ...DEFAULT_ROUTING, ...(cfg.routing ?? {}) };
   const slot = purpose ? (routing[purpose] ?? purpose) : "";   // event → group slot
   if (!explicitTo && slot === "off") {
-    return NextResponse.json({ ok: true, skipped: true });      // เหตุการณ์นี้ตั้งเป็น "ไม่ส่ง"
+    return NextResponse.json({ ok: true, skipped: true });      // เหตุการณ์นี้ตั้งเป็น "ไม่ส่ง" (routing)
+  }
+  // ปิดจาก "ศูนย์ LINE" (disabled_events) — ยกเว้นปุ่มทดสอบ (explicitTo/purpose=test)
+  if (!explicitTo && purpose && purpose !== "test" && cfg.disabled_events?.[purpose] === true) {
+    return NextResponse.json({ ok: true, skipped: true });
   }
   // เลือกกลุ่มปลายทาง: ระบุตรง (ปุ่มทดสอบ) → กลุ่มตาม slot → กลุ่มหลัก (group_id) เป็น fallback
   const target = explicitTo || (slot && cfg.groups?.[slot]) || cfg.group_id || "";

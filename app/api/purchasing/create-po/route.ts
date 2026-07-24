@@ -182,7 +182,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ? `฿${Math.round(v).toLocaleString("th-TH")}` : `${Math.round(v).toLocaleString("th-TH")} ${c}`;
     const poLines = created.map((c) => `• ${c.po_no} · ${c.seller_name} · ${fmtCur(c.grand_total, c.currency)} (${c.line_count} รายการ)`);
     const lineText = `🧾 สั่งซื้อแล้ว ${n} ใบ\nโดย: ${actor}\n${poLines.join("\n")}\n→ เปิดแอปจัดซื้อเพื่อติดตามของเข้า`;
-    await pushLineText(admin, ["purchase_order", "purchase_request"], lineText);
+    await pushLineText(admin, ["purchase_order", "purchase_request"], lineText, "po_created");
   } catch (e) { console.warn("[create-po] LINE notify failed:", e); }
 
   return NextResponse.json({ ok: true, created, error: null });

@@ -122,9 +122,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
       // ② LINE → กลุ่ม "ขอซื้อ" (groups.purchase_request) · ใช้บอท/โทเคนเดิม
       const { data: lc } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-      const cfg = (lc?.sval ?? {}) as { token?: string; groups?: Record<string, string> };
+      const cfg = (lc?.sval ?? {}) as { token?: string; groups?: Record<string, string>; disabled_events?: Record<string, boolean> };
       const target = cfg.groups?.purchase_request || "";
-      if (cfg.token && target) {
+      const evOn = cfg.disabled_events?.pr_rejected !== true;   // ปิดจากศูนย์ LINE → ไม่ส่ง
+      if (cfg.token && target && evOn) {
         const lineText = `❌ ใบขอซื้อไม่อนุมัติ ${n} ใบ\nโดย: ${actor}\nเหตุผล: ${reason}\n${itemLines.join("\n")}\n→ เปิดแอปจัดซื้อเพื่อดูรายละเอียด`;
         await fetch("https://api.line.me/v2/bot/message/push", {
           method: "POST",
