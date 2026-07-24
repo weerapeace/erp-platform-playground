@@ -258,23 +258,50 @@ export default function PurchaseOrdersPage() {
   }, [cartRows, cart, orderDate, submitPO]);
 
   // ── PDF ใบขอราคา (RFQ) ส่งร้าน — เปิดหน้าพิมพ์ (Save as PDF) สองภาษาตามสกุลเงินร้าน ──
-  const printRfq = useCallback((shop: string, items: Row[]) => {
-    const lang = isCNY(items[0]?.currency ?? "THB") ? "en" : "th";
-    const t = lang === "en"
-      ? { title: "Purchase Inquiry (RFQ)", shop: "Supplier", date: "Date", no: "No.", img: "Image", code: "Code", name: "Item", qty: "Qty", link: "Link", price: "Unit Price", lead: "Lead time", note: "Remark", footer: "Please fill in unit price & lead time, then reply. Thank you.", print: "Print / Save PDF" }
-      : { title: "ใบขอราคา (RFQ)", shop: "ร้าน", date: "วันที่", no: "ลำดับ", img: "รูป", code: "รหัส", name: "สินค้า", qty: "จำนวน", link: "ลิงก์", price: "ราคา/หน่วย", lead: "ลีดไทม์", note: "หมายเหตุ", footer: "กรุณากรอกราคาต่อหน่วยและลีดไทม์ แล้วส่งกลับ ขอบคุณค่ะ", print: "พิมพ์ / บันทึก PDF" };
-    const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+  // พิมพ์ "ใบสั่งซื้อ (ร่าง)" PDF — ร้านไทย=ไทยล้วน · ร้านจีน=จีน+อังกฤษกำกับ · มีราคา+ยอดรวม (ไม่มี VAT)
+  const printPo = useCallback((shop: string, items: Row[], cn: boolean) => {
+    const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
     const origin = window.location.origin;
+    const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const cur = cn ? "¥" : "฿";
+    const L = cn
+      ? { title: "采购单", company: "I.S.G. Trading Co., Ltd.", subtitle: "Purchase Order", draft: "草稿 DRAFT", date: "日期 Date", supplier: "供应商 Supplier", currency: "货币 Currency",
+          cols: ['序号<span class="en">No.</span>','图片<span class="en">Image</span>','编码<span class="en">Code</span>','品名<span class="en">Item</span>','数量<span class="en">Qty</span>','单位<span class="en">Unit</span>','单价<span class="en">Unit Price</span>','金额<span class="en">Amount</span>'],
+          total: "总计 Total", s1: "采购 Buyer", s2: "审批 Approver", s3: "供应商确认 Supplier",
+          remark: "备注 Remark: 请确认价格与交期 Please confirm price &amp; lead time · 由 ERP 系统生成", print: "打印 / Print PDF" }
+      : { title: "ใบสั่งซื้อ", company: "บริษัท ไอ.เอส.จี. เทรดดิ้ง จำกัด", subtitle: "Purchase Order", draft: "ร่าง", date: "วันที่", supplier: "ผู้จำหน่าย", currency: "สกุลเงิน",
+          cols: ["ลำดับ","รูป","รหัส","รายการสินค้า","จำนวน","หน่วย","ราคา/หน่วย","จำนวนเงิน"],
+          total: "ยอดรวมทั้งสิ้น", s1: "ผู้สั่งซื้อ", s2: "ผู้อนุมัติ", s3: "ผู้จำหน่าย (รับทราบ)",
+          remark: "หมายเหตุ: กรุณายืนยันราคาและกำหนดส่งกลับ · เอกสารออกจากระบบ ERP", print: "พิมพ์ / บันทึก PDF" };
+    let grand = 0;
     const body = items.map((r, i) => {
       const q = cart[r.id]?.qty ?? r.qty;
-      return `<tr><td>${i + 1}</td><td>${r.image_url ? `<img src="${origin}${esc(r.image_url)}"/>` : ""}</td><td>${esc(r.code || "")}</td><td>${esc(r.item_name || "")}</td><td>${q.toLocaleString()} ${esc(r.uom || "")}</td><td>${r.purchase_link ? `<a href="${esc(r.purchase_link)}">link</a>` : ""}</td><td></td><td></td><td></td></tr>`;
+      const amt = q * (r.price_est || 0); grand += amt;
+      return `<tr><td class="c">${i + 1}</td><td class="c">${r.image_url ? `<img src="${origin}${esc(r.image_url)}"/>` : ""}</td><td>${esc(r.code || "")}</td><td>${esc(stripCode(r.item_name) || "")}</td><td class="r">${q.toLocaleString()}</td><td class="c">${esc(r.uom || "")}</td><td class="r">${fmt(r.price_est || 0)}</td><td class="r">${fmt(amt)}</td></tr>`;
     }).join("");
-    const html = `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${t.title} - ${esc(shop)}</title>
-      <style>body{font-family:'Sarabun','Segoe UI',Tahoma,sans-serif;padding:24px;color:#1e293b}h1{font-size:18px;margin:0 0 4px}.meta{font-size:13px;color:#475569;margin-bottom:12px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #cbd5e1;padding:6px;text-align:left;vertical-align:top}th{background:#f1f5f9}img{width:56px;height:56px;object-fit:cover}.note{margin-top:14px;font-size:12px;color:#64748b}@media print{.noprint{display:none}}</style></head>
-      <body><h1>${t.title}</h1><div class="meta">${t.shop}: <b>${esc(shop)}</b> · ${t.date}: ${esc(orderDate)}</div>
-      <table><thead><tr><th>${t.no}</th><th>${t.img}</th><th>${t.code}</th><th>${t.name}</th><th>${t.qty}</th><th>${t.link}</th><th>${t.price}</th><th>${t.lead}</th><th>${t.note}</th></tr></thead><tbody>${body}</tbody></table>
-      <div class="note">${t.footer}</div>
-      <button class="noprint" onclick="window.print()" style="margin-top:16px;padding:8px 16px;font-size:14px;cursor:pointer">🖨️ ${t.print}</button>
+    const html = `<!doctype html><html lang="${cn ? "zh" : "th"}"><head><meta charset="utf-8"><title>${esc(L.title)} - ${esc(shop)}</title>
+      <style>
+        body{font-family:'Sarabun','Microsoft YaHei','Segoe UI',Tahoma,sans-serif;padding:24px;color:#1e293b;font-size:12px}
+        .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #334155;padding-bottom:10px;margin-bottom:12px}
+        .co{font-size:15px;font-weight:700;color:#0f172a}.title{text-align:right}.title .t1{font-size:20px;font-weight:700;color:#c2410c}.title .t2{font-size:11px;color:#64748b;margin-top:2px}
+        .draft{display:inline-block;border:1.5px solid #f59e0b;color:#b45309;background:#fffbeb;border-radius:4px;padding:0 6px;font-size:11px;font-weight:700;margin-left:6px}
+        .meta{display:grid;grid-template-columns:1fr 1fr;gap:2px 16px;font-size:12px;color:#334155;margin-bottom:12px}.meta b{color:#0f172a}
+        table{width:100%;border-collapse:collapse;font-size:11.5px}th,td{border:1px solid #cbd5e1;padding:5px 7px;vertical-align:middle}th{background:#f1f5f9;text-align:center;color:#334155}
+        td.r{text-align:right;font-variant-numeric:tabular-nums}td.c{text-align:center}img{width:40px;height:40px;object-fit:cover;border-radius:4px}
+        .en{color:#94a3b8;font-weight:400;font-size:9px;display:block}
+        .totwrap{display:flex;justify-content:flex-end;margin-top:10px}.tot{min-width:240px;border-top:1.5px solid #334155;padding-top:6px;display:flex;justify-content:space-between;font-size:15px;font-weight:700;color:#0f172a}
+        .foot{display:flex;justify-content:space-between;gap:20px;margin-top:28px}.sign{flex:1;text-align:center;font-size:11px;color:#475569}.sign .ln{border-bottom:1px solid #94a3b8;height:34px;margin-bottom:5px}
+        .note{font-size:10.5px;color:#64748b;margin-top:12px}@media print{.noprint{display:none}}
+      </style></head>
+      <body>
+        <div class="head"><div><div class="co">🏢 ${esc(L.company)}</div></div>
+          <div class="title"><div class="t1">${L.title}</div><div class="t2">${cn ? "" : L.subtitle + " · "}${L.date}: ${esc(orderDate)} <span class="draft">${L.draft}</span></div></div></div>
+        <div class="meta"><div>${L.supplier}: <b>${esc(shop)}</b></div><div>${L.currency}: <b>${cur} ${esc(items[0]?.currency || "")}</b></div></div>
+        <table><thead><tr>${L.cols.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>
+        <div class="totwrap"><div class="tot"><span>${L.total} (${cur})</span><span>${fmt(grand)}</span></div></div>
+        <div class="foot"><div class="sign"><div class="ln"></div>${L.s1}</div><div class="sign"><div class="ln"></div>${L.s2}</div><div class="sign"><div class="ln"></div>${L.s3}</div></div>
+        <div class="note">${L.remark}</div>
+        <button class="noprint" onclick="window.print()" style="margin-top:16px;padding:8px 16px;font-size:14px;cursor:pointer">🖨️ ${L.print}</button>
       </body></html>`;
     const w = window.open("", "_blank");
     if (!w) { toast.error("เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปก่อน"); return; }
@@ -659,7 +686,7 @@ export default function PurchaseOrdersPage() {
                   <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100 gap-2">
                     <span className="text-sm font-semibold text-slate-700 min-w-0 truncate">🏪 {shop} <span className="text-[11px] font-normal text-slate-400">({items.length} รายการ)</span></span>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <button type="button" onClick={() => printRfq(shop, items)} title="ใบขอราคา (PDF) ส่งร้าน"
+                      <button type="button" onClick={() => printPo(shop, items, isChineseShop(shop, items[0]?.currency ?? "THB"))} title="ใบสั่งซื้อ (PDF) — ร้านไทย=ไทย · ร้านจีน=จีน+อังกฤษ"
                         className="h-7 px-2 text-[11px] font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-white">📄 PDF</button>
                       <button type="button" onClick={() => setContactShop({ name: shop, partnerId: suppliers.find((s) => s.name === shop)?.id ?? null })} title="ติดต่อร้าน (Line/WeChat)"
                         className="h-7 px-2 text-[11px] font-medium rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100">💬 ติดต่อ</button>
@@ -776,23 +803,23 @@ function ShopContactModal({ shopName, partnerId, onClose }: { shopName: string; 
       ) : (
         <div className="space-y-2.5">
           {c.sale_name && <div className="text-sm text-slate-700">👤 Sale: <b>{c.sale_name}</b></div>}
-          {/* ปุ่มหลักตามประเภทร้าน */}
-          {isCN ? (
-            c.wechat_id ? (
-              <div className="flex items-center gap-2 p-2.5 rounded-lg border border-green-200 bg-green-50">
-                <span className="text-sm flex-1">🟢 WeChat: <b>{c.wechat_id}</b></span>
-                <button onClick={() => copy(c.wechat_id, "WeChat ID")} className="h-8 px-3 text-xs font-medium bg-green-600 text-white rounded-md hover:bg-green-700">คัดลอก ID</button>
-              </div>
-            ) : <div className="text-xs text-slate-400">ยังไม่มี WeChat — กด &quot;แก้ไขข้อมูลติดต่อ&quot; เพื่อเพิ่ม</div>
-          ) : (
-            (c.line_url || c.line_id) ? (
-              <div className="flex items-center gap-2 p-2.5 rounded-lg border border-emerald-200 bg-emerald-50">
+          {/* Line + WeChat ทั้งคู่ (ร้านจีนเอา WeChat ขึ้นก่อน · ร้านไทยเอา Line ขึ้นก่อน) */}
+          {(() => {
+            const lineBlock = (c.line_url || c.line_id) ? (
+              <div key="line" className="flex items-center gap-2 p-2.5 rounded-lg border border-emerald-200 bg-emerald-50">
                 <span className="text-sm flex-1">💬 Line: <b>{c.line_id || "(ลิงก์)"}</b></span>
                 {c.line_url && <a href={c.line_url} target="_blank" rel="noopener noreferrer" className="h-8 px-3 text-xs font-medium bg-emerald-600 text-white rounded-md hover:bg-emerald-700 flex items-center">เปิด Line</a>}
                 {c.line_id && <button onClick={() => copy(c.line_id, "Line ID")} className="h-8 px-3 text-xs font-medium border border-emerald-300 text-emerald-700 rounded-md hover:bg-emerald-100">คัดลอก ID</button>}
               </div>
-            ) : <div className="text-xs text-slate-400">ยังไม่มี Line — กด &quot;แก้ไขข้อมูลติดต่อ&quot; เพื่อเพิ่ม</div>
-          )}
+            ) : <div key="line" className="text-xs text-slate-400 px-1 py-0.5">💬 ยังไม่มี Line — กด &quot;แก้ไขข้อมูลติดต่อ&quot; เพื่อเพิ่ม</div>;
+            const wechatBlock = c.wechat_id ? (
+              <div key="wc" className="flex items-center gap-2 p-2.5 rounded-lg border border-green-200 bg-green-50">
+                <span className="text-sm flex-1">🟢 WeChat: <b>{c.wechat_id}</b></span>
+                <button onClick={() => copy(c.wechat_id, "WeChat ID")} className="h-8 px-3 text-xs font-medium bg-green-600 text-white rounded-md hover:bg-green-700">คัดลอก ID</button>
+              </div>
+            ) : <div key="wc" className="text-xs text-slate-400 px-1 py-0.5">🟢 ยังไม่มี WeChat — กด &quot;แก้ไขข้อมูลติดต่อ&quot; เพื่อเพิ่ม</div>;
+            return isCN ? [wechatBlock, lineBlock] : [lineBlock, wechatBlock];
+          })()}
           {/* เบอร์โทร */}
           {(c.phone || c.mobile) && (
             <div className="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200">
