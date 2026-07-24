@@ -13,7 +13,6 @@ import type { ExecutiveResponse, ExecutiveSummary } from "@/app/api/dashboard/ex
 import type { DeptOverview } from "@/app/api/dashboard/dept-overview/route";
 import type { DeptItemGroup } from "@/app/api/dashboard/dept-items/route";
 import { ResizableModal } from "@/components/resizable-modal";
-import { EmbedModal } from "@/components/embed-modal";
 import { LineConsole } from "@/components/line-console";
 
 const baht  = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
@@ -112,9 +111,6 @@ export function ExecutiveView() {
         <Kpi icon="🏦" label="ภาระหนี้รวม"        value={bahtC(f.loan_outstanding + f.od_used)} real
              hint="เงินกู้ + OD ที่ใช้ไป" />
       </div>
-
-      {/* ---- ปฏิทินผลิต / จัดซื้อ (แท็บสลับ · ฝังหน้าปฏิทินจริง) ---- */}
-      <CalendarTabs />
 
       {/* ---- แยกตามแผนก (ตัวเลขสำคัญ + กดเจาะเข้าดู) ---- */}
       <SectionLabel>แยกตามแผนก</SectionLabel>
@@ -377,25 +373,3 @@ function DeptItemsModal({ dept, onClose }: { dept: DeptDrill; onClose: () => voi
   );
 }
 
-// ---- แท็บปฏิทินผลิต / จัดซื้อ (ฝังหน้าปฏิทินจริง · single-source เหมือนการ์ดแผนก) ----
-function CalendarTabs() {
-  const [tab, setTab] = useState<"prod" | "buy">("prod");
-  const [big, setBig] = useState(false);   // เปิดใหญ่เป็น popup ปรับขนาดได้
-  const src = tab === "prod" ? "/master/production-dashboard?embed=1&view=calendar" : "/purchasing/calendar?embed=1";
-  const full = tab === "prod" ? "/master/production-dashboard?view=calendar" : "/purchasing/calendar";
-  const label = tab === "prod" ? "ปฏิทินผลิต" : "ปฏิทินจัดซื้อ";
-  const btn = (on: boolean) => `px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${on ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`;
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
-        <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
-          <button onClick={() => setTab("prod")} className={btn(tab === "prod")}>🏭 ปฏิทินผลิต</button>
-          <button onClick={() => setTab("buy")} className={btn(tab === "buy")}>🛒 ปฏิทินจัดซื้อ</button>
-        </div>
-        <button onClick={() => setBig(true)} className="ml-auto text-xs text-blue-600 hover:underline">⤢ เปิดใหญ่</button>
-      </div>
-      <iframe key={tab} src={src} title={label} className="w-full border-0 bg-slate-50" style={{ height: 540 }} />
-      {big && <EmbedModal url={full} title={label} onClose={() => setBig(false)} />}
-    </div>
-  );
-}

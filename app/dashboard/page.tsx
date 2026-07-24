@@ -17,6 +17,7 @@ import { systemForEvent, type DashboardPanel } from "@/lib/dashboard-systems";
 import { KpiStrip } from "./kpi-strip";
 import { ExecutiveView } from "./executive-view";
 import { EmbedModal } from "@/components/embed-modal";
+import { CalendarTabs } from "@/components/calendar-tabs";
 import { PinnedWidget, RecentWidget, AgendaWidget, FinanceWidget, ActivityWidget, TeamWidget, ShortcutsWidget, StatWidget, SalesChartWidget } from "./widgets";
 import { layoutForRole, type DashboardLayout, type DashboardView } from "@/lib/dashboard-widgets";
 
@@ -382,7 +383,10 @@ export default function DashboardPage() {
             onConfig={isAdmin ? (k) => setConfigApp(visibleApps.find(a => a.key === k) ?? null) : undefined}
             onSeeAll={(k) => { setView("list"); setListFilter(k); setTab("all"); }} />
         ) : view === "calendar" ? (
-          <DashboardCalendar apps={visibleApps} list={scopeList} team={scope === "team"} onOpen={openAny} />
+          <div className="space-y-4">
+            <CalendarTabs />
+            <DashboardCalendar apps={visibleApps} list={scopeList} team={scope === "team"} onOpen={openAny} />
+          </div>
         ) : scope === "team" ? (
           <TeamView items={teamItems} loading={teamLoading} onOpen={(n) => { if (n.link_url) setLinkModal({ url: n.link_url, title: n.title }); }} />
         ) : (
