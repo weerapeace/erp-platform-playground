@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ActivityFeed } from "@/components/activity-feed";
 import type { ActivityEntry } from "@/components/activity-feed";
@@ -17,6 +16,7 @@ import { PanelConfigModal } from "./panel-config-modal";
 import { systemForEvent, type DashboardPanel } from "@/lib/dashboard-systems";
 import { KpiStrip } from "./kpi-strip";
 import { ExecutiveView } from "./executive-view";
+import { EmbedModal } from "@/components/embed-modal";
 import { PinnedWidget, RecentWidget, AgendaWidget, FinanceWidget, ActivityWidget, TeamWidget, ShortcutsWidget, StatWidget, SalesChartWidget } from "./widgets";
 import { layoutForRole, type DashboardLayout, type DashboardView } from "@/lib/dashboard-widgets";
 
@@ -79,7 +79,6 @@ type Tab = "unread" | "pinned" | "all" | "snoozed" | "team";
 
 export default function DashboardPage() {
   const { user, can } = useAuth();
-  const router = useRouter();
 
   // ---- แดชบอร์ดรวมทุกระบบ: view + scope + ระบบ + ตั้งค่าการ์ด ----
   const [view, setView]   = useState<DashboardView>("systems");
@@ -122,6 +121,7 @@ export default function DashboardPage() {
   const [tab, setTab]         = useState<Tab>("unread");
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [snoozeOpen, setSnoozeOpen] = useState<string | null>(null);
+  const [linkModal, setLinkModal] = useState<{ url: string; title: string } | null>(null);   // เปิดลิงก์แจ้งเตือนเป็น popup (ฝังหน้าจริง)
 
   // ---- ภาพรวมทีม (owner/manager เท่านั้น) ----
   const [teamItems, setTeamItems]     = useState<TeamNotification[]>([]);
@@ -194,7 +194,7 @@ export default function DashboardPage() {
       setUnread(c => Math.max(0, c - 1));
       patch({ id: n.id });
     }
-    if (n.link_url) router.push(n.link_url);
+    if (n.link_url) setLinkModal({ url: n.link_url, title: n.title });   // เปิดเป็น popup (ฝังหน้าจริง) แทนเด้งออก
   };
 
   // ✓ ปิดงานจากการ์ด (mark read แต่ไม่เปิดหน้า) — เอาออกจาก "งานค้าง"
@@ -291,7 +291,7 @@ export default function DashboardPage() {
   const isAdmin = user?.role === "admin" || can("admin.users" as Parameters<typeof can>[0]);
   const scopeList: Notification[] = scope === "team" ? teamItems : items;
   // เปิดงาน: ของฉัน = mark read + ไป · ทีม = ไปอย่างเดียว (ไม่แตะสถานะคนอื่น)
-  const openAny = (n: Notification) => { if (scope === "mine") openItem(n); else if (n.link_url) router.push(n.link_url); };
+  const openAny = (n: Notification) => { if (scope === "mine") openItem(n); else if (n.link_url) setLinkModal({ url: n.link_url, title: n.title }); };
 
   // หน้าแดชบอร์ดตาม role (เฟส 3): widget เสริม + มุมมองเริ่มต้น (ไม่มี layout = ค่าเริ่มต้นเดิม)
   const myLayout = useMemo(() => layoutForRole(layouts, user?.role), [layouts, user]);
@@ -383,7 +383,7 @@ export default function DashboardPage() {
         ) : view === "calendar" ? (
           <DashboardCalendar apps={visibleApps} list={scopeList} team={scope === "team"} onOpen={openAny} />
         ) : scope === "team" ? (
-          <TeamView items={teamItems} loading={teamLoading} onOpen={(n) => { if (n.link_url) router.push(n.link_url); }} />
+          <TeamView items={teamItems} loading={teamLoading} onOpen={(n) => { if (n.link_url) setLinkModal({ url: n.link_url, title: n.title }); }} />
         ) : (
           <>
             {listFilter && (
@@ -455,6 +455,9 @@ export default function DashboardPage() {
           onClose={() => setConfigApp(null)}
           onSaved={(p) => setPanels((ps) => [...ps.filter((x) => x.app_key !== p.app_key), p])} />
       )}
+
+      {/* 🔗 กดแจ้งเตือน → เปิดลิงก์เป็น popup (ฝังหน้าจริง ไม่หลุดออกจาก Dashboard) */}
+      {linkModal && <EmbedModal url={linkModal.url} title={linkModal.title} onClose={() => setLinkModal(null)} />}
     </PlaygroundShell>
   );
 }
