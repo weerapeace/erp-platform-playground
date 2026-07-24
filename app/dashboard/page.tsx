@@ -37,6 +37,16 @@ const EVENT_ICON: Record<string, string> = {
 };
 const iconFor = (t: string) => EVENT_ICON[t] ?? "🔔";
 
+// ป้าย/ไอคอน หัวกลุ่ม module (ใช้ในแท็บ "รายการ" — จัดกลุ่มตามระบบ) · ใช้ชื่อแอปจริงถ้ามี
+const MODULE_LABEL: Record<string, string> = {
+  purchasing: "จัดซื้อ", tasks: "จัดการงาน / ออกแบบ", qc: "QC", sales: "ขาย", production: "ผลิต",
+  subscriptions: "สมาชิก / ต่ออายุ", settings: "ความปลอดภัย", misc: "อื่น ๆ",
+};
+const MODULE_ICON: Record<string, string> = {
+  purchasing: "🛒", tasks: "🗂️", qc: "✅", sales: "💰", production: "🏭",
+  subscriptions: "🔔", settings: "⚙️", misc: "📌",
+};
+
 // ---- time helpers ----
 function relTime(iso: string): string {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -45,17 +55,6 @@ function relTime(iso: string): string {
   if (diff < 86400)   return `${Math.floor(diff / 3600)} ชม.ที่แล้ว`;
   if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} วันที่แล้ว`;
   return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short" });
-}
-
-function dayLabel(iso: string): string {
-  const d = new Date(iso);
-  const today = new Date();
-  const yest  = new Date(); yest.setDate(today.getDate() - 1);
-  const same = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  if (same(d, today)) return "วันนี้";
-  if (same(d, yest))  return "เมื่อวาน";
-  return d.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
 }
 
 const isSnoozed = (n: Notification) => !!n.snoozed_until && new Date(n.snoozed_until).getTime() > Date.now();
@@ -243,13 +242,14 @@ export default function DashboardPage() {
     return [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [items, tab, listFilter]);
 
-  const groups = useMemo(() => {
+  // จัดกลุ่ม "รายการที่ต้องจัดการ / อนุมัติ" ตาม module (ระบบ) — มาก→น้อย
+  const moduleGroups = useMemo(() => {
     const map = new Map<string, Notification[]>();
     for (const n of visible) {
-      const k = dayLabel(n.created_at);
+      const k = systemForEvent(n.event_type);
       (map.get(k) ?? map.set(k, []).get(k)!).push(n);
     }
-    return Array.from(map.entries());
+    return Array.from(map.entries()).sort((a, b) => b[1].length - a[1].length);
   }, [visible]);
 
   // ---- 🎯 โฟกัสวันนี้ — จัดอันดับงานที่ควรทำก่อน (จากงานค้างทั้งหมด) ----
@@ -333,7 +333,7 @@ export default function DashboardPage() {
         {view !== "executive" && myLayout.widgets.map((w) => {
           if (w === "goals") return <GoalsEntryCard key="goals" />;
           if (w === "kpi") return <KpiStrip key="kpi" unread={unread} metrics={metrics} apps={visibleApps} />;
-          if (w === "focus") return (scope === "mine" && view !== "calendar" && focusItems.length > 0)
+          if (w === "focus") return (scope === "mine" && view === "systems" && focusItems.length > 0)
             ? <FocusBand key="focus" items={focusItems} onOpen={openItem} /> : null;
           if (w === "pinned") return <PinnedWidget key="pinned" items={items} onOpen={openItem} />;
           if (w === "recent") return <RecentWidget key="recent" items={items} onOpen={openItem} />;
@@ -414,9 +414,13 @@ export default function DashboardPage() {
               <EmptyState tab={tab} />
             ) : (
               <div className="space-y-5">
-                {groups.map(([label, list]) => (
-                  <div key={label}>
-                    <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">{label}</div>
+                {moduleGroups.map(([key, list]) => (
+                  <div key={key}>
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                      <span className="text-base leading-none">{MODULE_ICON[key] ?? "📌"}</span>
+                      <span className="text-sm font-semibold text-slate-700">{visibleApps.find(a => a.key === key)?.label ?? MODULE_LABEL[key] ?? key}</span>
+                      <span className="text-[11px] text-slate-400">{list.length} รายการที่ต้องจัดการ</span>
+                    </div>
                     <div className="space-y-2">
                       {list.map(n => (
                         <NotifRow key={n.id} n={n}
