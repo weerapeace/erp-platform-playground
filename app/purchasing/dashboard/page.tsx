@@ -349,7 +349,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
       const missing = (d.missing ?? []).filter((m) => m !== field);
       const patch: Partial<DrillRow> = { missing };
       if (field === "image") patch.image_url = `/api/r2-image?key=${encodeURIComponent(String(value))}`;
-      if (field === "price") patch.unit_price = Number(value);
+      if (field === "price") { patch.unit_price = Number(value); if (currency) patch.currency = isYuan(currency) ? "YUAN" : "THB"; }
       if (field === "link") patch.purchase_url = String(value) || null;
       if (field === "seller") patch.seller = String(value) || null;
       return { ...d, ...patch };
@@ -364,6 +364,11 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
       await enrich(r, "image", up.r2_key);
     } catch (e) { setErr(e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ"); }
     finally { setUploading(false); }
+  };
+  // แหล่งซื้อที่ 2 (เก็บบน SKU)
+  const saveSource2 = async (r: DrillRow, s: { seller: string; price: string; currency: string; link: string }) => {
+    await act(r.id, () => apiFetch("/api/purchasing/pr-enrich", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: entityOf(), id: r.id, sku_id: r.sku_id ?? null, field: "source2", source2: s }) }));
+    setDetail((d) => (d && d.id === r.id ? { ...d, alt_seller: s.seller.trim() || null, alt_price: s.price === "" ? null : Number(s.price), alt_currency: s.currency, alt_link: s.link.trim() || null } : d));
   };
 
   // ---- เรียง + แบ่งหน้า + จัดกลุ่ม ----
@@ -582,27 +587,54 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
       {/* popup รายละเอียด + เติมข้อมูลที่ขาด (กดจากการ์ด/แถว) */}
       {detail && (
         <DetailModal key={detail.id} r={detail} type={drill?.type ?? ""} onClose={() => setDetail(null)}
-          onEnrich={enrich} onUpload={uploadCover} uploading={uploading} busy={busy.has(detail.id)} />
+          onEnrich={enrich} onUpload={uploadCover} onSaveSource2={saveSource2} uploading={uploading} busy={busy.has(detail.id)} />
       )}
     </div>
   );
 }
 
-// ---- popup รายละเอียด + เติมข้อมูลที่ขาด (save กลับ SKU + เอกสาร) ----
+// ---- popup รายละเอียด + เติม/แก้ข้อมูล (readonly+แก้ไข · save กลับ SKU + เอกสาร) ----
 const MISS_LABEL: Record<string, string> = { image: "รูป", price: "ราคา", link: "ลิงก์", seller: "ร้านค้า" };
-function DetailModal({ r, type, onClose, onEnrich, onUpload, uploading, busy }: {
+const curTh = (c?: string | null) => isYuan(c) ? "YUAN" : "THB";
+const priceStr = (p?: number | null, c?: string | null) => p == null ? "—" : (isYuan(c) ? `¥${p.toLocaleString()}` : `฿${p.toLocaleString()}`);
+
+function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, uploading, busy }: {
   r: DrillRow; type: string; onClose: () => void;
   onEnrich: (r: DrillRow, field: string, value: string | number, currency?: string) => Promise<void>;
-  onUpload: (r: DrillRow, file: File) => Promise<void>; uploading: boolean; busy: boolean;
+  onUpload: (r: DrillRow, file: File) => Promise<void>;
+  onSaveSource2: (r: DrillRow, s: { seller: string; price: string; currency: string; link: string }) => Promise<void>;
+  uploading: boolean; busy: boolean;
 }) {
   const isReceive = type === "pending_receive";
   const missing = r.missing ?? [];
   const miss = (f: string) => missing.includes(f);
+  const [editing, setEditing] = useState<Set<string>>(new Set());
   const [priceDraft, setPriceDraft] = useState(r.unit_price ? String(r.unit_price) : "");
+  const [priceCur, setPriceCur] = useState(curTh(r.currency));
   const [linkDraft, setLinkDraft] = useState(r.purchase_url ?? "");
   const [sellerDraft, setSellerDraft] = useState(r.seller ?? "");
+  const [s2, setS2] = useState({ seller: r.alt_seller ?? "", price: r.alt_price != null ? String(r.alt_price) : "", currency: curTh(r.alt_currency), link: r.alt_link ?? "" });
   const fileRef = useRef<HTMLInputElement>(null);
   const box = (on: boolean) => `rounded-lg border p-2.5 ${on ? "border-amber-300 bg-amber-50/60" : "border-slate-100"}`;
+  const saveBtn = "h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50";
+  const inEdit = (f: string) => miss(f) || editing.has(f);
+  const openEdit = (f: string) => setEditing((s) => new Set(s).add(f));
+  const closeEdit = (f: string) => setEditing((s) => { const n = new Set(s); n.delete(f); return n; });
+  const hasAlt = !!(r.alt_seller || r.alt_price != null || r.alt_link);
+  const EditBtn = ({ f }: { f: string }) => <button onClick={() => openEdit(f)} className="text-xs text-blue-600 hover:underline shrink-0">แก้ไข</button>;
+  const Cancel = ({ f }: { f: string }) => !miss(f) ? <button onClick={() => closeEdit(f)} className="text-xs text-slate-500 hover:underline shrink-0">ยกเลิก</button> : null;
+  const CurToggle = ({ val, onChange }: { val: string; onChange: (c: string) => void }) => (
+    <div className="inline-flex bg-slate-100 rounded-lg p-0.5 text-[11px]">
+      {([["THB", "฿ บาท"], ["YUAN", "¥ หยวน"]] as [string, string][]).map(([c, l]) => (
+        <button key={c} onClick={() => onChange(c)} className={`px-2 py-0.5 rounded-md ${val === c ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>{l}</button>
+      ))}
+    </div>
+  );
+  const savePrice = async () => { await onEnrich(r, "price", Number(priceDraft), priceCur); closeEdit("price"); };
+  const saveLink = async () => { await onEnrich(r, "link", linkDraft); closeEdit("link"); };
+  const saveSeller = async () => { await onEnrich(r, "seller", sellerDraft); closeEdit("seller"); };
+  const pickStore = async (name: string) => { setSellerDraft(name); await onEnrich(r, "seller", name); closeEdit("seller"); openEdit("link"); };
+  const saveS2 = async () => { await onSaveSource2(r, s2); closeEdit("source2"); };
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="flex items-start gap-2 py-1 border-b border-slate-50 last:border-0">
       <span className="text-xs text-slate-400 w-24 shrink-0">{label}</span>
@@ -630,7 +662,6 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, uploading, busy }: 
           </div>
         </div>
 
-        {/* แถบเตือนข้อมูลไม่ครบ */}
         {missing.length > 0 && (
           <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
             ⚠️ ข้อมูลไม่ครบ: <b>{missing.map((m) => MISS_LABEL[m] ?? m).join(" · ")}</b> — เติมด้านล่าง บันทึกกลับ SKU + เอกสารให้เลย
@@ -653,10 +684,11 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, uploading, busy }: 
           </>}
         </div>
 
-        {/* เติม / แก้ข้อมูล (save กลับ SKU + เอกสาร) */}
+        {/* เติม / แก้ข้อมูล */}
         <div className="space-y-2">
           <div className="text-xs font-medium text-slate-500">เติม / แก้ข้อมูล <span className="font-normal text-slate-400">· บันทึกกลับ SKU {isReceive ? "" : "+ ใบขอซื้อ"}</span></div>
 
+          {/* รูป */}
           <div className={box(miss("image"))}>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-slate-600 w-16 shrink-0">🖼 รูป</span>
@@ -668,39 +700,97 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, uploading, busy }: 
             </div>
           </div>
 
+          {/* ราคา/หน่วย */}
           <div className={box(miss("price"))}>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-slate-600 w-16 shrink-0">💰 ราคา/หน่วย</span>
-              <input type="number" min={0} value={priceDraft} onChange={(e) => setPriceDraft(e.target.value)}
-                className="h-8 w-28 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
-              <span className="text-[11px] text-slate-400">{isYuan(r.currency) ? "หยวน ¥" : "บาท ฿"}</span>
-              <button disabled={busy || priceDraft === ""} onClick={() => onEnrich(r, "price", Number(priceDraft), r.currency ?? undefined)}
-                className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
+              {inEdit("price") ? <>
+                <input type="number" min={0} value={priceDraft} onChange={(e) => setPriceDraft(e.target.value)}
+                  className="h-8 w-24 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                <CurToggle val={priceCur} onChange={setPriceCur} />
+                <button disabled={busy || priceDraft === ""} onClick={savePrice} className={saveBtn}>บันทึก</button>
+                <Cancel f="price" />
+              </> : <>
+                <span className="text-xs text-slate-700 flex-1 tabular-nums">{unitStr(r)} <span className="text-slate-400">/{r.uom || "หน่วย"}</span></span>
+                <EditBtn f="price" />
+              </>}
             </div>
           </div>
 
+          {/* ลิงก์ */}
           <div className={box(miss("link"))}>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-slate-600 w-16 shrink-0">🔗 ลิงก์</span>
-              <input type="url" value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} placeholder="Taobao / 1688 / ฯลฯ"
-                className="h-8 flex-1 min-w-[140px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
-              {r.purchase_url && <a href={r.purchase_url} target="_blank" rel="noopener" className="text-xs text-blue-600 hover:underline shrink-0">เปิด ↗</a>}
-              <button disabled={busy} onClick={() => onEnrich(r, "link", linkDraft)}
-                className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
+              {inEdit("link") ? <>
+                <input type="url" value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} placeholder="Taobao / 1688 / ฯลฯ"
+                  className="h-8 flex-1 min-w-[140px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                <button disabled={busy} onClick={saveLink} className={saveBtn}>บันทึก</button>
+                <Cancel f="link" />
+              </> : <>
+                <span className="text-xs text-slate-600 flex-1 min-w-0 truncate">{r.purchase_url || "ตั้งไว้ที่ SKU"}</span>
+                {r.purchase_url && <a href={r.purchase_url} target="_blank" rel="noopener" className="text-xs text-blue-600 hover:underline shrink-0">เปิด ↗</a>}
+                <EditBtn f="link" />
+              </>}
             </div>
           </div>
 
+          {/* ร้านค้า (เฉพาะใบขอซื้อ) */}
           {!isReceive && (
             <div className={box(miss("seller"))}>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-slate-600 w-16 shrink-0">🏪 ร้านค้า</span>
-                <input value={sellerDraft} onChange={(e) => setSellerDraft(e.target.value)} placeholder="ชื่อร้าน / ผู้ขาย"
-                  className="h-8 flex-1 min-w-[140px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                <button disabled={busy} onClick={() => onEnrich(r, "seller", sellerDraft)}
-                  className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
+                {inEdit("seller") ? <>
+                  <input value={sellerDraft} onChange={(e) => setSellerDraft(e.target.value)} placeholder="ชื่อร้าน / ผู้ขาย"
+                    className="h-8 flex-1 min-w-[120px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                  <button disabled={busy} onClick={saveSeller} className={saveBtn}>บันทึก</button>
+                  <Cancel f="seller" />
+                  <div className="w-full flex items-center gap-1.5 mt-1">
+                    <span className="text-[11px] text-slate-400">ลัด:</span>
+                    <button disabled={busy} onClick={() => pickStore("Tao Bao")} className="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50">🛒 Taobao</button>
+                    <button disabled={busy} onClick={() => pickStore("1688")} className="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50">1688</button>
+                    <span className="text-[11px] text-slate-400">(ตั้งร้านแล้วไปใส่ลิงก์ต่อ)</span>
+                  </div>
+                </> : <>
+                  <span className="text-xs text-slate-700 flex-1 min-w-0 truncate">{r.seller || "—"}</span>
+                  <EditBtn f="seller" />
+                </>}
               </div>
             </div>
           )}
+
+          {/* แหล่งซื้อที่ 2 (เก็บบน SKU) */}
+          <div className={box(false)}>
+            <div className="flex items-start gap-2">
+              <span className="text-xs text-slate-600 w-16 shrink-0 pt-1">🛒 แหล่งที่ 2</span>
+              {editing.has("source2") ? (
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <input value={s2.seller} onChange={(e) => setS2((v) => ({ ...v, seller: e.target.value }))} placeholder="ชื่อร้านที่ 2"
+                    className="h-8 w-full px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input type="number" min={0} value={s2.price} onChange={(e) => setS2((v) => ({ ...v, price: e.target.value }))} placeholder="ราคา"
+                      className="h-8 w-24 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                    <CurToggle val={s2.currency} onChange={(c) => setS2((v) => ({ ...v, currency: c }))} />
+                  </div>
+                  <input type="url" value={s2.link} onChange={(e) => setS2((v) => ({ ...v, link: e.target.value }))} placeholder="ลิงก์ร้านที่ 2"
+                    className="h-8 w-full px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                  <div className="flex items-center gap-2">
+                    <button disabled={busy} onClick={saveS2} className={saveBtn}>บันทึก</button>
+                    <button onClick={() => closeEdit("source2")} className="text-xs text-slate-500 hover:underline">ยกเลิก</button>
+                  </div>
+                </div>
+              ) : hasAlt ? (
+                <div className="flex-1 min-w-0 flex items-center gap-2">
+                  <span className="text-xs text-slate-700 flex-1 min-w-0 truncate">
+                    {r.alt_seller || "—"} · {priceStr(r.alt_price, r.alt_currency)}
+                    {r.alt_link && <a href={r.alt_link} target="_blank" rel="noopener" className="text-blue-600 hover:underline ml-1">เปิด ↗</a>}
+                  </span>
+                  <EditBtn f="source2" />
+                </div>
+              ) : (
+                <button onClick={() => openEdit("source2")} className="text-xs text-blue-600 hover:underline pt-0.5">+ เพิ่มแหล่งซื้อที่ 2</button>
+              )}
+            </div>
+          </div>
         </div>
 
         {isReceive && (

@@ -28,7 +28,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { entity?: string; id?: string; sku_id?: string | null; field?: string; value?: string | number; currency?: string };
+  let body: { entity?: string; id?: string; sku_id?: string | null; field?: string; value?: string | number; currency?: string;
+    source2?: { seller?: string; price?: string | number | null; currency?: string; link?: string } };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const entity = body.entity === "po_line" ? "po_line" : "pr";
   const id = body.id;
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!isFinite(n) || n < 0) return NextResponse.json({ error: "ราคาไม่ถูกต้อง" }, { status: 400 });
     if (skuId) skuPatch[isCNY(body.currency) ? "rmb_cost" : "standard_price"] = n;
     docPatch.price_est = n;
+    if (body.currency) docPatch.currency = isCNY(body.currency) ? "YUAN" : "THB";   // ให้ราคา+สกุลตรงกัน
   } else if (field === "link") {
     const url = String(body.value ?? "").trim();
     if (url && !/^https?:\/\//i.test(url)) return NextResponse.json({ error: "ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://" }, { status: 400 });
@@ -59,6 +61,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } else if (field === "seller") {
     if (entity !== "pr") return NextResponse.json({ error: "แก้ร้านค้าได้เฉพาะใบขอซื้อ" }, { status: 400 });
     docPatch.seller_name = String(body.value ?? "").trim() || null;
+  } else if (field === "source2") {
+    // แหล่งซื้อที่ 2 → เก็บบน SKU เท่านั้น (ต้องมี SKU ผูก)
+    if (!skuId) return NextResponse.json({ error: "รายการนี้ยังไม่ผูก SKU — เพิ่มแหล่งซื้อที่ 2 ไม่ได้" }, { status: 400 });
+    const s = body.source2 ?? {};
+    const link = String(s.link ?? "").trim();
+    if (link && !/^https?:\/\//i.test(link)) return NextResponse.json({ error: "ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://" }, { status: 400 });
+    const p = s.price === "" || s.price == null ? null : Number(s.price);
+    if (p != null && (!isFinite(p) || p < 0)) return NextResponse.json({ error: "ราคาที่ 2 ไม่ถูกต้อง" }, { status: 400 });
+    skuPatch.alt_seller = String(s.seller ?? "").trim() || null;
+    skuPatch.alt_price = p;
+    skuPatch.alt_currency = isCNY(s.currency) ? "YUAN" : "THB";
+    skuPatch.alt_link = link || null;
   } else {
     return NextResponse.json({ error: "field ไม่ถูกต้อง" }, { status: 400 });
   }
