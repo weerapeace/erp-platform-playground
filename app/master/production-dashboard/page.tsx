@@ -15,6 +15,7 @@ import { getStatusStyle } from "@/lib/status-config";
 import { apiFetch } from "@/lib/api";
 import type { ProductionJob, ProductionDashboardResponse, ProdJobCategory } from "@/app/api/mo/production-dashboard/route";
 import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
+import { MoStatusModal } from "@/components/mo-status-modal";
 
 type CatKey = "all" | ProdJobCategory;
 const CATS: { key: CatKey; label: string; icon: string }[] = [
@@ -270,6 +271,7 @@ export default function ProductionDashboardPage() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());   // กลุ่มที่พับอยู่
   const [view, setView] = useState<"list" | "calendar" | "game">("list");
   const [cardDir, setCardDir] = useState<"h" | "v">("h");   // การ์ดแนวนอน/แนวตั้ง (โหมดจัดกลุ่ม)
+  const [statusMoId, setStatusMoId] = useState<string | null>(null);   // Popup สถานะงาน
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null);
 
   useEffect(() => {
@@ -333,8 +335,8 @@ export default function ProductionDashboardPage() {
     }
   };
 
-  // กดการ์ด → เปิดเช็กลิสต์เตรียม/ตัด (modal ตัวจริงในบอร์ดจ่ายงาน) ผ่าน ?mo=id
-  const openJob = (j: ProductionJob) => router.push(`/master/work-board?mo=${j.id}`);
+  // กดการ์ด → Popup สถานะงาน (มีปุ่มไปเช็กลิสต์เต็มในป๊อปอัป)
+  const openJob = (j: ProductionJob) => setStatusMoId(j.id);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -450,6 +452,12 @@ export default function ProductionDashboardPage() {
           </>}
         </main>
       </div>
+
+      {/* Popup สถานะงาน (กดจากการ์ด/แถว/ปฏิทิน) */}
+      {statusMoId && (
+        <MoStatusModal moId={statusMoId} onClose={() => setStatusMoId(null)}
+          onOpenChecklist={(id) => { setStatusMoId(null); router.push(`/master/work-board?mo=${id}`); }} />
+      )}
 
       {/* ป๊อปอัปรายละเอียดงาน */}
       <ERPModal open={selectedJob !== null} onClose={() => setSelectedJob(null)} size="md" title={selectedJob ? `🧰 ${selectedJob.product_sku ?? selectedJob.mo_no}` : ""}>
