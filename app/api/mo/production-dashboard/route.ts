@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { computeMoStatus, type MoStatusTone } from "@/lib/mo-status";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -55,6 +56,9 @@ export type ProductionJob = {
   progress_pct: number;                 // รับคืนแล้วกี่ % ของจำนวน
   due_date: string | null; status: string | null;
   delivery_confirmed: boolean;          // ยืนยันนัดส่งลูกค้าแล้ว (true) vs แค่ deadline (false)
+  status_code: number;                  // สถานะงาน 9 ขั้น (1..9)
+  status_short: string;                 // ป้ายสั้นบนการ์ด
+  status_tone: MoStatusTone;            // สี badge
   mo_group: string | null;              // ชุดใบสั่งงาน (mo_groups)
   categories: ProdJobCategory[];
   dept_names: string | null;            // โต๊ะ/แผนกที่กำลังทำ (รวมชื่อ)
@@ -107,6 +111,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const info = await skuInfoMap(admin, moList.map((m) => m.product_sku as string).filter(Boolean) as string[]);
 
+  // ความคืบหน้าเตรียม/ตัด ต่อใบ (aggregate ที่ DB) → คำนวณสถานะ 9 ขั้นบนการ์ด
+  const { data: pcData } = await admin.rpc("erp_mo_prep_cut", { p_mo_nos: moList.map((m) => String(m.mo_no)) });
+  const prepCut = (pcData ?? {}) as Record<string, { pd: number; pt: number; cd: number; ct: number }>;
+
   const counts = { all: 0, unassigned: 0, in_production: 0, piecework: 0, done_waiting: 0 };
   const jobs: ProductionJob[] = moList.map((m) => {
     const moNo = String(m.mo_no);
@@ -120,6 +128,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (pieceworkMo.has(moNo)) categories.push("piecework");
     if (qty > 0 && received >= qty - 0.0001) categories.push("done_waiting");
     const inf = info.get(String(m.product_sku)) ?? { image_url: null, brand: null, brand_color: null, category: null };
+    const pc = prepCut[moNo] ?? { pd: 0, pt: 0, cd: 0, ct: 0 };
+    const st = computeMoStatus({ prepDone: pc.pd, prepTotal: pc.pt, cutDone: pc.cd, cutTotal: pc.ct, qty, dispatched, received });
     counts.all += 1;
     if (categories.includes("unassigned")) counts.unassigned += 1;
     if (categories.includes("in_production")) counts.in_production += 1;
@@ -131,6 +141,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       progress_pct: qty > 0 ? Math.min(100, Math.round((received / qty) * 100)) : 0,
       due_date: (m.due_date as string) ?? null, status: (m.status as string) ?? null,
       delivery_confirmed: !!m.delivery_confirmed,
+      status_code: st.code, status_short: st.short, status_tone: st.tone,
       mo_group: groupOfMo.get(moNo) ?? null,
       categories, dept_names: deptsByMo.get(moNo) ? [...deptsByMo.get(moNo)!].join(", ") : null,
       worker_names: workersByMo.get(moNo) ? [...workersByMo.get(moNo)!].join(", ") : null,

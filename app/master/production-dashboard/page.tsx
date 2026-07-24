@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import type { ProductionJob, ProductionDashboardResponse, ProdJobCategory } from "@/app/api/mo/production-dashboard/route";
 import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
 import { MoStatusModal } from "@/components/mo-status-modal";
+import { MO_STATUS_TONE_CLASS } from "@/lib/mo-status";
 
 type CatKey = "all" | ProdJobCategory;
 const CATS: { key: CatKey; label: string; icon: string }[] = [
@@ -60,7 +61,10 @@ function JobCard({ j, onClick, vertical }: { j: ProductionJob; onClick?: () => v
           <div className="text-sm font-semibold text-slate-800 line-clamp-2 leading-snug">{j.product_name || j.product_sku || "—"}</div>
           <div className="font-mono text-[10px] text-slate-400 truncate">{j.product_sku} · {j.mo_no}</div>
         </div>
-        <StatusBadge status={j.status} />
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${MO_STATUS_TONE_CLASS[j.status_tone]}`}>{j.status_short}</span>
+          <StatusBadge status={j.status} />
+        </div>
       </div>
       <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 flex-wrap">
         {j.brand && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: j.brand_color || "#cbd5e1" }} />{j.brand}</span>}
@@ -393,6 +397,8 @@ export default function ProductionDashboardPage() {
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="w-4 h-4 accent-blue-600" /> จัดกลุ่ม
             </label>
+            <button onClick={() => { setGrouped(true); setGroupField("desk"); }}
+              className={`h-8 px-2.5 text-sm rounded-lg border shrink-0 ${grouped && groupField === "desk" ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>🔨 ตามโต๊ะ</button>
             {grouped && <>
               <select value={groupField} onChange={(e) => setGroupField(e.target.value as GroupField)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
                 {GROUP_FIELDS.map((g) => <option key={g.key} value={g.key}>ตาม{g.label}</option>)}

@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { computeMoStatus } from "@/lib/mo-status";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -138,15 +139,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // ---- สถานะ 9 ขั้น (จ่าย/ส่ง ชนะ) ----
   const prepOk = prepTotal > 0 && prepDone >= prepTotal;
   const cutOk = cutTotal === 0 || cutDone >= cutTotal;
-  let code = 1, label = "ยังไม่เริ่ม";
-  if (qty > 0 && received >= qty)      { code = 9; label = "ส่งครบแล้ว"; }
-  else if (received > 0)               { code = 8; label = "ส่งแล้วบางส่วน"; }
-  else if (qty > 0 && dispatched >= qty) { code = 6; label = "จ่ายครบแล้ว — กำลังผลิต"; }
-  else if (dispatched > 0)             { code = 7; label = "จ่ายบางส่วน — ยังจ่ายไม่ครบ"; }
-  else if (prepOk && cutOk)            { code = 5; label = "พร้อมจ่าย"; }
-  else if (cutDone > 0 && !prepOk)     { code = 4; label = "ตัดแล้วแต่ของยังไม่ครบ"; }
-  else if (prepOk && cutDone === 0)    { code = 3; label = "เตรียมครบ รอตัด"; }
-  else if (prepDone > 0)               { code = 2; label = "ของไม่ครบ"; }
+  const st = computeMoStatus({ prepDone, prepTotal, cutDone, cutTotal, qty, dispatched, received });
+  const code = st.code, label = st.label;
 
   // note: จ่าย/ส่งแล้วแต่เตรียม/ตัดยังไม่ครบ
   let note: string | null = null;
