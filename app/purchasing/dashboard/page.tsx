@@ -11,6 +11,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { ERPModal } from "@/components/modal";
 import { Pager } from "@/components/pager";
 import { SortTh, sortRows, type SortState } from "@/components/sort-th";
+import { SearchableSelect } from "@/components/searchable-select";
 import { apiFetch } from "@/lib/api";
 import type { DrillRow } from "@/app/api/purchasing/dashboard/list/route";
 
@@ -295,6 +296,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const [orderQty, setOrderQty] = useState("");
   const [detail, setDetail] = useState<DrillRow | null>(null);      // popup รายละเอียด
   const [uploading, setUploading] = useState(false);                // กำลังอัปรูปเข้า SKU
+  const [stores, setStores] = useState<string[]>([]);               // รายชื่อร้าน (pickup)
   const open = drill !== null;
   const isWaiting = drill?.type === "waiting";
   const isReceive = drill?.type === "pending_receive";
@@ -304,6 +306,8 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   useEffect(() => { if (open) { setQ(""); setSeller(""); setGrouped(false); setView("card"); setSort(null); setPage(0); setData(null); setOpenOrder(null); setDetail(null); } }, [open, drill?.type, drill?.seller]);
   // เลื่อนหน้าจอมาที่แผงเมื่อเปิด/สลับการ์ด (โดยเฉพาะเวลากดจากการ์ดด้านล่าง)
   useEffect(() => { if (open) panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }, [open, drill?.type, drill?.seller]);
+  // รายชื่อร้าน (pickup) — ดึงครั้งเดียวตอนเปิดแผง
+  useEffect(() => { if (open) apiFetch("/api/purchasing/stores").then((r) => r.json()).then((j) => setStores((j.stores ?? []) as string[])).catch(() => {}); }, [open]);
   // กลับหน้าแรกเมื่อเปลี่ยนตัวกรอง/เรียง/มุมมอง
   useEffect(() => { setPage(0); }, [q, seller, grouped, view, sort?.key, sort?.dir, pageSize]);
 
@@ -587,7 +591,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
       {/* popup รายละเอียด + เติมข้อมูลที่ขาด (กดจากการ์ด/แถว) */}
       {detail && (
         <DetailModal key={detail.id} r={detail} type={drill?.type ?? ""} onClose={() => setDetail(null)}
-          onEnrich={enrich} onUpload={uploadCover} onSaveSource2={saveSource2} uploading={uploading} busy={busy.has(detail.id)} />
+          onEnrich={enrich} onUpload={uploadCover} onSaveSource2={saveSource2} stores={stores} uploading={uploading} busy={busy.has(detail.id)} />
       )}
     </div>
   );
@@ -598,14 +602,15 @@ const MISS_LABEL: Record<string, string> = { image: "รูป", price: "รา�
 const curTh = (c?: string | null) => isYuan(c) ? "YUAN" : "THB";
 const priceStr = (p?: number | null, c?: string | null) => p == null ? "—" : (isYuan(c) ? `¥${p.toLocaleString()}` : `฿${p.toLocaleString()}`);
 
-function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, uploading, busy }: {
+function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stores, uploading, busy }: {
   r: DrillRow; type: string; onClose: () => void;
   onEnrich: (r: DrillRow, field: string, value: string | number, currency?: string) => Promise<void>;
   onUpload: (r: DrillRow, file: File) => Promise<void>;
   onSaveSource2: (r: DrillRow, s: { seller: string; price: string; currency: string; link: string }) => Promise<void>;
-  uploading: boolean; busy: boolean;
+  stores: string[]; uploading: boolean; busy: boolean;
 }) {
   const isReceive = type === "pending_receive";
+  const storeOpts = stores.map((s) => ({ value: s, label: s }));
   const missing = r.missing ?? [];
   const miss = (f: string) => missing.includes(f);
   const [editing, setEditing] = useState<Set<string>>(new Set());
@@ -617,6 +622,7 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, uplo
   // ลิงก์โชว์เฉพาะของออนไลน์ (Taobao/1688) — เดาจากชื่อร้าน/มีลิงก์อยู่แล้ว
   const looksTaobao = /taobao|tao ?bao|1688/i.test(r.seller ?? "") || !!r.purchase_url;
   const [showLink, setShowLink] = useState(looksTaobao);
+  const [showLink2, setShowLink2] = useState(/taobao|tao ?bao|1688/i.test(r.alt_seller ?? "") || !!r.alt_link);
   const fileRef = useRef<HTMLInputElement>(null);
   const box = (on: boolean) => `rounded-lg border p-2.5 ${on ? "border-amber-300 bg-amber-50/60" : "border-slate-100"}`;
   const saveBtn = "h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50";
@@ -715,8 +721,7 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, uplo
                 <span className="text-slate-500 w-14 shrink-0">🏪 ร้าน</span>
                 {isReceive ? <span className="text-slate-700 flex-1 min-w-0 truncate">{r.seller || "—"}</span>
                   : inEdit("seller") ? <>
-                    <input value={sellerDraft} onChange={(e) => setSellerDraft(e.target.value)} placeholder="ชื่อร้าน / ผู้ขาย"
-                      className="h-8 flex-1 min-w-[110px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                    <div className="flex-1 min-w-[120px]"><SearchableSelect value={sellerDraft} options={storeOpts} onChange={setSellerDraft} onCreate={setSellerDraft} placeholder="เลือก / พิมพ์ชื่อร้าน" createLabel="ใช้ร้าน" /></div>
                     <button disabled={busy} onClick={saveSeller} className={saveBtn}>บันทึก</button>
                     <Cancel f="seller" />
                     <div className="w-full flex items-center gap-1.5 mt-1">
@@ -770,15 +775,20 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, uplo
             <div className="px-3 py-2">
               {editing.has("source2") ? (
                 <div className="space-y-1.5">
-                  <input value={s2.seller} onChange={(e) => setS2((v) => ({ ...v, seller: e.target.value }))} placeholder="ชื่อร้านที่ 2"
-                    className="h-8 w-full px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                  <SearchableSelect value={s2.seller} options={storeOpts} onChange={(v) => setS2((s) => ({ ...s, seller: v }))} onCreate={(v) => setS2((s) => ({ ...s, seller: v }))} placeholder="เลือก / พิมพ์ชื่อร้านที่ 2" createLabel="ใช้ร้าน" />
                   <div className="flex items-center gap-2 flex-wrap">
                     <input type="number" min={0} value={s2.price} onChange={(e) => setS2((v) => ({ ...v, price: e.target.value }))} placeholder="ราคา"
                       className="h-8 w-24 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
                     <CurToggle val={s2.currency} onChange={(c) => setS2((v) => ({ ...v, currency: c }))} />
                   </div>
-                  <input type="url" value={s2.link} onChange={(e) => setS2((v) => ({ ...v, link: e.target.value }))} placeholder="ลิงก์ร้านที่ 2"
-                    className="h-8 w-full px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button onClick={() => setShowLink2((v) => !v)}
+                      className={`text-[11px] px-2 py-0.5 rounded-full border shrink-0 ${showLink2 ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🛒 Taobao</button>
+                    {showLink2
+                      ? <input type="url" value={s2.link} onChange={(e) => setS2((v) => ({ ...v, link: e.target.value }))} placeholder="ลิงก์ร้านที่ 2"
+                          className="h-8 flex-1 min-w-[140px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                      : <span className="text-[11px] text-slate-400">ไม่ใช่ของออนไลน์ — ซ่อนลิงก์ไว้</span>}
+                  </div>
                   <div className="flex items-center gap-2">
                     <button disabled={busy} onClick={saveS2} className={saveBtn}>บันทึก</button>
                     <button onClick={() => closeEdit("source2")} className="text-xs text-slate-500 hover:underline">ยกเลิก</button>
