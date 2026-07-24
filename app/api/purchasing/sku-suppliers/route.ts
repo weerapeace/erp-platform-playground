@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const SELECT =
-  "id, item_sku_id, supplier_partner_id, price, currency, is_default, supplier_sku, moq, lead_time_days, price_tiers, note, " +
+  "id, item_sku_id, supplier_partner_id, price, currency, is_default, supplier_sku, moq, lead_time_days, price_tiers, note, purchase_link, " +
   "partner:supplier_partner_id(id, display_name, name_th, default_currency, shop_country)";
 
 // ทำความสะอาดราคาขั้นบันได: [{qty,price}] เรียงตามจำนวนน้อย→มาก
@@ -52,6 +52,7 @@ function shape(r: Record<string, unknown>) {
     lead_time_days: r.lead_time_days == null ? null : Number(r.lead_time_days),
     price_tiers: cleanTiers(r.price_tiers),
     note: (r.note as string) ?? null,
+    purchase_link: (r.purchase_link as string) ?? null,
   };
 }
 
@@ -138,6 +139,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       moq: num(b.moq), lead_time_days: num(b.lead_time_days),
       price_tiers: "price_tiers" in b ? cleanTiers(b.price_tiers) : [],
       note: typeof b.note === "string" ? b.note : null, is_active: true,
+      purchase_link: typeof b.purchase_link === "string" ? (b.purchase_link.trim() || null) : null,
     };
     ({ data, error } = await admin.from("supplier_items").insert(row).select(SELECT).single());
   }
@@ -172,6 +174,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("lead_time_days" in b) patch.lead_time_days = num(b.lead_time_days);
   if ("price_tiers" in b) patch.price_tiers = cleanTiers(b.price_tiers);
   if ("note" in b) patch.note = typeof b.note === "string" ? b.note : null;
+  if ("purchase_link" in b) patch.purchase_link = typeof b.purchase_link === "string" ? (b.purchase_link.trim() || null) : null;
 
   if (b.is_default === true) {
     if (skuId) await admin.from("supplier_items").update({ is_default: false }).eq("item_sku_id", skuId).eq("is_default", true);

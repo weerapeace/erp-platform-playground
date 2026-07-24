@@ -19,11 +19,14 @@ export type SkuSupplierRow = {
   partner_country: string | null; price: number | null; currency: string; is_default: boolean;
   supplier_sku: string | null; moq: number | null; lead_time_days: number | null; note: string | null;
   price_tiers: { qty: number; price: number }[];
+  purchase_link: string | null;
 };
 type Supplier = { id: string; name: string; currency: string; cn?: boolean };
 
 const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
 const CURRENCIES = ["THB", "RMB"];
+// ลิงก์ร้านจีน (taobao/tmall/1688) → โชว์ปุ่ม 淘
+const isTaobao = (url: string) => /taobao|tmall|1688|world\.taobao/i.test(url);
 
 export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, reloadSignal }: {
   skuId: string;
@@ -118,6 +121,15 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
     finally { setBusy(false); }
   };
 
+  // ใส่/แก้ลิงก์สินค้าของร้าน (taobao ฯลฯ) — กดปุ่มแล้วให้วางลิงก์
+  const promptLink = (r: SkuSupplierRow) => {
+    if (typeof window === "undefined") return;
+    const v = window.prompt(`วางลิงก์สินค้าของร้าน "${r.partner_name}" (taobao / tmall / 1688 ฯลฯ)`, r.purchase_link ?? "");
+    if (v === null) return;   // กดยกเลิก
+    const link = v.trim() || null;
+    if (link !== (r.purchase_link || null)) void patchRow(r.id, { purchase_link: link });
+  };
+
   const delRow = async (id: string) => {
     setBusy(true); setErr(null);
     try {
@@ -186,12 +198,28 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
               <button type="button" onClick={() => void delRow(r.id)} disabled={busy}
                 className="text-slate-300 hover:text-red-500 text-sm">✕</button>
             </div>
-            {/* บรรทัดรอง: รหัสร้าน + MOQ + leadtime (แก้ได้) */}
+            {/* รหัสของร้าน (เด่น) + ปุ่มลิงก์ร้าน taobao — แต่ละร้านมีรหัส/ลิงก์ของตัวเอง */}
+            <div className="flex items-center gap-2 mt-1.5 pl-6 flex-wrap">
+              <span className="text-xs text-slate-500 shrink-0">รหัสของร้าน</span>
+              <input defaultValue={r.supplier_sku ?? ""} disabled={busy}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (r.supplier_sku || null)) void patchRow(r.id, { supplier_sku: v }); }}
+                className="h-7 w-36 px-2 text-sm border border-slate-300 rounded-md" placeholder="—" title="รหัสสินค้าของร้านนี้ (ใช้บนใบ PO ร้านจีน)" />
+              {r.purchase_link ? (
+                <span className="inline-flex items-center gap-0.5">
+                  <a href={r.purchase_link} target="_blank" rel="noreferrer" title={r.purchase_link}
+                    className={`h-7 px-2 inline-flex items-center gap-1 text-xs font-medium rounded-md border ${isTaobao(r.purchase_link) ? "border-orange-300 text-orange-600 bg-orange-50 hover:bg-orange-100" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
+                    {isTaobao(r.purchase_link) ? "淘 เปิดร้าน" : "🔗 เปิดลิงก์"}
+                  </a>
+                  <button type="button" onClick={() => promptLink(r)} disabled={busy} title="แก้ลิงก์"
+                    className="h-7 w-7 inline-flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded-md">✎</button>
+                </span>
+              ) : (
+                <button type="button" onClick={() => promptLink(r)} disabled={busy} title="ใส่ลิงก์สินค้าของร้าน (taobao ฯลฯ)"
+                  className="h-7 px-2 inline-flex items-center gap-1 text-xs text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-orange-300 hover:text-orange-500">🔗 ใส่ลิงก์ taobao</button>
+              )}
+            </div>
+            {/* บรรทัดรอง: MOQ + leadtime + ขั้นราคา + ประวัติ */}
             <div className="flex items-center gap-3 mt-1 pl-6 text-[11px] text-slate-400 flex-wrap">
-              <label className="flex items-center gap-1">รหัสร้าน
-                <input defaultValue={r.supplier_sku ?? ""} disabled={busy}
-                  onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (r.supplier_sku || null)) void patchRow(r.id, { supplier_sku: v }); }}
-                  className="h-6 w-24 px-1 border border-slate-200 rounded" placeholder="—" title="รหัสสินค้าของร้านนี้ (ใช้บนใบ PO ร้านจีน)" /></label>
               <label className="flex items-center gap-1">MOQ
                 <input type="number" step="any" defaultValue={r.moq ?? ""} disabled={busy}
                   onBlur={(e) => { const v = e.target.value === "" ? null : Number(e.target.value); if (v !== r.moq) void patchRow(r.id, { moq: v }); }}
