@@ -473,6 +473,8 @@ export type MasterCRUDConfig = {
   };
   /** section พิเศษในฟอร์ม (เช่น รูป Description ของ Parent SKU) — render เมื่อเปิดฟอร์ม */
   extraFormSection?: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode;
+  /** section พิเศษเต็มความกว้าง ใต้ฟอร์ม (โหมดดู) — เช่น ตารางร้านที่จำหน่ายในหน้า SKU (ของกลาง) */
+  recordSections?: { key: string; title?: string; render: (ctx: { recordId: string; row: Record<string, unknown>; readonly: boolean }) => React.ReactNode }[];
   /** แท็บพิเศษต่อโมดูล — โผล่ในแถบแท็บ (ต่อจากแท็บจาก Field Registry) เช่น "🛍 เว็บไซต์" ของ Parent SKU */
   extraTabs?: { key: string; label: string; icon?: string; render: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode }[];
   /**
@@ -2554,6 +2556,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             </div>
           );
         })()}
+
+        {/* recordSections — section พิเศษต่อโมดูล (ของกลาง) เช่น ตารางร้านที่จำหน่ายในหน้า SKU */}
+        {drawerMode === "view" && editingId && config.recordSections?.map((s) => (
+          <div key={s.key} className="mt-6 pt-4 border-t border-slate-100">
+            {s.title && <div className="text-sm font-semibold text-slate-700 mb-2">{s.title}</div>}
+            {s.render({ recordId: String(editingId), row: form as Record<string, unknown>, readonly: !canEdit })}
+          </div>
+        ))}
       </Drawer>
 
       <ConfirmDialog open={confirmDiscard} onClose={() => setConfirmDiscard(false)}

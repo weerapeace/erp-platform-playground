@@ -940,7 +940,8 @@ function CnPoBuilder({ shop, items, printPo, onSaved, onClose }: {
   const saveSku = async () => {
     setSaving(true);
     try {
-      const payload = rows.filter((r) => r.sku_id).map((r) => ({ sku_id: r.sku_id, supplier_sku_code: r.supplier_sku_code, name_cn: r.name_cn, name_en: r.name_en, purchase_uom_en: r.uom_en }));
+      // รหัสร้าน = per-shop (แก้ที่ตารางร้านในหน้า SKU) → ไม่ save กลับฟิลด์เดี่ยว SKU แล้ว เก็บแค่ชื่อ/หน่วย
+      const payload = rows.filter((r) => r.sku_id).map((r) => ({ sku_id: r.sku_id, name_cn: r.name_cn, name_en: r.name_en, purchase_uom_en: r.uom_en }));
       if (payload.length === 0) { toast.info("ไม่มีรายการที่ผูก SKU ให้บันทึก"); setSaving(false); return; }
       const res = await apiFetch("/api/purchasing/sku-cn-fields", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: payload }) });
       const j = await res.json().catch(() => ({}));

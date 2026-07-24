@@ -13,6 +13,7 @@ import type { MasterCRUDConfig } from "@/components/master-crud";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { SkuWizard } from "./sku-wizard";
+import { SkuSupplierList } from "@/components/sku-supplier-list";
 
 // F20: client-only render — กัน Worker 1102 (SSR component หนัก)
 const MasterCRUDPage = dynamic(
@@ -119,6 +120,12 @@ export default function SkusV2Page() {
           toast.success(`คัดลอกเป็น ${j.code} แล้ว — แก้ไขรายละเอียดได้`);
         } catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกไม่สำเร็จ"); }
       },
+    }],
+    // ตารางร้านที่จำหน่าย (1 สินค้าหลายร้าน) — รหัสร้าน/ราคา/ตั้งร้านหลัก ★ ในหน้า SKU
+    recordSections: [{
+      key: "suppliers",
+      title: "🏪 ร้านที่จำหน่าย + ราคา (แต่ละร้านมีรหัสร้านของตัวเอง · ★ = ร้านหลัก)",
+      render: ({ recordId }) => <SkuSupplierList skuId={recordId} defaultOpen />,
     }],
   }), [toast]);
 

@@ -57,8 +57,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
   }
 
+  // รหัสร้านต่อร้าน (supplier_items.supplier_sku) — match ด้วย (sku, ชื่อร้าน) → ใช้บนใบ PO ตามร้านที่สั่งจริง
+  const shopSkuMap = new Map<string, string>();
+  for (let i = 0; i < skuIds.length; i += 300) {
+    const chunk = skuIds.slice(i, i + 300);
+    const { data: si2 } = await admin.from("supplier_items").select("item_sku_id, supplier_partner, supplier_sku")
+      .in("item_sku_id", chunk).eq("is_active", true).not("supplier_sku", "is", null);
+    for (const s of (si2 ?? []) as Record<string, unknown>[]) {
+      const pname = String(s.supplier_partner ?? "").trim();
+      if (s.item_sku_id && s.supplier_sku && pname) shopSkuMap.set(`${s.item_sku_id}::${pname}`, String(s.supplier_sku));
+    }
+  }
+
   const rows = (prs ?? []).map((p) => {
     const sk = p.item_sku_id ? skuMap.get(String(p.item_sku_id)) : null;
+    const shopSku = p.item_sku_id ? shopSkuMap.get(`${p.item_sku_id}::${String(p.seller_name ?? "").trim()}`) : null;
     const key = sk?.cover ?? p.image_key ?? null;
     return {
       id: String(p.id),
@@ -81,7 +94,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       cover_key: key,   // r2 key ดิบ (ไว้แก้รูป SKU)
       image_url: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
       purchase_link: sk?.link ?? null,   // ลิงก์ซื้อสินค้า (จาก SKU)
-      supplier_sku_code: sk?.supplier_sku_code ?? null,   // ฟิลด์ใบ PO ร้านจีน (จาก SKU)
+      supplier_sku_code: shopSku ?? sk?.supplier_sku_code ?? null,   // รหัสร้าน: per-shop (supplier_items) ก่อน แล้ว fallback ฟิลด์เดี่ยว SKU
       name_cn: sk?.name_cn ?? null, name_en: sk?.name_en ?? null, purchase_uom_en: sk?.purchase_uom_en ?? null,
       moq: (p.item_sku_id ? supMap.get(String(p.item_sku_id))?.moq : null) ?? null,
       lead_time_days: (p.item_sku_id ? supMap.get(String(p.item_sku_id))?.lead : null) ?? null,

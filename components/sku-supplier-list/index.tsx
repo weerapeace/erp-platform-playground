@@ -186,8 +186,12 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
               <button type="button" onClick={() => void delRow(r.id)} disabled={busy}
                 className="text-slate-300 hover:text-red-500 text-sm">✕</button>
             </div>
-            {/* บรรทัดรอง: MOQ + leadtime (แก้ได้) */}
-            <div className="flex items-center gap-3 mt-1 pl-6 text-[11px] text-slate-400">
+            {/* บรรทัดรอง: รหัสร้าน + MOQ + leadtime (แก้ได้) */}
+            <div className="flex items-center gap-3 mt-1 pl-6 text-[11px] text-slate-400 flex-wrap">
+              <label className="flex items-center gap-1">รหัสร้าน
+                <input defaultValue={r.supplier_sku ?? ""} disabled={busy}
+                  onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (r.supplier_sku || null)) void patchRow(r.id, { supplier_sku: v }); }}
+                  className="h-6 w-24 px-1 border border-slate-200 rounded" placeholder="—" title="รหัสสินค้าของร้านนี้ (ใช้บนใบ PO ร้านจีน)" /></label>
               <label className="flex items-center gap-1">MOQ
                 <input type="number" step="any" defaultValue={r.moq ?? ""} disabled={busy}
                   onBlur={(e) => { const v = e.target.value === "" ? null : Number(e.target.value); if (v !== r.moq) void patchRow(r.id, { moq: v }); }}
