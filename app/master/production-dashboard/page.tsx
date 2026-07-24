@@ -16,7 +16,7 @@ import { apiFetch } from "@/lib/api";
 import type { ProductionJob, ProductionDashboardResponse, ProdJobCategory } from "@/app/api/mo/production-dashboard/route";
 import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
 import { MoStatusModal } from "@/components/mo-status-modal";
-import { MO_STATUS_TONE_CLASS } from "@/lib/mo-status";
+import { MO_STATUS_TONE_CLASS, type MoStatusTone } from "@/lib/mo-status";
 
 type CatKey = "all" | ProdJobCategory;
 const CATS: { key: CatKey; label: string; icon: string }[] = [
@@ -37,6 +37,50 @@ function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <span className="text-slate-300">—</span>;
   const s = getStatusStyle(status);
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${s.bg} ${s.text} ${s.border}`}>{s.label}</span>;
+}
+
+// ℹ️ ป้ายอธิบาย logic ของสถานะงาน 9 ขั้น (มุมขวาบน)
+const STATUS_LEGEND: { tone: MoStatusTone; label: string; logic: string }[] = [
+  { tone: "gray",   label: "ยังไม่เริ่ม",   logic: "ยังไม่ได้เตรียม/ตัด" },
+  { tone: "rose",   label: "ของไม่ครบ",    logic: "เริ่มเตรียมแล้ว แต่วัตถุดิบยังไม่ครบทุกรายการ" },
+  { tone: "amber",  label: "รอตัด",         logic: "เตรียมครบแล้ว · ยังไม่ได้ตัด" },
+  { tone: "rose",   label: "ตัด·ของไม่ครบ", logic: "ตัดไปบ้าง แต่ของเตรียมยังไม่ครบ" },
+  { tone: "green",  label: "พร้อมจ่าย",     logic: "เตรียม+ตัด ครบทุกรายการ · ยังไม่จ่าย" },
+  { tone: "indigo", label: "กำลังผลิต",     logic: "จ่ายงานให้โต๊ะครบจำนวนแล้ว" },
+  { tone: "indigo", label: "จ่ายบางส่วน",  logic: "จ่ายไปบ้าง · ยังจ่ายไม่ครบจำนวน" },
+  { tone: "amber",  label: "ส่งบางส่วน",   logic: "ช่างส่งคืนมาบ้าง · ยังไม่ครบ" },
+  { tone: "green",  label: "ส่งครบ",        logic: "รับคืนครบจำนวน (จบงาน)" },
+];
+
+function StatusLegend() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={() => setOpen((o) => !o)} title="ความหมาย/logic ของสถานะงาน"
+        className="h-9 px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center gap-1 text-sm">ℹ️ <span className="hidden sm:inline">สถานะ</span></button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-30 w-[19rem] bg-white border border-slate-200 rounded-xl shadow-xl p-3">
+          <div className="text-sm font-semibold text-slate-700 mb-2">สถานะงาน 9 ขั้น — คิดจากอะไร</div>
+          <div className="space-y-1.5 max-h-[70vh] overflow-y-auto">
+            {STATUS_LEGEND.map((it, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${MO_STATUS_TONE_CLASS[it.tone]}`}>{i + 1}. {it.label}</span>
+                <span className="text-[11px] text-slate-500 flex-1 pt-0.5">{it.logic}</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-2 pt-2 border-t border-slate-100">💡 ถ้าจ่าย/ส่งแล้วแต่ของยังไม่ครบ → ขึ้นสถานะจ่าย/ส่งก่อน (มีป้ายเตือนในป๊อปอัปสถานะ)</div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // จัดกลุ่ม (โหมดการ์ด) — แบรนด์ / หมวดสินค้า / สถานะ / เดือนกำหนดส่ง
@@ -350,6 +394,7 @@ export default function ProductionDashboardPage() {
           <p className="text-sm text-slate-500 mt-0.5">งานผลิตทุกสถานะ — กรองซ้าย · สลับ ตาราง/การ์ด · ค้นหาได้</p>
         </div>
         <div className="flex items-center gap-2">
+          <StatusLegend />
           <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
             <button onClick={() => setView("list")} className={`h-9 px-3 font-medium ${view === "list" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 รายการ</button>
             <button onClick={() => setView("calendar")} className={`h-9 px-3 font-medium border-l border-slate-200 ${view === "calendar" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📅 ปฏิทิน</button>
