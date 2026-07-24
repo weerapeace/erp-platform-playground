@@ -27,15 +27,17 @@ async function googleTranslate(text: string, tl: string): Promise<string> {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
-  let body: { text?: string };
+  let body: { text?: string; to?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const text = (body.text ?? "").trim();
   if (!text) return NextResponse.json({ error: "no text" }, { status: 400 });
   if (text.length > 4000) return NextResponse.json({ error: "ข้อความยาวเกินไป (จำกัด 4000 ตัวอักษร)" }, { status: 400 });
 
+  // to = "en"/"th" บังคับปลายทาง (เช่น จีน→อังกฤษ) · ไม่ส่ง = ตรวจเอง (ไทย→อังกฤษ, อื่น→ไทย)
+  const forced = body.to === "en" ? "en" : body.to === "th" ? "th" : null;
   const hasThai = /[฀-๿]/.test(text);
-  const target = hasThai ? "English" : "Thai";
-  const tlCode = hasThai ? "en" : "th";
+  const tlCode = forced ?? (hasThai ? "en" : "th");
+  const target = tlCode === "en" ? "English" : "Thai";
 
   // 1) ลอง Cloudflare AI ก่อน (ถ้าพร้อม — บน CF หรือมี CF_ACCOUNT_ID/CF_AI_API_TOKEN)
   const ai = await getAi();

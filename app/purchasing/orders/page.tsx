@@ -33,8 +33,11 @@ type Row = {
   purchase_link: string | null; moq: number | null; lead_time_days: number | null;
   price_tiers: { qty: number; price: number }[];
   source_mo_no: string | null; used_for_label: string | null;
+  supplier_sku_code: string | null; name_cn: string | null; name_en: string | null; purchase_uom_en: string | null;   // ใบ PO ร้านจีน
 };
 type CartLine = { qty: number; partial: boolean };
+// รายการที่ resolve แล้วสำหรับพิมพ์ PO (ไทย=ชื่อ/รหัสเรา · จีน=ชื่อจีน+อังกฤษ/รหัสร้าน)
+type PoPrintItem = { image_url: string | null; code: string; name: string; name_en?: string | null; qty: number; uom: string; price: number; currency: string };
 
 // ลิงก์ Taobao/Tmall → ใช้โชว์ป้าย Taobao
 const TAOBAO_RE = /taobao\.com|tmall\.com|world\.taobao/i;
@@ -97,6 +100,7 @@ export default function PurchaseOrdersPage() {
   const [linkRow, setLinkRow] = useState<Row | null>(null);          // popup ใส่ลิงก์สินค้า
   const [reviewOpen, setReviewOpen] = useState(false);               // ป๊อปทวนรายการก่อนสร้างใบสั่งซื้อ
   const [contactShop, setContactShop] = useState<{ name: string; partnerId: string | null } | null>(null);   // popup ติดต่อร้าน
+  const [cnBuilder, setCnBuilder] = useState<{ shop: string; items: Row[] } | null>(null);   // หน้าต่างเตรียมใบ PO ร้านจีน
   const [suppliers, setSuppliers] = useState<{ id: string; name: string; cn?: boolean }[]>([]);
   const [taobaoShops, setTaobaoShops] = useState<Set<string>>(new Set());   // ชื่อร้านที่เป็น Taobao
   const [shopQ, setShopQ] = useState("");
@@ -258,30 +262,37 @@ export default function PurchaseOrdersPage() {
   }, [cartRows, cart, orderDate, submitPO]);
 
   // ── PDF ใบขอราคา (RFQ) ส่งร้าน — เปิดหน้าพิมพ์ (Save as PDF) สองภาษาตามสกุลเงินร้าน ──
-  // พิมพ์ "ใบสั่งซื้อ (ร่าง)" PDF — ร้านไทย=ไทยล้วน · ร้านจีน=จีน+อังกฤษกำกับ · มีราคา+ยอดรวม (ไม่มี VAT)
-  const printPo = useCallback((shop: string, items: Row[], cn: boolean) => {
+  // พิมพ์ "ใบสั่งซื้อ (ร่าง)" PDF — A4 แนวตั้ง · ร้านไทย=ไทย · ร้านจีน=จีน+อังกฤษ · toggle ราคา · ปุ่มบันทึกเป็นรูป
+  const printPo = useCallback((shop: string, items: PoPrintItem[], opts: { cn: boolean; showPrice: boolean }) => {
+    const { cn, showPrice } = opts;
     const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
     const origin = window.location.origin;
     const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const cur = cn ? "¥" : "฿";
     const L = cn
       ? { title: "采购单", company: "I.S.G. Trading Co., Ltd.", subtitle: "Purchase Order", draft: "草稿 DRAFT", date: "日期 Date", supplier: "供应商 Supplier", currency: "货币 Currency",
-          cols: ['序号<span class="en">No.</span>','图片<span class="en">Image</span>','编码<span class="en">Code</span>','品名<span class="en">Item</span>','数量<span class="en">Qty</span>','单位<span class="en">Unit</span>','单价<span class="en">Unit Price</span>','金额<span class="en">Amount</span>'],
+          base: ['序号<span class="en">No.</span>','图片<span class="en">Image</span>','编码<span class="en">Code</span>','品名<span class="en">Item</span>','数量<span class="en">Qty</span>','单位<span class="en">Unit</span>'], price: ['单价<span class="en">Unit Price</span>','金额<span class="en">Amount</span>'],
           total: "总计 Total", s1: "采购 Buyer", s2: "审批 Approver", s3: "供应商确认 Supplier",
-          remark: "备注 Remark: 请确认价格与交期 Please confirm price &amp; lead time · 由 ERP 系统生成", print: "打印 / Print PDF" }
+          remark: "备注 Remark: 请确认价格与交期 Please confirm price &amp; lead time · 由 ERP 系统生成", print: "打印 / Print PDF", img: "保存图片 / Save Image" }
       : { title: "ใบสั่งซื้อ", company: "บริษัท ไอ.เอส.จี. เทรดดิ้ง จำกัด", subtitle: "Purchase Order", draft: "ร่าง", date: "วันที่", supplier: "ผู้จำหน่าย", currency: "สกุลเงิน",
-          cols: ["ลำดับ","รูป","รหัส","รายการสินค้า","จำนวน","หน่วย","ราคา/หน่วย","จำนวนเงิน"],
+          base: ["ลำดับ","รูป","รหัส","รายการสินค้า","จำนวน","หน่วย"], price: ["ราคา/หน่วย","จำนวนเงิน"],
           total: "ยอดรวมทั้งสิ้น", s1: "ผู้สั่งซื้อ", s2: "ผู้อนุมัติ", s3: "ผู้จำหน่าย (รับทราบ)",
-          remark: "หมายเหตุ: กรุณายืนยันราคาและกำหนดส่งกลับ · เอกสารออกจากระบบ ERP", print: "พิมพ์ / บันทึก PDF" };
+          remark: "หมายเหตุ: กรุณายืนยันราคาและกำหนดส่งกลับ · เอกสารออกจากระบบ ERP", print: "พิมพ์ / บันทึก PDF", img: "บันทึกเป็นรูป" };
+    const cols = showPrice ? [...L.base, ...L.price] : L.base;
     let grand = 0;
     const body = items.map((r, i) => {
-      const q = cart[r.id]?.qty ?? r.qty;
-      const amt = q * (r.price_est || 0); grand += amt;
-      return `<tr><td class="c">${i + 1}</td><td class="c">${r.image_url ? `<img src="${origin}${esc(r.image_url)}"/>` : ""}</td><td>${esc(r.code || "")}</td><td>${esc(stripCode(r.item_name) || "")}</td><td class="r">${q.toLocaleString()}</td><td class="c">${esc(r.uom || "")}</td><td class="r">${fmt(r.price_est || 0)}</td><td class="r">${fmt(amt)}</td></tr>`;
+      const amt = r.qty * (r.price || 0); grand += amt;
+      const nameCell = (cn && r.name_en) ? `${esc(r.name)}<span class="en">${esc(r.name_en)}</span>` : esc(r.name);
+      const priceCells = showPrice ? `<td class="r">${fmt(r.price || 0)}</td><td class="r">${fmt(amt)}</td>` : "";
+      return `<tr><td class="c">${i + 1}</td><td class="c">${r.image_url ? `<img src="${origin}${esc(r.image_url)}"/>` : ""}</td><td>${esc(r.code || "")}</td><td>${nameCell}</td><td class="r">${r.qty.toLocaleString()}</td><td class="c">${esc(r.uom || "")}</td>${priceCells}</tr>`;
     }).join("");
+    const totalRow = showPrice ? `<div class="totwrap"><div class="tot"><span>${L.total} (${cur})</span><span>${fmt(grand)}</span></div></div>` : "";
+    const fname = "PO_" + String(shop).replace(/[\\/:*?"<>|]/g, "_") + ".png";
     const html = `<!doctype html><html lang="${cn ? "zh" : "th"}"><head><meta charset="utf-8"><title>${esc(L.title)} - ${esc(shop)}</title>
       <style>
-        body{font-family:'Sarabun','Microsoft YaHei','Segoe UI',Tahoma,sans-serif;padding:24px;color:#1e293b;font-size:12px}
+        @page{size:A4;margin:12mm}
+        body{font-family:'Sarabun','Microsoft YaHei','Segoe UI',Tahoma,sans-serif;padding:16px;color:#1e293b;font-size:12px;background:#f1f5f9}
+        .doc{max-width:186mm;margin:0 auto;background:#fff;padding:20px 22px;border-radius:6px}
         .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #334155;padding-bottom:10px;margin-bottom:12px}
         .co{font-size:15px;font-weight:700;color:#0f172a}.title{text-align:right}.title .t1{font-size:20px;font-weight:700;color:#c2410c}.title .t2{font-size:11px;color:#64748b;margin-top:2px}
         .draft{display:inline-block;border:1.5px solid #f59e0b;color:#b45309;background:#fffbeb;border-radius:4px;padding:0 6px;font-size:11px;font-weight:700;margin-left:6px}
@@ -291,22 +302,35 @@ export default function PurchaseOrdersPage() {
         .en{color:#94a3b8;font-weight:400;font-size:9px;display:block}
         .totwrap{display:flex;justify-content:flex-end;margin-top:10px}.tot{min-width:240px;border-top:1.5px solid #334155;padding-top:6px;display:flex;justify-content:space-between;font-size:15px;font-weight:700;color:#0f172a}
         .foot{display:flex;justify-content:space-between;gap:20px;margin-top:28px}.sign{flex:1;text-align:center;font-size:11px;color:#475569}.sign .ln{border-bottom:1px solid #94a3b8;height:34px;margin-bottom:5px}
-        .note{font-size:10.5px;color:#64748b;margin-top:12px}@media print{.noprint{display:none}}
+        .note{font-size:10.5px;color:#64748b;margin-top:12px}
+        @media print{body{background:#fff;padding:0}.doc{max-width:none;padding:0;border-radius:0}.noprint{display:none}}
       </style></head>
       <body>
-        <div class="head"><div><div class="co">🏢 ${esc(L.company)}</div></div>
-          <div class="title"><div class="t1">${L.title}</div><div class="t2">${cn ? "" : L.subtitle + " · "}${L.date}: ${esc(orderDate)} <span class="draft">${L.draft}</span></div></div></div>
-        <div class="meta"><div>${L.supplier}: <b>${esc(shop)}</b></div><div>${L.currency}: <b>${cur} ${esc(items[0]?.currency || "")}</b></div></div>
-        <table><thead><tr>${L.cols.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>
-        <div class="totwrap"><div class="tot"><span>${L.total} (${cur})</span><span>${fmt(grand)}</span></div></div>
-        <div class="foot"><div class="sign"><div class="ln"></div>${L.s1}</div><div class="sign"><div class="ln"></div>${L.s2}</div><div class="sign"><div class="ln"></div>${L.s3}</div></div>
-        <div class="note">${L.remark}</div>
-        <button class="noprint" onclick="window.print()" style="margin-top:16px;padding:8px 16px;font-size:14px;cursor:pointer">🖨️ ${L.print}</button>
+        <div class="doc">
+          <div class="head"><div><div class="co">🏢 ${esc(L.company)}</div></div>
+            <div class="title"><div class="t1">${L.title}</div><div class="t2">${cn ? "" : L.subtitle + " · "}${L.date}: ${esc(orderDate)} <span class="draft">${L.draft}</span></div></div></div>
+          <div class="meta"><div>${L.supplier}: <b>${esc(shop)}</b></div><div>${L.currency}: <b>${cur} ${esc(items[0]?.currency || "")}</b></div></div>
+          <table><thead><tr>${cols.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>
+          ${totalRow}
+          <div class="foot"><div class="sign"><div class="ln"></div>${L.s1}</div><div class="sign"><div class="ln"></div>${L.s2}</div><div class="sign"><div class="ln"></div>${L.s3}</div></div>
+          <div class="note">${L.remark}</div>
+        </div>
+        <div class="noprint" style="max-width:186mm;margin:12px auto 0;display:flex;gap:8px">
+          <button onclick="window.print()" style="padding:8px 16px;font-size:14px;cursor:pointer">🖨️ ${L.print}</button>
+          <button onclick="saveImg()" style="padding:8px 16px;font-size:14px;cursor:pointer">🖼️ ${L.img}</button>
+        </div>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+        <script>function saveImg(){var el=document.querySelector('.doc');if(!window.html2canvas){alert('loading…');return;}html2canvas(el,{scale:2,backgroundColor:'#ffffff',useCORS:true}).then(function(c){var a=document.createElement('a');a.download=${JSON.stringify(fname)};a.href=c.toDataURL('image/png');a.click();});}</script>
       </body></html>`;
     const w = window.open("", "_blank");
     if (!w) { toast.error("เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปก่อน"); return; }
     w.document.write(html); w.document.close();
-  }, [cart, orderDate, toast]);
+  }, [orderDate, toast]);
+
+  // สร้างรายการพิมพ์ PO จาก rows (ไทย) — ชื่อ/รหัสเรา · จำนวนจากตะกร้า
+  const poItemsTH = useCallback((items: Row[]): PoPrintItem[] => items.map((r) => ({
+    image_url: r.image_url, code: r.code, name: stripCode(r.item_name), qty: cart[r.id]?.qty ?? r.qty, uom: r.uom, price: r.price_est, currency: r.currency,
+  })), [cart]);
 
   // ร้านไหนเป็นจีน: ป้าย Taobao / สกุล RMB / ตั้งค่า cn ในผู้จำหน่าย
   const cnSupplierNames = useMemo(() => new Set(suppliers.filter((s) => s.cn).map((s) => s.name)), [suppliers]);
@@ -666,6 +690,7 @@ export default function PurchaseOrdersPage() {
         onSaved={(url) => { const sid = linkRow.item_sku_id; setRows((rs) => rs.map((x) => x.item_sku_id === sid ? { ...x, purchase_link: url } : x)); setLinkRow(null); }} />}
 
       {contactShop && <ShopContactModal shopName={contactShop.name} partnerId={contactShop.partnerId} onClose={() => setContactShop(null)} />}
+      {cnBuilder && <CnPoBuilder shop={cnBuilder.shop} items={cnBuilder.items} printPo={printPo} onSaved={() => void fetchRows()} onClose={() => setCnBuilder(null)} />}
 
       {/* ป๊อปทวนรายการก่อนสร้างใบสั่งซื้อ — แยกตามร้าน (1 ใบ/ร้าน) */}
       {reviewOpen && (
@@ -686,7 +711,10 @@ export default function PurchaseOrdersPage() {
                   <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100 gap-2">
                     <span className="text-sm font-semibold text-slate-700 min-w-0 truncate">🏪 {shop} <span className="text-[11px] font-normal text-slate-400">({items.length} รายการ)</span></span>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <button type="button" onClick={() => printPo(shop, items, isChineseShop(shop, items[0]?.currency ?? "THB"))} title="ใบสั่งซื้อ (PDF) — ร้านไทย=ไทย · ร้านจีน=จีน+อังกฤษ"
+                      <button type="button" onClick={() => {
+                        if (isChineseShop(shop, items[0]?.currency ?? "THB")) setCnBuilder({ shop, items });
+                        else printPo(shop, poItemsTH(items), { cn: false, showPrice: true });
+                      }} title="ใบสั่งซื้อ (PDF) — ร้านไทย=ไทย · ร้านจีน=เปิดหน้าต่างเตรียมข้อมูล (จีน+อังกฤษ)"
                         className="h-7 px-2 text-[11px] font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-white">📄 PDF</button>
                       <button type="button" onClick={() => setContactShop({ name: shop, partnerId: suppliers.find((s) => s.name === shop)?.id ?? null })} title="ติดต่อร้าน (Line/WeChat)"
                         className="h-7 px-2 text-[11px] font-medium rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100">💬 ติดต่อ</button>
@@ -869,6 +897,115 @@ function LinkModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; o
           placeholder="วางลิงก์ เช่น https://item.taobao.com/..." className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
         <p className="text-[11px] text-slate-400">ลิงก์ Taobao/Tmall จะขึ้นป้าย 淘 ให้อัตโนมัติ · มีผลกับทุกใบที่ใช้สินค้านี้</p>
       </div>
+    </ERPModal>
+  );
+}
+
+// ── หน้าต่างเตรียมใบสั่งซื้อร้านจีน — แก้รหัสร้าน/ชื่อจีน/อังกฤษ/หน่วย + แปล + บันทึกกลับ SKU → ออก PDF ──
+function CnPoBuilder({ shop, items, printPo, onSaved, onClose }: {
+  shop: string; items: Row[];
+  printPo: (shop: string, items: PoPrintItem[], opts: { cn: boolean; showPrice: boolean }) => void;
+  onSaved: () => void; onClose: () => void;
+}) {
+  const toast = useToast();
+  type ER = { id: string; sku_id: string | null; our_code: string; our_name: string; supplier_sku_code: string; name_cn: string; name_en: string; qty: number; uom: string; uom_en: string; price: number; currency: string; image_url: string | null };
+  const [rows, setRows] = useState<ER[]>(() => items.map((r) => ({
+    id: r.id, sku_id: r.item_sku_id, our_code: r.code, our_name: stripCode(r.item_name),
+    supplier_sku_code: r.supplier_sku_code ?? "", name_cn: r.name_cn ?? "", name_en: r.name_en ?? "",
+    qty: r.qty, uom: r.uom, uom_en: r.purchase_uom_en ?? "", price: r.price_est, currency: r.currency, image_url: r.image_url,
+  })));
+  const [showPrice, setShowPrice] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const patch = (id: string, p: Partial<ER>) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
+  const copy = async (t: string) => { try { await navigator.clipboard.writeText(t); toast.success("คัดลอกแล้ว"); } catch { /* ignore */ } };
+  const tr = async (text: string): Promise<string> => {
+    const res = await apiFetch("/api/ai/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, to: "en" }) });
+    const j = await res.json().catch(() => ({})); return String(j?.data?.translated ?? "").trim();
+  };
+  const transName = async (r: ER) => { const s = r.name_cn || r.our_name; if (!s) return; setBusy(true); try { const t = await tr(s); if (t) patch(r.id, { name_en: t }); } catch { toast.error("แปลไม่สำเร็จ"); } finally { setBusy(false); } };
+  const transUom = async (r: ER) => { if (!r.uom) return; setBusy(true); try { const t = await tr(r.uom); if (t) patch(r.id, { uom_en: t }); } catch { toast.error("แปลไม่สำเร็จ"); } finally { setBusy(false); } };
+  const transAll = async () => {
+    setBusy(true);
+    try {
+      const next = [...rows];
+      for (let i = 0; i < next.length; i++) {
+        const r = next[i];
+        if (!r.name_en && (r.name_cn || r.our_name)) { const t = await tr(r.name_cn || r.our_name); if (t) next[i] = { ...next[i], name_en: t }; }
+        if (!r.uom_en && r.uom) { const t = await tr(r.uom); if (t) next[i] = { ...next[i], uom_en: t }; }
+      }
+      setRows(next); toast.success("แปลครบแล้ว");
+    } catch { toast.error("แปลบางรายการไม่สำเร็จ"); } finally { setBusy(false); }
+  };
+  const saveSku = async () => {
+    setSaving(true);
+    try {
+      const payload = rows.filter((r) => r.sku_id).map((r) => ({ sku_id: r.sku_id, supplier_sku_code: r.supplier_sku_code, name_cn: r.name_cn, name_en: r.name_en, purchase_uom_en: r.uom_en }));
+      if (payload.length === 0) { toast.info("ไม่มีรายการที่ผูก SKU ให้บันทึก"); setSaving(false); return; }
+      const res = await apiFetch("/api/purchasing/sku-cn-fields", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: payload }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? "save failed");
+      toast.success(`บันทึกกลับ SKU ${j.saved} รายการแล้ว`); onSaved();
+    } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); } finally { setSaving(false); }
+  };
+  const genPdf = () => printPo(shop, rows.map((r) => ({
+    image_url: r.image_url, code: r.supplier_sku_code || r.our_code, name: r.name_cn || r.our_name, name_en: r.name_en || null,
+    qty: r.qty, uom: r.uom_en || r.uom, price: r.price, currency: r.currency,
+  })), { cn: true, showPrice });
+
+  const inpc = "w-full h-8 px-2 text-sm border border-slate-200 rounded-md";
+  return (
+    <ERPModal open onClose={onClose} size="lg" storageKey="cn-po-builder" title={`🇨🇳 เตรียมใบสั่งซื้อ — ${shop}`}
+      description={`${rows.length} รายการ · แก้ชื่อ/รหัส/หน่วย + แปลอังกฤษ ก่อนออก PDF`}
+      footer={<>
+        <button onClick={saveSku} disabled={saving} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50 mr-auto">{saving ? "กำลังบันทึก…" : "💾 บันทึกกลับ SKU"}</button>
+        <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>
+        <button onClick={genPdf} className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">📄 สร้าง PDF</button>
+      </>}>
+      <div className="flex items-center gap-3 flex-wrap mb-2.5 text-sm">
+        <label className="flex items-center gap-1.5 text-slate-600"><input type="checkbox" checked={showPrice} onChange={(e) => setShowPrice(e.target.checked)} /> แสดงราคาในใบ</label>
+        <button onClick={() => void transAll()} disabled={busy} className="ml-auto h-8 px-3 text-xs font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50">{busy ? "กำลังแปล…" : "🌐 แปลทั้งหมด → EN"}</button>
+      </div>
+      <div className="overflow-x-auto border border-slate-200 rounded-lg">
+        <table className="w-full text-sm" style={{ minWidth: 720 }}>
+          <thead><tr className="bg-slate-50 text-[11px] text-slate-500">
+            <th className="text-left px-2 py-1.5 font-medium">รหัสร้าน (供应商编码)</th>
+            <th className="text-left px-2 py-1.5 font-medium">ชื่อจีน 品名</th>
+            <th className="text-left px-2 py-1.5 font-medium">ชื่ออังกฤษ</th>
+            <th className="text-right px-2 py-1.5 font-medium">จำนวน</th>
+            <th className="text-left px-2 py-1.5 font-medium">หน่วย (EN)</th>
+          </tr></thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td className="px-2 py-1.5 align-top">
+                  <div className="flex items-center gap-1">
+                    <input value={r.supplier_sku_code} onChange={(e) => patch(r.id, { supplier_sku_code: e.target.value })} placeholder={r.our_code} className={inpc} style={{ width: 100 }} />
+                    <button onClick={() => copy(r.supplier_sku_code || r.our_code)} title="คัดลอกรหัส" className="h-8 w-8 shrink-0 border border-slate-200 rounded-md text-slate-500 hover:bg-slate-50">⎘</button>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">เรา: {r.our_code || "—"}</div>
+                </td>
+                <td className="px-2 py-1.5 align-top"><input value={r.name_cn} onChange={(e) => patch(r.id, { name_cn: e.target.value })} placeholder={r.our_name} className={inpc} style={{ minWidth: 130 }} /></td>
+                <td className="px-2 py-1.5 align-top">
+                  <div className="flex items-center gap-1">
+                    <input value={r.name_en} onChange={(e) => patch(r.id, { name_en: e.target.value })} placeholder="English name" className={inpc} style={{ minWidth: 150 }} />
+                    <button onClick={() => void transName(r)} disabled={busy} title="แปล→อังกฤษ" className="h-8 px-2 shrink-0 text-[11px] border border-indigo-200 text-indigo-700 rounded-md hover:bg-indigo-50 disabled:opacity-50">แปล</button>
+                  </div>
+                </td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-700 align-top">{r.qty.toLocaleString()}</td>
+                <td className="px-2 py-1.5 align-top">
+                  <div className="flex items-center gap-1">
+                    <input value={r.uom_en} onChange={(e) => patch(r.id, { uom_en: e.target.value })} placeholder={r.uom} className={inpc} style={{ width: 90 }} />
+                    <button onClick={() => void transUom(r)} disabled={busy} title="แปลหน่วย→อังกฤษ" className="h-8 px-2 shrink-0 text-[11px] border border-indigo-200 text-indigo-700 rounded-md hover:bg-indigo-50 disabled:opacity-50">แปล</button>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">ไทย: {r.uom || "—"}</div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-slate-400 mt-2">💡 &quot;บันทึกกลับ SKU&quot; = เก็บรหัสร้าน/ชื่อจีน/อังกฤษ/หน่วย ไว้ครั้งหน้าไม่ต้องกรอกซ้ำ · แปลผ่าน AI (มีตัวสำรอง Google)</p>
     </ERPModal>
   );
 }
