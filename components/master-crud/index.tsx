@@ -2693,8 +2693,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               currencyField: (f.optionsRaw?.currency_field as string) ?? "",
               optionsRaw:    f.optionsRaw ?? {},
             }))}
-          onClose={() => { setStudioOpen(false); if (typeof window !== "undefined") window.location.reload(); }}
-          onSaved={() => { setStudioOpen(false); if (typeof window !== "undefined") window.location.reload(); }}
+          onClose={() => { setStudioOpen(false); void refreshRegistry(); }}
+          onSaved={() => { setStudioOpen(false); void refreshRegistry(); }}
         />
         </div>,
         document.body,
