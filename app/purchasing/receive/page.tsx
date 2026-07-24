@@ -18,8 +18,11 @@ import { FileInput } from "@/components/file-input";
 import { useCardLayout, CardLayoutEditor, type CardField } from "@/components/card-layout";
 import { WarehousePicker } from "@/components/pickers";
 import type { WarehousePickerValue } from "@/components/pickers";
+import { Pager } from "@/components/pager";
+import { MiniTable, type MiniColumn } from "@/components/mini-table";
 
 type PO = { id: string; po_no: string; seller_name: string; status: string; currency: string; expected_date?: string | null; order_date?: string | null };
+type PoCard = PO & { pendCount: number };
 type Line = { id: string; item_name: string; qty: number; uom: string; qty_received: number };
 type Input = { recv: string; def: string; close?: boolean };   // close=true → ปิดบิล (จบยอดที่ขาด)
 type PayloadLine = { po_line_id: string; qty_received: number; qty_defective: number; case_type: string };
@@ -58,8 +61,9 @@ type PendItem = {
   receive_count: number;                                          // รับมาแล้วกี่ครั้ง (ใบรับ GR)
   payment_status: string; paid_date: string | null; ship_before_pay: boolean; duration_days: number | null;  // สถานะจ่ายเงิน + ค้างมากี่วัน
 };
-type PendSort = "eta" | "order" | "name";
+type PendSort = "eta" | "order" | "name" | "seller" | "remaining";
 type PendGroup = "none" | "shop" | "eta" | "po" | "mo";
+type SortDir = "asc" | "desc";
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 // ตัด [code] นำหน้าชื่อสินค้าออก (รหัสโชว์เป็น chip แยกอยู่แล้ว)
@@ -75,7 +79,9 @@ function etaBadge(days: number | null): { text: string; cls: string } {
 }
 
 const PEND_VIEW_KEY = "recv_pend_view", PEND_COLS_KEY = "recv_pend_cols", PEND_SORT_KEY = "recv_pend_sort", PEND_GROUP_KEY = "recv_pend_group";
+const PEND_DIR_KEY = "recv_pend_dir", PEND_PSIZE_KEY = "recv_pend_psize", PO_VIEW_KEY = "recv_po_view";
 const COL_OPTIONS = [3, 4, 5, 6, 8, 10];
+const PAGE_SIZES = [50, 100, 200];
 // ข้อมูลที่เลือกโชว์ได้บนการ์ดติดตาม (Card Builder)
 const TRACK_CARD_FIELDS: CardField[] = [
   { key: "shop_po", label: "ร้าน / PO" },
@@ -122,7 +128,11 @@ export default function ReceiveGoodsPage() {
   const [poQ, setPoQ] = useState("");                                  // ค้นหาใบ PO (แท็บตามใบสั่งซื้อ)
   const [pendCols, setPendCols] = useState(4);
   const [pendSort, setPendSort] = useState<PendSort>("eta");
+  const [pendDir, setPendDir] = useState<SortDir>("asc");
   const [pendGroup, setPendGroup] = useState<PendGroup>("none");
+  const [pendPage, setPendPage] = useState(0);              // หน้า (0-based) แท็บรอเข้า
+  const [pendPageSize, setPendPageSize] = useState(50);     // 50/100/200 ต่อหน้า
+  const [poView, setPoView] = useState<"card" | "table">("card");   // มุมมองแท็บตามใบสั่งซื้อ
   const canDesign = usePermission("products.edit");                    // ตั้งค่าเริ่มต้นการ์ดทุกคน (admin)
   const { fields: cardFields, reload: reloadCard } = useCardLayout("receive-tracking");
   const [designOpen, setDesignOpen] = useState(false);
@@ -151,13 +161,24 @@ export default function ReceiveGoodsPage() {
     if (typeof window === "undefined") return;
     const v = localStorage.getItem(PEND_VIEW_KEY); if (v === "card" || v === "table") setPendView(v);
     const c = Number(localStorage.getItem(PEND_COLS_KEY)); if (COL_OPTIONS.includes(c)) setPendCols(c);
-    const s = localStorage.getItem(PEND_SORT_KEY); if (s === "eta" || s === "order" || s === "name") setPendSort(s as PendSort);
+    const s = localStorage.getItem(PEND_SORT_KEY); if (["eta","order","name","seller","remaining"].includes(s ?? "")) setPendSort(s as PendSort);
+    const d = localStorage.getItem(PEND_DIR_KEY); if (d === "asc" || d === "desc") setPendDir(d);
+    const ps = Number(localStorage.getItem(PEND_PSIZE_KEY)); if (PAGE_SIZES.includes(ps)) setPendPageSize(ps);
+    const pv = localStorage.getItem(PO_VIEW_KEY); if (pv === "card" || pv === "table") setPoView(pv);
     const g = localStorage.getItem(PEND_GROUP_KEY); if (["none","shop","eta","po","mo"].includes(g ?? "")) setPendGroup(g as PendGroup);
   }, []);
   const changePendView = (v: "card" | "table") => { setPendView(v); localStorage.setItem(PEND_VIEW_KEY, v); };
   const changePendCols = (n: number) => { setPendCols(n); localStorage.setItem(PEND_COLS_KEY, String(n)); };
-  const changePendSort = (s: PendSort) => { setPendSort(s); localStorage.setItem(PEND_SORT_KEY, s); };
+  const changePendSort = (s: PendSort) => { setPendSort(s); setPendDir("asc"); localStorage.setItem(PEND_SORT_KEY, s); localStorage.setItem(PEND_DIR_KEY, "asc"); };
   const changePendGroup = (g: PendGroup) => { setPendGroup(g); localStorage.setItem(PEND_GROUP_KEY, g); };
+  const changePendPageSize = (n: number) => { setPendPageSize(n); setPendPage(0); localStorage.setItem(PEND_PSIZE_KEY, String(n)); };
+  const changePoView = (v: "card" | "table") => { setPoView(v); localStorage.setItem(PO_VIEW_KEY, v); };
+  // กดหัวคอลัมน์ในตาราง → สลับ key/ทิศทาง (ของกลาง pattern เดียวกับ DataTable)
+  const toggleSort = (k: PendSort) => {
+    if (pendSort === k) { const d: SortDir = pendDir === "asc" ? "desc" : "asc"; setPendDir(d); localStorage.setItem(PEND_DIR_KEY, d); }
+    else changePendSort(k);
+  };
+  const sortArrow = (k: PendSort) => (pendSort === k ? (pendDir === "asc" ? " ▲" : " ▼") : "");
 
   useEffect(() => {
     apiFetch("/api/master-v2/purchase-orders-v2?limit=200").then((r) => r.json()).then((j) => {
@@ -275,9 +296,16 @@ export default function ReceiveGoodsPage() {
       const va = (a[ka] as string) || "9999-12-31", vb = (b[ka] as string) || "9999-12-31";
       return va !== vb ? (va < vb ? -1 : 1) : byName(a, b);
     };
-    const cmp = pendSort === "name" ? byName : pendSort === "order" ? byDate("order_date") : byDate("expected_date");
-    return [...filtered].sort(cmp);
-  }, [pend, pendQ, pendSort, activeShop, activeMo, tab]);
+    const bySeller = (a: PendItem, b: PendItem) => (a.seller_name || "").localeCompare(b.seller_name || "", "th") || byName(a, b);
+    const byRemaining = (a: PendItem, b: PendItem) => (num(a.remaining) - num(b.remaining)) || byName(a, b);
+    const cmp = pendSort === "name" ? byName
+      : pendSort === "seller" ? bySeller
+      : pendSort === "remaining" ? byRemaining
+      : pendSort === "order" ? byDate("order_date")
+      : byDate("expected_date");
+    const sorted = [...filtered].sort(cmp);
+    return pendDir === "desc" ? sorted.reverse() : sorted;
+  }, [pend, pendQ, pendSort, pendDir, activeShop, activeMo, tab]);
 
   // รายชื่อร้าน (list ซ้ายมือ) — นับจากข้อมูลแท็บปัจจุบัน
   const pendShops = useMemo(() => {
@@ -309,10 +337,36 @@ export default function ReceiveGoodsPage() {
       .sort((a, b) => String(b.order_date ?? "").localeCompare(String(a.order_date ?? "")));
   }, [pos, pend, poQ]);
 
+  // คอลัมน์ตาราง PO (มุมมองตาราง — ใช้ MiniTable ของกลาง: sort หัวคอลัมน์ + กดแถวเพื่อรับของ)
+  const poColumns = useMemo<MiniColumn<PoCard>[]>(() => [
+    { key: "po_no", header: "เลขที่ PO", width: "10rem", sortValue: (p) => p.po_no,
+      cell: (p) => <span className="font-mono text-sm font-semibold text-slate-800">{p.po_no}</span> },
+    { key: "seller", header: "ร้าน", width: "1.6fr", sortValue: (p) => p.seller_name,
+      cell: (p) => <span className="block truncate" title={p.seller_name}>🏪 {p.seller_name}</span> },
+    { key: "order_date", header: "วันที่สั่ง", width: "8rem", align: "center", sortValue: (p) => p.order_date ?? "",
+      cell: (p) => <span className="text-xs text-slate-500">{p.order_date ? formatDate(p.order_date) : "—"}</span> },
+    { key: "expected", header: "คาดเข้า", width: "8rem", align: "center", sortValue: (p) => p.expected_date ?? "",
+      cell: (p) => <span className="text-xs text-slate-500">{p.expected_date ? formatDate(p.expected_date) : "—"}</span> },
+    { key: "pend", header: "รอรับ", width: "9rem", align: "right", sortValue: (p) => p.pendCount,
+      cell: (p) => <span className="text-blue-700 font-medium tabular-nums">{p.pendCount.toLocaleString()} รายการ</span> },
+    { key: "status", header: "สถานะ", width: "7rem", align: "center",
+      cell: (p) => { const b = PO_BADGE[p.status] ?? { text: p.status, cls: "bg-slate-100 text-slate-600 border-slate-200" }; return <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>; } },
+  ], []);
+
+  // แบ่งหน้า (เฉพาะตอน "ไม่จัดกลุ่ม") — พอจัดกลุ่มจะโชว์ทั้งหมด · ใช้ Pager ของกลาง
+  const isGrouped = tab === "mo" || pendGroup !== "none";
+  const pagedPend = useMemo(() => {
+    if (isGrouped) return shownPend;
+    const start = pendPage * pendPageSize;
+    return shownPend.slice(start, start + pendPageSize);
+  }, [shownPend, isGrouped, pendPage, pendPageSize]);
+  // เปลี่ยนตัวกรอง/เรียง/แท็บ → กลับหน้าแรก
+  useEffect(() => { setPendPage(0); }, [pendQ, activeShop, activeMo, pendSort, pendDir, pendGroup, tab]);
+
   // จัดกลุ่ม (ร้าน / วันคาดเข้า / PO) — คงลำดับ sort ภายในกลุ่ม
   const groupedPend = useMemo<{ key: string; label: string; items: PendItem[] }[]>(() => {
     const grp: PendGroup = tab === "mo" ? "mo" : pendGroup;   // แท็บตามใบสั่งงาน = บังคับจัดกลุ่มตาม MO
-    if (grp === "none") return [{ key: "_all", label: "", items: shownPend }];
+    if (grp === "none") return [{ key: "_all", label: "", items: pagedPend }];
     const keyOf = (it: PendItem) =>
       grp === "shop" ? (it.seller_name || "—")
       : grp === "po" ? (it.po_no || "—")
@@ -335,7 +389,7 @@ export default function ReceiveGoodsPage() {
       ? ((a.key || "9999-12-31") < (b.key || "9999-12-31") ? -1 : 1)
       : a.label.localeCompare(b.label, "th"));
     return groups;
-  }, [shownPend, pendGroup, tab]);
+  }, [shownPend, pagedPend, pendGroup, tab]);
 
   // ตะกร้ารับของ = รายการที่ใส่จำนวนแล้ว (recv/เสีย > 0) จากทั้งหมด (ไม่ขึ้นกับตัวกรอง)
   const cartItems = useMemo(
@@ -492,11 +546,19 @@ export default function ReceiveGoodsPage() {
               <span className="text-sm font-semibold text-slate-700">ใบสั่งซื้อที่รอรับ ({poCards.length})</span>
               <input value={poQ} onChange={(e) => setPoQ(e.target.value)} placeholder="🔎 ค้นหา เลขที่ PO / ร้าน..."
                 className="ml-auto w-72 h-9 px-3 text-sm border border-slate-200 rounded-md" />
+              <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+                <button onClick={() => changePoView("card")} className={`h-9 px-3 ${poView === "card" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ การ์ด</button>
+                <button onClick={() => changePoView("table")} className={`h-9 px-3 border-l border-slate-200 ${poView === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
+              </div>
             </div>
 
-            {/* การ์ดใบ PO — กดเพื่อเปิด popup รับของ */}
+            {/* การ์ด/ตารางใบ PO — กดเพื่อเปิด popup รับของ */}
             {poCards.length === 0 ? (
               <div className="py-16 text-center text-slate-300 text-sm">{poQ.trim() ? "— ไม่พบใบสั่งซื้อที่ค้นหา —" : "— ไม่มีใบสั่งซื้อที่รอรับ —"}</div>
+            ) : poView === "table" ? (
+              <MiniTable<PoCard> rows={poCards} columns={poColumns} rowKey={(p) => p.id}
+                onRowClick={(p) => onPickPo(p.id)} countUnit="ใบ" dense resizable storageKey="recv-po-table"
+                emptyText="— ไม่มีใบสั่งซื้อที่รอรับ —" />
             ) : (
               <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
                 {poCards.map((p) => {
@@ -586,6 +648,13 @@ export default function ReceiveGoodsPage() {
                     <option value="eta">วันคาดการณ์ของเข้า</option>
                     <option value="po">ใบสั่งซื้อ (PO)</option>
                     <option value="mo">ใบสั่งผลิต (MO)</option>
+                  </select>
+                </label>
+              )}
+              {!isGrouped && (
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">ต่อหน้า
+                  <select value={pendPageSize} onChange={(e) => changePendPageSize(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                    {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </label>
               )}
@@ -700,9 +769,9 @@ export default function ReceiveGoodsPage() {
                     <thead className="bg-slate-50 text-slate-500 text-xs">
                       <tr>
                         <th className="px-3 py-2 font-medium w-14">รูป</th>
-                        <th className="text-left px-3 py-2 font-medium">สินค้า</th>
-                        <th className="text-left px-3 py-2 font-medium">ร้าน / PO</th>
-                        <th className="text-left px-3 py-2 font-medium">วันที่สั่ง</th>
+                        <th className="text-left px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("name")} className="inline-flex items-center hover:text-slate-700">สินค้า{sortArrow("name")}</button></th>
+                        <th className="text-left px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("seller")} className="inline-flex items-center hover:text-slate-700">ร้าน / PO{sortArrow("seller")}</button></th>
+                        <th className="text-left px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("order")} className="inline-flex items-center hover:text-slate-700">วันที่สั่ง{sortArrow("order")}</button></th>
                         {doneMode ? (
                           <>
                             <th className="text-left px-3 py-2 font-medium">สถานะ</th>
@@ -712,8 +781,8 @@ export default function ReceiveGoodsPage() {
                           </>
                         ) : (
                           <>
-                            <th className="text-left px-3 py-2 font-medium">คาดเข้า</th>
-                            <th className="text-right px-3 py-2 font-medium">คงเหลือ</th>
+                            <th className="text-left px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("eta")} className="inline-flex items-center hover:text-slate-700">คาดเข้า{sortArrow("eta")}</button></th>
+                            <th className="text-right px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("remaining")} className="inline-flex items-center hover:text-slate-700">คงเหลือ{sortArrow("remaining")}</button></th>
                             <th className="px-3 py-2 font-medium">รับครั้งนี้</th>
                             <th className="px-3 py-2 font-medium">เสีย/ผิด</th>
                           </>
@@ -775,6 +844,13 @@ export default function ReceiveGoodsPage() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+
+            {/* แถบแบ่งหน้า (ของกลาง) — โชว์เมื่อไม่จัดกลุ่มและมีมากกว่า 1 หน้า */}
+            {!isGrouped && !pendLoading && shownPend.length > pendPageSize && (
+              <div className="mt-3 bg-white border border-slate-200 rounded-xl px-3 py-2">
+                <Pager page={pendPage} pageSize={pendPageSize} total={shownPend.length} onPage={setPendPage} unitLabel="รายการ" />
               </div>
             )}
 
