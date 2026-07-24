@@ -293,6 +293,8 @@ export default function DashboardPage() {
     return true;
   }), [apps, panelMap, user, can]);
   const isAdmin = user?.role === "admin" || can("admin.users" as Parameters<typeof can>[0]);
+  // มุมมองที่ต้องการพื้นที่กว้าง (ปฏิทิน + ศูนย์ "ที่ต้องจัดการ") → ขยายเต็มความกว้าง
+  const wideView = view === "calendar" || (view === "list" && listMode === "action" && isAdmin);
   const scopeList: Notification[] = scope === "team" ? teamItems : items;
   // เปิดงาน: ของฉัน = mark read + ไป · ทีม = ไปอย่างเดียว (ไม่แตะสถานะคนอื่น)
   const openAny = (n: Notification) => { if (scope === "mine") openItem(n); else if (n.link_url) setLinkModal({ url: n.link_url, title: n.title }); };
@@ -309,7 +311,7 @@ export default function DashboardPage() {
     <PlaygroundShell>
       {/* ---- Header ---- */}
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
-        <div className="max-w-4xl mx-auto w-full flex flex-wrap items-start justify-between gap-3">
+        <div className={`mx-auto w-full flex flex-wrap items-start justify-between gap-3 ${wideView ? "max-w-7xl" : "max-w-4xl"}`}>
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
               สวัสดี {firstName || "ผู้ใช้"} 👋
@@ -331,7 +333,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className={`px-4 sm:px-8 py-5 space-y-5 mx-auto w-full ${view === "list" && listMode === "action" && isAdmin ? "max-w-6xl" : "max-w-4xl"}`}>
+      <div className={`px-4 sm:px-8 py-5 space-y-5 mx-auto w-full ${wideView ? "max-w-7xl" : "max-w-4xl"}`}>
         {/* ---- widget เสริม (เรียง/เปิด-ปิด ตามหน้าแดชบอร์ดของตำแหน่ง — เฟส 3) ---- */}
         {/* มุมมองผู้บริหารเป็นหน้าเต็มของตัวเอง ไม่โชว์ widget strip ซ้ำ */}
         {view !== "executive" && myLayout.widgets.map((w) => {
