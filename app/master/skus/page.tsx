@@ -121,11 +121,12 @@ export default function SkusV2Page() {
         } catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกไม่สำเร็จ"); }
       },
     }],
-    // ตารางร้านที่จำหน่าย (1 สินค้าหลายร้าน) — รหัสร้าน/ราคา/ตั้งร้านหลัก ★ ในหน้า SKU
-    recordSections: [{
-      key: "suppliers",
-      title: "🏪 ร้านที่จำหน่าย + ราคา (แต่ละร้านมีรหัสร้านของตัวเอง · ★ = ร้านหลัก)",
-      render: ({ recordId }) => <SkuSupplierList skuId={recordId} defaultOpen />,
+    // ตารางร้านที่จำหน่าย (1 สินค้าหลายร้าน) — เป็น "แท็บ" ในป๊อป SKU: รหัสร้าน/ราคา/ตั้งร้านหลัก ★
+    extraTabs: [{
+      key: "suppliers", label: "ร้านที่จำหน่าย", icon: "🏪",
+      render: ({ recordId }) => recordId
+        ? <div className="pt-1"><SkuSupplierList skuId={recordId} defaultOpen /></div>
+        : <div className="p-3 text-sm text-slate-400">บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย</div>,
     }],
   }), [toast]);
 

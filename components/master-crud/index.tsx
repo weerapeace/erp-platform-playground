@@ -2271,7 +2271,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         size="lg"
         hasUnsavedChanges={drawerMode === "edit" && dirty}
         headerActions={config.moduleKey && canEdit && drawerMode === "view" ? () => (
-          <button type="button" onClick={() => { discard(); setStudioOpen(true); }}
+          <button type="button" onClick={() => setStudioOpen(true)}
             title="ออกแบบฟิลด์/ฟอร์มของโมดูลนี้ (เพิ่ม/แก้/ซ่อนฟิลด์ · แอดมิน)"
             className="h-8 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-600 hover:bg-orange-50 inline-flex items-center gap-1 whitespace-nowrap">🎨 ออกแบบฟิลด์</button>
         ) : undefined}
@@ -2641,8 +2641,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         />
       )}
 
-      {/* F11B: Studio v1 — drag-drop layout builder (full-screen) */}
-      {studioOpen && (
+      {/* F11B: Studio v1 — drag-drop layout builder (full-screen) · portal ทับ drawer (z-200) กัน stacking-context บีบ z-60 ให้จมใต้ layout */}
+      {studioOpen && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[200]">
         <StudioPanel
           moduleLabel={config.title}
           moduleKey={config.moduleKey}
@@ -2694,6 +2695,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           onClose={() => { setStudioOpen(false); if (typeof window !== "undefined") window.location.reload(); }}
           onSaved={() => { setStudioOpen(false); if (typeof window !== "undefined") window.location.reload(); }}
         />
+        </div>,
+        document.body,
       )}
 
       {/* กดค่า relation (เช่น Brand/Category) → เปิด "drawer เก่าตัวจริง" ของโมดูลปลายทาง (เปิดด้วย moduleKey อย่างเดียว) */}
