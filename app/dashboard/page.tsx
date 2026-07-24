@@ -118,6 +118,7 @@ export default function DashboardPage() {
   const [loadingN, setLoadingN] = useState(true);
   const [errN, setErrN]       = useState<string | null>(null);
   const [tab, setTab]         = useState<Tab>("unread");
+  const [listMode, setListMode] = useState<"action" | "notif">("action");   // แท็บรายการ: ที่ต้องจัดการ (ของจริง) / แจ้งเตือน
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [snoozeOpen, setSnoozeOpen] = useState<string | null>(null);
   const [linkModal, setLinkModal] = useState<{ url: string; title: string } | null>(null);   // เปิดลิงก์แจ้งเตือนเป็น popup (ฝังหน้าจริง)
@@ -395,6 +396,17 @@ export default function DashboardPage() {
                 </span>
               </div>
             )}
+            {/* แอดมิน: สลับ "ที่ต้องจัดการ" (ของจริงต่อ module) / "แจ้งเตือน" */}
+            {isAdmin && (
+              <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
+                <button onClick={() => setListMode("action")} className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${listMode === "action" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🗂️ ที่ต้องจัดการ</button>
+                <button onClick={() => setListMode("notif")} className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${listMode === "notif" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🔔 แจ้งเตือน</button>
+              </div>
+            )}
+
+            {isAdmin && listMode === "action" ? (
+              <ActionCenter onOpen={(url, title) => setLinkModal({ url, title })} />
+            ) : (<>
             <div className="flex items-center gap-1.5 flex-wrap">
               <TabBtn active={tab === "unread"}  onClick={() => setTab("unread")}  label="ยังไม่อ่าน" count={counts.unread} />
               <TabBtn active={tab === "pinned"}  onClick={() => setTab("pinned")}  label="📌 ปักหมุด"  count={counts.pinned} />
@@ -435,6 +447,7 @@ export default function DashboardPage() {
                 ))}
               </div>
             )}
+            </>)}
           </>
         )}
 
@@ -578,6 +591,66 @@ function EmptyState({ tab }: { tab: Tab }) {
     <div className="bg-white rounded-xl border border-dashed border-slate-200 py-14 text-center">
       <div className="text-4xl mb-3 opacity-40">{icon}</div>
       <p className="text-sm text-slate-400">{text}</p>
+    </div>
+  );
+}
+
+// ---- 🗂️ Action Center — งานที่ต้องจัดการ/อนุมัติจริง รวมทุก module (แอดมิน) ----
+type ActionItem = { title: string; subtitle: string; link: string };
+type ActionGroup = { key: string; label: string; link: string; items: ActionItem[] };
+type ActionModule = { dept: string; label: string; icon: string; total: number; groups: ActionGroup[] };
+
+function ActionCenter({ onOpen }: { onOpen: (url: string, title: string) => void }) {
+  const [mods, setMods] = useState<ActionModule[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    apiFetch("/api/dashboard/action-items").then(r => r.json())
+      .then(j => { if (!alive) return; if (j.error) setErr(j.error); else setMods((j.modules ?? []) as ActionModule[]); })
+      .catch(() => { if (alive) setErr("โหลดรายการไม่ได้"); });
+    return () => { alive = false; };
+  }, []);
+
+  if (err) return <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 text-center">{err}</div>;
+  if (!mods) return <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-28 bg-white rounded-xl border border-slate-200 animate-pulse" />)}</div>;
+  if (mods.length === 0) return (
+    <div className="bg-white rounded-xl border border-dashed border-slate-200 py-14 text-center">
+      <div className="text-4xl mb-3 opacity-40">🎉</div><p className="text-sm text-slate-400">ไม่มีงานที่ต้องจัดการ</p>
+    </div>
+  );
+  return (
+    <div className="space-y-4">
+      {mods.map(m => (
+        <div key={m.dept} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/60">
+            <span className="text-base leading-none">{m.icon}</span>
+            <span className="text-sm font-semibold text-slate-800">{m.label}</span>
+            <span className="text-[11px] text-slate-400">{m.total} รายการที่ต้องจัดการ</span>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {m.groups.map(g => (
+              <div key={g.key} className="px-4 py-2.5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold text-slate-600">{g.label} <span className="text-slate-400 font-normal">({g.items.length})</span></span>
+                  <button onClick={() => onOpen(g.link, `${m.label} · ${g.label}`)} className="text-xs text-blue-600 hover:underline shrink-0">ดูทั้งหมด →</button>
+                </div>
+                <div className="space-y-1">
+                  {g.items.slice(0, 5).map((it, i) => (
+                    <button key={i} onClick={() => onOpen(it.link, it.title)}
+                      className="w-full text-left px-3 py-1.5 rounded-lg border border-slate-100 hover:border-slate-300 hover:bg-slate-50 transition-colors">
+                      <div className="text-sm text-slate-800 truncate">{it.title}</div>
+                      {it.subtitle && <div className="text-[11px] text-slate-400 truncate">{it.subtitle}</div>}
+                    </button>
+                  ))}
+                  {g.items.length > 5 && (
+                    <button onClick={() => onOpen(g.link, `${m.label} · ${g.label}`)} className="text-[11px] text-slate-500 hover:underline px-1.5 pt-0.5">+ อีก {g.items.length - 5} รายการ →</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
