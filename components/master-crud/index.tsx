@@ -45,6 +45,7 @@ const ParentDescriptionImages = dynamic(() => import("@/components/parent-descri
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-tab").then((m) => m.ParentPlatformsTab), { ssr: false });
 const ParentIssuesPanel = dynamic(() => import("@/components/parent-issues-panel").then((m) => m.ParentIssuesPanel), { ssr: false });
+const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").then((m) => m.SkuSupplierList), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -2763,12 +2764,18 @@ export function MasterRecordDrawer({
       extraFormSection: moduleKey === "parent-skus-v2"
         ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
         : undefined,
-      // Parent SKU → แท็บ "🛍 เว็บไซต์" (จัดการการขายบนเว็บร้านออนไลน์ได้ในแท็บ)
+      // Parent SKU → แท็บ "🛍 เว็บไซต์" · SKU → แท็บ "🏪 ร้านที่จำหน่าย" (ของกลาง: โผล่ทุก drawer SKU ไม่ว่าเปิดจากตาราง/แท็ก/การ์ด)
       extraTabs: moduleKey === "parent-skus-v2"
         ? [
             { key: "web", label: "เว็บไซต์", icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> },
             { key: "platforms", label: "แพลตฟอร์ม", icon: "🏬", render: ({ recordId }) => <ParentPlatformsTab parentId={recordId} /> },
             { key: "issues", label: "ปัญหา", icon: "⚠️", render: ({ recordId }) => <div className="p-3"><ParentIssuesPanel parentSkuId={recordId} editable bare /></div> },
+          ]
+        : moduleKey === "skus-v2"
+        ? [
+            { key: "suppliers", label: "ร้านที่จำหน่าย", icon: "🏪", render: ({ recordId }) => recordId
+              ? <div className="pt-1"><SkuSupplierList skuId={recordId} defaultOpen /></div>
+              : <div className="p-3 text-sm text-slate-400">บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย</div> },
           ]
         : undefined,
     };
