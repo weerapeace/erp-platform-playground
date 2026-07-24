@@ -5,7 +5,7 @@
  * ข้อมูลรวมจาก /api/purchasing/dashboard (คำขอเดียว) + ของใกล้เข้าจาก /api/purchasing/receivable (ของเดิม)
  * วาดกราฟเอง (CSS bar + SVG donut) ไม่พึ่งไลบรารีหนัก · responsive (มือถือเรียงลงเป็นแถวเดียว)
  */
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useState, useRef, Fragment } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ERPModal } from "@/components/modal";
@@ -74,13 +74,21 @@ function Donut({ data }: { data: { label: string; value: number; color: string }
   );
 }
 
-function Card({ children, className = "", onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
-  return <div onClick={onClick} className={`bg-white border border-slate-200 rounded-xl p-4 ${onClick ? "cursor-pointer hover:border-blue-300 hover:shadow-sm transition" : ""} ${className}`}>{children}</div>;
+function Card({ children, className = "", onClick, active }: { children: React.ReactNode; className?: string; onClick?: () => void; active?: boolean }) {
+  return (
+    <div onClick={onClick} className={`relative bg-white border rounded-xl p-4 ${active ? "border-blue-400 ring-2 ring-blue-200" : "border-slate-200"} ${onClick ? "cursor-pointer hover:border-blue-300 hover:shadow-sm transition" : ""} ${className}`}>
+      {children}
+      {active && <div className="absolute left-1/2 -bottom-[7px] -translate-x-1/2 w-3 h-3 bg-white border-b border-r border-blue-400 rotate-45 z-10" />}
+    </div>
+  );
 }
 
 export default function PurchasingDashboardPage() {
   const [d, setD] = useState<Dash | null>(null);
-  const [drill, setDrill] = useState<{ type: string; seller?: string } | null>(null);   // ป๊อปเจาะรายการ (กดการ์ด/ร้าน)
+  const [drill, setDrill] = useState<{ type: string; seller?: string } | null>(null);   // แผงเจาะรายการ (กดการ์ด/ร้าน) — กางในหน้า
+  // กดการ์ดเดิมซ้ำ = พับเก็บ · กดอันใหม่ = สลับเนื้อหา
+  const toggleDrill = (next: { type: string; seller?: string }) =>
+    setDrill((cur) => (cur && cur.type === next.type && (cur.seller ?? "") === (next.seller ?? "") ? null : next));
   const [metric, setMetric] = useState<"thb" | "po_count" | "pr_count">("thb");   // เลือกสิ่งที่กราฟรายเดือนโชว์
   const [lineOpen, setLineOpen] = useState(false);   // โมดอลตั้งค่ากลุ่ม LINE แจ้งเตือนขอซื้อ
   const [incoming, setIncoming] = useState<Incoming[]>([]);
@@ -130,23 +138,26 @@ export default function PurchasingDashboardPage() {
           <div className="space-y-3">
             {/* KPI */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Card onClick={() => setDrill({ type: "waiting" })}>
+              <Card active={drill?.type === "waiting"} onClick={() => toggleDrill({ type: "waiting" })}>
                 <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-amber-600">⏳</span> รออนุมัติ <span className="ml-auto text-[10px] text-slate-300">กดดู</span></div>
                 <div className="text-2xl font-semibold mt-1">{d.kpi.waiting} <span className="text-xs text-slate-400 font-normal">ใบ</span></div>
               </Card>
-              <Card onClick={() => setDrill({ type: "pending_receive" })}>
+              <Card active={drill?.type === "pending_receive"} onClick={() => toggleDrill({ type: "pending_receive" })}>
                 <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-blue-600">🚚</span> ค้างรับเข้า <span className="ml-auto text-[10px] text-slate-300">กดดู</span></div>
                 <div className="text-2xl font-semibold mt-1">{d.kpi.pending_receive} <span className="text-xs text-slate-400 font-normal">รายการ</span></div>
               </Card>
-              <Card onClick={() => setDrill({ type: "unpaid" })}>
+              <Card active={drill?.type === "unpaid"} onClick={() => toggleDrill({ type: "unpaid" })}>
                 <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-rose-600">💰</span> รอจ่ายเงิน <span className="ml-auto text-[10px] text-slate-300">กดดู</span></div>
                 <div className="text-2xl font-semibold mt-1">{baht(d.kpi.unpaid_thb)}</div>
               </Card>
-              <Card onClick={() => setDrill({ type: "spend_month" })}>
+              <Card active={drill?.type === "spend_month"} onClick={() => toggleDrill({ type: "spend_month" })}>
                 <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-emerald-600">🛒</span> ยอดซื้อเดือนนี้ <span className="ml-auto text-[10px] text-slate-300">กดดู</span></div>
                 <div className="text-2xl font-semibold mt-1">{bahtShort(d.kpi.spend_this_month_thb)}</div>
               </Card>
             </div>
+
+            {/* แผงเจาะรายการ (กางในหน้า แทน popup) — โผล่ใต้การ์ด KPI ทันทีที่กด */}
+            {drill && <DrillPanel drill={drill} onClose={() => setDrill(null)} />}
 
             {/* Monthly chart — เลือก metric + โชว์ตัวเลขบนแท่ง */}
             <Card>
@@ -242,17 +253,17 @@ export default function PurchasingDashboardPage() {
         )}
       </div>
       <LineGroupModal open={lineOpen} onClose={() => setLineOpen(false)} />
-      <DrillModal drill={drill} onClose={() => setDrill(null)} />
     </PlaygroundShell>
   );
 }
 
-// ป๊อปเจาะรายการเบื้องหลังตัวเลข/ร้าน — มีค้นหา + เลือกร้าน + จัดกลุ่มตามใบสั่งงาน + view การ์ด/ตาราง + ปุ่มสั่ง/ลิงก์
+// แผงเจาะรายการเบื้องหลังตัวเลข/ร้าน (กางในหน้า) — ค้นหา + เลือกร้าน + จัดกลุ่มตามใบสั่งงาน + view การ์ด/ตาราง + ปุ่มสั่ง/ลิงก์
 const isYuan = (c?: string | null) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").toUpperCase());
 const unitStr = (r: DrillRow) => isYuan(r.currency) ? `¥${(r.unit_price ?? 0).toLocaleString()}` : baht(r.unit_price ?? 0);
 type DrillView = "card" | "table" | "list";
 
-function DrillModal({ drill, onClose }: { drill: { type: string; seller?: string } | null; onClose: () => void }) {
+function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string } | null; onClose: () => void }) {
+  const panelRef = useRef<HTMLDivElement>(null);
   const [data, setData] = useState<{ title: string; rows: DrillRow[]; sellers: string[]; link: { href: string; label: string } | null } | null>(null);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
@@ -271,6 +282,8 @@ function DrillModal({ drill, onClose }: { drill: { type: string; seller?: string
   const fixedSeller = drill?.type === "supplier" ? (drill.seller ?? "") : "";
 
   useEffect(() => { if (open) { setQ(""); setSeller(""); setGroupMo(false); setView("card"); setData(null); setOpenOrder(null); setOpenLink(null); } }, [open, drill?.type, drill?.seller]);
+  // เลื่อนหน้าจอมาที่แผงเมื่อเปิด/สลับการ์ด (โดยเฉพาะเวลากดจากการ์ดด้านล่าง)
+  useEffect(() => { if (open) panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }, [open, drill?.type, drill?.seller]);
 
   useEffect(() => {
     if (!open || !drill) return;
@@ -431,8 +444,15 @@ function DrillModal({ drill, onClose }: { drill: { type: string; seller?: string
   );
 
   return (
-    <ERPModal open={open} onClose={onClose} size="lg" title={data?.title ?? "รายการ"}>
-      <div className="space-y-3">
+    <div ref={panelRef} className="scroll-mt-4 bg-white border border-blue-200 rounded-xl ring-1 ring-blue-100 shadow-sm overflow-hidden">
+      {/* หัวแผง: ชื่อ + ปิด */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/70">
+        <span className="text-sm font-medium text-slate-800">{data?.title ?? "รายการ"}</span>
+        {loading && <span className="text-[11px] text-slate-400">· กำลังโหลด…</span>}
+        {!loading && data && <span className="text-[11px] text-slate-400">· {data.rows.length} รายการ</span>}
+        <button onClick={onClose} title="ปิดแผง" className="ml-auto w-7 h-7 rounded-lg text-slate-400 hover:bg-slate-200/70 hover:text-slate-600 flex items-center justify-center">✕</button>
+      </div>
+      <div className="p-3 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาสินค้า / เลขเอกสาร..."
             className="flex-1 min-w-[160px] h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -504,7 +524,7 @@ function DrillModal({ drill, onClose }: { drill: { type: string; seller?: string
           </div>
         )}
       </div>
-    </ERPModal>
+    </div>
   );
 }
 
