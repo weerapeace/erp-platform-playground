@@ -62,8 +62,6 @@ export default function AdminNotificationRulesPage() {
 
   useEffect(() => { if (canView) load(); }, [canView, load]);
 
-  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
-
   const grouped = useMemo(() => {
     const g: Record<string, NotificationRule[]> = {};
     for (const r of rules) (g[r.event_type] ??= []).push(r);
@@ -123,6 +121,9 @@ export default function AdminNotificationRulesPage() {
   const removeRecipient = (idx: number) => {
     setEditing(e => e ? { ...e, recipients: e.recipients?.filter((_, i) => i !== idx) } : e);
   };
+
+  // ⚠️ ต้องอยู่ "ใต้ hooks ทั้งหมด" ไม่งั้นตอนสิทธิ์โหลดเสร็จ (false→true) จำนวน hook เปลี่ยน = React #310
+  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
   return (
     <PlaygroundShell>

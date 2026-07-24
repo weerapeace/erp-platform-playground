@@ -64,8 +64,6 @@ export default function AdminRolesPermissionsPage() {
 
   useEffect(() => { if (canView) load(); }, [canView, load]);
 
-  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
-
   // Map: roleKey → Set(permKeys)
   const grantedMap = useMemo(() => {
     const m: Record<string, Set<string>> = {};
@@ -152,6 +150,9 @@ export default function AdminRolesPermissionsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "ลบไม่สำเร็จ"); }
     finally { setDeleteTarget(null); }
   };
+
+  // ⚠️ ต้องอยู่ "ใต้ hooks ทั้งหมด" ไม่งั้นตอนสิทธิ์โหลดเสร็จ (false→true) จำนวน hook เปลี่ยน = React #310
+  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
   return (
     <PlaygroundShell>

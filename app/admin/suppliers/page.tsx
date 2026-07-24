@@ -67,8 +67,6 @@ export default function AdminSuppliersPage() {
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
-  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
-
   // ---- Form ops ----
   const updateForm = (patch: Partial<FormState>) => { setForm(p => ({ ...p, ...patch })); setDirty(true); };
 
@@ -204,6 +202,9 @@ export default function AdminSuppliersPage() {
       },
     },
   ] : [], [canEdit, user?.name, fetchList]);
+
+  // ⚠️ ต้องอยู่ "ใต้ hooks ทั้งหมด" ไม่งั้นตอนสิทธิ์โหลดเสร็จ (false→true) จำนวน hook เปลี่ยน = React #310
+  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
   return (
     <PlaygroundShell>
