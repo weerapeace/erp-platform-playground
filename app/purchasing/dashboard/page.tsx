@@ -294,7 +294,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const [openOrder, setOpenOrder] = useState<string | null>(null);  // แถวที่กำลังกรอก "สั่ง"
   const [orderQty, setOrderQty] = useState("");
   const [detail, setDetail] = useState<DrillRow | null>(null);      // popup รายละเอียด
-  const [linkDraft, setLinkDraft] = useState("");                   // ช่องกรอกลิงก์ใน popup
+  const [uploading, setUploading] = useState(false);                // กำลังอัปรูปเข้า SKU
   const open = drill !== null;
   const isWaiting = drill?.type === "waiting";
   const isReceive = drill?.type === "pending_receive";
@@ -339,10 +339,31 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
     await act(r.id, () => apiFetch("/api/purchasing/pr-quick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, mark_ordered: true, qty: orderQty === "" ? null : Number(orderQty) }) }));
     setOpenOrder(null);
   };
-  const openDetail = (r: DrillRow) => { setDetail(r); setLinkDraft(r.purchase_url ?? ""); };
-  const saveLink = async (r: DrillRow, url: string) => {
-    await act(r.id, () => apiFetch("/api/purchasing/pr-quick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, purchase_url: url.trim() }) }));
-    setDetail((d) => (d ? { ...d, purchase_url: url.trim() || null } : d));
+  const openDetail = (r: DrillRow) => setDetail(r);
+  const entityOf = () => (drill?.type === "waiting" ? "pr" : "po_line");
+  // เติมข้อมูลที่ขาด → save กลับ SKU + เอกสาร แล้วอัปเดตป๊อป (เอา field ออกจาก "ที่ขาด")
+  const enrich = async (r: DrillRow, field: string, value: string | number, currency?: string) => {
+    await act(r.id, () => apiFetch("/api/purchasing/pr-enrich", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: entityOf(), id: r.id, sku_id: r.sku_id ?? null, field, value, currency }) }));
+    setDetail((d) => {
+      if (!d || d.id !== r.id) return d;
+      const missing = (d.missing ?? []).filter((m) => m !== field);
+      const patch: Partial<DrillRow> = { missing };
+      if (field === "image") patch.image_url = `/api/r2-image?key=${encodeURIComponent(String(value))}`;
+      if (field === "price") patch.unit_price = Number(value);
+      if (field === "link") patch.purchase_url = String(value) || null;
+      if (field === "seller") patch.seller = String(value) || null;
+      return { ...d, ...patch };
+    });
+  };
+  const uploadCover = async (r: DrillRow, file: File) => {
+    setUploading(true); setErr(null);
+    try {
+      const fd = new FormData(); fd.append("file", file); fd.append("folder", "skus");
+      const up = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then((x) => x.json());
+      if (up.error || !up.r2_key) throw new Error(up.error || "อัปโหลดไม่สำเร็จ");
+      await enrich(r, "image", up.r2_key);
+    } catch (e) { setErr(e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ"); }
+    finally { setUploading(false); }
   };
 
   // ---- เรียง + แบ่งหน้า + จัดกลุ่ม ----
@@ -406,6 +427,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
                 {r.code && <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">{r.code}</span>}
                 {isReceive ? (r.po_no && <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">📄 {r.po_no}</span>)
                   : (r.mo_no && <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">🏭 {r.mo_no}</span>)}
+                {(r.missing?.length ?? 0) > 0 && <span className="text-[10px] font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">⚠️ ข้อมูลไม่ครบ</span>}
               </div>
               <div className="text-xs text-slate-700 mt-1 tabular-nums">
                 {isReceive
@@ -448,7 +470,10 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
                 <td className="py-1.5 pr-2"><Thumb url={r.image_url} size="w-10 h-10" /></td>
                 <td className="py-1.5 pr-2 min-w-[140px]">
                   <button type="button" onClick={() => openDetail(r)} className="text-left text-slate-700 hover:text-blue-700 break-words">{r.primary}</button>
-                  {r.code && <div className="text-[10px] font-mono text-slate-400">{r.code}</div>}
+                  <div className="flex items-center gap-1.5">
+                    {r.code && <span className="text-[10px] font-mono text-slate-400">{r.code}</span>}
+                    {(r.missing?.length ?? 0) > 0 && <span className="text-[10px] text-amber-600" title="ข้อมูลไม่ครบ">⚠️</span>}
+                  </div>
                 </td>
                 <td className="py-1.5 pr-2 text-slate-500">{r.seller || "—"}{isReceive ? (r.po_no && <div className="text-[10px] text-slate-400">📄 {r.po_no}</div>) : (r.mo_no && <div className="text-[10px] text-indigo-500">🏭 {r.mo_no}</div>)}</td>
                 <td className="py-1.5 pr-2 text-right tabular-nums whitespace-nowrap">{(r.qty ?? 0).toLocaleString()} {r.uom}</td>
@@ -520,7 +545,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
                           <div key={r.id}>
                             <div className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg border border-slate-100 hover:bg-slate-50">
                               <button type="button" onClick={() => isRich ? openDetail(r) : undefined} className={`min-w-0 flex-1 text-left ${isRich ? "hover:text-blue-700" : ""}`}>
-                                <div className="text-sm text-slate-700 truncate">{r.primary}{isRich && r.code && <span className="text-[10px] font-mono text-slate-400 ml-1.5">{r.code}</span>}</div>
+                                <div className="text-sm text-slate-700 truncate">{r.primary}{isRich && r.code && <span className="text-[10px] font-mono text-slate-400 ml-1.5">{r.code}</span>}{isRich && (r.missing?.length ?? 0) > 0 && <span className="text-[10px] text-amber-600 ml-1" title="ข้อมูลไม่ครบ">⚠️</span>}</div>
                                 <div className="text-[11px] text-slate-400 truncate">{r.secondary}{isWaiting && r.order_date && <span className="text-emerald-600"> · ✓ สั่งแล้ว {r.order_date}</span>}</div>
                               </button>
                               <div className="text-xs text-slate-600 text-right shrink-0 tabular-nums">{r.right}</div>
@@ -554,21 +579,30 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
         )}
       </div>
 
-      {/* popup รายละเอียด (กดจากการ์ด/แถว) */}
+      {/* popup รายละเอียด + เติมข้อมูลที่ขาด (กดจากการ์ด/แถว) */}
       {detail && (
-        <DetailModal r={detail} type={drill?.type ?? ""} onClose={() => setDetail(null)}
-          linkDraft={linkDraft} setLinkDraft={setLinkDraft} onSaveLink={saveLink} busy={busy.has(detail.id)} />
+        <DetailModal key={detail.id} r={detail} type={drill?.type ?? ""} onClose={() => setDetail(null)}
+          onEnrich={enrich} onUpload={uploadCover} uploading={uploading} busy={busy.has(detail.id)} />
       )}
     </div>
   );
 }
 
-// ---- popup รายละเอียดใบขอซื้อ / บรรทัดค้างรับเข้า (อ่านอย่างเดียว + แก้ลิงก์สำหรับรอซื้อ) ----
-function DetailModal({ r, type, onClose, linkDraft, setLinkDraft, onSaveLink, busy }: {
+// ---- popup รายละเอียด + เติมข้อมูลที่ขาด (save กลับ SKU + เอกสาร) ----
+const MISS_LABEL: Record<string, string> = { image: "รูป", price: "ราคา", link: "ลิงก์", seller: "ร้านค้า" };
+function DetailModal({ r, type, onClose, onEnrich, onUpload, uploading, busy }: {
   r: DrillRow; type: string; onClose: () => void;
-  linkDraft: string; setLinkDraft: (s: string) => void; onSaveLink: (r: DrillRow, url: string) => Promise<void>; busy: boolean;
+  onEnrich: (r: DrillRow, field: string, value: string | number, currency?: string) => Promise<void>;
+  onUpload: (r: DrillRow, file: File) => Promise<void>; uploading: boolean; busy: boolean;
 }) {
   const isReceive = type === "pending_receive";
+  const missing = r.missing ?? [];
+  const miss = (f: string) => missing.includes(f);
+  const [priceDraft, setPriceDraft] = useState(r.unit_price ? String(r.unit_price) : "");
+  const [linkDraft, setLinkDraft] = useState(r.purchase_url ?? "");
+  const [sellerDraft, setSellerDraft] = useState(r.seller ?? "");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const box = (on: boolean) => `rounded-lg border p-2.5 ${on ? "border-amber-300 bg-amber-50/60" : "border-slate-100"}`;
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="flex items-start gap-2 py-1 border-b border-slate-50 last:border-0">
       <span className="text-xs text-slate-400 w-24 shrink-0">{label}</span>
@@ -596,9 +630,17 @@ function DetailModal({ r, type, onClose, linkDraft, setLinkDraft, onSaveLink, bu
           </div>
         </div>
 
+        {/* แถบเตือนข้อมูลไม่ครบ */}
+        {missing.length > 0 && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            ⚠️ ข้อมูลไม่ครบ: <b>{missing.map((m) => MISS_LABEL[m] ?? m).join(" · ")}</b> — เติมด้านล่าง บันทึกกลับ SKU + เอกสารให้เลย
+          </div>
+        )}
+
+        {/* ข้อมูลอ่านอย่างเดียว */}
         <div className="rounded-lg border border-slate-100 px-3 py-1.5">
-          <Row label="ร้านค้า">{r.seller || "—"}</Row>
           {isReceive ? <>
+            <Row label="ร้านค้า">{r.seller || "—"}</Row>
             <Row label="ใบสั่งซื้อ">{r.po_no || "—"}</Row>
             <Row label="วันสั่ง">{r.order_date || "—"}</Row>
           </> : <>
@@ -611,20 +653,55 @@ function DetailModal({ r, type, onClose, linkDraft, setLinkDraft, onSaveLink, bu
           </>}
         </div>
 
-        {/* ลิงก์สั่งซื้อ (แก้ได้ เฉพาะใบขอซื้อ) */}
-        {!isReceive && (
-          <div className="rounded-lg bg-blue-50/60 border border-blue-100 p-2.5">
-            <div className="text-xs font-medium text-slate-600 mb-1.5 flex items-center gap-1.5">🔗 ลิงก์สั่งซื้อ
-              {r.purchase_url && <a href={r.purchase_url} target="_blank" rel="noopener" className="text-blue-600 hover:underline">เปิด ↗</a>}
-            </div>
-            <div className="flex items-center gap-2">
-              <input type="url" value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} placeholder="วางลิงก์ Taobao / 1688 / ฯลฯ"
-                className="h-8 flex-1 min-w-0 px-2 text-xs border border-blue-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
-              <button disabled={busy} onClick={() => onSaveLink(r, linkDraft)} className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
-              {r.purchase_url && <button disabled={busy} onClick={() => { setLinkDraft(""); onSaveLink(r, ""); }} className="h-8 px-2 text-xs text-rose-600 hover:underline">ล้าง</button>}
+        {/* เติม / แก้ข้อมูล (save กลับ SKU + เอกสาร) */}
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-slate-500">เติม / แก้ข้อมูล <span className="font-normal text-slate-400">· บันทึกกลับ SKU {isReceive ? "" : "+ ใบขอซื้อ"}</span></div>
+
+          <div className={box(miss("image"))}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-600 w-16 shrink-0">🖼 รูป</span>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(r, f); e.target.value = ""; }} />
+              <button disabled={uploading} onClick={() => fileRef.current?.click()}
+                className="h-8 px-3 text-xs rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50">{uploading ? "กำลังอัป…" : miss("image") ? "📤 อัปโหลดรูป" : "เปลี่ยนรูป"}</button>
+              {miss("image") && <span className="text-[11px] text-amber-600">ยังไม่มีรูป</span>}
             </div>
           </div>
-        )}
+
+          <div className={box(miss("price"))}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-600 w-16 shrink-0">💰 ราคา/หน่วย</span>
+              <input type="number" min={0} value={priceDraft} onChange={(e) => setPriceDraft(e.target.value)}
+                className="h-8 w-28 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+              <span className="text-[11px] text-slate-400">{isYuan(r.currency) ? "หยวน ¥" : "บาท ฿"}</span>
+              <button disabled={busy || priceDraft === ""} onClick={() => onEnrich(r, "price", Number(priceDraft), r.currency ?? undefined)}
+                className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
+            </div>
+          </div>
+
+          <div className={box(miss("link"))}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-600 w-16 shrink-0">🔗 ลิงก์</span>
+              <input type="url" value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} placeholder="Taobao / 1688 / ฯลฯ"
+                className="h-8 flex-1 min-w-[140px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+              {r.purchase_url && <a href={r.purchase_url} target="_blank" rel="noopener" className="text-xs text-blue-600 hover:underline shrink-0">เปิด ↗</a>}
+              <button disabled={busy} onClick={() => onEnrich(r, "link", linkDraft)}
+                className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
+            </div>
+          </div>
+
+          {!isReceive && (
+            <div className={box(miss("seller"))}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-slate-600 w-16 shrink-0">🏪 ร้านค้า</span>
+                <input value={sellerDraft} onChange={(e) => setSellerDraft(e.target.value)} placeholder="ชื่อร้าน / ผู้ขาย"
+                  className="h-8 flex-1 min-w-[140px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                <button disabled={busy} onClick={() => onEnrich(r, "seller", sellerDraft)}
+                  className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {isReceive && (
           <div className="text-right">

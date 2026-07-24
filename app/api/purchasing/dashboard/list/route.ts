@@ -27,8 +27,9 @@ export type DrillRow = {
   qty?: number; uom?: string; unit_price?: number; currency?: string;
   unit_price_thb?: number; line_total_thb?: number;
   order_date?: string | null; purchase_url?: string | null;
-  sku_id?: string | null;                                   // ไว้ save ข้อมูลกลับ SKU (เฟส 2)
+  sku_id?: string | null;                                   // ไว้ save ข้อมูลกลับ SKU
   needed_date?: string | null; note?: string | null; created_at?: string | null; status?: string | null;
+  missing?: string[];                                        // field ที่ยังไม่ครบ: image | price | link | seller
   // pending_receive
   po_no?: string; received?: number; remain?: number; expected_date?: string | null;
 };
@@ -60,12 +61,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .select("id, pr_no, item_sku_id, item_name, seller_name, requester, qty, uom, price_est, currency, created_at, order_date, source_mo_no, reason, image_key, purchase_url, needed_date, note, status")
       .eq("status", "waiting").eq("is_active", true).order("created_at", { ascending: false }).limit(5000);
     const all = (data ?? []) as Record<string, unknown>[];
-    // join skus_v2 → รหัส (code) + รูปปก (cover) — เหมือน pr-history
+    // join skus_v2 → รหัส (code) + รูปปก (cover) + ลิงก์ (purchase_link) — ไว้ตรวจ "ข้อมูลไม่ครบ"
     const skuIds = [...new Set(all.map((r) => r.item_sku_id).filter(Boolean) as string[])];
-    const skuMap = new Map<string, { code: string | null; cover: string | null }>();
+    const skuMap = new Map<string, { code: string | null; cover: string | null; link: string | null }>();
     for (let i = 0; i < skuIds.length; i += 300) {
-      const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key").in("id", skuIds.slice(i, i + 300));
-      for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null });
+      const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key, purchase_link").in("id", skuIds.slice(i, i + 300));
+      for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null, link: (s.purchase_link as string) ?? null });
     }
     sellers = [...new Set(all.map((r) => String(r.seller_name ?? "")).filter(Boolean))].sort();
     rows = all
@@ -76,6 +77,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         const sk = r.item_sku_id ? skuMap.get(String(r.item_sku_id)) : null;
         const imgKey = sk?.cover ?? (r.image_key as string) ?? null;
         const qty = num(r.qty), price = num(r.price_est);
+        const missing: string[] = [];
+        if (!imgKey) missing.push("image");
+        if (price <= 0) missing.push("price");
+        if (!sk?.link && !r.purchase_url) missing.push("link");
+        if (!r.seller_name) missing.push("seller");
         return {
           id: String(r.id),
           primary: String(r.item_name ?? "—"),
@@ -99,6 +105,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           note: (r.note as string) ?? null,
           created_at: (r.created_at as string) ?? null,
           status: (r.status as string) ?? null,
+          missing,
         };
       });
   } else if (type === "unpaid" || type === "spend_month") {
@@ -145,12 +152,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const enriched = lines.map((l) => ({ l, po: poById.get(String(l.po_id)) })).filter((x) => x.po && x.po.status !== "draft" && x.po.status !== "cancelled");
     const scoped = type === "supplier" ? enriched.filter((x) => String(x.po!.seller_name ?? "") === seller) : enriched;
     sellers = [...new Set(scoped.map((x) => String(x.po!.seller_name ?? "")).filter(Boolean))].sort();
-    // join skus_v2 → รหัส + รูปปก (โชว์รูปในลิสต์ค้างรับเข้า)
+    // join skus_v2 → รหัส + รูปปก + ลิงก์ (โชว์รูป + ตรวจ "ข้อมูลไม่ครบ")
     const skuIds = [...new Set(scoped.map((x) => x.l.item_sku_id).filter(Boolean) as string[])];
-    const skuMap = new Map<string, { code: string | null; cover: string | null }>();
+    const skuMap = new Map<string, { code: string | null; cover: string | null; link: string | null }>();
     for (let i = 0; i < skuIds.length; i += 300) {
-      const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key").in("id", skuIds.slice(i, i + 300));
-      for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null });
+      const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key, purchase_link").in("id", skuIds.slice(i, i + 300));
+      for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null, link: (s.purchase_link as string) ?? null });
     }
     rows = scoped
       .filter((x) => (!seller || type === "supplier" || String(x.po!.seller_name ?? "") === seller) && (hit(String(x.l.item_name ?? "")) || hit(String(x.po!.po_no ?? ""))))
@@ -160,6 +167,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         const sk = x.l.item_sku_id ? skuMap.get(String(x.l.item_sku_id)) : null;
         const imgKey = sk?.cover ?? null;
         const qty = num(x.l.qty), price = num(x.l.price_est);
+        const missing: string[] = [];
+        if (!imgKey) missing.push("image");
+        if (price <= 0) missing.push("price");
+        if (!sk?.link) missing.push("link");
         return {
           id: String(x.l.id),
           primary: String(x.l.item_name ?? "—"),
@@ -178,6 +189,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           unit_price_thb: Math.round(toThb(price, x.l.currency)),
           line_total_thb: Math.round(toThb(price * qty, x.l.currency)),
           sku_id: (x.l.item_sku_id as string) ?? null,
+          missing,
         };
       });
   } else {
