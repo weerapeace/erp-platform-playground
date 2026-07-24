@@ -19,7 +19,15 @@ const isCNY = (c: unknown) => { const s = String(c ?? "").toUpperCase(); return 
 const baht = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
 const monthKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 
-export type DrillRow = { id: string; primary: string; secondary: string; right: string; mo_no?: string | null };
+export type DrillRow = {
+  id: string; primary: string; secondary: string; right: string; mo_no?: string | null;
+  // ── ข้อมูลเต็ม (เฉพาะรายการรอซื้อ = waiting) สำหรับ view การ์ด/ตาราง ──
+  pr_no?: string; code?: string; image_url?: string | null; reason?: string | null;
+  seller?: string | null; requester?: string | null;
+  qty?: number; uom?: string; unit_price?: number; currency?: string;
+  unit_price_thb?: number; line_total_thb?: number;
+  order_date?: string | null; purchase_url?: string | null;
+};
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
@@ -45,21 +53,45 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     title = "รายการรอซื้อ (รออนุมัติ)";
     link = { href: "/purchasing/orders", label: "ไปหน้าอนุมัติ" };
     const { data } = await admin.from("purchase_requests_v2")
-      .select("id, pr_no, item_name, seller_name, requester, qty, uom, price_est, currency, created_at, source_mo_no")
+      .select("id, pr_no, item_sku_id, item_name, seller_name, requester, qty, uom, price_est, currency, created_at, order_date, source_mo_no, reason, image_key, purchase_url")
       .eq("status", "waiting").eq("is_active", true).order("created_at", { ascending: false }).limit(5000);
     const all = (data ?? []) as Record<string, unknown>[];
+    // join skus_v2 → รหัส (code) + รูปปก (cover) — เหมือน pr-history
+    const skuIds = [...new Set(all.map((r) => r.item_sku_id).filter(Boolean) as string[])];
+    const skuMap = new Map<string, { code: string | null; cover: string | null }>();
+    for (let i = 0; i < skuIds.length; i += 300) {
+      const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key").in("id", skuIds.slice(i, i + 300));
+      for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null });
+    }
     sellers = [...new Set(all.map((r) => String(r.seller_name ?? "")).filter(Boolean))].sort();
     rows = all
       .filter((r) => (!seller || String(r.seller_name ?? "") === seller) && (!mo || String(r.source_mo_no ?? "") === mo)
         && (hit(String(r.item_name ?? "")) || hit(String(r.seller_name ?? "")) || hit(String(r.pr_no ?? ""))))
       .slice(0, limit)
-      .map((r) => ({
-        id: String(r.id),
-        primary: String(r.item_name ?? "—"),
-        secondary: `🏪 ${r.seller_name || "—"} · ${r.requester || "—"}${r.source_mo_no ? ` · 🏭 ${r.source_mo_no}` : ""}`,
-        right: `${num(r.qty).toLocaleString()} ${r.uom || ""} · ${baht(toThb(num(r.price_est) * num(r.qty), r.currency))}`,
-        mo_no: (r.source_mo_no as string) ?? null,
-      }));
+      .map((r) => {
+        const sk = r.item_sku_id ? skuMap.get(String(r.item_sku_id)) : null;
+        const imgKey = sk?.cover ?? (r.image_key as string) ?? null;
+        const qty = num(r.qty), price = num(r.price_est);
+        return {
+          id: String(r.id),
+          primary: String(r.item_name ?? "—"),
+          secondary: `🏪 ${r.seller_name || "—"} · ${r.requester || "—"}${r.source_mo_no ? ` · 🏭 ${r.source_mo_no}` : ""}`,
+          right: `${qty.toLocaleString()} ${r.uom || ""} · ${baht(toThb(price * qty, r.currency))}`,
+          mo_no: (r.source_mo_no as string) ?? null,
+          pr_no: String(r.pr_no ?? ""),
+          code: sk?.code ?? "",
+          image_url: imgKey ? `/api/r2-image?key=${encodeURIComponent(imgKey)}` : null,
+          reason: (r.reason as string) ?? null,
+          seller: (r.seller_name as string) ?? null,
+          requester: (r.requester as string) ?? null,
+          qty, uom: (r.uom as string) || "",
+          unit_price: price, currency: String(r.currency ?? "THB"),
+          unit_price_thb: Math.round(toThb(price, r.currency)),
+          line_total_thb: Math.round(toThb(price * qty, r.currency)),
+          order_date: (r.order_date as string) ?? null,
+          purchase_url: (r.purchase_url as string) ?? null,
+        };
+      });
   } else if (type === "unpaid" || type === "spend_month") {
     const thisMonth = monthKey(new Date());
     title = type === "unpaid" ? "ใบสั่งซื้อรอจ่ายเงิน" : "ใบสั่งซื้อเดือนนี้";

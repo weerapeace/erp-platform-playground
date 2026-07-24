@@ -26,7 +26,7 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
   // perf: ยิง query ทั้งหมดพร้อมกัน (Promise.all) → เวลา = query ช้าสุด ไม่ใช่ผลรวม (กันเด้งไป Tokyo ทีละตัว)
   const [rateRes, prRes, poRes, lineRes] = await Promise.all([
     admin.from("daily_rates").select("rate").order("rate_date", { ascending: false }).limit(1).maybeSingle(),
-    admin.from("purchase_requests_v2").select("id, status, requester, price_est, currency, seller_name, created_at, order_date").limit(5000),
+    admin.from("purchase_requests_v2").select("id, status, requester, price_est, currency, seller_name, created_at, order_date, is_active").limit(5000),
     admin.from("purchase_orders_v2").select("status, payment_status, currency, grand_total, seller_name, order_date").limit(5000),
     admin.from("purchase_order_lines_v2").select("qty, qty_received, line_status").limit(20000),
   ]);
@@ -34,7 +34,8 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
   const toThb = (amount: number, currency: unknown) => amount * (isCNY(currency) ? rmbRate : 1);
 
   // ── ใบขอซื้อ (PR): สถานะ + รายการรออนุมัติ ──
-  const prRows = (prRes.data ?? []) as Record<string, unknown>[];
+  // ตัดใบที่ถูกลบทิ้ง (soft-delete is_active=false) ออกจากทุกตัวเลข — ให้ตรงกับป๊อปอัป
+  const prRows = ((prRes.data ?? []) as Record<string, unknown>[]).filter((p) => p.is_active !== false);
 
   const prStatusCounts: Record<string, number> = {};
   for (const p of prRows) { const s = String(p.status ?? "unknown"); prStatusCounts[s] = (prStatusCounts[s] ?? 0) + 1; }
