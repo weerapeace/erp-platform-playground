@@ -614,6 +614,9 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, uplo
   const [linkDraft, setLinkDraft] = useState(r.purchase_url ?? "");
   const [sellerDraft, setSellerDraft] = useState(r.seller ?? "");
   const [s2, setS2] = useState({ seller: r.alt_seller ?? "", price: r.alt_price != null ? String(r.alt_price) : "", currency: curTh(r.alt_currency), link: r.alt_link ?? "" });
+  // ลิงก์โชว์เฉพาะของออนไลน์ (Taobao/1688) — เดาจากชื่อร้าน/มีลิงก์อยู่แล้ว
+  const looksTaobao = /taobao|tao ?bao|1688/i.test(r.seller ?? "") || !!r.purchase_url;
+  const [showLink, setShowLink] = useState(looksTaobao);
   const fileRef = useRef<HTMLInputElement>(null);
   const box = (on: boolean) => `rounded-lg border p-2.5 ${on ? "border-amber-300 bg-amber-50/60" : "border-slate-100"}`;
   const saveBtn = "h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50";
@@ -633,7 +636,7 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, uplo
   const savePrice = async () => { await onEnrich(r, "price", Number(priceDraft), priceCur); closeEdit("price"); };
   const saveLink = async () => { await onEnrich(r, "link", linkDraft); closeEdit("link"); };
   const saveSeller = async () => { await onEnrich(r, "seller", sellerDraft); closeEdit("seller"); };
-  const pickStore = async (name: string) => { setSellerDraft(name); await onEnrich(r, "seller", name); closeEdit("seller"); openEdit("link"); };
+  const pickStore = async (name: string) => { setSellerDraft(name); await onEnrich(r, "seller", name); closeEdit("seller"); setShowLink(true); openEdit("link"); };
   const saveS2 = async () => { await onSaveSource2(r, s2); closeEdit("source2"); };
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="flex items-start gap-2 py-1 border-b border-slate-50 last:border-0">
@@ -700,70 +703,73 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, uplo
             </div>
           </div>
 
-          {/* ราคา/หน่วย */}
-          <div className={box(miss("price"))}>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-slate-600 w-16 shrink-0">💰 ราคา/หน่วย</span>
-              {inEdit("price") ? <>
-                <input type="number" min={0} value={priceDraft} onChange={(e) => setPriceDraft(e.target.value)}
-                  className="h-8 w-24 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                <CurToggle val={priceCur} onChange={setPriceCur} />
-                <button disabled={busy || priceDraft === ""} onClick={savePrice} className={saveBtn}>บันทึก</button>
-                <Cancel f="price" />
-              </> : <>
-                <span className="text-xs text-slate-700 flex-1 tabular-nums">{unitStr(r)} <span className="text-slate-400">/{r.uom || "หน่วย"}</span></span>
-                <EditBtn f="price" />
-              </>}
+          {/* แหล่งซื้อที่ 1 (หลัก) — การ์ดตาราง ร้าน/ราคา/ลิงก์ */}
+          <div className="rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-[11px] font-medium text-slate-500 flex items-center justify-between">
+              <span>🛒 แหล่งซื้อที่ 1 (หลัก)</span>
+              {(r.missing?.length ?? 0) > 0 && <span className="text-amber-600">⚠️ ยังไม่ครบ</span>}
             </div>
-          </div>
-
-          {/* ลิงก์ */}
-          <div className={box(miss("link"))}>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-slate-600 w-16 shrink-0">🔗 ลิงก์</span>
-              {inEdit("link") ? <>
-                <input type="url" value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} placeholder="Taobao / 1688 / ฯลฯ"
-                  className="h-8 flex-1 min-w-[140px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                <button disabled={busy} onClick={saveLink} className={saveBtn}>บันทึก</button>
-                <Cancel f="link" />
-              </> : <>
-                <span className="text-xs text-slate-600 flex-1 min-w-0 truncate">{r.purchase_url || "ตั้งไว้ที่ SKU"}</span>
-                {r.purchase_url && <a href={r.purchase_url} target="_blank" rel="noopener" className="text-xs text-blue-600 hover:underline shrink-0">เปิด ↗</a>}
-                <EditBtn f="link" />
-              </>}
-            </div>
-          </div>
-
-          {/* ร้านค้า (เฉพาะใบขอซื้อ) */}
-          {!isReceive && (
-            <div className={box(miss("seller"))}>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-slate-600 w-16 shrink-0">🏪 ร้านค้า</span>
-                {inEdit("seller") ? <>
-                  <input value={sellerDraft} onChange={(e) => setSellerDraft(e.target.value)} placeholder="ชื่อร้าน / ผู้ขาย"
-                    className="h-8 flex-1 min-w-[120px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                  <button disabled={busy} onClick={saveSeller} className={saveBtn}>บันทึก</button>
-                  <Cancel f="seller" />
-                  <div className="w-full flex items-center gap-1.5 mt-1">
-                    <span className="text-[11px] text-slate-400">ลัด:</span>
-                    <button disabled={busy} onClick={() => pickStore("Tao Bao")} className="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50">🛒 Taobao</button>
-                    <button disabled={busy} onClick={() => pickStore("1688")} className="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50">1688</button>
-                    <span className="text-[11px] text-slate-400">(ตั้งร้านแล้วไปใส่ลิงก์ต่อ)</span>
-                  </div>
+            <div className="divide-y divide-slate-50 text-xs">
+              {/* ร้าน */}
+              <div className={`flex items-center gap-2 flex-wrap px-3 py-2 ${miss("seller") ? "bg-amber-50/60" : ""}`}>
+                <span className="text-slate-500 w-14 shrink-0">🏪 ร้าน</span>
+                {isReceive ? <span className="text-slate-700 flex-1 min-w-0 truncate">{r.seller || "—"}</span>
+                  : inEdit("seller") ? <>
+                    <input value={sellerDraft} onChange={(e) => setSellerDraft(e.target.value)} placeholder="ชื่อร้าน / ผู้ขาย"
+                      className="h-8 flex-1 min-w-[110px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                    <button disabled={busy} onClick={saveSeller} className={saveBtn}>บันทึก</button>
+                    <Cancel f="seller" />
+                    <div className="w-full flex items-center gap-1.5 mt-1">
+                      <span className="text-[11px] text-slate-400">ลัด:</span>
+                      <button disabled={busy} onClick={() => pickStore("Tao Bao")} className="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50">🛒 Taobao</button>
+                      <button disabled={busy} onClick={() => pickStore("1688")} className="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-50">1688</button>
+                    </div>
+                  </> : <>
+                    <span className="text-slate-700 flex-1 min-w-0 truncate">{r.seller || "—"}</span>
+                    <EditBtn f="seller" />
+                  </>}
+              </div>
+              {/* ราคา */}
+              <div className={`flex items-center gap-2 flex-wrap px-3 py-2 ${miss("price") ? "bg-amber-50/60" : ""}`}>
+                <span className="text-slate-500 w-14 shrink-0">💰 ราคา</span>
+                {inEdit("price") ? <>
+                  <input type="number" min={0} value={priceDraft} onChange={(e) => setPriceDraft(e.target.value)}
+                    className="h-8 w-24 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                  <CurToggle val={priceCur} onChange={setPriceCur} />
+                  <button disabled={busy || priceDraft === ""} onClick={savePrice} className={saveBtn}>บันทึก</button>
+                  <Cancel f="price" />
                 </> : <>
-                  <span className="text-xs text-slate-700 flex-1 min-w-0 truncate">{r.seller || "—"}</span>
-                  <EditBtn f="seller" />
+                  <span className="text-slate-700 flex-1 tabular-nums">{unitStr(r)} <span className="text-slate-400">/{r.uom || "หน่วย"}</span></span>
+                  <EditBtn f="price" />
                 </>}
               </div>
+              {/* ลิงก์ — ปุ่ม Taobao คุมว่าจะโชว์ช่องลิงก์ไหม */}
+              <div className={`flex items-center gap-2 flex-wrap px-3 py-2 ${miss("link") && showLink ? "bg-amber-50/60" : ""}`}>
+                <span className="text-slate-500 w-14 shrink-0">🔗 ลิงก์</span>
+                <button onClick={() => setShowLink((v) => !v)}
+                  className={`text-[11px] px-2 py-0.5 rounded-full border ${showLink ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🛒 Taobao</button>
+                {showLink ? (
+                  inEdit("link") ? <>
+                    <input type="url" value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} placeholder="Taobao / 1688 / ฯลฯ"
+                      className="h-8 flex-1 min-w-[140px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                    <button disabled={busy} onClick={saveLink} className={saveBtn}>บันทึก</button>
+                    <Cancel f="link" />
+                  </> : <>
+                    <span className="text-slate-600 flex-1 min-w-0 truncate">{r.purchase_url || "ตั้งไว้ที่ SKU"}</span>
+                    {r.purchase_url && <a href={r.purchase_url} target="_blank" rel="noopener" className="text-blue-600 hover:underline shrink-0">เปิด ↗</a>}
+                    <EditBtn f="link" />
+                  </>
+                ) : <span className="text-[11px] text-slate-400">ไม่ใช่ของออนไลน์ — ซ่อนลิงก์ไว้</span>}
+              </div>
             </div>
-          )}
+          </div>
 
-          {/* แหล่งซื้อที่ 2 (เก็บบน SKU) */}
-          <div className={box(false)}>
-            <div className="flex items-start gap-2">
-              <span className="text-xs text-slate-600 w-16 shrink-0 pt-1">🛒 แหล่งที่ 2</span>
+          {/* แหล่งซื้อที่ 2 — การ์ด (เก็บบน SKU) */}
+          <div className="rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-[11px] font-medium text-slate-500">🛒 แหล่งซื้อที่ 2</div>
+            <div className="px-3 py-2">
               {editing.has("source2") ? (
-                <div className="flex-1 min-w-0 space-y-1.5">
+                <div className="space-y-1.5">
                   <input value={s2.seller} onChange={(e) => setS2((v) => ({ ...v, seller: e.target.value }))} placeholder="ชื่อร้านที่ 2"
                     className="h-8 w-full px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
                   <div className="flex items-center gap-2 flex-wrap">
@@ -779,15 +785,15 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, uplo
                   </div>
                 </div>
               ) : hasAlt ? (
-                <div className="flex-1 min-w-0 flex items-center gap-2">
-                  <span className="text-xs text-slate-700 flex-1 min-w-0 truncate">
-                    {r.alt_seller || "—"} · {priceStr(r.alt_price, r.alt_currency)}
-                    {r.alt_link && <a href={r.alt_link} target="_blank" rel="noopener" className="text-blue-600 hover:underline ml-1">เปิด ↗</a>}
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-slate-700 flex-1 min-w-0 truncate">
+                    🏪 {r.alt_seller || "—"} · 💰 {priceStr(r.alt_price, r.alt_currency)}
+                    {r.alt_link && <a href={r.alt_link} target="_blank" rel="noopener" className="text-blue-600 hover:underline ml-1">🔗 เปิด ↗</a>}
                   </span>
                   <EditBtn f="source2" />
                 </div>
               ) : (
-                <button onClick={() => openEdit("source2")} className="text-xs text-blue-600 hover:underline pt-0.5">+ เพิ่มแหล่งซื้อที่ 2</button>
+                <button onClick={() => openEdit("source2")} className="text-xs text-blue-600 hover:underline">+ เพิ่มแหล่งซื้อที่ 2</button>
               )}
             </div>
           </div>
