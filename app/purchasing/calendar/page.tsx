@@ -109,16 +109,17 @@ export default function PurchasingCalendarPage() {
                 </div>
                 <span className="text-xs font-medium text-slate-700 tabular-nums shrink-0">{baht(i.amount_thb)}</span>
               </div>
-              {/* สินค้าในใบ — รูปเล็กๆ (ชี้เพื่อดูรูปใหญ่ · กดหัวการ์ดดูทั้งหมด) + จำนวนรายการ */}
+              {/* สินค้าในใบ — รูป + ชื่อ (3 รายการแรก · ชี้รูปดูใหญ่ · กดหัวการ์ดดูทั้งหมด) */}
               {i.products.length > 0 && (
-                <div className="mt-1.5 flex items-center gap-1 flex-wrap">
-                  {i.products.slice(0, 8).map((p, idx) => (
-                    <span key={idx} title={`${p.name}${p.qty ? ` × ${qtyFmt(p.qty)}` : ""}`} className="inline-flex">
-                      <HoverImage url={p.img} size={26} alt={p.name} fallback="📦" />
-                    </span>
+                <div className="mt-1.5 space-y-0.5">
+                  {i.products.slice(0, 3).map((p, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5">
+                      <HoverImage url={p.img} size={22} alt={p.name} fallback="📦" />
+                      <span className="text-[11px] text-slate-500 truncate flex-1" title={`${p.name}${p.qty ? ` × ${qtyFmt(p.qty)}` : ""}`}>{p.name || "—"}</span>
+                    </div>
                   ))}
-                  {i.product_count > Math.min(i.products.length, 8) && (
-                    <span className="text-[10px] text-slate-400 self-center px-0.5">+{i.product_count - Math.min(i.products.length, 8)}</span>
+                  {i.product_count > 3 && (
+                    <div className="text-[10px] text-slate-400 pl-[26px]">+{i.product_count - 3} รายการ</div>
                   )}
                 </div>
               )}
