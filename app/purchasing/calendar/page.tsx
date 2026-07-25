@@ -84,16 +84,16 @@ export default function PurchasingCalendarPage() {
           getFilter={(i) => i.seller_name ?? undefined}
           getSearchText={(i) => `${i.po_no} ${i.seller_name ?? ""}`}
           backlogTitle={mode === "pay" ? "ยังไม่ลงวันจ่าย" : "ยังไม่ลงวันเข้า"}
-          hint={mode === "pay" ? "ลากไปวางบนวัน = ตั้งวันวางแผนจ่ายเงิน · กด ⚑ = ติดตาม" : "ลากไปวางบนวัน = ตั้งวันคาดว่าของจะเข้า · กด ⚑ = ติดตาม"}
+          hint={mode === "pay" ? "🔄 วันจ่ายมาจากเครดิตร้านอัตโนมัติ (ตั้งเครดิตที่ /master/partners) · ลากไปวางวัน = ตั้งเอง (ทับอัตโนมัติ) · กด ⚑ = ติดตาม" : "ลากไปวางบนวัน = ตั้งวันคาดว่าของจะเข้า · กด ⚑ = ติดตาม"}
           dayFooter={(its) => {
             const total = its.reduce((a, x) => a + x.amount_thb, 0);
             const hasF = its.some((x) => x.follow_up);
             return <div className={`text-[9px] px-1 tabular-nums ${hasF ? "text-rose-600 font-semibold" : "text-slate-400"}`}>รวม {baht(total)}</div>;
           }}
           renderChip={(i) => (
-            <div title={`${i.po_no} · ${i.seller_name ?? ""}`}
-              className={`text-[9px] leading-tight rounded px-1 py-0.5 flex items-center gap-1 ${i.follow_up ? "bg-rose-50 text-rose-700 font-bold" : "bg-slate-100 text-slate-600"}`}>
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${i.follow_up ? "bg-rose-500" : "bg-slate-400"}`} />
+            <div title={`${i.po_no} · ${i.seller_name ?? ""}${i.auto ? " · วันจ่ายอัตโนมัติ (เครดิตร้าน)" : ""}`}
+              className={`text-[9px] leading-tight rounded px-1 py-0.5 flex items-center gap-1 ${i.follow_up ? "bg-rose-50 text-rose-700 font-bold" : "bg-slate-100 text-slate-600"} ${i.auto ? "border border-dashed border-indigo-300" : ""}`}>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${i.follow_up ? "bg-rose-500" : i.auto ? "bg-indigo-400" : "bg-slate-400"}`} />
               <span className="truncate flex-1">{i.po_no}</span>
               <span className="shrink-0 tabular-nums">{baht(i.amount_thb)}</span>
             </div>
@@ -109,6 +109,11 @@ export default function PurchasingCalendarPage() {
                 </div>
                 <span className="text-xs font-medium text-slate-700 tabular-nums shrink-0">{baht(i.amount_thb)}</span>
               </div>
+              {/* ป้ายวันจ่ายอัตโนมัติ (จากเครดิตร้าน) — ยังลากตั้งวันเองทับได้ */}
+              {i.auto && (
+                <div className="mt-1 inline-flex items-center gap-1 text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-1.5 py-0.5"
+                  title="วันจ่ายคำนวณจากเครดิตของร้าน · ลากไปวางวันอื่นเพื่อตั้งเอง">🔄 วันจ่ายอัตโนมัติ</div>
+              )}
               {/* สินค้าในใบ — รูป + ชื่อ (3 รายการแรก · ชี้รูปดูใหญ่ · กดหัวการ์ดดูทั้งหมด) */}
               {i.products.length > 0 && (
                 <div className="mt-1.5 space-y-0.5">

@@ -10,6 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { computeDueDate } from "@/lib/credit-term";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,6 +24,7 @@ export type PoCalItem = {
   date: string | null; amount_thb: number; currency: string | null;
   follow_up: boolean; payment_status: string | null; status: string | null;
   products: PoCalProduct[]; product_count: number;   // สินค้าในใบ (โชว์รูปเล็กๆ ในการ์ด)
+  auto: boolean;   // วันจ่ายมาจากเครดิตร้านอัตโนมัติ (ยังไม่ได้ตั้งวันเอง)
 };
 export type PoCalResponse = { data: PoCalItem[]; error: string | null };
 
@@ -48,8 +50,30 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     amount_thb: Math.round(num(p.grand_total) * (isCNY(p.currency) ? rmb : 1)),
     currency: (p.currency as string) ?? null,
     follow_up: !!p.follow_up, payment_status: (p.payment_status as string) ?? null, status: (p.status as string) ?? null,
-    products: [], product_count: 0,
+    products: [], product_count: 0, auto: false,
   }));
+
+  // โหมดจ่ายเงิน: ใบที่ยังไม่ตั้งวันจ่ายเอง → คำนวณจาก "เครดิตร้าน + วันซื้อ" อัตโนมัติ (จับคู่ร้านด้วยชื่อ)
+  if (mode === "pay") {
+    const { data: partners } = await admin.from("partners_v2")
+      .select("display_name, name_th, purchase_credit_term").not("purchase_credit_term", "is", null);
+    const termByName = new Map<string, string>();
+    for (const pt of (partners ?? []) as Record<string, unknown>[]) {
+      const term = String(pt.purchase_credit_term ?? "").trim(); if (!term) continue;
+      for (const nm of [pt.display_name, pt.name_th]) { const k = String(nm ?? "").trim(); if (k && !termByName.has(k)) termByName.set(k, term); }
+    }
+    if (termByName.size) {
+      const orderDateById = new Map<string, string | null>();
+      for (const p of (data ?? []) as Record<string, unknown>[]) orderDateById.set(String(p.id), (p.order_date as string) ?? null);
+      for (const it of items) {
+        if (it.date) continue;   // ตั้งวันเองแล้ว → ไม่แตะ (override)
+        const term = it.seller_name ? termByName.get(it.seller_name.trim()) : undefined;
+        if (!term) continue;
+        const due = computeDueDate(orderDateById.get(it.id), term);
+        if (due) { it.date = due; it.auto = true; }
+      }
+    }
+  }
 
   // สินค้าในแต่ละใบ (โชว์รูปเล็กๆ ในการ์ด) — purchase_order_lines_v2 + รูปปก skus_v2
   const poIds = items.map((i) => i.id);

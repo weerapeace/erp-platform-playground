@@ -9,6 +9,8 @@
 
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
+import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input";
+import { formatCreditTerm } from "@/lib/credit-term";
 
 // F20: client-only render — กัน Worker 1102 (SSR component หนัก)
 const MasterCRUDPage = dynamic(
@@ -44,6 +46,18 @@ const CONFIG: MasterCRUDConfig = {
         ? <span className="text-sm tabular-nums text-slate-700">฿{Number(n).toLocaleString("th-TH")}</span>
         : <span className="text-xs text-slate-300">—</span>;
     },
+    // เครดิตการจ่าย → ข้อความไทยอ่านง่ายในตาราง
+    purchase_credit_term: (v) => {
+      const s = formatCreditTerm(v as string | null);
+      return s === "—" ? <span className="text-xs text-slate-300">—</span>
+        : <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700">💳 {s}</span>;
+    },
+  },
+  // ตัวเลือกเครดิตการจ่ายในฟอร์มร้าน (ปฏิทินจัดซื้อเอาไปคำนวณวันจ่ายอัตโนมัติ)
+  formRenderers: {
+    purchase_credit_term: ({ value, onChange, disabled }) => (
+      <PurchaseCreditTermInput value={(value as string) || null} onChange={onChange} disabled={disabled} />
+    ),
   },
 };
 
