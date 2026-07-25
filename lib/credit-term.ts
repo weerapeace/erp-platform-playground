@@ -5,14 +5,16 @@
  *
  * กติกา (ตามที่เจ้าของเลือก):
  *  - สิ้นเดือน (eom)      = สิ้นเดือน "ที่ซื้อ"
- *  - ทุกวันที่ X (monthday) = วันที่ X ของเดือนที่ซื้อ ถ้ายังไม่เลย · เลยแล้ว → เดือนถัดไป
+ *  - ทุกวันที่ X (monthday)      = วันที่ X ของ "เดือนที่ซื้อ" ถ้ายังไม่เลย · เลยแล้ว → เดือนถัดไป
+ *  - ทุกวันที่ X (monthday_next) = วันที่ X ของ "เดือนถัดไป" เสมอ (ซื้อเดือนนี้ จ่ายเดือนหน้า)
  */
 export type CreditTerm =
   | { type: "immediate" }
   | { type: "eom" }
   | { type: "days"; value: number }
   | { type: "months"; value: number }
-  | { type: "monthday"; value: number };
+  | { type: "monthday"; value: number }
+  | { type: "monthday_next"; value: number };
 
 export function parseCreditTerm(s: string | null | undefined): CreditTerm | null {
   if (!s) return null;
@@ -24,6 +26,7 @@ export function parseCreditTerm(s: string | null | undefined): CreditTerm | null
     case "days":      return isFinite(n) && n > 0 ? { type: "days", value: Math.round(n) } : null;
     case "months":    return isFinite(n) && n > 0 ? { type: "months", value: Math.round(n) } : null;
     case "monthday":  return isFinite(n) && n >= 1 && n <= 31 ? { type: "monthday", value: Math.round(n) } : null;
+    case "monthday_next": return isFinite(n) && n >= 1 && n <= 31 ? { type: "monthday_next", value: Math.round(n) } : null;
     default:          return null;
   }
 }
@@ -38,6 +41,7 @@ export function formatCreditTerm(s: string | null | undefined): string {
     case "days":      return `${t.value} วัน`;
     case "months":    return `${t.value} เดือน`;
     case "monthday":  return `ทุกวันที่ ${t.value}`;
+    case "monthday_next": return `ทุกวันที่ ${t.value} (เดือนถัดไป)`;
   }
 }
 
@@ -71,6 +75,12 @@ export function computeDueDate(orderDate: string | null | undefined, termStr: st
       let y = d.getFullYear(), m = d.getMonth();
       if (d.getDate() > term.value) { m += 1; if (m > 11) { m = 0; y += 1; } }   // เลยวันที่แล้ว → เดือนถัดไป
       const dd = Math.min(term.value, lastDayOfMonth(y, m));                      // clamp เช่น 31 ในก.พ.
+      return fmt(new Date(y, m, dd));
+    }
+    case "monthday_next": {
+      let y = d.getFullYear(), m = d.getMonth() + 1;   // เดือนถัดไปเสมอ (ไม่สนว่าวันซื้อเลยวันที่ X หรือยัง)
+      if (m > 11) { m = 0; y += 1; }
+      const dd = Math.min(term.value, lastDayOfMonth(y, m));
       return fmt(new Date(y, m, dd));
     }
   }

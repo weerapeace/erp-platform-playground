@@ -5,7 +5,12 @@
  * ค่า = text เดียว (immediate | eom | days:N | months:N | monthday:N) → ใช้ในฟอร์มร้าน (Partner)
  * ปฏิทินจัดซื้อโหมดจ่ายเงินจะเอาไปคำนวณวันครบกำหนดจ่ายอัตโนมัติ (lib/credit-term)
  */
-import { parseCreditTerm } from "@/lib/credit-term";
+import { parseCreditTerm, computeDueDate } from "@/lib/credit-term";
+
+const thDate = (iso: string) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+};
 
 const TYPES: { key: string; label: string }[] = [
   { key: "",          label: "— ไม่กำหนด —" },
@@ -13,9 +18,10 @@ const TYPES: { key: string; label: string }[] = [
   { key: "eom",       label: "สิ้นเดือน (ที่ซื้อ)" },
   { key: "days",      label: "กี่วัน (นับจากวันซื้อ)" },
   { key: "months",    label: "กี่เดือน (นับจากวันซื้อ)" },
-  { key: "monthday",  label: "ทุกวันที่ (ของเดือน)" },
+  { key: "monthday",      label: "ทุกวันที่ — เดือนที่ซื้อ (เลยวันแล้วไปเดือนถัดไป)" },
+  { key: "monthday_next", label: "ทุกวันที่ — เดือนถัดไปเสมอ" },
 ];
-const DEFAULT_NUM: Record<string, number> = { days: 15, months: 1, monthday: 1 };
+const DEFAULT_NUM: Record<string, number> = { days: 15, months: 1, monthday: 1, monthday_next: 1 };
 
 export function PurchaseCreditTermInput({ value, onChange, disabled }: {
   value: string | null;
@@ -25,7 +31,8 @@ export function PurchaseCreditTermInput({ value, onChange, disabled }: {
   const t = parseCreditTerm(value);
   const type = t?.type ?? "";
   const num = t && "value" in t ? t.value : "";
-  const needsNum = type === "days" || type === "months" || type === "monthday";
+  const isMonthday = type === "monthday" || type === "monthday_next";
+  const needsNum = type === "days" || type === "months" || isMonthday;
 
   const setType = (nt: string) => {
     if (nt === "" ) return onChange(null);
@@ -38,6 +45,11 @@ export function PurchaseCreditTermInput({ value, onChange, disabled }: {
     onChange(`${type}:${isFinite(v) && v > 0 ? v : ""}`);
   };
 
+  // ตัวอย่างสด: ถ้าซื้อวันนี้ จะต้องจ่ายวันไหน (ให้เห็นภาพก่อนบันทึก)
+  const today = new Date();
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const due = value ? computeDueDate(todayIso, value) : null;
+
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <select value={type} onChange={(e) => setType(e.target.value)} disabled={disabled}
@@ -46,10 +58,15 @@ export function PurchaseCreditTermInput({ value, onChange, disabled }: {
       </select>
       {needsNum && (
         <span className="inline-flex items-center gap-1">
-          <input type="number" min={1} max={type === "monthday" ? 31 : undefined} value={num} disabled={disabled}
+          <input type="number" min={1} max={isMonthday ? 31 : undefined} value={num} disabled={disabled}
             onChange={(e) => setNum(e.target.value)}
             className="h-9 w-20 px-2 text-sm text-right border border-slate-200 rounded-lg disabled:bg-slate-50" />
           <span className="text-xs text-slate-500">{type === "days" ? "วัน" : type === "months" ? "เดือน" : "(1–31)"}</span>
+        </span>
+      )}
+      {due && (
+        <span className="text-[11px] text-slate-500 bg-slate-100 rounded px-1.5 py-0.5 whitespace-nowrap">
+          เช่น ซื้อวันนี้ ({thDate(todayIso)}) → จ่าย <b className="text-slate-700">{thDate(due)}</b>
         </span>
       )}
     </div>

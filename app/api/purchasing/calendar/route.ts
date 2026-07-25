@@ -21,6 +21,8 @@ const isCNY = (c: unknown) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").to
 export type PoCalProduct = {
   name: string; qty: number; uom: string | null; total: number; img: string | null;
   line_id: string; sku_id: string | null; price: number;   // ใส่ราคาย้อนกลับได้จาก popup (ของกลาง)
+  // ที่มาจากใบขอซื้อ (PR) — ทำไมถึงสั่ง / ขอมาเมื่อไหร่ / ใช้กับงานไหน
+  pr_no: string | null; pr_date: string | null; pr_note: string | null; pr_used_for: string | null; pr_mo_no: string | null; pr_requester: string | null;
 };
 export type PoCalItem = {
   id: string; po_no: string; seller_name: string | null;
@@ -30,6 +32,7 @@ export type PoCalItem = {
   auto: boolean;   // วันจ่ายมาจากเครดิตร้านอัตโนมัติ (ยังไม่ได้ตั้งวันเอง)
   seller_partner_id: string | null;      // ร้านในทะเบียน (จับคู่จากชื่อ) — ไว้ตั้งเครดิตจาก popup
   seller_credit_term: string | null;     // เครดิตการจ่ายของร้าน (null = ยังไม่ตั้ง → เตือน)
+  order_date: string | null;             // วันที่สั่งซื้อ
 };
 export type PoCalResponse = { data: PoCalItem[]; error: string | null };
 
@@ -56,6 +59,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     currency: (p.currency as string) ?? null,
     follow_up: !!p.follow_up, payment_status: (p.payment_status as string) ?? null, status: (p.status as string) ?? null,
     products: [], product_count: 0, auto: false, seller_partner_id: null, seller_credit_term: null,
+    order_date: (p.order_date as string) ?? null,
   }));
 
   // จับคู่ร้าน (ชื่อ → id + เครดิต) — ใช้ทั้งคำนวณวันจ่ายอัตโนมัติ และให้ popup เตือน/ตั้งเครดิตได้
@@ -82,19 +86,40 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // สินค้าในแต่ละใบ (โชว์รูปเล็กๆ ในการ์ด) — purchase_order_lines_v2 + รูปปก skus_v2
   const poIds = items.map((i) => i.id);
-  type LineRow = { line_id: string; name: string; qty: number; uom: string | null; total: number; price: number; sku_id: string | null };
+  type LineRow = { line_id: string; name: string; qty: number; uom: string | null; total: number; price: number; sku_id: string | null; pr_id: string | null };
   const linesByPo = new Map<string, LineRow[]>();
   const skuIds = new Set<string>();
+  const prIds = new Set<string>();
   for (let i = 0; i < poIds.length; i += 200) {
     const chunk = poIds.slice(i, i + 200);
     const { data: ls } = await admin.from("purchase_order_lines_v2")
-      .select("id, po_id, item_sku_id, item_name, qty, uom, price_est, line_total, sort_order").in("po_id", chunk).order("sort_order", { ascending: true });
+      .select("id, po_id, pr_id, item_sku_id, item_name, qty, uom, price_est, line_total, sort_order").in("po_id", chunk).order("sort_order", { ascending: true });
     for (const l of (ls ?? []) as Record<string, unknown>[]) {
       const pid = String(l.po_id);
       const arr = linesByPo.get(pid) ?? []; linesByPo.set(pid, arr);
       arr.push({ line_id: String(l.id), name: String(l.item_name ?? ""), qty: num(l.qty), uom: (l.uom as string) ?? null,
-        total: num(l.line_total), price: num(l.price_est), sku_id: l.item_sku_id ? String(l.item_sku_id) : null });
+        total: num(l.line_total), price: num(l.price_est), sku_id: l.item_sku_id ? String(l.item_sku_id) : null,
+        pr_id: l.pr_id ? String(l.pr_id) : null });
       if (l.item_sku_id) skuIds.add(String(l.item_sku_id));
+      if (l.pr_id) prIds.add(String(l.pr_id));
+    }
+  }
+
+  // ใบขอซื้อต้นทาง (PR) — เหตุผลที่สั่ง / วันที่ขอซื้อ / ใช้กับงานไหน
+  type PrRow = { pr_no: string | null; date: string | null; note: string | null; used_for: string | null; mo_no: string | null; requester: string | null };
+  const prMap = new Map<string, PrRow>();
+  const prArr = [...prIds];
+  for (let i = 0; i < prArr.length; i += 300) {
+    const chunk = prArr.slice(i, i + 300);
+    const { data: prs2 } = await admin.from("purchase_requests_v2")
+      .select("id, pr_no, order_date, created_at, note, used_for_label, source_mo_no, requester").in("id", chunk);
+    for (const r of (prs2 ?? []) as Record<string, unknown>[]) {
+      prMap.set(String(r.id), {
+        pr_no: (r.pr_no as string) ?? null,
+        date: ((r.order_date as string) || (r.created_at ? String(r.created_at).slice(0, 10) : null)) ?? null,
+        note: (r.note as string) ?? null, used_for: (r.used_for_label as string) ?? null,
+        mo_no: (r.source_mo_no as string) ?? null, requester: (r.requester as string) ?? null,
+      });
     }
   }
   const coverMap = new Map<string, string | null>();
@@ -109,8 +134,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     it.product_count = ls.length;
     it.products = ls.slice(0, 50).map((l) => {
       const key = l.sku_id ? coverMap.get(l.sku_id) : null;
+      const pr = l.pr_id ? prMap.get(l.pr_id) : undefined;
       return { name: l.name, qty: l.qty, uom: l.uom, total: l.total, price: l.price, line_id: l.line_id, sku_id: l.sku_id,
-        img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null };
+        img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
+        pr_no: pr?.pr_no ?? null, pr_date: pr?.date ?? null, pr_note: pr?.note ?? null,
+        pr_used_for: pr?.used_for ?? null, pr_mo_no: pr?.mo_no ?? null, pr_requester: pr?.requester ?? null };
     });
   }
 

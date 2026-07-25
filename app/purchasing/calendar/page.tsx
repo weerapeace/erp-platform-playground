@@ -18,6 +18,13 @@ import type { PoCalItem } from "@/app/api/purchasing/calendar/route";
 
 const baht = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
 const qtyFmt = (n: number) => Number(n || 0).toLocaleString("th-TH");
+// วันที่แบบไทยสั้น เช่น "25 ก.ค. 69"
+const thDate = (iso?: string | null) => {
+  if (!iso) return "—";
+  const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return String(iso);
+  return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+};
 
 export default function PurchasingCalendarPage() {
   const [mode, setMode] = useState<"in" | "pay">("in");
@@ -180,7 +187,8 @@ export default function PurchasingCalendarPage() {
             {/* สรุปหัวใบ */}
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm bg-slate-50 rounded-lg px-3 py-2">
               <div><span className="text-slate-400">ยอดรวม (บาท) </span><b className="tabular-nums text-slate-800">{baht(detail.amount_thb)}</b></div>
-              {detail.date && <div><span className="text-slate-400">{mode === "pay" ? "วันจ่าย " : "วันของเข้า "}</span>{detail.date}</div>}
+              {detail.order_date && <div><span className="text-slate-400">วันที่สั่ง </span><b className="text-slate-700">{thDate(detail.order_date)}</b></div>}
+              {detail.date && <div><span className="text-slate-400">{mode === "pay" ? "วันจ่าย " : "วันของเข้า "}</span>{thDate(detail.date)}</div>}
               <div><span className="text-slate-400">รายการ </span>{detail.product_count}</div>
               {detail.currency && !["THB", "บาท"].includes(detail.currency) && <div><span className="text-slate-400">สกุลเงิน </span>{detail.currency === "YUAN" ? "RMB" : detail.currency}</div>}
               {detail.follow_up && <div className="text-rose-600 font-medium">⚑ กำลังติดตาม (งานเร่ง)</div>}
@@ -217,7 +225,19 @@ export default function PurchasingCalendarPage() {
                   <HoverImage url={p.img} size={44} previewSize={320} alt={p.name} fallback="📦" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm text-slate-700 truncate">{p.name || "—"}</div>
-                    <div className="text-[11px] text-slate-400">จำนวน {qtyFmt(p.qty)}{p.uom ? ` ${p.uom}` : ""}</div>
+                    <div className="text-[11px] text-slate-400">
+                      จำนวน {qtyFmt(p.qty)}{p.uom ? ` ${p.uom}` : ""}
+                      {p.pr_date && <> · 📝 ขอซื้อ {thDate(p.pr_date)}{p.pr_no ? ` (${p.pr_no})` : ""}</>}
+                      {p.pr_requester && <> · โดย {p.pr_requester}</>}
+                    </div>
+                    {/* เหตุผลที่สั่ง (จากใบขอซื้อ) */}
+                    {(p.pr_note || p.pr_used_for || p.pr_mo_no) && (
+                      <div className="text-[11px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-2">
+                        {p.pr_mo_no && <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">🏭 {p.pr_mo_no}</span>}
+                        {p.pr_used_for && <span className="px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">ใช้กับ {p.pr_used_for}</span>}
+                        {p.pr_note && <span className="text-slate-500 truncate" title={p.pr_note}>💬 {p.pr_note}</span>}
+                      </div>
+                    )}
                   </div>
                   {/* ราคา — ยังไม่มี = เตือน + ใส่ได้เลย (ของกลาง) → บันทึกเข้าใบ + ตารางราคาของร้าน */}
                   <div className="shrink-0">
