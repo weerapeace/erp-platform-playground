@@ -10,24 +10,33 @@ import { apiFetch } from "@/lib/api";
 import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
 import { HoverImage } from "@/components/hover-image";
 import { ERPModal } from "@/components/modal";
+import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input";
+import { PriceFillInput } from "@/components/price-fill-input";
+import { formatCreditTerm } from "@/lib/credit-term";
+import { useToast } from "@/components/toast";
 import type { PoCalItem } from "@/app/api/purchasing/calendar/route";
 
 const baht = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
 const qtyFmt = (n: number) => Number(n || 0).toLocaleString("th-TH");
-// ราคาต่อบรรทัด = สกุลเงินของใบ (ร้านจีน = ¥) · ยอดรวมหัวใบแปลงเป็นบาทแล้ว
-const money = (n: number, cur: string | null) =>
-  (["RMB", "YUAN", "CNY"].includes(String(cur ?? "").toUpperCase()) ? "¥" : "฿") + Math.round(n || 0).toLocaleString("th-TH");
 
 export default function PurchasingCalendarPage() {
   const [mode, setMode] = useState<"in" | "pay">("in");
   const [items, setItems] = useState<PoCalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<PoCalItem | null>(null);   // PO ที่กดดูรายละเอียด (popup)
+  const [termDraft, setTermDraft] = useState<string | null>(null); // เครดิตที่กำลังตั้งใน popup
+  const [savingTerm, setSavingTerm] = useState(false);
+  const toast = useToast();
 
   const load = useCallback(() => {
     setLoading(true);
     apiFetch(`/api/purchasing/calendar?mode=${mode}`).then((r) => r.json())
-      .then((j) => setItems((j.data ?? []) as PoCalItem[])).catch(() => setItems([])).finally(() => setLoading(false));
+      .then((j) => {
+        const list = (j.data ?? []) as PoCalItem[];
+        setItems(list);
+        setDetail((d) => (d ? list.find((x) => x.id === d.id) ?? d : d));   // popup ที่เปิดอยู่ = ข้อมูลสด
+      })
+      .catch(() => setItems([])).finally(() => setLoading(false));
   }, [mode]);
   useEffect(() => { load(); }, [load]);
 
@@ -50,6 +59,31 @@ export default function PurchasingCalendarPage() {
       const r = await apiFetch("/api/purchasing/calendar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: it.id, follow_up: next }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
     } catch { setItems((is) => is.map((x) => (x.id === it.id ? { ...x, follow_up: !next } : x))); }
+  };
+
+  // ตั้ง "เครดิตการจ่าย" ให้ร้านจาก popup → บันทึกกลับทะเบียนร้าน (partners) แล้วทุกใบของร้านนี้คิดวันจ่ายเอง
+  const saveTerm = async (partnerId: string, term: string | null) => {
+    if (!term) { toast.error("เลือกเครดิตก่อน"); return; }
+    setSavingTerm(true);
+    try {
+      const r = await apiFetch(`/api/master-v2/partners/${partnerId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purchase_credit_term: term }),
+      });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast.success(`ตั้งเครดิตร้านแล้ว: ${formatCreditTerm(term)} — ใบของร้านนี้จะคิดวันจ่ายให้อัตโนมัติ`);
+      setTermDraft(null); load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกเครดิตไม่สำเร็จ"); }
+    finally { setSavingTerm(false); }
+  };
+
+  // ใส่ราคาสินค้าในใบ → อัปเดตบรรทัด + ยอดรวมใบ + บันทึกเข้าตารางราคาหลายร้านกลาง (supplier_items)
+  const savePrice = async (lineId: string, price: number) => {
+    const r = await apiFetch("/api/purchasing/po-line-price", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ line_id: lineId, price }),
+    });
+    const j = await r.json(); if (j.error) throw new Error(j.error);
+    toast.success(j.saved_to_price_list ? "บันทึกราคาแล้ว + เก็บเข้าตารางราคาของร้านนี้ด้วย" : "บันทึกราคาแล้ว");
+    load();
   };
 
   const filters = useMemo<SchedFilter[]>(() => {
@@ -101,7 +135,7 @@ export default function PurchasingCalendarPage() {
           renderCard={(i) => (
             <div className={`rounded-xl border bg-white p-2.5 ${i.follow_up ? "border-rose-300" : "border-slate-200"}`}>
               {/* กดหัวการ์ด = เปิดรายละเอียด (popup) · ลากที่ว่าง = ตั้งวัน */}
-              <div onClick={(e) => { e.stopPropagation(); setDetail(i); }} title="ดูรายละเอียดใบสั่งซื้อ"
+              <div onClick={(e) => { e.stopPropagation(); setTermDraft(null); setDetail(i); }} title="ดูรายละเอียดใบสั่งซื้อ"
                 className="flex items-start justify-between gap-2 cursor-pointer group">
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-slate-800 truncate group-hover:text-blue-600">{i.po_no} <span className="text-[10px] font-normal text-slate-300 group-hover:text-blue-400">ⓘ</span></div>
@@ -151,6 +185,29 @@ export default function PurchasingCalendarPage() {
               {detail.currency && !["THB", "บาท"].includes(detail.currency) && <div><span className="text-slate-400">สกุลเงิน </span>{detail.currency === "YUAN" ? "RMB" : detail.currency}</div>}
               {detail.follow_up && <div className="text-rose-600 font-medium">⚑ กำลังติดตาม (งานเร่ง)</div>}
             </div>
+
+            {/* เครดิตการจ่ายของร้าน — ยังไม่ตั้ง = เตือน + ตั้งได้เลยตรงนี้ (บันทึกกลับทะเบียนร้าน) */}
+            {detail.seller_credit_term ? (
+              <div className="text-xs text-slate-500 px-1">💳 เครดิตร้าน: <b className="text-slate-700">{formatCreditTerm(detail.seller_credit_term)}</b>
+                {detail.auto && <span className="text-indigo-600"> · วันจ่ายคำนวณอัตโนมัติ</span>}</div>
+            ) : detail.seller_partner_id ? (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+                <div className="text-sm text-amber-800 font-medium">⚠ ร้านนี้ยังไม่ได้ตั้ง &quot;เครดิตการจ่าย&quot;</div>
+                <div className="text-[11px] text-amber-700 mt-0.5 mb-2">ตั้งครั้งเดียว → ทุกใบของร้านนี้จะไปอยู่วันที่ต้องจ่ายเองอัตโนมัติ</div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <PurchaseCreditTermInput value={termDraft} onChange={setTermDraft} disabled={savingTerm} />
+                  <button type="button" disabled={savingTerm || !termDraft}
+                    onClick={() => void saveTerm(detail.seller_partner_id!, termDraft)}
+                    className="h-9 px-3 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">
+                    {savingTerm ? "กำลังบันทึก…" : "💾 บันทึกเข้าร้าน"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                ⚠ ไม่พบร้าน &quot;{detail.seller_name || "—"}&quot; ในทะเบียนร้าน — ตั้งเครดิตอัตโนมัติไม่ได้ (เพิ่มร้านที่ /master/partners ให้ชื่อตรงกัน)
+              </div>
+            )}
             {/* รายการสินค้า */}
             <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[55vh] overflow-y-auto">
               {detail.products.length === 0 ? (
@@ -162,7 +219,11 @@ export default function PurchasingCalendarPage() {
                     <div className="text-sm text-slate-700 truncate">{p.name || "—"}</div>
                     <div className="text-[11px] text-slate-400">จำนวน {qtyFmt(p.qty)}{p.uom ? ` ${p.uom}` : ""}</div>
                   </div>
-                  {p.total > 0 && <div className="text-sm tabular-nums text-slate-600 shrink-0">{money(p.total, detail.currency)}</div>}
+                  {/* ราคา — ยังไม่มี = เตือน + ใส่ได้เลย (ของกลาง) → บันทึกเข้าใบ + ตารางราคาของร้าน */}
+                  <div className="shrink-0">
+                    <PriceFillInput value={p.price} qty={p.qty} currency={detail.currency}
+                      onSave={(price) => savePrice(p.line_id, price)} />
+                  </div>
                 </div>
               ))}
               {detail.product_count > detail.products.length && (

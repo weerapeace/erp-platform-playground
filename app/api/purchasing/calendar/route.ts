@@ -18,13 +18,18 @@ export const revalidate = 0;
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 const isCNY = (c: unknown) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").toUpperCase());
 
-export type PoCalProduct = { name: string; qty: number; uom: string | null; total: number; img: string | null };
+export type PoCalProduct = {
+  name: string; qty: number; uom: string | null; total: number; img: string | null;
+  line_id: string; sku_id: string | null; price: number;   // ใส่ราคาย้อนกลับได้จาก popup (ของกลาง)
+};
 export type PoCalItem = {
   id: string; po_no: string; seller_name: string | null;
   date: string | null; amount_thb: number; currency: string | null;
   follow_up: boolean; payment_status: string | null; status: string | null;
   products: PoCalProduct[]; product_count: number;   // สินค้าในใบ (โชว์รูปเล็กๆ ในการ์ด)
   auto: boolean;   // วันจ่ายมาจากเครดิตร้านอัตโนมัติ (ยังไม่ได้ตั้งวันเอง)
+  seller_partner_id: string | null;      // ร้านในทะเบียน (จับคู่จากชื่อ) — ไว้ตั้งเครดิตจาก popup
+  seller_credit_term: string | null;     // เครดิตการจ่ายของร้าน (null = ยังไม่ตั้ง → เตือน)
 };
 export type PoCalResponse = { data: PoCalItem[]; error: string | null };
 
@@ -50,43 +55,45 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     amount_thb: Math.round(num(p.grand_total) * (isCNY(p.currency) ? rmb : 1)),
     currency: (p.currency as string) ?? null,
     follow_up: !!p.follow_up, payment_status: (p.payment_status as string) ?? null, status: (p.status as string) ?? null,
-    products: [], product_count: 0, auto: false,
+    products: [], product_count: 0, auto: false, seller_partner_id: null, seller_credit_term: null,
   }));
 
-  // โหมดจ่ายเงิน: ใบที่ยังไม่ตั้งวันจ่ายเอง → คำนวณจาก "เครดิตร้าน + วันซื้อ" อัตโนมัติ (จับคู่ร้านด้วยชื่อ)
-  if (mode === "pay") {
-    const { data: partners } = await admin.from("partners_v2")
-      .select("display_name, name_th, purchase_credit_term").not("purchase_credit_term", "is", null);
-    const termByName = new Map<string, string>();
-    for (const pt of (partners ?? []) as Record<string, unknown>[]) {
-      const term = String(pt.purchase_credit_term ?? "").trim(); if (!term) continue;
-      for (const nm of [pt.display_name, pt.name_th]) { const k = String(nm ?? "").trim(); if (k && !termByName.has(k)) termByName.set(k, term); }
-    }
-    if (termByName.size) {
-      const orderDateById = new Map<string, string | null>();
-      for (const p of (data ?? []) as Record<string, unknown>[]) orderDateById.set(String(p.id), (p.order_date as string) ?? null);
-      for (const it of items) {
-        if (it.date) continue;   // ตั้งวันเองแล้ว → ไม่แตะ (override)
-        const term = it.seller_name ? termByName.get(it.seller_name.trim()) : undefined;
-        if (!term) continue;
-        const due = computeDueDate(orderDateById.get(it.id), term);
-        if (due) { it.date = due; it.auto = true; }
-      }
+  // จับคู่ร้าน (ชื่อ → id + เครดิต) — ใช้ทั้งคำนวณวันจ่ายอัตโนมัติ และให้ popup เตือน/ตั้งเครดิตได้
+  const { data: partners } = await admin.from("partners_v2")
+    .select("id, display_name, name_th, purchase_credit_term").eq("is_supplier", true);
+  const partnerByName = new Map<string, { id: string; term: string | null }>();
+  for (const pt of (partners ?? []) as Record<string, unknown>[]) {
+    const ent = { id: String(pt.id), term: (String(pt.purchase_credit_term ?? "").trim() || null) };
+    for (const nm of [pt.display_name, pt.name_th]) { const k = String(nm ?? "").trim(); if (k && !partnerByName.has(k)) partnerByName.set(k, ent); }
+  }
+  const orderDateById = new Map<string, string | null>();
+  for (const p of (data ?? []) as Record<string, unknown>[]) orderDateById.set(String(p.id), (p.order_date as string) ?? null);
+
+  for (const it of items) {
+    const pt = it.seller_name ? partnerByName.get(it.seller_name.trim()) : undefined;
+    it.seller_partner_id = pt?.id ?? null;
+    it.seller_credit_term = pt?.term ?? null;
+    // โหมดจ่ายเงิน: ใบที่ยังไม่ตั้งวันจ่ายเอง → คำนวณจาก "เครดิตร้าน + วันซื้อ" อัตโนมัติ
+    if (mode === "pay" && !it.date && pt?.term) {
+      const due = computeDueDate(orderDateById.get(it.id), pt.term);
+      if (due) { it.date = due; it.auto = true; }
     }
   }
 
   // สินค้าในแต่ละใบ (โชว์รูปเล็กๆ ในการ์ด) — purchase_order_lines_v2 + รูปปก skus_v2
   const poIds = items.map((i) => i.id);
-  const linesByPo = new Map<string, { name: string; qty: number; uom: string | null; total: number; sku_id: string | null }[]>();
+  type LineRow = { line_id: string; name: string; qty: number; uom: string | null; total: number; price: number; sku_id: string | null };
+  const linesByPo = new Map<string, LineRow[]>();
   const skuIds = new Set<string>();
   for (let i = 0; i < poIds.length; i += 200) {
     const chunk = poIds.slice(i, i + 200);
     const { data: ls } = await admin.from("purchase_order_lines_v2")
-      .select("po_id, item_sku_id, item_name, qty, uom, line_total, sort_order").in("po_id", chunk).order("sort_order", { ascending: true });
+      .select("id, po_id, item_sku_id, item_name, qty, uom, price_est, line_total, sort_order").in("po_id", chunk).order("sort_order", { ascending: true });
     for (const l of (ls ?? []) as Record<string, unknown>[]) {
       const pid = String(l.po_id);
       const arr = linesByPo.get(pid) ?? []; linesByPo.set(pid, arr);
-      arr.push({ name: String(l.item_name ?? ""), qty: num(l.qty), uom: (l.uom as string) ?? null, total: num(l.line_total), sku_id: l.item_sku_id ? String(l.item_sku_id) : null });
+      arr.push({ line_id: String(l.id), name: String(l.item_name ?? ""), qty: num(l.qty), uom: (l.uom as string) ?? null,
+        total: num(l.line_total), price: num(l.price_est), sku_id: l.item_sku_id ? String(l.item_sku_id) : null });
       if (l.item_sku_id) skuIds.add(String(l.item_sku_id));
     }
   }
@@ -102,7 +109,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     it.product_count = ls.length;
     it.products = ls.slice(0, 50).map((l) => {
       const key = l.sku_id ? coverMap.get(l.sku_id) : null;
-      return { name: l.name, qty: l.qty, uom: l.uom, total: l.total, img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null };
+      return { name: l.name, qty: l.qty, uom: l.uom, total: l.total, price: l.price, line_id: l.line_id, sku_id: l.sku_id,
+        img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null };
     });
   }
 
