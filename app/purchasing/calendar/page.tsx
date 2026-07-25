@@ -9,14 +9,20 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
 import { HoverImage } from "@/components/hover-image";
+import { ERPModal } from "@/components/modal";
 import type { PoCalItem } from "@/app/api/purchasing/calendar/route";
 
 const baht = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
+const qtyFmt = (n: number) => Number(n || 0).toLocaleString("th-TH");
+// ราคาต่อบรรทัด = สกุลเงินของใบ (ร้านจีน = ¥) · ยอดรวมหัวใบแปลงเป็นบาทแล้ว
+const money = (n: number, cur: string | null) =>
+  (["RMB", "YUAN", "CNY"].includes(String(cur ?? "").toUpperCase()) ? "¥" : "฿") + Math.round(n || 0).toLocaleString("th-TH");
 
 export default function PurchasingCalendarPage() {
   const [mode, setMode] = useState<"in" | "pay">("in");
   const [items, setItems] = useState<PoCalItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState<PoCalItem | null>(null);   // PO ที่กดดูรายละเอียด (popup)
 
   const load = useCallback(() => {
     setLoading(true);
@@ -94,23 +100,25 @@ export default function PurchasingCalendarPage() {
           )}
           renderCard={(i) => (
             <div className={`rounded-xl border bg-white p-2.5 ${i.follow_up ? "border-rose-300" : "border-slate-200"}`}>
-              <div className="flex items-start justify-between gap-2">
+              {/* กดหัวการ์ด = เปิดรายละเอียด (popup) · ลากที่ว่าง = ตั้งวัน */}
+              <div onClick={(e) => { e.stopPropagation(); setDetail(i); }} title="ดูรายละเอียดใบสั่งซื้อ"
+                className="flex items-start justify-between gap-2 cursor-pointer group">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-800 truncate">{i.po_no}</div>
+                  <div className="text-sm font-semibold text-slate-800 truncate group-hover:text-blue-600">{i.po_no} <span className="text-[10px] font-normal text-slate-300 group-hover:text-blue-400">ⓘ</span></div>
                   <div className="text-[11px] text-slate-400 truncate">🏪 {i.seller_name || "—"}</div>
                 </div>
                 <span className="text-xs font-medium text-slate-700 tabular-nums shrink-0">{baht(i.amount_thb)}</span>
               </div>
-              {/* สินค้าในใบ — รูปเล็กๆ (ชี้เพื่อดูรูปใหญ่) + จำนวนรายการ */}
+              {/* สินค้าในใบ — รูปเล็กๆ (ชี้เพื่อดูรูปใหญ่ · กดหัวการ์ดดูทั้งหมด) + จำนวนรายการ */}
               {i.products.length > 0 && (
                 <div className="mt-1.5 flex items-center gap-1 flex-wrap">
-                  {i.products.map((p, idx) => (
-                    <span key={idx} title={`${p.name}${p.qty ? ` × ${p.qty}` : ""}`} className="inline-flex">
+                  {i.products.slice(0, 8).map((p, idx) => (
+                    <span key={idx} title={`${p.name}${p.qty ? ` × ${qtyFmt(p.qty)}` : ""}`} className="inline-flex">
                       <HoverImage url={p.img} size={26} alt={p.name} fallback="📦" />
                     </span>
                   ))}
-                  {i.product_count > i.products.length && (
-                    <span className="text-[10px] text-slate-400 self-center px-0.5">+{i.product_count - i.products.length}</span>
+                  {i.product_count > Math.min(i.products.length, 8) && (
+                    <span className="text-[10px] text-slate-400 self-center px-0.5">+{i.product_count - Math.min(i.products.length, 8)}</span>
                   )}
                 </div>
               )}
@@ -122,6 +130,42 @@ export default function PurchasingCalendarPage() {
           )}
         />
       </div>
+
+      {/* Popup รายละเอียดใบสั่งซื้อ — กดหัวการ์ดเพื่อเปิด */}
+      <ERPModal open={!!detail} onClose={() => setDetail(null)} size="lg"
+        title={detail ? `📦 ใบสั่งซื้อ ${detail.po_no}` : ""}
+        description={detail?.seller_name ? `🏪 ${detail.seller_name}` : undefined}>
+        {detail && (
+          <div className="space-y-3">
+            {/* สรุปหัวใบ */}
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm bg-slate-50 rounded-lg px-3 py-2">
+              <div><span className="text-slate-400">ยอดรวม (บาท) </span><b className="tabular-nums text-slate-800">{baht(detail.amount_thb)}</b></div>
+              {detail.date && <div><span className="text-slate-400">{mode === "pay" ? "วันจ่าย " : "วันของเข้า "}</span>{detail.date}</div>}
+              <div><span className="text-slate-400">รายการ </span>{detail.product_count}</div>
+              {detail.currency && !["THB", "บาท"].includes(detail.currency) && <div><span className="text-slate-400">สกุลเงิน </span>{detail.currency === "YUAN" ? "RMB" : detail.currency}</div>}
+              {detail.follow_up && <div className="text-rose-600 font-medium">⚑ กำลังติดตาม (งานเร่ง)</div>}
+            </div>
+            {/* รายการสินค้า */}
+            <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[55vh] overflow-y-auto">
+              {detail.products.length === 0 ? (
+                <div className="p-4 text-center text-sm text-slate-400">ไม่มีรายการสินค้าในใบนี้</div>
+              ) : detail.products.map((p, idx) => (
+                <div key={idx} className="flex items-center gap-3 p-2">
+                  <HoverImage url={p.img} size={44} previewSize={320} alt={p.name} fallback="📦" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-slate-700 truncate">{p.name || "—"}</div>
+                    <div className="text-[11px] text-slate-400">จำนวน {qtyFmt(p.qty)}{p.uom ? ` ${p.uom}` : ""}</div>
+                  </div>
+                  {p.total > 0 && <div className="text-sm tabular-nums text-slate-600 shrink-0">{money(p.total, detail.currency)}</div>}
+                </div>
+              ))}
+              {detail.product_count > detail.products.length && (
+                <div className="p-2 text-center text-xs text-slate-400">…และอีก {detail.product_count - detail.products.length} รายการ</div>
+              )}
+            </div>
+          </div>
+        )}
+      </ERPModal>
     </PlaygroundShell>
   );
 }

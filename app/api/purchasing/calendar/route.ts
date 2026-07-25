@@ -17,7 +17,7 @@ export const revalidate = 0;
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 const isCNY = (c: unknown) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").toUpperCase());
 
-export type PoCalProduct = { name: string; qty: number; img: string | null };
+export type PoCalProduct = { name: string; qty: number; uom: string | null; total: number; img: string | null };
 export type PoCalItem = {
   id: string; po_no: string; seller_name: string | null;
   date: string | null; amount_thb: number; currency: string | null;
@@ -53,16 +53,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // สินค้าในแต่ละใบ (โชว์รูปเล็กๆ ในการ์ด) — purchase_order_lines_v2 + รูปปก skus_v2
   const poIds = items.map((i) => i.id);
-  const linesByPo = new Map<string, { name: string; qty: number; sku_id: string | null }[]>();
+  const linesByPo = new Map<string, { name: string; qty: number; uom: string | null; total: number; sku_id: string | null }[]>();
   const skuIds = new Set<string>();
   for (let i = 0; i < poIds.length; i += 200) {
     const chunk = poIds.slice(i, i + 200);
     const { data: ls } = await admin.from("purchase_order_lines_v2")
-      .select("po_id, item_sku_id, item_name, qty, sort_order").in("po_id", chunk).order("sort_order", { ascending: true });
+      .select("po_id, item_sku_id, item_name, qty, uom, line_total, sort_order").in("po_id", chunk).order("sort_order", { ascending: true });
     for (const l of (ls ?? []) as Record<string, unknown>[]) {
       const pid = String(l.po_id);
       const arr = linesByPo.get(pid) ?? []; linesByPo.set(pid, arr);
-      arr.push({ name: String(l.item_name ?? ""), qty: num(l.qty), sku_id: l.item_sku_id ? String(l.item_sku_id) : null });
+      arr.push({ name: String(l.item_name ?? ""), qty: num(l.qty), uom: (l.uom as string) ?? null, total: num(l.line_total), sku_id: l.item_sku_id ? String(l.item_sku_id) : null });
       if (l.item_sku_id) skuIds.add(String(l.item_sku_id));
     }
   }
@@ -76,9 +76,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const it of items) {
     const ls = linesByPo.get(it.id) ?? [];
     it.product_count = ls.length;
-    it.products = ls.slice(0, 8).map((l) => {
+    it.products = ls.slice(0, 50).map((l) => {
       const key = l.sku_id ? coverMap.get(l.sku_id) : null;
-      return { name: l.name, qty: l.qty, img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null };
+      return { name: l.name, qty: l.qty, uom: l.uom, total: l.total, img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null };
     });
   }
 
