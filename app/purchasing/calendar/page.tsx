@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
+import { HoverImage } from "@/components/hover-image";
 import type { PoCalItem } from "@/app/api/purchasing/calendar/route";
 
 const baht = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
@@ -100,6 +101,19 @@ export default function PurchasingCalendarPage() {
                 </div>
                 <span className="text-xs font-medium text-slate-700 tabular-nums shrink-0">{baht(i.amount_thb)}</span>
               </div>
+              {/* สินค้าในใบ — รูปเล็กๆ (ชี้เพื่อดูรูปใหญ่) + จำนวนรายการ */}
+              {i.products.length > 0 && (
+                <div className="mt-1.5 flex items-center gap-1 flex-wrap">
+                  {i.products.map((p, idx) => (
+                    <span key={idx} title={`${p.name}${p.qty ? ` × ${p.qty}` : ""}`} className="inline-flex">
+                      <HoverImage url={p.img} size={26} alt={p.name} fallback="📦" />
+                    </span>
+                  ))}
+                  {i.product_count > i.products.length && (
+                    <span className="text-[10px] text-slate-400 self-center px-0.5">+{i.product_count - i.products.length}</span>
+                  )}
+                </div>
+              )}
               <button onClick={(e) => { e.stopPropagation(); toggleFollow(i); }}
                 className={`mt-1.5 w-full text-xs py-1 rounded-lg border ${i.follow_up ? "bg-rose-50 border-rose-300 text-rose-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                 {i.follow_up ? "⚑ กำลังติดตาม (งานเร่ง)" : "⚐ กดติดตาม"}
