@@ -38,6 +38,8 @@ export default function PurchasingCalendarPage() {
   const [leadDraft, setLeadDraft] = useState<string | null>(null); // ระยะเวลาส่งของที่กำลังตั้งใน popup
   const [suppliers, setSuppliers] = useState<{ id: string; name: string; currency: string }[]>([]);   // ทะเบียนร้าน (ไว้ผูกใบที่ยังไม่มีร้าน)
   const [newPartnerFor, setNewPartnerFor] = useState<PoCalItem | null>(null);   // เปิด drawer เพิ่มร้านใหม่จากใบนี้
+  // เปิด record อื่นจาก popup (ใบสั่งผลิต MO / สินค้า SKU) ด้วย drawer กลาง
+  const [openRecord, setOpenRecord] = useState<{ moduleKey: string; apiPath: string; id: string; title: string; icon: string } | null>(null);
   const [savingTerm, setSavingTerm] = useState(false);
   const toast = useToast();
 
@@ -290,7 +292,14 @@ export default function PurchasingCalendarPage() {
                 <div key={idx} className="flex items-center gap-3 p-2">
                   <HoverImage url={p.img} size={44} previewSize={320} alt={p.name} fallback="📦" />
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm text-slate-700 truncate">{p.name || "—"}</div>
+                    <div className="text-sm text-slate-700 truncate">
+                      {p.name || "—"}
+                      {p.sku_id && (
+                        <button type="button" title="เปิด/แก้ไขสินค้า (SKU)"
+                          onClick={() => setOpenRecord({ moduleKey: "skus-v2", apiPath: "skus", id: p.sku_id!, title: "SKU", icon: "🏷️" })}
+                          className="ml-1 text-slate-300 hover:text-blue-600 text-xs align-middle">✎</button>
+                      )}
+                    </div>
                     <div className="text-[11px] text-slate-400">
                       จำนวน {qtyFmt(p.qty)}{p.uom ? ` ${p.uom}` : ""}
                       {p.pr_date && <> · 📝 ขอซื้อ {thDate(p.pr_date)}{p.pr_no ? ` (${p.pr_no})` : ""}</>}
@@ -298,8 +307,17 @@ export default function PurchasingCalendarPage() {
                     </div>
                     {/* เหตุผลที่สั่ง (จากใบขอซื้อ) */}
                     {(p.pr_note || p.pr_used_for || p.pr_mo_no) && (
-                      <div className="text-[11px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-2">
-                        {p.pr_mo_no && <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">🏭 {p.pr_mo_no}</span>}
+                      <div className="text-[11px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        {p.pr_mo_no && (p.mo_id ? (
+                          <button type="button" onClick={() => setOpenRecord({ moduleKey: "manufacturing-orders", apiPath: "manufacturing-orders", id: p.mo_id!, title: "ใบสั่งผลิต", icon: "🏭" })}
+                            title="เปิดดูใบสั่งผลิต"
+                            className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 font-medium">
+                            🏭 {p.pr_mo_no}{p.mo_sku ? ` · ผลิต ${p.mo_sku}` : ""} ↗
+                          </button>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">🏭 {p.pr_mo_no}</span>
+                        ))}
+                        {p.mo_product && <span className="text-slate-500 truncate" title={p.mo_product}>({p.mo_product})</span>}
                         {p.pr_used_for && <span className="px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">ใช้กับ {p.pr_used_for}</span>}
                         {p.pr_note && <span className="text-slate-500 truncate" title={p.pr_note}>💬 {p.pr_note}</span>}
                       </div>
@@ -334,6 +352,19 @@ export default function PurchasingCalendarPage() {
           createDefaults={{ display_name: newPartnerFor.seller_name ?? "", name_th: newPartnerFor.seller_name ?? "", is_supplier: true }}
           onChanged={() => { loadSuppliers(); load(); }}
           onClose={() => setNewPartnerFor(null)}
+        />
+      )}
+
+      {/* เปิดดู/แก้ไข record อื่นจาก popup — ใบสั่งผลิต (MO) หรือ สินค้า (SKU) ด้วย drawer กลางตัวเดียวกับหน้า master */}
+      {openRecord && (
+        <MasterRecordDrawer
+          moduleKey={openRecord.moduleKey}
+          apiPath={openRecord.apiPath}
+          recordId={openRecord.id}
+          title={openRecord.title}
+          icon={openRecord.icon}
+          onChanged={() => load()}
+          onClose={() => setOpenRecord(null)}
         />
       )}
     </PlaygroundShell>

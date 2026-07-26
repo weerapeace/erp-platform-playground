@@ -23,6 +23,8 @@ export type PoCalProduct = {
   line_id: string; sku_id: string | null; price: number;   // ใส่ราคาย้อนกลับได้จาก popup (ของกลาง)
   // ที่มาจากใบขอซื้อ (PR) — ทำไมถึงสั่ง / ขอมาเมื่อไหร่ / ใช้กับงานไหน
   pr_no: string | null; pr_date: string | null; pr_note: string | null; pr_used_for: string | null; pr_mo_no: string | null; pr_requester: string | null;
+  // ใบสั่งผลิตต้นทาง (MO) — เปิดดูรายละเอียด + รหัสสินค้าที่ผลิต
+  mo_id: string | null; mo_sku: string | null; mo_product: string | null;
 };
 export type PoCalItem = {
   id: string; po_no: string; seller_name: string | null;
@@ -134,6 +136,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ใบขอซื้อต้นทาง (PR) — เหตุผลที่สั่ง / วันที่ขอซื้อ / ใช้กับงานไหน
   type PrRow = { pr_no: string | null; date: string | null; note: string | null; used_for: string | null; mo_no: string | null; requester: string | null };
   const prMap = new Map<string, PrRow>();
+  // ใบเก่าที่บรรทัดไม่ได้ผูก pr_id → ใช้ PR ที่ชี้มาที่ใบนี้ (po_id) จับคู่ด้วย sku แทน
+  const prByPoSku = new Map<string, PrRow>();
+  {
+    const { data: prsByPo } = await admin.from("purchase_requests_v2")
+      .select("po_id, item_sku_id, pr_no, order_date, created_at, note, used_for_label, source_mo_no, requester")
+      .in("po_id", poIds.slice(0, 500));
+    for (const r of (prsByPo ?? []) as Record<string, unknown>[]) {
+      if (!r.po_id || !r.item_sku_id) continue;
+      const k = `${r.po_id}::${r.item_sku_id}`;
+      if (prByPoSku.has(k)) continue;
+      prByPoSku.set(k, {
+        pr_no: (r.pr_no as string) ?? null,
+        date: ((r.order_date as string) || (r.created_at ? String(r.created_at).slice(0, 10) : null)) ?? null,
+        note: (r.note as string) ?? null, used_for: (r.used_for_label as string) ?? null,
+        mo_no: (r.source_mo_no as string) ?? null, requester: (r.requester as string) ?? null,
+      });
+    }
+  }
   const prArr = [...prIds];
   for (let i = 0; i < prArr.length; i += 300) {
     const chunk = prArr.slice(i, i + 300);
@@ -167,18 +187,35 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: us } = await admin.from("uoms").select("id, name").in("id", chunk);
     for (const u of (us ?? []) as Record<string, unknown>[]) uomName.set(String(u.id), String(u.name ?? ""));
   }
+  // ใบสั่งผลิตต้นทาง (MO) — เอา id (เปิด drawer ดูได้) + รหัส/ชื่อสินค้าที่ผลิต
+  const moNos = new Set<string>();
+  for (const p of [...prMap.values(), ...prByPoSku.values()]) if (p.mo_no) moNos.add(p.mo_no);
+  const moMap = new Map<string, { id: string; sku: string | null; product: string | null }>();
+  const moArr = [...moNos];
+  for (let i = 0; i < moArr.length; i += 300) {
+    const chunk = moArr.slice(i, i + 300);
+    const { data: mos } = await admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name").in("mo_no", chunk);
+    for (const m of (mos ?? []) as Record<string, unknown>[]) {
+      moMap.set(String(m.mo_no), { id: String(m.id), sku: (m.product_sku as string) ?? null, product: (m.product_name as string) ?? null });
+    }
+  }
+
   for (const it of items) {
     const ls = linesByPo.get(it.id) ?? [];
     it.product_count = ls.length;
     it.products = ls.slice(0, 50).map((l) => {
       const key = l.sku_id ? coverMap.get(l.sku_id) : null;
-      const pr = l.pr_id ? prMap.get(l.pr_id) : undefined;
+      // PR: ผูกตรงด้วย pr_id ก่อน · ใบเก่าไม่มี pr_id → จับคู่ด้วย (po + sku)
+      const pr = (l.pr_id ? prMap.get(l.pr_id) : undefined)
+        ?? (l.sku_id ? prByPoSku.get(`${it.id}::${l.sku_id}`) : undefined);
+      const mo = pr?.mo_no ? moMap.get(pr.mo_no) : undefined;
       const uid = l.sku_id ? skuUomId.get(l.sku_id) : null;             // หน่วยจาก SKU ถ้าบรรทัดไม่มี
       const uom = l.uom || (uid ? (uomName.get(uid) ?? null) : null);
       return { name: l.name, qty: l.qty, uom, total: l.total, price: l.price, line_id: l.line_id, sku_id: l.sku_id,
         img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
         pr_no: pr?.pr_no ?? null, pr_date: pr?.date ?? null, pr_note: pr?.note ?? null,
-        pr_used_for: pr?.used_for ?? null, pr_mo_no: pr?.mo_no ?? null, pr_requester: pr?.requester ?? null };
+        pr_used_for: pr?.used_for ?? null, pr_mo_no: pr?.mo_no ?? null, pr_requester: pr?.requester ?? null,
+        mo_id: mo?.id ?? null, mo_sku: mo?.sku ?? null, mo_product: mo?.product ?? null };
     });
   }
 
