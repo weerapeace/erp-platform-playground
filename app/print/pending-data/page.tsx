@@ -10,6 +10,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { r2ImageUrl } from "@/lib/r2-image";
 import type { PendingSection, PendingDataResponse } from "@/app/api/pending-data/route";
 
 const SCOPE_LABEL: Record<string, string> = { purchasing: "จัดซื้อ", production: "ผลิต" };
@@ -26,18 +27,26 @@ function SectionTable({ sec, index }: { sec: PendingSection; index: number }) {
         <thead>
           <tr>
             <th className="pd-no">#</th>
+            {sec.hasImage && <th className="pd-img-h">รูป</th>}
             {sec.columns.map((c) => <th key={c}>{c}</th>)}
             {sec.blanks.map((b) => <th key={b} className="pd-blank-h">{b}</th>)}
           </tr>
         </thead>
         <tbody>
-          {sec.rows.map((r, i) => (
-            <tr key={i}>
-              <td className="pd-no">{i + 1}</td>
-              {r.map((cell, j) => <td key={j}>{cell || "—"}</td>)}
-              {sec.blanks.map((b) => <td key={b} className="pd-blank" />)}
-            </tr>
-          ))}
+          {sec.rows.map((r, i) => {
+            const src = r2ImageUrl(r.image, 120);
+            return (
+              <tr key={i}>
+                <td className="pd-no">{i + 1}</td>
+                {sec.hasImage && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <td className="pd-img">{src ? <img src={src} alt="" /> : null}</td>
+                )}
+                {r.cells.map((cell, j) => <td key={j}>{cell || "—"}</td>)}
+                {sec.blanks.map((b) => <td key={b} className="pd-blank" />)}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       {sec.truncated && <p className="pd-note">* แสดง {fmt(sec.rows.length)} จากทั้งหมด {fmt(sec.count)} รายการ</p>}
@@ -124,6 +133,9 @@ function PendingDataPrintInner() {
         .pd-table thead { display:table-header-group; }   /* ขึ้นหน้าใหม่ให้หัวตารางซ้ำ */
         .pd-table tr { break-inside:avoid; }
         .pd-no { width:26px; text-align:center; color:#64748b; }
+        .pd-img-h { width:34px; }
+        .pd-img { width:34px; padding:2px !important; text-align:center; }
+        .pd-img img { width:30px; height:30px; object-fit:cover; border-radius:3px; display:block; margin:0 auto; }
         .pd-blank-h { background:#fefce8; }
         .pd-blank { background:#fffdf5; min-width:70px; height:20px; }
         .pd-note { font-size:10px; color:#64748b; margin:3px 0 0; }
@@ -132,6 +144,8 @@ function PendingDataPrintInner() {
         .pd-where ul { margin:3px 0 0; padding-left:16px; }
         .pd-sign { display:flex; gap:40px; justify-content:flex-end; font-size:12px; margin-top:16px; }
         @media print {
+          /* บังคับพิมพ์สีพื้น/รูป (เบราว์เซอร์ตัดพื้นหลังทิ้งโดยดีฟอลต์ → ช่องเหลืองกับรูปจะหาย) */
+          .pd-doc, .pd-doc * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
           .pd-page { background:#fff; padding:0; }
           .pd-toolbar { display:none; }
           .pd-doc { max-width:none; box-shadow:none; padding:0; }
