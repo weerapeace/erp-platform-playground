@@ -26,7 +26,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("china_bills")
     .select("id, supplier_id, bill_date, transfer_date, amount_rmb, amount_thb, status")
-    .neq("is_active", false)
+    .not("is_active", "is", false)   // เอาทั้ง true และ null (neq จะตัด null ทิ้ง)
     .order("bill_date", { ascending: false })
     .limit(limit);
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });

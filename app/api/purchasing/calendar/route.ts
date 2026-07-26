@@ -66,8 +66,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }));
 
   // จับคู่ร้าน (ชื่อ → id + เครดิต) — ใช้ทั้งคำนวณวันจ่ายอัตโนมัติ และให้ popup เตือน/ตั้งเครดิตได้
+  // จับคู่ทุก partner (ไม่กรอง is_supplier) — ร้านบนใบสั่งซื้อหลายร้านยังไม่ได้ติ๊ก "เป็นผู้จำหน่าย"
+  // เรียงให้ร้านที่ติ๊ก is_supplier ชนะเมื่อชื่อซ้ำกัน
   const { data: partners } = await admin.from("partners_v2")
-    .select("id, display_name, name_th, purchase_credit_term, purchase_lead_time").eq("is_supplier", true);
+    .select("id, display_name, name_th, is_supplier, purchase_credit_term, purchase_lead_time")
+    .order("is_supplier", { ascending: false, nullsFirst: false });
   const partnerByName = new Map<string, { id: string; term: string | null; lead: string | null }>();
   const partnerById = new Map<string, { id: string; term: string | null; lead: string | null }>();
   for (const pt of (partners ?? []) as Record<string, unknown>[]) {

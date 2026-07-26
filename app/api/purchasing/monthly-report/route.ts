@@ -37,20 +37,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const month = (sp.get("month") ?? "").match(/^\d{4}-\d{2}$/) ? sp.get("month")! : new Date().toISOString().slice(0, 7);
   const from = `${month}-01`;
   const [y, m] = month.split("-").map(Number);
-  const to = new Date(y, m, 1).toISOString().slice(0, 10);   // วันที่ 1 ของเดือนถัดไป
+  // วันที่ 1 ของเดือนถัดไป — ต้องใช้ Date.UTC ไม่งั้นเวลาไทย (UTC+7) ทำให้ร่นไป 1 วัน = ใบวันสุดท้ายของเดือนหาย
+  const to = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
 
   const admin = supabaseAdmin();
   const rateRes = await admin.from("daily_rates").select("rate").order("rate_date", { ascending: false }).limit(1).maybeSingle();
   const rmb = num((rateRes.data as { rate?: number } | null)?.rate) || 5;
 
   const { data, error } = await admin.from("purchase_orders_v2")
-    .select("id, po_no, seller_name, grand_total, currency, order_date, payment_status, paid_date, paid_amount_thb, status")
+    .select("id, po_no, seller_name, grand_total, currency, order_date, payment_status, paid_date, paid_amount_thb, status, is_active")
     .gte("order_date", from).lt("order_date", to)
     .neq("status", "draft").neq("status", "cancelled")
     .order("order_date", { ascending: true }).limit(2000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const rows = (data ?? []) as Record<string, unknown>[];
+  // ตัดใบที่ถูกปิดใช้งาน (is_active=false) — กรองใน JS เพื่อไม่ให้ row ที่ค่าเป็น null หลุดหาย
+  const rows = ((data ?? []) as Record<string, unknown>[]).filter((p) => p.is_active !== false);
   const poIds = rows.map((p) => String(p.id));
 
   // นับบรรทัด + บรรทัดที่รับครบแล้ว ต่อใบ
@@ -63,9 +65,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const k = String(l.po_id);
       const st = lineStat.get(k) ?? { total: 0, received: 0 }; lineStat.set(k, st);
       st.total++;
-      const done = l.line_status === "received" || l.line_status === "short_closed"
-        || Math.max(0, num(l.qty) - num(l.qty_received)) === 0;
-      if (done) st.received++;
+      // สถานะจริงในฐานข้อมูลคือ "closed_short" (เผื่อ short_closed ไว้ด้วยกันพลาด)
+      const closed = l.line_status === "received" || l.line_status === "closed_short" || l.line_status === "short_closed";
+      const remain = Math.max(0, num(l.qty) - num(l.qty_received));
+      if (closed || (remain === 0 && num(l.qty) > 0)) st.received++;
     }
   }
 

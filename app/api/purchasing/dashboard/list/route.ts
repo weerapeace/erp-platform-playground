@@ -147,8 +147,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .slice(0, limit);
 
     // วันครบกำหนดจ่าย: ใช้ที่ตั้งไว้ ถ้าไม่มี → คำนวณจาก "เครดิตร้าน + วันสั่ง" (ของกลาง lib/credit-term)
+    // ไม่กรอง is_supplier — ร้านบนใบหลายร้านยังไม่ได้ติ๊กเป็นผู้จำหน่าย (ร้านที่ติ๊กแล้วชนะเมื่อชื่อซ้ำ)
     const { data: partners } = await admin.from("partners_v2")
-      .select("id, display_name, name_th, purchase_credit_term").eq("is_supplier", true);
+      .select("id, display_name, name_th, is_supplier, purchase_credit_term")
+      .order("is_supplier", { ascending: false, nullsFirst: false });
     const termById = new Map<string, string | null>(), termByName = new Map<string, string | null>();
     for (const pt of (partners ?? []) as Record<string, unknown>[]) {
       const term = String(pt.purchase_credit_term ?? "").trim() || null;
@@ -156,8 +158,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       for (const nm of [pt.display_name, pt.name_th]) { const k = String(nm ?? "").trim(); if (k && !termByName.has(k)) termByName.set(k, term); }
     }
 
-    // สินค้าในใบ (3 ตัวแรก + จำนวนรายการ) — ให้เห็นว่าจ่ายค่าอะไร
-    const poIds = shown.map((p) => String(p.id));
+    // สินค้าในใบ (3 ตัวแรก + จำนวนรายการ) — ให้เห็นว่าจ่ายค่าอะไร · เฉพาะ unpaid (spend_month ไม่ใช้ → ไม่ยิง query เปล่า)
+    const poIds = type === "unpaid" ? shown.map((p) => String(p.id)) : [];
     const linesByPo = new Map<string, { name: string; sku_id: string | null }[]>();
     const skuIds = new Set<string>();
     for (let i = 0; i < poIds.length; i += 200) {

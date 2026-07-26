@@ -100,9 +100,11 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
     if (l.is_active === false) continue;
     if (!committedIds.has(String(l.po_id))) continue;
     const st = l.line_status as string | null;
-    if (st === "received" || st === "short_closed") { receivedLines++; continue; }
-    if (Math.max(0, num(l.qty) - num(l.qty_received)) > 0) pendingReceive++;
-    else receivedLines++;   // รับครบแล้ว (แม้สถานะยังไม่ปิด)
+    // ปิดแล้ว: received / closed_short (ค่าจริงใน DB · เผื่อ short_closed ไว้กันพลาด)
+    if (st === "received" || st === "closed_short" || st === "short_closed") { receivedLines++; continue; }
+    const remain = Math.max(0, num(l.qty) - num(l.qty_received));
+    if (remain > 0) pendingReceive++;
+    else if (num(l.qty) > 0) receivedLines++;   // รับครบแล้ว (แม้สถานะยังไม่ปิด) · qty=0 ไม่นับ
   }
 
   return NextResponse.json({

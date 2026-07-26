@@ -361,7 +361,12 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const canCalendar = isReceive || isUnpaid;   // 2 กล่องนี้มีมุมมองปฏิทิน (ของเข้า / จ่ายเงิน)
   const fixedSeller = drill?.type === "supplier" ? (drill.seller ?? "") : "";
 
-  useEffect(() => { if (open) { setQ(""); setSeller(""); setGrouped(false); setView("card"); setSort(null); setPage(0); setData(null); setOpenOrder(null); setDetail(null); } }, [open, drill?.type, drill?.seller]);
+  // เปิดแผงใหม่ = รีเซ็ตตัวกรอง · มุมมองเริ่มต้น: การ์ด (กล่องที่มีข้อมูลเต็ม) / รายการ (กล่องอื่น เช่นรอจ่าย)
+  useEffect(() => {
+    if (!open) return;
+    setQ(""); setSeller(""); setGrouped(false); setSort(null); setPage(0); setData(null); setOpenOrder(null); setDetail(null);
+    setView(drill?.type === "waiting" || drill?.type === "pending_receive" ? "card" : "list");
+  }, [open, drill?.type, drill?.seller]);
   // เลื่อนหน้าจอมาที่แผงเมื่อเปิด/สลับการ์ด (โดยเฉพาะเวลากดจากการ์ดด้านล่าง)
   useEffect(() => { if (open) panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }, [open, drill?.type, drill?.seller]);
   // รายชื่อร้าน (pickup) — ดึงครั้งเดียวตอนเปิดแผง
