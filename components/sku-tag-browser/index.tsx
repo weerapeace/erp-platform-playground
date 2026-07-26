@@ -36,6 +36,8 @@ const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").
 const BulkEditAllModal = nextDynamic(() => import("@/components/data-table").then((m) => ({ default: m.BulkEditAllModal })), { ssr: false });
 // ป๊อปอัปพิมพ์บาร์โค้ด/QR — โหลดเฉพาะตอนกด (jsbarcode/qrcode ไม่เข้า bundle หน้านี้)
 const BarcodePrintModal = nextDynamic(() => import("@/components/barcode-print/modal").then((m) => ({ default: m.BarcodePrintModal })), { ssr: false });
+// ตัวจัดการ SKU ซ้ำ (รวม/ยุบ) — โหลดเฉพาะตอนกด
+const SkuMergeModal = nextDynamic(() => import("@/components/sku-merge").then((m) => ({ default: m.SkuMergeModal })), { ssr: false });
 
 type Crumb = { id: string; name: string };
 
@@ -156,6 +158,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
   const [selectingAll, setSelectingAll] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);               // เปิดฟอร์มเพิ่ม (SKU=Wizard / Parent=modal เล็ก)
+  const [mergeOpen, setMergeOpen] = useState(false);           // เปิดตัวจัดการ SKU ซ้ำ (รวม/ยุบ)
   const [copyPending, setCopyPending] = useState<{ id: string; code: string } | null>(null);  // ยืนยันก่อนคัดลอก
   const [peekId, setPeekId] = useState<string | null>(null);   // คลิกการ์ด/แถว → drawer เก่าตัวจริง (ของกลาง: ดู/แก้ทุกฟิลด์)
 
@@ -388,9 +391,16 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
           className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap">
           ＋ เพิ่ม {entity === "parent-skus" ? "Parent SKU" : "SKU"}
         </button>
+        {entity === "skus" && (
+          <button onClick={() => setMergeOpen(true)} title="รวม SKU ที่ซ้ำกัน เข้าเป็นตัวเดียว (โอนรูป/แท็ก/สต๊อก/BOM ให้ตัวหลัก)"
+            className="h-9 px-3 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 whitespace-nowrap">
+            🔗 จัดการ SKU ซ้ำ
+          </button>
+        )}
       </div>
       )}
       {/* ฟอร์มเพิ่ม: SKU = Wizard เต็ม · Parent = modal เล็ก */}
+      {mergeOpen && <SkuMergeModal onClose={() => setMergeOpen(false)} onDone={() => { setMergeOpen(false); void reloadFirst(); }} />}
       {addOpen && entity === "skus" && <SkuWizard open onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
       {addOpen && entity === "parent-skus" && <ParentSkuCreateModal onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
       {copyPending && (
