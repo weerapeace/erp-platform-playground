@@ -106,6 +106,8 @@ export default function TasksPage() {
   const { statuses } = useCreativeStatuses();
   const [view, setView] = useState<"overview" | "queue" | "calendar" | "workload" | "report" | "kanban" | "canvas">("overview");
   const [ovFilter, setOvFilter] = useState<"all" | "mine" | "review" | "overdue">("all"); // ตัวกรองตารางในภาพรวม (จากการ์ด)
+  const [ovStatusFilter, setOvStatusFilter] = useState<string | null>(null);  // กรองสถานะเดียว — มาจากปุ่ม "ดูทั้งหมด" ในคอลัมน์ที่จบแล้ว
+  const showAllStatus = useCallback((k: string) => { setOvStatusFilter(k); setOvFilter("all"); setView("overview"); }, []);
   const [ovTheme, setOvTheme] = useState<OverviewTheme>(DEFAULT_THEME); // ธีมหน้าภาพรวม "ของฉัน" (per-user)
   const [ovMetrics, setOvMetrics] = useState<MetricDef[]>([]); // การ์ดเมตริกของฉัน (per-user)
   const [mySubView, setMySubView] = useState<MySubView>(DEFAULT_MYSUB_VIEW); // จัดกลุ่ม/เรียงงานย่อยของฉัน (admin ตั้งกลาง)
@@ -275,7 +277,10 @@ export default function TasksPage() {
                 brands={brands}
                 columns={COLUMNS}
                 filter={ovFilter}
-                onFilter={setOvFilter}
+                onFilter={(f) => { setOvFilter(f); setOvStatusFilter(null); }}
+                statusFilter={ovStatusFilter}
+                onClearStatusFilter={() => setOvStatusFilter(null)}
+                onStatusFilter={(k) => setOvStatusFilter(k)}
                 theme={ovTheme}
                 canUpload={can("files.upload")}
                 onThemeChange={saveTheme}
@@ -318,7 +323,7 @@ export default function TasksPage() {
                   <OverviewKanban tasks={tasks} statuses={statuses} brands={brands} cfg={ovTheme.kanban} accent={ovTheme.accent}
                     onMoveStatus={(taskId, to) => { const found = tasks.find((x) => x.id === taskId); if (found) applyMove(found, to); }}
                     onSetField={async (taskId, field, value) => { try { await updateTask(taskId, { [field]: value }); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
-                    onCardClick={(id) => setDetailId(id)} />
+                    onCardClick={(id) => setDetailId(id)} onShowAllStatus={showAllStatus} />
                 </div>
               </div>
             )}

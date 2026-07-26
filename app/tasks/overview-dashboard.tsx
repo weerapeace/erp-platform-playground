@@ -40,7 +40,7 @@ export type OvFilter = "all" | "mine" | "review" | "overdue";
 type Counts = { total: number; mine: number; overdue: number; review: number };
 
 export function OverviewDashboard({
-  userName, userId, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, isAdmin,
+  userName, userId, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, statusFilter = null, onClearStatusFilter, onStatusFilter, isAdmin,
   theme, canUpload, onThemeChange, statuses, onMoveStatus, onSetField, viewSwitcher,
   onFilter, onOpenTask, onCreate, onQuickCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange, mySubView = DEFAULT_MYSUB_VIEW,
 }: {
@@ -54,6 +54,9 @@ export function OverviewDashboard({
   brands: BrandOption[];
   columns: ColumnDef<CreativeTask>[];
   filter: OvFilter;
+  statusFilter?: string | null;              // กรองตามสถานะเดียว (จากปุ่ม "ดูทั้งหมด" ในคอลัมน์ Kanban)
+  onClearStatusFilter?: () => void;
+  onStatusFilter?: (statusKey: string) => void;
   isAdmin: boolean;
   theme: OverviewTheme;
   canUpload: boolean;
@@ -116,11 +119,12 @@ export function OverviewDashboard({
       : filter === "review" ? tasks.filter((tk) => tk.status === "need_review")
       : filter === "overdue" ? tasks.filter(isOverdue)
       : tasks;
+    if (statusFilter) arr = arr.filter((tk) => tk.status === statusFilter);   // มาจากปุ่ม "ดูทั้งหมด" ในคอลัมน์ Kanban (เสร็จ/ยกเลิก)
     if (typeFilter) arr = arr.filter((tk) => tk.task_type === typeFilter);
     if (brandFilter) arr = arr.filter((tk) => tk.brand_id === brandFilter);
     return arr;
-  }, [activeMetricDef, filter, typeFilter, brandFilter, tasks, myTaskIds, metricCtx]);
-  const filterLabel = activeMetricDef ? activeMetricDef.label : filter === "mine" ? t("งานของฉัน", "My tasks") : filter === "review" ? t("รอตรวจ/อนุมัติ", "In review") : filter === "overdue" ? t("เกินกำหนด", "Overdue") : t("งานทั้งหมด", "All tasks");
+  }, [activeMetricDef, filter, statusFilter, typeFilter, brandFilter, tasks, myTaskIds, metricCtx]);
+  const filterLabel = statusFilter ? statusMeta(statusFilter).label : activeMetricDef ? activeMetricDef.label : filter === "mine" ? t("งานของฉัน", "My tasks") : filter === "review" ? t("รอตรวจ/อนุมัติ", "In review") : filter === "overdue" ? t("เกินกำหนด", "Overdue") : t("งานทั้งหมด", "All tasks");
 
   // มุมมอง "งานของฉัน" = 2 กลุ่ม: 🙋 ฉันทำ (เป็นผู้รับผิดชอบ/มีงานย่อย) · 📤 ฉันมอบหมายให้คนอื่น (ฉันสั่ง/สร้าง แต่ไม่ได้ทำเอง)
   const mineGroups = useMemo(() => {
@@ -398,8 +402,12 @@ export function OverviewDashboard({
           ) : (<>
           <div className="flex items-center justify-between gap-2">
             {theme.kanban.view !== "table"
-              ? <p className="text-sm font-semibold text-slate-700">{filterLabel} ({kanbanTasks.length})</p>
-              : <span />}
+              ? <p className="text-sm font-semibold text-slate-700 flex items-center gap-2">{filterLabel} ({kanbanTasks.length})
+                  {statusFilter && onClearStatusFilter && <button type="button" onClick={onClearStatusFilter} className="text-[11px] font-normal text-violet-600 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-50">✕ {t("ล้างตัวกรองสถานะ", "Clear status filter")}</button>}
+                </p>
+              : statusFilter && onClearStatusFilter
+                ? <button type="button" onClick={onClearStatusFilter} className="text-[11px] text-violet-600 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-50">✕ {filterLabel} — {t("ล้างตัวกรอง", "Clear filter")}</button>
+                : <span />}
             <div className="flex items-center gap-2">
               {theme.kanban.view === "kanban" && (
                 <input value={kanbanSearch} onChange={(e) => setKanbanSearch(e.target.value)}
@@ -419,7 +427,8 @@ export function OverviewDashboard({
           {theme.kanban.view === "kanban" ? (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
               <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent} statusColors={theme.statusColors} anim={theme.anim}
-                onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask} />
+                onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask}
+                onShowAllStatus={(k) => { onStatusFilter?.(k); onThemeChange({ ...theme, kanban: { ...theme.kanban, view: "table" } }); }} />
             </div>
           ) : theme.kanban.view === "calendar" ? (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm p-3">

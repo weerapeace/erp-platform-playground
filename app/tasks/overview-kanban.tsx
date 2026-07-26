@@ -103,9 +103,13 @@ function DraggableCard({ task, cfg, animCls, onClick }: { task: CreativeTask; cf
   );
 }
 
-function Column({ col, tasks, cfg, accent, animCls, onCardClick }: { col: Col; tasks: CreativeTask[]; cfg: KanbanTheme; accent: string; animCls?: string; onCardClick: (id: string) => void }) {
+const CLOSED_PREVIEW = 7;   // คอลัมน์ที่จบแล้ว (เสร็จ/ยกเลิก) โชว์แค่ N ใบล่าสุด — ที่เหลือกด "ดูทั้งหมด"
+
+function Column({ col, tasks, cfg, accent, animCls, onCardClick, limit, onShowAll }: { col: Col; tasks: CreativeTask[]; cfg: KanbanTheme; accent: string; animCls?: string; onCardClick: (id: string) => void; limit?: number; onShowAll?: () => void }) {
   const t = useT();
   const { setNodeRef, isOver } = useDroppable({ id: col.key });
+  const shown = limit && tasks.length > limit ? tasks.slice(0, limit) : tasks;
+  const hidden = tasks.length - shown.length;
   return (
     <div className="flex flex-col w-64 shrink-0">
       <div className="flex items-center justify-between px-3 py-2 bg-white rounded-t-lg border border-b-0 border-slate-200 border-t-4" style={{ borderTopColor: col.barColor || accent }}>
@@ -116,14 +120,20 @@ function Column({ col, tasks, cfg, accent, animCls, onCardClick }: { col: Col; t
         <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5 shrink-0">{tasks.length}</span>
       </div>
       <div ref={setNodeRef} className={`flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-violet-50" : "bg-slate-50/60"}`}>
-        {tasks.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={cfg} animCls={animCls} onClick={() => onCardClick(tk.id)} />)}
+        {shown.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={cfg} animCls={animCls} onClick={() => onCardClick(tk.id)} />)}
+        {hidden > 0 && (
+          <button type="button" onClick={onShowAll}
+            className="w-full rounded-lg border border-dashed border-slate-300 bg-white/70 py-2 text-xs font-medium text-violet-600 hover:border-violet-300 hover:bg-violet-50">
+            {t(`ดูทั้งหมด (${tasks.length}) — อีก ${hidden} งาน →`, `View all (${tasks.length}) — ${hidden} more →`)}
+          </button>
+        )}
         {tasks.length === 0 && <div className="h-16 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">{t("ลากการ์ดมาวางที่นี่", "Drag cards here")}</div>}
       </div>
     </div>
   );
 }
 
-export function OverviewKanban({ tasks, statuses, brands, cfg, accent, statusColors, anim, onMoveStatus, onSetField, onCardClick }: {
+export function OverviewKanban({ tasks, statuses, brands, cfg, accent, statusColors, anim, onMoveStatus, onSetField, onCardClick, onShowAllStatus }: {
   tasks: CreativeTask[];
   statuses: Status[];
   brands: BrandOption[];
@@ -134,6 +144,7 @@ export function OverviewKanban({ tasks, statuses, brands, cfg, accent, statusCol
   onMoveStatus: (taskId: string, toKey: string) => void;
   onSetField: (taskId: string, field: string, value: string | null) => void;
   onCardClick: (id: string) => void;
+  onShowAllStatus?: (statusKey: string) => void;   // กด "ดูทั้งหมด" ในคอลัมน์ที่จบแล้ว → ไปหน้ารายการทั้งหมด (กรองสถานะนั้น)
 }) {
   const t = useT();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -192,6 +203,8 @@ export function OverviewKanban({ tasks, statuses, brands, cfg, accent, statusCol
       <div className="flex gap-3 overflow-x-auto p-3">
         {columns.map((col) => (
           <Column key={col.key} col={col} cfg={cfg} accent={accent} animCls={animCls} onCardClick={onCardClick}
+            limit={cfg.groupBy === "status" && isTerminal(col.key) ? CLOSED_PREVIEW : undefined}
+            onShowAll={() => onShowAllStatus?.(col.key)}
             tasks={tasks.filter((x) => groupValue(x, cfg.groupBy) === col.key)} />
         ))}
       </div>
