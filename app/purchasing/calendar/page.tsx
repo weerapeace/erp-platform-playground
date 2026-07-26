@@ -13,6 +13,8 @@ import { ERPModal } from "@/components/modal";
 import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input";
 import { PurchaseLeadTimeInput } from "@/components/purchase-lead-time-input";
 import { PriceFillInput } from "@/components/price-fill-input";
+import { SupplierPicker } from "@/components/supplier-picker";
+import { MasterRecordDrawer } from "@/components/master-crud";
 import { formatCreditTerm, formatLeadTime } from "@/lib/credit-term";
 import { useToast } from "@/components/toast";
 import type { PoCalItem } from "@/app/api/purchasing/calendar/route";
@@ -34,6 +36,8 @@ export default function PurchasingCalendarPage() {
   const [detail, setDetail] = useState<PoCalItem | null>(null);   // PO ที่กดดูรายละเอียด (popup)
   const [termDraft, setTermDraft] = useState<string | null>(null); // เครดิตที่กำลังตั้งใน popup
   const [leadDraft, setLeadDraft] = useState<string | null>(null); // ระยะเวลาส่งของที่กำลังตั้งใน popup
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string; currency: string }[]>([]);   // ทะเบียนร้าน (ไว้ผูกใบที่ยังไม่มีร้าน)
+  const [newPartnerFor, setNewPartnerFor] = useState<PoCalItem | null>(null);   // เปิด drawer เพิ่มร้านใหม่จากใบนี้
   const [savingTerm, setSavingTerm] = useState(false);
   const toast = useToast();
 
@@ -48,6 +52,28 @@ export default function PurchasingCalendarPage() {
       .catch(() => setItems([])).finally(() => setLoading(false));
   }, [mode]);
   useEffect(() => { load(); }, [load]);
+
+  // ทะเบียนร้าน (ผู้จำหน่าย) — ใช้ใน popup ตอนใบยังไม่ผูกร้าน
+  const loadSuppliers = useCallback(() => {
+    const f = encodeURIComponent(JSON.stringify({ is_supplier: { type: "boolean", value: "true" } }));
+    apiFetch(`/api/master-v2/partners?limit=1000&filters=${f}`).then((r) => r.json())
+      .then((j) => setSuppliers(((j.data ?? []) as Record<string, unknown>[]).map((p) => ({
+        id: String(p.id), name: String(p.display_name || p.name_th || p.id), currency: String(p.default_currency || "THB"),
+      })))).catch(() => {});
+  }, []);
+  useEffect(() => { loadSuppliers(); }, [loadSuppliers]);
+
+  // ผูกใบนี้กับร้านในทะเบียน (ชื่อบนใบไม่ตรงกับทะเบียน → เลือกร้านเอง)
+  const linkPartner = async (poId: string, partnerId: string, partnerName: string) => {
+    try {
+      const r = await apiFetch("/api/purchasing/calendar", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: poId, seller_partner_id: partnerId }),
+      });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast.success(`ผูกใบนี้กับร้าน "${partnerName}" แล้ว`);
+      load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ผูกร้านไม่สำเร็จ"); }
+  };
 
   const dateField = mode === "pay" ? "payment_due_date" : "expected_date";
 
@@ -223,8 +249,19 @@ export default function PurchasingCalendarPage() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                ⚠ ไม่พบร้าน &quot;{detail.seller_name || "—"}&quot; ในทะเบียนร้าน — ตั้งเครดิต/ระยะเวลาส่งอัตโนมัติไม่ได้ (เพิ่มร้านที่ /master/partners ให้ชื่อตรงกัน)
+              <div className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2">
+                <div className="text-sm text-slate-700 font-medium">⚠ ไม่พบร้าน &quot;{detail.seller_name || "—"}&quot; ในทะเบียนร้าน</div>
+                <div className="text-[11px] text-slate-500 mt-0.5 mb-2">ผูกกับร้านที่มีอยู่ หรือเพิ่มร้านนี้เข้าระบบ → ถึงจะตั้งเครดิต/ระยะเวลาส่งได้</div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="min-w-[220px]">
+                    <SupplierPicker value="" suppliers={suppliers} placeholder="🔗 เลือกร้านที่มีอยู่…"
+                      onChange={(id, name) => void linkPartner(detail.id, id, name)} />
+                  </div>
+                  <button type="button" onClick={() => setNewPartnerFor(detail)}
+                    className="h-9 px-3 text-sm font-medium border border-slate-300 rounded-lg text-slate-700 hover:bg-white">
+                    ➕ เพิ่มร้านนี้เข้าระบบ
+                  </button>
+                </div>
               </div>
             )}
 
@@ -282,6 +319,23 @@ export default function PurchasingCalendarPage() {
           </div>
         )}
       </ERPModal>
+
+      {/* เพิ่มร้านใหม่จากใบสั่งซื้อ — drawer ของกลาง (ฟอร์มร้านเต็ม: เครดิต/ระยะเวลาส่ง/ที่อยู่ ฯลฯ)
+          ตั้งชื่อร้านให้ตรงกับชื่อบนใบไว้ก่อน → บันทึกแล้วใบนี้จับคู่ร้านได้ทันที */}
+      {newPartnerFor && (
+        <MasterRecordDrawer
+          moduleKey="partners-v2"
+          apiPath="partners"
+          recordId={null}
+          startInEdit
+          title="ร้าน / ผู้จำหน่าย"
+          createTitle={`เพิ่มร้าน "${newPartnerFor.seller_name || ""}"`}
+          icon="🏪"
+          createDefaults={{ display_name: newPartnerFor.seller_name ?? "", name_th: newPartnerFor.seller_name ?? "", is_supplier: true }}
+          onChanged={() => { loadSuppliers(); load(); }}
+          onClose={() => setNewPartnerFor(null)}
+        />
+      )}
     </PlaygroundShell>
   );
 }

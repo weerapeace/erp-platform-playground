@@ -46,7 +46,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rmb = num((rateRes.data as { rate?: number } | null)?.rate) || 5;
 
   let q = admin.from("purchase_orders_v2")
-    .select("id, po_no, seller_name, grand_total, currency, expected_date, payment_due_date, follow_up, payment_status, status, order_date")
+    .select("id, po_no, seller_name, seller_partner_id, grand_total, currency, expected_date, payment_due_date, follow_up, payment_status, status, order_date")
     .eq("is_active", true).neq("status", "cancelled").limit(2000);
   q = mode === "pay" ? q.eq("payment_status", "unpaid").neq("status", "draft")
                      : q.in("status", ["purchase", "partial"]);
@@ -67,19 +67,26 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: partners } = await admin.from("partners_v2")
     .select("id, display_name, name_th, purchase_credit_term, purchase_lead_time").eq("is_supplier", true);
   const partnerByName = new Map<string, { id: string; term: string | null; lead: string | null }>();
+  const partnerById = new Map<string, { id: string; term: string | null; lead: string | null }>();
   for (const pt of (partners ?? []) as Record<string, unknown>[]) {
     const ent = {
       id: String(pt.id),
       term: (String(pt.purchase_credit_term ?? "").trim() || null),
       lead: (String(pt.purchase_lead_time ?? "").trim() || null),
     };
+    partnerById.set(ent.id, ent);
     for (const nm of [pt.display_name, pt.name_th]) { const k = String(nm ?? "").trim(); if (k && !partnerByName.has(k)) partnerByName.set(k, ent); }
   }
+  // ผูกร้านตรงๆ ที่ใบ (seller_partner_id) ชนะการจับคู่ด้วยชื่อ
+  const linkedPartnerByPo = new Map<string, string>();
+  for (const p of (data ?? []) as Record<string, unknown>[]) if (p.seller_partner_id) linkedPartnerByPo.set(String(p.id), String(p.seller_partner_id));
   const orderDateById = new Map<string, string | null>();
   for (const p of (data ?? []) as Record<string, unknown>[]) orderDateById.set(String(p.id), (p.order_date as string) ?? null);
 
   for (const it of items) {
-    const pt = it.seller_name ? partnerByName.get(it.seller_name.trim()) : undefined;
+    const linkedId = linkedPartnerByPo.get(it.id);
+    const pt = (linkedId ? partnerById.get(linkedId) : undefined)
+      ?? (it.seller_name ? partnerByName.get(it.seller_name.trim()) : undefined);
     it.seller_partner_id = pt?.id ?? null;
     it.seller_credit_term = pt?.term ?? null;
     it.seller_lead_time = pt?.lead ?? null;
@@ -181,7 +188,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { id?: string; expected_date?: string | null; payment_due_date?: string | null; follow_up?: boolean };
+  let body: { id?: string; expected_date?: string | null; payment_due_date?: string | null; follow_up?: boolean; seller_partner_id?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const id = body.id;
   if (!id) return NextResponse.json({ error: "ไม่ระบุใบสั่งซื้อ" }, { status: 400 });
@@ -190,6 +197,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (body.expected_date !== undefined)     patch.expected_date = body.expected_date || null;
   if (body.payment_due_date !== undefined)  patch.payment_due_date = body.payment_due_date || null;
   if (body.follow_up !== undefined)         patch.follow_up = body.follow_up === true;
+  if (body.seller_partner_id !== undefined) patch.seller_partner_id = body.seller_partner_id || null;   // ผูกใบนี้กับร้านในทะเบียน
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้" }, { status: 400 });
 
   const admin = supabaseAdmin();
