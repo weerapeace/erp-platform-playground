@@ -821,7 +821,6 @@ function PayConfirmModal({ row, busy, onClose, onConfirm }: {
 // ---- popup รายละเอียด + เติม/แก้ข้อมูล (readonly+แก้ไข · save กลับ SKU + เอกสาร) ----
 const MISS_LABEL: Record<string, string> = { image: "รูป", price: "ราคา", link: "ลิงก์", seller: "ร้านค้า" };
 const curTh = (c?: string | null) => isYuan(c) ? "YUAN" : "THB";
-const priceStr = (p?: number | null, c?: string | null) => p == null ? "—" : (isYuan(c) ? `¥${p.toLocaleString()}` : `฿${p.toLocaleString()}`);
 
 function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stores, uploading, busy }: {
   r: DrillRow; type: string; onClose: () => void;
@@ -839,11 +838,9 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
   const [priceCur, setPriceCur] = useState(curTh(r.currency));
   const [linkDraft, setLinkDraft] = useState(r.purchase_url ?? "");
   const [sellerDraft, setSellerDraft] = useState(r.seller ?? "");
-  const [s2, setS2] = useState({ seller: r.alt_seller ?? "", price: r.alt_price != null ? String(r.alt_price) : "", currency: curTh(r.alt_currency), link: r.alt_link ?? "" });
   // ลิงก์โชว์เฉพาะของออนไลน์ (Taobao/1688) — เดาจากชื่อร้าน/มีลิงก์อยู่แล้ว
   const looksTaobao = /taobao|tao ?bao|1688/i.test(r.seller ?? "") || !!r.purchase_url;
   const [showLink, setShowLink] = useState(looksTaobao);
-  const [showLink2, setShowLink2] = useState(/taobao|tao ?bao|1688/i.test(r.alt_seller ?? "") || !!r.alt_link);
   const fileRef = useRef<HTMLInputElement>(null);
   // ลิงก์นับว่า "ขาด" เฉพาะเมื่อกด Taobao (เป็นของออนไลน์) เท่านั้น
   const effMissing = missing.filter((m) => m !== "link" || showLink);
@@ -853,8 +850,7 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
   const inEdit = (f: string) => miss(f) || editing.has(f);
   const openEdit = (f: string) => setEditing((s) => new Set(s).add(f));
   const closeEdit = (f: string) => setEditing((s) => { const n = new Set(s); n.delete(f); return n; });
-  const hasAlt = !!(r.alt_seller || r.alt_price != null || r.alt_link);
-  const EditBtn = ({ f }: { f: string }) => <button onClick={() => openEdit(f)} className="text-xs text-blue-600 hover:underline shrink-0">แก้ไข</button>;
+  const EditBtn =({ f }: { f: string }) => <button onClick={() => openEdit(f)} className="text-xs text-blue-600 hover:underline shrink-0">แก้ไข</button>;
   const Cancel = ({ f }: { f: string }) => !miss(f) ? <button onClick={() => closeEdit(f)} className="text-xs text-slate-500 hover:underline shrink-0">ยกเลิก</button> : null;
   const CurToggle = ({ val, onChange }: { val: string; onChange: (c: string) => void }) => (
     <div className="inline-flex bg-slate-100 rounded-lg p-0.5 text-[11px]">
@@ -867,7 +863,6 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
   const saveLink = async () => { await onEnrich(r, "link", linkDraft); closeEdit("link"); };
   const saveSeller = async () => { await onEnrich(r, "seller", sellerDraft); closeEdit("seller"); };
   const pickStore = async (name: string) => { setSellerDraft(name); await onEnrich(r, "seller", name); closeEdit("seller"); setShowLink(true); openEdit("link"); };
-  const saveS2 = async () => { await onSaveSource2(r, s2); closeEdit("source2"); };
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="flex items-start gap-2 py-1 border-b border-slate-50 last:border-0">
       <span className="text-xs text-slate-400 w-24 shrink-0">{label}</span>
@@ -936,7 +931,7 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
           {/* แหล่งซื้อที่ 1 (หลัก) — การ์ดตาราง ร้าน/ราคา/ลิงก์ */}
           <div className="rounded-xl border border-slate-200 overflow-hidden">
             <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-[11px] font-medium text-slate-500 flex items-center justify-between">
-              <span>🛒 แหล่งซื้อที่ 1 (หลัก)</span>
+              <span>🧾 ร้าน/ราคา บนเอกสารนี้</span>
               {source1Incomplete && <span className="text-amber-600">⚠️ ยังไม่ครบ</span>}
             </div>
             <div className="divide-y divide-slate-50 text-xs">
@@ -993,50 +988,12 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
             </div>
           </div>
 
-          {/* แหล่งซื้อที่ 2 — การ์ด (เก็บบน SKU) */}
-          <div className="rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-[11px] font-medium text-slate-500">🛒 แหล่งซื้อที่ 2</div>
-            <div className="px-3 py-2">
-              {editing.has("source2") ? (
-                <div className="space-y-1.5">
-                  <SearchableSelect value={s2.seller} options={storeOpts} onChange={(v) => setS2((s) => ({ ...s, seller: v }))} onCreate={(v) => setS2((s) => ({ ...s, seller: v }))} placeholder="เลือก / พิมพ์ชื่อร้านที่ 2" createLabel="ใช้ร้าน" />
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <input type="number" min={0} value={s2.price} onChange={(e) => setS2((v) => ({ ...v, price: e.target.value }))} placeholder="ราคา"
-                      className="h-8 w-24 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                    <CurToggle val={s2.currency} onChange={(c) => setS2((v) => ({ ...v, currency: c }))} />
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button onClick={() => { const nv = !showLink2; setShowLink2(nv); if (nv && !s2.seller.trim()) setS2((s) => ({ ...s, seller: "Tao Bao" })); }}
-                      className={`text-[11px] px-2 py-0.5 rounded-full border shrink-0 ${showLink2 ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🛒 Taobao</button>
-                    {showLink2
-                      ? <input type="url" value={s2.link} onChange={(e) => setS2((v) => ({ ...v, link: e.target.value }))} placeholder="ลิงก์ร้านที่ 2"
-                          className="h-8 flex-1 min-w-[140px] px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                      : <span className="text-[11px] text-slate-400">ไม่ใช่ของออนไลน์ — ซ่อนลิงก์ไว้</span>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button disabled={busy} onClick={saveS2} className={saveBtn}>บันทึก</button>
-                    <button onClick={() => closeEdit("source2")} className="text-xs text-slate-500 hover:underline">ยกเลิก</button>
-                  </div>
-                </div>
-              ) : hasAlt ? (
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-slate-700 flex-1 min-w-0 truncate">
-                    🏪 {r.alt_seller || "—"} · 💰 {priceStr(r.alt_price, r.alt_currency)}
-                    {r.alt_link && <a href={r.alt_link} target="_blank" rel="noopener" className="text-blue-600 hover:underline ml-1">🔗 เปิด ↗</a>}
-                  </span>
-                  <EditBtn f="source2" />
-                </div>
-              ) : (
-                <button onClick={() => openEdit("source2")} className="text-xs text-blue-600 hover:underline">+ เพิ่มแหล่งซื้อที่ 2</button>
-              )}
-            </div>
-          </div>
         </div>
 
-        {/* ร้านที่จำหน่ายทั้งหมดของสินค้านี้ — ตารางกลางตัวเดียวกับหน้า SKU (เพิ่ม/แก้ที่นี่ = เห็นทุกที่) */}
+        {/* ร้านที่จำหน่ายทั้งหมดของสินค้านี้ — ตารางกลางตัวเดียวกับหน้า SKU (ที่เดียวจบ: เพิ่ม/แก้ที่นี่ = เห็นทุกที่) */}
         {r.sku_id && (
           <div className="mt-3">
-            <SkuSupplierList skuId={r.sku_id} defaultOpen={false} />
+            <SkuSupplierList skuId={r.sku_id} defaultOpen />
           </div>
         )}
 
