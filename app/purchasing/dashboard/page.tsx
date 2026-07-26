@@ -468,7 +468,11 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   // ---- ปุ่มด่วน: waiting = อนุมัติ + สั่ง · pending = รับของ (ลิงก์/รายละเอียด อยู่ใน popup) ----
   const Actions = ({ r }: { r: DrillRow }) => {
     if (isReceive) return (
-      <Link href="/purchasing/receive" onClick={(e) => e.stopPropagation()} className="h-7 px-2.5 leading-7 text-xs rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50 shrink-0">รับของ →</Link>
+      <Link href="/purchasing/receive" onClick={(e) => e.stopPropagation()}
+        className={`h-7 px-2.5 leading-7 text-xs rounded-lg border shrink-0 ${drill?.type === "received"
+          ? "border-slate-200 text-slate-500 hover:bg-slate-50" : "border-blue-200 text-blue-700 hover:bg-blue-50"}`}>
+        {drill?.type === "received" ? "ดูประวัติรับของ →" : "รับของ →"}
+      </Link>
     );
     return (
       <div className="flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
