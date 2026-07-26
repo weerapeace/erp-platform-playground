@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
+import { InfoHint } from "@/components/info-hint";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { ASSET_TYPE_LABEL, formatBytes, type AssetType } from "@/lib/assets";
@@ -296,7 +297,31 @@ export function AssetLibrary() {
       {/* header */}
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-800">{t("🖼️ คลังไฟล์กลาง", "🖼️ Asset library")}</h1>
+          <h1 className="text-2xl font-semibold text-slate-800 flex items-center gap-2">
+            {t("🖼️ คลังไฟล์กลาง", "🖼️ Asset library")}
+            {/* ปุ่มช่วยเหลือ: วิธีใช้ + กฎของรูป (ของกลาง InfoHint) */}
+            <InfoHint label={t("วิธีใช้คลังไฟล์กลาง", "How to use the asset library")} side="right">
+              <b className="text-slate-800">📘 {t("วิธีใช้คลังไฟล์กลาง", "How to use the asset library")}</b>
+              <ol className="mt-1 list-decimal pl-4 space-y-1">
+                <li><b>{t("อัปครั้งเดียว ใช้ได้ทุกที่", "Upload once, reuse anywhere")}</b> — {t("กด “⬆ อัปโหลด” หรือลากไฟล์มาวางบนหน้านี้ · ไฟล์ที่อัปที่นี่จะไปโผล่ในทุกที่ที่มีปุ่ม “📁 เลือกจากคลัง” (ฟอร์มสินค้า/ใบเสนอ/งาน)", "Use “⬆ Upload” or drag files onto this page · anything here shows up wherever there is a “📁 From library” button (product forms, offers, tasks)")}</li>
+                <li><b>{t("ที่มา (แถบซ้าย)", "Source (left sidebar)")}</b> — {t("รูปที่อัปเอง · Artwork (ไฟล์ออกแบบ ต้นฉบับอยู่ NAS/Drive) · งานพิมพ์ (DTF/UV) · รูปสินค้า (Odoo) — คนละหมวดกัน เลือกดูทีละหมวด", "My uploads · Artwork (design files, masters on NAS/Drive) · Print jobs (DTF/UV) · Product images (Odoo) — separate sections")}</li>
+                <li><b>{t("จัดของ", "Organize")}</b> — {t("อัลบั้ม = โฟลเดอร์ (1 ไฟล์อยู่ได้หลายอัลบั้ม) · แท็ก = คำค้น · ติ๊กหลายไฟล์แล้วใช้แถบด้านล่างเพื่อติดแท็ก/ย้ายอัลบั้ม/แก้หลายรายการพร้อมกัน", "Albums = folders (a file can be in several) · tags = keywords · tick multiple files then use the bottom bar to tag / move / bulk-edit")}</li>
+                <li><b>{t("ค้นหา", "Search")}</b> — {t("พิมพ์ชื่อไฟล์/คำอธิบาย/คีย์เวิร์ด · พิมพ์รหัสสินค้า (เช่น PIX34) จะเจอ “โฟลเดอร์สินค้า” ขึ้นก่อน กดเข้าไปดูรูปทั้งชุดได้", "Type a file name / description / keyword · typing a product code (e.g. PIX34) surfaces its product folder first")}</li>
+                <li><b>{t("กดที่ไฟล์", "Click a file")}</b> — {t("เปิดรายละเอียด แก้ชื่อ/แท็ก/อัลบั้ม/ขนาด/ที่เก็บไฟล์ต้นฉบับ · มีปุ่มแทนที่ไฟล์ (ทุกที่ที่ใช้รูปนี้จะเปลี่ยนตาม)", "Opens details — rename, tags, albums, sizes, master file path · “Replace file” updates it everywhere it is used")}</li>
+              </ol>
+            </InfoHint>
+            <InfoHint label={t("กฎของรูปในคลัง", "Image rules")} side="right">
+              <b className="text-slate-800">📐 {t("กฎของรูปที่อัปในคลังนี้", "Rules for images uploaded here")}</b>
+              <ul className="mt-1 list-disc pl-4 space-y-1">
+                <li><b>{t("ขนาดไฟล์สูงสุด 25 MB / ไฟล์", "Max 25 MB per file")}</b> — {t("ใหญ่กว่านี้อัปไม่ได้ (ไฟล์ต้นฉบับใหญ่ ๆ เช่น .ai/.psd ให้เก็บไว้บน Drive/NAS แล้วใส่ลิงก์แทน)", "Larger files are rejected (keep big masters like .ai/.psd on Drive/NAS and link them instead)")}</li>
+                <li><b>{t("ระบบย่อรูปให้อัตโนมัติ", "Images are auto-shrunk")}</b> — {t("ตอนอัปเลือกได้ 800 / 1200 (ค่าเริ่มต้น) / 1600 px หรือ “ขนาดจริง” · ย่อตามด้านกว้าง คงสัดส่วนเดิม — ทำให้เว็บโหลดเร็ว (ไฟล์ที่ไม่ใช่รูปจะไม่ถูกย่อ)", "On upload pick 800 / 1200 (default) / 1600 px or “Full size” · scales by width, keeps aspect ratio (non-images are never shrunk)")}</li>
+                <li><b>{t("ไฟล์ซ้ำไม่เก็บซ้ำ", "Duplicates are skipped")}</b> — {t("ถ้าอัปไฟล์เดิมซ้ำ ระบบจะรู้และใช้ไฟล์เดิม (เพิ่มให้แค่แท็ก/อัลบั้ม) — ยกเว้นหมวด Artwork/งานพิมพ์ ที่ตั้งใจให้แต่ละใบแยกกัน", "Re-uploading the same file reuses the existing one (only tags/albums are added) — except Artwork/Print jobs, which are intentionally separate records")}</li>
+                <li><b>{t("รูปย่อในหน้าเว็บ", "Thumbnails")}</b> — {t("ทุกที่ที่โชว์รูปจะดึงเวอร์ชันย่อ (webp) ให้เอง ไม่ได้โหลดไฟล์เต็ม — กดที่รูปถึงจะเห็นตัวเต็ม", "Everywhere shows an auto-generated small webp, not the full file — click to see the original")}</li>
+                <li><b>{t("ลบ = ลงถังขยะ กู้คืนได้ 30 วัน", "Delete = trash, restorable for 30 days")}</b> — {t("ไฟล์ที่ยังถูกใช้อยู่ (ผูกกับสินค้า/งาน) จะลบไม่ได้ ระบบจะข้ามให้ · ดูของในถังได้ที่ปุ่ม 🗑 ถังขยะ มุมขวาบน", "Files still in use (linked to a product/task) are skipped · see the 🗑 Trash button at the top right")}</li>
+                <li><b>{t("ชนิดไฟล์ที่รับ", "Accepted types")}</b> — {t("รูปภาพ · PDF · ไฟล์ออกแบบ · วิดีโอ", "Images · PDF · design files · video")}</li>
+              </ul>
+            </InfoHint>
+          </h1>
           <p className="text-sm text-slate-500 mt-0.5">
             {t("อัปไฟล์ครั้งเดียว เก็บที่เดียว ค้น/แท็ก/จัดอัลบั้ม แล้วหยิบไปใช้ซ้ำได้ทุกที่", "Upload once, store once, search/tag/organize into albums, then reuse anywhere")} · {total} {t("ไฟล์", "files")}
           </p>
