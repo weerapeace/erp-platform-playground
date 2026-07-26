@@ -16,6 +16,7 @@ import { PurchasingCalendarBoard, thDate } from "@/components/purchasing-calenda
 import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import type { DrillRow } from "@/app/api/purchasing/dashboard/list/route";
+import type { ChinaBillOption } from "@/app/api/purchasing/china-bills/route";
 
 type Dash = {
   rmb_rate: number;
@@ -314,6 +315,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const [openOrder, setOpenOrder] = useState<string | null>(null);  // แถวที่กำลังกรอก "สั่ง"
   const [orderQty, setOrderQty] = useState("");
   const [detail, setDetail] = useState<DrillRow | null>(null);      // popup รายละเอียด
+  const [payRow, setPayRow] = useState<DrillRow | null>(null);      // ใบที่กำลังยืนยัน "จ่ายแล้ว"
   const [uploading, setUploading] = useState(false);                // กำลังอัปรูปเข้า SKU
   const [stores, setStores] = useState<string[]>([]);               // รายชื่อร้าน (pickup)
   const open = drill !== null;
@@ -357,7 +359,9 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
     finally { setBusy((b) => { const n = new Set(b); n.delete(id); return n; }); }
   };
   const approve = (id: string) => act(id, () => apiFetch("/api/purchasing/pr-approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pr_ids: [id], action: "approve" }) }));
-  const markPaid = (id: string) => act(id, () => apiFetch("/api/purchasing/mark-paid", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }));
+  // จ่ายเงิน: กดปุ่ม → เปิดหน้าต่างยืนยัน (ยอดจริง + วันที่ + บิลโอนเงินจีน) แล้วค่อยบันทึก
+  const markPaid = (id: string, payload: Record<string, unknown>) =>
+    act(id, () => apiFetch("/api/purchasing/mark-paid", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...payload }) }));
 
   const startOrder = (r: DrillRow) => { setOpenOrder(r.id); setOrderQty(String(r.qty ?? "")); };
   const confirmOrder = async (r: DrillRow) => {
@@ -604,8 +608,8 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
                               </button>
                               <div className="text-xs text-slate-600 text-right shrink-0 tabular-nums">{r.right}</div>
                               {isRich ? <Actions r={r} />
-                                : drill?.type === "unpaid" ? (
-                                  <button disabled={busy.has(r.id)} onClick={() => markPaid(r.id)}
+                                : isUnpaid ? (
+                                  <button disabled={busy.has(r.id)} onClick={() => setPayRow(r)}
                                     className="shrink-0 h-7 px-2.5 text-xs rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">{busy.has(r.id) ? "..." : "💰 จ่ายแล้ว"}</button>
                                 ) : null}
                             </div>
@@ -638,7 +642,70 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
         <DetailModal key={detail.id} r={detail} type={drill?.type ?? ""} onClose={() => setDetail(null)}
           onEnrich={enrich} onUpload={uploadCover} onSaveSource2={saveSource2} stores={stores} uploading={uploading} busy={busy.has(detail.id)} />
       )}
+
+      {/* ยืนยันการจ่าย — ยอดจริง + วันที่ + ผูกบิลโอนเงินจีน */}
+      {payRow && (
+        <PayConfirmModal row={payRow} busy={busy.has(payRow.id)} onClose={() => setPayRow(null)}
+          onConfirm={async (payload) => { await markPaid(payRow.id, payload); setPayRow(null); }} />
+      )}
     </div>
+  );
+}
+
+// ---- popup ยืนยัน "จ่ายแล้ว" — ใส่ยอดจริงที่จ่าย + วันที่ + เลือกบิลโอนเงินจีนที่ใช้ ----
+function PayConfirmModal({ row, busy, onClose, onConfirm }: {
+  row: DrillRow;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (payload: Record<string, unknown>) => void | Promise<void>;
+}) {
+  const amountFromRow = Number(String(row.right ?? "").replace(/[^\d.]/g, "")) || 0;
+  const [amount, setAmount] = useState(String(amountFromRow || ""));
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [billId, setBillId] = useState("");
+  const [bills, setBills] = useState<ChinaBillOption[]>([]);
+
+  useEffect(() => {
+    apiFetch("/api/purchasing/china-bills?limit=50").then((r) => r.json())
+      .then((j) => setBills((j.data ?? []) as ChinaBillOption[])).catch(() => {});
+  }, []);
+
+  return (
+    <ERPModal open onClose={onClose} size="sm" title={`💰 ยืนยันการจ่าย — ${row.primary}`} description={row.secondary}>
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">ยอดจริงที่จ่าย (บาท)</label>
+          <input type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus
+            className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md text-right tabular-nums" />
+          <div className="text-[11px] text-slate-400 mt-0.5">ยอดตามใบ: {row.right} — แก้ได้ถ้าจ่ายจริงไม่เท่ากัน</div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">วันที่จ่าย</label>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+            className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">บิลโอนเงินจีนที่ใช้จ่าย (ถ้ามี)</label>
+          <select value={billId} onChange={(e) => setBillId(e.target.value)}
+            className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+            <option value="">— ไม่ผูกบิล (จ่ายทางอื่น) —</option>
+            {bills.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.bill_date ?? "—"} · {b.supplier_name || "ไม่ระบุร้าน"} · {b.amount_rmb > 0 ? `¥${b.amount_rmb.toLocaleString()}` : `฿${b.amount_thb.toLocaleString()}`} · {b.status ?? ""}
+              </option>
+            ))}
+          </select>
+          <div className="text-[11px] text-slate-400 mt-0.5">ผูกไว้เพื่อรู้ว่าใบนี้จ่ายด้วยบิลโอนไหน</div>
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 pt-4">
+        <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+        <button disabled={busy} onClick={() => void onConfirm({ paid: true, paid_date: date, paid_amount_thb: Number(amount) || null, china_bill_id: billId || null })}
+          className="h-9 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">
+          {busy ? "กำลังบันทึก…" : "💰 ยืนยันจ่ายแล้ว"}
+        </button>
+      </div>
+    </ERPModal>
   );
 }
 

@@ -18,16 +18,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { id?: string; paid?: boolean };
+  let body: { id?: string; paid?: boolean; paid_date?: string | null; paid_amount_thb?: unknown; china_bill_id?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const id = body.id;
   if (!id) return NextResponse.json({ error: "ไม่ระบุใบสั่งซื้อ" }, { status: 400 });
   const paid = body.paid !== false;   // default = จ่ายแล้ว
 
   const admin = supabaseAdmin();
+  const amt = Number(body.paid_amount_thb);
   const patch = paid
-    ? { payment_status: "paid", paid_date: new Date().toISOString().slice(0, 10) }
-    : { payment_status: "unpaid", paid_date: null };
+    ? {
+        payment_status: "paid",
+        paid_date: body.paid_date || new Date().toISOString().slice(0, 10),
+        paid_amount_thb: isFinite(amt) && amt > 0 ? amt : null,   // ยอดจริงที่จ่าย
+        china_bill_id: body.china_bill_id || null,                 // ผูกบิลโอนเงินจีน
+      }
+    : { payment_status: "unpaid", paid_date: null, paid_amount_thb: null, china_bill_id: null };
   const { data, error } = await admin
     .from("purchase_orders_v2").update(patch).eq("id", id).select("id, po_no").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
