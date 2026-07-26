@@ -85,3 +85,33 @@ export function computeDueDate(orderDate: string | null | undefined, termStr: st
     }
   }
 }
+
+// ────────────────────────────────────────────────────────────────
+// ระยะเวลาส่งของ (Lead Time) ต่อร้าน — partners_v2.purchase_lead_time
+// รูปแบบ: "N" = N วันนับจากวันสั่ง · "N|after_pay" = N วันนับจากวันชำระเงิน
+// ────────────────────────────────────────────────────────────────
+export type LeadTime = { days: number; afterPayment: boolean };
+
+export function parseLeadTime(s: string | null | undefined): LeadTime | null {
+  if (!s) return null;
+  const [d, flag] = String(s).split("|");
+  const n = Number(d);
+  if (!isFinite(n) || n < 0) return null;
+  return { days: Math.round(n), afterPayment: (flag ?? "").trim() === "after_pay" };
+}
+
+export function formatLeadTime(s: string | null | undefined): string {
+  const t = parseLeadTime(s);
+  if (!t) return "—";
+  return `${t.days} วัน${t.afterPayment ? " (หลังชำระเงิน)" : ""}`;
+}
+
+/** วันของเข้า = วันตั้งต้น + lead time · baseDate เลือกเองตาม afterPayment (วันสั่ง หรือ วันจ่าย) */
+export function computeArrivalDate(baseDate: string | null | undefined, leadStr: string | null | undefined): string | null {
+  const t = parseLeadTime(leadStr);
+  if (!t || !baseDate) return null;
+  const d = new Date(String(baseDate).slice(0, 10) + "T00:00:00");
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + t.days);
+  return fmt(d);
+}

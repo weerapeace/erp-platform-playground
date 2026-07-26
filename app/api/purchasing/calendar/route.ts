@@ -10,7 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { computeDueDate } from "@/lib/credit-term";
+import { computeDueDate, computeArrivalDate, parseLeadTime } from "@/lib/credit-term";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,6 +32,7 @@ export type PoCalItem = {
   auto: boolean;   // วันจ่ายมาจากเครดิตร้านอัตโนมัติ (ยังไม่ได้ตั้งวันเอง)
   seller_partner_id: string | null;      // ร้านในทะเบียน (จับคู่จากชื่อ) — ไว้ตั้งเครดิตจาก popup
   seller_credit_term: string | null;     // เครดิตการจ่ายของร้าน (null = ยังไม่ตั้ง → เตือน)
+  seller_lead_time: string | null;       // ระยะเวลาส่งของของร้าน ("N" | "N|after_pay") — null = ยังไม่ตั้ง
   order_date: string | null;             // วันที่สั่งซื้อ
 };
 export type PoCalResponse = { data: PoCalItem[]; error: string | null };
@@ -58,16 +59,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     amount_thb: Math.round(num(p.grand_total) * (isCNY(p.currency) ? rmb : 1)),
     currency: (p.currency as string) ?? null,
     follow_up: !!p.follow_up, payment_status: (p.payment_status as string) ?? null, status: (p.status as string) ?? null,
-    products: [], product_count: 0, auto: false, seller_partner_id: null, seller_credit_term: null,
+    products: [], product_count: 0, auto: false, seller_partner_id: null, seller_credit_term: null, seller_lead_time: null,
     order_date: (p.order_date as string) ?? null,
   }));
 
   // จับคู่ร้าน (ชื่อ → id + เครดิต) — ใช้ทั้งคำนวณวันจ่ายอัตโนมัติ และให้ popup เตือน/ตั้งเครดิตได้
   const { data: partners } = await admin.from("partners_v2")
-    .select("id, display_name, name_th, purchase_credit_term").eq("is_supplier", true);
-  const partnerByName = new Map<string, { id: string; term: string | null }>();
+    .select("id, display_name, name_th, purchase_credit_term, purchase_lead_time").eq("is_supplier", true);
+  const partnerByName = new Map<string, { id: string; term: string | null; lead: string | null }>();
   for (const pt of (partners ?? []) as Record<string, unknown>[]) {
-    const ent = { id: String(pt.id), term: (String(pt.purchase_credit_term ?? "").trim() || null) };
+    const ent = {
+      id: String(pt.id),
+      term: (String(pt.purchase_credit_term ?? "").trim() || null),
+      lead: (String(pt.purchase_lead_time ?? "").trim() || null),
+    };
     for (const nm of [pt.display_name, pt.name_th]) { const k = String(nm ?? "").trim(); if (k && !partnerByName.has(k)) partnerByName.set(k, ent); }
   }
   const orderDateById = new Map<string, string | null>();
@@ -77,10 +82,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const pt = it.seller_name ? partnerByName.get(it.seller_name.trim()) : undefined;
     it.seller_partner_id = pt?.id ?? null;
     it.seller_credit_term = pt?.term ?? null;
+    it.seller_lead_time = pt?.lead ?? null;
+    const ordered = orderDateById.get(it.id);
     // โหมดจ่ายเงิน: ใบที่ยังไม่ตั้งวันจ่ายเอง → คำนวณจาก "เครดิตร้าน + วันซื้อ" อัตโนมัติ
     if (mode === "pay" && !it.date && pt?.term) {
-      const due = computeDueDate(orderDateById.get(it.id), pt.term);
+      const due = computeDueDate(ordered, pt.term);
       if (due) { it.date = due; it.auto = true; }
+    }
+    // โหมดของเข้า: ใบที่ยังไม่ตั้งวันเอง → คำนวณจาก "ระยะเวลาส่งของ" อัตโนมัติ
+    //   ปกตินับจากวันสั่ง · ถ้าร้านตั้ง "ส่งหลังชำระเงิน" → นับจากวันจ่าย (วันจ่ายจริง หรือคำนวณจากเครดิต)
+    if (mode === "in" && !it.date && pt?.lead) {
+      const lead = parseLeadTime(pt.lead);
+      let base = ordered ?? null;
+      if (lead?.afterPayment) {
+        const poRow = (data ?? []).find((r) => String((r as Record<string, unknown>).id) === it.id) as Record<string, unknown> | undefined;
+        base = ((poRow?.payment_due_date as string) ?? null) || computeDueDate(ordered, pt.term) || ordered || null;
+      }
+      const arrive = computeArrivalDate(base, pt.lead);
+      if (arrive) { it.date = arrive; it.auto = true; }
     }
   }
 
@@ -123,11 +142,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
   const coverMap = new Map<string, string | null>();
+  const skuUomId = new Map<string, string | null>();
   const skuArr = [...skuIds];
   for (let i = 0; i < skuArr.length; i += 300) {
     const chunk = skuArr.slice(i, i + 300);
-    const { data: sk } = await admin.from("skus_v2").select("id, cover_image_r2_key").in("id", chunk);
-    for (const s of (sk ?? []) as Record<string, unknown>[]) coverMap.set(String(s.id), (s.cover_image_r2_key as string) ?? null);
+    const { data: sk } = await admin.from("skus_v2").select("id, cover_image_r2_key, uom_id").in("id", chunk);
+    for (const s of (sk ?? []) as Record<string, unknown>[]) {
+      coverMap.set(String(s.id), (s.cover_image_r2_key as string) ?? null);
+      skuUomId.set(String(s.id), s.uom_id ? String(s.uom_id) : null);
+    }
+  }
+  // ชื่อหน่วยนับ (uoms) — เติมให้บรรทัดที่ไม่มีหน่วย เช่น "ชิ้น" / "หลา"
+  const uomIds = [...new Set([...skuUomId.values()].filter(Boolean) as string[])];
+  const uomName = new Map<string, string>();
+  for (let i = 0; i < uomIds.length; i += 300) {
+    const chunk = uomIds.slice(i, i + 300);
+    const { data: us } = await admin.from("uoms").select("id, name").in("id", chunk);
+    for (const u of (us ?? []) as Record<string, unknown>[]) uomName.set(String(u.id), String(u.name ?? ""));
   }
   for (const it of items) {
     const ls = linesByPo.get(it.id) ?? [];
@@ -135,7 +166,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     it.products = ls.slice(0, 50).map((l) => {
       const key = l.sku_id ? coverMap.get(l.sku_id) : null;
       const pr = l.pr_id ? prMap.get(l.pr_id) : undefined;
-      return { name: l.name, qty: l.qty, uom: l.uom, total: l.total, price: l.price, line_id: l.line_id, sku_id: l.sku_id,
+      const uid = l.sku_id ? skuUomId.get(l.sku_id) : null;             // หน่วยจาก SKU ถ้าบรรทัดไม่มี
+      const uom = l.uom || (uid ? (uomName.get(uid) ?? null) : null);
+      return { name: l.name, qty: l.qty, uom, total: l.total, price: l.price, line_id: l.line_id, sku_id: l.sku_id,
         img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
         pr_no: pr?.pr_no ?? null, pr_date: pr?.date ?? null, pr_note: pr?.note ?? null,
         pr_used_for: pr?.used_for ?? null, pr_mo_no: pr?.mo_no ?? null, pr_requester: pr?.requester ?? null };
