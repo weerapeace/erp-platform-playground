@@ -74,6 +74,8 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
 
   let spendThisMonth = 0;
   let unpaidSum = 0;
+  // สรุปสถานะเงิน (ทุกใบที่ commit แล้ว) — จ่ายแล้ว / ยังไม่จ่าย
+  let paidCount = 0, paidSum = 0, unpaidCount = 0;
   const bySeller = new Map<string, number>();
   for (const p of committed) {
     const thb = toThb(num(p.grand_total), p.currency);
@@ -81,7 +83,8 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
     const mk = od && !isNaN(od.getTime()) ? monthKey(od) : null;
     if (mk === thisMonth) spendThisMonth += thb;
     if (mk && monthIdx.has(mk)) { const mi = monthIdx.get(mk)!; months[mi].thb += thb; months[mi].po_count++; }
-    if (p.payment_status === "unpaid") unpaidSum += thb;
+    if (p.payment_status === "unpaid") { unpaidSum += thb; unpaidCount++; }
+    else if (p.payment_status === "paid") { paidSum += thb; paidCount++; }
     const seller = (p.seller_name as string) || "—";
     bySeller.set(seller, (bySeller.get(seller) ?? 0) + thb);
   }
@@ -92,13 +95,14 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
 
   // ── ค้างรับเข้า: บรรทัด PO ที่ยังรับไม่ครบ + ยังไม่ปิด (นับเฉพาะ PO ที่ commit แล้ว + บรรทัดที่ยัง active — ให้ตรงกับรายการจริง) ──
   const committedIds = new Set(committed.map((p) => String(p.id)));
-  let pendingReceive = 0;
+  let pendingReceive = 0, receivedLines = 0;
   for (const l of (lineRes.data ?? []) as Record<string, unknown>[]) {
     if (l.is_active === false) continue;
     if (!committedIds.has(String(l.po_id))) continue;
     const st = l.line_status as string | null;
-    if (st === "received" || st === "short_closed") continue;
+    if (st === "received" || st === "short_closed") { receivedLines++; continue; }
     if (Math.max(0, num(l.qty) - num(l.qty_received)) > 0) pendingReceive++;
+    else receivedLines++;   // รับครบแล้ว (แม้สถานะยังไม่ปิด)
   }
 
   return NextResponse.json({
@@ -109,6 +113,12 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
       pending_receive: pendingReceive,
       unpaid_thb: Math.round(unpaidSum),
       spend_this_month_thb: Math.round(spendThisMonth),
+    },
+    // สรุปสถานะ (การ์ด 4 ช่อง): จ่ายแล้ว/ยังไม่จ่าย · รับเข้าแล้ว/ยังไม่รับเข้า
+    summary: {
+      paid_count: paidCount, paid_thb: Math.round(paidSum),
+      unpaid_count: unpaidCount, unpaid_thb: Math.round(unpaidSum),
+      received_lines: receivedLines, pending_receive_lines: pendingReceive,
     },
     pr_status: prStatusCounts,
     monthly: months,            // [{key,label,thb}] เก่า→ใหม่

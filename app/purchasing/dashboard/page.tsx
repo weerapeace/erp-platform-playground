@@ -21,6 +21,8 @@ import type { ChinaBillOption } from "@/app/api/purchasing/china-bills/route";
 type Dash = {
   rmb_rate: number;
   kpi: { waiting: number; pending_receive: number; unpaid_thb: number; spend_this_month_thb: number };
+  // สรุปสถานะ: จ่ายแล้ว/ยังไม่จ่าย · รับเข้าแล้ว/ยังไม่รับเข้า
+  summary?: { paid_count: number; paid_thb: number; unpaid_count: number; unpaid_thb: number; received_lines: number; pending_receive_lines: number };
   pr_status: Record<string, number>;
   monthly: { key: string; label: string; thb: number; po_count: number; pr_count: number }[];
   top_suppliers: { name: string; thb: number }[];
@@ -161,6 +163,39 @@ export default function PurchasingDashboardPage() {
                 <div className="text-2xl font-semibold mt-1">{bahtShort(d.kpi.spend_this_month_thb)}</div>
               </Card>
             </div>
+
+            {/* สรุปสถานะ: จ่ายแล้ว / ยังไม่จ่าย / รับเข้าแล้ว / ยังไม่รับเข้า */}
+            {d.summary && (
+              <Card>
+                <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                  <div className="text-sm font-medium">สรุปสถานะ</div>
+                  <Link href={`/print/purchasing-monthly?month=${new Date().toISOString().slice(0, 7)}`} target="_blank"
+                    className="text-xs text-blue-600 hover:underline">🖨 รายงานรายเดือน (พิมพ์) →</Link>
+                </div>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
+                    <div className="text-[11px] text-emerald-700">✓ จ่ายแล้ว</div>
+                    <div className="text-lg font-semibold text-emerald-800 tabular-nums">{baht(d.summary.paid_thb)}</div>
+                    <div className="text-[10px] text-emerald-600">{d.summary.paid_count} ใบ</div>
+                  </div>
+                  <div className="rounded-lg border border-rose-100 bg-rose-50/60 px-3 py-2">
+                    <div className="text-[11px] text-rose-700">● ยังไม่จ่าย</div>
+                    <div className="text-lg font-semibold text-rose-800 tabular-nums">{baht(d.summary.unpaid_thb)}</div>
+                    <div className="text-[10px] text-rose-600">{d.summary.unpaid_count} ใบ</div>
+                  </div>
+                  <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2">
+                    <div className="text-[11px] text-blue-700">📦 รับเข้าแล้ว</div>
+                    <div className="text-lg font-semibold text-blue-800 tabular-nums">{d.summary.received_lines}</div>
+                    <div className="text-[10px] text-blue-600">รายการสินค้า</div>
+                  </div>
+                  <div className="rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2">
+                    <div className="text-[11px] text-amber-700">🚚 ยังไม่รับเข้า</div>
+                    <div className="text-lg font-semibold text-amber-800 tabular-nums">{d.summary.pending_receive_lines}</div>
+                    <div className="text-[10px] text-amber-600">รายการสินค้า</div>
+                  </div>
+                </div>
+              </Card>
+            )}
 
             {/* แผงเจาะรายการ (กางในหน้า แทน popup) — โผล่ใต้การ์ด KPI ทันทีที่กด */}
             {drill && <DrillPanel drill={drill} onClose={() => setDrill(null)} />}
