@@ -18,6 +18,7 @@ import { ConfirmDialog } from "@/components/modal";
 import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input";
 import { PurchaseLeadTimeInput } from "@/components/purchase-lead-time-input";
 import { formatCreditTerm, formatLeadTime } from "@/lib/credit-term";
+import { useDrawerResize } from "@/lib/use-drawer-resize";
 
 type Partner = Record<string, unknown> & { id: string };
 type Tab = "all" | "customer" | "supplier" | "china";
@@ -228,6 +229,7 @@ function PartnerDrawer({ partner, mode, canEdit, onMode, onClose, onSaved }: {
   onMode: (m: Mode) => void; onClose: () => void; onSaved: (p: Partner) => void;
 }) {
   const toast = useToast();
+  const { width, startResize } = useDrawerResize("partnerDrawerWidth", 560);   // ของกลาง: ลากขอบซ้ายปรับกว้าง + จำค่า
   const [form, setForm] = useState<Partner>(partner);
   const [tab, setTab] = useState<"info" | "rel">("info");
   const [saving, setSaving] = useState(false);
@@ -282,8 +284,13 @@ function PartnerDrawer({ partner, mode, canEdit, onMode, onClose, onSaved }: {
   const node = (
     <>
       <div className="fixed inset-0 bg-slate-900/40 z-40" onClick={tryClose} />
-      <aside className="fixed top-0 right-0 bottom-0 w-[min(560px,96vw)] bg-white shadow-2xl z-40 flex flex-col animate-[slidein_.25s_ease]">
+      <aside style={{ width }} className="fixed top-0 right-0 bottom-0 max-w-[97vw] bg-white shadow-2xl z-40 flex flex-col animate-[slidein_.25s_ease]">
         <style>{`@keyframes slidein{from{transform:translateX(100%)}to{transform:none}}`}</style>
+        {/* จับลากปรับความกว้าง (ของกลาง useDrawerResize) */}
+        <div onMouseDown={startResize} title="ลากเพื่อปรับความกว้าง"
+          className="group absolute left-0 top-0 h-full w-1.5 cursor-ew-resize z-20 hover:bg-indigo-200/50 active:bg-indigo-300/60">
+          <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-10 rounded-r bg-slate-300 group-hover:bg-indigo-400" />
+        </div>
         {/* header */}
         <div className="px-[22px] pt-5 relative border-b border-slate-100">
           <button onClick={tryClose} className="absolute top-4 right-4 w-8 h-8 rounded-[9px] border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100">✕</button>
