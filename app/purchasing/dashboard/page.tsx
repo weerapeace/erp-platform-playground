@@ -12,6 +12,8 @@ import { ERPModal } from "@/components/modal";
 import { Pager } from "@/components/pager";
 import { SortTh, sortRows, type SortState } from "@/components/sort-th";
 import { SearchableSelect } from "@/components/searchable-select";
+import { PurchasingCalendarBoard, thDate } from "@/components/purchasing-calendar-board";
+import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import type { DrillRow } from "@/app/api/purchasing/dashboard/list/route";
 
@@ -266,7 +268,21 @@ const unitStr = (r: DrillRow) => isYuan(r.currency) ? `¥${(r.unit_price ?? 0).t
 // ของออนไลน์ (Taobao/1688) ถึงจะนับ "ลิงก์" เป็นข้อมูลไม่ครบ — ร้านทั่วไปไม่ต้องมีลิงก์
 const rowOnline = (r: DrillRow) => /taobao|tao ?bao|1688/i.test(r.seller ?? "") || !!r.purchase_url;
 const shownMissing = (r: DrillRow) => (r.missing ?? []).filter((m) => m !== "link" || rowOnline(r));
-type DrillView = "card" | "table" | "list";
+type DrillView = "card" | "table" | "list" | "calendar";
+// วันครบกำหนดจ่าย: เลยกำหนด=แดง · ภายใน 3 วัน=ส้ม · อื่นๆ=เทา
+const overdueDays = (iso?: string | null) => {
+  if (!iso) return 0;
+  const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number);
+  if (!y) return 0;
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  return Math.round((t.getTime() - new Date(y, m - 1, d).getTime()) / 86400000);
+};
+const dueTone = (iso?: string | null) => {
+  const od = overdueDays(iso);
+  return od > 0 ? "bg-rose-50 text-rose-700 border-rose-200"
+    : od >= -3 ? "bg-amber-50 text-amber-700 border-amber-200"
+    : "bg-slate-50 text-slate-500 border-slate-200";
+};
 // คีย์ที่ใช้เรียงในตาราง (ของกลาง sortRows)
 const sortVal = (r: DrillRow, k: string): string | number | null | undefined => {
   switch (k) {
@@ -304,6 +320,8 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const isWaiting = drill?.type === "waiting";
   const isReceive = drill?.type === "pending_receive";
   const isRich = isWaiting || isReceive;
+  const isUnpaid = drill?.type === "unpaid";
+  const canCalendar = isReceive || isUnpaid;   // 2 กล่องนี้มีมุมมองปฏิทิน (ของเข้า / จ่ายเงิน)
   const fixedSeller = drill?.type === "supplier" ? (drill.seller ?? "") : "";
 
   useEffect(() => { if (open) { setQ(""); setSeller(""); setGrouped(false); setView("card"); setSort(null); setPage(0); setData(null); setOpenOrder(null); setDetail(null); } }, [open, drill?.type, drill?.seller]);
@@ -384,7 +402,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const total = sorted.length;
   const curPage = Math.min(page, Math.max(0, Math.ceil(total / pageSize) - 1));   // กันหน้าเกินช่วงหลังรายการลด
   const pageRows = sorted.slice(curPage * pageSize, (curPage + 1) * pageSize);
-  const groupKey = (r: DrillRow) => isReceive ? (r.seller || "— ไม่ระบุร้าน —") : (r.mo_no || "— ไม่มีใบสั่งงาน —");
+  const groupKey = (r: DrillRow) => (isReceive || isUnpaid) ? (r.seller || "— ไม่ระบุร้าน —") : (r.mo_no || "— ไม่มีใบสั่งงาน —");
   const groups: [string, DrillRow[]][] = grouped
     ? Object.entries(pageRows.reduce((m: Record<string, DrillRow[]>, r) => { (m[groupKey(r)] ??= []).push(r); return m; }, {}))
     : [["", pageRows]];
@@ -524,17 +542,21 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
               {data?.sellers.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           )}
-          {isRich && (
+          {(isRich || isUnpaid) && (
             <label className="flex items-center gap-1.5 text-xs text-slate-600 whitespace-nowrap">
-              <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="rounded border-slate-300" /> {isReceive ? "🏪 ตามร้านค้า" : "🏭 ตามใบสั่งงาน"}
+              <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="rounded border-slate-300" /> {isReceive || isUnpaid ? "🏪 ตามร้านค้า" : "🏭 ตามใบสั่งงาน"}
             </label>
           )}
         </div>
 
-        {/* สลับมุมมอง */}
-        {isRich && (
+        {/* สลับมุมมอง (การ์ด/ตาราง/รายการ + ปฏิทิน สำหรับค้างรับเข้า & รอจ่ายเงิน) */}
+        {(isRich || canCalendar) && (
           <div className="inline-flex bg-slate-100 rounded-lg p-0.5 text-xs">
-            {([["card", "🗂️ การ์ด"], ["table", "📊 ตาราง"], ["list", "📋 รายการ"]] as [DrillView, string][]).map(([v, l]) => (
+            {([
+              ...(isRich ? [["card", "🗂️ การ์ด"], ["table", "📊 ตาราง"]] as [DrillView, string][] : []),
+              ["list", "📋 รายการ"] as [DrillView, string],
+              ...(canCalendar ? [["calendar", "📅 ปฏิทิน"]] as [DrillView, string][] : []),
+            ]).map(([v, l]) => (
               <button key={v} onClick={() => setView(v)} className={`px-2.5 py-1 rounded-md font-medium ${view === v ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>{l}</button>
             ))}
           </div>
@@ -542,7 +564,10 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
 
         {err && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">{err}</div>}
 
-        {loading && rows.length === 0 ? <div className="py-10 text-center text-sm text-slate-400">กำลังโหลด...</div>
+        {/* มุมมองปฏิทิน — ใช้ของกลางตัวเดียวกับหน้า /purchasing/calendar (ลากตั้งวันได้เหมือนกัน) */}
+        {view === "calendar" && canCalendar ? (
+          <PurchasingCalendarBoard mode={isReceive ? "in" : "pay"} showModeSwitch={false} />
+        ) : loading && rows.length === 0 ? <div className="py-10 text-center text-sm text-slate-400">กำลังโหลด...</div>
           : rows.length === 0 ? <div className="py-10 text-center text-sm text-slate-300">— ไม่มีรายการ —</div>
           : (
             <div className="space-y-3 max-h-[55vh] overflow-y-auto">
@@ -559,6 +584,23 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
                               <button type="button" onClick={() => isRich ? openDetail(r) : undefined} className={`min-w-0 flex-1 text-left ${isRich ? "hover:text-blue-700" : ""}`}>
                                 <div className="text-sm text-slate-700 truncate">{r.primary}{isRich && r.code && <span className="text-[10px] font-mono text-slate-400 ml-1.5">{r.code}</span>}{isRich && shownMissing(r).length > 0 && <span className="text-[10px] text-amber-600 ml-1" title="ข้อมูลไม่ครบ">⚠️</span>}</div>
                                 <div className="text-[11px] text-slate-400 truncate">{r.secondary}{isWaiting && r.order_date && <span className="text-emerald-600"> · ✓ สั่งแล้ว {r.order_date}</span>}</div>
+                                {/* ใบรอจ่าย: วันครบกำหนดจ่าย + สินค้าในใบ (รูปเล็ก 3 ตัว) */}
+                                {isUnpaid && (
+                                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                    {r.due_date ? (
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${dueTone(r.due_date)}`}
+                                        title={r.auto_due ? "คำนวณจากเครดิตของร้าน" : "ตั้งวันจ่ายเอง"}>
+                                        {r.auto_due ? "🔄 " : "📅 "}จ่าย {thDate(r.due_date)}{overdueDays(r.due_date) > 0 ? ` · เลย ${overdueDays(r.due_date)} วัน` : ""}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-400">ยังไม่มีวันจ่าย</span>
+                                    )}
+                                    {(r.products ?? []).map((p, i2) => (
+                                      <HoverImage key={i2} url={p.img} size={20} alt={p.name} fallback="📦" />
+                                    ))}
+                                    {(r.product_count ?? 0) > 3 && <span className="text-[10px] text-slate-400">+{(r.product_count ?? 0) - 3}</span>}
+                                  </div>
+                                )}
                               </button>
                               <div className="text-xs text-slate-600 text-right shrink-0 tabular-nums">{r.right}</div>
                               {isRich ? <Actions r={r} />

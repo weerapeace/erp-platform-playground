@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { computeDueDate } from "@/lib/credit-term";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -49,6 +50,9 @@ export type DrillRow = {
   alt_seller?: string | null; alt_price?: number | null; alt_currency?: string | null; alt_link?: string | null;
   // pending_receive
   po_no?: string; received?: number; remain?: number; expected_date?: string | null;
+  // unpaid (ใบรอจ่าย) — วันครบกำหนดจ่าย + สินค้าในใบ (โชว์รูปเล็ก 3 ตัว)
+  due_date?: string | null; auto_due?: boolean;
+  products?: { name: string; img: string | null }[]; product_count?: number;
 };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -126,7 +130,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     title = type === "unpaid" ? "ใบสั่งซื้อรอจ่ายเงิน" : "ใบสั่งซื้อเดือนนี้";
     link = { href: "/purchasing/orders", label: "ไปหน้าใบสั่งซื้อ" };
     const { data } = await admin.from("purchase_orders_v2")
-      .select("id, po_no, seller_name, grand_total, currency, order_date, payment_status, status")
+      .select("id, po_no, seller_name, seller_partner_id, grand_total, currency, order_date, payment_due_date, payment_status, status")
       .order("order_date", { ascending: false }).limit(5000);
     const all = ((data ?? []) as Record<string, unknown>[]).filter((p) => p.status !== "draft" && p.status !== "cancelled");
     const filtered = all.filter((p) => {
@@ -138,15 +142,65 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return true;
     });
     sellers = [...new Set(filtered.map((r) => String(r.seller_name ?? "")).filter(Boolean))].sort();
-    rows = filtered
+    const shown = filtered
       .filter((p) => (!seller || String(p.seller_name ?? "") === seller) && (hit(String(p.po_no ?? "")) || hit(String(p.seller_name ?? ""))))
-      .slice(0, limit)
-      .map((p) => ({
-        id: String(p.id),
+      .slice(0, limit);
+
+    // วันครบกำหนดจ่าย: ใช้ที่ตั้งไว้ ถ้าไม่มี → คำนวณจาก "เครดิตร้าน + วันสั่ง" (ของกลาง lib/credit-term)
+    const { data: partners } = await admin.from("partners_v2")
+      .select("id, display_name, name_th, purchase_credit_term").eq("is_supplier", true);
+    const termById = new Map<string, string | null>(), termByName = new Map<string, string | null>();
+    for (const pt of (partners ?? []) as Record<string, unknown>[]) {
+      const term = String(pt.purchase_credit_term ?? "").trim() || null;
+      termById.set(String(pt.id), term);
+      for (const nm of [pt.display_name, pt.name_th]) { const k = String(nm ?? "").trim(); if (k && !termByName.has(k)) termByName.set(k, term); }
+    }
+
+    // สินค้าในใบ (3 ตัวแรก + จำนวนรายการ) — ให้เห็นว่าจ่ายค่าอะไร
+    const poIds = shown.map((p) => String(p.id));
+    const linesByPo = new Map<string, { name: string; sku_id: string | null }[]>();
+    const skuIds = new Set<string>();
+    for (let i = 0; i < poIds.length; i += 200) {
+      const { data: ls } = await admin.from("purchase_order_lines_v2")
+        .select("po_id, item_sku_id, item_name, sort_order").in("po_id", poIds.slice(i, i + 200)).order("sort_order", { ascending: true });
+      for (const l of (ls ?? []) as Record<string, unknown>[]) {
+        const arr = linesByPo.get(String(l.po_id)) ?? []; linesByPo.set(String(l.po_id), arr);
+        arr.push({ name: String(l.item_name ?? ""), sku_id: l.item_sku_id ? String(l.item_sku_id) : null });
+        if (l.item_sku_id) skuIds.add(String(l.item_sku_id));
+      }
+    }
+    const coverMap = new Map<string, string | null>();
+    const skuArr = [...skuIds];
+    for (let i = 0; i < skuArr.length; i += 300) {
+      const { data: sk } = await admin.from("skus_v2").select("id, cover_image_r2_key").in("id", skuArr.slice(i, i + 300));
+      for (const s of (sk ?? []) as Record<string, unknown>[]) coverMap.set(String(s.id), (s.cover_image_r2_key as string) ?? null);
+    }
+
+    rows = shown.map((p) => {
+      const pid = String(p.id);
+      const term = (p.seller_partner_id ? termById.get(String(p.seller_partner_id)) : null)
+        ?? termByName.get(String(p.seller_name ?? "").trim()) ?? null;
+      const setDue = (p.payment_due_date as string) ?? null;
+      const due = setDue ?? computeDueDate((p.order_date as string) ?? null, term);
+      const ls = linesByPo.get(pid) ?? [];
+      return {
+        id: pid,
         primary: String(p.po_no ?? "—"),
-        secondary: `🏪 ${p.seller_name || "—"}${p.order_date ? ` · ${p.order_date}` : ""}`,
+        secondary: `🏪 ${p.seller_name || "—"}${p.order_date ? ` · สั่ง ${p.order_date}` : ""}`,
         right: baht(toThb(num(p.grand_total), p.currency)),
-      }));
+        seller: (p.seller_name as string) ?? null,
+        due_date: due, auto_due: !setDue && !!due,
+        product_count: ls.length,
+        products: ls.slice(0, 3).map((l) => {
+          const key = l.sku_id ? coverMap.get(l.sku_id) : null;
+          return { name: l.name, img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null };
+        }),
+      };
+    });
+    // เรียง "ต้องจ่ายก่อน" ขึ้นก่อน (ยังไม่มีวันครบกำหนด → ไว้ท้าย)
+    if (type === "unpaid") {
+      rows.sort((a, b) => (a.due_date ? 0 : 1) - (b.due_date ? 0 : 1) || String(a.due_date ?? "").localeCompare(String(b.due_date ?? "")));
+    }
   } else if (type === "pending_receive" || type === "supplier") {
     title = type === "supplier" ? `ซื้อจาก ${seller || "ร้าน"}` : "รายการค้างรับเข้า";
     link = type === "pending_receive" ? { href: "/purchasing/receive", label: "ไปหน้ารับของ" } : { href: "/purchasing/orders", label: "ไปหน้าใบสั่งซื้อ" };
