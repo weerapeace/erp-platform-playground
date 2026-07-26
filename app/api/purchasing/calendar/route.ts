@@ -117,6 +117,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // สินค้าในแต่ละใบ (โชว์รูปเล็กๆ ในการ์ด) — purchase_order_lines_v2 + รูปปก skus_v2
   const poIds = items.map((i) => i.id);
+  const openLinesByPo = new Map<string, number>();   // จำนวนบรรทัดที่ยัง "ค้างรับ" ต่อใบ (โหมดของเข้าใช้กรอง)
   type LineRow = { line_id: string; name: string; qty: number; uom: string | null; total: number; price: number; sku_id: string | null; pr_id: string | null };
   const linesByPo = new Map<string, LineRow[]>();
   const skuIds = new Set<string>();
@@ -124,9 +125,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (let i = 0; i < poIds.length; i += 200) {
     const chunk = poIds.slice(i, i + 200);
     const { data: ls } = await admin.from("purchase_order_lines_v2")
-      .select("id, po_id, pr_id, item_sku_id, item_name, qty, uom, price_est, line_total, sort_order").in("po_id", chunk).order("sort_order", { ascending: true });
+      .select("id, po_id, pr_id, item_sku_id, item_name, qty, qty_received, uom, price_est, line_total, sort_order, line_status, is_active")
+      .in("po_id", chunk).order("sort_order", { ascending: true });
     for (const l of (ls ?? []) as Record<string, unknown>[]) {
       const pid = String(l.po_id);
+      // นับบรรทัดที่ยังค้างรับ (ยังไม่ปิด + ยังเหลือจำนวน) → ใบที่รับครบแล้วจะหายจากปฏิทิน "ของเข้า"
+      if (l.is_active !== false) {
+        const st = String(l.line_status ?? "");
+        const closed = st === "received" || st === "short_closed" || st === "closed_short";
+        const remain = Math.max(0, num(l.qty) - num(l.qty_received));
+        if (!closed && remain > 0) openLinesByPo.set(pid, (openLinesByPo.get(pid) ?? 0) + 1);
+      }
       const arr = linesByPo.get(pid) ?? []; linesByPo.set(pid, arr);
       arr.push({ line_id: String(l.id), name: String(l.item_name ?? ""), qty: num(l.qty), uom: (l.uom as string) ?? null,
         total: num(l.line_total), price: num(l.price_est), sku_id: l.item_sku_id ? String(l.item_sku_id) : null,
@@ -222,7 +231,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
   }
 
-  return NextResponse.json({ data: items, error: null });
+  // โหมด "ของเข้า": ตัดใบที่รับของครบทุกบรรทัดแล้วออก (sync กับหน้ารับของ — ไม่ค้างบนปฏิทิน)
+  const out = mode === "in" ? items.filter((it) => (openLinesByPo.get(it.id) ?? 0) > 0) : items;
+  return NextResponse.json({ data: out, error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

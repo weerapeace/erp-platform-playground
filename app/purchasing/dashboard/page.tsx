@@ -17,6 +17,7 @@ import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import type { DrillRow } from "@/app/api/purchasing/dashboard/list/route";
 import type { ChinaBillOption } from "@/app/api/purchasing/china-bills/route";
+import type { PoDetail } from "@/app/api/purchasing/po-detail/route";
 
 type Dash = {
   rmb_rate: number;
@@ -172,27 +173,31 @@ export default function PurchasingDashboardPage() {
                   <Link href={`/print/purchasing-monthly?month=${new Date().toISOString().slice(0, 7)}`} target="_blank"
                     className="text-xs text-blue-600 hover:underline">🖨 รายงานรายเดือน (พิมพ์) →</Link>
                 </div>
+                {/* กดการ์ด = กางรายการ (widget เดียวกับ KPI ด้านบน) */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                  <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
-                    <div className="text-[11px] text-emerald-700">✓ จ่ายแล้ว</div>
+                  <button type="button" onClick={() => toggleDrill({ type: "paid" })}
+                    className={`text-left rounded-lg border px-3 py-2 transition-colors ${drill?.type === "paid" ? "border-emerald-400 ring-2 ring-emerald-200 bg-emerald-50" : "border-emerald-100 bg-emerald-50/60 hover:bg-emerald-50"}`}>
+                    <div className="text-[11px] text-emerald-700 flex items-center gap-1">✓ จ่ายแล้ว <span className="ml-auto text-[9px] text-emerald-400">กดดู</span></div>
                     <div className="text-lg font-semibold text-emerald-800 tabular-nums">{baht(d.summary.paid_thb)}</div>
                     <div className="text-[10px] text-emerald-600">{d.summary.paid_count} ใบ</div>
-                  </div>
-                  <div className="rounded-lg border border-rose-100 bg-rose-50/60 px-3 py-2">
-                    <div className="text-[11px] text-rose-700">● ยังไม่จ่าย</div>
+                  </button>
+                  <button type="button" onClick={() => toggleDrill({ type: "unpaid" })}
+                    className={`text-left rounded-lg border px-3 py-2 transition-colors ${drill?.type === "unpaid" ? "border-rose-400 ring-2 ring-rose-200 bg-rose-50" : "border-rose-100 bg-rose-50/60 hover:bg-rose-50"}`}>
+                    <div className="text-[11px] text-rose-700 flex items-center gap-1">● ยังไม่จ่าย <span className="ml-auto text-[9px] text-rose-400">กดดู</span></div>
                     <div className="text-lg font-semibold text-rose-800 tabular-nums">{baht(d.summary.unpaid_thb)}</div>
                     <div className="text-[10px] text-rose-600">{d.summary.unpaid_count} ใบ</div>
-                  </div>
+                  </button>
                   <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2">
                     <div className="text-[11px] text-blue-700">📦 รับเข้าแล้ว</div>
                     <div className="text-lg font-semibold text-blue-800 tabular-nums">{d.summary.received_lines}</div>
                     <div className="text-[10px] text-blue-600">รายการสินค้า</div>
                   </div>
-                  <div className="rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2">
-                    <div className="text-[11px] text-amber-700">🚚 ยังไม่รับเข้า</div>
+                  <button type="button" onClick={() => toggleDrill({ type: "pending_receive" })}
+                    className={`text-left rounded-lg border px-3 py-2 transition-colors ${drill?.type === "pending_receive" ? "border-amber-400 ring-2 ring-amber-200 bg-amber-50" : "border-amber-100 bg-amber-50/60 hover:bg-amber-50"}`}>
+                    <div className="text-[11px] text-amber-700 flex items-center gap-1">🚚 ยังไม่รับเข้า <span className="ml-auto text-[9px] text-amber-400">กดดู</span></div>
                     <div className="text-lg font-semibold text-amber-800 tabular-nums">{d.summary.pending_receive_lines}</div>
                     <div className="text-[10px] text-amber-600">รายการสินค้า</div>
-                  </div>
+                  </button>
                 </div>
               </Card>
             )}
@@ -351,6 +356,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const [orderQty, setOrderQty] = useState("");
   const [detail, setDetail] = useState<DrillRow | null>(null);      // popup รายละเอียด
   const [payRow, setPayRow] = useState<DrillRow | null>(null);      // ใบที่กำลังยืนยัน "จ่ายแล้ว"
+  const [poDetailId, setPoDetailId] = useState<string | null>(null); // ใบที่กดดูรายละเอียด (popup รายการสินค้า)
   const [uploading, setUploading] = useState(false);                // กำลังอัปรูปเข้า SKU
   const [stores, setStores] = useState<string[]>([]);               // รายชื่อร้าน (pickup)
   const open = drill !== null;
@@ -358,6 +364,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const isReceive = drill?.type === "pending_receive";
   const isRich = isWaiting || isReceive;
   const isUnpaid = drill?.type === "unpaid";
+  const isPaid = drill?.type === "paid";
   const canCalendar = isReceive || isUnpaid;   // 2 กล่องนี้มีมุมมองปฏิทิน (ของเข้า / จ่ายเงิน)
   const fixedSeller = drill?.type === "supplier" ? (drill.seller ?? "") : "";
 
@@ -625,7 +632,9 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
                         {grows.map((r) => (
                           <div key={r.id}>
                             <div className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg border border-slate-100 hover:bg-slate-50">
-                              <button type="button" onClick={() => isRich ? openDetail(r) : undefined} className={`min-w-0 flex-1 text-left ${isRich ? "hover:text-blue-700" : ""}`}>
+                              <button type="button"
+                                onClick={() => isRich ? openDetail(r) : (isUnpaid || isPaid) ? setPoDetailId(r.id) : undefined}
+                                className={`min-w-0 flex-1 text-left ${isRich || isUnpaid || isPaid ? "hover:text-blue-700" : ""}`}>
                                 <div className="text-sm text-slate-700 truncate">{r.primary}{isRich && r.code && <span className="text-[10px] font-mono text-slate-400 ml-1.5">{r.code}</span>}{isRich && shownMissing(r).length > 0 && <span className="text-[10px] text-amber-600 ml-1" title="ข้อมูลไม่ครบ">⚠️</span>}</div>
                                 <div className="text-[11px] text-slate-400 truncate">{r.secondary}{isWaiting && r.order_date && <span className="text-emerald-600"> · ✓ สั่งแล้ว {r.order_date}</span>}</div>
                                 {/* ใบรอจ่าย: วันครบกำหนดจ่าย + สินค้าในใบ (รูปเล็ก 3 ตัว) */}
@@ -683,12 +692,66 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
           onEnrich={enrich} onUpload={uploadCover} onSaveSource2={saveSource2} stores={stores} uploading={uploading} busy={busy.has(detail.id)} />
       )}
 
+      {/* popup รายละเอียดใบสั่งซื้อ (กดแถวในรายการ จ่ายแล้ว/รอจ่าย) */}
+      {poDetailId && <PoDetailModal poId={poDetailId} onClose={() => setPoDetailId(null)} />}
+
       {/* ยืนยันการจ่าย — ยอดจริง + วันที่ + ผูกบิลโอนเงินจีน */}
       {payRow && (
         <PayConfirmModal row={payRow} busy={busy.has(payRow.id)} onClose={() => setPayRow(null)}
           onConfirm={async (payload) => { await markPaid(payRow.id, payload); setPayRow(null); }} />
       )}
     </div>
+  );
+}
+
+// ---- popup รายละเอียดใบสั่งซื้อ (หัวใบ + รายการสินค้า + รูป + สถานะรับเข้า) ----
+function PoDetailModal({ poId, onClose }: { poId: string; onClose: () => void }) {
+  const [d, setD] = useState<PoDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    setLoading(true);
+    apiFetch(`/api/purchasing/po-detail?id=${encodeURIComponent(poId)}`).then((r) => r.json())
+      .then((j) => setD((j.data ?? null) as PoDetail | null)).catch(() => setD(null)).finally(() => setLoading(false));
+  }, [poId]);
+  const sym = d && ["RMB", "YUAN", "CNY"].includes(String(d.currency ?? "").toUpperCase()) ? "¥" : "฿";
+  return (
+    <ERPModal open onClose={onClose} size="lg" title={d ? `📦 ใบสั่งซื้อ ${d.po_no}` : "รายละเอียดใบสั่งซื้อ"}
+      description={d?.seller ? `🏪 ${d.seller}` : undefined}>
+      {loading ? <div className="py-10 text-center text-sm text-slate-400">กำลังโหลด…</div>
+        : !d ? <div className="py-10 text-center text-sm text-slate-400">ไม่พบใบสั่งซื้อ</div>
+        : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm bg-slate-50 rounded-lg px-3 py-2">
+            <div><span className="text-slate-400">ยอดรวม (บาท) </span><b className="tabular-nums text-slate-800">{baht(d.amount_thb)}</b></div>
+            {d.order_date && <div><span className="text-slate-400">วันที่สั่ง </span>{thDate(d.order_date)}</div>}
+            {d.payment_status === "paid"
+              ? <div className="text-emerald-700 font-medium">✓ จ่ายแล้ว {d.paid_date ? thDate(d.paid_date) : ""}{d.paid_amount_thb ? ` · ${baht(d.paid_amount_thb)}` : ""}</div>
+              : <div className="text-rose-600 font-medium">● ยังไม่จ่าย{d.payment_due_date ? ` · ครบกำหนด ${thDate(d.payment_due_date)}` : ""}</div>}
+            {d.expected_date && <div><span className="text-slate-400">ของเข้า </span>{thDate(d.expected_date)}</div>}
+            <div><span className="text-slate-400">รายการ </span>{d.lines.length}</div>
+          </div>
+          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[55vh] overflow-y-auto">
+            {d.lines.length === 0 ? <div className="p-4 text-center text-sm text-slate-400">ไม่มีรายการสินค้า</div>
+              : d.lines.map((l, i) => (
+              <div key={i} className="flex items-center gap-3 p-2">
+                <HoverImage url={l.img} size={40} previewSize={320} alt={l.name} fallback="📦" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-slate-700 truncate">{l.name || "—"}</div>
+                  <div className="text-[11px] text-slate-400">
+                    จำนวน {l.qty.toLocaleString("th-TH")}{l.uom ? ` ${l.uom}` : ""}
+                    {l.received > 0 && <> · รับแล้ว {l.received.toLocaleString("th-TH")}</>}
+                    {l.done ? <span className="text-emerald-600"> · ✓ รับครบ</span> : <span className="text-amber-600"> · ค้างรับ</span>}
+                  </div>
+                </div>
+                <div className="text-sm tabular-nums text-slate-600 shrink-0">
+                  {l.total > 0 ? `${sym}${Math.round(l.total).toLocaleString("th-TH")}` : <span className="text-amber-600 text-xs">⚠ ยังไม่มีราคา</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </ERPModal>
   );
 }
 

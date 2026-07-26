@@ -108,7 +108,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const skuId = sp.get("sku_id");
   if (!skuId) return NextResponse.json({ data: [], error: "ต้องระบุ sku_id" }, { status: 400 });
 
-  const { data, error } = await supabaseAdmin()
+  const admin0 = supabaseAdmin();
+  const { data, error } = await admin0
     .from("supplier_items")
     .select(SELECT)
     .eq("item_sku_id", skuId)
@@ -116,7 +117,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .order("is_default", { ascending: false })
     .order("price", { ascending: true, nullsFirst: false });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
-  return NextResponse.json({ data: (data ?? []).map((r) => shape(r as unknown as Record<string, unknown>)), error: null });
+
+  const rows = (data ?? []).map((r) => shape(r as unknown as Record<string, unknown>));
+
+  // ยังไม่มีร้านเลย แต่ SKU มี "ข้อมูลซื้อเดิม" (ราคา/ลิงก์/หน่วย) → ส่งกลับให้ UI ชวนนำเข้าเป็นร้านแรก
+  let legacy: { price: number | null; currency: string; purchase_link: string | null; purchase_uom_en: string | null } | null = null;
+  if (rows.length === 0) {
+    const { data: sk } = await admin0.from("skus_v2")
+      .select("standard_price, rmb_cost, purchase_link, purchase_uom_en").eq("id", skuId).maybeSingle();
+    const s = (sk ?? {}) as Record<string, unknown>;
+    const rmbC = Number(s.rmb_cost) || 0, stdC = Number(s.standard_price) || 0;
+    if (rmbC > 0 || stdC > 0 || s.purchase_link || s.purchase_uom_en) {
+      legacy = {
+        price: rmbC > 0 ? rmbC : (stdC > 0 ? stdC : null),
+        currency: rmbC > 0 ? "RMB" : "THB",
+        purchase_link: (s.purchase_link as string) ?? null,
+        purchase_uom_en: (s.purchase_uom_en as string) ?? null,
+      };
+    }
+  }
+
+  return NextResponse.json({ data: rows, legacy, error: null });
 }
 
 // ── POST — เพิ่มร้าน+ราคาให้สินค้า ──

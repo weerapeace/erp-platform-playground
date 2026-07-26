@@ -125,16 +125,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           alt_seller: sk?.alt_seller ?? null, alt_price: sk?.alt_price ?? null, alt_currency: sk?.alt_currency ?? null, alt_link: sk?.alt_link ?? null,
         };
       });
-  } else if (type === "unpaid" || type === "spend_month") {
+  } else if (type === "unpaid" || type === "spend_month" || type === "paid") {
     const thisMonth = monthKey(new Date());
-    title = type === "unpaid" ? "ใบสั่งซื้อรอจ่ายเงิน" : "ใบสั่งซื้อเดือนนี้";
+    title = type === "unpaid" ? "ใบสั่งซื้อรอจ่ายเงิน" : type === "paid" ? "ใบสั่งซื้อที่จ่ายแล้ว" : "ใบสั่งซื้อเดือนนี้";
     link = { href: "/purchasing/orders", label: "ไปหน้าใบสั่งซื้อ" };
     const { data } = await admin.from("purchase_orders_v2")
-      .select("id, po_no, seller_name, seller_partner_id, grand_total, currency, order_date, payment_due_date, payment_status, status")
+      .select("id, po_no, seller_name, seller_partner_id, grand_total, currency, order_date, payment_due_date, paid_date, paid_amount_thb, payment_status, status")
       .order("order_date", { ascending: false }).limit(5000);
     const all = ((data ?? []) as Record<string, unknown>[]).filter((p) => p.status !== "draft" && p.status !== "cancelled");
     const filtered = all.filter((p) => {
       if (type === "unpaid" && p.payment_status !== "unpaid") return false;
+      if (type === "paid" && p.payment_status !== "paid") return false;
       if (type === "spend_month") {
         const od = p.order_date ? new Date(String(p.order_date) + "T00:00:00Z") : null;
         if (!od || isNaN(od.getTime()) || monthKey(od) !== thisMonth) return false;
@@ -158,8 +159,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       for (const nm of [pt.display_name, pt.name_th]) { const k = String(nm ?? "").trim(); if (k && !termByName.has(k)) termByName.set(k, term); }
     }
 
-    // สินค้าในใบ (3 ตัวแรก + จำนวนรายการ) — ให้เห็นว่าจ่ายค่าอะไร · เฉพาะ unpaid (spend_month ไม่ใช้ → ไม่ยิง query เปล่า)
-    const poIds = type === "unpaid" ? shown.map((p) => String(p.id)) : [];
+    // สินค้าในใบ (3 ตัวแรก + จำนวนรายการ) — ให้เห็นว่าจ่ายค่าอะไร (ใช้กับ unpaid/paid · spend_month ไม่ใช้)
+    const poIds = (type === "unpaid" || type === "paid") ? shown.map((p) => String(p.id)) : [];
     const linesByPo = new Map<string, { name: string; sku_id: string | null }[]>();
     const skuIds = new Set<string>();
     for (let i = 0; i < poIds.length; i += 200) {
@@ -185,13 +186,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const setDue = (p.payment_due_date as string) ?? null;
       const due = setDue ?? computeDueDate((p.order_date as string) ?? null, term);
       const ls = linesByPo.get(pid) ?? [];
+      const paidTxt = type === "paid"
+        ? ` · ✓ จ่าย ${p.paid_date ?? "—"}${p.paid_amount_thb ? ` (${baht(num(p.paid_amount_thb))})` : ""}` : "";
       return {
         id: pid,
         primary: String(p.po_no ?? "—"),
-        secondary: `🏪 ${p.seller_name || "—"}${p.order_date ? ` · สั่ง ${p.order_date}` : ""}`,
+        secondary: `🏪 ${p.seller_name || "—"}${p.order_date ? ` · สั่ง ${p.order_date}` : ""}${paidTxt}`,
         right: baht(toThb(num(p.grand_total), p.currency)),
         seller: (p.seller_name as string) ?? null,
-        due_date: due, auto_due: !setDue && !!due,
+        due_date: type === "paid" ? null : due, auto_due: type === "paid" ? false : (!setDue && !!due),
         product_count: ls.length,
         products: ls.slice(0, 3).map((l) => {
           const key = l.sku_id ? coverMap.get(l.sku_id) : null;

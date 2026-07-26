@@ -64,13 +64,16 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
   const [newSku, setNewSku] = useState("");     // รหัสสินค้าของร้าน
   const [newUom, setNewUom] = useState("");     // หน่วยซื้อ (EN)
   const [newLink, setNewLink] = useState("");   // ลิงก์สินค้าของร้าน (taobao ฯลฯ)
+  const [newTaobao, setNewTaobao] = useState(false);   // ติ๊ก = เป็นร้าน taobao (ถึงจะโชว์ช่องลิงก์)
+  // ข้อมูลซื้อเดิมบน SKU (ยังไม่ได้แปลงเป็นร้าน) — ชวนนำเข้าเป็นร้านแรก
+  const [legacy, setLegacy] = useState<{ price: number | null; currency: string; purchase_link: string | null; purchase_uom_en: string | null } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
       const j = await apiFetch(`/api/purchasing/sku-suppliers?sku_id=${encodeURIComponent(skuId)}`).then((r) => r.json());
       if (j.error) { setErr(j.error); setRows([]); }
-      else setRows(j.data as SkuSupplierRow[]);
+      else { setRows(j.data as SkuSupplierRow[]); setLegacy(j.legacy ?? null); }
     } catch (e) { setErr(String((e as Error).message ?? e)); }
     finally { setLoading(false); }
   }, [skuId]);
@@ -110,7 +113,7 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
       });
       const j = await res.json();
       if (j.error) { setErr(j.error); return; }
-      setNewPartner(""); setNewPrice(""); setNewCur("THB"); setNewDefault(false); setNewSku(""); setNewUom(""); setNewLink("");
+      setNewPartner(""); setNewPrice(""); setNewCur("THB"); setNewDefault(false); setNewSku(""); setNewUom(""); setNewLink(""); setNewTaobao(false);
       await load(); onChanged?.();
     } catch (e) { setErr(String((e as Error).message ?? e)); }
     finally { setBusy(false); }
@@ -294,6 +297,28 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
         </div>
       )}
 
+      {/* ข้อมูลซื้อเดิมของ SKU ที่ยังไม่ได้แปลงเป็นร้าน — กดเติมลงแถวเพิ่มร้านให้เลย (เหลือแค่เลือกร้าน) */}
+      {rows.length === 0 && legacy && (
+        <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-amber-800">
+            📦 มีข้อมูลซื้อเดิมของสินค้านี้:
+            {legacy.price != null && <b className="ml-1">{legacy.currency === "RMB" ? "¥" : "฿"}{legacy.price.toLocaleString()}</b>}
+            {legacy.purchase_uom_en && <span className="ml-1">· หน่วย {legacy.purchase_uom_en}</span>}
+            {legacy.purchase_link && <span className="ml-1">· มีลิงก์</span>}
+            <span className="text-amber-600"> (ยังไม่ได้ระบุร้าน)</span>
+          </span>
+          <button type="button" onClick={() => {
+              if (legacy.price != null) setNewPrice(String(legacy.price));
+              setNewCur(legacy.currency === "RMB" ? "RMB" : "THB");
+              if (legacy.purchase_uom_en) setNewUom(legacy.purchase_uom_en);
+              if (legacy.purchase_link) { setNewTaobao(true); setNewLink(legacy.purchase_link); }
+            }}
+            className="ml-auto h-7 px-2.5 text-xs font-medium bg-amber-600 text-white rounded-md hover:bg-amber-700">
+            ↓ เติมลงช่องด้านล่าง แล้วเลือกร้าน
+          </button>
+        </div>
+      )}
+
       {/* แถวเพิ่มร้าน */}
       <div className="mt-2 pt-2 border-t border-slate-200 flex flex-wrap items-center gap-2">
         <div className="flex-1 min-w-[150px]">
@@ -306,7 +331,13 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
         </select>
         <input value={newSku} onChange={(e) => setNewSku(e.target.value)} placeholder="รหัสร้าน" title="รหัสสินค้าของร้านนี้" className={inp + " w-24"} />
         <input value={newUom} onChange={(e) => setNewUom(e.target.value)} placeholder="หน่วย" title="หน่วยซื้อ (EN) เช่น pcs / roll" className={inp + " w-20"} />
-        <input value={newLink} onChange={(e) => setNewLink(e.target.value)} placeholder="🔗 ลิงก์ taobao (ถ้ามี)" title="ลิงก์สินค้าของร้านนี้" className={inp + " flex-1 min-w-[150px]"} />
+        {/* ติ๊ก Taobao ถึงจะมีช่องใส่ลิงก์ (ร้านทั่วไปไม่ต้องมีลิงก์ ไม่ต้องรกตา) */}
+        <label className="flex items-center gap-1 text-[11px] text-slate-600 whitespace-nowrap" title="ร้านออนไลน์ (taobao/1688) → ใส่ลิงก์สินค้าได้">
+          <input type="checkbox" checked={newTaobao} onChange={(e) => { setNewTaobao(e.target.checked); if (!e.target.checked) setNewLink(""); }} /> 🛒 taobao
+        </label>
+        {newTaobao && (
+          <input value={newLink} onChange={(e) => setNewLink(e.target.value)} placeholder="🔗 วางลิงก์ taobao" title="ลิงก์สินค้าของร้านนี้" className={inp + " flex-1 min-w-[150px]"} />
+        )}
         <label className="flex items-center gap-1 text-[11px] text-slate-500">
           <input type="checkbox" checked={newDefault} onChange={(e) => setNewDefault(e.target.checked)} /> ร้านหลัก
         </label>
