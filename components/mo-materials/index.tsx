@@ -6,7 +6,7 @@
  * - editable: โชว์ช่อง จำนวนที่มี/ขอซื้อ + ติ๊กเตรียมครบ ให้แก้ได้
  * - parent ตัดสินใจวิธีบันทึก (batch ตอน save / บันทึกทันที) ผ่าน callback
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { needsCut as needsCutRule } from "@/lib/cut-rules";
 import { ERPModal } from "@/components/modal";
@@ -30,7 +30,7 @@ const needsCutLine = (m: { cut_block_code: string | null; cut_length: number | n
 
 export function MoMaterialsTable({
   summary, materials, qty, sizeQty = {}, requested = {}, editable, canEdit,
-  onChangeSummary, onToggleCut, onCreatePR, onAddToCart, emptyText,
+  onChangeSummary, onToggleCut, onCreatePR, onAddToCart, emptyText, extraActions,
 }: {
   summary: MoMatSummary[];
   materials: MoMatPreview[];
@@ -45,6 +45,8 @@ export function MoMaterialsTable({
   // หย่อนวัตถุดิบลงตะกร้าขอซื้อ (เมื่อมี = คอลัมน์สถานะสั่งซื้อจะโชว์ปุ่ม "🛒 ขอซื้อ" แทน "— ยังไม่ขอ")
   onAddToCart?: (row: { component_sku: string | null; component_name: string | null; uom: string | null; to_purchase: number }) => void;
   emptyText?: string;
+  /** ปุ่มเสริมบนแถบเครื่องมือ (เช่น 🔄 อัพเดตวัตถุดิบตาม BOM) */
+  extraActions?: ReactNode;
 }) {
   const [matTab, setMatTab] = useState<"sum" | "block">("sum");
   const [editBuy, setEditBuy] = useState<Set<string>>(new Set());
@@ -151,6 +153,7 @@ export function MoMaterialsTable({
           <button type="button" onClick={() => setMatTab("block")} className={`h-7 px-3 border-l border-slate-200 ${matTab === "block" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>รายละเอียด (บล็อก)</button>
         </div>
         <div className="flex items-center gap-1.5">
+          {extraActions}
           {matTab === "sum" && editable && canEdit && onChangeSummary && summary.length > 0 && (
             <button type="button" onClick={() => allReady ? markAllReady(false) : setBulkConfirm("ready")} className="h-7 px-3 text-xs font-medium border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 whitespace-nowrap">{allReady ? "ยกเลิกเตรียมทั้งหมด" : "✓ เตรียมครบทั้งหมด"}</button>
           )}

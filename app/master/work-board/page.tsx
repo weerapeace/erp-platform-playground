@@ -22,6 +22,7 @@ import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import { AddPieceworkModal } from "./add-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
+import { BomRefreshButton } from "@/components/bom-refresh";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
 import { addToPrCart } from "@/lib/pr-cart";
 import { useViewPref } from "@/lib/use-view-pref";
@@ -57,6 +58,54 @@ type MatRow = { id: string; component_sku: string | null; component_name: string
 // แถวรายบล็อกสำหรับ "หน้าตัด" — มาจาก mo_materials โดยตรง (1 แถว = 1 บล็อกตัด) ติ๊กตัดครบรายบล็อกได้
 type CutRow = { id: string; component_sku: string | null; component_name: string | null; material_type: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null; required_qty: number; uom: string | null; cut_done: boolean };
 type PendingPiece = { id: string; mo_no: string; job_name: string; rate: number; qty_per: number; qty: number; product_sku: string | null; product_name: string | null; image_url: string | null; brand: string | null; brand_color: string | null };
+
+// ---- โหลด+แปลงวัตถุดิบของใบสั่งผลิต (ใช้ทั้งตอนเปิดป๊อป และตอนกด "อัพเดตตาม BOM") ----
+type ClMats = { rows: MatRow[]; cutRows: CutRow[]; summary: MoMatSummary[]; materials: MoMatPreview[]; requested: Record<string, number>; sizeQty: Record<string, number> };
+async function fetchClMats(moId: string): Promise<ClMats> {
+  const res = await apiFetch(`/api/mo/${moId}`); const j = await res.json();
+  const summary = (j?.data?.summary ?? []) as Record<string, unknown>[];
+  const materials = (j?.data?.materials ?? []) as Record<string, unknown>[];
+  // ตัดครบของวัตถุดิบ = ทุกบล็อกที่ต้องตัดของมันตัดครบ (จาก mo_materials รายบล็อก) — ไม่นับอะไหล่
+  const cutTotal = new Map<string, number>(), cutDoneN = new Map<string, number>();
+  for (const x of materials) {
+    if (!needsCut(x as CutFields)) continue;
+    const k = String(x.component_sku);
+    cutTotal.set(k, (cutTotal.get(k) ?? 0) + 1);
+    if (x.cut_done) cutDoneN.set(k, (cutDoneN.get(k) ?? 0) + 1);
+  }
+  const num = (v: unknown) => (v == null ? null : Number(v));
+  const n2 = (v: unknown) => Number(v) || 0;
+  const rows: MatRow[] = summary.map((s) => {
+    const k = String(s.component_sku); const ct = cutTotal.get(k) ?? 0;
+    return { id: String(s.id), component_sku: (s.component_sku as string) ?? null, component_name: (s.component_name as string) ?? null,
+      required_qty: n2(s.required_qty), uom: (s.uom as string) ?? null,
+      is_ready: !!s.is_ready, needs_cut: ct > 0, cut_done: ct > 0 && (cutDoneN.get(k) ?? 0) >= ct };
+  });
+  // หน้าตัด — รายบล็อกจริงจาก mo_materials (1 แถว = 1 บล็อกตัด) — ไม่นับอะไหล่
+  const cutRows: CutRow[] = materials.filter((x) => needsCut(x as CutFields)).map((x) => ({
+    id: String(x.id), component_sku: (x.component_sku as string) ?? null, component_name: (x.component_name as string) ?? null,
+    material_type: (x.material_type as string) ?? null,
+    cut_block_code: (x.cut_block_code as string) ?? null, cut_width: num(x.cut_width), cut_length: num(x.cut_length), pieces: num(x.pieces),
+    required_qty: n2(x.required_qty), uom: (x.uom as string) ?? null, cut_done: !!x.cut_done,
+  }));
+  // ตารางวัตถุดิบกลาง (MoMaterialsTable) — ใช้ข้อมูลดิบชุดเดียวกับหน้าแก้ใบสั่งผลิต
+  const moSummary: MoMatSummary[] = summary.map((s) => ({
+    key: String(s.id), id: String(s.id), component_sku: (s.component_sku as string) ?? null, component_name: (s.component_name as string) ?? null,
+    material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, qty_per: n2(s.qty_per),
+    on_hand_qty: n2(s.on_hand_qty), is_ready: !!s.is_ready, purchase_override: s.to_purchase_qty != null ? Number(s.to_purchase_qty) : null,
+  }));
+  const moMaterials: MoMatPreview[] = materials.map((m) => ({
+    key: String(m.id), id: String(m.id), component_sku: (m.component_sku as string) ?? null, component_name: (m.component_name as string) ?? null,
+    material_type: (m.material_type as string) ?? null, qty_per: n2(m.qty_per), uom: (m.uom as string) ?? null,
+    cut_block_code: (m.cut_block_code as string) ?? null, cut_width: num(m.cut_width), cut_length: num(m.cut_length), pieces: num(m.pieces),
+    on_hand_qty: n2(m.on_hand_qty), is_ready: !!m.is_ready, purchase_override: null, cut_done: !!m.cut_done,
+    size_label: (m.size_label as string) ?? null,
+  }));
+  const sb = (j?.data?.size_breakdown ?? []) as { label?: unknown; qty?: unknown }[];
+  const sizeQty: Record<string, number> = {};
+  for (const s of sb) { const lb = s?.label != null ? String(s.label) : ""; if (lb) sizeQty[lb] = Number(s.qty) || 0; }
+  return { rows, cutRows, summary: moSummary, materials: moMaterials, requested: (j?.data?.requested ?? {}) as Record<string, number>, sizeQty };
+}
 type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[]; pendingPiece: PendingPiece[] };
 type Pos = { x: number; y: number };
 type Size = { w: number; h: number };
@@ -729,52 +778,9 @@ function WorkBoardPageInner() {
     let cancel = false; setClLoading(true);
     void (async () => {
       try {
-        const res = await apiFetch(`/api/mo/${checklistMO.id}`); const j = await res.json();
-        const summary = (j?.data?.summary ?? []) as Record<string, unknown>[];
-        const materials = (j?.data?.materials ?? []) as Record<string, unknown>[];
-        // ตัดครบของวัตถุดิบ = ทุกบล็อกที่ต้องตัดของมันตัดครบ (จาก mo_materials รายบล็อก) — ไม่นับอะไหล่
-        const cutTotal = new Map<string, number>(), cutDone = new Map<string, number>();
-        for (const x of materials) {
-          if (!needsCut(x as CutFields)) continue;
-          const k = String(x.component_sku);
-          cutTotal.set(k, (cutTotal.get(k) ?? 0) + 1);
-          if (x.cut_done) cutDone.set(k, (cutDone.get(k) ?? 0) + 1);
-        }
-        const rows: MatRow[] = summary.map((s) => {
-          const k = String(s.component_sku); const ct = cutTotal.get(k) ?? 0;
-          return { id: String(s.id), component_sku: (s.component_sku as string) ?? null, component_name: (s.component_name as string) ?? null,
-            required_qty: Number(s.required_qty) || 0, uom: (s.uom as string) ?? null,
-            is_ready: !!s.is_ready, needs_cut: ct > 0, cut_done: ct > 0 && (cutDone.get(k) ?? 0) >= ct };
-        });
-        // หน้าตัด — รายบล็อกจริงจาก mo_materials (1 แถว = 1 บล็อกตัด) — ไม่นับอะไหล่
-        const isCut = (x: Record<string, unknown>) => needsCut(x as CutFields);
-        const num = (v: unknown) => (v == null ? null : Number(v));
-        const cutRows: CutRow[] = materials.filter(isCut).map((x) => ({
-          id: String(x.id), component_sku: (x.component_sku as string) ?? null, component_name: (x.component_name as string) ?? null,
-          material_type: (x.material_type as string) ?? null,
-          cut_block_code: (x.cut_block_code as string) ?? null, cut_width: num(x.cut_width), cut_length: num(x.cut_length), pieces: num(x.pieces),
-          required_qty: Number(x.required_qty) || 0, uom: (x.uom as string) ?? null, cut_done: !!x.cut_done,
-        }));
-        // ตารางวัตถุดิบกลาง (MoMaterialsTable) — ใช้ข้อมูลดิบชุดเดียวกับหน้าแก้ใบสั่งผลิต
-        const n2 = (v: unknown) => Number(v) || 0;
-        const moSummary: MoMatSummary[] = summary.map((s) => ({
-          key: String(s.id), id: String(s.id), component_sku: (s.component_sku as string) ?? null, component_name: (s.component_name as string) ?? null,
-          material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, qty_per: n2(s.qty_per),
-          on_hand_qty: n2(s.on_hand_qty), is_ready: !!s.is_ready, purchase_override: s.to_purchase_qty != null ? Number(s.to_purchase_qty) : null,
-        }));
-        const moMaterials: MoMatPreview[] = materials.map((m) => ({
-          key: String(m.id), id: String(m.id), component_sku: (m.component_sku as string) ?? null, component_name: (m.component_name as string) ?? null,
-          material_type: (m.material_type as string) ?? null, qty_per: n2(m.qty_per), uom: (m.uom as string) ?? null,
-          cut_block_code: (m.cut_block_code as string) ?? null, cut_width: num(m.cut_width), cut_length: num(m.cut_length), pieces: num(m.pieces),
-          on_hand_qty: n2(m.on_hand_qty), is_ready: !!m.is_ready, purchase_override: null, cut_done: !!m.cut_done,
-          size_label: (m.size_label as string) ?? null,
-        }));
-        const requested = (j?.data?.requested ?? {}) as Record<string, number>;
-        savedSumRef.current = new Map(moSummary.filter((s) => s.id).map((s) => [s.id as string, { on: s.on_hand_qty, rd: s.is_ready, po: s.purchase_override }]));
-        const sb = (j?.data?.size_breakdown ?? []) as { label?: unknown; qty?: unknown }[];
-        const sizeQtyMap: Record<string, number> = {};
-        for (const s of sb) { const lb = s?.label != null ? String(s.label) : ""; if (lb) sizeQtyMap[lb] = Number(s.qty) || 0; }
-        if (!cancel) { setClRows(rows); setClCutRows(cutRows); setClSummary(moSummary); setClMaterials(moMaterials); setClRequested(requested); setClSizeQty(sizeQtyMap); }
+        const d = await fetchClMats(checklistMO.id);
+        savedSumRef.current = new Map(d.summary.filter((s) => s.id).map((s) => [s.id as string, { on: s.on_hand_qty, rd: s.is_ready, po: s.purchase_override }]));
+        if (!cancel) { setClRows(d.rows); setClCutRows(d.cutRows); setClSummary(d.summary); setClMaterials(d.materials); setClRequested(d.requested); setClSizeQty(d.sizeQty); }
       } catch { if (!cancel) { setClRows([]); setClCutRows([]); setClSummary([]); setClMaterials([]); } }
       finally { if (!cancel) setClLoading(false); }
     })();
@@ -872,6 +878,20 @@ function WorkBoardPageInner() {
     try { const res = await apiFetch(`/api/mo/issues?id=${encodeURIComponent(id)}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error); setClIssues((rs) => (rs ?? []).filter((x) => x.id !== id)); }
     catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   }, [toast]);
+  // โหลดวัตถุดิบใหม่โดยไม่ปิด/รีเซ็ตป๊อป (ใช้หลังกด "อัพเดตตาม BOM")
+  const reloadClMats = useCallback(async () => {
+    if (!checklistMO) return;
+    setClLoading(true);
+    try {
+      const d = await fetchClMats(checklistMO.id);
+      savedSumRef.current = new Map(d.summary.filter((s) => s.id).map((s) => [s.id as string, { on: s.on_hand_qty, rd: s.is_ready, po: s.purchase_override }]));
+      setClRows(d.rows); setClCutRows(d.cutRows); setClSummary(d.summary); setClMaterials(d.materials); setClRequested(d.requested); setClSizeQty(d.sizeQty);
+      setClCost(null);   // ต้นทุนเปลี่ยนตามวัตถุดิบ → ให้โหลดใหม่ตอนเข้าแท็บ
+      void load(true);   // อัปเดตไฟเขียว/ตัวนับบนการ์ดที่บอร์ด
+    } catch { toast.error("โหลดวัตถุดิบใหม่ไม่สำเร็จ"); }
+    finally { setClLoading(false); }
+  }, [checklistMO, load, toast]);
+
   // ตารางวัตถุดิบกลาง — แก้ (จำนวนที่มี/ขอซื้อ/เตรียมครบ) → อัปเดตทันที + บันทึกแบบ debounce (กันยิง API ถี่ตอนพิมพ์)
   const onMatSummaryChange = useCallback((rows: MoMatSummary[]) => {
     setClSummary(rows);
@@ -1546,11 +1566,20 @@ function WorkBoardPageInner() {
                             <StepChip label="เตรียม" done={curMo.prep_done} disabled={!canEdit} onClick={() => togglePrep(curMo, "prep_done")} />
                             <StepChip label="ตัด" done={curMo.cut_done} disabled={!canEdit} onClick={() => togglePrep(curMo, "cut_done")} />
                           </div>
+                          {canEdit && (checklistMO.product_sku || curMo.bom_code) && (
+                            <div className="mt-4 flex justify-center">
+                              <BomRefreshButton moId={checklistMO.id} productSku={checklistMO.product_sku} currentBomCode={curMo.bom_code ?? null}
+                                onDone={reloadClMats} label="🔄 ดึงวัตถุดิบจาก BOM" />
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <MoMaterialsTable
                           summary={clSummary} materials={clMaterials} qty={checklistMO.qty || 0} sizeQty={clSizeQty} requested={clRequested}
                           editable={canEdit} canEdit={canEdit}
+                          extraActions={canEdit && (checklistMO.product_sku || curMo.bom_code)
+                            ? <BomRefreshButton moId={checklistMO.id} productSku={checklistMO.product_sku} currentBomCode={curMo.bom_code ?? null} onDone={reloadClMats} />
+                            : undefined}
                           onChangeSummary={(rows) => void onMatSummaryChange(rows)}
                           onToggleCut={(line, next) => void onMatToggleCut(line, next)}
                           onAddToCart={canEdit ? (row) => {
