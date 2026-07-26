@@ -71,7 +71,19 @@ type KindCfg = {
   title: (r: Row) => React.ReactNode; sub: (r: Row) => React.ReactNode; right: (r: Row) => React.ReactNode;
   dim: (r: Row) => boolean;              // ยกเลิก/สิ้นสุดแล้ว → แสดงจาง ๆ
   deleteHint: string;                    // ข้อความยืนยันตอนกดถังขยะ
+  /** รายละเอียดเต็มของแถว (กางอยู่ใต้หัวข้อ) — ไม่ต้องกดแก้ก็เห็น */
+  detail?: (r: Row) => React.ReactNode;
+  /** แถวไหนควรกางไว้ตั้งแต่แรก (เช่น สัญญาปัจจุบัน) */
+  autoOpen?: (r: Row) => boolean;
 };
+
+/** บรรทัด "หัวข้อ : ค่า" ในกล่องรายละเอียด */
+const KV = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  <div className="flex items-baseline justify-between gap-2 py-0.5">
+    <span className="text-[11px] text-slate-400 shrink-0">{label}</span>
+    <span className="text-xs text-slate-700 text-right truncate">{value || <span className="text-slate-300">—</span>}</span>
+  </div>
+);
 
 const KINDS: Record<RecordKind, KindCfg> = {
   recurring: {
@@ -121,6 +133,19 @@ const KINDS: Record<RecordKind, KindCfg> = {
     },
     dim: (r) => s(r.status) === "revoked",
     deleteHint: "ยกเลิกใบเตือนนี้? (สถานะจะเปลี่ยนเป็น “ยกเลิกแล้ว” ไม่ได้ลบทิ้ง)",
+    autoOpen: (r) => s(r.status) === "active" && s(r.detail).trim() !== "",
+    detail: (r) => (
+      <div className="mt-2 pt-2 border-t border-slate-100">
+        <KV label="วันที่เตือน" value={dateTH(r.warning_date)} />
+        <KV label="สถานะ" value={label(WARN_STATUS, r.status)} />
+        {s(r.detail).trim() && (
+          <div className="mt-1">
+            <div className="text-[11px] text-slate-400">รายละเอียด</div>
+            <div className="text-xs text-slate-700 whitespace-pre-wrap">{s(r.detail)}</div>
+          </div>
+        )}
+      </div>
+    ),
   },
   contracts: {
     key: "contracts", label: "สัญญา", icon: "📄", addLabel: "เพิ่มสัญญา",
@@ -150,6 +175,23 @@ const KINDS: Record<RecordKind, KindCfg> = {
     ),
     dim: (r) => ["ended", "cancelled"].includes(s(r.status)),
     deleteHint: "ปิดสัญญาใบนี้? (เปลี่ยนสถานะเป็นสิ้นสุด ไม่ได้ลบทิ้ง)",
+    autoOpen: (r) => r.is_current === true,        // สัญญาปัจจุบัน = กางรายละเอียดให้เลย
+    detail: (r) => (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 mt-2 pt-2 border-t border-slate-100">
+        <KV label="ประเภทสัญญา" value={label(CONTRACT_TYPE, r.contract_type)} />
+        <KV label="รูปแบบจ้าง" value={label(EMPLOYMENT_TYPE, r.employment_type)} />
+        <KV label="วิธีคิดค่าจ้าง" value={label(WAGE_TYPE, r.wage_type)} />
+        <KV label="รอบจ่าย" value={s(r.payment_cycle) === "monthly" ? "รายเดือน" : s(r.payment_cycle)} />
+        <KV label="เงินเดือน" value={n(r.base_salary) > 0 ? baht(r.base_salary) : ""} />
+        <KV label="ค่าแรง/วัน" value={n(r.daily_wage) > 0 ? baht(r.daily_wage) : ""} />
+        <KV label="ค่าแรง/ชั่วโมง" value={n(r.hourly_wage) > 0 ? baht(r.hourly_wage) : ""} />
+        <KV label="ค่าแรงรายชิ้น" value={n(r.piece_rate_default) > 0 ? baht(r.piece_rate_default) : ""} />
+        <KV label="ฐานทะเบียนค่าจ้าง" value={n(r.payroll_register_base_salary) > 0 ? baht(r.payroll_register_base_salary) : ""} />
+        <KV label="สถานะ" value={label(CONTRACT_STATUS, r.status)} />
+        <KV label="เริ่มสัญญา" value={dateTH(r.start_date)} />
+        <KV label="สิ้นสุด" value={s(r.end_date) ? dateTH(r.end_date) : "ไม่กำหนด"} />
+      </div>
+    ),
   },
 };
 
@@ -172,6 +214,7 @@ export function EmployeeRecordsPanel({
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ id: string | null; form: Row } | null>(null);   // id=null → เพิ่มใหม่
   const [confirmRow, setConfirmRow] = useState<Row | null>(null);                          // แถวที่รอยืนยันปิดใช้งาน
+  const [toggled, setToggled] = useState<Set<string>>(new Set());                          // แถวที่ผู้ใช้กดสลับ กาง/ย่อ เอง
 
   const load = useCallback(async () => {
     try {
@@ -182,6 +225,15 @@ export function EmployeeRecordsPanel({
   }, [employeeId]);
 
   useEffect(() => { if (!recs) void load(); }, [recs, load]);
+
+  // หน้าโปรไฟล์สลับแท็บด้านบน = ส่ง kinds ใหม่เข้ามา (React ใช้ component ตัวเดิม)
+  // ถ้าไม่ sync ตรงนี้ เนื้อหาจะค้างอยู่แท็บแรกที่เปิด — เหมือนกดแล้วไม่เปลี่ยน
+  const kindsKey = kinds.join(",");
+  useEffect(() => {
+    setTab((cur) => (kinds.includes(cur) ? cur : (defaultKind && kinds.includes(defaultKind) ? defaultKind : kinds[0])));
+    setEditing(null); setConfirmRow(null); setErr(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kindsKey, defaultKind]);
 
   const cfg = KINDS[tab];
   const rows = useMemo(() => (recs ? (recs[tab] ?? []) : []), [recs, tab]);
@@ -296,14 +348,23 @@ export function EmployeeRecordsPanel({
         {recs && rows.length === 0 && !editing && (
           <div className="py-8 text-center text-sm text-slate-400">ยังไม่มี{cfg.label} — กด “{cfg.addLabel}” ได้เลย</div>
         )}
-        {rows.map((r) => (
-          <div key={s(r.id)} className={`rounded-xl border border-slate-200 bg-white px-3 py-2 ${cfg.dim(r) ? "opacity-50" : ""}`}>
+        {rows.map((r) => {
+          const id = s(r.id);
+          // กางรายละเอียดเอง = สลับจากค่าเริ่มต้น (สัญญาปัจจุบัน/ใบเตือนที่มีผล กางไว้ให้ตั้งแต่แรก)
+          const open = cfg.detail ? (cfg.autoOpen?.(r) ?? false) !== toggled.has(id) : false;
+          return (
+          <div key={id} className={`rounded-xl border bg-white px-3 py-2 ${open ? "border-slate-300" : "border-slate-200"} ${cfg.dim(r) ? "opacity-50" : ""}`}>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm font-medium text-slate-800 truncate">{cfg.title(r)}</div>
                 <div className="text-[11px] mt-0.5 truncate">{cfg.sub(r)}</div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
+                {cfg.detail && (
+                  <button onClick={() => setToggled((cur) => { const next = new Set(cur); if (next.has(id)) next.delete(id); else next.add(id); return next; })}
+                    title={open ? "ย่อรายละเอียด" : "ดูรายละเอียด"}
+                    className={`${BTN} h-7 w-7 border-slate-200 bg-white text-slate-500 hover:bg-slate-50`}>{open ? "▴" : "▾"}</button>
+                )}
                 {cfg.right(r)}
                 <button onClick={() => startEdit(r)} disabled={busy} title="แก้ไข"
                   className={`${BTN} h-7 w-7 border-slate-200 bg-white text-slate-500 hover:bg-slate-50`}>✏️</button>
@@ -311,8 +372,10 @@ export function EmployeeRecordsPanel({
                   className={`${BTN} h-7 w-7 border-slate-200 bg-white text-red-500 hover:bg-red-50`}>🗑</button>
               </div>
             </div>
+            {open && cfg.detail?.(r)}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* ยืนยันก่อนปิดใช้งาน — ใช้ ConfirmDialog ของกลาง (ไม่ใช้ window.confirm ของเบราว์เซอร์) */}
