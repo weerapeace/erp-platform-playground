@@ -87,6 +87,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (error) return NextResponse.json({ error: "อัปเดตเอกสารไม่สำเร็จ: " + error.message }, { status: 400 });
   }
 
+  // แหล่งซื้อที่ 2 → ซิงก์เข้า "ตารางร้านที่จำหน่าย" (supplier_items) ด้วย
+  // เพื่อให้เห็นตรงกันทุกที่ (หน้า SKU / หน้าสั่งซื้อ / popup) — ไม่ใช่ข้อมูลแยกเกาะ
+  if (field === "source2" && skuId && skuPatch.alt_seller) {
+    const nm = String(skuPatch.alt_seller);
+    const { data: ps } = await admin.from("partners_v2").select("id, display_name, name_th, is_supplier")
+      .or(`display_name.eq.${nm},name_th.eq.${nm}`).order("is_supplier", { ascending: false, nullsFirst: false }).limit(1);
+    const partner = (ps ?? [])[0] as Record<string, unknown> | undefined;
+    if (partner) {
+      const pid = String(partner.id);
+      if (partner.is_supplier !== true) await admin.from("partners_v2").update({ is_supplier: true }).eq("id", pid);
+      const cur = skuPatch.alt_currency === "YUAN" ? "RMB" : "THB";
+      const { data: exist } = await admin.from("supplier_items")
+        .select("id").eq("item_sku_id", skuId).eq("supplier_partner_id", pid).maybeSingle();
+      const row = { price: (skuPatch.alt_price as number | null), currency: cur, purchase_link: (skuPatch.alt_link as string | null), is_active: true };
+      if (exist) await admin.from("supplier_items").update(row).eq("id", String((exist as Record<string, unknown>).id));
+      else {
+        const { count } = await admin.from("supplier_items").select("id", { count: "exact", head: true }).eq("item_sku_id", skuId);
+        await admin.from("supplier_items").insert({ item_sku_id: skuId, supplier_partner_id: pid, is_default: (count ?? 0) === 0, ...row });
+      }
+    }
+  }
+
   await writeAudit(admin, {
     action: "update", entityType: "purchasing_enrich", entityId: id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
