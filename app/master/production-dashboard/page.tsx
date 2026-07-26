@@ -12,6 +12,7 @@ import { DataTable } from "@/components/data-table";
 import { HoverImage } from "@/components/hover-image";
 import { ERPModal } from "@/components/modal";
 import { getStatusStyle } from "@/lib/status-config";
+import { PendingDataButton } from "@/components/pending-data-report";
 import { apiFetch } from "@/lib/api";
 import type { ProductionJob, ProductionDashboardResponse, ProdJobCategory } from "@/app/api/mo/production-dashboard/route";
 import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
@@ -395,6 +396,7 @@ function ProductionDashboardInner() {
           <p className="text-sm text-slate-500 mt-0.5">งานผลิตทุกสถานะ — กรองซ้าย · สลับ ตาราง/การ์ด · ค้นหาได้</p>
         </div>
         <div className="flex items-center gap-2">
+          <PendingDataButton scope="production" />
           <StatusLegend />
           <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
             <button onClick={() => setView("list")} className={`h-9 px-3 font-medium ${view === "list" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 รายการ</button>

@@ -20,6 +20,7 @@ import { LangSync } from "@/components/lang-sync";
 import { GlobalSearch } from "@/components/global-search";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
+import { DevicePreviewButton } from "@/components/device-preview";
 import { cachedGetJson } from "@/lib/shell-cache";
 
 // โมดูลที่เปิดเป็น "แอปแยก" (แท็บใหม่ + หน้าโฟกัสเต็ม ใช้ StandaloneShell)
@@ -786,6 +787,10 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
           {/* (เดิม) หมวด "⚙ ตั้งค่า" อัตโนมัติถูกเอาออกแล้ว — ให้เพิ่มเมนูตั้งค่าเองที่ /admin/menu */}
         </nav>
 
+        {/* ดูหน้านี้แบบมือถือ/แท็บเล็ต — ท้ายเมนู เหนือชื่อผู้ใช้ */}
+        <div className="px-2 py-1 border-t border-slate-100">
+          <DevicePreviewButton collapsed={!navExpanded} />
+        </div>
         <UserSwitcher collapsed={!navExpanded} />
       </aside>
 
