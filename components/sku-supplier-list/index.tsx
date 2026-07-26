@@ -20,6 +20,7 @@ export type SkuSupplierRow = {
   supplier_sku: string | null; moq: number | null; lead_time_days: number | null; note: string | null;
   price_tiers: { qty: number; price: number }[];
   purchase_link: string | null;
+  purchase_uom_en: string | null;
 };
 type Supplier = { id: string; name: string; currency: string; cn?: boolean };
 
@@ -60,6 +61,9 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
   const [newPrice, setNewPrice] = useState("");
   const [newCur, setNewCur] = useState("THB");
   const [newDefault, setNewDefault] = useState(false);
+  const [newSku, setNewSku] = useState("");     // รหัสสินค้าของร้าน
+  const [newUom, setNewUom] = useState("");     // หน่วยซื้อ (EN)
+  const [newLink, setNewLink] = useState("");   // ลิงก์สินค้าของร้าน (taobao ฯลฯ)
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
@@ -98,11 +102,15 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
     try {
       const res = await apiFetch(`/api/purchasing/sku-suppliers`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sku_id: skuId, partner_id: newPartner, price: newPrice === "" ? null : Number(newPrice), currency: newCur, is_default: newDefault || rows.length === 0 }),
+        body: JSON.stringify({
+          sku_id: skuId, partner_id: newPartner, price: newPrice === "" ? null : Number(newPrice), currency: newCur,
+          is_default: newDefault || rows.length === 0,
+          supplier_sku: newSku.trim() || null, purchase_uom_en: newUom.trim() || null, purchase_link: newLink.trim() || null,
+        }),
       });
       const j = await res.json();
       if (j.error) { setErr(j.error); return; }
-      setNewPartner(""); setNewPrice(""); setNewCur("THB"); setNewDefault(false);
+      setNewPartner(""); setNewPrice(""); setNewCur("THB"); setNewDefault(false); setNewSku(""); setNewUom(""); setNewLink("");
       await load(); onChanged?.();
     } catch (e) { setErr(String((e as Error).message ?? e)); }
     finally { setBusy(false); }
@@ -217,6 +225,10 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
                 <button type="button" onClick={() => promptLink(r)} disabled={busy} title="ใส่ลิงก์สินค้าของร้าน (taobao ฯลฯ)"
                   className="h-7 px-2 inline-flex items-center gap-1 text-xs text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-orange-300 hover:text-orange-500">🔗 ใส่ลิงก์ taobao</button>
               )}
+              <span className="text-xs text-slate-500 shrink-0 ml-1">หน่วยซื้อ</span>
+              <input defaultValue={r.purchase_uom_en ?? ""} disabled={busy}
+                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (r.purchase_uom_en || null)) void patchRow(r.id, { purchase_uom_en: v }); }}
+                className="h-7 w-20 px-2 text-sm border border-slate-300 rounded-md" placeholder="pcs" title="หน่วยที่ซื้อจากร้านนี้ (ใช้บนใบ PO ร้านจีน) เช่น pcs / roll / yard" />
             </div>
             {/* บรรทัดรอง: MOQ + leadtime + ขั้นราคา + ประวัติ */}
             <div className="flex items-center gap-3 mt-1 pl-6 text-[11px] text-slate-400 flex-wrap">
@@ -292,6 +304,9 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
         <select value={newCur} onChange={(e) => setNewCur(e.target.value)} className={inp + " bg-white w-[68px]"}>
           {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
+        <input value={newSku} onChange={(e) => setNewSku(e.target.value)} placeholder="รหัสร้าน" title="รหัสสินค้าของร้านนี้" className={inp + " w-24"} />
+        <input value={newUom} onChange={(e) => setNewUom(e.target.value)} placeholder="หน่วย" title="หน่วยซื้อ (EN) เช่น pcs / roll" className={inp + " w-20"} />
+        <input value={newLink} onChange={(e) => setNewLink(e.target.value)} placeholder="🔗 ลิงก์ taobao (ถ้ามี)" title="ลิงก์สินค้าของร้านนี้" className={inp + " flex-1 min-w-[150px]"} />
         <label className="flex items-center gap-1 text-[11px] text-slate-500">
           <input type="checkbox" checked={newDefault} onChange={(e) => setNewDefault(e.target.checked)} /> ร้านหลัก
         </label>

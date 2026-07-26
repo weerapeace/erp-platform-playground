@@ -123,7 +123,7 @@ export default function SkusV2Page() {
     }],
     // ตารางร้านที่จำหน่าย (1 สินค้าหลายร้าน) — เป็น "แท็บ" ในป๊อป SKU: รหัสร้าน/ราคา/ตั้งร้านหลัก ★
     extraTabs: [{
-      key: "suppliers", label: "ร้านที่จำหน่าย", icon: "🏪",
+      key: "suppliers", label: "ร้านที่จำหน่าย + ราคาซื้อ", icon: "🏪", inTab: "tab_ราคา",
       render: ({ recordId }) => recordId
         ? <div className="pt-1"><SkuSupplierList skuId={recordId} defaultOpen /></div>
         : <div className="p-3 text-sm text-slate-400">บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย</div>,

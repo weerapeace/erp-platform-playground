@@ -479,7 +479,7 @@ export type MasterCRUDConfig = {
   /** section พิเศษเต็มความกว้าง ใต้ฟอร์ม (โหมดดู) — เช่น ตารางร้านที่จำหน่ายในหน้า SKU (ของกลาง) */
   recordSections?: { key: string; title?: string; render: (ctx: { recordId: string; row: Record<string, unknown>; readonly: boolean }) => React.ReactNode }[];
   /** แท็บพิเศษต่อโมดูล — โผล่ในแถบแท็บ (ต่อจากแท็บจาก Field Registry) เช่น "🛍 เว็บไซต์" ของ Parent SKU */
-  extraTabs?: { key: string; label: string; icon?: string; render: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode }[];
+  extraTabs?: { key: string; label: string; icon?: string; inTab?: string; render: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode }[];
   /**
    * F19: server-side pagination — ดึงทีละหน้าจาก server (กัน Worker 1102 ถาวร)
    * เหมาะกับ dataset ใหญ่ (>500 rows เช่น parent-skus, skus)
@@ -2364,7 +2364,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             : null;
           // แท็บพิเศษต่อโมดูล (เช่น "🛍 เว็บไซต์" ของ Parent SKU) — ผูก ctx แล้วส่งเข้า Form/DetailSections
           const boundExtraTabs = (config.extraTabs ?? []).map((t) => ({
-            key: t.key, label: t.label, icon: t.icon,
+            key: t.key, label: t.label, icon: t.icon, inTab: t.inTab,
             node: t.render({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit }),
           }));
 
@@ -2781,7 +2781,8 @@ export function MasterRecordDrawer({
           ]
         : moduleKey === "skus-v2"
         ? [
-            { key: "suppliers", label: "ร้านที่จำหน่าย", icon: "🏪", render: ({ recordId }) => recordId
+            // ฝังอยู่ในแท็บ "ราคา" (ข้อมูลซื้อทั้งหมดอยู่ที่เดียว) — ดู inTab ใน LayoutTabs
+            { key: "suppliers", label: "ร้านที่จำหน่าย + ราคาซื้อ", icon: "🏪", inTab: "tab_ราคา", render: ({ recordId }) => recordId
               ? <div className="pt-1"><SkuSupplierList skuId={recordId} defaultOpen /></div>
               : <div className="p-3 text-sm text-slate-400">บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย</div> },
           ]
@@ -2975,13 +2976,16 @@ function LayoutTabs({
   const leftover: FieldDef[] = [];
   byGroup.forEach((fs, g) => { if (!assigned.has(g)) leftover.push(...fs); });
 
-  const activeExtra = extraTabs.find((t) => t.key === active);
+  // แท็บพิเศษที่ตั้ง inTab → ไม่เป็นแท็บของตัวเอง แต่ไปแปะท้าย "แท็บที่ระบุ" (เช่นตารางร้านที่จำหน่ายอยู่ในแท็บราคา)
+  const ownTabs = extraTabs.filter((t) => !t.inTab);
+  const activeExtra = ownTabs.find((t) => t.key === active);
   const cur = tabs.find((t) => t.key === active) ?? (activeExtra ? undefined : tabs[0]);
   if (!cur && !activeExtra) return null;
+  const inlineExtras = cur ? extraTabs.filter((t) => t.inTab && t.inTab === cur.key) : [];
 
   return (
     <div>
-      {tabs.length + extraTabs.length > 1 && (
+      {tabs.length + ownTabs.length > 1 && (
         <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
           {tabs.map((t) => (
             <button key={t.key} type="button" onClick={() => setActive(t.key)}
@@ -2991,7 +2995,7 @@ function LayoutTabs({
               {sectionIconNode(t.icon)}<span>{t.label}</span>
             </button>
           ))}
-          {extraTabs.map((t) => (
+          {ownTabs.map((t) => (
             <button key={t.key} type="button" onClick={() => setActive(t.key)}
               className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
                 t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
@@ -3021,6 +3025,13 @@ function LayoutTabs({
             {renderGrid(leftover, 2)}
           </div>
         )}
+        {/* section พิเศษที่ฝังในแท็บนี้ (inTab) */}
+        {inlineExtras.map((t) => (
+          <div key={t.key} className="pt-1">
+            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{t.icon ? `${t.icon} ` : ""}{t.label}</h4>
+            {t.node}
+          </div>
+        ))}
       </div>
       )}
     </div>
@@ -3028,7 +3039,7 @@ function LayoutTabs({
 }
 
 // แท็บพิเศษที่ผูก ctx แล้ว (พร้อม node) — ใช้ส่งเข้า LayoutTabs
-type BoundTab = { key: string; label: string; icon?: string; node: React.ReactNode };
+type BoundTab = { key: string; label: string; icon?: string; node: React.ReactNode; inTab?: string };
 
 function FormSections({
   fields, renderField, layout, extraTabs, sectionMode,

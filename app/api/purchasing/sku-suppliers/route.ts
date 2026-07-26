@@ -21,8 +21,31 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const SELECT =
-  "id, item_sku_id, supplier_partner_id, price, currency, is_default, supplier_sku, moq, lead_time_days, price_tiers, note, purchase_link, " +
+  "id, item_sku_id, supplier_partner_id, price, currency, is_default, supplier_sku, moq, lead_time_days, price_tiers, note, purchase_link, purchase_uom_en, " +
   "partner:supplier_partner_id(id, display_name, name_th, default_currency, shop_country)";
+
+/**
+ * ซิงก์ "ร้านหลัก ★" กลับฟิลด์เดิมบน skus_v2 (standard_price / rmb_cost / purchase_link / seller_partner_id / purchase_uom_en)
+ * เหตุผล: ข้อมูลซื้อย้ายมาอยู่รายร้านแล้ว แต่หน้าอื่น (ต้นทุน/ใบ PO/รายงาน) ยังอ่านฟิลด์เดิม
+ *        → ให้ค่าของ "ร้านหลัก" เป็นตัวแทนเสมอ ไม่ต้องกรอกซ้ำ 2 ที่
+ */
+async function syncDefaultToSku(admin: ReturnType<typeof supabaseAdmin>, skuId: string | null) {
+  if (!skuId) return;
+  const { data: def } = await admin.from("supplier_items")
+    .select("supplier_partner_id, price, currency, purchase_link, purchase_uom_en")
+    .eq("item_sku_id", skuId).eq("is_default", true).maybeSingle();
+  if (!def) return;
+  const d = def as Record<string, unknown>;
+  const price = d.price == null ? null : Number(d.price);
+  const cny = ["RMB", "YUAN", "CNY"].includes(String(d.currency ?? "").toUpperCase());
+  const patch: Record<string, unknown> = {
+    seller_partner_id: d.supplier_partner_id ?? null,
+    purchase_link: (d.purchase_link as string) ?? null,
+    purchase_uom_en: (d.purchase_uom_en as string) ?? null,
+  };
+  if (price != null) { if (cny) patch.rmb_cost = price; else patch.standard_price = price; }
+  await admin.from("skus_v2").update(patch).eq("id", skuId);
+}
 
 // ทำความสะอาดราคาขั้นบันได: [{qty,price}] เรียงตามจำนวนน้อย→มาก
 type Tier = { qty: number; price: number };
@@ -53,6 +76,7 @@ function shape(r: Record<string, unknown>) {
     price_tiers: cleanTiers(r.price_tiers),
     note: (r.note as string) ?? null,
     purchase_link: (r.purchase_link as string) ?? null,
+    purchase_uom_en: (r.purchase_uom_en as string) ?? null,
   };
 }
 
@@ -140,11 +164,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       price_tiers: "price_tiers" in b ? cleanTiers(b.price_tiers) : [],
       note: typeof b.note === "string" ? b.note : null, is_active: true,
       purchase_link: typeof b.purchase_link === "string" ? (b.purchase_link.trim() || null) : null,
+      purchase_uom_en: typeof b.purchase_uom_en === "string" ? (b.purchase_uom_en.trim() || null) : null,
     };
     ({ data, error } = await admin.from("supplier_items").insert(row).select(SELECT).single());
   }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const shaped = shape(data as unknown as Record<string, unknown>);
+  await syncDefaultToSku(admin, skuId);   // ร้านหลัก → ฟิลด์เดิมบน SKU
   await writeAudit(admin, { action: existing ? "update" : "create", entityType: "supplier_items", entityId: shaped.id, actorId: user?.id, actorName: user?.user_metadata?.name as string | undefined, metadata: { sku_id: skuId, partner_id: partnerId, price, currency } });
   return NextResponse.json({ data: shaped, error: null });
 }
@@ -175,6 +201,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("price_tiers" in b) patch.price_tiers = cleanTiers(b.price_tiers);
   if ("note" in b) patch.note = typeof b.note === "string" ? b.note : null;
   if ("purchase_link" in b) patch.purchase_link = typeof b.purchase_link === "string" ? (b.purchase_link.trim() || null) : null;
+  if ("purchase_uom_en" in b) patch.purchase_uom_en = typeof b.purchase_uom_en === "string" ? (b.purchase_uom_en.trim() || null) : null;
 
   if (b.is_default === true) {
     if (skuId) await admin.from("supplier_items").update({ is_default: false }).eq("item_sku_id", skuId).eq("is_default", true);
@@ -186,6 +213,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await admin.from("supplier_items").update(patch).eq("id", id).select(SELECT).single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if ("price" in patch) await logPriceChange(admin, { supplier_item_id: id, item_sku_id: skuId, partner_id: curRow.supplier_partner_id ? String(curRow.supplier_partner_id) : null, old_price: oldPrice, new_price: patch.price as number | null, currency: (patch.currency as string) ?? (curRow.currency as string) ?? "THB", userId: user?.id, userName: user?.user_metadata?.name as string | undefined });
+  await syncDefaultToSku(admin, skuId);   // ร้านหลัก → ฟิลด์เดิมบน SKU
   await writeAudit(admin, { action: "update", entityType: "supplier_items", entityId: id, actorId: user?.id, actorName: user?.user_metadata?.name as string | undefined, metadata: { changes: patch } });
   return NextResponse.json({ data: shape(data as unknown as Record<string, unknown>), error: null });
 }
