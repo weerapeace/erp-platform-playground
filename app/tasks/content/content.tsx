@@ -350,6 +350,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const t = useT();
   const { platforms } = useCreativeOptions();
   const [d, setD] = useState<ContentDetail | null>(null);
+  const [titleEdit, setTitleEdit] = useState<string | null>(null);   // ดับเบิลคลิกหัว drawer = แก้ชื่อ (null = ไม่ได้แก้อยู่)
   const [caps, setCaps] = useState<ContentCaption[]>([]);
   const [touchedCaps, setTouchedCaps] = useState<Set<string>>(new Set());   // ช่องที่ผู้ใช้ "แก้เอง" (platform|caption / platform|hashtags)
   const [applyFrom, setApplyFrom] = useState<string | null>(null);          // ป๊อป "ใช้ทั้งหมด" — แพลตฟอร์มต้นทาง
@@ -769,7 +770,26 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       <div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
         <div className="h-1 shrink-0" style={{ background: accentCss(dth) }} />
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
-          <div className="min-w-0"><h3 className="text-base font-semibold text-slate-900 truncate">{d.title}</h3><span className="font-mono text-xs text-slate-500">{d.content_no}</span></div>
+          <div className="min-w-0">
+            {/* ดับเบิลคลิกชื่อ = แก้ชื่อได้ทันที (Enter/คลิกนอกช่อง = บันทึก · Esc = ยกเลิก) */}
+            {titleEdit === null ? (
+              <h3 onDoubleClick={() => setTitleEdit(d.title ?? "")} title={t("ดับเบิลคลิกเพื่อแก้ชื่อ", "Double-click to rename")}
+                className="text-base font-semibold text-slate-900 truncate cursor-text hover:bg-slate-50 rounded px-1 -mx-1">{d.title}</h3>
+            ) : (
+              <input autoFocus value={titleEdit} onChange={(e) => setTitleEdit(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); } if (e.key === "Escape") { e.preventDefault(); setTitleEdit(null); } }}
+                onBlur={async () => {
+                  const v = (titleEdit ?? "").trim();
+                  setTitleEdit(null);
+                  if (!v || v === d.title) return;
+                  setD((x) => (x ? { ...x, title: v } : x));   // optimistic
+                  try { await updateContent(contentId, { title: v }); pushToast("success", t("เปลี่ยนชื่อแล้ว", "Renamed")); onChanged?.(); }
+                  catch (e) { pushToast("error", (e as Error).message); setD((x) => (x ? { ...x, title: d.title } : x)); }
+                }}
+                className="text-base font-semibold text-slate-900 border-b-2 border-violet-400 outline-none bg-transparent w-full px-1 -mx-1" />
+            )}
+            <span className="font-mono text-xs text-slate-500">{d.content_no}</span>
+          </div>
           <div className="flex items-center gap-1">
             <DrawerThemeButton theme={dth} update={dthUpdate} sections={CONTENT_SECTIONS} />
             {onDelete && <button onClick={() => onDelete(d)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">{t("ลบ", "Delete")}</button>}
