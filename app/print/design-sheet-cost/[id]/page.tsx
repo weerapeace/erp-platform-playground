@@ -26,6 +26,26 @@ const num = (n: number | null | undefined, dp = 0) =>
 const pkey = (s: string | null | undefined) => s ?? "";
 const parentLabel = (k: string) => (k === "" ? "ทั่วไป" : k);
 
+/** ราคาต่อ 1 ชิ้นของวัสดุนั้น = ยอดรวมบรรทัด ÷ จำนวนชิ้น (บรรทัดที่ไม่ได้นับเป็นชิ้น → "—") */
+const perPiece = (l: CostLine): number | null =>
+  (l.amount != null && l.pieces != null && l.pieces > 0) ? Math.round((l.amount / l.pieces) * 100) / 100 : null;
+
+/**
+ * ราคาวัสดุต่อ 1 หลา (หน่วยที่ซื้อจริง) — ให้คนอ่านเทียบราคาผ้าได้
+ * - บรรทัดที่คิดเป็นหลาอยู่แล้ว (uom = หลา) → ราคา/หน่วย คือ ฿/หลา ตรง ๆ
+ * - บรรทัดชนิด "ชิ้น" (uom = cm², ราคา/หน่วย = ฿/cm²) → 1 หลา = หน้ากว้าง × divisor cm²
+ *   ⇒ ฿/หลา = ราคา/cm² × หน้ากว้าง × divisor  (ไม่มีหน้ากว้าง = คิดไม่ได้ → "—")
+ */
+const perYard = (l: CostLine): number | null => {
+  if (l.unit_price == null) return null;
+  const uom = (l.uom ?? "").trim();
+  if (uom === "cm²" || uom === "cm2") {
+    const d = l.divisor || 90;
+    return l.face_width_cm ? Math.round(l.unit_price * l.face_width_cm * d * 100) / 100 : null;
+  }
+  return uom.includes("หลา") ? Math.round(l.unit_price * 100) / 100 : null;
+};
+
 type CostExtra = { label: string; amount: number };
 type Sheet = Record<string, unknown> & { brand?: { name?: string } | Array<{ name?: string }> | null; cost_extra?: unknown };
 
@@ -61,6 +81,8 @@ function buildData(sheet: Sheet, lines: CostLine[], extrasArr: CostExtra[], size
         qty:           l.qty != null ? num(l.qty, 4) : "—",
         uom:           l.uom ?? "",
         unit_price_th: l.unit_price != null ? num(l.unit_price, 4) : "—",
+        per_piece_th:  perPiece(l) != null ? baht(perPiece(l)) : "—",   // ฿ ต่อ 1 ชิ้นของวัสดุนี้
+        per_yard_th:   perYard(l) != null ? baht(perYard(l)) : "—",     // ฿ ต่อ 1 หลา (หน่วยที่ซื้อจริง)
         amount_th:     baht(l.amount),
         note:          l.note ?? "",
       })),
