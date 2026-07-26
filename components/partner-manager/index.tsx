@@ -35,6 +35,27 @@ function initials(n: string) { const m = n.replace(/[^\p{L}\p{N} ]/gu, "").trim(
 function avColor(code: string) { let h = 0; for (const c of code) h = (h * 31 + c.charCodeAt(0)) >>> 0; return AV[h % AV.length]; }
 function money(v: unknown, cur: string) { const n = Number(v); return n > 0 ? (cur === "CNY" ? "¥" : "฿") + n.toLocaleString("th-TH") : ""; }
 
+// ส่งออก CSV (ฝั่ง client จากแถวที่กรองอยู่) — ใส่ BOM ให้ Excel อ่านภาษาไทยไม่เพี้ยน
+function exportCsv(rows: Partner[]) {
+  const cols: [string, (p: Partner) => string][] = [
+    ["รหัส", (p) => s(p, "code")], ["ชื่อ", (p) => nameOf(p)], ["ชื่อ (EN)", (p) => s(p, "name_en")],
+    ["ประเภท", (p) => [b(p, "is_customer") ? "ลูกค้า" : "", b(p, "is_supplier") ? "ผู้ขาย" : ""].filter(Boolean).join("+")],
+    ["เบอร์โทร", (p) => s(p, "phone")], ["มือถือ", (p) => s(p, "mobile")], ["LINE", (p) => s(p, "line_id")], ["WeChat", (p) => s(p, "wechat_id")],
+    ["อีเมล", (p) => s(p, "email")], ["จังหวัด", (p) => s(p, "province")], ["เลขภาษี", (p) => s(p, "tax_id")],
+    ["วงเงินเครดิต", (p) => s(p, "credit_limit")], ["เทอมจ่าย", (p) => formatCreditTerm(s(p, "purchase_credit_term") || null)],
+    ["สกุลเงิน", (p) => s(p, "default_currency")], ["ธนาคาร", (p) => s(p, "bank_name_brief")], ["เลขบัญชี", (p) => s(p, "account_number")],
+    ["แท็ก", (p) => Array.isArray(p.tags) ? (p.tags as string[]).join(" ") : ""],
+  ];
+  const esc = (v: string) => `"${(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [cols.map((c) => esc(c[0])).join(","), ...rows.map((p) => cols.map((c) => esc(c[1](p))).join(","))];
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `partners-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function Badges({ p }: { p: Partner }) {
   return (
     <div className="flex gap-1 flex-wrap">
@@ -153,6 +174,9 @@ export function PartnerManager() {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ / รหัส / เบอร์โทร / เลขภาษี / จังหวัด…"
             className="w-full h-10 border border-slate-200 rounded-[11px] pl-9 pr-3.5 text-[13.5px] focus:outline-2 focus:outline-indigo-500" />
         </div>
+        <button onClick={() => exportCsv(filtered)} disabled={!filtered.length}
+          title="ส่งออกรายชื่อที่กรองอยู่เป็นไฟล์ CSV (เปิดใน Excel ได้)"
+          className="h-10 px-3.5 text-[12.5px] font-semibold border border-slate-200 bg-white text-slate-600 rounded-[11px] hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1.5 whitespace-nowrap">⬇ Export</button>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-[14px] shadow-sm overflow-hidden">
@@ -321,7 +345,7 @@ function PartnerDrawer({ partner, mode, canEdit, onMode, onClose, onSaved }: {
         <div className="px-[22px] py-4.5 overflow-y-auto flex-1">
           {editing ? <EditForm form={form} set={set} isSup={isSup} showChina={showChina} cur={cur} />
             : tab === "info" ? <ViewInfo form={form} isSup={isSup} showChina={showChina} cur={cur} />
-              : <RelStub isSup={isSup} />}
+              : <RelData partner={form} />}
         </div>
 
         {editing && (
@@ -472,12 +496,63 @@ function EditForm({ form, set, isSup, showChina, cur }: { form: Partner; set: (k
   );
 }
 
-function RelStub({ isSup }: { isSup: boolean }) {
+const fmtDate = (v: unknown) => { const t = v ? String(v) : ""; if (!t) return ""; const d = new Date(t); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }); };
+const STATUS_LABEL: Record<string, string> = { draft: "ร่าง", confirmed: "ยืนยัน", ordered: "สั่งแล้ว", received: "รับแล้ว", closed: "ปิด", cancelled: "ยกเลิก", paid: "จ่ายแล้ว", sent: "ส่งแล้ว" };
+
+function RelSection({ icon, title, count, empty, rows }: { icon: string; title: string; count: number; empty: string; rows: { t: string; s?: string; r?: string }[] }) {
   return (
-    <div className="text-center py-10 text-slate-400 text-[13px]">
-      <div className="text-3xl mb-2">{isSup ? "📦" : "🧾"}</div>
-      {isSup ? "รายการวัตถุดิบที่รับซื้อ + ใบสั่งซื้อ (PO)" : "ออเดอร์ขาย + ใบวางบิล"}
-      <div className="text-[12px] mt-1 text-slate-300">จะเชื่อมข้อมูลจริงในเฟสถัดไป</div>
+    <section className="mb-5">
+      <Lab>{icon} {title} {count > 0 && <span className="text-slate-300 tabular-nums">({count})</span>}</Lab>
+      {rows.length === 0 ? (
+        <div className="text-[12.5px] text-slate-400 px-3.5 py-2.5 rounded-[10px] bg-slate-50 border border-slate-100">{empty}</div>
+      ) : (
+        <div className="bg-slate-50 border border-slate-100 rounded-[10px] px-3.5">
+          {rows.map((it, i) => (
+            <div key={i} className="flex items-center gap-3 py-2.5 border-b border-slate-100 last:border-0">
+              <div className="w-8 h-8 rounded-lg flex-none flex items-center justify-center text-[14px] bg-white border border-slate-100">{icon}</div>
+              <div className="min-w-0"><div className="text-[13px] font-semibold truncate">{it.t}</div>{it.s && <div className="text-[11.5px] text-slate-400">{it.s}</div>}</div>
+              {it.r && <div className="ml-auto text-[12.5px] font-bold text-slate-600 shrink-0 tabular-nums">{it.r}</div>}
+            </div>
+          ))}
+          {count > rows.length && <div className="text-[11px] text-slate-400 py-2 text-center">แสดง {rows.length} จาก {count}</div>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RelData({ partner }: { partner: Partner }) {
+  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true; setLoading(true);
+    apiFetch(`/api/partners/${partner.id}/related`).then((r) => r.json()).then((j) => { if (alive) setData(j); }).catch(() => {}).finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [partner.id]);
+
+  if (loading) return <div className="py-10 text-center text-slate-400 text-[13px]"><Spinner /> กำลังโหลดรายการที่เกี่ยว…</div>;
+  if (!data) return <div className="py-10 text-center text-slate-400 text-[13px]">โหลดไม่สำเร็จ</div>;
+
+  const counts = (data.counts ?? {}) as Record<string, number>;
+  const st = (v: unknown) => { const k = String(v ?? "").toLowerCase(); return STATUS_LABEL[k] ?? (v ? String(v) : ""); };
+  const arr = (k: string) => (Array.isArray(data[k]) ? data[k] as Record<string, unknown>[] : []);
+
+  return (
+    <div>
+      {data.is_supplier ? (
+        <>
+          <RelSection icon="📦" title="วัตถุดิบที่รับซื้อ" count={counts.materials ?? 0} empty="ยังไม่มีวัตถุดิบผูกกับร้านนี้"
+            rows={arr("materials").map((m) => ({ t: String(m.sku_code), s: m.is_default ? "ค่าเริ่มต้น" : "" }))} />
+          <RelSection icon="🛒" title="ใบสั่งซื้อ (PO)" count={counts.purchase_orders ?? 0} empty="ยังไม่มีใบสั่งซื้อ"
+            rows={arr("purchase_orders").map((o) => ({ t: String(o.po_no ?? "PO"), s: [fmtDate(o.order_date), st(o.status)].filter(Boolean).join(" · "), r: money(o.grand_total, "THB") }))} />
+          <RelSection icon="🧾" title="บิลจีน" count={counts.china_bills ?? 0} empty="ยังไม่มีบิลจีน"
+            rows={arr("china_bills").map((c) => ({ t: "บิลจีน", s: [fmtDate(c.created_at), st(c.status)].filter(Boolean).join(" · ") }))} />
+        </>
+      ) : null}
+      {data.is_customer ? (
+        <RelSection icon="📄" title="ใบเสนอราคา" count={counts.offer_sheets ?? 0} empty="ยังไม่มีใบเสนอราคา"
+          rows={arr("offer_sheets").map((o) => ({ t: String(o.title || "ใบเสนอราคา"), s: [fmtDate(o.created_at), st(o.status)].filter(Boolean).join(" · ") }))} />
+      ) : null}
     </div>
   );
 }
