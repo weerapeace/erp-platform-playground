@@ -14,6 +14,7 @@ import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { HelpTabsButton } from "@/components/help-tabs";
 import { StorageCard } from "./storage-card";
+import { HelpGuideInline } from "@/components/help-guides";
 import { useAuth } from "@/components/auth";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { supabaseBrowser } from "@/lib/supabase-browser";
@@ -322,6 +323,12 @@ export function AssetLibrary() {
                 <li><b>{t("ลบ = ลงถังขยะ กู้คืนได้ 30 วัน", "Delete = trash, restorable for 30 days")}</b> — {t("ไฟล์ที่ยังถูกใช้อยู่ (ผูกกับสินค้า/งาน) จะลบไม่ได้ ระบบจะข้ามให้ · ดูของในถังได้ที่ปุ่ม 🗑 ถังขยะ มุมขวาบน", "Files still in use (linked to a product/task) are skipped · see the 🗑 Trash button at the top right")}</li>
                 <li><b>{t("ชนิดไฟล์ที่รับ", "Accepted types")}</b> — {t("รูปภาพ · PDF · ไฟล์ออกแบบ · วิดีโอ", "Images · PDF · design files · video")}</li>
               </ul>
+              ) },
+              // แท็บนี้ดึงเนื้อหาจากคู่มือในฐานข้อมูล → แอดมินกด "แก้เนื้อหาส่วนนี้" แก้เองได้ ไม่ต้องแก้โค้ด
+              { key: "flow", label: `🔀 ${t("Flow รูป & งาน", "Image & work flow")}`, content: (
+                <HelpGuideInline guideKey="asset-flow" newIcon="🔀"
+                  newTitle={t("Flow รูปและงาน", "Image & work flow")}
+                  newDescription={t("รูปเดินทางยังไงตั้งแต่ถ่าย/ออกแบบ จนขึ้นสินค้าและใช้งานจริง", "How an image travels from shoot/design to product and real use")} />
               ) },
             ]} />
           </h1>

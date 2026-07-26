@@ -142,6 +142,60 @@ export function HelpGuideModal({ guideKey, guideId, onClose }: { guideKey?: stri
   );
 }
 
+// ── คู่มือแบบ "ฝังในที่อื่น" (เช่นเป็นแท็บใน HelpTabsButton) — อ่าน + แอดมินแก้/สร้างได้ในตัว ──
+// ใช้: <HelpGuideInline guideKey="asset-flow" newTitle="Flow รูปและงาน" newIcon="🔀" />
+export function HelpGuideInline({ guideKey, newTitle, newIcon, newDescription }: {
+  guideKey: string;
+  newTitle?: string;        // ชื่อที่จะใช้ตอนกด "สร้างคู่มือ" (ถ้ายังไม่มี)
+  newIcon?: string;
+  newDescription?: string;
+}) {
+  const { can } = useAuth();
+  const toast = useToast();
+  const canEdit = can("assets.manage" as Parameters<typeof can>[0]);
+  const [guide, setGuide] = useState<HelpGuide | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const j = await (await apiFetch(`/api/help-guides?key=${encodeURIComponent(guideKey)}`)).json();
+      setGuide(((j.data ?? []) as HelpGuide[])[0] ?? null);
+    } catch { setGuide(null); } finally { setLoading(false); }
+  }, [guideKey]);
+  useEffect(() => { void load(); }, [load]);
+
+  const create = async () => {
+    setCreating(true);
+    try {
+      const j = await (await apiFetch("/api/help-guides", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guide_key: guideKey, title: newTitle || guideKey, icon: newIcon ?? "", description: newDescription ?? "" }) })).json();
+      if (j.error) throw new Error(j.error);
+      await load(); setEditing(true);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างคู่มือไม่สำเร็จ"); } finally { setCreating(false); }
+  };
+
+  if (loading) return <p className="text-[13px] text-slate-400 py-6 text-center">กำลังโหลด…</p>;
+  if (!guide) return (
+    <div className="py-6 text-center">
+      <p className="text-[13px] text-slate-400">ยังไม่มีเนื้อหาส่วนนี้</p>
+      {canEdit && <button type="button" disabled={creating} onClick={create} className="mt-2 h-8 px-3 text-[12px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50">＋ สร้างคู่มือนี้</button>}
+    </div>
+  );
+  return (
+    <div>
+      {editing
+        ? <GuideEditor guide={guide} onSaved={() => { setEditing(false); void load(); }} onCancel={() => setEditing(false)} />
+        : (<>
+            <GuideReader guide={guide} />
+            {canEdit && <button type="button" onClick={() => setEditing(true)} className="mt-3 text-[12px] text-indigo-600 hover:underline">✏️ แก้เนื้อหาส่วนนี้</button>}
+          </>)}
+    </div>
+  );
+}
+
 // ── ปุ่มเล็ก "❓ วิธีใช้งาน" (วางตรงจุดที่เกี่ยวข้อง) ──
 export function HelpButton({ guideKey, label = "วิธีใช้งาน", className }: { guideKey: string; label?: string; className?: string }) {
   const [open, setOpen] = useState(false);
