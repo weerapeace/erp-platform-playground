@@ -81,6 +81,14 @@ const fmtBaht = (v: unknown) => {
 const peekBtn = "inline-flex h-8 items-center rounded-lg border px-2.5 text-xs font-medium whitespace-nowrap transition";
 const contractBtn = `${peekBtn} border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100`;
 const recurringBtn = `${peekBtn} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`;
+const profileBtn = `${peekBtn} border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100`;
+
+// ปุ่มเปิด "หน้าประวัติพนักงาน" (หน้าเต็ม แบบดูง่าย/ลงง่าย) — ใช้ <a> ธรรมดาเพราะอยู่ในเซลล์ตาราง
+const ProfileLink = ({ id }: { id: string }) => (
+  <a href={`/payroll/employees/${id}`} onClick={(e) => e.stopPropagation()} title="เปิดหน้าประวัติพนักงาน" className={profileBtn}>
+    👤 ประวัติ
+  </a>
+);
 
 // ของพิเศษทั้งหมดของหน้าพนักงาน — registry mode merge ตาม field key (ไม่หาย)
 const employeeCellRenderers: NonNullable<MasterCRUDConfig["cellRenderers"]> = {
@@ -130,6 +138,7 @@ const employeeCellRenderers: NonNullable<MasterCRUDConfig["cellRenderers"]> = {
     const id = String(v); const code = String(row?.employee_code ?? ""); const name = String(row?.full_name ?? "");
     return (
       <span className="flex gap-1.5 flex-wrap items-center">
+        <ProfileLink id={id} />
         <ContractPeekCell employeeId={id} employeeCode={code} employeeName={name} />
         <RecordPeekCell label="🔁 ค่าประจำ" title="รายการประจำ" employeeId={id} employeeCode={code} employeeName={name}
           apiPath="/api/payroll/view/recurring" empty="ไม่มีรายการประจำ" renderRow={peekRecurring} />
@@ -154,15 +163,24 @@ const CONFIG: MasterCRUDConfig = {
   activeField: "active",
   // ปุ่มดาวน์โหลด/พิมพ์ "ใบกรอกประวัติพนักงาน" (ฟอร์มเปล่า 3 ภาษา ไทย/อังกฤษ/พม่า)
   headerActions: () => (
-    // เปิดด้วย window.open (สคริปต์) เพื่อให้ปุ่ม "ปิด" ในหน้าพิมพ์ปิดแท็บได้จริง
-    <button
-      type="button"
-      onClick={() => window.open("/print/employee-form", "_blank")}
-      title="ดาวน์โหลด/พิมพ์ ใบกรอกประวัติพนักงาน (ไทย/English/พม่า)"
-      className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap"
-    >
-      📄 ฟอร์มกรอกประวัติ
-    </button>
+    <span className="flex items-center gap-2">
+      <a
+        href="/payroll/employees/photos"
+        title="อัปโหลดรูปพนักงานหลายคนพร้อมกัน (ลากไฟล์เข้ามาแล้วจับคู่)"
+        className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap"
+      >
+        📸 อัปโหลดรูป (ยกชุด)
+      </a>
+      {/* เปิดด้วย window.open (สคริปต์) เพื่อให้ปุ่ม "ปิด" ในหน้าพิมพ์ปิดแท็บได้จริง */}
+      <button
+        type="button"
+        onClick={() => window.open("/print/employee-form", "_blank")}
+        title="ดาวน์โหลด/พิมพ์ ใบกรอกประวัติพนักงาน (ไทย/English/พม่า)"
+        className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap"
+      >
+        📄 ฟอร์มกรอกประวัติ
+      </button>
+    </span>
   ),
   exportEntityType: "payroll_employee",
   searchKeys:  ["employee_code", "first_name", "last_name", "nickname", "full_name", "phone", "scanner_employee_code"],
@@ -249,6 +267,7 @@ const CONFIG: MasterCRUDConfig = {
         const id = String(v); const code = String(row?.employee_code ?? ""); const name = String(row?.full_name ?? "");
         return (
         <span className="flex gap-1.5 flex-wrap items-center">
+          <ProfileLink id={id} />
           <ContractPeekCell employeeId={id} employeeCode={code} employeeName={name} />
           <RecordPeekCell label="🔁 ค่าประจำ" title="รายการประจำ" employeeId={id} employeeCode={code} employeeName={name}
             apiPath="/api/payroll/view/recurring" empty="ไม่มีรายการประจำ" renderRow={peekRecurring} />

@@ -36,9 +36,12 @@ const WRITABLE = new Set([
   // ธนาคาร (registry มีฟิลด์อยู่แล้ว แต่เดิมไม่อยู่ใน WRITABLE → กรอกแล้วไม่เซฟ)
   "bank_name", "bank_account_no", "bank_account_name", "bank_branch",
   // หัวหน้า + ทักษะรายคน (text[] ของ erp_lookups employee_skill)
-  "supervisor_name", "skills",
+  // supervisor_id = FK พนักงาน (เลือกจากปุ่ม "หัวหน้าของคนนี้" ในผัง/หน้าประวัติ)
+  "supervisor_name", "supervisor_id", "skills",
   // ตำแหน่ง/สังกัด (relation picker → เก็บ FK id ตรง)
   "position_id", "cost_center_id", "department_id",
+  // รูปโปรไฟล์ (R2 key จาก ImageInput ของกลาง) — ใช้โชว์บนการ์ดในผังพนักงาน
+  "profile_photo_key",
 ]);
 
 async function deptMap(): Promise<Record<string, string>> {
@@ -138,10 +141,13 @@ function decorate(row: Record<string, unknown>, dmap: Record<string, string>, cm
     current_contract_type:   con?.contract_type ?? "",
     current_employment_type: con?.employment_type ?? "",
     current_wage_type:       con?.wage_type ?? "",
-    bank_name:         bank?.bank ?? "",
-    bank_branch:       bank?.branch ?? "",
-    bank_account_no:   bank?.account_no ?? "",
-    bank_account_name: bank?.account_name ?? "",
+    // บัญชีธนาคาร: เอาจากตาราง employee_bank_accounts ก่อน (บัญชีหลัก)
+    // ถ้ายังไม่มีแถวในตารางนั้น ค่อย fallback มาที่คอลัมน์ในตาราง employees
+    // (ไม่งั้นกรอกช่องธนาคารในหน้าประวัติแล้วบันทึกได้ แต่จอโชว์ว่าง)
+    bank_name:         bank?.bank ?? row.bank_name ?? "",
+    bank_branch:       bank?.branch ?? row.bank_branch ?? "",
+    bank_account_no:   bank?.account_no ?? row.bank_account_no ?? "",
+    bank_account_name: bank?.account_name ?? row.bank_account_name ?? "",
     active:          row.employment_status === "active",
   };
 }

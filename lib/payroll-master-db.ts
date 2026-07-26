@@ -28,10 +28,11 @@ type EntityCfg = {
 export const PAYROLL_ENTITIES: Record<string, EntityCfg> = {
   departments: {
     table: "departments",
-    cols: "id, code, name, status, note, display_order, created_at, updated_at",
+    // manager_employee_id = หัวหน้าประจำแผนก (ตั้งจากปุ่ม ⭐ ในผังพนักงาน)
+    cols: "id, code, name, status, note, display_order, manager_employee_id, created_at, updated_at",
     search: ["code", "name"],
     statusField: "status", activeVal: "active", inactiveVal: "inactive",
-    writable: ["code", "name", "status", "note", "display_order"],
+    writable: ["code", "name", "status", "note", "display_order", "manager_employee_id"],
     required: ["name"], numeric: ["display_order"],
     defaultSort: "display_order",
   },
