@@ -13,6 +13,8 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { HelpTabsButton } from "@/components/help-tabs";
+import { StorageCard } from "./storage-card";
+import { useAuth } from "@/components/auth";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { ASSET_TYPE_LABEL, formatBytes, type AssetType } from "@/lib/assets";
@@ -50,6 +52,7 @@ const isImage = (a: { asset_type: AssetType }) => a.asset_type === "image";
 export function AssetLibrary() {
   const t = useT();
   const toast = useToast();
+  const { can } = useAuth();
   const [actor, setActor] = useState<string | null>(null);
 
   const [rows, setRows] = useState<AssetRow[]>([]);
@@ -356,6 +359,9 @@ export function AssetLibrary() {
           >{source === "artwork" ? t("🎨 เพิ่ม Artwork", "🎨 Add Artwork") : source === "print" ? t("🖨 เพิ่มงานพิมพ์", "🖨 Add print job") : t("⬆ อัปโหลด", "⬆ Upload")}</button>
         </div>
       </div>
+
+      {/* พื้นที่ที่ใช้จริงใน R2 (นับจากบัคเก็ต · แยกรายโฟลเดอร์) */}
+      {!byBrand && <div className="mb-3"><StorageCard canManage={can("assets.manage")} pushToast={(type, m) => toast[type](m)} /></div>}
 
       {/* type filter + trash toggle */}
       {!byBrand && (

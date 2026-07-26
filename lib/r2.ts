@@ -24,10 +24,14 @@ export type R2ObjectBodyLike = {
   size: number;
 } | null;
 
+// 1 หน้าของรายการไฟล์ (ใช้ไล่นับพื้นที่) — cursor = ตัวชี้หน้าถัดไป (null = หมดแล้ว)
+export type R2ListPage = { objects: { key: string; size: number }[]; cursor: string | null };
+
 export type R2BucketLike = {
   get(key: string): Promise<R2ObjectBodyLike>;
   put(key: string, value: ArrayBuffer | ReadableStream, opts?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
   delete(key: string): Promise<void>;
+  list?(opts?: { cursor?: string; limit?: number; prefix?: string }): Promise<R2ListPage>;
 };
 
 export const R2_BUCKET       = (process.env.R2_BUCKET ?? "odoo-product-images").replace(/^﻿/, "").trim();
@@ -76,7 +80,32 @@ function makeS3Bucket(bucketName: string): R2BucketLike | null {
       const res = await client.fetch(urlFor(key), { method: "DELETE" });
       if (!res.ok && res.status !== 404) throw new Error(`R2(S3) delete ${res.status}`);
     },
+    // ListObjectsV2 (ทีละ ≤1000 ไฟล์) — ใช้ไล่นับพื้นที่ที่ใช้จริง
+    async list(opts?: { cursor?: string; limit?: number; prefix?: string }): Promise<R2ListPage> {
+      const p = new URLSearchParams({ "list-type": "2", "max-keys": String(Math.min(1000, opts?.limit ?? 1000)) });
+      if (opts?.cursor) p.set("continuation-token", opts.cursor);
+      if (opts?.prefix) p.set("prefix", opts.prefix);
+      const res = await client.fetch(`${base}?${p.toString()}`, { method: "GET" });
+      if (!res.ok) throw new Error(`R2(S3) list ${res.status}`);
+      const xml = await res.text();
+      // แกะ XML แบบเบา ๆ (ไม่ดึง parser เพิ่ม): <Contents><Key>..</Key><Size>..</Size></Contents>
+      const objects: { key: string; size: number }[] = [];
+      const re = /<Contents>([\s\S]*?)<\/Contents>/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(xml))) {
+        const key = /<Key>([\s\S]*?)<\/Key>/.exec(m[1])?.[1] ?? "";
+        const size = Number(/<Size>(\d+)<\/Size>/.exec(m[1])?.[1] ?? 0);
+        if (key) objects.push({ key: decodeXml(key), size });
+      }
+      const truncated = /<IsTruncated>true<\/IsTruncated>/.test(xml);
+      const next = /<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/.exec(xml)?.[1] ?? null;
+      return { objects, cursor: truncated ? (next ? decodeXml(next) : null) : null };
+    },
   };
+}
+
+function decodeXml(s: string): string {
+  return s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 }
 
 /**
@@ -104,6 +133,21 @@ export async function getR2Binding(): Promise<R2BucketLike | null> {
 /** R2 ถูกตั้งค่าพร้อมใช้ไหม (มี binding) */
 export async function isR2Configured(): Promise<boolean> {
   return (await getR2Binding()) !== null;
+}
+
+/**
+ * ไล่รายชื่อไฟล์ใน R2 ทีละหน้า (≤1000) — คืนรูปแบบเดียวกันทั้ง S3 (Vercel) และ binding (Cloudflare)
+ * ใช้คำนวณ "พื้นที่ที่ใช้ไป" · คืน null ถ้า runtime นี้ list ไม่ได้
+ */
+export async function r2ListObjects(bucket: R2BucketLike, opts?: { cursor?: string; limit?: number; prefix?: string }): Promise<R2ListPage | null> {
+  const anyB = bucket as R2BucketLike & { list?: (o?: unknown) => Promise<unknown> };
+  if (typeof anyB.list !== "function") return null;
+  const raw = await anyB.list({ cursor: opts?.cursor, limit: opts?.limit ?? 1000, prefix: opts?.prefix }) as
+    { objects?: { key: string; size?: number }[]; cursor?: string | null; truncated?: boolean };
+  const objects = (raw?.objects ?? []).map((o) => ({ key: o.key, size: Number(o.size ?? 0) }));
+  // S3 adapter คืน cursor=null เมื่อหมด · binding CF ใช้ truncated บอก
+  const cursor = raw?.truncated === false ? null : (raw?.cursor ?? null);
+  return { objects, cursor };
 }
 
 /** อัปโหลดไฟล์ขึ้น R2 (ผ่าน binding) */

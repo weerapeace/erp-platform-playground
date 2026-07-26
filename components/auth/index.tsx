@@ -20,6 +20,7 @@ export type Permission =
   | "approval.view" | "admin.approval_rules"
   | "notifications.view"
   | "goals.view" | "goals.edit"
+  | "assets.view" | "assets.upload" | "assets.edit" | "assets.delete" | "assets.manage"
   | "saved_views.share" | "admin.saved_views"
   | "workflow.view" | "admin.workflow"
   | "reports.view" | "admin.reports"
