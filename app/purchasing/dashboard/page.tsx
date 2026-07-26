@@ -14,6 +14,7 @@ import { SortTh, sortRows, type SortState } from "@/components/sort-th";
 import { SearchableSelect } from "@/components/searchable-select";
 import { PurchasingCalendarBoard, thDate } from "@/components/purchasing-calendar-board";
 import { HoverImage } from "@/components/hover-image";
+import { SkuSupplierList } from "@/components/sku-supplier-list";
 import { apiFetch } from "@/lib/api";
 import type { DrillRow } from "@/app/api/purchasing/dashboard/list/route";
 import type { ChinaBillOption } from "@/app/api/purchasing/china-bills/route";
@@ -187,11 +188,12 @@ export default function PurchasingDashboardPage() {
                     <div className="text-lg font-semibold text-rose-800 tabular-nums">{baht(d.summary.unpaid_thb)}</div>
                     <div className="text-[10px] text-rose-600">{d.summary.unpaid_count} ใบ</div>
                   </button>
-                  <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2">
-                    <div className="text-[11px] text-blue-700">📦 รับเข้าแล้ว</div>
+                  <button type="button" onClick={() => toggleDrill({ type: "received" })}
+                    className={`text-left rounded-lg border px-3 py-2 transition-colors ${drill?.type === "received" ? "border-blue-400 ring-2 ring-blue-200 bg-blue-50" : "border-blue-100 bg-blue-50/60 hover:bg-blue-50"}`}>
+                    <div className="text-[11px] text-blue-700 flex items-center gap-1">📦 รับเข้าแล้ว <span className="ml-auto text-[9px] text-blue-400">กดดู</span></div>
                     <div className="text-lg font-semibold text-blue-800 tabular-nums">{d.summary.received_lines}</div>
                     <div className="text-[10px] text-blue-600">รายการสินค้า</div>
-                  </div>
+                  </button>
                   <button type="button" onClick={() => toggleDrill({ type: "pending_receive" })}
                     className={`text-left rounded-lg border px-3 py-2 transition-colors ${drill?.type === "pending_receive" ? "border-amber-400 ring-2 ring-amber-200 bg-amber-50" : "border-amber-100 bg-amber-50/60 hover:bg-amber-50"}`}>
                     <div className="text-[11px] text-amber-700 flex items-center gap-1">🚚 ยังไม่รับเข้า <span className="ml-auto text-[9px] text-amber-400">กดดู</span></div>
@@ -361,18 +363,18 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
   const [stores, setStores] = useState<string[]>([]);               // รายชื่อร้าน (pickup)
   const open = drill !== null;
   const isWaiting = drill?.type === "waiting";
-  const isReceive = drill?.type === "pending_receive";
+  const isReceive = drill?.type === "pending_receive" || drill?.type === "received";
   const isRich = isWaiting || isReceive;
   const isUnpaid = drill?.type === "unpaid";
   const isPaid = drill?.type === "paid";
-  const canCalendar = isReceive || isUnpaid;   // 2 กล่องนี้มีมุมมองปฏิทิน (ของเข้า / จ่ายเงิน)
+  const canCalendar = drill?.type === "pending_receive" || isUnpaid;   // ปฏิทิน: ของเข้า (ค้างรับ) / จ่ายเงิน
   const fixedSeller = drill?.type === "supplier" ? (drill.seller ?? "") : "";
 
   // เปิดแผงใหม่ = รีเซ็ตตัวกรอง · มุมมองเริ่มต้น: การ์ด (กล่องที่มีข้อมูลเต็ม) / รายการ (กล่องอื่น เช่นรอจ่าย)
   useEffect(() => {
     if (!open) return;
     setQ(""); setSeller(""); setGrouped(false); setSort(null); setPage(0); setData(null); setOpenOrder(null); setDetail(null);
-    setView(drill?.type === "waiting" || drill?.type === "pending_receive" ? "card" : "list");
+    setView(drill?.type === "waiting" || drill?.type === "pending_receive" || drill?.type === "received" ? "card" : "list");
   }, [open, drill?.type, drill?.seller]);
   // เลื่อนหน้าจอมาที่แผงเมื่อเปิด/สลับการ์ด (โดยเฉพาะเวลากดจากการ์ดด้านล่าง)
   useEffect(() => { if (open) panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }, [open, drill?.type, drill?.seller]);
@@ -1026,6 +1028,13 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
             </div>
           </div>
         </div>
+
+        {/* ร้านที่จำหน่ายทั้งหมดของสินค้านี้ — ตารางกลางตัวเดียวกับหน้า SKU (เพิ่ม/แก้ที่นี่ = เห็นทุกที่) */}
+        {r.sku_id && (
+          <div className="mt-3">
+            <SkuSupplierList skuId={r.sku_id} defaultOpen={false} />
+          </div>
+        )}
 
         {isReceive && (
           <div className="text-right">

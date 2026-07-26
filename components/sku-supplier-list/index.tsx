@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { SupplierWizard } from "@/components/supplier-wizard";
 import { SupplierPicker } from "@/components/supplier-picker";
+import { UomPicker } from "@/components/uom-picker";
 
 export type SkuSupplierRow = {
   id: string; sku_id: string | null; partner_id: string | null; partner_name: string;
@@ -65,6 +66,7 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
   const [newUom, setNewUom] = useState("");     // หน่วยซื้อ (EN)
   const [newLink, setNewLink] = useState("");   // ลิงก์สินค้าของร้าน (taobao ฯลฯ)
   const [newTaobao, setNewTaobao] = useState(false);   // ติ๊ก = เป็นร้าน taobao (ถึงจะโชว์ช่องลิงก์)
+  const [taobaoOn, setTaobaoOn] = useState<Set<string>>(new Set());   // แถวที่ติ๊ก taobao ไว้ (ยังไม่ได้ใส่ลิงก์)
   // ข้อมูลซื้อเดิมบน SKU (ยังไม่ได้แปลงเป็นร้าน) — ชวนนำเข้าเป็นร้านแรก
   const [legacy, setLegacy] = useState<{ price: number | null; currency: string; purchase_link: string | null; purchase_uom_en: string | null } | null>(null);
 
@@ -215,7 +217,15 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
               <input defaultValue={r.supplier_sku ?? ""} disabled={busy}
                 onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (r.supplier_sku || null)) void patchRow(r.id, { supplier_sku: v }); }}
                 className="h-7 w-36 px-2 text-sm border border-slate-300 rounded-md" placeholder="—" title="รหัสสินค้าของร้านนี้ (ใช้บนใบ PO ร้านจีน)" />
-              {r.purchase_link ? (
+              {/* ร้านออนไลน์: ติ๊ก 🛒 taobao ก่อน ถึงจะมีช่อง/ปุ่มลิงก์ (ร้านทั่วไปไม่ต้องรกตา) */}
+              <label className="inline-flex items-center gap-1 text-[11px] text-slate-500 shrink-0" title="ร้านออนไลน์ (taobao/1688) → ใส่ลิงก์สินค้าได้">
+                <input type="checkbox" checked={!!r.purchase_link || taobaoOn.has(r.id)} disabled={busy}
+                  onChange={(e) => {
+                    setTaobaoOn((s) => { const n = new Set(s); if (e.target.checked) n.add(r.id); else n.delete(r.id); return n; });
+                    if (!e.target.checked && r.purchase_link) void patchRow(r.id, { purchase_link: null });   // ปิด = ล้างลิงก์
+                  }} /> 🛒 taobao
+              </label>
+              {(!!r.purchase_link || taobaoOn.has(r.id)) && (r.purchase_link ? (
                 <span className="inline-flex items-center gap-0.5">
                   <a href={r.purchase_link} target="_blank" rel="noreferrer" title={r.purchase_link}
                     className={`h-7 px-2 inline-flex items-center gap-1 text-xs font-medium rounded-md border ${isTaobao(r.purchase_link) ? "border-orange-300 text-orange-600 bg-orange-50 hover:bg-orange-100" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
@@ -226,12 +236,13 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
                 </span>
               ) : (
                 <button type="button" onClick={() => promptLink(r)} disabled={busy} title="ใส่ลิงก์สินค้าของร้าน (taobao ฯลฯ)"
-                  className="h-7 px-2 inline-flex items-center gap-1 text-xs text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-orange-300 hover:text-orange-500">🔗 ใส่ลิงก์ taobao</button>
-              )}
+                  className="h-7 px-2 inline-flex items-center gap-1 text-xs text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-orange-300 hover:text-orange-500">🔗 วางลิงก์</button>
+              ))}
               <span className="text-xs text-slate-500 shrink-0 ml-1">หน่วยซื้อ</span>
-              <input defaultValue={r.purchase_uom_en ?? ""} disabled={busy}
-                onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (r.purchase_uom_en || null)) void patchRow(r.id, { purchase_uom_en: v }); }}
-                className="h-7 w-20 px-2 text-sm border border-slate-300 rounded-md" placeholder="pcs" title="หน่วยที่ซื้อจากร้านนี้ (ใช้บนใบ PO ร้านจีน) เช่น pcs / roll / yard" />
+              <div className="w-28">
+                <UomPicker value={r.purchase_uom_en} disabled={busy}
+                  onChange={(v) => { if (v !== (r.purchase_uom_en || null)) void patchRow(r.id, { purchase_uom_en: v }); }} />
+              </div>
             </div>
             {/* บรรทัดรอง: MOQ + leadtime + ขั้นราคา + ประวัติ */}
             <div className="flex items-center gap-3 mt-1 pl-6 text-[11px] text-slate-400 flex-wrap">
@@ -330,7 +341,7 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
           {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         <input value={newSku} onChange={(e) => setNewSku(e.target.value)} placeholder="รหัสร้าน" title="รหัสสินค้าของร้านนี้" className={inp + " w-24"} />
-        <input value={newUom} onChange={(e) => setNewUom(e.target.value)} placeholder="หน่วย" title="หน่วยซื้อ (EN) เช่น pcs / roll" className={inp + " w-20"} />
+        <div className="w-28"><UomPicker value={newUom || null} onChange={(v) => setNewUom(v ?? "")} placeholder="หน่วยซื้อ" /></div>
         {/* ติ๊ก Taobao ถึงจะมีช่องใส่ลิงก์ (ร้านทั่วไปไม่ต้องมีลิงก์ ไม่ต้องรกตา) */}
         <label className="flex items-center gap-1 text-[11px] text-slate-600 whitespace-nowrap" title="ร้านออนไลน์ (taobao/1688) → ใส่ลิงก์สินค้าได้">
           <input type="checkbox" checked={newTaobao} onChange={(e) => { setNewTaobao(e.target.checked); if (!e.target.checked) setNewLink(""); }} /> 🛒 taobao

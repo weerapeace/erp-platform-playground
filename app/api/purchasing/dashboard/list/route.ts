@@ -206,9 +206,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (type === "unpaid") {
       rows.sort((a, b) => (a.due_date ? 0 : 1) - (b.due_date ? 0 : 1) || String(a.due_date ?? "").localeCompare(String(b.due_date ?? "")));
     }
-  } else if (type === "pending_receive" || type === "supplier") {
-    title = type === "supplier" ? `ซื้อจาก ${seller || "ร้าน"}` : "รายการค้างรับเข้า";
-    link = type === "pending_receive" ? { href: "/purchasing/receive", label: "ไปหน้ารับของ" } : { href: "/purchasing/orders", label: "ไปหน้าใบสั่งซื้อ" };
+  } else if (type === "pending_receive" || type === "supplier" || type === "received") {
+    title = type === "supplier" ? `ซื้อจาก ${seller || "ร้าน"}` : type === "received" ? "รายการที่รับเข้าแล้ว" : "รายการค้างรับเข้า";
+    link = type === "supplier" ? { href: "/purchasing/orders", label: "ไปหน้าใบสั่งซื้อ" } : { href: "/purchasing/receive", label: "ไปหน้ารับของ" };
     // lines + join PO (สองคำขอ แล้วต่อใน JS — เลี่ยงพึ่ง FK ของ PostgREST)
     const [lineRes, poRes] = await Promise.all([
       admin.from("purchase_order_lines_v2").select("id, po_id, item_sku_id, item_name, qty, qty_received, uom, line_status, price_est, currency").eq("is_active", true).limit(20000),
@@ -217,9 +217,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const poById = new Map<string, Record<string, unknown>>();
     for (const p of (poRes.data ?? []) as Record<string, unknown>[]) poById.set(String(p.id), p);
     let lines = (lineRes.data ?? []) as Record<string, unknown>[];
-    if (type === "pending_receive") {
-      lines = lines.filter((l) => l.line_status !== "received" && l.line_status !== "short_closed" && Math.max(0, num(l.qty) - num(l.qty_received)) > 0);
-    }
+    const isDone = (l: Record<string, unknown>) =>
+      l.line_status === "received" || l.line_status === "short_closed" || l.line_status === "closed_short"
+      || (num(l.qty) > 0 && Math.max(0, num(l.qty) - num(l.qty_received)) === 0);
+    if (type === "pending_receive") lines = lines.filter((l) => !isDone(l));
+    else if (type === "received")   lines = lines.filter(isDone);   // รับเข้าแล้ว (ปิดบรรทัด/รับครบ)
     // ผูกข้อมูลร้านจาก PO + กรองร้านที่ปิด/ยกเลิก
     const enriched = lines.map((l) => ({ l, po: poById.get(String(l.po_id)) })).filter((x) => x.po && x.po.status !== "draft" && x.po.status !== "cancelled");
     const scoped = type === "supplier" ? enriched.filter((x) => String(x.po!.seller_name ?? "") === seller) : enriched;
@@ -244,6 +246,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           secondary: `🏪 ${x.po!.seller_name || "—"} · ${x.po!.po_no || "—"}${x.po!.order_date ? ` · ${x.po!.order_date}` : ""}`,
           right: type === "pending_receive"
             ? `รับแล้ว ${num(x.l.qty_received).toLocaleString()}/${qty.toLocaleString()} · ค้าง ${remain.toLocaleString()} ${x.l.uom || ""}`
+            : type === "received"
+            ? `✓ รับ ${num(x.l.qty_received).toLocaleString()}/${qty.toLocaleString()} ${x.l.uom || ""} · ${baht(toThb(price * qty, x.l.currency))}`
             : `${qty.toLocaleString()} ${x.l.uom || ""} · ${baht(toThb(price * qty, x.l.currency))}`,
           code: sk?.code ?? "",
           image_url: imgKey ? `/api/r2-image?key=${encodeURIComponent(imgKey)}` : null,
