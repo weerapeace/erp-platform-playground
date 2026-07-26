@@ -38,7 +38,7 @@ export function DriveFolderSettings() {
   };
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="max-w-2xl mx-auto space-y-4">
       <div>
         <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">🗂️ {t("โฟลเดอร์เก็บรูปปก (Google Drive)", "Cover image folder (Google Drive)")}</h2>
         <p className="text-sm text-slate-500 mt-1">{t("เวลาอนุมัติงาน \"เปลี่ยนปก\" ระบบจะเก็บรูปปกลงโฟลเดอร์นี้อัตโนมัติ", "Approved \"change cover\" images are saved to this folder automatically")}</p>

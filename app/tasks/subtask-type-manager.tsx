@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { useT } from "@/components/i18n";
 import { ColorInput } from "@/components/color-picker";
 import { listSubtaskTypes, updateSubtaskType, createSubtaskType, subtaskTypeHint, type SubtaskType } from "./data";
+import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 
 export function SubtaskTypeManager({ showToast: showToastProp, onChanged }: { showToast?: (m: string) => void; onChanged?: () => void }) {
   const t = useT();
@@ -61,13 +62,15 @@ export function SubtaskTypeManager({ showToast: showToastProp, onChanged }: { sh
     try { await createSubtaskType(k, l); setNewKey(""); setNewLabel(""); await load(); showToast(t("เพิ่มแล้ว", "Added")); onChanged?.(); }
     catch (e) { showToast((e as Error).message); } finally { setBusy(false); }
   };
-  // เรียง: สลับในเครื่อง + เซฟ sort_order ทั้งคู่ (ไม่ reload → ที่แก้ค้างในแถวอื่นไม่หาย)
-  const move = async (i: number, dir: -1 | 1) => {
-    const j = i + dir; if (j < 0 || j >= rows.length) return;
-    const a = rows[i], b = rows[j];
-    setRows((rs) => { const n = [...rs]; n[i] = { ...b, sort_order: a.sort_order }; n[j] = { ...a, sort_order: b.sort_order }; return n; });
-    try { await Promise.all([updateSubtaskType(a.key, { sort_order: b.sort_order }), updateSubtaskType(b.key, { sort_order: a.sort_order })]); onChanged?.(); } catch (e) { showToast((e as Error).message); }
+  // ลากจัดลำดับ (ของกลาง) — จัดในเครื่องก่อน แล้วเซฟ sort_order เฉพาะแถวที่เปลี่ยน (ไม่ reload → ที่แก้ค้างในแถวอื่นไม่หาย)
+  const reorder = async (from: number, to: number) => {
+    const next = moveItem(rows, from, to).map((r, idx) => ({ ...r, sort_order: idx }));
+    const changed = next.filter((r, idx) => rows[idx]?.key !== r.key);
+    setRows(next);
+    try { await Promise.all(changed.map((r) => updateSubtaskType(r.key, { sort_order: r.sort_order }))); onChanged?.(); }
+    catch (e) { showToast((e as Error).message); await load(); }
   };
+  const { rowProps, handleProps, rowCls } = useDragReorder(reorder);
 
   return (
     <div>
@@ -85,12 +88,9 @@ export function SubtaskTypeManager({ showToast: showToastProp, onChanged }: { sh
               const hex = isHex(r.color) ? r.color : null;
               const isDirty = dirty.has(r.key);
               return (
-                <div key={r.key} className={`border rounded-lg px-3 py-2 ${isDirty ? "border-violet-300 ring-1 ring-violet-200" : r.is_active ? "border-slate-200" : "border-slate-200 bg-slate-50 opacity-70"}`}>
+                <div key={r.key} {...rowProps(i)} className={`border rounded-lg px-3 py-2 transition-colors ${rowCls(i)} ${isDirty ? "border-violet-300 ring-1 ring-violet-200" : r.is_active ? "border-slate-200" : "border-slate-200 bg-slate-50 opacity-70"}`}>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex flex-col text-slate-300">
-                      <button onClick={() => move(i, -1)} disabled={i === 0} className="h-3 leading-none hover:text-slate-600 disabled:opacity-30">▲</button>
-                      <button onClick={() => move(i, 1)} disabled={i === rows.length - 1} className="h-3 leading-none hover:text-slate-600 disabled:opacity-30">▼</button>
-                    </div>
+                    <DragHandle {...handleProps(i)} title={t("ลากเพื่อจัดลำดับ", "Drag to reorder")} />
                     <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border shrink-0 max-w-[160px]" style={hex ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined} title={t("ตัวอย่างชิป", "Chip preview")}>
                       <span className="leading-none">{r.icon || "🧩"}</span><span className="truncate">{r.label_th}</span>
                     </span>

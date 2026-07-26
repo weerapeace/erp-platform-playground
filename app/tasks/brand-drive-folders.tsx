@@ -41,7 +41,7 @@ export function BrandDriveFolders() {
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
       <div className="px-5 py-4 border-b border-slate-100">
         <h2 className="font-semibold text-slate-800">🗂️ {t("โฟลเดอร์ Drive ต่อแบรนด์", "Drive folder per brand")}</h2>
         <p className="text-xs text-slate-400 mt-0.5">{t("ตั้งโฟลเดอร์แม่ใน Google Drive ให้แต่ละแบรนด์ — เวลากด \"สร้างโฟลเดอร์ + อัปไฟล์ขึ้น Drive\" ในงาน ระบบจะสร้างโครงโฟลเดอร์ (ตาม Parent SKU) ไว้ใต้โฟลเดอร์แม่ของแบรนด์นั้น", "Set a parent Google Drive folder for each brand — the task's \"Create Drive folder\" button builds the folder structure under that brand's parent folder")}</p>

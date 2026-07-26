@@ -25,6 +25,7 @@ import { MultiUserPicker } from "../multi-user-picker";
 import type { UserPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
+import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
@@ -85,13 +86,13 @@ export default function TaskSettingsPage() {
           : tab === "mysub" ? <MySubViewManager showToast={showToast} />
           : tab === "submit" ? <SubmitRequiredManager showToast={showToast} />
           : tab === "subtype" ? (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
               <div className="px-5 py-4 border-b border-slate-100"><h2 className="font-semibold text-slate-800">🧩 {t("ชนิดงานย่อย", "Subtask types")}</h2></div>
               <div className="p-5"><SubtaskTypeManager showToast={showToast} /></div>
             </div>
           )
           : tab === "line" ? (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
               <div className="px-5 py-4 border-b border-slate-100">
                 <h2 className="font-semibold text-slate-800">🔔 {t("แจ้งเตือนงานเข้า LINE", "LINE task notifications")}</h2>
                 <p className="text-xs text-slate-400 mt-0.5">{t("เตือนเมื่อมีงานใหม่ + งานย่อยส่งมารอตรวจ (ส่งเข้ากลุ่ม LINE) · เป็นการตั้งค่าของทั้งทีม", "Alerts on new tasks + review submissions (to a LINE group) · team-wide setting")}</p>
@@ -100,7 +101,7 @@ export default function TaskSettingsPage() {
             </div>
           )
           : tab === "drive" ? (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
               <div className="p-5"><DriveFolderSettings /></div>
             </div>
           )
@@ -220,7 +221,7 @@ function MySubViewManager({ showToast }: { showToast: (m: string) => void }) {
   const SORTS = [["priority", t("ความสำคัญ", "Priority")], ["deadline", t("กำหนดส่ง", "Deadline")], ["status", t("สถานะ", "Status")], ["none", t("ไม่เรียง", "None")]] as const;
   if (loading) return <div className="py-10 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>;
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 max-w-xl space-y-4">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 max-w-xl mx-auto space-y-4">
       <div>
         <h2 className="font-semibold text-slate-800">🧩 {t("งานย่อยของฉัน", "My subtasks")}</h2>
         <p className="text-xs text-slate-400 mt-0.5">{t('ตั้งครั้งเดียว ใช้กับทุกคน — จัดกลุ่ม + เรียงในรายการ "งานย่อยของฉัน" (คิวงาน + ภาพรวม)', 'Set once for everyone — grouping + sorting of the "My subtasks" list (queue + overview)')}</p>
@@ -293,15 +294,18 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
     } catch (e) { showToast((e as Error).message); } finally { setUploadingId(null); }
   };
   const remove = async (o: Option) => { if (!window.confirm(`${t("ลบ", "Delete")} "${o.label}" ?`)) return; try { await deleteOption(o.id); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
-  const move = async (i: number, dir: -1 | 1) => {
-    const j = i + dir; if (j < 0 || j >= opts.length) return;
-    const a = opts[i], b = opts[j];
-    try { await Promise.all([updateOption(a.id, { sort_order: b.sort_order }), updateOption(b.id, { sort_order: a.sort_order })]); await load(); }
-    catch (e) { showToast((e as Error).message); }
+  // ลากจัดลำดับ (ของกลาง) — เขียน sort_order = ตำแหน่งใหม่ เฉพาะแถวที่เปลี่ยน
+  const reorder = async (from: number, to: number) => {
+    const next = moveItem(opts, from, to);
+    setOpts(next);   // optimistic
+    const jobs = next.map((o, idx) => ({ o, idx })).filter(({ o, idx }) => o.sort_order !== idx);
+    try { await Promise.all(jobs.map(({ o, idx }) => updateOption(o.id, { sort_order: idx }))); setOpts(next.map((o, idx) => ({ ...o, sort_order: idx }))); }
+    catch (e) { showToast((e as Error).message); await load(); }
   };
+  const { rowProps, handleProps, rowCls } = useDragReorder(reorder);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-2xl">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-2xl mx-auto">
       <div className="px-5 py-4 border-b border-slate-100">
         <h2 className="font-semibold text-slate-800">{title}</h2>
         <p className="text-xs text-slate-400 mt-0.5">{kind === "platform"
@@ -327,11 +331,8 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                 const iconImg = o.icon_key ? r2ImageUrl(o.icon_key, 48) : null;
                 const hex = color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null;
                 return (
-                <div key={o.id} className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2">
-                  <div className="flex flex-col text-slate-300">
-                    <button onClick={() => move(i, -1)} disabled={i === 0} className="h-3 leading-none hover:text-slate-600 disabled:opacity-30">▲</button>
-                    <button onClick={() => move(i, 1)} disabled={i === opts.length - 1} className="h-3 leading-none hover:text-slate-600 disabled:opacity-30">▼</button>
-                  </div>
+                <div key={o.id} {...rowProps(i)} className={`flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 transition-colors ${rowCls(i)}`}>
+                  <DragHandle {...handleProps(i)} title={t("ลากเพื่อจัดลำดับ", "Drag to reorder")} />
                   {/* พรีวิวชิปจริง — รูปไอคอน > สี+emoji > slate */}
                   <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border shrink-0 max-w-[140px]" style={hex && !iconImg ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined}
                     title={t("ตัวอย่างชิป", "Chip preview")}>
@@ -382,10 +383,18 @@ function StatusManager({ showToast }: { showToast: (m: string) => void }) {
   const patch = async (id: string, p: Record<string, unknown>) => { try { await updateStatus(id, p); await load(); } catch (e) { showToast((e as Error).message); } };
   const add = async () => { if (!newLabel.trim()) return; try { await createStatus({ label: newLabel.trim(), color: newColor }); setNewLabel(""); await load(); showToast(t("เพิ่มสถานะแล้ว", "Status added")); } catch (e) { showToast((e as Error).message); } };
   const remove = async (s: Status) => { if (!window.confirm(`${t("ลบสถานะ", "Delete status")} "${s.label}" ?`)) return; try { await deleteStatus(s.id!); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
-  const move = async (i: number, dir: -1 | 1) => { const j = i + dir; if (j < 0 || j >= statuses.length) return; const a = statuses[i], b = statuses[j]; try { await Promise.all([updateStatus(a.id!, { sort_order: b.sort_order }), updateStatus(b.id!, { sort_order: a.sort_order })]); await load(); } catch (e) { showToast((e as Error).message); } };
+  // ลากจัดลำดับ (ของกลาง) — เขียน sort_order = ตำแหน่งใหม่ เฉพาะแถวที่เปลี่ยน
+  const reorder = async (from: number, to: number) => {
+    const next = moveItem(statuses, from, to);
+    setStatuses(next);   // optimistic
+    const jobs = next.map((s, idx) => ({ s, idx })).filter(({ s, idx }) => s.sort_order !== idx);
+    try { await Promise.all(jobs.map(({ s, idx }) => updateStatus(s.id!, { sort_order: idx }))); setStatuses(next.map((s, idx) => ({ ...s, sort_order: idx }))); }
+    catch (e) { showToast((e as Error).message); await load(); }
+  };
+  const { rowProps, handleProps, rowCls } = useDragReorder(reorder);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-4xl">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-4xl mx-auto">
       <div className="px-5 py-4 border-b border-slate-100">
         <h2 className="font-semibold text-slate-800">{t("สถานะงาน", "Task Statuses")}</h2>
         <p className="text-xs text-slate-400 mt-0.5">{t("เพิ่ม/แก้ชื่อ/สี/ลำดับ/ธง — Kanban·Canvas·คิว อ่านจากที่นี่ · \"ปิดงาน\"=ดูอย่างเดียว · \"ต้องอนุมัติ\"=รอตรวจ · \"เริ่มต้น\"=สถานะตอนสร้างงาน", "Add / rename / color / reorder / flags — Kanban·Canvas·Queue reads from here · \"Close task\"=read-only · \"Needs approval\"=pending review · \"Default\"=status on task creation")}</p>
@@ -399,11 +408,8 @@ function StatusManager({ showToast }: { showToast: (m: string) => void }) {
         {loading ? <div className="py-10 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div> : (
           <div className="space-y-1.5">
             {statuses.map((s, i) => (
-              <div key={s.id} className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 flex-wrap">
-                <div className="flex flex-col text-slate-300">
-                  <button onClick={() => move(i, -1)} disabled={i === 0} className="h-3 leading-none hover:text-slate-600 disabled:opacity-30">▲</button>
-                  <button onClick={() => move(i, 1)} disabled={i === statuses.length - 1} className="h-3 leading-none hover:text-slate-600 disabled:opacity-30">▼</button>
-                </div>
+              <div key={s.id} {...rowProps(i)} className={`flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 flex-wrap transition-colors ${rowCls(i)}`}>
+                <DragHandle {...handleProps(i)} title={t("ลากเพื่อจัดลำดับ", "Drag to reorder")} />
                 <span className={`h-3 w-3 rounded-full ${statusColor(s.color).dot}`} />
                 <select defaultValue={s.color} onChange={(e) => patch(s.id!, { color: e.target.value })} className="h-7 border border-slate-200 rounded-md px-1 text-xs w-24">{STATUS_COLOR_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}</select>
                 <input defaultValue={s.label} onBlur={(e) => { if (e.target.value.trim() && e.target.value !== s.label) patch(s.id!, { label: e.target.value.trim() }); }} placeholder={t("ชื่อไทย", "Thai")} className="flex-1 min-w-[110px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
@@ -448,7 +454,7 @@ function TransitionManager({ showToast }: { showToast: (m: string) => void }) {
 
   if (loading) return <div className="py-10 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>;
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
       <div className="px-5 py-4 border-b border-slate-100">
         <h2 className="font-semibold text-slate-800">{t("เส้นทางสถานะ (จากสถานะไหน → ไปไหนได้)", "Status Transitions (from which status → to which)")}</h2>
         <p className="text-xs text-slate-400 mt-0.5">{t("ชนิด \"อนุมัติ/ไม่ผ่าน/ให้แก้\" = ใช้สิทธิ์อนุมัติ (หัวหน้า) · ปุ่มเหล่านี้จะโผล่ในคิว/Kanban/หน้ารายละเอียด", "Types \"approve/reject/revise\" require approval permission (supervisor) · Buttons appear in Queue / Kanban / detail pages")}</p>
@@ -499,7 +505,7 @@ function SubmitRequiredManager({ showToast }: { showToast: (m: string) => void }
   const [overIdx, setOverIdx] = useState<number | null>(null);
   const move = (from: number, to: number) => setFields((f) => { if (!f || from === to || from < 0 || to < 0) return f; const n = [...f]; const [m] = n.splice(from, 1); n.splice(to, 0, m); return n; });
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5 max-w-2xl">
+    <div className="bg-white rounded-xl border border-slate-200 p-5 max-w-2xl mx-auto">
       <h2 className="text-lg font-semibold text-slate-800">📤 {t("ฟิลด์บังคับก่อนส่งงาน", "Required before submit")}</h2>
       <p className="text-sm text-slate-500 mt-1 mb-4">{t("เลือกฟิลด์ของ Parent SKU ที่ต้องกรอกครบก่อน (ดึงทุกฟิลด์จากทะเบียนฟิลด์กลาง) — ระบบจะใส่ * และกดส่งงานไม่ได้จนกว่าจะกรอกครบ · ลากจัดลำดับ = ลำดับที่โชว์ในป๊อปอัปตรวจงาน", "Pick Parent SKU fields that must be filled — drag to set the order shown in the review popup")}</p>
       {fields === null ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : (
@@ -564,7 +570,7 @@ function TeamManager({ showToast }: { showToast: (m: string) => void }) {
   };
   const remove = async (tm: Team) => { if (!window.confirm(`${t("ลบทีม", "Delete team")} "${tm.name}" ?`)) return; try { await deleteTeam(tm.id); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
       <div className="px-5 py-4 border-b border-slate-100">
         <h2 className="font-semibold text-slate-800">{t("ทีม", "Teams")}</h2>
         <p className="text-xs text-slate-400 mt-0.5">{t("สร้างทีม + ใส่สมาชิก → เวลาเลือกผู้รับผิดชอบ เลือก \"ทีม\" แล้วดึงสมาชิกมาใส่ได้เลย (แก้เพิ่ม/ลบรายคนต่อได้)", "Create teams + members → when assigning, pick a team to fill its members (still editable)")}</p>
