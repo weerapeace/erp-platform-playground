@@ -16,6 +16,7 @@ import { SupplierWizard } from "@/components/supplier-wizard";
 import { SupplierPicker } from "@/components/supplier-picker";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
+import { SkuShopSelect } from "@/components/sku-shop-select";
 import nextDynamic from "next/dynamic";
 import { ApproveActions, RejectedPanel, DeleteButton, BulkApproveBar } from "./approval";
 import { PieceworkFromPoModal, type PieceFromPoInit } from "../piecework-from-po-modal";
@@ -1147,8 +1148,14 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved, onApp
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย) *</label>
-          <SupplierPicker value={sellerId} suppliers={suppliers}
-            onChange={(id, name) => { setSellerId(id); setSeller(name); }} onAddNew={() => setWizardOpen(true)} />
+          <SkuShopSelect skuId={row.item_sku_id ?? null} valueId={sellerId} valueName={seller} suppliers={suppliers}
+            reloadSignal={syncCount} onAddNew={() => setWizardOpen(true)}
+            onPick={({ id, name, price: p, currency }) => {
+              setSellerId(id); setSeller(name);
+              if (p != null) setPrice(String(p));
+              if (currency) setCur(curLabel(currency));
+              setSyncCount((n) => n + 1);
+            }} />
           <button type="button" onClick={() => void pickTaobao()}
             className="mt-1.5 h-7 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100">🛒 ตั้งเป็นร้าน Taobao</button>
         </div>
@@ -1452,9 +1459,14 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
         )}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย)</label>
-          <SupplierPicker value={sellerId} suppliers={suppliers}
-            onChange={(id, name) => { setSellerId(id); setSeller(name); }} onAddNew={() => setWizardOpen(true)} />
-          {!sellerId && seller && <div className="text-[11px] text-amber-600 mt-1">ร้านปัจจุบัน: {seller} (ไม่ใช่ผู้จำหน่ายในระบบ — เลือกใหม่เพื่อเพิ่มเข้ารายการได้)</div>}
+          <SkuShopSelect skuId={row.item_sku_id ?? null} valueId={sellerId} valueName={seller} suppliers={suppliers}
+            reloadSignal={syncCount} onAddNew={() => setWizardOpen(true)}
+            onPick={({ id, name, price: p, currency }) => {
+              setSellerId(id); setSeller(name);
+              if (p != null) setPrice(String(p));
+              if (currency) setCur(curLabel(currency));
+              setSyncCount((n) => n + 1);
+            }} />
           <button type="button" onClick={() => void pickTaobao()}
             className="mt-1.5 mr-1.5 h-7 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100">🛒 ตั้งเป็นร้าน Taobao</button>
           <button type="button" onClick={() => void syncToPriceList()} disabled={!sellerId}
