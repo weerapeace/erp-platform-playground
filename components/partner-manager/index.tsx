@@ -9,6 +9,8 @@
 
 import { useState, useEffect, useMemo, useCallback, Fragment, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import nextDynamic from "next/dynamic";
+import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
@@ -19,6 +21,9 @@ import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input
 import { PurchaseLeadTimeInput } from "@/components/purchase-lead-time-input";
 import { formatCreditTerm, formatLeadTime } from "@/lib/credit-term";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
+
+// drawer รายละเอียด record ของกลาง (คลิกวัตถุดิบ → เปิด SKU ตัวจริง) — โหลดเฉพาะตอนใช้
+const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 type Partner = Record<string, unknown> & { id: string };
 type Tab = "all" | "customer" | "supplier" | "china";
@@ -33,7 +38,9 @@ const isChina = (p: Partner) => b(p, "is_supplier") && (b(p, "is_taobao") || !!s
 const AV = ["#4f46e5", "#0891b2", "#7c3aed", "#db2777", "#059669", "#d97706", "#2563eb", "#dc2626"];
 function initials(n: string) { const m = n.replace(/[^\p{L}\p{N} ]/gu, "").trim().split(/\s+/); return ((m[0]?.[0] || "") + (m.length > 1 ? m[m.length - 1][0] : (m[0]?.[1] || ""))).toUpperCase() || "?"; }
 function avColor(code: string) { let h = 0; for (const c of code) h = (h * 31 + c.charCodeAt(0)) >>> 0; return AV[h % AV.length]; }
-function money(v: unknown, cur: string) { const n = Number(v); return n > 0 ? (cur === "CNY" ? "¥" : "฿") + n.toLocaleString("th-TH") : ""; }
+// สัญลักษณ์เงิน — ข้อมูลจริงใช้ทั้ง RMB / YUAN / CNY (จีน), THB, USD
+const CUR_SYM: Record<string, string> = { CNY: "¥", RMB: "¥", YUAN: "¥", USD: "$", THB: "฿" };
+function money(v: unknown, cur: string) { const n = Number(v); return n > 0 ? (CUR_SYM[(cur || "THB").toUpperCase()] ?? "") + n.toLocaleString("th-TH") + (CUR_SYM[(cur || "").toUpperCase()] ? "" : ` ${cur}`) : ""; }
 
 // ส่งออก CSV (ฝั่ง client จากแถวที่กรองอยู่) — ใส่ BOM ให้ Excel อ่านภาษาไทยไม่เพี้ยน
 function exportCsv(rows: Partner[]) {
@@ -521,9 +528,57 @@ function RelSection({ icon, title, count, empty, rows }: { icon: string; title: 
   );
 }
 
+type Material = { id: string; sku_id: string | null; sku_code: string; sku_name: string; supplier_sku: string; price: number | null; currency: string; moq: number | null; lead_time_days: number | null; is_default: boolean };
+const MAT_PAGE = 20;
+
+// ตารางวัตถุดิบที่รับซื้อ (MiniTable ของกลาง) + ค้นหา + แบ่งหน้า (Pager ของกลาง) + คลิกดู SKU
+function MaterialsTable({ rows, total, onOpenSku }: { rows: Material[]; total: number; onOpenSku: (skuId: string) => void }) {
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(0);
+  const filtered = useMemo(() => {
+    const kw = q.trim().toLowerCase();
+    if (!kw) return rows;
+    return rows.filter((r) => [r.sku_code, r.sku_name, r.supplier_sku].join(" ").toLowerCase().includes(kw));
+  }, [rows, q]);
+  useEffect(() => { setPage(0); }, [q]);
+  const shown = filtered.slice(page * MAT_PAGE, page * MAT_PAGE + MAT_PAGE);
+
+  const cols: MiniColumn<Material>[] = [
+    { key: "code", header: "รหัส", width: "1.1fr", sortValue: (r) => r.sku_code, sortLabel: "รหัส",
+      cell: (r) => (<div className="min-w-0"><div className="font-medium text-[12.5px] truncate">{r.sku_code}</div>{r.sku_name && <div className="text-[11px] text-slate-400 truncate">{r.sku_name}</div>}</div>) },
+    // ราคา = ข้อมูลที่มีจริง (~85% ของ supplier_items) · MOQ/lead time/รหัสร้าน แทบไม่มีใครกรอก → ไม่ทำคอลัมน์เปล่า
+    { key: "price", header: "ราคา/หน่วย", align: "right", width: "6.5rem", sortValue: (r) => r.price ?? -1,
+      cell: (r) => r.price != null ? <span className="tabular-nums font-semibold text-[12.5px]">{money(r.price, r.currency)}</span> : <span className="text-slate-300">—</span> },
+    { key: "def", header: "", align: "center", width: "2.8rem",
+      cell: (r) => r.is_default ? <span title="ร้านหลักของวัตถุดิบนี้" className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600">หลัก</span> : null },
+  ];
+
+  return (
+    <section className="mb-5">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <Lab>📦 วัตถุดิบที่รับซื้อ {total > 0 && <span className="text-slate-300 tabular-nums">({total})</span>}</Lab>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหารหัส / ชื่อ / รหัสร้าน…"
+          className="ml-auto h-8 w-[190px] border border-slate-200 rounded-lg px-2.5 text-[12.5px] focus:outline-2 focus:outline-indigo-500" />
+      </div>
+      {rows.length === 0 ? (
+        <div className="text-[12.5px] text-slate-400 px-3.5 py-2.5 rounded-[10px] bg-slate-50 border border-slate-100">ยังไม่มีวัตถุดิบผูกกับร้านนี้</div>
+      ) : (
+        <>
+          <MiniTable<Material> rows={shown} columns={cols} rowKey={(r) => r.id} dense
+            onRowClick={(r) => { if (r.sku_id) onOpenSku(r.sku_id); }}
+            emptyText="ไม่พบวัตถุดิบที่ตรงคำค้น" countUnit="รายการ" />
+          {filtered.length > MAT_PAGE && <div className="mt-2"><Pager page={page} pageSize={MAT_PAGE} total={filtered.length} onPage={setPage} unitLabel="รายการ" /></div>}
+          <p className="text-[11px] text-slate-400 mt-1.5">คลิกแถวเพื่อดูรายละเอียดวัตถุดิบ (SKU){total > rows.length ? ` · โหลดมา ${rows.length} จาก ${total}` : ""}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
 function RelData({ partner }: { partner: Partner }) {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [skuId, setSkuId] = useState<string | null>(null);
   useEffect(() => {
     let alive = true; setLoading(true);
     apiFetch(`/api/partners/${partner.id}/related`).then((r) => r.json()).then((j) => { if (alive) setData(j); }).catch(() => {}).finally(() => { if (alive) setLoading(false); });
@@ -541,8 +596,7 @@ function RelData({ partner }: { partner: Partner }) {
     <div>
       {data.is_supplier ? (
         <>
-          <RelSection icon="📦" title="วัตถุดิบที่รับซื้อ" count={counts.materials ?? 0} empty="ยังไม่มีวัตถุดิบผูกกับร้านนี้"
-            rows={arr("materials").map((m) => ({ t: String(m.sku_code), s: m.is_default ? "ค่าเริ่มต้น" : "" }))} />
+          <MaterialsTable rows={(data.materials ?? []) as Material[]} total={counts.materials ?? 0} onOpenSku={setSkuId} />
           <RelSection icon="🛒" title="ใบสั่งซื้อ (PO)" count={counts.purchase_orders ?? 0} empty="ยังไม่มีใบสั่งซื้อ"
             rows={arr("purchase_orders").map((o) => ({ t: String(o.po_no ?? "PO"), s: [fmtDate(o.order_date), st(o.status)].filter(Boolean).join(" · "), r: money(o.grand_total, "THB") }))} />
           <RelSection icon="🧾" title="บิลจีน" count={counts.china_bills ?? 0} empty="ยังไม่มีบิลจีน"
@@ -553,6 +607,7 @@ function RelData({ partner }: { partner: Partner }) {
         <RelSection icon="📄" title="ใบเสนอราคา" count={counts.offer_sheets ?? 0} empty="ยังไม่มีใบเสนอราคา"
           rows={arr("offer_sheets").map((o) => ({ t: String(o.title || "ใบเสนอราคา"), s: [fmtDate(o.created_at), st(o.status)].filter(Boolean).join(" · ") }))} />
       ) : null}
+      {skuId && <MasterRecordDrawer key={skuId} moduleKey="skus-v2" recordId={skuId} onClose={() => setSkuId(null)} />}
     </div>
   );
 }
