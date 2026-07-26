@@ -48,8 +48,8 @@ const TEMPLATE: ReportTemplate = {
   </div>`,
   body_html: `
   <div class="kpi">
-    <div class="kpi-box"><div class="kpi-l">ยอดซื้อรวม</div><div class="kpi-v">฿{{total_thb}}</div><div class="kpi-s">{{po_count}} ใบ</div></div>
-    <div class="kpi-box"><div class="kpi-l">จ่ายแล้ว</div><div class="kpi-v paid">฿{{paid_thb}}</div><div class="kpi-s">{{paid_count}} ใบ</div></div>
+    <div class="kpi-box"><div class="kpi-l">ยอดซื้อรวม</div><div class="kpi-v">฿{{total_thb}}</div><div class="kpi-s">{{po_count}} ใบ · {{{trend}}}</div></div>
+    <div class="kpi-box"><div class="kpi-l">จ่ายแล้ว</div><div class="kpi-v paid">฿{{paid_thb}}</div><div class="kpi-s">{{paid_count}} ใบ{{{diff_note}}}</div></div>
     <div class="kpi-box"><div class="kpi-l">ยังไม่จ่าย</div><div class="kpi-v unpaid">฿{{unpaid_thb}}</div><div class="kpi-s">{{unpaid_count}} ใบ</div></div>
     <div class="kpi-box"><div class="kpi-l">รับเข้าแล้ว / ยังไม่รับ</div><div class="kpi-v">{{received_lines}} / {{pending_lines}}</div><div class="kpi-s">รายการสินค้า</div></div>
   </div>
@@ -90,7 +90,20 @@ function Inner() {
   const html = useMemo(() => {
     if (!rep) return "";
     const s = rep.summary;
+    // เทียบเดือนก่อน: +/-% ยอดซื้อ
+    const prevTotal = rep.prev?.total_thb ?? 0;
+    const pct = prevTotal > 0 ? Math.round(((s.total_thb - prevTotal) / prevTotal) * 100) : null;
+    const trend = rep.prev
+      ? (pct == null
+          ? `เดือนก่อน ฿${baht(prevTotal)}`
+          : `<span style="color:${pct >= 0 ? "#be123c" : "#047857"}">${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct)}%</span> จากเดือนก่อน (฿${baht(prevTotal)})`)
+      : "—";
+    // ส่วนต่าง: ยอดจ่ายจริง vs ยอดตามใบ (ของใบที่จ่ายแล้ว)
+    const diff = s.paid_thb - s.paid_invoiced_thb;
+    const diffNote = s.paid_count === 0 || Math.abs(diff) < 1 ? ""
+      : ` · <span style="color:${diff > 0 ? "#be123c" : "#047857"}">${diff > 0 ? "จ่ายเกินใบ" : "จ่ายต่ำกว่าใบ"} ฿${baht(Math.abs(diff))}</span>`;
     return buildReportHtml(TEMPLATE, {
+      trend, diff_note: diffNote,
       month_label: monthLabel(rep.month),
       printed_at: new Date().toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }),
       po_count: s.po_count, total_thb: baht(s.total_thb),

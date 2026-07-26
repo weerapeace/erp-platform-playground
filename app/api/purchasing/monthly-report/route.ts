@@ -19,14 +19,17 @@ export type MonthlyPo = {
   payment_status: string | null; paid_date: string | null; paid_amount_thb: number | null;
   lines: number; received_lines: number;
 };
+export type MonthlySummary = {
+  po_count: number; total_thb: number;
+  paid_count: number; paid_thb: number;
+  unpaid_count: number; unpaid_thb: number;
+  received_lines: number; pending_receive_lines: number;
+  paid_invoiced_thb: number;   // ยอด "ตามใบ" ของใบที่จ่ายแล้ว (ไว้เทียบกับยอดจ่ายจริง)
+};
 export type MonthlyReport = {
   month: string;
-  summary: {
-    po_count: number; total_thb: number;
-    paid_count: number; paid_thb: number;
-    unpaid_count: number; unpaid_thb: number;
-    received_lines: number; pending_receive_lines: number;
-  };
+  summary: MonthlySummary;
+  prev: { month: string; total_thb: number; po_count: number } | null;   // เดือนก่อน (ไว้เทียบ)
   by_seller: { name: string; po_count: number; thb: number }[];
   pos: MonthlyPo[];
 };
@@ -86,14 +89,30 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     };
   });
 
-  const summary = pos.reduce((a, p) => {
+  const summary: MonthlySummary = pos.reduce((a, p) => {
     a.po_count++; a.total_thb += p.amount_thb;
-    if (p.payment_status === "paid") { a.paid_count++; a.paid_thb += p.paid_amount_thb ?? p.amount_thb; }
-    else { a.unpaid_count++; a.unpaid_thb += p.amount_thb; }
+    if (p.payment_status === "paid") {
+      a.paid_count++;
+      a.paid_thb += p.paid_amount_thb ?? p.amount_thb;   // ยอดจ่ายจริง (ไม่มีก็ใช้ยอดตามใบ)
+      a.paid_invoiced_thb += p.amount_thb;                // ยอดตามใบของกลุ่มที่จ่ายแล้ว
+    } else { a.unpaid_count++; a.unpaid_thb += p.amount_thb; }
     a.received_lines += p.received_lines;
     a.pending_receive_lines += Math.max(0, p.lines - p.received_lines);
     return a;
-  }, { po_count: 0, total_thb: 0, paid_count: 0, paid_thb: 0, unpaid_count: 0, unpaid_thb: 0, received_lines: 0, pending_receive_lines: 0 });
+  }, { po_count: 0, total_thb: 0, paid_count: 0, paid_thb: 0, unpaid_count: 0, unpaid_thb: 0, received_lines: 0, pending_receive_lines: 0, paid_invoiced_thb: 0 });
+
+  // เดือนก่อน (ยอดรวม + จำนวนใบ) — ไว้เทียบว่าเดือนนี้ซื้อมากขึ้น/น้อยลง
+  const prevFrom = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 10);
+  const { data: prevData } = await admin.from("purchase_orders_v2")
+    .select("grand_total, currency, is_active")
+    .gte("order_date", prevFrom).lt("order_date", from)
+    .neq("status", "draft").neq("status", "cancelled").limit(2000);
+  const prevRows = ((prevData ?? []) as Record<string, unknown>[]).filter((p) => p.is_active !== false);
+  const prev = {
+    month: prevFrom.slice(0, 7),
+    po_count: prevRows.length,
+    total_thb: Math.round(prevRows.reduce((a, p) => a + num(p.grand_total) * (isCNY(p.currency) ? rmb : 1), 0)),
+  };
 
   const sellerMap = new Map<string, { po_count: number; thb: number }>();
   for (const p of pos) {
@@ -103,6 +122,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const by_seller = [...sellerMap.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.thb - a.thb);
 
-  const report: MonthlyReport = { month, summary, by_seller, pos };
+  const report: MonthlyReport = { month, summary, prev, by_seller, pos };
   return NextResponse.json({ data: report, error: null });
 }

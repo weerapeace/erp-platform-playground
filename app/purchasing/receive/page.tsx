@@ -254,7 +254,9 @@ export default function ReceiveGoodsPage() {
     finally { setMarking(false); }
   }, [user?.name, toast, loadPending, doneMode]);
   const savePaid = (poId: string, poNo: string, date: string) => patchPayment(poId, { payment_status: "paid", paid_date: date || null }, `มาร์คจ่ายแล้ว — ${poNo}`);
-  const unmarkPaid = (it: PendItem) => patchPayment(it.po_id, { payment_status: "unpaid", paid_date: null }, `ยกเลิกจ่าย — ${it.po_no}`);
+  // ยกเลิกจ่าย = ล้างข้อมูลการจ่ายทั้งชุด (ยอดจริง + บิลโอนเงินจีนที่ผูกไว้) ไม่งั้นค้างเป็นข้อมูลผี
+  const unmarkPaid = (it: PendItem) => patchPayment(it.po_id,
+    { payment_status: "unpaid", paid_date: null, paid_amount_thb: null, china_bill_id: null }, `ยกเลิกจ่าย — ${it.po_no}`);
 
   // เปิดบรรทัดที่ปิดแล้วกลับมา "รอรับ" (เคสปิดผิด/ของมาเพิ่ม) — ผ่าน API กลาง (audit log)
   const [reopening, setReopening] = useState(false);
