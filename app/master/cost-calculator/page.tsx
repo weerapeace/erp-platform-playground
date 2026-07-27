@@ -17,6 +17,8 @@ import { deriveCost, normScenario, DEFAULT_SCENARIO, laborModeLabel } from "@/li
 import type { CostScenario, PieceJob, MoCostMaterial } from "@/app/api/mo/[id]/cost/route";
 import type { BomComponent } from "@/app/api/bom/components/route";
 import { TrialBomEditor, trialLineCalc, emptyTrialLine, type TrialLine } from "@/components/trial-bom";
+import { r2ImageUrl } from "@/lib/r2-image";
+import type { RecentCosting } from "@/app/api/product-costings/route";
 
 
 type Inputs = {
@@ -55,6 +57,16 @@ export default function CostCalculatorPage() {
   const [craftsmen, setCraftsmen] = useState<{ id: string; name: string; department_id?: string | null }[]>([]);
   const [jobNames, setJobNames] = useState<string[]>([]);                        // ชื่องานเหมา distinct (dropdown)
   const [pullSku, setPullSku] = useState<SkuPickerValue | null>(null);           // เลือกรุ่นอื่นดึงงานเหมา
+  const [recent, setRecent] = useState<RecentCosting[] | null>(null);            // รายการที่คิดล่าสุด (โชว์ตอนยังไม่เลือกสินค้า)
+
+  // โหลดรายการล่าสุด — ตอนเปิดหน้า และหลังบันทึก (ให้เห็นของที่เพิ่งแก้)
+  const loadRecent = useCallback(async () => {
+    try {
+      const j = await apiFetch("/api/product-costings?recent=1&limit=9").then((r) => r.json());
+      setRecent((j.data ?? []) as RecentCosting[]);
+    } catch { setRecent([]); }
+  }, []);
+  useEffect(() => { void loadRecent(); }, [loadRecent]);
 
   // โหลดตัวเลือกจ่ายโต๊ะ (แผนก/ช่าง) + รายชื่องานเหมา — ครั้งเดียว
   useEffect(() => {
@@ -163,6 +175,7 @@ export default function CostCalculatorPage() {
       if (j.error) throw new Error(j.error);
       toast.success(target === "parent" ? `บันทึกต้นทุนมาตรฐาน (ทุกสี ${inputs.parent_code}) แล้ว` : `บันทึกต้นทุน SKU ${inputs.product_sku} แล้ว`);
       if (sku?.code) void load(sku.code);
+      void loadRecent();   // ให้ลิสต์ "คิดล่าสุด" เห็นตัวที่เพิ่งบันทึก
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
   };
@@ -229,6 +242,54 @@ export default function CostCalculatorPage() {
         </div>
 
         {loading && <div className="text-center text-slate-400 py-8 text-sm">กำลังคิดต้นทุน…</div>}
+
+        {/* ยังไม่เลือกสินค้า → โชว์รายการที่คิดล่าสุด (กดกลับเข้าไปดู/แก้ต่อได้) */}
+        {!sku && !loading && (
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-medium text-slate-700">🕑 คิดต้นทุนล่าสุด</h2>
+              {recent && recent.length > 0 && <span className="text-[11px] text-slate-400">กดเพื่อเปิดดู/แก้ต่อ</span>}
+            </div>
+            {recent === null ? (
+              <p className="text-center py-6 text-sm text-slate-400">กำลังโหลด…</p>
+            ) : recent.length === 0 ? (
+              <p className="text-center py-6 text-sm text-slate-400">ยังไม่เคยบันทึกต้นทุนสินค้าไหน — เลือกสินค้าด้านบนเพื่อเริ่มคิด</p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {recent.map((r) => {
+                  const img = r2ImageUrl(r.image, 96);
+                  return (
+                    <button key={`${r.target_type}-${r.target_code}`} type="button"
+                      disabled={!r.open_sku}
+                      onClick={() => r.open_sku && setSku({ code: r.open_sku, name: r.name ?? "" } as SkuPickerValue)}
+                      title={r.open_sku ? "เปิดดู/แก้ต่อ" : "รุ่นนี้ยังไม่มี SKU ลูก เปิดไม่ได้"}
+                      className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50/40 text-left disabled:opacity-50 disabled:hover:bg-white">
+                      {img
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={img} alt="" className="w-10 h-10 rounded object-cover border border-slate-200 shrink-0" />
+                        : <span className="w-10 h-10 rounded bg-slate-100 border border-slate-200 shrink-0" />}
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1">
+                          <code className="text-[11px] text-slate-500 truncate">{r.target_code}</code>
+                          <span className={`text-[9px] px-1 rounded shrink-0 ${r.target_type === "parent" ? "bg-indigo-50 text-indigo-600" : "bg-slate-100 text-slate-500"}`}>
+                            {r.target_type === "parent" ? "ทั้งรุ่น" : "SKU"}
+                          </span>
+                        </span>
+                        <span className="block text-[11px] text-slate-600 truncate">{r.name ?? "—"}</span>
+                        <span className="block text-[10px] text-slate-400">
+                          ทุน ฿{fmt(r.cost_pp)} · กำไร <span className={r.profit_pp >= 0 ? "text-emerald-600" : "text-rose-600"}>฿{fmt(r.profit_pp)}</span> ({fmt(r.margin_pct)}%)
+                        </span>
+                        <span className="block text-[10px] text-slate-300 truncate">
+                          {r.created_at ? new Date(r.created_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : ""}{r.by ? ` · ${r.by}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {inputs && d && (easyMode ? (
           /* ===== 📱 โหมดง่าย (ตัวใหญ่ กดง่าย เลื่อนยาว) ===== */

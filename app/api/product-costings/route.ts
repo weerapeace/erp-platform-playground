@@ -30,9 +30,78 @@ async function currentCosting(admin: ReturnType<typeof supabaseAdmin>, type: str
   return (data as SavedCosting | null) ?? null;
 }
 
+/** 1 รายการในลิสต์ "คิดล่าสุด" (โชว์หน้าแรกของเครื่องคิดต้นทุน ตอนยังไม่เลือกสินค้า) */
+export type RecentCosting = {
+  target_type: "parent" | "sku"; target_code: string;
+  open_sku: string | null;        // SKU ที่กดแล้วเปิดได้ (parent เก็บรหัสรุ่น → หยิบลูกตัวแรกมาเปิด)
+  name: string | null; image: string | null;
+  cost_pp: number; profit_pp: number; margin_pct: number;
+  qty_basis: number; created_at: string; by: string | null;
+};
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
-  const sku = (new URL(request.url).searchParams.get("sku") ?? "").trim();
+  const sp = new URL(request.url).searchParams;
+
+  // ?recent=1 → รายการที่คิด/แก้ล่าสุด (ไว้กดกลับเข้าไปดูต่อ)
+  if (sp.get("recent")) {
+    const a = supabaseAdmin();
+    const limit = Math.min(20, Math.max(1, parseInt(sp.get("limit") ?? "8", 10)));
+    const { data } = await a.from("product_costings")
+      .select("target_type, target_code, qty_basis, summary, created_at, created_by_name")
+      .eq("is_current", true).eq("is_active", true)
+      .order("created_at", { ascending: false }).limit(limit);
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const str = (v: unknown) => (v == null ? "" : String(v));
+
+    const parentCodes = rows.filter((r) => r.target_type === "parent").map((r) => str(r.target_code));
+    const skuCodes = rows.filter((r) => r.target_type !== "parent").map((r) => str(r.target_code));
+
+    // รุ่น (parent): ชื่อ + หยิบ SKU ลูกตัวแรกไว้ให้กดเปิด + รูปของลูก
+    const pInfo = new Map<string, { name: string | null; child: string | null; img: string | null }>();
+    if (parentCodes.length) {
+      const { data: ps } = await a.from("parent_skus_v2").select("id, code, name_th").in("code", parentCodes);
+      const idByCode = new Map<string, string>();
+      for (const p of (ps ?? []) as Record<string, unknown>[]) {
+        idByCode.set(str(p.code), str(p.id));
+        pInfo.set(str(p.code), { name: (p.name_th as string) ?? null, child: null, img: null });
+      }
+      const ids = [...idByCode.values()];
+      if (ids.length) {
+        const { data: kids } = await a.from("skus_v2").select("code, parent_sku_id, cover_image_r2_key")
+          .in("parent_sku_id", ids).eq("is_active", true).order("code", { ascending: true });
+        const firstKid = new Map<string, Record<string, unknown>>();
+        for (const k of (kids ?? []) as Record<string, unknown>[]) if (!firstKid.has(str(k.parent_sku_id))) firstKid.set(str(k.parent_sku_id), k);
+        for (const [code, id] of idByCode) {
+          const k = firstKid.get(id); const cur = pInfo.get(code);
+          if (cur && k) { cur.child = str(k.code); cur.img = (k.cover_image_r2_key as string) ?? null; }
+        }
+      }
+    }
+    const sInfo = new Map<string, { name: string | null; img: string | null }>();
+    if (skuCodes.length) {
+      const { data: ss } = await a.from("skus_v2").select("code, name_th, cover_image_r2_key").in("code", skuCodes);
+      for (const x of (ss ?? []) as Record<string, unknown>[]) sInfo.set(str(x.code), { name: (x.name_th as string) ?? null, img: (x.cover_image_r2_key as string) ?? null });
+    }
+    const numOf = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
+    const out: RecentCosting[] = rows.map((r) => {
+      const code = str(r.target_code); const isParent = r.target_type === "parent";
+      const p = isParent ? pInfo.get(code) : undefined; const s2 = !isParent ? sInfo.get(code) : undefined;
+      const sum = (r.summary ?? {}) as Record<string, unknown>;
+      return {
+        target_type: isParent ? "parent" : "sku", target_code: code,
+        open_sku: isParent ? (p?.child ?? null) : code,
+        name: (isParent ? p?.name : s2?.name) ?? null,
+        image: (isParent ? p?.img : s2?.img) ?? null,
+        cost_pp: numOf(sum.cost_pp), profit_pp: numOf(sum.profit_pp), margin_pct: numOf(sum.margin_pct),
+        qty_basis: numOf(r.qty_basis) || 1, created_at: str(r.created_at),
+        by: str(r.created_by_name) || null,
+      };
+    });
+    return NextResponse.json({ data: out, error: null });
+  }
+
+  const sku = (sp.get("sku") ?? "").trim();
   if (!sku) return NextResponse.json({ error: "ระบุ sku" }, { status: 400 });
   const admin = supabaseAdmin();
 
