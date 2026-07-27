@@ -18,6 +18,7 @@ import type { CostScenario, PieceJob, MoCostMaterial } from "@/app/api/mo/[id]/c
 import type { BomComponent } from "@/app/api/bom/components/route";
 import { TrialBomEditor, trialLineCalc, emptyTrialLine, type TrialLine } from "@/components/trial-bom";
 
+
 type Inputs = {
   product_sku: string; product_name: string; parent_code: string | null; bom_code: string | null;
   sell_price: number; material_cost_pp: number; materials: MoCostMaterial[]; missing_price: number;
@@ -93,13 +94,22 @@ export default function CostCalculatorPage() {
       qty_per: c.qtyPer, unit_cost: l.unit_cost, line_pp: c.amount, has_price: l.unit_cost > 0 };
   }), [trialLines, qty]);
 
+  // ค่าตัด/พิมพ์ ที่ตั้งไว้รายบรรทัดใน BOM ทดลอง (เป็น "ค่าแรง" ไม่ใช่ค่าวัตถุดิบ)
+  const trialJobPP = useMemo(
+    () => (matMode === "trial" ? trialLines.reduce((a, l) => a + trialLineCalc(l, qty).jobPP, 0) : 0),
+    [matMode, trialLines, qty]);
+
   // effInputs: ใส่ qty + ค่าแรงกลางที่แก้ในหน้า (centralOverride) → deriveCost คิด substitutes จาก materials ให้เอง
   const eff = useMemo(() => {
     if (!inputs) return null;
     const base = { ...inputs, qty, central_rate: centralOverride ?? inputs.central_rate };
     return matMode === "trial" ? { ...base, materials: trialMaterials } : base;
   }, [inputs, qty, centralOverride, matMode, trialMaterials]);
-  const d = useMemo(() => eff ? deriveCost(eff, sc) : null, [eff, sc]);
+  // ค่าตัด/พิมพ์ → ใส่เป็น "ค่าอื่นๆ" ตอนคิดเท่านั้น (ไม่เขียนกลับเข้า sc — ค่าจริงเก็บในบรรทัดทดลองแล้ว กันบวกซ้ำตอนบันทึก)
+  const scEff = useMemo<CostScenario>(() => trialJobPP > 0
+    ? { ...sc, extras: [...(sc.extras ?? []), { label: "ค่าตัด/พิมพ์ (BOM ทดลอง)", amount: trialJobPP, per: "piece" as const }] }
+    : sc, [sc, trialJobPP]);
+  const d = useMemo(() => eff ? deriveCost(eff, scEff) : null, [eff, scEff]);
 
   // แก้ค่าแรงกลาง + บันทึกกลับเข้า BOM (bom_labor_rates craftsman กลาง) → มีผลทุกใบที่ใช้สูตรนี้
   const saveCentral = async () => {
@@ -500,7 +510,7 @@ export default function CostCalculatorPage() {
                 <div className="border-t border-slate-100 p-2">
                   <TrialBomEditor lines={trialLines} onChange={setTrialLines} lotQty={qty}
                     realBomCode={inputs.bom_code ?? null} productSku={sku?.code ?? null}
-                    productName={inputs.product_name} canEdit={canEdit}
+                    productName={inputs.product_name} canEdit={canEdit} craftsmen={craftsmen}
                     onPushed={() => { if (sku?.code) void load(sku.code); }} />
                 </div>
               )}

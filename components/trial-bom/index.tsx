@@ -21,6 +21,37 @@ import type { BomComponent } from "@/app/api/bom/components/route";
 
 const ComponentPicker = dynamic(() => import("@/components/material-picker").then((m) => m.ComponentPicker), { ssr: false });
 
+/**
+ * ค่าแรงต่อบรรทัด (ค่าตัด / ค่าพิมพ์) — คิดได้ 2 แบบ
+ *   piece = เหมาเป็น ฿/ชิ้น
+ *   daily = เลือกพนักงาน (หลายคน) → เงินเดือนรวม ÷ วันทำงาน = ค่าแรงรวม/วัน
+ *           แล้วหารด้วย "ทำได้กี่ชิ้น/วัน" = ฿/ชิ้น
+ * ⚠️ ระบบเก็บค่าจ้างเป็น "เงินเดือน" (employees.payroll_register_base_salary) ไม่มีช่องรายวัน
+ *    จึงต้องหารด้วยวันทำงาน/เดือน (ดีฟอลต์ 26 · กติกาเดียวกับโหมดจ่ายโต๊ะ)
+ */
+export type LineJob = {
+  on: boolean;
+  mode: "piece" | "daily";
+  rate: number;            // piece: ฿/ชิ้น
+  worker_ids: string[];    // daily: พนักงานที่เลือก
+  wage_month: number;      // daily: เงินเดือนรวมของคนที่เลือก (กรอกเองได้ถ้าจ้างนอกระบบ)
+  workdays: number;        // daily: วันทำงาน/เดือน
+  per_day: number;         // daily: ทำได้กี่ชิ้น/วัน
+};
+
+export const emptyJob = (): LineJob => ({ on: false, mode: "piece", rate: 0, worker_ids: [], wage_month: 0, workdays: 26, per_day: 0 });
+
+/** คิดค่าแรงของงานหนึ่ง → บาท "ต่อ 1 ชิ้นที่ตัด/พิมพ์" (ยังไม่คูณจำนวนชิ้นต่อสินค้า) */
+export function jobPerPiece(j: LineJob | undefined): number {
+  if (!j?.on) return 0;
+  if (j.mode === "piece") return Number(j.rate) || 0;
+  const wd = Number(j.workdays) || 26;
+  const perDay = Number(j.per_day) || 0;
+  if (perDay <= 0 || wd <= 0) return 0;
+  const wagePerDay = (Number(j.wage_month) || 0) / wd;
+  return Math.round((wagePerDay / perDay) * 10000) / 10000;
+}
+
 /** 1 บรรทัดวัตถุดิบทดลอง — เก็บใน product_costings.scenario.trial_lines */
 export type TrialLine = {
   key: string;
@@ -39,6 +70,9 @@ export type TrialLine = {
   allow_rotate: boolean;     // หมุนชิ้น 90° ได้ไหม
   // โหมด manual
   qty_per: number;           // ใช้กี่หน่วย ต่อสินค้า 1 ตัว
+  // ค่าแรงของบรรทัดนี้ (ไม่ใช่ค่าวัตถุดิบ) — คิดต่อ "ชิ้นที่ตัด/พิมพ์"
+  cut?: LineJob;             // ✂️ ค่าตัด
+  print?: LineJob;           // 🖨 ค่าพิมพ์
 };
 
 export const emptyTrialLine = (i = 0): TrialLine => ({
@@ -46,6 +80,7 @@ export const emptyTrialLine = (i = 0): TrialLine => ({
   sku: null, name: "", uom: "หลา", unit_cost: 0,
   mode: "nest", face_width_cm: 0, cut_width: 0, cut_length: 0, pieces: 1,
   waste_percent: 0, divisor: 90, allow_rotate: false, qty_per: 0,
+  cut: emptyJob(), print: emptyJob(),
 });
 
 const num = (v: string) => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -57,29 +92,124 @@ const baht = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH", 
  * ⚠️ โหมด nest คิดจาก "ทั้งล็อต" แล้วหารกลับ — เศษแถวจะได้ถูกใช้ต่อโดยตัวถัดไป ไม่นับเป็นขยะทุกตัว
  */
 export function trialLineCalc(l: TrialLine, lotQty: number) {
+  // ค่าแรงตัด/พิมพ์ = (฿ ต่อชิ้นที่ตัด) × จำนวนชิ้นที่ตัดต่อสินค้า 1 ตัว
+  const pcs = Math.max(0, Number(l.pieces) || 0);
+  const cutPP = Math.round(jobPerPiece(l.cut) * pcs * 10000) / 10000;
+  const printPP = Math.round(jobPerPiece(l.print) * pcs * 10000) / 10000;
+  const jobPP = Math.round((cutPP + printPP) * 10000) / 10000;
+
   if (l.mode === "manual") {
     const q = Number(l.qty_per) || 0;
-    return { qtyPer: q, amount: Math.round(q * (Number(l.unit_cost) || 0) * 10000) / 10000, nest: null as ReturnType<typeof nestCalc> };
+    return { qtyPer: q, amount: Math.round(q * (Number(l.unit_cost) || 0) * 10000) / 10000, nest: null as ReturnType<typeof nestCalc>, cutPP, printPP, jobPP };
   }
   const lot = Math.max(1, Number(lotQty) || 1);
   const nest = nestCalc({
     face_width_cm: l.face_width_cm, cut_width: l.cut_width, cut_length: l.cut_length,
-    pieces: (Number(l.pieces) || 0) * lot,               // ← ทั้งล็อต
+    pieces: pcs * lot,                                   // ← ทั้งล็อต
     waste_percent: l.waste_percent, divisor: l.divisor, allow_rotate: l.allow_rotate,
   });
-  if (!nest) return { qtyPer: 0, amount: 0, nest: null };
+  if (!nest) return { qtyPer: 0, amount: 0, nest: null, cutPP, printPP, jobPP };
   const qtyPer = Math.round((nest.qty / lot) * 10000) / 10000;   // ← หารกลับเป็นต่อชิ้น
-  return { qtyPer, amount: Math.round(qtyPer * (Number(l.unit_cost) || 0) * 10000) / 10000, nest };
+  return { qtyPer, amount: Math.round(qtyPer * (Number(l.unit_cost) || 0) * 10000) / 10000, nest, cutPP, printPP, jobPP };
 }
 
 const inp = "h-7 px-1.5 text-[12px] text-right border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500";
+
+export type Craftsman = { id: string; name: string; department_id?: string | null };
+
+/** แผงตั้งค่าแรง 1 งาน (ตัด หรือ พิมพ์) ของบรรทัดหนึ่ง */
+function JobBox({ label, icon, job, pieces, craftsmen, onChange }: {
+  label: string; icon: string; job: LineJob; pieces: number;
+  craftsmen: Craftsman[]; onChange: (p: Partial<LineJob>) => void;
+}) {
+  const toast = useToast();
+  const [loadingWage, setLoadingWage] = useState(false);
+  const perPiece = jobPerPiece(job);
+  const perProduct = Math.round(perPiece * (Number(pieces) || 0) * 10000) / 10000;
+
+  // เลือก/เอาออกพนักงาน → ดึงเงินเดือนรวมจาก server (ไม่ส่งเงินเดือนรายคนออกมา = privacy)
+  const toggleWorker = async (id: string) => {
+    const ids = job.worker_ids.includes(id) ? job.worker_ids.filter((x) => x !== id) : [...job.worker_ids, id];
+    onChange({ worker_ids: ids });
+    if (ids.length === 0) { onChange({ worker_ids: ids, wage_month: 0 }); return; }
+    setLoadingWage(true);
+    try {
+      const j = await apiFetch(`/api/mo/worker-wage?ids=${ids.join(",")}`).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      onChange({ worker_ids: ids, wage_month: Number(j.total) || 0 });
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ดึงค่าแรงไม่สำเร็จ"); }
+    finally { setLoadingWage(false); }
+  };
+
+  return (
+    <div className={`rounded-lg border px-2 py-1.5 ${job.on ? "border-violet-200 bg-violet-50/40" : "border-slate-150 bg-slate-50/40"}`}>
+      <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+        <input type="checkbox" checked={job.on} onChange={(e) => onChange({ on: e.target.checked })} className="w-3.5 h-3.5 accent-violet-600" />
+        <span className={job.on ? "text-violet-800 font-medium" : "text-slate-500"}>{icon} {label}</span>
+        {job.on && perProduct > 0 && <span className="ml-auto text-violet-700 font-semibold tabular-nums">฿{baht(perProduct)}/ชิ้นสินค้า</span>}
+      </label>
+
+      {job.on && (
+        <div className="mt-1.5 space-y-1.5">
+          <div className="flex items-center gap-1 text-[11px]">
+            {([["piece", "เหมา ฿/ชิ้น"], ["daily", "คิดจากค่าแรงรายวัน"]] as const).map(([v, lb]) => (
+              <button key={v} type="button" onClick={() => onChange({ mode: v })}
+                className={`px-2 py-0.5 rounded-full border ${job.mode === v ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>{lb}</button>
+            ))}
+          </div>
+
+          {job.mode === "piece" ? (
+            <div className="flex items-end gap-1.5 text-[11px] text-slate-400">
+              <label className="flex flex-col">฿ ต่อชิ้นที่ทำ
+                <input type="number" min={0} step="any" value={job.rate || ""} onChange={(e) => onChange({ rate: num(e.target.value) })} className={`${inp} w-[80px]`} /></label>
+              <span className="pb-1.5 text-slate-500">× {fmt(pieces)} ชิ้น = ฿{baht(perProduct)}</span>
+            </div>
+          ) : (
+            <>
+              {/* เลือกพนักงาน (หลายคน) */}
+              <div className="flex flex-wrap gap-1">
+                {craftsmen.length === 0 && <span className="text-[11px] text-slate-400">— ไม่มีรายชื่อพนักงาน —</span>}
+                {craftsmen.map((c) => {
+                  const on = job.worker_ids.includes(c.id);
+                  return (
+                    <button key={c.id} type="button" onClick={() => void toggleWorker(c.id)}
+                      className={`px-1.5 py-0.5 text-[11px] rounded-full border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>
+                      {on ? "✓ " : ""}{c.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-end gap-1.5 flex-wrap text-[11px] text-slate-400">
+                <label className="flex flex-col">ค่าแรงรวม/เดือน
+                  <input type="number" min={0} step="any" value={job.wage_month || ""} onChange={(e) => onChange({ wage_month: num(e.target.value) })} className={`${inp} w-[92px]`} /></label>
+                <label className="flex flex-col">วันทำงาน/เดือน
+                  <input type="number" min={1} step="any" value={job.workdays || ""} onChange={(e) => onChange({ workdays: num(e.target.value) })} className={`${inp} w-[64px]`} /></label>
+                <label className="flex flex-col">ทำได้กี่ชิ้น/วัน
+                  <input type="number" min={0} step="any" value={job.per_day || ""} onChange={(e) => onChange({ per_day: num(e.target.value) })} className={`${inp} w-[76px]`} /></label>
+                {loadingWage && <span className="pb-1.5">กำลังดึงค่าแรง…</span>}
+              </div>
+              {perPiece > 0 ? (
+                <p className="text-[11px] text-violet-700">
+                  ค่าแรงรวม ฿{baht((Number(job.wage_month) || 0) / (Number(job.workdays) || 26))}/วัน ÷ {fmt(job.per_day)} ชิ้น = <b>฿{baht(perPiece)}/ชิ้นที่ทำ</b>
+                  <span className="text-slate-400"> · × {fmt(pieces)} ชิ้น = ฿{baht(perProduct)} ต่อสินค้า 1 ตัว</span>
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-400">เลือกพนักงาน (หรือกรอกค่าแรงเอง) + ใส่ “ทำได้กี่ชิ้น/วัน” เพื่อคำนวณ</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // รหัส/เลขเวอร์ชันสูตร — ใช้กติกาเดียวกับ Wizard ดึงจากใบตีราคา (bom-from-cost-wizard)
 const verNum = (v: string | null) => { const m = /(\d+)/.exec(v ?? ""); return m ? Number(m[1]) : 1; };
 const verCode = (sku: string, n: number) => (n <= 1 ? `BOM-${sku}` : `BOM-${sku}_v.${n}`);
 
 export function TrialBomEditor({
-  lines, onChange, lotQty, realBomCode, productSku, productName, canEdit, onPushed,
+  lines, onChange, lotQty, realBomCode, productSku, productName, canEdit, onPushed, craftsmen = [],
 }: {
   lines: TrialLine[];
   onChange: (next: TrialLine[]) => void;
@@ -88,6 +218,8 @@ export function TrialBomEditor({
   productSku: string | null;
   productName?: string | null;
   canEdit?: boolean;
+  /** รายชื่อพนักงาน (สำหรับโหมด "คิดจากค่าแรงรายวัน") */
+  craftsmen?: Craftsman[];
   /** เรียกหลังสร้างสูตรจริงสำเร็จ (ให้หน้าแม่โหลดข้อมูลใหม่) */
   onPushed?: () => void;
 }) {
@@ -96,6 +228,7 @@ export function TrialBomEditor({
   const [pushing, setPushing] = useState(false);
   const calc = useMemo(() => lines.map((l) => trialLineCalc(l, lotQty)), [lines, lotQty]);
   const total = calc.reduce((a, c) => a + c.amount, 0);
+  const jobTotal = calc.reduce((a, c) => a + c.jobPP, 0);
 
   const patch = (key: string, p: Partial<TrialLine>) => onChange(lines.map((l) => (l.key === key ? { ...l, ...p } : l)));
   const del = (key: string) => onChange(lines.filter((l) => l.key !== key));
@@ -162,7 +295,8 @@ export function TrialBomEditor({
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-[11px] text-slate-500">
-          🧪 บรรทัดทดลอง <b className="text-slate-700">{lines.length}</b> รายการ · รวม <b className="text-slate-700">฿{baht(total)}</b>/ชิ้น
+          🧪 บรรทัดทดลอง <b className="text-slate-700">{lines.length}</b> รายการ · วัตถุดิบ <b className="text-slate-700">฿{baht(total)}</b>/ชิ้น
+          {jobTotal > 0 && <> · ค่าตัด/พิมพ์ <b className="text-violet-700">฿{baht(jobTotal)}</b>/ชิ้น</>}
         </span>
         <span className="flex items-center gap-1.5">
           {canEdit && lines.length > 0 && (
@@ -242,6 +376,24 @@ export function TrialBomEditor({
                     <label className="flex flex-col">ใช้กี่ {l.uom ?? "หน่วย"} ต่อชิ้น
                       <input type="number" min={0} step="any" value={l.qty_per || ""} onChange={(e) => patch(l.key, { qty_per: num(e.target.value) })} className={`${inp} w-[90px]`} /></label>
                     <span className="pb-1.5 text-slate-500">= ฿{baht(c.amount)}/ชิ้น</span>
+                  </div>
+                )}
+
+                {/* ค่าแรงของบรรทัดนี้ — ตัด / พิมพ์ (คิดตามจำนวนชิ้นที่ตัด) */}
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  <JobBox label="ค่าตัด" icon="✂️" job={l.cut ?? emptyJob()} pieces={l.pieces} craftsmen={craftsmen}
+                    onChange={(p) => patch(l.key, { cut: { ...(l.cut ?? emptyJob()), ...p } })} />
+                  <JobBox label="ค่าพิมพ์" icon="🖨" job={l.print ?? emptyJob()} pieces={l.pieces} craftsmen={craftsmen}
+                    onChange={(p) => patch(l.key, { print: { ...(l.print ?? emptyJob()), ...p } })} />
+                </div>
+
+                {/* สรุปบรรทัดนี้ (วัตถุดิบ + ค่าแรง) */}
+                {(c.amount > 0 || c.jobPP > 0) && (
+                  <div className="text-[11px] text-slate-500 border-t border-slate-100 pt-1 flex flex-wrap gap-x-2">
+                    <span>วัตถุดิบ ฿{baht(c.amount)}</span>
+                    {c.cutPP > 0 && <span className="text-violet-700">✂️ ตัด ฿{baht(c.cutPP)}</span>}
+                    {c.printPP > 0 && <span className="text-violet-700">🖨 พิมพ์ ฿{baht(c.printPP)}</span>}
+                    <span className="ml-auto font-semibold text-slate-700">รวมบรรทัดนี้ ฿{baht(c.amount + c.jobPP)}/ชิ้น</span>
                   </div>
                 )}
               </div>

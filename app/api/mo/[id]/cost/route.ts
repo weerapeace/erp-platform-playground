@@ -53,6 +53,12 @@ export type CostTrialLine = {
   mode: "nest" | "manual";
   face_width_cm: number; cut_width: number; cut_length: number; pieces: number;
   waste_percent: number; divisor: number; allow_rotate: boolean; qty_per: number;
+  cut?: CostLineJob; print?: CostLineJob;   // ค่าตัด/ค่าพิมพ์ของบรรทัดนี้
+};
+/** ค่าแรงต่อบรรทัด (ตัด/พิมพ์) — เหมา ฿/ชิ้น หรือคิดจากค่าแรงรายวันของคนที่เลือก */
+export type CostLineJob = {
+  on: boolean; mode: "piece" | "daily"; rate: number;
+  worker_ids: string[]; wage_month: number; workdays: number; per_day: number;
 };
 export type MoCost = {
   product_sku: string | null; product_name: string | null; qty: number;
