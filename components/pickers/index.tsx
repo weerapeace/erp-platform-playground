@@ -553,6 +553,9 @@ export function ParentSkuPicker({ value, onChange, placeholder = "เลือ�
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ParentSkuPickerValue[]>([]);
+  const PARENT_PAGE = 24;                         // โหลดทีละหน้า + ปุ่มโหลดเพิ่ม
+  const [total, setTotal] = useState(0);          // ทั้งหมดที่ตรงคำค้น (ไว้บอก + โหลดเพิ่ม)
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -564,17 +567,28 @@ export function ParentSkuPicker({ value, onChange, placeholder = "เลือ�
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const res = await apiFetch(`/api/pickers/parent-skus?${new URLSearchParams({ search: query, limit: "24" })}`);
+        const res = await apiFetch(`/api/pickers/parent-skus?${new URLSearchParams({ search: query, limit: String(PARENT_PAGE) })}`);
         const json = await res.json();
         const rows = (json.data ?? []) as Record<string, unknown>[];
-        if (active) setResults(rows.map(mapParentRow));
-      } catch { if (active) setResults([]); }
+        if (active) { setResults(rows.map(mapParentRow)); setTotal(Number(json.total ?? rows.length)); }
+      } catch { if (active) { setResults([]); setTotal(0); } }
       finally { if (active) setLoading(false); }
     }, 250);
     return () => { active = false; clearTimeout(t); };
   }, [open, query]);
 
   const select = useCallback((p: ParentSkuPickerValue) => { onChange(p); setOpen(false); setQuery(""); }, [onChange]);
+
+  // โหลดเพิ่ม (ต่อท้าย) — กันเคสค้นแล้วเจอเกินหน้าแรก เช่นพิมพ์ "WK" เจอ 40 แต่เห็นแค่หน้าละ 24
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const res = await apiFetch(`/api/pickers/parent-skus?${new URLSearchParams({ search: query, limit: String(PARENT_PAGE), offset: String(results.length) })}`);
+      const json = await res.json();
+      const rows = ((json.data ?? []) as Record<string, unknown>[]).map(mapParentRow);
+      setResults((p) => [...p, ...rows]);
+    } catch { /* ignore */ } finally { setLoadingMore(false); }
+  };
 
   // สร้าง Parent SKU ใหม่จากรหัสที่พิมพ์ (code = query) แล้วเลือกทันที
   const createNew = async () => {
@@ -625,6 +639,13 @@ export function ParentSkuPicker({ value, onChange, placeholder = "เลือ�
                   <span className="text-sm text-slate-800 truncate" title={p.name}>{p.name}</span>
                 </button>
               ))
+            )}
+            {/* เจอมากกว่าที่โชว์ → โหลดเพิ่มได้ (ไม่งั้นตัวที่อยู่ท้าย ๆ จะหาไม่เจอ) */}
+            {!loading && results.length > 0 && results.length < total && (
+              <button type="button" onClick={loadMore} disabled={loadingMore}
+                className="w-full px-3 py-2 text-xs text-blue-700 bg-blue-50/60 hover:bg-blue-50 disabled:opacity-50 border-t border-slate-100">
+                {loadingMore ? "กำลังโหลด…" : `โหลดเพิ่ม (แสดง ${results.length}/${total})`}
+              </button>
             )}
           </div>
           {showCreate && (

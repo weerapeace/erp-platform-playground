@@ -870,23 +870,35 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
 }
 
 
+const PICK_PAGE = 30;   // โหลดทีละ 30 + ปุ่มโหลดเพิ่ม (เดิมตัดที่ 30 แล้วไม่มีทางเห็นตัวที่เหลือ เช่นค้น WK เจอ 40 เห็นแค่ 30)
+
 // เลือก Parent SKU หลายอัน (ค้นหา + checkbox + รูป)
 function ParentSkuMultiPick({ selected, onChange }: { selected: ParentSkuVal[]; onChange: (v: ParentSkuVal[]) => void }) {
   const t = useT();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ParentSkuVal[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [more, setMore] = useState(false);
+  const mapRow = (r: Record<string, unknown>): ParentSkuVal => ({ id: String(r.id), code: String(r.code ?? ""), name: String(r.name ?? r.code ?? ""), image_url: r.image_key ? `/api/r2-image?key=${encodeURIComponent(String(r.image_key))}` : null });
+  const fetchPage = async (q: string, offset: number) => {
+    const res = await apiFetch(`/api/pickers/parent-skus?${new URLSearchParams({ search: q, limit: String(PICK_PAGE), offset: String(offset) })}`);
+    const j = await res.json();
+    return { rows: ((j.data ?? []) as Record<string, unknown>[]).map(mapRow), total: Number(j.total ?? 0) };
+  };
   useEffect(() => {
     let active = true; setLoading(true);
     const tmr = setTimeout(async () => {
-      try {
-        const res = await apiFetch(`/api/pickers/parent-skus?${new URLSearchParams({ search: query, limit: "30" })}`);
-        const j = await res.json(); const rows = (j.data ?? []) as Record<string, unknown>[];
-        if (active) setResults(rows.map((r) => ({ id: String(r.id), code: String(r.code ?? ""), name: String(r.name ?? r.code ?? ""), image_url: r.image_key ? `/api/r2-image?key=${encodeURIComponent(String(r.image_key))}` : null })));
-      } catch { if (active) setResults([]); } finally { if (active) setLoading(false); }
+      try { const { rows, total: tt } = await fetchPage(query, 0); if (active) { setResults(rows); setTotal(tt); } }
+      catch { if (active) { setResults([]); setTotal(0); } } finally { if (active) setLoading(false); }
     }, 250);
     return () => { active = false; clearTimeout(tmr); };
   }, [query]);
+  const loadMore = async () => {
+    setMore(true);
+    try { const { rows } = await fetchPage(query, results.length); setResults((p) => [...p, ...rows]); }
+    catch { /* ignore */ } finally { setMore(false); }
+  };
   const toggle = (s: ParentSkuVal) => onChange(selected.some((x) => x.id === s.id) ? selected.filter((x) => x.id !== s.id) : [...selected, s]);
   return (
     <div className="space-y-2">
@@ -903,7 +915,13 @@ function ParentSkuMultiPick({ selected, onChange }: { selected: ParentSkuVal[]; 
               <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
             </button>
           ); })}
+        {!loading && results.length > 0 && results.length < total && (
+          <button onClick={loadMore} disabled={more} className="w-full px-3 py-2 text-xs text-teal-700 bg-teal-50/60 hover:bg-teal-50 disabled:opacity-50">
+            {more ? t("กำลังโหลด…", "Loading…") : `${t("โหลดเพิ่ม", "Load more")} (${t("แสดง", "showing")} ${results.length}/${total})`}
+          </button>
+        )}
       </div>
+      {!loading && total > 0 && <p className="text-[11px] text-slate-400">{t("พบ", "Found")} {total} {t("รายการ", "items")}{results.length < total ? ` · ${t("แสดง", "showing")} ${results.length}` : ""}</p>}
     </div>
   );
 }
@@ -913,18 +931,28 @@ function SkuMultiPick({ selected, onChange }: { selected: SkuPickerValue[]; onCh
   const t = useT();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SkuPickerValue[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [more, setMore] = useState(false);
+  const mapRow = (r: Record<string, unknown>): SkuPickerValue => ({ id: String(r.id), code: String(r.code ?? ""), name: String(r.name ?? r.code ?? ""), color: r.color != null ? String(r.color) : null, list_price: r.list_price == null ? null : Number(r.list_price), image_key: r.image_key == null ? null : String(r.image_key), image_url: r.image_key ? `/api/r2-image?key=${encodeURIComponent(String(r.image_key))}` : null });
+  const fetchPage = async (q: string, offset: number) => {
+    const res = await apiFetch(`/api/pickers/skus?${new URLSearchParams({ search: q, limit: String(PICK_PAGE), offset: String(offset), sales_only: "false" })}`);
+    const j = await res.json();
+    return { rows: ((j.data ?? []) as Record<string, unknown>[]).map(mapRow), total: Number(j.total ?? 0) };
+  };
   useEffect(() => {
     let active = true; setLoading(true);
     const tmr = setTimeout(async () => {
-      try {
-        const res = await apiFetch(`/api/pickers/skus?${new URLSearchParams({ search: query, limit: "30", sales_only: "false" })}`);
-        const j = await res.json(); const rows = (j.data ?? []) as Record<string, unknown>[];
-        if (active) setResults(rows.map((r) => ({ id: String(r.id), code: String(r.code ?? ""), name: String(r.name ?? r.code ?? ""), color: r.color != null ? String(r.color) : null, list_price: r.list_price == null ? null : Number(r.list_price), image_key: r.image_key == null ? null : String(r.image_key), image_url: r.image_key ? `/api/r2-image?key=${encodeURIComponent(String(r.image_key))}` : null })));
-      } catch { if (active) setResults([]); } finally { if (active) setLoading(false); }
+      try { const { rows, total: tt } = await fetchPage(query, 0); if (active) { setResults(rows); setTotal(tt); } }
+      catch { if (active) { setResults([]); setTotal(0); } } finally { if (active) setLoading(false); }
     }, 250);
     return () => { active = false; clearTimeout(tmr); };
   }, [query]);
+  const loadMore = async () => {
+    setMore(true);
+    try { const { rows } = await fetchPage(query, results.length); setResults((p) => [...p, ...rows]); }
+    catch { /* ignore */ } finally { setMore(false); }
+  };
   const toggle = (s: SkuPickerValue) => onChange(selected.some((x) => x.id === s.id) ? selected.filter((x) => x.id !== s.id) : [...selected, s]);
   return (
     <div className="space-y-2">
@@ -943,7 +971,13 @@ function SkuMultiPick({ selected, onChange }: { selected: SkuPickerValue[]; onCh
               {s.list_price != null && <span className="text-xs text-slate-400 shrink-0">{Number(s.list_price).toLocaleString()}฿</span>}
             </button>
           ); })}
+        {!loading && results.length > 0 && results.length < total && (
+          <button onClick={loadMore} disabled={more} className="w-full px-3 py-2 text-xs text-violet-700 bg-violet-50/60 hover:bg-violet-50 disabled:opacity-50">
+            {more ? t("กำลังโหลด…", "Loading…") : `${t("โหลดเพิ่ม", "Load more")} (${t("แสดง", "showing")} ${results.length}/${total})`}
+          </button>
+        )}
       </div>
+      {!loading && total > 0 && <p className="text-[11px] text-slate-400">{t("พบ", "Found")} {total} {t("รายการ", "items")}{results.length < total ? ` · ${t("แสดง", "showing")} ${results.length}` : ""}</p>}
     </div>
   );
 }
