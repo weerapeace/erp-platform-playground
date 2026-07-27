@@ -499,7 +499,9 @@ export default function CostCalculatorPage() {
               {showMat && matMode === "trial" && (
                 <div className="border-t border-slate-100 p-2">
                   <TrialBomEditor lines={trialLines} onChange={setTrialLines} lotQty={qty}
-                    realBomCode={inputs.bom_code ?? null} productSku={sku?.code ?? null} />
+                    realBomCode={inputs.bom_code ?? null} productSku={sku?.code ?? null}
+                    productName={inputs.product_name} canEdit={canEdit}
+                    onPushed={() => { if (sku?.code) void load(sku.code); }} />
                 </div>
               )}
 

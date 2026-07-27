@@ -14,6 +14,9 @@
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { nestCalc, nestExplain } from "@/lib/nesting-calc";
+import { apiFetch } from "@/lib/api";
+import { useToast } from "@/components/toast";
+import { ERPModal } from "@/components/modal";
 import type { BomComponent } from "@/app/api/bom/components/route";
 
 const ComponentPicker = dynamic(() => import("@/components/material-picker").then((m) => m.ComponentPicker), { ssr: false });
@@ -71,21 +74,80 @@ export function trialLineCalc(l: TrialLine, lotQty: number) {
 
 const inp = "h-7 px-1.5 text-[12px] text-right border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500";
 
+// รหัส/เลขเวอร์ชันสูตร — ใช้กติกาเดียวกับ Wizard ดึงจากใบตีราคา (bom-from-cost-wizard)
+const verNum = (v: string | null) => { const m = /(\d+)/.exec(v ?? ""); return m ? Number(m[1]) : 1; };
+const verCode = (sku: string, n: number) => (n <= 1 ? `BOM-${sku}` : `BOM-${sku}_v.${n}`);
+
 export function TrialBomEditor({
-  lines, onChange, lotQty, realBomCode, productSku,
+  lines, onChange, lotQty, realBomCode, productSku, productName, canEdit, onPushed,
 }: {
   lines: TrialLine[];
   onChange: (next: TrialLine[]) => void;
   lotQty: number;
   realBomCode: string | null;
   productSku: string | null;
+  productName?: string | null;
+  canEdit?: boolean;
+  /** เรียกหลังสร้างสูตรจริงสำเร็จ (ให้หน้าแม่โหลดข้อมูลใหม่) */
+  onPushed?: () => void;
 }) {
+  const toast = useToast();
+  const [pushOpen, setPushOpen] = useState(false);
+  const [pushing, setPushing] = useState(false);
   const calc = useMemo(() => lines.map((l) => trialLineCalc(l, lotQty)), [lines, lotQty]);
   const total = calc.reduce((a, c) => a + c.amount, 0);
 
   const patch = (key: string, p: Partial<TrialLine>) => onChange(lines.map((l) => (l.key === key ? { ...l, ...p } : l)));
   const del = (key: string) => onChange(lines.filter((l) => l.key !== key));
   const add = () => onChange([...lines, emptyTrialLine(lines.length)]);
+
+  /**
+   * "⬆ เพิ่มเข้า BOM จริง" — สร้างสูตรใหม่จากบรรทัดทดลอง
+   * ⚠️ ตั้งใจ "สร้างเวอร์ชันใหม่เสมอ" ไม่ทับสูตรเดิม — ของเก่าไม่หาย ย้อนกลับได้
+   * ⚠️ ส่ง qty ที่คิดแบบ "วางตัดจริง" มาแล้ว + calc_mode="manual"
+   *    เพราะ BOM จริงคิดด้วย area_face (พื้นที่หาร) ถ้าปล่อยให้คิดเองตัวเลขจะต่ำกว่าที่เห็นตรงนี้
+   */
+  const pushToRealBom = async () => {
+    if (!productSku) { toast.error("ยังไม่ได้เลือกสินค้า"); return; }
+    const usable = lines.filter((l, i) => l.sku && calc[i].qtyPer > 0);
+    if (usable.length === 0) { toast.error("ยังไม่มีบรรทัดที่ใส่วัตถุดิบ+ปริมาณครบ"); return; }
+    setPushing(true);
+    try {
+      // เวอร์ชันถัดไป (กันรหัสชนของเดิม)
+      let n = 1;
+      try {
+        const vj = await apiFetch(`/api/bom/versions?product_sku=${encodeURIComponent(productSku)}`).then((r) => r.json());
+        const vs = (vj.data ?? []) as { version: string | null }[];
+        if (vs.length) n = Math.max(...vs.map((v) => verNum(v.version))) + 1;
+      } catch { /* ไม่มีเวอร์ชันเดิม → v1 */ }
+
+      const payload = {
+        bom_code: verCode(productSku, n), version: `v${n}`, status: "draft",
+        product_sku: productSku, product_name: productName ?? null,
+        note: "สร้างจาก BOM ทดลอง (เครื่องคิดต้นทุน) — ปริมาณคิดแบบวางตัดจริงตามหน้ากว้าง",
+        lines: usable.map((l, idx) => {
+          const c = calc[lines.indexOf(l)];
+          return {
+            component_sku: l.sku, component_name: l.name || l.sku,
+            qty: c.qtyPer, uom: l.uom,
+            calc_mode: "manual",                 // ล็อกปริมาณที่คิดมาแล้ว (ดูเหตุผลด้านบน)
+            pieces: l.mode === "nest" ? l.pieces : null,
+            cut_width: l.mode === "nest" ? l.cut_width : null,
+            cut_length: l.mode === "nest" ? l.cut_length : null,
+            face_width_cm: l.mode === "nest" ? l.face_width_cm : null,
+            waste_percent: l.waste_percent || null,
+            source: "trial_bom", sequence: idx + 1,
+          };
+        }),
+      };
+      const j = await apiFetch("/api/bom", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      toast.success(`สร้างสูตรจริงแล้ว: ${payload.bom_code} (${usable.length} รายการ) — สถานะ “ร่าง”`);
+      setPushOpen(false);
+      onPushed?.();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างสูตรไม่สำเร็จ"); }
+    finally { setPushing(false); }
+  };
 
   // เลือกวัสดุ → เติม ราคา/หน่วย/หน้ากว้าง/เผื่อเสีย ให้อัตโนมัติ (เหมือนตัวแก้บรรทัด BOM)
   const onPick = (key: string, c: BomComponent) => patch(key, {
@@ -102,7 +164,14 @@ export function TrialBomEditor({
         <span className="text-[11px] text-slate-500">
           🧪 บรรทัดทดลอง <b className="text-slate-700">{lines.length}</b> รายการ · รวม <b className="text-slate-700">฿{baht(total)}</b>/ชิ้น
         </span>
-        <button type="button" onClick={add} className="h-7 px-2.5 text-[12px] border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50">+ เพิ่มวัตถุดิบ</button>
+        <span className="flex items-center gap-1.5">
+          {canEdit && lines.length > 0 && (
+            <button type="button" onClick={() => setPushOpen(true)}
+              title="สร้างสูตร BOM จริงจากบรรทัดทดลองพวกนี้ (เป็นเวอร์ชันใหม่ ไม่ทับของเดิม)"
+              className="h-7 px-2.5 text-[12px] border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50">⬆ เพิ่มเข้า BOM จริง</button>
+          )}
+          <button type="button" onClick={add} className="h-7 px-2.5 text-[12px] border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50">+ เพิ่มวัตถุดิบ</button>
+        </span>
       </div>
 
       {lines.length === 0 ? (
@@ -181,13 +250,32 @@ export function TrialBomEditor({
         </div>
       )}
 
-      {realBomCode && lines.length > 0 && (
+      {lines.length > 0 && (
         <p className="text-[11px] text-slate-400">
-          💡 บรรทัดทดลองไม่แตะสูตรจริง ({realBomCode}) — ถ้าพอใจแล้วให้ไปเพิ่มที่{" "}
-          <a href={`/master/bom?open=${encodeURIComponent(productSku ?? "")}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">หน้าสูตร BOM</a>
+          💾 บรรทัดทดลองถูกเก็บพร้อมใบคิดต้นทุน — กด <b>บันทึก</b> (ขวาล่าง) แล้วเปิดสินค้านี้ครั้งหน้าจะยังอยู่
+          {realBomCode && <> · ไม่แตะสูตรจริง ({realBomCode})</>}
         </p>
       )}
 
+      {/* ยืนยันก่อนสร้างสูตรจริง — แตะข้อมูลที่ใช้ผลิต ต้องเห็นภาพก่อนกด */}
+      <ERPModal open={pushOpen} onClose={() => !pushing && setPushOpen(false)} size="sm" title="⬆ เพิ่มเข้า BOM จริง"
+        footer={<>
+          <button onClick={() => setPushOpen(false)} disabled={pushing} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+          <button onClick={() => void pushToRealBom()} disabled={pushing} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{pushing ? "กำลังสร้าง…" : "สร้างสูตรจริง"}</button>
+        </>}>
+        <div className="space-y-2.5 text-sm text-slate-600">
+          <p>สร้างสูตร BOM ของ <b className="text-slate-800">{productSku}</b> จากบรรทัดทดลอง <b className="text-emerald-700">{lines.filter((l, i) => l.sku && calc[i].qtyPer > 0).length}</b> รายการ</p>
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
+            ✅ สร้างเป็น <b>เวอร์ชันใหม่</b> สถานะ “ร่าง” — สูตรเดิมไม่ถูกทับ ย้อนกลับได้<br />
+            ✅ ปริมาณที่บันทึก = ตัวเลขที่คิดแบบ <b>วางตัดจริง</b> (ตรงกับที่เห็นตรงนี้)
+          </div>
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            ⚠️ บรรทัดจะถูกล็อกเป็น “ใส่ปริมาณเอง” ในสูตรจริง — เพราะสูตรจริงคิดผ้าแบบเอาพื้นที่หาร
+            ถ้าปล่อยให้คิดเอง ตัวเลขจะต่ำกว่าความจริง · ถ้าแก้ขนาดที่หน้า BOM ทีหลัง ต้องแก้ปริมาณเองด้วย
+          </div>
+          {!canEdit && <p className="text-rose-600 text-xs">คุณไม่มีสิทธิ์แก้สูตร</p>}
+        </div>
+      </ERPModal>
     </div>
   );
 }

@@ -45,6 +45,10 @@ export function normScenario(s: CostScenario | null | undefined): CostScenario {
     substitutes: Array.isArray(s.substitutes)
       ? s.substitutes.map((x): CostSubstitute => ({ orig_sku: String(x.orig_sku ?? ""), sub_sku: String(x.sub_sku ?? ""), sub_name: String(x.sub_name ?? ""), unit_cost: numOf(x.unit_cost) })).filter((x) => x.orig_sku && x.sub_sku)
       : [],
+    // ⚠️ "BOM ทดลอง" ต้องคงไว้ด้วย — ฟังก์ชันนี้ประกอบ object ใหม่ทีละช่อง
+    //    ลืมช่องไหน = บันทึกลง DB ได้ แต่ "เปิดกลับมาแล้วหาย" (เคยพลาดตรงนี้มาแล้ว)
+    mat_mode: s.mat_mode === "trial" ? "trial" : "real",
+    trial_lines: Array.isArray(s.trial_lines) ? s.trial_lines : [],
   };
 }
 
