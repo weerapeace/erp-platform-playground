@@ -1105,6 +1105,14 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
           <FSToggle on={field.editable===false} label="อ่านอย่างเดียว" onClick={()=>onPatch({editable:field.editable===false?true:false})} />
           <FSToggle on={!!us.count} label="📊 นับความครบ" onClick={()=>setUi("count",!us.count)} />
         </FSRow>
+        <FSRow label="แก้เร็ว">
+          <FSToggle on={!!field.inlineEditable} label="⚡ แก้ในหน้ารายละเอียด"
+            title="เปิดแล้ว: กดที่ค่าในหน้ารายละเอียดเพื่อแก้ + บันทึกทันที (ไม่ต้องกดปุ่มแก้ไข)"
+            onClick={()=>onPatch({inlineEditable:!field.inlineEditable})} />
+          <FSToggle on={!!field.bulkEditable} label="📋 แก้หลายรายการ"
+            title="เปิดแล้ว: ฟิลด์นี้จะเลือกได้ในหน้าต่าง “แก้ไขหลายรายการ” ของตาราง"
+            onClick={()=>onPatch({bulkEditable:!field.bulkEditable})} />
+        </FSRow>
       </FSGroup>
 
       <FSGroup title="ข้อความช่วย">
