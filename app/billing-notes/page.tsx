@@ -19,7 +19,7 @@ const baht = (n: number | null | undefined) =>
   "฿" + Number(n ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2 });
 
 const STATUS_LABEL: Record<string, string> = {
-  draft: "ร่าง", issued: "วางบิลแล้ว", paid: "รับชำระแล้ว", cancelled: "ยกเลิก",
+  draft: "ยังไม่วางบิล", issued: "วางบิลแล้ว", paid: "ชำระแล้ว", cancelled: "ยกเลิก",
 };
 const STATUS_STYLE: Record<string, string> = {
   draft: "bg-slate-100 text-slate-600", issued: "bg-amber-100 text-amber-700",
@@ -171,7 +171,7 @@ export default function BillingNotesPage() {
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash({ issue: "วางบิลแล้ว", pay: "รับชำระแล้ว", cancel: "ยกเลิกแล้ว", revert: "ย้อนสถานะแล้ว" }[action] ?? "อัปเดตแล้ว");
+      flash({ issue: "วางบิลแล้ว", pay: "ชำระแล้ว", cancel: "ยกเลิกแล้ว", revert: "ย้อนสถานะแล้ว" }[action] ?? "อัปเดตแล้ว");
       setDetailOpen(false);
       await fetchList();
     } catch (err) { flash(err instanceof Error ? err.message : "ผิดพลาด"); }
@@ -205,10 +205,11 @@ export default function BillingNotesPage() {
   ], []);
 
   const views = useMemo(() => [
-    { id: "all",       label: "ทั้งหมด",        filter: () => true },
-    { id: "draft",     label: "📝 ร่าง",         filter: (r: Record<string, unknown>) => r.status === "draft" },
-    { id: "issued",    label: "📤 วางบิลแล้ว",   filter: (r: Record<string, unknown>) => r.status === "issued" },
-    { id: "paid",      label: "✅ รับชำระแล้ว",  filter: (r: Record<string, unknown>) => r.status === "paid" },
+    // ทั้งหมด = ซ่อนใบที่ยกเลิก (มาตรฐานเดียวกับใบขาย/ใบส่งสินค้า)
+    { id: "all",       label: "ทั้งหมด",          filter: (r: Record<string, unknown>) => r.status !== "cancelled" },
+    { id: "draft",     label: "📝 ยังไม่วางบิล",  filter: (r: Record<string, unknown>) => r.status === "draft" },
+    { id: "issued",    label: "📤 วางบิลแล้ว",    filter: (r: Record<string, unknown>) => r.status === "issued" },
+    { id: "paid",      label: "✅ ชำระแล้ว",      filter: (r: Record<string, unknown>) => r.status === "paid" },
     { id: "cancelled", label: "❌ ยกเลิก",       filter: (r: Record<string, unknown>) => r.status === "cancelled" },
   ], []);
 
