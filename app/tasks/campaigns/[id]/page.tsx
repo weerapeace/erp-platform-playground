@@ -999,7 +999,7 @@ function BigTagPick({ entity, picked, onPick, t }: {
         </p>
       </div>
       <div className="min-h-[55vh] max-h-[70vh] overflow-y-auto px-1">
-        <SkuTagBrowser mode="pick" entity={entity} onPick={onPick} />
+        <SkuTagBrowser mode="pick" entity={entity} onPick={onPick} pickedIds={picked} />
       </div>
     </div>
   );

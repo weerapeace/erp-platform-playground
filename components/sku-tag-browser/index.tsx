@@ -124,11 +124,12 @@ function toBulkField(f: RegField): BulkEditField | null {
   return { key: col, label: f.field_label, type: "text" };
 }
 
-export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: entityProp }: {
+export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: entityProp, pickedIds }: {
   mode?: "manage" | "pick";
   onPickSku?: (skuId: string) => void;
   onPick?: (row: { id: string; code?: string; name?: string; image?: string | null }) => void;   // คืนข้อมูลการ์ดเต็ม (ใช้ตอนเอาไปวางบนกระดาน)
   entity?: "skus" | "parent-skus";                                                                // บังคับชนิด (ไม่ส่ง = ผู้ใช้สลับเองได้)
+  pickedIds?: string[];                                                                           // โหมดเลือก: id ที่ผู้เรียกเลือกไว้แล้ว (โชว์ติ๊กบนการ์ด)
 } = {}) {
   const pick = mode === "pick";   // โหมดเลือกสินค้า (หน้าขอซื้อ) — กดการ์ด → onPickSku แทนเปิด drawer แก้ไข
   const toast = useToast();
@@ -294,7 +295,9 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   const allShownSelected = shown.length > 0 && shown.every((c) => selected.has(c.id));
 
   // โหมดเลือก = มีของเลือกอยู่ ≥1 → คลิกการ์ดทั้งใบ = toggle (ไม่เปิด drawer)
-  const selectMode = selected.size > 0;
+  // ⚠️ โหมด pick (เลือกไปวางกระดาน) ต้องไม่เข้าโหมด bulk ของหน้าจัดการ ไม่งั้นกดการ์ดแล้วไม่ส่งค่ากลับ
+  const selectMode = !pick && selected.size > 0;
+  const pickedSet = useMemo(() => new Set(pickedIds ?? []), [pickedIds]);
   // ลากคลุมเลือก: เริ่มจาก checkbox (หรือลากการ์ดในโหมดเลือก) แล้วลากผ่านการ์ดอื่น
   const dragRef = useRef<{ active: boolean; mode: boolean; moved: boolean }>({ active: false, mode: true, moved: false });
   const justDragged = useRef(false);
@@ -494,14 +497,17 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">หน้านี้ไม่มีรายการที่ข้อมูลไม่ครบ 🎉</div>
               : view === "table"
-                ? <SkuTable rows={shown} selected={selected} selectMode={selectMode} onToggle={toggleSel} onOpen={(id) => { if (pick) { onPickSku?.(id); return; } setPeekId(id); }} />
+                ? <SkuTable rows={shown} selected={pick ? pickedSet : selected} selectMode={selectMode}
+                    onToggle={pick ? ((id) => { const c = shown.find((x) => x.id === id); if (c) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); } }) : toggleSel}
+                    onOpen={(id) => { if (pick) { const c = shown.find((x) => x.id === id); if (c) onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); return; } setPeekId(id); }} />
                 : <div className="grid gap-3 select-none" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
                     {shown.map((c) => (
                       <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs}
-                        selected={selected.has(c.id)} selectMode={selectMode}
-                        onClick={() => { if (justDragged.current || selectMode) return; if (pick) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(c.id); return; } setPeekId(c.id); }}
-                        onPointerDownCard={() => { if (selectMode) beginDrag(c.id, selected.has(c.id)); }}
-                        onPointerDownHandle={() => beginDrag(c.id, selected.has(c.id))}
+                        // pick: ติ๊กตามที่ผู้เรียกเลือกไว้ · manage: ติ๊กตามระบบ bulk
+                        selected={pick ? pickedSet.has(c.id) : selected.has(c.id)} selectMode={pick ? true : selectMode}
+                        onClick={() => { if (justDragged.current) return; if (pick) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(c.id); return; } if (selectMode) return; setPeekId(c.id); }}
+                        onPointerDownCard={() => { if (!pick && selectMode) beginDrag(c.id, selected.has(c.id)); }}
+                        onPointerDownHandle={() => { if (pick) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(c.id); return; } beginDrag(c.id, selected.has(c.id)); }}
                         onPointerEnter={() => dragOver(c.id)} />
                     ))}
                   </div>}
@@ -550,7 +556,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
             </div>
       )}
 
-      {selected.size > 0 && (
+      {/* แถบจัดการหลายรายการ — ไม่โชว์ในโหมดเลือกไปวางกระดาน (ผู้เรียกมีปุ่มยืนยันของตัวเอง) */}
+      {!pick && selected.size > 0 && (
         <div className="sticky bottom-4 mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto flex-wrap">
           <span className="text-sm font-medium">เลือก {selected.size.toLocaleString("th-TH")}</span>
           {!allShownSelected && <button onClick={selectAllShown} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">เลือกที่แสดง</button>}
