@@ -267,8 +267,12 @@ export default function CampaignCanvasPage() {
     const BOTTOM = 44;   // แถบคำใบ้ล่าง + ระยะขอบ
     // ใช้ระยะจาก "บนสุดของเอกสาร" (ไม่ใช่จอ) → ค่าคงที่แม้หน้าจะเลื่อน ไม่วนคำนวณไปมา
     const calc = () => {
+      const vh = window.innerHeight || 0;
+      if (vh < 400) return;   // วัดไม่ได้/จอเตี้ยผิดปกติ → คงค่าเดิม (CSS calc) ไม่ยุบกระดาน
       const top = el.getBoundingClientRect().top + window.scrollY;
-      setBoardH(`${Math.max(320, Math.round(window.innerHeight - top - BOTTOM))}px`);
+      const h = Math.round(vh - top - BOTTOM);
+      if (h < 320) return;    // ค่าที่ได้ดูผิดปกติ → ไม่ทับของเดิม
+      setBoardH(`${h}px`);
     };
     calc();
     const ro = new ResizeObserver(calc);
