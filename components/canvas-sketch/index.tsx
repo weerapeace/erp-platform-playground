@@ -585,6 +585,9 @@ export function CanvasSketch({
       setAutoH((prev) => (prev != null && Math.abs(prev - h) <= 4 ? prev : h));  // ต่างไม่เกิน 4px = ถือว่าเท่าเดิม (กันสั่น/วนลูป)
     };
     const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
+    // วัดทันทีแบบ synchronous ก่อน — สำคัญ: effect นี้ re-run บ่อย (deps มี scene/peerList ที่ collab อัปเดตถี่)
+    // ถ้าพึ่ง rAF อย่างเดียว cleanup รอบถัดไปจะ cancel ทิ้งก่อนยิงเสมอ → measure ไม่เคยทำงาน (autoH ค้าง null)
+    measure();
     schedule();
     window.addEventListener("resize", schedule);
     // แก้ตัวเองอัตโนมัติ: ถ้าครั้งแรกวัด "สูงเกิน" (footer/เนื้อหามาทีหลัง จน layout ยังไม่นิ่ง) → ขนาดเอกสารเปลี่ยน → วัดใหม่จนพอดี
