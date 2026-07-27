@@ -998,7 +998,7 @@ function BigTagPick({ entity, picked, onPick, t }: {
           {picked.length > 0 && <b className="ml-1 text-teal-700">· {t("เลือกแล้ว", "selected")} {picked.length}</b>}
         </p>
       </div>
-      <div className="max-h-[62vh] overflow-y-auto px-1">
+      <div className="min-h-[55vh] max-h-[70vh] overflow-y-auto px-1">
         <SkuTagBrowser mode="pick" entity={entity} onPick={onPick} />
       </div>
     </div>
