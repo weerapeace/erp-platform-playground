@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useT, useLang } from "@/components/i18n";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
+import { SkuTagBrowser } from "@/components/sku-tag-browser";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { apiFetch } from "@/lib/api";
 import { suppressUnload } from "@/lib/canvas-unload-guard";
@@ -279,6 +280,17 @@ export default function CampaignCanvasPage() {
   const [fForm, setFForm] = useState({ label: "", path: "" });
   const [parentOpen, setParentOpen] = useState(false);  // modal การ์ด Parent SKU
   const [parentSel, setParentSel] = useState<ParentSkuVal[]>([]);
+  // โหมดเลือกแบบ "การ์ดใหญ่ ตามแท็ก" (ของกลาง SkuTagBrowser) — จำค่าไว้ต่อคน
+  const [bigPick, setBigPick] = useState(false);
+  useEffect(() => { try { setBigPick(localStorage.getItem("campaign-bigpick") === "1"); } catch { /* ignore */ } }, []);
+  const toggleBigPick = () => setBigPick((v) => { const n = !v; try { localStorage.setItem("campaign-bigpick", n ? "1" : "0"); } catch { /* ignore */ } return n; });
+  // กดการ์ดในโหมดการ์ดใหญ่ → สลับเลือก/เอาออก (สะสมไว้ แล้วกด "เพิ่มการ์ด" ทีเดียว)
+  const toggleParentPick = (r: { id: string; code?: string; name?: string; image?: string | null }) =>
+    setParentSel((prev) => prev.some((x) => x.id === r.id) ? prev.filter((x) => x.id !== r.id)
+      : [...prev, { id: r.id, code: r.code ?? "", name: r.name ?? "", image_url: r.image ?? null }]);
+  const toggleSkuPick = (r: { id: string; code?: string; name?: string; image?: string | null }) =>
+    setSkuSel((prev) => prev.some((x) => x.id === r.id) ? prev.filter((x) => x.id !== r.id)
+      : [...prev, { id: r.id, code: r.code ?? "", name: r.name ?? "", image_url: r.image ?? null } as SkuPickerValue]);
   const [parentRecId, setParentRecId] = useState<string | null>(null); // ดับเบิลคลิกการ์ด Parent SKU → ตัวแก้สินค้ากลาง
   const [knowledgeOpen, setKnowledgeOpen] = useState(false); // คลังความรู้
   const [assetOpen, setAssetOpen] = useState(false);     // AssetPicker เลือกรูปจากคลังกลาง
@@ -530,20 +542,26 @@ export default function CampaignCanvasPage() {
       </div>
 
       {/* เลือก SKU หลายอัน (checkbox) → วางการ์ดทีเดียว */}
-      <ERPModal open={skuOpen} onClose={() => setSkuOpen(false)} title={t("เพิ่มการ์ดสินค้า (SKU) ลงกระดาน", "Add SKU Card to board")} size="md"
+      <ERPModal open={skuOpen} onClose={() => setSkuOpen(false)} title={t("เพิ่มการ์ดสินค้า (SKU) ลงกระดาน", "Add SKU Card to board")} size={bigPick ? "xl" : "md"}
         footer={<>
+          <button onClick={toggleBigPick} className="mr-auto h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{bigPick ? `☰ ${t("แบบรายการ", "List view")}` : `🖼️ ${t("การ์ดใหญ่ (ตามแท็ก)", "Big cards (by tag)")}`}</button>
           <button onClick={() => setSkuOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
           <button onClick={confirmSku} disabled={!skuSel.length} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{t("เพิ่มการ์ด", "Add card")}{skuSel.length ? ` (${skuSel.length})` : ""}</button>
         </>}>
-        <SkuMultiPick selected={skuSel} onChange={setSkuSel} />
+        {bigPick
+          ? <BigTagPick entity="skus" picked={skuSel.map((x) => x.id)} onPick={toggleSkuPick} t={t} />
+          : <SkuMultiPick selected={skuSel} onChange={setSkuSel} />}
       </ERPModal>
 
-      <ERPModal open={parentOpen} onClose={() => setParentOpen(false)} title={t("เพิ่มการ์ด Parent SKU ลงกระดาน", "Add Parent SKU Card to board")} size="md"
+      <ERPModal open={parentOpen} onClose={() => setParentOpen(false)} title={t("เพิ่มการ์ด Parent SKU ลงกระดาน", "Add Parent SKU Card to board")} size={bigPick ? "xl" : "md"}
         footer={<>
+          <button onClick={toggleBigPick} className="mr-auto h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{bigPick ? `☰ ${t("แบบรายการ", "List view")}` : `🖼️ ${t("การ์ดใหญ่ (ตามแท็ก)", "Big cards (by tag)")}`}</button>
           <button onClick={() => setParentOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
           <button onClick={confirmParent} disabled={!parentSel.length} className="h-9 px-4 text-sm text-white bg-teal-600 rounded-lg disabled:opacity-50">{t("เพิ่มการ์ด", "Add card")}{parentSel.length ? ` (${parentSel.length})` : ""}</button>
         </>}>
-        <ParentSkuMultiPick selected={parentSel} onChange={setParentSel} />
+        {bigPick
+          ? <BigTagPick entity="parent-skus" picked={parentSel.map((x) => x.id)} onPick={toggleParentPick} t={t} />
+          : <ParentSkuMultiPick selected={parentSel} onChange={setParentSel} />}
       </ERPModal>
 
       {/* ดับเบิลคลิกการ์ด Parent SKU → ตัวแก้สินค้ากลาง */}
@@ -925,6 +943,29 @@ function SkuMultiPick({ selected, onChange }: { selected: SkuPickerValue[]; onCh
               {s.list_price != null && <span className="text-xs text-slate-400 shrink-0">{Number(s.list_price).toLocaleString()}฿</span>}
             </button>
           ); })}
+      </div>
+    </div>
+  );
+}
+
+// เลือกสินค้าแบบ "การ์ดใหญ่ ตามแท็ก" — ห่อของกลาง SkuTagBrowser (mode=pick)
+// กดการ์ด = เลือก/เอาออก (สะสมไว้) แล้วค่อยกด "เพิ่มการ์ด" ทีเดียว
+function BigTagPick({ entity, picked, onPick, t }: {
+  entity: "skus" | "parent-skus";
+  picked: string[];
+  onPick: (r: { id: string; code?: string; name?: string; image?: string | null }) => void;
+  t: (th: string, en: string) => string;
+}) {
+  return (
+    <div className="-mx-1">
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-1 pb-2 mb-1 border-b border-slate-100">
+        <p className="text-[11px] text-slate-400">
+          🖼️ {t("กดการ์ดเพื่อเลือก/เอาออก · เลือกได้หลายอัน แล้วกด “เพิ่มการ์ด”", "Click a card to select/deselect · pick several, then press “Add card”")}
+          {picked.length > 0 && <b className="ml-1 text-teal-700">· {t("เลือกแล้ว", "selected")} {picked.length}</b>}
+        </p>
+      </div>
+      <div className="max-h-[62vh] overflow-y-auto px-1">
+        <SkuTagBrowser mode="pick" entity={entity} onPick={onPick} />
       </div>
     </div>
   );

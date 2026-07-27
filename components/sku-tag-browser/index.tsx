@@ -124,12 +124,19 @@ function toBulkField(f: RegField): BulkEditField | null {
   return { key: col, label: f.field_label, type: "text" };
 }
 
-export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" | "pick"; onPickSku?: (skuId: string) => void } = {}) {
+export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: entityProp }: {
+  mode?: "manage" | "pick";
+  onPickSku?: (skuId: string) => void;
+  onPick?: (row: { id: string; code?: string; name?: string; image?: string | null }) => void;   // คืนข้อมูลการ์ดเต็ม (ใช้ตอนเอาไปวางบนกระดาน)
+  entity?: "skus" | "parent-skus";                                                                // บังคับชนิด (ไม่ส่ง = ผู้ใช้สลับเองได้)
+} = {}) {
   const pick = mode === "pick";   // โหมดเลือกสินค้า (หน้าขอซื้อ) — กดการ์ด → onPickSku แทนเปิด drawer แก้ไข
   const toast = useToast();
   // สถานะการเดิน (กลุ่ม/แท็ก/หน้า/ชนิด) เก็บใน history.state → refresh แล้วอยู่ที่เดิม + ปุ่ม Back ย้อนได้
   const nav0 = savedNav();
-  const [entity, setEntity] = useState<"skus" | "parent-skus">(nav0?.en ?? "skus");   // ดูตาม SKU หรือ Parent SKU (ของกลางตัวเดียว)
+  // entityProp = บังคับชนิดจากผู้เรียก (เช่น ป๊อปเลือก Parent SKU) · ไม่ส่ง = ใช้ค่าที่เคยเลือกไว้
+  const [entity, setEntity] = useState<"skus" | "parent-skus">(entityProp ?? nav0?.en ?? "skus");   // ดูตาม SKU หรือ Parent SKU (ของกลางตัวเดียว)
+  useEffect(() => { if (entityProp && entityProp !== entity) setEntity(entityProp); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [entityProp]);
   const entityRef = useRef(entity); entityRef.current = entity;   // ให้ pushNav อ่านค่าล่าสุดโดยไม่ต้องผูก dep
   const [tree, setTree] = useState<BrowseTree | null>(null);
   const [groupPath, setGroupPath] = useState<Crumb[]>(nav0?.gp ?? []);
@@ -492,7 +499,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
                     {shown.map((c) => (
                       <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs}
                         selected={selected.has(c.id)} selectMode={selectMode}
-                        onClick={() => { if (justDragged.current || selectMode) return; if (pick) { onPickSku?.(c.id); return; } setPeekId(c.id); }}
+                        onClick={() => { if (justDragged.current || selectMode) return; if (pick) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(c.id); return; } setPeekId(c.id); }}
                         onPointerDownCard={() => { if (selectMode) beginDrag(c.id, selected.has(c.id)); }}
                         onPointerDownHandle={() => beginDrag(c.id, selected.has(c.id))}
                         onPointerEnter={() => dragOver(c.id)} />
