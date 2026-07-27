@@ -42,7 +42,7 @@ const SkuMergeModal = nextDynamic(() => import("@/components/sku-merge").then((m
 type Crumb = { id: string; name: string };
 
 // ── สถานะการเดินเก็บใน history.state (__skuNav) — รอดตอน refresh + ปุ่ม Back ย้อนได้ ──
-type SkuNav = { gp: Crumb[]; tf: TagFilterValue; sp?: "all" | "recent" | null; page?: number; en?: "skus" | "parent-skus" };
+type SkuNav = { gp: Crumb[]; tf: TagFilterValue; sp?: "all" | "recent" | "trash" | null; page?: number; en?: "skus" | "parent-skus" };
 function savedNav(): SkuNav | null {
   if (typeof window === "undefined") return null;
   try { return (window.history.state as { __skuNav?: SkuNav } | null)?.__skuNav ?? null; } catch { return null; }
@@ -136,7 +136,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
   const [tagFilter, setTagFilter] = useState<TagFilterValue>(nav0?.tf ?? EMPTY_FILTER);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<string>("code");
-  const [special, setSpecial] = useState<"all" | "recent" | null>(nav0?.sp ?? null);   // โฟลเดอร์พิเศษ: ทั้งหมด / ล่าสุด
+  const [special, setSpecial] = useState<"all" | "recent" | "trash" | null>(nav0?.sp ?? null);   // โฟลเดอร์พิเศษ: ทั้งหมด / ล่าสุด / ถังขยะ
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);   // กรองเฉพาะ SKU ที่ข้อมูลไม่ครบ
   const [selected, setSelected] = useState<Set<string>>(new Set());   // เลือกหลายตัว (bulk)
   const [printOpen, setPrintOpen] = useState(false);                  // ป๊อปอัปพิมพ์บาร์โค้ด/QR
@@ -205,7 +205,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
   // ดึงการ์ดหนึ่งหน้า (off = ตำแหน่งเริ่ม)
   const fetchPage = useCallback(async (off: number) => {
     const p = new URLSearchParams();
-    if (special) p.set("all", "1");   // โฟลเดอร์ ทั้งหมด/ล่าสุด — โชว์ทุกรายการ (ไม่กรองแท็ก)
+    if (special === "trash") p.set("trash", "1");   // ถังขยะ — เฉพาะรายการที่ปิด/ลบแล้ว
+    else if (special) p.set("all", "1");            // โฟลเดอร์ ทั้งหมด/ล่าสุด — โชว์ทุกรายการ (ไม่กรองแท็ก)
     if (tagFilter.tagIds.length) p.set("family_ids", tagFilter.tagIds.join(","));
     if (search.trim()) p.set("search", search.trim());
     // "ล่าสุด" = เรียงตามแก้ไขล่าสุดเสมอ · อื่น ๆ ใช้การเรียงที่เลือก
@@ -258,7 +259,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
   const childTags   = (tree?.tags   ?? []).filter((t) => t.group_id === currentGroupId);
 
   // ผูกการเดินเข้ากลุ่ม/แท็กกับประวัติเบราว์เซอร์ → ปุ่ม Back ย้อนทีละชั้น (ไม่เด้งออกหน้าเลย)
-  const pushNav = useCallback((gp: Crumb[], tf: TagFilterValue, sp: "all" | "recent" | null = null) => {
+  const pushNav = useCallback((gp: Crumb[], tf: TagFilterValue, sp: "all" | "recent" | "trash" | null = null) => {
     setGroupPath(gp); setTagFilter(tf); setSpecial(sp); setPage(0);   // เดินที่ใหม่ = เริ่มหน้า 1
     try { window.history.pushState({ __skuNav: { gp, tf, sp, page: 0, en: entityRef.current } }, ""); } catch { /* ignore */ }
   }, []);
@@ -274,7 +275,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
 
   const openGroup   = (g: BrowseGroup) => pushNav([...groupPath, { id: g.id, name: g.name }], EMPTY_FILTER);
   const openTag     = (t: BrowseTag)   => pushNav(groupPath, { tagIds: [t.id], none: false });
-  const openSpecial = (kind: "all" | "recent") => { setSearch(""); pushNav([], EMPTY_FILTER, kind); };
+  const openSpecial = (kind: "all" | "recent" | "trash") => { setSearch(""); pushNav([], EMPTY_FILTER, kind); };
   const goRoot      = () => { setSearch(""); pushNav([], EMPTY_FILTER); };
   const goCrumb   = (i: number) => pushNav(groupPath.slice(0, i + 1), EMPTY_FILTER);
   const clearTags = () => pushNav(groupPath, EMPTY_FILTER);
@@ -397,6 +398,10 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
             🔗 จัดการ SKU ซ้ำ
           </button>
         )}
+        <button onClick={() => openSpecial("trash")} title="ดูรายการที่ลบ/ปิดใช้งานไว้ (กู้คืนได้)"
+          className={`h-9 px-3 text-sm rounded-lg whitespace-nowrap border ${special === "trash" ? "border-rose-300 bg-rose-50 text-rose-600 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+          🗑 ถังขยะ
+        </button>
       </div>
       )}
       {/* ฟอร์มเพิ่ม: SKU = Wizard เต็ม · Parent = modal เล็ก */}
@@ -436,7 +441,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku }: { mode?: "manage" 
         {special && (
           <span className="flex items-center gap-1">
             <span className="text-slate-300">›</span>
-            <span className="text-slate-700 font-medium">{special === "all" ? "📋 ทั้งหมด" : "🕒 ล่าสุด"}</span>
+            <span className="text-slate-700 font-medium">{special === "all" ? "📋 ทั้งหมด" : special === "trash" ? "🗑 ถังขยะ" : "🕒 ล่าสุด"}</span>
           </span>
         )}
         {!cardsMode && groupPath.map((c, i) => (

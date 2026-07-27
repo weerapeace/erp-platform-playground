@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
   const familyIds = (sp.get("family_ids") ?? sp.get("family_id") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const search   = (sp.get("search") ?? "").trim();
   const showAll  = sp.get("all") === "1";   // โหมด "ทั้งหมด/ล่าสุด" — โชว์ทุกรายการ (ไม่กรองแท็ก)
+  const trash    = sp.get("trash") === "1"; // โหมดถังขยะ — โชว์เฉพาะที่ปิด/ลบแล้ว (is_active=false)
   const admin = supabaseAdmin();
 
   // entity: skus (ดีฟอลต์) หรือ parent-skus — สลับตาราง/junction/RPC (ใช้ของกลางตัวเดียว)
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
     : { table: "skus_v2", junction: "skus_v2_product_family_m2m", countsRpc: "erp_sku_family_counts", pageRpc: "erp_skus_tag_page", moduleKey: "skus-v2", hasPrice: true };
 
   // ── โหมดต้นไม้ ──
-  if (familyIds.length === 0 && !search && !showAll) {
+  if (familyIds.length === 0 && !search && !showAll && !trash) {
     const [gRes, tRes, mRes] = await Promise.all([
       admin.from("product_family_groups").select("id, name, parent_group_id, icon, color, sort_order").eq("is_active", true).order("sort_order"),
       admin.from("product_families").select("id, name, group_id, sort_order").eq("is_active", true).order("sort_order"),
@@ -61,17 +62,20 @@ export async function GET(request: NextRequest) {
   // คืนแค่ id (เบา) ไม่ดึงรูป/แท็ก/สต๊อก — cap 10,000 (สอดคล้องเพดาน bulk-update กลาง)
   if (sp.get("ids") === "1") {
     const IDS_CAP = 10000;
-    if (familyIds.length) {
+    // ถังขยะ = ไม่ผ่าน RPC แท็ก (RPC ไม่มีโหมด "เฉพาะที่ปิด") → คิวรีตรงแทน
+    if (familyIds.length && !trash) {
       const pageRpc = entity === "parent-skus" ? "erp_parent_skus_tag_page" : "erp_skus_tag_page";
       const { data: rpc, error } = await admin.rpc(pageRpc, {
         p_incl: familyIds, p_excl: null, p_search: search || null,
-        p_include_inactive: true, p_limit: IDS_CAP, p_offset: 0, p_sort_by: "code", p_sort_dir: "asc",
+        p_include_inactive: false, p_limit: IDS_CAP, p_offset: 0, p_sort_by: "code", p_sort_dir: "asc",
       });
       if (error) return NextResponse.json({ ids: [], total: 0, error: error.message }, { status: 500 });
       return NextResponse.json({ ids: (rpc as { ids?: string[] } | null)?.ids ?? [], total: Number((rpc as { total?: number } | null)?.total ?? 0), error: null });
     }
     const tbl = entity === "parent-skus" ? "parent_skus_v2" : "skus_v2";
     let q = admin.from(tbl).select("id", { count: "exact" });
+    // ปกติ: ซ่อนของในถังขยะ (is_active=null ถือว่าใช้งานอยู่ → ใช้ not is false) · ถังขยะ: เฉพาะที่ปิด
+    q = trash ? q.eq("is_active", false) : q.not("is_active", "is", false);
     for (const raw of search.split(/\s+/)) { const t = sanitize(raw); if (t) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`); }
     const { data, count, error } = await q.range(0, IDS_CAP - 1);
     if (error) return NextResponse.json({ ids: [], total: 0, error: error.message }, { status: 500 });
@@ -108,11 +112,11 @@ export async function GET(request: NextRequest) {
   let rows: SkuRow[] = [];
   let total = 0;
 
-  if (familyIds.length) {
+  if (familyIds.length && !trash) {
     // กรองแท็ก (หลายแท็ก = OR) ผ่าน RPC กลาง erp_skus_tag_page (EXISTS ที่ DB + แบ่งหน้า) — รองรับแท็กที่มี SKU เป็นพัน ไม่ส่ง id ยาวใน URL
     const { data: rpc, error: rpcErr } = await admin.rpc(ENT.pageRpc, {
       p_incl: familyIds, p_excl: null, p_search: search || null,
-      p_include_inactive: true, p_limit: limit, p_offset: offset, p_sort_by: effSort, p_sort_dir: sortDir,
+      p_include_inactive: false, p_limit: limit, p_offset: offset, p_sort_by: effSort, p_sort_dir: sortDir,
     });
     if (rpcErr) return NextResponse.json({ cards: [], total: 0, error: rpcErr.message }, { status: 500 });
     const pageIds = (rpc as { ids?: string[] } | null)?.ids ?? [];
@@ -123,8 +127,10 @@ export async function GET(request: NextRequest) {
     const order = new Map(pageIds.map((id, i) => [id, i]));
     rows = ((skus ?? []) as unknown as SkuRow[]).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   } else {
-    // ค้นหาอย่างเดียว (ไม่มีแท็ก) — search จำกัดผลอยู่แล้ว
+    // ค้นหาอย่างเดียว (ไม่มีแท็ก) / โหมดถังขยะ — search จำกัดผลอยู่แล้ว
     let q = admin.from(ENT.table).select(sel, { count: "exact" });
+    // ปกติ: ซ่อนของในถังขยะ (is_active=null ถือว่าใช้งานอยู่) · ถังขยะ: เฉพาะที่ปิด
+    q = trash ? q.eq("is_active", false) : q.not("is_active", "is", false);
     for (const raw of search.split(/\s+/)) { const t = sanitize(raw); if (t) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`); }
     q = q.order(effSort, { ascending: sortDir === "asc" }).range(offset, offset + limit - 1);
     const { data: skus, count, error } = await q;
