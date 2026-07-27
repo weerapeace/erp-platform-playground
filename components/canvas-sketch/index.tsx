@@ -577,15 +577,12 @@ export function CanvasSketch({
     const measure = () => {
       const el = wrapRef.current; if (!el) return;
       const rect = el.getBoundingClientRect();
-      const absTop = rect.top + window.scrollY;                 // ระยะจากบนสุดเอกสารถึงบนกล่อง (คงที่แม้กำลังเลื่อน)
-      const below = Math.max(0, document.documentElement.scrollHeight - (rect.bottom + window.scrollY)); // ของที่อยู่ "ใต้" กล่อง (padding/footer)
-      let h = window.innerHeight - absTop - below - 4;          // เป้าหมาย: ให้ขอบล่างเอกสารพอดีจอ (เต็มสวย)
-      // ตาข่ายกันพลาด: ถ้าตอนนี้เอกสาร "ล้นจอ" จริง (below วัดพลาดเพราะ layout ยังไม่นิ่ง/ฝังใน iframe) → หดกล่องตามค่าที่ล้นจริง
-      // → รับประกันไม่มี scroll เสมอ · รอบถัดไปที่ layout นิ่งแล้วค่อยวัด below ใหม่ให้พอดี
-      const overflow = document.documentElement.scrollHeight - window.innerHeight;
-      if (overflow > 0) h = Math.min(h, rect.height - overflow - 2);
-      h = Math.max(360, Math.round(h));
-      setAutoH((prev) => (prev === h ? prev : h));              // เท่าเดิม = ไม่ setState ซ้ำ (กัน ResizeObserver วนลูป)
+      // "chrome" = ความสูงของทุกอย่างที่ไม่ใช่กระดาน (แถบบน + แถบล่าง + ขอบ) — ได้จากเอกสารทั้งหมดลบความสูงกระดานเอง
+      // จุดสำคัญ: ค่านี้ "ไม่ขึ้นกับ" ความสูงกระดาน → แทนค่าครั้งเดียวได้คำตอบที่ลงตัว ไม่แกว่ง
+      // (สูตรเดิมวัด below + มี guard overflow คอยหด → สลับโต-หด ทุกครั้งที่วัดใหม่ = แถบล่างขยับเรื่อย ๆ ตอนคลิก)
+      const chrome = Math.max(0, document.documentElement.scrollHeight - rect.height);
+      const h = Math.max(360, Math.round(window.innerHeight - chrome - 4));
+      setAutoH((prev) => (prev != null && Math.abs(prev - h) <= 4 ? prev : h));  // ต่างไม่เกิน 4px = ถือว่าเท่าเดิม (กันสั่น/วนลูป)
     };
     const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
     schedule();

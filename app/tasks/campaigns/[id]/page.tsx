@@ -258,28 +258,8 @@ export default function CampaignCanvasPage() {
     } catch { /* ignore */ }
   }, []);
   const [boardKey, setBoardKey] = useState(0); // เปลี่ยนเพื่อรีโหลดกระดานล่าสุด (แทน F5 ที่เด้งหน้าแรก)
-  // ความสูงกระดาน = วัดจากพื้นที่ที่เหลือจริง (แถบหัวสูงไม่เท่ากันในแต่ละโหมด/จอ)
-  // ค่าตายตัวเดิม (100vh-205px) ทำให้แถบคำใบ้ล่างถูกดันหลุดจอ ต้องเลื่อนตาม
-  const boardWrapRef = useRef<HTMLDivElement>(null);
-  const [boardH, setBoardH] = useState("calc(100vh - 205px)");   // ค่าตั้งต้นก่อนวัด (กันกระพริบ/SSR)
-  useEffect(() => {
-    const el = boardWrapRef.current; if (!el) return;
-    const BOTTOM = 44;   // แถบคำใบ้ล่าง + ระยะขอบ
-    // ใช้ระยะจาก "บนสุดของเอกสาร" (ไม่ใช่จอ) → ค่าคงที่แม้หน้าจะเลื่อน ไม่วนคำนวณไปมา
-    const calc = () => {
-      const vh = window.innerHeight || 0;
-      if (vh < 400) return;   // วัดไม่ได้/จอเตี้ยผิดปกติ → คงค่าเดิม (CSS calc) ไม่ยุบกระดาน
-      const top = el.getBoundingClientRect().top + window.scrollY;
-      const h = Math.round(vh - top - BOTTOM);
-      if (h < 320) return;    // ค่าที่ได้ดูผิดปกติ → ไม่ทับของเดิม
-      setBoardH(`${h}px`);
-    };
-    calc();
-    const ro = new ResizeObserver(calc);
-    ro.observe(document.body);
-    window.addEventListener("resize", calc);
-    return () => { ro.disconnect(); window.removeEventListener("resize", calc); };
-  }, []);
+  // หมายเหตุ: ความสูงกระดานจัดการโดย CanvasSketch เอง (autoH — วัดพื้นที่ที่เหลือให้พอดีจอ)
+  // ค่า height ที่ส่งไปเป็นแค่ค่าตั้งต้นก่อน autoH วัดเสร็จ · อย่าวัดซ้ำที่หน้านี้ (จะตีกัน)
   const [refreshing, setRefreshing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [skuOpen, setSkuOpen] = useState(false);
@@ -517,10 +497,10 @@ export default function CampaignCanvasPage() {
       </div>
 
       <div className="px-4 py-3">
-        <div ref={boardWrapRef} className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
+        <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
           {/* realtime ผ่าน Supabase Broadcast (ไม่กิน Cloudflare CPU) + เซฟกันทับด้วย version-guard */}
           {/* ความสูงวัดจากพื้นที่ที่เหลือจริง → กระดานเต็มถึงแถบล่างพอดี หน้าไม่เลื่อน toolbox ไม่จม */}
-          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height={boardH} controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onBoardReady} collab stickyTop={embed ? 72 : 128} />
+          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 205px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onBoardReady} collab stickyTop={embed ? 72 : 128} />
 
           {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
           {dragPanelOpen && (
