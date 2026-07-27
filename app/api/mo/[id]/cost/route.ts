@@ -42,6 +42,17 @@ export type CostScenario = {
   // โหมด target: ใส่เป้าหมาย → คิดงบค่าแรงที่จ่ายได้
   target?: { type: "margin_pct" | "profit_pp" | "cost_pp"; value: number } | null;
   substitutes?: CostSubstitute[];                     // วัตถุดิบทดแทน (คิดต้นทุนด้วยราคาตัวแทน)
+  // "BOM ทดลอง": บรรทัดวัตถุดิบที่เก็บไว้ในใบคิดต้นทุนนี้เท่านั้น — ไม่แตะสูตรจริง
+  //   mat_mode = ใช้ชุดไหนคิดต้นทุน (real = จาก BOM จริง · trial = จากบรรทัดทดลอง)
+  mat_mode?: "real" | "trial";
+  trial_lines?: CostTrialLine[];
+};
+/** 1 บรรทัดวัตถุดิบทดลอง (โครงเดียวกับ TrialLine ใน components/trial-bom) */
+export type CostTrialLine = {
+  key: string; sku: string | null; name: string; uom: string | null; unit_cost: number;
+  mode: "nest" | "manual";
+  face_width_cm: number; cut_width: number; cut_length: number; pieces: number;
+  waste_percent: number; divisor: number; allow_rotate: boolean; qty_per: number;
 };
 export type MoCost = {
   product_sku: string | null; product_name: string | null; qty: number;

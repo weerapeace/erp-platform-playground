@@ -16,6 +16,7 @@ import { ERPModal } from "@/components/modal";
 import { deriveCost, normScenario, DEFAULT_SCENARIO, laborModeLabel } from "@/lib/cost-calc";
 import type { CostScenario, PieceJob, MoCostMaterial } from "@/app/api/mo/[id]/cost/route";
 import type { BomComponent } from "@/app/api/bom/components/route";
+import { TrialBomEditor, trialLineCalc, emptyTrialLine, type TrialLine } from "@/components/trial-bom";
 
 type Inputs = {
   product_sku: string; product_name: string; parent_code: string | null; bom_code: string | null;
@@ -81,8 +82,23 @@ export default function CostCalculatorPage() {
 
   useEffect(() => { if (sku?.code) void load(sku.code); }, [sku, load]);
 
+  // --- BOM 2 ระบบ: "จริง" (จากสูตร) กับ "ทดลอง" (เก็บในใบคิดต้นทุนนี้ ไม่แตะสูตรจริง) ---
+  const matMode: "real" | "trial" = sc.mat_mode === "trial" ? "trial" : "real";
+  const trialLines = useMemo(() => (sc.trial_lines ?? []) as TrialLine[], [sc.trial_lines]);
+  const setTrialLines = useCallback((next: TrialLine[]) => setSc((s) => ({ ...s, trial_lines: next })), []);
+  // บรรทัดทดลอง → รูปแบบวัตถุดิบมาตรฐาน เพื่อให้ deriveCost คิดต้นทุนได้เหมือนกัน
+  const trialMaterials: MoCostMaterial[] = useMemo(() => trialLines.map((l) => {
+    const c = trialLineCalc(l, qty);
+    return { sku: l.sku, name: l.name || l.sku, material_type: "ทดลอง", uom: l.uom,
+      qty_per: c.qtyPer, unit_cost: l.unit_cost, line_pp: c.amount, has_price: l.unit_cost > 0 };
+  }), [trialLines, qty]);
+
   // effInputs: ใส่ qty + ค่าแรงกลางที่แก้ในหน้า (centralOverride) → deriveCost คิด substitutes จาก materials ให้เอง
-  const eff = useMemo(() => inputs ? { ...inputs, qty, central_rate: centralOverride ?? inputs.central_rate } : null, [inputs, qty, centralOverride]);
+  const eff = useMemo(() => {
+    if (!inputs) return null;
+    const base = { ...inputs, qty, central_rate: centralOverride ?? inputs.central_rate };
+    return matMode === "trial" ? { ...base, materials: trialMaterials } : base;
+  }, [inputs, qty, centralOverride, matMode, trialMaterials]);
   const d = useMemo(() => eff ? deriveCost(eff, sc) : null, [eff, sc]);
 
   // แก้ค่าแรงกลาง + บันทึกกลับเข้า BOM (bom_labor_rates craftsman กลาง) → มีผลทุกใบที่ใช้สูตรนี้
@@ -456,9 +472,38 @@ export default function CostCalculatorPage() {
             {/* วัตถุดิบ — จับกลุ่มตามชนิด + ราคารวมต่อกลุ่ม (เหมือน BOM) + ตัวแทน */}
             <div className="rounded-xl border border-slate-200 bg-white">
               <button onClick={() => setShowMat((v) => !v)} className="w-full px-3 py-2 flex items-center justify-between text-sm text-slate-600">
-                <span>📦 วัตถุดิบ ({matRows.length} ชนิด) · รวม <b className="text-slate-700">฿{fmt(d.matPP)}</b>/ชิ้น</span><span className="text-slate-400">{showMat ? "▲" : "▼"}</span>
+                <span>📦 วัตถุดิบ ({matMode === "trial" ? `${trialLines.length} ทดลอง` : `${matRows.length} ชนิด`}) · รวม <b className="text-slate-700">฿{fmt(d.matPP)}</b>/ชิ้น</span><span className="text-slate-400">{showMat ? "▲" : "▼"}</span>
               </button>
+
+              {/* สลับ BOM จริง / BOM ทดลอง */}
               {showMat && (
+                <div className="px-3 pb-2 flex items-center gap-1.5 flex-wrap text-[11px] border-t border-slate-100 pt-2">
+                  <span className="text-slate-400">ใช้วัตถุดิบจาก:</span>
+                  {([["real", "📋 BOM จริง"], ["trial", "🧪 BOM ทดลอง"]] as const).map(([v, lb]) => (
+                    <button key={v} type="button" onClick={() => setSc((s) => ({ ...s, mat_mode: v }))}
+                      className={`px-2 py-0.5 rounded-full border ${matMode === v ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>{lb}</button>
+                  ))}
+                  {matMode === "trial" && inputs.materials.length > 0 && trialLines.length === 0 && (
+                    <button type="button"
+                      onClick={() => setTrialLines(inputs.materials.map((m, i) => ({
+                        ...emptyTrialLine(i), sku: m.sku, name: m.name ?? "", uom: m.uom, unit_cost: m.unit_cost,
+                        mode: "manual" as const, qty_per: m.qty_per,
+                      })))}
+                      className="px-2 py-0.5 rounded-full border border-blue-200 text-blue-600 hover:bg-blue-50">⧉ คัดลอกจาก BOM จริง</button>
+                  )}
+                  {matMode === "trial" && <span className="text-amber-600">· ไม่แตะสูตรจริง</span>}
+                  {matMode === "real" && !inputs.bom_code && <span className="text-amber-600">· สินค้านี้ยังไม่มี BOM — ลองใช้โหมดทดลองได้</span>}
+                </div>
+              )}
+
+              {showMat && matMode === "trial" && (
+                <div className="border-t border-slate-100 p-2">
+                  <TrialBomEditor lines={trialLines} onChange={setTrialLines} lotQty={qty}
+                    realBomCode={inputs.bom_code ?? null} productSku={sku?.code ?? null} />
+                </div>
+              )}
+
+              {showMat && matMode === "real" && (
                 <div className="border-t border-slate-100 divide-y divide-slate-50 text-[12px]">
                   {matRows.map((row) => {
                       const m = row.main; const sub = m.sku ? subMap.get(m.sku) : undefined;
