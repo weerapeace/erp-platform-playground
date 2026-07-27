@@ -854,6 +854,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [form,        setForm]        = useState<Record<string, unknown>>({});
   // ref ที่ชี้ค่า form ล่าสุดเสมอ — ใช้ใน save() เพื่อกัน stale closure (โดยเฉพาะ m2m sync)
   const formRef = useRef<Record<string, unknown>>({});
+  // ค่าตั้งต้นตอนเปิด record (จาก DB) — ตอนบันทึกจะส่งเฉพาะฟิลด์ที่ "เปลี่ยนจริง"
+  // กันเคส: ระหว่างเปิด drawer มีการแก้ค่าจากที่อื่น (เช่นแนบรูป → ระบบตั้งรูปปกให้)
+  // แล้วกดบันทึกฟอร์ม → เดิมส่งทุกฟิลด์ทับ ทำให้ค่าที่เพิ่งเปลี่ยนหายกลับเป็นค่าเก่า
+  const baseSnapRef = useRef<Record<string, unknown>>({});
   formRef.current = form;
   const [formErr,     setFormErr]     = useState<string | null>(null);
   const [dirty,       setDirty]       = useState(false);
@@ -1115,6 +1119,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const openEdit = (r: Row) => {
     setEditingId(r.id);
     setFormErr(null); setDirty(false); setModalOpen(true);
+    baseSnapRef.current = {};   // เริ่มจับค่าตั้งต้นใหม่ (ใช้ส่งเฉพาะฟิลด์ที่แก้จริงตอนบันทึก)
 
     // เริ่มด้วยค่าจาก list (compact projection) — กันฟอร์มว่างขณะรอ full row
     const partial: Record<string, unknown> = {};
@@ -1131,6 +1136,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       }
     });
     setForm(partial);
+    baseSnapRef.current = { ...partial };   // ค่าตั้งต้นจาก list (จะถูกทับด้วย full row เมื่อโหลดเสร็จ)
 
     // โหลดลิงก์ m2m เข้า form (รันทุกครั้งที่เปิด record — กันค้าง "กำลังโหลด" ตอนเปิดซ้ำ)
     // guard: เขียนเฉพาะตอน field ยังว่าง (undefined) → ถ้า fetch ช้ามาทีหลัง จะไม่ revert ค่าที่ผู้ใช้แก้
@@ -1172,6 +1178,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         });
         // merge (ไม่ replace) → ค่า m2m/o2m ที่ widget โหลดไว้ไม่หาย
         setForm((prev) => ({ ...prev, ...f }));
+        baseSnapRef.current = { ...baseSnapRef.current, ...f };   // ค่าตั้งต้น = ค่าจริงจาก DB ตอนเปิด
       })
       .catch(() => { /* keep partial — ดีกว่าค้าง */ });
   };
@@ -1289,9 +1296,25 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         : `${apiBase}${config.apiPath}`;
       const method = editingId ? "PATCH" : "POST";
 
+      // แก้ไข (PATCH): ส่งเฉพาะฟิลด์ที่ค่าต่างจากตอนเปิด — ฟิลด์ที่ไม่ได้แตะจะไม่ถูกเขียนทับ
+      // (เดิมส่งทุกฟิลด์ → ถ้าระหว่างนั้นมีการแก้จากที่อื่น เช่นแนบรูปแล้วระบบตั้งรูปปกให้ จะโดนทับหาย)
+      let payload = serialized;
+      if (editingId) {
+        const snap = baseSnapRef.current;
+        const norm = (v: unknown) => (v === null || v === undefined || v === "" ? "" : typeof v === "boolean" ? (v ? "1" : "") : Array.isArray(v) ? JSON.stringify(v) : typeof v === "object" ? JSON.stringify(v) : String(v));
+        const diff: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(serialized)) if (norm(snap[k]) !== norm(v)) diff[k] = v;
+        payload = diff;
+        if (Object.keys(payload).length === 0) {
+          // ไม่มีอะไรเปลี่ยน → ไม่ต้องยิง (กัน API ตอบ "ไม่มี field ที่ต้อง update")
+          flash("ไม่มีการเปลี่ยนแปลง"); setDirty(false); setSaving(false); setDrawerMode("view");
+          return;
+        }
+      }
+
       const res = await apiFetch(url, {
         method, headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...serialized, actor: user?.name }),
+        body: JSON.stringify({ ...payload, actor: user?.name }),
       });
       const json = await res.json();
       if (json.error) {
@@ -1350,6 +1373,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             }
           });
           setForm((prev) => ({ ...prev, ...f }));
+          baseSnapRef.current = { ...baseSnapRef.current, ...f };   // ค่าตั้งต้นใหม่ = ค่าหลังบันทึก
         }
         setDrawerMode("view");
       } else {
