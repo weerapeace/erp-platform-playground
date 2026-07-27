@@ -865,6 +865,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   // F11: drawer mode — "view" (อ่านอย่างเดียว) | "edit" (ฟอร์ม)
   const [drawerMode,  setDrawerMode]  = useState<"view" | "edit">("view");
+  const [dblEditKey,  setDblEditKey]  = useState<string | null>(null);   // ฟิลด์ที่เพิ่งดับเบิลคลิกเพื่อแก้ตรงนั้น
   const [detailLoading, setDetailLoading] = useState(false);
 
   // อัปเดตค่า "related" สด เมื่อเปลี่ยน FK ต้นทางในฟอร์ม (เช่น เลือก size_description_id → size_description/how_to_size อัปเดตตาม)
@@ -1118,7 +1119,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // (sync wrapper เพื่อให้ rowActions/onRowClick type ตรง — fetch ผ่าน .then ภายใน)
   const openEdit = (r: Row) => {
     setEditingId(r.id);
-    setFormErr(null); setDirty(false); setModalOpen(true);
+    setFormErr(null); setDirty(false); setModalOpen(true); setDblEditKey(null);
     baseSnapRef.current = {};   // เริ่มจับค่าตั้งต้นใหม่ (ใช้ส่งเฉพาะฟิลด์ที่แก้จริงตอนบันทึก)
 
     // เริ่มด้วยค่าจาก list (compact projection) — กันฟอร์มว่างขณะรอ full row
@@ -2011,10 +2012,21 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
   // F11: render ค่าแบบอ่านอย่างเดียว (detail view)
   // wrapper: เติมปุ่มคัดลอกค่า ถ้า field ตั้ง ui_style.copyable
+  // ดับเบิลคลิกที่ค่าในหน้ารายละเอียด → เปิดแก้ตรงนั้นเลย (ไม่ต้องกดปุ่มแก้ไข/ไม่ต้องตั้งค่า field ก่อน)
+  const QUICK_TYPES = new Set(["text", "number", "boolean", "select", "textarea"]);
+  const canQuickEdit = (f: FieldDef) =>
+    drawerMode === "view" && !!editingId && canEdit && !f.readonly && !f.hideInForm
+    && (QUICK_TYPES.has(f.type) || (f.type === "relation" && !!f.relationConfig));
+
   const renderDetailValue = (f: FieldDef): React.ReactNode => {
     const node = renderDetailValueInner(f);
     const copyable = !!(f.uiStyle as Record<string, unknown> | undefined)?.copyable;
-    if (!copyable) return node;
+    // ยังไม่ได้เปิดแก้ + แก้ได้ → ห่อ double-click (คลุมทุกชนิดที่รองรับ)
+    const wrapDbl = (n: React.ReactNode) =>
+      canQuickEdit(f) && !f.inlineEditable && dblEditKey !== f.key
+        ? <span onDoubleClick={() => setDblEditKey(f.key)} title="ดับเบิลคลิกเพื่อแก้ไข" className="block cursor-text rounded -mx-1 px-1 hover:bg-blue-50/50">{n}</span>
+        : n;
+    if (!copyable) return wrapDbl(node);
     // ค่าที่จะคัดลอก: computed → ค่าที่คำนวณได้ (ที่แสดงจริง), อื่น ๆ → ค่าที่เก็บ
     let copyText = "";
     if (f.type === "computed") {
@@ -2024,8 +2036,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     } else {
       copyText = form[f.key] != null ? String(form[f.key]) : "";
     }
-    if (!copyText || copyText === "—") return node;
-    return <span className="inline-flex items-start gap-1">{node}<CopyValueBtn text={copyText} /></span>;
+    if (!copyText || copyText === "—") return wrapDbl(node);
+    return <span className="inline-flex items-start gap-1">{wrapDbl(node)}<CopyValueBtn text={copyText} /></span>;
   };
 
   const renderDetailValueInner = (f: FieldDef): React.ReactNode => {
@@ -2039,10 +2051,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         form,
       });
     }
-    // Quick edit: field ที่ตั้ง inline + แก้ได้ + ชนิดง่ายๆ → กดแก้ได้เลยในหน้า detail
-    if (drawerMode === "view" && editingId && canEdit && f.inlineEditable && !f.readonly
-        && (f.type === "text" || f.type === "number" || f.type === "boolean" || f.type === "select" || f.type === "textarea" || (f.type === "relation" && !!f.relationConfig))) {
-      return <QuickEditCell field={f} value={v} siblingValues={form} onSave={(val) => quickSave(f.key, val)} />;
+    // Quick edit: field ที่ตั้ง inline ไว้ (กดครั้งเดียวแก้ได้) หรือ field ที่เพิ่งดับเบิลคลิก
+    if (canQuickEdit(f) && (f.inlineEditable || dblEditKey === f.key)) {
+      return <QuickEditCell key={dblEditKey === f.key ? "dbl" : "inline"} field={f} value={v} siblingValues={form}
+        autoOpen={dblEditKey === f.key}
+        onDone={() => { if (dblEditKey === f.key) setDblEditKey(null); }}
+        onSave={(val) => quickSave(f.key, val)} />;
     }
     if (f.type === "computed") {
       if (f.textCompute) return <div className="text-sm text-slate-800 whitespace-pre-wrap break-words" style={vs}>{computedTextValue(f.textCompute, form) ?? "—"}</div>;
@@ -2834,9 +2848,10 @@ export function MasterRecordDrawer({
 // ============================================================
 // QuickEditCell — แก้ค่าเร็วในหน้า detail (view mode) บันทึกทันที
 // ============================================================
-function QuickEditCell({ field, value, onSave, siblingValues }: { field: FieldDef; value: unknown; onSave: (v: string) => Promise<string | null>; siblingValues?: Record<string, unknown> }) {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState("");
+function QuickEditCell({ field, value, onSave, siblingValues, autoOpen, onDone }: { field: FieldDef; value: unknown; onSave: (v: string) => Promise<string | null>; siblingValues?: Record<string, unknown>; autoOpen?: boolean; onDone?: () => void }) {
+  // autoOpen = มาจากดับเบิลคลิก → เปิดช่องแก้ทันที (ไม่ต้องกดซ้ำ)
+  const [editing, setEditing] = useState(!!autoOpen);
+  const [val, setVal] = useState(autoOpen ? (value == null ? "" : String(value)) : "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -2846,6 +2861,7 @@ function QuickEditCell({ field, value, onSave, siblingValues }: { field: FieldDe
     setSaving(false);
     if (e) { setErr(e); return; }
     setEditing(false);
+    onDone?.();
   };
 
   // relation: แก้ inline ด้วย picker (เลือกแล้วบันทึกทันที)
@@ -2902,13 +2918,13 @@ function QuickEditCell({ field, value, onSave, siblingValues }: { field: FieldDe
       ) : field.type === "textarea" ? (
         <textarea autoFocus value={val} disabled={saving} rows={4}
           onChange={(e) => setVal(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+          onKeyDown={(e) => { if (e.key === "Escape") { setEditing(false); onDone?.(); } }}
           onBlur={() => commit(val)}
           className="w-full px-2 py-1.5 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
       ) : (
         <input autoFocus type={field.type === "number" ? "number" : "text"} value={val} disabled={saving}
           onChange={(e) => setVal(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") commit(val); if (e.key === "Escape") setEditing(false); }}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(val); if (e.key === "Escape") { setEditing(false); onDone?.(); } }}
           onBlur={() => commit(val)} className={inputCls} />
       )}
       {saving && <span className="text-[10px] text-slate-400">…</span>}
