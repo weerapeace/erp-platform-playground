@@ -11,7 +11,7 @@
  *   2. ปุ่ม ↗ สำหรับงานใหญ่ → ไปหน้าจัดการ พร้อมเปิดรายการนั้นให้
  * เพิ่มหัวข้อใหม่ = เติมที่ /api/pending-data อย่างเดียว ไม่ต้องแก้หน้าจอ
  */
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
@@ -50,6 +50,7 @@ function QuickEdit({ sec, row, onSaved }: { sec: PendingSection; row: PendingRow
   const toast = useToast();
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cur, setCur] = useState(row.currency === "RMB" || row.currency === "YUAN" ? "RMB" : "THB");   // สกุลเงินของราคา
   const [linkVal, setLinkVal] = useState(row.link ?? "");     // ลิงก์สินค้า (ร้านออนไลน์)
   const [linkOpen, setLinkOpen] = useState(false);
   // popup ถาม "ใส่ราคาให้พี่น้อง Parent เดียวกันด้วยไหม"
@@ -76,7 +77,7 @@ function QuickEdit({ sec, row, onSaved }: { sec: PendingSection; row: PendingRow
     try {
       const r = await apiFetch("/api/pending-data", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: sec.key, id: row.id, value: v, qty: row.qty, ...(ids?.length ? { ids } : {}) }),
+        body: JSON.stringify({ key: sec.key, id: row.id, value: v, qty: row.qty, currency: cur, ...(ids?.length ? { ids } : {}) }),
       });
       const j = await r.json();
       if (j.error) throw new Error(j.error);
@@ -115,7 +116,14 @@ function QuickEdit({ sec, row, onSaved }: { sec: PendingSection; row: PendingRow
         onKeyDown={(e) => { if (e.key === "Enter") void saveWithSiblingCheck(val); }}
         placeholder={ed.label}
         className="h-7 w-[76px] px-1.5 text-[11px] text-right border border-amber-300 rounded bg-amber-50/50 focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-50" />
-      {ed.suffix && <span className="text-[10px] text-slate-400">{ed.suffix}</span>}
+      {/* สกุลเงิน (เฉพาะราคาวัตถุดิบ) — ร้านจีนใส่ ¥ ได้เลย */}
+      {sec.key === "supplier_item_price" ? (
+        <select value={cur} disabled={busy} onChange={(e) => setCur(e.target.value)} title="สกุลเงินของราคานี้"
+          className="h-7 px-1 text-[11px] border border-amber-300 rounded bg-white">
+          <option value="THB">฿</option>
+          <option value="RMB">¥</option>
+        </select>
+      ) : ed.suffix ? <span className="text-[10px] text-slate-400">{ed.suffix}</span> : null}
       <button type="button" disabled={busy || !val.trim()} onClick={() => void saveWithSiblingCheck(val)}
         title={row.siblings ? `บันทึก (มีพี่น้อง Parent เดียวกันอีก ${row.siblings} ตัว — จะถามให้ใส่ด้วย)` : "บันทึกกลับเข้าระบบ"}
         className="h-7 px-1.5 text-[11px] rounded bg-emerald-600 text-white disabled:opacity-30 hover:bg-emerald-700">✓</button>
@@ -175,11 +183,56 @@ function QuickEdit({ sec, row, onSaved }: { sec: PendingSection; row: PendingRow
   );
 }
 
+/** ใส่ราคาทั้งกลุ่ม (Parent + ร้านเดียวกัน) ทีเดียว */
+function GroupFill({ sec, rows, onDone }: { sec: PendingSection; rows: { r: PendingRow; i: number }[]; onDone: (idx: number[]) => void }) {
+  const toast = useToast();
+  const [val, setVal] = useState("");
+  const [cur, setCur] = useState(rows[0]?.r.currency === "RMB" || rows[0]?.r.currency === "YUAN" ? "RMB" : "THB");
+  const [busy, setBusy] = useState(false);
+  const ids = rows.map((x) => x.r.id).filter(Boolean) as string[];
+
+  const save = async () => {
+    if (!val.trim() || ids.length === 0) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch("/api/pending-data", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: sec.key, id: ids[0], ids, value: val, currency: cur }),
+      });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast.success(`ใส่ราคาทั้งกลุ่ม ${ids.length} รายการแล้ว`);
+      onDone(rows.map((x) => x.i));
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); setBusy(false); }
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input type="number" min={0} step="any" value={val} disabled={busy} onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") void save(); }} placeholder="ราคาทั้งกลุ่ม"
+        className="h-6 w-[86px] px-1.5 text-[11px] text-right border border-emerald-300 rounded bg-white" />
+      <select value={cur} disabled={busy} onChange={(e) => setCur(e.target.value)}
+        className="h-6 px-1 text-[11px] border border-emerald-300 rounded bg-white"><option value="THB">฿</option><option value="RMB">¥</option></select>
+      <button type="button" disabled={busy || !val.trim()} onClick={() => void save()}
+        title={`ใส่ราคานี้ให้ทั้ง ${ids.length} รายการในกลุ่ม`}
+        className="h-6 px-2 text-[11px] rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-30">✓ ทั้งกลุ่ม ({ids.length})</button>
+    </span>
+  );
+}
+
 function SectionCard({ sec }: { sec: PendingSection }) {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState<Set<number>>(new Set());   // แถวที่ใส่ค่าแล้ว (ซ่อนออก)
+  const [grouped, setGrouped] = useState(false);              // จัดกลุ่มตาม Parent + ร้าน
   const left = sec.count - done.size;
   const empty = left <= 0;
+  const canGroup = sec.rows.some((r) => !!r.group);
+  // จัดกลุ่ม (คงลำดับเดิม) — เก็บ index เดิมไว้ใช้ซ่อนแถวหลังบันทึก
+  const groups: [string, { r: PendingRow; i: number }[]][] = (() => {
+    if (!grouped) return [["", sec.rows.map((r, i) => ({ r, i }))]];
+    const m = new Map<string, { r: PendingRow; i: number }[]>();
+    sec.rows.forEach((r, i) => { const k = r.group || "— อื่น ๆ —"; (m.get(k) ?? m.set(k, []).get(k)!).push({ r, i }); });
+    return [...m.entries()].sort((a, b) => b[1].length - a[1].length);   // กลุ่มใหญ่ก่อน (ใส่ทีเดียวได้เยอะ)
+  })();
 
   return (
     <div className={`rounded-xl border ${empty ? "border-emerald-200 bg-emerald-50/40" : "border-amber-200 bg-amber-50/40"}`}>
@@ -198,11 +251,19 @@ function SectionCard({ sec }: { sec: PendingSection }) {
 
       {sec.count > 0 && open && (
         <div className="px-3 pb-3">
-          {sec.edit && (
-            <p className="text-[11px] text-amber-700 mb-1.5">
-              ✏️ ใส่{sec.edit.label}ในช่องสีเหลืองแล้วกด <b>Enter</b> หรือ ✓ — บันทึกกลับเข้าระบบทันที แถวนั้นจะหายไป
-            </p>
-          )}
+          <div className="flex items-center gap-2 flex-wrap mb-1.5">
+            {sec.edit && (
+              <p className="text-[11px] text-amber-700 flex-1 min-w-[200px]">
+                ✏️ ใส่{sec.edit.label}ในช่องสีเหลืองแล้วกด <b>Enter</b> หรือ ✓ — บันทึกกลับเข้าระบบทันที แถวนั้นจะหายไป
+              </p>
+            )}
+            {canGroup && sec.edit && (
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-600 whitespace-nowrap">
+                <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} />
+                🧩 จัดกลุ่มตาม Parent (ใส่ราคาทั้งกลุ่มทีเดียว)
+              </label>
+            )}
+          </div>
           <div className="max-h-[45vh] overflow-auto rounded-lg border border-slate-200 bg-white">
             <table className="w-full text-[11px] border-collapse">
               <thead className="sticky top-0 bg-slate-100 z-10">
@@ -214,26 +275,48 @@ function SectionCard({ sec }: { sec: PendingSection }) {
                 </tr>
               </thead>
               <tbody>
-                {sec.rows.map((r, i) => done.has(i) ? null : (
-                  <tr key={i} className={i % 2 ? "bg-slate-50/50" : ""}>
-                    {sec.hasImage && <td className="px-2 py-1 border-t border-slate-100"><Thumb k={r.image} /></td>}
-                    {r.cells.map((cell, j) => (
-                      <td key={j} className="px-2 py-1 text-slate-700 border-t border-slate-100">{cell || <span className="text-slate-300">—</span>}</td>
-                    ))}
-                    {sec.edit && (
-                      <td className="px-2 py-1 border-t border-slate-100 bg-amber-50/30">
-                        {r.id ? <QuickEdit sec={sec} row={r} onSaved={() => setDone((s) => new Set(s).add(i))} />
-                              : <span className="text-slate-300">—</span>}
-                      </td>
-                    )}
-                    <td className="px-1 py-1 border-t border-slate-100 text-center">
-                      {r.openHref && (
-                        <a href={r.openHref} target="_blank" rel="noreferrer" title="เปิดรายการนี้ในหน้าจัดการ"
-                          className="inline-block px-1 text-slate-400 hover:text-blue-600 text-sm leading-none">↗</a>
+                {groups.map(([gk, items]) => {
+                  const rest = items.filter((x) => !done.has(x.i));
+                  if (rest.length === 0) return null;
+                  const colSpan = (sec.hasImage ? 1 : 0) + sec.columns.length + (sec.edit ? 1 : 0) + 1;
+                  return (
+                    <Fragment key={gk || "_all"}>
+                      {gk && (
+                        <tr className="bg-emerald-50/70">
+                          <td colSpan={colSpan} className="px-2 py-1.5 border-t border-emerald-100">
+                            <span className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-slate-700">🧩 {gk}</span>
+                              <span className="text-[10px] text-slate-400">{rest.length} รายการ</span>
+                              {sec.edit && rest.length > 1 && (
+                                <span className="ml-auto"><GroupFill sec={sec} rows={rest} onDone={(idx) => setDone((s) => { const n = new Set(s); idx.forEach((k) => n.add(k)); return n; })} /></span>
+                              )}
+                            </span>
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                  </tr>
-                ))}
+                      {rest.map(({ r, i }) => (
+                        <tr key={i} className={i % 2 ? "bg-slate-50/50" : ""}>
+                          {sec.hasImage && <td className="px-2 py-1 border-t border-slate-100"><Thumb k={r.image} /></td>}
+                          {r.cells.map((cell, j) => (
+                            <td key={j} className="px-2 py-1 text-slate-700 border-t border-slate-100">{cell || <span className="text-slate-300">—</span>}</td>
+                          ))}
+                          {sec.edit && (
+                            <td className="px-2 py-1 border-t border-slate-100 bg-amber-50/30">
+                              {r.id ? <QuickEdit sec={sec} row={r} onSaved={() => setDone((s) => new Set(s).add(i))} />
+                                    : <span className="text-slate-300">—</span>}
+                            </td>
+                          )}
+                          <td className="px-1 py-1 border-t border-slate-100 text-center">
+                            {r.openHref && (
+                              <a href={r.openHref} target="_blank" rel="noreferrer" title="เปิดรายการนี้ในหน้าจัดการ"
+                                className="inline-block px-1 text-slate-400 hover:text-blue-600 text-sm leading-none">↗</a>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

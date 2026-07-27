@@ -33,6 +33,8 @@ export type PendingRow = {
   taobao?: boolean;           // ร้านออนไลน์ (taobao/1688) → โชว์ช่องใส่ลิงก์สินค้าเพิ่ม
   link?: string | null;       // ลิงก์สินค้าปัจจุบัน (ถ้ามี)
   siblings?: number;          // จำนวนวัตถุดิบพี่น้อง (Parent เดียวกัน ร้านเดียวกัน) ที่ยังไม่มีราคา
+  currency?: string | null;   // สกุลเงินปัจจุบันของรายการ (ตั้งต้นให้ช่องใส่ราคา)
+  group?: string | null;      // ชื่อกลุ่มสำหรับ "จัดกลุ่มตาม Parent" (Parent + ร้าน)
 };
 /** ตั้งค่า "ใส่ค่าเร็ว" ของหัวข้อนั้น (ไม่มี = แก้ตรงนี้ไม่ได้ ต้องกด ↗ ไปหน้าจริง) */
 export type PendingEdit = { field: string; label: string; kind: "number" | "credit_term"; suffix?: string };
@@ -135,6 +137,13 @@ async function purchasing(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
       const k = `${sk.parent}::${s(r.supplier_partner_id)}`;
       groupCount.set(k, (groupCount.get(k) ?? 0) + 1);
     }
+    // ชื่อ Parent (ไว้โชว์หัวกลุ่มตอน "จัดกลุ่มตาม Parent")
+    const parentIds = [...new Set([...sMap.values()].map((x) => x.parent).filter(Boolean))];
+    const parentName = new Map<string, string>();
+    for (let i = 0; i < parentIds.length; i += 300) {
+      const { data: pr } = await admin.from("parent_skus_v2").select("id, code, name_th").in("id", parentIds.slice(i, i + 300));
+      for (const x of (pr ?? []) as Row[]) parentName.set(s(x.id), s(x.code) || s(x.name_th));
+    }
 
     out.push({
       key: "supplier_item_price",
@@ -156,6 +165,11 @@ async function purchasing(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
           taobao: pTaobao.has(s(r.supplier_partner_id)),
           link: s(r.purchase_link) || null,
           siblings: gk ? Math.max(0, (groupCount.get(gk) ?? 1) - 1) : 0,
+          currency: s(r.currency) || "THB",
+          // กลุ่ม = Parent + ร้าน (ใส่ราคาทั้งกลุ่มทีเดียวได้) · ไม่มี Parent → จัดกลุ่มตามร้าน
+          group: sk?.parent
+            ? `${parentName.get(sk.parent) || "ไม่ทราบ Parent"} · ${pMap.get(s(r.supplier_partner_id)) ?? ""}`
+            : `— ไม่มี Parent · ${pMap.get(s(r.supplier_partner_id)) ?? ""}`,
         };
       }),
       edit: { field: "price", label: "ราคา", kind: "number", suffix: "฿" },
@@ -325,7 +339,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 // ---------- ใส่ค่าเร็ว: บันทึกกลับ "ต้นทางจริง" ของแต่ละหัวข้อ ----------
-type PatchBody = { key?: string; id?: string; value?: unknown; qty?: number; ids?: unknown[] };
+type PatchBody = { key?: string; id?: string; value?: unknown; qty?: number; ids?: unknown[]; currency?: string };
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -352,9 +366,12 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
         if (!(numVal > 0)) return NextResponse.json({ error: "ราคาต้องมากกว่า 0" }, { status: 400 });
         // ids = ใส่ราคาเดียวกันให้หลายรายการ (พี่น้อง Parent เดียวกัน) · ไม่ส่งมา = เฉพาะ id เดียว
         const ids = Array.isArray(b.ids) && b.ids.length ? b.ids.map(String) : [id];
-        const { error } = await admin.from("supplier_items").update({ price: numVal }).in("id", ids);
+        const cur = s(b.currency).toUpperCase();
+        const patch: Record<string, unknown> = { price: numVal };
+        if (cur === "RMB" || cur === "THB") patch.currency = cur;   // เลือกสกุลเงินตอนใส่ราคาได้
+        const { error } = await admin.from("supplier_items").update(patch).in("id", ids);
         if (error) throw new Error(error.message);
-        await writeAudit(admin, { action: "update", entityType: "supplier_item", entityId: id, ...actor, metadata: { price: numVal, applied_to: ids.length, via: "pending-data" } });
+        await writeAudit(admin, { action: "update", entityType: "supplier_item", entityId: id, ...actor, metadata: { price: numVal, currency: cur || null, applied_to: ids.length, via: "pending-data" } });
         break;
       }
       case "supplier_item_link": {
