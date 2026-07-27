@@ -34,6 +34,7 @@ export type PendingRow = {
   link?: string | null;       // ลิงก์สินค้าปัจจุบัน (ถ้ามี)
   siblings?: number;          // จำนวนวัตถุดิบพี่น้อง (Parent เดียวกัน ร้านเดียวกัน) ที่ยังไม่มีราคา
   currency?: string | null;   // สกุลเงินปัจจุบันของรายการ (ตั้งต้นให้ช่องใส่ราคา)
+  cn?: boolean;               // ร้านจีน → ช่องราคาตั้งต้นเป็น ¥ (RMB)
   group?: string | null;      // ชื่อกลุ่มสำหรับ "จัดกลุ่มตาม Parent" (Parent + ร้าน)
 };
 /** ตั้งค่า "ใส่ค่าเร็ว" ของหัวข้อนั้น (ไม่มี = แก้ตรงนี้ไม่ได้ ต้องกด ↗ ไปหน้าจริง) */
@@ -115,14 +116,18 @@ async function purchasing(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
     // ชื่อร้าน + รหัส/ชื่อ/รูป วัตถุดิบ มาจาก FK (คอลัมน์ text ในตารางนี้ว่าง)
     const pIds = [...new Set(rows.map((r) => s(r.supplier_partner_id)).filter(Boolean))];
     const sIds = [...new Set(rows.map((r) => s(r.item_sku_id)).filter(Boolean))];
-    const pMap = new Map<string, string>(), pTaobao = new Set<string>();
+    const pMap = new Map<string, string>(), pTaobao = new Set<string>(), pCN = new Set<string>();
     const sMap = new Map<string, { code: string; name: string; img: string; parent: string }>();
     for (let i = 0; i < pIds.length; i += 300) {
-      const { data: ps } = await admin.from("partners_v2").select("id, name_th, display_name, code, is_taobao").in("id", pIds.slice(i, i + 300));
+      const { data: ps } = await admin.from("partners_v2")
+        .select("id, name_th, display_name, code, is_taobao, default_currency, shop_country").in("id", pIds.slice(i, i + 300));
       for (const p of (ps ?? []) as Row[]) {
         const nm = s(p.name_th) || s(p.display_name) || s(p.code);
         pMap.set(s(p.id), nm);
         if (p.is_taobao === true || /taobao|tao ?bao|1688/i.test(nm)) pTaobao.add(s(p.id));   // ร้านออนไลน์ → ใส่ลิงก์ได้
+        // ร้านจีน = ติ๊ก taobao / สกุลเงินตั้งต้นเป็นหยวน / ประเทศจีน → ช่องราคาตั้งต้น ¥
+        if (p.is_taobao === true || ["RMB", "YUAN", "CNY"].includes(s(p.default_currency).toUpperCase())
+            || /จีน|china|cn/i.test(s(p.shop_country))) pCN.add(s(p.id));
       }
     }
     for (let i = 0; i < sIds.length; i += 300) {
@@ -166,6 +171,7 @@ async function purchasing(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
           link: s(r.purchase_link) || null,
           siblings: gk ? Math.max(0, (groupCount.get(gk) ?? 1) - 1) : 0,
           currency: s(r.currency) || "THB",
+          cn: pCN.has(s(r.supplier_partner_id)),
           // กลุ่ม = Parent + ร้าน (ใส่ราคาทั้งกลุ่มทีเดียวได้) · ไม่มี Parent → จัดกลุ่มตามร้าน
           group: sk?.parent
             ? `${parentName.get(sk.parent) || "ไม่ทราบ Parent"} · ${pMap.get(s(r.supplier_partner_id)) ?? ""}`

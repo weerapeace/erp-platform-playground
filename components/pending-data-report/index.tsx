@@ -45,12 +45,17 @@ function Thumb({ k }: { k: string | null | undefined }) {
   return <img src={src} alt="" loading="lazy" className="w-8 h-8 rounded object-cover border border-slate-200 bg-white" />;
 }
 
+/** สกุลเงินตั้งต้นของช่องใส่ราคา — ใช้สกุลเดิมของรายการก่อน · ไม่มีก็ดูว่าเป็นร้านจีนไหม (ร้านจีน = ¥) */
+const defaultCur = (row: PendingRow) =>
+  row.currency === "RMB" || row.currency === "YUAN" ? "RMB" : (row.cn ? "RMB" : "THB");
+
 /** ช่องใส่ค่าเร็ว — บันทึกแล้วเรียก onSaved (แถวจะหายออกจากรายการ) */
 function QuickEdit({ sec, row, onSaved }: { sec: PendingSection; row: PendingRow; onSaved: () => void }) {
   const toast = useToast();
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
-  const [cur, setCur] = useState(row.currency === "RMB" || row.currency === "YUAN" ? "RMB" : "THB");   // สกุลเงินของราคา
+  // สกุลเงินของราคา — ร้านจีน (taobao/หยวน/ประเทศจีน) ตั้งต้นเป็น ¥ ให้เลย
+  const [cur, setCur] = useState(defaultCur(row));
   const [linkVal, setLinkVal] = useState(row.link ?? "");     // ลิงก์สินค้า (ร้านออนไลน์)
   const [linkOpen, setLinkOpen] = useState(false);
   // popup ถาม "ใส่ราคาให้พี่น้อง Parent เดียวกันด้วยไหม"
@@ -187,7 +192,7 @@ function QuickEdit({ sec, row, onSaved }: { sec: PendingSection; row: PendingRow
 function GroupFill({ sec, rows, onDone }: { sec: PendingSection; rows: { r: PendingRow; i: number }[]; onDone: (idx: number[]) => void }) {
   const toast = useToast();
   const [val, setVal] = useState("");
-  const [cur, setCur] = useState(rows[0]?.r.currency === "RMB" || rows[0]?.r.currency === "YUAN" ? "RMB" : "THB");
+  const [cur, setCur] = useState(rows[0]?.r ? defaultCur(rows[0].r) : "THB");
   const [busy, setBusy] = useState(false);
   const ids = rows.map((x) => x.r.id).filter(Boolean) as string[];
 
