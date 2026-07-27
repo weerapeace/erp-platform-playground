@@ -258,6 +258,24 @@ export default function CampaignCanvasPage() {
     } catch { /* ignore */ }
   }, []);
   const [boardKey, setBoardKey] = useState(0); // เปลี่ยนเพื่อรีโหลดกระดานล่าสุด (แทน F5 ที่เด้งหน้าแรก)
+  // ความสูงกระดาน = วัดจากพื้นที่ที่เหลือจริง (แถบหัวสูงไม่เท่ากันในแต่ละโหมด/จอ)
+  // ค่าตายตัวเดิม (100vh-205px) ทำให้แถบคำใบ้ล่างถูกดันหลุดจอ ต้องเลื่อนตาม
+  const boardWrapRef = useRef<HTMLDivElement>(null);
+  const [boardH, setBoardH] = useState("calc(100vh - 205px)");   // ค่าตั้งต้นก่อนวัด (กันกระพริบ/SSR)
+  useEffect(() => {
+    const el = boardWrapRef.current; if (!el) return;
+    const BOTTOM = 44;   // แถบคำใบ้ล่าง + ระยะขอบ
+    // ใช้ระยะจาก "บนสุดของเอกสาร" (ไม่ใช่จอ) → ค่าคงที่แม้หน้าจะเลื่อน ไม่วนคำนวณไปมา
+    const calc = () => {
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      setBoardH(`${Math.max(320, Math.round(window.innerHeight - top - BOTTOM))}px`);
+    };
+    calc();
+    const ro = new ResizeObserver(calc);
+    ro.observe(document.body);
+    window.addEventListener("resize", calc);
+    return () => { ro.disconnect(); window.removeEventListener("resize", calc); };
+  }, []);
   const [refreshing, setRefreshing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [skuOpen, setSkuOpen] = useState(false);
@@ -495,10 +513,10 @@ export default function CampaignCanvasPage() {
       </div>
 
       <div className="px-4 py-3">
-        <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
+        <div ref={boardWrapRef} className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
           {/* realtime ผ่าน Supabase Broadcast (ไม่กิน Cloudflare CPU) + เซฟกันทับด้วย version-guard */}
-          {/* ความสูงพอดี viewport → หน้าไม่เลื่อน → toolbox ของกระดานไม่มุด/จม (กระดานเลื่อนในตัวเองได้อยู่แล้ว) */}
-          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 205px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onBoardReady} collab stickyTop={embed ? 72 : 128} />
+          {/* ความสูงวัดจากพื้นที่ที่เหลือจริง → กระดานเต็มถึงแถบล่างพอดี หน้าไม่เลื่อน toolbox ไม่จม */}
+          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height={boardH} controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onBoardReady} collab stickyTop={embed ? 72 : 128} />
 
           {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
           {dragPanelOpen && (
