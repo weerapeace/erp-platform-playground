@@ -71,7 +71,9 @@ export default function CostCalculatorPage() {
   // โหลดตัวเลือกจ่ายโต๊ะ (แผนก/ช่าง) + รายชื่องานเหมา — ครั้งเดียว
   useEffect(() => {
     apiFetch("/api/mo/departments").then((r) => r.json()).then((j) => setDepartments((j.data ?? j.departments ?? []) as { id: string; name: string }[])).catch(() => {});
-    apiFetch("/api/mo/assignees").then((r) => r.json()).then((j) => setCraftsmen((j.data ?? j.assignees ?? []) as { id: string; name: string; department_id?: string | null }[])).catch(() => {});
+    // ⚠️ /api/mo/assignees คืน { craftsmen, departments, dept_wages } — ไม่ใช่ data/assignees
+    //    (เคยอ่านผิดชื่อ → รายชื่อพนักงานว่างเปล่าทั้งโหมดจ่ายโต๊ะและค่าตัด/พิมพ์)
+    apiFetch("/api/mo/assignees").then((r) => r.json()).then((j) => setCraftsmen((j.craftsmen ?? []) as { id: string; name: string; department_id?: string | null }[])).catch(() => {});
     apiFetch("/api/bom/piecework?names=1").then((r) => r.json()).then((j) => setJobNames((j.names ?? []) as string[])).catch(() => {});
   }, []);
 

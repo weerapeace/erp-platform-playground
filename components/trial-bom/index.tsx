@@ -124,6 +124,13 @@ function JobBox({ label, icon, job, pieces, craftsmen, onChange }: {
 }) {
   const toast = useToast();
   const [loadingWage, setLoadingWage] = useState(false);
+  const [wSearch, setWSearch] = useState("");
+  const picked = useMemo(() => craftsmen.filter((c) => job.worker_ids.includes(c.id)), [craftsmen, job.worker_ids]);
+  const matches = useMemo(() => {
+    const q = wSearch.trim().toLowerCase();
+    if (!q) return [];
+    return craftsmen.filter((c) => !job.worker_ids.includes(c.id) && c.name.toLowerCase().includes(q)).slice(0, 20);
+  }, [craftsmen, wSearch, job.worker_ids]);
   const perPiece = jobPerPiece(job);
   const perProduct = Math.round(perPiece * (Number(pieces) || 0) * 10000) / 10000;
 
@@ -166,18 +173,29 @@ function JobBox({ label, icon, job, pieces, craftsmen, onChange }: {
             </div>
           ) : (
             <>
-              {/* เลือกพนักงาน (หลายคน) */}
-              <div className="flex flex-wrap gap-1">
-                {craftsmen.length === 0 && <span className="text-[11px] text-slate-400">— ไม่มีรายชื่อพนักงาน —</span>}
-                {craftsmen.map((c) => {
-                  const on = job.worker_ids.includes(c.id);
-                  return (
-                    <button key={c.id} type="button" onClick={() => void toggleWorker(c.id)}
-                      className={`px-1.5 py-0.5 text-[11px] rounded-full border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>
-                      {on ? "✓ " : ""}{c.name}
-                    </button>
-                  );
-                })}
+              {/* เลือกพนักงาน (หลายคน) — มีหลายสิบคน จึงใช้ช่องค้นหา + คนที่เลือกลอยขึ้นบน */}
+              <div className="space-y-1">
+                {picked.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {picked.map((c) => (
+                      <button key={c.id} type="button" onClick={() => void toggleWorker(c.id)} title="เอาออก"
+                        className="px-1.5 py-0.5 text-[11px] rounded-full border bg-violet-600 text-white border-violet-600">✓ {c.name} ✕</button>
+                    ))}
+                  </div>
+                )}
+                <input value={wSearch} onChange={(e) => setWSearch(e.target.value)}
+                  placeholder={craftsmen.length ? `พิมพ์ค้นหาพนักงาน (${craftsmen.length} คน)…` : "— ไม่มีรายชื่อพนักงาน —"}
+                  disabled={craftsmen.length === 0}
+                  className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:bg-slate-50" />
+                {wSearch.trim() !== "" && (
+                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                    {matches.length === 0 && <span className="text-[11px] text-slate-400">ไม่พบชื่อนี้</span>}
+                    {matches.map((c) => (
+                      <button key={c.id} type="button" onClick={() => void toggleWorker(c.id)}
+                        className="px-1.5 py-0.5 text-[11px] rounded-full border bg-white text-slate-600 border-slate-200 hover:bg-violet-50 hover:border-violet-300">+ {c.name}</button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="flex items-end gap-1.5 flex-wrap text-[11px] text-slate-400">
                 <label className="flex flex-col">ค่าแรงรวม/เดือน
