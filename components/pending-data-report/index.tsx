@@ -18,6 +18,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { PendingSection, PendingRow, PendingDataResponse } from "@/app/api/pending-data/route";
+import type { PriceSibling } from "@/app/api/pending-data/siblings/route";
 
 export type PendingScope = "purchasing" | "production";
 
@@ -49,21 +50,53 @@ function QuickEdit({ sec, row, onSaved }: { sec: PendingSection; row: PendingRow
   const toast = useToast();
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
+  const [linkVal, setLinkVal] = useState(row.link ?? "");     // ลิงก์สินค้า (ร้านออนไลน์)
+  const [linkOpen, setLinkOpen] = useState(false);
+  // popup ถาม "ใส่ราคาให้พี่น้อง Parent เดียวกันด้วยไหม"
+  const [ask, setAsk] = useState<{ value: string; parent: string | null; sibs: PriceSibling[]; picked: Set<string> } | null>(null);
   const ed = sec.edit!;
 
-  const save = async (v: string) => {
+  const saveLink = async () => {
+    if (!row.id) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch("/api/pending-data", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "supplier_item_link", id: row.id, value: linkVal }),
+      });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast.success("บันทึกลิงก์แล้ว"); setLinkOpen(false);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกลิงก์ไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
+  const save = async (v: string, ids?: string[]) => {
     if (!v.trim() || !row.id) return;
     setBusy(true);
     try {
       const r = await apiFetch("/api/pending-data", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: sec.key, id: row.id, value: v, qty: row.qty }),
+        body: JSON.stringify({ key: sec.key, id: row.id, value: v, qty: row.qty, ...(ids?.length ? { ids } : {}) }),
       });
       const j = await r.json();
       if (j.error) throw new Error(j.error);
-      toast.success(`บันทึก${ed.label}แล้ว`);
+      toast.success(ids?.length ? `บันทึก${ed.label} ${ids.length} รายการแล้ว` : `บันทึก${ed.label}แล้ว`);
       onSaved();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); setBusy(false); }
+  };
+
+  // ใส่ราคา: ถ้ามี "พี่น้อง" (Parent เดียวกัน ร้านเดียวกัน ยังไม่มีราคา) → ถามก่อนว่าจะใส่ให้ด้วยไหม
+  const saveWithSiblingCheck = async (v: string) => {
+    if (!v.trim() || !row.id) return;
+    if (sec.key !== "supplier_item_price" || !(row.siblings && row.siblings > 0)) { void save(v); return; }
+    setBusy(true);
+    try {
+      const j = await apiFetch(`/api/pending-data/siblings?supplier_item_id=${encodeURIComponent(row.id)}`).then((x) => x.json());
+      const sibs = (j.data ?? []) as PriceSibling[];
+      setBusy(false);
+      if (sibs.length === 0) { void save(v); return; }
+      setAsk({ value: v, parent: (j.parent_name as string) ?? null, sibs, picked: new Set(sibs.map((x) => x.supplier_item_id)) });
+    } catch { setBusy(false); void save(v); }
   };
 
   if (ed.kind === "credit_term") {
@@ -76,16 +109,68 @@ function QuickEdit({ sec, row, onSaved }: { sec: PendingSection; row: PendingRow
     );
   }
   return (
-    <span className="flex items-center gap-1">
+    <span className="flex items-center gap-1 flex-wrap">
       <input type="number" min={0} step="any" value={val} disabled={busy}
         onChange={(e) => setVal(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter") void save(val); }}
+        onKeyDown={(e) => { if (e.key === "Enter") void saveWithSiblingCheck(val); }}
         placeholder={ed.label}
         className="h-7 w-[76px] px-1.5 text-[11px] text-right border border-amber-300 rounded bg-amber-50/50 focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-50" />
       {ed.suffix && <span className="text-[10px] text-slate-400">{ed.suffix}</span>}
-      <button type="button" disabled={busy || !val.trim()} onClick={() => void save(val)}
-        title="บันทึกกลับเข้าระบบ"
+      <button type="button" disabled={busy || !val.trim()} onClick={() => void saveWithSiblingCheck(val)}
+        title={row.siblings ? `บันทึก (มีพี่น้อง Parent เดียวกันอีก ${row.siblings} ตัว — จะถามให้ใส่ด้วย)` : "บันทึกกลับเข้าระบบ"}
         className="h-7 px-1.5 text-[11px] rounded bg-emerald-600 text-white disabled:opacity-30 hover:bg-emerald-700">✓</button>
+      {/* ร้านออนไลน์ → ใส่ลิงก์สินค้าได้ตรงนี้เลย */}
+      {row.taobao && (linkOpen ? (
+        <span className="flex items-center gap-1">
+          <input type="url" value={linkVal} disabled={busy} onChange={(e) => setLinkVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void saveLink(); }} placeholder="วางลิงก์ taobao"
+            className="h-7 w-[150px] px-1.5 text-[11px] border border-orange-300 rounded bg-orange-50/40 focus:outline-none focus:ring-1 focus:ring-orange-400" />
+          <button type="button" disabled={busy} onClick={() => void saveLink()}
+            className="h-7 px-1.5 text-[11px] rounded bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40">✓</button>
+        </span>
+      ) : (
+        <button type="button" onClick={() => setLinkOpen(true)} title={row.link ?? "ใส่ลิงก์สินค้าของร้านนี้"}
+          className={`h-7 px-1.5 text-[11px] rounded border ${row.link ? "border-orange-300 text-orange-700 bg-orange-50" : "border-dashed border-slate-300 text-slate-400 hover:border-orange-300 hover:text-orange-500"}`}>
+          {row.link ? "淘 แก้ลิงก์" : "🔗 ลิงก์"}
+        </button>
+      ))}
+
+      {/* ถามก่อนบันทึก: ใส่ราคาเดียวกันให้พี่น้อง Parent เดียวกันด้วยไหม */}
+      {ask && (
+        <ERPModal open onClose={() => setAsk(null)} size="md" title="ใส่ราคาให้รหัสอื่นใน Parent เดียวกันด้วยไหม?"
+          description={ask.parent ? `Parent: ${ask.parent}` : undefined}>
+          <div className="space-y-2">
+            <div className="text-sm text-slate-600">
+              ราคาที่จะใส่: <b className="text-slate-800">{ask.value} {ed.suffix}</b> · พบอีก <b>{ask.sibs.length}</b> รหัสในกลุ่มเดียวกัน (ร้านเดียวกัน) ที่ยังไม่มีราคา
+            </div>
+            <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[40vh] overflow-y-auto">
+              {ask.sibs.map((sb) => (
+                <label key={sb.supplier_item_id} className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-slate-50 cursor-pointer">
+                  <input type="checkbox" checked={ask.picked.has(sb.supplier_item_id)}
+                    onChange={(e) => setAsk((a) => {
+                      if (!a) return a;
+                      const n = new Set(a.picked);
+                      if (e.target.checked) n.add(sb.supplier_item_id); else n.delete(sb.supplier_item_id);
+                      return { ...a, picked: n };
+                    })} />
+                  <span className="font-mono text-xs text-slate-500">{sb.code}</span>
+                  <span className="flex-1 min-w-0 truncate text-slate-700">{sb.name}</span>
+                  {sb.supplier_sku && <span className="text-[11px] text-slate-400">รหัสร้าน {sb.supplier_sku}</span>}
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => { const v = ask.value; setAsk(null); void save(v); }}
+                className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ใส่เฉพาะตัวนี้</button>
+              <button disabled={ask.picked.size === 0}
+                onClick={() => { const v = ask.value, ids = [row.id!, ...ask.picked]; setAsk(null); void save(v, ids); }}
+                className="h-9 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">
+                ใส่ทั้งหมด ({ask.picked.size + 1} รายการ)
+              </button>
+            </div>
+          </div>
+        </ERPModal>
+      )}
     </span>
   );
 }

@@ -30,6 +30,9 @@ export type PendingRow = {
   id?: string | null;         // id ที่ใช้บันทึกค่า (ตามชนิดของหัวข้อ)
   openHref?: string | null;   // ปุ่ม ↗ ไปหน้าจัดการ "พร้อมเปิดรายการนั้น"
   qty?: number;               // ใช้ตอนแปลง ค่าแรง/ชิ้น → ยอดรวม
+  taobao?: boolean;           // ร้านออนไลน์ (taobao/1688) → โชว์ช่องใส่ลิงก์สินค้าเพิ่ม
+  link?: string | null;       // ลิงก์สินค้าปัจจุบัน (ถ้ามี)
+  siblings?: number;          // จำนวนวัตถุดิบพี่น้อง (Parent เดียวกัน ร้านเดียวกัน) ที่ยังไม่มีราคา
 };
 /** ตั้งค่า "ใส่ค่าเร็ว" ของหัวข้อนั้น (ไม่มี = แก้ตรงนี้ไม่ได้ ต้องกด ↗ ไปหน้าจริง) */
 export type PendingEdit = { field: string; label: string; kind: "number" | "credit_term"; suffix?: string };
@@ -102,7 +105,7 @@ async function purchasing(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
   // 2) วัตถุดิบที่ผูกร้านไว้แล้วแต่ยังไม่ใส่ราคา → เทียบราคา/คิดต้นทุนไม่ได้
   {
     const { data, count } = await admin.from("supplier_items")
-      .select("id, supplier_partner_id, item_sku_id, supplier_sku, purchase_uom, currency", { count: "exact" })
+      .select("id, supplier_partner_id, item_sku_id, supplier_sku, purchase_uom, purchase_uom_en, purchase_link, currency", { count: "exact" })
       .eq("is_active", true).or("price.is.null,price.eq.0")
       .limit(MAX_ROWS);
     const rows = (data ?? []) as Row[];
@@ -110,14 +113,27 @@ async function purchasing(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
     // ชื่อร้าน + รหัส/ชื่อ/รูป วัตถุดิบ มาจาก FK (คอลัมน์ text ในตารางนี้ว่าง)
     const pIds = [...new Set(rows.map((r) => s(r.supplier_partner_id)).filter(Boolean))];
     const sIds = [...new Set(rows.map((r) => s(r.item_sku_id)).filter(Boolean))];
-    const pMap = new Map<string, string>(), sMap = new Map<string, { code: string; name: string; img: string }>();
+    const pMap = new Map<string, string>(), pTaobao = new Set<string>();
+    const sMap = new Map<string, { code: string; name: string; img: string; parent: string }>();
     for (let i = 0; i < pIds.length; i += 300) {
-      const { data: ps } = await admin.from("partners_v2").select("id, name_th, display_name, code").in("id", pIds.slice(i, i + 300));
-      for (const p of (ps ?? []) as Row[]) pMap.set(s(p.id), s(p.name_th) || s(p.display_name) || s(p.code));
+      const { data: ps } = await admin.from("partners_v2").select("id, name_th, display_name, code, is_taobao").in("id", pIds.slice(i, i + 300));
+      for (const p of (ps ?? []) as Row[]) {
+        const nm = s(p.name_th) || s(p.display_name) || s(p.code);
+        pMap.set(s(p.id), nm);
+        if (p.is_taobao === true || /taobao|tao ?bao|1688/i.test(nm)) pTaobao.add(s(p.id));   // ร้านออนไลน์ → ใส่ลิงก์ได้
+      }
     }
     for (let i = 0; i < sIds.length; i += 300) {
-      const { data: sk } = await admin.from("skus_v2").select("id, code, name_th, cover_image_r2_key").in("id", sIds.slice(i, i + 300));
-      for (const x of (sk ?? []) as Row[]) sMap.set(s(x.id), { code: s(x.code), name: s(x.name_th), img: s(x.cover_image_r2_key) });
+      const { data: sk } = await admin.from("skus_v2").select("id, code, name_th, cover_image_r2_key, parent_sku_id").in("id", sIds.slice(i, i + 300));
+      for (const x of (sk ?? []) as Row[]) sMap.set(s(x.id), { code: s(x.code), name: s(x.name_th), img: s(x.cover_image_r2_key), parent: s(x.parent_sku_id) });
+    }
+    // นับพี่น้อง: วัตถุดิบที่ยังไม่มีราคา + Parent เดียวกัน + ร้านเดียวกัน (ไว้ถามว่าจะใส่ราคาเดียวกันไหม)
+    const groupCount = new Map<string, number>();
+    for (const r of rows) {
+      const sk = sMap.get(s(r.item_sku_id));
+      if (!sk?.parent) continue;
+      const k = `${sk.parent}::${s(r.supplier_partner_id)}`;
+      groupCount.set(k, (groupCount.get(k) ?? 0) + 1);
     }
 
     out.push({
@@ -130,10 +146,16 @@ async function purchasing(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
       blanks: ["ราคา", "สกุลเงิน"],
       rows: rows.map((r) => {
         const sk = sMap.get(s(r.item_sku_id));
+        const gk = sk?.parent ? `${sk.parent}::${s(r.supplier_partner_id)}` : "";
         return {
-          cells: [pMap.get(s(r.supplier_partner_id)) ?? "", sk?.code ?? "", sk?.name ?? "", s(r.supplier_sku), s(r.purchase_uom)],
+          cells: [pMap.get(s(r.supplier_partner_id)) ?? "", sk?.code ?? "", sk?.name ?? "", s(r.supplier_sku), s(r.purchase_uom_en) || s(r.purchase_uom)],
           image: sk?.img || null,
-          id: s(r.id), openHref: `/master/supplier-items?open=${s(r.id)}`,
+          id: s(r.id),
+          // เปิดที่ "สินค้า (SKU)" ตัวนั้นเลย — ไม่ใช่ตาราง supplier items ที่ดูไม่รู้เรื่อง
+          openHref: r.item_sku_id ? `/master/skus?open=${s(r.item_sku_id)}` : `/master/supplier-items?open=${s(r.id)}`,
+          taobao: pTaobao.has(s(r.supplier_partner_id)),
+          link: s(r.purchase_link) || null,
+          siblings: gk ? Math.max(0, (groupCount.get(gk) ?? 1) - 1) : 0,
         };
       }),
       edit: { field: "price", label: "ราคา", kind: "number", suffix: "฿" },
@@ -303,7 +325,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 // ---------- ใส่ค่าเร็ว: บันทึกกลับ "ต้นทางจริง" ของแต่ละหัวข้อ ----------
-type PatchBody = { key?: string; id?: string; value?: unknown; qty?: number };
+type PatchBody = { key?: string; id?: string; value?: unknown; qty?: number; ids?: unknown[] };
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -328,9 +350,20 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       }
       case "supplier_item_price": {
         if (!(numVal > 0)) return NextResponse.json({ error: "ราคาต้องมากกว่า 0" }, { status: 400 });
-        const { error } = await admin.from("supplier_items").update({ price: numVal }).eq("id", id);
+        // ids = ใส่ราคาเดียวกันให้หลายรายการ (พี่น้อง Parent เดียวกัน) · ไม่ส่งมา = เฉพาะ id เดียว
+        const ids = Array.isArray(b.ids) && b.ids.length ? b.ids.map(String) : [id];
+        const { error } = await admin.from("supplier_items").update({ price: numVal }).in("id", ids);
         if (error) throw new Error(error.message);
-        await writeAudit(admin, { action: "update", entityType: "supplier_item", entityId: id, ...actor, metadata: { price: numVal, via: "pending-data" } });
+        await writeAudit(admin, { action: "update", entityType: "supplier_item", entityId: id, ...actor, metadata: { price: numVal, applied_to: ids.length, via: "pending-data" } });
+        break;
+      }
+      case "supplier_item_link": {
+        // ลิงก์สินค้าของร้าน (ร้านออนไลน์ เช่น taobao/1688)
+        const url = s(b.value).trim();
+        if (url && !/^https?:\/\//i.test(url)) return NextResponse.json({ error: "ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://" }, { status: 400 });
+        const { error } = await admin.from("supplier_items").update({ purchase_link: url || null }).eq("id", id);
+        if (error) throw new Error(error.message);
+        await writeAudit(admin, { action: "update", entityType: "supplier_item", entityId: id, ...actor, metadata: { purchase_link: url, via: "pending-data" } });
         break;
       }
       case "material_cost": {
