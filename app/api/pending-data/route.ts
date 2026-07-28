@@ -36,6 +36,7 @@ export type PendingRow = {
   currency?: string | null;   // สกุลเงินปัจจุบันของรายการ (ตั้งต้นให้ช่องใส่ราคา)
   cn?: boolean;               // ร้านจีน → ช่องราคาตั้งต้นเป็น ¥ (RMB)
   group?: string | null;      // ชื่อกลุ่มสำหรับ "จัดกลุ่มตาม Parent" (Parent + ร้าน)
+  filterKey?: string | null;  // ค่าที่ใช้กรองด้วย dropdown (เช่น ชื่อร้าน) — ดู PendingSection.filter
 };
 /** ตั้งค่า "ใส่ค่าเร็ว" ของหัวข้อนั้น (ไม่มี = แก้ตรงนี้ไม่ได้ ต้องกด ↗ ไปหน้าจริง) */
 export type PendingEdit = { field: string; label: string; kind: "number" | "credit_term"; suffix?: string };
@@ -53,6 +54,8 @@ export type PendingSection = {
   edit: PendingEdit | null;
   hasImage: boolean;      // หัวข้อนี้มีรูปไหม (ตาราง/ใบพิมพ์จะเพิ่มคอลัมน์รูป)
   truncated: boolean;
+  /** เปิด dropdown กรองรายการ (เช่น "ร้าน") — ต้องใส่ row.filterKey ด้วย · ไม่ใส่ = ไม่มีตัวกรอง */
+  filter?: { label: string } | null;
 };
 export type PendingDataResponse = { scope: string; sections: PendingSection[]; error: string | null };
 
@@ -91,7 +94,7 @@ async function purchasing(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
       key: "supplier_credit_term",
       title: "ร้านที่ยังไม่ตั้งเครดิตเทอม (กี่วันจ่าย)",
       hint: "ไม่ตั้ง = ปฏิทินจ่ายเงินคิดวันครบกำหนดให้ไม่ได้ ต้องจำเอง",
-      fixHref: "/master/partners", fixLabel: "ไปตั้งที่ข้อมูลร้าน",
+      fixHref: "/purchasing/shop-terms", fixLabel: "ไปตั้งเครดิตทุกร้านรวดเดียว",
       count: miss.length,
       columns: ["รหัสร้าน", "ชื่อร้าน", "โทร"],
       blanks: ["เครดิตกี่วัน", "หมายเหตุ"],
@@ -176,11 +179,14 @@ async function purchasing(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
           group: sk?.parent
             ? `${parentName.get(sk.parent) || "ไม่ทราบ Parent"} · ${pMap.get(s(r.supplier_partner_id)) ?? ""}`
             : `— ไม่มี Parent · ${pMap.get(s(r.supplier_partner_id)) ?? ""}`,
+          // ให้เลือกทำ "ทีละร้าน" ได้ — ราคาส่วนใหญ่กระจุกอยู่ไม่กี่ร้าน
+          filterKey: pMap.get(s(r.supplier_partner_id)) || "— ไม่ระบุร้าน —",
         };
       }),
       edit: { field: "price", label: "ราคา", kind: "number", suffix: "฿" },
       hasImage: true,
       truncated: (count ?? 0) > rows.length,
+      filter: { label: "ร้าน" },
     });
   }
   return out;

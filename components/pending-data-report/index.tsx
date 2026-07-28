@@ -228,14 +228,27 @@ function SectionCard({ sec }: { sec: PendingSection }) {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState<Set<number>>(new Set());   // แถวที่ใส่ค่าแล้ว (ซ่อนออก)
   const [grouped, setGrouped] = useState(false);              // จัดกลุ่มตาม Parent + ร้าน
+  const [pick, setPick] = useState("");                       // ตัวกรอง (เช่น เลือกทำทีละร้าน)
   const left = sec.count - done.size;
   const empty = left <= 0;
   const canGroup = sec.rows.some((r) => !!r.group);
-  // จัดกลุ่ม (คงลำดับเดิม) — เก็บ index เดิมไว้ใช้ซ่อนแถวหลังบันทึก
+
+  // ตัวเลือกของ dropdown กรอง — เรียงจากค้างเยอะสุด (ร้านที่ทำแล้วคุ้มสุดอยู่บน)
+  const filterOpts: [string, number][] = sec.filter
+    ? (() => {
+      const m = new Map<string, number>();
+      for (const r of sec.rows) { const k = r.filterKey || "—"; m.set(k, (m.get(k) ?? 0) + 1); }
+      return [...m.entries()].sort((a, b) => b[1] - a[1]);
+    })()
+    : [];
+  // เก็บ index เดิมไว้ใช้ซ่อนแถวหลังบันทึก → กรองแล้วยังอ้าง index ถูก
+  const visible = sec.rows.map((r, i) => ({ r, i })).filter(({ r }) => !pick || (r.filterKey || "—") === pick);
+
+  // จัดกลุ่ม (คงลำดับเดิม)
   const groups: [string, { r: PendingRow; i: number }[]][] = (() => {
-    if (!grouped) return [["", sec.rows.map((r, i) => ({ r, i }))]];
+    if (!grouped) return [["", visible]];
     const m = new Map<string, { r: PendingRow; i: number }[]>();
-    sec.rows.forEach((r, i) => { const k = r.group || "— อื่น ๆ —"; (m.get(k) ?? m.set(k, []).get(k)!).push({ r, i }); });
+    visible.forEach(({ r, i }) => { const k = r.group || "— อื่น ๆ —"; (m.get(k) ?? m.set(k, []).get(k)!).push({ r, i }); });
     return [...m.entries()].sort((a, b) => b[1].length - a[1].length);   // กลุ่มใหญ่ก่อน (ใส่ทีเดียวได้เยอะ)
   })();
 
@@ -262,6 +275,16 @@ function SectionCard({ sec }: { sec: PendingSection }) {
                 ✏️ ใส่{sec.edit.label}ในช่องสีเหลืองแล้วกด <b>Enter</b> หรือ ✓ — บันทึกกลับเข้าระบบทันที แถวนั้นจะหายไป
               </p>
             )}
+            {sec.filter && filterOpts.length > 1 && (
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-600 whitespace-nowrap">
+                🏪 {sec.filter.label}:
+                <select value={pick} onChange={(e) => setPick(e.target.value)}
+                  className="h-7 max-w-[230px] border border-slate-300 rounded-md px-1.5 text-[11px] bg-white">
+                  <option value="">ทุก{sec.filter.label} ({sec.rows.length})</option>
+                  {filterOpts.map(([k, n]) => <option key={k} value={k}>{k} ({n})</option>)}
+                </select>
+              </label>
+            )}
             {canGroup && sec.edit && (
               <label className="flex items-center gap-1.5 text-[11px] text-slate-600 whitespace-nowrap">
                 <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} />
@@ -269,6 +292,12 @@ function SectionCard({ sec }: { sec: PendingSection }) {
               </label>
             )}
           </div>
+          {pick && (
+            <p className="text-[11px] text-slate-500 mb-1.5">
+              กำลังดูเฉพาะ <b>{pick}</b> — {visible.filter((x) => !done.has(x.i)).length} รายการ
+              <button type="button" onClick={() => setPick("")} className="ml-2 text-indigo-600 hover:underline">ล้างตัวกรอง</button>
+            </p>
+          )}
           <div className="max-h-[45vh] overflow-auto rounded-lg border border-slate-200 bg-white">
             <table className="w-full text-[11px] border-collapse">
               <thead className="sticky top-0 bg-slate-100 z-10">
