@@ -32,6 +32,11 @@ const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").
     </div>
   ),
 });
+// 🛒 กล่องพักสินค้าจาก Taobao — โหลดเฉพาะตอนกดปุ่ม (ไม่ให้ถ่วง bundle หน้าหลัก)
+const TaobaoBrowser = nextDynamic(() => import("@/components/taobao-browser").then((m) => m.TaobaoBrowser), {
+  ssr: false,
+  loading: () => <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>,
+});
 // ป๊อปอัป bulk edit ของกลาง — โหลดเฉพาะตอนกด "แก้ไขข้อมูล" (data-table ใหญ่ ไม่เอาเข้า bundle หน้านี้)
 const BulkEditAllModal = nextDynamic(() => import("@/components/data-table").then((m) => ({ default: m.BulkEditAllModal })), { ssr: false });
 // ป๊อปอัปพิมพ์บาร์โค้ด/QR — โหลดเฉพาะตอนกด (jsbarcode/qrcode ไม่เข้า bundle หน้านี้)
@@ -139,6 +144,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   const [entity, setEntity] = useState<"skus" | "parent-skus">(entityProp ?? nav0?.en ?? "skus");   // ดูตาม SKU หรือ Parent SKU (ของกลางตัวเดียว)
   useEffect(() => { if (entityProp && entityProp !== entity) setEntity(entityProp); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [entityProp]);
   const entityRef = useRef(entity); entityRef.current = entity;   // ให้ pushNav อ่านค่าล่าสุดโดยไม่ต้องผูก dep
+  const [taobao, setTaobao] = useState(false);   // 🛒 โหมดกล่องพัก "สินค้าจาก Taobao" (ไม่ใช้แท็ก/กลุ่ม — คนละชุดข้อมูล)
   const [tree, setTree] = useState<BrowseTree | null>(null);
   const [groupPath, setGroupPath] = useState<Crumb[]>(nav0?.gp ?? []);
   const [tagFilter, setTagFilter] = useState<TagFilterValue>(nav0?.tf ?? EMPTY_FILTER);
@@ -394,24 +400,27 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
       {!pick && (
       <div className="flex items-center gap-1 mb-3">
         <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
-          <button onClick={() => { setEntity("skus"); patchNav({ en: "skus", page: 0 }); }} className={`h-9 px-4 text-sm ${entity === "skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🏷️ SKU</button>
-          <button onClick={() => { setEntity("parent-skus"); patchNav({ en: "parent-skus", page: 0 }); }} className={`h-9 px-4 text-sm border-l border-slate-200 ${entity === "parent-skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>📦 Parent SKU</button>
+          <button onClick={() => { setTaobao(false); setEntity("skus"); patchNav({ en: "skus", page: 0 }); }} className={`h-9 px-4 text-sm ${!taobao && entity === "skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🏷️ SKU</button>
+          <button onClick={() => { setTaobao(false); setEntity("parent-skus"); patchNav({ en: "parent-skus", page: 0 }); }} className={`h-9 px-4 text-sm border-l border-slate-200 ${!taobao && entity === "parent-skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>📦 Parent SKU</button>
+          {/* กล่องพักของที่ดูดมาจาก Taobao — ยังไม่เข้า SKU จนกว่าจะกดจับคู่/สร้าง */}
+          <button onClick={() => { setTaobao(true); setSelected(new Set()); }} title="สินค้าที่เครื่องมือ taobao-catalog ส่งเข้ามา — รอจับคู่กับ SKU"
+            className={`h-9 px-4 text-sm border-l border-slate-200 ${taobao ? "bg-orange-50 text-orange-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🛒 จาก Taobao</button>
         </div>
         {/* ปุ่มเพิ่ม — ตามแท็บที่เปิด */}
-        <button onClick={() => setAddOpen(true)}
+        {!taobao && <button onClick={() => setAddOpen(true)}
           className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap">
           ＋ เพิ่ม {entity === "parent-skus" ? "Parent SKU" : "SKU"}
-        </button>
-        {entity === "skus" && (
+        </button>}
+        {!taobao && entity === "skus" && (
           <button onClick={() => setMergeOpen(true)} title="รวม SKU ที่ซ้ำกัน เข้าเป็นตัวเดียว (โอนรูป/แท็ก/สต๊อก/BOM ให้ตัวหลัก)"
             className="h-9 px-3 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 whitespace-nowrap">
             🔗 จัดการ SKU ซ้ำ
           </button>
         )}
-        <button onClick={() => openSpecial("trash")} title="ดูรายการที่ลบ/ปิดใช้งานไว้ (กู้คืนได้)"
+        {!taobao && <button onClick={() => openSpecial("trash")} title="ดูรายการที่ลบ/ปิดใช้งานไว้ (กู้คืนได้)"
           className={`h-9 px-3 text-sm rounded-lg whitespace-nowrap border ${special === "trash" ? "border-rose-300 bg-rose-50 text-rose-600 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
           🗑 ถังขยะ
-        </button>
+        </button>}
       </div>
       )}
       {/* ฟอร์มเพิ่ม: SKU = Wizard เต็ม · Parent = modal เล็ก */}
@@ -423,6 +432,9 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
           title="คัดลอก SKU" message={`คัดลอก "${copyPending.code}" เป็น SKU ตัวใหม่? (รหัสจะตั้งให้อัตโนมัติ แก้รายละเอียดได้ภายหลัง)`}
           confirmText="คัดลอก" onConfirm={() => { const id = copyPending.id; setCopyPending(null); void doCopy(id); }} />
       )}
+      {/* 🛒 กล่องพักสินค้าจาก Taobao — โหมดแยก (ไม่ใช้แท็ก/กลุ่ม) */}
+      {taobao ? <TaobaoBrowser /> : (<>
+
       {/* search + กรองแท็ก (ของกลาง) + ปรับการ์ด */}
       <div className="flex items-center gap-2 mb-3">
         <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 h-10 flex-1 bg-white focus-within:ring-2 focus-within:ring-indigo-500">
@@ -555,6 +567,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
               ))}
             </div>
       )}
+
+      </>)}
 
       {/* แถบจัดการหลายรายการ — ไม่โชว์ในโหมดเลือกไปวางกระดาน (ผู้เรียกมีปุ่มยืนยันของตัวเอง) */}
       {!pick && selected.size > 0 && (

@@ -140,8 +140,19 @@ function AsyncPick({ table, label, secondary, value, valueLabel, onChange, place
 type Row = { values: Record<string, unknown>; labels: Record<string, string> };
 const blankRow = (): Row => ({ values: {}, labels: {} });
 
-export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+/** ผลลัพธ์หลังสร้างเสร็จ — ส่งกลับให้ผู้เรียกใช้ต่อได้ (เช่น กล่องพัก Taobao ใช้ผูก id ที่เพิ่งสร้าง) */
+export type SkuWizardResult = { created: number; ids: string[]; skus: { id: string; code: string }[] };
+
+export function SkuWizard({ open, onClose, onCreated, prefill }: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (result?: SkuWizardResult) => void;
+  /** ค่าเริ่มต้นของฟอร์ม "เพิ่มทีละตัว" (เช่น name_th / rmb_cost / purchase_link) — มีค่า = ข้ามหน้าเลือกโหมด ไปโหมดเดี่ยวเลย */
+  prefill?: Record<string, unknown>;
+}) {
   const toast = useToast();
+  // key เสถียรของ prefill (ผู้เรียกส่ง object ใหม่ทุก render) — กัน effect ด้านล่างรันซ้ำไม่รู้จบ
+  const prefillKey = useMemo(() => (prefill ? JSON.stringify(prefill) : ""), [prefill]);
   const [step, setStep] = useState<"choose" | "single" | "batch">("choose");
   const [tags, setTags] = useState<TagOpt[]>([]);
   const [catalog, setCatalog] = useState<ColDef[]>([]);
@@ -179,7 +190,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
   // โหลดประเภท + คอลัมน์จากทะเบียน field
   useEffect(() => {
     if (!open) return;
-    setStep("choose");
+    setStep(prefillKey ? "single" : "choose");   // มีค่าตั้งต้นมา (เช่นจากกล่องพัก Taobao) → เข้าโหมดเดี่ยวเลย
     loadTags();
     apiFetch("/api/admin/field-registry-v2?module=skus-v2").then((r) => r.json()).then((j) => {
       const cols: ColDef[] = ((j.fields ?? []) as Record<string, unknown>[]).flatMap((f): ColDef[] => {
@@ -199,7 +210,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
       });
       setCatalog(cols);
     }).catch(() => {});
-  }, [open, loadTags]);
+  }, [open, loadTags, prefillKey]);
 
   // คอลัมน์ที่เลือกโชว์ (จำใน localStorage, เริ่มต้น = DEFAULT_COLS)
   const [colKeys, setColKeys] = useState<string[]>(DEFAULT_COLS);
@@ -220,6 +231,12 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
   const [sug, setSug] = useState<Suggest | null>(null);
   const [tagCodes, setTagCodes] = useState<TagCode[]>([]);   // ทุกตระกูลรหัสที่ใช้กับแท็กนี้ (tooltip)
   const [single, setSingle] = useState<Row>(blankRow());
+  // เติมค่าตั้งต้นจากผู้เรียก (เช่นกล่องพัก Taobao ส่งชื่อไทย/ราคาหยวน/ลิงก์มาให้) — ตอนเปิดป๊อป
+  useEffect(() => {
+    if (!open || !prefillKey) return;
+    const values = JSON.parse(prefillKey) as Record<string, unknown>;
+    setSingle({ values: Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined && v !== null && v !== "")), labels: {} });
+  }, [open, prefillKey]);
   const setSV = (k: string, v: unknown, lbl?: string) => setSingle((s) => ({ values: { ...s.values, [k]: v }, labels: lbl !== undefined ? { ...s.labels, [k]: lbl } : s.labels }));
   // กรอกราคาซื้อหยวน (rmb_cost) → คำนวณราคาซื้อ (standard_price) = หยวน × เรต อัตโนมัติ (แก้ทับเองได้)
   const onRmbChange = (v: string) => setSingle((s) => {
@@ -375,7 +392,8 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(`สร้าง ${j.created} SKU แล้ว`);
-      reset(); onCreated();
+      reset();
+      onCreated({ created: Number(j.created ?? 0), ids: (j.ids ?? []) as string[], skus: (j.skus ?? []) as { id: string; code: string }[] });
     } catch (e) { toast.error(e instanceof Error ? e.message : "สร้าง SKU ไม่สำเร็จ"); }
     finally { setSaving(false); }
   };
