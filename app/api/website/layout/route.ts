@@ -91,16 +91,32 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     .eq("id", body.shopId);
   if (error) return NextResponse.json({ error: "เผยแพร่ไม่สำเร็จ" }, { status: 500 });
 
+  // เก็บประวัติไว้ย้อนกลับได้
+  const { data: last } = await sb
+    .from("store_home_versions")
+    .select("version_no")
+    .eq("shop_id", body.shopId)
+    .order("version_no", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextNo = Number((last as { version_no: number } | null)?.version_no ?? 0) + 1;
+  await sb.from("store_home_versions").insert({
+    shop_id: body.shopId,
+    version_no: nextNo,
+    layout: blocks,
+    actor: user?.email ?? null,
+  });
+
   await writeAudit(sb, {
     action: "update",
     entityType: "shop_home_layout",
     entityId: body.shopId,
     actorId: user?.id ?? null,
     actorName: user?.email ?? null,
-    metadata: { blocks: blocks.length },
+    metadata: { blocks: blocks.length, version: nextNo },
   });
 
-  return NextResponse.json({ ok: true, mode: "publish", blocks });
+  return NextResponse.json({ ok: true, mode: "publish", blocks, version: nextNo });
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {

@@ -4,7 +4,8 @@
  * ของกลาง — ตัวจัดบล็อกของหน้าเว็บ (ใช้ทั้งแท็บ "หน้าแรก" และ "หน้าเว็บ")
  * เพิ่ม/ลบ/ลากสลับลำดับ/เปิด-ปิด + ฟอร์มแก้ข้อความของแต่ละชนิดบล็อก
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 
 export type BlockType =
   | "announcement"
@@ -14,16 +15,27 @@ export type BlockType =
   | "featured"
   | "faq"
   | "cta"
-  | "rich-text";
+  | "rich-text"
+  | "image"
+  | "gallery";
+
+export interface Visibility {
+  desktop: boolean;
+  tablet: boolean;
+  mobile: boolean;
+}
 
 export interface Block {
   id: string;
   type: BlockType;
   enabled: boolean;
+  visibility?: Visibility;
   [k: string]: unknown;
 }
 
-export type BlockTypeInfo = { type: BlockType; label: string; icon: string; hint: string };
+const ALL_VISIBLE: Visibility = { desktop: true, tablet: true, mobile: true };
+
+export type BlockTypeInfo = { type: BlockType; label: string; icon: string; hint: string; group?: string };
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
@@ -42,18 +54,33 @@ export function blockSummary(b: Block): string {
       return `${((b.items as unknown[]) ?? []).length} คำถาม`;
     case "two-tracks":
       return ((b.cards as { title?: string }[]) ?? []).map((c) => c.title).filter(Boolean).join(" / ") || "2 การ์ด";
+    case "image":
+      return b.imageKey ? String(b.caption || b.alt || "รูปภาพ") : "ยังไม่ได้เลือกรูป";
+    case "gallery":
+      return `${((b.items as unknown[]) ?? []).length} รูป`;
     default:
       return String(b.title ?? "") || "—";
   }
 }
 
+/** สรุปว่าซ่อนบนอุปกรณ์ไหนบ้าง */
+function visibilityLabel(v?: Visibility): string {
+  const x = { ...ALL_VISIBLE, ...v };
+  const hidden = [!x.desktop && "คอม", !x.tablet && "แท็บเล็ต", !x.mobile && "มือถือ"].filter(Boolean);
+  return hidden.length ? `ซ่อนบน ${hidden.join("/")}` : "";
+}
+
 /** สร้างบล็อกใหม่ (ค่าเริ่มต้นเดียวกับฝั่ง API) */
 export function makeBlock(type: BlockType, seq: number): Block {
   const id = `${type}-${seq}-${Math.floor(Math.random() * 1000)}`;
-  const base = { id, type, enabled: true };
+  const base = { id, type, enabled: true, visibility: { ...ALL_VISIBLE } };
   switch (type) {
     case "announcement":
       return { ...base, messages: ["ข้อความประกาศของร้าน"] };
+    case "image":
+      return { ...base, imageKey: null, alt: "", caption: "", width: "wide", href: "" };
+    case "gallery":
+      return { ...base, eyebrow: "", title: "แกลเลอรี", columns: 3, items: [] };
     case "hero":
       return {
         ...base,
@@ -67,6 +94,10 @@ export function makeBlock(type: BlockType, seq: number): Block {
           { title: "หนังแท้", desc: "คัดเกรดทุกผืน" },
           { title: "งานเย็บมือ", desc: "ประณีตทุกตะเข็บ" },
         ],
+        imageKey: null,
+        imageAlt: "",
+        overlay: 45,
+        height: "auto",
       };
     case "two-tracks":
       return {
@@ -164,6 +195,87 @@ export function BlockEditor({ block, onChange }: { block: Block; onChange: (p: R
         />
       );
 
+    case "image":
+      return (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <ImageUploadField
+              label="รูปภาพ"
+              hint="แนะนำกว้าง 1200px+"
+              value={(block.imageKey as string | null) ?? null}
+              onChange={(k) => onChange({ imageKey: k })}
+              height={80}
+            />
+          </div>
+          <Field label="คำบรรยายรูป (Alt) — มีผลกับ SEO">
+            <input className={inputCls} value={s("alt")} onChange={(e) => onChange({ alt: e.target.value })} placeholder="อธิบายว่าในรูปคืออะไร" />
+          </Field>
+          <Field label="ข้อความใต้รูป (ถ้ามี)">
+            <input className={inputCls} value={s("caption")} onChange={(e) => onChange({ caption: e.target.value })} />
+          </Field>
+          <Field label="ความกว้าง">
+            <select className={inputCls} value={s("width") || "wide"} onChange={(e) => onChange({ width: e.target.value })}>
+              <option value="narrow">แคบ (อ่านง่าย)</option>
+              <option value="wide">กว้าง (แนะนำ)</option>
+              <option value="full">เต็มจอ</option>
+            </select>
+          </Field>
+          <Field label="ลิงก์เมื่อคลิกรูป (ไม่ใส่ = คลิกไม่ได้)">
+            <input className={inputCls} value={s("href")} onChange={(e) => onChange({ href: e.target.value })} placeholder="/shop" />
+          </Field>
+        </div>
+      );
+
+    case "gallery": {
+      const items = ((block.items as { imageKey: string | null; alt: string; caption: string }[]) ?? []);
+      const setItem = (i: number, p: Partial<{ imageKey: string | null; alt: string; caption: string }>) =>
+        onChange({ items: items.map((x, j) => (j === i ? { ...x, ...p } : x)) });
+      return (
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="ข้อความเล็ก"><input className={inputCls} value={s("eyebrow")} onChange={(e) => onChange({ eyebrow: e.target.value })} /></Field>
+            <Field label="หัวข้อ"><input className={inputCls} value={s("title")} onChange={(e) => onChange({ title: e.target.value })} /></Field>
+            <Field label="จำนวนคอลัมน์">
+              <select className={inputCls} value={(block.columns as number) ?? 3} onChange={(e) => onChange({ columns: Number(e.target.value) })}>
+                {[2, 3, 4].map((n) => <option key={n} value={n}>{n} คอลัมน์</option>)}
+              </select>
+            </Field>
+          </div>
+
+          <div className="space-y-2">
+            {items.map((it, i) => (
+              <div key={i} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                <div className="flex items-start gap-3">
+                  <div className="shrink-0 w-16 h-16 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
+                    {it.imageKey ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={keyUrl(it.imageKey, 160)!} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-[10px] text-slate-400">ไม่มีรูป</span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <ImageUploadField label={`รูปที่ ${i + 1}`} value={it.imageKey} onChange={(k) => setItem(i, { imageKey: k })} height={40} />
+                    <div className="grid gap-1.5 sm:grid-cols-2">
+                      <input className={inputCls} placeholder="คำบรรยาย (Alt)" value={it.alt} onChange={(e) => setItem(i, { alt: e.target.value })} />
+                      <input className={inputCls} placeholder="ข้อความใต้รูป" value={it.caption} onChange={(e) => setItem(i, { caption: e.target.value })} />
+                    </div>
+                  </div>
+                  <button onClick={() => onChange({ items: items.filter((_, j) => j !== i) })} className="shrink-0 w-8 h-8 rounded-lg border border-slate-200 text-slate-400 hover:text-red-500">×</button>
+                </div>
+              </div>
+            ))}
+            <button
+              onClick={() => onChange({ items: [...items, { imageKey: null, alt: "", caption: "" }] })}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              + เพิ่มรูป
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     case "hero": {
       const features = ((block.features as { title: string; desc: string }[]) ?? []);
       return (
@@ -188,6 +300,40 @@ export function BlockEditor({ block, onChange }: { block: Block; onChange: (p: R
               ))}
               <button onClick={() => onChange({ features: [...features, { title: "", desc: "" }] })} className="text-xs text-blue-600 hover:underline">+ เพิ่มจุดเด่น</button>
             </div>
+          </div>
+
+          {/* รูปพื้นหลัง */}
+          <div className="sm:col-span-2 pt-3 border-t border-slate-200 grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <ImageUploadField
+                label="รูปพื้นหลัง (ไม่ใส่ = ใช้พื้นหลังไล่สีเดิม)"
+                hint="แนะนำกว้าง 2000px"
+                value={(block.imageKey as string | null) ?? null}
+                onChange={(k) => onChange({ imageKey: k })}
+                previewBg="#18191B"
+                height={72}
+              />
+            </div>
+            <Field label="คำบรรยายรูป (Alt)">
+              <input className={inputCls} value={s("imageAlt")} onChange={(e) => onChange({ imageAlt: e.target.value })} placeholder="เช่น โรงงานผลิตเครื่องหนัง" />
+            </Field>
+            <Field label={`ความมืดทับรูป · ${(block.overlay as number) ?? 45}%`}>
+              <input
+                type="range"
+                min={0}
+                max={90}
+                value={(block.overlay as number) ?? 45}
+                onChange={(e) => onChange({ overlay: Number(e.target.value) })}
+                className="w-full accent-blue-600"
+              />
+            </Field>
+            <Field label="ความสูงแบนเนอร์">
+              <select className={inputCls} value={s("height") || "auto"} onChange={(e) => onChange({ height: e.target.value })}>
+                <option value="auto">อัตโนมัติ (ตามเนื้อหา)</option>
+                <option value="tall">สูง (70% ของจอ)</option>
+                <option value="full">เต็มจอ</option>
+              </select>
+            </Field>
           </div>
         </div>
       );
@@ -310,16 +456,64 @@ export function BlockListEditor({
   blocks,
   types,
   onChange,
+  selectedId,
+  onSelect,
 }: {
   blocks: Block[];
   types: BlockTypeInfo[];
   onChange: (next: Block[]) => void;
+  /** บล็อกที่ถูกเลือก (เช่น คลิกมาจากพรีวิว) */
+  selectedId?: string | null;
+  onSelect?: (id: string | null) => void;
 }) {
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openIdLocal, setOpenIdLocal] = useState<string | null>(null);
+  const openId = selectedId !== undefined ? selectedId : openIdLocal;
+  const setOpenId = (id: string | null) => {
+    setOpenIdLocal(id);
+    onSelect?.(id);
+  };
+
   const [showAdd, setShowAdd] = useState(false);
+  const [addQuery, setAddQuery] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
+  const [menuId, setMenuId] = useState<string | null>(null);
 
   const patch = (id: string, p: Record<string, unknown>) => onChange(blocks.map((b) => (b.id === id ? { ...b, ...p } : b)));
+
+  const duplicate = (id: string) => {
+    const i = blocks.findIndex((b) => b.id === id);
+    if (i < 0) return;
+    const src = blocks[i];
+    const copy: Block = {
+      ...JSON.parse(JSON.stringify(src)),
+      id: `${src.type}-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+    };
+    const next = [...blocks];
+    next.splice(i + 1, 0, copy);
+    onChange(next);
+    setMenuId(null);
+    setOpenId(copy.id);
+  };
+
+  const setVis = (id: string, key: keyof Visibility, value: boolean) => {
+    const b = blocks.find((x) => x.id === id);
+    if (!b) return;
+    patch(id, { visibility: { ...ALL_VISIBLE, ...b.visibility, [key]: value } });
+  };
+
+  // กลุ่มบล็อกในไลบรารี + ค้นหา
+  const grouped = useMemo(() => {
+    const q = addQuery.trim().toLowerCase();
+    const hit = types.filter(
+      (t) => !q || t.label.toLowerCase().includes(q) || t.hint.toLowerCase().includes(q) || t.type.includes(q)
+    );
+    const map = new Map<string, BlockTypeInfo[]>();
+    for (const t of hit) {
+      const g = t.group ?? "อื่น ๆ";
+      map.set(g, [...(map.get(g) ?? []), t]);
+    }
+    return [...map.entries()];
+  }, [types, addQuery]);
 
   const move = (id: string, dir: -1 | 1) => {
     const i = blocks.findIndex((b) => b.id === id);
@@ -366,16 +560,41 @@ export function BlockListEditor({
       </div>
 
       {showAdd && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 grid gap-2 sm:grid-cols-2">
-          {types.map((t) => (
-            <button key={t.type} onClick={() => add(t.type)} className="flex items-start gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-blue-400">
-              <span className="text-lg leading-none">{t.icon}</span>
-              <span className="min-w-0">
-                <span className="block text-sm text-slate-800">{t.label}</span>
-                <span className="block text-[11px] text-slate-400 truncate">{t.hint}</span>
-              </span>
-            </button>
-          ))}
+        <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
+          <input
+            className={inputCls}
+            value={addQuery}
+            onChange={(e) => setAddQuery(e.target.value)}
+            placeholder="ค้นหาบล็อก เช่น รูป, สินค้า, คำถาม"
+            autoFocus
+          />
+          {grouped.length === 0 ? (
+            <p className="py-6 text-center text-sm text-slate-400">ไม่พบบล็อกที่ค้นหา</p>
+          ) : (
+            grouped.map(([group, list]) => (
+              <div key={group}>
+                <p className="text-[11px] font-medium text-slate-500 mb-1.5">{group}</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {list.map((t) => (
+                    <button
+                      key={t.type}
+                      onClick={() => {
+                        add(t.type);
+                        setAddQuery("");
+                      }}
+                      className="flex items-start gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-blue-400"
+                    >
+                      <span className="text-lg leading-none">{t.icon}</span>
+                      <span className="min-w-0">
+                        <span className="block text-sm text-slate-800">{t.label}</span>
+                        <span className="block text-[11px] text-slate-400 truncate">{t.hint}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       )}
 
@@ -386,11 +605,18 @@ export function BlockListEditor({
           return (
             <li
               key={b.id}
+              id={`blk-${b.id}`}
               draggable
               onDragStart={() => setDragId(b.id)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => onDrop(b.id)}
-              className={`rounded-xl border bg-white overflow-hidden ${dragId === b.id ? "border-blue-400 opacity-60" : "border-slate-200"}`}
+              className={`rounded-xl border bg-white overflow-hidden transition ${
+                dragId === b.id
+                  ? "border-blue-400 opacity-60"
+                  : isOpen
+                    ? "border-blue-500 ring-2 ring-blue-100"
+                    : "border-slate-200"
+              }`}
             >
               <div className="flex items-center gap-2 px-3 py-2.5">
                 <span className="cursor-grab text-slate-300 select-none" title="ลากเพื่อย้าย">⠿</span>
@@ -399,6 +625,11 @@ export function BlockListEditor({
                 <button onClick={() => setOpenId(isOpen ? null : b.id)} className="flex-1 min-w-0 text-left">
                   <span className={`block text-sm font-medium truncate ${b.enabled ? "text-slate-800" : "text-slate-400 line-through"}`}>
                     {info?.label ?? b.type}
+                    {visibilityLabel(b.visibility) && (
+                      <span className="ml-2 text-[10px] font-normal px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                        {visibilityLabel(b.visibility)}
+                      </span>
+                    )}
                   </span>
                   <span className="block text-[11px] text-slate-400 truncate">{blockSummary(b)}</span>
                 </button>
@@ -414,6 +645,46 @@ export function BlockListEditor({
                 <div className="flex flex-col shrink-0">
                   <button onClick={() => move(b.id, -1)} disabled={i === 0} className="text-[10px] px-1 text-slate-400 hover:text-slate-800 disabled:opacity-30">▲</button>
                   <button onClick={() => move(b.id, 1)} disabled={i === blocks.length - 1} className="text-[10px] px-1 text-slate-400 hover:text-slate-800 disabled:opacity-30">▼</button>
+                </div>
+
+                {/* เมนูเพิ่มเติม */}
+                <div className="relative shrink-0">
+                  <button
+                    onClick={() => setMenuId(menuId === b.id ? null : b.id)}
+                    className="w-7 h-7 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-400"
+                    title="เพิ่มเติม"
+                  >
+                    ⋯
+                  </button>
+                  {menuId === b.id && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setMenuId(null)} />
+                      <div className="absolute right-0 top-8 z-20 w-52 rounded-xl border border-slate-200 bg-white shadow-lg py-1.5">
+                        <button onClick={() => duplicate(b.id)} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                          📑 ทำสำเนา
+                        </button>
+                        <div className="border-t border-slate-100 my-1" />
+                        <p className="px-3 py-1 text-[11px] text-slate-400">แสดงบนอุปกรณ์</p>
+                        {([
+                          { k: "desktop" as const, l: "🖥️ คอมพิวเตอร์" },
+                          { k: "tablet" as const, l: "📱 แท็บเล็ต" },
+                          { k: "mobile" as const, l: "📲 มือถือ" },
+                        ]).map((d) => {
+                          const on = { ...ALL_VISIBLE, ...b.visibility }[d.k];
+                          return (
+                            <label key={d.k} className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer">
+                              <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={on} onChange={(e) => setVis(b.id, d.k, e.target.checked)} />
+                              {d.l}
+                            </label>
+                          );
+                        })}
+                        <div className="border-t border-slate-100 my-1" />
+                        <button onClick={() => { remove(b.id); setMenuId(null); }} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50">
+                          🗑️ ลบบล็อกนี้
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
