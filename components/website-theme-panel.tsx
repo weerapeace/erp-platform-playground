@@ -2,13 +2,19 @@
 
 /**
  * WebsiteThemePanel — แท็บ "🎨 ดีไซน์" ในหน้า /website/<slug>
- * ตั้งสี/ฟอนต์/ความมน/โลโก้ของเว็บร้าน แล้วเว็บจริงเปลี่ยนตาม (อ่านผ่าน /api/public/storefront/site)
- * มีพรีวิวสดด้านขวา — เห็นผลก่อนบันทึก
- * ข้อมูล: /api/website/theme (guardApi + audit + เก็บประวัติใน store_theme_versions)
+ *
+ * Phase 1 ตาม spec:
+ *  1) แบ่งหมวดเป็นแท็บ  2) พรีวิวเว็บจริง (iframe) ติดหน้าจอ  3) สลับ Desktop/Tablet/Mobile
+ *  4) แยกบันทึกร่าง / เผยแพร่  5) ตัวบอก "ยังไม่บันทึก"  6) ย้อน/ทำซ้ำ (Ctrl+Z)
+ *  7) ประวัติเวอร์ชัน + กู้คืน  8) ตรวจ contrast (WCAG)  9) คืนค่าเดิมรายช่อง  10) ใช้บนมือถือได้
+ *
+ * ข้อมูล: /api/website/theme (GET/PUT/DELETE) · /api/website/theme/versions
+ * พรีวิวคือ "เว็บจริง" เปิดด้วย ?preview=1 แล้วส่งธีมเข้าไปทาง postMessage → เห็นตรงกับของจริง 100%
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken, lighten } from "@/lib/color-utils";
 
 type Radius = "sharp" | "soft" | "round";
 
@@ -19,38 +25,143 @@ interface Theme {
   logo: { mark: string; text: string };
 }
 
-const COLOR_FIELDS: { key: keyof Theme["colors"]; label: string; hint: string }[] = [
-  { key: "brand", label: "สีหลักแบรนด์", hint: "ปุ่ม ไฮไลต์ ลิงก์" },
-  { key: "brandDeep", label: "สีหลักเข้ม", hint: "ตอนชี้เมาส์" },
-  { key: "ink", label: "สีตัวอักษรหลัก", hint: "หัวข้อ เนื้อหา" },
+type ColorKey = keyof Theme["colors"];
+type TabKey = "colors" | "fonts" | "logo" | "shape" | "history";
+type Device = "desktop" | "tablet" | "mobile";
+
+const TABS: { k: TabKey; label: string }[] = [
+  { k: "colors", label: "สี" },
+  { k: "fonts", label: "ตัวอักษร" },
+  { k: "logo", label: "โลโก้" },
+  { k: "shape", label: "รูปทรง" },
+  { k: "history", label: "ประวัติ" },
+];
+
+const COLOR_FIELDS: { key: ColorKey; label: string; hint: string }[] = [
+  { key: "brand", label: "สีหลักแบรนด์", hint: "ปุ่มหลัก ราคา ลิงก์สำคัญ" },
+  { key: "brandDeep", label: "สีหลักเข้ม", hint: "ตอนชี้เมาส์ปุ่ม" },
+  { key: "ink", label: "สีตัวอักษรหลัก", hint: "หัวข้อและเนื้อหา" },
   { key: "muted", label: "สีตัวอักษรรอง", hint: "คำอธิบายจาง ๆ" },
   { key: "page", label: "สีพื้นหลังเว็บ", hint: "พื้นหลังทั้งหน้า" },
   { key: "surface", label: "สีพื้นการ์ด", hint: "กล่อง/การ์ดสินค้า" },
 ];
 
-const RADIUS_PX: Record<Radius, number> = { sharp: 2, soft: 12, round: 24 };
+const DEVICES: { k: Device; label: string; w: number; icon: string }[] = [
+  { k: "desktop", label: "คอมพิวเตอร์", w: 1440, icon: "🖥️" },
+  { k: "tablet", label: "แท็บเล็ต", w: 768, icon: "📱" },
+  { k: "mobile", label: "มือถือ", w: 390, icon: "📲" },
+];
+
+const PAGES = [
+  { path: "/", label: "หน้าแรก" },
+  { path: "/shop", label: "ร้านวัสดุ" },
+  { path: "/oem", label: "รับผลิต" },
+  { path: "/quote", label: "ขอใบเสนอราคา" },
+  { path: "/contact", label: "ติดต่อ" },
+];
+
+const PRESETS: { name: string; theme: Partial<Theme> }[] = [
+  {
+    name: "IG ส้มคลาสสิก",
+    theme: {
+      colors: { brand: "#E2540F", brandDeep: "#B8420A", ink: "#141517", page: "#FAFAF9", surface: "#FFFFFF", muted: "#9BA1A9" },
+      fonts: { display: "Kanit", body: "Noto Sans Thai" },
+      radius: "soft",
+    },
+  },
+  {
+    name: "ดำอุตสาหกรรม",
+    theme: {
+      colors: { brand: "#F59E0B", brandDeep: "#B45309", ink: "#0B0C0E", page: "#F4F4F5", surface: "#FFFFFF", muted: "#8B8F96" },
+      fonts: { display: "Prompt", body: "Sarabun" },
+      radius: "sharp",
+    },
+  },
+  {
+    name: "ขาวมินิมอล",
+    theme: {
+      colors: { brand: "#111827", brandDeep: "#000000", ink: "#111827", page: "#FFFFFF", surface: "#FAFAFA", muted: "#9CA3AF" },
+      fonts: { display: "IBM Plex Sans Thai", body: "IBM Plex Sans Thai" },
+      radius: "sharp",
+    },
+  },
+  {
+    name: "น้ำเงินหรู",
+    theme: {
+      colors: { brand: "#1E3A5F", brandDeep: "#132639", ink: "#0F172A", page: "#F8FAFC", surface: "#FFFFFF", muted: "#94A3B8" },
+      fonts: { display: "Kanit", body: "Sarabun" },
+      radius: "soft",
+    },
+  },
+  {
+    name: "เบจอบอุ่น",
+    theme: {
+      colors: { brand: "#A87C4F", brandDeep: "#7A5734", ink: "#2E2A26", page: "#FBF8F4", surface: "#FFFFFF", muted: "#A9A096" },
+      fonts: { display: "Prompt", body: "Noto Sans Thai" },
+      radius: "round",
+    },
+  },
+];
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
 const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
+const cardCls = "rounded-xl border border-slate-200 bg-white p-4";
+
+const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const timeAgo = (iso: string) => {
+  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 1) return "เมื่อสักครู่";
+  if (m < 60) return `${m} นาทีที่แล้ว`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ชั่วโมงที่แล้ว`;
+  return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+};
 
 export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
+
   const [theme, setTheme] = useState<Theme | null>(null);
+  const [published, setPublished] = useState<Theme | null>(null);
+  const [siteUrl, setSiteUrl] = useState<string | null>(null);
   const [fonts, setFonts] = useState<string[]>([]);
   const [radii, setRadii] = useState<{ value: Radius; label: string }[]>([]);
+  const [lastVersion, setLastVersion] = useState<{ version_no: number; created_at: string } | null>(null);
+  const [hadDraft, setHadDraft] = useState(false);
+
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
+  const [tab, setTab] = useState<TabKey>("colors");
+  const [device, setDevice] = useState<Device>("desktop");
+  const [page, setPage] = useState("/");
+  const [versions, setVersions] = useState<{ versionNo: number; createdAt: string; theme: Theme }[]>([]);
+
+  // ย้อน/ทำซ้ำ
+  const undoStack = useRef<Theme[]>([]);
+  const redoStack = useRef<Theme[]>([]);
+  const [, forceRender] = useState(0);
+
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const r = await apiFetch(`/api/website/theme?shop=${encodeURIComponent(shopSlug)}`);
       const j = await r.json();
-      if (j.error) toast.error(j.error);
-      setTheme(j.theme ?? null);
+      if (j.error) {
+        toast.error(j.error);
+        return;
+      }
+      const start: Theme = j.draft ?? j.published;
+      setTheme(start);
+      setPublished(j.published);
+      setSiteUrl(j.shop?.siteUrl ?? null);
       setFonts(j.fontChoices ?? []);
       setRadii(j.radiusChoices ?? []);
+      setLastVersion(j.lastVersion ?? null);
+      setHadDraft(Boolean(j.hasDraft));
+      undoStack.current = [];
+      redoStack.current = [];
     } catch {
       toast.error("โหลดธีมไม่สำเร็จ");
     } finally {
@@ -62,275 +173,702 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     void load();
   }, [load]);
 
-  const setColor = (k: keyof Theme["colors"], v: string) =>
-    setTheme((t) => (t ? { ...t, colors: { ...t.colors, [k]: v } } : t));
+  // เปลี่ยนค่า + เก็บลงประวัติ undo
+  const apply = useCallback((next: Theme) => {
+    setTheme((prev) => {
+      if (prev) {
+        undoStack.current = [...undoStack.current.slice(-49), prev];
+        redoStack.current = [];
+      }
+      return next;
+    });
+    forceRender((n) => n + 1);
+  }, []);
 
-  const save = async () => {
+  const setColor = (k: ColorKey, v: string) => theme && apply({ ...theme, colors: { ...theme.colors, [k]: v } });
+
+  const undo = useCallback(() => {
+    const prev = undoStack.current.pop();
+    if (!prev) return;
+    setTheme((cur) => {
+      if (cur) redoStack.current = [...redoStack.current, cur];
+      return prev;
+    });
+    forceRender((n) => n + 1);
+  }, []);
+
+  const redo = useCallback(() => {
+    const next = redoStack.current.pop();
+    if (!next) return;
+    setTheme((cur) => {
+      if (cur) undoStack.current = [...undoStack.current, cur];
+      return next;
+    });
+    forceRender((n) => n + 1);
+  }, []);
+
+  // คีย์ลัด Ctrl+Z / Ctrl+Shift+Z
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
+
+  // ส่งธีมเข้า iframe แบบสด
+  useEffect(() => {
     if (!theme) return;
-    setSaving(true);
+    const t = setTimeout(() => {
+      iframeRef.current?.contentWindow?.postMessage({ type: "storefront-theme-preview", theme }, "*");
+    }, 120);
+    return () => clearTimeout(t);
+  }, [theme]);
+
+  // iframe บอกว่าพร้อม → ส่งธีมทันที
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if ((e.data as { type?: string })?.type === "storefront-preview-ready" && theme) {
+        iframeRef.current?.contentWindow?.postMessage({ type: "storefront-theme-preview", theme }, "*");
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [theme]);
+
+  // เตือนก่อนออกจากหน้าถ้ายังไม่บันทึก
+  const dirtyFields = useMemo(() => {
+    if (!theme || !published) return [] as string[];
+    const out: string[] = [];
+    for (const f of COLOR_FIELDS) if (theme.colors[f.key] !== published.colors[f.key]) out.push(f.label);
+    if (theme.fonts.display !== published.fonts.display) out.push("ฟอนต์หัวข้อ");
+    if (theme.fonts.body !== published.fonts.body) out.push("ฟอนต์เนื้อหา");
+    if (theme.radius !== published.radius) out.push("ความมนขอบ");
+    if (!eq(theme.logo, published.logo)) out.push("โลโก้");
+    return out;
+  }, [theme, published]);
+
+  const isDirty = dirtyFields.length > 0;
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [isDirty]);
+
+  const save = async (mode: "draft" | "publish") => {
+    if (!theme) return;
+    if (mode === "publish" && !confirm("ยืนยันเผยแพร่ธีมนี้ไปยังเว็บไซต์จริง?\nผู้เข้าชมจะเห็นการเปลี่ยนแปลงภายในประมาณ 1 นาที")) return;
+    setBusy(mode);
     try {
       const r = await apiFetch("/api/website/theme", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shopId, theme }),
+        body: JSON.stringify({ shopId, theme, mode }),
       });
       const j = await r.json();
-      if (j.ok) {
-        setTheme(j.theme);
-        toast.success(`บันทึกธีมแล้ว (เวอร์ชัน ${j.version}) — เว็บจะเปลี่ยนภายใน ~1 นาที`);
-      } else toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+      if (!j.ok) {
+        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        return;
+      }
+      if (mode === "publish") {
+        setPublished(j.theme);
+        setHadDraft(false);
+        setLastVersion({ version_no: j.version, created_at: new Date().toISOString() });
+        toast.success(`เผยแพร่แล้ว (เวอร์ชัน ${j.version}) — เว็บจะอัปเดตภายใน ~1 นาที`);
+      } else {
+        setHadDraft(true);
+        toast.success("บันทึกร่างแล้ว — เว็บไซต์จริงยังไม่เปลี่ยน");
+      }
     } catch {
       toast.error("เชื่อมต่อไม่ได้");
     } finally {
-      setSaving(false);
+      setBusy(null);
+    }
+  };
+
+  const discard = async () => {
+    if (!confirm("ละทิ้งการเปลี่ยนแปลงทั้งหมด กลับไปใช้ธีมที่เผยแพร่อยู่?")) return;
+    try {
+      await apiFetch(`/api/website/theme?shopId=${encodeURIComponent(shopId)}`, { method: "DELETE" });
+    } catch {
+      /* ไม่เป็นไร โหลดใหม่อยู่ดี */
+    }
+    await load();
+    toast.info("ละทิ้งการเปลี่ยนแปลงแล้ว");
+  };
+
+  const loadVersions = useCallback(async () => {
+    try {
+      const r = await apiFetch(`/api/website/theme/versions?shop=${encodeURIComponent(shopSlug)}`);
+      const j = await r.json();
+      setVersions(j.versions ?? []);
+    } catch {
+      toast.error("โหลดประวัติไม่สำเร็จ");
+    }
+  }, [shopSlug, toast]);
+
+  useEffect(() => {
+    if (tab === "history") void loadVersions();
+  }, [tab, loadVersions]);
+
+  const restore = async (versionNo: number) => {
+    if (!confirm(`ดึงเวอร์ชัน ${versionNo} กลับมาเป็นร่าง?\n(ยังไม่เปลี่ยนเว็บจริงจนกว่าจะกดเผยแพร่)`)) return;
+    try {
+      const r = await apiFetch("/api/website/theme/versions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopId, versionNo }),
+      });
+      const j = await r.json();
+      if (j.ok) {
+        apply(j.theme);
+        setHadDraft(true);
+        setTab("colors");
+        toast.success(`กู้คืนเวอร์ชัน ${versionNo} เป็นร่างแล้ว — ตรวจแล้วกดเผยแพร่`);
+      } else toast.error(j.error ?? "กู้คืนไม่สำเร็จ");
+    } catch {
+      toast.error("เชื่อมต่อไม่ได้");
     }
   };
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
-  if (!theme) return <div className="py-16 text-center text-sm text-slate-400">โหลดธีมไม่สำเร็จ</div>;
+  if (!theme || !published) return <div className="py-16 text-center text-sm text-slate-400">โหลดธีมไม่สำเร็จ</div>;
 
-  const r = RADIUS_PX[theme.radius];
+  const dev = DEVICES.find((d) => d.k === device)!;
+  const previewSrc = siteUrl ? `${siteUrl}${page}?preview=1` : null;
+
+  /* ── ตรวจ contrast ── */
+  const checks = [
+    { label: "ตัวอักษรบนพื้นหลังเว็บ", fg: theme.colors.ink, bg: theme.colors.page },
+    { label: "ตัวอักษรรองบนพื้นการ์ด", fg: theme.colors.muted, bg: theme.colors.surface },
+    { label: "ตัวอักษรขาวบนปุ่มหลัก", fg: "#FFFFFF", bg: theme.colors.brand },
+    { label: "สีแบรนด์บนพื้นหลังเว็บ", fg: theme.colors.brand, bg: theme.colors.page },
+  ].map((c) => {
+    const ratio = contrastRatio(c.fg, c.bg);
+    const level = wcagLevel(ratio);
+    return { ...c, ratio, level, suggest: level === "fail" ? suggestReadable(c.fg, c.bg) : null };
+  });
+  const failCount = checks.filter((c) => c.level === "fail").length;
+
+  const ResetBtn = ({ onClick, show }: { onClick: () => void; show: boolean }) =>
+    show ? (
+      <button
+        onClick={onClick}
+        title="คืนค่าที่เผยแพร่อยู่"
+        className="shrink-0 w-7 h-7 rounded-lg border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-400 text-xs"
+      >
+        ↺
+      </button>
+    ) : null;
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-xl bg-blue-50/60 border border-blue-200 px-4 py-3">
-        <p className="text-sm text-slate-700">
-          ตั้งสี/ตัวอักษรของเว็บร้านนี้ — <span className="font-medium">เว็บจริงจะเปลี่ยนตามภายใน ~1 นาที</span>
-        </p>
-        <p className="text-xs text-slate-500 mt-0.5">ทุกครั้งที่บันทึกจะเก็บเป็นเวอร์ชันไว้ ย้อนกลับได้ภายหลัง</p>
+    <div className="space-y-3">
+      {/* ── แถบสถานะบนสุด ── */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
+        <span
+          className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+            isDirty || hadDraft ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+          }`}
+        >
+          {isDirty ? "● มีการแก้ไขที่ยังไม่บันทึก" : hadDraft ? "● มีร่างที่ยังไม่เผยแพร่" : "✓ เผยแพร่แล้ว"}
+        </span>
+        {lastVersion && (
+          <span className="text-[11px] text-slate-400">
+            เผยแพร่ล่าสุด: เวอร์ชัน {lastVersion.version_no} · {timeAgo(lastVersion.created_at)}
+          </span>
+        )}
+
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={undo}
+            disabled={!undoStack.current.length}
+            title="ย้อนกลับ (Ctrl+Z)"
+            className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400"
+          >
+            ↶
+          </button>
+          <button
+            onClick={redo}
+            disabled={!redoStack.current.length}
+            title="ทำซ้ำ (Ctrl+Shift+Z)"
+            className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400"
+          >
+            ↷
+          </button>
+        </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_380px] items-start">
-        {/* ── ฝั่งตั้งค่า ── */}
-        <div className="space-y-4">
-          {/* สี */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-800 mb-3">สี</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {COLOR_FIELDS.map((f) => (
-                <div key={f.key}>
-                  <label className={labelCls}>
-                    {f.label} <span className="text-slate-400">· {f.hint}</span>
-                  </label>
+      <div className="rounded-xl bg-blue-50/60 border border-blue-200 px-4 py-2.5">
+        <p className="text-sm text-slate-700 font-medium">กำลังแก้ไขธีมของเว็บไซต์จริง</p>
+        <p className="text-xs text-slate-500 mt-0.5">
+          กด &quot;บันทึกร่าง&quot; จะยังไม่เปลี่ยนหน้าเว็บ จนกว่าจะกด &quot;เผยแพร่&quot; · หลังเผยแพร่เว็บอัปเดตใน ~1 นาที
+        </p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,38%)] items-start">
+        {/* ══ ซ้าย: ตั้งค่า ══ */}
+        <div className="min-w-0 space-y-3">
+          {/* แท็บ */}
+          <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
+            {TABS.map((t) => {
+              const dirtyInTab =
+                (t.k === "colors" && dirtyFields.some((d) => COLOR_FIELDS.some((c) => c.label === d))) ||
+                (t.k === "fonts" && dirtyFields.some((d) => d.startsWith("ฟอนต์"))) ||
+                (t.k === "logo" && dirtyFields.includes("โลโก้")) ||
+                (t.k === "shape" && dirtyFields.includes("ความมนขอบ"));
+              return (
+                <button
+                  key={t.k}
+                  onClick={() => setTab(t.k)}
+                  className={`px-3.5 py-2 text-sm border-b-2 -mb-px whitespace-nowrap transition ${
+                    tab === t.k ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  {t.label}
+                  {dirtyInTab && <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-amber-500 align-middle" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ── หมวดสี ── */}
+          {tab === "colors" && (
+            <>
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">ชุดสีสำเร็จรูป</h3>
+                <p className="text-[11px] text-slate-500 mb-3">เลือกแล้วปรับต่อได้ · ย้อนกลับได้ก่อนบันทึก</p>
+                <div className="flex flex-wrap gap-2">
+                  {PRESETS.map((p) => (
+                    <button
+                      key={p.name}
+                      onClick={() => apply({ ...theme, ...p.theme } as Theme)}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-slate-500"
+                    >
+                      <span className="flex gap-0.5">
+                        {[p.theme.colors?.brand, p.theme.colors?.ink, p.theme.colors?.page].map((c, i) => (
+                          <span key={i} style={{ background: c, width: 10, height: 10, borderRadius: 3, border: "1px solid rgba(0,0,0,.1)" }} />
+                        ))}
+                      </span>
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className={cardCls}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-slate-800">สี</h3>
+                  <button
+                    onClick={() =>
+                      apply({
+                        ...theme,
+                        colors: { ...theme.colors, brandDeep: darken(theme.colors.brand) },
+                      })
+                    }
+                    className="text-[11px] text-blue-600 hover:underline"
+                  >
+                    สร้างสีเข้มจากสีหลักอัตโนมัติ
+                  </button>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {COLOR_FIELDS.map((f) => (
+                    <div key={f.key}>
+                      <label className={labelCls}>
+                        {f.label} <span className="text-slate-400">· {f.hint}</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={theme.colors[f.key]}
+                          onChange={(e) => setColor(f.key, e.target.value)}
+                          className="w-9 h-9 rounded-lg border border-slate-200 cursor-pointer shrink-0 p-0.5"
+                          aria-label={f.label}
+                        />
+                        <input value={theme.colors[f.key]} onChange={(e) => setColor(f.key, e.target.value)} className={inputCls} />
+                        <ResetBtn show={theme.colors[f.key] !== published.colors[f.key]} onClick={() => setColor(f.key, published.colors[f.key])} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* เฉดสีอัตโนมัติ */}
+                <div className="mt-4 pt-3 border-t border-slate-100">
+                  <p className={labelCls}>เฉดสีจากสีหลัก (ระบบสร้างให้อัตโนมัติ)</p>
+                  <div className="flex rounded-lg overflow-hidden border border-slate-200">
+                    {Object.entries(shades(theme.colors.brand)).map(([k, v]) => (
+                      <div key={k} className="flex-1 h-8 relative group" style={{ background: v }} title={`${k} · ${v}`}>
+                        <span className="absolute inset-0 hidden group-hover:flex items-center justify-center text-[9px] text-white mix-blend-difference">
+                          {k}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Contrast */}
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">ตรวจความอ่านง่าย (WCAG)</h3>
+                <p className="text-[11px] text-slate-500 mb-3">
+                  {failCount ? `⚠️ พบ ${failCount} จุดที่อ่านยาก` : "✓ ผ่านทุกจุด"}
+                </p>
+                <ul className="space-y-2">
+                  {checks.map((c) => (
+                    <li key={c.label} className="flex items-center gap-2 text-xs">
+                      <span
+                        className="inline-flex items-center justify-center px-2 py-1 rounded shrink-0"
+                        style={{ background: c.bg, color: c.fg, minWidth: 46 }}
+                      >
+                        Aa
+                      </span>
+                      <span className="flex-1 text-slate-600">{c.label}</span>
+                      <span
+                        className={
+                          c.level === "fail" ? "text-red-600" : c.level === "AA-large" ? "text-amber-600" : "text-emerald-600"
+                        }
+                      >
+                        {c.ratio}:1 · {WCAG_LABEL[c.level]}
+                      </span>
+                      {c.suggest && (
+                        <button
+                          onClick={() => {
+                            const key = COLOR_FIELDS.find((f) => theme.colors[f.key] === c.fg)?.key;
+                            if (key) setColor(key, c.suggest!);
+                          }}
+                          className="text-blue-600 hover:underline whitespace-nowrap"
+                        >
+                          ใช้ {c.suggest}
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          )}
+
+          {/* ── หมวดตัวอักษร ── */}
+          {tab === "fonts" && (
+            <div className={cardCls}>
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">ตัวอักษร</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className={labelCls}>ฟอนต์หัวข้อ</label>
                   <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={theme.colors[f.key]}
-                      onChange={(e) => setColor(f.key, e.target.value)}
-                      className="w-9 h-9 rounded-lg border border-slate-200 cursor-pointer shrink-0 p-0.5"
-                      aria-label={f.label}
-                    />
-                    <input
-                      value={theme.colors[f.key]}
-                      onChange={(e) => setColor(f.key, e.target.value)}
+                    <select
                       className={inputCls}
-                      placeholder="#000000"
+                      value={theme.fonts.display}
+                      onChange={(e) => apply({ ...theme, fonts: { ...theme.fonts, display: e.target.value } })}
+                    >
+                      {fonts.map((f) => (
+                        <option key={f} value={f}>
+                          {f}
+                        </option>
+                      ))}
+                    </select>
+                    <ResetBtn
+                      show={theme.fonts.display !== published.fonts.display}
+                      onClick={() => apply({ ...theme, fonts: { ...theme.fonts, display: published.fonts.display } })}
                     />
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* ตัวอักษร + ความมน */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-800 mb-3">ตัวอักษร &amp; รูปทรง</h3>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div>
-                <label className={labelCls}>ฟอนต์หัวข้อ</label>
-                <select
-                  className={inputCls}
-                  value={theme.fonts.display}
-                  onChange={(e) => setTheme({ ...theme, fonts: { ...theme.fonts, display: e.target.value } })}
-                >
-                  {fonts.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>ฟอนต์เนื้อหา</label>
-                <select
-                  className={inputCls}
-                  value={theme.fonts.body}
-                  onChange={(e) => setTheme({ ...theme, fonts: { ...theme.fonts, body: e.target.value } })}
-                >
-                  {fonts.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>ความมนของขอบ</label>
-                <select
-                  className={inputCls}
-                  value={theme.radius}
-                  onChange={(e) => setTheme({ ...theme, radius: e.target.value as Radius })}
-                >
-                  {radii.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* โลโก้ */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-800 mb-3">โลโก้</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className={labelCls}>อักษรในกล่อง (1-4 ตัว)</label>
-                <input
-                  className={inputCls}
-                  maxLength={4}
-                  value={theme.logo.mark}
-                  onChange={(e) => setTheme({ ...theme, logo: { ...theme.logo, mark: e.target.value } })}
-                  placeholder="IG"
-                />
-              </div>
-              <div>
-                <label className={labelCls}>ข้อความต่อท้าย</label>
-                <input
-                  className={inputCls}
-                  value={theme.logo.text}
-                  onChange={(e) => setTheme({ ...theme, logo: { ...theme.logo, text: e.target.value } })}
-                  placeholder="International"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── พรีวิวสด ── */}
-        <div className="lg:sticky lg:top-4">
-          <p className="text-[11px] font-medium text-slate-500 mb-2">ตัวอย่างหน้าเว็บ (สด)</p>
-          <div
-            className="rounded-2xl border border-slate-200 overflow-hidden shadow-sm"
-            style={{ background: theme.colors.page, fontFamily: `"${theme.fonts.body}", system-ui, sans-serif` }}
-          >
-            {/* หัวเว็บ */}
-            <div
-              className="flex items-center gap-2 px-4 h-12"
-              style={{ background: theme.colors.surface, borderBottom: "1px solid rgba(0,0,0,0.06)" }}
-            >
-              <span
-                className="inline-flex items-center justify-center text-white font-semibold"
-                style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: Math.min(r, 8),
-                  background: theme.colors.brand,
-                  fontSize: 11,
-                  fontFamily: `"${theme.fonts.display}", sans-serif`,
-                }}
-              >
-                {theme.logo.mark || "?"}
-              </span>
-              <span
-                className="text-sm font-semibold"
-                style={{ color: theme.colors.ink, fontFamily: `"${theme.fonts.display}", sans-serif` }}
-              >
-                {theme.logo.text || "ชื่อร้าน"}
-              </span>
-              <span className="ml-auto text-[10px]" style={{ color: theme.colors.muted }}>
-                ร้านวัสดุ · ติดต่อ
-              </span>
-            </div>
-
-            {/* hero */}
-            <div className="px-4 py-5" style={{ background: theme.colors.ink }}>
-              <p className="text-[9px] tracking-widest uppercase mb-1.5" style={{ color: theme.colors.brand }}>
-                รับผลิต &amp; วัสดุ
-              </p>
-              <p
-                className="text-white font-semibold leading-tight"
-                style={{ fontSize: 19, fontFamily: `"${theme.fonts.display}", sans-serif` }}
-              >
-                งานหนังคุณภาพ
-                <br />
-                <span style={{ color: theme.colors.brand }}>ครบ จบ ที่เดียว</span>
-              </p>
-              <div className="flex gap-2 mt-3">
-                <span
-                  className="px-3 py-1.5 text-[10px] font-semibold text-white"
-                  style={{ background: theme.colors.brand, borderRadius: 99 }}
-                >
-                  ขอใบเสนอราคา
-                </span>
-                <span
-                  className="px-3 py-1.5 text-[10px] font-semibold"
-                  style={{ color: "#fff", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 99 }}
-                >
-                  เข้าร้านวัสดุ
-                </span>
-              </div>
-            </div>
-
-            {/* การ์ดสินค้า */}
-            <div className="px-4 py-4">
-              <p
-                className="text-xs font-semibold mb-2"
-                style={{ color: theme.colors.ink, fontFamily: `"${theme.fonts.display}", sans-serif` }}
-              >
-                วัสดุแนะนำ
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {["หนังวัวฟอกฝาด", "หัวเข็มขัดทองเหลือง"].map((n, i) => (
-                  <div
-                    key={n}
-                    style={{
-                      background: theme.colors.surface,
-                      borderRadius: r,
-                      border: "1px solid rgba(0,0,0,0.06)",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        aspectRatio: "4/3",
-                        background: i === 0 ? "linear-gradient(135deg,#C89A5B,#8A5A2E)" : "linear-gradient(135deg,#D9C083,#A98A3C)",
-                      }}
+                <div>
+                  <label className={labelCls}>ฟอนต์เนื้อหา</label>
+                  <div className="flex items-center gap-2">
+                    <select
+                      className={inputCls}
+                      value={theme.fonts.body}
+                      onChange={(e) => apply({ ...theme, fonts: { ...theme.fonts, body: e.target.value } })}
+                    >
+                      {fonts.map((f) => (
+                        <option key={f} value={f}>
+                          {f}
+                        </option>
+                      ))}
+                    </select>
+                    <ResetBtn
+                      show={theme.fonts.body !== published.fonts.body}
+                      onClick={() => apply({ ...theme, fonts: { ...theme.fonts, body: published.fonts.body } })}
                     />
-                    <div className="p-2">
-                      <p className="text-[10px] leading-tight" style={{ color: theme.colors.ink }}>
-                        {n}
-                      </p>
-                      <p className="text-[10px] font-semibold mt-0.5" style={{ color: theme.colors.brand }}>
-                        ฿340
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 space-y-1.5">
+                <p className={labelCls}>ตัวอย่าง</p>
+                <p className="text-xl font-semibold" style={{ color: theme.colors.ink }}>
+                  งานหนังคุณภาพ ครบจบที่เดียว
+                </p>
+                <p className="text-lg font-semibold" style={{ color: theme.colors.ink }}>
+                  Premium leather manufacturing
+                </p>
+                <p className="text-sm" style={{ color: theme.colors.muted }}>
+                  หนังวัวแท้ฟอกฝาด ผิวเรียบเนียน ขึ้นเงาสวยตามการใช้งาน — 0123456789
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── หมวดโลโก้ ── */}
+          {tab === "logo" && (
+            <div className={cardCls}>
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">โลโก้</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className={labelCls}>อักษรในกล่อง (1-4 ตัว)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      className={inputCls}
+                      maxLength={4}
+                      value={theme.logo.mark}
+                      onChange={(e) => apply({ ...theme, logo: { ...theme.logo, mark: e.target.value } })}
+                    />
+                    <ResetBtn
+                      show={theme.logo.mark !== published.logo.mark}
+                      onClick={() => apply({ ...theme, logo: { ...theme.logo, mark: published.logo.mark } })}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>ข้อความต่อท้าย</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      className={inputCls}
+                      value={theme.logo.text}
+                      onChange={(e) => apply({ ...theme, logo: { ...theme.logo, text: e.target.value } })}
+                    />
+                    <ResetBtn
+                      show={theme.logo.text !== published.logo.text}
+                      onClick={() => apply({ ...theme, logo: { ...theme.logo, text: published.logo.text } })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100">
+                <p className={labelCls}>ดูบนพื้นหลังต่าง ๆ</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { bg: "#FFFFFF", label: "พื้นขาว" },
+                    { bg: theme.colors.ink, label: "พื้นเข้ม" },
+                    { bg: theme.colors.brand, label: "พื้นแบรนด์" },
+                  ].map((v) => (
+                    <div key={v.label} className="rounded-lg p-3 border border-slate-200 text-center" style={{ background: v.bg }}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className="inline-flex items-center justify-center text-white font-semibold"
+                          style={{ width: 22, height: 22, borderRadius: 6, background: theme.colors.brand, fontSize: 10 }}
+                        >
+                          {theme.logo.mark}
+                        </span>
+                        <span className="text-xs font-semibold" style={{ color: v.bg === "#FFFFFF" ? theme.colors.ink : "#fff" }}>
+                          {theme.logo.text}
+                        </span>
+                      </span>
+                      <p className="text-[9px] mt-1.5" style={{ color: v.bg === "#FFFFFF" ? "#94a3b8" : "rgba(255,255,255,.6)" }}>
+                        {v.label}
                       </p>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
+          )}
+
+          {/* ── หมวดรูปทรง ── */}
+          {tab === "shape" && (
+            <div className={cardCls}>
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">ความมนของขอบ</h3>
+              <div className="flex flex-wrap gap-2">
+                {radii.map((o) => (
+                  <button
+                    key={o.value}
+                    onClick={() => apply({ ...theme, radius: o.value })}
+                    className={`px-4 py-3 border text-sm transition ${
+                      theme.radius === o.value ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"
+                    }`}
+                    style={{ borderRadius: o.value === "sharp" ? 2 : o.value === "soft" ? 12 : 22 }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+                <ResetBtn show={theme.radius !== published.radius} onClick={() => apply({ ...theme, radius: published.radius })} />
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100">
+                <p className={labelCls}>ตัวอย่างปุ่มและการ์ด</p>
+                <div className="flex items-center gap-3">
+                  <span
+                    className="px-4 py-2 text-xs font-semibold text-white"
+                    style={{ background: theme.colors.brand, borderRadius: theme.radius === "sharp" ? 2 : theme.radius === "soft" ? 10 : 99 }}
+                  >
+                    ปุ่มหลัก
+                  </span>
+                  <span
+                    className="px-4 py-2 text-xs border"
+                    style={{
+                      borderColor: "#d6d6d2",
+                      color: theme.colors.ink,
+                      borderRadius: theme.radius === "sharp" ? 2 : theme.radius === "soft" ? 10 : 99,
+                    }}
+                  >
+                    ปุ่มรอง
+                  </span>
+                  <span
+                    className="w-16 h-12 border"
+                    style={{
+                      background: theme.colors.surface,
+                      borderColor: "#e7e7e4",
+                      borderRadius: theme.radius === "sharp" ? 3 : theme.radius === "soft" ? 14 : 24,
+                      display: "inline-block",
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── หมวดประวัติ ── */}
+          {tab === "history" && (
+            <div className={cardCls}>
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">ประวัติการเผยแพร่</h3>
+              {!versions.length ? (
+                <p className="py-8 text-center text-sm text-slate-400">ยังไม่มีประวัติ — จะบันทึกทุกครั้งที่กดเผยแพร่</p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {versions.map((v) => (
+                    <li key={v.versionNo} className="flex items-center gap-3 py-2.5">
+                      <span className="text-xs text-slate-400 w-10">#{v.versionNo}</span>
+                      <span className="flex gap-1">
+                        {[v.theme.colors.brand, v.theme.colors.ink, v.theme.colors.page].map((c, i) => (
+                          <span key={i} style={{ background: c, width: 14, height: 14, borderRadius: 4, border: "1px solid rgba(0,0,0,.1)" }} />
+                        ))}
+                      </span>
+                      <span className="flex-1 text-xs text-slate-600">
+                        {v.theme.fonts.display} / {v.theme.fonts.body} · {timeAgo(v.createdAt)}
+                      </span>
+                      <button onClick={() => void restore(v.versionNo)} className="text-xs text-blue-600 hover:underline">
+                        กู้คืนเป็นร่าง
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ══ ขวา: พรีวิวเว็บจริง ══ */}
+        <div className="lg:sticky lg:top-4 min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 mb-2">
+            {DEVICES.map((d) => (
+              <button
+                key={d.k}
+                onClick={() => setDevice(d.k)}
+                title={`${d.label} ${d.w}px`}
+                className={`px-2.5 py-1 rounded-lg border text-xs transition ${
+                  device === d.k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"
+                }`}
+              >
+                {d.icon}
+              </button>
+            ))}
+            <select value={page} onChange={(e) => setPage(e.target.value)} className={inputCls} style={{ width: "auto" }}>
+              {PAGES.map((p) => (
+                <option key={p.path} value={p.path}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            {previewSrc && (
+              <a
+                href={previewSrc}
+                target="_blank"
+                rel="noreferrer"
+                title="เปิดในแท็บใหม่"
+                className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400"
+              >
+                ↗
+              </a>
+            )}
+            <span className="text-[10px] text-slate-400 ml-auto">{dev.w}px</span>
           </div>
-          <p className="text-[10px] text-slate-400 mt-2 text-center">
-            ตัวอย่างคร่าว ๆ — หน้าจริงจะใช้สี/ฟอนต์ชุดเดียวกันนี้
-          </p>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: "72vh", minHeight: 420 }}>
+            {previewSrc ? (
+              <div className="w-full h-full overflow-auto flex justify-center">
+                <iframe
+                  ref={iframeRef}
+                  src={previewSrc}
+                  title="พรีวิวเว็บไซต์"
+                  className="bg-white border-0"
+                  style={{
+                    width: dev.w,
+                    height: `${(100 / Math.min(1, 400 / dev.w)) * 0.72}vh`,
+                    transform: `scale(${Math.min(1, 400 / dev.w)})`,
+                    transformOrigin: "top center",
+                    minHeight: 600,
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-center px-6">
+                <span className="text-3xl">🔗</span>
+                <p className="text-sm text-slate-500">ยังไม่ได้ผูกโดเมนเว็บกับร้านนี้</p>
+                <p className="text-xs text-slate-400">เพิ่มโดเมนในตาราง shop_domains แล้วพรีวิวจะแสดงเว็บจริงที่นี่</p>
+              </div>
+            )}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1.5 text-center">พรีวิวคือเว็บไซต์จริง — เปลี่ยนค่าแล้วเห็นผลทันที</p>
         </div>
       </div>
 
-      <div className="flex justify-end gap-2 sticky bottom-0 bg-slate-50/80 backdrop-blur py-3">
-        <button
-          onClick={() => void load()}
-          className="px-4 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:border-slate-400"
-        >
-          ยกเลิกการแก้ไข
-        </button>
-        <button
-          onClick={() => void save()}
-          disabled={saving}
-          className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-        >
-          {saving ? "กำลังบันทึก…" : "บันทึกธีม"}
-        </button>
+      {/* ══ แถบปุ่มล่าง ══ */}
+      <div className="sticky bottom-0 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
+        <span className="text-xs text-slate-500">
+          {isDirty ? (
+            <>
+              มีการแก้ไขที่ยังไม่บันทึก <span className="font-medium text-amber-700">{dirtyFields.length} รายการ</span>
+              <span className="text-slate-400"> · {dirtyFields.slice(0, 3).join(", ")}{dirtyFields.length > 3 ? "…" : ""}</span>
+            </>
+          ) : hadDraft ? (
+            "มีร่างบันทึกไว้ — ยังไม่เผยแพร่"
+          ) : (
+            "ไม่มีการเปลี่ยนแปลง"
+          )}
+        </span>
+
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => void discard()}
+            disabled={!isDirty && !hadDraft}
+            className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40"
+          >
+            ละทิ้งการเปลี่ยนแปลง
+          </button>
+          <button
+            onClick={() => void save("draft")}
+            disabled={busy !== null}
+            className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50"
+          >
+            {busy === "draft" ? "กำลังบันทึก…" : "บันทึกร่าง"}
+          </button>
+          <button
+            onClick={() => void save("publish")}
+            disabled={busy !== null}
+            className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+          >
+            {busy === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่"}
+          </button>
+        </div>
       </div>
     </div>
   );

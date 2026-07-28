@@ -31,13 +31,16 @@ const json = (body: unknown, status = 200) =>
   });
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const shopSlug = (new URL(request.url).searchParams.get("shop") ?? "").trim();
+  const url = new URL(request.url);
+  const shopSlug = (url.searchParams.get("shop") ?? "").trim();
+  // preview=1 → ใช้ "ร่าง" ที่ยังไม่เผยแพร่ (หน้าตั้งค่าธีมใช้ดูผลก่อนกดเผยแพร่)
+  const preview = url.searchParams.get("preview") === "1";
   if (!shopSlug) return json({ error: "ต้องระบุ shop" }, 400);
 
   const sb = supabaseAdmin();
   const { data: shop } = await sb
     .from("shops")
-    .select("id, name, slug, status, theme, home_layout")
+    .select("id, name, slug, status, theme, theme_draft, home_layout")
     .eq("slug", shopSlug)
     .maybeSingle();
   if (!shop) return json({ error: "ไม่พบร้าน" }, 404);
@@ -48,14 +51,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     slug: string;
     status: string;
     theme: unknown;
+    theme_draft: unknown;
     home_layout: unknown;
   };
+
+  const source = preview && s.theme_draft != null ? s.theme_draft : s.theme;
 
   return json({
     shop: s.slug,
     shopName: s.name,
     active: s.status === "active",
-    theme: normalizeTheme(s.theme),
+    preview,
+    theme: normalizeTheme(source),
     // เตรียมไว้สำหรับเฟสถัดไป (page builder) — ตอนนี้ปกติจะเป็น []
     layout: Array.isArray(s.home_layout) ? s.home_layout : [],
   });
