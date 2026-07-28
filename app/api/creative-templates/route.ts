@@ -1,3 +1,4 @@
+// rebuild-touch: 2026-07-28 — กันบิลด์เก่าค้าง (icon/no_brand_only ไม่ถูกบันทึก)
 /**
  * Creative Task Templates API — แม่แบบงาน (list + create)
  * GET  /api/creative-templates?search=

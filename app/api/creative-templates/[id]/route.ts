@@ -1,3 +1,4 @@
+// rebuild-touch: 2026-07-28 — กันบิลด์เก่าค้าง (icon/no_brand_only ไม่ถูกบันทึก)
 /**
  * Creative Task Template — รายตัว (GET / PATCH / DELETE soft)
  */
