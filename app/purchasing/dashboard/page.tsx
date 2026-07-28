@@ -139,6 +139,7 @@ export default function PurchasingDashboardPage() {
           <div className="flex items-center gap-2">
             <PendingDataButton scope="purchasing" />
             <Link href="/purchasing/calendar" className="h-9 px-3 leading-9 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50" title="ปฏิทินของเข้า / จ่ายเงิน">📅 ปฏิทิน</Link>
+            <Link href="/purchasing/shop-terms" className="h-9 px-3 leading-9 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50" title="ตั้งเทอมการจ่าย + ระยะเวลาส่งของ ให้หลายร้านรวดเดียว → ปฏิทินคิดวันจ่าย/วันของเข้าให้อัตโนมัติ">💳 เครดิตร้าน</Link>
             <button onClick={() => setLineOpen(true)} className="h-9 px-3 leading-9 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50" title="ตั้งค่ากลุ่ม LINE แจ้งเตือนขอซื้อ">💬 ตั้งค่า LINE</button>
             <Link href="/purchasing" className="h-9 px-4 leading-9 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">+ ขอซื้อสินค้า →</Link>
           </div>
