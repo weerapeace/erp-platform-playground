@@ -16,6 +16,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { pushLineText } from "@/lib/board-notify";
+import { buildPartnerMatcher } from "@/lib/partner-match";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -91,6 +92,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     groups.set(key, arr);
   }
 
+  // ผูก "id ร้าน" ลงใบตั้งแต่ตอนสร้าง (ไม่ใช่เก็บแค่ชื่อ) — เปลี่ยนชื่อร้านทีหลังก็ยังตามเจอ
+  // ของกลาง lib/partner-match: ชื่อสลับคำ/วงเล็บ/เว้นวรรคต่างก็จับคู่ได้
+  const { data: allPartners } = await admin.from("partners_v2").select("id, display_name, name_th, is_supplier, is_active");
+  const partnerMatcher = buildPartnerMatcher((allPartners ?? []) as unknown as { id: string; display_name: string | null; name_th: string | null; is_supplier: boolean | null; is_active: boolean | null }[]);
+
   // เลขที่ PO: ใช้ระบบเลขเอกสารกลาง erp_next_number('po') — atomic กันเลขซ้ำ
   // ตั้งค่ารูปแบบได้ที่หน้า /admin/numbering (ไม่ต้องแก้โค้ด)
   const now = new Date();
@@ -110,7 +116,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // header
     const { data: po, error: poErr } = await admin
       .from("purchase_orders_v2")
-      .insert({ po_no: poNo, seller_name: seller, currency, order_date: orderDate, status: "draft", grand_total: grandTotal, requester })
+      .insert({ po_no: poNo, seller_name: seller, seller_partner_id: partnerMatcher.match(seller)?.id ?? null, currency, order_date: orderDate, status: "draft", grand_total: grandTotal, requester })
       .select("id")
       .single();
     if (poErr || !po) return NextResponse.json({ error: "สร้าง PO ไม่สำเร็จ: " + (poErr?.message ?? "") }, { status: 500 });

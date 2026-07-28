@@ -12,6 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { buildPartnerMatcher } from "@/lib/partner-match";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -57,11 +58,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const sellerName = String((po as Record<string, unknown> | null)?.seller_name ?? "").trim();
     const currency = String((po as Record<string, unknown> | null)?.currency ?? "THB") || "THB";
     if (sellerName) {
-      const { data: partners } = await admin.from("partners_v2").select("id, display_name, name_th").eq("is_supplier", true);
-      const partner = (partners ?? []).find((p) => {
-        const r = p as Record<string, unknown>;
-        return String(r.display_name ?? "").trim() === sellerName || String(r.name_th ?? "").trim() === sellerName;
-      }) as Record<string, unknown> | undefined;
+      // ⚠️ ห้ามกรอง is_supplier=true — ร้านบนใบหลายร้านยังไม่ได้ติ๊ก "เป็นผู้จำหน่าย" ราคาจะไม่ถูกเก็บเข้าตารางร้าน
+      // จับคู่ผ่านของกลาง lib/partner-match (รองรับชื่อสลับคำ/วงเล็บ/เว้นวรรคต่าง)
+      const { data: partners } = await admin.from("partners_v2").select("id, display_name, name_th, is_supplier, is_active");
+      const partner = buildPartnerMatcher((partners ?? []) as unknown as { id: string; display_name: string | null; name_th: string | null; is_supplier: boolean | null; is_active: boolean | null }[])
+        .match(sellerName) as Record<string, unknown> | undefined;
       if (partner) {
         const partnerId = String(partner.id);
         const { data: existing } = await admin.from("supplier_items")

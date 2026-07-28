@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { computeDueDate } from "@/lib/credit-term";
+import { buildPartnerMatcher } from "@/lib/partner-match";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -150,14 +151,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // วันครบกำหนดจ่าย: ใช้ที่ตั้งไว้ ถ้าไม่มี → คำนวณจาก "เครดิตร้าน + วันสั่ง" (ของกลาง lib/credit-term)
     // ไม่กรอง is_supplier — ร้านบนใบหลายร้านยังไม่ได้ติ๊กเป็นผู้จำหน่าย (ร้านที่ติ๊กแล้วชนะเมื่อชื่อซ้ำ)
     const { data: partners } = await admin.from("partners_v2")
-      .select("id, display_name, name_th, is_supplier, purchase_credit_term")
-      .order("is_supplier", { ascending: false, nullsFirst: false });
-    const termById = new Map<string, string | null>(), termByName = new Map<string, string | null>();
-    for (const pt of (partners ?? []) as Record<string, unknown>[]) {
-      const term = String(pt.purchase_credit_term ?? "").trim() || null;
-      termById.set(String(pt.id), term);
-      for (const nm of [pt.display_name, pt.name_th]) { const k = String(nm ?? "").trim(); if (k && !termByName.has(k)) termByName.set(k, term); }
-    }
+      .select("id, display_name, name_th, is_supplier, is_active, purchase_credit_term");
+    type PtRow = { id: string; display_name: string | null; name_th: string | null; is_supplier: boolean | null; is_active: boolean | null; purchase_credit_term: string | null };
+    const ptRows = (partners ?? []) as unknown as PtRow[];
+    // ชื่อบนใบต่างจากทะเบียนนิดหน่อย (สลับคำ/วงเล็บ/เว้นวรรค) ก็ยังจับคู่ได้ — ของกลาง lib/partner-match
+    const matcher = buildPartnerMatcher(ptRows);
+    const termOf = (p: PtRow) => String(p.purchase_credit_term ?? "").trim() || null;
+    const termById = new Map<string, string | null>();
+    for (const p of ptRows) termById.set(String(p.id), termOf(p));
 
     // สินค้าในใบ (3 ตัวแรก + จำนวนรายการ) — ให้เห็นว่าจ่ายค่าอะไร (ใช้กับ unpaid/paid · spend_month ไม่ใช้)
     const poIds = (type === "unpaid" || type === "paid") ? shown.map((p) => String(p.id)) : [];
@@ -181,8 +182,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     rows = shown.map((p) => {
       const pid = String(p.id);
+      const matched = matcher.match(p.seller_name as string | null);
       const term = (p.seller_partner_id ? termById.get(String(p.seller_partner_id)) : null)
-        ?? termByName.get(String(p.seller_name ?? "").trim()) ?? null;
+        ?? (matched ? termOf(matched) : null) ?? null;
       const setDue = (p.payment_due_date as string) ?? null;
       const due = setDue ?? computeDueDate((p.order_date as string) ?? null, term);
       const ls = linesByPo.get(pid) ?? [];

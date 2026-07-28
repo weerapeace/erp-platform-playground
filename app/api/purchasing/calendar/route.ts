@@ -11,6 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { computeDueDate, computeArrivalDate, parseLeadTime } from "@/lib/credit-term";
+import { buildPartnerMatcher } from "@/lib/partner-match";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -68,20 +69,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // จับคู่ร้าน (ชื่อ → id + เครดิต) — ใช้ทั้งคำนวณวันจ่ายอัตโนมัติ และให้ popup เตือน/ตั้งเครดิตได้
   // จับคู่ทุก partner (ไม่กรอง is_supplier) — ร้านบนใบสั่งซื้อหลายร้านยังไม่ได้ติ๊ก "เป็นผู้จำหน่าย"
   // เรียงให้ร้านที่ติ๊ก is_supplier ชนะเมื่อชื่อซ้ำกัน
+  // ชื่อบนใบพิมพ์ต่างจากทะเบียนนิดหน่อย (สลับคำ/วงเล็บ/เว้นวรรค) ก็ยังจับคู่ได้ — ของกลาง lib/partner-match
   const { data: partners } = await admin.from("partners_v2")
-    .select("id, display_name, name_th, is_supplier, purchase_credit_term, purchase_lead_time")
-    .order("is_supplier", { ascending: false, nullsFirst: false });
-  const partnerByName = new Map<string, { id: string; term: string | null; lead: string | null }>();
+    .select("id, display_name, name_th, is_supplier, is_active, purchase_credit_term, purchase_lead_time");
+  type PtRow = { id: string; display_name: string | null; name_th: string | null; is_supplier: boolean | null; is_active: boolean | null; purchase_credit_term: string | null; purchase_lead_time: string | null };
+  const ptRows = ((partners ?? []) as unknown as PtRow[]);
+  const matcher = buildPartnerMatcher(ptRows);
+  const entOf = (p: PtRow) => ({
+    id: String(p.id),
+    term: (String(p.purchase_credit_term ?? "").trim() || null),
+    lead: (String(p.purchase_lead_time ?? "").trim() || null),
+  });
   const partnerById = new Map<string, { id: string; term: string | null; lead: string | null }>();
-  for (const pt of (partners ?? []) as Record<string, unknown>[]) {
-    const ent = {
-      id: String(pt.id),
-      term: (String(pt.purchase_credit_term ?? "").trim() || null),
-      lead: (String(pt.purchase_lead_time ?? "").trim() || null),
-    };
-    partnerById.set(ent.id, ent);
-    for (const nm of [pt.display_name, pt.name_th]) { const k = String(nm ?? "").trim(); if (k && !partnerByName.has(k)) partnerByName.set(k, ent); }
-  }
+  for (const p of ptRows) partnerById.set(String(p.id), entOf(p));
   // ผูกร้านตรงๆ ที่ใบ (seller_partner_id) ชนะการจับคู่ด้วยชื่อ
   const linkedPartnerByPo = new Map<string, string>();
   for (const p of (data ?? []) as Record<string, unknown>[]) if (p.seller_partner_id) linkedPartnerByPo.set(String(p.id), String(p.seller_partner_id));
@@ -90,8 +90,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   for (const it of items) {
     const linkedId = linkedPartnerByPo.get(it.id);
+    const byName = matcher.match(it.seller_name);
     const pt = (linkedId ? partnerById.get(linkedId) : undefined)
-      ?? (it.seller_name ? partnerByName.get(it.seller_name.trim()) : undefined);
+      ?? (byName ? entOf(byName) : undefined);
     it.seller_partner_id = pt?.id ?? null;
     it.seller_credit_term = pt?.term ?? null;
     it.seller_lead_time = pt?.lead ?? null;
