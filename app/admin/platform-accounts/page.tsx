@@ -44,6 +44,7 @@ export default function PlatformAccountsPage() {
   const canManage = can("products.platforms.manage_accounts");
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [brandLogos, setBrandLogos] = useState<Record<string, string>>({});   // brand id → โลโก้ (R2 key จาก /api/brands)
   const [brandId, setBrandId] = useState("");
   const [accounts, setAccounts] = useState<Record<string, Account>>({});
   const [keys, setKeys] = useState<Record<string, boolean>>({});   // platform_id → มี API Key ไหม
@@ -89,6 +90,17 @@ export default function PlatformAccountsPage() {
   }, []);
   useEffect(() => { load(""); }, [load]);
   useEffect(() => { if (brandId) load(brandId); }, [brandId, load]);
+  // โลโก้แบรนด์ (โชว์บนปุ่มเลือกแบรนด์) — แหล่งเดียวกับ Design Dashboard
+  useEffect(() => {
+    let live = true;
+    apiFetch("/api/brands").then((r) => r.json()).then((j) => {
+      if (!live) return;
+      const m: Record<string, string> = {};
+      for (const b of (j.data ?? []) as { id?: string; logo_url?: string | null }[]) if (b.id && b.logo_url) m[b.id] = b.logo_url;
+      setBrandLogos(m);
+    }).catch(() => { /* ไม่มีโลโก้ก็ใช้ตัวอักษรย่อแทน */ });
+    return () => { live = false; };
+  }, []);
   // กลับมาจากการเชื่อมต่อ Facebook (OAuth) — อ่านผลจาก query แล้วล้าง URL
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
@@ -193,7 +205,28 @@ export default function PlatformAccountsPage() {
 
       <div className="flex items-center gap-2 mb-4">
         <span className="text-sm text-slate-600">แบรนด์:</span>
-        <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white min-w-[220px]">
+        {/* ปุ่มเลือกแบรนด์พร้อมโลโก้ (จอกว้าง) — เห็นภาพ กดง่ายกว่า dropdown */}
+        <div className="hidden sm:flex flex-wrap items-center gap-2">
+          {brands.length === 0 && <span className="text-sm text-slate-400">—</span>}
+          {brands.map((b) => {
+            const on = b.id === brandId;
+            const logo = brandLogos[b.id];
+            return (
+              <button key={b.id} type="button" onClick={() => setBrandId(b.id)} title={b.name}
+                className={`h-11 pl-1.5 pr-3 inline-flex items-center gap-2 rounded-xl border transition-colors ${on
+                  ? "border-violet-400 bg-violet-50 ring-2 ring-violet-200"
+                  : "border-slate-200 bg-white hover:border-violet-300 hover:bg-slate-50"}`}>
+                {logo
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={`/api/r2-image?key=${encodeURIComponent(logo)}&w=64`} alt="" className="h-8 w-8 rounded-lg object-contain bg-white border border-slate-100 shrink-0" />
+                  : <span className="h-8 w-8 rounded-lg shrink-0 flex items-center justify-center text-white text-xs font-bold" style={{ background: b.color || "#cbd5e1" }}>{(b.name || "?").slice(0, 1)}</span>}
+                <span className={`text-sm ${on ? "font-semibold text-violet-800" : "text-slate-700"}`}>{b.name}</span>
+              </button>
+            );
+          })}
+        </div>
+        {/* จอแคบ — ใช้ dropdown เหมือนเดิม (ปุ่มเยอะจะล้น) */}
+        <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="sm:hidden h-9 border border-slate-200 rounded-md px-2 text-sm bg-white min-w-[200px]">
           {brands.length === 0 && <option value="">—</option>}
           {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
