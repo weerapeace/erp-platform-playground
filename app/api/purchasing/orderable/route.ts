@@ -78,7 +78,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       seller_name: p.seller_name ?? "—",
       item_sku_id: p.item_sku_id ?? null,
       item_name: p.item_name ?? "",
-      code: sk?.code ?? "",
+      // รหัสวัตถุดิบ: จาก SKU ที่ผูกไว้ · ถ้ายังไม่ผูก (ใบที่มาจาก BOM) → ดึงจากวงเล็บหน้าชื่อ "[CODE] ชื่อ"
+      code: sk?.code || (String(p.item_name ?? "").match(/^\s*\[([^\]]+)\]/)?.[1] ?? ""),
       qty: num(p.qty),
       uom: (p.uom as string) || (sk?.uom_id ? (uomMap.get(sk.uom_id) ?? "") : "") || "",
       price_est: num(p.price_est),
