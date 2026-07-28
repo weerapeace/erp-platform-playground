@@ -13,7 +13,18 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { normalizeTheme, mergeTheme, FONT_CHOICES, RADIUS_CHOICES } from "@/lib/website-theme";
+import {
+  normalizeTheme,
+  mergeTheme,
+  FONT_CHOICES,
+  RADIUS_CHOICES,
+  LOGO_MODES,
+  HEADER_BG,
+  MENU_ALIGNS,
+  CARD_PRESETS,
+  IMAGE_RATIOS,
+  CARD_HOVERS,
+} from "@/lib/website-theme";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -56,8 +67,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     draft: hasDraft ? normalizeTheme(s.theme_draft) : null,
     hasDraft,
     lastVersion: last ?? null,
-    fontChoices: FONT_CHOICES,
-    radiusChoices: RADIUS_CHOICES,
+    choices: {
+      fonts: FONT_CHOICES,
+      radius: RADIUS_CHOICES,
+      logoModes: LOGO_MODES,
+      headerBg: HEADER_BG,
+      menuAligns: MENU_ALIGNS,
+      cardPresets: CARD_PRESETS,
+      imageRatios: IMAGE_RATIOS,
+      cardHovers: CARD_HOVERS,
+    },
   });
 }
 

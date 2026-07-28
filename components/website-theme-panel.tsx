@@ -3,36 +3,64 @@
 /**
  * WebsiteThemePanel — แท็บ "🎨 ดีไซน์" ในหน้า /website/<slug>
  *
- * Phase 1 ตาม spec:
- *  1) แบ่งหมวดเป็นแท็บ  2) พรีวิวเว็บจริง (iframe) ติดหน้าจอ  3) สลับ Desktop/Tablet/Mobile
- *  4) แยกบันทึกร่าง / เผยแพร่  5) ตัวบอก "ยังไม่บันทึก"  6) ย้อน/ทำซ้ำ (Ctrl+Z)
- *  7) ประวัติเวอร์ชัน + กู้คืน  8) ตรวจ contrast (WCAG)  9) คืนค่าเดิมรายช่อง  10) ใช้บนมือถือได้
+ * หมวด: สี · ตัวอักษร · โลโก้และแบรนด์ · Header · การ์ดสินค้า · รูปทรง · ประวัติ
+ * ร่าง/เผยแพร่ · undo/redo (Ctrl+Z) · คืนค่ารายช่อง · ตรวจ contrast (WCAG) ·
+ * พรีวิว = เว็บจริงใน iframe (?preview=1) ส่งธีมสดผ่าน postMessage
  *
- * ข้อมูล: /api/website/theme (GET/PUT/DELETE) · /api/website/theme/versions
- * พรีวิวคือ "เว็บจริง" เปิดด้วย ?preview=1 แล้วส่งธีมเข้าไปทาง postMessage → เห็นตรงกับของจริง 100%
+ * ข้อมูล: /api/website/theme · /api/website/theme/versions · อัปโหลดรูปผ่าน /api/admin/upload (R2)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken, lighten } from "@/lib/color-utils";
+import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken } from "@/lib/color-utils";
+import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 
 type Radius = "sharp" | "soft" | "round";
+type LogoMode = "icon-text" | "image" | "text" | "icon";
+type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
+type MenuAlign = "left" | "center" | "right";
+type CardPreset = "flat" | "border" | "shadow" | "floating" | "minimal";
+type ImageRatio = "1:1" | "4:3" | "4:5" | "3:4" | "16:9";
+type CardHover = "none" | "lift" | "zoom";
 
 interface Theme {
   colors: { brand: string; brandDeep: string; ink: string; page: string; surface: string; muted: string };
   fonts: { display: string; body: string };
   radius: Radius;
-  logo: { mark: string; text: string };
+  logo: {
+    mark: string;
+    text: string;
+    mode: LogoMode;
+    imageKey: string | null;
+    imageDarkKey: string | null;
+    faviconKey: string | null;
+    height: number;
+  };
+  header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
+  card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
+}
+
+interface Choices {
+  fonts: string[];
+  radius: { value: Radius; label: string }[];
+  logoModes: { value: LogoMode; label: string }[];
+  headerBg: { value: HeaderBg; label: string }[];
+  menuAligns: { value: MenuAlign; label: string }[];
+  cardPresets: { value: CardPreset; label: string; hint: string }[];
+  imageRatios: { value: ImageRatio; label: string }[];
+  cardHovers: { value: CardHover; label: string }[];
 }
 
 type ColorKey = keyof Theme["colors"];
-type TabKey = "colors" | "fonts" | "logo" | "shape" | "history";
+type TabKey = "colors" | "fonts" | "logo" | "header" | "card" | "shape" | "history";
 type Device = "desktop" | "tablet" | "mobile";
 
 const TABS: { k: TabKey; label: string }[] = [
   { k: "colors", label: "สี" },
   { k: "fonts", label: "ตัวอักษร" },
   { k: "logo", label: "โลโก้" },
+  { k: "header", label: "Header" },
+  { k: "card", label: "การ์ดสินค้า" },
   { k: "shape", label: "รูปทรง" },
   { k: "history", label: "ประวัติ" },
 ];
@@ -124,8 +152,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [theme, setTheme] = useState<Theme | null>(null);
   const [published, setPublished] = useState<Theme | null>(null);
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
-  const [fonts, setFonts] = useState<string[]>([]);
-  const [radii, setRadii] = useState<{ value: Radius; label: string }[]>([]);
+  const [choices, setChoices] = useState<Choices | null>(null);
   const [lastVersion, setLastVersion] = useState<{ version_no: number; created_at: string } | null>(null);
   const [hadDraft, setHadDraft] = useState(false);
 
@@ -136,11 +163,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [page, setPage] = useState("/");
   const [versions, setVersions] = useState<{ versionNo: number; createdAt: string; theme: Theme }[]>([]);
 
-  // ย้อน/ทำซ้ำ
   const undoStack = useRef<Theme[]>([]);
   const redoStack = useRef<Theme[]>([]);
-  const [, forceRender] = useState(0);
-
+  const [, tick] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const load = useCallback(async () => {
@@ -152,12 +177,10 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         toast.error(j.error);
         return;
       }
-      const start: Theme = j.draft ?? j.published;
-      setTheme(start);
+      setTheme(j.draft ?? j.published);
       setPublished(j.published);
       setSiteUrl(j.shop?.siteUrl ?? null);
-      setFonts(j.fontChoices ?? []);
-      setRadii(j.radiusChoices ?? []);
+      setChoices(j.choices ?? null);
       setLastVersion(j.lastVersion ?? null);
       setHadDraft(Boolean(j.hasDraft));
       undoStack.current = [];
@@ -173,7 +196,6 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     void load();
   }, [load]);
 
-  // เปลี่ยนค่า + เก็บลงประวัติ undo
   const apply = useCallback((next: Theme) => {
     setTheme((prev) => {
       if (prev) {
@@ -182,10 +204,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       }
       return next;
     });
-    forceRender((n) => n + 1);
+    tick((n) => n + 1);
   }, []);
 
   const setColor = (k: ColorKey, v: string) => theme && apply({ ...theme, colors: { ...theme.colors, [k]: v } });
+  const setLogo = (p: Partial<Theme["logo"]>) => theme && apply({ ...theme, logo: { ...theme.logo, ...p } });
+  const setHeader = (p: Partial<Theme["header"]>) => theme && apply({ ...theme, header: { ...theme.header, ...p } });
+  const setCard = (p: Partial<Theme["card"]>) => theme && apply({ ...theme, card: { ...theme.card, ...p } });
 
   const undo = useCallback(() => {
     const prev = undoStack.current.pop();
@@ -194,7 +219,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       if (cur) redoStack.current = [...redoStack.current, cur];
       return prev;
     });
-    forceRender((n) => n + 1);
+    tick((n) => n + 1);
   }, []);
 
   const redo = useCallback(() => {
@@ -204,13 +229,14 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       if (cur) undoStack.current = [...undoStack.current, cur];
       return next;
     });
-    forceRender((n) => n + 1);
+    tick((n) => n + 1);
   }, []);
 
-  // คีย์ลัด Ctrl+Z / Ctrl+Shift+Z
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
+      const el = e.target as HTMLElement;
+      if (el?.tagName === "INPUT" || el?.tagName === "TEXTAREA") return;
       e.preventDefault();
       if (e.shiftKey) redo();
       else undo();
@@ -228,7 +254,6 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     return () => clearTimeout(t);
   }, [theme]);
 
-  // iframe บอกว่าพร้อม → ส่งธีมทันที
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if ((e.data as { type?: string })?.type === "storefront-preview-ready" && theme) {
@@ -239,7 +264,6 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     return () => window.removeEventListener("message", onMsg);
   }, [theme]);
 
-  // เตือนก่อนออกจากหน้าถ้ายังไม่บันทึก
   const dirtyFields = useMemo(() => {
     if (!theme || !published) return [] as string[];
     const out: string[] = [];
@@ -248,6 +272,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (theme.fonts.body !== published.fonts.body) out.push("ฟอนต์เนื้อหา");
     if (theme.radius !== published.radius) out.push("ความมนขอบ");
     if (!eq(theme.logo, published.logo)) out.push("โลโก้");
+    if (!eq(theme.header, published.header)) out.push("Header");
+    if (!eq(theme.card, published.card)) out.push("การ์ดสินค้า");
     return out;
   }, [theme, published]);
 
@@ -255,12 +281,12 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   useEffect(() => {
     if (!isDirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+    const h = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
   }, [isDirty]);
 
   const save = async (mode: "draft" | "publish") => {
@@ -299,7 +325,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     try {
       await apiFetch(`/api/website/theme?shopId=${encodeURIComponent(shopId)}`, { method: "DELETE" });
     } catch {
-      /* ไม่เป็นไร โหลดใหม่อยู่ดี */
+      /* ignore */
     }
     await load();
     toast.info("ละทิ้งการเปลี่ยนแปลงแล้ว");
@@ -332,7 +358,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         apply(j.theme);
         setHadDraft(true);
         setTab("colors");
-        toast.success(`กู้คืนเวอร์ชัน ${versionNo} เป็นร่างแล้ว — ตรวจแล้วกดเผยแพร่`);
+        toast.success(`กู้คืนเวอร์ชัน ${versionNo} เป็นร่างแล้ว`);
       } else toast.error(j.error ?? "กู้คืนไม่สำเร็จ");
     } catch {
       toast.error("เชื่อมต่อไม่ได้");
@@ -340,12 +366,12 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   };
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
-  if (!theme || !published) return <div className="py-16 text-center text-sm text-slate-400">โหลดธีมไม่สำเร็จ</div>;
+  if (!theme || !published || !choices) return <div className="py-16 text-center text-sm text-slate-400">โหลดธีมไม่สำเร็จ</div>;
 
   const dev = DEVICES.find((d) => d.k === device)!;
   const previewSrc = siteUrl ? `${siteUrl}${page}?preview=1` : null;
+  const scale = Math.min(1, 400 / dev.w);
 
-  /* ── ตรวจ contrast ── */
   const checks = [
     { label: "ตัวอักษรบนพื้นหลังเว็บ", fg: theme.colors.ink, bg: theme.colors.page },
     { label: "ตัวอักษรรองบนพื้นการ์ด", fg: theme.colors.muted, bg: theme.colors.surface },
@@ -360,18 +386,22 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   const ResetBtn = ({ onClick, show }: { onClick: () => void; show: boolean }) =>
     show ? (
-      <button
-        onClick={onClick}
-        title="คืนค่าที่เผยแพร่อยู่"
-        className="shrink-0 w-7 h-7 rounded-lg border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-400 text-xs"
-      >
+      <button onClick={onClick} title="คืนค่าที่เผยแพร่อยู่" className="shrink-0 w-7 h-7 rounded-lg border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-400 text-xs">
         ↺
       </button>
     ) : null;
 
+  const tabDirty = (k: TabKey) =>
+    (k === "colors" && dirtyFields.some((d) => COLOR_FIELDS.some((c) => c.label === d))) ||
+    (k === "fonts" && dirtyFields.some((d) => d.startsWith("ฟอนต์"))) ||
+    (k === "logo" && dirtyFields.includes("โลโก้")) ||
+    (k === "header" && dirtyFields.includes("Header")) ||
+    (k === "card" && dirtyFields.includes("การ์ดสินค้า")) ||
+    (k === "shape" && dirtyFields.includes("ความมนขอบ"));
+
   return (
     <div className="space-y-3">
-      {/* ── แถบสถานะบนสุด ── */}
+      {/* แถบสถานะ */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
         <span
           className={`text-xs px-2.5 py-1 rounded-full font-medium ${
@@ -385,61 +415,38 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             เผยแพร่ล่าสุด: เวอร์ชัน {lastVersion.version_no} · {timeAgo(lastVersion.created_at)}
           </span>
         )}
-
         <div className="ml-auto flex items-center gap-1">
-          <button
-            onClick={undo}
-            disabled={!undoStack.current.length}
-            title="ย้อนกลับ (Ctrl+Z)"
-            className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400"
-          >
-            ↶
-          </button>
-          <button
-            onClick={redo}
-            disabled={!redoStack.current.length}
-            title="ทำซ้ำ (Ctrl+Shift+Z)"
-            className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400"
-          >
-            ↷
-          </button>
+          <button onClick={undo} disabled={!undoStack.current.length} title="ย้อนกลับ (Ctrl+Z)" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↶</button>
+          <button onClick={redo} disabled={!redoStack.current.length} title="ทำซ้ำ" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↷</button>
         </div>
       </div>
 
       <div className="rounded-xl bg-blue-50/60 border border-blue-200 px-4 py-2.5">
         <p className="text-sm text-slate-700 font-medium">กำลังแก้ไขธีมของเว็บไซต์จริง</p>
         <p className="text-xs text-slate-500 mt-0.5">
-          กด &quot;บันทึกร่าง&quot; จะยังไม่เปลี่ยนหน้าเว็บ จนกว่าจะกด &quot;เผยแพร่&quot; · หลังเผยแพร่เว็บอัปเดตใน ~1 นาที
+          กด &quot;บันทึกร่าง&quot; จะยังไม่เปลี่ยนหน้าเว็บ จนกว่าจะกด &quot;เผยแพร่&quot;
         </p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,38%)] items-start">
-        {/* ══ ซ้าย: ตั้งค่า ══ */}
+        {/* ── ซ้าย: ตั้งค่า ── */}
         <div className="min-w-0 space-y-3">
-          {/* แท็บ */}
           <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-            {TABS.map((t) => {
-              const dirtyInTab =
-                (t.k === "colors" && dirtyFields.some((d) => COLOR_FIELDS.some((c) => c.label === d))) ||
-                (t.k === "fonts" && dirtyFields.some((d) => d.startsWith("ฟอนต์"))) ||
-                (t.k === "logo" && dirtyFields.includes("โลโก้")) ||
-                (t.k === "shape" && dirtyFields.includes("ความมนขอบ"));
-              return (
-                <button
-                  key={t.k}
-                  onClick={() => setTab(t.k)}
-                  className={`px-3.5 py-2 text-sm border-b-2 -mb-px whitespace-nowrap transition ${
-                    tab === t.k ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  {t.label}
-                  {dirtyInTab && <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-amber-500 align-middle" />}
-                </button>
-              );
-            })}
+            {TABS.map((t) => (
+              <button
+                key={t.k}
+                onClick={() => setTab(t.k)}
+                className={`px-3.5 py-2 text-sm border-b-2 -mb-px whitespace-nowrap transition ${
+                  tab === t.k ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                {t.label}
+                {tabDirty(t.k) && <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-amber-500 align-middle" />}
+              </button>
+            ))}
           </div>
 
-          {/* ── หมวดสี ── */}
+          {/* ── สี ── */}
           {tab === "colors" && (
             <>
               <div className={cardCls}>
@@ -447,11 +454,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 <p className="text-[11px] text-slate-500 mb-3">เลือกแล้วปรับต่อได้ · ย้อนกลับได้ก่อนบันทึก</p>
                 <div className="flex flex-wrap gap-2">
                   {PRESETS.map((p) => (
-                    <button
-                      key={p.name}
-                      onClick={() => apply({ ...theme, ...p.theme } as Theme)}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-slate-500"
-                    >
+                    <button key={p.name} onClick={() => apply({ ...theme, ...p.theme } as Theme)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-slate-500">
                       <span className="flex gap-0.5">
                         {[p.theme.colors?.brand, p.theme.colors?.ink, p.theme.colors?.page].map((c, i) => (
                           <span key={i} style={{ background: c, width: 10, height: 10, borderRadius: 3, border: "1px solid rgba(0,0,0,.1)" }} />
@@ -466,15 +469,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <div className={cardCls}>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-slate-800">สี</h3>
-                  <button
-                    onClick={() =>
-                      apply({
-                        ...theme,
-                        colors: { ...theme.colors, brandDeep: darken(theme.colors.brand) },
-                      })
-                    }
-                    className="text-[11px] text-blue-600 hover:underline"
-                  >
+                  <button onClick={() => apply({ ...theme, colors: { ...theme.colors, brandDeep: darken(theme.colors.brand) } })} className="text-[11px] text-blue-600 hover:underline">
                     สร้างสีเข้มจากสีหลักอัตโนมัติ
                   </button>
                 </div>
@@ -485,13 +480,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                         {f.label} <span className="text-slate-400">· {f.hint}</span>
                       </label>
                       <div className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={theme.colors[f.key]}
-                          onChange={(e) => setColor(f.key, e.target.value)}
-                          className="w-9 h-9 rounded-lg border border-slate-200 cursor-pointer shrink-0 p-0.5"
-                          aria-label={f.label}
-                        />
+                        <input type="color" value={theme.colors[f.key]} onChange={(e) => setColor(f.key, e.target.value)} className="w-9 h-9 rounded-lg border border-slate-200 cursor-pointer shrink-0 p-0.5" aria-label={f.label} />
                         <input value={theme.colors[f.key]} onChange={(e) => setColor(f.key, e.target.value)} className={inputCls} />
                         <ResetBtn show={theme.colors[f.key] !== published.colors[f.key]} onClick={() => setColor(f.key, published.colors[f.key])} />
                       </div>
@@ -499,42 +488,25 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   ))}
                 </div>
 
-                {/* เฉดสีอัตโนมัติ */}
                 <div className="mt-4 pt-3 border-t border-slate-100">
                   <p className={labelCls}>เฉดสีจากสีหลัก (ระบบสร้างให้อัตโนมัติ)</p>
                   <div className="flex rounded-lg overflow-hidden border border-slate-200">
                     {Object.entries(shades(theme.colors.brand)).map(([k, v]) => (
-                      <div key={k} className="flex-1 h-8 relative group" style={{ background: v }} title={`${k} · ${v}`}>
-                        <span className="absolute inset-0 hidden group-hover:flex items-center justify-center text-[9px] text-white mix-blend-difference">
-                          {k}
-                        </span>
-                      </div>
+                      <div key={k} className="flex-1 h-8" style={{ background: v }} title={`${k} · ${v}`} />
                     ))}
                   </div>
                 </div>
               </div>
 
-              {/* Contrast */}
               <div className={cardCls}>
                 <h3 className="text-sm font-semibold text-slate-800 mb-1">ตรวจความอ่านง่าย (WCAG)</h3>
-                <p className="text-[11px] text-slate-500 mb-3">
-                  {failCount ? `⚠️ พบ ${failCount} จุดที่อ่านยาก` : "✓ ผ่านทุกจุด"}
-                </p>
+                <p className="text-[11px] text-slate-500 mb-3">{failCount ? `⚠️ พบ ${failCount} จุดที่อ่านยาก` : "✓ ผ่านทุกจุด"}</p>
                 <ul className="space-y-2">
                   {checks.map((c) => (
                     <li key={c.label} className="flex items-center gap-2 text-xs">
-                      <span
-                        className="inline-flex items-center justify-center px-2 py-1 rounded shrink-0"
-                        style={{ background: c.bg, color: c.fg, minWidth: 46 }}
-                      >
-                        Aa
-                      </span>
+                      <span className="inline-flex items-center justify-center px-2 py-1 rounded shrink-0" style={{ background: c.bg, color: c.fg, minWidth: 46 }}>Aa</span>
                       <span className="flex-1 text-slate-600">{c.label}</span>
-                      <span
-                        className={
-                          c.level === "fail" ? "text-red-600" : c.level === "AA-large" ? "text-amber-600" : "text-emerald-600"
-                        }
-                      >
+                      <span className={c.level === "fail" ? "text-red-600" : c.level === "AA-large" ? "text-amber-600" : "text-emerald-600"}>
                         {c.ratio}:1 · {WCAG_LABEL[c.level]}
                       </span>
                       {c.suggest && (
@@ -555,7 +527,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             </>
           )}
 
-          {/* ── หมวดตัวอักษร ── */}
+          {/* ── ตัวอักษร ── */}
           {tab === "fonts" && (
             <div className={cardCls}>
               <h3 className="text-sm font-semibold text-slate-800 mb-3">ตัวอักษร</h3>
@@ -563,138 +535,211 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 <div>
                   <label className={labelCls}>ฟอนต์หัวข้อ</label>
                   <div className="flex items-center gap-2">
-                    <select
-                      className={inputCls}
-                      value={theme.fonts.display}
-                      onChange={(e) => apply({ ...theme, fonts: { ...theme.fonts, display: e.target.value } })}
-                    >
-                      {fonts.map((f) => (
-                        <option key={f} value={f}>
-                          {f}
-                        </option>
-                      ))}
+                    <select className={inputCls} value={theme.fonts.display} onChange={(e) => apply({ ...theme, fonts: { ...theme.fonts, display: e.target.value } })}>
+                      {choices.fonts.map((f) => <option key={f} value={f}>{f}</option>)}
                     </select>
-                    <ResetBtn
-                      show={theme.fonts.display !== published.fonts.display}
-                      onClick={() => apply({ ...theme, fonts: { ...theme.fonts, display: published.fonts.display } })}
-                    />
+                    <ResetBtn show={theme.fonts.display !== published.fonts.display} onClick={() => apply({ ...theme, fonts: { ...theme.fonts, display: published.fonts.display } })} />
                   </div>
                 </div>
                 <div>
                   <label className={labelCls}>ฟอนต์เนื้อหา</label>
                   <div className="flex items-center gap-2">
-                    <select
-                      className={inputCls}
-                      value={theme.fonts.body}
-                      onChange={(e) => apply({ ...theme, fonts: { ...theme.fonts, body: e.target.value } })}
-                    >
-                      {fonts.map((f) => (
-                        <option key={f} value={f}>
-                          {f}
-                        </option>
-                      ))}
+                    <select className={inputCls} value={theme.fonts.body} onChange={(e) => apply({ ...theme, fonts: { ...theme.fonts, body: e.target.value } })}>
+                      {choices.fonts.map((f) => <option key={f} value={f}>{f}</option>)}
                     </select>
-                    <ResetBtn
-                      show={theme.fonts.body !== published.fonts.body}
-                      onClick={() => apply({ ...theme, fonts: { ...theme.fonts, body: published.fonts.body } })}
-                    />
+                    <ResetBtn show={theme.fonts.body !== published.fonts.body} onClick={() => apply({ ...theme, fonts: { ...theme.fonts, body: published.fonts.body } })} />
                   </div>
                 </div>
               </div>
-
               <div className="mt-4 pt-3 border-t border-slate-100 space-y-1.5">
                 <p className={labelCls}>ตัวอย่าง</p>
-                <p className="text-xl font-semibold" style={{ color: theme.colors.ink }}>
-                  งานหนังคุณภาพ ครบจบที่เดียว
-                </p>
-                <p className="text-lg font-semibold" style={{ color: theme.colors.ink }}>
-                  Premium leather manufacturing
-                </p>
-                <p className="text-sm" style={{ color: theme.colors.muted }}>
-                  หนังวัวแท้ฟอกฝาด ผิวเรียบเนียน ขึ้นเงาสวยตามการใช้งาน — 0123456789
-                </p>
+                <p className="text-xl font-semibold" style={{ color: theme.colors.ink }}>งานหนังคุณภาพ ครบจบที่เดียว</p>
+                <p className="text-lg font-semibold" style={{ color: theme.colors.ink }}>Premium leather manufacturing</p>
+                <p className="text-sm" style={{ color: theme.colors.muted }}>หนังวัวแท้ฟอกฝาด ผิวเรียบเนียน — 0123456789</p>
               </div>
             </div>
           )}
 
-          {/* ── หมวดโลโก้ ── */}
+          {/* ── โลโก้ ── */}
           {tab === "logo" && (
-            <div className={cardCls}>
-              <h3 className="text-sm font-semibold text-slate-800 mb-3">โลโก้</h3>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className={labelCls}>อักษรในกล่อง (1-4 ตัว)</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      className={inputCls}
-                      maxLength={4}
-                      value={theme.logo.mark}
-                      onChange={(e) => apply({ ...theme, logo: { ...theme.logo, mark: e.target.value } })}
-                    />
-                    <ResetBtn
-                      show={theme.logo.mark !== published.logo.mark}
-                      onClick={() => apply({ ...theme, logo: { ...theme.logo, mark: published.logo.mark } })}
-                    />
+            <>
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">รูปแบบโลโก้</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className={labelCls}>แสดงแบบ</label>
+                    <select className={inputCls} value={theme.logo.mode} onChange={(e) => setLogo({ mode: e.target.value as LogoMode })}>
+                      {choices.logoModes.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </select>
                   </div>
-                </div>
-                <div>
-                  <label className={labelCls}>ข้อความต่อท้าย</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      className={inputCls}
-                      value={theme.logo.text}
-                      onChange={(e) => apply({ ...theme, logo: { ...theme.logo, text: e.target.value } })}
-                    />
-                    <ResetBtn
-                      show={theme.logo.text !== published.logo.text}
-                      onClick={() => apply({ ...theme, logo: { ...theme.logo, text: published.logo.text } })}
-                    />
+                  <div>
+                    <label className={labelCls}>ความสูงโลโก้ · {theme.logo.height}px</label>
+                    <input type="range" min={20} max={80} value={theme.logo.height} onChange={(e) => setLogo({ height: Number(e.target.value) })} className="w-full accent-blue-600" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>อักษรในกล่อง (1-4 ตัว)</label>
+                    <input className={inputCls} maxLength={4} value={theme.logo.mark} onChange={(e) => setLogo({ mark: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>ชื่อร้าน</label>
+                    <input className={inputCls} value={theme.logo.text} onChange={(e) => setLogo({ text: e.target.value })} />
                   </div>
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-100">
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">รูปโลโก้ &amp; ไอคอน</h3>
+                <p className="text-[11px] text-slate-500 mb-3">อัปโหลดแล้วเลือก &quot;แสดงแบบ: รูปโลโก้&quot; ด้านบน · รองรับ PNG/JPG/WebP (โปร่งใสแนะนำ PNG)</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <ImageUploadField label="โลโก้หลัก" hint="ใช้บนพื้นสว่าง" value={theme.logo.imageKey} onChange={(k) => setLogo({ imageKey: k })} previewBg={theme.colors.page} />
+                  <ImageUploadField label="โลโก้สำหรับพื้นเข้ม" hint="ใช้ตอน Header สีเข้ม" value={theme.logo.imageDarkKey} onChange={(k) => setLogo({ imageDarkKey: k })} previewBg={theme.colors.ink} />
+                  <ImageUploadField label="ไอคอนแท็บเบราว์เซอร์ (Favicon)" hint="จัตุรัส 64px+" value={theme.logo.faviconKey} onChange={(k) => setLogo({ faviconKey: k })} height={44} />
+                </div>
+              </div>
+
+              <div className={cardCls}>
                 <p className={labelCls}>ดูบนพื้นหลังต่าง ๆ</p>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { bg: "#FFFFFF", label: "พื้นขาว" },
-                    { bg: theme.colors.ink, label: "พื้นเข้ม" },
-                    { bg: theme.colors.brand, label: "พื้นแบรนด์" },
-                  ].map((v) => (
-                    <div key={v.label} className="rounded-lg p-3 border border-slate-200 text-center" style={{ background: v.bg }}>
-                      <span className="inline-flex items-center gap-1.5">
-                        <span
-                          className="inline-flex items-center justify-center text-white font-semibold"
-                          style={{ width: 22, height: 22, borderRadius: 6, background: theme.colors.brand, fontSize: 10 }}
-                        >
-                          {theme.logo.mark}
+                    { bg: "#FFFFFF", label: "พื้นขาว", dark: false },
+                    { bg: theme.colors.ink, label: "พื้นเข้ม", dark: true },
+                    { bg: theme.colors.brand, label: "พื้นแบรนด์", dark: true },
+                  ].map((v) => {
+                    const img = v.dark && theme.logo.imageDarkKey ? theme.logo.imageDarkKey : theme.logo.imageKey;
+                    const showImg = theme.logo.mode === "image" && img;
+                    return (
+                      <div key={v.label} className="rounded-lg p-3 border border-slate-200 text-center" style={{ background: v.bg }}>
+                        <span className="inline-flex items-center gap-1.5">
+                          {showImg ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img src={keyUrl(img, 200)!} alt="โลโก้" style={{ height: Math.min(theme.logo.height, 34) }} />
+                          ) : (
+                            <>
+                              {(theme.logo.mode === "icon-text" || theme.logo.mode === "icon") && (
+                                <span className="inline-flex items-center justify-center text-white font-semibold" style={{ width: 22, height: 22, borderRadius: 6, background: theme.colors.brand, fontSize: 10 }}>
+                                  {theme.logo.mark}
+                                </span>
+                              )}
+                              {(theme.logo.mode === "icon-text" || theme.logo.mode === "text") && (
+                                <span className="text-xs font-semibold" style={{ color: v.dark ? "#fff" : theme.colors.ink }}>{theme.logo.text}</span>
+                              )}
+                            </>
+                          )}
                         </span>
-                        <span className="text-xs font-semibold" style={{ color: v.bg === "#FFFFFF" ? theme.colors.ink : "#fff" }}>
-                          {theme.logo.text}
-                        </span>
-                      </span>
-                      <p className="text-[9px] mt-1.5" style={{ color: v.bg === "#FFFFFF" ? "#94a3b8" : "rgba(255,255,255,.6)" }}>
-                        {v.label}
-                      </p>
-                    </div>
-                  ))}
+                        <p className="text-[9px] mt-1.5" style={{ color: v.dark ? "rgba(255,255,255,.6)" : "#94a3b8" }}>{v.label}</p>
+                      </div>
+                    );
+                  })}
                 </div>
+              </div>
+            </>
+          )}
+
+          {/* ── Header ── */}
+          {tab === "header" && (
+            <div className={cardCls}>
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">แถบเมนูด้านบน (Header)</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className={labelCls}>ความสูง · {theme.header.height}px</label>
+                  <input type="range" min={48} max={120} value={theme.header.height} onChange={(e) => setHeader({ height: Number(e.target.value) })} className="w-full accent-blue-600" />
+                </div>
+                <div>
+                  <label className={labelCls}>สีพื้นหลัง</label>
+                  <select className={inputCls} value={theme.header.bg} onChange={(e) => setHeader({ bg: e.target.value as HeaderBg })}>
+                    {choices.headerBg.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>ตำแหน่งเมนู</label>
+                  <select className={inputCls} value={theme.header.menuAlign} onChange={(e) => setHeader({ menuAlign: e.target.value as MenuAlign })}>
+                    {choices.menuAligns.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-2 justify-end pb-1">
+                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.header.sticky} onChange={(e) => setHeader({ sticky: e.target.checked })} />
+                    ตรึงแถบเมนูไว้ด้านบนเมื่อเลื่อน
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.header.showCart} onChange={(e) => setHeader({ showCart: e.target.checked })} />
+                    แสดงไอคอนตะกร้า
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.header.border} onChange={(e) => setHeader({ border: e.target.checked })} />
+                    มีเส้นคั่นด้านล่าง
+                  </label>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-3">* หน้าที่สร้างเองจะเพิ่มเข้าเมนูอัตโนมัติเมื่อเผยแพร่</p>
+            </div>
+          )}
+
+          {/* ── การ์ดสินค้า ── */}
+          {tab === "card" && (
+            <div className={cardCls}>
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">การ์ดสินค้า</h3>
+
+              <label className={labelCls}>รูปแบบการ์ด</label>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {choices.cardPresets.map((p) => (
+                  <button
+                    key={p.value}
+                    onClick={() => setCard({ preset: p.value })}
+                    title={p.hint}
+                    className={`px-3.5 py-2 rounded-lg border text-sm transition ${
+                      theme.card.preset === p.value ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label className={labelCls}>สัดส่วนรูปสินค้า</label>
+                  <select className={inputCls} value={theme.card.imageRatio} onChange={(e) => setCard({ imageRatio: e.target.value as ImageRatio })}>
+                    {choices.imageRatios.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>ชื่อสินค้าแสดงกี่บรรทัด</label>
+                  <select className={inputCls} value={theme.card.titleLines} onChange={(e) => setCard({ titleLines: Number(e.target.value) })}>
+                    {[1, 2, 3].map((n) => <option key={n} value={n}>{n} บรรทัด</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>เอฟเฟกต์ตอนชี้เมาส์</label>
+                  <select className={inputCls} value={theme.card.hover} onChange={(e) => setCard({ hover: e.target.value as CardHover })}>
+                    {choices.cardHovers.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-4 mt-4 pt-3 border-t border-slate-100">
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.card.showBadge} onChange={(e) => setCard({ showBadge: e.target.checked })} />
+                  แสดงป้าย (ขายดี/แนะนำ)
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.card.showStock} onChange={(e) => setCard({ showStock: e.target.checked })} />
+                  แสดงสถานะสต๊อก
+                </label>
               </div>
             </div>
           )}
 
-          {/* ── หมวดรูปทรง ── */}
+          {/* ── รูปทรง ── */}
           {tab === "shape" && (
             <div className={cardCls}>
-              <h3 className="text-sm font-semibold text-slate-800 mb-3">ความมนของขอบ</h3>
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">ความมนของขอบ (ทั้งเว็บ)</h3>
               <div className="flex flex-wrap gap-2">
-                {radii.map((o) => (
+                {choices.radius.map((o) => (
                   <button
                     key={o.value}
                     onClick={() => apply({ ...theme, radius: o.value })}
-                    className={`px-4 py-3 border text-sm transition ${
-                      theme.radius === o.value ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"
-                    }`}
+                    className={`px-4 py-3 border text-sm transition ${theme.radius === o.value ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
                     style={{ borderRadius: o.value === "sharp" ? 2 : o.value === "soft" ? 12 : 22 }}
                   >
                     {o.label}
@@ -702,41 +747,18 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 ))}
                 <ResetBtn show={theme.radius !== published.radius} onClick={() => apply({ ...theme, radius: published.radius })} />
               </div>
-
               <div className="mt-4 pt-3 border-t border-slate-100">
                 <p className={labelCls}>ตัวอย่างปุ่มและการ์ด</p>
                 <div className="flex items-center gap-3">
-                  <span
-                    className="px-4 py-2 text-xs font-semibold text-white"
-                    style={{ background: theme.colors.brand, borderRadius: theme.radius === "sharp" ? 2 : theme.radius === "soft" ? 10 : 99 }}
-                  >
-                    ปุ่มหลัก
-                  </span>
-                  <span
-                    className="px-4 py-2 text-xs border"
-                    style={{
-                      borderColor: "#d6d6d2",
-                      color: theme.colors.ink,
-                      borderRadius: theme.radius === "sharp" ? 2 : theme.radius === "soft" ? 10 : 99,
-                    }}
-                  >
-                    ปุ่มรอง
-                  </span>
-                  <span
-                    className="w-16 h-12 border"
-                    style={{
-                      background: theme.colors.surface,
-                      borderColor: "#e7e7e4",
-                      borderRadius: theme.radius === "sharp" ? 3 : theme.radius === "soft" ? 14 : 24,
-                      display: "inline-block",
-                    }}
-                  />
+                  <span className="px-4 py-2 text-xs font-semibold text-white" style={{ background: theme.colors.brand, borderRadius: theme.radius === "sharp" ? 2 : theme.radius === "soft" ? 10 : 99 }}>ปุ่มหลัก</span>
+                  <span className="px-4 py-2 text-xs border" style={{ borderColor: "#d6d6d2", color: theme.colors.ink, borderRadius: theme.radius === "sharp" ? 2 : theme.radius === "soft" ? 10 : 99 }}>ปุ่มรอง</span>
+                  <span className="w-16 h-12 border inline-block" style={{ background: theme.colors.surface, borderColor: "#e7e7e4", borderRadius: theme.radius === "sharp" ? 3 : theme.radius === "soft" ? 14 : 24 }} />
                 </div>
               </div>
             </div>
           )}
 
-          {/* ── หมวดประวัติ ── */}
+          {/* ── ประวัติ ── */}
           {tab === "history" && (
             <div className={cardCls}>
               <h3 className="text-sm font-semibold text-slate-800 mb-3">ประวัติการเผยแพร่</h3>
@@ -755,9 +777,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       <span className="flex-1 text-xs text-slate-600">
                         {v.theme.fonts.display} / {v.theme.fonts.body} · {timeAgo(v.createdAt)}
                       </span>
-                      <button onClick={() => void restore(v.versionNo)} className="text-xs text-blue-600 hover:underline">
-                        กู้คืนเป็นร่าง
-                      </button>
+                      <button onClick={() => void restore(v.versionNo)} className="text-xs text-blue-600 hover:underline">กู้คืนเป็นร่าง</button>
                     </li>
                   ))}
                 </ul>
@@ -766,72 +786,41 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           )}
         </div>
 
-        {/* ══ ขวา: พรีวิวเว็บจริง ══ */}
+        {/* ── ขวา: พรีวิวเว็บจริง ── */}
         <div className="lg:sticky lg:top-4 min-w-0">
           <div className="flex flex-wrap items-center gap-1.5 mb-2">
             {DEVICES.map((d) => (
-              <button
-                key={d.k}
-                onClick={() => setDevice(d.k)}
-                title={`${d.label} ${d.w}px`}
-                className={`px-2.5 py-1 rounded-lg border text-xs transition ${
-                  device === d.k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"
-                }`}
-              >
+              <button key={d.k} onClick={() => setDevice(d.k)} title={`${d.label} ${d.w}px`} className={`px-2.5 py-1 rounded-lg border text-xs transition ${device === d.k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
                 {d.icon}
               </button>
             ))}
             <select value={page} onChange={(e) => setPage(e.target.value)} className={inputCls} style={{ width: "auto" }}>
-              {PAGES.map((p) => (
-                <option key={p.path} value={p.path}>
-                  {p.label}
-                </option>
-              ))}
+              {PAGES.map((p) => <option key={p.path} value={p.path}>{p.label}</option>)}
             </select>
-            {previewSrc && (
-              <a
-                href={previewSrc}
-                target="_blank"
-                rel="noreferrer"
-                title="เปิดในแท็บใหม่"
-                className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400"
-              >
-                ↗
-              </a>
-            )}
+            {previewSrc && <a href={previewSrc} target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↗</a>}
+            <button onClick={() => iframeRef.current?.contentWindow?.location.reload()} title="โหลดใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
             <span className="text-[10px] text-slate-400 ml-auto">{dev.w}px</span>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: "72vh", minHeight: 420 }}>
             {previewSrc ? (
               <div className="w-full h-full overflow-auto flex justify-center">
-                <iframe
-                  ref={iframeRef}
-                  src={previewSrc}
-                  title="พรีวิวเว็บไซต์"
-                  className="bg-white border-0"
-                  style={{
-                    width: dev.w,
-                    height: `${(100 / Math.min(1, 400 / dev.w)) * 0.72}vh`,
-                    transform: `scale(${Math.min(1, 400 / dev.w)})`,
-                    transformOrigin: "top center",
-                    minHeight: 600,
-                  }}
-                />
+                <iframe ref={iframeRef} src={previewSrc} title="พรีวิวเว็บไซต์" className="bg-white border-0" style={{ width: dev.w, height: `${72 / scale}vh`, transform: `scale(${scale})`, transformOrigin: "top center", minHeight: 600 }} />
               </div>
             ) : (
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center px-6">
                 <span className="text-3xl">🔗</span>
                 <p className="text-sm text-slate-500">ยังไม่ได้ผูกโดเมนเว็บกับร้านนี้</p>
-                <p className="text-xs text-slate-400">เพิ่มโดเมนในตาราง shop_domains แล้วพรีวิวจะแสดงเว็บจริงที่นี่</p>
               </div>
             )}
           </div>
-          <p className="text-[10px] text-slate-400 mt-1.5 text-center">พรีวิวคือเว็บไซต์จริง — เปลี่ยนค่าแล้วเห็นผลทันที</p>
+          <p className="text-[10px] text-slate-400 mt-1.5 text-center">
+            สี/ฟอนต์เปลี่ยนทันที · โลโก้/Header/การ์ด กด ↻ หลังบันทึกร่างเพื่อดูผล
+          </p>
         </div>
       </div>
 
-      {/* ══ แถบปุ่มล่าง ══ */}
+      {/* ── แถบปุ่มล่าง ── */}
       <div className="sticky bottom-0 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
         <span className="text-xs text-slate-500">
           {isDirty ? (
@@ -839,33 +828,14 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               มีการแก้ไขที่ยังไม่บันทึก <span className="font-medium text-amber-700">{dirtyFields.length} รายการ</span>
               <span className="text-slate-400"> · {dirtyFields.slice(0, 3).join(", ")}{dirtyFields.length > 3 ? "…" : ""}</span>
             </>
-          ) : hadDraft ? (
-            "มีร่างบันทึกไว้ — ยังไม่เผยแพร่"
-          ) : (
-            "ไม่มีการเปลี่ยนแปลง"
-          )}
+          ) : hadDraft ? "มีร่างบันทึกไว้ — ยังไม่เผยแพร่" : "ไม่มีการเปลี่ยนแปลง"}
         </span>
-
         <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => void discard()}
-            disabled={!isDirty && !hadDraft}
-            className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40"
-          >
-            ละทิ้งการเปลี่ยนแปลง
-          </button>
-          <button
-            onClick={() => void save("draft")}
-            disabled={busy !== null}
-            className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50"
-          >
+          <button onClick={() => void discard()} disabled={!isDirty && !hadDraft} className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40">ละทิ้งการเปลี่ยนแปลง</button>
+          <button onClick={() => void save("draft")} disabled={busy !== null} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50">
             {busy === "draft" ? "กำลังบันทึก…" : "บันทึกร่าง"}
           </button>
-          <button
-            onClick={() => void save("publish")}
-            disabled={busy !== null}
-            className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-          >
+          <button onClick={() => void save("publish")} disabled={busy !== null} className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
             {busy === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่"}
           </button>
         </div>
