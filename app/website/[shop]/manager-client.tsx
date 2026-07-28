@@ -15,6 +15,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { WebsiteFieldMapPanel } from "@/components/website-field-map-panel";
 import { WebsiteThemePanel } from "@/components/website-theme-panel";
+import { WebsiteLayoutPanel } from "@/components/website-layout-panel";
 
 type Shop = { id: string; name: string; slug: string; isDefault: boolean };
 
@@ -96,7 +97,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [tab, setTab] = useState<"listings" | "fieldmap" | "design">("listings");
+  const [tab, setTab] = useState<"listings" | "fieldmap" | "design" | "layout">("listings");
 
   // แผงเพิ่มสินค้า
   const [showAdd, setShowAdd] = useState(false);
@@ -260,6 +261,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
               { k: "listings", l: "สินค้าบนเว็บ" },
               { k: "fieldmap", l: "⚙️ จับคู่ฟิลด์" },
               { k: "design", l: "🎨 ดีไซน์" },
+              { k: "layout", l: "🧱 หน้าแรก" },
             ] as const).map((t) => (
               <button
                 key={t.k}
@@ -283,6 +285,9 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
 
         {/* แท็บดีไซน์ (ธีม) */}
         {tab === "design" && shop && <WebsiteThemePanel shopSlug={shop.slug} shopId={shop.id} />}
+
+        {/* แท็บจัดหน้าแรก (บล็อก) */}
+        {tab === "layout" && shop && <WebsiteLayoutPanel shopSlug={shop.slug} shopId={shop.id} />}
 
         {/* แถบสรุป + ปุ่มเพิ่ม */}
         {tab === "listings" && shop && (

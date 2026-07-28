@@ -40,7 +40,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const sb = supabaseAdmin();
   const { data: shop } = await sb
     .from("shops")
-    .select("id, name, slug, status, theme, theme_draft, home_layout")
+    .select("id, name, slug, status, theme, theme_draft, home_layout, home_layout_draft")
     .eq("slug", shopSlug)
     .maybeSingle();
   if (!shop) return json({ error: "ไม่พบร้าน" }, 404);
@@ -53,17 +53,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     theme: unknown;
     theme_draft: unknown;
     home_layout: unknown;
+    home_layout_draft: unknown;
   };
 
-  const source = preview && s.theme_draft != null ? s.theme_draft : s.theme;
+  const themeSource = preview && s.theme_draft != null ? s.theme_draft : s.theme;
+  const layoutSource = preview && s.home_layout_draft != null ? s.home_layout_draft : s.home_layout;
 
   return json({
     shop: s.slug,
     shopName: s.name,
     active: s.status === "active",
     preview,
-    theme: normalizeTheme(source),
-    // เตรียมไว้สำหรับเฟสถัดไป (page builder) — ตอนนี้ปกติจะเป็น []
-    layout: Array.isArray(s.home_layout) ? s.home_layout : [],
+    theme: normalizeTheme(themeSource),
+    /** โครงหน้าแรก — [] = ยังไม่เคยตั้ง ให้เว็บใช้โครงเริ่มต้นของตัวเอง */
+    layout: Array.isArray(layoutSource) ? layoutSource : [],
   });
 }
