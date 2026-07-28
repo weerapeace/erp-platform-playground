@@ -5,9 +5,11 @@
  * - โหลดแท็ก (product_families) + กลุ่ม (product_family_groups) เอง
  * - value = { tagIds: string[], none: boolean }  (none = "ยังไม่มีแท็ก")
  * - ตรรกะ OR (มีอย่างน้อย 1 แท็กที่ติ๊ก) — ผู้บริโภคเป็นคน apply
+ * - ➕ เพิ่มแท็กใหม่ได้ในตัว (เลือกกลุ่มเดิม หรือสร้างกลุ่มใหม่ไปพร้อมกัน) — เห็นเฉพาะคนมีสิทธิ์ products.create
+ *   เขียนผ่าน API กลาง /api/master-v2/product_families · product_family_groups (มี audit ให้เอง)
  * ใช้ซ้ำได้ทุกหน้าที่ต้องกรองตามแท็ก
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { useAuth, usePermission, type Permission } from "@/components/auth";
@@ -30,6 +32,7 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
 }) {
   const { user } = useAuth();
   const canManage = usePermission(manageFlag?.permission ?? ("__none__" as Permission));
+  const canCreate = usePermission("products.create");   // เพิ่มแท็ก/กลุ่มใหม่ได้ไหม
   const [open, setOpen] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [groups, setGroups] = useState<Grp[]>([]);
@@ -39,16 +42,29 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
   const btnRef = useRef<HTMLButtonElement>(null);
   const flagField = manageFlag?.field;
 
-  useEffect(() => {
+  // ── ฟอร์ม "เพิ่มแท็กใหม่" ──
+  const [adding, setAdding] = useState(false);
+  const [newTag, setNewTag] = useState("");
+  const [newGroup, setNewGroup] = useState("");        // "" = ไม่มีกลุ่ม · "__new__" = สร้างกลุ่มใหม่
+  const [newGrpName, setNewGrpName] = useState("");
+  const [newGrpParent, setNewGrpParent] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [addErr, setAddErr] = useState<string | null>(null);
+
+  const loadTags = useCallback(() => {
     apiFetch(`/api/master-v2/product_families?limit=500`).then((r) => r.json())
       .then((j) => setTags(((j.data ?? []) as Record<string, unknown>[]).map((t) => ({ id: String(t.id), label: String(t.name ?? t.id), group_id: t.group_id ? String(t.group_id) : null, flag: flagField ? t[flagField] === true : false }))))
       .catch(() => {});
+  }, [flagField]);
+  const loadGroups = useCallback(() => {
     apiFetch(`/api/master-v2/product_family_groups?limit=500`).then((r) => r.json())
       .then((j) => setGroups(((j.data ?? []) as Record<string, unknown>[]).map((g) => ({
         id: String(g.id), name: String(g.name ?? ""), parent_group_id: g.parent_group_id ? String(g.parent_group_id) : null,
         sort_order: Number(g.sort_order ?? 100), color: g.color ? String(g.color) : null, icon: g.icon ? String(g.icon) : null,
       })))).catch(() => {});
-  }, [flagField]);
+  }, []);
+
+  useEffect(() => { loadTags(); loadGroups(); }, [loadTags, loadGroups]);
 
   const count = value.tagIds.length + (value.none ? 1 : 0);
   const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
@@ -78,6 +94,58 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
     );
   };
   const clearAll = () => onChange({ tagIds: [], none: false });
+
+  // รายชื่อกลุ่มแบบเรียงชั้น (กลุ่มหลัก → กลุ่มย่อย) สำหรับ dropdown เลือกกลุ่ม
+  const groupOptions = useMemo(() => {
+    const out: { id: string; label: string }[] = [];
+    for (const g of groups.filter((x) => !x.parent_group_id).sort(byOrder)) {
+      out.push({ id: g.id, label: `${g.icon ? g.icon + " " : ""}${g.name}` });
+      for (const s of groups.filter((x) => x.parent_group_id === g.id).sort(byOrder)) {
+        out.push({ id: s.id, label: `　↳ ${s.icon ? s.icon + " " : ""}${s.name}` });
+      }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups]);
+
+  const resetAddForm = () => { setAdding(false); setNewTag(""); setNewGroup(""); setNewGrpName(""); setNewGrpParent(""); setAddErr(null); };
+
+  // สร้างแท็กใหม่ (+ สร้างกลุ่มใหม่ไปพร้อมกันได้) ผ่าน API กลาง master-v2 → มี audit ให้เอง
+  const createTag = async () => {
+    const name = newTag.trim();
+    if (!name) { setAddErr("ใส่ชื่อแท็กก่อน"); return; }
+    if (tags.some((t) => t.label.trim().toLowerCase() === name.toLowerCase())) { setAddErr("มีแท็กชื่อนี้อยู่แล้ว"); return; }
+    setCreating(true); setAddErr(null);
+    try {
+      // 1) กลุ่มใหม่ (ถ้าเลือกไว้)
+      let groupId: string | null = newGroup === "__new__" ? null : (newGroup || null);
+      if (newGroup === "__new__") {
+        const gName = newGrpName.trim();
+        if (!gName) throw new Error("ใส่ชื่อกลุ่มใหม่ด้วย");
+        const res = await apiFetch(`/api/master-v2/product_family_groups`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: gName, parent_group_id: newGrpParent || undefined, actor: user?.name }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.error) throw new Error(j.error ?? `สร้างกลุ่มไม่สำเร็จ (HTTP ${res.status})`);
+        groupId = String((j.data as Record<string, unknown>).id);
+      }
+
+      // 2) แท็กใหม่
+      const res2 = await apiFetch(`/api/master-v2/product_families`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, group_id: groupId ?? undefined, actor: user?.name }),
+      });
+      const j2 = await res2.json().catch(() => ({}));
+      if (!res2.ok || j2.error) throw new Error(j2.error ?? `สร้างแท็กไม่สำเร็จ (HTTP ${res2.status})`);
+      const newId = String((j2.data as Record<string, unknown>).id);
+
+      loadTags(); loadGroups();
+      onChange({ ...value, tagIds: [...value.tagIds, newId] });   // ติ๊กแท็กที่เพิ่งสร้างให้เลย
+      resetAddForm();
+    } catch (e) { setAddErr(e instanceof Error ? e.message : "สร้างไม่สำเร็จ"); }
+    finally { setCreating(false); }
+  };
 
   // โหมดตั้งค่า: toggle flag ต่อแท็ก (เก็บลง product_families → default ของทุกคน) ผ่าน API กลาง (audit)
   const toggleFlag = async (t: Tag) => {
@@ -144,6 +212,59 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
             <div className="px-3 pt-3">
               <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="ค้นหาแท็ก…" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
             </div>
+
+            {/* ➕ เพิ่มแท็กใหม่ (+ สร้างกลุ่มใหม่ได้พร้อมกัน) */}
+            {!manage && canCreate && (
+              <div className="px-3 pt-2">
+                {!adding ? (
+                  <button type="button" onClick={() => setAdding(true)}
+                    className="w-full h-8 text-[13px] rounded-md border border-dashed border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/40">
+                    ➕ เพิ่มแท็กใหม่
+                  </button>
+                ) : (
+                  <div className="border border-blue-200 bg-blue-50/40 rounded-lg p-2.5 space-y-2">
+                    <input value={newTag} onChange={(e) => { setNewTag(e.target.value); setAddErr(null); }} autoFocus
+                      placeholder="ชื่อแท็กใหม่ เช่น กระดาษฉากหลัง"
+                      onKeyDown={(e) => { if (e.key === "Enter") void createTag(); }}
+                      className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md bg-white" />
+
+                    <div>
+                      <label className="block text-[11px] text-slate-500 mb-1">อยู่กลุ่มไหน</label>
+                      <select value={newGroup} onChange={(e) => { setNewGroup(e.target.value); setAddErr(null); }}
+                        className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                        <option value="">— ไม่มีกลุ่ม —</option>
+                        {groupOptions.map((g) => <option key={g.id} value={g.id}>{g.label}</option>)}
+                        <option value="__new__">➕ สร้างกลุ่มใหม่…</option>
+                      </select>
+                    </div>
+
+                    {newGroup === "__new__" && (
+                      <div className="space-y-2 pl-2 border-l-2 border-blue-200">
+                        <input value={newGrpName} onChange={(e) => { setNewGrpName(e.target.value); setAddErr(null); }}
+                          placeholder="ชื่อกลุ่มใหม่ เช่น อุปกรณ์ถ่ายภาพ"
+                          className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md bg-white" />
+                        <select value={newGrpParent} onChange={(e) => setNewGrpParent(e.target.value)}
+                          className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                          <option value="">— เป็นกลุ่มหลัก —</option>
+                          {groupOptions.map((g) => <option key={g.id} value={g.id}>อยู่ใต้ {g.label}</option>)}
+                        </select>
+                      </div>
+                    )}
+
+                    {addErr && <p className="text-[12px] text-rose-600">{addErr}</p>}
+
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => void createTag()} disabled={creating}
+                        className="h-8 px-3 text-[13px] bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50">
+                        {creating ? "กำลังสร้าง…" : "สร้างแท็ก"}
+                      </button>
+                      <button type="button" onClick={resetAddForm} disabled={creating}
+                        className="h-8 px-3 text-[13px] text-slate-500 hover:text-slate-700">ยกเลิก</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {manage && manageFlag && (
                 <div className="text-[11px] text-slate-500 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
