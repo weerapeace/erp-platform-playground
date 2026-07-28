@@ -31,6 +31,17 @@ const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[])
 
 // ช่องในขั้น "ข้อมูลงาน" ที่จัดลำดับได้ (ช่องว่างดันขึ้นบน) — ไม่รวม "ชื่องาน" (ตรึงบนสุดเสมอ)
 const REORDER_KEYS = ["task_type", "priority", "brand_id", "campaign_id", "assignee", "reviewers", "order_date", "due_date", "drive", "platform", "description", "cover"];
+// ช่องที่โชว์ในโหมด BASIC (ค่าเริ่มต้น — แอดมินติ๊กเพิ่ม/ลบได้ที่ปุ่ม ⚙️ ข้างสวิตช์โหมด)
+const DEFAULT_BASIC_FIELDS = ["task_type", "priority", "assignee", "due_date"];
+// ป้ายชื่อช่อง (ใช้ในกล่องตั้งค่าโหมด BASIC)
+const FIELD_LABELS: Record<string, [string, string]> = {
+  task_type: ["ประเภทงาน", "Task type"], priority: ["ความสำคัญ", "Priority"],
+  brand_id: ["แบรนด์", "Brand"], campaign_id: ["Campaign", "Campaign"],
+  assignee: ["ผู้รับผิดชอบ", "Assignee"], reviewers: ["ผู้ตรวจ/อนุมัติ", "Reviewer"],
+  order_date: ["วันที่สั่ง", "Order date"], due_date: ["กำหนดส่ง", "Due date"],
+  drive: ["โฟลเดอร์ Drive", "Drive folder"], platform: ["Platform", "Platform"],
+  description: ["รายละเอียด", "Description"], cover: ["รูปปก", "Cover image"],
+};
 
 function todayStr(): string { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function addDaysStr(dateStr: string, days: number): string {
@@ -90,6 +101,20 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   // ช่องที่ผู้ใช้ "แตะเอง" ในขั้นข้อมูลงาน — ช่องที่ยังไม่แตะ (ยังเป็นค่าเริ่มต้น) = กล่องเทาอ่อน · ช่องว่าง = กล่องส้มอ่อน + ดันขึ้นบน
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [emptySnap, setEmptySnap] = useState<Set<string>>(new Set());   // ช่องที่ว่างตอน "เข้าขั้นข้อมูลงาน" (snapshot กันเด้งไปมาระหว่างพิมพ์)
+  // โหมดกรอกข้อมูล BASIC (โชว์เฉพาะช่องจำเป็น) / ADVANCE (โชว์ครบ) — ตั้งร่วมทั้งระบบ (ui_config)
+  const [fieldMode, setFieldMode] = useState<"basic" | "advance">("advance");
+  const [basicFields, setBasicFields] = useState<string[]>(DEFAULT_BASIC_FIELDS);
+  const [modeCfgOpen, setModeCfgOpen] = useState(false);
+  useEffect(() => {
+    apiFetch("/api/ui-config?key=wizard_fields").then((r) => r.json()).then((j) => {
+      const v = (j.value ?? {}) as { mode?: string; basic?: string[] };
+      if (v.mode === "basic" || v.mode === "advance") setFieldMode(v.mode);
+      if (Array.isArray(v.basic) && v.basic.length) setBasicFields(v.basic);
+    }).catch(() => { /* ไม่มีค่า = ใช้ค่าเริ่มต้น */ });
+  }, []);
+  const saveFieldCfg = (mode: "basic" | "advance", basic: string[]) => {
+    apiFetch("/api/ui-config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "wizard_fields", value: { mode, basic } }) }).catch(() => { /* บันทึกไม่ได้ก็ใช้ในเครื่องต่อได้ */ });
+  };
 
   const STEPS = [t("แบรนด์/เทมเพลต","Brand/Template"), t("ข้อมูลงาน","Task info"), t("งานย่อย","Subtasks"), t("สินค้า","Products")];
 
@@ -132,6 +157,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     }
   };
   const orderStyle = (k: string) => ({ order: emptySnap.has(k) ? 0 : 1 });
+  // โหมด BASIC = ซ่อนช่องที่ไม่ได้ติ๊ก · แต่ช่องที่ "มีค่าอยู่แล้ว" ยังโชว์ (กันข้อมูลจากเทมเพลตหายไปเงียบ ๆ)
+  const showField = (k: string) => fieldMode === "advance" || basicFields.includes(k) || !emptyNow(k);
+  const hideCls = (k: string) => (showField(k) ? "" : "hidden");
   const ctrlCls = (k: string) => (emptyNow(k) ? "bg-orange-50 border-orange-200" : touched.has(k) ? "" : "bg-slate-100");
   const wrapCls = (k: string) => (emptyNow(k) ? "rounded-lg bg-orange-50 border border-orange-200 p-1.5" : "");
   // เข้าขั้น "ข้อมูลงาน" ครั้งใด → จับ snapshot ว่าช่องไหนว่าง (ใช้จัดลำดับให้ช่องว่างอยู่บน โดยไม่เด้งระหว่างพิมพ์)
@@ -322,22 +350,52 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
             📱 {t("แม่แบบนี้จะสร้างคอนเทนต์", "This template will create")} {contentItems.length} {t("ชิ้นพ่วงกับงาน (ดู/แก้ได้ที่แท็บคอนเทนต์ในงาน)", "content item(s) linked to the task (view/edit in the task's Content tab)")}
           </div>
         )}
+        {/* สวิตช์โหมดกรอก: BASIC (เฉพาะช่องจำเป็น) / ADVANCE (ครบ) + ⚙️ ตั้งว่า BASIC โชว์ช่องไหน (ตั้งร่วมทั้งระบบ) */}
+        <div className="flex items-center justify-end gap-2 mb-2">
+          <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5">
+            {(["basic", "advance"] as const).map((m) => (
+              <button key={m} type="button" onClick={() => { setFieldMode(m); saveFieldCfg(m, basicFields); }}
+                className={`h-7 px-3 text-[11px] font-semibold rounded-md transition-colors ${fieldMode === m ? "bg-violet-600 text-white" : "text-slate-500 hover:text-slate-700"}`}>
+                {m === "basic" ? "BASIC" : "ADVANCE"}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => setModeCfgOpen((s) => !s)} title={t("ตั้งว่าโหมด BASIC โชว์ช่องไหน", "Choose which fields BASIC shows")}
+            className="h-7 w-7 inline-flex items-center justify-center text-slate-400 hover:text-violet-700 border border-slate-200 rounded-md">⚙️</button>
+        </div>
+        {modeCfgOpen && (
+          <div className="mb-3 border border-violet-200 bg-violet-50/40 rounded-lg p-2.5">
+            <p className="text-[11px] text-slate-500 mb-1.5">{t("ติ๊กช่องที่จะให้โชว์ในโหมด BASIC (มีผลกับทุกคน) · ช่องที่มีค่าอยู่แล้วจะโชว์เสมอ", "Tick fields shown in BASIC (applies to everyone) · fields with a value always show")}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {REORDER_KEYS.map((k) => {
+                const on = basicFields.includes(k);
+                return (
+                  <button key={k} type="button"
+                    onClick={() => { const next = on ? basicFields.filter((x) => x !== k) : [...basicFields, k]; setBasicFields(next); saveFieldCfg(fieldMode, next); }}
+                    className={`h-7 px-2.5 text-[11px] rounded-full border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>
+                    {on ? "✓ " : ""}{t(FIELD_LABELS[k]?.[0] ?? k, FIELD_LABELS[k]?.[1] ?? k)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <ERPFormSection title={t("ข้อมูลงาน","Task info")} columns={2}>
           <ERPFormField label={t("ชื่องาน","Task title")} required span={2}><ERPInput className={ctrlCls("title")} value={form.title} onChange={(e) => { markTouched("title"); updateForm({ title: e.target.value }); }} placeholder={t("เช่น ถ่ายรูปกระเป๋า Summer 8 สี","e.g. Summer bag photoshoot 8 colors")} /></ERPFormField>
           {/* ประเภทงาน — ปักไว้ลำดับ 2 เสมอ (ต่อจากชื่องาน) ไม่ให้เลื่อนตอนกรอก */}
-          <ERPFormField label={t("ประเภทงาน","Task type")} style={{ order: 0 }}><ERPSelect className={ctrlCls("task_type")} value={form.task_type} placeholder={t("— เลือกประเภท —","— select —")} options={taskTypes} onChange={(e) => { markTouched("task_type"); updateForm({ task_type: e.target.value }); }} /></ERPFormField>
-          <ERPFormField label={t("ความสำคัญ","Priority")} style={orderStyle("priority")}><ERPSelect className={ctrlCls("priority")} value={form.priority} options={priorityOptions()} onChange={(e) => { markTouched("priority"); updateForm({ priority: e.target.value as CreativePriority }); }} /></ERPFormField>
-          <ERPFormField label={t("แบรนด์","Brand")} style={orderStyle("brand_id")}><ERPSelect className={ctrlCls("brand_id")} value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => { markTouched("brand_id"); updateForm({ brand_id: e.target.value }); }} /></ERPFormField>
-          {!lockedCampaignId && <ERPFormField label="Campaign" style={orderStyle("campaign_id")}><ERPSelect className={ctrlCls("campaign_id")} value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => { markTouched("campaign_id"); updateForm({ campaign_id: e.target.value }); }} /></ERPFormField>}
-          <ERPFormField label={t("ผู้รับผิดชอบ (เลือกได้หลายคน)","Assignee (multiple)")} span={2} style={orderStyle("assignee")}>
+          <ERPFormField label={t("ประเภทงาน","Task type")} style={{ order: 0 }} className={hideCls("task_type")}><ERPSelect className={ctrlCls("task_type")} value={form.task_type} placeholder={t("— เลือกประเภท —","— select —")} options={taskTypes} onChange={(e) => { markTouched("task_type"); updateForm({ task_type: e.target.value }); }} /></ERPFormField>
+          <ERPFormField label={t("ความสำคัญ","Priority")} style={orderStyle("priority")} className={hideCls("priority")}><ERPSelect className={ctrlCls("priority")} value={form.priority} options={priorityOptions()} onChange={(e) => { markTouched("priority"); updateForm({ priority: e.target.value as CreativePriority }); }} /></ERPFormField>
+          <ERPFormField label={t("แบรนด์","Brand")} style={orderStyle("brand_id")} className={hideCls("brand_id")}><ERPSelect className={ctrlCls("brand_id")} value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => { markTouched("brand_id"); updateForm({ brand_id: e.target.value }); }} /></ERPFormField>
+          {!lockedCampaignId && <ERPFormField label="Campaign" style={orderStyle("campaign_id")} className={hideCls("campaign_id")}><ERPSelect className={ctrlCls("campaign_id")} value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => { markTouched("campaign_id"); updateForm({ campaign_id: e.target.value }); }} /></ERPFormField>}
+          <ERPFormField label={t("ผู้รับผิดชอบ (เลือกได้หลายคน)","Assignee (multiple)")} span={2} style={orderStyle("assignee")} className={hideCls("assignee")}>
             <div className={wrapCls("assignee")}>
               <MultiUserPicker value={form.assignees} onChange={pickTaskAssignees} disableCreate />
               <p className="text-[11px] text-slate-400 mt-1">{t("เลือกแล้ว งานย่อยทุกอันจะใช้คนกลุ่มนี้อัตโนมัติ (แก้รายอันได้ในขั้นถัดไป)", "Subtasks inherit these people automatically (editable per subtask in the next step)")}</p>
             </div>
           </ERPFormField>
-          <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เลือกได้หลายคน)","Reviewer / Approver (multiple)")} style={orderStyle("reviewers")}><div className={wrapCls("reviewers")}><MultiUserPicker value={form.reviewers} onChange={(v) => updateForm({ reviewers: v })} disableCreate /></div></ERPFormField>
-          <ERPFormField label={t("วันที่สั่ง","Order date")} style={orderStyle("order_date")}><ERPInput type="date" className={ctrlCls("order_date")} value={form.order_date} onChange={(e) => { markTouched("order_date"); setOrderDate(e.target.value); }} /></ERPFormField>
-          <ERPFormField label={t("กำหนดส่ง","Due date")} style={orderStyle("due_date")} hint={tplDueOffset != null ? t(`อัตโนมัติ = วันที่สั่ง + ${tplDueOffset} วัน (แก้เองได้)`, `auto = order date + ${tplDueOffset}d (editable)`) : t("ค่าเริ่มต้น = วันที่สั่ง + 3 วัน · กดปุ่มลัด/แก้เองได้", "default = order date + 3 days · use quick buttons / edit")}>
+          <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เลือกได้หลายคน)","Reviewer / Approver (multiple)")} style={orderStyle("reviewers")} className={hideCls("reviewers")}><div className={wrapCls("reviewers")}><MultiUserPicker value={form.reviewers} onChange={(v) => updateForm({ reviewers: v })} disableCreate /></div></ERPFormField>
+          <ERPFormField label={t("วันที่สั่ง","Order date")} style={orderStyle("order_date")} className={hideCls("order_date")}><ERPInput type="date" className={ctrlCls("order_date")} value={form.order_date} onChange={(e) => { markTouched("order_date"); setOrderDate(e.target.value); }} /></ERPFormField>
+          <ERPFormField label={t("กำหนดส่ง","Due date")} style={orderStyle("due_date")} className={hideCls("due_date")} hint={tplDueOffset != null ? t(`อัตโนมัติ = วันที่สั่ง + ${tplDueOffset} วัน (แก้เองได้)`, `auto = order date + ${tplDueOffset}d (editable)`) : t("ค่าเริ่มต้น = วันที่สั่ง + 3 วัน · กดปุ่มลัด/แก้เองได้", "default = order date + 3 days · use quick buttons / edit")}>
             <div className="space-y-1">
               <ERPInput type="date" className={ctrlCls("due_date")} value={form.due_date} onChange={(e) => { markTouched("due_date"); updateForm({ due_date: e.target.value }); }} />
               <div className="flex gap-1">
@@ -345,17 +403,17 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
               </div>
             </div>
           </ERPFormField>
-          <ERPFormField label={t("โฟลเดอร์ Drive (ลิงก์)","Drive folder (link)")} span={2} style={orderStyle("drive")}><ERPInput className={ctrlCls("drive")} value={form.drive_folder_url} onChange={(e) => { markTouched("drive"); updateForm({ drive_folder_url: e.target.value }); }} placeholder="https://drive.google.com/..." /></ERPFormField>
-          <ERPFormField label="Platform" span={2} style={orderStyle("platform")}>
+          <ERPFormField label={t("โฟลเดอร์ Drive (ลิงก์)","Drive folder (link)")} span={2} style={orderStyle("drive")} className={hideCls("drive")}><ERPInput className={ctrlCls("drive")} value={form.drive_folder_url} onChange={(e) => { markTouched("drive"); updateForm({ drive_folder_url: e.target.value }); }} placeholder="https://drive.google.com/..." /></ERPFormField>
+          <ERPFormField label="Platform" span={2} style={orderStyle("platform")} className={hideCls("platform")}>
             <div className={`flex flex-wrap gap-1.5 ${wrapCls("platform")}`}>
               {platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
             </div>
           </ERPFormField>
-          <ERPFormField label={t("รายละเอียด","Description")} span={2} style={orderStyle("description")}><ERPTextarea className={ctrlCls("description")} value={form.description} rows={2} onChange={(e) => { markTouched("description"); updateForm({ description: e.target.value }); }} placeholder={t("อธิบายงาน/บรีฟเพิ่มเติม","Describe the task or brief")} /></ERPFormField>
+          <ERPFormField label={t("รายละเอียด","Description")} span={2} style={orderStyle("description")} className={hideCls("description")}><ERPTextarea className={ctrlCls("description")} value={form.description} rows={2} onChange={(e) => { markTouched("description"); updateForm({ description: e.target.value }); }} placeholder={t("อธิบายงาน/บรีฟเพิ่มเติม","Describe the task or brief")} /></ERPFormField>
           <ERPFormField label={t("แนบรูป (บรีฟ/อ้างอิง)","Attach images (brief/reference)")} span={2}>
             <ImageAttachKeys value={form.reference_images} onChange={(keys) => { markTouched("description"); updateForm({ reference_images: keys }); }} folder="creative-tasks" maxSize={800} />
           </ERPFormField>
-          <ERPFormField label={t("รูปปก (ไม่บังคับ — ถ้า Parent SKU มีรูป จะใช้รูปนั้นแทน)","Cover image (optional — Parent SKU image takes priority)")} span={2} style={orderStyle("cover")}>
+          <ERPFormField label={t("รูปปก (ไม่บังคับ — ถ้า Parent SKU มีรูป จะใช้รูปนั้นแทน)","Cover image (optional — Parent SKU image takes priority)")} span={2} style={orderStyle("cover")} className={hideCls("cover")}>
             <div className={wrapCls("cover")}><ImageInput value={form.cover_image_r2_key || null} onChange={(k) => updateForm({ cover_image_r2_key: k ?? "" })} folder="creative-tasks" compact /></div>
           </ERPFormField>
         </ERPFormSection>
