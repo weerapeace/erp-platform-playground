@@ -14,6 +14,31 @@ type Platform = { id: string; code: string; name_th: string; icon_key: string | 
 type Brand = { id: string; name: string; color: string | null };
 type Account = { label: string | null; external_shop_id: string | null; is_active: boolean };
 
+// ลิงก์หน้าร้านจากค่าที่กรอก — รองรับทั้ง "ลิงก์เต็ม" และ "@handle/ชื่อร้าน"
+// คืน null ถ้าเดาไม่ได้ (จะไม่โชว์ปุ่มเปิดลิงก์ ดีกว่าพาไปหน้าผิด)
+const SHOP_URL: Record<string, (h: string) => string> = {
+  line_shopping: (h) => `https://shop.line.me/@${h}`,
+  line: (h) => `https://shop.line.me/@${h}`,
+  facebook: (h) => `https://www.facebook.com/${h}`,
+  instagram: (h) => `https://www.instagram.com/${h}`,
+  tiktok: (h) => `https://www.tiktok.com/@${h}`,
+  youtube: (h) => `https://www.youtube.com/@${h}`,
+  pinterest: (h) => `https://www.pinterest.com/${h}`,
+  x: (h) => `https://x.com/${h}`,
+  twitter: (h) => `https://x.com/${h}`,
+  shopee: (h) => `https://shopee.co.th/${h}`,
+  lazada: (h) => `https://www.lazada.co.th/shop/${h}`,
+};
+function shopUrlOf(code: string, raw: string | null | undefined): string | null {
+  const v = (raw ?? "").trim();
+  if (!v) return null;
+  if (/^https?:\/\//i.test(v)) return v;                    // กรอกลิงก์เต็มมาแล้ว
+  const handle = v.replace(/^@/, "").trim();                // ตัด @ นำหน้า (แต่ละเจ้าเติมเองตามรูปแบบ)
+  if (!handle) return null;
+  const make = SHOP_URL[(code || "").toLowerCase()];
+  return make ? make(handle) : null;
+}
+
 export default function PlatformAccountsPage() {
   const { can } = useAuth();
   const canManage = can("products.platforms.manage_accounts");
@@ -29,6 +54,8 @@ export default function PlatformAccountsPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [editPlat, setEditPlat] = useState<string | null>(null);   // แพลตฟอร์มที่กำลังแก้ (ชื่อร้าน/Shop ID) — กันเผลอพิมพ์
+  const [editKey, setEditKey] = useState<string | null>(null);      // แพลตฟอร์มที่กำลังแก้ API Key (มีคีย์แล้ว = อ่านอย่างเดียวจนกดแก้)
+  const [clearKeyFor, setClearKeyFor] = useState<string | null>(null);  // แพลตฟอร์มที่กำลังยืนยัน "ล้างคีย์"
   // สถานะเชื่อมต่อ Facebook (Meta) ต่อแบรนด์
   type FbStatus = { connected: boolean; stage: string; page_name: string | null; pages: { id: string; name: string; ig: boolean }[] };
   const [fb, setFb] = useState<FbStatus>({ connected: false, stage: "none", page_name: null, pages: [] });
@@ -189,6 +216,12 @@ export default function PlatformAccountsPage() {
                   <span className="text-sm font-medium text-slate-700 w-24 shrink-0">{p.name_th}</span>
                   <ERPInput value={acc.label ?? ""} disabled={!canManage || editPlat !== p.id} placeholder="ชื่อร้าน (เช่น Shopee – แบรนด์ A)" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, label: e.target.value } }))} />
                   <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage || editPlat !== p.id} placeholder="Shop ID / ลิงก์ร้าน (เช่น @louismontini — ใช้ทำลิงก์สินค้า)" title="ใช้สร้างลิงก์สินค้าบนร้าน เช่น LINE: https://shop.line.me/@Shop ID/product/..." className="max-w-[280px]" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, external_shop_id: e.target.value } }))} />
+                  {/* เปิดลิงก์ร้าน — โชว์เมื่อกรอกแล้วและไม่ได้กำลังแก้ (ทั้งลิงก์เต็มและ @handle ก็เปิดได้) */}
+                  {editPlat !== p.id && shopUrlOf(p.code, acc.external_shop_id) && (
+                    <a href={shopUrlOf(p.code, acc.external_shop_id) as string} target="_blank" rel="noopener noreferrer"
+                      title={`เปิดร้าน: ${shopUrlOf(p.code, acc.external_shop_id)}`}
+                      className="h-8 px-2.5 inline-flex items-center text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">↗ เปิดลิงก์</a>
+                  )}
                   <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0"><input type="checkbox" disabled={!canManage} checked={acc.is_active} onChange={(e) => save(p.id, { is_active: e.target.checked })} />เปิด</label>
                   {canManage && (editPlat === p.id ? (
                     <span className="flex items-center gap-1 shrink-0">
@@ -206,11 +239,27 @@ export default function PlatformAccountsPage() {
                   <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-2">
                     <span className="text-xs text-slate-500 shrink-0">🔑 API Key</span>
                     {keys[p.id] && <span className="text-[11px] text-emerald-600 shrink-0">● ตั้งค่าแล้ว</span>}
-                    <input type="password" autoComplete="off" value={keyDraft[p.id] ?? ""} placeholder={keys[p.id] ? "•••• (ใส่ใหม่เพื่อเปลี่ยน)" : "วาง API Key จาก MyShop"}
-                      onChange={(e) => setKeyDraft((d) => ({ ...d, [p.id]: e.target.value }))}
-                      className="h-8 flex-1 min-w-[180px] border border-slate-200 rounded-md px-2 text-sm font-mono" />
-                    <button onClick={() => saveKey(p.id, keyDraft[p.id] ?? "")} disabled={!(keyDraft[p.id] ?? "").trim()} className="h-8 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">บันทึกคีย์</button>
-                    {keys[p.id] && <button onClick={() => saveKey(p.id, "")} className="h-8 px-2 text-xs text-rose-500 border border-rose-200 rounded-lg hover:bg-rose-50">ล้าง</button>}
+                    {/* มีคีย์อยู่แล้ว = โชว์แบบอ่านอย่างเดียว (กัน
+                        เผลอพิมพ์ทับ) → กด "แก้ไข" ถึงจะพิมพ์ได้ · ยังไม่มีคีย์ = พิมพ์ได้เลย */}
+                    {keys[p.id] && editKey !== p.id ? (
+                      <>
+                        <input readOnly value="••••••••••••" className="h-8 flex-1 min-w-[180px] border border-slate-200 rounded-md px-2 text-sm font-mono bg-slate-50 text-slate-400" />
+                        <button onClick={() => { setEditKey(p.id); setKeyDraft((d) => ({ ...d, [p.id]: "" })); }}
+                          className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">✎ แก้ไข</button>
+                      </>
+                    ) : (
+                      <>
+                        <input type="password" autoComplete="off" value={keyDraft[p.id] ?? ""} placeholder={keys[p.id] ? "ใส่คีย์ใหม่เพื่อเปลี่ยน" : "วาง API Key จาก MyShop"}
+                          onChange={(e) => setKeyDraft((d) => ({ ...d, [p.id]: e.target.value }))}
+                          className="h-8 flex-1 min-w-[180px] border border-slate-200 rounded-md px-2 text-sm font-mono" />
+                        <button onClick={() => { void saveKey(p.id, keyDraft[p.id] ?? ""); setEditKey(null); }} disabled={!(keyDraft[p.id] ?? "").trim()} className="h-8 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40">บันทึกคีย์</button>
+                        {keys[p.id] && editKey === p.id && (
+                          <button onClick={() => { setEditKey(null); setKeyDraft((d) => ({ ...d, [p.id]: "" })); }}
+                            className="h-8 px-2 text-xs text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+                        )}
+                      </>
+                    )}
+                    {keys[p.id] && <button onClick={() => setClearKeyFor(p.id)} className="h-8 px-2 text-xs text-rose-500 border border-rose-200 rounded-lg hover:bg-rose-50">ล้าง</button>}
                     <button onClick={testConn} disabled={testing || !keys[p.id]} title={keys[p.id] ? "" : "ใส่ API Key ก่อน"} className="h-8 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-40">🔌 ทดสอบเชื่อมต่อ</button>
                     {testMsg && <span className="text-xs text-slate-600">{testMsg}</span>}
                     <button onClick={() => setShowGuide(true)} className="text-[11px] text-violet-600 underline shrink-0">📖 วิธีขอ API Key</button>
@@ -320,6 +369,24 @@ export default function PlatformAccountsPage() {
               <div className="flex justify-end gap-2 pt-1">
                 <a href="https://oaplus.line.biz" target="_blank" rel="noopener noreferrer" className="h-9 px-4 leading-9 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700">เปิด oaplus.line.biz ↗</a>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ยืนยันก่อนล้าง API Key (ลบแล้วต้องไปขอ/คัดลอกมาใหม่) */}
+      {clearKeyFor && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setClearKeyFor(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-4" onClick={(e) => e.stopPropagation()}>
+            <p className="text-base font-semibold text-slate-800">ล้าง API Key?</p>
+            <p className="mt-1 text-sm text-slate-500">
+              คีย์ของ <b className="text-slate-700">{platforms.find((x) => x.id === clearKeyFor)?.name_th ?? ""}</b> จะถูกลบออกจากระบบ
+              — การเชื่อมต่อจะหยุดทำงาน และต้องไปคัดลอกคีย์มาใส่ใหม่เอง
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setClearKeyFor(null)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+              <button onClick={() => { const id = clearKeyFor; setClearKeyFor(null); setEditKey(null); void saveKey(id, ""); }}
+                className="h-9 px-4 text-sm font-medium text-white bg-rose-600 rounded-lg hover:bg-rose-700">ล้างคีย์</button>
             </div>
           </div>
         </div>
