@@ -21,9 +21,12 @@ import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input
 import { PurchaseLeadTimeInput } from "@/components/purchase-lead-time-input";
 import { formatCreditTerm, formatLeadTime } from "@/lib/credit-term";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
+import { shopNameSimilarity } from "@/lib/partner-match";
 
 // drawer รายละเอียด record ของกลาง (คลิกวัตถุดิบ → เปิด SKU ตัวจริง) — โหลดเฉพาะตอนใช้
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+// popup สแกนร้านซ้ำ — โหลดเฉพาะตอนกดใช้
+const DuplicateScanModal = nextDynamic(() => import("./duplicate-scan").then((m) => m.DuplicateScanModal), { ssr: false });
 
 type Partner = Record<string, unknown> & { id: string };
 type Tab = "all" | "customer" | "supplier" | "china";
@@ -86,6 +89,7 @@ export function PartnerManager() {
   const [page, setPage] = useState(0);
   const [sel, setSel] = useState<Partner | null>(null);
   const [mode, setMode] = useState<Mode>("view");
+  const [dupOpen, setDupOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -181,6 +185,9 @@ export function PartnerManager() {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ / รหัส / เบอร์โทร / เลขภาษี / จังหวัด…"
             className="w-full h-10 border border-slate-200 rounded-[11px] pl-9 pr-3.5 text-[13.5px] focus:outline-2 focus:outline-indigo-500" />
         </div>
+        <button onClick={() => setDupOpen(true)}
+          title="หาคู่ค้า/ร้านที่ชื่อคล้ายกันมาก (มักเกิดจากพิมพ์ชื่อไม่เหมือนเดิมตอนสร้างใหม่)"
+          className="h-10 px-3.5 text-[12.5px] font-semibold border border-slate-200 bg-white text-slate-600 rounded-[11px] hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">🔍 สแกนร้านซ้ำ</button>
         <button onClick={() => exportCsv(filtered)} disabled={!filtered.length}
           title="ส่งออกรายชื่อที่กรองอยู่เป็นไฟล์ CSV (เปิดใน Excel ได้)"
           className="h-10 px-3.5 text-[12.5px] font-semibold border border-slate-200 bg-white text-slate-600 rounded-[11px] hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1.5 whitespace-nowrap">⬇ Export</button>
@@ -234,8 +241,11 @@ export function PartnerManager() {
         <div className="mt-3"><Pager page={page} pageSize={PAGE} total={filtered.length} onPage={setPage} unitLabel="ราย" /></div>
       )}
 
-      {sel && <PartnerDrawer partner={sel} mode={mode} canEdit={canEdit}
+      {sel && <PartnerDrawer partner={sel} mode={mode} canEdit={canEdit} others={all.filter((p) => p.id !== sel.id)}
         onMode={setMode} onClose={() => setSel(null)} onSaved={afterSave} />}
+
+      <DuplicateScanModal open={dupOpen} onClose={() => setDupOpen(false)}
+        onOpenPartner={(id) => { const p = all.find((r) => r.id === id); if (p) { setDupOpen(false); openView(p); } }} />
     </div>
   );
 }
@@ -255,8 +265,8 @@ function KV({ rows }: { rows: [string, ReactNode][] }) {
   );
 }
 
-function PartnerDrawer({ partner, mode, canEdit, onMode, onClose, onSaved }: {
-  partner: Partner; mode: Mode; canEdit: boolean;
+function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSaved }: {
+  partner: Partner; mode: Mode; canEdit: boolean; others: Partner[];
   onMode: (m: Mode) => void; onClose: () => void; onSaved: (p: Partner) => void;
 }) {
   const toast = useToast();
@@ -350,7 +360,7 @@ function PartnerDrawer({ partner, mode, canEdit, onMode, onClose, onSaved }: {
         )}
 
         <div className="px-[22px] py-4.5 overflow-y-auto flex-1">
-          {editing ? <EditForm form={form} set={set} isSup={isSup} showChina={showChina} cur={cur} />
+          {editing ? <EditForm form={form} set={set} isSup={isSup} showChina={showChina} cur={cur} others={others} />
             : tab === "info" ? <ViewInfo form={form} isSup={isSup} showChina={showChina} cur={cur} />
               : <RelData partner={form} />}
         </div>
@@ -435,7 +445,42 @@ function Tog({ label, k, form, set }: { label: string; k: string; form: Partner;
   );
 }
 
-function EditForm({ form, set, isSup, showChina, cur }: { form: Partner; set: (k: string, v: unknown) => void; isSup: boolean; showChina: boolean; cur: string }) {
+/**
+ * เตือนตอนพิมพ์ชื่อ: ชื่อนี้คล้ายกับร้านที่มีอยู่แล้วไหม (กันสร้างร้านซ้ำตั้งแต่ต้นทาง)
+ * ใช้ของกลาง lib/partner-match — เตือนอย่างเดียว ไม่บล็อกการบันทึก (บางทีชื่อคล้ายกันจริง ๆ)
+ */
+function SimilarNameWarn({ form, others }: { form: Partner; others: Partner[] }) {
+  const hits = useMemo(() => {
+    const mine = [s(form, "display_name"), s(form, "name_th"), s(form, "name_en")].filter(Boolean);
+    if (!mine.length) return [];
+    return others
+      .map((o) => {
+        const theirs = [s(o, "display_name"), s(o, "name_th"), s(o, "name_en")].filter(Boolean);
+        let best = 0;
+        for (const a of mine) for (const b of theirs) best = Math.max(best, shopNameSimilarity(a, b));
+        return { o, score: best };
+      })
+      .filter((h) => h.score >= 0.82)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4);
+  }, [form, others]);
+
+  if (!hits.length) return null;
+  return (
+    <div className="mt-2.5 text-[12.5px] bg-amber-50 border border-amber-200 text-amber-800 rounded-[10px] px-3.5 py-2.5">
+      ⚠️ ชื่อนี้คล้ายกับที่มีอยู่แล้ว — เช็กก่อนว่าเป็นร้านเดียวกันหรือเปล่า
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {hits.map(({ o, score }) => (
+          <span key={o.id} className="text-[11.5px] font-medium px-2 py-0.5 rounded-full bg-white border border-amber-200 text-amber-900">
+            {nameOf(o)} <span className="text-amber-500">{Math.round(score * 100)}%</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EditForm({ form, set, isSup, showChina, cur, others }: { form: Partner; set: (k: string, v: unknown) => void; isSup: boolean; showChina: boolean; cur: string; others: Partner[] }) {
   const tagsStr = Array.isArray(form.tags) ? (form.tags as string[]).join(", ") : s(form, "tags");
   return (
     <div className="space-y-5">
@@ -451,6 +496,7 @@ function EditForm({ form, set, isSup, showChina, cur }: { form: Partner; set: (k
           <Fld label="ชื่อ (อังกฤษ/จีน)" k="name_en" form={form} set={set} span />
           <Fld label="ชื่อที่แสดง" k="display_name" form={form} set={set} span ph="เว้นว่าง = ใช้ชื่อไทย" />
         </div>
+        <SimilarNameWarn form={form} others={others} />
       </section>
       <section><Lab>📇 ติดต่อ</Lab>
         <div className="grid grid-cols-2 gap-3">
