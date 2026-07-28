@@ -5,7 +5,7 @@
  * แสดง PR ที่รอออกใบสั่งซื้อ → เลือก → สร้าง PO (แยกใบตามร้านอัตโนมัติ)
  * 2 view: ตาราง (DataTable) / การ์ด (ร้าน + การ์ดแบ่ง section + ตะกร้า)
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -17,6 +17,7 @@ import { SupplierPicker } from "@/components/supplier-picker";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
 import { SkuShopSelect } from "@/components/sku-shop-select";
+import { SortTh, sortRows, type SortState } from "@/components/sort-th";
 import nextDynamic from "next/dynamic";
 import { ApproveActions, RejectedPanel, DeleteButton, BulkApproveBar } from "./approval";
 import { PieceworkFromPoModal, type PieceFromPoInit } from "../piecework-from-po-modal";
@@ -52,6 +53,7 @@ const isCNY = (c: string) => c === "RMB" || c === "YUAN" || c === "CNY";
 const noShop = (r: Row) => !r.seller_name || r.seller_name === "—" || r.seller_name === "ไม่ระบุร้าน";
 // ตัด [code] นำหน้าชื่อสินค้าออก (code โชว์เป็น chip ข้างล่างอยู่แล้ว) — ถ้าตัดแล้วว่างให้คงชื่อเดิมไว้
 const stripCode = (name: string) => name?.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
+type CartView = "table" | "card";
 const VIEW_KEY = "po_create_view", COLS_KEY = "po_create_cols", RATE_KEY = "po_create_rate", CART_KEY = "po_create_cart", SORT_KEY = "po_create_sort";
 type SortKey = "date" | "name" | "qty" | "price";
 type CreatedPO = { id: string; po_no: string; seller_name: string; currency: string; grand_total: number; line_count: number };
@@ -107,6 +109,9 @@ export default function PurchaseOrdersPage() {
   const [shopQ, setShopQ] = useState("");
   const [prodQ, setProdQ] = useState("");
   const [cartQ, setCartQ] = useState("");
+  // ตะกร้า: มุมมองตาราง (ค่าเริ่มต้น — แถวเดียวจบ) / การ์ด · เรียงตามหัวคอลัมน์ได้
+  const [cartView, setCartView] = useState<CartView>("table");
+  const [cartSort, setCartSort] = useState<SortState>(null);
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [selectMode, setSelectMode] = useState(false);                 // โหมดเลือกหลายชิ้น (ตั้งร้าน/ราคา Mass)
   // responsive (จอ < xl): รายชื่อร้านเป็นลิ้นชัก + ตะกร้าสั่งซื้อเป็นแผ่นเลื่อนขึ้น (กดจากปุ่มลอย)
@@ -251,6 +256,16 @@ export default function PurchaseOrdersPage() {
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], "th"));
   }, [cartRows]);
   const lineTotal = (r: Row) => (cart[r.id]?.qty ?? r.qty) * r.price_est;
+  // ค่าใช้เรียงในตารางตะกร้า (ของกลาง sortRows)
+  const cartSortVal = (r: Row, k: string): string | number | null | undefined => {
+    switch (k) {
+      case "code": return r.code;
+      case "name": return stripCode(r.item_name);
+      case "qty":  return cart[r.id]?.qty ?? r.qty;
+      case "total": return lineTotal(r);
+      default: return undefined;
+    }
+  };
   const grandByCur = useMemo(() => { const t: Record<string, number> = {}; for (const r of cartRows) t[r.currency] = (t[r.currency] ?? 0) + lineTotal(r); return t; }, [cartRows, cart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ยืนยันจากป๊อปทวนรายการ → สร้างใบสั่งซื้อจริง (แยกใบละร้าน)
@@ -580,9 +595,88 @@ export default function PurchaseOrdersPage() {
                       <input value={cartQ} onChange={(e) => setCartQ(e.target.value)} placeholder="🔎 ค้นหาในตะกร้า…" className="w-full h-8 px-2 text-xs border border-slate-200 rounded-md" />
                     </div>
                   )}
+                  {cartRows.length > 0 && (
+                    <div className="px-3 pb-2 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-slate-400">{cartRows.length} รายการ</span>
+                      <div className="inline-flex bg-slate-100 rounded-md p-0.5 text-[11px]">
+                        {([["table", "🧾 ตาราง"], ["card", "🗂️ การ์ด"]] as [CartView, string][]).map(([v, l]) => (
+                          <button key={v} onClick={() => setCartView(v)}
+                            className={`px-2 py-0.5 rounded ${cartView === v ? "bg-white text-slate-800 shadow-sm font-medium" : "text-slate-500"}`}>{l}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex-1 overflow-auto xl:flex-none xl:max-h-[55vh] p-3 space-y-3">
                     {cartRows.length === 0 && <div className="text-sm text-slate-300 text-center py-8">ยังไม่มีรายการ<br />คลิกการ์ดเพื่อใส่ตะกร้า</div>}
-                    {cartByShop.map(([shop, items]) => {
+
+                    {/* มุมมองตาราง (ค่าเริ่มต้น) — แถวเดียวจบ + กดหัวคอลัมน์เพื่อเรียง */}
+                    {cartView === "table" && cartRows.length > 0 && (
+                      <table className="w-full text-[11px] border-collapse">
+                        <thead className="bg-slate-50">
+                          <tr>
+                            <th className="w-7 px-1 py-1" />
+                            <SortTh label="รหัส" k="code" sort={cartSort} onSort={setCartSort} className="text-left px-1 py-1" />
+                            <SortTh label="ชื่อ" k="name" sort={cartSort} onSort={setCartSort} className="text-left px-1 py-1" />
+                            <SortTh label="จำนวน" k="qty" sort={cartSort} onSort={setCartSort} className="text-right px-1 py-1" />
+                            <SortTh label="ยอด" k="total" sort={cartSort} onSort={setCartSort} className="text-right px-1 py-1" />
+                            <th className="w-6 px-1 py-1" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cartByShop.map(([shop, items]) => {
+                            const cq = cartQ.trim().toLowerCase();
+                            const shown0 = cq ? items.filter((r) => r.item_name.toLowerCase().includes(cq) || r.code.toLowerCase().includes(cq)) : items;
+                            if (shown0.length === 0) return null;
+                            const shown = sortRows(shown0, cartSort, cartSortVal);
+                            const subtotal = items.reduce((a, r) => a + lineTotal(r), 0);
+                            const cur = items[0]?.currency ?? "THB";
+                            return (
+                              <Fragment key={shop}>
+                                <tr className="bg-slate-50/80">
+                                  <td colSpan={6} className="px-1.5 py-1 border-t border-slate-200">
+                                    <span className="flex items-center justify-between gap-2">
+                                      <span className="font-medium text-slate-600">🏪 {shop}</span>
+                                      <span className="text-slate-600">{money(subtotal, cur)}</span>
+                                    </span>
+                                  </td>
+                                </tr>
+                                {shown.map((r) => {
+                                  const cl = cart[r.id]; const remain = r.qty - (cl?.qty ?? r.qty);
+                                  return (
+                                    <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                                      <td className="px-1 py-1">
+                                        <span className="w-6 h-6 rounded bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
+                                          {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-[10px]">📦</span>}
+                                        </span>
+                                      </td>
+                                      <td className="px-1 py-1 font-mono text-slate-500 max-w-[80px] truncate" title={r.code}>{r.code || "—"}</td>
+                                      <td className="px-1 py-1 text-slate-700 max-w-[130px] truncate" title={r.item_name}>{stripCode(r.item_name)}</td>
+                                      <td className="px-1 py-1 text-right whitespace-nowrap">
+                                        <input type="number" min={1} value={cl?.qty ?? r.qty} onChange={(e) => setCartQty(r.id, Number(e.target.value))}
+                                          className="w-14 h-6 px-1 border border-slate-200 rounded text-right" />
+                                        <span className="text-slate-400 ml-0.5">{r.uom}</span>
+                                        {remain > 0 && (
+                                          <label className="flex items-center justify-end gap-1 text-[10px] text-amber-600 mt-0.5" title={`เหลือ ${remain.toLocaleString()} ${r.uom} → เปิดใบขอซื้อใหม่`}>
+                                            <input type="checkbox" checked={cl?.partial ?? false} onChange={(e) => setCartPartial(r.id, e.target.checked)} className="rounded border-slate-300" />
+                                            รอซื้ออีก
+                                          </label>
+                                        )}
+                                      </td>
+                                      <td className="px-1 py-1 text-right font-medium text-slate-700 whitespace-nowrap">{money(lineTotal(r), r.currency)}</td>
+                                      <td className="px-1 py-1 text-center">
+                                        <button onClick={() => toggleCart(r)} className="text-slate-300 hover:text-red-500">✕</button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+
+                    {cartView === "card" && cartByShop.map(([shop, items]) => {
                       const cq = cartQ.trim().toLowerCase();
                       const shown = cq ? items.filter((r) => r.item_name.toLowerCase().includes(cq) || r.code.toLowerCase().includes(cq)) : items;
                       if (shown.length === 0) return null;
