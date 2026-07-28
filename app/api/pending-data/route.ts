@@ -56,6 +56,8 @@ export type PendingSection = {
   truncated: boolean;
   /** เปิด dropdown กรองรายการ (เช่น "ร้าน") — ต้องใส่ row.filterKey ด้วย · ไม่ใส่ = ไม่มีตัวกรอง */
   filter?: { label: string } | null;
+  /** ลิงก์ทางเลือกเพิ่มเติมท้ายการ์ด (เช่น นำเข้าจาก Excel) */
+  links?: { href: string; label: string }[];
 };
 export type PendingDataResponse = { scope: string; sections: PendingSection[]; error: string | null };
 
@@ -187,6 +189,7 @@ async function purchasing(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
       hasImage: true,
       truncated: (count ?? 0) > rows.length,
       filter: { label: "ร้าน" },
+      links: [{ href: "/purchasing/import-prices", label: "⬆ นำเข้าราคาจาก Excel" }],
     });
   }
   return out;

@@ -359,7 +359,12 @@ function SectionCard({ sec }: { sec: PendingSection }) {
               {sec.truncated ? `แสดง ${fmt(sec.rows.length)} จาก ${fmt(sec.count)} รายการ` : `ทั้งหมด ${fmt(sec.rows.length)} รายการ`}
               {done.size > 0 && <span className="text-emerald-600"> · ใส่ไปแล้ว {fmt(done.size)}</span>}
             </span>
-            {sec.fixHref && <Link href={sec.fixHref} className="text-[11px] text-blue-600 hover:underline">{sec.fixLabel ?? "ไปแก้"} →</Link>}
+            <span className="flex items-center gap-3 flex-wrap">
+              {(sec.links ?? []).map((l) => (
+                <Link key={l.href} href={l.href} className="text-[11px] text-blue-600 hover:underline">{l.label} →</Link>
+              ))}
+              {sec.fixHref && <Link href={sec.fixHref} className="text-[11px] text-blue-600 hover:underline">{sec.fixLabel ?? "ไปแก้"} →</Link>}
+            </span>
           </div>
         </div>
       )}
