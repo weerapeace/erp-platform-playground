@@ -9,10 +9,15 @@
  *   ➕ สร้าง SKU ใหม่   → เปิด SkuWizard ของกลาง โดยเติมชื่อไทย/ราคา/ลิงก์ ให้ล่วงหน้า
  *   🚫 ตีตก            → ซ่อนออกจากรายการ (กู้คืนได้)
  *
- * ของกลางที่ใช้: SkuPicker · ParentSkuPicker(ผ่าน SkuPicker+โหมด) · SupplierPicker · ERPModal · useToast · apiFetch · SkuWizard
+ * กดที่การ์ด = เปิด drawer ขวา (ดูรายละเอียด/แก้ชื่อไทย-ราคา-โน้ต/เลื่อนดูตัวถัดไป) · ชี้ที่รูป = พรีวิวใหญ่
+ *
+ * ของกลางที่ใช้: SkuPicker · SupplierPicker · ERPModal · HoverPreview · useToast · apiFetch · SkuWizard
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { HoverPreview } from "@/components/hover-image";
+import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
@@ -36,9 +41,12 @@ type Card = {
   matched_parent_sku_id: string | null;
   matched_label: string | null;
   supplier_item_id: string | null;
+  family_tag_ids: string[];
+  tags: { id: string; name: string }[];
   created_at: string | null;
 };
 type Counts = { new: number; matched: number; rejected: number };
+const EMPTY_FILTER: TagFilterValue = { tagIds: [], none: false };
 
 const PAGE = 60;
 const STATUS_TABS = [
@@ -57,6 +65,8 @@ export function TaobaoBrowser() {
   const toast = useToast();
   const [status, setStatus] = useState<StatusKey>("new");
   const [search, setSearch] = useState("");
+  const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);   // กรองแท็ก (ของกลางตัวเดียวกับหน้า SKU)
+  const [bulkTag, setBulkTag] = useState<TagFilterValue>(EMPTY_FILTER);       // ติดแท็กให้รายการที่เลือก
   const [cards, setCards] = useState<Card[]>([]);
   const [counts, setCounts] = useState<Counts>({ new: 0, matched: 0, rejected: 0 });
   const [total, setTotal] = useState(0);
@@ -66,6 +76,7 @@ export function TaobaoBrowser() {
   const [rate, setRate] = useState(5.2);            // เรตหยวน→บาท (ui_config rmb_to_thb_rate)
   const [matchRow, setMatchRow] = useState<Card | null>(null);
   const [wizardRow, setWizardRow] = useState<Card | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);   // drawer รายละเอียด (กดที่การ์ด)
 
   // เรตหยวน→บาท (ของกลางเดียวกับ SkuWizard)
   useEffect(() => {
@@ -79,6 +90,7 @@ export function TaobaoBrowser() {
     try {
       const p = new URLSearchParams({ status, limit: String(PAGE), offset: String(offset) });
       if (search.trim()) p.set("search", search.trim());
+      if (tagFilter.tagIds.length > 0) p.set("family_ids", tagFilter.tagIds.join(","));
       const j = await apiFetch(`/api/taobao-products?${p}`).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       const rows = (j.data ?? []) as Card[];
@@ -89,7 +101,7 @@ export function TaobaoBrowser() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "โหลดรายการไม่สำเร็จ");
     } finally { setLoading(false); setLoadingMore(false); }
-  }, [status, search, toast]);
+  }, [status, search, tagFilter, toast]);
 
   // โหลดครั้งแรก + เปลี่ยนสถานะ · ค้นหา debounce 300ms
   useEffect(() => { const t = setTimeout(() => { void load(0); }, search ? 300 : 0); return () => clearTimeout(t); }, [load, search]);
@@ -109,6 +121,22 @@ export function TaobaoBrowser() {
       toast.success(next === "rejected" ? `ตีตก ${ids.length} รายการแล้ว` : `กู้คืน ${ids.length} รายการแล้ว`);
       void load(0);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+  };
+
+  // ติดแท็กให้รายการที่เลือก (เพิ่มเข้าของเดิม ไม่ทับ)
+  const applyBulkTag = async () => {
+    const ids = [...sel];
+    if (ids.length === 0 || bulkTag.tagIds.length === 0) return;
+    try {
+      const res = await apiFetch("/api/taobao-products", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, add_tag_ids: bulkTag.tagIds }),
+      });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(`ติดแท็กให้ ${ids.length} รายการแล้ว`);
+      setBulkTag(EMPTY_FILTER);
+      void load(0);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ติดแท็กไม่สำเร็จ"); }
   };
 
   const removeRows = async (ids: string[]) => {
@@ -143,12 +171,20 @@ export function TaobaoBrowser() {
             className="flex-1 h-full text-sm outline-none bg-transparent" />
           {search && <button onClick={() => setSearch("")} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>}
         </div>
+        <TagGroupFilter value={tagFilter} onChange={setTagFilter} label="กรองแท็ก" showNone={false} />
       </div>
 
       {/* แถบเลือกหลายรายการ */}
       {sel.size > 0 && (
         <div className="flex items-center gap-2 mb-3 px-3 h-11 bg-indigo-50 border border-indigo-200 rounded-lg flex-wrap">
           <span className="text-sm text-indigo-800 font-medium">เลือก {sel.size} รายการ</span>
+          <TagGroupFilter value={bulkTag} onChange={setBulkTag} label="🏷️ ติดแท็ก" showNone={false} />
+          {bulkTag.tagIds.length > 0 && (
+            <button onClick={applyBulkTag}
+              className="h-8 px-3 text-[12px] bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium">
+              ติด {bulkTag.tagIds.length} แท็ก
+            </button>
+          )}
           {status !== "rejected" && (
             <button onClick={() => patchStatus([...sel], "rejected")}
               className="h-8 px-3 text-[12px] bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🚫 ตีตก</button>
@@ -185,6 +221,7 @@ export function TaobaoBrowser() {
             {cards.map((c) => (
               <TaobaoCardView key={c.id} card={c} rate={rate} selected={sel.has(c.id)}
                 onToggle={() => toggleSel(c.id)}
+                onOpen={() => (sel.size > 0 ? toggleSel(c.id) : setOpenId(c.id))}
                 onMatch={() => setMatchRow(c)}
                 onCreate={() => setWizardRow(c)}
                 onReject={() => patchStatus([c.id], "rejected")}
@@ -201,6 +238,24 @@ export function TaobaoBrowser() {
           )}
         </>
       )}
+
+      {/* drawer รายละเอียด — กดที่การ์ด */}
+      {openId && (() => {
+        const idx = cards.findIndex((c) => c.id === openId);
+        if (idx < 0) return null;
+        const cur = cards[idx];
+        return (
+          <TaobaoDrawer card={cur} rate={rate}
+            hasPrev={idx > 0} hasNext={idx < cards.length - 1}
+            onPrev={() => setOpenId(cards[idx - 1].id)}
+            onNext={() => setOpenId(cards[idx + 1].id)}
+            onClose={() => setOpenId(null)}
+            onChanged={() => void load(0)}
+            onGone={() => { setOpenId(null); void load(0); }}
+            onMatch={() => setMatchRow(cur)}
+            onCreate={() => setWizardRow(cur)} />
+        );
+      })()}
 
       {/* ป๊อปจับคู่ SKU เดิม */}
       {matchRow && (
@@ -234,23 +289,27 @@ export function TaobaoBrowser() {
 }
 
 // ── การ์ด 1 ใบ ──
-function TaobaoCardView({ card, rate, selected, onToggle, onMatch, onCreate, onReject, onRestore }: {
+function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCreate, onReject, onRestore }: {
   card: Card; rate: number; selected: boolean;
-  onToggle: () => void; onMatch: () => void; onCreate: () => void; onReject: () => void; onRestore: () => void;
+  onToggle: () => void; onOpen: () => void; onMatch: () => void; onCreate: () => void; onReject: () => void; onRestore: () => void;
 }) {
   const baht = card.price_rmb != null ? card.price_rmb * rate : null;
   return (
-    <div className={`border rounded-xl bg-white overflow-hidden flex flex-col transition ${selected ? "border-indigo-400 ring-2 ring-indigo-100" : "border-slate-200 hover:border-slate-300"}`}>
+    <div onClick={onOpen} title="กดเพื่อดูรายละเอียด"
+      className={`border rounded-xl bg-white overflow-hidden flex flex-col transition cursor-pointer ${selected ? "border-indigo-400 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-300 hover:shadow-md"}`}>
+      {/* ชี้ที่รูป = พรีวิวใหญ่ลอยขึ้น (ของกลาง HoverPreview) */}
+      <HoverPreview url={imgSrc(card.image_url, 720)} previewW={520}>
       <div className="relative bg-slate-50 h-[150px] flex items-center justify-center">
         {card.image_url
           ? <img src={imgSrc(card.image_url, 420) ?? ""} alt={card.translated_name ?? ""} className="max-h-full max-w-full object-contain" loading="lazy" />
           : <span className="text-slate-300 text-3xl">🖼️</span>}
-        <button onClick={onToggle}
+        <button onClick={(e) => { e.stopPropagation(); onToggle(); }}
           className={`absolute top-1.5 left-1.5 w-5 h-5 rounded border text-[11px] leading-none flex items-center justify-center ${selected ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white/90 border-slate-300 text-transparent hover:border-indigo-400"}`}
           title="เลือก">✓</button>
         {card.status === "matched" && <span className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">จับคู่แล้ว</span>}
         {card.status === "rejected" && <span className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">ตีตก</span>}
       </div>
+      </HoverPreview>
 
       <div className="p-2.5 flex-1 flex flex-col gap-1">
         <p className="text-[13px] font-medium text-slate-800 line-clamp-2 leading-snug" title={card.translated_name ?? ""}>
@@ -275,9 +334,18 @@ function TaobaoCardView({ card, rate, selected, onToggle, onMatch, onCreate, onR
           </div>
         )}
 
+        {card.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-0.5">
+            {card.tags.slice(0, 3).map((t) => (
+              <span key={t.id} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 max-w-full truncate">🏷️ {t.name}</span>
+            ))}
+            {card.tags.length > 3 && <span className="text-[10px] text-slate-400">+{card.tags.length - 3}</span>}
+          </div>
+        )}
+
         {card.matched_label && <p className="text-[10px] text-emerald-700 line-clamp-1 mt-0.5" title={card.matched_label}>🔗 {card.matched_label}</p>}
 
-        <div className="mt-auto pt-2 flex items-center gap-1 flex-wrap">
+        <div onClick={(e) => e.stopPropagation()} className="mt-auto pt-2 flex items-center gap-1 flex-wrap">
           {card.taobao_url && (
             <a href={card.taobao_url} target="_blank" rel="noopener noreferrer"
               className="h-7 px-2 text-[11px] border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 flex items-center" title="เปิดหน้า Taobao">🔗 Taobao</a>
@@ -389,6 +457,195 @@ function MatchModal({ row, rate, onClose, onDone }: { row: Card; rate: number; o
         )}
       </div>
     </ERPModal>
+  );
+}
+
+// ── drawer รายละเอียด (ขวามือ เต็มความสูง — แบบเดียวกับ drawer อื่นในระบบ) ──
+function TaobaoDrawer({ card, rate, hasPrev, hasNext, onPrev, onNext, onClose, onChanged, onGone, onMatch, onCreate }: {
+  card: Card; rate: number;
+  hasPrev: boolean; hasNext: boolean; onPrev: () => void; onNext: () => void;
+  onClose: () => void; onChanged: () => void; onGone: () => void; onMatch: () => void; onCreate: () => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState(card.translated_name ?? "");
+  const [price, setPrice] = useState(card.price_rmb != null ? String(card.price_rmb) : "");
+  const [note, setNote] = useState(card.note ?? "");
+  const [tags, setTags] = useState<TagFilterValue>({ tagIds: card.family_tag_ids ?? [], none: false });
+  const [saving, setSaving] = useState(false);
+
+  const tagKey = (card.family_tag_ids ?? []).join(",");
+  // เปลี่ยนรายการ (◀ ▶) → โหลดค่าใหม่ลงฟอร์ม
+  useEffect(() => {
+    setName(card.translated_name ?? "");
+    setPrice(card.price_rmb != null ? String(card.price_rmb) : "");
+    setNote(card.note ?? "");
+    setTags({ tagIds: card.family_tag_ids ?? [], none: false });
+  }, [card.id, card.translated_name, card.price_rmb, card.note, tagKey, card.family_tag_ids]);
+
+  const dirty = name !== (card.translated_name ?? "")
+    || price !== (card.price_rmb != null ? String(card.price_rmb) : "")
+    || note !== (card.note ?? "")
+    || tags.tagIds.join(",") !== tagKey;
+  const baht = Number(price) > 0 ? Number(price) * rate : null;
+
+  // ปิดด้วย Esc
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  const patch = async (body: Record<string, unknown>, okMsg: string) => {
+    setSaving(true);
+    try {
+      const res = await apiFetch("/api/taobao-products", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: card.id, ...body }),
+      });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(okMsg);
+      onChanged();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  };
+
+  const remove = async () => {
+    if (!confirm("ลบรายการนี้ออกจากกล่องพัก? (ไม่กระทบ SKU ในระบบ)")) return;
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/taobao-products?id=${card.id}`, { method: "DELETE" });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("ลบแล้ว");
+      onGone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); setSaving(false); }
+  };
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[140] bg-black/30 flex justify-end" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="bg-white h-full w-full max-w-xl shadow-2xl flex flex-col animate-[slideIn_.15s_ease-out]">
+        {/* หัว */}
+        <div className="flex items-center gap-2 px-4 h-14 border-b border-slate-200 shrink-0">
+          <span className="text-lg">🛒</span>
+          <p className="flex-1 text-sm font-medium text-slate-800 truncate">{card.translated_name || "(ยังไม่มีชื่อไทย)"}</p>
+          <button onClick={onPrev} disabled={!hasPrev} title="ก่อนหน้า"
+            className="w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30">◀</button>
+          <button onClick={onNext} disabled={!hasNext} title="ถัดไป"
+            className="w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30">▶</button>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="ปิด (Esc)">✕</button>
+        </div>
+
+        {/* เนื้อหา */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* รูป */}
+          <HoverPreview url={imgSrc(card.image_url, 1024)} previewW={640}>
+            <div className="bg-slate-50 rounded-xl h-[260px] flex items-center justify-center border border-slate-200">
+              {card.image_url
+                ? <img src={imgSrc(card.image_url, 720) ?? ""} alt="" className="max-h-full max-w-full object-contain" />
+                : <span className="text-slate-300 text-5xl">🖼️</span>}
+            </div>
+          </HoverPreview>
+
+          {/* สถานะ + ลิงก์ */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-[11px] px-2 py-1 rounded ${card.status === "matched" ? "bg-emerald-100 text-emerald-700" : card.status === "rejected" ? "bg-slate-200 text-slate-600" : "bg-blue-100 text-blue-700"}`}>
+              {card.status === "matched" ? "✅ จับคู่แล้ว" : card.status === "rejected" ? "🚫 ตีตก" : "🆕 ยังไม่จับคู่"}
+            </span>
+            {card.matched_label && <span className="text-[12px] text-emerald-700">🔗 {card.matched_label}</span>}
+            {card.taobao_url && (
+              <a href={card.taobao_url} target="_blank" rel="noopener noreferrer"
+                className="text-[12px] text-indigo-600 hover:underline ml-auto">เปิดหน้า Taobao ↗</a>
+            )}
+          </div>
+
+          {/* แก้ไขได้ */}
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[12px] text-slate-500 mb-1">ชื่อไทย (แก้ได้ก่อนสร้าง SKU)</label>
+              <textarea value={name} onChange={(e) => setName(e.target.value)} rows={2}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+            </div>
+            <div>
+              <label className="block text-[12px] text-slate-500 mb-1">ราคา (หยวน ¥)</label>
+              <div className="flex items-center gap-2">
+                <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" step="0.01"
+                  className="h-10 w-40 px-3 text-sm border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" />
+                {baht != null && <span className="text-[12px] text-slate-400">≈ ฿{baht.toLocaleString("th-TH", { maximumFractionDigits: 2 })} (เรต {rate})</span>}
+                {card.price_text && <span className="text-[11px] text-slate-300">ดิบ: {card.price_text}</span>}
+              </div>
+            </div>
+            <div>
+              <label className="block text-[12px] text-slate-500 mb-1">แท็ก (ชุดเดียวกับแท็ก SKU)</label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <TagGroupFilter value={tags} onChange={setTags} label="เลือกแท็ก" showNone={false} />
+                {card.tags.map((t) => (
+                  <span key={t.id} className="text-[11px] px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-100">🏷️ {t.name}</span>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">ติดไว้เพื่อจัดกลุ่มในกล่องพัก · กด 💾 บันทึกเพื่อให้มีผล</p>
+            </div>
+            <div>
+              <label className="block text-[12px] text-slate-500 mb-1">โน้ต</label>
+              <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="เช่น ร้านนี้ส่งเร็ว / ต้องสั่งขั้นต่ำ 10 ชิ้น"
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+            </div>
+          </div>
+
+          {/* อ่านอย่างเดียว */}
+          <div className="border-t border-slate-100 pt-3 space-y-2">
+            <Row label="ชื่อจีน" value={card.original_name} mono />
+            <div>
+              <p className="text-[12px] text-slate-500 mb-1">ตัวเลือก ({card.variants.length})</p>
+              {card.variants.length === 0
+                ? <p className="text-[13px] text-slate-300">—</p>
+                : (
+                  <div className="flex flex-wrap gap-1">
+                    {card.variants.map((v, i) => (
+                      <span key={i} className="text-[11px] px-2 py-1 rounded bg-slate-100 text-slate-600"
+                        title={v.originalName ?? ""}>{v.translatedName || v.originalName}</span>
+                    ))}
+                  </div>
+                )}
+            </div>
+            <Row label="เก็บเข้าระบบเมื่อ" value={card.created_at ? new Date(card.created_at).toLocaleString("th-TH") : null} />
+          </div>
+        </div>
+
+        {/* ท้าย */}
+        <div className="border-t border-slate-200 p-3 flex items-center gap-2 flex-wrap shrink-0">
+          <button onClick={() => patch({ translated_name: name, price_rmb: price === "" ? null : price, note, family_tag_ids: tags.tagIds }, "บันทึกแล้ว")}
+            disabled={!dirty || saving}
+            className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">
+            {saving ? "กำลังบันทึก…" : "💾 บันทึก"}
+          </button>
+          {card.status !== "rejected" ? (
+            <>
+              <button onClick={onMatch} className="h-9 px-3 text-sm border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-50">🔗 จับคู่ SKU</button>
+              <button onClick={onCreate} className="h-9 px-3 text-sm border border-emerald-200 rounded-lg text-emerald-700 hover:bg-emerald-50">➕ สร้าง SKU</button>
+              <button onClick={() => patch({ status: "rejected" }, "ตีตกแล้ว")} disabled={saving}
+                className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">🚫 ตีตก</button>
+            </>
+          ) : (
+            <button onClick={() => patch({ status: "new" }, "กู้คืนแล้ว")} disabled={saving}
+              className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">↩️ กู้คืน</button>
+          )}
+          <button onClick={remove} disabled={saving}
+            className="h-9 px-3 text-sm text-rose-600 hover:bg-rose-50 rounded-lg ml-auto">🗑 ลบ</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function Row({ label, value, mono }: { label: string; value: string | null; mono?: boolean }) {
+  return (
+    <div>
+      <p className="text-[12px] text-slate-500">{label}</p>
+      <p className={`text-[13px] text-slate-700 break-words ${mono ? "font-mono" : ""}`}>{value || <span className="text-slate-300">—</span>}</p>
+    </div>
   );
 }
 

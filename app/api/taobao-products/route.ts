@@ -36,18 +36,21 @@ export type TaobaoCard = {
   matched_parent_sku_id: string | null;
   matched_label: string | null;   // "รหัส · ชื่อ" ของ SKU/Parent ที่จับคู่ไว้ (ไว้โชว์บนการ์ด)
   supplier_item_id: string | null;
+  family_tag_ids: string[];                       // แท็กกลาง (product_families) ที่ติดไว้กับรายการนี้
+  tags: { id: string; name: string }[];           // ชื่อแท็ก — ไว้โชว์ chips บนการ์ด
   created_at: string | null;
 };
 
 const SELECT =
   "id, original_name, translated_name, price_text, price_rmb, taobao_url, image_url, variants, note, status, " +
-  "matched_sku_id, matched_parent_sku_id, supplier_item_id, created_at";
+  "matched_sku_id, matched_parent_sku_id, supplier_item_id, family_tag_ids, created_at";
 
 const STATUSES = new Set(["new", "matched", "rejected"]);
 
-function shape(r: Record<string, unknown>, labels: Map<string, string>): TaobaoCard {
+function shape(r: Record<string, unknown>, labels: Map<string, string>, tagNames?: Map<string, string>): TaobaoCard {
   const skuId    = r.matched_sku_id ? String(r.matched_sku_id) : null;
   const parentId = r.matched_parent_sku_id ? String(r.matched_parent_sku_id) : null;
+  const tagIds   = Array.isArray(r.family_tag_ids) ? (r.family_tag_ids as unknown[]).map(String) : [];
   return {
     id: String(r.id),
     original_name:   (r.original_name as string) ?? null,
@@ -63,6 +66,8 @@ function shape(r: Record<string, unknown>, labels: Map<string, string>): TaobaoC
     matched_parent_sku_id: parentId,
     matched_label:   (skuId && labels.get(skuId)) || (parentId && labels.get(parentId)) || null,
     supplier_item_id: r.supplier_item_id ? String(r.supplier_item_id) : null,
+    family_tag_ids:  tagIds,
+    tags:            tagIds.map((id) => ({ id, name: tagNames?.get(id) ?? "แท็ก" })),
     created_at:      (r.created_at as string) ?? null,
   };
 }
@@ -79,8 +84,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const offset = Number(sp.get("offset")) || 0;
   const admin  = supabaseAdmin();
 
+  // กรองแท็ก (หลายแท็ก = OR เหมือนหน้า SKU) — family_tag_ids เป็น jsonb array ของ product_families.id
+  const familyIds = (sp.get("family_ids") ?? "").split(",").map((s) => s.trim()).filter((s) => /^[0-9a-f-]{36}$/i.test(s));
+
   let q = admin.from("taobao_products").select(SELECT, { count: "exact" });
   if (STATUSES.has(status)) q = q.eq("status", status);
+  if (familyIds.length > 0) q = q.or(familyIds.map((id) => `family_tag_ids.cs.["${id}"]`).join(","));
   if (search) {
     const s = search.replace(/[,()%*]/g, " ").trim();
     q = q.or(`translated_name.ilike.%${s}%,original_name.ilike.%${s}%,taobao_url.ilike.%${s}%`);
@@ -111,13 +120,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       : Promise.resolve(),
   ]);
 
+  // ชื่อแท็กที่ติดไว้ (product_families) — ดึงรอบเดียวเหมือนกัน
+  const tagIds = [...new Set(rows.flatMap((r) => (Array.isArray(r.family_tag_ids) ? (r.family_tag_ids as unknown[]).map(String) : [])))];
+  const tagNames = new Map<string, string>();
+  if (tagIds.length > 0) {
+    const { data } = await admin.from("product_families").select("id, name").in("id", tagIds);
+    for (const t of (data ?? []) as Record<string, unknown>[]) tagNames.set(String(t.id), String(t.name ?? "แท็ก"));
+  }
+
   const counts = { new: 0, matched: 0, rejected: 0 };
   for (const r of (countRes.data ?? []) as { status: string }[]) {
     if (r.status === "new" || r.status === "matched" || r.status === "rejected") counts[r.status]++;
   }
 
   return NextResponse.json({
-    data: rows.map((r) => shape(r, labels)),
+    data: rows.map((r) => shape(r, labels, tagNames)),
     total: listRes.count ?? rows.length,
     counts,
     error: null,
@@ -151,8 +168,23 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("matched_sku_id" in b)        patch.matched_sku_id        = typeof b.matched_sku_id === "string" ? b.matched_sku_id : null;
   if ("matched_parent_sku_id" in b) patch.matched_parent_sku_id = typeof b.matched_parent_sku_id === "string" ? b.matched_parent_sku_id : null;
   if ("supplier_item_id" in b)      patch.supplier_item_id      = typeof b.supplier_item_id === "string" ? b.supplier_item_id : null;
+  // แท็ก: ส่ง family_tag_ids = ตั้งใหม่ทั้งชุด · add_tag_ids = เพิ่มเข้าของเดิม (ใช้ตอนติดแท็กหลายรายการพร้อมกัน)
+  if (Array.isArray(b.family_tag_ids)) patch.family_tag_ids = [...new Set(b.family_tag_ids.map(String))];
 
   const admin = supabaseAdmin();
+
+  // เพิ่มแท็กให้หลายรายการโดยไม่ทับของเดิม (ติดแท็กแบบเลือกหลายใบ)
+  if (Array.isArray(b.add_tag_ids) && b.add_tag_ids.length > 0) {
+    const add = b.add_tag_ids.map(String);
+    const { data: cur } = await admin.from("taobao_products").select("id, family_tag_ids").in("id", ids);
+    await Promise.all(((cur ?? []) as Record<string, unknown>[]).map((r) => {
+      const old = Array.isArray(r.family_tag_ids) ? (r.family_tag_ids as unknown[]).map(String) : [];
+      return admin.from("taobao_products")
+        .update({ family_tag_ids: [...new Set([...old, ...add])], updated_at: new Date().toISOString() })
+        .eq("id", String(r.id));
+    }));
+  }
+
   const { data, error } = await admin.from("taobao_products").update(patch).in("id", ids).select(SELECT);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
