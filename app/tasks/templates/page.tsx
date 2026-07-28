@@ -72,7 +72,7 @@ export default function TemplatesPage() {
 }
 
 // ============================================================
-// Templates tab
+// Templates tab (มีช่องไอคอน + ธง "ไม่เกี่ยวกับแบรนด์" ตั้งต่อเทมเพลต)
 // ============================================================
 const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[], due_offset_days: "", require_parent_sku: false, icon: "", no_brand_only: false };
 
