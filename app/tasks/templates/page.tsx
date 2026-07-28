@@ -74,7 +74,7 @@ export default function TemplatesPage() {
 // ============================================================
 // Templates tab
 // ============================================================
-const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[], due_offset_days: "", require_parent_sku: false };
+const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[], due_offset_days: "", require_parent_sku: false, icon: "", no_brand_only: false };
 
 function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) => void }) {
   const t = useT();
@@ -109,7 +109,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const setContentD = (c: TemplateContentItem[]) => { setContentItems(c); setDirty(true); };
 
   const openNew = () => { setEditId(null); setForm(EMPTY_TPL); setSteps([]); setContentItems([]); setReviewers([]); setDirty(false); setOpen(true); };
-  const openEdit = (tpl: TaskTemplate) => { setEditId(tpl.id); setForm({ name: tpl.name, task_type: tpl.task_type ?? "photo_shoot", default_priority: tpl.default_priority, brand_id: tpl.brand_id ?? "", description: tpl.description ?? "", platforms: tpl.platforms ?? [], due_offset_days: tpl.due_offset_days != null ? String(tpl.due_offset_days) : "", require_parent_sku: !!tpl.require_parent_sku }); setSteps((Array.isArray(tpl.steps) ? tpl.steps : []).map(toEditStep)); setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []); setReviewers((tpl.default_reviewers && tpl.default_reviewers.length ? tpl.default_reviewers.map((r) => ({ id: r.id, name: r.label } as UserPickerValue)) : (tpl.default_reviewer_id ? [{ id: tpl.default_reviewer_id, name: tpl.default_reviewer_label ?? "" } as UserPickerValue] : []))); setDirty(false); setOpen(true); };
+  const openEdit = (tpl: TaskTemplate) => { setEditId(tpl.id); setForm({ name: tpl.name, task_type: tpl.task_type ?? "photo_shoot", default_priority: tpl.default_priority, brand_id: tpl.brand_id ?? "", description: tpl.description ?? "", platforms: tpl.platforms ?? [], due_offset_days: tpl.due_offset_days != null ? String(tpl.due_offset_days) : "", require_parent_sku: !!tpl.require_parent_sku, icon: tpl.icon ?? "", no_brand_only: !!tpl.no_brand_only }); setSteps((Array.isArray(tpl.steps) ? tpl.steps : []).map(toEditStep)); setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []); setReviewers((tpl.default_reviewers && tpl.default_reviewers.length ? tpl.default_reviewers.map((r) => ({ id: r.id, name: r.label } as UserPickerValue)) : (tpl.default_reviewer_id ? [{ id: tpl.default_reviewer_id, name: tpl.default_reviewer_label ?? "" } as UserPickerValue] : []))); setDirty(false); setOpen(true); };
   const togglePlat = (v: string) => setFormD((f) => ({ ...f, platforms: f.platforms.includes(v) ? f.platforms.filter((x) => x !== v) : [...f.platforms, v] }));
 
   // EditStep → body step (type-driven)
@@ -118,7 +118,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const save = async () => {
     if (!form.name.trim()) { pushToast("error", t("กรุณาใส่ชื่อเทมเพลต", "Please enter a template name")); return; }
     setSaving(true);
-    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, default_reviewer_ids: reviewers.map((r) => r.id), due_offset_days: form.due_offset_days ? Number(form.due_offset_days) : null, require_parent_sku: form.require_parent_sku, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map(stepBody), content_items: contentItems.filter((c) => c.title.trim()) };
+    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, default_reviewer_ids: reviewers.map((r) => r.id), due_offset_days: form.due_offset_days ? Number(form.due_offset_days) : null, require_parent_sku: form.require_parent_sku, icon: form.icon.trim() || null, no_brand_only: form.no_brand_only, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map(stepBody), content_items: contentItems.filter((c) => c.title.trim()) };
     try { if (editId) await updateTemplate(editId, body); else await createTemplate(body); setOpen(false); setDirty(false); pushToast("success", t("บันทึกเทมเพลตแล้ว", "Template saved")); await load(); }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setSaving(false); }
@@ -172,7 +172,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
                             <button onClick={(e) => { e.stopPropagation(); setDelId(tpl); }} className="text-xs text-slate-300 hover:text-red-500">{t("ลบ", "Delete")}</button>
                           </div>
                         </div>
-                        <p className="font-semibold text-slate-800">{tpl.name}</p>
+                        <p className="font-semibold text-slate-800">{tpl.icon ? `${tpl.icon} ` : ""}{tpl.name}</p>
                         <p className="text-xs text-slate-400 mt-1">{(tpl.steps?.length ?? 0)} {t("ขั้นตอน", "steps")} · {(tpl.platforms?.length ?? 0)} {t("แพลตฟอร์ม", "platforms")}{(tpl.content_items?.length ?? 0) > 0 ? ` · 📱 ${tpl.content_items!.length} ${t("คอนเทนต์", "content")}` : ""}{tpl.due_offset_days != null ? ` · ⏱ +${tpl.due_offset_days}${t("ว", "d")}` : ""}</p>
                       </div>
                     ))}
@@ -190,9 +190,26 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
         </>}>
         <ERPFormSection title={t("ข้อมูลเทมเพลต", "Template Details")} columns={2}>
           <ERPFormField label={t("ชื่อเทมเพลต", "Template Name")} required span={2}><ERPInput value={form.name} onChange={(e) => setFormD((f) => ({ ...f, name: e.target.value }))} placeholder={t("เช่น ถ่ายรูปสินค้าใหม่", "e.g. New product photo shoot")} /></ERPFormField>
+          <ERPFormField label={t("ไอคอน (อีโมจิ)", "Icon (emoji)")} hint={t("โชว์บนการ์ดเทมเพลตตอนสร้างงาน · เว้นว่างได้", "Shown on the template card in the wizard · optional")}>
+            <div className="flex items-center gap-2">
+              <ERPInput value={form.icon} maxLength={4} placeholder="🖨️" className="w-20 text-center text-lg" onChange={(e) => setFormD((f) => ({ ...f, icon: e.target.value }))} />
+              <div className="flex flex-wrap gap-1">
+                {["🖨️", "🎨", "📸", "🎬", "🏷️", "🧵", "📦", "✏️", "🖼️", "📱"].map((em) => (
+                  <button key={em} type="button" onClick={() => setFormD((f) => ({ ...f, icon: em }))}
+                    className={`h-8 w-8 rounded-md border text-base leading-none ${form.icon === em ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:bg-slate-50"}`}>{em}</button>
+                ))}
+              </div>
+            </div>
+          </ERPFormField>
           <ERPFormField label={t("ประเภทงาน", "Task Type")}><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => setFormD((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("ความสำคัญเริ่มต้น", "Default Priority")}><ERPSelect value={form.default_priority} options={PRIORITY_OPTIONS()} onChange={(e) => setFormD((f) => ({ ...f, default_priority: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setFormD((f) => ({ ...f, brand_id: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("งานนี้ไม่เกี่ยวกับแบรนด์", "Not brand-specific")} hint={t("ติ๊กสำหรับงานที่ไม่ผูกแบรนด์ เช่น งานเรียงพิมพ์ — จะโชว์เฉพาะตอนเลือก “ไม่ระบุแบรนด์” ไม่ไปเกะกะในแบรนด์อื่น", "For work not tied to a brand (e.g. arrange print) — only shown when “No brand” is selected")}>
+            <label className="flex items-center gap-2 cursor-pointer h-8">
+              <input type="checkbox" checked={form.no_brand_only} onChange={(e) => setFormD((f) => ({ ...f, no_brand_only: e.target.checked }))} className="w-4 h-4 accent-violet-600" />
+              <span className="text-sm text-slate-600">{form.no_brand_only ? t("โชว์เฉพาะ “ไม่ระบุแบรนด์”", "Only under “No brand”") : t("โชว์ตามปกติ", "Normal")}</span>
+            </label>
+          </ERPFormField>
           <ERPFormField label={t("แพลตฟอร์ม", "Platforms")}><div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlat(p.value)} className={`px-2 py-0.5 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>)}</div></ERPFormField>
           <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เริ่มต้น)", "Reviewer/Approver (default)")} hint={t("งานที่สร้างจากแม่แบบนี้จะตั้งผู้ตรวจเหล่านี้ให้ (เลือกได้หลายคน)", "Tasks from this template get these reviewers (multiple)")}><MultiUserPicker value={reviewers} onChange={(v) => { setReviewers(v); setDirty(true); }} disableCreate /></ERPFormField>
           <ERPFormField label={t("กำหนดส่ง = +X วัน จากวันที่สั่ง", "Due = +X days from order date")} hint={t("เว้นว่าง = ไม่ตั้งกำหนดส่งอัตโนมัติ", "Blank = no auto due date")}><ERPInput type="number" value={form.due_offset_days} placeholder={t("เช่น 7", "e.g. 7")} onChange={(e) => setFormD((f) => ({ ...f, due_offset_days: e.target.value }))} /></ERPFormField>

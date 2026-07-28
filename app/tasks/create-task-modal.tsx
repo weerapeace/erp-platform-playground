@@ -202,7 +202,10 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   // วันที่สั่งเปลี่ยน → คำนวณกำหนดส่งใหม่ (แม่แบบ +X หรือ default +3) ถ้ายังไม่แก้กำหนดส่งเอง
   const setOrderDate = (v: string) => { const autoDue = !!v && (tplDueOffset != null || !touched.has("due_date")); updateForm({ order_date: v, ...(autoDue ? { due_date: addDaysStr(v, tplDueOffset ?? 3) } : {}) }); };
   // เทมเพลตของแบรนด์ที่เลือก (+ เทมเพลตทั่วไปที่ไม่ผูกแบรนด์)
-  const brandTemplates = templates.filter((tp) => form.brand_id ? (tp.brand_id === form.brand_id || !tp.brand_id) : !tp.brand_id);
+  // ยกเว้นเทมเพลตที่ติ๊ก "ไม่เกี่ยวกับแบรนด์" (เช่นงานเรียงพิมพ์) → โชว์เฉพาะตอนเลือก "ไม่ระบุแบรนด์"
+  const brandTemplates = templates.filter((tp) => form.brand_id
+    ? ((tp.brand_id === form.brand_id || !tp.brand_id) && !tp.no_brand_only)
+    : !tp.brand_id);
   // เทมเพลตที่เลือกบังคับระบุ Parent SKU ไหม (เช่น เพิ่มสี/แก้สี)
   const requireParent = !!templates.find((x) => x.id === tplId)?.require_parent_sku;
   // งานเรียงพิมพ์ (มีงานย่อยชนิด arrange_print) → ขั้น "งานย่อย" แสดง UI เลือกรูป+ขนาด+จำนวนแทน
@@ -299,7 +302,10 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
               </button>
               {brandTemplates.map((tpl) => { const on = tplId === tpl.id; return (
                 <button key={tpl.id} type="button" onClick={() => applyTemplate(tpl.id)} className={`p-3 rounded-lg border text-left ${on ? "border-violet-400 ring-2 ring-violet-200 bg-violet-50/40" : "border-slate-200 hover:border-violet-300"}`}>
-                  <p className="text-sm font-medium text-slate-800">{tpl.name}</p>
+                  <p className="text-sm font-medium text-slate-800 flex items-center gap-1.5">
+                    {tpl.icon ? <span className="text-lg leading-none shrink-0">{tpl.icon}</span> : null}
+                    <span className="min-w-0">{tpl.name}</span>
+                  </p>
                   <p className="text-xs text-slate-400 mt-0.5">{(tpl.steps?.length ?? 0)} {t("ขั้นตอน","steps")}{(tpl.content_items?.length ?? 0) > 0 ? ` · 📱 ${tpl.content_items!.length}` : ""}{tpl.due_offset_days != null ? ` · ⏱ +${tpl.due_offset_days}${t("ว","d")}` : ""}</p>
                 </button>
               ); })}

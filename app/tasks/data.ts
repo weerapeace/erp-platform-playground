@@ -703,6 +703,8 @@ export type TaskTemplate = {
   default_reviewer_ids?: string[]; default_reviewers?: { id: string; label: string }[];   // ผู้ตรวจหลายคน
   platforms: string[] | null; steps: TemplateStep[]; content_items?: TemplateContentItem[];
   require_parent_sku?: boolean;   // บังคับระบุ Parent SKU ตอนสร้างงาน (เช่น เพิ่มสี/แก้สี)
+  icon?: string | null;           // อีโมจิโชว์บนการ์ดเทมเพลต (ตั้งที่หน้าเทมเพลต)
+  no_brand_only?: boolean;        // งานที่ไม่เกี่ยวกับแบรนด์ (เช่นเรียงพิมพ์) → โชว์เฉพาะตอนไม่ระบุแบรนด์
 };
 export type RecurringRule = {
   id: string; name: string; template_id: string | null; template_label?: string | null;
