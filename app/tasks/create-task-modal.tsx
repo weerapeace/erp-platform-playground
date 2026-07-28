@@ -30,7 +30,7 @@ import type { ArrangePrintType } from "./data";
 const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 
 // ช่องในขั้น "ข้อมูลงาน" ที่จัดลำดับได้ (ช่องว่างดันขึ้นบน) — ไม่รวม "ชื่องาน" (ตรึงบนสุดเสมอ)
-const REORDER_KEYS = ["task_type", "priority", "brand_id", "campaign_id", "assignee", "reviewers", "order_date", "due_date", "drive", "platform", "description", "cover"];
+const REORDER_KEYS = ["task_type", "priority", "brand_id", "campaign_id", "assignee", "reviewers", "order_date", "due_date", "drive", "platform", "description", "images", "cover"];
 // ช่องที่โชว์ในโหมด BASIC (ค่าเริ่มต้น — แอดมินติ๊กเพิ่ม/ลบได้ที่ปุ่ม ⚙️ ข้างสวิตช์โหมด)
 const DEFAULT_BASIC_FIELDS = ["task_type", "priority", "assignee", "due_date"];
 // ป้ายชื่อช่อง (ใช้ในกล่องตั้งค่าโหมด BASIC)
@@ -40,7 +40,7 @@ const FIELD_LABELS: Record<string, [string, string]> = {
   assignee: ["ผู้รับผิดชอบ", "Assignee"], reviewers: ["ผู้ตรวจ/อนุมัติ", "Reviewer"],
   order_date: ["วันที่สั่ง", "Order date"], due_date: ["กำหนดส่ง", "Due date"],
   drive: ["โฟลเดอร์ Drive", "Drive folder"], platform: ["Platform", "Platform"],
-  description: ["รายละเอียด", "Description"], cover: ["รูปปก", "Cover image"],
+  description: ["รายละเอียด", "Description"], images: ["แนบรูป (บรีฟ)", "Attach images"], cover: ["รูปปก", "Cover image"],
 };
 
 function todayStr(): string { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
@@ -152,13 +152,16 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       case "drive": return !form.drive_folder_url.trim();
       case "platform": return form.platforms.length === 0;
       case "description": return !form.description.trim();
+      case "images": return form.reference_images.length === 0;
       case "cover": return !form.cover_image_r2_key;
       default: return false;   // task_type/priority มีค่าเสมอ
     }
   };
   const orderStyle = (k: string) => ({ order: emptySnap.has(k) ? 0 : 1 });
-  // โหมด BASIC = ซ่อนช่องที่ไม่ได้ติ๊ก · แต่ช่องที่ "มีค่าอยู่แล้ว" ยังโชว์ (กันข้อมูลจากเทมเพลตหายไปเงียบ ๆ)
-  const showField = (k: string) => fieldMode === "advance" || basicFields.includes(k) || !emptyNow(k);
+  // โหมด BASIC = ซ่อนช่องที่ไม่ได้ติ๊ก (ซ่อนแค่การแสดงผล — ค่ายังถูกบันทึกครบ ไม่ต้องกลัวข้อมูลหาย)
+  // ⚠️ เคยใส่เงื่อนไข "ช่องที่มีค่าแล้วให้โชว์" → พัง เพราะ Wizard เติมค่าให้เกือบทุกช่อง
+  //    (แบรนด์/ความสำคัญ/ผู้ตรวจ/วันที่) เลยไม่ซ่อนอะไรเลย
+  const showField = (k: string) => fieldMode === "advance" || basicFields.includes(k);
   const hideCls = (k: string) => (showField(k) ? "" : "hidden");
   const ctrlCls = (k: string) => (emptyNow(k) ? "bg-orange-50 border-orange-200" : touched.has(k) ? "" : "bg-slate-100");
   const wrapCls = (k: string) => (emptyNow(k) ? "rounded-lg bg-orange-50 border border-orange-200 p-1.5" : "");
@@ -410,7 +413,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
             </div>
           </ERPFormField>
           <ERPFormField label={t("รายละเอียด","Description")} span={2} style={orderStyle("description")} className={hideCls("description")}><ERPTextarea className={ctrlCls("description")} value={form.description} rows={2} onChange={(e) => { markTouched("description"); updateForm({ description: e.target.value }); }} placeholder={t("อธิบายงาน/บรีฟเพิ่มเติม","Describe the task or brief")} /></ERPFormField>
-          <ERPFormField label={t("แนบรูป (บรีฟ/อ้างอิง)","Attach images (brief/reference)")} span={2}>
+          <ERPFormField label={t("แนบรูป (บรีฟ/อ้างอิง)","Attach images (brief/reference)")} span={2} style={orderStyle("images")} className={hideCls("images")}>
             <ImageAttachKeys value={form.reference_images} onChange={(keys) => { markTouched("description"); updateForm({ reference_images: keys }); }} folder="creative-tasks" maxSize={800} />
           </ERPFormField>
           <ERPFormField label={t("รูปปก (ไม่บังคับ — ถ้า Parent SKU มีรูป จะใช้รูปนั้นแทน)","Cover image (optional — Parent SKU image takes priority)")} span={2} style={orderStyle("cover")} className={hideCls("cover")}>
