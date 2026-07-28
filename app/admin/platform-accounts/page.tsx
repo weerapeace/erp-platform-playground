@@ -197,14 +197,15 @@ export default function PlatformAccountsPage() {
 
   return (
     <AppAccessGate appKey="master">
-    <div className="max-w-3xl mx-auto p-6">
+    <div className="max-w-6xl mx-auto p-6">
       <h1 className="text-xl font-semibold text-slate-900 mb-1">🏪 จัดการร้าน/บัญชีแพลตฟอร์ม</h1>
       <p className="text-sm text-slate-500 mb-4">แต่ละแบรนด์มีร้านของตัวเองในแต่ละแพลตฟอร์ม — ตั้งร้านที่นี่ ระบบจะใช้ตอนลงขายตามแบรนด์ของสินค้า</p>
 
       {!canManage && <p className="text-sm text-amber-600 mb-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">คุณไม่มีสิทธิ์แก้ไข (ดูได้อย่างเดียว)</p>}
 
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-sm text-slate-600">แบรนด์:</span>
+      {/* แถวเลือกแบรนด์ — ป้ายอยู่บรรทัดบน ปุ่มเรียงเต็มความกว้าง (ไม่ให้ป้ายลอยกลางตอนตัดบรรทัด) */}
+      <div className="mb-4">
+        <span className="block text-sm text-slate-600 mb-1.5">แบรนด์:</span>
         {/* ปุ่มเลือกแบรนด์พร้อมโลโก้ (จอกว้าง) — เห็นภาพ กดง่ายกว่า dropdown */}
         <div className="hidden sm:flex flex-wrap items-center gap-2">
           {brands.length === 0 && <span className="text-sm text-slate-400">—</span>}
@@ -230,7 +231,7 @@ export default function PlatformAccountsPage() {
           {brands.length === 0 && <option value="">—</option>}
           {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
-        {msg && <span className="text-xs text-slate-400">{msg}</span>}
+        {msg && <span className="block mt-1.5 text-xs text-slate-400">{msg}</span>}
       </div>
 
       {loading ? <p className="text-slate-400 text-sm py-8 text-center">กำลังโหลด...</p> : (
@@ -248,7 +249,7 @@ export default function PlatformAccountsPage() {
                   <span className="w-7 text-center shrink-0"><PlatformIcon code={p.code} iconKey={p.icon_key} size={22} /></span>
                   <span className="text-sm font-medium text-slate-700 w-24 shrink-0">{p.name_th}</span>
                   <ERPInput value={acc.label ?? ""} disabled={!canManage || editPlat !== p.id} placeholder="ชื่อร้าน (เช่น Shopee – แบรนด์ A)" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, label: e.target.value } }))} />
-                  <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage || editPlat !== p.id} placeholder="Shop ID / ลิงก์ร้าน (เช่น @louismontini — ใช้ทำลิงก์สินค้า)" title="ใช้สร้างลิงก์สินค้าบนร้าน เช่น LINE: https://shop.line.me/@Shop ID/product/..." className="max-w-[280px]" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, external_shop_id: e.target.value } }))} />
+                  <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage || editPlat !== p.id} placeholder="Shop ID / ลิงก์ร้าน (เช่น @louismontini — ใช้ทำลิงก์สินค้า)" title="ใช้สร้างลิงก์สินค้าบนร้าน เช่น LINE: https://shop.line.me/@Shop ID/product/..." className="max-w-[360px]" onChange={(e) => setAccounts((a) => ({ ...a, [p.id]: { ...acc, external_shop_id: e.target.value } }))} />
                   {/* เปิดลิงก์ร้าน — โชว์เมื่อกรอกแล้วและไม่ได้กำลังแก้ (ทั้งลิงก์เต็มและ @handle ก็เปิดได้) */}
                   {editPlat !== p.id && shopUrlOf(p.code, acc.external_shop_id) && (
                     <a href={shopUrlOf(p.code, acc.external_shop_id) as string} target="_blank" rel="noopener noreferrer"
