@@ -6,11 +6,21 @@
  * และเลือกเฉพาะฟิลด์ที่ตั้งใจให้ลูกค้าเห็น — ไม่มีต้นทุน/ข้อมูลภายใน/สต๊อกจริง
  * (pattern เดียวกับ /api/offer-sheets/public/[token] ที่เปิดสาธารณะโดยตั้งใจ)
  *
+ * ค่าที่ส่ง = store_listings ที่กรอกทับ ถ้าเว้นว่างจะดึงจาก Parent SKU ตาม shops.field_map
+ * (ดู lib/website-field-map.ts)
+ *
  * ⚠️ ต่างจาก API อื่นในระบบ: route นี้ "ไม่มี guardApi" โดยเจตนา และมี CORS
- * ให้เว็บภายนอกเรียกข้ามโดเมนได้ (ระบบเดิมไม่มี CORS ที่ไหนเลย จึงใส่เฉพาะจุดนี้)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import {
+  normalizeFieldMap,
+  resolveProduct,
+  PARENT_SELECT,
+  CHILD_SELECT,
+  type ParentRow,
+  type ChildSku,
+} from "@/lib/website-field-map";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,21 +43,6 @@ const json = (body: unknown, status = 200) =>
     headers: { ...CORS, "Cache-Control": "public, max-age=60, stale-while-revalidate=300" },
   });
 
-type ParentRow = {
-  id: string;
-  code: string | null;
-  name_th: string | null;
-  name_platform: string | null;
-  description: string | null;
-  platform_description: string | null;
-  sale_price: number | string | null;
-  final_price: number | string | null;
-  cover_image_r2_key: string | null;
-};
-
-const displayName = (p: ParentRow) =>
-  (p.name_platform && p.name_platform.trim()) || (p.name_th && p.name_th.trim()) || p.code || "";
-
 /** สร้าง slug จากรหัสสินค้า (ใช้เป็น URL บนเว็บร้าน) */
 const slugify = (code: string) =>
   code.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || code;
@@ -60,33 +55,51 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data: shop } = await sb
     .from("shops")
-    .select("id, name, slug, status")
+    .select("id, name, slug, status, field_map")
     .eq("slug", shopSlug)
     .maybeSingle();
   if (!shop) return json({ error: "ไม่พบร้าน" }, 404);
-  if ((shop as { status: string }).status !== "active") return json({ shop: shopSlug, products: [] });
+  const s = shop as { id: string; name: string; status: string; field_map: unknown };
+  if (s.status !== "active") return json({ shop: shopSlug, products: [] });
+
+  const fieldMap = normalizeFieldMap(s.field_map);
 
   const { data: listData } = await sb
     .from("store_listings")
     .select(
       "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
     )
-    .eq("shop_id", (shop as { id: string }).id)
+    .eq("shop_id", s.id)
     .eq("is_published", true)
     .order("sort_order")
     .order("created_at");
 
   const rows = (listData ?? []) as Record<string, unknown>[];
-  if (!rows.length) return json({ shop: shopSlug, products: [] });
+  if (!rows.length) return json({ shop: shopSlug, shopName: s.name, count: 0, products: [] });
 
-  const { data: parents } = await sb
-    .from("parent_skus_v2")
-    .select("id, code, name_th, name_platform, description, platform_description, sale_price, final_price, cover_image_r2_key")
-    .in(
-      "id",
-      rows.map((r) => r.parent_sku_id as string)
-    );
+  const parentIds = rows.map((r) => r.parent_sku_id as string).filter(Boolean);
+
+  const [{ data: parents }, { data: children }] = await Promise.all([
+    sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
+    sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
+  ]);
+
   const parentById = new Map(((parents ?? []) as ParentRow[]).map((p) => [p.id, p]));
+
+  const kidsByParent = new Map<string, ChildSku[]>();
+  for (const k of (children ?? []) as (ChildSku & { parent_sku_id: string })[]) {
+    const arr = kidsByParent.get(k.parent_sku_id) ?? [];
+    arr.push(k);
+    kidsByParent.set(k.parent_sku_id, arr);
+  }
+
+  // ชื่อหมวดใน ERP (ใช้จับคู่เป็นหมวดเว็บ)
+  const catIds = [...new Set(((parents ?? []) as ParentRow[]).map((p) => p.category_id).filter(Boolean))] as string[];
+  const catName = new Map<string, string>();
+  if (catIds.length) {
+    const { data: cats } = await sb.from("product_categories").select("id, name").in("id", catIds);
+    for (const c of (cats ?? []) as { id: string; name: string }[]) catName.set(c.id, c.name);
+  }
 
   // รูปเสิร์ฟผ่าน proxy สาธารณะของระบบ (/api/r2-image) — เว็บภายนอกใช้ URL นี้ได้เลย
   const origin = new URL(request.url).origin;
@@ -96,33 +109,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .map((l) => {
       const p = parentById.get(l.parent_sku_id as string);
       if (!p) return null;
-      const code = p.code ?? "";
-      const keys = [
-        ...(Array.isArray(l.web_images) ? (l.web_images as string[]) : []),
-        ...(p.cover_image_r2_key ? [p.cover_image_r2_key] : []),
-      ].filter((k) => typeof k === "string" && k);
 
+      const kids = kidsByParent.get(p.id) ?? [];
+      const cat = p.category_id ? catName.get(p.category_id) ?? null : null;
+      const r = resolveProduct(fieldMap, p, kids, l, cat);
+
+      const code = p.code ?? "";
       return {
-        id: l.parent_sku_id as string,
+        id: p.id,
         code,
         slug: slugify(code),
-        name: (l.web_name as string | null)?.trim() || displayName(p),
-        description:
-          ((l.web_description as string | null) ?? "").trim() ||
-          (p.platform_description ?? p.description ?? "").trim(),
+        name: r.name,
+        description: r.description,
         /** ราคาเป็น "บาท" (ไม่ใช่สตางค์) */
-        price: l.web_price != null ? Number(l.web_price) : Number(p.final_price) || Number(p.sale_price) || 0,
-        unit: ((l.web_unit as string | null) ?? "").trim(),
-        category: ((l.web_category as string | null) ?? "").trim(),
-        badge: ((l.web_badge as string | null) ?? "").trim(),
-        stock: ((l.web_stock_status as string | null) ?? "in").trim(),
-        swatch: ((l.web_swatch as string | null) ?? "").trim(),
-        options: (l.web_options as unknown) ?? null,
+        price: r.price,
+        unit: r.unit,
+        category: r.category,
+        badge: String(l.web_badge ?? "").trim(),
+        stock: String(l.web_stock_status ?? "in").trim() || "in",
+        swatch: String(l.web_swatch ?? "").trim(),
+        options: r.options,
         featured: Boolean(l.featured),
-        images: [...new Set(keys)].map(imageUrl),
+        images: r.images.map(imageUrl),
       };
     })
     .filter(Boolean);
 
-  return json({ shop: shopSlug, shopName: (shop as { name: string }).name, count: products.length, products });
+  return json({ shop: shopSlug, shopName: s.name, count: products.length, products });
 }

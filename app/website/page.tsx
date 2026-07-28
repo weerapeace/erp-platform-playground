@@ -11,12 +11,25 @@ import { useCallback, useEffect, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { WebsiteFieldMapPanel } from "@/components/website-field-map-panel";
 
 type Shop = { id: string; name: string; slug: string; isDefault: boolean };
+
+/** ค่าที่เว็บจะใช้อัตโนมัติถ้าไม่กรอกทับ (มาจากการจับคู่ฟิลด์) */
+type Mapped = {
+  name: string;
+  price: number;
+  description: string;
+  unit: string;
+  category: string;
+  images: string[];
+  options: { label: string; items: { id: string; label: string }[] } | null;
+} | null;
 type OptionItem = { id: string; label: string; swatch?: string | null };
 type WebOptions = { label: string; items: OptionItem[] } | null;
 
 type Listing = {
+  mapped: Mapped;
   id: string;
   parentId: string;
   code: string;
@@ -81,6 +94,7 @@ export default function WebsitePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [tab, setTab] = useState<"listings" | "fieldmap">("listings");
 
   // แผงเพิ่มสินค้า
   const [showAdd, setShowAdd] = useState(false);
@@ -253,8 +267,35 @@ export default function WebsitePage() {
           ))}
         </div>
 
-        {/* แถบสรุป + ปุ่มเพิ่ม */}
+        {/* แท็บ */}
         {shop && (
+          <div className="flex items-center gap-1 mb-4 border-b border-slate-200">
+            {([
+              { k: "listings", l: "สินค้าบนเว็บ" },
+              { k: "fieldmap", l: "⚙️ จับคู่ฟิลด์" },
+            ] as const).map((t) => (
+              <button
+                key={t.k}
+                onClick={() => setTab(t.k)}
+                className={`px-4 py-2 text-sm border-b-2 -mb-px transition ${
+                  tab === t.k
+                    ? "border-blue-600 text-blue-700 font-medium"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                {t.l}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* แท็บจับคู่ฟิลด์ */}
+        {tab === "fieldmap" && shop && (
+          <WebsiteFieldMapPanel shopSlug={shop.slug} shopId={shop.id} />
+        )}
+
+        {/* แถบสรุป + ปุ่มเพิ่ม */}
+        {tab === "listings" && shop && (
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <p className="text-sm text-slate-500">
               ร้าน <span className="font-medium text-slate-800">{shop.name}</span> · สินค้าบนเว็บ {listings.length} รายการ ·
@@ -270,7 +311,7 @@ export default function WebsitePage() {
         )}
 
         {/* แผงเพิ่มสินค้า */}
-        {showAdd && shop && (
+        {tab === "listings" && showAdd && shop && (
           <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/50 p-4">
             <p className="text-xs text-slate-500 mb-2">ค้นหาสินค้าจาก ERP (รหัส หรือ ชื่อ) แล้วกดเพิ่มเข้าเว็บร้านนี้</p>
             <div className="flex gap-2">
@@ -321,7 +362,7 @@ export default function WebsitePage() {
         )}
 
         {/* รายการสินค้าบนเว็บ */}
-        {loading ? (
+        {tab === "listings" && (loading ? (
           <div className="space-y-2">
             {[0, 1, 2].map((i) => (
               <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse" />
@@ -387,33 +428,37 @@ export default function WebsitePage() {
                     <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-4">
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         <div className="sm:col-span-2">
-                          <label className={labelCls}>ชื่อบนเว็บ (เว้นว่าง = ใช้ชื่อ ERP: {l.erpName})</label>
+                          <label className={labelCls}>
+                            ชื่อบนเว็บ (เว้นว่าง = ใช้อัตโนมัติ: {l.mapped?.name || l.erpName})
+                          </label>
                           <input
                             value={l.webName}
                             onChange={(e) => patch(l.parentId, { webName: e.target.value })}
-                            placeholder={l.erpName}
+                            placeholder={l.mapped?.name || l.erpName}
                             className={inputCls}
                           />
                         </div>
                         <div>
-                          <label className={labelCls}>ราคาบนเว็บ (บาท) — ERP: {baht(l.erpPrice)}</label>
+                          <label className={labelCls}>
+                            ราคาบนเว็บ (บาท) — อัตโนมัติ: {baht(l.mapped?.price ?? l.erpPrice)}
+                          </label>
                           <input
                             type="number"
                             value={l.webPrice ?? ""}
                             onChange={(e) =>
                               patch(l.parentId, { webPrice: e.target.value === "" ? null : Number(e.target.value) })
                             }
-                            placeholder={String(l.erpPrice)}
+                            placeholder={String(l.mapped?.price ?? l.erpPrice)}
                             className={inputCls}
                           />
                         </div>
 
                         <div>
-                          <label className={labelCls}>หน่วยขาย</label>
+                          <label className={labelCls}>หน่วยขาย{l.mapped?.unit ? ` (อัตโนมัติ: ${l.mapped.unit})` : ""}</label>
                           <input
                             value={l.webUnit}
                             onChange={(e) => patch(l.parentId, { webUnit: e.target.value })}
-                            placeholder="ตร.ฟุต / หลา / ชิ้น / ขวด"
+                            placeholder={l.mapped?.unit || "ตร.ฟุต / หลา / ชิ้น / ขวด"}
                             className={inputCls}
                           />
                         </div>
@@ -486,12 +531,12 @@ export default function WebsitePage() {
                         </div>
 
                         <div className="sm:col-span-2 lg:col-span-3">
-                          <label className={labelCls}>คำอธิบายบนเว็บ (เว้นว่าง = ใช้ของ ERP)</label>
+                          <label className={labelCls}>คำอธิบายบนเว็บ (เว้นว่าง = ใช้อัตโนมัติ)</label>
                           <textarea
                             rows={2}
                             value={l.webDescription}
                             onChange={(e) => patch(l.parentId, { webDescription: e.target.value })}
-                            placeholder={l.erpDescription || "อธิบายสินค้าสำหรับลูกค้า"}
+                            placeholder={l.mapped?.description || l.erpDescription || "อธิบายสินค้าสำหรับลูกค้า"}
                             className={inputCls}
                           />
                         </div>
@@ -546,7 +591,7 @@ export default function WebsitePage() {
               );
             })}
           </ul>
-        )}
+        ))}
       </div>
     </PlaygroundShell>
   );

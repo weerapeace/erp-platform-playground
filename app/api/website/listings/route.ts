@@ -16,6 +16,14 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import {
+  normalizeFieldMap,
+  resolveProduct,
+  PARENT_SELECT,
+  CHILD_SELECT,
+  type ParentRow as MapParentRow,
+  type ChildSku,
+} from "@/lib/website-field-map";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -56,10 +64,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data: shopsData } = await sb
     .from("shops")
-    .select("id, name, slug, is_default, status")
+    .select("id, name, slug, is_default, status, field_map")
     .order("is_default", { ascending: false })
     .order("name");
-  const shops = (shopsData ?? []) as { id: string; name: string; slug: string; is_default: boolean; status: string }[];
+  const shops = (shopsData ?? []) as {
+    id: string;
+    name: string;
+    slug: string;
+    is_default: boolean;
+    status: string;
+    field_map: unknown;
+  }[];
   if (!shops.length) return NextResponse.json({ shops: [], shop: null, listings: [], results: [] });
 
   const shop = shops.find((s) => s.slug === shopSlug) ?? shops[0];
@@ -75,14 +90,43 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const parentIds = rows.map((r) => r.parent_sku_id as string).filter(Boolean);
   const parentById = new Map<string, ParentRow>();
+  // ข้อมูลสำหรับคำนวณ "ค่าที่จะได้อัตโนมัติ" ตามการจับคู่ฟิลด์
+  const fieldMap = normalizeFieldMap(shop.field_map);
+  const mapParentById = new Map<string, MapParentRow>();
+  const kidsByParent = new Map<string, ChildSku[]>();
+  const catName = new Map<string, string>();
+
   if (parentIds.length) {
-    const { data: parents } = await sb.from("parent_skus_v2").select(PARENT_COLS).in("id", parentIds);
+    const [{ data: parents }, { data: mapParents }, { data: children }] = await Promise.all([
+      sb.from("parent_skus_v2").select(PARENT_COLS).in("id", parentIds),
+      sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
+      sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
+    ]);
     for (const p of (parents ?? []) as ParentRow[]) parentById.set(p.id, p);
+    for (const p of (mapParents ?? []) as MapParentRow[]) mapParentById.set(p.id, p);
+    for (const k of (children ?? []) as (ChildSku & { parent_sku_id: string })[]) {
+      const arr = kidsByParent.get(k.parent_sku_id) ?? [];
+      arr.push(k);
+      kidsByParent.set(k.parent_sku_id, arr);
+    }
+    const catIds = [
+      ...new Set([...mapParentById.values()].map((p) => p.category_id).filter(Boolean)),
+    ] as string[];
+    if (catIds.length) {
+      const { data: cats } = await sb.from("product_categories").select("id, name").in("id", catIds);
+      for (const c of (cats ?? []) as { id: string; name: string }[]) catName.set(c.id, c.name);
+    }
   }
 
   const listings = rows.map((l) => {
     const p = parentById.get(l.parent_sku_id as string);
+    const mp = mapParentById.get(l.parent_sku_id as string);
+    // ค่าที่เว็บจะใช้จริงถ้าไม่กรอกทับ (เอาไปโชว์เป็น placeholder ในหน้าจัดการ)
+    const mapped = mp
+      ? resolveProduct(fieldMap, mp, kidsByParent.get(mp.id) ?? [], null, mp.category_id ? catName.get(mp.category_id) ?? null : null)
+      : null;
     return {
+      mapped,
       id: l.id as string,
       parentId: l.parent_sku_id as string,
       code: p?.code ?? "",
