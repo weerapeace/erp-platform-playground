@@ -57,6 +57,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const actor = body.actor ?? user.email ?? "system";
   const orderDate = typeof body.order_date === "string" && body.order_date ? body.order_date : new Date().toISOString().slice(0, 10);
 
+  // ---- เติม "ร้าน + ราคา" จากร้านหลัก ★ ของ SKU ให้อัตโนมัติ (ของกลาง: ตารางร้านที่จำหน่าย) ----
+  // ใบที่มาจาก BOM/ใบสั่งผลิตมักไม่ได้ส่งร้าน/ราคามาด้วย → ดึงจาก SKU ให้เลย จะได้ไม่ต้องมาตั้งร้านทีหลัง
+  const needFill = items.filter((it) => it.sku_id && (!it.seller_name || !(num(it.price_est) > 0)));
+  const fillMap = new Map<string, { seller: string | null; price: number | null; currency: string }>();
+  if (needFill.length) {
+    const skuIds = [...new Set(needFill.map((it) => String(it.sku_id)))];
+    for (let i = 0; i < skuIds.length; i += 300) {
+      const { data: sis } = await admin.from("supplier_items")
+        .select("item_sku_id, price, currency, is_default, partner:supplier_partner_id(display_name, name_th)")
+        .in("item_sku_id", skuIds.slice(i, i + 300)).eq("is_active", true)
+        .order("is_default", { ascending: false })            // ร้านหลัก ★ มาก่อน
+        .order("price", { ascending: true, nullsFirst: false });
+      for (const r of (sis ?? []) as Record<string, unknown>[]) {
+        const k = String(r.item_sku_id);
+        if (fillMap.has(k)) continue;                          // เอาแถวแรก = ร้านหลัก (ไม่มีก็ราคาถูกสุด)
+        const p = r.partner as { display_name?: string; name_th?: string } | null;
+        fillMap.set(k, {
+          seller: p?.display_name || p?.name_th || null,
+          price: r.price == null ? null : Number(r.price),
+          currency: String(r.currency ?? "THB"),
+        });
+      }
+    }
+  }
+
   // ---- ออกเลขกลางทีละใบ (atomic) แล้ว insert รวดเดียว ----
   const rows: Record<string, unknown>[] = [];
   for (const it of items) {
@@ -69,7 +94,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       pr_no: prNo, requester: actor, status: "waiting", order_date: orderDate,
       item_sku_id: it.sku_id ?? null, item_name: it.item_name ?? null,
       qty: num(it.qty), uom: it.uom ?? null,
-      seller_name: it.seller_name ?? null, price_est: num(it.price_est), currency: it.currency ?? "THB",
+      // ร้าน/ราคา: ใช้ที่ส่งมาก่อน · ไม่มี → ดึงจากร้านหลัก ★ ของ SKU
+      seller_name: it.seller_name || (it.sku_id ? fillMap.get(String(it.sku_id))?.seller ?? null : null),
+      price_est: num(it.price_est) > 0 ? num(it.price_est) : (it.sku_id ? (fillMap.get(String(it.sku_id))?.price ?? 0) : 0),
+      currency: it.currency || (it.sku_id && !(num(it.price_est) > 0) ? fillMap.get(String(it.sku_id))?.currency ?? "THB" : "THB"),
       image_key: it.image_key ?? null, note: it.note ?? null,
       reason: it.reason ?? null,
       used_for_sku_id: it.used_for_sku_id ?? null, used_for_label: it.used_for_label ?? null,
