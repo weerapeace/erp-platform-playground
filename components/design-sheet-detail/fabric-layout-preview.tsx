@@ -36,10 +36,14 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
   }, [result.rows]);
 
   // แบ่งเป็น "ผืน" — ผ้าม้วน = ผืนเดียว (ยาวเท่าที่ใช้)
+  // ผ้าผืนที่ต้องใช้เยอะ: วาดแค่ MAX_SHEETS ผืนแรกพอ (ผืนที่เหลือหน้าตาเหมือนกัน + ภาพยาวเกินจะอืด)
+  const MAX_SHEETS = 10;
+  const totalSheets = mode === "sheet" ? (result.sheetsUsed ?? 0) : 1;
+  const shownSheets = Math.min(totalSheets, MAX_SHEETS);
   const sheets = useMemo(() => {
     if (mode === "sheet" && (result.sheetsUsed ?? 0) > 0) {
       const out: { label: string; height: number; rows: typeof result.rows }[] = [];
-      for (let s = 0; s < (result.sheetsUsed ?? 0); s++) {
+      for (let s = 0; s < Math.min(result.sheetsUsed ?? 0, MAX_SHEETS); s++) {
         out.push({
           label: `ผืนที่ ${s + 1}`,
           height: Number(sheetLengthCm) || 0,
@@ -106,7 +110,13 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
         })}
       </div>
 
-      {sheets.length > 1 && <p className="text-[11px] text-slate-400">* เลื่อนดูผืนถัดไปทางขวา</p>}
+      {totalSheets > shownSheets ? (
+        <p className="text-[11px] text-amber-600">
+          * แสดง {shownSheets} จาก {totalSheets} ผืน (ผืนที่เหลือวางแบบเดียวกัน) — ยอดที่ต้องสั่งด้านบนคิดครบทุกผืนแล้ว
+        </p>
+      ) : sheets.length > 1 ? (
+        <p className="text-[11px] text-slate-400">* เลื่อนดูผืนถัดไปทางขวา</p>
+      ) : null}
     </div>
   );
 }
