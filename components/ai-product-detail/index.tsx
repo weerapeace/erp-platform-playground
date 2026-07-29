@@ -34,7 +34,10 @@ const SIZE_FIELDS: { key: string; label: string; unit: string }[] = [
 ];
 
 type Sizes = Record<string, number | string | null>;
-type Result = Record<string, string> & { image_count?: number; sizes?: Sizes | null; size_source?: string };
+type Result = Record<string, string> & {
+  image_count?: number; sizes?: Sizes | null; size_source?: string;
+  questions?: string[]; suggestions?: string[]; rules_used?: string[];
+};
 
 const isBlank = (v: unknown) => {
   const s = String(v ?? "").trim();
@@ -44,12 +47,178 @@ const isBlank = (v: unknown) => {
 /** คำสั่ง AI 1 ระดับ (ค่ากลาง หรือ เฉพาะแบรนด์นี้) */
 type PromptRow = { brand_id: string | null; platform: string | null; prompt: string };
 
+/** กฎคำสั่งตามประเภทสินค้า — จับจากแท็กที่ติดไว้ หรือคำที่อยู่ในชื่อสินค้า */
+type Rule = {
+  id?: string; name: string; tag_ids: string[]; name_keywords: string[]; brand_id: string | null;
+  instruction: string; required_topics: string[]; hint: string | null; is_active?: boolean;
+};
+type TagOpt = { id: string; name: string };
+
+const EMPTY_RULE: Rule = { name: "", tag_ids: [], name_keywords: [], brand_id: null, instruction: "", required_topics: [], hint: "" };
+
+/**
+ * แผงจัดการ "กฎตามประเภทสินค้า"
+ * เช่น กฎ "กระเป๋าสตางค์" → บังคับให้ Description บอกจำนวนช่องใส่บัตร/ธนบัตร/อเนกประสงค์เสมอ
+ * จับสินค้าได้ 2 ทาง (แท็ก หรือ คำในชื่อ) เพราะของจริงยังติดแท็กประเภทสินค้ากันน้อย
+ */
+function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; suggestKeyword?: string }) {
+  const [rules, setRules] = useState<Rule[] | null>(null);
+  const [tags, setTags] = useState<TagOpt[]>([]);
+  const [edit, setEdit] = useState<Rule | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const j = await apiFetch("/api/ai/product-rules").then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      setRules((j.data ?? []) as Rule[]);
+      setTags((j.tags ?? []) as TagOpt[]);
+    } catch (e) { setRules([]); setMsg(e instanceof Error ? e.message : "โหลดกฎไม่สำเร็จ"); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const save = async () => {
+    if (!edit) return;
+    setBusy(true); setMsg("");
+    try {
+      const j = await apiFetch("/api/ai/product-rules", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit),
+      }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      setMsg("บันทึกกฎแล้ว — กด “ให้คิดใหม่” เพื่อใช้กฎใหม่");
+      setEdit(null); void load();
+    } catch (e) { setMsg(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
+  const del = async (id?: string) => {
+    if (!id || !window.confirm("ลบกฎนี้?")) return;
+    setBusy(true);
+    try {
+      const j = await apiFetch(`/api/ai/product-rules?id=${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      setEdit(null); void load();
+    } catch (e) { setMsg(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
+  if (rules === null) return <p className="text-[12.5px] text-slate-400 py-2"><Spinner /> กำลังโหลดกฎ…</p>;
+
+  if (edit) {
+    const lines = (v: string[]) => v.join("\n");
+    return (
+      <div className="space-y-2">
+        <input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+          placeholder="ชื่อกฎ เช่น กระเป๋าสตางค์"
+          className="w-full h-9 px-3 text-[13px] font-medium border border-slate-200 rounded-lg bg-white" />
+
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 space-y-2">
+          <p className="text-[12px] font-semibold text-slate-600">ใช้กฎนี้กับสินค้าที่… (เข้าข้อใดข้อหนึ่งก็พอ)</p>
+          <div>
+            <p className="text-[11.5px] text-slate-500 mb-1">① ติดแท็กเหล่านี้</p>
+            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+              {tags.map((t) => {
+                const on = edit.tag_ids.includes(t.id);
+                return (
+                  <button key={t.id} type="button"
+                    onClick={() => setEdit({ ...edit, tag_ids: on ? edit.tag_ids.filter((x) => x !== t.id) : [...edit.tag_ids, t.id] })}
+                    className={`h-7 px-2.5 text-[12px] rounded-full border ${on ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                    {t.name}
+                  </button>
+                );
+              })}
+              {tags.length === 0 && <span className="text-[12px] text-slate-400">ยังไม่มีแท็กในระบบ</span>}
+            </div>
+          </div>
+          <div>
+            <p className="text-[11.5px] text-slate-500 mb-1">② หรือ ชื่อสินค้ามีคำว่า (คั่นด้วยลูกน้ำ)</p>
+            <input value={edit.name_keywords.join(", ")}
+              onChange={(e) => setEdit({ ...edit, name_keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+              placeholder={suggestKeyword ? `เช่น ${suggestKeyword}` : "เช่น กระเป๋าสตางค์, wallet"}
+              className="w-full h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg" />
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[11.5px] text-slate-500 mb-1">หัวข้อที่ Description ต้องมีเสมอ (บรรทัดละหัวข้อ)</p>
+          <textarea value={lines(edit.required_topics)} rows={3}
+            onChange={(e) => setEdit({ ...edit, required_topics: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })}
+            placeholder={"จำนวนช่องใส่บัตร\nจำนวนช่องใส่ธนบัตร\nช่องอเนกประสงค์"}
+            className="w-full px-2.5 py-2 text-[12.5px] border border-slate-200 rounded-lg bg-white" />
+          <p className="mt-1 text-[11px] text-slate-400">ถ้าดูจากรูปไม่ออก AI จะถามกลับให้เองแทนที่จะเดา</p>
+        </div>
+
+        <div>
+          <p className="text-[11.5px] text-slate-500 mb-1">คำสั่งเพิ่มให้ AI (ไม่บังคับ)</p>
+          <textarea value={edit.instruction} rows={3} onChange={(e) => setEdit({ ...edit, instruction: e.target.value })}
+            placeholder="เช่น เน้นความจุและการพกพา · บอกด้วยว่าใส่ธนบัตรไทยได้พอดีไหม"
+            className="w-full px-2.5 py-2 text-[12.5px] border border-slate-200 rounded-lg bg-white" />
+        </div>
+
+        <div>
+          <p className="text-[11.5px] text-slate-500 mb-1">ใบ้ถาวรของสินค้าประเภทนี้ (ไม่บังคับ — ไม่ต้องพิมพ์ซ้ำทุกครั้ง)</p>
+          <input value={edit.hint ?? ""} onChange={(e) => setEdit({ ...edit, hint: e.target.value })}
+            placeholder="เช่น หนัง PU เกรดพรีเมียม ซับในผ้าโพลีเอสเตอร์"
+            className="w-full h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg" />
+        </div>
+
+        <label className="flex items-center gap-2 text-[12.5px] text-slate-600">
+          <input type="checkbox" checked={edit.brand_id !== null} className="h-4 w-4 accent-indigo-600" disabled={!brandId}
+            onChange={(e) => setEdit({ ...edit, brand_id: e.target.checked ? brandId ?? null : null })} />
+          ใช้เฉพาะแบรนด์ของสินค้าตัวนี้ {brandId ? "" : "(สินค้ายังไม่ระบุแบรนด์)"}
+        </label>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button type="button" onClick={() => void save()} disabled={busy}
+            className="h-8 px-3 text-[12.5px] font-medium bg-slate-700 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
+            {busy ? "กำลังบันทึก…" : "บันทึกกฎ"}
+          </button>
+          <button type="button" onClick={() => { setEdit(null); setMsg(""); }} className="h-8 px-3 text-[12.5px] border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+          {edit.id && <button type="button" onClick={() => void del(edit.id)} disabled={busy} className="h-8 px-3 text-[12.5px] text-rose-600 hover:bg-rose-50 rounded-lg">ลบกฎนี้</button>}
+          {msg && <span className="text-[12px] text-slate-500">{msg}</span>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {rules.length === 0 && <p className="text-[12.5px] text-slate-400">ยังไม่มีกฎ — กดปุ่มด้านล่างเพื่อสร้างกฎแรก</p>}
+      {rules.map((r) => (
+        <button key={r.id} type="button" onClick={() => setEdit({ ...r, hint: r.hint ?? "" })}
+          className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50">
+          <div className="flex items-center gap-2 flex-wrap">
+            <b className="text-[12.5px] text-slate-700">{r.name}</b>
+            {(r.required_topics ?? []).length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-700">บังคับ {r.required_topics.length} หัวข้อ</span>
+            )}
+            {r.hint && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">มีใบ้ถาวร</span>}
+          </div>
+          <p className="text-[11.5px] text-slate-400 mt-0.5">
+            {(r.tag_ids ?? []).length > 0 && `แท็ก ${r.tag_ids.length} รายการ`}
+            {(r.tag_ids ?? []).length > 0 && (r.name_keywords ?? []).length > 0 && " · "}
+            {(r.name_keywords ?? []).length > 0 && `ชื่อมีคำว่า: ${r.name_keywords.join(", ")}`}
+          </p>
+        </button>
+      ))}
+      <button type="button" onClick={() => setEdit({ ...EMPTY_RULE, name_keywords: suggestKeyword ? [suggestKeyword] : [] })}
+        className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
+        + สร้างกฎใหม่
+      </button>
+      {msg && <span className="ml-2 text-[12px] text-slate-500">{msg}</span>}
+    </div>
+  );
+}
+
 export function AiProductDetailModal({
-  parentId, brandId, current, onApply, onClose,
+  parentId, brandId, suggestKeyword, current, onApply, onClose,
 }: {
   parentId: string;
   /** แบรนด์ของสินค้าตัวนี้ — ไว้ตั้งคำสั่ง AI เฉพาะแบรนด์ */
   brandId?: string | null;
+  /** คำที่เดาจากชื่อสินค้าตัวนี้ — เติมให้ตอนสร้างกฎใหม่ (เช่น "กระเป๋าสตางค์") */
+  suggestKeyword?: string;
   /** ค่าปัจจุบันในฟอร์ม (ไว้เทียบว่าจะทับของเดิมไหม) */
   current: Record<string, unknown>;
   onApply: (values: Record<string, string>) => void;
@@ -63,6 +232,7 @@ export function AiProductDetailModal({
 
   // ── แผงตั้งคำสั่ง AI (เปิด/ปิดในป๊อปเดียวกัน ไม่ต้องออกไปหน้าตั้งค่า) ──
   const [cfgOpen, setCfgOpen] = useState(false);
+  const [cfgTab, setCfgTab] = useState<"main" | "rules">("main");
   const [cfgScope, setCfgScope] = useState<"global" | "brand">("global");
   const [cfgRows, setCfgRows] = useState<PromptRow[] | null>(null);
   const [cfgDraft, setCfgDraft] = useState("");
@@ -99,12 +269,19 @@ export function AiProductDetailModal({
     finally { setCfgBusy(false); }
   };
 
-  const run = useCallback(async () => {
-    setLoading(true); setErr(null); setRes(null);
+  // คำตอบที่ผู้ใช้พิมพ์ตอบคำถามของ AI (ส่งกลับไปตอนกด "ตอบแล้วให้คิดใหม่")
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+
+  const run = useCallback(async (opts?: { withAnswers?: boolean }) => {
+    setLoading(true); setErr(null);
+    const qa = opts?.withAnswers
+      ? Object.entries(answers).filter(([, a]) => a.trim()).map(([q, a]) => ({ q, a: a.trim() }))
+      : [];
+    setRes(null);
     try {
       const r = await apiFetch("/api/ai/product-detail", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parent_id: parentId, extra: extra.trim() || undefined }),
+        body: JSON.stringify({ parent_id: parentId, extra: extra.trim() || undefined, answers: qa.length ? qa : undefined }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j?.error) throw new Error(j?.error || `เรียก AI ไม่สำเร็จ (${r.status})`);
@@ -117,7 +294,7 @@ export function AiProductDetailModal({
       setPicked(init);
     } catch (e) { setErr(e instanceof Error ? e.message : "เรียก AI ไม่สำเร็จ"); }
     finally { setLoading(false); }
-  }, [parentId, extra, current]);
+  }, [parentId, extra, current, answers]);
 
   const rows = res ? FIELDS.filter((f) => String(res[f.key] ?? "").trim()) : [];
   const sizeRows = res?.sizes
@@ -141,7 +318,9 @@ export function AiProductDetailModal({
       footer={
         <div className="flex items-center justify-between w-full gap-2 flex-wrap">
           <span className="text-[11.5px] text-slate-400">
-            {res ? `AI ดูรูป ${res.image_count ?? 0} รูป · เลือกไว้ ${pickedCount} ช่อง` : "ค่าที่ได้จะลงในฟอร์ม ต้องกดบันทึกเองอีกที"}
+            {res
+              ? `AI ดูรูป ${res.image_count ?? 0} รูป · เลือกไว้ ${pickedCount} ช่อง${(res.rules_used?.length ?? 0) > 0 ? ` · ใช้กฎ: ${res.rules_used?.join(", ")}` : ""}`
+              : "ค่าที่ได้จะลงในฟอร์ม ต้องกดบันทึกเองอีกที"}
           </span>
           <div className="flex gap-2">
             <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
@@ -170,6 +349,20 @@ export function AiProductDetailModal({
 
         {cfgOpen && (
           <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+            {/* 2 แท็บ: คำสั่งหลัก (ทุกสินค้า/ต่อแบรนด์) · กฎตามประเภทสินค้า (แท็ก/คำในชื่อ) */}
+            <div className="flex gap-1 border-b border-slate-200 -mx-3 px-3 pb-1.5">
+              {([["main", "คำสั่งหลัก"], ["rules", "กฎตามประเภทสินค้า"]] as const).map(([k, label]) => (
+                <button key={k} type="button" onClick={() => setCfgTab(k)}
+                  className={`h-7 px-3 text-[12.5px] font-medium rounded-lg ${cfgTab === k ? "bg-white border border-slate-200 text-slate-700" : "text-slate-500 hover:bg-white/70"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {cfgTab === "rules" ? (
+              <RulesEditor brandId={brandId} suggestKeyword={suggestKeyword} />
+            ) : (
+            <>
             <div className="flex items-center gap-2 flex-wrap">
               <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden bg-white">
                 <button type="button" onClick={() => setCfgScope("global")}
@@ -205,6 +398,8 @@ export function AiProductDetailModal({
                   แก้จากหน้ารวมได้ที่ งาน → ตั้งค่า → Prompt แคปชั่น AI
                 </p>
               </>
+            )}
+            </>
             )}
           </div>
         )}
@@ -300,6 +495,43 @@ export function AiProductDetailModal({
             )}
             {res && !res.sizes && (
               <p className="text-[11.5px] text-slate-400">📏 ไม่พบตัวเลขขนาดเขียนอยู่ในรูป — ช่องขนาดจึงไม่ถูกแตะ (AI ไม่กะขนาดจากสายตา)</p>
+            )}
+
+            {/* ❓ AI ถามกลับ — ตอบแล้วให้คิดใหม่ ข้อความจะแม่นขึ้น */}
+            {(res?.questions?.length ?? 0) > 0 && (
+              <div className="rounded-lg border border-violet-200 overflow-hidden">
+                <div className="px-3 py-2 bg-violet-50 border-b border-violet-200">
+                  <p className="text-[12.5px] font-semibold text-violet-800">❓ AI มีเรื่องที่ไม่แน่ใจ — ตอบแล้วจะเขียนได้แม่นขึ้น</p>
+                  <p className="text-[11.5px] text-violet-700 mt-0.5">ตอบเท่าที่รู้ ข้อไหนไม่รู้ปล่อยว่างได้ · ข้อความด้านบนใช้ได้เลยถ้าไม่อยากตอบ</p>
+                </div>
+                <div className="p-3 space-y-2">
+                  {(res?.questions ?? []).map((q) => (
+                    <div key={q}>
+                      <label className="block text-[12.5px] text-slate-600 mb-1">{q}</label>
+                      <input value={answers[q] ?? ""} onChange={(e) => setAnswers((p) => ({ ...p, [q]: e.target.value }))}
+                        placeholder="พิมพ์คำตอบ…"
+                        className="w-full h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300" />
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => void run({ withAnswers: true })}
+                    disabled={loading || Object.values(answers).every((v) => !v.trim())}
+                    className="h-8 px-3 text-[12.5px] font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40">
+                    ✓ ตอบแล้ว ให้คิดใหม่
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 💡 ควรเติมข้อมูลในระบบ */}
+            {(res?.suggestions?.length ?? 0) > 0 && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2.5">
+                <p className="text-[12.5px] font-semibold text-slate-600 mb-1">💡 ควรเติมข้อมูลพวกนี้ในระบบ จะได้ไม่ต้องตอบซ้ำทุกครั้ง</p>
+                <ul className="space-y-0.5">
+                  {(res?.suggestions ?? []).map((s) => (
+                    <li key={s} className="text-[12.5px] text-slate-500">• {s}</li>
+                  ))}
+                </ul>
+              </div>
             )}
 
             <p className="text-[11.5px] text-slate-400">

@@ -30,7 +30,12 @@ const FALLBACK = [
   "โทนสุภาพ อ่านง่าย ชวนซื้อแต่ไม่โฆษณาเกินจริง",
 ].join(" · ");
 
-type Body = { parent_id?: string; extra?: string };
+type Body = {
+  parent_id?: string;
+  extra?: string;
+  /** คำตอบของผู้ใช้ต่อคำถามที่ AI ถามกลับรอบก่อน (ถามครั้งเดียว ตอบแล้วห้ามถามซ้ำ) */
+  answers?: { q?: string; a?: string }[];
+};
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "ai.caption")))
@@ -53,10 +58,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!p) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
 
   const brandId = (p.brand_id as string | null) ?? null;
-  const [{ data: brand }, { data: cat }] = await Promise.all([
+  const [{ data: brand }, { data: cat }, { data: tagLinks }, { data: allRules }] = await Promise.all([
     brandId ? admin.from("brands").select("name").eq("id", brandId).maybeSingle() : Promise.resolve({ data: null }),
     p.platform_category_id ? admin.from("platform_categories").select("name").eq("id", p.platform_category_id).maybeSingle() : Promise.resolve({ data: null }),
+    admin.from("parent_skus_v2_product_family_m2m").select("tgt_id, product_families!inner(id, name)").eq("src_id", parentId),
+    admin.from("erp_ai_product_rules").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
   ]);
+
+  // ── กฎตามประเภทสินค้า — เข้าเงื่อนไขเมื่อ "ติดแท็กไว้" หรือ "ชื่อสินค้ามีคำที่กำหนด" ──
+  //    (จับ 2 ทางเพราะของจริงแท็กประเภทสินค้ายังติดกันน้อยมาก) · กฎที่เข้าเงื่อนไขใช้ได้พร้อมกันหลายกฎ
+  const tagIds = ((tagLinks ?? []) as { tgt_id: string }[]).map((t) => t.tgt_id);
+  const tagNames = ((tagLinks ?? []) as { product_families?: { name?: string } }[])
+    .map((t) => t.product_families?.name).filter((n): n is string => !!n);
+  const nameLower = String(p.name_th ?? "").toLowerCase();
+  type Rule = {
+    id: string; name: string; tag_ids: string[]; name_keywords: string[]; brand_id: string | null;
+    instruction: string; required_topics: string[]; hint: string | null;
+  };
+  const rules = ((allRules ?? []) as Rule[]).filter((r) => {
+    if (r.brand_id && r.brand_id !== brandId) return false;
+    const byTag = (r.tag_ids ?? []).some((t) => tagIds.includes(t));
+    const byName = (r.name_keywords ?? []).some((k) => k && nameLower.includes(k.toLowerCase()));
+    return byTag || byName;
+  });
+  const ruleInstruction = rules.map((r) => r.instruction).filter(Boolean).join("\n");
+  const ruleTopics = [...new Set(rules.flatMap((r) => r.required_topics ?? []).filter(Boolean))];
+  const ruleHints = rules.map((r) => r.hint).filter(Boolean).join(" · ");
 
   // ── รูปให้ AI ดู — ไล่ 4 ชั้นจนครบเพดาน (ของจริงแกลเลอรี Parent มักมีแค่ 1 รูป
   //    ถ้าดึงชั้นเดียว AI จะไม่มีวันเห็นรูปสเปคที่เขียนขนาดไว้) ──
@@ -100,6 +127,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const custom = pickJobPrompt(await loadPromptRows(), brandId, PRODUCT_DETAIL_KEY);
   const system = [
     custom || FALLBACK,
+    ...(ruleInstruction ? ["", "คำสั่งเพิ่มสำหรับสินค้าประเภทนี้:", ruleInstruction] : []),
+    ...(ruleTopics.length ? ["", "หัวข้อที่ต้องมีใน Description เสมอ (ถ้าดูจากรูปไม่ออก ให้ถามใน questions):",
+      ...ruleTopics.map((t) => `- ${t}`)] : []),
     "",
     "ตอบเป็น JSON เท่านั้น ตามรูปแบบนี้ (ทุกช่องเป็นข้อความ):",
     `{"name_th":"ชื่อสินค้าภาษาไทย สั้น กระชับ ไม่เกิน 80 ตัวอักษร ไม่ต้องใส่รหัสสินค้า",`,
@@ -108,7 +138,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     `"name_en":"ชื่อสินค้าภาษาอังกฤษ (เขียนใหม่ให้เป็นธรรมชาติ ไม่ใช่แปลตรงตัว)",`,
     `"introduction_en":"โปรยเปิดภาษาอังกฤษ ความหมายตรงกับภาษาไทย",`,
     `"english_description":"รายละเอียดภาษาอังกฤษ ขึ้นต้นแต่ละบรรทัดด้วย '- ' ความหมายตรงกับภาษาไทย",`,
-    `"sizes":{"size_length_cm":ตัวเลขหรือ null,"size_height_cm":ตัวเลขหรือ null,"size_thickness_cm":ตัวเลขหรือ null,"weight_g":ตัวเลขหรือ null,"warranty":"ข้อความหรือ null","source":"บอกสั้น ๆ ว่าอ่านตัวเลขมาจากไหน เช่น 'รูปที่ 3 เขียนว่า 34*22*12 cm'"}}`,
+    `"sizes":{"size_length_cm":ตัวเลขหรือ null,"size_height_cm":ตัวเลขหรือ null,"size_thickness_cm":ตัวเลขหรือ null,"weight_g":ตัวเลขหรือ null,"warranty":"ข้อความหรือ null","source":"บอกสั้น ๆ ว่าอ่านตัวเลขมาจากไหน เช่น 'รูปที่ 3 เขียนว่า 34*22*12 cm'"},`,
+    `"questions":["คำถามที่อยากถามผู้ใช้ ถ้ามีอะไรที่ไม่แน่ใจหรือดูจากรูปไม่ออก (สูงสุด 5 ข้อ ถามสั้น ๆ ตรงประเด็น เช่น 'ช่องใส่บัตรมีกี่ช่อง?')"],`,
+    `"suggestions":["สิ่งที่ควรเติมข้อมูลในระบบเพื่อให้รายละเอียดสมบูรณ์ขึ้น (สูงสุด 5 ข้อ)"]}`,
+    "",
+    "กติกาเรื่องคำถาม:",
+    "- ต้องเขียนข้อความให้ครบทุกช่องก่อนเสมอ ห้ามรอคำตอบ — ส่วนที่ไม่แน่ใจให้เขียนแบบกลาง ๆ ไม่ระบุตัวเลข/ข้อเท็จจริงที่ยังไม่รู้",
+    "- ถ้ามีหัวข้อที่ 'ต้องมีเสมอ' แต่มองจากรูปไม่ออก ให้ถามใน questions ทุกครั้ง (เช่น จำนวนช่องใส่บัตร)",
+    "- ไม่มีอะไรต้องถาม ให้ questions เป็น []",
     "",
     "กติกาเรื่องขนาด (สำคัญมาก):",
     "- ใส่ตัวเลขใน sizes ได้เฉพาะเมื่อ 'มีตัวเลขเขียนอยู่ในรูป' เช่น รูปสเปค อินโฟกราฟิก ป้ายวัดขนาด ตารางไซซ์ หรือมีให้ในข้อมูลด้านล่าง",
@@ -128,15 +165,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     p.warranty && `ประกัน ${p.warranty}`,
   ].filter(Boolean).join(" · ");
 
+  // คำตอบที่ผู้ใช้ตอบคำถามของ AI รอบก่อน — เชื่อถือได้เท่าข้อมูลในระบบ
+  const answerTxt = (body.answers ?? [])
+    .filter((a) => a && a.q && a.a).slice(0, 8)
+    .map((a) => `- ${String(a.q).slice(0, 200)} → ${String(a.a).slice(0, 300)}`).join("\n");
+
   const facts = [
     `รหัสสินค้า: ${p.code ?? "-"}`,
     brand?.name ? `แบรนด์: ${brand.name}` : "",
     cat?.name ? `หมวดสินค้า: ${cat.name}` : "",
+    tagNames.length ? `แท็ก: ${tagNames.join(", ")}` : "",
     p.name_th ? `ชื่อเดิม (ไทย): ${p.name_th}` : "",
     p.introduction ? `Introduction เดิม: ${String(p.introduction).slice(0, 600)}` : "",
     p.description ? `Description เดิม: ${String(p.description).slice(0, 900)}` : "",
     sizeTxt ? `ขนาดที่วัดไว้แล้วในระบบ: ${sizeTxt}` : "ระบบยังไม่มีข้อมูลขนาด — ถ้ารูปไหนมีตัวเลขขนาดเขียนไว้ ให้อ่านมาใส่ใน sizes",
+    ruleHints ? `ข้อมูลประจำสินค้าประเภทนี้ (ตั้งไว้ล่วงหน้า เชื่อถือได้): ${ruleHints}` : "",
     extra ? `ข้อมูลเพิ่มเติมจากผู้ใช้ (เชื่อถือได้ ให้ใช้): ${extra}` : "",
+    answerTxt ? `ผู้ใช้ตอบคำถามที่ถามไปรอบก่อนแล้ว (เชื่อถือได้ ให้ใช้และห้ามถามซ้ำ):\n${answerTxt}` : "",
     images.length ? `มีรูปสินค้าให้ดู ${images.length} รูป` : "ไม่มีรูปให้ดู — เขียนจากข้อมูลข้อความเท่านั้น และเขียนแบบไม่ระบุรายละเอียดที่มองไม่เห็น",
   ].filter(Boolean).join("\n");
 
@@ -164,6 +209,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   };
   const hasSize = Object.values(sizes).some((v) => v !== null);
 
+  const list = (k: string) => (Array.isArray(out[k]) ? (out[k] as unknown[]) : [])
+    .map((v) => String(v).trim()).filter(Boolean).slice(0, 5);
+
   const data = {
     name_th: str("name_th", 200),
     introduction: str("introduction", 1500),
@@ -174,6 +222,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     sizes: hasSize ? sizes : null,
     size_source: hasSize ? String(rawSizes.source ?? "").trim().slice(0, 200) : "",
     image_count: images.length,
+    // ถามกลับ + แนะนำให้เติมข้อมูล (เขียนเสร็จก่อนแล้วค่อยถาม — ไม่บล็อกผู้ใช้)
+    questions: list("questions"),
+    suggestions: list("suggestions"),
+    rules_used: rules.map((r) => r.name),
   };
   if (!data.name_th && !data.description && !data.introduction)
     return NextResponse.json({ error: "AI ไม่ได้ส่งข้อความกลับมา — ลองกดอีกครั้ง" }, { status: 502 });

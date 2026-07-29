@@ -2754,6 +2754,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       {aiDetailOpen && editingId && (
         <AiProductDetailModal parentId={editingId} current={form} onClose={() => setAiDetailOpen(false)}
           brandId={(form.brand_id as string | null) ?? null}
+          suggestKeyword={String(form.name_th ?? "").trim().split(/\s+/)[0] ?? ""}
           onApply={(vals) => {
             const keys = Object.keys(vals);
             if (keys.length === 0) return;
