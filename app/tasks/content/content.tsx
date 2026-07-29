@@ -1020,7 +1020,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
               <div className="flex items-center gap-3 flex-wrap">
                 {canAiCaption && caps.length > 0 && (
-                  <button onClick={() => setAiModal({ platforms: caps.filter((c) => pset[c.platform]?.use_caption !== false).map((c) => c.platform) })} disabled={aiAllBusy}
+                  <button onClick={() => setAiModal({ platforms: caps.filter((c) => pset[c.platform]?.use_caption !== false && (postStatus[c.platform] ?? "todo") !== "skip").map((c) => c.platform) })} disabled={aiAllBusy}
                     title={t("ให้ AI เขียนแคปชั่นทุกแพลตฟอร์มรอบเดียว ตาม prompt ที่ตั้งไว้ของแต่ละแพลตฟอร์ม (อ่านรูปครั้งเดียว = ประหยัด)", "Write all platform captions in one go, using each platform's prompt")}
                     className="text-xs font-medium text-white bg-fuchsia-600 hover:bg-fuchsia-700 disabled:opacity-50 rounded-md px-2 py-1">
                     {aiAllBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนทั้งหมด", "✨ AI write all")}
@@ -1270,7 +1270,7 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
   const POST_STATES: { key: string; label: string; onCls: string }[] = [
     { key: "todo", label: t("ยังไม่โพสต์", "Not posted"), onCls: "bg-slate-200 text-slate-700 border-slate-300" },
     { key: "posted", label: `✅ ${t("โพสต์แล้ว", "Posted")}`, onCls: "bg-emerald-50 text-emerald-700 border-emerald-300" },
-    { key: "skip", label: `⊘ ${t("ข้าม", "Skip")}`, onCls: "bg-slate-50 text-slate-400 border-slate-200" },
+    { key: "skip", label: `⊘ ${t("ข้าม", "Skip")}`, onCls: "bg-rose-50 text-rose-700 border-rose-300" },
   ];
   // "โพสต์เลย" (มือ) — คัดลอกแคปชั่น + เปิดหน้าโพสต์ของแพลตฟอร์มให้ในคลิกเดียว แล้วให้ผู้ใช้มากด ✅
 
@@ -1280,7 +1280,7 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
   const snippet = (cap.caption ?? "").split("\n").map((x) => x.trim()).find(Boolean) ?? "";
   const stBadge = postStatus === "posted" ? { cls: "bg-emerald-50 text-emerald-700 border-emerald-200", label: `✅ ${t("โพสต์แล้ว", "Posted")}` }
     : postStatus === "scheduled" ? { cls: "bg-blue-50 text-blue-700 border-blue-200", label: `⏰ ${t("ตั้งเวลาแล้ว", "Scheduled")}` }
-    : postStatus === "skip" ? { cls: "bg-slate-50 text-slate-400 border-slate-200", label: `⊘ ${t("ข้าม", "Skip")}` }
+    : postStatus === "skip" ? { cls: "bg-rose-50 text-rose-700 border-rose-300", label: `⊘ ${t("ข้าม", "Skip")}` }
     : { cls: "bg-white text-slate-400 border-slate-200", label: t("ยังไม่โพสต์", "Not posted") };
   // เมนู ⋯ = ของที่ไม่ได้ใช้ทุกครั้ง (ยุบออกจากหัวการ์ดเพื่อลดความรก)
   const menuItems: { label: string; onClick: () => void }[] = [];

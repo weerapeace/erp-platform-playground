@@ -38,7 +38,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   const { data: content } = await admin.from("erp_creative_content")
-    .select("id, title, post_type, brand_id, note, platforms, platform_images, task_id").eq("id", contentId).maybeSingle();
+    .select("id, title, post_type, brand_id, note, platforms, platform_images, task_id, post_status").eq("id", contentId).maybeSingle();
   if (!content) return NextResponse.json({ error: "ไม่พบคอนเทนต์" }, { status: 404 });
 
   const brandId = (content.brand_id as string | null) ?? null;
@@ -53,7 +53,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const capOff = new Set(Object.entries(psAll).filter(([, v]) => v?.use_caption === false).map(([k]) => k));
   const wanted = (body.platforms?.length ? body.platforms : ((content.platforms as string[] | null) ?? caps.map((c) => c.platform))).filter(Boolean);
   const skipped: { platform: string; reason: string }[] = [];
+  // แพลตฟอร์มที่ผู้ใช้กด "⊘ ข้าม" ไว้ = ไม่โพสต์ → ไม่ต้องเขียนแคปชั่น (ไม่เสียค่า AI ฟรี ๆ)
+  const postStatus = (content.post_status ?? {}) as Record<string, string>;
   const targets = wanted.filter((p) => {
+    if (postStatus[p] === "skip") { skipped.push({ platform: p, reason: "ตั้งเป็น ⊘ ข้าม (ไม่โพสต์)" }); return false; }
     if (capOff.has(p)) { skipped.push({ platform: p, reason: "ปิดแคปชั่นแพลตฟอร์มนี้" }); return false; }
     if (!overwrite && (caps.find((c) => c.platform === p)?.caption ?? "").trim()) { skipped.push({ platform: p, reason: "มีแคปชั่นอยู่แล้ว" }); return false; }
     return true;
