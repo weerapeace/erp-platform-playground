@@ -66,6 +66,46 @@ export function normalizeHashtags(x: unknown, max = 12): string[] {
   return [...new Set(cleaned)].slice(0, max);
 }
 
+/**
+ * หา "รูปที่จะให้ AI ดู" ของแพลตฟอร์มหนึ่ง — ไล่ตามลำดับ เจอที่ไหนหยุดที่นั่น
+ *   1) รูปที่เลือกไว้เฉพาะแพลตฟอร์มนี้ (platform_images)
+ *   2) รูปที่แนบไว้ในคอนเทนต์เอง (erp_creative_attachments.content_id)
+ *   3) รูปจากงานย่อยของงานที่ผูกไว้ (อนุมัติแล้วมาก่อน)
+ * เพราะของจริงแทบไม่มีใครเลือกรูปรายแพลตฟอร์ม ถ้าไม่ fallback AI จะเขียนโดยไม่เห็นรูป
+ */
+export async function resolveImageKeys(
+  content: { id: string; task_id?: string | null; platform_images?: unknown },
+  platform: string,
+): Promise<{ keys: string[]; source: "platform" | "content" | "task" | "none" }> {
+  const admin = supabaseAdmin();
+  const map = (content.platform_images ?? {}) as Record<string, string[]>;
+  const own = (map[platform] ?? []).filter(Boolean);
+  if (own.length) return { keys: own.slice(0, MAX_IMAGES), source: "platform" };
+
+  const { data: atts } = await admin.from("erp_creative_attachments")
+    .select("r2_key, created_at").eq("content_id", content.id).eq("kind", "image").order("created_at", { ascending: true });
+  const fromContent = ((atts ?? []) as { r2_key: string | null }[]).map((a) => a.r2_key).filter((k): k is string => !!k);
+  if (fromContent.length) return { keys: fromContent.slice(0, MAX_IMAGES), source: "content" };
+
+  if (content.task_id) {
+    const { data: subs } = await admin.from("erp_creative_subtasks").select("id, status, image_sync_targets").eq("task_id", content.task_id);
+    const subRows = ((subs ?? []) as { id: string; status: string | null; image_sync_targets: { sku_images?: Record<string, string[]> } | null }[])
+      .sort((a, b) => (a.status === "approved" ? 0 : 1) - (b.status === "approved" ? 0 : 1));
+    const ids = subRows.map((s) => s.id);
+    if (ids.length) {
+      const { data: sa } = await admin.from("erp_creative_attachments").select("r2_key, subtask_id").in("subtask_id", ids).eq("kind", "image");
+      const rows = ((sa ?? []) as { r2_key: string | null; subtask_id: string | null }[]);
+      const ordered = subRows.flatMap((s) => [
+        ...rows.filter((r) => r.subtask_id === s.id).map((r) => r.r2_key),
+        // รูปที่ sync เข้า SKU แล้ว (แหล่งเดียวกับที่หน้าเว็บโชว์ใน "รูปจากงาน")
+        ...Object.values(s.image_sync_targets?.sku_images ?? {}).flat(),
+      ]).filter((k): k is string => !!k);
+      if (ordered.length) return { keys: [...new Set(ordered)].slice(0, MAX_IMAGES), source: "task" };
+    }
+  }
+  return { keys: [], source: "none" };
+}
+
 /** ต่อรูปเป็น content ของ OpenAI (detail low = ถูกที่สุด) */
 export function imageParts(urls: string[]): Record<string, unknown>[] {
   return urls.map((url) => ({ type: "image_url", image_url: { url, detail: "low" } }));

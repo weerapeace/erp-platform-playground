@@ -11,7 +11,7 @@ import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { CAPTION_MODEL, chatJson, imageParts, imagesToDataUrls, loadPromptRows, normalizeHashtags, openAiKey, pickPrompt } from "@/lib/ai-caption";
+import { CAPTION_MODEL, chatJson, imageParts, imagesToDataUrls, loadPromptRows, normalizeHashtags, openAiKey, pickPrompt, resolveImageKeys } from "@/lib/ai-caption";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ── ข้อมูลคอนเทนต์ + แคปชั่นเดิม/แฮชแท็กของแพลตฟอร์มนี้ ──
   const { data: content } = await admin.from("erp_creative_content")
-    .select("id, title, post_type, brand_id, note, platform_images").eq("id", contentId).maybeSingle();
+    .select("id, title, post_type, brand_id, note, platform_images, task_id").eq("id", contentId).maybeSingle();
   if (!content) return NextResponse.json({ error: "ไม่พบคอนเทนต์" }, { status: 404 });
 
   const { data: cap } = await admin.from("erp_creative_content_captions")
@@ -45,8 +45,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const prompt = pickPrompt(await loadPromptRows(), brandId, platform);
 
   // ── รูปของแพลตฟอร์มนี้ → base64 ──
-  const imgMap = (content.platform_images ?? {}) as Record<string, string[]>;
-  const images = await imagesToDataUrls(imgMap[platform] ?? []);
+  const { keys: imgKeys } = await resolveImageKeys(content as { id: string; task_id?: string | null; platform_images?: unknown }, platform);
+  const images = await imagesToDataUrls(imgKeys);
 
   const facts = [
     content.title ? `ชื่อคอนเทนต์: ${content.title}` : "",
