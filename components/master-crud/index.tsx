@@ -2753,6 +2753,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       {/* ✨ AI คิดรายละเอียดสินค้า — ค่าที่เลือกลงฟอร์มเฉย ๆ ต้องกดบันทึกเอง */}
       {aiDetailOpen && editingId && (
         <AiProductDetailModal parentId={editingId} current={form} onClose={() => setAiDetailOpen(false)}
+          brandId={(form.brand_id as string | null) ?? null}
           onApply={(vals) => {
             const keys = Object.keys(vals);
             if (keys.length === 0) return;

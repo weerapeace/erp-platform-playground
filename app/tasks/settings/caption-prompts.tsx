@@ -102,6 +102,7 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
   const jobOptions = useMemo(() => [
     ...platforms,
     { value: "product_detail", label: t("📦 รายละเอียดสินค้า (ชื่อ/Introduction/Description)", "📦 Product detail (name/intro/description)") },
+    { value: "translate", label: t("🌐 สไตล์การแปลภาษา (ปุ่มแปลทั้งหมด)", "🌐 Translation style (translate button)") },
   ], [platforms, t]);
 
   const brandName = (id: string | null) => (id ? (brands.find((b) => b.id === id)?.name ?? id.slice(0, 8)) : t("ทุกแบรนด์", "All brands"));

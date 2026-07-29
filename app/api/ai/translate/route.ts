@@ -1,12 +1,16 @@
 /**
- * POST /api/ai/translate — แปลข้อความ ไทย↔อังกฤษ อัตโนมัติ ด้วย Cloudflare Workers AI
- * body: { text: string }            คืน: { translated: string }
- * - ตรวจภาษาเอง: ไทย→อังกฤษ, อังกฤษ/อื่น→ไทย
- * - ใช้ binding AI (wrangler.jsonc "ai") มีโควตาฟรีรายวัน
+ * POST /api/ai/translate — แปลข้อความ ไทย↔อังกฤษ
+ * body: { text, to? }  คืน: { data: { translated, target, engine } }
+ *
+ * ไล่ 3 ชั้น: ① GPT (คุณภาพดีสุด เรียบเรียงใหม่ ~0.02 บาท/ช่องยาว)
+ *            ② Cloudflare Workers AI (ฟรีมีโควตา — ใช้เมื่ออยู่บน CF)
+ *            ③ Google แปลฟรี (ตรงตัว — กันพังเวลาไม่มี key)
+ * สไตล์การแปลตั้งเองได้ที่ทะเบียน prompt เดียวกับแคปชั่น โดยใช้ platform = "translate"
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { getAi } from "@/lib/ai";
+import { chatJson, loadPromptRows, openAiKey, pickJobPrompt, TRANSLATE_KEY } from "@/lib/ai-caption";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -39,7 +43,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const tlCode = forced ?? (hasThai ? "en" : "th");
   const target = tlCode === "en" ? "English" : "Thai";
 
-  // 1) ลอง Cloudflare AI ก่อน (ถ้าพร้อม — บน CF หรือมี CF_ACCOUNT_ID/CF_AI_API_TOKEN)
+  // 0) GPT ก่อน (คุณภาพดีสุด — เรียบเรียงใหม่ให้อ่านลื่น ไม่แปลตรงตัวแบบเครื่องแปล)
+  //    ราคา ~0.02 บาท/ช่องข้อความยาว · สไตล์การแปลตั้งเองได้ที่ทะเบียน prompt (platform = "translate")
+  if (openAiKey()) {
+    try {
+      const style = pickJobPrompt(await loadPromptRows(), null, TRANSLATE_KEY);
+      const sys = [
+        `You are a professional translator for a Thai e-commerce/ERP system. Translate the user's text into ${target}.`,
+        "Keep proper nouns, URLs, product codes (SKU), and brand names unchanged. Preserve line breaks and any leading '- ' bullets.",
+        style || "Write naturally for online shoppers — do not translate word-for-word; rephrase so it reads like it was written in the target language. Do not add facts that are not in the source.",
+        'Reply as JSON: {"translated":"..."} with no other keys.',
+      ].join(" ");
+      const out = await chatJson(sys, [{ type: "text", text }], 1500);
+      const translated = String(out?.translated ?? "").trim();
+      if (translated) return NextResponse.json({ data: { translated, target, engine: "gpt" }, error: null });
+    } catch { /* ตกไปใช้ตัวถัดไป — ห้ามพังเงียบ */ }
+  }
+
+  // 1) ลอง Cloudflare AI (ถ้าพร้อม — บน CF หรือมี CF_ACCOUNT_ID/CF_AI_API_TOKEN)
   const ai = await getAi();
   if (ai) {
     try {
@@ -51,14 +72,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         max_tokens: 1024,
       });
       const translated = String(out?.response ?? "").trim();
-      if (translated) return NextResponse.json({ data: { translated, target }, error: null });
+      if (translated) return NextResponse.json({ data: { translated, target, engine: "cf" }, error: null });
     } catch { /* ตกไปใช้ตัวสำรองด้านล่าง */ }
   }
 
-  // 2) ตัวสำรองฟรี (Google) — ทำงานได้แม้ไม่มี Cloudflare AI (เช่นบน Vercel)
+  // 2) ตัวสำรองฟรี (Google) — ทำงานได้แม้ไม่มี key ใด ๆ · แปลตรงตัว ไม่เรียบเรียง
   try {
     const translated = await googleTranslate(text, tlCode);
-    if (translated) return NextResponse.json({ data: { translated, target }, error: null });
+    if (translated) return NextResponse.json({ data: { translated, target, engine: "google" }, error: null });
     return NextResponse.json({ error: "แปลไม่สำเร็จ" }, { status: 502 });
   } catch (e) {
     return NextResponse.json({ error: `แปลไม่สำเร็จ: ${(e as Error).message}` }, { status: 500 });

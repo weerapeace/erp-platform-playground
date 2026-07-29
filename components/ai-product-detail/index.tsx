@@ -9,7 +9,7 @@
 //   → แถวขนาดจะไม่ติ๊กให้อัตโนมัติเสมอ ต้องกดยืนยันเอง
 // ============================================================
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { Spinner } from "@/components/spinner";
@@ -41,10 +41,15 @@ const isBlank = (v: unknown) => {
   return !s || s === "-" || s === "—" || s === "–";
 };
 
+/** คำสั่ง AI 1 ระดับ (ค่ากลาง หรือ เฉพาะแบรนด์นี้) */
+type PromptRow = { brand_id: string | null; platform: string | null; prompt: string };
+
 export function AiProductDetailModal({
-  parentId, current, onApply, onClose,
+  parentId, brandId, current, onApply, onClose,
 }: {
   parentId: string;
+  /** แบรนด์ของสินค้าตัวนี้ — ไว้ตั้งคำสั่ง AI เฉพาะแบรนด์ */
+  brandId?: string | null;
   /** ค่าปัจจุบันในฟอร์ม (ไว้เทียบว่าจะทับของเดิมไหม) */
   current: Record<string, unknown>;
   onApply: (values: Record<string, string>) => void;
@@ -55,6 +60,44 @@ export function AiProductDetailModal({
   const [err, setErr] = useState<string | null>(null);
   const [res, setRes] = useState<Result | null>(null);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
+
+  // ── แผงตั้งคำสั่ง AI (เปิด/ปิดในป๊อปเดียวกัน ไม่ต้องออกไปหน้าตั้งค่า) ──
+  const [cfgOpen, setCfgOpen] = useState(false);
+  const [cfgScope, setCfgScope] = useState<"global" | "brand">("global");
+  const [cfgRows, setCfgRows] = useState<PromptRow[] | null>(null);
+  const [cfgDraft, setCfgDraft] = useState("");
+  const [cfgBusy, setCfgBusy] = useState(false);
+  const [cfgMsg, setCfgMsg] = useState("");
+
+  const loadCfg = useCallback(async () => {
+    try {
+      const j = await apiFetch("/api/ai/caption-prompts").then((r) => r.json());
+      setCfgRows(((j.data ?? []) as PromptRow[]).filter((r) => r.platform === "product_detail"));
+    } catch { setCfgRows([]); }
+  }, []);
+  useEffect(() => { if (cfgOpen && cfgRows === null) void loadCfg(); }, [cfgOpen, cfgRows, loadCfg]);
+  // เปลี่ยนระดับ → เติมข้อความของระดับนั้น (ไม่มี = ว่าง แปลว่ายังไม่ตั้ง จะใช้ระดับที่กว้างกว่า)
+  useEffect(() => {
+    if (!cfgRows) return;
+    const want = cfgScope === "brand" ? brandId ?? null : null;
+    setCfgDraft(cfgRows.find((r) => r.brand_id === want)?.prompt ?? "");
+    setCfgMsg("");
+  }, [cfgRows, cfgScope, brandId]);
+
+  const saveCfg = async () => {
+    if (!cfgDraft.trim()) { setCfgMsg("กรุณาใส่คำสั่งก่อนบันทึก"); return; }
+    setCfgBusy(true); setCfgMsg("");
+    try {
+      const j = await apiFetch("/api/ai/caption-prompts", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brand_id: cfgScope === "brand" ? brandId : null, platform: "product_detail", prompt: cfgDraft.trim() }),
+      }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      setCfgMsg("บันทึกคำสั่งแล้ว — กด “ให้คิดใหม่” เพื่อใช้คำสั่งใหม่");
+      setCfgRows(null); void loadCfg();
+    } catch (e) { setCfgMsg(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setCfgBusy(false); }
+  };
 
   const run = useCallback(async () => {
     setLoading(true); setErr(null); setRes(null);
@@ -116,6 +159,56 @@ export function AiProductDetailModal({
         </div>
       }>
       <div className="space-y-3">
+        {/* ⚙ ตั้งคำสั่ง AI — แก้ได้ในป๊อปนี้เลย ไม่ต้องออกไปหน้าตั้งค่า */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-[12.5px] text-slate-500">คำสั่งที่ AI ใช้เขียน (ตั้งได้ทั้งค่ากลางและเฉพาะแบรนด์)</span>
+          <button type="button" onClick={() => setCfgOpen((o) => !o)}
+            className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            {cfgOpen ? "▲ ซ่อนคำสั่ง" : "⚙ ตั้งค่าคำสั่ง AI"}
+          </button>
+        </div>
+
+        {cfgOpen && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden bg-white">
+                <button type="button" onClick={() => setCfgScope("global")}
+                  className={`h-8 px-3 text-[12px] font-medium ${cfgScope === "global" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
+                  ค่ากลาง (ทุกแบรนด์)
+                </button>
+                <button type="button" onClick={() => setCfgScope("brand")} disabled={!brandId}
+                  title={brandId ? "ตั้งคำสั่งเฉพาะแบรนด์ของสินค้าตัวนี้" : "สินค้าตัวนี้ยังไม่ได้ระบุแบรนด์"}
+                  className={`h-8 px-3 text-[12px] font-medium border-l border-slate-200 disabled:opacity-40 ${cfgScope === "brand" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
+                  เฉพาะแบรนด์นี้
+                </button>
+              </div>
+              <span className="text-[11.5px] text-slate-400">
+                {cfgScope === "brand" ? "ถ้าเว้นว่าง = ใช้ค่ากลาง" : "ใช้กับสินค้าทุกแบรนด์ที่ไม่ได้ตั้งเฉพาะ"}
+              </span>
+            </div>
+            {cfgRows === null ? (
+              <p className="text-[12.5px] text-slate-400 py-2"><Spinner /> กำลังโหลดคำสั่ง…</p>
+            ) : (
+              <>
+                <textarea value={cfgDraft} onChange={(e) => setCfgDraft(e.target.value)} rows={7}
+                  placeholder="เช่น เขียนโทนพรีเมียม เน้นงานคราฟต์ · ห้ามใช้คำว่า ถูกที่สุด · ปิดท้ายด้วยการรับประกัน"
+                  className="w-full px-3 py-2 text-[13px] leading-relaxed border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 font-mono" />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button type="button" onClick={() => void saveCfg()} disabled={cfgBusy}
+                    className="h-8 px-3 text-[12.5px] font-medium bg-slate-700 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
+                    {cfgBusy ? "กำลังบันทึก…" : "บันทึกคำสั่ง"}
+                  </button>
+                  {cfgMsg && <span className="text-[12px] text-slate-500">{cfgMsg}</span>}
+                </div>
+                <p className="text-[11.5px] text-slate-400">
+                  กติกาความปลอดภัย (ห้ามแต่งข้อมูลที่ไม่เห็น · ห้ามเดาขนาด · ต้องตอบเป็น JSON) ระบบใส่ให้อัตโนมัติเสมอ ไม่ต้องเขียนเอง ·
+                  แก้จากหน้ารวมได้ที่ งาน → ตั้งค่า → Prompt แคปชั่น AI
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
         <div>
           <label className="block text-[12.5px] font-medium text-slate-600 mb-1">บอกใบ้เพิ่ม (ไม่บังคับ)</label>
           <input value={extra} onChange={(e) => setExtra(e.target.value)} maxLength={500}
@@ -210,7 +303,7 @@ export function AiProductDetailModal({
             )}
 
             <p className="text-[11.5px] text-slate-400">
-              คำสั่งที่ AI ใช้เขียน ตั้งแยกรายแบรนด์ได้ที่หน้า <b>งาน → ตั้งค่า → คำสั่ง AI</b> (เลือกงาน “รายละเอียดสินค้า”)
+              ไม่ถูกใจผลลัพธ์? กด <b>⚙ ตั้งค่าคำสั่ง AI</b> ด้านบน แก้คำสั่ง แล้วกด “ให้คิดใหม่”
             </p>
           </>
         )}

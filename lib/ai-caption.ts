@@ -11,6 +11,11 @@ export const FALLBACK_PROMPT = "เขียนแคปชั่นภาษา
 
 export type PromptRow = { brand_id: string | null; platform: string | null; prompt: string };
 
+// งาน AI ที่ไม่ใช่แคปชั่นโซเชียล แต่ใช้ทะเบียน prompt ชุดเดียวกัน (จึงตั้งรายแบรนด์ได้เหมือนกัน)
+// เก็บค่าไว้ที่นี่เพราะไฟล์ route ห้าม export ตัวแปรอื่นนอกจาก handler
+export const PRODUCT_DETAIL_KEY = "product_detail";
+export const TRANSLATE_KEY = "translate";
+
 /** ยังไม่ตั้ง OPENAI_API_KEY = คืนค่าว่าง (ให้ route ตอบข้อความบอกวิธี ไม่พังเงียบ) */
 export function openAiKey(): string {
   return (process.env.OPENAI_API_KEY ?? "").trim();
@@ -25,6 +30,16 @@ export async function loadPromptRows(): Promise<PromptRow[]> {
 export function pickPrompt(rows: PromptRow[], brandId: string | null, platform: string): string {
   const at = (b: string | null, p: string | null) => rows.find((r) => r.brand_id === b && r.platform === p)?.prompt;
   return (brandId ? (at(brandId, platform) ?? at(brandId, null)) : undefined) ?? at(null, platform) ?? at(null, null) ?? FALLBACK_PROMPT;
+}
+
+/**
+ * เลือก prompt ของ "งานที่ไม่ใช่แคปชั่น" (รายละเอียดสินค้า / แปลภาษา)
+ * ต่างจาก pickPrompt ตรงที่ **ห้ามตกไปใช้ค่ากลางของแคปชั่น** — ไม่งั้นสั่งให้ AI
+ * "เขียนแคปชั่นสั้น ๆ" ตอนที่เราขอให้แปลภาษา · ไม่มีตั้งไว้ = คืนค่าว่าง ให้ route ใช้ค่าในโค้ดของงานนั้น
+ */
+export function pickJobPrompt(rows: PromptRow[], brandId: string | null, jobKey: string): string {
+  const at = (b: string | null) => rows.find((r) => r.brand_id === b && r.platform === jobKey)?.prompt;
+  return (brandId ? at(brandId) : undefined) ?? at(null) ?? "";
 }
 
 /** อ่านรูปจาก R2 → data URL (ไม่พึ่งให้ OpenAI ยิงกลับเข้าเว็บเรา) · รูปไหนอ่านไม่ได้ก็ข้าม */

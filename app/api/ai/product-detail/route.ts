@@ -15,14 +15,11 @@ import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { CAPTION_MODEL, chatJson, imageParts, imagesToDataUrls, loadPromptRows, openAiKey, pickPrompt } from "@/lib/ai-caption";
+import { CAPTION_MODEL, chatJson, imageParts, imagesToDataUrls, loadPromptRows, openAiKey, pickJobPrompt, PRODUCT_DETAIL_KEY } from "@/lib/ai-caption";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 120;
-
-/** งานชนิดนี้ในทะเบียน prompt (ใช้ช่อง platform ร่วมกับแคปชั่น) */
-export const PRODUCT_DETAIL_KEY = "product_detail";
 
 const MAX_IMG = 10;   // เจ้าของขอ 10 รูป — รูปสเปค/อินโฟกราฟิกมักอยู่รูปท้าย ๆ ถ้าตัดที่ 4 จะไม่เห็นตัวเลขขนาด
 
@@ -100,7 +97,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const images = keys.length ? await imagesToDataUrls(keys) : [];
 
   // ── คำสั่ง (prompt) — เจาะจงรายแบรนด์ชนะค่ากลาง ──
-  const custom = pickPrompt(await loadPromptRows(), brandId, PRODUCT_DETAIL_KEY);
+  const custom = pickJobPrompt(await loadPromptRows(), brandId, PRODUCT_DETAIL_KEY);
   const system = [
     custom || FALLBACK,
     "",
