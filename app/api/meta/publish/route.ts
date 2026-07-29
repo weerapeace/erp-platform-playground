@@ -30,6 +30,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const scheduledTime = Number(body.scheduled_time) || 0;
   // รับ media[{key,type}] · เผื่อ backward-compat กับ image_keys เดิม
   let media: Media[] = Array.isArray(body.media) && body.media.length ? body.media.filter((m) => m?.key) : (body.image_keys ?? []).filter(Boolean).map((k) => ({ key: k, type: "image" }));
+  media = media.map((m) => (m.key.startsWith("drive:") ? { ...m, type: "video" } : m));
   // รูปแบบโพสต์ที่ผู้ใช้เลือก (single/carousel/video/reels/story) — ไม่เลือก = เดาจากสื่อเหมือนเดิม
   const format = (body.format ?? "").trim();
   if (format === "story" && Number(body.scheduled_time) > 0)
@@ -43,7 +44,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     media = [v];
   }
   if (media.length === 0) return NextResponse.json({ error: "ยังไม่ได้เลือกรูป/วิดีโอสำหรับโพสต์นี้" }, { status: 400 });
-  const url = (k: string) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`;
+  // คีย์ที่ขึ้นต้น drive: = วิดีโอที่อยู่บน Google Drive → ให้ Meta ดึงผ่านตัวกลางของเรา (ไม่ต้องเก็บไฟล์ใน R2)
+  const url = (k: string) => k.startsWith("drive:")
+    ? `${baseUrl()}/api/drive-video/${encodeURIComponent(k.slice(6))}`
+    : `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`;
   const videoUrls = media.filter((m) => m.type === "video").map((m) => url(m.key));
   const imageUrls = media.filter((m) => m.type !== "video").map((m) => url(m.key));
 

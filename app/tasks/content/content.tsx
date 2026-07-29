@@ -597,6 +597,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const postImages: PostImage[] = (() => {
     const seen = new Set<string>(); const out: PostImage[] = [];
     for (const a of attachments) if ((a.kind === "image" || a.kind === "video") && a.r2_key && !seen.has(a.r2_key)) { seen.add(a.r2_key); out.push({ key: a.r2_key, label: a.label ?? a.file_name ?? null, type: a.kind === "video" ? "video" : "image" }); }
+    // วิดีโอที่อยู่บน Google Drive (ไม่มีไฟล์ในระบบ) — คีย์เป็น drive:<fileId>
+    for (const a of attachments) if (a.kind === "video" && !a.r2_key && (a.url ?? "").startsWith("drive:") && !seen.has(a.url as string)) { seen.add(a.url as string); out.push({ key: a.url as string, label: a.label ?? a.file_name ?? null, type: "video" }); }
     for (const im of taskMedia.images) if (im.key && !seen.has(im.key)) { seen.add(im.key); out.push({ key: im.key, label: im.label ?? null, type: "image" }); }
     return out;
   })();
@@ -716,6 +718,16 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     const pv = await getLinkPreview(url);
     await addContentAttachment(contentId, { kind: "link", url: pv.url, label: pv.title, file_name: pv.image });
     await loadAttachments();
+  };
+  // 🎬 วิดีโอที่อยู่บน Google Drive — เก็บแค่ลิงก์ ไม่ก็อปไฟล์ลง R2 (คลิปใหญ่อยู่ที่ Drive ที่เดียว)
+  const onAddDriveVideo = async (link: string) => {
+    try {
+      const j = await apiFetch("/api/drive-video/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link }) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      await addContentAttachment(contentId, { kind: "video", url: `drive:${j.file_id}`, label: j.name || "Google Drive", file_name: j.name ?? null, content_type: j.mime_type ?? null, size_bytes: j.size ?? null });
+      await loadAttachments();
+      pushToast("success", t("เพิ่มวิดีโอจาก Drive แล้ว (ไม่ได้ก็อปไฟล์ลงระบบ)", "Added Drive video (no copy stored)"));
+    } catch (e) { pushToast("error", (e as Error).message); }
   };
 
   // โน้ตต่อแพลตฟอร์ม (แก้ในตัว) — บันทึกตอนเลิกโฟกัส
@@ -1012,7 +1024,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             {!isHidden(dth, "attach") && (
             <CSection title={cLabelOf("attach")} order={cOrderOf("attach")} collapsed={coll("attach")} onToggle={() => toggleColl("attach")}
               right={<span className="text-[11px] text-slate-400">{attachments.length} {t("ไฟล์", "files")}</span>}>
-              <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onDelete={onDelAttachment} pushToast={pushToast} />
+              <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onAddDriveVideo={onAddDriveVideo} onDelete={onDelAttachment} pushToast={pushToast} />
             </CSection>)}
 
 
@@ -1121,11 +1133,12 @@ type SharedVars = { shop: ShopChannel[]; fake_price: number | null; real_price: 
 // ============================================================
 // ไฟล์แนบของคอนเทนต์: รูป (ย่อก่อนอัป) / วิดีโอสั้น / ลิงก์ (พรีวิว OG เต็ม)
 // ============================================================
-function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLink, onDelete, pushToast }: {
+function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLink, onAddDriveVideo, onDelete, pushToast }: {
   attachments: ContentAttachment[];
   onAttachImage: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => Promise<void>;
   onUploadVideo: (f: File) => Promise<void>;
   onAddLink: (url: string) => Promise<void>;
+  onAddDriveVideo: (link: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   pushToast: (type: Toast["type"], m: string) => void;
 }) {
@@ -1136,6 +1149,8 @@ function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLi
   const vidRef = useRef<HTMLInputElement>(null);
   const images = attachments.filter((a) => a.kind === "image");
   const videos = attachments.filter((a) => a.kind === "video");
+  const [driveLink, setDriveLink] = useState("");
+  const [driveBusy, setDriveBusy] = useState(false);
   const linkAtts = attachments.filter((a) => a.kind === "link");
 
   const addLink = async () => {
@@ -1159,16 +1174,30 @@ function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLi
         <p className="text-xs text-slate-500 mb-1">🎬 {t("วิดีโอ", "Video")}</p>
         <input ref={vidRef} type="file" accept="video/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickVideo(f); e.target.value = ""; }} />
         <button onClick={() => vidRef.current?.click()} disabled={vidBusy} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">{vidBusy ? t("⏳ กำลังอัป…", "⏳ Uploading…") : t("⬆ อัปวิดีโอสั้น (≤25MB)", "⬆ Upload short video (≤25MB)")}</button>
-        <span className="text-[11px] text-slate-400 ml-2">{t("คลิปยาวใช้ลิงก์ด้านล่าง", "Long clips → use link below")}</span>
+        <span className="text-[11px] text-slate-400 ml-2">{t("คลิปใหญ่ → ใช้ Google Drive ด้านล่าง", "Big clips → use Google Drive below")}</span>
+        {/* คลิปใหญ่: วางลิงก์ Google Drive — ระบบไม่ก็อปไฟล์ลงระบบ ดึงจาก Drive ตอนใช้งาน */}
+        <div className="flex gap-1.5 mt-2">
+          <input value={driveLink} onChange={(e) => setDriveLink(e.target.value)} placeholder={t("วางลิงก์วิดีโอจาก Google Drive...", "Paste a Google Drive video link...")}
+            className="flex-1 min-w-0 h-8 border border-slate-200 rounded-md px-2 text-xs" />
+          <button onClick={async () => { const l = driveLink.trim(); if (!l) return; setDriveBusy(true); await onAddDriveVideo(l); setDriveBusy(false); setDriveLink(""); }}
+            disabled={driveBusy || !driveLink.trim()} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 shrink-0">
+            {driveBusy ? t("⏳ ตรวจไฟล์…", "⏳ Checking…") : t("＋ เพิ่มจาก Drive", "＋ Add from Drive")}
+          </button>
+        </div>
+        <p className="text-[10px] text-slate-400 mt-0.5">{t("ไฟล์อยู่ที่ Drive ที่เดียว (ไม่กินพื้นที่ระบบ) · ต้องแชร์ไฟล์ให้บัญชีระบบก่อน", "Stays on Drive only — share the file with the system account first")}</p>
         {videos.length > 0 && (
           <div className="grid grid-cols-2 gap-2 mt-2">
-            {videos.map((v) => (
+            {videos.map((v) => {
+              const isDrive = (v.url ?? "").startsWith("drive:");
+              const src = isDrive ? `/api/drive-video/${(v.url as string).slice(6)}` : (r2ImageUrl(v.r2_key) ?? undefined);
+              return (
               <div key={v.id} className="relative group">
                 {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                <video src={r2ImageUrl(v.r2_key) ?? undefined} controls className="w-full h-28 object-cover rounded-lg border border-slate-200 bg-black" />
+                <video src={src} controls preload="metadata" className="w-full h-28 object-cover rounded-lg border border-slate-200 bg-black" />
+                {isDrive && <span className="absolute bottom-0.5 left-0.5 text-[9px] bg-black/70 text-white px-1 rounded">Drive</span>}
                 <button onClick={() => void onDelete(v.id)} title={t("ลบ", "Delete")} className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs opacity-0 group-hover:opacity-100 shadow">✕</button>
               </div>
-            ))}
+              ); })}
           </div>
         )}
       </div>

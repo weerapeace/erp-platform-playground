@@ -230,3 +230,29 @@ export async function driveCreateResumableSession(name: string, mimeType: string
   if (!loc) throw new Error("ไม่ได้ upload URL จาก Drive");
   return loc;
 }
+
+/** ขอ access token ให้ route อื่นใช้ต่อ (เช่น stream ไฟล์ตรงจาก Drive โดยไม่โหลดเข้าเซิร์ฟเวอร์) */
+export async function driveAccessToken(): Promise<string> { return getAccessToken(); }
+
+/** ข้อมูลย่อของไฟล์ (ชื่อ/ชนิด/ขนาด) — ใช้ตอนโชว์วิดีโอที่อยู่บน Drive */
+export async function driveFileMeta(fileId: string): Promise<{ id: string; name: string; mimeType: string; size?: number } | null> {
+  try {
+    const token = await getAccessToken();
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,size&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return { id: String(j.id), name: String(j.name ?? ""), mimeType: String(j.mimeType ?? ""), size: j.size ? Number(j.size) : undefined };
+  } catch { return null; }
+}
+
+/** ดึง fileId จากลิงก์ Google Drive ทุกรูปแบบที่เจอบ่อย */
+export function parseDriveFileId(url: string): string | null {
+  const s = (url ?? "").trim();
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;                       // วาง id มาตรง ๆ
+  const m1 = s.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);                  // .../file/d/<id>/view
+  if (m1) return m1[1];
+  const m2 = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);                      // ...uc?id=<id>
+  if (m2) return m2[1];
+  const m3 = s.match(/\/d\/([a-zA-Z0-9_-]+)/);                        // .../d/<id>/...
+  return m3 ? m3[1] : null;
+}

@@ -2,7 +2,7 @@
 
 // ============================================================
 // ImageAttach (ของกลาง) — แนบรูปหลายรูป: ลากวาง / Ctrl+V / เลือกไฟล์
-// ย่อขนาด ≤ 800px อัตโนมัติก่อนอัปขึ้น R2 (ไฟล์เบา) แล้วเรียก onAttach เก็บเป็น attachment
+// ย่อขนาด ≤ 1600px อัตโนมัติก่อนอัปขึ้น R2 (คมพอสำหรับโพสต์/พิมพ์ย่อ) แล้วเรียก onAttach เก็บเป็น attachment
 // ============================================================
 
 import { useEffect, useRef, useState } from "react";
@@ -14,7 +14,7 @@ type Img = { id: string; r2_key: string | null; file_name?: string | null };
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 
 // ย่อรูปให้ด้านยาวสุด ≤ max (คงสัดส่วน) → คืน Blob
-async function resizeImage(file: File, max = 800): Promise<{ blob: Blob; type: string }> {
+async function resizeImage(file: File, max = 1600): Promise<{ blob: Blob; type: string }> {
   const url = URL.createObjectURL(file);
   try {
     const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
@@ -30,7 +30,7 @@ async function resizeImage(file: File, max = 800): Promise<{ blob: Blob; type: s
 
 // ของกลาง: ย่อรูป (≤max) แล้วอัปขึ้น R2 → คืน r2_key (ใช้ซ้ำได้ทั้ง ImageAttach + ฟอร์มสร้าง SKU)
 export async function uploadResizedImage(file: File, opts?: { folder?: string; max?: number }): Promise<{ r2_key: string; file_name: string; content_type: string; size_bytes: number }> {
-  const { blob, type } = await resizeImage(file, opts?.max ?? 800);
+  const { blob, type } = await resizeImage(file, opts?.max ?? 1600);
   const name = file.name.replace(/\.[^.]+$/, "") + (type === "image/png" ? ".png" : ".jpg");
   const fd = new FormData();
   fd.append("file", new File([blob], name, { type }));
@@ -40,12 +40,12 @@ export async function uploadResizedImage(file: File, opts?: { folder?: string; m
   return { r2_key: j.r2_key as string, file_name: file.name, content_type: (j.content_type as string) || type, size_bytes: (j.size as number) ?? blob.size };
 }
 
-export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 800 }: {
+export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1600 }: {
   images: Img[];
   onAttach: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   pushToast: ToastFn;
-  maxSize?: number;   // ด้านยาวสุดที่ย่อก่อนอัป (ดีฟอลต์ 800)
+  maxSize?: number;   // ด้านยาวสุดที่ย่อก่อนอัป (ดีฟอลต์ 1600)
 }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
@@ -106,7 +106,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 8
 // ImageAttachKeys (ของกลาง) — แนบรูปหลายรูปแบบเก็บเป็น "array ของ r2_key" (ไม่ผูกตาราง attachment)
 // เหมาะกับ field ในฟอร์ม/หน้ารายละเอียด (เช่น รูปประกอบบรีฟของงาน) · ย่อ ≤maxSize อัตโนมัติ · ลาก/วาง/เลือกไฟล์
 // ============================================================
-export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", maxSize = 800, disabled }: {
+export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", maxSize = 1600, disabled }: {
   value: string[];
   onChange: (keys: string[]) => void;
   folder?: string;
