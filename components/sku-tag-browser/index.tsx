@@ -13,6 +13,7 @@ import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { Pager } from "@/components/pager";
@@ -83,13 +84,13 @@ const EMPTY_FILTER: TagFilterValue = { tagIds: [], none: false };
 const LIMIT = 60;   // โหลดหน้าละ 60 (เดิม 120) — เห็นเร็วขึ้น แล้วค่อย "โหลดเพิ่ม"
 
 const SORTS = [
-  { key: "code",       label: "รหัส (A→Z)",     by: "code",       dir: "asc"  },
-  { key: "code_desc",  label: "รหัส (Z→A)",     by: "code",       dir: "desc" },
-  { key: "name",       label: "ชื่อ (A→Z)",      by: "name_th",    dir: "asc"  },
-  { key: "name_desc",  label: "ชื่อ (Z→A)",      by: "name_th",    dir: "desc" },
-  { key: "price_desc", label: "ราคา (สูง→ต่ำ)",  by: "list_price", dir: "desc" },
-  { key: "price_asc",  label: "ราคา (ต่ำ→สูง)",  by: "list_price", dir: "asc"  },
-  { key: "newest",     label: "ใหม่ล่าสุด",      by: "created_at", dir: "desc" },
+  { key: "code",       label: "รหัส (A→Z)",     en: "Code (A→Z)",   by: "code",       dir: "asc"  },
+  { key: "code_desc",  label: "รหัส (Z→A)",     en: "Code (Z→A)",   by: "code",       dir: "desc" },
+  { key: "name",       label: "ชื่อ (A→Z)",      en: "Name (A→Z)",   by: "name_th",    dir: "asc"  },
+  { key: "name_desc",  label: "ชื่อ (Z→A)",      en: "Name (Z→A)",   by: "name_th",    dir: "desc" },
+  { key: "price_desc", label: "ราคา (สูง→ต่ำ)",  en: "Price (high→low)", by: "list_price", dir: "desc" },
+  { key: "price_asc",  label: "ราคา (ต่ำ→สูง)",  en: "Price (low→high)", by: "list_price", dir: "asc"  },
+  { key: "newest",     label: "ใหม่ล่าสุด",      en: "Newest",       by: "created_at", dir: "desc" },
 ] as const;
 
 /** เช็คว่าการ์ดนี้ข้อมูลไม่ครบตรงไหน (ไว้โชว์ป้ายเตือน + กรอง) */
@@ -140,6 +141,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   pickedIds?: string[];                                                                           // โหมดเลือก: id ที่ผู้เรียกเลือกไว้แล้ว (โชว์ติ๊กบนการ์ด)
 } = {}) {
   const pick = mode === "pick";   // โหมดเลือกสินค้า (หน้าขอซื้อ) — กดการ์ด → onPickSku แทนเปิด drawer แก้ไข
+  const t = useT();
   const toast = useToast();
   // สถานะการเดิน (กลุ่ม/แท็ก/หน้า/ชนิด) เก็บใน history.state → refresh แล้วอยู่ที่เดิม + ปุ่ม Back ย้อนได้
   const nav0 = savedNav();
@@ -410,27 +412,27 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
           <button onClick={() => { setTaobao(false); setEntity("skus"); patchNav({ en: "skus", page: 0 }); }} className={`h-9 px-4 text-sm ${!taobao && entity === "skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🏷️ SKU</button>
           <button onClick={() => { setTaobao(false); setEntity("parent-skus"); patchNav({ en: "parent-skus", page: 0 }); }} className={`h-9 px-4 text-sm border-l border-slate-200 ${!taobao && entity === "parent-skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>📦 Parent SKU</button>
           {/* กล่องพักของที่ดูดมาจาก Taobao — ยังไม่เข้า SKU จนกว่าจะกดจับคู่/สร้าง */}
-          <button onClick={() => { setTaobao(true); setSelected(new Set()); }} title="สินค้าที่เครื่องมือ taobao-catalog ส่งเข้ามา — รอจับคู่กับ SKU"
-            className={`h-9 px-4 text-sm border-l border-slate-200 ${taobao ? "bg-orange-50 text-orange-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🛒 จาก Taobao</button>
+          <button onClick={() => { setTaobao(true); setSelected(new Set()); }} title={t("สินค้าที่เครื่องมือ taobao-catalog ส่งเข้ามา — รอจับคู่กับ SKU", "Items pulled by the taobao-catalog tool — waiting to match a SKU")}
+            className={`h-9 px-4 text-sm border-l border-slate-200 ${taobao ? "bg-orange-50 text-orange-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🛒 {t("จาก Taobao", "From Taobao")}</button>
         </div>
         {/* ปุ่มเพิ่ม — ตามแท็บที่เปิด */}
         {!taobao && <button onClick={() => setAddOpen(true)}
           className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap">
-          ＋ เพิ่ม {entity === "parent-skus" ? "Parent SKU" : "SKU"}
+          ＋ {t("เพิ่ม", "Add")} {entity === "parent-skus" ? "Parent SKU" : "SKU"}
         </button>}
         {!taobao && entity === "skus" && (
-          <button onClick={() => setMergeOpen(true)} title="รวม SKU ที่ซ้ำกัน เข้าเป็นตัวเดียว (โอนรูป/แท็ก/สต๊อก/BOM ให้ตัวหลัก)"
+          <button onClick={() => setMergeOpen(true)} title={t("รวม SKU ที่ซ้ำกัน เข้าเป็นตัวเดียว (โอนรูป/แท็ก/สต๊อก/BOM ให้ตัวหลัก)", "Merge duplicate SKUs into one (moves images/tags/stock/BOM to the main one)")}
             className="h-9 px-3 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 whitespace-nowrap">
-            🔗 จัดการ SKU ซ้ำ
+            🔗 {t("จัดการ SKU ซ้ำ", "Merge duplicates")}
           </button>
         )}
-        {!taobao && <button onClick={() => setMissingOpen(true)} title="ตรวจว่ามีสินค้าตัวไหนรูปเสีย (ไฟล์หายจากที่เก็บ) บ้าง"
+        {!taobao && <button onClick={() => setMissingOpen(true)} title={t("ตรวจว่ามีสินค้าตัวไหนรูปเสีย (ไฟล์หายจากที่เก็บ) บ้าง", "Find products whose image files are missing from storage")}
           className="h-9 px-3 text-sm border border-slate-200 text-slate-500 rounded-lg hover:bg-slate-50 whitespace-nowrap">
-          🔎 ตรวจรูปหาย
+          🔎 {t("ตรวจรูปหาย", "Find broken images")}
         </button>}
-        {!taobao && <button onClick={() => openSpecial("trash")} title="ดูรายการที่ลบ/ปิดใช้งานไว้ (กู้คืนได้)"
+        {!taobao && <button onClick={() => openSpecial("trash")} title={t("ดูรายการที่ลบ/ปิดใช้งานไว้ (กู้คืนได้)", "View deleted/disabled items (restorable)")}
           className={`h-9 px-3 text-sm rounded-lg whitespace-nowrap border ${special === "trash" ? "border-rose-300 bg-rose-50 text-rose-600 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
-          🗑 ถังขยะ
+          🗑 {t("ถังขยะ", "Trash")}
         </button>}
       </div>
       )}
@@ -441,8 +443,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
       {addOpen && entity === "parent-skus" && <ParentSkuCreateModal onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
       {copyPending && (
         <ConfirmDialog open onClose={() => setCopyPending(null)}
-          title="คัดลอก SKU" message={`คัดลอก "${copyPending.code}" เป็น SKU ตัวใหม่? (รหัสจะตั้งให้อัตโนมัติ แก้รายละเอียดได้ภายหลัง)`}
-          confirmText="คัดลอก" onConfirm={() => { const id = copyPending.id; setCopyPending(null); void doCopy(id); }} />
+          title={t("คัดลอก SKU", "Duplicate SKU")} message={t(`คัดลอก "${copyPending.code}" เป็น SKU ตัวใหม่? (รหัสจะตั้งให้อัตโนมัติ แก้รายละเอียดได้ภายหลัง)`, `Duplicate "${copyPending.code}" as a new SKU? (code is auto-generated, details editable later)`)}
+          confirmText={t("คัดลอก", "Duplicate")} onConfirm={() => { const id = copyPending.id; setCopyPending(null); void doCopy(id); }} />
       )}
       {/* 🛒 กล่องพักสินค้าจาก Taobao — โหมดแยก (ไม่ใช้แท็ก/กลุ่ม) */}
       {taobao ? <TaobaoBrowser /> : (<>
@@ -452,19 +454,19 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
         <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 h-10 flex-1 bg-white focus-within:ring-2 focus-within:ring-indigo-500">
           <span className="text-slate-400">🔍</span>
           <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="ค้นหา SKU ทั้งหมด (รหัส / ชื่อ) — หาได้จากทุกกลุ่ม"
+            placeholder={t("ค้นหา SKU ทั้งหมด (รหัส / ชื่อ) — หาได้จากทุกกลุ่ม", "Search all SKUs (code / name) — across every group")}
             className="flex-1 h-full text-sm outline-none bg-transparent" />
           {search && <button onClick={() => setSearch("")} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>}
         </div>
-        <TagGroupFilter value={tagFilter} onChange={setTagFilter} label="กรองแท็ก" showNone={false} />
+        <TagGroupFilter value={tagFilter} onChange={setTagFilter} label={t("กรองแท็ก", "Filter tags")} showNone={false} />
         {!pick && <button onClick={() => setCustomizeOpen(true)}
-          className="h-10 px-3 text-[13px] border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ ปรับการ์ด</button>}
+          className="h-10 px-3 text-[13px] border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ {t("ปรับการ์ด", "Card settings")}</button>}
       </div>
 
       {/* breadcrumb */}
       <div className="flex items-center gap-1 text-[13px] mb-3 flex-wrap">
-        <button onClick={goRoot} className={`hover:underline ${groupPath.length === 0 && !cardsMode ? "text-slate-700 font-medium" : "text-indigo-600"}`}>🏠 ทั้งหมด</button>
-        {search.trim() && <><span className="text-slate-300">›</span><span className="text-slate-500">ค้นหา “{search.trim()}”</span></>}
+        <button onClick={goRoot} className={`hover:underline ${groupPath.length === 0 && !cardsMode ? "text-slate-700 font-medium" : "text-indigo-600"}`}>🏠 {t("ทั้งหมด", "All")}</button>
+        {search.trim() && <><span className="text-slate-300">›</span><span className="text-slate-500">{t("ค้นหา", "Search")} “{search.trim()}”</span></>}
         {!search.trim() && tagFilter.tagIds.length > 0 && (
           <>
             <span className="text-slate-300">›</span>
@@ -501,25 +503,25 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
               <div className="flex items-center gap-2 flex-wrap">
                 {!pick && <button onClick={allShownSelected ? clearSel : selectAllShown}
                   className={`h-8 px-2.5 text-[12px] rounded-lg border ${allShownSelected ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
-                  {allShownSelected ? "☑ เลือกแล้ว" : "☐ เลือกทั้งหมด"}
+                  {allShownSelected ? `☑ ${t("เลือกแล้ว", "Selected")}` : `☐ ${t("เลือกทั้งหมด", "Select all")}`}
                 </button>}
                 <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden">
-                  <button onClick={() => setViewPersist("card")} className={`h-8 px-2.5 text-[12px] ${view === "card" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>▦ การ์ด</button>
-                  <button onClick={() => setViewPersist("table")} className={`h-8 px-2.5 text-[12px] border-l border-slate-200 ${view === "table" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>☰ ตาราง</button>
+                  <button onClick={() => setViewPersist("card")} className={`h-8 px-2.5 text-[12px] ${view === "card" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>▦ {t("การ์ด", "Cards")}</button>
+                  <button onClick={() => setViewPersist("table")} className={`h-8 px-2.5 text-[12px] border-l border-slate-200 ${view === "table" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>☰ {t("ตาราง", "Table")}</button>
                 </div>
                 <button onClick={() => setOnlyIncomplete((v) => !v)}
-                  className={`h-8 px-2.5 text-[12px] rounded-lg border ${onlyIncomplete ? "bg-amber-50 border-amber-300 text-amber-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>⚠️ เฉพาะข้อมูลไม่ครบ</button>
+                  className={`h-8 px-2.5 text-[12px] rounded-lg border ${onlyIncomplete ? "bg-amber-50 border-amber-300 text-amber-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>⚠️ {t("เฉพาะข้อมูลไม่ครบ", "Incomplete only")}</button>
                 <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
-                  <span>เรียง</span>
+                  <span>{t("เรียง", "Sort")}</span>
                   <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white">
-                    {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    {SORTS.map((s) => <option key={s.key} value={s.key}>{t(s.label, s.en)}</option>)}
                   </select>
                 </div>
               </div>
             </div>
-            {onlyIncomplete && <p className="text-[11px] text-amber-600 mb-2">กรองเฉพาะในหน้านี้ ({cards.length.toLocaleString("th-TH")} ตัว) — เลื่อนหน้าด้านล่างเพื่อตรวจหน้าถัดไป</p>}
+            {onlyIncomplete && <p className="text-[11px] text-amber-600 mb-2">{t(`กรองเฉพาะในหน้านี้ (${cards.length.toLocaleString("th-TH")} ตัว) — เลื่อนหน้าด้านล่างเพื่อตรวจหน้าถัดไป`, `Filtered within this page only (${cards.length.toLocaleString("en-US")}) — go to the next page to check more`)}</p>}
             {shown.length === 0
-              ? <div className="text-center py-12 text-slate-400 text-sm">หน้านี้ไม่มีรายการที่ข้อมูลไม่ครบ 🎉</div>
+              ? <div className="text-center py-12 text-slate-400 text-sm">{t("หน้านี้ไม่มีรายการที่ข้อมูลไม่ครบ 🎉", "Nothing incomplete on this page 🎉")}</div>
               : view === "table"
                 ? <SkuTable rows={shown} selected={pick ? pickedSet : selected} selectMode={selectMode}
                     onToggle={pick ? ((id) => { const c = shown.find((x) => x.id === id); if (c) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); } }) : toggleSel}
@@ -544,21 +546,21 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
           </>
       ) : (
         (childGroups.length === 0 && childTags.length === 0)
-          ? <div className="text-center py-16 text-slate-400 text-sm">ยังไม่มีกลุ่มย่อย/แท็กในนี้</div>
+          ? <div className="text-center py-16 text-slate-400 text-sm">{t("ยังไม่มีกลุ่มย่อย/แท็กในนี้", "No sub-groups or tags here yet")}</div>
           : <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
               {currentGroupId === null && (
                 <>
                   <button onClick={() => openSpecial("all")}
                     className="text-left rounded-xl border border-indigo-200 bg-indigo-50/40 p-3.5 hover:border-indigo-400 hover:shadow-sm transition">
                     <div className="flex items-center justify-between"><span className="text-2xl">📋</span><span className="text-indigo-300">›</span></div>
-                    <p className="text-sm font-medium text-slate-800 mt-1">ทั้งหมด</p>
-                    <p className="text-[11px] text-indigo-500">ดูทุกรายการ →</p>
+                    <p className="text-sm font-medium text-slate-800 mt-1">{t("ทั้งหมด", "All")}</p>
+                    <p className="text-[11px] text-indigo-500">{t("ดูทุกรายการ", "See everything")} →</p>
                   </button>
                   <button onClick={() => openSpecial("recent")}
                     className="text-left rounded-xl border border-indigo-200 bg-indigo-50/40 p-3.5 hover:border-indigo-400 hover:shadow-sm transition">
                     <div className="flex items-center justify-between"><span className="text-2xl">🕒</span><span className="text-indigo-300">›</span></div>
-                    <p className="text-sm font-medium text-slate-800 mt-1">ล่าสุด</p>
-                    <p className="text-[11px] text-indigo-500">สร้าง/แก้ไขล่าสุด →</p>
+                    <p className="text-sm font-medium text-slate-800 mt-1">{t("ล่าสุด", "Recent")}</p>
+                    <p className="text-[11px] text-indigo-500">{t("สร้าง/แก้ไขล่าสุด", "Recently created/edited")} →</p>
                   </button>
                 </>
               )}
@@ -567,15 +569,15 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
                   className="text-left rounded-xl border border-slate-200 bg-white p-3.5 hover:border-indigo-300 hover:shadow-sm transition">
                   <div className="flex items-center justify-between"><span className="text-2xl">{g.icon || "📁"}</span><span className="text-slate-300">›</span></div>
                   <p className="text-sm font-medium text-slate-800 mt-1">{g.name}</p>
-                  <p className="text-[11px] text-slate-400">กลุ่ม</p>
+                  <p className="text-[11px] text-slate-400">{t("กลุ่ม", "Group")}</p>
                 </button>
               ))}
-              {childTags.map((t) => (
-                <button key={t.id} onClick={() => openTag(t)}
+              {childTags.map((tg) => (
+                <button key={tg.id} onClick={() => openTag(tg)}
                   className="text-left rounded-xl border border-slate-200 bg-white p-3.5 hover:border-indigo-300 hover:shadow-sm transition">
-                  <div className="flex items-center justify-between"><span className="text-2xl">🏷️</span><span className="text-[11px] text-slate-400">{t.sku_count.toLocaleString("th-TH")} SKU</span></div>
-                  <p className="text-sm font-medium text-slate-800 mt-1">{t.name}</p>
-                  <p className="text-[11px] text-indigo-500">ดูการ์ด SKU →</p>
+                  <div className="flex items-center justify-between"><span className="text-2xl">🏷️</span><span className="text-[11px] text-slate-400">{tg.sku_count.toLocaleString("th-TH")} SKU</span></div>
+                  <p className="text-sm font-medium text-slate-800 mt-1">{tg.name}</p>
+                  <p className="text-[11px] text-indigo-500">{t("ดูการ์ด SKU", "View SKU cards")} →</p>
                 </button>
               ))}
             </div>
@@ -586,15 +588,15 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
       {/* แถบจัดการหลายรายการ — ไม่โชว์ในโหมดเลือกไปวางกระดาน (ผู้เรียกมีปุ่มยืนยันของตัวเอง) */}
       {!pick && selected.size > 0 && (
         <div className="sticky bottom-4 mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto flex-wrap">
-          <span className="text-sm font-medium">เลือก {selected.size.toLocaleString("th-TH")}</span>
-          {!allShownSelected && <button onClick={selectAllShown} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">เลือกที่แสดง</button>}
+          <span className="text-sm font-medium">{t("เลือก", "Selected")} {selected.size.toLocaleString("th-TH")}</span>
+          {!allShownSelected && <button onClick={selectAllShown} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">{t("เลือกที่แสดง", "Select shown")}</button>}
           {total > shown.length && (
             <button onClick={selectAllMatching} disabled={selectingAll} className="text-[12px] px-2 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-60">
-              {selectingAll ? "กำลังเลือก…" : `เลือกทั้งหมด ${total.toLocaleString("th-TH")}`}
+              {selectingAll ? t("กำลังเลือก…", "Selecting…") : t(`เลือกทั้งหมด ${total.toLocaleString("th-TH")}`, `Select all ${total.toLocaleString("en-US")}`)}
             </button>
           )}
           {bulkFields.length > 0 && (
-            <button onClick={() => setBulkEditOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">✏️ แก้ไขข้อมูล</button>
+            <button onClick={() => setBulkEditOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">✏️ {t("แก้ไขข้อมูล", "Bulk edit")}</button>
           )}
           <select onChange={(e) => { const v = e.target.value; e.currentTarget.value = ""; if (v) void bulkAddTag(v); }} defaultValue=""
             className="h-8 px-2 text-[12px] rounded-lg text-slate-700 bg-white">

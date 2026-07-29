@@ -11,6 +11,7 @@ import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { useToast } from "@/components/toast";
+import { useT, LangToggle } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { SkuWizard } from "./sku-wizard";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
@@ -97,21 +98,22 @@ function fmtPrice(v: unknown) {
 }
 
 const TABS = [
-  { key: "table",  label: "📋 ตาราง SKU" },
-  { key: "browse", label: "🗂️ เลือกดูตามแท็ก" },
-  { key: "tags",   label: "🏷️ Tags Manager" },
+  { key: "table",  th: "📋 ตาราง SKU",      en: "📋 SKU table" },
+  { key: "browse", th: "🗂️ เลือกดูตามแท็ก", en: "🗂️ Browse by tag" },
+  { key: "tags",   th: "🏷️ Tags Manager",   en: "🏷️ Tags Manager" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
 export default function SkusV2Page() {
   const toast = useToast();
+  const tr = useT();
   const [tab, setTab] = useState<TabKey>("browse");   // เปิดมาเจอ "เลือกดูตามแท็ก" ก่อน (ตามที่เจ้าของขอ)
 
   // เพิ่มปุ่ม "คัดลอก" รายแถว — ก๊อปทุกฟิลด์ไปเป็น SKU ใหม่ + (copy) ท้ายชื่อ + รหัสใหม่
   const config = useMemo<MasterCRUDConfig>(() => ({
     ...CONFIG,
     extraRowActions: [{
-      label: "คัดลอก", icon: "⧉",
+      label: tr("คัดลอก", "Duplicate"), icon: "⧉",
       onClick: async (row) => {
         try {
           const res = await apiFetch("/api/skus/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id }) });
@@ -128,17 +130,18 @@ export default function SkusV2Page() {
         ? <div className="pt-1"><SkuSupplierList skuId={recordId} defaultOpen /></div>
         : <div className="p-3 text-sm text-slate-400">บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย</div>,
     }],
-  }), [toast]);
+  }), [toast, tr]);
 
   return (
     <div>
       <div className="flex items-center gap-1 border-b border-slate-200 px-3 pt-2">
-        {TABS.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-3.5 py-2 text-sm border-b-2 -mb-px transition ${tab === t.key
+        {TABS.map((tb) => (
+          <button key={tb.key} onClick={() => setTab(tb.key)}
+            className={`px-3.5 py-2 text-sm border-b-2 -mb-px transition ${tab === tb.key
               ? "border-indigo-500 text-indigo-700 font-medium"
-              : "border-transparent text-slate-500 hover:text-slate-700"}`}>{t.label}</button>
+              : "border-transparent text-slate-500 hover:text-slate-700"}`}>{tr(tb.th, tb.en)}</button>
         ))}
+        <div className="ml-auto pb-1"><LangToggle /></div>
       </div>
 
       {tab === "table"  && <MasterCRUDPage config={config} />}
