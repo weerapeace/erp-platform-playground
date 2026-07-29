@@ -13,6 +13,49 @@ import { useT } from "@/components/i18n";
 type Row = { id: string; brand_id: string | null; platform: string | null; prompt: string; updated_at: string };
 const ALL = "__all__";   // ค่าใน dropdown ที่หมายถึง "ทุก…" (= null ใน DB)
 
+// การ์ดสรุปการใช้ AI + ค่าใช้จ่ายประมาณ (นับจากประวัติการกด ไม่ต้องต่อ API ของ OpenAI)
+function AiUsageCard() {
+  const t = useT();
+  const [d, setD] = useState<{ months: { month: string; calls: number; images: number; captions: number; est_thb: number }[]; total: { calls: number; images: number; captions: number; est_thb: number }; by_user: { name: string; captions: number; est_thb: number }[] } | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { (async () => {
+    try { const j = await apiFetch("/api/ai/usage?months=3").then((r) => r.json()); if (!j.error) setD(j); } catch { /* ไม่ขึ้นก็ไม่เป็นไร */ }
+  })(); }, []);
+  if (!d || d.total.calls === 0) return null;
+  const thisMonth = d.months[0];
+  return (
+    <div className="rounded-lg border border-fuchsia-200 bg-fuchsia-50/50 px-3 py-2">
+      <div className="flex items-center gap-2 flex-wrap text-xs">
+        <span className="font-medium text-fuchsia-800">💸 {t("ค่าใช้จ่าย AI", "AI usage")}</span>
+        <span className="text-slate-600">{t("เดือนนี้", "This month")}: <b className="text-slate-800">~{thisMonth?.est_thb ?? 0} {t("บาท", "THB")}</b> ({thisMonth?.captions ?? 0} {t("แคปชั่น", "captions")} · {thisMonth?.calls ?? 0} {t("ครั้ง", "calls")} · {thisMonth?.images ?? 0} {t("รูป", "images")})</span>
+        <span className="text-slate-400">| 3 {t("เดือนรวม", "months")}: ~{d.total.est_thb} {t("บาท", "THB")}</span>
+        <button onClick={() => setOpen((o) => !o)} className="ml-auto text-fuchsia-700 hover:underline">{open ? t("ซ่อน", "Hide") : t("ดูรายละเอียด", "Details")}</button>
+      </div>
+      {open && (
+        <div className="mt-2 grid gap-3 sm:grid-cols-2 text-[11px]">
+          <div>
+            <p className="font-semibold text-slate-500 mb-1">{t("รายเดือน", "By month")}</p>
+            {d.months.map((m) => (
+              <div key={m.month} className="flex justify-between text-slate-600 py-0.5 border-b border-fuchsia-100/60">
+                <span>{m.month}</span><span>{m.captions} {t("แคปชั่น", "cap")} · ~{m.est_thb} {t("บาท", "THB")}</span>
+              </div>
+            ))}
+          </div>
+          <div>
+            <p className="font-semibold text-slate-500 mb-1">{t("ใครใช้", "By user")}</p>
+            {d.by_user.map((u) => (
+              <div key={u.name} className="flex justify-between text-slate-600 py-0.5 border-b border-fuchsia-100/60">
+                <span className="truncate max-w-[60%]">{u.name}</span><span>{u.captions} · ~{u.est_thb} {t("บาท", "THB")}</span>
+              </div>
+            ))}
+          </div>
+          <p className="sm:col-span-2 text-slate-400">{t("* ประมาณจากราคา gpt-4o-mini (รูปคือส่วนที่กิน token มากสุด) — ตัวเลขจริงดูได้ที่หน้า Usage ของ OpenAI", "* Estimated from gpt-4o-mini pricing — see OpenAI usage page for exact billing")}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function CaptionPromptsManager({ showToast }: { showToast: (m: string) => void }) {
   const t = useT();
   const { platforms } = useCreativeOptions();
@@ -87,6 +130,7 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
         <p className="text-xs text-slate-400 mt-0.5">{t("ตั้งได้ 4 ระดับ — ระดับที่เจาะจงกว่าจะถูกใช้ก่อน: แบรนด์+แพลตฟอร์ม → แบรนด์ → แพลตฟอร์ม → ค่ากลาง", "4 levels — the most specific wins: brand+platform → brand → platform → global")}</p>
       </div>
       <div className="p-5 space-y-3">
+        <AiUsageCard />
         <div className="flex flex-wrap items-end gap-2">
           <label className="block">
             <span className="text-[11px] font-medium text-slate-500 block mb-0.5">{t("แบรนด์", "Brand")}</span>

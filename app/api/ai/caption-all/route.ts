@@ -1,6 +1,6 @@
 /**
  * /api/ai/caption-all — ให้ AI เขียนแคปชั่น "ทุกแพลตฟอร์มในคอนเทนต์นี้" รอบเดียว
- *   POST { content_id, platforms?: string[], overwrite?: boolean }
+ *   POST { content_id, platforms?: string[], overwrite?: boolean, extra?: string, apply?: boolean }
  *     → { results: [{ platform, caption, hashtags[] }], calls, skipped, images_used }
  *
  * ประหยัด token: รูปคือส่วนที่กิน token มากที่สุด → จับกลุ่มแพลตฟอร์มที่ใช้ "ชุดรูปเดียวกัน"
@@ -28,11 +28,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!openAiKey())
     return NextResponse.json({ error: "ยังไม่ได้ตั้งค่า AI — ผู้ดูแลต้องใส่ค่า OPENAI_API_KEY ใน Vercel (Settings → Environment Variables) แล้ว redeploy" }, { status: 400 });
 
-  let body: { content_id?: string; platforms?: string[]; overwrite?: boolean };
+  let body: { content_id?: string; platforms?: string[]; overwrite?: boolean; extra?: string; apply?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const contentId = (body.content_id ?? "").trim();
   if (!contentId) return NextResponse.json({ error: "ต้องระบุ content_id" }, { status: 400 });
   const overwrite = body.overwrite !== false;
+  const extra = (body.extra ?? "").trim();     // คำสั่งเพิ่มจากผู้ใช้ครั้งนี้ (ไม่บันทึกถาวร)
+  const apply = body.apply === true;            // true = เขียนลง DB ให้เลย (ใช้ตอนสั่งรวบจากหน้ารายการ)
 
   const admin = supabaseAdmin();
   const { data: content } = await admin.from("erp_creative_content")
@@ -74,6 +76,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     brand?.name ? `แบรนด์: ${brand.name}` : "",
     content.post_type ? `ประเภทโพสต์: ${content.post_type}` : "",
     (content.note ?? "").toString().trim() ? `โน้ตเพิ่มเติม: ${content.note}` : "",
+    extra ? `คำสั่งเพิ่มจากผู้ใช้ครั้งนี้ (สำคัญ ทำตามนี้ด้วย): ${extra}` : "",
   ].filter(Boolean).join("\n");
 
   const results: Out[] = [];
@@ -109,8 +112,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ results, calls, skipped, images_used: imagesUsed, warning: (e as Error).message, error: null });
   }
 
-  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  await writeAudit(admin, { action: "ai_caption_all", entityType: "creative_content", entityId: contentId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { platforms: results.map((r) => r.platform), calls, images: imagesUsed, model: CAPTION_MODEL } });
+  // ── apply = เขียนลง DB ให้เลย (สั่งรวบจากหน้ารายการ ไม่มีฟอร์มให้กดบันทึก) ──
+  let saved = 0;
+  if (apply) {
+    for (const res of results) {
+      const cur = caps.find((c) => c.platform === res.platform);
+      const old = (cur?.hashtags ?? "").trim();
+      const have = new Set(old.split(/\s+/).filter(Boolean).map((x) => x.toLowerCase()));
+      const add = res.hashtags.filter((h) => !have.has(h.toLowerCase()));
+      const hashtags = [old, ...add].filter(Boolean).join(" ");
+      const row = { caption: res.caption, hashtags, updated_at: new Date().toISOString() };
+      const { error } = cur
+        ? await admin.from("erp_creative_content_captions").update(row).eq("content_id", contentId).eq("platform", res.platform)
+        : await admin.from("erp_creative_content_captions").insert({ content_id: contentId, platform: res.platform, ...row });
+      if (!error) saved++;
+    }
+  }
 
-  return NextResponse.json({ results, calls, skipped, images_used: imagesUsed, model: CAPTION_MODEL, error: null });
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  await writeAudit(admin, { action: "ai_caption_all", entityType: "creative_content", entityId: contentId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { platforms: results.map((r) => r.platform), calls, images: imagesUsed, model: CAPTION_MODEL, applied: saved, extra: extra || null } });
+
+  return NextResponse.json({ results, calls, skipped, images_used: imagesUsed, saved, model: CAPTION_MODEL, error: null });
 }

@@ -59,6 +59,8 @@ const TEMPLATE_ICONS = ["🧩", "📢", "🖼️", "✨", "🎬", "🛍️", "�
 export function ContentPageView() {
   const t = useT();
   const { platforms } = useCreativeOptions();
+  const { can } = useAuth();
+  const canAiCaption = can("ai.caption");   // สิทธิ์สั่ง AI เขียนแคปชั่น (มีค่าใช้จ่าย)
   const [view, setView] = useState<"list" | "table" | "calendar" | "templates">(() => {
     if (typeof window === "undefined") return "table";
     const v = new URLSearchParams(window.location.search).get("view");
@@ -69,6 +71,8 @@ export function ContentPageView() {
   const [selected, setSelected] = useState<Set<string>>(new Set());   // เลือกหลายรายการ (table view)
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkAi, setBulkAi] = useState(false);       // ป๊อป "AI เขียนแคปชั่น" ของรายการที่เลือก
+  const [bulkAiBusy, setBulkAiBusy] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // create modal (ฟอร์ม/logic ย้ายไปของกลาง ContentCreateModal แล้ว)
@@ -111,6 +115,30 @@ export function ContentPageView() {
     }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBulkBusy(false); setBulkConfirm(false); }
   };
+  // ✨ สั่ง AI เขียนแคปชั่นหลายคอนเทนต์รวบเดียว (จากรายการที่ติ๊กไว้) — บันทึกให้เลย เพราะไม่มีฟอร์มให้กดบันทึก
+  // ทำทีละคอนเทนต์ (ฝั่ง server ยิง OpenAI ครั้งเดียวต่อคอนเทนต์อยู่แล้ว) เพื่อไม่ให้ timeout และรายงานได้ละเอียด
+  const bulkAiWrite = async (extra: string, overwrite: boolean) => {
+    const ids = [...selected];
+    setBulkAiBusy(true);
+    let okCount = 0, savedTotal = 0, callTotal = 0, imgTotal = 0, failed = 0;
+    try {
+      for (const id of ids) {
+        try {
+          const r = await apiFetch("/api/ai/caption-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_id: id, overwrite, extra, apply: true }) });
+          const j = await r.json();
+          if (j.error) { failed++; continue; }
+          okCount += ((j.results ?? []) as unknown[]).length;
+          savedTotal += Number(j.saved ?? 0); callTotal += Number(j.calls ?? 0); imgTotal += Number(j.images_used ?? 0);
+        } catch { failed++; }
+      }
+      pushToast(failed ? "error" : "success", t(
+        `เขียน+บันทึกแล้ว ${savedTotal} ช่อง จาก ${ids.length} คอนเทนต์ (ยิง AI ${callTotal} ครั้ง · อ่าน ${imgTotal} รูป)${failed ? ` · ล้มเหลว ${failed} คอนเทนต์` : ""}`,
+        `Wrote & saved ${savedTotal} caption(s) across ${ids.length} content(s) in ${callTotal} call(s), ${imgTotal} image(s)${failed ? `, ${failed} failed` : ""}`));
+      if (okCount > savedTotal) pushToast("info", t("บางช่องเขียนได้แต่บันทึกไม่สำเร็จ — ลองเปิดดูรายตัว", "Some captions were written but not saved"));
+      setBulkAi(false); setSelected(new Set()); await load();
+    } finally { setBulkAiBusy(false); }
+  };
+
   // สร้างแม่แบบคอนเทนต์เปล่า → เปิด drawer ให้กรอกแคปชั่น/แพลตฟอร์ม
   const createTpl = async () => {
     const name = window.prompt(t("ชื่อแม่แบบคอนเทนต์", "Content template name"));
@@ -202,6 +230,7 @@ export function ContentPageView() {
                   <span className="text-sm text-violet-800 font-medium">{t("เลือก", "Selected")} {selected.size}</span>
                   <div className="flex items-center gap-2">
                     <button onClick={() => setSelected(new Set())} className="text-xs text-slate-500 hover:underline">{t("ล้าง", "Clear")}</button>
+                    {canAiCaption && <button onClick={() => setBulkAi(true)} className="h-8 px-3 text-xs font-medium text-white bg-fuchsia-600 rounded-lg hover:bg-fuchsia-700">✨ {t("AI เขียนแคปชั่น", "AI write captions")}</button>}
                     <button onClick={() => setBulkConfirm(true)} className="h-8 px-3 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700">🗑 {t("ลบที่เลือก", "Delete selected")}</button>
                   </div>
                 </div>
@@ -281,6 +310,12 @@ export function ContentPageView() {
 
       <ConfirmDialog open={bulkConfirm} onClose={() => setBulkConfirm(false)} onConfirm={bulkDelete}
         title={t("ลบคอนเทนต์ที่เลือก", "Delete selected content")} message={<span>{t("ต้องการลบ", "Delete")} <span className="font-semibold">{selected.size}</span> {t("รายการใช่ไหม?", "items?")}</span>} confirmText={bulkBusy ? "..." : t("ลบทั้งหมด", "Delete all")} variant="danger" />
+
+      {/* ✨ AI เขียนแคปชั่นให้รายการที่เลือก (บันทึกให้เลย) */}
+      {bulkAi && (
+        <AiCaptionModal platformLabels={[]} filledCount={0} contentCount={selected.size} busy={bulkAiBusy}
+          onClose={() => setBulkAi(false)} onRun={(extra, overwrite) => bulkAiWrite(extra, overwrite)} />
+      )}
 
       <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
         {toasts.map((t) => <div key={t.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${t.type === "success" ? "bg-emerald-600" : t.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{t.message}</div>)}
@@ -378,6 +413,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [tplSettingsOpen, setTplSettingsOpen] = useState(false);
   // แพลตฟอร์มที่กางอยู่ (แบบพับเก็บ) — เริ่มต้นกางตัวแรกที่ยังไม่ได้โพสต์
   const [aiAllBusy, setAiAllBusy] = useState(false);   // กำลังให้ AI เขียนทุกแพลตฟอร์ม
+  const [aiModal, setAiModal] = useState<{ platforms: string[] } | null>(null);   // ป๊อป AI (ทั้งหมด / ช่องเดียว)
   const [openPlats, setOpenPlats] = useState<Set<string>>(new Set());
   const [openInit, setOpenInit] = useState(false);
   useEffect(() => {
@@ -713,21 +749,12 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   // ✨ ให้ AI เขียนแคปชั่นทุกแพลตฟอร์มรอบเดียว — ประหยัด token เพราะอ่านรูปครั้งเดียวต่อชุดรูป
   // (ฝั่ง server จับกลุ่มแพลตฟอร์มที่ใช้รูปชุดเดียวกัน แล้วยิง OpenAI ครั้งเดียวต่อกลุ่ม)
-  const aiWriteAll = async () => {
+  const aiWriteAll = async (platforms: string[], extra: string, overwrite: boolean) => {
     if (!contentId) { pushToast("error", t("บันทึกคอนเทนต์ก่อน แล้วค่อยให้ AI เขียน", "Save the content first")); return; }
-    const writable = caps.filter((c) => pset[c.platform]?.use_caption !== false);
-    if (writable.length === 0) { pushToast("info", t("ไม่มีแพลตฟอร์มที่เปิดใช้แคปชั่น", "No platform has captions enabled")); return; }
-    const filled = writable.filter((c) => (c.caption ?? "").trim()).length;
-    let overwrite = true;
-    if (filled > 0) {
-      overwrite = window.confirm(t(
-        `มี ${filled} ช่องที่เขียนไว้แล้ว\n\nตกลง = ให้ AI เขียนใหม่ทั้งหมด ${writable.length} ช่อง (ทับของเดิม)\nยกเลิก = เขียนเฉพาะช่องที่ยังว่าง ${writable.length - filled} ช่อง`,
-        `${filled} already have captions\n\nOK = rewrite all ${writable.length}\nCancel = only fill the ${writable.length - filled} empty ones`));
-      if (!overwrite && writable.length - filled === 0) { pushToast("info", t("ทุกช่องมีแคปชั่นอยู่แล้ว", "All captions are already written")); return; }
-    }
+    if (platforms.length === 0) { pushToast("info", t("ไม่มีแพลตฟอร์มที่เปิดใช้แคปชั่น", "No platform has captions enabled")); return; }
     setAiAllBusy(true);
     try {
-      const r = await apiFetch("/api/ai/caption-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_id: contentId, platforms: writable.map((c) => c.platform), overwrite }) });
+      const r = await apiFetch("/api/ai/caption-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_id: contentId, platforms, overwrite, extra }) });
       const j = await r.json();
       if (j.error) throw new Error(j.error);
       const results = (j.results ?? []) as { platform: string; caption: string; hashtags: string[] }[];
@@ -744,6 +771,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         `AI เขียนให้ ${results.length} แพลตฟอร์ม (ยิง AI ${j.calls} ครั้ง · อ่าน ${j.images_used ?? 0} รูป)${skip ? ` · ข้าม ${skip}` : ""} — กด “บันทึก” เพื่อเก็บ`,
         `AI wrote ${results.length} platform(s) in ${j.calls} call(s), ${j.images_used ?? 0} image(s)${skip ? `, skipped ${skip}` : ""} — press Save to keep`));
       if (j.warning) pushToast("error", String(j.warning));
+      setAiModal(null);
     } catch (e) { pushToast("error", (e as Error).message); } finally { setAiAllBusy(false); }
   };
 
@@ -992,7 +1020,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
               <div className="flex items-center gap-3 flex-wrap">
                 {canAiCaption && caps.length > 0 && (
-                  <button onClick={aiWriteAll} disabled={aiAllBusy}
+                  <button onClick={() => setAiModal({ platforms: caps.filter((c) => pset[c.platform]?.use_caption !== false).map((c) => c.platform) })} disabled={aiAllBusy}
                     title={t("ให้ AI เขียนแคปชั่นทุกแพลตฟอร์มรอบเดียว ตาม prompt ที่ตั้งไว้ของแต่ละแพลตฟอร์ม (อ่านรูปครั้งเดียว = ประหยัด)", "Write all platform captions in one go, using each platform's prompt")}
                     className="text-xs font-medium text-white bg-fuchsia-600 hover:bg-fuchsia-700 disabled:opacity-50 rounded-md px-2 py-1">
                     {aiAllBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนทั้งหมด", "✨ AI write all")}
@@ -1008,7 +1036,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-1.5">
-                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -1028,6 +1056,15 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
       {recOpen && <RecommendedTimesModal initial={recTimes} onClose={() => setRecOpen(false)} onSaved={(v) => { setRecTimes(v); setRecOpen(false); }} pushToast={pushToast} />}
       {hashOpen && <HashtagLibraryModal brandId={brandId} onClose={() => setHashOpen(false)} pushToast={pushToast} />}
+      {/* ป๊อป AI เขียนแคปชั่น (ใส่คำสั่งเพิ่มได้) — เปิดจากปุ่มหัวคอลัมน์ หรือปุ่ม ✨ ของช่องใดช่องหนึ่ง */}
+      {aiModal && (
+        <AiCaptionModal
+          platformLabels={aiModal.platforms.map((p) => platformLabel(p))}
+          filledCount={aiModal.platforms.filter((p) => (caps.find((c) => c.platform === p)?.caption ?? "").trim()).length}
+          busy={aiAllBusy}
+          onClose={() => setAiModal(null)}
+          onRun={(extra, overwrite) => aiWriteAll(aiModal.platforms, extra, overwrite)} />
+      )}
       {postModal && (
         <PostConfirmModal
           platform={postModal.platform}
@@ -1214,27 +1251,10 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ open = true, onToggle, contentId, canAi = false, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { open?: boolean; onToggle?: () => void; contentId?: string; canAi?: boolean; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { open?: boolean; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [imgEdit, setImgEdit] = useState(false);   // โหมดเลือกรูป (ปกติโชว์เฉพาะรูปที่เลือก · กดแล้วกางเลือก)
-  const [aiBusy, setAiBusy] = useState(false);      // กำลังให้ AI เขียนแคปชั่น
-  // ให้ AI เขียนแคปชั่นจากรูปที่แนบ + แฮชแท็กที่กรอก (ต้องมีสิทธิ์ ai.caption + ตั้ง OPENAI_API_KEY)
-  const aiWrite = async () => {
-    if (!contentId) return;
-    if ((cap.caption ?? "").trim() && !window.confirm(t("มีแคปชั่นอยู่แล้ว — ให้ AI เขียนทับไหม?", "A caption already exists — overwrite with AI?"))) return;
-    setAiBusy(true);
-    try {
-      const r = await apiFetch("/api/ai/caption", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_id: contentId, platform: cap.platform }) });
-      const j = await r.json();
-      if (j.error) throw new Error(j.error);
-      // แฮชแท็กที่ AI แนะนำ → ต่อท้ายของเดิม (ไม่ทับ) และไม่ซ้ำ
-      const old = (cap.hashtags ?? "").trim();
-      const have = new Set(old.split(/s+/).filter(Boolean).map((x) => x.toLowerCase()));
-      const add = ((j.hashtags ?? []) as string[]).filter((h) => !have.has(h.toLowerCase()));
-      onChange({ caption: j.caption as string, ...(add.length ? { hashtags: [old, ...add].filter(Boolean).join(" ") } : {}) });
-      pushToast("success", t(`AI เขียนให้แล้ว (อ่าน ${j.images_used ?? 0} รูป)${add.length ? ` + แนะแฮชแท็ก ${add.length} อัน` : ""}`, `AI wrote it (read ${j.images_used ?? 0} image(s))${add.length ? ` + ${add.length} hashtag(s)` : ""}`));
-    } catch (e) { pushToast("error", (e as Error).message); } finally { setAiBusy(false); }
-  };
+  // ปุ่ม ✨ ของช่องนี้ = เปิดป๊อป "AI เขียนแคปชั่น" ของ drawer (ใส่คำสั่งเพิ่มได้) — ใช้เส้นทางเดียวกับปุ่มเขียนทั้งหมด
   const useCaption = setting?.use_caption !== false;
   const useHashtags = setting?.use_hashtags !== false;
   const postUrl = (setting?.post_url ?? "").trim();
@@ -1289,7 +1309,7 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, cap, tem
         {open && (
           <div className="flex items-center gap-2 shrink-0">
             {canAi && useCaption && contentId && (
-              <button onClick={aiWrite} disabled={aiBusy} title={t("ให้ AI อ่านรูปที่แนบ + แฮชแท็ก แล้วเขียนแคปชั่นให้", "Let AI read the attached images + hashtags and write the caption")}
+              <button onClick={onAiWrite} disabled={aiBusy} title={t("ให้ AI อ่านรูปที่แนบ + แฮชแท็ก แล้วเขียนแคปชั่นให้", "Let AI read the attached images + hashtags and write the caption")}
                 className="text-xs font-medium text-fuchsia-700 hover:underline disabled:opacity-50">{aiBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนให้", "✨ AI write")}</button>
             )}
             <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
@@ -1380,6 +1400,68 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, cap, tem
         </div>
       )}
     </div>
+  );
+}
+
+// ป๊อปอัปกลาง "ให้ AI เขียนแคปชั่น" — ใช้ทั้งปุ่มเขียนทั้งหมด / ปุ่ม ✨ ของแต่ละช่อง / สั่งรวบจากหน้ารายการ
+// ใส่คำสั่งเพิ่มครั้งนี้ได้ (ไม่กระทบ prompt ที่ตั้งไว้) · เลือกได้ว่าทับของเดิมหรือเขียนเฉพาะช่องว่าง
+// บอกค่าใช้จ่ายคร่าว ๆ ก่อนกด เพราะกดแล้วมีค่าใช้จ่ายจริง
+function AiCaptionModal({ platformLabels, filledCount, contentCount = 1, busy, onClose, onRun }: {
+  platformLabels: string[];
+  filledCount: number;                 // จำนวนช่องที่มีข้อความอยู่แล้ว
+  contentCount?: number;               // จำนวนคอนเทนต์ (สั่งรวบจากหน้ารายการ)
+  busy: boolean;
+  onClose: () => void;
+  onRun: (extra: string, overwrite: boolean) => void;
+}) {
+  const t = useT();
+  const [extra, setExtra] = useState("");
+  // ตั้งต้นแบบปลอดภัย/ประหยัด: ถ้ามีของเดิมอยู่ หรือสั่งหลายคอนเทนต์ → ไม่ทับ
+  const [overwrite, setOverwrite] = useState(filledCount === 0 && contentCount === 1);
+  // ประมาณค่าใช้จ่าย: ยิง 1 ครั้งต่อคอนเทนต์ · รูป ≤7 ใบ ≈ 2,800 token/ใบ + ข้อความ ~600 (gpt-4o-mini, 36 บาท/USD)
+  const estBaht = Math.max(0.01, contentCount * ((7 * 2800 + 600) * 0.15 / 1e6 + (platformLabels.length * 350) * 0.6 / 1e6) * 36);
+  return (
+    <ERPModal open onClose={busy ? () => {} : onClose} size="md" title={t("✨ ให้ AI เขียนแคปชั่น", "✨ AI write captions")}
+      description={contentCount > 1
+        ? t(`${contentCount} คอนเทนต์ที่เลือก — ใช้ prompt ที่ตั้งไว้ของแต่ละแพลตฟอร์ม และบันทึกให้เลย`, `${contentCount} selected — uses each platform's prompt and saves automatically`)
+        : t("ใช้ prompt ที่ตั้งไว้ของแต่ละแพลตฟอร์ม + อ่านรูปที่แนบ", "Uses each platform's prompt + reads attached images")}
+      footer={
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-slate-400">{t("ค่าใช้จ่ายประมาณ", "Approx. cost")} ~{estBaht < 0.1 ? estBaht.toFixed(2) : estBaht.toFixed(1)} {t("บาท", "THB")}</span>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{t("ยกเลิก", "Cancel")}</button>
+            <button onClick={() => onRun(extra, overwrite)} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-fuchsia-600 rounded-lg hover:bg-fuchsia-700 disabled:opacity-50">
+              {busy ? t("กำลังเขียน...", "Writing...") : t("✨ เขียนเลย", "✨ Write")}
+            </button>
+          </div>
+        </div>}>
+      <div className="space-y-3">
+        {contentCount === 1 && (
+          <div className="flex flex-wrap gap-1.5">
+            {platformLabels.map((p) => <span key={p} className="text-[11px] bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">{p}</span>)}
+          </div>
+        )}
+        <label className="block">
+          <span className="text-xs font-medium text-slate-600">{t("คำสั่งเพิ่มครั้งนี้ (ไม่ใส่ก็ได้)", "Extra instruction for this run (optional)")}</span>
+          <textarea value={extra} onChange={(e) => setExtra(e.target.value)} rows={3} disabled={busy}
+            placeholder={t("เช่น เน้นโปรลด 20% ถึงสิ้นเดือน / ใช้คำสุภาพ ไม่ต้องมีอีโมจิ", "e.g. push the 20% promo, no emojis")}
+            className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-fuchsia-300" />
+          <span className="text-[11px] text-slate-400">{t("ใช้แค่ครั้งนี้ ไม่ทับ prompt ที่ตั้งไว้ในตั้งค่า", "Applies to this run only — your saved prompt is unchanged")}</span>
+        </label>
+        {(filledCount > 0 || contentCount > 1) && (
+          <div className="space-y-1">
+            <span className="text-xs font-medium text-slate-600">{filledCount > 0
+              ? t(`มี ${filledCount} ช่องที่เขียนไว้แล้ว`, `${filledCount} already written`)
+              : t("ช่องที่เขียนไว้แล้ว", "Captions that already exist")}</span>
+            {([[false, t("เขียนเฉพาะช่องที่ยังว่าง (ประหยัดกว่า)", "Only fill empty ones (cheaper)")], [true, t("เขียนใหม่ทับทั้งหมด", "Rewrite everything")]] as [boolean, string][]).map(([v, lb]) => (
+              <label key={String(v)} className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="radio" checked={overwrite === v} onChange={() => setOverwrite(v)} disabled={busy} />{lb}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+    </ERPModal>
   );
 }
 

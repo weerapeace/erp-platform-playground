@@ -6,7 +6,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { r2GetObject } from "@/lib/r2";
 
 export const CAPTION_MODEL = process.env.OPENAI_CAPTION_MODEL || "gpt-4o-mini";
-export const MAX_IMAGES = 3;   // คุมค่าใช้จ่าย — รูปคือส่วนที่กิน token มากที่สุด
+export const MAX_IMAGES = 7;   // เพดานรูปต่อครั้ง — รูปคือส่วนที่กิน token มากที่สุด (~2,800 token/รูป)
 export const FALLBACK_PROMPT = "เขียนแคปชั่นภาษาไทยสั้น ๆ 2-4 บรรทัดจากรูปที่ให้มา โทนเป็นมิตร ชวนซื้อแต่ไม่ hard sell · ห้ามแต่งข้อมูลที่ไม่เห็นในรูป · ไม่ต้องใส่แฮชแท็กในแคปชั่น";
 
 export type PromptRow = { brand_id: string | null; platform: string | null; prompt: string };
