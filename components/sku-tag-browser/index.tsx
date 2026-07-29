@@ -511,7 +511,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
               : view === "table"
                 ? <SkuTable rows={shown} selected={pick ? pickedSet : selected} selectMode={selectMode}
                     onToggle={pick ? ((id) => { const c = shown.find((x) => x.id === id); if (c) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); } }) : toggleSel}
-                    onOpen={(id) => { if (pick) { const c = shown.find((x) => x.id === id); if (c) onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); return; } setPeekId(id); }} />
+                    onOpen={(id) => { if (pick) { const c = shown.find((x) => x.id === id); if (c) onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); return; } setPeekId(id); }}
+                    sortKey={sortKey} onSort={(k) => { setSortKey(k); setPage(0); patchNav({ page: 0 }); }} />
                 : <div className="grid gap-3 select-none" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
                     {shown.map((c) => (
                       <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs}
@@ -705,8 +706,25 @@ function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPo
 }
 
 // มุมมองตาราง — ใช้ข้อมูลชุดเดียวกับการ์ด (filter/sort/เลือก เหมือนกัน)
-function SkuTable({ rows, selected, selectMode, onToggle, onOpen }: {
+// หัวคอลัมน์ที่กดเรียงได้ — เรียงที่เซิร์ฟเวอร์ (ครบทุกหน้า ไม่ใช่แค่หน้าที่เห็น) · กดซ้ำ = สลับน้อย→มาก/มาก→น้อย
+function SortTh({ label, ascKey, descKey, sortKey, onSort, align = "left" }: {
+  label: string; ascKey: string; descKey: string; sortKey: string; onSort: (k: string) => void; align?: "left" | "right";
+}) {
+  const asc = sortKey === ascKey, desc = sortKey === descKey;
+  const on = asc || desc;
+  return (
+    <th className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : ""}`}>
+      <button type="button" onClick={() => onSort(asc ? descKey : ascKey)} title={`เรียงตาม${label}`}
+        className={`inline-flex items-center gap-1 hover:text-slate-800 ${on ? "text-indigo-600 font-semibold" : ""} ${align === "right" ? "flex-row-reverse" : ""}`}>
+        {label}<span className={`text-[10px] ${on ? "" : "text-slate-300"}`}>{asc ? "▲" : desc ? "▼" : "⇅"}</span>
+      </button>
+    </th>
+  );
+}
+
+function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort }: {
   rows: SkuCard[]; selected: Set<string>; selectMode: boolean; onToggle: (id: string) => void; onOpen: (id: string) => void;
+  sortKey: string; onSort: (col: string) => void;
 }) {
   return (
     <div className="rounded-xl border border-slate-200 overflow-x-auto bg-white">
@@ -715,9 +733,9 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen }: {
           <tr className="text-left">
             <th className="px-2 py-2 w-8"></th>
             <th className="px-2 py-2 w-12">รูป</th>
-            <th className="px-3 py-2 font-medium">รหัส</th>
-            <th className="px-3 py-2 font-medium">ชื่อ</th>
-            <th className="px-3 py-2 font-medium text-right">ราคาขาย</th>
+            <SortTh label="รหัส" ascKey="code" descKey="code_desc" sortKey={sortKey} onSort={onSort} />
+            <SortTh label="ชื่อ" ascKey="name" descKey="name_desc" sortKey={sortKey} onSort={onSort} />
+            <SortTh label="ราคาขาย" ascKey="price_asc" descKey="price_desc" sortKey={sortKey} onSort={onSort} align="right" />
             <th className="px-3 py-2 font-medium text-right">สต๊อก</th>
             <th className="px-3 py-2 font-medium">แท็ก</th>
             <th className="px-3 py-2 font-medium">สถานะ</th>
