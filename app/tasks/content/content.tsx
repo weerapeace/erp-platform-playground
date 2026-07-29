@@ -258,7 +258,14 @@ export function ContentPageView() {
                         <td className="px-3 py-2"><StatusBadge status={c.status} /></td>
                         <td className="px-3 py-2 font-mono text-[11px] text-slate-400 whitespace-nowrap">{c.content_no}</td>
                         <td className="px-3 py-2 font-medium text-slate-800 max-w-[220px] truncate">{c.title}</td>
-                        <td className="px-3 py-2 text-slate-500 max-w-[170px] truncate">{c.task_label ? <span className="inline-flex items-center gap-1" title={c.task_no ?? undefined}>📋 {c.task_label}</span> : "—"}</td>
+                        {/* ผูกกับงานไหน — กดชื่องานไปดูงานได้เลย (แท็บใหม่ ไม่เปิด drawer คอนเทนต์) */}
+                        <td className="px-3 py-2 text-slate-500 max-w-[170px] truncate" onClick={(e) => c.task_id && e.stopPropagation()}>
+                          {c.task_label
+                            ? (c.task_id
+                              ? <a href={`/tasks?task=${c.task_id}`} target="_blank" rel="noreferrer" title={t("เปิดงานนี้ (แท็บใหม่)", "Open task (new tab)")} className="inline-flex items-center gap-1 hover:text-violet-700 hover:underline">📋 {c.task_label} ↗</a>
+                              : <span className="inline-flex items-center gap-1" title={c.task_no ?? undefined}>📋 {c.task_label}</span>)
+                            : "—"}
+                        </td>
                         <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{c.brand_label ? <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span> : "—"}</td>
                         <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{c.post_type ? postTypeLabel(c.post_type) : "—"}</td>
                         <td className="px-3 py-2"><div className="flex flex-wrap gap-1">{(c.platforms ?? []).map((p) => <span key={p} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{platformLabel(p)}</span>)}</div></td>
@@ -892,6 +899,14 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 className="text-base font-semibold text-slate-900 border-b-2 border-violet-400 outline-none bg-transparent w-full px-1 -mx-1" />
             )}
             <span className="font-mono text-xs text-slate-500">{d.content_no}</span>
+            {/* ผูกกับงานอยู่ → กดไปดูงานนั้นได้เลย (เปิดแท็บใหม่ ไม่หลุดจากคอนเทนต์ที่กำลังแก้) */}
+            {d.task_id && (
+              <a href={`/tasks?task=${d.task_id}`} target="_blank" rel="noreferrer"
+                title={t("เปิดงานที่ผูกกับคอนเทนต์นี้ (แท็บใหม่)", "Open the linked task (new tab)")}
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-100 whitespace-nowrap">
+                👁 {t("ดูงาน", "View task")} ↗
+              </a>
+            )}
           </div>
           <div className="flex items-center gap-1">
             <DrawerThemeButton theme={dth} update={dthUpdate} sections={CONTENT_SECTIONS} />
