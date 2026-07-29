@@ -278,6 +278,7 @@ function StatusCards({
   onPick: (v: string | null) => void;
   moduleKey?: string;
 }) {
+  const trCards = useT();
   const card = (key: string | null, label: string, count: number, m?: ReturnType<typeof getStatusStyle>) => {
     const on = active === key;
     return (
@@ -294,7 +295,7 @@ function StatusCards({
   };
   return (
     <div className="flex flex-wrap gap-2 mb-3">
-      {card(null, "ทั้งหมด", total)}
+      {card(null, trCards("ทั้งหมด", "All"), total)}
       {options.map((o) => { const m = getStatusStyle(o, moduleKey); return card(o, m.label, counts[o] ?? 0, m); })}
     </div>
   );
@@ -1521,15 +1522,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // ⚠️ DataTableView field คือ "filter" (ไม่ใช่ "predicate")
   const views: DataTableView[] = useMemo(() => (
     config.hideActiveStatus
-      ? [{ id: "all", label: "ทั้งหมด", filter: () => true }]   // ไม่มีฟิลด์ active → แท็บเดียวพอ
+      ? [{ id: "all", label: tr("ทั้งหมด", "All"), filter: () => true }]   // ไม่มีฟิลด์ active → แท็บเดียวพอ
       : [
-          { id: "active",   label: "เปิดอยู่",  filter: (r) => r[activeField] === true,
+          { id: "active",   label: tr("เปิดอยู่", "Active"),  filter: (r) => r[activeField] === true,
             serverFilter: { [activeField]: { type: "boolean", value: "true" } } },
-          { id: "all",      label: "ทั้งหมด",   filter: () => true },
-          { id: "inactive", label: "🗑 ถังขยะ", filter: (r) => r[activeField] === false,
+          { id: "all",      label: tr("ทั้งหมด", "All"),   filter: () => true },
+          { id: "inactive", label: tr("🗑 ถังขยะ", "🗑 Trash"), filter: (r) => r[activeField] === false,
             serverFilter: { [activeField]: { type: "boolean", value: "false" } } },
         ]
-  ), [activeField, config.hideActiveStatus]);
+  ), [activeField, config.hideActiveStatus, tr]);
 
   // ---- Row actions ----
   const rowActions: RowAction<Row>[] = useMemo(() => {
@@ -2256,7 +2257,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               <div className="relative">
                 <button onClick={() => setToolsOpen((o) => !o)}
                   className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">
-                  ⚙ ปรับแต่ง <span className="text-slate-400">▾</span>
+                  ⚙ {tr("ปรับแต่ง", "Tools")} <span className="text-slate-400">▾</span>
                 </button>
                 {toolsOpen && (
                   <>
@@ -2280,13 +2281,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               <button onClick={() => setImportOpen(true)}
                 title={tr("นำเข้าข้อมูลจาก CSV / Excel", "Import from CSV / Excel")}
                 className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">
-                📥 นำเข้า
+                📥 {tr("นำเข้า", "Import")}
               </button>
             )}
             {canCreate && (
               <button onClick={() => config.customCreate ? setCustomCreateOpen(true) : openCreate()}
                 className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap">
-                {config.customCreate?.label ?? `＋ เพิ่ม${config.title}`}
+                {config.customCreate?.label ?? `＋ ${tr("เพิ่ม", "Add")}${config.title}`}
               </button>
             )}
           </div>
