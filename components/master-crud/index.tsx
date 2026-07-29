@@ -80,7 +80,7 @@ function RelationLabelValue({ id, config, style }: { id: string; config?: Relati
     return () => { alive = false; };
   }, [id, config]);
   if (label) return <span className="text-sm text-slate-800" style={style}>{label}</span>;
-  if (!done)  return <span className="inline-block h-3.5 w-24 rounded bg-slate-100 animate-pulse align-middle" title="กำลังโหลดชื่อ…" />;
+  if (!done)  return <span className="inline-block h-3.5 w-24 rounded bg-slate-100 animate-pulse align-middle" title={tr("กำลังโหลดชื่อ…", "Loading name…")} />;
   // โหลดแล้วไม่พบชื่อ (เช่น record ถูกลบ) → โชว์รหัสสั้น ๆ ไม่ค้าง skeleton
   return <span className="text-sm text-slate-400" style={style} title={id}>{String(id).slice(0, 8)}…</span>;
 }
@@ -90,7 +90,7 @@ function defaultRelationCellRender(key: string) {
   // strip _id suffix สำหรับหา key ของ label
   const base = key.endsWith("_id") ? key.slice(0, -3) : key;
   return (value: unknown, row?: Record<string, unknown>): React.ReactNode => {
-    if (!row) return value ? <span className="inline-block h-3.5 w-20 rounded bg-slate-100 animate-pulse align-middle" title="กำลังโหลดชื่อ…" /> : <span className="text-slate-300">—</span>;
+    if (!row) return value ? <span className="inline-block h-3.5 w-20 rounded bg-slate-100 animate-pulse align-middle" title={tr("กำลังโหลดชื่อ…", "Loading name…")} /> : <span className="text-slate-300">—</span>;
     const label = row[`${base}_label`] ?? row[`${base}_name`];
     const secondary = row[`${base}_secondary`];
     if (label) return (
@@ -99,7 +99,7 @@ function defaultRelationCellRender(key: string) {
         {secondary != null && String(secondary) !== "" && <span className="ml-1 text-xs text-slate-400">· {String(secondary)}</span>}
       </span>
     );
-    if (value) return <span className="inline-block h-3.5 w-20 rounded bg-slate-100 animate-pulse align-middle" title="กำลังโหลดชื่อ…" />;
+    if (value) return <span className="inline-block h-3.5 w-20 rounded bg-slate-100 animate-pulse align-middle" title={tr("กำลังโหลดชื่อ…", "Loading name…")} />;
     return <span className="text-slate-300">—</span>;
   };
 }
@@ -1483,9 +1483,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         cell: ({ getValue }) => {
           const a = getValue() as boolean;
           return a ? (
-            <span className="inline-flex items-center gap-1.5 text-xs"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"/>เปิด</span>
+            <span className="inline-flex items-center gap-1.5 text-xs"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"/>{tr("เปิด", "On")}</span>
           ) : (
-            <span className="inline-flex items-center gap-1.5 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300"/>ปิดอยู่</span>
+            <span className="inline-flex items-center gap-1.5 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300"/>{tr("ปิดอยู่", "Off")}</span>
           );
         },
       });
@@ -1977,7 +1977,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             <span className={`flex-1 ${f.textCompute ? "whitespace-pre-wrap break-words" : "tabular-nums"}`}>
               {f.textCompute ? (computedTextValue(f.textCompute, form) ?? "—") : formatComputed(computeField(f.formula, form), f.computeFormat, f.computeDecimals)}
             </span>
-            <span className="text-[10px] text-slate-400 shrink-0 mt-0.5">∑ คำนวณอัตโนมัติ</span>
+            <span className="text-[10px] text-slate-400 shrink-0 mt-0.5">{tr("∑ คำนวณอัตโนมัติ", "∑ Auto-calculated")}</span>
           </div>
         ) : f.type === "image" ? (
           <ImageInput
@@ -2020,7 +2020,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             onChange={e => updateForm({ [f.key]: e.target.value })}
             style={tStyle}
             className={`${common} bg-white`}>
-            <option value="">— เลือก —</option>
+            <option value="">{tr("— เลือก —", "— select —")}</option>
             {f.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
           </select>
         ) : f.type === "textarea" ? (
@@ -2094,7 +2094,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     // ยังไม่ได้เปิดแก้ + แก้ได้ → ห่อ double-click (คลุมทุกชนิดที่รองรับ)
     const wrapDbl = (n: React.ReactNode) =>
       canQuickEdit(f) && !f.inlineEditable && dblEditKey !== f.key
-        ? <span onDoubleClick={() => setDblEditKey(f.key)} title="ดับเบิลคลิกเพื่อแก้ไข" className="block cursor-text rounded -mx-1 px-1 hover:bg-blue-50/50">{n}</span>
+        ? <span onDoubleClick={() => setDblEditKey(f.key)} title={tr("ดับเบิลคลิกเพื่อแก้ไข", "Double-click to edit")} className="block cursor-text rounded -mx-1 px-1 hover:bg-blue-50/50">{n}</span>
         : n;
     if (!copyable) return wrapDbl(node);
     // ค่าที่จะคัดลอก: computed → ค่าที่คำนวณได้ (ที่แสดงจริง), อื่น ๆ → ค่าที่เก็บ
@@ -2155,8 +2155,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     }
     if (f.type === "boolean") {
       return v
-        ? <span className="inline-flex items-center gap-1 text-sm text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิด</span>
-        : <span className="inline-flex items-center gap-1 text-sm text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิด</span>;
+        ? <span className="inline-flex items-center gap-1 text-sm text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{tr("เปิด", "On")}</span>
+        : <span className="inline-flex items-center gap-1 text-sm text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />{tr("ปิด", "Close")}</span>;
     }
     if (f.cellRender && f.type !== "relation") {
       if (v == null || v === "") return <span className="text-slate-300 text-sm">—</span>;
@@ -2222,8 +2222,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     <div className="flex items-center gap-3">
       {detailCode && <code className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600">{detailCode}</code>}
       {form[activeField]
-        ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิดอยู่</span>
-        : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>}
+        ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{tr("เปิดอยู่", "On")}</span>
+        : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />{tr("ปิดอยู่", "Off")}</span>}
     </div>
   );
 
@@ -2264,12 +2264,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     <div className="absolute right-0 z-40 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg py-1">
                       {/* ประตูหลัก: ออกแบบหน้า (ตาราง+ฟอร์ม+ฟิลด์ มี preview) */}
                       <button onClick={() => { setToolsOpen(false); setStudioOpen(true); }} className="w-full text-left px-3 py-2.5 hover:bg-orange-50 border-b border-slate-100">
-                        <div className="text-sm font-semibold text-orange-600 inline-flex items-center gap-2">🎨 ออกแบบหน้า</div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">จัดตาราง · ฟอร์ม · ฟิลด์ ที่เดียว — เห็น preview สด</div>
+                        <div className="text-sm font-semibold text-orange-600 inline-flex items-center gap-2">{tr("🎨 ออกแบบหน้า", "🎨 Page designer")}</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">{tr("จัดตาราง · ฟอร์ม · ฟิลด์ ที่เดียว — เห็น preview สด", "Table · form · fields in one place — live preview")}</div>
                       </button>
-                      <button onClick={() => { setToolsOpen(false); setFieldCreatorOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">＋ เพิ่ม Field ใหม่ <span className="text-[11px] text-slate-400">(ทางลัด)</span></button>
+                      <button onClick={() => { setToolsOpen(false); setFieldCreatorOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">{tr("＋ เพิ่ม Field ใหม่ ", "＋ Add new field ")}<span className="text-[11px] text-slate-400">{tr("(ทางลัด)", "(shortcut)")}</span></button>
                       {familyM2mFields.length > 0 && (
-                        <a href="/admin/family-template" onClick={() => setToolsOpen(false)} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">🧩 เทมเพลตประเภทสินค้า</a>
+                        <a href="/admin/family-template" onClick={() => setToolsOpen(false)} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">{tr("🧩 เทมเพลตประเภทสินค้า", "🧩 Product type template")}</a>
                       )}
                     </div>
                   </>
@@ -2278,7 +2278,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             )}
             {config.moduleKey && canCreate && registryFields && registryFields.length > 0 && (
               <button onClick={() => setImportOpen(true)}
-                title="นำเข้าข้อมูลจาก CSV / Excel"
+                title={tr("นำเข้าข้อมูลจาก CSV / Excel", "Import from CSV / Excel")}
                 className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">
                 📥 นำเข้า
               </button>
@@ -2317,7 +2317,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         {error && (
           <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center gap-2">
             <span className="flex-1">⚠ {/(not valid JSON|Unexpected token|Failed to fetch|<!DOCTYPE)/i.test(error) ? "โหลดข้อมูลไม่สำเร็จ (เซิร์ฟเวอร์อาจทำงานหนักชั่วคราว) — กดลองใหม่" : error}</span>
-            <button onClick={() => { setError(null); void refreshData(); }} className="flex-shrink-0 h-7 px-3 text-xs font-medium border border-red-300 rounded bg-white hover:bg-red-100">🔄 ลองใหม่</button>
+            <button onClick={() => { setError(null); void refreshData(); }} className="flex-shrink-0 h-7 px-3 text-xs font-medium border border-red-300 rounded bg-white hover:bg-red-100">{tr("🔄 ลองใหม่", "🔄 Retry")}</button>
           </div>
         )}
 
@@ -2335,7 +2335,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         {Object.keys(urlFilter).length > 0 && (
           <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
             🔎 กำลังแสดงเฉพาะรายการที่กรองจากลิงก์ที่เปิดมา
-            <button onClick={clearUrlFilter} className="ml-auto text-xs font-medium px-2 py-1 rounded bg-white border border-amber-300 hover:bg-amber-100">✕ ล้างตัวกรอง (ดูทั้งหมด)</button>
+            <button onClick={clearUrlFilter} className="ml-auto text-xs font-medium px-2 py-1 rounded bg-white border border-amber-300 hover:bg-amber-100">{tr("✕ ล้างตัวกรอง (ดูทั้งหมด)", "✕ Clear filters (show all)")}</button>
           </div>
         )}
 
@@ -2389,8 +2389,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         hasUnsavedChanges={drawerMode === "edit" && dirty}
         headerActions={config.moduleKey && canEdit && drawerMode === "view" ? () => (
           <button type="button" onClick={() => setStudioOpen(true)}
-            title="ออกแบบฟิลด์/ฟอร์มของโมดูลนี้ (เพิ่ม/แก้/ซ่อนฟิลด์ · แอดมิน)"
-            className="h-8 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-600 hover:bg-orange-50 inline-flex items-center gap-1 whitespace-nowrap">🎨 ออกแบบฟิลด์</button>
+            title={tr("ออกแบบฟิลด์/ฟอร์มของโมดูลนี้ (เพิ่ม/แก้/ซ่อนฟิลด์ · แอดมิน)", "Design this module's fields/form (add/edit/hide · admin)")}
+            className="h-8 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-600 hover:bg-orange-50 inline-flex items-center gap-1 whitespace-nowrap">{tr("🎨 ออกแบบฟิลด์", "🎨 Field designer")}</button>
         ) : undefined}
         title={
           drawerMode === "view"
@@ -2408,9 +2408,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 return (
                   <div className="mr-auto flex items-center gap-1">
                     <button onClick={() => go(-1)} disabled={idx <= 0}
-                      className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40" title="รายการก่อนหน้า">◀ ก่อนหน้า</button>
+                      className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40" title={tr("รายการก่อนหน้า", "Previous record")}>{tr("◀ ก่อนหน้า", "◀ Previous")}</button>
                     <button onClick={() => go(1)} disabled={idx < 0 || idx >= list.length - 1}
-                      className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40" title="รายการถัดไป">ถัดไป ▶</button>
+                      className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40" title={tr("รายการถัดไป", "Next record")}>{tr("ถัดไป ▶", "Next ▶")}</button>
                     {idx >= 0 && <span className="text-xs text-slate-400 ml-1">{idx + 1}/{list.length}</span>}
                   </div>
                 );
@@ -2425,11 +2425,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   </button>
                 ))}
               {editingId && canEdit && !config.hideActiveStatus && (
-                <button onClick={() => openDelete({ ...form, id: editingId })} title="ลบ (เก็บในถังขยะ · กู้คืนได้)"
-                  className="h-9 px-3 text-sm border border-rose-300 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1.5">🗑 ลบ</button>
+                <button onClick={() => openDelete({ ...form, id: editingId })} title={tr("ลบ (เก็บในถังขยะ · กู้คืนได้)", "Delete (goes to trash · restorable)")}
+                  className="h-9 px-3 text-sm border border-rose-300 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1.5">{tr("🗑 ลบ", "🗑 Delete")}</button>
               )}
               <button onClick={() => setModalOpen(false)}
-                className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">ปิด</button>
+                className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">{tr("ปิด", "Close")}</button>
               {canEdit && (
                 <button onClick={switchToEdit}
                   className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center gap-1.5">
@@ -2482,18 +2482,18 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               {canTranslate && canEdit && (
                 <>
                   <button type="button" onClick={() => void translateAll()} disabled={translating}
-                    title="แปลช่องไทย → ช่องอังกฤษที่ยังว่าง (ช่องที่กรอกไว้แล้วจะไม่ถูกทับ)"
+                    title={tr("แปลช่องไทย → ช่องอังกฤษที่ยังว่าง (ช่องที่กรอกไว้แล้วจะไม่ถูกทับ)", "Translate Thai → empty English fields (filled ones are kept)")}
                     className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50">
                     {translating ? "กำลังแปล…" : "🌐 แปลทั้งหมด"}
                   </button>
                   <button type="button" onClick={() => void translateAll({ overwrite: true })} disabled={translating}
-                    title="แปลใหม่ทับของเดิมทุกช่อง"
+                    title={tr("แปลใหม่ทับของเดิมทุกช่อง", "Re-translate and overwrite every field")}
                     className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">
                     ↻ แปลทับ
                   </button>
                 </>
               )}
-              {langMode === "en" && <span className="text-[11.5px] text-slate-400">กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ</span>}
+              {langMode === "en" && <span className="text-[11.5px] text-slate-400">{tr("กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ", "Viewing English fields · [EN] computed fields are built from the English ones")}</span>}
             </div>
           );
         })()}
@@ -2522,7 +2522,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
           // ปุ่มลบรูป (เฉพาะตอนดู + มีสิทธิ์แก้ + มีรูป) — โผล่ตอน hover
           const coverDeleteBtn = (coverKey && drawerMode === "view" && canEdit) ? (
-            <button type="button" onClick={() => setCoverDeleteOpen(true)} title="ลบรูป (ย้ายไปถังขยะ R2)"
+            <button type="button" onClick={() => setCoverDeleteOpen(true)} title={tr("ลบรูป (ย้ายไปถังขยะ R2)", "Delete image (moved to R2 trash)")}
               className="absolute top-2 right-2 z-10 h-8 w-8 flex items-center justify-center rounded-lg bg-white/90 border border-slate-200 text-rose-500 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-50 hover:border-rose-300">🗑</button>
           ) : null;
           // layout=gallery (เช่น Parent SKU) → ย้าย "รูปสินค้า" + Description ขึ้นคอลัมน์ซ้ายให้เห็นเด่น (ไม่ต้องเลื่อนหา)
@@ -2609,7 +2609,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                       ? <ImageGallery r2Key={coverKey} />
                       : drawerMode === "edit"
                         ? renderField(effectiveFields.find(f => f.key === "cover_image_r2_key")!)
-                        : <div className="text-slate-300 text-sm">ไม่มีรูป</div>}
+                        : <div className="text-slate-300 text-sm">{tr("ไม่มีรูป", "No image")}</div>}
                     {coverDeleteBtn}
                   </div>
                 )}
@@ -2619,8 +2619,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   {detailCode && <code className="inline-block text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600 mb-1">{detailCode}</code>}
                   <div>
                     {form[activeField]
-                      ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิดอยู่</span>
-                      : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>}
+                      ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{tr("เปิดอยู่", "On")}</span>
+                      : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />{tr("ปิดอยู่", "Off")}</span>}
                   </div>
                 </div>
 
@@ -2681,13 +2681,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                       maxSizeBytes={config.fileAttachments.maxSizeBytes}
                     />
                   ) : (
-                    <div className="text-xs text-slate-400 text-center py-3">บันทึกรายการก่อน แล้วค่อยแนบไฟล์</div>
+                    <div className="text-xs text-slate-400 text-center py-3">{tr("บันทึกรายการก่อน แล้วค่อยแนบไฟล์", "Save the record first, then attach files")}</div>
                   )}
                 </div>
               )}
 
               <div className="flex-1 min-w-0 md:order-2">
-                {detailLoading && drawerMode === "view" && <div className="text-xs text-slate-400 mb-2">⏳ กำลังโหลด...</div>}
+                {detailLoading && drawerMode === "view" && <div className="text-xs text-slate-400 mb-2">{tr("⏳ กำลังโหลด...", "⏳ Loading...")}</div>}
                 {drawerMode === "edit" && formErr && (
                   <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
                 )}
@@ -2697,7 +2697,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
                     : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />
                 ) : (
-                  <div className="text-sm text-slate-300 py-8 text-center">ไม่มีข้อมูลเพิ่มเติม</div>
+                  <div className="text-sm text-slate-300 py-8 text-center">{tr("ไม่มีข้อมูลเพิ่มเติม", "No extra details")}</div>
                 )}
               </div>
             </div>
@@ -2717,7 +2717,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           if (rels.length === 0) return null;
           return (
             <div className="mt-6 pt-4 border-t border-slate-100 space-y-4">
-              <div className="text-sm font-semibold text-slate-700">🧩 ข้อมูลที่เกี่ยวข้อง (360)</div>
+              <div className="text-sm font-semibold text-slate-700">{tr("🧩 ข้อมูลที่เกี่ยวข้อง (360)", "🧩 Related records (360)")}</div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {rels.map((rr) => (
                   <div key={`${rr.source_module_key}|${rr.fk_column}`} className="border border-slate-150 rounded-lg p-3 bg-slate-50/40">
@@ -2745,11 +2745,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       </Drawer>
 
       <ConfirmDialog open={confirmDiscard} onClose={() => setConfirmDiscard(false)}
-        title="ยังไม่บันทึก" message="ออกโดยไม่บันทึกหรือไม่?"
+        title={tr("ยังไม่บันทึก", "Unsaved")} message="ออกโดยไม่บันทึกหรือไม่?"
         confirmText="ออก" cancelText="อยู่ต่อ" onConfirm={discard} variant="danger" />
 
       <ConfirmDialog open={coverDeleteOpen} onClose={() => setCoverDeleteOpen(false)}
-        title="ลบรูป" message="ลบรูปนี้ออกจากรายการ? ไฟล์จะถูกย้ายไปถังขยะ แล้วลบถาวรอัตโนมัติภายหลัง (กู้คืนได้ก่อนถูกลบ)"
+        title={tr("ลบรูป", "Delete image")} message="ลบรูปนี้ออกจากรายการ? ไฟล์จะถูกย้ายไปถังขยะ แล้วลบถาวรอัตโนมัติภายหลัง (กู้คืนได้ก่อนถูกลบ)"
         confirmText="ลบรูป" cancelText="ยกเลิก" variant="danger" onConfirm={deleteCover} />
 
       {/* ✨ AI คิดรายละเอียดสินค้า — ค่าที่เลือกลงฟอร์มเฉย ๆ ต้องกดบันทึกเอง */}
@@ -2786,7 +2786,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       )}
 
       <ConfirmDialog open={archiveTarget !== null} onClose={() => setArchiveTarget(null)}
-        title="ปิดบัญชี" message={`ปิดบัญชี "${archiveTarget?.name as string}" ใช่ไหม?`}
+        title={tr("ปิดบัญชี", "Deactivate")} message={`ปิดบัญชี "${archiveTarget?.name as string}" ใช่ไหม?`}
         confirmText="ปิดบัญชี" cancelText="ยกเลิก" variant="danger"
         onConfirm={() => { if (archiveTarget) { void apiFetch(`${apiBase}${config.apiPath}/${archiveTarget.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" }).then(() => refreshData()); setArchiveTarget(null); } }} />
 
@@ -2795,23 +2795,23 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         <div className="fixed inset-0 z-[150] bg-black/40 flex items-center justify-center p-4" onClick={() => !deleting && setDeleteTarget(null)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-100">
-              <h3 className="text-base font-semibold text-slate-800">ลบรายการ</h3>
+              <h3 className="text-base font-semibold text-slate-800">{tr("ลบรายการ", "Delete record")}</h3>
               <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{rowLabel(deleteTarget)}</p>
             </div>
             <div className="p-5 space-y-2">
               <label className={`flex gap-3 items-start p-3 rounded-lg border cursor-pointer ${deleteMode === "soft" ? "border-amber-300 bg-amber-50" : "border-slate-200 hover:bg-slate-50"}`}>
                 <input type="radio" name="delmode" checked={deleteMode === "soft"} onChange={() => { setDeleteMode("soft"); setDeleteText(""); }} className="mt-0.5" />
-                <div><div className="text-sm font-medium text-slate-800">🟡 ลบชั่วคราว (แนะนำ)</div>
-                  <div className="text-xs text-slate-500 mt-0.5">ซ่อนจากตาราง แต่ข้อมูลยังอยู่ — กู้คืนได้ภายหลัง</div></div>
+                <div><div className="text-sm font-medium text-slate-800">{tr("🟡 ลบชั่วคราว (แนะนำ)", "🟡 Move to trash (recommended)")}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">{tr("ซ่อนจากตาราง แต่ข้อมูลยังอยู่ — กู้คืนได้ภายหลัง", "Hidden from the table but kept — restorable later")}</div></div>
               </label>
               {allowPermanentDelete && <label className={`flex gap-3 items-start p-3 rounded-lg border cursor-pointer ${deleteMode === "hard" ? "border-red-300 bg-red-50" : "border-slate-200 hover:bg-slate-50"}`}>
                 <input type="radio" name="delmode" checked={deleteMode === "hard"} onChange={() => setDeleteMode("hard")} className="mt-0.5" />
-                <div><div className="text-sm font-medium text-red-700">🔴 ลบถาวร (กู้คืนไม่ได้)</div>
-                  <div className="text-xs text-slate-500 mt-0.5">ลบจริงออกจากฐานข้อมูล Supabase — ไม่สามารถกู้คืน</div></div>
+                <div><div className="text-sm font-medium text-red-700">{tr("🔴 ลบถาวร (กู้คืนไม่ได้)", "🔴 Delete permanently (no undo)")}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">{tr("ลบจริงออกจากฐานข้อมูล Supabase — ไม่สามารถกู้คืน", "Really removed from the database — cannot be undone")}</div></div>
               </label>}
               {deleteMode === "hard" && (
                 <div className="pt-1">
-                  <label className="text-xs text-slate-600">พิมพ์ <code className="px-1 bg-slate-100 rounded text-red-600 font-mono">ลบ</code> เพื่อยืนยัน</label>
+                  <label className="text-xs text-slate-600">พิมพ์ <code className="px-1 bg-slate-100 rounded text-red-600 font-mono">ลบ</code>{tr(" เพื่อยืนยัน", " to confirm")}</label>
                   <input value={deleteText} onChange={(e) => setDeleteText(e.target.value)} autoFocus placeholder="ลบ"
                     className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-red-400" />
                 </div>
@@ -2819,7 +2819,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">⚠ {error}</div>}
             </div>
             <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
-              <button onClick={() => setDeleteTarget(null)} disabled={deleting} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+              <button onClick={() => setDeleteTarget(null)} disabled={deleting} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{tr("ยกเลิก", "Cancel")}</button>
               <button onClick={doDelete} disabled={deleting || (deleteMode === "hard" && deleteText.trim() !== "ลบ")}
                 className={`h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50 ${deleteMode === "hard" ? "bg-red-600 hover:bg-red-700" : "bg-amber-500 hover:bg-amber-600"}`}>
                 {deleting ? "กำลังลบ..." : deleteMode === "hard" ? "ลบถาวร" : "ลบชั่วคราว"}
@@ -2989,7 +2989,7 @@ export function MasterRecordDrawer({
             // ฝังอยู่ในแท็บ "ราคา" (ข้อมูลซื้อทั้งหมดอยู่ที่เดียว) — ดู inTab ใน LayoutTabs
             { key: "suppliers", label: "ร้านที่จำหน่าย + ราคาซื้อ", icon: "🏪", inTab: "tab_ราคา", render: ({ recordId }) => recordId
               ? <div className="pt-1"><SkuSupplierList skuId={recordId} defaultOpen /></div>
-              : <div className="p-3 text-sm text-slate-400">บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย</div> },
+              : <div className="p-3 text-sm text-slate-400">{tr("บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย", "Save the product first, then add suppliers")}</div> },
           ]
         : undefined,
     };
@@ -3052,7 +3052,7 @@ function QuickEditCell({ field, value, onSave, siblingValues, autoOpen, onDone }
         className="inline-flex items-center gap-1.5 text-sm group">
         <span className={`w-1.5 h-1.5 rounded-full ${value ? "bg-emerald-500" : "bg-slate-300"}`} />
         <span className={value ? "text-emerald-600" : "text-slate-400"}>{value ? "เปิด" : "ปิด"}</span>
-        <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100">✎ แตะเพื่อสลับ</span>
+        <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100">{tr("✎ แตะเพื่อสลับ", "✎ Tap to toggle")}</span>
         {err && <span className="text-[10px] text-red-500 ml-1">{err}</span>}
       </button>
     );
@@ -3140,7 +3140,7 @@ function sectionIconNode(icon?: string | null): React.ReactNode {
 function CopyValueBtn({ text }: { text: string }) {
   const [done, setDone] = useState(false);
   return (
-    <button type="button" title="คัดลอกค่า"
+    <button type="button" title={tr("คัดลอกค่า", "Copy value")}
       onClick={(e) => { e.stopPropagation(); try { navigator.clipboard?.writeText(text); setDone(true); setTimeout(() => setDone(false), 1200); } catch { /* ignore */ } }}
       className={`text-xs shrink-0 ${done ? "text-emerald-600" : "text-slate-300 hover:text-blue-600"}`}>
       {done ? "✓" : "⧉"}
@@ -3228,7 +3228,7 @@ function LayoutTabs({
         })}
         {active === tabs[0]?.key && leftover.length > 0 && (
           <div>
-            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">อื่นๆ</h4>
+            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">{tr("อื่นๆ", "Other")}</h4>
             {renderGrid(leftover, 2)}
           </div>
         )}
@@ -3390,7 +3390,7 @@ function CompletenessBar({ fields, values }: { fields: FieldDef[]; values: Recor
   return (
     <div className="rounded-lg border border-slate-200 p-3">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-xs font-medium text-slate-600">📊 ความครบของข้อมูล</span>
+        <span className="text-xs font-medium text-slate-600">{tr("📊 ความครบของข้อมูล", "📊 Data completeness")}</span>
         <span className={`text-xs font-bold ${txt}`}>{pct}% ({filled.length}/{marked.length})</span>
       </div>
       <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full ${bar} transition-all`} style={{ width: `${pct}%` }} /></div>
@@ -3480,7 +3480,7 @@ function M2mChipsCell({ vals }: { vals: string[] }) {
   };
   return (
     <>
-      <button ref={btnRef} type="button" onClick={openPop} title="กดดูรายการทั้งหมด"
+      <button ref={btnRef} type="button" onClick={openPop} title={tr("กดดูรายการทั้งหมด", "Click to see all")}
         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100">
         📎 {vals.length} รายการ ▾
       </button>
