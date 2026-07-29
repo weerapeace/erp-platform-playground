@@ -21,6 +21,7 @@ import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
 import { WorkflowStatusManager } from "@/components/workflow-status-manager";
 import { SkuWizard } from "@/app/master/design-sheets/sku-wizard";
 import { BomFromCostWizard } from "./bom-from-cost-wizard";
+import { FabricCalcModal } from "./fabric-calc-modal";
 import { BomToCostWizard, type BomPulledLine } from "./bom-to-cost-wizard";
 import { ToQuotationModal } from "@/app/master/design-sheets/to-quotation-modal";
 import { QuotationCartDrawer } from "@/app/master/design-sheets/quotation-cart-drawer";
@@ -912,6 +913,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [statusMgr, setStatusMgr] = useState(false);   // ป๊อปอัปจัดการสถานะงาน
   const [skuWizard, setSkuWizard] = useState(false);   // Wizard สร้าง SKU
   const [bomWizard, setBomWizard] = useState(false);   // Wizard ดึงตีราคา → สร้างสูตร BOM
+  const [fabricCalc, setFabricCalc] = useState(false); // 🧵 คำนวณจำนวนผ้า (จากขนาดชิ้น × จำนวนผลิต)
   const [bomPull, setBomPull] = useState(false);       // Wizard ดึงโครงจาก BOM → ตีราคา (คู่กลับ)
   const [toQuote, setToQuote] = useState(false);       // ส่งไปใบเสนอราคา (ระบบขาย)
   const [cartId, setCartId] = useState<string | null>(null);   // ตะกร้าใบเสนอราคาปัจจุบัน
@@ -1825,6 +1827,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     className="h-8 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50">🧬⬇ ดึงจาก BOM</button>}
                   {canEdit && <button onClick={() => setBomWizard(true)} title="ดึงกว้าง/ยาว/จำนวนจากตีราคาไปสร้างสูตรการผลิต (วัตถุดิบใส่ทีหลัง)"
                     className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">🧬 สร้างสูตร BOM</button>}
+                  <button onClick={() => setFabricCalc(true)} title="คำนวณว่าต้องใช้ผ้ากี่หลา/กี่ผืน จากขนาดชิ้นในตาราง × จำนวนที่ผลิต (ใช้ได้ทั้งโหมดดู)"
+                    className="h-8 px-3 text-sm font-medium border border-teal-300 text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100">🧵 คำนวณผ้า</button>
                 </div>
               </div>
               {priceItems.length === 0 && (
@@ -2081,6 +2085,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           width_cm: r.width_cm, length_cm: r.length_cm, pieces: r.pieces,
           face_width_cm: r.face_width_cm, waste_percent: r.waste_percent, qty: r.qty, uom: r.uom,
         }))} />
+
+      {/* 🧵 คำนวณจำนวนผ้า — จำลองวางชิ้นบนหน้าผ้า (ดูได้ทั้งโหมดดู/แก้ไข ไม่แก้ข้อมูล) */}
+      {fabricCalc && (
+        <FabricCalcModal onClose={() => setFabricCalc(false)}
+          lines={curLines.map((r) => ({
+            key: r.key, item_id: r.item_id, item_name: r.item_name,
+            width_cm: r.width_cm, length_cm: r.length_cm, pieces: r.pieces,
+            face_width_cm: r.face_width_cm, waste_percent: r.waste_percent, uom: r.uom,
+          }))} />
+      )}
 
       {/* Wizard คู่กลับ: ดึงโครงจาก BOM (ชนิด/กว้าง/ยาว/จำนวน) → ต่อท้ายบรรทัดตีราคาแท็บที่กำลังดู (วัสดุ+ราคาเลือกเอง) */}
       {form?.id && (
