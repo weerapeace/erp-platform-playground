@@ -71,6 +71,8 @@ const CONFIG: MasterCRUDConfig = {
   description: "Product Templates — จัดการ visible/filter/search/required ที่ /admin/schema-sync",
   icon:        "📦",
   activeField: "is_active",
+  // ✨ ปุ่มให้ AI ดูรูปสินค้าแล้วเขียน ชื่อ/Introduction/Description (ไทย+อังกฤษ) — ไม่แตะช่องขนาด
+  aiProductDetail: true,
   // server mode — โหลดทีละหน้า (smooth + กัน 1102) เหมือนหน้า SKU; card view เปิดได้ใน server mode แล้ว
   serverMode:  true,
   pageLimit:   200,

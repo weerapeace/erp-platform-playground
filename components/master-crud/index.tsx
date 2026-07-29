@@ -46,6 +46,7 @@ const ParentWebListings = dynamic(() => import("@/components/parent-web-listings
 const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-tab").then((m) => m.ParentPlatformsTab), { ssr: false });
 const ParentIssuesPanel = dynamic(() => import("@/components/parent-issues-panel").then((m) => m.ParentIssuesPanel), { ssr: false });
 const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").then((m) => m.SkuSupplierList), { ssr: false });
+const AiProductDetailModal = dynamic(() => import("@/components/ai-product-detail").then((m) => m.AiProductDetailModal), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -481,6 +482,12 @@ export type MasterCRUDConfig = {
   /** แท็บพิเศษต่อโมดูล — โผล่ในแถบแท็บ (ต่อจากแท็บจาก Field Registry) เช่น "🛍 เว็บไซต์" ของ Parent SKU */
   extraTabs?: { key: string; label: string; icon?: string; inTab?: string; render: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode }[];
   /**
+   * ปุ่ม "✨ ให้ AI คิดรายละเอียดสินค้า" ในฟอร์ม (ของกลาง) — ใช้กับโมดูลที่มีช่อง
+   * name_th / introduction / description (+ คู่อังกฤษ) และมีรูปสินค้าให้ AI ดู
+   * AI ไม่แตะช่องขนาด/น้ำหนักโดยตั้งใจ · ตั้งคำสั่งรายแบรนด์ได้ที่ งาน → ตั้งค่า → คำสั่ง AI
+   */
+  aiProductDetail?: boolean;
+  /**
    * F19: server-side pagination — ดึงทีละหน้าจาก server (กัน Worker 1102 ถาวร)
    * เหมาะกับ dataset ใหญ่ (>500 rows เช่น parent-skus, skus)
    * Trade-off: ปิด client filter/saved-views (search + pagination ทำที่ server)
@@ -871,6 +878,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [dblEditKey,  setDblEditKey]  = useState<string | null>(null);   // ฟิลด์ที่เพิ่งดับเบิลคลิกเพื่อแก้ตรงนั้น
   const [langMode,    setLangMode]    = useState<"th" | "en">("th");     // สลับดูช่องไทย/อังกฤษ (ของกลาง: ui_style.lang_en)
   const [translating, setTranslating] = useState(false);
+  const [aiDetailOpen, setAiDetailOpen] = useState(false);              // ✨ ป๊อป "ให้ AI คิดรายละเอียดสินค้า"
   const [detailLoading, setDetailLoading] = useState(false);
 
   // อัปเดตค่า "related" สด เมื่อเปลี่ยน FK ต้นทางในฟอร์ม (เช่น เลือก size_description_id → size_description/how_to_size อัปเดตตาม)
@@ -2432,13 +2440,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           )
         }
       >
-        {/* สลับภาษา TH/EN + แปลอัตโนมัติ — โผล่เฉพาะโมดูลที่ตั้งคู่ภาษาไว้ (ui_style.lang_en) */}
+        {/* สลับภาษา TH/EN + แปลอัตโนมัติ + ✨ ให้ AI คิดรายละเอียด — โผล่เฉพาะโมดูลที่ตั้งค่าไว้ */}
         {(() => {
           const pairFields = effectiveFields.filter((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_en);
-          if (pairFields.length === 0) return null;
+          const aiBtn = !!config.aiProductDetail && !!editingId && canEdit;
+          if (pairFields.length === 0 && !aiBtn) return null;
           const canTranslate = pairFields.some((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_translate !== false);
           return (
             <div className="flex items-center gap-2 mb-3 flex-wrap">
+              {pairFields.length > 0 && (
               <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
                 {(["th", "en"] as const).map((m) => (
                   <button key={m} type="button" onClick={() => setLangMode(m)}
@@ -2448,6 +2458,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   </button>
                 ))}
               </div>
+              )}
+              {aiBtn && (
+                <button type="button" onClick={() => setAiDetailOpen(true)}
+                  title="ให้ AI ดูรูปสินค้าแล้วเขียนชื่อสินค้า / Introduction / Description ให้ทั้งไทยและอังกฤษ (ไม่แตะช่องขนาด)"
+                  className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100">
+                  ✨ ให้ AI คิดรายละเอียด
+                </button>
+              )}
               {canTranslate && canEdit && (
                 <>
                   <button type="button" onClick={() => void translateAll()} disabled={translating}
@@ -2720,6 +2738,17 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       <ConfirmDialog open={coverDeleteOpen} onClose={() => setCoverDeleteOpen(false)}
         title="ลบรูป" message="ลบรูปนี้ออกจากรายการ? ไฟล์จะถูกย้ายไปถังขยะ แล้วลบถาวรอัตโนมัติภายหลัง (กู้คืนได้ก่อนถูกลบ)"
         confirmText="ลบรูป" cancelText="ยกเลิก" variant="danger" onConfirm={deleteCover} />
+
+      {/* ✨ AI คิดรายละเอียดสินค้า — ค่าที่เลือกลงฟอร์มเฉย ๆ ต้องกดบันทึกเอง */}
+      {aiDetailOpen && editingId && (
+        <AiProductDetailModal parentId={editingId} current={form} onClose={() => setAiDetailOpen(false)}
+          onApply={(vals) => {
+            if (Object.keys(vals).length === 0) return;
+            setForm((p) => ({ ...p, ...vals }));
+            setDirty(true);
+            flash(`ใส่ข้อความจาก AI แล้ว ${Object.keys(vals).length} ช่อง — ตรวจแล้วกดบันทึก`);
+          }} />
+      )}
 
       <ConfirmDialog open={archiveTarget !== null} onClose={() => setArchiveTarget(null)}
         title="ปิดบัญชี" message={`ปิดบัญชี "${archiveTarget?.name as string}" ใช่ไหม?`}

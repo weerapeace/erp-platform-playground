@@ -98,8 +98,14 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
   // เปลี่ยนคู่ที่เลือก → เติมข้อความของ "ระดับนั้นเป๊ะ ๆ" (ไม่มี = ว่าง + โชว์ตัวที่มีผลอยู่ให้ดู)
   useEffect(() => { setDraft(exact?.prompt ?? ""); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [brandSel, platSel, rows.length]);
 
+  // งาน AI ที่ไม่ใช่แคปชั่นโซเชียล แต่ใช้ทะเบียน prompt ชุดเดียวกัน (ตั้งรายแบรนด์ได้เหมือนกัน)
+  const jobOptions = useMemo(() => [
+    ...platforms,
+    { value: "product_detail", label: t("📦 รายละเอียดสินค้า (ชื่อ/Introduction/Description)", "📦 Product detail (name/intro/description)") },
+  ], [platforms, t]);
+
   const brandName = (id: string | null) => (id ? (brands.find((b) => b.id === id)?.name ?? id.slice(0, 8)) : t("ทุกแบรนด์", "All brands"));
-  const platName = (k: string | null) => (k ? (platforms.find((p) => p.value === k)?.label ?? k) : t("ทุกแพลตฟอร์ม", "All platforms"));
+  const platName = (k: string | null) => (k ? (jobOptions.find((p) => p.value === k)?.label ?? k) : t("ทุกแพลตฟอร์ม", "All platforms"));
 
   const save = async () => {
     if (!draft.trim()) { showToast(t("กรุณาใส่คำสั่ง (prompt)", "Please enter a prompt")); return; }
@@ -143,7 +149,7 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
             <span className="text-[11px] font-medium text-slate-500 block mb-0.5">{t("แพลตฟอร์ม", "Platform")}</span>
             <select value={platSel} onChange={(e) => setPlatSel(e.target.value)} className={sel}>
               <option value={ALL}>{t("ทุกแพลตฟอร์ม", "All platforms")}</option>
-              {platforms.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+              {jobOptions.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
           </label>
           <span className={`text-[11px] px-2 py-1 rounded-full border ${exact ? "bg-violet-50 text-violet-700 border-violet-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}>
