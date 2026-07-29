@@ -47,7 +47,9 @@ export type FabricResult = {
   yards: number;              // แปลงเป็นหลา (1 หลา = 91.44 ซม.)
   meters: number;
   sheets?: number;            // เฉพาะผ้าผืน: ต้องสั่งกี่ผืน (เผื่อเสียแล้ว)
-  sheetsUsed?: number;        // เฉพาะผ้าผืน: วางจริงกี่ผืน (ไว้วาดภาพ)
+  sheetsUsed?: number;        // เฉพาะผ้าผืน: ใช้จริงกี่ผืน (ก่อนเผื่อเสีย)
+  sheetsDrawn?: number;       // เฉพาะผ้าผืน: มีผังจริงให้วาดกี่ผืน (งานล็อตใหญ่จะน้อยกว่า sheetsUsed)
+  sampledFrom?: { simulated: number; total: number };   // งานล็อตใหญ่: จำลองกี่ชิ้นจากทั้งหมดกี่ชิ้น
   rows: FabricRow[];          // ผังการวาง (ไว้ทำภาพ preview ในเฟสถัดไป)
   pieceAreaCm2: number;       // พื้นที่ชิ้นรวม
   fabricAreaCm2: number;      // พื้นที่ผ้าที่ใช้จริง
@@ -64,14 +66,27 @@ export function packFabric(input: FabricInput): FabricResult {
   const waste = Math.max(0, Number(input.wastePercent) || 0);
   const rotate = !!input.allowRotate;
 
+  // งานล็อตใหญ่ (เช่นผลิต 1,000 ใบ = หมื่นกว่าชิ้น): ไม่ต้องจำลองทุกชิ้น
+  // เพราะการวางจะซ้ำรูปแบบเดิม → จำลอง "ตัวอย่าง" แล้วขยายผลตามสัดส่วน (เร็ว + ผลใกล้เคียง)
+  const MAX_SIM_PIECES = 2000;
+  const wantTotal = input.pieces.reduce((s, p) => s + Math.max(0, Math.floor(Number(p.qty) || 0)), 0);
+  const simRatio = wantTotal > MAX_SIM_PIECES ? MAX_SIM_PIECES / wantTotal : 1;
+
   // กระจายเป็นชิ้นเดี่ยว ๆ (qty ชิ้น) + ตัดชิ้นที่ข้อมูลไม่ครบออก
   const flat: { key: string; label: string; w: number; h: number }[] = [];
+  let realArea = 0;
   for (const p of input.pieces) {
     const w = Number(p.width_cm) || 0, h = Number(p.length_cm) || 0, n = Math.max(0, Math.floor(Number(p.qty) || 0));
     if (w <= 0 || h <= 0 || n === 0) continue;
-    for (let i = 0; i < n; i++) flat.push({ key: p.key, label: p.label, w, h });
+    realArea += w * h * n;
+    const simN = simRatio < 1 ? Math.max(1, Math.round(n * simRatio)) : n;   // ย่อสัดส่วน (อย่างน้อยชนิดละ 1)
+    for (let i = 0; i < simN; i++) flat.push({ key: p.key, label: p.label, w, h });
   }
-  const pieceAreaCm2 = flat.reduce((s, p) => s + p.w * p.h, 0);
+  // สัดส่วนจริงที่ย่อได้ (หลังปัดเศษ) → ใช้ขยายผลกลับ
+  const simArea = flat.reduce((s, p) => s + p.w * p.h, 0);
+  const scaleUp = simArea > 0 ? realArea / simArea : 1;
+  const sampled = simRatio < 1;
+  const pieceAreaCm2 = realArea;
 
   if (face <= 0) return emptyResult("ยังไม่รู้หน้ากว้างผ้า — ใส่หน้ากว้าง (ซม.) ก่อน", flat.length, pieceAreaCm2);
   if (flat.length === 0) return emptyResult("ไม่มีชิ้นที่ต้องตัด (ตรวจว่ากรอกกว้าง/ยาว/จำนวนชิ้นครบไหม)", 0, 0);
@@ -118,17 +133,19 @@ export function packFabric(input: FabricInput): FabricResult {
     }
   });
 
-  // ความยาวที่ใช้: ผ้าม้วน = ขอบล่างสุด · ผ้าผืน = (จำนวนผืน × ความยาวผืน) เพื่อคิดต้นทุนรวม
+  // ความยาวที่ใช้: ผ้าม้วน = ขอบล่างสุด · ผ้าผืน = รวมทุกผืน
+  // งานล็อตใหญ่ที่ย่อจำลอง → ขยายผลกลับตามสัดส่วนพื้นที่จริง (scaleUp)
   const bottomOf = (items: FabricItem[]) => items.reduce((m, i) => Math.max(m, i.y + i.h), 0);
-  const usedLengthCm = sheetLen > 0
+  const simUsedLength = sheetLen > 0
     ? sheetsPlaced.reduce((s, items) => s + bottomOf(items), 0)
     : bottomOf(sheetsPlaced[0] ?? []);
+  const usedLengthCm = simUsedLength * scaleUp;
   const lengthWithWasteCm = usedLengthCm * (1 + waste / 100);
   const fabricAreaCm2 = lengthWithWasteCm * face;
 
   const res: FabricResult = {
     ok: true,
-    totalPieces: flat.length,
+    totalPieces: wantTotal,          // จำนวนชิ้นจริงที่ต้องตัด (ไม่ใช่จำนวนที่จำลอง)
     usedLengthCm,
     lengthWithWasteCm,
     yards: lengthWithWasteCm / YARD_CM,
@@ -140,12 +157,15 @@ export function packFabric(input: FabricInput): FabricResult {
     naiveYards: face > 0 ? (pieceAreaCm2 * (1 + waste / 100)) / face / YARD_CM : 0,
   };
 
-  // ผ้าผืน: จำนวนผืนที่วางจริง (จาก loop ด้านบน) + เผื่อเสีย
+  // ผ้าผืน: จำนวนผืน (ขยายกลับถ้าย่อจำลอง) + เผื่อเสีย
   if (sheetLen > 0) {
-    res.sheetsUsed = sheetsPlaced.length;
-    res.sheets = Math.ceil(sheetsPlaced.length * (1 + waste / 100));
+    const realSheets = sheetsPlaced.length * scaleUp;
+    res.sheetsUsed = Math.max(sheetsPlaced.length, Math.ceil(realSheets));
+    res.sheets = Math.ceil(realSheets * (1 + waste / 100));
+    res.sheetsDrawn = sheetsPlaced.length;                    // จำนวนผืนที่มีผังจริงให้วาด
   }
-  // ชิ้นที่วางไม่ลงเลย (ไม่ควรเกิดถ้าไม่ oversize) — แจ้งไว้กันเงียบ
+  if (sampled) res.sampledFrom = { simulated: flat.length, total: wantTotal };
+  // ชิ้นที่วางไม่ลงเลย (ปกติเกิดเฉพาะชิ้นใหญ่เกินผ้า ซึ่งดักไว้ก่อนแล้ว)
   if (remaining.length > 0) { res.ok = false; res.error = `วางไม่ลง ${remaining.length} ชิ้น — ลองเพิ่มหน้ากว้าง/ความยาวผืน`; }
   return res;
 }

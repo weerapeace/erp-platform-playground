@@ -140,6 +140,11 @@ export function FabricCalcModal({ lines, onClose }: { lines: CalcLine[]; onClose
                 <Stat label="ความยาวที่วางจริง" value={`${fmt(result.usedLengthCm, 1)} ซม.`} hint={`${result.rows.length} แถว`} />
                 <Stat label="ใช้ผ้าคุ้ม" value={`${fmt(result.utilizationPercent, 1)}%`} hint={result.utilizationPercent >= 75 ? "ดี" : result.utilizationPercent >= 55 ? "พอใช้" : "เศษเยอะ"} />
               </div>
+              {result.sampledFrom && (
+                <p className="mt-3 text-[11.5px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  ℹ️ งานล็อตใหญ่ ({result.sampledFrom.total.toLocaleString("th-TH")} ชิ้น) — ระบบจำลองการวางจาก {result.sampledFrom.simulated.toLocaleString("th-TH")} ชิ้นแล้วขยายผลตามสัดส่วน (การวางซ้ำรูปแบบเดิม ตัวเลขจึงใกล้เคียงของจริง)
+                </p>
+              )}
               <p className="mt-3 pt-3 border-t border-emerald-200/70 text-[11.5px] text-slate-500">
                 เทียบวิธีเดิม (เอาพื้นที่ ÷ หน้ากว้าง) = {fmt(result.naiveYards)} หลา ·
                 วิธีนี้คิดเศษที่ตัดไม่ได้ด้วย จึงมักมากกว่า {result.naiveYards > 0 ? `${fmt((result.yards / result.naiveYards - 1) * 100, 0)}%` : "—"}

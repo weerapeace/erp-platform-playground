@@ -39,11 +39,12 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
   // ผ้าผืนที่ต้องใช้เยอะ: วาดแค่ MAX_SHEETS ผืนแรกพอ (ผืนที่เหลือหน้าตาเหมือนกัน + ภาพยาวเกินจะอืด)
   const MAX_SHEETS = 10;
   const totalSheets = mode === "sheet" ? (result.sheetsUsed ?? 0) : 1;
-  const shownSheets = Math.min(totalSheets, MAX_SHEETS);
+  const drawable = mode === "sheet" ? (result.sheetsDrawn ?? result.sheetsUsed ?? 0) : 1;   // ผังที่มีจริง
+  const shownSheets = Math.min(drawable, MAX_SHEETS);
   const sheets = useMemo(() => {
-    if (mode === "sheet" && (result.sheetsUsed ?? 0) > 0) {
+    if (mode === "sheet" && (result.sheetsDrawn ?? result.sheetsUsed ?? 0) > 0) {
       const out: { label: string; height: number; rows: typeof result.rows }[] = [];
-      for (let s = 0; s < Math.min(result.sheetsUsed ?? 0, MAX_SHEETS); s++) {
+      for (let s = 0; s < Math.min(result.sheetsDrawn ?? result.sheetsUsed ?? 0, MAX_SHEETS); s++) {
         out.push({
           label: `ผืนที่ ${s + 1}`,
           height: Number(sheetLengthCm) || 0,
