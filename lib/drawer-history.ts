@@ -27,6 +27,10 @@ function ensureListener() {
   window.addEventListener("popstate", onPop);
 }
 
+/** มี drawer เปิดค้างอยู่ไหม — ใช้แยกว่า popstate ที่เกิดขึ้นเป็น "ปิด drawer" หรือ "ย้อนการเดินของหน้า"
+ *  (listener ของหน้าเพจถูกผูกไว้ก่อน drawer เสมอ → ตอนหน้าเพจอ่านค่านี้ drawer ยังไม่ถูก pop) */
+export function hasOpenDrawer(): boolean { return stack.length > 0; }
+
 export type DrawerHistoryHandle = {
   /** ปิดเอง (ปุ่ม ✕ / Esc / แตะนอก) → ถอยประวัติ 1 ก้าว ให้ popstate ปิด + เคลียร์ entry */
   requestClose: () => void;
@@ -39,7 +43,13 @@ export function pushDrawerHistory(close: () => void): DrawerHistoryHandle {
   ensureListener();
   const entry: Entry = { id: ++SEQ, close };
   stack.push(entry);
-  try { window.history.pushState({ __drawer: entry.id }, ""); } catch { /* ignore */ }
+  // ⚠️ ต้องพา state เดิมของหน้าไปด้วย (เช่น __skuNav ที่เก็บหน้า/โฟลเดอร์/แท็กที่กำลังดู)
+  //    ถ้า push ทับด้วย { __drawer } เปล่า ๆ → ตอนปิด drawer (history.back) หน้าจะอ่าน state ที่ไม่มีข้อมูล
+  //    แล้วเด้งกลับหน้า 1 (เคสจริง: อยู่หน้า 4/70 เปิดสินค้า แก้ แล้วปิด → เด้งหน้า 1)
+  try {
+    const prev = (window.history.state ?? {}) as Record<string, unknown>;
+    window.history.pushState({ ...prev, __drawer: entry.id }, "");
+  } catch { /* ignore */ }
 
   let done = false;
   return {

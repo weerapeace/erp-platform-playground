@@ -16,6 +16,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { Pager } from "@/components/pager";
+import { hasOpenDrawer } from "@/lib/drawer-history";
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 // ของกลาง bulk edit — type อย่างเดียว (ไม่กิน runtime); ตัว modal โหลดแบบ dynamic ด้านล่าง (กัน data-table เข้า bundle หน้านี้)
 import type { BulkEditField } from "@/components/data-table";
@@ -279,6 +280,9 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   }, []);
   useEffect(() => {
     const onPop = (e: PopStateEvent) => {
+      // ปิด drawer (ของกลาง drawer-history) ก็ยิง popstate เหมือนกัน — ไม่ใช่การ "ย้อนการเดิน" ของหน้านี้
+      // → ต้องไม่แตะหน้า/โฟลเดอร์ที่กำลังดู (เดิมเด้งกลับหน้า 1 หลังปิดสินค้าที่หน้า 4/70)
+      if (hasOpenDrawer()) return;
       const s = (e.state as { __skuNav?: SkuNav } | null)?.__skuNav;
       setGroupPath(s?.gp ?? []); setTagFilter(s?.tf ?? EMPTY_FILTER); setSpecial(s?.sp ?? null);   // ไม่มี state ของเรา = กลับถึงราก
       setPage(s?.page ?? 0); if (s?.en) setEntity(s.en);

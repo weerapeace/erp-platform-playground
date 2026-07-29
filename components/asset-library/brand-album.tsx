@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { downloadImagesAsZip } from "@/lib/zip";
+import { hasOpenDrawer } from "@/lib/drawer-history";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 
@@ -125,6 +126,8 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
   // ปุ่ม Back เบราว์เซอร์ย้อนทีละชั้น (Parent → แบรนด์ → ทุกแบรนด์)
   useEffect(() => {
     const onPop = (e: PopStateEvent) => {
+      // ปิด drawer/ป๊อปอัปของกลางก็ยิง popstate — ไม่ใช่การย้อนการเดินของหน้านี้ → อย่าเด้งกลับราก
+      if (hasOpenDrawer()) return;
       const s = (e.state as { __brandNav?: { level?: string } } | null)?.__brandNav;
       if (!s) { setBrand(null); setParents([]); setDetail(null); }
       else if (s.level === "parents") setDetail(null);
