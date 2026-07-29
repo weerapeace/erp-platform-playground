@@ -541,6 +541,9 @@ export type MasterCRUDConfig = {
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
 
+// ข้อความ "ขีดไว้" ที่ถือว่าเท่ากับว่าง (ข้อมูลนำเข้าเก่ามักใส่ขีดแทนค่าว่าง) — ใช้กับตัวแปลภาษา
+const PLACEHOLDER_TEXT = new Set(["-", "--", "—", "–", "n/a", "N/A", "na", "NA", ".", "_"]);
+
 // SWR-lite cache สำหรับ "แถวในตาราง" (client mode) — อยู่ข้ามการสลับโมดูลใน session เดียว
 // เปลี่ยนโมดูลแล้วกลับเข้ามาใหม่ → โชว์ของเดิมทันที (ไม่เห็น "กำลังโหลด" กระพริบ) แล้วแอบโหลดสดเบื้องหลัง
 // key = URL เต็ม (รวม filter) · เก็บแถวที่ enrich label แล้ว · จำกัดจำนวน key กันบวม
@@ -1699,6 +1702,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
   // 🌐 แปลช่องไทย → ช่องอังกฤษที่จับคู่ไว้ (ui_style.lang_en + lang_translate)
   //   เติมเฉพาะช่องอังกฤษที่ยังว่าง (ไม่ทับของที่เขียนเอง) · ช่องคำนวณไม่ต้องแปล (lang_translate=false)
+  //   ข้อมูลเก่าที่ใส่ขีดไว้ ("-") ถือว่าว่าง → แปลทับให้เลย
   const translateAll = useCallback(async (opts?: { onlyKey?: string; overwrite?: boolean }) => {
     const pairs = effectiveFields
       .map((f) => ({ f, us: (f.uiStyle ?? {}) as Record<string, unknown> }))
@@ -1707,26 +1711,34 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     if (pairs.length === 0) { flash("ไม่มีช่องที่ตั้งค่าให้แปล"); return; }
 
     setTranslating(true);
-    let done = 0, skipped = 0;
+    let done = 0, skipped = 0, failed = 0;
+    let lastErr = "";
     try {
       for (const { f, us } of pairs) {
         const enKey = String(us.lang_en);
         const src = String(formRef.current[f.key] ?? "").trim();
         const cur = String(formRef.current[enKey] ?? "").trim();
-        if (!src) { skipped++; continue; }
-        if (cur && !opts?.overwrite) { skipped++; continue; }   // มีของเดิมแล้ว → ไม่ทับ
+        if (!src || PLACEHOLDER_TEXT.has(src)) { skipped++; continue; }
+        // "-" / "—" ถือว่าว่าง (ข้อมูลเก่านำเข้ามาแบบขีดไว้) → แปลทับได้เลย
+        if (cur && !PLACEHOLDER_TEXT.has(cur) && !opts?.overwrite) { skipped++; continue; }
         const res = await apiFetch("/api/ai/translate", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: src.slice(0, 4000), to: "en" }),
         });
-        const j = await res.json().catch(() => ({}));
-        const out = String(j?.translated ?? "").trim();
-        if (!res.ok || j?.error || !out) { skipped++; continue; }
+        const j = await res.json().catch(() => ({})) as { data?: { translated?: string }; translated?: string; error?: string };
+        const out = String(j?.data?.translated ?? j?.translated ?? "").trim();
+        if (!res.ok || j?.error || !out) {
+          failed++;
+          lastErr = j?.error || (res.status === 401 || res.status === 403 ? "ไม่มีสิทธิ์ใช้ตัวแปลภาษา" : `แปลไม่สำเร็จ (${res.status})`);
+          continue;
+        }
         setForm((p) => ({ ...p, [enKey]: out }));
         setDirty(true);
         done++;
       }
-      flash(done ? `แปลแล้ว ${done} ช่อง${skipped ? ` (ข้าม ${skipped})` : ""} — กดบันทึกเพื่อเก็บ` : "ไม่มีช่องที่ต้องแปล (มีข้อความอังกฤษอยู่แล้ว)");
+      if (failed && !done) setFormErr(`แปลไม่สำเร็จ ${failed} ช่อง — ${lastErr}`);
+      else if (done) flash(`แปลแล้ว ${done} ช่อง${skipped ? ` · ข้าม ${skipped}` : ""}${failed ? ` · ล้มเหลว ${failed}` : ""} — กดบันทึกเพื่อเก็บ`);
+      else flash("ไม่มีช่องที่ต้องแปล (มีข้อความอังกฤษอยู่แล้ว — กด ↻ แปลทับ ถ้าต้องการแปลใหม่)");
     } catch (e) {
       setFormErr(e instanceof Error ? e.message : "แปลไม่สำเร็จ");
     } finally { setTranslating(false); }
@@ -2461,13 +2473,21 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             !f.hideInForm && f.key !== "cover_image_r2_key" && evaluateCondition(f.conditionRules, form) && !tplHidden(f)
           );
           // สลับภาษา (ของกลาง): field ฝั่งไทยตั้ง ui_style.lang_en = ชื่อ field อังกฤษที่คู่กัน
-          //   โหมด TH = ซ่อนช่องอังกฤษ · โหมด EN = ซ่อนช่องไทยที่มีคู่ แล้วโชว์ช่องอังกฤษแทน
-          const enKeys = new Set(baseVisible.map((f) => String((f.uiStyle as Record<string, unknown> | undefined)?.lang_en ?? "")).filter(Boolean));
-          const visibleFields = enKeys.size === 0 ? baseVisible : baseVisible.filter((f) => {
-            const pair = String((f.uiStyle as Record<string, unknown> | undefined)?.lang_en ?? "");
-            if (langMode === "en") return !pair;              // ซ่อนตัวไทยที่มีคู่ (ตัวอังกฤษยังอยู่)
-            return !enKeys.has(f.key);                        // โหมดไทย: ซ่อนตัวอังกฤษ
-          });
+          //   โหมด TH = ซ่อนช่องอังกฤษ · โหมด EN = ช่องอังกฤษ "มานั่งแทนที่" ช่องไทย (ยืมกลุ่ม/ลำดับ/ความกว้าง)
+          //   → ตำแหน่งช่องทั้งสองโหมดตรงกันเป๊ะ ไม่ว่าจะตั้ง display_order ของช่องอังกฤษไว้ตรงไหน
+          const langPair = (f: FieldDef) => String((f.uiStyle as Record<string, unknown> | undefined)?.lang_en ?? "");
+          const enKeys = new Set(baseVisible.map(langPair).filter(Boolean));
+          const visibleFields =
+            enKeys.size === 0 ? baseVisible
+            : langMode === "th" ? baseVisible.filter((f) => !enKeys.has(f.key))
+            : baseVisible.flatMap((f) => {
+                if (enKeys.has(f.key)) return [];             // ช่องอังกฤษ: ไม่โชว์ที่ตำแหน่งเดิมของมัน
+                const pair = langPair(f);
+                if (!pair) return [f];
+                const en = baseVisible.find((x) => x.key === pair);
+                if (!en) return [f];                          // ยังไม่มีช่องอังกฤษคู่นี้ → คงช่องไทยไว้
+                return [{ ...en, groupKey: f.groupKey, order: f.order, formSpan: f.formSpan ?? en.formSpan }];
+              });
           const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
           // ปุ่มลบรูป (เฉพาะตอนดู + มีสิทธิ์แก้ + มีรูป) — โผล่ตอน hover
           const coverDeleteBtn = (coverKey && drawerMode === "view" && canEdit) ? (
