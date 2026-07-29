@@ -33,6 +33,7 @@ import { RelationMany2Many, RelationOne2Many, MasterDetailRelation } from "@/com
 import { ImportWizard } from "@/components/import-wizard";
 import { buildImportSchemaFromRegistry } from "@/lib/import";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
@@ -988,6 +989,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
   // toast กลาง (ของกลาง) — flash = สำเร็จ, fail = ผิดพลาด
   const notify = useToast();
+  const tr = useT();   // แปลข้อความของกลาง (ปุ่ม AI ฯลฯ)
   const flash = (m: string) => notify.success(m);
   const fail = (m: string) => notify.error(m);
 
@@ -2472,9 +2474,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               )}
               {aiBtn && (
                 <button type="button" onClick={() => setAiDetailOpen(true)}
-                  title="ให้ AI ดูรูปสินค้าแล้วเขียนชื่อสินค้า / Introduction / Description ให้ทั้งไทยและอังกฤษ (ไม่แตะช่องขนาด)"
+                  title={tr("ให้ AI ดูรูปสินค้าแล้วเขียนชื่อสินค้า / Introduction / Description ให้ทั้งไทยและอังกฤษ (ไม่แตะช่องขนาด)", "Let AI look at the product images and write name / introduction / description in Thai and English (never touches size fields)")}
                   className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100">
-                  ✨ ให้ AI คิดรายละเอียด
+                  ✨ {tr("ให้ AI คิดรายละเอียด", "Let AI draft details")}
                 </button>
               )}
               {canTranslate && canEdit && (
