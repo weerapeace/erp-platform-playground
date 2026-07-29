@@ -199,6 +199,19 @@ export function TaobaoBrowser() {
         </div>
       )}
 
+      {/* กำลังกรองแท็กอยู่ — บอกให้ชัดว่าทำไมเห็นไม่ครบ + ล้างได้ในคลิกเดียว */}
+      {tagFilter.tagIds.length > 0 && (
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg flex-wrap">
+          <span className="text-[12.5px] text-amber-800">
+            🏷️ กำลังดูเฉพาะแท็กที่เลือก ({tagFilter.tagIds.length} แท็ก) — รายการอื่นถูกซ่อนไว้
+          </span>
+          <button onClick={() => setTagFilter(EMPTY_FILTER)}
+            className="h-7 px-2.5 text-[12px] rounded-lg bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 ml-auto">
+            ✕ ล้างตัวกรองแท็ก
+          </button>
+        </div>
+      )}
+
       {/* จำนวน + เลือกทั้งหมด */}
       {!loading && cards.length > 0 && (
         <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
@@ -225,7 +238,9 @@ export function TaobaoBrowser() {
                 onMatch={() => setMatchRow(c)}
                 onCreate={() => setWizardRow(c)}
                 onReject={() => patchStatus([c.id], "rejected")}
-                onRestore={() => patchStatus([c.id], "new")} />
+                onRestore={() => patchStatus([c.id], "new")}
+                onTagClick={(id) => setTagFilter({ tagIds: [id], none: false })}
+                activeTagIds={tagFilter.tagIds} />
             ))}
           </div>
           {cards.length < total && (
@@ -289,9 +304,12 @@ export function TaobaoBrowser() {
 }
 
 // ── การ์ด 1 ใบ ──
-function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCreate, onReject, onRestore }: {
+function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCreate, onReject, onRestore, onTagClick, activeTagIds = [] }: {
   card: Card; rate: number; selected: boolean;
   onToggle: () => void; onOpen: () => void; onMatch: () => void; onCreate: () => void; onReject: () => void; onRestore: () => void;
+  /** กดแท็กบนการ์ด = กรองให้เหลือเฉพาะแท็กนั้น */
+  onTagClick?: (tagId: string) => void;
+  activeTagIds?: string[];
 }) {
   const baht = card.price_rmb != null ? card.price_rmb * rate : null;
   return (
@@ -335,10 +353,21 @@ function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCre
         )}
 
         {card.tags.length > 0 && (
+          // กดแท็ก = กรองให้เหลือเฉพาะแท็กนั้น (ไม่เปิดการ์ด) · แท็กที่กรองอยู่จะเข้ม
           <div className="flex flex-wrap gap-1 mt-0.5">
-            {card.tags.slice(0, 3).map((t) => (
-              <span key={t.id} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 max-w-full truncate">🏷️ {t.name}</span>
-            ))}
+            {card.tags.slice(0, 3).map((t) => {
+              const on = activeTagIds.includes(t.id);
+              return (
+                <button key={t.id} type="button"
+                  onClick={(e) => { e.stopPropagation(); onTagClick?.(t.id); }}
+                  title={`ดูเฉพาะ "${t.name}"`}
+                  className={`text-[10px] px-1.5 py-0.5 rounded border max-w-full truncate transition ${on
+                    ? "bg-amber-500 border-amber-500 text-white"
+                    : "bg-amber-50 border-amber-100 text-amber-700 hover:bg-amber-100 hover:border-amber-300"}`}>
+                  🏷️ {t.name}
+                </button>
+              );
+            })}
             {card.tags.length > 3 && <span className="text-[10px] text-slate-400">+{card.tags.length - 3}</span>}
           </div>
         )}
