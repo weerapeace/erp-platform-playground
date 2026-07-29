@@ -668,6 +668,17 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const [loaded, setLoaded] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [peek, setPeek] = useState<{ id: string; edit: boolean } | null>(null);  // กดรายการลูก → ดู/แก้ record นั้น
+  // เปิดรายการเฉพาะ "กดแล้วปล่อยที่เดิม" — ลากคลุมข้อความ (เช่นเลือกตัวเลขราคาไปคัดลอก) ต้องไม่เด้งเปิด
+  const clickStart = useRef<{ x: number; y: number } | null>(null);
+  const openOnRealClick = (id: string) => ({
+    onMouseDown: (e: React.MouseEvent) => { clickStart.current = { x: e.clientX, y: e.clientY }; },
+    onClick: (e: React.MouseEvent) => {
+      const s = clickStart.current; clickStart.current = null;
+      if (s && Math.abs(e.clientX - s.x) + Math.abs(e.clientY - s.y) > 5) return;   // ลาก = ไม่ใช่คลิกเปิด
+      if (typeof window !== "undefined" && (window.getSelection?.()?.toString() ?? "")) return;   // มีข้อความถูกคลุมอยู่
+      setPeek({ id, edit: false });
+    },
+  });
   // เรียงลำดับตารางลูก (server-side) — กดหัวคอลัมน์ · ค่าเริ่มต้น = เรียงตาม "รหัส" (code) A→Z
   const [sort, setSort] = useState<{ col: string; dir: "asc" | "desc" } | null>({ col: titleField, dir: "asc" });
   const toggleSort = (col: string) =>
@@ -895,7 +906,19 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         const m = re.exec(String(r[titleField] ?? ""));
         if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; width = Math.max(width, m[1].length); }
       });
-      setNewRow((p) => ({ ...p, [titleField]: `${parentCode}-${String(max + 1).padStart(width, "0")}` }));
+      // คัดลอกราคาจาก "ตัวล่าสุด" มาให้ด้วย (พิมพ์ทับได้) — ตัวใหม่ในตระกูลเดียวกันมักราคาเท่ากัน
+      const priceCopy: Record<string, string> = {};
+      const latest = childRows
+        .filter((r) => re.test(String(r[titleField] ?? "")))
+        .sort((a, b) => String(b[titleField] ?? "").localeCompare(String(a[titleField] ?? "")))[0];
+      if (latest) {
+        for (const f of ["list_price", "fake_price"]) {
+          if (!subFields.includes(f) || !isEditableCol(f)) continue;
+          const v = latest[f];
+          if (v != null && v !== "" && Number(v) > 0) priceCopy[f] = String(v);
+        }
+      }
+      setNewRow((p) => ({ ...p, ...priceCopy, [titleField]: `${parentCode}-${String(max + 1).padStart(width, "0")}` }));
     } catch { setNewRow((p) => ({ ...p, [titleField]: `${parentCode}-01` })); }
   };
 
@@ -1068,7 +1091,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       <tr key={String(r.id)}
         className={`group cursor-pointer ${dropRowId === String(r.id) ? "bg-indigo-50 ring-1 ring-indigo-300" : opts?.indent ? "hover:bg-blue-50/40 bg-slate-50/40" : "hover:bg-blue-50/40"}`}
         title={canDropImages ? "ลากรูปมาวางเพื่อเพิ่มรูปให้รายการนี้" : undefined}
-        onClick={() => setPeek({ id: String(r.id), edit: false })}
+        {...openOnRealClick(String(r.id))}
         onDragOver={canDropImages ? (e) => { e.preventDefault(); if (dropRowId !== String(r.id)) setDropRowId(String(r.id)); } : undefined}
         onDragLeave={canDropImages ? () => setDropRowId((p) => (p === String(r.id) ? null : p)) : undefined}
         onDrop={canDropImages ? (e) => { e.preventDefault(); setDropRowId(null); if (e.dataTransfer.files?.length) void dropImagesOnRow(r, e.dataTransfer.files); } : undefined}>
