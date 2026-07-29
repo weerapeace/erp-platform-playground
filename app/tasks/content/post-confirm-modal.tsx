@@ -8,12 +8,13 @@ import { ERPModal } from "@/components/modal";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 import { PlatformChip } from "../platform-chip";
+import { FORMATS } from "./brand-platforms-modal";
 
 export type PostImage = { key: string; label?: string | null; type?: "image" | "video" };
 
 export function PostConfirmModal({
   platform, connected, allowSchedule = true, pageName, captionText, images, defaultSelected, scheduledAtLocal, busy,
-  onClose, onPublish, onManual,
+  format, onClose, onPublish, onManual,
 }: {
   platform: string;
   connected: boolean;              // เชื่อมแล้ว → โพสต์จริง · false → โหมดมือ
@@ -23,14 +24,17 @@ export function PostConfirmModal({
   images: PostImage[];
   defaultSelected: string[];
   scheduledAtLocal: string;        // ค่า datetime-local ("" = ยังไม่ตั้งเวลา)
+  format?: string;                 // รูปแบบโพสต์ที่ตั้งไว้ในการ์ด (แก้ตรงนี้ก่อนโพสต์ได้)
   busy: boolean;
   onClose: () => void;
-  onPublish: (imageKeys: string[], scheduledUnix: number | null) => void;
+  onPublish: (imageKeys: string[], scheduledUnix: number | null, format: string) => void;
   onManual: () => void;
 }) {
   const t = useT();
   const [sel, setSel] = useState<string[]>(defaultSelected);
   const [mode, setMode] = useState<"now" | "schedule">("now");
+  const [fmt, setFmt] = useState(format ?? "");   // ประเภทโพสต์ (ว่าง = อัตโนมัติจากสื่อที่เลือก)
+  const fmtOpts = FORMATS[platform] ?? [];
   const toggle = (k: string) => setSel((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k]));
   // เรียงรูปที่เลือกตามลำดับที่แสดง
   const orderedSel = images.filter((im) => sel.includes(im.key)).map((im) => im.key);
@@ -40,14 +44,15 @@ export function PostConfirmModal({
   const schedUnix = scheduledAtLocal ? Math.floor(new Date(scheduledAtLocal).getTime() / 1000) : 0;
   const schedFuture = schedUnix > 0 && schedUnix * 1000 - Date.now() >= 10 * 60 * 1000;   // ≥ 10 นาทีล่วงหน้า
 
-  const doPublish = () => onPublish(orderedSel, mode === "schedule" && schedFuture ? schedUnix : null);
+  const doPublish = () => onPublish(orderedSel, mode === "schedule" && schedFuture ? schedUnix : null, fmt);
+  const storyBlocked = fmt === "story" && platform === "instagram";   // IG Story รอสิทธิ์ Meta
 
   return (
     <ERPModal open onClose={onClose} size="lg" title={`🚀 ${t("ยืนยันการโพสต์", "Confirm post")}`}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         {connected ? (
-          <button onClick={doPublish} disabled={busy || (mode === "schedule" && !schedFuture)} className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+          <button onClick={doPublish} disabled={busy || storyBlocked || (mode === "schedule" && !schedFuture)} className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
             {busy ? t("กำลังส่ง...", "Sending...") : mode === "schedule" ? `⏰ ${t("ตั้งเวลาโพสต์", "Schedule")}` : `🚀 ${t("โพสต์เลย", "Post now")}`}
           </button>
         ) : (
@@ -63,6 +68,31 @@ export function PostConfirmModal({
             ? <span className="text-slate-700">· {t("เพจ", "Page")} <b>{pageName}</b></span>
             : <span className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">{t("โหมดมือ — ยังไม่เชื่อมต่อ", "manual — not connected")}</span>}
         </div>
+
+        {/* ประเภทโพสต์ — เลือกก่อนยิงได้ (ค่าเริ่มต้นมาจากที่ตั้งในการ์ด/ค่าของแบรนด์) */}
+        {fmtOpts.length > 0 && (
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">🎬 {t("ลงเป็น", "Post as")}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {[{ key: "", th: "อัตโนมัติ", en: "Auto" }, ...fmtOpts].map((f) => (
+                <button key={f.key || "auto"} type="button" onClick={() => setFmt(f.key)}
+                  className={`px-2.5 py-1 rounded-full text-xs border ${fmt === f.key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:border-blue-300"}`}>
+                  {t(f.th, f.en)}
+                </button>
+              ))}
+            </div>
+            {fmt === "story" && (
+              <p className={`text-[11px] mt-1 ${storyBlocked ? "text-rose-600" : "text-slate-500"}`}>
+                {storyBlocked
+                  ? t("Instagram Story ยังยิงอัตโนมัติไม่ได้ (รอ Meta อนุมัติสิทธิ์) — กดยกเลิกแล้วลงเองในแอป", "IG story needs Meta approval — post manually for now")
+                  : t("Story = ใช้สื่อ 1 ชิ้น · อยู่ 24 ชม. · ตั้งเวลาล่วงหน้าไม่ได้", "Story = 1 item, 24h, no scheduling")}
+              </p>
+            )}
+            {(fmt === "video" || fmt === "reels") && !selHasVideo && (
+              <p className="text-[11px] text-amber-700 mt-1">{t("เลือกไฟล์วิดีโอในรายการด้านล่างก่อน", "Select a video below first")}</p>
+            )}
+          </div>
+        )}
 
         {/* พรีวิวแคปชั่น */}
         <div>

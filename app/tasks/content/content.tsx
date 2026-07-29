@@ -414,7 +414,19 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [tplSettingsOpen, setTplSettingsOpen] = useState(false);
   // แพลตฟอร์มที่กางอยู่ (แบบพับเก็บ) — เริ่มต้นกางตัวแรกที่ยังไม่ได้โพสต์
   const [aiAllBusy, setAiAllBusy] = useState(false);   // กำลังให้ AI เขียนทุกแพลตฟอร์ม
-  const [aiModal, setAiModal] = useState<{ platforms: string[] } | null>(null);   // ป๊อป AI (ทั้งหมด / ช่องเดียว)
+  const [aiModal, setAiModal] = useState<{ platforms: string[] } | null>(null);
+  // ปุ่มบนหัวคอลัมน์แคปชั่นที่ "โชว์" (สูงสุด 3) — จำรายคนที่ user_ui_prefs
+  const [pinnedTools, setPinnedTools] = useState<string[]>(["ai", "expand", "copy_prompt"]);
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=content_caption_toolbar").then((r) => r.json()).then((j) => {
+      const v = (j?.value as { pinned?: unknown } | undefined)?.pinned;
+      if (Array.isArray(v) && v.length) setPinnedTools(v.filter((x): x is string => typeof x === "string").slice(0, 3));
+    }).catch(() => { /* ไม่ขึ้นก็ใช้ค่าเริ่มต้น */ });
+  }, []);
+  const savePinnedTools = (keys: string[]) => {
+    setPinnedTools(keys);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "content_caption_toolbar", value: { pinned: keys } }) }).catch(() => { /* ไม่เป็นไร */ });
+  };   // ป๊อป AI (ทั้งหมด / ช่องเดียว)
   const [openPlats, setOpenPlats] = useState<Set<string>>(new Set());
   const [openInit, setOpenInit] = useState(false);
   useEffect(() => {
@@ -592,14 +604,14 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const contentImageKeys = attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => a.r2_key as string);
 
   // ยิงโพสต์จริง (Facebook/Instagram) จากป๊อปยืนยัน · รูป/วิดีโอ/อัลบั้ม + ตั้งเวลา(FB) · IG Reels = ตามเช็กสถานะ
-  const runPublish = async (platform: string, captionText: string, selectedKeys: string[], scheduledUnix: number | null) => {
+  const runPublish = async (platform: string, captionText: string, selectedKeys: string[], scheduledUnix: number | null, fmtOverride?: string) => {
     const label = platform === "facebook" ? "Facebook" : "Instagram";
     // เลือกวิดีโอ → โพสต์เป็นวิดีโอ (ตัวแรก) · ไม่งั้น = รูปทั้งหมด
     const videoKey = selectedKeys.find((k) => mediaTypeOf(k) === "video");
     const media: PostMediaRef[] = videoKey ? [{ key: videoKey, type: "video" }] : selectedKeys.map((k) => ({ key: k, type: "image" as const }));
     setPosting(platform);
     try {
-      const res = await publishToPlatform(contentId, platform, captionText, media, scheduledUnix ?? undefined, platformFormats[platform]);
+      const res = await publishToPlatform(contentId, platform, captionText, media, scheduledUnix ?? undefined, fmtOverride ?? platformFormats[platform]);
       setPostModal(null);
       if (res.processing && res.creationId) {
         // IG Reels: ตามเช็กสถานะจนพร้อม (สูงสุด ~2.5 นาที)
@@ -1019,21 +1031,23 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           <div className={isWide ? `flex-1 overflow-y-auto ${densityCls(dth.density)} min-w-0 bg-slate-50/40` : `${densityCls(dth.density)} bg-slate-50/40 border-t border-slate-200`}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
-              <div className="flex items-center gap-3 flex-wrap">
-                {canAiCaption && caps.length > 0 && (
-                  <button onClick={() => setAiModal({ platforms: caps.filter((c) => pset[c.platform]?.use_caption !== false && (postStatus[c.platform] ?? "todo") !== "skip").map((c) => c.platform) })} disabled={aiAllBusy}
-                    title={t("ให้ AI เขียนแคปชั่นทุกแพลตฟอร์มรอบเดียว ตาม prompt ที่ตั้งไว้ของแต่ละแพลตฟอร์ม (อ่านรูปครั้งเดียว = ประหยัด)", "Write all platform captions in one go, using each platform's prompt")}
-                    className="text-xs font-medium text-white bg-fuchsia-600 hover:bg-fuchsia-700 disabled:opacity-50 rounded-md px-2 py-1">
-                    {aiAllBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนทั้งหมด", "✨ AI write all")}
-                  </button>
-                )}
-                {caps.length > 1 && <button onClick={() => setOpenPlats(openPlats.size === caps.length ? new Set() : new Set(caps.map((c) => c.platform)))} className="text-xs text-slate-500 hover:text-violet-700">{openPlats.size === caps.length ? t("⊟ พับทั้งหมด", "⊟ Collapse all") : t("⊞ กางทั้งหมด", "⊞ Expand all")}</button>}
-                <button onClick={copyPrompt} className="text-xs font-medium text-violet-700 hover:underline">📋 {t("คัดลอกพรอมต์", "Copy prompt")}</button>
-                <button onClick={() => setCfgOpen(true)} className="text-xs text-violet-700 hover:underline">✍️ {t("พรอมต์/แฮชแท็ก", "Prompt/Hashtags")}</button>
-                <button onClick={() => setPsOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ {t("ตั้งค่าแพลตฟอร์ม", "Platform settings")}</button>
-                <button onClick={() => setTplSettingsOpen(true)} className="text-xs text-violet-700 hover:underline">📝 {t("แม่แบบ", "Templates")}</button>
-                <button onClick={() => setHashOpen(true)} className="text-xs text-violet-700 hover:underline">🏷 {t("คลังแฮชแท็ก", "Hashtag library")}</button>
-              </div>
+              <CaptionToolbar pinned={pinnedTools} onSavePinned={savePinnedTools} actions={[
+                ...(canAiCaption && caps.length > 0 ? [{
+                  key: "ai", primary: true,
+                  label: aiAllBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนทั้งหมด", "✨ AI write all"),
+                  onClick: () => setAiModal({ platforms: caps.filter((c) => pset[c.platform]?.use_caption !== false && (postStatus[c.platform] ?? "todo") !== "skip").map((c) => c.platform) }),
+                }] : []),
+                ...(caps.length > 1 ? [{
+                  key: "expand",
+                  label: openPlats.size === caps.length ? t("⊟ พับทั้งหมด", "⊟ Collapse all") : t("⊞ กางทั้งหมด", "⊞ Expand all"),
+                  onClick: () => setOpenPlats(openPlats.size === caps.length ? new Set() : new Set(caps.map((c) => c.platform))),
+                }] : []),
+                { key: "copy_prompt", label: `📋 ${t("คัดลอกพรอมต์", "Copy prompt")}`, onClick: copyPrompt },
+                { key: "prompt_cfg", label: `✍️ ${t("พรอมต์/แฮชแท็ก", "Prompt/Hashtags")}`, onClick: () => setCfgOpen(true) },
+                { key: "platform_cfg", label: `⚙️ ${t("ตั้งค่าแพลตฟอร์ม", "Platform settings")}`, onClick: () => setPsOpen(true) },
+                { key: "templates", label: `📝 ${t("แม่แบบ", "Templates")}`, onClick: () => setTplSettingsOpen(true) },
+                { key: "hashtags", label: `🏷 ${t("คลังแฮชแท็ก", "Hashtag library")}`, onClick: () => setHashOpen(true) },
+              ]} />
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-1.5">
@@ -1076,9 +1090,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           images={postImages}
           defaultSelected={platformImages[postModal.platform]?.length ? platformImages[postModal.platform] : contentImageKeys}
           scheduledAtLocal={scheduledAt}
+          format={platformFormats[postModal.platform]}
           busy={posting === postModal.platform}
           onClose={() => setPostModal(null)}
-          onPublish={(keys, sched) => runPublish(postModal.platform, postModal.captionText, keys, sched)}
+          onPublish={(keys, sched, fmt) => { setPlatformFormats((m) => { const n = { ...m }; if (fmt) n[postModal.platform] = fmt; else delete n[postModal.platform]; return n; }); runPublish(postModal.platform, postModal.captionText, keys, sched, fmt); }}
           onManual={() => manualPost(postModal.platform, postModal.captionText)}
         />
       )}
@@ -1246,6 +1261,76 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
             className={`block w-full text-left px-2 py-1 text-sm rounded text-emerald-700 ${activeIdx === suggestions.length ? "bg-emerald-100" : "hover:bg-emerald-50"}`}>＋ {t("เพิ่ม", "Add")} “#{q}” {t("เข้าคลัง", "to library")}</button>}
         </div>
       )}
+    </div>
+  );
+}
+
+// แถบปุ่มหัวคอลัมน์แคปชั่น — โชว์แค่ 3 ปุ่มที่ปักไว้ ที่เหลือซ่อนใน ⋯ (เลือกได้เองว่าจะโชว์อะไร)
+// จำเป็นรายคนที่ user_ui_prefs (key: content_caption_toolbar) → ใช้เครื่องอื่นก็ได้ค่าเดิม
+type ToolAction = { key: string; label: string; onClick: () => void; primary?: boolean };
+const MAX_PINNED = 3;
+
+function CaptionToolbar({ actions, pinned, onSavePinned }: {
+  actions: ToolAction[];
+  pinned: string[];
+  onSavePinned: (keys: string[]) => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [cfg, setCfg] = useState(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) { setOpen(false); setCfg(false); } };
+    window.addEventListener("mousedown", away);
+    return () => window.removeEventListener("mousedown", away);
+  }, [open]);
+
+  const shown = pinned.map((k) => actions.find((a) => a.key === k)).filter((a): a is ToolAction => !!a).slice(0, MAX_PINNED);
+  const rest = actions.filter((a) => !shown.some((s) => s.key === a.key));
+  const togglePin = (k: string) => {
+    const has = pinned.includes(k);
+    if (has) onSavePinned(pinned.filter((x) => x !== k));
+    else if (pinned.length >= MAX_PINNED) onSavePinned([...pinned.slice(1), k]);   // เต็ม 3 → ดันตัวเก่าสุดออก
+    else onSavePinned([...pinned, k]);
+  };
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {shown.map((a) => (
+        <button key={a.key} onClick={a.onClick}
+          className={a.primary
+            ? "text-xs font-medium text-white bg-fuchsia-600 hover:bg-fuchsia-700 rounded-md px-2 py-1"
+            : "text-xs text-violet-700 hover:underline"}>{a.label}</button>
+      ))}
+      <div ref={boxRef} className="relative">
+        <button type="button" onClick={() => setOpen((o) => !o)} title={t("เมนูเพิ่มเติม", "More")}
+          className="text-slate-400 hover:text-violet-700 leading-none text-base px-1">⋯</button>
+        {open && (
+          <div className="absolute right-0 top-full mt-1 z-30 min-w-[230px] bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+            {rest.map((a) => (
+              <button key={a.key} type="button" onClick={() => { setOpen(false); a.onClick(); }}
+                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">{a.label}</button>
+            ))}
+            <div className="border-t border-slate-100 mt-1 pt-1">
+              <button type="button" onClick={() => setCfg((c) => !c)} className="w-full text-left px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50">
+                ⚙️ {t("เลือกปุ่มที่โชว์ (3 ปุ่ม)", "Choose visible buttons (3)")}
+              </button>
+              {cfg && (
+                <div className="px-3 py-1.5 space-y-1">
+                  {actions.map((a) => (
+                    <label key={a.key} className="flex items-center gap-2 text-xs text-slate-600">
+                      <input type="checkbox" checked={pinned.includes(a.key)} onChange={() => togglePin(a.key)} />
+                      <span className="truncate">{a.label}</span>
+                    </label>
+                  ))}
+                  <p className="text-[10px] text-slate-400">{t("ติ๊กได้ 3 ปุ่ม — ถ้าครบแล้วติ๊กเพิ่ม ตัวเก่าสุดจะถูกเอาออก", "Up to 3 — adding a 4th drops the oldest")}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
