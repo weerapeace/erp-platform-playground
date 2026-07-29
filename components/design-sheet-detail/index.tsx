@@ -1245,6 +1245,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   // คอลัมน์ตารางตีราคา (ใช้ LineItemsGrid กลาง) — เลือกวัสดุ → เติมชนิด/สูตร/เผื่อเสีย/ราคาอัตโนมัติ แล้วคำนวณสด
   const numInputCls = "w-full h-8 px-1.5 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
+  // โหมดดูอย่างเดียว: ล็อกช่องแก้ให้ตรงกับตาราง (เดิมพิมพ์ได้แต่บันทึกไม่ได้) + บอกเหตุผลเมื่อชี้เมาส์
+  const roTip = !fullEdit ? "อยู่ในโหมดดูอย่างเดียว — กดปุ่ม ✏️ แก้ไข ด้านล่างก่อนจึงจะแก้ได้ (การจัดกลุ่ม/เรียงลำดับใช้ได้ตลอด)" : undefined;
+  const cellEdit = fullEdit;
   const costCols = useMemo<LineColumn<CostRow>[]>(() => [
     { key: "item", header: "วัสดุ / กลุ่ม", minWidth: 220, sortable: true, getValue: (r) => r.item_name,
       render: (r, u) => {
@@ -1303,32 +1306,32 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         <span className="block px-1 text-xs text-slate-500 leading-tight">{r.group_name ?? "—"}<br />
           <span className="text-[10px] text-slate-300">{METHOD_LABEL[r.calc_method ?? "manual"] ?? r.calc_method}</span></span>
       ) },
-    { key: "width_cm", header: "กว้าง (ซม.)", width: 84, align: "right", getValue: (r) => r.width_cm,
+    { key: "width_cm", header: "กว้าง (ซม.)", width: 84, align: "right", sortable: true, getValue: (r) => r.width_cm,
       render: (r, u) => usesWidth(r.calc_method)
-        ? <input type="number" min={0} step="any" value={r.width_cm ?? ""} disabled={!canEdit}
+        ? <input type="number" min={0} step="any" value={r.width_cm ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ width_cm: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
         : <span className="block px-1 text-right text-slate-300 text-xs" title="ชนิดนี้ไม่ใช้ความกว้าง">—</span> },
-    { key: "length_cm", header: "ยาว (ซม.)", width: 84, align: "right", getValue: (r) => r.length_cm,
+    { key: "length_cm", header: "ยาว (ซม.)", width: 84, align: "right", sortable: true, getValue: (r) => r.length_cm,
       render: (r, u) => usesLength(r.calc_method)
-        ? <input type="number" min={0} step="any" value={r.length_cm ?? ""} disabled={!canEdit}
+        ? <input type="number" min={0} step="any" value={r.length_cm ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ length_cm: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
         : <span className="block px-1 text-right text-slate-300 text-xs" title="ชนิดนี้ไม่ใช้ความยาว">—</span> },
-    { key: "pieces", header: "จำนวนชิ้น", width: 80, align: "right", getValue: (r) => r.pieces,
+    { key: "pieces", header: "จำนวนชิ้น", width: 80, align: "right", sortable: true, getValue: (r) => r.pieces,
       render: (r, u) => usesPieces(r.calc_method)
-        ? <input type="number" min={0} step="any" value={r.pieces ?? ""} disabled={!canEdit}
+        ? <input type="number" min={0} step="any" value={r.pieces ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ pieces: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
         : <span className="block px-1 text-right text-slate-300 text-xs" title="ชนิดนี้ไม่ใช้จำนวนชิ้น">—</span> },
-    { key: "waste_percent", header: "เผื่อเสีย %", width: 84, align: "right", getValue: (r) => r.waste_percent,
+    { key: "waste_percent", header: "เผื่อเสีย %", width: 84, align: "right", sortable: true, getValue: (r) => r.waste_percent,
       render: (r, u) => usesWaste(r.calc_method)
-        ? <input type="number" min={0} step="any" value={r.waste_percent ?? ""} disabled={!canEdit} placeholder="0"
+        ? <input type="number" min={0} step="any" value={r.waste_percent ?? ""} disabled={!cellEdit} title={roTip} placeholder="0"
             onChange={(e) => u({ waste_percent: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
         : <span className="block px-1 text-right text-slate-300 text-xs" title="ชนิดนี้ไม่ใช้เผื่อเสีย">—</span> },
-    { key: "face_width_cm", header: "หน้ากว้าง / พื้นที่", width: 96, align: "right", getValue: (r) => r.face_width_cm,
+    { key: "face_width_cm", header: "หน้ากว้าง / พื้นที่", width: 96, align: "right", sortable: true, getValue: (r) => r.face_width_cm,
       render: (r, u) => rowIsPiece(r)
         // ชนิดชิ้น: ไม่ใช้หน้ากว้าง — โชว์พื้นที่ cm² (กว้าง×ยาว) แทนไว้อ้างอิง
         ? <span className="block px-1 text-right text-xs text-violet-600" title="พื้นที่ = กว้าง×ยาว (อ้างอิง ไม่ได้คูณราคา)">{pieceArea(r) != null ? `${fmtQty(pieceArea(r))} cm²` : "—"}</span>
         : r.calc_method === "area_face"
-        ? <input type="number" min={0} step="any" value={r.face_width_cm ?? ""} disabled={!canEdit}
+        ? <input type="number" min={0} step="any" value={r.face_width_cm ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ face_width_cm: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
         : <span className="block px-1 text-right text-slate-300 text-xs">—</span> },
     { key: "qty", header: "ปริมาณ", width: 96, align: "right", summable: true, sortable: true, getValue: (r) => r.qty,
@@ -1336,16 +1339,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         ? <input type="number" min={0} step="any" value={r.qty ?? ""} placeholder="พิมพ์เอง"
             onChange={(e) => u({ qty: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
         : <span className="block px-1 text-right tabular-nums font-medium text-slate-700 cursor-help underline decoration-dotted decoration-slate-300" title={calcTooltip(r)}>{fmtQty(r.qty)}</span> },
-    { key: "uom", header: "หน่วย", width: 70, getValue: (r) => r.uom,
-      render: (r, u) => <input value={r.uom ?? ""} disabled={!canEdit} onChange={(e) => u({ uom: e.target.value || null })}
+    { key: "uom", header: "หน่วย", width: 70, sortable: true, getValue: (r) => r.uom,
+      render: (r, u) => <input value={r.uom ?? ""} disabled={!cellEdit} title={roTip} onChange={(e) => u({ uom: e.target.value || null })}
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" /> },
-    { key: "unit_price", header: "ราคา/หน่วย", width: 96, align: "right", getValue: (r) => r.unit_price,
-      render: (r, u) => <input type="number" min={0} step="any" value={r.unit_price ?? ""} disabled={!canEdit}
+    { key: "unit_price", header: "ราคา/หน่วย", width: 96, align: "right", sortable: true, getValue: (r) => r.unit_price,
+      render: (r, u) => <input type="number" min={0} step="any" value={r.unit_price ?? ""} disabled={!cellEdit} title={roTip}
         onChange={(e) => u({ unit_price: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} /> },
     { key: "amount", header: "รวม (บาท)", width: 104, align: "right", summable: true, sortable: true, getValue: (r) => r.amount,
       render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmtBaht(r.amount)}</span> },
     { key: "note", header: "หมายเหตุ", minWidth: 120, getValue: (r) => r.note,
-      render: (r, u) => <input value={r.note ?? ""} disabled={!canEdit} onChange={(e) => u({ note: e.target.value || null })} placeholder="—"
+      render: (r, u) => <input value={r.note ?? ""} disabled={!cellEdit} title={roTip} onChange={(e) => u({ note: e.target.value || null })} placeholder="—"
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" /> },
   ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline]);
 
@@ -1840,7 +1843,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 }}
                 rowId={(r) => r.key}
                 readonly={!fullEdit}
-                groupByOptions={[{ key: "group", label: "ชนิดวัสดุ" }]}
+                groupByOptions={[{ key: "group", label: "ชนิดวัสดุ" }, { key: "item", label: "วัสดุ" }, { key: "uom", label: "หน่วย" }]}
                 onAdd={() => ({
                   key: `n${Date.now()}_${costLines.length}`,
                   parent_code: costParent || null,
