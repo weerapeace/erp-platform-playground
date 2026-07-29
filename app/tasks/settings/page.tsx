@@ -24,6 +24,7 @@ import { BrandDriveFolders } from "../brand-drive-folders";
 import { MultiUserPicker } from "../multi-user-picker";
 import type { UserPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
+import { UserPermOverrideButton } from "@/components/user-perm-override";
 import { tr } from "@/lib/lang";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 
@@ -185,6 +186,8 @@ function PermissionMatrix({ showToast }: { showToast: (m: string) => void }) {
                 <td className="px-5 py-3 sticky left-0 bg-white">
                   <div className="font-medium text-slate-800 flex items-center gap-1.5">{p.label}{p.is_dangerous && <span className="text-[10px] bg-red-50 text-red-600 border border-red-200 px-1 rounded">{t("อันตราย", "Dangerous")}</span>}</div>
                   {p.description && <div className="text-xs text-slate-400">{p.description}</div>}
+                  {/* ให้สิทธิ์เฉพาะบุคคล (ทับสิทธิ์ตำแหน่ง) — ของกลาง */}
+                  <div className="mt-1"><UserPermOverrideButton permissionKey={p.key} label={p.label} /></div>
                 </td>
                 {roles.map((r) => {
                   const isAdminRole = r.key === "admin";
