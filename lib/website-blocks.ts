@@ -17,7 +17,10 @@ export type BlockType =
   | "cta"
   | "rich-text"
   | "image"
-  | "gallery";
+  | "gallery"
+  | "button"
+  | "divider"
+  | "video";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -172,6 +175,30 @@ export interface GalleryBlock extends BlockBase {
   items: { imageKey: string | null; alt: string; caption: string }[];
 }
 
+/** ปุ่มเดี่ยว — วางคั่นระหว่างเนื้อหาได้ทุกจุด */
+export interface ButtonBlock extends BlockBase {
+  type: "button";
+  text: string;
+  href: string;
+  /** brand = ปุ่มทึบสีแบรนด์ · outline = ปุ่มขอบบาง */
+  variant: "brand" | "outline";
+}
+
+/** เส้นคั่น / ช่องเว้นระยะ */
+export interface DividerBlock extends BlockBase {
+  type: "divider";
+  /** line = เส้นบาง · dots = จุดไข่ปลา · space = เว้นว่างเปล่า ๆ */
+  variant: "line" | "dots" | "space";
+}
+
+/** วิดีโอฝัง — รับเฉพาะ YouTube / Vimeo */
+export interface VideoBlock extends BlockBase {
+  type: "video";
+  url: string;
+  title: string;
+  caption: string;
+}
+
 export type Block =
   | AnnouncementBlock
   | HeroBlock
@@ -182,7 +209,10 @@ export type Block =
   | CtaBlock
   | RichTextBlock
   | ImageBlock
-  | GalleryBlock;
+  | GalleryBlock
+  | ButtonBlock
+  | DividerBlock
+  | VideoBlock;
 
 export const BLOCK_META: Record<BlockType, { label: string; icon: string; hint: string; group: string }> = {
   announcement: { label: "แถบประกาศ", icon: "🎗️", hint: "ข้อความเลื่อนบนสุดของเว็บ", group: "พื้นฐาน" },
@@ -195,6 +225,9 @@ export const BLOCK_META: Record<BlockType, { label: string; icon: string; hint: 
   featured: { label: "สินค้าแนะนำ", icon: "⭐", hint: "ดึงสินค้าที่ติ๊กแนะนำมาแสดง", group: "สินค้า" },
   faq: { label: "คำถามที่พบบ่อย", icon: "❓", hint: "รายการถาม-ตอบแบบพับได้", group: "เนื้อหา" },
   cta: { label: "แถบชวนติดต่อ", icon: "📣", hint: "กล่องสีเน้น + ปุ่ม", group: "เนื้อหา" },
+  button: { label: "ปุ่ม", icon: "🔘", hint: "ปุ่มเดี่ยว วางคั่นตรงไหนก็ได้", group: "พื้นฐาน" },
+  divider: { label: "เส้นคั่น / เว้นระยะ", icon: "➖", hint: "แบ่งช่วงเนื้อหาให้อ่านง่าย", group: "พื้นฐาน" },
+  video: { label: "วิดีโอ", icon: "🎬", hint: "ฝังคลิปจาก YouTube หรือ Vimeo", group: "พื้นฐาน" },
 };
 
 const uid = (t: string, n: number) => `${t}-${n}`;
@@ -256,6 +289,12 @@ export function newBlock(type: BlockType, seq: number, opts?: { uniqueId?: boole
       return { ...base, type, title: "มีแบบในใจแล้ว?", subtitle: "", primary: { text: "ขอใบเสนอราคา", href: "/quote" }, secondary: { text: "ติดต่อเรา", href: "/contact" } };
     case "rich-text":
       return { ...base, type, eyebrow: "", title: "หัวข้อ", body: "เนื้อหา" };
+    case "button":
+      return { ...base, type, text: "ขอใบเสนอราคา", href: "/quote", variant: "brand" };
+    case "divider":
+      return { ...base, type, variant: "line" };
+    case "video":
+      return { ...base, type, url: "", title: "", caption: "" };
     case "image":
       return { ...base, type, imageKey: null, alt: "", caption: "", width: "wide", href: "" };
     case "gallery":
@@ -293,6 +332,20 @@ const link = (v: unknown, fbText = "", fbHref = "/"): CtaLink => {
 const vis = (v: unknown): Visibility => {
   const o = (v ?? {}) as Record<string, unknown>;
   return { desktop: o.desktop !== false, tablet: o.tablet !== false, mobile: o.mobile !== false };
+};
+
+/** โฮสต์วิดีโอที่ยอมให้ฝัง — กันใส่ลิงก์มั่วแล้วโดนยัดสคริปต์เข้าเว็บ */
+const VIDEO_HOSTS = ["youtube.com", "www.youtube.com", "youtu.be", "vimeo.com", "player.vimeo.com"];
+const videoUrl = (v: unknown): string => {
+  const raw = String(v ?? "").trim().slice(0, 300);
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:") return "";
+    return VIDEO_HOSTS.includes(u.hostname) ? u.toString() : "";
+  } catch {
+    return "";
+  }
 };
 
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
@@ -417,6 +470,21 @@ export function normalizeBlocks(raw: unknown): Block[] {
       case "rich-text":
         out.push({ ...base, type, eyebrow: str(b.eyebrow, "", 120), title: str(b.title, "", 160), body: str(b.body, "", 3000) });
         break;
+      case "button":
+        out.push({
+          ...base,
+          type,
+          text: str(b.text, "", 60),
+          href: str(b.href, "", 200),
+          variant: pickOne(b.variant, ["brand", "outline"] as const, "brand"),
+        });
+        break;
+      case "divider":
+        out.push({ ...base, type, variant: pickOne(b.variant, ["line", "dots", "space"] as const, "line") });
+        break;
+      case "video":
+        out.push({ ...base, type, url: videoUrl(b.url), title: str(b.title, "", 160), caption: str(b.caption, "", 300) });
+        break;
       case "image":
         out.push({
           ...base,
@@ -512,6 +580,15 @@ export function validateBlocks(blocks: Block[]): ValidationIssue[] {
 
     if (b.type === "rich-text" && !b.title.trim() && !b.body.trim())
       issues.push({ blockId: b.id, level: "warning", message: `${label}: ยังไม่มีเนื้อหา` });
+
+    if (b.type === "button") {
+      if (!b.text.trim()) issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่ได้ใส่ข้อความบนปุ่ม` });
+      if (!b.href.trim()) issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่ได้ใส่ลิงก์ปลายทาง` });
+    }
+
+    // url ว่างแปลว่ากรอกลิงก์ที่ไม่ใช่ YouTube/Vimeo แล้วโดนปัดตก — ต้องบอก ไม่งั้นงงว่าทำไมไม่ขึ้น
+    if (b.type === "video" && !b.url)
+      issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่มีลิงก์คลิป (รับเฉพาะ YouTube และ Vimeo)` });
   }
 
   return issues;

@@ -114,6 +114,46 @@ describe("แหล่งเดียวของชนิดบล็อก", (
   });
 });
 
+describe("widget วิดีโอ — ตัวกรองลิงก์", () => {
+  const url = (u: unknown) => (normalizeBlocks([{ id: "v", type: "video", url: u }])[0] as { url: string }).url;
+
+  it("รับ YouTube / Vimeo แบบ https", () => {
+    expect(url("https://www.youtube.com/watch?v=abc123")).toContain("youtube.com");
+    expect(url("https://youtu.be/abc123")).toContain("youtu.be");
+    expect(url("https://vimeo.com/12345")).toContain("vimeo.com");
+  });
+
+  it("ปัดตกลิงก์อันตราย/โฮสต์อื่น", () => {
+    expect(url("javascript:alert(1)")).toBe("");
+    expect(url("http://www.youtube.com/watch?v=a")).toBe(""); // ไม่ใช่ https
+    expect(url("https://evil.com/x")).toBe("");
+    expect(url("https://youtube.com.evil.com/x")).toBe(""); // โฮสต์ปลอมที่ขึ้นต้นเหมือน
+    expect(url("")).toBe("");
+  });
+
+  it("ลิงก์ว่าง = เตือนก่อนเผยแพร่ ไม่ปล่อยผ่านเงียบ", () => {
+    const blocks = normalizeBlocks([{ id: "v", type: "video", url: "https://evil.com/x" }]);
+    const errs = validateBlocks(blocks).filter((i) => i.level === "error");
+    expect(errs.map((e) => e.message).join(" ")).toContain("YouTube");
+  });
+});
+
+describe("widget ปุ่ม / เส้นคั่น", () => {
+  it("ปุ่มไม่มีข้อความหรือลิงก์ = เตือนก่อนเผยแพร่", () => {
+    const blocks = normalizeBlocks([{ id: "b", type: "button", text: "", href: "" }]);
+    const msgs = validateBlocks(blocks).filter((i) => i.level === "error").map((e) => e.message).join(" | ");
+    expect(msgs).toContain("ข้อความบนปุ่ม");
+    expect(msgs).toContain("ลิงก์ปลายทาง");
+  });
+
+  it("รูปแบบนอกรายการตกกลับเป็นค่าเริ่มต้น", () => {
+    const [b] = normalizeBlocks([{ id: "d", type: "divider", variant: "sparkles" }]) as unknown as { variant: string }[];
+    expect(b.variant).toBe("line");
+    const [btn] = normalizeBlocks([{ id: "b", type: "button", variant: "neon" }]) as unknown as { variant: string }[];
+    expect(btn.variant).toBe("brand");
+  });
+});
+
 describe("validateBlocks", () => {
   it("ไม่พังเมื่อเจอบล็อกชนิดที่ไม่รู้จัก", () => {
     const blocks = normalizeBlocks([{ id: "pg-1", type: "product-grid" }, { id: "h1", type: "hero", title: "ก" }]);

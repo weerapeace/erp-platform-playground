@@ -60,6 +60,12 @@ export function blockSummary(b: Block): string {
       return b.imageKey ? String(b.caption || b.alt || "รูปภาพ") : "ยังไม่ได้เลือกรูป";
     case "gallery":
       return `${((b.items as unknown[]) ?? []).length} รูป`;
+    case "button":
+      return String(b.text || "") ? `${b.text} → ${b.href || "ยังไม่มีลิงก์"}` : "ยังไม่ได้ตั้งปุ่ม";
+    case "divider":
+      return { line: "เส้นบาง", dots: "จุดไข่ปลา", space: "เว้นว่าง" }[String(b.variant)] ?? "เส้นคั่น";
+    case "video":
+      return b.url ? String(b.title || b.url) : "ยังไม่มีลิงก์คลิป";
     default:
       return String(b.title ?? "") || "—";
   }
@@ -390,6 +396,63 @@ export function BlockEditor({ block, onChange }: { block: Block; onChange: (p: R
           </div>
           <LinkPair label="ปุ่มหลัก" value={block.primary as { text: string; href: string }} onChange={(v) => onChange({ primary: v })} />
           <LinkPair label="ปุ่มรอง" value={block.secondary as { text: string; href: string }} onChange={(v) => onChange({ secondary: v })} />
+        </div>
+      );
+
+    case "button":
+      return (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="ข้อความบนปุ่ม">
+            <input className={inputCls} value={s("text")} onChange={(e) => onChange({ text: e.target.value })} placeholder="ขอใบเสนอราคา" />
+          </Field>
+          <Field label="ลิงก์ปลายทาง">
+            <input className={inputCls} value={s("href")} onChange={(e) => onChange({ href: e.target.value })} placeholder="/quote" />
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="หน้าตาปุ่ม">
+              <select className={inputCls} value={s("variant") || "brand"} onChange={(e) => onChange({ variant: e.target.value })}>
+                <option value="brand">ทึบสีแบรนด์ (เน้น)</option>
+                <option value="outline">ขอบบาง (รอง)</option>
+              </select>
+            </Field>
+            <p className="mt-1 text-[11px] text-slate-400">อยากให้ปุ่มอยู่กลางหรือชิดขวา ตั้งที่ 🎨 รูปลักษณ์ → จัดข้อความ</p>
+          </div>
+        </div>
+      );
+
+    case "divider":
+      return (
+        <Field label="รูปแบบ">
+          <select className={inputCls} value={s("variant") || "line"} onChange={(e) => onChange({ variant: e.target.value })}>
+            <option value="line">เส้นบาง</option>
+            <option value="dots">จุดไข่ปลา</option>
+            <option value="space">เว้นว่าง (ไม่มีเส้น)</option>
+          </select>
+        </Field>
+      );
+
+    case "video":
+      return (
+        <div className="grid gap-3">
+          <Field label="ลิงก์คลิป (YouTube หรือ Vimeo เท่านั้น)">
+            <input
+              className={inputCls}
+              value={s("url")}
+              onChange={(e) => onChange({ url: e.target.value })}
+              placeholder="https://www.youtube.com/watch?v=..."
+            />
+          </Field>
+          {s("url") && !/^https:\/\/(www\.)?(youtube\.com|youtu\.be|vimeo\.com|player\.vimeo\.com)\//.test(s("url")) && (
+            <p className="text-[11px] text-red-600">
+              ลิงก์นี้ใช้ไม่ได้ — รับเฉพาะ YouTube และ Vimeo (ต้องขึ้นต้น https)
+            </p>
+          )}
+          <Field label="หัวข้อ (ไม่ใส่ก็ได้)">
+            <input className={inputCls} value={s("title")} onChange={(e) => onChange({ title: e.target.value })} />
+          </Field>
+          <Field label="คำบรรยายใต้คลิป (ไม่ใส่ก็ได้)">
+            <input className={inputCls} value={s("caption")} onChange={(e) => onChange({ caption: e.target.value })} />
+          </Field>
         </div>
       );
 
