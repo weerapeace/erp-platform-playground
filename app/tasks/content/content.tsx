@@ -376,6 +376,16 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [discountValue, setDiscountValue] = useState<string>("");
   const [discountPct, setDiscountPct] = useState(false);
   const [tplSettingsOpen, setTplSettingsOpen] = useState(false);
+  // แพลตฟอร์มที่กางอยู่ (แบบพับเก็บ) — เริ่มต้นกางตัวแรกที่ยังไม่ได้โพสต์
+  const [openPlats, setOpenPlats] = useState<Set<string>>(new Set());
+  const [openInit, setOpenInit] = useState(false);
+  useEffect(() => {
+    if (openInit || caps.length === 0) return;
+    const first = caps.find((c) => !["posted", "skip", "scheduled"].includes(postStatus[c.platform] ?? "todo")) ?? caps[0];
+    setOpenPlats(new Set(first ? [first.platform] : []));
+    setOpenInit(true);
+  }, [caps, postStatus, openInit]);
+  const togglePlat = (k: string) => setOpenPlats((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const [psOpen, setPsOpen] = useState(false);   // โมดอลตั้งค่าแพลตฟอร์ม
   const [capCfg, setCapCfg] = useState<CaptionConfig>({});   // พรอมต์ + แฮชแท็กเริ่มต้น
   const [cfgOpen, setCfgOpen] = useState(false);   // โมดอลตั้งค่าพรอมต์/แฮชแท็ก
@@ -944,6 +954,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
               <div className="flex items-center gap-3 flex-wrap">
+                {caps.length > 1 && <button onClick={() => setOpenPlats(openPlats.size === caps.length ? new Set() : new Set(caps.map((c) => c.platform)))} className="text-xs text-slate-500 hover:text-violet-700">{openPlats.size === caps.length ? t("⊟ พับทั้งหมด", "⊟ Collapse all") : t("⊞ กางทั้งหมด", "⊞ Expand all")}</button>}
                 <button onClick={copyPrompt} className="text-xs font-medium text-violet-700 hover:underline">📋 {t("คัดลอกพรอมต์", "Copy prompt")}</button>
                 <button onClick={() => setCfgOpen(true)} className="text-xs text-violet-700 hover:underline">✍️ {t("พรอมต์/แฮชแท็ก", "Prompt/Hashtags")}</button>
                 <button onClick={() => setPsOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ {t("ตั้งค่าแพลตฟอร์ม", "Platform settings")}</button>
@@ -952,8 +963,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               </div>
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
-              <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} contentId={contentId} canAi={canAiCaption} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
+              <div className="space-y-1.5">
+                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -1159,9 +1170,8 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ contentId, canAi = false, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { contentId?: string; canAi?: boolean; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ open = true, onToggle, contentId, canAi = false, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { open?: boolean; onToggle?: () => void; contentId?: string; canAi?: boolean; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
-  const [tplOpen, setTplOpen] = useState(false);   // พับปุ่มเลือกแม่แบบไว้ก่อน
   const [imgEdit, setImgEdit] = useState(false);   // โหมดเลือกรูป (ปกติโชว์เฉพาะรูปที่เลือก · กดแล้วกางเลือก)
   const [aiBusy, setAiBusy] = useState(false);      // กำลังให้ AI เขียนแคปชั่น
   // ให้ AI เขียนแคปชั่นจากรูปที่แนบ + แฮชแท็กที่กรอก (ต้องมีสิทธิ์ ai.caption + ตั้ง OPENAI_API_KEY)
@@ -1200,114 +1210,155 @@ function CaptionCard({ contentId, canAi = false, cap, templates, sharedVars, bra
   ];
   // "โพสต์เลย" (มือ) — คัดลอกแคปชั่น + เปิดหน้าโพสต์ของแพลตฟอร์มให้ในคลิกเดียว แล้วให้ผู้ใช้มากด ✅
 
+  // ตัวอย่างที่ประกอบจากแม่แบบ — โชว์เฉพาะตอนแม่แบบ "เติมข้อความเพิ่ม" จริง ๆ
+  // (ถ้าแม่แบบมีแค่ {caption}/{hashtags} ก็ไม่ต้องโชว์ เพราะซ้ำกับช่องด้านบน = ต้นตอความรกเดิม)
+  const tplAddsText = !!tpl && renderCaption(tpl.body, { caption: "", hashtags: "", ...sharedVars }).replace(/\s+/g, "").length > 0;
+  const snippet = (cap.caption ?? "").split("\n").map((x) => x.trim()).find(Boolean) ?? "";
+  const stBadge = postStatus === "posted" ? { cls: "bg-emerald-50 text-emerald-700 border-emerald-200", label: `✅ ${t("โพสต์แล้ว", "Posted")}` }
+    : postStatus === "scheduled" ? { cls: "bg-blue-50 text-blue-700 border-blue-200", label: `⏰ ${t("ตั้งเวลาแล้ว", "Scheduled")}` }
+    : postStatus === "skip" ? { cls: "bg-slate-50 text-slate-400 border-slate-200", label: `⊘ ${t("ข้าม", "Skip")}` }
+    : { cls: "bg-white text-slate-400 border-slate-200", label: t("ยังไม่โพสต์", "Not posted") };
+  // เมนู ⋯ = ของที่ไม่ได้ใช้ทุกครั้ง (ยุบออกจากหัวการ์ดเพื่อลดความรก)
+  const menuItems: { label: string; onClick: () => void }[] = [];
+  if (postUrl) menuItems.push({ label: `↗ ${t("ไปหน้าโพสต์", "Open post page")}`, onClick: () => window.open(postUrl, "_blank", "noopener") });
+  else if (onOpenSettings) menuItems.push({ label: `🔗 ${t("ตั้งลิงก์ไปหน้าโพสต์", "Set post link")}`, onClick: onOpenSettings });
+  if (onApplyAll) menuItems.push({ label: `⇊ ${t("ใช้แคปชั่นนี้กับแพลตฟอร์มอื่น", "Apply to other platforms")}`, onClick: () => onApplyAll(cap.platform) });
+  if (onOpenSettings) menuItems.push({ label: `⚙️ ${t("ตั้งค่าแพลตฟอร์มนี้", "Platform settings")}`, onClick: onOpenSettings });
+
   return (
-    <div className="border border-slate-200 rounded-lg p-3 bg-white">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <span className="inline-flex items-center gap-1.5 min-w-0">
+    <div className={`border rounded-lg bg-white ${open ? "border-violet-200 shadow-sm" : "border-slate-200"}`}>
+      {/* ── หัวแถว: กดเพื่อกาง/พับ · ตอนพับเห็นครบว่าเขียนแล้วยัง มีรูปกี่รูป โพสต์แล้วยัง ── */}
+      <div className="flex items-center gap-2 px-2.5 py-2">
+        <button type="button" onClick={onToggle} className="flex items-center gap-2 min-w-0 flex-1 text-left">
+          <span className="text-[10px] text-slate-400 w-3 shrink-0">{open ? "▲" : "▼"}</span>
           <PlatformChip code={cap.platform} />
-          {postStatus === "posted" && <span className="text-emerald-600 text-sm" title={t("โพสต์แล้ว", "Posted")}>✅</span>}
-          {postStatus === "scheduled" && <span className="text-blue-600 text-sm" title={t("ตั้งเวลาโพสต์แล้ว", "Scheduled")}>⏰</span>}
-          {postStatus === "skip" && <span className="text-slate-300 text-sm" title={t("ข้าม (ไม่โพสต์แพลตฟอร์มนี้)", "Skipped")}>⊘</span>}
-        </span>
-        <div className="flex items-center gap-3 shrink-0">
-          {postUrl
-            ? <a href={postUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-100">↗ {t("ไปโพสต์", "Post")}</a>
-            : onOpenSettings && <button onClick={onOpenSettings} title={t("ตั้งลิงก์ไปหน้าโพสต์ ที่ตั้งค่าแพลตฟอร์ม", "Set post link in platform settings")} className="text-[11px] text-slate-400 hover:text-violet-700">🔗 {t("ตั้งลิงก์", "Set link")}</button>}
-          {onApplyAll && <button onClick={() => onApplyAll(cap.platform)} title={t("เอาแคปชั่น/แฮชแท็กช่องนี้ไปใช้กับแพลตฟอร์มอื่น (เลือกวิธี)", "Apply this caption/hashtags to other platforms")} className="text-[11px] text-slate-500 hover:text-violet-700">⇊ {t("ใช้ทั้งหมด", "Apply all")}</button>}
-          {canAi && useCaption && contentId && (
-            <button onClick={aiWrite} disabled={aiBusy} title={t("ให้ AI อ่านรูปที่แนบ + แฮชแท็ก แล้วเขียนแคปชั่นให้", "Let AI read the attached images + hashtags and write the caption")}
-              className="text-xs font-medium text-fuchsia-700 hover:underline disabled:opacity-50">{aiBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนให้", "✨ AI write")}</button>
+          {!open && (
+            <>
+              <span className={`text-xs truncate min-w-0 flex-1 ${snippet ? "text-slate-600" : "text-slate-300 italic"}`}>
+                {snippet || (useCaption ? t("ยังไม่เขียน", "Not written") : t("ปิดแคปชั่นแพลตฟอร์มนี้", "Caption off"))}
+              </span>
+              {selectedImages.length > 0 && <span className="text-[11px] text-slate-400 shrink-0" title={t("รูปที่เลือกไว้", "Selected images")}>🖼 {selectedImages.length}</span>}
+              <span className={`text-[11px] px-1.5 py-0.5 rounded-full border shrink-0 ${stBadge.cls}`}>{stBadge.label}</span>
+            </>
           )}
-          <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
-        </div>
-      </div>
-      {/* เลือกแม่แบบ (พับไว้ — กดกางเมื่อจะเปลี่ยน) · ซ่อนถ้าปิดแคปชั่น */}
-      {useCaption && (
-      <div className="mb-2">
-        <button onClick={() => setTplOpen((o) => !o)} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-violet-700">
-          📑 {t("แม่แบบ", "Template")}: <span className="font-medium text-slate-700">{tpl?.label ?? t("ไม่มี", "none")}</span> <span className="text-[10px]">{tplOpen ? "▲" : "▼"}</span>
         </button>
-        {tplOpen && (
-          <div className="flex flex-wrap gap-1.5 mt-1.5">
-            {templates.map((tp) => { const on = typeKey === tp.key; return (
-              <button key={tp.key} onClick={() => { onChange({ caption_type: tp.key }); setTplOpen(false); }} className={`px-2.5 py-0.5 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100"}`}>{tp.label}</button>
-            ); })}
-            {templates.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มีแม่แบบ — กด 📝 แม่แบบ", "No templates yet — click 📝 Templates")}</span>}
+        {open && (
+          <div className="flex items-center gap-2 shrink-0">
+            {canAi && useCaption && contentId && (
+              <button onClick={aiWrite} disabled={aiBusy} title={t("ให้ AI อ่านรูปที่แนบ + แฮชแท็ก แล้วเขียนแคปชั่นให้", "Let AI read the attached images + hashtags and write the caption")}
+                className="text-xs font-medium text-fuchsia-700 hover:underline disabled:opacity-50">{aiBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนให้", "✨ AI write")}</button>
+            )}
+            <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
+            {menuItems.length > 0 && <RowMenu items={menuItems} />}
           </div>
         )}
       </div>
-      )}
-      {useCaption
-        ? <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={t(`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`, `Write caption for ${platformLabel(cap.platform)}...`)} />
-        : <p className="text-[11px] text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">{t("ปิดแคปชั่นสำหรับแพลตฟอร์มนี้ (เปิดได้ที่ ⚙️ ตั้งค่าแพลตฟอร์ม)", "Caption off for this platform (toggle in ⚙️ Platform settings)")}</p>}
-      {useHashtags && <div className="mt-2"><HashtagInput value={cap.hashtags} onChange={(v) => onChange({ hashtags: v })} brandId={brandId} platform={cap.platform} pushToast={pushToast} /></div>}
-      {/* preview ผลลัพธ์ที่จะคัดลอก — โชว์เฉพาะเมื่อมีแคปชั่นจริง */}
-      {useCaption && (cap.caption ?? "").trim() && (
-        <div className="mt-2">
-          <p className="text-[11px] text-slate-400 mb-1">{t("ตัวอย่างที่จะโพสต์ (ประกอบจากแม่แบบ)", "Preview (assembled from template)")}</p>
-          <pre className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
-        </div>
-      )}
-      {/* รูปสำหรับแพลตฟอร์มนี้ — ปกติโชว์เฉพาะรูปที่เลือก · กด "เลือก/แก้รูป" เพื่อกางเลือก (รูปที่เลือกไปโชว์บนการ์ดย่อย + default ตอนโพสต์) */}
-      <div className="mt-2.5 pt-2 border-t border-slate-100">
-        <div className="flex items-center justify-between mb-1.5">
-          <p className="text-[11px] text-slate-400">🖼 {t("รูปสำหรับแพลตฟอร์มนี้", "Images for this platform")}{postImages.length ? ` — ${t("เลือกแล้ว", "selected")} ${selectedImages.length}` : ""}</p>
-          {postImages.length > 0 && (
-            <button type="button" onClick={() => setImgEdit((v) => !v)} className="text-[11px] font-medium text-violet-700 hover:underline">
-              {imgEdit ? `✓ ${t("เสร็จ", "Done")}` : `✏️ ${t("เลือก/แก้รูป", "Choose images")}`}
-            </button>
+
+      {open && (
+        <div className="px-2.5 pb-2.5 space-y-2">
+          {/* แม่แบบ — เปลี่ยนเป็นช่องเลือกเล็ก ๆ (เดิมเป็นชิปกางเต็มแถว) */}
+          {useCaption && templates.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-slate-400 shrink-0">📑 {t("แม่แบบ", "Template")}</span>
+              <select value={typeKey} onChange={(e) => onChange({ caption_type: e.target.value })} className="h-7 text-xs border border-slate-200 rounded-md px-1.5 bg-white max-w-[60%]">
+                {templates.map((tp) => <option key={tp.key} value={tp.key}>{tp.label}</option>)}
+              </select>
+            </div>
           )}
-        </div>
-        {postImages.length === 0
-          ? <p className="text-[11px] text-slate-300 italic">{t("ยังไม่มีรูป — แนบที่ส่วน “แนบเพิ่มเอง” หรือผูกงานก่อน", "No media yet — attach in “Attach” section or link a task first")}</p>
-          : imgEdit
-            ? (   // โหมดเลือก: โชว์รูปทั้งหมดให้ติ๊ก (เลือก/ยกเลิก)
-              <div className="flex flex-wrap gap-1.5">
-                {postImages.map((im) => { const on = selectedImages.includes(im.key); return (
-                  <button key={im.key} type="button" onClick={() => onToggleImage?.(im.key)} title={im.label ?? ""} className={`relative h-14 w-14 rounded-md overflow-hidden border-2 transition-all ${on ? "border-violet-500 ring-1 ring-violet-300" : "border-slate-200 opacity-60 hover:opacity-100"}`}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={r2ImageUrl(im.key, 120) ?? ""} alt="" className="w-full h-full object-cover" />
-                    {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
-                    {on && <span className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-violet-600 text-white text-[10px] flex items-center justify-center shadow">✓</span>}
-                  </button>
-                ); })}
-              </div>
-            )
-            : selectedImages.length === 0
-              ? <p className="text-[11px] text-slate-300 italic">{t("ยังไม่เลือกรูป — กด “เลือก/แก้รูป”", "No image selected — click “Choose images”")}</p>
-              : (   // โหมดปกติ: โชว์เฉพาะรูปที่เลือก (ซ่อนรูปที่ไม่เลือก) · รูปแรก=รูปใหญ่ · รูปอื่นชี้แล้วตั้งเป็นรูปใหญ่ได้
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedImages.map((key, idx) => { const im = postImages.find((p) => p.key === key); if (!im) return null; const isMain = idx === 0; return (
-                    <div key={key} className={`group/mi relative h-16 w-16 rounded-md overflow-hidden border-2 ${isMain ? "border-violet-500" : "border-slate-200"}`}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={r2ImageUrl(key, 140) ?? ""} alt="" className="w-full h-full object-cover" />
-                      {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
-                      {isMain
-                        ? <span className="absolute top-0.5 left-0.5 text-[8px] bg-violet-600 text-white px-1 rounded shadow">⭐ {t("รูปใหญ่", "Main")}</span>
-                        : onSetMain && <button type="button" onClick={() => onSetMain(key)} title={t("ตั้งเป็นรูปใหญ่", "Set as main")} className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-[9px] font-medium opacity-0 group-hover/mi:opacity-100 transition-opacity">⭐ {t("ตั้งเป็นรูปใหญ่", "Set main")}</button>}
+          {useCaption
+            ? <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={t(`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`, `Write caption for ${platformLabel(cap.platform)}...`)} />
+            : <p className="text-[11px] text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">{t("ปิดแคปชั่นสำหรับแพลตฟอร์มนี้ (เปิดได้ที่ ⚙️ ตั้งค่าแพลตฟอร์ม)", "Caption off for this platform (toggle in ⚙️ Platform settings)")}</p>}
+          {useHashtags && <HashtagInput value={cap.hashtags} onChange={(v) => onChange({ hashtags: v })} brandId={brandId} platform={cap.platform} pushToast={pushToast} />}
+          {/* ตัวอย่างจริง — เฉพาะเมื่อแม่แบบเติมข้อความเพิ่ม (ไม่งั้นซ้ำกับช่องบน) */}
+          {useCaption && tplAddsText && (cap.caption ?? "").trim() && (
+            <details className="group">
+              <summary className="text-[11px] text-slate-400 cursor-pointer hover:text-violet-700 list-none">👁 {t("ดูตัวอย่างที่จะโพสต์ (ประกอบจากแม่แบบ)", "Preview (assembled from template)")}</summary>
+              <pre className="mt-1 text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
+            </details>
+          )}
+
+          {/* ── รูป + สถานะโพสต์ รวมอยู่ท้ายเดียว (เดิมแยก 2 บล็อกมีเส้นคั่น 2 เส้น) ── */}
+          <div className="pt-2 border-t border-slate-100 space-y-2">
+            <div className="flex items-start gap-2 flex-wrap">
+              <span className="text-[11px] text-slate-400 mt-1 shrink-0">🖼 {t("รูป", "Images")}</span>
+              {postImages.length === 0
+                ? <span className="text-[11px] text-slate-300 italic mt-1">{t("ยังไม่มีรูป — แนบที่ส่วน “แนบเพิ่มเอง” หรือผูกงานก่อน", "No media yet — attach in “Attach” section or link a task first")}</span>
+                : imgEdit
+                  ? (   // โหมดเลือก: โชว์รูปทั้งหมดให้ติ๊ก
+                    <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+                      {postImages.map((im) => { const on = selectedImages.includes(im.key); return (
+                        <button key={im.key} type="button" onClick={() => onToggleImage?.(im.key)} title={im.label ?? ""} className={`relative h-12 w-12 rounded-md overflow-hidden border-2 transition-all ${on ? "border-violet-500 ring-1 ring-violet-300" : "border-slate-200 opacity-60 hover:opacity-100"}`}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={r2ImageUrl(im.key, 120) ?? ""} alt="" className="w-full h-full object-cover" />
+                          {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
+                          {on && <span className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-violet-600 text-white text-[10px] flex items-center justify-center shadow">✓</span>}
+                        </button>
+                      ); })}
                     </div>
-                  ); })}
-                </div>
+                  )
+                  : selectedImages.length === 0
+                    ? <span className="text-[11px] text-slate-300 italic mt-1">{t("ยังไม่เลือกรูป", "No image selected")}</span>
+                    : (   // ปกติ: เฉพาะรูปที่เลือก · รูปแรก = รูปใหญ่
+                      <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+                        {selectedImages.map((key, idx) => { const im = postImages.find((p) => p.key === key); if (!im) return null; const isMain = idx === 0; return (
+                          <div key={key} className={`group/mi relative h-12 w-12 rounded-md overflow-hidden border-2 ${isMain ? "border-violet-500" : "border-slate-200"}`}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={r2ImageUrl(key, 140) ?? ""} alt="" className="w-full h-full object-cover" />
+                            {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
+                            {isMain
+                              ? <span className="absolute top-0.5 left-0.5 text-[8px] bg-violet-600 text-white px-1 rounded shadow" title={t("รูปใหญ่", "Main")}>⭐</span>
+                              : onSetMain && <button type="button" onClick={() => onSetMain(key)} title={t("ตั้งเป็นรูปใหญ่", "Set as main")} className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-[9px] font-medium opacity-0 group-hover/mi:opacity-100 transition-opacity">⭐</button>}
+                          </div>
+                        ); })}
+                      </div>
+                    )}
+              {postImages.length > 0 && (
+                <button type="button" onClick={() => setImgEdit((v) => !v)} className="text-[11px] font-medium text-violet-700 hover:underline mt-1 shrink-0 ml-auto">
+                  {imgEdit ? `✓ ${t("เสร็จ", "Done")}` : `✏️ ${t("เลือก/แก้รูป", "Choose")}`}
+                </button>
               )}
-      </div>
-      {/* แถบโพสต์ (เฟส 1 = โพสต์มือ): สถานะต่อแพลตฟอร์ม + ปุ่มโพสต์เลย + ลิงก์ที่ลง */}
-      <div className="mt-2.5 pt-2 border-t border-slate-100">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] text-slate-400 mr-0.5">{t("สถานะโพสต์", "Post status")}:</span>
-          {POST_STATES.map((st) => { const on = postStatus === st.key; return (
-            <button key={st.key} onClick={() => onSetStatus?.(st.key)} className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${on ? st.onCls : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>{st.label}</button>
-          ); })}
-          {postStatus === "scheduled" && <span className="text-[11px] px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-300">⏰ {t("ตั้งเวลาแล้ว", "Scheduled")}</span>}
-          <button onClick={() => onRequestPost?.(preview)} title={canAuto ? t(`โพสต์ขึ้น ${autoLabel} จริง`, `Publish to ${autoLabel}`) : t("คัดลอกแคปชั่น + เปิดหน้าโพสต์", "Copy caption + open post page")} className={`ml-auto inline-flex items-center gap-1 text-xs font-medium text-white rounded-md px-2.5 py-1 ${canAuto ? "bg-blue-600 hover:bg-blue-700" : "bg-violet-600 hover:bg-violet-700"}`}>{canAuto ? `🚀 ${t("โพสต์ขึ้น", "Post to")} ${autoLabel}` : `📤 ${t("โพสต์เลย", "Post now")}`}</button>
-        </div>
-        {(postStatus === "posted" || postStatus === "scheduled") && (
-          <div className="flex items-center gap-1.5 mt-1.5">
-            <span className="text-[11px] text-slate-400 shrink-0">{t("ลิงก์ที่ลง", "Posted link")}</span>
-            <input value={postedUrl} onChange={(e) => onSetPostedUrl?.(e.target.value)} onBlur={() => onCommitPostedUrl?.()} placeholder="https://..." className="flex-1 min-w-0 h-7 border border-slate-200 rounded-md px-2 text-xs" />
-            {postedUrl.trim() && <a href={postedUrl} target="_blank" rel="noreferrer" title={t("เปิดโพสต์", "Open post")} className="text-xs text-violet-700 hover:underline shrink-0">↗</a>}
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {POST_STATES.map((st) => { const on = postStatus === st.key; return (
+                <button key={st.key} onClick={() => onSetStatus?.(st.key)} className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${on ? st.onCls : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>{st.label}</button>
+              ); })}
+              {postStatus === "scheduled" && <span className="text-[11px] px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-300">⏰ {t("ตั้งเวลาแล้ว", "Scheduled")}</span>}
+              <button onClick={() => onRequestPost?.(preview)} title={canAuto ? t(`โพสต์ขึ้น ${autoLabel} จริง`, `Publish to ${autoLabel}`) : t("คัดลอกแคปชั่น + เปิดหน้าโพสต์", "Copy caption + open post page")} className={`ml-auto inline-flex items-center gap-1 text-xs font-medium text-white rounded-md px-2.5 py-1 ${canAuto ? "bg-blue-600 hover:bg-blue-700" : "bg-violet-600 hover:bg-violet-700"}`}>{canAuto ? `🚀 ${t("โพสต์ขึ้น", "Post to")} ${autoLabel}` : `📤 ${t("โพสต์เลย", "Post now")}`}</button>
+            </div>
+            {(postStatus === "posted" || postStatus === "scheduled") && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-slate-400 shrink-0">{t("ลิงก์ที่ลง", "Posted link")}</span>
+                <input value={postedUrl} onChange={(e) => onSetPostedUrl?.(e.target.value)} onBlur={() => onCommitPostedUrl?.()} placeholder="https://..." className="flex-1 min-w-0 h-7 border border-slate-200 rounded-md px-2 text-xs" />
+                {postedUrl.trim() && <a href={postedUrl} target="_blank" rel="noreferrer" title={t("เปิดโพสต์", "Open post")} className="text-xs text-violet-700 hover:underline shrink-0">↗</a>}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// เมนู ⋯ เล็ก ๆ ท้ายหัวการ์ด (ของที่ไม่ได้ใช้ทุกครั้ง) · กดที่อื่นแล้วปิดเอง
+function RowMenu({ items }: { items: { label: string; onClick: () => void }[] }) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener("mousedown", away);
+    return () => window.removeEventListener("mousedown", away);
+  }, [open]);
+  return (
+    <div ref={boxRef} className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)} title="เพิ่มเติม" className="text-slate-400 hover:text-violet-700 px-1 leading-none text-base">⋯</button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 min-w-[200px] bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+          {items.map((it) => (
+            <button key={it.label} type="button" onClick={() => { setOpen(false); it.onClick(); }} className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">{it.label}</button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
