@@ -44,6 +44,8 @@ const BulkEditAllModal = nextDynamic(() => import("@/components/data-table").the
 const BarcodePrintModal = nextDynamic(() => import("@/components/barcode-print/modal").then((m) => ({ default: m.BarcodePrintModal })), { ssr: false });
 // ตัวจัดการ SKU ซ้ำ (รวม/ยุบ) — โหลดเฉพาะตอนกด
 const SkuMergeModal = nextDynamic(() => import("@/components/sku-merge").then((m) => ({ default: m.SkuMergeModal })), { ssr: false });
+// ตรวจรูปที่ไฟล์หายจากที่เก็บ — โหลดเฉพาะตอนกด
+const MissingImagesModal = nextDynamic(() => import("@/components/missing-images").then((m) => ({ default: m.MissingImagesModal })), { ssr: false });
 
 type Crumb = { id: string; name: string };
 
@@ -174,6 +176,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);               // เปิดฟอร์มเพิ่ม (SKU=Wizard / Parent=modal เล็ก)
   const [mergeOpen, setMergeOpen] = useState(false);           // เปิดตัวจัดการ SKU ซ้ำ (รวม/ยุบ)
+  const [missingOpen, setMissingOpen] = useState(false);       // ตรวจรูปที่ไฟล์หายจากที่เก็บ
   const [copyPending, setCopyPending] = useState<{ id: string; code: string } | null>(null);  // ยืนยันก่อนคัดลอก
   const [peekId, setPeekId] = useState<string | null>(null);   // คลิกการ์ด/แถว → drawer เก่าตัวจริง (ของกลาง: ดู/แก้ทุกฟิลด์)
 
@@ -421,6 +424,10 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
             🔗 จัดการ SKU ซ้ำ
           </button>
         )}
+        {!taobao && <button onClick={() => setMissingOpen(true)} title="ตรวจว่ามีสินค้าตัวไหนรูปเสีย (ไฟล์หายจากที่เก็บ) บ้าง"
+          className="h-9 px-3 text-sm border border-slate-200 text-slate-500 rounded-lg hover:bg-slate-50 whitespace-nowrap">
+          🔎 ตรวจรูปหาย
+        </button>}
         {!taobao && <button onClick={() => openSpecial("trash")} title="ดูรายการที่ลบ/ปิดใช้งานไว้ (กู้คืนได้)"
           className={`h-9 px-3 text-sm rounded-lg whitespace-nowrap border ${special === "trash" ? "border-rose-300 bg-rose-50 text-rose-600 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
           🗑 ถังขยะ
@@ -429,6 +436,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
       )}
       {/* ฟอร์มเพิ่ม: SKU = Wizard เต็ม · Parent = modal เล็ก */}
       {mergeOpen && <SkuMergeModal onClose={() => setMergeOpen(false)} onDone={() => { setMergeOpen(false); void reloadFirst(); }} />}
+      {missingOpen && <MissingImagesModal onClose={() => { setMissingOpen(false); void reloadFirst(); }} />}
       {addOpen && entity === "skus" && <SkuWizard open onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
       {addOpen && entity === "parent-skus" && <ParentSkuCreateModal onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); void reloadFirst(); }} />}
       {copyPending && (
