@@ -345,7 +345,7 @@ export type ContentItem = {
   cover_image_url?: string | null;   // รูปหน้าปก (resolve จากสื่อแนบ/SKU/งาน) — ใช้โชว์บนการ์ดกระดานแคมเปญ
   post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
   scheduled_at: string | null; published_at: string | null; published_url: string | null;
-  product_links: { platform: string; url: string }[]; posted_links?: Record<string, string> | null; post_status?: Record<string, string> | null; platform_images?: Record<string, string[]> | null; note: string | null; is_template?: boolean; template_icon?: string | null; updated_at: string;
+  product_links: { platform: string; url: string }[]; posted_links?: Record<string, string> | null; post_status?: Record<string, string> | null; platform_images?: Record<string, string[]> | null; platform_formats?: Record<string, string> | null; note: string | null; is_template?: boolean; template_icon?: string | null; updated_at: string;
   discount_value?: number | null; discount_is_percent?: boolean;
   brand_shop_channels?: { label: string; value: string }[];
   assignee_id?: string | null; assignee_label?: string | null;   // ผู้รับผิดชอบคอนเทนต์ (เดี่ยว = back-compat)
@@ -492,8 +492,8 @@ export async function getMetaStatus(brandId: string): Promise<MetaConnStatus> {
 // คืน: url+scheduled · หรือ processing+creationId (IG วิดีโอ ต้องไปตามเช็กที่ igFinalize)
 export type PostMediaRef = { key: string; type: "image" | "video" };
 export type PublishResult = { url: string; scheduled: boolean; processing: boolean; creationId?: string };
-export async function publishToPlatform(contentId: string, platform: string, captionText: string, media: PostMediaRef[], scheduledTime?: number): Promise<PublishResult> {
-  const j = await jsonOrThrow(await apiFetch("/api/meta/publish", { method: "POST", body: JSON.stringify({ content_id: contentId, platform, caption_text: captionText, media, scheduled_time: scheduledTime ?? 0 }) }));
+export async function publishToPlatform(contentId: string, platform: string, captionText: string, media: PostMediaRef[], scheduledTime?: number, format?: string): Promise<PublishResult> {
+  const j = await jsonOrThrow(await apiFetch("/api/meta/publish", { method: "POST", body: JSON.stringify({ content_id: contentId, platform, caption_text: captionText, media, scheduled_time: scheduledTime ?? 0, format: format ?? null }) }));
   const r = j as { url?: string; scheduled?: boolean; processing?: boolean; creation_id?: string };
   return { url: String(r.url ?? ""), scheduled: !!r.scheduled, processing: !!r.processing, creationId: r.creation_id };
 }

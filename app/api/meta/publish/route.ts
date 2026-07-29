@@ -22,14 +22,26 @@ type Media = { key: string; type: string };
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { content_id?: string; platform?: string; caption_text?: string; media?: Media[]; image_keys?: string[]; scheduled_time?: number };
+  let body: { content_id?: string; platform?: string; caption_text?: string; media?: Media[]; image_keys?: string[]; scheduled_time?: number; format?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const contentId = (body.content_id ?? "").trim();
   const platform = (body.platform ?? "").trim();
   const caption = (body.caption_text ?? "").trim();
   const scheduledTime = Number(body.scheduled_time) || 0;
   // รับ media[{key,type}] · เผื่อ backward-compat กับ image_keys เดิม
-  const media: Media[] = Array.isArray(body.media) && body.media.length ? body.media.filter((m) => m?.key) : (body.image_keys ?? []).filter(Boolean).map((k) => ({ key: k, type: "image" }));
+  let media: Media[] = Array.isArray(body.media) && body.media.length ? body.media.filter((m) => m?.key) : (body.image_keys ?? []).filter(Boolean).map((k) => ({ key: k, type: "image" }));
+  // รูปแบบโพสต์ที่ผู้ใช้เลือก (single/carousel/video/reels/story) — ไม่เลือก = เดาจากสื่อเหมือนเดิม
+  const format = (body.format ?? "").trim();
+  if (format === "story")
+    return NextResponse.json({ error: "Story ยังยิงอัตโนมัติไม่ได้ (Meta ต้องขอสิทธิ์เพิ่ม) — กด “คัดลอกแคปชั่น + เปิดหน้าโพสต์” แล้วลง Story เองก่อน" }, { status: 400 });
+  if (format === "single") media = media.filter((m) => m.type !== "video").slice(0, 1);
+  if (format === "carousel") media = media.filter((m) => m.type !== "video");
+  if (format === "video" || format === "reels") {
+    const v = media.find((m) => m.type === "video");
+    if (!v) return NextResponse.json({ error: "เลือกรูปแบบเป็นวิดีโอ/Reels แต่ยังไม่ได้เลือกไฟล์วิดีโอ — เลือกวิดีโอในช่อง “รูปสำหรับแพลตฟอร์มนี้” ก่อน" }, { status: 400 });
+    media = [v];
+  }
+  if (media.length === 0) return NextResponse.json({ error: "ยังไม่ได้เลือกรูป/วิดีโอสำหรับโพสต์นี้" }, { status: 400 });
   const url = (k: string) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`;
   const videoUrls = media.filter((m) => m.type === "video").map((m) => url(m.key));
   const imageUrls = media.filter((m) => m.type !== "video").map((m) => url(m.key));

@@ -399,6 +399,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   // สถานะ/ลิงก์การโพสต์ต่อแพลตฟอร์ม (บันทึกทันทีที่กด — ไม่ต้องรอปุ่มบันทึก)
   const [postStatus, setPostStatus] = useState<Record<string, string>>({});   // platform → 'posted' | 'skip' (ไม่มี = ยังไม่โพสต์)
   const [postedLinks, setPostedLinks] = useState<Record<string, string>>({});   // platform → ลิงก์โพสต์ที่ลงแล้ว
+  const [platformFormats, setPlatformFormats] = useState<Record<string, string>>({});   // platform → รูปแบบโพสต์ (โพสต์เดี่ยว/อัลบั้ม/Reels/Story)
   const [platformImages, setPlatformImages] = useState<Record<string, string[]>>({});   // platform → รูป(r2 key)ที่เลือกไว้ต่อแพลตฟอร์ม (โชว์บนการ์ดย่อย + default ตอนโพสต์)
   const [metaStatus, setMetaStatus] = useState<MetaConnStatus>({});   // เชื่อมต่อ Facebook/IG ของแบรนด์นี้แล้วหรือยัง (กด "โพสต์เลย" ยิงจริงได้ไหม)
   const [posting, setPosting] = useState<string | null>(null);   // แพลตฟอร์มที่กำลังยิงโพสต์จริง
@@ -473,7 +474,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     try {
       const detail = await getContent(contentId);
       setD(detail); setStatus(detail.status); setScheduledAt(detail.scheduled_at ? detail.scheduled_at.slice(0, 16) : ""); setPublishedUrl(detail.published_url ?? "");
-      setPostStatus(detail.post_status ?? {}); setPostedLinks(detail.posted_links ?? {}); setPlatformImages(detail.platform_images ?? {});
+      setPostStatus(detail.post_status ?? {}); setPostedLinks(detail.posted_links ?? {}); setPlatformImages(detail.platform_images ?? {}); setPlatformFormats(detail.platform_formats ?? {});
       setAssignees((detail.assignees && detail.assignees.length ? detail.assignees : (detail.assignee_id ? [{ id: detail.assignee_id, name: detail.assignee_label ?? "" }] : [])).map((a) => ({ id: a.id, name: a.name } as UserPickerValue)));
       setLinks(Array.isArray(detail.product_links) ? detail.product_links : []);
       setDiscountValue(detail.discount_value != null ? String(detail.discount_value) : "");
@@ -598,7 +599,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     const media: PostMediaRef[] = videoKey ? [{ key: videoKey, type: "video" }] : selectedKeys.map((k) => ({ key: k, type: "image" as const }));
     setPosting(platform);
     try {
-      const res = await publishToPlatform(contentId, platform, captionText, media, scheduledUnix ?? undefined);
+      const res = await publishToPlatform(contentId, platform, captionText, media, scheduledUnix ?? undefined, platformFormats[platform]);
       setPostModal(null);
       if (res.processing && res.creationId) {
         // IG Reels: ตามเช็กสถานะจนพร้อม (สูงสุด ~2.5 นาที)
@@ -780,7 +781,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     try {
       await updateContent(contentId, {
         status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null, assignee_ids: assignees.map((a) => a.id), color_source: colorSource,
-        post_status: postStatus, posted_links: postedLinks, platform_images: platformImages,
+        post_status: postStatus, posted_links: postedLinks, platform_images: platformImages, platform_formats: platformFormats,
         brand_id: brandId || null, sku_id: sku?.id ?? null, parent_sku_id: parent?.id ?? null, product_name: sku?.name ?? d?.product_name ?? null,
         discount_value: discountValue === "" ? null : Number(discountValue), discount_is_percent: discountPct,
         product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })),
@@ -1036,7 +1037,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-1.5">
-                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -1249,9 +1250,31 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
   );
 }
 
+// รูปแบบโพสต์ที่แต่ละแพลตฟอร์มมีให้เลือก (ไม่เลือก = ให้ระบบเดาจากสื่อที่เลือก: วิดีโอ→วิดีโอ, หลายรูป→อัลบั้ม)
+// ใช้ทั้งบอกคนโพสต์มือ และคุมตอนยิงอัตโนมัติ (Story ยังต้องโพสต์มือ)
+const POST_FORMATS: Record<string, { key: string; th: string; en: string }[]> = {
+  instagram: [
+    { key: "single", th: "โพสต์รูปเดียว", en: "Single post" },
+    { key: "carousel", th: "อัลบั้มหลายรูป", en: "Carousel" },
+    { key: "reels", th: "Reels (วิดีโอ)", en: "Reels" },
+    { key: "story", th: "Story (24 ชม.)", en: "Story" },
+  ],
+  facebook: [
+    { key: "single", th: "โพสต์รูปเดียว", en: "Single post" },
+    { key: "carousel", th: "อัลบั้มหลายรูป", en: "Album" },
+    { key: "video", th: "วิดีโอ", en: "Video" },
+    { key: "story", th: "Story (24 ชม.)", en: "Story" },
+  ],
+  tiktok: [{ key: "video", th: "วิดีโอ", en: "Video" }, { key: "carousel", th: "โพสต์รูปภาพ", en: "Photo post" }],
+  youtube: [{ key: "video", th: "วิดีโอปกติ", en: "Video" }, { key: "reels", th: "Shorts", en: "Shorts" }],
+};
+export function postFormatLabel(platform: string, key: string | undefined, t: (th: string, en: string) => string): string {
+  const f = (POST_FORMATS[platform] ?? []).find((x) => x.key === key);
+  return f ? t(f.th, f.en) : "";
+}
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { open?: boolean; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, format, onSetFormat, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { open?: boolean; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; format?: string; onSetFormat?: (v: string) => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [imgEdit, setImgEdit] = useState(false);   // โหมดเลือกรูป (ปกติโชว์เฉพาะรูปที่เลือก · กดแล้วกางเลือก)
   // ปุ่ม ✨ ของช่องนี้ = เปิดป๊อป "AI เขียนแคปชั่น" ของ drawer (ใส่คำสั่งเพิ่มได้) — ใช้เส้นทางเดียวกับปุ่มเขียนทั้งหมด
@@ -1301,6 +1324,7 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
               <span className={`text-xs truncate min-w-0 flex-1 ${snippet ? "text-slate-600" : "text-slate-300 italic"}`}>
                 {snippet || (useCaption ? t("ยังไม่เขียน", "Not written") : t("ปิดแคปชั่นแพลตฟอร์มนี้", "Caption off"))}
               </span>
+              {format && <span className="text-[10px] text-slate-500 bg-slate-100 rounded-full px-1.5 shrink-0" title={t("รูปแบบโพสต์", "Post format")}>{postFormatLabel(cap.platform, format, t)}</span>}
               {selectedImages.length > 0 && <span className="text-[11px] text-slate-400 shrink-0" title={t("รูปที่เลือกไว้", "Selected images")}>🖼 {selectedImages.length}</span>}
               <span className={`text-[11px] px-1.5 py-0.5 rounded-full border shrink-0 ${stBadge.cls}`}>{stBadge.label}</span>
             </>
@@ -1321,6 +1345,16 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
       {open && (
         <div className="px-2.5 pb-2.5 space-y-2">
           {/* แม่แบบ — เปลี่ยนเป็นช่องเลือกเล็ก ๆ (เดิมเป็นชิปกางเต็มแถว) */}
+          {(POST_FORMATS[cap.platform] ?? []).length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-slate-400 shrink-0">🎬 {t("ลงเป็น", "Post as")}</span>
+              <select value={format ?? ""} onChange={(e) => onSetFormat?.(e.target.value)} className="h-7 text-xs border border-slate-200 rounded-md px-1.5 bg-white">
+                <option value="">{t("อัตโนมัติ (ดูจากสื่อที่เลือก)", "Auto (from media)")}</option>
+                {(POST_FORMATS[cap.platform] ?? []).map((f) => <option key={f.key} value={f.key}>{t(f.th, f.en)}</option>)}
+              </select>
+              {format === "story" && <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5">{t("Story = โพสต์มือ", "Story = manual")}</span>}
+            </div>
+          )}
           {useCaption && templates.length > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-slate-400 shrink-0">📑 {t("แม่แบบ", "Template")}</span>
