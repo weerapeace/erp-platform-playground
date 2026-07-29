@@ -1799,14 +1799,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   );
                 })}
               </div>
-              {/* ครอบส่วนแก้ไขด้วย fieldset disabled → โหมดดูล็อกทุกช่อง/ปุ่ม (เว้นแท็บ Parent ด้านบนไว้เลื่อนดู) */}
-              <fieldset disabled={!fullEdit} className="contents space-y-2">
+              {/* โหมดดู: ล็อกเฉพาะ "ช่อง/ปุ่มที่แก้ข้อมูล" (ทำที่ตัวมันเอง) — ห้ามใช้ fieldset disabled ครอบ
+                  เพราะ fieldset disabled ล็อกทุกอย่างข้างในรวมของที่ควรใช้ได้ตลอด:
+                  จัดกลุ่ม · เรียงลำดับหัวคอลัมน์ · ปุ่มคำนวณผ้า · ค้นหา */}
+              <div className="contents space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-[11px] text-slate-400">
                   กำลังตีราคาของ: <b className="text-slate-600">{costParent === "" ? "ทั่วไป" : costParent}</b>
                 </div>
                 <div className="flex items-center gap-2">
-                  {canEdit && costParentTabs.length > 1 && (
+                  {fullEdit && costParentTabs.length > 1 && (
                     <CopyCostButton tabs={costParentTabs} current={costParent}
                       lineCountOf={(key) => costLines.filter((r) => pkey(r.parent_code) === key).length}
                       onCopy={(source) => {
@@ -1820,10 +1822,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                         toast.success(`คัดลอกตีราคาจาก "${source === "" ? "ทั่วไป" : source}" มาแล้ว (${cloned.length} บรรทัด)`);
                       }} />
                   )}
-                  {canEdit && form?.id && <button onClick={() => setCopyFromOpen(true)} title="คัดลอกตีราคาจากใบงานอื่น"
+                  {fullEdit && form?.id && <button onClick={() => setCopyFromOpen(true)} title="คัดลอกตีราคาจากใบงานอื่น"
                     className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📄 Copy จากใบอื่น</button>}
                   {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
-                  {canEdit && <button onClick={() => setBomPull(true)} title="ดึงชนิด/กว้าง/ยาว/จำนวน จากสูตร BOM มาตีราคา (วัสดุ+ราคาเลือกเอง)"
+                  {fullEdit && <button onClick={() => setBomPull(true)} title="ดึงชนิด/กว้าง/ยาว/จำนวน จากสูตร BOM มาตีราคา (วัสดุ+ราคาเลือกเอง)"
                     className="h-8 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50">🧬⬇ ดึงจาก BOM</button>}
                   {canEdit && <button onClick={() => setBomWizard(true)} title="ดึงกว้าง/ยาว/จำนวนจากตีราคาไปสร้างสูตรการผลิต (วัตถุดิบใส่ทีหลัง)"
                     className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">🧬 สร้างสูตร BOM</button>}
@@ -1942,7 +1944,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               <div className="sticky bottom-0 z-10 -mx-1 px-1 py-2 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm text-slate-600">ต้นทุนสินค้า: <b className="text-base text-emerald-700">{fmtBaht(grandTotal)}</b> บาท
                   {costDirty && <span className="ml-2 text-[11px] text-amber-600">● มีแก้ไขที่ยังไม่บันทึก</span>}</div>
-                {canEdit && (
+                {fullEdit && (
                   <div className="flex gap-1.5">
                     <button onClick={() => void saveCost()} disabled={costSaving}
                       className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 shadow-sm">{costSaving ? "กำลังบันทึก..." : "💾 บันทึกตีราคา"}</button>
@@ -1951,7 +1953,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   </div>
                 )}
               </div>
-              </fieldset>
+              </div>
             </div>}
 
             {/* แท็บรอบเสนอราคา (เฟส 3) */}
