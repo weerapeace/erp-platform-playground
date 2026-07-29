@@ -377,6 +377,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [discountPct, setDiscountPct] = useState(false);
   const [tplSettingsOpen, setTplSettingsOpen] = useState(false);
   // แพลตฟอร์มที่กางอยู่ (แบบพับเก็บ) — เริ่มต้นกางตัวแรกที่ยังไม่ได้โพสต์
+  const [aiAllBusy, setAiAllBusy] = useState(false);   // กำลังให้ AI เขียนทุกแพลตฟอร์ม
   const [openPlats, setOpenPlats] = useState<Set<string>>(new Set());
   const [openInit, setOpenInit] = useState(false);
   useEffect(() => {
@@ -710,6 +711,42 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); }
   };
 
+  // ✨ ให้ AI เขียนแคปชั่นทุกแพลตฟอร์มรอบเดียว — ประหยัด token เพราะอ่านรูปครั้งเดียวต่อชุดรูป
+  // (ฝั่ง server จับกลุ่มแพลตฟอร์มที่ใช้รูปชุดเดียวกัน แล้วยิง OpenAI ครั้งเดียวต่อกลุ่ม)
+  const aiWriteAll = async () => {
+    if (!contentId) { pushToast("error", t("บันทึกคอนเทนต์ก่อน แล้วค่อยให้ AI เขียน", "Save the content first")); return; }
+    const writable = caps.filter((c) => pset[c.platform]?.use_caption !== false);
+    if (writable.length === 0) { pushToast("info", t("ไม่มีแพลตฟอร์มที่เปิดใช้แคปชั่น", "No platform has captions enabled")); return; }
+    const filled = writable.filter((c) => (c.caption ?? "").trim()).length;
+    let overwrite = true;
+    if (filled > 0) {
+      overwrite = window.confirm(t(
+        `มี ${filled} ช่องที่เขียนไว้แล้ว\n\nตกลง = ให้ AI เขียนใหม่ทั้งหมด ${writable.length} ช่อง (ทับของเดิม)\nยกเลิก = เขียนเฉพาะช่องที่ยังว่าง ${writable.length - filled} ช่อง`,
+        `${filled} already have captions\n\nOK = rewrite all ${writable.length}\nCancel = only fill the ${writable.length - filled} empty ones`));
+      if (!overwrite && writable.length - filled === 0) { pushToast("info", t("ทุกช่องมีแคปชั่นอยู่แล้ว", "All captions are already written")); return; }
+    }
+    setAiAllBusy(true);
+    try {
+      const r = await apiFetch("/api/ai/caption-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_id: contentId, platforms: writable.map((c) => c.platform), overwrite }) });
+      const j = await r.json();
+      if (j.error) throw new Error(j.error);
+      const results = (j.results ?? []) as { platform: string; caption: string; hashtags: string[] }[];
+      for (const res of results) {
+        const cur = caps.find((c) => c.platform === res.platform);
+        const old = (cur?.hashtags ?? "").trim();
+        const have = new Set(old.split(/\s+/).filter(Boolean).map((x) => x.toLowerCase()));
+        const add = (res.hashtags ?? []).filter((h) => !have.has(h.toLowerCase()));
+        setCap(res.platform, { caption: res.caption, ...(add.length ? { hashtags: [old, ...add].filter(Boolean).join(" ") } : {}) });
+        setTouchedCaps((s) => { const n = new Set(s); n.add(`${res.platform}|caption`); if (add.length) n.add(`${res.platform}|hashtags`); return n; });
+      }
+      const skip = ((j.skipped ?? []) as { platform: string; reason: string }[]).length;
+      pushToast(results.length ? "success" : "info", t(
+        `AI เขียนให้ ${results.length} แพลตฟอร์ม (ยิง AI ${j.calls} ครั้ง · อ่าน ${j.images_used ?? 0} รูป)${skip ? ` · ข้าม ${skip}` : ""} — กด “บันทึก” เพื่อเก็บ`,
+        `AI wrote ${results.length} platform(s) in ${j.calls} call(s), ${j.images_used ?? 0} image(s)${skip ? `, skipped ${skip}` : ""} — press Save to keep`));
+      if (j.warning) pushToast("error", String(j.warning));
+    } catch (e) { pushToast("error", (e as Error).message); } finally { setAiAllBusy(false); }
+  };
+
   const save = async () => {
     setSaving(true);
     try {
@@ -954,6 +991,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
               <div className="flex items-center gap-3 flex-wrap">
+                {canAiCaption && caps.length > 0 && (
+                  <button onClick={aiWriteAll} disabled={aiAllBusy}
+                    title={t("ให้ AI เขียนแคปชั่นทุกแพลตฟอร์มรอบเดียว ตาม prompt ที่ตั้งไว้ของแต่ละแพลตฟอร์ม (อ่านรูปครั้งเดียว = ประหยัด)", "Write all platform captions in one go, using each platform's prompt")}
+                    className="text-xs font-medium text-white bg-fuchsia-600 hover:bg-fuchsia-700 disabled:opacity-50 rounded-md px-2 py-1">
+                    {aiAllBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนทั้งหมด", "✨ AI write all")}
+                  </button>
+                )}
                 {caps.length > 1 && <button onClick={() => setOpenPlats(openPlats.size === caps.length ? new Set() : new Set(caps.map((c) => c.platform)))} className="text-xs text-slate-500 hover:text-violet-700">{openPlats.size === caps.length ? t("⊟ พับทั้งหมด", "⊟ Collapse all") : t("⊞ กางทั้งหมด", "⊞ Expand all")}</button>}
                 <button onClick={copyPrompt} className="text-xs font-medium text-violet-700 hover:underline">📋 {t("คัดลอกพรอมต์", "Copy prompt")}</button>
                 <button onClick={() => setCfgOpen(true)} className="text-xs text-violet-700 hover:underline">✍️ {t("พรอมต์/แฮชแท็ก", "Prompt/Hashtags")}</button>
