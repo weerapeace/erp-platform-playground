@@ -1719,6 +1719,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     if (pairs.length === 0) { flash("ไม่มีช่องที่ตั้งค่าให้แปล"); return; }
 
     setTranslating(true);
+    // โหมดดู = ไม่มีปุ่มบันทึกให้กด → บันทึกทีละช่องทันที (เหมือน quick edit)
+    const autoSave = drawerMode === "view" && !!editingId;
     let done = 0, skipped = 0, failed = 0;
     let lastErr = "";
     try {
@@ -1740,17 +1742,26 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           lastErr = j?.error || (res.status === 401 || res.status === 403 ? "ไม่มีสิทธิ์ใช้ตัวแปลภาษา" : `แปลไม่สำเร็จ (${res.status})`);
           continue;
         }
-        setForm((p) => ({ ...p, [enKey]: out }));
-        setDirty(true);
+        // โหมด "ดู" ไม่มีปุ่มบันทึก → ต้องเขียนลงระบบทันที ไม่งั้นปิดหน้าแล้วคำแปลหาย
+        if (autoSave) {
+          const err = await onInlineEdit({ id: editingId } as Row, enKey, out);
+          if (err) { failed++; lastErr = err; continue; }
+          setForm((p) => ({ ...p, [enKey]: out }));
+        } else {
+          setForm((p) => ({ ...p, [enKey]: out }));
+          setDirty(true);
+        }
         done++;
       }
       if (failed && !done) setFormErr(`แปลไม่สำเร็จ ${failed} ช่อง — ${lastErr}`);
-      else if (done) flash(`แปลแล้ว ${done} ช่อง${skipped ? ` · ข้าม ${skipped}` : ""}${failed ? ` · ล้มเหลว ${failed}` : ""} — กดบันทึกเพื่อเก็บ`);
+      else if (done) flash(autoSave
+        ? `แปลและบันทึกแล้ว ${done} ช่อง${skipped ? ` · ข้าม ${skipped}` : ""}${failed ? ` · ล้มเหลว ${failed}` : ""}`
+        : `แปลแล้ว ${done} ช่อง${skipped ? ` · ข้าม ${skipped}` : ""}${failed ? ` · ล้มเหลว ${failed}` : ""} — กดบันทึกเพื่อเก็บ`);
       else flash("ไม่มีช่องที่ต้องแปล (มีข้อความอังกฤษอยู่แล้ว — กด ↻ แปลทับ ถ้าต้องการแปลใหม่)");
     } catch (e) {
       setFormErr(e instanceof Error ? e.message : "แปลไม่สำเร็จ");
     } finally { setTranslating(false); }
-  }, [effectiveFields]);
+  }, [effectiveFields, drawerMode, editingId, onInlineEdit]);
 
   // Quick edit ในหน้า detail (view mode) — บันทึกทันทีผ่าน onInlineEdit + อัปเดต form
   const quickSave = useCallback(async (field: string, value: string): Promise<string | null> => {
@@ -2743,7 +2754,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       {aiDetailOpen && editingId && (
         <AiProductDetailModal parentId={editingId} current={form} onClose={() => setAiDetailOpen(false)}
           onApply={(vals) => {
-            if (Object.keys(vals).length === 0) return;
+            const keys = Object.keys(vals);
+            if (keys.length === 0) return;
             // ช่องตัวเลข (ขนาด/น้ำหนัก) ต้องเก็บเป็นตัวเลข ไม่ใช่ข้อความ — ไม่งั้นบันทึกแล้ว type เพี้ยน
             const coerced: Record<string, unknown> = {};
             for (const [k, v] of Object.entries(vals)) {
@@ -2751,8 +2763,21 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               coerced[k] = def?.type === "number" ? (v === "" ? null : Number(v)) : v;
             }
             setForm((p) => ({ ...p, ...coerced }));
-            setDirty(true);
-            flash(`ใส่ข้อความจาก AI แล้ว ${Object.keys(vals).length} ช่อง — ตรวจแล้วกดบันทึก`);
+            // โหมดดูไม่มีปุ่มบันทึก → เขียนลงระบบทันทีทีละช่อง (ไม่งั้นปิดหน้าแล้วหาย)
+            if (drawerMode === "view" && editingId) {
+              void (async () => {
+                let ok = 0; let err0 = "";
+                for (const k of keys) {
+                  const e = await onInlineEdit({ id: editingId } as Row, k, String(vals[k] ?? ""));
+                  if (e) { if (!err0) err0 = e; } else ok++;
+                }
+                if (ok) flash(`AI เขียนให้และบันทึกแล้ว ${ok} ช่อง`);
+                if (err0) setFormErr(`บันทึกบางช่องไม่สำเร็จ — ${err0}`);
+              })();
+            } else {
+              setDirty(true);
+              flash(`ใส่ข้อความจาก AI แล้ว ${keys.length} ช่อง — ตรวจแล้วกดบันทึก`);
+            }
           }} />
       )}
 
@@ -2938,6 +2963,9 @@ export function MasterRecordDrawer({
       title: title ?? createTitle ?? prettifyModuleKey(moduleKey),
       icon, activeField: "is_active", serverMode: true,
       permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
+      // ✨ ปุ่ม "ให้ AI คิดรายละเอียดสินค้า" — ต้องเปิดที่นี่ด้วย เพราะ drawer สร้าง config เอง
+      // (ไม่ได้ใช้ CONFIG ของหน้า /master/parent-skus) ซึ่งเป็นทางที่ผู้ใช้เปิดจริงจากหน้าแท็ก/การ์ด
+      aiProductDetail: moduleKey === "parent-skus-v2",
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults, formRenderers,
       // ไฟล์แนบ: ผู้เรียกส่ง fileAttachments มาได้ตรงๆ (เช่น payroll พนักงาน) · fallback = สินค้า (Parent/SKU)
       fileAttachments: fileAttachments ?? (productEntity ? { entityType: productEntity, title: "ไฟล์แนบ" } : undefined),
