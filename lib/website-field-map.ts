@@ -14,6 +14,12 @@ export type NameSource = "name_th" | "name_platform" | "name_en" | "sku_name" | 
 export type PriceSource = "sku_max" | "sku_min" | "final_price" | "sale_price" | "fake_price";
 export type DescSource = "platform_description" | "introduction" | "description" | "english_description" | "none";
 export type OptionSource = "sku_color" | "none";
+/**
+ * ตัวเลือกกลุ่มที่ 2 — มาจาก `skus_v2.attribute_values.variant_option`
+ * ซึ่งเป็นช่องที่ระบบสร้าง SKU แบบเมทริกซ์ (/api/skus/variant-matrix) ใช้เก็บ "มิติที่ 2" อยู่แล้ว
+ * เช่น เครื่องมือเจาะหนัง PI338 = จำนวนรู (สี) × ขนาดรู (variant_option)
+ */
+export type Option2Source = "variant_option" | "none";
 export type WebCategory = "leather" | "fabric" | "hardware" | "edge-paint" | "";
 
 export interface FieldMap {
@@ -22,6 +28,8 @@ export interface FieldMap {
   description: { source: DescSource };
   unit: { default: string };
   options: { source: OptionSource; label: string };
+  /** เว้น source เป็น "none" = สินค้านั้นมีตัวเลือกชั้นเดียว (ค่าเริ่มต้น ไม่กระทบของเดิม) */
+  options2: { source: Option2Source; label: string };
   category: { default: WebCategory; rules: Record<string, WebCategory> };
   image: { useCover: boolean };
 }
@@ -32,6 +40,7 @@ export const DEFAULT_FIELD_MAP: FieldMap = {
   description: { source: "platform_description" },
   unit: { default: "ชิ้น" },
   options: { source: "sku_color", label: "แบบ/สี" },
+  options2: { source: "none", label: "ตัวเลือกที่ 2" },
   category: { default: "hardware", rules: {} },
   image: { useCover: true },
 };
@@ -68,6 +77,10 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
       source: pick(r.options?.source, ["sku_color", "none"] as OptionSource[], d.options.source),
       label: str(r.options?.label, d.options.label).slice(0, 60),
     },
+    options2: {
+      source: pick(r.options2?.source, ["variant_option", "none"] as Option2Source[], d.options2.source),
+      label: str(r.options2?.label, d.options2.label).slice(0, 60),
+    },
     category: {
       default: pick(r.category?.default, WEB_CATEGORIES, d.category.default),
       rules,
@@ -100,8 +113,12 @@ export interface ChildSku {
   id: string;
   code: string | null;
   color: string | null;
+  /** ลำดับที่อยากให้ตัวเลือกเรียง (น้อยไปมาก) — ไม่ตั้งไว้ = เรียงตามที่ DB คืนมา */
+  color_index?: number | null;
   list_price: number | string | null;
   cover_image_r2_key: string | null;
+  /** มิติที่ 2 อยู่ใน attribute_values.variant_option = { name, value, code } */
+  attribute_values?: Record<string, unknown> | null;
 }
 
 export interface ListingRow {
@@ -121,7 +138,8 @@ export interface ListingRow {
 export const PARENT_SELECT =
   "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, sale_price, final_price, fake_price, cover_image_r2_key, category_id";
 
-export const CHILD_SELECT = "id, code, color, list_price, cover_image_r2_key, parent_sku_id";
+export const CHILD_SELECT =
+  "id, code, color, color_index, list_price, cover_image_r2_key, parent_sku_id, attribute_values";
 
 const num = (v: unknown) => Number(v) || 0;
 const clean = (v: unknown) => String(v ?? "").trim();
@@ -169,12 +187,20 @@ function resolveDescription(map: FieldMap, parent: ParentRow): string {
   );
 }
 
+/** เรียง SKU ลูกตาม color_index ถ้ามี — ไม่งั้นตัวเลือกบนเว็บจะสลับไปมาตามที่ DB คืนมา */
+const sortKids = (kids: ChildSku[]): ChildSku[] =>
+  [...kids].sort((a, b) => {
+    const ai = a.color_index ?? Number.MAX_SAFE_INTEGER;
+    const bi = b.color_index ?? Number.MAX_SAFE_INTEGER;
+    return ai !== bi ? ai - bi : clean(a.code).localeCompare(clean(b.code), "th");
+  });
+
 /** สร้างตัวเลือกจากสีของ SKU ลูก (ตัดสีซ้ำ) */
 function resolveOptions(map: FieldMap, kids: ChildSku[]): { label: string; items: { id: string; label: string }[] } | null {
   if (map.options.source !== "sku_color") return null;
   const seen = new Set<string>();
   const items: { id: string; label: string }[] = [];
-  for (const k of kids) {
+  for (const k of sortKids(kids)) {
     const label = clean(k.color);
     if (!label || seen.has(label)) continue;
     seen.add(label);
@@ -182,6 +208,28 @@ function resolveOptions(map: FieldMap, kids: ChildSku[]): { label: string; items
     if (items.length >= 24) break;
   }
   return items.length ? { label: map.options.label || "แบบ/สี", items } : null;
+}
+
+/**
+ * ตัวเลือกกลุ่มที่ 2 — อ่านจาก attribute_values.variant_option
+ * สินค้าที่มี 2 มิติจริง ๆ (เช่น ขนาดรู × จำนวนรู) จะเลือกได้ครบ ไม่ต้องยัดรวมเป็นลิสต์เดียว
+ */
+function resolveOptions2(map: FieldMap, kids: ChildSku[]): { label: string; items: { id: string; label: string }[] } | null {
+  if (map.options2.source !== "variant_option") return null;
+  const seen = new Set<string>();
+  const items: { id: string; label: string }[] = [];
+  let groupName = "";
+  for (const k of sortKids(kids)) {
+    const vo = (k.attribute_values as { variant_option?: { name?: unknown; value?: unknown } } | null)?.variant_option;
+    const label = clean(vo?.value);
+    if (!label || seen.has(label)) continue;
+    if (!groupName) groupName = clean(vo?.name);
+    seen.add(label);
+    items.push({ id: `opt2-${k.id.slice(0, 8)}`, label });
+    if (items.length >= 24) break;
+  }
+  // ชื่อกลุ่มที่ตั้งไว้ใน ERP ชนะ ถ้าไม่ได้ตั้งค่อยใช้ชื่อที่ติดมากับ SKU
+  return items.length ? { label: map.options2.label || groupName || "ตัวเลือกที่ 2", items } : null;
 }
 
 export interface ResolvedProduct {
@@ -192,6 +240,8 @@ export interface ResolvedProduct {
   category: string;
   images: string[];
   options: { label: string; items: { id: string; label: string; swatch?: string | null }[] } | null;
+  /** null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว */
+  options2: { label: string; items: { id: string; label: string }[] } | null;
 }
 
 /**
@@ -226,5 +276,7 @@ export function resolveProduct(
     category: clean(l.web_category) || rule || map.category.default,
     images: listingImages.length ? listingImages : mappedImages,
     options: listingOptions?.items?.length ? listingOptions : mappedOptions,
+    // กรอกทับตัวเลือกเองในหน้าจัดการ = ตั้งใจคุมเอง → ไม่ยัดกลุ่ม 2 ตามไปด้วย จะกลายเป็นเลือกไม่ตรงของ
+    options2: listingOptions?.items?.length ? null : resolveOptions2(map, kids),
   };
 }

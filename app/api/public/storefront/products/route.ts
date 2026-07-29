@@ -129,6 +129,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         stock: String(l.web_stock_status ?? "in").trim() || "in",
         swatch: String(l.web_swatch ?? "").trim(),
         options: r.options,
+        /** ตัวเลือกกลุ่มที่ 2 (null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว) — เว็บเก่าที่ยังไม่รู้จักจะข้ามไปเอง */
+        options2: r.options2,
         featured: Boolean(l.featured),
         images: r.images.map(imageUrl),
       };

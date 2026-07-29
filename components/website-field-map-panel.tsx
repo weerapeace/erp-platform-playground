@@ -18,6 +18,8 @@ interface FieldMap {
   description: { source: string };
   unit: { default: string };
   options: { source: string; label: string };
+  /** อาจไม่มีในข้อมูลเก่าที่บันทึกไว้ก่อนมีฟีเจอร์นี้ */
+  options2?: { source: string; label: string };
   category: { default: WebCategory; rules: Record<string, WebCategory> };
   image: { useCover: boolean };
 }
@@ -235,6 +237,35 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
               placeholder="แบบ/สี"
             />
           </div>
+
+          {/* ตัวเลือกชุดที่ 2 — สินค้าที่มี 2 มิติ เช่น ขนาดรู × จำนวนรู */}
+          <div>
+            <label className={labelCls}>ตัวเลือกชุดที่ 2</label>
+            <select
+              className={inputCls}
+              value={map.options2?.source ?? "none"}
+              onChange={(e) => patch({ options2: { ...(map.options2 ?? { label: "" }), source: e.target.value } })}
+            >
+              <option value="none">— ไม่ใช้ (ตัวเลือกชั้นเดียว) —</option>
+              <option value="variant_option">ตัวเลือกที่ 2 ของ SKU ลูก</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>ชื่อชุดตัวเลือกที่ 2</label>
+            <input
+              className={inputCls}
+              value={map.options2?.label ?? ""}
+              onChange={(e) => patch({ options2: { ...(map.options2 ?? { source: "none" }), label: e.target.value } })}
+              placeholder="เว้นว่าง = ใช้ชื่อที่ตั้งไว้กับ SKU"
+              disabled={(map.options2?.source ?? "none") === "none"}
+            />
+          </div>
+          {(map.options2?.source ?? "none") === "variant_option" && (
+            <p className="sm:col-span-2 lg:col-span-3 text-[11px] text-slate-500">
+              ใช้กับสินค้าที่เลือก 2 อย่างถึงจะได้ของถูกตัว เช่น เครื่องมือเจาะหนัง = จำนวนรู × ขนาดรู ·
+              ค่ามาจากช่อง &quot;ตัวเลือกที่ 2&quot; ที่ตั้งไว้ตอนสร้าง SKU แบบเมทริกซ์
+            </p>
+          )}
           <div className="flex items-end">
             <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer pb-1.5">
               <input
