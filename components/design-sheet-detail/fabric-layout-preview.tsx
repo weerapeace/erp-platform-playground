@@ -43,7 +43,7 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
         out.push({
           label: `ผืนที่ ${s + 1}`,
           height: Number(sheetLengthCm) || 0,
-          rows: result.rows.filter((r) => (r.sheetIndex ?? 0) === s).map((r) => ({ ...r, y: r.yInSheet ?? r.y })),
+          rows: result.rows.filter((r) => (r.sheetIndex ?? 0) === s),
         });
       }
       return out;
@@ -84,7 +84,7 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
                 {/* ชิ้นงาน */}
                 {sh.rows.flatMap((r) => r.items.map((it, ii) => {
                   const c = colorOf(it.key);
-                  const x = it.x * scale, y = r.y * scale, w = it.w * scale, h = it.h * scale;
+                  const x = it.x * scale, y = it.y * scale, w = it.w * scale, h = it.h * scale;
                   const showText = w > 34 && h > 14;
                   return (
                     <g key={`${r.y}-${ii}`}>

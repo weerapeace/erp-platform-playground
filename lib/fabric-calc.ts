@@ -31,7 +31,7 @@ export type FabricInput = {
   gapCm?: number;             // เว้นระยะระหว่างชิ้น (รอยตัด/ตะเข็บ)
 };
 
-export type FabricItem = { key: string; label: string; x: number; w: number; h: number; rotated: boolean };
+export type FabricItem = { key: string; label: string; x: number; y: number; w: number; h: number; rotated: boolean };
 export type FabricRow = {
   y: number; height: number; used: number; items: FabricItem[];
   sheetIndex?: number;   // ผ้าผืน: อยู่ผืนที่เท่าไร (0-based)
@@ -81,32 +81,48 @@ export function packFabric(input: FabricInput): FabricResult {
   if (oversize) return emptyResult(`ชิ้น "${oversize.label}" (${oversize.w}×${oversize.h} ซม.) กว้างเกินหน้าผ้า ${face} ซม.`, flat.length, pieceAreaCm2);
 
   // จัดท่าแต่ละชิ้น: ให้ "ด้านที่กินหน้ากว้าง" สั้นกว่า (วางได้ต่อแถวเยอะขึ้น) เมื่อหมุนได้
-  const oriented = flat.map((p) => {
-    if (rotate && p.h <= face && p.h < p.w) return { ...p, w: p.h, h: p.w, rotated: true };
-    return { ...p, rotated: false };
-  });
+  // เรียงชิ้นใหญ่ก่อน (ด้านยาวสุด) — วางของใหญ่ลงก่อนแล้วเอาชิ้นเล็กแทรกซอก
+  const queue = [...flat].sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h) || b.w * b.h - a.w * a.h);
 
-  // FFDH: เรียงสูง→เตี้ย แล้ววางแถวแรกที่ยังมีที่ว่างพอ
-  oriented.sort((a, b) => b.h - a.h || b.w - a.w);
-  const rows: FabricRow[] = [];
-  for (const p of oriented) {
-    let placed = false;
-    for (const row of rows) {
-      const need = (row.items.length ? gap : 0) + p.w;
-      if (row.used + need <= face) {
-        row.items.push({ key: p.key, label: p.label, x: row.used + (row.items.length ? gap : 0), w: p.w, h: p.h, rotated: p.rotated });
-        row.used += need;
-        row.height = Math.max(row.height, p.h);
-        placed = true; break;
-      }
-    }
-    if (!placed) {
-      const y = rows.reduce((s, r) => s + r.height + gap, 0);
-      rows.push({ y, height: p.h, used: p.w, items: [{ key: p.key, label: p.label, x: 0, w: p.w, h: p.h, rotated: p.rotated }] });
-    }
+  const sheetLen = Number(input.sheetLengthCm) || 0;
+  const limitH = sheetLen > 0 ? sheetLen : Infinity;   // ผ้าผืน = สูงจำกัดต่อผืน · ผ้าม้วน = ไม่จำกัด
+
+  // วางทีละ "ผืน" (ผ้าม้วน = ผืนเดียวยาวไม่จำกัด)
+  const sheetsPlaced: FabricItem[][] = [];
+  let remaining = queue;
+  let guard = 0;
+  while (remaining.length > 0 && guard++ < 500) {
+    const { placed, leftover } = packSkyline(remaining, face, limitH, rotate, gap);
+    if (placed.length === 0) break;            // วางไม่ลงเลย (กันลูปค้าง)
+    sheetsPlaced.push(placed);
+    remaining = leftover;
   }
 
-  const usedLengthCm = rows.reduce((s, r) => s + r.height, 0) + Math.max(0, rows.length - 1) * gap;
+  // แปลงผลเป็น "แถว" ตามระดับ y (ให้ตัววาดภาพ/โครงเดิมใช้ได้เหมือนเดิม)
+  const rows: FabricRow[] = [];
+  sheetsPlaced.forEach((items, si) => {
+    const byY = new Map<number, FabricItem[]>();
+    for (const it of items) {
+      const k = Math.round(it.y * 100) / 100;
+      if (!byY.has(k)) byY.set(k, []);
+      byY.get(k)!.push(it);
+    }
+    for (const [y, list] of [...byY.entries()].sort((a, b) => a[0] - b[0])) {
+      rows.push({
+        y: sheetLen > 0 ? y : y,
+        height: Math.max(...list.map((i) => i.h)),
+        used: Math.max(...list.map((i) => i.x + i.w)),
+        items: list.map((i) => ({ ...i })),
+        ...(sheetLen > 0 ? { sheetIndex: si, yInSheet: y } : {}),
+      });
+    }
+  });
+
+  // ความยาวที่ใช้: ผ้าม้วน = ขอบล่างสุด · ผ้าผืน = (จำนวนผืน × ความยาวผืน) เพื่อคิดต้นทุนรวม
+  const bottomOf = (items: FabricItem[]) => items.reduce((m, i) => Math.max(m, i.y + i.h), 0);
+  const usedLengthCm = sheetLen > 0
+    ? sheetsPlaced.reduce((s, items) => s + bottomOf(items), 0)
+    : bottomOf(sheetsPlaced[0] ?? []);
   const lengthWithWasteCm = usedLengthCm * (1 + waste / 100);
   const fabricAreaCm2 = lengthWithWasteCm * face;
 
@@ -124,21 +140,80 @@ export function packFabric(input: FabricInput): FabricResult {
     naiveYards: face > 0 ? (pieceAreaCm2 * (1 + waste / 100)) / face / YARD_CM : 0,
   };
 
-  // ผ้าผืน (ขนาดตายตัว): แปลงความยาวที่ใช้ → จำนวนผืน (วางใหม่ต่อผืน ไม่ต่อข้ามผืน)
-  const sheetLen = Number(input.sheetLengthCm) || 0;
+  // ผ้าผืน: จำนวนผืนที่วางจริง (จาก loop ด้านบน) + เผื่อเสีย
   if (sheetLen > 0) {
-    let sheets = 1, cursor = 0;
-    for (const r of rows) {
-      const need = (cursor > 0 ? gap : 0) + r.height;
-      if (cursor + need > sheetLen) { sheets++; cursor = 0; }   // ขึ้นผืนใหม่ (เริ่มจากขอบบน)
-      r.sheetIndex = sheets - 1;
-      r.yInSheet = cursor > 0 ? cursor + gap : 0;
-      cursor = (r.yInSheet ?? 0) + r.height;
-    }
-    res.sheetsUsed = sheets;                                    // ผืนที่วางจริง (ก่อนเผื่อเสีย)
-    res.sheets = Math.ceil(sheets * (1 + waste / 100));         // สั่งจริง (เผื่อเสียแล้ว)
+    res.sheetsUsed = sheetsPlaced.length;
+    res.sheets = Math.ceil(sheetsPlaced.length * (1 + waste / 100));
   }
+  // ชิ้นที่วางไม่ลงเลย (ไม่ควรเกิดถ้าไม่ oversize) — แจ้งไว้กันเงียบ
+  if (remaining.length > 0) { res.ok = false; res.error = `วางไม่ลง ${remaining.length} ชิ้น — ลองเพิ่มหน้ากว้าง/ความยาวผืน`; }
   return res;
+}
+
+// ── Skyline Bottom-Left ────────────────────────────────────────────────
+// เก็บ "เส้นขอบบนของกองที่วางแล้ว" (skyline) แล้ววางชิ้นถัดไปที่ตำแหน่งต่ำที่สุดเท่าที่ลง
+// ดีกว่าวางเป็นแถว (shelf) ตรงที่ใช้ช่องว่าง "ใต้ชิ้นเตี้ย" ได้ → เศษผ้าน้อยลงมาก
+type SkyNode = { x: number; w: number; y: number };
+
+function packSkyline(
+  pieces: { key: string; label: string; w: number; h: number }[],
+  face: number, limitH: number, rotate: boolean, gap: number,
+): { placed: FabricItem[]; leftover: typeof pieces } {
+  let sky: SkyNode[] = [{ x: 0, w: face, y: 0 }];
+  const placed: FabricItem[] = [];
+  const leftover: typeof pieces = [];
+
+  // หา y ต่ำสุดที่วางชิ้นกว้าง w ได้ โดยเริ่มที่ node i
+  const fit = (i: number, w: number): number | null => {
+    if (sky[i].x + w > face + 1e-9) return null;
+    let y = sky[i].y, rest = w, j = i;
+    while (rest > 1e-9 && j < sky.length) {
+      y = Math.max(y, sky[j].y);
+      rest -= sky[j].w; j++;
+    }
+    return rest > 1e-9 ? null : y;
+  };
+
+  const addSkyline = (x: number, w: number, top: number) => {
+    const next: SkyNode[] = [];
+    for (const nd of sky) {
+      const l = nd.x, r = nd.x + nd.w;
+      if (r <= x + 1e-9 || l >= x + w - 1e-9) { next.push(nd); continue; }   // ไม่ทับ
+      if (l < x) next.push({ x: l, w: x - l, y: nd.y });                     // ส่วนซ้ายที่เหลือ
+      if (r > x + w) next.push({ x: x + w, w: r - (x + w), y: nd.y });       // ส่วนขวาที่เหลือ
+    }
+    next.push({ x, w, y: top });
+    next.sort((a, b) => a.x - b.x);
+    // รวม node ที่ระดับเดียวกัน
+    sky = next.reduce<SkyNode[]>((acc, nd) => {
+      const last = acc[acc.length - 1];
+      if (last && Math.abs(last.y - nd.y) < 1e-9 && Math.abs(last.x + last.w - nd.x) < 1e-9) last.w += nd.w;
+      else acc.push({ ...nd });
+      return acc;
+    }, []);
+  };
+
+  for (const p of pieces) {
+    let best: { x: number; y: number; w: number; h: number; rot: boolean } | null = null;
+    for (let i = 0; i < sky.length; i++) {
+      // ลองทั้ง 2 ท่า (ถ้าอนุญาตหมุน) — เผื่อ gap ไว้ในขนาดที่จอง
+      const tries: [number, number, boolean][] = rotate
+        ? [[p.w, p.h, false], [p.h, p.w, true]]
+        : [[p.w, p.h, false]];
+      for (const [w, h, rot] of tries) {
+        const y = fit(i, w + gap);
+        if (y == null || y + h > limitH + 1e-9) continue;
+        // เลือกตำแหน่งที่ "ต่ำสุด" ก่อน แล้วค่อยชิดซ้ายสุด
+        if (!best || y < best.y - 1e-9 || (Math.abs(y - best.y) < 1e-9 && sky[i].x < best.x)) {
+          best = { x: sky[i].x, y, w, h, rot };
+        }
+      }
+    }
+    if (!best) { leftover.push(p); continue; }
+    placed.push({ key: p.key, label: p.label, x: best.x, y: best.y, w: best.w, h: best.h, rotated: best.rot });
+    addSkyline(best.x, Math.min(best.w + gap, face - best.x), best.y + best.h + gap);
+  }
+  return { placed, leftover };
 }
 
 function emptyResult(error: string, totalPieces: number, pieceAreaCm2: number): FabricResult {
