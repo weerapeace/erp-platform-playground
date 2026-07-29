@@ -26,12 +26,49 @@ export interface Visibility {
   mobile: boolean;
 }
 
+/**
+ * ทุกค่าใช้ "auto" เป็นค่าเริ่มต้น = ปล่อยตามดีไซน์เดิมของบล็อกนั้น
+ * สำคัญมาก: บล็อกที่สร้างไว้ก่อนมีแผงนี้ต้องหน้าตาไม่เปลี่ยนเลยแม้แต่นิดเดียว
+ */
+export type BlockSpacing = "auto" | "none" | "sm" | "md" | "lg";
+/** ความกว้างเนื้อหา — narrow=แคบอ่านง่าย · full=เต็มจอ */
+export type BlockWidth = "auto" | "narrow" | "full";
+export type BlockAlign = "auto" | "left" | "center" | "right";
+/** พื้นหลัง — อิงสีจากธีมร้าน (เปลี่ยนธีมแล้วบล็อกเปลี่ยนตาม) */
+export type BlockBg = "auto" | "page" | "surface" | "brand" | "ink" | "custom";
+
+export const BLOCK_SPACINGS: readonly BlockSpacing[] = ["auto", "none", "sm", "md", "lg"];
+export const BLOCK_WIDTHS: readonly BlockWidth[] = ["auto", "narrow", "full"];
+export const BLOCK_ALIGNS: readonly BlockAlign[] = ["auto", "left", "center", "right"];
+export const BLOCK_BGS: readonly BlockBg[] = ["auto", "page", "surface", "brand", "ink", "custom"];
+
+/** หน้าตาของบล็อก — แยกจาก "เนื้อหา" ทุกชนิดบล็อกมีชุดนี้เหมือนกัน */
+export interface BlockStyle {
+  padTop: BlockSpacing;
+  padBottom: BlockSpacing;
+  bg: BlockBg;
+  /** ใช้เมื่อ bg = "custom" เท่านั้น (#rrggbb) */
+  bgColor: string;
+  width: BlockWidth;
+  align: BlockAlign;
+}
+
+export const DEFAULT_BLOCK_STYLE: BlockStyle = {
+  padTop: "auto",
+  padBottom: "auto",
+  bg: "auto",
+  bgColor: "",
+  width: "auto",
+  align: "auto",
+};
+
 export interface BlockBase {
   id: string;
   type: BlockType;
   /** ปิดชั่วคราวโดยไม่ต้องลบ (ปิดแล้วไม่แสดงทุกอุปกรณ์) */
   enabled: boolean;
   visibility: Visibility;
+  style: BlockStyle;
 }
 
 export interface CtaLink {
@@ -165,7 +202,7 @@ const ALL_VISIBLE: Visibility = { desktop: true, tablet: true, mobile: true };
 
 /** บล็อกเปล่าเมื่อกด "เพิ่มบล็อก" */
 export function newBlock(type: BlockType, seq: number): Block {
-  const base = { id: uid(type, seq), type, enabled: true, visibility: { ...ALL_VISIBLE } };
+  const base = { id: uid(type, seq), type, enabled: true, visibility: { ...ALL_VISIBLE }, style: { ...DEFAULT_BLOCK_STYLE } };
   switch (type) {
     case "announcement":
       return { ...base, type, messages: ["ข้อความประกาศของร้าน"] };
@@ -249,6 +286,27 @@ const vis = (v: unknown): Visibility => {
   return { desktop: o.desktop !== false, tablet: o.tablet !== false, mobile: o.mobile !== false };
 };
 
+const HEX6 = /^#[0-9a-fA-F]{6}$/;
+const pickOne = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T =>
+  typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb;
+
+/** หน้าตาของบล็อก — บล็อกเก่าที่ยังไม่มี style จะได้ค่าเริ่มต้นเสมอ (เว็บแสดงผลเหมือนเดิม) */
+const sty = (v: unknown): BlockStyle => {
+  const o = (v ?? {}) as Record<string, unknown>;
+  const d = DEFAULT_BLOCK_STYLE;
+  const bgColor = typeof o.bgColor === "string" && HEX6.test(o.bgColor.trim()) ? o.bgColor.trim().toLowerCase() : "";
+  const bg = pickOne(o.bg, BLOCK_BGS, d.bg);
+  return {
+    padTop: pickOne(o.padTop, BLOCK_SPACINGS, d.padTop),
+    padBottom: pickOne(o.padBottom, BLOCK_SPACINGS, d.padBottom),
+    // เลือก "สีเอง" แต่ยังไม่ได้ใส่สี → ถือว่าไม่ได้ตั้ง กันบล็อกกลายเป็นพื้นโปร่งแปลก ๆ
+    bg: bg === "custom" && !bgColor ? d.bg : bg,
+    bgColor,
+    width: pickOne(o.width, BLOCK_WIDTHS, d.width),
+    align: pickOne(o.align, BLOCK_ALIGNS, d.align),
+  };
+};
+
 /**
  * ทำให้ข้อมูลที่มาจาก DB/ฟอร์มปลอดภัยและครบเสมอ
  * บล็อกชนิดที่ไม่รู้จัก (เช่นของร้านอื่น) จะถูกข้ามไป ไม่แก้ไข
@@ -267,6 +325,7 @@ export function normalizeBlocks(raw: unknown): Block[] {
       type,
       enabled: b.enabled !== false,
       visibility: vis(b.visibility),
+      style: sty(b.style),
     };
 
     switch (type) {

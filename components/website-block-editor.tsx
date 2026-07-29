@@ -6,6 +6,8 @@
  */
 import { Fragment, useMemo, useState } from "react";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
+import { ColorInput } from "@/components/color-picker";
+import { DEFAULT_BLOCK_STYLE, type BlockStyle } from "@/lib/website-blocks";
 
 export type BlockType =
   | "announcement"
@@ -73,7 +75,7 @@ function visibilityLabel(v?: Visibility): string {
 /** สร้างบล็อกใหม่ (ค่าเริ่มต้นเดียวกับฝั่ง API) */
 export function makeBlock(type: BlockType, seq: number): Block {
   const id = `${type}-${seq}-${Math.floor(Math.random() * 1000)}`;
-  const base = { id, type, enabled: true, visibility: { ...ALL_VISIBLE } };
+  const base = { id, type, enabled: true, visibility: { ...ALL_VISIBLE }, style: { ...DEFAULT_BLOCK_STYLE } };
   switch (type) {
     case "announcement":
       return { ...base, messages: ["ข้อความประกาศของร้าน"] };
@@ -452,6 +454,142 @@ export function BlockEditor({ block, onChange }: { block: Block; onChange: (p: R
 }
 
 /** รายการบล็อก + เพิ่ม/ลบ/ลาก/เปิด-ปิด */
+/** ปุ่มเลือกแบบแถบ — ใช้ในแผงรูปลักษณ์ */
+function Seg<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { v: T; l: string }[];
+}) {
+  return (
+    <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-white">
+      {options.map((o) => (
+        <button
+          key={o.v}
+          type="button"
+          onClick={() => onChange(o.v)}
+          className={`flex-1 px-2 py-1.5 text-xs transition ${
+            value === o.v ? "bg-slate-900 text-white font-medium" : "text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          {o.l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * แผง "รูปลักษณ์" — มีเหมือนกันทุกชนิดบล็อก (แยกจากฟอร์มเนื้อหา)
+ * เก็บเป็นชื่อขนาด/ชื่อสีจากธีม ไม่ใช่ค่า pixel หรือรหัสสีตรง ๆ
+ * → เว็บแต่ละร้านแปลงเป็นสเกลของตัวเอง หน้าตาเลยยังคุมโทนตามธีมอยู่
+ */
+export function StylePanel({ value, onChange }: { value: BlockStyle; onChange: (s: BlockStyle) => void }) {
+  const [open, setOpen] = useState(false);
+  const s = { ...DEFAULT_BLOCK_STYLE, ...(value ?? {}) };
+  const set = (p: Partial<BlockStyle>) => onChange({ ...s, ...p });
+  const isDefault = (Object.keys(DEFAULT_BLOCK_STYLE) as (keyof BlockStyle)[]).every(
+    (k) => s[k] === DEFAULT_BLOCK_STYLE[k]
+  );
+
+  const SPACE = [
+    { v: "auto" as const, l: "ตามเดิม" },
+    { v: "none" as const, l: "ไม่มี" },
+    { v: "sm" as const, l: "น้อย" },
+    { v: "md" as const, l: "กลาง" },
+    { v: "lg" as const, l: "มาก" },
+  ];
+
+  return (
+    <div className="mt-4 pt-3 border-t border-slate-200">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900"
+      >
+        <span>{open ? "▾" : "▸"}</span>
+        🎨 รูปลักษณ์
+        {!isDefault && <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] border border-blue-200">ปรับแล้ว</span>}
+      </button>
+
+      {open && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Field label="ระยะห่างด้านบน">
+            <Seg value={s.padTop} onChange={(v) => set({ padTop: v })} options={SPACE} />
+          </Field>
+          <Field label="ระยะห่างด้านล่าง">
+            <Seg value={s.padBottom} onChange={(v) => set({ padBottom: v })} options={SPACE} />
+          </Field>
+
+          <Field label="ความกว้างเนื้อหา">
+            <Seg
+              value={s.width}
+              onChange={(v) => set({ width: v })}
+              options={[
+                { v: "auto", l: "ตามเดิม" },
+                { v: "narrow", l: "แคบ" },
+                { v: "full", l: "เต็มจอ" },
+              ]}
+            />
+          </Field>
+          <Field label="จัดข้อความ">
+            <Seg
+              value={s.align}
+              onChange={(v) => set({ align: v })}
+              options={[
+                { v: "auto", l: "ตามเดิม" },
+                { v: "left", l: "ซ้าย" },
+                { v: "center", l: "กลาง" },
+                { v: "right", l: "ขวา" },
+              ]}
+            />
+          </Field>
+
+          <div className="sm:col-span-2">
+            <Field label="พื้นหลังบล็อก">
+              <Seg
+                value={s.bg}
+                onChange={(v) => set({ bg: v })}
+                options={[
+                  { v: "auto", l: "ตามเดิม" },
+                  { v: "page", l: "พื้นเว็บ" },
+                  { v: "surface", l: "พื้นการ์ด" },
+                  { v: "brand", l: "สีแบรนด์" },
+                  { v: "ink", l: "เข้ม" },
+                  { v: "custom", l: "เลือกเอง" },
+                ]}
+              />
+            </Field>
+            {s.bg === "custom" && (
+              <div className="mt-2">
+                <ColorInput value={s.bgColor || "#ffffff"} onChange={(hex) => set({ bgColor: hex })} />
+                <p className="mt-1 text-[11px] text-amber-600">
+                  เลือกสีเองจะไม่เปลี่ยนตามธีมร้าน — ถ้าอยากให้เปลี่ยนตามธีมด้วย ใช้ &quot;สีแบรนด์&quot; หรือ &quot;พื้นการ์ด&quot;
+                </p>
+              </div>
+            )}
+          </div>
+
+          {!isDefault && (
+            <div className="sm:col-span-2">
+              <button
+                type="button"
+                onClick={() => onChange({ ...DEFAULT_BLOCK_STYLE })}
+                className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline"
+              >
+                คืนค่าเริ่มต้นทั้งหมด
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function BlockListEditor({
   blocks,
   types,
@@ -760,6 +898,10 @@ export function BlockListEditor({
               {isOpen && (
                 <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-4">
                   <BlockEditor block={b} onChange={(p) => patch(b.id, p)} />
+                  <StylePanel
+                    value={{ ...DEFAULT_BLOCK_STYLE, ...((b.style as Partial<BlockStyle>) ?? {}) }}
+                    onChange={(style) => patch(b.id, { style })}
+                  />
                   <div className="flex justify-end mt-3 pt-3 border-t border-slate-200">
                     <button onClick={() => remove(b.id)} className="text-xs text-red-500 hover:underline">ลบบล็อกนี้</button>
                   </div>
