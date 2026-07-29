@@ -75,9 +75,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     status: string;
     field_map: unknown;
   }[];
-  if (!shops.length) return NextResponse.json({ shops: [], shop: null, listings: [], results: [] });
+  if (!shops.length)
+    return NextResponse.json({ shops: [], shop: null, listings: [], results: [], notFound: true }, { status: 404 });
 
-  const shop = shops.find((s) => s.slug === shopSlug) ?? shops[0];
+  // ระบุ slug มาแล้ว "ต้องเจอร้านนั้นจริง" — ห้าม fallback เป็นร้านแรกเงียบ ๆ
+  // (ของเดิมพิมพ์ slug ผิด → เด้งไปร้านแรกโดยไม่บอก เสี่ยงนั่งแก้สินค้าผิดร้าน)
+  // เทียบซ้ำแบบไม่สนตัวพิมพ์เล็ก/ใหญ่ ให้ URL ต่างเคสยังเข้าได้
+  const shop = shopSlug
+    ? shops.find((s) => s.slug === shopSlug) ??
+      shops.find((s) => s.slug.toLowerCase() === shopSlug.toLowerCase())
+    : shops[0];
+  if (!shop)
+    return NextResponse.json(
+      {
+        shops: shops.map((s) => ({ id: s.id, name: s.name, slug: s.slug, isDefault: s.is_default })),
+        shop: null,
+        listings: [],
+        results: [],
+        notFound: true,
+      },
+      { status: 404 }
+    );
 
   // สินค้าที่อยู่บนเว็บของร้านนี้
   const { data: listData } = await sb

@@ -96,6 +96,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [shop, setShop] = useState<Shop | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [tab, setTab] = useState<"listings" | "fieldmap" | "design" | "layout" | "pages">("listings");
@@ -113,6 +114,8 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         const r = await apiFetch(`/api/website/listings?shop=${encodeURIComponent(slug ?? "")}`);
         const j = await r.json();
         setShop(j.shop ?? null);
+        // API ตอบ notFound เมื่อ slug ที่ขอไม่มีจริง (ไม่เด้งไปร้านอื่นแล้ว)
+        setNotFound(Boolean(j.notFound) || !j.shop);
         setListings(j.listings ?? []);
       } catch {
         toast.error("โหลดข้อมูลไม่สำเร็จ");
@@ -235,6 +238,31 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   };
 
   const publishedCount = listings.filter((l) => l.published).length;
+
+  // ไม่มีเว็บร้านชื่อนี้ — บอกให้ชัด ดีกว่าพาไปร้านอื่นแบบเงียบ ๆ
+  if (notFound && !loading)
+    return (
+      <PlaygroundShell>
+        <div className="max-w-6xl mx-auto px-5 py-6">
+          <Link href="/website" className="text-xs text-slate-500 hover:text-blue-600 inline-flex items-center gap-1">
+            ← เว็บไซต์ทั้งหมด
+          </Link>
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-6 py-10 text-center">
+            <p className="text-3xl">🔍</p>
+            <p className="mt-3 text-sm text-amber-900">
+              ไม่พบเว็บร้านชื่อ <span className="font-medium">“{shopSlug}”</span>
+            </p>
+            <p className="mt-1 text-xs text-amber-700">อาจพิมพ์ที่อยู่ผิด หรือร้านนี้ถูกลบไปแล้ว</p>
+            <Link
+              href="/website"
+              className="inline-block mt-4 px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700"
+            >
+              เลือกจากเว็บไซต์ทั้งหมด
+            </Link>
+          </div>
+        </div>
+      </PlaygroundShell>
+    );
 
   return (
     <PlaygroundShell>
