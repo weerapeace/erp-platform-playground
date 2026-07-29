@@ -824,7 +824,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
           )}
           {/* กลุ่ม ข้อมูล | เส้นแบ่ง | แคปชั่น — ตัวลากปรับขนาดทำงานในนี้ (รูปอยู่นอกกลุ่ม จะได้ลากแม่น) */}
-          <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0" : "contents"} style={isWide && dth.swap ? { flexDirection: "row-reverse" } : undefined}>
+          <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0 min-w-0" : "contents"} style={isWide && dth.swap ? { flexDirection: "row-reverse" } : undefined}>
           {/* ───── ฝั่งกลาง: ข้อมูล + แนบงาน ───── */}
           <div className={`flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} ${isWide ? "overflow-y-auto min-w-0" : ""}`} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
             {/* status + schedule + assignee — ปักไว้บนสุดเสมอ */}
