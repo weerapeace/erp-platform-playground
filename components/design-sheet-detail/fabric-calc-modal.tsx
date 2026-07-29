@@ -9,6 +9,7 @@
 import { useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { packFabric, YARD_CM, type FabricPiece } from "@/lib/fabric-calc";
+import { FabricLayoutPreview } from "./fabric-layout-preview";
 
 export type CalcLine = {
   key: string;
@@ -48,6 +49,7 @@ export function FabricCalcModal({ lines, onClose }: { lines: CalcLine[]; onClose
   const [rotate, setRotate] = useState(true);             // ผ้าไม่มีลายทิศทาง → หมุนชิ้นได้
   const [waste, setWaste] = useState<number>(() => n(materials[0]?.lines[0]?.waste_percent) || 10);
   const [gap, setGap] = useState(0.5);                    // เว้นรอยตัด
+  const [showLayout, setShowLayout] = useState(true);     // โชว์ภาพผังการวาง
 
   // ชิ้นที่ต้องตัด = แต่ละบรรทัด × จำนวนที่ผลิต
   const pieces: FabricPiece[] = useMemo(() => (cur?.lines ?? []).map((l, i) => ({
@@ -146,6 +148,18 @@ export function FabricCalcModal({ lines, onClose }: { lines: CalcLine[]; onClose
             </div>
           )}
 
+          {/* ภาพผังการวาง (เฟส 2) */}
+          {result.ok && (
+            <div className="rounded-xl border border-slate-200 p-3">
+              <button onClick={() => setShowLayout((v) => !v)}
+                className="w-full flex items-center justify-between text-[13px] font-medium text-slate-700">
+                <span>🖼️ ดูผังการวางบนหน้าผ้า</span>
+                <span className="text-[11px] text-slate-400">{showLayout ? "▲ ซ่อน" : "▼ แสดง"}</span>
+              </button>
+              {showLayout && <div className="mt-3"><FabricLayoutPreview result={result} faceWidthCm={faceWidth} sheetLengthCm={mode === "sheet" ? sheetLength : null} mode={mode} /></div>}
+            </div>
+          )}
+
           {/* รายการชิ้น */}
           {cur && (
             <details className="rounded-lg border border-slate-200">
@@ -161,7 +175,7 @@ export function FabricCalcModal({ lines, onClose }: { lines: CalcLine[]; onClose
               </div>
             </details>
           )}
-          <p className="text-[11px] text-slate-400">* เป็นการประมาณเพื่อตีราคา (วางแนวตรงเป็นแถว) — ช่างตัดจริงอาจประหยัดกว่านี้เล็กน้อย · เฟสถัดไปจะมีภาพผังการวางให้ดู</p>
+          <p className="text-[11px] text-slate-400">* เป็นการประมาณเพื่อตีราคา (วางแนวตรงเป็นแถว) — ช่างตัดจริงวางสลับฟันปลาอาจประหยัดกว่านี้เล็กน้อย</p>
         </div>
       )}
     </ERPModal>

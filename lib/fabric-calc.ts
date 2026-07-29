@@ -31,7 +31,12 @@ export type FabricInput = {
   gapCm?: number;             // เว้นระยะระหว่างชิ้น (รอยตัด/ตะเข็บ)
 };
 
-export type FabricRow = { y: number; height: number; used: number; items: { key: string; label: string; x: number; w: number; h: number; rotated: boolean }[] };
+export type FabricItem = { key: string; label: string; x: number; w: number; h: number; rotated: boolean };
+export type FabricRow = {
+  y: number; height: number; used: number; items: FabricItem[];
+  sheetIndex?: number;   // ผ้าผืน: อยู่ผืนที่เท่าไร (0-based)
+  yInSheet?: number;     // ผ้าผืน: ตำแหน่งแนวยาวภายในผืนนั้น
+};
 
 export type FabricResult = {
   ok: boolean;
@@ -41,7 +46,8 @@ export type FabricResult = {
   lengthWithWasteCm: number;  // หลังเผื่อเสีย
   yards: number;              // แปลงเป็นหลา (1 หลา = 91.44 ซม.)
   meters: number;
-  sheets?: number;            // เฉพาะผ้าผืน: ใช้กี่ผืน
+  sheets?: number;            // เฉพาะผ้าผืน: ต้องสั่งกี่ผืน (เผื่อเสียแล้ว)
+  sheetsUsed?: number;        // เฉพาะผ้าผืน: วางจริงกี่ผืน (ไว้วาดภาพ)
   rows: FabricRow[];          // ผังการวาง (ไว้ทำภาพ preview ในเฟสถัดไป)
   pieceAreaCm2: number;       // พื้นที่ชิ้นรวม
   fabricAreaCm2: number;      // พื้นที่ผ้าที่ใช้จริง
@@ -124,10 +130,13 @@ export function packFabric(input: FabricInput): FabricResult {
     let sheets = 1, cursor = 0;
     for (const r of rows) {
       const need = (cursor > 0 ? gap : 0) + r.height;
-      if (cursor + need > sheetLen) { sheets++; cursor = r.height; }   // ขึ้นผืนใหม่
-      else cursor += need;
+      if (cursor + need > sheetLen) { sheets++; cursor = 0; }   // ขึ้นผืนใหม่ (เริ่มจากขอบบน)
+      r.sheetIndex = sheets - 1;
+      r.yInSheet = cursor > 0 ? cursor + gap : 0;
+      cursor = (r.yInSheet ?? 0) + r.height;
     }
-    res.sheets = Math.ceil(sheets * (1 + waste / 100));
+    res.sheetsUsed = sheets;                                    // ผืนที่วางจริง (ก่อนเผื่อเสีย)
+    res.sheets = Math.ceil(sheets * (1 + waste / 100));         // สั่งจริง (เผื่อเสียแล้ว)
   }
   return res;
 }
