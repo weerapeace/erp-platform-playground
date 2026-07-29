@@ -8,6 +8,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
+import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
 import type { CartonLabelRow } from "@/app/api/carton-labels/route";
 
@@ -75,7 +76,7 @@ export default function PrintCartonLabelPage() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <PrintToolbar onBack={() => router.back()} />
+      <PrintToolbar onBack={() => router.back()} fileName={docFileName("ป้ายกล่อง", doc?.po_no)} />
       <div className="py-6 px-4">
         {loading ? (
           <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
@@ -84,7 +85,7 @@ export default function PrintCartonLabelPage() {
         ) : !Array.isArray(doc.cartons) || doc.cartons.length === 0 ? (
           <div className="text-center py-20 text-amber-600">⚠️ เอกสารนี้ยังไม่มีกล่อง</div>
         ) : (
-          <PrintFrame html={html} maxWidth={794} />
+          <PrintFrame html={html} fileName={docFileName("ป้ายกล่อง", doc?.po_no)} maxWidth={794} />
         )}
       </div>
     </div>

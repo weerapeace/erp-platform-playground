@@ -7,6 +7,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
+import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml, buildReportImageGridHtml } from "@/lib/template";
 import { withImageWidth } from "@/lib/r2-image";
@@ -204,7 +205,7 @@ export default function PrintDesignSheetPage() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <PrintToolbar onBack={() => router.back()} />
+      <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบสั่งตัวอย่าง", sheet ? String(sheet.code ?? "") : null)} />
       <div className="py-6 px-4">
         {loading ? (
           <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
@@ -219,7 +220,7 @@ export default function PrintDesignSheetPage() {
             {imageAtts.length > 0 && (
               <ImagePicker images={imageAtts} selected={selImageIds ?? new Set()} onToggle={toggleImage} max={MAX_PRINT_IMAGES} />
             )}
-            <PrintFrame html={html} />
+            <PrintFrame html={html} fileName={docFileName("ใบสั่งตัวอย่าง", sheet ? String(sheet.code ?? "") : null)} />
           </>
         )}
       </div>

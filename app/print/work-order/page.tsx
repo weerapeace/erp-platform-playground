@@ -8,6 +8,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
+import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
 import { WORKORDER_PRINT_TEMPLATE, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
 
@@ -59,13 +60,13 @@ function BulkPrintInner() {
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <span className="text-sm text-slate-600">🖨️ พิมพ์ใบสั่งงานรวม <b>{ids.length}</b> ใบ {data === null && `(กำลังโหลด ${done}/${ids.length})`}</span>
         <div className="flex-1" />
-        <button onClick={() => printReportFrameOrWindow()} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
+        <button onClick={() => printReportFrameOrWindow(docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`))} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">⬇ ดาวน์โหลด PDF</button>
       </div>
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>
           : data === null ? <div className="py-20 text-center text-slate-400">กำลังโหลด {done}/{ids.length}…</div>
           : data.length === 0 ? <div className="py-20 text-center text-slate-400">ไม่มีใบสั่งงานให้พิมพ์</div>
-          : <PrintFrame html={html} />}
+          : <PrintFrame html={html} fileName={docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`)} />}
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
 import { apiFetch } from "@/lib/api";
+import { docFileName } from "@/lib/print-filename";
 import { buildReportHtml } from "@/lib/template";
 import type { PODetail } from "@/app/api/purchase-orders/route";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
@@ -73,24 +74,27 @@ export default function PrintPOPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  // ชื่อไฟล์ตอนบันทึก PDF — "ใบสั่งซื้อ - PO-2026-00032" (ของกลาง lib/print-filename)
+  const fileName = docFileName("ใบสั่งซื้อ", po?.po_number);
+
   const html = useMemo(() => {
     if (!po || !template) return "";
     return buildReportHtml({
       paper_size: template.paper_size, orientation: template.orientation,
       header_html: template.header_html, body_html: template.body_html,
       footer_html: template.footer_html, custom_css: template.custom_css,
-    }, buildPoData(po));
+    }, buildPoData(po), docFileName("ใบสั่งซื้อ", po.po_number));
   }, [po, template]);
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <PrintToolbar onBack={() => router.back()} />
+      <PrintToolbar onBack={() => router.back()} fileName={po ? fileName : undefined} />
       <div className="py-6 px-4">
         {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
          : error || !po ? <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
          : !template ? <div className="text-center py-20 text-amber-600">⚠️ ยังไม่มี template สำหรับ PO</div>
          : (
-          <PrintFrame html={html} />
+          <PrintFrame html={html} fileName={fileName} />
         )}
       </div>
     </div>

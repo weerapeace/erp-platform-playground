@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
+import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml } from "@/lib/template";
 import { thaiBahtText } from "@/lib/quotation-print";
@@ -115,7 +116,7 @@ export default function PrintSOPage() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <PrintToolbar onBack={() => router.back()} />
+      <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบกำกับภาษี", so?.tax_invoice_no || so?.so_number)} />
       <div className="py-6 px-4">
         {loading ? (
           <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
@@ -126,7 +127,7 @@ export default function PrintSOPage() {
             ⚠️ ยังไม่มี template สำหรับ SO — สร้างที่ <a href="/admin/report-templates" className="underline">Admin · Report Templates</a>
           </div>
         ) : (
-          <PrintFrame html={html} />
+          <PrintFrame html={html} fileName={docFileName("ใบกำกับภาษี", so?.tax_invoice_no || so?.so_number)} />
         )}
       </div>
     </div>

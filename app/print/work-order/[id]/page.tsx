@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
+import { docFileName } from "@/lib/print-filename";
 import { parseDesignerDescription } from "@/lib/report-designer";
 import { buildReportHtml, buildReportHtmlMulti, type ReportTemplate } from "@/lib/template";
 import { WORKORDER_PRINT_TEMPLATE, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
@@ -150,6 +151,9 @@ export default function PrintWorkOrderPage() {
     return buildReportHtml(tplObj, { ...buildWoHtmlData(mo, spec), qr_html: qrHtml });
   }, [mo, spec, selectedRow, pdfmeTemplate, qrHtml]);
 
+  // ชื่อไฟล์ตอนบันทึก PDF — "ใบสั่งงาน - MO-2026-00123" (ของกลาง lib/print-filename)
+  const fileName = docFileName("ใบสั่งงาน", mo?.mo_no);
+
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-6 py-3">
@@ -167,17 +171,35 @@ export default function PrintWorkOrderPage() {
         </label>
         <div className="flex-1" />
         {pdfmeTemplate ? (
-          <button
-            onClick={() => pdfUrl && window.open(pdfUrl, "_blank")}
-            disabled={!pdfUrl}
-            className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            เปิด PDF (พิมพ์/บันทึก)
-          </button>
+          <>
+            {/* เทมเพลต pdfme สร้างไฟล์ PDF จริงอยู่แล้ว → โหลดลงเครื่องได้ตรง ๆ คลิกเดียว */}
+            <a
+              href={pdfUrl ?? undefined}
+              download={`${fileName}.pdf`}
+              aria-disabled={!pdfUrl}
+              className={`h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 inline-flex items-center no-underline ${pdfUrl ? "" : "pointer-events-none opacity-50"}`}
+            >
+              ⬇ ดาวน์โหลด PDF
+            </a>
+            <button
+              onClick={() => pdfUrl && window.open(pdfUrl, "_blank")}
+              disabled={!pdfUrl}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              เปิด PDF
+            </button>
+          </>
         ) : (
-          <button onClick={() => printReportFrameOrWindow()} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
-            พิมพ์ / บันทึก PDF
-          </button>
+          <>
+            <button onClick={() => printReportFrameOrWindow(fileName)} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">
+              🖨️ พิมพ์
+            </button>
+            <button onClick={() => printReportFrameOrWindow(fileName)}
+              title={`กดแล้วเลือกปลายทางเป็น "บันทึกเป็น PDF" — ชื่อไฟล์ตั้งให้แล้วเป็น "${fileName}.pdf"`}
+              className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
+              ⬇ ดาวน์โหลด PDF
+            </button>
+          </>
         )}
       </div>
 
@@ -195,7 +217,7 @@ export default function PrintWorkOrderPage() {
             <div className="py-20 text-center text-slate-400">กำลังเตรียม...</div>
           )
         ) : (
-          <PrintFrame html={html} />
+          <PrintFrame html={html} fileName={fileName} />
         )}
       </div>
     </div>

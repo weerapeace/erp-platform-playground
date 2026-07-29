@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
+import { docFileName } from "@/lib/print-filename";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { buildEmployeeFormHtml, type EmployeeFormLang, type SkillOption } from "@/lib/employee-form-print";
@@ -35,7 +36,7 @@ export default function EmployeeFormPrintPage() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <PrintToolbar onBack={() => router.back()} />
+      <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบข้อมูลพนักงาน")} />
       <div className="mx-auto max-w-[860px] px-4 pb-10">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="text-sm text-slate-500">ภาษาฟอร์ม:</span>
@@ -61,7 +62,7 @@ export default function EmployeeFormPrintPage() {
           </button>
           <span className="ml-auto text-xs text-slate-400">กดปุ่ม “พิมพ์” ด้านบนเพื่อพิมพ์ หรือบันทึกเป็น PDF</span>
         </div>
-        <PrintFrame html={html} />
+        <PrintFrame html={html} fileName={docFileName("ใบข้อมูลพนักงาน")} />
       </div>
       <SkillSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} onChanged={loadFormSkills} />
     </div>

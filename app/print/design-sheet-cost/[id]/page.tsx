@@ -11,6 +11,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
+import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml } from "@/lib/template";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
@@ -172,7 +173,7 @@ export default function PrintDesignSheetCostPage() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <PrintToolbar onBack={() => router.back()} />
+      <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบตีราคาต้นทุน", sheet ? String(sheet.code ?? "") : null)} />
       <div className="py-6 px-4">
         {loading ? (
           <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
@@ -202,7 +203,7 @@ export default function PrintDesignSheetCostPage() {
                 <p className="text-[11px] text-slate-400 mt-2">แถบนี้ไม่ติดไปกับกระดาษที่พิมพ์ · เลือกไซส์แล้วใบจะเหลือเฉพาะบรรทัด/ค่าแรง/ยอดรวมของไซส์นั้น</p>
               </div>
             )}
-            <PrintFrame html={html} />
+            <PrintFrame html={html} fileName={docFileName("ใบตีราคาต้นทุน", sheet ? String(sheet.code ?? "") : null)} />
           </>
         )}
       </div>

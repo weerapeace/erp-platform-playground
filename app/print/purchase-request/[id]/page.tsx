@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
+import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml } from "@/lib/template";
 import type { PRDetail } from "@/app/api/purchase-requests/route";
@@ -89,7 +90,7 @@ export default function PrintPRPage() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <PrintToolbar onBack={() => router.back()} />
+      <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบขอซื้อ", pr?.pr_number)} />
       <div className="py-6 px-4">
         {loading ? (
           <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
@@ -100,7 +101,7 @@ export default function PrintPRPage() {
             ⚠️ ยังไม่มี template สำหรับ PR — สร้างที่ <a href="/admin/report-templates" className="underline">Admin · Report Templates</a>
           </div>
         ) : (
-          <PrintFrame html={html} />
+          <PrintFrame html={html} fileName={docFileName("ใบขอซื้อ", pr?.pr_number)} />
         )}
       </div>
     </div>
