@@ -129,15 +129,38 @@ export function PrintDocument({
 // PrintToolbar — แถบปุ่มพิมพ์ (ซ่อนตอนพิมพ์จริงด้วย .no-print)
 // ============================================================
 
-export function printReportFrameOrWindow() {
+/**
+ * สั่งพิมพ์เอกสารในกรอบพรีวิว
+ * @param fileName ชื่อไฟล์ตั้งต้นตอนเลือก "บันทึกเป็น PDF" — เบราว์เซอร์อ่านจาก <title> ของเอกสารที่พิมพ์
+ *   ตั้งทั้งใน iframe และหน้าแม่ (แต่ละเบราว์เซอร์หยิบคนละที่) แล้วคืนค่าเดิมหลังหน้าต่างพิมพ์อ่านไปแล้ว
+ */
+export function printReportFrameOrWindow(fileName?: string) {
+  const name = typeof fileName === "string" ? fileName.trim() : "";
   const frame = document.querySelector<HTMLIFrameElement>('iframe[data-report-print-frame="true"]');
   const frameWindow = frame?.contentWindow;
-  if (frameWindow) {
-    frameWindow.focus();
-    frameWindow.print();
-    return;
+  const frameDoc = frame?.contentDocument;
+  const prevParent = document.title;
+  const prevFrame = frameDoc?.title;
+  if (name) {
+    document.title = name;
+    if (frameDoc) frameDoc.title = name;
   }
-  window.print();
+  try {
+    if (frameWindow) {
+      frameWindow.focus();
+      frameWindow.print();
+    } else {
+      window.print();
+    }
+  } finally {
+    if (name) {
+      // คืนชื่อเดิมหลังหน้าต่างพิมพ์อ่าน title เสร็จ (บางเบราว์เซอร์อ่านแบบ async)
+      window.setTimeout(() => {
+        document.title = prevParent;
+        if (frameDoc && prevFrame != null) frameDoc.title = prevFrame;
+      }, 1500);
+    }
+  }
 }
 
 /**
@@ -172,17 +195,46 @@ function closeOrBack(onBack?: () => void) {
   }, 150);
 }
 
-export function PrintToolbar({ onBack, onPrint }: { onBack?: () => void; onPrint?: () => void }) {
+/**
+ * @param fileName ใส่แล้วจะมีปุ่ม "⬇ ดาวน์โหลด PDF" + ตั้งชื่อไฟล์ให้ตอนเลือก "บันทึกเป็น PDF"
+ *                 (เว็บสั่งเซฟไฟล์เองเงียบ ๆ ไม่ได้ — ต้องผ่านหน้าต่างพิมพ์ของเบราว์เซอร์)
+ */
+export function PrintToolbar({ onBack, onPrint, fileName }: {
+  onBack?: () => void;
+  onPrint?: (fileName?: string) => void;
+  fileName?: string;
+}) {
+  const name = typeof fileName === "string" ? fileName.trim() : "";
+  const run = () => (onPrint ? onPrint(name || undefined) : printReportFrameOrWindow(name || undefined));
   return (
     <div className="no-print sticky top-0 z-10 bg-slate-100 border-b border-slate-200 px-6 py-3 flex items-center gap-3">
       <button onClick={() => closeOrBack(onBack)} title="ปิดหน้านี้" className="h-9 px-4 text-sm text-slate-600 border border-slate-200 bg-white rounded-lg hover:bg-slate-50">
         ✕ ปิด
       </button>
       <div className="flex-1" />
-      <button onClick={onPrint ?? printReportFrameOrWindow}
-        className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-2">
-        🖨️ พิมพ์ / บันทึก PDF
-      </button>
+      {name && (
+        <span className="hidden sm:block text-xs text-slate-400 truncate max-w-[280px]" title={`ชื่อไฟล์: ${name}.pdf`}>
+          ชื่อไฟล์: {name}.pdf
+        </span>
+      )}
+      {name ? (
+        <>
+          <button onClick={run} title="เปิดหน้าต่างพิมพ์เพื่อพิมพ์ออกกระดาษ"
+            className="h-9 px-4 text-sm text-slate-600 border border-slate-200 bg-white rounded-lg hover:bg-slate-50">
+            🖨️ พิมพ์
+          </button>
+          <button onClick={run}
+            title={`กดแล้วเลือกปลายทางเป็น "บันทึกเป็น PDF" — ชื่อไฟล์ตั้งให้แล้วเป็น "${name}.pdf"`}
+            className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-2">
+            ⬇ ดาวน์โหลด PDF
+          </button>
+        </>
+      ) : (
+        <button onClick={run}
+          className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-2">
+          🖨️ พิมพ์ / บันทึก PDF
+        </button>
+      )}
     </div>
   );
 }
@@ -457,7 +509,7 @@ export function ReportLayoutControls({
   );
 }
 
-export function PrintFrame({ html, maxWidth = 840, onPrint }: { html: string; maxWidth?: number; onPrint?: () => void }) {
+export function PrintFrame({ html, maxWidth = 840, onPrint, fileName }: { html: string; maxWidth?: number; onPrint?: () => void; fileName?: string }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [h, setH] = useState(400);
   // วัดความสูงเนื้อหาจริง — ซ้ำหลายรอบเผื่อฟอนต์/รูปจัดเสร็จช้า
@@ -471,9 +523,14 @@ export function PrintFrame({ html, maxWidth = 840, onPrint }: { html: string; ma
     measure(); setTimeout(measure, 120); setTimeout(measure, 400);
     // กด Ctrl/Cmd+P ขณะโฟกัสอยู่ใน iframe → เด้งหน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่าง)
     const doc = ref.current?.contentDocument;
-    if (doc && onPrint) {
+    // ตั้งชื่อเอกสารไว้ล่วงหน้า → กด Ctrl+P เองก็ได้ชื่อไฟล์ถูกเหมือนกดปุ่ม
+    if (doc && fileName) doc.title = fileName;
+    if (doc) {
       doc.addEventListener("keydown", (e: KeyboardEvent) => {
-        if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); onPrint(); }
+        if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
+          e.preventDefault();
+          if (onPrint) onPrint(); else printReportFrameOrWindow(fileName);
+        }
       });
     }
   };

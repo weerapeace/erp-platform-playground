@@ -1,4 +1,5 @@
 import { normalizeReportLayout, type ReportLayoutSettings } from "@/lib/report-layout";
+import { docFileName } from "@/lib/print-filename";
 
 export type QuoteLinePrint = {
   sku?: string | null;
@@ -191,6 +192,7 @@ export function buildQuotationHtml(
 <html lang="th">
 <head>
   <meta charset="utf-8">
+  <title>${escapeHtml(docFileName("ใบเสนอราคา", quote.quote_number))}</title>
   <base href="${escapeHtml(origin || "/")}">
   <style>
     @page { size: A4; margin: 0; }

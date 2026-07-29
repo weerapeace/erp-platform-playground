@@ -148,13 +148,15 @@ function reportDocDiv(tpl: ReportTemplate, data: Record<string, unknown>): strin
 </div>`;
 }
 
-function wrapHtmlDoc(css: string, body: string): string {
+// docTitle = ชื่อไฟล์ตั้งต้นตอน "บันทึกเป็น PDF" (เบราว์เซอร์อ่านจาก <title>) — ไม่ส่งมา = "Print" เหมือนเดิม
+function wrapHtmlDoc(css: string, body: string, docTitle?: string): string {
+  const title = String(docTitle ?? "").trim() || "Print";
   return `<!DOCTYPE html>
 <html lang="th">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Print</title>
+<title>${title.replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"))}</title>
 <style>${css}</style>
 </head>
 <body>
@@ -163,8 +165,8 @@ ${body}
 </html>`;
 }
 
-export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknown>): string {
-  return wrapHtmlDoc(reportCss(tpl), reportDocDiv(tpl, data));
+export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknown>, docTitle?: string): string {
+  return wrapHtmlDoc(reportCss(tpl), reportDocDiv(tpl, data), docTitle);
 }
 
 /**

@@ -175,7 +175,7 @@ export default function PrintWorkOrderPage() {
             เปิด PDF (พิมพ์/บันทึก)
           </button>
         ) : (
-          <button onClick={printReportFrameOrWindow} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
+          <button onClick={() => printReportFrameOrWindow()} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
             พิมพ์ / บันทึก PDF
           </button>
         )}

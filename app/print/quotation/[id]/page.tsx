@@ -9,6 +9,7 @@ import {
   buildQuoteTemplateData as buildPrintableQuoteTemplateData,
 } from "@/lib/quotation-print";
 import { DEFAULT_REPORT_LAYOUT, reportLayoutFromStoredValue, type ReportLayoutSettings } from "@/lib/report-layout";
+import { docFileName } from "@/lib/print-filename";
 import { buildReportHtml } from "@/lib/template";
 import type { ReportLayoutDefaultResponse } from "@/app/api/admin/report-layout-defaults/route";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
@@ -363,6 +364,9 @@ export default function PrintQuotationPage() {
     return () => { alive = false; };
   }, [id]);
 
+  // ชื่อไฟล์ตอนบันทึก PDF — "ใบเสนอราคา - QT-202607-0005" (ของกลาง lib/print-filename)
+  const fileName = useMemo(() => docFileName("ใบเสนอราคา", quote?.quote_number), [quote?.quote_number]);
+
   const html = useMemo(() => {
     if (!quote) return "";
     if (template && !useStandardLayout) {
@@ -373,10 +377,10 @@ export default function PrintQuotationPage() {
         body_html: template.body_html,
         footer_html: template.footer_html,
         custom_css: template.custom_css,
-      }, buildPrintableQuoteTemplateData(quote, origin));
+      }, buildPrintableQuoteTemplateData(quote, origin), fileName);
     }
     return buildPrintableQuotationHtml(quote, origin, layout);
-  }, [layout, origin, quote, template, useStandardLayout]);
+  }, [fileName, layout, origin, quote, template, useStandardLayout]);
 
   const updateLayout = (next: ReportLayoutSettings) => {
     setLayout(next);
@@ -425,7 +429,7 @@ export default function PrintQuotationPage() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <PrintToolbar onBack={() => router.back()} />
+      <PrintToolbar onBack={() => router.back()} fileName={quote ? fileName : undefined} />
       <div className="py-6 px-4">
         {loading ? (
           <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
@@ -441,7 +445,7 @@ export default function PrintQuotationPage() {
               savingDefault={savingLayoutDefault}
               defaultMessage={layoutDefaultMessage}
             />
-            <PrintFrame html={html} />
+            <PrintFrame html={html} fileName={fileName} />
           </>
         )}
       </div>
