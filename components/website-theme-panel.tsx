@@ -74,11 +74,14 @@ const COLOR_FIELDS: { key: ColorKey; label: string; hint: string }[] = [
   { key: "surface", label: "สีพื้นการ์ด", hint: "กล่อง/การ์ดสินค้า" },
 ];
 
-const DEVICES: { k: Device; label: string; w: number; icon: string }[] = [
-  { k: "desktop", label: "คอมพิวเตอร์", w: 1440, icon: "🖥️" },
-  { k: "tablet", label: "แท็บเล็ต", w: 768, icon: "📱" },
-  { k: "mobile", label: "มือถือ", w: 390, icon: "📲" },
+const DEVICES: { k: Device; label: string; w: number; h: number; icon: string }[] = [
+  { k: "desktop", label: "คอมพิวเตอร์", w: 1440, h: 900, icon: "🖥️" },
+  { k: "tablet", label: "แท็บเล็ต", w: 768, h: 1024, icon: "📱" },
+  { k: "mobile", label: "มือถือ", w: 390, h: 844, icon: "📲" },
 ];
+
+/** ระดับการย่อพรีวิว — "fit" = ย่อให้พอดีกล่อง (เหมือนแท็บจัดหน้าแรก) */
+type Zoom = "fit" | 0.5 | 0.75 | 1;
 
 const PAGES = [
   { path: "/", label: "หน้าแรก" },
@@ -160,6 +163,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
   const [tab, setTab] = useState<TabKey>("colors");
   const [device, setDevice] = useState<Device>("desktop");
+  const [zoom, setZoom] = useState<Zoom>("fit");
   const [page, setPage] = useState("/");
   const [versions, setVersions] = useState<{ versionNo: number; createdAt: string; theme: Theme }[]>([]);
 
@@ -167,6 +171,10 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const redoStack = useRef<Theme[]>([]);
   const [, tick] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // วัดกล่องพรีวิวจริง เพื่อย่อ "พอดีจอ" (เดิม hardcode 400px → จอคอมถูกบีบเหลือ ~28%)
+  const previewBoxRef = useRef<HTMLDivElement>(null);
+  const [boxW, setBoxW] = useState(420);
+  const [boxH, setBoxH] = useState(600);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -195,6 +203,20 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   useEffect(() => {
     void load();
   }, [load]);
+
+  // วัดขนาดกล่องพรีวิวเพื่อคำนวณ "พอดีจอ" (แบบเดียวกับแท็บ 🧱 จัดหน้าแรก)
+  useEffect(() => {
+    const el = previewBoxRef.current;
+    if (!el) return;
+    const read = () => {
+      setBoxW(el.clientWidth);
+      setBoxH(el.clientHeight);
+    };
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    read();
+    return () => ro.disconnect();
+  }, [loading]);
 
   const apply = useCallback((next: Theme) => {
     setTheme((prev) => {
@@ -370,7 +392,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   const dev = DEVICES.find((d) => d.k === device)!;
   const previewSrc = siteUrl ? `${siteUrl}${page}?preview=1` : null;
-  const scale = Math.min(1, 400 / dev.w);
+  const scale = zoom === "fit" ? Math.min(1, Math.max(0.1, (boxW - 16) / dev.w)) : zoom;
+  // สูงพอให้เนื้อเว็บเต็มกล่องหลังย่อแล้ว (ไม่งั้นเหลือที่ว่างข้างล่าง)
+  const frameH = Math.max(dev.h, Math.round((boxH - 16) / scale));
 
   const checks = [
     { label: "ตัวอักษรบนพื้นหลังเว็บ", fg: theme.colors.ink, bg: theme.colors.page },
@@ -797,15 +821,43 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             <select value={page} onChange={(e) => setPage(e.target.value)} className={inputCls} style={{ width: "auto" }}>
               {PAGES.map((p) => <option key={p.path} value={p.path}>{p.label}</option>)}
             </select>
+            <select
+              value={String(zoom)}
+              onChange={(e) => setZoom(e.target.value === "fit" ? "fit" : (Number(e.target.value) as Zoom))}
+              title="ขนาดที่แสดง"
+              className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700"
+            >
+              <option value="fit">พอดีจอ</option>
+              <option value="0.5">50%</option>
+              <option value="0.75">75%</option>
+              <option value="1">100%</option>
+            </select>
             {previewSrc && <a href={previewSrc} target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↗</a>}
             <button onClick={() => iframeRef.current?.contentWindow?.location.reload()} title="โหลดใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
-            <span className="text-[10px] text-slate-400 ml-auto">{dev.w}px</span>
+            <span className="text-[10px] text-slate-400 ml-auto">{dev.w}px · {Math.round(scale * 100)}%</span>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: "72vh", minHeight: 420 }}>
+          <div ref={previewBoxRef} className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: "72vh", minHeight: 420 }}>
             {previewSrc ? (
-              <div className="w-full h-full overflow-auto flex justify-center">
-                <iframe ref={iframeRef} src={previewSrc} title="พรีวิวเว็บไซต์" className="bg-white border-0" style={{ width: dev.w, height: `${72 / scale}vh`, transform: `scale(${scale})`, transformOrigin: "top center", minHeight: 600 }} />
+              <div className="w-full h-full overflow-auto py-2">
+                {/* กล่องนอกกว้างเท่า "ขนาดหลังย่อ" — transform ไม่ย่อกล่อง layout ถ้าไม่ครอบแบบนี้จะเหลือที่ว่างมหาศาล */}
+                <div style={{ width: dev.w * scale, height: frameH * scale, margin: "0 auto", overflow: "hidden" }}>
+                  <iframe
+                    ref={iframeRef}
+                    src={previewSrc}
+                    title="พรีวิวเว็บไซต์"
+                    className="bg-white border-0 shadow-sm"
+                    style={{
+                      width: dev.w,
+                      height: frameH,
+                      transform: `scale(${scale})`,
+                      transformOrigin: "top left",
+                      // ⚠️ สำคัญ: ถ้าไม่ล็อก iframe จะโดนบีบให้แคบตามกล่อง → เว็บข้างในสลับไปหน้าตามือถือ
+                      flexShrink: 0,
+                      display: "block",
+                    }}
+                  />
+                </div>
               </div>
             ) : (
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center px-6">

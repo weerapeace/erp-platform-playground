@@ -324,20 +324,24 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   const previewFrame = (heightCss: string) => (
     <div ref={previewBoxRef} className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: heightCss }}>
       {previewSrc ? (
-        <div className="w-full h-full overflow-auto flex justify-center py-2">
-          <iframe
-            ref={iframeRef}
-            src={previewSrc}
-            title="พรีวิวหน้าแรก"
-            className="bg-white border-0 shadow-sm"
-            style={{
-              width: dev.w,
-              height: dev.h,
-              transform: `scale(${scale})`,
-              transformOrigin: "top center",
-              flexShrink: 0,
-            }}
-          />
+        <div className="w-full h-full overflow-auto py-2">
+          {/* กล่องนอกกว้างเท่า "ขนาดหลังย่อ" — transform ไม่ย่อกล่อง layout ถ้าไม่ครอบจะเหลือที่ว่าง+ต้องเลื่อนหา */}
+          <div style={{ width: dev.w * scale, height: dev.h * scale, margin: "0 auto", overflow: "hidden" }}>
+            <iframe
+              ref={iframeRef}
+              src={previewSrc}
+              title="พรีวิวหน้าแรก"
+              className="bg-white border-0 shadow-sm"
+              style={{
+                width: dev.w,
+                height: dev.h,
+                transform: `scale(${scale})`,
+                transformOrigin: "top left",
+                flexShrink: 0,
+                display: "block",
+              }}
+            />
+          </div>
         </div>
       ) : (
         <div className="h-full flex items-center justify-center text-sm text-slate-400 px-6 text-center">
