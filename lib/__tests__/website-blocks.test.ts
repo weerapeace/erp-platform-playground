@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { normalizeBlocks, validateBlocks, DEFAULT_BLOCK_STYLE, type Block } from "../website-blocks";
+import {
+  normalizeBlocks,
+  validateBlocks,
+  newBlock,
+  defaultLayout,
+  BLOCK_META,
+  DEFAULT_BLOCK_STYLE,
+  type Block,
+  type BlockType,
+} from "../website-blocks";
 
 /**
  * กันบั๊กที่เคยเกิดจริง 2 ตัว:
@@ -61,6 +70,47 @@ describe("normalizeBlocks — รูปลักษณ์ (style)", () => {
     const bad = normalizeBlocks([{ id: "h1", type: "hero", style: { bg: "custom", bgColor: "red; background:url(x)" } }]);
     expect(bad[0].style.bgColor).toBe("");
     expect(bad[0].style.bg).toBe("auto");
+  });
+});
+
+/**
+ * ตัวกันเพี้ยน — ให้ "ชนิดบล็อก" มีแหล่งเดียวจริง ๆ
+ * ก่อนหน้านี้ค่าตั้งต้นถูกเขียนซ้ำ 2 ที่ (lib กับหน้าจอ) แล้วเพี้ยนจากกันไปเงียบ ๆ
+ * เทสต์ชุดนี้จะแดงทันทีถ้าเพิ่ม widget ใหม่แล้วต่อไม่ครบ
+ */
+describe("แหล่งเดียวของชนิดบล็อก", () => {
+  const ALL = Object.keys(BLOCK_META) as BlockType[];
+
+  it("ทุกชนิดใน BLOCK_META สร้างบล็อกจริงได้ (เพิ่มชนิดแล้วลืมทำค่าตั้งต้น = แดง)", () => {
+    for (const type of ALL) {
+      const b = newBlock(type, 1);
+      expect(b, `ชนิด ${type} สร้างไม่ได้`).toBeTruthy();
+      expect(b.type).toBe(type);
+      expect(b.style).toEqual(DEFAULT_BLOCK_STYLE);
+    }
+  });
+
+  it("บล็อกที่สร้างใหม่ผ่าน normalize แล้วต้องไม่ถูกทิ้ง/ไม่เพี้ยน", () => {
+    for (const type of ALL) {
+      const [out] = normalizeBlocks([newBlock(type, 1)]);
+      expect(out, `ชนิด ${type} หายตอน normalize`).toBeTruthy();
+      expect(out.type).toBe(type);
+    }
+  });
+
+  it("รหัสนิ่งเมื่อไม่ขอ unique (โครงเริ่มต้นต้องเหมือนเดิมทุกครั้งที่เรียก)", () => {
+    expect(newBlock("hero", 2).id).toBe(newBlock("hero", 2).id);
+  });
+
+  it("ขอ unique แล้วต้องไม่ซ้ำกัน (ผู้ใช้กดเพิ่มรัว ๆ)", () => {
+    const ids = Array.from({ length: 30 }, () => newBlock("hero", 2, { uniqueId: true }).id);
+    expect(new Set(ids).size).toBeGreaterThan(25);
+  });
+
+  it("โครงหน้าแรกเริ่มต้นใช้ได้จริง — รหัสไม่ซ้ำ และผ่านการตรวจโดยไม่มี error", () => {
+    const layout = defaultLayout();
+    expect(new Set(layout.map((b) => b.id)).size).toBe(layout.length);
+    expect(validateBlocks(layout).filter((i) => i.level === "error")).toEqual([]);
   });
 });
 

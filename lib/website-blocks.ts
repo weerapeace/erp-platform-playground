@@ -200,9 +200,18 @@ export const BLOCK_META: Record<BlockType, { label: string; icon: string; hint: 
 const uid = (t: string, n: number) => `${t}-${n}`;
 const ALL_VISIBLE: Visibility = { desktop: true, tablet: true, mobile: true };
 
-/** บล็อกเปล่าเมื่อกด "เพิ่มบล็อก" */
-export function newBlock(type: BlockType, seq: number): Block {
-  const base = { id: uid(type, seq), type, enabled: true, visibility: { ...ALL_VISIBLE }, style: { ...DEFAULT_BLOCK_STYLE } };
+/**
+ * บล็อกเปล่า — โรงงานผลิตบล็อกที่เดียวของทั้งระบบ (ทั้งฝั่งเซิร์ฟเวอร์และหน้าจอ)
+ *
+ * uniqueId:
+ *   false (ค่าเริ่มต้น) = รหัสนิ่ง เช่น "hero-2" — ใช้กับโครงหน้าแรกเริ่มต้น (defaultLayout)
+ *     ต้องนิ่ง เพราะ API คืนค่านี้ทุกครั้งที่ร้านยังไม่เคยจัดหน้า ถ้ารหัสเปลี่ยนทุกครั้ง
+ *     ตัวจัดหน้าจะเข้าใจผิดว่า "มีการแก้" แล้วเด้งบันทึกร่างเอง
+ *   true = เติมเลขสุ่มท้าย — ใช้ตอนผู้ใช้กดเพิ่มบล็อกเอง กันรหัสชนกับบล็อกที่มีอยู่
+ */
+export function newBlock(type: BlockType, seq: number, opts?: { uniqueId?: boolean }): Block {
+  const id = opts?.uniqueId ? `${uid(type, seq)}-${Math.floor(Math.random() * 1000)}` : uid(type, seq);
+  const base = { id, type, enabled: true, visibility: { ...ALL_VISIBLE }, style: { ...DEFAULT_BLOCK_STYLE } };
   switch (type) {
     case "announcement":
       return { ...base, type, messages: ["ข้อความประกาศของร้าน"] };

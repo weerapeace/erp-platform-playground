@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 /**
  * ของกลาง — ตัวจัดบล็อกของหน้าเว็บ (ใช้ทั้งแท็บ "หน้าแรก" และ "หน้าเว็บ")
@@ -7,31 +7,31 @@
 import { Fragment, useMemo, useState } from "react";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ColorInput } from "@/components/color-picker";
-import { DEFAULT_BLOCK_STYLE, type BlockStyle } from "@/lib/website-blocks";
+import {
+  DEFAULT_BLOCK_STYLE,
+  newBlock,
+  type BlockStyle,
+  type BlockType,
+  type Visibility,
+} from "@/lib/website-blocks";
 
-export type BlockType =
-  | "announcement"
-  | "hero"
-  | "two-tracks"
-  | "categories"
-  | "featured"
-  | "faq"
-  | "cta"
-  | "rich-text"
-  | "image"
-  | "gallery";
+/**
+ * ⚠️ ชนิดบล็อก/ค่าตั้งต้น มาจาก lib/website-blocks.ts ที่เดียวเท่านั้น — ห้ามประกาศซ้ำที่นี่
+ * เคยประกาศซ้ำ 2 ที่แล้วเพี้ยนจากกันจริง (รหัสบล็อกคนละแบบ + ข้อความตั้งต้นไม่ตรงกัน)
+ * เพิ่ม widget ใหม่ = แก้ที่ lib ที่เดียว แล้วมาเพิ่มแค่ "ฟอร์มกรอก" ในไฟล์นี้
+ */
+export type { BlockType, Visibility };
 
-export interface Visibility {
-  desktop: boolean;
-  tablet: boolean;
-  mobile: boolean;
-}
-
+/**
+ * บล็อกแบบหลวมสำหรับฟอร์ม — ฟอร์มต้องอ่าน/เขียนฟิลด์ตามชนิดที่เลือกตอนรันไทม์
+ * (ชนิดเข้มของจริงคือ Block ใน lib ซึ่งใช้ตอน normalize/ตรวจก่อนเผยแพร่)
+ */
 export interface Block {
   id: string;
   type: BlockType;
   enabled: boolean;
   visibility?: Visibility;
+  style?: BlockStyle;
   [k: string]: unknown;
 }
 
@@ -72,57 +72,13 @@ function visibilityLabel(v?: Visibility): string {
   return hidden.length ? `ซ่อนบน ${hidden.join("/")}` : "";
 }
 
-/** สร้างบล็อกใหม่ (ค่าเริ่มต้นเดียวกับฝั่ง API) */
+/**
+ * สร้างบล็อกใหม่ตอนผู้ใช้กดเพิ่ม/ลากจากคลัง
+ * ค่าตั้งต้นทั้งหมดมาจาก newBlock() ใน lib — ที่นี่แค่ขอ "รหัสไม่ซ้ำ" เพิ่ม
+ * (เดิมไฟล์นี้ก๊อป switch ทั้งชุดมาไว้เอง 50 บรรทัด แล้วเพี้ยนจากฝั่ง lib ไปเงียบ ๆ)
+ */
 export function makeBlock(type: BlockType, seq: number): Block {
-  const id = `${type}-${seq}-${Math.floor(Math.random() * 1000)}`;
-  const base = { id, type, enabled: true, visibility: { ...ALL_VISIBLE }, style: { ...DEFAULT_BLOCK_STYLE } };
-  switch (type) {
-    case "announcement":
-      return { ...base, messages: ["ข้อความประกาศของร้าน"] };
-    case "image":
-      return { ...base, imageKey: null, alt: "", caption: "", width: "wide", href: "" };
-    case "gallery":
-      return { ...base, eyebrow: "", title: "แกลเลอรี", columns: 3, items: [] };
-    case "hero":
-      return {
-        ...base,
-        eyebrow: "รับผลิตเครื่องหนัง & วัสดุงานหนัง",
-        title: "งานหนังคุณภาพ",
-        titleAccent: "ครบ จบ ที่เดียว",
-        subtitle: "รับผลิตกระเป๋าและเข็มขัดหนังแท้ พร้อมจำหน่ายวัสดุงานหนังครบวงจร",
-        primary: { text: "ขอใบเสนอราคา", href: "/quote" },
-        secondary: { text: "เข้าร้านวัสดุ", href: "/shop" },
-        features: [
-          { title: "หนังแท้", desc: "คัดเกรดทุกผืน" },
-          { title: "งานเย็บมือ", desc: "ประณีตทุกตะเข็บ" },
-        ],
-        imageKey: null,
-        imageAlt: "",
-        overlay: 45,
-        height: "auto",
-      };
-    case "two-tracks":
-      return {
-        ...base,
-        eyebrow: "บริการของเรา",
-        title: "สองบริการหลัก",
-        subtitle: "",
-        cards: [
-          { emoji: "🏭", title: "รับผลิต (OEM)", desc: "", bullets: [], primary: { text: "ขอใบเสนอราคา", href: "/quote" }, secondary: { text: "ดูผลงาน", href: "/gallery" }, dark: true },
-          { emoji: "🛒", title: "ร้านวัสดุ", desc: "", bullets: [], primary: { text: "เข้าร้าน", href: "/shop" }, secondary: { text: "", href: "" }, dark: false },
-        ],
-      };
-    case "categories":
-      return { ...base, eyebrow: "ร้านวัสดุ", title: "เลือกซื้อตามหมวด" };
-    case "featured":
-      return { ...base, eyebrow: "ขายดี", title: "วัสดุแนะนำ", limit: 4 };
-    case "faq":
-      return { ...base, eyebrow: "คำถามที่พบบ่อย", title: "เรื่องที่ลูกค้าถามบ่อย", subtitle: "", items: [{ q: "คำถาม", a: "คำตอบ" }] };
-    case "cta":
-      return { ...base, title: "มีแบบในใจแล้ว?", subtitle: "", primary: { text: "ขอใบเสนอราคา", href: "/quote" }, secondary: { text: "ติดต่อเรา", href: "/contact" } };
-    case "rich-text":
-      return { ...base, eyebrow: "", title: "หัวข้อ", body: "เนื้อหา" };
-  }
+  return newBlock(type, seq, { uniqueId: true }) as unknown as Block;
 }
 
 /* ── ตัวช่วยฟอร์ม ── */
