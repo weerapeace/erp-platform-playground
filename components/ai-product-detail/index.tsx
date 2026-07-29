@@ -1,7 +1,7 @@
 "use client";
 
 // ============================================================
-// AiProductDetailModal — t("✨ ให้ AI คิดรายละเอียดสินค้า", "✨ Let AI draft the product details") (ของกลาง)
+// AiProductDetailModal — ป๊อป "✨ ให้ AI คิดรายละเอียดสินค้า" (ของกลาง · 2 ภาษา)
 //   AI ดูรูปสินค้า + ข้อมูลที่มีอยู่ → เขียน ชื่อสินค้า / Introduction / Description
 //   ทั้งไทยและอังกฤษ แล้วให้ผู้ใช้ t("ติ๊กเลือกทีละช่อง", "Tick each field you want") ว่าจะเอาอันไหน (ไม่ทับทั้งดุ้น)
 //   ค่าที่เลือกจะลงในฟอร์มเฉย ๆ — ต้องกดบันทึกเองอีกที
@@ -112,7 +112,7 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
     return (
       <div className="space-y-2">
         <input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })}
-          placeholder={t(t("ชื่อกฎ เช่น กระเป๋าสตางค์", "Rule name, e.g. wallet"), "Rule name, e.g. wallet")}
+          placeholder={t("ชื่อกฎ เช่น กระเป๋าสตางค์", "Rule name, e.g. wallet")}
           className="w-full h-9 px-3 text-[13px] font-medium border border-slate-200 rounded-lg bg-white" />
 
         <div className="rounded-lg border border-slate-200 bg-white p-2.5 space-y-2">
@@ -154,14 +154,14 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
         <div>
           <p className="text-[11.5px] text-slate-500 mb-1">{t("คำสั่งเพิ่มให้ AI (ไม่บังคับ)", "Extra instruction for AI (optional)")}</p>
           <textarea value={edit.instruction} rows={3} onChange={(e) => setEdit({ ...edit, instruction: e.target.value })}
-            placeholder={t(t("เช่น เน้นความจุและการพกพา · บอกด้วยว่าใส่ธนบัตรไทยได้พอดีไหม", "e.g. focus on capacity and portability · say whether Thai banknotes fit"), "e.g. focus on capacity and portability · say whether Thai banknotes fit")}
+            placeholder={t("เช่น เน้นความจุและการพกพา · บอกด้วยว่าใส่ธนบัตรไทยได้พอดีไหม", "e.g. focus on capacity and portability · say whether Thai banknotes fit")}
             className="w-full px-2.5 py-2 text-[12.5px] border border-slate-200 rounded-lg bg-white" />
         </div>
 
         <div>
           <p className="text-[11.5px] text-slate-500 mb-1">{t("ใบ้ถาวรของสินค้าประเภทนี้ (ไม่บังคับ — ไม่ต้องพิมพ์ซ้ำทุกครั้ง)", "Saved hints for this product type (optional — no need to retype)")}</p>
           <input value={edit.hint ?? ""} onChange={(e) => setEdit({ ...edit, hint: e.target.value })}
-            placeholder={t(t("เช่น หนัง PU เกรดพรีเมียม ซับในผ้าโพลีเอสเตอร์", "e.g. premium PU leather, polyester lining"), "e.g. premium PU leather, polyester lining")}
+            placeholder={t("เช่น หนัง PU เกรดพรีเมียม ซับในผ้าโพลีเอสเตอร์", "e.g. premium PU leather, polyester lining")}
             className="w-full h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg" />
         </div>
 
@@ -316,8 +316,8 @@ export function AiProductDetailModal({
   };
 
   return (
-    <ERPModal open onClose={onClose} size="lg" title={t(t("✨ ให้ AI คิดรายละเอียดสินค้า", "✨ Let AI draft the product details"), "✨ Let AI draft the product details")}
-      description={t(t("AI ดูรูปสินค้า (สูงสุด 10 รูป) + ข้อมูลที่กรอกไว้ → เขียนชื่อสินค้า / Introduction / Description ทั้งไทยและอังกฤษ · ขนาดจะเอามาให้เฉพาะที่มีตัวเลขเขียนอยู่ในรูป", "AI looks at the product images (up to 10) + what you filled in → writes name / introduction / description in both Thai and English · sizes are only used when numbers are written in the image"), "AI looks at the product images (up to 10) + what you filled in → writes name / introduction / description in both Thai and English · sizes are only used when numbers are written in the image")}
+    <ERPModal open onClose={onClose} size="lg" title={t("✨ ให้ AI คิดรายละเอียดสินค้า", "✨ Let AI draft the product details")}
+      description={t("AI ดูรูปสินค้า (สูงสุด 10 รูป) + ข้อมูลที่กรอกไว้ → เขียนชื่อสินค้า / Introduction / Description ทั้งไทยและอังกฤษ · ขนาดจะเอามาให้เฉพาะที่มีตัวเลขเขียนอยู่ในรูป", "AI looks at the product images (up to 10) + what you filled in → writes name / introduction / description in both Thai and English · sizes are only used when numbers are written in the image")}
       footer={
         <div className="flex items-center justify-between w-full gap-2 flex-wrap">
           <span className="text-[11.5px] text-slate-400">
@@ -387,7 +387,7 @@ export function AiProductDetailModal({
             ) : (
               <>
                 <textarea value={cfgDraft} onChange={(e) => setCfgDraft(e.target.value)} rows={7}
-                  placeholder={t(t("เช่น เขียนโทนพรีเมียม เน้นงานคราฟต์ · ห้ามใช้คำว่า ถูกที่สุด · ปิดท้ายด้วยการรับประกัน", "e.g. premium, craft-focused tone · never say “cheapest” · end with the warranty"), "e.g. premium, craft-focused tone · never say “cheapest” · end with the warranty")}
+                  placeholder={t("เช่น เขียนโทนพรีเมียม เน้นงานคราฟต์ · ห้ามใช้คำว่า ถูกที่สุด · ปิดท้ายด้วยการรับประกัน", "e.g. premium, craft-focused tone · never say “cheapest” · end with the warranty")}
                   className="w-full px-3 py-2 text-[13px] leading-relaxed border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 font-mono" />
                 <div className="flex items-center gap-2 flex-wrap">
                   <button type="button" onClick={() => void saveCfg()} disabled={cfgBusy}
@@ -410,7 +410,7 @@ export function AiProductDetailModal({
         <div>
           <label className="block text-[12.5px] font-medium text-slate-600 mb-1">{t("บอกใบ้เพิ่ม (ไม่บังคับ)", "Extra hints (optional)")}</label>
           <input value={extra} onChange={(e) => setExtra(e.target.value)} maxLength={500}
-            placeholder={t(t("เช่น หนัง PU กันน้ำ · ใส่โน้ตบุ๊ก 15 นิ้วได้ · เหมาะกับนักเรียน", "e.g. waterproof PU leather · fits a 15\" laptop · good for students"), "e.g. waterproof PU leather · fits a 15\" laptop · good for students")}
+            placeholder={t("เช่น หนัง PU กันน้ำ · ใส่โน้ตบุ๊ก 15 นิ้วได้ · เหมาะกับนักเรียน", "e.g. waterproof PU leather · fits a 15\" laptop · good for students")}
             className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300" />
           <p className="mt-1 text-[11.5px] text-slate-400">
             AI เขียนจากสิ่งที่เห็นในรูปเท่านั้น — อะไรที่มองไม่เห็น (วัสดุจริง กันน้ำ ขนาดจุของ) พิมพ์บอกตรงนี้ AI จะเอาไปใช้ ·
@@ -512,7 +512,7 @@ export function AiProductDetailModal({
                     <div key={q}>
                       <label className="block text-[12.5px] text-slate-600 mb-1">{q}</label>
                       <input value={answers[q] ?? ""} onChange={(e) => setAnswers((p) => ({ ...p, [q]: e.target.value }))}
-                        placeholder={t(t("พิมพ์คำตอบ…", "Type your answer…"), "Type your answer…")}
+                        placeholder={t("พิมพ์คำตอบ…", "Type your answer…")}
                         className="w-full h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300" />
                     </div>
                   ))}
