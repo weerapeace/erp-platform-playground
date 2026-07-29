@@ -4,7 +4,7 @@
  * ของกลาง — ตัวจัดบล็อกของหน้าเว็บ (ใช้ทั้งแท็บ "หน้าแรก" และ "หน้าเว็บ")
  * เพิ่ม/ลบ/ลากสลับลำดับ/เปิด-ปิด + ฟอร์มแก้ข้อความของแต่ละชนิดบล็อก
  */
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 
 export type BlockType =
@@ -475,8 +475,11 @@ export function BlockListEditor({
 
   const [showAdd, setShowAdd] = useState(false);
   const [addQuery, setAddQuery] = useState("");
-  const [dragId, setDragId] = useState<string | null>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
+  /** กำลังลากอะไรอยู่ — บล็อกเดิมในหน้า (move) หรือ widget ใหม่จากคลัง (new) */
+  const [drag, setDrag] = useState<{ kind: "move"; id: string } | { kind: "new"; type: BlockType } | null>(null);
+  /** ตำแหน่งที่จะวาง (0 = บนสุด, blocks.length = ล่างสุด) — ใช้วาดเส้นบอกตำแหน่ง */
+  const [overIdx, setOverIdx] = useState<number | null>(null);
 
   const patch = (id: string, p: Record<string, unknown>) => onChange(blocks.map((b) => (b.id === id ? { ...b, ...p } : b)));
 
@@ -535,27 +538,81 @@ export function BlockListEditor({
     const fresh = makeBlock(type, blocks.length + 1);
     onChange([...blocks, fresh]);
     setOpenId(fresh.id);
-    setShowAdd(false);
+    // คลังค้างไว้ให้เลือกตัวถัดไปได้เลย (ปิดเองด้วยปุ่ม "ปิด")
   };
 
-  const onDrop = (targetId: string) => {
-    if (!dragId || dragId === targetId) return;
-    const from = blocks.findIndex((b) => b.id === dragId);
-    const to = blocks.findIndex((b) => b.id === targetId);
-    if (from < 0 || to < 0) return;
-    const next = [...blocks];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    onChange(next);
-    setDragId(null);
+  const endDrag = () => {
+    setDrag(null);
+    setOverIdx(null);
+  };
+
+  /** วางของที่ลางอยู่ลงที่ตำแหน่ง idx (0 = บนสุด, blocks.length = ล่างสุด) */
+  const dropAt = (idx: number) => {
+    if (!drag) return;
+    if (drag.kind === "new") {
+      const fresh = makeBlock(drag.type, blocks.length + 1);
+      const next = [...blocks];
+      next.splice(idx, 0, fresh);
+      onChange(next);
+      setOpenId(fresh.id);
+    } else {
+      const from = blocks.findIndex((b) => b.id === drag.id);
+      if (from >= 0) {
+        const next = [...blocks];
+        const [moved] = next.splice(from, 1);
+        // ถอดตัวเองออกแล้ว ตำแหน่งหลังจุดที่ถอดจะเลื่อนขึ้น 1
+        next.splice(idx > from ? idx - 1 : idx, 0, moved);
+        onChange(next);
+      }
+    }
+    endDrag();
+  };
+
+  /** ลากผ่านบล็อก → เส้นจะไปอยู่เหนือหรือใต้ ตามว่าเมาส์อยู่ครึ่งบนหรือครึ่งล่าง */
+  const overBlock = (e: React.DragEvent, i: number) => {
+    if (!drag) return;
+    e.preventDefault();
+    const r = e.currentTarget.getBoundingClientRect();
+    setOverIdx(e.clientY < r.top + r.height / 2 ? i : i + 1);
+  };
+
+  /**
+   * เส้นบอกตำแหน่งวาง — คั่นระหว่างบล็อก (โผล่เฉพาะตอนลาก)
+   * เขียนเป็นฟังก์ชันคืน JSX ไม่ใช่ component ย่อย — ถ้าเป็น component React จะสร้าง DOM ใหม่ทุกครั้งที่ขยับเมาส์
+   * แล้วเบราว์เซอร์จะยิง dragleave ใส่ของที่เพิ่งถูกแทน → เส้นกะพริบและวางไม่ติด
+   */
+  const dropLine = (idx: number) => {
+    const active = overIdx === idx;
+    if (!drag) return null;
+    return (
+      <li
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOverIdx(idx);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          dropAt(idx);
+        }}
+        className={`rounded-lg transition-all ${
+          active
+            ? "h-10 border-2 border-dashed border-blue-500 bg-blue-50 flex items-center justify-center"
+            : "h-3 border-2 border-dashed border-transparent"
+        }`}
+      >
+        {active && <span className="text-[11px] font-medium text-blue-600">วางตรงนี้</span>}
+      </li>
+    );
   };
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-slate-500">ลากเพื่อสลับลำดับ · กดชื่อเพื่อแก้ข้อความ</p>
+        <p className="text-xs text-slate-500">
+          {drag ? "ปล่อยตรงเส้นน้ำเงินเพื่อวาง" : "ลากจากคลังมาวางตรงไหนก็ได้ · ลากบล็อกเพื่อสลับลำดับ · กดชื่อเพื่อแก้"}
+        </p>
         <button onClick={() => setShowAdd((v) => !v)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">
-          {showAdd ? "ปิด" : "+ เพิ่มบล็อก"}
+          {showAdd ? "ปิดคลัง" : "+ เพิ่มบล็อก"}
         </button>
       </div>
 
@@ -578,12 +635,19 @@ export function BlockListEditor({
                   {list.map((t) => (
                     <button
                       key={t.type}
+                      draggable
+                      onDragStart={() => setDrag({ kind: "new", type: t.type })}
+                      onDragEnd={endDrag}
                       onClick={() => {
                         add(t.type);
                         setAddQuery("");
                       }}
-                      className="flex items-start gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-blue-400"
+                      title={`${t.label} — ลากไปวางในหน้า หรือกดเพื่อเพิ่มต่อท้าย`}
+                      className={`flex items-start gap-2 bg-white rounded-lg border px-3 py-2 text-left cursor-grab active:cursor-grabbing hover:border-blue-400 ${
+                        drag?.kind === "new" && drag.type === t.type ? "border-blue-500 opacity-50" : "border-slate-200"
+                      }`}
                     >
+                      <span className="text-slate-300 select-none leading-none pt-0.5">⠿</span>
                       <span className="text-lg leading-none">{t.icon}</span>
                       <span className="min-w-0">
                         <span className="block text-sm text-slate-800">{t.label}</span>
@@ -598,26 +662,31 @@ export function BlockListEditor({
         </div>
       )}
 
-      <ul className="space-y-2">
+      <ul className={drag ? "space-y-0" : "space-y-2"}>
         {blocks.map((b, i) => {
           const info = types.find((t) => t.type === b.type);
           const isOpen = openId === b.id;
           return (
-            <li
-              key={b.id}
-              id={`blk-${b.id}`}
-              draggable
-              onDragStart={() => setDragId(b.id)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => onDrop(b.id)}
-              className={`rounded-xl border bg-white overflow-hidden transition ${
-                dragId === b.id
-                  ? "border-blue-400 opacity-60"
-                  : isOpen
-                    ? "border-blue-500 ring-2 ring-blue-100"
-                    : "border-slate-200"
-              }`}
-            >
+            <Fragment key={b.id}>
+              {dropLine(i)}
+              <li
+                id={`blk-${b.id}`}
+                draggable
+                onDragStart={() => setDrag({ kind: "move", id: b.id })}
+                onDragEnd={endDrag}
+                onDragOver={(e) => overBlock(e, i)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  dropAt(overIdx ?? i);
+                }}
+                className={`rounded-xl border bg-white overflow-hidden transition ${
+                  drag?.kind === "move" && drag.id === b.id
+                    ? "border-blue-400 opacity-50"
+                    : isOpen
+                      ? "border-blue-500 ring-2 ring-blue-100"
+                      : "border-slate-200"
+                }`}
+              >
               <div className="flex items-center gap-2 px-3 py-2.5">
                 <span className="cursor-grab text-slate-300 select-none" title="ลากเพื่อย้าย">⠿</span>
                 <span className="text-lg">{info?.icon ?? "🧩"}</span>
@@ -696,14 +765,30 @@ export function BlockListEditor({
                   </div>
                 </div>
               )}
-            </li>
+              </li>
+            </Fragment>
           );
         })}
+        {dropLine(blocks.length)}
       </ul>
 
       {!blocks.length && (
-        <div className="rounded-xl border border-dashed border-slate-300 py-12 text-center text-sm text-slate-400">
-          ยังไม่มีบล็อก — กด &quot;+ เพิ่มบล็อก&quot; เพื่อเริ่มจัดหน้า
+        <div
+          onDragOver={(e) => {
+            if (drag) {
+              e.preventDefault();
+              setOverIdx(0);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            dropAt(0);
+          }}
+          className={`rounded-xl border-2 border-dashed py-12 text-center text-sm transition ${
+            drag ? "border-blue-500 bg-blue-50 text-blue-600" : "border-slate-300 text-slate-400"
+          }`}
+        >
+          {drag ? "วางตรงนี้เพื่อเริ่มจัดหน้า" : 'ยังไม่มีบล็อก — ลาก widget จากคลังมาวาง หรือกด "+ เพิ่มบล็อก"'}
         </div>
       )}
     </div>

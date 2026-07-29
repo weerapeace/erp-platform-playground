@@ -5,8 +5,12 @@
  * อัปผ่าน /api/admin/upload (R2) แล้วเก็บเป็น r2_key · แสดงผลผ่าน /api/r2-image
  */
 import { useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+
+// คลังรูปเป็นตัวใหญ่ — โหลดตอนกดเปิดเท่านั้น ไม่ถ่วงหน้าตั้งค่า
+const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
 
 export const keyUrl = (key: string | null, w = 200) =>
   key ? `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}` : null;
@@ -29,6 +33,7 @@ export function ImageUploadField({
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const upload = async (file: File) => {
     setBusy(true);
@@ -74,11 +79,17 @@ export function ImageUploadField({
 
         <div className="flex flex-col gap-1.5">
           <button
+            onClick={() => setPickerOpen(true)}
+            className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-blue-400 hover:text-blue-700"
+          >
+            🖼 เลือกจากคลังรูป
+          </button>
+          <button
             onClick={() => inputRef.current?.click()}
             disabled={busy}
             className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-slate-500 disabled:opacity-50"
           >
-            {busy ? "กำลังอัปโหลด…" : value ? "เปลี่ยนรูป" : "อัปโหลดรูป"}
+            {busy ? "กำลังอัปโหลด…" : value ? "อัปโหลดรูปใหม่" : "อัปโหลดรูป"}
           </button>
           {value && (
             <button onClick={() => onChange(null)} className="text-[11px] text-red-500 hover:underline text-left">
@@ -98,6 +109,24 @@ export function ImageUploadField({
           }}
         />
       </div>
+
+      {/* คลังรูปกลางของ ERP — เลือกแล้วเก็บ r2_key เหมือนตอนอัปโหลดเอง */}
+      {pickerOpen && (
+        <AssetPicker
+          open
+          onClose={() => setPickerOpen(false)}
+          typeFilter="image"
+          title={`เลือกรูป — ${label}`}
+          onSelect={(rows) => {
+            const key = rows[0]?.r2_key;
+            if (key) {
+              onChange(key);
+              toast.success("เลือกรูปแล้ว");
+            }
+            setPickerOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
