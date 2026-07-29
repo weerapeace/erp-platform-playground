@@ -2744,7 +2744,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         <AiProductDetailModal parentId={editingId} current={form} onClose={() => setAiDetailOpen(false)}
           onApply={(vals) => {
             if (Object.keys(vals).length === 0) return;
-            setForm((p) => ({ ...p, ...vals }));
+            // ช่องตัวเลข (ขนาด/น้ำหนัก) ต้องเก็บเป็นตัวเลข ไม่ใช่ข้อความ — ไม่งั้นบันทึกแล้ว type เพี้ยน
+            const coerced: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(vals)) {
+              const def = effectiveFields.find((f) => f.key === k);
+              coerced[k] = def?.type === "number" ? (v === "" ? null : Number(v)) : v;
+            }
+            setForm((p) => ({ ...p, ...coerced }));
             setDirty(true);
             flash(`ใส่ข้อความจาก AI แล้ว ${Object.keys(vals).length} ช่อง — ตรวจแล้วกดบันทึก`);
           }} />

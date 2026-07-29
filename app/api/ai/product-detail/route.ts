@@ -2,8 +2,9 @@
  * /api/ai/product-detail — ให้ AI "คิดรายละเอียดสินค้า" จากรูป + ข้อมูลที่มีอยู่
  *   POST { parent_id, extra? } → { data: { name_th, introduction, description, name_en, introduction_en, english_description, image_count } }
  *
- * เขียนให้ 6 ช่อง (ไทย+อังกฤษพร้อมกัน) — ไม่แตะช่องขนาด/น้ำหนัก (เจ้าของสั่งว่าห้ามให้ AI เดาตัวเลข)
- * ขนาดที่กรอกไว้แล้วจะส่งไปเป็นข้อมูลประกอบ ให้ AI เขียนถึงได้ถูกต้อง (ไม่ใช่ให้เดาใหม่)
+ * เขียนให้ 6 ช่อง (ไทย+อังกฤษพร้อมกัน)
+ * ขนาด/น้ำหนัก: อ่านได้เฉพาะตัวเลขที่ "เขียนอยู่ในรูป" (รูปสเปค/อินโฟกราฟิก) — ห้ามกะจากสายตาเด็ดขาด
+ * ขนาดที่กรอกไว้แล้วจะส่งไปเป็นข้อมูลประกอบ ให้ AI เขียนถึงได้ถูกต้อง
  *
  * สิทธิ์: ai.caption (สิทธิ์ "ใช้ AI ที่มีค่าใช้จ่าย" ตัวเดียวกับเขียนแคปชั่น)
  * prompt: ใช้ทะเบียน prompt 4 ระดับตัวเดิม โดยใช้ platform = "product_detail"
@@ -23,12 +24,12 @@ export const maxDuration = 120;
 /** งานชนิดนี้ในทะเบียน prompt (ใช้ช่อง platform ร่วมกับแคปชั่น) */
 export const PRODUCT_DETAIL_KEY = "product_detail";
 
-const MAX_IMG = 4;   // รูปคือส่วนที่กิน token มากสุด — 4 รูปพอเห็นสินค้ารอบด้านแล้ว
+const MAX_IMG = 10;   // เจ้าของขอ 10 รูป — รูปสเปค/อินโฟกราฟิกมักอยู่รูปท้าย ๆ ถ้าตัดที่ 4 จะไม่เห็นตัวเลขขนาด
 
 const FALLBACK = [
   "คุณคือนักเขียนรายละเอียดสินค้าสำหรับร้านค้าออนไลน์ไทย (Shopee/Lazada/TikTok)",
   "เขียนจากสิ่งที่เห็นในรูปและข้อมูลที่ให้มาเท่านั้น ห้ามแต่งคุณสมบัติที่ไม่เห็น เช่น วัสดุแท้/กันน้ำ/มาตรฐาน ถ้าไม่มีข้อมูล",
-  "ห้ามใส่ราคา ห้ามใส่ตัวเลขขนาดหรือน้ำหนักที่ไม่ได้ให้มา",
+  "ห้ามใส่ราคา",
   "โทนสุภาพ อ่านง่าย ชวนซื้อแต่ไม่โฆษณาเกินจริง",
 ].join(" · ");
 
@@ -87,9 +88,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     `"description":"รายละเอียด 3-6 บรรทัด ขึ้นต้นแต่ละบรรทัดด้วย '- ' บอกวัสดุที่เห็น ช่องเก็บของ จุดเด่น การใช้งาน",`,
     `"name_en":"ชื่อสินค้าภาษาอังกฤษ (เขียนใหม่ให้เป็นธรรมชาติ ไม่ใช่แปลตรงตัว)",`,
     `"introduction_en":"โปรยเปิดภาษาอังกฤษ ความหมายตรงกับภาษาไทย",`,
-    `"english_description":"รายละเอียดภาษาอังกฤษ ขึ้นต้นแต่ละบรรทัดด้วย '- ' ความหมายตรงกับภาษาไทย"}`,
+    `"english_description":"รายละเอียดภาษาอังกฤษ ขึ้นต้นแต่ละบรรทัดด้วย '- ' ความหมายตรงกับภาษาไทย",`,
+    `"sizes":{"size_length_cm":ตัวเลขหรือ null,"size_height_cm":ตัวเลขหรือ null,"size_thickness_cm":ตัวเลขหรือ null,"weight_g":ตัวเลขหรือ null,"warranty":"ข้อความหรือ null","source":"บอกสั้น ๆ ว่าอ่านตัวเลขมาจากไหน เช่น 'รูปที่ 3 เขียนว่า 34*22*12 cm'"}}`,
     "",
-    "ห้ามใส่คีย์อื่นนอกจากนี้ · ห้ามใส่ตัวเลขขนาด/น้ำหนักที่ไม่ได้ระบุไว้ในข้อมูลด้านล่าง",
+    "กติกาเรื่องขนาด (สำคัญมาก):",
+    "- ใส่ตัวเลขใน sizes ได้เฉพาะเมื่อ 'มีตัวเลขเขียนอยู่ในรูป' เช่น รูปสเปค อินโฟกราฟิก ป้ายวัดขนาด ตารางไซซ์ หรือมีให้ในข้อมูลด้านล่าง",
+    "- ห้ามกะ/ประมาณ/เดาขนาดหรือน้ำหนักจากสายตาเด็ดขาด — ถ้าไม่มีตัวเลขเขียนไว้ ให้ใส่ null ทุกช่อง และ source ว่า 'ไม่พบตัวเลขในรูป'",
+    "- หน่วยต้องแปลงเป็น: เซนติเมตร (cm) สำหรับขนาด และ กรัม (g) สำหรับน้ำหนัก · ถ้าในรูปเป็นนิ้ว/มม./กก. ให้แปลงก่อน",
+    "- ในข้อความ Description ห้ามใส่ตัวเลขขนาดที่ไม่ได้มาจากรูปหรือข้อมูลที่ให้ไว้",
+    "",
+    "ห้ามใส่คีย์อื่นนอกจากนี้",
   ].join("\n");
 
   const sizeTxt = [
@@ -108,19 +116,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     p.name_th ? `ชื่อเดิม (ไทย): ${p.name_th}` : "",
     p.introduction ? `Introduction เดิม: ${String(p.introduction).slice(0, 600)}` : "",
     p.description ? `Description เดิม: ${String(p.description).slice(0, 900)}` : "",
-    sizeTxt ? `ขนาดที่วัดไว้แล้ว (ใช้อ้างอิงได้ ห้ามเปลี่ยนตัวเลข): ${sizeTxt}` : "ยังไม่มีข้อมูลขนาด — ห้ามเดาตัวเลขขนาดหรือน้ำหนัก",
+    sizeTxt ? `ขนาดที่วัดไว้แล้วในระบบ: ${sizeTxt}` : "ระบบยังไม่มีข้อมูลขนาด — ถ้ารูปไหนมีตัวเลขขนาดเขียนไว้ ให้อ่านมาใส่ใน sizes",
     extra ? `ข้อมูลเพิ่มเติมจากผู้ใช้ (เชื่อถือได้ ให้ใช้): ${extra}` : "",
     images.length ? `มีรูปสินค้าให้ดู ${images.length} รูป` : "ไม่มีรูปให้ดู — เขียนจากข้อมูลข้อความเท่านั้น และเขียนแบบไม่ระบุรายละเอียดที่มองไม่เห็น",
   ].filter(Boolean).join("\n");
 
   let out: Record<string, unknown>;
   try {
-    out = await chatJson(system, [{ type: "text", text: facts }, ...imageParts(images)], 1400);
+    out = await chatJson(system, [{ type: "text", text: facts }, ...imageParts(images)], 1700);
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "AI ตอบกลับไม่สำเร็จ" }, { status: 502 });
   }
 
   const str = (k: string, max: number) => String(out[k] ?? "").trim().slice(0, max);
+
+  // ── ขนาดที่ AI "อ่านจากรูป" — กรองค่าเพี้ยนทิ้ง (AI อาจส่งข้อความหรือค่าที่เป็นไปไม่ได้มา) ──
+  const rawSizes = (out.sizes ?? {}) as Record<string, unknown>;
+  const num = (k: string, max: number): number | null => {
+    const v = Number(String(rawSizes[k] ?? "").replace(/[^\d.]/g, ""));
+    return Number.isFinite(v) && v > 0 && v <= max ? Math.round(v * 100) / 100 : null;
+  };
+  const sizes = {
+    size_length_cm:    num("size_length_cm", 500),      // เกิน 5 เมตร = อ่านผิดแน่
+    size_height_cm:    num("size_height_cm", 500),
+    size_thickness_cm: num("size_thickness_cm", 500),
+    weight_g:          num("weight_g", 200000),         // เกิน 200 กก. = อ่านผิด
+    warranty:          String(rawSizes.warranty ?? "").trim().slice(0, 80) || null,
+  };
+  const hasSize = Object.values(sizes).some((v) => v !== null);
+
   const data = {
     name_th: str("name_th", 200),
     introduction: str("introduction", 1500),
@@ -128,6 +152,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     name_en: str("name_en", 200),
     introduction_en: str("introduction_en", 1500),
     english_description: str("english_description", 4000),
+    sizes: hasSize ? sizes : null,
+    size_source: hasSize ? String(rawSizes.source ?? "").trim().slice(0, 200) : "",
     image_count: images.length,
   };
   if (!data.name_th && !data.description && !data.introduction)

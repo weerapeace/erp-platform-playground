@@ -5,7 +5,8 @@
 //   AI ดูรูปสินค้า + ข้อมูลที่มีอยู่ → เขียน ชื่อสินค้า / Introduction / Description
 //   ทั้งไทยและอังกฤษ แล้วให้ผู้ใช้ "ติ๊กเลือกทีละช่อง" ว่าจะเอาอันไหน (ไม่ทับทั้งดุ้น)
 //   ค่าที่เลือกจะลงในฟอร์มเฉย ๆ — ต้องกดบันทึกเองอีกที
-//   ⚠️ ไม่แตะช่องขนาด/น้ำหนัก โดยตั้งใจ (ตัวเลขต้องวัดจริง ไม่ให้ AI เดา)
+//   ขนาด/น้ำหนัก: เอามาเฉพาะที่ "มีตัวเลขเขียนอยู่ในรูป" (รูปสเปค/ตารางไซซ์) ห้าม AI กะจากสายตา
+//   → แถวขนาดจะไม่ติ๊กให้อัตโนมัติเสมอ ต้องกดยืนยันเอง
 // ============================================================
 
 import { useCallback, useState } from "react";
@@ -13,7 +14,7 @@ import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { Spinner } from "@/components/spinner";
 
-/** ช่องที่ AI เขียนให้ — เรียงตามที่เห็นในฟอร์ม */
+/** ช่องข้อความที่ AI เขียนให้ — เรียงตามที่เห็นในฟอร์ม */
 const FIELDS: { key: string; label: string; lang: "th" | "en"; long?: boolean }[] = [
   { key: "name_th",             label: "ชื่อสินค้า",          lang: "th" },
   { key: "introduction",        label: "Introduction",        lang: "th", long: true },
@@ -23,7 +24,17 @@ const FIELDS: { key: string; label: string; lang: "th" | "en"; long?: boolean }[
   { key: "english_description", label: "English Description", lang: "en", long: true },
 ];
 
-type Result = Record<string, string> & { image_count?: number };
+/** ช่องขนาด — เอามาเฉพาะที่อ่านตัวเลขได้จากในรูป (ไม่ติ๊กให้อัตโนมัติ) */
+const SIZE_FIELDS: { key: string; label: string; unit: string }[] = [
+  { key: "size_length_cm",    label: "Size Length Cm",    unit: "ซม." },
+  { key: "size_height_cm",    label: "Size Height Cm",    unit: "ซม." },
+  { key: "size_thickness_cm", label: "Size Thickness Cm", unit: "ซม." },
+  { key: "weight_g",          label: "Weight G",          unit: "กรัม" },
+  { key: "warranty",          label: "Warranty",          unit: "" },
+];
+
+type Sizes = Record<string, number | string | null>;
+type Result = Record<string, string> & { image_count?: number; sizes?: Sizes | null; size_source?: string };
 
 const isBlank = (v: unknown) => {
   const s = String(v ?? "").trim();
@@ -56,7 +67,8 @@ export function AiProductDetailModal({
       if (!r.ok || j?.error) throw new Error(j?.error || `เรียก AI ไม่สำเร็จ (${r.status})`);
       const data = (j.data ?? {}) as Result;
       setRes(data);
-      // ค่าเริ่มต้น: ติ๊กเฉพาะช่องที่ "ของเดิมยังว่าง" — ช่องที่มีข้อความอยู่แล้วไม่ติ๊กให้ (กันทับงานที่เขียนเอง)
+      // ค่าเริ่มต้น: ติ๊กเฉพาะช่องข้อความที่ "ของเดิมยังว่าง" — ช่องที่มีข้อความอยู่แล้วไม่ติ๊กให้ (กันทับงานที่เขียนเอง)
+      //   ช่องขนาดไม่ติ๊กให้เลย ต้องกดยืนยันเอง (ตัวเลขผิดกระทบค่าส่ง/ลูกค้าได้ของไม่ตรง)
       const init: Record<string, boolean> = {};
       for (const f of FIELDS) init[f.key] = !!String(data[f.key] ?? "").trim() && isBlank(current[f.key]);
       setPicked(init);
@@ -65,20 +77,24 @@ export function AiProductDetailModal({
   }, [parentId, extra, current]);
 
   const rows = res ? FIELDS.filter((f) => String(res[f.key] ?? "").trim()) : [];
-  const pickedCount = rows.filter((f) => picked[f.key]).length;
-  const willOverwrite = rows.filter((f) => picked[f.key] && !isBlank(current[f.key])).length;
+  const sizeRows = res?.sizes
+    ? SIZE_FIELDS.filter((f) => { const v = res.sizes?.[f.key]; return v !== null && v !== undefined && String(v).trim() !== ""; })
+    : [];
+  const pickedCount = [...rows, ...sizeRows].filter((f) => picked[f.key]).length;
+  const willOverwrite = [...rows, ...sizeRows].filter((f) => picked[f.key] && !isBlank(current[f.key])).length;
 
   const apply = () => {
     if (!res) return;
     const out: Record<string, string> = {};
     for (const f of rows) if (picked[f.key]) out[f.key] = String(res[f.key] ?? "").trim();
+    for (const f of sizeRows) if (picked[f.key]) out[f.key] = String(res.sizes?.[f.key] ?? "").trim();
     onApply(out);
     onClose();
   };
 
   return (
     <ERPModal open onClose={onClose} size="lg" title="✨ ให้ AI คิดรายละเอียดสินค้า"
-      description="AI จะดูรูปสินค้า + ข้อมูลที่กรอกไว้ แล้วเขียนชื่อสินค้า / Introduction / Description ให้ทั้งไทยและอังกฤษ · ไม่แตะช่องขนาดและน้ำหนัก"
+      description="AI ดูรูปสินค้า (สูงสุด 10 รูป) + ข้อมูลที่กรอกไว้ → เขียนชื่อสินค้า / Introduction / Description ทั้งไทยและอังกฤษ · ขนาดจะเอามาให้เฉพาะที่มีตัวเลขเขียนอยู่ในรูป"
       footer={
         <div className="flex items-center justify-between w-full gap-2 flex-wrap">
           <span className="text-[11.5px] text-slate-400">
@@ -106,7 +122,8 @@ export function AiProductDetailModal({
             placeholder="เช่น หนัง PU กันน้ำ · ใส่โน้ตบุ๊ก 15 นิ้วได้ · เหมาะกับนักเรียน"
             className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300" />
           <p className="mt-1 text-[11.5px] text-slate-400">
-            AI เขียนจากสิ่งที่เห็นในรูปเท่านั้น — อะไรที่มองไม่เห็น (วัสดุจริง กันน้ำ ขนาดจุของ) พิมพ์บอกตรงนี้ AI จะเอาไปใช้
+            AI เขียนจากสิ่งที่เห็นในรูปเท่านั้น — อะไรที่มองไม่เห็น (วัสดุจริง กันน้ำ ขนาดจุของ) พิมพ์บอกตรงนี้ AI จะเอาไปใช้ ·
+            ถ้ามีรูปสเปคที่เขียนขนาดไว้ AI จะอ่านตัวเลขมาให้เลือกด้วย
           </p>
         </div>
 
@@ -156,6 +173,42 @@ export function AiProductDetailModal({
                 );
               })}
             </div>
+
+            {/* ขนาดที่อ่านได้จากตัวเลขในรูป — ไม่ติ๊กให้อัตโนมัติ ต้องยืนยันเอง */}
+            {sizeRows.length > 0 && (
+              <div className="rounded-lg border border-sky-200 overflow-hidden">
+                <div className="px-3 py-2 bg-sky-50 border-b border-sky-200">
+                  <p className="text-[12.5px] font-semibold text-sky-800">📏 ขนาดที่ AI อ่านได้จากตัวเลขในรูป</p>
+                  <p className="text-[11.5px] text-sky-700 mt-0.5">
+                    {res?.size_source || "AI อ่านตัวเลขจากรูปสเปค"} · <b>เทียบกับสินค้าจริงก่อนติ๊ก</b> — ระบบไม่ติ๊กให้อัตโนมัติเพราะตัวเลขผิดจะกระทบค่าส่ง
+                  </p>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {sizeRows.map((f) => {
+                    const now = String(current[f.key] ?? "").trim();
+                    const next = String(res?.sizes?.[f.key] ?? "").trim();
+                    const same = now !== "" && Number(now) === Number(next);
+                    return (
+                      <label key={f.key} className="flex gap-3 px-3 py-2 items-center cursor-pointer hover:bg-slate-50/70">
+                        <input type="checkbox" checked={!!picked[f.key]}
+                          onChange={(e) => setPicked((p) => ({ ...p, [f.key]: e.target.checked }))}
+                          className="h-4 w-4 accent-sky-600 shrink-0" />
+                        <span className="text-[12.5px] font-medium text-slate-600 w-[150px] shrink-0">{f.label}</span>
+                        <span className="text-[12.5px] text-slate-400 tabular-nums">{isBlank(now) ? "— ว่าง" : now}</span>
+                        <span className="text-slate-300">→</span>
+                        <span className="text-[13px] font-semibold text-sky-700 tabular-nums">{next} {f.unit}</span>
+                        {same && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600">ตรงกับของเดิม</span>}
+                        {!same && !isBlank(now) && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">ไม่ตรงของเดิม</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {res && !res.sizes && (
+              <p className="text-[11.5px] text-slate-400">📏 ไม่พบตัวเลขขนาดเขียนอยู่ในรูป — ช่องขนาดจึงไม่ถูกแตะ (AI ไม่กะขนาดจากสายตา)</p>
+            )}
+
             <p className="text-[11.5px] text-slate-400">
               คำสั่งที่ AI ใช้เขียน ตั้งแยกรายแบรนด์ได้ที่หน้า <b>งาน → ตั้งค่า → คำสั่ง AI</b> (เลือกงาน “รายละเอียดสินค้า”)
             </p>
