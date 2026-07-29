@@ -108,6 +108,69 @@ TEXT_COMPUTES.name_platform_code = {
   },
 };
 
+// Parent SKU — Name Platform (EN) = ชื่ออังกฤษ + Code (คู่ของ name_platform_code · ไม่ใช้ AI แปล)
+TEXT_COMPUTES.name_platform_code_en = {
+  label: "ชื่อแพลตฟอร์ม + รหัส (EN)",
+  describe: "Name En + รหัส (Code) ต่อท้าย — เวอร์ชันอังกฤษของ Name Platform (ไม่ต้องแปลด้วย AI)",
+  fn: (r) => {
+    const base = trim(r.name_en) || trim(r.name_platform) || trim(r.name_th);
+    return [base, trim(r.code)].filter(Boolean).join(" ");
+  },
+};
+
+// Parent SKU — รายละเอียดแพลตฟอร์ม (EN): โครงเดียวกับฝั่งไทย แต่หยิบช่องอังกฤษ + ข้อความประจำเป็นอังกฤษ
+TEXT_COMPUTES.platform_description_en = {
+  label: "รายละเอียดแพลตฟอร์ม (EN)",
+  describe: "เวอร์ชันอังกฤษของ Platform Description — ใช้ Introduction En / English Description + เงื่อนไขการสั่งซื้อฉบับอังกฤษ (ไม่ต้องแปลด้วย AI)",
+  fn: (r) => {
+    const intro  = String(r.introduction_en ?? "");
+    const detail = String(r.english_description ?? "");
+    const customSize  = trim(r.custom_size);
+    // ขนาดฉบับอังกฤษ (สูตรไทยมีวงเล็บ "กว้าง x สูง x หนา" ติดมา จึงประกอบเอง)
+    const sw = g(r.size_length_cm), sh = g(r.size_height_cm), st = Number(r.size_thickness_cm) || 0;
+    const productSize = st
+      ? `${sw} x ${sh} x ${g(st)} cm. (W x H x D)`
+      : `${sw} x ${sh} cm. (W x H)`;
+    // รับประกัน: แปลงหน่วยไทยที่พบบ่อยเป็นอังกฤษ (ข้อมูลกรอกเป็นไทย เช่น "1 ปี")
+    const warranty = trim(r.warranty)
+      .replace(/ปี/g, "year(s)").replace(/เดือน/g, "month(s)").replace(/วัน/g, "day(s)")
+      .replace(/ตลอดอายุการใช้งาน/g, "lifetime").trim();
+
+    const weightVal  = Number(r.weight_g) || 0;
+    const weightShow = !!r.show_weight;
+    const weightText = (weightShow && weightVal > 0) ? ` | Weight: ${g(weightVal)} g` : "";
+
+    const brand     = trim(r.brand_name) || trim(r.brand_label);
+    const brandText = brand ? `${brand} ` : "";
+
+    const width  = Number(r.size_length_cm) || 0;
+    const height = Number(r.size_height_cm) || 0;
+    const prefix = "\n- Size: ";
+    let sizeLine = "";
+    if (!(width === 0 && height === 0)) sizeLine = `${prefix}${productSize}${weightText}`;
+    else if (customSize)                sizeLine = `${prefix}${customSize}${weightText}`;
+    else if (weightShow && weightVal > 0) sizeLine = `\n- Weight: ${g(weightVal)} g`;
+
+    const warrantyText = (warranty && warranty !== "ไม่มีรับประกัน") ? `\n**Warranty: ${warranty}**` : "";
+
+    return (
+      `  ${intro}\n\n` +
+      `Product details\n${detail}` +
+      `${sizeLine}\n` +
+      `\nNotes:` +
+      `${warrantyText}\n` +
+      `Items can be exchanged within 7 days at no extra cost if the defect is caused by the manufacturing process.\n\n` +
+      `.... Ordering from ${brandText}Official\n` +
+      `1. Orders are shipped Monday–Saturday. Daily cut-off is 08:00 (orders placed after 08:00 ship the next day, excluding Sundays).\n` +
+      `2. After payment, please allow 1–3 days for preparation and 2–5 days for delivery, depending on the courier.\n` +
+      `3. If the address or phone number is entered incorrectly, we cannot edit it for you — please cancel and place a new order.\n` +
+      `4. Wrong size can be exchanged (style cannot be changed); a 50 THB return-shipping fee applies (paid by the customer).\n\n` +
+      `....• Follow our shop for promotions and to see new arrivals first.\n` +
+      `....• For any questions, chat with us Monday–Saturday 08:00–22:00, Sunday 11:00–22:00.`
+    );
+  },
+};
+
 // China bills — ประเภทบิล: ค่าส่ง / VAT (ISG/IG) / บิลร้านจีน
 TEXT_COMPUTES.china_bill_type = {
   label: "ประเภทบิล",
