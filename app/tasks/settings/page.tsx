@@ -25,14 +25,15 @@ import { MultiUserPicker } from "../multi-user-picker";
 import type { UserPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
 import { UserPermOverrideButton } from "@/components/user-perm-override";
+import { CaptionPromptsManager } from "./caption-prompts";
 import { tr } from "@/lib/lang";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
 type MatrixRow = { role_key: string; permission_key: string };
-type Tab = "perm" | "task_type" | "platform" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "line" | "drive" | "brand_drive";
-const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "subtype", "status", "transition", "team", "mysub", "submit", "line", "drive", "brand_drive"];
+type Tab = "perm" | "task_type" | "platform" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "line" | "drive" | "brand_drive" | "ai_prompt";
+const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "subtype", "status", "transition", "team", "mysub", "submit", "line", "drive", "brand_drive", "ai_prompt"];
 
 export default function TaskSettingsPage() {
   const t = useT();
@@ -70,6 +71,7 @@ export default function TaskSettingsPage() {
             <TabBtn active={tab === "line"} onClick={() => setTab("line")}>🔔 {t("LINE", "LINE")}</TabBtn>
             <TabBtn active={tab === "drive"} onClick={() => setTab("drive")}>🗂️ {t("โฟลเดอร์ปก", "Cover folder")}</TabBtn>
             <TabBtn active={tab === "brand_drive"} onClick={() => setTab("brand_drive")}>🏷️ {t("โฟลเดอร์ต่อแบรนด์", "Brand folders")}</TabBtn>
+            <TabBtn active={tab === "ai_prompt"} onClick={() => setTab("ai_prompt")}>✨ {t("Prompt แคปชั่น AI", "AI caption prompt")}</TabBtn>
           </div>
         )}
       </div>
@@ -85,6 +87,7 @@ export default function TaskSettingsPage() {
           : tab === "transition" ? <TransitionManager showToast={showToast} />
           : tab === "team" ? <TeamManager showToast={showToast} />
           : tab === "mysub" ? <MySubViewManager showToast={showToast} />
+          : tab === "ai_prompt" ? <CaptionPromptsManager showToast={showToast} />
           : tab === "submit" ? <SubmitRequiredManager showToast={showToast} />
           : tab === "subtype" ? (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
