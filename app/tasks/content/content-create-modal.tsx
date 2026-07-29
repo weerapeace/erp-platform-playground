@@ -12,7 +12,7 @@ import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "../use-options";
-import { BrandPlatformsModal, getBrandPlatforms, type BrandPlatformMap } from "./brand-platforms-modal";
+import { BrandPlatformsModal, getBrandPlatforms, type BrandPlatformMap, type BrandFormatMap } from "./brand-platforms-modal";
 import {
   createContent, getContent, getRecommendedTimes, CONTENT_STATUS_META, POST_TYPES, contentStatusLabel, postTypeLabel,
   type ContentItem, type ContentCaption, type ContentStatus, type BrandOption, type RecommendedTimes,
@@ -42,11 +42,12 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [bpMap, setBpMap] = useState<BrandPlatformMap>({});      // แบรนด์ไหนลงแพลตฟอร์มไหน (ตั้งค่าไว้ล่วงหน้า)
+  const [bpFmt, setBpFmt] = useState<BrandFormatMap>({});        // รูปแบบโพสต์เริ่มต้นต่อแบรนด์ × แพลตฟอร์ม
   const [bpOpen, setBpOpen] = useState(false);
   const [recTimes, setRecTimes] = useState<RecommendedTimes>({});   // เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์)
   const recRef = useRef<RecommendedTimes>({});
   useEffect(() => { getRecommendedTimes().then((r) => { setRecTimes(r); recRef.current = r; }).catch(() => {}); }, []);
-  useEffect(() => { getBrandPlatforms().then(setBpMap).catch(() => {}); }, []);
+  useEffect(() => { getBrandPlatforms().then((r) => { setBpMap(r.map); setBpFmt(r.formats); }).catch(() => {}); }, []);
 
   // เปิดใหม่ทุกครั้ง → รีเซ็ตฟอร์ม + เติมค่า default (แบรนด์จากแท็บ / วันจากช่องที่คลิก + เวลาแนะนำ)
   useEffect(() => {
@@ -100,6 +101,8 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         title: form.title.trim(), campaign_id: form.campaign_id || null, brand_id: form.brand_id || null,
         sku_id: form.product?.id ?? null, product_name: form.product?.name ?? null, post_type: form.post_type || null,
         platforms: form.platforms, status: form.status, scheduled_at: form.scheduled_at || null, note: form.note.trim() || null,
+        // รูปแบบโพสต์เริ่มต้นของแบรนด์ (เอาเฉพาะแพลตฟอร์มที่เลือกไว้จริง)
+        platform_formats: Object.fromEntries(Object.entries(bpFmt[form.brand_id] ?? {}).filter(([p]) => form.platforms.includes(p))),
         captions: tplCaptions.length ? form.platforms.map((p) => { const c = tplCaptions.find((x) => x.platform === p); return { platform: p, caption: c?.caption ?? null, hashtags: c?.hashtags ?? null, caption_type: c?.caption_type ?? "short" }; }) : undefined,
       });
       setDirty(false);
@@ -172,7 +175,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         </ERPFormField>
         <ERPFormField label={t("โน้ต/บรีฟ", "Note/Brief")} span={2}><ERPTextarea value={form.note} rows={2} onChange={(e) => upd({ note: e.target.value })} /></ERPFormField>
       </ERPFormSection>
-      {bpOpen && <BrandPlatformsModal brands={brands} initial={bpMap} onClose={() => setBpOpen(false)} onSaved={(m) => { setBpMap(m); setBpOpen(false); if (form.brand_id && m[form.brand_id]) upd({ platforms: [...m[form.brand_id]] }); }} pushToast={pushToast} />}
+      {bpOpen && <BrandPlatformsModal brands={brands} initial={bpMap} onClose={() => setBpOpen(false)} onSaved={(m, f) => { setBpMap(m); setBpFmt(f); setBpOpen(false); if (form.brand_id && m[form.brand_id]) upd({ platforms: [...m[form.brand_id]] }); }} initialFormats={bpFmt} pushToast={pushToast} />}
     </ERPModal>
   );
 }

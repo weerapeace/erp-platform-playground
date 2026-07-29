@@ -54,7 +54,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 type Caption = { platform: string; caption?: string | null; hashtags?: string | null; caption_type?: string | null };
 type CreateBody = {
   title?: string; task_id?: string | null; campaign_id?: string | null; brand_id?: string | null; sku_id?: string | null; parent_sku_id?: string | null; product_name?: string | null;
-  post_type?: string | null; platforms?: string[]; status?: string; scheduled_at?: string | null;
+  post_type?: string | null; platforms?: string[]; platform_formats?: Record<string, string>; status?: string; scheduled_at?: string | null;
   product_links?: { platform: string; url: string }[]; note?: string | null; captions?: Caption[]; is_template?: boolean; template_icon?: string | null;
   discount_value?: number | null; discount_is_percent?: boolean; assignee_id?: string | null; assignee_ids?: string[];
 };
@@ -74,6 +74,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     content_no: no, title, task_id: body.task_id || null, campaign_id: body.campaign_id || null, brand_id: body.brand_id || null,
     sku_id: body.sku_id || null, parent_sku_id: body.parent_sku_id || null, product_name: body.product_name?.trim() || null, post_type: body.post_type || null,
     platforms: body.platforms ?? [], status: body.status || "draft", scheduled_at: body.scheduled_at || null,
+    platform_formats: body.platform_formats ?? {},   // รูปแบบโพสต์ต่อแพลตฟอร์ม (มาจากค่าเริ่มต้นของแบรนด์)
     product_links: body.product_links ?? [], note: body.note?.trim() || null, is_template: !!body.is_template, template_icon: body.template_icon || null, created_by: user?.id ?? null,
     discount_value: body.discount_value ?? null, discount_is_percent: !!body.discount_is_percent,
     assignee_ids: Array.isArray(body.assignee_ids) ? body.assignee_ids : (body.assignee_id ? [body.assignee_id] : []),

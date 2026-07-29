@@ -1352,7 +1352,11 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
                 <option value="">{t("อัตโนมัติ (ดูจากสื่อที่เลือก)", "Auto (from media)")}</option>
                 {(POST_FORMATS[cap.platform] ?? []).map((f) => <option key={f.key} value={f.key}>{t(f.th, f.en)}</option>)}
               </select>
-              {format === "story" && <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5">{t("Story = โพสต์มือ", "Story = manual")}</span>}
+              {format === "story" && (cap.platform === "facebook"
+                ? <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-1.5" title={t("กดโพสต์เลย = ขึ้น Story ของเพจอัตโนมัติ (ตั้งเวลาล่วงหน้าไม่ได้)", "Auto-posts to the Page story")}>{t("ยิง Story ได้", "Auto story")}</span>
+                : cap.platform === "instagram"
+                  ? <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5" title={t("IG Story ต้องรอ Meta อนุมัติสิทธิ์ (App Review) — ระหว่างนี้โพสต์มือ", "IG story needs Meta App Review")}>{t("IG Story รอสิทธิ์", "IG story pending")}</span>
+                  : <span className="text-[10px] text-slate-500 bg-slate-100 rounded-full px-1.5">{t("โพสต์มือ", "Manual")}</span>)}
             </div>
           )}
           {useCaption && templates.length > 0 && (

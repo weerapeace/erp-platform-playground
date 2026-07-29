@@ -10,7 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { fbPublish, fbPublishVideo, igPublishImages, igCreateReels } from "@/lib/meta-graph";
+import { fbPublish, fbPublishVideo, fbPublishStory, fbPublishVideoStory, igPublishImages, igPublishStory, igCreateReels } from "@/lib/meta-graph";
 import { baseUrl, getPlatformId, loadConn } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -32,8 +32,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let media: Media[] = Array.isArray(body.media) && body.media.length ? body.media.filter((m) => m?.key) : (body.image_keys ?? []).filter(Boolean).map((k) => ({ key: k, type: "image" }));
   // รูปแบบโพสต์ที่ผู้ใช้เลือก (single/carousel/video/reels/story) — ไม่เลือก = เดาจากสื่อเหมือนเดิม
   const format = (body.format ?? "").trim();
-  if (format === "story")
-    return NextResponse.json({ error: "Story ยังยิงอัตโนมัติไม่ได้ (Meta ต้องขอสิทธิ์เพิ่ม) — กด “คัดลอกแคปชั่น + เปิดหน้าโพสต์” แล้วลง Story เองก่อน" }, { status: 400 });
+  if (format === "story" && Number(body.scheduled_time) > 0)
+    return NextResponse.json({ error: "Story ตั้งเวลาล่วงหน้าไม่ได้ — เลือก “โพสต์เลย”" }, { status: 400 });
+  if (format === "story") media = media.slice(0, 1);   // Story = 1 ชิ้นต่อครั้ง
   if (format === "single") media = media.filter((m) => m.type !== "video").slice(0, 1);
   if (format === "carousel") media = media.filter((m) => m.type !== "video");
   if (format === "video" || format === "reels") {
@@ -79,6 +80,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     if (platform === "facebook") {
+      if (format === "story") {   // Story ของเพจ (24 ชม.) — แคปชั่นไม่ขึ้นใน Story
+        const st = videoUrls.length
+          ? await fbPublishVideoStory(conn.meta.page_id, token, videoUrls[0])
+          : await fbPublishStory(conn.meta.page_id, token, imageUrls[0]);
+        await markPosted("posted", st.url);
+        return NextResponse.json({ ok: true, url: st.url, scheduled: false, story: true, error: null });
+      }
       const posted = videoUrls.length
         ? await fbPublishVideo(conn.meta.page_id, token, caption, videoUrls[0], scheduledTime || undefined)
         : await fbPublish(conn.meta.page_id, token, caption, imageUrls, scheduledTime || undefined);
@@ -88,6 +96,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Instagram
     const igId = conn.meta.ig_user_id;
     if (!igId) return NextResponse.json({ error: "เพจที่เชื่อมยังไม่ได้ผูก Instagram (ต้องเป็น IG Business + ผูกกับเพจ)" }, { status: 400 });
+    if (format === "story") {   // IG Story (ต้องมีสิทธิ์ instagram_content_publish — ยังรอ App Review)
+      const st = await igPublishStory(igId, token, (videoUrls[0] ?? imageUrls[0]), videoUrls.length > 0);
+      await markPosted("posted", st.url);
+      return NextResponse.json({ ok: true, url: st.url, scheduled: false, story: true, error: null });
+    }
     if (videoUrls.length) {
       // Reels: สร้าง container แล้วให้ client ไปตามเช็กที่ /api/meta/ig-finalize
       const creationId = await igCreateReels(igId, token, videoUrls[0], caption);

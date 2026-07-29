@@ -11,30 +11,41 @@ import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "../use-options";
 
 export type BrandPlatformMap = Record<string, string[]>;
+export type BrandFormatMap = Record<string, Record<string, string>>;   // brand → platform → รูปแบบโพสต์
 
-export async function getBrandPlatforms(): Promise<BrandPlatformMap> {
+// รูปแบบที่แต่ละแพลตฟอร์มมีให้เลือก (ต้องตรงกับ POST_FORMATS ในหน้าคอนเทนต์)
+export const FORMATS: Record<string, { key: string; th: string; en: string }[]> = {
+  instagram: [{ key: "single", th: "รูปเดียว", en: "Single" }, { key: "carousel", th: "อัลบั้ม", en: "Carousel" }, { key: "reels", th: "Reels", en: "Reels" }, { key: "story", th: "Story", en: "Story" }],
+  facebook: [{ key: "single", th: "รูปเดียว", en: "Single" }, { key: "carousel", th: "อัลบั้ม", en: "Album" }, { key: "video", th: "วิดีโอ", en: "Video" }, { key: "story", th: "Story", en: "Story" }],
+  tiktok: [{ key: "video", th: "วิดีโอ", en: "Video" }, { key: "carousel", th: "โพสต์รูป", en: "Photo" }],
+  youtube: [{ key: "video", th: "วิดีโอ", en: "Video" }, { key: "reels", th: "Shorts", en: "Shorts" }],
+};
+
+export async function getBrandPlatforms(): Promise<{ map: BrandPlatformMap; formats: BrandFormatMap }> {
   try {
     const j = await apiFetch("/api/creative-brand-platforms").then((r) => r.json());
-    return (j.map ?? {}) as BrandPlatformMap;
-  } catch { return {}; }
+    return { map: (j.map ?? {}) as BrandPlatformMap, formats: (j.formats ?? {}) as BrandFormatMap };
+  } catch { return { map: {}, formats: {} }; }
 }
 
-export function BrandPlatformsModal({ brands, initial, onClose, onSaved, pushToast }: {
+export function BrandPlatformsModal({ brands, initial, initialFormats, onClose, onSaved, pushToast }: {
   brands: { id: string; name: string }[];
   initial?: BrandPlatformMap;
+  initialFormats?: BrandFormatMap;
   onClose: () => void;
-  onSaved: (map: BrandPlatformMap) => void;
+  onSaved: (map: BrandPlatformMap, formats: BrandFormatMap) => void;
   pushToast: (type: "success" | "error" | "info", m: string) => void;
 }) {
   const t = useT();
   const { platforms } = useCreativeOptions();
   const [map, setMap] = useState<BrandPlatformMap>(initial ?? {});
+  const [fmt, setFmt] = useState<BrandFormatMap>(initialFormats ?? {});
   const [loading, setLoading] = useState(!initial);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (initial) return;
-    (async () => { setMap(await getBrandPlatforms()); setLoading(false); })();
+    (async () => { const r = await getBrandPlatforms(); setMap(r.map); setFmt(r.formats); setLoading(false); })();
   }, [initial]);
 
   const isSet = (bid: string) => Array.isArray(map[bid]);
@@ -49,10 +60,10 @@ export function BrandPlatformsModal({ brands, initial, onClose, onSaved, pushToa
   const save = async () => {
     setSaving(true);
     try {
-      const j = await apiFetch("/api/creative-brand-platforms", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ map }) }).then((r) => r.json());
+      const j = await apiFetch("/api/creative-brand-platforms", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ map, formats: fmt }) }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       pushToast("success", t("บันทึกแพลตฟอร์มต่อแบรนด์แล้ว", "Saved brand platforms"));
-      onSaved(map);
+      onSaved(map, fmt);
     } catch (e) { pushToast("error", (e as Error).message); } finally { setSaving(false); }
   };
 
@@ -88,6 +99,25 @@ export function BrandPlatformsModal({ brands, initial, onClose, onSaved, pushToa
                   );
                 })}
               </div>
+              {/* รูปแบบโพสต์เริ่มต้นของแบรนด์นี้ — เฉพาะแพลตฟอร์มที่ลง + ที่มีตัวเลือก */}
+              {platforms.some((p) => on(b.id, p.value) && (FORMATS[p.value] ?? []).length > 0) && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 pt-1.5 border-t border-slate-100">
+                  <span className="text-[10px] text-slate-400">🎬 {t("ลงเป็น", "Post as")}</span>
+                  {platforms.filter((p) => on(b.id, p.value) && (FORMATS[p.value] ?? []).length > 0).map((p) => (
+                    <label key={p.value} className="inline-flex items-center gap-1 text-[11px] text-slate-500">
+                      {p.label}
+                      <select value={fmt[b.id]?.[p.value] ?? ""} onChange={(e) => setFmt((m) => {
+                        const cur = { ...(m[b.id] ?? {}) };
+                        if (e.target.value) cur[p.value] = e.target.value; else delete cur[p.value];
+                        return { ...m, [b.id]: cur };
+                      })} className="h-6 text-[11px] border border-slate-200 rounded px-1 bg-white">
+                        <option value="">{t("อัตโนมัติ", "Auto")}</option>
+                        {(FORMATS[p.value] ?? []).map((f) => <option key={f.key} value={f.key}>{t(f.th, f.en)}</option>)}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
           {brands.length === 0 && <p className="py-8 text-center text-sm text-slate-400">{t("ยังไม่มีแบรนด์", "No brands yet")}</p>}

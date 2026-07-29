@@ -173,3 +173,42 @@ export async function igCreateReels(igId: string, token: string, videoUrl: strin
   const j = await graph(`${META_API}/${igId}/media`, { method: "POST", body: b });
   return String(j.id ?? "");
 }
+
+// ── Story (24 ชม.) ────────────────────────────────────────────────────────────
+// Facebook Page Story: อัปรูปแบบ published=false ก่อน (ได้ photo id) → /photo_stories
+//   ต้องมีสิทธิ์ pages_manage_posts + เพจต้องผ่านเงื่อนไขของ Meta · ตั้งเวลาไม่ได้
+export async function fbPublishStory(pageId: string, pageToken: string, imageUrl: string): Promise<{ url: string; id: string }> {
+  const up = new URLSearchParams({ url: imageUrl, published: "false", access_token: pageToken });
+  const photo = await graph(`${META_API}/${pageId}/photos`, { method: "POST", body: up });
+  const photoId = String(photo.id ?? "");
+  if (!photoId) throw new Error("อัปรูปสำหรับ Story ไม่สำเร็จ");
+  const b = new URLSearchParams({ photo_id: photoId, access_token: pageToken });
+  const j = await graph(`${META_API}/${pageId}/photo_stories`, { method: "POST", body: b });
+  const id = String(j.post_id ?? j.id ?? "");
+  return { id, url: id ? `https://www.facebook.com/stories/${pageId}` : "" };
+}
+
+// Facebook Page Story แบบวิดีโอ — ต้อง initialize → upload → finish (3 ขั้น)
+export async function fbPublishVideoStory(pageId: string, pageToken: string, videoUrl: string): Promise<{ url: string; id: string }> {
+  const init = await graph(`${META_API}/${pageId}/video_stories`, { method: "POST", body: new URLSearchParams({ upload_phase: "start", access_token: pageToken }) });
+  const videoId = String(init.video_id ?? "");
+  const uploadUrl = String(init.upload_url ?? "");
+  if (!videoId || !uploadUrl) throw new Error("เริ่มอัป Story วิดีโอไม่สำเร็จ");
+  const r = await fetch(uploadUrl, { method: "POST", headers: { Authorization: `OAuth ${pageToken}`, file_url: videoUrl } });
+  if (!r.ok) throw new Error(`อัปวิดีโอ Story ไม่สำเร็จ (HTTP ${r.status})`);
+  const fin = await graph(`${META_API}/${pageId}/video_stories`, { method: "POST", body: new URLSearchParams({ upload_phase: "finish", video_id: videoId, access_token: pageToken }) });
+  const id = String(fin.post_id ?? videoId);
+  return { id, url: `https://www.facebook.com/stories/${pageId}` };
+}
+
+// Instagram Story: container media_type=STORIES → publish (แคปชั่นไม่ขึ้นใน Story)
+// ต้องมีสิทธิ์ instagram_content_publish (ของเรายังรอ App Review) — ถ้าไม่ผ่านจะได้ error จาก Meta ตรง ๆ
+export async function igPublishStory(igId: string, token: string, mediaUrl: string, isVideo = false): Promise<{ url: string; id: string }> {
+  const b = new URLSearchParams({ media_type: "STORIES", access_token: token });
+  b.set(isVideo ? "video_url" : "image_url", mediaUrl);
+  const j = await graph(`${META_API}/${igId}/media`, { method: "POST", body: b });
+  const cid = String(j.id ?? "");
+  if (!cid) throw new Error("สร้าง Story ของ Instagram ไม่สำเร็จ");
+  await igWaitReady(token, cid);
+  return igPublish(igId, token, cid);
+}
