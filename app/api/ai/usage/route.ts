@@ -19,7 +19,7 @@ const IMG_TOKENS = 2833, TEXT_IN = 600, OUT_PER_CAPTION = 350;
 const costThb = (images: number, captions: number, calls: number) =>
   ((images * IMG_TOKENS + calls * TEXT_IN) * 0.15 / 1e6 + captions * OUT_PER_CAPTION * 0.6 / 1e6) * USD_THB;
 
-type Row = { action: string; created_at: string; actor_name: string | null; metadata: Record<string, unknown> | null };
+type Row = { action: string; created_at: string; metadata: Record<string, unknown> | null };   // ชื่อผู้ทำอยู่ใน metadata.actor (ตาราง audit_logs ไม่มีคอลัมน์ actor_name)
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "ai.caption")) && !(await apiCan(request, "tasks.approve")))
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const since = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - (months - 1), 1)).toISOString();
 
   const { data, error } = await supabaseAdmin().from("audit_logs")
-    .select("action, created_at, actor_name, metadata")
+    .select("action, created_at, metadata")
     .in("action", ["ai_caption", "ai_caption_all"]).gte("created_at", since)
     .order("created_at", { ascending: false }).limit(5000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const captions = Array.isArray(md.platforms) ? (md.platforms as unknown[]).length : 1;
     const b = bucket.get(m) ?? { month: m, calls: 0, images: 0, captions: 0 };
     b.calls += calls; b.images += images; b.captions += captions; bucket.set(m, b);
-    const who = (r.actor_name ?? "—").toString();
+    const who = (md.actor ?? "—").toString();
     const u = byUser.get(who) ?? { name: who, calls: 0, captions: 0, images: 0 };
     u.calls += calls; u.captions += captions; u.images += images; byUser.set(who, u);
   }
