@@ -21,6 +21,7 @@ export type Permission =
   | "notifications.view"
   | "goals.view" | "goals.edit"
   | "assets.view" | "assets.upload" | "assets.edit" | "assets.delete" | "assets.manage"
+  | "ai.caption"
   | "saved_views.share" | "admin.saved_views"
   | "workflow.view" | "admin.workflow"
   | "reports.view" | "admin.reports"

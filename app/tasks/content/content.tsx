@@ -37,6 +37,7 @@ import { PostConfirmModal, type PostImage } from "./post-confirm-modal";
 import { ContentCreateModal } from "./content-create-modal";
 import { MultiUserPicker } from "../multi-user-picker";
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/components/auth";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, isCollapsed, toggleCollapsedList } from "../drawer-theme";
 import dynamic from "next/dynamic";
@@ -351,6 +352,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const { platforms } = useCreativeOptions();
   const [d, setD] = useState<ContentDetail | null>(null);
   const [titleEdit, setTitleEdit] = useState<string | null>(null);   // ดับเบิลคลิกหัว drawer = แก้ชื่อ (null = ไม่ได้แก้อยู่)
+  const { can } = useAuth();
+  const canAiCaption = can("ai.caption");   // สิทธิ์กดปุ่มให้ AI เขียนแคปชั่น (มีค่าใช้จ่าย)
   const [caps, setCaps] = useState<ContentCaption[]>([]);
   const [touchedCaps, setTouchedCaps] = useState<Set<string>>(new Set());   // ช่องที่ผู้ใช้ "แก้เอง" (platform|caption / platform|hashtags)
   const [applyFrom, setApplyFrom] = useState<string | null>(null);          // ป๊อป "ใช้ทั้งหมด" — แพลตฟอร์มต้นทาง
@@ -950,7 +953,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} contentId={contentId} canAi={canAiCaption} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -1156,10 +1159,28 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ contentId, canAi = false, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { contentId?: string; canAi?: boolean; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [tplOpen, setTplOpen] = useState(false);   // พับปุ่มเลือกแม่แบบไว้ก่อน
   const [imgEdit, setImgEdit] = useState(false);   // โหมดเลือกรูป (ปกติโชว์เฉพาะรูปที่เลือก · กดแล้วกางเลือก)
+  const [aiBusy, setAiBusy] = useState(false);      // กำลังให้ AI เขียนแคปชั่น
+  // ให้ AI เขียนแคปชั่นจากรูปที่แนบ + แฮชแท็กที่กรอก (ต้องมีสิทธิ์ ai.caption + ตั้ง OPENAI_API_KEY)
+  const aiWrite = async () => {
+    if (!contentId) return;
+    if ((cap.caption ?? "").trim() && !window.confirm(t("มีแคปชั่นอยู่แล้ว — ให้ AI เขียนทับไหม?", "A caption already exists — overwrite with AI?"))) return;
+    setAiBusy(true);
+    try {
+      const r = await apiFetch("/api/ai/caption", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_id: contentId, platform: cap.platform }) });
+      const j = await r.json();
+      if (j.error) throw new Error(j.error);
+      // แฮชแท็กที่ AI แนะนำ → ต่อท้ายของเดิม (ไม่ทับ) และไม่ซ้ำ
+      const old = (cap.hashtags ?? "").trim();
+      const have = new Set(old.split(/s+/).filter(Boolean).map((x) => x.toLowerCase()));
+      const add = ((j.hashtags ?? []) as string[]).filter((h) => !have.has(h.toLowerCase()));
+      onChange({ caption: j.caption as string, ...(add.length ? { hashtags: [old, ...add].filter(Boolean).join(" ") } : {}) });
+      pushToast("success", t(`AI เขียนให้แล้ว (อ่าน ${j.images_used ?? 0} รูป)${add.length ? ` + แนะแฮชแท็ก ${add.length} อัน` : ""}`, `AI wrote it (read ${j.images_used ?? 0} image(s))${add.length ? ` + ${add.length} hashtag(s)` : ""}`));
+    } catch (e) { pushToast("error", (e as Error).message); } finally { setAiBusy(false); }
+  };
   const useCaption = setting?.use_caption !== false;
   const useHashtags = setting?.use_hashtags !== false;
   const postUrl = (setting?.post_url ?? "").trim();
@@ -1193,6 +1214,10 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, o
             ? <a href={postUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-100">↗ {t("ไปโพสต์", "Post")}</a>
             : onOpenSettings && <button onClick={onOpenSettings} title={t("ตั้งลิงก์ไปหน้าโพสต์ ที่ตั้งค่าแพลตฟอร์ม", "Set post link in platform settings")} className="text-[11px] text-slate-400 hover:text-violet-700">🔗 {t("ตั้งลิงก์", "Set link")}</button>}
           {onApplyAll && <button onClick={() => onApplyAll(cap.platform)} title={t("เอาแคปชั่น/แฮชแท็กช่องนี้ไปใช้กับแพลตฟอร์มอื่น (เลือกวิธี)", "Apply this caption/hashtags to other platforms")} className="text-[11px] text-slate-500 hover:text-violet-700">⇊ {t("ใช้ทั้งหมด", "Apply all")}</button>}
+          {canAi && useCaption && contentId && (
+            <button onClick={aiWrite} disabled={aiBusy} title={t("ให้ AI อ่านรูปที่แนบ + แฮชแท็ก แล้วเขียนแคปชั่นให้", "Let AI read the attached images + hashtags and write the caption")}
+              className="text-xs font-medium text-fuchsia-700 hover:underline disabled:opacity-50">{aiBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนให้", "✨ AI write")}</button>
+          )}
           <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
         </div>
       </div>
