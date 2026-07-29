@@ -20,8 +20,15 @@ import { normalizeBlocks, BLOCK_META } from "@/lib/website-blocks";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-/** slug ที่ห้ามใช้ เพราะชนกับหน้าจริงของเว็บ */
-const RESERVED = new Set(["shop", "product", "checkout", "quote", "api", "_next", "cart", "home"]);
+/**
+ * slug ที่ห้ามใช้ เพราะชนกับหน้าที่เว็บร้านเขียนไว้ในโค้ดตัวเอง
+ * หน้าที่ฝังในโค้ดเว็บจะชนะหน้าที่มาจากที่นี่เสมอ → สร้างได้แต่เผยแพร่ไปก็ไม่ขึ้น เสียเวลาเปล่า
+ * (about/contact/gallery/oem = หน้าที่เว็บ IG International มีอยู่แล้ว)
+ */
+const RESERVED = new Set([
+  "shop", "product", "checkout", "quote", "api", "_next", "cart", "home",
+  "about", "contact", "gallery", "oem",
+]);
 
 const cleanSlug = (v: unknown) =>
   String(v ?? "")

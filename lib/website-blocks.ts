@@ -318,7 +318,13 @@ export function normalizeBlocks(raw: unknown): Block[] {
   raw.slice(0, 60).forEach((item, i) => {
     const b = (item ?? {}) as Record<string, unknown>;
     const type = str(b.type) as BlockType;
-    if (!BLOCK_META[type]) return;
+    if (!BLOCK_META[type]) {
+      // ชนิดที่ระบบนี้ไม่รู้จัก = ของร้านที่ใช้ระบบเดิม (เช่น Pixiedustie ใช้ "product-grid")
+      // ⚠️ ต้องเก็บไว้ทั้งก้อนแบบไม่แตะ — เดิมทิ้งทันที ทำให้กด "เผยแพร่" ครั้งเดียว
+      // บล็อกของร้านนั้นหายจากเว็บจริง (ตัวจัดหน้าจะโชว์เป็น 🧩 แก้ไม่ได้ แต่ไม่หาย)
+      if (typeof b.type === "string" && b.type.trim()) out.push(item as Block);
+      return;
+    }
 
     const base = {
       id: str(b.id, uid(type, i + 1), 60),
@@ -455,9 +461,12 @@ export function validateBlocks(blocks: Block[]): ValidationIssue[] {
   if (heroes.length > 1) issues.push({ blockId: null, level: "warning", message: `มีแบนเนอร์หลัก ${heroes.length} อัน — ควรมีอันเดียวเพื่อ SEO` });
 
   for (const b of active) {
+    // บล็อกชนิดที่ไม่รู้จัก (ของร้านระบบเดิม) ไม่มีใน BLOCK_META — ข้ามไป อย่าตรวจ อย่าพัง
+    if (!BLOCK_META[b.type]) continue;
     const label = BLOCK_META[b.type].label;
 
-    if (!b.visibility.desktop && !b.visibility.tablet && !b.visibility.mobile)
+    const v = b.visibility;
+    if (v && !v.desktop && !v.tablet && !v.mobile)
       issues.push({ blockId: b.id, level: "warning", message: `${label}: ซ่อนทุกอุปกรณ์ — จะไม่แสดงที่ไหนเลย` });
 
     if (b.type === "hero") {
