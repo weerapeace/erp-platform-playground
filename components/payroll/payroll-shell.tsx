@@ -13,7 +13,7 @@ import { Logo, BRAND } from "@/components/brand";
 import { useAuth, roleLabel } from "@/components/auth";
 import { NotificationBell } from "@/components/notification-bell";
 import { AppAccessGate } from "@/components/app-access-gate";
-import { PayrollPeriodProvider, usePayrollPeriod } from "@/components/payroll/payroll-period-context";
+import { PayrollPeriodProvider, usePayrollPeriod, isFinishedPeriod } from "@/components/payroll/payroll-period-context";
 import { cachedGetJson } from "@/lib/shell-cache";
 
 type NavItem = { href: string; icon: string; label: string; icon_url?: string | null };
@@ -60,7 +60,12 @@ const FALLBACK_NAV: NavGroup[] = [
 
 function PayrollPeriodSwitcher() {
   const { periods, periodId, selectedPeriod, setPeriodId, loading } = usePayrollPeriod();
+  const [showFinished, setShowFinished] = useState(false);
   if (!periods.length && !loading) return null;
+
+  // ซ่อนงวดที่จบแล้ว (จ่ายแล้ว/ยกเลิก/ส่ง Odoo) — คงงวดที่กำลังเลือกไว้เสมอ ไม่งั้นช่องจะว่าง
+  const visiblePeriods = showFinished ? periods : periods.filter((p) => !isFinishedPeriod(p) || p.id === periodId);
+  const hiddenCount = periods.length - visiblePeriods.length;
 
   return (
     <div className="hidden md:flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1">
@@ -72,10 +77,20 @@ function PayrollPeriodSwitcher() {
         className="h-7 max-w-[220px] bg-transparent text-xs font-semibold text-slate-700 outline-none disabled:opacity-50"
       >
         {!periodId && <option value="">เลือกงวด</option>}
-        {periods.map((p) => (
+        {visiblePeriods.map((p) => (
           <option key={p.id} value={p.id}>{p.period_name} ({p.status})</option>
         ))}
       </select>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowFinished(true)}
+          title="งวดที่จ่ายแล้ว/ยกเลิกถูกซ่อนไว้ กดเพื่อแสดงทั้งหมด"
+          className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-400 hover:text-slate-600"
+        >
+          +{hiddenCount} ที่จบแล้ว
+        </button>
+      )}
       {selectedPeriod && (
         <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500">
           {selectedPeriod.status}

@@ -25,11 +25,16 @@ type PayrollPeriodContextValue = {
 const STORAGE_KEY = "erp.payroll.selected_period_id";
 const EDITABLE_STATUS = new Set(["draft", "review"]);
 
+// งวดที่ "จบแล้ว" — ไม่ต้องโชว์ในตัวเลือกงวดปัจจุบัน และไม่เลือกให้เป็นค่าเริ่มต้น
+export const FINISHED_PERIOD_STATUS = new Set(["paid", "cancelled", "synced_to_odoo"]);
+export const isFinishedPeriod = (period: PayrollPeriod) => FINISHED_PERIOD_STATUS.has(period.status);
+
 const PayrollPeriodContext = createContext<PayrollPeriodContextValue | null>(null);
 
 function preferredPeriod(periods: PayrollPeriod[]) {
   return (
     periods.find((p) => EDITABLE_STATUS.has(p.status)) ??
+    periods.find((p) => !isFinishedPeriod(p)) ??
     periods.find((p) => p.status !== "cancelled") ??
     periods[0] ??
     null
