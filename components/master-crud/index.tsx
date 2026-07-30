@@ -48,6 +48,9 @@ const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-t
 const ParentIssuesPanel = dynamic(() => import("@/components/parent-issues-panel").then((m) => m.ParentIssuesPanel), { ssr: false });
 const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").then((m) => m.SkuSupplierList), { ssr: false });
 const AiProductDetailModal = dynamic(() => import("@/components/ai-product-detail").then((m) => m.AiProductDetailModal), { ssr: false });
+// หมวดกลางสำหรับลงขาย — picker ค้นหา + เพิ่มหมวดใหม่พร้อมจับคู่ร้านในตัว (ของกลาง)
+const CentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker), { ssr: false });
+const InlineCentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.InlineCentralCategoryPicker), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -3017,7 +3020,26 @@ export function MasterRecordDrawer({
       // ✨ ปุ่ม "ให้ AI คิดรายละเอียดสินค้า" — ต้องเปิดที่นี่ด้วย เพราะ drawer สร้าง config เอง
       // (ไม่ได้ใช้ CONFIG ของหน้า /master/parent-skus) ซึ่งเป็นทางที่ผู้ใช้เปิดจริงจากหน้าแท็ก/การ์ด
       aiProductDetail: moduleKey === "parent-skus-v2",
-      mediaGallery: mg, extraRowActions, cellRenderers, createDefaults, formRenderers,
+      mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
+      // ช่อง "หมวดกลางสำหรับลงขาย" — ใช้ picker ของกลางที่ค้นหาได้ + เพิ่มหมวดใหม่พร้อมจับคู่ร้านในตัว
+      // ต้องตั้งที่นี่ด้วย เพราะ drawer ประกอบ config เอง ไม่ได้ใช้ของหน้า /master/parent-skus
+      // ถ้าไม่ตั้ง ปุ่ม "+ เพิ่มใหม่" จะเปิดฟอร์มดิบที่ต้องกรอกรหัสหมวดของแต่ละแพลตฟอร์มเอง (ไม่มีใครรู้รหัส)
+      formRenderers: productEntity
+        ? {
+            platform_category_id: ({ value, onChange, disabled }) => (
+              <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder={tr("— เลือกหมวดกลาง —", "— select central category —")} />
+            ),
+            ...(formRenderers ?? {}),
+          }
+        : formRenderers,
+      detailRenderers: productEntity
+        ? {
+            platform_category_id: ({ value, recordId }) => (
+              <InlineCentralCategoryPicker recordId={recordId} value={(value as string) || null}
+                apiPath={moduleKey === "parent-skus-v2" ? "parent-skus" : "skus"} />
+            ),
+          }
+        : undefined,
       // ไฟล์แนบ: ผู้เรียกส่ง fileAttachments มาได้ตรงๆ (เช่น payroll พนักงาน) · fallback = สินค้า (Parent/SKU)
       fileAttachments: fileAttachments ?? (productEntity ? { entityType: productEntity, title: tr("ไฟล์แนบ", "Attachments") } : undefined),
       // Parent SKU → ช่อง "รูป Description" ในฟอร์ม (เหมือนหน้า master page โดยตรง)
