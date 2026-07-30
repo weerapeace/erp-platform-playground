@@ -206,6 +206,7 @@ export function classifyScans(scans: unknown[] = [], config = defaultAttendanceR
   const noonEnd = minutesFromTime(config.noonScanWindowEnd) as number;
   const finalStart = minutesFromTime(config.finalCheckoutWindowStart) as number;
   const morningEnd = minutesFromTime(config.morningWorkEnd) as number;
+  const afternoonEnd = minutesFromTime(config.afternoonWorkEnd) as number;
 
   const morningScans = minutes.filter((item) => item.minutes < morningEnd);
   const noonScans = minutes.filter((item) => item.minutes >= noonStart && item.minutes <= noonEnd);
@@ -216,10 +217,12 @@ export function classifyScans(scans: unknown[] = [], config = defaultAttendanceR
   // กลับจากพัก "สายเกินช่วงที่ยอมรับ" (ช่วงสแกนเที่ยงกว้างกว่าเวลาตัดแค่ ~20 นาที)
   // ถ้าสแกนครบ 3 ครั้งขึ้นไป: ตัวกลาง (ไม่ใช่ตัวสุดท้าย = สแกนออก) ถือเป็นกลับจากพัก ไม่ว่าจะสายแค่ไหน
   // เดิมตัวกลางจะหลุดไปนับเป็น "สแกนออก" → สายเที่ยงหายเงียบ กลายเป็น "ปกติ"
+  // ขอบบน = เวลาเลิกงาน: สแกนหลังเลิกงานคือ "ออกงาน/OT" ไม่ใช่กลับจากพัก
+  //   (กันเคส 07:47/17:03/18:56 → ถ้าไม่กั้น 17:03 จะถูกอ่านเป็นกลับจากพัก = สาย 253 นาที ซึ่งผิด)
   let noonOutsideWindow = false;
   if (!noonIn && minutes.length >= 3) {
     const lastMinutes = minutes[minutes.length - 1].minutes;
-    const rescued = minutes.find((item) => item.minutes > noonEnd && item.minutes < lastMinutes);
+    const rescued = minutes.find((item) => item.minutes > noonEnd && item.minutes < lastMinutes && item.minutes < afternoonEnd);
     if (rescued) { noonIn = rescued.scan; noonOutsideWindow = true; }
   }
 
