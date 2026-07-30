@@ -370,6 +370,8 @@ export function AttendanceImportPreview({
   const [draft, setDraft] = useState<AttendanceDraftBatch | null>(null);
   const [drafts, setDrafts] = useState<AttendanceDraftBatch[]>([]);   // draft ทั้งหมดของงวดนี้ (เลือกดู/สลับได้)
   const [draftName, setDraftName] = useState("");                      // ชื่อ draft (ตั้งเอง) = source_filename
+  // มีงานที่ยังไม่ได้กด "บันทึก draft / อัปเดต draft" → เตือนก่อนออกจากหน้า (กันงานตรวจเวลาหายทั้งชุด)
+  const [unsavedDraft, setUnsavedDraft] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
@@ -558,12 +560,21 @@ export function AttendanceImportPreview({
 
   useEffect(() => { void loadDrafts(); }, [loadDrafts]);
 
+  // เตือนก่อนปิด/รีเฟรชแท็บ ถ้ายังไม่ได้บันทึก draft
+  useEffect(() => {
+    if (!unsavedDraft) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [unsavedDraft]);
+
   const readFile = async (file?: File | null) => {
     if (!file) return;
     const fileText = await decodeImportFile(file);
     setDraft(null);
     setSelectedIds(new Set());
     setReviewDecisions({});
+    setUnsavedDraft(true);
     setText((current) => current.trim() ? `${current.trimEnd()}\n${fileText.trim()}` : fileText.trim());
     setMessage(file.name.toLowerCase().endsWith(".pdf")
       ? "อ่าน PDF แบบ text แล้ว ถ้า preview ไม่ขึ้น ให้ export/copy text จากรายงานเครื่องสแกนเป็น TXT/CSV"
@@ -627,6 +638,7 @@ export function AttendanceImportPreview({
     setDraft(next);
     setDrafts((cur) => [next, ...cur.filter((d) => d.id !== next.id)]);
     setSelectedIds(new Set((next.rows || []).filter((row) => isCommitReadyStatus(String(row.status))).map((row) => row.id)));
+    setUnsavedDraft(false);
     setMessage(successText);
   };
 
@@ -675,6 +687,7 @@ export function AttendanceImportPreview({
       setDrafts((cur) => [next, ...cur.filter((d) => d.id !== next.id)]);
       setReviewDecisions({});
       setSelectedIds(new Set((next.rows || []).filter((row) => ["ready", "approved", "normal"].includes(String(row.status))).map((row) => row.id)));
+      setUnsavedDraft(false);
       setMessage(`บันทึก draft “${next.source_filename || ""}” แล้ว ${next.rows?.length || 0} รายการ`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "บันทึก draft ไม่สำเร็จ");
@@ -807,6 +820,7 @@ export function AttendanceImportPreview({
           return next;
         });
         setSelectedIds(new Set());
+        setUnsavedDraft(true);
         setMessage(`${decisionNote(decision)} แล้ว ${selectedReviewCount} รายการ กดบันทึก draft เพื่อเก็บผลนี้`);
       }
     } catch (error) {
@@ -850,6 +864,7 @@ export function AttendanceImportPreview({
       }
     } else {
       setReviewDecisions((cur) => ({ ...cur, [rowKey]: decision }));
+      setUnsavedDraft(true);
       setMessage("ตรวจแล้ว — กดบันทึก draft เพื่อเก็บผลนี้");
     }
   };
@@ -977,7 +992,7 @@ export function AttendanceImportPreview({
               ชื่อ draft (ตั้งเอง)
               <input
                 value={draftName}
-                onChange={(event) => setDraftName(event.target.value)}
+                onChange={(event) => { setDraftName(event.target.value); setUnsavedDraft(true); }}
                 placeholder="เช่น เครื่อง 1 รอบเช้า"
                 className="mt-1 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm"
               />
@@ -1000,7 +1015,7 @@ export function AttendanceImportPreview({
             วางข้อความจากเครื่องสแกน
             <textarea
               value={text}
-              onChange={(event) => setText(event.target.value)}
+              onChange={(event) => { setText(event.target.value); setUnsavedDraft(true); }}
               placeholder={SAMPLE_TEXT}
               rows={12}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-slate-400"
@@ -1032,6 +1047,12 @@ export function AttendanceImportPreview({
               {draft ? "อัปเดต draft" : "บันทึก draft"}
             </button>
           </div>
+          {unsavedDraft && displayRows.length > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              ⚠️ <b>ยังไม่ได้บันทึก</b> — กด “{draft ? "อัปเดต draft" : "บันทึก draft"}” ก่อนออกจากหน้านี้
+              ไม่งั้นที่ตรวจไว้จะหายทั้งหมด (ยังไม่ใช่การบันทึกจริงเข้าเงินเดือน — บันทึกจริงคือปุ่มส้ม “บันทึกจริงรายการที่เลือก”)
+            </div>
+          )}
           <label className="block text-xs font-medium text-slate-500">
             ถ้ามีรายการเดิมพนักงาน+วันเดียวกัน
             <select
