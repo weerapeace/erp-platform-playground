@@ -59,13 +59,8 @@ type Listing = {
 
 type SearchHit = { id: string; code: string; name: string; price: number; imageKey: string | null };
 
-const CATEGORIES = [
-  { value: "", label: "— ไม่ระบุ —" },
-  { value: "leather", label: "หนัง" },
-  { value: "fabric", label: "ผ้า" },
-  { value: "hardware", label: "อะไหล่" },
-  { value: "edge-paint", label: "สีทาขอบ" },
-];
+/** หมวดของร้าน — มาจาก API (ตั้งได้เองในแท็บ ⚙️ จับคู่ฟิลด์) ไม่ฝังไว้ในโค้ดแล้ว */
+type CategoryDef = { key: string; label: string; icon: string };
 
 const STOCKS = [
   { value: "in", label: "พร้อมส่ง" },
@@ -106,6 +101,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
+  const [categories, setCategories] = useState<CategoryDef[]>([]);
 
   const load = useCallback(
     async (slug?: string) => {
@@ -117,6 +113,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         // API ตอบ notFound เมื่อ slug ที่ขอไม่มีจริง (ไม่เด้งไปร้านอื่นแล้ว)
         setNotFound(Boolean(j.notFound) || !j.shop);
         setListings(j.listings ?? []);
+        setCategories(Array.isArray(j.categories) ? j.categories : []);
       } catch {
         toast.error("โหลดข้อมูลไม่สำเร็จ");
       } finally {
@@ -435,7 +432,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
                       <p className="text-sm font-medium text-slate-800 truncate">{l.webName || l.erpName}</p>
                       <p className="text-xs text-slate-400 truncate">
                         {l.code}
-                        {l.webCategory && ` · ${CATEGORIES.find((c) => c.value === l.webCategory)?.label ?? l.webCategory}`}
+                        {l.webCategory && ` · ${categories.find((c) => c.key === l.webCategory)?.label ?? l.webCategory}`}
                         {" · "}
                         {baht(l.webPrice ?? l.erpPrice)}
                         {l.webUnit && `/${l.webUnit}`}
@@ -497,11 +494,17 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
                             onChange={(e) => patch(l.parentId, { webCategory: e.target.value })}
                             className={inputCls}
                           >
-                            {CATEGORIES.map((c) => (
-                              <option key={c.value} value={c.value}>
+                            <option value="">— ไม่ระบุ —</option>
+                            {categories.map((c) => (
+                              <option key={c.key} value={c.key}>
+                                {c.icon ? `${c.icon} ` : ""}
                                 {c.label}
                               </option>
                             ))}
+                            {/* หมวดที่เคยตั้งไว้แต่ถูกลบออกจากรายการแล้ว — ยังต้องเห็น ไม่งั้นค่าหายเงียบตอนบันทึก */}
+                            {l.webCategory && !categories.some((c) => c.key === l.webCategory) && (
+                              <option value={l.webCategory}>{l.webCategory} (หมวดที่ถูกลบแล้ว)</option>
+                            )}
                           </select>
                         </div>
                         <div>

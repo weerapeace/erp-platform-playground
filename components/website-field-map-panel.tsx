@@ -10,7 +10,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 
-type WebCategory = "leather" | "fabric" | "hardware" | "edge-paint" | "";
+/** รหัสหมวดตั้งเองได้แล้ว ไม่ใช่รายการตายตัว (ให้ตรงกับ lib/website-field-map.ts) */
+type WebCategory = string;
 
 interface FieldMap {
   name: { source: string; stripPrefix?: string };
@@ -21,6 +22,8 @@ interface FieldMap {
   /** อาจไม่มีในข้อมูลเก่าที่บันทึกไว้ก่อนมีฟีเจอร์นี้ */
   options2?: { source: string; label: string };
   category: { default: WebCategory; rules: Record<string, WebCategory> };
+  /** อาจไม่มีในข้อมูลเก่า — server จะเติมชุดตั้งต้นให้ */
+  categories?: CategoryDef[];
   image: { useCover: boolean };
 }
 
@@ -48,13 +51,11 @@ const DESC_OPTS = [
   { v: "none", l: "— ไม่ดึง —" },
 ];
 
-const WEB_CATS: { v: WebCategory; l: string }[] = [
-  { v: "leather", l: "หนัง" },
-  { v: "fabric", l: "ผ้า" },
-  { v: "hardware", l: "อะไหล่" },
-  { v: "edge-paint", l: "สีทาขอบ" },
-  { v: "", l: "— ไม่ระบุ —" },
-];
+type CategoryDef = { key: string; label: string; icon: string };
+
+/** รหัสหมวดต้องปลอดภัยกับ URL (/shop?cat=<key>) — ให้ตรงกับฝั่ง server */
+const cleanKey = (v: string) =>
+  v.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 40);
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
@@ -130,6 +131,26 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
   if (!map) return <div className="py-16 text-center text-sm text-slate-400">โหลดการตั้งค่าไม่สำเร็จ</div>;
 
   const mappedCount = shown.filter((c) => map.category.rules[c.name]).length;
+
+  /* ── หมวดของร้าน (เจ้าของเพิ่ม/แก้/ลบเอง) ── */
+  const webCatDefs: CategoryDef[] = map.categories ?? [];
+  const webCats = [...webCatDefs.map((c) => ({ v: c.key, l: c.label })), { v: "", l: "— ไม่ระบุ —" }];
+
+  const setCats = (next: CategoryDef[]) => setMap((m) => (m ? { ...m, categories: next } : m));
+  const editCat = (i: number, p: Partial<CategoryDef>) =>
+    setCats(webCatDefs.map((c, idx) => (idx === i ? { ...c, ...p } : c)));
+  const addCat = () => setCats([...webCatDefs, { key: "", label: "", icon: "" }]);
+  const removeCat = (i: number) => {
+    const c = webCatDefs[i];
+    const used = Object.values(map.category.rules).filter((v) => v === c.key).length;
+    const warn = used ? `\n\nมี ${used} หมวด ERP จับคู่ไว้กับหมวดนี้ — ลบแล้วจะกลับไปใช้ค่าเริ่มต้น` : "";
+    if (!confirm(`ลบหมวด "${c.label || c.key}" ออกจากเว็บ?${warn}`)) return;
+    setCats(webCatDefs.filter((_, idx) => idx !== i));
+  };
+  const dupKey = (i: number) => {
+    const k = webCatDefs[i].key;
+    return !!k && webCatDefs.some((c, idx) => idx !== i && c.key === k);
+  };
 
   return (
     <div className="space-y-4">
@@ -280,6 +301,65 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
         </div>
       </div>
 
+      {/* หมวดของเว็บร้าน */}
+      <div className={cardCls}>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+          <h3 className="text-sm font-semibold text-slate-800">หมวดสินค้าบนเว็บร้านนี้</h3>
+          <button
+            onClick={addCat}
+            className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-blue-400 hover:text-blue-700"
+          >
+            + เพิ่มหมวด
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-500 mb-3">
+          เมนูหมวดบนหน้าเว็บมาจากรายการนี้ · <b>รหัส</b> คือชื่อที่โผล่ในลิงก์ (`/shop?cat=รหัส`) ตั้งแล้วไม่ควรเปลี่ยน
+          เพราะลิงก์เก่าที่ลูกค้าเคยบันทึกไว้จะเสีย
+        </p>
+
+        {webCatDefs.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-400">ยังไม่มีหมวด — กด &quot;+ เพิ่มหมวด&quot;</p>
+        ) : (
+          <ul className="space-y-2">
+            {webCatDefs.map((c, i) => (
+              <li key={i} className="flex flex-wrap items-center gap-2">
+                <input
+                  className={inputCls}
+                  style={{ width: 64 }}
+                  value={c.icon}
+                  onChange={(e) => editCat(i, { icon: e.target.value.slice(0, 4) })}
+                  placeholder="ไอคอน"
+                  title="ใส่อีโมจิได้ 1 ตัว"
+                />
+                <input
+                  className={inputCls}
+                  style={{ width: 180 }}
+                  value={c.label}
+                  onChange={(e) => editCat(i, { label: e.target.value })}
+                  placeholder="ชื่อที่ลูกค้าเห็น เช่น เครื่องมือ"
+                />
+                <input
+                  className={`${inputCls} ${dupKey(i) ? "border-red-400" : ""}`}
+                  style={{ width: 160 }}
+                  value={c.key}
+                  onChange={(e) => editCat(i, { key: cleanKey(e.target.value) })}
+                  placeholder="รหัส เช่น tools"
+                />
+                <button onClick={() => removeCat(i)} className="text-xs text-red-500 hover:underline">
+                  ลบ
+                </button>
+                {dupKey(i) && <span className="text-[11px] text-red-600">รหัสซ้ำกับหมวดอื่น</span>}
+                {!c.key && c.label && <span className="text-[11px] text-amber-600">ยังไม่ได้ใส่รหัส — จะไม่ถูกบันทึก</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <p className="mt-3 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          ⚠️ เพิ่มหมวดใหม่แล้ว <b>เว็บร้านต้องรองรับด้วย</b> — ถ้าเว็บยังไม่รู้จักรหัสนั้น สินค้าจะไปโผล่ในหมวดอื่นแทน
+        </p>
+      </div>
+
       {/* จับคู่หมวด */}
       <div className={cardCls}>
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -297,7 +377,7 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
               value={map.category.default}
               onChange={(e) => patch({ category: { ...map.category, default: e.target.value as WebCategory } })}
             >
-              {WEB_CATS.map((c) => (
+              {webCats.map((c) => (
                 <option key={c.v} value={c.v}>
                   {c.l}
                 </option>
@@ -315,7 +395,7 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
             placeholder="ค้นหาหมวด เช่น ซิป, หนัง"
           />
           <span className="text-[11px] text-slate-400">ตั้งที่แสดงอยู่ทั้งหมดเป็น:</span>
-          {WEB_CATS.filter((c) => c.v).map((c) => (
+          {webCats.filter((c) => c.v).map((c) => (
             <button
               key={c.v}
               onClick={() => bulkSet(c.v)}
@@ -343,7 +423,7 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
                     onChange={(e) => setRule(c.name, e.target.value as WebCategory)}
                   >
                     <option value="">— ใช้ค่าเริ่มต้น —</option>
-                    {WEB_CATS.filter((w) => w.v).map((w) => (
+                    {webCats.filter((w) => w.v).map((w) => (
                       <option key={w.v} value={w.v}>
                         {w.l}
                       </option>

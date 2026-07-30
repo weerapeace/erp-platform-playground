@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeTheme } from "@/lib/website-theme";
+import { normalizeFieldMap } from "@/lib/website-field-map";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const sb = supabaseAdmin();
   const { data: shop } = await sb
     .from("shops")
-    .select("id, name, slug, status, theme, theme_draft, home_layout, home_layout_draft")
+    .select("id, name, slug, status, theme, theme_draft, home_layout, home_layout_draft, field_map")
     .eq("slug", shopSlug)
     .maybeSingle();
   if (!shop) return json({ error: "ไม่พบร้าน" }, 404);
@@ -54,6 +55,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     theme_draft: unknown;
     home_layout: unknown;
     home_layout_draft: unknown;
+    field_map: unknown;
   };
 
   const themeSource = preview && s.theme_draft != null ? s.theme_draft : s.theme;
@@ -67,5 +69,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     theme: normalizeTheme(themeSource),
     /** โครงหน้าแรก — [] = ยังไม่เคยตั้ง ให้เว็บใช้โครงเริ่มต้นของตัวเอง */
     layout: Array.isArray(layoutSource) ? layoutSource : [],
+    /**
+     * หมวดสินค้าของร้าน [{key,label,icon}] — เจ้าของเพิ่ม/แก้เองได้ในแท็บจับคู่ฟิลด์
+     * เว็บร้านต้องวาดเมนูหมวดจากรายการนี้ ห้ามฝังไว้ในโค้ดเว็บ ไม่งั้นเพิ่มหมวดแล้วไม่ขึ้น
+     */
+    categories: normalizeFieldMap(s.field_map).categories,
   });
 }

@@ -20,7 +20,26 @@ export type OptionSource = "sku_color" | "none";
  * เช่น เครื่องมือเจาะหนัง PI338 = จำนวนรู (สี) × ขนาดรู (variant_option)
  */
 export type Option2Source = "variant_option" | "none";
-export type WebCategory = "leather" | "fabric" | "hardware" | "edge-paint" | "";
+/**
+ * หมวดสินค้าบนเว็บ — เป็น "รหัสอะไรก็ได้" ที่เจ้าของตั้งเอง ไม่ใช่รายการตายตัวอีกแล้ว
+ * รายการหมวดของแต่ละร้านเก็บใน field_map.categories
+ */
+export type WebCategory = string;
+
+/** หมวดตั้งต้นของร้านวัสดุ — ร้านเก่าที่ยังไม่เคยตั้งจะได้ชุดนี้ หน้าเว็บจึงเหมือนเดิม */
+export const DEFAULT_WEB_CATEGORIES: WebCategoryDef[] = [
+  { key: "leather", label: "หนัง", icon: "🟫" },
+  { key: "fabric", label: "ผ้า", icon: "🧵" },
+  { key: "hardware", label: "อะไหล่", icon: "⚙️" },
+  { key: "edge-paint", label: "สีทาขอบ", icon: "🎨" },
+];
+
+export interface WebCategoryDef {
+  /** รหัสที่ใช้ในลิงก์ /shop?cat=<key> — a-z 0-9 - เท่านั้น */
+  key: string;
+  label: string;
+  icon: string;
+}
 
 export interface FieldMap {
   name: { source: NameSource; stripPrefix?: string };
@@ -31,6 +50,8 @@ export interface FieldMap {
   /** เว้น source เป็น "none" = สินค้านั้นมีตัวเลือกชั้นเดียว (ค่าเริ่มต้น ไม่กระทบของเดิม) */
   options2: { source: Option2Source; label: string };
   category: { default: WebCategory; rules: Record<string, WebCategory> };
+  /** รายการหมวดของร้านนี้ — เจ้าของเพิ่ม/แก้/ลบเองได้ในแท็บจับคู่ฟิลด์ */
+  categories: WebCategoryDef[];
   image: { useCover: boolean };
 }
 
@@ -42,50 +63,75 @@ export const DEFAULT_FIELD_MAP: FieldMap = {
   options: { source: "sku_color", label: "แบบ/สี" },
   options2: { source: "none", label: "ตัวเลือกที่ 2" },
   category: { default: "hardware", rules: {} },
+  categories: DEFAULT_WEB_CATEGORIES,
   image: { useCover: true },
 };
 
 const NAME_SOURCES: NameSource[] = ["name_th", "name_platform", "name_en", "sku_name", "code"];
 const PRICE_SOURCES: PriceSource[] = ["sku_max", "sku_min", "final_price", "sale_price", "fake_price"];
 const DESC_SOURCES: DescSource[] = ["platform_description", "introduction", "description", "english_description", "none"];
-const WEB_CATEGORIES: WebCategory[] = ["leather", "fabric", "hardware", "edge-paint", ""];
+/** รหัสหมวดต้องปลอดภัยกับ URL (/shop?cat=<key>) — ตัวเล็ก ตัวเลข ขีดกลาง เท่านั้น */
+export const cleanCategoryKey = (v: unknown): string =>
+  String(v ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .slice(0, 40);
 
 /** อ่านค่าที่เก็บใน DB ให้เป็น FieldMap ที่ครบถ้วนเสมอ (กันข้อมูลเก่า/ไม่ครบ) */
 export function normalizeFieldMap(raw: unknown): FieldMap {
-  const r = (raw ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  const r = (raw ?? {}) as Record<string, unknown>;
   const d = DEFAULT_FIELD_MAP;
+  const g = (k: string) => (r[k] ?? {}) as Record<string, unknown>;
   const str = (v: unknown, fallback = "") => (typeof v === "string" ? v : fallback);
 
-  const rulesRaw = (r.category?.rules ?? {}) as Record<string, unknown>;
+  // รายการหมวดของร้าน — ไม่เคยตั้ง = ใช้ชุดตั้งต้น (ร้านเดิมหน้าเว็บไม่เปลี่ยน)
+  const catsRaw = Array.isArray(r.categories) ? (r.categories as unknown[]) : null;
+  const seenKey = new Set<string>();
+  const categories: WebCategoryDef[] = (catsRaw ?? [])
+    .slice(0, 40)
+    .map((c) => {
+      const o = (c ?? {}) as Record<string, unknown>;
+      return { key: cleanCategoryKey(o.key), label: str(o.label).slice(0, 60), icon: str(o.icon).slice(0, 8) };
+    })
+    .filter((c) => c.key && c.label && !seenKey.has(c.key) && seenKey.add(c.key) !== undefined);
+  const cats = catsRaw ? categories : d.categories;
+  const catKeys = cats.map((c) => c.key);
+
+  // กฎจับหมวด: เก็บเฉพาะที่ชี้ไปหมวดที่ยังมีอยู่จริง (ลบหมวดแล้วกฎเก่าต้องไม่ค้าง)
+  const rulesRaw = (g("category").rules ?? {}) as Record<string, unknown>;
   const rules: Record<string, WebCategory> = {};
   for (const [k, v] of Object.entries(rulesRaw).slice(0, 300)) {
-    if (typeof v === "string" && (WEB_CATEGORIES as string[]).includes(v)) rules[k] = v as WebCategory;
+    if (typeof v === "string" && catKeys.includes(v)) rules[k] = v;
   }
 
   const pick = <T extends string>(v: unknown, allowed: T[], fallback: T): T =>
     typeof v === "string" && (allowed as string[]).includes(v) ? (v as T) : fallback;
 
+  // หมวดตั้งต้นต้องเป็นหมวดที่มีอยู่จริง ไม่งั้นสินค้าจะไปกองในหมวดที่ไม่มีในเมนู
+  const defRaw = cleanCategoryKey(g("category").default);
+  const defaultCat = catKeys.includes(defRaw) ? defRaw : catKeys[0] ?? "";
+
   return {
     name: {
-      source: pick(r.name?.source, NAME_SOURCES, d.name.source),
-      stripPrefix: str(r.name?.stripPrefix).slice(0, 60),
+      source: pick(g("name").source, NAME_SOURCES, d.name.source),
+      stripPrefix: str(g("name").stripPrefix).slice(0, 60),
     },
-    price: { source: pick(r.price?.source, PRICE_SOURCES, d.price.source) },
-    description: { source: pick(r.description?.source, DESC_SOURCES, d.description.source) },
-    unit: { default: str(r.unit?.default, d.unit.default).slice(0, 40) },
+    price: { source: pick(g("price").source, PRICE_SOURCES, d.price.source) },
+    description: { source: pick(g("description").source, DESC_SOURCES, d.description.source) },
+    unit: { default: str(g("unit").default, d.unit.default).slice(0, 40) },
     options: {
-      source: pick(r.options?.source, ["sku_color", "none"] as OptionSource[], d.options.source),
-      label: str(r.options?.label, d.options.label).slice(0, 60),
+      source: pick(g("options").source, ["sku_color", "none"] as OptionSource[], d.options.source),
+      label: str(g("options").label, d.options.label).slice(0, 60),
     },
     options2: {
-      source: pick(r.options2?.source, ["variant_option", "none"] as Option2Source[], d.options2.source),
-      label: str(r.options2?.label, d.options2.label).slice(0, 60),
+      source: pick(g("options2").source, ["variant_option", "none"] as Option2Source[], d.options2.source),
+      label: str(g("options2").label, d.options2.label).slice(0, 60),
     },
-    category: {
-      default: pick(r.category?.default, WEB_CATEGORIES, d.category.default),
-      rules,
-    },
-    image: { useCover: r.image?.useCover !== false },
+    category: { default: defaultCat, rules },
+    categories: cats,
+    image: { useCover: g("image").useCover !== false },
   };
 }
 

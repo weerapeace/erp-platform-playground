@@ -195,6 +195,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     shop: { id: shop.id, name: shop.name, slug: shop.slug, isDefault: shop.is_default },
     listings,
     results,
+    /** หมวดของร้านนี้ (ตั้งเองได้ในแท็บจับคู่ฟิลด์) — ช่อง "หมวดบนเว็บ" ใช้รายการนี้ */
+    categories: fieldMap.categories,
   });
 }
 
