@@ -61,15 +61,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const [{ data: brand }, { data: cat }, { data: tagLinks }, { data: allRules }] = await Promise.all([
     brandId ? admin.from("brands").select("name").eq("id", brandId).maybeSingle() : Promise.resolve({ data: null }),
     p.platform_category_id ? admin.from("platform_categories").select("name").eq("id", p.platform_category_id).maybeSingle() : Promise.resolve({ data: null }),
-    admin.from("parent_skus_v2_product_family_m2m").select("tgt_id, product_families!inner(id, name)").eq("src_id", parentId),
+    admin.from("parent_skus_v2_product_family_m2m").select("tgt_id, product_families!inner(id, name, name_en)").eq("src_id", parentId),
     admin.from("erp_ai_product_rules").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
   ]);
 
   // ── กฎตามประเภทสินค้า — เข้าเงื่อนไขเมื่อ "ติดแท็กไว้" หรือ "ชื่อสินค้ามีคำที่กำหนด" ──
   //    (จับ 2 ทางเพราะของจริงแท็กประเภทสินค้ายังติดกันน้อยมาก) · กฎที่เข้าเงื่อนไขใช้ได้พร้อมกันหลายกฎ
   const tagIds = ((tagLinks ?? []) as { tgt_id: string }[]).map((t) => t.tgt_id);
-  const tagNames = ((tagLinks ?? []) as { product_families?: { name?: string } }[])
-    .map((t) => t.product_families?.name).filter((n): n is string => !!n);
+  // ชื่อแท็ก 2 ภาษา — ส่งคำอังกฤษไปด้วย เพื่อให้ข้อความฝั่ง EN ใช้ศัพท์เดียวกับที่เราตั้งไว้ (Wallet/Belt)
+  const tagNames = ((tagLinks ?? []) as { product_families?: { name?: string; name_en?: string | null } }[])
+    .map((t) => {
+      const th = t.product_families?.name; if (!th) return null;
+      const en = (t.product_families?.name_en ?? "").trim();
+      return en ? `${th} (EN: ${en})` : th;
+    })
+    .filter((n): n is string => !!n);
   const nameLower = String(p.name_th ?? "").toLowerCase();
   type Rule = {
     id: string; name: string; tag_ids: string[]; name_keywords: string[]; brand_id: string | null;

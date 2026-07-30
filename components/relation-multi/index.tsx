@@ -1075,14 +1075,24 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const translateColors = async (dir: "th2en" | "en2th") => {
     const srcKey = dir === "th2en" ? "color_th" : "color";
     const dstKey = dir === "th2en" ? "color" : "color_th";
-    const targets = rows.filter((r) => {
-      const src = String(r[srcKey] ?? "").trim();
-      if (!src) return false;
+    const withSrc = rows.filter((r) => String(r[srcKey] ?? "").trim());
+    let targets = withSrc.filter((r) => {
       const cur = String(r[dstKey] ?? "").trim();
       if (!cur) return true;                                          // ปลายทางว่าง → แปลเติม
       return dir === "th2en" ? hasThaiChar(cur) : !hasThaiChar(cur);   // ปลายทางผิดภาษา → แปลทับ
     });
-    if (targets.length === 0) { alert("ไม่มีช่องที่ต้องแปล — ทุกแถวมีชื่อสีถูกภาษาแล้ว"); return; }
+    // ทุกแถวมีค่าถูกภาษาอยู่แล้ว — แต่คำแปลอาจผิดความหมาย (เช่น Sugar ที่ควรเป็น Brown)
+    // → ถามยืนยันก่อนแปลทับ ไม่ตัดจบเงียบ ๆ เหมือนเดิม
+    if (targets.length === 0) {
+      if (withSrc.length === 0) { alert(`ไม่มีข้อมูลต้นทางให้แปล (ช่อง ${dir === "th2en" ? "Color Th" : "Color"} ว่างทุกแถว)`); return; }
+      const ok = window.confirm(
+        `ทุกแถวมีชื่อสีถูกภาษาอยู่แล้ว (${withSrc.length} แถว)\n\n` +
+        `ต้องการ "แปลทับ" ใหม่ทั้งหมดด้วยพจนานุกรมสีไหม?\n` +
+        `(ใช้ตอนคำแปลเดิมผิดความหมาย เช่น น้ำตาล → Sugar ที่ควรเป็น Brown)`,
+      );
+      if (!ok) return;
+      targets = withSrc;
+    }
 
     const dict = colorDict ?? (await loadDict());
     const edits: { id: string; changes: Record<string, unknown> }[] = [];
