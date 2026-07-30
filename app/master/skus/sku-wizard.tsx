@@ -12,6 +12,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
 import { SkuPrefixManager } from "@/components/sku-prefix-manager";
 import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
 
@@ -197,7 +198,8 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
         const key = f.column_name as string | null;
         if (!key || !f.is_editable || SKIP_COLS.has(key)) return [];
         const t = f.ui_field_type as string;
-        const label = (f.field_label as string) || key;
+        const labelTh = (f.field_label as string) || key;
+        const label = tr(labelTh, (f.field_label_en as string) || labelTh);   // ไม่มีชื่ออังกฤษ = ใช้ไทย
         if (t === "relation") {
           const rc = (f.relation_config ?? {}) as Record<string, string>;
           if (!rc.target_table) return [];

@@ -9,6 +9,7 @@ import { useEffect, useState, useCallback, useRef, useMemo, type ReactNode } fro
 import { createPortal } from "react-dom";
 import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
 import { ImageInput } from "@/components/image-input";
 import { CopyButton } from "@/components/copy-button";
 import { TagOrganizerModal } from "@/components/tag-organizer";
@@ -717,7 +718,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         const types: Record<string, string> = {};
         (j.fields ?? []).forEach((f: Record<string, unknown>) => {
           const k = String(f.column_name ?? f.field_key);
-          const lbl = String(f.field_label ?? k);
+          const lblTh = String(f.field_label ?? k);
+          const lbl = tr(lblTh, String(f.field_label_en ?? "") || lblTh);   // ไม่มีชื่ออังกฤษ = ใช้ไทย
           m[k] = lbl; list.push({ key: k, label: lbl });
           types[k] = String(f.ui_field_type ?? "text");
           // ฟิลด์เชื่อม = มี relation_config ที่ชี้ตารางปลายทาง → ใช้แปลง id→ชื่อ

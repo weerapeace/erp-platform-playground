@@ -9,6 +9,8 @@
  * รองรับ .csv, .xlsx, .xls — Excel ผ่าน dynamic import + webpackIgnore
  */
 
+import { tr } from "@/lib/lang";
+
 // ---- Types ----
 
 export type FieldType = "text" | "number" | "boolean" | "select";
@@ -278,6 +280,7 @@ type RegistryFieldLite = {
   field_key: string;
   column_name?: string | null;
   field_label?: string | null;
+  field_label_en?: string | null;
   ui_field_type?: string | null;
   is_editable?: boolean;
   show_in_form?: boolean;
@@ -300,15 +303,18 @@ export function buildImportSchemaFromRegistry(
         : t === "select" ? "select"
         : "text";   // relation/date/text → text (relation จับคู่ด้วยชื่อ)
       const key = String(f.column_name ?? f.field_key);
-      const lbl = String(f.field_label ?? f.field_key);
+      const lblTh = String(f.field_label ?? f.field_key);
+      const lblEn = String(f.field_label_en ?? "").trim();
+      const lbl = tr(lblTh, lblEn || lblTh);   // ไม่มีชื่ออังกฤษ = ใช้ไทยเหมือนเดิม
       return {
+        // alias เก็บทั้งไทยและอังกฤษ → ไฟล์ที่หัวคอลัมน์เป็นภาษาไหนก็จับคู่ได้
         key, label: lbl, type, required: !!f.is_required,
-        aliases: [lbl, f.field_key, key],
+        aliases: [lblTh, ...(lblEn ? [lblEn] : []), f.field_key, key],
         ...(type === "select" && f.options?.options?.length ? { options: f.options.options } : {}),
       } as ImportField;
     });
   // id — คอลัมน์สำหรับ "อัปเดตของเดิม" (เว้นว่าง = เพิ่มใหม่) วางไว้บนสุด
-  importFields.unshift({ key: "id", label: "ID (เว้นว่างถ้าเพิ่มใหม่)", type: "text", aliases: ["id"] });
+  importFields.unshift({ key: "id", label: tr("ID (เว้นว่างถ้าเพิ่มใหม่)", "ID (blank = create new)"), type: "text", aliases: ["id"] });
   // uniqueKey: เดาจากคอลัมน์ที่มักไม่ซ้ำ
   const keys = new Set(importFields.map((f) => f.key));
   const uniqueKey = ["code", "sku", "barcode", "family_code", "pr_no", "po_no"].find((k) => keys.has(k));

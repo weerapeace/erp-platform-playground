@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { Pager } from "@/components/pager";
@@ -105,11 +106,13 @@ function cardWarnings(c: SkuCard): string[] {
 // ── แปลงฟิลด์จาก Field Registry → BulkEditField (ของกลาง) ──
 // เลือกเฉพาะชนิดที่แก้แบบหลายรายการได้อย่างปลอดภัย (text/number/boolean/select/relation) — ไม่ hardcode รายฟิลด์
 type RegField = {
-  column_name: string | null; field_label: string; ui_field_type: string; data_type: string;
+  column_name: string | null; field_label: string; field_label_en?: string | null; ui_field_type: string; data_type: string;
   is_visible: boolean; is_sensitive: boolean; is_editable: boolean; is_bulk_editable: boolean;
   options: unknown; relation_config: Record<string, unknown> | null;
 };
 const NO_BULK = new Set(["id", "code", "created_at", "updated_at", "created_by", "cover_image_r2_key"]);
+/** ชื่อฟิลด์ตามภาษาปัจจุบัน — ไม่มีชื่ออังกฤษในทะเบียน = ใช้ไทยเหมือนเดิม */
+const regLabel = (f: { field_label: string; field_label_en?: string | null }) => tr(f.field_label, f.field_label_en || f.field_label);
 function parseOptions(opt: unknown): { value: string; label: string }[] | undefined {
   const arr = Array.isArray(opt) ? opt
     : (opt && typeof opt === "object" && Array.isArray((opt as { choices?: unknown }).choices)) ? (opt as { choices: unknown[] }).choices
@@ -124,13 +127,14 @@ function parseOptions(opt: unknown): { value: string; label: string }[] | undefi
 function toBulkField(f: RegField): BulkEditField | null {
   const col = f.column_name; if (!col || NO_BULK.has(col)) return null;
   const ui = (f.ui_field_type || "").toLowerCase(); const dt = (f.data_type || "").toLowerCase();
+  const label = regLabel(f);
   if ((ui.includes("relation") || ui.includes("many2one") || ui.includes("picker")) && f.relation_config && Object.keys(f.relation_config).length) {
-    return { key: col, label: f.field_label, type: "relation", relationConfig: f.relation_config as unknown as BulkEditField["relationConfig"] };
+    return { key: col, label, type: "relation", relationConfig: f.relation_config as unknown as BulkEditField["relationConfig"] };
   }
-  if (["boolean", "toggle", "switch", "checkbox"].includes(ui) || dt === "boolean") return { key: col, label: f.field_label, type: "boolean" };
-  if (["select", "status", "enum", "dropdown"].includes(ui)) { const options = parseOptions(f.options); if (options) return { key: col, label: f.field_label, type: "select", options }; }
-  if (["number", "currency", "integer", "decimal", "float"].includes(ui) || ["number", "numeric", "integer", "bigint", "double precision", "real"].includes(dt)) return { key: col, label: f.field_label, type: "number" };
-  return { key: col, label: f.field_label, type: "text" };
+  if (["boolean", "toggle", "switch", "checkbox"].includes(ui) || dt === "boolean") return { key: col, label, type: "boolean" };
+  if (["select", "status", "enum", "dropdown"].includes(ui)) { const options = parseOptions(f.options); if (options) return { key: col, label, type: "select", options }; }
+  if (["number", "currency", "integer", "decimal", "float"].includes(ui) || ["number", "numeric", "integer", "bigint", "double precision", "real"].includes(dt)) return { key: col, label, type: "number" };
+  return { key: col, label, type: "text" };
 }
 
 export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: entityProp, pickedIds }: {
@@ -205,7 +209,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
         const all = (j.fields ?? []) as RegField[];
         // ฟิลด์เพิ่มบนการ์ด (visible + ไม่ sensitive + ไม่ใช่ core)
         setAvailFields(all.filter((f) => f.column_name && f.is_visible && !f.is_sensitive && !CORE_COLUMNS.has(f.column_name as string))
-          .map((f) => ({ key: f.column_name as string, label: f.field_label })));
+          .map((f) => ({ key: f.column_name as string, label: regLabel(f) })));
         // ฟิลด์ที่แก้หลายรายการได้ (§18) — ใช้ is_bulk_editable ถ้าตั้งค่าไว้, ไม่งั้น editable & ไม่ sensitive
         const anyFlagged = all.some((f) => f.is_bulk_editable === true);
         setBulkFields(all

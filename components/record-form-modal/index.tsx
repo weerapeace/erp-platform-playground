@@ -10,6 +10,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
 import { useAuth } from "@/components/auth";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { ImageInput } from "@/components/image-input";
@@ -18,6 +19,7 @@ import { useBackdropDismiss } from "@/components/modal";
 type RF = {
   field_key: string;
   field_label: string;
+  field_label_en?: string | null;
   ui_field_type: string;
   is_editable: boolean;
   show_in_form: boolean;
@@ -101,24 +103,25 @@ export function RecordFormModal({
 
   const renderField = (fd: RF) => {
     const v = form[fd.field_key];
+    const lbl = tr(fd.field_label, fd.field_label_en || fd.field_label);   // ไม่มีชื่ออังกฤษในทะเบียน = ใช้ไทย
     if (fd.ui_field_type === "boolean") {
-      return <label className="flex items-center gap-2 text-sm text-slate-700 h-9"><input type="checkbox" checked={!!v} onChange={(e) => set(fd.field_key, e.target.checked)} /> {fd.field_label}</label>;
+      return <label className="flex items-center gap-2 text-sm text-slate-700 h-9"><input type="checkbox" checked={!!v} onChange={(e) => set(fd.field_key, e.target.checked)} /> {lbl}</label>;
     }
     if (fd.ui_field_type === "relation" && fd.relation_config?.target_table) {
       return (
         <div>
-          <label className="text-xs font-medium text-slate-600">{fd.field_label}{fd.is_required && " *"}</label>
+          <label className="text-xs font-medium text-slate-600">{lbl}{fd.is_required && " *"}</label>
           <div className="mt-0.5"><RelationPicker value={(v as string) || null} onChange={(id) => set(fd.field_key, id)} config={fd.relation_config} siblingValues={form} /></div>
         </div>
       );
     }
     if (fd.ui_field_type === "image") {
-      return <div><label className="text-xs font-medium text-slate-600">{fd.field_label}</label><div className="mt-0.5"><ImageInput value={(v as string) || null} onChange={(k) => set(fd.field_key, k)} folder={moduleKey} /></div></div>;
+      return <div><label className="text-xs font-medium text-slate-600">{lbl}</label><div className="mt-0.5"><ImageInput value={(v as string) || null} onChange={(k) => set(fd.field_key, k)} folder={moduleKey} /></div></div>;
     }
     if (fd.ui_field_type === "select" && fd.options?.options?.length) {
       return (
         <div>
-          <label className="text-xs font-medium text-slate-600">{fd.field_label}{fd.is_required && " *"}</label>
+          <label className="text-xs font-medium text-slate-600">{lbl}{fd.is_required && " *"}</label>
           <select value={(v as string) ?? ""} onChange={(e) => set(fd.field_key, e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
             <option value="">—</option>{fd.options.options.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
@@ -128,7 +131,7 @@ export function RecordFormModal({
     const isNum = fd.ui_field_type === "number";
     return (
       <div>
-        <label className="text-xs font-medium text-slate-600">{fd.field_label}{fd.is_required && " *"}</label>
+        <label className="text-xs font-medium text-slate-600">{lbl}{fd.is_required && " *"}</label>
         <input type={isNum ? "number" : "text"} value={(v as string | number) ?? ""} step={isNum ? "any" : undefined}
           onChange={(e) => set(fd.field_key, isNum ? (e.target.value === "" ? null : Number(e.target.value)) : e.target.value)}
           className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />

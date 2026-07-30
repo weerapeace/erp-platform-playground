@@ -28,6 +28,8 @@ function toStudioField(f: FormField): StudioField {
     fieldId:       f.id,
     key:           f.field_key,
     label:         f.field_label,
+    // ต้องพาชื่ออังกฤษมาด้วย — Studio บันทึกทุกฟิลด์พร้อมกัน ถ้าไม่ส่งมาจะเขียน null ทับของที่กรอกไว้ทั้งโมดูล
+    labelEn:       f.field_label_en ?? "",
     groupKey:      f.group_key ?? "other",
     order:         f.display_order ?? 999,
     type:          f.ui_field_type,

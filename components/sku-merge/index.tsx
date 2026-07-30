@@ -12,11 +12,12 @@ import { useState, useEffect, useCallback } from "react";
 import { ERPModal } from "@/components/modal";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
 import { useToast } from "@/components/toast";
 import { Spinner } from "@/components/spinner";
 
 type Rec = Record<string, unknown>;
-type RegField = { column_name: string | null; field_label: string; is_visible?: boolean; is_sensitive?: boolean };
+type RegField = { column_name: string | null; field_label: string; field_label_en?: string | null; is_visible?: boolean; is_sensitive?: boolean };
 
 // คอลัมน์ที่ไม่เอามาให้เลือก (ระบบ/สงวน) — ตรงกับฝั่ง server
 const SKIP = new Set(["id", "code", "is_active", "created_at", "updated_at", "created_by", "updated_by", "parent_sku_id", "cover_image_r2_key"]);
@@ -68,7 +69,7 @@ export function SkuMergeModal({ onClose, onDone }: { onClose: () => void; onDone
       const lb = new Map<string, string>(); const vis = new Set<string>();
       for (const f of fields) {
         if (!f.column_name) continue;
-        lb.set(f.column_name, f.field_label || f.column_name);
+        { const th = f.field_label || f.column_name; lb.set(f.column_name, tr(th, f.field_label_en || th)); }
         if (f.is_visible && !f.is_sensitive && !SKIP.has(f.column_name)) vis.add(f.column_name);
       }
       setLabels(lb); setVisibleCols(vis);

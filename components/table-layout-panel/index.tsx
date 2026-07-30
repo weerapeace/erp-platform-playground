@@ -12,6 +12,7 @@
 import { useEffect, useState, useCallback, useRef, type MutableRefObject } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
 
 export type SummaryMap = Record<string, "sum" | "count" | "avg">;
 
@@ -78,10 +79,14 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
       apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(moduleKey)}`).then((r) => r.json()).catch(() => ({})),
       apiFetch(`/api/table-layouts?table_id=${encodeURIComponent(tableId)}`).then((r) => r.json()).catch(() => ({})),
     ]).then(([fr, lr]) => {
-      const fl = (fr.fields as { field_key: string; column_name: string | null; field_label: string; ui_field_type?: string; is_visible?: boolean }[] | undefined) ?? [];
+      const fl = (fr.fields as { field_key: string; column_name: string | null; field_label: string; field_label_en?: string | null; ui_field_type?: string; is_visible?: boolean }[] | undefined) ?? [];
       const flClean = fl
         .filter((f) => !["one2many", "many2many"].includes(String(f.ui_field_type)))
-        .map((f) => { const key = String(f.column_name ?? f.field_key); return { value: key, label: f.field_label || key, visible: !!f.is_visible }; });
+        .map((f) => {
+          const key = String(f.column_name ?? f.field_key);
+          const th = f.field_label || key;
+          return { value: key, label: tr(th, f.field_label_en || th), visible: !!f.is_visible };
+        });
       setFields(flClean);
       const layout = (lr.data as FullLayout | null) ?? null;
       setFull(layout);

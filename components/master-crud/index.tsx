@@ -178,6 +178,8 @@ function registryToFieldDef(
     key,
     fieldId:     rf.id,            // F11B: registry id สำหรับ Studio save
     label:       tr(rf.field_label, rf.field_label_en || rf.field_label),
+    labelTh:     rf.field_label,
+    labelEn:     rf.field_label_en ?? "",
     type:        fieldType,
     required:    rf.is_required,
     options:     opts,
@@ -307,7 +309,11 @@ export type FieldDef = {
   key:        string;
   /** F11B: erp_module_fields.id — ใช้ตอน Studio บันทึก layout (group/order) */
   fieldId?:   string;
+  /** ชื่อที่แสดงตามภาษาปัจจุบัน (แปลแล้ว) — ห้ามเอาไปบันทึกลงทะเบียน ใช้ labelTh/labelEn */
   label:      string;
+  /** ชื่อดิบจากทะเบียน (ไทย/อังกฤษ) — Studio ต้องใช้ค่าดิบ ไม่ใช่ค่าที่แปลแล้ว */
+  labelTh?:   string;
+  labelEn?:   string;
   type:       "text" | "number" | "date" | "boolean" | "select" | "textarea" | "relation" | "image" | "many2many" | "one2many" | "computed";
   /** computed: สูตรคำนวณ เช่น "qty * price_est" (อ้างชื่อ field ในระเบียนเดียวกัน) */
   formula?:   string;
@@ -2882,7 +2888,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             .map<StudioField>((f) => ({
               fieldId:    f.fieldId,
               key:        f.key,
-              label:      f.label,
+              // ค่าดิบเสมอ — ถ้าส่ง f.label (แปลแล้ว) ไป ตอนอยู่โหมด EN แล้วกดบันทึก
+              // ข้อความอังกฤษจะถูกเขียนทับช่องชื่อไทย และชื่ออังกฤษเดิมจะหายไป
+              label:      f.labelTh ?? f.label,
+              labelEn:    f.labelEn ?? "",
               groupKey:   f.groupKey ?? "other",
               order:      f.order ?? 999,
               type:       f.type,
