@@ -635,6 +635,10 @@ export function AiProductDetailModal({
   const sizeRows = res?.sizes
     ? SIZE_FIELDS.filter((f) => { const v = res.sizes?.[f.key]; return v !== null && v !== undefined && String(v).trim() !== ""; })
     : [];
+  // ช่องไทยมีข้อความ แต่คู่อังกฤษว่าง → บอกให้รู้ (ไม่ใช่หายเงียบ) ปกติระบบแปลให้เองแล้ว
+  const missingEn = res
+    ? CFG_FIELDS.filter((f) => String(res[f.field] ?? "").trim() && !String(res[f.field === "name_th" ? "name_en" : f.field === "introduction" ? "introduction_en" : "english_description"] ?? "").trim())
+    : [];
   const pickedCount = [...rows, ...sizeRows].filter((f) => picked[f.key]).length;
   const willOverwrite = [...rows, ...sizeRows].filter((f) => picked[f.key] && !isBlank(current[f.key])).length;
 
@@ -888,6 +892,13 @@ export function AiProductDetailModal({
 
         {rows.length > 0 && (
           <>
+            {missingEn.length > 0 && (
+              <div className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[12.5px] text-slate-600">
+                ℹ️ {t(`AI ไม่ได้ส่งฉบับอังกฤษของ ${missingEn.map((f) => f.label).join(", ")} มา`,
+                     `AI returned no English version of ${missingEn.map((f) => f.label).join(", ")}`)} —
+                {t(" ใช้ค่าที่เลือกแล้วกดปุ่มแปลในฟอร์มได้ หรือกด “ให้คิดใหม่”", " apply what you have then use the translate button, or press “Redraft”")}
+              </div>
+            )}
             {willOverwrite > 0 && (
               <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[12.5px] text-amber-800">
                 ⚠️ มี {willOverwrite} ช่องที่ติ๊กไว้และ<b>{t("มีข้อความเดิมอยู่แล้ว", "already has text")}</b> — กด “ใช้ค่าที่เลือก” จะเขียนทับของเดิม (ยังไม่บันทึกจนกว่าจะกดบันทึกในฟอร์ม)
