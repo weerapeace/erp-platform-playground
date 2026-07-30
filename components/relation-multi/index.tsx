@@ -436,6 +436,128 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
   );
 }
 
+// ---- พจนานุกรมคำแปลสี/วัสดุ: "เจอคำนี้ให้แปลเป็นคำนี้" (ใช้ก่อน AI) ----
+//      ของกลาง: ปุ่ม ⚙ ข้างปุ่มแปลสีในตาราง SKU ลูก · แก้แล้วมีผลกับทุกใบทันที
+function ColorDictModal({ rows, suggest, onReload, onClose }: {
+  rows: { id: string; th: string; en: string }[];
+  /** คำที่ AI เพิ่งแปลให้ (ยังไม่อยู่ในพจนานุกรม) — กดบันทึกรวดเดียวได้ */
+  suggest: { th: string; en: string }[];
+  onReload: () => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [edit, setEdit] = useState<{ id?: string; th: string; en: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const save = async (payload: { id?: string; th: string; en: string }) => {
+    if (!payload.th.trim() || !payload.en.trim()) { setMsg("กรอกทั้งคำไทยและคำอังกฤษ"); return false; }
+    setBusy(true); setMsg("");
+    try {
+      const j = await apiFetch("/api/color-dictionary", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      onReload(); setEdit(null); return true;
+    } catch (e) { setMsg(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); return false; }
+    finally { setBusy(false); }
+  };
+  const del = async (id: string, th: string) => {
+    if (!window.confirm(`ลบคำ "${th}" ออกจากพจนานุกรม?`)) return;
+    setBusy(true);
+    try {
+      const j = await apiFetch(`/api/color-dictionary?id=${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      onReload();
+    } catch (e) { setMsg(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+  const saveAllSuggest = async () => {
+    setBusy(true); let ok = 0;
+    for (const s of suggest) {
+      try {
+        const j = await apiFetch("/api/color-dictionary", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s),
+        }).then((r) => r.json());
+        if (!j.error) ok++;
+      } catch { /* ข้าม */ }
+    }
+    setBusy(false); setMsg(`บันทึกคำใหม่แล้ว ${ok} คำ`); onReload();
+  };
+
+  const shown = q.trim()
+    ? rows.filter((r) => r.th.toLowerCase().includes(q.trim().toLowerCase()) || r.en.toLowerCase().includes(q.trim().toLowerCase()))
+    : rows;
+
+  const node = (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg bg-white rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">⚙ ตั้งค่าคำแปลสี / วัสดุ</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">เจอคำนี้ → แปลเป็นคำนี้ · ใช้ก่อน AI เสมอ · คำประกอบเช่น “ดำ/หนังเรียบ” แยกแปลทีละคำ</p>
+          </div>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+        </div>
+
+        {suggest.length > 0 && (
+          <div className="mx-4 mt-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200">
+            <p className="text-[12px] text-amber-800 mb-1.5">AI เพิ่งแปล {suggest.length} คำที่ยังไม่มีในพจนานุกรม — ตรวจแล้วบันทึกไว้ใช้ครั้งต่อไปได้</p>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {suggest.slice(0, 12).map((s) => (
+                <span key={`${s.th}|${s.en}`} className="text-[11px] px-1.5 py-0.5 rounded bg-white border border-amber-200 text-slate-600">{s.th} → {s.en}</span>
+              ))}
+            </div>
+            <button type="button" onClick={() => void saveAllSuggest()} disabled={busy}
+              className="h-7 px-2.5 text-[12px] font-medium rounded-md bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">บันทึกทั้งหมด</button>
+          </div>
+        )}
+
+        <div className="px-4 pt-3 flex items-center gap-2">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาคำ (ไทย/อังกฤษ)"
+            className="flex-1 h-8 px-2.5 text-[13px] border border-slate-200 rounded-md" />
+          <button type="button" onClick={() => setEdit({ th: "", en: "" })}
+            className="h-8 px-2.5 text-[12px] font-medium rounded-md border border-violet-200 text-violet-700 hover:bg-violet-50">＋ เพิ่มคำ</button>
+        </div>
+
+        {edit && (
+          <div className="mx-4 mt-2 p-2.5 rounded-lg border border-violet-200 bg-violet-50/60 flex items-center gap-2 flex-wrap">
+            <input value={edit.th} onChange={(e) => setEdit({ ...edit, th: e.target.value })} placeholder="คำไทย เช่น น้ำตาล" autoFocus
+              className="w-[150px] h-8 px-2 text-[13px] border border-slate-200 rounded-md" />
+            <span className="text-slate-400">→</span>
+            <input value={edit.en} onChange={(e) => setEdit({ ...edit, en: e.target.value })} placeholder="คำอังกฤษ เช่น Brown"
+              onKeyDown={(e) => { if (e.key === "Enter") void save(edit); }}
+              className="w-[150px] h-8 px-2 text-[13px] border border-slate-200 rounded-md" />
+            <button type="button" onClick={() => void save(edit)} disabled={busy}
+              className="h-8 px-3 text-[12px] font-medium rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">บันทึก</button>
+            <button type="button" onClick={() => { setEdit(null); setMsg(""); }} className="h-8 px-2 text-[12px] text-slate-500 hover:bg-white rounded-md">ยกเลิก</button>
+          </div>
+        )}
+        {msg && <p className="px-4 pt-2 text-[12px] text-slate-500">{msg}</p>}
+
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
+            {shown.length === 0 && <p className="px-3 py-4 text-[12.5px] text-slate-400 text-center">ไม่พบคำที่ค้นหา</p>}
+            {shown.map((r) => (
+              <div key={r.id} className="group flex items-center gap-2 px-3 py-1.5 text-[13px] hover:bg-slate-50">
+                <span className="w-[45%] truncate text-slate-700">{r.th}</span>
+                <span className="text-slate-300">→</span>
+                <span className="flex-1 truncate text-slate-600">{r.en}</span>
+                <button type="button" onClick={() => setEdit({ id: r.id, th: r.th, en: r.en })}
+                  className="w-6 h-6 rounded text-[12px] text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100">✎</button>
+                <button type="button" onClick={() => void del(r.id, r.th)}
+                  className="w-6 h-6 rounded text-[12px] text-slate-400 hover:text-rose-600 hover:bg-white opacity-0 group-hover:opacity-100">🗑</button>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-slate-400">มีทั้งหมด {rows.length} คำ · แก้ที่นี่มีผลกับทุกสินค้าที่กดปุ่มแปลสี</p>
+        </div>
+      </div>
+    </div>
+  );
+  return typeof document !== "undefined" ? createPortal(node, document.body) : node;
+}
+
 // ---- เพิ่ม "แบบ/ไซส์" ให้สีที่มีอยู่ (สร้างหลาย SKU ลูกทีเดียว) — ใช้กับตารางที่จัดกลุ่ม (SKU ลูก) ----
 //      ส่ง bases มาได้หลายตัว = สร้างแบบตาราง "ทุกสีที่ติ๊ก × ทุกไซส์ที่กรอก" ในครั้งเดียว
 function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupField, bases, existingCodes, onDone, onClose }: {
@@ -458,8 +580,46 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const SIZE_PRESET = ["S", "M", "L", "XL", "XXL"].map((s) => ({ code: s, value: s }));
-  const PRINT_PRESET = [{ code: "D", value: "พิมพ์จม" }, { code: "N", value: "ฟอยล์เงิน" }, { code: "G", value: "ฟอยล์ทอง" }];
+  // ชุดสำเร็จ — เก็บใน DB (erp_variant_presets) ให้เจ้าของเพิ่ม/แก้/ลบเองได้ (เดิม hardcode)
+  type Preset = { id: string; label: string; option_name: string; items: { code: string; value: string }[] };
+  const [presets, setPresets] = useState<Preset[] | null>(null);
+  const [presetEdit, setPresetEdit] = useState<{ id?: string; label: string; option_name: string } | null>(null);
+  const [presetBusy, setPresetBusy] = useState(false);
+  const loadPresets = useCallback(async () => {
+    try {
+      const j = await apiFetch("/api/variant-presets").then((r) => r.json());
+      setPresets((j.data ?? []) as Preset[]);
+    } catch { setPresets([]); }
+  }, []);
+  useEffect(() => { void loadPresets(); }, [loadPresets]);
+
+  /** บันทึกชุดสำเร็จ — ใช้ค่าที่กรอกอยู่ในฟอร์มตอนนี้เป็นรายการของชุด */
+  const savePreset = async () => {
+    if (!presetEdit) return;
+    const items = opts.map((o) => ({ code: o.code.trim(), value: o.value.trim() })).filter((o) => o.code && o.value);
+    if (!presetEdit.label.trim()) { setMsg("ตั้งชื่อชุดก่อน"); return; }
+    if (items.length === 0) { setMsg("กรอกตัวย่อ + ชื่อ อย่างน้อย 1 บรรทัด ก่อนบันทึกเป็นชุด"); return; }
+    setPresetBusy(true); setMsg(null);
+    try {
+      const j = await apiFetch("/api/variant-presets", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: presetEdit.id, label: presetEdit.label.trim(), option_name: presetEdit.option_name.trim() || optName, items }),
+      }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      setPresetEdit(null); void loadPresets(); setMsg("บันทึกชุดสำเร็จแล้ว");
+    } catch (e) { setMsg(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setPresetBusy(false); }
+  };
+  const deletePreset = async (p: Preset) => {
+    if (!window.confirm(`ลบชุด "${p.label}" ?`)) return;
+    setPresetBusy(true);
+    try {
+      const j = await apiFetch(`/api/variant-presets?id=${encodeURIComponent(p.id)}`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      void loadPresets();
+    } catch (e) { setMsg(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    finally { setPresetBusy(false); }
+  };
   const setOpt = (i: number, k: "code" | "value", v: string) => setOpts((p) => p.map((o, j) => (j === i ? { ...o, [k]: v } : o)));
 
   const create = async () => {
@@ -544,9 +704,44 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
           </div>
           <div className="flex flex-wrap gap-1.5 items-center">
             <span className="text-[11px] text-slate-400">ชุดสำเร็จ:</span>
-            <button type="button" onClick={() => { setOptName("ไซส์"); setOpts(SIZE_PRESET); }} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 hover:bg-slate-50">ไซส์ S–XXL</button>
-            <button type="button" onClick={() => { setOptName("แบบพิมพ์"); setOpts(PRINT_PRESET); }} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 hover:bg-slate-50">แบบพิมพ์ (จม/เงิน/ทอง)</button>
+            {(presets ?? []).map((p) => (
+              <span key={p.id} className="group inline-flex items-center rounded-md border border-slate-200 overflow-hidden">
+                <button type="button" title={p.items.map((i) => `${i.code}=${i.value}`).join(" · ")}
+                  onClick={() => { if (p.option_name) setOptName(p.option_name); setOpts(p.items.length ? p.items : [{ code: "", value: "" }]); }}
+                  className="h-7 px-2 text-[11px] hover:bg-slate-50">{p.label}</button>
+                <button type="button" title="แก้ชุดนี้ (ใช้ค่าที่กรอกอยู่ตอนนี้เป็นรายการใหม่)"
+                  onClick={() => setPresetEdit({ id: p.id, label: p.label, option_name: p.option_name })}
+                  className="h-7 px-1 text-[10px] text-slate-400 border-l border-slate-200 hover:text-blue-600 hover:bg-slate-50">✎</button>
+                <button type="button" title="ลบชุดนี้" onClick={() => void deletePreset(p)} disabled={presetBusy}
+                  className="h-7 px-1 text-[10px] text-slate-400 border-l border-slate-200 hover:text-rose-600 hover:bg-slate-50 disabled:opacity-40">🗑</button>
+              </span>
+            ))}
+            {presets === null && <span className="text-[11px] text-slate-300">กำลังโหลด…</span>}
+            <button type="button" title="บันทึกรายการที่กรอกอยู่ตอนนี้เป็นชุดสำเร็จใหม่"
+              onClick={() => setPresetEdit({ label: "", option_name: optName })}
+              className="h-7 px-2 text-[11px] rounded-md border border-dashed border-slate-300 text-slate-500 hover:bg-slate-50">＋ บันทึกเป็นชุด</button>
           </div>
+
+          {presetEdit && (
+            <div className="p-2.5 rounded-lg border border-blue-200 bg-blue-50/60 space-y-2">
+              <p className="text-[11px] text-blue-800">
+                {presetEdit.id ? "แก้ชุดสำเร็จ" : "บันทึกเป็นชุดสำเร็จใหม่"} — รายการของชุดจะใช้ “ตัวย่อ/ชื่อ” ที่กรอกอยู่ด้านล่างนี้
+              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <input value={presetEdit.label} onChange={(e) => setPresetEdit({ ...presetEdit, label: e.target.value })}
+                  placeholder="ชื่อปุ่ม เช่น ไซส์ S–XXL" autoFocus
+                  className="w-[170px] h-8 px-2 text-[13px] border border-slate-200 rounded-md" />
+                <input value={presetEdit.option_name} onChange={(e) => setPresetEdit({ ...presetEdit, option_name: e.target.value })}
+                  placeholder="ชุดตัวเลือก เช่น ไซส์"
+                  className="w-[130px] h-8 px-2 text-[13px] border border-slate-200 rounded-md" />
+                <button type="button" onClick={() => void savePreset()} disabled={presetBusy}
+                  className="h-8 px-3 text-[12px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                  {presetBusy ? "กำลังบันทึก…" : "บันทึกชุด"}
+                </button>
+                <button type="button" onClick={() => { setPresetEdit(null); setMsg(null); }} className="h-8 px-2 text-[12px] text-slate-500 hover:bg-white rounded-md">ยกเลิก</button>
+              </div>
+            </div>
+          )}
           <div className="space-y-1.5">
             <div className="flex gap-2 text-[11px] text-slate-400"><span className="w-16">ตัวย่อ</span><span className="flex-1">ชื่อที่โชว์</span></div>
             {opts.map((o, i) => (
@@ -824,6 +1019,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const [editCell, setEditCell] = useState<{ rowId: string; field: string } | null>(null);
   const [editVal, setEditVal] = useState("");
   const fkCol = config.target_fk_column ?? "";
+  // ช่องตัวเลข/ราคา → บีบคอลัมน์ให้แคบ (หัวตารางตัดเป็น 2 บรรทัดได้) เพราะเลขสั้นแต่ชื่อหัวยาว
+  const isNumCol = (f: string) => { const t = typeByField[f] ?? "text"; return t === "number" || t === "currency"; };
   const parseByType = (f: string, raw: string): unknown => {
     const t = typeByField[f] ?? "text";
     if (t === "number" || t === "currency") { const n = Number(raw); return raw === "" ? null : (isFinite(n) ? n : null); }
@@ -842,10 +1039,39 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       if (!res.ok || j.error) { alert("บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); load(); }
     } catch (e) { alert("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); load(); }
   };
-  // 🌐 แปลชื่อสีระหว่างช่องไทย/อังกฤษ (Color Th ↔ Color) — ใช้ตัวแปลของกลาง /api/ai/translate
-  //    เติมช่องที่ว่าง + แก้ช่องที่ "ผิดภาษา" ด้วย (ของจริงพบช่อง Color เป็นภาษาไทย เช่น "แทน", "ออฟไวท์")
+  // 🌐 แปลชื่อสีระหว่างช่องไทย/อังกฤษ (Color Th ↔ Color)
+  //    ① ใช้ "พจนานุกรมสี" ที่ตั้งค่าไว้ก่อน (ตายตัว แม่นกว่า) — AI แปลชื่อสีเพี้ยนบ่อย เช่น น้ำตาล→Sugar
+  //    ② ชื่อสีของจริงเป็นคำประกอบ "สี/วัสดุ" (ดำ/หนังเรียบ) → แยกด้วย "/" แปลทีละคำแล้วประกอบกลับ
+  //    ③ คำที่ยังไม่มีในพจนานุกรม ค่อยถาม AI แล้วเสนอให้บันทึกเข้าพจนานุกรม
   const [colorTranslating, setColorTranslating] = useState("");
+  const [colorDict, setColorDict] = useState<{ id: string; th: string; en: string }[] | null>(null);
+  const [dictOpen, setDictOpen] = useState(false);
+  const [newWords, setNewWords] = useState<{ th: string; en: string }[]>([]);   // คำที่ AI แปลให้ (เสนอบันทึก)
   const hasThaiChar = (s: string) => /[฀-๿]/.test(s);
+  const norm = (s: string) => s.trim().toLowerCase();
+
+  const loadDict = useCallback(async () => {
+    try {
+      const j = await apiFetch("/api/color-dictionary").then((r) => r.json());
+      setColorDict((j.data ?? []) as { id: string; th: string; en: string }[]);
+      return (j.data ?? []) as { id: string; th: string; en: string }[];
+    } catch { setColorDict([]); return []; }
+  }, []);
+
+  /** แปล 1 ค่า โดยแยกคำที่คั่นด้วย "/" · คืนผลลัพธ์ + คำที่พจนานุกรมยังไม่มี */
+  const translateByDict = (raw: string, dir: "th2en" | "en2th", dict: { th: string; en: string }[]) => {
+    const parts = raw.split("/").map((p) => p.trim()).filter(Boolean);
+    const out: string[] = []; const missing: string[] = [];
+    for (const p of parts) {
+      const hit = dir === "th2en"
+        ? dict.find((d) => norm(d.th) === norm(p))
+        : dict.find((d) => norm(d.en) === norm(p));
+      if (hit) out.push(dir === "th2en" ? hit.en : hit.th);
+      else { out.push(""); missing.push(p); }
+    }
+    return { parts, out, missing };
+  };
+
   const translateColors = async (dir: "th2en" | "en2th") => {
     const srcKey = dir === "th2en" ? "color_th" : "color";
     const dstKey = dir === "th2en" ? "color" : "color_th";
@@ -858,31 +1084,53 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     });
     if (targets.length === 0) { alert("ไม่มีช่องที่ต้องแปล — ทุกแถวมีชื่อสีถูกภาษาแล้ว"); return; }
 
+    const dict = colorDict ?? (await loadDict());
     const edits: { id: string; changes: Record<string, unknown> }[] = [];
-    let failed = 0;
+    const aiCache = new Map<string, string>();          // คำไหนถาม AI แล้ว ไม่ถามซ้ำ (คำสีวนซ้ำหลายแถว)
+    const learned: { th: string; en: string }[] = [];   // คำที่ AI แปลให้ → เสนอบันทึกเข้าพจนานุกรม
+    let failed = 0, byDict = 0, byAi = 0;
+
+    setColorTranslating(`0/${targets.length}`);
     for (let i = 0; i < targets.length; i++) {
       const r = targets[i];
       setColorTranslating(`${i + 1}/${targets.length}`);
-      try {
-        const res = await apiFetch("/api/ai/translate", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: String(r[srcKey] ?? "").trim().slice(0, 200), to: dir === "th2en" ? "en" : "th" }),
-        });
-        const j = await res.json().catch(() => ({}));
-        const out = String((j?.data?.translated ?? j?.translated) ?? "").trim();
-        if (!res.ok || j?.error || !out) { failed++; continue; }
-        edits.push({ id: String(r.id), changes: { [dstKey]: out } });
-      } catch { failed++; }
+      const raw = String(r[srcKey] ?? "").trim();
+      const { parts, out, missing } = translateByDict(raw, dir, dict);
+      if (parts.length === 0) { failed++; continue; }
+
+      // คำที่พจนานุกรมยังไม่มี → ถาม AI ทีละคำ (คำสั้น แม่นกว่าแปลทั้งประโยค)
+      for (const word of missing) {
+        if (aiCache.has(norm(word))) continue;
+        try {
+          const res = await apiFetch("/api/ai/translate", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: word.slice(0, 100), to: dir === "th2en" ? "en" : "th" }),
+          });
+          const j = await res.json().catch(() => ({}));
+          const got = String((j?.data?.translated ?? j?.translated) ?? "").trim().replace(/[.。]+$/, "");
+          if (got) {
+            aiCache.set(norm(word), got);
+            learned.push(dir === "th2en" ? { th: word, en: got } : { th: got, en: word });
+          }
+        } catch { /* คำนี้แปลไม่ได้ ปล่อยว่าง */ }
+      }
+
+      // ประกอบผลลัพธ์กลับตามรูปเดิม "a/b"
+      const filled = parts.map((p, idx) => out[idx] || aiCache.get(norm(p)) || "");
+      if (filled.some((x) => !x)) { failed++; continue; }        // มีคำที่แปลไม่ได้ → ข้ามแถวนี้ ไม่เขียนค่าครึ่ง ๆ
+      if (missing.length === 0) byDict++; else byAi++;
+      edits.push({ id: String(r.id), changes: { [dstKey]: filled.join("/") } });
     }
     setColorTranslating("");
-    if (edits.length === 0) { alert(`แปลไม่สำเร็จ (${failed} แถว) — ลองอีกครั้ง หรือตรวจสิทธิ์ใช้ตัวแปลภาษา`); return; }
+    if (learned.length) setNewWords(learned);                     // โชว์แถบ "บันทึกคำใหม่เข้าพจนานุกรม"
+    if (edits.length === 0) { alert(`แปลไม่สำเร็จ (${failed} แถว) — เพิ่มคำที่ยังไม่มีในพจนานุกรมสี (ปุ่ม ⚙) แล้วลองอีกครั้ง`); return; }
     try {
       const res = await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) { alert("บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
-      alert(`แปลและบันทึกแล้ว ${edits.length} แถว${failed ? ` · แปลไม่สำเร็จ ${failed}` : ""}`);
+      alert(`แปลและบันทึกแล้ว ${edits.length} แถว (จากพจนานุกรม ${byDict} · ใช้ AI ช่วย ${byAi})${failed ? ` · แปลไม่ได้ ${failed}` : ""}`);
       load();
     } catch (e) { alert("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
   };
@@ -1074,6 +1322,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       <button type="button" disabled={!!colorTranslating} onClick={() => void translateColors("en2th")}
         title="แปลชื่อสีอังกฤษ → ไทย (เติมช่อง Color Th ที่ว่างหรือยังเป็นภาษาอังกฤษ)"
         className="h-6 px-1.5 text-[11px] font-medium text-violet-600 border-l border-violet-200 hover:bg-violet-50 disabled:opacity-40">EN→TH</button>
+      <button type="button" onClick={() => { setDictOpen(true); if (!colorDict) void loadDict(); }}
+        title="ตั้งค่าคำแปลสี — กำหนดเองว่าคำไหนแปลเป็นอะไร (ใช้ก่อน AI)"
+        className="h-6 px-1.5 text-[11px] text-violet-500 border-l border-violet-200 hover:bg-violet-50">⚙</button>
     </div>
   ) : null;
 
@@ -1227,7 +1478,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             </div>
           </td>
         )}
-        <td className="px-2 py-1.5 text-slate-700" style={opts?.indent ? { paddingLeft: 8 + opts.indent * 22 } : undefined}>
+        <td className="px-2 py-1.5 text-slate-700 whitespace-nowrap" style={opts?.indent ? { paddingLeft: 8 + opts.indent * 22 } : undefined}>
           <span className="inline-flex items-center gap-1.5">
             {opts?.lead}
             {opts?.indent ? <span className="text-slate-300 text-xs">└</span> : null}
@@ -1255,7 +1506,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           return (
             <td key={f}
               onClick={editable ? (e) => { e.stopPropagation(); setEditCell({ rowId: String(r.id), field: f }); setEditVal(r[f] == null ? "" : String(r[f])); } : undefined}
-              className={`px-2 py-1.5 text-slate-600 whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"} ${editable ? "cursor-text hover:bg-blue-50/60" : ""}`}>
+              className={`py-1.5 text-slate-600 ${isNumCol(f) ? "px-1.5" : "px-2"} whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"} ${editable ? "cursor-text hover:bg-blue-50/60" : ""}`}>
               {f === "color_th" && r[f] != null && r[f] !== ""
                 ? <span className="inline-flex items-center gap-1 justify-end">{cellValue(r, f) ?? "—"}<CopyButton value={String(r[f] ?? "")} className="opacity-0 group-hover:opacity-100" /></span>
                 : (cellValue(r, f) ?? "—")}
@@ -1325,14 +1576,16 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
               {imageField && <th className="px-2 py-1.5 w-10" />}
-              <th className="px-2 py-1.5 text-left font-medium">
+              {/* คอลัมน์รหัส: กว้างพอดีข้อความที่ยาวสุด (w-0 + nowrap = shrink-to-fit) ไม่กินที่เหลือ */}
+              <th className="px-2 py-1.5 text-left font-medium w-0 whitespace-nowrap">
                 <button type="button" onClick={() => toggleSort(titleField)} title="กดเพื่อเรียง"
                   className="inline-flex items-center gap-0.5 hover:text-slate-700">
                   {labelOf(titleField)}<span className="text-blue-500">{sortArrow(titleField)}</span>
                 </button>
               </th>
               {subFields.map((f) => (
-                <th key={f} className={`px-2 py-1.5 font-medium whitespace-nowrap ${relCfgByField[f] ? "text-left" : "text-right"}`}>
+                // ช่องตัวเลข/ราคา: บีบให้แคบ ตัดคำได้ 2 บรรทัด (ชื่อหัวยาวไม่ต้องดันความกว้าง)
+                <th key={f} className={`px-1.5 py-1.5 font-medium ${isNumCol(f) ? "text-right w-[62px] leading-tight whitespace-normal break-words" : `whitespace-nowrap ${relCfgByField[f] ? "text-left" : "text-right"}`}`}>
                   <span className={`inline-flex items-center gap-1 ${relCfgByField[f] ? "" : "flex-row-reverse"}`}>
                     <button type="button" onClick={() => toggleSort(f)} title="กดเพื่อเรียง"
                       className="inline-flex items-center gap-0.5 hover:text-slate-700">
@@ -1430,6 +1683,11 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           onChanged={load} onClose={() => setPeek(null)} />
       )}
       {pickerModal}
+      {dictOpen && (
+        <ColorDictModal rows={colorDict ?? []} suggest={newWords}
+          onReload={() => { void loadDict(); setNewWords([]); }}
+          onClose={() => setDictOpen(false)} />
+      )}
       {variantBases && variantBases.length > 0 && (
         <O2MVariantAdder moduleKey={moduleKey} fkField={fk} parentValue={matchValue as string | number}
           titleField={titleField} groupField={config.list_group_field ?? "color_th"} bases={variantBases}
