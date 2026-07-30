@@ -66,6 +66,12 @@ export function blockSummary(b: Block): string {
       return { line: "เส้นบาง", dots: "จุดไข่ปลา", space: "เว้นว่าง" }[String(b.variant)] ?? "เส้นคั่น";
     case "video":
       return b.url ? String(b.title || b.url) : "ยังไม่มีลิงก์คลิป";
+    case "steps":
+      return `${((b.items as unknown[]) ?? []).length} ขั้นตอน`;
+    case "reviews":
+      return `${((b.items as unknown[]) ?? []).length} รีวิว`;
+    case "map":
+      return b.embedUrl ? String(b.address || b.title || "แผนที่") : "ยังไม่มีลิงก์แผนที่";
     default:
       return String(b.title ?? "") || "—";
   }
@@ -417,6 +423,78 @@ export function BlockEditor({ block, onChange }: { block: Block; onChange: (p: R
             </Field>
             <p className="mt-1 text-[11px] text-slate-400">อยากให้ปุ่มอยู่กลางหรือชิดขวา ตั้งที่ 🎨 รูปลักษณ์ → จัดข้อความ</p>
           </div>
+        </div>
+      );
+
+    case "steps": {
+      const items = (block.items as { title: string; desc: string }[]) ?? [];
+      const setItem = (i: number, p: Partial<{ title: string; desc: string }>) =>
+        onChange({ items: items.map((x, idx) => (idx === i ? { ...x, ...p } : x)) });
+      return (
+        <div className="grid gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="ข้อความนำ"><input className={inputCls} value={s("eyebrow")} onChange={(e) => onChange({ eyebrow: e.target.value })} /></Field>
+            <Field label="หัวข้อ"><input className={inputCls} value={s("title")} onChange={(e) => onChange({ title: e.target.value })} /></Field>
+          </div>
+          <Field label="คำโปรย"><input className={inputCls} value={s("subtitle")} onChange={(e) => onChange({ subtitle: e.target.value })} /></Field>
+          <div className="space-y-2">
+            {items.map((it, i) => (
+              <div key={i} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="shrink-0 w-6 h-6 rounded-full bg-slate-900 text-white text-[11px] flex items-center justify-center">{i + 1}</span>
+                  <input className={inputCls} value={it.title} onChange={(e) => setItem(i, { title: e.target.value })} placeholder="ชื่อขั้นตอน" />
+                  <button onClick={() => onChange({ items: items.filter((_, idx) => idx !== i) })} className="shrink-0 text-xs text-red-500 hover:underline">ลบ</button>
+                </div>
+                <textarea rows={2} className={inputCls} value={it.desc} onChange={(e) => setItem(i, { desc: e.target.value })} placeholder="อธิบายขั้นตอนนี้" />
+              </div>
+            ))}
+            <button onClick={() => onChange({ items: [...items, { title: "", desc: "" }] })} className="text-xs text-blue-600 hover:underline">+ เพิ่มขั้นตอน</button>
+          </div>
+        </div>
+      );
+    }
+
+    case "reviews": {
+      const items = (block.items as { name: string; text: string; role: string }[]) ?? [];
+      const setItem = (i: number, p: Partial<{ name: string; text: string; role: string }>) =>
+        onChange({ items: items.map((x, idx) => (idx === i ? { ...x, ...p } : x)) });
+      return (
+        <div className="grid gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="ข้อความนำ"><input className={inputCls} value={s("eyebrow")} onChange={(e) => onChange({ eyebrow: e.target.value })} /></Field>
+            <Field label="หัวข้อ"><input className={inputCls} value={s("title")} onChange={(e) => onChange({ title: e.target.value })} /></Field>
+          </div>
+          <div className="space-y-2">
+            {items.map((it, i) => (
+              <div key={i} className="rounded-lg border border-slate-200 bg-white p-2.5 space-y-1.5">
+                <div className="flex gap-2">
+                  <input className={inputCls} value={it.name} onChange={(e) => setItem(i, { name: e.target.value })} placeholder="ชื่อลูกค้า" />
+                  <input className={inputCls} value={it.role} onChange={(e) => setItem(i, { role: e.target.value })} placeholder="แบรนด์/ตำแหน่ง" />
+                  <button onClick={() => onChange({ items: items.filter((_, idx) => idx !== i) })} className="shrink-0 text-xs text-red-500 hover:underline">ลบ</button>
+                </div>
+                <textarea rows={2} className={inputCls} value={it.text} onChange={(e) => setItem(i, { text: e.target.value })} placeholder="ข้อความรีวิว" />
+              </div>
+            ))}
+            <button onClick={() => onChange({ items: [...items, { name: "", text: "", role: "" }] })} className="text-xs text-blue-600 hover:underline">+ เพิ่มรีวิว</button>
+          </div>
+        </div>
+      );
+    }
+
+    case "map":
+      return (
+        <div className="grid gap-3">
+          <Field label="หัวข้อ"><input className={inputCls} value={s("title")} onChange={(e) => onChange({ title: e.target.value })} /></Field>
+          <Field label="ที่อยู่ (ข้อความ)"><input className={inputCls} value={s("address")} onChange={(e) => onChange({ address: e.target.value })} placeholder="เลขที่ ถนน ตำบล อำเภอ จังหวัด" /></Field>
+          <Field label="ลิงก์ฝังแผนที่ (Google Maps)">
+            <input className={inputCls} value={s("embedUrl")} onChange={(e) => onChange({ embedUrl: e.target.value })} placeholder="https://www.google.com/maps/embed?pb=..." />
+          </Field>
+          <p className="text-[11px] text-slate-500">
+            วิธีเอาลิงก์: เปิด Google Maps → หาร้าน → กด <b>แชร์</b> → แท็บ <b>ฝังแผนที่</b> → คัดลอกเฉพาะลิงก์ที่อยู่ใน <code>src=&quot;…&quot;</code>
+          </p>
+          {s("embedUrl") && !s("embedUrl").includes("/maps/embed") && (
+            <p className="text-[11px] text-red-600">ลิงก์นี้ใช้ไม่ได้ — ต้องเป็นลิงก์จากหัวข้อ &quot;ฝังแผนที่&quot; เท่านั้น</p>
+          )}
         </div>
       );
 

@@ -20,7 +20,10 @@ export type BlockType =
   | "gallery"
   | "button"
   | "divider"
-  | "video";
+  | "video"
+  | "steps"
+  | "reviews"
+  | "map";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -199,6 +202,31 @@ export interface VideoBlock extends BlockBase {
   caption: string;
 }
 
+/** ขั้นตอนการทำงาน — เหมาะกับงานรับผลิต (OEM) ที่ต้องอธิบายว่าสั่งแล้วเกิดอะไรขึ้นบ้าง */
+export interface StepsBlock extends BlockBase {
+  type: "steps";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  items: { title: string; desc: string }[];
+}
+
+/** รีวิวลูกค้า */
+export interface ReviewsBlock extends BlockBase {
+  type: "reviews";
+  eyebrow: string;
+  title: string;
+  items: { name: string; text: string; role: string }[];
+}
+
+/** แผนที่ร้าน — รับเฉพาะลิงก์ฝังของ Google Maps */
+export interface MapBlock extends BlockBase {
+  type: "map";
+  title: string;
+  address: string;
+  embedUrl: string;
+}
+
 export type Block =
   | AnnouncementBlock
   | HeroBlock
@@ -212,7 +240,10 @@ export type Block =
   | GalleryBlock
   | ButtonBlock
   | DividerBlock
-  | VideoBlock;
+  | VideoBlock
+  | StepsBlock
+  | ReviewsBlock
+  | MapBlock;
 
 export const BLOCK_META: Record<BlockType, { label: string; icon: string; hint: string; group: string }> = {
   announcement: { label: "แถบประกาศ", icon: "🎗️", hint: "ข้อความเลื่อนบนสุดของเว็บ", group: "พื้นฐาน" },
@@ -228,6 +259,9 @@ export const BLOCK_META: Record<BlockType, { label: string; icon: string; hint: 
   button: { label: "ปุ่ม", icon: "🔘", hint: "ปุ่มเดี่ยว วางคั่นตรงไหนก็ได้", group: "พื้นฐาน" },
   divider: { label: "เส้นคั่น / เว้นระยะ", icon: "➖", hint: "แบ่งช่วงเนื้อหาให้อ่านง่าย", group: "พื้นฐาน" },
   video: { label: "วิดีโอ", icon: "🎬", hint: "ฝังคลิปจาก YouTube หรือ Vimeo", group: "พื้นฐาน" },
+  steps: { label: "ขั้นตอนการทำงาน", icon: "🪜", hint: "อธิบายเป็นสเต็ป 1-2-3 เหมาะกับงานรับผลิต", group: "เนื้อหา" },
+  reviews: { label: "รีวิวลูกค้า", icon: "💬", hint: "คำชมจากลูกค้าจริง สร้างความเชื่อมั่น", group: "เนื้อหา" },
+  map: { label: "แผนที่ร้าน", icon: "📍", hint: "ฝังแผนที่ Google Maps + ที่อยู่", group: "เนื้อหา" },
 };
 
 const uid = (t: string, n: number) => `${t}-${n}`;
@@ -295,6 +329,29 @@ export function newBlock(type: BlockType, seq: number, opts?: { uniqueId?: boole
       return { ...base, type, variant: "line" };
     case "video":
       return { ...base, type, url: "", title: "", caption: "" };
+    case "steps":
+      return {
+        ...base,
+        type,
+        eyebrow: "ขั้นตอนการทำงาน",
+        title: "สั่งผลิตกับเรา ทำงานยังไง",
+        subtitle: "",
+        items: [
+          { title: "คุยแบบ & ตีราคา", desc: "ส่งแบบหรือตัวอย่างมา เราประเมินราคาและระยะเวลาให้" },
+          { title: "ทำแพตเทิร์น & ตัวอย่าง", desc: "ขึ้นตัวอย่างให้ตรวจก่อนเดินสายผลิตจริง" },
+          { title: "ผลิต & ส่งมอบ", desc: "ผลิตตามจำนวนที่ตกลง ตรวจคุณภาพก่อนส่ง" },
+        ],
+      };
+    case "reviews":
+      return {
+        ...base,
+        type,
+        eyebrow: "ลูกค้าของเรา",
+        title: "เสียงจากลูกค้า",
+        items: [{ name: "", text: "", role: "" }],
+      };
+    case "map":
+      return { ...base, type, title: "แผนที่ร้าน", address: "", embedUrl: "" };
     case "image":
       return { ...base, type, imageKey: null, alt: "", caption: "", width: "wide", href: "" };
     case "gallery":
@@ -343,6 +400,19 @@ const videoUrl = (v: unknown): string => {
     const u = new URL(raw);
     if (u.protocol !== "https:") return "";
     return VIDEO_HOSTS.includes(u.hostname) ? u.toString() : "";
+  } catch {
+    return "";
+  }
+};
+
+/** ลิงก์ฝังแผนที่ — รับเฉพาะของ Google Maps ที่เป็น /maps/embed (ลิงก์อื่นยัดอะไรเข้าเว็บก็ได้) */
+const mapUrl = (v: unknown): string => {
+  const raw = String(v ?? "").trim().slice(0, 600);
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    const okHost = u.hostname === "www.google.com" || u.hostname === "google.com" || u.hostname.endsWith(".google.com");
+    return u.protocol === "https:" && okHost && u.pathname.startsWith("/maps/embed") ? u.toString() : "";
   } catch {
     return "";
   }
@@ -485,6 +555,40 @@ export function normalizeBlocks(raw: unknown): Block[] {
       case "video":
         out.push({ ...base, type, url: videoUrl(b.url), title: str(b.title, "", 160), caption: str(b.caption, "", 300) });
         break;
+      case "steps":
+        out.push({
+          ...base,
+          type,
+          eyebrow: str(b.eyebrow, "", 120),
+          title: str(b.title, "", 160),
+          subtitle: str(b.subtitle, "", 300),
+          items: (Array.isArray(b.items) ? b.items : []).slice(0, 12).map((it) => {
+            const o = (it ?? {}) as Record<string, unknown>;
+            return { title: str(o.title, "", 120), desc: str(o.desc, "", 400) };
+          }),
+        });
+        break;
+      case "reviews":
+        out.push({
+          ...base,
+          type,
+          eyebrow: str(b.eyebrow, "", 120),
+          title: str(b.title, "", 160),
+          items: (Array.isArray(b.items) ? b.items : []).slice(0, 12).map((it) => {
+            const o = (it ?? {}) as Record<string, unknown>;
+            return { name: str(o.name, "", 80), text: str(o.text, "", 600), role: str(o.role, "", 80) };
+          }),
+        });
+        break;
+      case "map":
+        out.push({
+          ...base,
+          type,
+          title: str(b.title, "", 160),
+          address: str(b.address, "", 300),
+          embedUrl: mapUrl(b.embedUrl),
+        });
+        break;
       case "image":
         out.push({
           ...base,
@@ -589,6 +693,19 @@ export function validateBlocks(blocks: Block[]): ValidationIssue[] {
     // url ว่างแปลว่ากรอกลิงก์ที่ไม่ใช่ YouTube/Vimeo แล้วโดนปัดตก — ต้องบอก ไม่งั้นงงว่าทำไมไม่ขึ้น
     if (b.type === "video" && !b.url)
       issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่มีลิงก์คลิป (รับเฉพาะ YouTube และ Vimeo)` });
+
+    if (b.type === "map" && !b.embedUrl)
+      issues.push({
+        blockId: b.id,
+        level: "error",
+        message: `${label}: ยังไม่มีลิงก์แผนที่ — ใน Google Maps กด "แชร์" → "ฝังแผนที่" แล้วเอาลิงก์ใน src มาวาง`,
+      });
+
+    if (b.type === "steps" && !b.items.some((i) => i.title.trim()))
+      issues.push({ blockId: b.id, level: "warning", message: `${label}: ยังไม่ได้ใส่ขั้นตอน` });
+
+    if (b.type === "reviews" && !b.items.some((i) => i.text.trim()))
+      issues.push({ blockId: b.id, level: "warning", message: `${label}: ยังไม่ได้ใส่รีวิว` });
   }
 
   return issues;
