@@ -154,8 +154,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     PRODUCT_FIELD_KEYS.map(({ field }) => [field, fieldPrompt(field)]).filter(([, v]) => v),
   ) as Record<string, string>;
   const hasFieldPrompts = Object.keys(fieldPrompts).length > 0;
-  /** คำอธิบายในโครง JSON ของช่องนั้น — มีคำสั่งรายช่อง ใช้คำสั่งนั้นเลย (เจ้าของคุมเองเต็มที่) */
-  const fieldDesc = (field: string, fallback: string) => (fieldPrompts[field] ? fieldPrompts[field].replace(/"/g, "'").replace(/\s*\n\s*/g, " · ") : fallback);
+  /**
+   * รูปแบบผลลัพธ์ของแต่ละช่อง (โค้ดคุม ไม่ใช่ผู้ใช้คุม) — กันเคสจริงที่เจอ:
+   * คำสั่งของเจ้าของเขียนเป็น "รายการหัวข้อ" (ชื่อสินค้า, แบรนด์, วัสดุ, สีที่มี…)
+   * AI ไปพิมพ์ป้ายกำกับพวกนั้นลงใน Introduction ตรง ๆ แทนที่จะเขียนเป็นย่อหน้าขาย
+   */
+  const FIELD_SHAPE: Record<string, string> = {
+    name_th: "รูปแบบผลลัพธ์: ข้อความบรรทัดเดียว · ห้ามมีป้ายกำกับ (ห้ามขึ้นต้นด้วย 'ชื่อสินค้า:') · ห้ามใช้คำหรือวลีเดิมซ้ำในชื่อ · ถ้าตัวอย่างในคำสั่งมีรหัสสินค้าอยู่ท้ายชื่อ ให้ปิดท้ายด้วยรหัสสินค้าจริงของสินค้านี้",
+    introduction: "รูปแบบผลลัพธ์: ย่อหน้าร้อยแก้วที่อ่านลื่น · หัวข้อที่ระบุไว้ในคำสั่งคือ 'ข้อมูลที่ต้องกล่าวถึงในเนื้อความ' ไม่ใช่รูปแบบผลลัพธ์ — ห้ามพิมพ์ชื่อหัวข้อเป็นป้ายกำกับ (ห้ามมี 'ชื่อสินค้า:', 'แบรนด์:', 'วัสดุ:', 'สีที่มี:', 'กลุ่มลูกค้า:') และห้ามใช้ · หรือ - คั่นเป็นรายการ",
+    description: "รูปแบบผลลัพธ์: รายการ บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' เท่านั้น คั่นด้วยการขึ้นบรรทัดใหม่ (ห้ามใช้ '·' ห้ามใช้ '· -' ห้ามเอาทุกข้อมาต่อกันในบรรทัดเดียว)",
+  };
+  /** คำอธิบายในโครง JSON — ใช้คำกลาง ๆ เท่านั้น (เอาคำสั่งของเจ้าของยัดในนี้ทำให้รูปแบบเพี้ยน) */
+  const fieldDesc = (_field: string, fallback: string) => fallback;
   const system = [
     // ไม่มีคำสั่งของเจ้าของ → ใช้ persona ในโค้ด · มีคำสั่งเอง → persona มาจากคำสั่งนั้น (ปิดท้าย)
     ...(hasCustom ? [] : [FALLBACK, ""]),
@@ -236,7 +246,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       "",
       "════════ คำสั่งเฉพาะแต่ละช่อง (สำคัญสูงสุด — ทับทุกข้อด้านบน) ════════",
       ...PRODUCT_FIELD_KEYS.filter(({ field }) => fieldPrompts[field]).map(({ field, label, en }) =>
-        `▸ ${field} (${label}) — ใช้กับ ${en} ด้วย โดย ${en} = ฉบับแปลอังกฤษของ ${field} โครงสร้างเดียวกันเป๊ะ ๆ:\n${fieldPrompts[field]}`),
+        [`▸ ${field} (${label}) — ใช้กับ ${en} ด้วย โดย ${en} = ฉบับแปลอังกฤษของ ${field} โครงสร้างเดียวกันเป๊ะ ๆ:`,
+          fieldPrompts[field],
+          FIELD_SHAPE[field] ? `[${FIELD_SHAPE[field]}]` : "",
+        ].filter(Boolean).join("\n")),
+      "",
+      "ถ้าคำสั่งข้างบนขอ 'Checklist สิ่งที่ยังไม่แน่ใจ' → ใส่ใน questions · ขอ 'แนะนำรูปที่ควรถ่ายเพิ่ม' → ใส่ใน suggestions",
+      "ห้ามเขียน Checklist / คำแนะนำรูป / คำถาม ลงในข้อความของช่องใด ๆ (ช่องข้อความมีแต่เนื้อหาขายสินค้า)",
       "════════════════════════════════════════════════",
       "ช่องที่ไม่มีคำสั่งเฉพาะ ให้ทำตามคำสั่งรวม/กติกาด้านบน",
       "ช่องภาษาอังกฤษไม่ต้องคิดใหม่ — แปลจากช่องไทยคู่ของมันให้ตรงกัน (ชื่อแบรนด์/Collection/รหัสสินค้า/คำ SEO ที่เป็นภาษาอังกฤษอยู่แล้ว ให้คงไว้เหมือนเดิม) และห้ามส่งค่าว่าง",
@@ -305,7 +321,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const tail = hasFieldPrompts
       ? ["กติกาที่ต้องตรวจก่อนตอบ (คำสั่งเฉพาะช่อง — ทำให้ครบทุกข้อ):",
         ...PRODUCT_FIELD_KEYS.filter(({ field }) => fieldPrompts[field])
-          .map(({ field, en }) => `▸ ${field} (และ ${en} = ฉบับแปล):\n${fieldPrompts[field]}`)].join("\n")
+          .map(({ field, en }) => [`▸ ${field} (และ ${en} = ฉบับแปล):`, fieldPrompts[field],
+            FIELD_SHAPE[field] ? `[${FIELD_SHAPE[field]}]` : ""].filter(Boolean).join("\n"))].join("\n")
       : "";
     out = await chatJson(system, [
       { type: "text", text: facts },
@@ -317,6 +334,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const str = (k: string, max: number) => String(out[k] ?? "").trim().slice(0, max);
+
+  // ── จัดรูปแบบผลลัพธ์ให้เข้าที่เอง (ไม่หวังพึ่งโมเดล) ──
+  /** ชื่อสินค้า: ตัดป้ายกำกับหน้าข้อความ · บีบช่องว่าง · ปิดท้ายด้วยรหัสสินค้าจริงถ้ายังไม่มี */
+  const fixName = (s: string, isThai: boolean): string => {
+    let v = s.replace(/^\s*(ชื่อสินค้า(ภาษาไทย|ภาษาอังกฤษ)?|ชื่อ|product\s*name|name)\s*[:：]\s*/i, "")
+      .replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, " ").trim();
+    const code = String(p.code ?? "").trim();
+    if (code && v && !v.toLowerCase().includes(code.toLowerCase())) v = `${v} ${code}`;
+    return v.slice(0, isThai ? 200 : 200);
+  };
+  /** Description: บังคับเป็นบรรทัดละข้อ ขึ้นต้น "- " (AI เคยส่ง "· - วัสดุ: …" ต่อกันยาวเป็นพืด) */
+  const fixBullets = (s: string): string => {
+    if (!s.trim()) return "";
+    let v = s.replace(/\r/g, "");
+    v = v.replace(/\s*·\s*[-–•]\s*/g, "\n- ").replace(/\s*·\s*/g, "\n- ");   // · และ · - → บรรทัดใหม่
+    v = v.replace(/\s*[•–]\s+/g, "\n- ");
+    const lines = v.split("\n").map((l) => l.replace(/^\s*[-–•]\s*/, "").replace(/[ \t]+/g, " ").trim()).filter(Boolean);
+    return lines.map((l) => `- ${l}`).join("\n");
+  };
+  /** Introduction ที่ AI พิมพ์เป็น "ป้ายกำกับ" แทนย่อหน้าขาย (เคสจริงจากคำสั่งที่เขียนเป็นรายการหัวข้อ) */
+  const looksLikeLabelDump = (s: string): boolean => {
+    const labels = ["ชื่อสินค้า:", "แบรนด์:", "ประเภทสินค้า:", "วัสดุ:", "สีที่มี:", "กลุ่มลูกค้า:", "สไตล์สินค้า:", "โอกาสใช้งาน:", "ขนาด:", "จุดเด่นสินค้า:"];
+    return labels.filter((l) => s.includes(l)).length >= 2 || (s.split("·").length >= 4 && s.includes(":"));
+  };
 
   // ── ขนาดที่ AI "อ่านจากรูป" — กรองค่าเพี้ยนทิ้ง (AI อาจส่งข้อความหรือค่าที่เป็นไปไม่ได้มา) ──
   const rawSizes = (out.sizes ?? {}) as Record<string, unknown>;
@@ -338,12 +379,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const data = {
     // กันเหนียว: ช่องที่ไม่ได้สั่งให้เขียนรอบนี้ → บังคับเป็นค่าว่าง (เผื่อ AI เขียนมาให้เอง)
-    name_th: pickFields.includes("name") ? str("name_th", 200) : "",
+    name_th: pickFields.includes("name") ? fixName(str("name_th", 200), true) : "",
     introduction: pickFields.includes("intro") ? str("introduction", 1500) : "",
-    description: pickFields.includes("desc") ? str("description", 4000) : "",
-    name_en: pickFields.includes("name") ? str("name_en", 200) : "",
+    description: pickFields.includes("desc") ? fixBullets(str("description", 4000)) : "",
+    name_en: pickFields.includes("name") ? fixName(str("name_en", 200), false) : "",
     introduction_en: pickFields.includes("intro") ? str("introduction_en", 1500) : "",
-    english_description: pickFields.includes("desc") ? str("english_description", 4000) : "",
+    english_description: pickFields.includes("desc") ? fixBullets(str("english_description", 4000)) : "",
     sizes: hasSize ? sizes : null,
     size_source: hasSize ? String(rawSizes.source ?? "").trim().slice(0, 200) : "",
     image_count: images.length,
@@ -356,6 +397,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   };
   if (!data.name_th && !data.description && !data.introduction)
     return NextResponse.json({ error: "AI ไม่ได้ส่งข้อความกลับมา — ลองกดอีกครั้ง" }, { status: 502 });
+
+  // ── Introduction ออกมาเป็น "รายการป้ายกำกับ" → เขียนใหม่เป็นย่อหน้าขาย (ยิงข้อความล้วน ไม่ส่งรูป = ถูกมาก) ──
+  if (data.introduction && looksLikeLabelDump(data.introduction)) {
+    try {
+      const fix = await chatJson(
+        [
+          "คุณคือนักเขียนคำโปรยสินค้าภาษาไทยสำหรับร้านค้าออนไลน์",
+          "แปลงข้อมูลที่ได้รับให้เป็นย่อหน้าร้อยแก้วที่อ่านลื่น 80-120 คำ",
+          "ห้ามพิมพ์ป้ายกำกับใด ๆ (ชื่อสินค้า: / แบรนด์: / วัสดุ: / สีที่มี: / กลุ่มลูกค้า:) ห้ามทำเป็นรายการ ห้ามใช้ · หรือ -",
+          "ใช้เฉพาะข้อมูลที่ให้มา ห้ามเพิ่มข้อมูลใหม่ ห้ามใส่ราคา",
+          "เปิดด้วยประโยคดึงดูด ปิดท้ายด้วยประโยคชวนเลือกซื้อแบบนุ่มนวล",
+          'ตอบ JSON: {"introduction":"…"}',
+        ].join("\n"),
+        [{ type: "text", text: data.introduction }],
+        900, model,
+      );
+      const v = String(fix.introduction ?? "").trim();
+      if (v && !looksLikeLabelDump(v)) {
+        data.introduction = v.slice(0, 1500);
+        data.introduction_en = "";      // ฉบับอังกฤษของเดิมไม่ตรงแล้ว → ให้ตัวแปลด้านล่างทำใหม่
+      }
+    } catch { /* เขียนใหม่ไม่สำเร็จ → ใช้ของเดิม ผู้ใช้แก้เองได้ในป๊อป */ }
+  }
 
   // ── ฝั่งอังกฤษหาย → แปลจากฝั่งไทยให้เอง (เคสจริง: AI ส่ง name_en ว่าง ผู้ใช้เลยไม่เห็นชื่ออังกฤษ) ──
   //    เรียกรอบสองแบบ "ข้อความล้วน ไม่ส่งรูป" → ถูกมาก (ไม่กี่สตางค์) และแปลได้ตรงกว่าปล่อยว่าง
