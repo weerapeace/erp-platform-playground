@@ -285,10 +285,11 @@ function outcomeFor(previewRow: AttendancePreviewRow, decision: RowDecision | un
 }
 
 // สรุปผล (สาย/ออกก่อน/ขาด/ปกติ) สำหรับโชว์ "ผลเดิม → ผลใหม่" ในป๊อปอัป — แสดงเป็น ชม./นาที
-function resultSummary(r?: { totalLateMinutes?: number; earlyOutMinutes?: number; absent?: boolean } | null): string {
+function resultSummary(r?: { totalLateMinutes?: number; earlyOutMinutes?: number; absent?: boolean; absenceHours?: number } | null): string {
   if (!r) return "-";
   const parts: string[] = [];
   if (r.absent) parts.push("ขาด");
+  else if (Number(r.absenceHours) > 0) parts.push(`ขาด ${minutesText(Number(r.absenceHours) * 60)}`);
   if (r.totalLateMinutes) parts.push(`สาย ${minutesText(r.totalLateMinutes)}`);
   if (r.earlyOutMinutes) parts.push(`ออกก่อน ${minutesText(r.earlyOutMinutes)}`);
   return parts.length ? parts.join(" / ") : "ปกติ";
@@ -296,20 +297,26 @@ function resultSummary(r?: { totalLateMinutes?: number; earlyOutMinutes?: number
 
 // สรุป "ผล" จากรายการที่จะสร้าง (manual_payloads) → คอลัมน์ "ผล" โชว์ ขาด/สาย/ออกก่อน กี่ ชม./นาที (แทน "N รายการ")
 function summaryFromPayloads(payloads: Record<string, unknown>[]): string {
-  let late = 0, early = 0, absent = false;
+  let late = 0, early = 0, absent = false, absenceHours = 0;
   for (const p of payloads) {
     const t = String(p.entry_type || "");
-    if (t === "absence") absent = true;
+    // ขาดเต็มวัน (8 ชม.) = "ขาด" · ขาดบางส่วน (เช่น 4 ชม. ครึ่งเช้า) โชว์จำนวนชั่วโมงด้วย
+    if (t === "absence") {
+      const hours = Number(p.absence_hours ?? 0) || 0;
+      if (hours > 0 && hours < 8) absenceHours += hours; else absent = true;
+    }
     else if (t === "late") late += Number(p.late_minutes ?? p.minutes ?? 0) || 0;
     else if (t === "early_leave") early += Number(p.minutes ?? 0) || 0;
   }
-  return resultSummary({ totalLateMinutes: late, earlyOutMinutes: early, absent });
+  return resultSummary({ totalLateMinutes: late, earlyOutMinutes: early, absent, absenceHours });
 }
 
 function flagText(flags: string[]): string {
   const labels: Record<string, string> = {
     late_morning: "สายช่วงเช้า",
     late_noon: "สายหลังพัก",
+    late_noon_outside_window: "กลับจากพักสายมาก",
+    absent_morning_session: "ไม่มาช่วงเช้า (ขาดครึ่งเช้า)",
     early_checkout: "ออกก่อน",
     absent: "ขาด",
     no_scans_on_workday: "ไม่มีสแกนในวันทำงาน",

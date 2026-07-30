@@ -72,6 +72,8 @@ export type AttendanceDayResult = {
   lateMorningMinutes: number;
   lateNoonMinutes: number;
   totalLateMinutes: number;
+  /** ขาดงานบางส่วนของวัน (ชม.) เช่น ไม่มาช่วงเช้าเลย = ขาดครึ่งเช้า — ไม่ใช่การมาสาย */
+  absenceHours: number;
 };
 
 export type AttendanceImportStatus = "ready" | "needs_review" | "unmapped" | "blocked" | "skipped";
@@ -279,6 +281,7 @@ export function calculateAttendanceDay(
       lateMorningMinutes: 0,
       lateNoonMinutes: 0,
       totalLateMinutes: 0,
+      absenceHours: 0,
       flags: uniqueFlags([...flags,
         scheduleStatus === "scanner_exempt" ? "attendance_scan_exempt" : "",
         scheduleStatus === "outside_contract" ? "outside_contract_period" : "",
@@ -298,6 +301,7 @@ export function calculateAttendanceDay(
       lateMorningMinutes: 0,
       lateNoonMinutes: 0,
       totalLateMinutes: 0,
+      absenceHours: 0,
       flags: uniqueFlags([...flags, "no_scans_on_workday", "absent", "manual_review_required"]),
     };
   }
@@ -317,7 +321,20 @@ export function calculateAttendanceDay(
   const rawMinutes = scans.rawScans.map(minutesFromTime).filter((value): value is number => value !== null);
   const lastScan = rawMinutes[rawMinutes.length - 1];
 
-  const lateMorningMinutes = morningInMinutes === null ? 0 : Math.max(0, morningInMinutes - morningCutoff);
+  const morningStart = minutesFromTime(config.morningWorkStart) as number;
+  // ไม่ได้มาทำงานช่วงเช้าเลย (ไม่มีสแกนเช้า หรือสแกนแรกเลยเวลาเลิกช่วงเช้าไปแล้ว)
+  //   = "ขาดครึ่งเช้า" ตามชั่วโมงงานช่วงเช้า (08:00-12:00 = 4 ชม.) ไม่ใช่ "มาสาย 5 ชม."
+  //   แล้วค่อยคิดสายจากการกลับเข้าหลังพักตามปกติ (เช่น 13:10 vs 12:50 = สาย 20 นาที)
+  const missedMorningSession = morningInMinutes === null || morningInMinutes >= morningEnd;
+  const hasAfternoonAttendance = noonInMinutes !== null || finalOutMinutes !== null
+    || (lastScan !== undefined && lastScan >= morningEnd);
+  const morningAbsenceHours = missedMorningSession && hasAfternoonAttendance
+    ? Math.max(0, (morningEnd - morningStart) / 60)
+    : 0;
+
+  const lateMorningMinutes = morningInMinutes === null || missedMorningSession
+    ? 0
+    : Math.max(0, morningInMinutes - morningCutoff);
   const lateNoonMinutes = noonInMinutes === null ? 0 : Math.max(0, noonInMinutes - noonCutoff);
   let earlyOutMinutes = finalOutMinutes === null ? 0 : Math.max(0, checkoutRequired - finalOutMinutes);
   if (earlyOutMinutes > 0 && earlyOutMinutes <= Number(config.earlyCheckoutGraceMinutes || 0)) earlyOutMinutes = 0;
@@ -336,6 +353,7 @@ export function calculateAttendanceDay(
   if (!scans.finalOut) flags.push("missing_final_checkout", "manual_review_required");
   if (lateMorningMinutes > 0) flags.push("late_morning");
   if (lateNoonMinutes > 0) flags.push("late_noon");
+  if (morningAbsenceHours > 0) flags.push("absent_morning_session", "manual_review_required");
 
   const abnormal = flags.includes("manual_review_required");
   return {
@@ -347,6 +365,7 @@ export function calculateAttendanceDay(
     lateMorningMinutes,
     lateNoonMinutes,
     totalLateMinutes: lateMorningMinutes + lateNoonMinutes,
+    absenceHours: morningAbsenceHours,
     flags: uniqueFlags(flags),
   };
 }
@@ -570,6 +589,9 @@ export function buildAttendanceManualEntryPayloads(
   const payloads: AttendanceManualPayload[] = [];
   if (result.absent) {
     payloads.push({ ...common, entry_type: "absence", absence_hours: activePeriod?.default_hours_per_day || 8, minutes: 0, late_minutes: 0 });
+  } else if (Number(result.absenceHours) > 0) {
+    // ขาดบางส่วนของวัน (เช่น ไม่มาช่วงเช้า = 4 ชม.) — คิดเป็นขาดตามชั่วโมง ไม่ใช่สาย
+    payloads.push({ ...common, entry_type: "absence", absence_hours: Number(result.absenceHours), minutes: 0, late_minutes: 0 });
   }
   if (result.totalLateMinutes > 0) {
     payloads.push({ ...common, entry_type: "late", minutes: result.totalLateMinutes, late_minutes: result.totalLateMinutes, absence_hours: 0 });
