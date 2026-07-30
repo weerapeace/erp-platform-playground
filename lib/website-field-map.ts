@@ -26,12 +26,15 @@ export type Option2Source = "variant_option" | "none";
  */
 export type WebCategory = string;
 
-/** หมวดตั้งต้นของร้านวัสดุ — ร้านเก่าที่ยังไม่เคยตั้งจะได้ชุดนี้ หน้าเว็บจึงเหมือนเดิม */
+/**
+ * หมวดตั้งต้นของร้านวัสดุ — ร้านเก่าที่ยังไม่เคยตั้งจะได้ชุดนี้ หน้าเว็บจึงเหมือนเดิม
+ * ⚠️ ไอคอน/คำโปรยต้องตรงกับที่หน้าเว็บ IG เคยฝังไว้ในโค้ด ไม่งั้นการ์ดหมวดหน้าแรกจะเปลี่ยนหน้าตา
+ */
 export const DEFAULT_WEB_CATEGORIES: WebCategoryDef[] = [
-  { key: "leather", label: "หนัง", icon: "🟫" },
-  { key: "fabric", label: "ผ้า", icon: "🧵" },
-  { key: "hardware", label: "อะไหล่", icon: "⚙️" },
-  { key: "edge-paint", label: "สีทาขอบ", icon: "🎨" },
+  { key: "leather", label: "หนัง", icon: "🐄", blurb: "หนังวัว แพะ ฟอกฝาด Pull-up" },
+  { key: "fabric", label: "ผ้า", icon: "🧵", blurb: "ผ้าซับใน แคนวาสกันน้ำ" },
+  { key: "hardware", label: "อะไหล่", icon: "⚙️", blurb: "หัวเข็มขัด ซิป หมุด ห่วง" },
+  { key: "edge-paint", label: "สีทาขอบ", icon: "🎨", blurb: "สีทาขอบ น้ำยาเคลือบขอบ" },
 ];
 
 export interface WebCategoryDef {
@@ -39,6 +42,8 @@ export interface WebCategoryDef {
   key: string;
   label: string;
   icon: string;
+  /** คำโปรยสั้น ๆ ใต้ชื่อหมวดบนการ์ดหน้าแรก — เว้นว่างได้ */
+  blurb: string;
 }
 
 export interface FieldMap {
@@ -93,7 +98,12 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
     .slice(0, 40)
     .map((c) => {
       const o = (c ?? {}) as Record<string, unknown>;
-      return { key: cleanCategoryKey(o.key), label: str(o.label).slice(0, 60), icon: str(o.icon).slice(0, 8) };
+      return {
+        key: cleanCategoryKey(o.key),
+        label: str(o.label).slice(0, 60),
+        icon: str(o.icon).slice(0, 8),
+        blurb: str(o.blurb).slice(0, 120),
+      };
     })
     .filter((c) => c.key && c.label && !seenKey.has(c.key) && seenKey.add(c.key) !== undefined);
   const cats = catsRaw ? categories : d.categories;

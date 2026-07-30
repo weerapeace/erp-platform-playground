@@ -51,7 +51,7 @@ const DESC_OPTS = [
   { v: "none", l: "— ไม่ดึง —" },
 ];
 
-type CategoryDef = { key: string; label: string; icon: string };
+type CategoryDef = { key: string; label: string; icon: string; blurb: string };
 
 /** รหัสหมวดต้องปลอดภัยกับ URL (/shop?cat=<key>) — ให้ตรงกับฝั่ง server */
 const cleanKey = (v: string) =>
@@ -139,7 +139,7 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
   const setCats = (next: CategoryDef[]) => setMap((m) => (m ? { ...m, categories: next } : m));
   const editCat = (i: number, p: Partial<CategoryDef>) =>
     setCats(webCatDefs.map((c, idx) => (idx === i ? { ...c, ...p } : c)));
-  const addCat = () => setCats([...webCatDefs, { key: "", label: "", icon: "" }]);
+  const addCat = () => setCats([...webCatDefs, { key: "", label: "", icon: "", blurb: "" }]);
   const removeCat = (i: number) => {
     const c = webCatDefs[i];
     const used = Object.values(map.category.rules).filter((v) => v === c.key).length;
@@ -345,6 +345,14 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
                   onChange={(e) => editCat(i, { key: cleanKey(e.target.value) })}
                   placeholder="รหัส เช่น tools"
                 />
+                <input
+                  className={inputCls}
+                  style={{ width: 240 }}
+                  value={c.blurb ?? ""}
+                  onChange={(e) => editCat(i, { blurb: e.target.value.slice(0, 120) })}
+                  placeholder="คำโปรย เช่น หัวเข็มขัด ซิป หมุด ห่วง"
+                  title="ข้อความสั้น ๆ ใต้ชื่อหมวดบนการ์ดหน้าแรก เว้นว่างได้"
+                />
                 <button onClick={() => removeCat(i)} className="text-xs text-red-500 hover:underline">
                   ลบ
                 </button>
@@ -355,8 +363,9 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
           </ul>
         )}
 
-        <p className="mt-3 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          ⚠️ เพิ่มหมวดใหม่แล้ว <b>เว็บร้านต้องรองรับด้วย</b> — ถ้าเว็บยังไม่รู้จักรหัสนั้น สินค้าจะไปโผล่ในหมวดอื่นแทน
+        <p className="mt-3 text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+          เมนูหมวดในหน้าร้านวัสดุ <b>และการ์ดหมวดบนหน้าแรก</b> วาดจากรายการนี้ทั้งคู่ — เพิ่ม/แก้ที่นี่แล้วขึ้นเว็บเลย
+          ไม่ต้องแก้โค้ด · ลำดับการ์ดเรียงตามลำดับในรายการนี้
         </p>
       </div>
 
