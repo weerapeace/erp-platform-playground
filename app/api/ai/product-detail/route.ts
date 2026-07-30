@@ -64,16 +64,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ── ข้อมูลสินค้าที่มีอยู่ (ใช้เป็นบริบท ไม่ใช่ให้ AI ลอก) ──
   const { data: p } = await admin.from("parent_skus_v2")
-    .select("id, code, name_th, name_en, introduction, description, english_description, brand_id, platform_category_id, cover_image_r2_key, size_length_cm, size_height_cm, size_thickness_cm, custom_size, weight_g, warranty")
+    .select("id, code, name_th, name_en, introduction, description, english_description, brand_id, collection_id, platform_category_id, cover_image_r2_key, size_length_cm, size_height_cm, size_thickness_cm, custom_size, weight_g, warranty")
     .eq("id", parentId).maybeSingle();
   if (!p) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
 
   const brandId = (p.brand_id as string | null) ?? null;
-  const [{ data: brand }, { data: cat }, { data: tagLinks }, { data: allRules }] = await Promise.all([
+  const [{ data: brand }, { data: cat }, { data: tagLinks }, { data: allRules }, { data: coll }] = await Promise.all([
     brandId ? admin.from("brands").select("name").eq("id", brandId).maybeSingle() : Promise.resolve({ data: null }),
     p.platform_category_id ? admin.from("platform_categories").select("name").eq("id", p.platform_category_id).maybeSingle() : Promise.resolve({ data: null }),
     admin.from("parent_skus_v2_product_family_m2m").select("tgt_id, product_families!inner(id, name, name_en)").eq("src_id", parentId),
     admin.from("erp_ai_product_rules").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
+    // Collection (คอลเลกชัน) — คำสั่งของเจ้าของอ้างถึงช่องนี้ตรง ๆ ("ถ้าไม่มี Collection ก็ไม่ต้องใส่")
+    // แต่เดิมไม่เคยส่งค่าไปให้ AI เลย → AI เดาเอาจากชื่อเดิม ชื่อจึงไม่ตรงแม่แบบ
+    p.collection_id ? admin.from("collections").select("name").eq("id", p.collection_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
 
   // ── กฎตามประเภทสินค้า — เข้าเงื่อนไขเมื่อ "ติดแท็กไว้" หรือ "ชื่อสินค้ามีคำที่กำหนด" ──
@@ -275,6 +278,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const facts = [
     `รหัสสินค้า: ${p.code ?? "-"}`,
     brand?.name ? `แบรนด์: ${brand.name}` : "",
+    // ต้องบอกทั้ง "มี" และ "ไม่มี" — ไม่งั้น AI เดาเอาจากชื่อเดิมว่ามี Collection
+    (coll as { name?: string } | null)?.name
+      ? `Collection (คอลเลกชัน): ${(coll as { name?: string }).name}`
+      : "Collection (คอลเลกชัน): ไม่มี — สินค้าตัวนี้ไม่ได้ระบุคอลเลกชัน ห้ามเดาหรือหยิบคำจากชื่อเดิมมาใช้เป็น Collection",
     cat?.name ? `หมวดสินค้า: ${cat.name}` : "",
     tagNames.length ? `แท็ก: ${tagNames.join(", ")}` : "",
     colorSet.length ? `สี/ลายที่มีขาย (${colorSet.length} แบบ): ${colorSet.join(", ")}` : "",
