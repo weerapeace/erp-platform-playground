@@ -9,7 +9,7 @@
 //   → แถวขนาดจะไม่ติ๊กให้อัตโนมัติเสมอ ต้องกดยืนยันเอง
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "@/components/i18n";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
@@ -37,7 +37,7 @@ const SIZE_FIELDS: { key: string; label: string; unit: string }[] = [
 type Sizes = Record<string, number | string | null>;
 type Result = Record<string, string> & {
   image_count?: number; sizes?: Sizes | null; size_source?: string;
-  questions?: string[]; suggestions?: string[]; rules_used?: string[];
+  questions?: string[]; questions_en?: string[]; suggestions?: string[]; rules_used?: string[];
 };
 
 const isBlank = (v: unknown) => {
@@ -516,6 +516,45 @@ export function AiProductDetailModal({
   }, [parentId]);
   const topicLabel = (x: { th: string; en: string }) => (t("th", "en") === "en" && x.en ? x.en : x.th);
 
+  // ── แก้ข้อความในผลลัพธ์ได้เลย + ให้อีกภาษาแปลตามอัตโนมัติ (ไทย↔EN) ──
+  //    คู่ช่อง: ชื่อสินค้า · Introduction · Description  · หยุดพิมพ์ 1.2 วินาทีแล้วค่อยยิงแปล (ไม่ยิงทุกตัวอักษร)
+  const PAIRS: Record<string, { other: string; to: "en" | "th" }> = {
+    name_th: { other: "name_en", to: "en" },
+    name_en: { other: "name_th", to: "th" },
+    introduction: { other: "introduction_en", to: "en" },
+    introduction_en: { other: "introduction", to: "th" },
+    description: { other: "english_description", to: "en" },
+    english_description: { other: "description", to: "th" },
+  };
+  const [syncing, setSyncing] = useState<string | null>(null);
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editField = (key: string, value: string) => {
+    setRes((p) => (p ? { ...p, [key]: value } : p));
+    setPicked((p) => ({ ...p, [key]: true }));            // แก้แล้ว = ติ๊กใช้ให้เลย
+    const pair = PAIRS[key];
+    if (!pair) return;
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => { void syncOther(key, value, pair); }, 1200);
+  };
+  const syncOther = async (key: string, value: string, pair: { other: string; to: "en" | "th" }) => {
+    const src = value.trim();
+    if (!src) return;
+    setSyncing(key);
+    try {
+      const r = await apiFetch("/api/ai/translate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: src.slice(0, 4000), to: pair.to }),
+      });
+      const j = await r.json().catch(() => ({}));
+      const out = String((j?.data?.translated ?? j?.translated) ?? "").trim();
+      if (out) {
+        setRes((p) => (p ? { ...p, [pair.other]: out } : p));
+        setPicked((p) => ({ ...p, [pair.other]: true }));
+      }
+    } catch { /* แปลไม่ได้ก็ปล่อยให้แก้เองต่อ */ }
+    finally { setSyncing(null); }
+  };
+
   const run = useCallback(async (opts?: { withAnswers?: boolean }) => {
     setLoading(true); setErr(null);
     // คำตอบหัวข้อบังคับ ส่งไปทุกครั้ง (ไม่ต้องรอ AI ถาม) · คำตอบคำถามของ AI ส่งเมื่อกด "ตอบแล้วให้คิดใหม่"
@@ -766,7 +805,12 @@ export function AiProductDetailModal({
                       {!isBlank(now) && (
                         <p className="text-[11.5px] text-slate-400 line-through whitespace-pre-wrap break-words mb-1 max-h-16 overflow-y-auto">{now}</p>
                       )}
-                      <p className={`text-[13px] text-slate-700 whitespace-pre-wrap break-words ${f.long ? "max-h-40 overflow-y-auto" : ""}`}>{next}</p>
+                      {/* แก้ข้อความได้ตรงนี้เลย · แก้ฝั่งหนึ่งแล้วอีกฝั่ง (ไทย↔EN) จะแปลตามให้อัตโนมัติ */}
+                      <textarea value={next} rows={f.long ? 5 : 2}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => editField(f.key, e.target.value)}
+                        className="w-full px-2 py-1.5 text-[13px] leading-relaxed text-slate-700 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300" />
+                      {syncing === f.key && <p className="mt-0.5 text-[11px] text-indigo-500">{t("กำลังแปลอีกภาษาให้…", "Translating the other language…")}</p>}
                     </div>
                   </label>
                 );
@@ -816,18 +860,23 @@ export function AiProductDetailModal({
                   <p className="text-[11.5px] text-violet-700 mt-0.5">{t("ตอบเท่าที่รู้ ข้อไหนไม่รู้ปล่อยว่างได้ · ข้อความด้านบนใช้ได้เลยถ้าไม่อยากตอบ", "Answer what you know, leave the rest blank · the text above is usable as-is")}</p>
                 </div>
                 <div className="p-3 space-y-2">
-                  {(res?.questions ?? []).map((q) => (
-                    <div key={q}>
-                      <label className="block text-[12.5px] text-slate-600 mb-1">{q}</label>
-                      <input value={answers[q] ?? ""} onChange={(e) => setAnswers((p) => ({ ...p, [q]: e.target.value }))}
-                        placeholder={t("พิมพ์คำตอบ…", "Type your answer…")}
-                        className="w-full h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300" />
-                    </div>
-                  ))}
+                  {/* คำถามแสดงตามภาษาหน้าจอ (AI ส่งมาทั้งไทย/อังกฤษ) · คำตอบผูกกับคำถามฉบับไทยเสมอ
+                      เพื่อให้สลับภาษาแล้วคำตอบที่พิมพ์ไว้ไม่หาย */}
+                  {(res?.questions ?? []).map((q, i) => {
+                    const label = t("th", "en") === "en" ? ((res?.questions_en ?? [])[i] || q) : q;
+                    return (
+                      <div key={q}>
+                        <label className="block text-[12.5px] text-slate-600 mb-1">{label}</label>
+                        <input value={answers[q] ?? ""} onChange={(e) => setAnswers((p) => ({ ...p, [q]: e.target.value }))}
+                          placeholder={t("พิมพ์คำตอบ…", "Type your answer…")}
+                          className="w-full h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300" />
+                      </div>
+                    );
+                  })}
                   <button type="button" onClick={() => void run({ withAnswers: true })}
                     disabled={loading || Object.values(answers).every((v) => !v.trim())}
                     className="h-8 px-3 text-[12.5px] font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40">
-                    ✓ ตอบแล้ว ให้คิดใหม่
+                    {t("✓ ตอบแล้ว ให้คิดใหม่", "✓ Answered — redraft")}
                   </button>
                 </div>
               </div>

@@ -145,7 +145,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     `"introduction_en":"โปรยเปิดภาษาอังกฤษ ความหมายตรงกับภาษาไทย",`,
     `"english_description":"รายละเอียดภาษาอังกฤษ ขึ้นต้นแต่ละบรรทัดด้วย '- ' ความหมายตรงกับภาษาไทย",`,
     `"sizes":{"size_length_cm":ตัวเลขหรือ null,"size_height_cm":ตัวเลขหรือ null,"size_thickness_cm":ตัวเลขหรือ null,"weight_g":ตัวเลขหรือ null,"warranty":"ข้อความหรือ null","source":"บอกสั้น ๆ ว่าอ่านตัวเลขมาจากไหน เช่น 'รูปที่ 3 เขียนว่า 34*22*12 cm'"},`,
-    `"questions":["คำถามที่อยากถามผู้ใช้ ถ้ามีอะไรที่ไม่แน่ใจหรือดูจากรูปไม่ออก (สูงสุด 5 ข้อ ถามสั้น ๆ ตรงประเด็น เช่น 'ช่องใส่บัตรมีกี่ช่อง?')"],`,
+    `"questions":["คำถามภาษาไทยที่อยากถามผู้ใช้ ถ้ามีอะไรไม่แน่ใจหรือดูจากรูปไม่ออก (สูงสุด 5 ข้อ สั้น ตรงประเด็น)"],`,
+    `"questions_en":["คำถามชุดเดียวกันฉบับภาษาอังกฤษ เรียงลำดับตรงกับ questions"],`,
     `"suggestions":["สิ่งที่ควรเติมข้อมูลในระบบเพื่อให้รายละเอียดสมบูรณ์ขึ้น (สูงสุด 5 ข้อ)"]}`,
     "",
     "กติกาการเขียนให้ได้คุณภาพ (สำคัญ — ปัญหาที่เจอบ่อย):",
@@ -265,6 +266,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     model,
     // ถามกลับ + แนะนำให้เติมข้อมูล (เขียนเสร็จก่อนแล้วค่อยถาม — ไม่บล็อกผู้ใช้)
     questions: list("questions"),
+    questions_en: list("questions_en"),      // คำถามชุดเดียวกันฉบับอังกฤษ (โหมด EN ใช้ตัวนี้)
     suggestions: list("suggestions"),
     rules_used: rules.map((r) => r.name),
   };
