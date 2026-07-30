@@ -113,6 +113,9 @@ export type AttendanceManualPayload = {
   late_minutes: number;
 };
 
+/** เวลาที่ผู้ใช้ระบุช่องเองจากป๊อป "ตรวจ/แก้รายการเวลา" (เข้า / กลับจากพัก / ออก) */
+export type ExplicitScans = { morningIn?: unknown; noonIn?: unknown; finalOut?: unknown };
+
 export const defaultAttendanceRuleConfig: AttendanceRuleConfig = {
   morningCheckInCutoff: "07:50",
   noonCheckInCutoff: "12:50",
@@ -140,8 +143,10 @@ export function isContractActiveOnDate(contract: AttendanceImportContract = {}, 
 }
 
 export function minutesFromTime(value: unknown): number | null {
-  const text = String(value || "").trim();
-  const match = text.match(/^(\d{1,2}):(\d{2})$/);
+  // รับหลายรูปแบบที่คนไทยพิมพ์จริง: 13:40 · 13.40 · 13 40 · 1340 (เดิมรับแค่ 13:40
+  // → พิมพ์ "13.40" ในป๊อปตรวจเวลาแล้วระบบมองว่าช่องว่าง สายเลยไม่ถูกนับ)
+  const text = String(value ?? "").trim().replace(/[.\s]/g, ":");
+  const match = text.match(/^(\d{1,2}):(\d{2})$/) ?? text.match(/^(\d{2})(\d{2})$/);
   if (!match) return null;
   const hours = Number(match[1]);
   const minutes = Number(match[2]);
@@ -190,7 +195,7 @@ export function normalizeScanTimes(scans: unknown[] = []): string[] {
     .map((scan) => ({ scan, minutes: minutesFromTime(scan) }))
     .filter((item): item is { scan: string; minutes: number } => item.minutes !== null)
     .sort((left, right) => left.minutes - right.minutes)
-    .map((item) => item.scan);
+    .map((item) => timeFromMinutes(item.minutes));   // มาตรฐาน HH:MM (กันรูปแบบ 13.40 / 1340 ปนในข้อมูล)
 }
 
 export function classifyScans(scans: unknown[] = [], config = defaultAttendanceRuleConfig) {
@@ -204,10 +209,21 @@ export function classifyScans(scans: unknown[] = [], config = defaultAttendanceR
 
   const morningScans = minutes.filter((item) => item.minutes < morningEnd);
   const noonScans = minutes.filter((item) => item.minutes >= noonStart && item.minutes <= noonEnd);
-  const finalScans = minutes.filter((item) => item.minutes >= finalStart);
 
   const morningIn = morningScans[0]?.scan;
-  const noonIn = noonScans[0]?.scan;
+  let noonIn = noonScans[0]?.scan;
+
+  // กลับจากพัก "สายเกินช่วงที่ยอมรับ" (ช่วงสแกนเที่ยงกว้างกว่าเวลาตัดแค่ ~20 นาที)
+  // ถ้าสแกนครบ 3 ครั้งขึ้นไป: ตัวกลาง (ไม่ใช่ตัวสุดท้าย = สแกนออก) ถือเป็นกลับจากพัก ไม่ว่าจะสายแค่ไหน
+  // เดิมตัวกลางจะหลุดไปนับเป็น "สแกนออก" → สายเที่ยงหายเงียบ กลายเป็น "ปกติ"
+  let noonOutsideWindow = false;
+  if (!noonIn && minutes.length >= 3) {
+    const lastMinutes = minutes[minutes.length - 1].minutes;
+    const rescued = minutes.find((item) => item.minutes > noonEnd && item.minutes < lastMinutes);
+    if (rescued) { noonIn = rescued.scan; noonOutsideWindow = true; }
+  }
+
+  const finalScans = minutes.filter((item) => item.minutes >= finalStart && item.scan !== noonIn);
   const finalOut = finalScans[finalScans.length - 1]?.scan;
   const used = new Set([morningIn, noonIn, finalOut].filter(Boolean));
   const ignoredScans = rawScans.filter((scan) => !used.has(scan));
@@ -215,16 +231,37 @@ export function classifyScans(scans: unknown[] = [], config = defaultAttendanceR
   if (morningScans.length > 1) flags.push("multiple_morning_scans");
   if (noonScans.length > 1) flags.push("multiple_noon_scans");
   if (finalScans.length > 1) flags.push("multiple_final_scans");
+  // ให้คนยืนยันก่อนหักเงิน เพราะเป็นรูปแบบไม่ปกติ (แต่ผลลัพธ์ต้องขึ้น "สาย" ให้เห็น ไม่ใช่ "ปกติ")
+  if (noonOutsideWindow) flags.push("late_noon_outside_window", "manual_review_required");
 
   return { morningIn, noonIn, finalOut, rawScans, ignoredScans, flags: uniqueFlags(flags) };
 }
 
+/** ผู้ใช้กรอกเวลาเองในป๊อป "ตรวจ/แก้" → เชื่อช่องที่เขาระบุ ไม่ต้องเดาใหม่ตามช่วงเวลา */
+function classifyExplicitScans(explicit: ExplicitScans) {
+  // เก็บเป็นรูปแบบมาตรฐาน HH:MM เสมอ (เผื่อผู้ใช้พิมพ์ 13.40 / 1340)
+  const pick = (value: unknown) => {
+    const minutes = minutesFromTime(value);
+    return minutes === null ? undefined : timeFromMinutes(minutes);
+  };
+  const morningIn = pick(explicit.morningIn);
+  const noonIn = pick(explicit.noonIn);
+  const finalOut = pick(explicit.finalOut);
+  return {
+    morningIn, noonIn, finalOut,
+    rawScans: normalizeScanTimes([morningIn, noonIn, finalOut]),
+    ignoredScans: [] as string[],
+    flags: [] as string[],
+  };
+}
+
 export function calculateAttendanceDay(
-  input: { rawScans?: unknown[]; scheduleStatus?: string } = {},
+  input: { rawScans?: unknown[]; scheduleStatus?: string; explicit?: ExplicitScans } = {},
   config = defaultAttendanceRuleConfig,
 ): AttendanceDayResult {
   const scheduleStatus = input.scheduleStatus || "workday";
-  const scans = classifyScans(input.rawScans || [], config);
+  // explicit = ผู้ใช้ระบุมาแล้วว่าช่องไหนคือเข้า/กลับจากพัก/ออก → ห้ามเดาใหม่
+  const scans = input.explicit ? classifyExplicitScans(input.explicit) : classifyScans(input.rawScans || [], config);
   const flags = [...scans.flags];
   const isHoliday = ["holiday", "paid_holiday", "day_off", "off", "scanner_exempt", "outside_contract", "piecework_contract"].includes(scheduleStatus);
 

@@ -261,8 +261,15 @@ function outcomeFor(previewRow: AttendancePreviewRow, decision: RowDecision | un
   // leave จัดการแยก (สร้าง leave_entries + ตั้งแถวเป็นข้าม) — ที่นี่กันไว้เฉย ๆ
   if (decision.kind === "leave") return { status: "skipped", payloads: [], note: "ลา", rawScans: baseRaw };
   // recompute: แก้เวลาเอง → คำนวณสาย/ออกก่อน/ขาด ใหม่ด้วยกฎเดิมของแถวนั้น
+  // decision.scans เรียงตามช่องที่กรอก [เข้า, กลับจากพัก, ออก] → ส่งเป็น explicit ไม่ให้ระบบเดาใหม่
+  // (เดิมโยนรวมเป็นกองเดียว → กลับจากพัก 13:40 หลุดช่วงสแกนเที่ยง กลายเป็น "ปกติ" ทั้งที่สาย 50 นาที)
   const scans = cleanTimes(decision.scans ?? baseRaw);
-  const recomputed = calculateAttendanceDay({ rawScans: scans, scheduleStatus: previewRow.scheduleStatus }, previewRow.ruleConfig);
+  const recomputed = calculateAttendanceDay(
+    decision.scans
+      ? { explicit: { morningIn: decision.scans[0], noonIn: decision.scans[1], finalOut: decision.scans[2] }, scheduleStatus: previewRow.scheduleStatus }
+      : { rawScans: scans, scheduleStatus: previewRow.scheduleStatus },
+    previewRow.ruleConfig,
+  );
   // ถ้ากรอก "ออกก่อน" เอง → ใช้ค่านั้นแทนที่ระบบคำนวณ
   const finalResult = decision.earlyLeaveMinutes != null
     ? { ...recomputed, earlyOutMinutes: Math.max(0, Math.round(decision.earlyLeaveMinutes)) }
@@ -1345,7 +1352,8 @@ function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
     if (absent) return { absent: true, totalLateMinutes: 0, earlyOutMinutes: 0 };
     if (official) return { absent: false, totalLateMinutes: 0, earlyOutMinutes: 0 };
     if (!previewRow) return null;
-    const r = calculateAttendanceDay({ rawScans: cleanTimes([morningIn, noonIn, finalOut]), scheduleStatus: previewRow.scheduleStatus }, previewRow.ruleConfig);
+    // เชื่อช่องที่กรอก (เข้า / กลับจากพัก / ออก) ไม่ให้ระบบเดาใหม่ตามช่วงเวลา — ต้องตรงกับตอนกดบันทึก
+    const r = calculateAttendanceDay({ explicit: { morningIn, noonIn, finalOut }, scheduleStatus: previewRow.scheduleStatus }, previewRow.ruleConfig);
     return { absent: r.absent, totalLateMinutes: r.totalLateMinutes, earlyOutMinutes: earlyOverride ?? r.earlyOutMinutes };
   }, [absent, official, previewRow, morningIn, noonIn, finalOut, earlyOverride]);
 
