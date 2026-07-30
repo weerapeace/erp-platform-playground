@@ -321,7 +321,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       }
     } else {
       await admin.from("erp_creative_subtask_assignees").delete().eq("subtask_id", subtaskId).eq("user_id", user.id);
-      await writeAudit(admin, { action: "subtask:self_leave", entityType: "creative_subtask", entityId: subtaskId, actorId: user.id, actorName: user.email ?? null, metadata: { task_id: id } });
+      // ไม่เหลือผู้รับผิดชอบแล้ว + งานยัง "กำลังทำ" → ย้อนกลับเป็นยังไม่เริ่ม (todo)
+      // เคสจริง: เผลอกด Start แล้วไม่ได้ทำ → กดออก งานต้องกลับไปรอคนมารับ ไม่ค้างเป็น "กำลังทำ" ที่ไม่มีใครทำ
+      let backToTodo = false;
+      const { data: leftA } = await admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId);
+      if (((leftA ?? []) as unknown[]).length === 0 && status === "in_progress") {
+        await admin.from("erp_creative_subtasks").update({ status: "todo", updated_at: new Date().toISOString() }).eq("id", subtaskId);
+        backToTodo = true;
+      }
+      await writeAudit(admin, { action: "subtask:self_leave", entityType: "creative_subtask", entityId: subtaskId, actorId: user.id, actorName: user.email ?? null, metadata: { task_id: id, back_to_todo: backToTodo } });
     }
     await recomputeTaskStatusFromSubtasks(admin, id);
     const { data: row } = await admin.from("erp_creative_subtasks").select("*").eq("id", subtaskId).maybeSingle();
@@ -333,8 +341,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   for (const [k, v] of Object.entries(body)) if (EDITABLE.has(k)) patch[k] = v === "" ? null : v;
 
   // ⑤ แก้ "ผู้รับผิดชอบ" ได้เฉพาะ admin/ผจก./คนสร้างงานแม่
-  if (Array.isArray(body.assignee_ids) && !(isManager || isCreator))
-    return NextResponse.json({ error: "คุณไม่มีสิทธิ์เปลี่ยนผู้รับผิดชอบงานย่อย" }, { status: 403 });
+  //    ยกเว้น "ถอนตัวเองออก" (ออกจากงาน) — ใครก็ทำกับตัวเองได้ ไม่ต้องรอหัวหน้า
+  //    เงื่อนไข: รายชื่อใหม่ = รายชื่อเดิมที่เอาตัวเองออกเท่านั้น (เพิ่ม/ถอนคนอื่นยังต้องมีสิทธิ์)
+  if (Array.isArray(body.assignee_ids) && !(isManager || isCreator)) {
+    const nextIds = (body.assignee_ids as string[]).map(String);
+    const { data: curAsg } = await admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId);
+    const curIds = ((curAsg ?? []) as { user_id: string }[]).map((a) => String(a.user_id));
+    const selfLeave = !!user?.id
+      && curIds.includes(user.id)
+      && !nextIds.includes(user.id)
+      && curIds.filter((id) => id !== user.id).sort().join(",") === [...nextIds].sort().join(",");
+    if (!selfLeave)
+      return NextResponse.json({ error: "คุณไม่มีสิทธิ์เปลี่ยนผู้รับผิดชอบงานย่อย (ถอนตัวเองออกได้เท่านั้น)" }, { status: 403 });
+  }
   // ④ อนุมัติ (status → approved) ได้เฉพาะ admin/ผจก./ผู้ตรวจของงาน (หรือมีสิทธิ์ task_subtask.approve)
   if (patch.status === "approved" && !(isManager || isReviewer || await canPerm(request, "task_subtask.approve")))
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์อนุมัติงานย่อยนี้" }, { status: 403 });

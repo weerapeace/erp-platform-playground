@@ -35,6 +35,12 @@ type Body = {
   extra?: string;
   /** คำตอบของผู้ใช้ต่อคำถามที่ AI ถามกลับรอบก่อน (ถามครั้งเดียว ตอบแล้วห้ามถามซ้ำ) */
   answers?: { q?: string; a?: string }[];
+  /**
+   * ให้เขียนแค่บางกลุ่มช่อง — "name" | "intro" | "desc"
+   * แต่ละกลุ่มพ่วงคู่อังกฤษให้เสมอ (name → name_th + name_en)
+   * ไม่ส่ง = เขียนทุกกลุ่มเหมือนเดิม
+   */
+  fields?: string[];
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -48,6 +54,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const parentId = (body.parent_id ?? "").trim();
   const extra = (body.extra ?? "").trim().slice(0, 500);
   if (!parentId) return NextResponse.json({ error: "ต้องระบุ parent_id" }, { status: 400 });
+
+  // กลุ่มช่องที่สั่งให้เขียนรอบนี้ (ไม่ส่ง = ทุกกลุ่ม) — แต่ละกลุ่มพ่วงคู่อังกฤษเสมอ
+  const ALL_FIELDS = ["name", "intro", "desc"];
+  const asked = Array.isArray(body.fields) ? body.fields.map((f) => String(f).trim()).filter((f) => ALL_FIELDS.includes(f)) : [];
+  const pickFields = asked.length ? [...new Set(asked)] : ALL_FIELDS;
 
   const admin = supabaseAdmin();
 
@@ -148,6 +159,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     `"questions":["คำถามภาษาไทยที่อยากถามผู้ใช้ ถ้ามีอะไรไม่แน่ใจหรือดูจากรูปไม่ออก (สูงสุด 5 ข้อ สั้น ตรงประเด็น)"],`,
     `"questions_en":["คำถามชุดเดียวกันฉบับภาษาอังกฤษ เรียงลำดับตรงกับ questions"],`,
     `"suggestions":["สิ่งที่ควรเติมข้อมูลในระบบเพื่อให้รายละเอียดสมบูรณ์ขึ้น (สูงสุด 5 ข้อ)"]}`,
+    ...(pickFields.length < 3 ? ["",
+      `⚠️ รอบนี้ให้เขียนแค่: ${pickFields.map((f) => ({ name: "ชื่อสินค้า (name_th + name_en)", intro: "Introduction (ไทย + อังกฤษ)", desc: "Description (ไทย + อังกฤษ)" }[f] ?? f)).join(" · ")}`,
+      "ช่องที่ไม่ได้สั่ง ให้ตอบเป็นข้อความว่าง \"\" (ห้ามเขียนอะไรลงไป) — ของเดิมในระบบจะไม่ถูกแตะ",
+    ] : []),
     "",
     "กติกาการเขียนให้ได้คุณภาพ (สำคัญ — ปัญหาที่เจอบ่อย):",
     "- ห้ามเขียนหัวข้อที่ไม่มีข้อมูล เช่น 'อุปกรณ์เสริม: ไม่มี' — ถ้าไม่มีข้อมูล ให้ตัดบรรทัดนั้นทิ้งเลย",
@@ -254,12 +269,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .map((v) => String(v).trim()).filter(Boolean).slice(0, 5);
 
   const data = {
-    name_th: str("name_th", 200),
-    introduction: str("introduction", 1500),
-    description: str("description", 4000),
-    name_en: str("name_en", 200),
-    introduction_en: str("introduction_en", 1500),
-    english_description: str("english_description", 4000),
+    // กันเหนียว: ช่องที่ไม่ได้สั่งให้เขียนรอบนี้ → บังคับเป็นค่าว่าง (เผื่อ AI เขียนมาให้เอง)
+    name_th: pickFields.includes("name") ? str("name_th", 200) : "",
+    introduction: pickFields.includes("intro") ? str("introduction", 1500) : "",
+    description: pickFields.includes("desc") ? str("description", 4000) : "",
+    name_en: pickFields.includes("name") ? str("name_en", 200) : "",
+    introduction_en: pickFields.includes("intro") ? str("introduction_en", 1500) : "",
+    english_description: pickFields.includes("desc") ? str("english_description", 4000) : "",
     sizes: hasSize ? sizes : null,
     size_source: hasSize ? String(rawSizes.source ?? "").trim().slice(0, 200) : "",
     image_count: images.length,

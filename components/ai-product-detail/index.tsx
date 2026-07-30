@@ -496,6 +496,8 @@ export function AiProductDetailModal({
 
   // คำตอบที่ผู้ใช้พิมพ์ตอบคำถามของ AI (ส่งกลับไปตอนกด t("ตอบแล้วให้คิดใหม่", "Answer & redraft"))
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  // เลือกว่าให้ AI เขียนช่องไหนรอบนี้ (แต่ละกลุ่มพ่วงคู่อังกฤษให้เอง) — ค่าเริ่มต้น = ทุกกลุ่ม
+  const [pickFields, setPickFields] = useState<string[]>(["name", "intro", "desc"]);
 
   // ── หัวข้อบังคับจาก "กฎตามประเภทสินค้า" ที่สินค้าตัวนี้เข้าเงื่อนไข ──
   //    โชว์เป็นช่องให้กรอกก่อนกดให้ AI คิด (AI จะไม่ต้องถามกลับ และไม่เดา)
@@ -576,7 +578,7 @@ export function AiProductDetailModal({
     try {
       const r = await apiFetch("/api/ai/product-detail", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parent_id: parentId, extra: extra.trim() || undefined, answers: qa.length ? qa : undefined }),
+        body: JSON.stringify({ parent_id: parentId, extra: extra.trim() || undefined, answers: qa.length ? qa : undefined, fields: pickFields }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j?.error) throw new Error(j?.error || `เรียก AI ไม่สำเร็จ (${r.status})`);
@@ -590,7 +592,7 @@ export function AiProductDetailModal({
     } catch (e) { setErr(e instanceof Error ? e.message : t("เรียก AI ไม่สำเร็จ", "Could not reach AI")); }
     finally { setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parentId, extra, current, answers, topics]);
+  }, [parentId, extra, current, answers, topics, pickFields]);
 
   const rows = res ? FIELDS.filter((f) => String(res[f.key] ?? "").trim()) : [];
   const sizeRows = res?.sizes
@@ -710,6 +712,24 @@ export function AiProductDetailModal({
           </div>
           </ERPModal>
         )}
+
+        {/* เลือกว่ารอบนี้ให้ AI เขียนช่องไหน — กลุ่มที่เลือกได้คู่อังกฤษด้วย · ช่องที่ไม่เลือกของเดิมไม่ถูกแตะ */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[12.5px] font-medium text-slate-600">{t("ให้ AI เขียนช่อง", "Let AI write")}</span>
+          {([["name", t("ชื่อสินค้า", "Product name")], ["intro", "Introduction"], ["desc", "Description"]] as const).map(([k, label]) => {
+            const on = pickFields.includes(k);
+            return (
+              <button key={k} type="button"
+                onClick={() => setPickFields((p) => (p.includes(k) ? (p.length > 1 ? p.filter((x) => x !== k) : p) : [...p, k]))}
+                title={on ? t("กดเพื่อไม่เขียนช่องนี้", "Click to skip this field") : t("กดเพื่อให้เขียนช่องนี้", "Click to include this field")}
+                className={`h-7 px-2.5 text-[12px] rounded-full border ${on
+                  ? "bg-fuchsia-50 border-fuchsia-300 text-fuchsia-700 font-medium" : "bg-white border-slate-200 text-slate-400 hover:bg-slate-50"}`}>
+                {on ? "✓ " : ""}{label}
+              </button>
+            );
+          })}
+          <span className="text-[11.5px] text-slate-400">{t("(กลุ่มที่เลือก ได้ฝั่งอังกฤษด้วย)", "(each group includes its English pair)")}</span>
+        </div>
 
         {/* เลือกแท็กประเภทสินค้าได้ตรงนี้เลย (2 ภาษา) — แท็กมีผลกับกฎ AI + เป็นบริบทตอนเขียน */}
         <TagPicker parentId={parentId} />

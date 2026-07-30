@@ -542,7 +542,13 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const isAssignee = !!user?.id && sub.assignees.some((a) => a.id === user.id);
   const canSelfJoin = !!user?.id && !isSubDone(st) && st !== "canceled";
   const selfJoin = async () => { await patch({ self_join: true }); pushToast("success", t("เพิ่มตัวเองเป็นผู้ช่วยแล้ว", "You joined as a helper")); };
-  const selfLeave = async () => { await patch({ self_leave: true }); pushToast("info", t("เอาตัวเองออกจากผู้ช่วยแล้ว", "You left as a helper")); };
+  const selfLeave = async () => {
+    const lastOne = sub.assignees.length === 1 && sub.status === "in_progress";
+    await patch({ self_leave: true });
+    pushToast("info", lastOne
+      ? t("ออกจากงานแล้ว — งานกลับไปเป็น \"ยังไม่เริ่ม\" ให้คนอื่นมารับ", "You left — the task is back to \"not started\" for someone else")
+      : t("เอาตัวเองออกจากผู้รับผิดชอบแล้ว", "You removed yourself from assignees"));
+  };
 
   // ③ ส่งงาน/แนบงาน: เปิดป๊อปอัป (แนบรูป/ลิงก์ + กดส่ง) — การ์ดไม่ต้องโชว์ฟอร์มแนบเอง
   const openWork = () => setWorkOpen(true);
@@ -649,7 +655,13 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
                 {sub.assignees.map((a) => <AssigneeChip key={a.id} a={a} />)}
               </>}
               {canSelfJoin && (isAssignee
-                ? <button disabled={busy} onClick={selfLeave} title={t("เอาตัวเองออกจากผู้ช่วย", "Leave as helper")} className="text-[11px] text-slate-400 border border-slate-200 rounded-md px-1.5 py-0.5 hover:bg-slate-50 disabled:opacity-50">↩︎ {t("ออกจากผู้ช่วย", "Leave")}</button>
+                ? <button disabled={busy} onClick={selfLeave}
+                    title={sub.assignees.length === 1 && st === "in_progress"
+                      ? t("ออกจากงานนี้ — ไม่เหลือผู้รับผิดชอบ งานจะกลับไปเป็น \"ยังไม่เริ่ม\" ให้คนอื่นมารับ", "Leave this task — no assignee left, it goes back to \"not started\"")
+                      : t("เอาตัวเองออกจากผู้รับผิดชอบ (คนอื่นทำต่อได้)", "Remove yourself from assignees (others continue)")}
+                    className="text-[11px] text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 hover:bg-slate-50 disabled:opacity-50">
+                    ↩︎ {sub.assignees.length === 1 && st === "in_progress" ? t("ออกจากงาน (กลับเป็นยังไม่เริ่ม)", "Leave (back to not started)") : t("ออกจากงาน", "Leave")}
+                  </button>
                 : <button disabled={busy} onClick={selfJoin} title={t("ไปช่วยทำงานนี้ (เพิ่มตัวเองเป็นผู้ช่วย)", "Help with this (add yourself)")} className="text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 hover:bg-emerald-100 disabled:opacity-50">✋ {t("ช่วยทำงานนี้", "Help with this")}</button>)}
             </div>
           )}
