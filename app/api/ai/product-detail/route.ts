@@ -15,7 +15,7 @@ import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { CAPTION_MODEL, chatJson, imageParts, imagesToDataUrls, loadPromptRows, openAiKey, pickJobPrompt, PRODUCT_DETAIL_KEY } from "@/lib/ai-caption";
+import { CAPTION_MODEL, productDetailModel, chatJson, imageParts, imagesToDataUrls, loadPromptRows, openAiKey, pickJobPrompt, PRODUCT_DETAIL_KEY } from "@/lib/ai-caption";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -148,6 +148,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     `"questions":["คำถามที่อยากถามผู้ใช้ ถ้ามีอะไรที่ไม่แน่ใจหรือดูจากรูปไม่ออก (สูงสุด 5 ข้อ ถามสั้น ๆ ตรงประเด็น เช่น 'ช่องใส่บัตรมีกี่ช่อง?')"],`,
     `"suggestions":["สิ่งที่ควรเติมข้อมูลในระบบเพื่อให้รายละเอียดสมบูรณ์ขึ้น (สูงสุด 5 ข้อ)"]}`,
     "",
+    "กติกาการเขียนให้ได้คุณภาพ (สำคัญ — ปัญหาที่เจอบ่อย):",
+    "- ห้ามเขียนหัวข้อที่ไม่มีข้อมูล เช่น 'อุปกรณ์เสริม: ไม่มี' — ถ้าไม่มีข้อมูล ให้ตัดบรรทัดนั้นทิ้งเลย",
+    "- ห้ามใช้ชื่อหัวข้อผิดรูป เช่น 'ช่องการใช้งาน' · ใช้คำที่คนไทยเขียนจริง: วัสดุ / ขนาด / การใช้งาน / จุดเด่น / ในกล่อง",
+    "- ต้องใช้ข้อมูลจริงที่ให้ไว้ด้านล่างให้หมด (น้ำหนัก ประกัน ไซซ์ที่มี ราคา ฯลฯ) อย่าปล่อยทิ้ง",
+    "- ห้ามเขียนคำซ้ำซ้อนแบบ 'ขนาดสินค้า: ขนาด L ...' → เขียน 'ขนาด: L 37-41 นิ้ว · M 33-37 นิ้ว'",
+    "- Introduction ต้องเป็นประโยคขายที่อ่านลื่น 2-3 บรรทัด ไม่ใช่การไล่คุณสมบัติ",
+    "- Description ให้ขึ้นต้นด้วย '- ' เรียงจากสิ่งที่ลูกค้าสนใจก่อน (วัสดุ → ขนาด/ไซซ์ → การใช้งาน → จุดเด่น → ประกัน)",
+    "",
+    "ตัวอย่างบรรทัด Description ที่ดี (เลียนแบบสไตล์นี้ ไม่ใช่ลอกเนื้อหา):",
+    "- วัสดุ: หนังวัวแท้ผิวเรียบ เย็บขอบเก็บงานเรียบร้อย ยิ่งใช้ยิ่งขึ้นเงา",
+    "- ไซซ์: S (29-33 นิ้ว) · M (33-37 นิ้ว) · L (37-41 นิ้ว) — วัดรอบเอวจริงแล้วเลือกไซซ์ที่ครอบ",
+    "- หัวเข็มขัด: แบบหัวเข็ม สับได้หลายรู ปรับความยาวได้ละเอียด",
+    "- งานสลักชื่อ: สลักชื่อบนสายได้ตามต้องการ เหมาะเป็นของขวัญให้คนสำคัญ",
+    "",
     "กติกาเรื่องคำถาม:",
     "- ต้องเขียนข้อความให้ครบทุกช่องก่อนเสมอ ห้ามรอคำตอบ — ส่วนที่ไม่แน่ใจให้เขียนแบบกลาง ๆ ไม่ระบุตัวเลข/ข้อเท็จจริงที่ยังไม่รู้",
     "- ถ้ามีหัวข้อที่ 'ต้องมีเสมอ' แต่มองจากรูปไม่ออก ให้ถามใน questions ทุกครั้ง (เช่น จำนวนช่องใส่บัตร)",
@@ -162,14 +176,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     "ห้ามใส่คีย์อื่นนอกจากนี้",
   ].join("\n");
 
+  const pos = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
   const sizeTxt = [
-    p.size_length_cm && `กว้าง ${p.size_length_cm} ซม.`,
-    p.size_height_cm && `สูง ${p.size_height_cm} ซม.`,
-    p.size_thickness_cm && `หนา ${p.size_thickness_cm} ซม.`,
+    pos(p.size_length_cm) && `กว้าง ${pos(p.size_length_cm)} ซม.`,
+    pos(p.size_height_cm) && `สูง ${pos(p.size_height_cm)} ซม.`,
+    pos(p.size_thickness_cm) && `หนา ${pos(p.size_thickness_cm)} ซม.`,
     p.custom_size && `ขนาดพิเศษ: ${p.custom_size}`,
-    p.weight_g && `น้ำหนัก ${p.weight_g} กรัม`,
+    pos(p.weight_g) && `น้ำหนัก ${pos(p.weight_g)} กรัม`,
     p.warranty && `ประกัน ${p.warranty}`,
   ].filter(Boolean).join(" · ");
+
+  // ── ข้อมูลจาก SKU ลูก: สี/ลาย + ไซซ์ที่มีจริง + ช่วงราคา ──
+  //    AI เขียนได้แม่นขึ้นมาก (เดิมไม่รู้ว่าสินค้ามีสีอะไร ไซซ์อะไร ราคาเท่าไร → เขียนกว้าง ๆ)
+  const { data: kids } = await admin.from("skus_v2")
+    .select("color_th, list_price, attribute_values").eq("parent_sku_id", parentId).limit(200);
+  const kidRows = (kids ?? []) as { color_th: string | null; list_price: number | string | null; attribute_values: Record<string, unknown> | null }[];
+  const colorSet = [...new Set(kidRows.map((k) => String(k.color_th ?? "").split("/")[0].trim()).filter(Boolean))].slice(0, 20);
+  const variantSet = [...new Set(kidRows
+    .map((k) => (k.attribute_values?.variant_option as { value?: string } | undefined)?.value)
+    .filter((v): v is string => !!v))].slice(0, 20);
+  const prices = kidRows.map((k) => Number(k.list_price)).filter((n) => Number.isFinite(n) && n > 0);
+  const priceTxt = prices.length
+    ? (Math.min(...prices) === Math.max(...prices) ? `${Math.min(...prices).toLocaleString("th-TH")} บาท` : `${Math.min(...prices).toLocaleString("th-TH")}-${Math.max(...prices).toLocaleString("th-TH")} บาท`)
+    : "";
 
   // คำตอบที่ผู้ใช้ตอบคำถามของ AI รอบก่อน — เชื่อถือได้เท่าข้อมูลในระบบ
   const answerTxt = (body.answers ?? [])
@@ -181,6 +210,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     brand?.name ? `แบรนด์: ${brand.name}` : "",
     cat?.name ? `หมวดสินค้า: ${cat.name}` : "",
     tagNames.length ? `แท็ก: ${tagNames.join(", ")}` : "",
+    colorSet.length ? `สี/ลายที่มีขาย (${colorSet.length} แบบ): ${colorSet.join(", ")}` : "",
+    variantSet.length ? `ไซซ์/แบบย่อยที่มีจริง: ${variantSet.join(", ")}` : "",
+    priceTxt ? `ราคาขาย: ${priceTxt} (ใช้เป็นบริบทได้ แต่ห้ามเขียนราคาลงในข้อความ)` : "",
     p.name_th ? `ชื่อเดิม (ไทย): ${p.name_th}` : "",
     p.introduction ? `Introduction เดิม: ${String(p.introduction).slice(0, 600)}` : "",
     p.description ? `Description เดิม: ${String(p.description).slice(0, 900)}` : "",
@@ -191,9 +223,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     images.length ? `มีรูปสินค้าให้ดู ${images.length} รูป` : "ไม่มีรูปให้ดู — เขียนจากข้อมูลข้อความเท่านั้น และเขียนแบบไม่ระบุรายละเอียดที่มองไม่เห็น",
   ].filter(Boolean).join("\n");
 
+  // โมเดลที่ผู้ดูแลเลือกไว้ในหน้าตั้งค่า (ไม่ตั้ง = ค่าเริ่มต้น gpt-4o-mini)
+  const model = await productDetailModel();
   let out: Record<string, unknown>;
   try {
-    out = await chatJson(system, [{ type: "text", text: facts }, ...imageParts(images)], 1700);
+    out = await chatJson(system, [{ type: "text", text: facts }, ...imageParts(images)], 1700, model);
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "AI ตอบกลับไม่สำเร็จ" }, { status: 502 });
   }
@@ -228,6 +262,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     sizes: hasSize ? sizes : null,
     size_source: hasSize ? String(rawSizes.source ?? "").trim().slice(0, 200) : "",
     image_count: images.length,
+    model,
     // ถามกลับ + แนะนำให้เติมข้อมูล (เขียนเสร็จก่อนแล้วค่อยถาม — ไม่บล็อกผู้ใช้)
     questions: list("questions"),
     suggestions: list("suggestions"),
@@ -243,7 +278,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     await writeAudit(admin, {
       action: "ai_product_detail", entityType: "parent_skus_v2", entityId: parentId,
       actorId: u?.user?.id ?? null, actorName: u?.user?.email ?? null,
-      metadata: { code: p.code ?? null, images: images.length, brand: brand?.name ?? null, has_extra: !!extra, model: CAPTION_MODEL },
+      metadata: { code: p.code ?? null, images: images.length, brand: brand?.name ?? null, has_extra: !!extra, model },
     });
   } catch { /* audit ล้มไม่ควรทำให้ผู้ใช้เสียงาน */ }
 

@@ -52,6 +52,69 @@ type PromptRow = { brand_id: string | null; platform: string | null; prompt: str
 type TagRow = { id: string; name: string; name_en?: string | null };
 
 /**
+ * เลือกโมเดล AI ที่ใช้เขียน (เก็บที่ ui_config key = ai_product_model)
+ * โชว์ราคาประมาณต่อสินค้า 1 ตัวให้เห็นก่อนเลือก — คิดจากงานจริง (รูป 5 ใบ ≈ 14,000 token เข้า + 1,400 ออก)
+ */
+const MODEL_CHOICES: { id: string; label: string; note: string; bahtPerItem: string }[] = [
+  { id: "gpt-4o-mini",  label: "gpt-4o-mini",  note: "ถูกสุด · งานเขียนพื้น ๆ",            bahtPerItem: "~0.10" },
+  { id: "gpt-4.1-mini", label: "gpt-4.1-mini", note: "คุ้มสุด · เขียนไทยเรียบกว่า ตามคำสั่งดีกว่า", bahtPerItem: "~0.28" },
+  { id: "gpt-4o",       label: "gpt-4o",       note: "คุณภาพสูง · งานเขียนดี",              bahtPerItem: "~1.8" },
+  { id: "gpt-4.1",      label: "gpt-4.1",      note: "คุณภาพสูง รุ่นใหม่ · ตามคำสั่งเป๊ะสุด",   bahtPerItem: "~1.5" },
+];
+
+function ModelPicker() {
+  const [model, setModel] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    apiFetch("/api/ui-config?key=ai_product_model").then((r) => r.json())
+      .then((j) => setModel(String((j.value ?? {}).model ?? "gpt-4o-mini")))
+      .catch(() => setModel("gpt-4o-mini"));
+  }, []);
+
+  const save = async (id: string) => {
+    setBusy(true); setMsg("");
+    try {
+      const j = await apiFetch("/api/ui-config", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "ai_product_model", value: { model: id } }),
+      }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      setModel(id); setMsg("บันทึกแล้ว — กด “ให้คิดใหม่” เพื่อใช้โมเดลนี้");
+    } catch (e) { setMsg(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-2.5 mb-2">
+      <p className="text-[12px] font-medium text-slate-600 mb-1.5">
+        🧠 โมเดล AI ที่ใช้เขียน <span className="font-normal text-slate-400">· ยิ่งแพงยิ่งเขียนดี — ราคาต่อสินค้า 1 ตัว (รูป ~5 ใบ)</span>
+      </p>
+      <div className="space-y-1">
+        {MODEL_CHOICES.map((m) => {
+          const on = model === m.id;
+          return (
+            <button key={m.id} type="button" disabled={busy} onClick={() => void save(m.id)}
+              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition ${on
+                ? "border-fuchsia-300 bg-fuchsia-50" : "border-slate-200 hover:bg-slate-50"} disabled:opacity-50`}>
+              <span className={`w-4 h-4 rounded-full border-2 shrink-0 ${on ? "border-fuchsia-500 bg-fuchsia-500" : "border-slate-300"}`} />
+              <span className="text-[12.5px] font-medium text-slate-700 w-[110px] shrink-0">{m.label}</span>
+              <span className="text-[11.5px] text-slate-500 flex-1">{m.note}</span>
+              <span className="text-[11.5px] font-semibold text-slate-600 tabular-nums">{m.bahtPerItem} บาท</span>
+            </button>
+          );
+        })}
+      </div>
+      {msg && <p className="mt-1.5 text-[11.5px] text-slate-500">{msg}</p>}
+      <p className="mt-1 text-[11px] text-slate-400">
+        ทั้งระบบ 1,482 สินค้า: gpt-4o-mini ≈ 150 บาท · gpt-4.1-mini ≈ 410 บาท · gpt-4o ≈ 2,700 บาท
+      </p>
+    </div>
+  );
+}
+
+/**
  * เลือกแท็กให้สินค้าได้จากในป๊อป AI เลย (ไม่ต้องออกไปหน้าอื่น)
  * แท็กมีผลกับ AI 2 ทาง: ① ใช้จับ "กฎตามประเภทสินค้า"  ② ส่งเข้า prompt ให้ AI รู้ว่าสินค้าเป็นของประเภทไหน
  * แสดง 2 ภาษา (ไทย · EN) — แท็กไหนยังไม่มีชื่ออังกฤษ เติมได้ในที่เดียวกัน
@@ -530,14 +593,23 @@ export function AiProductDetailModal({
         {/* ⚙ ตั้งคำสั่ง AI — แก้ได้ในป๊อปนี้เลย ไม่ต้องออกไปหน้าตั้งค่า */}
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-[12.5px] text-slate-500">{t("คำสั่งที่ AI ใช้เขียน (ตั้งได้ทั้งค่ากลางและเฉพาะแบรนด์)", "The prompt AI writes with (global or per brand)")}</span>
-          <button type="button" onClick={() => setCfgOpen((o) => !o)}
+          <button type="button" onClick={() => setCfgOpen(true)}
             className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-            {cfgOpen ? t("▲ ซ่อนคำสั่ง", "▲ Hide prompt") : t("⚙ ตั้งค่าคำสั่ง AI", "⚙ AI prompt settings")}
+            {t("⚙ ตั้งค่าคำสั่ง AI", "⚙ AI prompt settings")}
           </button>
         </div>
 
+        {/* ตั้งค่าคำสั่ง AI = ป๊อปแยก (ซ้อนบนป๊อปนี้) — ไม่กางในหน้าให้ยาว เลื่อนหาของยาก */}
         {cfgOpen && (
-          <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+          <ERPModal open onClose={() => setCfgOpen(false)} size="lg"
+            title={t("⚙ ตั้งค่าคำสั่ง AI", "⚙ AI prompt settings")}
+            description={t("คำสั่งหลัก = ใช้กับทุกสินค้า/ต่อแบรนด์ · กฎตามประเภทสินค้า = ใช้เมื่อเข้าเงื่อนไขแท็ก/ชื่อ", "Main prompt applies to all products or per brand · Rules apply when tag/name matches")}
+            footer={
+              <div className="flex justify-end w-full">
+                <button onClick={() => setCfgOpen(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+              </div>
+            }>
+          <div className="space-y-2">
             {/* 2 แท็บ: คำสั่งหลัก (ทุกสินค้า/ต่อแบรนด์) · กฎตามประเภทสินค้า (แท็ก/คำในชื่อ) */}
             <div className="flex gap-1 border-b border-slate-200 -mx-3 px-3 pb-1.5">
               {([["main", t("คำสั่งหลัก", "Main prompt")], ["rules", t("กฎตามประเภทสินค้า", "Rules by product type")]] as const).map(([k, label]) => (
@@ -552,6 +624,7 @@ export function AiProductDetailModal({
               <RulesEditor brandId={brandId} suggestKeyword={suggestKeyword} />
             ) : (
             <>
+            <ModelPicker />
             <div className="flex items-center gap-2 flex-wrap">
               <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden bg-white">
                 <button type="button" onClick={() => setCfgScope("global")}
@@ -591,6 +664,7 @@ export function AiProductDetailModal({
             </>
             )}
           </div>
+          </ERPModal>
         )}
 
         {/* เลือกแท็กประเภทสินค้าได้ตรงนี้เลย (2 ภาษา) — แท็กมีผลกับกฎ AI + เป็นบริบทตอนเขียน */}

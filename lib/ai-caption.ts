@@ -6,6 +6,27 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { r2GetObject } from "@/lib/r2";
 
 export const CAPTION_MODEL = process.env.OPENAI_CAPTION_MODEL || "gpt-4o-mini";
+
+/**
+ * โมเดลที่เลือกได้ในหน้าตั้งค่า (ui_config key = "ai_product_model")
+ * ราคา = บาทต่อ 1 ล้าน token (อัตรา 36 บาท/USD) — เอาไว้โชว์ให้เจ้าของเห็นก่อนเลือก
+ */
+export const AI_MODEL_CHOICES: { id: string; label: string; note: string; inPerM: number; outPerM: number }[] = [
+  { id: "gpt-4o-mini", label: "gpt-4o-mini (ถูกสุด)", note: "เร็ว ประหยัด · งานเขียนไทยพื้น ๆ", inPerM: 5.4, outPerM: 21.6 },
+  { id: "gpt-4.1-mini", label: "gpt-4.1-mini (คุ้มสุด)", note: "เขียนไทยเรียบกว่า ตามคำสั่งดีกว่า", inPerM: 14.4, outPerM: 57.6 },
+  { id: "gpt-4o", label: "gpt-4o (คุณภาพสูง)", note: "งานเขียนดีสุดในสาย OpenAI", inPerM: 90, outPerM: 360 },
+  { id: "gpt-4.1", label: "gpt-4.1 (คุณภาพสูง รุ่นใหม่)", note: "ตามคำสั่งเป๊ะ เขียนยาวได้ดี", inPerM: 72, outPerM: 288 },
+];
+
+/** โมเดลที่ใช้เขียนรายละเอียดสินค้า — อ่านจากหน้าตั้งค่าก่อน แล้วค่อย env/ค่าเริ่มต้น */
+export async function productDetailModel(): Promise<string> {
+  try {
+    const { data } = await supabaseAdmin().from("ui_config").select("value").eq("key", "ai_product_model").maybeSingle();
+    const picked = String(((data as { value?: Record<string, unknown> } | null)?.value ?? {}).model ?? "").trim();
+    if (picked && AI_MODEL_CHOICES.some((m) => m.id === picked)) return picked;
+  } catch { /* อ่านค่าไม่ได้ → ใช้ค่าเริ่มต้น */ }
+  return CAPTION_MODEL;
+}
 export const MAX_IMAGES = 7;   // เพดานรูปต่อครั้ง — รูปคือส่วนที่กิน token มากที่สุด (~2,800 token/รูป)
 export const FALLBACK_PROMPT = "เขียนแคปชั่นภาษาไทยสั้น ๆ 2-4 บรรทัดจากรูปที่ให้มา โทนเป็นมิตร ชวนซื้อแต่ไม่ hard sell · ห้ามแต่งข้อมูลที่ไม่เห็นในรูป · ไม่ต้องใส่แฮชแท็กในแคปชั่น";
 
@@ -57,13 +78,13 @@ export async function imagesToDataUrls(keys: string[]): Promise<string[]> {
 }
 
 /** เรียก OpenAI แบบบังคับตอบ JSON · error เป็นข้อความไทยพร้อมโชว์ให้ผู้ใช้ */
-export async function chatJson(system: string, userContent: unknown[], maxTokens: number): Promise<Record<string, unknown>> {
+export async function chatJson(system: string, userContent: unknown[], maxTokens: number, model?: string): Promise<Record<string, unknown>> {
   const key = openAiKey();
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: CAPTION_MODEL,
+      model: model || CAPTION_MODEL,
       response_format: { type: "json_object" },
       max_tokens: maxTokens,
       messages: [{ role: "system", content: system }, { role: "user", content: userContent }],
