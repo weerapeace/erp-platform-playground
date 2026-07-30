@@ -437,15 +437,22 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
 }
 
 // ---- เพิ่ม "แบบ/ไซส์" ให้สีที่มีอยู่ (สร้างหลาย SKU ลูกทีเดียว) — ใช้กับตารางที่จัดกลุ่ม (SKU ลูก) ----
-function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupField, base, existingCodes, onDone, onClose }: {
+//      ส่ง bases มาได้หลายตัว = สร้างแบบตาราง "ทุกสีที่ติ๊ก × ทุกไซส์ที่กรอก" ในครั้งเดียว
+function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupField, bases, existingCodes, onDone, onClose }: {
   moduleKey: string; fkField: string; parentValue: string | number;
   titleField: string; groupField: string;
-  base: Record<string, unknown>; existingCodes: Set<string>;
+  bases: Record<string, unknown>[]; existingCodes: Set<string>;
   onDone: (created: number, skipped: number) => void; onClose: () => void;
 }) {
+  const nameOf = (b: Record<string, unknown>) => String(b.color_th ?? b[groupField] ?? b.color ?? String(b[titleField] ?? ""));
+  const multi = bases.length > 1;
+  // สีที่ติ๊กไว้ (โหมดหลายสี) — ค่าเริ่มต้นติ๊กทุกสี
+  const [picked, setPicked] = useState<Set<string>>(new Set(bases.map((b) => String(b.id))));
+  const chosen = multi ? bases.filter((b) => picked.has(String(b.id))) : bases;
+  const base = bases[0] ?? {};
   const baseCode = String(base[titleField] ?? "");
   // ชื่อสีสำหรับตั้งชื่อ = color_th ของตัวฐาน (ไทย) · จัดกลุ่มด้วยฟิลด์อื่น (เช่น color) ได้
-  const colorLabel = String(base.color_th ?? base[groupField] ?? base.color ?? "");
+  const colorLabel = nameOf(base);
   const [optName, setOptName] = useState("แบบพิมพ์");
   const [opts, setOpts] = useState<{ code: string; value: string }[]>([{ code: "", value: "" }]);
   const [saving, setSaving] = useState(false);
@@ -458,28 +465,34 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
   const create = async () => {
     const rows = opts.map((o) => ({ code: o.code.trim(), value: o.value.trim() })).filter((o) => o.code && o.value);
     if (!rows.length) { setMsg("กรอกตัวย่อ (รหัส) + ชื่ออย่างน้อย 1 แบบ"); return; }
+    if (chosen.length === 0) { setMsg("ติ๊กเลือกสีอย่างน้อย 1 สี"); return; }
     setSaving(true); setMsg(null);
     let ok = 0, skip = 0;
-    for (const o of rows) {
-      const code = baseCode + o.code;
-      if (existingCodes.has(code)) { skip++; continue; }
-      const body: Record<string, unknown> = {
-        [fkField]: parentValue,
-        [titleField]: code,
-        name_th: `${colorLabel} / ${o.value}`,
-        color: base.color ?? colorLabel,                 // สีฐาน (ใช้จัดกลุ่ม)
-        color_th: `${colorLabel} / ${o.value}`,          // ชื่อเต็ม (= name_th) — platform ดึงจากนี่
-        list_price: base.list_price ?? null,
-        fake_price: base.fake_price ?? null,
-        attribute_values: { variant_option: { code: o.code, name: optName, value: o.value } },
-        is_active: true,
-      };
-      try {
-        const res = await apiFetch(`/api/master-v2/${moduleKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok || j.error) throw new Error(j.error || "ผิดพลาด");
-        ok++;
-      } catch { skip++; }
+    // ทุกสีที่เลือก × ทุกแบบ/ไซส์ที่กรอก
+    for (const b of chosen) {
+      const bCode = String(b[titleField] ?? "");
+      const bLabel = nameOf(b);
+      for (const o of rows) {
+        const code = bCode + o.code;
+        if (existingCodes.has(code)) { skip++; continue; }
+        const body: Record<string, unknown> = {
+          [fkField]: parentValue,
+          [titleField]: code,
+          name_th: `${bLabel} / ${o.value}`,
+          color: b.color ?? bLabel,                        // สีฐาน (ใช้จัดกลุ่ม)
+          color_th: `${bLabel} / ${o.value}`,              // ชื่อเต็ม (= name_th) — platform ดึงจากนี่
+          list_price: b.list_price ?? null,
+          fake_price: b.fake_price ?? null,
+          attribute_values: { variant_option: { code: o.code, name: optName, value: o.value } },
+          is_active: true,
+        };
+        try {
+          const res = await apiFetch(`/api/master-v2/${moduleKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || j.error) throw new Error(j.error || "ผิดพลาด");
+          ok++;
+        } catch { skip++; }
+      }
     }
     setSaving(false);
     onDone(ok, skip);
@@ -489,11 +502,41 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
     <div className="fixed inset-0 z-[125] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
       <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">＋ เพิ่มแบบ/ไซส์ ให้สี “{colorLabel}”</h3>
+          <h3 className="text-sm font-semibold text-slate-800">
+            {multi ? `＋ เพิ่มแบบ/ไซส์ ให้หลายสี (${bases.length} สี)` : `＋ เพิ่มแบบ/ไซส์ ให้สี “${colorLabel}”`}
+          </h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          <div className="text-[11px] text-slate-400">รหัสฐาน <b className="text-slate-600">{baseCode}</b> · รหัสใหม่ = {baseCode}<span className="text-emerald-600">+ตัวย่อ</span> · ชื่อ = สี / ชื่อแบบ · ราคาก๊อปจากตัวฐาน</div>
+          <div className="text-[11px] text-slate-400">
+            {multi
+              ? <>รหัสใหม่ = <b className="text-slate-600">รหัสของแต่ละสี</b><span className="text-emerald-600">+ตัวย่อ</span> · ชื่อ = สี / ชื่อแบบ · ราคาก๊อปจากสีนั้น ๆ</>
+              : <>รหัสฐาน <b className="text-slate-600">{baseCode}</b> · รหัสใหม่ = {baseCode}<span className="text-emerald-600">+ตัวย่อ</span> · ชื่อ = สี / ชื่อแบบ · ราคาก๊อปจากตัวฐาน</>}
+          </div>
+
+          {/* โหมดหลายสี: ติ๊กว่าจะใส่แบบ/ไซส์ให้สีไหน (เริ่มต้นติ๊กทุกสี) */}
+          {multi && (
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs text-slate-500">ใส่ให้สี</span>
+                <button type="button" onClick={() => setPicked(new Set(bases.map((b) => String(b.id))))} className="text-[11px] text-blue-600 hover:underline">เลือกทั้งหมด</button>
+                <button type="button" onClick={() => setPicked(new Set())} className="text-[11px] text-slate-400 hover:underline">ล้าง</button>
+                <span className="text-[11px] text-slate-400 ml-auto">เลือกแล้ว {picked.size}/{bases.length}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto border border-slate-100 rounded-lg p-2">
+                {bases.map((b) => {
+                  const id = String(b.id); const on = picked.has(id);
+                  return (
+                    <button key={id} type="button"
+                      onClick={() => setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; })}
+                      className={`h-7 px-2 text-[11px] rounded-full border ${on ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                      {nameOf(b)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <label className="text-xs text-slate-500 w-20 flex-shrink-0">ชุดตัวเลือก</label>
             <input value={optName} onChange={(e) => setOptName(e.target.value)} placeholder="เช่น แบบพิมพ์ / ไซส์"
@@ -523,7 +566,9 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
         </div>
         <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
           <button type="button" onClick={onClose} disabled={saving} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
-          <button type="button" onClick={create} disabled={saving} className="h-8 px-4 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-50">{saving ? "กำลังสร้าง…" : "สร้าง"}</button>
+          <button type="button" onClick={create} disabled={saving} className="h-8 px-4 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-50">
+            {saving ? "กำลังสร้าง…" : `สร้าง${(() => { const n = chosen.length * opts.filter((o) => o.code.trim() && o.value.trim()).length; return n > 0 ? ` ${n} รายการ` : ""; })()}`}
+          </button>
         </div>
       </div>
     </div>
@@ -649,7 +694,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const { user } = useAuth();
   const [dropRowId, setDropRowId]         = useState<string | null>(null);   // แถวที่กำลังลากรูปมาวาง (ไฮไลต์)
   const [uploadingRowId, setUploadingRowId] = useState<string | null>(null); // แถวที่กำลังอัปรูป (สปินเนอร์)
-  const [variantBase, setVariantBase] = useState<Record<string, unknown> | null>(null);   // เปิดโมดัล "เพิ่มแบบ/ไซส์" ให้กลุ่มสี (base = แถวฐานของสีนั้น)
+  // เปิดโมดัล "เพิ่มแบบ/ไซส์" — 1 ตัว = ให้สีนั้น · หลายตัว = ตารางสี × ไซส์ (ปุ่มระดับตาราง)
+  const [variantBases, setVariantBases] = useState<Record<string, unknown>[] | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());   // id ตัวหลักที่ "พับ" ตัวย่อยอยู่ (ว่าง = ขยายหมด)
   // จับคู่ด้วยฟิลด์ไหนของพ่อ: 'id' = ลิงก์ id ปกติ (ใช้ recordId) · อื่นๆ เช่น 'code' = เชื่อมด้วยรหัส (ใช้ค่าจาก parentValues)
   const matchField = config.parent_match_field || "id";
@@ -1031,12 +1077,23 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     </div>
   ) : null;
 
+  // ปุ่มระดับตาราง: เพิ่มแบบ/ไซส์ให้หลายสีพร้อมกัน (ตารางสี × ไซส์) — โผล่เมื่อตารางจัดกลุ่มตามสีและมีแถวฐาน
+  const variantBaseRows = config.list_group_field
+    ? rows.filter((r) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !(av && av.variant_option); })
+    : [];
+  const bulkVariantBtn = (canAdd && variantBaseRows.length > 1) ? (
+    <button type="button" onClick={() => setVariantBases(variantBaseRows)}
+      title={`เพิ่มแบบ/ไซส์ให้หลายสีพร้อมกัน (${variantBaseRows.length} สี) — เลือกสีและไซส์ แล้วสร้างทีเดียว`}
+      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 inline-flex items-center gap-1">＋ ไซส์/แบบ (หลายสี)</button>
+  ) : null;
+
   // หัวข้อ + จำนวน (สำหรับ 360 view)
   const header = (title || gearBtn || addBtn) ? (
     <div className="flex items-center gap-1.5 mb-1.5">
       {title && <span className="text-sm font-medium text-slate-700">{title}</span>}
       {title && loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
       <div className="flex-1" />
+      {bulkVariantBtn}
       {colorBtn}
       {attachBtn}
       {addBtn}
@@ -1214,7 +1271,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     };
     const hasVariant = (r: Record<string, unknown>) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !!(av && av.variant_option); };
     const addVariantBtn = (base: Record<string, unknown>) => canAdd ? (
-      <button type="button" title="เพิ่มแบบ/ไซส์ให้สีนี้" onClick={(e) => { e.stopPropagation(); setVariantBase(base); }}
+      <button type="button" title="เพิ่มแบบ/ไซส์ให้สีนี้" onClick={(e) => { e.stopPropagation(); setVariantBases([base]); }}
         className="h-5 px-1.5 rounded text-[10px] font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 opacity-0 group-hover:opacity-100 transition-opacity">＋ เพิ่มแบบ/ไซส์</button>
     ) : null;
     // ทรี 2 ชั้น: ตัวหลักของสี (ไม่มี variant_option) = แถวแม่ + ปุ่มพับ/ขยาย · ตัวย่อย = ย่อหน้าใต้แม่
@@ -1231,7 +1288,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         // ⚠️ ถ้าในกลุ่มไม่มี option จริงเลย → แสดงแบนทุกตัว (ไม่เอาตัวแรกมาเป็น "แม่" ให้ตัวอื่นซ้อน)
         //    กันกรณี SKU ยังไม่ตั้งสี → ตกไปกองรวมกลุ่ม "ไม่ระบุ" แล้วดูเหมือนเป็นลูกของตัวแรก
         if (variants.length === 0) {
-          for (const r of grs) out.push(renderDataRow(r));
+          // ยังไม่มีแบบ/ไซส์ในกลุ่มนี้ → แสดงแบน แต่ต้องมีปุ่ม "＋ เพิ่มแบบ/ไซส์" ให้ด้วย
+          // (เดิมปุ่มโผล่เฉพาะกลุ่มที่มีไซส์อยู่แล้ว = ไก่กับไข่ ตัวที่ยังไม่มีไซส์เลยไม่มีทางเริ่ม)
+          for (const r of grs) out.push(renderDataRow(r, { trail: addVariantBtn(r) }));
           continue;
         }
         const base = bases[0];
@@ -1371,12 +1430,12 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           onChanged={load} onClose={() => setPeek(null)} />
       )}
       {pickerModal}
-      {variantBase && (
+      {variantBases && variantBases.length > 0 && (
         <O2MVariantAdder moduleKey={moduleKey} fkField={fk} parentValue={matchValue as string | number}
-          titleField={titleField} groupField={config.list_group_field ?? "color_th"} base={variantBase}
+          titleField={titleField} groupField={config.list_group_field ?? "color_th"} bases={variantBases}
           existingCodes={new Set(rows.map((r) => String(r[titleField] ?? "")))}
-          onClose={() => setVariantBase(null)}
-          onDone={(ok, skip) => { setVariantBase(null); if (ok) { toast.success(`สร้าง ${ok} รายการ${skip ? ` · ข้าม ${skip} (ซ้ำ/พลาด)` : ""}`); load(); } else toast.error("ไม่ได้สร้าง (ซ้ำ/พลาด/ว่าง)"); }} />
+          onClose={() => setVariantBases(null)}
+          onDone={(ok, skip) => { setVariantBases(null); if (ok) { toast.success(`สร้าง ${ok} รายการ${skip ? ` · ข้าม ${skip} (ซ้ำ/พลาด)` : ""}`); load(); } else toast.error("ไม่ได้สร้าง (ซ้ำ/พลาด/ว่าง)"); }} />
       )}
       {createModal}
       {attachModal}
