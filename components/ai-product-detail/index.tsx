@@ -248,6 +248,11 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
     setTopicsText((r.required_topics ?? []).join("\n"));
     setTopicsEnText((r.required_topics_en ?? []).join("\n"));
     setKeywordsText((r.name_keywords ?? []).join(", "));
+    // ⚠️ ต้องเติมคำตอบแนะนำที่บันทึกไว้ด้วย — ถ้าไม่เติม ช่องจะว่างทุกครั้งที่เปิด
+    //    และตอนกดบันทึกจะเขียนทับของเดิมด้วยค่าว่าง (ของที่ตั้งไว้หายหมด)
+    setOptionsText(Object.fromEntries(
+      Object.entries(r.topic_options ?? {}).map(([k, v]) => [k, (v ?? []).join(", ")]),
+    ));
   };
   const splitLines = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean);
   const splitCommas = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
