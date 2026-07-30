@@ -571,14 +571,25 @@ export function AiProductDetailModal({
     english_description: { other: "description", to: "th" },
   };
   const [syncing, setSyncing] = useState<string | null>(null);
-  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * ตัวนับเวลาแยก "รายช่อง" — เดิมใช้ตัวเดียวร่วมกัน ถ้าแก้ 2 ช่องติดกัน ช่องแรกถูกยกเลิกไปเงียบ ๆ
+   * (อาการที่เจ้าของเจอ: แก้แล้วอีกภาษาไม่แปลตาม ต้องไปกดแปลเอง)
+   */
+  const syncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const editField = (key: string, value: string) => {
     setRes((p) => (p ? { ...p, [key]: value } : p));
     setPicked((p) => ({ ...p, [key]: true }));            // แก้แล้ว = ติ๊กใช้ให้เลย
     const pair = PAIRS[key];
     if (!pair) return;
-    if (syncTimer.current) clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(() => { void syncOther(key, value, pair); }, 1200);
+    if (syncTimers.current[key]) clearTimeout(syncTimers.current[key]);
+    syncTimers.current[key] = setTimeout(() => { void syncOther(key, value, pair); }, 1200);
+  };
+  /** ออกจากช่อง = แปลทันที ไม่ต้องรอครบ 1.2 วิ (กันเคสพิมพ์เสร็จแล้วกด "ใช้ค่าที่เลือก" เลย) */
+  const flushSync = (key: string) => {
+    const pair = PAIRS[key];
+    if (!pair) return;
+    if (syncTimers.current[key]) { clearTimeout(syncTimers.current[key]); delete syncTimers.current[key]; }
+    void syncOther(key, String(res?.[key] ?? ""), pair);
   };
   const syncOther = async (key: string, value: string, pair: { other: string; to: "en" | "th" }) => {
     const src = value.trim();
@@ -930,8 +941,21 @@ export function AiProductDetailModal({
                       <textarea value={next} rows={f.long ? 5 : 2}
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) => editField(f.key, e.target.value)}
+                        onBlur={() => flushSync(f.key)}
                         className="w-full px-2 py-1.5 text-[13px] leading-relaxed text-slate-700 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300" />
-                      {syncing === f.key && <p className="mt-0.5 text-[11px] text-indigo-500">{t("กำลังแปลอีกภาษาให้…", "Translating the other language…")}</p>}
+                      <div className="mt-1 flex items-center gap-2 flex-wrap">
+                        {/* กดแปลเดี๋ยวนี้ได้ ไม่ต้องรอ auto (เจ้าของเจอเคสแก้แล้วอีกภาษายังไม่เปลี่ยน) */}
+                        {PAIRS[f.key] && !!next && (
+                          <button type="button" disabled={syncing === f.key}
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); flushSync(f.key); }}
+                            className="h-6 px-2 text-[11px] rounded-full border border-indigo-200 text-indigo-600 bg-white hover:bg-indigo-50 disabled:opacity-50">
+                            {syncing === f.key
+                              ? t("กำลังแปล…", "Translating…")
+                              : f.lang === "th" ? t("⇄ แปลไปช่องอังกฤษ", "⇄ Translate to English") : t("⇄ แปลไปช่องไทย", "⇄ Translate to Thai")}
+                          </button>
+                        )}
+                        {syncing === f.key && <span className="text-[11px] text-indigo-500">{t("กำลังแปลอีกภาษาให้…", "Translating the other language…")}</span>}
+                      </div>
                     </div>
                   </label>
                 );
