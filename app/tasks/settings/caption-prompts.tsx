@@ -101,7 +101,14 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
   // งาน AI ที่ไม่ใช่แคปชั่นโซเชียล แต่ใช้ทะเบียน prompt ชุดเดียวกัน (ตั้งรายแบรนด์ได้เหมือนกัน)
   const jobOptions = useMemo(() => [
     ...platforms,
-    { value: "product_detail", label: t("📦 รายละเอียดสินค้า (ชื่อ/Introduction/Description)", "📦 Product detail (name/intro/description)") },
+    { value: "product_detail", label: t("📦 รายละเอียดสินค้า — คำสั่งรวมทุกช่อง", "📦 Product detail — all fields") },
+    // คำสั่งรายช่อง (สำคัญกว่าคำสั่งรวม) — ตั้งจากป๊อป ⚙ ในหน้าสินค้าก็ได้ แต่ให้แก้จากหน้ารวมนี้ได้ด้วย
+    { value: "product_detail:name_th", label: t("📦 ↳ ชื่อสินค้า (ไทย)", "📦 ↳ Product name (TH)") },
+    { value: "product_detail:name_en", label: t("📦 ↳ ชื่อสินค้า (EN)", "📦 ↳ Product name (EN)") },
+    { value: "product_detail:introduction", label: t("📦 ↳ Introduction (ไทย)", "📦 ↳ Introduction (TH)") },
+    { value: "product_detail:introduction_en", label: t("📦 ↳ Introduction (EN)", "📦 ↳ Introduction (EN)") },
+    { value: "product_detail:description", label: t("📦 ↳ Description (ไทย)", "📦 ↳ Description (TH)") },
+    { value: "product_detail:english_description", label: t("📦 ↳ Description (EN)", "📦 ↳ Description (EN)") },
     { value: "translate", label: t("🌐 สไตล์การแปลภาษา (ปุ่มแปลทั้งหมด)", "🌐 Translation style (translate button)") },
   ], [platforms, t]);
 
