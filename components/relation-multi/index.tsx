@@ -942,6 +942,25 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     fetchPage(0).then(({ data, total }) => { setRows(data); setTotal(total); setLoaded(true); }).catch(() => setLoaded(true));
   }, [matchValue, fk, fetchPage]);
 
+  /**
+   * ดึง "ทุกแถว" ของใบนี้ (ไม่ใช่แค่หน้าแรก 20 แถว)
+   * ⚠️ งานที่ทำกับทั้งชุด (แปลสี / เพิ่มไซส์หลายสี) ต้องใช้ตัวนี้ ไม่ใช่ rows ที่โชว์อยู่
+   *    เคสจริง: MGN193 มี 44 แถว (11 สี + 33 ไซส์) แต่ตารางโหลด 20 → แปลสีได้แค่ถึง 05
+   */
+  const fetchAllRows = useCallback(async (): Promise<Record<string, unknown>[]> => {
+    if (matchValue == null || matchValue === "" || !fk) return [];
+    const flt = encodeURIComponent(JSON.stringify({ [fk]: matchCond }));
+    const out: Record<string, unknown>[] = [];
+    for (let off = 0; off < 2000; off += 200) {                 // ไล่ทีละ 200 กัน worker หนัก
+      const j = await apiFetch(`/api/master-v2/${moduleKey}?limit=200&offset=${off}&filters=${flt}`).then((r) => r.json());
+      const page = (j.data ?? j.rows ?? []) as Record<string, unknown>[];
+      out.push(...page);
+      if (page.length < 200 || out.length >= Number(j.total ?? out.length)) break;
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moduleKey, fk, matchField, matchValue]);
+
   useEffect(() => { load(); }, [load]);
 
   // ดึง label หัวคอลัมน์ + รายการ field + config ของฟิลด์เชื่อม (FK) จากทะเบียน field ของโมดูลลูก (ของกลาง)
@@ -1075,7 +1094,11 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const translateColors = async (dir: "th2en" | "en2th") => {
     const srcKey = dir === "th2en" ? "color_th" : "color";
     const dstKey = dir === "th2en" ? "color" : "color_th";
-    const withSrc = rows.filter((r) => String(r[srcKey] ?? "").trim());
+    // ต้องทำกับ "ทุกแถว" ไม่ใช่แค่ 20 แถวที่โชว์อยู่ (ไม่งั้นแปลได้แค่ครึ่งชุด)
+    setColorTranslating("โหลด…");
+    const allRows = await fetchAllRows();
+    setColorTranslating("");
+    const withSrc = (allRows.length ? allRows : rows).filter((r) => String(r[srcKey] ?? "").trim());
     let targets = withSrc.filter((r) => {
       const cur = String(r[dstKey] ?? "").trim();
       if (!cur) return true;                                          // ปลายทางว่าง → แปลเติม
@@ -1343,7 +1366,12 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     ? rows.filter((r) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !(av && av.variant_option); })
     : [];
   const bulkVariantBtn = (canAdd && variantBaseRows.length > 1) ? (
-    <button type="button" onClick={() => setVariantBases(variantBaseRows)}
+    // ดึงทุกแถวก่อน — ตารางโชว์แค่ 20 แถว ถ้าใช้ค่าที่โชว์จะได้สีไม่ครบ
+    <button type="button" onClick={() => void (async () => {
+      const all = await fetchAllRows();
+      const bases = (all.length ? all : rows).filter((r) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !(av && av.variant_option); });
+      setVariantBases(bases.length ? bases : variantBaseRows);
+    })()}
       title={`เพิ่มแบบ/ไซส์ให้หลายสีพร้อมกัน (${variantBaseRows.length} สี) — เลือกสีและไซส์ แล้วสร้างทีเดียว`}
       className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 inline-flex items-center gap-1">＋ ไซส์/แบบ (หลายสี)</button>
   ) : null;
@@ -1517,8 +1545,10 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             <td key={f}
               onClick={editable ? (e) => { e.stopPropagation(); setEditCell({ rowId: String(r.id), field: f }); setEditVal(r[f] == null ? "" : String(r[f])); } : undefined}
               className={`py-1.5 text-slate-600 ${isNumCol(f) ? "px-1.5" : "px-2"} whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"} ${editable ? "cursor-text hover:bg-blue-50/60" : ""}`}>
-              {f === "color_th" && r[f] != null && r[f] !== ""
-                ? <span className="inline-flex items-center gap-1 justify-end">{cellValue(r, f) ?? "—"}<CopyButton value={String(r[f] ?? "")} className="opacity-0 group-hover:opacity-100" /></span>
+              {/* ปุ่มคัดลอกในทุกช่องข้อความที่มีค่า (เดิม hardcode เฉพาะ color_th → ช่องคำนวณอย่าง
+                   Color Platform [TH]/[EN] ที่ตั้งเพิ่มทีหลังจึงไม่มีปุ่มให้ก๊อป) · ช่องตัวเลข/relation ไม่ต้อง */}
+              {!isNumCol(f) && !isRel && cellValue(r, f) != null && String(cellValue(r, f) ?? "") !== ""
+                ? <span className="inline-flex items-center gap-1 justify-end">{cellValue(r, f)}<CopyButton value={String(cellValue(r, f) ?? "")} className="opacity-0 group-hover:opacity-100" /></span>
                 : (cellValue(r, f) ?? "—")}
             </td>
           );
@@ -1538,8 +1568,19 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     // ทรี 2 ชั้น: ตัวหลักของสี (ไม่มี variant_option) = แถวแม่ + ปุ่มพับ/ขยาย · ตัวย่อย = ย่อหน้าใต้แม่
     const renderBody = () => {
       if (!groupField) return rows.map((r) => renderDataRow(r));
+      // จัดกลุ่มตาม "รหัสตัวฐาน" เป็นหลัก: MGN193-01S/M/L → อยู่ใต้ MGN193-01
+      //   เดิมจัดกลุ่มด้วยค่าสี (list_group_field) → พอแปลสีหรือแก้สีของลูก ลูกก็หลุดออกจากกลุ่มแม่
+      //   (เคสจริง: แปล TH→EN แล้ว color ของลูกกลายเป็น "Black/Smooth Leather/L" ไม่เท่าของแม่)
+      //   ตัวไหนหารหัสแม่ไม่ได้ → ตกไปจัดกลุ่มตามสีเหมือนเดิม
+      const baseCodes = rows.filter((r) => !hasVariant(r)).map((r) => String(r[titleField] ?? "").trim()).filter(Boolean);
+      const groupKeyOf = (r: Record<string, unknown>) => {
+        const code = String(r[titleField] ?? "").trim();
+        if (!hasVariant(r)) return code || (String(r[groupField] ?? "").trim() || "— ไม่ระบุ —");
+        const parent = baseCodes.filter((bc) => code.startsWith(bc) && code !== bc).sort((a, b) => b.length - a.length)[0];
+        return parent || (String(r[groupField] ?? "").trim() || "— ไม่ระบุ —");
+      };
       const groups = new Map<string, Record<string, unknown>[]>();
-      for (const r of rows) { const k = (String(r[groupField] ?? "").trim() || "— ไม่ระบุ —"); const arr = groups.get(k); if (arr) arr.push(r); else groups.set(k, [r]); }
+      for (const r of rows) { const k = groupKeyOf(r); const arr = groups.get(k); if (arr) arr.push(r); else groups.set(k, [r]); }
       const out: ReactNode[] = [];
       for (const [label, grs] of groups.entries()) {
         const variants = grs.filter((r) => hasVariant(r));       // ตัวที่เป็น "แบบ/ไซส์" จริง (มี variant_option)
