@@ -32,6 +32,14 @@ function text(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+// สลิปที่ห้ามดึงเข้ารอบจ่าย: ยกเลิกแล้ว หรือจ่ายไปแล้ว
+// ("void" = ค่าจริงใน DB ตาม payroll_payslips_status_check — เดิมโค้ดเช็กแค่ "voided" ซึ่งไม่มีในข้อมูลจริง)
+const SLIP_NOT_PAYABLE = ["void", "voided", "cancelled", "paid"];
+
+function slipPayable(slip: Row): boolean {
+  return !SLIP_NOT_PAYABLE.includes(text(slip.status));
+}
+
 function bool(value: unknown): boolean {
   return value === true || value === "true" || value === 1 || value === "1";
 }
@@ -334,7 +342,7 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
       .is("voided_at", null)
       .is("payment_batch_id", null);
     if (slipError) throw new Error(slipError.message);
-    const readySlips = ((slips ?? []) as Row[]).filter((slip) => !["cancelled", "voided"].includes(text(slip.status)));
+    const readySlips = ((slips ?? []) as Row[]).filter(slipPayable);
     const payrollLineIds = [...new Set(readySlips.map((slip) => text(slip.payroll_line_id)).filter(Boolean))];
     const [maps, payrollLineRows] = await Promise.all([
       employeeAndBankMaps([...new Set(readySlips.map((slip) => text(slip.employee_id)).filter(Boolean))]),
@@ -523,7 +531,7 @@ export async function createPaymentBatch(input: { periodId: string; batchType?: 
       .is("voided_at", null)
       .is("payment_batch_id", null);
     if (error) throw new Error(error.message);
-    const readySlips = ((slips ?? []) as Row[]).filter((slip) => !["cancelled", "voided"].includes(text(slip.status)));
+    const readySlips = ((slips ?? []) as Row[]).filter(slipPayable);
     if (!readySlips.length) throw new Error("ไม่มีสลิปที่พร้อมสร้างชุดจ่าย หรือสลิปทั้งหมดถูกผูกกับชุดจ่ายแล้ว");
     readyLines = readySlips.map((slip) => buildPaymentLineFromPayslip({
       id: text(slip.id),
@@ -633,7 +641,7 @@ export async function resyncPaymentBatch(batchId: string, actor: Actor = {}) {
     .is("voided_at", null);
   if (slipError) throw new Error(slipError.message);
   const readySlips = ((slipRows ?? []) as Row[]).filter((slip) => {
-    if (["cancelled", "voided"].includes(text(slip.status))) return false;
+    if (!slipPayable(slip)) return false;
     const linked = text(slip.payment_batch_id);
     return linked === "" || linked === batchId;
   });
@@ -932,14 +940,17 @@ export async function markPaymentBatchPaid(batchId: string, actor: Actor = {}) {
   if (status !== "approved") throw new Error("ต้องอนุมัติชุดจ่ายก่อนบันทึกว่าจ่ายแล้ว");
 
   const now = new Date().toISOString();
-  const { error: lineError } = await admin.from("payment_batch_lines").update({ status: "paid", updated_at: now }).eq("payment_batch_id", batchId);
-  if (lineError) throw new Error(lineError.message);
-
   const batchType = text(detail.batch.batch_type);
+
+  // ลำดับสำคัญ: อัปเดตสลิปก่อน (ขั้นที่เคยพลาดเพราะ constraint) แล้วค่อยบรรทัดจ่าย แล้วค่อยหัวรอบ
+  // — Supabase ไม่มี transaction ให้ย้อนทั้งชุด ถ้าขั้นแรกพัง จะยังไม่มีอะไรถูกแก้ (กดซ้ำได้สะอาด)
   if (batchType === "month_end") {
     const { error: slipError } = await admin.from("payroll_payslips").update({ status: "paid", issued_at: now, updated_at: now }).eq("payment_batch_id", batchId);
     if (slipError) throw new Error(slipError.message);
   }
+
+  const { error: lineError } = await admin.from("payment_batch_lines").update({ status: "paid", updated_at: now }).eq("payment_batch_id", batchId);
+  if (lineError) throw new Error(lineError.message);
 
   const { error: batchError } = await admin.from("payment_batches").update({ status: "paid", paid_at: now, updated_at: now }).eq("id", batchId);
   if (batchError) throw new Error(batchError.message);
