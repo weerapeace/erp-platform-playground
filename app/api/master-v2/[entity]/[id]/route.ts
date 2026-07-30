@@ -15,6 +15,7 @@ import { guardApi } from "@/lib/api-auth";
 import { timeRoute } from "@/lib/api-timing";
 import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
 import { r2MoveToTrash } from "@/lib/r2";
+import { r2KeyStillReferenced } from "@/lib/r2-refs";
 import { deleteRecordFilesFor } from "@/lib/record-files";
 
 export const dynamic = "force-dynamic";
@@ -117,8 +118,13 @@ async function _PATCH(
   if (error) return NextResponse.json({ error: friendlyDbError(error.message), dup: parseDupError(error) }, { status: 400 });
 
   // รูปปกเปลี่ยน/ลบ → ย้ายไฟล์เก่าเข้าถังขยะ R2 (ลบจริงด้วย lifecycle rule) ไม่ปล่อยขยะค้าง · ไม่ขวางการบันทึก
+  // ⚠️ เช็กก่อนว่ายังมีที่อื่นอ้างอิงไฟล์เดิมอยู่ไหม — ไฟล์ R2 หนึ่งไฟล์ถูกใช้ร่วมกันได้หลายที่
+  //    (เคสจริง 2026-07-29: SKU TML10-02 รูปแตกเพราะไฟล์ถูกย้ายเข้าถังจากอีกทาง ทั้งที่ทะเบียนยังชี้ไฟล์นั้นอยู่)
   if (oldCoverKey && oldCoverKey !== cleanPatch.cover_image_r2_key) {
-    try { await r2MoveToTrash(oldCoverKey); } catch { /* best-effort */ }
+    try {
+      if (!(await r2KeyStillReferenced(admin, oldCoverKey, { table: cfg.table, id })))
+        await r2MoveToTrash(oldCoverKey);
+    } catch { /* best-effort */ }
   }
 
   // audit (ของกลาง — ลง audit_logs, ไม่ throw)

@@ -796,6 +796,51 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       if (!res.ok || j.error) { alert("บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); load(); }
     } catch (e) { alert("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); load(); }
   };
+  // 🌐 แปลชื่อสีระหว่างช่องไทย/อังกฤษ (Color Th ↔ Color) — ใช้ตัวแปลของกลาง /api/ai/translate
+  //    เติมช่องที่ว่าง + แก้ช่องที่ "ผิดภาษา" ด้วย (ของจริงพบช่อง Color เป็นภาษาไทย เช่น "แทน", "ออฟไวท์")
+  const [colorTranslating, setColorTranslating] = useState("");
+  const hasThaiChar = (s: string) => /[฀-๿]/.test(s);
+  const translateColors = async (dir: "th2en" | "en2th") => {
+    const srcKey = dir === "th2en" ? "color_th" : "color";
+    const dstKey = dir === "th2en" ? "color" : "color_th";
+    const targets = rows.filter((r) => {
+      const src = String(r[srcKey] ?? "").trim();
+      if (!src) return false;
+      const cur = String(r[dstKey] ?? "").trim();
+      if (!cur) return true;                                          // ปลายทางว่าง → แปลเติม
+      return dir === "th2en" ? hasThaiChar(cur) : !hasThaiChar(cur);   // ปลายทางผิดภาษา → แปลทับ
+    });
+    if (targets.length === 0) { alert("ไม่มีช่องที่ต้องแปล — ทุกแถวมีชื่อสีถูกภาษาแล้ว"); return; }
+
+    const edits: { id: string; changes: Record<string, unknown> }[] = [];
+    let failed = 0;
+    for (let i = 0; i < targets.length; i++) {
+      const r = targets[i];
+      setColorTranslating(`${i + 1}/${targets.length}`);
+      try {
+        const res = await apiFetch("/api/ai/translate", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: String(r[srcKey] ?? "").trim().slice(0, 200), to: dir === "th2en" ? "en" : "th" }),
+        });
+        const j = await res.json().catch(() => ({}));
+        const out = String((j?.data?.translated ?? j?.translated) ?? "").trim();
+        if (!res.ok || j?.error || !out) { failed++; continue; }
+        edits.push({ id: String(r.id), changes: { [dstKey]: out } });
+      } catch { failed++; }
+    }
+    setColorTranslating("");
+    if (edits.length === 0) { alert(`แปลไม่สำเร็จ (${failed} แถว) — ลองอีกครั้ง หรือตรวจสิทธิ์ใช้ตัวแปลภาษา`); return; }
+    try {
+      const res = await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { alert("บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      alert(`แปลและบันทึกแล้ว ${edits.length} แถว${failed ? ` · แปลไม่สำเร็จ ${failed}` : ""}`);
+      load();
+    } catch (e) { alert("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+  };
+
   const fillColumn = async (field: string) => {
     if (matchValue == null || !fkCol) return;
     const raw = window.prompt(`เติมค่า "${labelOf(field)}" ให้รายการลูกทุกตัวของใบนี้:`, "");
@@ -970,12 +1015,29 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       title={title} onAttached={load} onClose={() => setAttaching(false)} />
   ) : null;
 
+  // ปุ่มแปลชื่อสี — โผล่เฉพาะตารางลูกที่มีทั้งช่องไทยและอังกฤษ (SKU ลูก) และแก้ได้
+  const colorPair = canAdd && rows.some((r) => "color" in r) && rows.some((r) => "color_th" in r);
+  const colorBtn = colorPair ? (
+    <div className="flex-shrink-0 inline-flex rounded-md border border-violet-200 overflow-hidden">
+      <span className="h-6 px-1.5 text-[11px] font-medium text-violet-700 bg-violet-50 inline-flex items-center">
+        {colorTranslating ? `แปล ${colorTranslating}…` : "🌐 แปลสี"}
+      </span>
+      <button type="button" disabled={!!colorTranslating} onClick={() => void translateColors("th2en")}
+        title="แปลชื่อสีไทย → อังกฤษ (เติมช่อง Color ที่ว่างหรือยังเป็นภาษาไทย)"
+        className="h-6 px-1.5 text-[11px] font-medium text-violet-600 border-l border-violet-200 hover:bg-violet-50 disabled:opacity-40">TH→EN</button>
+      <button type="button" disabled={!!colorTranslating} onClick={() => void translateColors("en2th")}
+        title="แปลชื่อสีอังกฤษ → ไทย (เติมช่อง Color Th ที่ว่างหรือยังเป็นภาษาอังกฤษ)"
+        className="h-6 px-1.5 text-[11px] font-medium text-violet-600 border-l border-violet-200 hover:bg-violet-50 disabled:opacity-40">EN→TH</button>
+    </div>
+  ) : null;
+
   // หัวข้อ + จำนวน (สำหรับ 360 view)
   const header = (title || gearBtn || addBtn) ? (
     <div className="flex items-center gap-1.5 mb-1.5">
       {title && <span className="text-sm font-medium text-slate-700">{title}</span>}
       {title && loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
       <div className="flex-1" />
+      {colorBtn}
       {attachBtn}
       {addBtn}
       {gearBtn}

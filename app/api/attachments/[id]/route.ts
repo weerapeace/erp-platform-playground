@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
+import { r2KeyStillReferenced } from "@/lib/r2-refs";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 // ---- DELETE /api/attachments/[id]?actor=.. ----
@@ -30,9 +32,14 @@ export async function DELETE(
     warning = "ลบ DB แล้วแต่ R2 ยังไม่ได้ตั้งค่า — ไฟล์อาจคงค้างบน R2";
   } else {
     try {
-      const trashKey = await r2MoveToTrash(filePath);
-      deletedFromR2 = true;
-      console.log("[api/attachments/[id]] R2 moved to trash:", filePath, "→", trashKey);
+      // ไฟล์เดียวกันอาจถูกใช้เป็นรูปปกสินค้า/อยู่ในคลังไฟล์ด้วย — ถ้ายังมีคนใช้ ห้ามย้ายเข้าถัง (ไม่งั้นที่นั่นรูปแตก)
+      if (await r2KeyStillReferenced(supabaseAdmin(), filePath)) {
+        warning = "ลบรายการแนบแล้ว — ไฟล์ยังถูกใช้ที่อื่น (เช่นรูปปกสินค้า/คลังไฟล์) จึงไม่ย้ายเข้าถังขยะ";
+      } else {
+        const trashKey = await r2MoveToTrash(filePath);
+        deletedFromR2 = true;
+        console.log("[api/attachments/[id]] R2 moved to trash:", filePath, "→", trashKey);
+      }
     } catch (err) {
       console.error("[api/attachments/[id]] R2 trash move failed", filePath, err);
       warning = `ลบ DB สำเร็จแต่ย้ายไฟล์เข้าถังเก็บ R2 ไม่สำเร็จ: ${err instanceof Error ? err.message : "unknown"} (path: ${filePath})`;
