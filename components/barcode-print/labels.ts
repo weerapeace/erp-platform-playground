@@ -76,7 +76,15 @@ export function rollDriverSize(c: CustomLayout): { w: number; h: number } {
 
 export type PrintOpts = {
   showQR: boolean;
-  showBarcode: boolean;    // Code128 (สแกนรหัส SKU ที่เป็นตัวอักษรได้)
+  showBarcode: boolean;    // แสดงบาร์โค้ดเส้น (ชนิดตาม barcodeFormat)
+  /** ชนิดบาร์โค้ด — CODE128 รับตัวอักษร+ตัวเลขทุกแบบ · CODE39 เครื่องสแกนรุ่นเก่ารองรับกว้างกว่า (A-Z 0-9 - . $ / + % และเว้นวรรค) */
+  barcodeFormat?: "CODE128" | "CODE39";
+  /**
+   * รูปแบบการวางบนดวง
+   *  center  = โค้ดอยู่บน ข้อความอยู่ล่าง จัดกลาง (แบบเดิม)
+   *  sticker = ชื่อสินค้าบนสุด → บาร์โค้ด → เลขใต้บาร์โค้ด → ราคา · ชิดซ้าย (แบบป้ายสติกเกอร์ร้าน)
+   */
+  labelStyle?: "center" | "sticker";
   showCode: boolean;
   showName: boolean;
   showPrice: boolean;

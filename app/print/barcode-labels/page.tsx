@@ -45,25 +45,54 @@ async function makeQR(text: string, logo: string | null, color = "#000000", size
   } catch { return url; }
 }
 
-function Barcode({ value, heightMm, color = "#000000" }: { value: string; heightMm: number; color?: string }) {
+function Barcode({ value, heightMm, color = "#000000", format = "CODE128" }: { value: string; heightMm: number; color?: string; format?: "CODE128" | "CODE39" }) {
   const ref = useRef<SVGSVGElement>(null);
   useEffect(() => {
     if (!ref.current) return;
-    try { JsBarcode(ref.current, value || " ", { format: "CODE128", displayValue: false, height: heightMm * 3.78, width: 1.3, margin: 0, lineColor: color }); }
-    catch { /* ค่าที่ Code128 ไม่รองรับ (หายากมาก) */ }
-  }, [value, heightMm, color]);
+    // CODE39 รับได้เฉพาะ A-Z 0-9 และ - . $ / + % (ตัวพิมพ์เล็กต้องแปลงเป็นใหญ่ ไม่งั้นวาดไม่ออก)
+    const raw = value || " ";
+    const val = format === "CODE39" ? raw.toUpperCase().replace(/[^A-Z0-9\-. $/+%]/g, "-") : raw;
+    try { JsBarcode(ref.current, val, { format, displayValue: false, height: heightMm * 3.78, width: format === "CODE39" ? 1 : 1.3, margin: 0, lineColor: color }); }
+    catch { /* ค่าที่ชนิดนั้นไม่รองรับ (หายากมาก) */ }
+  }, [value, heightMm, color, format]);
   return <svg ref={ref} style={{ height: `${heightMm}mm`, maxWidth: "100%" }} />;
 }
 
 function Label({ it, opts, codeH, font, qr }: { it: PrintItem; opts: PrintOpts; codeH: number; font: number; qr?: string }) {
   const hasText = opts.showCode || opts.showName || opts.showPrice;
   const sz = resolveSizes(opts.sizes, codeH, font);
+  const fmt = opts.barcodeFormat ?? "CODE128";
+
+  // แบบป้ายสติกเกอร์ร้าน: ชื่อสินค้าบนสุด → บาร์โค้ด → เลขใต้บาร์โค้ด → ราคา · ชิดซ้ายทั้งดวง
+  if ((opts.labelStyle ?? "center") === "sticker") {
+    return (
+      <div style={{ border: opts.showBorder ? "0.4px dashed #dcdcdc" : "none", display: "flex", flexDirection: "column",
+        alignItems: "flex-start", justifyContent: "center", gap: "0.4mm", overflow: "hidden", padding: "1mm", boxSizing: "border-box" }}>
+        {opts.showName && it.name && (
+          <div style={{ fontSize: `${sz.fontName}pt`, fontWeight: 700, lineHeight: 1.1, maxWidth: "100%",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.name}</div>
+        )}
+        <div style={{ display: "flex", alignItems: "flex-end", gap: "1.5mm", maxWidth: "100%" }}>
+          {opts.showBarcode && <Barcode value={it.barcode || it.code} heightMm={sz.barcodeH} color={opts.codeColor} format={fmt} />}
+          {opts.showQR && qr && <img src={qr} alt="" style={{ height: `${sz.qr}mm`, width: `${sz.qr}mm` }} />}
+        </div>
+        {opts.showCode && (
+          <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: `${sz.fontCode}pt`, letterSpacing: "0.3px",
+            maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.barcode || it.code}</div>
+        )}
+        {opts.showPrice && it.price != null && it.price > 0 && (
+          <div style={{ fontSize: `${sz.fontPrice}pt`, fontWeight: 700 }}>{Number(it.price).toLocaleString("th-TH")} บาท</div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{ border: opts.showBorder ? "0.4px dashed #dcdcdc" : "none", display: "flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", gap: "0.5mm", overflow: "hidden", padding: "1mm", boxSizing: "border-box" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "1.5mm", maxWidth: "100%" }}>
         {opts.showQR && qr && <img src={qr} alt="" style={{ height: `${sz.qr}mm`, width: `${sz.qr}mm` }} />}
-        {opts.showBarcode && <Barcode value={it.barcode || it.code} heightMm={sz.barcodeH} color={opts.codeColor} />}
+        {opts.showBarcode && <Barcode value={it.barcode || it.code} heightMm={sz.barcodeH} color={opts.codeColor} format={fmt} />}
       </div>
       {hasText && (
         <div style={{ textAlign: "center", lineHeight: 1.12, maxWidth: "100%", overflow: "hidden" }}>

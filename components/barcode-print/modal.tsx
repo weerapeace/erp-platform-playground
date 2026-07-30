@@ -25,7 +25,8 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
   const [rows, setRows] = useState<Row[]>([]);
   const [globalQty, setGlobalQty] = useState(1);
   const [opts, setOpts] = useState<PrintOpts>({
-    showQR: true, showBarcode: true, showCode: true, showName: false, showPrice: false, preset: "a4-3x8", custom: null,
+    showQR: true, showBarcode: true, barcodeFormat: "CODE128", labelStyle: "center",
+    showCode: true, showName: false, showPrice: false, preset: "a4-3x8", custom: null,
     logoMode: "none", logo: null, codeColor: "#000000", showBorder: true,
   });
   const [templates, setTemplates] = useState<SavedTemplate[]>([]);
@@ -103,6 +104,22 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
   }, [opts.custom, opts.preset]);
   const sheets = perPage ? (Math.ceil(Math.min(total, MAX_LABELS) / perPage) || 0) : 0;
 
+  // ── ป้ายที่กรอกเอง (ไม่มีในระบบ) — เพิ่มเข้ารายการเหมือน SKU ปกติ ──
+  const [manual, setManual] = useState({ name: "", barcode: "", price: "", qty: "1" });
+  const addManual = () => {
+    const name = manual.name.trim(), barcode = manual.barcode.trim();
+    if (!name && !barcode) { toast.error("ใส่ชื่อสินค้า หรือบาร์โค้ด อย่างน้อยหนึ่งช่อง"); return; }
+    const priceNum = Number(manual.price);
+    const qtyNum = Math.max(1, Math.min(999, Math.floor(Number(manual.qty) || 1)));
+    setRows((rs) => [
+      { id: `manual-${Date.now()}`, code: barcode || name, barcode: barcode || name, name,
+        price: Number.isFinite(priceNum) && priceNum > 0 ? priceNum : null, brandLogo: null, qty: qtyNum },
+      ...rs,
+    ]);
+    setManual({ name: "", barcode: "", price: "", qty: "1" });
+  };
+  const removeRow = (id: string) => setRows((rs) => rs.filter((r) => r.id !== id));
+
   const setQty = (id: string, q: number) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, qty: Math.max(0, Math.min(999, Math.floor(q || 0))) } : r)));
   const applyGlobal = () => setRows((rs) => rs.map((r) => ({ ...r, qty: Math.max(0, Math.min(999, Math.floor(globalQty || 0))) })));
 
@@ -160,7 +177,34 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
           <div className="border border-slate-200 rounded-lg p-3 space-y-2">
             <div className="text-xs font-medium text-slate-500">โค้ดที่พิมพ์</div>
             {chk("QR Code", opts.showQR, (v) => setOpts((o) => ({ ...o, showQR: v })))}
-            {chk("บาร์โค้ด (Code128)", opts.showBarcode, (v) => setOpts((o) => ({ ...o, showBarcode: v })), "สแกนรหัส SKU ได้")}
+            {chk("บาร์โค้ดเส้น", opts.showBarcode, (v) => setOpts((o) => ({ ...o, showBarcode: v })), "สแกนรหัส/บาร์โค้ดได้")}
+            {/* ชนิดบาร์โค้ด — Code-39 สำหรับเครื่องสแกนรุ่นเก่า/ระบบที่รับเฉพาะ 39 */}
+            {opts.showBarcode && (
+              <div className="pl-6 flex items-center gap-1.5">
+                {(["CODE128", "CODE39"] as const).map((f) => (
+                  <button key={f} type="button" onClick={() => setOpts((o) => ({ ...o, barcodeFormat: f }))}
+                    title={f === "CODE128" ? "รับตัวอักษร+ตัวเลขทุกแบบ (ค่าเริ่มต้น)" : "รับ A-Z 0-9 และ - . $ / + % · เครื่องสแกนรุ่นเก่ารองรับกว้างกว่า"}
+                    className={`h-7 px-2.5 text-xs rounded-md border ${(opts.barcodeFormat ?? "CODE128") === f
+                      ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                    {f === "CODE128" ? "Code 128" : "Code 39"}
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* รูปแบบการวางบนดวง */}
+            <div className="pt-1.5 border-t border-slate-100">
+              <div className="text-xs font-medium text-slate-500 mb-1">รูปแบบการวาง</div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {([["center", "โค้ดบน · จัดกลาง"], ["sticker", "ชื่อบน · ชิดซ้าย (ป้ายร้าน)"]] as const).map(([k, label]) => (
+                  <button key={k} type="button" onClick={() => setOpts((o) => ({ ...o, labelStyle: k }))}
+                    title={k === "sticker" ? "ชื่อสินค้าบนสุด → บาร์โค้ด → เลขใต้บาร์โค้ด → ราคา (890 บาท)" : "แบบเดิม: โค้ดอยู่บน ข้อความอยู่ล่าง จัดกลาง"}
+                    className={`h-7 px-2.5 text-xs rounded-md border ${(opts.labelStyle ?? "center") === k
+                      ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
           {/* โชว์ใต้โค้ด */}
           <div className="border border-slate-200 rounded-lg p-3 space-y-2">
@@ -315,6 +359,40 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
           <button onClick={applyGlobal} className="h-9 px-3 text-sm rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">ตั้งทั้งหมด</button>
         </div>
 
+        {/* กรอกป้ายเอง — ไม่ต้องมีสินค้าในระบบ (ป้ายเฉพาะกิจ / ของฝาก / สินค้าทดลอง) */}
+        <div className="border border-emerald-200 bg-emerald-50/40 rounded-lg p-2.5">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-xs font-medium text-emerald-800">✍️ กรอกป้ายเอง</span>
+            <span className="text-[11px] text-emerald-700">พิมพ์ชื่อ/บาร์โค้ด/ราคา แล้วกดเพิ่ม — ไม่ต้องมีสินค้าในระบบ</span>
+          </div>
+          <div className="flex items-end gap-1.5 flex-wrap">
+            <label className="flex flex-col gap-0.5 flex-1 min-w-[150px]">
+              <span className="text-[11px] text-slate-500">ชื่อสินค้า</span>
+              <input value={manual.name} onChange={(e) => setManual((m) => ({ ...m, name: e.target.value }))}
+                placeholder="เช่น O3O POUNTBLOCK DIY BASIC SET"
+                className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white" />
+            </label>
+            <label className="flex flex-col gap-0.5 w-[150px]">
+              <span className="text-[11px] text-slate-500">บาร์โค้ด / รหัส</span>
+              <input value={manual.barcode} onChange={(e) => setManual((m) => ({ ...m, barcode: e.target.value }))}
+                placeholder="205001009725"
+                className="h-8 px-2 text-sm font-mono border border-slate-200 rounded-md bg-white" />
+            </label>
+            <label className="flex flex-col gap-0.5 w-[90px]">
+              <span className="text-[11px] text-slate-500">ราคา</span>
+              <input type="number" min={0} value={manual.price} onChange={(e) => setManual((m) => ({ ...m, price: e.target.value }))}
+                placeholder="890" className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white" />
+            </label>
+            <label className="flex flex-col gap-0.5 w-[70px]">
+              <span className="text-[11px] text-slate-500">จำนวน</span>
+              <input type="number" min={1} max={999} value={manual.qty} onChange={(e) => setManual((m) => ({ ...m, qty: e.target.value }))}
+                className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white" />
+            </label>
+            <button type="button" onClick={addManual}
+              className="h-8 px-3 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700">＋ เพิ่ม</button>
+          </div>
+        </div>
+
         {/* รายการ + จำนวนต่อตัว */}
         <div className="border border-slate-200 rounded-lg max-h-64 overflow-y-auto divide-y divide-slate-100">
           {loading && <div className="p-4 text-center text-sm text-slate-400">กำลังโหลด…</div>}
@@ -326,6 +404,10 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
               {!isParent && r.price != null && r.price > 0 && <span className="text-xs text-slate-500 shrink-0">฿{Number(r.price).toLocaleString("th-TH")}</span>}
               <input type="number" min={0} max={999} value={r.qty} onChange={(e) => setQty(r.id, Number(e.target.value))}
                 className="w-16 h-8 px-2 text-sm border border-slate-200 rounded-md shrink-0" />
+              {r.id.startsWith("manual-") && (
+                <button type="button" onClick={() => removeRow(r.id)} title="เอาป้ายที่กรอกเองออก"
+                  className="w-7 h-7 shrink-0 rounded-md text-xs text-slate-400 hover:text-rose-600 hover:bg-rose-50">✕</button>
+              )}
             </div>
           ))}
         </div>
