@@ -347,28 +347,87 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
   );
 }
 
-// ป๊อปอัป "ขอแก้" — เหตุผล + เลือกช่องที่ต้องแก้ (แทน window.prompt) · ลอยทับด้วย portal
-function ReviseModal({ fields, busy, onCancel, onConfirm }: {
+// ป๊อปอัป "ขอแก้" — เลือกรูปที่ต้องแก้ (หลายรูป + เหตุผลต่อรูป) + ช่องที่ต้องแก้ + เหตุผลรวม · portal
+// ของกลาง: ใช้ทั้งการ์ดงานย่อย, ป๊อปส่งงาน และหน้าคิวตรวจงาน (review-queue-view)
+export function ReviseModal({ fields, images, busy, onCancel, onConfirm }: {
   fields?: { key: string; label: string }[];
+  /** รูปที่ช่างส่งมา — ติ๊กเลือกได้หลายรูปว่ารูปไหนต้องแก้ */
+  images?: { id: string; r2_key: string; file_name?: string | null }[];
   busy?: boolean;
   onCancel: () => void;
-  onConfirm: (comment: string) => void;
+  onConfirm: (comment: string, reviseImages?: { r2_key: string; file_name?: string | null; index: number; reason: string }[]) => void;
 }) {
   const t = useT();
   const [reason, setReason] = useState("");
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [imgSel, setImgSel] = useState<Set<string>>(new Set());          // r2_key ของรูปที่ต้องแก้
+  const [imgReason, setImgReason] = useState<Record<string, string>>({}); // เหตุผลต่อรูป
   const toggle = (k: string) => setChecked((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggleImg = (k: string) => setImgSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const picked = (fields ?? []).filter((f) => checked.has(f.key));
+  const imgs = images ?? [];
+  const pickedImgs = imgs.map((a, i) => ({ ...a, index: i + 1 })).filter((a) => imgSel.has(a.r2_key));
+
   const submit = () => {
     const parts: string[] = [];
+    if (pickedImgs.length) {
+      parts.push(`${t("รูปที่ต้องแก้", "Images to fix")}: ${pickedImgs.map((a) => {
+        const r = (imgReason[a.r2_key] ?? "").trim();
+        return `#${a.index}${r ? ` (${r})` : ""}`;
+      }).join(", ")}`);
+    }
     if (picked.length) parts.push(`${t("ต้องแก้", "Fix")}: ${picked.map((f) => f.label).join(", ")}`);
     if (reason.trim()) parts.push(reason.trim());
-    onConfirm(parts.join("\n"));
+    onConfirm(
+      parts.join("\n"),
+      pickedImgs.length
+        ? pickedImgs.map((a) => ({ r2_key: a.r2_key, file_name: a.file_name ?? null, index: a.index, reason: (imgReason[a.r2_key] ?? "").trim() }))
+        : undefined,
+    );
   };
   const node = (
     <div className="fixed inset-0 z-[9998] bg-black/50 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
         <p className="text-base font-semibold text-slate-800">↩︎ {t("ขอแก้งานย่อย", "Request revision")}</p>
+
+        {/* เลือกรูปที่ต้องแก้ — ติ๊กได้หลายรูป · เลือกแล้วพิมพ์เหตุผลเฉพาะรูปนั้นได้ */}
+        {imgs.length > 0 && (
+          <div>
+            <p className="text-xs text-slate-500 mb-1.5">
+              {t("กดเลือกรูปที่ต้องแก้ (เลือกได้หลายรูป)", "Tap the images that need fixing (multi-select)")}
+              {imgSel.size > 0 && <span className="ml-1 text-orange-600 font-medium">— {t("เลือกแล้ว", "selected")} {imgSel.size}/{imgs.length}</span>}
+            </p>
+            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto border border-slate-100 rounded-lg p-2">
+              {imgs.map((a, i) => {
+                const on = imgSel.has(a.r2_key);
+                return (
+                  <button key={a.id} type="button" onClick={() => toggleImg(a.r2_key)}
+                    title={a.file_name ?? `#${i + 1}`}
+                    className={`relative h-14 w-14 rounded overflow-hidden border-2 transition ${on ? "border-orange-500 ring-2 ring-orange-200" : "border-slate-200 hover:border-orange-300"}`}>
+                    <img src={`/api/r2-image?key=${encodeURIComponent(a.r2_key)}&w=120`} alt="" className="h-full w-full object-cover" />
+                    <span className={`absolute top-0 left-0 px-1 text-[9px] font-semibold ${on ? "bg-orange-500 text-white" : "bg-black/45 text-white"}`}>{i + 1}</span>
+                    {on && <span className="absolute bottom-0 right-0 h-4 w-4 bg-orange-500 text-white text-[10px] leading-4 text-center">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+            {pickedImgs.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                <p className="text-xs text-slate-500">{t("เหตุผลต่อรูป (ไม่ใส่ก็ได้)", "Reason per image (optional)")}</p>
+                {pickedImgs.map((a) => (
+                  <div key={a.r2_key} className="flex items-center gap-2">
+                    <img src={`/api/r2-image?key=${encodeURIComponent(a.r2_key)}&w=80`} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" />
+                    <span className="text-[11px] text-slate-400 w-6 shrink-0">#{a.index}</span>
+                    <input value={imgReason[a.r2_key] ?? ""} onChange={(e) => setImgReason((p) => ({ ...p, [a.r2_key]: e.target.value }))}
+                      placeholder={t("เช่น เบลอ / สีเพี้ยน / ตัดขอบไม่สวย", "e.g. blurry / wrong color / bad crop")}
+                      className="flex-1 h-8 text-[13px] border border-slate-200 rounded-lg px-2 focus:ring-1 focus:ring-orange-300 outline-none" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {fields && fields.length > 0 && (
           <div>
             <p className="text-xs text-slate-500 mb-1.5">{t("เลือกช่องที่ต้องแก้ (ถ้ามี)", "Pick fields to fix (optional)")}</p>
@@ -388,7 +447,7 @@ function ReviseModal({ fields, busy, onCancel, onConfirm }: {
         </div>
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onCancel} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-          <button onClick={submit} disabled={busy || (!reason.trim() && picked.length === 0)} className="h-9 px-4 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:opacity-50">↩︎ {t("ส่งขอแก้", "Send")}</button>
+          <button onClick={submit} disabled={busy || (!reason.trim() && picked.length === 0 && pickedImgs.length === 0)} className="h-9 px-4 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:opacity-50">↩︎ {t("ส่งขอแก้", "Send")}</button>
         </div>
       </div>
     </div>
@@ -547,8 +606,33 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
           )}
           {sub.subtask_type === "arrange_print" && <ArrangePrintSubtaskPanel sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} />}
           {(st === "revision_requested" || st === "canceled") && ((sub.config as Record<string, unknown> | undefined)?.review_note as string | undefined) && (
-            <p className="text-[11px] text-orange-600">📝 {st === "canceled" ? t("เหตุผลยกเลิก", "Cancel reason") : t("ขอแก้", "Revision")}: {(sub.config as Record<string, unknown>).review_note as string}</p>
+            <p className="text-[11px] text-orange-600 whitespace-pre-wrap">📝 {st === "canceled" ? t("เหตุผลยกเลิก", "Cancel reason") : t("ขอแก้", "Revision")}: {(sub.config as Record<string, unknown>).review_note as string}</p>
           )}
+          {/* รูปที่ผู้ตรวจชี้ว่าต้องแก้ — ช่างเห็นทันทีว่าต้องแก้รูปไหน เพราะอะไร */}
+          {st === "revision_requested" && (() => {
+            const ri = ((sub.config as Record<string, unknown> | undefined)?.review_images ?? null) as
+              { r2_key: string; index?: number | null; reason?: string }[] | null;
+            if (!ri?.length) return null;
+            return (
+              <div className="rounded-lg border border-orange-200 bg-orange-50/70 p-2">
+                <p className="text-[11px] font-medium text-orange-700 mb-1.5">🖼 {t("รูปที่ต้องแก้", "Images to fix")} ({ri.length})</p>
+                <div className="flex flex-wrap gap-2">
+                  {ri.map((r) => (
+                    <div key={r.r2_key} className="flex flex-col items-center gap-0.5 max-w-[92px]">
+                      <div className="relative">
+                        <img src={`/api/r2-image?key=${encodeURIComponent(r.r2_key)}&w=120`} alt=""
+                          onClick={() => window.open(`/api/r2-image?key=${encodeURIComponent(r.r2_key)}`, "_blank")}
+                          title={t("กดดูเต็มจอ", "Click to view full")}
+                          className="h-14 w-14 rounded object-cover border-2 border-orange-400 cursor-zoom-in" />
+                        {r.index != null && <span className="absolute top-0 left-0 px-1 text-[9px] font-semibold bg-orange-500 text-white">{r.index}</span>}
+                      </div>
+                      {r.reason && <span className="text-[10px] text-orange-700 text-center leading-tight break-words">{r.reason}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           {(hasPrompt || imageAtts.length > 0) && (
             <div className="flex flex-wrap gap-1.5">
               {hasPrompt && <button onClick={copyPrompt} className="text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-md px-2 py-1 hover:bg-violet-100">📋 {t("คัดลอก prompt", "Copy prompt")}</button>}
@@ -651,7 +735,9 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
       {contentOpen && sub.config?.content_id && <ContentDrawer contentId={String(sub.config.content_id)} brands={[]} onClose={() => setContentOpen(false)} onChanged={() => { void reload(); }} pushToast={pushToast} />}
       {detailsOpen && <ContentDetailsModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} onClose={() => setDetailsOpen(false)} />}
-      {reviseOpen && <ReviseModal busy={busy} onCancel={() => setReviseOpen(false)} onConfirm={async (c) => { setReviseOpen(false); await patch({ status: "revision_requested", comment: c }); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); }} />}
+      {reviseOpen && <ReviseModal busy={busy} images={imageAtts.map((a) => ({ id: a.id, r2_key: a.r2_key as string, file_name: a.file_name }))}
+        onCancel={() => setReviseOpen(false)}
+        onConfirm={async (c, imgs) => { setReviseOpen(false); await patch({ status: "revision_requested", comment: c, revise_images: imgs }); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); }} />}
     </div>
   );
 }
@@ -1419,7 +1505,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const canReview = canApprove && sub.status === "submitted";
   const [reviseOpen, setReviseOpen] = useState(false);
   const doApprove = async () => { setBusy(true); try { await updateSubtask(taskId, sub.id, { status: "approved" }); await reload(); pushToast("success", t("อนุมัติแล้ว", "Approved")); onClose(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
-  const doRevise = async (comment: string) => { setReviseOpen(false); setBusy(true); try { await updateSubtask(taskId, sub.id, { status: "revision_requested", comment }); await reload(); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); onClose(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+  const doRevise = async (comment: string, reviseImages?: { r2_key: string; file_name?: string | null; index: number; reason: string }[]) => { setReviseOpen(false); setBusy(true); try { await updateSubtask(taskId, sub.id, { status: "revision_requested", comment, revise_images: reviseImages }); await reload(); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); onClose(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
 
   return (
     <>
@@ -1609,7 +1695,9 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       )}
       {/* ดูรูปต่อ SKU เต็มจอ + เลื่อนดูได้ */}
       <ImageLightbox images={skuLb.images} index={skuLb.index} onClose={() => setSkuLb((s) => ({ ...s, index: -1 }))} onIndex={(i) => setSkuLb((s) => ({ ...s, index: i }))} />
-      {reviseOpen && <ReviseModal fields={requiredFields} busy={busy} onCancel={() => setReviseOpen(false)} onConfirm={doRevise} />}
+      {reviseOpen && <ReviseModal fields={requiredFields} busy={busy}
+        images={imageAtts.map((a) => ({ id: a.id, r2_key: a.r2_key as string, file_name: a.file_name }))}
+        onCancel={() => setReviseOpen(false)} onConfirm={doRevise} />}
     </>
   );
 }

@@ -448,7 +448,21 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   } else if ((patch.status === "revision_requested" || patch.status === "canceled")) {
     try { await reverseSubtaskSync(admin, subtaskId, { actorId: user?.id ?? null, reason: reason || null }); } catch { /* ถอดพลาดไม่ทำให้บันทึกพัง */ }
     try { await restoreSkuImagesBackup(admin, subtaskId); } catch { /* คืนรูปสำรองพลาดไม่กระทบ */ }
-    if (reason) { try { const cfg = (row?.config as Record<string, unknown>) ?? {}; await admin.from("erp_creative_subtasks").update({ config: { ...cfg, review_note: reason, review_status: patch.status } }).eq("id", subtaskId); } catch { /* noop */ } }
+    // รูปที่ผู้ตรวจชี้ว่าต้องแก้ (เลือกได้หลายรูป + เหตุผลต่อรูป) → เก็บใน config ให้ช่างเห็นบนการ์ด
+    const rawImgs = Array.isArray(body.revise_images) ? (body.revise_images as unknown[]) : [];
+    const reviseImages = rawImgs.slice(0, 30).map((x) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      const key = String(o.r2_key ?? "").trim();
+      return key ? { r2_key: key, file_name: o.file_name ? String(o.file_name).slice(0, 200) : null, index: Number(o.index) || null, reason: String(o.reason ?? "").trim().slice(0, 300) } : null;
+    }).filter((x): x is { r2_key: string; file_name: string | null; index: number | null; reason: string } => !!x);
+    if (reason || reviseImages.length) {
+      try {
+        const cfg = (row?.config as Record<string, unknown>) ?? {};
+        await admin.from("erp_creative_subtasks").update({
+          config: { ...cfg, review_note: reason || null, review_status: patch.status, review_images: reviseImages.length ? reviseImages : null },
+        }).eq("id", subtaskId);
+      } catch { /* noop */ }
+    }
   }
   // ย้อนจาก "อนุมัติแล้ว" → สถานะอื่น (เช่น submitted) → ถอดข้อมูลที่ส่งเข้าสินค้าออก (revise/cancel ถอดในบล็อกบนแล้ว)
   if (wasApproved && patch.status && !["approved", "revision_requested", "canceled"].includes(String(patch.status))) {

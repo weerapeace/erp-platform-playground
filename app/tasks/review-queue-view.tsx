@@ -15,6 +15,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
 import { AssigneeStack } from "./assignee-avatar";
 import { listReviewQueue, updateSubtask, type ReviewQueueItem } from "./data";
+import { ReviseModal } from "./subtask-manager";
 import { useT } from "@/components/i18n";
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
@@ -46,6 +47,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   const [destSkus, setDestSkus] = useState<Dest[]>([]);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [pickOpen, setPickOpen] = useState(false);
+  const [reviseOpen, setReviseOpen] = useState(false);   // ป๊อปขอแก้ (ของกลาง — เลือกรูปที่ต้องแก้ได้)
   // รูปเดิมในสินค้า (แกลเลอรีจริง) ต่อปลายทาง — โชว์ให้ผู้ตรวจเห็นก่อนอนุมัติ · tk = "parent:<id>"/"sku:<id>"
   const [destGalleries, setDestGalleries] = useState<Record<string, { r2_key?: string; url?: string; slot_id?: string; slot?: number }[]>>({});
   const [galLb, setGalLb] = useState<{ images: { url: string; label: string | null }[]; index: number }>({ images: [], index: -1 });   // ซูมรูปเดิมในสินค้า (แยกจาก imgs งานส่ง)
@@ -123,7 +125,17 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
       closeItem(); await load(); onChanged?.();
     } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
-  const revise = () => { const r = window.prompt(t("เหตุผลที่ขอแก้ (ส่งให้ผู้ทำ)", "Reason for revision")); if (r === null) return; act("revision_requested", r); };
+  // ขอแก้ — ใช้ป๊อปของกลางตัวเดียวกับการ์ดงานย่อย (เลือกรูปที่ต้องแก้หลายรูป + เหตุผลต่อรูป)
+  const revise = () => setReviseOpen(true);
+  const doRevise = async (comment: string, reviseImages?: { r2_key: string; file_name?: string | null; index: number; reason: string }[]) => {
+    if (!active) return;
+    setReviseOpen(false); setBusy(true);
+    try {
+      await updateSubtask(active.task_id, active.id, { status: "revision_requested", comment, revise_images: reviseImages });
+      pushToast("success", t("ส่งกลับให้แก้แล้ว", "Sent back for revision"));
+      closeItem(); await load(); onChanged?.();
+    } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
   const onApprove = () => { if (confirmApprove) act("approved"); else setConfirmApprove(true); };
 
   const rows = useMemo(() => {
@@ -369,6 +381,10 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
       <ImageLightbox images={lbImages} index={lb} onClose={() => setLb(-1)} onIndex={setLb} />
       <ImageLightbox images={galLb.images} index={galLb.index} onClose={() => setGalLb((s) => ({ ...s, index: -1 }))} onIndex={(i) => setGalLb((s) => ({ ...s, index: i }))} />
       <SkuMultiPickerModal open={pickOpen} onClose={() => setPickOpen(false)} onConfirm={onAddSkus} excludeIds={destSkus.map((s) => s.id)} />
+      {reviseOpen && (
+        <ReviseModal busy={busy} images={imgs.map((im) => ({ id: im.r2_key, r2_key: im.r2_key, file_name: im.file_name }))}
+          onCancel={() => setReviseOpen(false)} onConfirm={doRevise} />
+      )}
 
       <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
         {toasts.map((x) => <div key={x.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${x.type === "success" ? "bg-emerald-600" : x.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{x.message}</div>)}
