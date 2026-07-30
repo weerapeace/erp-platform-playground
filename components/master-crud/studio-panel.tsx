@@ -282,6 +282,7 @@ export function StudioPanel({
     [...fields].sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
   );
   const [saving, setSaving] = useState(false);
+  const [translating, setTranslating] = useState(false);
   const [dirty,  setDirty]  = useState(false);
   const [msg,    setMsg]    = useState<string | null>(null);
   const [settingsKey, setSettingsKey] = useState<string | null>(null);   // field ที่กำลังเปิด ⚙️ ตั้งค่า
@@ -490,6 +491,45 @@ export function StudioPanel({
   const toggleBulk = (key: string) =>
     setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, bulkEditable: !i.bulkEditable } : i); });
 
+  // ---- แปลชื่อฟิลด์ทั้งโมดูลเป็นอังกฤษ (ของกลาง — ใช้ปุ่มแปลเดียวกับที่อื่น) ----
+  // ค่าเริ่มต้น: เติมเฉพาะช่องที่ยังว่าง (ไม่ทับของที่คนกรอกไว้เอง)
+  // ถ้ามีครบทุกช่องแล้วจะถามก่อนว่าจะให้แปลใหม่ทับทั้งหมดไหม
+  // แปลเสร็จ "ยังไม่เขียนฐานข้อมูล" — ใส่ในช่อง English ให้ตรวจ/แก้ก่อน แล้วกดบันทึกเอง
+  const translateLabels = async () => {
+    const named = items.filter((i) => (i.label ?? "").trim());
+    const empty = named.filter((i) => !(i.labelEn ?? "").trim());
+    let targets = empty;
+    if (!targets.length) {
+      if (!confirm(`ทุกฟิลด์มีชื่ออังกฤษแล้ว (${named.length} ฟิลด์)\nให้ AI แปลใหม่ทับทั้งหมดไหม?`)) return;
+      targets = named;
+    }
+    setTranslating(true); setMsg(null);
+    try {
+      const result = new Map<string, string>();
+      let engine = "";
+      // ยิงเป็นชุด (ชุดละ 80 ฟิลด์) — ไม่ยิงทีละฟิลด์ · ชุดเล็กพอที่คำตอบ JSON ไม่ถูกตัดกลางทาง
+      for (let s = 0; s < targets.length; s += 80) {
+        const chunk = targets.slice(s, s + 80);
+        const res = await apiFetch("/api/ai/translate", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ texts: chunk.map((i) => i.label), to: "en" }),
+        });
+        const j = await res.json();
+        if (j.error) throw new Error(String(j.error));
+        const out = (j.data?.translated_list ?? []) as string[];
+        engine = String(j.data?.engine ?? engine);
+        chunk.forEach((i, idx) => { const en = (out[idx] ?? "").trim(); if (en) result.set(i.key, en); });
+      }
+      if (!result.size) throw new Error("แปลไม่สำเร็จ (ไม่ได้ข้อความกลับมา)");
+      setItems((prev) => prev.map((i) => result.has(i.key) ? { ...i, labelEn: result.get(i.key)! } : i));
+      setDirty(true);
+      const missed = targets.length - result.size;
+      setMsg(`✓ แปลแล้ว ${result.size} ฟิลด์${missed > 0 ? ` (ไม่สำเร็จ ${missed})` : ""}${engine === "google" ? " · แปลตรงตัว (ไม่มี key ของ AI)" : ""} — ตรวจ/แก้ได้ แล้วกดบันทึก`);
+    } catch (e) {
+      setMsg("❌ " + (e instanceof Error ? e.message : "แปลไม่สำเร็จ"));
+    } finally { setTranslating(false); }
+  };
+
   // ---- save ----
   const save = async () => {
     setSaving(true); setMsg(null);
@@ -667,6 +707,11 @@ export function StudioPanel({
         </div>
         <div className="flex items-center gap-2">
           {msg && <span className={`text-sm ${msg.startsWith("✓")?"text-emerald-600":"text-red-600"}`}>{msg}</span>}
+          <button onClick={() => void translateLabels()} disabled={saving || translating}
+            title="ให้ AI แปลชื่อฟิลด์ทุกช่องของโมดูลนี้เป็นอังกฤษ (เติมเฉพาะช่องที่ยังว่าง) — ยังไม่บันทึก ตรวจ/แก้ได้ก่อน"
+            className="h-9 px-3 text-sm border border-violet-200 text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 disabled:opacity-50">
+            {translating ? "กำลังแปล…" : "🌐 แปลชื่อฟิลด์ (EN)"}
+          </button>
           <button onClick={onClose} disabled={saving}
             className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">ปิด</button>
           <button onClick={save} disabled={saving || !dirty}

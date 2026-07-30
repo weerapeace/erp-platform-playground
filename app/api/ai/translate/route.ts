@@ -1,6 +1,9 @@
 /**
  * POST /api/ai/translate — แปลข้อความ ไทย↔อังกฤษ
- * body: { text, to? }  คืน: { data: { translated, target, engine } }
+ * body: { text, to? }   คืน: { data: { translated, target, engine } }
+ * body: { texts[], to? } คืน: { data: { translated_list, target, engine } }  ← ชุดเดียวหลายข้อความ
+ *   (ใช้กับปุ่ม "แปลชื่อฟิลด์ทั้งโมดูล" — ยิงครั้งเดียวแทนการยิงทีละฟิลด์เป็นร้อยครั้ง
+ *    ลำดับผลลัพธ์ตรงกับลำดับที่ส่งไป · ช่องที่แปลไม่ได้จะคืนเป็นค่าว่าง ไม่ใช่ทำให้ทั้งชุดพัง)
  *
  * ไล่ 3 ชั้น: ① GPT (คุณภาพดีสุด เรียบเรียงใหม่ ~0.02 บาท/ช่องยาว)
  *            ② Cloudflare Workers AI (ฟรีมีโควตา — ใช้เมื่ออยู่บน CF)
@@ -29,19 +32,82 @@ async function googleTranslate(text: string, tl: string): Promise<string> {
   return segs.map((s: any) => (Array.isArray(s) ? s[0] ?? "" : "")).join("").trim();
 }
 
+/** ปลายทางการแปล: to บังคับได้ · ไม่ส่ง = มีอักษรไทย→อังกฤษ, อื่น→ไทย */
+function pickTarget(sample: string, to?: string): { tlCode: string; target: string } {
+  const forced = to === "en" ? "en" : to === "th" ? "th" : null;
+  const tlCode = forced ?? (/[฀-๿]/.test(sample) ? "en" : "th");
+  return { tlCode, target: tlCode === "en" ? "English" : "Thai" };
+}
+
+// แปลหลายข้อความในคำขอเดียว — GPT ก่อน (ครั้งเดียวจบ) ตกไป Google ทีละข้อความ (ทีละ 5 พร้อมกัน)
+// คืนลำดับตรงกับที่ส่งมาเสมอ · ช่องที่แปลไม่ได้ = "" ให้ฝั่งเรียกข้ามไปเอง
+async function translateBatch(list: string[], to?: string): Promise<NextResponse> {
+  const { tlCode, target } = pickTarget(list.find(Boolean) ?? "", to);
+
+  if (openAiKey()) {
+    try {
+      const style = pickJobPrompt(await loadPromptRows(), null, TRANSLATE_KEY);
+      const sys = [
+        `You are a professional translator for a Thai e-commerce/ERP system. Translate each numbered line into ${target}.`,
+        "These are short data-entry field names (labels) in a business form — translate them as concise UI labels, not sentences.",
+        "Keep proper nouns, URLs, product codes (SKU), and brand names unchanged.",
+        style || "",
+        'Reply as JSON: {"items":[{"i":1,"en":"..."}]} — exactly one entry per input line, keeping the same i number. No other keys.',
+      ].filter(Boolean).join(" ");
+      const userText = list.map((t, i) => `${i + 1}. ${t}`).join("\n");
+      const out = await chatJson(sys, [{ type: "text", text: userText }], 3000);
+      const items = Array.isArray((out as { items?: unknown })?.items) ? (out as { items: unknown[] }).items : [];
+      const byIndex = new Map<number, string>();
+      for (const raw of items) {
+        const it = (raw ?? {}) as { i?: unknown; en?: unknown };
+        const i = Number(it.i); const en = String(it.en ?? "").trim();
+        if (Number.isInteger(i) && i >= 1 && i <= list.length && en) byIndex.set(i, en);
+      }
+      if (byIndex.size) {
+        return NextResponse.json({
+          data: { translated_list: list.map((_, i) => byIndex.get(i + 1) ?? ""), target, engine: "gpt" },
+          error: null,
+        });
+      }
+    } catch { /* ตกไปใช้ตัวสำรอง */ }
+  }
+
+  // ตัวสำรอง: Google ทีละข้อความ (ทำงานได้แม้ไม่มี key) — จำกัด 5 พร้อมกัน กันยิงถี่เกิน
+  const outList = new Array<string>(list.length).fill("");
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(5, list.length) }, async () => {
+    for (;;) {
+      const my = cursor++;
+      if (my >= list.length) return;
+      const t = list[my];
+      if (!t) continue;
+      try { outList[my] = await googleTranslate(t, tlCode); } catch { /* ปล่อยว่าง ไม่ทำให้ทั้งชุดพัง */ }
+    }
+  }));
+  if (outList.some(Boolean)) return NextResponse.json({ data: { translated_list: outList, target, engine: "google" }, error: null });
+  return NextResponse.json({ error: "แปลไม่สำเร็จ" }, { status: 502 });
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
-  let body: { text?: string; to?: string };
+  let body: { text?: string; texts?: unknown; to?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  // ---- โหมดชุด (หลายข้อความในครั้งเดียว) ----
+  const listIn = Array.isArray(body.texts) ? body.texts.map((s) => String(s ?? "").trim()) : null;
+  if (listIn) {
+    if (!listIn.some(Boolean)) return NextResponse.json({ error: "no text" }, { status: 400 });
+    if (listIn.length > 400) return NextResponse.json({ error: "ส่งมาเกิน 400 ข้อความ" }, { status: 400 });
+    if (listIn.join("").length > 12000) return NextResponse.json({ error: "ข้อความรวมกันยาวเกินไป (จำกัด 12000 ตัวอักษร)" }, { status: 400 });
+    return translateBatch(listIn, body.to);
+  }
+
   const text = (body.text ?? "").trim();
   if (!text) return NextResponse.json({ error: "no text" }, { status: 400 });
   if (text.length > 4000) return NextResponse.json({ error: "ข้อความยาวเกินไป (จำกัด 4000 ตัวอักษร)" }, { status: 400 });
 
   // to = "en"/"th" บังคับปลายทาง (เช่น จีน→อังกฤษ) · ไม่ส่ง = ตรวจเอง (ไทย→อังกฤษ, อื่น→ไทย)
-  const forced = body.to === "en" ? "en" : body.to === "th" ? "th" : null;
-  const hasThai = /[฀-๿]/.test(text);
-  const tlCode = forced ?? (hasThai ? "en" : "th");
-  const target = tlCode === "en" ? "English" : "Thai";
+  const { tlCode, target } = pickTarget(text, body.to);
 
   // 0) GPT ก่อน (คุณภาพดีสุด — เรียบเรียงใหม่ให้อ่านลื่น ไม่แปลตรงตัวแบบเครื่องแปล)
   //    ราคา ~0.02 บาท/ช่องข้อความยาว · สไตล์การแปลตั้งเองได้ที่ทะเบียน prompt (platform = "translate")
