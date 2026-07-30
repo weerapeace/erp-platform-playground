@@ -904,7 +904,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   useEffect(() => { setSubFields(config.list_sub_fields ?? []); }, [config.list_sub_fields]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const canConfig = !!configurable && !!fieldId;
-  const PAGE = 20;   // โหลดทีละ 20 (ลดภาระ worker) แล้วกด "ดูเพิ่ม"
+  // โชว์ทุกแถวในครั้งเดียว (ไม่มี "ดูเพิ่ม") — เจ้าของสั่ง: ต้องเห็น SKU ลูกครบ ไม่งั้นทำงานยาก
+  // และปุ่มที่ทำงานกับทั้งชุด (แปลสี/เพิ่มไซส์) จะไม่พลาดแถวที่ยังไม่โหลด
+  const PAGE = 500;
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [total, setTotal] = useState(0);
   const [loaded, setLoaded] = useState(false);

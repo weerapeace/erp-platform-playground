@@ -65,8 +65,12 @@ export function PlatformCategoryMapper() {
       const entries = await Promise.all(platforms.map(async (p): Promise<[string, SelectOption[]]> => {
         const head: SelectOption = { value: "", label: "— ไม่จับคู่ร้านนี้ —" };
         try {
-          const j = await apiFetch(`/api/platform-category-options?platform_id=${p.id}&limit=2000`).then((r) => r.json());
-          const opts = ((j.categories ?? []) as Opt[]).map((o) => ({ value: `${o.external_id} · ${o.name_th || o.name_en}`, label: o.name_th || o.name_en, sub: `#${o.external_id}`, searchText: o.external_id }));
+          // ขอทั้งหมด — บางร้านมีถึง ~3,000 หมวด · เดิมขอ 2,000 แต่ API หั่นเหลือ 100 จึงโชว์ไม่ครบ
+          const j = await apiFetch(`/api/platform-category-options?platform_id=${p.id}&limit=5000`).then((r) => r.json());
+          const opts: SelectOption[] = ((j.categories ?? []) as Opt[]).map((o) => ({ value: `${o.external_id} · ${o.name_th || o.name_en}`, label: o.name_th || o.name_en, sub: `#${o.external_id}`, searchText: o.external_id }));
+          const total = Number(j.total ?? opts.length);
+          // โปร่งใส: ถ้ายังไม่ครบจริง ๆ บอกในรายการ (ไม่เงียบเหมือนเดิม)
+          if (total > opts.length) opts.push({ value: "", label: `— โหลดมา ${opts.length} จาก ${total} หมวด (พิมพ์ค้นหาเพื่อหาหมวดที่เหลือ) —` });
           return [p.id, [head, ...opts]];
         } catch { return [p.id, [head]]; }
       }));

@@ -18,7 +18,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const platformId = (sp.get("platform_id") ?? "").trim();
   const search = (sp.get("search") ?? "").trim();
   const idsParam = (sp.get("ids") ?? "").trim();   // ดึงเฉพาะรหัสที่ระบุ (ไว้โชว์ค่าที่เลือกไว้)
-  const limit = Math.min(100, Math.max(1, parseInt(sp.get("limit") ?? "30", 10)));
+  // เพดาน 5,000 — ของจริงร้านหนึ่งมีหมวดถึง 3,068 รายการ ถ้า cap 100 ตามเดิม
+  // ดรอปดาวน์จับคู่หมวดจะโชว์แค่ 100 หมวดแรก (เจ้าของเจอเอง: Lazada/LINE Shopping เลือกไม่เจอหมวดที่ต้องการ)
+  // payload เล็ก (3 คอลัมน์ ~80 bytes/แถว) → 5,000 แถว ≈ 400KB ยังไหว
+  const limit = Math.min(5000, Math.max(1, parseInt(sp.get("limit") ?? "30", 10)));
   if (!platformId) return NextResponse.json({ categories: [], total: 0, error: null });
   const admin = supabaseAdmin();
 
