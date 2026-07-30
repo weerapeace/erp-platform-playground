@@ -103,12 +103,10 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
     ...platforms,
     { value: "product_detail", label: t("📦 รายละเอียดสินค้า — คำสั่งรวมทุกช่อง", "📦 Product detail — all fields") },
     // คำสั่งรายช่อง (สำคัญกว่าคำสั่งรวม) — ตั้งจากป๊อป ⚙ ในหน้าสินค้าก็ได้ แต่ให้แก้จากหน้ารวมนี้ได้ด้วย
-    { value: "product_detail:name_th", label: t("📦 ↳ ชื่อสินค้า (ไทย)", "📦 ↳ Product name (TH)") },
-    { value: "product_detail:name_en", label: t("📦 ↳ ชื่อสินค้า (EN)", "📦 ↳ Product name (EN)") },
-    { value: "product_detail:introduction", label: t("📦 ↳ Introduction (ไทย)", "📦 ↳ Introduction (TH)") },
-    { value: "product_detail:introduction_en", label: t("📦 ↳ Introduction (EN)", "📦 ↳ Introduction (EN)") },
-    { value: "product_detail:description", label: t("📦 ↳ Description (ไทย)", "📦 ↳ Description (TH)") },
-    { value: "product_detail:english_description", label: t("📦 ↳ Description (EN)", "📦 ↳ Description (EN)") },
+    // ตั้งเฉพาะฝั่งไทย — ฝั่งอังกฤษ AI แปลจากฝั่งไทยให้ตรงกันเอง ไม่ต้องเขียนคำสั่งซ้ำ
+    { value: "product_detail:name_th", label: t("📦 ↳ ชื่อสินค้า (คุม Name En ด้วย)", "📦 ↳ Product name (covers Name En)") },
+    { value: "product_detail:introduction", label: t("📦 ↳ Introduction (คุม Introduction En ด้วย)", "📦 ↳ Introduction (covers Introduction En)") },
+    { value: "product_detail:description", label: t("📦 ↳ Description (คุม English Description ด้วย)", "📦 ↳ Description (covers English Description)") },
     { value: "translate", label: t("🌐 สไตล์การแปลภาษา (ปุ่มแปลทั้งหมด)", "🌐 Translation style (translate button)") },
   ], [platforms, t]);
 

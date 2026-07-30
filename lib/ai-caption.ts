@@ -41,14 +41,22 @@ export const TRANSLATE_KEY = "translate";
  * คำสั่ง AI "รายช่อง" ของรายละเอียดสินค้า — เก็บในทะเบียน prompt เดิมโดยใช้ platform = product_detail:<field>
  * ตั้งได้ 2 ระดับเหมือนเดิม (ค่ากลาง / เฉพาะแบรนด์) · ช่องไหนไม่ตั้ง = ใช้คำอธิบายพื้นฐานในโค้ด
  */
+/**
+ * ตั้งคำสั่งได้เฉพาะ "ฝั่งไทย" — ฝั่งอังกฤษถือเป็นการแปลจากฝั่งไทยให้ตรงกัน
+ * (เจ้าของร้านสั่งไว้: ภาษาอีกภาษา = แปลกันเอง ไม่ต้องเขียน prompt ซ้ำสองรอบ)
+ */
 export const PRODUCT_FIELD_KEYS = [
-  { field: "name_th",             label: "ชื่อสินค้า (ไทย)" },
-  { field: "name_en",             label: "Name En" },
-  { field: "introduction",        label: "Introduction (ไทย)" },
-  { field: "introduction_en",     label: "Introduction En" },
-  { field: "description",         label: "Description (ไทย)" },
-  { field: "english_description", label: "English Description" },
+  { field: "name_th",      label: "ชื่อสินค้า",   en: "name_en" },
+  { field: "introduction", label: "Introduction", en: "introduction_en" },
+  { field: "description",  label: "Description",  en: "english_description" },
 ] as const;
+
+/** ช่องอังกฤษ → ช่องไทยที่เป็นต้นฉบับ (ใช้คำสั่งของฝั่งไทยตัวเดียวกัน) */
+export const EN_SOURCE_FIELD: Record<string, string> = {
+  name_en: "name_th",
+  introduction_en: "introduction",
+  english_description: "description",
+};
 
 export const productFieldPromptKey = (field: string) => `${PRODUCT_DETAIL_KEY}:${field}`;
 

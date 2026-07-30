@@ -164,9 +164,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     `{"name_th":"${fieldDesc("name_th", "ชื่อสินค้าภาษาไทย")}",`,
     `"introduction":"${fieldDesc("introduction", "ข้อความโปรยเปิดภาษาไทย")}",`,
     `"description":"${fieldDesc("description", "รายละเอียดภาษาไทย")}",`,
-    `"name_en":"${fieldDesc("name_en", "ชื่อสินค้าภาษาอังกฤษ")}",`,
-    `"introduction_en":"${fieldDesc("introduction_en", "ข้อความโปรยเปิดภาษาอังกฤษ")}",`,
-    `"english_description":"${fieldDesc("english_description", "รายละเอียดภาษาอังกฤษ")}",`,
+    // ฝั่งอังกฤษ = แปลจากฝั่งไทยให้ตรงกัน (ไม่ต้องตั้งคำสั่งซ้ำ — คำสั่งฝั่งไทยคุมโครงสร้างอยู่แล้ว)
+    `"name_en":"ฉบับภาษาอังกฤษของ name_th — แปลให้ตรงกัน โครงสร้าง/ลำดับ/รหัสสินค้าเหมือนกัน",`,
+    `"introduction_en":"ฉบับภาษาอังกฤษของ introduction — แปลให้ตรงกันทุกประเด็น",`,
+    `"english_description":"ฉบับภาษาอังกฤษของ description — แปลให้ตรงกัน หัวข้อและจำนวนบรรทัดเท่ากัน",`,
     `"sizes":{"size_length_cm":ตัวเลขหรือ null,"size_height_cm":ตัวเลขหรือ null,"size_thickness_cm":ตัวเลขหรือ null,"weight_g":ตัวเลขหรือ null,"warranty":"ข้อความหรือ null","source":"บอกสั้น ๆ ว่าอ่านตัวเลขมาจากไหน เช่น 'รูปที่ 3 เขียนว่า 34*22*12 cm'"},`,
     `"questions":["คำถามภาษาไทยที่อยากถามผู้ใช้ ถ้ามีอะไรไม่แน่ใจหรือดูจากรูปไม่ออก (สูงสุด 5 ข้อ สั้น ตรงประเด็น)"],`,
     `"questions_en":["คำถามชุดเดียวกันฉบับภาษาอังกฤษ เรียงลำดับตรงกับ questions"],`,
@@ -225,10 +226,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ...(hasFieldPrompts ? [
       "",
       "════════ คำสั่งเฉพาะแต่ละช่อง (สำคัญสูงสุด — ช่องไหนมีคำสั่ง ให้ทำตามคำสั่งช่องนั้นเป๊ะ ๆ) ════════",
-      ...PRODUCT_FIELD_KEYS.filter(({ field }) => fieldPrompts[field]).map(({ field, label }) =>
-        `▸ ${field} (${label}):\n${fieldPrompts[field]}`),
+      ...PRODUCT_FIELD_KEYS.filter(({ field }) => fieldPrompts[field]).map(({ field, label, en }) =>
+        `▸ ${field} (${label}) — และใช้กับ ${en} ด้วย โดย ${en} คือฉบับแปลอังกฤษของ ${field} (โครงสร้างเดียวกันเป๊ะ ๆ):\n${fieldPrompts[field]}`),
       "════════════════════════════════════════════════",
       "ช่องที่ไม่มีคำสั่งเฉพาะ ให้ทำตามคำสั่งรวม/กติกาด้านบน",
+      "ช่องภาษาอังกฤษไม่ต้องคิดใหม่ — แปลจากช่องไทยคู่ของมันให้ตรงกัน (ชื่อแบรนด์/Collection/รหัสสินค้า/คำ SEO ที่เป็นภาษาอังกฤษอยู่แล้ว ให้คงไว้เหมือนเดิม)",
     ] : []),
     ...(ruleInstruction ? ["", "คำสั่งเพิ่มสำหรับสินค้าประเภทนี้ (ทำร่วมกับคำสั่งเจ้าของร้าน):", ruleInstruction] : []),
     ...(ruleTopics.length ? ["", "หัวข้อที่ต้องมีใน Description เสมอ (ถ้าดูจากรูปไม่ออก ให้ถามใน questions):",
