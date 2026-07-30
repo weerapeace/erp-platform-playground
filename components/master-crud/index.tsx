@@ -243,27 +243,36 @@ function scopedTpl(raw: FamilyTemplateRaw | undefined | null, scope: "parent_sku
 // ---- Group config (Sprint 7) ----
 // defaultOpen = true ทุก section — user ขอ "ดึงมาไม่ครบ" ปัญหามาจาก collapse
 // ปุ่ม "ยุบทั้งหมด" มีอยู่ใน FormSections header
-const GROUP_CONFIG: Record<string, { label: string; icon: string; defaultOpen: boolean; order: number }> = {
-  core:      { label: "ข้อมูลหลัก",     icon: "📋", defaultOpen: true, order: 10 },
-  relations: { label: "ความสัมพันธ์",  icon: "🔗", defaultOpen: true, order: 20 },
-  product:   { label: "คุณสมบัติ",      icon: "✨", defaultOpen: true, order: 25 },
-  specs:     { label: "ขนาด/สเปก",     icon: "📐", defaultOpen: true, order: 30 },
-  supplier:  { label: "ผู้จำหน่าย",     icon: "🏭", defaultOpen: true, order: 35 },
-  content:   { label: "เนื้อหา",        icon: "📝", defaultOpen: true, order: 40 },
-  pricing:   { label: "ราคา & ต้นทุน",  icon: "💰", defaultOpen: true, order: 50 },
-  money:     { label: "เงินต้น & ดอกเบี้ย", icon: "💰", defaultOpen: true, order: 51 },
-  period:    { label: "ระยะเวลา",        icon: "📅", defaultOpen: true, order: 53 },
-  pay:       { label: "ค่าจ้าง",         icon: "💰", defaultOpen: true, order: 52 },
-  term:      { label: "ระยะเวลา/สถานะ", icon: "📅", defaultOpen: true, order: 54 },
-  media:     { label: "รูปภาพ/ไฟล์",    icon: "🖼️", defaultOpen: true, order: 55 },
-  bom:       { label: "BOM (สูตรผลิต)", icon: "📐", defaultOpen: true, order: 58 },
-  status:    { label: "สถานะ",          icon: "🟢", defaultOpen: true, order: 60 },
-  other:     { label: "อื่น ๆ",         icon: "📦", defaultOpen: true, order: 80 },
-  system:    { label: "ระบบ",           icon: "⚙️", defaultOpen: false, order: 90 },
+// คำยืนยันการลบถาวร — รับทั้งไทยและอังกฤษ (โหมด EN พิมพ์ไทยไม่ได้) · เทียบแบบตัวพิมพ์ใหญ่
+const CONFIRM_DELETE_WORDS = ["ลบ", "DELETE"];
+
+// ชื่อกลุ่ม/หัวข้อในฟอร์ม — เก็บทั้ง 2 ภาษา แล้วเลือกภาษาตอนอ่าน (getGroupConfig)
+// ห้ามใส่ tr() ตรงนี้ เพราะค่าคงที่ระดับไฟล์ถูกคำนวณตอน import — ก่อนระบบรู้ภาษาที่ผู้ใช้เลือก
+const GROUP_CONFIG: Record<string, { label: string; labelEn: string; icon: string; defaultOpen: boolean; order: number }> = {
+  core:      { label: "ข้อมูลหลัก",     labelEn: "Main info",            icon: "📋", defaultOpen: true, order: 10 },
+  relations: { label: "ความสัมพันธ์",  labelEn: "Relations",            icon: "🔗", defaultOpen: true, order: 20 },
+  product:   { label: "คุณสมบัติ",      labelEn: "Attributes",           icon: "✨", defaultOpen: true, order: 25 },
+  specs:     { label: "ขนาด/สเปก",     labelEn: "Size / specs",         icon: "📐", defaultOpen: true, order: 30 },
+  supplier:  { label: "ผู้จำหน่าย",     labelEn: "Supplier",             icon: "🏭", defaultOpen: true, order: 35 },
+  content:   { label: "เนื้อหา",        labelEn: "Content",              icon: "📝", defaultOpen: true, order: 40 },
+  pricing:   { label: "ราคา & ต้นทุน",  labelEn: "Price & cost",         icon: "💰", defaultOpen: true, order: 50 },
+  money:     { label: "เงินต้น & ดอกเบี้ย", labelEn: "Principal & interest", icon: "💰", defaultOpen: true, order: 51 },
+  period:    { label: "ระยะเวลา",        labelEn: "Period",               icon: "📅", defaultOpen: true, order: 53 },
+  pay:       { label: "ค่าจ้าง",         labelEn: "Wages",                icon: "💰", defaultOpen: true, order: 52 },
+  term:      { label: "ระยะเวลา/สถานะ", labelEn: "Term / status",        icon: "📅", defaultOpen: true, order: 54 },
+  media:     { label: "รูปภาพ/ไฟล์",    labelEn: "Images / files",       icon: "🖼️", defaultOpen: true, order: 55 },
+  bom:       { label: "BOM (สูตรผลิต)", labelEn: "BOM (recipe)",         icon: "📐", defaultOpen: true, order: 58 },
+  status:    { label: "สถานะ",          labelEn: "Status",               icon: "🟢", defaultOpen: true, order: 60 },
+  other:     { label: "อื่น ๆ",         labelEn: "Other",                icon: "📦", defaultOpen: true, order: 80 },
+  system:    { label: "ระบบ",           labelEn: "System",               icon: "⚙️", defaultOpen: false, order: 90 },
 };
 
 function getGroupConfig(key: string) {
-  return GROUP_CONFIG[key] ?? { label: key, icon: "📁", defaultOpen: false, order: 99 };
+  const g = GROUP_CONFIG[key];
+  // แปลตอนอ่าน (ไม่ใช่ตอน import) → ตรงกับภาษาที่ผู้ใช้เลือกจริง
+  // หมวดที่ตั้งชื่อเองใน Studio (ไม่อยู่ในรายการ) → ใช้ชื่อที่ตั้งไว้ทั้ง 2 ภาษา
+  if (!g) return { label: key, icon: "📁", defaultOpen: false, order: 99 };
+  return { ...g, label: tr(g.label, g.labelEn) };
 }
 
 // ---- Status summary cards (ของกลาง) ----
@@ -1060,7 +1069,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       const enriched = enrichRelated(raw, vis);
       setRows(enriched);
       setListCache(url, enriched);
-    } catch (err) { if (!cached) setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
+    } catch (err) { if (!cached) setError(err instanceof Error ? err.message : tr("โหลดไม่ได้", "Couldn't load")); }
     finally { setLoading(false); }
   }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, extraQueryString, urlFilter, enrichRelated, ensureRelatedMaps]);
 
@@ -1288,7 +1297,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     }
     setFieldErrors(fErr);
     if (hasErr) {
-      setFormErr("มี field ที่ยังไม่ผ่านการตรวจ — ดูข้อความใต้แต่ละ field");
+      setFormErr(tr("มี field ที่ยังไม่ผ่านการตรวจ — ดูข้อความใต้แต่ละ field", "Some fields didn't pass validation — see the message under each field"));
       return;
     }
     setSaving(true); setFormErr(null);
@@ -1330,7 +1339,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         payload = diff;
         if (Object.keys(payload).length === 0) {
           // ไม่มีอะไรเปลี่ยน → ไม่ต้องยิง (กัน API ตอบ "ไม่มี field ที่ต้อง update")
-          flash("ไม่มีการเปลี่ยนแปลง"); setDirty(false); setSaving(false); setDrawerMode("view");
+          flash(tr("ไม่มีการเปลี่ยนแปลง", "No changes")); setDirty(false); setSaving(false); setDrawerMode("view");
           return;
         }
       }
@@ -1343,10 +1352,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       if (json.error) {
         // ค่าซ้ำ (23505): server แนบ dup:{field,value} → ไฮไลต์ช่องที่ซ้ำในฟอร์ม (เดิมโชว์แค่ข้อความรวม)
         const dup = json.dup as { field?: string; value?: string } | undefined;
-        if (dup?.field) setFieldErrors((prev) => ({ ...prev, [dup.field as string]: [`ค่านี้ซ้ำกับที่มีอยู่แล้ว${dup.value ? ` ("${dup.value}")` : ""}`] }));
+        if (dup?.field) setFieldErrors((prev) => ({ ...prev, [dup.field as string]: [tr("ค่านี้ซ้ำกับที่มีอยู่แล้ว", "This value already exists") + (dup.value ? ` ("${dup.value}")` : "")] }));
         throw new Error(json.error);
       }
-      flash(editingId ? "บันทึกแล้ว" : "สร้างใหม่แล้ว");
+      flash(editingId ? tr("บันทึกแล้ว", "Saved") : tr("สร้างใหม่แล้ว", "Created"));
       setDirty(false);
       // ผูก/ถอดลิงก์ m2m ให้ตรงกับที่เลือก (widget mirror ค่าเข้า form แล้ว) — ทั้งสร้างและแก้ไข
       const srcId = String((json.data as Record<string, unknown> | undefined)?.id ?? editingId ?? "");
@@ -1404,7 +1413,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       }
       await refreshData();
       embedded?.onChanged?.();   // โหมด embedded: ให้ตัวเรียก (เช่น SKU browser) รีเฟรชการ์ด
-    } catch (err) { const m = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"; setFormErr(m); fail(m); }
+    } catch (err) { const m = err instanceof Error ? err.message : tr("บันทึกไม่สำเร็จ", "Save failed"); setFormErr(m); fail(m); }
     finally { setSaving(false); }
   };
 
@@ -1413,20 +1422,23 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // ลบชั่วคราว (soft) / ลบถาวร (hard) — จากกล่อง deleteTarget
   const doDelete = async () => {
     if (!deleteTarget) return;
-    if (deleteMode === "hard" && !allowPermanentDelete) { setError("ตารางนี้ไม่อนุญาตให้ลบถาวร"); return; }
-    if (deleteMode === "hard" && deleteText.trim() !== "ลบ") { setError('พิมพ์คำว่า "ลบ" เพื่อยืนยันการลบถาวร'); return; }
+    if (deleteMode === "hard" && !allowPermanentDelete) { setError(tr("ตารางนี้ไม่อนุญาตให้ลบถาวร", "This table does not allow permanent delete")); return; }
+    // รับคำยืนยันได้ทั้ง "ลบ" และ "DELETE" — คนที่ใช้โหมดอังกฤษพิมพ์ไทยไม่ได้
+    if (deleteMode === "hard" && !CONFIRM_DELETE_WORDS.includes(deleteText.trim().toUpperCase())) {
+      setError(tr('พิมพ์คำว่า "ลบ" เพื่อยืนยันการลบถาวร', 'Type "DELETE" to confirm permanent delete')); return;
+    }
     setDeleting(true); setError(null);
     try {
       const url = `${apiBase}${config.apiPath}/${deleteTarget.id}?actor=${encodeURIComponent(user?.name ?? "")}${deleteMode === "hard" ? "&hard=1" : ""}`;
       const res = await apiFetch(url, { method: "DELETE" });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash(deleteMode === "hard" ? "ลบถาวรแล้ว" : "ลบแล้ว (กู้คืนได้)");
+      flash(deleteMode === "hard" ? tr("ลบถาวรแล้ว", "Permanently deleted") : tr("ลบแล้ว (กู้คืนได้)", "Deleted (can be restored)"));
       // ถ้ากำลังลบ record ที่เปิดใน drawer อยู่ → ปิด drawer หลังลบเสร็จ
       if (modalOpen && editingId != null && String(deleteTarget.id) === String(editingId)) setModalOpen(false);
       setDeleteTarget(null); setDeleteMode("soft"); setDeleteText("");
       await refreshData();
-    } catch (err) { const m = err instanceof Error ? err.message : "ลบไม่สำเร็จ"; setError(m); fail(m); }
+    } catch (err) { const m = err instanceof Error ? err.message : tr("ลบไม่สำเร็จ", "Delete failed"); setError(m); fail(m); }
     finally { setDeleting(false); }
   };
   const openDelete = (r: Row) => { setDeleteTarget(r); setDeleteMode("soft"); setDeleteText(""); setError(null); };
@@ -1438,9 +1450,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash("เปิดใช้งานแล้ว");
+      flash(tr("เปิดใช้งานแล้ว", "Restored"));
       await refreshData();
-    } catch (err) { setError(err instanceof Error ? err.message : "เปิดไม่สำเร็จ"); }
+    } catch (err) { setError(err instanceof Error ? err.message : tr("เปิดไม่สำเร็จ", "Restore failed")); }
   };
 
   // ---- Columns ----
@@ -1486,7 +1498,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     // ข้ามถ้า hideActiveStatus — ตารางผลลัพธ์ที่ไม่มีฟิลด์ active จะได้ไม่ขึ้น "ปิดอยู่" ทุกแถว
     if (!config.hideActiveStatus) {
       cols.push({
-        id: activeField, accessorKey: activeField, header: "สถานะ", size: 90,
+        id: activeField, accessorKey: activeField, header: tr("สถานะ", "Status"), size: 90,
         cell: ({ getValue }) => {
           const a = getValue() as boolean;
           return a ? (
@@ -1540,7 +1552,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
   // ---- Row actions ----
   const rowActions: RowAction<Row>[] = useMemo(() => {
-    const acts: RowAction<Row>[] = [{ label: "ดู / แก้", icon: "✎", onClick: openEdit }];
+    const acts: RowAction<Row>[] = [{ label: tr("ดู / แก้", "View / edit"), icon: "✎", onClick: openEdit }];
     // ปุ่มรายแถวเพิ่มเติมจาก config (เช่น คัดลอก) — wrap ให้ refresh อัตโนมัติ
     for (const a of (config.extraRowActions ?? [])) {
       acts.push({
@@ -1550,8 +1562,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       });
     }
     if (canEdit) {
-      acts.push({ label: "กู้คืน", icon: "↩", onClick: restore, show: (r: Row) => !r[activeField] });
-      acts.push({ label: "ลบ", icon: "🗑", onClick: openDelete, variant: "danger" });
+      acts.push({ label: tr("กู้คืน", "Restore"), icon: "↩", onClick: restore, show: (r: Row) => !r[activeField] });
+      acts.push({ label: tr("ลบ", "Delete"), icon: "🗑", onClick: openDelete, variant: "danger" });
     }
     const extraCount = config.extraRowActions?.length ?? 0;
     return acts.map((action, index) => {
@@ -1572,11 +1584,40 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       variant: a.variant,
       onClick: async (selected: Row[]) => { await a.onClick(selected); await refreshData(); },
     }));
+    // ปุ่มลบถาวร — ประกอบแยกตามสิทธิ์ของตาราง (เดิมกรองด้วยการหาคำว่า "ถาวร" ในชื่อปุ่ม
+    // ซึ่งพอชื่อปุ่มเป็นภาษาอังกฤษจะหาไม่เจอ → ปุ่มลบถาวรจะหลุดไปโผล่ในตารางที่ห้ามลบถาวร)
+    const permanentActions: BulkAction<Row>[] = (canEdit && allowPermanentDelete) ? [
+      {
+        label: tr("🔴 ลบถาวรที่เลือก", "🔴 Permanently delete selected"),
+        variant: "danger",
+        onClick: async (selected: Row[]) => {
+          const ans = window.prompt(tr(
+            `⚠ ลบถาวร ${selected.length} ราย — ลบจริงออกจากระบบ กู้คืนไม่ได้!\n\nพิมพ์ "ลบ" เพื่อยืนยัน:`,
+            `⚠ Permanently delete ${selected.length} item(s) — removed from the system for good!\n\nType "DELETE" to confirm:`));
+          if (ans == null) return;
+          if (!CONFIRM_DELETE_WORDS.includes(ans.trim().toUpperCase())) {
+            setError(tr('ยกเลิก: ต้องพิมพ์ "ลบ" ให้ตรงเพื่อยืนยันลบถาวร', 'Cancelled: type "DELETE" exactly to confirm')); return;
+          }
+          let ok = 0; const fails: string[] = [];
+          for (const r of selected) {
+            try {
+              const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}?hard=1&actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
+              const j = await res.json();
+              if (j.error) fails.push(j.error); else ok++;
+            } catch (e) { fails.push(String((e as Error).message ?? e)); }
+          }
+          flash(tr(`ลบถาวร ${ok} ราย`, `Permanently deleted ${ok} item(s)`) + (fails.length ? tr(` · ล้มเหลว ${fails.length}`, ` · failed ${fails.length}`) : ""));
+          if (fails.length) fail(tr(`ลบถาวรไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`, `Permanent delete failed for ${fails.length} item(s): ${fails[0]}`));
+          await refreshData();
+        },
+      },
+    ] : [];
+
     const base: BulkAction<Row>[] = canEdit ? [
       {
-        label: "🗑 ลบที่เลือก (ชั่วคราว)",
+        label: tr("🗑 ลบที่เลือก (ชั่วคราว)", "🗑 Delete selected (temporary)"),
         onClick: async (selected: Row[]) => {
-          if (!confirm(`ลบชั่วคราว ${selected.length} ราย? (ซ่อนไว้ กู้คืนได้)`)) return;
+          if (!confirm(tr(`ลบชั่วคราว ${selected.length} ราย? (ซ่อนไว้ กู้คืนได้)`, `Delete ${selected.length} item(s) temporarily? (hidden, can be restored)`))) return;
           // เก็บผลรายตัว — พังบางรายต้องบอก (เดิมขึ้น "สำเร็จ" เสมอแม้พัง)
           let ok = 0; const fails: string[] = [];
           for (const r of selected) {
@@ -1586,18 +1627,18 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               if (j.error) fails.push(String(j.error)); else ok++;
             } catch (e) { fails.push(String((e as Error).message ?? e)); }
           }
-          flash(`ลบชั่วคราว ${ok} ราย${fails.length ? ` · ล้มเหลว ${fails.length}` : ""}`);
-          if (fails.length) fail(`ลบไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`);
+          flash(tr(`ลบชั่วคราว ${ok} ราย`, `Deleted ${ok} item(s) temporarily`) + (fails.length ? tr(` · ล้มเหลว ${fails.length}`, ` · failed ${fails.length}`) : ""));
+          if (fails.length) fail(tr(`ลบไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`, `Delete failed for ${fails.length} item(s): ${fails[0]}`));
           await refreshData();
         },
       },
       // ถังขยะ: กู้คืนหลายรายการพร้อมกัน (เฉพาะที่ถูกลบ/ปิดอยู่ — รายการที่เปิดอยู่อยู่แล้วข้าม)
       {
-        label: "↩ กู้คืนที่เลือก",
+        label: tr("↩ กู้คืนที่เลือก", "↩ Restore selected"),
         onClick: async (selected: Row[]) => {
           const targets = selected.filter((r) => !r[activeField]);
-          if (targets.length === 0) { fail("ไม่มีรายการที่ถูกลบในรายการที่เลือก"); return; }
-          if (!confirm(`กู้คืน ${targets.length} ราย กลับมาใช้งาน?`)) return;
+          if (targets.length === 0) { fail(tr("ไม่มีรายการที่ถูกลบในรายการที่เลือก", "No deleted items in your selection")); return; }
+          if (!confirm(tr(`กู้คืน ${targets.length} ราย กลับมาใช้งาน?`, `Restore ${targets.length} item(s) back to active?`))) return;
           let ok = 0; const fails: string[] = [];
           for (const r of targets) {
             try {
@@ -1609,38 +1650,17 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               if (j.error) fails.push(String(j.error)); else ok++;
             } catch (e) { fails.push(String((e as Error).message ?? e)); }
           }
-          flash(`กู้คืน ${ok} ราย${fails.length ? ` · ล้มเหลว ${fails.length}` : ""}`);
-          if (fails.length) fail(`กู้คืนไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`);
+          flash(tr(`กู้คืน ${ok} ราย`, `Restored ${ok} item(s)`) + (fails.length ? tr(` · ล้มเหลว ${fails.length}`, ` · failed ${fails.length}`) : ""));
+          if (fails.length) fail(tr(`กู้คืนไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`, `Restore failed for ${fails.length} item(s): ${fails[0]}`));
           await refreshData();
         },
       },
-      {
-        label: "🔴 ลบถาวรที่เลือก",
-        variant: "danger",
-        onClick: async (selected: Row[]) => {
-          const ans = window.prompt(`⚠ ลบถาวร ${selected.length} ราย — ลบจริงออกจากระบบ กู้คืนไม่ได้!\n\nพิมพ์ "ลบ" เพื่อยืนยัน:`);
-          if (ans == null) return;
-          if (ans.trim() !== "ลบ") { setError('ยกเลิก: ต้องพิมพ์ "ลบ" ให้ตรงเพื่อยืนยันลบถาวร'); return; }
-          let ok = 0; const fails: string[] = [];
-          for (const r of selected) {
-            try {
-              const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}?hard=1&actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
-              const j = await res.json();
-              if (j.error) fails.push(j.error); else ok++;
-            } catch (e) { fails.push(String((e as Error).message ?? e)); }
-          }
-          flash(`ลบถาวร ${ok} ราย${fails.length ? ` · ล้มเหลว ${fails.length}` : ""}`);
-          if (fails.length) fail(`ลบถาวรไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`);
-          await refreshData();
-        },
-      },
+      ...permanentActions,
     ] : [];
 
     // ล้างถังขยะ — ลบถาวร "ทุกใบที่อยู่ในถัง" (ปิดอยู่) ทีเดียว · เฉพาะตารางที่มี soft-delete
-    const effectiveBase = allowPermanentDelete ? base : base.filter((a) => !a.label.includes("ถาวร"));
-
     const emptyTrash: BulkAction<Row>[] = (canEdit && allowPermanentDelete && !config.hideActiveStatus) ? [{
-      label: "🧹 ล้างถังขยะ (ลบถาวรทุกใบในถัง)",
+      label: tr("🧹 ล้างถังขยะ (ลบถาวรทุกใบในถัง)", "🧹 Empty trash (permanently delete everything in it)"),
       variant: "danger",
       onClick: async () => {
         const flt = encodeURIComponent(JSON.stringify({ [activeField]: { type: "boolean", value: "false" } }));
@@ -1648,11 +1668,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         try {
           const j = await apiFetch(`${apiBase}${config.apiPath}?include_inactive=true&limit=2000&filters=${flt}`).then((r) => r.json());
           ids = ((j.data ?? j.rows ?? []) as Row[]).map((r) => String(r.id));
-        } catch { fail("โหลดรายการในถังไม่สำเร็จ"); return; }
-        if (ids.length === 0) { flash("ถังขยะว่างอยู่แล้ว"); return; }
-        const ans = window.prompt(`⚠ ล้างถังขยะ — ลบถาวร ${ids.length} ใบที่อยู่ในถังทั้งหมด กู้คืนไม่ได้!\n\nพิมพ์ "ลบ" เพื่อยืนยัน:`);
+        } catch { fail(tr("โหลดรายการในถังไม่สำเร็จ", "Couldn't load the trash list")); return; }
+        if (ids.length === 0) { flash(tr("ถังขยะว่างอยู่แล้ว", "Trash is already empty")); return; }
+        const ans = window.prompt(tr(
+          `⚠ ล้างถังขยะ — ลบถาวร ${ids.length} ใบที่อยู่ในถังทั้งหมด กู้คืนไม่ได้!\n\nพิมพ์ "ลบ" เพื่อยืนยัน:`,
+          `⚠ Empty trash — permanently delete all ${ids.length} item(s) in it!\n\nType "DELETE" to confirm:`));
         if (ans == null) return;
-        if (ans.trim() !== "ลบ") { setError('ยกเลิก: ต้องพิมพ์ "ลบ" ให้ตรงเพื่อยืนยัน'); return; }
+        if (!CONFIRM_DELETE_WORDS.includes(ans.trim().toUpperCase())) {
+          setError(tr('ยกเลิก: ต้องพิมพ์ "ลบ" ให้ตรงเพื่อยืนยัน', 'Cancelled: type "DELETE" exactly to confirm')); return;
+        }
         let ok = 0; const fails: string[] = [];
         for (const id of ids) {
           try {
@@ -1661,13 +1685,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             if (j.error) fails.push(j.error); else ok++;
           } catch (e) { fails.push(String((e as Error).message ?? e)); }
         }
-        flash(`ล้างถังขยะ — ลบถาวร ${ok} ใบ${fails.length ? ` · ล้มเหลว ${fails.length}` : ""}`);
-        if (fails.length) fail(`ลบไม่สำเร็จ ${fails.length} ใบ: ${fails[0]}`);
+        flash(tr(`ล้างถังขยะ — ลบถาวร ${ok} ใบ`, `Trash emptied — permanently deleted ${ok} item(s)`) + (fails.length ? tr(` · ล้มเหลว ${fails.length}`, ` · failed ${fails.length}`) : ""));
+        if (fails.length) fail(tr(`ลบไม่สำเร็จ ${fails.length} ใบ: ${fails[0]}`, `Delete failed for ${fails.length} item(s): ${fails[0]}`));
         await refreshData();
       },
     }] : [];
 
-    return [...extra, ...effectiveBase, ...emptyTrash];
+    return [...extra, ...base, ...emptyTrash];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEdit, user?.name, apiBase, config.apiPath, config.extraBulkActions, refreshData, activeField, isRest, config.hideActiveStatus, allowPermanentDelete]);
 
@@ -1687,13 +1711,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   ): Promise<string | null> => {
     // หา field def เพื่อ coerce type
     const def = effectiveFields.find((f) => f.key === field);
-    if (!def) return "field ไม่พบ";
+    if (!def) return tr("field ไม่พบ", "Field not found");
     let coerced: unknown = value;
     if (def.type === "number") {
       if (value === "" || value == null) coerced = null;
       else {
         const n = Number(value);
-        if (isNaN(n)) return "ต้องเป็นตัวเลข";
+        if (isNaN(n)) return tr("ต้องเป็นตัวเลข", "Must be a number");
         coerced = isRest ? n : String(n);
       }
     } else if (def.type === "boolean") {
@@ -1710,10 +1734,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       if (json.error) return json.error;
       // optimistic update local
       setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, [field]: coerced } as Row : r));
-      flash(`✓ บันทึก ${def.label}`);
+      flash(tr(`✓ บันทึก ${def.label}`, `✓ Saved ${def.label}`));
       return null;
     } catch (e) {
-      return e instanceof Error ? e.message : "บันทึกไม่สำเร็จ";
+      return e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed");
     }
   }, [effectiveFields, apiBase, config.apiPath, user?.name, isRest]);
 
@@ -1725,7 +1749,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       .map((f) => ({ f, us: (f.uiStyle ?? {}) as Record<string, unknown> }))
       .filter(({ us }) => us.lang_en && us.lang_translate !== false)
       .filter(({ f }) => !opts?.onlyKey || f.key === opts.onlyKey);
-    if (pairs.length === 0) { flash("ไม่มีช่องที่ตั้งค่าให้แปล"); return; }
+    if (pairs.length === 0) { flash(tr("ไม่มีช่องที่ตั้งค่าให้แปล", "No fields are set up for translation")); return; }
 
     setTranslating(true);
     // โหมดดู = ไม่มีปุ่มบันทึกให้กด → บันทึกทีละช่องทันที (เหมือน quick edit)
@@ -1748,7 +1772,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         const out = String(j?.data?.translated ?? j?.translated ?? "").trim();
         if (!res.ok || j?.error || !out) {
           failed++;
-          lastErr = j?.error || (res.status === 401 || res.status === 403 ? "ไม่มีสิทธิ์ใช้ตัวแปลภาษา" : `แปลไม่สำเร็จ (${res.status})`);
+          lastErr = j?.error || (res.status === 401 || res.status === 403
+            ? tr("ไม่มีสิทธิ์ใช้ตัวแปลภาษา", "You don't have permission to use the translator")
+            : tr(`แปลไม่สำเร็จ (${res.status})`, `Translation failed (${res.status})`));
           continue;
         }
         // โหมด "ดู" ไม่มีปุ่มบันทึก → ต้องเขียนลงระบบทันที ไม่งั้นปิดหน้าแล้วคำแปลหาย
@@ -1762,19 +1788,22 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         }
         done++;
       }
-      if (failed && !done) setFormErr(`แปลไม่สำเร็จ ${failed} ช่อง — ${lastErr}`);
+      const extra = (skipped ? tr(` · ข้าม ${skipped}`, ` · skipped ${skipped}`) : "")
+                  + (failed ? tr(` · ล้มเหลว ${failed}`, ` · failed ${failed}`) : "");
+      if (failed && !done) setFormErr(tr(`แปลไม่สำเร็จ ${failed} ช่อง — ${lastErr}`, `Translation failed for ${failed} field(s) — ${lastErr}`));
       else if (done) flash(autoSave
-        ? `แปลและบันทึกแล้ว ${done} ช่อง${skipped ? ` · ข้าม ${skipped}` : ""}${failed ? ` · ล้มเหลว ${failed}` : ""}`
-        : `แปลแล้ว ${done} ช่อง${skipped ? ` · ข้าม ${skipped}` : ""}${failed ? ` · ล้มเหลว ${failed}` : ""} — กดบันทึกเพื่อเก็บ`);
-      else flash("ไม่มีช่องที่ต้องแปล (มีข้อความอังกฤษอยู่แล้ว — กด ↻ แปลทับ ถ้าต้องการแปลใหม่)");
+        ? tr(`แปลและบันทึกแล้ว ${done} ช่อง`, `Translated and saved ${done} field(s)`) + extra
+        : tr(`แปลแล้ว ${done} ช่อง`, `Translated ${done} field(s)`) + extra + tr(" — กดบันทึกเพื่อเก็บ", " — press Save to keep it"));
+      else flash(tr("ไม่มีช่องที่ต้องแปล (มีข้อความอังกฤษอยู่แล้ว — กด ↻ แปลทับ ถ้าต้องการแปลใหม่)",
+                    "Nothing to translate (English text already filled — press ↻ to translate over it)"));
     } catch (e) {
-      setFormErr(e instanceof Error ? e.message : "แปลไม่สำเร็จ");
+      setFormErr(e instanceof Error ? e.message : tr("แปลไม่สำเร็จ", "Translation failed"));
     } finally { setTranslating(false); }
   }, [effectiveFields, drawerMode, editingId, onInlineEdit]);
 
   // Quick edit ในหน้า detail (view mode) — บันทึกทันทีผ่าน onInlineEdit + อัปเดต form
   const quickSave = useCallback(async (field: string, value: string): Promise<string | null> => {
-    if (!editingId) return "ยังไม่มีระเบียน";
+    if (!editingId) return tr("ยังไม่มีระเบียน", "No record yet");
     const err = await onInlineEdit({ id: editingId } as Row, field, value);
     if (!err) {
       const def = effectiveFields.find((f) => f.key === field);
@@ -1802,9 +1831,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       if (json.error) { fail(json.error); return; }
       setForm((p) => ({ ...p, cover_image_r2_key: null }));
       void refreshData();
-      flash("ลบรูปแล้ว — ย้ายเข้าถังขยะ");
+      flash(tr("ลบรูปแล้ว — ย้ายเข้าถังขยะ", "Image deleted — moved to trash"));
     } catch (e) {
-      fail(e instanceof Error ? e.message : "ลบรูปไม่สำเร็จ");
+      fail(e instanceof Error ? e.message : tr("ลบรูปไม่สำเร็จ", "Couldn't delete the image"));
     }
   }, [editingId, form, apiBase, config.apiPath, user?.name, refreshData]);
 
@@ -1834,7 +1863,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     edits: { row: Row; changes: Record<string, unknown> }[]
   ): Promise<BulkEditResult> => {
     const total = edits.length;
-    if (total === 0) { flash("ไม่มีรายการที่เปลี่ยน"); return { success: 0, failed: 0 }; }
+    if (total === 0) { flash(tr("ไม่มีรายการที่เปลี่ยน", "Nothing changed")); return { success: 0, failed: 0 }; }
     // 1) ลองยิง bulk-update (เร็ว — ครั้งเดียว) ถ้า surface นี้มี route
     try {
       const res = await apiFetch(`${apiBase}${config.apiPath}/bulk-update`, {
@@ -1853,7 +1882,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         if (json) {
           const success = (json.affected as number) ?? total;
           await refreshData();
-          flash(`แก้ ${success} ราย`);
+          flash(tr(`แก้ ${success} ราย`, `Updated ${success} item(s)`));
           return { success, failed: total - success };
         }
       } else {
@@ -1878,10 +1907,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         });
         const j = await r.json().catch(() => ({} as { error?: string }));
         if (r.ok && !j.error) success++; else lastErr = j.error || `HTTP ${r.status}`;
-      } catch (err) { lastErr = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"; }
+      } catch (err) { lastErr = err instanceof Error ? err.message : tr("บันทึกไม่สำเร็จ", "Save failed"); }
     }
     if (success === 0 && lastErr) { setError(lastErr); fail(lastErr); }
-    else { await refreshData(); flash(`แก้ ${success} ราย`); }
+    else { await refreshData(); flash(tr(`แก้ ${success} ราย`, `Updated ${success} item(s)`)); }
     return { success, failed: total - success };
   }, [apiBase, config.apiPath, user?.name, refreshData]);
 
@@ -1895,10 +1924,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       body: JSON.stringify({ changes, search: scope.search, filters: scope.filters, base_filter: config.baseFilter, actor: user?.name }),
     });
     const j = await res.json().catch(() => null);
-    if (!res.ok || !j) throw new Error("โหมด “แก้ทั้งหมดที่ตรงตัวกรอง” ยังไม่รองรับตารางนี้ — เลือกแถวที่ต้องการแล้วแก้แทน");
+    if (!res.ok || !j) throw new Error(tr(
+      "โหมด “แก้ทั้งหมดที่ตรงตัวกรอง” ยังไม่รองรับตารางนี้ — เลือกแถวที่ต้องการแล้วแก้แทน",
+      "“Edit all matching the filter” isn't supported for this table — select the rows you want instead"));
     if (j.error) throw new Error(j.error);
     await refreshData();
-    flash(`แก้ ${j.affected ?? 0} รายการ (ทั้งหมดที่ตรง)`);
+    flash(tr(`แก้ ${j.affected ?? 0} รายการ (ทั้งหมดที่ตรง)`, `Updated ${j.affected ?? 0} item(s) (all matching)`));
     return { affected: (j.affected as number) ?? 0 };
   }, [apiBase, config.apiPath, config.baseFilter, user?.name, refreshData]);
 
@@ -2001,7 +2032,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               value={(v as string) || null}
               onChange={(val) => updateForm({ [f.key]: val })}
               config={f.relationConfig}
-              placeholder={f.placeholder ?? `— เลือก ${f.label} —`}
+              placeholder={f.placeholder ?? tr(`— เลือก ${f.label} —`, `— select ${f.label} —`)}
               required={f.required}
               disabled={disabled}
               hasError={hasErr}
@@ -2044,7 +2075,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             <input type="checkbox" disabled={disabled} checked={!!v}
               onChange={e => updateForm({ [f.key]: e.target.checked })}
               className="rounded border-slate-300" />
-            <span className="ml-2 text-xs text-slate-500">{v ? "เปิด" : "ปิด"}</span>
+            <span className="ml-2 text-xs text-slate-500">{v ? tr("เปิด", "On") : tr("ปิด", "Off")}</span>
           </div>
         ) : f.type === "date" ? (
           <DateInput
@@ -2323,7 +2354,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
         {error && (
           <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center gap-2">
-            <span className="flex-1">⚠ {/(not valid JSON|Unexpected token|Failed to fetch|<!DOCTYPE)/i.test(error) ? "โหลดข้อมูลไม่สำเร็จ (เซิร์ฟเวอร์อาจทำงานหนักชั่วคราว) — กดลองใหม่" : error}</span>
+            <span className="flex-1">⚠ {/(not valid JSON|Unexpected token|Failed to fetch|<!DOCTYPE)/i.test(error)
+              ? tr("โหลดข้อมูลไม่สำเร็จ (เซิร์ฟเวอร์อาจทำงานหนักชั่วคราว) — กดลองใหม่",
+                   "Couldn't load the data (the server may be busy) — press retry")
+              : error}</span>
             <button onClick={() => { setError(null); void refreshData(); }} className="flex-shrink-0 h-7 px-3 text-xs font-medium border border-red-300 rounded bg-white hover:bg-red-100">{tr("🔄 ลองใหม่", "🔄 Retry")}</button>
           </div>
         )}
@@ -2353,7 +2387,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           columns={columns}
           loading={loading || registryLoading}
           searchableKeys={effectiveSearchKeys as (keyof Row)[]}
-          searchPlaceholder={`ค้นหา ${config.title}...`}
+          searchPlaceholder={tr(`ค้นหา ${config.title}...`, `Search ${config.title}...`)}
           views={views}
           rowActions={rowActions}
           bulkActions={bulkActions}
@@ -2401,8 +2435,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         ) : undefined}
         title={
           drawerMode === "view"
-            ? (editingId ? `${config.title}` : `เพิ่ม ${config.title}`)
-            : (editingId ? `แก้ไข ${config.title}` : `เพิ่ม ${config.title}ใหม่`)
+            ? (editingId ? `${config.title}` : tr(`เพิ่ม ${config.title}`, `Add ${config.title}`))
+            : (editingId ? tr(`แก้ไข ${config.title}`, `Edit ${config.title}`) : tr(`เพิ่ม ${config.title}ใหม่`, `Add new ${config.title}`))
         }
         footer={
           drawerMode === "view" ? (
@@ -2450,11 +2484,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 onClick={() => { if (editingId) { setDrawerMode("view"); setDirty(false); } else tryClose(); }}
                 disabled={saving}
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-                {editingId ? "ยกเลิก" : "ปิด"}
+                {editingId ? tr("ยกเลิก", "Cancel") : tr("ปิด", "Close")}
               </button>
               <button onClick={save} disabled={saving}
                 className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                {saving ? "กำลังบันทึก..." : "บันทึก"}
+                {saving ? tr("กำลังบันทึก...", "Saving...") : tr("บันทึก", "Save")}
               </button>
             </>
           )
@@ -2472,9 +2506,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
                 {(["th", "en"] as const).map((m) => (
                   <button key={m} type="button" onClick={() => setLangMode(m)}
-                    title={m === "th" ? "ดูช่องภาษาไทย" : "ดูช่องภาษาอังกฤษ"}
+                    title={m === "th" ? tr("ดูช่องภาษาไทย", "Show Thai fields") : tr("ดูช่องภาษาอังกฤษ", "Show English fields")}
                     className={`h-8 px-3 text-[12.5px] font-semibold ${langMode === m ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-500 hover:bg-slate-50"} ${m === "en" ? "border-l border-slate-200" : ""}`}>
-                    {m === "th" ? "🇹🇭 ไทย" : "🇬🇧 EN"}
+                    {m === "th" ? `🇹🇭 ${tr("ไทย", "TH")}` : "🇬🇧 EN"}
                   </button>
                 ))}
               </div>
@@ -2491,12 +2525,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   <button type="button" onClick={() => void translateAll()} disabled={translating}
                     title={tr("แปลช่องไทย → ช่องอังกฤษที่ยังว่าง (ช่องที่กรอกไว้แล้วจะไม่ถูกทับ)", "Translate Thai → empty English fields (filled ones are kept)")}
                     className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50">
-                    {translating ? "กำลังแปล…" : "🌐 แปลทั้งหมด"}
+                    {translating ? tr("กำลังแปล…", "Translating…") : `🌐 ${tr("แปลทั้งหมด", "Translate all")}`}
                   </button>
                   <button type="button" onClick={() => void translateAll({ overwrite: true })} disabled={translating}
                     title={tr("แปลใหม่ทับของเดิมทุกช่อง", "Re-translate and overwrite every field")}
                     className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">
-                    ↻ แปลทับ
+                    ↻ {tr("แปลทับ", "Overwrite")}
                   </button>
                 </>
               )}
@@ -2608,7 +2642,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     imageOnly={config.mediaGallery.imageOnly ?? true}
                     layout="gallery"
                     fallbackImageUrl={parentFallbackImg}
-                    fallbackLabel="รูปตัวอย่างจาก SKU ลูก"
+                    fallbackLabel={tr("รูปตัวอย่างจาก SKU ลูก", "Sample image from a child SKU")}
                   />
                 ) : (
                   <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
@@ -2656,7 +2690,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                       imageOnly={config.mediaGallery.imageOnly ?? true}
                       layout={config.mediaGallery.layout ?? "grid"}
                       fallbackImageUrl={parentFallbackImg}
-                      fallbackLabel="รูปตัวอย่างจาก SKU ลูก"
+                      fallbackLabel={tr("รูปตัวอย่างจาก SKU ลูก", "Sample image from a child SKU")}
                     />
                   ) : (
                     <div className="text-xs text-slate-400 text-center py-3">
@@ -2752,12 +2786,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       </Drawer>
 
       <ConfirmDialog open={confirmDiscard} onClose={() => setConfirmDiscard(false)}
-        title={tr("ยังไม่บันทึก", "Unsaved")} message="ออกโดยไม่บันทึกหรือไม่?"
-        confirmText="ออก" cancelText="อยู่ต่อ" onConfirm={discard} variant="danger" />
+        title={tr("ยังไม่บันทึก", "Unsaved")} message={tr("ออกโดยไม่บันทึกหรือไม่?", "Leave without saving?")}
+        confirmText={tr("ออก", "Leave")} cancelText={tr("อยู่ต่อ", "Stay")} onConfirm={discard} variant="danger" />
 
       <ConfirmDialog open={coverDeleteOpen} onClose={() => setCoverDeleteOpen(false)}
-        title={tr("ลบรูป", "Delete image")} message="ลบรูปนี้ออกจากรายการ? ไฟล์จะถูกย้ายไปถังขยะ แล้วลบถาวรอัตโนมัติภายหลัง (กู้คืนได้ก่อนถูกลบ)"
-        confirmText="ลบรูป" cancelText="ยกเลิก" variant="danger" onConfirm={deleteCover} />
+        title={tr("ลบรูป", "Delete image")}
+        message={tr("ลบรูปนี้ออกจากรายการ? ไฟล์จะถูกย้ายไปถังขยะ แล้วลบถาวรอัตโนมัติภายหลัง (กู้คืนได้ก่อนถูกลบ)",
+                    "Remove this image? The file goes to trash and is deleted for good later (restorable until then)")}
+        confirmText={tr("ลบรูป", "Delete image")} cancelText={tr("ยกเลิก", "Cancel")} variant="danger" onConfirm={deleteCover} />
 
       {/* ✨ AI คิดรายละเอียดสินค้า — ค่าที่เลือกลงฟอร์มเฉย ๆ ต้องกดบันทึกเอง */}
       {aiDetailOpen && editingId && (
@@ -2782,19 +2818,20 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   const e = await onInlineEdit({ id: editingId } as Row, k, String(vals[k] ?? ""));
                   if (e) { if (!err0) err0 = e; } else ok++;
                 }
-                if (ok) flash(`AI เขียนให้และบันทึกแล้ว ${ok} ช่อง`);
-                if (err0) setFormErr(`บันทึกบางช่องไม่สำเร็จ — ${err0}`);
+                if (ok) flash(tr(`AI เขียนให้และบันทึกแล้ว ${ok} ช่อง`, `AI wrote and saved ${ok} field(s)`));
+                if (err0) setFormErr(tr(`บันทึกบางช่องไม่สำเร็จ — ${err0}`, `Some fields didn't save — ${err0}`));
               })();
             } else {
               setDirty(true);
-              flash(`ใส่ข้อความจาก AI แล้ว ${keys.length} ช่อง — ตรวจแล้วกดบันทึก`);
+              flash(tr(`ใส่ข้อความจาก AI แล้ว ${keys.length} ช่อง — ตรวจแล้วกดบันทึก`, `Filled ${keys.length} field(s) from AI — review then press Save`));
             }
           }} />
       )}
 
       <ConfirmDialog open={archiveTarget !== null} onClose={() => setArchiveTarget(null)}
-        title={tr("ปิดบัญชี", "Deactivate")} message={`ปิดบัญชี "${archiveTarget?.name as string}" ใช่ไหม?`}
-        confirmText="ปิดบัญชี" cancelText="ยกเลิก" variant="danger"
+        title={tr("ปิดบัญชี", "Deactivate")}
+        message={tr(`ปิดบัญชี "${archiveTarget?.name as string}" ใช่ไหม?`, `Deactivate "${archiveTarget?.name as string}"?`)}
+        confirmText={tr("ปิดบัญชี", "Deactivate")} cancelText={tr("ยกเลิก", "Cancel")} variant="danger"
         onConfirm={() => { if (archiveTarget) { void apiFetch(`${apiBase}${config.apiPath}/${archiveTarget.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" }).then(() => refreshData()); setArchiveTarget(null); } }} />
 
       {/* กล่องลบ — เลือกลบชั่วคราว / ลบถาวร (ของกลาง) · portal ไป body: กันเด้ง "หลัง" drawer (Drawer ใช้ portal z-50) */}
@@ -2818,8 +2855,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               </label>}
               {deleteMode === "hard" && (
                 <div className="pt-1">
-                  <label className="text-xs text-slate-600">พิมพ์ <code className="px-1 bg-slate-100 rounded text-red-600 font-mono">ลบ</code>{tr(" เพื่อยืนยัน", " to confirm")}</label>
-                  <input value={deleteText} onChange={(e) => setDeleteText(e.target.value)} autoFocus placeholder="ลบ"
+                  <label className="text-xs text-slate-600">{tr("พิมพ์ ", "Type ")}<code className="px-1 bg-slate-100 rounded text-red-600 font-mono">{tr("ลบ", "DELETE")}</code>{tr(" เพื่อยืนยัน", " to confirm")}</label>
+                  <input value={deleteText} onChange={(e) => setDeleteText(e.target.value)} autoFocus placeholder={tr("ลบ", "DELETE")}
                     className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-red-400" />
                 </div>
               )}
@@ -2827,9 +2864,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             </div>
             <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
               <button onClick={() => setDeleteTarget(null)} disabled={deleting} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{tr("ยกเลิก", "Cancel")}</button>
-              <button onClick={doDelete} disabled={deleting || (deleteMode === "hard" && deleteText.trim() !== "ลบ")}
+              <button onClick={doDelete} disabled={deleting || (deleteMode === "hard" && !CONFIRM_DELETE_WORDS.includes(deleteText.trim().toUpperCase()))}
                 className={`h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50 ${deleteMode === "hard" ? "bg-red-600 hover:bg-red-700" : "bg-amber-500 hover:bg-amber-600"}`}>
-                {deleting ? "กำลังลบ..." : deleteMode === "hard" ? "ลบถาวร" : "ลบชั่วคราว"}
+                {deleting ? tr("กำลังลบ...", "Deleting...") : deleteMode === "hard" ? tr("ลบถาวร", "Delete permanently") : tr("ลบชั่วคราว", "Delete (temporary)")}
               </button>
             </div>
           </div>
@@ -2969,7 +3006,7 @@ export function MasterRecordDrawer({
     const productEntity = moduleKey === "parent-skus-v2" ? "parent_skus_v2" : moduleKey === "skus-v2" ? "skus_v2" : null;
     const mg: MasterCRUDConfig["mediaGallery"] = mediaGallery
       ? { ...mediaGallery, layout: mediaGallery.layout ?? (productEntity ? "gallery" : undefined) }
-      : (productEntity ? { entityType: productEntity, title: "รูปสินค้า", maxItems: 9, imageOnly: true, layout: "gallery" } : undefined);
+      : (productEntity ? { entityType: productEntity, title: tr("รูปสินค้า", "Product images"), maxItems: 9, imageOnly: true, layout: "gallery" } : undefined);
     return {
       apiBase: apiBase ?? "/api/master-v2/",
       apiPath: apiPath ?? moduleKey,        // v2 API รับ moduleKey ตรงๆ ได้ (RelationPeek ใช้แบบนี้อยู่แล้ว)
@@ -2982,7 +3019,7 @@ export function MasterRecordDrawer({
       aiProductDetail: moduleKey === "parent-skus-v2",
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults, formRenderers,
       // ไฟล์แนบ: ผู้เรียกส่ง fileAttachments มาได้ตรงๆ (เช่น payroll พนักงาน) · fallback = สินค้า (Parent/SKU)
-      fileAttachments: fileAttachments ?? (productEntity ? { entityType: productEntity, title: "ไฟล์แนบ" } : undefined),
+      fileAttachments: fileAttachments ?? (productEntity ? { entityType: productEntity, title: tr("ไฟล์แนบ", "Attachments") } : undefined),
       // Parent SKU → ช่อง "รูป Description" ในฟอร์ม (เหมือนหน้า master page โดยตรง)
       extraFormSection: moduleKey === "parent-skus-v2"
         ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
@@ -2990,14 +3027,14 @@ export function MasterRecordDrawer({
       // Parent SKU → แท็บ "🛍 เว็บไซต์" · SKU → แท็บ "🏪 ร้านที่จำหน่าย" (ของกลาง: โผล่ทุก drawer SKU ไม่ว่าเปิดจากตาราง/แท็ก/การ์ด)
       extraTabs: moduleKey === "parent-skus-v2"
         ? [
-            { key: "web", label: "เว็บไซต์", icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> },
-            { key: "platforms", label: "แพลตฟอร์ม", icon: "🏬", render: ({ recordId }) => <ParentPlatformsTab parentId={recordId} /> },
-            { key: "issues", label: "ปัญหา", icon: "⚠️", render: ({ recordId }) => <div className="p-3"><ParentIssuesPanel parentSkuId={recordId} editable bare /></div> },
+            { key: "web", label: tr("เว็บไซต์", "Website"), icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> },
+            { key: "platforms", label: tr("แพลตฟอร์ม", "Platforms"), icon: "🏬", render: ({ recordId }) => <ParentPlatformsTab parentId={recordId} /> },
+            { key: "issues", label: tr("ปัญหา", "Issues"), icon: "⚠️", render: ({ recordId }) => <div className="p-3"><ParentIssuesPanel parentSkuId={recordId} editable bare /></div> },
           ]
         : moduleKey === "skus-v2"
         ? [
             // ฝังอยู่ในแท็บ "ราคา" (ข้อมูลซื้อทั้งหมดอยู่ที่เดียว) — ดู inTab ใน LayoutTabs
-            { key: "suppliers", label: "ร้านที่จำหน่าย + ราคาซื้อ", icon: "🏪", inTab: "tab_ราคา", render: ({ recordId }) => recordId
+            { key: "suppliers", label: tr("ร้านที่จำหน่าย + ราคาซื้อ", "Suppliers + buying price"), icon: "🏪", inTab: "tab_ราคา", render: ({ recordId }) => recordId
               ? <div className="pt-1"><SkuSupplierList skuId={recordId} defaultOpen /></div>
               : <div className="p-3 text-sm text-slate-400">{tr("บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย", "Save the product first, then add suppliers")}</div> },
           ]
@@ -3061,7 +3098,7 @@ function QuickEditCell({ field, value, onSave, siblingValues, autoOpen, onDone }
       <button type="button" disabled={saving} onClick={() => commit(value ? "false" : "true")}
         className="inline-flex items-center gap-1.5 text-sm group">
         <span className={`w-1.5 h-1.5 rounded-full ${value ? "bg-emerald-500" : "bg-slate-300"}`} />
-        <span className={value ? "text-emerald-600" : "text-slate-400"}>{value ? "เปิด" : "ปิด"}</span>
+        <span className={value ? "text-emerald-600" : "text-slate-400"}>{value ? tr("เปิด", "On") : tr("ปิด", "Off")}</span>
         <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100">{tr("✎ แตะเพื่อสลับ", "✎ Tap to toggle")}</span>
         {err && <span className="text-[10px] text-red-500 ml-1">{err}</span>}
       </button>
@@ -3076,7 +3113,7 @@ function QuickEditCell({ field, value, onSave, siblingValues, autoOpen, onDone }
       <button type="button" onClick={() => { setVal(value == null ? "" : String(value)); setEditing(true); }}
         className={`block w-full text-left text-sm rounded px-2 py-1 -mx-2 border border-transparent hover:border-blue-200 hover:bg-blue-50/60 group ${empty ? "text-slate-300 italic" : "text-slate-800"}`}>
         <span className="flex items-start gap-1 max-w-full">
-          <span className={`flex-1 ${isArea ? "whitespace-pre-wrap break-words" : "truncate"}`}>{empty ? "คลิกเพื่อเพิ่มข้อมูล" : String(value)}</span>
+          <span className={`flex-1 ${isArea ? "whitespace-pre-wrap break-words" : "truncate"}`}>{empty ? tr("คลิกเพื่อเพิ่มข้อมูล", "Click to add") : String(value)}</span>
           <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 flex-shrink-0">✎</span>
         </span>
       </button>
@@ -3129,9 +3166,10 @@ function gw12(f: { uiStyle?: Record<string, unknown>; formSpan?: number; type?: 
 // คำอธิบายสูตร/คำนวณ (tooltip ภาษาคน) สำหรับ computed / readonly-ที่มี help text
 function fieldHelpTip(f: FieldDef): string | null {
   if (f.type === "computed") {
-    if (f.textCompute) return textComputeDescribe(f.textCompute) ?? "ช่องคำนวณอัตโนมัติ";
-    if (f.formula) return `คำนวณอัตโนมัติจากสูตร: ${f.formula}`;
-    return "ช่องคำนวณอัตโนมัติ";
+    const auto = tr("ช่องคำนวณอัตโนมัติ", "Calculated automatically");
+    if (f.textCompute) return textComputeDescribe(f.textCompute) ?? auto;
+    if (f.formula) return tr(`คำนวณอัตโนมัติจากสูตร: ${f.formula}`, `Calculated from formula: ${f.formula}`);
+    return auto;
   }
   return f.helpText ?? null;
 }
@@ -3404,7 +3442,7 @@ function CompletenessBar({ fields, values }: { fields: FieldDef[]; values: Recor
         <span className={`text-xs font-bold ${txt}`}>{pct}% ({filled.length}/{marked.length})</span>
       </div>
       <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full ${bar} transition-all`} style={{ width: `${pct}%` }} /></div>
-      {missing.length > 0 && <div className="mt-1.5 text-[11px] text-slate-400">ยังขาด: {missing.map((f) => f.label).join(", ")}</div>}
+      {missing.length > 0 && <div className="mt-1.5 text-[11px] text-slate-400">{tr("ยังขาด", "Missing")}: {missing.map((f) => f.label).join(", ")}</div>}
     </div>
   );
 }
