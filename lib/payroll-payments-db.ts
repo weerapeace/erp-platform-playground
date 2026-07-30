@@ -100,7 +100,7 @@ async function latestPayrollCalcSummary(periodId: string) {
 async function getPeriod(periodId: string): Promise<Row> {
   const { data, error } = await supabaseAdmin()
     .from("payroll_periods")
-    .select("id, period_name, status, payment_date")
+    .select("id, period_name, status, payment_date, company_id")
     .eq("id", periodId)
     .limit(1);
   if (error) throw new Error(error.message);
@@ -151,30 +151,38 @@ async function employeeAndBankMaps(employeeIds: string[]) {
   return { empById, bankByEmp, contractByEmp };
 }
 
-async function previousPaymentLineMap(periodId: string, batchType: PaymentBatchType, beforeDate?: string | null): Promise<Map<string, Row>> {
+async function previousPaymentLineMap(periodId: string, batchType: PaymentBatchType, beforeDate?: string | null, companyId?: string | null): Promise<Map<string, Row>> {
   const admin = supabaseAdmin();
-  let query = admin
-    .from("payment_batches")
-    .select("id, batch_no, payment_date")
-    .eq("batch_type", batchType)
-    .neq("status", "cancelled")
-    .neq("payroll_period_id", periodId)
-    .order("payment_date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1);
-  if (beforeDate) query = query.lt("payment_date", beforeDate);
-  let { data, error } = await query;
-  if (error) throw new Error(error.message);
-  if (!data?.length && beforeDate) {
-    const fallback = await admin
+
+  // "ยอดเดือนก่อน" ต้องมาจากงวดของบริษัทเดียวกันเท่านั้น (ไม่งั้นงวดหลุยส์จะไปหยิบยอดของ ISG มาแนะนำ)
+  let companyPeriodIds: string[] | null = null;
+  if (companyId) {
+    const { data: periodRows, error: periodErr } = await admin
+      .from("payroll_periods").select("id").eq("company_id", companyId);
+    if (periodErr) throw new Error(periodErr.message);
+    companyPeriodIds = ((periodRows ?? []) as Row[]).map((row) => text(row.id)).filter((id) => id && id !== periodId);
+    if (!companyPeriodIds.length) return new Map();
+  }
+
+  const baseQuery = () => {
+    let q = admin
       .from("payment_batches")
       .select("id, batch_no, payment_date")
       .eq("batch_type", batchType)
       .neq("status", "cancelled")
-      .neq("payroll_period_id", periodId)
       .order("payment_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(1);
+    q = companyPeriodIds ? q.in("payroll_period_id", companyPeriodIds) : q.neq("payroll_period_id", periodId);
+    return q;
+  };
+
+  let query = baseQuery();
+  if (beforeDate) query = query.lt("payment_date", beforeDate);
+  let { data, error } = await query;
+  if (error) throw new Error(error.message);
+  if (!data?.length && beforeDate) {
+    const fallback = await baseQuery();
     data = fallback.data;
     error = fallback.error;
     if (error) throw new Error(error.message);
@@ -398,7 +406,8 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
     .neq("status", "cancelled");
   if (existingError) throw new Error(existingError.message);
 
-  const previousByEmp = await previousPaymentLineMap(periodId, batchType, text(period.payment_date));
+  const periodCompanyId = text(period.company_id) || null;
+  const previousByEmp = await previousPaymentLineMap(periodId, batchType, text(period.payment_date), periodCompanyId);
   const { data: settings, error: settingsError } = await admin
     .from("employee_payroll_settings")
     .select("id, employee_id, advance_payment_allowed, default_mid_month_advance_amount")
@@ -409,9 +418,14 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
     .filter((row) => money(row.default_mid_month_advance_amount) > 0);
   const settingEmpIds = settingRows.map((row) => text(row.employee_id)).filter(Boolean);
   const previousEmpIds = [...previousByEmp.keys()];
+  // พนักงานที่มีสิทธิ์อยู่ในรอบจ่ายของงวดนี้ = ต้องเป็นคนของ "บริษัทเดียวกับงวด"
+  // (บริษัทผูกไว้ที่สัญญาจ้าง ไม่ได้อยู่บนตาราง employees) — งวดเก่าที่ยังไม่ผูกบริษัทให้แสดงทุกคนเหมือนเดิม
+  const contractQuery = admin
+    .from("employee_contracts").select("employee_id, is_current, status, contract_type, wage_type, company_id")
+    .eq("is_current", true).eq("status", "active");
   const [activeEmployees, activeContracts] = await Promise.all([
     admin.from("employees").select("id, employee_code, first_name, last_name, nickname, employment_status").eq("employment_status", "active"),
-    admin.from("employee_contracts").select("employee_id, is_current, status, contract_type, wage_type").eq("is_current", true).eq("status", "active"),
+    periodCompanyId ? contractQuery.eq("company_id", periodCompanyId) : contractQuery,
   ]);
   if (activeEmployees.error) throw new Error(activeEmployees.error.message);
   if (activeContracts.error) throw new Error(activeContracts.error.message);
@@ -574,7 +588,7 @@ export async function createPaymentBatch(input: { periodId: string; batchType?: 
         note: override?.note ?? null,
       })];
     });
-    if (!readyLines.length) throw new Error("ยังไม่มีรายการจ่ายกลางเดือน หรือยอดที่เลือกเป็น 0");
+    if (!readyLines.length) throw new Error("ยังสร้างรอบจ่ายไม่ได้ เพราะคนที่เลือกไว้ยอดจ่ายเป็น 0 ทุกคน — ให้กรอกช่อง \"ยอดจ่ายจริง\" (คอลัมน์ขวาสุดของตาราง) หรือกดปุ่ม \"ใช้ยอดเดือนก่อน\" ก่อน · ถ้าต้องการให้ยอดขึ้นเองทุกเดือน ให้ไปตั้ง \"จ่ายล่วงหน้ากลางเดือน\" รายคนที่หน้าตั้งค่าเงินเดือนรายคน");
   }
 
   const batchNo = `${batchPrefix(batchType)}-${periodId.slice(0, 8)}-${Date.now().toString().slice(-6)}`;

@@ -833,6 +833,19 @@ export default function PayrollPaymentsPage() {
           </div>
 
           {preview?.existing_count ? <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">งวดนี้มีรอบประเภทนี้อยู่แล้ว ระบบจะกันไม่ให้สร้างซ้ำถ้ายังไม่ยกเลิก</div> : null}
+          {batchType !== "month_end" && !previewLoading && createLines.length === 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              ⚠️ งวดนี้ยังไม่มีใครตั้งยอดจ่ายกลางเดือน จึงไม่มีรายการตั้งต้นให้ — ใช้กล่องเขียว <b>“เพิ่มพนักงานเข้ารอบจ่าย”</b> ด้านบน
+              เลือกคน + ใส่ยอด แล้วกด “เพิ่ม” ก่อนกด “สร้างร่าง”
+            </div>
+          )}
+          {batchType !== "month_end" && !previewLoading && createLines.length > 0 && createLines.every((line) => (Number(line.paid_amount) || 0) <= 0) && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              ⚠️ ยังไม่มีใครในงวดนี้มียอดจ่ายกลางเดือน — กรอกช่อง <b>ยอดจ่ายจริง</b> (คอลัมน์ขวาสุด ปักหมุดไว้ให้แล้ว) ของคนที่ต้องการจ่าย
+              แล้วค่อยกด “สร้างร่าง” · ถ้าอยากให้ยอดขึ้นเองทุกเดือน ให้ไปตั้ง “จ่ายล่วงหน้ากลางเดือน” รายคนที่หน้า
+              <a href="/payroll/employee-settings" className="ml-1 font-semibold underline">ตั้งค่าเงินเดือนรายคน</a>
+            </div>
+          )}
           {batchType !== "month_end" && (
             <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
               <div className="mb-2">
@@ -905,7 +918,8 @@ export default function PayrollPaymentsPage() {
                     <th className="px-3 py-2 text-right">เงินสด</th>
                     <th className="px-3 py-2 text-right">ปกส. 5%</th>
                     <th className="px-3 py-2 text-right">ยอดคงเหลือ</th>
-                    <th className="px-3 py-2 text-right">ยอดจ่ายจริง</th>
+                    {/* ปักหมุดขวา: ช่องกรอกยอดต้องเห็นตลอดแม้ตารางกว้างเกินจอ (เดิมต้องเลื่อนขวาสุดจึงเจอ) */}
+                    <th className="sticky right-0 z-20 border-l border-slate-200 bg-slate-50 px-3 py-2 text-right">ยอดจ่ายจริง</th>
                     <th className="px-3 py-2 text-left">หมายเหตุรายคน</th>
                   </tr>
                 </thead>
@@ -927,7 +941,7 @@ export default function PayrollPaymentsPage() {
                       <td className="px-3 py-2 text-right tabular-nums text-amber-700">{dashBaht(line.cash_pay)}</td>
                       <td className="px-3 py-2 text-right tabular-nums bg-yellow-100">{dashBaht(line.social_security)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{dashBaht(line.balance)}</td>
-                      <td className="px-3 py-2 text-right">
+                      <td className="sticky right-0 z-10 border-l border-slate-200 bg-white px-3 py-2 text-right">
                         {batchType === "month_end" ? (
                           <span className="font-semibold tabular-nums">{baht(line.paid_amount)}</span>
                         ) : (
