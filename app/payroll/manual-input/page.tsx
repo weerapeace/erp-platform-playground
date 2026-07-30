@@ -2194,6 +2194,9 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   const [durationPreset, setDurationPreset] = useState<DurationPreset>("custom");
   const [customHours, setCustomHours] = useState("");
   const [customMinutes, setCustomMinutes] = useState("");
+  // OT กรอกเป็นช่วงเวลาได้ (17.00–20.00) แล้วระบบคิดชั่วโมงให้เอง — ไม่ต้องคำนวณในหัว
+  const [otFrom, setOtFrom] = useState("");
+  const [otTo, setOtTo] = useState("");
   const [leaveReason, setLeaveReason] = useState<LeaveReason>("unpaid");
   const [hasMedicalCertificate, setHasMedicalCertificate] = useState(false);
   const [certificateDate, setCertificateDate] = useState("");
@@ -2229,7 +2232,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     setLateHours("");
     setLateMinutes("");
     setDurationPreset("custom");
-    setCustomHours("");
+    setCustomHours(""); setOtFrom(""); setOtTo("");
     setCustomMinutes("");
     setLeaveReason("unpaid");
     setHasMedicalCertificate(false);
@@ -2256,7 +2259,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     setLateHours("");
     setLateMinutes("");
     setDurationPreset("custom");
-    setCustomHours("");
+    setCustomHours(""); setOtFrom(""); setOtTo("");
     setCustomMinutes("");
     setLeaveReason("unpaid");
     setHasMedicalCertificate(false);
@@ -2275,7 +2278,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
       setLateHours(totalMinutes >= 60 ? String(Math.floor(totalMinutes / 60)) : "");
       setLateMinutes(totalMinutes % 60 ? String(totalMinutes % 60) : totalMinutes ? "0" : "");
       setDurationPreset("custom");
-      setCustomHours("");
+      setCustomHours(""); setOtFrom(""); setOtTo("");
       setCustomMinutes("");
       return;
     }
@@ -2284,13 +2287,13 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     const halfValue = kind === "ot" ? STANDARD_HOURS_PER_DAY / 2 : 0.5;
     if (Math.abs(value - fullValue) < 0.001) {
       setDurationPreset("full");
-      setCustomHours("");
+      setCustomHours(""); setOtFrom(""); setOtTo("");
       setCustomMinutes("");
       return;
     }
     if (Math.abs(value - halfValue) < 0.001) {
       setDurationPreset("half");
-      setCustomHours("");
+      setCustomHours(""); setOtFrom(""); setOtTo("");
       setCustomMinutes("");
       return;
     }
@@ -2368,6 +2371,31 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     if (!(totalHours > 0)) return 0;
     return tKind === "ot" ? totalHours : totalHours / STANDARD_HOURS_PER_DAY;
   }
+
+  /** อ่านเวลาได้หลายแบบที่คนพิมพ์จริง: 17:00 · 17.00 · 17 00 · 1700 → นาทีจากเที่ยงคืน */
+  function timeToMinutes(value: string): number | null {
+    const t = String(value ?? "").trim().replace(/[.\s]/g, ":");
+    const m = t.match(/^(\d{1,2}):(\d{2})$/) ?? t.match(/^(\d{2})(\d{2})$/);
+    if (!m) return null;
+    const h = Number(m[1]), mi = Number(m[2]);
+    if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+    return h * 60 + mi;
+  }
+  /** ช่วง OT → นาที (ถ้าเวลาสิ้นสุดน้อยกว่าเริ่ม ถือว่าข้ามเที่ยงคืน) */
+  function otRangeMinutes(): number | null {
+    const from = timeToMinutes(otFrom), to = timeToMinutes(otTo);
+    if (from === null || to === null) return null;
+    const diff = to > from ? to - from : to === from ? 0 : to + 1440 - from;
+    return diff > 0 ? diff : null;
+  }
+  // กรอกช่วงเวลาครบ → เติมชั่วโมง/นาทีให้อัตโนมัติ
+  useEffect(() => {
+    const total = otRangeMinutes();
+    if (total === null) return;
+    setCustomHours(String(Math.floor(total / 60)));
+    setCustomMinutes(String(total % 60));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otFrom, otTo]);
 
   function timeNote() {
     const note = tNote.trim();
@@ -2673,6 +2701,34 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                         </div>
                         <p className="mt-1 text-xs text-slate-400">{timeQuantityLabel()}</p>
                       </div>
+                      {durationPreset === "custom" && tKind === "ot" && (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                          <span className="block text-xs font-medium text-slate-500 mb-1">กรอกเป็นช่วงเวลาก็ได้ (ระบบคิดชั่วโมงให้)</span>
+                          <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+                            <label className="block">
+                              <span className="block text-[11px] text-slate-400 mb-1">เริ่ม</span>
+                              <input value={otFrom} onChange={(e) => setOtFrom(e.target.value)} placeholder="17.00"
+                                className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
+                            </label>
+                            <span className="pb-2 text-slate-400">–</span>
+                            <label className="block">
+                              <span className="block text-[11px] text-slate-400 mb-1">ถึง</span>
+                              <input value={otTo} onChange={(e) => setOtTo(e.target.value)} placeholder="20.00"
+                                className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
+                            </label>
+                          </div>
+                          {(() => {
+                            const total = otRangeMinutes();
+                            if (total === null) {
+                              return (otFrom.trim() || otTo.trim())
+                                ? <p className="mt-1 text-[11px] text-amber-600">กรอกให้ครบทั้ง 2 ช่อง เช่น 17.00 ถึง 20.00</p>
+                                : <p className="mt-1 text-[11px] text-slate-400">พิมพ์ได้ทั้ง 17.00 · 17:00 · 1700 · ข้ามเที่ยงคืนได้</p>;
+                            }
+                            const h = Math.floor(total / 60), m = total % 60;
+                            return <p className="mt-1 text-[11px] font-medium text-emerald-700">= OT {h ? `${h} ชั่วโมง` : ""}{m ? `${h ? " " : ""}${m} นาที` : h ? "" : "0 นาที"}</p>;
+                          })()}
+                        </div>
+                      )}
                       {durationPreset === "custom" && (
                         <div className="grid grid-cols-2 gap-2">
                           <label className="block">
