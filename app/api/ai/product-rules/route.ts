@@ -23,7 +23,21 @@ type RuleBody = {
   brand_id?: string | null; instruction?: string; required_topics?: string[];
   /** หัวข้อบังคับฉบับภาษาอังกฤษ (เว้นได้ = ใช้ไทย) */
   required_topics_en?: string[];
+  /** คำตอบแนะนำต่อหัวข้อ { หัวข้อไทย: [ตัวเลือก...] } — ผู้ใช้กดเลือกได้ ไม่ต้องพิมพ์ */
+  topic_options?: Record<string, string[]>;
   hint?: string | null; sort_order?: number; is_active?: boolean;
+};
+
+// ทำความสะอาดคำตอบแนะนำ: คีย์ = หัวข้อ, ค่า = รายการตัวเลือก (จำกัดกันบวม)
+const cleanOptions = (v: unknown): Record<string, string[]> => {
+  if (!v || typeof v !== "object") return {};
+  const out: Record<string, string[]> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>).slice(0, 30)) {
+    const key = String(k).trim(); if (!key) continue;
+    const list = Array.isArray(val) ? val.map((x) => String(x).trim()).filter(Boolean).slice(0, 30) : [];
+    if (list.length) out[key] = [...new Set(list)];
+  }
+  return out;
 };
 
 const arr = (v: unknown): string[] =>
@@ -83,6 +97,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     instruction: (b.instruction ?? "").trim(),
     required_topics: arr(b.required_topics),
     required_topics_en: arr(b.required_topics_en),
+    topic_options: cleanOptions(b.topic_options),
     hint: (b.hint ?? "").trim() || null,
     sort_order: Number.isFinite(b.sort_order) ? Number(b.sort_order) : 0,
     is_active: b.is_active !== false,

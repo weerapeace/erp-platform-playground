@@ -154,7 +154,10 @@ function TagPicker({ parentId, onChanged }: { parentId: string; onChanged?: () =
 /** กฎคำสั่งตามประเภทสินค้า — จับจากแท็กที่ติดไว้ หรือคำที่อยู่ในชื่อสินค้า */
 type Rule = {
   id?: string; name: string; tag_ids: string[]; name_keywords: string[]; brand_id: string | null;
-  instruction: string; required_topics: string[]; required_topics_en?: string[]; hint: string | null; is_active?: boolean;
+  instruction: string; required_topics: string[]; required_topics_en?: string[];
+  /** คำตอบแนะนำต่อหัวข้อ { หัวข้อไทย: [ตัวเลือก...] } */
+  topic_options?: Record<string, string[]>;
+  hint: string | null; is_active?: boolean;
 };
 type TagOpt = { id: string; name: string };
 
@@ -175,6 +178,7 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
   //    = ขึ้นบรรทัดใหม่ไม่ได้เลย (เจ้าของเจอเอง)
   const [topicsText, setTopicsText] = useState("");
   const [topicsEnText, setTopicsEnText] = useState("");
+  const [optionsText, setOptionsText] = useState<Record<string, string>>({});   // หัวข้อ → คำตอบแนะนำ (คั่นลูกน้ำ)
   const [keywordsText, setKeywordsText] = useState("");
   const openEdit = (r: Rule) => {
     setEdit(r);
@@ -202,7 +206,11 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
     setBusy(true); setMsg("");
     try {
       // แปลงข้อความดิบ → รายการ ตอนบันทึกเท่านั้น
-      const payload: Rule = { ...edit, required_topics: splitLines(topicsText), required_topics_en: splitLines(topicsEnText), name_keywords: splitCommas(keywordsText) };
+      const topicsNow = splitLines(topicsText);
+      // เก็บคำตอบแนะนำเฉพาะหัวข้อที่ยังอยู่ (ลบหัวข้อออก = ตัวเลือกของมันหายไปด้วย)
+      const optsNow: Record<string, string[]> = {};
+      for (const tp of topicsNow) { const v = splitCommas(optionsText[tp] ?? ""); if (v.length) optsNow[tp] = v; }
+      const payload: Rule = { ...edit, required_topics: topicsNow, required_topics_en: splitLines(topicsEnText), topic_options: optsNow, name_keywords: splitCommas(keywordsText) };
       const j = await apiFetch("/api/ai/product-rules", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       }).then((r) => r.json());
@@ -275,6 +283,26 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
             {t("ช่องซ้าย = ไทย · ช่องขวา = อังกฤษ (บรรทัดต่อบรรทัด · เว้นได้ ระบบใช้ไทยแทน) · ช่องเหล่านี้จะไปโผล่เป็นช่องให้กรอกในป๊อป AI", "Left = Thai · Right = English (line by line, optional) · these become answer fields in the AI popup")}
           </p>
           <p className="mt-0.5 text-[11px] text-slate-400">{t("ถ้าดูจากรูปไม่ออก AI จะถามกลับให้เองแทนที่จะเดา", "If the images aren't clear, AI asks instead of guessing")}</p>
+
+          {/* คำตอบแนะนำต่อหัวข้อ — ผู้ใช้จะกดเลือกได้เลยในป๊อป (ไม่ต้องพิมพ์) */}
+          {splitLines(topicsText).length > 0 && (
+            <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2 space-y-1.5">
+              <p className="text-[11.5px] font-medium text-slate-600">
+                {t("คำตอบแนะนำของแต่ละหัวข้อ (คั่นด้วยลูกน้ำ — ไม่บังคับ)", "Suggested answers per heading (comma-separated — optional)")}
+              </p>
+              {splitLines(topicsText).map((tp) => (
+                <div key={tp} className="flex items-center gap-2">
+                  <span className="text-[12px] text-slate-600 w-[38%] shrink-0 truncate" title={tp}>{tp}</span>
+                  <input value={optionsText[tp] ?? ""} onChange={(e) => setOptionsText((p) => ({ ...p, [tp]: e.target.value }))}
+                    placeholder={t("เช่น หัวเข็ม, หัวออโต้, หัวกลัด", "e.g. pin-buckle, auto-lock, plate")}
+                    className="flex-1 h-8 px-2 text-[12.5px] border border-slate-200 rounded-md bg-white" />
+                </div>
+              ))}
+              <p className="text-[11px] text-slate-400">
+                {t("ผู้ใช้จะเห็นเป็นปุ่มกดเลือกในป๊อป AI · ยังพิมพ์คำตอบอื่นเองได้", "Users get these as one-tap chips in the AI popup, and can still type their own")}
+              </p>
+            </div>
+          )}
         </div>
 
         <div>
@@ -404,16 +432,20 @@ export function AiProductDetailModal({
   // ── หัวข้อบังคับจาก "กฎตามประเภทสินค้า" ที่สินค้าตัวนี้เข้าเงื่อนไข ──
   //    โชว์เป็นช่องให้กรอกก่อนกดให้ AI คิด (AI จะไม่ต้องถามกลับ และไม่เดา)
   //    โหมด EN ของหน้าจอ → ใช้หัวข้อฉบับอังกฤษถ้ากฎตั้งไว้
-  const [topics, setTopics] = useState<{ th: string; en: string; rule: string }[]>([]);
+  const [topics, setTopics] = useState<{ th: string; en: string; rule: string; options: string[] }[]>([]);
   useEffect(() => {
     (async () => {
       try {
         const j = await apiFetch(`/api/ai/product-rules?parent_id=${encodeURIComponent(parentId)}`).then((r) => r.json());
-        const matched = (j.matched ?? []) as { name: string; required_topics?: string[]; required_topics_en?: string[] }[];
-        const out: { th: string; en: string; rule: string }[] = [];
+        const matched = (j.matched ?? []) as { name: string; required_topics?: string[]; required_topics_en?: string[]; topic_options?: Record<string, string[]> }[];
+        const out: { th: string; en: string; rule: string; options: string[] }[] = [];
         for (const r of matched) {
           const th = r.required_topics ?? []; const en = r.required_topics_en ?? [];
-          th.forEach((topic, i) => { if (topic && !out.some((x) => x.th === topic)) out.push({ th: topic, en: en[i] ?? "", rule: r.name }); });
+          th.forEach((topic, i) => {
+            if (topic && !out.some((x) => x.th === topic)) {
+              out.push({ th: topic, en: en[i] ?? "", rule: r.name, options: (r.topic_options ?? {})[topic] ?? [] });
+            }
+          });
         }
         setTopics(out);
       } catch { setTopics([]); }
@@ -575,14 +607,36 @@ export function AiProductDetailModal({
               {t("กรอกเท่าที่รู้ — ช่องที่เว้นไว้ AI จะถามกลับให้ทีหลัง (ไม่เดาเอง)", "Fill in what you know — AI will ask about blanks instead of guessing")}
             </p>
             <div className="space-y-1.5">
-              {topics.map((x) => (
-                <div key={x.th} className="flex items-center gap-2">
-                  <span className="text-[12.5px] text-slate-600 w-[42%] shrink-0">{topicLabel(x)}</span>
-                  <input value={answers[x.th] ?? ""} onChange={(e) => setAnswers((p) => ({ ...p, [x.th]: e.target.value }))}
-                    placeholder={t("พิมพ์คำตอบ…", "Type the answer…")}
-                    className="flex-1 h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300" />
-                </div>
-              ))}
+              {topics.map((x) => {
+                const cur = answers[x.th] ?? "";
+                return (
+                  <div key={x.th}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12.5px] text-slate-600 w-[42%] shrink-0">{topicLabel(x)}</span>
+                      <input value={cur} onChange={(e) => setAnswers((p) => ({ ...p, [x.th]: e.target.value }))}
+                        placeholder={t("พิมพ์คำตอบ…", "Type the answer…")}
+                        className="flex-1 h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300" />
+                    </div>
+                    {/* คำตอบแนะนำที่ผู้ดูแลตั้งไว้ — กดเลือกได้เลย (กดซ้ำ = ยกเลิก) ยังพิมพ์เองได้ */}
+                    {x.options.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1 ml-[42%] pl-2">
+                        {x.options.map((op) => {
+                          const on = cur.trim() === op;
+                          return (
+                            <button key={op} type="button"
+                              onClick={() => setAnswers((p) => ({ ...p, [x.th]: on ? "" : op }))}
+                              className={`h-6 px-2 text-[11.5px] rounded-full border transition ${on
+                                ? "bg-violet-600 border-violet-600 text-white"
+                                : "bg-white border-violet-200 text-violet-700 hover:bg-violet-50"}`}>
+                              {op}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
