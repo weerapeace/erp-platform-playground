@@ -170,6 +170,18 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
   const [rules, setRules] = useState<Rule[] | null>(null);
   const [tags, setTags] = useState<TagOpt[]>([]);
   const [edit, setEdit] = useState<Rule | null>(null);
+  // ⚠️ ต้องเก็บ "ข้อความดิบ" ระหว่างพิมพ์ แล้วค่อยแปลงเป็นรายการตอนบันทึก
+  //    เดิมแปลงทุกครั้งที่พิมพ์ (split + filter(Boolean)) → กด Enter/พิมพ์ลูกน้ำแล้วตัวคั่นถูกตัดทันที
+  //    = ขึ้นบรรทัดใหม่ไม่ได้เลย (เจ้าของเจอเอง)
+  const [topicsText, setTopicsText] = useState("");
+  const [keywordsText, setKeywordsText] = useState("");
+  const openEdit = (r: Rule) => {
+    setEdit(r);
+    setTopicsText((r.required_topics ?? []).join("\n"));
+    setKeywordsText((r.name_keywords ?? []).join(", "));
+  };
+  const splitLines = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean);
+  const splitCommas = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -187,8 +199,10 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
     if (!edit) return;
     setBusy(true); setMsg("");
     try {
+      // แปลงข้อความดิบ → รายการ ตอนบันทึกเท่านั้น
+      const payload: Rule = { ...edit, required_topics: splitLines(topicsText), name_keywords: splitCommas(keywordsText) };
       const j = await apiFetch("/api/ai/product-rules", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       setMsg(t("บันทึกกฎแล้ว — กด “ให้คิดใหม่” เพื่อใช้กฎใหม่", "Rule saved — press “Redraft” to use it"));
@@ -238,8 +252,7 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
           </div>
           <div>
             <p className="text-[11.5px] text-slate-500 mb-1">{t("② หรือ ชื่อสินค้ามีคำว่า (คั่นด้วยลูกน้ำ)", "② Or the name contains (comma-separated)")}</p>
-            <input value={edit.name_keywords.join(", ")}
-              onChange={(e) => setEdit({ ...edit, name_keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+            <input value={keywordsText} onChange={(e) => setKeywordsText(e.target.value)}
               placeholder={suggestKeyword ? `เช่น ${suggestKeyword}` : t("เช่น กระเป๋าสตางค์, wallet", "e.g. wallet, purse")}
               className="w-full h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg" />
           </div>
@@ -247,8 +260,7 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
 
         <div>
           <p className="text-[11.5px] text-slate-500 mb-1">{t("หัวข้อที่ Description ต้องมีเสมอ (บรรทัดละหัวข้อ)", "Headings the description must always include (one per line)")}</p>
-          <textarea value={lines(edit.required_topics)} rows={3}
-            onChange={(e) => setEdit({ ...edit, required_topics: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })}
+          <textarea value={topicsText} onChange={(e) => setTopicsText(e.target.value)} rows={4}
             placeholder={"จำนวนช่องใส่บัตร\nจำนวนช่องใส่ธนบัตร\nช่องอเนกประสงค์"}
             className="w-full px-2.5 py-2 text-[12.5px] border border-slate-200 rounded-lg bg-white" />
           <p className="mt-1 text-[11px] text-slate-400">{t("ถ้าดูจากรูปไม่ออก AI จะถามกลับให้เองแทนที่จะเดา", "If the images aren't clear, AI asks instead of guessing")}</p>
@@ -291,7 +303,7 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
     <div className="space-y-2">
       {rules.length === 0 && <p className="text-[12.5px] text-slate-400">{t("ยังไม่มีกฎ — กดปุ่มด้านล่างเพื่อสร้างกฎแรก", "No rules yet — use the button below to add the first one")}</p>}
       {rules.map((r) => (
-        <button key={r.id} type="button" onClick={() => setEdit({ ...r, hint: r.hint ?? "" })}
+        <button key={r.id} type="button" onClick={() => openEdit({ ...r, hint: r.hint ?? "" })}
           className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50">
           <div className="flex items-center gap-2 flex-wrap">
             <b className="text-[12.5px] text-slate-700">{r.name}</b>
@@ -307,7 +319,7 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
           </p>
         </button>
       ))}
-      <button type="button" onClick={() => setEdit({ ...EMPTY_RULE, name_keywords: suggestKeyword ? [suggestKeyword] : [] })}
+      <button type="button" onClick={() => openEdit({ ...EMPTY_RULE, name_keywords: suggestKeyword ? [suggestKeyword] : [] })}
         className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
         + สร้างกฎใหม่
       </button>
