@@ -48,6 +48,19 @@ const isBlank = (v: unknown) => {
 /** คำสั่ง AI 1 ระดับ (ค่ากลาง หรือ เฉพาะแบรนด์นี้) */
 type PromptRow = { brand_id: string | null; platform: string | null; prompt: string };
 
+/**
+ * ช่องที่ตั้งคำสั่ง AI แยกได้ (ตรงกับ PRODUCT_FIELD_KEYS ใน lib/ai-caption.ts)
+ * เขียนซ้ำที่นี่เพราะไฟล์นั้นเป็นโค้ดฝั่งเซิร์ฟเวอร์ (ต่อ Supabase/R2) ดึงเข้าหน้าเว็บตรง ๆ ไม่ได้
+ */
+const CFG_FIELDS: { field: string; label: string; hint: string }[] = [
+  { field: "name_th",             label: "ชื่อสินค้า (ไทย)",   hint: "เช่น ขึ้นต้นด้วยประเภทสินค้า ตามด้วยจุดขาย ไม่เกิน 60 ตัวอักษร ห้ามใส่รหัส" },
+  { field: "name_en",             label: "Name En",            hint: "e.g. Title Case, start with the product type, no product code" },
+  { field: "introduction",        label: "Introduction (ไทย)", hint: "เช่น 2-3 บรรทัด เปิดด้วยปัญหาที่สินค้าช่วยแก้ ปิดด้วยจุดขายเด่น" },
+  { field: "introduction_en",     label: "Introduction En",    hint: "e.g. 2-3 short lines, benefit-first tone" },
+  { field: "description",         label: "Description (ไทย)",  hint: "เช่น แบ่งเป็นหัวข้อ: จุดเด่น / วัสดุ / ขนาด / การดูแล ใช้ • นำหน้าแต่ละข้อ" },
+  { field: "english_description", label: "English Description", hint: "e.g. same headings as the Thai version, bullet list" },
+];
+
 /** แท็กสินค้า 2 ภาษา (product_families) */
 type TagRow = { id: string; name: string; name_en?: string | null };
 
@@ -458,6 +471,7 @@ export function AiProductDetailModal({
   // ── แผงตั้งคำสั่ง AI (เปิด/ปิดในป๊อปเดียวกัน ไม่ต้องออกไปหน้าตั้งค่า) ──
   const [cfgOpen, setCfgOpen] = useState(false);
   const [cfgTab, setCfgTab] = useState<"main" | "rules">("main");
+  const [cfgField, setCfgField] = useState<string>("");   // "" = คำสั่งรวมทุกช่อง · ไม่ว่าง = คำสั่งเฉพาะช่องนั้น
   const [cfgScope, setCfgScope] = useState<"global" | "brand">("global");
   const [cfgRows, setCfgRows] = useState<PromptRow[] | null>(null);
   const [cfgDraft, setCfgDraft] = useState("");
@@ -467,7 +481,7 @@ export function AiProductDetailModal({
   const loadCfg = useCallback(async () => {
     try {
       const j = await apiFetch("/api/ai/caption-prompts").then((r) => r.json());
-      setCfgRows(((j.data ?? []) as PromptRow[]).filter((r) => r.platform === "product_detail"));
+      setCfgRows(((j.data ?? []) as PromptRow[]).filter((r) => String(r.platform ?? "").startsWith("product_detail")));
     } catch { setCfgRows([]); }
   }, []);
   useEffect(() => { if (cfgOpen && cfgRows === null) void loadCfg(); }, [cfgOpen, cfgRows, loadCfg]);
@@ -475,9 +489,10 @@ export function AiProductDetailModal({
   useEffect(() => {
     if (!cfgRows) return;
     const want = cfgScope === "brand" ? brandId ?? null : null;
-    setCfgDraft(cfgRows.find((r) => r.brand_id === want)?.prompt ?? "");
+    const plat = cfgField ? `product_detail:${cfgField}` : "product_detail";
+    setCfgDraft(cfgRows.find((r) => r.brand_id === want && r.platform === plat)?.prompt ?? "");
     setCfgMsg("");
-  }, [cfgRows, cfgScope, brandId]);
+  }, [cfgRows, cfgScope, brandId, cfgField]);
 
   const saveCfg = async () => {
     if (!cfgDraft.trim()) { setCfgMsg(t("กรุณาใส่คำสั่งก่อนบันทึก", "Please enter a prompt before saving")); return; }
@@ -485,12 +500,28 @@ export function AiProductDetailModal({
     try {
       const j = await apiFetch("/api/ai/caption-prompts", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brand_id: cfgScope === "brand" ? brandId : null, platform: "product_detail", prompt: cfgDraft.trim() }),
+        body: JSON.stringify({ brand_id: cfgScope === "brand" ? brandId : null, platform: cfgField ? `product_detail:${cfgField}` : "product_detail", prompt: cfgDraft.trim() }),
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       setCfgMsg(t("บันทึกคำสั่งแล้ว — กด “ให้คิดใหม่” เพื่อใช้คำสั่งใหม่", "Prompt saved — press “Redraft” to use it"));
       setCfgRows(null); void loadCfg();
     } catch (e) { setCfgMsg(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
+    finally { setCfgBusy(false); }
+  };
+
+  /** ลบคำสั่งของช่อง/ระดับที่กำลังดู → กลับไปใช้คำสั่งรวม (หรือค่าในโค้ด) */
+  const delCfg = async () => {
+    setCfgBusy(true); setCfgMsg("");
+    try {
+      const plat = cfgField ? `product_detail:${cfgField}` : "product_detail";
+      const qs = new URLSearchParams({ platform: plat });
+      if (cfgScope === "brand" && brandId) qs.set("brand_id", brandId);
+      const j = await apiFetch(`/api/ai/caption-prompts?${qs.toString()}`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      setCfgDraft("");
+      setCfgMsg(t("ลบคำสั่งนี้แล้ว", "Prompt removed"));
+      setCfgRows(null); void loadCfg();
+    } catch (e) { setCfgMsg(e instanceof Error ? e.message : t("ลบไม่สำเร็จ", "Delete failed")); }
     finally { setCfgBusy(false); }
   };
 
@@ -649,7 +680,7 @@ export function AiProductDetailModal({
         {cfgOpen && (
           <ERPModal open onClose={() => setCfgOpen(false)} size="lg"
             title={t("⚙ ตั้งค่าคำสั่ง AI", "⚙ AI prompt settings")}
-            description={t("คำสั่งหลัก = ใช้กับทุกสินค้า/ต่อแบรนด์ · กฎตามประเภทสินค้า = ใช้เมื่อเข้าเงื่อนไขแท็ก/ชื่อ", "Main prompt applies to all products or per brand · Rules apply when tag/name matches")}
+            description={t("คำสั่งหลัก = ตั้งรวมทุกช่อง หรือแยกรายช่องก็ได้ (รายช่องสำคัญกว่า) · กฎตามประเภทสินค้า = ใช้เมื่อเข้าเงื่อนไขแท็ก/ชื่อ", "Main prompt: set once for all fields or per field (per-field wins) · Rules apply when tag/name matches")}
             footer={
               <div className="flex justify-end w-full">
                 <button onClick={() => setCfgOpen(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
@@ -671,6 +702,33 @@ export function AiProductDetailModal({
             ) : (
             <>
             <ModelPicker />
+            {/* เลือกว่าจะตั้งคำสั่ง "รวมทุกช่อง" หรือ "เฉพาะช่องนี้" — ช่องที่ตั้งไว้แล้วมีจุดเขียว */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2 space-y-1.5">
+              <p className="text-[11.5px] font-medium text-slate-500">
+                {t("ตั้งคำสั่งของช่องไหน", "Which field is this prompt for?")}
+              </p>
+              <div className="flex gap-1.5 flex-wrap">
+                {([["", t("รวมทุกช่อง", "All fields")], ...CFG_FIELDS.map((f) => [f.field, f.label] as const)] as const).map(([k, label]) => {
+                  const plat = k ? `product_detail:${k}` : "product_detail";
+                  const has = (cfgRows ?? []).some((r) => r.platform === plat && (r.prompt ?? "").trim());
+                  const on = cfgField === k;
+                  return (
+                    <button key={k || "_all"} type="button" onClick={() => setCfgField(k)}
+                      title={has ? t("ช่องนี้ตั้งคำสั่งไว้แล้ว", "This field already has a prompt") : t("ยังไม่ได้ตั้งคำสั่งของช่องนี้", "No prompt set for this field yet")}
+                      className={`h-7 px-2.5 text-[12px] rounded-full border inline-flex items-center gap-1 ${on
+                        ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-100"}`}>
+                      {has && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-slate-400">
+                {cfgField
+                  ? t("คำสั่งนี้ใช้กับช่องนี้ช่องเดียว และมีน้ำหนักมากกว่าคำสั่งรวม", "This prompt applies to this field only and outweighs the all-fields prompt")
+                  : t("คำสั่งรวม = ใช้กับทุกช่องที่ไม่ได้ตั้งคำสั่งเฉพาะไว้", "All-fields prompt = used by every field without its own prompt")}
+              </p>
+            </div>
             <div className="flex items-center gap-2 flex-wrap">
               <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden bg-white">
                 <button type="button" onClick={() => setCfgScope("global")}
@@ -692,13 +750,23 @@ export function AiProductDetailModal({
             ) : (
               <>
                 <textarea value={cfgDraft} onChange={(e) => setCfgDraft(e.target.value)} rows={7}
-                  placeholder={t("เช่น เขียนโทนพรีเมียม เน้นงานคราฟต์ · ห้ามใช้คำว่า ถูกที่สุด · ปิดท้ายด้วยการรับประกัน", "e.g. premium, craft-focused tone · never say “cheapest” · end with the warranty")}
+                  placeholder={cfgField
+                    ? (CFG_FIELDS.find((f) => f.field === cfgField)?.hint ?? "")
+                    : t("เช่น เขียนโทนพรีเมียม เน้นงานคราฟต์ · ห้ามใช้คำว่า ถูกที่สุด · ปิดท้ายด้วยการรับประกัน", "e.g. premium, craft-focused tone · never say “cheapest” · end with the warranty")}
                   className="w-full px-3 py-2 text-[13px] leading-relaxed border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 font-mono" />
                 <div className="flex items-center gap-2 flex-wrap">
                   <button type="button" onClick={() => void saveCfg()} disabled={cfgBusy}
                     className="h-8 px-3 text-[12.5px] font-medium bg-slate-700 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
                     {cfgBusy ? t("กำลังบันทึก…", "Saving…") : t("บันทึกคำสั่ง", "Save prompt")}
                   </button>
+                  {!!(cfgRows ?? []).some((r) => r.platform === (cfgField ? `product_detail:${cfgField}` : "product_detail")
+                    && r.brand_id === (cfgScope === "brand" ? brandId ?? null : null) && (r.prompt ?? "").trim()) && (
+                    <button type="button" onClick={() => void delCfg()} disabled={cfgBusy}
+                      title={t("กลับไปใช้คำสั่งรวม/ค่าในโค้ด", "Fall back to the all-fields prompt")}
+                      className="h-8 px-3 text-[12.5px] border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-50">
+                      {t("ลบคำสั่งนี้", "Remove")}
+                    </button>
+                  )}
                   {cfgMsg && <span className="text-[12px] text-slate-500">{cfgMsg}</span>}
                 </div>
                 <p className="text-[11.5px] text-slate-400">

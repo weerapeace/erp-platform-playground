@@ -15,7 +15,7 @@ import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { CAPTION_MODEL, productDetailModel, chatJson, imageParts, imagesToDataUrls, loadPromptRows, openAiKey, pickJobPrompt, PRODUCT_DETAIL_KEY } from "@/lib/ai-caption";
+import { CAPTION_MODEL, productDetailModel, chatJson, imageParts, imagesToDataUrls, loadPromptRows, openAiKey, pickJobPrompt, PRODUCT_DETAIL_KEY, PRODUCT_FIELD_KEYS, productFieldPromptKey } from "@/lib/ai-caption";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -141,8 +141,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const images = keys.length ? await imagesToDataUrls(keys) : [];
 
   // ── คำสั่ง (prompt) — เจาะจงรายแบรนด์ชนะค่ากลาง ──
-  const custom = pickJobPrompt(await loadPromptRows(), brandId, PRODUCT_DETAIL_KEY);
+  const promptRows = await loadPromptRows();
+  const custom = pickJobPrompt(promptRows, brandId, PRODUCT_DETAIL_KEY);
   const hasCustom = !!custom.trim();
+
+  // คำสั่ง "รายช่อง" — ตั้งแยกได้ทีละช่อง (เจาะจงกว่าคำสั่งรวม) · ช่องไหนตั้งไว้ ใช้ตัวนั้นเป็นหลัก
+  const fieldPrompt = (field: string) => pickJobPrompt(promptRows, brandId, productFieldPromptKey(field)).trim();
+  const fieldPrompts = Object.fromEntries(
+    PRODUCT_FIELD_KEYS.map(({ field }) => [field, fieldPrompt(field)]).filter(([, v]) => v),
+  ) as Record<string, string>;
+  const hasFieldPrompts = Object.keys(fieldPrompts).length > 0;
+  /** คำอธิบายในโครง JSON ของช่องนั้น — มีคำสั่งรายช่อง ใช้คำสั่งนั้นเลย (เจ้าของคุมเองเต็มที่) */
+  const fieldDesc = (field: string, fallback: string) => (fieldPrompts[field] ? fieldPrompts[field].replace(/"/g, "'").replace(/\s*\n\s*/g, " · ") : fallback);
   const system = [
     // ไม่มีคำสั่งของเจ้าของ → ใช้ persona ในโค้ด · มีคำสั่งเอง → persona มาจากคำสั่งนั้น (ปิดท้าย)
     ...(hasCustom ? [] : [FALLBACK, ""]),
@@ -150,12 +160,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     "ตอบเป็น JSON เท่านั้น ตามรูปแบบนี้ (ทุกช่องเป็นข้อความ):",
     // ⚠️ คำอธิบายฟิลด์ต้องเป็น "กลาง" ห้ามใส่ข้อจำกัดสไตล์ (เช่น ห้ามใส่รหัส / ไม่เกิน 80 ตัวอักษร)
     //    เพราะจะไปขัดกับคำสั่งที่เจ้าของตั้งไว้เอง (เคสจริง: ตั้งให้ใส่ Collection + SEO + รหัส แต่ AI ไม่ทำตาม)
-    `{"name_th":"ชื่อสินค้าภาษาไทย",`,
-    `"introduction":"ข้อความโปรยเปิดภาษาไทย",`,
-    `"description":"รายละเอียดภาษาไทย",`,
-    `"name_en":"ชื่อสินค้าภาษาอังกฤษ",`,
-    `"introduction_en":"ข้อความโปรยเปิดภาษาอังกฤษ",`,
-    `"english_description":"รายละเอียดภาษาอังกฤษ",`,
+    // คำอธิบายแต่ละช่อง = คำสั่งรายช่องที่เจ้าของตั้งไว้ (ถ้าตั้ง) ไม่งั้นใช้คำกลาง ๆ
+    `{"name_th":"${fieldDesc("name_th", "ชื่อสินค้าภาษาไทย")}",`,
+    `"introduction":"${fieldDesc("introduction", "ข้อความโปรยเปิดภาษาไทย")}",`,
+    `"description":"${fieldDesc("description", "รายละเอียดภาษาไทย")}",`,
+    `"name_en":"${fieldDesc("name_en", "ชื่อสินค้าภาษาอังกฤษ")}",`,
+    `"introduction_en":"${fieldDesc("introduction_en", "ข้อความโปรยเปิดภาษาอังกฤษ")}",`,
+    `"english_description":"${fieldDesc("english_description", "รายละเอียดภาษาอังกฤษ")}",`,
     `"sizes":{"size_length_cm":ตัวเลขหรือ null,"size_height_cm":ตัวเลขหรือ null,"size_thickness_cm":ตัวเลขหรือ null,"weight_g":ตัวเลขหรือ null,"warranty":"ข้อความหรือ null","source":"บอกสั้น ๆ ว่าอ่านตัวเลขมาจากไหน เช่น 'รูปที่ 3 เขียนว่า 34*22*12 cm'"},`,
     `"questions":["คำถามภาษาไทยที่อยากถามผู้ใช้ ถ้ามีอะไรไม่แน่ใจหรือดูจากรูปไม่ออก (สูงสุด 5 ข้อ สั้น ตรงประเด็น)"],`,
     `"questions_en":["คำถามชุดเดียวกันฉบับภาษาอังกฤษ เรียงลำดับตรงกับ questions"],`,
@@ -209,6 +220,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       "════════════════════════════════════════════════",
       "ถ้าคำสั่งด้านบนนี้ขัดกับคำอธิบายฟิลด์หรือกติกาการเขียนก่อนหน้า ให้ทำตามคำสั่งของเจ้าของร้าน",
       "(ยังคงห้าม: แต่งข้อมูลที่มองไม่เห็น · เดาตัวเลขขนาด/น้ำหนัก · ตอบไม่เป็น JSON ตามคีย์ที่กำหนด)",
+    ] : []),
+    // คำสั่งรายช่อง — ย้ำท้ายสุดแบบเต็ม (ในโครง JSON ถูกย่อบรรทัดเดียว) เพราะตัวท้ายมีน้ำหนักสุด
+    ...(hasFieldPrompts ? [
+      "",
+      "════════ คำสั่งเฉพาะแต่ละช่อง (สำคัญสูงสุด — ช่องไหนมีคำสั่ง ให้ทำตามคำสั่งช่องนั้นเป๊ะ ๆ) ════════",
+      ...PRODUCT_FIELD_KEYS.filter(({ field }) => fieldPrompts[field]).map(({ field, label }) =>
+        `▸ ${field} (${label}):\n${fieldPrompts[field]}`),
+      "════════════════════════════════════════════════",
+      "ช่องที่ไม่มีคำสั่งเฉพาะ ให้ทำตามคำสั่งรวม/กติกาด้านบน",
     ] : []),
     ...(ruleInstruction ? ["", "คำสั่งเพิ่มสำหรับสินค้าประเภทนี้ (ทำร่วมกับคำสั่งเจ้าของร้าน):", ruleInstruction] : []),
     ...(ruleTopics.length ? ["", "หัวข้อที่ต้องมีใน Description เสมอ (ถ้าดูจากรูปไม่ออก ให้ถามใน questions):",

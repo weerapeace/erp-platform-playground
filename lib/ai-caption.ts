@@ -37,6 +37,21 @@ export type PromptRow = { brand_id: string | null; platform: string | null; prom
 export const PRODUCT_DETAIL_KEY = "product_detail";
 export const TRANSLATE_KEY = "translate";
 
+/**
+ * คำสั่ง AI "รายช่อง" ของรายละเอียดสินค้า — เก็บในทะเบียน prompt เดิมโดยใช้ platform = product_detail:<field>
+ * ตั้งได้ 2 ระดับเหมือนเดิม (ค่ากลาง / เฉพาะแบรนด์) · ช่องไหนไม่ตั้ง = ใช้คำอธิบายพื้นฐานในโค้ด
+ */
+export const PRODUCT_FIELD_KEYS = [
+  { field: "name_th",             label: "ชื่อสินค้า (ไทย)" },
+  { field: "name_en",             label: "Name En" },
+  { field: "introduction",        label: "Introduction (ไทย)" },
+  { field: "introduction_en",     label: "Introduction En" },
+  { field: "description",         label: "Description (ไทย)" },
+  { field: "english_description", label: "English Description" },
+] as const;
+
+export const productFieldPromptKey = (field: string) => `${PRODUCT_DETAIL_KEY}:${field}`;
+
 /** ยังไม่ตั้ง OPENAI_API_KEY = คืนค่าว่าง (ให้ route ตอบข้อความบอกวิธี ไม่พังเงียบ) */
 export function openAiKey(): string {
   return (process.env.OPENAI_API_KEY ?? "").trim();
