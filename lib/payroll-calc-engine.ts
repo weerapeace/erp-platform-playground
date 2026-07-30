@@ -163,8 +163,14 @@ function buildLine(period: Row, employee: Row, contract: Row, setting: Row, manu
   const contractor = isContractor(contract);
   const payByAttendance = isDailyPaid(contract);
   values.base_salary = payByAttendance ? 0 : money(manual.base_salary ?? contract.base_salary);
-  const sched = scheduledWorkDays(period, contract) || money(period.default_work_days ?? countWorkDays(String(period.start_date), String(period.end_date)));
-  const payable = payableWorkDays(period, contract) || sched;
+  const schedRaw = scheduledWorkDays(period, contract) || money(period.default_work_days ?? countWorkDays(String(period.start_date), String(period.end_date)));
+  // รายเดือน: ฐานวันทำงาน "ห้ามเกินวันทำงานฐานของงวด" (ตั้งไว้ 26) — เดือนที่ปฏิทินมี 27 วันทำงาน
+  //   (เช่น ก.ค. 2026 = 31 วัน หักอาทิตย์ 4 = 27) จะถูกกั้นไว้ 26 ให้ตรงกับหน้าข้อมูลคำนวณและสลิป
+  //   ซึ่งใช้ default_work_days อยู่แล้ว · คนเข้า/ออกกลางงวดยังถูกคลิปตามช่วงสัญญาเหมือนเดิม (min ไม่กระทบ)
+  // รายวัน/รายชม.: ไม่กั้น — ทำ 27 วันต้องได้ 27 วัน (ใช้ payable ตามจริง)
+  const baseCap = money(period.default_work_days);
+  const sched = baseCap > 0 ? Math.min(schedRaw, baseCap) : schedRaw;
+  const payable = payableWorkDays(period, contract) || schedRaw;
   const defaultWorkDays = payByAttendance ? payable : sched;
   const hoursPerDay = money(period.default_hours_per_day ?? 8);
   const manualAtt = hasInput(manual.attendance_days);
