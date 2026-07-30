@@ -21,6 +21,8 @@ export const revalidate = 0;
 type RuleBody = {
   id?: string; name?: string; tag_ids?: string[]; name_keywords?: string[];
   brand_id?: string | null; instruction?: string; required_topics?: string[];
+  /** หัวข้อบังคับฉบับภาษาอังกฤษ (เว้นได้ = ใช้ไทย) */
+  required_topics_en?: string[];
   hint?: string | null; sort_order?: number; is_active?: boolean;
 };
 
@@ -31,11 +33,32 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "ai.caption")) && !(await apiCan(request, "tasks.approve")))
     return NextResponse.json({ data: [], error: "ไม่มีสิทธิ์ดูกฎคำสั่ง AI" }, { status: 401 });
   const admin = supabaseAdmin();
+  const parentId = (new URL(request.url).searchParams.get("parent_id") ?? "").trim();
   const [rules, tags] = await Promise.all([
     admin.from("erp_ai_product_rules").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
-    admin.from("product_families").select("id, name").eq("is_active", true).order("name", { ascending: true }),
+    admin.from("product_families").select("id, name, name_en").eq("is_active", true).order("name", { ascending: true }),
   ]);
-  return NextResponse.json({ data: rules.data ?? [], tags: tags.data ?? [], error: null });
+  const all = (rules.data ?? []) as Record<string, unknown>[];
+
+  // ?parent_id= → บอกด้วยว่าสินค้าตัวนี้เข้ากฎไหน (ป๊อปเอาไปโชว์ช่องกรอกหัวข้อบังคับก่อนกดให้ AI คิด)
+  let matched: Record<string, unknown>[] = [];
+  if (parentId) {
+    const [{ data: p }, { data: links }] = await Promise.all([
+      admin.from("parent_skus_v2").select("name_th, brand_id").eq("id", parentId).maybeSingle(),
+      admin.from("parent_skus_v2_product_family_m2m").select("tgt_id").eq("src_id", parentId),
+    ]);
+    const tagIds = ((links ?? []) as { tgt_id: string }[]).map((l) => l.tgt_id);
+    const nameLower = String(p?.name_th ?? "").toLowerCase();
+    const brandId = (p?.brand_id as string | null) ?? null;
+    matched = all.filter((r) => {
+      if (r.brand_id && r.brand_id !== brandId) return false;
+      const byTag = ((r.tag_ids ?? []) as string[]).some((t) => tagIds.includes(t));
+      const byName = ((r.name_keywords ?? []) as string[]).some((k) => k && nameLower.includes(String(k).toLowerCase()));
+      return byTag || byName;
+    });
+  }
+
+  return NextResponse.json({ data: all, matched, tags: tags.data ?? [], error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -59,6 +82,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     brand_id: (b.brand_id ?? null) || null,
     instruction: (b.instruction ?? "").trim(),
     required_topics: arr(b.required_topics),
+    required_topics_en: arr(b.required_topics_en),
     hint: (b.hint ?? "").trim() || null,
     sort_order: Number.isFinite(b.sort_order) ? Number(b.sort_order) : 0,
     is_active: b.is_active !== false,

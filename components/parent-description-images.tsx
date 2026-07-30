@@ -15,6 +15,7 @@ import { downscaleImageWidth } from "@/lib/image-resize";
 import { formatBytes } from "@/lib/assets";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
+import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow } from "@/app/api/assets/shared";
 
 const imgDims = (file: File) => new Promise<{ w: number; h: number } | null>((res) => {
@@ -103,6 +104,30 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   };
 
+  // เลือกรูปจากคลังไฟล์กลาง (media) มาเป็นรูป Description — ไม่ต้องอัปซ้ำ ไฟล์เดียวใช้ได้หลายที่
+  const [pickOpen, setPickOpen] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const linkFromLibrary = async (assets: AssetRow[]) => {
+    setPickOpen(false);
+    const ids = assets.map((a) => String(a.id)).filter(Boolean);
+    if (!parentId || ids.length === 0) return;
+    setLinking(true);
+    let ok = 0;
+    for (const assetId of ids) {
+      try {
+        const r = await apiFetch("/api/assets/description", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parent_id: parentId, asset_id: assetId }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) throw new Error(j.error || "ผูกไม่สำเร็จ");
+        ok++;
+      } catch (e) { toast.error(e instanceof Error ? e.message : "ผูกรูปไม่สำเร็จ"); }
+    }
+    setLinking(false);
+    if (ok) { toast.success(`เพิ่มรูปจากคลัง ${ok} รูป`); await load(); }
+  };
+
   // ล้างรูป Description ทั้งหมด — เอาออกจาก Description ทุกใบ + ลบไฟล์ออกจากคลัง (ถังขยะ 30 วัน)
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing]   = useState(false);
@@ -168,6 +193,11 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
             title="ลบรูป Description ทั้งหมด (ลบไฟล์ออกจากคลัง/R2 ด้วย)"
             className="h-8 px-2.5 text-[12px] border border-rose-200 text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50 flex items-center gap-1">
             {clearing ? <span className="w-3.5 h-3.5 border-2 border-rose-300 border-t-rose-600 rounded-full animate-spin" /> : "🗑"} ล้างทั้งหมด</button>}
+          {/* เลือกรูปที่มีอยู่แล้วในคลังไฟล์กลาง — ไฟล์เดียวใช้ได้หลายที่ ไม่ต้องอัปซ้ำ */}
+          {!readonly && <button type="button" onClick={() => setPickOpen(true)} disabled={busy || linking}
+            title="เลือกรูปจากคลังไฟล์กลาง (media) มาเป็นรูป Description"
+            className="h-8 px-2.5 text-[12px] border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-50 flex items-center gap-1">
+            {linking ? <span className="w-3.5 h-3.5 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" /> : "📁"} เลือกจากคลัง</button>}
           {!readonly && <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
             className="h-8 px-3 text-[12px] border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5">
             {busy ? <><span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />กำลังอัป {progress?.done}/{progress?.total}</> : "＋ เพิ่มรูป"}</button>}
@@ -247,6 +277,10 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
       <ConfirmDialog open={clearOpen} onClose={() => setClearOpen(false)} onConfirm={() => void clearAll()}
         title="ล้างรูป Description ทั้งหมด?" message={`ลบรูป Description ทั้งหมด ${images.length} รูป ออกจากสินค้านี้ และลบไฟล์ออกจากคลัง/R2 ด้วย (กู้คืนได้ 30 วัน)`}
         confirmText="ล้างทั้งหมด" variant="danger" />
+
+      {/* เลือกรูปจากคลังไฟล์กลาง (ของกลาง AssetPicker) */}
+      <AssetPicker open={pickOpen} onClose={() => setPickOpen(false)} onSelect={(a) => void linkFromLibrary(a)}
+        multiple typeFilter="image" title="เลือกรูปจากคลัง → รูป Description" />
     </div>
   );
 }

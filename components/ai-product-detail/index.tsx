@@ -154,7 +154,7 @@ function TagPicker({ parentId, onChanged }: { parentId: string; onChanged?: () =
 /** กฎคำสั่งตามประเภทสินค้า — จับจากแท็กที่ติดไว้ หรือคำที่อยู่ในชื่อสินค้า */
 type Rule = {
   id?: string; name: string; tag_ids: string[]; name_keywords: string[]; brand_id: string | null;
-  instruction: string; required_topics: string[]; hint: string | null; is_active?: boolean;
+  instruction: string; required_topics: string[]; required_topics_en?: string[]; hint: string | null; is_active?: boolean;
 };
 type TagOpt = { id: string; name: string };
 
@@ -174,10 +174,12 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
   //    เดิมแปลงทุกครั้งที่พิมพ์ (split + filter(Boolean)) → กด Enter/พิมพ์ลูกน้ำแล้วตัวคั่นถูกตัดทันที
   //    = ขึ้นบรรทัดใหม่ไม่ได้เลย (เจ้าของเจอเอง)
   const [topicsText, setTopicsText] = useState("");
+  const [topicsEnText, setTopicsEnText] = useState("");
   const [keywordsText, setKeywordsText] = useState("");
   const openEdit = (r: Rule) => {
     setEdit(r);
     setTopicsText((r.required_topics ?? []).join("\n"));
+    setTopicsEnText((r.required_topics_en ?? []).join("\n"));
     setKeywordsText((r.name_keywords ?? []).join(", "));
   };
   const splitLines = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean);
@@ -200,7 +202,7 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
     setBusy(true); setMsg("");
     try {
       // แปลงข้อความดิบ → รายการ ตอนบันทึกเท่านั้น
-      const payload: Rule = { ...edit, required_topics: splitLines(topicsText), name_keywords: splitCommas(keywordsText) };
+      const payload: Rule = { ...edit, required_topics: splitLines(topicsText), required_topics_en: splitLines(topicsEnText), name_keywords: splitCommas(keywordsText) };
       const j = await apiFetch("/api/ai/product-rules", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       }).then((r) => r.json());
@@ -260,10 +262,19 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
 
         <div>
           <p className="text-[11.5px] text-slate-500 mb-1">{t("หัวข้อที่ Description ต้องมีเสมอ (บรรทัดละหัวข้อ)", "Headings the description must always include (one per line)")}</p>
-          <textarea value={topicsText} onChange={(e) => setTopicsText(e.target.value)} rows={4}
-            placeholder={"จำนวนช่องใส่บัตร\nจำนวนช่องใส่ธนบัตร\nช่องอเนกประสงค์"}
-            className="w-full px-2.5 py-2 text-[12.5px] border border-slate-200 rounded-lg bg-white" />
-          <p className="mt-1 text-[11px] text-slate-400">{t("ถ้าดูจากรูปไม่ออก AI จะถามกลับให้เองแทนที่จะเดา", "If the images aren't clear, AI asks instead of guessing")}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <textarea value={topicsText} onChange={(e) => setTopicsText(e.target.value)} rows={4}
+              placeholder={"จำนวนช่องใส่บัตร\nจำนวนช่องใส่ธนบัตร\nช่องอเนกประสงค์"}
+              className="w-full px-2.5 py-2 text-[12.5px] border border-slate-200 rounded-lg bg-white" />
+            {/* หัวข้อฉบับอังกฤษ (บรรทัดต่อบรรทัดกับฝั่งไทย) — เว้นได้ ระบบจะใช้ไทยแทน */}
+            <textarea value={topicsEnText} onChange={(e) => setTopicsEnText(e.target.value)} rows={4}
+              placeholder={"Number of card slots\nNumber of bill compartments\nMulti-purpose compartment"}
+              className="w-full px-2.5 py-2 text-[12.5px] border border-slate-200 rounded-lg bg-white" />
+          </div>
+          <p className="mt-1 text-[11px] text-slate-400">
+            {t("ช่องซ้าย = ไทย · ช่องขวา = อังกฤษ (บรรทัดต่อบรรทัด · เว้นได้ ระบบใช้ไทยแทน) · ช่องเหล่านี้จะไปโผล่เป็นช่องให้กรอกในป๊อป AI", "Left = Thai · Right = English (line by line, optional) · these become answer fields in the AI popup")}
+          </p>
+          <p className="mt-0.5 text-[11px] text-slate-400">{t("ถ้าดูจากรูปไม่ออก AI จะถามกลับให้เองแทนที่จะเดา", "If the images aren't clear, AI asks instead of guessing")}</p>
         </div>
 
         <div>
@@ -390,11 +401,38 @@ export function AiProductDetailModal({
   // คำตอบที่ผู้ใช้พิมพ์ตอบคำถามของ AI (ส่งกลับไปตอนกด t("ตอบแล้วให้คิดใหม่", "Answer & redraft"))
   const [answers, setAnswers] = useState<Record<string, string>>({});
 
+  // ── หัวข้อบังคับจาก "กฎตามประเภทสินค้า" ที่สินค้าตัวนี้เข้าเงื่อนไข ──
+  //    โชว์เป็นช่องให้กรอกก่อนกดให้ AI คิด (AI จะไม่ต้องถามกลับ และไม่เดา)
+  //    โหมด EN ของหน้าจอ → ใช้หัวข้อฉบับอังกฤษถ้ากฎตั้งไว้
+  const [topics, setTopics] = useState<{ th: string; en: string; rule: string }[]>([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const j = await apiFetch(`/api/ai/product-rules?parent_id=${encodeURIComponent(parentId)}`).then((r) => r.json());
+        const matched = (j.matched ?? []) as { name: string; required_topics?: string[]; required_topics_en?: string[] }[];
+        const out: { th: string; en: string; rule: string }[] = [];
+        for (const r of matched) {
+          const th = r.required_topics ?? []; const en = r.required_topics_en ?? [];
+          th.forEach((topic, i) => { if (topic && !out.some((x) => x.th === topic)) out.push({ th: topic, en: en[i] ?? "", rule: r.name }); });
+        }
+        setTopics(out);
+      } catch { setTopics([]); }
+    })();
+  }, [parentId]);
+  const topicLabel = (x: { th: string; en: string }) => (t("th", "en") === "en" && x.en ? x.en : x.th);
+
   const run = useCallback(async (opts?: { withAnswers?: boolean }) => {
     setLoading(true); setErr(null);
-    const qa = opts?.withAnswers
-      ? Object.entries(answers).filter(([, a]) => a.trim()).map(([q, a]) => ({ q, a: a.trim() }))
-      : [];
+    // คำตอบหัวข้อบังคับ ส่งไปทุกครั้ง (ไม่ต้องรอ AI ถาม) · คำตอบคำถามของ AI ส่งเมื่อกด "ตอบแล้วให้คิดใหม่"
+    const topicQa = topics
+      .map((x) => ({ q: topicLabel(x), a: (answers[x.th] ?? "").trim() }))
+      .filter((x) => x.a);
+    const qa = [
+      ...topicQa,
+      ...(opts?.withAnswers
+        ? Object.entries(answers).filter(([q, a]) => a.trim() && !topics.some((x) => x.th === q)).map(([q, a]) => ({ q, a: a.trim() }))
+        : []),
+    ];
     setRes(null);
     try {
       const r = await apiFetch("/api/ai/product-detail", {
@@ -412,7 +450,8 @@ export function AiProductDetailModal({
       setPicked(init);
     } catch (e) { setErr(e instanceof Error ? e.message : t("เรียก AI ไม่สำเร็จ", "Could not reach AI")); }
     finally { setLoading(false); }
-  }, [parentId, extra, current, answers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parentId, extra, current, answers, topics]);
 
   const rows = res ? FIELDS.filter((f) => String(res[f.key] ?? "").trim()) : [];
   const sizeRows = res?.sizes
@@ -524,6 +563,29 @@ export function AiProductDetailModal({
 
         {/* เลือกแท็กประเภทสินค้าได้ตรงนี้เลย (2 ภาษา) — แท็กมีผลกับกฎ AI + เป็นบริบทตอนเขียน */}
         <TagPicker parentId={parentId} />
+
+        {/* หัวข้อบังคับจากกฎที่สินค้านี้เข้า — กรอกตรงนี้ AI จะใช้เลย ไม่ต้องเดาและไม่ต้องถามกลับ */}
+        {topics.length > 0 && (
+          <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+            <p className="text-[12.5px] font-semibold text-violet-800 mb-0.5">
+              📝 {t("ข้อมูลที่ต้องมีใน Description", "Details the description must include")}
+              <span className="ml-1.5 text-[11px] font-normal text-violet-600">({t("จากกฎ", "from rule")}: {[...new Set(topics.map((x) => x.rule))].join(", ")})</span>
+            </p>
+            <p className="text-[11.5px] text-violet-700 mb-2">
+              {t("กรอกเท่าที่รู้ — ช่องที่เว้นไว้ AI จะถามกลับให้ทีหลัง (ไม่เดาเอง)", "Fill in what you know — AI will ask about blanks instead of guessing")}
+            </p>
+            <div className="space-y-1.5">
+              {topics.map((x) => (
+                <div key={x.th} className="flex items-center gap-2">
+                  <span className="text-[12.5px] text-slate-600 w-[42%] shrink-0">{topicLabel(x)}</span>
+                  <input value={answers[x.th] ?? ""} onChange={(e) => setAnswers((p) => ({ ...p, [x.th]: e.target.value }))}
+                    placeholder={t("พิมพ์คำตอบ…", "Type the answer…")}
+                    className="flex-1 h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div>
           <label className="block text-[12.5px] font-medium text-slate-600 mb-1">{t("บอกใบ้เพิ่ม (ไม่บังคับ)", "Extra hints (optional)")}</label>
