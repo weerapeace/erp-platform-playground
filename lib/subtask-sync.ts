@@ -156,7 +156,10 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
       }
       ledger.push({ ...base, target_kind: "media_replace", target_table: "erp_playground_attachments", target_id: attId, ref: imgKey, prev_value: prevKey, new_value: imgKey, mode: "gallery" }); pushed++;
     }
-    if (appendKeys.length) await pushGallery(ownerType, table, ownerId, appendKeys, false);
+    // setCoverIfEmpty = true → ถ้าสินค้ายังไม่มีรูปปก ตั้งรูปแรกเป็นปกให้ (ไม่ทับปกที่ตั้งไว้แล้ว)
+    // ⚠️ เดิมส่ง false: อนุมัติงานรูปแล้วรูปเข้าแกลเลอรีจริง แต่การ์ด/ตาราง SKU ยังขึ้น "ไม่มีรูป"
+    //    เพราะที่นั่นอ่าน cover_image_r2_key (เคสจริง MGN193 — 11 SKU + Parent มีรูปครบแต่ปกว่าง)
+    if (appendKeys.length) await pushGallery(ownerType, table, ownerId, appendKeys, true);
   };
 
   // ===== รูป → สินค้า : (1) รูปงานตามการติ๊กเลือก  (2) รูปร่างต่อ SKU =====
