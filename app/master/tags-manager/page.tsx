@@ -140,6 +140,9 @@ export default function TagsManagerPage() {
 
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [newTag, setNewTag] = useState("");
+  const [newTagEn, setNewTagEn] = useState("");                                   // ชื่ออังกฤษของแท็กใหม่ (บังคับ)
+  const [tagEnMap, setTagEnMap] = useState<Record<string, string>>({});           // id → ชื่ออังกฤษ
+  const [enEdit, setEnEdit] = useState<{ id: string; name: string; en: string } | null>(null);
   const [tagMap, setTagMap] = useState<Record<string, string[]>>({});   // recId -> tagId[] (แท็กปัจจุบัน)
 
   const [applying, setApplying] = useState(false);
@@ -151,7 +154,14 @@ export default function TagsManagerPage() {
 
   const loadTags = useCallback(() => {
     apiFetch(`/api/master-v2/${TAG_MODULE}?limit=500`).then((r) => r.json())
-      .then((j) => setAllTags(((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({ id: String(r.id), label: String(r.name ?? r.id), group_id: r.group_id ? String(r.group_id) : null }))))
+      .then((j) => {
+        const rows = (j.data ?? j.rows ?? []) as Record<string, unknown>[];
+        setAllTags(rows.map((r) => ({ id: String(r.id), label: String(r.name ?? r.id), group_id: r.group_id ? String(r.group_id) : null })));
+        // ชื่ออังกฤษของแท็ก — เก็บแยกไว้โชว์/แก้ในหน้านี้ (จุดเดียวที่ตั้งค่า EN)
+        const map: Record<string, string> = {};
+        for (const r of rows) { const en = String(r.name_en ?? "").trim(); if (en) map[String(r.id)] = en; }
+        setTagEnMap(map);
+      })
       .catch(() => {});
   }, []);
   useEffect(() => { loadTags(); }, [loadTags]);
@@ -232,13 +242,31 @@ export default function TagsManagerPage() {
   });
   const removeTag = (id: string) => setTagSet((s) => s.filter((x) => x !== id));
 
+  // สร้างแท็กใหม่ — ต้องใส่ชื่ออังกฤษด้วย (ใช้ตอนลงขายต่างประเทศ + ให้ AI เขียนคำอังกฤษให้ตรงศัพท์)
   const createTag = async () => {
     const name = newTag.trim(); if (!name) return;
-    const res = await apiFetch(`/api/master-v2/${TAG_MODULE}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    const nameEn = newTagEn.trim();
+    if (!nameEn) { alert("ใส่ชื่ออังกฤษของแท็กด้วย (ช่อง EN) — ใช้ตอนลงขายต่างประเทศและให้ AI เขียนคำอังกฤษ"); return; }
+    const res = await apiFetch(`/api/master-v2/${TAG_MODULE}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, name_en: nameEn }) });
     const j = await res.json().catch(() => ({}));
     if (!res.ok || j.error || !j.data?.id) { alert("สร้างแท็กไม่สำเร็จ: " + (j.error ?? res.status)); return; }
     const id = String(j.data.id);
-    setAllTags((t) => [...t, { id, label: name, group_id: null }]); setNewTag(""); addTag(id);
+    setAllTags((t) => [...t, { id, label: name, group_id: null }]);
+    setTagEnMap((m) => ({ ...m, [id]: nameEn }));
+    setNewTag(""); setNewTagEn(""); addTag(id);
+  };
+
+  // แก้ชื่ออังกฤษของแท็กที่มีอยู่ (จุดเดียวที่ตั้งค่า EN ของแท็ก — ป๊อป AI แค่โชว์)
+  const saveTagEn = async () => {
+    if (!enEdit) return;
+    const res = await apiFetch("/api/product-tags", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag_id: enEdit.id, name_en: enEdit.en.trim() }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.error) { alert("บันทึกชื่ออังกฤษไม่สำเร็จ: " + (j.error ?? res.status)); return; }
+    setTagEnMap((m) => ({ ...m, [enEdit.id]: enEdit.en.trim() }));
+    setEnEdit(null);
   };
 
   // ดึง SKU ลูกของ Parent ที่เลือก (skus_v2.parent_sku_id IN parentIds)
@@ -409,12 +437,21 @@ export default function TagsManagerPage() {
   const ungroupedTags = useMemo(() => allTags.filter((t) => !t.group_id || !groupById.has(t.group_id)), [allTags, groupById]);
   const tagChip = (t: Tag) => {
     const inSet = tagSet.includes(t.id);
+    const en = tagEnMap[t.id] ?? "";
     return (
-      <button key={t.id} draggable onDragStart={() => { dragRef.current = { type: "tag", id: t.id }; }}
-        onClick={() => addTag(t.id)} disabled={inSet}
-        className={`px-2.5 py-1 rounded-full text-xs border cursor-grab active:cursor-grabbing ${inSet ? "bg-amber-100 text-amber-700 border-amber-200 opacity-50" : "bg-white text-slate-600 border-slate-200 hover:bg-amber-50"}`}>
-        {t.label}{inSet ? " ✓" : ""}
-      </button>
+      <span key={t.id} className="inline-flex items-center rounded-full border overflow-hidden"
+        style={{ borderColor: inSet ? "#fde68a" : "#e2e8f0", background: inSet ? "#fef3c7" : "#fff" }}>
+        <button draggable onDragStart={() => { dragRef.current = { type: "tag", id: t.id }; }}
+          onClick={() => addTag(t.id)} disabled={inSet}
+          className={`px-2.5 py-1 text-xs cursor-grab active:cursor-grabbing ${inSet ? "text-amber-700 opacity-60" : "text-slate-600 hover:bg-amber-50"}`}>
+          {t.label}
+          {/* ชื่ออังกฤษของแท็ก — ยังไม่ตั้งจะขึ้นเตือนสีเหลือง (ต้องมีเพื่อใช้ลงขายต่างประเทศ/ให้ AI) */}
+          <span className={`ml-1 text-[10px] ${en ? "text-slate-400" : "text-amber-500 font-medium"}`}>{en ? `· ${en}` : "· ไม่มี EN"}</span>
+          {inSet ? " ✓" : ""}
+        </button>
+        <button title="ตั้ง/แก้ชื่ออังกฤษของแท็กนี้" onClick={(e) => { e.stopPropagation(); setEnEdit({ id: t.id, name: t.label, en }); }}
+          className="px-1 py-1 text-[10px] text-slate-300 border-l border-slate-200 hover:text-blue-600">✎</button>
+      </span>
     );
   };
 
@@ -489,11 +526,27 @@ export default function TagsManagerPage() {
                   {ungroupedTags.map(tagChip)}
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 pt-1">
+              {/* สร้างแท็กใหม่ — ต้องมีทั้งไทยและอังกฤษ (EN ใช้ลงขายต่างประเทศ + ให้ AI เขียนคำอังกฤษ) */}
+              <div className="flex items-center gap-1.5 pt-1 flex-wrap">
                 <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") createTag(); }}
-                  placeholder="แท็กใหม่…" className="h-7 w-28 px-2 text-xs border border-slate-200 rounded-md" />
-                <button onClick={createTag} disabled={!newTag.trim()} className="h-7 px-2 text-xs rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40">+ สร้าง</button>
+                  placeholder="แท็กใหม่ (ไทย)…" className="h-7 w-32 px-2 text-xs border border-slate-200 rounded-md" />
+                <input value={newTagEn} onChange={(e) => setNewTagEn(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") createTag(); }}
+                  placeholder="EN (บังคับ)" className="h-7 w-28 px-2 text-xs border border-slate-200 rounded-md" />
+                <button onClick={createTag} disabled={!newTag.trim() || !newTagEn.trim()}
+                  title={!newTagEn.trim() ? "ต้องใส่ชื่ออังกฤษด้วย" : "สร้างแท็กใหม่"}
+                  className="h-7 px-2 text-xs rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40">+ สร้าง</button>
               </div>
+
+              {enEdit && (
+                <div className="mt-1.5 p-2 rounded-lg border border-blue-200 bg-blue-50/60 flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-slate-600">{enEdit.name} →</span>
+                  <input value={enEdit.en} onChange={(e) => setEnEdit({ ...enEdit, en: e.target.value })} autoFocus
+                    onKeyDown={(e) => { if (e.key === "Enter") void saveTagEn(); if (e.key === "Escape") setEnEdit(null); }}
+                    placeholder="ชื่ออังกฤษ เช่น Wallet" className="h-7 w-40 px-2 text-xs border border-slate-200 rounded-md" />
+                  <button onClick={() => void saveTagEn()} className="h-7 px-2.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">บันทึก</button>
+                  <button onClick={() => setEnEdit(null)} className="h-7 px-2 text-xs text-slate-500 hover:bg-white rounded-md">ยกเลิก</button>
+                </div>
+              )}
             </div>
           </div>
           <div className="w-px self-stretch bg-slate-100 hidden md:block" />

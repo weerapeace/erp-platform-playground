@@ -1077,11 +1077,20 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     } catch { setColorDict([]); return []; }
   }, []);
 
+  /**
+   * คำที่ "ไม่ต้องแปล" — ไซส์/ตัวย่อ/ตัวเลข (S, M, L, XL, XXL, 2XL, 01, F)
+   * ⚠️ สำคัญ: ชื่อสีของ SKU ไซส์คือ "ดำ/หนังเรียบ / L" → ถ้าไม่ยกเว้น "L" ไว้
+   *    มันจะกลายเป็นคำที่พจนานุกรมไม่มี → ต้องถาม AI → แปลไม่ได้ก็ข้ามทั้งแถว
+   *    (แถวไซส์เป็น 33 จาก 44 แถวของ MGN193 = ข้ามเกือบทั้งชุด)
+   */
+  const isSizeToken = (s: string) => /^[A-Za-z0-9]{1,4}$/.test(s.trim());
+
   /** แปล 1 ค่า โดยแยกคำที่คั่นด้วย "/" · คืนผลลัพธ์ + คำที่พจนานุกรมยังไม่มี */
   const translateByDict = (raw: string, dir: "th2en" | "en2th", dict: { th: string; en: string }[]) => {
     const parts = raw.split("/").map((p) => p.trim()).filter(Boolean);
     const out: string[] = []; const missing: string[] = [];
     for (const p of parts) {
+      if (isSizeToken(p)) { out.push(p); continue; }      // ไซส์/ตัวย่อ → คงเดิมทั้งสองทิศทาง
       const hit = dir === "th2en"
         ? dict.find((d) => norm(d.th) === norm(p))
         : dict.find((d) => norm(d.en) === norm(p));
@@ -1361,6 +1370,20 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     </div>
   ) : null;
 
+  // ปุ่มพับ/ขยายทุกกลุ่มพร้อมกัน — ตารางที่มีไซส์เยอะ (11 สี × 3 ไซส์ = 44 แถว) ต้องพับดูภาพรวมได้
+  const groupBaseIds = config.list_group_field
+    ? rows.filter((r) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !(av && av.variant_option); }).map((r) => String(r.id))
+    : [];
+  const hasAnyVariant = rows.some((r) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !!(av && av.variant_option); });
+  const allCollapsed = groupBaseIds.length > 0 && groupBaseIds.every((id) => collapsed.has(id));
+  const collapseBtn = hasAnyVariant ? (
+    <button type="button" onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(groupBaseIds))}
+      title={allCollapsed ? "ขยายทุกกลุ่ม (โชว์ไซส์ทั้งหมด)" : "พับทุกกลุ่ม (เห็นแต่ตัวหลักของแต่ละสี)"}
+      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50">
+      {allCollapsed ? "▼ โชว์ทั้งหมด" : "▶ พับทั้งหมด"}
+    </button>
+  ) : null;
+
   // ปุ่มระดับตาราง: เพิ่มแบบ/ไซส์ให้หลายสีพร้อมกัน (ตารางสี × ไซส์) — โผล่เมื่อตารางจัดกลุ่มตามสีและมีแถวฐาน
   const variantBaseRows = config.list_group_field
     ? rows.filter((r) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !(av && av.variant_option); })
@@ -1382,6 +1405,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       {title && <span className="text-sm font-medium text-slate-700">{title}</span>}
       {title && loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
       <div className="flex-1" />
+      {collapseBtn}
       {bulkVariantBtn}
       {colorBtn}
       {attachBtn}

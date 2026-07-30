@@ -60,7 +60,8 @@ function TagPicker({ parentId, onChanged }: { parentId: string; onChanged?: () =
   const [all, setAll] = useState<TagRow[] | null>(null);
   const [mine, setMine] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string>("");
-  const [enEdit, setEnEdit] = useState<{ id: string; name: string; en: string } | null>(null);
+  const [open, setOpen] = useState(false);        // ดรอปดาวน์เลือกแท็ก
+  const [search, setSearch] = useState("");
   const [msg, setMsg] = useState("");
 
   const load = useCallback(async () => {
@@ -87,65 +88,64 @@ function TagPicker({ parentId, onChanged }: { parentId: string; onChanged?: () =
     finally { setBusy(""); }
   };
 
-  const saveEn = async () => {
-    if (!enEdit) return;
-    setBusy(enEdit.id);
-    try {
-      const j = await apiFetch("/api/product-tags", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tag_id: enEdit.id, name_en: enEdit.en.trim() }),
-      }).then((r) => r.json());
-      if (j.error) throw new Error(j.error);
-      setAll((p) => (p ?? []).map((t) => (t.id === enEdit.id ? { ...t, name_en: enEdit.en.trim() } : t)));
-      setEnEdit(null);
-    } catch (e) { setMsg(e instanceof Error ? e.message : "บันทึกชื่ออังกฤษไม่สำเร็จ"); }
-    finally { setBusy(""); }
-  };
+  // หมายเหตุ: การตั้งชื่ออังกฤษของแท็กย้ายไปหน้า Tags Manager (ที่นี่โชว์เฉย ๆ ไม่ให้รก)
 
   if (all === null) return <p className="text-[12px] text-slate-400"><Spinner /> กำลังโหลดแท็ก…</p>;
 
-  // แท็กที่ติดอยู่ขึ้นก่อน แล้วค่อยที่เหลือ (เรียงตามชื่อ)
-  const sorted = [...all].sort((a, b) => (Number(mine.has(b.id)) - Number(mine.has(a.id))) || a.name.localeCompare(b.name, "th"));
+  const picked = all.filter((t) => mine.has(t.id));
+  const q = search.trim().toLowerCase();
+  const options = all
+    .filter((t) => !mine.has(t.id))
+    .filter((t) => !q || t.name.toLowerCase().includes(q) || (t.name_en ?? "").toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name, "th"));
+
   return (
     <div>
       <div className="flex items-center gap-2 mb-1 flex-wrap">
         <span className="text-[12.5px] font-medium text-slate-600">แท็กประเภทสินค้า</span>
-        <span className="text-[11.5px] text-slate-400">กดเพื่อติด/ปลด · แท็กช่วยให้ AI รู้ว่าเป็นสินค้าประเภทไหน และไปเข้ากฎที่ตั้งไว้</span>
-        {mine.size > 0 && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 ml-auto">ติดไว้ {mine.size}</span>}
+        <span className="text-[11.5px] text-slate-400">แท็กช่วยให้ AI รู้ว่าเป็นสินค้าประเภทไหน และไปเข้ากฎที่ตั้งไว้</span>
       </div>
-      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto border border-slate-100 rounded-lg p-2">
-        {sorted.map((t) => {
-          const on = mine.has(t.id);
-          return (
-            <span key={t.id} className="inline-flex items-center rounded-full overflow-hidden border"
-              style={{ borderColor: on ? "#6ee7b7" : "#e2e8f0", background: on ? "#ecfdf5" : "#fff" }}>
-              <button type="button" disabled={busy === t.id} onClick={() => void toggle(t)}
-                title={on ? "กดเพื่อปลดแท็ก" : "กดเพื่อติดแท็ก"}
-                className={`h-7 px-2.5 text-[12px] disabled:opacity-50 ${on ? "text-emerald-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>
-                {on ? "✓ " : ""}{t.name}
-                <span className={`ml-1 text-[10.5px] ${t.name_en ? "text-slate-400" : "text-amber-500"}`}>
-                  · {t.name_en || "ยังไม่มี EN"}
-                </span>
-              </button>
-              <button type="button" title="แก้ชื่ออังกฤษของแท็กนี้" onClick={() => setEnEdit({ id: t.id, name: t.name, en: t.name_en ?? "" })}
-                className="h-7 px-1 text-[10px] text-slate-300 border-l border-slate-200 hover:text-blue-600">✎</button>
-            </span>
-          );
-        })}
-        {sorted.length === 0 && <span className="text-[12px] text-slate-400">ยังไม่มีแท็กในระบบ</span>}
-      </div>
-      {enEdit && (
-        <div className="mt-1.5 p-2 rounded-lg border border-blue-200 bg-blue-50/60 flex items-center gap-2 flex-wrap">
-          <span className="text-[12.5px] text-slate-600">{enEdit.name} →</span>
-          <input value={enEdit.en} onChange={(e) => setEnEdit({ ...enEdit, en: e.target.value })} autoFocus
-            onKeyDown={(e) => { if (e.key === "Enter") void saveEn(); }}
-            placeholder="ชื่ออังกฤษ เช่น Wallet"
-            className="w-[160px] h-8 px-2 text-[13px] border border-slate-200 rounded-md" />
-          <button type="button" onClick={() => void saveEn()} disabled={!!busy}
-            className="h-8 px-3 text-[12px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
-          <button type="button" onClick={() => setEnEdit(null)} className="h-8 px-2 text-[12px] text-slate-500 hover:bg-white rounded-md">ยกเลิก</button>
+
+      {/* แท็กที่ติดอยู่ = ชิปพร้อมปุ่มเอาออก · เพิ่มแท็กใหม่ผ่านดรอปดาวน์ค้นหาได้ (ไม่กางรายการทั้งหมดให้รก) */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {picked.map((t) => (
+          <span key={t.id} className="inline-flex items-center gap-1 h-7 pl-2.5 pr-1 rounded-full border border-emerald-300 bg-emerald-50 text-[12px] text-emerald-700">
+            {t.name}{t.name_en ? <span className="text-emerald-500/70 text-[10.5px]">· {t.name_en}</span> : null}
+            <button type="button" disabled={busy === t.id} onClick={() => void toggle(t)} title="เอาแท็กนี้ออก"
+              className="w-5 h-5 rounded-full text-emerald-600 hover:bg-emerald-100 disabled:opacity-40">✕</button>
+          </span>
+        ))}
+        {picked.length === 0 && <span className="text-[12px] text-slate-400">ยังไม่ได้ติดแท็ก</span>}
+
+        <div className="relative">
+          <button type="button" onClick={() => setOpen((o) => !o)}
+            className="h-7 px-2.5 text-[12px] font-medium rounded-full border border-dashed border-slate-300 text-slate-600 hover:bg-slate-50">
+            ＋ เพิ่มแท็ก
+          </button>
+          {open && (
+            <div className="absolute z-20 mt-1 w-[260px] bg-white border border-slate-200 rounded-lg shadow-lg p-2">
+              <input value={search} onChange={(e) => setSearch(e.target.value)} autoFocus placeholder="ค้นหาแท็ก (ไทย/EN)…"
+                className="w-full h-8 px-2 mb-1.5 text-[13px] border border-slate-200 rounded-md" />
+              <div className="max-h-44 overflow-y-auto">
+                {options.map((t) => (
+                  <button key={t.id} type="button" disabled={busy === t.id}
+                    onClick={() => { void toggle(t); setSearch(""); }}
+                    className="w-full text-left px-2 py-1.5 rounded-md text-[13px] text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+                    {t.name}
+                    <span className={`ml-1.5 text-[11px] ${t.name_en ? "text-slate-400" : "text-amber-500"}`}>
+                      {t.name_en ? `· ${t.name_en}` : "· ยังไม่มี EN"}
+                    </span>
+                  </button>
+                ))}
+                {options.length === 0 && <p className="px-2 py-3 text-[12px] text-slate-400 text-center">ไม่พบแท็กที่ค้นหา</p>}
+              </div>
+              <p className="mt-1 pt-1 border-t border-slate-100 text-[11px] text-slate-400">
+                ตั้งชื่ออังกฤษของแท็กได้ที่หน้า SKU → แท็บ Tags Manager
+              </p>
+            </div>
+          )}
         </div>
-      )}
+      </div>
       {msg && <p className="mt-1 text-[12px] text-rose-600">{msg}</p>}
     </div>
   );
