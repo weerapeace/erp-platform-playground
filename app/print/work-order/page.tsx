@@ -10,7 +10,7 @@ import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
-import { buildWorkOrderTemplate, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
+import { buildWorkOrderTemplate, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 
 function BulkPrintInner() {
@@ -21,7 +21,9 @@ function BulkPrintInner() {
   const [data, setData] = useState<Record<string, unknown>[] | null>(null);
   const [done, setDone] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const { cols: woCols, reload: reloadCols } = useWoPrintColumns();   // ตั้งค่าคอลัมน์ (ค่ากลางเดียวกับหน้าพิมพ์ใบเดียว)
+  const { cols: savedCols, reload: reloadCols } = useWoPrintColumns();   // ตั้งค่าคอลัมน์ (ค่ากลางเดียวกับหน้าพิมพ์ใบเดียว)
+  const [previewCols, setPreviewCols] = useState<WoPrintColumns | null>(null);   // ค่าที่กำลังปรับในแผง (ยังไม่บันทึก)
+  const woCols = previewCols ?? savedCols;
 
   useEffect(() => {
     if (ids.length === 0) { setError("ไม่ได้เลือกใบสั่งงาน"); setData([]); return; }
@@ -61,7 +63,7 @@ function BulkPrintInner() {
       <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-6 py-3">
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <span className="text-sm text-slate-600">🖨️ พิมพ์ใบสั่งงานรวม <b>{ids.length}</b> ใบ {data === null && `(กำลังโหลด ${done}/${ids.length})`}</span>
-        <WoColumnSettings onSaved={reloadCols} />
+        <WoColumnSettings onPreview={setPreviewCols} onSaved={reloadCols} />
         <div className="flex-1" />
         <button onClick={() => printReportFrameOrWindow(docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`))} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">⬇ ดาวน์โหลด PDF</button>
       </div>

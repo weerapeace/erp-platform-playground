@@ -7,7 +7,7 @@ import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { parseDesignerDescription } from "@/lib/report-designer";
 import { buildReportHtml, buildReportHtmlMulti, type ReportTemplate } from "@/lib/template";
-import { WORKORDER_PRINT_TEMPLATE, buildWorkOrderTemplate, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
+import { buildWorkOrderTemplate, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { Font, Plugins, Schema, Template } from "@pdfme/common";
@@ -47,7 +47,9 @@ export default function PrintWorkOrderPage() {
   const [genMsg, setGenMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [qrHtml, setQrHtml] = useState("");
-  const { cols: woCols, reload: reloadCols } = useWoPrintColumns();   // ตั้งค่าคอลัมน์ (ค่ากลางของระบบ)
+  const { cols: savedCols, reload: reloadCols } = useWoPrintColumns();   // ตั้งค่าคอลัมน์ (ค่ากลางของระบบ)
+  const [previewCols, setPreviewCols] = useState<WoPrintColumns | null>(null);   // ค่าที่กำลังปรับในแผง (ยังไม่บันทึก)
+  const woCols = previewCols ?? savedCols;
 
   useEffect(() => {
     if (!mo) { setQrHtml(""); return; }
@@ -174,7 +176,7 @@ export default function PrintWorkOrderPage() {
           </select>
         </label>
         {/* ปรับความกว้างคอลัมน์ / เปิด-ปิดช่องรูป — ใช้ได้กับเทมเพลตค่าเริ่มต้น (HTML) เท่านั้น */}
-        {!pdfmeTemplate && <WoColumnSettings onSaved={reloadCols} />}
+        {!pdfmeTemplate && <WoColumnSettings onPreview={setPreviewCols} onSaved={reloadCols} />}
         <div className="flex-1" />
         {pdfmeTemplate ? (
           <>
