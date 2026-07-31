@@ -13,7 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import { usePermission } from "@/components/auth";
-import { WO_BORDER_COLORS, WO_DEFAULT_COLUMNS, WO_DEFAULT_STYLE, isBlankWoColumn, normalizeWoColumns, type WoColumn, type WoPrintColumns } from "@/lib/work-order-print";
+import { WO_BORDER_COLORS, WO_BORDER_MODES, WO_DEFAULT_COLUMNS, WO_DEFAULT_STYLE, isBlankWoColumn, normalizeWoColumns, type WoColumn, type WoPrintColumns } from "@/lib/work-order-print";
 
 const CONFIG_KEY = "wo_print_columns";
 
@@ -181,31 +181,47 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                 <div>
                   <div className="text-[12px] font-bold text-slate-700 mb-1">3) เส้นตาราง</div>
                   <div className="border border-slate-200 rounded-lg px-2 py-1.5 space-y-1.5">
+                    {/* แบบเส้น — ตัวที่ทำให้ "ดูบางลง" ได้จริงที่สุด */}
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-slate-500 w-14 shrink-0">ความหนา</span>
-                      <input type="range" min={0.2} max={2} step={0.1}
-                        value={(draft.style ?? WO_DEFAULT_STYLE).border_px}
-                        onChange={(e) => setDraft((d) => ({ ...d, style: { ...(d.style ?? WO_DEFAULT_STYLE), border_px: Number(e.target.value) } }))}
-                        className="flex-1 accent-indigo-600" />
-                      <span className="w-11 text-right text-[11px] text-slate-500 tabular-nums">{(draft.style ?? WO_DEFAULT_STYLE).border_px} px</span>
+                      <span className="text-[11px] text-slate-500 w-14 shrink-0">แบบเส้น</span>
+                      <div className="flex gap-1 flex-1">
+                        {WO_BORDER_MODES.map((m) => {
+                          const on = (draft.style ?? WO_DEFAULT_STYLE).border_mode === m.value;
+                          return (
+                            <button key={m.value} title={m.hint}
+                              onClick={() => setDraft((d) => ({ ...d, style: { ...(d.style ?? WO_DEFAULT_STYLE), border_mode: m.value } }))}
+                              className={`flex-1 h-6 rounded border text-[10px] ${on ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{m.label}</button>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-slate-500 w-14 shrink-0">ความเข้ม</span>
+                      <span className="text-[11px] text-slate-500 w-14 shrink-0">สีเส้น</span>
                       <div className="flex gap-1 flex-1">
                         {WO_BORDER_COLORS.map((c) => {
                           const on = (draft.style ?? WO_DEFAULT_STYLE).border_color === c.value;
                           return (
                             <button key={c.value} onClick={() => setDraft((d) => ({ ...d, style: { ...(d.style ?? WO_DEFAULT_STYLE), border_color: c.value } }))}
                               title={c.label}
-                              className={`flex-1 h-6 rounded border text-[10px] ${on ? "border-indigo-500 ring-1 ring-indigo-300 text-slate-700" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>
-                              <span className="inline-block w-full h-0 align-middle" style={{ borderTop: `2px solid ${c.value}` }} />
+                              className={`flex-1 h-6 rounded border flex items-center justify-center ${on ? "border-indigo-500 ring-1 ring-indigo-300" : "border-slate-200 hover:bg-slate-50"}`}>
+                              <span className="block w-full mx-1" style={{ borderTop: `3px solid ${c.value}` }} />
                               <span className="sr-only">{c.label}</span>
                             </button>
                           );
                         })}
                       </div>
                     </div>
-                    <p className="text-[10px] text-slate-400 leading-snug">บางลง = เอกสารดูโปร่ง อ่านง่ายตอนพิมพ์ · ค่าเริ่มต้นใหม่ = 0.5 px สีกลาง</p>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-14 shrink-0">ความหนา</span>
+                      <input type="range" min={1} max={3} step={0.5}
+                        value={(draft.style ?? WO_DEFAULT_STYLE).border_px}
+                        onChange={(e) => setDraft((d) => ({ ...d, style: { ...(d.style ?? WO_DEFAULT_STYLE), border_px: Number(e.target.value) } }))}
+                        className="flex-1 accent-indigo-600" />
+                      <span className="w-11 text-right text-[11px] text-slate-500 tabular-nums">{(draft.style ?? WO_DEFAULT_STYLE).border_px} px</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-snug">
+                      อยากให้ดู<b className="text-slate-600">บางลง</b> ให้เลือก <b className="text-slate-600">“เส้นนอน”</b> + สีจาง ๆ · ความหนา<b className="text-slate-600">ต่ำกว่า 1 ไม่ได้</b> (เบราว์เซอร์วาดบางกว่านี้ไม่ได้ ปัดขึ้นเป็น 1 เสมอ)
+                    </p>
                   </div>
                 </div>
 

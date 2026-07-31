@@ -102,16 +102,27 @@ function matImgHtml(url?: string | null) {
  * ผู้ใช้ปรับได้จากปุ่ม "⚙ ตั้งค่าตาราง" ในหน้าพิมพ์ (เปิด/ปิดคอลัมน์ + ความกว้าง %)
  */
 export type WoColumn = { key: string; label: string; width: number; show: boolean };
-/** หน้าตาเส้นตาราง (บาง/หนา + เข้ม/อ่อน) — เดิมเป็นเส้นดำ 1px ทุกช่อง เจ้าของบอกว่าหนาไปตอนพิมพ์ */
-export type WoPrintStyle = { border_px: number; border_color: string };
+/**
+ * หน้าตาเส้นตาราง — เดิมเป็นเส้นดำ 1px ทุกช่อง เจ้าของบอกว่าหนาไปตอนพิมพ์
+ * ⚠️ เบราว์เซอร์วาดเส้นบางกว่า 1px ไม่ได้ (ปัดขึ้นเป็น 1 เสมอ) → ความหนาต่ำสุดคือ 1
+ *    สิ่งที่ทำให้ "ดูบางลง" จริงคือ สีเส้นที่อ่อนลง + ตัดเส้นตั้งออก (border_mode)
+ */
+export type WoBorderMode = "all" | "h" | "none";
+export type WoPrintStyle = { border_px: number; border_color: string; border_mode: WoBorderMode };
 export type WoPrintColumns = { summary: WoColumn[]; lines: WoColumn[]; style?: WoPrintStyle };
 
-export const WO_DEFAULT_STYLE: WoPrintStyle = { border_px: 0.5, border_color: "#64748b" };
+export const WO_DEFAULT_STYLE: WoPrintStyle = { border_px: 1, border_color: "#94a3b8", border_mode: "all" };
 export const WO_BORDER_COLORS: { label: string; value: string }[] = [
+  { label: "จางมาก", value: "#e2e8f0" },
   { label: "อ่อนมาก", value: "#cbd5e1" },
   { label: "อ่อน", value: "#94a3b8" },
   { label: "กลาง", value: "#64748b" },
   { label: "เข้ม", value: "#111827" },
+];
+export const WO_BORDER_MODES: { value: WoBorderMode; label: string; hint: string }[] = [
+  { value: "all", label: "ตาราง", hint: "มีเส้นครบทุกด้าน (แบบเดิม)" },
+  { value: "h", label: "เส้นนอน", hint: "มีแต่เส้นคั่นแถว ตัดเส้นตั้งออก — ดูโปร่งที่สุดแต่ยังอ่านเป็นแถวได้" },
+  { value: "none", label: "ไม่มีเส้น", hint: "ไม่มีเส้นเลย" },
 ];
 
 // คอลัมน์เสริมที่ใช้ได้ทั้ง 2 ตาราง: ☐ ติ๊กถูก (ให้ช่างติ๊กบนกระดาษ) + ช่องว่างเปล่าไว้เขียนมือ (ตั้งชื่อหัวเองได้)
@@ -208,10 +219,12 @@ export function normalizeWoColumns(raw: unknown): WoPrintColumns {
   const st = (obj.style ?? {}) as Partial<WoPrintStyle>;
   const px = Number(st.border_px);
   const color = typeof st.border_color === "string" && /^#[0-9a-fA-F]{3,8}$/.test(st.border_color) ? st.border_color : WO_DEFAULT_STYLE.border_color;
+  const mode = WO_BORDER_MODES.some((m) => m.value === st.border_mode) ? (st.border_mode as WoBorderMode) : WO_DEFAULT_STYLE.border_mode;
   return {
     summary: pick(WO_DEFAULT_COLUMNS.summary, obj.summary),
     lines: pick(WO_DEFAULT_COLUMNS.lines, obj.lines),
-    style: { border_px: Number.isFinite(px) && px > 0 ? Math.min(3, px) : WO_DEFAULT_STYLE.border_px, border_color: color },
+    // ต่ำกว่า 1 เบราว์เซอร์ปัดขึ้นเป็น 1 อยู่ดี → clamp ให้ตรงกับที่เห็นจริง (ค่าเก่าที่เคยบันทึก 0.2 จะกลายเป็น 1)
+    style: { border_px: Number.isFinite(px) && px > 0 ? Math.min(3, Math.max(1, px)) : WO_DEFAULT_STYLE.border_px, border_color: color, border_mode: mode },
   };
 }
 
@@ -399,11 +412,19 @@ function woBodyHtml(cols: WoPrintColumns): string {
 </section>`;
 }
 
-// CSS ทับท้าย — ปรับเส้นตาราง (บาง/หนา · เข้ม/อ่อน) ใช้ทั้งบนจอและตอนพิมพ์ให้เห็นเหมือนกัน
+// CSS ทับท้าย — ปรับเส้นตาราง (หนา · สี · แบบเส้น) ใช้ทั้งบนจอและตอนพิมพ์ให้เห็นเหมือนกัน
 function woStyleCss(style: WoPrintStyle): string {
   const w = style.border_px, c = style.border_color;
-  const rule = `.summary-table th, .summary-table td, .doc-table th, .doc-table td { border: ${w}px solid ${c}; }
-.wo-hero { border: ${w}px solid ${c}; }`;
+  const cells = ".summary-table th, .summary-table td, .doc-table th, .doc-table td";
+  const rule =
+    style.border_mode === "none"
+      ? `${cells} { border: 0; }\n.wo-hero { border: 0; }`
+      : style.border_mode === "h"
+        // เส้นนอนอย่างเดียว = ตัดเส้นตั้งออก เหลือเส้นคั่นแถว (ดูโปร่งกว่ามาก แต่ยังอ่านเป็นแถวได้)
+        ? `${cells} { border: 0; border-bottom: ${w}px solid ${c}; }
+.summary-table thead th, .doc-table thead th { border-bottom: ${w}px solid ${c}; }
+.wo-hero { border: 0; border-bottom: ${w}px solid ${c}; }`
+        : `${cells} { border: ${w}px solid ${c}; }\n.wo-hero { border: ${w}px solid ${c}; }`;
   return `\n/* เส้นตาราง — ปรับจากปุ่ม "⚙ ตั้งค่าตาราง" */\n${rule}\n@media print {\n${rule}\n}\n`;
 }
 
