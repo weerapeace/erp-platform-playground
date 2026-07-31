@@ -18,6 +18,8 @@ import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { EmployeeRecordsPanel, type EmployeeRecords, type RecordKind } from "@/components/payroll/employee-records-panel";
 import { EmployeeSkillsField } from "../../employee-skills-field";
+import { BankPicker, bankAccountDigits, useBanks } from "@/components/bank-picker";
+import { BankAccountInput } from "@/components/bank-account-input";
 
 const ImageInput = dynamic(() => import("@/components/image-input").then((m) => m.ImageInput), { ssr: false });
 const AttachmentPanel = dynamic(() => import("@/components/attachment-panel").then((m) => m.AttachmentPanel), { ssr: false });
@@ -81,12 +83,17 @@ const LANG: Opt[] = [{ v: "th", th: "ไทย" }, { v: "en", th: "อังก�
 
 type PField = {
   key: string; label: string;
-  type: "text" | "number" | "date" | "select" | "textarea" | "readonly";
+  // bank = ตัวเลือกธนาคาร (ค้นหา/เพิ่มได้) · bank_account = ช่องเลขบัญชีแบบนับหลัก
+  type: "text" | "number" | "date" | "select" | "textarea" | "readonly" | "bank" | "bank_account";
   options?: Opt[]; optionsFrom?: "departments" | "positions" | "employees";
   span?: 1 | 2; hint?: string;
   format?: (v: unknown, e: Emp) => string;      // แปลงค่าโชว์ในโหมดดู
 };
 type Section = { key: string; title: string; icon: string; fields: PField[] };
+type BankAccountRow = {
+  id: string; bank_name: string; bank_branch: string | null; account_no: string; account_name: string;
+  replaced_at: string | null; changed_by_name: string | null; created_at: string;
+};
 
 /** การ์ดหมวดในแท็บ "ประวัติ" — ลำดับนี้คือลำดับที่โชว์บนหน้าจอ */
 const SECTIONS: Section[] = [
@@ -143,8 +150,8 @@ const SECTIONS: Section[] = [
     fields: [
       { key: "payroll_register_base_salary", label: "เงินเดือนฐาน (ทะเบียน)", type: "number", format: (v) => baht(v) },
       { key: "current_contract_salary", label: "เงินเดือนตามสัญญาปัจจุบัน", type: "readonly", format: (v) => baht(v) },
-      { key: "bank_name", label: "ธนาคาร", type: "text" },
-      { key: "bank_account_no", label: "เลขบัญชี", type: "text", hint: "ข้อมูลอ่อนไหว" },
+      { key: "bank_name", label: "ธนาคาร", type: "bank" },
+      { key: "bank_account_no", label: "เลขบัญชี", type: "bank_account", hint: "ข้อมูลอ่อนไหว · เปลี่ยนบัญชีแล้วบัญชีเดิมถูกเก็บเป็นประวัติ" },
       { key: "bank_account_name", label: "ชื่อบัญชี", type: "text" },
       { key: "bank_branch", label: "สาขา", type: "text" },
     ],
@@ -201,6 +208,7 @@ export default function EmployeeProfilePage() {
   const [saving, setSaving] = useState(false);
   const [opts, setOpts] = useState<Options | null>(null);
   const [showGaps, setShowGaps] = useState(false);                   // ไฮไลต์ช่องที่ยังว่าง
+  const [bankHistory, setBankHistory] = useState<BankAccountRow[]>([]);   // บัญชีเดิมที่เคยใช้
 
   const load = useCallback(async () => {
     setErr(null);
@@ -211,6 +219,15 @@ export default function EmployeeProfilePage() {
     } catch { setErr("โหลดข้อมูลไม่ได้"); }
   }, [id]);
   useEffect(() => { if (id) void load(); }, [id, load]);
+
+  // ประวัติบัญชีเดิม (บัญชีที่เคยใช้ก่อนเปลี่ยน)
+  const loadBankHistory = useCallback(async () => {
+    try {
+      const j = await apiFetch(`/api/payroll/employee-bank-accounts?employee_id=${id}`).then((r) => r.json());
+      if (!j.error) setBankHistory((j.data?.history ?? []) as BankAccountRow[]);
+    } catch { /* ไม่มีประวัติก็ไม่เป็นไร */ }
+  }, [id]);
+  useEffect(() => { if (id) void loadBankHistory(); }, [id, loadBankHistory]);
 
   // ตัวเลือก (แผนก/ตำแหน่ง/หัวหน้า) — โหลดครั้งเดียวตอนกดแก้ครั้งแรก
   const ensureOptions = useCallback(async () => {
@@ -254,12 +271,39 @@ export default function EmployeeProfilePage() {
 
     setSaving(true); setErr(null);
     try {
-      const j = await apiFetch(`/api/payroll/core/employees/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(changed),
-      }).then((r) => r.json());
-      if (j.error) { setErr(j.error); return; }
+      // ช่องธนาคารต้องบันทึกผ่าน employee_bank_accounts (ตารางที่หน้าจอ "อ่าน" จริง)
+      // เดิมเขียนลงคอลัมน์ employees.bank_* ซึ่งถูกตารางนั้นทับ → แก้แล้วจอไม่เปลี่ยน
+      // และเปลี่ยนบัญชีที่นี่ = บัญชีเดิมถูกเก็บเป็นประวัติให้อัตโนมัติ
+      const BANK_KEYS = ["bank_name", "bank_account_no", "bank_account_name", "bank_branch"];
+      const bankTouched = BANK_KEYS.some((k) => k in changed);
+      if (bankTouched) {
+        const bankName = s(form.bank_name ?? emp.bank_name);
+        const accountNo = s(form.bank_account_no ?? emp.bank_account_no);
+        const accountName = s(form.bank_account_name ?? emp.bank_account_name);
+        if (!bankName || !accountNo || !accountName) {
+          setErr("บัญชีธนาคารต้องกรอกให้ครบ: ธนาคาร + เลขบัญชี + ชื่อบัญชี");
+          return;
+        }
+        const jb = await apiFetch("/api/payroll/employee-bank-accounts", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            employee_id: id, bank_name: bankName, account_no: accountNo,
+            account_name: accountName, bank_branch: s(form.bank_branch ?? emp.bank_branch),
+          }),
+        }).then((r) => r.json());
+        if (jb.error) { setErr(jb.error); return; }
+        for (const k of BANK_KEYS) delete changed[k];
+      }
+
+      if (Object.keys(changed).length > 0) {
+        const j = await apiFetch(`/api/payroll/core/employees/${id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(changed),
+        }).then((r) => r.json());
+        if (j.error) { setErr(j.error); return; }
+      }
       setEditKey(null);
       await load();
+      if (bankTouched) await loadBankHistory();
     } catch { setErr("บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
   };
@@ -393,10 +437,32 @@ export default function EmployeeProfilePage() {
       {tab === "profile" && (
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
           {SECTIONS.map((sec) => (
-            <SectionCard key={sec.key} sec={sec} emp={emp} opts={opts}
-              editing={editKey === sec.key} form={form} setForm={setForm} saving={saving}
-              showGaps={showGaps} isGap={isGap}
-              onEdit={() => void startEdit(sec)} onCancel={() => setEditKey(null)} onSave={() => void saveSection()} />
+            <div key={sec.key} className="space-y-3">
+              <SectionCard sec={sec} emp={emp} opts={opts}
+                editing={editKey === sec.key} form={form} setForm={setForm} saving={saving}
+                showGaps={showGaps} isGap={isGap}
+                onEdit={() => void startEdit(sec)} onCancel={() => setEditKey(null)} onSave={() => void saveSection()} />
+              {/* บัญชีเดิมที่เคยใช้ — โผล่ใต้การ์ดค่าจ้าง/ธนาคาร เมื่อเคยเปลี่ยนบัญชี */}
+              {sec.key === "pay" && bankHistory.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <h3 className="mb-2 text-[13px] font-semibold text-slate-600">🕘 บัญชีเดิมที่เคยใช้ ({bankHistory.length})</h3>
+                  <div className="space-y-2">
+                    {bankHistory.map((b) => (
+                      <div key={b.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+                        <div className="font-medium text-slate-700">{b.bank_name}</div>
+                        <div className="font-mono text-slate-600">{b.account_no}</div>
+                        <div className="text-slate-400">
+                          {b.account_name}
+                          {b.replaced_at ? ` · เลิกใช้ ${dateTH(b.replaced_at)}` : ""}
+                          {b.changed_by_name ? ` · เปลี่ยนโดย ${b.changed_by_name}` : ""}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[11px] text-slate-400">เก็บไว้อ้างอิงเท่านั้น — การโอนเงินใช้บัญชีหลักด้านบน</p>
+                </div>
+              )}
+            </div>
           ))}
 
           {/* ทักษะ/ความสามารถ — ช่องติ๊ก (คลังทักษะ 3 ภาษา) ใช้ของกลางตัวเดียวกับ drawer ในตาราง */}
@@ -535,6 +601,7 @@ function SectionCard({
   showGaps: boolean; isGap: (k: string) => boolean;
   onEdit: () => void; onCancel: () => void; onSave: () => void;
 }) {
+  const banks = useBanks();   // ใช้หาจำนวนหลักเลขบัญชีของธนาคารที่เลือก
   const optionsOf = (f: PField): Opt[] => {
     const base = f.options ?? (f.optionsFrom && opts ? opts[f.optionsFrom].map((o) => ({ v: o.id, th: o.name })) : []);
     // ค่าที่มีอยู่เดิมในฐานข้อมูลอาจไม่ตรงตัวเลือก (เช่น gender = "FEMALE")
@@ -562,7 +629,18 @@ function SectionCard({
           {sec.fields.filter((f) => f.type !== "readonly").map((f) => (
             <div key={f.key} className={f.span === 2 || f.type === "textarea" ? "col-span-2" : ""}>
               <label className="block text-[11px] text-slate-500 mb-0.5">{f.label}</label>
-              {f.type === "select" ? (
+              {f.type === "bank" ? (
+                <BankPicker
+                  value={s(form[f.key])}
+                  onChange={(name) => setForm({ ...form, [f.key]: name })}
+                />
+              ) : f.type === "bank_account" ? (
+                <BankAccountInput
+                  value={s(form[f.key])}
+                  expectedDigits={bankAccountDigits(s(form.bank_name), banks)}
+                  onChange={(v) => setForm({ ...form, [f.key]: v })}
+                />
+              ) : f.type === "select" ? (
                 <select value={s(form[f.key])} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
                   className="w-full h-9 px-2 border border-slate-300 rounded-lg text-sm bg-white">
                   <option value="">— ไม่ระบุ —</option>
