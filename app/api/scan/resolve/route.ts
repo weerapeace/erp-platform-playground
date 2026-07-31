@@ -32,15 +32,21 @@ export type ScanHit = {
 type Row = Record<string, unknown>;
 const str = (v: unknown): string => String(v ?? "").trim();
 
+/**
+ * รหัสสินค้าจริงมีอักขระพิเศษเยอะ (#, ช่องว่าง, /) — ถ้ามี % หรือ _ ปนมา
+ * LIKE จะมองเป็นไวลด์การ์ดแล้วไปเจอแถวผิด → ต้อง escape ก่อนเสมอ
+ */
+const likeSafe = (s: string): string => s.replace(/([\\%_])/g, "\\$1");
+
 /** ค้นแบบ "ตรงเป๊ะก่อน" ตามมาตรฐานการค้นหาของระบบ */
 async function findDoc(kind: ScanKind, code: string, byId: boolean): Promise<ScanHit | null> {
   const admin = supabaseAdmin();
 
   if (kind === "po") {
     const q = admin.from("purchase_orders_v2").select("id, po_no, seller_name, order_date, status, grand_total, currency");
-    const { data } = byId ? await q.eq("id", code).maybeSingle() : await q.ilike("po_no", code).maybeSingle();
-    if (!data) return null;
-    const r = data as Row;
+    const { data: rows } = byId ? await q.eq("id", code).limit(1) : await q.ilike("po_no", likeSafe(code)).limit(1);
+    if (!rows?.length) return null;
+    const r = rows[0] as Row;
     return {
       kind: "po", id: str(r.id), code: str(r.po_no), status: str(r.status) || null,
       title: `ใบสั่งซื้อ ${str(r.po_no)}`,
@@ -51,9 +57,9 @@ async function findDoc(kind: ScanKind, code: string, byId: boolean): Promise<Sca
 
   if (kind === "mo") {
     const q = admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date");
-    const { data } = byId ? await q.eq("id", code).maybeSingle() : await q.ilike("mo_no", code).maybeSingle();
-    if (!data) return null;
-    const r = data as Row;
+    const { data: rows } = byId ? await q.eq("id", code).limit(1) : await q.ilike("mo_no", likeSafe(code)).limit(1);
+    if (!rows?.length) return null;
+    const r = rows[0] as Row;
     return {
       kind: "mo", id: str(r.id), code: str(r.mo_no), status: str(r.status) || null,
       title: `ใบสั่งผลิต ${str(r.mo_no)}`,
@@ -64,9 +70,9 @@ async function findDoc(kind: ScanKind, code: string, byId: boolean): Promise<Sca
 
   if (kind === "pr") {
     const q = admin.from("purchase_requests_v2").select("id, pr_no, item_name, requester, status");
-    const { data } = byId ? await q.eq("id", code).maybeSingle() : await q.ilike("pr_no", code).maybeSingle();
-    if (!data) return null;
-    const r = data as Row;
+    const { data: rows } = byId ? await q.eq("id", code).limit(1) : await q.ilike("pr_no", likeSafe(code)).limit(1);
+    if (!rows?.length) return null;
+    const r = rows[0] as Row;
     return {
       kind: "pr", id: str(r.id), code: str(r.pr_no), status: str(r.status) || null,
       title: `ใบขอซื้อ ${str(r.pr_no)}`,
@@ -90,13 +96,13 @@ async function findSku(code: string, byId: boolean): Promise<ScanHit | null> {
     return p ? parentHit(p as Row) : null;
   }
 
-  const { data: byBarcode } = await admin.from("skus_v2").select(sel).ilike("barcode", code).limit(1);
+  const { data: byBarcode } = await admin.from("skus_v2").select(sel).ilike("barcode", likeSafe(code)).limit(1);
   if (byBarcode?.length) return skuHit(byBarcode[0] as Row);
 
-  const { data: byCode } = await admin.from("skus_v2").select(sel).ilike("code", code).limit(1);
+  const { data: byCode } = await admin.from("skus_v2").select(sel).ilike("code", likeSafe(code)).limit(1);
   if (byCode?.length) return skuHit(byCode[0] as Row);
 
-  const { data: parents } = await admin.from("parent_skus_v2").select("id, code, name_th, sku_name, is_active").ilike("code", code).limit(1);
+  const { data: parents } = await admin.from("parent_skus_v2").select("id, code, name_th, sku_name, is_active").ilike("code", likeSafe(code)).limit(1);
   if (parents?.length) return parentHit(parents[0] as Row);
 
   return null;
@@ -131,19 +137,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ data: null, parsed, error: "อ่านรหัสไม่ออก" }, { status: 404 });
   }
 
-  let hit: ScanHit | null = null;
+  /**
+   * ลองตารางที่ "เดาว่าใช่" ก่อน แล้วไล่ที่เหลือจนเจอ
+   * ทำไมต้องไล่ต่อ: เลขเอกสารจริงไม่ได้รูปแบบเดียว (P00181, PR-LINE-18 ฯลฯ)
+   * ถ้าเดาชนิดผิดแล้วหยุดเลย จะสแกนไม่เจอทั้งที่ของมีอยู่
+   * ปลอดภัยเพราะตรวจ DB แล้วว่า "ไม่มีรหัสซ้ำข้ามตาราง" (PO/MO/PR/SKU ไม่ชนกันเลย)
+   */
+  const guess = parsed.kind === "unknown" ? [] : [parsed.kind];
+  const order = [...guess, ...(["sku", "po", "mo", "pr"] as ScanKind[])];
 
-  if (parsed.kind === "sku") {
-    hit = await findSku(parsed.code, parsed.byId);
-  } else if (parsed.kind === "unknown") {
-    // uuid หรืออ่านชนิดไม่ออก → ไล่ลองทีละแบบ (QR รุ่นเก่าที่ฝัง id ไว้จะเข้าทางนี้)
-    for (const k of ["mo", "po", "pr"] as ScanKind[]) {
-      hit = await findDoc(k, parsed.code, parsed.byId);
-      if (hit) break;
-    }
-    if (!hit) hit = await findSku(parsed.code, parsed.byId);
-  } else {
-    hit = await findDoc(parsed.kind, parsed.code, parsed.byId);
+  let hit: ScanHit | null = null;
+  const tried = new Set<ScanKind>();
+  for (const k of order) {
+    if (tried.has(k)) continue;
+    tried.add(k);
+    hit = k === "sku" ? await findSku(parsed.code, parsed.byId) : await findDoc(k, parsed.code, parsed.byId);
+    if (hit) break;
   }
 
   if (!hit) {
