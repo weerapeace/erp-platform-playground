@@ -11,8 +11,10 @@
 import { useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { HoverImage } from "@/components/hover-image";
+import { HoverImage, HoverPreview } from "@/components/hover-image";
 import { ERPModal } from "@/components/modal";
+import { withImageWidth } from "@/lib/r2-image";
+import { useViewPref } from "@/lib/use-view-pref";
 
 // รับ PendingMO/Dept/Assignee จากหน้า work-board แบบ subset (structural) — ไม่ผูกชนิดข้ามไฟล์
 type ShopMO = {
@@ -49,6 +51,10 @@ function evenSplit(total: number, ids: string[]): Record<string, number> {
 }
 
 type SortKey = "due" | "remaining" | "sku" | "mo";
+// หน้าตาการ์ด: big = รูปใหญ่เต็มการ์ด (ค่าเริ่มต้น) · compact = รูปเล็กข้างข้อความ (แบบเดิม)
+const CARD_MODES = ["big", "compact"] as const;
+type CardMode = (typeof CARD_MODES)[number];
+
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "due", label: "ใกล้ครบกำหนด" },
   { key: "remaining", label: "คงเหลือมาก→น้อย" },
@@ -75,6 +81,8 @@ export function DispatchShop({
   const [groupMode, setGroupMode] = useState<"none" | "group" | "brand">("none");
   const [readyFilter, setReadyFilter] = useState<"all" | "ready" | "not">("all");
   const [groupFilter, setGroupFilter] = useState<string>("__all__");
+  // หน้าตาการ์ด (รูปใหญ่ / แบบรายการ) — จำต่อผู้ใช้ผ่านของกลาง useViewPref
+  const { view: cardMode, setView: setCardMode, saveDefault: saveCardMode } = useViewPref("work_board_shop_card", CARD_MODES, "big");
   const [cart, setCart] = useState<Record<string, number>>({});   // mo.id → จำนวนที่จะจ่าย
   const [dept, setDept] = useState<string>("");
   const [craftIds, setCraftIds] = useState<string[]>([]);          // ช่างที่เลือก (หลายคน)
@@ -195,10 +203,62 @@ export function DispatchShop({
     await onReload();
   };
 
-  const gridCols = "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2";
-  const renderCard = (m: ShopMO) => {
-    const inCart = cart[m.id] != null;
+  const gridCols = cardMode === "big"
+    ? "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2.5"
+    : "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2";
+
+  const readyBadge = (m: ShopMO) => (m.ready
+    ? <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span>
+    : <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span>);
+
+  // แถบล่างของการ์ด (เหลือ / ค่าแรง / กำหนดเสร็จ) — ใช้ร่วมทั้ง 2 แบบ
+  const cardFooter = (m: ShopMO) => {
     const pp = laborByMo[m.mo_no] ?? 0;
+    return (
+      <>
+        <div className="flex items-center justify-between gap-1 mt-2 text-[11px]">
+          <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap">เหลือ <b className="text-sm">{fmt(m.remaining)}</b></span>
+          {pp > 0 && <span className="text-amber-600 whitespace-nowrap">💰฿{fmt(pp)}</span>}
+          <span className={`whitespace-nowrap ${dueClass(m.due_date)}`}>📅 {dueText(m.due_date)}</span>
+        </div>
+        <button type="button" onClick={(e) => { e.stopPropagation(); onOpenMO(m); }}
+          className="mt-1.5 w-full h-6 text-[11px] text-slate-500 border border-slate-200 rounded hover:bg-slate-50">📋 เช็กลิสต์</button>
+      </>
+    );
+  };
+
+  // การ์ดแบบรูปใหญ่ — รูปเต็มความกว้างด้านบน (ชี้ที่รูป = พรีวิวใหญ่), ข้อมูลอยู่ใต้รูป
+  const renderCardBig = (m: ShopMO) => {
+    const inCart = cart[m.id] != null;
+    return (
+      <div key={m.id} onClick={() => canDispatch && toggleCart(m)}
+        className={`relative rounded-xl border bg-white overflow-hidden transition ${canDispatch ? "cursor-pointer" : ""} ${inCart ? "border-indigo-400 ring-2 ring-indigo-200" : "border-slate-200 hover:border-slate-300 hover:shadow-sm"}`}
+        style={m.brand_color ? { borderLeftColor: m.brand_color, borderLeftWidth: 3 } : undefined}>
+        <HoverPreview url={m.image_url ? (withImageWidth(m.image_url, 720) ?? m.image_url) : null} previewW={520}>
+          <div className="relative bg-slate-50 h-40 flex items-center justify-center">
+            {m.image_url
+              ? <img src={withImageWidth(m.image_url, 420) ?? m.image_url} alt={m.product_sku ?? ""} loading="lazy" decoding="async" className="max-h-full max-w-full object-contain" />
+              : <span className="text-4xl text-slate-300">📦</span>}
+            <span className="absolute top-1.5 left-1.5">{readyBadge(m)}</span>
+            {canDispatch && (
+              <input type="checkbox" checked={inCart} onClick={(e) => e.stopPropagation()} onChange={() => toggleCart(m)}
+                className="absolute top-1.5 right-1.5 w-5 h-5 accent-indigo-600" />
+            )}
+          </div>
+        </HoverPreview>
+        <div className="p-2.5">
+          <div className="text-sm font-semibold text-slate-800 truncate">{m.product_sku}</div>
+          <div className="text-[11px] text-slate-500 truncate">{m.product_name}{m.color ? <span className="text-slate-400"> · {m.color}</span> : null}</div>
+          <div className="text-[10px] text-slate-400 font-mono truncate">{m.mo_no}</div>
+          {cardFooter(m)}
+        </div>
+      </div>
+    );
+  };
+
+  const renderCard = (m: ShopMO) => {
+    if (cardMode === "big") return renderCardBig(m);
+    const inCart = cart[m.id] != null;
     return (
       <div key={m.id} onClick={() => canDispatch && toggleCart(m)}
         className={`relative rounded-xl border bg-white p-2.5 transition ${canDispatch ? "cursor-pointer" : ""} ${inCart ? "border-indigo-400 ring-2 ring-indigo-200" : "border-slate-200 hover:border-slate-300 hover:shadow-sm"}`}
@@ -208,22 +268,14 @@ export function DispatchShop({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1">
               <span className="text-sm font-semibold text-slate-800 truncate">{m.product_sku}</span>
-              {m.ready
-                ? <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span>
-                : <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span>}
+              {readyBadge(m)}
             </div>
             <div className="text-[11px] text-slate-500 truncate">{m.product_name}{m.color ? <span className="text-slate-400"> · {m.color}</span> : null}</div>
             <div className="text-[10px] text-slate-400 font-mono truncate">{m.mo_no}</div>
           </div>
           {canDispatch && <input type="checkbox" checked={inCart} onClick={(e) => e.stopPropagation()} onChange={() => toggleCart(m)} className="shrink-0 w-4 h-4 accent-indigo-600 mt-0.5" />}
         </div>
-        <div className="flex items-center justify-between gap-1 mt-2 text-[11px]">
-          <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap">เหลือ <b className="text-sm">{fmt(m.remaining)}</b></span>
-          {pp > 0 && <span className="text-amber-600 whitespace-nowrap">💰฿{fmt(pp)}</span>}
-          <span className={`whitespace-nowrap ${dueClass(m.due_date)}`}>📅 {dueText(m.due_date)}</span>
-        </div>
-        <button type="button" onClick={(e) => { e.stopPropagation(); onOpenMO(m); }}
-          className="mt-1.5 w-full h-6 text-[11px] text-slate-500 border border-slate-200 rounded hover:bg-slate-50">📋 เช็กลิสต์</button>
+        {cardFooter(m)}
       </div>
     );
   };
@@ -256,6 +308,13 @@ export function DispatchShop({
             {moGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
             <option value="__none__">— ยังไม่จับกลุ่ม —</option>
           </select>
+          {/* หน้าตาการ์ด: รูปใหญ่ / แบบรายการ — เลือกแล้วจำเป็นค่าเริ่มต้นของฉัน */}
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden shrink-0" title="หน้าตาการ์ด (จำค่าที่เลือกไว้ให้)">
+            {([{ k: "big" as CardMode, label: "🖼 รูปใหญ่" }, { k: "compact" as CardMode, label: "▤ แบบรายการ" }]).map((o, i) => (
+              <button key={o.k} onClick={() => { setCardMode(o.k); void saveCardMode(o.k); }}
+                className={`h-9 px-2.5 text-sm whitespace-nowrap ${i > 0 ? "border-l border-slate-200" : ""} ${cardMode === o.k ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{o.label}</button>
+            ))}
+          </div>
           {canDispatch && filtered.length > 0 && (
             <button onClick={addAllShown} className="h-9 px-3 text-sm border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap">＋ ใส่ตะกร้าทั้งหมดที่เห็น ({filtered.length})</button>
           )}
