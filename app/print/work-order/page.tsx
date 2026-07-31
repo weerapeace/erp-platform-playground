@@ -10,7 +10,7 @@ import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
-import { buildWorkOrderTemplate, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
+import { buildWorkOrderTemplate, woSectionDataList, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 
 function BulkPrintInner() {
@@ -56,7 +56,12 @@ function BulkPrintInner() {
     return () => { cancelled = true; };
   }, [ids]);
 
-  const html = useMemo(() => (data && data.length ? buildReportHtmlMulti(buildWorkOrderTemplate(woCols), data) : ""), [data, woCols]);
+  // โหมด "แยกใบ" → แต่ละใบสั่งงานแตกเป็นหลายแผ่นตามส่วนที่เปิดไว้
+  const html = useMemo(() => {
+    if (!data || !data.length) return "";
+    const dataList = data.flatMap((d) => woSectionDataList(d, woCols));
+    return buildReportHtmlMulti(buildWorkOrderTemplate(woCols), dataList);
+  }, [data, woCols]);
 
   return (
     <div className="min-h-screen bg-slate-100">

@@ -193,6 +193,16 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                         </label>
                       );
                     })}
+                    {/* แยกใบ — ส่วนที่เปิดไว้ไปคนละแผ่น (ส่งช่างคนละคนได้) */}
+                    <label className="flex items-start gap-1.5 cursor-pointer border-t border-slate-100 pt-1.5">
+                      <input type="checkbox" checked={(draft.sections ?? WO_DEFAULT_SECTIONS).split}
+                        onChange={(e) => setDraft((d) => ({ ...d, sections: { ...(d.sections ?? WO_DEFAULT_SECTIONS), split: e.target.checked } }))}
+                        className="w-4 h-4 accent-indigo-600 shrink-0 mt-0.5" />
+                      <span className="text-[12px] text-slate-700 leading-snug">
+                        ✂️ <b>แยกใบ</b> — ส่วนที่ติ๊กไว้ไป<b>คนละแผ่น</b> (แต่ละแผ่นมีหัวเอกสารครบ ส่งช่างคนละคนได้)
+                        <br /><span className="text-[10px] text-slate-400">ไม่ติ๊ก = ทุกส่วนต่อกันในใบเดียวแบบเดิม</span>
+                      </span>
+                    </label>
                     <p className="text-[10px] text-slate-400">หัวเอกสาร (ชื่อบริษัท · สินค้า · จำนวน · เลขที่ใบ · QR) พิมพ์ติดไปด้วยเสมอ</p>
                   </div>
                 </div>

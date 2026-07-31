@@ -111,12 +111,15 @@ export type WoColumn = { key: string; label: string; width: number; show: boolea
  */
 export type WoBorderMode = "all" | "h" | "none";
 export type WoPrintStyle = { border_mm: number; border_color: string; border_mode: WoBorderMode; font_scale: number };
-/** ส่วนไหนของเอกสารที่จะพิมพ์ — ปิดได้ เช่นอยากได้แค่ตาราง "สรุปวัตถุดิบ" ใบเดียว */
-export type WoSections = { summary: boolean; lines: boolean; detail: boolean; signature: boolean };
+/**
+ * ส่วนไหนของเอกสารที่จะพิมพ์ — ปิดได้ เช่นอยากได้แค่ตาราง "สรุปวัตถุดิบ" ใบเดียว
+ * split = แยกใบ: แต่ละส่วนที่เปิดไว้ไปอยู่คนละแผ่น (มีหัวเอกสารของตัวเองครบ) แทนที่จะต่อกันในใบเดียว
+ */
+export type WoSections = { summary: boolean; lines: boolean; detail: boolean; signature: boolean; split: boolean };
 export type WoPrintColumns = { summary: WoColumn[]; lines: WoColumn[]; style?: WoPrintStyle; sections?: WoSections };
 
 export const WO_DEFAULT_STYLE: WoPrintStyle = { border_mm: 0.12, border_color: "#94a3b8", border_mode: "all", font_scale: 1 };
-export const WO_DEFAULT_SECTIONS: WoSections = { summary: true, lines: true, detail: true, signature: true };
+export const WO_DEFAULT_SECTIONS: WoSections = { summary: true, lines: true, detail: true, signature: true, split: false };
 export const WO_SECTION_LABELS: { key: keyof WoSections; label: string }[] = [
   { key: "summary", label: "สรุปวัตถุดิบที่ต้องใช้" },
   { key: "lines", label: "รายการวัตถุดิบ / บล็อกตัด" },
@@ -125,10 +128,29 @@ export const WO_SECTION_LABELS: { key: keyof WoSections; label: string }[] = [
 ];
 /** ชุดสำเร็จ — กดปุ่มเดียวได้เอกสารแบบที่อยากพิมพ์บ่อย ๆ */
 export const WO_SECTION_PRESETS: { label: string; hint: string; value: WoSections }[] = [
-  { label: "ทั้งหมด", hint: "พิมพ์ครบทุกส่วน (แบบเดิม)", value: { summary: true, lines: true, detail: true, signature: true } },
-  { label: "เฉพาะสรุปวัตถุดิบ", hint: "เอาแค่ตารางสรุปวัตถุดิบที่ต้องใช้", value: { summary: true, lines: false, detail: false, signature: false } },
-  { label: "เฉพาะบล็อกตัด", hint: "เอาแค่ตารางรายการวัตถุดิบ / บล็อกตัด", value: { summary: false, lines: true, detail: false, signature: false } },
+  { label: "ทั้งหมด", hint: "พิมพ์ครบทุกส่วน ต่อกันในใบเดียว (แบบเดิม)", value: { summary: true, lines: true, detail: true, signature: true, split: false } },
+  { label: "เฉพาะสรุปวัตถุดิบ", hint: "เอาแค่ตารางสรุปวัตถุดิบที่ต้องใช้", value: { summary: true, lines: false, detail: false, signature: false, split: false } },
+  { label: "เฉพาะบล็อกตัด", hint: "เอาแค่ตารางรายการวัตถุดิบ / บล็อกตัด", value: { summary: false, lines: true, detail: false, signature: false, split: false } },
+  { label: "แยกใบ: สรุป + บล็อกตัด", hint: "พิมพ์ทีเดียวได้ 2 ใบ — ใบสรุปวัตถุดิบ 1 ใบ · ใบบล็อกตัด 1 ใบ แต่ละใบมีหัวเอกสารครบ แยกส่งช่างคนละคนได้", value: { summary: true, lines: true, detail: false, signature: false, split: true } },
 ];
+
+/**
+ * แตกข้อมูล 1 ใบ → รายการเอกสารที่จะพิมพ์
+ *  • ปกติ = 1 ใบ (ทุกส่วนต่อกัน)
+ *  • split = แยกใบ: ส่วนที่เปิดไว้ (สรุป / บล็อกตัด / รายละเอียดสินค้า) ไปคนละแผ่น หัวเอกสารครบทุกแผ่น
+ * ใช้คู่กับ buildReportHtmlMulti (ห่อ .doc-page + บังคับขึ้นหน้าใหม่ให้แล้ว)
+ */
+export function woSectionDataList(base: Record<string, unknown>, cols?: WoPrintColumns | null): Record<string, unknown>[] {
+  const sec = cols?.sections ?? WO_DEFAULT_SECTIONS;
+  if (!sec.split) return [{ ...base, sec_summary: sec.summary, sec_lines: sec.lines, sec_detail: sec.detail }];
+  const keys: { on: boolean; flag: string }[] = [
+    { on: sec.summary, flag: "sec_summary" },
+    { on: sec.lines, flag: "sec_lines" },
+    { on: sec.detail, flag: "sec_detail" },
+  ];
+  const docs = keys.filter((k) => k.on).map((k) => ({ ...base, sec_summary: false, sec_lines: false, sec_detail: false, [k.flag]: true }));
+  return docs.length > 0 ? docs : [{ ...base, sec_summary: false, sec_lines: false, sec_detail: false }];
+}
 export const WO_BORDER_COLORS: { label: string; value: string }[] = [
   { label: "จางมาก", value: "#e2e8f0" },
   { label: "อ่อนมาก", value: "#cbd5e1" },
@@ -239,6 +261,7 @@ export function normalizeWoColumns(raw: unknown): WoPrintColumns {
     lines: sec.lines === undefined ? WO_DEFAULT_SECTIONS.lines : !!sec.lines,
     detail: sec.detail === undefined ? WO_DEFAULT_SECTIONS.detail : !!sec.detail,
     signature: sec.signature === undefined ? WO_DEFAULT_SECTIONS.signature : !!sec.signature,
+    split: sec.split === undefined ? WO_DEFAULT_SECTIONS.split : !!sec.split,
   };
   const st = (obj.style ?? {}) as Partial<WoPrintStyle>;
   const scale = Number(st.font_scale);
@@ -391,8 +414,8 @@ function woBodyHtml(cols: WoPrintColumns): string {
   const s = colsHtml(cols.summary, true);
   const l = colsHtml(cols.lines, false);
   const parts: string[] = [];
-
-  if (sections.summary) parts.push(`<section class="summary-section">
+  // ห่อด้วย {{#sec_x}} เสมอ — โหมดปกติส่ง flag เป็น true ทุกตัว, โหมดแยกใบส่งทีละตัวต่อแผ่น (woSectionDataList)
+  if (sections.summary) parts.push(`{{#sec_summary}}<section class="summary-section">
   <div class="section-title">สรุปวัตถุดิบที่ต้องใช้</div>
   <table class="summary-table">
     <thead>
@@ -408,9 +431,9 @@ function woBodyHtml(cols: WoPrintColumns): string {
       {{/material_summary}}
     </tbody>
   </table>
-</section>`);
+</section>{{/sec_summary}}`);
 
-  if (sections.lines) parts.push(`<section>
+  if (sections.lines) parts.push(`{{#sec_lines}}<section>
   <div class="section-title">รายการวัตถุดิบ / บล็อกตัด</div>
   <table class="doc-table">
     <thead>
@@ -426,9 +449,9 @@ function woBodyHtml(cols: WoPrintColumns): string {
       {{/lines}}
     </tbody>
   </table>
-</section>`);
+</section>{{/sec_lines}}`);
 
-  if (sections.detail) parts.push(`<section class="product-detail">
+  if (sections.detail) parts.push(`{{#sec_detail}}<section class="product-detail">
   <div class="detail-photo">{{{product_image_html}}}</div>
   <div class="detail-main">
     <div class="detail-title">{{product_name}}</div>
@@ -443,7 +466,7 @@ function woBodyHtml(cols: WoPrintColumns): string {
     </table>
     <div class="note-box"><span class="label">วิธีทำ / หมายเหตุ:</span> {{note}}</div>
   </div>
-</section>`);
+</section>{{/sec_detail}}`);
 
   return parts.join("\n\n");
 }

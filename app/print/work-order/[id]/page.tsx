@@ -7,7 +7,7 @@ import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { parseDesignerDescription } from "@/lib/report-designer";
 import { buildReportHtml, buildReportHtmlMulti, type ReportTemplate } from "@/lib/template";
-import { buildWorkOrderTemplate, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
+import { buildWorkOrderTemplate, woSectionDataList, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { Font, Plugins, Schema, Template } from "@pdfme/common";
@@ -146,15 +146,16 @@ export default function PrintWorkOrderPage() {
     };
     // กลุ่ม C: ถ้าใบนี้แบ่งหลายไซส์ → พิมพ์แยกหน้าต่อไซส์ (วัตถุดิบที่ผันตามไซส์ตามไซส์นั้น + ของกลางทุกไซส์)
     const sizes = (mo.size_breakdown ?? []).filter((s) => s && (Number(s.qty) || 0) > 0);
-    if (sizes.length >= 2) {
-      const dataList = sizes.map((s) => {
+    const baseDatas = sizes.length >= 2
+      ? sizes.map((s) => {
         const mats = (mo.materials ?? []).filter((m) => m.size_label === s.label || m.size_label == null);
         const perMo: MoDetail = { ...mo, qty: s.qty, product_name: `${mo.product_name ?? mo.product_sku ?? ""} · ไซส์ ${s.label}`, materials: mats, summary: undefined };
         return { ...buildWoHtmlData(perMo, spec), qr_html: qrHtml };
-      });
-      return buildReportHtmlMulti(tplObj, dataList);
-    }
-    return buildReportHtml(tplObj, { ...buildWoHtmlData(mo, spec), qr_html: qrHtml });
+      })
+      : [{ ...buildWoHtmlData(mo, spec), qr_html: qrHtml }];
+    // โหมด "แยกใบ" → แต่ละส่วนไปคนละแผ่น (ซ้อนกับการแยกไซส์ได้)
+    const dataList = baseDatas.flatMap((d) => woSectionDataList(d, woCols));
+    return dataList.length > 1 ? buildReportHtmlMulti(tplObj, dataList) : buildReportHtml(tplObj, dataList[0]);
   }, [mo, spec, selectedRow, pdfmeTemplate, qrHtml, woCols]);
 
   // ชื่อไฟล์ตอนบันทึก PDF — "ใบสั่งงาน - MO-2026-00123" (ของกลาง lib/print-filename)
