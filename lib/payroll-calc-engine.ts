@@ -208,6 +208,11 @@ function buildLine(period: Row, employee: Row, contract: Row, setting: Row, manu
       : (taxRate > 0 && taxRate < 1 ? roundMoney(roundMoney(withholdingBase / (1 - taxRate)) - withholdingBase) : 0);
   } else values.withholding_tax = 0;
 
+  // ช่างเหมา (สัญญาเหมา) ไม่หักภาษี ณ ที่จ่ายในระบบเงินเดือน — นโยบายเจ้าของ
+  // (เดิมเปิดสิทธิ์รายคนไว้ 8 คน + ไม่ได้ติ๊ก "บริษัทออกให้" → ถูกหักจากค่าจ้างจริง)
+  // ยังใส่ยอดเองได้ถ้าจำเป็น (manual.withholding_tax) — กันเคสพิเศษ ไม่ให้ค่าที่กรอกหายเงียบ
+  if (contractor && !hasInput(manual.withholding_tax)) values.withholding_tax = 0;
+
   const companyPaidWithholding = setting.withholding_tax_company_paid === true;
   const totalDeduction = preTax + (companyPaidWithholding ? 0 : money(values.withholding_tax));
   const netPay = roundMoney(grossPay - totalDeduction);
