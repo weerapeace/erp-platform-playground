@@ -102,16 +102,35 @@ function matImgHtml(url?: string | null) {
  * ผู้ใช้ปรับได้จากปุ่ม "⚙ ตั้งค่าตาราง" ในหน้าพิมพ์ (เปิด/ปิดคอลัมน์ + ความกว้าง %)
  */
 export type WoColumn = { key: string; label: string; width: number; show: boolean };
-export type WoPrintColumns = { summary: WoColumn[]; lines: WoColumn[] };
+/** หน้าตาเส้นตาราง (บาง/หนา + เข้ม/อ่อน) — เดิมเป็นเส้นดำ 1px ทุกช่อง เจ้าของบอกว่าหนาไปตอนพิมพ์ */
+export type WoPrintStyle = { border_px: number; border_color: string };
+export type WoPrintColumns = { summary: WoColumn[]; lines: WoColumn[]; style?: WoPrintStyle };
+
+export const WO_DEFAULT_STYLE: WoPrintStyle = { border_px: 0.5, border_color: "#64748b" };
+export const WO_BORDER_COLORS: { label: string; value: string }[] = [
+  { label: "อ่อนมาก", value: "#cbd5e1" },
+  { label: "อ่อน", value: "#94a3b8" },
+  { label: "กลาง", value: "#64748b" },
+  { label: "เข้ม", value: "#111827" },
+];
+
+// คอลัมน์เสริมที่ใช้ได้ทั้ง 2 ตาราง: ☐ ติ๊กถูก (ให้ช่างติ๊กบนกระดาษ) + ช่องว่างเปล่าไว้เขียนมือ (ตั้งชื่อหัวเองได้)
+const EXTRA_COLUMNS: WoColumn[] = [
+  { key: "check", label: "✓", width: 6, show: false },
+  { key: "blank1", label: "", width: 10, show: false },
+  { key: "blank2", label: "", width: 10, show: false },
+];
 
 export const WO_DEFAULT_COLUMNS: WoPrintColumns = {
   summary: [
+    { key: "idx", label: "ลำดับ", width: 5, show: true },
     { key: "image", label: "รูป", width: 12, show: true },
     { key: "material_type", label: "ชนิด", width: 12, show: true },
     { key: "code", label: "รหัส", width: 20, show: true },
     { key: "component_name", label: "วัตถุดิบ", width: 34, show: true },
     { key: "required", label: "รวมต้องใช้", width: 12, show: true },
     { key: "uom", label: "หน่วย", width: 10, show: true },
+    ...EXTRA_COLUMNS,
   ],
   lines: [
     { key: "image", label: "รูป", width: 8, show: true },
@@ -124,8 +143,12 @@ export const WO_DEFAULT_COLUMNS: WoPrintColumns = {
     { key: "total_pieces", label: "ยอดรวมชิ้น", width: 10, show: true },
     { key: "required", label: "รวมต้องใช้", width: 10, show: true },
     { key: "uom", label: "หน่วย", width: 8, show: true },
+    ...EXTRA_COLUMNS,
   ],
 };
+
+/** คอลัมน์ที่ "ว่างเปล่า" ไว้เขียนมือ — ตั้งชื่อหัวเองได้ (โชว์ช่องพิมพ์ชื่อในแผงตั้งค่า) */
+export const isBlankWoColumn = (key: string) => key.startsWith("blank");
 
 // เนื้อในช่องของแต่ละคอลัมน์ (คลาส + ตัวแปร Mustache) — ที่เดียว ใช้ทั้ง 2 ตาราง
 const CELL: Record<string, { cls: string; body: string }> = {
@@ -139,6 +162,9 @@ const CELL: Record<string, { cls: string; body: string }> = {
   total_pieces: { cls: "text-right", body: "{{total_pieces}}" },
   required: { cls: "text-right", body: "{{required}}" },
   uom: { cls: "text-center", body: "{{uom}}" },
+  check: { cls: "text-center", body: `<span class="tick-box"></span>` },
+  blank1: { cls: "", body: "" },
+  blank2: { cls: "", body: "" },
 };
 // ตารางสรุปจัดชนิดกลาง / ลำดับไม่มี — override เฉพาะที่ต่าง
 const SUMMARY_CELL_OVERRIDE: Record<string, Partial<{ cls: string }>> = { material_type: { cls: "" }, uom: { cls: "text-center" } };
@@ -156,17 +182,37 @@ export function normalizeWoColumns(raw: unknown): WoPrintColumns {
     const merged = defs.map((d) => {
       const s = map.get(d.key);
       const w = Number(s?.width);
-      return { ...d, width: Number.isFinite(w) && w > 0 ? Math.min(80, w) : d.width, show: s?.show === undefined ? d.show : !!s.show };
+      return {
+        ...d,
+        label: typeof s?.label === "string" ? s.label.slice(0, 40) : d.label,   // ผู้ใช้ตั้งชื่อหัวคอลัมน์เองได้ (ว่างได้)
+        width: Number.isFinite(w) && w > 0 ? Math.min(80, w) : d.width,
+        show: s?.show === undefined ? d.show : !!s.show,
+      };
     });
-    // เรียงตามลำดับที่บันทึกไว้ (ถ้ามี) — คอลัมน์ที่ยังไม่เคยบันทึกไปต่อท้าย
-    const order = [...map.keys()];
-    return merged.sort((a, b) => {
-      const ia = order.indexOf(a.key), ib = order.indexOf(b.key);
-      return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+    // เรียงตามลำดับที่บันทึกไว้ก่อน แล้วค่อยแทรกคอลัมน์ใหม่ "ตรงตำแหน่งค่าเริ่มต้นของมัน"
+    // (ถ้าโยนไปต่อท้ายเฉย ๆ คอลัมน์ใหม่อย่าง "ลำดับ" จะไปโผล่ท้ายสุดแทนที่จะอยู่หัวตาราง)
+    const savedOrder = [...map.keys()].filter((k) => defs.some((d) => d.key === k));
+    const out = savedOrder.map((k) => merged.find((c) => c.key === k)!);
+    defs.forEach((d, di) => {
+      if (savedOrder.includes(d.key)) return;
+      let pos = di === 0 ? 0 : out.length;
+      for (let j = di - 1; j >= 0; j--) {
+        const at = out.findIndex((c) => c.key === defs[j].key);
+        if (at >= 0) { pos = at + 1; break; }
+      }
+      out.splice(pos, 0, merged.find((c) => c.key === d.key)!);
     });
+    return out;
   };
-  const obj = (raw ?? {}) as { summary?: unknown; lines?: unknown };
-  return { summary: pick(WO_DEFAULT_COLUMNS.summary, obj.summary), lines: pick(WO_DEFAULT_COLUMNS.lines, obj.lines) };
+  const obj = (raw ?? {}) as { summary?: unknown; lines?: unknown; style?: unknown };
+  const st = (obj.style ?? {}) as Partial<WoPrintStyle>;
+  const px = Number(st.border_px);
+  const color = typeof st.border_color === "string" && /^#[0-9a-fA-F]{3,8}$/.test(st.border_color) ? st.border_color : WO_DEFAULT_STYLE.border_color;
+  return {
+    summary: pick(WO_DEFAULT_COLUMNS.summary, obj.summary),
+    lines: pick(WO_DEFAULT_COLUMNS.lines, obj.lines),
+    style: { border_px: Number.isFinite(px) && px > 0 ? Math.min(3, px) : WO_DEFAULT_STYLE.border_px, border_color: color },
+  };
 }
 
 const colsHtml = (cols: WoColumn[], summary: boolean) => {
@@ -241,7 +287,7 @@ export function woTableRows(mo: MoDetail): string[][] {
 function materialSummaryRows(mo: MoDetail) {
   const qty = Number(mo.qty) || 0;
   const source = (mo.summary?.length ? mo.summary : mo.materials) ?? [];
-  const grouped = new Map<string, { material_type: string; code: string; component_name: string; required: number; uom: string; image_url: string | null }>();
+  const grouped = new Map<string, { material_type: string; code: string; component_name: string; required: number; uom: string; image_url: string | null; idx?: string }>();
   source.forEach((row) => {
     const materialType = dash(row.material_type);
     const componentName = dash(row.component_name ?? row.component_sku);
@@ -255,7 +301,7 @@ function materialSummaryRows(mo: MoDetail) {
   });
   return [...grouped.values()]
     .sort((a, b) => `${a.material_type}${a.component_name}`.localeCompare(`${b.material_type}${b.component_name}`, "th"))
-    .map((row) => ({ ...row, required: numTh(r2(row.required)), image_html: matImgHtml(row.image_url) }));
+    .map((row, i) => ({ ...row, idx: String(i + 1), required: numTh(r2(row.required)), image_html: matImgHtml(row.image_url) }));
 }
 
 function productSpecRows(spec: ProductSpec | null) {
@@ -353,9 +399,22 @@ function woBodyHtml(cols: WoPrintColumns): string {
 </section>`;
 }
 
+// CSS ทับท้าย — ปรับเส้นตาราง (บาง/หนา · เข้ม/อ่อน) ใช้ทั้งบนจอและตอนพิมพ์ให้เห็นเหมือนกัน
+function woStyleCss(style: WoPrintStyle): string {
+  const w = style.border_px, c = style.border_color;
+  const rule = `.summary-table th, .summary-table td, .doc-table th, .doc-table td { border: ${w}px solid ${c}; }
+.wo-hero { border: ${w}px solid ${c}; }`;
+  return `\n/* เส้นตาราง — ปรับจากปุ่ม "⚙ ตั้งค่าตาราง" */\n${rule}\n@media print {\n${rule}\n}\n`;
+}
+
 /** สร้างเทมเพลตใบสั่งงานผลิตตาม "ตั้งค่าคอลัมน์" (ไม่ส่ง = ใช้ค่าเริ่มต้น) */
 export function buildWorkOrderTemplate(columns?: WoPrintColumns | null): ReportTemplate {
-  return { ...WORKORDER_PRINT_TEMPLATE, body_html: woBodyHtml(columns ?? WO_DEFAULT_COLUMNS) };
+  const cols = columns ?? WO_DEFAULT_COLUMNS;
+  return {
+    ...WORKORDER_PRINT_TEMPLATE,
+    body_html: woBodyHtml(cols),
+    custom_css: (WORKORDER_PRINT_TEMPLATE.custom_css ?? "") + woStyleCss(cols.style ?? WO_DEFAULT_STYLE),
+  };
 }
 
 export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
@@ -426,6 +485,8 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 /* ช่องรูปวัตถุดิบ — เห็นเต็มใบ ไม่ตัด · ไม่มีรูป = เว้นว่าง ไม่ดันความสูงแถว */
 .img-cell { text-align: center; padding: 0.6mm !important; }
 .mat-img { display: inline-block; max-width: 100%; max-height: 13mm; width: auto; height: auto; object-fit: contain; }
+/* ช่องติ๊กถูก — กล่องเปล่าให้ช่างติ๊กด้วยปากกาบนกระดาษ */
+.tick-box { display: inline-block; width: 4mm; height: 4mm; border: 1px solid #64748b; border-radius: 0.5mm; }
 .code-cell { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 8.5px; line-height: 1.2; color: #334155; white-space: normal; word-break: break-all; overflow-wrap: anywhere; padding-left: 1mm !important; padding-right: 1mm !important; }
 .product-detail { margin-top: 5mm; display: grid; grid-template-columns: 28mm 1fr; gap: 3mm; border-top: 1px solid #cbd5e1; padding-top: 3mm; page-break-inside: avoid; break-inside: avoid; }
 .detail-photo { width: 28mm; height: 24mm; }
@@ -453,6 +514,7 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
   .code-cell { font-size: 7.5px; padding-left: 0.6mm !important; padding-right: 0.6mm !important; }
   .img-cell { padding: 0.3mm !important; }
   .mat-img { max-height: 10mm; }
+  .tick-box { width: 3.4mm; height: 3.4mm; }
   .summary-table { margin-bottom: 1.5mm; }
   .product-detail { margin-top: 2mm; gap: 2mm; grid-template-columns: 22mm 1fr; padding-top: 2mm; }
   .detail-photo { width: 22mm; height: 17mm; }

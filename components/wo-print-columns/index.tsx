@@ -13,7 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import { usePermission } from "@/components/auth";
-import { WO_DEFAULT_COLUMNS, normalizeWoColumns, type WoColumn, type WoPrintColumns } from "@/lib/work-order-print";
+import { WO_BORDER_COLORS, WO_DEFAULT_COLUMNS, WO_DEFAULT_STYLE, isBlankWoColumn, normalizeWoColumns, type WoColumn, type WoPrintColumns } from "@/lib/work-order-print";
 
 const CONFIG_KEY = "wo_print_columns";
 
@@ -43,12 +43,17 @@ function ColumnRows({ list, onChange }: { list: WoColumn[]; onChange: (next: WoC
       {list.map((c, i) => (
         <div key={c.key} {...rowProps(i)} className={`flex items-center gap-1.5 px-1.5 py-1 ${rowCls(i)} ${c.show ? "" : "bg-slate-50"}`}>
           <DragHandle {...handleProps(i)} />
-          <label className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer">
-            <input type="checkbox" checked={c.show} onChange={(e) => patch(i, { show: e.target.checked })} className="w-4 h-4 accent-indigo-600 shrink-0" />
-            <span className={`text-[12px] truncate ${c.show ? "text-slate-700" : "text-slate-400 line-through"}`}>
-              {c.key === "image" ? "🖼 " : ""}{c.label}
-            </span>
-          </label>
+          <input type="checkbox" checked={c.show} onChange={(e) => patch(i, { show: e.target.checked })}
+            title="แสดงคอลัมน์นี้" className="w-4 h-4 accent-indigo-600 shrink-0" />
+          {c.key === "image" && <span className="text-[11px] shrink-0">🖼</span>}
+          {c.key === "check" && <span className="text-[11px] shrink-0">☑</span>}
+          {isBlankWoColumn(c.key) && <span className="text-[9px] shrink-0 px-1 py-0.5 rounded bg-slate-100 text-slate-400">ว่าง {c.key.replace("blank", "")}</span>}
+          {/* ชื่อหัวคอลัมน์ — พิมพ์เปลี่ยนเองได้ทุกช่อง (ช่องว่างจะได้ตั้งชื่อเองตามที่เจ้าของขอ) */}
+          <input type="text" value={c.label} maxLength={40}
+            onChange={(e) => patch(i, { label: e.target.value })}
+            placeholder={isBlankWoColumn(c.key) ? "ตั้งชื่อหัวช่องว่าง…" : "ชื่อหัวคอลัมน์"}
+            title="พิมพ์เปลี่ยนชื่อหัวคอลัมน์ได้"
+            className={`min-w-0 flex-1 h-6 px-1 text-[12px] rounded bg-transparent border border-transparent hover:border-slate-200 focus:border-indigo-300 focus:bg-white focus:outline-none ${c.show ? "text-slate-700" : "text-slate-400 line-through"}`} />
           <input type="range" min={3} max={60} value={c.width} disabled={!c.show}
             onChange={(e) => patch(i, { width: Number(e.target.value) })}
             className="w-20 accent-indigo-600 disabled:opacity-30" />
@@ -158,7 +163,8 @@ export function WoColumnSettings({ onPreview, onSaved }: {
               <div className="max-h-[calc(100vh-230px)] overflow-y-auto px-2.5 py-2 space-y-2.5">
                 <p className="text-[11px] text-slate-500 leading-snug">
                   ปรับแล้ว<b className="text-slate-700">เห็นผลบนเอกสารทันที</b> · กด <b>บันทึก</b> ถึงจะมีผลกับทุกคน
-                  <br />ติ๊ก = แสดง · ลาก <span className="text-slate-400">⠿</span> = สลับลำดับ · % ขวา = ความกว้างจริงบนกระดาษ
+                  <br />ติ๊ก = แสดง · ลาก <span className="text-slate-400">⠿</span> = สลับลำดับ · <b className="text-slate-700">พิมพ์ทับชื่อคอลัมน์ได้</b> · % ขวา = ความกว้างจริงบนกระดาษ
+                  <br />ช่องพิเศษ: <b>☑ ติ๊กถูก</b> (กล่องเปล่าให้ช่างติ๊กบนกระดาษ) · <b>ช่องว่าง 1/2</b> (เว้นว่างไว้เขียนมือ ตั้งชื่อหัวเองได้)
                 </p>
 
                 <div>
@@ -171,6 +177,38 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                   <ColumnRows list={draft.lines} onChange={(lines) => setDraft((d) => ({ ...d, lines }))} />
                 </div>
 
+                {/* เส้นตาราง — เจ้าของบอกว่าเส้นดำ 1px หนาไปตอนพิมพ์ */}
+                <div>
+                  <div className="text-[12px] font-bold text-slate-700 mb-1">3) เส้นตาราง</div>
+                  <div className="border border-slate-200 rounded-lg px-2 py-1.5 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-14 shrink-0">ความหนา</span>
+                      <input type="range" min={0.2} max={2} step={0.1}
+                        value={(draft.style ?? WO_DEFAULT_STYLE).border_px}
+                        onChange={(e) => setDraft((d) => ({ ...d, style: { ...(d.style ?? WO_DEFAULT_STYLE), border_px: Number(e.target.value) } }))}
+                        className="flex-1 accent-indigo-600" />
+                      <span className="w-11 text-right text-[11px] text-slate-500 tabular-nums">{(draft.style ?? WO_DEFAULT_STYLE).border_px} px</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-14 shrink-0">ความเข้ม</span>
+                      <div className="flex gap-1 flex-1">
+                        {WO_BORDER_COLORS.map((c) => {
+                          const on = (draft.style ?? WO_DEFAULT_STYLE).border_color === c.value;
+                          return (
+                            <button key={c.value} onClick={() => setDraft((d) => ({ ...d, style: { ...(d.style ?? WO_DEFAULT_STYLE), border_color: c.value } }))}
+                              title={c.label}
+                              className={`flex-1 h-6 rounded border text-[10px] ${on ? "border-indigo-500 ring-1 ring-indigo-300 text-slate-700" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>
+                              <span className="inline-block w-full h-0 align-middle" style={{ borderTop: `2px solid ${c.value}` }} />
+                              <span className="sr-only">{c.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-snug">บางลง = เอกสารดูโปร่ง อ่านง่ายตอนพิมพ์ · ค่าเริ่มต้นใหม่ = 0.5 px สีกลาง</p>
+                  </div>
+                </div>
+
                 <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 leading-snug">
                   ⚠️ ช่อง <b>รูป</b> ขึ้นเฉพาะวัตถุดิบที่มีรูปปกในระบบ — ตัวที่ยังไม่มีรูป ช่องจะว่าง
                 </p>
@@ -178,7 +216,7 @@ export function WoColumnSettings({ onPreview, onSaved }: {
               </div>
 
               <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-slate-100">
-                <button onClick={() => setDraft(WO_DEFAULT_COLUMNS)} disabled={saving}
+                <button onClick={() => setDraft({ ...WO_DEFAULT_COLUMNS, style: WO_DEFAULT_STYLE })} disabled={saving}
                   className="h-8 px-2 text-[11px] border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-50">↺ ค่าเริ่มต้น</button>
                 <div className="flex-1" />
                 <button onClick={closePanel} disabled={saving} className="h-8 px-2.5 text-[11px] border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
