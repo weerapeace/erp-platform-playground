@@ -4,6 +4,7 @@
  * เดิมโค้ดนี้ฝังอยู่ในหน้าพิมพ์เดี่ยว — ย้ายมาเป็นของกลางเพื่อไม่ให้เขียนซ้ำ
  */
 import type { ReportTemplate } from "@/lib/template";
+import { scanQrHtml } from "@/lib/scan-code";
 
 export const STATUS_LABELS: Record<string, string> = {
   draft: "ร่าง",
@@ -70,13 +71,9 @@ export type MoDetail = {
  * สร้าง QR Code เป็น data-URL (offline ไม่ต้องต่อเน็ต) → คืน <img> สำหรับฝังในเทมเพลต
  * โหลด lib qrcode แบบ dynamic เฉพาะตอนเรียก (ไม่กระทบ bundle หลัก)
  */
+/** QR บนใบสั่งงาน — เรียกตัวสร้างกลาง lib/scan-code (ที่เดียวทั้งระบบ) */
 export async function woQrHtml(url: string): Promise<string> {
-  if (!url) return "";
-  try {
-    const QR = (await import("qrcode")).default;
-    const dataUrl = await QR.toDataURL(url, { margin: 0, width: 200, errorCorrectionLevel: "M" });
-    return `<img class="wo-qr" src="${dataUrl}" alt="QR ใบสั่งงาน" />`;
-  } catch { return ""; }
+  return scanQrHtml(url, { className: "wo-qr", alt: "QR ใบสั่งงาน" });
 }
 
 export const thaiDate = (iso: string | null | undefined) => {

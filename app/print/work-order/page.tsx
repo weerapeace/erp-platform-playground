@@ -11,6 +11,7 @@ import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
 import { buildWorkOrderTemplate, woSectionDataList, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
+import { scanUrl } from "@/lib/scan-code";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 
 function BulkPrintInner() {
@@ -46,7 +47,8 @@ function BulkPrintInner() {
               specCache.set(sku, spec);
             }
           }
-          const qr_html = await woQrHtml(`${window.location.origin}/print/work-order/${mo.id}`);
+          // QR ชี้หน้ากลาง /s/<เลขใบ> — ปลายทางเปลี่ยนทีหลังได้โดยไม่ต้องพิมพ์ใบใหม่
+          const qr_html = await woQrHtml(scanUrl(mo.mo_no || mo.id));
           out.push({ ...buildWoHtmlData(mo, spec), qr_html });
           if (!cancelled) setDone((d) => d + 1);
         }

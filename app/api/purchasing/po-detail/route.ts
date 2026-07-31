@@ -15,6 +15,8 @@ const isCNY = (c: unknown) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").to
 export type PoDetailLine = {
   name: string; qty: number; received: number; uom: string | null;
   price: number; total: number; img: string | null; done: boolean;
+  /** รหัสสินค้า — ใช้บนใบพิมพ์ที่แขวนไว้ที่โต๊ะรับของ */
+  sku: string | null;
 };
 export type PoDetail = {
   id: string; po_no: string; seller: string | null; order_date: string | null;
@@ -46,8 +48,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const skuIds = [...new Set(rows.map((l) => l.item_sku_id).filter(Boolean) as string[])];
   const coverMap = new Map<string, string | null>();
   const uomBySku = new Map<string, string | null>();
+  const codeBySku = new Map<string, string | null>();
   if (skuIds.length) {
-    const { data: sk } = await admin.from("skus_v2").select("id, cover_image_r2_key, uom_id").in("id", skuIds);
+    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key, uom_id").in("id", skuIds);
     const uomIds = [...new Set(((sk ?? []) as Record<string, unknown>[]).map((s) => s.uom_id).filter(Boolean) as string[])];
     const uomName = new Map<string, string>();
     if (uomIds.length) {
@@ -57,6 +60,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     for (const s of (sk ?? []) as Record<string, unknown>[]) {
       coverMap.set(String(s.id), (s.cover_image_r2_key as string) ?? null);
       uomBySku.set(String(s.id), s.uom_id ? (uomName.get(String(s.uom_id)) ?? null) : null);
+      codeBySku.set(String(s.id), (s.code as string) ?? null);
     }
   }
 
@@ -81,6 +85,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         price: num(l.price_est), total: num(l.line_total),
         img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
         done: st === "received" || st === "short_closed" || st === "closed_short" || remain === 0,
+        sku: sid ? (codeBySku.get(sid) ?? null) : null,
       };
     }),
   };

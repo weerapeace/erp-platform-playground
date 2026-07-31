@@ -8,6 +8,7 @@ import { docFileName } from "@/lib/print-filename";
 import { parseDesignerDescription } from "@/lib/report-designer";
 import { buildReportHtml, buildReportHtmlMulti, type ReportTemplate } from "@/lib/template";
 import { buildWorkOrderTemplate, woSectionDataList, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
+import { scanUrl } from "@/lib/scan-code";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { Font, Plugins, Schema, Template } from "@pdfme/common";
@@ -54,7 +55,8 @@ export default function PrintWorkOrderPage() {
   useEffect(() => {
     if (!mo) { setQrHtml(""); return; }
     let on = true;
-    void woQrHtml(`${window.location.origin}/print/work-order/${mo.id}`).then((h) => { if (on) setQrHtml(h); });
+    // QR ชี้หน้ากลาง /s/<เลขใบ> — ปลายทางเปลี่ยนทีหลังได้โดยไม่ต้องพิมพ์ใบใหม่
+    void woQrHtml(scanUrl(mo.mo_no || mo.id)).then((h) => { if (on) setQrHtml(h); });
     return () => { on = false; };
   }, [mo]);
 

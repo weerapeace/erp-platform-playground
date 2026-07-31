@@ -1,51 +1,116 @@
 "use client";
 
+/**
+ * พิมพ์ใบสั่งซื้อ — /print/purchase-order/<id>
+ *
+ * ⚠️ เดิมหน้านี้อ่านจากระบบจัดซื้อชุดเก่า (erp_playground_purchase_orders ซึ่งว่างเปล่า 0 แถว)
+ *    ทำให้ปุ่ม "พิมพ์" หลังสร้างใบสั่งซื้อขึ้น "ไม่พบเอกสาร" ทุกครั้ง
+ *    ตอนนี้อ่านใบจริง (purchase_orders_v2) ก่อน แล้วค่อย fallback ระบบเก่า
+ *
+ * มี QR ชี้หน้ากลาง /s/<เลขใบ> → พิมพ์แขวนไว้ที่โต๊ะรับของ พนักงานส่องมือถือเปิดใบนี้ได้เลย
+ */
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtml } from "@/lib/template";
+import { scanUrl, scanQrHtml } from "@/lib/scan-code";
+import type { PoDetail } from "@/app/api/purchasing/po-detail/route";
 import type { PODetail } from "@/app/api/purchase-orders/route";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "ร่าง", confirmed: "ยืนยันแล้ว", received: "รับของแล้ว",
   completed: "เสร็จสิ้น", cancelled: "ยกเลิก",
+  unpaid: "รอจ่าย", paid: "จ่ายแล้ว", partial: "รับบางส่วน",
 };
 
-const baht = (n: number | null | undefined) => Number(n ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2 });
+const CURRENCY_SYMBOL: Record<string, string> = { THB: "฿", RMB: "¥", YUAN: "¥", CNY: "¥", USD: "$" };
+
+const money = (n: number | null | undefined) =>
+  Number(n ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const thaiDate = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
-function buildPoData(po: PODetail): Record<string, unknown> {
+type PoView = { poNumber: string; data: Record<string, unknown> };
+
+/** ใบสั่งซื้อจริง (purchase_orders_v2) */
+function viewFromV2(po: PoDetail): PoView {
+  const cur = String(po.currency ?? "THB").toUpperCase();
+  const symbol = CURRENCY_SYMBOL[cur] ?? "";
+  const subtotal = po.lines.reduce((s, l) => s + Number(l.total ?? 0), 0);
   return {
-    po_number:        po.po_number ?? "(ยังไม่ออกเลข)",
-    status_label:     STATUS_LABELS[po.status] ?? po.status,
-    supplier_name:    po.supplier_name ?? "—",
-    supplier_code:    po.supplier_code ?? "",
-    warehouse_name:   po.to_warehouse_name ?? "—",
-    warehouse_code:   po.to_warehouse_code ?? "",
-    buyer_name:       po.buyer_name ?? "—",
-    order_date_th:    thaiDate(po.order_date),
-    arrival_date_th:  thaiDate(po.expected_arrival_date),
-    note:             po.note ?? "",
-    vat_rate_label:   po.vat_included ? `${po.vat_rate}% รวมแล้ว` : `${po.vat_rate}%`,
-    taxable:          baht(po.taxable),
-    total_vat:        baht(po.total_vat),
-    total_wht:        baht(po.total_wht),
-    has_wht:          po.total_wht > 0 ? "1" : "",
-    grand_total:      baht(po.grand_total),
-    amount_due:       baht(po.amount_due),
-    lines: po.lines.map((l, i) => ({
-      idx:          i + 1,
-      sku:          l.sku ?? "",
-      product_name: l.product_name,
-      qty:          Number(l.qty).toLocaleString("th-TH"),
-      unit:         l.unit,
-      unit_price:   baht(l.unit_price),
-      line_total:   baht(l.line_total ?? 0),
-    })),
+    poNumber: po.po_no,
+    data: {
+      po_number:       po.po_no,
+      status_label:    STATUS_LABELS[String(po.payment_status ?? "")] ?? (po.payment_status ?? "—"),
+      supplier_name:   po.seller ?? "—",
+      supplier_code:   "",
+      warehouse_name:  "",
+      warehouse_code:  "",
+      buyer_name:      "",
+      order_date_th:   thaiDate(po.order_date),
+      arrival_date_th: thaiDate(po.expected_date),
+      note:            "",
+      currency_symbol: symbol,
+      currency_code:   cur === "YUAN" ? "RMB" : cur,
+      vat_rate_label:  "",
+      taxable:         money(subtotal),
+      total_vat:       "",
+      total_wht:       "",
+      has_wht:         "",
+      show_due:        "",
+      grand_total:     money(subtotal),
+      amount_due:      money(subtotal),
+      lines: po.lines.map((l, i) => ({
+        idx:          i + 1,
+        sku:          l.sku ?? "",
+        product_name: l.name,
+        qty:          Number(l.qty).toLocaleString("th-TH"),
+        unit:         l.uom ?? "",
+        unit_price:   money(l.price),
+        line_total:   money(l.total),
+      })),
+    },
+  };
+}
+
+/** ระบบจัดซื้อชุดเก่า (ยังไม่มีข้อมูลจริง แต่เก็บไว้กันหน้าเดิมพัง) */
+function viewFromLegacy(po: PODetail): PoView {
+  return {
+    poNumber: po.po_number ?? "",
+    data: {
+      po_number:       po.po_number ?? "(ยังไม่ออกเลข)",
+      status_label:    STATUS_LABELS[po.status] ?? po.status,
+      supplier_name:   po.supplier_name ?? "—",
+      supplier_code:   po.supplier_code ?? "",
+      warehouse_name:  po.to_warehouse_name ?? "",
+      warehouse_code:  po.to_warehouse_code ?? "",
+      buyer_name:      po.buyer_name ?? "",
+      order_date_th:   thaiDate(po.order_date),
+      arrival_date_th: thaiDate(po.expected_arrival_date),
+      note:            po.note ?? "",
+      currency_symbol: "฿",
+      currency_code:   "THB",
+      vat_rate_label:  po.vat_included ? `${po.vat_rate}% รวมแล้ว` : `${po.vat_rate}%`,
+      taxable:         money(po.taxable),
+      total_vat:       money(po.total_vat),
+      total_wht:       money(po.total_wht),
+      has_wht:         po.total_wht > 0 ? "1" : "",
+      show_due:        "1",
+      grand_total:     money(po.grand_total),
+      amount_due:      money(po.amount_due),
+      lines: po.lines.map((l, i) => ({
+        idx:          i + 1,
+        sku:          l.sku ?? "",
+        product_name: l.product_name,
+        qty:          Number(l.qty).toLocaleString("th-TH"),
+        unit:         l.unit,
+        unit_price:   money(l.unit_price),
+        line_total:   money(l.line_total ?? 0),
+      })),
+    },
   };
 }
 
@@ -54,44 +119,75 @@ export default function PrintPOPage() {
   const router = useRouter();
   const id = params.id as string;
 
-  const [po, setPo] = useState<PODetail | null>(null);
+  const [view, setView] = useState<PoView | null>(null);
+  const [qrHtml, setQrHtml] = useState("");
   const [template, setTemplate] = useState<ReportTemplateRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      apiFetch(`/api/purchase-orders/${id}`).then(r => r.json()),
-      apiFetch("/api/admin/report-templates?entity_type=po").then(r => r.json()),
-    ])
-      .then(([poRes, tplRes]) => {
-        if (poRes.error) throw new Error(poRes.error);
-        setPo(poRes.data as PODetail);
-        const tpls = (tplRes as ReportTemplatesResponse).data?.filter(t => t.active) ?? [];
-        setTemplate(tpls.find(t => t.is_default) ?? tpls[0] ?? null);
-      })
-      .catch(e => setError(e instanceof Error ? e.message : "โหลดไม่ได้"))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const tplPromise = apiFetch("/api/admin/report-templates?entity_type=po").then((r) => r.json());
+
+        // 1) ใบจริง (v2)
+        let next: PoView | null = null;
+        const v2 = await apiFetch(`/api/purchasing/po-detail?id=${encodeURIComponent(id)}`)
+          .then((r) => r.json()).catch(() => null) as { data?: PoDetail; error?: string } | null;
+        if (v2?.data) next = viewFromV2(v2.data);
+
+        // 2) ระบบเก่า (เผื่อมีใบค้างอยู่)
+        if (!next) {
+          const legacy = await apiFetch(`/api/purchase-orders/${id}`)
+            .then((r) => r.json()).catch(() => null) as { data?: PODetail; error?: string } | null;
+          if (legacy?.data) next = viewFromLegacy(legacy.data);
+        }
+
+        const tplRes = (await tplPromise) as ReportTemplatesResponse;
+        if (cancelled) return;
+
+        if (!next) { setError("ไม่พบใบสั่งซื้อนี้"); return; }
+
+        const tpls = tplRes.data?.filter((t) => t.active) ?? [];
+        setTemplate(tpls.find((t) => t.is_default) ?? tpls[0] ?? null);
+        setView(next);
+
+        const qr = await scanQrHtml(scanUrl(next.poNumber || id), { className: "po-qr", alt: "QR ใบสั่งซื้อ" });
+        if (!cancelled) setQrHtml(qr);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "โหลดไม่ได้");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, [id]);
 
-  // ชื่อไฟล์ตอนบันทึก PDF — "ใบสั่งซื้อ - PO-2026-00032" (ของกลาง lib/print-filename)
-  const fileName = docFileName("ใบสั่งซื้อ", po?.po_number);
+  // ชื่อไฟล์ตอนบันทึก PDF — "ใบสั่งซื้อ - PO-2026-00070" (ของกลาง lib/print-filename)
+  const fileName = docFileName("ใบสั่งซื้อ", view?.poNumber);
 
   const html = useMemo(() => {
-    if (!po || !template) return "";
-    return buildReportHtml({
-      paper_size: template.paper_size, orientation: template.orientation,
-      header_html: template.header_html, body_html: template.body_html,
-      footer_html: template.footer_html, custom_css: template.custom_css,
-    }, buildPoData(po), docFileName("ใบสั่งซื้อ", po.po_number));
-  }, [po, template]);
+    if (!view || !template) return "";
+    return buildReportHtml(
+      {
+        paper_size: template.paper_size, orientation: template.orientation,
+        header_html: template.header_html, body_html: template.body_html,
+        footer_html: template.footer_html, custom_css: template.custom_css,
+      },
+      { ...view.data, qr_html: qrHtml },
+      docFileName("ใบสั่งซื้อ", view.poNumber),
+    );
+  }, [view, template, qrHtml]);
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <PrintToolbar onBack={() => router.back()} fileName={po ? fileName : undefined} />
+      <PrintToolbar onBack={() => router.back()} fileName={view ? fileName : undefined} />
       <div className="py-6 px-4">
         {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
-         : error || !po ? <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
+         : error || !view ? <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
          : !template ? <div className="text-center py-20 text-amber-600">⚠️ ยังไม่มี template สำหรับ PO</div>
          : (
           <PrintFrame html={html} fileName={fileName} />

@@ -15,9 +15,21 @@ import {
   type PrintPayload, type PrintItem, type PrintOpts, type CustomLayout, type SavedTemplate, type ElemSizes,
 } from "@/components/barcode-print/labels";
 import { TemplateMenu } from "@/components/barcode-print/template-menu";
+import { scanUrl } from "@/lib/scan-code";
 
 const loadImg = (src: string): Promise<HTMLImageElement> =>
   new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src; });
+
+/**
+ * ข้อความที่ฝังใน QR ของแต่ละดวง
+ *  - qrLink = ลิงก์หน้ากลาง /s/<รหัส> → ส่องด้วยแอปกล้องมือถือธรรมดาเปิดหน้าสินค้าได้เลย
+ *  - ไม่เปิด = รหัสเปล่า (แบบเดิม) — ใช้กับเครื่องยิง/หน้าสถานีสแกน
+ * บาร์โค้ดเส้นใช้รหัสเปล่าเสมอ (ลิงก์ยาวทำให้เส้นกว้างจนอ่านไม่ออก)
+ */
+function qrTextOf(it: PrintItem, o: PrintOpts): string {
+  const code = it.barcode || it.code;
+  return o.qrLink ? scanUrl(code) : code;
+}
 
 // โลโก้ที่จะวางกลาง QR ของแต่ละดวง (ตาม logoMode)
 function logoForItem(it: PrintItem, o: PrintOpts): string | null {
@@ -127,7 +139,7 @@ export default function BarcodeLabelsPrintPage() {
 
   // สร้าง QR ใหม่เฉพาะเมื่อค่าที่เกี่ยว QR เปลี่ยน (ปรับ layout/จูนตำแหน่ง จะไม่ต้อง regen)
   const qrDepKey = payload
-    ? [payload.opts.showQR, payload.opts.logoMode, payload.opts.logo, payload.opts.codeColor,
+    ? [payload.opts.showQR, payload.opts.qrLink, payload.opts.logoMode, payload.opts.logo, payload.opts.codeColor,
        ...payload.items.map((i) => `${i.barcode || i.code}~${i.brandLogo ?? ""}`)].join("|")
     : "";
   useEffect(() => {
@@ -135,7 +147,7 @@ export default function BarcodeLabelsPrintPage() {
     const o = payload.opts;
     const jobs = new Map<string, { text: string; logo: string | null }>();
     for (const it of payload.items) {
-      const text = it.barcode || it.code;
+      const text = qrTextOf(it, o);
       const logo = logoForItem(it, o);
       jobs.set(`${text}|${logo ?? ""}`, { text, logo });
     }
@@ -214,7 +226,7 @@ export default function BarcodeLabelsPrintPage() {
   const opts = payload.opts;
   const custom = opts.custom;
   const capped = labels.length >= MAX_LABELS;
-  const qrOf = (it: PrintItem) => qrMap[`${it.barcode || it.code}|${logoForItem(it, opts) ?? ""}`];
+  const qrOf = (it: PrintItem) => qrMap[`${qrTextOf(it, opts)}|${logoForItem(it, opts) ?? ""}`];
   // ขนาด default ตามเลย์เอาต์ (ไว้โชว์ในช่องปรับขนาด)
   const autoCM = custom ? autoCodeMetrics(custom.labelH) : { codeH: getPreset(opts.preset).codeH, font: getPreset(opts.preset).font };
   const rs = resolveSizes(opts.sizes, autoCM.codeH, autoCM.font);
@@ -370,6 +382,7 @@ export default function BarcodeLabelsPrintPage() {
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
             <strong style={{ fontSize: 12, color: "#94a3b8" }}>แสดง</strong>
             {chkF("QR", opts.showQR, (v) => updateOpts({ showQR: v }))}
+            {opts.showQR && chkF("QR เปิดหน้าสินค้าได้", opts.qrLink ?? false, (v) => updateOpts({ qrLink: v }))}
             {chkF("บาร์โค้ด", opts.showBarcode, (v) => updateOpts({ showBarcode: v }))}
             {chkF("รหัส", opts.showCode, (v) => updateOpts({ showCode: v }))}
             {chkF("ชื่อ", opts.showName, (v) => updateOpts({ showName: v }))}

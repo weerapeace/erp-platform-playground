@@ -177,6 +177,13 @@ export function BarcodePrintModal({ open, onClose, ids, entity }: {
           <div className="border border-slate-200 rounded-lg p-3 space-y-2">
             <div className="text-xs font-medium text-slate-500">โค้ดที่พิมพ์</div>
             {chk("QR Code", opts.showQR, (v) => setOpts((o) => ({ ...o, showQR: v })))}
+            {/* QR เก็บลิงก์ → ส่องด้วยแอปกล้องมือถือธรรมดาแล้วเปิดหน้าสินค้าได้เลย */}
+            {opts.showQR && (
+              <div className="pl-6">
+                {chk("QR เปิดหน้าสินค้าได้", opts.qrLink ?? false, (v) => setOpts((o) => ({ ...o, qrLink: v })),
+                  "ส่องด้วยกล้องมือถือธรรมดาแล้วเด้งเข้าหน้าสินค้าในระบบ (ไม่ติ๊ก = QR เก็บรหัสเปล่าแบบเดิม ใช้กับเครื่องยิง)")}
+              </div>
+            )}
             {chk("บาร์โค้ดเส้น", opts.showBarcode, (v) => setOpts((o) => ({ ...o, showBarcode: v })), "สแกนรหัส/บาร์โค้ดได้")}
             {/* ชนิดบาร์โค้ด — Code-39 สำหรับเครื่องสแกนรุ่นเก่า/ระบบที่รับเฉพาะ 39 */}
             {opts.showBarcode && (
