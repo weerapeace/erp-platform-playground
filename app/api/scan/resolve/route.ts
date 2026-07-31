@@ -77,7 +77,10 @@ async function findDoc(kind: ScanKind, code: string, byId: boolean): Promise<Sca
       kind: "pr", id: str(r.id), code: str(r.pr_no), status: str(r.status) || null,
       title: `ใบขอซื้อ ${str(r.pr_no)}`,
       subtitle: [str(r.item_name), str(r.requester)].filter(Boolean).join(" · "),
-      href: `/print/purchase-request/${str(r.id)}`,
+      // ⚠️ ไม่ชี้ /print/purchase-request/<id> เพราะหน้านั้นอ่านจากระบบจัดซื้อชุดเก่า
+      //    (erp_playground_purchase_requests มี 1 แถว ส่วนใบจริงอยู่ purchase_requests_v2 182 ใบ)
+      //    → ชี้หน้าโมดูลกลางแทน ซึ่งอ่านใบจริง
+      href: `/m/purchase-requests-v2?open=${encodeURIComponent(str(r.id))}`,
     };
   }
 
