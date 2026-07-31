@@ -13,7 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import { usePermission } from "@/components/auth";
-import { WO_BORDER_COLORS, WO_BORDER_MODES, WO_DEFAULT_COLUMNS, WO_DEFAULT_STYLE, isBlankWoColumn, normalizeWoColumns, type WoColumn, type WoPrintColumns } from "@/lib/work-order-print";
+import { WO_BORDER_COLORS, WO_BORDER_MODES, WO_DEFAULT_COLUMNS, WO_DEFAULT_SECTIONS, WO_DEFAULT_STYLE, WO_SECTION_LABELS, WO_SECTION_PRESETS, isBlankWoColumn, normalizeWoColumns, type WoColumn, type WoPrintColumns } from "@/lib/work-order-print";
 
 const CONFIG_KEY = "wo_print_columns";
 
@@ -167,6 +167,36 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                   <br />ช่องพิเศษ: <b>☑ ติ๊กถูก</b> (กล่องเปล่าให้ช่างติ๊กบนกระดาษ) · <b>ช่องว่าง 1/2</b> (เว้นว่างไว้เขียนมือ ตั้งชื่อหัวเองได้)
                 </p>
 
+                {/* ส่วนที่จะพิมพ์ — อยากได้แค่ตารางเดียวก็กดชุดสำเร็จได้เลย */}
+                <div>
+                  <div className="text-[12px] font-bold text-slate-700 mb-1">0) จะพิมพ์ส่วนไหนบ้าง</div>
+                  <div className="border border-slate-200 rounded-lg px-2 py-1.5 space-y-1.5">
+                    <div className="flex gap-1">
+                      {WO_SECTION_PRESETS.map((p) => {
+                        const cur = draft.sections ?? WO_DEFAULT_SECTIONS;
+                        const on = WO_SECTION_LABELS.every((s) => cur[s.key] === p.value[s.key]);
+                        return (
+                          <button key={p.label} title={p.hint}
+                            onClick={() => setDraft((d) => ({ ...d, sections: { ...p.value } }))}
+                            className={`flex-1 h-6 rounded border text-[10px] ${on ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{p.label}</button>
+                        );
+                      })}
+                    </div>
+                    {WO_SECTION_LABELS.map((s) => {
+                      const cur = draft.sections ?? WO_DEFAULT_SECTIONS;
+                      return (
+                        <label key={s.key} className="flex items-center gap-1.5 cursor-pointer">
+                          <input type="checkbox" checked={cur[s.key]}
+                            onChange={(e) => setDraft((d) => ({ ...d, sections: { ...(d.sections ?? WO_DEFAULT_SECTIONS), [s.key]: e.target.checked } }))}
+                            className="w-4 h-4 accent-indigo-600 shrink-0" />
+                          <span className={`text-[12px] ${cur[s.key] ? "text-slate-700" : "text-slate-400 line-through"}`}>{s.label}</span>
+                        </label>
+                      );
+                    })}
+                    <p className="text-[10px] text-slate-400">หัวเอกสาร (ชื่อบริษัท · สินค้า · จำนวน · เลขที่ใบ · QR) พิมพ์ติดไปด้วยเสมอ</p>
+                  </div>
+                </div>
+
                 <div>
                   <div className="text-[12px] font-bold text-slate-700 mb-1">1) ตาราง “สรุปวัตถุดิบที่ต้องใช้”</div>
                   <ColumnRows list={draft.summary} onChange={(summary) => setDraft((d) => ({ ...d, summary }))} />
@@ -179,7 +209,7 @@ export function WoColumnSettings({ onPreview, onSaved }: {
 
                 {/* เส้นตาราง — เจ้าของบอกว่าเส้นดำ 1px หนาไปตอนพิมพ์ */}
                 <div>
-                  <div className="text-[12px] font-bold text-slate-700 mb-1">3) เส้นตาราง</div>
+                  <div className="text-[12px] font-bold text-slate-700 mb-1">3) เส้นตาราง + ขนาดตัวอักษร</div>
                   <div className="border border-slate-200 rounded-lg px-2 py-1.5 space-y-1.5">
                     {/* แบบเส้น — ตัวที่ทำให้ "ดูบางลง" ได้จริงที่สุด */}
                     <div className="flex items-center gap-1.5">
@@ -219,6 +249,15 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                         className="flex-1 accent-indigo-600" />
                       <span className="w-14 text-right text-[11px] text-slate-500 tabular-nums">{(draft.style ?? WO_DEFAULT_STYLE).border_mm} มม.</span>
                     </div>
+                    {/* ขนาดตัวอักษร */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-14 shrink-0">ตัวอักษร</span>
+                      <input type="range" min={0.6} max={1.6} step={0.05}
+                        value={(draft.style ?? WO_DEFAULT_STYLE).font_scale}
+                        onChange={(e) => setDraft((d) => ({ ...d, style: { ...(d.style ?? WO_DEFAULT_STYLE), font_scale: Number(e.target.value) } }))}
+                        className="flex-1 accent-indigo-600" />
+                      <span className="w-14 text-right text-[11px] text-slate-500 tabular-nums">{Math.round((draft.style ?? WO_DEFAULT_STYLE).font_scale * 100)}%</span>
+                    </div>
                     <p className="text-[10px] text-slate-400 leading-snug">
                       ⚠️ <b className="text-slate-600">บนจอ</b> เส้นจะดูหนาเท่ากันหมด (จอวาดบางกว่า 1 จุดไม่ได้) — <b className="text-slate-600">ต้องดูที่ “ตัวอย่างก่อนพิมพ์” (Ctrl+P) หรือกระดาษจริง</b> ถึงจะเห็นว่าบางลง
                       <br />เทียบให้: เส้นเดิม = 0.26 มม. · ค่าเริ่มต้นใหม่ = 0.12 มม. (บางกว่าครึ่ง) · อยากโปร่งอีกให้เลือก “เส้นนอน” + สีจาง
@@ -233,7 +272,7 @@ export function WoColumnSettings({ onPreview, onSaved }: {
               </div>
 
               <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-slate-100">
-                <button onClick={() => setDraft({ ...WO_DEFAULT_COLUMNS, style: WO_DEFAULT_STYLE })} disabled={saving}
+                <button onClick={() => setDraft({ ...WO_DEFAULT_COLUMNS, style: WO_DEFAULT_STYLE, sections: WO_DEFAULT_SECTIONS })} disabled={saving}
                   className="h-8 px-2 text-[11px] border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-50">↺ ค่าเริ่มต้น</button>
                 <div className="flex-1" />
                 <button onClick={closePanel} disabled={saving} className="h-8 px-2.5 text-[11px] border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>

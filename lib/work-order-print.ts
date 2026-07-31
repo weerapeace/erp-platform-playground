@@ -110,10 +110,25 @@ export type WoColumn = { key: string; label: string; width: number; show: boolea
  * ตัวช่วยอื่นที่ทำให้ดูโปร่ง: สีเส้นอ่อนลง + ตัดเส้นตั้งออก (border_mode)
  */
 export type WoBorderMode = "all" | "h" | "none";
-export type WoPrintStyle = { border_mm: number; border_color: string; border_mode: WoBorderMode };
-export type WoPrintColumns = { summary: WoColumn[]; lines: WoColumn[]; style?: WoPrintStyle };
+export type WoPrintStyle = { border_mm: number; border_color: string; border_mode: WoBorderMode; font_scale: number };
+/** ส่วนไหนของเอกสารที่จะพิมพ์ — ปิดได้ เช่นอยากได้แค่ตาราง "สรุปวัตถุดิบ" ใบเดียว */
+export type WoSections = { summary: boolean; lines: boolean; detail: boolean; signature: boolean };
+export type WoPrintColumns = { summary: WoColumn[]; lines: WoColumn[]; style?: WoPrintStyle; sections?: WoSections };
 
-export const WO_DEFAULT_STYLE: WoPrintStyle = { border_mm: 0.12, border_color: "#94a3b8", border_mode: "all" };
+export const WO_DEFAULT_STYLE: WoPrintStyle = { border_mm: 0.12, border_color: "#94a3b8", border_mode: "all", font_scale: 1 };
+export const WO_DEFAULT_SECTIONS: WoSections = { summary: true, lines: true, detail: true, signature: true };
+export const WO_SECTION_LABELS: { key: keyof WoSections; label: string }[] = [
+  { key: "summary", label: "สรุปวัตถุดิบที่ต้องใช้" },
+  { key: "lines", label: "รายการวัตถุดิบ / บล็อกตัด" },
+  { key: "detail", label: "รายละเอียดสินค้า (รูป + สเปก + หมายเหตุ)" },
+  { key: "signature", label: "ช่องลงชื่อท้ายเอกสาร" },
+];
+/** ชุดสำเร็จ — กดปุ่มเดียวได้เอกสารแบบที่อยากพิมพ์บ่อย ๆ */
+export const WO_SECTION_PRESETS: { label: string; hint: string; value: WoSections }[] = [
+  { label: "ทั้งหมด", hint: "พิมพ์ครบทุกส่วน (แบบเดิม)", value: { summary: true, lines: true, detail: true, signature: true } },
+  { label: "เฉพาะสรุปวัตถุดิบ", hint: "เอาแค่ตารางสรุปวัตถุดิบที่ต้องใช้", value: { summary: true, lines: false, detail: false, signature: false } },
+  { label: "เฉพาะบล็อกตัด", hint: "เอาแค่ตารางรายการวัตถุดิบ / บล็อกตัด", value: { summary: false, lines: true, detail: false, signature: false } },
+];
 export const WO_BORDER_COLORS: { label: string; value: string }[] = [
   { label: "จางมาก", value: "#e2e8f0" },
   { label: "อ่อนมาก", value: "#cbd5e1" },
@@ -217,8 +232,16 @@ export function normalizeWoColumns(raw: unknown): WoPrintColumns {
     });
     return out;
   };
-  const obj = (raw ?? {}) as { summary?: unknown; lines?: unknown; style?: unknown };
+  const obj = (raw ?? {}) as { summary?: unknown; lines?: unknown; style?: unknown; sections?: unknown };
+  const sec = (obj.sections ?? {}) as Partial<WoSections>;
+  const sections: WoSections = {
+    summary: sec.summary === undefined ? WO_DEFAULT_SECTIONS.summary : !!sec.summary,
+    lines: sec.lines === undefined ? WO_DEFAULT_SECTIONS.lines : !!sec.lines,
+    detail: sec.detail === undefined ? WO_DEFAULT_SECTIONS.detail : !!sec.detail,
+    signature: sec.signature === undefined ? WO_DEFAULT_SECTIONS.signature : !!sec.signature,
+  };
   const st = (obj.style ?? {}) as Partial<WoPrintStyle>;
+  const scale = Number(st.font_scale);
   const mm = Number(st.border_mm);
   const color = typeof st.border_color === "string" && /^#[0-9a-fA-F]{3,8}$/.test(st.border_color) ? st.border_color : WO_DEFAULT_STYLE.border_color;
   const mode = WO_BORDER_MODES.some((m) => m.value === st.border_mode) ? (st.border_mode as WoBorderMode) : WO_DEFAULT_STYLE.border_mode;
@@ -226,7 +249,13 @@ export function normalizeWoColumns(raw: unknown): WoPrintColumns {
     summary: pick(WO_DEFAULT_COLUMNS.summary, obj.summary),
     lines: pick(WO_DEFAULT_COLUMNS.lines, obj.lines),
     // ค่าเก่าที่เคยเก็บเป็น px (ใช้ไม่ได้จริง) ตกไปเอง → ได้ค่าเริ่มต้นแบบ mm แทน
-    style: { border_mm: Number.isFinite(mm) && mm > 0 ? Math.min(1, Math.max(0.05, mm)) : WO_DEFAULT_STYLE.border_mm, border_color: color, border_mode: mode },
+    style: {
+      border_mm: Number.isFinite(mm) && mm > 0 ? Math.min(1, Math.max(0.05, mm)) : WO_DEFAULT_STYLE.border_mm,
+      border_color: color,
+      border_mode: mode,
+      font_scale: Number.isFinite(scale) && scale > 0 ? Math.min(1.6, Math.max(0.6, scale)) : WO_DEFAULT_STYLE.font_scale,
+    },
+    sections,
   };
 }
 
@@ -356,11 +385,14 @@ export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null): Record<
   };
 }
 
-// เนื้อเอกสารส่วนตาราง — สร้างจาก "ตั้งค่าคอลัมน์" (ที่เดียว ไม่มีตารางซ้ำในไฟล์)
+// เนื้อเอกสารส่วนตาราง — สร้างจาก "ตั้งค่าคอลัมน์" + "ส่วนที่จะพิมพ์" (ที่เดียว ไม่มีตารางซ้ำในไฟล์)
 function woBodyHtml(cols: WoPrintColumns): string {
+  const sections = cols.sections ?? WO_DEFAULT_SECTIONS;
   const s = colsHtml(cols.summary, true);
   const l = colsHtml(cols.lines, false);
-  return `<section class="summary-section">
+  const parts: string[] = [];
+
+  if (sections.summary) parts.push(`<section class="summary-section">
   <div class="section-title">สรุปวัตถุดิบที่ต้องใช้</div>
   <table class="summary-table">
     <thead>
@@ -376,9 +408,9 @@ function woBodyHtml(cols: WoPrintColumns): string {
       {{/material_summary}}
     </tbody>
   </table>
-</section>
+</section>`);
 
-<section>
+  if (sections.lines) parts.push(`<section>
   <div class="section-title">รายการวัตถุดิบ / บล็อกตัด</div>
   <table class="doc-table">
     <thead>
@@ -394,9 +426,9 @@ function woBodyHtml(cols: WoPrintColumns): string {
       {{/lines}}
     </tbody>
   </table>
-</section>
+</section>`);
 
-<section class="product-detail">
+  if (sections.detail) parts.push(`<section class="product-detail">
   <div class="detail-photo">{{{product_image_html}}}</div>
   <div class="detail-main">
     <div class="detail-title">{{product_name}}</div>
@@ -411,7 +443,9 @@ function woBodyHtml(cols: WoPrintColumns): string {
     </table>
     <div class="note-box"><span class="label">วิธีทำ / หมายเหตุ:</span> {{note}}</div>
   </div>
-</section>`;
+</section>`);
+
+  return parts.join("\n\n");
 }
 
 // CSS ทับท้าย — ปรับเส้นตาราง (หนา · สี · แบบเส้น) ใช้ทั้งบนจอและตอนพิมพ์ให้เห็นเหมือนกัน
@@ -427,15 +461,26 @@ function woStyleCss(style: WoPrintStyle): string {
 .summary-table thead th, .doc-table thead th { border-bottom: ${w} solid ${c}; }
 .wo-hero { border: 0; border-bottom: ${w} solid ${c}; }`
         : `${cells} { border: ${w} solid ${c}; }\n.wo-hero { border: ${w} solid ${c}; }`;
-  return `\n/* เส้นตาราง — ปรับจากปุ่ม "⚙ ตั้งค่าตาราง" */\n${rule}\n@media print {\n${rule}\n}\n`;
+  // ขนาดตัวอักษร — คูณจากขนาดเดิม (บนจอ 10.5px / ตอนพิมพ์ 9.2px · รหัสวัตถุดิบ 8.5 / 7.5)
+  const k = style.font_scale;
+  const fs = k === 1 ? "" : `
+.doc { font-size: ${r2(10.5 * k)}px; }
+.code-cell { font-size: ${r2(8.5 * k)}px; }
+@media print {
+  .doc { font-size: ${r2(9.2 * k)}px; }
+  .code-cell { font-size: ${r2(7.5 * k)}px; }
+}`;
+  return `\n/* เส้นตาราง + ขนาดตัวอักษร — ปรับจากปุ่ม "⚙ ตั้งค่าตาราง" */\n${rule}\n@media print {\n${rule}\n}\n${fs}\n`;
 }
 
 /** สร้างเทมเพลตใบสั่งงานผลิตตาม "ตั้งค่าคอลัมน์" (ไม่ส่ง = ใช้ค่าเริ่มต้น) */
 export function buildWorkOrderTemplate(columns?: WoPrintColumns | null): ReportTemplate {
   const cols = columns ?? WO_DEFAULT_COLUMNS;
+  const sections = cols.sections ?? WO_DEFAULT_SECTIONS;
   return {
     ...WORKORDER_PRINT_TEMPLATE,
     body_html: woBodyHtml(cols),
+    footer_html: sections.signature ? WORKORDER_PRINT_TEMPLATE.footer_html : "",
     custom_css: (WORKORDER_PRINT_TEMPLATE.custom_css ?? "") + woStyleCss(cols.style ?? WO_DEFAULT_STYLE),
   };
 }
