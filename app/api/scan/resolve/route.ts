@@ -51,7 +51,8 @@ async function findDoc(kind: ScanKind, code: string, byId: boolean): Promise<Sca
       kind: "po", id: str(r.id), code: str(r.po_no), status: str(r.status) || null,
       title: `ใบสั่งซื้อ ${str(r.po_no)}`,
       subtitle: [str(r.seller_name), str(r.order_date).slice(0, 10)].filter(Boolean).join(" · "),
-      href: `/print/purchase-order/${str(r.id)}`,
+      // สแกนใบสั่งซื้อ = มารับของ → เข้าการ์ดยืนยันรับของเลย (มีปุ่มดูใบ/พิมพ์อยู่ในนั้น)
+      href: `/scan/receive/${str(r.id)}`,
     };
   }
 

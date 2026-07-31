@@ -17,12 +17,21 @@ export type PoDetailLine = {
   price: number; total: number; img: string | null; done: boolean;
   /** รหัสสินค้า — ใช้บนใบพิมพ์ที่แขวนไว้ที่โต๊ะรับของ */
   sku: string | null;
+  /** id ของบรรทัด PO — ต้องมีเพื่อยืนยันรับของจากหน้าสแกน */
+  id: string;
+  defective: number;
 };
+
+/** ใบรับล่าสุดของ PO นี้ — ใช้เตือน "ใบนี้รับไปแล้ว" กันสแกนซ้ำ */
+export type PoLastReceipt = { gr_no: string; receiver: string | null; receive_date: string | null };
 export type PoDetail = {
   id: string; po_no: string; seller: string | null; order_date: string | null;
   currency: string | null; amount_thb: number;
   payment_status: string | null; paid_date: string | null; paid_amount_thb: number | null;
   payment_due_date: string | null; expected_date: string | null;
+  /** สถานะรับของรวมทั้งใบ: confirmed | partial | received | ... */
+  status: string | null;
+  last_receipt: PoLastReceipt | null;
   lines: PoDetailLine[];
 };
 
@@ -36,12 +45,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rmb = num((rateRes.data as { rate?: number } | null)?.rate) || 5;
 
   const { data: po, error } = await admin.from("purchase_orders_v2")
-    .select("id, po_no, seller_name, order_date, grand_total, currency, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date")
+    .select("id, po_no, seller_name, order_date, grand_total, currency, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status")
     .eq("id", id).single();
   if (error || !po) return NextResponse.json({ error: "ไม่พบใบสั่งซื้อ" }, { status: 404 });
 
   const { data: ls } = await admin.from("purchase_order_lines_v2")
-    .select("item_sku_id, item_name, qty, qty_received, uom, price_est, line_total, sort_order, line_status, is_active")
+    .select("id, item_sku_id, item_name, qty, qty_received, qty_defective, uom, price_est, line_total, sort_order, line_status, is_active")
     .eq("po_id", id).order("sort_order", { ascending: true });
   const rows = ((ls ?? []) as Record<string, unknown>[]).filter((l) => l.is_active !== false);
 
@@ -64,6 +73,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // ใบรับล่าสุด — หน้าสแกนเอาไปเตือน "ใบนี้รับไปแล้วเมื่อ..." กันกดซ้ำจนของเข้าเบิ้ล
+  const { data: grs } = await admin.from("goods_receipts_v2")
+    .select("gr_no, receiver, receive_date").eq("po_id", id)
+    .order("receive_date", { ascending: false }).limit(1);
+  const lastGr = ((grs ?? []) as Record<string, unknown>[])[0] ?? null;
+
   const p = po as Record<string, unknown>;
   const detail: PoDetail = {
     id: String(p.id), po_no: String(p.po_no ?? "—"), seller: (p.seller_name as string) ?? null,
@@ -74,6 +89,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     paid_amount_thb: p.paid_amount_thb == null ? null : num(p.paid_amount_thb),
     payment_due_date: (p.payment_due_date as string) ?? null,
     expected_date: (p.expected_date as string) ?? null,
+    status: (p.status as string) ?? null,
+    last_receipt: lastGr
+      ? { gr_no: String(lastGr.gr_no ?? ""), receiver: (lastGr.receiver as string) ?? null, receive_date: (lastGr.receive_date as string) ?? null }
+      : null,
     lines: rows.map((l) => {
       const sid = l.item_sku_id ? String(l.item_sku_id) : null;
       const key = sid ? coverMap.get(sid) : null;
@@ -86,6 +105,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
         done: st === "received" || st === "short_closed" || st === "closed_short" || remain === 0,
         sku: sid ? (codeBySku.get(sid) ?? null) : null,
+        id: String(l.id),
+        defective: num(l.qty_defective),
       };
     }),
   };

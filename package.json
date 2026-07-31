@@ -42,6 +42,7 @@
     "@types/jsbarcode": "^3.11.4",
     "aws4fetch": "^1.0.20",
     "jsbarcode": "^3.12.3",
+    "jsqr": "^1.4.0",
     "lottie-react": "^2.4.1",
     "next": "^15.0.0",
     "qrcode": "^1.5.4",
