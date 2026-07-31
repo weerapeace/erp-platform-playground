@@ -56,7 +56,21 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     if (key) product_image = `/api/r2-image?key=${encodeURIComponent(key)}`;
   }
 
-  return NextResponse.json({ data: { ...header, materials: materials ?? [], summary: summary ?? [], requested, product_image }, error: null });
+  // รูปวัตถุดิบ — วัตถุดิบเก็บใน skus_v2 เหมือนสินค้า (ผูกด้วย code = component_sku) → map เป็น URL รูปย่อ
+  const matCodes = [...new Set([...(materials ?? []), ...(summary ?? [])]
+    .map((r) => String((r as { component_sku?: string | null }).component_sku ?? "").trim())
+    .filter(Boolean))];
+  const matImages: Record<string, string> = {};
+  if (matCodes.length > 0) {
+    const { data: comps } = await supabase.from("skus_v2").select("code, cover_image_r2_key").in("code", matCodes.slice(0, 500));
+    for (const c of (comps ?? []) as { code: string; cover_image_r2_key: string | null }[]) {
+      if (c.cover_image_r2_key) matImages[c.code] = `/api/r2-image?key=${encodeURIComponent(c.cover_image_r2_key)}&w=120`;
+    }
+  }
+  const withImage = <T extends { component_sku?: string | null }>(rows: T[]) =>
+    rows.map((r) => ({ ...r, image_url: matImages[String(r.component_sku ?? "").trim()] ?? null }));
+
+  return NextResponse.json({ data: { ...header, materials: withImage(materials ?? []), summary: withImage(summary ?? []), requested, product_image }, error: null });
 }
 
 type MatEdit = { id: string; on_hand_qty: number; is_ready: boolean; to_purchase_qty: number };

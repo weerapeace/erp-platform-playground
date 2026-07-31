@@ -7,7 +7,8 @@ import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { parseDesignerDescription } from "@/lib/report-designer";
 import { buildReportHtml, buildReportHtmlMulti, type ReportTemplate } from "@/lib/template";
-import { WORKORDER_PRINT_TEMPLATE, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
+import { WORKORDER_PRINT_TEMPLATE, buildWorkOrderTemplate, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
+import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { Font, Plugins, Schema, Template } from "@pdfme/common";
 
@@ -46,6 +47,7 @@ export default function PrintWorkOrderPage() {
   const [genMsg, setGenMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [qrHtml, setQrHtml] = useState("");
+  const { cols: woCols, reload: reloadCols } = useWoPrintColumns();   // ตั้งค่าคอลัมน์ (ค่ากลางของระบบ)
 
   useEffect(() => {
     if (!mo) { setQrHtml(""); return; }
@@ -129,10 +131,12 @@ export default function PrintWorkOrderPage() {
 
   const html = useMemo(() => {
     if (!mo || pdfmeTemplate) return "";
-    const template = selectedRow ?? WORKORDER_PRINT_TEMPLATE;
+    // เทมเพลตเริ่มต้น = สร้างตาม "ตั้งค่าคอลัมน์" (ค่ากลางของระบบ) · เทมเพลตที่ผู้ใช้ทำเองใช้ของเขาเหมือนเดิม
+    const base = buildWorkOrderTemplate(woCols);
+    const template = selectedRow ?? base;
     const tplObj: ReportTemplate = {
-      paper_size: (selectedRow?.paper_size as ReportTemplate["paper_size"]) ?? WORKORDER_PRINT_TEMPLATE.paper_size,
-      orientation: (selectedRow?.orientation as ReportTemplate["orientation"]) ?? WORKORDER_PRINT_TEMPLATE.orientation,
+      paper_size: (selectedRow?.paper_size as ReportTemplate["paper_size"]) ?? base.paper_size,
+      orientation: (selectedRow?.orientation as ReportTemplate["orientation"]) ?? base.orientation,
       header_html: template.header_html ?? "",
       body_html: template.body_html ?? "",
       footer_html: template.footer_html ?? "",
@@ -149,7 +153,7 @@ export default function PrintWorkOrderPage() {
       return buildReportHtmlMulti(tplObj, dataList);
     }
     return buildReportHtml(tplObj, { ...buildWoHtmlData(mo, spec), qr_html: qrHtml });
-  }, [mo, spec, selectedRow, pdfmeTemplate, qrHtml]);
+  }, [mo, spec, selectedRow, pdfmeTemplate, qrHtml, woCols]);
 
   // ชื่อไฟล์ตอนบันทึก PDF — "ใบสั่งงาน - MO-2026-00123" (ของกลาง lib/print-filename)
   const fileName = docFileName("ใบสั่งงาน", mo?.mo_no);
@@ -169,6 +173,8 @@ export default function PrintWorkOrderPage() {
             {templates.map((template) => <option key={template.id} value={template.id}>{tplOptionLabel(template)}</option>)}
           </select>
         </label>
+        {/* ปรับความกว้างคอลัมน์ / เปิด-ปิดช่องรูป — ใช้ได้กับเทมเพลตค่าเริ่มต้น (HTML) เท่านั้น */}
+        {!pdfmeTemplate && <WoColumnSettings onSaved={reloadCols} />}
         <div className="flex-1" />
         {pdfmeTemplate ? (
           <>

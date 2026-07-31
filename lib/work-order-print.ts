@@ -24,6 +24,7 @@ export type MoMat = {
   qty_per?: number | null;
   uom?: string | null;
   size_label?: string | null;   // กลุ่ม C: บล็อกนี้ของไซส์ไหน (null = ใช้ทุกไซส์)
+  image_url?: string | null;    // รูปวัตถุดิบ (มาจาก /api/mo/[id] — skus_v2.cover_image_r2_key)
 };
 export type MoSummary = {
   component_sku?: string | null;
@@ -31,6 +32,7 @@ export type MoSummary = {
   material_type?: string | null;
   qty_per?: number | null;
   uom?: string | null;
+  image_url?: string | null;
 };
 export type ProductSpecRow = { key: string; label: string; value: string; order?: number };
 export type ProductSpecGroup = { label: string; items: { code: string; name: string; count: number }[] };
@@ -91,6 +93,95 @@ function photoHtml(url?: string | null) {
   return url ? `<img src="${esc(url)}" alt="รูปสินค้า" />` : `<div class="photo-empty">ไม่มีรูป</div>`;
 }
 
+function matImgHtml(url?: string | null) {
+  return url ? `<img class="mat-img" src="${esc(url)}" alt="" />` : "";
+}
+
+/* ─────────────── ตั้งค่าคอลัมน์ตารางวัตถุดิบ (ของกลาง) ───────────────
+ * เก็บเป็นค่ากลางของระบบใน ui_config key "wo_print_columns" → ทุกคนพิมพ์ได้หน้าตาเดียวกัน
+ * ผู้ใช้ปรับได้จากปุ่ม "⚙ ตั้งค่าตาราง" ในหน้าพิมพ์ (เปิด/ปิดคอลัมน์ + ความกว้าง %)
+ */
+export type WoColumn = { key: string; label: string; width: number; show: boolean };
+export type WoPrintColumns = { summary: WoColumn[]; lines: WoColumn[] };
+
+export const WO_DEFAULT_COLUMNS: WoPrintColumns = {
+  summary: [
+    { key: "image", label: "รูป", width: 12, show: true },
+    { key: "material_type", label: "ชนิด", width: 12, show: true },
+    { key: "code", label: "รหัส", width: 20, show: true },
+    { key: "component_name", label: "วัตถุดิบ", width: 34, show: true },
+    { key: "required", label: "รวมต้องใช้", width: 12, show: true },
+    { key: "uom", label: "หน่วย", width: 10, show: true },
+  ],
+  lines: [
+    { key: "image", label: "รูป", width: 8, show: true },
+    { key: "idx", label: "ลำดับ", width: 5, show: true },
+    { key: "code", label: "รหัส", width: 13, show: true },
+    { key: "component_name", label: "วัตถุดิบ", width: 19, show: true },
+    { key: "material_type", label: "ชนิด", width: 8, show: true },
+    { key: "cut_block_code", label: "บล็อกตัด", width: 8, show: true },
+    { key: "cut_size", label: "กว้าง x ยาว", width: 11, show: true },
+    { key: "total_pieces", label: "ยอดรวมชิ้น", width: 10, show: true },
+    { key: "required", label: "รวมต้องใช้", width: 10, show: true },
+    { key: "uom", label: "หน่วย", width: 8, show: true },
+  ],
+};
+
+// เนื้อในช่องของแต่ละคอลัมน์ (คลาส + ตัวแปร Mustache) — ที่เดียว ใช้ทั้ง 2 ตาราง
+const CELL: Record<string, { cls: string; body: string }> = {
+  image: { cls: "img-cell", body: "{{{image_html}}}" },
+  idx: { cls: "text-center", body: "{{idx}}" },
+  code: { cls: "code-cell", body: "{{code}}" },
+  component_name: { cls: "", body: "{{component_name}}" },
+  material_type: { cls: "", body: "{{material_type}}" },
+  cut_block_code: { cls: "text-center", body: "{{cut_block_code}}" },
+  cut_size: { cls: "text-center", body: "{{cut_size}}" },
+  total_pieces: { cls: "text-right", body: "{{total_pieces}}" },
+  required: { cls: "text-right", body: "{{required}}" },
+  uom: { cls: "text-center", body: "{{uom}}" },
+};
+// ตารางสรุปจัดชนิดกลาง / ลำดับไม่มี — override เฉพาะที่ต่าง
+const SUMMARY_CELL_OVERRIDE: Record<string, Partial<{ cls: string }>> = { material_type: { cls: "" }, uom: { cls: "text-center" } };
+
+/** รวมค่าที่ผู้ใช้บันทึกไว้เข้ากับค่าเริ่มต้น — คอลัมน์ใหม่ที่เพิ่มทีหลังจะไม่หาย, คีย์แปลกปลอมถูกทิ้ง */
+export function normalizeWoColumns(raw: unknown): WoPrintColumns {
+  const pick = (defs: WoColumn[], saved: unknown): WoColumn[] => {
+    const map = new Map<string, Partial<WoColumn>>();
+    if (Array.isArray(saved)) {
+      for (const s of saved) {
+        const k = typeof s === "object" && s !== null ? String((s as { key?: unknown }).key ?? "") : "";
+        if (k) map.set(k, s as Partial<WoColumn>);
+      }
+    }
+    const merged = defs.map((d) => {
+      const s = map.get(d.key);
+      const w = Number(s?.width);
+      return { ...d, width: Number.isFinite(w) && w > 0 ? Math.min(80, w) : d.width, show: s?.show === undefined ? d.show : !!s.show };
+    });
+    // เรียงตามลำดับที่บันทึกไว้ (ถ้ามี) — คอลัมน์ที่ยังไม่เคยบันทึกไปต่อท้าย
+    const order = [...map.keys()];
+    return merged.sort((a, b) => {
+      const ia = order.indexOf(a.key), ib = order.indexOf(b.key);
+      return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+    });
+  };
+  const obj = (raw ?? {}) as { summary?: unknown; lines?: unknown };
+  return { summary: pick(WO_DEFAULT_COLUMNS.summary, obj.summary), lines: pick(WO_DEFAULT_COLUMNS.lines, obj.lines) };
+}
+
+const colsHtml = (cols: WoColumn[], summary: boolean) => {
+  const shown = cols.filter((c) => c.show);
+  const use = shown.length > 0 ? shown : cols;   // ปิดหมด = กันตารางว่าง ให้กลับไปโชว์ทั้งหมด
+  const total = use.reduce((n, c) => n + c.width, 0) || 1;
+  const th = use.map((c) => `<th style="width:${r2((c.width / total) * 100)}%">${esc(c.label)}</th>`).join("\n        ");
+  const td = use.map((c) => {
+    const base = CELL[c.key] ?? { cls: "", body: "" };
+    const cls = summary ? (SUMMARY_CELL_OVERRIDE[c.key]?.cls ?? base.cls) : base.cls;
+    return `<td${cls ? ` class="${cls}"` : ""}>${base.body}</td>`;
+  }).join("\n        ");
+  return { th, td };
+};
+
 function specLabel(key: string, fallback: string) {
   const labels: Record<string, string> = {
     materials: "วัตถุดิบ", lining: "ซับใน", zipper: "ซิป", strap: "สาย", thread: "ด้าย", spares: "อะไหล่", logo: "โลโก้/พิมพ์",
@@ -115,16 +206,20 @@ export function woScalars(mo: MoDetail, spec: ProductSpec | null): Record<string
   };
 }
 
-export function woTableRows(mo: MoDetail): string[][] {
-  const qty = Number(mo.qty) || 0;
-  const sortedMaterials = [...(mo.materials ?? [])].sort((a, b) => {
+// เรียงวัตถุดิบแบบเดียวกันทุกที่ (ตาราง HTML + ตาราง pdfme) — แยกออกมาให้ zip รูปเข้าแถวได้ตรงกัน
+function sortedMaterials(mo: MoDetail): MoMat[] {
+  return [...(mo.materials ?? [])].sort((a, b) => {
     const byType = dash(a.material_type).localeCompare(dash(b.material_type), "th");
     if (byType !== 0) return byType;
     const byName = dash(a.component_name ?? a.component_sku).localeCompare(dash(b.component_name ?? b.component_sku), "th");
     if (byName !== 0) return byName;
     return dash(a.cut_block_code).localeCompare(dash(b.cut_block_code), "th", { numeric: true });
   });
-  return sortedMaterials.map((mat, index) => {
+}
+
+export function woTableRows(mo: MoDetail): string[][] {
+  const qty = Number(mo.qty) || 0;
+  return sortedMaterials(mo).map((mat, index) => {
     const width = Number(mat.cut_width) || 0;
     const length = Number(mat.cut_length) || 0;
     const pieces = Number(mat.pieces) || 0;
@@ -146,20 +241,21 @@ export function woTableRows(mo: MoDetail): string[][] {
 function materialSummaryRows(mo: MoDetail) {
   const qty = Number(mo.qty) || 0;
   const source = (mo.summary?.length ? mo.summary : mo.materials) ?? [];
-  const grouped = new Map<string, { material_type: string; component_name: string; required: number; uom: string }>();
+  const grouped = new Map<string, { material_type: string; code: string; component_name: string; required: number; uom: string; image_url: string | null }>();
   source.forEach((row) => {
     const materialType = dash(row.material_type);
     const componentName = dash(row.component_name ?? row.component_sku);
     const code = dash(row.component_sku);
     const uom = dash(row.uom);
     const key = `${materialType}|${componentName}|${uom}`;
-    const prev = grouped.get(key) ?? { material_type: materialType, code, component_name: componentName, required: 0, uom };
+    const prev = grouped.get(key) ?? { material_type: materialType, code, component_name: componentName, required: 0, uom, image_url: row.image_url ?? null };
     prev.required += (Number(row.qty_per) || 0) * qty;
+    if (!prev.image_url && row.image_url) prev.image_url = row.image_url;   // แถวแรกที่มีรูปชนะ
     grouped.set(key, prev);
   });
   return [...grouped.values()]
     .sort((a, b) => `${a.material_type}${a.component_name}`.localeCompare(`${b.material_type}${b.component_name}`, "th"))
-    .map((row) => ({ ...row, required: numTh(r2(row.required)) }));
+    .map((row) => ({ ...row, required: numTh(r2(row.required)), image_html: matImgHtml(row.image_url) }));
 }
 
 function productSpecRows(spec: ProductSpec | null) {
@@ -184,9 +280,11 @@ function productSpecRows(spec: ProductSpec | null) {
 }
 
 export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null): Record<string, unknown> {
-  const lines = woTableRows(mo).map((row) => ({
+  const mats = sortedMaterials(mo);   // ลำดับเดียวกับ woTableRows → zip รูปเข้าแถวได้ตรงตัว
+  const lines = woTableRows(mo).map((row, i) => ({
     idx: row[0], component_name: row[1], material_type: row[2], cut_block_code: row[3],
     cut_size: row[4], total_pieces: row[5], required: row[6], uom: row[7], code: row[8] || "-",
+    image_html: matImgHtml(mats[i]?.image_url),
   }));
   return {
     ...woScalars(mo, spec),
@@ -195,6 +293,69 @@ export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null): Record<
     product_spec_rows: productSpecRows(spec),
     lines,
   };
+}
+
+// เนื้อเอกสารส่วนตาราง — สร้างจาก "ตั้งค่าคอลัมน์" (ที่เดียว ไม่มีตารางซ้ำในไฟล์)
+function woBodyHtml(cols: WoPrintColumns): string {
+  const s = colsHtml(cols.summary, true);
+  const l = colsHtml(cols.lines, false);
+  return `<section class="summary-section">
+  <div class="section-title">สรุปวัตถุดิบที่ต้องใช้</div>
+  <table class="summary-table">
+    <thead>
+      <tr>
+        ${s.th}
+      </tr>
+    </thead>
+    <tbody>
+      {{#material_summary}}
+      <tr>
+        ${s.td}
+      </tr>
+      {{/material_summary}}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <div class="section-title">รายการวัตถุดิบ / บล็อกตัด</div>
+  <table class="doc-table">
+    <thead>
+      <tr>
+        ${l.th}
+      </tr>
+    </thead>
+    <tbody>
+      {{#lines}}
+      <tr>
+        ${l.td}
+      </tr>
+      {{/lines}}
+    </tbody>
+  </table>
+</section>
+
+<section class="product-detail">
+  <div class="detail-photo">{{{product_image_html}}}</div>
+  <div class="detail-main">
+    <div class="detail-title">{{product_name}}</div>
+    <div class="detail-sub">ขนาด: {{product_size}}</div>
+    <table class="detail-table">
+      {{#product_spec_rows}}
+      <tr>
+        <td class="detail-label">{{label}}</td>
+        <td>{{value}}</td>
+      </tr>
+      {{/product_spec_rows}}
+    </table>
+    <div class="note-box"><span class="label">วิธีทำ / หมายเหตุ:</span> {{note}}</div>
+  </div>
+</section>`;
+}
+
+/** สร้างเทมเพลตใบสั่งงานผลิตตาม "ตั้งค่าคอลัมน์" (ไม่ส่ง = ใช้ค่าเริ่มต้น) */
+export function buildWorkOrderTemplate(columns?: WoPrintColumns | null): ReportTemplate {
+  return { ...WORKORDER_PRINT_TEMPLATE, body_html: woBodyHtml(columns ?? WO_DEFAULT_COLUMNS) };
 }
 
 export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
@@ -227,82 +388,7 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
     <div class="wo-qr-box">{{{qr_html}}}</div>
   </div>
 </section>`,
-  body_html: `<section class="summary-section">
-  <div class="section-title">สรุปวัตถุดิบที่ต้องใช้</div>
-  <table class="summary-table">
-    <thead>
-      <tr>
-        <th>ชนิด</th>
-        <th>รหัส</th>
-        <th>วัตถุดิบ</th>
-        <th class="text-right">รวมต้องใช้</th>
-        <th>หน่วย</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{#material_summary}}
-      <tr>
-        <td>{{material_type}}</td>
-        <td class="code-cell">{{code}}</td>
-        <td>{{component_name}}</td>
-        <td class="text-right">{{required}}</td>
-        <td class="text-center">{{uom}}</td>
-      </tr>
-      {{/material_summary}}
-    </tbody>
-  </table>
-</section>
-
-<section>
-  <div class="section-title">รายการวัตถุดิบ / บล็อกตัด</div>
-  <table class="doc-table">
-    <thead>
-      <tr>
-        <th style="width:6%">ลำดับ</th>
-        <th style="width:15%">รหัส</th>
-        <th style="width:22%">วัตถุดิบ</th>
-        <th style="width:8%">ชนิด</th>
-        <th style="width:9%">บล็อกตัด</th>
-        <th style="width:12%">กว้าง x ยาว</th>
-        <th style="width:11%">ยอดรวมชิ้น</th>
-        <th style="width:11%">รวมต้องใช้</th>
-        <th style="width:6%">หน่วย</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{#lines}}
-      <tr>
-        <td class="text-center">{{idx}}</td>
-        <td class="code-cell">{{code}}</td>
-        <td>{{component_name}}</td>
-        <td class="text-center">{{material_type}}</td>
-        <td class="text-center">{{cut_block_code}}</td>
-        <td class="text-center">{{cut_size}}</td>
-        <td class="text-right">{{total_pieces}}</td>
-        <td class="text-right">{{required}}</td>
-        <td class="text-center">{{uom}}</td>
-      </tr>
-      {{/lines}}
-    </tbody>
-  </table>
-</section>
-
-<section class="product-detail">
-  <div class="detail-photo">{{{product_image_html}}}</div>
-  <div class="detail-main">
-    <div class="detail-title">{{product_name}}</div>
-    <div class="detail-sub">ขนาด: {{product_size}}</div>
-    <table class="detail-table">
-      {{#product_spec_rows}}
-      <tr>
-        <td class="detail-label">{{label}}</td>
-        <td>{{value}}</td>
-      </tr>
-      {{/product_spec_rows}}
-    </table>
-    <div class="note-box"><span class="label">วิธีทำ / หมายเหตุ:</span> {{note}}</div>
-  </div>
-</section>`,
+  body_html: woBodyHtml(WO_DEFAULT_COLUMNS),
   footer_html: `<section class="signatures">
   <div class="signature">ผู้สั่งผลิต</div>
   <div class="signature">ผู้รับงานผลิต</div>
@@ -337,6 +423,9 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 .summary-table { margin-bottom: 3mm; }
 .text-center { text-align: center; }
 .text-right { text-align: right; }
+/* ช่องรูปวัตถุดิบ — เห็นเต็มใบ ไม่ตัด · ไม่มีรูป = เว้นว่าง ไม่ดันความสูงแถว */
+.img-cell { text-align: center; padding: 0.6mm !important; }
+.mat-img { display: inline-block; max-width: 100%; max-height: 13mm; width: auto; height: auto; object-fit: contain; }
 .code-cell { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 8.5px; line-height: 1.2; color: #334155; white-space: normal; word-break: break-all; overflow-wrap: anywhere; padding-left: 1mm !important; padding-right: 1mm !important; }
 .product-detail { margin-top: 5mm; display: grid; grid-template-columns: 28mm 1fr; gap: 3mm; border-top: 1px solid #cbd5e1; padding-top: 3mm; page-break-inside: avoid; break-inside: avoid; }
 .detail-photo { width: 28mm; height: 24mm; }
@@ -362,6 +451,8 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
   .section-title { font-size: 10px; margin: 1.5mm 0 1mm; }
   .summary-table th, .summary-table td, .doc-table th, .doc-table td { padding: 0.6mm 0.7mm; }
   .code-cell { font-size: 7.5px; padding-left: 0.6mm !important; padding-right: 0.6mm !important; }
+  .img-cell { padding: 0.3mm !important; }
+  .mat-img { max-height: 10mm; }
   .summary-table { margin-bottom: 1.5mm; }
   .product-detail { margin-top: 2mm; gap: 2mm; grid-template-columns: 22mm 1fr; padding-top: 2mm; }
   .detail-photo { width: 22mm; height: 17mm; }
