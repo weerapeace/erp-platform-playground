@@ -104,14 +104,16 @@ function matImgHtml(url?: string | null) {
 export type WoColumn = { key: string; label: string; width: number; show: boolean };
 /**
  * หน้าตาเส้นตาราง — เดิมเป็นเส้นดำ 1px ทุกช่อง เจ้าของบอกว่าหนาไปตอนพิมพ์
- * ⚠️ เบราว์เซอร์วาดเส้นบางกว่า 1px ไม่ได้ (ปัดขึ้นเป็น 1 เสมอ) → ความหนาต่ำสุดคือ 1
- *    สิ่งที่ทำให้ "ดูบางลง" จริงคือ สีเส้นที่อ่อนลง + ตัดเส้นตั้งออก (border_mode)
+ * ⚠️⚠️ ต้องกำหนดความหนาเป็น "มม." ไม่ใช่ "px":
+ *   - จอวาดเส้นบางกว่า 1px ไม่ได้ (ปัดขึ้นเสมอ) → สั่งเป็น px แล้วต่ำกว่า 1 จะไม่มีผลอะไรเลย
+ *   - แต่กระดาษ/ตัวอย่างก่อนพิมพ์ละเอียดกว่าจอมาก → สั่งเป็น mm แล้วบางได้จริง (1px ≈ 0.26mm = หนามากสำหรับเอกสาร)
+ * ตัวช่วยอื่นที่ทำให้ดูโปร่ง: สีเส้นอ่อนลง + ตัดเส้นตั้งออก (border_mode)
  */
 export type WoBorderMode = "all" | "h" | "none";
-export type WoPrintStyle = { border_px: number; border_color: string; border_mode: WoBorderMode };
+export type WoPrintStyle = { border_mm: number; border_color: string; border_mode: WoBorderMode };
 export type WoPrintColumns = { summary: WoColumn[]; lines: WoColumn[]; style?: WoPrintStyle };
 
-export const WO_DEFAULT_STYLE: WoPrintStyle = { border_px: 1, border_color: "#94a3b8", border_mode: "all" };
+export const WO_DEFAULT_STYLE: WoPrintStyle = { border_mm: 0.12, border_color: "#94a3b8", border_mode: "all" };
 export const WO_BORDER_COLORS: { label: string; value: string }[] = [
   { label: "จางมาก", value: "#e2e8f0" },
   { label: "อ่อนมาก", value: "#cbd5e1" },
@@ -217,14 +219,14 @@ export function normalizeWoColumns(raw: unknown): WoPrintColumns {
   };
   const obj = (raw ?? {}) as { summary?: unknown; lines?: unknown; style?: unknown };
   const st = (obj.style ?? {}) as Partial<WoPrintStyle>;
-  const px = Number(st.border_px);
+  const mm = Number(st.border_mm);
   const color = typeof st.border_color === "string" && /^#[0-9a-fA-F]{3,8}$/.test(st.border_color) ? st.border_color : WO_DEFAULT_STYLE.border_color;
   const mode = WO_BORDER_MODES.some((m) => m.value === st.border_mode) ? (st.border_mode as WoBorderMode) : WO_DEFAULT_STYLE.border_mode;
   return {
     summary: pick(WO_DEFAULT_COLUMNS.summary, obj.summary),
     lines: pick(WO_DEFAULT_COLUMNS.lines, obj.lines),
-    // ต่ำกว่า 1 เบราว์เซอร์ปัดขึ้นเป็น 1 อยู่ดี → clamp ให้ตรงกับที่เห็นจริง (ค่าเก่าที่เคยบันทึก 0.2 จะกลายเป็น 1)
-    style: { border_px: Number.isFinite(px) && px > 0 ? Math.min(3, Math.max(1, px)) : WO_DEFAULT_STYLE.border_px, border_color: color, border_mode: mode },
+    // ค่าเก่าที่เคยเก็บเป็น px (ใช้ไม่ได้จริง) ตกไปเอง → ได้ค่าเริ่มต้นแบบ mm แทน
+    style: { border_mm: Number.isFinite(mm) && mm > 0 ? Math.min(1, Math.max(0.05, mm)) : WO_DEFAULT_STYLE.border_mm, border_color: color, border_mode: mode },
   };
 }
 
@@ -414,17 +416,17 @@ function woBodyHtml(cols: WoPrintColumns): string {
 
 // CSS ทับท้าย — ปรับเส้นตาราง (หนา · สี · แบบเส้น) ใช้ทั้งบนจอและตอนพิมพ์ให้เห็นเหมือนกัน
 function woStyleCss(style: WoPrintStyle): string {
-  const w = style.border_px, c = style.border_color;
+  const w = `${style.border_mm}mm`, c = style.border_color;
   const cells = ".summary-table th, .summary-table td, .doc-table th, .doc-table td";
   const rule =
     style.border_mode === "none"
       ? `${cells} { border: 0; }\n.wo-hero { border: 0; }`
       : style.border_mode === "h"
         // เส้นนอนอย่างเดียว = ตัดเส้นตั้งออก เหลือเส้นคั่นแถว (ดูโปร่งกว่ามาก แต่ยังอ่านเป็นแถวได้)
-        ? `${cells} { border: 0; border-bottom: ${w}px solid ${c}; }
-.summary-table thead th, .doc-table thead th { border-bottom: ${w}px solid ${c}; }
-.wo-hero { border: 0; border-bottom: ${w}px solid ${c}; }`
-        : `${cells} { border: ${w}px solid ${c}; }\n.wo-hero { border: ${w}px solid ${c}; }`;
+        ? `${cells} { border: 0; border-bottom: ${w} solid ${c}; }
+.summary-table thead th, .doc-table thead th { border-bottom: ${w} solid ${c}; }
+.wo-hero { border: 0; border-bottom: ${w} solid ${c}; }`
+        : `${cells} { border: ${w} solid ${c}; }\n.wo-hero { border: ${w} solid ${c}; }`;
   return `\n/* เส้นตาราง — ปรับจากปุ่ม "⚙ ตั้งค่าตาราง" */\n${rule}\n@media print {\n${rule}\n}\n`;
 }
 

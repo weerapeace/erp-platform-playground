@@ -213,14 +213,15 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[11px] text-slate-500 w-14 shrink-0">ความหนา</span>
-                      <input type="range" min={1} max={3} step={0.5}
-                        value={(draft.style ?? WO_DEFAULT_STYLE).border_px}
-                        onChange={(e) => setDraft((d) => ({ ...d, style: { ...(d.style ?? WO_DEFAULT_STYLE), border_px: Number(e.target.value) } }))}
+                      <input type="range" min={0.05} max={0.6} step={0.01}
+                        value={(draft.style ?? WO_DEFAULT_STYLE).border_mm}
+                        onChange={(e) => setDraft((d) => ({ ...d, style: { ...(d.style ?? WO_DEFAULT_STYLE), border_mm: Number(e.target.value) } }))}
                         className="flex-1 accent-indigo-600" />
-                      <span className="w-11 text-right text-[11px] text-slate-500 tabular-nums">{(draft.style ?? WO_DEFAULT_STYLE).border_px} px</span>
+                      <span className="w-14 text-right text-[11px] text-slate-500 tabular-nums">{(draft.style ?? WO_DEFAULT_STYLE).border_mm} มม.</span>
                     </div>
                     <p className="text-[10px] text-slate-400 leading-snug">
-                      อยากให้ดู<b className="text-slate-600">บางลง</b> ให้เลือก <b className="text-slate-600">“เส้นนอน”</b> + สีจาง ๆ · ความหนา<b className="text-slate-600">ต่ำกว่า 1 ไม่ได้</b> (เบราว์เซอร์วาดบางกว่านี้ไม่ได้ ปัดขึ้นเป็น 1 เสมอ)
+                      ⚠️ <b className="text-slate-600">บนจอ</b> เส้นจะดูหนาเท่ากันหมด (จอวาดบางกว่า 1 จุดไม่ได้) — <b className="text-slate-600">ต้องดูที่ “ตัวอย่างก่อนพิมพ์” (Ctrl+P) หรือกระดาษจริง</b> ถึงจะเห็นว่าบางลง
+                      <br />เทียบให้: เส้นเดิม = 0.26 มม. · ค่าเริ่มต้นใหม่ = 0.12 มม. (บางกว่าครึ่ง) · อยากโปร่งอีกให้เลือก “เส้นนอน” + สีจาง
                     </p>
                   </div>
                 </div>
