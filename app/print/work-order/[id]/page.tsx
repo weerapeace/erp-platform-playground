@@ -165,6 +165,19 @@ export default function PrintWorkOrderPage() {
 
   return (
     <div className="min-h-screen bg-slate-100">
+      {/* ใบสั่งงานที่พิมพ์แจกไปแล้ว QR ชี้มาหน้านี้ (ก่อนเปลี่ยนไปชี้ /s/<เลขใบ>)
+          → ใส่ทางลัดไปการ์ดยืนยันเตรียม/ตัด ใบเก่าในมือช่างจะได้ใช้ได้เลย ไม่ต้องพิมพ์ใหม่ */}
+      {mo && (
+        <div className="no-print bg-emerald-50 border-b border-emerald-200 px-6 py-2.5 flex flex-wrap items-center gap-3">
+          <span className="text-sm text-emerald-800">📷 สแกนมาเพื่อติ๊กงาน?</span>
+          <button
+            onClick={() => router.push(`/scan/prep/${mo.id}`)}
+            className="h-9 rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            ยืนยันเตรียม / ตัด →
+          </button>
+        </div>
+      )}
       <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-6 py-3">
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <label className="flex items-center gap-2 text-sm text-slate-600">
