@@ -96,7 +96,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const skuIds = [...codeBySkuId.keys()];
   if (skuIds.length > 0) {
     const { data: poLines } = await admin.from("purchase_order_lines_v2")
-      .select("item_sku_id, qty, qty_received, line_status, po:purchase_orders_v2!po_id ( po_number, expected_date, is_active )")
+      .select("item_sku_id, qty, qty_received, line_status, po:purchase_orders_v2!po_id ( po_no, expected_date, is_active )")   // ⚠️ ตารางนี้ใช้ po_no ไม่ใช่ po_number
       .in("item_sku_id", skuIds.slice(0, 2000)).eq("is_active", true)
       .not("line_status", "in", "(received,short_closed,closed_short,cancelled)");   // ⚠️ DB มีทั้ง short_closed/closed_short — รับทั้งสองแบบ
     for (const l of (poLines ?? []) as Record<string, unknown>[]) {
@@ -111,7 +111,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       prev.qty = r2(prev.qty + left);
       const exp = (po.expected_date as string) ?? null;
       if (exp && (!prev.expected || exp < prev.expected)) prev.expected = exp;   // เอาวันที่ใกล้สุด
-      const poNo = (po.po_number as string) ?? "";
+      const poNo = (po.po_no as string) ?? "";
       if (poNo && !prev.po_nos.includes(poNo) && prev.po_nos.length < 10) prev.po_nos.push(poNo);
       incomingByCode.set(code, prev);
     }
