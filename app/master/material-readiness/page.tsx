@@ -16,6 +16,7 @@ import { ERPModal } from "@/components/modal";
 import { addToPrCart } from "@/lib/pr-cart";
 import { useViewPref } from "@/lib/use-view-pref";
 import { usePermission } from "@/components/auth";
+import { MoMaterialChecklist } from "@/components/mo-material-checklist";
 import type { ReadinessMo, ReadinessLine, MissingRow, Criticality } from "@/app/api/mo/material-readiness/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 
@@ -137,6 +138,8 @@ export default function MaterialReadinessPage() {
   const [filter, setFilter] = useState<"all" | "ready" | "preparing" | "waiting" | "blocked">("all");
   const [sortKey, setSortKey] = useState<"due" | "pct_asc" | "pct_desc" | "mo">("due");
   const [detail, setDetail] = useState<ReadinessMo | null>(null);
+  const [detailTab, setDetailTab] = useState<"summary" | "edit">("summary");
+  const [picked, setPicked] = useState<Set<string>>(new Set());   // วัตถุดิบที่ขาด ที่ติ๊กไว้จะใส่ตะกร้าทีเดียว
   const { view, setView, defaultView, saveDefault } = useViewPref("material_readiness_view", ["cards", "table"] as const, "cards");
 
   const load = () => {
@@ -167,13 +170,26 @@ export default function MaterialReadinessPage() {
     return q === "" ? data.missing : data.missing.filter((r) => `${r.component_sku ?? ""} ${r.component_name ?? ""}`.toLowerCase().includes(q));
   }, [data, search]);
 
+  const cartLine = (r: MissingRow) => ({
+    label: r.component_sku ? `[${r.component_sku}] ${r.component_name ?? ""}`.trim() : (r.component_name || "วัตถุดิบ"),
+    qty: Math.max(1, Math.ceil(r.total_missing)), uom: r.uom || "ชิ้น",
+    seller: "", price: 0, currency: "THB", image: null, variationId: null, skuRef: r.component_sku, skuId: null,
+    note: `ขาดรวมจาก ${r.mo_count} ใบสั่งผลิต (${r.mo_nos.slice(0, 5).join(", ")}${r.mo_nos.length > 5 ? " …" : ""})`,
+    reason: "วัตถุดิบไม่พอตามใบสั่งผลิต", sourceMoNo: r.mo_nos[0] ?? null,
+  });
   const addMissingToCart = (r: MissingRow) => {
-    const n = addToPrCart([{
-      label: r.component_name || r.component_sku || "-", qty: Math.max(1, Math.ceil(r.total_missing)), uom: r.uom || "ชิ้น",
-      seller: "", price: 0, currency: "THB", image: null, variationId: null, skuRef: r.component_sku, skuId: null,
-      note: `ขาดจาก ${r.mo_count} ใบสั่งผลิต`, reason: "วัตถุดิบไม่พอตามใบสั่งผลิต", sourceMoNo: r.mo_nos[0] ?? null,
-    }]);
-    toast.success(`ใส่ตะกร้าขอซื้อแล้ว (${n} รายการ) — ไปกดยืนยันที่หน้า “ขอซื้อ”`);
+    const n = addToPrCart([cartLine(r)]);
+    toast.success(`ใส่ตะกร้าขอซื้อแล้ว (ตะกร้ามี ${n} รายการ) — ไปกดยืนยันที่หน้า “ขอซื้อ”`);
+  };
+  const rowKey = (r: MissingRow) => r.component_sku ?? r.component_name ?? "?";
+  const togglePick = (r: MissingRow) => setPicked((s) => { const n = new Set(s); const k = rowKey(r); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  // ใส่ตะกร้าทีเดียวหลายรายการ → ไปสร้างเป็น "ใบขอซื้อใบเดียว" ที่หน้าขอซื้อ
+  const addPickedToCart = () => {
+    const rows = missingShown.filter((r) => picked.has(rowKey(r)));
+    if (rows.length === 0) return;
+    const n = addToPrCart(rows.map(cartLine));
+    setPicked(new Set());
+    toast.success(`ใส่ตะกร้า ${rows.length} รายการแล้ว (ตะกร้ามี ${n}) — ไปหน้า “ขอซื้อ” กดสร้างเป็นใบเดียวได้เลย`);
   };
 
   const selCls = "h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500";
@@ -323,12 +339,25 @@ export default function MaterialReadinessPage() {
                     ตัวบนสุด = ปลดล็อกใบงานได้มากที่สุดถ้าหามาได้
                     {data.summary.missing_ordered > 0 && <> · <span className="text-emerald-600">🚚 {data.summary.missing_ordered} รายการสั่งซื้อไปแล้ว รอเข้า</span></>}
                   </div>
+                  {/* เลือกหลายรายการ → ใส่ตะกร้าทีเดียว → ไปสร้างเป็นใบขอซื้อ "ใบเดียว" ที่หน้าขอซื้อ */}
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <button onClick={() => setPicked(new Set(missingShown.filter((r) => !(r.incoming && r.incoming.qty > 0)).map(rowKey)))}
+                      className="h-7 px-2 text-[11px] border border-slate-200 rounded text-slate-500 hover:bg-slate-50 whitespace-nowrap">
+                      เลือกที่ยังไม่ได้สั่ง ({missingShown.filter((r) => !(r.incoming && r.incoming.qty > 0)).length})
+                    </button>
+                    {picked.size > 0 && <button onClick={() => setPicked(new Set())} className="h-7 px-1.5 text-[11px] text-slate-400 hover:text-rose-500">ล้าง</button>}
+                    <div className="flex-1" />
+                    <button onClick={addPickedToCart} disabled={picked.size === 0}
+                      className="h-7 px-2.5 text-[11px] font-medium bg-indigo-600 text-white rounded disabled:opacity-40 whitespace-nowrap">🛒 ใส่ตะกร้า ({picked.size})</button>
+                  </div>
                 </div>
                 <div className="max-h-[calc(100vh-260px)] overflow-y-auto p-2 space-y-1.5">
                   {missingShown.length === 0 ? (
                     <div className="text-center text-[11px] text-slate-300 py-8">ไม่มีของขาด 🎉</div>
                   ) : missingShown.slice(0, 100).map((r) => (
-                    <div key={r.component_sku ?? r.component_name} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-100">
+                    <div key={rowKey(r)} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border ${picked.has(rowKey(r)) ? "border-indigo-300 bg-indigo-50/40" : "border-slate-100"}`}>
+                      <input type="checkbox" checked={picked.has(rowKey(r))} onChange={() => togglePick(r)}
+                        title="เลือกเพื่อใส่ตะกร้าพร้อมกันหลายรายการ" className="w-4 h-4 accent-indigo-600 shrink-0" />
                       <HoverImage url={r.image} size={32} />
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-medium text-slate-800 truncate">{r.component_name}</div>
@@ -361,7 +390,7 @@ export default function MaterialReadinessPage() {
         )}
 
       {/* ป๊อป: วัตถุดิบของใบนั้น */}
-      <ERPModal open={!!detail} onClose={() => setDetail(null)} size="xl" storageKey="material-readiness-detail"
+      <ERPModal open={!!detail} onClose={() => { setDetail(null); setDetailTab("summary"); }} size="xl" storageKey="material-readiness-detail"
         title={detail ? `${detail.product_sku ?? ""} · ${detail.mo_no}` : ""}>
         {detail && (
           <div className="space-y-2">
@@ -371,6 +400,25 @@ export default function MaterialReadinessPage() {
               <b className={detail.blocked ? "text-rose-600" : "text-slate-700"}>{detail.pct}%</b>
               {detail.blocked && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700">⛔ ของหลักยังไม่ครบ</span>}
             </div>
+
+            {/* สลับ: ดูสรุป (มีระดับความสำคัญ) ↔ ติ๊กเตรียม/แก้จำนวน (เช็กลิสต์ตัวเดียวกับบอร์ดจ่ายงาน) */}
+            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+              <button onClick={() => setDetailTab("summary")} className={`h-8 px-3 text-[12px] ${detailTab === "summary" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📊 สรุปความพร้อม</button>
+              <button onClick={() => setDetailTab("edit")} className={`h-8 px-3 text-[12px] border-l border-slate-200 ${detailTab === "edit" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>✏️ ติ๊กเตรียม / แก้จำนวน</button>
+            </div>
+
+            {detailTab === "edit" ? (
+              <>
+                {detail.blocked && detail.lines.some((l) => l.criticality === "critical" && !l.is_ready) && (
+                  <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">
+                    ⛔ <b>ของหลักที่ยังไม่พร้อม:</b> {detail.lines.filter((l) => l.criticality === "critical" && !l.is_ready).map((l) => l.component_name).join(" · ")}
+                  </div>
+                )}
+                <MoMaterialChecklist moId={detail.id} moNo={detail.mo_no} productLabel={detail.product_name ?? detail.product_sku} onSaved={load} />
+                <p className="text-[11px] text-slate-400">ติ๊ก/พิมพ์แล้วบันทึกให้อัตโนมัติ · ตัวเลขบนหน้าหลักจะอัปเดตตาม (เหมือนติ๊กที่บอร์ดจ่ายงานทุกอย่าง)</p>
+              </>
+            ) : (
+            <>
             <div className="border border-slate-200 rounded-lg overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-[11px] text-slate-500">
@@ -409,9 +457,11 @@ export default function MaterialReadinessPage() {
               </table>
             </div>
             <p className="text-[11px] text-slate-400">
-              “พร้อม” = ติ๊กเตรียมแล้วในบอร์ดจ่ายงาน หรือ จำนวนที่มี ≥ ที่ต้องใช้ · ของ<b>สิ้นเปลือง</b>ไม่นับใน % ·
-              แก้ค่าเหล่านี้ได้ที่ <b>บอร์ดจ่ายงาน → เช็กลิสต์</b> หรือหน้าใบสั่งผลิต
+              “พร้อม” = ติ๊กเตรียมแล้ว หรือ จำนวนที่มี ≥ ที่ต้องใช้ · ของ<b>สิ้นเปลือง</b>ไม่นับใน % ·
+              จะแก้กดแท็บ <b>✏️ ติ๊กเตรียม / แก้จำนวน</b> ได้เลย (ไม่ต้องไปบอร์ดจ่ายงาน)
             </p>
+            </>
+            )}
           </div>
         )}
       </ERPModal>
