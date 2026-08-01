@@ -39,10 +39,13 @@ export type ReadinessMo = {
   missing_count: number;
   lines: ReadinessLine[];
 };
+/** ของที่สั่งซื้อไปแล้วแต่ยังไม่เข้า — กันสั่งซ้ำ */
+export type Incoming = { qty: number; expected: string | null; po_nos: string[] };
 export type MissingRow = {
   component_sku: string | null; component_name: string | null; image: string | null;
   uom: string | null; criticality: Criticality;
   total_missing: number; mo_count: number; mo_nos: string[];
+  incoming: Incoming | null;
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -73,17 +76,45 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ].filter(Boolean))];
   const [{ data: skus }, { data: groups }] = await Promise.all([
     matCodes.length
-      ? admin.from("skus_v2").select("code, cover_image_r2_key, material_group_id").in("code", matCodes.slice(0, 2000))
+      ? admin.from("skus_v2").select("id, code, cover_image_r2_key, material_group_id").in("code", matCodes.slice(0, 2000))
       : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     admin.from("material_groups").select("id, criticality"),
   ]);
   const critByGroup = new Map((groups ?? []).map((g) => [String((g as Record<string, unknown>).id), String((g as Record<string, unknown>).criticality ?? "required") as Criticality]));
   const imgByCode = new Map<string, string>();
   const critByCode = new Map<string, Criticality>();
+  const codeBySkuId = new Map<string, string>();
   for (const s of (skus ?? []) as Record<string, unknown>[]) {
     const code = String(s.code);
     if (s.cover_image_r2_key) imgByCode.set(code, `/api/r2-image?key=${encodeURIComponent(String(s.cover_image_r2_key))}&w=120`);
     critByCode.set(code, critByGroup.get(String(s.material_group_id ?? "")) ?? "required");
+    if (s.id) codeBySkuId.set(String(s.id), code);
+  }
+
+  // "ของกำลังมา" — ใบสั่งซื้อที่สั่งแล้วแต่ยังรับไม่ครบ (กันสั่งซ้ำ)
+  const incomingByCode = new Map<string, Incoming>();
+  const skuIds = [...codeBySkuId.keys()];
+  if (skuIds.length > 0) {
+    const { data: poLines } = await admin.from("purchase_order_lines_v2")
+      .select("item_sku_id, qty, qty_received, line_status, po:purchase_orders_v2!po_id ( po_number, expected_date, is_active )")
+      .in("item_sku_id", skuIds.slice(0, 2000)).eq("is_active", true)
+      .not("line_status", "in", "(received,short_closed,closed_short,cancelled)");   // ⚠️ DB มีทั้ง short_closed/closed_short — รับทั้งสองแบบ
+    for (const l of (poLines ?? []) as Record<string, unknown>[]) {
+      const poRel = l.po as Record<string, unknown> | Record<string, unknown>[] | null;
+      const po = (Array.isArray(poRel) ? poRel[0] : poRel) ?? null;
+      if (!po || po.is_active === false) continue;
+      const left = num(l.qty) - num(l.qty_received);
+      if (left <= 0) continue;
+      const code = codeBySkuId.get(String(l.item_sku_id));
+      if (!code) continue;
+      const prev = incomingByCode.get(code) ?? { qty: 0, expected: null, po_nos: [] };
+      prev.qty = r2(prev.qty + left);
+      const exp = (po.expected_date as string) ?? null;
+      if (exp && (!prev.expected || exp < prev.expected)) prev.expected = exp;   // เอาวันที่ใกล้สุด
+      const poNo = (po.po_number as string) ?? "";
+      if (poNo && !prev.po_nos.includes(poNo) && prev.po_nos.length < 10) prev.po_nos.push(poNo);
+      incomingByCode.set(code, prev);
+    }
   }
 
   const linesByMo = new Map<string, ReadinessLine[]>();
@@ -143,6 +174,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const prev = missMap.get(key) ?? {
         component_sku: l.component_sku, component_name: l.component_name, image: l.image,
         uom: l.uom, criticality: l.criticality, total_missing: 0, mo_count: 0, mo_nos: [],
+        incoming: (l.component_sku && incomingByCode.get(l.component_sku)) || null,
       };
       prev.total_missing = r2(prev.total_missing + Math.max(0, l.required - l.on_hand));
       prev.mo_count += 1;
@@ -159,6 +191,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     waiting: out.filter((m) => m.state === "waiting").length,
     blocked: out.filter((m) => m.blocked).length,
     no_bom: out.filter((m) => m.state === "no_bom").length,
+    missing_items: missing.length,
+    missing_ordered: missing.filter((r) => r.incoming && r.incoming.qty > 0).length,   // ขาดแต่สั่งซื้อไปแล้ว
   };
 
   return NextResponse.json({ summary, mos: out, missing, error: null });

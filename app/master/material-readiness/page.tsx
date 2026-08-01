@@ -15,10 +15,12 @@ import { HoverImage } from "@/components/hover-image";
 import { ERPModal } from "@/components/modal";
 import { addToPrCart } from "@/lib/pr-cart";
 import { useViewPref } from "@/lib/use-view-pref";
+import { usePermission } from "@/components/auth";
 import type { ReadinessMo, ReadinessLine, MissingRow, Criticality } from "@/app/api/mo/material-readiness/route";
+import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 
 type Resp = {
-  summary: { total: number; ready: number; preparing: number; waiting: number; blocked: number; no_bom: number };
+  summary: { total: number; ready: number; preparing: number; waiting: number; blocked: number; no_bom: number; missing_items: number; missing_ordered: number };
   mos: ReadinessMo[];
   missing: MissingRow[];
 };
@@ -52,21 +54,97 @@ function Bar({ pct, blocked }: { pct: number; blocked: boolean }) {
   );
 }
 
+// ป๊อปตั้ง "ระดับความสำคัญ" ต่อหมวดวัตถุดิบ — มีผลกับ % ความพร้อม + ป้าย ⛔ ติดของหลัก ทั้งระบบ
+function CriticalitySettings({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const canEdit = usePermission("products.edit");
+  const [rows, setRows] = useState<MaterialGroup[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch("/api/bom/material-groups").then((r) => r.json())
+      .then((j) => setRows((j?.data ?? []) as MaterialGroup[])).catch(() => setRows([]));
+  }, []);
+
+  const set = async (g: MaterialGroup, v: Criticality) => {
+    if (g.criticality === v) return;
+    setBusy(g.id);
+    try {
+      const res = await apiFetch("/api/bom/material-groups", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: g.id, criticality: v }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      setRows((p) => (p ?? []).map((x) => (x.id === g.id ? { ...x, criticality: v } : x)));
+      onSaved();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(null); }
+  };
+
+  const OPTS: { v: Criticality; label: string; hint: string }[] = [
+    { v: "critical", label: "ของหลัก", hint: "ขาดแล้วผลิตไม่ได้ → ใบงานขึ้น ⛔ ติดของหลัก" },
+    { v: "required", label: "ต้องมี", hint: "นับใน % ความพร้อม แต่ไม่บล็อกการผลิต" },
+    { v: "consumable", label: "สิ้นเปลือง", hint: "ไม่ถูกนับใน % เลย (ด้าย กาว น้ำยา)" },
+  ];
+
+  return (
+    <ERPModal open onClose={onClose} size="lg" title="⚙ ระดับความสำคัญของหมวดวัตถุดิบ"
+      footer={<button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>}>
+      <div className="space-y-2">
+        <p className="text-[12px] text-slate-500">
+          กดเลือกได้เลย <b>บันทึกทันที</b> · มีผลกับทุกใบสั่งผลิตพร้อมกัน
+          <br />ของหลัก = ขาดแล้วผลิตไม่ได้ · ต้องมี = นับใน % · สิ้นเปลือง = ไม่นับใน % เลย
+        </p>
+        {rows === null ? <div className="py-8 text-center text-slate-400 text-sm">กำลังโหลด…</div> : (
+          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {rows.map((g) => (
+              <div key={g.id} className="flex items-center gap-2 px-2.5 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-slate-800 truncate">{g.name}</div>
+                  <div className="text-[10px] text-slate-400 font-mono">{g.code}</div>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  {OPTS.map((o) => {
+                    const on = g.criticality === o.v;
+                    return (
+                      <button key={o.v} title={o.hint} disabled={!canEdit || busy === g.id}
+                        onClick={() => void set(g, o.v)}
+                        className={`h-7 px-2.5 text-[11px] rounded border disabled:opacity-50 ${on
+                          ? o.v === "critical" ? "border-rose-400 bg-rose-50 text-rose-700"
+                            : o.v === "consumable" ? "border-slate-300 bg-slate-100 text-slate-500"
+                            : "border-indigo-400 bg-indigo-50 text-indigo-700"
+                          : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{o.label}</button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {!canEdit && <p className="text-[11px] text-rose-600">คุณไม่มีสิทธิ์แก้ (ต้องมีสิทธิ์แก้ข้อมูลสินค้า) — ดูได้อย่างเดียว</p>}
+      </div>
+    </ERPModal>
+  );
+}
+
 export default function MaterialReadinessPage() {
   const toast = useToast();
   const [data, setData] = useState<Resp | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "ready" | "preparing" | "waiting" | "blocked">("all");
   const [sortKey, setSortKey] = useState<"due" | "pct_asc" | "pct_desc" | "mo">("due");
   const [detail, setDetail] = useState<ReadinessMo | null>(null);
   const { view, setView, defaultView, saveDefault } = useViewPref("material_readiness_view", ["cards", "table"] as const, "cards");
 
-  useEffect(() => {
+  const load = () => {
     apiFetch("/api/mo/material-readiness").then((r) => r.json())
       .then((j) => { if (j?.error) throw new Error(j.error); setData(j as Resp); })
       .catch((e) => setErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"));
-  }, []);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const shown = useMemo(() => {
     if (!data) return [];
@@ -117,6 +195,8 @@ export default function MaterialReadinessPage() {
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          <button onClick={() => setSettingsOpen(true)} title="ตั้งว่าหมวดไหนเป็นของหลัก / ต้องมี / สิ้นเปลือง"
+            className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">⚙ ระดับความสำคัญ</button>
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
             <button onClick={() => setView("cards")} className={`h-9 px-3 text-sm ${view === "cards" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🖼 การ์ด</button>
             <button onClick={() => setView("table")} className={`h-9 px-3 text-sm border-l border-slate-200 ${view === "table" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
@@ -239,7 +319,10 @@ export default function MaterialReadinessPage() {
               <div className="xl:sticky xl:top-2 border border-slate-200 rounded-xl bg-white">
                 <div className="px-3 py-2 border-b border-slate-100">
                   <div className="text-sm font-bold text-slate-700">🔥 วัตถุดิบที่ขาด (เรียงตามจำนวนใบงานที่รอ)</div>
-                  <div className="text-[10px] text-slate-400">ตัวบนสุด = ปลดล็อกใบงานได้มากที่สุดถ้าหามาได้</div>
+                  <div className="text-[10px] text-slate-400">
+                    ตัวบนสุด = ปลดล็อกใบงานได้มากที่สุดถ้าหามาได้
+                    {data.summary.missing_ordered > 0 && <> · <span className="text-emerald-600">🚚 {data.summary.missing_ordered} รายการสั่งซื้อไปแล้ว รอเข้า</span></>}
+                  </div>
                 </div>
                 <div className="max-h-[calc(100vh-260px)] overflow-y-auto p-2 space-y-1.5">
                   {missingShown.length === 0 ? (
@@ -257,9 +340,17 @@ export default function MaterialReadinessPage() {
                       <div className="shrink-0 text-right">
                         <div className="text-[11px] font-bold text-rose-600 tabular-nums">{r.mo_count} ใบ</div>
                         <div className="text-[10px] text-slate-400 tabular-nums">ขาด {fmt(r.total_missing)} {r.uom}</div>
+                        {r.incoming && r.incoming.qty > 0 && (
+                          <div className="text-[10px] text-emerald-600 tabular-nums whitespace-nowrap"
+                            title={`สั่งไปแล้วในใบ ${r.incoming.po_nos.join(", ")}`}>
+                            🚚 มา {fmt(r.incoming.qty)}{r.incoming.expected ? ` · ${dueText(r.incoming.expected)}` : ""}
+                          </div>
+                        )}
                       </div>
-                      <button onClick={() => addMissingToCart(r)} title="ใส่ตะกร้าขอซื้อ"
-                        className="shrink-0 h-7 px-2 text-[11px] border border-indigo-200 text-indigo-600 rounded hover:bg-indigo-50">🛒</button>
+                      <button onClick={() => addMissingToCart(r)}
+                        title={r.incoming && r.incoming.qty > 0 ? `⚠️ สั่งไปแล้ว ${fmt(r.incoming.qty)} ${r.uom ?? ""} (${r.incoming.po_nos.join(", ")}) — กดถ้าจะสั่งเพิ่มอีก` : "ใส่ตะกร้าขอซื้อ"}
+                        className={`shrink-0 h-7 px-2 text-[11px] border rounded ${r.incoming && r.incoming.qty > 0
+                          ? "border-slate-200 text-slate-400 hover:bg-slate-50" : "border-indigo-200 text-indigo-600 hover:bg-indigo-50"}`}>🛒</button>
                     </div>
                   ))}
                   {missingShown.length > 100 && <div className="text-center text-[10px] text-slate-400 py-1">แสดง 100 อันดับแรก จากทั้งหมด {missingShown.length}</div>}
@@ -324,6 +415,8 @@ export default function MaterialReadinessPage() {
           </div>
         )}
       </ERPModal>
+
+      {settingsOpen && <CriticalitySettings onClose={() => setSettingsOpen(false)} onSaved={load} />}
     </div>
   );
 }
