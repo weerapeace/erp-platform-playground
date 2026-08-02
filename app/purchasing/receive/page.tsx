@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { FileInput } from "@/components/file-input";
 import { useCardLayout, CardLayoutEditor, type CardField } from "@/components/card-layout";
+import { MaterialDemandPanel } from "@/components/material-demand-panel";
 import { WarehousePicker } from "@/components/pickers";
 import type { WarehousePickerValue } from "@/components/pickers";
 import { Pager } from "@/components/pager";
@@ -1143,6 +1144,9 @@ export default function ReceiveGoodsPage() {
                 </div>
               </div>
             )}
+            {/* ของกลาง: ใบงานที่รอวัตถุดิบนี้ · พอไหม · ไม่พอกดใส่ตะกร้าขอซื้อได้เลย */}
+            <MaterialDemandPanel code={it.code} uom={it.uom} incomingQty={recv} />
+
             <div className="mt-2 text-[11px] text-slate-400">ใส่จำนวนแล้วกด <b>ปิด</b> → เลือกรายการอื่นต่อได้ → กด <b>✓ ยืนยันรับของ</b> ด้านล่าง (ใส่วันที่ + แนบใบรับ/บิล + ผู้รับ)</div>
             {historyBlock}
           </ERPModal>
