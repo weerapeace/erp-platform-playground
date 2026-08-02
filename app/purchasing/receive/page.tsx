@@ -1144,8 +1144,9 @@ export default function ReceiveGoodsPage() {
                 </div>
               </div>
             )}
-            {/* ของกลาง: ใบงานที่รอวัตถุดิบนี้ · พอไหม · ไม่พอกดใส่ตะกร้าขอซื้อได้เลย */}
-            <MaterialDemandPanel code={it.code} uom={it.uom} incomingQty={recv} />
+            {/* ของกลาง: ใบงานที่รอวัตถุดิบนี้ · พอไหม · แบ่งเข้าใบงาน (เฟส 2) · ไม่พอกดขอซื้อ */}
+            <MaterialDemandPanel code={it.code} uom={it.uom} incomingQty={recv}
+              allocatable refType="po_line" refId={it.id} refLabel={it.po_no} />
 
             <div className="mt-2 text-[11px] text-slate-400">ใส่จำนวนแล้วกด <b>ปิด</b> → เลือกรายการอื่นต่อได้ → กด <b>✓ ยืนยันรับของ</b> ด้านล่าง (ใส่วันที่ + แนบใบรับ/บิล + ผู้รับ)</div>
             {historyBlock}
