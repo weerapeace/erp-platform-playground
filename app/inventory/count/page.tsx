@@ -41,6 +41,7 @@ export default function CountPage() {
   const [applying, setApplying] = useState(false);
   const [scanCode, setScanCode] = useState("");
   const [addKey, setAddKey] = useState(0);
+  const [addingNeeded, setAddingNeeded] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
 
   const loadSessions = useCallback(async () => {
@@ -130,6 +131,20 @@ export default function CountPage() {
       if (j.error) { setError(j.error); return; }
       upsertLine(j.line); setAddKey((k) => k + 1); flash("เพิ่มสินค้าแล้ว");
     } catch { setError("เพิ่มไม่สำเร็จ"); }
+  };
+  // เฟส 0: เติมวัตถุดิบที่ใบสั่งผลิตต้องใช้เข้ารอบนับทีเดียว (ไม่ต้องไล่เพิ่มทีละตัว)
+  const addNeeded = async () => {
+    if (!active || addingNeeded) return;
+    setAddingNeeded(true);
+    try {
+      const res = await apiFetch("/api/inventory/count", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "add_needed", count_id: active.session.id }) });
+      const j = await res.json();
+      if (j.error) { setError(j.error); return; }
+      if (j.added > 0) { await openSession(active.session.id); flash(`เพิ่ม ${j.added} รายการเข้ารอบนับแล้ว`); }
+      else flash(j.skipped > 0 ? "อยู่ในรอบนับครบแล้ว" : "ไม่มีวัตถุดิบที่ต้องเติม");
+      setError(null);
+    } catch { setError("เติมรายการไม่สำเร็จ"); }
+    finally { setAddingNeeded(false); }
   };
   const deleteLine = async (lineId: string) => {
     if (!active) return;
@@ -247,6 +262,15 @@ export default function CountPage() {
                 <div className="w-60">
                   <span className="text-xs font-medium text-slate-600">➕ หรือค้นหาเพิ่มสินค้า</span>
                   <div className="mt-1"><SkuPicker key={addKey} value={null} onChange={(v) => { if (v) void addLine(v.id); }} /></div>
+                </div>
+                {/* เฟส 0: ตั้งยอดตั้งต้นวัตถุดิบ — เติมทุกตัวที่ใบสั่งผลิตต้องใช้ทีเดียว */}
+                <div>
+                  <span className="text-xs font-medium text-slate-600">🧵 ตั้งยอดตั้งต้นวัตถุดิบ</span>
+                  <button onClick={() => void addNeeded()} disabled={addingNeeded}
+                    title="เติมวัตถุดิบทุกตัวที่ใบสั่งผลิต (ที่ยังไม่จบ) ต้องใช้ เข้ารอบนับนี้ทีเดียว — กดซ้ำได้ ไม่เพิ่มซ้ำ"
+                    className="mt-1 h-10 px-3 text-sm font-medium rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 whitespace-nowrap">
+                    {addingNeeded ? "กำลังเติม…" : "＋ เติมวัตถุดิบที่ใบสั่งผลิตใช้"}
+                  </button>
                 </div>
               </div>
             )}

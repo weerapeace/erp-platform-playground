@@ -116,6 +116,63 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ line: inserted, error: null });
   }
 
+  // เติม "วัตถุดิบที่ใบสั่งผลิตต้องใช้" เข้ารอบนับทีเดียว (เฟส 0 — ตั้งยอดตั้งต้น)
+  // เปิดรอบนับปกติจะได้เฉพาะของที่เคยมียอดในระบบ (ซึ่งยังว่าง) → ไม่งั้นต้องไล่เพิ่มเองทีละตัว 200+ รายการ
+  if (action === "add_needed") {
+    const denied = await guardApi(request, "stock.view"); if (denied) return denied;
+    const count_id = body.count_id as string | undefined;
+    if (!count_id) return NextResponse.json({ error: "ไม่พบรอบนับ" }, { status: 400 });
+
+    const { data: c } = await admin.from("erp_stock_counts").select("warehouse_id, status").eq("id", count_id).maybeSingle();
+    const cnt = c as { warehouse_id?: string; status?: string } | null;
+    if (!cnt) return NextResponse.json({ error: "ไม่พบรอบนับ" }, { status: 404 });
+    if (cnt.status && cnt.status !== "open") return NextResponse.json({ error: "รอบนับนี้ปิดแล้ว" }, { status: 400 });
+
+    // รหัสวัตถุดิบที่ใบสั่งผลิต (ยังไม่จบ) ต้องใช้
+    const { data: mos } = await admin.from("manufacturing_orders").select("mo_no")
+      .eq("is_active", true).not("status", "in", "(cancelled,done)").limit(2000);
+    const moNos = ((mos ?? []) as { mo_no: string }[]).map((m) => String(m.mo_no));
+    if (moNos.length === 0) return NextResponse.json({ added: 0, skipped: 0, not_in_sku: 0, error: null });
+
+    const { data: sums } = await admin.from("mo_material_summary").select("component_sku")
+      .in("mo_no", moNos).eq("is_active", true).limit(5000);
+    const codes = [...new Set(((sums ?? []) as { component_sku: string | null }[])
+      .map((s) => String(s.component_sku ?? "").trim()).filter(Boolean))];
+    if (codes.length === 0) return NextResponse.json({ added: 0, skipped: 0, not_in_sku: 0, error: null });
+
+    const { data: skus } = await admin.from("skus_v2").select("id, code, name_th").in("code", codes.slice(0, 2000));
+    const skuList = (skus ?? []) as { id: string; code: string; name_th: string | null }[];
+
+    // ตัดตัวที่อยู่ในรอบนับแล้วออก (กดซ้ำได้ ไม่เพิ่มซ้ำ)
+    const { data: exist } = await admin.from("erp_stock_count_lines").select("product_id").eq("count_id", count_id).limit(5000);
+    const has = new Set(((exist ?? []) as { product_id: string }[]).map((x) => String(x.product_id)));
+    const fresh = skuList.filter((s) => !has.has(String(s.id)));
+    if (fresh.length === 0) return NextResponse.json({ added: 0, skipped: skuList.length, not_in_sku: codes.length - skuList.length, error: null });
+
+    // ยอดในระบบตอนนี้ (ส่วนใหญ่ = 0 เพราะยังไม่เคยตั้งต้น)
+    const balByProduct = new Map<string, number>();
+    if (cnt.warehouse_id) {
+      const { data: bals } = await admin.from("erp_playground_stock_balances")
+        .select("product_id, qty_on_hand").eq("warehouse_id", cnt.warehouse_id)
+        .in("product_id", fresh.map((s) => s.id)).limit(5000);
+      for (const b of (bals ?? []) as { product_id: string; qty_on_hand: number }[]) balByProduct.set(String(b.product_id), Number(b.qty_on_hand) || 0);
+    }
+
+    const rows = fresh.map((s) => ({
+      count_id, product_id: s.id, product_sku: s.code, product_name: s.name_th ?? s.code,
+      system_qty: balByProduct.get(String(s.id)) ?? 0, counted_qty: null,
+    }));
+    const { error } = await admin.from("erp_stock_count_lines").insert(rows);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    await admin.from("audit_logs").insert({
+      actor_user_id: user?.id ?? null, action: "count_add_needed", entity_type: "erp_stock_counts", entity_id: count_id,
+      metadata: { actor, added: rows.length, skipped: skuList.length - rows.length, from: "mo_material_summary" },
+    }).then(() => {}, () => {});
+
+    return NextResponse.json({ added: rows.length, skipped: skuList.length - rows.length, not_in_sku: codes.length - skuList.length, error: null });
+  }
+
   // ลบรายการออกจากรอบนับ (เช่นสแกน/เพิ่มผิด)
   if (action === "delete_line") {
     const denied = await guardApi(request, "stock.view"); if (denied) return denied;
