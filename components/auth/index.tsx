@@ -172,6 +172,39 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+/**
+ * บันทึก "ใครเข้าใช้ระบบ จากเครื่องไหน ที่ไหน แอปอะไร" → /api/auth/login-event
+ * (ฝั่ง server เตือนอัตโนมัติเมื่อเข้าจากเครื่องใหม่ + ให้แอดมินดูย้อนหลังได้)
+ * throttle 30 นาที/เครื่อง กันยิงซ้ำทุกแท็บ/ทุก refresh
+ */
+async function recordLoginEvent(): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    let deviceId = localStorage.getItem("erp_device_id");
+    if (!deviceId) {
+      deviceId = (crypto?.randomUUID?.() ?? `d${Date.now()}${Math.round(Math.random() * 1e6)}`);
+      localStorage.setItem("erp_device_id", deviceId);
+    }
+    const last = Number(localStorage.getItem("erp_login_event_at") ?? 0);
+    if (last && Date.now() - last < 30 * 60 * 1000) return;
+    localStorage.setItem("erp_login_event_at", String(Date.now()));
+
+    // แอปที่กำลังเข้า: /app/<key>/... หรือ /<key>/... (เช่น /payroll/dashboard → payroll)
+    const path = window.location.pathname;
+    const seg = path.split("/").filter(Boolean);
+    const appKey = seg[0] === "app" ? (seg[1] ?? "") : (seg[0] ?? "");
+
+    const { supabaseBrowser: sb } = await import("@/lib/supabase-browser");
+    const { data } = await sb.auth.getSession();
+    const token = data.session?.access_token;
+    await fetch("/api/auth/login-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ device_id: deviceId, app_key: appKey, path }),
+    });
+  } catch { /* บันทึกไม่ได้ก็ไม่ควรทำให้ล็อกอินพัง */ }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser]   = useState<AuthUser | null>(null);
   const [ready, setReady] = useState(false);
@@ -196,6 +229,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // โหลดโปรไฟล์ตัวเองใหม่ (หลังแก้ชื่อ/รูป)
+  // (ตัวบันทึกการเข้าใช้ประกาศไว้นอก component — ดู recordLoginEvent ด้านบนไฟล์)
   const refreshProfile = useCallback(async () => {
     const { data } = await supabaseBrowser.auth.getSession();
     const s = data.session;
@@ -209,7 +243,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       else setReady(true);
     });
     const { data: sub } = supabaseBrowser.auth.onAuthStateChange((_e, session) => {
-      if (session?.user) loadProfile(session.user.email ?? "");
+      if (session?.user) { loadProfile(session.user.email ?? ""); void recordLoginEvent(); }
       else { setUser(null); setPerms(null); }
     });
     return () => sub.subscription.unsubscribe();

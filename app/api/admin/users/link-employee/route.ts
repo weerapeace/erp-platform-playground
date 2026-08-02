@@ -52,6 +52,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const empId = body.employee_id ? String(body.employee_id) : null;
 
   const admin = supabaseAdmin();
+  // กฎ: ผู้ใช้สิทธิ์ "พนักงาน" ต้องผูกทะเบียนพนักงานเสมอ — ยกเลิกการผูกไม่ได้
+  if (!empId) {
+    const { data: prof } = await admin.from("user_profiles").select("role").eq("id", userId).maybeSingle();
+    if (String(prof?.role ?? "") === "staff") {
+      return NextResponse.json({
+        error: 'ผู้ใช้สิทธิ์ "พนักงาน" ต้องผูกกับทะเบียนพนักงาน — ถ้าคนนี้ไม่ใช่พนักงานแล้ว ให้เปลี่ยนสิทธิ์ก่อน หรือปิดบัญชีแทน',
+      }, { status: 400 });
+    }
+  }
   const { error } = await admin.from("user_profiles").update({ employee_id: empId, updated_at: new Date().toISOString() }).eq("id", userId);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await writeAudit(admin, {

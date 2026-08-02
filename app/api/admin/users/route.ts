@@ -18,6 +18,8 @@ export type AdminUser = {
   email_confirmed_at: string | null;
   created_at:         string;
   updated_at:         string;
+  employee_id?:       string | null;   // ทะเบียนพนักงานที่ผูกไว้ (สิทธิ์ "พนักงาน" ต้องมีเสมอ)
+  employee_label?:    string | null;
 };
 
 export type AdminUsersResponse = {
@@ -33,12 +35,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ data: [], error: error.message } satisfies AdminUsersResponse, { status: 500 });
   }
   const users = (data as AdminUser[]) ?? [];
-  // เติมสีประจำตัว (user_profiles.color) เข้า list — RPC เดิมไม่มีคอลัมน์นี้
+  // เติมสีประจำตัว + พนักงานที่ผูกไว้ (RPC เดิมไม่มี 2 คอลัมน์นี้)
+  // employee_code ใช้โชว์ป้ายเตือน "สิทธิ์พนักงานแต่ยังไม่ผูกทะเบียนพนักงาน"
   try {
-    const { data: colors } = await supabaseAdmin().from("user_profiles").select("id, color").in("id", users.map((u) => u.id));
-    const cmap = new Map(((colors ?? []) as { id: string; color: string | null }[]).map((c) => [c.id, c.color]));
-    for (const u of users) u.color = cmap.get(u.id) ?? null;
-  } catch { /* ไม่มีสีก็ปล่อยว่าง */ }
+    const admin = supabaseAdmin();
+    const ids = users.map((u) => u.id);
+    const { data: profs } = await admin.from("user_profiles").select("id, color, employee_id").in("id", ids);
+    const rows = (profs ?? []) as { id: string; color: string | null; employee_id: string | null }[];
+    const empIds = rows.map((r) => r.employee_id).filter(Boolean) as string[];
+    const codeById = new Map<string, string>();
+    if (empIds.length) {
+      const { data: emps } = await admin.from("employees").select("id, employee_code, nickname").in("id", empIds);
+      for (const e of (emps ?? []) as { id: string; employee_code: string | null; nickname: string | null }[]) {
+        codeById.set(e.id, [e.employee_code, e.nickname].filter(Boolean).join(" "));
+      }
+    }
+    const pmap = new Map(rows.map((r) => [r.id, r]));
+    for (const u of users) {
+      const p = pmap.get(u.id);
+      u.color = p?.color ?? null;
+      u.employee_id = p?.employee_id ?? null;
+      u.employee_label = p?.employee_id ? (codeById.get(p.employee_id) ?? "") : null;
+    }
+  } catch { /* ไม่มีข้อมูลเสริมก็ปล่อยว่าง */ }
   return NextResponse.json({ data: users, error: null } satisfies AdminUsersResponse);
 }
 
@@ -137,6 +156,17 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (body.role) {
+    // กฎ: ผู้ใช้สิทธิ์ "พนักงาน" ต้องผูกกับทะเบียนพนักงานเสมอ
+    // (ไม่งั้นระบบไม่รู้ว่าใครคือใคร → ลาออกแล้วปิดบัญชีอัตโนมัติไม่ได้ · สลิป/สิทธิ์รายคนก็ผูกไม่ได้)
+    if (body.role === "staff") {
+      const { data: prof } = await supabaseAdmin()
+        .from("user_profiles").select("employee_id").eq("id", body.user_id).maybeSingle();
+      if (!prof?.employee_id) {
+        return NextResponse.json({
+          error: 'สิทธิ์ "พนักงาน" ต้องผูกกับทะเบียนพนักงานก่อน — กดเมนู ⋮ ของผู้ใช้คนนี้ แล้วเลือก "ผูกพนักงาน"',
+        }, { status: 400 });
+      }
+    }
     const { data, error } = await client.rpc("erp_admin_users_update_role", {
       p_user_id: body.user_id, p_role: body.role, p_actor: body.actor ?? null,
     });

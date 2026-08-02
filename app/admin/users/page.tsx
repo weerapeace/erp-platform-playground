@@ -359,7 +359,22 @@ export default function AdminUsersPage() {
       meta: { group: "สิทธิ์", filterType: "select" },
       cell: ({ row }) => {
         const u = row.original;
-        return <span className={`text-xs px-2 py-0.5 rounded border ${roleColor(u.role)}`}>{roleLabel(u.role)}</span>;
+        // สิทธิ์ "พนักงาน" ต้องผูกทะเบียนพนักงานเสมอ — ยังไม่ผูก = เตือนให้เห็นจากในตาราง
+        const needsLink = u.role === "staff" && !u.employee_id;
+        return (
+          <span className="inline-flex flex-wrap items-center gap-1">
+            <span className={`text-xs px-2 py-0.5 rounded border ${roleColor(u.role)}`}>{roleLabel(u.role)}</span>
+            {u.role === "staff" && u.employee_id && (
+              <span className="text-[10px] text-slate-400" title="ผูกกับทะเบียนพนักงานแล้ว">🔗 {u.employee_label || "ผูกแล้ว"}</span>
+            )}
+            {needsLink && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-700"
+                    title="สิทธิ์พนักงานต้องผูกกับทะเบียนพนักงาน — กดเมนู ⋮ แล้วเลือกผูกพนักงาน">
+                ⚠️ ยังไม่ผูกพนักงาน
+              </span>
+            )}
+          </span>
+        );
       },
     },
     {

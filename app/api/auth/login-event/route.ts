@@ -28,9 +28,12 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
-  let body: { device_id?: string };
+  let body: { device_id?: string; app_key?: string; path?: string };
   try { body = await request.json(); } catch { body = {}; }
   const deviceId = (String(body.device_id ?? "").trim() || "unknown").slice(0, 80);
+  // เข้าใช้จากแอปไหน (payroll / purchasing / …) — ให้แอดมินดูได้ว่าใครเข้าแอปไหน
+  const appKey = String(body.app_key ?? "").trim().slice(0, 60) || null;
+  const path = String(body.path ?? "").trim().slice(0, 200) || null;
 
   const ua = request.headers.get("user-agent") ?? "";
   const { browser, os, deviceType } = parseUserAgent(ua);
@@ -54,7 +57,7 @@ export async function POST(request: NextRequest) {
     user_id: user.id, device_id: deviceId, user_agent: ua.slice(0, 400),
     browser, os, device_type: deviceType,
     ip: geo.ip.slice(0, 60), city: geo.city, region: geo.region, country: geo.country,
-    is_new_device: isNewDevice,
+    is_new_device: isNewDevice, app_key: appKey, path,
   });
 
   if (isNewDevice && (totalCount ?? 0) > 0) {

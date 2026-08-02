@@ -11,6 +11,7 @@
  *   - ทุก mutation เขียน audit log กลาง (writeAudit → audit_logs)
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 import { nullifyEmpty } from "@/lib/payroll-coerce";
 import { syncEndedCurrentContracts } from "@/lib/payroll-contract-lifecycle";
 
@@ -218,12 +219,32 @@ export async function createEmployee(body: Record<string, unknown>): Promise<Emp
   return decorate(data![0] as unknown as Record<string, unknown>, dmap, {});
 }
 
+/**
+ * พนักงานไม่ได้ทำงานแล้ว (ลาออก/ปิดใช้งาน) → ปิดบัญชีผู้ใช้ระบบที่ผูกไว้ด้วย
+ * กันเคส "ลาออกแล้วยังล็อกอินเข้าระบบได้" ซึ่งเป็นช่องโหว่ความปลอดภัย
+ * กลับมาทำงาน (active) ไม่เปิดบัญชีคืนอัตโนมัติ — ต้องให้แอดมินเปิดเอง (ตั้งใจ)
+ */
+export async function syncUserAccountOnEmploymentChange(employeeId: string, status: unknown): Promise<void> {
+  if (String(status ?? "") === "active") return;
+  const admin = supabaseAdmin();
+  const { data } = await admin.from("user_profiles").select("id, active").eq("employee_id", employeeId);
+  for (const u of (data ?? []) as { id: string; active: boolean }[]) {
+    if (!u.active) continue;
+    await admin.from("user_profiles").update({ active: false, updated_at: new Date().toISOString() }).eq("id", u.id);
+    await writeAudit(admin, {
+      action: "deactivate_user_on_resign", entityType: "user", entityId: u.id,
+      metadata: { employee_id: employeeId, employment_status: String(status ?? "") },
+    });
+  }
+}
+
 export async function updateEmployee(id: string, body: Record<string, unknown>): Promise<EmployeeRow | null> {
   const cols = await toColumns(body);
   if (Object.keys(cols).length === 0) return getEmployee(id);
   const { data, error } = await supabaseAdmin().from(TABLE).update(cols).eq("id", id).select(SELECT).limit(1);
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
+  if ("employment_status" in cols) await syncUserAccountOnEmploymentChange(id, cols.employment_status);
   const dmap = await deptMap();
   return decorate(data[0] as unknown as Record<string, unknown>, dmap, {});
 }
@@ -232,5 +253,6 @@ export async function updateEmployee(id: string, body: Record<string, unknown>):
 export async function softDeleteEmployee(id: string): Promise<boolean> {
   const { error } = await supabaseAdmin().from(TABLE).update({ employment_status: "inactive" }).eq("id", id);
   if (error) throw new Error(error.message);
+  await syncUserAccountOnEmploymentChange(id, "inactive");
   return true;
 }

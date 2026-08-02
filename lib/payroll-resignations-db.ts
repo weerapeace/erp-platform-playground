@@ -1,6 +1,7 @@
 import { writeAudit } from "@/lib/audit";
 import type { ResignationAction } from "@/lib/payroll-resignations-copy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { syncUserAccountOnEmploymentChange } from "@/lib/payroll-employees-db";
 
 export { getResignationTransitionCopy, type ResignationAction } from "@/lib/payroll-resignations-copy";
 
@@ -229,6 +230,8 @@ export async function transitionResignation(id: string, input: TransitionInput):
       .update(updates.employee)
       .eq("id", employeeId);
     if (employeeError) throw new Error(employeeError.message);
+    // อนุมัติลาออกแล้ว → ปิดบัญชีผู้ใช้ระบบที่ผูกกับพนักงานคนนี้ (กันลาออกแล้วยังล็อกอินได้)
+    await syncUserAccountOnEmploymentChange(employeeId, updates.employee.employment_status);
   }
 
   const reviewedAt = new Date().toISOString();
