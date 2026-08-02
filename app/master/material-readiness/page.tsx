@@ -17,6 +17,7 @@ import { addToPrCart } from "@/lib/pr-cart";
 import { useViewPref } from "@/lib/use-view-pref";
 import { usePermission } from "@/components/auth";
 import { MoMaterialChecklist } from "@/components/mo-material-checklist";
+import { MaterialDemandPanel } from "@/components/material-demand-panel";
 import type { ReadinessMo, ReadinessLine, MissingRow, Criticality } from "@/app/api/mo/material-readiness/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 
@@ -140,6 +141,8 @@ export default function MaterialReadinessPage() {
   const [detail, setDetail] = useState<ReadinessMo | null>(null);
   const [detailTab, setDetailTab] = useState<"summary" | "edit">("summary");
   const [picked, setPicked] = useState<Set<string>>(new Set());   // วัตถุดิบที่ขาด ที่ติ๊กไว้จะใส่ตะกร้าทีเดียว
+  const [allocFor, setAllocFor] = useState<MissingRow | null>(null);   // ป๊อปแบ่งของที่มีอยู่แล้วให้ใบงาน
+  const [allocQty, setAllocQty] = useState("");                        // มีของอยู่กี่หน่วย (ตัวตั้งในการแบ่ง)
   const { view, setView, defaultView, saveDefault } = useViewPref("material_readiness_view", ["cards", "table"] as const, "cards");
 
   const load = () => {
@@ -376,6 +379,8 @@ export default function MaterialReadinessPage() {
                           </div>
                         )}
                       </div>
+                      <button onClick={() => { setAllocFor(r); setAllocQty(""); }} title="แบ่งของที่มีอยู่แล้วให้ใบงาน"
+                        className="shrink-0 h-7 px-2 text-[11px] border border-emerald-200 text-emerald-700 rounded hover:bg-emerald-50">📤</button>
                       <button onClick={() => addMissingToCart(r)}
                         title={r.incoming && r.incoming.qty > 0 ? `⚠️ สั่งไปแล้ว ${fmt(r.incoming.qty)} ${r.uom ?? ""} (${r.incoming.po_nos.join(", ")}) — กดถ้าจะสั่งเพิ่มอีก` : "ใส่ตะกร้าขอซื้อ"}
                         className={`shrink-0 h-7 px-2 text-[11px] border rounded ${r.incoming && r.incoming.qty > 0
@@ -462,6 +467,33 @@ export default function MaterialReadinessPage() {
             </p>
             </>
             )}
+          </div>
+        )}
+      </ERPModal>
+
+      {/* ป๊อปแบ่งของที่มีอยู่แล้ว (ไม่ต้องรอรับของ) — ใส่จำนวนที่มี → แบ่งเข้าใบงาน */}
+      <ERPModal open={!!allocFor} onClose={() => setAllocFor(null)} size="lg" storageKey="material-allocate"
+        title={allocFor ? `📤 แบ่งของให้ใบงาน · ${allocFor.component_name ?? allocFor.component_sku ?? ""}` : ""}>
+        {allocFor && (
+          <div className="space-y-2">
+            <label className="block">
+              <span className="text-[12px] text-slate-600">ตอนนี้มีของอยู่กี่ {allocFor.uom || "หน่วย"} (จำนวนที่จะเอามาแบ่ง)</span>
+              <div className="flex items-center gap-2 mt-1">
+                <input type="number" inputMode="decimal" step="any" min={0} autoFocus value={allocQty}
+                  onChange={(e) => setAllocQty(e.target.value)} placeholder="0"
+                  className="w-40 h-10 px-2 text-lg text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <span className="text-sm text-slate-500">{allocFor.uom}</span>
+                <button onClick={() => setAllocQty(String(Math.ceil(allocFor.total_missing)))}
+                  className="h-9 px-3 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
+                  เท่าที่ขาดพอดี ({fmt(allocFor.total_missing)})
+                </button>
+              </div>
+            </label>
+            <MaterialDemandPanel code={allocFor.component_sku} uom={allocFor.uom} incomingQty={Number(allocQty) || 0}
+              allocatable source="manual" refLabel="แบ่งจากของในโกดัง" onAllocated={load} />
+            <p className="text-[11px] text-slate-400">
+              ใช้ตอน<b>ของอยู่ในโกดังอยู่แล้ว</b> (ไม่ได้เพิ่งรับเข้า) · ใส่จำนวนที่มี → กด ⚡ แบ่งอัตโนมัติ หรือกรอกเองรายใบ → บันทึก
+            </p>
           </div>
         )}
       </ERPModal>

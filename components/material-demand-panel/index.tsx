@@ -33,7 +33,7 @@ const dueCls = (d: string | null) => {
 
 export function MaterialDemandPanel({
   code, uom, incomingQty = 0, compact = false,
-  allocatable = false, refType, refId, refLabel, onAllocated,
+  allocatable = false, refType, refId, refLabel, source = "receive", onAllocated,
 }: {
   /** รหัสวัตถุดิบ (component_sku / skus_v2.code) */
   code: string | null | undefined;
@@ -44,6 +44,8 @@ export function MaterialDemandPanel({
   /** เปิดโหมดแบ่งของเข้าใบงาน (เฟส 2) */
   allocatable?: boolean;
   refType?: string; refId?: string; refLabel?: string;
+  /** receive = แบ่งตอนรับของ · manual = แบ่งของที่มีอยู่แล้วในโกดัง */
+  source?: string;
   onAllocated?: () => void;
 }) {
   const toast = useToast();
@@ -109,7 +111,7 @@ export function MaterialDemandPanel({
     try {
       const res = await apiFetch("/api/mo/material-allocations", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items, source: "receive", ref_type: refType ?? null, ref_id: refId ?? null, ref_label: refLabel ?? null }),
+        body: JSON.stringify({ items, source, ref_type: refType ?? null, ref_id: refId ?? null, ref_label: refLabel ?? null }),
       });
       const j = await res.json();
       if (!res.ok || j?.error) throw new Error(j?.error || "แบ่งไม่สำเร็จ");
