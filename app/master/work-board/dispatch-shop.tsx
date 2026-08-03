@@ -95,6 +95,7 @@ export function DispatchShop({
   const { view: cardMode, setView: setCardMode, saveDefault: saveCardMode } = useViewPref("work_board_shop_card", CARD_MODES, "big");
   const { view: cardCols, setView: setCardCols, saveDefault: saveCardCols } = useViewPref("work_board_shop_cols", CARD_COLS, "4");
   const [cart, setCart] = useState<Record<string, number>>({});   // mo.id → จำนวนที่จะจ่าย
+  const [cartOpen, setCartOpen] = useState(false);                // เปิด "หน้าตะกร้า" เต็มจอ (แทนแผงข้าง)
   const [dept, setDept] = useState<string>("");
   const [craftIds, setCraftIds] = useState<string[]>([]);          // ช่างที่เลือก (หลายคน)
   const [craftListOpen, setCraftListOpen] = useState(false);
@@ -211,7 +212,7 @@ export function DispatchShop({
     setSaving(false); setConfirmOpen(false);
     if (ok > 0) toast.success(`จ่ายเข้า ${selDept!.name} แล้ว ${ok} ใบจ่ายงาน${fails.length ? ` · พลาด ${fails.length}` : ""}`);
     else toast.error(`จ่ายไม่สำเร็จ: ${fails.slice(0, 3).join(", ")}`);
-    setCart({}); setCraftIds([]);
+    setCart({}); setCraftIds([]); setCartOpen(false);   // จ่ายเสร็จ → กลับไปหน้าเลือกงาน
     await onReload();
   };
 
@@ -313,9 +314,196 @@ export function DispatchShop({
   const selCls = "h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500";
   const craftFiltered = craftPool.filter((c) => `${c.code ?? ""} ${c.name}`.toLowerCase().includes(craftSearch.trim().toLowerCase()));
 
+  // ป๊อปยืนยันจ่ายงาน — ใช้ร่วมทั้งหน้าเลือกงานและหน้าตะกร้า
+  const confirmModal = (
+        <ERPModal open={confirmOpen} onClose={() => !saving && setConfirmOpen(false)} size="xl" title="ยืนยันจ่ายงาน"
+          footer={<>
+            <button onClick={() => setConfirmOpen(false)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+            <button onClick={() => void doDispatch()} disabled={saving || anyOver || totalWO === 0 || missingRate}
+              title={missingRate ? "ต้องใส่ค่าแรง/ชิ้น ทุกใบก่อนจ่าย" : ""}
+              className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? "กำลังจ่าย…" : `ยืนยันจ่าย (${totalWO} ใบจ่ายงาน)`}</button>
+          </>}>
+          <div className="space-y-2">
+            <div className="text-sm text-slate-600">
+              จ่ายเข้า <b>{selDept?.name}</b>
+              {cols.length > 0 && cols[0].id !== "__dept__"
+                ? <> · ช่าง {cols.map((c) => c.name).join(", ")}</>
+                : <> · ทั้งแผนก (ไม่ระบุช่าง)</>}
+              {due && <> · กำหนดเสร็จ {due}</>}
+            </div>
+            <div className="border border-slate-200 rounded-lg overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-[11px] text-slate-500">
+                  <tr>
+                    <th className="text-left px-2 py-1.5 font-medium sticky left-0 bg-slate-50">สินค้า</th>
+                    {cols.map((c) => <th key={c.id} className="px-2 py-1.5 font-medium text-center whitespace-nowrap">{c.id === "__dept__" ? "จำนวน" : c.name}</th>)}
+                    <th className="px-2 py-1.5 font-medium text-center">รวม</th>
+                    <th className="px-2 py-1.5 font-medium text-center whitespace-nowrap">ค่าแรง/ชิ้น *</th>
+                    <th className="px-2 py-1.5 font-medium text-center whitespace-nowrap">ตัด/เตรียมครบ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {confirmItems.map((m) => {
+                    const sum = itemSum(m.id);
+                    const over = sum > m.remaining + 0.0001;
+                    return (
+                      <tr key={m.id}>
+                        <td className="px-2 py-1.5 sticky left-0 bg-white">
+                          <div className="text-xs font-semibold text-slate-800 truncate max-w-[160px]">{m.product_sku}</div>
+                          <div className="text-[10px] text-slate-400 font-mono">{m.mo_no} · เหลือ {fmt(m.remaining)}</div>
+                        </td>
+                        {cols.map((c) => (
+                          <td key={c.id} className="px-1 py-1 text-center">
+                            <input type="number" min={0} step="any" value={splits[m.id]?.[c.id] ?? 0}
+                              onChange={(e) => setSplits((s) => ({ ...s, [m.id]: { ...s[m.id], [c.id]: Math.max(0, Number(e.target.value) || 0) } }))}
+                              className="w-16 h-8 px-1.5 text-xs text-right border border-slate-200 rounded" />
+                          </td>
+                        ))}
+                        <td className={`px-2 py-1.5 text-center tabular-nums font-semibold ${over ? "text-rose-600" : "text-slate-700"}`}>{fmt(sum)}</td>
+                        <td className="px-1 py-1 text-center">
+                          <input type="number" min={0} step="any" value={rates[m.id] ?? 0}
+                            onChange={(e) => setRates((s) => ({ ...s, [m.id]: Math.max(0, Number(e.target.value) || 0) }))}
+                            className={`w-16 h-8 px-1.5 text-xs text-right border rounded ${sum > 0 && !((rates[m.id] ?? 0) > 0) ? "border-rose-400 bg-rose-50" : "border-slate-200"}`} />
+                        </td>
+                        <td className="px-2 py-1.5 text-center">
+                          {m.ready
+                            ? <span className="text-[10px] text-emerald-600">พร้อมแล้ว</span>
+                            : <input type="checkbox" checked={!!markReady[m.id]} onChange={(e) => setMarkReady((s) => ({ ...s, [m.id]: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {anyOver && <p className="text-[11px] text-rose-600">⚠️ มีบางรายการจำนวนรวมเกิน “คงเหลือ” — แก้จำนวนก่อนจ่าย</p>}
+            {missingRate && <p className="text-[11px] text-rose-600">⚠️ ต้องใส่ <b>ค่าแรง/ชิ้น</b> ทุกใบที่จ่าย (ห้ามเป็น 0)</p>}
+            <label className="flex items-center gap-2 text-[11px] text-slate-600 cursor-pointer w-fit">
+              <input type="checkbox" checked={saveBom} onChange={(e) => setSaveBom(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+              💾 บันทึกค่าแรงที่กรอกกลับเข้า BOM (ราคากลาง/ชิ้น) — ครั้งหน้าจะเติมให้อัตโนมัติ
+            </label>
+            <p className="text-[11px] text-slate-400">
+              แต่ละช่องคือจำนวนที่ช่างคนนั้นได้ (แบ่งเท่ากันให้ก่อน แก้เองได้) · ช่องเป็น 0 = ไม่จ่ายให้คนนั้น ·
+              ค่าแรงเติมราคากลางจาก BOM ให้ก่อน (แก้ได้) · ติ๊ก “ตัด/เตรียมครบ” = ทำเครื่องหมายทั้งใบตอนจ่าย
+            </p>
+          </div>
+        </ERPModal>
+  );
+
+  // ฟอร์มจ่ายงาน (โต๊ะ/ช่าง/กำหนดเสร็จ/ปุ่มจ่าย) — ใช้ในหน้าตะกร้า
+  const dispatchForm = (
+    <div className="space-y-2.5">
+      <label className="block">
+        <span className="text-xs text-slate-500">โต๊ะ/แผนกที่จ่าย *</span>
+        <select value={dept} onChange={(e) => changeDept(e.target.value)} className={`${selCls} w-full mt-0.5`}>
+          <option value="">— เลือกโต๊ะ —</option>
+          {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+      </label>
+
+      <div>
+        <span className="text-xs text-slate-500">ช่าง (เลือกได้หลายคน = แบ่งงานให้{isHire ? " · งานเหมาต้องเลือก" : " · ว่าง = ทั้งแผนก"})</span>
+        {selectedCrafts.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {selectedCrafts.map((c) => (
+              <span key={c.id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-indigo-50 text-indigo-700 rounded-full">
+                {c.name}<button onClick={() => toggleCraft(c.id)} className="text-indigo-400 hover:text-rose-500">✕</button>
+              </span>
+            ))}
+          </div>
+        )}
+        <button type="button" onClick={() => setCraftListOpen((o) => !o)} className="mt-1 w-full h-9 text-sm text-left px-2 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 text-slate-600">
+          ＋ เลือกช่าง {craftIds.length > 0 ? `(${craftIds.length})` : ""} <span className="float-right text-[9px] text-slate-400">▾</span>
+        </button>
+        {craftListOpen && (
+          <div className="mt-1 border border-slate-200 rounded-lg bg-white">
+            <input value={craftSearch} onChange={(e) => setCraftSearch(e.target.value)} placeholder="ค้นหาช่าง…" className="w-full h-8 px-2 text-sm border-b border-slate-100 focus:outline-none" />
+            <div className="max-h-52 overflow-y-auto p-1">
+              {craftFiltered.map((c) => (
+                <label key={c.id} className="flex items-center gap-2 px-2 py-1 text-sm rounded hover:bg-slate-50 cursor-pointer">
+                  <input type="checkbox" checked={craftIds.includes(c.id)} onChange={() => toggleCraft(c.id)} className="w-4 h-4 accent-indigo-600" />
+                  <span className="truncate">{c.code ? <code className="text-[10px] text-slate-400">[{c.code}] </code> : null}{c.name}</span>
+                </label>
+              ))}
+              {craftFiltered.length === 0 && <div className="px-2 py-3 text-center text-[11px] text-slate-300">ไม่พบช่าง</div>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <label className="block">
+        <span className="text-xs text-slate-500">กำหนดเสร็จ (ทั้งตะกร้า — ว่าง = ใช้ของแต่ละใบ)</span>
+        <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={`${selCls} w-full mt-0.5`} />
+      </label>
+      {isHire && craftIds.length === 0 && <p className="text-[11px] text-rose-500">งานเหมา — ต้องเลือกช่างอย่างน้อย 1 คนก่อนจ่าย</p>}
+      <button onClick={openConfirm} disabled={cartItems.length === 0 || !selDept || (isHire && craftIds.length === 0)}
+        title={isHire && craftIds.length === 0 ? "งานเหมา ต้องเลือกช่างก่อน" : ""}
+        className="w-full h-12 text-base font-semibold bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+        {craftIds.length > 1 ? `แบ่งงานให้ช่าง ${craftIds.length} คน (${cartItems.length} ใบ)` : `จ่ายงาน (${cartItems.length} ใบ)`}
+      </button>
+      <p className="text-[11px] text-slate-400">กดแล้วมีป๊อปให้ยืนยัน — ตรวจจำนวนต่อช่าง + เลือกงานที่จะ “ตัด/เตรียมครบ” ได้</p>
+    </div>
+  );
+
+  // ───────── หน้าตะกร้า (เต็มจอ) — เปิดจากปุ่ม 🛒 · กลับได้ทุกเมื่อ ของในตะกร้าไม่หาย ─────────
+  if (cartOpen && canDispatch) {
+    return (
+      <div className="max-w-[1200px] mx-auto">
+        <div className="flex items-center gap-2 mb-3">
+          <button onClick={() => setCartOpen(false)} className="h-10 px-4 text-sm border border-slate-200 bg-white rounded-lg text-slate-600 hover:bg-slate-50">← เลือกงานต่อ</button>
+          <h2 className="text-lg font-bold text-slate-800">🛒 ตะกร้าจ่ายงาน ({cartItems.length} ใบ)</h2>
+          <div className="flex-1" />
+          {cartItems.length > 0 && <button onClick={() => setCart({})} className="h-9 px-3 text-sm text-slate-400 hover:text-rose-500">ล้างตะกร้า</button>}
+        </div>
+
+        {cartItems.length === 0 ? (
+          <div className="border border-dashed border-slate-200 rounded-xl py-20 text-center text-slate-400">
+            ตะกร้าว่าง — กด “← เลือกงานต่อ” แล้วติ๊กการ์ดที่จะจ่าย
+          </div>
+        ) : (
+          <div className="flex flex-col lg:flex-row gap-3 items-start">
+            {/* รายการในตะกร้า — แถวใหญ่ อ่านง่าย */}
+            <div className="flex-1 min-w-0 w-full border border-slate-200 rounded-xl bg-white divide-y divide-slate-100">
+              {cartItems.map((m) => (
+                <div key={m.id} className="flex items-center gap-3 p-3">
+                  <HoverImage url={m.image_url} size={56} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-semibold text-slate-800 truncate">{m.product_sku}</span>
+                      {readyBadge(m)}
+                    </div>
+                    <div className="text-xs text-slate-500 truncate">{m.product_name}{m.color ? <span className="text-slate-400"> · {m.color}</span> : null}</div>
+                    <div className="text-[11px] text-slate-400 font-mono">{m.mo_no} · เหลือ {fmt(m.remaining)} · <span className={dueClass(m.due_date)}>📅 {dueText(m.due_date)}</span></div>
+                    {gapBadges(m)}
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-[11px] text-slate-500 mb-0.5">จำนวนที่จ่าย</div>
+                    <input type="number" min={0} max={m.remaining} step="any" value={cart[m.id]}
+                      onChange={(e) => setQty(m.id, Number(e.target.value), m.remaining)}
+                      className="w-24 h-10 px-2 text-base text-right border border-slate-200 rounded-lg" />
+                  </div>
+                  <button onClick={() => removeCart(m.id)} title="เอาออกจากตะกร้า" className="shrink-0 text-slate-300 hover:text-rose-500 text-lg">✕</button>
+                </div>
+              ))}
+            </div>
+
+            {/* ฟอร์มจ่ายงาน */}
+            <div className="w-full lg:w-96 shrink-0 border border-slate-200 rounded-xl bg-white p-3 lg:sticky lg:top-2">
+              <div className="text-sm font-bold text-slate-700 mb-2">จ่ายให้ใคร</div>
+              {dispatchForm}
+            </div>
+          </div>
+        )}
+
+        {/* ป๊อปยืนยันจ่ายงาน (ตัวเดียวกับหน้าเลือกงาน) */}
+        {confirmModal}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col xl:flex-row gap-3">
-      {/* ซ้าย: ตัวกรอง + การ์ด */}
+    <div>
+      {/* ตัวกรอง + การ์ด */}
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2 mb-2">
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา สินค้า / เลขใบสั่งผลิต"
@@ -356,6 +544,13 @@ export function DispatchShop({
           {canDispatch && filtered.length > 0 && (
             <button onClick={addAllShown} className="h-9 px-3 text-sm border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap">＋ ใส่ตะกร้าทั้งหมดที่เห็น ({filtered.length})</button>
           )}
+          {/* ไปหน้าตะกร้า (เต็มจอ) — แทนแผงข้างเดิม */}
+          {canDispatch && (
+            <button onClick={() => setCartOpen(true)} disabled={cartItems.length === 0}
+              className="h-9 px-4 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 whitespace-nowrap ml-auto">
+              🛒 ตะกร้า ({cartItems.length}) →
+            </button>
+          )}
         </div>
 
         <div className="max-h-[calc(100vh-230px)] overflow-y-auto pr-1 space-y-3">
@@ -376,161 +571,7 @@ export function DispatchShop({
         </div>
       </div>
 
-      {/* ขวา: ตะกร้าจ่ายงาน */}
-      {canDispatch && (
-        <div className="xl:w-80 shrink-0">
-          <div className="xl:sticky xl:top-2 border border-slate-200 rounded-xl bg-white flex flex-col max-h-[calc(100vh-210px)]">
-            <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
-              <span className="text-sm font-bold text-slate-700">🛒 ตะกร้าจ่ายงาน ({cartItems.length})</span>
-              {cartItems.length > 0 && <button onClick={() => setCart({})} className="text-[11px] text-slate-400 hover:text-rose-500">ล้าง</button>}
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-[80px]">
-              {cartItems.length === 0 ? (
-                <div className="text-center text-[11px] text-slate-300 py-6">ติ๊กเลือกการ์ดทางซ้าย<br />เพื่อใส่ลงตะกร้า</div>
-              ) : cartItems.map((m) => (
-                <div key={m.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-100">
-                  <HoverImage url={m.image_url} size={30} />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-semibold text-slate-800 truncate">{m.product_sku}</div>
-                    <div className="text-[10px] text-slate-400 font-mono truncate">{m.mo_no}</div>
-                  </div>
-                  <input type="number" min={0} max={m.remaining} step="any" value={cart[m.id]} onChange={(e) => setQty(m.id, Number(e.target.value), m.remaining)}
-                    className="w-14 h-7 px-1.5 text-xs text-right border border-slate-200 rounded" />
-                  <button onClick={() => removeCart(m.id)} className="text-slate-300 hover:text-rose-500 text-xs shrink-0">✕</button>
-                </div>
-              ))}
-            </div>
-
-            <div className="border-t border-slate-100 p-2.5 space-y-2">
-              <label className="block">
-                <span className="text-[11px] text-slate-500">โต๊ะ/แผนกที่จ่าย *</span>
-                <select value={dept} onChange={(e) => changeDept(e.target.value)} className={`${selCls} w-full mt-0.5`}>
-                  <option value="">— เลือกโต๊ะ —</option>
-                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-              </label>
-
-              {/* ช่าง — เลือกได้หลายคน (แบ่งงาน) */}
-              <div>
-                <span className="text-[11px] text-slate-500">ช่าง (เลือกได้หลายคน = แบ่งงานให้{isHire ? " · งานเหมาต้องเลือก" : " · ว่าง = ทั้งแผนก"})</span>
-                {selectedCrafts.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {selectedCrafts.map((c) => (
-                      <span key={c.id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-indigo-50 text-indigo-700 rounded-full">
-                        {c.name}<button onClick={() => toggleCraft(c.id)} className="text-indigo-400 hover:text-rose-500">✕</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <button type="button" onClick={() => setCraftListOpen((o) => !o)} className="mt-1 w-full h-8 text-sm text-left px-2 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 text-slate-600">
-                  ＋ เลือกช่าง {craftIds.length > 0 ? `(${craftIds.length})` : ""} <span className="float-right text-[9px] text-slate-400">▾</span>
-                </button>
-                {craftListOpen && (
-                  <div className="mt-1 border border-slate-200 rounded-lg bg-white">
-                    <input value={craftSearch} onChange={(e) => setCraftSearch(e.target.value)} placeholder="ค้นหาช่าง…" className="w-full h-8 px-2 text-sm border-b border-slate-100 focus:outline-none" />
-                    <div className="max-h-44 overflow-y-auto p-1">
-                      {craftFiltered.map((c) => (
-                        <label key={c.id} className="flex items-center gap-2 px-2 py-1 text-sm rounded hover:bg-slate-50 cursor-pointer">
-                          <input type="checkbox" checked={craftIds.includes(c.id)} onChange={() => toggleCraft(c.id)} className="w-4 h-4 accent-indigo-600" />
-                          <span className="truncate">{c.code ? <code className="text-[10px] text-slate-400">[{c.code}] </code> : null}{c.name}</span>
-                        </label>
-                      ))}
-                      {craftFiltered.length === 0 && <div className="px-2 py-3 text-center text-[11px] text-slate-300">ไม่พบช่าง</div>}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <label className="block">
-                <span className="text-[11px] text-slate-500">กำหนดเสร็จ (ทั้งตะกร้า — ว่าง = ใช้ของแต่ละใบ)</span>
-                <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={`${selCls} w-full mt-0.5`} />
-              </label>
-              {isHire && craftIds.length === 0 && <p className="text-[11px] text-rose-500">งานเหมา — ต้องเลือกช่างอย่างน้อย 1 คนก่อนจ่าย</p>}
-              <button onClick={openConfirm} disabled={cartItems.length === 0 || !selDept || (isHire && craftIds.length === 0)}
-                title={isHire && craftIds.length === 0 ? "งานเหมา ต้องเลือกช่างก่อน" : ""}
-                className="w-full h-10 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                {craftIds.length > 1 ? `แบ่งงานให้ช่าง ${craftIds.length} คน (${cartItems.length} ใบ)` : `จ่ายงาน (${cartItems.length} ใบ)`}
-              </button>
-              <p className="text-[10px] text-slate-400">กดแล้วมีป๊อปให้ยืนยัน — ตรวจจำนวนต่อช่าง + เลือกงานที่จะ “ตัด/เตรียมครบ” ได้</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ป๊อปยืนยันจ่ายงาน — ตารางแบ่งงานต่อช่าง + ติ๊กตัด/เตรียมครบ */}
-      <ERPModal open={confirmOpen} onClose={() => !saving && setConfirmOpen(false)} size="xl" title="ยืนยันจ่ายงาน"
-        footer={<>
-          <button onClick={() => setConfirmOpen(false)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-          <button onClick={() => void doDispatch()} disabled={saving || anyOver || totalWO === 0 || missingRate}
-            title={missingRate ? "ต้องใส่ค่าแรง/ชิ้น ทุกใบก่อนจ่าย" : ""}
-            className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? "กำลังจ่าย…" : `ยืนยันจ่าย (${totalWO} ใบจ่ายงาน)`}</button>
-        </>}>
-        <div className="space-y-2">
-          <div className="text-sm text-slate-600">
-            จ่ายเข้า <b>{selDept?.name}</b>
-            {cols.length > 0 && cols[0].id !== "__dept__"
-              ? <> · ช่าง {cols.map((c) => c.name).join(", ")}</>
-              : <> · ทั้งแผนก (ไม่ระบุช่าง)</>}
-            {due && <> · กำหนดเสร็จ {due}</>}
-          </div>
-          <div className="border border-slate-200 rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-[11px] text-slate-500">
-                <tr>
-                  <th className="text-left px-2 py-1.5 font-medium sticky left-0 bg-slate-50">สินค้า</th>
-                  {cols.map((c) => <th key={c.id} className="px-2 py-1.5 font-medium text-center whitespace-nowrap">{c.id === "__dept__" ? "จำนวน" : c.name}</th>)}
-                  <th className="px-2 py-1.5 font-medium text-center">รวม</th>
-                  <th className="px-2 py-1.5 font-medium text-center whitespace-nowrap">ค่าแรง/ชิ้น *</th>
-                  <th className="px-2 py-1.5 font-medium text-center whitespace-nowrap">ตัด/เตรียมครบ</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {confirmItems.map((m) => {
-                  const sum = itemSum(m.id);
-                  const over = sum > m.remaining + 0.0001;
-                  return (
-                    <tr key={m.id}>
-                      <td className="px-2 py-1.5 sticky left-0 bg-white">
-                        <div className="text-xs font-semibold text-slate-800 truncate max-w-[160px]">{m.product_sku}</div>
-                        <div className="text-[10px] text-slate-400 font-mono">{m.mo_no} · เหลือ {fmt(m.remaining)}</div>
-                      </td>
-                      {cols.map((c) => (
-                        <td key={c.id} className="px-1 py-1 text-center">
-                          <input type="number" min={0} step="any" value={splits[m.id]?.[c.id] ?? 0}
-                            onChange={(e) => setSplits((s) => ({ ...s, [m.id]: { ...s[m.id], [c.id]: Math.max(0, Number(e.target.value) || 0) } }))}
-                            className="w-16 h-8 px-1.5 text-xs text-right border border-slate-200 rounded" />
-                        </td>
-                      ))}
-                      <td className={`px-2 py-1.5 text-center tabular-nums font-semibold ${over ? "text-rose-600" : "text-slate-700"}`}>{fmt(sum)}</td>
-                      <td className="px-1 py-1 text-center">
-                        <input type="number" min={0} step="any" value={rates[m.id] ?? 0}
-                          onChange={(e) => setRates((s) => ({ ...s, [m.id]: Math.max(0, Number(e.target.value) || 0) }))}
-                          className={`w-16 h-8 px-1.5 text-xs text-right border rounded ${sum > 0 && !((rates[m.id] ?? 0) > 0) ? "border-rose-400 bg-rose-50" : "border-slate-200"}`} />
-                      </td>
-                      <td className="px-2 py-1.5 text-center">
-                        {m.ready
-                          ? <span className="text-[10px] text-emerald-600">พร้อมแล้ว</span>
-                          : <input type="checkbox" checked={!!markReady[m.id]} onChange={(e) => setMarkReady((s) => ({ ...s, [m.id]: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {anyOver && <p className="text-[11px] text-rose-600">⚠️ มีบางรายการจำนวนรวมเกิน “คงเหลือ” — แก้จำนวนก่อนจ่าย</p>}
-          {missingRate && <p className="text-[11px] text-rose-600">⚠️ ต้องใส่ <b>ค่าแรง/ชิ้น</b> ทุกใบที่จ่าย (ห้ามเป็น 0)</p>}
-          <label className="flex items-center gap-2 text-[11px] text-slate-600 cursor-pointer w-fit">
-            <input type="checkbox" checked={saveBom} onChange={(e) => setSaveBom(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
-            💾 บันทึกค่าแรงที่กรอกกลับเข้า BOM (ราคากลาง/ชิ้น) — ครั้งหน้าจะเติมให้อัตโนมัติ
-          </label>
-          <p className="text-[11px] text-slate-400">
-            แต่ละช่องคือจำนวนที่ช่างคนนั้นได้ (แบ่งเท่ากันให้ก่อน แก้เองได้) · ช่องเป็น 0 = ไม่จ่ายให้คนนั้น ·
-            ค่าแรงเติมราคากลางจาก BOM ให้ก่อน (แก้ได้) · ติ๊ก “ตัด/เตรียมครบ” = ทำเครื่องหมายทั้งใบตอนจ่าย
-          </p>
-        </div>
-      </ERPModal>
+      {confirmModal}
     </div>
   );
 }
