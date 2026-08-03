@@ -17,6 +17,8 @@ import { docFileName } from "@/lib/print-filename";
 import { buildReportHtml } from "@/lib/template";
 import { scanUrl, scanQrHtml } from "@/lib/scan-code";
 import { thaiBahtText } from "@/lib/quotation-print";
+import { buildStampsHtml } from "@/lib/doc-stamps";
+import { useDocStamps, DocStampOverlay, DocStampPanel } from "@/components/doc-stamp-editor";
 import type { PoDetail } from "@/app/api/purchasing/po-detail/route";
 import type { PODetail } from "@/app/api/purchase-orders/route";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
@@ -159,6 +161,10 @@ export default function PrintPOPage() {
    * ตัวเลือก "แสดงบนใบ" — จำค่าไว้ในเครื่อง (ตั้งครั้งเดียว ใช้ทุกใบ)
    * QR ปิดเป็นค่าเริ่มต้นตามที่เจ้าของสั่ง — เปิดได้ถ้าจะพิมพ์ใบไว้สแกนรับของที่โกดัง
    */
+  const [placing, setPlacing] = useState(false);      // โหมดจัดตำแหน่งลายเซ็น/ตรา
+  const [selId, setSelId] = useState<string | null>(null);
+  const { stamps, patch: patchStamp, add: addStamp, remove: removeStamp } = useDocStamps("po");
+
   const [showQr, setShowQr] = useState(false);
   const [showTerms, setShowTerms] = useState(true);
   useEffect(() => {
@@ -234,10 +240,12 @@ export default function PrintPOPage() {
         qr_html: showQr ? qrHtml : "",
         // เทมเพลตห่อบรรทัดนี้ด้วย {{#show_payment_terms}} → ส่ง "" = ซ่อนทั้งบรรทัด
         show_payment_terms: showTerms && view.data.payment_terms ? "1" : "",
+        // ลายเซ็น/ตราประทับ — ตอนจัดตำแหน่งซ่อนในเอกสารไว้ (โชว์ตัวลากทับแทน จะได้ไม่เห็นซ้อนกัน 2 ชั้น)
+        stamps_html: placing ? "" : buildStampsHtml(stamps),
       },
       docFileName("ใบสั่งซื้อ", view.poNumber),
     );
-  }, [view, template, qrHtml, showQr, showTerms]);
+  }, [view, template, qrHtml, showQr, showTerms, stamps, placing]);
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -254,13 +262,32 @@ export default function PrintPOPage() {
           QR สแกน
           <span className="text-[11px] text-slate-400">(สำหรับพิมพ์ไว้สแกนรับของ — ใบที่ส่งซัพไม่ต้องมี)</span>
         </label>
+        <button type="button" onClick={() => { setPlacing((v) => !v); setSelId(null); }}
+          className={`ml-auto h-8 px-3 text-sm rounded-md border ${placing
+            ? "bg-blue-600 border-blue-600 text-white font-medium" : "bg-white border-slate-300 text-slate-700 hover:bg-slate-50"}`}>
+          {placing ? "✓ เสร็จแล้ว" : "🖊 จัดลายเซ็น / ตราประทับ"}
+        </button>
       </div>
+
+      {placing && (
+        <div className="no-print px-6 py-3 bg-white border-b border-slate-200">
+          <DocStampPanel stamps={stamps} selectedId={selId} onSelect={setSelId}
+            onPatch={patchStamp} onAdd={addStamp} onRemove={removeStamp} />
+        </div>
+      )}
+
       <div className="py-6 px-4">
         {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
          : error || !view ? <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
          : !template ? <div className="text-center py-20 text-amber-600">⚠️ ยังไม่มี template สำหรับ PO</div>
          : (
-          <PrintFrame html={html} fileName={fileName} />
+          // กรอบ relative ครอบตัวอย่างพิมพ์ → ตัวลากวางทับได้ตรงตำแหน่ง (เอกสารกว้างคงที่ 210mm)
+          <div className="relative mx-auto" style={{ maxWidth: 840 }}>
+            <PrintFrame html={html} fileName={fileName} />
+            {placing && (
+              <DocStampOverlay stamps={stamps} onPatch={patchStamp} selectedId={selId} onSelect={setSelId} />
+            )}
+          </div>
         )}
       </div>
     </div>
