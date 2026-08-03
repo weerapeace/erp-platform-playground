@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { formatThaiAddress, formatTaxId } from "@/lib/thai-address";
 import type { SOLine } from "../route";
 
@@ -30,6 +31,34 @@ async function enrichSoCustomer(request: NextRequest, so: unknown) {
     customer_address: firstText(detail.customer_address, formatThaiAddress(row)),
     customer_phone:   firstText(detail.customer_phone, row.phone, row.mobile, row.tel, row.contact_phone),
     customer_tax_id:  firstText(detail.customer_tax_id, formatTaxId(firstText(row.tax_id, row.tax_no, row.vat_id), row.tax_branch)),
+  };
+}
+
+/** เติมหัวบิล "บริษัทผู้ขาย" จากทะเบียน companies — เดิมพิมพ์ฝังตายในแม่แบบ */
+async function enrichSoCompany(so: unknown) {
+  if (!so || typeof so !== "object") return so;
+  const detail = so as Record<string, unknown>;
+  const admin = supabaseAdmin();
+  const companyId = String(detail.company_id ?? "").trim();
+
+  // ใบเก่าที่ยังไม่ได้ผูกบริษัท → ใช้บริษัทตั้งต้น (เอกสารจะได้ไม่มีหัวว่าง)
+  const q = admin.from("companies").select("*");
+  const { data: c } = companyId
+    ? await q.eq("id", companyId).maybeSingle()
+    : await q.eq("is_default", true).maybeSingle();
+  if (!c) return so;
+
+  const row = c as Record<string, unknown>;
+  return {
+    ...detail,
+    company_name_th: firstText(row.name_th, row.name),
+    company_name_en: firstText(row.name_en),
+    company_address: formatThaiAddress(row),
+    company_phone:   firstText(row.phone),
+    company_fax:     firstText(row.fax),
+    company_tax_id:  formatTaxId(row.tax_id, row.tax_branch),
+    company_logo_key: firstText(row.logo_key),
+    company_code:    firstText(row.company_code),
   };
 }
 

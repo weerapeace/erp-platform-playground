@@ -14,6 +14,12 @@ export type SODetailExt = SODetail & {
   customer_address?: string;
   customer_phone?:   string;
   customer_tax_id?:  string;
+  company_name_th?:  string;
+  company_name_en?:  string;
+  company_address?:  string;
+  company_phone?:    string;
+  company_fax?:      string;
+  company_tax_id?:   string;
   payment_terms?:    string;
   customer_po_no?:   string;
 };
@@ -42,6 +48,14 @@ export function buildSoData(so: SODetailExt): Record<string, unknown> {
     customer_address: so.customer_address ?? "",
     customer_phone:   so.customer_phone ?? "",
     customer_tax_id:  so.customer_tax_id ?? "",
+    // หัวบิลบริษัทผู้ขาย — ดึงจากทะเบียนบริษัท (เดิมพิมพ์ฝังตายในแม่แบบ เปลี่ยนไม่ได้)
+    company_name_th:  so.company_name_th ?? "",
+    company_name_en:  so.company_name_en ?? "",
+    company_address:  so.company_address ?? "",
+    company_phone:    so.company_phone ?? "",
+    company_fax:      so.company_fax ?? "",
+    company_tax_id:   so.company_tax_id ?? "",
+    company_tel_line: [so.company_phone && `โทร/Tel: ${so.company_phone}`, so.company_fax && `แฟกซ์/Fax: ${so.company_fax}`].filter(Boolean).join(" "),
     sale_person_name: so.sale_person_name ?? "—",
     order_date_th:    thaiDate(so.order_date),
     order_date_iso:   isoDate(so.order_date),

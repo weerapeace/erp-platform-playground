@@ -71,6 +71,7 @@ type FormState = {
   payment_terms: string;
   customer_po_no: string;
   tax_invoice_no: string;
+  company_id: string;          // ออกในนามบริษัทไหน (หัวบิลบนเอกสาร)
   lines: EditorLine[];
 };
 
@@ -79,8 +80,11 @@ const EMPTY: FormState = {
   order_date: new Date().toISOString().slice(0, 10), expected_ship_date: "",
   vat_rate: 7, vat_included: false, wht_rate: 0,
   header_discount_type: "percent", header_discount_value: 0, shipping_fee: 0,
-  note: "", payment_terms: "", customer_po_no: "", tax_invoice_no: "", lines: [emptyLine()],
+  note: "", payment_terms: "", customer_po_no: "", tax_invoice_no: "", company_id: "", lines: [emptyLine()],
 };
+
+/** ทะเบียนบริษัท (หัวบิล) — โหลดครั้งเดียวต่อการเปิดหน้า */
+type CompanyOpt = { id: string; company_code: string; name: string; is_default: boolean; status: string | null };
 
 const formSnapshot = (form: FormState) => JSON.stringify({
   ...form,
@@ -119,6 +123,13 @@ export default function SalesOrdersPage() {
 
   // คลังหลัก (default ตอนสร้าง)
   const [defaultWarehouse, setDefaultWarehouse] = useState<WarehousePickerValue | null>(null);
+
+  // ทะเบียนบริษัท (หัวบิลบนเอกสาร) — ใช้ตอนเลือก "ออกในนามบริษัท"
+  const [companies, setCompanies] = useState<CompanyOpt[]>([]);
+  const defaultCompanyId = useMemo(
+    () => companies.find((c) => c.is_default)?.id ?? companies[0]?.id ?? "",
+    [companies],
+  );
 
   // detail drawer
   const [detail,        setDetail]        = useState<SODetail | null>(null);
@@ -163,6 +174,14 @@ export default function SalesOrdersPage() {
       .catch(() => {});
   }, [canView]);
 
+  // ทะเบียนบริษัท (หัวบิล) — รายการสั้น โหลดครั้งเดียวตอนเปิดหน้า
+  useEffect(() => {
+    if (!canView) return;
+    apiFetch("/api/admin/companies").then((r) => r.json())
+      .then((j) => setCompanies(((j.data ?? []) as CompanyOpt[]).filter((c) => c.status !== "inactive")))
+      .catch(() => {});
+  }, [canView]);
+
   // ---- Open detail ----
   const openDetail = async (id: string) => {
     setDetailOpen(true); setDetailLoading(true); setDetail(null);
@@ -198,6 +217,7 @@ export default function SalesOrdersPage() {
       note: so.note ?? "",
       payment_terms: (so as unknown as { payment_terms?: string }).payment_terms ?? "",
       customer_po_no: (so as unknown as { customer_po_no?: string }).customer_po_no ?? "",
+      company_id: (so as unknown as { company_id?: string }).company_id ?? "",
       tax_invoice_no: so.tax_invoice_no ?? "",
       lines: so.lines.map(l => ({
         tempId: l.id ?? String(Math.random()),
@@ -222,7 +242,7 @@ export default function SalesOrdersPage() {
   };
 
   const openCreate = () => {
-    const nextForm = { ...EMPTY, sale_person_name: user?.name ?? "", warehouse: defaultWarehouse, lines: [emptyLine()] };
+    const nextForm = { ...EMPTY, sale_person_name: user?.name ?? "", warehouse: defaultWarehouse, company_id: defaultCompanyId, lines: [emptyLine()] };
     setEditingId(null); setForm(nextForm); setFormBaseline(formSnapshot(nextForm)); setPulledQuotes([]); setFormErr(null); setModalOpen(true);
   };
 
@@ -321,6 +341,7 @@ export default function SalesOrdersPage() {
         note: form.note || null,
         payment_terms: form.payment_terms || null,
         customer_po_no: form.customer_po_no || null,
+        company_id: form.company_id || null,
         tax_invoice_no: form.tax_invoice_no.trim() || null,
       };
       const lines = form.lines.map(l => ({
