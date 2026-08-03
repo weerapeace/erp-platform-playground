@@ -20,6 +20,7 @@ import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { Pager } from "@/components/pager";
 import { hasOpenDrawer } from "@/lib/drawer-history";
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
+import { MaterialRequestButton } from "@/components/material-request";
 // ของกลาง bulk edit — type อย่างเดียว (ไม่กิน runtime); ตัว modal โหลดแบบ dynamic ด้านล่าง (กัน data-table เข้า bundle หน้านี้)
 import type { BulkEditField } from "@/components/data-table";
 import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
@@ -430,6 +431,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
             🔗 {t("จัดการ SKU ซ้ำ", "Merge duplicates")}
           </button>
         )}
+        {/* ขอเพิ่มวัตถุดิบ — พนักงานกรอกเท่าที่รู้ ยังไม่สร้าง SKU (ของกลาง material-request) */}
+        {!taobao && entity === "skus" && <MaterialRequestButton />}
         {!taobao && <button onClick={() => setMissingOpen(true)} title={t("ตรวจว่ามีสินค้าตัวไหนรูปเสีย (ไฟล์หายจากที่เก็บ) บ้าง", "Find products whose image files are missing from storage")}
           className="h-9 px-3 text-sm border border-slate-200 text-slate-500 rounded-lg hover:bg-slate-50 whitespace-nowrap">
           🔎 {t("ตรวจรูปหาย", "Find broken images")}
