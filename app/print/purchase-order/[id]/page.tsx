@@ -29,6 +29,9 @@ const STATUS_LABELS: Record<string, string> = {
 
 const CURRENCY_SYMBOL: Record<string, string> = { THB: "฿", RMB: "¥", YUAN: "¥", CNY: "¥", USD: "$" };
 
+/** ตัวเลือกการแสดงผลบนใบ — จำต่อเครื่อง (ไม่ผูกกับใบใดใบหนึ่ง) */
+const PRINT_OPTS_KEY = "po_print_opts";
+
 const money = (n: number | null | undefined) =>
   Number(n ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const thaiDate = (iso: string | null | undefined) =>
@@ -50,11 +53,12 @@ function viewFromV2(po: PoDetail): PoView {
     data: {
       po_number:       po.po_no,
       status_label:    STATUS_LABELS[String(po.payment_status ?? "")] ?? (po.payment_status ?? "—"),
-      supplier_name:   po.seller ?? "—",
+      // ชื่อบนเอกสารต้องเป็น "ชื่อบริษัทตามทะเบียน" ก่อน — ชื่อเล่นร้านใช้เฉพาะตอนยังไม่ได้กรอก
+      supplier_name:   si?.company_name || po.seller || "—",
       supplier_code:   "",
-      supplier_address: si?.address ?? "",
+      supplier_address: si?.address_full || si?.address || "",
       supplier_phone:  si?.phone ?? "",
-      supplier_tax_id: si?.tax_id ? `${si.tax_id}${si.tax_branch ? ` (${si.tax_branch})` : ""}` : "",
+      supplier_tax_id: si?.tax_id_full ?? "",
       payment_terms:   si?.payment_terms ?? "",
       warehouse_name:  "",
       warehouse_code:  "",
@@ -151,6 +155,28 @@ export default function PrintPOPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * ตัวเลือก "แสดงบนใบ" — จำค่าไว้ในเครื่อง (ตั้งครั้งเดียว ใช้ทุกใบ)
+   * QR ปิดเป็นค่าเริ่มต้นตามที่เจ้าของสั่ง — เปิดได้ถ้าจะพิมพ์ใบไว้สแกนรับของที่โกดัง
+   */
+  const [showQr, setShowQr] = useState(false);
+  const [showTerms, setShowTerms] = useState(true);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PRINT_OPTS_KEY);
+      if (raw) {
+        const o = JSON.parse(raw) as { qr?: boolean; terms?: boolean };
+        if (typeof o.qr === "boolean") setShowQr(o.qr);
+        if (typeof o.terms === "boolean") setShowTerms(o.terms);
+      }
+    } catch { /* ไม่มีค่าเก่า = ใช้ค่าเริ่มต้น */ }
+  }, []);
+  const setOpt = (patch: { qr?: boolean; terms?: boolean }) => {
+    const next = { qr: patch.qr ?? showQr, terms: patch.terms ?? showTerms };
+    setShowQr(next.qr); setShowTerms(next.terms);
+    try { localStorage.setItem(PRINT_OPTS_KEY, JSON.stringify(next)); } catch { /* โควตาเต็ม = ข้าม */ }
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -203,14 +229,32 @@ export default function PrintPOPage() {
         header_html: template.header_html, body_html: template.body_html,
         footer_html: template.footer_html, custom_css: template.custom_css,
       },
-      { ...view.data, qr_html: qrHtml },
+      {
+        ...view.data,
+        qr_html: showQr ? qrHtml : "",
+        // เทมเพลตห่อบรรทัดนี้ด้วย {{#show_payment_terms}} → ส่ง "" = ซ่อนทั้งบรรทัด
+        show_payment_terms: showTerms && view.data.payment_terms ? "1" : "",
+      },
       docFileName("ใบสั่งซื้อ", view.poNumber),
     );
-  }, [view, template, qrHtml]);
+  }, [view, template, qrHtml, showQr, showTerms]);
 
   return (
     <div className="min-h-screen bg-slate-100">
       <PrintToolbar onBack={() => router.back()} fileName={view ? fileName : undefined} />
+      {/* แถบ "แสดงบนใบ" — ไม่ติดไปตอนพิมพ์ (no-print) · จำค่าไว้ในเครื่อง */}
+      <div className="no-print flex flex-wrap items-center gap-4 border-b border-slate-200 bg-white px-6 py-2.5">
+        <span className="text-xs font-medium text-slate-400">แสดงบนใบ</span>
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <input type="checkbox" checked={showTerms} onChange={(e) => setOpt({ terms: e.target.checked })} className="rounded border-slate-300" />
+          เงื่อนไขชำระเงิน
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <input type="checkbox" checked={showQr} onChange={(e) => setOpt({ qr: e.target.checked })} className="rounded border-slate-300" />
+          QR สแกน
+          <span className="text-[11px] text-slate-400">(สำหรับพิมพ์ไว้สแกนรับของ — ใบที่ส่งซัพไม่ต้องมี)</span>
+        </label>
+      </div>
       <div className="py-6 px-4">
         {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
          : error || !view ? <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>

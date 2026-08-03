@@ -8,6 +8,7 @@ import { guardApi } from "@/lib/api-auth";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
 import { formatCreditTerm } from "@/lib/credit-term";
 import { computePoTotals, sumActiveLines } from "@/lib/po-total";
+import { formatThaiAddress, formatTaxId } from "@/lib/th-address";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -30,6 +31,12 @@ export type PoLastReceipt = { gr_no: string; receiver: string | null; receive_da
 
 /** ข้อมูลผู้จำหน่ายสำหรับหัวเอกสาร (ใบสั่งซื้อแบบใบกำกับภาษี) */
 export type PoSellerInfo = {
+  /** ชื่อบริษัทเต็ม (ตามทะเบียน) — ใบสั่งซื้อต้องใช้ชื่อนี้ ไม่ใช่ชื่อเล่นร้าน */
+  company_name: string | null;
+  /** ที่อยู่ประกอบเสร็จแล้ว (แขวง/เขต/จังหวัด/ไปรษณีย์) ด้วยของกลาง lib/th-address */
+  address_full: string | null;
+  /** เลขผู้เสียภาษี + สาขา (ซ่อนสาขา 00000 = สำนักงานใหญ่) */
+  tax_id_full: string | null;
   address: string | null; phone: string | null; tax_id: string | null; tax_branch: string | null;
   /** เงื่อนไขชำระเงินของร้าน (ข้อความอ่านง่าย เช่น "เครดิต 30 วัน") */
   payment_terms: string | null;
@@ -108,10 +115,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
     if (partnerId) {
       const { data: pt } = await admin.from("partners_v2")
-        .select("address_line, phone, tax_id, tax_branch, purchase_credit_term").eq("id", partnerId).maybeSingle();
+        .select("company_name, address_line, sub_district, district, province, postal_code, phone, tax_id, tax_branch, purchase_credit_term")
+        .eq("id", partnerId).maybeSingle();
       const r = (pt ?? null) as Record<string, unknown> | null;
       if (r) {
         sellerInfo = {
+          company_name: (r.company_name as string) ?? null,
+          address_full: formatThaiAddress({
+            address_line: r.address_line as string, sub_district: r.sub_district as string,
+            district: r.district as string, province: r.province as string, postal_code: r.postal_code as string,
+          }) || null,
+          tax_id_full: formatTaxId(r.tax_id, r.tax_branch) || null,
           address: (r.address_line as string) ?? null,
           phone: (r.phone as string) ?? null,
           tax_id: (r.tax_id as string) ?? null,
