@@ -56,17 +56,14 @@ type SortKey = "due" | "remaining" | "sku" | "mo";
 const CARD_MODES = ["big", "compact"] as const;
 type CardMode = (typeof CARD_MODES)[number];
 
-// จำนวนการ์ดต่อแถว (จอกว้าง) — จำค่าต่อผู้ใช้
+/**
+ * จำนวนการ์ดต่อแถว — จำค่าต่อผู้ใช้
+ * ⚠️ ห้ามใช้ breakpoint ของ Tailwind (sm/lg/xl) เพราะมันอิง "ความกว้างจอ" ไม่ใช่เลขที่ผู้ใช้กด
+ *    (เคยทำแบบนั้น → กด 6 บนจอ ~1000px ได้ 3 คอลัมน์ = ผิดความคาดหวัง)
+ *    จึงสั่งด้วย inline style ให้ได้เลขตรงตามที่กดเสมอ
+ */
 const CARD_COLS = ["3", "4", "6", "8", "10"] as const;
 type CardCols = (typeof CARD_COLS)[number];
-// คลาส grid ต่อจำนวนคอลัมน์ (เขียนเต็มเพราะ Tailwind ต้องเห็นชื่อคลาสตรง ๆ ตอน build)
-const COLS_CLS: Record<CardCols, string> = {
-  "3": "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3",
-  "4": "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4",
-  "6": "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6",
-  "8": "grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8",
-  "10": "grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 xl:grid-cols-10",
-};
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "due", label: "ใกล้ครบกำหนด" },
@@ -218,7 +215,9 @@ export function DispatchShop({
     await onReload();
   };
 
-  const gridCols = `grid ${COLS_CLS[cardCols]} ${cardMode === "big" ? "gap-2.5" : "gap-2"}`;
+  const gridCols = `grid ${cardMode === "big" ? "gap-2.5" : "gap-2"}`;
+  // เลขคอลัมน์ตรงตามที่กดเสมอ (ไม่อิงความกว้างจอ) — การ์ดจะแคบลงเองเมื่อเลือกเยอะ
+  const gridStyle = { gridTemplateColumns: `repeat(${Number(cardCols)}, minmax(0, 1fr))` };
   const dense = Number(cardCols) >= 8;   // แถวละเยอะ = การ์ดแคบ ต้องย่อรูป/ตัวหนังสือ
 
   const readyBadge = (m: ShopMO) => (m.ready
@@ -363,14 +362,14 @@ export function DispatchShop({
           {filtered.length === 0 ? (
             <div className="text-center py-16 text-slate-300 text-sm">{pending.length === 0 ? "ไม่มีงานรอจ่าย 🎉" : "ไม่พบรายการที่ตรงกับตัวกรอง"}</div>
           ) : groupMode === "none" ? (
-            <div className={gridCols}>{filtered.map(renderCard)}</div>
+            <div className={gridCols} style={gridStyle}>{filtered.map(renderCard)}</div>
           ) : (
             buckets.map((b) => (
               <div key={b.name}>
                 <div className="text-xs font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">
                   {groupMode === "brand" ? "🏷 " : "🗂 "}{b.name} <span className="text-slate-400 font-normal">({b.items.length})</span>
                 </div>
-                <div className={gridCols}>{b.items.map(renderCard)}</div>
+                <div className={gridCols} style={gridStyle}>{b.items.map(renderCard)}</div>
               </div>
             ))
           )}
