@@ -6,6 +6,8 @@ import { PrintToolbar, PrintFrame } from "@/components/report";
 import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml } from "@/lib/template";
+import { columnTokens } from "@/lib/doc-print-prefs";
+import { DocPrintSettings, useDocPrintPrefs } from "@/components/doc-print-settings";
 import { thaiBahtText } from "@/lib/quotation-print";
 import type { SODetail } from "@/app/api/sales-orders/route";
 
@@ -81,6 +83,9 @@ export function buildSoData(so: SODetailExt): Record<string, unknown> {
       unit:            l.unit,
       unit_price:      baht(l.unit_price),
       discount_amount: baht(l.discount_amount ?? 0),
+      // ส่วนลด/VAT รายบรรทัด — โชว์เฉพาะเมื่อติ๊กเปิดคอลัมน์ · เว้นว่างถ้าไม่มี จะได้ไม่รกด้วย 0.00
+      discount_text:   Number(l.discount_amount ?? 0) > 0 ? baht(l.discount_amount) : "",
+      vat_text:        Number(l.vat_amount ?? 0) > 0 ? baht(l.vat_amount) : "",
       // คอลัมน์ AMOUNT = ยอดก่อน VAT (net) เพื่อให้รวมกันได้ = "รวมราคาทั้งสิ้น" แล้วบวก VAT แยกด้านล่าง
       // (เดิมใช้ line_total ที่รวม VAT แล้ว → ไม่ตรงกับยอดรวม)
       line_total:      baht(l.net_amount ?? l.line_total ?? 0),
@@ -93,8 +98,9 @@ export default function PrintSOPage() {
   const router = useRouter();
   const id = params.id as string;
 
-  const [so,       setSo]       = useState<SODetail | null>(null);
-  const [template, setTemplate] = useState<ReportTemplateRow | null>(null);
+  const [so,        setSo]        = useState<SODetail | null>(null);
+  const [templates, setTemplates] = useState<ReportTemplateRow[]>([]);
+  const { prefs, setPrefs } = useDocPrintPrefs("so");
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState<string | null>(null);
 
@@ -106,15 +112,20 @@ export default function PrintSOPage() {
       .then(([soRes, tplRes]) => {
         if (soRes.error) throw new Error(soRes.error);
         setSo(soRes.data as SODetail);
-        const tpls = (tplRes as ReportTemplatesResponse).data?.filter(t => t.active) ?? [];
-        setTemplate(tpls.find(t => t.is_default) ?? tpls[0] ?? null);
+        setTemplates((tplRes as ReportTemplatesResponse).data?.filter(t => t.active) ?? []);
       })
       .catch(e => setError(e instanceof Error ? e.message : "โหลดไม่ได้"))
       .finally(() => setLoading(false));
   }, [id]);
 
+  // แม่แบบที่ใช้: ตัวที่เลือกไว้ > ตัวตั้งต้นของระบบ > ตัวแรก
+  const template = useMemo(
+    () => templates.find((t) => t.id === prefs?.template_id) ?? templates.find((t) => t.is_default) ?? templates[0] ?? null,
+    [templates, prefs?.template_id],
+  );
+
   const html = useMemo(() => {
-    if (!so || !template) return "";
+    if (!so || !template || !prefs) return "";
     return buildReportHtml(
       {
         paper_size:  template.paper_size,
@@ -124,13 +135,20 @@ export default function PrintSOPage() {
         footer_html: template.footer_html,
         custom_css:  template.custom_css,
       },
-      buildSoData(so),
+      // คอลัมน์ที่ติ๊กเปิด → token col_<key> ให้แม่แบบซ่อน/โชว์ + colspan ของแถวสรุปยอด
+      { ...buildSoData(so), ...columnTokens("so", prefs) },
     );
-  }, [so, template]);
+  }, [so, template, prefs]);
 
   return (
     <div className="min-h-screen bg-slate-100">
       <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบกำกับภาษี", so?.tax_invoice_no || so?.so_number)} />
+      {prefs && templates.length > 0 && (
+        <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} />
+      )}
+      {prefs && templates.length > 0 && (
+        <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} />
+      )}
       <div className="py-6 px-4">
         {loading ? (
           <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
