@@ -12,6 +12,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
+import { ERPModal } from "@/components/modal";
+import { MoMaterialChecklist } from "@/components/mo-material-checklist";
 
 type Phase = "loading" | "ready" | "saving" | "error";
 
@@ -36,6 +38,9 @@ export default function ScanPrepPage() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [lastApplied, setLastApplied] = useState<"prep" | "cut" | "both" | null>(null);   // ไว้กด ↩ ย้อนกลับทันทีถ้าเผลอกด
+  const [undoAsk, setUndoAsk] = useState<"prep" | "cut" | "both" | null>(null);           // ยืนยันก่อนยกเลิกทั้งใบ
+  const [checklistOpen, setChecklistOpen] = useState(false);                               // ป๊อปติ๊กทีละชิ้น
 
   const load = useCallback(async () => {
     setError(null);
@@ -69,13 +74,14 @@ export default function ScanPrepPage() {
   const cutAllDone = prog.hasBom ? prog.cutReady >= prog.cutTotal : !!mo?.cut_done;
   const greenLight = prepAllDone && cutAllDone;
 
-  const apply = useCallback(async (which: "prep" | "cut" | "both") => {
+  /** done=true = ติ๊กครบทั้งใบ · done=false = ยกเลิก (ปลดติ๊กทุกชิ้นในใบ) */
+  const apply = useCallback(async (which: "prep" | "cut" | "both", done = true) => {
     if (!mo) return;
     setPhase("saving"); setError(null); setFlash(null);
     try {
       const body: Record<string, unknown> = { apply_all: true };
-      if (which === "prep" || which === "both") body.prep_done = true;
-      if (which === "cut" || which === "both") body.cut_done = true;
+      if (which === "prep" || which === "both") body.prep_done = done;
+      if (which === "cut" || which === "both") body.cut_done = done;
 
       const res = await apiFetch(`/api/mo/${encodeURIComponent(mo.id)}/prep`, {
         method: "PATCH",
@@ -84,7 +90,9 @@ export default function ScanPrepPage() {
       });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) { setError(json.error ?? "บันทึกไม่สำเร็จ"); setPhase("ready"); return; }
-      setFlash(which === "cut" ? "บันทึก ตัดครบ แล้ว" : which === "prep" ? "บันทึก เตรียมครบ แล้ว" : "บันทึก เตรียม+ตัด ครบแล้ว");
+      const what = which === "cut" ? "ตัดครบ" : which === "prep" ? "เตรียมครบ" : "เตรียม+ตัด ครบ";
+      setFlash(done ? `บันทึก ${what} แล้ว` : `ยกเลิก ${what} แล้ว`);
+      setLastApplied(done ? which : null);
       await load();
       setPhase("ready");
     } catch {
@@ -183,7 +191,16 @@ export default function ScanPrepPage() {
       </div>
 
       {flash && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 text-sm text-emerald-800">✅ {flash}</div>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 text-sm text-emerald-800 flex items-center gap-2">
+          <span className="flex-1">✅ {flash}</span>
+          {/* เผลอกด → กดย้อนกลับได้ทันที (ปลดติ๊กที่เพิ่งกดไป) */}
+          {lastApplied && (
+            <button onClick={() => void apply(lastApplied, false)} disabled={phase === "saving"}
+              className="shrink-0 h-8 px-3 rounded-lg border border-emerald-300 bg-white text-emerald-700 text-xs font-semibold disabled:opacity-50">
+              ↩ ย้อนกลับ
+            </button>
+          )}
+        </div>
       )}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">⚠️ {error}</div>
@@ -213,15 +230,61 @@ export default function ScanPrepPage() {
         </div>
       )}
 
-      <button onClick={() => router.push(`/master/manufacturing-orders?open=${encodeURIComponent(mo.id)}`)}
+      {/* ยกเลิกทีหลัง (ไม่ได้เพิ่งกด) — ต้องยืนยันก่อน เพราะปลดติ๊กทุกชิ้นในใบ */}
+      {(prepAllDone || cutAllDone) && (
+        <div className="flex flex-wrap gap-2">
+          {prepAllDone && (
+            <button onClick={() => setUndoAsk("prep")} disabled={phase === "saving"}
+              className="flex-1 h-10 rounded-xl border border-slate-300 bg-white text-slate-600 text-sm disabled:opacity-50">
+              ↩ ยกเลิกเตรียมครบ
+            </button>
+          )}
+          {cutAllDone && prog.cutTotal > 0 && (
+            <button onClick={() => setUndoAsk("cut")} disabled={phase === "saving"}
+              className="flex-1 h-10 rounded-xl border border-slate-300 bg-white text-slate-600 text-sm disabled:opacity-50">
+              ↩ ยกเลิกตัดครบ
+            </button>
+          )}
+        </div>
+      )}
+
+      <button onClick={() => setChecklistOpen(true)}
         className="w-full h-12 rounded-xl border border-slate-300 bg-white text-slate-700 font-medium">
-        ติ๊กทีละชิ้น / ดูรายละเอียด →
+        📋 ติ๊กทีละชิ้น / ดูรายละเอียด
       </button>
 
       <button onClick={() => router.push("/scan")}
         className="w-full h-12 rounded-xl bg-blue-600 text-white font-semibold">
         📷 สแกนใบถัดไป
       </button>
+
+      {/* ป๊อปติ๊กทีละชิ้น — ใช้เช็กลิสต์ตัวกลางตัวเดียวกับบอร์ดจ่ายงาน/หน้าความพร้อม */}
+      <ERPModal open={checklistOpen} onClose={() => { setChecklistOpen(false); void load(); }} size="xl" storageKey="scan-prep-checklist"
+        title={`${mo.product_sku ?? ""} · ${mo.mo_no}`}
+        footer={<button onClick={() => { setChecklistOpen(false); void load(); }} className="h-10 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg">เสร็จแล้ว</button>}>
+        <MoMaterialChecklist moId={mo.id} moNo={mo.mo_no} productLabel={mo.product_name ?? mo.product_sku} onSaved={load} />
+      </ERPModal>
+
+      {/* ยืนยันก่อนยกเลิกทั้งใบ */}
+      <ERPModal open={!!undoAsk} onClose={() => setUndoAsk(null)} size="sm" title="ยกเลิกการติ๊กทั้งใบ?"
+        footer={<>
+          <button onClick={() => setUndoAsk(null)} className="h-10 px-4 text-sm border border-slate-200 rounded-lg">ไม่ยกเลิก</button>
+          <button onClick={() => { const w = undoAsk; setUndoAsk(null); if (w) void apply(w, false); }}
+            className="h-10 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg">ยกเลิกทั้งใบ</button>
+        </>}>
+        <div className="text-sm text-slate-700">
+          จะปลดติ๊ก <b>{undoAsk === "cut" ? "ตัดครบ" : "เตรียมครบ"}</b> ของใบ <b className="font-mono">{mo.mo_no}</b>
+          <div className="mt-2 text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+            ⚠️ ปลด<b>ทุกชิ้นในใบ</b> ({undoAsk === "cut" ? `${prog.cutTotal} บล็อก` : `${prog.prepTotal} รายการ`}) —
+            ถ้าอยากปลดแค่บางชิ้น ให้กด “📋 ติ๊กทีละชิ้น” แทน
+            {undoAsk === "cut" && (
+              <div className="mt-1 pt-1 border-t border-amber-200">
+                หมายเหตุ: ระบบผูก “ตัด” กับ “เตรียม” ไว้ — ยกเลิกตัดครบ จะทำให้<b>วัตถุดิบที่มีบล็อกตัดกลับเป็น “ยังไม่เตรียม”</b> ด้วย
+              </div>
+            )}
+          </div>
+        </div>
+      </ERPModal>
     </Shell>
   );
 }
