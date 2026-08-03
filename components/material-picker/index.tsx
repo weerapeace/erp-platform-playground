@@ -21,6 +21,7 @@ import type { BomComponent } from "@/app/api/bom/components/route";
 // โหลดเมื่อกดปุ่มเท่านั้น (dynamic กัน bundle บวม/import วน — material-picker เป็นของกลางใช้ทุกหน้า)
 const SkuWizard = dynamic(() => import("@/app/master/skus/sku-wizard").then((m) => m.SkuWizard), { ssr: false });
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+const MaterialRequestForm = dynamic(() => import("@/components/material-request").then((m) => m.MaterialRequestForm), { ssr: false });
 
 export type { BomComponent };
 
@@ -174,6 +175,7 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
   // เพิ่ม/ก๊อป SKU วัตถุดิบตรงจากหน้าค้นหา (ไม่ต้องออกไปหน้าอื่น)
   const toast = useToast();
   const [wizardOpen, setWizardOpen] = useState(false);   // ➕ เพิ่ม SKU (Wizard เดี่ยว/ชุด)
+  const [reqOpen, setReqOpen] = useState(false);         // 🙋 ขอเพิ่ม (ส่งคำขอ ไม่สร้างเอง)
   const [copyMode, setCopyMode] = useState(false);       // ⧉ โหมดก๊อป: กดวัตถุดิบสักตัว = ก๊อป (ไม่ใช่เลือก)
   const [copying, setCopying] = useState(false);
   const [copyEditId, setCopyEditId] = useState<string | null>(null);   // เปิดตัวที่ก๊อปมาแก้สี/รหัส
@@ -196,6 +198,9 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
       footer={<div className="flex items-center gap-2 w-full">
         <button onClick={() => setWizardOpen(true)} className="h-9 px-3 text-sm font-medium border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">➕ เพิ่ม SKU</button>
         <button onClick={() => setCopyMode((v) => !v)} className={`h-9 px-3 text-sm font-medium rounded-lg border ${copyMode ? "bg-amber-500 text-white border-amber-500" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>⧉ {copyMode ? "ยกเลิกก๊อป" : "copy SKU"}</button>
+        {/* ไม่มีสิทธิ์สร้างเอง/ข้อมูลยังไม่ครบ → ส่งคำขอให้คนดูแลข้อมูลสร้างให้ (ของกลาง material-request) */}
+        <button onClick={() => setReqOpen(true)} title="กรอกเท่าที่รู้ ส่งให้คนดูแลข้อมูลสร้าง SKU ให้"
+          className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50">🙋 ขอเพิ่ม</button>
         <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg ml-auto">ปิด</button>
       </div>}>
       <div className="space-y-2">
@@ -223,6 +228,10 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
 
     {/* ➕ เพิ่ม SKU — Wizard เดี่ยว/ชุด (ของกลางเดียวกับหน้า /master/skus) */}
     {wizardOpen && <SkuWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onCreated={() => { setWizardOpen(false); refreshSearch(); toast.success("เพิ่ม SKU แล้ว — ค้นหาเจอในรายการ"); }} />}
+
+    {/* 🙋 ขอเพิ่มวัตถุดิบ — กรอกเท่าที่รู้ เข้าคิวรออนุมัติ (ของกลางเดียวกับหน้า SKU) · เติมคำค้นที่พิมพ์ไว้ให้ */}
+    {reqOpen && <MaterialRequestForm open onClose={() => setReqOpen(false)}
+      prefill={{ name_th: search.trim() }} onSaved={() => toast.success("ส่งคำขอแล้ว — รอคนดูแลข้อมูลอนุมัติ")} />}
 
     {/* ⧉ ก๊อปแล้ว → เปิดแก้สี/รหัสทันที (บันทึกแล้วรีเฟรชรายการ) */}
     {copyEditId && <MasterRecordDrawer moduleKey="skus-v2" apiPath="skus" recordId={copyEditId} startInEdit onClose={() => setCopyEditId(null)} onChanged={() => refreshSearch()} />}

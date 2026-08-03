@@ -22,6 +22,7 @@ type ShopMO = {
   qty: number; remaining: number; due_date: string | null;
   image_url: string | null; brand: string | null; brand_color: string | null; ready: boolean;
   color?: string | null;   // สี (color_th ก่อน ไม่มีใช้ color) — โชว์ต่อท้ายชื่อ
+  has_bom?: boolean;       // ใบนี้มีสูตรวัตถุดิบไหม (ไม่มี = เตือนบนการ์ด)
 };
 type ShopDept = { id: string; name: string };
 type ShopCraftsman = { id: string; name: string; code: string | null; department_id?: string | null };
@@ -55,6 +56,18 @@ type SortKey = "due" | "remaining" | "sku" | "mo";
 const CARD_MODES = ["big", "compact"] as const;
 type CardMode = (typeof CARD_MODES)[number];
 
+// จำนวนการ์ดต่อแถว (จอกว้าง) — จำค่าต่อผู้ใช้
+const CARD_COLS = ["3", "4", "6", "8", "10"] as const;
+type CardCols = (typeof CARD_COLS)[number];
+// คลาส grid ต่อจำนวนคอลัมน์ (เขียนเต็มเพราะ Tailwind ต้องเห็นชื่อคลาสตรง ๆ ตอน build)
+const COLS_CLS: Record<CardCols, string> = {
+  "3": "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3",
+  "4": "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4",
+  "6": "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6",
+  "8": "grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8",
+  "10": "grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 xl:grid-cols-10",
+};
+
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "due", label: "ใกล้ครบกำหนด" },
   { key: "remaining", label: "คงเหลือมาก→น้อย" },
@@ -79,10 +92,11 @@ export function DispatchShop({
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("due");
   const [groupMode, setGroupMode] = useState<"none" | "group" | "brand">("none");
-  const [readyFilter, setReadyFilter] = useState<"all" | "ready" | "not">("all");
+  const [readyFilter, setReadyFilter] = useState<"all" | "ready" | "not" | "gap">("all");   // gap = ขาดสูตร/ค่าแรง
   const [groupFilter, setGroupFilter] = useState<string>("__all__");
   // หน้าตาการ์ด (รูปใหญ่ / แบบรายการ) — จำต่อผู้ใช้ผ่านของกลาง useViewPref
   const { view: cardMode, setView: setCardMode, saveDefault: saveCardMode } = useViewPref("work_board_shop_card", CARD_MODES, "big");
+  const { view: cardCols, setView: setCardCols, saveDefault: saveCardCols } = useViewPref("work_board_shop_cols", CARD_COLS, "4");
   const [cart, setCart] = useState<Record<string, number>>({});   // mo.id → จำนวนที่จะจ่าย
   const [dept, setDept] = useState<string>("");
   const [craftIds, setCraftIds] = useState<string[]>([]);          // ช่างที่เลือก (หลายคน)
@@ -109,8 +123,9 @@ export function DispatchShop({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const hasGap = (m: ShopMO) => m.has_bom === false || !((laborByMo[m.mo_no] ?? 0) > 0);
     const list = pending.filter((m) =>
-      (readyFilter === "all" || (readyFilter === "ready" ? m.ready : !m.ready)) &&
+      (readyFilter === "all" ? true : readyFilter === "gap" ? hasGap(m) : readyFilter === "ready" ? m.ready : !m.ready) &&
       (groupFilter === "__all__" ? true : groupFilter === "__none__" ? groupOf(m.mo_no) === null : groupOf(m.mo_no) === groupFilter) &&
       (q === "" || `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`.toLowerCase().includes(q)),
     );
@@ -120,7 +135,7 @@ export function DispatchShop({
       if (sortKey === "sku") return (a.product_sku ?? "").localeCompare(b.product_sku ?? "");
       return a.mo_no.localeCompare(b.mo_no);
     });
-  }, [pending, search, readyFilter, groupFilter, groupOf, sortKey]);
+  }, [pending, search, readyFilter, groupFilter, groupOf, sortKey, laborByMo]);
 
   const buckets = useMemo(() => {
     if (groupMode === "none") return [{ name: "", items: filtered }];
@@ -203,13 +218,27 @@ export function DispatchShop({
     await onReload();
   };
 
-  const gridCols = cardMode === "big"
-    ? "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2.5"
-    : "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2";
+  const gridCols = `grid ${COLS_CLS[cardCols]} ${cardMode === "big" ? "gap-2.5" : "gap-2"}`;
+  const dense = Number(cardCols) >= 8;   // แถวละเยอะ = การ์ดแคบ ต้องย่อรูป/ตัวหนังสือ
 
   const readyBadge = (m: ShopMO) => (m.ready
     ? <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span>
     : <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span>);
+
+  // เตือนข้อมูลตั้งต้นที่ยังขาด — ไม่มีสูตร = จ่ายงานไปก็ไม่รู้ต้องใช้อะไร · ไม่มีค่าแรง = คิดเงินช่างไม่ได้
+  const gapBadges = (m: ShopMO) => {
+    const noBom = m.has_bom === false;
+    const noLabor = !((laborByMo[m.mo_no] ?? 0) > 0);
+    if (!noBom && !noLabor) return null;
+    return (
+      <div className="flex flex-wrap gap-1 mt-1">
+        {noBom && <span title="ใบนี้ยังไม่มีสูตรวัตถุดิบ (BOM) — จ่ายงานได้แต่จะไม่รู้ว่าต้องเตรียม/ตัดอะไร"
+          className="text-[9px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 whitespace-nowrap">⚠ ไม่มีสูตร</span>}
+        {noLabor && <span title="ยังไม่ได้ตั้งค่าแรง/ชิ้น — ตอนจ่ายงานต้องกรอกเอง"
+          className="text-[9px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">⚠ ไม่มีค่าแรง</span>}
+      </div>
+    );
+  };
 
   // แถบล่างของการ์ด (เหลือ / ค่าแรง / กำหนดเสร็จ) — ใช้ร่วมทั้ง 2 แบบ
   const cardFooter = (m: ShopMO) => {
@@ -235,9 +264,9 @@ export function DispatchShop({
         className={`relative rounded-xl border bg-white overflow-hidden transition ${canDispatch ? "cursor-pointer" : ""} ${inCart ? "border-indigo-400 ring-2 ring-indigo-200" : "border-slate-200 hover:border-slate-300 hover:shadow-sm"}`}
         style={m.brand_color ? { borderLeftColor: m.brand_color, borderLeftWidth: 3 } : undefined}>
         <HoverPreview url={m.image_url ? (withImageWidth(m.image_url, 720) ?? m.image_url) : null} previewW={520}>
-          <div className="relative bg-slate-50 h-40 flex items-center justify-center">
+          <div className={`relative bg-slate-50 flex items-center justify-center ${dense ? "h-24" : "h-40"}`}>
             {m.image_url
-              ? <img src={withImageWidth(m.image_url, 420) ?? m.image_url} alt={m.product_sku ?? ""} loading="lazy" decoding="async" className="max-h-full max-w-full object-contain" />
+              ? <img src={withImageWidth(m.image_url, dense ? 240 : 420) ?? m.image_url} alt={m.product_sku ?? ""} loading="lazy" decoding="async" className="max-h-full max-w-full object-contain" />
               : <span className="text-4xl text-slate-300">📦</span>}
             <span className="absolute top-1.5 left-1.5">{readyBadge(m)}</span>
             {canDispatch && (
@@ -250,6 +279,7 @@ export function DispatchShop({
           <div className="text-sm font-semibold text-slate-800 truncate">{m.product_sku}</div>
           <div className="text-[11px] text-slate-500 truncate">{m.product_name}{m.color ? <span className="text-slate-400"> · {m.color}</span> : null}</div>
           <div className="text-[10px] text-slate-400 font-mono truncate">{m.mo_no}</div>
+          {gapBadges(m)}
           {cardFooter(m)}
         </div>
       </div>
@@ -275,6 +305,7 @@ export function DispatchShop({
           </div>
           {canDispatch && <input type="checkbox" checked={inCart} onClick={(e) => e.stopPropagation()} onChange={() => toggleCart(m)} className="shrink-0 w-4 h-4 accent-indigo-600 mt-0.5" />}
         </div>
+        {gapBadges(m)}
         {cardFooter(m)}
       </div>
     );
@@ -298,10 +329,11 @@ export function DispatchShop({
             <option value="group">จัดกลุ่ม: กลุ่มใบสั่งผลิต</option>
             <option value="brand">จัดกลุ่ม: แบรนด์</option>
           </select>
-          <select value={readyFilter} onChange={(e) => setReadyFilter(e.target.value as "all" | "ready" | "not")} title="กรองความพร้อม" className={selCls}>
+          <select value={readyFilter} onChange={(e) => setReadyFilter(e.target.value as "all" | "ready" | "not" | "gap")} title="กรองความพร้อม" className={selCls}>
             <option value="all">ทั้งหมด</option>
             <option value="ready">พร้อมจ่าย</option>
             <option value="not">ยังไม่พร้อม</option>
+            <option value="gap">⚠ ขาดสูตร/ค่าแรง</option>
           </select>
           <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} title="กรองตามกลุ่ม" className={selCls}>
             <option value="__all__">🗂 ทุกกลุ่ม</option>
@@ -313,6 +345,13 @@ export function DispatchShop({
             {([{ k: "big" as CardMode, label: "🖼 รูปใหญ่" }, { k: "compact" as CardMode, label: "▤ แบบรายการ" }]).map((o, i) => (
               <button key={o.k} onClick={() => { setCardMode(o.k); void saveCardMode(o.k); }}
                 className={`h-9 px-2.5 text-sm whitespace-nowrap ${i > 0 ? "border-l border-slate-200" : ""} ${cardMode === o.k ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{o.label}</button>
+            ))}
+          </div>
+          {/* จำนวนการ์ดต่อแถว — เลือกแล้วจำเป็นค่าเริ่มต้นของฉัน */}
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden shrink-0" title="จำนวนการ์ดต่อแถว (จอกว้าง)">
+            {CARD_COLS.map((c, i) => (
+              <button key={c} onClick={() => { setCardCols(c); void saveCardCols(c); }}
+                className={`h-9 w-8 text-sm ${i > 0 ? "border-l border-slate-200" : ""} ${cardCols === c ? "bg-slate-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>{c}</button>
             ))}
           </div>
           {canDispatch && filtered.length > 0 && (
