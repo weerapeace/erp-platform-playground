@@ -9,6 +9,7 @@
  * ของกลาง: HoverImage, ERPModal, useToast, apiFetch
  */
 import { useMemo, useState } from "react";
+import dynamicImport from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { HoverImage, HoverPreview } from "@/components/hover-image";
@@ -65,6 +66,12 @@ type CardMode = (typeof CARD_MODES)[number];
 const CARD_COLS = ["3", "4", "6", "8", "10"] as const;
 type CardCols = (typeof CARD_COLS)[number];
 
+// ตัวขอแก้สูตร — โหลดตอนกดเท่านั้น (ตัวแก้สูตรของจริงหนัก ไม่ควรถ่วงหน้าช้อป)
+const BomChangeRequestEditor = dynamicImport(
+  () => import("@/components/bom-change-request").then((m) => m.BomChangeRequestEditor),
+  { ssr: false },
+);
+
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "due", label: "ใกล้ครบกำหนด" },
   { key: "remaining", label: "คงเหลือมาก→น้อย" },
@@ -96,6 +103,7 @@ export function DispatchShop({
   const { view: cardCols, setView: setCardCols, saveDefault: saveCardCols } = useViewPref("work_board_shop_cols", CARD_COLS, "4");
   const [cart, setCart] = useState<Record<string, number>>({});   // mo.id → จำนวนที่จะจ่าย
   const [cartOpen, setCartOpen] = useState(false);                // เปิด "หน้าตะกร้า" เต็มจอ (แทนแผงข้าง)
+  const [bomReqFor, setBomReqFor] = useState<ShopMO | null>(null); // กดป้าย "ไม่มีสูตร" → เปิดตัวเสนอสูตรของใบนั้น
   const [dept, setDept] = useState<string>("");
   const [craftIds, setCraftIds] = useState<string[]>([]);          // ช่างที่เลือก (หลายคน)
   const [craftListOpen, setCraftListOpen] = useState(false);
@@ -146,6 +154,7 @@ export function DispatchShop({
   }, [filtered, groupMode, groupOf]);
 
   const cartItems = useMemo(() => pending.filter((m) => cart[m.id] != null), [pending, cart]);
+  const cartTotalQty = useMemo(() => cartItems.reduce((s, m) => s + (cart[m.id] || 0), 0), [cartItems, cart]);
 
   const toggleCart = (m: ShopMO) => setCart((c) => { const n = { ...c }; if (n[m.id] != null) delete n[m.id]; else n[m.id] = m.remaining; return n; });
   const setQty = (id: string, v: number, max: number) => setCart((c) => ({ ...c, [id]: Math.max(0, Math.min(max, v || 0)) }));
@@ -232,9 +241,13 @@ export function DispatchShop({
     if (!noBom && !noLabor) return null;
     return (
       <div className="flex flex-wrap gap-1 mt-1">
-        {noBom && <span title="ใบนี้ยังไม่มีสูตรวัตถุดิบ (BOM) — จ่ายงานได้แต่จะไม่รู้ว่าต้องเตรียม/ตัดอะไร"
-          className="text-[9px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 whitespace-nowrap">⚠ ไม่มีสูตร</span>}
-        {noLabor && <span title="ยังไม่ได้ตั้งค่าแรง/ชิ้น — ตอนจ่ายงานต้องกรอกเอง"
+        {noBom && (m.product_sku
+          ? <button type="button" onClick={(e) => { e.stopPropagation(); setBomReqFor(m); }}
+              title="ใบนี้ยังไม่มีสูตรวัตถุดิบ (BOM) — กดเพื่อเสนอสูตร (เข้าคิวรออนุมัติ ยังไม่กระทบสูตรจริง)"
+              className="text-[9px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 whitespace-nowrap hover:bg-rose-100 hover:border-rose-300">⚠ ไม่มีสูตร · เสนอ →</button>
+          : <span title="ใบนี้ยังไม่มีสูตรวัตถุดิบ (BOM) และไม่มีรหัสสินค้า จึงเสนอสูตรจากตรงนี้ไม่ได้"
+              className="text-[9px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 whitespace-nowrap">⚠ ไม่มีสูตร</span>)}
+        {noLabor && <span title="ยังไม่ได้ตั้งค่าแรง/ชิ้น — ตอนจ่ายงานต้องกรอกเอง (ติ๊ก “บันทึกกลับเข้า BOM” ตอนจ่าย ครั้งหน้าจะเติมให้เอง)"
           className="text-[9px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">⚠ ไม่มีค่าแรง</span>}
       </div>
     );
@@ -313,6 +326,13 @@ export function DispatchShop({
 
   const selCls = "h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500";
   const craftFiltered = craftPool.filter((c) => `${c.code ?? ""} ${c.name}`.toLowerCase().includes(craftSearch.trim().toLowerCase()));
+
+  // ตัวเสนอสูตร (เปิดจากป้าย "ไม่มีสูตร") — ใช้ร่วมทั้งหน้าเลือกงานและหน้าตะกร้า
+  const bomReqModal = bomReqFor?.product_sku ? (
+    <BomChangeRequestEditor open onClose={() => setBomReqFor(null)}
+      productSku={bomReqFor.product_sku} productName={bomReqFor.product_name} moNo={bomReqFor.mo_no}
+      onSent={() => { setBomReqFor(null); void onReload(); }} />
+  ) : null;
 
   // ป๊อปยืนยันจ่ายงาน — ใช้ร่วมทั้งหน้าเลือกงานและหน้าตะกร้า
   const confirmModal = (
@@ -497,6 +517,7 @@ export function DispatchShop({
 
         {/* ป๊อปยืนยันจ่ายงาน (ตัวเดียวกับหน้าเลือกงาน) */}
         {confirmModal}
+        {bomReqModal}
       </div>
     );
   }
@@ -571,7 +592,20 @@ export function DispatchShop({
         </div>
       </div>
 
+      {/* ปุ่มตะกร้าลอย — ติดมุมขวาล่าง เลื่อนดูการ์ดลงไปไกลแค่ไหนก็ยังกดจ่ายงานได้ */}
+      {canDispatch && cartItems.length > 0 && (
+        <button onClick={() => setCartOpen(true)} title="ไปหน้าตะกร้าเพื่อจ่ายงาน"
+          className="fixed bottom-5 right-5 z-30 h-14 pl-4 pr-5 flex items-center gap-2 rounded-full bg-indigo-600 text-white font-semibold shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition">
+          <span className="text-2xl leading-none">🛒</span>
+          <span className="flex flex-col items-start leading-tight">
+            <span className="text-sm">ตะกร้า {cartItems.length} ใบ</span>
+            <span className="text-[10px] font-normal text-indigo-100">รวม {fmt(cartTotalQty)} ชิ้น · กดเพื่อจ่ายงาน</span>
+          </span>
+        </button>
+      )}
+
       {confirmModal}
+      {bomReqModal}
     </div>
   );
 }

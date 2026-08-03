@@ -14,6 +14,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { notifyEvent } from "@/lib/board-notify";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -86,6 +87,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     metadata: { code: values.code ?? null, name: values.name_th ?? null, tag: body.family_tag_name ?? null },
   }).catch(() => { /* audit ห้ามบล็อกงานหลัก */ });
 
+  // แจ้งคนดูแลข้อมูล (กฎ material_request.created → role manager+admin) — best-effort ไม่บล็อกการบันทึก
+  await notifyEvent(admin, "material_request.created", "material_requests", (data as { id: string }).id, user?.id ?? null, {
+    name: String(values.name_th ?? values.code ?? "วัตถุดิบใหม่"),
+    actor: user?.email ?? "—",
+    note: body.note ? ` · ${body.note}` : "",
+  });
+
   return NextResponse.json({ id: (data as { id: string }).id, error: null });
 }
 
@@ -100,7 +108,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, action === "cancel" ? "products.view" : "products.edit"); if (denied) return denied;
 
   const admin = supabaseAdmin();
-  const { data: cur } = await admin.from("material_requests").select("id, status, values, requested_by").eq("id", id).maybeSingle();
+  const { data: cur } = await admin.from("material_requests").select("id, status, values, requested_by, requested_by_name").eq("id", id).maybeSingle();
   const row = cur as Record<string, unknown> | null;
   if (!row) return NextResponse.json({ error: "ไม่พบคำขอนี้" }, { status: 404 });
   if (row.status !== "pending") return NextResponse.json({ error: "คำขอนี้ถูกดำเนินการไปแล้ว" }, { status: 400 });
@@ -126,6 +134,22 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: { sku_code: body.sku_code ?? null, reason: body.reason ?? null },
   }).catch(() => { /* ignore */ });
+
+  // แจ้งผู้ขอว่าคำขอได้ผลแล้ว — ยิงตรงถึง user id (ตัวเลือก "requester" ของ rule engine ใช้ได้เฉพาะใบขอซื้อ)
+  const vals = (row.values ?? {}) as Record<string, unknown>;
+  if (action !== "cancel" && row.requested_by && String(row.requested_by) !== String(user?.id ?? "")) {
+    const ok = action === "approve";
+    await admin.rpc("erp_notify", {
+      p_user_ids: [String(row.requested_by)],
+      p_event_type: "material_request.result",
+      p_title: `${ok ? "✅ อนุมัติแล้ว" : "❌ ไม่อนุมัติ"} · ${String(vals.name_th ?? vals.code ?? "คำขอวัตถุดิบ")}`,
+      p_body: ok ? `สร้างเป็น ${body.sku_code ?? "SKU ใหม่"} แล้ว` : (body.reason ? `เหตุผล: ${body.reason}` : "ดูรายละเอียดในคิวคำขอ"),
+      p_link_url: "/master/skus",
+      p_entity_type: "material_requests",
+      p_entity_id: id,
+      p_priority: "normal",
+    }).then(() => {}, () => { /* แจ้งเตือนล้มไม่กระทบการบันทึก */ });
+  }
 
   return NextResponse.json({ ok: true, error: null });
 }
