@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { buildPartnerMatcher } from "@/lib/partner-match";
+import { computePoTotals, sumActiveLines } from "@/lib/po-total";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -44,10 +45,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .update({ price_est: price, line_total: lineTotal }).eq("id", lineId);
   if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
 
-  // 2. ยอดรวมใบใหม่
+  // 2. ยอดรวมใบใหม่ — คิดผ่านของกลาง lib/po-total เพื่อให้ใบที่มีภาษีไม่โดนล้าง VAT ทิ้ง
+  //    (เดิมบวก line_total ตรง ๆ → พอแก้ราคาทีเดียว ยอดรวมจะกลายเป็นยอดก่อน VAT)
   const poId = String(l.po_id);
-  const { data: allLines } = await admin.from("purchase_order_lines_v2").select("line_total").eq("po_id", poId);
-  const grand = (allLines ?? []).reduce((a, r) => a + num((r as Record<string, unknown>).line_total), 0);
+  const [{ data: allLines }, { data: poRow }] = await Promise.all([
+    admin.from("purchase_order_lines_v2").select("line_total, is_active").eq("po_id", poId),
+    admin.from("purchase_orders_v2").select("vat_rate, vat_included").eq("id", poId).maybeSingle(),
+  ]);
+  const lineSum = sumActiveLines((allLines ?? []) as { line_total?: number | null; is_active?: boolean | null }[]);
+  const pr = (poRow ?? {}) as Record<string, unknown>;
+  const grand = computePoTotals(lineSum, num(pr.vat_rate), !!pr.vat_included).total;
   await admin.from("purchase_orders_v2").update({ grand_total: grand }).eq("id", poId);
 
   // 3. บันทึกเข้าตารางราคาหลายร้านกลาง (supplier_items) — จับคู่ร้านจากชื่อบนใบ

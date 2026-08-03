@@ -41,7 +41,9 @@ function viewFromV2(po: PoDetail): PoView {
   const cur = String(po.currency ?? "THB").toUpperCase();
   const symbol = CURRENCY_SYMBOL[cur] ?? "";
   const isTHB = cur === "THB" || !cur;
-  const subtotal = po.lines.reduce((s, l) => s + Number(l.total ?? 0), 0);
+  const hasVat = Number(po.vat_rate) > 0;
+  const subtotal = po.subtotal;          // ยอดก่อนภาษี (คิดจาก lib/po-total ฝั่ง API)
+  const grand = subtotal + po.vat_amount;
   const si = po.seller_info;
   return {
     poNumber: po.po_no,
@@ -64,18 +66,18 @@ function viewFromV2(po: PoDetail): PoView {
       currency_symbol: symbol,
       currency_code:   cur === "YUAN" ? "RMB" : cur,
       is_foreign:      isTHB ? "" : "1",
-      vat_rate:        "",
-      vat_rate_label:  "",
+      vat_rate:        hasVat ? String(po.vat_rate) : "",
+      vat_rate_label:  hasVat ? `${po.vat_rate}%${po.vat_included ? " (รวมในราคาแล้ว)" : ""}` : "",
       subtotal:        money(subtotal),
       taxable:         money(subtotal),
-      total_vat:       "",
+      total_vat:       hasVat ? money(po.vat_amount) : "",
       total_wht:       "",
       has_wht:         "",
       show_due:        "",
-      grand_total:     money(subtotal),
-      amount_due:      money(subtotal),
+      grand_total:     money(grand),
+      amount_due:      money(grand),
       // ตัวอักษรกำกับยอดเงิน — เฉพาะสกุลบาท (ของกลาง lib/quotation-print)
-      amount_in_words: isTHB ? thaiBahtText(subtotal) : "",
+      amount_in_words: isTHB ? thaiBahtText(grand) : "",
       line_count:      String(po.lines.length),
       lines: po.lines.map((l, i) => ({
         idx:          i + 1,

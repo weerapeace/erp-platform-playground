@@ -235,6 +235,7 @@ export default function PoListPage() {
         <PoDetailModal
           poId={detailId}
           onClose={() => setDetailId(null)}
+          onSaved={() => void fetchRows()}
           footer={(() => {
             const r = rows.find((x) => x.id === detailId);
             if (!r) return null;

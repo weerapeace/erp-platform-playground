@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
 import { formatCreditTerm } from "@/lib/credit-term";
+import { computePoTotals, sumActiveLines } from "@/lib/po-total";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,6 +41,12 @@ export type PoDetail = {
   payment_due_date: string | null; expected_date: string | null;
   /** สถานะรับของรวมทั้งใบ: confirmed | partial | received | ... */
   status: string | null;
+  /** ภาษีมูลค่าเพิ่ม */
+  vat_rate: number;
+  vat_included: boolean;
+  /** ยอดก่อนภาษี / ภาษี — คิดด้วยของกลาง lib/po-total */
+  subtotal: number;
+  vat_amount: number;
   last_receipt: PoLastReceipt | null;
   seller_info: PoSellerInfo | null;
   note: string | null;
@@ -56,7 +63,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rmb = num((rateRes.data as { rate?: number } | null)?.rate) || 5;
 
   const { data: po, error } = await admin.from("purchase_orders_v2")
-    .select("id, po_no, seller_name, seller_partner_id, order_date, grand_total, currency, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status, note")
+    .select("id, po_no, seller_name, seller_partner_id, order_date, grand_total, currency, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status, note, vat_rate, vat_included")
     .eq("id", id).single();
   if (error || !po) return NextResponse.json({ error: "ไม่พบใบสั่งซื้อ" }, { status: 404 });
 
@@ -116,6 +123,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const p = po as Record<string, unknown>;
+  // ยอดก่อนภาษี/ภาษี — คิดจากบรรทัดจริงด้วยสูตรกลาง (grand_total ใน DB = ยอดจ่ายรวม VAT แล้ว)
+  const poTotals = computePoTotals(
+    sumActiveLines(rows as { line_total?: number | null; is_active?: boolean | null }[]),
+    num(p.vat_rate), !!p.vat_included,
+  );
   const detail: PoDetail = {
     id: String(p.id), po_no: String(p.po_no ?? "—"), seller: (p.seller_name as string) ?? null,
     order_date: (p.order_date as string) ?? null, currency: (p.currency as string) ?? null,
@@ -126,6 +138,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     payment_due_date: (p.payment_due_date as string) ?? null,
     expected_date: (p.expected_date as string) ?? null,
     status: (p.status as string) ?? null,
+    vat_rate: num(p.vat_rate),
+    vat_included: !!p.vat_included,
+    subtotal: poTotals.subtotal,
+    vat_amount: poTotals.vat,
     seller_info: sellerInfo,
     note: (p.note as string) ?? null,
     last_receipt: lastGr
