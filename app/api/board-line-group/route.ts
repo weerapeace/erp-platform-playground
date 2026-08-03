@@ -25,6 +25,8 @@ const EVENTS: { key: string; label: string; slot: string; vars: string[] }[] = [
   { key: "qc_pending", label: "📥 มีงานรอ QC (กลุ่ม QC)", slot: "qc", vars: ["sku", "product_name", "worker", "qty", "link"] },
   { key: "qc_defect", label: "⚠️ พบของเสีย (กลุ่ม QC)", slot: "qc", vars: ["sku", "product_name", "reason", "qty", "worker", "link"] },
   { key: "wo_due_soon", label: "⏰ งานใกล้/เกินกำหนด (กลุ่มผลิต)", slot: "production", vars: ["sku", "dept", "remaining", "due", "due_text", "link"] },
+  { key: "material_request", label: "🙋 ขอเพิ่มวัตถุดิบ (กลุ่มผลิต)", slot: "production", vars: ["name", "actor", "note", "link"] },
+  { key: "bom_request", label: "📐 ขอแก้สูตร BOM (กลุ่มผลิต)", slot: "production", vars: ["sku", "product_name", "actor", "lines", "note", "link"] },
 ];
 
 async function readCfg(admin: Admin): Promise<{ id?: string; cfg: LineCfg }> {

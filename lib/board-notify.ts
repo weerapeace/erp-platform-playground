@@ -27,6 +27,8 @@ const DEFAULT_TPL: Record<string, string> = {
   qc_pending: "📥 มีงานรอ QC · {sku}\n{product_name}\n👷 {worker} · {qty} ชิ้น\n🔗 {link}",
   qc_defect: "⚠️ พบของเสีย · {sku}\n{product_name}\n❌ {reason} · {qty} ชิ้น · 👷 {worker}\n🔗 {link}",
   wo_due_soon: "⏰ งานใกล้/เกินกำหนด · {sku}\n🪑 {dept} · เหลือส่ง {remaining} ชิ้น\n📅 {due} ({due_text})\n🔗 {link}",
+  material_request: "🙋 ขอเพิ่มวัตถุดิบ · {name}\n👤 ผู้ขอ: {actor}\n{note}\n🔗 {link}",
+  bom_request: "📐 ขอแก้สูตร · {sku}\n{product_name}\n👤 ผู้ขอ: {actor} · {lines} รายการ\n{note}\n🔗 {link}",
 };
 
 async function lineCfg(admin: Admin): Promise<LineCfg> {

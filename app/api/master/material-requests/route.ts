@@ -14,7 +14,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { notifyEvent } from "@/lib/board-notify";
+import { notifyEvent, pushLineTpl, boardLink } from "@/lib/board-notify";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -87,11 +87,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     metadata: { code: values.code ?? null, name: values.name_th ?? null, tag: body.family_tag_name ?? null },
   }).catch(() => { /* audit ห้ามบล็อกงานหลัก */ });
 
-  // แจ้งคนดูแลข้อมูล (กฎ material_request.created → role manager+admin) — best-effort ไม่บล็อกการบันทึก
+  // แจ้งคนดูแลข้อมูล — กระดิ่ง (กฎ material_request.created → role manager+admin) + LINE กลุ่มผลิต
+  // best-effort ทั้งคู่: แจ้งเตือนล้ม ไม่กระทบการบันทึกคำขอ
+  const reqName = String(values.name_th ?? values.code ?? "วัตถุดิบใหม่");
   await notifyEvent(admin, "material_request.created", "material_requests", (data as { id: string }).id, user?.id ?? null, {
-    name: String(values.name_th ?? values.code ?? "วัตถุดิบใหม่"),
+    name: reqName,
     actor: user?.email ?? "—",
     note: body.note ? ` · ${body.note}` : "",
+  });
+  await pushLineTpl(admin, "production", "material_request", {
+    name: reqName,
+    actor: user?.email ?? "—",
+    note: body.note ? `📝 ${body.note}` : "",
+    link: boardLink("/master/skus"),
   });
 
   return NextResponse.json({ id: (data as { id: string }).id, error: null });

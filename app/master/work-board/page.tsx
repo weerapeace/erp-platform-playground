@@ -31,6 +31,7 @@ import { PurchaseNeeds } from "./purchase-needs";
 import { DispatchShop } from "./dispatch-shop";
 import { DeskShop } from "./desk-shop";
 import { BoardLineSettings } from "@/components/board-line-settings";
+import { RequestInboxButton } from "@/components/request-inbox";
 import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
@@ -1025,6 +1026,8 @@ function WorkBoardPageInner() {
           <PwaInstallButton className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 inline-flex items-center gap-1" />
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
           {canDispatch && <button onClick={() => setLineSettingsOpen(true)} title="ตั้งค่ากลุ่ม LINE + ข้อความแจ้งเตือน" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🔔 แจ้งเตือน</button>}
+          {/* คำขอค้างจากหน้างาน (ขอเพิ่มวัตถุดิบ / ขอแก้สูตร) — ของกลาง เห็นตัวเลขโดยไม่ต้องเปิดเข้าไปดู */}
+          <RequestInboxButton />
           <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>
           <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
           <div className="relative">

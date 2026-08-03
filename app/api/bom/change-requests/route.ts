@@ -13,7 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { notifyEvent } from "@/lib/board-notify";
+import { notifyEvent, pushLineTpl, boardLink } from "@/lib/board-notify";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -103,12 +103,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     metadata: { product_sku: body.product_sku ?? null, bom_code: body.bom_code ?? null, mo_no: body.mo_no ?? null, lines: lines.length },
   }).catch(() => { /* audit ห้ามบล็อกงานหลัก */ });
 
-  // แจ้งคนดูแลสูตร (กฎ bom_request.created → role manager+admin) — best-effort
+  // แจ้งคนดูแลสูตร — กระดิ่ง (กฎ bom_request.created → role manager+admin) + LINE กลุ่มผลิต · best-effort
   await notifyEvent(admin, "bom_request.created", "bom_change_requests", (data as { id: string }).id, user?.id ?? null, {
     sku: String(body.product_sku ?? "—"),
     actor: user?.email ?? "—",
     lines: String(lines.length),
     note: body.note ? ` · ${String(body.note)}` : "",
+  });
+  await pushLineTpl(admin, "production", "bom_request", {
+    sku: String(body.product_sku ?? "—"),
+    product_name: String(body.product_name ?? ""),
+    actor: user?.email ?? "—",
+    lines: String(lines.length),
+    note: body.note ? `📝 ${String(body.note)}` : "",
+    link: boardLink("/master/work-board"),
   });
 
   return NextResponse.json({ id: (data as { id: string }).id, error: null });

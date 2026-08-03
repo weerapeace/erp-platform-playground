@@ -21,12 +21,33 @@ export function BoardLineSettings({ open, onClose }: { open: boolean; onClose: (
   const [busy, setBusy] = useState(false);
   const [paste, setPaste] = useState<Record<string, string>>({});
   const [tpl, setTpl] = useState<Record<string, string>>({});
+  const [dueMsg, setDueMsg] = useState<string | null>(null);   // ผลตรวจ "งานใกล้/เกินกำหนด"
 
   const load = useCallback(async () => {
     try { const r = await apiFetch("/api/board-line-group"); const j = await r.json(); if (j.error) throw new Error(j.error); setData(j as Data); setTpl((j.templates ?? {}) as Record<string, string>); setPaste({}); }
     catch (e) { toast.error(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
   }, [toast]);
   useEffect(() => { if (open) void load(); }, [open, load]);
+
+  /** เรียกตัวตรวจ "งานใกล้/เกินกำหนด" ตัวเดียวกับที่ระบบวิ่งเองทุกวัน — dry = ดูเฉย ๆ ไม่ส่ง */
+  const checkDue = async (real: boolean) => {
+    setBusy(true); setDueMsg(null);
+    try {
+      const r = await apiFetch(`/api/cron/wo-due-soon${real ? "" : "?dry=1"}`);
+      const j = await r.json() as { ok?: boolean; found?: number; overdue?: number; error?: string | null;
+        items?: { sku: string; dept: string; due: string; days: number; ref: string }[] };
+      if (j.error) throw new Error(j.error);
+      const list = (j.items ?? []).slice(0, 8)
+        .map((i) => `• ${i.sku} · ${i.dept} · ${i.days < 0 ? `เลยกำหนด ${-i.days} วัน` : i.days === 0 ? "ครบวันนี้" : `อีก ${i.days} วัน`} (${i.ref})`).join("\n");
+      setDueMsg(
+        (j.found ?? 0) === 0
+          ? "ตอนนี้ไม่มีงานที่ใกล้/เกินกำหนดเลย (หรือยังไม่ได้กรอกวันกำหนดส่งไว้)"
+          : `พบ ${j.found} รายการ (เลยกำหนดแล้ว ${j.overdue}):\n${list}${(j.found ?? 0) > 8 ? "\n…" : ""}`,
+      );
+      if (real) toast.success((j.found ?? 0) > 0 ? "ส่งแจ้งเตือนแล้ว" : "ไม่มีรายการต้องแจ้ง");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ตรวจไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
 
   const post = async (body: Record<string, unknown>, okMsg: string) => {
     setBusy(true);
@@ -65,6 +86,22 @@ export function BoardLineSettings({ open, onClose }: { open: boolean; onClose: (
               </div>
             );
           })}
+
+          {/* เตือนงานใกล้/เกินกำหนด — ระบบวิ่งเองทุกวัน 09:00 น. · ปุ่มนี้ไว้ลองดูว่าตอนนี้มีอะไรค้าง */}
+          <div className="border border-slate-200 rounded-lg p-3">
+            <div className="text-sm font-semibold text-slate-700 mb-1">⏰ เตือนงานใกล้/เกินกำหนด</div>
+            <div className="text-[11px] text-slate-500 mb-2">
+              ระบบตรวจให้เองทุกวันเวลา <b>09:00 น.</b> (ล่วงหน้า 3 วัน + ที่เลยกำหนดแล้ว) แล้วส่งเข้ากระดิ่ง + กลุ่มผลิต
+              <br />⚠️ ตรวจจาก “กำหนดส่ง” ที่กรอกไว้ในใบสั่งผลิต/ใบจ่ายงาน — ใบไหนไม่ได้ใส่วันกำหนด จะไม่ถูกเตือน
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button disabled={busy} onClick={() => void checkDue(false)}
+                className="h-8 px-3 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40">🔍 ดูว่าตอนนี้มีอะไรค้าง (ไม่ส่ง)</button>
+              <button disabled={busy} onClick={() => void checkDue(true)}
+                className="h-8 px-3 text-xs border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-40">📨 ทดสอบส่งจริงตอนนี้</button>
+            </div>
+            {dueMsg && <div className="mt-2 text-[11px] text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-2 whitespace-pre-wrap">{dueMsg}</div>}
+          </div>
 
           <details className="border border-slate-200 rounded-lg">
             <summary className="px-3 py-2 text-sm font-semibold text-slate-700 cursor-pointer">✏️ แก้ข้อความแจ้งเตือน (ไม่บังคับ — เว้นว่าง = ใช้ข้อความเริ่มต้น)</summary>

@@ -43,8 +43,10 @@ export const LINE_SYSTEMS: LineSystemDef[] = [
   {
     key: "production", label: "ผลิต", icon: "🏭", slots: ["production"],
     events: [
-      { key: "wo_dispatched", label: "จ่ายงานเข้าโต๊ะ",        slot: "production", icon: "📤" },
-      { key: "wo_due_soon",   label: "งานใกล้/เกินกำหนด",       slot: "production", icon: "⏰" },
+      { key: "wo_dispatched",    label: "จ่ายงานเข้าโต๊ะ",   slot: "production", icon: "📤" },
+      { key: "wo_due_soon",      label: "งานใกล้/เกินกำหนด",  slot: "production", icon: "⏰" },
+      { key: "material_request", label: "ขอเพิ่มวัตถุดิบ",    slot: "production", icon: "🙋" },
+      { key: "bom_request",      label: "ขอแก้สูตร (BOM)",    slot: "production", icon: "📐" },
     ],
   },
   {
