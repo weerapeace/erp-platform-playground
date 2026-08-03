@@ -55,6 +55,7 @@ export function MoMaterialChecklist({
         material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null,
         qty_per: n2(s.qty_per), on_hand_qty: n2(s.on_hand_qty), is_ready: !!s.is_ready,
         purchase_override: s.to_purchase_qty != null ? Number(s.to_purchase_qty) : null,
+        image_url: (s.image_url as string) ?? null,
       }));
       const materials: MoMatPreview[] = mats.map((m) => ({
         key: String(m.id), id: String(m.id),
@@ -63,6 +64,7 @@ export function MoMaterialChecklist({
         cut_block_code: (m.cut_block_code as string) ?? null, cut_width: num(m.cut_width), cut_length: num(m.cut_length), pieces: num(m.pieces),
         on_hand_qty: n2(m.on_hand_qty), is_ready: !!m.is_ready, purchase_override: null, cut_done: !!m.cut_done,
         size_label: (m.size_label as string) ?? null,
+        image_url: (m.image_url as string) ?? null,
       }));
       const sb = (j?.data?.size_breakdown ?? []) as { label?: unknown; qty?: unknown }[];
       const sizeQty: Record<string, number> = {};

@@ -10,16 +10,19 @@ import { useState, type ReactNode } from "react";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { needsCut as needsCutRule } from "@/lib/cut-rules";
 import { ERPModal } from "@/components/modal";
+import { HoverImage } from "@/components/hover-image";
 
 export type MoMatPreview = {
   key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null;
   qty_per: number; uom: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null;
   on_hand_qty: number; is_ready: boolean; purchase_override: number | null; cut_done: boolean;
   size_label?: string | null;   // ไซส์ของบล็อกนี้ (กลุ่ม C) — null = ใช้ทุกไซส์
+  image_url?: string | null;    // รูปวัตถุดิบ (จาก /api/mo/[id]) — ไม่ส่งมาก็ได้ แค่ไม่โชว์รูป
 };
 export type MoMatSummary = {
   key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null;
   uom: string | null; qty_per: number; on_hand_qty: number; is_ready: boolean; purchase_override: number | null;
+  image_url?: string | null;
 };
 type MatRow = MoMatPreview & { required: number; to_purchase: number };
 
@@ -68,9 +71,17 @@ export function MoMaterialsTable({
   const blockRows: MatRow[] = materials.map((m) => ({ ...m, required: Math.round(m.qty_per * rowQty(m.size_label) * 10000) / 10000, to_purchase: 0 }));
 
   const codeCol: LineColumn<MatRow> = {
-    key: "component", header: "วัตถุดิบ", minWidth: 220, sortable: true,
+    key: "component", header: "วัตถุดิบ", minWidth: 240, sortable: true,
     getValue: (r) => r.component_name || r.component_sku, groupLabel: (r) => r.component_sku ? `${r.component_sku} ${r.component_name}` : "— ไม่ระบุ —",
-    render: (r) => <span className="block truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> <span className="text-slate-700">{r.component_name}</span></span>,
+    // มีรูปก็โชว์รูปย่อ (ชี้ดูใหญ่ได้) — วัตถุดิบหลายตัวชื่อคล้ายกันมาก ดูรูปเร็วกว่าอ่านชื่อ
+    render: (r) => (
+      <span className="flex items-center gap-1.5 min-w-0">
+        {r.image_url ? <HoverImage url={r.image_url} size={26} /> : null}
+        <span className="block truncate min-w-0">
+          <code className="text-[10px] text-slate-400">{r.component_sku}</code> <span className="text-slate-700">{r.component_name}</span>
+        </span>
+      </span>
+    ),
   };
   const typeCol: LineColumn<MatRow> = { key: "material_type", header: "ประเภท", width: 110, sortable: true, getValue: (r) => r.material_type, groupLabel: (r) => r.material_type || "— ไม่ระบุ —" };
   const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required, render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmt(r.required)}</span> };

@@ -13,6 +13,7 @@ import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
 import { ERPModal } from "@/components/modal";
+import { HoverImage } from "@/components/hover-image";
 import { MoMaterialChecklist } from "@/components/mo-material-checklist";
 
 type Phase = "loading" | "ready" | "saving" | "error";
@@ -23,11 +24,33 @@ type Mo = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number | null; status: string | null; due_date: string | null;
   prep_done: boolean | null; cut_done: boolean | null;
+  product_image?: string | null;   // รูปสินค้า (API /api/mo/[id] ส่งมาให้อยู่แล้ว)
   summary?: SummaryRow[]; materials?: MatRow[];
 };
 
-const thDate = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "—";
+const thDateShort = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : "—";
+/** เหลืออีกกี่วัน (null = ไม่ได้ตั้งวัน) */
+const daysLeft = (iso: string | null) => {
+  if (!iso) return null;
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const d = new Date(iso); d.setHours(0, 0, 0, 0);
+  return Math.round((d.getTime() - t.getTime()) / 86400000);
+};
+const dueTone = (iso: string | null) => {
+  const d = daysLeft(iso);
+  if (d == null) return "bg-slate-50 border-slate-100 text-slate-400";
+  if (d < 0) return "bg-rose-50 border-rose-200 text-rose-700";
+  if (d <= 2) return "bg-amber-50 border-amber-200 text-amber-800";
+  return "bg-slate-50 border-slate-100 text-slate-800";
+};
+const dueNote = (iso: string | null) => {
+  const d = daysLeft(iso);
+  if (d == null) return "ยังไม่ได้ตั้งวัน";
+  if (d < 0) return `เลยมา ${Math.abs(d)} วัน`;
+  if (d === 0) return "วันนี้!";
+  return `อีก ${d} วัน`;
+};
 
 export default function ScanPrepPage() {
   const params = useParams();
@@ -142,22 +165,43 @@ export default function ScanPrepPage() {
 
   return (
     <Shell>
-      {/* หัวใบ */}
+      {/* หัวใบ — รูปสินค้าด้านขวา · จำนวน/กำหนดส่งตัวใหญ่ (อ่านจากระยะแขนบนหน้างาน) */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs text-slate-400">ใบสั่งผลิต</div>
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400">ใบสั่งผลิต</span>
+              <button onClick={() => router.push("/scan")}
+                className="ml-auto sm:hidden shrink-0 h-8 px-2.5 rounded-lg border border-slate-200 text-slate-500 text-xs">สแกนใหม่</button>
+            </div>
             <div className="text-xl font-bold text-slate-900 font-mono">{mo.mo_no}</div>
-            <div className="text-sm text-slate-700 mt-0.5 truncate">{mo.product_name ?? "—"}</div>
+            <div className="text-sm text-slate-700 mt-0.5 line-clamp-2">{mo.product_name ?? "—"}</div>
             <div className="text-xs text-slate-400 mt-0.5 font-mono">{mo.product_sku ?? ""}</div>
-            <div className="text-xs text-slate-500 mt-1">
-              จำนวน {Number(mo.qty ?? 0).toLocaleString("th-TH")} · กำหนดส่ง {thDate(mo.due_date)}
+          </div>
+
+          {/* รูปสินค้า — แตะเพื่อดูใหญ่ */}
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            {mo.product_image
+              ? <HoverImage url={mo.product_image} size={84} previewSize={320} rounded="rounded-xl" alt={mo.product_sku ?? ""} />
+              : <div className="w-[84px] h-[84px] rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-3xl text-slate-300">📦</div>}
+            <button onClick={() => router.push("/scan")}
+              className="hidden sm:block h-8 px-2.5 rounded-lg border border-slate-200 text-slate-500 text-xs">สแกนใหม่</button>
+          </div>
+        </div>
+
+        {/* จำนวน + กำหนดส่ง — ตัวใหญ่ อ่านง่าย */}
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+            <div className="text-[11px] text-slate-400">จำนวนผลิต</div>
+            <div className="text-3xl font-extrabold text-slate-900 leading-tight">
+              {Number(mo.qty ?? 0).toLocaleString("th-TH")}<span className="text-sm font-normal text-slate-400 ml-1">ชิ้น</span>
             </div>
           </div>
-          <button onClick={() => router.push("/scan")}
-            className="shrink-0 h-9 px-3 rounded-lg border border-slate-200 text-slate-500 text-sm">
-            สแกนใหม่
-          </button>
+          <div className={`rounded-xl border px-3 py-2 ${dueTone(mo.due_date)}`}>
+            <div className="text-[11px] opacity-70">กำหนดส่ง</div>
+            <div className="text-2xl font-extrabold leading-tight">{thDateShort(mo.due_date)}</div>
+            {dueNote(mo.due_date) && <div className="text-[11px] font-medium">{dueNote(mo.due_date)}</div>}
+          </div>
         </div>
       </div>
 
