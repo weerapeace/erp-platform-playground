@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { formatThaiAddress } from "@/lib/thai-address";
+import { formatThaiAddress, formatTaxId } from "@/lib/thai-address";
 import type { SOLine } from "../route";
 
 const firstText = (...values: unknown[]) => {
@@ -29,7 +29,7 @@ async function enrichSoCustomer(request: NextRequest, so: unknown) {
     customer_code:    firstText(detail.customer_code, row.code),
     customer_address: firstText(detail.customer_address, formatThaiAddress(row)),
     customer_phone:   firstText(detail.customer_phone, row.phone, row.mobile, row.tel, row.contact_phone),
-    customer_tax_id:  firstText(detail.customer_tax_id, row.tax_id, row.tax_no, row.vat_id),
+    customer_tax_id:  firstText(detail.customer_tax_id, formatTaxId(firstText(row.tax_id, row.tax_no, row.vat_id), row.tax_branch)),
   };
 }
 

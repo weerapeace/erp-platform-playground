@@ -16,6 +16,31 @@ const firstText = (...values: unknown[]) => {
 
 const isBangkok = (province: string) => /กรุงเทพ|กทม|bangkok/i.test(province);
 
+/**
+ * เติมคำนำหน้าถ้ายังไม่มี — กัน "แขวงแขวงบางแค" เวลาผู้ใช้พิมพ์คำนำหน้ามาเองแล้ว
+ * (ข้อมูลจริงมีทั้งสองแบบ: บางรายกรอก "บางแค" บางรายกรอก "แขวงบางแค")
+ */
+const withPrefix = (value: string, prefix: string, alts: readonly string[] = []) => {
+  if (!value) return "";
+  return [prefix, ...alts].some((p) => p && value.startsWith(p)) ? value : `${prefix}${value}`;
+};
+
+/**
+ * เลขประจำตัวผู้เสียภาษี (+ สาขา)
+ * สาขา "00000" / ว่าง = สำนักงานใหญ่ → ไม่ต้องพิมพ์ต่อท้าย (เจ้าของสั่ง 2026-08-03)
+ * สาขาจริง (เช่น 00001) ต้องแสดง เพราะมีผลทางภาษี
+ *
+ * ⚠️ ตั้งใจไม่ "เดา" ว่าเลขภาษีอยู่ในช่องสาขา แม้ข้อมูลจริงเคยกรอกสลับช่องกัน —
+ *    เพราะจะทำให้เอกสารพิมพ์เลขผิดโดยไม่มีใครรู้ ควรแก้ที่ข้อมูลต้นทางแทน
+ */
+export function formatTaxId(taxId: unknown, branch?: unknown): string {
+  const id = t(taxId);
+  if (!id) return "";
+  const b = t(branch);
+  const headOffice = !b || /^0+$/.test(b) || /สำนักงานใหญ่|head\s*office/i.test(b);
+  return headOffice ? id : `${id} (สาขา ${b})`;
+}
+
 /** ประกอบที่อยู่ไทยแบบเต็ม (มีคำนำหน้า ตำบล/อำเภอ/จังหวัด หรือ แขวง/เขต สำหรับ กทม.) */
 export function formatThaiAddress(p: Record<string, unknown>): string {
   // ถ้ามีที่อยู่เต็มสำเร็จรูปอยู่แล้ว ใช้เลย
@@ -36,9 +61,9 @@ export function formatThaiAddress(p: Record<string, unknown>): string {
 
   return [
     addressLine,
-    sub ? `${subLabel}${sub}` : "",
-    district ? `${distLabel}${district}` : "",
-    province ? `${provLabel}${province}` : "",
+    withPrefix(sub, subLabel, ["แขวง", "ตำบล", "ต."]),
+    withPrefix(district, distLabel, ["เขต", "อำเภอ", "อ."]),
+    provLabel ? withPrefix(province, provLabel, ["จังหวัด", "จ."]) : province,
     postal,
     country && !/thai|ไทย/i.test(country) ? country : "",   // ไทยไม่ต้องโชว์ประเทศ
   ].filter(Boolean).join(" ");
