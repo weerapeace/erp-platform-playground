@@ -18,18 +18,20 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /**
- * บรรทัดสูตรที่เสนอ
- * ⚠️ `id` = bom_lines.id เดิม (สำคัญมาก): สูตรหนึ่งมีหลายบรรทัดของวัตถุดิบตัวเดียวกันได้ (คนละบล็อกตัด)
- *    ตอนอนุมัติต้องจับคู่ด้วย id เพื่อ "รวมค่าใหม่เข้าบรรทัดเดิม" ไม่ให้ข้อมูลบล็อกตัด/สูตรคำนวณหาย
+ * บรรทัดสูตรที่เสนอ — เก็บ "ทั้งก้อน" ในรูปเดียวกับที่หน้า /master/bom ส่งตอนเซฟ
+ * (มี calc_mode / cut_block_id / cut_block_code / slot_code / pieces / size_values … ครบ)
+ * → ตอนอนุมัติส่งต่อเข้า PATCH /api/bom/[id] ได้ตรง ๆ ไม่ต้องประกอบใหม่ = ข้อมูลไม่หาย
  */
 export type BomReqLine = {
-  id?: string | null;
   component_sku: string | null;
   component_name: string | null;
   qty: number;
   uom: string | null;
   waste_percent?: number | null;
-  note?: string | null;
+  cut_block_code?: string | null;
+  slot_code?: string | null;
+  sequence?: number | null;
+  [key: string]: unknown;
 };
 export type BomChangeRequest = {
   id: string;

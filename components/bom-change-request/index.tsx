@@ -5,21 +5,50 @@
  *
  *   <BomChangeRequestButton productSku="CTL110-02" productName="…" moNo="MO-2026-00091" />
  *
- * ตัวแก้: ดึงสูตรปัจจุบันมาให้ (ระบบ BOM ตัวจริง) → เพิ่ม/แก้/ลบบรรทัดง่าย ๆ → ส่งเป็น "คำขอ"
+ * ตัวแก้: ดึงสูตรปัจจุบันมา แล้วใช้ ⭐ `<BomLineEditor>` — **ตัวแก้สูตรตัวเดียวกับหน้า /master/bom**
+ *   (บล็อกตัด · โหมดคำนวณ · ไซส์ · สลับมุมมองย่อ/เต็ม ครบ) → ส่งเป็น "คำขอ" แทนการเซฟจริง
  * ตัวอนุมัติ: เทียบของเดิม↔ที่เสนอ → กดอนุมัติ = ยิง PATCH /api/bom/[id] (ตัวบันทึกสูตรเดิม) แล้วปิดคำขอ
  *   ⚠️ ไม่มีตัวเขียน BOM ซ้ำในไฟล์นี้ · PATCH เขียนทับ header ด้วย จึงต้องดึง header เดิมมาส่งคืนครบ
- * ของกลางที่ใช้: ERPModal · useToast · apiFetch · usePermission · ComponentPicker
+ *   ⚠️ คำขอเก็บบรรทัด "ทั้งก้อน" (รูปเดียวกับที่หน้า BOM ส่งตอนเซฟ) → อนุมัติแล้วส่งต่อตรง ๆ ข้อมูลไม่หาย
+ * ของกลางที่ใช้: ERPModal · useToast · apiFetch · usePermission · BomLineEditor
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { ERPModal } from "@/components/modal";
-import { ComponentPicker, type BomComponent } from "@/components/material-picker";
+import { BomLineEditor, emptyLine, type EditorLine } from "@/app/master/bom/line-editor";
 import type { BomChangeRequest, BomReqLine } from "@/app/api/bom/change-requests/route";
 
 type Ver = { id: string; bom_code: string; version: string | null; status: string | null; is_default: boolean };
-type EditRow = BomReqLine & { key: string; _base?: BomReqLine | null; _deleted?: boolean };
+
+/** bom_lines (จาก API) → EditorLine — ชุดเดียวกับที่หน้า /master/bom ใช้ */
+const toEditorLine = (l: Record<string, unknown>): EditorLine => ({
+  key: String(l.id ?? Math.random()), component_id: (l.sku_id as string) ?? null, slot_code: (l.slot_code as string) ?? null,
+  image_key: (l.image_key as string) ?? null,
+  component_sku: (l.component_sku as string) ?? "", component_name: (l.component_name as string) ?? "",
+  material_group_id: null, material_type: (l.material_type as string) ?? "",
+  qty: Number(l.qty) || 0, uom: (l.uom as string) ?? "", uom_id: (l.uom_id as string) ?? null,
+  waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,
+  cut_block_id: (l.cut_block_id as number) ?? null, cut_block_code: (l.cut_block_code as string) ?? "",
+  pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,
+  face_width_cm: Number(l.face_width_cm) || 0,
+  source: (l.source as string) ?? undefined, odoo_bom_line_id: (l.odoo_bom_line_id as number) ?? undefined,
+  size_variant: !!l.size_variant, size_dim: (l.size_dim as EditorLine["size_dim"]) ?? "cut_length",
+  size_values: (l.size_values ?? {}) as Record<string, number>,
+});
+
+/** EditorLine → รูปที่ PATCH /api/bom/[id] รับ (ชุดเดียวกับที่หน้า /master/bom ส่งตอนเซฟ)
+ *  → เก็บ "ทั้งก้อน" ไว้ในคำขอ ตอนอนุมัติจึงส่งต่อได้ตรง ๆ ไม่ต้อง merge อะไรอีก */
+const toSaveLine = (l: EditorLine, i: number) => ({
+  slot_code: l.slot_code, component_sku: l.component_sku || null, component_name: l.component_name || null,
+  qty: l.qty, uom: l.uom || null, waste_percent: l.waste_percent, is_optional: l.is_optional,
+  sequence: i + 1, source: l.source ?? "manual", odoo_bom_line_id: l.odoo_bom_line_id ?? null,
+  calc_mode: l.cut_block_id ? "block" : "manual", cut_block_id: l.cut_block_id, cut_block_code: l.cut_block_code || null,
+  pieces: l.pieces, cut_width: l.cut_width, cut_length: l.cut_length,
+  face_width_cm: l.face_width_cm, material_type: l.material_type || null,
+  size_variant: l.size_variant, size_dim: l.size_dim, size_values: l.size_values,
+});
 
 const n2 = (v: unknown) => Math.round((Number(v) || 0) * 10000) / 10000;
 const fmt = (n: number) => n2(n).toLocaleString("th-TH");
@@ -37,8 +66,9 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
   const toast = useToast();
   const [vers, setVers] = useState<Ver[]>([]);
   const [ver, setVer] = useState<Ver | null>(null);
-  const [rows, setRows] = useState<EditRow[]>([]);
-  const [base, setBase] = useState<BomReqLine[]>([]);
+  const [lines, setLines] = useState<EditorLine[]>([]);
+  const [baseSnap, setBaseSnap] = useState<string>("[]");   // สำเนา lines ตอนโหลด (ไว้เทียบว่าแก้อะไร)
+  const [sizes, setSizes] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -46,7 +76,7 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
   // 1) หาเวอร์ชันสูตรของสินค้านี้
   useEffect(() => {
     if (!open || !productSku) return;
-    setLoading(true); setRows([]); setBase([]); setNote("");
+    setLoading(true); setLines([]); setBaseSnap("[]"); setNote("");
     apiFetch(`/api/bom/versions?product_sku=${encodeURIComponent(productSku)}`).then((r) => r.json())
       .then((j) => {
         const list = (j.data ?? []) as Ver[];
@@ -57,44 +87,30 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
       .catch(() => { setVers([]); setVer(null); setLoading(false); });
   }, [open, productSku]);
 
-  // 2) โหลดบรรทัดของเวอร์ชันที่เลือก
+  // 2) โหลดสูตรของเวอร์ชันที่เลือก → แปลงเป็น EditorLine (ตัวเดียวกับหน้า /master/bom ใช้)
   useEffect(() => {
     if (!open || !ver) return;
     setLoading(true);
     apiFetch(`/api/bom/${encodeURIComponent(ver.id)}`).then((r) => r.json())
       .then((j) => {
-        const lines = ((j?.data?.lines ?? []) as Record<string, unknown>[]).map((l) => ({
-          id: l.id ? String(l.id) : null,           // ⚠️ ต้องเก็บไว้ — ตอนอนุมัติใช้จับคู่บรรทัดเดิม (กันข้อมูลบล็อกตัดหาย)
-          component_sku: (l.component_sku as string) ?? null,
-          component_name: (l.component_name as string) ?? null,
-          qty: n2(l.qty), uom: (l.uom as string) ?? null,
-          waste_percent: l.waste_percent != null ? Number(l.waste_percent) : null,
-          note: (l.cut_block_code as string) ?? null,   // โชว์บล็อกตัดให้รู้ว่าบรรทัดไหนคือบล็อกไหน
-        })) as BomReqLine[];
-        setBase(lines);
-        setRows(lines.map((l, i) => ({ ...l, key: `b${l.id ?? i}`, _base: l })));
+        const raw = (j?.data?.lines ?? []) as Record<string, unknown>[];
+        const eds = raw.map(toEditorLine);
+        setLines(eds);
+        setBaseSnap(JSON.stringify(eds.map(toSaveLine)));
+        setSizes(((j?.data?.sizes ?? []) as { label?: unknown }[]).map((s) => String(s.label ?? "")).filter(Boolean));
       })
       .catch(() => toast.error("โหลดสูตรไม่สำเร็จ"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, ver]);
 
-  const upd = (key: string, p: Partial<EditRow>) => setRows((s) => s.map((r) => (r.key === key ? { ...r, ...p } : r)));
-  const addRow = () => setRows((s) => [...s, { key: `n${Date.now()}${s.length}`, component_sku: null, component_name: null, qty: 1, uom: null, waste_percent: null, _base: null }]);
-  const pick = (key: string, c: BomComponent) => upd(key, { component_sku: c.code, component_name: c.name, uom: c.uom_name ?? null });
-
-  const live = rows.filter((r) => !r._deleted);
-  const added = live.filter((r) => !r._base).length;
-  const edited = live.filter((r) => r._base && !sameLine(r, r._base)).length;
-  const removed = rows.filter((r) => r._deleted && r._base).length;
-  const changed = added + edited + removed;
+  const proposed = lines.map(toSaveLine);
+  const dirty = JSON.stringify(proposed) !== baseSnap;
 
   const submit = async () => {
-    const lines: BomReqLine[] = live
-      .filter((r) => r.component_sku)
-      .map((r) => ({ id: r.id ?? null, component_sku: r.component_sku, component_name: r.component_name, qty: n2(r.qty), uom: r.uom ?? null, waste_percent: r.waste_percent ?? null, note: r.note ?? null }));
-    if (lines.length === 0 && !note.trim()) { toast.error("ยังไม่มีวัตถุดิบในสูตร (หรือเขียนหมายเหตุบอกก็ได้)"); return; }
-    if (changed === 0 && !note.trim()) { toast.error("ยังไม่ได้แก้อะไรเลย"); return; }
+    const clean = lines.filter((l) => l.component_sku).map(toSaveLine);
+    if (clean.length === 0 && !note.trim()) { toast.error("ยังไม่มีวัตถุดิบในสูตร (หรือเขียนหมายเหตุบอกก็ได้)"); return; }
+    if (!dirty && !note.trim()) { toast.error("ยังไม่ได้แก้อะไรเลย"); return; }
     setSaving(true);
     try {
       const res = await apiFetch("/api/bom/change-requests", {
@@ -102,7 +118,7 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
         body: JSON.stringify({
           bom_id: ver?.id ?? null, bom_code: ver?.bom_code ?? null, bom_version: ver?.version ?? null,
           product_sku: productSku, product_name: productName ?? null, mo_no: moNo ?? null,
-          base_lines: base, lines, note: note.trim() || null,
+          base_lines: JSON.parse(baseSnap), lines: clean, note: note.trim() || null,
         }),
       });
       const j = await res.json();
@@ -120,12 +136,13 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
         <button onClick={onClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
         <button onClick={() => void submit()} disabled={saving || loading}
           className="h-9 px-5 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-          {saving ? "กำลังส่ง…" : `ส่งคำขอ${changed > 0 ? ` (${changed} จุด)` : ""}`}
+          {saving ? "กำลังส่ง…" : "ส่งคำขอ"}
         </button>
       </>}>
       <div className="space-y-2">
         <p className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-          แก้ตรงนี้ <b>ยังไม่กระทบสูตรจริง</b> — ส่งเป็นคำขอให้คนดูแลสูตรตรวจก่อน อนุมัติแล้วถึงจะเขียนลง BOM
+          นี่คือ<b>ตัวแก้สูตรตัวเดียวกับหน้า BOM</b> (มีบล็อกตัด/คำนวณครบ · สลับ ย่อ/เต็ม ได้) —
+          แต่แก้ตรงนี้ <b>ยังไม่กระทบสูตรจริง</b> ส่งเป็นคำขอให้อนุมัติก่อน
         </p>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -139,70 +156,15 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
             </select>
           )}
           <div className="flex-1" />
-          {changed > 0 && (
-            <span className="text-[11px] text-slate-500">
-              {added > 0 && <span className="text-emerald-600">เพิ่ม {added}</span>}
-              {edited > 0 && <span className="text-amber-600 ml-2">แก้ {edited}</span>}
-              {removed > 0 && <span className="text-rose-600 ml-2">ลบ {removed}</span>}
-            </span>
-          )}
+          {dirty && <span className="text-[11px] text-amber-600 font-medium">มีการแก้ไข (ยังไม่ส่ง)</span>}
         </div>
 
         {loading ? <div className="py-8 text-center text-slate-400 text-sm">กำลังโหลดสูตร…</div> : (
-          <div className="border border-slate-200 rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-[11px] text-slate-500">
-                <tr>
-                  <th className="text-left px-2 py-1.5 font-medium min-w-[240px]">วัตถุดิบ</th>
-                  <th className="px-2 py-1.5 font-medium w-24 text-right">จำนวน/ชิ้น</th>
-                  <th className="px-2 py-1.5 font-medium w-24">หน่วย</th>
-                  <th className="px-2 py-1.5 font-medium w-20 text-right">เผื่อเสีย %</th>
-                  <th className="px-2 py-1.5 font-medium w-16" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rows.map((r) => {
-                  const isNew = !r._base, isEdit = r._base && !r._deleted && !sameLine(r, r._base);
-                  return (
-                    <tr key={r.key} className={r._deleted ? "opacity-40 line-through bg-rose-50/40" : isNew ? "bg-emerald-50/40" : isEdit ? "bg-amber-50/40" : ""}>
-                      <td className="px-2 py-1.5">
-                        <div className="flex items-center gap-1.5">
-                          {isNew && <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-100 text-emerald-700 shrink-0">ใหม่</span>}
-                          {isEdit && <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 shrink-0">แก้</span>}
-                          <div className="min-w-0 flex-1">
-                            <ComponentPicker sku={r.component_sku ?? ""} name={r.component_name ?? ""} onPick={(c) => pick(r.key, c)} />
-                            {r.note && <div className="text-[10px] text-slate-400 mt-0.5">บล็อก {r.note}</div>}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-1 py-1">
-                        <input type="number" step="any" min={0} value={r.qty} disabled={r._deleted}
-                          onChange={(e) => upd(r.key, { qty: Number(e.target.value) })} className={`${inCls} text-right`} />
-                      </td>
-                      <td className="px-1 py-1">
-                        <input value={r.uom ?? ""} disabled={r._deleted} onChange={(e) => upd(r.key, { uom: e.target.value })} className={inCls} />
-                      </td>
-                      <td className="px-1 py-1">
-                        <input type="number" step="any" min={0} value={r.waste_percent ?? ""} disabled={r._deleted}
-                          onChange={(e) => upd(r.key, { waste_percent: e.target.value === "" ? null : Number(e.target.value) })}
-                          className={`${inCls} text-right`} />
-                      </td>
-                      <td className="px-1 py-1 text-center">
-                        {r._deleted
-                          ? <button onClick={() => upd(r.key, { _deleted: false })} className="text-[11px] text-slate-500 hover:text-emerald-600">คืน</button>
-                          : <button onClick={() => (r._base ? upd(r.key, { _deleted: true }) : setRows((s) => s.filter((x) => x.key !== r.key)))}
-                              className="text-slate-300 hover:text-rose-500">✕</button>}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {rows.length === 0 && <tr><td colSpan={5} className="px-2 py-6 text-center text-[12px] text-slate-400">ยังไม่มีวัตถุดิบในสูตรนี้</td></tr>}
-              </tbody>
-            </table>
-          </div>
+          <BomLineEditor lines={lines} onChange={setLines} sizes={sizes} />
         )}
 
-        <button onClick={addRow} className="h-8 px-3 text-[12px] border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">＋ เพิ่มวัตถุดิบ</button>
+        <button onClick={() => setLines((s) => [...s, emptyLine()])}
+          className="h-8 px-3 text-[12px] border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">＋ เพิ่มวัตถุดิบ</button>
 
         <label className="block">
           <span className="text-[12px] text-slate-600">เหตุผล / หมายเหตุ</span>
@@ -214,6 +176,7 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
     </ERPModal>
   );
 }
+
 
 /** คิวอนุมัติคำขอแก้สูตร */
 export function BomChangeRequestQueue({ open, onClose, onChanged }: {
@@ -244,26 +207,17 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
       if (!h) throw new Error("ไม่พบสูตรที่จะแก้ (อาจถูกลบไปแล้ว)");
 
       /**
-       * ⚠️ PATCH แทนที่ lines ทั้งชุด — ถ้าส่งแค่ 5 ฟิลด์ที่คำขอเก็บไว้ ข้อมูลอื่นของบรรทัด
-       *    (บล็อกตัด cut_block_id / calc_mode / slot_code / is_optional …) จะหายทันที
-       *    จึงต้อง "รวมค่าใหม่เข้าบรรทัดเดิม" โดยจับคู่ด้วย bom_lines.id
+       * คำขอเก็บบรรทัด "ทั้งก้อน" ไว้แล้ว (รูปเดียวกับที่หน้า /master/bom ส่งตอนเซฟ —
+       * มี cut_block/calc_mode/slot_code/size_values ครบ) → ส่งต่อได้ตรง ๆ ไม่ต้อง merge
+       * ⚠️ ส่ง header เดิมคืนให้ครบด้วย เพราะ PATCH เขียนทับ header (ฟิลด์ที่ไม่ส่ง = null)
        */
-      const curLines = (h.lines ?? []) as Record<string, unknown>[];
-      const byId = new Map(curLines.filter((l) => l.id).map((l) => [String(l.id), l]));
-      const merged = r.lines.map((l, i) => {
-        const orig = l.id ? byId.get(String(l.id)) : undefined;
-        return orig
-          ? { ...orig, qty: l.qty, uom: l.uom, waste_percent: l.waste_percent ?? null, sequence: i }
-          : { component_sku: l.component_sku, component_name: l.component_name, qty: l.qty, uom: l.uom, waste_percent: l.waste_percent ?? null, is_optional: false, sequence: i };
-      });
-
       const res = await apiFetch(`/api/bom/${encodeURIComponent(r.bom_id)}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bom_code: h.bom_code, product_sku: h.product_sku, product_name: h.product_name,
           version: h.version, bom_type: h.bom_type, status: h.status,
           effective_from: h.effective_from, note: h.note,
-          lines: merged,
+          lines: r.lines.map((l, i) => ({ ...l, sequence: i + 1 })),
         }),
       });
       const j = await res.json();
@@ -299,18 +253,21 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
     rejected: { label: "ไม่อนุมัติ", cls: "bg-slate-100 text-slate-500 border-slate-200" },
   };
 
-  // เทียบด้วย bom_lines.id (สูตรมีหลายบรรทัดของวัตถุดิบเดียวกันได้ = คนละบล็อกตัด) · บรรทัดใหม่ไม่มี id
+  /**
+   * เทียบ "ของเดิม ↔ ที่เสนอ" — จับคู่ด้วย วัตถุดิบ+บล็อกตัด+ช่อง
+   * (สูตรหนึ่งมีหลายบรรทัดของวัตถุดิบตัวเดียวกันได้ = คนละบล็อกตัด จับด้วยรหัสอย่างเดียวไม่พอ)
+   */
   const diff = (r: BomChangeRequest) => {
     const b = r.base_lines ?? [], l = r.lines ?? [];
-    const key = (x: BomReqLine, i: number) => x.id ?? `~${x.component_sku ?? ""}#${i}`;
-    const bm = new Map(b.map((x, i) => [key(x, i), x]));
+    const key = (x: BomReqLine) => `${x.component_sku ?? ""}|${x.cut_block_code ?? ""}|${x.slot_code ?? ""}`;
+    const bm = new Map(b.map((x) => [key(x), x]));
     const seen = new Set<string>();
     const out: { kind: "add" | "edit" | "del"; line: BomReqLine; from?: BomReqLine }[] = [];
-    l.forEach((line, i) => {
-      const k = key(line, i);
-      const prev = line.id ? bm.get(k) : undefined;
-      if (prev) { seen.add(k); if (!sameLine(line, prev)) out.push({ kind: "edit", line, from: prev }); }
-      else out.push({ kind: "add", line });
+    l.forEach((line) => {
+      const k = key(line);
+      const prev = bm.get(k);
+      if (prev && !seen.has(k)) { seen.add(k); if (!sameLine(line, prev)) out.push({ kind: "edit", line, from: prev }); }
+      else if (!prev) out.push({ kind: "add", line });
     });
     for (const [k, line] of bm) if (!seen.has(k)) out.push({ kind: "del", line });
     return out;
