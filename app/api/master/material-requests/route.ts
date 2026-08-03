@@ -62,6 +62,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!hasSomething) return NextResponse.json({ error: "ใส่อย่างน้อย ชื่อ หรือ รหัส หรือ หมายเหตุ" }, { status: 400 });
 
   const admin = supabaseAdmin();
+  // หน่วยที่เลือกจาก UomPicker มาเป็น "ชื่อ" → แปลงเป็น uom_id ให้เลย (SkuWizard ตอนอนุมัติจะได้เติมหน่วยถูกตัว)
+  const uomLabel = String(values.uom_label ?? "").trim();
+  if (uomLabel && !values.uom_id) {
+    // ⚠️ ทะเบียนหน่วยมีชื่อซ้ำกันอยู่ 4 ตัว → ห้ามใช้ maybeSingle (จะ error) เอาตัวแรกพอ
+    const { data: u } = await admin.from("uoms").select("id").eq("name", uomLabel).limit(1);
+    const first = (u ?? [])[0] as { id: string } | undefined;
+    if (first) values.uom_id = first.id;
+  }
+
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const { data, error } = await admin.from("material_requests").insert({
     values, labels: body.labels ?? {},

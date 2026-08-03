@@ -16,6 +16,8 @@ import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { ERPModal } from "@/components/modal";
 import { ImageAttachKeys } from "@/components/image-attach";
+import { UomPicker } from "@/components/uom-picker";
+import { SupplierPicker, type SupplierPickerValue } from "@/components/pickers";
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 import type { MaterialRequest } from "@/app/api/master/material-requests/route";
 
@@ -24,14 +26,12 @@ type TagOpt = { id: string; name: string; code_prefix: string; group_name: strin
 const inCls = "w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500";
 const thDT = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
 
-/** ฟิลด์ที่ให้พนักงานกรอก — ทุกช่องไม่บังคับ (ขอแค่มีชื่อ/รหัส/หมายเหตุ อย่างน้อยอย่างหนึ่ง) */
+/** ช่องพิมพ์ธรรมดา — ทุกช่องไม่บังคับ (หน่วย/ร้าน ใช้ picker ของกลางแยกด้านล่าง) */
 const FIELDS: { key: string; label: string; hint?: string; type?: "number" }[] = [
   { key: "code", label: "รหัสที่อยากได้", hint: "ไม่รู้ก็เว้นไว้ ให้คนอนุมัติตั้งให้" },
   { key: "name_th", label: "ชื่อวัตถุดิบ" },
   { key: "color", label: "สี" },
   { key: "fabric_width_cm", label: "หน้ากว้าง (ซม.)", type: "number", hint: "กรณีผ้า" },
-  { key: "uom_label", label: "หน่วย", hint: "หลา / เมตร / ชิ้น" },
-  { key: "seller_label", label: "ร้าน / ผู้ขาย" },
   { key: "standard_price", label: "ราคาซื้อ (บาท)", type: "number" },
   { key: "rmb_cost", label: "ราคาซื้อ (หยวน)", type: "number" },
   { key: "purchase_link", label: "ลิงก์ซื้อ" },
@@ -47,12 +47,14 @@ export function MaterialRequestForm({ open, onClose, onSaved, prefill }: {
   const [imgs, setImgs] = useState<string[]>([]);
   const [tags, setTags] = useState<TagOpt[]>([]);
   const [tagId, setTagId] = useState("");
+  const [uom, setUom] = useState<string | null>(null);                       // ของกลาง UomPicker (เก็บเป็นชื่อหน่วย)
+  const [seller, setSeller] = useState<SupplierPickerValue | null>(null);    // ของกลาง SupplierPicker (ได้ id จริง)
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setV(Object.fromEntries(Object.entries(prefill ?? {}).map(([k, val]) => [k, String(val ?? "")])));
-    setNote(""); setImgs([]); setTagId("");
+    setNote(""); setImgs([]); setTagId(""); setUom(null); setSeller(null);
     apiFetch("/api/skus/tag-prefix").then((r) => r.json()).then((j) => setTags((j.data ?? []) as TagOpt[])).catch(() => setTags([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -65,10 +67,11 @@ export function MaterialRequestForm({ open, onClose, onSaved, prefill }: {
     for (const f of FIELDS) {
       const raw = (v[f.key] ?? "").trim();
       if (!raw) continue;
-      // หน่วย/ผู้ขาย พนักงานพิมพ์เป็นข้อความ — เก็บเป็น label ให้คนอนุมัติเลือกตัวจริงใน Wizard
-      if (f.key === "uom_label" || f.key === "seller_label") { labels[f.key] = raw; continue; }
       values[f.key] = f.type === "number" ? Number(raw) : raw;
     }
+    // หน่วย/ร้าน มาจาก picker ของกลาง → ได้ค่าจริงที่ Wizard เอาไปใช้ต่อได้เลย
+    if (uom) { values.uom_label = uom; labels.uom_label = uom; }
+    if (seller) { values.seller_partner_id = seller.id; labels.seller_label = seller.name; labels.seller_partner_id = seller.name; }
     const tag = tags.find((t) => t.id === tagId) ?? null;
     if (!Object.keys(values).length && !note.trim()) { toast.error("ใส่อย่างน้อย ชื่อ หรือ รหัส หรือ หมายเหตุ"); return; }
 
@@ -121,6 +124,18 @@ export function MaterialRequestForm({ open, onClose, onSaved, prefill }: {
               {f.hint && <span className="text-[10px] text-slate-400">{f.hint}</span>}
             </label>
           ))}
+
+          {/* หน่วย + ร้าน — ใช้ picker ของกลาง (ค้นหาได้ · ได้ค่าจริงในระบบ ไม่ใช่ข้อความมั่ว) */}
+          <div>
+            <span className="text-[12px] text-slate-600">หน่วย</span>
+            <div className="mt-0.5"><UomPicker value={uom} onChange={setUom} /></div>
+            <span className="text-[10px] text-slate-400">เลือกจากทะเบียนหน่วย · ไม่มีในรายการก็พิมพ์เองได้</span>
+          </div>
+          <div>
+            <span className="text-[12px] text-slate-600">ร้าน / ผู้ขาย</span>
+            <div className="mt-0.5"><SupplierPicker value={seller} onChange={setSeller} placeholder="ค้นหาร้าน…" /></div>
+            <span className="text-[10px] text-slate-400">ค้นหาจากทะเบียนร้าน · ยังไม่มีร้านนี้ เขียนบอกในหมายเหตุได้</span>
+          </div>
         </div>
 
         <label className="block">
@@ -241,7 +256,8 @@ export function MaterialRequestQueue({ open, onClose, onChanged }: {
       {/* อนุมัติ = เปิด SkuWizard เดิม พร้อมเติมค่าที่ขอมาให้ → สร้างเสร็จค่อยปิดคำขอ */}
       {approving && (
         <SkuWizard open onClose={() => setApproving(null)}
-          prefill={{ ...(approving.values ?? {}) }}
+          // uom_label ไม่ใช่คอลัมน์จริง (server กรองทิ้งอยู่แล้ว) — ตัดออกกันสับสนใน Wizard
+          prefill={Object.fromEntries(Object.entries(approving.values ?? {}).filter(([k]) => k !== "uom_label"))}
           onCreated={(res) => {
             const sku = res?.skus?.[0];
             void finish(approving, "approve", { sku_id: sku?.id ?? null, sku_code: sku?.code ?? null });
