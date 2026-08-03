@@ -71,7 +71,8 @@ export async function GET(
   const { id } = await params;
   const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_so_get", { p_id: id });
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
-  const enriched = await enrichSoCustomer(request, data);
+  const withCustomer = await enrichSoCustomer(request, data);
+  const enriched = await enrichSoCompany(withCustomer);   // หัวบิลบริษัทผู้ขาย (จากทะเบียน companies)
   return NextResponse.json({ data: enriched, error: null });
 }
 

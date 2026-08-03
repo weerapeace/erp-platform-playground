@@ -38,6 +38,23 @@ const baht = (n: number | null | undefined) =>
 const thaiDate = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
+/** ตัวเลขล้วน ไม่มีสัญลักษณ์เงิน — ตารางแบบที่ 2 ใส่หน่วยไว้ที่หัวคอลัมน์แล้ว */
+const plain = (n: number | null | undefined) =>
+  Number(n ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * วันครบกำหนดชำระ = วันที่ออกเอกสาร + จำนวนวันเครดิตที่อ่านได้จากข้อความ
+ * (เก็บเป็นข้อความอิสระ เช่น "เครดิต 30 วัน" / "เงินสด") — ไม่เจอตัวเลข = ไม่มีกำหนด
+ */
+function dueDateIso(orderDate: string | null | undefined, terms: string | null | undefined): string {
+  if (!orderDate) return "-";
+  const m = /(\d+)/.exec(String(terms ?? ""));
+  if (!m) return "-";
+  const d = new Date(orderDate);
+  d.setDate(d.getDate() + Number(m[1]));
+  return d.toISOString().slice(0, 10);
+}
+
 export function buildSoData(so: SODetailExt): Record<string, unknown> {
   const isoDate = (iso: string | null | undefined) => (iso ? String(iso).slice(0, 10) : "—");
   return {
@@ -75,13 +92,25 @@ export function buildSoData(so: SODetailExt): Record<string, unknown> {
     grand_total:      baht(so.grand_total),
     amount_due:       baht(so.amount_due),
     amount_in_words:  thaiBahtText(so.grand_total),
+    // ---- ใช้ในแม่แบบ "ใบส่งของ/ใบส่งมอบงาน" (แบบที่ 2) ----
+    page_label:       "1 / 1",
+    credit_label:     so.payment_terms ?? "-",
+    due_date_iso:     dueDateIso(so.order_date, so.payment_terms),
+    reference:        so.customer_po_no ?? "-",
     lines: so.lines.map((l, i) => ({
       idx:             i + 1,
       sku:             l.sku ?? "",
       product_name:    l.product_name,
+      // บรรทัดที่ 2 ใต้ชื่อสินค้า (แม่แบบแบบที่ 2) — ใช้หมายเหตุบรรทัดถ้ามี
+      desc2:           l.note ?? "",
       qty:             Number(l.qty).toLocaleString("th-TH"),
       unit:            l.unit,
       unit_price:      baht(l.unit_price),
+      // ราคา/ส่วนลด แบบไม่มีสัญลักษณ์เงิน (ตารางแบบที่ 2 ใส่หน่วยไว้หัวคอลัมน์แล้ว)
+      price_plain:     plain(l.unit_price),
+      discount_plain:  plain(l.discount_amount ?? 0),
+      net_plain:       plain(l.net_amount ?? l.line_total ?? 0),
+      vat_pct:         String(so.vat_rate ?? 7),
       discount_amount: baht(l.discount_amount ?? 0),
       // ส่วนลด/VAT รายบรรทัด — โชว์เฉพาะเมื่อติ๊กเปิดคอลัมน์ · เว้นว่างถ้าไม่มี จะได้ไม่รกด้วย 0.00
       discount_text:   Number(l.discount_amount ?? 0) > 0 ? baht(l.discount_amount) : "",
@@ -143,9 +172,6 @@ export default function PrintSOPage() {
   return (
     <div className="min-h-screen bg-slate-100">
       <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบกำกับภาษี", so?.tax_invoice_no || so?.so_number)} />
-      {prefs && templates.length > 0 && (
-        <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} />
-      )}
       {prefs && templates.length > 0 && (
         <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} />
       )}
