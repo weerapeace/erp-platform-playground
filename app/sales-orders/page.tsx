@@ -17,6 +17,7 @@ import type { SOListItem, SODetail } from "@/app/api/sales-orders/route";
 import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
 import { format as formatMoney } from "@/lib/money";
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
+import { PartnerWizard } from "@/components/supplier-wizard";
 
 const randId = () => String(Math.random()).slice(2);
 
@@ -123,6 +124,9 @@ export default function SalesOrdersPage() {
 
   // คลังหลัก (default ตอนสร้าง)
   const [defaultWarehouse, setDefaultWarehouse] = useState<WarehousePickerValue | null>(null);
+
+  // เพิ่มลูกค้าใหม่จากในช่องเลือกลูกค้า (ของกลาง PartnerWizard — กรอกได้ครบทุกช่อง)
+  const [newCustomerName, setNewCustomerName] = useState<string | null>(null);
 
   // ทะเบียนบริษัท (หัวบิลบนเอกสาร) — ใช้ตอนเลือก "ออกในนามบริษัท"
   const [companies, setCompanies] = useState<CompanyOpt[]>([]);
@@ -747,7 +751,8 @@ export default function SalesOrdersPage() {
               <div className="md:col-span-2">
                 <FieldLabel required>ลูกค้า</FieldLabel>
                 <div className="mt-0.5">
-                  <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })} />
+                  <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })}
+                    onAddNew={(q) => setNewCustomerName(q)} />
                 </div>
                 {form.customer && (
                   <RecordPeekLink
@@ -881,6 +886,21 @@ export default function SalesOrdersPage() {
           mode={pickerMode}
           onClose={() => setPickerMode(null)}
           onConfirm={handlePicked}
+        />
+      )}
+
+      {/* เพิ่มลูกค้าใหม่ — ของกลางตัวเดียวกับที่ใช้เพิ่มผู้จำหน่าย (กรอกได้ครบทุกช่อง 4 หน้า)
+          สร้างเสร็จ → เลือกให้ในใบเลย ไม่ต้องมาค้นหาใหม่ */}
+      {newCustomerName !== null && (
+        <PartnerWizard
+          role="customer"
+          initialName={newCustomerName}
+          onClose={() => setNewCustomerName(null)}
+          onCreated={(p) => {
+            setForm((f) => ({ ...f, customer: { id: p.id, name: p.name } as CustomerPickerValue }));
+            setNewCustomerName(null);
+            flash(`เพิ่มลูกค้า "${p.name}" แล้ว`);
+          }}
         />
       )}
 

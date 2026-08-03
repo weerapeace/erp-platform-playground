@@ -88,7 +88,7 @@ function toggleFav<V extends { id: string }>(key: string, v: V): V[] {
 
 export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfig<V>) {
   return function MasterPicker({
-    value, onChange, placeholder = `เลือก${cfg.label}...`, disabled, error, disableCreate,
+    value, onChange, placeholder = `เลือก${cfg.label}...`, disabled, error, disableCreate, onAddNew,
   }: {
     value: V | null;
     onChange: (v: V | null) => void;
@@ -96,6 +96,12 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
     disabled?: boolean;
     error?: boolean;
     disableCreate?: boolean;
+    /**
+     * เปิด "ฟอร์มกรอกข้อมูลเต็ม" (ของกลาง) แทนการสร้างแบบใส่แค่ชื่อ
+     * ใส่มาแล้วจะมีปุ่มท้าย dropdown เสมอ (ไม่ต้องพิมพ์ค้นหาก่อน)
+     * ส่งคำค้นที่พิมพ์ค้างไว้ไปให้เติมในฟอร์มได้
+     */
+    onAddNew?: (query: string) => void;
   }) {
     const { can } = useAuth();
     const [open, setOpen]       = useState(false);
@@ -243,6 +249,16 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
                   className="w-full px-3 py-2.5 flex items-center gap-2 text-sm text-blue-600 hover:bg-blue-50 border-t border-slate-100 disabled:opacity-50">
                   {creating ? <IconLoader /> : <span className="text-lg leading-none">＋</span>}
                   สร้าง{cfg.label}ใหม่ &quot;{query.trim()}&quot;
+                </button>
+              )}
+
+              {/* ฟอร์มกรอกข้อมูลเต็ม — โชว์เสมอ ไม่ต้องพิมพ์ค้นหาก่อน */}
+              {onAddNew && (
+                <button type="button"
+                  onClick={() => { setOpen(false); onAddNew(query.trim()); }}
+                  className="w-full px-3 py-2.5 flex items-center gap-2 text-sm text-blue-700 bg-blue-50/60 hover:bg-blue-100 border-t border-slate-200">
+                  <span className="text-lg leading-none">＋</span>
+                  เพิ่ม{cfg.label}ใหม่ <span className="text-xs text-blue-500">(กรอกข้อมูลครบ)</span>
                 </button>
               )}
             </div>

@@ -24,9 +24,13 @@ const COUNTRIES = ["ไทย", "จีน", "ฮ่องกง", "อื่น
 const STEPS = ["ข้อมูลร้าน", "ติดต่อ", "ที่อยู่ + ภาษี", "การค้า / การเงิน"] as const;
 type Step = 1 | 2 | 3 | 4;
 
-export function SupplierWizard({ onClose, onCreated }: {
+export function SupplierWizard({ onClose, onCreated, role = "supplier", initialName = "" }: {
   onClose: () => void;
   onCreated: (p: { id: string; name: string }) => void;
+  /** เปิดจากที่ไหน — กำหนดว่าติ๊ก "ผู้จำหน่าย" หรือ "ลูกค้า" ให้ตั้งแต่แรก */
+  role?: "supplier" | "customer" | "both";
+  /** ชื่อที่พิมพ์ค้างไว้ในช่องค้นหา — เติมให้เลย ไม่ต้องพิมพ์ซ้ำ */
+  initialName?: string;
 }) {
   const [step, setStep] = useState<Step>(1);
   const [saving, setSaving] = useState(false);
@@ -34,16 +38,16 @@ export function SupplierWizard({ onClose, onCreated }: {
   const banks = useBanks("TH");
 
   // ---- หน้า 1: ข้อมูลร้าน ----
-  const [displayName, setDisplayName] = useState("");
+  const [displayName, setDisplayName] = useState(initialName);
   const [nameTh, setNameTh] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [code, setCode] = useState("");
-  const [isSupplier, setIsSupplier] = useState(true);
-  const [isCustomer, setIsCustomer] = useState(false);
+  const [isSupplier, setIsSupplier] = useState(role !== "customer");
+  const [isCustomer, setIsCustomer] = useState(role !== "supplier");
   const [isCompany, setIsCompany] = useState(true);
   const [isTaobao, setIsTaobao] = useState(false);
   const [shopCountry, setShopCountry] = useState("");
-  const [currency, setCurrency] = useState("RMB");
+  const [currency, setCurrency] = useState(role === "customer" ? "THB" : "RMB");
   const [nameCard, setNameCard] = useState<string[]>([]);
 
   // ---- หน้า 2: ติดต่อ ----
@@ -150,7 +154,7 @@ export function SupplierWizard({ onClose, onCreated }: {
       <div className="bg-white rounded-xl shadow-2xl w-[560px] max-w-[94vw] max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between px-4 py-3 border-b border-slate-100">
           <div>
-            <h3 className="font-semibold text-slate-800">➕ เพิ่มคู่ค้า / ผู้จำหน่าย</h3>
+            <h3 className="font-semibold text-slate-800">➕ {role === "customer" ? "เพิ่มลูกค้า" : role === "both" ? "เพิ่มคู่ค้า" : "เพิ่มผู้จำหน่าย"}</h3>
             <div className="text-[11px] text-slate-400">กรอกแค่ชื่อร้านก็บันทึกได้ — ช่องอื่นเติมทีหลังได้</div>
           </div>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 text-lg leading-none">✕</button>
@@ -176,7 +180,8 @@ export function SupplierWizard({ onClose, onCreated }: {
           {step === 1 && (
             <>
               <div><label className={lbl}>ชื่อร้าน (Display) *</label>
-                <input value={displayName} autoFocus onChange={(e) => setDisplayName(e.target.value)} className={cls} placeholder="เช่น ร้านซิปเมืองจีน" /></div>
+                <input value={displayName} autoFocus onChange={(e) => setDisplayName(e.target.value)} className={cls}
+                  placeholder={role === "customer" ? "เช่น บริษัท ตัวอย่าง จำกัด" : "เช่น ร้านซิปเมืองจีน"} /></div>
               <div className="grid grid-cols-2 gap-2">
                 <div><label className={lbl}>ชื่อไทย</label>
                   <input value={nameTh} onChange={(e) => setNameTh(e.target.value)} className={cls} placeholder="เว้นว่าง = ใช้ชื่อร้าน" /></div>
@@ -335,3 +340,6 @@ export function SupplierWizard({ onClose, onCreated }: {
     document.body,
   );
 }
+
+/** ชื่อกลาง — ตัวเดียวกัน ใช้ได้ทั้งลูกค้าและผู้จำหน่าย (partners_v2) */
+export const PartnerWizard = SupplierWizard;
