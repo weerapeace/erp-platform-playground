@@ -419,7 +419,7 @@ export default function MaterialReadinessPage() {
                     ⛔ <b>ของหลักที่ยังไม่พร้อม:</b> {detail.lines.filter((l) => l.criticality === "critical" && !l.is_ready).map((l) => l.component_name).join(" · ")}
                   </div>
                 )}
-                <MoMaterialChecklist moId={detail.id} moNo={detail.mo_no} productLabel={detail.product_name ?? detail.product_sku} onSaved={load} />
+                <MoMaterialChecklist moId={detail.id} moNo={detail.mo_no} productLabel={detail.product_name ?? detail.product_sku} productSku={detail.product_sku} onSaved={load} />
                 <p className="text-[11px] text-slate-400">ติ๊ก/พิมพ์แล้วบันทึกให้อัตโนมัติ · ตัวเลขบนหน้าหลักจะอัปเดตตาม (เหมือนติ๊กที่บอร์ดจ่ายงานทุกอย่าง)</p>
               </>
             ) : (

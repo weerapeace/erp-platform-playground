@@ -15,6 +15,7 @@ import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { addToPrCart } from "@/lib/pr-cart";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
+import { BomChangeRequestButton } from "@/components/bom-change-request";
 
 const n2 = (v: unknown) => Number(v ?? 0) || 0;
 const num = (v: unknown) => (v == null ? null : Number(v) || 0);
@@ -26,11 +27,13 @@ type Loaded = {
 };
 
 export function MoMaterialChecklist({
-  moId, moNo, productLabel, onSaved,
+  moId, moNo, productLabel, productSku, onSaved,
 }: {
   moId: string;
   moNo: string;
   productLabel?: string | null;
+  /** รหัสสินค้า — มีค่า = โชว์ปุ่ม "📐 ขอแก้สูตร" บนแถบเครื่องมือ */
+  productSku?: string | null;
   /** เรียกหลังบันทึกสำเร็จ (ให้หน้าแม่รีเฟรชตัวเลข) */
   onSaved?: () => void;
 }) {
@@ -115,6 +118,7 @@ export function MoMaterialChecklist({
     <MoMaterialsTable
       summary={d.summary} materials={d.materials} qty={d.qty} sizeQty={d.sizeQty} requested={d.requested}
       editable canEdit={canEdit}
+      extraActions={productSku ? <BomChangeRequestButton productSku={productSku} productName={productLabel} moNo={moNo} /> : undefined}
       onChangeSummary={onChangeSummary}
       onToggleCut={onToggleCut}
       onAddToCart={canEdit ? (row) => {

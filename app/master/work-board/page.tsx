@@ -23,6 +23,7 @@ import { AddPieceworkModal } from "./add-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
 import { BomRefreshButton } from "@/components/bom-refresh";
+import { BomChangeRequestButton } from "@/components/bom-change-request";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
 import { addToPrCart } from "@/lib/pr-cart";
 import { useViewPref } from "@/lib/use-view-pref";
@@ -1578,7 +1579,11 @@ function WorkBoardPageInner() {
                           summary={clSummary} materials={clMaterials} qty={checklistMO.qty || 0} sizeQty={clSizeQty} requested={clRequested}
                           editable={canEdit} canEdit={canEdit}
                           extraActions={canEdit && (checklistMO.product_sku || curMo.bom_code)
-                            ? <BomRefreshButton moId={checklistMO.id} productSku={checklistMO.product_sku} currentBomCode={curMo.bom_code ?? null} onDone={reloadClMats} />
+                            ? <>
+                                <BomRefreshButton moId={checklistMO.id} productSku={checklistMO.product_sku} currentBomCode={curMo.bom_code ?? null} onDone={reloadClMats} />
+                                {/* เสนอแก้สูตร — ยังไม่แตะ BOM จริงจนกว่าจะอนุมัติ (ของกลาง) */}
+                                <BomChangeRequestButton productSku={checklistMO.product_sku} productName={checklistMO.product_name} moNo={checklistMO.mo_no} />
+                              </>
                             : undefined}
                           onChangeSummary={(rows) => void onMatSummaryChange(rows)}
                           onToggleCut={(line, next) => void onMatToggleCut(line, next)}

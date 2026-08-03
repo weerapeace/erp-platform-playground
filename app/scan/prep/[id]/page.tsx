@@ -306,7 +306,7 @@ export default function ScanPrepPage() {
       <ERPModal open={checklistOpen} onClose={() => { setChecklistOpen(false); void load(); }} size="xl" storageKey="scan-prep-checklist"
         title={`${mo.product_sku ?? ""} · ${mo.mo_no}`}
         footer={<button onClick={() => { setChecklistOpen(false); void load(); }} className="h-10 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg">เสร็จแล้ว</button>}>
-        <MoMaterialChecklist moId={mo.id} moNo={mo.mo_no} productLabel={mo.product_name ?? mo.product_sku} onSaved={load} />
+        <MoMaterialChecklist moId={mo.id} moNo={mo.mo_no} productLabel={mo.product_name ?? mo.product_sku} productSku={mo.product_sku} onSaved={load} />
       </ERPModal>
 
       {/* ยืนยันก่อนยกเลิกทั้งใบ */}
