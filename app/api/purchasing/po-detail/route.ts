@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
+import { formatCreditTerm } from "@/lib/credit-term";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,6 +26,13 @@ export type PoDetailLine = {
 
 /** ใบรับล่าสุดของ PO นี้ — ใช้เตือน "ใบนี้รับไปแล้ว" กันสแกนซ้ำ */
 export type PoLastReceipt = { gr_no: string; receiver: string | null; receive_date: string | null };
+
+/** ข้อมูลผู้จำหน่ายสำหรับหัวเอกสาร (ใบสั่งซื้อแบบใบกำกับภาษี) */
+export type PoSellerInfo = {
+  address: string | null; phone: string | null; tax_id: string | null; tax_branch: string | null;
+  /** เงื่อนไขชำระเงินของร้าน (ข้อความอ่านง่าย เช่น "เครดิต 30 วัน") */
+  payment_terms: string | null;
+};
 export type PoDetail = {
   id: string; po_no: string; seller: string | null; order_date: string | null;
   currency: string | null; amount_thb: number;
@@ -32,6 +41,8 @@ export type PoDetail = {
   /** สถานะรับของรวมทั้งใบ: confirmed | partial | received | ... */
   status: string | null;
   last_receipt: PoLastReceipt | null;
+  seller_info: PoSellerInfo | null;
+  note: string | null;
   lines: PoDetailLine[];
 };
 
@@ -45,7 +56,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rmb = num((rateRes.data as { rate?: number } | null)?.rate) || 5;
 
   const { data: po, error } = await admin.from("purchase_orders_v2")
-    .select("id, po_no, seller_name, order_date, grand_total, currency, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status")
+    .select("id, po_no, seller_name, seller_partner_id, order_date, grand_total, currency, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status, note")
     .eq("id", id).single();
   if (error || !po) return NextResponse.json({ error: "ไม่พบใบสั่งซื้อ" }, { status: 404 });
 
@@ -79,6 +90,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .order("receive_date", { ascending: false }).limit(1);
   const lastGr = ((grs ?? []) as Record<string, unknown>[])[0] ?? null;
 
+  // ข้อมูลผู้จำหน่ายสำหรับหัวเอกสาร — ผูกจาก id ก่อน ถ้าไม่มีค่อยจับจากชื่อ (ของกลาง lib/partner-match)
+  let sellerInfo: PoSellerInfo | null = null;
+  {
+    const p0 = po as Record<string, unknown>;
+    let partnerId: string | null = (p0.seller_partner_id as string) ?? null;
+    if (!partnerId && p0.seller_name) {
+      const { data: all } = await admin.from("partners_v2").select("id, display_name, name_th, is_supplier, is_active");
+      partnerId = buildPartnerMatcher((all ?? []) as unknown as PartnerLike[]).match(String(p0.seller_name))?.id ?? null;
+    }
+    if (partnerId) {
+      const { data: pt } = await admin.from("partners_v2")
+        .select("address_line, phone, tax_id, tax_branch, purchase_credit_term").eq("id", partnerId).maybeSingle();
+      const r = (pt ?? null) as Record<string, unknown> | null;
+      if (r) {
+        sellerInfo = {
+          address: (r.address_line as string) ?? null,
+          phone: (r.phone as string) ?? null,
+          tax_id: (r.tax_id as string) ?? null,
+          tax_branch: (r.tax_branch as string) ?? null,
+          payment_terms: r.purchase_credit_term ? formatCreditTerm(r.purchase_credit_term as string) : null,
+        };
+      }
+    }
+  }
+
   const p = po as Record<string, unknown>;
   const detail: PoDetail = {
     id: String(p.id), po_no: String(p.po_no ?? "—"), seller: (p.seller_name as string) ?? null,
@@ -90,6 +126,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     payment_due_date: (p.payment_due_date as string) ?? null,
     expected_date: (p.expected_date as string) ?? null,
     status: (p.status as string) ?? null,
+    seller_info: sellerInfo,
+    note: (p.note as string) ?? null,
     last_receipt: lastGr
       ? { gr_no: String(lastGr.gr_no ?? ""), receiver: (lastGr.receiver as string) ?? null, receive_date: (lastGr.receive_date as string) ?? null }
       : null,

@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtml } from "@/lib/template";
 import { scanUrl, scanQrHtml } from "@/lib/scan-code";
+import { thaiBahtText } from "@/lib/quotation-print";
 import type { PoDetail } from "@/app/api/purchasing/po-detail/route";
 import type { PODetail } from "@/app/api/purchase-orders/route";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
@@ -39,7 +40,9 @@ type PoView = { poNumber: string; data: Record<string, unknown> };
 function viewFromV2(po: PoDetail): PoView {
   const cur = String(po.currency ?? "THB").toUpperCase();
   const symbol = CURRENCY_SYMBOL[cur] ?? "";
+  const isTHB = cur === "THB" || !cur;
   const subtotal = po.lines.reduce((s, l) => s + Number(l.total ?? 0), 0);
+  const si = po.seller_info;
   return {
     poNumber: po.po_no,
     data: {
@@ -47,15 +50,23 @@ function viewFromV2(po: PoDetail): PoView {
       status_label:    STATUS_LABELS[String(po.payment_status ?? "")] ?? (po.payment_status ?? "—"),
       supplier_name:   po.seller ?? "—",
       supplier_code:   "",
+      supplier_address: si?.address ?? "",
+      supplier_phone:  si?.phone ?? "",
+      supplier_tax_id: si?.tax_id ? `${si.tax_id}${si.tax_branch ? ` (${si.tax_branch})` : ""}` : "",
+      payment_terms:   si?.payment_terms ?? "",
       warehouse_name:  "",
       warehouse_code:  "",
       buyer_name:      "",
       order_date_th:   thaiDate(po.order_date),
+      order_date_iso:  po.order_date ?? "",
       arrival_date_th: thaiDate(po.expected_date),
-      note:            "",
+      note:            po.note ?? "",
       currency_symbol: symbol,
       currency_code:   cur === "YUAN" ? "RMB" : cur,
+      is_foreign:      isTHB ? "" : "1",
+      vat_rate:        "",
       vat_rate_label:  "",
+      subtotal:        money(subtotal),
       taxable:         money(subtotal),
       total_vat:       "",
       total_wht:       "",
@@ -63,6 +74,9 @@ function viewFromV2(po: PoDetail): PoView {
       show_due:        "",
       grand_total:     money(subtotal),
       amount_due:      money(subtotal),
+      // ตัวอักษรกำกับยอดเงิน — เฉพาะสกุลบาท (ของกลาง lib/quotation-print)
+      amount_in_words: isTHB ? thaiBahtText(subtotal) : "",
+      line_count:      String(po.lines.length),
       lines: po.lines.map((l, i) => ({
         idx:          i + 1,
         sku:          l.sku ?? "",
@@ -88,6 +102,16 @@ function viewFromLegacy(po: PODetail): PoView {
       warehouse_name:  po.to_warehouse_name ?? "",
       warehouse_code:  po.to_warehouse_code ?? "",
       buyer_name:      po.buyer_name ?? "",
+      supplier_address: "",
+      supplier_phone:  "",
+      supplier_tax_id: "",
+      payment_terms:   "",
+      order_date_iso:  po.order_date ?? "",
+      is_foreign:      "",
+      vat_rate:        String(po.vat_rate ?? ""),
+      subtotal:        money(po.taxable),
+      amount_in_words: thaiBahtText(po.grand_total),
+      line_count:      String(po.lines.length),
       order_date_th:   thaiDate(po.order_date),
       arrival_date_th: thaiDate(po.expected_arrival_date),
       note:            po.note ?? "",
