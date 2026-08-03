@@ -45,7 +45,9 @@ export function SupplierWizard({ onClose, onCreated }: {
     setSaving(true); setErr(null);
     try {
       const body = {
-        is_supplier: true, is_company: true, is_active: true,
+        // ส่ง is_customer: false มาด้วยเสมอ — ทะเบียน field ตั้งช่องนี้เป็น "จำเป็น"
+        // ไม่ส่งมาจะติด "กรอกข้อมูลไม่ครบ: is_customer" ทั้งที่เป็นการเพิ่มผู้จำหน่ายอย่างเดียว
+        is_supplier: true, is_customer: false, is_company: true, is_active: true,
         display_name: displayName.trim(),
         name_th: (nameTh.trim() || displayName.trim()),
         is_taobao: isTaobao,

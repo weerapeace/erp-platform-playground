@@ -267,7 +267,12 @@ export const ENTITIES: Record<string, EntityConfig> = {
     // F29: ลบ listColumns เก่า (ตัด field) → ใช้ * (partners เล็ก 262 rows) → ได้ครบทุก field
     searchColumns: ["code", "name_th", "name_en", "phone", "email", "tax_id"],
     softDeleteColumn: "is_active",
-    defaults: { is_active: true, is_company: true, country: "TH", tax_branch: "00000" },
+    // is_customer/is_supplier ใส่ default false — ทะเบียน field ตั้ง 2 ช่องนี้เป็น "จำเป็น"
+    // แต่ค่าบูลีน false ก็เป็นคำตอบที่ถูกต้อง (ไม่ใช่ช่องว่าง) พอ caller ไม่ส่งมา
+    // เลยติด "กรอกข้อมูลไม่ครบ: is_customer" ทั้งที่ตั้งใจสร้างผู้จำหน่ายอย่างเดียว
+    // กฎจริง "ต้องเป็นลูกค้าหรือผู้จำหน่ายอย่างน้อย 1" มี CHECK constraint คุมอยู่แล้ว
+    // (partners_v2_at_least_one_role) และ friendlyDbError แปลเป็นภาษาคนให้แล้ว
+    defaults: { is_active: true, is_company: true, is_customer: false, is_supplier: false, country: "TH", tax_branch: "00000" },
   },
   // LR3: Logic Registry — ทะเบียนกฎธุรกิจ (จาก LOGIC_MEMORY_SIMPLE.md, 146 rules)
   logic: {
