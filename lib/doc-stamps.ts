@@ -56,6 +56,25 @@ export const STAMP_CSS = `
 .doc-stamp { position: absolute; object-fit: contain; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 `;
 
+/**
+ * ⚠️⚠️ กับดักที่ทำให้ "บนจอกับตอนพิมพ์ไม่ตรงกัน" (เจอจริง 2026-08-03)
+ *
+ * เทมเพลตพิมพ์กลางตั้งความสูงเอกสารไว้ไม่เท่ากันระหว่างจอกับพิมพ์:
+ *   จอ    → `.doc { min-height: 297mm }`  (จาก lib/template ค่าเริ่มต้น = เต็มหน้า A4)
+ *   พิมพ์ → `.doc { min-height: 0 !important; height: auto }` แล้วเทมเพลตทับด้วยค่าของตัวเอง (เช่น 255mm)
+ *
+ * เทมเพลตแบบใบกำกับใช้ `display:flex` + `main{flex:1 0 auto}` → **ช่องเซ็นถูกดันไปติดขอบล่างเสมอ**
+ * พอความสูงเอกสารต่างกัน 42mm ช่องเซ็นก็เลื่อน 42mm แต่ตราที่ยึดจากขอบบน "ไม่เลื่อนตาม"
+ * → ดูเหมือนตราขยับ ทั้งที่จริงเนื้อหาต่างหากที่ขยับ
+ *
+ * **กฎ: เทมเพลตไหนจะใช้ลายเซ็น/ตราประทับ ต้องตั้งความสูงเอกสารให้เท่ากันทั้งจอและพิมพ์**
+ * ใช้ docHeightCss() ผนวกท้าย custom_css แล้วจะไม่เจอปัญหานี้
+ */
+export const docHeightCss = (mm = 255) => `
+.doc { min-height: ${mm}mm; }
+@media print { .doc { min-height: ${mm}mm !important; } }
+`;
+
 export const DEFAULT_STAMP = (kind: "signature" | "stamp") =>
   kind === "signature"
     ? { x_mm: 30, y_mm: 245, w_mm: 40, h_mm: 20 }
