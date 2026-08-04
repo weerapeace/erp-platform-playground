@@ -73,6 +73,7 @@ const CONFIG: MasterCRUDConfig = {
   activeField: "is_active",
   // ✨ ปุ่มให้ AI ดูรูปสินค้าแล้วเขียน ชื่อ/Introduction/Description (ไทย+อังกฤษ) — ไม่แตะช่องขนาด
   aiProductDetail: true,
+  copyFromRecord: true,   // 📋 คัดลอกค่าทั้งกลุ่ม (เช่น รายละเอียด Platform) จากสินค้าตัวอื่น
   // server mode — โหลดทีละหน้า (smooth + กัน 1102) เหมือนหน้า SKU; card view เปิดได้ใน server mode แล้ว
   serverMode:  true,
   pageLimit:   200,

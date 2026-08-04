@@ -17,6 +17,7 @@ import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { CopyFromRecordButton } from "./copy-from-record";
 import { pushDrawerHistory, type DrawerHistoryHandle } from "@/lib/drawer-history";
 import { cachedJson, primeCache } from "@/lib/client-cache";
 import { resolveRelationLabels } from "@/lib/relation";
@@ -507,6 +508,14 @@ export type MasterCRUDConfig = {
    * AI ไม่แตะช่องขนาด/น้ำหนักโดยตั้งใจ · ตั้งคำสั่งรายแบรนด์ได้ที่ งาน → ตั้งค่า → คำสั่ง AI
    */
   aiProductDetail?: boolean;
+  /**
+   * ปุ่ม "📋 คัดลอกจากตัวอื่น" ข้างหัวข้อแต่ละกลุ่มในฟอร์ม (ของกลาง)
+   * กดแล้วค้นหาระเบียนอื่นในโมดูลเดียวกัน → เอาค่าเฉพาะกลุ่มนั้นมาเติมในฟอร์ม (ยังไม่บันทึก)
+   * ไม่คัดลอก: รหัส/บาร์โค้ด/รูปปก/สถานะ/วันเวลา (ดู NEVER_COPY ใน copy-from-record.tsx)
+   */
+  copyFromRecord?: boolean;
+  /** คีย์ที่ห้ามคัดลอกเพิ่มเติมเฉพาะโมดูลนี้ */
+  copyExcludeKeys?: string[];
   /**
    * F19: server-side pagination — ดึงทีละหน้าจาก server (กัน Worker 1102 ถาวร)
    * เหมาะกับ dataset ใหญ่ (>500 rows เช่น parent-skus, skus)
@@ -1957,6 +1966,29 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     [rows, showStatusCards, statusFilter, statusField],
   );
 
+  /**
+   * ปุ่ม "📋 คัดลอกจากตัวอื่น" ข้างหัวข้อกลุ่มในฟอร์ม (ของกลาง — เปิดด้วย config.copyFromRecord)
+   * คัดลอกเฉพาะช่องที่แก้ได้ในกลุ่มนั้น (ข้าม computed/readonly/รูป) แล้วเติมลงฟอร์ม ยังไม่บันทึก
+   */
+  const sectionAction = config.copyFromRecord
+    ? (groupKey: string, groupLabel: string, groupFields: FieldDef[]) => {
+      if (drawerMode !== "edit" || !canEdit) return null;
+      const keys = groupFields
+        .filter((f) => !f.readonly && f.type !== "computed" && f.type !== "image" && f.type !== "one2many" && f.type !== "many2many")
+        .map((f) => f.key);
+      if (keys.length === 0) return null;
+      return (
+        <CopyFromRecordButton
+          apiBase={apiBase} apiPath={config.apiPath} currentId={editingId ? String(editingId) : null}
+          sectionLabel={groupLabel} fieldKeys={keys}
+          labelKeys={["code", "name_th", "name", "title"]}
+          currentValues={form} excludeKeys={config.copyExcludeKeys ?? []}
+          onApply={(values) => setForm((p) => ({ ...p, ...values }))}
+        />
+      );
+    }
+    : undefined;
+
   const renderField = (f: FieldDef, maxSpan = 3) => {
     const v = form[f.key];
     const errs = fieldErrors[f.key];
@@ -2605,7 +2637,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {createHeaderEl}
                 {drawerMode === "view"
                   ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
-                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />}
+                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} sectionAction={sectionAction} />}
               </div>
             );
           }
@@ -2621,7 +2653,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {createHeaderEl}
                 {drawerMode === "view"
                   ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
-                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />}
+                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} sectionAction={sectionAction} />}
               </div>
             );
           }
@@ -2739,7 +2771,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"
                     ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
-                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />
+                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} sectionAction={sectionAction} />
                 ) : (
                   <div className="text-sm text-slate-300 py-8 text-center">{tr("ไม่มีข้อมูลเพิ่มเติม", "No extra details")}</div>
                 )}
@@ -3020,6 +3052,8 @@ export function MasterRecordDrawer({
       // ✨ ปุ่ม "ให้ AI คิดรายละเอียดสินค้า" — ต้องเปิดที่นี่ด้วย เพราะ drawer สร้าง config เอง
       // (ไม่ได้ใช้ CONFIG ของหน้า /master/parent-skus) ซึ่งเป็นทางที่ผู้ใช้เปิดจริงจากหน้าแท็ก/การ์ด
       aiProductDetail: moduleKey === "parent-skus-v2",
+      // 📋 "คัดลอกจากตัวอื่น" รายกลุ่มฟิลด์ — เปิดให้ทุกโมดูลที่เปิดผ่าน drawer (ยังไม่บันทึกจนกด "บันทึก")
+      copyFromRecord: true,
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
       // ช่อง "หมวดกลางสำหรับลงขาย" — ใช้ picker ของกลางที่ค้นหาได้ + เพิ่มหมวดใหม่พร้อมจับคู่ร้านในตัว
       // ต้องตั้งที่นี่ด้วย เพราะ drawer ประกอบ config เอง ไม่ได้ใช้ของหน้า /master/parent-skus
@@ -3233,12 +3267,13 @@ function groupByKey(fields: FieldDef[]): Map<string, FieldDef[]> {
 
 /** กลุ่ม B: render ตาม layout (Tab → Section → columns) ใช้ทั้ง form + detail */
 function LayoutTabs({
-  layout, byGroup, renderGrid, extraTabs = [],
+  layout, byGroup, renderGrid, extraTabs = [], sectionAction,
 }: {
   layout: NonNullable<FormLayout>;
   byGroup: Map<string, FieldDef[]>;
   renderGrid: (fields: FieldDef[], columns: number) => React.ReactNode;
   extraTabs?: BoundTab[];
+  sectionAction?: (groupKey: string, groupLabel: string, groupFields: FieldDef[]) => React.ReactNode;
 }) {
   // ซ่อนแท็บที่ไม่มี field จริง (เช่นแท็บ core ฝั่งขวาที่ core ถูกเรนเดอร์แยกซ้ายแล้ว)
   const tabs = (layout.tabs ?? []).filter((t) => t.sections.some((s) => (byGroup.get(s.key)?.length ?? 0) > 0));
@@ -3291,7 +3326,10 @@ function LayoutTabs({
           if (fs.length === 0) return null;
           return (
             <div key={sec.key}>
-              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{sec.label}</h4>
+              <div className="flex items-center gap-2 mb-2">
+                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{sec.label}</h4>
+                {sectionAction?.(sec.key, sec.label, fs)}
+              </div>
               {renderGrid(fs, sec.columns || 2)}
             </div>
           );
@@ -3319,7 +3357,7 @@ function LayoutTabs({
 type BoundTab = { key: string; label: string; icon?: string; node: React.ReactNode; inTab?: string };
 
 function FormSections({
-  fields, renderField, layout, extraTabs, sectionMode,
+  fields, renderField, layout, extraTabs, sectionMode, sectionAction,
 }: {
   fields: FieldDef[];
   renderField: (f: FieldDef, maxSpan?: number) => React.ReactNode;
@@ -3327,6 +3365,8 @@ function FormSections({
   extraTabs?: BoundTab[];
   /** true = แสดงทุกกลุ่มเรียงลงมาเป็น section (หน้าเดียว เลื่อนดู) แทนแท็บ */
   sectionMode?: boolean;
+  /** ปุ่มเสริมข้างหัวข้อกลุ่ม (เช่น "คัดลอกจากตัวอื่น") — ของกลาง ใช้ได้ทุกโมดูล */
+  sectionAction?: (groupKey: string, groupLabel: string, groupFields: FieldDef[]) => React.ReactNode;
 }) {
   // hooks ทั้งหมดเรียกก่อน return เสมอ (Rules of Hooks)
   const byGroup = useMemo(() => groupByKey(fields), [fields]);
@@ -3340,7 +3380,7 @@ function FormSections({
 
   // กลุ่ม B: ถ้ามี layout → ใช้ Tab → Section → columns
   if (layout?.tabs?.length) {
-    return <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} renderGrid={(fs, cols) => (
+    return <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} sectionAction={sectionAction} renderGrid={(fs, cols) => (
       <div className="grid grid-cols-12 gap-3">{fs.map((f) => renderField(f, cols))}</div>
     )} />;
   }
@@ -3356,6 +3396,7 @@ function FormSections({
               <div className="flex items-center gap-1.5 pb-2 mb-3 border-b border-slate-100">
                 <span>{cfg.icon}</span>
                 <span className="text-sm font-semibold text-slate-700">{cfg.label}</span>
+                <span className="ml-auto">{sectionAction?.(groupKey, cfg.label, groupFields)}</span>
               </div>
               <div className="grid grid-cols-12 gap-3">
                 {groupFields.map((f) => renderField(f, 2))}
