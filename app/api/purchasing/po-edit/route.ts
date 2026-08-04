@@ -126,18 +126,21 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       const qty = num(l.qty);
       const price = num(l.price);
       const row = {
-        item_sku_id: l.item_sku_id || null,
         item_name: str(l.item_name),
         qty, uom: str(l.uom) || null,
         price_est: price, line_total: Math.round(qty * price * 100) / 100,
         currency, sort_order: i++, is_active: true,
       };
+      // ผูกสินค้าจริง: แตะเฉพาะตอนที่ผู้เรียกส่งมาจริง ๆ
+      // (ไม่ส่ง = ไม่แตะ — กันหน้าเก่าที่ไม่รู้จักฟิลด์นี้ล้างสินค้าที่ผูกไว้ทิ้ง)
+      const hasSku = Object.prototype.hasOwnProperty.call(l, "item_sku_id");
+      const rowWithSku = hasSku ? { ...row, item_sku_id: l.item_sku_id || null } : row;
       const id = str(l.id);
       if (id && oldById.has(id)) {
-        const { error } = await admin.from("purchase_order_lines_v2").update(row).eq("id", id);
+        const { error } = await admin.from("purchase_order_lines_v2").update(rowWithSku).eq("id", id);
         if (error) return NextResponse.json({ error: "แก้รายการไม่สำเร็จ: " + error.message }, { status: 400 });
       } else {
-        const { error } = await admin.from("purchase_order_lines_v2").insert({ ...row, po_id: poId });
+        const { error } = await admin.from("purchase_order_lines_v2").insert({ ...rowWithSku, po_id: poId });
         if (error) return NextResponse.json({ error: "เพิ่มรายการไม่สำเร็จ: " + error.message }, { status: 400 });
       }
     }

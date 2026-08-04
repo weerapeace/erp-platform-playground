@@ -21,6 +21,8 @@ export type PoDetailLine = {
   price: number; total: number; img: string | null; done: boolean;
   /** รหัสสินค้า — ใช้บนใบพิมพ์ที่แขวนไว้ที่โต๊ะรับของ */
   sku: string | null;
+  /** id สินค้าจริงที่ผูกไว้ (null = พิมพ์ชื่อเอง) — ใช้ตอนแก้ใบให้ตัวเลือกสินค้าจำค่าเดิม */
+  sku_id: string | null;
   /** id ของบรรทัด PO — ต้องมีเพื่อยืนยันรับของจากหน้าสแกน */
   id: string;
   defective: number;
@@ -170,6 +172,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
         done: st === "received" || st === "short_closed" || st === "closed_short" || remain === 0,
         sku: sid ? (codeBySku.get(sid) ?? null) : null,
+        sku_id: sid,
         id: String(l.id),
         defective: num(l.qty_defective),
       };

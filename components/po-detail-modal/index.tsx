@@ -9,6 +9,8 @@
  * โหมดแก้ไข (2026-08-03 ตามที่เจ้าของขอ):
  *   - แก้หัวใบ: ร้าน · วันที่สั่ง · กำหนดของเข้า · หมายเหตุ
  *   - แก้รายการ: ชื่อ/จำนวน/หน่วย/ราคา · เพิ่ม/ลบบรรทัด
+ *     ชื่อสินค้าเลือกจากคลังได้ (SkuPicker ของกลาง → เติมชื่อ/หน่วย/ราคาให้) หรือพิมพ์เองก็ได้
+ *     ของที่สั่งจากร้านนอกมักไม่มีในคลัง จึงต้องพิมพ์เองได้เสมอ ไม่บังคับเลือก
  *   - ปุ่มภาษี: ไม่มี VAT / VAT 7% (แยก "ราคารวม VAT แล้ว" กับ "ยังไม่รวม")
  *   บันทึกผ่าน PATCH /api/purchasing/po-edit (คิดยอดด้วยของกลาง lib/po-total + กันแก้ของที่รับมาแล้ว)
  *
@@ -17,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { HoverImage } from "@/components/hover-image";
+import { SkuPicker } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
 import { computePoTotals } from "@/lib/po-total";
 import type { PoDetail } from "@/app/api/purchasing/po-detail/route";
@@ -28,7 +31,11 @@ const isCNY = (c: unknown) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").to
 const n2 = (s: string) => { const v = Number(s); return isFinite(v) ? v : 0; };
 const fmt = (n: number) => Number(n || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 
-type EditLine = { key: string; id?: string; name: string; qty: string; uom: string; price: string; received: number };
+type EditLine = {
+  key: string; id?: string; name: string; qty: string; uom: string; price: string; received: number;
+  /** ผูกกับสินค้าจริงไหม (เลือกจากตัวเลือก) — ว่าง = พิมพ์ชื่อเอง ไม่ผูกสินค้า */
+  sku_id: string | null; sku: string | null;
+};
 const newKey = () => `n${Math.random().toString(36).slice(2, 9)}`;
 
 export function PoDetailModal({ poId, onClose, footer, onSaved }: {
@@ -78,6 +85,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
     setLines(d.lines.map((l) => ({
       key: newKey(), id: l.id, name: l.name, qty: String(l.qty),
       uom: l.uom ?? "", price: String(l.price || ""), received: l.received,
+      sku_id: l.sku_id ?? null, sku: l.sku ?? null,
     })));
     setErr(null);
     setEditing(true);
@@ -111,6 +119,8 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
           },
           lines: lines.filter((l) => l.name.trim() && n2(l.qty) > 0).map((l) => ({
             id: l.id, item_name: l.name.trim(), qty: n2(l.qty),
+            // ผูกสินค้าจริงถ้าเลือกจากตัวเลือก (null = พิมพ์ชื่อเอง ไม่ผูก)
+            item_sku_id: l.sku_id,
             uom: l.uom.trim() || null, price: n2(l.price),
           })),
         }),
@@ -219,8 +229,23 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
             <div className="divide-y divide-slate-100 max-h-[38vh] overflow-y-auto">
               {lines.map((l) => (
                 <div key={l.key} className="grid grid-cols-2 sm:grid-cols-[1fr_70px_70px_90px_90px_32px] gap-2 px-2.5 py-1.5 items-center">
-                  <input value={l.name} onChange={(e) => setLine(l.key, { name: e.target.value })}
-                    className={inp + " col-span-2 sm:col-span-1 w-full"} placeholder="ชื่อสินค้า" />
+                  <div className="col-span-2 sm:col-span-1 min-w-0 space-y-1">
+                    {/* เลือกจากคลังสินค้า → เติมชื่อ/หน่วย/ราคาให้ · หรือจะพิมพ์ชื่อเองในช่องล่างก็ได้ */}
+                    <SkuPicker
+                      value={l.sku_id ? { id: l.sku_id, code: l.sku ?? "", name: l.name } : null}
+                      onChange={(p) => {
+                        if (!p) { setLine(l.key, { sku_id: null, sku: null }); return; }
+                        setLine(l.key, {
+                          sku_id: p.id, sku: p.code, name: p.name,
+                          uom: p.uom_name ?? l.uom,
+                          price: n2(l.price) > 0 ? l.price : (p.list_price != null ? String(p.list_price) : l.price),
+                        });
+                      }}
+                      placeholder="เลือกจากคลังสินค้า (ไม่เลือกก็ได้)"
+                    />
+                    <input value={l.name} onChange={(e) => setLine(l.key, { name: e.target.value })}
+                      className={inp + " w-full"} placeholder="ชื่อสินค้าที่จะพิมพ์ลงใบ" />
+                  </div>
                   <input type="number" step="any" value={l.qty} onChange={(e) => setLine(l.key, { qty: e.target.value })}
                     className={inp + " w-full text-right tabular-nums"} />
                   <input value={l.uom} onChange={(e) => setLine(l.key, { uom: e.target.value })}
@@ -234,7 +259,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
                 </div>
               ))}
             </div>
-            <button type="button" onClick={() => setLines((ls) => [...ls, { key: newKey(), name: "", qty: "1", uom: "", price: "", received: 0 }])}
+            <button type="button" onClick={() => setLines((ls) => [...ls, { key: newKey(), name: "", qty: "1", uom: "", price: "", received: 0, sku_id: null, sku: null }])}
               className="w-full h-8 text-xs text-blue-600 hover:bg-blue-50 border-t border-slate-100">+ เพิ่มรายการ</button>
           </div>
 
