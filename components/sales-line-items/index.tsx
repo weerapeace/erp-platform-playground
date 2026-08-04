@@ -6,6 +6,7 @@ import type { SkuPickerValue, UnitPickerValue } from "@/components/pickers";
 import { ImageThumbnail } from "@/components/image-manager";
 import { calculateDocument, type DocumentResult } from "@/lib/tax";
 import { format as formatMoney, money } from "@/lib/money";
+import { LineImportModal, type ImportedLine } from "@/components/line-import";
 
 export type EditorLine = {
   tempId: string;
@@ -24,6 +25,23 @@ export type EditorLine = {
 };
 
 export type LineDraft = EditorLine;
+
+/** แถวที่นำเข้าจากตาราง/Excel → รูปแบบบรรทัดของตัวแก้ไข */
+export const toEditorLine = (r: ImportedLine): EditorLine => ({
+  tempId: String(Math.random()).slice(2),
+  product_id: r.product_id,
+  sku: r.sku || null,
+  product_name: r.product_name,
+  image_url: null,
+  image_key: null,
+  qty: r.qty,
+  unit: r.unit || "ชิ้น",
+  unit_price: r.unit_price,
+  discount_type: "percent",
+  discount_value: r.discount_value,
+  tax_code: null,
+  note: r.note || undefined,
+});
 
 export const emptyLine = (): EditorLine => ({
   tempId: String(Math.random()).slice(2),
@@ -96,6 +114,8 @@ export function SOLineEditor({
   /** ซ่อนคอลัมน์ราคา/ส่วนลด/รวม (โหมดตาราง) — เช่น ใบส่งสินค้าที่สนใจแค่จำนวน */
   hidePrice?: boolean;
 }) {
+  const [importOpen, setImportOpen] = useState(false);   // ป๊อป "ลงจากตาราง / Excel"
+
   const update = (i: number, patch: Partial<EditorLine>) => {
     onChange(lines.map((l, idx) => idx === i ? { ...l, ...patch } : l));
   };
@@ -299,15 +319,38 @@ export function SOLineEditor({
           </p>
         </div>
         {!readonly && (
-          <button
-            type="button"
-            onClick={add}
-            className="h-9 shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            + เพิ่มรายการ
-          </button>
+          <div className="flex shrink-0 gap-2">
+            {/* ลงรายการทีละหลายตัวจากตาราง/Excel (ของกลาง) */}
+            <button
+              type="button"
+              onClick={() => setImportOpen(true)}
+              title="โหลดแม่แบบ Excel ไปกรอก แล้วโยนกลับเข้ามา หรือคัดลอกจากชีตมาวาง"
+              className="h-9 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-medium text-blue-700 hover:bg-blue-100"
+            >
+              📋 ลงจากตาราง / Excel
+            </button>
+            <button
+              type="button"
+              onClick={add}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              + เพิ่มรายการ
+            </button>
+          </div>
         )}
       </div>
+
+      {importOpen && (
+        <LineImportModal
+          open onClose={() => setImportOpen(false)}
+          onConfirm={(imported) => {
+            // ต่อท้ายรายการเดิม — ทิ้งแถวว่างที่ยังไม่ได้เลือกสินค้าออก
+            const kept = lines.filter((l) => l.product_name.trim() || l.sku);
+            onChange([...kept, ...imported.map(toEditorLine)]);
+            setImportOpen(false);
+          }}
+        />
+      )}
 
       <div className="space-y-3 bg-slate-50/40 p-3">
         {lines.map((l, i) => {
