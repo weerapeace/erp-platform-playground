@@ -18,6 +18,30 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 
 type SkuInfo = { image_url: string | null; brand: string | null; brand_color: string | null; color: string | null };
 
+/**
+ * ดึงแถวของหลาย MO "ให้ครบจริง" — ไล่ทีละหน้า
+ *
+ * 🐛 บั๊กที่แก้: query ที่ไม่ใส่ช่วงแถว จะถูกตัดที่ 1,000 แถวเงียบ ๆ (ไม่มี error)
+ *    ใบสั่งผลิตที่รอจ่ายมีวัตถุดิบรวมกันพันกว่าแถว → ใบท้าย ๆ ไม่ได้ข้อมูลมา
+ *    เลยถูกมองว่า "ไม่มีสูตร" ทั้งที่มี (การ์ดขึ้นป้าย ⚠ ไม่มีสูตร ผิด ๆ)
+ */
+const PAGE = 1000;
+async function fetchAllByMo(
+  admin: ReturnType<typeof supabaseAdmin>, table: string, select: string, moNos: string[],
+): Promise<{ data: Record<string, unknown>[] }> {
+  if (moNos.length === 0) return { data: [] };
+  const out: Record<string, unknown>[] = [];
+  for (let from = 0; from < 50_000; from += PAGE) {
+    const { data, error } = await admin.from(table).select(select).in("mo_no", moNos).eq("is_active", true)
+      .order("mo_no", { ascending: true }).range(from, from + PAGE - 1);
+    if (error) break;
+    const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    out.push(...rows);
+    if (rows.length < PAGE) break;   // หน้าสุดท้าย
+  }
+  return { data: out };
+}
+
 async function skuInfoMap(admin: ReturnType<typeof supabaseAdmin>, skus: string[]): Promise<Map<string, SkuInfo>> {
   const map = new Map<string, SkuInfo>();
   const list = [...new Set(skus.filter(Boolean))];
@@ -93,8 +117,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     missingMoNos.length ? admin.from("manufacturing_orders").select("id, mo_no").in("mo_no", missingMoNos) : Promise.resolve(noData),
     bomCodes.length ? admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes).is("craftsman_id", null).eq("is_current", true).eq("is_active", true) : Promise.resolve(noData),
     allMoNos.length ? admin.from("mo_piecework").select("id, mo_no, job_name, rate, qty_per, total_qty, status, assignee_name").in("mo_no", allMoNos).eq("is_active", true) : Promise.resolve(noData),
-    pendingMoNos.length ? admin.from("mo_material_summary").select("mo_no, is_ready").in("mo_no", pendingMoNos).eq("is_active", true) : Promise.resolve(noData),
-    pendingMoNos.length ? admin.from("mo_materials").select("mo_no, material_type, cut_block_code, cut_length, pieces, cut_done").in("mo_no", pendingMoNos).eq("is_active", true) : Promise.resolve(noData),
+    // ⚠️ ต้องไล่ทีละหน้า — วัตถุดิบของใบที่รอจ่ายรวมกันเกิน 1,000 แถว (ดู fetchAllByMo)
+    fetchAllByMo(admin, "mo_material_summary", "mo_no, is_ready", pendingMoNos),
+    fetchAllByMo(admin, "mo_materials", "mo_no, material_type, cut_block_code, cut_length, pieces, cut_done", pendingMoNos),
   ]);
 
   for (const m of (extraMoRes.data ?? []) as Record<string, unknown>[]) moIdByNo.set(String(m.mo_no), String(m.id));

@@ -22,6 +22,7 @@ import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { ERPModal } from "@/components/modal";
 import { ComponentPicker } from "@/components/material-picker";
+import { FreeTextPicker } from "@/components/free-text-picker";
 import { fabricQty } from "@/lib/bom-calc";
 
 export type EditorLine = {
@@ -474,10 +475,9 @@ export function BomLineEditor({
       groupEditNode: (apply) => <GroupReplacePicker onPick={(c) => apply(replacePatch(c))} />,
       render: (l, u) => l.free_text ? (
         // บรรทัดพิมพ์ชื่อเอง — ยังไม่รู้รหัสของจริง (เปิดเฉพาะหน้าคำขอ)
+        // ช่องนี้เป็น "พิมพ์เองก็ได้ เลือกจากชื่อที่เคยใช้ก็ได้" + เพิ่ม/แก้/ลบรายการในตัว
         <div className="flex items-center gap-1">
-          <input value={l.component_name} onChange={(e) => u({ component_name: e.target.value })}
-            placeholder="พิมพ์ชื่อที่รู้ เช่น ผ้าแคนวาสรีไซเคิล"
-            className="flex-1 min-w-0 h-8 px-2 text-sm border border-amber-300 bg-amber-50/40 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          <FreeTextPicker value={l.component_name} onChange={(v) => u({ component_name: v })} className="flex-1 min-w-0" />
           <button type="button" title="รู้ของจริงแล้ว — เลือกจากคลังวัตถุดิบแทน"
             onClick={() => u({ free_text: false, component_name: "" })}
             className="shrink-0 h-7 px-1.5 text-[11px] text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded">🔍</button>
