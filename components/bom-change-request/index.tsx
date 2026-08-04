@@ -17,7 +17,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { ERPModal } from "@/components/modal";
-import { BomLineEditor, emptyLine, type EditorLine } from "@/app/master/bom/line-editor";
+import { BomLineEditor, type EditorLine } from "@/app/master/bom/line-editor";
 import { ComponentPicker } from "@/components/material-picker";
 import type { BomChangeRequest, BomReqLine } from "@/app/api/bom/change-requests/route";
 
@@ -170,18 +170,12 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
           <BomLineEditor lines={lines} onChange={setLines} sizes={sizes} allowFreeText />
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button onClick={() => setLines((s) => [...s, emptyLine()])}
-            className="h-8 px-3 text-[12px] border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">＋ เพิ่มวัตถุดิบ</button>
-          <button onClick={() => setLines((s) => [...s, { ...emptyLine(), free_text: true }])}
-            title="ยังไม่รู้รหัส/ยังไม่มีในคลัง — พิมพ์ชื่อที่รู้ไว้ก่อน เดี๋ยวคนอนุมัติมาระบุของจริงให้"
-            className="h-8 px-3 text-[12px] border border-amber-300 text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100">✏️ พิมพ์ชื่อเอง (ไม่รู้รหัส)</button>
-          {freeCount > 0 && (
-            <span className="text-[11px] text-amber-700">
-              มี {freeCount} รายการที่พิมพ์ชื่อไว้ — ส่งได้เลย คนอนุมัติจะเป็นคนระบุของจริงให้
-            </span>
-          )}
-        </div>
+        {/* ปุ่มเพิ่มรายการอยู่ในแถบล่างของตารางแล้ว (＋ เพิ่มวัตถุดิบ · เพิ่มจากที่มีใน BOM · ✏️ พิมพ์ชื่อเอง) — ไม่ทำซ้ำที่นี่ */}
+        {freeCount > 0 && (
+          <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+            ✏️ มี {freeCount} รายการที่พิมพ์ชื่อไว้ — ส่งได้เลย คนอนุมัติจะเป็นคนระบุของจริงให้
+          </div>
+        )}
 
         <label className="block">
           <span className="text-[12px] text-slate-600">เหตุผล / หมายเหตุ</span>

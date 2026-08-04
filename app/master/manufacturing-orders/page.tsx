@@ -22,6 +22,7 @@ import type { Assignee } from "@/app/api/mo/assignees/route";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { ParentIssuesPanel } from "@/components/parent-issues-panel";
 import { MoStockActions } from "@/components/mo-stock-actions";
+import { MoCreateModal } from "@/components/mo-create";
 
 type Version = { id: string; version: string | null; bom_code: string; is_default: boolean };
 type PreviewMat = {
@@ -85,6 +86,7 @@ export default function MoWorkspacePage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = () => setRefreshKey((k) => k + 1);
   const [form, setForm] = useState<FormState | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);   // ป๊อปสร้างใบใหม่ (ของกลาง)
   const [versions, setVersions] = useState<Version[]>([]);
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
@@ -196,7 +198,8 @@ export default function MoWorkspacePage() {
     return { ...f, size_qty: sq, qty: total };
   });
 
-  const openCreate = () => { setForm(empty()); setVersions([]); setFormErr(null); setWoList([]); };
+  // สร้างใบใหม่ = ป๊อปของกลาง MoCreateModal (ตัวเดียวกับที่บอร์ดจ่ายงานใช้) · ฟอร์มใหญ่ด้านล่างไว้ "แก้" ใบที่มีแล้ว
+  const openCreate = () => setCreateOpen(true);
 
   const openEdit = async (row: MoListItem) => {
     setLoadingForm(true); setFormErr(null); setForm(empty()); setVersions([]); setWoList([]);
@@ -473,6 +476,9 @@ export default function MoWorkspacePage() {
 
       {assignMos && <AssignToGroupModal moNos={assignMos} onClose={() => setAssignMos(null)} onDone={() => setRefreshKey((k) => k + 1)} />}
       {manageGroups && <ManageGroupsModal onClose={() => setManageGroups(false)} />}
+
+      {/* สร้างใบใหม่ — ของกลาง (บอร์ดจ่ายงานใช้ตัวเดียวกัน) · สร้างเสร็จรีเฟรชรายการ แล้วคลิกแถวเพื่อแก้ต่อ */}
+      <MoCreateModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={() => refresh()} />
 
       <ERPModal open={form !== null} onClose={() => !saving && setForm(null)} size="xl"
         title={form?.id ? `แก้ใบสั่งผลิต: ${form.mo_no}` : "สร้างใบสั่งผลิตใหม่"}

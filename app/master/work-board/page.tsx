@@ -32,6 +32,7 @@ import { DispatchShop } from "./dispatch-shop";
 import { DeskShop } from "./desk-shop";
 import { BoardLineSettings } from "@/components/board-line-settings";
 import { RequestInboxButton } from "@/components/request-inbox";
+import { MoCreateModal } from "@/components/mo-create";
 import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
@@ -198,6 +199,7 @@ function WorkBoardPageInner() {
   const { view: viewMode, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase"] as const, "board");
   const [shopMode, setShopMode] = useState<"dispatch" | "desk">("dispatch");   // มุมมองช้อป: รอจ่าย / งานในโต๊ะ
   const [lineSettingsOpen, setLineSettingsOpen] = useState(false);   // ป๊อปตั้งค่าแจ้งเตือน LINE
+  const [moCreateOpen, setMoCreateOpen] = useState(false);           // ป๊อปสร้างใบสั่งผลิต (ของกลาง)
   const [pendingCols] = useState<number | null>(null);     // (เลิกใช้) คอลัมน์โซนรอจ่าย — รอจ่ายย้ายไปป๊อปอัปแล้ว
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
   const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // เงินเดือนรวมพนักงานต่อแผนก (จาก payroll)
@@ -1029,6 +1031,9 @@ function WorkBoardPageInner() {
           {/* คำขอค้างจากหน้างาน (ขอเพิ่มวัตถุดิบ / ขอแก้สูตร) — ของกลาง เห็นตัวเลขโดยไม่ต้องเปิดเข้าไปดู */}
           <RequestInboxButton />
           <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>
+          {/* สร้างใบสั่งผลิตได้จากบอร์ดเลย — ใช้ป๊อปของกลางตัวเดียวกับหน้าใบสั่งผลิต */}
+          {canEdit && <button onClick={() => setMoCreateOpen(true)} title="เปิดใบสั่งผลิตใหม่ (สร้างเสร็จการ์ดจะโผล่ในช่องรอจ่ายทันที)"
+            className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap">＋ สร้างใบสั่งผลิต</button>}
           <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
           <div className="relative">
             <button onClick={() => setPrintOpen((v) => !v)} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🖨 พิมพ์รายงาน ▾</button>
@@ -1453,6 +1458,9 @@ function WorkBoardPageInner() {
       </ERPModal>
 
       <BoardLineSettings open={lineSettingsOpen} onClose={() => setLineSettingsOpen(false)} />
+
+      {/* สร้างใบสั่งผลิตจากบอร์ด — ของกลางตัวเดียวกับหน้า /master/manufacturing-orders */}
+      <MoCreateModal open={moCreateOpen} onClose={() => setMoCreateOpen(false)} onCreated={() => void load(true)} />
 
       {/* เช็กลิสต์วัตถุดิบ เตรียม/ตัด (Phase 2 — จาก BOM) */}
       <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="xl" storageKey="wb-checklist" title={clWO ? `🔄 ใบจ่ายงาน · ${clWO.wo_no}` : `📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
