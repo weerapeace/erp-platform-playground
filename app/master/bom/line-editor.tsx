@@ -46,6 +46,9 @@ export type EditorLine = {
   slot_code:      string | null;
   source?:        string | null;
   odoo_bom_line_id?: number | null;
+  /** บรรทัด "พิมพ์ชื่อเอง" (ยังไม่รู้รหัสของจริง) — เปิดใช้เฉพาะหน้าคำขอ (allowFreeText)
+   *  สูตรจริงห้ามมีบรรทัดแบบนี้ค้าง เพราะคิดต้นทุน/เตรียมของ/ตัดผ้าไม่ได้ → คิวอนุมัติบังคับให้ระบุของจริงก่อน */
+  free_text?:     boolean;
   // เฟส 4: ผันตามไซส์
   size_variant:   boolean;
   size_dim:       string;                     // cut_length | cut_width | pieces | qty
@@ -331,8 +334,13 @@ function SizeFormula({ base0, onApply }: { base0?: number; onApply: (base: numbe
 // BomLineEditor
 // ============================================================
 export function BomLineEditor({
-  lines, onChange, readonly, sizes = [],
-}: { lines: EditorLine[]; onChange: (lines: EditorLine[]) => void; readonly?: boolean; sizes?: string[] }) {
+  lines, onChange, readonly, sizes = [], allowFreeText = false,
+}: {
+  lines: EditorLine[]; onChange: (lines: EditorLine[]) => void; readonly?: boolean; sizes?: string[];
+  /** เปิดปุ่ม "✏️ พิมพ์ชื่อเอง" — ใช้เฉพาะหน้า "ขอแก้สูตร" (คนหน้างานไม่รู้รหัส)
+   *  ห้ามเปิดในหน้า /master/bom ของจริง ไม่งั้นสูตรจริงจะมีบรรทัดที่ระบบคำนวณต่อไม่ได้ */
+  allowFreeText?: boolean;
+}) {
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [uoms, setUoms] = useState<{ id: string; name: string }[]>([]);
   const [detail, setDetail] = useState<EditorLine | null>(null);
@@ -416,6 +424,13 @@ export function BomLineEditor({
     onChange([...lines, line]);
   };
 
+  // เพิ่มบรรทัด "พิมพ์ชื่อเอง" (หน้าคำขอเท่านั้น) — ไม่มีรหัส ยังคิดปริมาณอัตโนมัติไม่ได้ ให้กรอกจำนวนเอง
+  const addFreeText = () => {
+    setUndoStack((u) => [...u, lines].slice(-50));
+    setRedoStack([]);
+    onChange([...lines, { ...emptyLine(), free_text: true }]);
+  };
+
   const resolveSkuId = async (l: EditorLine): Promise<string | null> => {
     if (l.component_id) return l.component_id;
     if (!l.component_sku) return null;
@@ -464,12 +479,27 @@ export function BomLineEditor({
       getValue: (l) => l.component_name || l.component_sku,
       groupLabel: (l) => l.component_sku ? `${l.component_sku} ${l.component_name}` : "— ไม่ระบุวัตถุดิบ —",
       groupEditNode: (apply) => <GroupReplacePicker onPick={(c) => apply(replacePatch(c))} />,
-      render: (l, u) => (
+      render: (l, u) => l.free_text ? (
+        // บรรทัดพิมพ์ชื่อเอง — ยังไม่รู้รหัสของจริง (เปิดเฉพาะหน้าคำขอ)
+        <div className="flex items-center gap-1">
+          <input value={l.component_name} onChange={(e) => u({ component_name: e.target.value })}
+            placeholder="พิมพ์ชื่อที่รู้ เช่น ผ้าแคนวาสรีไซเคิล"
+            className="flex-1 min-w-0 h-8 px-2 text-sm border border-amber-300 bg-amber-50/40 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          <button type="button" title="รู้ของจริงแล้ว — เลือกจากคลังวัตถุดิบแทน"
+            onClick={() => u({ free_text: false, component_name: "" })}
+            className="shrink-0 h-7 px-1.5 text-[11px] text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded">🔍</button>
+        </div>
+      ) : (
         <div className="flex items-center gap-1">
           <div className="flex-1 min-w-0"><ComponentPicker sku={l.component_sku} name={l.component_name} imageKey={l.image_key} onPick={(c) => u(pickComponent(l, c))} allowedGroupCodes={l.slot_code ? SLOT_GROUP_CODES[l.slot_code] : undefined} /></div>
           {l.component_sku && (
             <button type="button" title="รายละเอียดวัตถุดิบ" onClick={() => setDetail(l)}
               className="shrink-0 h-7 w-6 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded">ℹ</button>
+          )}
+          {allowFreeText && !l.component_sku && (
+            <button type="button" title="ไม่รู้รหัส — พิมพ์ชื่อเอาไว้ก่อน"
+              onClick={() => u({ free_text: true })}
+              className="shrink-0 h-7 px-1.5 text-[11px] text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded">✏️</button>
           )}
         </div>
       ),
@@ -645,8 +675,18 @@ export function BomLineEditor({
         maxHeight="56vh"
         onAdd={emptyLine}
         addLabel="＋ เพิ่มวัตถุดิบ"
-        addExtra={!readonly && lines.length > 0 ? <QuickAddFromBomPicker lines={lines} onPick={addComponent} /> : undefined}
-        emptyText="ยังไม่มีวัตถุดิบในสูตรนี้"
+        addExtra={readonly ? undefined : (
+          <>
+            {lines.length > 0 && <QuickAddFromBomPicker lines={lines} onPick={addComponent} />}
+            {allowFreeText && (
+              <button type="button" onClick={addFreeText} title="ยังไม่รู้รหัส/ยังไม่มีในคลัง — พิมพ์ชื่อที่รู้ไว้ก่อน เดี๋ยวคนอนุมัติมาระบุของจริงให้"
+                className="h-8 px-3 text-[12px] border border-amber-300 text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 whitespace-nowrap">
+                ✏️ พิมพ์ชื่อเอง
+              </button>
+            )}
+          </>
+        )}
+        emptyText={allowFreeText ? "ยังไม่มีวัตถุดิบในสูตรนี้ — เลือกจากคลัง หรือกด “✏️ พิมพ์ชื่อเอง” ถ้ายังไม่รู้รหัส" : "ยังไม่มีวัตถุดิบในสูตรนี้"}
         groupByOptions={[{ key: "material_type", label: "ชนิดวัตถุดิบ" }, { key: "component", label: "วัตถุดิบ (เปลี่ยนทั้งกลุ่มได้)" }, { key: "uom", label: "หน่วย" }]}
         footer={<span className="text-sm text-slate-600">รวม <span className="font-bold text-slate-900">{lines.length}</span> รายการ</span>}
       />

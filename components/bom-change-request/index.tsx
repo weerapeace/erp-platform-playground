@@ -18,6 +18,7 @@ import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { ERPModal } from "@/components/modal";
 import { BomLineEditor, emptyLine, type EditorLine } from "@/app/master/bom/line-editor";
+import { ComponentPicker } from "@/components/material-picker";
 import type { BomChangeRequest, BomReqLine } from "@/app/api/bom/change-requests/route";
 
 type Ver = { id: string; bom_code: string; version: string | null; status: string | null; is_default: boolean };
@@ -34,6 +35,7 @@ const toEditorLine = (l: Record<string, unknown>): EditorLine => ({
   pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,
   face_width_cm: Number(l.face_width_cm) || 0,
   source: (l.source as string) ?? undefined, odoo_bom_line_id: (l.odoo_bom_line_id as number) ?? undefined,
+  free_text: !!l.free_text,
   size_variant: !!l.size_variant, size_dim: (l.size_dim as EditorLine["size_dim"]) ?? "cut_length",
   size_values: (l.size_values ?? {}) as Record<string, number>,
 });
@@ -48,6 +50,8 @@ const toSaveLine = (l: EditorLine, i: number) => ({
   pieces: l.pieces, cut_width: l.cut_width, cut_length: l.cut_length,
   face_width_cm: l.face_width_cm, material_type: l.material_type || null,
   size_variant: l.size_variant, size_dim: l.size_dim, size_values: l.size_values,
+  // บรรทัดพิมพ์ชื่อเอง (ยังไม่รู้รหัส) — lineToRow ของ /api/bom/[id] คัดเฉพาะคอลัมน์จริง คีย์นี้จึงไม่ไปโผล่ในสูตร
+  free_text: !!l.free_text,
 });
 
 const n2 = (v: unknown) => Math.round((Number(v) || 0) * 10000) / 10000;
@@ -106,9 +110,11 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
 
   const proposed = lines.map(toSaveLine);
   const dirty = JSON.stringify(proposed) !== baseSnap;
+  const freeCount = lines.filter((l) => l.free_text && l.component_name.trim()).length;
 
   const submit = async () => {
-    const clean = lines.filter((l) => l.component_sku).map(toSaveLine);
+    // เก็บทั้งบรรทัดที่เลือกของจริง และบรรทัด "พิมพ์ชื่อเอง" ที่พิมพ์ชื่อไว้แล้ว (ทิ้งเฉพาะแถวว่างเปล่า)
+    const clean = lines.filter((l) => l.component_sku || (l.free_text && l.component_name.trim())).map(toSaveLine);
     if (clean.length === 0 && !note.trim()) { toast.error("ยังไม่มีวัตถุดิบในสูตร (หรือเขียนหมายเหตุบอกก็ได้)"); return; }
     if (!dirty && !note.trim()) { toast.error("ยังไม่ได้แก้อะไรเลย"); return; }
     setSaving(true);
@@ -143,12 +149,13 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
         <p className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
           นี่คือ<b>ตัวแก้สูตรตัวเดียวกับหน้า BOM</b> (มีบล็อกตัด/คำนวณครบ · สลับ ย่อ/เต็ม ได้) —
           แต่แก้ตรงนี้ <b>ยังไม่กระทบสูตรจริง</b> ส่งเป็นคำขอให้อนุมัติก่อน
+          <br />ไม่รู้รหัสวัตถุดิบ? กด <b>“✏️ พิมพ์ชื่อเอง”</b> พิมพ์เท่าที่รู้ เช่น “ผ้าแคนวาสรีไซเคิล” แล้วส่งได้เลย — คนอนุมัติจะเป็นคนใส่ของจริงให้
         </p>
 
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[12px] text-slate-600">สูตรที่แก้:</span>
           {vers.length === 0 ? (
-            <span className="text-[12px] text-rose-600">สินค้านี้ยังไม่มีสูตร — เพิ่มวัตถุดิบด้านล่างแล้วส่งคำขอได้เลย</span>
+            <span className="text-[12px] text-rose-600">สินค้านี้ยังไม่มีสูตร — เพิ่มวัตถุดิบด้านล่าง (หรือพิมพ์ชื่อเอง) แล้วส่งคำขอได้เลย</span>
           ) : (
             <select value={ver?.id ?? ""} onChange={(e) => setVer(vers.find((x) => x.id === e.target.value) ?? null)}
               className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
@@ -160,11 +167,21 @@ export function BomChangeRequestEditor({ open, onClose, productSku, productName,
         </div>
 
         {loading ? <div className="py-8 text-center text-slate-400 text-sm">กำลังโหลดสูตร…</div> : (
-          <BomLineEditor lines={lines} onChange={setLines} sizes={sizes} />
+          <BomLineEditor lines={lines} onChange={setLines} sizes={sizes} allowFreeText />
         )}
 
-        <button onClick={() => setLines((s) => [...s, emptyLine()])}
-          className="h-8 px-3 text-[12px] border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">＋ เพิ่มวัตถุดิบ</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => setLines((s) => [...s, emptyLine()])}
+            className="h-8 px-3 text-[12px] border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50">＋ เพิ่มวัตถุดิบ</button>
+          <button onClick={() => setLines((s) => [...s, { ...emptyLine(), free_text: true }])}
+            title="ยังไม่รู้รหัส/ยังไม่มีในคลัง — พิมพ์ชื่อที่รู้ไว้ก่อน เดี๋ยวคนอนุมัติมาระบุของจริงให้"
+            className="h-8 px-3 text-[12px] border border-amber-300 text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100">✏️ พิมพ์ชื่อเอง (ไม่รู้รหัส)</button>
+          {freeCount > 0 && (
+            <span className="text-[11px] text-amber-700">
+              มี {freeCount} รายการที่พิมพ์ชื่อไว้ — ส่งได้เลย คนอนุมัติจะเป็นคนระบุของจริงให้
+            </span>
+          )}
+        </div>
 
         <label className="block">
           <span className="text-[12px] text-slate-600">เหตุผล / หมายเหตุ</span>
@@ -189,6 +206,12 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<BomChangeRequest | null>(null);
   const [reason, setReason] = useState("");
+  /**
+   * บรรทัด "พิมพ์ชื่อเอง" ที่ผู้อนุมัติจับคู่กับวัตถุดิบจริงแล้ว — เก็บชั่วคราวในหน้าจอนี้ (คีย์ `reqId:index`)
+   * ไม่ได้บันทึกลงคำขอ เพราะจับคู่เสร็จก็กดอนุมัติต่อเลย · ปิดป๊อปก่อนกดอนุมัติ = ต้องจับคู่ใหม่
+   */
+  const [mapped, setMapped] = useState<Record<string, { sku: string; name: string }>>({});
+  const mapKey = (reqId: string, idx: number) => `${reqId}:${idx}`;
 
   const load = useCallback(() => {
     apiFetch(`/api/bom/change-requests?status=${tab}`).then((r) => r.json())
@@ -196,9 +219,20 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
   }, [tab]);
   useEffect(() => { if (open) load(); }, [open, load]);
 
+  /** บรรทัดที่ยังไม่มีวัตถุดิบจริง (พิมพ์ชื่อมา) + ที่ผู้อนุมัติจับคู่ให้แล้ว */
+  const freeLines = (r: BomChangeRequest) =>
+    (r.lines ?? []).map((l, i) => ({ l, i })).filter(({ l }) => !l.component_sku);
+  const unresolvedCount = (r: BomChangeRequest) =>
+    freeLines(r).filter(({ i }) => !mapped[mapKey(r.id, i)]).length;
+
   /** อนุมัติ = เขียนลงสูตรจริงผ่าน PATCH /api/bom/[id] (ตัวเดิม) แล้วปิดคำขอ */
   const approve = async (r: BomChangeRequest) => {
     if (!r.bom_id) { toast.error("คำขอนี้ยังไม่ผูกกับสูตร — ต้องไปสร้างสูตรใหม่ที่หน้า BOM ก่อน"); return; }
+    // 🔒 ห้ามเขียนบรรทัดที่ไม่มีวัตถุดิบจริงลงสูตร — คิดต้นทุน/เตรียมของ/ตัดผ้าต่อไม่ได้ (และจะเงียบ ไม่ error)
+    if (unresolvedCount(r) > 0) {
+      toast.error(`ยังมี ${unresolvedCount(r)} รายการที่ยังไม่ได้ระบุของจริง — เลือกวัตถุดิบให้ครบก่อน`);
+      return;
+    }
     setBusy(r.id);
     try {
       // ⚠️ PATCH เขียนทับ header ด้วย → ต้องดึงของเดิมมาส่งคืนให้ครบ ไม่งั้นค่าหัวสูตรจะหาย
@@ -217,7 +251,13 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
           bom_code: h.bom_code, product_sku: h.product_sku, product_name: h.product_name,
           version: h.version, bom_type: h.bom_type, status: h.status,
           effective_from: h.effective_from, note: h.note,
-          lines: r.lines.map((l, i) => ({ ...l, sequence: i + 1 })),
+          // เติมวัตถุดิบจริงที่ผู้อนุมัติจับคู่ให้กับบรรทัด "พิมพ์ชื่อเอง" ก่อนเขียนลงสูตร
+          lines: r.lines.map((l, i) => {
+            const m = mapped[mapKey(r.id, i)];
+            return m
+              ? { ...l, component_sku: m.sku, component_name: m.name, free_text: false, sequence: i + 1 }
+              : { ...l, sequence: i + 1 };
+          }),
         }),
       });
       const j = await res.json();
@@ -309,6 +349,7 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
                                   <span className={`px-1 py-0.5 rounded text-[9px] ${x.kind === "add" ? "bg-emerald-100 text-emerald-700" : x.kind === "del" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>
                                     {x.kind === "add" ? "เพิ่ม" : x.kind === "del" ? "ลบ" : "แก้"}
                                   </span>
+                                  {!x.line.component_sku && <span className="px-1 py-0.5 rounded text-[9px] bg-amber-100 text-amber-700 shrink-0">พิมพ์เอง</span>}
                                   <span className="text-slate-700 truncate">{x.line.component_name ?? x.line.component_sku}</span>
                                   <span className="text-slate-500 tabular-nums">
                                     {x.kind === "edit" && x.from ? <>{fmt(x.from.qty)} → <b>{fmt(x.line.qty)}</b></> : fmt(x.line.qty)} {x.line.uom}
@@ -317,6 +358,37 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
                               ))}
                             {d.length > 12 && <div className="text-[10px] text-slate-400">…อีก {d.length - 12} รายการ</div>}
                           </div>
+
+                          {/* บรรทัดที่ผู้ขอ "พิมพ์ชื่อเอง" — ต้องระบุของจริงก่อนถึงจะอนุมัติได้ */}
+                          {r.status === "pending" && canReview && freeLines(r).length > 0 && (
+                            <div className="mt-1.5 border border-amber-200 bg-amber-50/60 rounded-lg p-2 space-y-1.5">
+                              <div className="text-[11px] font-medium text-amber-800">
+                                ✏️ ผู้ขอไม่รู้รหัส — พิมพ์ชื่อมา {freeLines(r).length} รายการ · เลือกของจริงให้ก่อนอนุมัติ
+                                <span className="font-normal text-amber-700"> (ไม่มีในคลัง → กด 🔍 แล้วใช้ปุ่ม “🙋 ขอเพิ่ม” ในหน้าค้นหา)</span>
+                              </div>
+                              {freeLines(r).map(({ l, i }) => {
+                                const m = mapped[mapKey(r.id, i)];
+                                return (
+                                  <div key={i} className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[11px] text-slate-700 shrink-0">
+                                      “{String(l.component_name ?? "—")}”
+                                      <span className="text-slate-400"> · {fmt(Number(l.qty) || 0)} {String(l.uom ?? "")}</span>
+                                    </span>
+                                    <span className="text-slate-300 text-[11px]">→</span>
+                                    <div className="min-w-[220px] flex-1">
+                                      <ComponentPicker sku={m?.sku ?? ""} name={m?.name ?? ""} placeholder="— เลือกวัตถุดิบจริง —"
+                                        onPick={(c) => setMapped((s) => ({ ...s, [mapKey(r.id, i)]: { sku: c.code, name: c.name } }))} />
+                                    </div>
+                                    {m && <button onClick={() => setMapped((s) => { const n = { ...s }; delete n[mapKey(r.id, i)]; return n; })}
+                                      title="ยกเลิกการจับคู่" className="text-slate-300 hover:text-rose-500 text-sm shrink-0">✕</button>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {r.status === "pending" && !canReview && freeLines(r).length > 0 && (
+                            <div className="mt-1 text-[11px] text-amber-700">✏️ มี {freeLines(r).length} รายการที่พิมพ์ชื่อมา (รอคนอนุมัติระบุของจริง)</div>
+                          )}
 
                           {r.note && <div className="text-[11px] text-slate-600 mt-1">📝 {r.note}</div>}
                           <div className="text-[10px] text-slate-400 mt-0.5">
@@ -328,9 +400,10 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
 
                         {r.status === "pending" && canReview && (
                           <div className="shrink-0 flex flex-col gap-1">
-                            <button onClick={() => void approve(r)} disabled={busy === r.id}
-                              className="h-7 px-2.5 text-[11px] font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap">
-                              {busy === r.id ? "กำลังบันทึก…" : "✓ อนุมัติ → เขียนลงสูตร"}
+                            <button onClick={() => void approve(r)} disabled={busy === r.id || unresolvedCount(r) > 0}
+                              title={unresolvedCount(r) > 0 ? `ยังมี ${unresolvedCount(r)} รายการที่ยังไม่ได้ระบุวัตถุดิบจริง` : "เขียนลงสูตรจริงทันที"}
+                              className="h-7 px-2.5 text-[11px] font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-40 whitespace-nowrap">
+                              {busy === r.id ? "กำลังบันทึก…" : unresolvedCount(r) > 0 ? `ระบุของจริงอีก ${unresolvedCount(r)}` : "✓ อนุมัติ → เขียนลงสูตร"}
                             </button>
                             <button onClick={() => { setRejecting(r); setReason(""); }}
                               className="h-7 px-2.5 text-[11px] border border-slate-200 text-slate-500 rounded hover:bg-slate-50">ไม่อนุมัติ</button>
