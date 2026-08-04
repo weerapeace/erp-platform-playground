@@ -28,6 +28,10 @@ const baht = (n: number | null | undefined) => `฿${Math.round(Number(n ?? 0)).
 const thDate = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "—";
 const isCNY = (c: unknown) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").toUpperCase());
+/** เทียบชื่อร้านแบบหลวม ๆ — ตัดช่องว่างและตัวพิมพ์ใหญ่เล็ก */
+const normName = (s: unknown) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+/** แถวราคาต่อร้านจาก /api/purchasing/sku-suppliers (ร้านหลัก ★ มาก่อนเสมอ) */
+type SupplierPriceRow = { price: number | null; currency: string | null; partner_name: string | null };
 const n2 = (s: string) => { const v = Number(s); return isFinite(v) ? v : 0; };
 const fmt = (n: number) => Number(n || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 
@@ -99,6 +103,24 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
     () => computePoTotals(lines.reduce((a, l) => a + n2(l.qty) * n2(l.price), 0), vatRate, vatIncluded),
     [lines, vatRate, vatIncluded],
   );
+
+  /**
+   * เติม "ราคาซื้อ" ให้บรรทัดที่เพิ่งเลือกสินค้า — อ่านจากตารางราคาหลายร้านกลาง (supplier_items)
+   * เลือกราคาของร้านที่อยู่บนใบนี้ก่อน · ไม่เจอ → ร้านหลัก ★ (API เรียงร้านหลักมาก่อนแล้ว)
+   * เติมเฉพาะราคาที่ "สกุลเงินตรงกับใบ" — ใบบาทได้ราคาหยวนมาใส่ = ยอดผิดทั้งใบ
+   */
+  const fillPurchasePrice = useCallback(async (lineKey: string, skuId: string) => {
+    try {
+      const res = await apiFetch(`/api/purchasing/sku-suppliers?sku_id=${encodeURIComponent(skuId)}`);
+      const j = (await res.json()) as { data?: SupplierPriceRow[] };
+      const rows = (j.data ?? []).filter((r) => Number(r.price) > 0 && isCNY(r.currency) === isCNY(d?.currency));
+      if (rows.length === 0) return;
+      const want = normName(seller);
+      const mine = want ? rows.find((r) => normName(r.partner_name) === want) : null;
+      const pick = mine ?? rows[0];
+      setLine(lineKey, { price: String(pick.price) });
+    } catch { /* หาราคาไม่ได้ก็ปล่อยว่าง ให้พิมพ์เอง — ไม่ต้องรบกวนผู้ใช้ */ }
+  }, [d?.currency, seller]);
 
   const save = useCallback(async () => {
     if (!d) return;
@@ -235,11 +257,10 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
                       value={l.sku_id ? { id: l.sku_id, code: l.sku ?? "", name: l.name } : null}
                       onChange={(p) => {
                         if (!p) { setLine(l.key, { sku_id: null, sku: null }); return; }
-                        setLine(l.key, {
-                          sku_id: p.id, sku: p.code, name: p.name,
-                          uom: p.uom_name ?? l.uom,
-                          price: n2(l.price) > 0 ? l.price : (p.list_price != null ? String(p.list_price) : l.price),
-                        });
+                        setLine(l.key, { sku_id: p.id, sku: p.code, name: p.name, uom: p.uom_name ?? l.uom });
+                        // ราคายังว่าง → ดึง "ราคาซื้อของร้านนี้" จากตารางราคาหลายร้านกลาง
+                        // (ห้ามใช้ list_price ของ SkuPicker — นั่นคือราคา "ขาย" ไม่ใช่ราคาซื้อ)
+                        if (!(n2(l.price) > 0)) void fillPurchasePrice(l.key, p.id);
                       }}
                       placeholder="เลือกจากคลังสินค้า (ไม่เลือกก็ได้)"
                     />
