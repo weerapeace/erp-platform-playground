@@ -16,6 +16,7 @@ import { HoverImage, HoverPreview } from "@/components/hover-image";
 import { ERPModal } from "@/components/modal";
 import { withImageWidth } from "@/lib/r2-image";
 import { useViewPref } from "@/lib/use-view-pref";
+import { useBackClose } from "@/lib/use-back-close";
 
 // รับ PendingMO/Dept/Assignee จากหน้า work-board แบบ subset (structural) — ไม่ผูกชนิดข้ามไฟล์
 type ShopMO = {
@@ -155,6 +156,8 @@ export function DispatchShop({
 
   const cartItems = useMemo(() => pending.filter((m) => cart[m.id] != null), [pending, cart]);
   const cartTotalQty = useMemo(() => cartItems.reduce((s, m) => s + (cart[m.id] || 0), 0), [cartItems, cart]);
+  // กด back ของเบราว์เซอร์/ปัดขวาบนมือถือ ตอนอยู่หน้าตะกร้า = กลับไปหน้าเลือกงาน (ไม่หลุดออกจากบอร์ด)
+  useBackClose(cartOpen, () => setCartOpen(false), "cart");
 
   const toggleCart = (m: ShopMO) => setCart((c) => { const n = { ...c }; if (n[m.id] != null) delete n[m.id]; else n[m.id] = m.remaining; return n; });
   const setQty = (id: string, v: number, max: number) => setCart((c) => ({ ...c, [id]: Math.max(0, Math.min(max, v || 0)) }));

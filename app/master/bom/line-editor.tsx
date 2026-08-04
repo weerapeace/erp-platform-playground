@@ -424,13 +424,6 @@ export function BomLineEditor({
     onChange([...lines, line]);
   };
 
-  // เพิ่มบรรทัด "พิมพ์ชื่อเอง" (หน้าคำขอเท่านั้น) — ไม่มีรหัส ยังคิดปริมาณอัตโนมัติไม่ได้ ให้กรอกจำนวนเอง
-  const addFreeText = () => {
-    setUndoStack((u) => [...u, lines].slice(-50));
-    setRedoStack([]);
-    onChange([...lines, { ...emptyLine(), free_text: true }]);
-  };
-
   const resolveSkuId = async (l: EditorLine): Promise<string | null> => {
     if (l.component_id) return l.component_id;
     if (!l.component_sku) return null;
@@ -673,20 +666,15 @@ export function BomLineEditor({
         storageKey="bom-lines"
         stickyHeader
         maxHeight="56vh"
-        onAdd={emptyLine}
+        /**
+         * หน้าคำขอ (allowFreeText) ไม่ต้องมีปุ่ม "เพิ่มวัตถุดิบ" ในแถบตาราง —
+         * เพราะแถบนี้ **ซ่อนตัวเองเมื่อยังไม่มีบรรทัด** (rows.length > 0) ปุ่มจะหายตอนสูตรว่าง
+         * → ย้ายไปไว้ชุดเดียวใต้ตารางในป๊อปคำขอ ที่โผล่เสมอ (กันปุ่มซ้ำ + กันปุ่มหาย)
+         */
+        onAdd={allowFreeText ? undefined : emptyLine}
         addLabel="＋ เพิ่มวัตถุดิบ"
-        addExtra={readonly ? undefined : (
-          <>
-            {lines.length > 0 && <QuickAddFromBomPicker lines={lines} onPick={addComponent} />}
-            {allowFreeText && (
-              <button type="button" onClick={addFreeText} title="ยังไม่รู้รหัส/ยังไม่มีในคลัง — พิมพ์ชื่อที่รู้ไว้ก่อน เดี๋ยวคนอนุมัติมาระบุของจริงให้"
-                className="h-8 px-3 text-[12px] border border-amber-300 text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 whitespace-nowrap">
-                ✏️ พิมพ์ชื่อเอง
-              </button>
-            )}
-          </>
-        )}
-        emptyText={allowFreeText ? "ยังไม่มีวัตถุดิบในสูตรนี้ — เลือกจากคลัง หรือกด “✏️ พิมพ์ชื่อเอง” ถ้ายังไม่รู้รหัส" : "ยังไม่มีวัตถุดิบในสูตรนี้"}
+        addExtra={!readonly && lines.length > 0 ? <QuickAddFromBomPicker lines={lines} onPick={addComponent} /> : undefined}
+        emptyText={allowFreeText ? "ยังไม่มีวัตถุดิบในสูตรนี้ — กดปุ่มด้านล่าง: เลือกจากคลัง หรือ “✏️ พิมพ์ชื่อเอง” ถ้ายังไม่รู้รหัส" : "ยังไม่มีวัตถุดิบในสูตรนี้"}
         groupByOptions={[{ key: "material_type", label: "ชนิดวัตถุดิบ" }, { key: "component", label: "วัตถุดิบ (เปลี่ยนทั้งกลุ่มได้)" }, { key: "uom", label: "หน่วย" }]}
         footer={<span className="text-sm text-slate-600">รวม <span className="font-bold text-slate-900">{lines.length}</span> รายการ</span>}
       />
