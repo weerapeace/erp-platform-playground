@@ -260,8 +260,10 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
     setKeywordsText((r.name_keywords ?? []).join(", "));
     // ⚠️ ต้องเติมคำตอบแนะนำที่บันทึกไว้ด้วย — ถ้าไม่เติม ช่องจะว่างทุกครั้งที่เปิด
     //    และตอนกดบันทึกจะเขียนทับของเดิมด้วยค่าว่าง (ของที่ตั้งไว้หายหมด)
+    // เก็บตาม "ลำดับบรรทัด" ไม่ใช่ตามข้อความหัวข้อ — เดิมผูกกับข้อความ พอไปแก้ข้อความหัวข้อ
+    // (เช่นเติม ": ตาม Tags เลย") คำตอบแนะนำที่พิมพ์ไว้จะหลุดคีย์แล้วหายตอนบันทึกแบบเงียบ ๆ
     setOptionsText(Object.fromEntries(
-      Object.entries(r.topic_options ?? {}).map(([k, v]) => [k, (v ?? []).join(", ")]),
+      (r.required_topics ?? []).map((tp, i) => [String(i), ((r.topic_options ?? {})[tp] ?? []).join(", ")]),
     ));
   };
   const splitLines = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean);
@@ -287,7 +289,7 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
       const topicsNow = splitLines(topicsText);
       // เก็บคำตอบแนะนำเฉพาะหัวข้อที่ยังอยู่ (ลบหัวข้อออก = ตัวเลือกของมันหายไปด้วย)
       const optsNow: Record<string, string[]> = {};
-      for (const tp of topicsNow) { const v = splitCommas(optionsText[tp] ?? ""); if (v.length) optsNow[tp] = v; }
+      topicsNow.forEach((tp, i) => { const v = splitCommas(optionsText[String(i)] ?? ""); if (v.length) optsNow[tp] = v; });
       const payload: Rule = { ...edit, required_topics: topicsNow, required_topics_en: splitLines(topicsEnText), topic_options: optsNow, name_keywords: splitCommas(keywordsText) };
       const j = await apiFetch("/api/ai/product-rules", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -368,10 +370,10 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
               <p className="text-[11.5px] font-medium text-slate-600">
                 {t("คำตอบแนะนำของแต่ละหัวข้อ (คั่นด้วยลูกน้ำ — ไม่บังคับ)", "Suggested answers per heading (comma-separated — optional)")}
               </p>
-              {splitLines(topicsText).map((tp) => (
-                <div key={tp} className="flex items-center gap-2">
+              {splitLines(topicsText).map((tp, i) => (
+                <div key={i} className="flex items-center gap-2">
                   <span className="text-[12px] text-slate-600 w-[38%] shrink-0 truncate" title={tp}>{tp}</span>
-                  <input value={optionsText[tp] ?? ""} onChange={(e) => setOptionsText((p) => ({ ...p, [tp]: e.target.value }))}
+                  <input value={optionsText[String(i)] ?? ""} onChange={(e) => setOptionsText((p) => ({ ...p, [String(i)]: e.target.value }))}
                     placeholder={t("เช่น หัวเข็ม, หัวออโต้, หัวกลัด", "e.g. pin-buckle, auto-lock, plate")}
                     className="flex-1 h-8 px-2 text-[12.5px] border border-slate-200 rounded-md bg-white" />
                 </div>
@@ -403,14 +405,17 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
           ใช้เฉพาะแบรนด์ของสินค้าตัวนี้ {brandId ? "" : t("(สินค้ายังไม่ระบุแบรนด์)", "(no brand set)")}
         </label>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* ปุ่มบันทึกลอยติดขอบล่าง — เดิมอยู่สุดหน้าจอที่ต้องเลื่อนลงไปหา พิมพ์เสร็จแล้วกดปิดเลย ของหาย */}
+        <div className="flex items-center gap-2 flex-wrap sticky bottom-0 -mx-1 px-1 py-2 bg-white/95 backdrop-blur border-t border-slate-200">
           <button type="button" onClick={() => void save()} disabled={busy}
             className="h-8 px-3 text-[12.5px] font-medium bg-slate-700 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
             {busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึกกฎ", "Save rule")}
           </button>
           <button type="button" onClick={() => { setEdit(null); setMsg(""); }} className="h-8 px-3 text-[12.5px] border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
           {edit.id && <button type="button" onClick={() => void del(edit.id)} disabled={busy} className="h-8 px-3 text-[12.5px] text-rose-600 hover:bg-rose-50 rounded-lg">{t("ลบกฎนี้", "Delete this rule")}</button>}
-          {msg && <span className="text-[12px] text-slate-500">{msg}</span>}
+          {msg
+            ? <span className="text-[12px] text-slate-500">{msg}</span>
+            : <span className="text-[11.5px] text-amber-600">{t("พิมพ์เสร็จต้องกด “บันทึกกฎ” ก่อนปิด ไม่งั้นของที่พิมพ์หาย", "Press “Save rule” before closing or your edits are lost")}</span>}
         </div>
       </div>
     );

@@ -505,12 +505,34 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
     if (owners.size === 0) return;
     let live = true;
     owners.forEach((o) => {
-      apiFetch(`/api/creative-tasks/${taskId}/subtasks?gallery=${encodeURIComponent(o)}`).then((r) => r.json())
-        .then((j) => { if (live && j?.galleries) setSavedGalleries((prev) => ({ ...prev, ...(j.galleries as Record<string, { r2_key: string }[]>) })); }).catch(() => { /* ข้าม */ });
+      // งานย่อยชนิด "รูปคำอธิบาย" ปลายทางคือแกลเลอรีคำอธิบาย ไม่ใช่แกลเลอรีรูปสินค้า
+      // เดิมดึงแกลเลอรีรูปสินค้ามาโชว์เสมอ → การ์ดขึ้นรูปสินค้าแทนรูปคำอธิบายที่ส่งไป
+      const isDescMedia = approveTarget === "description_media" && o.startsWith("parent_sku:");
+      const url = isDescMedia
+        ? `/api/creative-tasks/${taskId}/subtasks?descgallery=parent:${encodeURIComponent(o.slice("parent_sku:".length))}`
+        : `/api/creative-tasks/${taskId}/subtasks?gallery=${encodeURIComponent(o)}`;
+      apiFetch(url).then((r) => r.json())
+        .then((j) => {
+          if (!live) return;
+          if (isDescMedia && j?.desc_galleries) {
+            // desc_galleries คีย์เป็น "parent:<id>" อยู่แล้ว แต่ให้มาเป็น url (/api/r2-image?key=…)
+            // การ์ดใช้ r2_key ทั้งการเทียบรูปซ้ำและการแสดงผล → ถอด key ออกจาก url ให้เป็นรูปแบบเดียวกัน
+            const mapped = Object.fromEntries(
+              Object.entries(j.desc_galleries as Record<string, { slot_id?: string; slot?: number; url?: string }[]>)
+                .map(([k, list]) => [k, (list ?? []).map((s) => {
+                  const m = /[?&]key=([^&]+)/.exec(s.url ?? "");
+                  return { ...s, r2_key: m ? decodeURIComponent(m[1]) : undefined };
+                })]),
+            );
+            setSavedGalleries((prev) => ({ ...prev, ...mapped }));
+          } else if (j?.galleries) {
+            setSavedGalleries((prev) => ({ ...prev, ...(j.galleries as Record<string, { r2_key: string }[]>) }));
+          }
+        }).catch(() => { /* ข้าม */ });
     });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, sub.id]);
+  }, [taskId, sub.id, approveTarget]);
   // รวมรูปทั้งหมดบนการ์ด (รูปงาน + รูปเข้าสินค้า) ไว้กดดูเต็มจอ/เลื่อน
   const cardImages: LightboxImage[] = [
     ...imageAtts.map((a) => ({ url: `/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}&w=1600`, label: a.file_name ?? t("รูปแนบงาน", "Work image") })),
@@ -679,7 +701,11 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
             {/* รูปเข้าสินค้า — จัดกลุ่มตามสินค้า + ป้ายรหัส (เช่น BSAC007) · กดดูเต็มจอ */}
             {productGroups.length > 0 && (
               <div className="space-y-1.5">
-                <p className="text-[11px] text-slate-400">📦 {t("รูปเข้าสินค้า", "Product images")} <span className="text-emerald-600">· ✓ {t("= บันทึกในแกลเลอรีแล้ว", "= saved in gallery")}</span></p>
+                <p className="text-[11px] text-slate-400">
+                  {approveTarget === "description_media"
+                    ? <>🖼️ {t("รูปคำอธิบายสินค้า", "Description images")} <span className="text-emerald-600">· ✓ {t("= อยู่ในคำอธิบายแล้ว", "= already in the description")}</span></>
+                    : <>📦 {t("รูปเข้าสินค้า", "Product images")} <span className="text-emerald-600">· ✓ {t("= บันทึกในแกลเลอรีแล้ว", "= saved in gallery")}</span></>}
+                </p>
                 {productGroups.map((g) => {
                   const lookup = g.key.startsWith("legacy:") ? `sku:${g.key.slice(7)}` : g.key;
                   const submitted = new Set(g.keys);
