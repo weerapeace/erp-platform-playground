@@ -14,7 +14,7 @@
  */
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
+import { PrintFrame, PrintDocLinkButton, printReportHtmlInNewWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
@@ -79,7 +79,10 @@ function BulkInner() {
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <span className="text-sm text-slate-600">🧾 พิมพ์ใบกำกับภาษีรวม <b>{ids.length}</b> ใบ {data === null && `(กำลังโหลด ${done}/${ids.length})`}</span>
         <div className="flex-1" />
-        <button onClick={() => html && printReportHtmlInNewWindow(html)} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">⬇ ดาวน์โหลด PDF</button>
+        <PrintDocLinkButton html={html} fileName={docFileName("ใบกำกับภาษีรวม", `${ids.length} ใบ`)}
+          className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
+          🖨 พิมพ์ / บันทึก PDF
+        </PrintDocLinkButton>
       </div>
       {prefs && templates.length > 0 && (
         <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} />

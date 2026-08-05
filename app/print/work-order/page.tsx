@@ -7,7 +7,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 // พิมพ์หลายใบ = หลายแผ่น → ต้องเปิดเอกสารจริงในแท็บใหม่ (iframe พรีวิวไหลข้ามหน้ากระดาษไม่ได้)
-import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
+import { PrintFrame, PrintDocLinkButton, printReportHtmlInNewWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
@@ -73,7 +73,10 @@ function BulkPrintInner() {
         <span className="text-sm text-slate-600">🖨️ พิมพ์ใบสั่งงานรวม <b>{ids.length}</b> ใบ {data === null && `(กำลังโหลด ${done}/${ids.length})`}</span>
         <WoColumnSettings onPreview={setPreviewCols} onSaved={reloadCols} />
         <div className="flex-1" />
-        <button onClick={() => html && printReportHtmlInNewWindow(html)} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">⬇ ดาวน์โหลด PDF</button>
+        <PrintDocLinkButton html={html} fileName={docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`)}
+          className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
+          🖨 พิมพ์ / บันทึก PDF
+        </PrintDocLinkButton>
       </div>
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>

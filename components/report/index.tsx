@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   compactReportLayout,
   DEFAULT_REPORT_LAYOUT,
@@ -164,23 +164,89 @@ export function printReportFrameOrWindow(fileName?: string) {
 }
 
 /**
+ * ป๊อปอัปโดนบล็อก → โชว์แถบพร้อมลิงก์จริงให้กดเอง
+ * (คลิกลิงก์ด้วยมือผู้ใช้ เบราว์เซอร์ไม่บล็อก — ต่างจาก window.open ที่สคริปต์เรียก)
+ * เดิมเงียบแล้วถอยไปพิมพ์จาก iframe ซึ่งเอกสารหลายแผ่นจะออกไม่ครบ = ผู้ใช้เห็นเป็น "กดแล้วไม่มีอะไรเกิดขึ้น"
+ */
+function showPopupBlockedBar(url: string) {
+  const ID = "report-popup-blocked-bar";
+  document.getElementById(ID)?.remove();
+  const bar = document.createElement("div");
+  bar.id = ID;
+  bar.className = "no-print";
+  bar.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:99999;display:flex;align-items:center;gap:12px;background:#0f172a;color:#fff;padding:12px 16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-size:14px;max-width:92vw;";
+  const msg = document.createElement("span");
+  msg.textContent = "เบราว์เซอร์บล็อกหน้าต่างพิมพ์ไว้ —";
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.textContent = "กดตรงนี้เพื่อเปิดเอกสารแล้วสั่งพิมพ์";
+  link.style.cssText = "color:#93c5fd;text-decoration:underline;font-weight:600;white-space:nowrap;";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.textContent = "✕";
+  close.style.cssText = "background:transparent;border:0;color:#94a3b8;cursor:pointer;font-size:16px;line-height:1;";
+  const dispose = () => { bar.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000); };
+  close.onclick = dispose;
+  link.onclick = () => { setTimeout(dispose, 100); };
+  bar.append(msg, link, close);
+  document.body.appendChild(bar);
+}
+
+/**
  * พิมพ์เอกสารหลายหน้าให้ถูกต้อง — เปิด HTML เอกสารจริงในแท็บใหม่ แล้วสั่งพิมพ์ที่นั่น
  * แก้ปัญหา "พรีวิวเต็มแต่พิมพ์ตัด" เพราะ iframe ในหน้าเพจไม่ไหลข้ามหน้า (พิมพ์ Ctrl+P จะตัดทิ้ง)
- * ใช้ Blob URL เพื่อให้รูป/ลิงก์แบบ /api/... resolve ถูก (มี origin จริง) · มี fallback ไป iframe ถ้าป๊อปอัปถูกบล็อก
+ * ใช้ Blob URL เพื่อให้รูป/ลิงก์แบบ /api/... resolve ถูก (มี origin จริง)
+ * ป๊อปอัปโดนบล็อก → โชว์ลิงก์ให้กดเอง (ห้ามถอยไปพิมพ์ iframe เงียบ ๆ — เอกสารหลายแผ่นจะออกไม่ครบ)
  */
 export function printReportHtmlInNewWindow(html: string) {
   try {
-    const withAutoPrint = html.includes("</body>")
-      ? html.replace("</body>", `<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},350);};</script></body>`)
-      : html;
-    const blob = new Blob([withAutoPrint], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([withAutoPrintScript(html)], { type: "text/html" }));
     const w = window.open(url, "_blank");
-    if (!w) { URL.revokeObjectURL(url); printReportFrameOrWindow(); return; }
+    if (!w) { showPopupBlockedBar(url); return; }
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch {
     printReportFrameOrWindow();
   }
+}
+
+/** ฝังสคริปต์ให้เอกสารเด้งหน้าต่างพิมพ์เองทันทีที่เปิด */
+function withAutoPrintScript(html: string): string {
+  return html.includes("</body>")
+    ? html.replace("</body>", `<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},350);};</script></body>`)
+    : html;
+}
+
+/**
+ * ปุ่มพิมพ์แบบ "ลิงก์จริง" — ของกลาง ใช้กับหน้าพิมพ์รวมหลายใบ
+ *
+ * ⭐ ทำไมต้องเป็น <a> ไม่ใช่ <button> ที่เรียก window.open:
+ *    window.open ที่สคริปต์เรียก โดนตัวบล็อกป๊อปอัปได้ (บล็อกแล้วเงียบ = ผู้ใช้เห็นว่า "กดแล้วไม่มีอะไรเกิดขึ้น")
+ *    แต่การคลิกลิงก์ด้วยมือผู้ใช้ เบราว์เซอร์ไม่บล็อก → กดแล้วเปิดเอกสารเสมอ
+ * เอกสารที่เปิดจะเด้งหน้าต่างพิมพ์เองอัตโนมัติ
+ */
+export function PrintDocLinkButton({ html, fileName, className, children }: {
+  html: string;
+  /** ชื่อไฟล์ตอนบันทึก PDF — เบราว์เซอร์อ่านจาก <title> ของเอกสาร (buildReportHtmlMulti ใส่ให้แล้ว) */
+  fileName?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!html) { setUrl(null); return; }
+    const u = URL.createObjectURL(new Blob([withAutoPrintScript(html)], { type: "text/html" }));
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [html]);
+
+  if (!url) return <span className={`${className ?? ""} pointer-events-none opacity-50`}>{children}</span>;
+  return (
+    <a href={url} target="_blank" rel="noopener" download={undefined} title={fileName} className={className}>
+      {children}
+    </a>
+  );
 }
 
 // ปุ่ม "ปิด" ของหน้าพิมพ์ (ของกลาง): หน้าพิมพ์มักเปิดในแท็บใหม่ → พยายามปิดแท็บก่อน
