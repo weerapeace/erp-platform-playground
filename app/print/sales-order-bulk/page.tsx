@@ -2,7 +2,11 @@
 
 /**
  * พิมพ์ใบเสร็จ/ใบกำกับภาษีหลายใบทีเดียว — /print/sales-order-bulk?ids=id1,id2,...
- * โหลด SO แต่ละใบ → ต่อเป็นเอกสารเดียว (ขึ้นหน้าใหม่ทุกใบ) ด้วยแม่แบบใบกำกับภาษี (is_default)
+ * โหลด SO แต่ละใบ → ต่อเป็นเอกสารเดียว (ขึ้นหน้าใหม่ทุกใบ)
+ *
+ * ⭐ ต้องใช้ "แบบฟอร์ม + คอลัมน์ที่ติ๊กไว้" ชุดเดียวกับพิมพ์ทีละใบเสมอ
+ *    (useDocPrintPrefs("so") + columnTokens) — ถ้าไม่ส่ง token คอลัมน์
+ *    แม่แบบจะซ่อนทุกคอลัมน์ที่ไม่ได้ล็อก เหลือแค่ ชื่อสินค้า + จำนวนเงิน
  */
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -10,6 +14,8 @@ import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
+import { columnTokens } from "@/lib/doc-print-prefs";
+import { DocPrintSettings, useDocPrintPrefs } from "@/components/doc-print-settings";
 import { buildSoData, type SODetailExt } from "@/app/print/sales-order/[id]/page";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 
@@ -19,7 +25,8 @@ function BulkInner() {
   const ids = useMemo(() => (sp.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean), [sp]);
 
   const [data, setData] = useState<Record<string, unknown>[] | null>(null);
-  const [tpl,  setTpl]  = useState<ReportTemplateRow | null>(null);
+  const [templates, setTemplates] = useState<ReportTemplateRow[]>([]);
+  const { prefs, setPrefs } = useDocPrintPrefs("so");
   const [done, setDone] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,9 +37,8 @@ function BulkInner() {
       try {
         const tplRes = await apiFetch("/api/admin/report-templates?entity_type=so").then((r) => r.json());
         const tpls = (tplRes as ReportTemplatesResponse).data?.filter((t) => t.active) ?? [];
-        const template = tpls.find((t) => t.is_default) ?? tpls.find((t) => t.template_key !== "delivery-note") ?? tpls[0] ?? null;
-        if (!template) throw new Error("ยังไม่มีแม่แบบใบกำกับภาษี");
-        if (!cancelled) setTpl(template);
+        if (tpls.length === 0) throw new Error("ยังไม่มีแม่แบบใบกำกับภาษี");
+        if (!cancelled) setTemplates(tpls);
         const out: Record<string, unknown>[] = [];
         for (const id of ids) {
           const soRes = await apiFetch(`/api/sales-orders/${id}`).then((r) => r.json()).catch(() => ({ error: "load" }));
@@ -46,14 +52,21 @@ function BulkInner() {
     return () => { cancelled = true; };
   }, [ids]);
 
+  // แม่แบบที่ใช้: ตัวที่เลือกไว้ > ตัวตั้งต้นของระบบ > ตัวแรก (กติกาเดียวกับพิมพ์ทีละใบ)
+  const tpl = useMemo(
+    () => templates.find((t) => t.id === prefs?.template_id) ?? templates.find((t) => t.is_default) ?? templates[0] ?? null,
+    [templates, prefs?.template_id],
+  );
+
   const html = useMemo(() =>
-    (data && data.length && tpl)
+    (data && data.length && tpl && prefs)
       ? buildReportHtmlMulti(
           { paper_size: tpl.paper_size, orientation: tpl.orientation, header_html: tpl.header_html, body_html: tpl.body_html, footer_html: tpl.footer_html, custom_css: tpl.custom_css },
-          data,
+          // คอลัมน์ที่ติ๊กเปิด → ต้องแนบให้ "ทุกใบ" ไม่งั้นใบนั้นเหลือ 2 คอลัมน์
+          data.map((d) => ({ ...d, ...columnTokens("so", prefs) })),
         )
       : "",
-  [data, tpl]);
+  [data, tpl, prefs]);
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -63,6 +76,9 @@ function BulkInner() {
         <div className="flex-1" />
         <button onClick={() => printReportFrameOrWindow(docFileName("ใบกำกับภาษีรวม", `${ids.length} ใบ`))} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">⬇ ดาวน์โหลด PDF</button>
       </div>
+      {prefs && templates.length > 0 && (
+        <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} />
+      )}
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>
           : data === null ? <div className="py-20 text-center text-slate-400">กำลังโหลด {done}/{ids.length}…</div>
