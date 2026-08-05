@@ -178,6 +178,8 @@ export function buildReportHtmlMulti(tpl: ReportTemplate, dataList: Record<strin
   const breakCss = `
     .doc-page { break-after: page; page-break-after: always; }
     .doc-page:last-child { break-after: auto; page-break-after: auto; }
+    /* พรีวิวเป็นกระดาษยาวม้วนเดียว มองไม่ออกว่าคนละแผ่น → ขีดเส้นคั่นให้เห็น (เฉพาะบนจอ ไม่ติดไปตอนพิมพ์) */
+    @media screen { .doc-page + .doc-page { border-top: 2px dashed #cbd5e1; } }
     @media print {
       .doc-page { break-after: page !important; page-break-after: always !important; }
       .doc-page:last-child { break-after: auto !important; page-break-after: auto !important; }
