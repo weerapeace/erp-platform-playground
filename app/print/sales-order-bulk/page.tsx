@@ -7,10 +7,14 @@
  * ⭐ ต้องใช้ "แบบฟอร์ม + คอลัมน์ที่ติ๊กไว้" ชุดเดียวกับพิมพ์ทีละใบเสมอ
  *    (useDocPrintPrefs("so") + columnTokens) — ถ้าไม่ส่ง token คอลัมน์
  *    แม่แบบจะซ่อนทุกคอลัมน์ที่ไม่ได้ล็อก เหลือแค่ ชื่อสินค้า + จำนวนเงิน
+ *
+ * ⭐⭐ สั่งพิมพ์ต้องใช้ `printReportHtmlInNewWindow` เท่านั้น (ห้ามใช้ printReportFrameOrWindow)
+ *    เอกสารหลายใบ = หลายแผ่น แต่ **iframe พรีวิวไหลข้ามหน้ากระดาษไม่ได้**
+ *    → สั่งพิมพ์จาก iframe จะได้แค่แผ่นเดียวหรือไม่ออกเลย ต้องเปิดเอกสารจริงในแท็บใหม่แล้วพิมพ์ที่นั่น
  */
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
+import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
@@ -64,9 +68,10 @@ function BulkInner() {
           { paper_size: tpl.paper_size, orientation: tpl.orientation, header_html: tpl.header_html, body_html: tpl.body_html, footer_html: tpl.footer_html, custom_css: tpl.custom_css },
           // คอลัมน์ที่ติ๊กเปิด → ต้องแนบให้ "ทุกใบ" ไม่งั้นใบนั้นเหลือ 2 คอลัมน์
           data.map((d) => ({ ...d, ...columnTokens("so", prefs) })),
+          docFileName("ใบกำกับภาษีรวม", `${ids.length} ใบ`),
         )
       : "",
-  [data, tpl, prefs]);
+  [data, tpl, prefs, ids.length]);
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -74,7 +79,7 @@ function BulkInner() {
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <span className="text-sm text-slate-600">🧾 พิมพ์ใบกำกับภาษีรวม <b>{ids.length}</b> ใบ {data === null && `(กำลังโหลด ${done}/${ids.length})`}</span>
         <div className="flex-1" />
-        <button onClick={() => printReportFrameOrWindow(docFileName("ใบกำกับภาษีรวม", `${ids.length} ใบ`))} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">⬇ ดาวน์โหลด PDF</button>
+        <button onClick={() => html && printReportHtmlInNewWindow(html)} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">⬇ ดาวน์โหลด PDF</button>
       </div>
       {prefs && templates.length > 0 && (
         <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} />
@@ -83,7 +88,8 @@ function BulkInner() {
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>
           : data === null ? <div className="py-20 text-center text-slate-400">กำลังโหลด {done}/{ids.length}…</div>
           : data.length === 0 ? <div className="py-20 text-center text-slate-400">ไม่มีเอกสารให้พิมพ์</div>
-          : <PrintFrame html={html} fileName={docFileName("ใบกำกับภาษีรวม", `${ids.length} ใบ`)} />}
+          : <PrintFrame html={html} fileName={docFileName("ใบกำกับภาษีรวม", `${ids.length} ใบ`)}
+              onPrint={() => html && printReportHtmlInNewWindow(html)} />}
       </div>
     </div>
   );

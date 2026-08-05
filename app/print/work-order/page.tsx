@@ -6,7 +6,8 @@
  */
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
+// พิมพ์หลายใบ = หลายแผ่น → ต้องเปิดเอกสารจริงในแท็บใหม่ (iframe พรีวิวไหลข้ามหน้ากระดาษไม่ได้)
+import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
@@ -62,8 +63,8 @@ function BulkPrintInner() {
   const html = useMemo(() => {
     if (!data || !data.length) return "";
     const dataList = data.flatMap((d) => woSectionDataList(d, woCols));
-    return buildReportHtmlMulti(buildWorkOrderTemplate(woCols), dataList);
-  }, [data, woCols]);
+    return buildReportHtmlMulti(buildWorkOrderTemplate(woCols), dataList, docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`));
+  }, [data, woCols, ids.length]);
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -72,13 +73,14 @@ function BulkPrintInner() {
         <span className="text-sm text-slate-600">🖨️ พิมพ์ใบสั่งงานรวม <b>{ids.length}</b> ใบ {data === null && `(กำลังโหลด ${done}/${ids.length})`}</span>
         <WoColumnSettings onPreview={setPreviewCols} onSaved={reloadCols} />
         <div className="flex-1" />
-        <button onClick={() => printReportFrameOrWindow(docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`))} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">⬇ ดาวน์โหลด PDF</button>
+        <button onClick={() => html && printReportHtmlInNewWindow(html)} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">⬇ ดาวน์โหลด PDF</button>
       </div>
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>
           : data === null ? <div className="py-20 text-center text-slate-400">กำลังโหลด {done}/{ids.length}…</div>
           : data.length === 0 ? <div className="py-20 text-center text-slate-400">ไม่มีใบสั่งงานให้พิมพ์</div>
-          : <PrintFrame html={html} fileName={docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`)} />}
+          : <PrintFrame html={html} fileName={docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`)}
+              onPrint={() => html && printReportHtmlInNewWindow(html)} />}
       </div>
     </div>
   );

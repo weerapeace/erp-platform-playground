@@ -173,7 +173,7 @@ export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknow
  * พิมพ์หลายเอกสารในไฟล์เดียว (เทมเพลตเดียวกัน) — แต่ละชุดข้อมูลขึ้นหน้าใหม่
  * ใช้กับ bulk print เช่น เลือกใบสั่งงานหลายใบแล้วพิมพ์ทีเดียว
  */
-export function buildReportHtmlMulti(tpl: ReportTemplate, dataList: Record<string, unknown>[]): string {
+export function buildReportHtmlMulti(tpl: ReportTemplate, dataList: Record<string, unknown>[], docTitle?: string): string {
   // ห่อแต่ละใบด้วย .doc-page แล้วบังคับแบ่งหน้า — ต้องใช้ !important เพราะ .doc มี break-after:auto!important ในโหมดพิมพ์
   const breakCss = `
     .doc-page { break-after: page; page-break-after: always; }
@@ -184,5 +184,5 @@ export function buildReportHtmlMulti(tpl: ReportTemplate, dataList: Record<strin
     }
   `;
   const body = dataList.map((data) => `<div class="doc-page">${reportDocDiv(tpl, data)}</div>`).join("\n");
-  return wrapHtmlDoc(reportCss(tpl) + breakCss, body);
+  return wrapHtmlDoc(reportCss(tpl) + breakCss, body, docTitle);
 }
