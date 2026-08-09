@@ -20,7 +20,8 @@ import { EmbedModal } from "@/components/embed-modal";
 import { CalendarTabs } from "@/components/calendar-tabs";
 import { Pager } from "@/components/pager";
 import { SortTh, sortRows, type SortState } from "@/components/sort-th";
-import { PinnedWidget, RecentWidget, AgendaWidget, FinanceWidget, ActivityWidget, TeamWidget, ShortcutsWidget, StatWidget, SalesChartWidget } from "./widgets";
+import { PinnedWidget, RecentWidget, AgendaWidget, FinanceWidget, ActivityWidget, TeamWidget, ShortcutsWidget, StatWidget, SalesChartWidget, PlanWidget } from "./widgets";
+import { PlannerView } from "./planner-view";
 import { layoutForRole, type DashboardLayout, type DashboardView } from "@/lib/dashboard-widgets";
 
 // ---- Event type → icon (ครอบคลุม event ที่ไหลเข้ามาจริง) ----
@@ -294,7 +295,7 @@ export default function DashboardPage() {
   }), [apps, panelMap, user, can]);
   const isAdmin = user?.role === "admin" || can("admin.users" as Parameters<typeof can>[0]);
   // มุมมองที่ต้องการพื้นที่กว้าง (ปฏิทิน + ศูนย์ "ที่ต้องจัดการ") → ขยายเต็มความกว้าง
-  const wideView = view === "calendar" || (view === "list" && listMode === "action" && isAdmin);
+  const wideView = view === "calendar" || view === "planner" || (view === "list" && listMode === "action" && isAdmin);
   const scopeList: Notification[] = scope === "team" ? teamItems : items;
   // เปิดงาน: ของฉัน = mark read + ไป · ทีม = ไปอย่างเดียว (ไม่แตะสถานะคนอื่น)
   const openAny = (n: Notification) => { if (scope === "mine") openItem(n); else if (n.link_url) setLinkModal({ url: n.link_url, title: n.title }); };
@@ -341,6 +342,9 @@ export default function DashboardPage() {
           if (w === "kpi") return <KpiStrip key="kpi" unread={unread} metrics={metrics} apps={visibleApps} />;
           if (w === "focus") return (scope === "mine" && view === "systems" && focusItems.length > 0)
             ? <FocusBand key="focus" items={focusItems} onOpen={openItem} /> : null;
+          // แผนวันนี้: มุมมองแผนงานมีบอร์ดเต็มอยู่แล้ว ไม่ต้องโชว์การ์ดสรุปซ้ำ
+          if (w === "plan") return (scope === "mine" && view !== "planner")
+            ? <PlanWidget key="plan" onOpenPlanner={() => setView("planner")} /> : null;
           if (w === "pinned") return <PinnedWidget key="pinned" items={items} onOpen={openItem} />;
           if (w === "recent") return <RecentWidget key="recent" items={items} onOpen={openItem} />;
           if (w === "agenda") return <AgendaWidget key="agenda" items={items} onOpen={openItem} />;
@@ -359,13 +363,14 @@ export default function DashboardPage() {
           <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
             {([
               ...(isAdmin ? [["executive", "👔 ผู้บริหาร"]] : []),
-              ["systems", "🗂️ การ์ดระบบ"], ["calendar", "📅 ปฏิทิน"], ["list", "📋 รายการ"],
+              ["systems", "🗂️ การ์ดระบบ"], ["planner", "🗒️ แผนงาน"], ["calendar", "📅 ปฏิทิน"], ["list", "📋 รายการ"],
             ] as [DashboardView, string][]).map(([v, l]) => (
               <button key={v} onClick={() => { setView(v); if (v !== "list") setListFilter(null); }}
                 className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${view === v ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{l}</button>
             ))}
           </div>
-          {teamAllowed && (
+          {/* แผนงานเป็นของส่วนตัวล้วน (ไม่มีมุมมองทีม) → ซ่อนปุ่มสลับ ของฉัน/ทีม */}
+          {teamAllowed && view !== "planner" && (
             <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
               <button onClick={() => setScope("mine")} className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${scope === "mine" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🙋 ของฉัน</button>
               <button onClick={() => setScope("team")} className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${scope === "team" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>👥 ทีม</button>
@@ -386,6 +391,9 @@ export default function DashboardPage() {
             onDone={scope === "mine" ? markDone : undefined}
             onConfig={isAdmin ? (k) => setConfigApp(visibleApps.find(a => a.key === k) ?? null) : undefined}
             onSeeAll={(k) => { setView("list"); setListFilter(k); setTab("all"); }} />
+        ) : view === "planner" ? (
+          <PlannerView notifications={items} apps={visibleApps}
+            onOpenLink={(url, title) => setLinkModal({ url, title })} />
         ) : view === "calendar" ? (
           <div className="space-y-4">
             <CalendarTabs />

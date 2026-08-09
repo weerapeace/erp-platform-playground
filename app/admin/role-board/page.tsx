@@ -377,10 +377,10 @@ export default function RoleBoardPage() {
                   <p className="text-[11px] text-slate-400 mb-3">มีผลกับหน้า /dashboard ของทุกคนในตำแหน่งนี้</p>
                   <div className="flex items-center gap-2 mb-3 flex-wrap">
                     <span className="text-xs text-slate-500">มุมมองเริ่มต้น:</span>
-                    {(["systems", "calendar", "list"] as DashboardView[]).map((v) => (
+                    {(["systems", "planner", "calendar", "list"] as DashboardView[]).map((v) => (
                       <button key={v} disabled={!canEdit} onClick={() => saveLayout({ default_view: v })}
                         className={`text-xs px-2.5 py-1 rounded-full border ${curLayout.default_view === v ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
-                        {v === "systems" ? "🗂️ การ์ดระบบ" : v === "calendar" ? "📅 ปฏิทิน" : "📋 รายการ"}
+                        {v === "systems" ? "🗂️ การ์ดระบบ" : v === "planner" ? "🗒️ แผนงาน" : v === "calendar" ? "📅 ปฏิทิน" : "📋 รายการ"}
                       </button>
                     ))}
                   </div>

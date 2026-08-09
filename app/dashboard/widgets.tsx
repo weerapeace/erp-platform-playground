@@ -4,8 +4,12 @@
 // Dashboard widgets (ชุดใหญ่) — reuse ข้อมูลเดิม (แจ้งเตือน/ทีม/กิจกรรม/ตัวเลขจริง)
 // ใช้กับหน้าแดชบอร์ดต่อตำแหน่ง (เฟส 3 Role Board) — page ส่งข้อมูลที่ต้องใช้เข้ามา
 // ============================================================
+import { useMemo } from "react";
 import Link from "next/link";
 import { ActivityFeed, type ActivityEntry } from "@/components/activity-feed";
+import { useSWRLite } from "@/lib/swr-lite";
+import { listPlan, patchPlanItem } from "@/lib/planner-client";
+import { PLAN_CACHE_KEY, groupPlan, todayProgress, type PlanItem } from "@/lib/planner";
 import { colorForSystem } from "@/lib/dashboard-systems";
 import type { Notification, TeamNotification } from "@/app/api/notifications/route";
 import type { SystemApp } from "./system-cards";
@@ -128,6 +132,55 @@ export function ShortcutsWidget({ apps }: { apps: SystemApp[] }) {
           </Link>
         ))}
       </div>
+    </Card>
+  );
+}
+
+// 🗒️ แผนวันนี้ — งานที่ "ฉันเลือกเองว่าจะทำวันนี้" (มุมมองแผนงาน) · ติ๊กเสร็จได้จากตรงนี้เลย
+export function PlanWidget({ onOpenPlanner }: { onOpenPlanner?: () => void }) {
+  const { data, mutate } = useSWRLite<PlanItem[]>(PLAN_CACHE_KEY, listPlan, { dedupeMs: 3000 });
+  const plan = useMemo(() => data ?? [], [data]);
+  const today = useMemo(() => groupPlan(plan).today, [plan]);
+  const prog  = useMemo(() => todayProgress(plan), [plan]);
+
+  const toggle = async (it: PlanItem) => {
+    const done_at = it.done_at ? null : new Date().toISOString();
+    mutate(plan.map((x) => (x.id === it.id ? { ...x, done_at } : x)));
+    try { await patchPlanItem(it.id, { done_at }); }
+    catch { mutate(plan); }
+  };
+
+  const action = onOpenPlanner
+    ? <button onClick={onOpenPlanner} className="text-xs text-blue-600 hover:underline">เปิดแผนงาน →</button>
+    : undefined;
+
+  return (
+    <Card icon="🗒️" title="แผนวันนี้" action={action}>
+      {today.length === 0 ? (
+        <div className="text-xs text-slate-400 py-2">ยังไม่ได้วางแผนวันนี้ — เปิดมุมมอง “แผนงาน” แล้วลากงานมาช่องวันนี้ได้เลย</div>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${prog.percent}%` }} />
+            </div>
+            <span className="text-[11px] text-slate-500">{prog.done}/{prog.total}</span>
+          </div>
+          <div className="space-y-1">
+            {today.slice(0, 6).map((it) => (
+              <div key={it.id} className="flex items-start gap-2 px-1 py-1 rounded-lg hover:bg-slate-50">
+                <button onClick={() => void toggle(it)} aria-label={it.done_at ? "ยังไม่เสร็จ" : "เสร็จแล้ว"}
+                  className={`mt-0.5 h-4 w-4 shrink-0 rounded border flex items-center justify-center text-[10px]
+                    ${it.done_at ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 hover:border-emerald-400"}`}>
+                  {it.done_at ? "✓" : ""}
+                </button>
+                <span className={`flex-1 min-w-0 text-[13px] truncate ${it.done_at ? "text-slate-400 line-through" : "text-slate-700"}`}>{it.title}</span>
+              </div>
+            ))}
+            {today.length > 6 && <div className="text-[11px] text-slate-400 pl-1">อีก {today.length - 6} งาน</div>}
+          </div>
+        </>
+      )}
     </Card>
   );
 }

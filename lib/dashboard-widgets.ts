@@ -4,7 +4,7 @@
 // เก็บใน erp_dashboard_layouts · ไม่มีแถว = ใช้ DEFAULT_LAYOUT (เหมือนเดิม)
 // ============================================================
 
-export type DashboardView = "systems" | "calendar" | "list" | "executive";
+export type DashboardView = "systems" | "planner" | "calendar" | "list" | "executive";
 
 export type DashboardLayout = {
   role_key: string;
@@ -14,7 +14,7 @@ export type DashboardLayout = {
 
 // widget เสริมทั้งหมด (ด้านบน main content)
 export const ALL_WIDGETS = [
-  "goals", "focus", "kpi", "pinned", "recent", "agenda",
+  "goals", "focus", "plan", "kpi", "pinned", "recent", "agenda",
   "saleschart", "lowstock", "production", "finance", "activity", "team", "shortcuts",
 ] as const;
 export type WidgetKey = (typeof ALL_WIDGETS)[number];
@@ -22,6 +22,7 @@ export type WidgetKey = (typeof ALL_WIDGETS)[number];
 export const WIDGET_META: Record<WidgetKey, { label: string; icon: string; desc: string }> = {
   goals: { label: "การ์ดเป้าหมาย", icon: "🎯", desc: "ทางเข้าแอปเป้าหมาย/เก็บเงิน" },
   focus: { label: "โฟกัสวันนี้", icon: "⭐", desc: "5 งานที่ควรทำก่อน (เรียงตามความด่วน)" },
+  plan: { label: "แผนวันนี้", icon: "🗒️", desc: "งานที่วางแผนไว้ว่าจะทำวันนี้ + ความคืบหน้า" },
   kpi: { label: "แถบ KPI ตัวเลขจริง", icon: "🔢", desc: "สรุปงานค้าง + เลขจริงรวมทุกระบบ" },
   pinned: { label: "งานปักหมุด", icon: "📌", desc: "งานที่ปักหมุดไว้" },
   recent: { label: "แจ้งเตือนล่าสุด", icon: "🔔", desc: "แจ้งเตือนใหม่ล่าสุด" },
