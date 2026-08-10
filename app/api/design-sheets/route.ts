@@ -75,6 +75,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const status   = (searchParams.get("status") ?? "").trim();
   const brandId  = (searchParams.get("brand_id") ?? "").trim();
   const archived = searchParams.get("archived") === "1";   // โชว์ที่เก็บเข้ากรุ
+  // ids=<id,id,...> → ดึงเฉพาะใบที่ระบุ (ไม่สนกรุ) — ใช้ซิงค์การ์ดใบงานบนกระดานแคมเปญ ให้ยิงครั้งเดียวแทนยิงราย id
+  const idList = (searchParams.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 200);
   const limit  = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
   const SAFE = ["code", "name", "status", "order_date", "deadline", "created_at", "updated_at", "sort_order"];
@@ -85,9 +87,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   let q = admin.from("design_sheets")
     .select("id, code, name, brand_id, status, order_date, deadline, drive_link, note, detail, is_active, updated_at, parent_sku_codes, brand:brands!brand_id(name, color)", { count: "exact" })
-    .eq("is_active", !archived)
     .order(orderCol, { ascending: orderAsc })
-    .range(offset, offset + limit - 1);
+    .range(offset, offset + Math.max(limit, idList.length) - 1);
+  if (idList.length) q = q.in("id", idList);
+  else q = q.eq("is_active", !archived);
   if (search)  { const t = `%${search}%`; q = q.or(`code.ilike.${t},name.ilike.${t}`); }
   if (status)  q = q.eq("status", status);
   if (brandId) q = q.eq("brand_id", brandId);

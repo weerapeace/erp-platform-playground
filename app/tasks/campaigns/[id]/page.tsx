@@ -16,7 +16,9 @@ import { apiFetch } from "@/lib/api";
 import { suppressUnload } from "@/lib/canvas-unload-guard";
 import { ERPModal } from "@/components/modal";
 import { ERPInput } from "@/components/form";
-import { useAuth } from "@/components/auth";
+import { useAuth, usePermission } from "@/components/auth";
+import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
+import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { GifPokeLayer } from "../../gif-poke-layer";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
@@ -59,6 +61,8 @@ const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m)
 });
 const KnowledgeDrawer = dynamic(() => import("../../knowledge-drawer").then((m) => m.KnowledgeDrawer), { ssr: false });
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+// ป๊อปอัปใบงานออกแบบ = ของกลางตัวเดียวกับที่ Design Dashboard ใช้ (ดู/แก้/เปลี่ยนสถานะ/สร้างใหม่) — โหลดเฉพาะตอนใช้
+const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 type ParentSkuVal = { id: string; code: string; name: string; image_url: string | null };
@@ -97,6 +101,41 @@ function parentSkuCardSkeleton(s: ParentSkuVal): Record<string, unknown>[] {
   if (hasImg) els.push({ type: "image", _imageUrl: s.image_url, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], customData: data });
   els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 14, strokeColor: "#0f766e", groupIds: [gid], customData: data });
   return els;
+}
+
+// ---- การ์ดใบงานออกแบบ (Design Sheet) — ตัวเชื่อมกับ Design Dashboard ----
+// ดับเบิลคลิก = เปิดป๊อปอัปใบงานของกลาง (ดู/แก้/เปลี่ยนสถานะ) · ปิดแล้วการ์ดซิงค์ข้อความ+รูป+สีขอบตามสถานะใหม่
+const DS_CARD_STROKE = "#4f46e5";
+type DsCardInfo = { id: string; code: string; name: string; brand_name?: string | null; status?: string | null; deadline?: string | null; cover_url?: string | null };
+function dsCardText(s: DsCardInfo, statusLabel?: string | null): string {
+  const meta = [s.brand_name ? `🏷 ${s.brand_name}` : null, statusLabel ? `● ${statusLabel}` : null].filter(Boolean).join("  ·  ");
+  const dl = s.deadline ? `🗓 ${s.deadline}` : `🗓 ${tt("ไม่มีกำหนด", "No deadline")}`;
+  return [`📐 ${s.code}`, wrapCardText(s.name, 24, 2), meta, dl].filter(Boolean).join("\n");
+}
+function designSheetCardSkeleton(s: DsCardInfo, statusLabel?: string | null, statusColor?: string | null): Record<string, unknown>[] {
+  const gid = `design_sheet-${s.id}-${Math.random().toString(36).slice(2, 7)}`;
+  const data = { kind: "design_sheet", id: s.id, code: s.code, name: s.name, brand_name: s.brand_name ?? null, status: s.status ?? null };
+  const img = s.cover_url ? (withImageWidth(s.cover_url, 480) ?? s.cover_url) : null;
+  const text = dsCardText(s, statusLabel);
+  const lineCount = text ? text.split("\n").length : 1;
+  const W = 240, imgH = 170, txtY = img ? imgH + 18 : 14, H = txtY + lineCount * 20 + 12;
+  const els: Record<string, unknown>[] = [
+    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ffffff", strokeColor: statusColor || DS_CARD_STROKE, fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
+  ];
+  if (img) els.push({ type: "image", _imageUrl: img, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], customData: data });
+  els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 14, strokeColor: "#3730a3", groupIds: [gid], customData: data });
+  return els;
+}
+// ดึงใบงานตาม id ทีเดียว (ใช้ทั้งตอนซิงค์การ์ด และตอนรับ ?add_design_sheets= จาก Design Dashboard)
+async function fetchDesignSheets(ids: string[]): Promise<Map<string, DesignSheetListItem>> {
+  const map = new Map<string, DesignSheetListItem>();
+  if (!ids.length) return map;
+  try {
+    const r = await apiFetch(`/api/design-sheets?ids=${encodeURIComponent(ids.join(","))}&limit=200`);
+    const j = await r.json();
+    for (const row of ((j.data ?? []) as DesignSheetListItem[])) map.set(row.id, row);
+  } catch { /* โหลดไม่ได้ = ปล่อยการ์ดเดิมไว้ */ }
+  return map;
 }
 
 // ตัวเลือก "ดึงข้อมูลอะไรของรูปมาด้วย" บนการ์ดรูปจากคลังกลาง (ติ๊กได้)
@@ -292,6 +331,23 @@ export default function CampaignCanvasPage() {
     setSkuSel((prev) => prev.some((x) => x.id === r.id) ? prev.filter((x) => x.id !== r.id)
       : [...prev, { id: r.id, code: r.code ?? "", name: r.name ?? "", image_url: r.image ?? null } as SkuPickerValue]);
   const [parentRecId, setParentRecId] = useState<string | null>(null); // ดับเบิลคลิกการ์ด Parent SKU → ตัวแก้สินค้ากลาง
+  // ── การ์ดใบงานออกแบบ (เชื่อมกับ Design Dashboard) ──
+  const canDesign = usePermission("products.view");
+  const [dsPickOpen, setDsPickOpen] = useState(false);        // ป๊อปอัปเลือกใบงาน
+  const [dsSel, setDsSel] = useState<DesignSheetListItem[]>([]);
+  const [dsViewId, setDsViewId] = useState<string | null>(null);   // ดับเบิลคลิกการ์ด → เปิดป๊อปอัปใบงาน
+  const [dsCreate, setDsCreate] = useState(false);                 // สร้างใบงานใหม่จากบนกระดาน
+  const [dsMeta, setDsMeta] = useState<StatusMeta>(() => buildStatusMeta(null));
+  const dsMetaRef = useRef<StatusMeta>(dsMeta);
+  useEffect(() => { dsMetaRef.current = dsMeta; }, [dsMeta]);
+  useEffect(() => {
+    if (!canDesign) return;
+    apiFetch("/api/design-sheets/statuses").then((r) => r.json())
+      .then((j) => { if (Array.isArray(j?.data)) setDsMeta(buildStatusMeta(j.data as WfStatusRow[])); }).catch(() => {});
+  }, [canDesign]);
+  const dsLabel = useCallback((status?: string | null) => (status ? (dsMetaRef.current.map[status]?.label ?? status) : null), []);
+  const dsColor = useCallback((status?: string | null) => (status ? (dsMetaRef.current.colorHex[status] ?? DS_CARD_STROKE) : DS_CARD_STROKE), []);
+
   const [knowledgeOpen, setKnowledgeOpen] = useState(false); // คลังความรู้
   const [assetOpen, setAssetOpen] = useState(false);     // AssetPicker เลือกรูปจากคลังกลาง
   const [assetSel, setAssetSel] = useState<AssetRow[]>([]); // รูปที่เลือกไว้รอวาง
@@ -355,6 +411,24 @@ export default function CampaignCanvasPage() {
     setAssetOptOpen(false); setAssetSel([]);
     pushToast("success", t(`วางการ์ดรูป ${n} รูปแล้ว`, `Placed ${n} image card(s)`));
   };
+  // วางการ์ดใบงานออกแบบ (ข้ามใบที่มีการ์ดอยู่แล้ว กันซ้ำ) — ใช้ทั้งจากป๊อปอัปเลือก และจาก Design Dashboard
+  const placeDesignSheetCards = useCallback((sheets: DsCardInfo[]) => {
+    if (!sketchRef.current || !sheets.length) return 0;
+    const onBoard = new Set((sketchRef.current.listCards() ?? []).filter((c) => c.kind === "design_sheet").map((c) => String(c.data.id)));
+    const fresh = sheets.filter((s) => !onBoard.has(s.id));
+    if (!fresh.length) return 0;
+    const all: Record<string, unknown>[] = [];
+    fresh.forEach((s, i) => { const dx = i * 280; for (const el of designSheetCardSkeleton(s, dsLabel(s.status), dsColor(s.status))) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
+    void sketchRef.current.insert(all);
+    return fresh.length;
+  }, [dsLabel, dsColor]);
+  const confirmDesignSheets = () => {
+    const n = placeDesignSheetCards(dsSel);
+    setDsPickOpen(false); setDsSel([]);
+    pushToast(n ? "success" : "info", n
+      ? t(`วางการ์ดใบงาน ${n} ใบแล้ว`, `Placed ${n} design sheet card(s)`)
+      : t("ใบงานที่เลือกอยู่บนกระดานแล้ว", "Selected sheets are already on the board"));
+  };
   const onTaskCreated = (tk: CreatedTask) => { sketchRef.current?.insert(taskCardSkeleton(tk)); pushToast("success", t(`สร้างงาน ${tk.task_no} + วางการ์ดแล้ว`, `Created task ${tk.task_no} and placed card`)); };
   const createContentCard = async () => {
     if (!cForm.title.trim()) { pushToast("error", t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
@@ -393,7 +467,7 @@ export default function CampaignCanvasPage() {
     pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = เปิดโฟลเดอร์
-  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); else if (data.kind === "asset") setAssetView(data); else if (data.kind === "table") setTableView(data); }, [openFolder]);
+  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); else if (data.kind === "asset") setAssetView(data); else if (data.kind === "table") setTableView(data); else if (data.kind === "design_sheet") setDsViewId(String(data.id ?? "")); }, [openFolder]);
   // สร้างตารางคำนวณใหม่ → วางการ์ดบนกระดาน
   const createTableCard = async () => {
     try {
@@ -461,11 +535,56 @@ export default function CampaignCanvasPage() {
       } catch { return null; }
     });
   }, []);
-  const onBoardReady = useCallback(() => { syncTaskCards(); syncContentCards(); }, [syncTaskCards, syncContentCards]);
+  // ④ ซิงค์การ์ดใบงานออกแบบ (ชื่อ/สถานะ/กำหนดส่ง/รูปหน้าปก + สีขอบตามสถานะ) — ยิงครั้งเดียวด้วย ?ids=
+  const syncDesignSheetCards = useCallback(async () => {
+    const ctrl = sketchRef.current; if (!ctrl) return;
+    const ids = (ctrl.listCards() ?? []).filter((c) => c.kind === "design_sheet").map((c) => String(c.data.id)).filter(Boolean);
+    if (!ids.length) return;
+    const map = await fetchDesignSheets(ids);
+    if (!map.size) return;
+    await ctrl.refreshCards(async ({ kind, id }) => {
+      if (kind !== "design_sheet" || !id) return null;
+      const s = map.get(id); if (!s) return null;
+      return {
+        text: dsCardText(s, dsLabel(s.status)),
+        data: { code: s.code, name: s.name, brand_name: s.brand_name, status: s.status },
+        imageUrl: s.cover_url ? (withImageWidth(s.cover_url, 480) ?? s.cover_url) : null,
+        stroke: dsColor(s.status),
+      };
+    });
+  }, [dsLabel, dsColor]);
+
+  // รับใบงานที่ส่งมาจาก Design Dashboard (?add_design_sheets=id,id) → วางการ์ดตอนกระดานพร้อม แล้วล้าง param ออกจาก URL
+  const pendingDsRef = useRef<string[]>([]);
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const raw = sp.get("add_design_sheets"); if (!raw) return;
+      pendingDsRef.current = raw.split(",").map((s) => s.trim()).filter(Boolean);
+      sp.delete("add_design_sheets");
+      window.history.replaceState(null, "", window.location.pathname + (sp.toString() ? `?${sp.toString()}` : ""));
+    } catch { /* ignore */ }
+  }, []);
+  const placePendingDesignSheets = useCallback(async () => {
+    const ids = pendingDsRef.current; if (!ids.length) return;
+    pendingDsRef.current = [];
+    const map = await fetchDesignSheets(ids);
+    const sheets = ids.map((i) => map.get(i)).filter(Boolean) as DesignSheetListItem[];
+    const n = placeDesignSheetCards(sheets);
+    if (n) pushToast("success", t(`วางการ์ดใบงานจาก Design Dashboard ${n} ใบแล้ว`, `Placed ${n} design sheet card(s) from Design Dashboard`));
+    else if (sheets.length) pushToast("info", t("ใบงานที่ส่งมาอยู่บนกระดานแล้ว", "Those sheets are already on the board"));
+  }, [placeDesignSheetCards, pushToast, t]);
+
+  // ⚠️ ชื่อสถานะใบงานมาจาก Workflow กลาง (แก้ได้ที่ /admin/workflows) — ชุดสำรองในโค้ดไม่มีสถานะที่เพิ่มทีหลัง
+  // ถ้ากระดานพร้อมก่อนสถานะโหลดเสร็จ การ์ดจะโชว์ key ดิบ (เช่น state_8) → พอสถานะมาถึงให้ซิงค์ซ้ำ 1 รอบ
+  const boardReadyRef = useRef(false);
+  useEffect(() => { if (boardReadyRef.current) void syncDesignSheetCards(); }, [dsMeta, syncDesignSheetCards]);
+
+  const onBoardReady = useCallback(() => { boardReadyRef.current = true; syncTaskCards(); syncContentCards(); void syncDesignSheetCards(); void placePendingDesignSheets(); }, [syncTaskCards, syncContentCards, syncDesignSheetCards, placePendingDesignSheets]);
   // สลับภาษา → รีเฟรชข้อความบนการ์ด (การ์ดเป็น snapshot · ข้าม mount แรก ให้ onReady จัดการ)
   const { lang } = useLang();
   const langMountRef = useRef(false);
-  useEffect(() => { if (!langMountRef.current) { langMountRef.current = true; return; } syncTaskCards(); syncContentCards(); }, [lang, syncTaskCards, syncContentCards]);
+  useEffect(() => { if (!langMountRef.current) { langMountRef.current = true; return; } syncTaskCards(); syncContentCards(); void syncDesignSheetCards(); }, [lang, syncTaskCards, syncContentCards, syncDesignSheetCards]);
 
   if (err) return <StandaloneShell title={t("แคมเปญ", "Campaign")} icon="📣" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
 
@@ -496,6 +615,7 @@ export default function CampaignCanvasPage() {
             <button onClick={() => setTaskOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">✅ Task Card</button>
             <button onClick={openDragPanel} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">🧲 {t("ลากงานเข้า", "Drag tasks in")}</button>
             <button onClick={() => setContentOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50">📱 Content Card</button>
+            {canDesign && <button onClick={() => { setDsSel([]); setDsPickOpen(true); }} title={t("ดึงใบงานจาก Design Dashboard มาวางบนกระดาน หรือสร้างใบงานใหม่", "Bring design sheets onto the board, or create a new one")} className="h-9 px-3 inline-flex items-center text-sm font-medium text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-50">📐 {t("ใบงานออกแบบ", "Design sheet")}</button>}
             <button onClick={createTableCard} className="h-9 px-3 inline-flex items-center text-sm font-medium text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-50">▦ {t("ตาราง", "Table")}</button>
             <button onClick={() => setFolderOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-cyan-700 border border-cyan-200 rounded-lg hover:bg-cyan-50">📁 {t("โฟลเดอร์", "Folder")}</button>
             <button onClick={() => { setAssetSel([]); setAssetOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-pink-700 border border-pink-200 rounded-lg hover:bg-pink-50">🖼️ {t("รูปจากคลัง", "Library image")}</button>
@@ -538,7 +658,7 @@ export default function CampaignCanvasPage() {
             </div>
           )}
         </div>
-        <p className="text-xs text-slate-400 mt-2">🗂 Section · 📦 SKU · ✅ Task · 📱 Content → <b>{t("ดับเบิลคลิกการ์ด", "Double-click a card")}</b>{t("เพื่อดู/จัดการ · ล้อเมาส์ = ซูม (shift+ล้อ = เลื่อน) · บันทึกอัตโนมัติ", " to view/manage · Scroll = zoom (shift+scroll = pan) · Auto-saved")}</p>
+        <p className="text-xs text-slate-400 mt-2">🗂 Section · 📦 SKU · ✅ Task · 📱 Content · 📐 {t("ใบงานออกแบบ", "Design sheet")} → <b>{t("ดับเบิลคลิกการ์ด", "Double-click a card")}</b>{t("เพื่อดู/จัดการ · ล้อเมาส์ = ซูม (shift+ล้อ = เลื่อน) · บันทึกอัตโนมัติ", " to view/manage · Scroll = zoom (shift+scroll = pan) · Auto-saved")}</p>
       </div>
 
       {/* เลือก SKU หลายอัน (checkbox) → วางการ์ดทีเดียว */}
@@ -563,6 +683,23 @@ export default function CampaignCanvasPage() {
           ? <BigTagPick entity="parent-skus" picked={parentSel.map((x) => x.id)} onPick={toggleParentPick} t={t} />
           : <ParentSkuMultiPick selected={parentSel} onChange={setParentSel} />}
       </ERPModal>
+
+      {/* เลือกใบงานออกแบบ (จาก Design Dashboard) หลายใบ → วางการ์ด · หรือกดสร้างใบงานใหม่จากบนกระดาน */}
+      <ERPModal open={dsPickOpen} onClose={() => setDsPickOpen(false)} title={t("เพิ่มการ์ดใบงานออกแบบลงกระดาน", "Add Design Sheet card to board")} size="md"
+        footer={<>
+          <button onClick={() => { setDsPickOpen(false); setDsCreate(true); }} className="mr-auto h-9 px-3 text-sm text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-50">＋ {t("สร้างใบงานใหม่", "New design sheet")}</button>
+          <button onClick={() => setDsPickOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={confirmDesignSheets} disabled={!dsSel.length} className="h-9 px-4 text-sm text-white bg-indigo-600 rounded-lg disabled:opacity-50">{t("เพิ่มการ์ด", "Add card")}{dsSel.length ? ` (${dsSel.length})` : ""}</button>
+        </>}>
+        <DesignSheetMultiPick selected={dsSel} onChange={setDsSel} statusLabel={dsLabel} />
+      </ERPModal>
+
+      {/* ดับเบิลคลิกการ์ดใบงาน → ป๊อปอัปใบงานของกลาง (ดู/แก้/เปลี่ยนสถานะ) · ปิดแล้วซิงค์การ์ด */}
+      {dsViewId && <DesignSheetDetail detailOnly openId={dsViewId} onDetailClose={() => { setDsViewId(null); void syncDesignSheetCards(); }} />}
+      {/* สร้างใบงานใหม่จากบนกระดาน → ได้ใบงานจริง (โผล่ใน Design Dashboard) + วางการ์ดให้ทันที */}
+      {dsCreate && <DesignSheetDetail detailOnly createMode defaultBrandId={detail?.campaign.brand_id ?? null}
+        onCreated={(s) => { placeDesignSheetCards([{ id: s.id, code: s.code, name: t("ใบงานใหม่", "New design sheet"), status: null }]); pushToast("success", t(`สร้างใบงาน ${s.code} + วางการ์ดแล้ว`, `Created design sheet ${s.code} and placed card`)); }}
+        onDetailClose={() => { setDsCreate(false); void syncDesignSheetCards(); }} />}
 
       {/* ดับเบิลคลิกการ์ด Parent SKU → ตัวแก้สินค้ากลาง */}
       {parentRecId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={parentRecId} onClose={() => setParentRecId(null)} onChanged={() => {}} />}
@@ -649,7 +786,7 @@ export default function CampaignCanvasPage() {
       {/* ป๊อปอัปสรุปการ์ดบนกระดาน */}
       <ERPModal open={cardsOpen} onClose={() => setCardsOpen(false)} title={t("การ์ดบนกระดาน", "Cards on board")} size="md"
         footer={<button onClick={() => setCardsOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>}>
-        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); else if (c.kind === "content") setContentView(c.data); else if (c.kind === "parent_sku") setParentRecId(String(c.data.id ?? "")); else if (c.kind === "folder") openFolder(String(c.data.path ?? "")); else if (c.kind === "asset") setAssetView(c.data); }} />
+        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); else if (c.kind === "content") setContentView(c.data); else if (c.kind === "parent_sku") setParentRecId(String(c.data.id ?? "")); else if (c.kind === "folder") openFolder(String(c.data.path ?? "")); else if (c.kind === "asset") setAssetView(c.data); else if (c.kind === "design_sheet") setDsViewId(String(c.data.id ?? "")); }} />
       </ERPModal>
 
       {/* สร้างงานจริง (ฟอร์มเดียวกับหน้างาน) -- ล็อกแคมเปญนี้ → วางการ์ดงานบนกระดาน */}
@@ -784,6 +921,7 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
   const contents = cards.filter((c) => c.kind === "content");
   const folders = cards.filter((c) => c.kind === "folder");
   const assets = cards.filter((c) => c.kind === "asset");
+  const designSheets = cards.filter((c) => c.kind === "design_sheet");
   if (cards.length === 0) return <p className="text-sm text-slate-400 text-center py-6">{t("ยังไม่มีการ์ดบนกระดาน — กด ✅ Task / 📦 SKU / 📱 Content / 📁 โฟลเดอร์ เพื่อเพิ่ม", "No cards on the board yet — click ✅ Task / 📦 SKU / 📱 Content / 📁 Folder to add")}</p>;
   return (
     <div className="space-y-4">
@@ -840,6 +978,20 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
           </div>
         )}
       </div>
+      {designSheets.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">📐 {t("การ์ดใบงานออกแบบ", "Design sheet cards")} ({designSheets.length})</p>
+          <div className="space-y-1.5">
+            {designSheets.map((c, i) => (
+              <button key={i} onClick={() => onOpen(c)} className="w-full flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 hover:border-indigo-300 hover:bg-indigo-50/40 text-left">
+                <span className="font-mono text-[11px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{String(c.data.code ?? "")}</span>
+                <span className="text-sm text-slate-700 flex-1 truncate">{String(c.data.name ?? "")}</span>
+                <span className="text-[11px] text-slate-400 shrink-0">{String(c.data.brand_name ?? "")}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {assets.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">🖼️ {t("การ์ดรูปจากคลัง", "Library image cards")} ({assets.length})</p>
@@ -973,6 +1125,68 @@ function SkuMultiPick({ selected, onChange }: { selected: SkuPickerValue[]; onCh
           ); })}
         {!loading && results.length > 0 && results.length < total && (
           <button onClick={loadMore} disabled={more} className="w-full px-3 py-2 text-xs text-violet-700 bg-violet-50/60 hover:bg-violet-50 disabled:opacity-50">
+            {more ? t("กำลังโหลด…", "Loading…") : `${t("โหลดเพิ่ม", "Load more")} (${t("แสดง", "showing")} ${results.length}/${total})`}
+          </button>
+        )}
+      </div>
+      {!loading && total > 0 && <p className="text-[11px] text-slate-400">{t("พบ", "Found")} {total} {t("รายการ", "items")}{results.length < total ? ` · ${t("แสดง", "showing")} ${results.length}` : ""}</p>}
+    </div>
+  );
+}
+
+// เลือกใบงานออกแบบหลายใบ (ค้นหา + checkbox + รูปหน้าปก) — ข้อมูลชุดเดียวกับ Design Dashboard
+function DesignSheetMultiPick({ selected, onChange, statusLabel }: {
+  selected: DesignSheetListItem[];
+  onChange: (v: DesignSheetListItem[]) => void;
+  statusLabel: (status?: string | null) => string | null;
+}) {
+  const t = useT();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<DesignSheetListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [more, setMore] = useState(false);
+  const fetchPage = async (q: string, offset: number) => {
+    const res = await apiFetch(`/api/design-sheets?${new URLSearchParams({ search: q, limit: String(PICK_PAGE), offset: String(offset), archived: "0", sort_by: "updated_at", sort_dir: "desc" })}`);
+    const j = await res.json();
+    return { rows: ((j.data ?? []) as DesignSheetListItem[]), total: Number(j.total ?? 0) };
+  };
+  useEffect(() => {
+    let active = true; setLoading(true);
+    const tmr = setTimeout(async () => {
+      try { const { rows, total: tt } = await fetchPage(query, 0); if (active) { setResults(rows); setTotal(tt); } }
+      catch { if (active) { setResults([]); setTotal(0); } } finally { if (active) setLoading(false); }
+    }, 250);
+    return () => { active = false; clearTimeout(tmr); };
+  }, [query]);
+  const loadMore = async () => {
+    setMore(true);
+    try { const { rows } = await fetchPage(query, results.length); setResults((p) => [...p, ...rows]); }
+    catch { /* ignore */ } finally { setMore(false); }
+  };
+  const toggle = (s: DesignSheetListItem) => onChange(selected.some((x) => x.id === s.id) ? selected.filter((x) => x.id !== s.id) : [...selected, s]);
+  return (
+    <div className="space-y-2">
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("🔍 ค้นหารหัสใบงาน (DS-...) / ชื่องาน...", "🔍 Search sheet code (DS-...) / name...")} className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm" />
+      {selected.length > 0 && <div className="flex flex-wrap gap-1.5">{selected.map((s) => <span key={s.id} className="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono">{s.code}</span><button onClick={() => toggle(s)} className="hover:text-red-500">✕</button></span>)}</div>}
+      <div className="max-h-64 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
+        {loading ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("กำลังค้นหา...", "Searching...")}</p>
+          : results.length === 0 ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("ไม่พบใบงานออกแบบ", "No design sheet found")}</p>
+          : results.map((s) => { const on = selected.some((x) => x.id === s.id); const cover = withImageWidth(s.cover_url, 72); return (
+            <button key={s.id} onClick={() => toggle(s)} className={`w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-slate-50 ${on ? "bg-indigo-50/40" : ""}`}>
+              <input type="checkbox" readOnly checked={on} className="h-4 w-4 rounded border-slate-300 text-indigo-600 pointer-events-none" />
+              {cover
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={cover} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" />
+                : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">📐</span>}
+              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+              <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
+              {s.brand_name && <span className="text-[10px] text-slate-400 shrink-0">{s.brand_name}</span>}
+              <span className="text-[10px] text-indigo-500 shrink-0">{statusLabel(s.status)}</span>
+            </button>
+          ); })}
+        {!loading && results.length > 0 && results.length < total && (
+          <button onClick={loadMore} disabled={more} className="w-full px-3 py-2 text-xs text-indigo-700 bg-indigo-50/60 hover:bg-indigo-50 disabled:opacity-50">
             {more ? t("กำลังโหลด…", "Loading…") : `${t("โหลดเพิ่ม", "Load more")} (${t("แสดง", "showing")} ${results.length}/${total})`}
           </button>
         )}

@@ -389,8 +389,10 @@ function CopyFromSheetModal({ open, excludeId, onClose, onApply }: {
 
 // detailOnly = โหมด "เฉพาะ popup" (ไม่เรนเดอร์ตาราง/canvas) — ให้หน้าอื่น (เช่น Design Dashboard) เปิด popup รายละเอียด
 // ในตัวเองได้ โดย reuse popup เดิมทั้งหมด · openId = ใบที่จะเปิด · onDetailClose = เรียกตอนปิด popup
-export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, onDetailClose }:
-  { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; onDetailClose?: () => void } = {}) {
+// onCreated = แจ้งหน้าแม่ทันทีที่ "สร้างใบงานใหม่" สำเร็จ (ป๊อปอัปยังค้างอยู่ให้แนบรูปต่อได้)
+// ใช้โดยกระดานแคมเปญ: สร้างใบงานจากบนกระดาน → วางการ์ดให้เลย
+export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, onDetailClose, onCreated }:
+  { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; onDetailClose?: () => void; onCreated?: (sheet: { id: string; code: string }) => void } = {}) {
   const canView = usePermission("products.view");
   const canCreate = usePermission("products.create");
   const canEdit = usePermission("products.edit");
@@ -1160,6 +1162,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         // สร้างเสร็จ → ค้างป๊อปอัพไว้ (กลายเป็นโหมดแก้) ให้แนบรูป/comment ต่อได้เลย
         toast.success(`สร้างใบงานแล้ว: ${j.code}`);
         patch({ id: j.id, code: j.code });
+        onCreated?.({ id: String(j.id), code: String(j.code ?? "") });   // เช่น กระดานแคมเปญ → วางการ์ดใบงานที่เพิ่งสร้าง
       }
       refresh();
     } catch (e) { setFormErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }

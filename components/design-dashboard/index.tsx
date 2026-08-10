@@ -11,6 +11,7 @@ import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design
 import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
 import { usePermission } from "@/components/auth";
+import { useAppGuard } from "@/components/app-access-gate";
 import { RecordTasksButton } from "@/components/record-tasks";
 import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import { wfIconSlotId } from "@/lib/brand-theme";
@@ -150,6 +151,15 @@ function CardDeadline({ tone, label }: { tone: Tone; label: string }) {
 
 
 
+// ติ๊กมุมการ์ดตอนอยู่ในโหมด "ส่งขึ้นกระดาน" (ไม่รับคลิกเอง — ให้การ์ดทั้งใบเป็นตัวกด)
+function PickBadge({ checked }: { checked: boolean }) {
+  return (
+    <span className={`pointer-events-none absolute left-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-md border text-xs font-bold shadow-sm ${checked ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-300 bg-white/90 text-transparent"}`}>
+      ✓
+    </span>
+  );
+}
+
 function LoadingCard() {
   return (
     <div className="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
@@ -160,8 +170,19 @@ function LoadingCard() {
   );
 }
 
+// ── ส่งใบงานขึ้นกระดานแคมเปญ (Campaign Canvas) ──
+// กระดานเก็บ scene ไว้ฝั่ง server + มี realtime/version-guard → หน้านี้ "ไม่แก้ scene เอง" (จะชนกับคนที่เปิดกระดานอยู่)
+// แต่ส่งรายการ id ไปกับ URL แล้วให้หน้ากระดานวางการ์ดเอง → ปลอดภัย + คนกดได้เห็นกระดานทันทีเพื่อจัดตำแหน่ง
+const SEND_TO_BOARD_MAX = 40;
+type CampaignOption = { id: string; name: string; status: string; brand_label: string | null };
+// ป้ายสถานะแคมเปญ (ชุดเดียวกับ CAMPAIGN_STATUS ใน app/tasks/campaigns/campaign-drawer.tsx)
+// ไม่ import มาตรง ๆ เพราะจะลาก drawer + โมดูลงานทั้งก้อนเข้า bundle ของหน้านี้
+const CAMPAIGN_STATUS_TH: Record<string, string> = { planning: "วางแผน", active: "กำลังทำ", done: "จบแล้ว", cancelled: "ยกเลิก" };
+
 export function DesignDashboard() {
   const canEdit = usePermission("products.edit");
+  // กระดานแคมเปญอยู่ในแอป "งาน" (/tasks) — ใช้ guard กลางตัวเดียวกับ layout ของแอปนั้น ไม่มีสิทธิ์ = ไม่โชว์ปุ่ม
+  const canTasks = !useAppGuard("tasks").blocked;
   const [sheets, setSheets] = useState<DesignSheetListItem[]>([]);
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditLogEntry[]>([]);
@@ -247,6 +268,34 @@ export function DesignDashboard() {
       .catch(() => {});
   };
   const [quickFilter, setQuickFilter] = useState<"all" | "active" | "urgent" | "soon" | "closed">("all");
+
+  // ── โหมดเลือกใบงานเพื่อส่งขึ้นกระดานแคมเปญ ──
+  const [pickMode, setPickMode] = useState(false);
+  const [pickedIds, setPickedIds] = useState<Set<string>>(new Set());
+  const [campaignPickOpen, setCampaignPickOpen] = useState(false);
+  const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
+  const [campaignsLoading, setCampaignsLoading] = useState(false);
+  const [campaignQuery, setCampaignQuery] = useState("");
+  const togglePicked = (id: string) => setPickedIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const exitPickMode = () => { setPickMode(false); setPickedIds(new Set()); setCampaignPickOpen(false); };
+  const openCampaignPick = () => {
+    setCampaignPickOpen(true);
+    if (campaigns.length || campaignsLoading) return;
+    setCampaignsLoading(true);
+    apiFetch("/api/creative-campaigns").then((r) => r.json())
+      .then((j) => {
+        const rows = Array.isArray(j?.data) ? j.data as Array<Record<string, unknown>> : [];
+        setCampaigns(rows.map((c) => ({ id: String(c.id), name: String(c.name ?? ""), status: String(c.status ?? ""), brand_label: (c.brand_label as string) ?? null })));
+      })
+      .catch(() => setCampaigns([]))
+      .finally(() => setCampaignsLoading(false));
+  };
+  // ส่งขึ้นกระดาน = เปิดหน้ากระดานแคมเปญพร้อมรายการใบงาน → หน้ากระดานวางการ์ดให้เอง (ดูหมายเหตุด้านบนไฟล์)
+  const sendToBoard = (campaignId: string) => {
+    const ids = Array.from(pickedIds).slice(0, SEND_TO_BOARD_MAX);
+    if (!ids.length) return;
+    window.location.href = `/tasks/campaigns/${encodeURIComponent(campaignId)}?add_design_sheets=${encodeURIComponent(ids.join(","))}`;
+  };
 
   useEffect(() => {
     let alive = true;
@@ -674,6 +723,14 @@ export function DesignDashboard() {
                       className={`h-9 rounded-md border px-3 text-xs font-medium transition ${quickFilter === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
                   ))}
                 </div>
+                {/* ส่งใบงานขึ้นกระดานวางแผน (Campaign Canvas) — ติ๊กเลือกหลายใบแล้วส่งทีเดียว */}
+                {canTasks && (
+                  <button type="button" onClick={() => (pickMode ? exitPickMode() : setPickMode(true))}
+                    title="ติ๊กเลือกใบงานแล้วส่งขึ้นกระดานวางแผนของแคมเปญ"
+                    className={`h-9 rounded-md border px-3 text-xs font-medium transition ${pickMode ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}>
+                    {pickMode ? "✕ ออกจากโหมดเลือก" : "🎨 ส่งขึ้นกระดาน"}
+                  </button>
+                )}
                 {/* เลือกจำนวนการ์ดต่อแถว (ของกลาง) — เฉพาะมุมมองแกลเลอรี */}
                 {viewMode === "gallery" && (
                   <GalleryColumnsControl cols={galleryCols} onChange={setGalleryCols} className="ml-auto" />
@@ -703,17 +760,20 @@ export function DesignDashboard() {
                     const brandColor = safeColor(sheet.brand_color);
                     const coverUrl = sheetCoverUrl(sheet);
                     const st = statusInfo.get(sheet.status);
+                    const picked = pickedIds.has(sheet.id);
+                    const activate = () => (pickMode ? togglePicked(sheet.id) : openDetail(sheet.id));
                     return (
                       <div
                         key={sheet.id}
                         role="button"
                         tabIndex={0}
-                        onClick={() => openDetail(sheet.id)}
-                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDetail(sheet.id); } }}
+                        onClick={activate}
+                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
                         data-gg-task-card
-                        title={`${sheet.code} • ${sheet.name}`}
-                        className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-amber-300"
+                        title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : `${sheet.code} • ${sheet.name}`}
+                        className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-white shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"}`}
                       >
+                        {pickMode && <PickBadge checked={picked} />}
                         <BrandSlot theme={brandTheme} id="task_corner" />
                         {coverUrl ? (
                           <HoverPreview url={sheet.cover_url} previewW={640}>
@@ -795,21 +855,24 @@ export function DesignDashboard() {
                               const coverUrl = sheetCoverUrl(sheet);
                               const isDragging = draggingSheetId === sheet.id;
                               const isMoving = movingSheetId === sheet.id;
+                              const picked = pickedIds.has(sheet.id);
+                              const activate = () => { if (isMoving) return; if (pickMode) togglePicked(sheet.id); else openDetail(sheet.id); };
                               return (
                                 <div
                                   key={sheet.id}
                                   role="button"
                                   tabIndex={0}
-                                  onClick={() => { if (!isMoving) openDetail(sheet.id); }}
-                                  onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && !isMoving) { event.preventDefault(); openDetail(sheet.id); } }}
+                                  onClick={activate}
+                                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
                                   data-gg-task-card
-                                  draggable={!movingSheetId}
+                                  draggable={!movingSheetId && !pickMode}
                                   onDragStart={(event) => handleCardDragStart(event, sheet)}
                                   onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
                                   aria-busy={isMoving}
-                                  title="Drag to change status or click to open"
-                                  className={`relative block overflow-hidden rounded-lg border border-slate-200 bg-white p-2.5 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-amber-300 ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : "cursor-grab active:cursor-grabbing"}`}
+                                  title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : "Drag to change status or click to open"}
+                                  className={`relative block overflow-hidden rounded-lg border bg-white p-2.5 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
                                 >
+                                  {pickMode && <PickBadge checked={picked} />}
                                   <BrandSlot theme={brandTheme} id="task_corner" />
                                   {coverUrl ? (
                                     <HoverPreview url={sheet.cover_url} previewW={640}>
@@ -912,6 +975,76 @@ export function DesignDashboard() {
           </main>
         </div>
       </div>
+
+      {/* แถบล่าง "เลือกไว้ N ใบ" (Bulk action bar) — โผล่เฉพาะโหมดเลือก */}
+      {pickMode && createPortal(
+        <div className="fixed inset-x-0 bottom-0 z-[80] border-t border-indigo-200 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_rgba(15,23,42,0.10)] backdrop-blur">
+          <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-3">
+            <span className="text-sm font-semibold text-slate-800">🎨 เลือกไว้ {pickedIds.size.toLocaleString("th-TH")} ใบ</span>
+            <span className="text-xs text-slate-400">กดการ์ดเพื่อเลือก · ส่งได้ครั้งละไม่เกิน {SEND_TO_BOARD_MAX} ใบ</span>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <button onClick={() => setPickedIds(new Set(filteredSheets.map((s) => s.id).slice(0, SEND_TO_BOARD_MAX)))}
+                title={`เลือกทุกใบที่ผ่านตัวกรอง/คำค้นตอนนี้ (${Math.min(filteredSheets.length, SEND_TO_BOARD_MAX)} ใบ)`}
+                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                เลือกทั้งหมดที่กรองอยู่
+              </button>
+              <button onClick={() => setPickedIds(new Set())} disabled={pickedIds.size === 0}
+                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                ล้างที่เลือก
+              </button>
+              <button onClick={exitPickMode} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                ออกจากโหมด
+              </button>
+              <button onClick={openCampaignPick} disabled={pickedIds.size === 0}
+                className="h-9 rounded-md bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
+                ส่งขึ้นกระดาน →
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* เลือกแคมเปญปลายทาง → เปิดกระดานแคมเปญนั้นพร้อมวางการ์ดใบงานที่เลือก */}
+      {campaignPickOpen && createPortal(
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={() => setCampaignPickOpen(false)}>
+          <div className="flex max-h-[85vh] w-[520px] max-w-full flex-col rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <div className="text-base font-semibold text-slate-800">🎨 ส่งขึ้นกระดานวางแผน</div>
+                <p className="text-xs text-slate-400">เลือกแคมเปญที่จะวางการ์ดใบงาน {Math.min(pickedIds.size, SEND_TO_BOARD_MAX)} ใบ</p>
+              </div>
+              <button onClick={() => setCampaignPickOpen(false)} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
+            </div>
+            <div className="border-b border-slate-100 px-4 py-2">
+              <input value={campaignQuery} onChange={(e) => setCampaignQuery(e.target.value)} placeholder="🔍 ค้นหาแคมเปญ..."
+                className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+            </div>
+            <div className="flex-1 overflow-auto p-2">
+              {campaignsLoading ? (
+                <p className="py-6 text-center text-sm text-slate-400">กำลังโหลดแคมเปญ...</p>
+              ) : campaigns.length === 0 ? (
+                <p className="py-6 text-center text-sm text-slate-400">ยังไม่มีแคมเปญ — สร้างได้ที่หน้า “แคมเปญ” ในระบบงาน</p>
+              ) : (
+                campaigns
+                  .filter((c) => !campaignQuery.trim() || `${c.name} ${c.brand_label ?? ""}`.toLowerCase().includes(campaignQuery.trim().toLowerCase()))
+                  .map((c) => (
+                    <button key={c.id} onClick={() => sendToBoard(c.id)}
+                      className="mb-1 flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-indigo-300 hover:bg-indigo-50/40">
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">📣 {c.name}</span>
+                      {c.brand_label && <span className="shrink-0 text-[11px] text-slate-400">{c.brand_label}</span>}
+                      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{CAMPAIGN_STATUS_TH[c.status] ?? c.status}</span>
+                    </button>
+                  ))
+              )}
+            </div>
+            <div className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-400">
+              กดแคมเปญแล้วระบบจะพาไปที่กระดานนั้นและวางการ์ดให้อัตโนมัติ · จัดตำแหน่งการ์ดต่อได้บนกระดาน
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {statusMgr && (
         <WorkflowStatusManager
