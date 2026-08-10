@@ -149,6 +149,38 @@ function triggerDownload(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/**
+ * ของกลาง: ดาวน์โหลดไฟล์จาก API ที่มีด่านสิทธิ์
+ *
+ * ⚠️ ห้ามใช้ `<a href="/api/...">` กับ endpoint ที่ต้องล็อกอิน — การกดลิงก์คือการ
+ * "เปิด URL" ธรรมดา ไม่ได้แนบ Authorization: Bearer ของผู้ใช้ไปด้วย → API ตอบ
+ * "ต้องมีสิทธิ์…" แล้วเบราว์เซอร์โชว์ JSON error แทนที่จะได้ไฟล์
+ * (เจอจริงกับปุ่ม Export CSV ของรอบจ่ายเงิน)
+ *
+ * ตัวนี้ยิงผ่าน apiFetch (แนบ token ให้) แล้วแปลงเป็นไฟล์ให้ดาวน์โหลด
+ * คืน null = สำเร็จ · คืนข้อความ = error ให้หน้าจอเอาไปโชว์
+ */
+export async function downloadFromApi(url: string, fallbackFilename: string): Promise<string | null> {
+  const { apiFetch } = await import("@/lib/api");
+  try {
+    const res = await apiFetch(url);
+    const type = res.headers.get("content-type") ?? "";
+    if (!res.ok || type.includes("application/json")) {
+      // API ตอบ JSON = พลาด (สิทธิ์/ข้อผิดพลาด) ไม่ใช่ไฟล์
+      const j = await res.json().catch(() => ({}));
+      return String((j as { error?: string }).error ?? `ดาวน์โหลดไม่สำเร็จ (${res.status})`);
+    }
+    // ใช้ชื่อไฟล์จาก Content-Disposition ถ้า API ส่งมา
+    const cd = res.headers.get("content-disposition") ?? "";
+    const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    const filename = m?.[1] ? decodeURIComponent(m[1]) : fallbackFilename;
+    triggerDownload(await res.blob(), filename);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : "ดาวน์โหลดไม่สำเร็จ";
+  }
+}
+
 // ---- Audit log (best-effort, ไม่ block download ถ้า fail) ----
 
 async function logExportAudit(opts: ExportOptions, exportedCount: number, blockedFields: string[]) {

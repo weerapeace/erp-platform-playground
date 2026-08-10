@@ -407,6 +407,26 @@ export default function PayrollPaymentsPage() {
     }
   }
 
+  /**
+   * Export CSV — ต้องยิงผ่าน apiFetch (แนบ token) ไม่ใช่ <a href="/api/...">
+   * เดิมเป็นลิงก์ตรง → เบราว์เซอร์ไม่ได้ส่ง Authorization ไปด้วย → API ตอบ
+   * "ต้องมีสิทธิ์เข้าแอป Payroll" แล้วโชว์ JSON แทนไฟล์
+   */
+  async function exportCsv() {
+    if (!detail) return;
+    setBusy("export"); setErr(null); setMsg(null);
+    try {
+      const { downloadFromApi } = await import("@/lib/export");
+      const fail = await downloadFromApi(
+        `/api/payroll/payment-batches/${encodeURIComponent(detail.batch.id)}/export`,
+        `payroll-payment-${String(detail.batch.batch_no ?? detail.batch.id)}.csv`,
+      );
+      if (fail) setErr(fail); else setMsg("ดาวน์โหลด CSV แล้ว");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Export CSV ไม่สำเร็จ");
+    } finally { setBusy(null); }
+  }
+
   async function resyncBatch() {
     if (!detail) return;
     if (!confirm("อัปเดตยอดในรอบนี้ให้ตรงกับการคำนวณล่าสุด?\n\n• คนเดิม: ยอดจ่ายจะอัปเดตตามคำนวณล่าสุด\n• คนใหม่ที่ยังไม่อยู่ในรอบ: จะถูกเพิ่มเข้ามาให้\n\n(การแก้ยอด/ธนาคารรายบรรทัดที่ตั้งไว้เองจะถูกแทนด้วยยอดจากคำนวณ)")) return;
@@ -691,7 +711,10 @@ export default function PayrollPaymentsPage() {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {badge(detail.batch.status)}
-                <a href={`/api/payroll/payment-batches/${encodeURIComponent(detail.batch.id)}/export`} className="h-9 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">Export CSV</a>
+                <button type="button" onClick={() => void exportCsv()} disabled={busy === "export"}
+                  className="h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                  {busy === "export" ? "กำลังดาวน์โหลด…" : "Export CSV"}
+                </button>
                 <button type="button" onClick={() => setReportOpen(true)} className="h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50">ปรับ Report</button>
                 {detail.batch.status === "draft" && <button onClick={resyncBatch} disabled={busy === "resync"} className="h-9 rounded-lg border border-amber-300 bg-amber-50 px-3 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-40">{busy === "resync" ? "กำลังอัปเดต…" : "🔄 อัปเดตยอดจากคำนวณล่าสุด"}</button>}
                 {detail.batch.status === "draft" && <button onClick={() => batchAction("approve")} disabled={busy === "approve"} className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40">อนุมัติ</button>}
