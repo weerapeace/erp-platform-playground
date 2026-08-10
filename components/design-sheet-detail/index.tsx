@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable, type ServerFetchParams } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { CampaignBoardPicker, useCanSendToBoard } from "@/components/campaign-board-send";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -391,8 +392,11 @@ function CopyFromSheetModal({ open, excludeId, onClose, onApply }: {
 // ในตัวเองได้ โดย reuse popup เดิมทั้งหมด · openId = ใบที่จะเปิด · onDetailClose = เรียกตอนปิด popup
 // onCreated = แจ้งหน้าแม่ทันทีที่ "สร้างใบงานใหม่" สำเร็จ (ป๊อปอัปยังค้างอยู่ให้แนบรูปต่อได้)
 // ใช้โดยกระดานแคมเปญ: สร้างใบงานจากบนกระดาน → วางการ์ดให้เลย
-export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, onDetailClose, onCreated }:
-  { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; onDetailClose?: () => void; onCreated?: (sheet: { id: string; code: string }) => void } = {}) {
+// hideSendToBoard = ซ่อนปุ่ม "ส่งขึ้นกระดาน" (ส่งมาจากหน้ากระดานแคมเปญเอง — การ์ดอยู่บนกระดานแล้ว ปุ่มนี้ซ้ำซ้อน)
+export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, hideSendToBoard = false, onDetailClose, onCreated }:
+  { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; hideSendToBoard?: boolean; onDetailClose?: () => void; onCreated?: (sheet: { id: string; code: string }) => void } = {}) {
+  const canSendToBoard = useCanSendToBoard();
+  const [boardPick, setBoardPick] = useState(false);   // ป๊อปอัปเลือกแคมเปญปลายทาง
   const canView = usePermission("products.view");
   const canCreate = usePermission("products.create");
   const canEdit = usePermission("products.edit");
@@ -1540,6 +1544,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             <div className="mr-auto flex items-center gap-1.5">
               <button onClick={() => void copySheetLink()} title="คัดลอกลิงก์มาที่ใบงานนี้ (ส่งให้คนอื่นเปิดตรงนี้ได้เลย)"
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🔗 คัดลอกลิงก์</button>
+              {/* ปุ่มลัด: ส่งใบงานนี้ขึ้นกระดานวางแผนของแคมเปญ (ของกลาง) — ซ่อนตอนเปิดจากบนกระดานเอง (ซ้ำซ้อน) */}
+              {canSendToBoard && !hideSendToBoard && (
+                <button onClick={() => { if (costDirty) { toast.error("มีข้อมูลตีราคายังไม่บันทึก — กดบันทึกก่อนออกจากใบงาน"); return; } setBoardPick(true); }}
+                  title="เลือกแคมเปญ แล้วไปวางการ์ดใบงานนี้บนกระดานวางแผน"
+                  className="h-9 px-3 inline-flex items-center text-sm border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-50">🎨 ส่งขึ้นกระดาน</button>
+              )}
               <a href={`/print/design-sheet/${form.id}`} target="_blank" rel="noreferrer"
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบสั่งตัวอย่าง</a>
               <a href={`/print/design-sheet-quote/${form.id}`} target="_blank" rel="noreferrer"
@@ -2136,6 +2146,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       <QuotationCartDrawer cartId={cartId} refreshKey={cartRefresh} onClear={clearCart} onLabel={setCartLabel} />
 
       {/* เตือนก่อนปิด เมื่อมีข้อมูลยังไม่บันทึก (กระดาน/ตีราคา) — 3 ทางเลือก */}
+      {/* เลือกแคมเปญปลายทาง (ของกลาง) → ไปกระดานนั้นพร้อมวางการ์ดใบงานนี้ */}
+      <CampaignBoardPicker open={boardPick} onClose={() => setBoardPick(false)} sheetIds={form?.id ? [form.id] : []} />
+
       <ERPModal open={closeConfirm} onClose={() => !closeSaving && setCloseConfirm(false)} size="sm" title="ยังไม่ได้บันทึก"
         footer={<>
           <button onClick={() => setCloseConfirm(false)} disabled={closeSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">อยู่ต่อ</button>

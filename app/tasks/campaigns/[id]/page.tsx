@@ -695,9 +695,9 @@ export default function CampaignCanvasPage() {
       </ERPModal>
 
       {/* ดับเบิลคลิกการ์ดใบงาน → ป๊อปอัปใบงานของกลาง (ดู/แก้/เปลี่ยนสถานะ) · ปิดแล้วซิงค์การ์ด */}
-      {dsViewId && <DesignSheetDetail detailOnly openId={dsViewId} onDetailClose={() => { setDsViewId(null); void syncDesignSheetCards(); }} />}
+      {dsViewId && <DesignSheetDetail detailOnly hideSendToBoard openId={dsViewId} onDetailClose={() => { setDsViewId(null); void syncDesignSheetCards(); }} />}
       {/* สร้างใบงานใหม่จากบนกระดาน → ได้ใบงานจริง (โผล่ใน Design Dashboard) + วางการ์ดให้ทันที */}
-      {dsCreate && <DesignSheetDetail detailOnly createMode defaultBrandId={detail?.campaign.brand_id ?? null}
+      {dsCreate && <DesignSheetDetail detailOnly hideSendToBoard createMode defaultBrandId={detail?.campaign.brand_id ?? null}
         onCreated={(s) => { placeDesignSheetCards([{ id: s.id, code: s.code, name: t("ใบงานใหม่", "New design sheet"), status: null }]); pushToast("success", t(`สร้างใบงาน ${s.code} + วางการ์ดแล้ว`, `Created design sheet ${s.code} and placed card`)); }}
         onDetailClose={() => { setDsCreate(false); void syncDesignSheetCards(); }} />}
 
