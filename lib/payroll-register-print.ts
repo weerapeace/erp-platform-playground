@@ -42,17 +42,25 @@ export function computePayrollRegisterAmounts(line: Record<string, unknown>): {
   const socialSecurity = roundMoney(money(line.social_security_employee));
   const plannedMonthEndPay = roundMoney(baseSalary - midMonthPaid - socialSecurity);
   const payableMonthEndPay = Math.max(plannedMonthEndPay, 0);
-  const transferNetPay = roundMoney(money(line.net_pay));
-  const monthEndPay = roundMoney(Math.min(Math.max(transferNetPay, 0), payableMonthEndPay));
-  const diff = roundMoney(transferNetPay - plannedMonthEndPay);
+  // ทะเบียนเงินเดือนใช้ "จำนวนเต็มบาท" เหมือนหน้าอื่นในระบบ (ไม่มีทศนิยม)
+  // ตัดเศษสตางค์ของยอดโอนลง แล้วให้เศษไหลเข้าช่อง "เงินสด" อัตโนมัติ
+  //   (cash_pay คำนวณจาก payable − monthEndPay อยู่แล้ว → แถวยังบวกได้ลงตัว ไม่มีใครเสียเงิน)
+  // ตัวอย่าง: ฐาน 11,160 − ปกส 558 = 10,602 · หัก 16 (2,000) = 8,602
+  //   สุทธิจริง 8,024.50 → เงินเดือน 31 = 8,024 · เงินสด = 578 · รวม 8,602 เท่าเดิม
+  const netPayRaw = Math.max(roundMoney(money(line.net_pay)), 0);
+  const transferNetPay = Math.floor(netPayRaw);
+  const monthEndPay = Math.floor(Math.min(netPayRaw, payableMonthEndPay));
+  const diff = roundMoney(netPayRaw - plannedMonthEndPay);
 
   return {
     base_salary: baseSalary,
     mid_month_paid: midMonthPaid,
     month_end_pay: monthEndPay,
     transfer_net_pay: transferNetPay,
-    overtime_amount: diff > 0 ? diff : 0,
-    cash_pay: diff < 0 ? roundMoney(payableMonthEndPay - monthEndPay) : 0,
+    // เกินแผน (มี OT/เงินเพิ่ม) → ส่วนเกินเป็นจำนวนเต็มเช่นกัน
+    overtime_amount: diff > 0 ? Math.round(diff) : 0,
+    // ขาดจากแผน หรือมีเศษสตางค์จากการตัดยอดโอน → ไปรวมที่เงินสด
+    cash_pay: Math.max(payableMonthEndPay - monthEndPay, 0),
     social_security: socialSecurity,
     balance: roundMoney(baseSalary - socialSecurity),
   };
