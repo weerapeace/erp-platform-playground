@@ -36,6 +36,25 @@ API: `/api/admin/schema-sync`, `/api/admin/field-registry-v2/*`
 
 audit table: `erp_field_registry_audit` — บันทึก before/after เมื่อ admin แก้ field config (S10)
 
+### `options` jsonb — รูปแบบที่ระบบกลางอ่าน
+
+```jsonc
+{
+  "options": ["term", "revolving"],            // ค่าที่เก็บจริงใน DB (ui_field_type = select)
+  "labels":  { "term": "เงินกู้มีกำหนดระยะเวลา (Term)",  // ป้ายที่คนเห็น — ไม่ใส่ = โชว์ค่าดิบ
+               "revolving": "วงเงินหมุนเวียน (Revolving)" },
+  "currency": "THB",                           // ฟิลด์เงิน: สกุลตายตัว
+  "currency_field": "currency"                 // หรืออ่านสกุลจากฟิลด์อื่นในแถวเดียวกัน
+}
+```
+
+`labels` มีผลพร้อมกันทุกที่ผ่าน `MasterCRUDPage`: ตัวเลือกในฟอร์ม · ค่าที่แสดงในตาราง · ป๊อปแก้เร็ว (inline edit) ·
+ตัวกรองคอลัมน์ · แก้หลายรายการ (bulk edit) — **ไม่ต้องเขียน `cellRenderers` ซ้ำในแต่ละหน้า**
+
+แก้ป้ายเองได้จาก UI: หน้าโมดูล → 🎨 แต่งฟอร์ม (Studio) → คลิกฟิลด์ → กล่อง **"ตัวเลือก (select)"**
+พิมพ์บรรทัดละ 1 ตัวเลือก รูปแบบ `ค่าที่เก็บ | ป้ายที่คนเห็น`
+⚠️ เปลี่ยน "ค่าที่เก็บ" = ข้อมูลเก่าที่บันทึกค่าเดิมไว้จะไม่ตรงกับตัวเลือกใหม่ (ป้ายเปลี่ยนได้อิสระ)
+
 ---
 
 ## Sprint Map

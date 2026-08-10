@@ -133,6 +133,10 @@ function registryToFieldDef(
     : "text";
 
   const opts = (rf.options as { options?: string[] })?.options;
+  // ป้ายภาษาไทยของตัวเลือก (ของกลาง) — เก็บที่ทะเบียน field: options.labels = { "ค่าที่เก็บ": "ป้ายที่คนเห็น" }
+  const rawLabels = (rf.options as { labels?: Record<string, string> })?.labels;
+  const optLabels = rawLabels && typeof rawLabels === "object" && !Array.isArray(rawLabels) ? rawLabels : undefined;
+  const optLabel  = (v: string) => optLabels?.[v] || v;
   const relCfg = rf.relation_config as RelationConfig | undefined;
   const key = rf.column_name ?? rf.field_key;
   const customRender = cellRenderers?.[key];
@@ -166,6 +170,12 @@ function registryToFieldDef(
             ? (v: unknown) => <ImageCell r2Key={v as string | null} size={40} />
           : fieldType === "date"
             ? (v: unknown) => v ? <span className="text-sm tabular-nums text-slate-700">{formatDate(v)}</span> : <span className="text-slate-300">—</span>
+          : fieldType === "select" && optLabels
+            // select ที่ตั้งป้ายไทยไว้ → ตารางโชว์ป้าย ไม่ใช่ค่าดิบอังกฤษ
+            ? (v: unknown) => {
+                const k = String(v ?? "");
+                return k ? <span className="text-sm text-slate-700">{optLabel(k)}</span> : <span className="text-slate-300">—</span>;
+              }
           : hasCurrency && fieldType === "number"
             // ฟิลด์เงิน: โชว์สกุลถูกต้องตามทะเบียน (ตายตัว หรือตามฟิลด์อื่นในแถว เช่น currency)
             ? (v: unknown, row?: Record<string, unknown>) => {
@@ -187,6 +197,7 @@ function registryToFieldDef(
     type:        fieldType,
     required:    rf.is_required,
     options:     opts,
+    optionLabels: optLabels,
     placeholder: rf.placeholder ?? undefined,
     helpText:    rf.help_text ?? undefined,
     colSize:     rf.is_visible ? rf.width : undefined,
@@ -262,6 +273,7 @@ const GROUP_CONFIG: Record<string, { label: string; labelEn: string; icon: strin
   pricing:   { label: "ราคา & ต้นทุน",  labelEn: "Price & cost",         icon: "💰", defaultOpen: true, order: 50 },
   money:     { label: "เงินต้น & ดอกเบี้ย", labelEn: "Principal & interest", icon: "💰", defaultOpen: true, order: 51 },
   period:    { label: "ระยะเวลา",        labelEn: "Period",               icon: "📅", defaultOpen: true, order: 53 },
+  progress:  { label: "ความคืบหน้าการผ่อน", labelEn: "Repayment progress",  icon: "📊", defaultOpen: true, order: 52 },
   pay:       { label: "ค่าจ้าง",         labelEn: "Wages",                icon: "💰", defaultOpen: true, order: 52 },
   term:      { label: "ระยะเวลา/สถานะ", labelEn: "Term / status",        icon: "📅", defaultOpen: true, order: 54 },
   media:     { label: "รูปภาพ/ไฟล์",    labelEn: "Images / files",       icon: "🖼️", defaultOpen: true, order: 55 },
@@ -340,6 +352,8 @@ export type FieldDef = {
   summarize?: boolean;
   required?:  boolean;
   options?:   string[];                   // สำหรับ select
+  /** ป้ายที่คนเห็นของแต่ละตัวเลือก (ค่าที่เก็บ → ป้ายไทย) — ตั้งที่ Studio หรือ options.labels ในทะเบียน field */
+  optionLabels?: Record<string, string>;
   placeholder?: string;
   /** help text แสดงใต้ label ใน form */
   helpText?:  string;
@@ -1484,7 +1498,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         filterable: f.type === "many2many" ? false : (f.filterable ?? false),
         // relation → select (ติ๊กเลือกชื่อจริง) · ตัวเลือกดึงจาก /distinct แบบ lazy · ไม่ hardcode เป็น text อีกต่อไป
         filterType: f.filterType ?? (f.type === "number" ? "number" : f.type === "boolean" ? "boolean" : (f.type === "select" || f.type === "relation") ? "select" : "text"),
-        ...(f.type === "select" && f.options ? { filterOptions: f.options.map(o => ({ value: o, label: o })) } : {}),
+        ...(f.type === "select" && f.options ? { filterOptions: f.options.map(o => ({ value: o, label: f.optionLabels?.[o] || o })) } : {}),
         // computed + ตั้ง "แสดงผลรวมท้ายตาราง" → sum สูตรทุกแถวในหน้านี้
         ...(f.type === "computed" && f.summarize
           ? { summary: (rows: unknown[]) => formatComputed(
@@ -1866,7 +1880,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         key: f.key,
         label: f.label,
         type: (["number", "select", "boolean", "relation"].includes(f.type) ? f.type : "text") as BulkEditField["type"],
-        options: f.type === "select" && f.options ? f.options.map((o) => ({ value: o, label: o })) : undefined,
+        options: f.type === "select" && f.options ? f.options.map((o) => ({ value: o, label: f.optionLabels?.[o] || o })) : undefined,
         relationConfig: f.type === "relation" ? f.relationConfig : undefined,
       }));
   }, [canEdit, effectiveFields, config.uniqueKey]);
@@ -2094,7 +2108,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             style={tStyle}
             className={`${common} bg-white`}>
             <option value="">{tr("— เลือก —", "— select —")}</option>
-            {f.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            {f.options?.map(opt => <option key={opt} value={opt}>{f.optionLabels?.[opt] || opt}</option>)}
           </select>
         ) : f.type === "textarea" ? (
           <textarea value={(v as string) || ""} disabled={disabled}
@@ -3169,7 +3183,7 @@ function QuickEditCell({ field, value, onSave, siblingValues, autoOpen, onDone }
       <button type="button" onClick={() => { setVal(value == null ? "" : String(value)); setEditing(true); }}
         className={`block w-full text-left text-sm rounded px-2 py-1 -mx-2 border border-transparent hover:border-blue-200 hover:bg-blue-50/60 group ${empty ? "text-slate-300 italic" : "text-slate-800"}`}>
         <span className="flex items-start gap-1 max-w-full">
-          <span className={`flex-1 ${isArea ? "whitespace-pre-wrap break-words" : "truncate"}`}>{empty ? tr("คลิกเพื่อเพิ่มข้อมูล", "Click to add") : String(value)}</span>
+          <span className={`flex-1 ${isArea ? "whitespace-pre-wrap break-words" : "truncate"}`}>{empty ? tr("คลิกเพื่อเพิ่มข้อมูล", "Click to add") : (field.optionLabels?.[String(value)] || String(value))}</span>
           <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 flex-shrink-0">✎</span>
         </span>
       </button>
@@ -3183,7 +3197,7 @@ function QuickEditCell({ field, value, onSave, siblingValues, autoOpen, onDone }
       {field.type === "select" && field.options ? (
         <select autoFocus value={val} disabled={saving} onChange={(e) => setVal(e.target.value)} onBlur={() => commit(val)} className={`${inputCls} bg-white`}>
           <option value="">—</option>
-          {field.options.map((o) => <option key={o} value={o}>{o}</option>)}
+          {field.options.map((o) => <option key={o} value={o}>{field.optionLabels?.[o] || o}</option>)}
         </select>
       ) : field.type === "textarea" ? (
         <textarea autoFocus value={val} disabled={saving} rows={4}

@@ -15,10 +15,8 @@ const MasterCRUDPage = dynamic(
 );
 
 // ---- ป้ายชื่อ (แสดงผลภาษาไทย จากค่าที่เก็บเป็นอังกฤษ) ----
-const LOAN_TYPE: Record<string, string> = {
-  term: "เงินกู้มีกำหนด", revolving: "หมุนเวียน", leasing: "ลีสซิ่ง", director: "กรรมการ",
-  vehicle: "สินเชื่อรถ", machine: "ซื้อเครื่องจักร", short_term: "ระยะสั้น",
-};
+// ประเภทเงินกู้ / ชนิดอัตรา / วิธีผ่อน ฯลฯ ใช้ป้ายไทยจากทะเบียน field (options.labels)
+// แก้ชื่อป้ายได้เองที่ปุ่ม 🎨 แต่งฟอร์ม → เลือกฟิลด์ → "ตัวเลือก (select)" — ไม่ต้องแก้โค้ด
 const chip = (label: string, cls: string) =>
   <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}>{label}</span>;
 
@@ -72,10 +70,6 @@ const CONFIG: MasterCRUDConfig = {
     layout: "grid",
   },
   cellRenderers: {
-    loan_type: (v) => {
-      const k = String(v ?? "");
-      return LOAN_TYPE[k] ? <span className="text-sm text-slate-600">{LOAN_TYPE[k]}</span> : <span className="text-xs text-slate-300">—</span>;
-    },
     lifecycle_status: (v) => {
       const m = LIFECYCLE[String(v ?? "")];
       return m ? chip(m[0], m[1]) : <span className="text-xs text-slate-300">{String(v ?? "—")}</span>;
@@ -86,9 +80,33 @@ const CONFIG: MasterCRUDConfig = {
     },
     contracted_principal: money,
     approved_limit: money,
+    total_paid_amount: money,
+    next_due_amount: money,
     interest_rate: (v) => {
       const n = Number(v);
       return <span className="text-sm tabular-nums text-slate-600">{n.toFixed(2)}%</span>;
+    },
+    // ผ่อนไปกี่งวด — โชว์ "x / y งวด" + แถบความคืบหน้า (อ่านง่ายกว่าเลขเดี่ยว)
+    paid_installment_count: (v, row) => {
+      const paid  = Number(v ?? 0);
+      const total = Number(row?.total_installment_count ?? 0);
+      if (!total) return <span className="text-xs text-slate-300">ยังไม่มีตารางผ่อน</span>;
+      const pct = Math.min(100, Math.round((paid / total) * 100));
+      return (
+        <span className="inline-flex items-center gap-2">
+          <span className="text-sm tabular-nums text-slate-700">{paid} / {total} งวด</span>
+          <span className="w-14 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+            <span className="block h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+          </span>
+          <span className="text-[10px] text-slate-400 tabular-nums">{pct}%</span>
+        </span>
+      );
+    },
+    payment_due_day: (v) => {
+      const n = Number(v ?? 0);
+      return n >= 1 && n <= 31
+        ? <span className="text-sm text-slate-700">ทุกวันที่ {n}</span>
+        : <span className="text-xs text-slate-300">—</span>;
     },
   },
 };

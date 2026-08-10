@@ -82,6 +82,7 @@ const GROUP_META: Record<string, { label: string; icon: string; order: number }>
   content:   { label: "เนื้อหา",       icon: "📝", order: 40 },
   pricing:   { label: "ราคา",          icon: "💰", order: 50 },
   media:     { label: "รูปภาพ/ไฟล์",   icon: "🖼️", order: 55 },
+  progress:  { label: "ความคืบหน้าการผ่อน", icon: "📊", order: 52 },
   bom:       { label: "BOM (สูตรผลิต)", icon: "📐", order: 58 },
   status:    { label: "สถานะ",         icon: "🟢", order: 60 },
   other:     { label: "อื่น ๆ",        icon: "📦", order: 80 },
@@ -1122,6 +1123,51 @@ function FSGroup({ title, children }: { title: string; children: React.ReactNode
   return <div className="space-y-1.5 pt-2.5 first:pt-0 border-t first:border-t-0 border-slate-100">
     <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{title}</div>{children}</div>;
 }
+
+// ตัวเลือกของ field แบบ select: บรรทัดละ 1 ตัวเลือก "ค่าที่เก็บ | ป้ายที่คนเห็น"
+// ค่าที่เก็บ = ค่าจริงในฐานข้อมูล (ห้ามเปลี่ยนพร่ำเพรื่อ ข้อมูลเก่าจะไม่ตรง) · ป้าย = ข้อความไทยที่โชว์ในฟอร์ม/ตาราง/ตัวกรอง
+function optionsToText(raw?: Record<string, unknown>): string {
+  const opts = Array.isArray(raw?.options) ? (raw!.options as unknown[]).map(String) : [];
+  const labels = (raw?.labels ?? {}) as Record<string, string>;
+  return opts.map((o) => (labels[o] ? `${o} | ${labels[o]}` : o)).join("\n");
+}
+function textToOptions(text: string, raw?: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...(raw ?? {}) } as Record<string, unknown>;
+  const opts: string[] = [];
+  const labels: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const [rawVal, ...rest] = line.split("|");
+    const val = (rawVal ?? "").trim();
+    if (!val) continue;
+    opts.push(val);
+    const lbl = rest.join("|").trim();
+    if (lbl) labels[val] = lbl;
+  }
+  next.options = opts;
+  if (Object.keys(labels).length) next.labels = labels; else delete next.labels;
+  return next;
+}
+function FSOptions({ field, onPatch }: { field: StudioField; onPatch: (patch: Partial<StudioField>) => void }) {
+  const [text, setText] = useState(() => optionsToText(field.optionsRaw));
+  // เปลี่ยน field ที่เลือก → โหลดข้อความใหม่ (ไม่ยึดของ field เดิม)
+  useEffect(() => { setText(optionsToText(field.optionsRaw)); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [field.key]);
+  return (
+    <FSGroup title="ตัวเลือก (select)">
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => onPatch({ optionsRaw: textToOptions(text, field.optionsRaw) })}
+        rows={Math.min(10, Math.max(3, text.split("\n").length + 1))}
+        placeholder={"draft | ร่าง\nactive | ใช้งานอยู่"}
+        className="w-full px-2 py-1.5 border border-slate-200 rounded font-mono text-[11px]"
+      />
+      <div className="text-[10px] text-slate-400 leading-relaxed">
+        บรรทัดละ 1 ตัวเลือก · รูปแบบ <code className="bg-slate-100 px-1 rounded">ค่าที่เก็บ | ป้ายที่คนเห็น</code><br />
+        เปลี่ยน &ldquo;ป้าย&rdquo; ได้อิสระ (โชว์ทั้งฟอร์ม ตาราง และตัวกรอง) · เปลี่ยน &ldquo;ค่าที่เก็บ&rdquo; = ข้อมูลเก่าที่บันทึกค่าเดิมไว้จะไม่ตรงกับตัวเลือกใหม่
+      </div>
+    </FSGroup>
+  );
+}
 function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch: Partial<StudioField>)=>void }) {
   const us = (field.uiStyle ?? {}) as Record<string, unknown>;
   const setUi = (k: string, v: unknown) => onPatch({ uiStyle: { ...us, [k]: v } });
@@ -1167,6 +1213,8 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
           <input value={String(field.defaultValue ?? "")} onChange={(e)=>onPatch({defaultValue:e.target.value})} placeholder="ค่าเริ่มต้น" className="h-8 px-2 border border-slate-200 rounded" />
         </div>
       </FSGroup>
+
+      {field.type === "select" && <FSOptions field={field} onPatch={onPatch} />}
 
       {(field.type === "number" || field.type === "currency") && (
         <FSGroup title="สกุลเงิน">
