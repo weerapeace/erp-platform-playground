@@ -8,7 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { canMakeBat, downloadSubBat, subInvoiceUrl } from "@/lib/subs-bat";
+import { canMakeBat, downloadChromeBat, downloadSubBat, subInvoiceUrl } from "@/lib/subs-bat";
+import { canSearchMail, gmailSearchUrl } from "@/lib/gmail-search";
 import { INVOICE_ACCEPT_ATTR, invoiceFileKind } from "@/lib/subscriptions";
 import type { MissingInvoice } from "@/app/api/subscriptions/missing-invoices/route";
 
@@ -71,6 +72,21 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter, onAttac
 
   const pickFile = (it: MissingInvoice) => { pendingRef.current = it; fileRef.current?.click(); };
 
+  /**
+   * เปิด Gmail ของบัญชีที่ผูกกับรายการ พร้อมคำค้นเมลบิลของเดือนนั้น
+   * มีโฟลเดอร์โปรไฟล์ Chrome → โหลด .bat (การันตีว่าเปิดในโปรไฟล์ที่ล็อกอินเมลนั้น)
+   * ไม่มี → เปิดแท็บใหม่ตรง ๆ (ถ้า Chrome ที่เปิดอยู่ไม่ได้ล็อกอินเมลนี้ Gmail จะให้เลือกบัญชี)
+   */
+  const searchMail = (it: MissingInvoice) => {
+    const url = gmailSearchUrl(it, it.month);
+    if (!url) { toast.warning("รายการนี้ยังไม่ได้ใส่อีเมลบัญชี — ใส่ก่อนถึงจะค้นในเมลได้"); return; }
+    if (it.chrome_profile_dir && downloadChromeBat(it, url, "gmail")) {
+      toast.success("ดาวน์โหลดไฟล์แล้ว — ดับเบิลคลิกเพื่อเปิด Gmail ในโปรไฟล์ที่ถูก");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   const skip = async (it: MissingInvoice) => {
     const key = rowKey(it);
     setBusy(key);
@@ -108,7 +124,11 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter, onAttac
 
       {!collapsed && (
         <div className="px-3 pb-3">
-          <p className="text-[11px] text-amber-600 px-1 mb-1.5">รายการ รายเดือน + เปิดใช้งาน + งาน ที่ยังไม่มีใบเสร็จ (ย้อน 3 เดือน) · กดโหลด .bat ไปเอาบิล แล้วกด &ldquo;📎 แนบบิล&rdquo; (หรือลากไฟล์มาวางบนแถว) เพื่ออัปโหลดเข้าเดือนนั้นทันที · ถ้าเดือนนั้นไม่มีบิลให้กด &ldquo;ข้ามบิล&rdquo;</p>
+          <p className="text-[11px] text-amber-600 px-1 mb-1.5">
+            รายการ รายเดือน + เปิดใช้งาน + งาน ที่ยังไม่มีใบเสร็จ (ย้อน 3 เดือน) ·
+            หาบิลได้ 2 ทาง: <b>.bat/เปิดบิล</b> = ไปหน้าบิลของร้าน · <b>🔍 หาในเมล</b> = เปิด Gmail ของบัญชีนั้น พร้อมคำค้นเมลบิลของเดือนนั้นให้แล้ว
+            (แก้คำค้นต่อในหน้า Gmail ได้) · ได้ไฟล์แล้วกด <b>📎 แนบบิล</b> หรือลากไฟล์มาวางบนแถว · เดือนไหนไม่มีบิลให้กด &ldquo;ข้ามบิล&rdquo;
+          </p>
           {/* ช่องเลือกไฟล์ตัวเดียวใช้ร่วมทุกแถว (จำแถวที่กดไว้ใน pendingRef) */}
           <input ref={fileRef} type="file" accept={INVOICE_ACCEPT_ATTR} className="hidden"
             onChange={(e) => {
@@ -149,6 +169,15 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter, onAttac
                 ) : (
                   <span className="text-[11px] text-slate-300 flex-shrink-0">ตั้งลิงก์/โปรไฟล์ก่อน</span>
                 )}
+                <button onClick={() => searchMail(it)} disabled={!canSearchMail(it)}
+                  title={!canSearchMail(it)
+                    ? "ยังไม่ได้ใส่อีเมลบัญชีของรายการนี้"
+                    : it.chrome_profile_dir
+                      ? `โหลดไฟล์เปิด Gmail (โปรไฟล์ ${it.chrome_profile_dir}) พร้อมคำค้นเมลบิลเดือน ${fmtMonth(it.month)}`
+                      : `เปิด Gmail ของ ${it.account_email} พร้อมคำค้นเมลบิลเดือน ${fmtMonth(it.month)}`}
+                  className="h-8 px-3 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent flex-shrink-0">
+                  🔍 หาในเมล
+                </button>
                 {canEdit && (
                   <button onClick={() => pickFile(it)} disabled={uploading}
                     title={`แนบไฟล์บิลของเดือน ${fmtMonth(it.month)} (PDF หรือรูป) — ลากไฟล์มาวางบนแถวนี้ก็ได้`}

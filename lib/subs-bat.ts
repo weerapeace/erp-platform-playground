@@ -37,11 +37,21 @@ function downloadTextFile(filename: string, content: string): void {
   URL.revokeObjectURL(href);
 }
 
-/** ดาวน์โหลดไฟล์ .bat ของ subscription — ชื่อไฟล์เติมชื่อเล่นโปรไฟล์/อีเมล กันชื่อซ้ำ · คืน false ถ้าข้อมูลไม่พอ */
+/** ชื่อไฟล์ .bat — เติมชื่อเล่นโปรไฟล์/อีเมล กันชื่อซ้ำ */
+function batFileName(prefix: string, sub: BatInfo): string {
+  const suffix = sub.chrome_profile ? `-${sanitizeName(sub.chrome_profile)}` : sub.account_email ? `-${sanitizeName(sub.account_email)}` : "";
+  return `${prefix}-${sanitizeName(sub.name)}${suffix}.bat`;
+}
+
+/** ดาวน์โหลด .bat เปิด Chrome โปรไฟล์ของรายการนี้ไปที่ url ที่กำหนด · false ถ้าไม่มีโฟลเดอร์โปรไฟล์ */
+export function downloadChromeBat(sub: BatInfo, url: string, prefix = "chrome"): boolean {
+  if (!url || !sub.chrome_profile_dir) return false;
+  downloadTextFile(batFileName(prefix, sub), makeBat(sub.chrome_profile_dir, url));
+  return true;
+}
+
+/** ดาวน์โหลดไฟล์ .bat เปิดหน้าบิลของร้าน · คืน false ถ้าข้อมูลไม่พอ */
 export function downloadSubBat(sub: BatInfo): boolean {
   const url = subInvoiceUrl(sub);
-  if (!url || !sub.chrome_profile_dir) return false;
-  const suffix = sub.chrome_profile ? `-${sanitizeName(sub.chrome_profile)}` : sub.account_email ? `-${sanitizeName(sub.account_email)}` : "";
-  downloadTextFile(`chrome-${sanitizeName(sub.name)}${suffix}.bat`, makeBat(sub.chrome_profile_dir, url));
-  return true;
+  return url ? downloadChromeBat(sub, url) : false;
 }

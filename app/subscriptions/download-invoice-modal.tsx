@@ -8,7 +8,8 @@
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import type { Subscription } from "@/lib/subscriptions";
-import { normUrl, subInvoiceUrl, canMakeBat, downloadSubBat } from "@/lib/subs-bat";
+import { normUrl, subInvoiceUrl, canMakeBat, downloadChromeBat, downloadSubBat } from "@/lib/subs-bat";
+import { canSearchMail, gmailSearchUrl } from "@/lib/gmail-search";
 
 export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
   sub: Subscription | null;
@@ -29,6 +30,17 @@ export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
 
   const genBat = () => {
     if (sub && downloadSubBat(sub)) toast.success("ดาวน์โหลดไฟล์แล้ว — ดับเบิลคลิกเพื่อเปิด Chrome");
+  };
+
+  // ค้นเมลใบเสร็จย้อน 60 วัน (ป๊อปอัปนี้ไม่ผูกกับเดือนใดเดือนหนึ่ง)
+  const searchMail = () => {
+    const url = sub ? gmailSearchUrl(sub) : null;
+    if (!url) return;
+    if (sub?.chrome_profile_dir && downloadChromeBat(sub, url, "gmail")) {
+      toast.success("ดาวน์โหลดไฟล์แล้ว — ดับเบิลคลิกเพื่อเปิด Gmail ในโปรไฟล์ที่ถูก");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -67,6 +79,27 @@ export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
               )}
             </div>
           )}
+
+          {/* หาใบเสร็จในเมล */}
+          <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+            <div className="text-xs font-medium text-slate-600">📧 หาใบเสร็จในเมล</div>
+            {canSearchMail(sub) ? (
+              <>
+                <button onClick={searchMail}
+                  className="h-9 w-full rounded-lg border border-indigo-200 bg-white text-indigo-600 text-sm font-medium hover:bg-indigo-50">
+                  🔍 หาในเมล (ย้อน 60 วัน)
+                </button>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  เปิด Gmail ของ <b>{sub.account_email}</b> พร้อมคำค้นเมลบิลของร้านนี้ให้แล้ว (แก้คำค้นต่อได้ในหน้า Gmail)
+                  {sub.chrome_profile_dir ? <><br />รายการนี้ตั้งโปรไฟล์ Chrome ไว้ → จะได้ไฟล์ลัดมาให้ดับเบิลคลิก เพื่อเปิดในโปรไฟล์ที่ล็อกอินเมลนี้</> : null}
+                </p>
+              </>
+            ) : (
+              <p className="text-[11px] text-amber-600">
+                ยังไม่ได้ใส่ <b>อีเมลบัญชี</b> ของรายการนี้{canEdit && " — กด ✎ แก้ไขเพื่อเพิ่ม"}
+              </p>
+            )}
+          </div>
 
           {/* เปิดใน Chrome โปรไฟล์ที่ถูก (ไฟล์ลัด .bat) */}
           <div className="rounded-lg border border-slate-200 p-3 space-y-2">
