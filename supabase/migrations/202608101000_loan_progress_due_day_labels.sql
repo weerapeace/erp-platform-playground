@@ -337,3 +337,17 @@ begin
     perform public.loan_contract_recompute(r.id);
   end loop;
 end $$;
+
+-- ============================================================
+-- 7) กติกาตรวจค่า "ชำระทุกวันที่" (ของกลาง erp_validation_rules)
+--    กันกรอก 0 หรือ 45 แล้วเด้ง error ดิบจากฐานข้อมูล
+-- ============================================================
+insert into public.erp_validation_rules (key, label, description, category, validator_type, config, default_message, is_builtin, active)
+select 'day_of_month', 'วันที่ของเดือน (1-31)', 'ใช้กับช่องที่กรอกวันที่ของเดือน เช่น "ชำระทุกวันที่"', 'range', 'min_max',
+       '{"min":1,"max":31}'::jsonb, 'กรอกได้เฉพาะวันที่ 1-31', true, true
+where not exists (select 1 from public.erp_validation_rules where key = 'day_of_month');
+
+update public.erp_module_fields f
+set validation_rules = jsonb_build_object('rules', jsonb_build_array('day_of_month'))
+from public.erp_modules m
+where m.id = f.module_id and m.module_key = 'loan-contracts' and f.column_name = 'payment_due_day';
