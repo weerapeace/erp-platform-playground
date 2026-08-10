@@ -182,12 +182,20 @@ export function payrollRegisterNetPayBasis(payrollNetPay: unknown, paidAmount: u
 async function pnd3ConfirmedPaymentNetByEmployee(admin: ReturnType<typeof supabaseAdmin>, periodId: string) {
   const { data: batchRows, error: batchError } = await admin
     .from("payment_batches")
-    .select("id")
+    .select("id, batch_type")
     .eq("payroll_period_id", periodId)
     .in("status", CONFIRMED_PAYMENT_STATUSES);
   if (batchError) throw new Error(batchError.message);
 
-  const batchIds = ((batchRows ?? []) as Row[]).map((batch) => text(batch.id)).filter(Boolean);
+  // ⚠️ ภ.ง.ด.3 ต้องรายงาน "รายได้ทั้งงวด" — ถ้ารอบจ่าย "สิ้นเดือน" ยังไม่อนุมัติ/จ่าย
+  // ยอดจากรอบจ่ายจะเหลือแค่เงินล่วงหน้ากลางเดือน → รายงานต่ำกว่าจริงมาก
+  // (เจอจริง: สุพร รายงาน 3,000 ทั้งที่รับจริง 16,451 · รวม 8 คนขาดไป ~76,000)
+  // → ใช้ยอดจากรอบจ่ายได้เฉพาะเมื่อรอบสิ้นเดือนยืนยันแล้ว ไม่งั้นคืนว่างเพื่อไป fallback
+  //   (fallback = สุทธิจากผลคำนวณ + เงินจ่ายกลางเดือน = ยอดรับทั้งงวด)
+  const rows = (batchRows ?? []) as Row[];
+  if (!rows.some((b) => text(b.batch_type) === "month_end")) return new Map<string, number>();
+
+  const batchIds = rows.map((batch) => text(batch.id)).filter(Boolean);
   if (!batchIds.length) return new Map<string, number>();
 
   const { data: lineRows, error: lineError } = await admin
@@ -534,7 +542,12 @@ export async function getPayrollExportPreview(periodId: string, type: PayrollExp
     const employeeId = text(line.employee_id);
     const employee = employees.get(employeeId) ?? {};
     const contract = contracts.get(text(line.contract_id)) ?? {};
-    const pnd3NetBasis = pnd3NetPayBasis(line.net_pay, pnd3PaymentNetByEmployee.get(employeeId));
+    // fallback ของ ภ.ง.ด.3 = ยอดรับทั้งงวด (สุทธิสิ้นเดือน + เงินที่จ่ายกลางเดือนไปแล้ว)
+    // เดิมใช้ net_pay เดี่ยว ๆ → ขาดเงินล่วงหน้ากลางเดือนไปจากยอดที่ยื่นภาษี
+    const pnd3NetBasis = pnd3NetPayBasis(
+      round2(money(line.net_pay) + money(line.mid_month_paid)),
+      pnd3PaymentNetByEmployee.get(employeeId),
+    );
     const pnd3Amounts = pnd3GrossUpFromNet(pnd3NetBasis, 3);
     const registerBase = money(contract.payroll_register_base_salary) || money(line.base_salary);
     const registerPaidAmount = payrollRegisterPaymentNetByEmployee.get(employeeId);
