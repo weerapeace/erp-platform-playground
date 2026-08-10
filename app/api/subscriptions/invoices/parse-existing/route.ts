@@ -29,6 +29,12 @@ export async function POST(request: NextRequest) {
   let processed = 0, withData = 0;
   for (const r of rows ?? []) {
     const nowIso = new Date().toISOString();
+    // บิลที่เป็นรูป (สกรีนช็อต) อ่านข้อความไม่ได้ → mark ว่าอ่านแล้วเลย กันวนซ้ำ
+    if (!String(r.file_path ?? "").toLowerCase().endsWith(".pdf")) {
+      await db.from("subscription_invoices").update({ parsed_at: nowIso }).eq("id", r.id);
+      processed++;
+      continue;
+    }
     try {
       const { data: blob } = await db.storage.from("invoices").download(r.file_path as string);
       const parsed = blob

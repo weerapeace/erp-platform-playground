@@ -1,7 +1,8 @@
 /**
- * /api/subscriptions/[id]/invoices — ใบเสร็จรายเดือน (PDF)
+ * /api/subscriptions/[id]/invoices — ใบเสร็จรายเดือน (PDF หรือรูปบิล)
  * GET  → รายการใบเสร็จ + ลิงก์เปิด (signed url) (subscriptions.view)
- * POST → อัปโหลด PDF เข้า Supabase Storage bucket `invoices` (subscriptions.edit)
+ * POST → อัปโหลดไฟล์บิลเข้า Supabase Storage bucket `invoices` (subscriptions.edit)
+ *        รับ PDF (อ่านยอด/วันที่ให้อัตโนมัติ) และรูปภาพ (สกรีนช็อตบิล — ไม่อ่านอัตโนมัติ กรอกเองได้)
  *
  * ใช้ตาราง subscription_invoices + bucket `invoices` ร่วมกับแอปเดิม (path เดิม: <subId>/<month>/<file>)
  */
@@ -11,7 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { extractPdfFields } from "@/lib/parse-pdf-server";
-import type { SubInvoice } from "@/lib/subscriptions";
+import { invoiceFileKind, type SubInvoice } from "@/lib/subscriptions";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -54,23 +55,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const file = fd.get("file") as File | null;
   const month = String(fd.get("month") ?? "").trim();
-  if (!file) return NextResponse.json({ error: "กรุณาแนบไฟล์ PDF" }, { status: 400 });
+  if (!file) return NextResponse.json({ error: "กรุณาแนบไฟล์บิล (PDF หรือรูป)" }, { status: 400 });
   if (!/^\d{4}-\d{2}$/.test(month)) return NextResponse.json({ error: "กรุณาเลือกเดือน (YYYY-MM)" }, { status: 400 });
-  if (file.type && file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf"))
-    return NextResponse.json({ error: "รองรับเฉพาะไฟล์ PDF" }, { status: 400 });
+  const kind = invoiceFileKind(file.name, file.type);
+  if (!kind) return NextResponse.json({ error: "รองรับเฉพาะไฟล์ PDF หรือรูปภาพ (jpg/png/webp)" }, { status: 400 });
   if (file.size > MAX) return NextResponse.json({ error: "ไฟล์ใหญ่เกิน 15MB" }, { status: 400 });
 
-  const safeName = (file.name || "invoice.pdf").replace(/[^\w.\-() ]+/g, "_");
+  const safeName = (file.name || (kind === "pdf" ? "invoice.pdf" : "invoice.jpg")).replace(/[^\w.\-() ]+/g, "_");
   const path = `${id}/${month}/${safeName}`;
 
   const db = supabaseAdmin();
   const buf = await file.arrayBuffer();
   const { error: upErr } = await db.storage.from("invoices")
-    .upload(path, buf, { upsert: true, contentType: "application/pdf" });
+    .upload(path, buf, { upsert: true, contentType: kind === "pdf" ? "application/pdf" : (file.type || "application/octet-stream") });
   if (upErr) return NextResponse.json({ error: `อัปโหลดไม่สำเร็จ: ${upErr.message}` }, { status: 500 });
 
-  // อ่านข้อความใน PDF เก็บ ยอด/สกุลเงิน/วันที่ (best-effort — บิลรูปอ่านไม่ได้ก็ปล่อย null)
-  const parsed = await extractPdfFields(buf);
+  // อ่านข้อความใน PDF เก็บ ยอด/สกุลเงิน/วันที่ (best-effort) · รูปอ่านไม่ได้ → ปล่อยว่างให้กรอกเอง
+  const parsed = kind === "pdf"
+    ? await extractPdfFields(buf)
+    : { amount: null as number | null, currency: null as string | null, dateISO: null as string | null };
 
   const invId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const { data: row, error: dbErr } = await db.from("subscription_invoices").insert({

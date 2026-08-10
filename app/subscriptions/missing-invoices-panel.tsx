@@ -2,12 +2,14 @@
 
 /**
  * พาเนล "⚠️ บิลที่ยังขาด" — รายการ (subscription × เดือน) ที่ควรมีใบเสร็จแต่ยังไม่มี
- * แต่ละแถว: ปุ่มโหลด .bat (เปิด Chrome ไปเอาบิล) หรือเปิดหน้าบิล + ปุ่ม "ข้ามบิล"
+ * แต่ละแถว: ปุ่มโหลด .bat (เปิด Chrome ไปเอาบิล) หรือเปิดหน้าบิล + 📎 แนบบิล (อัปโหลดตรงจากแถวนี้) + "ข้ามบิล"
+ * แนบได้ทั้งกดปุ่มเลือกไฟล์ และลากไฟล์มาวางบนแถว (PDF หรือรูปบิล)
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { canMakeBat, downloadSubBat, subInvoiceUrl } from "@/lib/subs-bat";
+import { INVOICE_ACCEPT_ATTR, invoiceFileKind } from "@/lib/subscriptions";
 import type { MissingInvoice } from "@/app/api/subscriptions/missing-invoices/route";
 
 function fmtMonth(ym: string): string {
@@ -17,12 +19,24 @@ function fmtMonth(ym: string): string {
   return names[idx] ? `${names[idx]} ${Number(y) + 543}` : ym;
 }
 
-export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter }: { canEdit: boolean; refreshKey?: number; monthFilter?: string }) {
+const rowKey = (it: Pick<MissingInvoice, "subscription_id" | "month">) => `${it.subscription_id}|${it.month}`;
+
+export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter, onAttached }: {
+  canEdit: boolean;
+  refreshKey?: number;
+  monthFilter?: string;
+  /** เรียกหลังแนบบิลสำเร็จ — ให้หน้าแม่โหลดตารางใบเสร็จใหม่ */
+  onAttached?: () => void;
+}) {
   const toast = useToast();
   const [items, setItems] = useState<MissingInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null); // key ที่กำลังข้าม
+  const [uploadKey, setUploadKey] = useState<string | null>(null); // key ที่กำลังอัปโหลดบิล
+  const [dragKey, setDragKey] = useState<string | null>(null);     // key ที่กำลังลากไฟล์มาวาง
   const [collapsed, setCollapsed] = useState(true); // default ซ่อน
+  const fileRef = useRef<HTMLInputElement>(null);
+  const pendingRef = useRef<MissingInvoice | null>(null); // แถวที่กดปุ่มแนบไว้ (รอเลือกไฟล์)
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -36,8 +50,29 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter }: { can
   }, []);
   useEffect(() => { load(); }, [load, refreshKey]);
 
+  /** แนบไฟล์บิลของแถวนี้ (เดือนล็อกตามแถว ไม่ต้องเลือกเอง) */
+  const attach = useCallback(async (it: MissingInvoice, file: File) => {
+    const key = rowKey(it);
+    if (!invoiceFileKind(file.name, file.type)) { toast.warning("รองรับเฉพาะไฟล์ PDF หรือรูปภาพ"); return; }
+    setUploadKey(key);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("month", it.month);
+      const res = await apiFetch(`/api/subscriptions/${it.subscription_id}/invoices`, { method: "POST", body: fd });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      toast.success(`แนบบิล ${it.name} (${fmtMonth(it.month)}) แล้ว`);
+      setItems((prev) => prev.filter((x) => rowKey(x) !== key));
+      onAttached?.();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แนบบิลไม่สำเร็จ"); }
+    finally { setUploadKey(null); }
+  }, [toast, onAttached]);
+
+  const pickFile = (it: MissingInvoice) => { pendingRef.current = it; fileRef.current?.click(); };
+
   const skip = async (it: MissingInvoice) => {
-    const key = `${it.subscription_id}|${it.month}`;
+    const key = rowKey(it);
     setBusy(key);
     try {
       const res = await apiFetch("/api/subscriptions/missing-invoices", {
@@ -47,7 +82,7 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter }: { can
       const j = await res.json();
       if (j.error) throw new Error(j.error);
       toast.success(`ข้ามบิล ${it.name} (${fmtMonth(it.month)}) แล้ว`);
-      setItems((prev) => prev.filter((x) => `${x.subscription_id}|${x.month}` !== key));
+      setItems((prev) => prev.filter((x) => rowKey(x) !== key));
     } catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); }
     finally { setBusy(null); }
   };
@@ -55,7 +90,7 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter }: { can
   // โชว์ตามเดือนที่เลือกในตัวกรอง (ถ้าเลือกเดือนเจาะจง)
   const shown = monthFilter && monthFilter !== "all" ? items.filter((i) => i.month === monthFilter) : items;
 
-  if (loading) return null;
+  if (loading && items.length === 0) return null; // โหลดรอบแรกเท่านั้น (รอบรีเฟรชคงรายการเดิมไว้ ไม่ให้พาเนลกะพริบ)
   if (shown.length === 0) {
     return (
       <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-2.5 text-sm text-emerald-700">
@@ -73,13 +108,30 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter }: { can
 
       {!collapsed && (
         <div className="px-3 pb-3">
-          <p className="text-[11px] text-amber-600 px-1 mb-1.5">รายการ รายเดือน + เปิดใช้งาน + งาน ที่ยังไม่มีใบเสร็จ (ย้อน 3 เดือน) · กดโหลด .bat ไปเอาบิล แล้วอัปโหลดที่ปุ่ม 🧾 ของรายการนั้น หรือกด &ldquo;ข้ามบิล&rdquo; ถ้าเดือนนั้นไม่มีบิล</p>
+          <p className="text-[11px] text-amber-600 px-1 mb-1.5">รายการ รายเดือน + เปิดใช้งาน + งาน ที่ยังไม่มีใบเสร็จ (ย้อน 3 เดือน) · กดโหลด .bat ไปเอาบิล แล้วกด &ldquo;📎 แนบบิล&rdquo; (หรือลากไฟล์มาวางบนแถว) เพื่ออัปโหลดเข้าเดือนนั้นทันที · ถ้าเดือนนั้นไม่มีบิลให้กด &ldquo;ข้ามบิล&rdquo;</p>
+          {/* ช่องเลือกไฟล์ตัวเดียวใช้ร่วมทุกแถว (จำแถวที่กดไว้ใน pendingRef) */}
+          <input ref={fileRef} type="file" accept={INVOICE_ACCEPT_ATTR} className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]; const it = pendingRef.current;
+              e.target.value = ""; pendingRef.current = null;
+              if (f && it) attach(it, f);
+            }} />
           <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
           {shown.map((it) => {
-            const key = `${it.subscription_id}|${it.month}`;
+            const key = rowKey(it);
             const link = subInvoiceUrl(it);
+            const uploading = uploadKey === key;
+            const dragging = dragKey === key;
             return (
-              <div key={key} className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-100 bg-white px-3 py-2">
+              <div key={key}
+                onDragOver={canEdit ? (e) => { e.preventDefault(); setDragKey(key); } : undefined}
+                onDragLeave={canEdit ? () => setDragKey((k) => (k === key ? null : k)) : undefined}
+                onDrop={canEdit ? (e) => {
+                  e.preventDefault(); setDragKey(null);
+                  const f = e.dataTransfer.files?.[0];
+                  if (f) attach(it, f);
+                } : undefined}
+                className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 ${dragging ? "border-indigo-400 bg-indigo-50 ring-2 ring-indigo-200" : "border-amber-100 bg-white"}`}>
                 <span className="text-[11px] font-medium text-amber-700 bg-amber-100 rounded px-2 py-0.5 flex-shrink-0">{fmtMonth(it.month)}</span>
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium text-slate-800 truncate">{it.name}</div>
@@ -87,6 +139,7 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter }: { can
                     <div className="text-[11px] text-slate-400 truncate">{it.chrome_profile || it.account_email}</div>
                   )}
                 </div>
+                {dragging && <span className="text-[11px] font-medium text-indigo-600 flex-shrink-0">วางไฟล์เพื่อแนบบิลเดือนนี้</span>}
                 {canMakeBat(it) ? (
                   <button onClick={() => downloadSubBat(it)} title="โหลดไฟล์เปิด Chrome ไปเอาบิล"
                     className="h-8 px-3 text-xs font-medium rounded-lg bg-slate-800 text-white hover:bg-slate-900 flex-shrink-0">⬇️ .bat</button>
@@ -97,7 +150,14 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter }: { can
                   <span className="text-[11px] text-slate-300 flex-shrink-0">ตั้งลิงก์/โปรไฟล์ก่อน</span>
                 )}
                 {canEdit && (
-                  <button onClick={() => skip(it)} disabled={busy === key} title="เดือนนี้ไม่มีบิล — หยุดเตือน"
+                  <button onClick={() => pickFile(it)} disabled={uploading}
+                    title={`แนบไฟล์บิลของเดือน ${fmtMonth(it.month)} (PDF หรือรูป) — ลากไฟล์มาวางบนแถวนี้ก็ได้`}
+                    className="h-8 px-3 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex-shrink-0">
+                    {uploading ? "กำลังอัปโหลด…" : "📎 แนบบิล"}
+                  </button>
+                )}
+                {canEdit && (
+                  <button onClick={() => skip(it)} disabled={busy === key || uploading} title="เดือนนี้ไม่มีบิล — หยุดเตือน"
                     className="h-8 px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50 flex-shrink-0">
                     {busy === key ? "…" : "ข้ามบิล"}
                   </button>

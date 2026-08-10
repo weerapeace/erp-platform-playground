@@ -10,7 +10,7 @@ import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import type { ColumnDef } from "@tanstack/react-table";
-import { toTHB, fmtBaht, fmtCost, type SubSettings, type SubInvoice, type Currency } from "@/lib/subscriptions";
+import { toTHB, fmtBaht, fmtCost, invoiceFileIcon, type SubSettings, type SubInvoice, type Currency } from "@/lib/subscriptions";
 import { MissingInvoicesPanel } from "./missing-invoices-panel";
 
 type InvoiceRow = SubInvoice & { sub_name: string | null; sub_email: string | null; sub_profile: string | null; sub_card_name: string | null };
@@ -145,7 +145,8 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
         const thb = toTHB(Number(inv.amount), (inv.currency || "THB") as Currency, settings);
         return <span className={`text-sm font-mono tabular-nums ${thb < 0 ? "text-red-600" : "text-indigo-600"}`}>{fmtBaht(thb, 2)}</span>; } },
     { id: "file_name", accessorKey: "file_name", header: "ไฟล์", size: 260,
-      cell: ({ getValue }) => <span className="text-sm text-slate-600 inline-flex items-center gap-1.5"><span>📄</span><span className="truncate">{getValue() as string}</span></span> },
+      cell: ({ getValue }) => { const n = getValue() as string;
+        return <span className="text-sm text-slate-600 inline-flex items-center gap-1.5"><span>{invoiceFileIcon(n)}</span><span className="truncate">{n}</span></span>; } },
     {
       id: "actions", header: "", size: 190, enableSorting: false,
       cell: ({ row }) => {
@@ -177,7 +178,7 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
   return (
     <div className="space-y-3">
       {/* บิลที่ยังขาด */}
-      <MissingInvoicesPanel canEdit={canEdit} refreshKey={rows.length} monthFilter={month} />
+      <MissingInvoicesPanel canEdit={canEdit} refreshKey={rows.length} monthFilter={month} onAttached={load} />
 
       {/* ตัวกรองเดือน */}
       <div className="flex flex-wrap items-center gap-3">

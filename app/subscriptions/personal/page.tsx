@@ -263,7 +263,7 @@ export default function PersonalSubscriptionsPage() {
             <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
               <button onClick={() => setDlTarget({ sub: s, canEdit: !!opts.canEdit })} title="ดาวน์โหลดใบเสร็จ (เปิดหน้าบิล + ดูเมล/โปรไฟล์)"
                 className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-indigo-200 text-xs text-indigo-600 hover:bg-indigo-50">⬇️</button>
-              <button onClick={() => setInvTarget({ sub: s, canEdit: !!opts.canEdit })} title="ใบเสร็จที่อัปโหลดไว้ (PDF)"
+              <button onClick={() => setInvTarget({ sub: s, canEdit: !!opts.canEdit })} title="ใบเสร็จที่แนบไว้ (PDF/รูป) — กดเพื่อดูหรือแนบเพิ่ม"
                 className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs hover:bg-slate-50">🧾</button>
               {opts.canEdit && (
                 <>

@@ -2,7 +2,7 @@
 
 /**
  * ป๊อปอัปใบเสร็จรายเดือนของ subscription 1 รายการ
- * - อัปโหลด PDF (แยกตามเดือน) → เก็บใน Supabase Storage
+ * - อัปโหลดไฟล์บิล PDF หรือรูป (แยกตามเดือน) → เก็บใน Supabase Storage
  * - เปิดดู / ลบ
  * ใช้ ERPModal กลาง + useToast กลาง
  */
@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import type { Subscription, SubInvoice } from "@/lib/subscriptions";
+import { INVOICE_ACCEPT_ATTR, invoiceFileIcon, invoiceFileKind, type Subscription, type SubInvoice } from "@/lib/subscriptions";
 
 function fmtMonth(ym: string): string {
   const [y, m] = ym.split("-");
@@ -37,8 +37,10 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
 
   const onPickFile = async (file: File) => {
     setDetected(null);
-    const isPdf = /pdf/i.test(file.type) || file.name.toLowerCase().endsWith(".pdf");
-    if (!isPdf) return;
+    const kind = invoiceFileKind(file.name, file.type);
+    if (!kind) { toast.warning("รองรับเฉพาะไฟล์ PDF หรือรูปภาพ"); return; }
+    // รูปบิลอ่านข้อความไม่ได้ → บอกให้เลือกเดือนเอง
+    if (kind === "image") { setDetected({ amount: null, currency: null, month: null, hasText: false }); return; }
     setDetecting(true);
     try {
       const fd = new FormData(); fd.append("file", file);
@@ -69,7 +71,7 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
   const handleUpload = async () => {
     if (!sub) return;
     const file = fileRef.current?.files?.[0];
-    if (!file) { toast.warning("กรุณาเลือกไฟล์ PDF"); return; }
+    if (!file) { toast.warning("กรุณาเลือกไฟล์บิล (PDF หรือรูป)"); return; }
     if (!month) { toast.warning("กรุณาเลือกเดือน"); return; }
     setUploading(true);
     try {
@@ -112,7 +114,7 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
   return (
     <ERPModal open={open} onClose={onClose} size="lg" storageKey="subs-invoices"
       title={sub ? `🧾 ใบเสร็จ · ${sub.name}` : "ใบเสร็จ"}
-      description="เก็บไฟล์ PDF ใบเสร็จแยกตามเดือน (เก็บใน Supabase)"
+      description="เก็บไฟล์ใบเสร็จแยกตามเดือน — PDF (อ่านยอด/วันที่ให้อัตโนมัติ) หรือรูปบิล"
       footer={<button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>}>
       <div className="space-y-4">
         {/* กล่องอัปโหลด */}
@@ -125,8 +127,8 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
                   className="h-9 w-full px-2 rounded-lg border border-slate-200 text-sm outline-none focus:border-indigo-400" />
               </label>
               <label className="flex-[2] min-w-[160px]">
-                <span className="block text-xs font-medium text-slate-600 mb-1">ไฟล์ PDF</span>
-                <input ref={fileRef} type="file" accept="application/pdf,.pdf"
+                <span className="block text-xs font-medium text-slate-600 mb-1">ไฟล์บิล (PDF หรือรูป)</span>
+                <input ref={fileRef} type="file" accept={INVOICE_ACCEPT_ATTR}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) onPickFile(f); }}
                   className="h-9 w-full text-sm file:mr-2 file:h-7 file:rounded-md file:border-0 file:bg-indigo-100 file:px-2 file:text-indigo-700 file:text-xs" />
               </label>
@@ -164,7 +166,7 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
         ) : months.length === 0 ? (
           <div className="py-10 text-center">
             <div className="text-4xl mb-2">📄</div>
-            <p className="text-sm text-slate-500">ยังไม่มีใบเสร็จ{canEdit && " — อัปโหลด PDF ด้านบนเพื่อเริ่ม"}</p>
+            <p className="text-sm text-slate-500">ยังไม่มีใบเสร็จ{canEdit && " — อัปโหลดไฟล์บิล (PDF/รูป) ด้านบนเพื่อเริ่ม"}</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -174,7 +176,7 @@ export function InvoicesModal({ sub, canEdit, onClose }: {
                 <div className="space-y-1.5">
                   {grouped[m].map((inv) => (
                     <div key={inv.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2">
-                      <span className="text-lg flex-shrink-0">📄</span>
+                      <span className="text-lg flex-shrink-0">{invoiceFileIcon(inv.file_name)}</span>
                       <span className="flex-1 min-w-0 truncate text-sm text-slate-700" title={inv.file_name}>{inv.file_name}</span>
                       {inv.url ? (
                         <>

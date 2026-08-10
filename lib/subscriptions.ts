@@ -69,6 +69,27 @@ export type SubInvoice = {
   parsed_at?: string | null;    // null = ยังไม่เคยอ่าน
 };
 
+/** ค่า accept ของช่องเลือกไฟล์ใบเสร็จ (ของกลาง — ใช้ทั้งป๊อปอัปใบเสร็จและปุ่มแนบบิลในพาเนลบิลขาด) */
+export const INVOICE_ACCEPT_ATTR = "application/pdf,.pdf,image/*";
+const INVOICE_IMAGE_EXT = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
+
+/**
+ * ชนิดไฟล์ใบเสร็จที่รับได้ — "pdf" | "image" (สกรีนช็อต/ถ่ายรูปบิล) | null = ไม่รับ
+ * ใช้ทั้งฝั่ง client (กันเลือกไฟล์ผิด) และ server (ตรวจก่อนอัปโหลด)
+ */
+export function invoiceFileKind(name: string, type?: string | null): "pdf" | "image" | null {
+  const n = (name || "").toLowerCase();
+  const t = (type || "").toLowerCase();
+  if (t.includes("pdf") || n.endsWith(".pdf")) return "pdf";
+  if (t.startsWith("image/") || INVOICE_IMAGE_EXT.test(n)) return "image";
+  return null;
+}
+
+/** ไอคอนหน้าชื่อไฟล์ใบเสร็จ (รูป vs เอกสาร) */
+export function invoiceFileIcon(fileName: string): string {
+  return invoiceFileKind(fileName) === "image" ? "🖼" : "📄";
+}
+
 export const CYCLE_LABEL: Record<BillingCycle, string> = {
   monthly: "รายเดือน",
   yearly: "รายปี",
