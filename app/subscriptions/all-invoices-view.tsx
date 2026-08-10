@@ -4,13 +4,13 @@
  * มุมมอง "ใบเสร็จ" — รวมใบเสร็จ PDF ของทุก subscription + กรองตามเดือน
  * ใช้ DataTable กลาง (ค้นหา/เรียง/ส่งออก) · เปิด/ลบไฟล์ได้
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import type { ColumnDef } from "@tanstack/react-table";
-import { toTHB, fmtBaht, fmtCost, invoiceFileIcon, type SubSettings, type SubInvoice, type Currency } from "@/lib/subscriptions";
+import { toTHB, fmtBaht, fmtCost, invoiceFileIcon, INVOICE_ACCEPT_ATTR, invoiceFileKind, type SubSettings, type SubInvoice, type Currency, type Subscription } from "@/lib/subscriptions";
 import { MissingInvoicesPanel } from "./missing-invoices-panel";
 
 type InvoiceRow = SubInvoice & { sub_name: string | null; sub_email: string | null; sub_profile: string | null; sub_card_name: string | null };
@@ -24,17 +24,24 @@ function fmtMonth(ym: string): string {
 // signed url + บังคับดาวน์โหลด (Supabase รองรับ ?download=ชื่อไฟล์)
 const dlUrl = (u: string, n: string) => `${u}${u.includes("?") ? "&" : "?"}download=${encodeURIComponent(n)}`;
 
-export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; settings: SubSettings }) {
+type EditForm = { subscription_id: string; month: string; amount: string; currency: string; invoice_date: string };
+const EMPTY_EDIT: EditForm = { subscription_id: "", month: "", amount: "", currency: "THB", invoice_date: "" };
+
+export function AllInvoicesView({ canEdit, settings, subs }: { canEdit: boolean; settings: SubSettings; subs: Subscription[] }) {
   const toast = useToast();
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [months, setMonths] = useState<string[]>([]);
   const [month, setMonth] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [backfilling, setBackfilling] = useState(false);
-  // แก้ค่าใบเสร็จเอง (ตอนระบบอ่านผิด)
+  // แก้ไขใบเสร็จที่แนบไว้ (เดือน/รายการ/ยอด/วันที่/เปลี่ยนไฟล์)
   const [editInv, setEditInv] = useState<InvoiceRow | null>(null);
-  const [ef, setEf] = useState<{ amount: string; currency: string; invoice_date: string }>({ amount: "", currency: "THB", invoice_date: "" });
+  const [ef, setEf] = useState<EditForm>(EMPTY_EDIT);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [newFile, setNewFile] = useState<File | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const editFileRef = useRef<HTMLInputElement>(null);
+  const [tick, setTick] = useState(0); // บอกพาเนล "บิลที่ยังขาด" ให้โหลดใหม่เมื่อข้อมูลใบเสร็จเปลี่ยน
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,33 +74,91 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
       if (j.error) throw new Error(j.error);
       toast.success("ลบใบเสร็จแล้ว");
       setRows((prev) => prev.filter((r) => r.id !== inv.id));
+      setTick((t) => t + 1); // ลบแล้วเดือนนั้นอาจกลับไปเป็น "บิลที่ยังขาด"
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   }, [toast]);
 
   const openEditInv = useCallback((inv: InvoiceRow) => {
     setEditInv(inv);
-    setEf({ amount: inv.amount != null ? String(inv.amount) : "", currency: inv.currency || "THB", invoice_date: inv.invoice_date ?? "" });
+    setNewFile(null);
+    if (editFileRef.current) editFileRef.current.value = "";
+    setEf({
+      subscription_id: inv.subscription_id,
+      month: inv.month ?? "",
+      amount: inv.amount != null ? String(inv.amount) : "",
+      currency: inv.currency || "THB",
+      invoice_date: inv.invoice_date ?? "",
+    });
+  }, []);
+
+  /** เลือกไฟล์ใหม่ → ถ้าเป็น PDF อ่านยอด/วันที่มาเติมให้ (แก้ต่อได้ก่อนบันทึก) */
+  const pickNewFile = useCallback(async (f: File) => {
+    setNewFile(f);
+    if (invoiceFileKind(f.name, f.type) !== "pdf") return;
+    setDetecting(true);
+    try {
+      const fd = new FormData(); fd.append("file", f);
+      const res = await apiFetch("/api/subscriptions/parse-invoice", { method: "POST", body: fd });
+      const j = await res.json();
+      setEf((p) => ({
+        ...p,
+        month: j.month || p.month,
+        amount: j.amount != null ? String(j.amount) : p.amount,
+        currency: j.currency || p.currency,
+        invoice_date: j.dateISO || p.invoice_date,
+      }));
+    } catch { /* อ่านไม่ได้ก็กรอกเอง */ }
+    finally { setDetecting(false); }
   }, []);
 
   const saveEdit = useCallback(async () => {
     if (!editInv) return;
+    if (!/^\d{4}-\d{2}$/.test(ef.month)) { toast.warning("กรุณาเลือกเดือนของใบเสร็จ"); return; }
     setSavingEdit(true);
     try {
-      const res = await apiFetch(`/api/subscriptions/${editInv.subscription_id}/invoices/${editInv.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: ef.amount.trim() === "" ? null : Number(ef.amount), currency: ef.currency, invoice_date: ef.invoice_date || null }),
-      });
+      const fields = {
+        subscription_id: ef.subscription_id,
+        month: ef.month,
+        amount: ef.amount.trim() === "" ? null : Number(ef.amount),
+        currency: ef.currency,
+        invoice_date: ef.invoice_date || null,
+      };
+      // มีไฟล์ใหม่ → ส่งเป็น multipart (API เดียวกัน) · ไม่มี → ส่ง JSON เหมือนเดิม
+      const init: RequestInit = newFile
+        ? (() => {
+            const fd = new FormData();
+            fd.append("file", newFile);
+            Object.entries(fields).forEach(([k, v]) => fd.append(k, v == null ? "" : String(v)));
+            return { method: "PATCH", body: fd };
+          })()
+        : { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields) };
+
+      const res = await apiFetch(`/api/subscriptions/${editInv.subscription_id}/invoices/${editInv.id}`, init);
       const j = await res.json();
       if (j.error) throw new Error(j.error);
-      const u = j.data as InvoiceRow;
-      setRows((prev) => prev.map((r) => (r.id === editInv.id ? { ...r, amount: u.amount, currency: u.currency, invoice_date: u.invoice_date, parsed_at: u.parsed_at } : r)));
-      toast.success("แก้ไขแล้ว");
+      toast.success("แก้ไขใบเสร็จแล้ว");
       setEditInv(null);
+      setNewFile(null);
+      setTick((t) => t + 1);
+      await load(); // ย้ายรายการ/เดือนแล้ว ชื่อรายการ+ลิงก์ไฟล์เปลี่ยน → โหลดใหม่ให้ตรง
     } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไขไม่สำเร็จ"); }
     finally { setSavingEdit(false); }
-  }, [editInv, ef, toast]);
+  }, [editInv, ef, newFile, toast, load]);
 
   const unparsed = useMemo(() => rows.filter((r) => !r.parsed_at).length, [rows]);
+
+  /**
+   * ตัวเลือก "รายการ" ในป๊อปอัปแก้ไข — เรียงตามชื่อ
+   * ⚠️ ตารางนี้รวมใบเสร็จของรายการส่วนตัวด้วย แต่ subs ที่ส่งมาเป็นรายการงานเท่านั้น
+   *    ถ้าไม่มีรายการปัจจุบันอยู่ใน list ต้องใส่เพิ่ม ไม่งั้น dropdown จะเด้งไปตัวแรก = ย้ายใบเสร็จโดยไม่ตั้งใจ
+   */
+  const subOptions = useMemo(() => {
+    const list = [...subs].sort((a, b) => a.name.localeCompare(b.name)).map((s) => ({ id: s.id, name: s.name }));
+    if (editInv && !list.some((s) => s.id === editInv.subscription_id)) {
+      list.unshift({ id: editInv.subscription_id, name: editInv.sub_name ?? "(รายการปัจจุบัน)" });
+    }
+    return list;
+  }, [subs, editInv]);
 
   // อ่าน PDF ที่แนบไว้แล้ว (ย้อนหลัง) — วนจนหมด
   const runBackfill = useCallback(async () => {
@@ -178,7 +243,8 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
   return (
     <div className="space-y-3">
       {/* บิลที่ยังขาด */}
-      <MissingInvoicesPanel canEdit={canEdit} refreshKey={rows.length} monthFilter={month} onAttached={load} />
+      <MissingInvoicesPanel canEdit={canEdit} refreshKey={tick} monthFilter={month}
+        onAttached={() => { setTick((t) => t + 1); load(); }} />
 
       {/* ตัวกรองเดือน */}
       <div className="flex flex-wrap items-center gap-3">
@@ -215,9 +281,9 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
         emptyMessage="ยังไม่มีใบเสร็จ — อัปโหลดได้ที่ปุ่ม 🧾 ของแต่ละรายการ"
       />
 
-      {/* แก้ค่าจากบิลเอง (ตอนระบบอ่านผิด) */}
-      <ERPModal open={!!editInv} onClose={() => !savingEdit && setEditInv(null)} size="sm"
-        title="แก้ไขค่าจากบิล" description={editInv ? `${editInv.sub_name ?? ""} · ${editInv.file_name}` : undefined}
+      {/* แก้ไขใบเสร็จที่แนบไว้ */}
+      <ERPModal open={!!editInv} onClose={() => !savingEdit && setEditInv(null)} size="md"
+        title="✎ แก้ไขใบเสร็จที่แนบไว้" description={editInv ? `${editInv.sub_name ?? ""} · ${editInv.file_name}` : undefined}
         footer={
           <>
             <button onClick={() => setEditInv(null)} disabled={savingEdit} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
@@ -226,6 +292,25 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
         }>
         {editInv && (
           <div className="space-y-3">
+            {/* รายการ + เดือน — แก้ตอนแนบผิดรายการ/ผิดเดือน */}
+            <div className="grid grid-cols-3 gap-2">
+              <label className="col-span-2 block">
+                <span className="text-xs font-medium text-slate-600">รายการ (ใบเสร็จนี้เป็นของอะไร)</span>
+                <select value={ef.subscription_id} onChange={(e) => setEf({ ...ef, subscription_id: e.target.value })}
+                  className="mt-1 h-10 w-full px-2 rounded-lg border border-slate-200 text-sm bg-white outline-none focus:border-indigo-400">
+                  {subOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">เดือนของใบเสร็จ</span>
+                <input type="month" value={ef.month} onChange={(e) => setEf({ ...ef, month: e.target.value })}
+                  className="mt-1 h-10 w-full px-2 rounded-lg border border-slate-200 text-sm outline-none focus:border-indigo-400" />
+              </label>
+            </div>
+            {ef.subscription_id !== editInv.subscription_id && (
+              <p className="text-[11px] text-amber-600">⚠️ ย้ายใบเสร็จนี้ไปอยู่ใต้รายการใหม่ (ไฟล์จะถูกย้ายตามไปด้วย)</p>
+            )}
+
             <div className="grid grid-cols-3 gap-2">
               <label className="col-span-2 block">
                 <span className="text-xs font-medium text-slate-600">จำนวนเงิน</span>
@@ -246,6 +331,34 @@ export function AllInvoicesView({ canEdit, settings }: { canEdit: boolean; setti
               <input type="date" value={ef.invoice_date} onChange={(e) => setEf({ ...ef, invoice_date: e.target.value })}
                 className="mt-1 h-10 w-full px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-indigo-400" />
             </label>
+
+            {/* เปลี่ยนไฟล์ (แนบผิดไฟล์/ได้ไฟล์ที่ชัดกว่า) */}
+            <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+              <div className="text-xs font-medium text-slate-600">ไฟล์บิล</div>
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <span>{invoiceFileIcon(editInv.file_name)}</span>
+                <span className="flex-1 min-w-0 truncate" title={editInv.file_name}>{editInv.file_name}</span>
+                {editInv.url && (
+                  <a href={editInv.url} target="_blank" rel="noopener noreferrer"
+                    className="h-7 px-2.5 inline-flex items-center rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 flex-shrink-0">🔗 เปิด</a>
+                )}
+              </div>
+              <label className="block">
+                <span className="block text-[11px] text-slate-500 mb-1">เปลี่ยนเป็นไฟล์อื่น (ไม่เลือก = ใช้ไฟล์เดิม)</span>
+                <input ref={editFileRef} type="file" accept={INVOICE_ACCEPT_ATTR}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) pickNewFile(f); else setNewFile(null); }}
+                  className="h-9 w-full text-sm file:mr-2 file:h-7 file:rounded-md file:border-0 file:bg-indigo-100 file:px-2 file:text-indigo-700 file:text-xs" />
+              </label>
+              {detecting && <p className="text-[11px] text-slate-400">🔍 กำลังอ่านไฟล์ใหม่…</p>}
+              {newFile && !detecting && (
+                <p className="text-[11px] text-emerald-600">
+                  จะแทนที่ด้วย <b>{newFile.name}</b>
+                  {invoiceFileKind(newFile.name, newFile.type) === "pdf" ? " (อ่านค่าจากบิลมาเติมให้แล้ว — แก้ได้)" : " (เป็นรูป อ่านยอดอัตโนมัติไม่ได้)"}
+                  <br /><span className="text-slate-400">ไฟล์เดิมจะถูกลบเมื่อกดบันทึก</span>
+                </p>
+              )}
+            </div>
+
             <p className="text-[11px] text-slate-400">แก้เองแล้วปุ่ม &ldquo;🔄 อ่านบิลที่แนบ&rdquo; จะไม่ทับค่านี้</p>
           </div>
         )}

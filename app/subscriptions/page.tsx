@@ -430,7 +430,7 @@ export default function SubscriptionsPage() {
             <WishlistView rows={rows} settings={settings} canEdit={canEdit}
               onAdd={openCreateWishlist} onEdit={openEdit} onDelete={askDelete} onPurchase={purchaseItem} />
           )}
-          {view === "invoices" && <AllInvoicesView canEdit={canEdit} settings={settings} />}
+          {view === "invoices" && <AllInvoicesView canEdit={canEdit} settings={settings} subs={rows} />}
           {view === "board" && (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
