@@ -8,13 +8,22 @@ import { apiFetch } from "@/lib/api";
 type ContractOpt = { id: string; loan_code: string; loan_name: string; outstanding: number };
 
 export function RecordPaymentModal({
-  open, onClose, onCreated,
-}: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  open, onClose, onCreated, contractId,
+}: {
+  open: boolean; onClose: () => void; onCreated: () => void;
+  /** ล็อกสัญญาไว้ล่วงหน้า (เปิดจากในหน้าสัญญา) — ไม่ต้องให้ผู้ใช้เลือกซ้ำ */
+  contractId?: string | null;
+}) {
   const [contracts, setContracts] = useState<ContractOpt[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const [f, setF] = useState({ contract_id: "", payment_date: "", amount: "", paid_from: "", reference: "" });
+
+  // เปิดจากหน้าสัญญา → ตั้งสัญญาให้เลย
+  useEffect(() => {
+    if (open && contractId) setF((p) => ({ ...p, contract_id: contractId }));
+  }, [open, contractId]);
 
   useEffect(() => {
     if (!open) return;
@@ -51,7 +60,7 @@ export function RecordPaymentModal({
       const j = await res.json();
       if (!res.ok || j?.error) { setErr(j?.error || "บันทึกไม่สำเร็จ"); setSaving(false); return; }
       setSaving(false);
-      setF({ contract_id: "", payment_date: "", amount: "", paid_from: "", reference: "" });
+      setF({ contract_id: contractId ?? "", payment_date: "", amount: "", paid_from: "", reference: "" });
       onCreated();
     } catch {
       setErr("เกิดข้อผิดพลาดในการเชื่อมต่อ");
@@ -78,14 +87,22 @@ export function RecordPaymentModal({
       <div className="space-y-4">
         {err && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {err}</div>}
 
-        <ERPFormField label="สัญญาเงินกู้" required>
-          <ERPSelect
-            value={f.contract_id}
-            onChange={(e) => set("contract_id", e.target.value)}
-            options={contracts.map((c) => ({ value: c.id, label: `${c.loan_code} — ${c.loan_name}` }))}
-            placeholder={loadingList ? "กำลังโหลด..." : "— เลือกสัญญา —"}
-          />
-        </ERPFormField>
+        {contractId ? (
+          <ERPFormField label="สัญญาเงินกู้">
+            <div className="h-9 flex items-center px-3 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">
+              {selected ? `${selected.loan_code} — ${selected.loan_name}` : "กำลังโหลด..."}
+            </div>
+          </ERPFormField>
+        ) : (
+          <ERPFormField label="สัญญาเงินกู้" required>
+            <ERPSelect
+              value={f.contract_id}
+              onChange={(e) => set("contract_id", e.target.value)}
+              options={contracts.map((c) => ({ value: c.id, label: `${c.loan_code} — ${c.loan_name}` }))}
+              placeholder={loadingList ? "กำลังโหลด..." : "— เลือกสัญญา —"}
+            />
+          </ERPFormField>
+        )}
 
         {selected && (
           <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">

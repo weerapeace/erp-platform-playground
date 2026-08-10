@@ -578,6 +578,17 @@ export type MasterCRUDConfig = {
     render: (args: { open: boolean; onClose: () => void; onCreated: () => void }) => React.ReactNode;
   };
   /**
+   * ปุ่ม/แผงเสริมข้างหัวข้อกลุ่มในฟอร์ม (key = group_key) — ของกลาง ใช้ได้ทุกโมดูล
+   * เช่น กลุ่ม "ความคืบหน้าการผ่อน" มีปุ่ม "บันทึกการจ่าย" เปิด popup ได้จากในหน้าเลย
+   * ctx.refresh() = โหลดค่าของระเบียนนี้ใหม่ + refresh ตาราง (ช่องที่ผู้ใช้กำลังพิมพ์ค้างไว้จะไม่ถูกทับ)
+   */
+  sectionActions?: Record<string, (ctx: {
+    recordId: string | null;
+    form: Record<string, unknown>;
+    mode: "view" | "edit";
+    refresh: () => Promise<void>;
+  }) => React.ReactNode>;
+  /**
    * ปุ่มรายแถวเพิ่มเติม (เช่น "คัดลอก") — ของกลาง · refresh ตารางให้อัตโนมัติหลัง onClick
    */
   extraRowActions?: Array<{
@@ -1981,17 +1992,52 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   );
 
   /**
-   * ปุ่ม "📋 คัดลอกจากตัวอื่น" ข้างหัวข้อกลุ่มในฟอร์ม (ของกลาง — เปิดด้วย config.copyFromRecord)
-   * คัดลอกเฉพาะช่องที่แก้ได้ในกลุ่มนั้น (ข้าม computed/readonly/รูป) แล้วเติมลงฟอร์ม ยังไม่บันทึก
+   * โหลดค่าของระเบียนที่เปิดอยู่ใหม่ + refresh ตาราง — ใช้หลังมีการเขียนข้อมูลจากปุ่มเสริม
+   * (เช่น บันทึกการจ่าย → ยอด/งวดที่ระบบคิดให้เปลี่ยน) · ทับเฉพาะช่องที่ผู้ใช้ยังไม่ได้แก้ค้างไว้
    */
-  const sectionAction = config.copyFromRecord
+  const reloadRecord = useCallback(async () => {
+    await refreshData();
+    if (!editingId) return;
+    try {
+      const res  = await apiFetch(`${apiBase}${config.apiPath}/${editingId}`);
+      const json = await res.json();
+      if (json.error || !json.data) return;
+      const full = json.data as Row;
+      setForm((prev) => {
+        const next = { ...prev };
+        for (const field of effectiveFields) {
+          if (field.type === "many2many" || field.type === "one2many") continue;
+          const k = field.key;
+          if (!(k in full)) continue;
+          // ช่องที่ผู้ใช้แก้ค้างไว้ (ต่างจากค่าตั้งต้น) → ไม่ทับ
+          if (prev[k] !== baseSnapRef.current[k]) continue;
+          const v = full[k];
+          next[k] = v == null ? (field.type === "boolean" ? false : "") : v;
+          baseSnapRef.current[k] = next[k];
+        }
+        return next;
+      });
+    } catch { /* เงียบไว้ — ค่าเดิมยังใช้ได้ */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, apiBase, config.apiPath, refreshData, effectiveFields]);
+
+  /**
+   * ปุ่มข้างหัวข้อกลุ่มในฟอร์ม (ของกลาง) — รวม 2 แหล่ง:
+   *   1) "📋 คัดลอกจากตัวอื่น" (config.copyFromRecord) — คัดลอกเฉพาะช่องที่แก้ได้ในกลุ่มนั้น (ยังไม่บันทึก)
+   *   2) ปุ่มเฉพาะโมดูลจาก config.sectionActions[group_key] เช่น "บันทึกการจ่าย"
+   */
+  const sectionAction = (config.copyFromRecord || config.sectionActions)
     ? (groupKey: string, groupLabel: string, groupFields: FieldDef[]) => {
-      if (drawerMode !== "edit" || !canEdit) return null;
+      const custom = config.sectionActions?.[groupKey]?.({
+        recordId: editingId ? String(editingId) : null,
+        form,
+        mode: drawerMode,
+        refresh: reloadRecord,
+      });
       const keys = groupFields
         .filter((f) => !f.readonly && f.type !== "computed" && f.type !== "image" && f.type !== "one2many" && f.type !== "many2many")
         .map((f) => f.key);
-      if (keys.length === 0) return null;
-      return (
+      const copyBtn = (config.copyFromRecord && drawerMode === "edit" && canEdit && keys.length > 0) ? (
         <CopyFromRecordButton
           apiBase={apiBase} apiPath={config.apiPath} currentId={editingId ? String(editingId) : null}
           sectionLabel={groupLabel} fieldKeys={keys}
@@ -1999,7 +2045,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           currentValues={form} excludeKeys={config.copyExcludeKeys ?? []}
           onApply={(values) => setForm((p) => ({ ...p, ...values }))}
         />
-      );
+      ) : null;
+      if (!custom && !copyBtn) return null;
+      return <span className="inline-flex items-center gap-2">{custom}{copyBtn}</span>;
     }
     : undefined;
 

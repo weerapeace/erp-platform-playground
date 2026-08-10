@@ -14,8 +14,12 @@ const METHOD_OPTS = [
 ];
 
 export function GenerateScheduleModal({
-  open, onClose, onCreated,
-}: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  open, onClose, onCreated, contractId,
+}: {
+  open: boolean; onClose: () => void; onCreated: () => void;
+  /** ล็อกสัญญาไว้ล่วงหน้า (เปิดจากในหน้าสัญญา) — ไม่ต้องให้ผู้ใช้เลือกซ้ำ */
+  contractId?: string | null;
+}) {
   const [contracts, setContracts] = useState<ContractOpt[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -36,7 +40,13 @@ export function GenerateScheduleModal({
       .finally(() => setLoadingList(false));
   }, [open]);
 
+  // เปิดจากหน้าสัญญา → ตั้งสัญญาให้เลย
+  useEffect(() => {
+    if (open && contractId) setF((p) => ({ ...p, contract_id: contractId }));
+  }, [open, contractId]);
+
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const picked = contracts.find((c) => c.id === f.contract_id);
 
   const submit = async () => {
     setErr("");
@@ -53,7 +63,7 @@ export function GenerateScheduleModal({
       const j = await res.json();
       if (!res.ok || j?.error) { setErr(j?.error || "สร้างตารางไม่สำเร็จ"); setSaving(false); return; }
       setSaving(false);
-      setF({ contract_id: "", method: "equal_installment", start_date: "", num: "", reason: "" });
+      setF({ contract_id: contractId ?? "", method: "equal_installment", start_date: "", num: "", reason: "" });
       onCreated();
     } catch {
       setErr("เกิดข้อผิดพลาดในการเชื่อมต่อ");
@@ -80,14 +90,22 @@ export function GenerateScheduleModal({
       <div className="space-y-4">
         {err && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {err}</div>}
 
-        <ERPFormField label="สัญญาเงินกู้" required hint="เงินต้น + อัตราดอกเบี้ยจะดึงจากสัญญาที่เลือก">
-          <ERPSelect
-            value={f.contract_id}
-            onChange={(e) => set("contract_id", e.target.value)}
-            options={contracts.map((c) => ({ value: c.id, label: `${c.loan_code} — ${c.loan_name}` }))}
-            placeholder={loadingList ? "กำลังโหลด..." : "— เลือกสัญญา —"}
-          />
-        </ERPFormField>
+        {contractId ? (
+          <ERPFormField label="สัญญาเงินกู้" hint="เงินต้น + อัตราดอกเบี้ย + วันที่ต้องชำระ ดึงจากสัญญานี้">
+            <div className="h-9 flex items-center px-3 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">
+              {picked ? `${picked.loan_code} — ${picked.loan_name}` : "กำลังโหลด..."}
+            </div>
+          </ERPFormField>
+        ) : (
+          <ERPFormField label="สัญญาเงินกู้" required hint="เงินต้น + อัตราดอกเบี้ยจะดึงจากสัญญาที่เลือก">
+            <ERPSelect
+              value={f.contract_id}
+              onChange={(e) => set("contract_id", e.target.value)}
+              options={contracts.map((c) => ({ value: c.id, label: `${c.loan_code} — ${c.loan_name}` }))}
+              placeholder={loadingList ? "กำลังโหลด..." : "— เลือกสัญญา —"}
+            />
+          </ERPFormField>
+        )}
 
         <ERPFormField label="วิธีคิดตารางผ่อน" required>
           <ERPSelect value={f.method} onChange={(e) => set("method", e.target.value)} options={METHOD_OPTS} />

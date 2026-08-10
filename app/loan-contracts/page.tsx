@@ -8,6 +8,7 @@
 
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
+import { LoanProgressActions } from "./progress-actions";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -68,6 +69,16 @@ const CONFIG: MasterCRUDConfig = {
     maxSizeBytes: 10 * 1024 * 1024,
     imageOnly: false,
     layout: "grid",
+  },
+  // ปุ่มในหมวด "ความคืบหน้าการผ่อน" — ลงตารางผ่อน/บันทึกการจ่ายได้จากในหน้าสัญญาเลย (ของกลาง sectionActions)
+  sectionActions: {
+    progress: ({ recordId, form, refresh }) => (
+      <LoanProgressActions
+        recordId={recordId}
+        totalInstallments={Number(form.total_installment_count ?? 0)}
+        onDone={refresh}
+      />
+    ),
   },
   cellRenderers: {
     lifecycle_status: (v) => {
