@@ -713,7 +713,8 @@ function payrollRegisterSheetRows(rows: PayrollExportRow[], _paymentDate: string
 }
 
 function payrollRegisterMoney(value: unknown) {
-  return round2(money(value));
+  // ทะเบียนเงินเดือนในไฟล์ Excel เป็นจำนวนเต็มบาท ให้ตรงกับที่โชว์บนหน้าจอ
+  return Math.round(money(value));
 }
 
 function pnd3IdentityNo(row: PayrollExportRow) {

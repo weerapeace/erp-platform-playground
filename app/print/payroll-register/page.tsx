@@ -34,7 +34,8 @@ type RegisterResponse = {
 };
 
 const num = (value: unknown) => Number(value) || 0;
-const money = (value: unknown) => num(value).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// ทะเบียนเงินเดือนที่พิมพ์ออกมาเป็นจำนวนเต็มบาท ให้ตรงกับหน้าจอและไฟล์ Excel
+const money = (value: unknown) => Math.round(num(value)).toLocaleString("th-TH");
 const dashMoney = (value: unknown) => Math.abs(num(value)) > 0.004 ? money(value) : "";
 
 export default function PayrollRegisterPrintPage() {

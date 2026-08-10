@@ -27,12 +27,15 @@ const WRITABLE = new Set(["recipient_name", "tax_id", "address", "income_type", 
 const text = (v: unknown) => String(v ?? "").trim();
 
 export function pnd3GrossUpFromNet(netAmount: unknown, taxRate: unknown) {
-  const net = money(netAmount);
+  // ภ.ง.ด.3 ยื่นเป็น "จำนวนเต็มบาท" — ปัดทุกช่องเป็นเต็มบาท
+  // และคิดภาษีจากผลต่างของเลขที่ปัดแล้ว เพื่อให้สมการในแบบยื่นลงตัวเสมอ
+  //   ภาษี = จำนวนเงิน − ยอดสุทธิ (ไม่มีเศษสตางค์ค้างให้สรรพากรตีกลับ)
+  const net = Math.round(money(netAmount));
   const rate = Math.max(money(taxRate), 0);
   if (net <= 0) return { gross_pay: 0, withholding_tax: 0, net_pay: 0 };
   if (rate <= 0) return { gross_pay: net, withholding_tax: 0, net_pay: net };
-  const gross = Math.round((net / (1 - rate / 100)) * 100) / 100;
-  const tax = Math.round((gross - net) * 100) / 100;
+  const gross = Math.round(net / (1 - rate / 100));
+  const tax = gross - net;
   return { gross_pay: gross, withholding_tax: tax, net_pay: net };
 }
 

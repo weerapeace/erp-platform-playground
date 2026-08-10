@@ -129,7 +129,9 @@ const EXPORT_OPTIONS: Record<ExportType, { title: string; short: string; descrip
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
-const baht = (value: unknown) => `฿${(Number(value) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// ทะเบียนเงินเดือน + ภ.ง.ด.3 ใช้จำนวนเต็มบาททั้งหน้า (เหมือนหน้าอื่นในระบบ ไม่มีทศนิยม)
+// ตัวเลขที่คำนวณมาเป็นจำนวนเต็มแล้ว — ปัดตรงนี้อีกชั้นกันเศษหลุดมาโชว์
+const baht = (value: unknown) => `฿${Math.round(Number(value) || 0).toLocaleString("th-TH")}`;
 const dashBaht = (value: unknown) => Math.abs(Number(value) || 0) > 0.004 ? baht(value) : "-";
 const identityText = (row: Pick<ExportRow, "identity_no" | "national_id" | "passport_no">) => row.identity_no || row.national_id || row.passport_no || "-";
 const thaiDate = (value: string) => {
