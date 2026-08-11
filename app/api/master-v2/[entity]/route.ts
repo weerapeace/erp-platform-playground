@@ -68,6 +68,12 @@ const SAFE_IDENT = /^[a-z_][a-z0-9_]*$/i;
 
 /** แปลง error จากฐานข้อมูลให้เป็นภาษาคน (ของกลาง — ใช้ทั้ง update/delete/import) */
 export function friendlyDbError(msg: string): string {
+  // คอลัมน์ที่ DB คำนวณเอง — โค้ดใหม่ตัดออกให้แล้ว (stripGenerated)
+  // ถ้ายังเห็นข้อความนี้ แปลว่าเป็นโค้ดตัวเก่าที่ค้างอยู่ในเบราว์เซอร์/เซิร์ฟเวอร์
+  if (/non-DEFAULT value into column/i.test(msg)) {
+    const col = generatedColFromError(msg);
+    return `ช่อง "${col ?? "บางช่อง"}" ระบบคำนวณให้เองอัตโนมัติ กรอกหรือก๊อปค่าเข้าไปไม่ได้ — กด Ctrl+Shift+R แล้วลองใหม่อีกครั้ง`;
+  }
   if (/partners_v2_at_least_one_role/i.test(msg))
     return "คู่ค้าต้องเป็น 'ลูกค้า' หรือ 'ผู้จำหน่าย' อย่างน้อย 1 อย่าง — ปิดทั้งสองพร้อมกันไม่ได้";
   if (/foreign key|violates foreign key|still referenced|23503/i.test(msg))
