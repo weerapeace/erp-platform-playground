@@ -197,12 +197,11 @@ function showPopupBlockedBar(url: string) {
 /**
  * พิมพ์เอกสารหลายหน้าให้ถูกต้อง — เปิด HTML เอกสารจริงในแท็บใหม่ แล้วสั่งพิมพ์ที่นั่น
  * แก้ปัญหา "พรีวิวเต็มแต่พิมพ์ตัด" เพราะ iframe ในหน้าเพจไม่ไหลข้ามหน้า (พิมพ์ Ctrl+P จะตัดทิ้ง)
- * ใช้ Blob URL เพื่อให้รูป/ลิงก์แบบ /api/... resolve ถูก (มี origin จริง)
  * ป๊อปอัปโดนบล็อก → โชว์ลิงก์ให้กดเอง (ห้ามถอยไปพิมพ์ iframe เงียบ ๆ — เอกสารหลายแผ่นจะออกไม่ครบ)
  */
 export function printReportHtmlInNewWindow(html: string) {
   try {
-    const url = URL.createObjectURL(new Blob([withAutoPrintScript(html)], { type: "text/html" }));
+    const url = URL.createObjectURL(new Blob([printDocHtml(html)], { type: "text/html" }));
     const w = window.open(url, "_blank");
     if (!w) { showPopupBlockedBar(url); return; }
     setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -211,11 +210,33 @@ export function printReportHtmlInNewWindow(html: string) {
   }
 }
 
+/**
+ * ⚠️⚠️ รูปแตกตอนพิมพ์ — ใส่ที่อยู่เว็บจริงให้เอกสารก่อนเปิดแท็บใหม่
+ *
+ * เอกสารที่เปิดในแท็บใหม่ถูกสร้างเป็นไฟล์ชั่วคราวในเบราว์เซอร์ (Blob URL = `blob:https://โดเมน/uuid`)
+ * ที่อยู่แบบ blob **ต่อ path ไม่ได้** → รูป/ลิงก์ที่เขียนแบบย่อ เช่น `src="/api/r2-image?key=..."`
+ * จะ resolve ไม่ออกเลย กลายเป็นรูปแตกทั้งใบ (QR ยังขึ้นเพราะเป็นรูปฝังในตัว data: URL)
+ * นี่คือเหตุผลที่ "พรีวิวรูปมา แต่พิมพ์แล้วรูปหาย" — พรีวิวใช้ iframe ซึ่งอ้างที่อยู่หน้าแม่ได้
+ *
+ * แก้ที่เดียว: ใส่ `<base href="<เว็บจริง>/">` ในหัวเอกสาร → ที่อยู่แบบย่อทุกอันกลับไปชี้เว็บจริง
+ * (ห้ามถอด — ถอดเมื่อไหร่ทุกหน้าพิมพ์รวมรูปแตกหมด)
+ */
+function withDocBase(html: string): string {
+  if (typeof window === "undefined" || /<base[\s>]/i.test(html)) return html;
+  const base = `<base href="${window.location.origin}/" />`;
+  return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (tag) => `${tag}\n${base}`) : `${base}\n${html}`;
+}
+
 /** ฝังสคริปต์ให้เอกสารเด้งหน้าต่างพิมพ์เองทันทีที่เปิด */
 function withAutoPrintScript(html: string): string {
   return html.includes("</body>")
     ? html.replace("</body>", `<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},350);};</script></body>`)
     : html;
+}
+
+/** เอกสารพร้อมเปิดแท็บใหม่ = ใส่ที่อยู่เว็บจริง (กันรูปแตก) + เด้งหน้าต่างพิมพ์เอง */
+function printDocHtml(html: string): string {
+  return withAutoPrintScript(withDocBase(html));
 }
 
 /**
@@ -236,7 +257,7 @@ export function PrintDocLinkButton({ html, fileName, className, children }: {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!html) { setUrl(null); return; }
-    const u = URL.createObjectURL(new Blob([withAutoPrintScript(html)], { type: "text/html" }));
+    const u = URL.createObjectURL(new Blob([printDocHtml(html)], { type: "text/html" }));
     setUrl(u);
     return () => URL.revokeObjectURL(u);
   }, [html]);
