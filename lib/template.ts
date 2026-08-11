@@ -119,7 +119,10 @@ function reportCss(tpl: ReportTemplate): string {
 
   return `
     *,*::before,*::after { box-sizing: border-box; }
-    html, body { width: ${pageW}; min-height: 0; margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", "Sarabun", sans-serif; color: #0f172a; background: white; overflow-x: hidden; }
+    /* บนจอ: ปล่อยความกว้างเต็มหน้าต่างแล้วให้ .doc (margin:0 auto) อยู่กึ่งกลาง
+       — เดิมล็อก body = ความกว้างกระดาษ ทำให้เอกสารไปกองซ้ายมือ มีที่ว่างโล่งด้านขวา
+       ตอนพิมพ์ยังล็อกความกว้างกระดาษเหมือนเดิมใน @media print ด้านล่าง */
+    html, body { width: 100%; min-width: ${pageW}; min-height: 0; margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", "Sarabun", sans-serif; color: #0f172a; background: white; overflow-x: hidden; }
     .doc { width: ${pageW}; min-height: ${pageH}; padding: 20mm 16mm; margin: 0 auto; background: white; overflow: visible; break-after: auto; page-break-after: auto; }
     .doc table { page-break-inside: auto; }
     .doc tr { page-break-inside: avoid; break-inside: avoid; }

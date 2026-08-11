@@ -5,20 +5,34 @@
  *   เลือกเดือน → เห็นยอดขายทั้งเดือน · แยกตามลูกค้า / พนักงานขาย / สถานะ / สินค้าขายดี
  *   + รายการใบขายทุกใบในเดือน · พิมพ์เป็น A4 / PDF ได้ · ดาวน์โหลด Excel ได้
  *
- * ของกลางที่ใช้: PlaygroundShell · permission (so.view) · ระบบพิมพ์กลาง (buildReportHtml + printReportHtmlInNewWindow)
+ * ของกลางที่ใช้: PlaygroundShell · permission (so.view) · ระบบพิมพ์กลาง (lib/sales-monthly-print → buildReportHtml)
  *                Export กลาง (lib/export — มี audit log ให้อัตโนมัติ) · สถานะ SO กลาง (lib/so-status)
+ *                ตัวเลือก "แสดงอะไรบ้าง" กลาง (components/report-sections — จำรายคน)
  * กราฟวาดเอง (CSS) — โปรเจกต์ไม่มี chart library เพื่อไม่ให้ bundle บวม (แบบเดียวกับแดชบอร์ดขาย/จัดซื้อ)
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { exportTable } from "@/lib/export";
-import { buildReportHtml, type ReportTemplate } from "@/lib/template";
+import { buildSalesMonthlyReportHtml } from "@/lib/sales-monthly-print";
 import { printReportHtmlInNewWindow } from "@/components/report";
+import { useReportSections, ReportSectionPicker, type ReportSection } from "@/components/report-sections";
 import { soStatusLabel, soStatusColor } from "@/lib/so-status";
 import type { SalesMonthlyReport, SalesMonthlyRow } from "@/app/api/sales/monthly-report/route";
+
+/** ส่วนต่าง ๆ ของรายงาน — ผู้ใช้ติ๊กเลือกได้ว่าจะโชว์อะไร (มีผลทั้งบนจอและตอนพิมพ์) */
+const SECTIONS: readonly ReportSection[] = [
+  { key: "kpi",          label: "การ์ดสรุปยอด",          locked: true },
+  { key: "daily",        label: "กราฟยอดขายรายวัน",     hint: "เฉพาะบนจอ ไม่ติดไปตอนพิมพ์" },
+  { key: "by_customer",  label: "แยกตามลูกค้า" },
+  { key: "by_sales",     label: "แยกตามพนักงานขาย" },
+  { key: "by_status",    label: "สถานะเอกสาร" },
+  { key: "top_products", label: "สินค้าขายดี 10 อันดับ" },
+  { key: "rows",         label: "รายการใบขายทั้งเดือน" },
+  { key: "items",        label: "รายการสินค้าในแต่ละใบ", on: false, hint: "แตกบรรทัดสินค้าใต้ใบขายแต่ละใบ (ใบยาวขึ้น)" },
+];
 
 // ---- helpers ----
 const baht = (n: number) => Math.round(n || 0).toLocaleString("th-TH");
@@ -38,94 +52,6 @@ const shiftMonth = (ym: string, delta: number) => {
   return d.toISOString().slice(0, 7);
 };
 
-// ============================================================
-// เทมเพลตพิมพ์ (A4) — ใช้ระบบพิมพ์กลาง
-// ============================================================
-const CSS = `
-.doc { font-size: 11px; color: #111827; }
-.h { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #111827; padding-bottom:3mm; margin-bottom:3mm; }
-.h-title { font-size:18px; font-weight:800; }
-.h-sub { font-size:10px; color:#6b7280; margin-top:1mm; }
-.h-r { text-align:right; font-size:10px; color:#6b7280; }
-.kpi { display:flex; gap:3mm; margin-bottom:4mm; }
-.kpi-box { flex:1; border:1px solid #cbd5e1; border-radius:3px; padding:2mm 2.5mm; }
-.kpi-l { font-size:9.5px; color:#6b7280; }
-.kpi-v { font-size:14px; font-weight:800; margin-top:0.5mm; }
-.kpi-s { font-size:9px; color:#94a3b8; }
-.sec { font-size:12px; font-weight:800; margin:4mm 0 1.5mm; }
-.two { display:flex; gap:4mm; align-items:flex-start; }
-.two > div { flex:1; }
-.t { width:100%; border-collapse:collapse; }
-.t th, .t td { border:1px solid #cbd5e1; padding:1.4mm 2mm; font-size:10.5px; }
-.t th { background:#f1f5f9; font-weight:700; text-align:left; }
-.t td.r, .t th.r { text-align:right; white-space:nowrap; }
-.t .mono { font-family: ui-monospace, monospace; color:#475569; white-space:nowrap; }
-.t tfoot td { background:#f8fafc; font-weight:800; }
-.ok { color:#047857; font-weight:700; }
-.wait { color:#b45309; font-weight:700; }
-.cxl { color:#9ca3af; text-decoration:line-through; }
-.empty { text-align:center; color:#94a3b8; padding:12mm 0; font-size:12px; }
-@media print { .doc { padding: 10mm 10mm !important; } }`;
-
-const TEMPLATE: ReportTemplate = {
-  paper_size: "A4", orientation: "portrait",
-  header_html: `<div class="h">
-    <div><div class="h-title">รายงานสรุปยอดขายรายเดือน</div><div class="h-sub">เดือน {{month_label}} · {{n}} ใบขาย</div></div>
-    <div class="h-r">พิมพ์ {{printed_at}}</div>
-  </div>`,
-  body_html: `
-  <div class="kpi">
-    <div class="kpi-box"><div class="kpi-l">ยอดขายรวม (ไม่รวมยกเลิก)</div><div class="kpi-v">฿{{amt}}</div><div class="kpi-s">{{n}} ใบ · {{{trend}}}</div></div>
-    <div class="kpi-box"><div class="kpi-l">ยืนยันแล้ว</div><div class="kpi-v ok">฿{{confirmed_amt}}</div><div class="kpi-s">{{confirmed_n}} ใบ · ร่างอีก {{draft_n}} ใบ (฿{{draft_amt}})</div></div>
-    <div class="kpi-box"><div class="kpi-l">ก่อนภาษี / VAT</div><div class="kpi-v">฿{{taxable}}</div><div class="kpi-s">VAT ฿{{vat}}{{{wht_note}}}</div></div>
-    <div class="kpi-box"><div class="kpi-l">ยังไม่ได้วางบิล</div><div class="kpi-v wait">฿{{unbilled_amt}}</div><div class="kpi-s">{{unbilled_n}} ใบ · วางบิลแล้ว {{billed_n}} ใบ</div></div>
-  </div>
-
-  <div class="two">
-    <div>
-      <div class="sec">แยกตามลูกค้า</div>
-      {{#has_cust}}<table class="t">
-        <thead><tr><th>ลูกค้า</th><th class="r">ใบ</th><th class="r">ยอด (บาท)</th></tr></thead>
-        <tbody>{{#customers}}<tr><td>{{name}}</td><td class="r">{{n}}</td><td class="r">{{amt}}</td></tr>{{/customers}}</tbody>
-        <tfoot><tr><td>รวม</td><td class="r">{{n}}</td><td class="r">{{amt}}</td></tr></tfoot>
-      </table>{{/has_cust}}
-      {{^has_cust}}<div class="empty">— ไม่มีรายการ —</div>{{/has_cust}}
-    </div>
-    <div>
-      <div class="sec">แยกตามพนักงานขาย</div>
-      {{#has_sales}}<table class="t">
-        <thead><tr><th>พนักงานขาย</th><th class="r">ใบ</th><th class="r">ยอด (บาท)</th></tr></thead>
-        <tbody>{{#sales}}<tr><td>{{name}}</td><td class="r">{{n}}</td><td class="r">{{amt}}</td></tr>{{/sales}}</tbody>
-      </table>{{/has_sales}}
-      {{^has_sales}}<div class="empty">— ไม่มีรายการ —</div>{{/has_sales}}
-
-      <div class="sec">สถานะเอกสาร</div>
-      {{#has_status}}<table class="t">
-        <thead><tr><th>สถานะ</th><th class="r">ใบ</th><th class="r">ยอด (บาท)</th></tr></thead>
-        <tbody>{{#statuses}}<tr><td>{{label}}</td><td class="r">{{n}}</td><td class="r">{{amt}}</td></tr>{{/statuses}}</tbody>
-      </table>{{/has_status}}
-    </div>
-  </div>
-
-  {{#has_prod}}<div class="sec">สินค้าขายดี (10 อันดับแรก)</div>
-  <table class="t">
-    <thead><tr><th>รหัส</th><th>สินค้า</th><th class="r">จำนวน</th><th class="r">ยอด (บาท)</th></tr></thead>
-    <tbody>{{#products}}<tr><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{qty}}</td><td class="r">{{amt}}</td></tr>{{/products}}</tbody>
-  </table>{{/has_prod}}
-
-  {{#has_rows}}<div class="sec">รายการใบขายทั้งเดือน</div>
-  <table class="t">
-    <thead><tr><th>วันที่</th><th>เลขที่</th><th>ลูกค้า</th><th>เซลส์</th><th>สถานะ</th><th class="r">ก่อนภาษี</th><th class="r">ยอดรวม</th><th>วางบิล</th></tr></thead>
-    <tbody>{{#rows}}<tr>
-      <td class="mono">{{date}}</td><td class="mono">{{so_number}}</td><td>{{customer}}</td><td>{{sales}}</td>
-      <td>{{status}}</td><td class="r">{{taxable}}</td><td class="r">{{{total_cell}}}</td><td>{{{billed_cell}}}</td>
-    </tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="6">รวม (ไม่รวมใบยกเลิก)</td><td class="r">{{amt}}</td><td></td></tr></tfoot>
-  </table>{{/has_rows}}
-  {{^has_rows}}<div class="empty">— เดือนนี้ยังไม่มีใบขาย —</div>{{/has_rows}}`,
-  footer_html: `<div style="font-size:9px;color:#94a3b8;text-align:center;">รายงานสรุปยอดขายรายเดือน · ระบบ ERP</div>`,
-  custom_css: CSS,
-};
 
 // ============================================================
 // ชิ้นส่วนหน้าจอ
@@ -204,6 +130,7 @@ export default function SalesMonthlyReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const { on, toggle, reset } = useReportSections("sales_monthly_sections", SECTIONS);
 
   useEffect(() => {
     if (!canView) return;
@@ -214,46 +141,8 @@ export default function SalesMonthlyReportPage() {
       .finally(() => setLoading(false));
   }, [canView, month]);
 
-  // ---- HTML สำหรับพิมพ์ ----
-  const printHtml = useMemo(() => {
-    if (!rep) return "";
-    const s = rep.summary;
-    const prevAmt = rep.prev?.amt ?? 0;
-    const pct = prevAmt > 0 ? Math.round(((s.amt - prevAmt) / prevAmt) * 100) : null;
-    const trend = pct == null
-      ? `เดือนก่อน ฿${baht(prevAmt)}`
-      : `<span style="color:${pct >= 0 ? "#047857" : "#be123c"}">${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct)}%</span> จากเดือนก่อน (฿${baht(prevAmt)})`;
-    return buildReportHtml(TEMPLATE, {
-      month_label: monthLabel(rep.month),
-      printed_at: new Date().toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }),
-      trend,
-      wht_note: s.wht > 0 ? ` · หัก ณ ที่จ่าย ฿${baht(s.wht)}` : "",
-      n: s.n, amt: baht(s.amt),
-      confirmed_n: s.confirmed_n, confirmed_amt: baht(s.confirmed_amt),
-      draft_n: s.draft_n, draft_amt: baht(s.draft_amt),
-      taxable: baht(s.taxable), vat: baht(s.vat),
-      unbilled_n: s.unbilled_n, unbilled_amt: baht(s.unbilled_amt), billed_n: s.billed_n,
-      has_cust: rep.by_customer.length > 0,
-      customers: rep.by_customer.map(c => ({ name: c.name, n: c.n, amt: baht(c.amt) })),
-      has_sales: rep.by_sales.length > 0,
-      sales: rep.by_sales.map(c => ({ name: c.name, n: c.n, amt: baht(c.amt) })),
-      has_status: rep.by_status.length > 0,
-      statuses: rep.by_status.map(c => ({ label: soStatusLabel(c.status), n: c.n, amt: baht(c.amt) })),
-      has_prod: rep.top_products.length > 0,
-      products: rep.top_products.slice(0, 10).map(p => ({
-        sku: p.sku ?? "—", name: p.name, qty: `${p.qty.toLocaleString("th-TH")}${p.unit ? " " + p.unit : ""}`, amt: baht(p.amt),
-      })),
-      has_rows: rep.rows.length > 0,
-      rows: rep.rows.map(r => ({
-        date: dmy(r.order_date), so_number: r.so_number ?? "(ร่าง)",
-        customer: r.customer_name ?? "—", sales: r.sale_person_name ?? "—",
-        status: soStatusLabel(r.status),
-        taxable: baht(r.taxable),
-        total_cell: r.status === "cancelled" ? `<span class="cxl">${baht(r.grand_total)}</span>` : baht(r.grand_total),
-        billed_cell: r.status === "cancelled" ? "—" : (r.billed ? `<span class="ok">วางบิลแล้ว</span>` : `<span class="wait">ยัง</span>`),
-      })),
-    });
-  }, [rep]);
+  // ---- HTML สำหรับพิมพ์ (สร้างจาก lib/sales-monthly-print) ----
+  const printHtml = useMemo(() => (rep ? buildSalesMonthlyReportHtml(rep, on) : ""), [rep, on]);
 
   const doExport = useCallback(async (format: "csv" | "excel") => {
     if (!rep) return;
@@ -311,6 +200,7 @@ export default function SalesMonthlyReportPage() {
             {month !== thisMonth() && (
               <button onClick={() => setMonth(thisMonth())} className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">เดือนนี้</button>
             )}
+            <ReportSectionPicker sections={SECTIONS} on={on} onToggle={toggle} onReset={reset} />
             <button onClick={() => printHtml && printReportHtmlInNewWindow(printHtml)} disabled={!printHtml}
               className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">🖨 พิมพ์ / PDF</button>
             <button onClick={() => doExport("excel")} disabled={!rep?.rows.length}
@@ -354,7 +244,7 @@ export default function SalesMonthlyReportPage() {
             </div>
 
             {/* ===== ยอดขายรายวัน ===== */}
-            <Card title="ยอดขายรายวัน" right={
+            {on.daily && <Card title="ยอดขายรายวัน" right={
               <span className="text-xs text-slate-400">
                 ลูกค้า {s.customers} ราย · สินค้า {s.skus} รายการ · จำนวนรวม {s.qty.toLocaleString("th-TH")} ชิ้น
               </span>}>
@@ -374,43 +264,55 @@ export default function SalesMonthlyReportPage() {
               <div className="flex justify-between mt-1.5 text-[10px] text-slate-400">
                 {rep.daily.filter(d => d.d === 1 || d.d % 5 === 0).map(d => <span key={d.d}>{d.d}</span>)}
               </div>
-            </Card>
+            </Card>}
 
             {/* ===== ลูกค้า / พนักงานขาย ===== */}
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              <Card title="แยกตามลูกค้า" right={<span className="text-xs text-slate-400">{rep.by_customer.length} ราย</span>}>
-                <RankRows items={rep.by_customer.slice(0, 10).map(c => ({ name: c.name, sub: c.code, n: c.n, amt: c.amt }))} total={s.amt} color="emerald" />
-              </Card>
-              <Card title="แยกตามพนักงานขาย" right={<span className="text-xs text-slate-400">{rep.by_sales.length} คน</span>}>
-                <RankRows items={rep.by_sales.map(c => ({ name: c.name, n: c.n, amt: c.amt }))} total={s.amt} color="blue" />
-              </Card>
-            </div>
+            {(on.by_customer || on.by_sales) && (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {on.by_customer && (
+                  <Card title="แยกตามลูกค้า" right={<span className="text-xs text-slate-400">{rep.by_customer.length} ราย</span>}>
+                    <RankRows items={rep.by_customer.slice(0, 10).map(c => ({ name: c.name, sub: c.code, n: c.n, amt: c.amt }))} total={s.amt} color="emerald" />
+                  </Card>
+                )}
+                {on.by_sales && (
+                  <Card title="แยกตามพนักงานขาย" right={<span className="text-xs text-slate-400">{rep.by_sales.length} คน</span>}>
+                    <RankRows items={rep.by_sales.map(c => ({ name: c.name, n: c.n, amt: c.amt }))} total={s.amt} color="blue" />
+                  </Card>
+                )}
+              </div>
+            )}
 
             {/* ===== สถานะ / สินค้าขายดี ===== */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-              <Card title="สถานะเอกสาร">
-                <div className="space-y-2">
-                  {rep.by_status.map(st => (
-                    <div key={st.status} className="flex items-center gap-2 text-sm">
-                      <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: soStatusColor(st.status) }} />
-                      <span className="text-slate-600 flex-1">{soStatusLabel(st.status)}</span>
-                      <span className="text-slate-400 text-xs">{st.n} ใบ</span>
-                      <span className="w-24 text-right font-mono tabular-nums text-xs text-slate-700">{bahtShort(st.amt)}</span>
+            {(on.by_status || on.top_products) && (
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                {on.by_status && (
+                  <Card title="สถานะเอกสาร">
+                    <div className="space-y-2">
+                      {rep.by_status.map(st => (
+                        <div key={st.status} className="flex items-center gap-2 text-sm">
+                          <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: soStatusColor(st.status) }} />
+                          <span className="text-slate-600 flex-1">{soStatusLabel(st.status)}</span>
+                          <span className="text-slate-400 text-xs">{st.n} ใบ</span>
+                          <span className="w-24 text-right font-mono tabular-nums text-xs text-slate-700">{bahtShort(st.amt)}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </Card>
-              <Card title="สินค้าขายดี (10 อันดับ)" className="xl:col-span-2">
-                <RankRows
-                  items={rep.top_products.slice(0, 10).map(p => ({
-                    name: p.name, sub: p.sku, n: Math.round(p.qty), amt: p.amt, unit: p.unit ?? "ชิ้น",
-                  }))}
-                  total={rep.top_products.reduce((a, p) => a + p.amt, 0)} unit="ชิ้น" color="violet" />
-              </Card>
-            </div>
+                  </Card>
+                )}
+                {on.top_products && (
+                  <Card title="สินค้าขายดี (10 อันดับ)" className={on.by_status ? "xl:col-span-2" : "xl:col-span-3"}>
+                    <RankRows
+                      items={rep.top_products.slice(0, 10).map(p => ({
+                        name: p.name, sub: p.sku, n: Math.round(p.qty), amt: p.amt, unit: p.unit ?? "ชิ้น",
+                      }))}
+                      total={rep.top_products.reduce((a, p) => a + p.amt, 0)} unit="ชิ้น" color="violet" />
+                  </Card>
+                )}
+              </div>
+            )}
 
             {/* ===== รายการใบขายทั้งเดือน ===== */}
-            <Card title={`รายการใบขายทั้งเดือน (${rep.rows.length} ใบ)`} right={
+            {on.rows && <Card title={`รายการใบขายทั้งเดือน (${rep.rows.length} ใบ)`} right={
               <button onClick={() => doExport("csv")} className="text-xs text-blue-600 hover:underline">⬇ CSV</button>}>
               <div className="overflow-auto">
                 <table className="w-full text-sm">
@@ -429,7 +331,8 @@ export default function SalesMonthlyReportPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {visibleRows.map(r => (
-                      <tr key={r.id} className={`hover:bg-slate-50 ${r.status === "cancelled" ? "opacity-50" : ""}`}>
+                      <Fragment key={r.id}>
+                      <tr className={`hover:bg-slate-50 ${r.status === "cancelled" ? "opacity-50" : ""}`}>
                         <td className="px-2 py-1.5 text-xs text-slate-500 whitespace-nowrap">{dmy(r.order_date)}</td>
                         <td className="px-2 py-1.5"><code className="font-mono text-[11px] text-slate-600">{r.so_number ?? "(ร่าง)"}</code></td>
                         <td className="px-2 py-1.5 max-w-[240px] truncate text-slate-700" title={r.customer_name ?? ""}>{r.customer_name ?? "—"}</td>
@@ -448,6 +351,24 @@ export default function SalesMonthlyReportPage() {
                             : <span className="text-amber-600">รอ</span>}
                         </td>
                       </tr>
+                      {/* บรรทัดสินค้าในใบนี้ (เปิด/ปิดได้ที่ปุ่ม "เลือกสิ่งที่จะแสดง") */}
+                      {on.items && r.items.map((it, i) => (
+                        <tr key={`${r.id}-${i}`} className="bg-slate-50/60">
+                          <td />
+                          <td colSpan={3} className="px-2 py-1 text-xs text-slate-500">
+                            <span className="text-slate-300 mr-1">↳</span>
+                            {it.sku && <code className="font-mono text-[11px] text-slate-500 mr-1.5">{it.sku}</code>}
+                            {it.name}
+                          </td>
+                          <td className="px-2 py-1 text-xs text-slate-500 whitespace-nowrap">
+                            {it.qty.toLocaleString("th-TH")}{it.unit ? ` ${it.unit}` : ""}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono tabular-nums text-[11px] text-slate-400">×{baht(it.unit_price)}</td>
+                          <td className="px-2 py-1 text-right font-mono tabular-nums text-[11px] text-slate-500">{baht(it.amount)}</td>
+                          <td colSpan={2} />
+                        </tr>
+                      ))}
+                      </Fragment>
                     ))}
                   </tbody>
                   <tfoot>
@@ -466,7 +387,7 @@ export default function SalesMonthlyReportPage() {
                   {showAll ? "ย่อรายการ" : `ดูทั้งหมด ${rep.rows.length} ใบ`}
                 </button>
               )}
-            </Card>
+            </Card>}
           </>
         )}
       </div>

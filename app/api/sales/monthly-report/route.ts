@@ -20,6 +20,16 @@ export const revalidate = 0;
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 
+/** บรรทัดสินค้าในใบขาย (ใช้ตอนเปิด "แสดงรายการสินค้าในแต่ละใบ") */
+export type SalesMonthlyLine = {
+  sku: string | null;
+  name: string;
+  qty: number;
+  unit: string | null;
+  unit_price: number;
+  amount: number;       // ยอดหลังส่วนลด ก่อน VAT
+};
+
 export type SalesMonthlyRow = {
   id: string;
   so_number: string | null;
@@ -33,6 +43,7 @@ export type SalesMonthlyRow = {
   wht: number;
   grand_total: number;
   lines: number;
+  items: SalesMonthlyLine[];
   billed: boolean;      // อยู่ในใบวางบิลที่ไม่ถูกยกเลิกแล้วหรือยัง
 };
 
@@ -84,16 +95,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ใบที่ยกเลิกไม่ควรถูกนับเป็น "สินค้าขายดี" — เก็บสถานะไว้กรองตอนรวมบรรทัด
   const cancelledIds = new Set(soRows.filter(s => s.status === "cancelled").map(s => String(s.id)));
 
-  // ---- บรรทัดสินค้า: นับจำนวนบรรทัดต่อใบ + สินค้าขายดี (ไม่นับใบยกเลิก) ----
-  const lineCount = new Map<string, number>();
+  // ---- บรรทัดสินค้า: รายการต่อใบ + สินค้าขายดี (ไม่นับใบยกเลิก) ----
+  const itemsBySo = new Map<string, SalesMonthlyLine[]>();
   const prodMap = new Map<string, { sku: string | null; name: string; qty: number; unit: string | null; amt: number }>();
   let totalQty = 0;
   for (let i = 0; i < soIds.length; i += 200) {
     const { data: ls } = await admin.from("erp_playground_so_lines")
-      .select("so_id, sku, product_name, qty, unit, net_amount").in("so_id", soIds.slice(i, i + 200));
+      .select("so_id, sku, product_name, qty, unit, unit_price, net_amount, sort_order")
+      .in("so_id", soIds.slice(i, i + 200))
+      .order("sort_order", { ascending: true });
     for (const l of (ls ?? []) as Record<string, unknown>[]) {
       const soId = String(l.so_id);
-      lineCount.set(soId, (lineCount.get(soId) ?? 0) + 1);
+      const bucket = itemsBySo.get(soId) ?? []; itemsBySo.set(soId, bucket);
+      bucket.push({
+        sku: (l.sku as string) ?? null, name: String(l.product_name ?? "(ไม่ระบุ)"),
+        qty: num(l.qty), unit: (l.unit as string) ?? null,
+        unit_price: num(l.unit_price), amount: num(l.net_amount),
+      });
       if (cancelledIds.has(soId)) continue;
       const key = String(l.sku ?? "").trim() || String(l.product_name ?? "(ไม่ระบุ)");
       const e = prodMap.get(key) ?? {
@@ -140,7 +158,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     vat: num(s.total_vat),
     wht: num(s.total_wht),
     grand_total: num(s.grand_total),
-    lines: lineCount.get(String(s.id)) ?? 0,
+    lines: (itemsBySo.get(String(s.id)) ?? []).length,
+    items: itemsBySo.get(String(s.id)) ?? [],
     billed: billedSoIds.has(String(s.id)),
   }));
 
