@@ -164,6 +164,7 @@ export default function DeliveryNotesPage() {
       };
       const dnLines: DeliveryNoteLine[] = validLines.map(l => ({
         product_id: l.product_id ?? null, sku: l.sku, product_name: l.product_name, qty: l.qty, unit: l.unit,
+        note: l.note || null,          // สี/ตัวเลือก — เดิมตกหล่นตอนบันทึก (กรอกแล้วหาย)
       }));
       const url = editingId ? `/api/delivery-notes/${editingId}` : "/api/delivery-notes";
       const method = editingId ? "PATCH" : "POST";

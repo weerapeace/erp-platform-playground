@@ -21,6 +21,7 @@ export type EditorLine = {
   discount_type: "percent" | "amount";
   discount_value: number;
   tax_code?: string | null;
+  /** สี/ตัวเลือก — พิมพ์ใต้ชื่อสินค้าบนเอกสาร (ใบเสนอราคาโชว์เป็น "สี/ตัวเลือก:") */
   note?: string;
 };
 
@@ -170,6 +171,24 @@ export function SOLineEditor({
     );
   };
 
+  /**
+   * ช่อง "สี/ตัวเลือก" (เก็บในฟิลด์ note ของบรรทัด)
+   * ข้อความนี้พิมพ์ใต้ชื่อสินค้าบนเอกสาร — ใบเสนอราคาขึ้นเป็น "สี/ตัวเลือก: …"
+   * เลือก SKU แล้วระบบเติมค่าจากทะเบียนสินค้าให้ก่อน แก้ทับได้ (เช่น M → L)
+   */
+  const renderVariantField = (l: EditorLine, i: number, compact = false) => (
+    <input
+      value={l.note ?? ""}
+      onChange={(e) => update(i, { note: e.target.value })}
+      disabled={readonly}
+      placeholder={compact ? "สี/ตัวเลือก (เช่น เขียว L)" : "เช่น เขียว L (10 cm.)"}
+      title="สี/ตัวเลือก — จะพิมพ์ใต้ชื่อสินค้าบนเอกสาร"
+      className={compact
+        ? "mt-1 h-8 w-full rounded-md border border-slate-200 px-2 text-xs text-slate-700 outline-none focus:border-blue-400 disabled:bg-slate-50"
+        : "h-9 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-700 outline-none focus:border-blue-400 disabled:bg-slate-50"}
+    />
+  );
+
   const lineTotal = (l: EditorLine) => {
     const sub = l.qty * l.unit_price;
     const disc = l.discount_type === "percent"
@@ -178,9 +197,10 @@ export function SOLineEditor({
     return Math.max(0, sub - disc);
   };
 
+  /** เลือก SKU → เติมชื่อ/รูป/หน่วย/ราคา + สี/ตัวเลือกจากทะเบียนสินค้า (ไม่ทับค่าที่พิมพ์เอง) */
   const applyPick = (i: number, p: SkuPickerValue | null, current: EditorLine) => {
     if (!p) {
-      update(i, { product_id: null, sku: null, product_name: "", image_url: null, image_key: null });
+      update(i, { product_id: null, sku: null, product_name: "", image_url: null, image_key: null, note: "" });
       return;
     }
     update(i, {
@@ -188,6 +208,7 @@ export function SOLineEditor({
       image_url: p.image_url ?? null, image_key: p.image_key ?? null,
       unit_price: p.list_price ?? current.unit_price ?? 0,
       unit: p.uom_name ?? current.unit,
+      note: current.note?.trim() ? current.note : (p.color ?? ""),
     });
   };
 
@@ -250,6 +271,7 @@ export function SOLineEditor({
                           </div>
                         )}
                         {renderNameEditor(l, i)}
+                        {renderVariantField(l, i, true)}
                       </div>
                     </div>
                   </td>
@@ -378,27 +400,7 @@ export function SOLineEditor({
                   <label className="mb-1 block text-xs font-medium text-slate-500">สินค้า</label>
                   <SkuPicker
                     value={pickerValue}
-                    onChange={(p: SkuPickerValue | null) => {
-                      if (!p) {
-                        update(i, {
-                          product_id: null,
-                          sku: null,
-                          product_name: "",
-                          image_url: null,
-                          image_key: null,
-                        });
-                        return;
-                      }
-                      update(i, {
-                        product_id: p.id,
-                        sku: p.code,
-                        product_name: p.name,
-                        image_url: p.image_url ?? null,
-                        image_key: p.image_key ?? null,
-                        unit_price: p.list_price ?? l.unit_price ?? 0,
-                        unit: p.uom_name ?? l.unit,
-                      });
-                    }}
+                    onChange={(p: SkuPickerValue | null) => applyPick(i, p, l)}
                     disabled={readonly}
                     placeholder="เลือก SKU / ชื่อสินค้า..."
                   />
@@ -413,6 +415,14 @@ export function SOLineEditor({
                     </div>
                   )}
                   {renderNameEditor(l, i)}
+
+                  {/* สี/ตัวเลือก — พิมพ์ใต้ชื่อสินค้าบนเอกสาร (เลือก SKU แล้วเติมให้ก่อน แก้ทับได้) */}
+                  <div className="mt-2">
+                    <label className="mb-1 block text-xs font-medium text-slate-500">
+                      สี/ตัวเลือก <span className="font-normal text-slate-400">(พิมพ์ใต้ชื่อสินค้าบนเอกสาร)</span>
+                    </label>
+                    {renderVariantField(l, i)}
+                  </div>
                 </div>
                 {!readonly && (
                   <button
@@ -616,10 +626,12 @@ export function SalesLineCompactTable({
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return (
     <label className="block min-w-0">
-      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-slate-500">
+        {label}{hint && <span className="ml-1 font-normal text-slate-400">({hint})</span>}
+      </span>
       {children}
     </label>
   );
