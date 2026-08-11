@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable, type BulkAction } from "@/components/data-table";
 import { AttachmentPanel } from "@/components/attachment-panel";
@@ -541,12 +542,17 @@ export default function SalesOrdersPage() {
             <h1 className="text-2xl font-semibold text-slate-800">🧾 Sales Orders</h1>
             <p className="text-sm text-slate-500 mt-0.5">ใบสั่งขาย — workflow: draft → confirmed → ready → shipped → completed</p>
           </div>
-          {canCreate && (
-            <button onClick={openCreate}
-              className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              ＋ สร้าง SO
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <Link href="/sales/monthly" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">
+              📈 สรุปรายเดือน
+            </Link>
+            {canCreate && (
+              <button onClick={openCreate}
+                className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                ＋ สร้าง SO
+              </button>
+            )}
+          </div>
         </div>
 
         {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}

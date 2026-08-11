@@ -11,6 +11,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
+import { soStatusLabel, soStatusColor } from "@/lib/so-status";
 import type { SalesDashboard } from "@/app/api/sales/dashboard/route";
 
 const baht = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
@@ -23,15 +24,6 @@ const bahtShort = (n: number) => {
 const monthLabel = (ym: string) => {
   const [y, m] = ym.split("-").map(Number);
   return `${["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."][m - 1] ?? m} ${String((y + 543) % 100).padStart(2, "0")}`;
-};
-
-const SO_STATUS: Record<string, { label: string; color: string }> = {
-  completed:     { label: "เสร็จสิ้น",   color: "#639922" },
-  shipped:       { label: "ส่งของแล้ว",  color: "#1D9E75" },
-  ready:         { label: "พร้อมส่ง",    color: "#3FB6A8" },
-  in_production: { label: "กำลังผลิต",   color: "#EF9F27" },
-  confirmed:     { label: "ยืนยันแล้ว",  color: "#378ADD" },
-  draft:         { label: "ร่าง",        color: "#888780" },
 };
 
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -120,7 +112,8 @@ export default function SalesDashboardPage() {
             <h1 className="text-2xl font-semibold text-slate-800">📊 แดชบอร์ดงานขาย</h1>
             <p className="text-sm text-slate-500">สรุปยอดขาย · สถานะเอกสาร · ยอดที่ยังไม่ได้จ่าย</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Link href="/sales/monthly" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">📈 สรุปรายเดือน</Link>
             <Link href="/sales-orders" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">🧾 ใบขาย</Link>
             <Link href="/billing-notes" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">📑 ใบวางบิล</Link>
             <Link href="/delivery-notes" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">📦 ใบส่งสินค้า</Link>
@@ -193,7 +186,7 @@ export default function SalesDashboardPage() {
               <Card>
                 <h2 className="text-sm font-semibold text-slate-700 mb-4">สถานะใบขาย</h2>
                 <Donut data={d.status_mix.map(s => ({
-                  label: SO_STATUS[s.status]?.label ?? s.status, value: s.n, color: SO_STATUS[s.status]?.color ?? "#94a3b8",
+                  label: soStatusLabel(s.status), value: s.n, color: soStatusColor(s.status),
                 }))} />
               </Card>
             </div>
