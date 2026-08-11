@@ -7,6 +7,7 @@
  *   {{user.email}}           — nested path
  *   {{#items}}{{x}}{{/items}}— loop array; ใน loop, scope = item
  *   {{#name}}value{{/name}}  — show ถ้า truthy (อาจเป็น scalar)
+ *   {{^name}}ว่าง{{/name}}    — show ถ้า "ไม่มี" (falsy หรือ array ว่าง) เช่นข้อความ "— ไม่มีรายการ —"
  *
  * ไม่ใช้ regex engine ภายนอก เพื่อความเรียบง่ายและปลอดภัย
  */
@@ -36,17 +37,21 @@ function esc(v: unknown): string {
 export function renderTemplate(tpl: string, data: Record<string, unknown>): string {
   let out = tpl;
 
-  // 1. Section loops {{#name}}...{{/name}}
+  // 1. Section {{#name}}...{{/name}} (แสดงเมื่อมีค่า/วน array) และ {{^name}}...{{/name}} (แสดงเมื่อ "ไม่มี")
   // จับเริ่มจากบล็อกในสุดก่อน (greedy ไม่ทำเพราะอาจมี nest ไม่กี่ชั้น)
   // วน loop จนไม่เจอ section
   let safety = 100;
   while (safety-- > 0) {
-    const m = out.match(/\{\{#([\w.]+)\}\}([\s\S]*?)\{\{\/\1\}\}/);
+    const m = out.match(/\{\{([#^])([\w.]+)\}\}([\s\S]*?)\{\{\/\2\}\}/);
     if (!m) break;
-    const [full, key, inner] = m;
+    const [full, kind, key, inner] = m;
     const val = getPath(data, key);
+    const empty = Array.isArray(val) ? val.length === 0 : !val;
     let replaced: string;
-    if (Array.isArray(val)) {
+    if (kind === "^") {
+      // inverted section — แสดงเนื้อในเฉพาะตอนไม่มีข้อมูล (ใช้ทำข้อความ "— ไม่มีรายการ —")
+      replaced = empty ? renderTemplate(inner, data) : "";
+    } else if (Array.isArray(val)) {
       replaced = val.map((item, idx) => {
         // scope ใน loop = ตัว item ผสม index + parent data (เผื่อ {{globalToken}})
         const scope = { ...data, ...(typeof item === "object" && item ? item as Record<string, unknown> : { value: item }), idx: idx + 1 };
