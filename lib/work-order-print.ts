@@ -39,6 +39,8 @@ export type ProductSpecRow = { key: string; label: string; value: string; order?
 export type ProductSpecGroup = { label: string; items: { code: string; name: string; count: number }[] };
 export type ProductSpec = {
   image_url?: string | null;     // รูปหลัก (ระดับบนสุด ไม่ผูกกับ parent)
+  /** ชื่อตัวเลือกของ SKU (สี / ตัวเลือกย่อย) — โชว์ใต้รหัสในใบสั่งผลิต */
+  sku_variant?: string | null;
   parent?: {
     name?: string | null;
     family?: string | null;
@@ -309,6 +311,8 @@ export function woScalars(mo: MoDetail, spec: ProductSpec | null): Record<string
     due_date_th: thaiDate(mo.due_date),
     product_sku: mo.product_sku ?? "",
     product_name: spec?.parent?.name || mo.product_name || mo.product_sku || "",
+    // ชื่อตัวเลือก (สี/แบบ) ของ SKU ที่ผลิต — ช่างต้องเห็นว่าทำสีไหน ไม่ใช่รู้แค่รหัส
+    product_variant: spec?.sku_variant || "",
     product_size: size,
     qty: numTh(Number(mo.qty) || 0),
     bom_version: mo.bom_version || "-",
@@ -518,6 +522,7 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
     <div class="muted">สินค้า</div>
     <div class="product-name">{{product_name}}</div>
     <div class="product-code">{{product_sku}}</div>
+    {{#product_variant}}<div class="product-variant">{{product_variant}}</div>{{/product_variant}}
     <div class="product-size">{{product_size}}</div>
   </div>
   <div class="wo-qty">
@@ -529,7 +534,7 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
     <div class="wo-meta-text">
       <div><span class="label">เลขที่:</span> {{mo_number}}</div>
       <div><span class="label">วันที่สั่ง:</span> {{created_at_th}}</div>
-      <div><span class="label">กำหนดส่ง:</span> {{due_date_th}}</div>
+      <div class="due-line"><span class="label">กำหนดส่ง:</span> <span class="due-big">{{due_date_th}}</span></div>
       <div><span class="label">สถานะ:</span> {{status_label}}</div>
     </div>
     <div class="wo-qr-box">{{{qr_html}}}</div>
@@ -556,7 +561,12 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 .photo-empty { color: #94a3b8; font-size: 10px; text-align: center; }
 .product-name { font-size: 13px; font-weight: 300; font-style: italic; line-height: 1.3; color: #334155; }
 .product-code { margin-top: 1.5mm; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 19px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a; }
+/* ชื่อตัวเลือก (สี/แบบ) ใต้รหัส — ตัวหนาพอให้เหลือบเห็นว่าทำสีไหน */
+.product-variant { margin-top: 0.8mm; font-size: 13px; font-weight: 700; color: #0f172a; }
 .product-size { margin-top: 1mm; color: #334155; }
+/* กำหนดส่ง = ตัวใหญ่สุดในกล่องข้อมูล (ช่างดูวันส่งเป็นหลัก) */
+.due-line { margin-top: 0.5mm; }
+.due-big { font-size: 15px; font-weight: 800; color: #b91c1c; }
 .wo-qty { text-align: center; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; padding: 1mm 2mm; }
 .qty-big { font-size: 30px; font-weight: 900; line-height: 1; }
 .wo-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 2mm; line-height: 1.55; }

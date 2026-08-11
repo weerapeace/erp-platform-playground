@@ -45,7 +45,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!sku) return NextResponse.json({ parent: null, legacy: [], model_attrs: [], sku_attrs: [], error: "ต้องระบุ sku" }, { status: 400 });
   const admin = supabaseAdmin();
 
-  const { data: skuRow } = await admin.from("skus_v2").select("id, code, parent_sku_id, cover_image_r2_key").eq("code", sku).maybeSingle();
+  const { data: skuRow } = await admin.from("skus_v2").select("id, code, parent_sku_id, cover_image_r2_key, color_th, color, color_platform_th, attribute_values").eq("code", sku).maybeSingle();
   if (!skuRow) return NextResponse.json({ parent: null, legacy: [], model_attrs: [], sku_attrs: [], error: null });
 
   const { data: parent } = skuRow.parent_sku_id
@@ -138,8 +138,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .sort((a, b) => (SLOT_ORDER.indexOf(a.slot) + 99) - (SLOT_ORDER.indexOf(b.slot) + 99));
   }
 
+  // ชื่อตัวเลือกของ SKU ตัวนี้ (สี / ตัวเลือกย่อย) — ใบสั่งผลิตต้องโชว์ใต้รหัส ไม่งั้นช่างไม่รู้ว่าทำสีไหน
+  const variantOption = ((skuRow as Record<string, unknown>).attribute_values as { variant_option?: { value?: string } } | null)?.variant_option?.value;
+  const skuVariant = [
+    str((skuRow as Record<string, unknown>).color_th) || str((skuRow as Record<string, unknown>).color),
+    str(variantOption),
+  ].filter(Boolean).join(" / ");
+
   return NextResponse.json({
     sku_id: skuRow.id ? String(skuRow.id) : null,
+    sku_variant: skuVariant || null,          // เช่น "สีส้ม" หรือ "สีดำ / ไซซ์ L"
     image_url: imgUrl,        // รูปหลัก (SKU ก่อน, fallback Parent) — ไม่ผูกกับ parent จึงไม่หายเมื่อ SKU ไม่มี parent
     parent: parent ? {
       id: (parent as { id?: string }).id ?? null,
