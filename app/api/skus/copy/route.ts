@@ -49,8 +49,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const origName = String((src as Record<string, unknown>).name_th ?? "").trim();
   payload.name_th = origName ? `${origName} (copy)` : `${newCode} (copy)`;
 
-  const { data: inserted, error } = await admin.from("skus_v2").insert(payload).select("id, code").single();
-  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  // คอลัมน์ที่ DB คำนวณเอง (color_platform_th/en) ส่งกลับไปไม่ได้ — Postgres ปฏิเสธทั้งคำสั่ง
+  // เคสจริง: กด "copy SKU" แล้วเด้ง cannot insert a non-DEFAULT value into column "color_platform_th"
+  let { data: inserted, error } = await admin.from("skus_v2").insert(stripGenerated(payload)).select("id, code").single();
+  // เผื่อมีคอลัมน์คำนวณตัวใหม่ที่ยังไม่อยู่ในรายการ → อ่านชื่อจาก error แล้วตัดทิ้ง ลองใหม่ 1 ครั้ง
+  const genCol = error ? generatedColFromError(error.message) : null;
+  if (genCol) {
+    const retry: Record<string, unknown> = { ...stripGenerated(payload) };
+    delete retry[genCol];
+    ({ data: inserted, error } = await admin.from("skus_v2").insert(retry).select("id, code").single());
+  }
+  if (error || !inserted) return NextResponse.json({ error: friendlyDbError(error?.message ?? "ก๊อปไม่สำเร็จ") }, { status: 400 });
 
   // ก๊อปแท็ก (m2m) จากต้นฉบับ
   const { data: tags } = await admin.from("skus_v2_product_family_m2m").select("tgt_id").eq("src_id", body.id);
