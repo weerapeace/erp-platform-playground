@@ -97,7 +97,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "สถานะไม่ถูกต้อง — เช็ครายการสถานะที่ Admin · Workflows" }, { status: 400 });
   }
 
-  // เฟส 5: ตั้ง Parent SKU (หลายรหัสได้) — รหัสซ้ำกับที่มีอยู่ = ห้ามบันทึก
+  // เฟส 5: ตั้ง Parent SKU (หลายรหัสได้) — รหัส "ที่เพิ่งเพิ่มใหม่" ห้ามซ้ำกับสินค้าที่มีอยู่แล้ว
+  // แต่รหัสที่ใบนี้ถือไว้อยู่แล้วต้องบันทึกซ้ำได้ ไม่งั้นพอสร้าง SKU จากใบงานเสร็จ (Parent เกิดจริงในระบบ)
+  // จะแก้ใบงานนั้นไม่ได้อีกเลย — เจอจริง: ใบที่ตั้งรหัสไว้ 1/1 ใบ บันทึกไม่ผ่าน
   if (body.parent_sku_codes !== undefined || body.parent_sku_code !== undefined) {
     const raw = Array.isArray(body.parent_sku_codes)
       ? body.parent_sku_codes
@@ -108,10 +110,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (code && !codes.includes(code)) codes.push(code);
     }
     if (codes.length) {
-      const { data: dup } = await admin.from("parent_skus_v2").select("code").in("code", codes);
-      const taken = (dup ?? []).map((d) => String((d as { code: string }).code).toUpperCase());
-      if (taken.length) {
-        return NextResponse.json({ error: `รหัส ${taken.join(", ")} มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ` }, { status: 400 });
+      const { data: curRow } = await admin.from("design_sheets").select("parent_sku_codes").eq("id", id).maybeSingle();
+      const already = new Set((Array.isArray(curRow?.parent_sku_codes) ? (curRow!.parent_sku_codes as unknown[]) : [])
+        .map((c) => String(c ?? "").trim().toUpperCase()).filter(Boolean));
+      const added = codes.filter((c) => !already.has(c));
+      if (added.length) {
+        const { data: dup } = await admin.from("parent_skus_v2").select("code").in("code", added);
+        const taken = (dup ?? []).map((d) => String((d as { code: string }).code).toUpperCase());
+        if (taken.length) {
+          return NextResponse.json({ error: `รหัส ${taken.join(", ")} มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ` }, { status: 400 });
+        }
       }
     }
     patch.parent_sku_codes = codes;
