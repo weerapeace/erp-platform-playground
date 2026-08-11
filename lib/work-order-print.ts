@@ -534,11 +534,12 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
     <div class="wo-meta-text">
       <div><span class="label">เลขที่:</span> {{mo_number}}</div>
       <div><span class="label">วันที่สั่ง:</span> {{created_at_th}}</div>
-      <div class="due-line"><span class="label">กำหนดส่ง:</span> <span class="due-big">{{due_date_th}}</span></div>
       <div><span class="label">สถานะ:</span> {{status_label}}</div>
     </div>
     <div class="wo-qr-box">{{{qr_html}}}</div>
   </div>
+  <!-- กำหนดส่ง = แถบเต็มความกว้างมุมล่างของกล่องหัวเอกสาร (ในกล่องขวาแคบไป วันที่ถูกตัดขึ้นบรรทัดใหม่) -->
+  <div class="wo-due"><span class="label">กำหนดส่ง:</span> <span class="due-big">{{due_date_th}}</span></div>
 </section>`,
   body_html: woBodyHtml(WO_DEFAULT_COLUMNS),
   footer_html: `<section class="signatures">
@@ -564,9 +565,9 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 /* ชื่อตัวเลือก (สี/แบบ) ใต้รหัส — ตัวหนาพอให้เหลือบเห็นว่าทำสีไหน */
 .product-variant { margin-top: 0.8mm; font-size: 13px; font-weight: 700; color: #0f172a; }
 .product-size { margin-top: 1mm; color: #334155; }
-/* กำหนดส่ง = ตัวใหญ่สุดในกล่องข้อมูล (ช่างดูวันส่งเป็นหลัก) */
-.due-line { margin-top: 0.5mm; }
-.due-big { font-size: 15px; font-weight: 800; color: #b91c1c; }
+/* กำหนดส่ง = แถบล่างเต็มความกว้างของกล่องหัว ชิดขวา ไม่ตัดคำ (ช่างดูวันส่งเป็นหลัก) */
+.wo-due { grid-column: 1 / -1; margin-top: 2mm; padding-top: 1.5mm; border-top: 1px solid #e2e8f0; text-align: right; white-space: nowrap; }
+.due-big { font-size: 17px; font-weight: 800; color: #b91c1c; white-space: nowrap; }
 .wo-qty { text-align: center; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; padding: 1mm 2mm; }
 .qty-big { font-size: 30px; font-weight: 900; line-height: 1; }
 .wo-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 2mm; line-height: 1.55; }
