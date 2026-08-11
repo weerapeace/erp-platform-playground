@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { resolveEntity, resolveRelationLabels, friendlyDbError, parseDupError, requiredColumnsFor } from "../route";
+import { resolveEntity, resolveRelationLabels, friendlyDbError, parseDupError, requiredColumnsFor, stripGenerated, generatedColFromError } from "../route";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { timeRoute } from "@/lib/api-timing";
@@ -96,7 +96,8 @@ async function _PATCH(
 
   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้แก้ไม่ได้ออกก่อนเขียน
   const access = await getFieldAccess(request, admin, cfg.table);
-  const { clean: cleanPatch, skipped } = stripReadonly(patch, access.readonlyCols);
+  const { clean: cleanPatch0, skipped } = stripReadonly(patch, access.readonlyCols);
+  const cleanPatch = stripGenerated(cleanPatch0);   // คอลัมน์ที่ DB คำนวณเอง ห้ามส่งไป (ไม่งั้น Postgres ปฏิเสธทั้งคำสั่ง)
   if (Object.keys(cleanPatch).length === 0) {
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์แก้ไขฟิลด์ที่ส่งมา" }, { status: 403 });
   }
@@ -108,12 +109,20 @@ async function _PATCH(
     oldCoverKey = (prev?.cover_image_r2_key as string) || null;
   }
 
-  const { data, error } = await admin
+  let { data, error } = await admin
     .from(cfg.table)
     .update(cleanPatch)
     .eq("id", id)
     .select(cfg.selectColumns)
     .single();
+
+  // เผื่อมีคอลัมน์คำนวณตัวใหม่ที่ยังไม่รู้จัก → ตัดตัวที่ error บอกแล้วลองใหม่ 1 ครั้ง
+  const genCol = error ? generatedColFromError(error.message) : null;
+  if (genCol) {
+    const retry: Record<string, unknown> = { ...cleanPatch };
+    delete retry[genCol];
+    ({ data, error } = await admin.from(cfg.table).update(retry).eq("id", id).select(cfg.selectColumns).single());
+  }
 
   if (error) return NextResponse.json({ error: friendlyDbError(error.message), dup: parseDupError(error) }, { status: 400 });
 

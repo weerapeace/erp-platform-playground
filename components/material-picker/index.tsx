@@ -16,6 +16,7 @@ import dynamic from "next/dynamic";
 import { apiFetch, safeSearch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { PagerBar } from "@/components/pager-bar";
 import type { BomComponent } from "@/app/api/bom/components/route";
 
 // โหลดเมื่อกดปุ่มเท่านั้น (dynamic กัน bundle บวม/import วน — material-picker เป็นของกลางใช้ทุกหน้า)
@@ -154,23 +155,29 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
   const [search, setSearch] = useState("");
   const [items, setItems] = useState<BomComponent[]>([]);
   const [loading, setLoading] = useState(false);
-  const [offset, setOffset] = useState(0);
+  // เลื่อนดูเป็น "หน้า" (ของกลาง PagerBar) — เดิมมีแค่ปุ่มโหลดเพิ่มที่ต้องกดรัวและย้อนกลับไม่ได้
+  const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
-  const load = useCallback(async (q: string, off: number, append: boolean) => {
+  const [total, setTotal] = useState<number | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const load = useCallback(async (q: string, pg: number) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: String(PAGE), offset: String(off) });
+      const params = new URLSearchParams({ limit: String(PAGE), offset: String(pg * PAGE) });
       if (q) params.set("search", safeSearch(q));
       if (allowedGroupCodes && allowedGroupCodes.length) params.set("groups", allowedGroupCodes.join(","));
       if (allowedTags && allowedTags.length) params.set("tags", allowedTags.join(","));
       const res = await apiFetch(`/api/bom/components?${params}`, { cache: "no-store" }); const j = await res.json();
       const data = (j.data ?? []) as BomComponent[];
-      setItems((prev) => append ? [...prev, ...data] : data);
+      setItems(data);
+      setTotal(typeof j.total === "number" ? j.total : null);
       setHasMore(data.length === PAGE);
-      setOffset(off + data.length);
+      listRef.current?.scrollTo({ top: 0 });   // เปลี่ยนหน้าแล้วเลื่อนกลับบนสุด
     } finally { setLoading(false); }
   }, [allowedGroupCodes, allowedTags]);
-  useEffect(() => { if (!open) return; const t = setTimeout(() => { void load(search, 0, false); }, search ? 300 : 0); return () => clearTimeout(t); }, [open, search, load]);
+  // เปลี่ยนคำค้น → กลับหน้าแรกเสมอ (ไม่งั้นค้างอยู่หน้า 5 ของคำค้นเก่า แล้วเห็นว่าง)
+  useEffect(() => { setPage(0); }, [search]);
+  useEffect(() => { if (!open) return; const t = setTimeout(() => { void load(search, page); }, search ? 300 : 0); return () => clearTimeout(t); }, [open, search, page, load]);
 
   // เพิ่ม/ก๊อป SKU วัตถุดิบตรงจากหน้าค้นหา (ไม่ต้องออกไปหน้าอื่น)
   const toast = useToast();
@@ -179,7 +186,7 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
   const [copyMode, setCopyMode] = useState(false);       // ⧉ โหมดก๊อป: กดวัตถุดิบสักตัว = ก๊อป (ไม่ใช่เลือก)
   const [copying, setCopying] = useState(false);
   const [copyEditId, setCopyEditId] = useState<string | null>(null);   // เปิดตัวที่ก๊อปมาแก้สี/รหัส
-  const refreshSearch = useCallback(() => { void load(search, 0, false); }, [load, search]);
+  const refreshSearch = useCallback(() => { void load(search, page); }, [load, search, page]);
   const doCopy = async (c: BomComponent) => {
     setCopying(true);
     try {
@@ -207,7 +214,7 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
         {copyMode && <div className="px-3 py-1.5 text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">โหมดก๊อป — กดวัตถุดิบที่จะใช้เป็นต้นแบบ แล้วเปลี่ยนแค่ “สี”/รหัส (ระบบก๊อปฟิลด์อื่นให้)</div>}
         <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อวัตถุดิบ…"
           className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        <div className="grid grid-cols-2 gap-2 max-h-[55vh] overflow-y-auto pr-1">
+        <div ref={listRef} className="grid grid-cols-2 gap-2 max-h-[55vh] overflow-y-auto pr-1">
           {items.map((c) => (
             <button key={c.id} type="button" disabled={copying} onClick={() => (copyMode ? void doCopy(c) : onPick(c))}
               className={`flex items-center gap-2 p-2 border rounded-lg text-left disabled:opacity-50 ${copyMode ? "border-amber-200 hover:bg-amber-50 hover:border-amber-400" : "border-slate-200 hover:bg-blue-50 hover:border-blue-300"}`}>
@@ -222,7 +229,7 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
           {!loading && items.length === 0 && <div className="col-span-2 text-center py-10 text-slate-300 text-sm">ไม่พบวัตถุดิบ</div>}
         </div>
         {loading && <div className="text-center text-xs text-slate-400 py-1">กำลังค้นหา…</div>}
-        {hasMore && !loading && <button type="button" onClick={() => load(search, offset, true)} className="w-full h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">โหลดเพิ่ม</button>}
+        <PagerBar page={page} pageSize={PAGE} count={items.length} total={total} hasMore={hasMore} loading={loading} onPage={setPage} />
       </div>
     </ERPModal>
 

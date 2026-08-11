@@ -81,6 +81,36 @@ export function friendlyDbError(msg: string): string {
   return msg;
 }
 
+/**
+ * คอลัมน์ที่ฐานข้อมูล "คำนวณให้เอง" (GENERATED ALWAYS) — ส่งค่าไปด้วยแล้ว Postgres จะปฏิเสธทั้งคำสั่ง
+ * (เคสจริง: ก๊อป SKU แล้วเด้ง 'cannot insert a non-DEFAULT value into column "color_platform_th"')
+ * ของกลาง: ตัดออกทุกครั้งก่อน insert/update ทุกโมดูล
+ */
+const GENERATED_COLS = new Set([
+  "color_platform_th", "color_platform_en",   // skus_v2 — คำนวณจาก color/color_th + รหัส
+  "price_thb",                                 // parent_sku_supply_data — คำนวณจากราคาหยวน
+  "owner_key", "search_vector",
+]);
+
+/** ตัดคอลัมน์คำนวณอัตโนมัติออกจาก payload (ถ้ามี) */
+export function stripGenerated(payload: Record<string, unknown>): Record<string, unknown> {
+  let hit = false;
+  for (const k of Object.keys(payload)) if (GENERATED_COLS.has(k)) { hit = true; break; }
+  if (!hit) return payload;
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(payload)) if (!GENERATED_COLS.has(k)) clean[k] = v;
+  return clean;
+}
+
+/**
+ * เผื่อมีคอลัมน์คำนวณตัวใหม่ที่ยังไม่อยู่ในรายการข้างบน — อ่านชื่อคอลัมน์จากข้อความ error
+ * แล้วให้ผู้เรียกลองใหม่โดยตัดคอลัมน์นั้นทิ้ง (กันงานพังเพราะ schema เปลี่ยน)
+ */
+export function generatedColFromError(msg: string): string | null {
+  const m = /non-DEFAULT value into column "([^"]+)"/i.exec(msg ?? "");
+  return m ? m[1] : null;
+}
+
 /** ดึงชื่อฟิลด์+ค่าที่ซ้ำจาก error 23505 ของ Postgres (ให้ client ไฮไลต์ฟิลด์ + หารายการที่ซ้ำ) */
 export function parseDupError(err: { message?: string | null; details?: string | null } | null | undefined): { field: string; value: string } | null {
   if (!err) return null;
@@ -686,13 +716,22 @@ async function _POST(
 
   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้แก้ไม่ได้ออกก่อนเขียน
   const access = await getFieldAccess(request, admin, cfg.table);
-  const { clean: cleanPayload } = stripReadonly(payload, access.readonlyCols);
+  const { clean: cleanPayload0 } = stripReadonly(payload, access.readonlyCols);
+  const cleanPayload = stripGenerated(cleanPayload0);   // คอลัมน์ที่ DB คำนวณเอง ห้ามส่งไป
 
-  const { data, error } = await admin
+  let { data, error } = await admin
     .from(cfg.table)
     .insert(cleanPayload)
     .select(cfg.selectColumns)
     .single();
+
+  // schema มีคอลัมน์คำนวณตัวใหม่ที่เรายังไม่รู้จัก → ตัดตัวที่ error บอกแล้วลองใหม่ 1 ครั้ง
+  const genCol = error ? generatedColFromError(error.message) : null;
+  if (genCol) {
+    const retry: Record<string, unknown> = { ...cleanPayload };
+    delete retry[genCol];
+    ({ data, error } = await admin.from(cfg.table).insert(retry).select(cfg.selectColumns).single());
+  }
 
   if (error) return NextResponse.json({ error: friendlyDbError(error.message), dup: parseDupError(error) }, { status: 400 });
 

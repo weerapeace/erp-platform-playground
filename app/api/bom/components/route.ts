@@ -91,6 +91,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
   let out: BomComponent[] = (data ?? []).map((r) => mapRow(r as Record<string, unknown>));
+  let totalFound: number | null = null;   // จำนวนทั้งหมดของผลค้นหา (ใช้โชว์เลขหน้า)
 
   // เสริม: รหัสที่มีครบทุก token บน "code" (AND อย่างเชื่อถือได้ผ่าน .ilike ซ้อนคอลัมน์เดียว)
   //   → กันชุด 300 ตัว (จากแบบกว้าง) ตัด "ตัวที่รหัสตรง" ทิ้ง → พิมพ์รหัสตรงๆ เจอเสมอ + จัดอันดับขึ้นบน
@@ -123,6 +124,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     };
     const groupSet = groupIds ? new Set(groupIds) : null;
     const codeMatch = (c: BomComponent) => { const code = norm(c.code); return !!S && (code === S || code.startsWith(S) || code.includes(S)); };
+    // นับจำนวนทั้งหมดก่อนตัดหน้า → แถบเลื่อนหน้าโชว์ "หน้า 2/5" ได้ (เดิมรู้แค่ว่ามีต่อไหม)
+    totalFound = out.filter((c) => {
+      const inGroup = !groupSet || (c.material_group_id != null && groupSet.has(c.material_group_id));
+      return inGroup || codeMatch(c);
+    }).length;
     out = out
       .map((c) => { const inGroup = !groupSet || (c.material_group_id != null && groupSet.has(c.material_group_id)); return { c: { ...c, out_of_group: !inGroup }, s: scoreOf(c), inGroup }; })
       .filter((x) => x.inGroup || codeMatch(x.c))               // นอกกลุ่ม → เก็บเฉพาะตัวที่ "รหัสตรง"
@@ -130,7 +136,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .slice(offset, offset + limit)
       .map((x) => x.c);
   }
-  return NextResponse.json({ data: out, error: null }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ data: out, total: totalFound, error: null }, { headers: { "Cache-Control": "no-store" } });
 }
 
 // ---- PATCH: ติดกลุ่มวัตถุดิบ / เขียนหน้ากว้างกลับ SKU ----
