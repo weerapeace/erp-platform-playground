@@ -33,20 +33,37 @@ const MAT_TTL = 45000;
 // dropdown ลอยผ่าน portal — ไม่โดนตาราง scroll บัง + เด้งขึ้นบนเมื่อพื้นที่ล่างไม่พอ
 function FloatingPanel({ anchorRef, open, children, minWidth = 340 }: { anchorRef: RefObject<HTMLDivElement | null>; open: boolean; children: ReactNode; minWidth?: number }) {
   const [style, setStyle] = useState<CSSProperties | null>(null);
-  useLayoutEffect(() => {
+  /**
+   * วางตำแหน่งใหม่ทุกครั้งที่จอ/กล่องแม่เลื่อน — เดิมคำนวณครั้งเดียวตอนเปิด
+   * พอฟอร์มในโมดัลเลื่อนตามช่องที่โฟกัส กล่องลอยค้างที่เดิม ล้นจอ แล้ว "เลื่อนดูรายการที่เหลือไม่ได้"
+   * และจำกัดความสูงตามที่ว่างจริง เพื่อให้รายการข้างในเลื่อนได้เสมอ ไม่โดนตัดหาย
+   */
+  const place = useCallback(() => {
     if (!open || !anchorRef.current) { setStyle(null); return; }
     const r = anchorRef.current.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - r.bottom;
-    const openUp = spaceBelow < 300 && r.top > spaceBelow;
+    const GAP = 4, EDGE = 8;
+    const spaceBelow = window.innerHeight - r.bottom - GAP - EDGE;
+    const spaceAbove = r.top - GAP - EDGE;
+    const openUp = spaceBelow < 260 && spaceAbove > spaceBelow;
     const width = Math.min(Math.max(r.width, minWidth), window.innerWidth - 16);
     setStyle({
       position: "fixed",
-      left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
+      left: Math.max(EDGE, Math.min(r.left, window.innerWidth - width - EDGE)),
       width,
       zIndex: 60,
-      ...(openUp ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }),
+      maxHeight: Math.max(160, openUp ? spaceAbove : spaceBelow),   // ไม่ล้นจอ → ข้างในเลื่อนได้
+      display: "flex", flexDirection: "column",
+      ...(openUp ? { bottom: window.innerHeight - r.top + GAP } : { top: r.bottom + GAP }),
     });
   }, [open, anchorRef, minWidth]);
+  useLayoutEffect(() => { place(); }, [place]);
+  useEffect(() => {
+    if (!open) return;
+    const onMove = () => place();
+    window.addEventListener("scroll", onMove, true);   // capture = จับการเลื่อนของกล่องแม่ทุกชั้น
+    window.addEventListener("resize", onMove);
+    return () => { window.removeEventListener("scroll", onMove, true); window.removeEventListener("resize", onMove); };
+  }, [open, place]);
   if (!open || !style) return null;
   return createPortal(<div style={style} onMouseDown={(e) => e.stopPropagation()}>{children}</div>, document.body);
 }
@@ -100,9 +117,10 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
         className="w-full h-9 px-2 text-left text-sm border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center gap-1.5 overflow-hidden">
         {sku ? <><Thumb k={imageKey ?? null} /><span className="truncate"><code className="text-xs text-slate-500">{sku}</code> <span className="text-slate-700">{name}</span></span></> : <span className="text-slate-400">{placeholder}</span>}
       </button>
+      {/* flex/min-h-0 = ให้ส่วนรายการยืดตามที่ว่างจริงแล้วเลื่อนข้างใน (ไม่ล้นจอจนกดไม่ถึง) */}
       <FloatingPanel anchorRef={boxRef} open={open} minWidth={520}>
-        <div className="bg-white border border-slate-200 rounded-lg shadow-xl">
-          <div className="p-2 border-b border-slate-100">
+        <div className="bg-white border border-slate-200 rounded-lg shadow-xl flex flex-col min-h-0 max-h-full">
+          <div className="p-2 border-b border-slate-100 shrink-0">
             <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อวัตถุดิบ..." className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             {allowedGroupCodes && allowedGroupCodes.length > 0 && (
               <label className="flex items-center gap-1.5 mt-1.5 text-[11px] text-slate-500 cursor-pointer">
@@ -144,13 +162,14 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
           </div>
         </div>
       </FloatingPanel>
-      <MaterialSearchModal open={fullOpen} onClose={() => setFullOpen(false)} onPick={pick} allowedGroupCodes={filtered ? allowedGroupCodes : undefined} allowedTags={allowedTags} />
+      {/* ส่งคำที่พิมพ์ไว้ใน dropdown ต่อไปด้วย — เดิมกดค้นหาแบบเต็มแล้วต้องพิมพ์ใหม่ */}
+      <MaterialSearchModal open={fullOpen} initialSearch={search} onClose={() => setFullOpen(false)} onPick={pick} allowedGroupCodes={filtered ? allowedGroupCodes : undefined} allowedTags={allowedTags} />
     </div>
   );
 }
 
 // MaterialSearchModal — ค้นหาวัตถุดิบแบบเต็ม (popup ใหญ่ + โหลดเพิ่ม)
-function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowedTags }: { open: boolean; onClose: () => void; onPick: (c: BomComponent) => void; allowedGroupCodes?: string[]; allowedTags?: string[] }) {
+function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowedTags, initialSearch = "" }: { open: boolean; onClose: () => void; onPick: (c: BomComponent) => void; allowedGroupCodes?: string[]; allowedTags?: string[]; initialSearch?: string }) {
   const PAGE = 40;
   const [search, setSearch] = useState("");
   const [items, setItems] = useState<BomComponent[]>([]);
@@ -175,6 +194,12 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
       listRef.current?.scrollTo({ top: 0 });   // เปลี่ยนหน้าแล้วเลื่อนกลับบนสุด
     } finally { setLoading(false); }
   }, [allowedGroupCodes, allowedTags]);
+  // เปิดป๊อป → เริ่มด้วยคำที่พิมพ์ค้างไว้ใน dropdown (ไม่ต้องพิมพ์ใหม่)
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpen.current) { setSearch(initialSearch); setPage(0); }   // เฉพาะตอนเพิ่งเปิด — ไม่ทับสิ่งที่ผู้ใช้พิมพ์ต่อ
+    wasOpen.current = open;
+  }, [open, initialSearch]);
   // เปลี่ยนคำค้น → กลับหน้าแรกเสมอ (ไม่งั้นค้างอยู่หน้า 5 ของคำค้นเก่า แล้วเห็นว่าง)
   useEffect(() => { setPage(0); }, [search]);
   useEffect(() => { if (!open) return; const t = setTimeout(() => { void load(search, page); }, search ? 300 : 0); return () => clearTimeout(t); }, [open, search, page, load]);
