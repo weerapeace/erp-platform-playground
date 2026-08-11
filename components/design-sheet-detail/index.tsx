@@ -43,6 +43,7 @@ import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
 import type { PriceItem, PriceGroup } from "@/app/api/design-sheets/price-items/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
+import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
 
 type Brand = { id: string; name: string; color: string | null };
 type CostExtra = { label: string; amount: number };
@@ -427,6 +428,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย
   const [editing, setEditing] = useState(false);
   const [parentRefs, setParentRefs] = useState<Record<string, string>>({});   // รหัส Parent SKU → id (ทำ chip เป็นลิงก์)
+  const [linkedSkus, setLinkedSkus] = useState<DesignSheetLinkedSku[]>([]);   // SKU ที่สร้างจากใบนี้ (+ พี่น้องใต้ Parent เดียวกัน)
   const [comments, setComments] = useState<DesignSheetComment[]>([]);
   const [quotes, setQuotes] = useState<DesignSheetQuote[]>([]);
   const [cqLoading, setCqLoading] = useState(false);
@@ -1045,10 +1047,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch { /* ไม่ critical */ }
   };
 
-  const openCreate = () => { setEditing(true); setParentRefs({}); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
+  // โหลด "SKU ที่เชื่อม" ใหม่ (หลังสร้าง SKU จาก wizard) — อ่านจาก GET ใบงานตัวเดิม
+  const reloadLinkedSkus = useCallback(async (sheetId: string) => {
+    try {
+      const j = await apiFetch(`/api/design-sheets/${sheetId}`).then((r) => r.json());
+      if (!j.error) setLinkedSkus((j.data?.linked_skus ?? []) as DesignSheetLinkedSku[]);
+    } catch { /* ไม่ critical */ }
+  }, []);
+
+  const openCreate = () => { setEditing(true); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
 
   const openEdit = async (row: DesignSheetListItem, tab: "info" | "comments" | "cost" | "quotes" = "info") => {
-    setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false); setParentRefs({});
+    setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false); setParentRefs({}); setLinkedSkus([]);
     setModalTab(tab); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend();
     try {
       const res = await apiFetch(`/api/design-sheets/${row.id}`); const j = await res.json();
@@ -1060,6 +1070,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       const refs: Record<string, string> = {};
       for (const r of (Array.isArray(d.parent_sku_refs) ? d.parent_sku_refs : []) as { code: string; id: string }[]) refs[r.code] = r.id;
       setParentRefs(refs);
+      setLinkedSkus((Array.isArray(d.linked_skus) ? d.linked_skus : []) as DesignSheetLinkedSku[]);
       setForm({
         id: d.id, code: d.code ?? "", name: d.name ?? "", brand_id: d.brand_id ?? "",
         detail: d.detail ?? "", note: d.note ?? "", status: d.status ?? "design",
@@ -1700,6 +1711,34 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     : skuCheck?.latest ? <span className="text-slate-400">✓ ใช้ได้ · ล่าสุดที่ตั้ง: <b>{skuCheck.latest}</b>{skuCheck.suggested ? <> · ถัดไป: <b className="text-emerald-600">{skuCheck.suggested}</b></> : null}{skuCheck.max_code ? <> · เลขสูงสุด: {skuCheck.max_code}</> : null}</span>
                     : skuCheck ? <span className="text-emerald-600">✓ ยังไม่มีรหัสกลุ่มนี้ ใช้ได้</span> : null}
                 </div>
+                {/* SKU ที่เชื่อมกับใบงานนี้ — ตัวที่สร้างจากใบนี้ (เขียว) + พี่น้องใต้ Parent เดียวกัน (เทา) · คลิกเปิดดู SKU */}
+                {linkedSkus.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-2">
+                    <div className="mb-1 text-[11px] font-medium text-emerald-800">
+                      🏷️ SKU ที่เชื่อม {linkedSkus.filter((s) => s.from_sheet).length} ตัว
+                      {linkedSkus.some((s) => !s.from_sheet) && (
+                        <span className="font-normal text-slate-500"> · ใต้ Parent เดียวกันอีก {linkedSkus.filter((s) => !s.from_sheet).length} ตัว</span>
+                      )}
+                    </div>
+                    <div className="max-h-40 space-y-1 overflow-auto">
+                      {linkedSkus.map((s) => (
+                        <div key={s.id} title={s.from_sheet ? "สร้างจากใบงานนี้" : `อยู่ใต้ Parent ${s.parent_code ?? ""} (ไม่ได้สร้างจากใบนี้)`}
+                          className={`flex items-center gap-1.5 rounded border bg-white px-1.5 py-1 ${s.from_sheet ? "border-emerald-200" : "border-slate-200 opacity-70"}`}>
+                          {s.image_key
+                            ? <ImageThumbnail url={`/api/r2-image?key=${encodeURIComponent(s.image_key)}`} size={22} />
+                            : <span className="inline-block h-[22px] w-[22px] shrink-0 rounded bg-slate-100" />}
+                          <RecordPeekLink moduleKey="skus-v2" recordId={s.id} label={s.code} />
+                          <span className="truncate text-[11px] text-slate-500">{s.color || s.name_th || ""}</span>
+                          <span className="ml-auto shrink-0 text-[11px] tabular-nums text-slate-500">
+                            {s.standard_price != null ? s.standard_price.toLocaleString("th-TH") : ""}
+                          </span>
+                          {!s.is_active && <span className="shrink-0 text-[10px] text-slate-400">ปิดใช้</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* ข้อ 6: ร่าง Parent (ชื่อก่อน ยังไม่ใส่รหัสจริง) — ใช้ตั้งชื่อแบบที่จะทำ แล้วค่อยสร้างรหัสจริงทีหลัง */}
                 <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
                   <span className="text-[11px] text-slate-500">ร่าง Parent (ยังไม่มีรหัส) — เช่น &quot;พวงกุญแจ มะพร้าว&quot;</span>
@@ -2089,7 +2128,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         <SkuWizard open={skuWizard} onClose={() => setSkuWizard(false)}
           sheetId={form.id} sheetName={form.name} brandId={form.brand_id || null}
           parentCodeOptions={form.parent_sku_codes} parentCodeDefault={form.parent_sku_codes[0] || ""} defaultPrice={offeredPrice}
-          onDone={() => { patch({ status: "sku_created" }); refresh(); }} />
+          onDone={() => { patch({ status: "sku_created" }); refresh(); if (form.id) void reloadLinkedSkus(form.id); }} />
       )}
 
       {/* Wizard ดึงตีราคา (แท็บที่กำลังดู) → สร้างสูตร BOM (วัตถุดิบใส่ทีหลัง) */}

@@ -1,7 +1,7 @@
 /**
  * Design Sheets API — รายใบ (เฟส 1)
  *
- * GET    /api/design-sheets/[id] → รายละเอียดใบงาน
+ * GET    /api/design-sheets/[id] → รายละเอียดใบงาน (+ parent_sku_refs, linked_skus = SKU ที่เชื่อมกับใบนี้)
  * PATCH  /api/design-sheets/[id] → แก้ไข (whitelist field) + กู้คืนจากกรุ (is_active)
  * DELETE /api/design-sheets/[id]        → เก็บเข้ากรุ (archive — ไม่ลบจริง)
  * DELETE /api/design-sheets/[id]?hard=1 → ลบถาวร + ย้ายรูปใน R2 เข้า trash/ (สำรอง 30 วัน) + ลบลูก (cascade)
@@ -20,6 +20,13 @@ import { isValidDsStatus } from "../shared";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+/** SKU ที่ผูกกับใบงาน — from_sheet=true คือสร้างจากใบนี้ · false คือพี่น้องใต้ Parent เดียวกัน */
+export type DesignSheetLinkedSku = {
+  id: string; code: string; name_th: string | null; color: string | null;
+  standard_price: number | null; image_key: string | null; is_active: boolean;
+  parent_code: string | null; from_sheet: boolean;
+};
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { id } = await params;
@@ -33,11 +40,35 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (Array.isArray(row.parent_sku_codes)) for (const c of row.parent_sku_codes as unknown[]) if (c) codesSet.add(String(c));
   if (row.parent_sku_code) codesSet.add(String(row.parent_sku_code));
   let parent_sku_refs: { code: string; id: string }[] = [];
+  const parentIdToCode = new Map<string, string>();
   if (codesSet.size) {
     const { data: prs } = await admin.from("parent_skus_v2").select("id, code").in("code", Array.from(codesSet));
     parent_sku_refs = (prs ?? []).map((p) => ({ code: String((p as { code: string }).code), id: String((p as { id: string }).id) }));
+    for (const r of parent_sku_refs) parentIdToCode.set(r.id, r.code);
   }
-  return NextResponse.json({ data: { ...data, parent_sku_refs }, error: null });
+
+  // "SKU ที่เชื่อมกับใบงานนี้" = SKU ที่สร้างจากใบนี้ (design_sheet_id) + พี่น้องที่อยู่ใต้ Parent เดียวกัน
+  // (ตัวที่ไม่ได้สร้างจากใบนี้ ติดธง from_sheet=false → หน้าจอโชว์จาง ๆ ให้รู้ว่าเป็นของเดิม)
+  const SKU_COLS = "id, code, name_th, color, standard_price, cover_image_r2_key, is_active, parent_sku_id, design_sheet_id";
+  const byId = new Map<string, Record<string, unknown>>();
+  const { data: own } = await admin.from("skus_v2").select(SKU_COLS).eq("design_sheet_id", id).limit(500);
+  for (const s of (own ?? []) as Record<string, unknown>[]) byId.set(String(s.id), s);
+  if (parent_sku_refs.length) {
+    const { data: sib } = await admin.from("skus_v2").select(SKU_COLS)
+      .in("parent_sku_id", parent_sku_refs.map((p) => p.id)).limit(500);
+    for (const s of (sib ?? []) as Record<string, unknown>[]) if (!byId.has(String(s.id))) byId.set(String(s.id), s);
+  }
+  const linked_skus = Array.from(byId.values()).map((s) => ({
+    id: String(s.id), code: String(s.code ?? ""), name_th: (s.name_th as string) ?? null,
+    color: (s.color as string) ?? null,
+    standard_price: s.standard_price == null ? null : Number(s.standard_price),
+    image_key: (s.cover_image_r2_key as string) ?? null,
+    is_active: s.is_active !== false,
+    parent_code: s.parent_sku_id ? (parentIdToCode.get(String(s.parent_sku_id)) ?? null) : null,
+    from_sheet: String(s.design_sheet_id ?? "") === id,
+  })).sort((a, b) => (a.parent_code ?? "").localeCompare(b.parent_code ?? "") || a.code.localeCompare(b.code));
+
+  return NextResponse.json({ data: { ...data, parent_sku_refs, linked_skus }, error: null });
 }
 
 // field ที่แก้ได้ (whitelist)

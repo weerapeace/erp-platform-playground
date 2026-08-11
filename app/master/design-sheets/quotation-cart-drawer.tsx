@@ -3,7 +3,7 @@
 // ============================================================
 // QuotationCartDrawer — ตะกร้าใบเสนอราคา (drawer ขอบขวา) สำหรับโมดูล Design Sheets
 // "ตะกร้า" = ใบเสนอราคาร่าง 1 ใบที่ active (ตัวชี้เก็บใน localStorage ที่หน้าแม่)
-// โผล่แถบขอบขวาเมื่อมีรายการ · กดเปิด drawer ดู/แก้จำนวน-ราคา/ลบบรรทัด/รวมยอด
+// โผล่แถบขอบขวาเมื่อมีรายการ · กดเปิด drawer ดู/แก้ชื่อสินค้า-ตัวเลือก(สี/ไซส์)-จำนวน-ราคา/ลบบรรทัด/รวมยอด
 // ของจริงอยู่ใน DB ระบบขาย → ดึง/แก้ผ่าน /api/quotations/[id] (GET/PATCH) เดิม
 // ============================================================
 
@@ -107,10 +107,18 @@ export function QuotationCartDrawer({
             <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
               {lines.map((l, i) => (
                 <div key={l.id ?? i} className="rounded-lg border border-slate-200 p-2">
+                  {/* ชื่อสินค้า + ตัวเลือก (สี/ไซส์) แก้ได้ตรงนี้เลย เช่น "ครีม L" → "ครีม M" */}
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm text-slate-800">{l.product_name}</div>
-                      {l.note && <div className="truncate text-xs text-slate-400">ตัวเลือก: {l.note}</div>}
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <input value={l.product_name ?? ""} onChange={(e) => setLine(i, { product_name: e.target.value })}
+                        title="ชื่อสินค้า (แก้ได้)" placeholder="ชื่อสินค้า"
+                        className="h-7 w-full rounded border border-transparent px-1 text-sm text-slate-800 hover:border-slate-200 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300" />
+                      <div className="flex items-center gap-1">
+                        <span className="shrink-0 text-[11px] text-slate-400">ตัวเลือก:</span>
+                        <input value={l.note ?? ""} onChange={(e) => setLine(i, { note: e.target.value })}
+                          title="สี / ไซส์ / ตัวเลือก (แก้ได้)" placeholder="เช่น ครีม M (10 cm.)"
+                          className="h-6 w-full rounded border border-transparent px-1 text-xs text-slate-500 hover:border-slate-200 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300" />
+                      </div>
                     </div>
                     <button onClick={() => removeLine(i)} title="ลบรายการ" className="h-6 w-6 shrink-0 rounded text-rose-500 hover:bg-rose-50">🗑</button>
                   </div>

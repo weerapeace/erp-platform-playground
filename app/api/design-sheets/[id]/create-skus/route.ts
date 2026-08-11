@@ -94,7 +94,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const rows = skus.map((s) => ({
     code: s.code!.trim(), name_th: (s.name_th ?? pName).trim() || pName,
-    parent_sku_id: parentId, color: s.color?.trim() || null,
+    parent_sku_id: parentId, design_sheet_id: id,   // ลิงก์ย้อนกลับ → ใบงานโชว์ "SKU ที่เชื่อม" ได้
+    color: s.color?.trim() || null,
     standard_price: s.standard_price != null ? Number(s.standard_price) : null,
     list_price: s.list_price != null ? Number(s.list_price) : null,
     cover_image_r2_key: s.image_keys?.[0] ?? s.cover_image_r2_key ?? null,
