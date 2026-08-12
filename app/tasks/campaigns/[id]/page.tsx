@@ -126,6 +126,40 @@ function designSheetCardSkeleton(s: DsCardInfo, statusLabel?: string | null, sta
   els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 14, strokeColor: "#3730a3", groupIds: [gid], customData: data });
   return els;
 }
+// ---- การ์ดเทรนด์ (Trend) — ส่งมาจากบอร์ดเทรนด์ (/tasks/trends) ----
+// รูป = ภาพถ่ายหน้าเทรนด์ (กระดานของเทรนด์นั้น) · ดับเบิลคลิก = เปิดบอร์ดเทรนด์ในแท็บใหม่
+const TREND_CARD_STROKE = "#db2777";
+type TrendCardInfo = { id: string; title: string; heat?: string | null; percent?: number | null; done?: number | null; total?: number | null; cover_url?: string | null; brand_name?: string | null };
+function trendCardText(x: TrendCardInfo): string {
+  const heat = x.heat === "hot" ? "🔥" : x.heat === "cooling" ? "❄️" : "🌱";
+  const prog = x.total ? `✅ ${x.done ?? 0}/${x.total} (${x.percent ?? 0}%)` : null;
+  return [`${heat} ${wrapCardText(x.title, 22, 2)}`, x.brand_name ? `🏷 ${x.brand_name}` : null, prog].filter(Boolean).join("\n");
+}
+function trendCardSkeleton(x: TrendCardInfo): Record<string, unknown>[] {
+  const gid = `trend-${x.id}-${Math.random().toString(36).slice(2, 7)}`;
+  const data = { kind: "trend", id: x.id, title: x.title, heat: x.heat ?? null, tooltip: tt("ดับเบิลคลิกเพื่อเปิดบอร์ดเทรนด์", "Double-click to open the trend board") };
+  const img = x.cover_url ? (withImageWidth(x.cover_url, 560) ?? x.cover_url) : null;
+  const text = trendCardText(x);
+  const lineCount = text.split("\n").length;
+  const W = 280, imgH = 158, txtY = img ? imgH + 18 : 14, H = txtY + lineCount * 20 + 12;   // 16:9 ย่อ
+  const els: Record<string, unknown>[] = [
+    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#fff1f2", strokeColor: TREND_CARD_STROKE, fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
+  ];
+  if (img) els.push({ type: "image", _imageUrl: img, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], customData: data });
+  els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 14, strokeColor: "#9d174d", groupIds: [gid], customData: data });
+  return els;
+}
+async function fetchTrends(ids: string[]): Promise<Map<string, TrendCardInfo>> {
+  const map = new Map<string, TrendCardInfo>();
+  if (!ids.length) return map;
+  try {
+    const r = await apiFetch(`/api/creative-trends?ids=${encodeURIComponent(ids.join(","))}`);
+    const j = await r.json();
+    for (const row of ((j.data ?? []) as TrendCardInfo[])) map.set(row.id, row);
+  } catch { /* โหลดไม่ได้ = ปล่อยการ์ดเดิมไว้ */ }
+  return map;
+}
+
 // ดึงใบงานตาม id ทีเดียว (ใช้ทั้งตอนซิงค์การ์ด และตอนรับ ?add_design_sheets= จาก Design Dashboard)
 async function fetchDesignSheets(ids: string[]): Promise<Map<string, DesignSheetListItem>> {
   const map = new Map<string, DesignSheetListItem>();
@@ -467,7 +501,7 @@ export default function CampaignCanvasPage() {
     pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = เปิดโฟลเดอร์
-  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); else if (data.kind === "asset") setAssetView(data); else if (data.kind === "table") setTableView(data); else if (data.kind === "design_sheet") setDsViewId(String(data.id ?? "")); }, [openFolder]);
+  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); else if (data.kind === "asset") setAssetView(data); else if (data.kind === "table") setTableView(data); else if (data.kind === "design_sheet") setDsViewId(String(data.id ?? "")); else if (data.kind === "trend") window.open(`/tasks/trends/${encodeURIComponent(String(data.id ?? ""))}`, "_blank", "noopener"); }, [openFolder]);
   // สร้างตารางคำนวณใหม่ → วางการ์ดบนกระดาน
   const createTableCard = async () => {
     try {
@@ -554,17 +588,58 @@ export default function CampaignCanvasPage() {
     });
   }, [dsLabel, dsColor]);
 
-  // รับใบงานที่ส่งมาจาก Design Dashboard (?add_design_sheets=id,id) → วางการ์ดตอนกระดานพร้อม แล้วล้าง param ออกจาก URL
+  // ⑤ ซิงค์การ์ดเทรนด์ (รูปหน้าเทรนด์ + % ความครบของเช็คลิสต์)
+  const syncTrendCards = useCallback(async () => {
+    const ctrl = sketchRef.current; if (!ctrl) return;
+    const ids = (ctrl.listCards() ?? []).filter((c) => c.kind === "trend").map((c) => String(c.data.id)).filter(Boolean);
+    if (!ids.length) return;
+    const map = await fetchTrends(ids);
+    if (!map.size) return;
+    await ctrl.refreshCards(async ({ kind, id: tid }) => {
+      if (kind !== "trend" || !tid) return null;
+      const x = map.get(tid); if (!x) return null;
+      return {
+        text: trendCardText(x),
+        data: { title: x.title, heat: x.heat ?? null },
+        imageUrl: x.cover_url ? (withImageWidth(x.cover_url, 560) ?? x.cover_url) : null,
+      };
+    });
+  }, []);
+  // วางการ์ดเทรนด์ (ข้ามตัวที่มีอยู่แล้ว กันซ้ำ)
+  const placeTrendCards = useCallback((trends: TrendCardInfo[]) => {
+    if (!sketchRef.current || !trends.length) return 0;
+    const onBoard = new Set((sketchRef.current.listCards() ?? []).filter((c) => c.kind === "trend").map((c) => String(c.data.id)));
+    const fresh = trends.filter((x) => !onBoard.has(x.id));
+    if (!fresh.length) return 0;
+    const all: Record<string, unknown>[] = [];
+    fresh.forEach((x, i) => { const dx = i * 300; for (const el of trendCardSkeleton(x)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
+    void sketchRef.current.insert(all);
+    return fresh.length;
+  }, []);
+
+  // รับใบงาน/เทรนด์ที่ส่งมา (?add_design_sheets=id,id · ?add_trends=id,id) → วางการ์ดตอนกระดานพร้อม แล้วล้าง param ออกจาก URL
   const pendingDsRef = useRef<string[]>([]);
+  const pendingTrendRef = useRef<string[]>([]);
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search);
-      const raw = sp.get("add_design_sheets"); if (!raw) return;
-      pendingDsRef.current = raw.split(",").map((s) => s.trim()).filter(Boolean);
-      sp.delete("add_design_sheets");
+      const raw = sp.get("add_design_sheets");
+      const rawT = sp.get("add_trends");
+      if (!raw && !rawT) return;
+      if (raw) { pendingDsRef.current = raw.split(",").map((s) => s.trim()).filter(Boolean); sp.delete("add_design_sheets"); }
+      if (rawT) { pendingTrendRef.current = rawT.split(",").map((s) => s.trim()).filter(Boolean); sp.delete("add_trends"); }
       window.history.replaceState(null, "", window.location.pathname + (sp.toString() ? `?${sp.toString()}` : ""));
     } catch { /* ignore */ }
   }, []);
+  const placePendingTrends = useCallback(async () => {
+    const ids = pendingTrendRef.current; if (!ids.length) return;
+    pendingTrendRef.current = [];
+    const map = await fetchTrends(ids);
+    const rows = ids.map((i) => map.get(i)).filter(Boolean) as TrendCardInfo[];
+    const n = placeTrendCards(rows);
+    if (n) pushToast("success", t(`วางการ์ดเทรนด์ ${n} ใบแล้ว`, `Placed ${n} trend card(s)`));
+    else if (rows.length) pushToast("info", t("เทรนด์ที่ส่งมาอยู่บนกระดานแล้ว", "Those trends are already on the board"));
+  }, [placeTrendCards, pushToast, t]);
   const placePendingDesignSheets = useCallback(async () => {
     const ids = pendingDsRef.current; if (!ids.length) return;
     pendingDsRef.current = [];
@@ -580,7 +655,7 @@ export default function CampaignCanvasPage() {
   const boardReadyRef = useRef(false);
   useEffect(() => { if (boardReadyRef.current) void syncDesignSheetCards(); }, [dsMeta, syncDesignSheetCards]);
 
-  const onBoardReady = useCallback(() => { boardReadyRef.current = true; syncTaskCards(); syncContentCards(); void syncDesignSheetCards(); void placePendingDesignSheets(); }, [syncTaskCards, syncContentCards, syncDesignSheetCards, placePendingDesignSheets]);
+  const onBoardReady = useCallback(() => { boardReadyRef.current = true; syncTaskCards(); syncContentCards(); void syncDesignSheetCards(); void syncTrendCards(); void placePendingDesignSheets(); void placePendingTrends(); }, [syncTaskCards, syncContentCards, syncDesignSheetCards, syncTrendCards, placePendingDesignSheets, placePendingTrends]);
   // สลับภาษา → รีเฟรชข้อความบนการ์ด (การ์ดเป็น snapshot · ข้าม mount แรก ให้ onReady จัดการ)
   const { lang } = useLang();
   const langMountRef = useRef(false);

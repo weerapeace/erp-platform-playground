@@ -310,6 +310,39 @@ export async function deleteKnowledge(id: string): Promise<void> {
   await jsonOrThrow(await apiFetch(`/api/creative-knowledge/${id}`, { method: "DELETE" }));
 }
 
+// ---- เทรนด์ (Trends) — 1 เทรนด์ = 1 กระดาน 1 หน้า + เช็คลิสต์สิ่งที่ต้องมี ----
+export type { TrendItem } from "@/app/api/creative-trends/route";
+import type { TrendItem } from "@/app/api/creative-trends/route";
+import type { TrendChecklist } from "@/lib/creative-trends-meta";
+
+export async function listTrends(opts?: { all?: boolean; ids?: string[] }): Promise<TrendItem[]> {
+  const sp = new URLSearchParams();
+  if (opts?.all) sp.set("all", "1");
+  if (opts?.ids?.length) sp.set("ids", opts.ids.join(","));
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-trends${sp.toString() ? `?${sp}` : ""}`));
+  return (j.data as TrendItem[]) ?? [];
+}
+export async function getTrend(id: string): Promise<TrendItem> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-trends/${id}`));
+  return j.data as TrendItem;
+}
+export type TrendPatch = {
+  title?: string; summary?: string | null; heat?: string; brand_id?: string | null;
+  platforms?: string[]; tags?: string[]; source_url?: string | null;
+  start_date?: string | null; end_date?: string | null; checklist?: TrendChecklist; is_active?: boolean;
+};
+export async function createTrend(body: TrendPatch): Promise<TrendItem> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-trends", { method: "POST", body: JSON.stringify(body) }));
+  return j.data as TrendItem;
+}
+export async function updateTrend(id: string, patch: TrendPatch): Promise<TrendItem> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-trends/${id}`, { method: "PATCH", body: JSON.stringify(patch) }));
+  return j.data as TrendItem;
+}
+export async function deleteTrend(id: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-trends/${id}`, { method: "DELETE" }));
+}
+
 // ---- Brands (ของกลาง /api/brands) ----
 export async function listBrands(): Promise<BrandOption[]> {
   const j = await jsonOrThrow(await apiFetch("/api/brands"));

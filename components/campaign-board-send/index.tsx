@@ -39,12 +39,14 @@ export function useCanSendToBoard(): boolean {
   return !useAppGuard("tasks").blocked;
 }
 
-/** ป๊อปอัปเลือกแคมเปญปลายทาง → กดแล้วพาไปกระดานนั้นพร้อมวางการ์ดใบงานให้ */
-export function CampaignBoardPicker({ open, onClose, sheetIds }: {
+/** ป๊อปอัปเลือกแคมเปญปลายทาง → กดแล้วพาไปกระดานนั้นพร้อมวางการ์ดให้ (ใบงานออกแบบ และ/หรือ เทรนด์) */
+export function CampaignBoardPicker({ open, onClose, sheetIds, trendIds }: {
   open: boolean;
   onClose: () => void;
   /** id ใบงานออกแบบที่จะวางบนกระดาน (เกิน SEND_TO_BOARD_MAX จะถูกตัด) */
-  sheetIds: string[];
+  sheetIds?: string[];
+  /** id เทรนด์ที่จะวางบนกระดาน (บอร์ดเทรนด์ → การ์ดรูปหน้าเทรนด์) */
+  trendIds?: string[];
 }) {
   const [campaigns, setCampaigns] = useState<CampaignOption[] | null>(null);
   const [query, setQuery] = useState("");
@@ -64,10 +66,14 @@ export function CampaignBoardPicker({ open, onClose, sheetIds }: {
 
   if (!open || typeof document === "undefined") return null;
 
-  const ids = sheetIds.filter(Boolean).slice(0, SEND_TO_BOARD_MAX);
+  const ids = (sheetIds ?? []).filter(Boolean).slice(0, SEND_TO_BOARD_MAX);
+  const tIds = (trendIds ?? []).filter(Boolean).slice(0, SEND_TO_BOARD_MAX);
   const go = (campaignId: string) => {
-    if (!ids.length) return;
-    window.location.href = `/tasks/campaigns/${encodeURIComponent(campaignId)}?add_design_sheets=${encodeURIComponent(ids.join(","))}`;
+    if (!ids.length && !tIds.length) return;
+    const sp = new URLSearchParams();
+    if (ids.length) sp.set("add_design_sheets", ids.join(","));
+    if (tIds.length) sp.set("add_trends", tIds.join(","));
+    window.location.href = `/tasks/campaigns/${encodeURIComponent(campaignId)}?${sp.toString()}`;
   };
   const q = query.trim().toLowerCase();
   const shown = (campaigns ?? []).filter((c) => !q || `${c.name} ${c.brand_label ?? ""}`.toLowerCase().includes(q));
@@ -78,7 +84,9 @@ export function CampaignBoardPicker({ open, onClose, sheetIds }: {
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <div>
             <div className="text-base font-semibold text-slate-800">🎨 ส่งขึ้นกระดานวางแผน</div>
-            <p className="text-xs text-slate-400">เลือกแคมเปญที่จะวางการ์ดใบงาน {ids.length} ใบ</p>
+            <p className="text-xs text-slate-400">
+              เลือกแคมเปญที่จะวาง{[ids.length ? `การ์ดใบงาน ${ids.length} ใบ` : null, tIds.length ? `การ์ดเทรนด์ ${tIds.length} ใบ` : null].filter(Boolean).join(" + ")}
+            </p>
           </div>
           <button onClick={onClose} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
         </div>
