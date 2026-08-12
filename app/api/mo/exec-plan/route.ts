@@ -81,7 +81,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const [prodSkus, sums, mats, { data: ratesRaw }, { data: pcsRaw }] = await Promise.all([
     fetchSkus(admin, mos.map((m) => String(m.product_sku ?? "")),
-      "code, list_price, cover_image_r2_key, color_th, color, parent:parent_skus_v2!parent_sku_id ( brand:brands!brand_id ( name, color ) )"),
+      "code, list_price, cover_image_r2_key, color_th, color, parent:parent_skus_v2!parent_sku_id ( brand:brands!brand_id ( id, name, color, pricing_mode ) )"),
     fetchAllByMo(admin, "mo_material_summary", "mo_no, component_sku, qty_per, is_ready", moNos),
     fetchAllByMo(admin, "mo_materials", "mo_no, cut_done, material_type, cut_block_code, cut_length, pieces", moNos),
     bomCodes.length
@@ -98,17 +98,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const c of compSkus) costOf.set(String(c.code), Number(c.standard_price) || 0);
 
   // ข้อมูลสินค้าที่ผลิต (ราคาขาย/รูป/แบรนด์/สี)
-  type Info = { list_price: number; image_url: string | null; brand: string | null; brand_color: string | null; color: string | null };
+  type Info = { list_price: number; image_url: string | null; brand: string | null; brand_id: string | null; brand_color: string | null; brand_oem: boolean; color: string | null };
   const infoOf = new Map<string, Info>();
   for (const s of prodSkus) {
     const parent = (Array.isArray(s.parent) ? s.parent[0] : s.parent) as { brand?: unknown } | null;
-    const brand = (parent && (Array.isArray(parent.brand) ? parent.brand[0] : parent.brand)) as { name?: string; color?: string } | null;
+    const brand = (parent && (Array.isArray(parent.brand) ? parent.brand[0] : parent.brand)) as { id?: string; name?: string; color?: string; pricing_mode?: string } | null;
     const key = s.cover_image_r2_key as string | null;
     const colorTh = String(s.color_th ?? "").trim(), colorEn = String(s.color ?? "").trim();
     infoOf.set(String(s.code), {
       list_price: Number(s.list_price) || 0,
       image_url: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
-      brand: brand?.name ?? null, brand_color: brand?.color ?? null, color: colorTh || colorEn || null,
+      brand: brand?.name ?? null, brand_id: brand?.id ?? null, brand_color: brand?.color ?? null,
+      // แบรนด์ OEM = รับจ้างผลิต ราคาคิดต่อออเดอร์ → ไม่ต้องเตือนว่า "ยังไม่ตั้งราคาขาย"
+      brand_oem: brand?.pricing_mode === "oem",
+      color: colorTh || colorEn || null,
     });
   }
 
@@ -147,7 +150,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const qty = Number(m.qty) || 0;
     const dispatched = dispatchedByMo.get(moNo) ?? 0;
     const remaining = r2(Math.max(0, qty - dispatched));
-    const inf = infoOf.get(String(m.product_sku)) ?? { list_price: 0, image_url: null, brand: null, brand_color: null, color: null };
+    const inf = infoOf.get(String(m.product_sku)) ?? { list_price: 0, image_url: null, brand: null, brand_id: null, brand_color: null, brand_oem: false, color: null };
 
     // ค่าแรงผลิต/ชิ้น: ราคากลางจากสูตรก่อน → ไม่มีก็ใช้ค่าแรงที่วางแผนไว้ทั้งใบหารจำนวน
     const central = centralRate.get(String(m.bom_code ?? "")) ?? 0;
@@ -164,7 +167,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return {
       id: String(m.id), mo_no: moNo,
       product_sku: (m.product_sku as string) ?? null, product_name: (m.product_name as string) ?? null,
-      image_url: inf.image_url, brand: inf.brand, brand_color: inf.brand_color, color: inf.color,
+      image_url: inf.image_url, brand: inf.brand, brand_id: inf.brand_id, brand_color: inf.brand_color, brand_oem: inf.brand_oem, color: inf.color,
       qty, dispatched: r2(dispatched), remaining,
       due_date: (m.due_date as string) ?? null, status: (m.status as string) ?? null,
       created_at: (m.created_at as string) ?? null,

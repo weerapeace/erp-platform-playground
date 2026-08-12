@@ -20,7 +20,9 @@ import { ERPModal } from "@/components/modal";
 export type ExecRow = {
   id: string; mo_no: string;
   product_sku: string | null; product_name: string | null; color: string | null;
-  image_url: string | null; brand: string | null; brand_color: string | null;
+  image_url: string | null; brand: string | null; brand_id: string | null; brand_color: string | null;
+  /** แบรนด์นี้เป็น OEM (รับจ้างผลิต ราคาคิดต่อออเดอร์) — ตั้งได้ที่ปุ่ม ⚙️ ตั้งค่าแบรนด์ */
+  brand_oem: boolean;
   qty: number; dispatched: number; remaining: number;
   due_date: string | null; status: string | null;
   priority: number; priority_note: string | null; priority_by: string | null;
@@ -64,7 +66,8 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "margin", label: "%มาร์จิน มาก→น้อย" },
 ];
 type GroupMode = "month" | "brand" | "none";
-type FilterKey = "all" | "urgent" | "noprice" | "ready" | "late" | "pending";
+type FilterKey = "all" | "urgent" | "noprice" | "ready" | "late" | "pending" | "own" | "oem";
+type BrandRow = { id: string; name: string; color: string | null; pricing_mode?: "own" | "oem" };
 
 export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
   const toast = useToast();
@@ -81,6 +84,10 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
   const [flagVal, setFlagVal] = useState(0);
   const [flagNote, setFlagNote] = useState("");
   const [saving, setSaving] = useState(false);
+  // ป๊อปตั้งค่าแบรนด์: แบรนด์ไหน "ขายเอง (มีราคาขาย)" แบรนด์ไหน "OEM (รับจ้างผลิต)"
+  const [brandOpen, setBrandOpen] = useState(false);
+  const [brands, setBrands] = useState<BrandRow[]>([]);
+  const [brandBusy, setBrandBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -95,14 +102,41 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  // โหลดรายชื่อแบรนด์ตอน "กดเปิดป๊อป" เท่านั้น (ไม่ถ่วงหน้าตอนเปิดแท็บ)
+  const openBrandSettings = async () => {
+    setBrandOpen(true);
+    if (brands.length > 0) return;
+    try {
+      const j = await apiFetch("/api/brands").then((r) => r.json());
+      setBrands((j.data ?? []) as BrandRow[]);
+    } catch { toast.error("โหลดรายชื่อแบรนด์ไม่สำเร็จ"); }
+  };
+  const setBrandMode = async (b: BrandRow, mode: "own" | "oem") => {
+    setBrandBusy(b.id);
+    try {
+      const res = await apiFetch("/api/brands", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: b.id, pricing_mode: mode }) });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      setBrands((s) => s.map((x) => x.id === b.id ? { ...x, pricing_mode: mode } : x));
+      // อัปเดตแถวในตารางทันที (ไม่ต้องโหลดใหม่ทั้งหน้า)
+      setRows((s) => s.map((r) => r.brand_id === b.id ? { ...r, brand_oem: mode === "oem" } : r));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    } finally { setBrandBusy(null); }
+  };
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = rows.filter((r) => {
       if (filter === "urgent" && r.priority === 0) return false;
-      if (filter === "noprice" && r.list_price > 0) return false;
+      // "ยังไม่มีราคา" นับเฉพาะแบรนด์เราเอง — OEM ราคาคิดต่อออเดอร์ ไม่ถือว่าขาด
+      if (filter === "noprice" && (r.list_price > 0 || r.brand_oem)) return false;
       if (filter === "ready" && !r.ready) return false;
       if (filter === "late" && (daysUntil(r.due_date) ?? 99999) >= 0) return false;
       if (filter === "pending" && !(r.remaining > 0.0001)) return false;
+      if (filter === "own" && r.brand_oem) return false;
+      if (filter === "oem" && !r.brand_oem) return false;
       if (q && !`${r.product_sku ?? ""} ${r.product_name ?? ""} ${r.mo_no} ${r.brand ?? ""}`.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -121,19 +155,20 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
   // ยอดรวมของ "รายการที่เห็นอยู่ตอนนี้" (ตัวกรองมีผลกับ KPI ด้วย — จะได้ดูรายเดือน/รายแบรนด์ได้)
   const kpi = useMemo(() => {
     let value = 0, valueAll = 0, qty = 0, profit = 0, profitBase = 0, profitUnknown = 0;
-    let late = 0, urgent = 0, noPrice = 0, noLabor = 0, noDue = 0;
+    let late = 0, urgent = 0, noPrice = 0, noLabor = 0, noDue = 0, oemValue = 0, oemCount = 0;
     for (const r of filtered) {
       value += r.remaining * r.list_price;
+      if (r.brand_oem) { oemValue += r.remaining * r.list_price; oemCount += 1; }
       valueAll += r.qty * r.list_price;
       qty += r.remaining;
       if (canProfit(r)) { profit += unitProfit(r) * r.remaining; profitBase += r.remaining * r.list_price; } else profitUnknown += 1;
       if ((daysUntil(r.due_date) ?? 99999) < 0) late += 1;
       if (r.priority > 0) urgent += 1;
-      if (!(r.list_price > 0)) noPrice += 1;
+      if (!(r.list_price > 0) && !r.brand_oem) noPrice += 1;   // OEM ไม่นับว่าขาดราคา
       if (!(r.labor_cost > 0) && !(r.piece_cost > 0)) noLabor += 1;
       if (!r.due_date) noDue += 1;
     }
-    return { value, valueAll, qty, profit, profitBase, profitUnknown, late, urgent, noPrice, noLabor, noDue, count: filtered.length };
+    return { value, valueAll, qty, profit, profitBase, profitUnknown, late, urgent, noPrice, noLabor, noDue, oemValue, oemCount, count: filtered.length };
   }, [filtered]);
 
   const buckets = useMemo(() => {
@@ -191,6 +226,11 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
           <div className="text-[11px] text-indigo-700/70">มูลค่างานที่ยังไม่ได้จ่าย (ราคาขาย)</div>
           <div className="text-2xl font-bold text-indigo-700 tabular-nums">{moneyK(kpi.value)}</div>
           <div className="text-[11px] text-indigo-600/60 mt-0.5">ค้างจ่าย {fmt(kpi.qty)} ชิ้น · ใบสั่งผลิตที่เปิดอยู่ {kpi.count} ใบ · รวมทั้งใบ {moneyK(kpi.valueAll)}</div>
+          {kpi.oemCount > 0 && (
+            <div className="text-[10px] text-violet-700 bg-violet-100/70 rounded px-1.5 py-0.5 mt-1">
+              🤝 ในนี้เป็นงาน OEM (รับจ้างผลิต) {kpi.oemCount} ใบ · {moneyK(kpi.oemValue)} — ราคาคิดต่อออเดอร์
+            </div>
+          )}
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
           <div className="text-[11px] text-emerald-700/70">กำไรประมาณ (ขาย − วัตถุดิบ − ค่าแรง)</div>
@@ -222,7 +262,10 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
       {kpi.noPrice > 0 && (
         <div className="flex items-center gap-2 text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
           <span>⚠️</span>
-          <span><b>{kpi.noPrice} ใบ</b> ยังไม่ได้ตั้งราคาขายในระบบสินค้า → มูลค่า/กำไรของใบเหล่านี้ยังนับไม่ได้ (ตัวเลขข้างบนจึงต่ำกว่าความจริง)</span>
+          <span>
+            <b>{kpi.noPrice} ใบ</b> (แบรนด์เราเอง) ยังไม่ได้ตั้งราคาขายในระบบสินค้า → มูลค่า/กำไรของใบเหล่านี้ยังนับไม่ได้ (ตัวเลขข้างบนจึงต่ำกว่าความจริง)
+            <button onClick={() => void openBrandSettings()} className="ml-1 underline hover:text-amber-900">แบรนด์ไหนเป็น OEM? ตั้งที่นี่</button>
+          </span>
           <button onClick={() => setFilter(filter === "noprice" ? "all" : "noprice")} className="ml-auto shrink-0 h-7 px-2.5 text-[11px] border border-amber-300 rounded-lg hover:bg-amber-100">
             {filter === "noprice" ? "ดูทั้งหมด" : "ดูเฉพาะใบที่ยังไม่มีราคา"}
           </button>
@@ -247,8 +290,12 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
           <option value="urgent">🔥 เฉพาะงานที่ติดธง</option>
           <option value="late">เฉพาะที่เลยกำหนด</option>
           <option value="ready">เฉพาะที่พร้อมจ่าย</option>
+          <option value="own">🏷 เฉพาะแบรนด์เราเอง</option>
+          <option value="oem">🤝 เฉพาะงาน OEM</option>
           <option value="noprice">เฉพาะที่ยังไม่มีราคาขาย</option>
         </select>
+        <button onClick={() => void openBrandSettings()} title="ตั้งว่าแบรนด์ไหนมีราคาขาย (ขายเอง) แบรนด์ไหนเป็นงาน OEM"
+          className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ ตั้งค่าแบรนด์</button>
         <button onClick={() => { setLoading(true); void load(); }} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⟳ โหลดใหม่</button>
       </div>
 
@@ -311,7 +358,10 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
                                 {!r.has_bom && <span title="ใบนี้ยังไม่มีสูตรวัตถุดิบ — คิดต้นทุน/กำไรไม่ได้" className="shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">ไม่มีสูตร</span>}
                               </div>
                               <div className="text-[11px] text-slate-500 truncate max-w-[280px]">{r.product_name}{r.color ? <span className="text-slate-400"> · {r.color}</span> : null}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">{r.mo_no}{r.brand ? <span className="text-slate-300"> · {r.brand}</span> : null}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                {r.mo_no}{r.brand ? <span className="text-slate-300"> · {r.brand}</span> : null}
+                                {r.brand_oem && <span title="แบรนด์นี้ตั้งไว้ว่าเป็นงาน OEM (รับจ้างผลิต) — ราคาคิดกันต่อออเดอร์" className="ml-1 px-1 py-0.5 rounded bg-violet-100 text-violet-700 font-sans">OEM</span>}
+                              </div>
                               {r.priority > 0 && r.priority_note && <div className="text-[10px] text-rose-600 truncate max-w-[280px]">📌 {r.priority_note}</div>}
                             </div>
                           </div>
@@ -326,7 +376,9 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
                           </div>
                         </td>
                         <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">
-                          {r.list_price > 0 ? money(r.list_price) : <span className="text-[10px] text-amber-600">ยังไม่ตั้งราคา</span>}
+                          {r.list_price > 0 ? money(r.list_price)
+                            : r.brand_oem ? <span className="text-[10px] text-violet-500" title="งาน OEM — ราคาตกลงกันต่อออเดอร์ ไม่ได้ตั้งไว้ในระบบสินค้า">ราคาต่อออเดอร์</span>
+                            : <span className="text-[10px] text-amber-600">ยังไม่ตั้งราคา</span>}
                         </td>
                         <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-indigo-700 whitespace-nowrap">{value > 0 ? money(value) : "—"}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums text-slate-600 whitespace-nowrap">
@@ -357,6 +409,44 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
         <b> กำไร</b> จึงเป็น <b>ตัวเลขประมาณ</b> ไม่ใช่กำไรจริงต่อบิลขาย (ยังไม่รวมส่วนลด/ค่าขนส่ง/ค่าใช้จ่ายอื่น)
         <br />• ใบที่ยังไม่ตั้งราคาขาย หรือยังไม่มีสูตรวัตถุดิบ จะไม่ถูกนับในยอดกำไร (ขึ้น “—”) เพื่อไม่ให้ตัวเลขรวมหลอกตา
       </p>
+
+      {/* ── ป๊อปตั้งค่าแบรนด์: ขายเอง (มีราคาขาย) / OEM (รับจ้างผลิต) ── */}
+      <ERPModal open={brandOpen} onClose={() => setBrandOpen(false)} size="lg" title="ตั้งค่าแบรนด์ — แบรนด์ไหนมีราคาขาย"
+        footer={<button onClick={() => setBrandOpen(false)} className="h-9 px-4 text-sm font-medium bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จแล้ว</button>}>
+        <div className="space-y-2">
+          <p className="text-[12px] text-slate-500 leading-relaxed">
+            <b>🏷 ขายเอง</b> = แบรนด์ของเรา ตั้งราคาขายไว้ในระบบสินค้า → หน้านี้จะคิดมูลค่า/กำไรให้ และเตือนถ้าใบไหนยังไม่ตั้งราคา<br />
+            <b>🤝 OEM</b> = รับจ้างผลิตให้ลูกค้า ราคาตกลงกันต่อออเดอร์ → <b>ไม่เตือน</b>เรื่องราคา และแยกยอดให้ดูต่างหาก
+            <br /><span className="text-slate-400">(กดแล้วบันทึกทันที · มีผลกับหน้านี้เท่านั้น ไม่กระทบการตั้งค่าแบรนด์ที่อื่น)</span>
+          </p>
+          {brands.length === 0 ? (
+            <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลดรายชื่อแบรนด์…</div>
+          ) : (
+            <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[50vh] overflow-y-auto">
+              {brands.map((b) => {
+                const oem = b.pricing_mode === "oem";
+                const used = rows.filter((r) => r.brand_id === b.id).length;
+                return (
+                  <div key={b.id} className="flex items-center gap-2 px-3 py-2">
+                    <span className="w-2.5 h-6 rounded-sm shrink-0" style={{ background: b.color ?? "#e2e8f0" }} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm text-slate-800 truncate">{b.name}</div>
+                      <div className="text-[10px] text-slate-400">{used > 0 ? `มีงานที่เปิดอยู่ ${used} ใบ` : "ยังไม่มีงานที่เปิดอยู่"}</div>
+                    </div>
+                    <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden shrink-0">
+                      <button onClick={() => void setBrandMode(b, "own")} disabled={brandBusy === b.id}
+                        className={`h-8 px-3 text-xs whitespace-nowrap ${!oem ? "bg-indigo-600 text-white font-medium" : "bg-white text-slate-500 hover:bg-slate-50"} disabled:opacity-50`}>🏷 ขายเอง</button>
+                      <button onClick={() => void setBrandMode(b, "oem")} disabled={brandBusy === b.id}
+                        className={`h-8 px-3 text-xs whitespace-nowrap border-l border-slate-200 ${oem ? "bg-violet-600 text-white font-medium" : "bg-white text-slate-500 hover:bg-slate-50"} disabled:opacity-50`}>🤝 OEM</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400">สินค้าที่ยังไม่ผูกแบรนด์ จะถือว่าเป็น “ขายเอง” ไว้ก่อน (เตือนเรื่องราคาตามปกติ)</p>
+        </div>
+      </ERPModal>
 
       {/* ── ป๊อปติดธงงานเร่ง ── */}
       <ERPModal open={!!flagFor} onClose={() => !saving && setFlagFor(null)} size="sm" title="ลำดับความสำคัญของงานนี้"

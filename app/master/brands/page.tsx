@@ -106,6 +106,11 @@ export default function BrandsPage() {
                   <input type="checkbox" checked={!!b.is_customer_job} onChange={(e) => patchBrand(b.id, { is_customer_job: e.target.checked })} />
                   <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">👤 งานลูกค้า</span>
                 </label>
+                {/* มีราคาขายในระบบไหม — ใช้ในหน้าแผนผู้บริหาร (OEM = รับจ้างผลิต ราคาต่อออเดอร์ ไม่เตือนเรื่องราคา) */}
+                <label className="flex items-center gap-1.5 text-[12px] text-slate-600 cursor-pointer shrink-0" title="รับจ้างผลิตให้ลูกค้า — ราคาคิดต่อออเดอร์ หน้าแผนผู้บริหารจะไม่เตือนว่า “ยังไม่ตั้งราคาขาย”">
+                  <input type="checkbox" checked={b.pricing_mode === "oem"} onChange={(e) => patchBrand(b.id, { pricing_mode: e.target.checked ? "oem" : "own" })} />
+                  <span className="px-1.5 py-0.5 rounded bg-violet-50 text-violet-600">🤝 OEM (ไม่มีราคาขาย)</span>
+                </label>
                 <label className="flex items-center gap-1.5 text-[12px] text-slate-600 cursor-pointer shrink-0" title="ซ่อนแบรนด์นี้จากตัวเลือกในคลัง Artwork">
                   <input type="checkbox" checked={!!b.hide_in_artwork} onChange={(e) => patchBrand(b.id, { hide_in_artwork: e.target.checked })} />
                   <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">🙈 ซ่อน Artwork</span>
