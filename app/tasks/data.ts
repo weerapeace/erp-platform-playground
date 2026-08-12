@@ -311,8 +311,8 @@ export async function deleteKnowledge(id: string): Promise<void> {
 }
 
 // ---- เทรนด์ (Trends) — 1 เทรนด์ = 1 กระดาน 1 หน้า + เช็คลิสต์สิ่งที่ต้องมี ----
-export type { TrendItem } from "@/app/api/creative-trends/route";
-import type { TrendItem } from "@/app/api/creative-trends/route";
+export type { TrendItem } from "@/lib/creative-trends-server";
+import type { TrendItem } from "@/lib/creative-trends-server";
 import type { TrendChecklist } from "@/lib/creative-trends-meta";
 
 export async function listTrends(opts?: { all?: boolean; ids?: string[] }): Promise<TrendItem[]> {

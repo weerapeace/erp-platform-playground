@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { decorateTrends } from "../route";
+import { decorateTrends } from "@/lib/creative-trends-server";
 import type { TrendChecklist } from "@/lib/creative-trends-meta";
 
 export const dynamic = "force-dynamic";

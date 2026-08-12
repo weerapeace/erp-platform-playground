@@ -102,7 +102,7 @@ export default function TrendBoardPage() {
   return (
     <StandaloneShell title={trend?.title ?? t("เทรนด์", "Trend")} icon="🔥" accent="violet">
       {/* หัวเรื่อง */}
-      <div className="border-b border-slate-200 bg-white px-6 py-3">
+      <div className="border-b border-slate-200 bg-white px-6 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <a href="/tasks/trends" className="inline-flex h-9 items-center rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">← {t("เทรนด์ทั้งหมด", "All trends")}</a>
           <input value={trend?.title ?? ""} onChange={(e) => setTrend((x) => (x ? { ...x, title: e.target.value } : x))}
@@ -124,7 +124,7 @@ export default function TrendBoardPage() {
           <button onClick={() => void archive()} className="h-9 rounded-lg px-3 text-sm text-slate-400 hover:bg-rose-50 hover:text-rose-600">🗑 {t("เก็บเข้ากรุ", "Archive")}</button>
         </div>
         {/* แถบความครบ */}
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-1.5 flex items-center gap-2">
           <div className="h-2 max-w-md flex-1 overflow-hidden rounded-full bg-slate-100">
             <div className={`h-full transition-all ${barCls}`} style={{ width: `${prog.percent}%` }} />
           </div>
@@ -138,21 +138,23 @@ export default function TrendBoardPage() {
         </div>
       </div>
 
-      <div className="flex gap-3 px-4 py-3">
+      <div className="flex gap-3 px-4 py-2">
         {/* กระดาน */}
         <div className="min-w-0 flex-1">
-          {id && <CanvasSketch entityType="creative_trend" entityId={id} height="calc(100vh - 240px)" controlsRef={sketchRef} onReady={onBoardReady} collab stickyTop={128} />}
+          {id && <CanvasSketch entityType="creative_trend" entityId={id} height="calc(100vh - 200px)" controlsRef={sketchRef} onReady={onBoardReady} collab stickyTop={128} />}
         </div>
 
-        {/* เช็คลิสต์ + ข้อมูลเทรนด์ */}
+        {/* เช็คลิสต์ + ข้อมูลเทรนด์
+            ⚠️ แถบนี้ต้อง "ไม่ยืดหน้าให้สูงเกินจอ" — CanvasSketch คิดความสูงกระดานจาก (ความสูงจอ − ส่วนที่ไม่ใช่กระดาน)
+            ถ้าปล่อยให้แถบขวายาวกว่าจอ กระดานจะถูกบีบเหลือขั้นต่ำ (เคยเจอ: เหลือ ~360px) → ล็อกสูงแล้วให้เลื่อนในตัวมันเอง */}
         {sideOpen && (
-          <aside className="w-[330px] shrink-0 space-y-3">
+          <aside className="w-[330px] shrink-0 space-y-3 overflow-y-auto pr-1" style={{ maxHeight: "calc(100vh - 180px)" }}>
             <div className="rounded-xl border border-slate-200 bg-white p-3">
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-800">✅ {t("สิ่งที่ต้องมีในเทรนด์", "What this trend needs")}</h3>
                 <span className="text-[11px] text-slate-400">{t("ติ๊กเมื่อวางบนกระดานแล้ว", "Tick when it's on the board")}</span>
               </div>
-              <div className="max-h-[calc(100vh-360px)] space-y-1 overflow-auto pr-1">
+              <div className="space-y-1">
                 {TREND_CHECKLIST.map((c) => {
                   const cur = (trend?.checklist ?? {})[c.key];
                   const done = !!cur?.done;
