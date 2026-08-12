@@ -171,6 +171,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       qty, dispatched: r2(dispatched), remaining,
       due_date: (m.due_date as string) ?? null, status: (m.status as string) ?? null,
       created_at: (m.created_at as string) ?? null,
+      // ส่งไปให้หน้าเปิด "ป๊อปเช็กลิสต์" ของใบนั้นได้ทันที (แม้ใบที่จ่ายงานครบแล้ว ซึ่งไม่อยู่ในรายการรอจ่าย)
+      prep_done: !!m.prep_done, cut_done: !!m.cut_done, bom_code: (m.bom_code as string) ?? null,
       priority: Number(m.priority) || 0, priority_note: (m.priority_note as string) ?? null,
       priority_at: (m.priority_at as string) ?? null, priority_by: (m.priority_by as string) ?? null,
       // เงิน (ต่อชิ้น)

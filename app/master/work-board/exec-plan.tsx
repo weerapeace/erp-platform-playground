@@ -25,6 +25,7 @@ export type ExecRow = {
   brand_oem: boolean;
   qty: number; dispatched: number; remaining: number;
   due_date: string | null; status: string | null;
+  prep_done: boolean; cut_done: boolean; bom_code: string | null;
   priority: number; priority_note: string | null; priority_by: string | null;
   list_price: number; mat_cost: number; mat_no_price: number;
   labor_cost: number; labor_src: "central" | "est" | "none"; piece_cost: number; labor_paid: number;
@@ -69,7 +70,10 @@ type GroupMode = "month" | "brand" | "none";
 type FilterKey = "all" | "urgent" | "noprice" | "ready" | "late" | "pending" | "own" | "oem";
 type BrandRow = { id: string; name: string; color: string | null; pricing_mode?: "own" | "oem" };
 
-export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
+export function ExecPlan({ onOpenMO }: {
+  /** กดที่สินค้า → เปิดป๊อปรายละเอียดงาน (เช็กลิสต์/ต้นทุน) ของใบนั้น */
+  onOpenMO?: (row: ExecRow) => void;
+}) {
   const toast = useToast();
   const [rows, setRows] = useState<ExecRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -346,12 +350,14 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
                             {p.icon || "🏳"}
                           </button>
                         </td>
-                        <td className="px-2 py-1.5">
-                          <div className="flex items-center gap-2 min-w-[240px]">
+                        {/* กดที่ช่องสินค้า (รูป/ชื่อ) = เปิดป๊อปรายละเอียดงาน — เช็กลิสต์ วัตถุดิบ ต้นทุน พิมพ์ใบสั่งงาน */}
+                        <td className="px-2 py-1.5 cursor-pointer" onClick={() => onOpenMO?.(r)}
+                          title="กดเพื่อเปิดรายละเอียดงานใบนี้ (เช็กลิสต์ · วัตถุดิบ · ต้นทุน)">
+                          <div className="flex items-center gap-2 min-w-[240px] group">
                             <HoverImage url={r.image_url} size={36} />
                             <div className="min-w-0">
                               <div className="flex items-center gap-1.5">
-                                <button onClick={() => onOpenMO?.(r.id)} className="text-sm font-semibold text-slate-800 truncate hover:text-indigo-600 hover:underline">{r.product_sku ?? "—"}</button>
+                                <span className="text-sm font-semibold text-slate-800 truncate group-hover:text-indigo-600 group-hover:underline">{r.product_sku ?? "—"}</span>
                                 {r.ready
                                   ? <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">พร้อม ✓</span>
                                   : <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">ยังไม่พร้อม</span>}

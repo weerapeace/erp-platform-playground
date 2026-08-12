@@ -30,7 +30,7 @@ import { addToPrCart } from "@/lib/pr-cart";
 import { useViewPref } from "@/lib/use-view-pref";
 import { PurchaseNeeds } from "./purchase-needs";
 import { DispatchShop } from "./dispatch-shop";
-import { ExecPlan } from "./exec-plan";
+import { ExecPlan, type ExecRow } from "./exec-plan";
 import { DeskShop } from "./desk-shop";
 import { BoardLineSettings } from "@/components/board-line-settings";
 import { RequestInboxButton } from "@/components/request-inbox";
@@ -1115,7 +1115,22 @@ function WorkBoardPageInner() {
           <button onClick={() => void load()} className="mt-4 h-9 px-4 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700">↻ ลองใหม่</button>
         </div>
       ) : viewMode === "exec" ? (
-        <ExecPlan onOpenMO={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
+        <ExecPlan onOpenMO={(row: ExecRow) => {
+          setClWO(null);
+          // ใบที่ยังมีของค้างจ่าย ใช้ข้อมูลจากบอร์ด (ครบกว่า — มีค่าแรง/ราคากลาง)
+          // ใบที่จ่ายงานครบแล้วจะไม่อยู่ในรายการรอจ่าย → ประกอบการ์ดจากแถวในหน้าแผน เพื่อให้กดเปิดป๊อปได้เหมือนกัน
+          const real = board.pending.find((x) => x.id === row.id);
+          setChecklistMO(real ?? {
+            id: row.id, mo_no: row.mo_no, product_sku: row.product_sku, product_name: row.product_name,
+            qty: row.qty, dispatched: row.dispatched, remaining: row.remaining,
+            due_date: row.due_date, status: row.status ?? "",
+            image_url: row.image_url, brand: row.brand, brand_color: row.brand_color, color: row.color,
+            prep_done: row.prep_done, cut_done: row.cut_done, bom_code: row.bom_code,
+            has_bom: row.has_bom, prep_total: row.prep_total, prep_ready: row.prep_ready,
+            cut_total: row.cut_total, cut_ready: row.cut_ready, ready: row.ready,
+            priority: row.priority, priority_note: row.priority_note,
+          });
+        }} />
       ) : viewMode === "purchase" ? (
         <PurchaseNeeds canEdit={canEdit} onOpenMo={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "table" ? (
