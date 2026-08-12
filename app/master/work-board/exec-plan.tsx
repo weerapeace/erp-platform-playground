@@ -328,7 +328,17 @@ export function ExecPlan({ onOpenMO }: {
                     <th className="text-left px-2 py-2 font-medium">สินค้า</th>
                     <th className="px-2 py-2 font-medium whitespace-nowrap">กำหนดส่ง</th>
                     <th className="px-2 py-2 font-medium whitespace-nowrap">ความคืบหน้า</th>
-                    <th className="px-2 py-2 font-medium text-right whitespace-nowrap">ราคาขาย/ชิ้น</th>
+                    {/* หัวคอลัมน์ราคาขาย มีปุ่มลัด "ดูเฉพาะงาน OEM" (ซ่อนแบรนด์เราเองทั้งหมด) */}
+                    <th className="px-2 py-2 font-medium text-right whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1">
+                        ราคาขาย/ชิ้น
+                        <button onClick={() => setFilter(filter === "oem" ? "all" : "oem")}
+                          title={filter === "oem" ? "กำลังดูเฉพาะงาน OEM (รับจ้างผลิต) — กดเพื่อกลับไปดูทั้งหมด" : "ดูเฉพาะงาน OEM (รับจ้างผลิต) — ซ่อนงานแบรนด์เราเองทั้งหมด"}
+                          className={`h-5 px-1.5 rounded text-[10px] border ${filter === "oem" ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-400 border-slate-200 hover:text-violet-600 hover:border-violet-300"}`}>
+                          🤝{filter === "oem" ? " OEM ✕" : ""}
+                        </button>
+                      </span>
+                    </th>
                     <th className="px-2 py-2 font-medium text-right whitespace-nowrap">มูลค่าที่ยังค้าง</th>
                     <th className="px-2 py-2 font-medium text-right whitespace-nowrap">ต้นทุน/ชิ้น</th>
                     <th className="px-2 py-2 font-medium text-right whitespace-nowrap">กำไร/ชิ้น</th>
