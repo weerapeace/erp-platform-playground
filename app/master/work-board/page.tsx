@@ -29,6 +29,7 @@ import { addToPrCart } from "@/lib/pr-cart";
 import { useViewPref } from "@/lib/use-view-pref";
 import { PurchaseNeeds } from "./purchase-needs";
 import { DispatchShop } from "./dispatch-shop";
+import { ExecPlan } from "./exec-plan";
 import { DeskShop } from "./desk-shop";
 import { BoardLineSettings } from "@/components/board-line-settings";
 import { RequestInboxButton } from "@/components/request-inbox";
@@ -56,6 +57,8 @@ type PendingMO = {
   // Phase 2: เช็กลิสต์วัตถุดิบจาก BOM
   has_bom: boolean; prep_total: number; prep_ready: number; cut_total: number; cut_ready: number; ready: boolean;
   labor?: Labor; bom_code?: string | null; central_rate?: number;
+  // ธงลำดับความสำคัญที่ผู้บริหารติดไว้ (แท็บ 👔 แผนผู้บริหาร) — 0=ปกติ 1=สำคัญ 2=เร่งด่วน
+  priority?: number; priority_note?: string | null;
 };
 type MatRow = { id: string; component_sku: string | null; component_name: string | null; required_qty: number; uom: string | null; is_ready: boolean; cut_done: boolean; needs_cut: boolean };
 // แถวรายบล็อกสำหรับ "หน้าตัด" — มาจาก mo_materials โดยตรง (1 แถว = 1 บล็อกตัด) ติ๊กตัดครบรายบล็อกได้
@@ -190,13 +193,20 @@ function WorkBoardPageInner() {
   const canEdit = usePermission("products.edit");
   // สิทธิ์ "จ่ายงานเข้าแผนก" แยกต่างหาก — ตั้งค่ารายตำแหน่งได้ที่ /admin/roles-permissions
   const canDispatch = usePermission("work_board.dispatch");
-  const { user } = useAuth(); void user;
+  const { user } = useAuth();
+  // แท็บ "แผนผู้บริหาร" (ตัวเลขราคาขาย/ต้นทุน/กำไร) — เจ้าของหรือแอดมินเท่านั้น
+  // ⚠️ เรียก usePermission ไว้ตรง ๆ เสมอ (ห้ามใส่หลัง || เพราะ hook ห้ามเรียกแบบมีเงื่อนไข)
+  // (ซ่อนปุ่มอย่างเดียวไม่พอ — /api/mo/exec-plan ล็อกด้วย admin.users ที่เซิร์ฟเวอร์อีกชั้น)
+  const canAdminUsers = usePermission("admin.users");
+  const isAdmin = user?.role === "admin" || canAdminUsers;
   const toast = useToast();
 
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], pendingPiece: [] });
   const [loading, setLoading] = useState(true);
   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ + จำมุมมองเริ่มต้นต่อผู้ใช้ (⭐)
-  const { view: viewMode, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase"] as const, "board");
+  const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase", "exec"] as const, "board");
+  // ถ้าเคยตั้ง "แผนผู้บริหาร" เป็นค่าเริ่มต้นไว้ แล้วสิทธิ์ถูกถอดทีหลัง → ถอยกลับบอร์ดปกติ (ไม่ค้างหน้าว่าง)
+  const viewMode = viewRaw === "exec" && !isAdmin ? "board" : viewRaw;
   const [shopMode, setShopMode] = useState<"dispatch" | "desk">("dispatch");   // มุมมองช้อป: รอจ่าย / งานในโต๊ะ
   const [lineSettingsOpen, setLineSettingsOpen] = useState(false);   // ป๊อปตั้งค่าแจ้งเตือน LINE
   const [moCreateOpen, setMoCreateOpen] = useState(false);           // ป๊อปสร้างใบสั่งผลิต (ของกลาง)
@@ -1021,6 +1031,9 @@ function WorkBoardPageInner() {
             <button onClick={() => setViewMode("table")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ ตาราง</button>
             <button onClick={() => setViewMode("shop")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "shop" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🛒 ช้อปจ่ายงาน</button>
             <button onClick={() => setViewMode("purchase")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "purchase" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 ขอซื้อ/เตรียม</button>
+            {/* แผนผู้บริหาร — เห็นเฉพาะแอดมิน (มีตัวเลขราคาขาย/ต้นทุน/กำไร) */}
+            {isAdmin && <button onClick={() => setViewMode("exec")} title="แผนงานสำหรับผู้บริหาร — มูลค่างาน ราคาขาย ต้นทุน กำไรประมาณ (เห็นเฉพาะแอดมิน)"
+              className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "exec" ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>👔 แผนผู้บริหาร</button>}
           </div>
           <button onClick={() => { void saveDefView(viewMode); toast.success("ตั้งเป็นมุมมองเริ่มต้นของคุณแล้ว"); }}
             title={defView === viewMode ? "มุมมองนี้เป็นค่าเริ่มต้นของคุณเมื่อเปิดหน้า" : "ตั้งมุมมองนี้เป็นค่าเริ่มต้นเมื่อเปิดหน้า (เฉพาะคุณ)"}
@@ -1097,6 +1110,8 @@ function WorkBoardPageInner() {
           <p className="text-slate-400 text-sm mt-1">เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา — ไม่ใช่ว่าไม่มีงาน</p>
           <button onClick={() => void load()} className="mt-4 h-9 px-4 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700">↻ ลองใหม่</button>
         </div>
+      ) : viewMode === "exec" ? (
+        <ExecPlan onOpenMO={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "purchase" ? (
         <PurchaseNeeds canEdit={canEdit} onOpenMo={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "table" ? (

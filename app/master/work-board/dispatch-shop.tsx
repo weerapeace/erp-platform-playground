@@ -25,6 +25,8 @@ type ShopMO = {
   image_url: string | null; brand: string | null; brand_color: string | null; ready: boolean;
   color?: string | null;   // สี (color_th ก่อน ไม่มีใช้ color) — โชว์ต่อท้ายชื่อ
   has_bom?: boolean;       // ใบนี้มีสูตรวัตถุดิบไหม (ไม่มี = เตือนบนการ์ด)
+  // ธงที่ผู้บริหารติดไว้ในแท็บ 👔 แผนผู้บริหาร — 0=ปกติ 1=สำคัญ 2=เร่งด่วน (อ่านอย่างเดียวที่นี่)
+  priority?: number; priority_note?: string | null;
 };
 type ShopDept = { id: string; name: string };
 type ShopCraftsman = { id: string; name: string; code: string | null; department_id?: string | null };
@@ -53,7 +55,25 @@ function evenSplit(total: number, ids: string[]): Record<string, number> {
   return out;
 }
 
-type SortKey = "due" | "remaining" | "sku" | "mo";
+type SortKey = "due" | "remaining" | "sku" | "mo" | "priority";
+
+// ธงงานเร่งที่ผู้บริหารติดไว้ (ตั้งค่าที่แท็บ 👔 แผนผู้บริหาร — ที่นี่โชว์อย่างเดียว)
+const PRIO_BADGE: Record<number, { icon: string; label: string; cls: string }> = {
+  2: { icon: "🔥", label: "เร่งด่วน", cls: "bg-rose-600 text-white" },
+  1: { icon: "⭐", label: "สำคัญ", cls: "bg-amber-500 text-white" },
+};
+const prioBadge = (m: ShopMO) => {
+  const p = PRIO_BADGE[m.priority ?? 0];
+  if (!p) return null;
+  return (
+    <span title={`ผู้บริหารทำเครื่องหมายว่า “${p.label}”${m.priority_note ? ` — ${m.priority_note}` : ""}`}
+      className={`shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap ${p.cls}`}>{p.icon} {p.label}</span>
+  );
+};
+// เหตุผลที่ผู้บริหารเขียนไว้ตอนติดธง — ให้คนจ่ายงานเห็นว่าทำไมต้องเร่ง
+const prioNote = (m: ShopMO) => ((m.priority ?? 0) > 0 && m.priority_note
+  ? <div className="mt-1 text-[10px] text-rose-600 truncate" title={m.priority_note}>📌 {m.priority_note}</div>
+  : null);
 // หน้าตาการ์ด: big = รูปใหญ่เต็มการ์ด (ค่าเริ่มต้น) · compact = รูปเล็กข้างข้อความ (แบบเดิม)
 const CARD_MODES = ["big", "compact"] as const;
 type CardMode = (typeof CARD_MODES)[number];
@@ -74,6 +94,7 @@ const BomChangeRequestEditor = dynamicImport(
 );
 
 const SORTS: { key: SortKey; label: string }[] = [
+  { key: "priority", label: "🔥 งานเร่งก่อน" },
   { key: "due", label: "ใกล้ครบกำหนด" },
   { key: "remaining", label: "คงเหลือมาก→น้อย" },
   { key: "sku", label: "รหัสสินค้า" },
@@ -97,7 +118,7 @@ export function DispatchShop({
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("due");
   const [groupMode, setGroupMode] = useState<"none" | "group" | "brand">("none");
-  const [readyFilter, setReadyFilter] = useState<"all" | "ready" | "not" | "gap">("all");   // gap = ขาดสูตร/ค่าแรง
+  const [readyFilter, setReadyFilter] = useState<"all" | "ready" | "not" | "gap" | "urgent">("all");   // gap = ขาดสูตร/ค่าแรง · urgent = งานที่ผู้บริหารติดธง
   const [groupFilter, setGroupFilter] = useState<string>("__all__");
   // หน้าตาการ์ด (รูปใหญ่ / แบบรายการ) — จำต่อผู้ใช้ผ่านของกลาง useViewPref
   const { view: cardMode, setView: setCardMode, saveDefault: saveCardMode } = useViewPref("work_board_shop_card", CARD_MODES, "big");
@@ -132,11 +153,17 @@ export function DispatchShop({
     const q = search.trim().toLowerCase();
     const hasGap = (m: ShopMO) => m.has_bom === false || !((laborByMo[m.mo_no] ?? 0) > 0);
     const list = pending.filter((m) =>
-      (readyFilter === "all" ? true : readyFilter === "gap" ? hasGap(m) : readyFilter === "ready" ? m.ready : !m.ready) &&
+      (readyFilter === "all" ? true : readyFilter === "urgent" ? (m.priority ?? 0) > 0 : readyFilter === "gap" ? hasGap(m) : readyFilter === "ready" ? m.ready : !m.ready) &&
       (groupFilter === "__all__" ? true : groupFilter === "__none__" ? groupOf(m.mo_no) === null : groupOf(m.mo_no) === groupFilter) &&
       (q === "" || `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`.toLowerCase().includes(q)),
     );
     return [...list].sort((a, b) => {
+      // งานเร่งก่อน → เท่ากันค่อยดูกำหนดส่ง
+      if (sortKey === "priority") {
+        const d = (b.priority ?? 0) - (a.priority ?? 0);
+        if (d !== 0) return d;
+        return (daysUntil(a.due_date) ?? 99999) - (daysUntil(b.due_date) ?? 99999);
+      }
       if (sortKey === "due") return (daysUntil(a.due_date) ?? 99999) - (daysUntil(b.due_date) ?? 99999);
       if (sortKey === "remaining") return b.remaining - a.remaining;
       if (sortKey === "sku") return (a.product_sku ?? "").localeCompare(b.product_sku ?? "");
@@ -284,7 +311,7 @@ export function DispatchShop({
             {m.image_url
               ? <img src={withImageWidth(m.image_url, dense ? 240 : 420) ?? m.image_url} alt={m.product_sku ?? ""} loading="lazy" decoding="async" className="max-h-full max-w-full object-contain" />
               : <span className="text-4xl text-slate-300">📦</span>}
-            <span className="absolute top-1.5 left-1.5">{readyBadge(m)}</span>
+            <span className="absolute top-1.5 left-1.5 flex flex-col items-start gap-1">{readyBadge(m)}{prioBadge(m)}</span>
             {canDispatch && (
               <input type="checkbox" checked={inCart} onClick={(e) => e.stopPropagation()} onChange={() => toggleCart(m)}
                 className="absolute top-1.5 right-1.5 w-5 h-5 accent-indigo-600" />
@@ -295,7 +322,7 @@ export function DispatchShop({
           <div className="text-sm font-semibold text-slate-800 truncate">{m.product_sku}</div>
           <div className="text-[11px] text-slate-500 truncate">{m.product_name}{m.color ? <span className="text-slate-400"> · {m.color}</span> : null}</div>
           <div className="text-[10px] text-slate-400 font-mono truncate">{m.mo_no}</div>
-          {gapBadges(m)}
+          {prioNote(m)}{gapBadges(m)}
           {cardFooter(m)}
         </div>
       </div>
@@ -315,13 +342,14 @@ export function DispatchShop({
             <div className="flex items-center gap-1">
               <span className="text-sm font-semibold text-slate-800 truncate">{m.product_sku}</span>
               {readyBadge(m)}
+              {prioBadge(m)}
             </div>
             <div className="text-[11px] text-slate-500 truncate">{m.product_name}{m.color ? <span className="text-slate-400"> · {m.color}</span> : null}</div>
             <div className="text-[10px] text-slate-400 font-mono truncate">{m.mo_no}</div>
           </div>
           {canDispatch && <input type="checkbox" checked={inCart} onClick={(e) => e.stopPropagation()} onChange={() => toggleCart(m)} className="shrink-0 w-4 h-4 accent-indigo-600 mt-0.5" />}
         </div>
-        {gapBadges(m)}
+        {prioNote(m)}{gapBadges(m)}
         {cardFooter(m)}
       </div>
     );
@@ -494,10 +522,11 @@ export function DispatchShop({
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm font-semibold text-slate-800 truncate">{m.product_sku}</span>
                       {readyBadge(m)}
+                      {prioBadge(m)}
                     </div>
                     <div className="text-xs text-slate-500 truncate">{m.product_name}{m.color ? <span className="text-slate-400"> · {m.color}</span> : null}</div>
                     <div className="text-[11px] text-slate-400 font-mono">{m.mo_no} · เหลือ {fmt(m.remaining)} · <span className={dueClass(m.due_date)}>📅 {dueText(m.due_date)}</span></div>
-                    {gapBadges(m)}
+                    {prioNote(m)}{gapBadges(m)}
                   </div>
                   <div className="shrink-0 text-right">
                     <div className="text-[11px] text-slate-500 mb-0.5">จำนวนที่จ่าย</div>
@@ -540,11 +569,12 @@ export function DispatchShop({
             <option value="group">จัดกลุ่ม: กลุ่มใบสั่งผลิต</option>
             <option value="brand">จัดกลุ่ม: แบรนด์</option>
           </select>
-          <select value={readyFilter} onChange={(e) => setReadyFilter(e.target.value as "all" | "ready" | "not" | "gap")} title="กรองความพร้อม" className={selCls}>
+          <select value={readyFilter} onChange={(e) => setReadyFilter(e.target.value as "all" | "ready" | "not" | "gap" | "urgent")} title="กรองความพร้อม" className={selCls}>
             <option value="all">ทั้งหมด</option>
             <option value="ready">พร้อมจ่าย</option>
             <option value="not">ยังไม่พร้อม</option>
             <option value="gap">⚠ ขาดสูตร/ค่าแรง</option>
+            <option value="urgent">🔥 งานเร่ง (ผู้บริหารสั่ง)</option>
           </select>
           <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} title="กรองตามกลุ่ม" className={selCls}>
             <option value="__all__">🗂 ทุกกลุ่ม</option>
