@@ -9,13 +9,14 @@
  */
 import { useState, useEffect, useCallback, useMemo, useRef, Suspense, type PointerEvent as RPE } from "react";
 import { useSearchParams } from "next/navigation";
+import dynamicImport from "next/dynamic";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
-import type { MoCost, CostScenario, PieceJob } from "@/app/api/mo/[id]/cost/route";
+import type { MoCost, MoCostMaterial, CostScenario, PieceJob } from "@/app/api/mo/[id]/cost/route";
 import type { PurchaseStatusRow } from "@/app/api/mo/purchase-status/route";
 import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
@@ -44,6 +45,9 @@ import { PwaInstallButton } from "@/components/pwa-install-button";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { LaborRate } from "@/app/api/bom/labor-rates/route";
 import type { Brand } from "@/app/api/brands/route";
+
+// ป๊อปใส่ราคาต้นทุนวัตถุดิบ (ของกลาง) — โหลดตอนกดเท่านั้น (พ่วงตัวเลือกร้าน/หน่วย ไม่ควรถ่วงบอร์ด)
+const SkuPriceModal = dynamicImport(() => import("@/components/sku-price-modal").then((m) => m.SkuPriceModal), { ssr: false });
 
 type Dept = { id: string; name: string; note?: string | null; show_note?: boolean; show_on_board?: boolean };
 type DeptFull = { id: string; name: string; status: string | null; note: string | null; show_note: boolean; display_order: number | null; show_on_board?: boolean };
@@ -1713,7 +1717,7 @@ function WorkBoardPageInner() {
                         </div>
                       )
                     ) : clTab === "cost" ? (
-                      <CostTab cost={clCost} pieceRows={clPieceRows} moId={checklistMO.id} bomCode={checklistMO.bom_code ?? null} departments={board.departments} deptWages={deptWages} craftsmen={craftsmen} canEdit={canEdit} />
+                      <CostTab cost={clCost} pieceRows={clPieceRows} moId={checklistMO.id} bomCode={checklistMO.bom_code ?? null} departments={board.departments} deptWages={deptWages} craftsmen={craftsmen} canEdit={canEdit} onReloadCost={() => setClCost(null)} />
                     ) : clTab === "purch" ? (
                       <PurchTab rows={clPurch} />
                     ) : clTab === "issue" ? (
@@ -1859,13 +1863,15 @@ const PO_BADGE: Record<string, { t: string; c: string }> = {
 const DEFAULT_SC: CostScenario = { labor_mode: "system", piece_rate: 0, piece_jobs: [], table: { salary: 0, workdays: 26, capacity: 0, dept_name: "", calc: "days", days: 0, target_pp: 0, pick_mode: "table", worker_ids: [] }, extras: [] };
 const normPieceJob = (j: Partial<PieceJob>): PieceJob => ({ label: String(j.label ?? ""), kind: j.kind === "table" ? "table" : "piece", rate: Number(j.rate) || 0, qty_per: Number(j.qty_per) || 1, salary: Number(j.salary) || 0, workdays: Number(j.workdays) || 26, days: Number(j.days) || 0, dept_name: String(j.dept_name ?? "") });
 
-function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, craftsmen, canEdit }: { cost: MoCost | null; pieceRows: MoPieceRow[]; moId: string; bomCode: string | null; departments: { id: string; name: string }[]; deptWages: Record<string, number>; craftsmen: { id: string; name: string; code?: string | null; department_id?: string | null }[]; canEdit: boolean }) {
+function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, craftsmen, canEdit, onReloadCost }: { cost: MoCost | null; pieceRows: MoPieceRow[]; moId: string; bomCode: string | null; departments: { id: string; name: string }[]; deptWages: Record<string, number>; craftsmen: { id: string; name: string; code?: string | null; department_id?: string | null }[]; canEdit: boolean; onReloadCost?: () => void }) {
   const toast = useToast();
   const [sc, setSc] = useState<CostScenario>(DEFAULT_SC);
   const [saving, setSaving] = useState(false);
   const [bomSaving, setBomSaving] = useState(false);
   // ⚠️ hooks ทุกตัวต้องอยู่เหนือ early return (cost === null) ไม่งั้น React error #310
   const [savingStd, setSavingStd] = useState(false);
+  // วัตถุดิบที่กำลังใส่ราคา (กดที่ช่อง "ราคา/หน่วย" ในตารางล่าง) — ของกลาง SkuPriceModal
+  const [priceFor, setPriceFor] = useState<MoCostMaterial | null>(null);
   useEffect(() => {
     if (!cost) return;
     // ใบนี้เคยคิดแล้ว → ใช้ของใบ · ยังไม่เคย → ดึง "ต้นทุนมาตรฐานของสินค้า" มาเป็นค่าตั้งต้น
@@ -2127,13 +2133,29 @@ function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, craft
             <div key={i} className="grid grid-cols-[1fr_4.5rem_5rem_5rem] gap-2 px-3 py-1.5 items-center text-[12px]">
               <div className="min-w-0"><div className="truncate text-slate-700">{m.name}</div><div className="text-[10px] text-slate-400 truncate">{m.sku}</div></div>
               <span className="text-right tabular-nums text-slate-500">{fmt(m.qty_per)} {m.uom ?? ""}</span>
-              <span className={`text-right tabular-nums ${m.has_price ? "text-slate-600" : "text-rose-500"}`}>{m.has_price ? `฿${fmt(m.unit_cost)}` : "ไม่มีราคา"}</span>
+              {/* กดที่ราคา = ใส่/แก้ราคาได้เลย แล้วบันทึกกลับเข้าสินค้า (ระบุร้านที่ซื้อได้ด้วย) */}
+              {canEdit && m.sku ? (
+                <button onClick={() => setPriceFor(m)}
+                  title={m.has_price ? "แก้ราคาต้นทุน (บันทึกกลับเข้าสินค้า)" : "ใส่ราคาต้นทุนของวัตถุดิบนี้ (บันทึกกลับเข้าสินค้า + ระบุร้านได้)"}
+                  className={`text-right tabular-nums rounded px-1 -mx-1 hover:bg-indigo-50 hover:text-indigo-700 ${m.has_price ? "text-slate-600" : "text-rose-500 font-medium underline decoration-dotted"}`}>
+                  {m.has_price ? `฿${fmt(m.unit_cost)}` : "＋ ใส่ราคา"}
+                </button>
+              ) : (
+                <span className={`text-right tabular-nums ${m.has_price ? "text-slate-600" : "text-rose-500"}`}>{m.has_price ? `฿${fmt(m.unit_cost)}` : "ไม่มีราคา"}</span>
+              )}
               <span className="text-right tabular-nums font-medium text-slate-700">฿{fmt(m.line_pp)}</span>
             </div>
           ))}
           {cost.materials.length === 0 && <div className="text-center py-4 text-slate-300 text-sm">ไม่มีวัตถุดิบใน BOM</div>}
         </div>
       </div>
+
+      {/* ป๊อปใส่ราคาต้นทุน (ของกลาง) — บันทึกกลับ skus_v2.standard_price + ร้านที่ซื้อ (supplier_items) */}
+      {priceFor && (
+        <SkuPriceModal open skuCode={priceFor.sku} skuName={priceFor.name} uom={priceFor.uom}
+          onClose={() => setPriceFor(null)}
+          onSaved={() => { onReloadCost?.(); }} />
+      )}
     </div>
   );
 }
