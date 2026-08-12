@@ -64,7 +64,7 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "margin", label: "%มาร์จิน มาก→น้อย" },
 ];
 type GroupMode = "month" | "brand" | "none";
-type FilterKey = "all" | "urgent" | "noprice" | "ready" | "late";
+type FilterKey = "all" | "urgent" | "noprice" | "ready" | "late" | "pending";
 
 export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
   const toast = useToast();
@@ -102,6 +102,7 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
       if (filter === "noprice" && r.list_price > 0) return false;
       if (filter === "ready" && !r.ready) return false;
       if (filter === "late" && (daysUntil(r.due_date) ?? 99999) >= 0) return false;
+      if (filter === "pending" && !(r.remaining > 0.0001)) return false;
       if (q && !`${r.product_sku ?? ""} ${r.product_name ?? ""} ${r.mo_no} ${r.brand ?? ""}`.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -189,7 +190,7 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
         <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
           <div className="text-[11px] text-indigo-700/70">มูลค่างานที่ยังไม่ได้จ่าย (ราคาขาย)</div>
           <div className="text-2xl font-bold text-indigo-700 tabular-nums">{moneyK(kpi.value)}</div>
-          <div className="text-[11px] text-indigo-600/60 mt-0.5">{fmt(kpi.qty)} ชิ้น · {kpi.count} ใบ · ทั้งใบรวม {moneyK(kpi.valueAll)}</div>
+          <div className="text-[11px] text-indigo-600/60 mt-0.5">ค้างจ่าย {fmt(kpi.qty)} ชิ้น · ใบสั่งผลิตที่เปิดอยู่ {kpi.count} ใบ · รวมทั้งใบ {moneyK(kpi.valueAll)}</div>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
           <div className="text-[11px] text-emerald-700/70">กำไรประมาณ (ขาย − วัตถุดิบ − ค่าแรง)</div>
@@ -242,6 +243,7 @@ export function ExecPlan({ onOpenMO }: { onOpenMO?: (moId: string) => void }) {
         </select>
         <select value={filter} onChange={(e) => setFilter(e.target.value as FilterKey)} title="กรอง" className={selCls}>
           <option value="all">ทั้งหมด</option>
+          <option value="pending">เฉพาะที่ยังมีของค้างจ่าย</option>
           <option value="urgent">🔥 เฉพาะงานที่ติดธง</option>
           <option value="late">เฉพาะที่เลยกำหนด</option>
           <option value="ready">เฉพาะที่พร้อมจ่าย</option>
