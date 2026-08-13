@@ -138,17 +138,46 @@ export function FabricCalcModal({ lines, onClose }: { lines: CalcLine[]; onClose
                   </>
                 )}
                 <Stat label="ความยาวที่วางจริง" value={`${fmt(result.usedLengthCm, 1)} ซม.`} hint={`${result.rows.length} แถว`} />
-                <Stat label="ใช้ผ้าคุ้ม" value={`${fmt(result.utilizationPercent, 1)}%`} hint={result.utilizationPercent >= 75 ? "ดี" : result.utilizationPercent >= 55 ? "พอใช้" : "เศษเยอะ"} />
+                {/* วัดคุณภาพการวางล้วน ๆ (ยังไม่รวมเผื่อเสีย) — เลขเดิมรวมเผื่อเสียเลยดูแย่กว่าความจริง */}
+                <Stat label="วางได้คุ้ม (ไม่รวมเผื่อเสีย)" value={`${fmt(result.packEfficiencyPercent, 1)}%`}
+                  hint={result.packEfficiencyPercent >= 85 ? "ดีมาก" : result.packEfficiencyPercent >= 75 ? "ดี" : result.packEfficiencyPercent >= 60 ? "พอใช้" : "เศษเยอะ"} />
               </div>
               {result.sampledFrom && (
                 <p className="mt-3 text-[11.5px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   ℹ️ งานล็อตใหญ่ ({result.sampledFrom.total.toLocaleString("th-TH")} ชิ้น) — ระบบจำลองการวางจาก {result.sampledFrom.simulated.toLocaleString("th-TH")} ชิ้นแล้วขยายผลตามสัดส่วน (การวางซ้ำรูปแบบเดิม ตัวเลขจึงใกล้เคียงของจริง)
                 </p>
               )}
-              <p className="mt-3 pt-3 border-t border-emerald-200/70 text-[11.5px] text-slate-500">
+              {/* ผ้าที่ต้องซื้อหายไปไหนบ้าง — แยก "เศษจากการวาง" ออกจาก "เผื่อเสียที่เราตั้งเอง" */}
+              <div className="mt-3 pt-3 border-t border-emerald-200/70 space-y-1 text-[11.5px] text-slate-600">
+                <div className="font-medium text-slate-700">ผ้าที่ต้องซื้อ 100% แบ่งเป็น</div>
+                <WasteBar
+                  piece={result.pieceAreaCm2 / Math.max(1, result.fabricAreaCm2) * 100}
+                  packWaste={Math.max(0, (result.usedLengthCm * faceWidth - result.pieceAreaCm2)) / Math.max(1, result.fabricAreaCm2) * 100}
+                  allowance={Math.max(0, result.lengthWithWasteCm - result.usedLengthCm) * faceWidth / Math.max(1, result.fabricAreaCm2) * 100}
+                />
+                <p className="text-slate-400">
+                  * “เศษจากการวาง” คือช่องว่างที่ตัดชิ้นอื่นไม่ได้ · “เผื่อเสีย {fmt(waste, 0)}%” คือส่วนที่เราตั้งเผื่อไว้เอง (ลดได้ที่ช่องเผื่อเสีย)
+                </p>
+              </div>
+
+              {/* ทำไมเหลือเศษ — ขนาดชิ้นกับหน้ากว้างผ้าไม่ลงตัว (บอกให้รู้ว่าแก้ที่ไหนได้) */}
+              {(result.fitHints?.length ?? 0) > 0 && (
+                <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[11.5px] text-amber-800 space-y-0.5">
+                  <div className="font-medium">ทำไมยังเหลือเศษ — ขนาดชิ้นกับหน้าผ้า {fmt(faceWidth, 0)} ซม. ไม่ลงตัว</div>
+                  {result.fitHints!.map((h, i) => (
+                    <div key={i}>
+                      • ชิ้น <b>{h.label}</b> วางได้ {h.perRow} ชิ้น/แถว → เหลือแถบว่างกว้าง <b>{fmt(h.leftoverCm, 1)} ซม.</b>
+                      {h.suggestFaceCm ? <> · ถ้าใช้ผ้าหน้ากว้าง <b>{h.suggestFaceCm} ซม.</b> จะวางได้ {h.perRow + 1} ชิ้น/แถว</> : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <p className="mt-3 text-[11.5px] text-slate-500">
                 เทียบวิธีเดิม (เอาพื้นที่ ÷ หน้ากว้าง) = {fmt(result.naiveYards)} หลา ·
                 วิธีนี้คิดเศษที่ตัดไม่ได้ด้วย จึงมักมากกว่า {result.naiveYards > 0 ? `${fmt((result.yards / result.naiveYards - 1) * 100, 0)}%` : "—"}
                 {mode === "roll" && <> · 1 หลา = {YARD_CM} ซม.</>}
+                {result.strategiesTried ? <> · ระบบลองวาง {result.strategiesTried} แบบแล้วเลือกแบบที่ประหยัดผ้าที่สุด</> : null}
               </p>
             </div>
           )}
@@ -184,6 +213,27 @@ export function FabricCalcModal({ lines, onClose }: { lines: CalcLine[]; onClose
         </div>
       )}
     </ERPModal>
+  );
+}
+
+/** แถบสัดส่วน: ชิ้นจริง / เศษจากการวาง / เผื่อเสีย (รวม = ผ้าที่ต้องซื้อ) */
+function WasteBar({ piece, packWaste, allowance }: { piece: number; packWaste: number; allowance: number }) {
+  const p = Math.max(0, piece), w = Math.max(0, packWaste), a = Math.max(0, allowance);
+  const sum = p + w + a || 1;
+  const pct = (v: number) => `${(v / sum) * 100}%`;
+  return (
+    <>
+      <div className="flex h-3 w-full overflow-hidden rounded-full border border-slate-200">
+        <div style={{ width: pct(p) }} className="bg-emerald-500" title="ชิ้นงานจริง" />
+        <div style={{ width: pct(w) }} className="bg-rose-300" title="เศษจากการวาง" />
+        <div style={{ width: pct(a) }} className="bg-amber-300" title="เผื่อเสีย" />
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+        <span><span className="inline-block h-2 w-2 rounded-sm bg-emerald-500 mr-1" />ชิ้นงานจริง {(p / sum * 100).toFixed(1)}%</span>
+        <span><span className="inline-block h-2 w-2 rounded-sm bg-rose-300 mr-1" />เศษจากการวาง {(w / sum * 100).toFixed(1)}%</span>
+        <span><span className="inline-block h-2 w-2 rounded-sm bg-amber-300 mr-1" />เผื่อเสีย {(a / sum * 100).toFixed(1)}%</span>
+      </div>
+    </>
   );
 }
 

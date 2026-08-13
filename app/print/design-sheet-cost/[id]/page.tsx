@@ -13,7 +13,7 @@ import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
 import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
-import { buildReportHtml } from "@/lib/template";
+import { buildReportHtml, buildReportImageGridHtml } from "@/lib/template";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
 
@@ -63,7 +63,19 @@ function extrasForParent(rawCe: unknown, sel: string): CostExtra[] {
   return [];
 }
 
-function buildData(sheet: Sheet, lines: CostLine[], extrasArr: CostExtra[], sizeLabel: string | null): Record<string, unknown> {
+/** รูปในใบงาน (ทุกแหล่ง: แกลเลอรี/รายละเอียด/คอมเมนต์) — เลือกติดไปกับใบพิมพ์ได้ */
+type SheetImage = { key: string; url: string; source_label: string; is_primary: boolean };
+
+/**
+ * วางบล็อกรูปเข้าไปในเอกสาร เมื่อเทมเพลตไม่มีช่อง {{{images_html}}} ของตัวเอง
+ * แทรกท้าย <main> = อยู่ในกรอบกระดาษเสมอ (ไม่หลุดออกนอก .doc)
+ */
+function injectImages(html: string, block: string): string {
+  if (!block) return html;
+  return html.includes("</main>") ? html.replace("</main>", `${block}</main>`) : html.replace("</body>", `${block}</body>`);
+}
+
+function buildData(sheet: Sheet, lines: CostLine[], extrasArr: CostExtra[], sizeLabel: string | null, imagesHtml = ""): Record<string, unknown> {
   const brand = (Array.isArray(sheet.brand) ? sheet.brand[0] : sheet.brand) as { name?: string } | null;
 
   // จัดกลุ่มวัสดุตามชนิด
@@ -110,6 +122,8 @@ function buildData(sheet: Sheet, lines: CostLine[], extrasArr: CostExtra[], size
     grand_total_th:   baht(grand),
     groups,
     no_lines:         lines.length === 0,
+    images_html:      imagesHtml,          // เทมเพลตจะวางเองก็ได้ด้วย {{{images_html}}}
+    has_images:       imagesHtml !== "",
   };
 }
 
@@ -124,6 +138,9 @@ export default function PrintDesignSheetCostPage() {
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [sel, setSel]           = useState<string>(ALL);   // ไซส์/แท็บที่เลือกพิมพ์ (ALL = ทุกไซส์)
+  const [images, setImages]     = useState<SheetImage[]>([]);        // รูปทั้งหมดในใบงาน (ทุกแหล่ง)
+  const [picked, setPicked]     = useState<string[]>([]);            // รูปที่เลือกให้ติดไปกับใบพิมพ์ (เรียงตามที่กด)
+  const [imgCols, setImgCols]   = useState<1 | 2>(2);                // วางกี่รูปต่อแถว
 
   // ค่าเริ่มต้นจาก ?parent= (ไซส์ที่กำลังดูตอนกดพิมพ์) — อ่านฝั่ง client
   useEffect(() => {
@@ -148,6 +165,15 @@ export default function PrintDesignSheetCostPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  // รูปในใบงาน (ทุกแหล่ง) — ไว้ให้เลือกติดไปกับใบพิมพ์ (ไม่เลือกอะไร = ใบเหมือนเดิมทุกอย่าง)
+  useEffect(() => {
+    let alive = true;
+    apiFetch(`/api/design-sheets/${id}/images`).then((r) => r.json())
+      .then((j) => { if (alive && Array.isArray(j.data)) setImages(j.data as SheetImage[]); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [id]);
+
   // ไซส์/แท็บที่มีในบรรทัด (เรียง "ทั่วไป" ก่อน) + จำนวนบรรทัดต่อไซส์
   const tabs = useMemo(() => {
     const counts = new Map<string, number>();
@@ -163,13 +189,20 @@ export default function PrintDesignSheetCostPage() {
     if (!sheet || !template) return "";
     const sizeLabel = sel === ALL ? null : parentLabel(sel);
     const extras = extrasForParent(sheet.cost_extra, sel);
-    return buildReportHtml(
+    // รูปที่เลือก → กริดรูปของกลาง (ตัวเดียวกับใบพิมพ์อื่น) · เรียงตามลำดับที่กดเลือก
+    const items = picked.map((k) => images.find((im) => im.key === k)).filter(Boolean) as SheetImage[];
+    const grid = buildReportImageGridHtml(items.map((im) => ({ src: im.url, alt: im.source_label })), { columns: imgCols });
+    const block = grid ? `<section class="print-images"><h3 style="font-size:12px;margin:4mm 0 1mm;color:#334155;">รูปประกอบ</h3>${grid}</section>` : "";
+    const rendered = buildReportHtml(
       { paper_size: template.paper_size, orientation: template.orientation,
         header_html: template.header_html, body_html: template.body_html,
         footer_html: template.footer_html, custom_css: template.custom_css },
-      buildData(sheet, shownLines, extras, sizeLabel),
+      buildData(sheet, shownLines, extras, sizeLabel, block),
     );
-  }, [sheet, shownLines, template, sel]);
+    // เทมเพลตวางเองไหม ({{{images_html}}}) — ถ้าไม่ ให้ระบบแทรกท้ายเนื้อหาให้
+    const tplPlaces = /images_html/.test(`${template.header_html}${template.body_html}${template.footer_html}`);
+    return tplPlaces ? rendered : injectImages(rendered, block);
+  }, [sheet, shownLines, template, sel, picked, images, imgCols]);
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -203,6 +236,41 @@ export default function PrintDesignSheetCostPage() {
                 <p className="text-[11px] text-slate-400 mt-2">แถบนี้ไม่ติดไปกับกระดาษที่พิมพ์ · เลือกไซส์แล้วใบจะเหลือเฉพาะบรรทัด/ค่าแรง/ยอดรวมของไซส์นั้น</p>
               </div>
             )}
+            {/* เลือกรูปประกอบที่จะติดไปกับใบพิมพ์ (แถบนี้ไม่ติดไปกับกระดาษ) */}
+            {images.length > 0 && (
+              <div className="no-print mx-auto mb-4 max-w-[840px] rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-slate-700">🖼️ รูปประกอบในใบพิมพ์:</span>
+                  <span className="text-xs text-slate-400">กดรูปเพื่อเลือก/เอาออก · เลือกแล้ว {picked.length} รูป</span>
+                  {picked.length > 0 && (
+                    <>
+                      <span className="ml-2 text-xs text-slate-500">ต่อแถว:</span>
+                      {([1, 2] as const).map((c) => (
+                        <button key={c} onClick={() => setImgCols(c)}
+                          className={`h-7 px-2 text-xs rounded-md border ${imgCols === c ? "border-indigo-500 bg-indigo-50 text-indigo-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{c} รูป</button>
+                      ))}
+                      <button onClick={() => setPicked([])} className="ml-auto h-7 px-2 text-xs text-slate-500 hover:text-rose-600">ล้างที่เลือก</button>
+                    </>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {images.map((im) => {
+                    const idx = picked.indexOf(im.key);
+                    return (
+                      <button key={im.key} type="button" title={im.source_label}
+                        onClick={() => setPicked((p) => (p.includes(im.key) ? p.filter((k) => k !== im.key) : [...p, im.key]))}
+                        className={`relative h-20 w-20 overflow-hidden rounded-lg border-2 bg-white ${idx >= 0 ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={im.url} alt={im.source_label} className="h-full w-full object-contain" />
+                        {idx >= 0 && <span className="absolute left-0.5 top-0.5 rounded bg-indigo-600 px-1 text-[10px] font-medium text-white">{idx + 1}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-[11px] text-slate-400">รูปจะไปต่อท้ายตารางวัตถุดิบ · เรียงตามลำดับที่กดเลือก · ไม่เลือก = ใบเหมือนเดิม</p>
+              </div>
+            )}
+
             <PrintFrame html={html} fileName={docFileName("ใบตีราคาต้นทุน", sheet ? String(sheet.code ?? "") : null)} />
           </>
         )}
