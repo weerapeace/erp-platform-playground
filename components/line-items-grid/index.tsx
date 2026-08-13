@@ -55,6 +55,9 @@ export type LineItemsGridProps<T> = {
   /** ทำซ้ำบรรทัด — คืน row ใหม่ (ต้องตั้ง id/key ใหม่เอง) แล้วระบบแทรกต่อจากบรรทัดเดิม */
   onDuplicate?: (row: T) => T;
   emptyText?: string;
+  /** ปุ่ม/ข้อความเสริมในกล่อง "ยังไม่มีรายการ" — โชว์แม้ตอน readonly
+   *  (เช่น โหมดดูอย่างเดียว อยากมีปุ่ม "＋ เพิ่มวัตถุดิบ" ที่กดแล้วเข้าโหมดแก้ไขให้เลย) */
+  emptyAction?: React.ReactNode;
   footer?:    React.ReactNode;
   /** ปุ่ม/ตัวเลือกเสริม วางข้างปุ่ม "เพิ่มบรรทัด" (เช่น เพิ่มจากรายการที่ใช้บ่อย) */
   addExtra?:  React.ReactNode;
@@ -82,7 +85,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
-  groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", footer, addExtra, storageKey,
+  groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
   stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar,
 }: LineItemsGridProps<T>) {
   const [sort, setSort]       = useState<SortState>(defaultSort);
@@ -289,6 +292,7 @@ export function LineItemsGrid<T>({
           {onAdd && !readonly && (
             <button type="button" onClick={() => onChange([...rows, onAdd()])} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{addLabel}</button>
           )}
+          {emptyAction && <div className="mt-1 flex justify-center">{emptyAction}</div>}
         </div>
       ) : (
         <div className={`${stickyHeader ? "overflow-auto" : "overflow-x-auto"} border border-slate-200 rounded-lg`}

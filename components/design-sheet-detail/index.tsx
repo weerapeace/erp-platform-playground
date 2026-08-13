@@ -471,6 +471,17 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const costExtra = costExtraMap[costParent] ?? [];
   const setCurExtra = (updater: (l: CostExtra[]) => CostExtra[]) =>
     setCostExtraMap((m) => ({ ...m, [costParent]: updater(m[costParent] ?? []) }));
+  // บรรทัดตีราคาว่าง 1 บรรทัด (ของแท็บ Parent ที่กำลังดู) — ใช้ทั้งปุ่มในตารางและปุ่มในกล่องว่าง
+  const newCostRow = useCallback((): CostRow => ({
+    key: `n${Date.now()}_${costLines.length}`,
+    parent_code: costParent || null,
+    item_id: null, item_name: null, group_name: null, calc_method: null,
+    width_cm: null, length_cm: null, pieces: null, face_width_cm: null,
+    waste_percent: null, divisor: null, qty: null, uom: null,
+    unit_price: null, amount: null, note: null, sort_order: costLines.length + 1,
+  }), [costLines.length, costParent]);
+  const addCostRow = useCallback(() => { setCostLines((prev) => [...prev, newCostRow()]); setCostDirty(true); }, [newCostRow]);
+
   const costTotal  = curLines.reduce((s, r) => s + (r.amount || 0), 0);   // ต้นทุนวัสดุของ Parent นี้
   const extraTotal = costExtra.reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const grandTotal = costTotal + extraTotal;                              // ต้นทุนสินค้าของ Parent นี้ (รวมทั้งหมด)
@@ -1902,16 +1913,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 rowId={(r) => r.key}
                 readonly={!fullEdit}
                 groupByOptions={[{ key: "group", label: "ชนิดวัสดุ" }, { key: "item", label: "วัสดุ" }, { key: "uom", label: "หน่วย" }]}
-                onAdd={() => ({
-                  key: `n${Date.now()}_${costLines.length}`,
-                  parent_code: costParent || null,
-                  item_id: null, item_name: null, group_name: null, calc_method: null,
-                  width_cm: null, length_cm: null, pieces: null, face_width_cm: null,
-                  waste_percent: null, divisor: null, qty: null, uom: null,
-                  unit_price: null, amount: null, note: null, sort_order: costLines.length + 1,
-                })}
-                addLabel="＋ เพิ่มบรรทัดตีราคา"
-                emptyText="ยังไม่มีบรรทัดตีราคา — กดเพิ่มบรรทัดแล้วเลือกวัสดุ"
+                onAdd={newCostRow}
+                addLabel="＋ เพิ่มวัตถุดิบ"
+                emptyText="ยังไม่มีวัตถุดิบในรายการตีราคา"
+                // โหมดดูอย่างเดียว: ให้กด "เพิ่มวัตถุดิบ" ได้เลย (เข้าโหมดแก้ไข + เพิ่มบรรทัดให้ในคลิกเดียว)
+                emptyAction={!fullEdit && canEdit ? (
+                  <button type="button" onClick={() => { setEditing(true); addCostRow(); }}
+                    className="h-9 px-4 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">＋ เพิ่มวัตถุดิบ</button>
+                ) : null}
                 onDuplicate={(r) => recomputeRow({ ...r, key: `d${Date.now()}_${Math.round(Math.random() * 1e6)}` })}
                 selectable={fullEdit}
                 bulkBar={(sel, clear) => {
