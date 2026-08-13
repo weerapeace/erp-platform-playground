@@ -213,6 +213,7 @@ function WorkBoardPageInner() {
   const viewMode = viewRaw === "exec" && !isAdmin ? "board" : viewRaw;
   const [shopMode, setShopMode] = useState<"dispatch" | "desk">("dispatch");   // มุมมองช้อป: รอจ่าย / งานในโต๊ะ
   const [lineSettingsOpen, setLineSettingsOpen] = useState(false);   // ป๊อปตั้งค่าแจ้งเตือน LINE
+  const [settingsOpen, setSettingsOpen] = useState(false);           // เมนู ⚙️ ตั้งค่า (ติดตั้งแอป/สีแบรนด์/แจ้งเตือน)
   const [moCreateOpen, setMoCreateOpen] = useState(false);           // ป๊อปสร้างใบสั่งผลิต (ของกลาง)
   const [pendingCols] = useState<number | null>(null);     // (เลิกใช้) คอลัมน์โซนรอจ่าย — รอจ่ายย้ายไปป๊อปอัปแล้ว
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
@@ -1030,21 +1031,36 @@ function WorkBoardPageInner() {
           <p className="text-sm text-slate-500 mt-0.5">ติ๊ก <b>เตรียม/ตัด</b> บนการ์ด → ครบทั้งคู่ <b className="text-emerald-600">ไฟเขียว</b> = พร้อมจ่าย → ลากไปวางที่แผนกช่างเพื่อจ่ายงาน</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
-            <button onClick={() => setViewMode("board")} className={`h-9 px-3 font-medium ${viewMode === "board" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 บอร์ด</button>
-            <button onClick={() => setViewMode("table")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ ตาราง</button>
-            <button onClick={() => setViewMode("shop")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "shop" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🛒 ช้อปจ่ายงาน</button>
-            <button onClick={() => setViewMode("purchase")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "purchase" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 ขอซื้อ/เตรียม</button>
+          {/* เลือกมุมมอง — รวมเป็น dropdown ตัวเดียว (เดิมเป็นปุ่มเรียงกันหลายปุ่ม ทำให้หัวหน้ารก) */}
+          <select value={viewMode} onChange={(e) => setViewMode(e.target.value as typeof viewMode)} title="เลือกมุมมองของหน้านี้"
+            className="h-9 px-2 text-sm font-medium border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="board">📋 บอร์ด</option>
+            <option value="table">▦ ตาราง</option>
+            <option value="shop">🛒 ช้อปจ่ายงาน</option>
+            <option value="purchase">📦 ขอซื้อ/เตรียม</option>
             {/* แผนผู้บริหาร — เห็นเฉพาะแอดมิน (มีตัวเลขราคาขาย/ต้นทุน/กำไร) */}
-            {isAdmin && <button onClick={() => setViewMode("exec")} title="แผนงานสำหรับผู้บริหาร — มูลค่างาน ราคาขาย ต้นทุน กำไรประมาณ (เห็นเฉพาะแอดมิน)"
-              className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "exec" ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>👔 แผนผู้บริหาร</button>}
-          </div>
+            {isAdmin && <option value="exec">👔 แผนผู้บริหาร</option>}
+          </select>
           <button onClick={() => { void saveDefView(viewMode); toast.success("ตั้งเป็นมุมมองเริ่มต้นของคุณแล้ว"); }}
             title={defView === viewMode ? "มุมมองนี้เป็นค่าเริ่มต้นของคุณเมื่อเปิดหน้า" : "ตั้งมุมมองนี้เป็นค่าเริ่มต้นเมื่อเปิดหน้า (เฉพาะคุณ)"}
             className={`h-9 px-2.5 text-sm rounded-lg border ${defView === viewMode ? "border-amber-300 bg-amber-50 text-amber-600" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>{defView === viewMode ? "⭐" : "☆"}</button>
-          <PwaInstallButton className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 inline-flex items-center gap-1" />
-          <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
-          {canDispatch && <button onClick={() => setLineSettingsOpen(true)} title="ตั้งค่ากลุ่ม LINE + ข้อความแจ้งเตือน" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🔔 แจ้งเตือน</button>}
+          {/* ⚙️ ตั้งค่า — รวม ติดตั้งแอป / ตั้งสีแบรนด์ / แจ้งเตือน ไว้ที่เดียว */}
+          <div className="relative">
+            <button onClick={() => setSettingsOpen((v) => !v)} title="ตั้งค่า — ติดตั้งแอป · สีแบรนด์ · แจ้งเตือน LINE"
+              className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">⚙️ ตั้งค่า ▾</button>
+            {settingsOpen && (<>
+              <div className="fixed inset-0 z-40" onClick={() => setSettingsOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
+                <PwaInstallButton className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-50" />
+                <button onClick={() => { setSettingsOpen(false); void openColor(); }} className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
+                {canDispatch && (
+                  <button onClick={() => { setSettingsOpen(false); setLineSettingsOpen(true); }} className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-50">
+                    🔔 แจ้งเตือน<div className="text-[11px] text-slate-400">กลุ่ม LINE + ข้อความแจ้งเตือน</div>
+                  </button>
+                )}
+              </div>
+            </>)}
+          </div>
           {/* คำขอค้างจากหน้างาน (ขอเพิ่มวัตถุดิบ / ขอแก้สูตร) — ของกลาง เห็นตัวเลขโดยไม่ต้องเปิดเข้าไปดู */}
           <RequestInboxButton />
           <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>
