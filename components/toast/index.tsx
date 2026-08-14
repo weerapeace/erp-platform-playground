@@ -12,7 +12,7 @@ import { createPortal } from "react-dom";
 type Variant = "success" | "error" | "warning" | "info";
 type ToastItem = { id: number; msg: string; variant: Variant };
 
-type ToastApi = {
+export type ToastApi = {
   show: (msg: string, variant?: Variant) => void;
   success: (msg: string) => void;
   error: (msg: string) => void;

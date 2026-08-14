@@ -21,6 +21,8 @@ import type { BomComponent } from "@/app/api/bom/components/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { ERPModal } from "@/components/modal";
+import { useToast } from "@/components/toast";
+import { apiSave } from "@/lib/save-toast";
 import { ComponentPicker } from "@/components/material-picker";
 import { FreeTextPicker } from "@/components/free-text-picker";
 import { fabricQty } from "@/lib/bom-calc";
@@ -342,6 +344,7 @@ export function BomLineEditor({
    *  ห้ามเปิดในหน้า /master/bom ของจริง ไม่งั้นสูตรจริงจะมีบรรทัดที่ระบบคำนวณต่อไม่ได้ */
   allowFreeText?: boolean;
 }) {
+  const toast = useToast();
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [uoms, setUoms] = useState<{ id: string; name: string }[]>([]);
   // ป๊อป "รายละเอียดวัตถุดิบ" — เก็บเป็น key แล้วหาแถวจริงจาก lines ทุกครั้ง
@@ -440,19 +443,27 @@ export function BomLineEditor({
       return ((j.data ?? []) as BomComponent[]).find((c) => c.code === l.component_sku)?.id ?? null; } catch { return null; }
   };
 
+  // ⚠️ 3 ปุ่มนี้ "เขียนกลับไปที่ SKU จริง" (ไม่ใช่แค่ในสูตรนี้) — เดิมยิงแบบเงียบ ๆ
+  //    พังก็ไม่รู้ ผู้ใช้นึกว่าบันทึกแล้ว → ตอนนี้ใช้ของกลาง apiSave เด้งบอกผลทุกครั้ง
+  const noSkuMsg = "หา SKU ของวัตถุดิบนี้ไม่เจอ จึงบันทึกกลับไปที่สินค้าไม่ได้";
+
   // เขียนหน้ากว้างกลับไปที่ SKU (เพื่อครั้งหน้าใช้ซ้ำ)
   const saveFaceToSku = async (l: EditorLine) => {
-    const skuId = await resolveSkuId(l);
-    if (skuId) apiFetch("/api/bom/components", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_id: skuId, fabric_width_cm: l.face_width_cm || null }) }).catch(() => {});
     setEditFace((s) => toggleSet(s, l.key, false));
+    const skuId = await resolveSkuId(l);
+    if (!skuId) { toast.error(noSkuMsg); return; }
+    await apiSave(toast, "/api/bom/components", { body: { sku_id: skuId, fabric_width_cm: l.face_width_cm || null } },
+      { ok: `บันทึกหน้ากว้าง ${l.face_width_cm || "—"} ซม. กลับเข้า ${l.component_sku} แล้ว`, fail: "บันทึกหน้ากว้างไม่สำเร็จ" });
   };
 
   // เขียนหน่วยกลับไปที่ SKU
   const saveUomToSku = async (l: EditorLine, uomId: string, uomName: string, update: (p: Partial<EditorLine>) => void) => {
     update({ uom_id: uomId, uom: uomName });
-    const skuId = await resolveSkuId(l);
-    if (skuId) apiFetch("/api/bom/components", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_id: skuId, uom_id: uomId }) }).catch(() => {});
     setEditUom((s) => toggleSet(s, l.key, false));
+    const skuId = await resolveSkuId(l);
+    if (!skuId) { toast.error(noSkuMsg); return; }
+    await apiSave(toast, "/api/bom/components", { body: { sku_id: skuId, uom_id: uomId } },
+      { ok: `เปลี่ยนหน่วยของ ${l.component_sku} เป็น "${uomName}" แล้ว`, fail: "บันทึกหน่วยไม่สำเร็จ" });
   };
 
   // เลือกชนิดให้ SKU (บันทึก material_group_id ที่ SKU ด้วย เพื่อครั้งหน้าใช้ซ้ำ)
@@ -461,7 +472,9 @@ export function BomLineEditor({
     if (!g) return;
     update({ material_group_id: g.id, material_type: g.name, waste_percent: g.loss_percent ?? l.waste_percent });
     const skuId = await resolveSkuId(l);
-    if (skuId) apiFetch("/api/bom/components", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_id: skuId, material_group_id: g.id }) }).catch(() => {});
+    if (!skuId) { toast.error(noSkuMsg); return; }
+    await apiSave(toast, "/api/bom/components", { body: { sku_id: skuId, material_group_id: g.id } },
+      { ok: `ตั้งชนิดของ ${l.component_sku} เป็น "${g.name}" แล้ว`, fail: "บันทึกชนิดวัตถุดิบไม่สำเร็จ" });
   };
 
   const columns: LineColumn<EditorLine>[] = [

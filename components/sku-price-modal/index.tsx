@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { apiSave } from "@/lib/save-toast";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
 import type { SkuLookupHit } from "@/app/api/skus/lookup/route";
 
@@ -68,18 +69,13 @@ export function SkuPriceModal({ open, skuCode, skuName, uom, onClose, onSaved }:
     const n = price.trim() === "" ? null : Number(price);
     if (n != null && (!isFinite(n) || n < 0)) { toast.error("ราคาต้องเป็นตัวเลขไม่ติดลบ"); return; }
     setSaving(true);
-    try {
-      const res = await apiFetch(`/api/master-v2/skus/${encodeURIComponent(skuId)}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ standard_price: n }),
-      });
-      const j = await res.json();
-      if (j.error) throw new Error(j.error);
-      setSavedPrice(n);
-      toast.success(n == null ? "ล้างราคาแล้ว" : `บันทึกราคา ฿${n.toLocaleString("th-TH")} กลับเข้าสินค้าแล้ว`);
-      onSaved?.();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
-    } finally { setSaving(false); }
+    // ของกลาง apiSave — เด้ง toast บอกผลสำเร็จ/ไม่สำเร็จให้เอง (ไม่ต้องเขียนซ้ำทุกที่)
+    const r = await apiSave(toast, `/api/master-v2/skus/${encodeURIComponent(skuId)}`, { body: { standard_price: n } },
+      { ok: n == null ? "ล้างราคาแล้ว" : `บันทึกราคา ฿${n.toLocaleString("th-TH")} กลับเข้าสินค้าแล้ว`, fail: "บันทึกราคาไม่สำเร็จ" });
+    setSaving(false);
+    if (!r.ok) return;
+    setSavedPrice(n);
+    onSaved?.();
   };
 
   const dirty = (price.trim() === "" ? null : Number(price)) !== savedPrice;
