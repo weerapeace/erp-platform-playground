@@ -39,6 +39,7 @@ import { tr } from "@/lib/lang";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
 import { formatAmount, currencyLabel } from "@/lib/money";
+import { MoneyInput } from "@/components/money-input";
 import { computedTextValue, textComputeDescribe } from "@/lib/computed-text";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
@@ -2181,15 +2182,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             disabled={disabled}
           />
         ) : f.type === "number" && (f.currencyCode || f.currencyField) ? (
-          /* ฟิลด์เงิน: ป้ายสกุลกำกับท้ายช่อง (ตายตัว หรือตามฟิลด์อื่นในฟอร์ม เช่น currency) */
+          /* ฟิลด์เงิน: โชว์ลูกน้ำคั่นหลักพันขณะพิมพ์ (ของกลาง MoneyInput) + ป้ายสกุลกำกับท้ายช่อง */
           <div className="relative">
-            <input
-              type="number" step="any" disabled={disabled}
+            <MoneyInput
+              disabled={disabled}
               value={(v as string | number | undefined) ?? ""}
-              onChange={e => updateForm({ [f.key]: e.target.value })}
+              onChange={(raw) => updateForm({ [f.key]: raw })}
               placeholder={f.placeholder}
               style={tStyle}
-              className={`${common} pr-14`}
+              className={`${common} pr-14 tabular-nums`}
             />
             <span className="absolute right-3 bottom-2 text-[11px] font-medium text-slate-400 pointer-events-none">
               {currencyLabel(f.currencyCode ?? (f.currencyField ? form[f.currencyField] : undefined))}
@@ -2698,7 +2699,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {/* Layout คุมทุก field (รวม core) */}
                 {createHeaderEl}
                 {drawerMode === "view"
-                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
+                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />
                   : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} sectionAction={sectionAction} />}
               </div>
             );
@@ -2714,7 +2715,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 )}
                 {createHeaderEl}
                 {drawerMode === "view"
-                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
+                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />
                   : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} sectionAction={sectionAction} />}
               </div>
             );
@@ -2832,7 +2833,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {createHeaderEl}
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"
-                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} />
+                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />
                     : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} sectionAction={sectionAction} />
                 ) : (
                   <div className="text-sm text-slate-300 py-8 text-center">{tr("ไม่มีข้อมูลเพิ่มเติม", "No extra details")}</div>
@@ -3253,6 +3254,12 @@ function QuickEditCell({ field, value, onSave, siblingValues, autoOpen, onDone }
           onKeyDown={(e) => { if (e.key === "Escape") { setEditing(false); onDone?.(); } }}
           onBlur={() => commit(val)}
           className="w-full px-2 py-1.5 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+      ) : field.type === "number" && (field.currencyCode || field.currencyField) ? (
+        /* ฟิลด์เงิน → ช่องกลาง MoneyInput (โชว์ลูกน้ำขณะพิมพ์) */
+        <MoneyInput autoFocus value={val} disabled={saving}
+          onChange={(raw) => setVal(raw)}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(val); if (e.key === "Escape") { e.preventDefault(); setEditing(false); onDone?.(); } }}
+          onBlur={(raw) => commit(raw)} className={`${inputCls} tabular-nums`} />
       ) : (
         <input autoFocus type={field.type === "number" ? "number" : "text"} value={val} disabled={saving}
           onChange={(e) => setVal(e.target.value)}
@@ -3573,13 +3580,15 @@ function CompletenessBar({ fields, values }: { fields: FieldDef[]; values: Recor
 }
 
 function DetailSections({
-  fields, renderValue, layout, values, extraTabs,
+  fields, renderValue, layout, values, extraTabs, sectionMode,
 }: {
   fields: FieldDef[];
   renderValue: (f: FieldDef) => React.ReactNode;
   layout?: FormLayout;
   values?: Record<string, unknown>;
   extraTabs?: BoundTab[];
+  /** true = แสดงทุกกลุ่มเรียงลงมาเป็นหัวข้อ (หน้าเดียว เลื่อนดู) แทนแท็บ — ให้ตรงกับหน้าแก้ไข */
+  sectionMode?: boolean;
 }) {
   const byGroup = useMemo(() => groupByKey(fields), [fields]);
   const grouped = useMemo(() =>
@@ -3617,6 +3626,29 @@ function DetailSections({
       <div className="space-y-4">
         {values && <CompletenessBar fields={fields} values={values} />}
         <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} renderGrid={renderDl} />
+      </div>
+    );
+  }
+
+  // sectionMode: ทุกกลุ่มเรียงลงมาเป็นหัวข้อ (ไม่มีแท็บ) — หน้ารายละเอียดหน้าตาเดียวกับหน้าแก้ไข
+  if (sectionMode && grouped.length > 1) {
+    return (
+      <div className="space-y-4">
+        {values && <CompletenessBar fields={fields} values={values} />}
+        <div className="space-y-6 pt-1">
+          {grouped.map(([groupKey, groupFields]) => {
+            const cfg = getGroupConfig(groupKey);
+            return (
+              <section key={groupKey}>
+                <div className="flex items-center gap-1.5 pb-2 mb-3 border-b border-slate-100">
+                  <span>{cfg.icon}</span>
+                  <span className="text-sm font-semibold text-slate-700">{cfg.label}</span>
+                </div>
+                {renderDl(groupFields, 2)}
+              </section>
+            );
+          })}
+        </div>
       </div>
     );
   }

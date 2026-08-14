@@ -9,6 +9,7 @@ import { useState } from "react";
 import { InfoHint } from "@/components/info-hint";
 import { GenerateScheduleModal } from "@/app/loan-schedules/generate-modal";
 import { RecordPaymentModal } from "@/app/loan-payments/record-modal";
+import { InstallmentsModal } from "@/app/loan-contracts/installments-modal";
 
 const btn = "h-7 px-2.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
@@ -21,6 +22,7 @@ export function LoanProgressActions({
 }) {
   const [payOpen, setPayOpen] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
+  const [instOpen, setInstOpen] = useState(false);
 
   // ยังไม่ได้บันทึกสัญญา (สร้างใหม่) → ยังผูกการจ่ายไม่ได้
   if (!recordId) {
@@ -40,12 +42,11 @@ export function LoanProgressActions({
         title={totalInstallments > 0 ? "สร้างตารางผ่อนเวอร์ชันใหม่ (ของเดิมเก็บเป็นประวัติ)" : "ยังไม่มีตารางผ่อน — สร้างก่อน"}>
         🧾 {totalInstallments > 0 ? "แก้ตารางผ่อน" : "สร้างตารางผ่อน"}
       </button>
-      <a href={`/loan-installments?flt=${encodeURIComponent(JSON.stringify({ loan_contract_id: recordId }))}`}
-        target="_blank" rel="noopener noreferrer"
-        className={`${btn} border-slate-200 text-slate-600 hover:bg-slate-50 inline-flex items-center`}
-        title="เปิดดูงวดผ่อนทั้งหมดของสัญญานี้">
+      <button type="button" onClick={() => setInstOpen(true)}
+        className={`${btn} border-slate-200 text-slate-600 hover:bg-slate-50`}
+        title="ดูงวดผ่อนทั้งหมดของสัญญานี้ (เปิดเป็นป๊อปอัป) · แก้ยอดรายงวดได้">
         📄 ดูงวดทั้งหมด
-      </a>
+      </button>
       <button type="button" onClick={() => setPayOpen(true)}
         className={`${btn} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}>
         💵 บันทึกการจ่าย
@@ -60,6 +61,11 @@ export function LoanProgressActions({
         open={payOpen} contractId={recordId}
         onClose={() => setPayOpen(false)}
         onCreated={async () => { setPayOpen(false); await onDone(); }}
+      />
+      <InstallmentsModal
+        open={instOpen} contractId={recordId}
+        onClose={() => setInstOpen(false)}
+        onSaved={onDone}
       />
     </span>
   );

@@ -13,7 +13,8 @@ import { writeAudit } from "@/lib/audit";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const METHODS = new Set(["equal_installment", "equal_principal", "interest_only"]);
+// 'custom' = สร้างตัวตั้งต้นให้ก่อน แล้วผู้ใช้ไปแก้ยอดรายงวดเอง (ตารางธนาคารที่เงินต้น/ดอกเบี้ยไม่เท่ากัน)
+const METHODS = new Set(["equal_installment", "equal_principal", "interest_only", "custom"]);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "loan_schedules.create");

@@ -8,10 +8,19 @@ import { apiFetch } from "@/lib/api";
 type ContractOpt = { id: string; loan_code: string; loan_name: string };
 
 const METHOD_OPTS = [
-  { value: "equal_installment", label: "งวดเท่ากัน (Equal Installment)" },
-  { value: "equal_principal", label: "เงินต้นเท่ากัน (Equal Principal)" },
-  { value: "interest_only", label: "จ่ายดอกเบี้ยอย่างเดียว (Interest Only)" },
+  { value: "equal_installment", label: "ผ่อนเท่ากันทุกงวด (Equal Installment)" },
+  { value: "equal_principal", label: "ตัดเงินต้นเท่ากันทุกงวด (Equal Principal)" },
+  { value: "interest_only", label: "จ่ายดอกอย่างเดียว ปิดต้นงวดสุดท้าย (Interest Only)" },
+  // ตารางจริงของธนาคารหลายใบ เงินต้น/ดอกเบี้ยแต่ละงวดไม่เท่ากัน → สร้างตัวตั้งต้นแล้วพิมพ์ยอดจริงเอง
+  { value: "custom", label: "กำหนดเอง (Custom) — พิมพ์ยอดจริงรายงวดเอง" },
 ];
+
+const METHOD_HINT: Record<string, string> = {
+  equal_installment: "จ่ายเท่ากันทุกเดือน ช่วงแรกเป็นดอกเบี้ยมากกว่า",
+  equal_principal:   "ตัดเงินต้นเท่ากันทุกงวด ยอดจ่ายลดลงเรื่อย ๆ",
+  interest_only:     "ระหว่างทางจ่ายแต่ดอกเบี้ย แล้วปิดเงินต้นทั้งก้อนงวดสุดท้าย",
+  custom:            "ระบบสร้างตัวตั้งต้นให้ก่อน แล้วเข้าไปแก้ยอดแต่ละงวดให้ตรงกับใบของธนาคารได้ (เงินต้น/ดอกเบี้ยไม่เท่ากันก็ได้) — แก้ที่ปุ่ม “📄 ดูงวดทั้งหมด” ในหน้าสัญญา",
+};
 
 export function GenerateScheduleModal({
   open, onClose, onCreated, contractId,
@@ -107,7 +116,7 @@ export function GenerateScheduleModal({
           </ERPFormField>
         )}
 
-        <ERPFormField label="วิธีคิดตารางผ่อน" required>
+        <ERPFormField label="วิธีคิดตารางผ่อน" required hint={METHOD_HINT[f.method]}>
           <ERPSelect value={f.method} onChange={(e) => set("method", e.target.value)} options={METHOD_OPTS} />
         </ERPFormField>
 
