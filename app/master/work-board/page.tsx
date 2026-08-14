@@ -330,6 +330,8 @@ function WorkBoardPageInner() {
   const [estLabor, setEstLabor] = useState("");               // ค่าแรงผลิตที่วางแผน — กรอกเป็นราคา/ชิ้น
   const [moQty, setMoQty] = useState("");                     // จำนวนสั่งผลิต (แก้ได้ในป๊อปเช็กลิสต์)
   const [qtySaving, setQtySaving] = useState(false);
+  // ปกติจำนวนเป็น "อ่านอย่างเดียว" — ต้องกดปุ่ม ✏️ ก่อนถึงจะพิมพ์แก้ได้ (กันเผลอพิมพ์ทับ = สูตรกางใหม่ทั้งใบ)
+  const [qtyEditing, setQtyEditing] = useState(false);
   const [estSaving, setEstSaving] = useState(false);
   const [estSaveBom, setEstSaveBom] = useState(false);        // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง)
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
@@ -790,6 +792,7 @@ function WorkBoardPageInner() {
   useEffect(() => {
     setDelArmed(false); setClTab(clWO ? "recv" : "prep");
     setClPurch(null); setClIssues(null); setClHist(null); setClCost(null); setIssType(""); setIssSev("medium"); setIssQty("");
+    setQtyEditing(false);   // เปิดป๊อปใหม่ = จำนวนกลับเป็นอ่านอย่างเดียวเสมอ
     if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); setMoQty(""); return; }
     setMoQty(String(checklistMO.qty ?? ""));   // ช่องแก้จำนวนสั่งผลิตในป๊อป
     // ค่าแรงผลิตวางแผน — กรอกเป็น "ราคา/ชิ้น"
@@ -931,6 +934,7 @@ function WorkBoardPageInner() {
       { ok: `เปลี่ยนจำนวนเป็น ${fmt(n)} ชิ้นแล้ว — คิดวัตถุดิบตามจำนวนใหม่ให้อัตโนมัติ`, fail: "เปลี่ยนจำนวนไม่สำเร็จ" });
     setQtySaving(false);
     if (!r.ok) return;
+    setQtyEditing(false);   // บันทึกแล้วกลับเป็นอ่านอย่างเดียว
     setChecklistMO((m) => (m ? { ...m, qty: n, remaining: Math.max(0, n - (m.dispatched || 0)) } : m));
     await reloadClMats();   // วัตถุดิบ + ต้นทุน + การ์ดบนบอร์ด (reloadClMats เรียก load(true) ให้แล้ว)
   }, [checklistMO, moQty, reloadClMats, toast]);
@@ -1556,29 +1560,38 @@ function WorkBoardPageInner() {
                 <p className="text-sm font-medium text-slate-800 truncate">{checklistMO.product_name ?? checklistMO.product_sku}</p>
                 <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${ready ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ready ? "พร้อมจ่าย ✓" : "ยังไม่พร้อม"}</span>
               </div>
-              {/* จำนวนสั่งผลิต — แก้ได้ตรงนี้เลย (เปลี่ยนแล้วระบบคิดวัตถุดิบตามจำนวนใหม่ให้) */}
+              {/* จำนวนสั่งผลิต — ปกติ "อ่านอย่างเดียว" ต้องกด ✏️ ก่อนถึงแก้ได้
+                  (เปลี่ยนจำนวน = ระบบกางสูตรวัตถุดิบใหม่ทั้งใบ ไม่ควรให้เผลอพิมพ์ทับ) */}
               <div className="flex items-center gap-2 flex-wrap text-[12px] rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
                 <span className="text-slate-500 whitespace-nowrap">จำนวนสั่งผลิต</span>
-                {canEdit && !curMo.has_sizes ? (
+                {qtyEditing ? (
                   <>
-                    <input type="number" min={0} step="any" value={moQty} disabled={qtySaving}
+                    <input type="number" min={0} step="any" value={moQty} disabled={qtySaving} autoFocus
                       onChange={(e) => setMoQty(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") void saveMoQty(); }}
-                      className="w-28 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100" />
+                      onKeyDown={(e) => { if (e.key === "Enter") void saveMoQty(); if (e.key === "Escape") { setMoQty(String(checklistMO.qty ?? "")); setQtyEditing(false); } }}
+                      className="w-28 h-8 px-2 text-sm text-right border border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100" />
                     <span className="text-slate-400">ชิ้น</span>
-                    {Number(moQty) !== (checklistMO.qty || 0) && Number(moQty) > 0 && (
-                      <button onClick={() => void saveMoQty()} disabled={qtySaving}
-                        className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                        {qtySaving ? "กำลังบันทึก…" : "💾 บันทึกจำนวน"}
-                      </button>
-                    )}
+                    <button onClick={() => void saveMoQty()} disabled={qtySaving || !(Number(moQty) > 0) || Number(moQty) === (checklistMO.qty || 0)}
+                      className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
+                      {qtySaving ? "กำลังบันทึก…" : "💾 บันทึก"}
+                    </button>
+                    <button onClick={() => { setMoQty(String(checklistMO.qty ?? "")); setQtyEditing(false); }} disabled={qtySaving}
+                      className="h-8 px-2.5 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-white disabled:opacity-50">ยกเลิก</button>
                   </>
                 ) : (
-                  <b className="text-slate-700 tabular-nums">{fmt(checklistMO.qty || 0)} ชิ้น</b>
+                  <>
+                    <b className="text-slate-700 tabular-nums text-sm">{fmt(checklistMO.qty || 0)}</b>
+                    <span className="text-slate-400">ชิ้น</span>
+                    {canEdit && !curMo.has_sizes && (
+                      <button onClick={() => { setMoQty(String(checklistMO.qty ?? "")); setQtyEditing(true); }}
+                        title="แก้จำนวนสั่งผลิต (ระบบจะคิดวัตถุดิบตามจำนวนใหม่ให้)"
+                        className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 bg-white hover:text-blue-600 hover:border-blue-300">✏️ แก้จำนวน</button>
+                    )}
+                  </>
                 )}
                 <span className="text-slate-400">· จ่ายไปแล้ว {fmt(checklistMO.dispatched || 0)} · เหลือ <b className="text-slate-600">{fmt(checklistMO.remaining || 0)}</b></span>
                 {curMo.has_sizes && <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">ใบนี้แบ่งตามไซส์ — แก้จำนวนที่หน้าใบสั่งผลิต</span>}
-                {canEdit && !curMo.has_sizes && <span className="text-[11px] text-slate-400">แก้แล้ววัตถุดิบจะคิดใหม่ให้ (ค่าที่ติ๊กไว้ยังอยู่)</span>}
+                {qtyEditing && <span className="text-[11px] text-slate-400">บันทึกแล้ววัตถุดิบจะคิดใหม่ให้ (ค่าที่ติ๊กไว้ยังอยู่)</span>}
               </div>
               {/* รายละเอียดสั่งงาน (เหมือนหน้าแก้ใบสั่งผลิต) — พับไว้ โชว์แค่รูป+ชื่อ กดกางดูสเปกเต็ม */}
               {checklistMO.product_sku && <WorkInstructionPanel sku={checklistMO.product_sku} editable={false} defaultOpen={false} onAfterBomEdit={() => load(true)} />}
