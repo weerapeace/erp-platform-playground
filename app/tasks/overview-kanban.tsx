@@ -45,13 +45,18 @@ function CardBody({ task, cfg, dragging }: { task: CreativeTask; cfg: KanbanThem
   useT();   // subscribe ภาษา
   const pr = PRIORITY_META[task.priority as CreativePriority];
   const overdue = isOverdue(task);
+  const compact = cfg.compact === true;
   // คอลัมน์ที่จบแล้ว (เสร็จ/ยกเลิก) ไม่โชว์รูปปก — เหลือแค่ตัวอักษร+ผู้รับผิดชอบ
-  const cover = cfg.cover && !isTerminal(task.status) ? coverKey(task) : null;
+  const showImages = cfg.cover && !isTerminal(task.status);
+  const cover = showImages ? coverKey(task) : null;
   const coverUrl = cover ? r2ImageUrl(cover, 320) : null;
+  // งานเรียงพิมพ์ไม่ผูกสินค้า → ไม่มีรูปปก แต่มี "รูป Artwork ที่จะพิมพ์" → โชว์เป็นแถวรูปเล็กแทน
+  const artKeys = showImages && !coverUrl ? (task.arrange_image_keys ?? []) : [];
+  const artMax = compact ? 4 : 6;
+  const artShown = artKeys.slice(0, artMax);
   // กรอบสีตามแบรนด์ (ถ้าเปิด + แบรนด์มีสี hex)
   const bc = task.brand_color;
   const brandBorder = cfg.brandBorder && bc && /^#[0-9a-fA-F]{6}$/.test(String(bc));
-  const compact = cfg.compact === true;
   const showSku = cfg.sku !== false, showTaskNo = cfg.taskNo !== false;
   return (
     <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}
@@ -61,6 +66,21 @@ function CardBody({ task, cfg, dragging }: { task: CreativeTask; cfg: KanbanThem
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${compact ? "h-12" : "h-20"} w-full object-cover bg-slate-50 border-b border-slate-100`} />
         </HoverPreview>
+      )}
+      {/* งานเรียงพิมพ์ — แถวรูป Artwork ที่จะพิมพ์ (เล็ก หลายตัว · ชี้เมาส์ดูใหญ่) */}
+      {artShown.length > 0 && (
+        <div className="flex items-center gap-1 border-b border-slate-100 bg-slate-50/70 px-1.5 py-1.5">
+          {artShown.map((k) => (
+            <HoverPreview key={k} url={r2ImageUrl(k)} previewW={520}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={r2ImageUrl(k, 160) ?? undefined} alt="" loading="lazy" decoding="async"
+                className={`${compact ? "h-8 w-8" : "h-10 w-10"} rounded border border-slate-200 bg-white object-contain`} />
+            </HoverPreview>
+          ))}
+          {artKeys.length > artShown.length && (
+            <span className="text-[10px] font-medium text-slate-400">+{artKeys.length - artShown.length}</span>
+          )}
+        </div>
       )}
       <div className={compact ? "p-2" : "p-2.5"}>
         <div className={`flex items-center justify-between gap-2 ${compact ? "mb-1" : "mb-1.5"}`}>

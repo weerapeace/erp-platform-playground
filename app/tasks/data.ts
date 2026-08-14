@@ -35,6 +35,7 @@ export type CreativeTask = {
   cover_image_r2_key: string | null;
   reference_html?: string | null;   // โน้ต/อ้างอิง (rich text)
   reference_images?: string[];   // รูปประกอบ/บรีฟ (array ของ r2_key) — แสดงใต้รายละเอียด
+  arrange_image_keys?: string[]; // งานเรียงพิมพ์: รูป Artwork ที่จะพิมพ์ (จาก subtask config) — โชว์เป็นรูปเล็กบนการ์ด
   priority: CreativePriority;
   status: CreativeStatus;
   progress_percent: number;

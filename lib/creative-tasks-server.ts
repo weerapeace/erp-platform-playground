@@ -501,6 +501,30 @@ export async function setTaskAssignees(admin: Admin, taskId: string, userIds: (s
   if (clean.length) await admin.from("erp_creative_task_assignees").insert(clean.map((user_id) => ({ task_id: taskId, user_id })));
 }
 
+/**
+ * งานเรียงพิมพ์: รูป Artwork ที่จะพิมพ์ของแต่ละงาน → Map<task_id, r2_key[]>
+ * อ่านจาก erp_creative_subtasks (subtask_type='arrange_print') → config.arrange_print.items[].r2_key
+ * เอาไปโชว์เป็นรูปเล็กบนการ์ดกระดาน (งานพิมพ์ไม่ผูกสินค้า การ์ดเลยไม่เคยมีรูป)
+ */
+export async function arrangeImagesMap(admin: Admin, taskIds: string[], maxPerTask = 8): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  const ids = [...new Set(taskIds.filter(Boolean).map(String))];
+  if (!ids.length) return map;
+  const { data } = await admin.from("erp_creative_subtasks")
+    .select("task_id, config").eq("subtask_type", "arrange_print").in("task_id", ids);
+  for (const r of (data ?? []) as { task_id: string; config: Record<string, unknown> | null }[]) {
+    const spec = (r.config?.arrange_print ?? null) as { items?: { r2_key?: string }[] } | null;
+    if (!spec?.items?.length) continue;
+    const cur = map.get(String(r.task_id)) ?? [];
+    for (const it of spec.items) {
+      const k = String(it?.r2_key ?? "").trim();
+      if (k && !cur.includes(k) && cur.length < maxPerTask) cur.push(k);
+    }
+    if (cur.length) map.set(String(r.task_id), cur);
+  }
+  return map;
+}
+
 /** ผู้รับผิดชอบงานหลัก = ตั้งเอง (explicit) ∪ คนที่กดเริ่มงานย่อย → Map<task_id, AssigneeInfo[]> */
 export async function taskAssigneesMap(admin: Admin, taskIds: string[]): Promise<Map<string, AssigneeInfo[]>> {
   const map = new Map<string, AssigneeInfo[]>();
