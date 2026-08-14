@@ -25,7 +25,7 @@ export type ExecRow = {
   brand_oem: boolean;
   qty: number; dispatched: number; remaining: number;
   due_date: string | null; status: string | null;
-  prep_done: boolean; cut_done: boolean; bom_code: string | null;
+  prep_done: boolean; cut_done: boolean; bom_code: string | null; has_sizes: boolean;
   priority: number; priority_note: string | null; priority_by: string | null;
   list_price: number; mat_cost: number; mat_no_price: number;
   labor_cost: number; labor_src: "central" | "est" | "none"; piece_cost: number; labor_paid: number;

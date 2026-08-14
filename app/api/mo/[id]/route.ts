@@ -109,11 +109,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const effSizes = sizesProvided ? cleanSizes(body.size_breakdown) : cleanSizes((existing as { size_breakdown?: unknown }).size_breakdown);
   const newQty = effSizes ? effSizes.reduce((a, s) => a + s.qty, 0) : (body.qty != null ? Number(body.qty) : (existing as { qty: number }).qty);
 
-  const { error } = await admin.from("manufacturing_orders").update({
-    product_sku: body.product_sku, product_name: body.product_name ?? null, qty: newQty,
-    status: body.status, due_date: body.due_date || null, bom_code: newBom, bom_version: body.bom_version ?? null, note: body.note ?? null,
-    ...(sizesProvided ? { size_breakdown: effSizes } : {}),
-  }).eq("id", id);
+  // ⚠️ อัปเดตเฉพาะฟิลด์ที่ "ส่งมาจริง" — เดิมเขียนทุกฟิลด์เสมอ (product_name/due_date/note/bom_version
+  //    ที่ไม่ได้ส่งมาจะกลายเป็น null) → ใครยิง PATCH แค่ {qty} จากหน้าอื่น ข้อมูลใบนั้นหายไปเงียบ ๆ
+  //    ฟอร์มแก้ใบสั่งผลิตส่งครบทุกช่องอยู่แล้ว พฤติกรรมเดิมจึงไม่เปลี่ยน
+  const patch: Record<string, unknown> = { qty: newQty, bom_code: newBom };
+  if ("product_sku"  in body) patch.product_sku  = body.product_sku;
+  if ("product_name" in body) patch.product_name = body.product_name ?? null;
+  if ("status"       in body) patch.status       = body.status;
+  if ("due_date"     in body) patch.due_date     = body.due_date || null;
+  if ("bom_version"  in body) patch.bom_version  = body.bom_version ?? null;
+  if ("note"         in body) patch.note         = body.note ?? null;
+  if (sizesProvided)          patch.size_breakdown = effSizes;
+  const { error } = await admin.from("manufacturing_orders").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
   // กางสูตรใหม่เมื่อจำนวน/สูตร/ไซส์เปลี่ยน หรือสั่ง reexplode

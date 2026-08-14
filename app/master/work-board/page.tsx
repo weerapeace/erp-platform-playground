@@ -14,6 +14,7 @@ import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { apiSave } from "@/lib/save-toast";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
 import type { MoCost, MoCostMaterial, CostScenario, PieceJob } from "@/app/api/mo/[id]/cost/route";
@@ -63,6 +64,7 @@ type PendingMO = {
   labor?: Labor; bom_code?: string | null; central_rate?: number;
   // ธงลำดับความสำคัญที่ผู้บริหารติดไว้ (แท็บ 👔 แผนผู้บริหาร) — 0=ปกติ 1=สำคัญ 2=เร่งด่วน
   priority?: number; priority_note?: string | null;
+  has_sizes?: boolean;   // ใบนี้แบ่งจำนวนตามไซส์ → แก้จำนวนรวมตรง ๆ ไม่ได้
 };
 type MatRow = { id: string; component_sku: string | null; component_name: string | null; required_qty: number; uom: string | null; is_ready: boolean; cut_done: boolean; needs_cut: boolean };
 // แถวรายบล็อกสำหรับ "หน้าตัด" — มาจาก mo_materials โดยตรง (1 แถว = 1 บล็อกตัด) ติ๊กตัดครบรายบล็อกได้
@@ -326,6 +328,8 @@ function WorkBoardPageInner() {
   const [recvLabor, setRecvLabor] = useState("");             // ค่าแรงผลิตของใบจ่ายงานนี้
   const [saveLaborBom, setSaveLaborBom] = useState(false);    // บันทึกค่าแรงกลับเข้า BOM
   const [estLabor, setEstLabor] = useState("");               // ค่าแรงผลิตที่วางแผน — กรอกเป็นราคา/ชิ้น
+  const [moQty, setMoQty] = useState("");                     // จำนวนสั่งผลิต (แก้ได้ในป๊อปเช็กลิสต์)
+  const [qtySaving, setQtySaving] = useState(false);
   const [estSaving, setEstSaving] = useState(false);
   const [estSaveBom, setEstSaveBom] = useState(false);        // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง)
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
@@ -786,7 +790,8 @@ function WorkBoardPageInner() {
   useEffect(() => {
     setDelArmed(false); setClTab(clWO ? "recv" : "prep");
     setClPurch(null); setClIssues(null); setClHist(null); setClCost(null); setIssType(""); setIssSev("medium"); setIssQty("");
-    if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); return; }
+    if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); setMoQty(""); return; }
+    setMoQty(String(checklistMO.qty ?? ""));   // ช่องแก้จำนวนสั่งผลิตในป๊อป
     // ค่าแรงผลิตวางแผน — กรอกเป็น "ราคา/ชิ้น"
     // default: ราคากลาง/ชิ้น จาก BOM ก่อน · ไม่มีค่อยถอดจากยอดรวมที่เคยตั้งไว้ (prod_plan ÷ จำนวน)
     setEstSaveBom(false);
@@ -910,6 +915,25 @@ function WorkBoardPageInner() {
     } catch { toast.error("โหลดวัตถุดิบใหม่ไม่สำเร็จ"); }
     finally { setClLoading(false); }
   }, [checklistMO, load, toast]);
+
+  /**
+   * แก้ "จำนวนสั่งผลิต" ได้จากป๊อปเช็กลิสต์เลย (เดิมต้องไปหน้าใบสั่งผลิต)
+   * ⚠️ ต้องส่ง preserve: true — การเปลี่ยนจำนวนทำให้ระบบกางสูตรใหม่ ถ้าไม่ preserve
+   *    ค่าที่ติ๊กไว้ (เตรียม/ตัด/จำนวนที่มี/ยอดขอซื้อ) จะถูกล้างทิ้งหมด
+   */
+  const saveMoQty = useCallback(async () => {
+    if (!checklistMO) return;
+    const n = Number(moQty);
+    if (!isFinite(n) || n <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
+    if (n === (checklistMO.qty || 0)) return;
+    setQtySaving(true);
+    const r = await apiSave(toast, `/api/mo/${encodeURIComponent(checklistMO.id)}`, { body: { qty: n, preserve: true } },
+      { ok: `เปลี่ยนจำนวนเป็น ${fmt(n)} ชิ้นแล้ว — คิดวัตถุดิบตามจำนวนใหม่ให้อัตโนมัติ`, fail: "เปลี่ยนจำนวนไม่สำเร็จ" });
+    setQtySaving(false);
+    if (!r.ok) return;
+    setChecklistMO((m) => (m ? { ...m, qty: n, remaining: Math.max(0, n - (m.dispatched || 0)) } : m));
+    await reloadClMats();   // วัตถุดิบ + ต้นทุน + การ์ดบนบอร์ด (reloadClMats เรียก load(true) ให้แล้ว)
+  }, [checklistMO, moQty, reloadClMats, toast]);
 
   // ตารางวัตถุดิบกลาง — แก้ (จำนวนที่มี/ขอซื้อ/เตรียมครบ) → อัปเดตทันที + บันทึกแบบ debounce (กันยิง API ถี่ตอนพิมพ์)
   const onMatSummaryChange = useCallback((rows: MoMatSummary[]) => {
@@ -1141,7 +1165,7 @@ function WorkBoardPageInner() {
             qty: row.qty, dispatched: row.dispatched, remaining: row.remaining,
             due_date: row.due_date, status: row.status ?? "",
             image_url: row.image_url, brand: row.brand, brand_color: row.brand_color, color: row.color,
-            prep_done: row.prep_done, cut_done: row.cut_done, bom_code: row.bom_code,
+            prep_done: row.prep_done, cut_done: row.cut_done, bom_code: row.bom_code, has_sizes: row.has_sizes,
             has_bom: row.has_bom, prep_total: row.prep_total, prep_ready: row.prep_ready,
             cut_total: row.cut_total, cut_ready: row.cut_ready, ready: row.ready,
             priority: row.priority, priority_note: row.priority_note,
@@ -1531,6 +1555,30 @@ function WorkBoardPageInner() {
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium text-slate-800 truncate">{checklistMO.product_name ?? checklistMO.product_sku}</p>
                 <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${ready ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ready ? "พร้อมจ่าย ✓" : "ยังไม่พร้อม"}</span>
+              </div>
+              {/* จำนวนสั่งผลิต — แก้ได้ตรงนี้เลย (เปลี่ยนแล้วระบบคิดวัตถุดิบตามจำนวนใหม่ให้) */}
+              <div className="flex items-center gap-2 flex-wrap text-[12px] rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+                <span className="text-slate-500 whitespace-nowrap">จำนวนสั่งผลิต</span>
+                {canEdit && !curMo.has_sizes ? (
+                  <>
+                    <input type="number" min={0} step="any" value={moQty} disabled={qtySaving}
+                      onChange={(e) => setMoQty(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") void saveMoQty(); }}
+                      className="w-28 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100" />
+                    <span className="text-slate-400">ชิ้น</span>
+                    {Number(moQty) !== (checklistMO.qty || 0) && Number(moQty) > 0 && (
+                      <button onClick={() => void saveMoQty()} disabled={qtySaving}
+                        className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                        {qtySaving ? "กำลังบันทึก…" : "💾 บันทึกจำนวน"}
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <b className="text-slate-700 tabular-nums">{fmt(checklistMO.qty || 0)} ชิ้น</b>
+                )}
+                <span className="text-slate-400">· จ่ายไปแล้ว {fmt(checklistMO.dispatched || 0)} · เหลือ <b className="text-slate-600">{fmt(checklistMO.remaining || 0)}</b></span>
+                {curMo.has_sizes && <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">ใบนี้แบ่งตามไซส์ — แก้จำนวนที่หน้าใบสั่งผลิต</span>}
+                {canEdit && !curMo.has_sizes && <span className="text-[11px] text-slate-400">แก้แล้ววัตถุดิบจะคิดใหม่ให้ (ค่าที่ติ๊กไว้ยังอยู่)</span>}
               </div>
               {/* รายละเอียดสั่งงาน (เหมือนหน้าแก้ใบสั่งผลิต) — พับไว้ โชว์แค่รูป+ชื่อ กดกางดูสเปกเต็ม */}
               {checklistMO.product_sku && <WorkInstructionPanel sku={checklistMO.product_sku} editable={false} defaultOpen={false} onAfterBomEdit={() => load(true)} />}
@@ -2184,7 +2232,8 @@ function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, craft
       {/* ป๊อปใส่ราคาต้นทุน (ของกลาง) — บันทึกกลับ skus_v2.standard_price + ร้านที่ซื้อ (supplier_items) */}
       {priceFor && (
         <SkuPriceModal open skuCode={priceFor.sku} skuName={priceFor.name} uom={priceFor.uom}
-          onClose={() => setPriceFor(null)}
+          // ปิดป๊อป = โหลดต้นทุนใหม่เสมอ (เผื่อไปแก้ราคา/ร้านข้างใน แล้วปิดโดยไม่ได้กดบันทึกที่ช่องหลัก)
+          onClose={() => { setPriceFor(null); onReloadCost?.(); }}
           onSaved={() => { onReloadCost?.(); }} />
       )}
     </div>

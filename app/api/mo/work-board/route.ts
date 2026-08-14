@@ -77,7 +77,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const [{ data: depts }, { data: wos }, { data: mos }] = await Promise.all([
     admin.from("departments").select("id, name, status, note, show_note, display_order, show_on_board").order("display_order", { ascending: true, nullsFirst: false }).order("name", { ascending: true }),
     admin.from("mo_work_orders").select("*").eq("is_active", true).order("created_at", { ascending: true }).limit(2000),
-    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note").eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000),
+    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, size_breakdown").eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000),
   ]);
 
   const departments = (depts ?? []).filter((d: Record<string, unknown>) => !d.status || d.status === "active")
@@ -161,6 +161,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       prep_done: !!m.prep_done, cut_done: !!m.cut_done, bom_code: (m.bom_code as string) ?? null,
       // ธง "งานเร่ง/สำคัญ" ที่ผู้บริหารติดไว้ในแท็บ 👔 แผนผู้บริหาร (0=ปกติ 1=สำคัญ 2=เร่งด่วน)
       priority: Number(m.priority) || 0, priority_note: (m.priority_note as string) ?? null,
+      // ใบที่แบ่งจำนวนตามไซส์ → จำนวนรวมมาจากผลบวกไซส์ แก้จำนวนตรง ๆ ไม่ได้ (ต้องแก้ที่หน้าใบสั่งผลิต)
+      has_sizes: Array.isArray(m.size_breakdown) && (m.size_breakdown as unknown[]).length > 0,
       ...inf, labor: laborOfMo(String(m.mo_no)), central_rate: centralRateOf(String(m.mo_no)) };
   }).filter((m) => m.remaining > 0.0001);   // ซ่อน MO ที่จ่ายครบแล้ว
 

@@ -58,7 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const [{ data: mosRaw }, { data: wosRaw }] = await Promise.all([
     admin.from("manufacturing_orders")
-      .select("id, mo_no, product_sku, product_name, qty, status, due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, priority_at, priority_by, created_at")
+      .select("id, mo_no, product_sku, product_name, qty, status, due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, priority_at, priority_by, created_at, size_breakdown")
       .eq("is_active", true).not("status", "in", "(cancelled,done)").limit(2000),
     admin.from("mo_work_orders").select("mo_no, qty, status, labor_cost").eq("is_active", true).limit(5000),
   ]);
@@ -173,6 +173,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       created_at: (m.created_at as string) ?? null,
       // ส่งไปให้หน้าเปิด "ป๊อปเช็กลิสต์" ของใบนั้นได้ทันที (แม้ใบที่จ่ายงานครบแล้ว ซึ่งไม่อยู่ในรายการรอจ่าย)
       prep_done: !!m.prep_done, cut_done: !!m.cut_done, bom_code: (m.bom_code as string) ?? null,
+      has_sizes: Array.isArray(m.size_breakdown) && (m.size_breakdown as unknown[]).length > 0,
       priority: Number(m.priority) || 0, priority_note: (m.priority_note as string) ?? null,
       priority_at: (m.priority_at as string) ?? null, priority_by: (m.priority_by as string) ?? null,
       // เงิน (ต่อชิ้น)

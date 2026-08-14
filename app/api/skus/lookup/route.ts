@@ -1,11 +1,16 @@
 /**
  * POST /api/skus/lookup   body: { codes: string[] }
- * ของกลาง — จับคู่ "รหัสสินค้าหลายตัวพร้อมกัน" กับ SKU จริง (ใช้ตอนนำเข้ารายการจากตาราง/Excel)
+ * ของกลาง — จับคู่ "รหัสสินค้าหลายตัวพร้อมกัน" กับ SKU จริง (นำเข้ารายการจากตาราง/Excel, ป๊อปใส่ราคาต้นทุน ฯลฯ)
  *
  * ทำไมเป็น POST: รหัสสินค้าจริง 43% มีตัว "#" และบางตัวมีช่องว่าง —
  * ส่งผ่าน query string จะโดน apiFetch แปลง %23 → %20 แล้วรหัสเพี้ยน (บทเรียนจากระบบสแกน)
  *
- * จับคู่แบบไม่สนตัวพิมพ์ใหญ่เล็กและช่องว่างหัวท้าย · หา barcode ก่อน แล้วค่อย code
+ * 🐛🐛 บั๊กที่แก้ (2026-08-12): เดิม "ดึง skus_v2 มาทั้งตาราง" แล้วจับคู่ใน JS (`.limit(20000)`)
+ *     แต่ PostgREST ตัดผลลัพธ์ที่ 1,000 แถวเงียบ ๆ (limit ที่ใหญ่กว่าถูกลดลงมา) — ตอนนี้ SKU มี 12,829 ตัว
+ *     → รหัสที่อยู่หลังแถวที่ 1,000 หา "ไม่เจอ" ทั้งที่มีอยู่จริง (เจอกับ MN15/15MM ซึ่งอยู่แถวที่ ~4,270)
+ *     วิธีใหม่: ยิงถามเฉพาะรหัสที่ต้องการด้วย .in() (ผลลัพธ์ไม่มีทางเกินจำนวนรหัสที่ถาม) → ไม่โดนตัด + เร็วกว่าเดิม
+ *
+ * ลำดับการจับคู่: code เป๊ะ → barcode เป๊ะ → ไม่สนตัวพิมพ์ใหญ่เล็ก/ช่องว่างหัวท้าย (เฉพาะตัวที่ยังไม่เจอ)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -22,7 +27,16 @@ export type SkuLookupHit = {
   price: number | null;
 };
 
+type Row = Record<string, unknown>;
+const SELECT = "id, code, barcode, name_th, name_en, list_price, uom_id";
 const norm = (s: unknown) => String(s ?? "").trim().toLowerCase();
+const chunk = <T,>(arr: T[], n: number): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+};
+/** ทำ pattern ilike ให้ตรงตัวจริง — % และ _ เป็นตัวแทนอักขระใน ilike ต้อง escape ก่อน */
+const likeSafe = (s: string) => s.replace(/([%_\\])/g, "\\$1");
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
@@ -37,24 +51,46 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (codes.length === 0) return NextResponse.json({ data: {}, error: null });
 
   const admin = supabaseAdmin();
-  // ดึงมาทั้งชุดแล้วจับคู่ใน JS — เลี่ยง ilike ทีละตัว (2,000 รหัส = 2,000 query)
-  const [{ data: skus }, { data: uoms }] = await Promise.all([
-    admin.from("skus_v2").select("id, code, barcode, name_th, name_en, list_price, uom_id").limit(20000),
-    admin.from("uoms").select("id, name").limit(2000),
-  ]);
 
-  const uomName = new Map<string, string>();
-  for (const u of ((uoms ?? []) as Record<string, unknown>[])) uomName.set(String(u.id), String(u.name ?? ""));
+  // ── 1) ถามเฉพาะรหัสที่ต้องการ (code + barcode) เป็นชุด ๆ ──
+  const byKey = new Map<string, Row>();          // norm(รหัส) → แถว
+  const addRow = (r: Row, keyField: "code" | "barcode") => {
+    const k = norm(r[keyField]);
+    if (!k) return;
+    // code ชนะ barcode ถ้าชนกัน
+    if (keyField === "code" || !byKey.has(k)) byKey.set(k, r);
+  };
 
-  // index: รหัส/บาร์โค้ด (ตัวเล็ก) → แถว · code ชนะ barcode ถ้าซ้ำ
-  const byKey = new Map<string, Record<string, unknown>>();
-  for (const s of ((skus ?? []) as Record<string, unknown>[])) {
-    const bc = norm(s.barcode);
-    if (bc && !byKey.has(bc)) byKey.set(bc, s);
+  const groups = chunk(codes, 200);
+  const results = await Promise.all(groups.flatMap((g) => [
+    admin.from("skus_v2").select(SELECT).in("code", g),
+    admin.from("skus_v2").select(SELECT).in("barcode", g),
+  ]));
+  // เติม barcode ก่อน แล้วค่อย code (code ทับได้)
+  results.forEach((res, i) => { if (i % 2 === 1) for (const r of ((res.data ?? []) as Row[])) addRow(r, "barcode"); });
+  results.forEach((res, i) => { if (i % 2 === 0) for (const r of ((res.data ?? []) as Row[])) addRow(r, "code"); });
+
+  // ── 2) ตัวที่ยังไม่เจอ (พิมพ์เล็ก-ใหญ่ไม่ตรง / มีช่องว่างเกินใน DB) → ค้นแบบไม่สนตัวพิมพ์ ──
+  //     ปกติเหลือไม่กี่ตัว จึงยิงทีละตัวได้ (จำกัดไว้ 200 ตัว กันหลุดเป็นพันคำสั่ง)
+  const missing = codes.filter((c) => !byKey.has(norm(c))).slice(0, 200);
+  if (missing.length > 0) {
+    for (const g of chunk(missing, 10)) {   // ทีละ 10 คำสั่งพร้อมกัน กันยิงถล่ม DB
+      const found = await Promise.all(g.map((c) =>
+        admin.from("skus_v2").select(SELECT).ilike("code", likeSafe(c)).limit(1)));
+      found.forEach((res, i) => {
+        const r = ((res.data ?? []) as Row[])[0];
+        // ยืนยันอีกชั้นด้วยการเทียบแบบ normalize (กัน ilike จับผิดตัว)
+        if (r && norm(r.code) === norm(g[i])) byKey.set(norm(g[i]), r);
+      });
+    }
   }
-  for (const s of ((skus ?? []) as Record<string, unknown>[])) {
-    const cd = norm(s.code);
-    if (cd) byKey.set(cd, s);
+
+  // ── 3) ชื่อหน่วยนับ (ถามเฉพาะที่ใช้จริง) ──
+  const uomIds = [...new Set([...byKey.values()].map((r) => (r.uom_id ? String(r.uom_id) : "")).filter(Boolean))];
+  const uomName = new Map<string, string>();
+  if (uomIds.length > 0) {
+    const uomRes = await Promise.all(chunk(uomIds, 200).map((g) => admin.from("uoms").select("id, name").in("id", g)));
+    for (const res of uomRes) for (const u of ((res.data ?? []) as Row[])) uomName.set(String(u.id), String(u.name ?? ""));
   }
 
   const out: Record<string, SkuLookupHit | null> = {};
