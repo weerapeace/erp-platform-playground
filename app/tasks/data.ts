@@ -656,7 +656,9 @@ export type SubtaskStepConfig = {
 };
 
 // งานเรียงพิมพ์ (Arrange Print) — เก็บใน subtask.config.arrange_print
-export type ArrangeOrderLine = { label: string; w: number | null; h: number | null; unit: string; qty: number };   // 1 ขนาด + จำนวน
+// 1 ขนาด + จำนวน · qty_unit = นับเป็น "ชิ้น" (default, เข้ากันได้กับของเดิม) หรือ "แผ่น" (วางเต็มแผ่น ไม่ต้องนับชิ้น)
+export type ArrangeQtyUnit = "pcs" | "sheet";
+export type ArrangeOrderLine = { label: string; w: number | null; h: number | null; unit: string; qty: number; qty_unit?: ArrangeQtyUnit };
 export type ArrangePrintItem = { asset_id: string; r2_key: string; title: string; orders: ArrangeOrderLine[] };     // 1 รูป + หลายขนาด
 // รูปฐาน (จากอัลบั้ม "งานพิมพ์ DFT UV (Printed)") + รายละเอียด "เพิ่ม/ลบ" อะไรจากรูปฐานนี้ (ต่อรูป)
 export type ArrangeBaseItem = { asset_id: string; r2_key: string; title: string; add: string; remove: string };

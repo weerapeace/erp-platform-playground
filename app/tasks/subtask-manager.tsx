@@ -28,7 +28,7 @@ import {
   listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent, getPlatformSettings, savePlatformSettings,
   type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem, type PlatformSettings, type ArrangePrintType,
 } from "./data";
-import { ArrangePrintEditor, itemsFromSpec, specFromItems, basesFromSpec, specBasesFrom, arrangeTotalQty, arrangeSizeKey, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
+import { ArrangePrintEditor, itemsFromSpec, specFromItems, basesFromSpec, specBasesFrom, arrangeTotalText, arrangeSizeKey, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
 import type { AssetSize } from "@/app/api/assets/shared";
 
 // ตัวแก้สินค้ากลาง (ของกลาง) — เปิดแก้ Parent SKU จากป๊อปอัปส่งงาน · dynamic กัน import วน + ลด bundle
@@ -79,7 +79,7 @@ function ArrangePrintSubtaskPanel({ sub, taskId, reload, pushToast }: { sub: Cre
   return (
     <div className="rounded-lg border border-sky-100 bg-sky-50/40 p-2.5 space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-slate-700">🖨️ {t("รายการเรียงพิมพ์", "Arrange print")} <span className="text-slate-400">· {items.length} {t("รูป", "img")} · {arrangeTotalQty(items).toLocaleString()} {t("ชิ้น", "pcs")}{bases.length > 0 ? ` · ${bases.length} ${t("ฐาน", "base")}` : ""}</span>{printType && <span className="ml-1 inline-flex items-center rounded-full bg-violet-100 text-violet-700 px-2 py-0.5 text-[10px] font-semibold">🖨 {printType.code}{printType.w != null && printType.h != null ? ` ${printType.w}×${printType.h} ${printType.unit}` : ""}</span>}</p>
+        <p className="text-xs font-medium text-slate-700">🖨️ {t("รายการเรียงพิมพ์", "Arrange print")} <span className="text-slate-400">· {items.length} {t("รูป", "img")} · {arrangeTotalText(items, t)}{bases.length > 0 ? ` · ${bases.length} ${t("ฐาน", "base")}` : ""}</span>{printType && <span className="ml-1 inline-flex items-center rounded-full bg-violet-100 text-violet-700 px-2 py-0.5 text-[10px] font-semibold">🖨 {printType.code}{printType.w != null && printType.h != null ? ` ${printType.w}×${printType.h} ${printType.unit}` : ""}</span>}</p>
         <button onClick={save} disabled={saving || !dirty} className="h-7 px-3 text-[11px] font-medium text-white bg-sky-600 rounded-md hover:bg-sky-700 disabled:opacity-40 shrink-0">{saving ? "⏳" : "💾"} {t("บันทึก", "Save")}</button>
       </div>
       <ArrangePrintEditor items={items} onChange={(it) => { setItems(it); setDirty(true); }} bases={bases} onBasesChange={(b) => { setBases(b); setDirty(true); }} printType={printType} onPrintTypeChange={(pt) => { setPrintType(pt); setDirty(true); }} pushToast={pushToast} contextLabel={sub.title} />

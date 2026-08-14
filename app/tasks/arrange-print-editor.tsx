@@ -13,13 +13,13 @@ import type { AssetRow, AssetSize } from "@/app/api/assets/shared";
 import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
-import type { ArrangePrintSpec, ArrangeBaseItem, ArrangePrintType, PrintTypeRow } from "./data";
+import type { ArrangePrintSpec, ArrangeBaseItem, ArrangePrintType, PrintTypeRow, ArrangeQtyUnit } from "./data";
 import { listPrintTypes, createPrintType, updatePrintType, deletePrintType } from "./data";
 
 // ป๊อปอัปรายละเอียด/แก้ไฟล์คลังกลาง (กดรูปในการ์ด) — dynamic กัน bundle asset-library ลากเข้า tasks
 const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
 
-export type ArrangeOrder = { label: string; w: number | null; h: number | null; unit: string; qty: number };
+export type ArrangeOrder = { label: string; w: number | null; h: number | null; unit: string; qty: number; qty_unit?: ArrangeQtyUnit };
 export type ArrangeItem = { asset_id: string; r2_key: string; title: string; url: string; available: AssetSize[]; orders: ArrangeOrder[]; master_path?: string | null; master_url?: string | null };
 // รูปฐาน (จากอัลบั้ม DFT UV Printed) + รายละเอียด เพิ่ม/ลบ ต่อรูป
 export type ArrangeBase = { asset_id: string; r2_key: string; title: string; url: string; add: string; remove: string };
@@ -61,6 +61,23 @@ export function itemsFromSpec(spec: ArrangePrintSpec | undefined, sizesByAsset?:
 export function specFromItems(items: ArrangeItem[]): ArrangePrintSpec {
   return { items: items.map((it) => ({ asset_id: it.asset_id, r2_key: it.r2_key, title: it.title, orders: it.orders })) };
 }
+/** นับ "ชิ้น" กับ "แผ่น" แยกกัน (บรรทัดที่ตั้งเป็นแผ่น = วางเต็มแผ่น ไม่นับเป็นชิ้น) */
+export const arrangeTotals = (items: ArrangeItem[]) => items.reduce((acc, it) => {
+  for (const o of it.orders) {
+    if (o.qty_unit === "sheet") acc.sheets += o.qty || 0;
+    else acc.pcs += o.qty || 0;
+  }
+  return acc;
+}, { pcs: 0, sheets: 0 });
+/** ข้อความสรุปสั้น ๆ เช่น "12 ชิ้น · 3 แผ่น" (ไม่มีอย่างใดอย่างหนึ่ง = ไม่โชว์) */
+export const arrangeTotalText = (items: ArrangeItem[], t: (th: string, en: string) => string) => {
+  const { pcs, sheets } = arrangeTotals(items);
+  const parts: string[] = [];
+  if (pcs > 0 || sheets === 0) parts.push(`${pcs.toLocaleString()} ${t("ชิ้น", "pcs")}`);
+  if (sheets > 0) parts.push(`${sheets.toLocaleString()} ${t("แผ่น", "sheets")}`);
+  return parts.join(" · ");
+};
+/** (เดิม) จำนวนรวมแบบตัวเลขเดียว — ยังใช้ได้ แต่ควรใช้ arrangeTotalText แทนเพื่อแยกชิ้น/แผ่น */
 export const arrangeTotalQty = (items: ArrangeItem[]) => items.reduce((n, it) => n + it.orders.reduce((m, o) => m + (o.qty || 0), 0), 0);
 
 export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, collapseSizes = true, bases, onBasesChange, printType, onPrintTypeChange }: {
@@ -98,6 +115,9 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
     return { ...it, orders: has ? it.orders.filter((o) => arrangeSizeKey(o) !== arrangeSizeKey(s)) : [...it.orders, { label: s.label, w: s.w, h: s.h, unit: s.unit, qty: 1 }] };
   }));
   const setQty = (idx: number, orderIdx: number, qty: number) => onChange(items.map((it, i) => i === idx ? { ...it, orders: it.orders.map((o, j) => j === orderIdx ? { ...o, qty } : o) } : it));
+  // สลับหน่วยจำนวน ชิ้น ↔ แผ่น (แผ่น = วางเต็มแผ่น ไม่ต้องนับชิ้น)
+  const setQtyUnit = (idx: number, orderIdx: number, qty_unit: ArrangeQtyUnit) =>
+    onChange(items.map((it, i) => i === idx ? { ...it, orders: it.orders.map((o, j) => j === orderIdx ? { ...o, qty_unit } : o) } : it));
   const addSize = async (idx: number, s: AssetSize) => {
     const it = items[idx]; if (!it) return;
     const nextAvail = [...it.available, s];
@@ -138,14 +158,14 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
         <div className="border border-dashed border-slate-200 rounded-lg p-6 text-center text-sm text-slate-400">{t("ยังไม่ได้เลือกรูป — กดปุ่มด้านบนเพื่อเลือกจากคลัง Artwork", "No images yet — pick from the Artwork library")}</div>
       ) : (
         <div className="space-y-2">
-          {items.map((it, i) => <ArrangeImageCard key={it.asset_id} item={it} collapseSizes={collapseSizes} pushToast={pushToast} onOpenDetail={() => setDetailAssetId(it.asset_id)} onToggleSize={(s) => toggleSize(i, s)} onSetQty={(oi, q) => setQty(i, oi, q)} onAddSize={(s) => addSize(i, s)} onRemove={() => removeItem(i)} />)}
+          {items.map((it, i) => <ArrangeImageCard key={it.asset_id} item={it} collapseSizes={collapseSizes} pushToast={pushToast} onOpenDetail={() => setDetailAssetId(it.asset_id)} onToggleSize={(s) => toggleSize(i, s)} onSetQty={(oi, q) => setQty(i, oi, q)} onSetQtyUnit={(oi, u) => setQtyUnit(i, oi, u)} onAddSize={(s) => addSize(i, s)} onRemove={() => removeItem(i)} />)}
         </div>
       )}
       {items.length > 0 && (
         <div className="mt-3 bg-slate-50 rounded-lg px-3 py-2 text-xs text-slate-600 flex gap-4 flex-wrap">
           <span>{t("รูป", "Images")} <b className="text-slate-800">{items.length}</b></span>
           <span>{t("รายการขนาด", "Size lines")} <b className="text-slate-800">{items.reduce((n, it) => n + it.orders.length, 0)}</b></span>
-          <span>{t("รวมจำนวน", "Total qty")} <b className="text-slate-800">{arrangeTotalQty(items).toLocaleString()}</b> {t("ชิ้น", "pcs")}</span>
+          <span>{t("รวมจำนวน", "Total qty")} <b className="text-slate-800">{arrangeTotalText(items, t)}</b></span>
         </div>
       )}
       {pickerOpen && <AssetPicker open onClose={() => setPickerOpen(false)} multiple typeFilter="image" defaultSource="artwork" title={t("เลือกรูป Artwork สำหรับเรียงพิมพ์", "Pick Artwork images")} contextLabel={contextLabel} onSelect={addAssets} />}
@@ -156,10 +176,11 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
 }
 
 // การ์ดรูป 1 รูป — ติ๊กขนาด (จากคลัง) + ใส่จำนวน + เพิ่มขนาดใหม่ (save กลับ asset)
-function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, onOpenDetail, collapseSizes = true, pushToast }: {
+function ArrangeImageCard({ item, onToggleSize, onSetQty, onSetQtyUnit, onAddSize, onRemove, onOpenDetail, collapseSizes = true, pushToast }: {
   item: ArrangeItem;
   onToggleSize: (s: AssetSize) => void;
   onSetQty: (orderIdx: number, qty: number) => void;
+  onSetQtyUnit: (orderIdx: number, unit: ArrangeQtyUnit) => void;
   onAddSize: (s: AssetSize) => void;
   onRemove: () => void;
   onOpenDetail: () => void;
@@ -205,13 +226,24 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onAddSize, onRemove, o
           <div className="space-y-1.5">
             {item.available.length === 0 && !adding && <p className="text-[11px] text-slate-400 italic">{t("รูปนี้ยังไม่มีขนาดในคลัง — กดเพิ่มขนาด", "No sizes in library yet — add one")}</p>}
             {/* ขนาดที่เลือกแล้ว — โชว์บนสุด + ช่องจำนวน */}
-            {selected.map((s) => { const oi = orderIdxOf(s); const dim = chipDim(s); return (
+            {selected.map((s) => { const oi = orderIdxOf(s); const dim = chipDim(s); const unit = item.orders[oi].qty_unit ?? "pcs"; return (
               <div key={arrangeSizeKey(s)} className="flex items-center gap-2 flex-wrap">
                 <button type="button" onClick={() => onToggleSize(s)} className="inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 border bg-violet-600 text-white border-violet-600">
                   <span>✓</span>{mainText(s)}{dim && <span className="text-violet-200">· {dim}</span>}
                 </button>
-                <span className="text-[11px] text-slate-400">{t("จำนวน", "Qty")}</span>
+                <span className="text-[11px] text-slate-400">{unit === "sheet" ? t("จำนวนแผ่น", "Sheets") : t("จำนวน", "Qty")}</span>
                 <input type="number" min={0} value={item.orders[oi].qty} onChange={(e) => onSetQty(oi, Math.max(0, Number(e.target.value) || 0))} className="w-20 h-8 border border-slate-200 rounded-md px-2 text-sm text-center" />
+                {/* สลับหน่วย: ชิ้น (นับเป็นชิ้น) ↔ แผ่น (วางเต็มแผ่น ไม่ต้องนับชิ้น) */}
+                <div className="inline-flex rounded-md border border-slate-200 overflow-hidden">
+                  {(["pcs", "sheet"] as const).map((u) => (
+                    <button key={u} type="button" onClick={() => onSetQtyUnit(oi, u)}
+                      title={u === "sheet" ? t("วางเต็มแผ่น — บอกแค่ว่ากี่แผ่น", "Fill the whole sheet — just say how many sheets") : t("นับเป็นชิ้น", "Count in pieces")}
+                      className={`h-8 px-2.5 text-[11px] font-medium ${unit === u ? "bg-violet-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>
+                      {u === "sheet" ? t("แผ่น", "sheet") : t("ชิ้น", "pcs")}
+                    </button>
+                  ))}
+                </div>
+                {unit === "sheet" && <span className="text-[11px] text-violet-600">🧩 {t("วางเต็มแผ่น", "fill the sheet")}</span>}
               </div>
             ); })}
             {/* ขนาดที่ยังไม่เลือก — Wizard (collapseSizes=false) โชว์หมด · หน้างานพับซ่อน กดปุ่มกาง */}
