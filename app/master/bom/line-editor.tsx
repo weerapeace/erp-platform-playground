@@ -344,7 +344,9 @@ export function BomLineEditor({
 }) {
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [uoms, setUoms] = useState<{ id: string; name: string }[]>([]);
-  const [detail, setDetail] = useState<EditorLine | null>(null);
+  // ป๊อป "รายละเอียดวัตถุดิบ" — เก็บเป็น key แล้วหาแถวจริงจาก lines ทุกครั้ง
+  // (ถ้าเก็บทั้งแถวไว้ ค่าที่แก้ในป๊อปจะไม่อัปเดตตาม เพราะเป็นสำเนาแช่แข็ง)
+  const [detailKey, setDetailKey] = useState<string | null>(null);
   const [view, setView] = useState<"basic" | "pro">("basic");   // มุมมองตาราง: BASIC (ย่อ, ค่าเริ่มต้น) / PRO (เต็ม)
   const [editFace, setEditFace] = useState<Set<string>>(new Set());
   const [editUom, setEditUom] = useState<Set<string>>(new Set());
@@ -405,6 +407,12 @@ export function BomLineEditor({
     setUndoStack((u) => [...u, lines].slice(-50));
     setRedoStack([]);
     onChange(rows.map(recalc));
+  };
+  // แก้ทีละบรรทัด (ใช้จากป๊อปรายละเอียด) — ผ่านทางเดียวกับตาราง: undo ได้ + คิดปริมาณใหม่ให้
+  const updateLine = (key: string, patch: Partial<EditorLine>) => {
+    setUndoStack((u) => [...u, lines].slice(-50));
+    setRedoStack([]);
+    onChange(lines.map((x) => (x.key === key ? recalc({ ...x, ...patch }) : x)));
   };
 
   // เลือกวัตถุดิบ → autofill ชนิด/หน้ากว้าง/เผื่อเสีย
@@ -486,7 +494,7 @@ export function BomLineEditor({
         <div className="flex items-center gap-1">
           <div className="flex-1 min-w-0"><ComponentPicker sku={l.component_sku} name={l.component_name} imageKey={l.image_key} onPick={(c) => u(pickComponent(l, c))} allowedGroupCodes={l.slot_code ? SLOT_GROUP_CODES[l.slot_code] : undefined} /></div>
           {l.component_sku && (
-            <button type="button" title="รายละเอียดวัตถุดิบ" onClick={() => setDetail(l)}
+            <button type="button" title="รายละเอียด/แก้ไขวัตถุดิบบรรทัดนี้" onClick={() => setDetailKey(l.key)}
               className="shrink-0 h-7 w-6 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded">ℹ</button>
           )}
           {allowFreeText && !l.component_sku && (
@@ -713,23 +721,105 @@ export function BomLineEditor({
         </div>
       )}
 
-      <ERPModal open={detail !== null} onClose={() => setDetail(null)} size="sm" title="รายละเอียดวัตถุดิบ">
-        {detail && (
-          <div className="flex gap-3 text-sm">
-            <Thumb k={detail.image_key} size={96} />
-            <div className="flex-1 space-y-1 min-w-0 select-text">
-              <div><span className="text-slate-400">รหัส:</span> <code className="text-slate-700">{detail.component_sku || "—"}</code></div>
-              <div><span className="text-slate-400">ชื่อ:</span> {detail.component_name || "—"}</div>
-              <div><span className="text-slate-400">ชนิด:</span> {detail.material_type || "— ยังไม่ระบุ —"}</div>
-              <div><span className="text-slate-400">หน้ากว้างผ้า:</span> {detail.face_width_cm || "—"} ซม.</div>
-              <div><span className="text-slate-400">บล็อกตัด:</span> {detail.cut_block_code || "—"}</div>
-              <div><span className="text-slate-400">กว้าง×ยาว×ชิ้น:</span> {detail.cut_width}×{detail.cut_length}×{detail.pieces}</div>
-              <div><span className="text-slate-400">% เผื่อเสีย:</span> {detail.waste_percent}</div>
-              <div><span className="text-slate-400">ปริมาณ:</span> <b className="text-emerald-700">{r2(detail.qty)}</b> {detail.uom}</div>
-            </div>
-          </div>
-        )}
-      </ERPModal>
+      {/* รายละเอียดวัตถุดิบของบรรทัดนี้ — แก้ได้ในตัว (ค่าที่แก้ = ค่าเดียวกับในตาราง แก้ที่ไหนก็ได้ ยัง undo ได้)
+          ปริมาณ: กลุ่มที่มีสูตรคำนวณ = ระบบคิดให้อัตโนมัติ · กลุ่มที่ไม่มีสูตร = พิมพ์เอง */}
+      {(() => {
+        const d = detailKey ? lines.find((x) => x.key === detailKey) ?? null : null;
+        const u = (patch: Partial<EditorLine>) => detailKey && updateLine(detailKey, patch);
+        const numCls = "w-24 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400";
+        const rowCls = "flex items-center gap-2 min-h-[2rem]";
+        const labCls = "text-slate-400 w-28 shrink-0";
+        return (
+          <ERPModal open={d !== null} onClose={() => setDetailKey(null)} size="md" title="รายละเอียดวัตถุดิบ"
+            footer={<button onClick={() => setDetailKey(null)} className="h-9 px-4 text-sm font-medium bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จแล้ว</button>}>
+            {d && (
+              <div className="flex gap-3 text-sm">
+                <Thumb k={d.image_key} size={96} />
+                <div className="flex-1 space-y-1.5 min-w-0">
+                  <div className={rowCls}><span className={labCls}>รหัส:</span> <code className="text-slate-700 select-text">{d.component_sku || "—"}</code></div>
+                  <div className={rowCls}><span className={labCls}>ชื่อ:</span> <span className="select-text truncate" title={d.component_name}>{d.component_name || "—"}</span></div>
+
+                  <div className={rowCls}>
+                    <span className={labCls}>ชนิด:</span>
+                    {d.material_type
+                      ? <span className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700">{d.material_type}</span>
+                      : readonly ? <span className="text-slate-300">— ยังไม่ระบุ —</span> : (
+                        <select value="" onChange={(e) => e.target.value && tagGroup(d, u, e.target.value)}
+                          className="h-8 px-2 text-sm border border-amber-300 text-amber-700 rounded-lg bg-white" title="เลือกชนิดวัตถุดิบให้ SKU (ใช้ซ้ำครั้งหน้า)">
+                          <option value="">＋ เลือกชนิด</option>
+                          {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                        </select>
+                      )}
+                  </div>
+
+                  {usesFace(d) && (
+                    <div className={rowCls}>
+                      <span className={labCls}>หน้ากว้างผ้า:</span>
+                      <input type="number" min={0} step="any" value={d.face_width_cm} disabled={readonly}
+                        onChange={(e) => u({ face_width_cm: Number(e.target.value) })} className={numCls} />
+                      <span className="text-slate-400 text-xs">ซม.</span>
+                      {!readonly && (
+                        <button type="button" title="บันทึกหน้ากว้างนี้กลับไปที่ SKU (ครั้งหน้าใช้ค่านี้เลย)"
+                          onClick={() => saveFaceToSku(d)}
+                          className="h-7 px-2 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50">💾 บันทึกกลับ SKU</button>
+                      )}
+                    </div>
+                  )}
+
+                  <div className={rowCls}>
+                    <span className={labCls}>บล็อกตัด:</span>
+                    {readonly ? <span className="text-slate-600">{d.cut_block_code || "—"}</span> : (
+                      <div className="flex-1 min-w-0 max-w-[220px]">
+                        <CutBlockPicker code={d.cut_block_code} width={d.cut_width} length={d.cut_length}
+                          onPick={(b) => u({
+                            cut_block_id: b.source === "odoo" && /^\d+$/.test(b.id) ? Number(b.id) : null,
+                            cut_block_code: b.code, cut_width: b.width ?? d.cut_width, cut_length: b.length ?? d.cut_length,
+                          })} />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className={rowCls}>
+                    <span className={labCls}>กว้าง×ยาว×ชิ้น:</span>
+                    <input type="number" min={0} step="any" value={d.cut_width} disabled={readonly || !!d.cut_block_code}
+                      title={d.cut_block_code ? "ดึงจากบล็อกตัด — ถ้าจะแก้เอง ให้เอาบล็อกออกก่อน" : "กว้าง (ซม.)"}
+                      onChange={(e) => u({ cut_width: Number(e.target.value) })} className={numCls.replace("w-24", "w-20")} />
+                    <span className="text-slate-300">×</span>
+                    <input type="number" min={0} step="any" value={d.cut_length} disabled={readonly || !!d.cut_block_code}
+                      title={d.cut_block_code ? "ดึงจากบล็อกตัด — ถ้าจะแก้เอง ให้เอาบล็อกออกก่อน" : "ยาว (ซม.)"}
+                      onChange={(e) => u({ cut_length: Number(e.target.value) })} className={numCls.replace("w-24", "w-20")} />
+                    <span className="text-slate-300">×</span>
+                    <input type="number" min={0} step="any" value={d.pieces} disabled={readonly}
+                      title="จำนวนชิ้นที่ตัดได้/ต้องใช้" onChange={(e) => u({ pieces: Number(e.target.value) })} className={numCls.replace("w-24", "w-16")} />
+                  </div>
+
+                  <div className={rowCls}>
+                    <span className={labCls}>% เผื่อเสีย:</span>
+                    <input type="number" min={0} step="any" value={d.waste_percent} disabled={readonly}
+                      title="ค่าเริ่มต้นมาจากกลุ่มวัตถุดิบ — แก้ตรงนี้ = ใช้เฉพาะบรรทัดนี้ในสูตรนี้"
+                      onChange={(e) => u({ waste_percent: Number(e.target.value) })} className={numCls} />
+                    <span className="text-[11px] text-slate-400">ค่าเริ่มต้นมาจากกลุ่มวัตถุดิบ · แก้ที่นี่ = เฉพาะบรรทัดนี้</span>
+                  </div>
+
+                  <div className={rowCls}>
+                    <span className={labCls}>ปริมาณ:</span>
+                    {lineCalc(d) == null ? (
+                      <input type="number" min={0} step="any" value={d.qty} disabled={readonly}
+                        onChange={(e) => u({ qty: Number(e.target.value) })} className={numCls} />
+                    ) : (
+                      <b className="text-emerald-700 tabular-nums">{r2(d.qty)}</b>
+                    )}
+                    <span className="text-slate-500">{d.uom}</span>
+                    {lineCalc(d) != null && <span className="text-[11px] text-slate-400">ระบบคิดให้จากขนาด×ชิ้น×เผื่อเสีย</span>}
+                  </div>
+
+                  {!readonly && <p className="text-[11px] text-slate-400 pt-1">แก้แล้วมีผลกับตารางทันที · อย่าลืมกด <b>บันทึกสูตร</b> ที่หน้าหลัก · กด Ctrl+Z ย้อนได้</p>}
+                </div>
+              </div>
+            )}
+          </ERPModal>
+        );
+      })()}
     </>
   );
 }
