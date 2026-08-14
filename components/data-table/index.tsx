@@ -1296,8 +1296,31 @@ export function DataTable<T extends Record<string, unknown>>({
     getPaginationRowModel: isServer ? undefined : getPaginationRowModel(),
     // จำการ "ติ๊กเลือก" ด้วย id ของรายการจริง (ไม่ใช่ลำดับแถว) → เปลี่ยนหน้าแล้วการเลือกไม่เด้ง/ไม่หาย
     getRowId: (row, index) => (row.id != null ? String(row.id) : String(index)),
+    // ⛔ ห้าม TanStack เด้งกลับหน้า 1 เองเวลา data เปลี่ยน "อ้างอิง" (identity)
+    // ค่า default ของ TanStack = เด้งทุกครั้งที่ row model คำนวณใหม่ ซึ่งเกิดง่ายมาก:
+    // หน้าแม่ re-render (เปิด drawer/ป๊อปอัป, toast, โหลดข้อมูลใหม่) + prop แบบ inline
+    // (เช่น searchableKeys={[...]}) → filteredData เป็น array ใหม่ → เด้งหน้า 1 ทั้งที่ข้อมูลชุดเดิม
+    // เราคุมการรีเซ็ตเองด้านล่างแทน (เปลี่ยนคำค้น/ตัวกรอง/มุมมอง เท่านั้น)
+    autoResetPageIndex: false,
     initialState: { pagination: { pageSize: initialPageSize } },
   });
+
+  // รีเซ็ตกลับหน้า 1 เฉพาะตอน "ชุดข้อมูลที่เห็นเปลี่ยนจริง" (client mode) — คำค้น / ตัวกรอง / แท็บมุมมอง
+  // (server mode มีตัวรีเซ็ตของตัวเองอยู่แล้วที่ setSrvPage(0))
+  useEffect(() => {
+    if (isServer) return;
+    table.setPageIndex(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isServer, globalSearch, filtersKey, activeView]);
+
+  // กันค้างหน้าที่ไม่มีอยู่แล้ว: ข้อมูลหดลง (ลบ/กรอง/โหลดใหม่) แล้วหน้าปัจจุบันเกินหน้าสุดท้าย → เลื่อนมาหน้าสุดท้าย
+  useEffect(() => {
+    if (isServer) return;
+    const pageCount = table.getPageCount();
+    const pageIndex = table.getState().pagination.pageIndex;
+    if (pageCount > 0 && pageIndex > pageCount - 1) table.setPageIndex(pageCount - 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isServer, filteredData]);
 
   // เก็บ "ข้อมูลแถวที่เลือก" สะสมข้ามหน้า (server mode โหลดทีละหน้า — getSelectedRowModel เห็นแค่หน้าปัจจุบัน)
   // → ตัวเลข "เลือกแล้ว N" + ปุ่ม bulk/จัดกลุ่ม/พิมพ์/export ใช้ของที่เลือกจากทุกหน้ารวมกัน
