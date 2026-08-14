@@ -17,6 +17,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
+import { parsePastedTable, parseNumberCell } from "@/lib/paste-table";
 import type { SkuLookupHit } from "@/app/api/skus/lookup/route";
 
 /** แถวที่คืนกลับให้หน้าที่เรียก */
@@ -36,25 +37,15 @@ export type ImportedLine = {
 const HEADERS = ["รหัสสินค้า", "ชื่อสินค้า", "จำนวน", "หน่วย", "ราคา/หน่วย", "ส่วนลด(%)", "หมายเหตุ"] as const;
 const SAMPLE = ["CTL110-02", "(เว้นว่างได้ ระบบดึงชื่อจากรหัสให้)", "10", "ชิ้น", "165", "0", ""];
 
-const num = (v: unknown) => {
-  const n = Number(String(v ?? "").replace(/[, ฿]/g, ""));
-  return isFinite(n) ? n : 0;
-};
+// อ่านตัวเลข + แยกตารางที่วางมา — ใช้ของกลาง lib/paste-table (เดิมเขียนซ้ำในไฟล์นี้)
+const num = (v: unknown) => parseNumberCell(v);
 const txt = (v: unknown) => String(v ?? "").trim();
 
 /** แถวหัวตาราง? (กันผู้ใช้วางทั้งตารางรวมหัวมา) */
 const looksLikeHeader = (row: string[]) =>
   /รหัส|sku|code/i.test(row[0] ?? "") || /ชื่อสินค้า|name|description/i.test(row[1] ?? "");
 
-/** แยกข้อความที่วางมาเป็นตาราง — Excel ใช้ TAB, บางที่ใช้จุลภาค */
-function parsePasted(text: string): string[][] {
-  return text
-    .replace(/\r/g, "")
-    .split("\n")
-    .map((line) => (line.includes("\t") ? line.split("\t") : line.split(",")))
-    .map((cells) => cells.map((c) => c.trim()))
-    .filter((cells) => cells.some((c) => c !== ""));
-}
+const parsePasted = parsePastedTable;
 
 export function LineImportModal({ open, onClose, onConfirm, title = "ลงรายการแบบตาราง" }: {
   open: boolean;

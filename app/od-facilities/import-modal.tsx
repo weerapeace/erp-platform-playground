@@ -4,27 +4,27 @@ import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPFormField, ERPSelect } from "@/components/form";
 import { apiFetch } from "@/lib/api";
+import { parsePastedTable, dropHeaderRow, parseNumberCell, parseDateCell } from "@/lib/paste-table";
 
 type FacilityOpt = { id: string; od_code: string; lender_name: string };
 type ParsedRow = { date: string; description: string; money_in: number; money_out: number; balance: number };
 
-const num = (s: string) => Number((s ?? "").replace(/[,\s฿]/g, "")) || 0;
-
+// อ่านตารางที่วางมาจาก Excel ผ่านของกลาง lib/paste-table
+// (รับวันที่ได้หลายแบบแล้ว: 2026-09-05 · 05/09/2026 · 5 ก.ย. 2569 · ตัวเลขมีลูกน้ำ/วงเล็บติดลบ)
 function parse(text: string): { rows: ParsedRow[]; bad: number } {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const grid = dropHeaderRow(parsePastedTable(text), /วันที่|date|รายละเอียด|description/i);
   const rows: ParsedRow[] = [];
   let bad = 0;
-  for (const line of lines) {
-    const cols = line.includes("\t") ? line.split("\t") : line.split(",");
+  for (const cols of grid) {
     if (cols.length < 5) { bad++; continue; }
-    const date = (cols[0] ?? "").trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { bad++; continue; }
+    const date = parseDateCell(cols[0]);
+    if (!date) { bad++; continue; }
     rows.push({
       date,
       description: (cols[1] ?? "").trim(),
-      money_in: num(cols[2]),
-      money_out: num(cols[3]),
-      balance: num(cols[4]),
+      money_in: parseNumberCell(cols[2]),
+      money_out: parseNumberCell(cols[3]),
+      balance: parseNumberCell(cols[4]),
     });
   }
   return { rows, bad };
