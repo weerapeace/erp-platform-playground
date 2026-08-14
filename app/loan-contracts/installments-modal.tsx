@@ -167,33 +167,33 @@ export function InstallmentsModal({
 
   const columns: MiniColumn<Inst>[] = useMemo(() => [
     {
-      key: "no", header: "งวดที่", width: "4.5rem", align: "center",
+      key: "no", header: "งวดที่", width: "3.5rem", align: "center",
       sortValue: (r) => r.installment_no, sortLabel: "งวดที่",
       cell: (r) => <span className="text-sm font-medium text-slate-600 tabular-nums">{r.installment_no}</span>,
     },
     {
-      key: "due_date", header: "ครบกำหนด", width: "9rem",
+      key: "due_date", header: "ครบกำหนด", width: "8rem",
       sortValue: (r) => r.due_date ?? "", sortLabel: "วันครบกำหนด",
       cell: (r) => editing
         ? <DateInput value={cellVal(r, "due_date")} onChange={(iso) => setCell(r.id, "due_date", iso)} />
         : <span className="text-sm tabular-nums text-slate-700">{r.due_date ? formatDate(r.due_date) : "—"}</span>,
     },
     {
-      key: "principal_due", header: "เงินต้น", width: "9rem", align: "right",
+      key: "principal_due", header: "เงินต้น", width: "1fr", align: "right",
       sortValue: (r) => r.principal_due, sortLabel: "เงินต้น",
       cell: (r) => editing
         ? <MoneyInput value={cellVal(r, "principal_due")} onChange={(raw) => setCell(r.id, "principal_due", raw)} className={inputCls} />
         : money(r.principal_due),
     },
     {
-      key: "interest_due", header: "ดอกเบี้ย", width: "9rem", align: "right",
+      key: "interest_due", header: "ดอกเบี้ย", width: "1fr", align: "right",
       sortValue: (r) => r.interest_due, sortLabel: "ดอกเบี้ย",
       cell: (r) => editing
         ? <MoneyInput value={cellVal(r, "interest_due")} onChange={(raw) => setCell(r.id, "interest_due", raw)} className={inputCls} />
         : money(r.interest_due),
     },
     {
-      key: "total_due", header: "รวมต้องจ่าย", width: "9rem", align: "right",
+      key: "total_due", header: "รวมต้องจ่าย", width: "1fr", align: "right",
       sortValue: (r) => r.total_due, sortLabel: "รวมต้องจ่าย",
       cell: (r) => {
         if (!editing) return <span className="text-sm font-medium text-slate-800">{money(r.total_due)}</span>;
@@ -202,17 +202,17 @@ export function InstallmentsModal({
       },
     },
     {
-      key: "total_paid", header: "จ่ายแล้ว", width: "9rem", align: "right",
+      key: "total_paid", header: "จ่ายแล้ว", width: "1fr", align: "right",
       sortValue: (r) => r.total_paid, sortLabel: "จ่ายแล้ว",
       cell: (r) => money(r.total_paid),
     },
     {
-      key: "closing", header: "เงินต้นคงเหลือ", width: "9.5rem", align: "right",
+      key: "closing", header: "เงินต้นคงเหลือ", width: "1.1fr", align: "right",
       sortValue: (r) => r.closing_principal, sortLabel: "เงินต้นคงเหลือ",
       cell: (r) => <span className="text-sm text-slate-500">{money(r.closing_principal)}</span>,
     },
     {
-      key: "payment_status", header: "สถานะ", width: "7.5rem", align: "center",
+      key: "payment_status", header: "สถานะ", width: "6.5rem", align: "center",
       sortValue: (r) => r.payment_status, sortLabel: "สถานะ",
       cell: (r) => {
         const m = PAY_STATUS[r.payment_status];
@@ -283,6 +283,9 @@ export function InstallmentsModal({
           {loading ? (
             <div className="py-16 text-center text-sm text-slate-400">กำลังโหลดงวดผ่อน...</div>
           ) : (
+            /* จอแคบ → เลื่อนตารางไปทางข้างได้ (ไม่ให้คอลัมน์ถูกบีบจนอ่านไม่ออก) */
+            <div className="overflow-x-auto">
+            <div className="min-w-[820px]">
             <MiniTable
               rows={rows}
               columns={columns}
@@ -312,6 +315,8 @@ export function InstallmentsModal({
               }
               footnote="เงินต้นคงเหลือของแต่ละงวด = ยอดหลังหักเงินต้นงวดนั้น · ยอด “จ่ายแล้ว” มาจากใบบันทึกการจ่าย ระบบตัดให้เอง"
             />
+            </div>
+            </div>
           )}
         </div>
       </ERPModal>
