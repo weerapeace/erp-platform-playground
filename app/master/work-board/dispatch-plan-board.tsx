@@ -700,12 +700,17 @@ export function DispatchPlanBoard({
         const others = craftsmen.filter((c) => c.department_id !== dept.id);
         const q = staffSearch.trim().toLowerCase();
         const addable = q ? others.filter((c) => `${c.code ?? ""} ${c.name}`.toLowerCase().includes(q)) : others.slice(0, 30);
-        const otTotal = list.reduce((n, c) => n + (Number(ot[c.id]?.amount) || 0), 0);
         const planOt = isUuid(planId);   // ตั้ง OT ได้เฉพาะในหน้าแผน
+        // ค่าแรง/ชม. ที่ใช้จริง = ที่กรอกเอง ถ้ายังไม่กรอก ใช้ค่าแรงจริงของคนนั้นเป็นค่าตั้งต้น (ไม่ต้องกดปุ่ม)
+        const rateOf = (empId: string) => (ot[empId]?.rate_per_hour ?? 0) > 0 ? ot[empId].rate_per_hour : (otRate[empId]?.rate ?? 0);
+        const amountOf = (empId: string) => otAmount({ ...(ot[empId] ?? {}), rate_per_hour: rateOf(empId) });
+        const otTotal = list.reduce((n, c) => n + amountOf(c.id), 0);
 
         const saveOt = async (empId: string, patch: Partial<OtRow>) => {
           const cur = ot[empId] ?? { rate_per_hour: 0, hours_per_day: 0, days: 0, amount: 0 };
           const next = { ...cur, ...patch };
+          // ยังไม่ได้กรอกเรตเอง → บันทึกด้วยค่าแรงจริงที่ระบบคิดให้ (ค่าที่โชว์ในช่องอยู่แล้ว)
+          if (!(next.rate_per_hour > 0)) next.rate_per_hour = otRate[empId]?.rate ?? 0;
           next.amount = otAmount(next);
           setOt((s) => ({ ...s, [empId]: next }));   // เห็นผลทันที
           setOtBusy(empId);
@@ -758,10 +763,7 @@ export function DispatchPlanBoard({
                     onChange={(e) => { const v = Number(e.target.value) || 0; setBaseDays(v); try { localStorage.setItem("wb:otBaseDays", String(v)); } catch { /* ignore */ } }}
                     className="w-12 h-6 px-1 text-right border border-slate-200 rounded" title="วันทำงานต่อเดือน (ใช้กับลูกจ้างรายเดือน)" />
                   <span>วัน/เดือน</span>
-                  <button
-                    onClick={() => { for (const c of list) { const r = otRate[c.id]?.rate ?? 0; if (r > 0 && !(ot[c.id]?.rate_per_hour > 0)) void saveOt(c.id, { rate_per_hour: r }); } }}
-                    title="เติมช่อง ฿/ชม. ของทุกคนในโต๊ะนี้จากค่าแรงจริง (เฉพาะคนที่ยังไม่ได้ใส่)"
-                    className="ml-auto h-6 px-2 text-[11px] font-medium text-violet-700 border border-violet-200 rounded hover:bg-violet-50">↻ เติมค่าแรงให้ทุกคน</button>
+                  <span className="ml-auto text-[10px] text-slate-400">ช่อง ฿/ชม. เติมค่าแรงจริงของแต่ละคนให้แล้ว — พิมพ์ทับได้</span>
                 </div>
               )}
 
@@ -785,13 +787,17 @@ export function DispatchPlanBoard({
                         </div>
                         {planOt && (() => {
                           const auto = otRate[c.id];
-                          const basisTxt = auto?.basis === "daily" ? "รายวัน ÷ ชม." : auto?.basis === "monthly" ? "รายเดือน ÷ วัน ÷ ชม." : auto?.basis === "hourly" ? "ค่าแรงรายชั่วโมง" : "";
+                          const basisTxt = auto?.basis === "daily" ? "ค่าแรงรายวัน ÷ ชม./วัน" : auto?.basis === "monthly" ? "เงินเดือน ÷ วัน/เดือน ÷ ชม./วัน" : auto?.basis === "hourly" ? "ค่าแรงรายชั่วโมง" : "";
+                          const effRate = rateOf(c.id);                       // ค่าที่โชว์ = กรอกเอง หรือค่าแรงจริง (ค่าตั้งต้น)
+                          const custom = (o.rate_per_hour ?? 0) > 0 && Math.abs(o.rate_per_hour - (auto?.rate ?? 0)) > 0.005;
                           return (
                           <div className="flex items-center gap-1 mt-0.5 pl-1 text-[11px] text-slate-500 flex-wrap">
                             <span className="text-amber-600">OT</span>
-                            <input type="number" min={0} step="any" disabled={!canEdit || otBusy === c.id} value={o.rate_per_hour || ""} placeholder={auto?.rate ? String(auto.rate) : "฿/ชม."}
+                            {/* ค่าแรง/ชม. — ขึ้นค่าแรงจริงของคนนั้นให้เลย ไม่ต้องกดปุ่ม (พิมพ์ทับได้) */}
+                            <input type="number" min={0} step="any" disabled={!canEdit || otBusy === c.id} value={effRate || ""} placeholder="฿/ชม."
+                              title={basisTxt ? `ค่าตั้งต้นจากค่าแรงจริงของคนนี้ (${basisTxt}) — พิมพ์ทับได้` : "ค่า OT ต่อชั่วโมง (บาท)"}
                               onChange={(e) => setOt((s) => ({ ...s, [c.id]: { ...o, rate_per_hour: Number(e.target.value) || 0, amount: otAmount({ ...o, rate_per_hour: Number(e.target.value) || 0 }) } }))}
-                              onBlur={(e) => void saveOt(c.id, { rate_per_hour: Number(e.target.value) || 0 })} className={numCls} title="ค่า OT ต่อชั่วโมง (บาท)" />
+                              onBlur={(e) => void saveOt(c.id, { rate_per_hour: Number(e.target.value) || 0 })} className={`${numCls} ${custom ? "border-violet-300 text-violet-700" : ""}`} />
                             <span className="text-slate-300">×</span>
                             <input type="number" min={0} step="any" disabled={!canEdit || otBusy === c.id} value={o.hours_per_day || ""} placeholder="ชม./วัน"
                               onChange={(e) => setOt((s) => ({ ...s, [c.id]: { ...o, hours_per_day: Number(e.target.value) || 0, amount: otAmount({ ...o, hours_per_day: Number(e.target.value) || 0 }) } }))}
@@ -800,14 +806,14 @@ export function DispatchPlanBoard({
                             <input type="number" min={0} step="any" disabled={!canEdit || otBusy === c.id} value={o.days || ""} placeholder="วัน"
                               onChange={(e) => setOt((s) => ({ ...s, [c.id]: { ...o, days: Number(e.target.value) || 0, amount: otAmount({ ...o, days: Number(e.target.value) || 0 }) } }))}
                               onBlur={(e) => void saveOt(c.id, { days: Number(e.target.value) || 0 })} className={numCls} title="จำนวนวันที่ทำ OT" />
-                            {/* ค่าแรง/ชม. ที่ระบบคิดจากค่าแรงจริงของคนนี้ — กดเพื่อใช้ค่านี้ */}
-                            {canEdit && (auto?.rate ?? 0) > 0 && Math.abs((o.rate_per_hour || 0) - auto.rate) > 0.005 && (
+                            {/* แก้เรตเองแล้ว → ปุ่มกลับไปใช้ค่าแรงจริง */}
+                            {canEdit && custom && (auto?.rate ?? 0) > 0 && (
                               <button onClick={() => void saveOt(c.id, { rate_per_hour: auto.rate })} disabled={otBusy === c.id}
-                                title={`ค่าแรงของคนนี้คิดเป็น ฿${auto.rate}/ชม. (${basisTxt})`}
-                                className="h-6 px-1.5 text-[10px] text-violet-600 border border-violet-200 rounded hover:bg-violet-50 disabled:opacity-40">ใช้ ฿{auto.rate}/ชม.</button>
+                                title={`กลับไปใช้ค่าแรงจริง ฿${auto.rate}/ชม. (${basisTxt})`}
+                                className="h-6 px-1.5 text-[10px] text-slate-400 border border-slate-200 rounded hover:text-violet-600 hover:border-violet-300 disabled:opacity-40">↺ ฿{auto.rate}</button>
                             )}
                             {(auto?.basis === "none") && <span className="text-[10px] text-slate-300">ไม่มีค่าแรงในระบบ</span>}
-                            <span className="ml-auto font-semibold text-amber-700 tabular-nums">= {baht(o.amount || 0)}</span>
+                            <span className="ml-auto font-semibold text-amber-700 tabular-nums">= {baht(amountOf(c.id))}</span>
                           </div>
                           );
                         })()}
