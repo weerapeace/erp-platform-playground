@@ -17,6 +17,8 @@ export type WoSubmission = {
   id: string; wo_id: string | null; wo_no: string | null; mo_no: string | null;
   sku: string | null; sku_name: string | null; craftsman_name: string | null; department_name: string | null;
   qty: number; wage: number | null; submitted_at: string; due_date: string | null; created_at: string;
+  /** true = ส่งงานไว้ก่อน ยังไม่ลงวันที่/ค่าแรงจริง (รอเติม) */
+  info_pending?: boolean;
 };
 
 const n = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
@@ -26,8 +28,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const search = (searchParams.get("search") ?? "").trim();
   let q = supabaseAdmin().from("wo_submissions")
-    .select("id, wo_id, wo_no, mo_no, sku, sku_name, craftsman_name, department_name, qty, wage, submitted_at, due_date, created_at")
+    .select("id, wo_id, wo_no, mo_no, sku, sku_name, craftsman_name, department_name, qty, wage, submitted_at, due_date, created_at, info_pending")
     .order("submitted_at", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+  if (searchParams.get("pending") === "1") q = q.eq("info_pending", true);   // รายงาน "ยังไม่ครบ"
   if (search) q = q.or(`wo_no.ilike.%${search}%,mo_no.ilike.%${search}%,sku.ilike.%${search}%,sku_name.ilike.%${search}%,craftsman_name.ilike.%${search}%`);
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
@@ -49,7 +52,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const allowOver = body.allow_over === true;   // อนุญาตส่งเกินยอดที่จ่าย (เฉพาะจอ QC ที่เตือนสีเหลืองแล้ว) — จอบอร์ดจ่ายงานไม่ส่ง flag นี้ = คงเดิม
   if (!wo_id) return NextResponse.json({ error: "missing wo_id" }, { status: 400 });
   if (qty <= 0) return NextResponse.json({ error: "จำนวนต้องมากกว่า 0" }, { status: 400 });
-  if (wage == null) return NextResponse.json({ error: "กรุณาใส่ค่าแรงก่อนส่งงาน" }, { status: 400 });
+  // ส่งงานไว้ก่อน ยังไม่ลงวันที่/ค่าแรง → ข้ามการบังคับใส่ค่าแรง แล้วไปโผล่ในรายงาน "ยังไม่ครบ"
+  const infoPending = body.info_pending === true;
+  if (wage == null && !infoPending) return NextResponse.json({ error: "กรุณาใส่ค่าแรงก่อนส่งงาน (หรือติ๊ก “ยังไม่ลงวันที่/ค่าแรง”)" }, { status: 400 });
 
   const admin = supabaseAdmin();
   const { data: wo } = await admin.from("mo_work_orders").select("id, wo_no, mo_no, product_sku, product_name, assignee_id, assignee_type, assignee_name, department_name, qty, received_qty, due_date").eq("id", wo_id).single();
@@ -74,12 +79,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     wo_id, wo_no: wo.wo_no, mo_no: wo.mo_no, sku: wo.product_sku, sku_name: wo.product_name ?? wo.product_sku,
     craftsman_id: effWorkerId, craftsman_name: effWorker, department_name: wo.department_name,
     qty, wage, due_date: wo.due_date, created_by: user?.id ?? null, created_by_name: user?.email ?? null,
+    info_pending: infoPending,
     ...(submittedAt ? { submitted_at: submittedAt } : {}),
   });
   if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
 
   // 2) อัปเดตใบจ่ายงาน — บวกยอดส่ง + ค่าแรง + ปิดใบถ้าส่งครบ + แก้ช่างถ้ามีการแก้
-  const patch: Record<string, unknown> = { received_qty: newReceived, labor_cost: wage };
+  const patch: Record<string, unknown> = { received_qty: newReceived };
+  if (wage != null) patch.labor_cost = wage;   // ยังไม่ลงค่าแรง → ไม่ไปล้างค่าแรงเดิมของใบงาน
   if (overrideWorker) { patch.assignee_name = effWorker; if (overrideWorkerId) { patch.assignee_id = overrideWorkerId; patch.assignee_type = "craftsman"; } }
   if (newReceived >= Number(wo.qty ?? 0)) patch.status = "done";
   await admin.from("mo_work_orders").update(patch).eq("id", wo_id);
@@ -95,6 +102,44 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   });
 
   return NextResponse.json({ error: null, done: newReceived >= Number(wo.qty ?? 0) });
+}
+
+/**
+ * เติมข้อมูลที่ค้าง (วันที่/ค่าแรง) ของรายการส่งงาน — /api/mo/submissions PATCH
+ * body { id, submitted_at?, wage?, info_pending? }
+ * ใส่ค่าแรงแล้ว → อัปเดต labor_cost ของใบจ่ายงานให้ด้วย + ปลดธง "ยังไม่ครบ" อัตโนมัติ
+ */
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+
+  let body: Record<string, unknown>;
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const id = String(body.id ?? "");
+  if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  const { data: sub } = await admin.from("wo_submissions").select("id, wo_id, qty, wage, submitted_at, info_pending").eq("id", id).single();
+  if (!sub) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
+
+  const patch: Record<string, unknown> = {};
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(body.submitted_at ?? ""))) patch.submitted_at = String(body.submitted_at);
+  const wage = body.wage == null || body.wage === "" ? null : n(body.wage);
+  if ("wage" in body) patch.wage = wage;
+  // ครบเมื่อ: มีค่าแรงแล้ว (หรือสั่งปลดธงเอง)
+  const nextWage = "wage" in body ? wage : (sub.wage as number | null);
+  if ("info_pending" in body) patch.info_pending = body.info_pending === true;
+  else if (nextWage != null) patch.info_pending = false;
+  if (Object.keys(patch).length === 0) return NextResponse.json({ data: { id }, error: null });
+
+  const { error } = await admin.from("wo_submissions").update(patch).eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  // ใส่ค่าแรงแล้ว → ใบจ่ายงานต้องเห็นด้วย (ยอดค่าแรงรวมของโต๊ะคิดจากตรงนี้)
+  if (sub.wo_id && nextWage != null) await admin.from("mo_work_orders").update({ labor_cost: nextWage }).eq("id", sub.wo_id);
+
+  await writeAudit(admin, { action: "wo.submit_fill", entityType: "wo_submissions", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: patch });
+  return NextResponse.json({ data: { id, ...patch }, error: null });
 }
 
 // ย้อนกลับ (ลบรายการส่งงาน กรณีส่งผิด) — คืน received_qty + เปิดใบกลับถ้าเคยปิด

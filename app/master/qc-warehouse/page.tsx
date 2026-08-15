@@ -156,44 +156,50 @@ export default function QcWarehousePage() {
   //    (เดิมให้กรอกยอดรวมเอง ซึ่งคนหน้างานคิดเป็นต่อใบมากกว่า)
   const [sendRate, setSendRate] = useState("");
   const [sendSaveBom, setSendSaveBom] = useState(false);   // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง)
+  // ⏳ ส่งงานไว้ก่อน ยังไม่ลงวันที่/ค่าแรง → ไปโผล่ในรายงาน "ยังไม่ครบ" ให้ตามมาเติมทีหลัง
+  const [sendPending, setSendPending] = useState(false);
   // วันที่ส่งงาน — ค่าเริ่มต้น "วันนี้" ตามเวลาเครื่อง (เวลาไทย)
   // ⚠️ เดิมปล่อยให้ฐานข้อมูลใส่ CURRENT_DATE ซึ่งเป็นเวลา UTC → ส่งงานหลังเที่ยงคืน–ตี 7 จะถูกบันทึกเป็น "เมื่อวาน"
   const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
   const [sendDate, setSendDate] = useState(todayStr);
-  const [sendCart, setSendCart] = useState<Record<string, { qty: number; rate: number; saveBom: boolean; date: string }>>({});
+  const [sendCart, setSendCart] = useState<Record<string, { qty: number; rate: number; saveBom: boolean; date: string; pending?: boolean }>>({});
   const [sendSaving, setSendSaving] = useState(false);
-  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendRate(w.rate > 0 ? String(w.rate) : ""); setSendSaveBom(w.rate <= 0); setSendDate(todayStr()); };
+  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendRate(w.rate > 0 ? String(w.rate) : ""); setSendSaveBom(w.rate <= 0); setSendDate(todayStr()); setSendPending(false); };
   // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง — ไม่ระบุช่าง) ผ่านของกลาง /api/bom/labor-rates (หา BOM จาก product_sku ให้เอง)
   const saveBomRate = async (sku: string | null, perUnit: number) => {
     if (!sku || !(perUnit > 0)) return;
     try { await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product_sku: sku, rate: perUnit }) }); } catch { /* ignore */ }
   };
-  const postSubmission = async (woId: string, qty: number, wage: number, date?: string): Promise<string | null> => {
-    try { const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: woId, qty, wage, submitted_at: date || undefined }) }); const j = await res.json(); return (j.error as string) ?? null; }
+  const postSubmission = async (woId: string, qty: number, wage: number | null, date?: string, pending?: boolean): Promise<string | null> => {
+    try { const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: woId, qty, wage, submitted_at: pending ? undefined : (date || undefined), info_pending: pending === true }) }); const j = await res.json(); return (j.error as string) ?? null; }
     catch (e) { return e instanceof Error ? e.message : "ส่งงานไม่สำเร็จ"; }
   };
   const submitSendNow = async () => {
     if (!sendModal) return; const qty = num(sendQty); const rate = Number(sendRate) || 0;
     const wage = Math.round(rate * qty * 100) / 100;   // ยอดรวม = ค่าแรงต่อใบ × จำนวนที่ส่ง
     if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    setSendSaving(true); const err = await postSubmission(sendModal.id, qty, wage, sendDate);
-    if (!err && sendSaveBom && rate > 0) await saveBomRate(sendModal.sku, rate);
+    setSendSaving(true);
+    const err = await postSubmission(sendModal.id, qty, sendPending ? null : wage, sendDate, sendPending);
+    if (!err && !sendPending && sendSaveBom && rate > 0) await saveBomRate(sendModal.sku, rate);
     setSendSaving(false);
     if (err) { toast.error(err); return; }
-    toast.success(`ส่งงานแล้ว ${fmt(qty)} ใบ · ค่าแรงรวม ฿${fmt(wage)} → เข้างานรอ QC${sendSaveBom && rate > 0 ? " · บันทึกค่าแรงเข้า BOM" : ""}`); setSendModal(null); await load();
+    toast.success(sendPending
+      ? `ส่งงานแล้ว ${fmt(qty)} ใบ (ยังไม่ลงวันที่/ค่าแรง — ดูที่ตารางส่งงาน แท็บ “ยังไม่ครบ”)`
+      : `ส่งงานแล้ว ${fmt(qty)} ใบ · ค่าแรงรวม ฿${fmt(wage)} → เข้างานรอ QC${sendSaveBom && rate > 0 ? " · บันทึกค่าแรงเข้า BOM" : ""}`); setSendModal(null); await load();
   };
   const addSendCart = () => {
     if (!sendModal) return; const qty = num(sendQty); const rate = Number(sendRate) || 0;
     if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, rate, saveBom: sendSaveBom, date: sendDate } })); setSendModal(null);
+    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, rate, saveBom: sendSaveBom, date: sendDate, pending: sendPending } })); setSendModal(null);
   };
   const removeSendCart = (woId: string) => setSendCart((c) => { const n = { ...c }; delete n[woId]; return n; });
   const submitSendCart = async () => {
     const ids = Object.keys(sendCart); if (ids.length === 0) return;
     setSendSaving(true); let ok = 0; const fails: string[] = [];
     for (const id of ids) {
-      const d = sendCart[id]; const err = await postSubmission(id, d.qty, Math.round(d.rate * d.qty * 100) / 100, d.date);
-      if (!err) { ok++; if (d.saveBom && d.rate > 0) { const w = atDesks.find((x) => x.id === id); await saveBomRate(w?.sku ?? null, d.rate); } }
+      const d = sendCart[id];
+      const err = await postSubmission(id, d.qty, d.pending ? null : Math.round(d.rate * d.qty * 100) / 100, d.date, d.pending);
+      if (!err) { ok++; if (!d.pending && d.saveBom && d.rate > 0) { const w = atDesks.find((x) => x.id === id); await saveBomRate(w?.sku ?? null, d.rate); } }
       else fails.push(id);
     }
     setSendSaving(false); setSendCart({});
@@ -865,22 +871,32 @@ export default function QcWarehousePage() {
                     className="w-full h-10 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" /></label>
                 {/* ค่าแรง = ต่อใบ (ต่อชิ้น) — ระบบคูณจำนวนให้เอง */}
                 <label className="block"><span className="text-[11px] text-slate-500">ค่าแรง / ใบ (บาท)</span>
-                  <input type="number" min={0} step="any" value={sendRate} onChange={(e) => setSendRate(e.target.value)} placeholder={sendModal.rate > 0 ? String(sendModal.rate) : "0"}
-                    className="w-full h-10 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
+                  <input type="number" min={0} step="any" value={sendPending ? "" : sendRate} disabled={sendPending} onChange={(e) => setSendRate(e.target.value)} placeholder={sendPending ? "ลงทีหลัง" : (sendModal.rate > 0 ? String(sendModal.rate) : "0")}
+                    className="w-full h-10 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100 disabled:text-slate-400" /></label>
               </div>
               {/* ยอดรวมที่จะบันทึก — คิดให้อัตโนมัติ */}
-              <div className="flex items-center justify-between gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
-                <span className="text-[12px] text-emerald-800">ค่าแรงรวมที่จะบันทึก</span>
-                <span className="text-sm font-bold text-emerald-700 tabular-nums">
-                  {fmt(num(sendQty))} ใบ × ฿{fmt(Number(sendRate) || 0)} = ฿{fmt(Math.round((Number(sendRate) || 0) * num(sendQty) * 100) / 100)}
+              {!sendPending && (
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
+                  <span className="text-[12px] text-emerald-800">ค่าแรงรวมที่จะบันทึก</span>
+                  <span className="text-sm font-bold text-emerald-700 tabular-nums">
+                    {fmt(num(sendQty))} ใบ × ฿{fmt(Number(sendRate) || 0)} = ฿{fmt(Math.round((Number(sendRate) || 0) * num(sendQty) * 100) / 100)}
+                  </span>
+                </div>
+              )}
+              {/* ⏳ ส่งไว้ก่อน — ยังไม่ลงวันที่/ค่าแรง */}
+              <label className={`flex items-start gap-2 text-xs cursor-pointer rounded-lg px-2.5 py-2 border ${sendPending ? "bg-amber-50 border-amber-300 text-amber-800" : "border-slate-200 text-slate-600"}`}>
+                <input type="checkbox" checked={sendPending} onChange={(e) => setSendPending(e.target.checked)} className="w-4 h-4 accent-amber-600 mt-0.5" />
+                <span>
+                  ⏳ <b>ยังไม่ลงวันที่/ค่าแรง</b> — ส่งงานไว้ก่อน ค่อยมาเติมทีหลัง
+                  <br /><span className="text-[11px] opacity-80">รายการจะไปรออยู่ที่ <b>ตารางส่งงาน → แท็บ “⏳ ยังไม่ครบ”</b> · จำนวนที่ส่งยังถูกบันทึกตามปกติ</span>
                 </span>
-              </div>
+              </label>
               {/* วันที่ส่งงาน — ขึ้นวันนี้ให้ก่อน (ย้อนวันได้ ถ้าลงบันทึกทีหลัง) */}
               <label className="block">
                 <span className="text-[11px] text-slate-500">วันที่ส่งงาน</span>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <input type="date" value={sendDate} onChange={(e) => setSendDate(e.target.value || todayStr())}
-                    className="h-10 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  <input type="date" value={sendPending ? "" : sendDate} disabled={sendPending} onChange={(e) => setSendDate(e.target.value || todayStr())}
+                    className="h-10 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:text-slate-400" />
                   {sendDate !== todayStr()
                     ? <button type="button" onClick={() => setSendDate(todayStr())} className="h-7 px-2 text-[11px] text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50">↺ วันนี้</button>
                     : <span className="text-[11px] text-slate-400">= วันนี้</span>}
