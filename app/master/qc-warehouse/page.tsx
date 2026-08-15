@@ -81,6 +81,10 @@ export default function QcWarehousePage() {
   const [lineSettingsOpen, setLineSettingsOpen] = useState(false);   // ป๊อปตั้งค่าแจ้งเตือน LINE
   const [isMax, setIsMax] = useState(false);   // เต็มจอ — คลุมทับเมนูซ้าย/บน
   const [atDesks, setAtDesks] = useState<QcDeskCard[]>([]);   // งานที่จ่ายไปที่โต๊ะ (ยังทำอยู่) — โชว์ในมุมมองช้อป
+  // จัดกลุ่มการ์ด "จ่ายไปที่โต๊ะ" ตามโต๊ะ (ค่าเริ่มต้น = จัดกลุ่ม · จำค่าไว้ที่เครื่อง)
+  const [deskGroup, setDeskGroup] = useState(true);
+  useEffect(() => { try { const v = localStorage.getItem("qc:deskGroup"); if (v != null) setDeskGroup(v === "1"); } catch { /* ignore */ } }, []);
+  const toggleDeskGroup = () => setDeskGroup((g) => { const n = !g; try { localStorage.setItem("qc:deskGroup", n ? "1" : "0"); } catch { /* ignore */ } return n; });
   const [histOpen, setHistOpen] = useState(false);
   const [histSearch, setHistSearch] = useState("");
   const [histRows, setHistRows] = useState<DefectLog[]>([]);
@@ -618,10 +622,37 @@ export default function QcWarehousePage() {
                   </div>
                   {/* 🪑 จ่ายไปที่โต๊ะ — กดส่งงาน */}
                   <div>
-                    <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">🪑 จ่ายไปที่โต๊ะ (กดการ์ดเพื่อส่งงาน) <span className="text-slate-400 font-normal">({deskFiltered.length})</span></div>
-                    {deskFiltered.length === 0
-                      ? <div className="text-center py-6 text-[12px] text-slate-300">ยังไม่มีงานที่จ่ายไปที่โต๊ะ — งานที่จ่ายให้ช่างที่โต๊ะ (บนบอร์ดจ่ายงาน) จะมาโชว์ที่นี่ แล้วไหลเข้า QC เมื่อช่างส่งงาน</div>
-                      : <div className={gridCls}>{deskFiltered.map(renderDeskCard)}</div>}
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-2">
+                      <span>🪑 จ่ายไปที่โต๊ะ (กดการ์ดเพื่อส่งงาน) <span className="text-slate-400 font-normal">({deskFiltered.length})</span></span>
+                      <button onClick={toggleDeskGroup} title="สลับ จัดกลุ่มตามโต๊ะ / ไม่จัดกลุ่ม"
+                        className={`ml-auto h-6 px-2 text-[11px] font-medium rounded border ${deskGroup ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>
+                        {deskGroup ? "🪑 จัดกลุ่มตามโต๊ะ" : "▤ ไม่จัดกลุ่ม"}
+                      </button>
+                    </div>
+                    {deskFiltered.length === 0 ? (
+                      <div className="text-center py-6 text-[12px] text-slate-300">ยังไม่มีงานที่จ่ายไปที่โต๊ะ — งานที่จ่ายให้ช่างที่โต๊ะ (บนบอร์ดจ่ายงาน) จะมาโชว์ที่นี่ แล้วไหลเข้า QC เมื่อช่างส่งงาน</div>
+                    ) : !deskGroup ? (
+                      <div className={gridCls}>{deskFiltered.map(renderDeskCard)}</div>
+                    ) : (() => {
+                      // จัดกลุ่มตามโต๊ะ — เรียงโต๊ะที่มีงานเยอะก่อน · ในกลุ่มบอกจำนวนใบ/ชิ้นที่ยังไม่ส่ง
+                      const byDesk = new Map<string, QcDeskCard[]>();
+                      for (const w of deskFiltered) { const k = w.department_name || "— ไม่ระบุโต๊ะ —"; (byDesk.get(k) ?? byDesk.set(k, []).get(k)!).push(w); }
+                      return [...byDesk.entries()]
+                        .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], "th"))
+                        .map(([name, list]) => {
+                          const remain = list.reduce((n, w) => n + Math.max(0, (w.qty || 0) - (w.received_qty || 0)), 0);
+                          return (
+                            <div key={name} className="mb-4">
+                              <div className="flex items-center gap-2 text-[12px] font-bold text-indigo-700 bg-indigo-50/70 border border-indigo-100 rounded-lg px-2.5 py-1 mb-1.5">
+                                <span className="truncate">🪑 {name}</span>
+                                <span className="text-indigo-400 font-normal">({list.length} ใบ)</span>
+                                <span className="ml-auto text-slate-500 font-normal">ยังไม่ส่ง {fmt(remain)} ชิ้น</span>
+                              </div>
+                              <div className={gridCls}>{list.map(renderDeskCard)}</div>
+                            </div>
+                          );
+                        });
+                    })()}
                   </div>
                 </>
               ) : (
