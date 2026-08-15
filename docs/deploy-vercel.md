@@ -30,6 +30,19 @@
 | `CF_ACCOUNT_ID` | Account ID ของ Cloudflare (ตัวเดียวกับ R2_ACCOUNT_ID) |
 | `CF_AI_API_TOKEN` | API Token ที่สร้าง (สิทธิ์ Workers AI) |
 
+> ⚠️ **ตรวจแล้ว 2026-08-15: 2 ค่านี้ยังไม่ได้ตั้งบน Vercel** → ทุกฟีเจอร์ที่ใช้ AI อ่านรูป/แปลภาษา
+> จะตอบว่า *"ยังไม่ได้เปิดใช้ AI"* แล้วให้ผู้ใช้กรอกเอง (ไม่พัง แค่ไม่ทำงาน) ได้แก่
+> `/api/china-pay/ocr-slip` · `/api/china-pay/ocr-slip-extract` · `/api/ai/translate` ·
+> `/api/loan-payment/read-receipt` (ปุ่ม "✨ อ่านจากรูป" ในใบจ่ายเงินกู้)
+>
+> **วิธีเช็กเร็ว ๆ ว่าตั้งแล้วหรือยัง** (endpoint นี้ไม่ต้อง login):
+> ```bash
+> curl -s -X POST https://erp-platform-playground.vercel.app/api/china-pay/ocr-slip-extract \
+>   -H "Content-Type: application/json" -d '{"key":"x.jpg"}'
+> ```
+> ได้ `"ยังไม่ได้เปิดใช้ AI (binding)"` = **ยังไม่ได้ตั้ง** · ได้ `"ไม่พบไฟล์สลิป"` = ตั้งเรียบร้อยแล้ว
+> (ตั้งค่าที่ Vercel → Project → Settings → Environment Variables แล้ว **Redeploy** หนึ่งครั้ง)
+
 ## ตั้งค่าโซน (region) ให้ใกล้ฐานข้อมูล
 Supabase อยู่โตเกียว (`ap-northeast-1`) → ตั้ง Vercel Function Region เป็น **Tokyo (hnd1)** หรือ Singapore (sin1)
 (Project Settings → Functions → Region)
