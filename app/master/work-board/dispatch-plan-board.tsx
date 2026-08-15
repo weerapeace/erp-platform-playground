@@ -498,9 +498,11 @@ export function DispatchPlanBoard({
       )}
 
       {loading ? <div className="text-center py-10 text-slate-400 text-sm">กำลังโหลดแผน…</div> : (
-        <div className="grid gap-2.5" style={{ gridTemplateColumns: tablet ? "1fr 1fr" : `repeat(auto-fill, minmax(${colW}px, 1fr))` }}>
+        <div className={tablet ? "grid gap-2.5" : "flex gap-2.5 overflow-x-auto items-start pb-2 board-scroll"}
+          style={tablet ? { gridTemplateColumns: "1fr 1fr" } : undefined}>
           {/* คอลัมน์รอจ่าย */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2 min-h-[140px]"
+          <div className={`rounded-xl border border-slate-200 bg-slate-50/60 p-2 min-h-[140px] ${tablet ? "" : "overflow-y-auto shrink-0"}`}
+            style={tablet ? undefined : { flexBasis: colW, width: colW, maxHeight: "calc(100vh - 240px)" }}
             onDragOver={(e) => { if (editable && dragRef.current?.kind === "draft") e.preventDefault(); }}
             onDrop={() => { if (!editable) return; const d = dragRef.current; dragRef.current = null; if (d?.kind === "draft" && d.lineId) void removeLine(d.lineId); }}>
             <div className="sticky top-0 z-20 flex items-center justify-between -mx-2 -mt-2 px-2 pt-2 pb-2 mb-2 bg-slate-100 rounded-t-xl border-b border-slate-200">
@@ -601,7 +603,8 @@ export function DispatchPlanBoard({
             return (
               <div key={d.id} onClick={() => canDrop && addLine(d)}
                 onDragOver={(e) => { if (editable) e.preventDefault(); }} onDrop={() => editable && dropToDept(d)}
-                className={`rounded-xl border p-2 min-h-[140px] ${canDrop ? "border-dashed border-indigo-300 bg-indigo-50/30 cursor-pointer" : "border-slate-200 bg-white"}`}>
+                className={`rounded-xl border p-2 min-h-[140px] ${tablet ? "" : "overflow-y-auto shrink-0"} ${canDrop ? "border-dashed border-indigo-300 bg-indigo-50/30 cursor-pointer" : "border-slate-200 bg-white"}`}
+                style={tablet ? undefined : { flexBasis: colW, width: colW, maxHeight: "calc(100vh - 240px)" }}>
                 <div className="sticky top-0 z-20 flex items-center justify-between gap-1 -mx-2 -mt-2 px-2 pt-2 pb-2 mb-1.5 bg-white rounded-t-xl border-b border-slate-100"
                   onDragOver={(e) => { if (onReorderDepts && deptDragRef.current) e.preventDefault(); }}
                   onDrop={(e) => { if (deptDragRef.current) { e.stopPropagation(); reorderDept(d.id); } }}>
