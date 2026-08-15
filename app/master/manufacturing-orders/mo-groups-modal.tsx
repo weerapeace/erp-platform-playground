@@ -22,59 +22,117 @@ function useGroups() {
   return { groups, reload: load };
 }
 
-// ── เพิ่ม MO ที่เลือกเข้ากลุ่ม ────────────────────────────────
+// ── จัดกลุ่ม / ย้ายกลุ่ม MO ที่เลือก ────────────────────────────────
+//  ⚠️ 1 ใบอยู่ได้หลายกลุ่มในเชิงข้อมูล แต่หน้าจอจัดกลุ่มจะโชว์กลุ่มแรกที่เจอ → อยู่ 2 กลุ่ม = งง
+//     ค่าเริ่มต้นจึงเป็น "ย้าย" (เอาออกจากกลุ่มเดิมก่อน) ไม่ใช่ "เพิ่มซ้อน"
 export function AssignToGroupModal({ moNos, onClose, onDone }: { moNos: string[]; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const { groups } = useGroups();
-  const [target, setTarget] = useState<string>("__new__");   // group id หรือ "__new__"
+  const [target, setTarget] = useState<string>("__new__");   // group id · "__new__" · "__none__" (เอาออกจากทุกกลุ่ม)
   const [newName, setNewName] = useState("");
+  const [moveOut, setMoveOut] = useState(true);              // ย้าย (เอาออกจากกลุ่มเดิม) — แนะนำ
   const [saving, setSaving] = useState(false);
+
+  // กลุ่มเดิมของใบที่เลือก (ไว้บอกผู้ใช้ว่ากำลังย้ายมาจากไหน)
+  const sel = new Set(moNos);
+  const currentGroups = (groups ?? []).map((g) => ({ g, n: g.mo_nos.filter((m) => sel.has(m)).length })).filter((x) => x.n > 0);
+  const ungrouped = moNos.length - currentGroups.reduce((n, x) => n + x.n, 0);
+
+  const removeFromOthers = async (exceptId: string | null) => {
+    for (const { g } of currentGroups) {
+      if (exceptId && g.id === exceptId) continue;
+      const r = await apiFetch("/api/mo/groups", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: g.id, remove_mos: moNos }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+    }
+  };
 
   const submit = async () => {
     if (moNos.length === 0) { toast.error("ยังไม่ได้เลือกใบสั่งผลิต"); return; }
     setSaving(true);
     try {
-      if (target === "__new__") {
+      if (target === "__none__") {
+        await removeFromOthers(null);
+        toast.success(`เอา ${moNos.length} ใบออกจากกลุ่มแล้ว (กลับไปเป็น “ยังไม่จับกลุ่ม”)`);
+      } else if (target === "__new__") {
         const name = newName.trim(); if (!name) { toast.error("ใส่ชื่อกลุ่มก่อน"); setSaving(false); return; }
+        if (moveOut) await removeFromOthers(null);
         const r = await apiFetch("/api/mo/groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, mo_nos: moNos }) });
         const j = await r.json(); if (j.error) throw new Error(j.error);
-        toast.success(`สร้างกลุ่ม "${name}" + เพิ่ม ${moNos.length} ใบ`);
+        toast.success(`สร้างกลุ่ม "${name}" + ${moveOut ? "ย้าย" : "เพิ่ม"} ${moNos.length} ใบ`);
       } else {
+        if (moveOut) await removeFromOthers(target);
         const r = await apiFetch("/api/mo/groups", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: target, add_mos: moNos }) });
         const j = await r.json(); if (j.error) throw new Error(j.error);
-        toast.success(`เพิ่ม ${moNos.length} ใบเข้ากลุ่มแล้ว`);
+        toast.success(`${moveOut ? "ย้าย" : "เพิ่ม"} ${moNos.length} ใบเข้ากลุ่มแล้ว`);
       }
       onDone(); onClose();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
   };
 
+  const actionLabel = target === "__none__" ? "เอาออกจากกลุ่ม" : moveOut ? "ย้ายเข้ากลุ่มนี้" : "เพิ่มเข้ากลุ่ม";
+
   return (
-    <ERPModal open onClose={() => !saving && onClose()} size="md" title={`จัดกลุ่มใบสั่งงาน (${moNos.length} ใบ)`}
+    <ERPModal open onClose={() => !saving && onClose()} size="md" title={`จัดกลุ่ม / ย้ายกลุ่ม (${moNos.length} ใบ)`}
       footer={<>
         <button onClick={onClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-        <button onClick={() => void submit()} disabled={saving} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "เพิ่มเข้ากลุ่ม"}</button>
+        <button onClick={() => void submit()} disabled={saving} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : actionLabel}</button>
       </>}>
       <div className="space-y-3">
-        <div className="flex flex-wrap gap-1">
+        {/* ตอนนี้อยู่กลุ่มไหน */}
+        {groups !== null && (
+          <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5">
+            ตอนนี้:&nbsp;
+            {currentGroups.length === 0 && ungrouped === moNos.length
+              ? <b className="text-slate-600">ยังไม่จับกลุ่มทั้งหมด</b>
+              : <>
+                  {currentGroups.map(({ g, n }) => <span key={g.id} className="mr-2">🗂 <b className="text-slate-700">{g.name}</b> {n} ใบ</span>)}
+                  {ungrouped > 0 && <span>· ยังไม่จับกลุ่ม {ungrouped} ใบ</span>}
+                </>}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
           {moNos.map((m) => <code key={m} className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{m}</code>)}
         </div>
+
         <label className="flex items-center gap-2 p-2 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
           <input type="radio" checked={target === "__new__"} onChange={() => setTarget("__new__")} className="accent-blue-600" />
           <span className="text-sm text-slate-700">สร้างกลุ่มใหม่</span>
           {target === "__new__" && <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="ชื่อกลุ่ม เช่น ชุดเตรียมรอบ 1"
             className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-300" />}
         </label>
+
         {groups === null ? <div className="text-center py-3 text-sm text-slate-400">กำลังโหลดกลุ่ม…</div>
           : groups.length > 0 && <div className="border border-slate-200 rounded-lg divide-y divide-slate-50 max-h-56 overflow-y-auto">
-            {groups.map((g) => (
-              <label key={g.id} className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-slate-50">
-                <input type="radio" checked={target === g.id} onChange={() => setTarget(g.id)} className="accent-blue-600" />
-                <span className="text-sm text-slate-700 flex-1 truncate">{g.name}</span>
-                <span className="text-[11px] text-slate-400">{g.mo_nos.length} ใบ</span>
-              </label>
-            ))}
+            {groups.map((g) => {
+              const inThis = g.mo_nos.filter((m) => sel.has(m)).length;
+              return (
+                <label key={g.id} className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-slate-50">
+                  <input type="radio" checked={target === g.id} onChange={() => setTarget(g.id)} className="accent-blue-600" />
+                  <span className="text-sm text-slate-700 flex-1 truncate">{g.name}</span>
+                  {inThis > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">อยู่แล้ว {inThis}</span>}
+                  <span className="text-[11px] text-slate-400">{g.mo_nos.length} ใบ</span>
+                </label>
+              );
+            })}
           </div>}
+
+        {/* เอาออกจากกลุ่มทั้งหมด */}
+        <label className="flex items-center gap-2 p-2 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
+          <input type="radio" checked={target === "__none__"} onChange={() => setTarget("__none__")} className="accent-rose-600" />
+          <span className="text-sm text-slate-600">— เอาออกจากทุกกลุ่ม (กลับไปเป็น “ยังไม่จับกลุ่ม”) —</span>
+        </label>
+
+        {target !== "__none__" && (
+          <label className="flex items-start gap-2 text-[12px] text-slate-600 cursor-pointer">
+            <input type="checkbox" checked={moveOut} onChange={(e) => setMoveOut(e.target.checked)} className="w-4 h-4 accent-blue-600 mt-0.5" />
+            <span>
+              <b>ย้าย</b> (เอาออกจากกลุ่มเดิมก่อน) — <span className="text-emerald-600">แนะนำ</span>
+              <br /><span className="text-[11px] text-slate-400">ติ๊กออก = ให้ใบนั้นอยู่หลายกลุ่มพร้อมกัน · หน้าจอจะโชว์แค่กลุ่มเดียว (กลุ่มแรกที่เจอ) อาจสับสน</span>
+            </span>
+          </label>
+        )}
       </div>
     </ERPModal>
   );

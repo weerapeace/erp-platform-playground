@@ -87,6 +87,12 @@ type CardMode = (typeof CARD_MODES)[number];
 const CARD_COLS = ["3", "4", "6", "8", "10"] as const;
 type CardCols = (typeof CARD_COLS)[number];
 
+// ป๊อปจัดกลุ่ม/ย้ายกลุ่มใบสั่งผลิต (ของกลางตัวเดียวกับหน้าตาราง/หน้าใบสั่งผลิต) — โหลดตอนกดเท่านั้น
+const AssignToGroupModal = dynamicImport(
+  () => import("@/app/master/manufacturing-orders/mo-groups-modal").then((m) => m.AssignToGroupModal),
+  { ssr: false },
+);
+
 // ตัวขอแก้สูตร — โหลดตอนกดเท่านั้น (ตัวแก้สูตรของจริงหนัก ไม่ควรถ่วงหน้าช้อป)
 const BomChangeRequestEditor = dynamicImport(
   () => import("@/components/bom-change-request").then((m) => m.BomChangeRequestEditor),
@@ -125,6 +131,7 @@ export function DispatchShop({
   const { view: cardCols, setView: setCardCols, saveDefault: saveCardCols } = useViewPref("work_board_shop_cols", CARD_COLS, "4");
   const [cart, setCart] = useState<Record<string, number>>({});   // mo.id → จำนวนที่จะจ่าย
   const [cartOpen, setCartOpen] = useState(false);                // เปิด "หน้าตะกร้า" เต็มจอ (แทนแผงข้าง)
+  const [groupOpen, setGroupOpen] = useState(false);              // ป๊อปจัดกลุ่ม/ย้ายกลุ่มใบที่ติ๊กไว้
   const [bomReqFor, setBomReqFor] = useState<ShopMO | null>(null); // กดป้าย "ไม่มีสูตร" → เปิดตัวเสนอสูตรของใบนั้น
   const [dept, setDept] = useState<string>("");
   const [craftIds, setCraftIds] = useState<string[]>([]);          // ช่างที่เลือก (หลายคน)
@@ -365,6 +372,13 @@ export function DispatchShop({
       onSent={() => { setBomReqFor(null); void onReload(); }} />
   ) : null;
 
+  // ป๊อปจัดกลุ่ม/ย้ายกลุ่ม — ใช้ร่วมทั้งหน้าเลือกงานและหน้าตะกร้า
+  const groupModal = groupOpen ? (
+    <AssignToGroupModal moNos={cartItems.map((m) => m.mo_no)}
+      onClose={() => setGroupOpen(false)}
+      onDone={() => { setGroupOpen(false); void onReload(); }} />
+  ) : null;
+
   // ป๊อปยืนยันจ่ายงาน — ใช้ร่วมทั้งหน้าเลือกงานและหน้าตะกร้า
   const confirmModal = (
         <ERPModal open={confirmOpen} onClose={() => !saving && setConfirmOpen(false)} size="xl" title="ยืนยันจ่ายงาน"
@@ -550,6 +564,7 @@ export function DispatchShop({
         {/* ป๊อปยืนยันจ่ายงาน (ตัวเดียวกับหน้าเลือกงาน) */}
         {confirmModal}
         {bomReqModal}
+        {groupModal}
       </div>
     );
   }
@@ -598,10 +613,17 @@ export function DispatchShop({
           {canDispatch && filtered.length > 0 && (
             <button onClick={addAllShown} className="h-9 px-3 text-sm border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap">＋ ใส่ตะกร้าทั้งหมดที่เห็น ({filtered.length})</button>
           )}
+          {/* จัดกลุ่ม/ย้ายกลุ่มใบที่ติ๊กไว้ — ใช้ป๊อปของกลางตัวเดียวกับหน้าตาราง/ใบสั่งผลิต */}
+          {canDispatch && cartItems.length > 0 && (
+            <button onClick={() => setGroupOpen(true)} title="จัดกลุ่ม / ย้ายกลุ่มใบที่ติ๊กไว้"
+              className="h-9 px-3 text-sm font-medium border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50 whitespace-nowrap ml-auto">
+              🗂 จัดกลุ่ม ({cartItems.length})
+            </button>
+          )}
           {/* ไปหน้าตะกร้า (เต็มจอ) — แทนแผงข้างเดิม */}
           {canDispatch && (
             <button onClick={() => setCartOpen(true)} disabled={cartItems.length === 0}
-              className="h-9 px-4 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 whitespace-nowrap ml-auto">
+              className={`h-9 px-4 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 whitespace-nowrap ${cartItems.length > 0 ? "" : "ml-auto"}`}>
               🛒 ตะกร้า ({cartItems.length}) →
             </button>
           )}
@@ -639,6 +661,7 @@ export function DispatchShop({
 
       {confirmModal}
       {bomReqModal}
+      {groupModal}
     </div>
   );
 }
