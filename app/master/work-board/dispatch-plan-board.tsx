@@ -729,29 +729,32 @@ export function DispatchPlanBoard({
         const sumLabor = isPending ? 0 : drafts.reduce((n, l) => n + lineLabor(l), 0) + reals.reduce((n, w) => n + woLabor(w), 0);
         const total = isPending ? pendRows.length : drafts.length + reals.length;
 
-        const row = (key: string, img: string | null | undefined, sku: string | null, name: string | null, moNo: string | null,
-                     qty: number, right: ReactNode, badge?: ReactNode, onClick?: () => void) => (
+        // การ์ด 1 ใบ — รูปใหญ่ด้านบน ข้อมูลใต้รูป (หน้าตาแนวเดียวกับการ์ดในช้อปจ่ายงาน)
+        const card = (key: string, img: string | null | undefined, sku: string | null, name: string | null, moNo: string | null,
+                      qty: number, right: ReactNode, badge?: ReactNode, onClick?: () => void) => (
           <div key={key} onClick={onClick}
-            className={`flex items-center gap-2 px-2 py-1.5 ${onClick ? "cursor-pointer hover:bg-indigo-50/60" : ""}`}>
-            <Thumb url={img} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-semibold text-slate-800 truncate">{sku ?? "—"}</span>
-                {badge}
-              </div>
+            className={`rounded-xl border border-slate-200 bg-white overflow-hidden transition ${onClick ? "cursor-pointer hover:border-indigo-300 hover:shadow-sm" : ""}`}>
+            <div className="relative h-24 bg-slate-50 flex items-center justify-center">
+              {img
+                ? <img src={img} alt={sku ?? ""} loading="lazy" decoding="async" className="max-h-full max-w-full object-contain" />
+                : <span className="text-3xl text-slate-200">📦</span>}
+              {badge && <span className="absolute top-1 left-1">{badge}</span>}
+            </div>
+            <div className="p-2">
+              <div className="text-sm font-semibold text-slate-800 truncate">{sku ?? "—"}</div>
               <div className="text-[11px] text-slate-500 truncate">{name}</div>
               <div className="text-[10px] text-slate-400 font-mono truncate">{moNo}</div>
-            </div>
-            <div className="shrink-0 text-right">
-              <div className="text-sm font-bold text-slate-700 tabular-nums">{fmt(qty)} <span className="text-[10px] font-normal text-slate-400">ชิ้น</span></div>
-              {right}
+              <div className="flex items-center justify-between gap-1 mt-1.5">
+                <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap"><b className="text-sm">{fmt(qty)}</b> ชิ้น</span>
+                <span className="text-right leading-tight">{right}</span>
+              </div>
             </div>
           </div>
         );
 
         return (
           <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={close}>
-            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col p-4" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between gap-2 mb-2">
                 <h3 className="text-sm font-bold text-slate-800 truncate">
                   {isPending ? "📥 รอจ่าย" : `🪑 ${d?.name ?? ""}`} <span className="text-slate-400 font-normal">({total} รายการ)</span>
@@ -761,27 +764,28 @@ export function DispatchPlanBoard({
               <input value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อ / เลขใบ / ช่าง…"
                 className="h-8 px-2 mb-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" />
 
-              <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+              <div className="flex-1 overflow-y-auto -mx-1 px-1">
                 {total === 0 && <div className="py-10 text-center text-slate-300 text-sm">— ไม่มีรายการ —</div>}
+                <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
+                  {/* รอจ่าย */}
+                  {pendRows.map((p) => card(`p:${p.id}`, imageByMo[p.mo_no], p.product_sku, p.product_name, p.mo_no, availOf(p),
+                    <span className="text-[10px] text-slate-400">จ่ายแล้ว {fmt((p.qty || 0) - p.remaining)}/{fmt(p.qty)}</span>,
+                    (p.ready ?? (!!p.prep_done && !!p.cut_done))
+                      ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">พร้อม ✓</span>
+                      : <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">รอเตรียม/ตัด</span>,
+                    () => { close(); onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }); }))}
 
-                {/* รอจ่าย */}
-                {pendRows.map((p) => row(`p:${p.id}`, imageByMo[p.mo_no], p.product_sku, p.product_name, p.mo_no, availOf(p),
-                  <div className="text-[10px] text-slate-400">จ่ายแล้ว {fmt((p.qty || 0) - p.remaining)}/{fmt(p.qty)}</div>,
-                  (p.ready ?? (!!p.prep_done && !!p.cut_done))
-                    ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">พร้อม ✓</span>
-                    : <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">รอเตรียม/ตัด</span>,
-                  () => { close(); onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }); }))}
+                  {/* ในโต๊ะ: ใบจ่ายงานจริง */}
+                  {reals.map((w) => card(`w:${w.id}`, w.image_url ?? imageByMo[w.mo_no], w.product_sku, w.product_name, w.mo_no, Number(w.qty) || 0,
+                    <span className="text-[10px] text-amber-600 font-medium">{baht(woLabor(w))}</span>,
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-600 text-white max-w-[110px] truncate inline-block">{w.assignee_name || "ทั้งโต๊ะ"}</span>,
+                    () => { close(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }); }))}
 
-                {/* ในโต๊ะ: ใบจ่ายงานจริง */}
-                {reals.map((w) => row(`w:${w.id}`, w.image_url ?? imageByMo[w.mo_no], w.product_sku, w.product_name, w.mo_no, Number(w.qty) || 0,
-                  <div className="text-[10px] text-amber-600">{baht(woLabor(w))}</div>,
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{w.assignee_name || "ทั้งโต๊ะ"}</span>,
-                  () => { close(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }); }))}
-
-                {/* ในโต๊ะ: ร่าง (ยังไม่ดันเป็นของจริง) */}
-                {drafts.map((l) => row(`d:${l.id}`, imageByMo[l.mo_no ?? ""], l.product_sku, l.product_name, l.mo_no, Number(l.qty) || 0,
-                  <div className="text-[10px] text-amber-600">{baht(lineLabor(l))}</div>,
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">ร่าง{l.assignee_name ? ` · ${l.assignee_name}` : ""}</span>))}
+                  {/* ในโต๊ะ: ร่าง (ยังไม่ดันเป็นของจริง) */}
+                  {drafts.map((l) => card(`d:${l.id}`, imageByMo[l.mo_no ?? ""], l.product_sku, l.product_name, l.mo_no, Number(l.qty) || 0,
+                    <span className="text-[10px] text-amber-600 font-medium">{baht(lineLabor(l))}</span>,
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-600 text-white max-w-[110px] truncate inline-block">ร่าง{l.assignee_name ? ` · ${l.assignee_name}` : ""}</span>))}
+                </div>
               </div>
 
               <div className="mt-2 flex items-center justify-between text-xs">
