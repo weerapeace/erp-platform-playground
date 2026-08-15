@@ -98,6 +98,11 @@ export function DispatchPlanBoard({
   // ⛶ ขยายดูรายการในช่อง (รอจ่าย / โต๊ะ) — คอลัมน์บนบอร์ดยาว เลื่อนหาของยาก
   const [listPopup, setListPopup] = useState<{ kind: "pending" | "dept"; dept?: DeptLite } | null>(null);
   const [listSearch, setListSearch] = useState("");
+  const [listAddOpen, setListAddOpen] = useState(false);      // ป๊อป ⛶: โหมด "＋ เพิ่มงานจากรอจ่าย"
+  const [listAddSearch, setListAddSearch] = useState("");
+  const [listLaborId, setListLaborId] = useState<string | null>(null);   // ใบที่กำลังใส่ค่าแรงในป๊อป
+  const [listLaborVal, setListLaborVal] = useState("");
+  const [listBusy, setListBusy] = useState(false);
   // OT วางแผน ต่อคน (เก็บต่อ "แผน" — บอร์ดของจริงไม่มี) · ยอด = ฿/ชม. × ชม./วัน × วัน
   const [ot, setOt] = useState<Record<string, OtRow>>({});
   const [otBusy, setOtBusy] = useState<string | null>(null);
@@ -841,16 +846,56 @@ export function DispatchPlanBoard({
         );
 
         return (
-          <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={close}>
+          <div className="fixed inset-0 z-40 bg-black/30 flex items-center justify-center p-4" onClick={close}>
             <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col p-4" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between gap-2 mb-2">
                 <h3 className="text-sm font-bold text-slate-800 truncate">
                   {isPending ? "📥 รอจ่าย" : `🪑 ${d?.name ?? ""}`} <span className="text-slate-400 font-normal">({total} รายการ)</span>
                 </h3>
+                {!isPending && d && editable && (
+                  <button onClick={() => { setListAddOpen((v) => !v); setListAddSearch(""); }}
+                    className={`h-8 px-3 text-xs font-medium rounded-lg border ${listAddOpen ? "bg-indigo-600 text-white border-indigo-600" : "border-indigo-200 text-indigo-700 hover:bg-indigo-50"}`}>
+                    {listAddOpen ? "✕ ปิดรายการรอจ่าย" : "＋ เพิ่มงานเข้าโต๊ะนี้"}
+                  </button>
+                )}
                 <button onClick={close} className="text-slate-400 hover:text-slate-600 shrink-0">✕</button>
               </div>
               <input value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อ / เลขใบ / ช่าง…"
                 className="h-8 px-2 mb-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+
+              {/* ＋ เพิ่มงานเข้าโต๊ะนี้ — เลือกจากใบที่ยังไม่ได้จ่าย */}
+              {listAddOpen && !isPending && d && (
+                <div className="mb-2 rounded-lg border border-indigo-200 bg-indigo-50/50 p-2">
+                  <input autoFocus value={listAddSearch} onChange={(e) => setListAddSearch(e.target.value)} placeholder="ค้นหางานที่ยังไม่ได้จ่าย…"
+                    className="w-full h-8 px-2 mb-1.5 text-sm border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                  <div className="max-h-40 overflow-y-auto scrollbar-hide space-y-1">
+                    {(() => {
+                      const aq = listAddSearch.trim().toLowerCase();
+                      const opts = visiblePending.filter((p) => !aq || `${p.product_sku ?? ""} ${p.product_name ?? ""} ${p.mo_no}`.toLowerCase().includes(aq));
+                      if (opts.length === 0) return <div className="py-3 text-center text-[11px] text-slate-400">ไม่มีงานรอจ่ายที่ตรงกับที่ค้น</div>;
+                      return opts.slice(0, 60).map((p) => (
+                        <button key={p.id} disabled={listBusy}
+                          onClick={async () => {
+                            setListBusy(true);
+                            try {
+                              if (realMode) { onDispatch?.({ moId: p.id, deptId: d.id, qty: availOf(p) }); close(); }
+                              else { await addLineFor(p.mo_no, d); }
+                            } finally { setListBusy(false); }
+                          }}
+                          className="w-full flex items-center gap-2 px-2 py-1.5 bg-white border border-slate-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 text-left disabled:opacity-50">
+                          <Thumb url={imageByMo[p.mo_no]} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-semibold text-slate-800 truncate">{p.product_sku}</span>
+                            <span className="block text-[10px] text-slate-400 font-mono truncate">{p.mo_no}</span>
+                          </span>
+                          <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">เหลือ <b>{fmt(availOf(p))}</b></span>
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">{realMode ? "กดแล้วจ่ายจริงทันที (จำนวนที่เหลือทั้งหมด)" : "กดแล้วเพิ่มเป็นรายการร่างในโต๊ะนี้"}</p>
+                </div>
+              )}
 
               <div className="flex-1 overflow-y-auto -mx-1 px-1">
                 {total === 0 && <div className="py-10 text-center text-slate-300 text-sm">— ไม่มีรายการ —</div>}
@@ -861,13 +906,66 @@ export function DispatchPlanBoard({
                     (p.ready ?? (!!p.prep_done && !!p.cut_done))
                       ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">พร้อม ✓</span>
                       : <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">รอเตรียม/ตัด</span>,
-                    () => { close(); onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }); }))}
+                    () => onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty })))}
 
                   {/* ในโต๊ะ: ใบจ่ายงานจริง */}
-                  {reals.map((w) => card(`w:${w.id}`, w.image_url ?? imageByMo[w.mo_no], w.product_sku, w.product_name, w.mo_no, Number(w.qty) || 0,
-                    <span className="text-[10px] text-amber-600 font-medium">{baht(woLabor(w))}</span>,
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-600 text-white max-w-[110px] truncate inline-block">{w.assignee_name || "ทั้งโต๊ะ"}</span>,
-                    () => { close(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }); }))}
+                  {reals.map((w) => {
+                    const wl = woLabor(w);
+                    const editingLabor = listLaborId === w.id;
+                    return (
+                      <div key={`w:${w.id}`} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                        <div onClick={() => onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 })}
+                          title="กดเพื่อเปิดรายละเอียดงาน (ปิดแล้วกลับมาหน้านี้)" className="cursor-pointer hover:bg-slate-50/60">
+                          <div className="relative h-24 bg-slate-50 flex items-center justify-center">
+                            {(w.image_url ?? imageByMo[w.mo_no])
+                              ? <img src={(w.image_url ?? imageByMo[w.mo_no]) as string} alt={w.product_sku ?? ""} loading="lazy" decoding="async" className="max-h-full max-w-full object-contain" />
+                              : <span className="text-3xl text-slate-200">📦</span>}
+                            <span className="absolute top-1 left-1 text-[9px] px-1.5 py-0.5 rounded-full bg-blue-600 text-white max-w-[110px] truncate">{w.assignee_name || "ทั้งโต๊ะ"}</span>
+                          </div>
+                          <div className="px-2 pt-2">
+                            <div className="text-sm font-semibold text-slate-800 truncate">{w.product_sku ?? "—"}</div>
+                            <div className="text-[11px] text-slate-500 truncate">{w.product_name}</div>
+                            <div className="text-[10px] text-slate-400 font-mono truncate">{w.mo_no}</div>
+                          </div>
+                        </div>
+                        <div className="px-2 pb-2">
+                          <div className="flex items-center justify-between gap-1 mt-1.5">
+                            <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap"><b className="text-sm">{fmt(Number(w.qty) || 0)}</b> ชิ้น</span>
+                            {wl > 0 ? <span className="text-[10px] text-amber-600 font-medium">{baht(wl)}</span> : <span className="text-[10px] text-slate-300">ยังไม่ใส่ค่าแรง</span>}
+                          </div>
+                          {realMode && editable && onUpdateWO && (
+                            editingLabor ? (
+                              <div className="flex items-center gap-1 mt-1.5" onClick={(e) => e.stopPropagation()}>
+                                <input type="number" min={0} step="any" autoFocus value={listLaborVal} onChange={(e) => setListLaborVal(e.target.value)} placeholder="฿/ชิ้น"
+                                  className="w-16 h-7 px-1.5 text-xs text-right border border-amber-300 rounded" />
+                                <span className="text-[10px] text-slate-400">= ฿{fmt((Number(listLaborVal) || 0) * (Number(w.qty) || 0))}</span>
+                                <button disabled={listBusy} onClick={async () => {
+                                  setListBusy(true);
+                                  try { await onUpdateWO(w.id, { labor_cost: (Number(listLaborVal) || 0) * (Number(w.qty) || 0) }, true); setListLaborId(null); toast.success("ใส่ค่าแรงแล้ว"); }
+                                  catch { /* parent toast */ } finally { setListBusy(false); }
+                                }} className="ml-auto h-7 px-2 text-[11px] bg-amber-500 text-white rounded hover:bg-amber-600 disabled:opacity-50">บันทึก</button>
+                                <button onClick={() => setListLaborId(null)} className="h-7 px-1.5 text-[11px] text-slate-400">✕</button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1 mt-1.5">
+                                <button onClick={(e) => { e.stopPropagation(); setListLaborId(w.id); setListLaborVal(wl > 0 && (Number(w.qty) || 0) > 0 ? String(Math.round((wl / (Number(w.qty) || 1)) * 100) / 100) : ""); }}
+                                  className="h-6 px-1.5 text-[10px] rounded border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100">💰 {wl > 0 ? "แก้ค่าแรง" : "ใส่ค่าแรง"}</button>
+                                {onCancelWO && w.status !== "partial_return" && (
+                                  <button onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!window.confirm(`ย้อน "${w.product_sku ?? "งานนี้"}" (${fmt(Number(w.qty) || 0)} ชิ้น) กลับไปรอจ่าย?`)) return;
+                                    setListBusy(true);
+                                    try { await onCancelWO(w.id); } finally { setListBusy(false); }
+                                  }} disabled={listBusy}
+                                    className="h-6 px-1.5 text-[10px] rounded border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300 disabled:opacity-50">↩ คืนรอจ่าย</button>
+                                )}
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
 
                   {/* ในโต๊ะ: ร่าง (ยังไม่ดันเป็นของจริง) */}
                   {drafts.map((l) => card(`d:${l.id}`, imageByMo[l.mo_no ?? ""], l.product_sku, l.product_name, l.mo_no, Number(l.qty) || 0,
@@ -880,7 +978,7 @@ export function DispatchPlanBoard({
                 <span className="text-slate-500">รวม <b className="text-slate-700">{fmt(sumQty)}</b> ชิ้น</span>
                 {!isPending && sumLabor > 0 && <span className="text-amber-700">ค่าแรงรวม <b>{baht(sumLabor)}</b></span>}
               </div>
-              <p className="text-[10px] text-slate-400 mt-1">{isPending ? "กดรายการ = เปิดเช็กลิสต์ใบนั้น" : "กดใบจ่ายงานจริง = เปิดรายละเอียดงาน · รายการ “ร่าง” แก้ที่การ์ดบนบอร์ด"}</p>
+              <p className="text-[10px] text-slate-400 mt-1">{isPending ? "กดการ์ด = เปิดเช็กลิสต์ใบนั้น (ปิดแล้วกลับมาหน้านี้)" : "กดการ์ด = เปิดรายละเอียดงาน (ปิดแล้วกลับมาหน้านี้) · 💰 ใส่ค่าแรง · ↩ คืนรอจ่าย · รายการ “ร่าง” แก้ที่การ์ดบนบอร์ด"}</p>
             </div>
           </div>
         );
