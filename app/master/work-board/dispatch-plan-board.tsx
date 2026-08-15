@@ -129,7 +129,8 @@ export function DispatchPlanBoard({
   const [laborSaving, setLaborSaving] = useState(false);
   const [cancelArmId, setCancelArmId] = useState<string | null>(null);   // ใบงานจริงที่กด X แล้ว (รอยืนยันคืนรอจ่าย)
   const [cancelSaving, setCancelSaving] = useState(false);
-  const [assignPopup, setAssignPopup] = useState<{ wo: WOLite; dept: DeptLite } | null>(null);   // เลือกช่าง (หลายคน) ของใบงานจริง
+  // ป๊อปเลือกช่าง — ใช้ร่วมกันทั้ง "ใบงานจริง" (เลือกได้หลายคน) และ "รายการร่าง" (เลือกได้คนเดียว)
+  const [assignPopup, setAssignPopup] = useState<{ wo?: WOLite; line?: DispatchPlanLine; dept: DeptLite } | null>(null);
   const [assignSel, setAssignSel] = useState<Set<string>>(new Set());
   const [assignSaving, setAssignSaving] = useState(false);
   const [assignSearch, setAssignSearch] = useState("");   // ค้นหาช่างในป๊อปเลือกช่าง
@@ -141,12 +142,27 @@ export function DispatchPlanBoard({
     if (cur.size === 0 && w.assignee_id) cur.add(w.assignee_id);   // ของเดิม (ช่างเดี่ยว)
     setAssignSel(cur); setAssignSearch(""); setAssignPopup({ wo: w, dept });
   };
+  /** เปิดป๊อปเลือกช่างให้ "รายการร่าง" — ใช้หน้าตาเดียวกับของจริง (ค้นหา + แยกกลุ่มแผนก) แต่เลือกได้คนเดียว */
+  const openAssignLine = (l: DispatchPlanLine, dept: DeptLite) => {
+    setAssignSel(new Set(l.assignee_id ? [l.assignee_id] : []));
+    setAssignSearch(""); setAssignPopup({ line: l, dept });
+  };
   const saveAssign = async () => {
-    if (!assignPopup || !onUpdateWO) return;
+    if (!assignPopup) return;
+    // รายการร่าง — เก็บช่างเดียว (โครงข้อมูลของแผนรองรับคนเดียว)
+    if (assignPopup.line) {
+      const id = [...assignSel][0] ?? null;
+      const c = id ? craftsmen.find((x) => x.id === id) ?? null : null;
+      setAssignSaving(true);
+      try { await updateLine(assignPopup.line.id, { assignee_id: c?.id ?? null, assignee_name: c?.name ?? null }); setAssignPopup(null); }
+      finally { setAssignSaving(false); }
+      return;
+    }
+    if (!onUpdateWO) return;
     const list = [...assignSel].map((id) => { const c = craftsmen.find((x) => x.id === id); return c ? { id: c.id, name: c.name } : null; }).filter(Boolean) as { id: string; name: string }[];
     setAssignSaving(true);
     try {
-      await onUpdateWO(assignPopup.wo.id, { assignees: list, assignee_name: list.map((x) => x.name).join(", ") || null, assignee_id: list[0]?.id ?? null, assignee_type: list.length ? "craftsman" : "department" });
+      await onUpdateWO(assignPopup.wo!.id, { assignees: list, assignee_name: list.map((x) => x.name).join(", ") || null, assignee_id: list[0]?.id ?? null, assignee_type: list.length ? "craftsman" : "department" });
       setAssignPopup(null);
     } catch { /* parent toast */ } finally { setAssignSaving(false); }
   };
@@ -415,13 +431,15 @@ export function DispatchPlanBoard({
             onChange={(e) => updateLine(l.id, { qty: Number(e.target.value) })}
             className="w-14 h-6 px-1 text-xs text-right border border-slate-200 rounded" />
           <span className="text-[10px] text-slate-400">ชิ้น</span>
+          {/* เลือกช่าง — ใช้ป๊อปตัวเดียวกับใบงานจริง (ค้นหาได้ + แยกกลุ่มตามแผนก) */}
           {opts.length > 0 && (
-            <select value={l.assignee_id ?? ""} disabled={!editable}
-              onChange={(e) => { const c = opts.find((x) => x.id === e.target.value); updateLine(l.id, { assignee_id: c?.id ?? null, assignee_name: c?.name ?? null }); }}
-              className="flex-1 h-6 px-1 text-[11px] border border-slate-200 rounded min-w-0">
-              <option value="">ทั้งโต๊ะ</option>
-              {opts.map((c) => { const df = defectOf(c.name); return <option key={c.id} value={c.id}>{df ? "⚠️ " : ""}{c.name}</option>; })}
-            </select>
+            editable ? (
+              <button type="button" onClick={(e) => { e.stopPropagation(); openAssignLine(l, d); }}
+                title="เลือกช่างของรายการนี้"
+                className="flex-1 h-6 px-1.5 text-[11px] border border-slate-200 rounded min-w-0 text-left text-slate-600 bg-white hover:border-violet-300 hover:text-violet-700 truncate">
+                👤 {l.assignee_name || "ทั้งโต๊ะ"} <span className="text-slate-300">✎</span>
+              </button>
+            ) : <span className="flex-1 text-[11px] text-slate-500 truncate">👤 {l.assignee_name || "ทั้งโต๊ะ"}</span>
           )}
         </div>
         {(() => { const df = defectOf(l.assignee_name); return df ? <div className="text-[10px] text-amber-600 mt-0.5">⚠️ ช่างนี้เคยมีงานเสีย {df.count} ครั้ง</div> : null; })()}
@@ -759,10 +777,10 @@ export function DispatchPlanBoard({
         <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={() => setAssignPopup(null)}>
           <div className="bg-white rounded-xl shadow-xl max-w-xs w-full p-4 max-h-[75vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
-              <h3 className="text-sm font-bold text-slate-800 truncate">👤 เลือกช่าง (เลือกได้หลายคน)</h3>
+              <h3 className="text-sm font-bold text-slate-800 truncate">👤 เลือกช่าง{assignPopup.line ? "" : " (เลือกได้หลายคน)"}</h3>
               <button onClick={() => setAssignPopup(null)} className="text-slate-400 hover:text-slate-600 shrink-0">✕</button>
             </div>
-            <div className="text-[11px] text-slate-400 mb-1.5">{assignPopup.dept.name} · เลือกแล้ว {assignSel.size} คน</div>
+            <div className="text-[11px] text-slate-400 mb-1.5">{assignPopup.dept.name} · {assignPopup.line ? "รายการร่าง — เลือกได้ 1 คน" : `เลือกแล้ว ${assignSel.size} คน`}</div>
             {/* ค้นหาช่าง — ช่างเหมามีหลายสิบคน เลื่อนหายาก */}
             <input autoFocus value={assignSearch} onChange={(e) => setAssignSearch(e.target.value)} placeholder="ค้นหา ชื่อ / รหัสพนักงาน…"
               className="h-8 px-2 mb-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" />
@@ -782,8 +800,13 @@ export function DispatchPlanBoard({
 
                 const line = (c: CraftLite) => (
                   <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-pointer text-sm">
-                    <input type="checkbox" checked={assignSel.has(c.id)} onChange={() => setAssignSel((prev) => { const n = new Set(prev); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n; })} className="w-4 h-4 accent-violet-600" />
+                    <input type={assignPopup.line ? "radio" : "checkbox"} checked={assignSel.has(c.id)}
+                      onChange={() => setAssignSel((prev) => {
+                        if (assignPopup.line) return new Set(prev.has(c.id) ? [] : [c.id]);   // ร่าง = คนเดียว
+                        const n = new Set(prev); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n;
+                      })} className="w-4 h-4 accent-violet-600" />
                     <span className="flex-1 truncate text-slate-700">{c.code ? `[${c.code}] ` : ""}{c.name}</span>
+                    {(() => { const df = defectOf(c.name); return df ? <span className="text-[10px] text-amber-600 shrink-0" title={`เคยมีงานเสีย ${df.count} ครั้ง`}>⚠️ {df.count}</span> : null; })()}
                   </label>
                 );
                 // แผนกเดียว (โต๊ะปกติ) → ไม่ต้องมีหัวกลุ่มให้รก
