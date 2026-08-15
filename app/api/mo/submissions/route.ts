@@ -31,6 +31,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .select("id, wo_id, wo_no, mo_no, sku, sku_name, craftsman_name, department_name, qty, wage, submitted_at, due_date, created_at, info_pending")
     .order("submitted_at", { ascending: false }).order("created_at", { ascending: false }).limit(500);
   if (searchParams.get("pending") === "1") q = q.eq("info_pending", true);   // รายงาน "ยังไม่ครบ"
+  const woId = (searchParams.get("wo_id") ?? "").trim();
+  if (woId) q = q.eq("wo_id", woId);   // ใช้ตอนเปิดป๊อป QC เพื่อดูว่างานใบนี้ยังค้างข้อมูลไหม
   if (search) q = q.or(`wo_no.ilike.%${search}%,mo_no.ilike.%${search}%,sku.ilike.%${search}%,sku_name.ilike.%${search}%,craftsman_name.ilike.%${search}%`);
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });

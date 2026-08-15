@@ -26,6 +26,8 @@ const PERM: Record<string, string> = {
   receive: "qc.receive", move: "qc.move", ship: "qc.ship", to_defect: "qc.defect",
   repair_send: "qc.repair", repair_cancel: "qc.repair", repair_receive: "qc.repair", return_queue: "qc.move",
   add_manual: "qc.receive", add_bulk: "qc.receive",
+  // ลบทิ้งถาวร (ของทดสอบ/ลงผิด) — ล็อกไว้ที่ "แอดมิน" เท่านั้น เพราะลบแล้วหายจริง
+  delete_item: "admin.users",
 };
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -211,6 +213,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (wo) await admin.from("mo_work_orders").update({ qc_pulled_qty: Math.max(0, Number(wo.qc_pulled_qty ?? 0) - Number(item.qty)) }).eq("id", item.wo_id);
       }
       await writeAudit(admin, { action: "qc.move", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sub: "return_queue", qty: item.qty } });
+      return NextResponse.json({ error: null });
+    }
+
+    // ── 🗑 ลบรายการทิ้งถาวร (แอดมินเท่านั้น — ใช้กับของทดสอบ/ลงผิด) ──
+    //    คืนยอด "ดึงเข้า QC" ให้ใบจ่ายงานด้วย (เหมือน return_queue) ไม่งั้นยอดค้างเพี้ยน
+    if (action === "delete_item") {
+      const item_id = String(body.item_id ?? "");
+      const item = await getItem(admin, item_id);
+      if (!item) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
+      const del = await admin.from("qc_warehouse_items").delete().eq("id", item_id);
+      if (del.error) return NextResponse.json({ error: friendlyDbError(del.error.message) }, { status: 400 });
+      if (item.wo_id) {
+        const { data: wo } = await admin.from("mo_work_orders").select("qc_pulled_qty").eq("id", item.wo_id).single();
+        if (wo) await admin.from("mo_work_orders").update({ qc_pulled_qty: Math.max(0, Number(wo.qc_pulled_qty ?? 0) - Number(item.qty)) }).eq("id", item.wo_id);
+      }
+      await writeAudit(admin, { action: "qc.delete", entityType: "qc_warehouse_items", entityId: item_id, ...actor,
+        metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, qty: item.qty, status: item.status, reason: body.reason ?? null } });
       return NextResponse.json({ error: null });
     }
 

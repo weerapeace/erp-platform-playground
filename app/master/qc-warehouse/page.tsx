@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { ERPModal } from "@/components/modal";
 import { ParentIssuesPanel } from "@/components/parent-issues-panel";
 import { useToast } from "@/components/toast";
-import { usePermission, AccessDenied } from "@/components/auth";
+import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { SkuPicker } from "@/components/pickers";
 import type { SkuPickerValue } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
@@ -61,6 +61,16 @@ function Thumb({ k, color, size = 44 }: { k?: string | null; color: string; size
 export default function QcWarehousePage() {
   const canView = usePermission("qc.view");
   const toast = useToast();
+  // ปุ่มลบถาวรในป๊อปรายละเอียด — เฉพาะแอดมิน (API ก็ล็อก admin.users อีกชั้น)
+  const { user } = useAuth();
+  const canAdminUsers = usePermission("admin.users");
+  const isAdmin = user?.role === "admin" || canAdminUsers;
+  const [delItemBusy, setDelItemBusy] = useState(false);
+  // การส่งงานของใบนี้ที่ "ยังไม่ลงวันที่/ค่าแรง" (โผล่ในป๊อปรายละเอียดของงานรอ QC ให้เติมได้เลย)
+  const [pendSub, setPendSub] = useState<{ id: string; qty: number; submitted_at: string } | null>(null);
+  const [pendDate, setPendDate] = useState("");
+  const [pendRate, setPendRate] = useState("");
+  const [pendBusy, setPendBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [shelves, setShelves] = useState<ShelfWithItems[]>([]);
   const [queue, setQueue] = useState<QcQueueCard[]>([]);
@@ -289,6 +299,53 @@ export default function QcWarehousePage() {
   const openFromRepair = (item: QcItem) => { setFromRepair(item); setFrGood(item.qty); setFrScrap(0); setFrShelf(storeShelves[0]?.id ?? ""); };
   const submitFromRepair = async () => { if (!fromRepair) return; if (await act("/api/qc-warehouse/items", { action: "repair_receive", item_id: fromRepair.id, good: num(frGood), scrap: num(frScrap), shelf_id: frShelf })) { toast.success("รับจากซ่อมแล้ว"); setFromRepair(null); } };
   const returnQueue = async (item: QcItem) => { if (await act("/api/qc-warehouse/items", { action: "return_queue", item_id: item.id })) { toast.success("ย้ายกลับงานรอ QC แล้ว"); setDetail(null); } };
+
+  /** 🗑 ลบรายการใน QC ทิ้งถาวร (แอดมินเท่านั้น) — ใช้กับของทดสอบ/ลงผิด */
+  const deleteQcItem = async (item: QcItem) => {
+    if (!isAdmin) return;
+    if (!window.confirm(`ลบ "${item.sku_name ?? item.sku ?? "รายการนี้"}" (${fmt(Number(item.qty))} ชิ้น) ออกจากโกดัง QC ถาวร?\n\nลบแล้วเอาคืนไม่ได้ · ยอด "ดึงเข้า QC" ของใบจ่ายงานจะถูกคืนให้`)) return;
+    setDelItemBusy(true);
+    try {
+      if (await act("/api/qc-warehouse/items", { action: "delete_item", item_id: item.id })) { toast.success("ลบรายการแล้ว"); setDetail(null); }
+    } finally { setDelItemBusy(false); }
+  };
+
+  // เปิดป๊อปรายละเอียด "งานรอ QC" → เช็กว่ามีการส่งงานที่ยังไม่ลงวันที่/ค่าแรงไหม
+  useEffect(() => {
+    if (!detail || detail.kind !== "queue" || !detail.card.wo_id) { setPendSub(null); return; }
+    let cancel = false;
+    void (async () => {
+      try {
+        const j = await apiFetch(`/api/mo/submissions?pending=1&wo_id=${encodeURIComponent(detail.card.wo_id)}`).then((r) => r.json());
+        const rows = (j.data ?? []) as { id: string; wo_id: string | null; qty: number; submitted_at: string }[];
+        const hit = rows.find((r) => r.wo_id === detail.card.wo_id) ?? null;
+        if (!cancel) {
+          setPendSub(hit ? { id: hit.id, qty: Number(hit.qty) || 0, submitted_at: hit.submitted_at } : null);
+          setPendDate(todayStr()); setPendRate("");
+        }
+      } catch { if (!cancel) setPendSub(null); }
+    })();
+    return () => { cancel = true; };
+  }, [detail]);
+
+  const savePendSub = async () => {
+    if (!pendSub) return;
+    const rate = Number(pendRate) || 0;
+    if (!(rate > 0)) { toast.error("ใส่ค่าแรงต่อใบก่อน"); return; }
+    setPendBusy(true);
+    try {
+      const wage = Math.round(rate * pendSub.qty * 100) / 100;
+      const r = await apiFetch("/api/mo/submissions", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: pendSub.id, submitted_at: pendDate || undefined, wage, info_pending: false }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast.success(`ลงข้อมูลแล้ว · ค่าแรงรวม ฿${fmt(wage)}`);
+      setPendSub(null); await load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setPendBusy(false); }
+  };
+
+
+
 
   const openAddShelf = () => { setShelfName(""); setShelfKind("store"); setShelfModal({ mode: "add" }); };
   const openEditShelf = (shelf: ShelfWithItems) => { setShelfName(shelf.name); setShelfKind(shelf.kind); setShelfModal({ mode: "edit", shelf }); };
@@ -1081,12 +1138,39 @@ export default function QcWarehousePage() {
                   <button onClick={() => returnQueue(detail.item)} className="w-full text-[12px] px-2.5 py-1.5 rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50">↩️ ย้ายกลับไปงานรอ QC (กรณีรับผิด)</button>
                 </div>
               )}
+              {/* ⚠️ การส่งงานนี้ยังไม่ได้ลงวันที่/ค่าแรง — เติมได้ตรงนี้เลย */}
+              {detail.kind === "queue" && pendSub && (
+                <div className="pt-1 border-t border-slate-100">
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 space-y-2">
+                    <div className="text-[12px] text-amber-800 font-medium">⚠️ ยังไม่ได้ลงวันที่ส่ง/ค่าแรงของงานนี้ ({fmt(pendSub.qty)} ใบ)</div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <input type="date" value={pendDate} onChange={(e) => setPendDate(e.target.value)} className="h-8 px-2 text-sm border border-amber-300 rounded-lg" />
+                      <input type="number" min={0} step="any" value={pendRate} onChange={(e) => setPendRate(e.target.value)} placeholder="฿/ใบ"
+                        className="w-20 h-8 px-2 text-sm text-right border border-amber-300 rounded-lg" />
+                      <span className="text-[11px] text-amber-700">= ฿{fmt(Math.round((Number(pendRate) || 0) * pendSub.qty * 100) / 100)}</span>
+                      <button disabled={pendBusy || !(Number(pendRate) > 0)} onClick={() => void savePendSub()}
+                        className="ml-auto h-8 px-3 text-xs font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-40">{pendBusy ? "บันทึก…" : "💾 ลงข้อมูล"}</button>
+                    </div>
+                    <p className="text-[10px] text-amber-700/80">ไม่ลงตอนนี้ก็ได้ — รายการจะค้างอยู่ที่ ตารางส่งงาน → แท็บ “⏳ ยังไม่ครบ”</p>
+                  </div>
+                </div>
+              )}
               {detail.kind === "queue" && (
                 <div className="pt-1 border-t border-slate-100"><div className="text-[11px] text-slate-500 mb-1.5">📦 รับเข้าชั้น</div>
                   <div className="flex flex-wrap gap-1.5">
                     {storeShelves.map((s) => (<button key={s.id} onClick={() => { const card = detail.card; setDetail(null); openReceive(card, s); }} className="text-[12px] px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">🗄️ {s.name}</button>))}
                     {storeShelves.length === 0 && <span className="text-[11px] text-rose-500">ยังไม่มีชั้นเก็บ</span>}
                   </div></div>
+              )}
+              {/* 🗑 ลบทิ้งถาวร — เฉพาะแอดมิน (ของทดสอบ/ลงผิด) */}
+              {detail.kind === "item" && isAdmin && (
+                <div className="pt-1 border-t border-slate-100">
+                  <button disabled={delItemBusy} onClick={() => void deleteQcItem(detail.item)}
+                    className="w-full text-[12px] px-2.5 py-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50">
+                    {delItemBusy ? "กำลังลบ…" : "🗑 ลบรายการนี้ถาวร (แอดมิน)"}
+                  </button>
+                  <p className="text-[10px] text-slate-400 mt-1">ใช้กับของทดสอบ/ลงผิดเท่านั้น · ลบแล้วยอด “ดึงเข้า QC” ของใบจ่ายงานจะคืนให้ · มีบันทึกประวัติว่าใครลบ</p>
+                </div>
               )}
               {detail.kind === "item" && detail.shelf.kind === "defect" && (
                 <div className="pt-1 border-t border-slate-100">
