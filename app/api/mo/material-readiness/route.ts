@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -64,10 +65,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const moNos = moList.map((m) => String(m.mo_no));
 
-  const { data: sums } = await admin.from("mo_material_summary")
+  // ⚠️ แถวโตตามจำนวนใบ (ตอนนี้ ~1,981 แถว) → ต้องไล่ทีละหน้า ไม่งั้นโดนตัดที่ 1,000 แถวเงียบ ๆ
+  //    ถ้าไม่ทำ: ใบท้าย ๆ ไม่มีวัตถุดิบมาถึง → ถูกนับเป็น "ไม่มีสูตร"/พร้อม ทั้งที่ยังขาดของ
+  const sumList = await fetchAllPages<Record<string, unknown>>((from, to) => admin.from("mo_material_summary")
     .select("id, mo_no, component_sku, component_name, material_type, uom, qty_per, required_qty, on_hand_qty, to_purchase_qty, is_ready")
-    .in("mo_no", moNos).eq("is_active", true);
-  const sumList = (sums ?? []) as Record<string, unknown>[];
+    .in("mo_no", moNos).eq("is_active", true)
+    .order("mo_no", { ascending: true }).range(from, to));
 
   // วัตถุดิบ → รูป + ระดับความสำคัญ (skus_v2.material_group_id → material_groups.criticality)
   const matCodes = [...new Set([

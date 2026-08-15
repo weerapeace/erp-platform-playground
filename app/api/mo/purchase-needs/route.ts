@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,6 +24,8 @@ export type PurchaseNeedRow = {
 
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
+type Row = Record<string, unknown>;
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
@@ -35,9 +38,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const moNos = moList.map((m) => String(m.mo_no));
   const moById = new Map(moList.map((m) => [String(m.mo_no), m]));
 
-  const [{ data: sums }, { data: prs }] = await Promise.all([
-    admin.from("mo_material_summary").select("id, mo_no, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready").in("mo_no", moNos).eq("is_active", true),
-    admin.from("purchase_requests_v2").select("item_name, qty, source_mo_nos").overlaps("source_mo_nos", moNos).eq("is_active", true).not("status", "in", "(rejected,cancelled)"),   // m2m: ใบขอซื้อที่ผูก MO ใด ๆ ในชุดนี้
+  // ⚠️ ทั้ง 2 ชุดนี้จำนวนแถวโตตามจำนวนใบสั่งผลิต → ต้องไล่ทีละหน้า ไม่งั้นโดนตัดที่ 1,000 แถวเงียบ ๆ
+  //    (ของจริงตอนแก้: วัตถุดิบ 1,981 แถว → เดิมหาย 981 แถว = ใบที่เพิ่งสร้าง 80 ใบไม่โผล่ในหน้านี้เลย)
+  const [sums, prs] = await Promise.all([
+    fetchAllPages<Row>((from, to) => admin.from("mo_material_summary")
+      .select("id, mo_no, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready")
+      .in("mo_no", moNos).eq("is_active", true)
+      .order("mo_no", { ascending: true }).range(from, to)),
+    // m2m: ใบขอซื้อที่ผูก MO ใด ๆ ในชุดนี้
+    fetchAllPages<Row>((from, to) => admin.from("purchase_requests_v2")
+      .select("item_name, qty, source_mo_nos").overlaps("source_mo_nos", moNos)
+      .eq("is_active", true).not("status", "in", "(rejected,cancelled)")
+      .order("id", { ascending: true }).range(from, to)),
   ]);
 
   // รูปสินค้า (cover SKU, fallback Parent) — ดึงครั้งเดียวสำหรับทั้งวัตถุดิบและสินค้าของ MO
@@ -46,12 +58,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const s of (sums ?? []) as Record<string, unknown>[]) if (s.component_sku) imgCodes.add(String(s.component_sku));
   const imgMap = new Map<string, string>();
   if (imgCodes.size) {
-    const { data: skus } = await admin.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", [...imgCodes]);
-    for (const sk of (skus ?? []) as Record<string, unknown>[]) {
-      const parRel = sk.parent_skus_v2;
-      const par = (Array.isArray(parRel) ? parRel[0] : parRel) as { cover_image_r2_key?: string | null } | null;
-      const key = (sk.cover_image_r2_key as string | null) || par?.cover_image_r2_key || "";
-      if (key) imgMap.set(String(sk.code), `/api/r2-image?key=${encodeURIComponent(key)}`);
+    // แบ่งเป็นชุดละ 300 (กันทั้ง URL ยาวเกิน และผลลัพธ์โดนตัดที่ 1,000 แถวเมื่อ SKU เยอะ)
+    const codeList = [...imgCodes];
+    const chunks: string[][] = [];
+    for (let i = 0; i < codeList.length; i += 300) chunks.push(codeList.slice(i, i + 300));
+    const results = await Promise.all(chunks.map((c) =>
+      admin.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", c)));
+    for (const { data: skus } of results) {
+      for (const sk of (skus ?? []) as Record<string, unknown>[]) {
+        const parRel = sk.parent_skus_v2;
+        const par = (Array.isArray(parRel) ? parRel[0] : parRel) as { cover_image_r2_key?: string | null } | null;
+        const key = (sk.cover_image_r2_key as string | null) || par?.cover_image_r2_key || "";
+        if (key) imgMap.set(String(sk.code), `/api/r2-image?key=${encodeURIComponent(key)}`);
+      }
     }
   }
   const imgOf = (code: string | null | undefined) => (code ? imgMap.get(code) ?? null : null);

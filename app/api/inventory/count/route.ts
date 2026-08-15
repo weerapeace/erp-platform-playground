@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -134,10 +135,12 @@ export async function POST(request: NextRequest) {
     const moNos = ((mos ?? []) as { mo_no: string }[]).map((m) => String(m.mo_no));
     if (moNos.length === 0) return NextResponse.json({ added: 0, skipped: 0, not_in_sku: 0, error: null });
 
-    const { data: sums } = await admin.from("mo_material_summary").select("component_sku")
-      .in("mo_no", moNos).eq("is_active", true).limit(5000);
-    const codes = [...new Set(((sums ?? []) as { component_sku: string | null }[])
-      .map((s) => String(s.component_sku ?? "").trim()).filter(Boolean))];
+    // ⚠️ `.limit(5000)` ไม่ช่วย — PostgREST ตัดที่ 1,000 แถวเงียบ ๆ → รายการนับขาดวัตถุดิบไปเยอะ
+    const sums = await fetchAllPages<{ component_sku: string | null }>((from, to) =>
+      admin.from("mo_material_summary").select("component_sku")
+        .in("mo_no", moNos).eq("is_active", true)
+        .order("mo_no", { ascending: true }).range(from, to));
+    const codes = [...new Set(sums.map((s) => String(s.component_sku ?? "").trim()).filter(Boolean))];
     if (codes.length === 0) return NextResponse.json({ added: 0, skipped: 0, not_in_sku: 0, error: null });
 
     const { data: skus } = await admin.from("skus_v2").select("id, code, name_th").in("code", codes.slice(0, 2000));

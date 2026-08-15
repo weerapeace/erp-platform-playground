@@ -5,7 +5,11 @@ import { ERPModal } from "@/components/modal";
 import { ERPFormField, ERPInput, ERPSelect } from "@/components/form";
 import { apiFetch } from "@/lib/api";
 
-type ContractOpt = { id: string; loan_code: string; loan_name: string };
+type ContractOpt = { id: string; loan_code: string; loan_name: string; contract_no: string };
+
+/** ป้ายสัญญา: รหัส — ชื่อ · เลขที่บัญชี (เจ้าของขอให้เห็นเลขบัญชีด้วย) */
+const contractLabel = (c: ContractOpt) =>
+  `${c.loan_code} — ${c.loan_name}${c.contract_no ? ` · บัญชี ${c.contract_no}` : ""}`;
 
 const METHOD_OPTS = [
   { value: "equal_installment", label: "ผ่อนเท่ากันทุกงวด (Equal Installment)" },
@@ -43,7 +47,7 @@ export function GenerateScheduleModal({
       .then((r) => r.json())
       .then((j) => {
         const rows = (j?.data ?? []) as Record<string, unknown>[];
-        setContracts(rows.map((r) => ({ id: String(r.id), loan_code: String(r.loan_code ?? ""), loan_name: String(r.loan_name ?? "") })));
+        setContracts(rows.map((r) => ({ id: String(r.id), loan_code: String(r.loan_code ?? ""), loan_name: String(r.loan_name ?? ""), contract_no: String(r.contract_no ?? "") })));
       })
       .catch(() => setErr("โหลดรายชื่อสัญญาไม่สำเร็จ"))
       .finally(() => setLoadingList(false));
@@ -106,7 +110,7 @@ export function GenerateScheduleModal({
         {contractId ? (
           <ERPFormField label="สัญญาเงินกู้" hint="เงินต้น + อัตราดอกเบี้ย + วันที่ต้องชำระ ดึงจากสัญญานี้">
             <div className="h-9 flex items-center px-3 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">
-              {picked ? `${picked.loan_code} — ${picked.loan_name}` : "กำลังโหลด..."}
+              {picked ? contractLabel(picked) : "กำลังโหลด..."}
             </div>
           </ERPFormField>
         ) : (
@@ -114,7 +118,7 @@ export function GenerateScheduleModal({
             <ERPSelect
               value={f.contract_id}
               onChange={(e) => set("contract_id", e.target.value)}
-              options={contracts.map((c) => ({ value: c.id, label: `${c.loan_code} — ${c.loan_name}` }))}
+              options={contracts.map((c) => ({ value: c.id, label: contractLabel(c) }))}
               placeholder={loadingList ? "กำลังโหลด..." : "— เลือกสัญญา —"}
             />
           </ERPFormField>

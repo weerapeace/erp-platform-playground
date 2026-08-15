@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -45,10 +46,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (codes.length === 0) return NextResponse.json({ data: {}, error: null });
 
   const admin = supabaseAdmin();
-  const { data: sums } = await admin.from("mo_material_summary")
+  // ⚠️ วัตถุดิบยอดฮิตตัวเดียวอาจถูกใช้ในใบเป็นร้อย → แถวเกิน 1,000 ได้
+  //    `.limit(2000)` ไม่ช่วย (PostgREST ตัดที่ 1,000 เงียบ ๆ) ต้องไล่ทีละหน้า
+  const sumList = await fetchAllPages<Record<string, unknown>>((from, to) => admin.from("mo_material_summary")
     .select("id, mo_no, component_sku, component_name, uom, qty_per, required_qty, on_hand_qty, is_ready")
-    .in("component_sku", codes).eq("is_active", true).limit(2000);
-  const sumList = (sums ?? []) as Record<string, unknown>[];
+    .in("component_sku", codes).eq("is_active", true)
+    .order("mo_no", { ascending: true }).range(from, to));
   if (sumList.length === 0) {
     return NextResponse.json({ data: Object.fromEntries(codes.map((c) => [c, { code: c, component_name: null, uom: null, mo_count: 0, total_required: 0, total_short: 0, mos: [] }])), error: null });
   }
