@@ -335,6 +335,8 @@ function WorkBoardPageInner() {
   const [recvLabor, setRecvLabor] = useState("");             // ค่าแรงผลิตของใบจ่ายงานนี้
   const [saveLaborBom, setSaveLaborBom] = useState(false);    // บันทึกค่าแรงกลับเข้า BOM
   const [estLabor, setEstLabor] = useState("");               // ค่าแรงผลิตที่วางแผน — กรอกเป็นราคา/ชิ้น
+  const [estEditing, setEstEditing] = useState(false);
+  const estLaborInit = useRef("");                            // ค่าแรงเดิมตอนเปิดป๊อป (ไว้กด "ยกเลิก" คืนค่า)        // ค่าแรง/ชิ้น: มีค่าแล้ว = อ่านอย่างเดียว ต้องกด ✏️ ก่อนแก้
   const [moQty, setMoQty] = useState("");                     // จำนวนสั่งผลิต (แก้ได้ในป๊อปเช็กลิสต์)
   const [qtySaving, setQtySaving] = useState(false);
   // ปกติจำนวนเป็น "อ่านอย่างเดียว" — ต้องกดปุ่ม ✏️ ก่อนถึงจะพิมพ์แก้ได้ (กันเผลอพิมพ์ทับ = สูตรกางใหม่ทั้งใบ)
@@ -803,16 +805,16 @@ function WorkBoardPageInner() {
   useEffect(() => {
     setDelArmed(false); setClTab(clWO ? "recv" : "prep");
     setClPurch(null); setClIssues(null); setClHist(null); setClCost(null); setIssType(""); setIssSev("medium"); setIssQty("");
-    setQtyEditing(false);   // เปิดป๊อปใหม่ = จำนวนกลับเป็นอ่านอย่างเดียวเสมอ
+    setQtyEditing(false); setEstEditing(false);   // เปิดป๊อปใหม่ = จำนวน/ค่าแรง กลับเป็นอ่านอย่างเดียวเสมอ
     if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); setMoQty(""); return; }
     setMoQty(String(checklistMO.qty ?? ""));   // ช่องแก้จำนวนสั่งผลิตในป๊อป
     // ค่าแรงผลิตวางแผน — กรอกเป็น "ราคา/ชิ้น"
     // default: ราคากลาง/ชิ้น จาก BOM ก่อน · ไม่มีค่อยถอดจากยอดรวมที่เคยตั้งไว้ (prod_plan ÷ จำนวน)
     setEstSaveBom(false);
-    setEstLabor(
-      checklistMO.central_rate && checklistMO.central_rate > 0 ? String(checklistMO.central_rate)
-      : (checklistMO.labor?.prod_plan && (checklistMO.qty || 0) > 0 ? String(Math.round((checklistMO.labor.prod_plan / (checklistMO.qty || 1)) * 100) / 100) : "")
-    );
+    const initRate = checklistMO.central_rate && checklistMO.central_rate > 0 ? String(checklistMO.central_rate)
+      : (checklistMO.labor?.prod_plan && (checklistMO.qty || 0) > 0 ? String(Math.round((checklistMO.labor.prod_plan / (checklistMO.qty || 1)) * 100) / 100) : "");
+    estLaborInit.current = initRate;
+    setEstLabor(initRate);
     let cancel = false; setClLoading(true);
     void (async () => {
       try {
@@ -1703,16 +1705,35 @@ function WorkBoardPageInner() {
                         </div>
                         {canEdit && (
                           <div className="space-y-1.5">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <label className="text-[11px] text-slate-500 whitespace-nowrap">ค่าแรงผลิต/ชิ้น (วางแผน)</label>
-                              <input type="number" min={0} step="any" value={estLabor} onChange={(e) => setEstLabor(e.target.value)} placeholder="—"
-                                className="w-24 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-                              <span className="text-[10px] text-slate-400">บาท/ชิ้น</span>
-                              {estLabor.trim() !== "" && (checklistMO.qty || 0) > 0 && (
-                                <span className="text-[10px] text-slate-400">= รวม ฿{fmt((Number(estLabor) || 0) * (checklistMO.qty || 0))} ({fmt(checklistMO.qty || 0)} ชิ้น)</span>
-                              )}
-                              <button onClick={() => void saveEstLabor()} disabled={estSaving} className="h-8 px-3 text-sm border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50">{estSaving ? "บันทึก…" : "💾 บันทึก"}</button>
-                            </div>
+                            {/* มีค่าแรงอยู่แล้ว = อ่านอย่างเดียว (กัน DblClick พิมพ์ทับ) — กด ✏️ ก่อนถึงแก้ได้ */}
+                            {(() => {
+                              const hasRate = estLabor.trim() !== "" && Number(estLabor) > 0;
+                              if (hasRate && !estEditing) return (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <label className="text-[11px] text-slate-500 whitespace-nowrap">ค่าแรงผลิต/ชิ้น (วางแผน)</label>
+                                  <b className="text-sm text-slate-700 tabular-nums">฿{fmt(Number(estLabor) || 0)}</b>
+                                  <span className="text-[10px] text-slate-400">บาท/ชิ้น</span>
+                                  {(checklistMO.qty || 0) > 0 && (
+                                    <span className="text-[10px] text-slate-400">= รวม ฿{fmt((Number(estLabor) || 0) * (checklistMO.qty || 0))} ({fmt(checklistMO.qty || 0)} ชิ้น)</span>
+                                  )}
+                                  <button onClick={() => setEstEditing(true)} title="แก้ค่าแรงผลิต/ชิ้น ของใบนี้"
+                                    className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 bg-white hover:text-indigo-600 hover:border-indigo-300">✏️ แก้ค่าแรง</button>
+                                </div>
+                              );
+                              return (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <label className="text-[11px] text-slate-500 whitespace-nowrap">ค่าแรงผลิต/ชิ้น (วางแผน)</label>
+                                  <input type="number" min={0} step="any" autoFocus={estEditing} value={estLabor} onChange={(e) => setEstLabor(e.target.value)} placeholder="—"
+                                    className="w-24 h-8 px-2 text-sm text-right border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                                  <span className="text-[10px] text-slate-400">บาท/ชิ้น</span>
+                                  {estLabor.trim() !== "" && (checklistMO.qty || 0) > 0 && (
+                                    <span className="text-[10px] text-slate-400">= รวม ฿{fmt((Number(estLabor) || 0) * (checklistMO.qty || 0))} ({fmt(checklistMO.qty || 0)} ชิ้น)</span>
+                                  )}
+                                  <button onClick={async () => { await saveEstLabor(); setEstEditing(false); }} disabled={estSaving} className="h-8 px-3 text-sm border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50">{estSaving ? "บันทึก…" : "💾 บันทึก"}</button>
+                                  {estEditing && <button onClick={() => { setEstEditing(false); setEstLabor(estLaborInit.current); }} disabled={estSaving} className="h-8 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 disabled:opacity-50">ยกเลิก</button>}
+                                </div>
+                              );
+                            })()}
                             <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer w-fit">
                               <input type="checkbox" checked={estSaveBom} onChange={(e) => setEstSaveBom(e.target.checked)} className="w-3.5 h-3.5 accent-indigo-600" />
                               💾 บันทึกกลับเข้า BOM ด้วย (เป็นราคากลาง/ชิ้น)
