@@ -57,11 +57,15 @@ export function GenerateScheduleModal({
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const picked = contracts.find((c) => c.id === f.contract_id);
 
+  const isCustom = f.method === "custom";
+
   const submit = async () => {
     setErr("");
     if (!f.contract_id) { setErr("กรุณาเลือกสัญญาเงินกู้"); return; }
-    const n = Math.floor(Number(f.num));
-    if (!n || n < 1) { setErr("กรุณาระบุจำนวนงวด"); return; }
+    // วิธี "กำหนดเอง" เว้นจำนวนงวดว่างได้ = สร้างตารางเปล่า ไว้เติมงวดทีหลัง
+    const n = f.num.trim() === "" ? 0 : Math.floor(Number(f.num));
+    if (!isFinite(n) || n < 0) { setErr("จำนวนงวดต้องเป็นตัวเลข"); return; }
+    if (n < 1 && !isCustom) { setErr("กรุณาระบุจำนวนงวด"); return; }
     setSaving(true);
     try {
       const res = await apiFetch("/api/loan-schedule/generate", {
@@ -91,7 +95,7 @@ export function GenerateScheduleModal({
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
           <button onClick={submit} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {saving ? "กำลังสร้าง..." : "สร้างตารางผ่อน"}
+            {saving ? "กำลังสร้าง..." : (isCustom && f.num.trim() === "" ? "สร้างตารางเปล่า" : "สร้างตารางผ่อน")}
           </button>
         </div>
       }
@@ -121,8 +125,15 @@ export function GenerateScheduleModal({
         </ERPFormField>
 
         <div className="grid grid-cols-2 gap-4">
-          <ERPFormField label="จำนวนงวด (เดือน)" required>
-            <ERPInput type="number" value={f.num} onChange={(e) => set("num", e.target.value)} placeholder="เช่น 60" />
+          <ERPFormField
+            label="จำนวนงวด"
+            required={!isCustom}
+            hint={isCustom
+              ? "ยังไม่รู้ว่ากี่งวด → เว้นว่างไว้ได้ ระบบจะสร้างตารางเปล่า แล้วค่อยไปเพิ่มงวด/วางจาก Excel ทีหลัง"
+              : "จำนวนงวดที่ต้องผ่อนทั้งหมด"}
+          >
+            <ERPInput type="number" value={f.num} onChange={(e) => set("num", e.target.value)}
+              placeholder={isCustom ? "ไม่รู้ก็เว้นว่างได้" : "เช่น 60"} />
           </ERPFormField>
           <ERPFormField label="งวดแรกเริ่ม (วันที่)" hint="เว้นว่าง = วันนี้">
             <ERPInput type="date" value={f.start_date} onChange={(e) => set("start_date", e.target.value)} />

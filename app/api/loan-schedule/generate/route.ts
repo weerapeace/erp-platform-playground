@@ -33,7 +33,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (!contract_id) return NextResponse.json({ error: "กรุณาเลือกสัญญาเงินกู้" }, { status: 400 });
   if (!METHODS.has(method)) return NextResponse.json({ error: "วิธีคิดไม่ถูกต้อง" }, { status: 400 });
-  if (num < 1 || num > 600) return NextResponse.json({ error: "จำนวนงวดต้องอยู่ระหว่าง 1–600" }, { status: 400 });
+  // num = 0 ได้เฉพาะวิธี "กำหนดเอง" = สร้างตารางเปล่าไว้ก่อน (ยังไม่รู้ว่ากี่งวด) แล้วเติมงวดทีหลัง
+  if (num < 0 || num > 600) return NextResponse.json({ error: "จำนวนงวดต้องอยู่ระหว่าง 1–600" }, { status: 400 });
+  if (num === 0 && method !== "custom") {
+    return NextResponse.json({ error: 'วิธีนี้ต้องระบุจำนวนงวด (เว้นว่างได้เฉพาะวิธี "กำหนดเอง")' }, { status: 400 });
+  }
 
   const admin = supabaseAdmin();
   const { data, error } = await admin.rpc("loan_schedule_generate", {

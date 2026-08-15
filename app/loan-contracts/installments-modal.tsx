@@ -121,11 +121,18 @@ export function InstallmentsModal({
       const iFilter = encodeURIComponent(JSON.stringify({
         schedule_version_id: { type: "text", value: String(ver.id) },
       }));
-      const ir = await apiFetch(`/api/master-v2/loan-installments?filters=${iFilter}&sort_by=installment_no&sort_dir=asc&limit=2000`);
+      // ดึงงวด + เงินต้นตั้งต้นของสัญญาพร้อมกัน
+      // (ฐานเงินต้นต้องมาจาก "สัญญา" ไม่ใช่แถวแรก — ตารางอาจยังไม่มีงวดเลย หรืองวดแรกถูกลบ/แทนที่)
+      const [ir, cr] = await Promise.all([
+        apiFetch(`/api/master-v2/loan-installments?filters=${iFilter}&sort_by=installment_no&sort_dir=asc&limit=2000`),
+        apiFetch(`/api/master-v2/loan-contracts/${contractId}`),
+      ]);
       const ij = await ir.json();
+      const c = (await cr.json())?.data as Record<string, unknown> | undefined;
       const raw = ((ij?.data ?? []) as Record<string, unknown>[])
         .sort((a, b) => num(a.installment_no) - num(b.installment_no));
-      setBasePrincipal(num(raw[0]?.opening_principal));
+      const limit = num(c?.contracted_principal) > 0 ? num(c?.contracted_principal) : num(c?.approved_limit);
+      setBasePrincipal(limit > 0 ? limit : num(raw[0]?.opening_principal));
       setRows(raw.map((r) => ({
         key: String(r.id),
         id: String(r.id),
@@ -160,8 +167,8 @@ export function InstallmentsModal({
   const addRow = () => setDraft((p) => {
     const list = p ?? [];
     const last = list[list.length - 1];
-    // วันครบกำหนดของงวดใหม่ = เดือนถัดจากงวดสุดท้าย (เดาให้ แก้ต่อได้)
-    let due = "";
+    // วันครบกำหนดของงวดใหม่ = เดือนถัดจากงวดสุดท้าย (เดาให้ แก้ต่อได้) · งวดแรกสุด = วันนี้
+    let due = list.length === 0 ? new Date().toISOString().slice(0, 10) : "";
     if (last?.due_date) {
       const [y, m, d] = last.due_date.split("-").map(Number);
       const nx = new Date(Date.UTC(y, m, 1));           // เดือนถัดไป (m คือ index เดือนถัดไปพอดี)
@@ -318,7 +325,8 @@ export function InstallmentsModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing, calc]);
 
-  const hasSchedule = rows.length > 0 || editing;
+  // มีตารางผ่อน (เวอร์ชัน) อยู่แล้ว → แก้ได้ แม้ยังไม่มีงวดสักงวด (ตารางเปล่าที่สร้างไว้ก่อน)
+  const hasSchedule = !!versionId;
 
   return (
     <>
@@ -329,9 +337,11 @@ export function InstallmentsModal({
         hasUnsavedChanges={dirty}
         title={`งวดผ่อนทั้งหมด${contractLabel ? ` — ${contractLabel}` : ""}`}
         description={
-          versionNo
-            ? `ตารางผ่อนที่ใช้อยู่ (เวอร์ชัน ${versionNo}) · ${shown.length} งวด${editing ? " · กำลังแก้ — กด “บันทึกตารางผ่อน” เมื่อเสร็จ" : ""}`
-            : "ยังไม่มีตารางผ่อนที่ใช้อยู่ — กดปุ่ม 🧾 สร้างตารางผ่อน ในหน้าสัญญาก่อน"
+          !versionNo
+            ? "ยังไม่มีตารางผ่อนที่ใช้อยู่ — กดปุ่ม 🧾 สร้างตารางผ่อน ในหน้าสัญญาก่อน"
+            : shown.length === 0 && !editing
+              ? `ตารางผ่อนเวอร์ชัน ${versionNo} ยังไม่มีงวด — กด “✏️ แก้ยอดรายงวด” แล้วเพิ่มงวดเอง หรือวางทั้งใบจาก Excel`
+              : `ตารางผ่อนที่ใช้อยู่ (เวอร์ชัน ${versionNo}) · ${shown.length} งวด${editing ? " · กำลังแก้ — กด “บันทึกตารางผ่อน” เมื่อเสร็จ" : ""}`
         }
         size="xl"
         resizable
@@ -416,7 +426,11 @@ export function InstallmentsModal({
               countUnit="งวด"
               dense
               maxHeightClass="max-h-[52vh]"
-              emptyText="ยังไม่มีงวดผ่อน — สร้างตารางผ่อนก่อน"
+              emptyText={!versionId
+                ? "ยังไม่มีตารางผ่อน — กด 🧾 สร้างตารางผ่อน ในหน้าสัญญาก่อน"
+                : editing
+                  ? "ยังไม่มีงวด — กด ➕ เพิ่มงวด ทีละงวด หรือ 📋 วางจาก Excel ทั้งใบ"
+                  : "ตารางนี้ยังไม่มีงวด — กด ✏️ แก้ยอดรายงวด เพื่อเริ่มใส่งวด"}
               actions={
                 <div className="flex items-center gap-2">
                   {canEdit && hasSchedule && !editing && (
