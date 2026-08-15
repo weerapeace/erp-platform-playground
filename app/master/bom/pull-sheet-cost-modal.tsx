@@ -13,9 +13,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
+import { HoverImage } from "@/components/hover-image";
 import { emptyLine, type EditorLine } from "./line-editor";
 
-type SheetRow = { id: string; code: string; name: string; status?: string | null };
+// cover_url = รูปแรกของใบงาน (API /api/design-sheets ส่งมาให้อยู่แล้ว)
+type SheetRow = { id: string; code: string; name: string; status?: string | null; cover_url?: string | null };
 type CostLine = {
   item_name: string | null; group_name: string | null; parent_code?: string | null;
   width_cm: number | null; length_cm: number | null; pieces: number | null;
@@ -116,6 +118,8 @@ export function PullSheetCostModal({
               {results.map((s) => (
                 <button key={s.id} type="button" onClick={() => void pickSheet(s)}
                   className="w-full px-3 py-2 text-left hover:bg-blue-50 flex items-center gap-3">
+                  {/* รูปใบงาน — ชี้ที่รูปเพื่อดูใหญ่ (ของกลาง HoverImage) */}
+                  <span className="shrink-0"><HoverImage url={s.cover_url ?? null} size={40} previewSize={320} fallback="📐" /></span>
                   <code className="text-[11px] text-slate-400 font-mono shrink-0">{s.code}</code>
                   <span className="text-sm text-slate-700 truncate flex-1">{s.name}</span>
                 </button>
@@ -126,6 +130,7 @@ export function PullSheetCostModal({
           <>
             {/* หัว: ใบที่เลือก + เปลี่ยนใบ */}
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+              <HoverImage url={sheet.cover_url ?? null} size={32} previewSize={320} fallback="📐" />
               <code className="text-[11px] text-slate-400 font-mono">{sheet.code}</code>
               <span className="text-sm text-slate-700 truncate flex-1">{sheet.name}</span>
               <button type="button" onClick={() => { setSheet(null); setLines([]); }}
