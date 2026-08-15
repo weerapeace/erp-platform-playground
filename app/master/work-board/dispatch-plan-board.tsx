@@ -84,7 +84,7 @@ export function DispatchPlanBoard({
   onReorderDepts?: (orderedIds: string[]) => void;   // ลากสลับคอลัมน์แผนก → บันทึกลำดับ
   onManageDepts?: () => void;   // เปิดป๊อปอัปตั้งค่าแผนก (ซ่อน/แสดงโต๊ะ ฯลฯ)
   onStaffMoved?: () => void;    // ย้ายพนักงานเข้า/ออกโต๊ะแล้ว → ให้หน้าแม่โหลดรายชื่อ + เงินเดือนรวมใหม่
-  onUpdateWO?: (id: string, patch: { labor_cost?: number; assignees?: { id: string | null; name: string }[]; assignee_name?: string | null; assignee_id?: string | null; assignee_type?: string }) => Promise<void>;   // แก้ใบงานจริง (ของจริงเท่านั้น)
+  onUpdateWO?: (id: string, patch: { labor_cost?: number; assignees?: { id: string | null; name: string }[]; assignee_name?: string | null; assignee_id?: string | null; assignee_type?: string; department_id?: string | null; department_name?: string | null }, quiet?: boolean) => Promise<void>;   // แก้ใบงานจริง (ของจริงเท่านั้น) · quiet = ไม่เด้ง toast "บันทึกค่าแรงแล้ว"
   onCancelWO?: (id: string) => void | Promise<void>;   // ยกเลิกใบจ่ายงาน (ของจริง) → คืน qty กลับ "รอจ่าย"
   onSetCentralRate?: (info: { moNo: string; rate: number }) => void | Promise<void>;   // การ์ดร่าง: ใส่ค่าแรง → ตั้งเรตกลางสินค้า
   onPickDispatch?: (moNo: string, qty: number) => void;   // tablet: แตะการ์ดซ้ำ/กดเลือกโต๊ะ → เปิด popup จ่ายงาน (เลือกโต๊ะ+ช่าง)
@@ -151,7 +151,8 @@ export function DispatchPlanBoard({
   const setColWidth = (w: number) => { const v = Math.max(180, Math.min(480, Math.round(w))); setColW(v); try { localStorage.setItem("wb:planColW", String(v)); } catch { /* ignore */ } };
   // กลุ่มใบสั่งงาน (สำหรับแท็บกรองในคอลัมน์รอจ่าย)
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
-  const [groupTab, setGroupTab] = useState<string>("__all__");   // __all__ | ชื่อกลุ่ม | __none__
+  const [groupTab, setGroupTab] = useState<string>("__all__");   // __all__ | ชื่อกลุ่ม | __none__ (ใช้ทั้งบอร์ด: รอจ่าย + การ์ดในโต๊ะ)
+  const [boardSearch, setBoardSearch] = useState("");             // ค้นหาทั้งบอร์ด (รหัส/ชื่อ/เลขใบ/ช่าง)
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
     setMoGroups(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } })(); }, []);
   const groupsOf = (moNo: string) => moGroups.filter((g) => g.mo_nos.includes(moNo)).map((g) => g.name);
@@ -276,11 +277,37 @@ export function DispatchPlanBoard({
     catch { void load(); }
   };
   // ลากการ์ด (HTML5) — เก็บข้อมูลว่ากำลังลากอะไร
-  const dragRef = useRef<{ kind: "pending" | "draft"; moNo: string; lineId?: string } | null>(null);
+  const dragRef = useRef<{ kind: "pending" | "draft" | "wo"; moNo: string; lineId?: string; woId?: string; fromDept?: string } | null>(null);
   const dropToDept = (dept: DeptLite) => {
     const d = dragRef.current; dragRef.current = null; if (!d) return;
     if (d.kind === "pending") void addLineFor(d.moNo, dept);
     else if (d.kind === "draft" && d.lineId) void moveLine(d.lineId, dept);
+    else if (d.kind === "wo" && d.woId) void moveWO(d.woId, dept, null, d.fromDept);
+  };
+
+  /**
+   * ลากใบจ่ายงานจริงข้ามโต๊ะ / เข้าช่างคนใดคนหนึ่ง (เดสก์ท็อปเท่านั้น)
+   *  - ย้ายโต๊ะเฉย ๆ: ถ้าช่างเดิมไม่ได้อยู่โต๊ะปลายทาง → ล้างเป็น "ทั้งโต๊ะ" (กันชื่อช่างผิดโต๊ะ)
+   *  - ลากทับหัวกลุ่มช่าง: ย้ายโต๊ะ + ตั้งช่างคนนั้นให้เลย
+   */
+  const moveWO = async (woId: string, dept: DeptLite, craft: CraftLite | null, fromDept?: string) => {
+    if (!onUpdateWO) return;
+    const w = realWOs.find((x) => x.id === woId);
+    if (!w) return;
+    if (fromDept === dept.id && !craft) return;                       // โต๊ะเดิม + ไม่ได้ระบุช่าง = ไม่ต้องทำอะไร
+    const patch: Parameters<NonNullable<typeof onUpdateWO>>[1] = { department_id: dept.id, department_name: dept.name };
+    if (craft) {
+      patch.assignee_type = "craftsman"; patch.assignee_id = craft.id; patch.assignee_name = craft.name;
+      patch.assignees = [{ id: craft.id, name: craft.name }];
+    } else if (fromDept !== dept.id) {
+      // ย้ายข้ามโต๊ะ: ช่างเดิมยังอยู่โต๊ะปลายทางไหม (โต๊ะช่างเหมารับได้ทุกคน)
+      const keep = /เหมา/.test(dept.name) || craftsmen.some((c) => c.name === w.assignee_name && c.department_id === dept.id);
+      if (!keep) { patch.assignee_type = "department"; patch.assignee_id = null; patch.assignee_name = dept.name; patch.assignees = []; }
+    }
+    try {
+      await onUpdateWO(woId, patch, true);
+      toast.success(craft ? `ย้าย ${w.product_sku ?? "งาน"} → ${dept.name} · ${craft.name}` : `ย้าย ${w.product_sku ?? "งาน"} → ${dept.name}`);
+    } catch { /* parent toast */ }
   };
   // ลากสลับคอลัมน์แผนก (C4)
   const deptDragRef = useRef<string | null>(null);
@@ -328,7 +355,12 @@ export function DispatchPlanBoard({
   };
 
   const deptCraftsmen = (dept: DeptLite) => /เหมา/.test(dept.name) ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id);
-  const visiblePending = pending.filter((p) => availOf(p) > 0 && inGroupTab(p.mo_no));
+  // ค้นหา/กรองกลุ่ม — ใช้กับทั้งช่องรอจ่ายและการ์ดในโต๊ะ (ของจริง + ร่าง)
+  const sq = boardSearch.trim().toLowerCase();
+  const hitText = (...vals: (string | null | undefined)[]) => !sq || vals.some((v) => (v ?? "").toLowerCase().includes(sq));
+  const visiblePending = pending.filter((p) => availOf(p) > 0 && inGroupTab(p.mo_no) && hitText(p.product_sku, p.product_name, p.mo_no));
+  const showWO = (w: WOLite) => inGroupTab(w.mo_no) && hitText(w.product_sku, w.product_name, w.mo_no, w.assignee_name);
+  const showLine = (l: DispatchPlanLine) => inGroupTab(l.mo_no ?? "") && hitText(l.product_sku, l.product_name, l.mo_no, l.assignee_name);
   // โหมดแท็บเล็ต: โฟกัสทีละโต๊ะ → เห็น 2 ช่อง (รอจ่าย + โต๊ะที่เลือก) ลดการเลื่อนหาคอลัมน์
   const focusedId = tablet ? (departments.some((d) => d.id === focusDept) ? focusDept : departments[0]?.id ?? null) : null;
   const shownDepts = tablet ? departments.filter((d) => d.id === focusedId) : departments;
@@ -445,6 +477,26 @@ export function DispatchPlanBoard({
         </div>
       )}
 
+      {/* 🔍 ค้นหา + กรองกลุ่มงาน — มีผลทั้งช่องรอจ่ายและการ์ดในทุกโต๊ะ */}
+      {!loading && (
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <input value={boardSearch} onChange={(e) => setBoardSearch(e.target.value)} placeholder="🔍 ค้นหา รหัสสินค้า / ชื่อ / เลขใบสั่งผลิต / ช่าง…"
+            className="h-8 px-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 min-w-[240px] flex-1 max-w-md" />
+          {boardSearch && <button onClick={() => setBoardSearch("")} className="h-8 px-2 text-[11px] text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg bg-white">✕ ล้างคำค้น</button>}
+          {moGroups.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {([["__all__", "🗂 ทุกกลุ่ม"], ...moGroups.map((g) => [g.name, g.name] as [string, string]), ["__none__", "ยังไม่จับกลุ่ม"]] as [string, string][]).map(([key, label]) => (
+                <button key={key} type="button" onClick={() => setGroupTab(key)}
+                  className={`text-[11px] px-2 py-1 rounded-full border ${groupTab === key ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>{label}</button>
+              ))}
+            </div>
+          )}
+          {(boardSearch || groupTab !== "__all__") && (
+            <span className="text-[11px] text-violet-600">กำลังกรองอยู่ — ตัวเลขบนหัวโต๊ะนับเฉพาะที่เห็น</span>
+          )}
+        </div>
+      )}
+
       {loading ? <div className="text-center py-10 text-slate-400 text-sm">กำลังโหลดแผน…</div> : (
         <div className="grid gap-2.5" style={{ gridTemplateColumns: tablet ? "1fr 1fr" : `repeat(auto-fill, minmax(${colW}px, 1fr))` }}>
           {/* คอลัมน์รอจ่าย */}
@@ -460,15 +512,6 @@ export function DispatchPlanBoard({
                   className="text-slate-300 hover:text-indigo-600 text-[13px] leading-none">⛶</button>
               </span>
             </div>
-            {/* แท็บกรองตามกลุ่มใบสั่งงาน */}
-            {moGroups.length > 0 && (
-              <div className="flex flex-wrap gap-1 mb-2">
-                {([["__all__", "ทั้งหมด"], ...moGroups.map((g) => [g.name, g.name] as [string, string]), ["__none__", "ยังไม่จับกลุ่ม"]] as [string, string][]).map(([key, label]) => (
-                  <button key={key} type="button" onClick={() => setGroupTab(key)}
-                    className={`text-[11px] px-2 py-0.5 rounded-full border ${groupTab === key ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>{label}</button>
-                ))}
-              </div>
-            )}
             {visiblePending.map((p) => {
               const on = selected === p.mo_no;
               return (
@@ -550,8 +593,8 @@ export function DispatchPlanBoard({
 
           {/* คอลัมน์แผนก (แท็บเล็ต = เฉพาะโต๊ะที่โฟกัส) */}
           {shownDepts.map((d) => {
-            const reals = realByDept.get(d.id) ?? [];
-            const drafts = draftByDept.get(d.id) ?? [];
+            const reals = (realByDept.get(d.id) ?? []).filter(showWO);
+            const drafts = (draftByDept.get(d.id) ?? []).filter(showLine);
             const totQty = drafts.reduce((a, l) => a + (Number(l.qty) || 0), 0) + reals.reduce((a, w) => a + (Number(w.qty) || 0), 0);
             const totLabor = drafts.reduce((a, l) => a + lineLabor(l), 0) + reals.reduce((a, w) => a + woLabor(w), 0);
             const canDrop = editable && !!selected;
@@ -593,7 +636,18 @@ export function DispatchPlanBoard({
                   return [...byWorker.entries()].map(([worker, ws]) => (
                   <div key={"rw:" + (worker || "__none__")}>
                     {showHeads && (
-                      <div className="flex items-center justify-between text-[10px] font-medium mt-1 mb-0.5 px-0.5 text-violet-700">
+                      <div
+                        onDragOver={(e) => { if (realMode && editable && !tablet && dragRef.current?.kind === "wo") { e.preventDefault(); e.stopPropagation(); } }}
+                        onDrop={(e) => {
+                          if (!(realMode && editable && !tablet)) return;
+                          const dr = dragRef.current;
+                          if (dr?.kind !== "wo" || !dr.woId) return;
+                          e.stopPropagation(); dragRef.current = null;
+                          const craft = craftsmen.find((c) => c.name === worker) ?? null;
+                          void moveWO(dr.woId, d, craft, dr.fromDept);
+                        }}
+                        title={realMode && editable && !tablet ? "ลากการ์ดมาวางตรงนี้ = ย้ายงานเข้าช่างคนนี้" : undefined}
+                        className="flex items-center justify-between text-[10px] font-medium mt-1 mb-0.5 px-0.5 text-violet-700 rounded hover:bg-violet-50">
                         <span className="truncate">👤 {worker || "ทั้งโต๊ะ (ไม่ระบุช่าง)"}</span>
                         <span className="text-slate-400 shrink-0">{fmt(ws.reduce((a, x) => a + (Number(x.qty) || 0), 0))} ชิ้น · {baht(ws.reduce((a, x) => a + woLabor(x), 0))}</span>
                       </div>
@@ -605,6 +659,13 @@ export function DispatchPlanBoard({
                   const editing = laborEditId === w.id;
                   return (
                   <CardShell key={w.id} dim={!realMode} thumbUrl={w.image_url} sku={w.product_sku}
+                    drag={canEditWO && !tablet ? (
+                      <span draggable
+                        onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "wo", moNo: w.mo_no, woId: w.id, fromDept: d.id }; deptDragRef.current = null; }}
+                        onClick={(e) => e.stopPropagation()}
+                        title="ลากย้ายโต๊ะ · ลากไปวางที่ชื่อช่างเพื่อย้ายเข้าช่างคนนั้น"
+                        className="shrink-0 cursor-move text-slate-300 hover:text-indigo-600 select-none">⠿</span>
+                    ) : null}
                     actions={<>
                       <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty }); }} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">📋</button>
                       {/* X: ย้อนการ์ดกลับ "รอจ่าย" (เฉพาะของจริง + ยังไม่ส่งงานคืน) — กด 1 ครั้ง = ติดอาวุธ, ยืนยันด้านล่าง */}

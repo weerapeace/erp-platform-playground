@@ -118,7 +118,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 // PATCH — แก้ใบงานจริง (ค่าแรง / ผู้รับงาน) หลังจ่ายแล้ว
-type PatchBody = { id?: string; labor_cost?: number | null; assignee_type?: string | null; assignee_id?: string | null; assignee_name?: string | null; assignees?: { id: string | null; name: string }[] };
+type PatchBody = { id?: string; labor_cost?: number | null; assignee_type?: string | null; assignee_id?: string | null; assignee_name?: string | null; assignees?: { id: string | null; name: string }[];
+  // ย้ายโต๊ะ (ลากการ์ดข้ามคอลัมน์บนบอร์ด)
+  department_id?: string | null; department_name?: string | null; stage?: string | null };
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
@@ -133,6 +135,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("assignee_id" in body)   patch.assignee_id   = body.assignee_id ?? null;
   if ("assignees" in body)     patch.assignees     = Array.isArray(body.assignees) ? body.assignees : [];
   if ("assignee_name" in body) patch.assignee_name = body.assignee_name ?? null;
+  // ย้ายโต๊ะ — ลากการ์ดใบจ่ายงานข้ามคอลัมน์ (บอร์ด "ของจริง")
+  if ("department_id" in body)   patch.department_id   = body.department_id ?? null;
+  if ("department_name" in body) patch.department_name = body.department_name ?? null;
+  if ("stage" in body)           patch.stage           = body.stage ?? null;
   if (Object.keys(patch).length === 1) return NextResponse.json({ id: body.id, error: null });   // มีแค่ updated_at = ไม่มีอะไรแก้
 
   const admin = supabaseAdmin();

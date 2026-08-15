@@ -1277,11 +1277,12 @@ function WorkBoardPageInner() {
             onCancelWO={async (id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) await cancelWO(wo); }}
             onSetCentralRate={setCentralRate}
             onPickDispatch={(moNo, qty) => { const mo = board.pending.find((x) => x.mo_no === moNo); if (mo) { openDispatch(mo, null); if (qty > 0) setDispQty(qty); } }}
-            onUpdateWO={async (id, patch) => {
+            onUpdateWO={async (id, patch, quiet) => {
               try {
                 const res = await apiFetch("/api/mo/work-orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...patch }) });
                 const j = await res.json(); if (j.error) throw new Error(j.error);
-                toast.success("บันทึกค่าแรงแล้ว"); await load(true);
+                if (!quiet) toast.success("บันทึกแล้ว");   // quiet = ลากย้ายโต๊ะ (บอร์ดเด้ง toast เองพร้อมชื่อโต๊ะ)
+                await load(true);
               } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); throw e; }
             }}
             onOpenWork={(info) => {
