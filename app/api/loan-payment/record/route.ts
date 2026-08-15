@@ -4,7 +4,8 @@
  *
  * body: {
  *   contract_id, payment_date?, amount, paid_from?, reference?,
- *   principal?, interest?, penalty?, fee?     // แยกยอดตามใบเสร็จธนาคาร (ไม่ส่ง = ให้ระบบเดา)
+ *   principal?, interest?, penalty?, fee?,    // แยกยอดตามใบเสร็จธนาคาร (ไม่ส่ง = ให้ระบบเดา)
+ *   receipt_no?, receipt_image?               // เลขที่ใบเสร็จ + รูปใบเสร็จ (R2 key)
  * }
  *
  * แยกยอดมา → ตัดตามช่อง (ดอกเข้าดอก เงินต้นเข้าเงินต้น ค่าธรรมเนียม/ดอกผิดนัดเข้าช่องตัวเอง)
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     contract_id?: string; payment_date?: string | null; amount?: number;
     paid_from?: string; reference?: string;
     principal?: number; interest?: number; penalty?: number; fee?: number;
+    receipt_no?: string; receipt_image?: string;
   };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -46,6 +48,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const interest  = money(body.interest);
   const penalty   = money(body.penalty);
   const fee       = money(body.fee);
+  const receipt_no    = typeof body.receipt_no === "string" ? body.receipt_no.trim().slice(0, 120) : "";
+  const receipt_image = typeof body.receipt_image === "string" && /^[a-zA-Z0-9._/-]*$/.test(body.receipt_image) ? body.receipt_image : "";
 
   if (!contract_id) return NextResponse.json({ error: "กรุณาเลือกสัญญาเงินกู้" }, { status: 400 });
   if (amount <= 0) return NextResponse.json({ error: "ยอดจ่ายต้องมากกว่า 0" }, { status: 400 });
@@ -68,6 +72,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     p_interest: interest,
     p_penalty: penalty,
     p_fee: fee,
+    p_receipt_no: receipt_no,
+    p_receipt_image: receipt_image,
   });
   if (error) return NextResponse.json({ error: "บันทึกการจ่ายไม่สำเร็จ: " + error.message }, { status: 500 });
 
@@ -76,7 +82,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     entityType: "loan_payments",
     entityId: data as string,
     actorId: user?.id,
-    metadata: { contract_id, amount, split: split > 0 ? { principal, interest, penalty, fee } : null },
+    metadata: { contract_id, amount, split: split > 0 ? { principal, interest, penalty, fee } : null, receipt_no, has_image: !!receipt_image },
   });
 
   return NextResponse.json({ payment_id: data, error: null });

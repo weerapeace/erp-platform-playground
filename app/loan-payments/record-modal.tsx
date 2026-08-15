@@ -7,11 +7,13 @@
  *   - แยกแล้ว → ระบบตัดตามช่องที่กรอก (ผลรวมต้องเท่ากับยอดจ่ายรวม)
  *   - ไม่แยก  → ระบบตัดดอกเบี้ยก่อนแล้วเงินต้นให้เอง (พฤติกรรมเดิม)
  * ช่องเงินใช้ของกลาง MoneyInput (มีลูกน้ำ) · ป้ายสัญญาโชว์เลขที่บัญชีด้วย
+ * แนบรูปใบเสร็จแล้วกด "อ่านจากรูป" ให้ AI กรอกยอดให้ได้ (ตัวช่วย — ต้องตรวจก่อนบันทึกเสมอ)
  */
 import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPFormField, ERPInput, ERPSelect } from "@/components/form";
 import { MoneyInput } from "@/components/money-input";
+import { ImageInput } from "@/components/image-input";
 import { apiFetch } from "@/lib/api";
 import { formatAmount } from "@/lib/money";
 
@@ -35,6 +37,7 @@ type SplitKey = typeof SPLIT_FIELDS[number]["key"];
 const EMPTY = {
   contract_id: "", payment_date: "", amount: "", paid_from: "", reference: "",
   principal: "", interest: "", penalty: "", fee: "",
+  receipt_no: "",
 };
 
 const moneyCls = "w-full h-9 px-3 text-sm tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500";
@@ -51,6 +54,9 @@ export function RecordPaymentModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const [f, setF] = useState({ ...EMPTY });
+  const [imageKey, setImageKey] = useState<string | null>(null);
+  const [reading, setReading] = useState(false);
+  const [readNote, setReadNote] = useState("");
 
   // เปิดจากหน้าสัญญา → ตั้งสัญญาให้เลย
   useEffect(() => {
@@ -95,6 +101,50 @@ export function RecordPaymentModal({
     set("principal", String(Math.round((n2(f.principal) + diff) * 100) / 100));
   };
 
+  /** ให้ AI อ่านรูปใบเสร็จแล้วกรอกช่องให้ — ผู้ใช้ตรวจ/แก้ก่อนกดบันทึกเสมอ */
+  const readReceipt = async () => {
+    if (!imageKey) return;
+    setReading(true); setErr(""); setReadNote("");
+    try {
+      const res = await apiFetch("/api/loan-payment/read-receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: imageKey }),
+      });
+      const j = await res.json();
+      if (j?.error) { setReadNote(`อ่านรูปไม่ได้: ${j.error} — กรอกเองได้เลย`); setReading(false); return; }
+
+      const num = (v: unknown) => (Number(v) > 0 ? String(Number(v)) : "");
+      setF((p) => ({
+        ...p,
+        amount:      num(j.total)     || p.amount,
+        principal:   num(j.principal) || p.principal,
+        interest:    num(j.interest)  || p.interest,
+        penalty:     num(j.penalty)   || p.penalty,
+        fee:         num(j.fee)       || p.fee,
+        payment_date: (j.payment_date as string) || p.payment_date,
+        receipt_no:   (j.receipt_no as string)   || p.receipt_no,
+      }));
+
+      const got = [
+        Number(j.total) > 0 ? "ยอดรวม" : "",
+        Number(j.principal) > 0 ? "เงินต้น" : "",
+        Number(j.interest) > 0 ? "ดอกเบี้ย" : "",
+        Number(j.penalty) > 0 ? "ดอกผิดนัด" : "",
+        Number(j.fee) > 0 ? "ค่าธรรมเนียม" : "",
+        j.payment_date ? "วันที่" : "",
+        j.receipt_no ? "เลขที่ใบเสร็จ" : "",
+      ].filter(Boolean);
+      setReadNote(got.length
+        ? `อ่านได้: ${got.join(" · ")} — กรุณาตรวจตัวเลขก่อนบันทึก${j.split_matches === false ? " ⚠ ยอดแยกรวมไม่ตรงกับยอดรวมที่อ่านได้" : ""}`
+        : "อ่านตัวเลขจากรูปนี้ไม่ได้ — กรอกเองได้เลย");
+    } catch {
+      setReadNote("อ่านรูปไม่สำเร็จ — กรอกเองได้เลย");
+    } finally {
+      setReading(false);
+    }
+  };
+
   const submit = async () => {
     setErr("");
     if (!f.contract_id) { setErr("กรุณาเลือกสัญญาเงินกู้"); return; }
@@ -113,12 +163,14 @@ export function RecordPaymentModal({
           reference: f.reference,
           principal: n2(f.principal), interest: n2(f.interest),
           penalty: n2(f.penalty), fee: n2(f.fee),
+          receipt_no: f.receipt_no, receipt_image: imageKey ?? "",
         }),
       });
       const j = await res.json();
       if (!res.ok || j?.error) { setErr(j?.error || "บันทึกไม่สำเร็จ"); setSaving(false); return; }
       setSaving(false);
       setF({ ...EMPTY, contract_id: contractId ?? "" });
+      setImageKey(null); setReadNote("");
       onCreated();
     } catch {
       setErr("เกิดข้อผิดพลาดในการเชื่อมต่อ");
@@ -169,6 +221,27 @@ export function RecordPaymentModal({
           </div>
         )}
 
+        {/* รูปใบเสร็จ + ให้ AI อ่านยอดให้ */}
+        <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-slate-700">📎 รูปใบเสร็จ / สลิป</span>
+            <button type="button" onClick={readReceipt} disabled={!imageKey || reading}
+              className="h-8 px-3 text-xs font-medium rounded-lg border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              title={imageKey ? "ให้ระบบอ่านยอดจากรูปมากรอกให้" : "แนบรูปก่อน"}>
+              {reading ? "กำลังอ่านรูป..." : "✨ อ่านจากรูป"}
+            </button>
+          </div>
+          <ImageInput value={imageKey} onChange={setImageKey} folder="loan-payments" />
+          {readNote && (
+            <div className={`text-[11px] rounded-md px-2.5 py-1.5 border ${
+              readNote.startsWith("อ่านได้") ? "bg-violet-50 border-violet-200 text-violet-700" : "bg-amber-50 border-amber-200 text-amber-700"
+            }`}>{readNote}</div>
+          )}
+          <p className="text-[11px] text-slate-400">
+            ระบบอ่านให้เป็น &ldquo;ตัวช่วยกรอก&rdquo; เท่านั้น — ตรวจตัวเลขทุกช่องก่อนกดบันทึกเสมอ
+          </p>
+        </div>
+
         <div className="grid grid-cols-2 gap-4">
           <ERPFormField label="ยอดจ่ายรวมทั้งหมด" required hint="ยอดที่จ่ายจริงทั้งก้อน">
             <MoneyInput value={f.amount} onChange={(raw) => set("amount", raw)} placeholder="0.00" className={moneyCls} />
@@ -215,6 +288,9 @@ export function RecordPaymentModal({
         </div>
 
         <div className="grid grid-cols-2 gap-4">
+          <ERPFormField label="เลขที่ใบเสร็จรับเงิน" hint="เลขที่ใบเสร็จที่ธนาคารออกให้">
+            <ERPInput value={f.receipt_no} onChange={(e) => set("receipt_no", e.target.value)} placeholder="เช่น RC-2569-000123" />
+          </ERPFormField>
           <ERPFormField label="จ่ายจากบัญชี">
             <ERPInput value={f.paid_from} onChange={(e) => set("paid_from", e.target.value)} placeholder="เช่น KBANK 123-4-56789-0" />
           </ERPFormField>
