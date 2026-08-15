@@ -136,6 +136,9 @@ const WO_STATUS: Record<string, { label: string; cls: string }> = {
   done:           { label: "รับครบ",         cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
 };
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
+// วันที่ "วันนี้" ตามเวลาเครื่อง (เวลาไทย) — ห้ามปล่อยให้ DB ใส่ CURRENT_DATE เอง เพราะนั่นคือเวลา UTC
+// (เที่ยงคืน–ตี 7 บ้านเราจะถูกบันทึกเป็นเมื่อวาน)
+const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 const ZONE_W = 220, HEADER_H = 44, NOTE_H = 26, CARD_W = 150, CARD_SLOT = 228, GAP_C = 14, PENDING_W = 3 * 150 + 2 * 14 + 24, PAD = 12, GAP = 40;
 const ZONES_KEY = "erp-workboard-zones:v2", ZONESIZE_KEY = "erp-workboard-zonesizes:v2", CARDPOS_KEY = "erp-workboard-cards:v2";
@@ -685,7 +688,7 @@ function WorkBoardPageInner() {
     if (recvLabor.trim() === "") { toast.error("กรุณาใส่ค่าแรงก่อนส่งงาน"); return; }
     setRecvSaving(true);
     try {
-      const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: detailWO.id, qty: recvQty, wage: Number(recvLabor) || 0 }) });
+      const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: detailWO.id, qty: recvQty, wage: Number(recvLabor) || 0, submitted_at: todayLocal() }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกส่งงานแล้ว"); setDetailWO(null); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
@@ -747,7 +750,7 @@ function WorkBoardPageInner() {
     setRecvSaving(true);
     try {
       if (saveLaborBom) await persistLabor(clWO);   // บันทึกค่าแรงกลับเข้า BOM (ถ้าติ๊ก)
-      const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: clWO.id, qty: recvQty, wage: Number(recvLabor) || 0 }) });
+      const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: clWO.id, qty: recvQty, wage: Number(recvLabor) || 0, submitted_at: todayLocal() }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกส่งงานแล้ว"); closeChecklist();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }

@@ -64,11 +64,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (qty > remaining && !allowOver) return NextResponse.json({ error: `ส่งเกินจำนวนที่เหลือ (${remaining})` }, { status: 400 });
   const newReceived = Number(wo.received_qty ?? 0) + qty;
 
+  // วันที่ส่งงาน — หน้าจอส่งมาได้ (เลือกวัน/ลงย้อนหลัง)
+  // ⚠️ ถ้าไม่ส่งมา ฐานข้อมูลใส่ CURRENT_DATE ให้ ซึ่งเป็นวันที่ตามเวลา UTC
+  //    → ช่วงเที่ยงคืน–07:00 เวลาไทย จะถูกบันทึกเป็น "เมื่อวาน" (กับดัก timezone เดิมของโปรเจกต์)
+  const submittedAt = /^\d{4}-\d{2}-\d{2}$/.test(String(body.submitted_at ?? "")) ? String(body.submitted_at) : null;
+
   // 1) บันทึกการส่งงานรายครั้ง
   const { error: insErr } = await admin.from("wo_submissions").insert({
     wo_id, wo_no: wo.wo_no, mo_no: wo.mo_no, sku: wo.product_sku, sku_name: wo.product_name ?? wo.product_sku,
     craftsman_id: effWorkerId, craftsman_name: effWorker, department_name: wo.department_name,
     qty, wage, due_date: wo.due_date, created_by: user?.id ?? null, created_by_name: user?.email ?? null,
+    ...(submittedAt ? { submitted_at: submittedAt } : {}),
   });
   if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
 

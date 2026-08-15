@@ -150,22 +150,26 @@ export default function QcWarehousePage() {
   const [sendQty, setSendQty] = useState("");
   const [sendWage, setSendWage] = useState("");
   const [sendSaveBom, setSendSaveBom] = useState(false);   // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง)
-  const [sendCart, setSendCart] = useState<Record<string, { qty: number; wage: number; saveBom: boolean }>>({});
+  // วันที่ส่งงาน — ค่าเริ่มต้น "วันนี้" ตามเวลาเครื่อง (เวลาไทย)
+  // ⚠️ เดิมปล่อยให้ฐานข้อมูลใส่ CURRENT_DATE ซึ่งเป็นเวลา UTC → ส่งงานหลังเที่ยงคืน–ตี 7 จะถูกบันทึกเป็น "เมื่อวาน"
+  const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const [sendDate, setSendDate] = useState(todayStr);
+  const [sendCart, setSendCart] = useState<Record<string, { qty: number; wage: number; saveBom: boolean; date: string }>>({});
   const [sendSaving, setSendSaving] = useState(false);
-  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendWage(String(Math.round(w.rate * remain * 100) / 100)); setSendSaveBom(w.rate <= 0); };
+  const openSend = (w: QcDeskCard) => { const remain = Math.max(0, w.qty - w.received_qty); setSendModal(w); setSendQty(String(remain)); setSendWage(String(Math.round(w.rate * remain * 100) / 100)); setSendSaveBom(w.rate <= 0); setSendDate(todayStr()); };
   // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง — ไม่ระบุช่าง) ผ่านของกลาง /api/bom/labor-rates (หา BOM จาก product_sku ให้เอง)
   const saveBomRate = async (sku: string | null, perUnit: number) => {
     if (!sku || !(perUnit > 0)) return;
     try { await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product_sku: sku, rate: perUnit }) }); } catch { /* ignore */ }
   };
-  const postSubmission = async (woId: string, qty: number, wage: number): Promise<string | null> => {
-    try { const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: woId, qty, wage }) }); const j = await res.json(); return (j.error as string) ?? null; }
+  const postSubmission = async (woId: string, qty: number, wage: number, date?: string): Promise<string | null> => {
+    try { const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: woId, qty, wage, submitted_at: date || undefined }) }); const j = await res.json(); return (j.error as string) ?? null; }
     catch (e) { return e instanceof Error ? e.message : "ส่งงานไม่สำเร็จ"; }
   };
   const submitSendNow = async () => {
     if (!sendModal) return; const qty = num(sendQty); const wage = Number(sendWage) || 0;
     if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    setSendSaving(true); const err = await postSubmission(sendModal.id, qty, wage);
+    setSendSaving(true); const err = await postSubmission(sendModal.id, qty, wage, sendDate);
     if (!err && sendSaveBom && qty > 0 && wage > 0) await saveBomRate(sendModal.sku, Math.round((wage / qty) * 100) / 100);
     setSendSaving(false);
     if (err) { toast.error(err); return; }
@@ -174,14 +178,14 @@ export default function QcWarehousePage() {
   const addSendCart = () => {
     if (!sendModal) return; const qty = num(sendQty); const wage = Number(sendWage) || 0;
     if (qty <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, wage, saveBom: sendSaveBom } })); setSendModal(null);
+    setSendCart((c) => ({ ...c, [sendModal.id]: { qty, wage, saveBom: sendSaveBom, date: sendDate } })); setSendModal(null);
   };
   const removeSendCart = (woId: string) => setSendCart((c) => { const n = { ...c }; delete n[woId]; return n; });
   const submitSendCart = async () => {
     const ids = Object.keys(sendCart); if (ids.length === 0) return;
     setSendSaving(true); let ok = 0; const fails: string[] = [];
     for (const id of ids) {
-      const d = sendCart[id]; const err = await postSubmission(id, d.qty, d.wage);
+      const d = sendCart[id]; const err = await postSubmission(id, d.qty, d.wage, d.date);
       if (!err) { ok++; if (d.saveBom && d.qty > 0 && d.wage > 0) { const w = atDesks.find((x) => x.id === id); await saveBomRate(w?.sku ?? null, Math.round((d.wage / d.qty) * 100) / 100); } }
       else fails.push(id);
     }
@@ -829,6 +833,17 @@ export default function QcWarehousePage() {
                   <input type="number" min={0} step="any" value={sendWage} onChange={(e) => setSendWage(e.target.value)}
                     className="w-full h-10 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
               </div>
+              {/* วันที่ส่งงาน — ขึ้นวันนี้ให้ก่อน (ย้อนวันได้ ถ้าลงบันทึกทีหลัง) */}
+              <label className="block">
+                <span className="text-[11px] text-slate-500">วันที่ส่งงาน</span>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <input type="date" value={sendDate} onChange={(e) => setSendDate(e.target.value || todayStr())}
+                    className="h-10 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  {sendDate !== todayStr()
+                    ? <button type="button" onClick={() => setSendDate(todayStr())} className="h-7 px-2 text-[11px] text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50">↺ วันนี้</button>
+                    : <span className="text-[11px] text-slate-400">= วันนี้</span>}
+                </div>
+              </label>
               <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer w-fit">
                 <input type="checkbox" checked={sendSaveBom} onChange={(e) => setSendSaveBom(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
                 💾 บันทึกค่าแรงนี้กลับเข้า BOM (ราคากลาง/ชิ้น)
