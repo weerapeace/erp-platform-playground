@@ -90,11 +90,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let b: { id?: string; done?: boolean; assignee_name?: string | null }; try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  let b: { id?: string; done?: boolean; assignee_name?: string | null; job_name?: string; rate?: unknown; qty_per?: unknown };
+  try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const id = (b.id ?? "").trim();
   if (!id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
   const admin = supabaseAdmin();
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  // แก้รายละเอียดงานเหมาของใบนี้ (ชื่องาน / ฿ต่อชิ้น / จำนวนต่อใบ) — จำนวนรวมคิดใหม่ให้
+  if (b.job_name !== undefined) {
+    const nm = String(b.job_name).trim();
+    if (!nm) return NextResponse.json({ error: "ชื่องานห้ามว่าง" }, { status: 400 });
+    patch.job_name = nm;
+  }
+  if (b.rate !== undefined) patch.rate = Math.max(0, num(b.rate, 0));
+  if (b.qty_per !== undefined) {
+    const qp = Math.max(0, num(b.qty_per, 1));
+    patch.qty_per = qp;
+    // total_qty = qty_per × จำนวนที่สั่งของใบนั้น
+    const { data: row } = await admin.from("mo_piecework").select("mo_no").eq("id", id).maybeSingle();
+    const moNo = (row as { mo_no?: string } | null)?.mo_no ?? "";
+    if (moNo) {
+      const { data: mo } = await admin.from("manufacturing_orders").select("qty").eq("mo_no", moNo).maybeSingle();
+      patch.total_qty = qp * num((mo as { qty?: number } | null)?.qty, 0);
+    }
+  }
   // จ่าย/คืน งานเหมาให้ช่างเหมา (assignee_name) — ส่ง null = คืนเข้ารอจ่าย
   if (b.assignee_name !== undefined) patch.assignee_name = (b.assignee_name ?? "").toString().trim() || null;
   // กดเสร็จ/ยกเลิกเสร็จ

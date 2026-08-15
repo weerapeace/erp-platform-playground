@@ -351,7 +351,11 @@ function WorkBoardPageInner() {
   const [clIssues, setClIssues] = useState<MoIssue[] | null>(null);           // ปัญหา QC
   const [clHist, setClHist] = useState<DispatchHistRow[] | null>(null);       // ประวัติการจ่าย
   const [issType, setIssType] = useState(""); const [issSev, setIssSev] = useState("medium"); const [issQty, setIssQty] = useState("");
-  const [addPieceOpen, setAddPieceOpen] = useState(false);   // popup เพิ่มงานเหมาเข้า BOM
+  const [addPieceOpen, setAddPieceOpen] = useState(false);
+  // แก้/ลบ งานเหมารายแถว (ในแท็บ 🧵 งานเหมา)
+  const [pieceEditKey, setPieceEditKey] = useState<string | null>(null);
+  const [pieceEdit, setPieceEdit] = useState<{ job_name: string; rate: string; qty_per: string }>({ job_name: "", rate: "", qty_per: "" });
+  const [pieceBusy, setPieceBusy] = useState(false);   // popup เพิ่มงานเหมาเข้า BOM
   // popup ตั้งค่าแผนก (สร้าง/แก้/ลบ/โชว์-ซ่อน/หมายเหตุ/เรียงลำดับ)
   const [deptMgrOpen, setDeptMgrOpen] = useState(false);
   const [deptList, setDeptList] = useState<DeptFull[]>([]);
@@ -880,6 +884,69 @@ function WorkBoardPageInner() {
     try { const pr = await apiFetch(`/api/mo/piecework?mo_id=${encodeURIComponent(checklistMO.id)}`); const pj = await pr.json(); setClPieceRows((pj?.data ?? []) as MoPieceRow[]); } catch { /* ignore */ }
   }, [checklistMO]);
   // เลือก/ยกเลิก งานเหมารายชิ้นที่จะจ่าย (จากงานเหมาใน BOM ของสินค้า)
+  /** เปิดแก้บรรทัดงานเหมา (ชื่อ/เรต/จำนวนต่อใบ) */
+  const openPieceEdit = (r: MoPieceRow) => {
+    setPieceEditKey(r.key);
+    setPieceEdit({ job_name: r.job_name, rate: r.rate ? String(r.rate) : "", qty_per: String(r.qty_per ?? 1) });
+  };
+  /** บันทึกที่แก้ — ถ้าแถวนี้ยังไม่ได้ติ๊กจ่าย จะสร้างแถวของใบนี้ให้ (= ติ๊กจ่ายให้ด้วย) */
+  const savePieceEdit = async (r: MoPieceRow) => {
+    if (!canEdit || !checklistMO) return;
+    const name = pieceEdit.job_name.trim();
+    if (!name) { toast.error("ชื่องานห้ามว่าง"); return; }
+    const rate = Number(pieceEdit.rate) || 0;
+    const qtyPer = Math.max(0, Number(pieceEdit.qty_per) || 0);
+    setPieceBusy(true);
+    try {
+      if (r.selected_id) {
+        const res = await apiFetch("/api/mo/piecework", { method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: r.selected_id, job_name: name, rate, qty_per: qtyPer }) });
+        const j = await res.json(); if (j.error) throw new Error(j.error);
+      } else {
+        const res = await apiFetch("/api/mo/piecework", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mo_id: checklistMO.id, job_id: r.job_id, job_name: name, rate, qty_per: qtyPer, is_detail: r.is_detail, note: r.note }) });
+        const j = await res.json(); if (j.error) throw new Error(j.error);
+      }
+      setPieceEditKey(null);
+      await reloadPiece();
+      toast.success(r.selected_id ? "แก้งานเหมาแล้ว" : "แก้แล้ว + เลือกจ่ายงานนี้ในใบนี้ให้ด้วย");
+      void load(true);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setPieceBusy(false); }
+  };
+  /** ลบงานเหมา — แถวที่ติ๊กจ่ายแล้ว = เอาออกจากใบนี้ · แถวที่มาจากสูตร = เอาออกจากสูตร (กระทบใบอื่นในอนาคต) */
+  const deletePieceRow = async (r: MoPieceRow) => {
+    if (!canEdit || !checklistMO) return;
+    if (r.selected_id) {
+      if (!window.confirm(`เอา "${r.job_name}" ออกจากใบนี้?`)) return;
+      setPieceBusy(true);
+      try {
+        const res = await apiFetch(`/api/mo/piecework?id=${encodeURIComponent(r.selected_id)}`, { method: "DELETE" });
+        const j = await res.json(); if (j.error) throw new Error(j.error);
+        await reloadPiece(); toast.success("เอาออกจากใบนี้แล้ว"); void load(true);
+      } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+      finally { setPieceBusy(false); }
+      return;
+    }
+    // แถวที่มาจากสูตร (ยังไม่ได้ติ๊ก) → เอาออกจาก BOM
+    const bomCode = checklistMO.bom_code;
+    if (!bomCode) { toast.error("ใบนี้ไม่มีสูตร จึงลบงานจากสูตรไม่ได้"); return; }
+    if (!window.confirm(`เอา "${r.job_name}" ออกจาก "สูตร" (BOM ${bomCode})?
+
+มีผลกับใบสั่งผลิตที่จะสร้างใหม่ด้วย (ใบที่ติ๊กจ่ายไปแล้วไม่กระทบ)`)) return;
+    setPieceBusy(true);
+    try {
+      const cur = await apiFetch(`/api/bom/piecework?bom_code=${encodeURIComponent(bomCode)}`).then((x) => x.json());
+      const rows = ((cur.data ?? []) as { job_id: string | null; job_name: string; rate: number; note: string | null; is_detail: boolean; qty_per: number }[])
+        .filter((x) => !(x.job_name === r.job_name && (x.job_id ?? null) === (r.job_id ?? null)));
+      const res = await apiFetch("/api/bom/piecework", { method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bom_code: bomCode, lines: rows }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      await reloadPiece(); toast.success("เอาออกจากสูตรแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบจากสูตรไม่สำเร็จ"); }
+    finally { setPieceBusy(false); }
+  };
+
   const togglePiece = useCallback(async (key: string) => {
     if (!canEdit || !checklistMO) return;
     const cur = clPieceRows.find((r) => r.key === key); if (!cur) return;
@@ -1789,12 +1856,32 @@ function WorkBoardPageInner() {
                             <span className="text-[11px] font-medium text-slate-500">เลือกงานเหมาที่จะจ่าย</span>
                             {canEdit && <button onClick={() => setAddPieceOpen(true)} className="text-[11px] text-blue-600 hover:underline">➕ เพิ่มงานเข้า BOM</button>}
                           </div>
-                          <div className="grid grid-cols-[2rem_1fr_4.5rem_3.6rem] gap-2 px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span><span className="text-center">เสร็จ</span></div>
+                          <div className="grid grid-cols-[2rem_1fr_4.5rem_3.6rem_3.4rem] gap-2 px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span><span className="text-center">เสร็จ</span><span className="text-center">แก้/ลบ</span></div>
                           <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
                             {clPieceRows.map((r) => {
                               const done = r.status === "done";
+                              const editing = pieceEditKey === r.key;
+                              const editQty = (Number(pieceEdit.qty_per) || 0) * (checklistMO.qty || 0);
+                              if (editing) return (
+                                <div key={r.key} className="px-3 py-2 bg-amber-50/60 space-y-1.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <input autoFocus value={pieceEdit.job_name} onChange={(e) => setPieceEdit((v) => ({ ...v, job_name: e.target.value }))} placeholder="ชื่องาน"
+                                      className="flex-1 min-w-[120px] h-8 px-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                                    <input type="number" min={0} step="any" value={pieceEdit.rate} onChange={(e) => setPieceEdit((v) => ({ ...v, rate: e.target.value }))} placeholder="฿/ชิ้น" title="ค่าแรงต่อชิ้น"
+                                      className="w-20 h-8 px-2 text-sm text-right border border-amber-300 rounded-lg" />
+                                    <input type="number" min={0} step="any" value={pieceEdit.qty_per} onChange={(e) => setPieceEdit((v) => ({ ...v, qty_per: e.target.value }))} placeholder="ต่อใบ" title="จำนวนต่อสินค้า 1 ใบ"
+                                      className="w-16 h-8 px-2 text-sm text-right border border-amber-300 rounded-lg" />
+                                  </div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                                    <span>รวม {fmt(editQty)} ชิ้น{Number(pieceEdit.rate) > 0 ? ` · ฿${fmt(editQty * (Number(pieceEdit.rate) || 0))}` : ""}</span>
+                                    <button disabled={pieceBusy} onClick={() => void savePieceEdit(r)} className="ml-auto h-7 px-3 text-xs font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50">{pieceBusy ? "บันทึก…" : "บันทึก"}</button>
+                                    <button disabled={pieceBusy} onClick={() => setPieceEditKey(null)} className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-500">ยกเลิก</button>
+                                  </div>
+                                  {!r.selected_id && <p className="text-[10px] text-amber-600">บันทึกแล้วระบบจะติ๊ก “จ่ายงานนี้ในใบนี้” ให้เลย (ค่าที่แก้ใช้เฉพาะใบนี้)</p>}
+                                </div>
+                              );
                               return (
-                              <div key={r.key} className="grid grid-cols-[2rem_1fr_4.5rem_3.6rem] gap-2 px-3 py-2 items-center hover:bg-slate-50/60">
+                              <div key={r.key} className="grid grid-cols-[2rem_1fr_4.5rem_3.6rem_3.4rem] gap-2 px-3 py-2 items-center hover:bg-slate-50/60">
                                 <span className="flex justify-center"><input type="checkbox" checked={!!r.selected_id} disabled={!canEdit} onChange={() => togglePiece(r.key)} className="w-4 h-4 accent-blue-600" title="เลือกจ่ายงานนี้" /></span>
                                 <div className="min-w-0">
                                   <p className="text-sm text-slate-800 truncate">{r.job_name} {r.is_detail && <span className="text-[10px] text-amber-600">★ละเอียด</span>}{!r.in_bom && <span className="text-[10px] text-slate-400">(เพิ่มเอง)</span>}</p>
@@ -1809,6 +1896,18 @@ function WorkBoardPageInner() {
                                       {done ? "✓ เสร็จ" : "ทำเสร็จ"}
                                     </button>
                                   ) : <span className="text-[10px] text-slate-300">—</span>}
+                                </span>
+                                {/* แก้ / ลบ งานเหมาบรรทัดนี้ */}
+                                <span className="flex justify-center gap-0.5">
+                                  {canEdit && (
+                                    <button type="button" onClick={() => openPieceEdit(r)} title="แก้ชื่องาน / ค่าแรงต่อชิ้น / จำนวนต่อใบ"
+                                      className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50 text-xs">✎</button>
+                                  )}
+                                  {canEdit && (
+                                    <button type="button" disabled={pieceBusy} onClick={() => void deletePieceRow(r)}
+                                      title={r.selected_id ? "เอาออกจากใบนี้" : "เอาออกจากสูตร (BOM)"}
+                                      className="w-6 h-6 flex items-center justify-center rounded text-slate-300 hover:text-rose-600 hover:bg-rose-50 text-xs disabled:opacity-40">🗑</button>
+                                  )}
                                 </span>
                               </div>
                               );
