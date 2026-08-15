@@ -9,6 +9,7 @@
 
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
+import { DrawdownGrossHint } from "@/app/loan-drawdowns/gross-hint";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -48,6 +49,12 @@ const CONFIG: MasterCRUDConfig = {
     edit:   "loan_drawdowns.edit",
   },
   createDefaults: { status: "confirmed" },
+  // ใต้ช่องยอดเบิก → บอกว่าสัญญานี้เบิกได้อีกเท่าไหร่ (ของกลาง fieldHints)
+  fieldHints: {
+    gross_amount: ({ value, form, recordId }) => (
+      <DrawdownGrossHint value={value} contractId={String(form.loan_contract_id ?? "")} recordId={recordId} />
+    ),
+  },
   cellRenderers: {
     status: (v) => {
       const m = STATUS[String(v ?? "")];

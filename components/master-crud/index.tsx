@@ -463,6 +463,18 @@ export type MasterCRUDConfig = {
   cellRenderers?: Record<string, (value: unknown, row?: Record<string, unknown>) => React.ReactNode>;
   /** custom field ในฟอร์ม (key → renderForm) — merge เข้า field จาก Registry ได้ (คู่กับ cellRenderers) */
   formRenderers?: Record<string, FieldDef["renderForm"]>;
+  /**
+   * ของกลาง — บรรทัดข้อความ "สด" ใต้ช่องกรอก ที่คิดจากค่าอื่นในฟอร์มตอนนั้น
+   * (ต่างจาก help_text ในทะเบียนฟิลด์ ซึ่งเป็นข้อความตายตัว)
+   * เช่น "เบิกได้อีก ฿1,200,000" ใต้ช่องยอดเบิก · "สต๊อกคงเหลือ 25 ชิ้น" ใต้ช่องจำนวน
+   * key = ชื่อฟิลด์ · คืน null ถ้ายังไม่มีอะไรจะบอก
+   */
+  fieldHints?: Record<string, (ctx: {
+    value: unknown;
+    form: Record<string, unknown>;
+    recordId: string | null;
+    mode: "view" | "edit";
+  }) => React.ReactNode>;
   /** custom field ในหน้า "ดู" (key → renderDetail) — คู่กับ formRenderers */
   detailRenderers?: Record<string, FieldDef["renderDetail"]>;
   /** แถบ custom เหนือฟอร์ม "ตอนสร้างใหม่" เท่านั้น (เช่น แม่แบบ) — รับค่าฟอร์มปัจจุบัน + setter */
@@ -2207,6 +2219,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             className={common}
           />
         )}
+        {/* บรรทัดข้อความสดใต้ช่อง (ของกลาง config.fieldHints) เช่น "เบิกได้อีก ฿1,200,000" */}
+        {config.fieldHints?.[f.key]?.({ value: v, form, recordId: editingId, mode: drawerMode })}
         {hasErr && (
           <div className="text-[11px] text-red-600 mt-1 space-y-0.5 flex flex-col">
             {errs.map((m, i) => <span key={i} className="flex items-center gap-1">⚠ <span>{m}</span></span>)}
