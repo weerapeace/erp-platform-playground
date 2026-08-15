@@ -127,13 +127,14 @@ export function DispatchPlanBoard({
   const [assignPopup, setAssignPopup] = useState<{ wo: WOLite; dept: DeptLite } | null>(null);   // เลือกช่าง (หลายคน) ของใบงานจริง
   const [assignSel, setAssignSel] = useState<Set<string>>(new Set());
   const [assignSaving, setAssignSaving] = useState(false);
+  const [assignSearch, setAssignSearch] = useState("");   // ค้นหาช่างในป๊อปเลือกช่าง
   // เปิด/บันทึก ตัวเลือกช่างหลายคน
   const craftsOfDept = useCallback((dept: DeptLite) => /เหมา/.test(dept.name) ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id), [craftsmen]);
   const openAssign = (w: WOLite, dept: DeptLite) => {
     const cur = new Set<string>();
     (w.assignees ?? []).forEach((a) => { if (a.id) cur.add(a.id); });
     if (cur.size === 0 && w.assignee_id) cur.add(w.assignee_id);   // ของเดิม (ช่างเดี่ยว)
-    setAssignSel(cur); setAssignPopup({ wo: w, dept });
+    setAssignSel(cur); setAssignSearch(""); setAssignPopup({ wo: w, dept });
   };
   const saveAssign = async () => {
     if (!assignPopup || !onUpdateWO) return;
@@ -691,16 +692,39 @@ export function DispatchPlanBoard({
               <h3 className="text-sm font-bold text-slate-800 truncate">👤 เลือกช่าง (เลือกได้หลายคน)</h3>
               <button onClick={() => setAssignPopup(null)} className="text-slate-400 hover:text-slate-600 shrink-0">✕</button>
             </div>
-            <div className="text-[11px] text-slate-400 mb-2">{assignPopup.dept.name} · เลือกแล้ว {assignSel.size} คน</div>
+            <div className="text-[11px] text-slate-400 mb-1.5">{assignPopup.dept.name} · เลือกแล้ว {assignSel.size} คน</div>
+            {/* ค้นหาช่าง — ช่างเหมามีหลายสิบคน เลื่อนหายาก */}
+            <input autoFocus value={assignSearch} onChange={(e) => setAssignSearch(e.target.value)} placeholder="ค้นหา ชื่อ / รหัสพนักงาน…"
+              className="h-8 px-2 mb-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" />
             <div className="flex-1 overflow-auto -mx-1 px-1 space-y-0.5">
               {(() => {
-                const crafts = craftsOfDept(assignPopup.dept);
-                if (crafts.length === 0) return <div className="text-[12px] text-slate-300 py-4 text-center">แผนกนี้ยังไม่มีช่าง</div>;
-                return crafts.map((c) => (
+                const q = assignSearch.trim().toLowerCase();
+                const crafts = craftsOfDept(assignPopup.dept)
+                  .filter((c) => !q || `${c.code ?? ""} ${c.name}`.toLowerCase().includes(q));
+                if (crafts.length === 0) return <div className="text-[12px] text-slate-300 py-4 text-center">{assignSearch ? "ไม่พบช่างที่ค้นหา" : "แผนกนี้ยังไม่มีช่าง"}</div>;
+
+                // แยกกลุ่มตามแผนก (โต๊ะช่างเหมาจะเห็นทุกคน → จัดกลุ่มให้หาง่าย) · แผนกที่กำลังจ่ายอยู่ขึ้นก่อน
+                const nameOfDept = (id?: string | null) => departments.find((x) => x.id === id)?.name ?? "— ไม่ระบุแผนก —";
+                const byDept = new Map<string, CraftLite[]>();
+                for (const c of crafts) { const k = nameOfDept(c.department_id); (byDept.get(k) ?? byDept.set(k, []).get(k)!).push(c); }
+                const groups = [...byDept.entries()].sort((a, b) =>
+                  a[0] === assignPopup.dept.name ? -1 : b[0] === assignPopup.dept.name ? 1 : a[0].localeCompare(b[0], "th"));
+
+                const line = (c: CraftLite) => (
                   <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-pointer text-sm">
                     <input type="checkbox" checked={assignSel.has(c.id)} onChange={() => setAssignSel((prev) => { const n = new Set(prev); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n; })} className="w-4 h-4 accent-violet-600" />
                     <span className="flex-1 truncate text-slate-700">{c.code ? `[${c.code}] ` : ""}{c.name}</span>
                   </label>
+                );
+                // แผนกเดียว (โต๊ะปกติ) → ไม่ต้องมีหัวกลุ่มให้รก
+                if (groups.length <= 1) return groups[0]?.[1].map(line) ?? null;
+                return groups.map(([dname, list]) => (
+                  <div key={dname}>
+                    <div className="sticky top-0 bg-white/95 backdrop-blur text-[11px] font-semibold text-violet-700 px-2 py-1 border-b border-slate-100">
+                      🪑 {dname} <span className="text-slate-400 font-normal">({list.length})</span>
+                    </div>
+                    {list.map(line)}
+                  </div>
                 ));
               })()}
             </div>
