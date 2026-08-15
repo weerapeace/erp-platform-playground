@@ -15,9 +15,9 @@ import { HoverImage } from "@/components/hover-image";
 import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type DeptLite = { id: string; name: string };
-type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null; status?: string; ready?: boolean; prep_done?: boolean; cut_done?: boolean };
+type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null; status?: string; ready?: boolean; prep_done?: boolean; cut_done?: boolean; brand?: string | null };
 type PieceLite = { id: string; mo_no: string; job_name: string; rate: number; qty_per: number; qty: number; product_sku: string | null; product_name: string | null; image_url?: string | null };
-type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; department_id: string | null; stage: string; assignee_id?: string | null; assignee_name: string | null; assignees?: { id: string | null; name: string }[]; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number } };
+type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; department_id: string | null; stage: string; assignee_id?: string | null; assignee_name: string | null; assignees?: { id: string | null; name: string }[]; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number }; brand?: string | null };
 type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null };
 type DefectMap = Record<string, { count: number } | undefined>;
 
@@ -174,6 +174,7 @@ export function DispatchPlanBoard({
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   const [groupTab, setGroupTab] = useState<string>("__all__");   // __all__ | ชื่อกลุ่ม | __none__ (ใช้ทั้งบอร์ด: รอจ่าย + การ์ดในโต๊ะ)
   const [boardSearch, setBoardSearch] = useState("");             // ค้นหาทั้งบอร์ด (รหัส/ชื่อ/เลขใบ/ช่าง)
+  const [brandFilter, setBrandFilter] = useState("__all__");      // กรองตามแบรนด์ (ทั้งบอร์ด)
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
     setMoGroups(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } })(); }, []);
   const groupsOf = (moNo: string) => moGroups.filter((g) => g.mo_nos.includes(moNo)).map((g) => g.name);
@@ -376,12 +377,22 @@ export function DispatchPlanBoard({
   };
 
   const deptCraftsmen = (dept: DeptLite) => /เหมา/.test(dept.name) ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id);
-  // ค้นหา/กรองกลุ่ม — ใช้กับทั้งช่องรอจ่ายและการ์ดในโต๊ะ (ของจริง + ร่าง)
+  // ค้นหา/กรองกลุ่ม/กรองแบรนด์ — ใช้กับทั้งช่องรอจ่ายและการ์ดในโต๊ะ (ของจริง + ร่าง)
   const sq = boardSearch.trim().toLowerCase();
   const hitText = (...vals: (string | null | undefined)[]) => !sq || vals.some((v) => (v ?? "").toLowerCase().includes(sq));
-  const visiblePending = pending.filter((p) => availOf(p) > 0 && inGroupTab(p.mo_no) && hitText(p.product_sku, p.product_name, p.mo_no));
-  const showWO = (w: WOLite) => inGroupTab(w.mo_no) && hitText(w.product_sku, w.product_name, w.mo_no, w.assignee_name);
-  const showLine = (l: DispatchPlanLine) => inGroupTab(l.mo_no ?? "") && hitText(l.product_sku, l.product_name, l.mo_no, l.assignee_name);
+  // แบรนด์ต่อใบสั่งผลิต (การ์ดร่างไม่มีฟิลด์แบรนด์ → ยืมจากใบรอจ่าย/ใบจ่ายงานจริงที่ mo_no เดียวกัน)
+  const brandByMo = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of pending) if (p.brand) m.set(p.mo_no, p.brand);
+    for (const w of realWOs) if (w.brand && !m.has(w.mo_no)) m.set(w.mo_no, w.brand);
+    return m;
+  }, [pending, realWOs]);
+  const brandOptions = useMemo(() => [...new Set([...brandByMo.values()])].sort((a, b) => a.localeCompare(b, "th")), [brandByMo]);
+  const inBrand = (moNo: string | null | undefined) => brandFilter === "__all__" ? true
+    : brandFilter === "__none__" ? !brandByMo.get(moNo ?? "") : brandByMo.get(moNo ?? "") === brandFilter;
+  const visiblePending = pending.filter((p) => availOf(p) > 0 && inGroupTab(p.mo_no) && inBrand(p.mo_no) && hitText(p.product_sku, p.product_name, p.mo_no));
+  const showWO = (w: WOLite) => inGroupTab(w.mo_no) && inBrand(w.mo_no) && hitText(w.product_sku, w.product_name, w.mo_no, w.assignee_name);
+  const showLine = (l: DispatchPlanLine) => inGroupTab(l.mo_no ?? "") && inBrand(l.mo_no) && hitText(l.product_sku, l.product_name, l.mo_no, l.assignee_name);
   // โหมดแท็บเล็ต: โฟกัสทีละโต๊ะ → เห็น 2 ช่อง (รอจ่าย + โต๊ะที่เลือก) ลดการเลื่อนหาคอลัมน์
   const focusedId = tablet ? (departments.some((d) => d.id === focusDept) ? focusDept : departments[0]?.id ?? null) : null;
   const shownDepts = tablet ? departments.filter((d) => d.id === focusedId) : departments;
@@ -514,7 +525,15 @@ export function DispatchPlanBoard({
               ))}
             </div>
           )}
-          {(boardSearch || groupTab !== "__all__") && (
+          {brandOptions.length > 0 && (
+            <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)} title="กรองตามแบรนด์"
+              className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+              <option value="__all__">🏷 ทุกแบรนด์</option>
+              {brandOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+              <option value="__none__">— ไม่ระบุแบรนด์ —</option>
+            </select>
+          )}
+          {(boardSearch || groupTab !== "__all__" || brandFilter !== "__all__") && (
             <span className="text-[11px] text-violet-600">กำลังกรองอยู่ — ตัวเลขบนหัวโต๊ะนับเฉพาะที่เห็น</span>
           )}
         </div>
