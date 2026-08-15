@@ -629,7 +629,7 @@ function WorkBoardPageInner() {
   const submitDispatch = async () => {
     if (!dispMO || !dispDept) return;
     if (!(dispQty > 0)) { toast.error("จำนวนต้องมากกว่า 0"); return; }
-    if (!(Number(dispLaborRate) > 0)) { toast.error("ต้องใส่ค่าแรงผลิต/ชิ้น ก่อนจ่าย"); return; }
+    // ค่าแรงว่างได้ — จ่ายก่อน ค่อยมาใส่ทีหลัง (ปุ่ม 💰 ใส่ค่าแรง ที่การ์ดในโต๊ะ / ตอนส่งงาน)
     const craft = craftsmen.find((c) => c.id === dispCraftsman);
     setDispSaving(true);
     try {
@@ -1397,7 +1397,7 @@ function WorkBoardPageInner() {
       <ERPModal open={dispMO !== null} onClose={() => { if (dispSaving) return; setDispMO(null); void load(true); }} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
         footer={<>
           <button onClick={() => setDispMO(null)} disabled={dispSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-          <button onClick={submitDispatch} disabled={dispSaving || !dispDept || (dispIsHire && !dispCraftsman) || !(Number(dispLaborRate) > 0)} title={!dispDept ? "เลือกโต๊ะก่อน" : (dispIsHire && !dispCraftsman) ? "งานเหมา ต้องเลือกช่างก่อน" : !(Number(dispLaborRate) > 0) ? "ต้องใส่ค่าแรง/ชิ้น ก่อนจ่าย" : ""} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
+          <button onClick={submitDispatch} disabled={dispSaving || !dispDept || (dispIsHire && !dispCraftsman)} title={!dispDept ? "เลือกโต๊ะก่อน" : (dispIsHire && !dispCraftsman) ? "งานเหมา ต้องเลือกช่างก่อน" : !(Number(dispLaborRate) > 0) ? "จ่ายได้เลย — ค่าแรงค่อยมาใส่ทีหลัง" : ""} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
         </>}>
         {dispMO && (
           <div className="space-y-3">
@@ -1429,7 +1429,7 @@ function WorkBoardPageInner() {
             </label>
             {/* ค่าแรงผลิต/ชิ้น — default ราคากลางจาก BOM (เลือกช่างที่มีเรต → ใช้เรตช่างนั้น) */}
             <label className="block">
-              <span className="text-[11px] text-slate-500">💰 ค่าแรงผลิต / ชิ้น (บาท) <span className="text-rose-500">*</span></span>
+              <span className="text-[11px] text-slate-500">💰 ค่าแรงผลิต / ชิ้น (บาท) <span className="text-slate-400">— เว้นว่างได้ ใส่ทีหลังก็ได้</span></span>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 <input type="number" min={0} step="any" value={dispLaborRate} onChange={(e) => setDispLaborRate(e.target.value)} placeholder="—"
                   className="w-28 h-9 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />

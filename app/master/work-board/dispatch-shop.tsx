@@ -222,7 +222,8 @@ export function DispatchShop({
   const confirmItems = cartItems.filter((m) => (cart[m.id] || 0) > 0);
   const anyOver = confirmItems.some((m) => itemSum(m.id) > m.remaining + 0.0001);
   const totalWO = confirmItems.reduce((n, m) => n + cols.filter((c) => (splits[m.id]?.[c.id] || 0) > 0).length, 0);
-  const missingRate = confirmItems.some((m) => itemSum(m.id) > 0 && !((rates[m.id] ?? 0) > 0));   // มีใบที่จ่ายแต่ยังไม่ใส่ค่าแรง
+  // ใบที่จ่ายแต่ยังไม่ใส่ค่าแรง — จ่ายได้ (ใส่ทีหลังที่การ์ดในโต๊ะ/ตอนส่งงาน) แค่เตือนไว้
+  const noRateItems = confirmItems.filter((m) => itemSum(m.id) > 0 && !((rates[m.id] ?? 0) > 0));
 
   const doDispatch = async () => {
     const craftById = new Map(craftsmen.map((c) => [c.id, c]));
@@ -384,8 +385,8 @@ export function DispatchShop({
         <ERPModal open={confirmOpen} onClose={() => !saving && setConfirmOpen(false)} size="xl" title="ยืนยันจ่ายงาน"
           footer={<>
             <button onClick={() => setConfirmOpen(false)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-            <button onClick={() => void doDispatch()} disabled={saving || anyOver || totalWO === 0 || missingRate}
-              title={missingRate ? "ต้องใส่ค่าแรง/ชิ้น ทุกใบก่อนจ่าย" : ""}
+            <button onClick={() => void doDispatch()} disabled={saving || anyOver || totalWO === 0}
+              title={noRateItems.length > 0 ? "จ่ายได้เลย — ค่าแรงที่ยังว่างค่อยมาใส่ทีหลัง" : ""}
               className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? "กำลังจ่าย…" : `ยืนยันจ่าย (${totalWO} ใบจ่ายงาน)`}</button>
           </>}>
           <div className="space-y-2">
@@ -403,7 +404,7 @@ export function DispatchShop({
                     <th className="text-left px-2 py-1.5 font-medium sticky left-0 bg-slate-50">สินค้า</th>
                     {cols.map((c) => <th key={c.id} className="px-2 py-1.5 font-medium text-center whitespace-nowrap">{c.id === "__dept__" ? "จำนวน" : c.name}</th>)}
                     <th className="px-2 py-1.5 font-medium text-center">รวม</th>
-                    <th className="px-2 py-1.5 font-medium text-center whitespace-nowrap">ค่าแรง/ชิ้น *</th>
+                    <th className="px-2 py-1.5 font-medium text-center whitespace-nowrap">ค่าแรง/ชิ้น</th>
                     <th className="px-2 py-1.5 font-medium text-center whitespace-nowrap">ตัด/เตรียมครบ</th>
                   </tr>
                 </thead>
@@ -428,7 +429,7 @@ export function DispatchShop({
                         <td className="px-1 py-1 text-center">
                           <input type="number" min={0} step="any" value={rates[m.id] ?? 0}
                             onChange={(e) => setRates((s) => ({ ...s, [m.id]: Math.max(0, Number(e.target.value) || 0) }))}
-                            className={`w-16 h-8 px-1.5 text-xs text-right border rounded ${sum > 0 && !((rates[m.id] ?? 0) > 0) ? "border-rose-400 bg-rose-50" : "border-slate-200"}`} />
+                            className={`w-16 h-8 px-1.5 text-xs text-right border rounded ${sum > 0 && !((rates[m.id] ?? 0) > 0) ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
                         </td>
                         <td className="px-2 py-1.5 text-center">
                           {m.ready
@@ -442,14 +443,18 @@ export function DispatchShop({
               </table>
             </div>
             {anyOver && <p className="text-[11px] text-rose-600">⚠️ มีบางรายการจำนวนรวมเกิน “คงเหลือ” — แก้จำนวนก่อนจ่าย</p>}
-            {missingRate && <p className="text-[11px] text-rose-600">⚠️ ต้องใส่ <b>ค่าแรง/ชิ้น</b> ทุกใบที่จ่าย (ห้ามเป็น 0)</p>}
+            {noRateItems.length > 0 && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                💡 ยังไม่ใส่ค่าแรง <b>{noRateItems.length} ใบ</b> — <b>จ่ายได้เลย</b> แล้วค่อยมาใส่ทีหลัง (ปุ่ม 💰 ใส่ค่าแรง ที่การ์ดในโต๊ะ หรือตอนส่งงาน)
+              </p>
+            )}
             <label className="flex items-center gap-2 text-[11px] text-slate-600 cursor-pointer w-fit">
               <input type="checkbox" checked={saveBom} onChange={(e) => setSaveBom(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
               💾 บันทึกค่าแรงที่กรอกกลับเข้า BOM (ราคากลาง/ชิ้น) — ครั้งหน้าจะเติมให้อัตโนมัติ
             </label>
             <p className="text-[11px] text-slate-400">
               แต่ละช่องคือจำนวนที่ช่างคนนั้นได้ (แบ่งเท่ากันให้ก่อน แก้เองได้) · ช่องเป็น 0 = ไม่จ่ายให้คนนั้น ·
-              ค่าแรงเติมราคากลางจาก BOM ให้ก่อน (แก้ได้) · ติ๊ก “ตัด/เตรียมครบ” = ทำเครื่องหมายทั้งใบตอนจ่าย
+              ค่าแรงเติมราคากลางจาก BOM ให้ก่อน (แก้ได้ · เว้นว่างไว้ก่อนก็จ่ายได้) · ติ๊ก “ตัด/เตรียมครบ” = ทำเครื่องหมายทั้งใบตอนจ่าย
             </p>
           </div>
         </ERPModal>
