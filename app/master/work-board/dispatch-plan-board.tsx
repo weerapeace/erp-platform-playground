@@ -106,6 +106,10 @@ export function DispatchPlanBoard({
   // ฐานคิด: ชั่วโมงงานปกติ/วัน + วันทำงาน/เดือน (จำไว้ที่เครื่อง)
   const [baseHours, setBaseHours] = useState(8);
   const [baseDays, setBaseDays] = useState(26);
+  // ใส่ ชม./วัน + วัน ให้ทุกคนในโต๊ะทีเดียว
+  const [bulkHours, setBulkHours] = useState("");
+  const [bulkDays, setBulkDays] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
   useEffect(() => {
     try {
       const h = Number(localStorage.getItem("wb:otBaseHours")); if (h > 0 && h <= 24) setBaseHours(h);
@@ -724,6 +728,36 @@ export function DispatchPlanBoard({
             void loadOt();   // ดึงค่าจริงกลับมา กันหน้าจอโชว์ค่าที่ยังไม่ได้บันทึก
           } finally { setOtBusy(null); }
         };
+        // ใส่ ชม./วัน + วัน ให้ "ทุกคนในโต๊ะนี้" ทีเดียว (ค่าแรง/ชม. ใช้ของแต่ละคนตามเดิม)
+        const applyBulk = async () => {
+          const h = Number(bulkHours) || 0, d = Number(bulkDays) || 0;
+          if (h <= 0 && d <= 0) { toast.error("ใส่ ชม./วัน หรือ จำนวนวัน อย่างน้อย 1 ช่อง"); return; }
+          if (list.length === 0) return;
+          const rows = list.map((c) => ({
+            employee_id: c.id, rate_per_hour: rateOf(c.id),
+            hours_per_day: h > 0 ? h : (ot[c.id]?.hours_per_day ?? 0),
+            days: d > 0 ? d : (ot[c.id]?.days ?? 0),
+          }));
+          setBulkBusy(true);
+          // อัปเดตหน้าจอก่อน (เห็นผลทันที) แล้วค่อยยิงบันทึกทีเดียว
+          setOt((s) => {
+            const n = { ...s };
+            for (const r of rows) n[r.employee_id] = { rate_per_hour: r.rate_per_hour, hours_per_day: r.hours_per_day, days: r.days, amount: otAmount(r) };
+            return n;
+          });
+          try {
+            const res = await apiFetch("/api/mo/plan-ot", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ plan_id: planId, department_id: dept.id, rows }) });
+            const j = await res.json();
+            if (j.error) throw new Error(j.error);
+            toast.success(`ใส่ OT ให้ ${rows.length} คนในโต๊ะ ${dept.name} แล้ว`);
+            setBulkHours(""); setBulkDays("");
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "ใส่ OT ให้ทุกคนไม่สำเร็จ");
+            void loadOt();
+          } finally { setBulkBusy(false); }
+        };
+
         const moveStaff = async (empId: string, toDept: string | null, label: string) => {
           setStaffBusy(empId);
           try {
@@ -764,6 +798,23 @@ export function DispatchPlanBoard({
                     className="w-12 h-6 px-1 text-right border border-slate-200 rounded" title="วันทำงานต่อเดือน (ใช้กับลูกจ้างรายเดือน)" />
                   <span>วัน/เดือน</span>
                   <span className="ml-auto text-[10px] text-slate-400">ช่อง ฿/ชม. เติมค่าแรงจริงของแต่ละคนให้แล้ว — พิมพ์ทับได้</span>
+                </div>
+              )}
+
+              {/* ใส่ ชม./วัน + วัน ให้ทุกคนในโต๊ะทีเดียว (ค่าแรง/ชม. ใช้ของแต่ละคน) */}
+              {planOt && canEdit && list.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-2 py-1.5 mb-2">
+                  <span className="font-medium">ใส่ให้ทุกคน:</span>
+                  <input type="number" min={0} step="any" value={bulkHours} onChange={(e) => setBulkHours(e.target.value)} placeholder="ชม./วัน"
+                    className="w-16 h-6 px-1 text-right border border-violet-200 rounded" title="ชั่วโมง OT ต่อวัน (ว่าง = ไม่เปลี่ยนของเดิม)" />
+                  <span className="text-violet-300">×</span>
+                  <input type="number" min={0} step="any" value={bulkDays} onChange={(e) => setBulkDays(e.target.value)} placeholder="วัน"
+                    className="w-16 h-6 px-1 text-right border border-violet-200 rounded" title="จำนวนวันที่ทำ OT (ว่าง = ไม่เปลี่ยนของเดิม)" />
+                  <button onClick={() => void applyBulk()} disabled={bulkBusy || (!(Number(bulkHours) > 0) && !(Number(bulkDays) > 0))}
+                    className="h-6 px-2 text-[11px] font-medium bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-40">
+                    {bulkBusy ? "กำลังใส่…" : `ใช้กับทั้งโต๊ะ (${list.length} คน)`}
+                  </button>
+                  <span className="ml-auto text-[10px] text-violet-400">ค่าแรง/ชม. ใช้ของแต่ละคน · ช่องที่เว้นว่าง = ไม่เปลี่ยน</span>
                 </div>
               )}
 
