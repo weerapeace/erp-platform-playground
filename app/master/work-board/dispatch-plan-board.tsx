@@ -95,6 +95,9 @@ export function DispatchPlanBoard({
   const [selected, setSelected] = useState<string | null>(null);   // mo_no ของการ์ดรอจ่ายที่เลือก
   const [dispQty, setDispQty] = useState<Record<string, string>>({});   // จำนวนที่จะจ่าย (แบ่งจ่าย) ต่อ mo_no
   const [staffPopup, setStaffPopup] = useState<DeptLite | null>(null);   // popup พนักงานในโต๊ะ (แก้คน + ตั้ง OT)
+  // ⛶ ขยายดูรายการในช่อง (รอจ่าย / โต๊ะ) — คอลัมน์บนบอร์ดยาว เลื่อนหาของยาก
+  const [listPopup, setListPopup] = useState<{ kind: "pending" | "dept"; dept?: DeptLite } | null>(null);
+  const [listSearch, setListSearch] = useState("");
   // OT วางแผน ต่อคน (เก็บต่อ "แผน" — บอร์ดของจริงไม่มี) · ยอด = ฿/ชม. × ชม./วัน × วัน
   const [ot, setOt] = useState<Record<string, OtRow>>({});
   const [otBusy, setOtBusy] = useState<string | null>(null);
@@ -447,8 +450,15 @@ export function DispatchPlanBoard({
           <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2 min-h-[140px]"
             onDragOver={(e) => { if (editable && dragRef.current?.kind === "draft") e.preventDefault(); }}
             onDrop={() => { if (!editable) return; const d = dragRef.current; dragRef.current = null; if (d?.kind === "draft" && d.lineId) void removeLine(d.lineId); }}>
-            <div className="sticky top-0 z-20 flex items-center justify-between -mx-2 -mt-2 px-2 pt-2 pb-2 mb-2 bg-slate-100 rounded-t-xl border-b border-slate-200"><span className="text-sm font-bold text-slate-700">📥 รอจ่าย</span>
-              <span className="text-[11px] text-slate-400">{visiblePending.length}</span></div>
+            <div className="sticky top-0 z-20 flex items-center justify-between -mx-2 -mt-2 px-2 pt-2 pb-2 mb-2 bg-slate-100 rounded-t-xl border-b border-slate-200">
+              <span className="text-sm font-bold text-slate-700">📥 รอจ่าย</span>
+              <span className="flex items-center gap-1">
+                <span className="text-[11px] text-slate-400">{visiblePending.length}</span>
+                {/* ขยายดูเป็นรายการ — คอลัมน์ยาว เลื่อนหายาก */}
+                <button onClick={(e) => { e.stopPropagation(); setListPopup({ kind: "pending" }); }} title="ขยายดูรายการทั้งหมดในช่องนี้"
+                  className="text-slate-300 hover:text-indigo-600 text-[13px] leading-none">⛶</button>
+              </span>
+            </div>
             {/* แท็บกรองตามกลุ่มใบสั่งงาน */}
             {moGroups.length > 0 && (
               <div className="flex flex-wrap gap-1 mb-2">
@@ -554,7 +564,10 @@ export function DispatchPlanBoard({
                   <div className="flex items-center gap-1 min-w-0">
                     {onReorderDepts && <span draggable onDragStart={(e) => { e.stopPropagation(); deptDragRef.current = d.id; dragRef.current = null; }} title="ลากสลับตำแหน่งโต๊ะ" className="shrink-0 cursor-move text-slate-300 hover:text-slate-500 select-none">⠿</span>}
                     <span className={`font-bold text-slate-700 truncate ${tablet ? "text-lg" : "text-sm"}`}>{d.name}</span>
-                    <button onClick={(e) => { e.stopPropagation(); setStaffPopup(d); }} title="ดูพนักงานในแผนก" className={`shrink-0 text-slate-300 hover:text-violet-600 ${tablet ? "text-sm" : "text-[11px]"}`}>👥</button>
+                    <button onClick={(e) => { e.stopPropagation(); setStaffPopup(d); }} title="พนักงานในโต๊ะนี้ (ย้ายคน + ตั้ง OT)" className={`shrink-0 text-slate-300 hover:text-violet-600 ${tablet ? "text-sm" : "text-[11px]"}`}>👥</button>
+                    {/* ขยายดูงานในโต๊ะนี้เป็นรายการ (คอลัมน์ยาว เลื่อนดูยาก) */}
+                    <button onClick={(e) => { e.stopPropagation(); setListPopup({ kind: "dept", dept: d }); }} title="ขยายดูรายการงานในโต๊ะนี้"
+                      className={`shrink-0 text-slate-300 hover:text-indigo-600 ${tablet ? "text-sm" : "text-[11px]"}`}>⛶</button>
                   </div>
                   <span className={`text-right shrink-0 leading-tight ${tablet ? "text-[13px]" : "text-[10px]"}`}>
                     {(deptWages[d.id] ?? 0) > 0 && (
@@ -700,6 +713,87 @@ export function DispatchPlanBoard({
       )}
 
       {/* ยืนยันดันเป็นของจริง */}
+      {/* ⛶ ขยายดูรายการในช่อง (รอจ่าย / โต๊ะ) — อ่านง่ายกว่าเลื่อนในคอลัมน์แคบ ๆ */}
+      {listPopup && (() => {
+        const isPending = listPopup.kind === "pending";
+        const d = listPopup.dept;
+        const q = listSearch.trim().toLowerCase();
+        const hit = (...vals: (string | null | undefined)[]) => !q || vals.some((v) => (v ?? "").toLowerCase().includes(q));
+        const close = () => { setListPopup(null); setListSearch(""); };
+
+        const pendRows = isPending ? visiblePending.filter((p) => hit(p.product_sku, p.product_name, p.mo_no)) : [];
+        const drafts = !isPending && d ? (draftByDept.get(d.id) ?? []).filter((l) => hit(l.product_sku, l.product_name, l.mo_no, l.assignee_name)) : [];
+        const reals = !isPending && d ? (realByDept.get(d.id) ?? []).filter((w) => hit(w.product_sku, w.product_name, w.mo_no, w.assignee_name)) : [];
+        const sumQty = isPending ? pendRows.reduce((n, p) => n + availOf(p), 0)
+          : drafts.reduce((n, l) => n + (Number(l.qty) || 0), 0) + reals.reduce((n, w) => n + (Number(w.qty) || 0), 0);
+        const sumLabor = isPending ? 0 : drafts.reduce((n, l) => n + lineLabor(l), 0) + reals.reduce((n, w) => n + woLabor(w), 0);
+        const total = isPending ? pendRows.length : drafts.length + reals.length;
+
+        const row = (key: string, img: string | null | undefined, sku: string | null, name: string | null, moNo: string | null,
+                     qty: number, right: ReactNode, badge?: ReactNode, onClick?: () => void) => (
+          <div key={key} onClick={onClick}
+            className={`flex items-center gap-2 px-2 py-1.5 ${onClick ? "cursor-pointer hover:bg-indigo-50/60" : ""}`}>
+            <Thumb url={img} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-semibold text-slate-800 truncate">{sku ?? "—"}</span>
+                {badge}
+              </div>
+              <div className="text-[11px] text-slate-500 truncate">{name}</div>
+              <div className="text-[10px] text-slate-400 font-mono truncate">{moNo}</div>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="text-sm font-bold text-slate-700 tabular-nums">{fmt(qty)} <span className="text-[10px] font-normal text-slate-400">ชิ้น</span></div>
+              {right}
+            </div>
+          </div>
+        );
+
+        return (
+          <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={close}>
+            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="text-sm font-bold text-slate-800 truncate">
+                  {isPending ? "📥 รอจ่าย" : `🪑 ${d?.name ?? ""}`} <span className="text-slate-400 font-normal">({total} รายการ)</span>
+                </h3>
+                <button onClick={close} className="text-slate-400 hover:text-slate-600 shrink-0">✕</button>
+              </div>
+              <input value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อ / เลขใบ / ช่าง…"
+                className="h-8 px-2 mb-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+
+              <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                {total === 0 && <div className="py-10 text-center text-slate-300 text-sm">— ไม่มีรายการ —</div>}
+
+                {/* รอจ่าย */}
+                {pendRows.map((p) => row(`p:${p.id}`, imageByMo[p.mo_no], p.product_sku, p.product_name, p.mo_no, availOf(p),
+                  <div className="text-[10px] text-slate-400">จ่ายแล้ว {fmt((p.qty || 0) - p.remaining)}/{fmt(p.qty)}</div>,
+                  (p.ready ?? (!!p.prep_done && !!p.cut_done))
+                    ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">พร้อม ✓</span>
+                    : <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">รอเตรียม/ตัด</span>,
+                  () => { close(); onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }); }))}
+
+                {/* ในโต๊ะ: ใบจ่ายงานจริง */}
+                {reals.map((w) => row(`w:${w.id}`, w.image_url ?? imageByMo[w.mo_no], w.product_sku, w.product_name, w.mo_no, Number(w.qty) || 0,
+                  <div className="text-[10px] text-amber-600">{baht(woLabor(w))}</div>,
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{w.assignee_name || "ทั้งโต๊ะ"}</span>,
+                  () => { close(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }); }))}
+
+                {/* ในโต๊ะ: ร่าง (ยังไม่ดันเป็นของจริง) */}
+                {drafts.map((l) => row(`d:${l.id}`, imageByMo[l.mo_no ?? ""], l.product_sku, l.product_name, l.mo_no, Number(l.qty) || 0,
+                  <div className="text-[10px] text-amber-600">{baht(lineLabor(l))}</div>,
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">ร่าง{l.assignee_name ? ` · ${l.assignee_name}` : ""}</span>))}
+              </div>
+
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <span className="text-slate-500">รวม <b className="text-slate-700">{fmt(sumQty)}</b> ชิ้น</span>
+                {!isPending && sumLabor > 0 && <span className="text-amber-700">ค่าแรงรวม <b>{baht(sumLabor)}</b></span>}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">{isPending ? "กดรายการ = เปิดเช็กลิสต์ใบนั้น" : "กดใบจ่ายงานจริง = เปิดรายละเอียดงาน · รายการ “ร่าง” แก้ที่การ์ดบนบอร์ด"}</p>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 👥 พนักงานในโต๊ะ — ย้ายคนเข้า/ออก + ตั้ง OT วางแผนรายคน (฿/ชม. × ชม./วัน × วัน) */}
       {staffPopup && (() => {
         const dept = staffPopup;
