@@ -1371,7 +1371,7 @@ function WorkBoardPageInner() {
       )}
 
       {/* popup จ่ายงานเหมารายชิ้น → เลือกช่างเหมา */}
-      <ERPModal open={dispPiece !== null} onClose={() => !pieceSaving && setDispPiece(null)} size="sm" title="🧵 จ่ายงานเหมาให้ช่าง"
+      <ERPModal open={dispPiece !== null} onClose={() => { if (pieceSaving) return; setDispPiece(null); void load(true); }} size="sm" title="🧵 จ่ายงานเหมาให้ช่าง"
         footer={<>
           <button onClick={() => setDispPiece(null)} disabled={pieceSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
           <button onClick={() => void assignPiece()} disabled={pieceSaving || !pieceCraftsman} title={!pieceCraftsman ? "เลือกช่างก่อน" : ""} className="h-9 px-4 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">{pieceSaving ? "กำลังจ่าย…" : "จ่ายงานเหมา"}</button>
@@ -1394,7 +1394,7 @@ function WorkBoardPageInner() {
       </ERPModal>
 
       {/* popup จ่ายงาน */}
-      <ERPModal open={dispMO !== null} onClose={() => !dispSaving && setDispMO(null)} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
+      <ERPModal open={dispMO !== null} onClose={() => { if (dispSaving) return; setDispMO(null); void load(true); }} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
         footer={<>
           <button onClick={() => setDispMO(null)} disabled={dispSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
           <button onClick={submitDispatch} disabled={dispSaving || !dispDept || (dispIsHire && !dispCraftsman) || !(Number(dispLaborRate) > 0)} title={!dispDept ? "เลือกโต๊ะก่อน" : (dispIsHire && !dispCraftsman) ? "งานเหมา ต้องเลือกช่างก่อน" : !(Number(dispLaborRate) > 0) ? "ต้องใส่ค่าแรง/ชิ้น ก่อนจ่าย" : ""} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
@@ -1472,7 +1472,7 @@ function WorkBoardPageInner() {
       </ERPModal>
 
       {/* popup ตั้งสีแบรนด์ */}
-      <ERPModal open={colorOpen} onClose={() => setColorOpen(false)} size="sm" title="🎨 ตั้งสีประจำแบรนด์"
+      <ERPModal open={colorOpen} onClose={() => { setColorOpen(false); void load(true); }} size="sm" title="🎨 ตั้งสีประจำแบรนด์"
         footer={<button onClick={() => setColorOpen(false)} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button>}>
         <div className="space-y-2">
           <p className="text-[11px] text-slate-400">สีจะใช้เป็นกรอบการ์ดบนบอร์ด — กดที่ช่องสีเพื่อเปลี่ยน</p>
@@ -1490,7 +1490,7 @@ function WorkBoardPageInner() {
       </ERPModal>
 
       {/* รายละเอียดใบจ่ายงาน + รับงานคืน (คลิกการ์ด) */}
-      <ERPModal open={detailWO !== null} onClose={() => !recvSaving && setDetailWO(null)} size="sm" title={`📄 ${detailWO?.wo_no ?? ""}`}
+      <ERPModal open={detailWO !== null} onClose={() => { if (recvSaving) return; setDetailWO(null); void load(true); }} size="sm" title={`📄 ${detailWO?.wo_no ?? ""}`}
         footer={detailWO && (detailWO.status === "done" ? <button onClick={() => setDetailWO(null)} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg">ปิด</button> : <>
           <button onClick={() => detailWO && cancelWO(detailWO)} disabled={recvSaving} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-50 mr-auto">ยกเลิกใบ</button>
           <button onClick={() => setDetailWO(null)} disabled={recvSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
@@ -1522,7 +1522,7 @@ function WorkBoardPageInner() {
       </ERPModal>
 
       {/* รายละเอียดใบสั่งผลิต (คลิกการ์ดรอจ่าย) */}
-      <ERPModal open={detailMO !== null} onClose={() => setDetailMO(null)} size="sm" title={`🏭 ${detailMO?.mo_no ?? ""}`}
+      <ERPModal open={detailMO !== null} onClose={() => { setDetailMO(null); void load(true); }} size="sm" title={`🏭 ${detailMO?.mo_no ?? ""}`}
         footer={<>
           <button onClick={() => setDetailMO(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
           <a href="/master/manufacturing-orders" className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center">เปิดหน้าใบสั่งผลิต</a>

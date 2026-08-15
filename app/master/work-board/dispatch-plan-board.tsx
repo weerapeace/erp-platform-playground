@@ -209,6 +209,9 @@ export function DispatchPlanBoard({
     return m;
   }, [craftsmen, ot]);
 
+  // ปิดป๊อปพนักงาน = รีเฟรชเบา ๆ (ยอด OT + เงินเดือนรวมต่อโต๊ะ ให้ตรงกับที่เพิ่งแก้)
+  const closeStaffPopup = () => { setStaffPopup(null); setStaffAddOpen(false); setStaffSearch(""); void loadOt(); onStaffMoved?.(); };
+
   const defectOf = (nm: string | null | undefined) => nm ? defectByWorker[nm.trim().toLowerCase()] : undefined;
   // ค่าแรงผลิตของรายการร่าง = จำนวน × ค่าแรงต่อชิ้น (จากแผนกลุ่ม A)
   const lineLabor = (l: DispatchPlanLine) => (Number(l.qty) || 0) * (laborPerUnit[l.mo_no ?? ""] ?? 0);
@@ -774,11 +777,11 @@ export function DispatchPlanBoard({
         const numCls = "w-14 h-7 px-1 text-xs text-right border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:bg-slate-50";
 
         return (
-          <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={() => { setStaffPopup(null); setStaffAddOpen(false); setStaffSearch(""); }}>
+          <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={() => closeStaffPopup()}>
             <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-4" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-bold text-slate-800 truncate">👥 พนักงาน — {dept.name} <span className="text-slate-400 font-normal">({list.length} คน)</span></h3>
-                <button onClick={() => { setStaffPopup(null); setStaffAddOpen(false); }} className="text-slate-400 hover:text-slate-600 shrink-0">✕</button>
+                <button onClick={() => closeStaffPopup()} className="text-slate-400 hover:text-slate-600 shrink-0">✕</button>
               </div>
 
               {planOt

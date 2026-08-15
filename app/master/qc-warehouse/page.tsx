@@ -699,7 +699,7 @@ export default function QcWarehousePage() {
       )}
 
       {/* รับเข้า */}
-      <ERPModal open={recv !== null} onClose={() => setRecv(null)} size="md" title={`📦 รับเข้า ${recv?.shelf.name ?? ""}`}
+      <ERPModal open={recv !== null} onClose={() => { setRecv(null); void load(); }} size="md" title={`📦 รับเข้า ${recv?.shelf.name ?? ""}`}
         footer={<><button onClick={() => setRecv(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
           <button onClick={submitReceive} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">ยืนยันรับเข้า</button></>}>
         {recv && (
@@ -728,7 +728,7 @@ export default function QcWarehousePage() {
       </ERPModal>
 
       {/* ปุ่มย้ายชั้น (จากการ์ด) */}
-      <ERPModal open={movePick !== null} onClose={() => setMovePick(null)} size="sm" title="↔️ ย้ายชั้น"
+      <ERPModal open={movePick !== null} onClose={() => { setMovePick(null); void load(); }} size="sm" title="↔️ ย้ายชั้น"
         footer={<button onClick={() => setMovePick(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>}>
         {movePick && (
           <div className="space-y-2">
@@ -810,7 +810,7 @@ export default function QcWarehousePage() {
       )}
 
       {/* ป๊อปส่งงาน (จ่ายไปที่โต๊ะ) — จำนวน + ค่าแรง · ส่งเลย/ใส่ตะกร้า */}
-      <ERPModal open={sendModal !== null} onClose={() => !sendSaving && setSendModal(null)} size="sm" title="📤 ส่งงานจากโต๊ะ"
+      <ERPModal open={sendModal !== null} onClose={() => { if (sendSaving) return; setSendModal(null); void load(); }} size="sm" title="📤 ส่งงานจากโต๊ะ"
         footer={sendModal ? <>
           <button onClick={() => setSendModal(null)} disabled={sendSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
           <button onClick={addSendCart} disabled={sendSaving} className="h-9 px-3 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50">🛒 ใส่ตะกร้า</button>
@@ -907,7 +907,7 @@ export default function QcWarehousePage() {
       </ERPModal>
 
       {/* ส่งออก */}
-      <ERPModal open={ship !== null} onClose={() => setShip(null)} size="sm" title="📤 ส่งออกจากโกดัง QC"
+      <ERPModal open={ship !== null} onClose={() => { setShip(null); void load(); }} size="sm" title="📤 ส่งออกจากโกดัง QC"
         footer={<><button onClick={() => setShip(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
           <button onClick={submitShip} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">ยืนยันส่งออก</button></>}>
         {ship && (
@@ -926,7 +926,7 @@ export default function QcWarehousePage() {
       </ERPModal>
 
       {/* ย้ายไปของเสีย */}
-      <ERPModal open={toDefect !== null} onClose={() => setToDefect(null)} size="sm" title="⚠️ ย้ายไปชั้นของเสีย"
+      <ERPModal open={toDefect !== null} onClose={() => { setToDefect(null); void load(); }} size="sm" title="⚠️ ย้ายไปชั้นของเสีย"
         footer={<><button onClick={() => setToDefect(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
           <button onClick={submitToDefect} className="h-9 px-4 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยัน</button></>}>
         {toDefect && (
@@ -944,7 +944,7 @@ export default function QcWarehousePage() {
       </ERPModal>
 
       {/* ส่งซ่อม */}
-      <ERPModal open={repair !== null} onClose={() => setRepair(null)} size="sm" title="🔧 ส่งซ่อม"
+      <ERPModal open={repair !== null} onClose={() => { setRepair(null); void load(); }} size="sm" title="🔧 ส่งซ่อม"
         footer={<><button onClick={() => setRepair(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
           <button onClick={submitRepair} className="h-9 px-4 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600">ส่งซ่อม</button></>}>
         {repair && (
@@ -965,7 +965,7 @@ export default function QcWarehousePage() {
       </ERPModal>
 
       {/* รับจากซ่อม */}
-      <ERPModal open={fromRepair !== null} onClose={() => setFromRepair(null)} size="sm" title="📥 รับจากซ่อม"
+      <ERPModal open={fromRepair !== null} onClose={() => { setFromRepair(null); void load(); }} size="sm" title="📥 รับจากซ่อม"
         footer={<><button onClick={() => setFromRepair(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
           <button onClick={submitFromRepair} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">ยืนยัน</button></>}>
         {fromRepair && (

@@ -375,8 +375,8 @@ export function DispatchShop({
   // ป๊อปจัดกลุ่ม/ย้ายกลุ่ม — ใช้ร่วมทั้งหน้าเลือกงานและหน้าตะกร้า
   const groupModal = groupOpen ? (
     <AssignToGroupModal moNos={cartItems.map((m) => m.mo_no)}
-      onClose={() => setGroupOpen(false)}
-      onDone={() => { setGroupOpen(false); void onReload(); }} />
+      onClose={() => { setGroupOpen(false); void onReload(); }}
+      onDone={() => { setGroupOpen(false); setCart({}); void onReload(); }} />
   ) : null;
 
   // ป๊อปยืนยันจ่ายงาน — ใช้ร่วมทั้งหน้าเลือกงานและหน้าตะกร้า
