@@ -219,6 +219,10 @@ function WorkBoardPageInner() {
   const [moCreateOpen, setMoCreateOpen] = useState(false);           // ป๊อปสร้างใบสั่งผลิต (ของกลาง)
   const [pendingCols] = useState<number | null>(null);     // (เลิกใช้) คอลัมน์โซนรอจ่าย — รอจ่ายย้ายไปป๊อปอัปแล้ว
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
+  // โหลดรายชื่อพนักงาน + เงินเดือนรวมต่อโต๊ะใหม่ (ใช้หลังย้ายคนเข้า/ออกโต๊ะจากป๊อป 👥)
+  const reloadAssignees = useCallback(async () => {
+    try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); setDeptWages(j.dept_wages ?? {}); } catch { /* ignore */ }
+  }, []);
   const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // เงินเดือนรวมพนักงานต่อแผนก (จาก payroll)
   // กลุ่ม B: ประวัติงานเสียต่อช่าง (จับด้วยชื่อ) → เตือนตอนจ่ายงาน
   type DefItem = { sku: string | null; mo_no: string | null; defect_type: string; qty: number; created_at: string | null };
@@ -1220,7 +1224,7 @@ function WorkBoardPageInner() {
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
             pending={board.pending} pendingPiece={board.pendingPiece} onPieceClick={(p) => { setDispPiece({ ...p, image_url: p.image_url ?? null, brand: null, brand_color: null }); setPieceCraftsman(""); }} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
-            canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr}
+            canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr} onStaffMoved={() => void reloadAssignees()}
             onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}
             onSetCentralRate={setCentralRate}
             onRenamed={(name) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, name } : x))}
@@ -1259,7 +1263,7 @@ function WorkBoardPageInner() {
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
             pending={board.pending} pendingPiece={board.pendingPiece} onPieceClick={(p) => { setDispPiece({ ...p, image_url: p.image_url ?? null, brand: null, brand_color: null }); setPieceCraftsman(""); }} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
-            canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr}
+            canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr} onStaffMoved={() => void reloadAssignees()}
             onApplied={() => {}} onRenamed={() => {}} onDates={() => {}} onDeleted={() => {}}
             onDispatch={({ moId, deptId, qty }) => {
               const mo = board.pending.find((x) => x.id === moId);

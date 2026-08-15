@@ -28,6 +28,11 @@ function Thumb({ url }: { url?: string | null }) {
   return <HoverImage url={url} size={28} previewSize={224} />;
 }
 
+// OT วางแผนต่อคน (ดู /api/mo/plan-ot) — ตัวเลขบนบอร์ดอย่างเดียว ไม่เข้าระบบเงินเดือน
+type OtRow = { rate_per_hour: number; hours_per_day: number; days: number; amount: number };
+const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+const otAmount = (o: Partial<OtRow>) => (Number(o.rate_per_hour) || 0) * (Number(o.hours_per_day) || 0) * (Number(o.days) || 0);
+
 // การ์ดงานกลาง — ใช้ทั้ง "ของจริง" / "ล็อก" / "ร่าง" ให้หน้าตาเหมือนกัน (ต่างแค่ปุ่ม + เนื้อใน)
 // ยึดสไตล์ตามของจริง: พื้นเทา ขอบทึบ · ร่าง = เส้นซ้ายเขียวบาง ๆ + ป้าย "ร่าง" · ล็อก = จาง
 function CardShell({ dim, accent, thumbUrl, sku, drag, actions, children }: {
@@ -63,7 +68,7 @@ function CardShell({ dim, accent, thumbUrl, sku, drag, actions, children }: {
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
   laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch, pendingPiece, onPieceClick,
-  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onUpdateWO, onCancelWO, onSetCentralRate, onPickDispatch,
+  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onStaffMoved, onUpdateWO, onCancelWO, onSetCentralRate, onPickDispatch,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; pendingPiece?: PieceLite[]; onPieceClick?: (p: PieceLite) => void; realWOs: WOLite[]; craftsmen: CraftLite[];
@@ -78,6 +83,7 @@ export function DispatchPlanBoard({
   onOpenWork: (info: { moId: string | null; moNo: string | null; productSku: string | null; productName: string | null; qty: number }) => void;
   onReorderDepts?: (orderedIds: string[]) => void;   // ลากสลับคอลัมน์แผนก → บันทึกลำดับ
   onManageDepts?: () => void;   // เปิดป๊อปอัปตั้งค่าแผนก (ซ่อน/แสดงโต๊ะ ฯลฯ)
+  onStaffMoved?: () => void;    // ย้ายพนักงานเข้า/ออกโต๊ะแล้ว → ให้หน้าแม่โหลดรายชื่อ + เงินเดือนรวมใหม่
   onUpdateWO?: (id: string, patch: { labor_cost?: number; assignees?: { id: string | null; name: string }[]; assignee_name?: string | null; assignee_id?: string | null; assignee_type?: string }) => Promise<void>;   // แก้ใบงานจริง (ของจริงเท่านั้น)
   onCancelWO?: (id: string) => void | Promise<void>;   // ยกเลิกใบจ่ายงาน (ของจริง) → คืน qty กลับ "รอจ่าย"
   onSetCentralRate?: (info: { moNo: string; rate: number }) => void | Promise<void>;   // การ์ดร่าง: ใส่ค่าแรง → ตั้งเรตกลางสินค้า
@@ -88,7 +94,13 @@ export function DispatchPlanBoard({
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);   // mo_no ของการ์ดรอจ่ายที่เลือก
   const [dispQty, setDispQty] = useState<Record<string, string>>({});   // จำนวนที่จะจ่าย (แบ่งจ่าย) ต่อ mo_no
-  const [staffPopup, setStaffPopup] = useState<DeptLite | null>(null);   // popup ดูพนักงานในแผนก
+  const [staffPopup, setStaffPopup] = useState<DeptLite | null>(null);   // popup พนักงานในโต๊ะ (แก้คน + ตั้ง OT)
+  // OT วางแผน ต่อคน (เก็บต่อ "แผน" — บอร์ดของจริงไม่มี) · ยอด = ฿/ชม. × ชม./วัน × วัน
+  const [ot, setOt] = useState<Record<string, OtRow>>({});
+  const [otBusy, setOtBusy] = useState<string | null>(null);
+  const [staffAddOpen, setStaffAddOpen] = useState(false);
+  const [staffSearch, setStaffSearch] = useState("");
+  const [staffBusy, setStaffBusy] = useState<string | null>(null);
   const [laborEditId, setLaborEditId] = useState<string | null>(null);   // ใบงานจริงที่กำลังใส่ค่าแรง
   const [laborEditVal, setLaborEditVal] = useState("");
   const [laborSaving, setLaborSaving] = useState(false);
@@ -144,6 +156,28 @@ export function DispatchPlanBoard({
     } catch { /* ignore */ } finally { setLoading(false); }
   }, [planId, realMode]);
   useEffect(() => { setSelected(null); void load(); }, [load]);
+
+  // OT วางแผนของแผนนี้ (บอร์ด "ของจริง" ไม่มีแผน → ไม่โหลด)
+  const loadOt = useCallback(async () => {
+    if (!isUuid(planId)) { setOt({}); return; }
+    try {
+      const j = await apiFetch(`/api/mo/plan-ot?plan_id=${encodeURIComponent(planId)}`).then((r) => r.json());
+      const map: Record<string, OtRow> = {};
+      for (const r of ((j.data ?? []) as (OtRow & { employee_id: string })[])) map[r.employee_id] = { rate_per_hour: r.rate_per_hour, hours_per_day: r.hours_per_day, days: r.days, amount: r.amount };
+      setOt(map);
+    } catch { /* ไม่ critical — บอร์ดยังใช้ได้ */ }
+  }, [planId]);
+  useEffect(() => { void loadOt(); }, [loadOt]);
+
+  // ยอด OT รวมต่อโต๊ะ — คิดจาก "แผนกปัจจุบันของคนนั้น" (ย้ายคนแล้ว OT ย้ายตาม)
+  const otByDept = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const c of craftsmen) {
+      const o = ot[c.id]; if (!o || !c.department_id) continue;
+      m[c.department_id] = (m[c.department_id] ?? 0) + (Number(o.amount) || 0);
+    }
+    return m;
+  }, [craftsmen, ot]);
 
   const defectOf = (nm: string | null | undefined) => nm ? defectByWorker[nm.trim().toLowerCase()] : undefined;
   // ค่าแรงผลิตของรายการร่าง = จำนวน × ค่าแรงต่อชิ้น (จากแผนกลุ่ม A)
@@ -490,9 +524,18 @@ export function DispatchPlanBoard({
                     <button onClick={(e) => { e.stopPropagation(); setStaffPopup(d); }} title="ดูพนักงานในแผนก" className={`shrink-0 text-slate-300 hover:text-violet-600 ${tablet ? "text-sm" : "text-[11px]"}`}>👥</button>
                   </div>
                   <span className={`text-right shrink-0 leading-tight ${tablet ? "text-[13px]" : "text-[10px]"}`}>
-                    {(deptWages[d.id] ?? 0) > 0 && <span className="block text-violet-600" title="เงินเดือนรวมพนักงานในแผนก">คน {baht(deptWages[d.id])}</span>}
+                    {(deptWages[d.id] ?? 0) > 0 && (
+                      <span className="block text-violet-600" title={`เงินเดือนรวมพนักงานในโต๊ะ${(otByDept[d.id] ?? 0) > 0 ? ` + OT ที่วางแผนไว้ ${baht(otByDept[d.id])}` : ""}`}>
+                        คน {baht((deptWages[d.id] ?? 0) + (otByDept[d.id] ?? 0))}
+                        {(otByDept[d.id] ?? 0) > 0 && <span className="text-amber-600"> (รวม OT {baht(otByDept[d.id])})</span>}
+                      </span>
+                    )}
+                    {(deptWages[d.id] ?? 0) === 0 && (otByDept[d.id] ?? 0) > 0 && <span className="block text-amber-600" title="OT ที่วางแผนไว้">OT {baht(otByDept[d.id])}</span>}
                     {totQty > 0 && <span className="block text-slate-500" title="ค่าแรงงานที่จ่ายในโต๊ะนี้">งาน {fmt(totQty)} ชิ้น · {baht(totLabor)}</span>}
-                    {(deptWages[d.id] ?? 0) > 0 && totLabor > 0 && (() => { const diff = (deptWages[d.id] ?? 0) - totLabor; return <span className={`block ${diff >= 0 ? "text-amber-600" : "text-rose-600"}`} title="เงินเดือนพนักงาน − ค่าแรงงานที่จ่าย">ต่าง {baht(diff)}</span>; })()}
+                    {((deptWages[d.id] ?? 0) + (otByDept[d.id] ?? 0)) > 0 && totLabor > 0 && (() => {
+                      const diff = (deptWages[d.id] ?? 0) + (otByDept[d.id] ?? 0) - totLabor;
+                      return <span className={`block ${diff >= 0 ? "text-amber-600" : "text-rose-600"}`} title="(เงินเดือน + OT) − ค่าแรงงานที่จ่าย">ต่าง {baht(diff)}</span>;
+                    })()}
                   </span>
                 </div>
                 {/* ใบจ่ายจริง — จัดกลุ่มตามช่างที่เลือก (ถ้ามี) · ในแผน "ล็อก" · ในของจริง "แก้ได้" */}
@@ -624,23 +667,136 @@ export function DispatchPlanBoard({
       )}
 
       {/* ยืนยันดันเป็นของจริง */}
-      {staffPopup && (
-        <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={() => setStaffPopup(null)}>
-          <div className="bg-white rounded-xl shadow-xl max-w-xs w-full p-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-bold text-slate-800 truncate">👥 พนักงาน — {staffPopup.name}</h3>
-              <button onClick={() => setStaffPopup(null)} className="text-slate-400 hover:text-slate-600 shrink-0">✕</button>
+      {/* 👥 พนักงานในโต๊ะ — ย้ายคนเข้า/ออก + ตั้ง OT วางแผนรายคน (฿/ชม. × ชม./วัน × วัน) */}
+      {staffPopup && (() => {
+        const dept = staffPopup;
+        const list = craftsmen.filter((c) => c.department_id === dept.id);
+        const others = craftsmen.filter((c) => c.department_id !== dept.id);
+        const q = staffSearch.trim().toLowerCase();
+        const addable = q ? others.filter((c) => `${c.code ?? ""} ${c.name}`.toLowerCase().includes(q)) : others.slice(0, 30);
+        const otTotal = list.reduce((n, c) => n + (Number(ot[c.id]?.amount) || 0), 0);
+        const planOt = isUuid(planId);   // ตั้ง OT ได้เฉพาะในหน้าแผน
+
+        const saveOt = async (empId: string, patch: Partial<OtRow>) => {
+          const cur = ot[empId] ?? { rate_per_hour: 0, hours_per_day: 0, days: 0, amount: 0 };
+          const next = { ...cur, ...patch };
+          next.amount = otAmount(next);
+          setOt((s) => ({ ...s, [empId]: next }));   // เห็นผลทันที
+          setOtBusy(empId);
+          try {
+            const res = await apiFetch("/api/mo/plan-ot", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ plan_id: planId, employee_id: empId, department_id: dept.id, rate_per_hour: next.rate_per_hour, hours_per_day: next.hours_per_day, days: next.days }) });
+            const j = await res.json();
+            if (j.error) throw new Error(j.error);
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "บันทึก OT ไม่สำเร็จ");
+            void loadOt();   // ดึงค่าจริงกลับมา กันหน้าจอโชว์ค่าที่ยังไม่ได้บันทึก
+          } finally { setOtBusy(null); }
+        };
+        const moveStaff = async (empId: string, toDept: string | null, label: string) => {
+          setStaffBusy(empId);
+          try {
+            const res = await apiFetch("/api/mo/dept-staff", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ employee_id: empId, department_id: toDept }) });
+            const j = await res.json();
+            if (j.error) throw new Error(j.error);
+            toast.success(label);
+            onStaffMoved?.();   // ให้หน้าแม่โหลดรายชื่อ/เงินเดือนรวมใหม่
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "ย้ายพนักงานไม่สำเร็จ");
+          } finally { setStaffBusy(null); }
+        };
+        const numCls = "w-14 h-7 px-1 text-xs text-right border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:bg-slate-50";
+
+        return (
+          <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={() => { setStaffPopup(null); setStaffAddOpen(false); setStaffSearch(""); }}>
+            <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-bold text-slate-800 truncate">👥 พนักงาน — {dept.name} <span className="text-slate-400 font-normal">({list.length} คน)</span></h3>
+                <button onClick={() => { setStaffPopup(null); setStaffAddOpen(false); }} className="text-slate-400 hover:text-slate-600 shrink-0">✕</button>
+              </div>
+
+              {planOt
+                ? <p className="text-[11px] text-slate-400 mb-1.5">OT ที่ใส่ = <b>฿/ชม. × ชม./วัน × วัน</b> · เป็นตัวเลข<b>วางแผนของแผนนี้</b>เท่านั้น ไม่ส่งเข้าระบบเงินเดือน</p>
+                : <p className="text-[11px] text-amber-600 mb-1.5">ตั้ง OT ได้ในหน้า “แผน” (บอร์ดของจริงไม่ใช่แผน) — ที่นี่ย้ายคนเข้า/ออกโต๊ะได้</p>}
+
+              {list.length === 0 ? (
+                <p className="text-xs text-slate-400 py-3 text-center">โต๊ะนี้ยังไม่มีพนักงาน — กด “＋ เพิ่มคนเข้าโต๊ะ” ด้านล่าง</p>
+              ) : (
+                <div className="divide-y divide-slate-100 max-h-[46vh] overflow-y-auto -mx-1 px-1">
+                  {list.map((c) => {
+                    const o = ot[c.id] ?? { rate_per_hour: 0, hours_per_day: 0, days: 0, amount: 0 };
+                    return (
+                      <div key={c.id} className="py-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">
+                            {c.code ? <code className="text-[10px] text-slate-400 mr-1">[{c.code}]</code> : null}{c.name}
+                          </span>
+                          {canEdit && (
+                            <button onClick={() => void moveStaff(c.id, null, `ย้าย ${c.name} ออกจาก ${dept.name} แล้ว`)} disabled={staffBusy === c.id}
+                              title="ย้ายออกจากโต๊ะนี้ (ไม่ได้ลบพนักงาน — แค่ไม่สังกัดโต๊ะ)"
+                              className="shrink-0 h-6 px-1.5 text-[11px] text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded disabled:opacity-40">ย้ายออก</button>
+                          )}
+                        </div>
+                        {planOt && (
+                          <div className="flex items-center gap-1 mt-0.5 pl-1 text-[11px] text-slate-500 flex-wrap">
+                            <span className="text-amber-600">OT</span>
+                            <input type="number" min={0} step="any" disabled={!canEdit || otBusy === c.id} value={o.rate_per_hour || ""} placeholder="฿/ชม."
+                              onChange={(e) => setOt((s) => ({ ...s, [c.id]: { ...o, rate_per_hour: Number(e.target.value) || 0, amount: otAmount({ ...o, rate_per_hour: Number(e.target.value) || 0 }) } }))}
+                              onBlur={(e) => void saveOt(c.id, { rate_per_hour: Number(e.target.value) || 0 })} className={numCls} title="ค่า OT ต่อชั่วโมง (บาท)" />
+                            <span className="text-slate-300">×</span>
+                            <input type="number" min={0} step="any" disabled={!canEdit || otBusy === c.id} value={o.hours_per_day || ""} placeholder="ชม./วัน"
+                              onChange={(e) => setOt((s) => ({ ...s, [c.id]: { ...o, hours_per_day: Number(e.target.value) || 0, amount: otAmount({ ...o, hours_per_day: Number(e.target.value) || 0 }) } }))}
+                              onBlur={(e) => void saveOt(c.id, { hours_per_day: Number(e.target.value) || 0 })} className={numCls} title="ชั่วโมง OT ต่อวัน" />
+                            <span className="text-slate-300">×</span>
+                            <input type="number" min={0} step="any" disabled={!canEdit || otBusy === c.id} value={o.days || ""} placeholder="วัน"
+                              onChange={(e) => setOt((s) => ({ ...s, [c.id]: { ...o, days: Number(e.target.value) || 0, amount: otAmount({ ...o, days: Number(e.target.value) || 0 }) } }))}
+                              onBlur={(e) => void saveOt(c.id, { days: Number(e.target.value) || 0 })} className={numCls} title="จำนวนวันที่ทำ OT" />
+                            <span className="ml-auto font-semibold text-amber-700 tabular-nums">= {baht(o.amount || 0)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* เพิ่มคนเข้าโต๊ะ */}
+              {canEdit && (
+                <div className="mt-2 pt-2 border-t border-slate-100">
+                  {!staffAddOpen ? (
+                    <button onClick={() => setStaffAddOpen(true)} className="w-full h-8 text-sm text-violet-600 border border-dashed border-violet-200 rounded-lg hover:bg-violet-50">＋ เพิ่มคนเข้าโต๊ะนี้</button>
+                  ) : (
+                    <div>
+                      <input autoFocus value={staffSearch} onChange={(e) => setStaffSearch(e.target.value)} placeholder="พิมพ์ชื่อ/รหัสพนักงาน…"
+                        className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                      <div className="max-h-40 overflow-y-auto mt-1 border border-slate-100 rounded-lg divide-y divide-slate-50">
+                        {addable.map((c) => (
+                          <button key={c.id} disabled={staffBusy === c.id}
+                            onClick={() => void moveStaff(c.id, dept.id, `ย้าย ${c.name} เข้า ${dept.name} แล้ว`)}
+                            className="w-full text-left px-2 py-1.5 text-sm text-slate-700 hover:bg-violet-50 disabled:opacity-40">
+                            {c.code ? <code className="text-[10px] text-slate-400 mr-1">[{c.code}]</code> : null}{c.name}
+                            <span className="text-[10px] text-slate-400 ml-1">{c.department_id ? "· ย้ายมาจากโต๊ะอื่น" : "· ยังไม่มีโต๊ะ"}</span>
+                          </button>
+                        ))}
+                        {addable.length === 0 && <div className="px-2 py-3 text-center text-[11px] text-slate-300">ไม่พบพนักงาน</div>}
+                      </div>
+                      <button onClick={() => { setStaffAddOpen(false); setStaffSearch(""); }} className="mt-1 text-[11px] text-slate-400 hover:text-slate-600">ปิด</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* สรุปค่าแรงโต๊ะ */}
+              <div className="mt-2 pt-2 border-t border-slate-100 text-xs space-y-0.5">
+                {(deptWages[dept.id] ?? 0) > 0 && <div className="text-violet-700">เงินเดือนรวมในโต๊ะ {baht(deptWages[dept.id])}</div>}
+                {otTotal > 0 && <div className="text-amber-700">OT ที่วางแผนไว้ {baht(otTotal)}</div>}
+                {((deptWages[dept.id] ?? 0) > 0 || otTotal > 0) && <div className="font-bold text-slate-700">รวมค่าแรงโต๊ะ {baht((deptWages[dept.id] ?? 0) + otTotal)}</div>}
+              </div>
             </div>
-            {(() => {
-              const list = craftsmen.filter((c) => c.department_id === staffPopup.id);
-              return list.length === 0
-                ? <p className="text-xs text-slate-400 py-3 text-center">แผนกนี้ยังไม่มีพนักงานผูกไว้</p>
-                : <div className="divide-y divide-slate-50 max-h-72 overflow-y-auto">{list.map((c) => <div key={c.id} className="py-1.5 text-sm text-slate-700">{c.code ? <code className="text-[10px] text-slate-400 mr-1">[{c.code}]</code> : null}{c.name}</div>)}</div>;
-            })()}
-            {(deptWages[staffPopup.id] ?? 0) > 0 && <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-violet-700">เงินเดือนรวมในแผนก {baht(deptWages[staffPopup.id])}</div>}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {confirmApply && (
         <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={() => setConfirmApply(false)}>
