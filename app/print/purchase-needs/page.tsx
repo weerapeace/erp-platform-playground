@@ -5,6 +5,13 @@
  *   ?types=ผ้า,หนัง                         → จัดกลุ่มตามประเภทอย่างเดียว (1 ชั้น)
  *   ?mode=group[&groups=กลุ่มA,กลุ่มB]       → จัดกลุ่มตามกลุ่ม MO แล้วแยกประเภทในกลุ่ม (2 ชั้น)
  * worksheet ไปโกดัง/ผู้ขาย: รหัส/วัตถุดิบ/ต้องซื้อ/หน่วย/ใบสั่งผลิต + ช่องเช็ค ☐ ซื้อแล้ว ☐ เตรียมแล้ว
+ *
+ * ⚙️ ตั้งค่าก่อนพิมพ์ได้ (แถบบนสุด — จำค่าไว้ให้ที่เครื่องนี้):
+ *   • ขนาดตัวอักษร (เล็ก/ปกติ/ใหญ่/ใหญ่มาก)
+ *   • โชว์รูปสินค้าที่สั่งผลิต (รูปของ SKU ในคอลัมน์ "ใบสั่งผลิต")
+ *   • โชว์รูปวัตถุดิบ (เพิ่มคอลัมน์รูปหน้ารหัส)
+ *   • โชว์จำนวนที่สั่งผลิตของแต่ละใบ (CTL044-02 ×1,000 (13.333) — ×1,000 = สั่งผลิต, (13.333) = วัตถุดิบที่ใบนั้นใช้)
+ * รูปเป็นที่อยู่แบบย่อ (/api/r2-image?key=…) → ตอนเปิดแท็บพิมพ์มี <base href> ของกลางจัดการให้แล้ว
  */
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -16,107 +23,148 @@ import type { PurchaseNeedRow } from "@/app/api/mo/purchase-needs/route";
 const fmt = (n: number) => (Math.round(n * 10000) / 10000).toLocaleString("th-TH");
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
-const TABLE_HTML = `<table class="doc-table">
+// ---- ตั้งค่าก่อนพิมพ์ ----
+type PrintOpts = {
+  fontPx: number;
+  moImg: boolean;    // รูปสินค้าที่สั่งผลิต (ในคอลัมน์ใบสั่งผลิต)
+  matImg: boolean;   // รูปวัตถุดิบ (คอลัมน์ใหม่หน้ารหัส)
+  moQty: boolean;    // จำนวนที่สั่งผลิตของใบนั้น (×1,000) — คู่กับจำนวนวัตถุดิบที่ใบนั้นต้องใช้
+};
+const FONTS: { px: number; label: string }[] = [
+  { px: 9, label: "เล็ก" }, { px: 10.5, label: "ปกติ" }, { px: 12, label: "ใหญ่" }, { px: 14, label: "ใหญ่มาก" },
+];
+const OPTS_KEY = "print:purchase-needs:opts";
+
+/** ความกว้างคอลัมน์ — ปรับตามว่าโชว์รูปอะไรบ้าง (รวมต้องได้ 100%) */
+function colWidths(o: PrintOpts) {
+  const moW = o.moImg ? 26 : 17;                       // คอลัมน์ใบสั่งผลิต กว้างขึ้นเมื่อมีรูป
+  const matW = o.matImg ? 9 : 0;                       // คอลัมน์รูปวัตถุดิบ
+  const nameW = 100 - (5 + matW + 13 + 10 + 7 + moW + 8 + 8);
+  return { idx: 5, img: matW, code: 13, name: nameW, qty: 10, uom: 7, mos: moW, chk: 8 };
+}
+
+const tableHtml = (o: PrintOpts) => {
+  const w = colWidths(o);
+  return `<table class="doc-table">
     <thead><tr>
-      <th style="width:5%">ลำดับ</th>
-      <th style="width:15%">รหัส</th>
-      <th style="width:30%">วัตถุดิบ</th>
-      <th style="width:10%" class="text-right">ต้องซื้อ</th>
-      <th style="width:7%">หน่วย</th>
-      <th style="width:17%">ใบสั่งผลิต</th>
-      <th style="width:8%" class="text-center">ซื้อแล้ว</th>
-      <th style="width:8%" class="text-center">เตรียมแล้ว</th>
+      <th style="width:${w.idx}%">ลำดับ</th>
+      ${o.matImg ? `<th style="width:${w.img}%">รูป</th>` : ""}
+      <th style="width:${w.code}%">รหัส</th>
+      <th style="width:${w.name}%">วัตถุดิบ</th>
+      <th style="width:${w.qty}%" class="text-right">ต้องซื้อ</th>
+      <th style="width:${w.uom}%">หน่วย</th>
+      <th style="width:${w.mos}%">ใบสั่งผลิต</th>
+      <th style="width:${w.chk}%" class="text-center">ซื้อแล้ว</th>
+      <th style="width:${w.chk}%" class="text-center">เตรียมแล้ว</th>
     </tr></thead>
     <tbody>
       {{#rows}}
       <tr>
         <td class="text-center">{{idx}}</td>
+        ${o.matImg ? `<td class="text-center">{{#img}}<img src="{{img}}" class="mat-thumb" />{{/img}}{{^img}}<span class="no-img">—</span>{{/img}}</td>` : ""}
         <td class="code-cell">{{code}}</td>
         <td>{{name}}</td>
         <td class="text-right">{{qty}}</td>
         <td class="text-center">{{uom}}</td>
-        <td class="mos">{{mos_text}}</td>
+        <td class="mos">${o.moImg
+          ? `{{#mos_list}}<span class="mo-chip">{{#img}}<img src="{{img}}" class="mo-thumb" />{{/img}}<span>{{label}}{{#moqty}} <b class="moqty">×{{moqty}}</b>{{/moqty}} ({{qty}})</span></span>{{/mos_list}}`
+          : `{{mos_text}}`}</td>
         <td class="text-center"><span class="chk"></span></td>
         <td class="text-center"><span class="chk"></span></td>
       </tr>
       {{/rows}}
     </tbody>
   </table>`;
+};
 
-const SHARED_CSS = `
-.doc { font-size: 10.5px; color: #111827; }
+// ขนาดย่อยทั้งหมดอิงตัวอักษรหลัก (em) → เลื่อนขนาดตัวอักษรแล้วทั้งใบขยายตามกัน
+const sharedCss = (o: PrintOpts) => `
+.doc { font-size: ${o.fontPx}px; color: #111827; }
 .doc-header { text-align: center; }
-.company-name { font-size: 11px; font-weight: 700; color: #475569; }
-.doc-title { text-align: center; font-size: 20px; font-weight: 800; margin: 2mm 0 1mm; }
-.doc-sub { text-align: center; font-size: 10px; color: #64748b; margin-bottom: 4mm; }
+.company-name { font-size: 1.05em; font-weight: 700; color: #475569; }
+.doc-title { text-align: center; font-size: 1.9em; font-weight: 800; margin: 2mm 0 1mm; }
+.doc-sub { text-align: center; font-size: 0.95em; color: #64748b; margin-bottom: 4mm; }
 .grp { margin-bottom: 4mm; page-break-inside: auto; }
-.grp-title { font-size: 12px; font-weight: 800; background: #f1f5f9; padding: 1.2mm 2mm; border: 1px solid #cbd5e1; break-after: avoid; page-break-after: avoid; }
+.grp-title { font-size: 1.15em; font-weight: 800; background: #f1f5f9; padding: 1.2mm 2mm; border: 1px solid #cbd5e1; break-after: avoid; page-break-after: avoid; }
 .grp-count { color: #64748b; font-weight: 500; }
-.bucket-title { font-size: 13px; font-weight: 800; color: #5b21b6; background: #f5f3ff; padding: 1.5mm 2mm; border: 1px solid #c4b5fd; margin: 2mm 0 1.5mm; break-after: avoid; page-break-after: avoid; }
+.bucket-title { font-size: 1.25em; font-weight: 800; color: #5b21b6; background: #f5f3ff; padding: 1.5mm 2mm; border: 1px solid #c4b5fd; margin: 2mm 0 1.5mm; break-after: avoid; page-break-after: avoid; }
 .bucket { margin-bottom: 5mm; }
 .doc-table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 2mm; }
 .doc-table th, .doc-table td { border: 1px solid #94a3b8; padding: 1mm 1.2mm; vertical-align: middle; word-break: break-word; }
-.doc-table th { background: #f8fafc; font-weight: 700; font-size: 10px; }
+.doc-table th { background: #f8fafc; font-weight: 700; font-size: 0.95em; }
 .doc-table tr { page-break-inside: avoid; }
 .text-center { text-align: center; }
 .text-right { text-align: right; }
-.code-cell { font-family: ui-monospace, Consolas, monospace; font-size: 8.5px; word-break: break-all; color: #334155; }
-.mos { font-size: 8.5px; color: #475569; }
+.code-cell { font-family: ui-monospace, Consolas, monospace; font-size: 0.82em; word-break: break-all; color: #334155; }
+.mos { font-size: 0.82em; color: #475569; }
 .chk { display: inline-block; width: 4mm; height: 4mm; border: 1.2px solid #334155; border-radius: 1px; }
-@media print { .doc { padding: 10mm 9mm !important; } .doc-title { font-size: 17px; } }`;
+.mat-thumb { width: 100%; max-width: 16mm; max-height: 16mm; object-fit: contain; display: inline-block; }
+.no-img { color: #cbd5e1; }
+.mo-chip { display: inline-flex; align-items: center; gap: 1mm; margin: 0 2mm 1mm 0; vertical-align: middle; }
+.mo-thumb { width: 9mm; height: 9mm; object-fit: contain; border: 1px solid #e2e8f0; border-radius: 1mm; background: #fff; }
+.moqty { color: #b45309; font-weight: 700; }
+@media print { .doc { padding: 10mm 9mm !important; } }`;
+
+const headerHtml = (title: string) => `<div class="doc-header"><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
+<div class="doc-title">${title}</div>
+<div class="doc-sub">พิมพ์เมื่อ {{printed_at}} · รวม {{total}} รายการ</div>`;
 
 // โหมดตามประเภท (1 ชั้น)
-const TEMPLATE: ReportTemplate = {
+const templateByType = (o: PrintOpts): ReportTemplate => ({
   paper_size: "A4", orientation: "portrait",
-  header_html: `<div class="doc-header"><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
-<div class="doc-title">รายการขอซื้อ / เตรียมวัตถุดิบ</div>
-<div class="doc-sub">พิมพ์เมื่อ {{printed_at}} · รวม {{total}} รายการ</div>`,
+  header_html: headerHtml("รายการขอซื้อ / เตรียมวัตถุดิบ"),
   body_html: `{{#groups}}
 <section class="grp">
   <div class="grp-title">{{type}} <span class="grp-count">({{count}})</span></div>
-  ${TABLE_HTML}
+  ${tableHtml(o)}
 </section>
 {{/groups}}`,
   footer_html: "",
-  custom_css: SHARED_CSS,
-};
+  custom_css: sharedCss(o),
+});
 
 // โหมดตามกลุ่ม (2 ชั้น): กลุ่ม MO → ประเภท → รายการ
-const TEMPLATE_GROUP: ReportTemplate = {
+const templateByGroup = (o: PrintOpts): ReportTemplate => ({
   paper_size: "A4", orientation: "portrait",
-  header_html: `<div class="doc-header"><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
-<div class="doc-title">รายการขอซื้อ / เตรียมวัตถุดิบ (ตามกลุ่ม)</div>
-<div class="doc-sub">พิมพ์เมื่อ {{printed_at}} · รวม {{total}} รายการ</div>`,
+  header_html: headerHtml("รายการขอซื้อ / เตรียมวัตถุดิบ (ตามกลุ่ม)"),
   body_html: `{{#buckets}}
 <section class="bucket">
   <div class="bucket-title">🗂 {{name}} <span class="grp-count">({{mo_count}} ใบสั่งผลิต)</span></div>
   {{#types}}
   <div class="grp">
     <div class="grp-title">{{type}} <span class="grp-count">({{count}})</span></div>
-    ${TABLE_HTML}
+    ${tableHtml(o)}
   </div>
   {{/types}}
 </section>
 {{/buckets}}`,
   footer_html: "",
-  custom_css: SHARED_CSS,
-};
+  custom_css: sharedCss(o),
+});
 
 type GroupDef = { name: string; mo_nos: string[] };
 
 // แปลง row → record สำหรับเทมเพลต
-const rowRecord = (r: PurchaseNeedRow, i: number) => ({
+//   ×N = จำนวนที่ใบสั่งผลิตนั้นสั่งผลิต (เปิด/ปิดได้) · (N) = จำนวนวัตถุดิบที่ใบนั้นต้องใช้
+const rowRecord = (r: PurchaseNeedRow, i: number, o: PrintOpts) => ({
   idx: i + 1, code: r.component_sku || "-", name: r.component_name ?? "", qty: fmt(r.total_remaining), uom: r.uom ?? "",
-  mos_text: r.mos.map((m) => `${m.product_label || m.mo_no} (${fmt(m.needed)})`).join(", "),
+  img: r.component_image ?? "",
+  mos_text: r.mos.map((m) => `${m.product_label || m.mo_no}${o.moQty ? ` ×${fmt(m.mo_qty)}` : ""} (${fmt(m.needed)})`).join(", "),
+  // โหมดรูป: การ์ดเล็ก ๆ ต่อใบสั่งผลิต (รูปสินค้า + รหัส + จำนวน)
+  mos_list: r.mos.map((m) => ({
+    label: m.product_label || m.mo_no, qty: fmt(m.needed),
+    moqty: o.moQty ? fmt(m.mo_qty) : "",
+    img: m.product_image ?? "",
+  })),
 });
 
 // จัดกลุ่มชุด row ตามประเภท → [{ type, count, rows }]
-const groupByType = (rs: PurchaseNeedRow[]) => {
+const groupByType = (rs: PurchaseNeedRow[], o: PrintOpts) => {
   const byType = new Map<string, PurchaseNeedRow[]>();
   for (const r of rs) { const t = r.material_type || "ไม่ระบุประเภท"; (byType.get(t) ?? byType.set(t, []).get(t)!).push(r); }
   return [...byType.entries()].sort((a, b) => a[0].localeCompare(b[0], "th")).map(([type, list]) => ({
     type, count: list.length,
-    rows: list.sort((a, b) => (a.component_name ?? "").localeCompare(b.component_name ?? "", "th")).map(rowRecord),
+    rows: list.sort((a, b) => (a.component_name ?? "").localeCompare(b.component_name ?? "", "th")).map((r, i) => rowRecord(r, i, o)),
   }));
 };
 
@@ -130,6 +178,19 @@ function PurchaseNeedsPrintInner() {
   const [rows, setRows] = useState<PurchaseNeedRow[] | null>(null);
   const [moGroups, setMoGroups] = useState<GroupDef[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // ตั้งค่าก่อนพิมพ์ — จำไว้ที่เครื่องนี้ (ครั้งหน้าเปิดมาได้ค่าเดิม)
+  const [opts, setOpts] = useState<PrintOpts>({ fontPx: 10.5, moImg: false, matImg: false, moQty: false });
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(OPTS_KEY);
+      if (raw) { const o = JSON.parse(raw) as Partial<PrintOpts>; setOpts((s) => ({ ...s, ...o })); }
+    } catch { /* ignore */ }
+  }, []);
+  const setOpt = (patch: Partial<PrintOpts>) => setOpts((s) => {
+    const next = { ...s, ...patch };
+    try { localStorage.setItem(OPTS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    return next;
+  });
 
   useEffect(() => {
     Promise.all([
@@ -166,27 +227,54 @@ function PurchaseNeedsPrintInner() {
           if (mos.length === 0) return null;
           return { ...r, mos, total_remaining: r4(mos.reduce((n, m) => n + m.needed, 0)) };
         }).filter((x): x is PurchaseNeedRow => x !== null);
-        const types = groupByType(grows);
+        const types = groupByType(grows, opts);
         total += grows.length;
         return { name, mo_count: moSet.size, types };
       });
-      return buildReportHtml(TEMPLATE_GROUP, { printed_at, total, buckets });
+      return buildReportHtml(templateByGroup(opts), { printed_at, total, buckets });
     }
 
     const filtered = typesFilter.length ? rows.filter((r) => typesFilter.includes(r.material_type || "ไม่ระบุประเภท")) : rows;
-    return buildReportHtml(TEMPLATE, { printed_at, total: filtered.length, groups: groupByType(filtered) });
-  }, [rows, moGroups, isGroupMode, typesFilter, groupsFilter]);
+    return buildReportHtml(templateByType(opts), { printed_at, total: filtered.length, groups: groupByType(filtered, opts) });
+  }, [rows, moGroups, isGroupMode, typesFilter, groupsFilter, opts]);
 
   const subtitle = isGroupMode
     ? `ตามกลุ่ม${groupsFilter.length ? ` · ${groupsFilter.join(", ")}` : " · ทุกกลุ่ม"}`
     : typesFilter.length ? ` · ${typesFilter.join(", ")}` : "";
 
+  const chk = "flex items-center gap-1.5 h-9 px-3 text-sm rounded-lg border cursor-pointer whitespace-nowrap";
+
   return (
     <div className="min-h-screen bg-slate-100">
-      <div className="no-print sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200 bg-slate-100 px-6 py-3">
+      <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-100 px-6 py-3">
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <span className="text-sm text-slate-600">🖨️ พิมพ์รายการขอซื้อ/เตรียม{subtitle ? ` · ${subtitle}` : ""}</span>
         <div className="flex-1" />
+
+        {/* ⚙️ ตั้งค่าก่อนพิมพ์ */}
+        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 h-9" title="ขนาดตัวอักษรทั้งใบ">
+          <span className="text-xs text-slate-500">ตัวอักษร</span>
+          {FONTS.map((f) => (
+            <button key={f.px} onClick={() => setOpt({ fontPx: f.px })}
+              className={`h-7 px-2 text-xs rounded ${opts.fontPx === f.px ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"}`}>{f.label}</button>
+          ))}
+        </div>
+        <label className={`${chk} ${opts.moImg ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 bg-white text-slate-600"}`}
+          title="โชว์รูปสินค้าที่สั่งผลิต ในคอลัมน์ “ใบสั่งผลิต” (เช่น CTL044-02 มีรูปด้วย)">
+          <input type="checkbox" checked={opts.moImg} onChange={(e) => setOpt({ moImg: e.target.checked })} className="w-4 h-4 accent-rose-600" />
+          🖼 รูปสินค้าที่สั่งผลิต
+        </label>
+        <label className={`${chk} ${opts.matImg ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 bg-white text-slate-600"}`}
+          title="เพิ่มคอลัมน์รูปวัตถุดิบหน้ารหัส">
+          <input type="checkbox" checked={opts.matImg} onChange={(e) => setOpt({ matImg: e.target.checked })} className="w-4 h-4 accent-rose-600" />
+          🧵 รูปวัตถุดิบ
+        </label>
+        <label className={`${chk} ${opts.moQty ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 bg-white text-slate-600"}`}
+          title="โชว์จำนวนที่ใบสั่งผลิตนั้นสั่งผลิต เช่น CTL044-02 ×1,000 (13.333) — ×1,000 คือจำนวนที่สั่ง, ในวงเล็บคือวัตถุดิบที่ใบนั้นต้องใช้">
+          <input type="checkbox" checked={opts.moQty} onChange={(e) => setOpt({ moQty: e.target.checked })} className="w-4 h-4 accent-rose-600" />
+          🔢 จำนวนที่สั่งผลิต
+        </label>
+
         <button onClick={() => printReportHtmlInNewWindow(html)} disabled={!html} className="h-9 rounded-lg bg-rose-600 px-5 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
       </div>
       <div className="px-4 py-6">
