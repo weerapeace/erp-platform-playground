@@ -610,18 +610,19 @@ export function DispatchPlanBoard({
                 onDragOver={(e) => { if (editable) e.preventDefault(); }} onDrop={() => editable && dropToDept(d)}
                 className={`rounded-xl border p-2 min-h-[140px] ${tablet ? "" : "overflow-y-auto scrollbar-hide shrink-0"} ${canDrop ? "border-dashed border-indigo-300 bg-indigo-50/30 cursor-pointer" : "border-slate-200 bg-white"}`}
                 style={tablet ? undefined : { flexBasis: colW, width: colW, maxHeight: "calc(100vh - 240px)" }}>
-                <div className="sticky top-0 z-20 flex items-center justify-between gap-1 -mx-2 -mt-2 px-2 pt-2 pb-2 mb-1.5 bg-white rounded-t-xl border-b border-slate-100"
+                {/* หัวโต๊ะ: ชื่ออยู่บรรทัดบน (ไม่ตัดคำ) · ตัวเลขเงินอยู่บรรทัดล่าง */}
+                <div className="sticky top-0 z-20 -mx-2 -mt-2 px-2 pt-2 pb-2 mb-1.5 bg-white rounded-t-xl border-b border-slate-100"
                   onDragOver={(e) => { if (onReorderDepts && deptDragRef.current) e.preventDefault(); }}
                   onDrop={(e) => { if (deptDragRef.current) { e.stopPropagation(); reorderDept(d.id); } }}>
-                  <div className="flex items-center gap-1 min-w-0">
-                    {onReorderDepts && <span draggable onDragStart={(e) => { e.stopPropagation(); deptDragRef.current = d.id; dragRef.current = null; }} title="ลากสลับตำแหน่งโต๊ะ" className="shrink-0 cursor-move text-slate-300 hover:text-slate-500 select-none">⠿</span>}
-                    <span className={`font-bold text-slate-700 truncate ${tablet ? "text-lg" : "text-sm"}`}>{d.name}</span>
-                    <button onClick={(e) => { e.stopPropagation(); setStaffPopup(d); }} title="พนักงานในโต๊ะนี้ (ย้ายคน + ตั้ง OT)" className={`shrink-0 text-slate-300 hover:text-violet-600 ${tablet ? "text-sm" : "text-[11px]"}`}>👥</button>
+                  <div className="flex items-start gap-1">
+                    {onReorderDepts && <span draggable onDragStart={(e) => { e.stopPropagation(); deptDragRef.current = d.id; dragRef.current = null; }} title="ลากสลับตำแหน่งโต๊ะ" className="shrink-0 cursor-move text-slate-300 hover:text-slate-500 select-none leading-5">⠿</span>}
+                    <span className={`font-bold text-slate-700 flex-1 break-words ${tablet ? "text-lg" : "text-sm"}`}>{d.name}</span>
+                    <button onClick={(e) => { e.stopPropagation(); setStaffPopup(d); }} title="พนักงานในโต๊ะนี้ (ย้ายคน + ตั้ง OT)" className={`shrink-0 text-slate-300 hover:text-violet-600 leading-5 ${tablet ? "text-sm" : "text-[11px]"}`}>👥</button>
                     {/* ขยายดูงานในโต๊ะนี้เป็นรายการ (คอลัมน์ยาว เลื่อนดูยาก) */}
                     <button onClick={(e) => { e.stopPropagation(); setListPopup({ kind: "dept", dept: d }); }} title="ขยายดูรายการงานในโต๊ะนี้"
-                      className={`shrink-0 text-slate-300 hover:text-indigo-600 ${tablet ? "text-sm" : "text-[11px]"}`}>⛶</button>
+                      className={`shrink-0 text-slate-300 hover:text-indigo-600 leading-5 ${tablet ? "text-sm" : "text-[11px]"}`}>⛶</button>
                   </div>
-                  <span className={`text-right shrink-0 leading-tight ${tablet ? "text-[13px]" : "text-[10px]"}`}>
+                  <span className={`block text-right leading-tight mt-0.5 ${tablet ? "text-[13px]" : "text-[10px]"}`}>
                     {(deptWages[d.id] ?? 0) > 0 && (
                       <span className="block text-violet-600" title={`เงินเดือนรวมพนักงานในโต๊ะ${(otByDept[d.id] ?? 0) > 0 ? ` + OT ที่วางแผนไว้ ${baht(otByDept[d.id])}` : ""}`}>
                         คน {baht((deptWages[d.id] ?? 0) + (otByDept[d.id] ?? 0))}
