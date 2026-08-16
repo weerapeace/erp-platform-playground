@@ -48,6 +48,8 @@ const ParentDescriptionImages = dynamic(() => import("@/components/parent-descri
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-tab").then((m) => m.ParentPlatformsTab), { ssr: false });
 const ParentIssuesPanel = dynamic(() => import("@/components/parent-issues-panel").then((m) => m.ParentIssuesPanel), { ssr: false });
+// ตัวเลือกธนาคารกลาง — ใช้กับฟิลด์ข้อความที่ตั้ง options.picker = "bank" (โหลดเฉพาะโมดูลที่ใช้)
+const BankPicker = dynamic(() => import("@/components/bank-picker").then((m) => m.BankPicker), { ssr: false });
 const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").then((m) => m.SkuSupplierList), { ssr: false });
 const AiProductDetailModal = dynamic(() => import("@/components/ai-product-detail").then((m) => m.AiProductDetailModal), { ssr: false });
 // หมวดกลางสำหรับลงขาย — picker ค้นหา + เพิ่มหมวดใหม่พร้อมจับคู่ร้านในตัว (ของกลาง)
@@ -2116,7 +2118,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       );
     }
     // ฟิลด์ที่มี control หลายตัว (m2m/o2m) ห้ามครอบด้วย <label> — เพราะคลิกที่ชื่อ label เบราว์เซอร์จะไปกด control ตัวแรก (แท็กอันแรกหลุด)
-    const FieldWrap: "label" | "div" = (f.type === "many2many" || f.type === "one2many") ? "div" : "label";
+    // ของกลาง: ฟิลด์ข้อความที่ให้ "เลือกจากทะเบียนกลาง" แทนพิมพ์เอง (ทะเบียนฟิลด์ options.picker)
+    // ตอนนี้รองรับ "bank" — เพิ่มชนิดอื่นได้ที่นี่ที่เดียว แล้วทุกโมดูลใช้ได้ทันที
+    const pickerKind = f.type === "text" ? String((f.optionsRaw as { picker?: unknown } | undefined)?.picker ?? "") : "";
+    // ช่องที่มี control ซ้อน (dropdown) ห้ามครอบด้วย <label> — คลิกในรายการจะไปโดน control ตัวแรก
+    const FieldWrap: "label" | "div" = (f.type === "many2many" || f.type === "one2many" || pickerKind) ? "div" : "label";
     return (
       <FieldWrap key={f.key} style={{ gridColumn: `span ${gw12(f, maxSpan)}`, ...(highlight ? { background: hlColor, borderColor: hlColor } : {}) }} className={`block ${highlight ? "border rounded-lg p-2" : ""}`}>
         <span className="text-xs font-medium text-slate-600" style={labelStyle}>
@@ -2213,6 +2219,18 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             <span className="absolute right-3 bottom-2 text-[11px] font-medium text-slate-400 pointer-events-none">
               {currencyLabel(f.currencyCode ?? (f.currencyField ? form[f.currencyField] : undefined))}
             </span>
+          </div>
+        ) : pickerKind === "bank" ? (
+          /* ช่องข้อความที่ตั้ง options.picker = "bank" ในทะเบียนฟิลด์
+             → ใช้ตัวเลือกธนาคารกลาง (ค้นหาได้ + เพิ่มธนาคารใหม่ได้) แทนการพิมพ์เอง
+             กันชื่อธนาคารสะกดไม่ตรงกันจนจับคู่ข้ามโมดูลไม่ได้ */
+          <div className="mt-0.5">
+            <BankPicker
+              value={(v as string) || ""}
+              onChange={(name) => updateForm({ [f.key]: name })}
+              disabled={disabled}
+              placeholder={f.placeholder ?? tr("เลือกธนาคาร / พิมพ์ค้นหา", "Pick a bank / type to search")}
+            />
           </div>
         ) : (
           <input
