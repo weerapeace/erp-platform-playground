@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { getStatusStyle } from "@/lib/status-config";
 import { ImportMailModal } from "./import-mail-modal";
+import { SeriesWizardModal } from "./series-wizard-modal";
 
 const MasterRecordDrawer = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterRecordDrawer),
@@ -87,6 +88,7 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [mailOpen, setMailOpen] = useState(false);
+  const [seriesOpen, setSeriesOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -154,6 +156,8 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
           </div>
           {canEdit && (
             <>
+              <button onClick={() => setSeriesOpen(true)}
+                className="h-9 px-4 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">📚 เพิ่มทั้งชุด</button>
               <button onClick={() => setMailOpen(true)}
                 className="h-9 px-4 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">📧 จากอีเมล</button>
               <button onClick={() => setCreating(true)}
@@ -227,6 +231,7 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
       </div>
 
       <ImportMailModal open={mailOpen} onClose={() => setMailOpen(false)} onImported={load} />
+      <SeriesWizardModal open={seriesOpen} onClose={() => setSeriesOpen(false)} onCreated={load} />
 
       {(openId || creating) && (
         <MasterRecordDrawer

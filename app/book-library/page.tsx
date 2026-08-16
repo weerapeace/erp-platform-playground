@@ -16,6 +16,7 @@ import { StatusBadge } from "@/components/data-table";
 import { useViewPref } from "@/lib/use-view-pref";
 import { BookShelfView } from "./shelf-view";
 import { ImportMailModal } from "./import-mail-modal";
+import { SeriesWizardModal } from "./series-wizard-modal";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -73,17 +74,21 @@ type View = (typeof VIEWS)[number];
 export default function BookLibraryPage() {
   const { view, setView, saveDefault } = useViewPref<View>("book_library_view", VIEWS, "shelf");
   const [mailOpen, setMailOpen] = useState(false);
+  const [seriesOpen, setSeriesOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);   // นำเข้าเสร็จ → บังคับตารางโหลดใหม่
 
   // เปลี่ยนมุมมอง = จำไว้ให้ด้วย (ต่อคน) → เปิดครั้งหน้าได้มุมมองเดิม
   const go = useCallback((v: View) => { setView(v); void saveDefault(v); }, [setView, saveDefault]);
   const openMail = useCallback(() => setMailOpen(true), []);
+  const openSeries = useCallback(() => setSeriesOpen(true), []);
 
   // ปุ่มบนหัวหน้าตาราง — useMemo (deps คงที่) กันตารางถูกสร้างใหม่ทุกครั้งที่ re-render
   const tableConfig = useMemo<MasterCRUDConfig>(() => ({
     ...CONFIG,
     headerActions: () => (
       <>
+        <button onClick={openSeries}
+          className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">📚 เพิ่มทั้งชุด</button>
         <button onClick={openMail}
           className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">📧 จากอีเมล</button>
         <div className="flex items-center rounded-lg border border-slate-200 bg-white p-0.5">
@@ -94,13 +99,14 @@ export default function BookLibraryPage() {
         </div>
       </>
     ),
-  }), [go, openMail]);
+  }), [go, openMail, openSeries]);
 
   if (view === "shelf") return <BookShelfView onSwitchToTable={() => go("table")} />;
   return (
     <>
       <MasterCRUDPage key={reloadKey} config={tableConfig} />
       <ImportMailModal open={mailOpen} onClose={() => setMailOpen(false)} onImported={() => setReloadKey((k) => k + 1)} />
+      <SeriesWizardModal open={seriesOpen} onClose={() => setSeriesOpen(false)} onCreated={() => setReloadKey((k) => k + 1)} />
     </>
   );
 }
