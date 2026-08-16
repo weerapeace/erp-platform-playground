@@ -49,6 +49,9 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
   const [owned, setOwned] = useState<Set<number>>(new Set());
   const [rangeText, setRangeText] = useState("");
   const [saving, setSaving] = useState(false);
+  // เล่มที่ "มีในคลังอยู่แล้ว" (เช็กตอนเข้าขั้น 2) — จะไม่สร้างซ้ำ
+  const [dupes, setDupes] = useState<Map<number, string>>(new Map());   // เลขเล่ม → สถานะเดิมในคลัง
+  const [checking, setChecking] = useState(false);
 
   const n = Math.min(MAX_VOLUMES, Math.max(0, parseInt(total || "0", 10) || 0));
   const volumes = useMemo(() => Array.from({ length: n }, (_, i) => i + 1), [n]);
@@ -57,30 +60,55 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
   const reset = () => {
     setStep(1); setSeries(""); setTotal(""); setAuthor(""); setCategory("");
     setStore(""); setPrice(""); setOwned(new Set()); setRangeText(""); setSaving(false);
+    setDupes(new Map()); setChecking(false);
   };
   const close = () => { reset(); onClose(); };
 
-  const toggle = (v: number) =>
+  const toggle = (v: number) => {
+    if (dupes.has(v)) return;   // มีในคลังแล้ว — แตะไม่ได้
     setOwned((prev) => { const s = new Set(prev); if (s.has(v)) s.delete(v); else s.add(v); return s; });
+  };
 
   const applyRange = () => {
     const picked = parseRanges(rangeText, n);
     if (picked.size === 0) { toast.warning("พิมพ์เลขเล่มที่มี เช่น 1-10, 12, 15-18"); return; }
+    for (const v of dupes.keys()) picked.delete(v);
     setOwned(picked);
     toast.success(`ติ๊กให้แล้ว ${picked.size} เล่ม`);
+  };
+
+  /** เช็กว่าเล่มไหนมีในคลังแล้ว (เทียบด้วยชื่อเล่มแบบเดียวกับที่ฐานข้อมูลกันซ้ำ) */
+  const checkDupes = async (count: number) => {
+    setChecking(true);
+    try {
+      const list = Array.from({ length: count }, (_, i) => titleOf(i + 1));
+      const res = await apiFetch("/api/book-library/check-duplicates", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ titles: list }),
+      });
+      const j = await res.json();
+      const found = (j.existing ?? {}) as Record<string, { status: string }>;
+      const map = new Map<number, string>();
+      list.forEach((t, i) => { if (found[t]) map.set(i + 1, found[t].status); });
+      setDupes(map);
+      setOwned((prev) => { const s = new Set(prev); for (const v of map.keys()) s.delete(v); return s; });
+      if (map.size > 0) toast.info(`ชุดนี้มีในคลังแล้ว ${map.size} เล่ม — จะข้ามให้ ไม่สร้างซ้ำ`);
+    } catch { /* เช็กไม่ได้ก็ปล่อยผ่าน — ฐานข้อมูลกันซ้ำให้อีกชั้น */ }
+    finally { setChecking(false); }
   };
 
   const next = () => {
     if (!series.trim()) { toast.warning("ใส่ชื่อชุดก่อน"); return; }
     if (n < 1) { toast.warning("ใส่จำนวนเล่มทั้งหมด (1-200)"); return; }
     setStep(2);
+    void checkDupes(n);
   };
 
   const save = async () => {
     setSaving(true);
     try {
       const priceNum = price === "" ? null : Number(price);
-      const rows = volumes.map((v) => {
+      const rows = volumes.filter((v) => !dupes.has(v)).map((v) => {
         const row: Record<string, unknown> = {
           title: titleOf(v),
           series: series.trim(),
@@ -93,6 +121,7 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
         if (priceNum != null && priceNum > 0) row.price = priceNum;
         return row;
       });
+      if (rows.length === 0) { toast.warning("ชุดนี้มีครบในคลังแล้ว ไม่มีเล่มใหม่ให้เพิ่ม"); return; }
       const res = await apiFetch("/api/master-v2/book_library/import", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows, mode: "create", actor: user?.name ?? user?.email }),
@@ -134,9 +163,9 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
           {step === 1
             ? <button onClick={next}
                 className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">ถัดไป →</button>
-            : <button onClick={save} disabled={saving}
+            : <button onClick={save} disabled={saving || checking || n - dupes.size === 0}
                 className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-                {saving ? "กำลังบันทึก…" : `บันทึก ${n} เล่ม`}
+                {saving ? "กำลังบันทึก…" : `บันทึก ${n - dupes.size} เล่ม`}
               </button>}
         </>
       }
@@ -196,12 +225,15 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
 
           <div className="flex flex-wrap gap-1.5 max-h-[42vh] overflow-auto p-1">
             {volumes.map((v) => {
+              const dup = dupes.has(v);
               const on = owned.has(v);
               return (
-                <button key={v} onClick={() => toggle(v)} title={titleOf(v)}
+                <button key={v} onClick={() => toggle(v)} disabled={dup}
+                  title={dup ? `${titleOf(v)} — มีในคลังแล้ว (จะไม่สร้างซ้ำ)` : titleOf(v)}
                   className={`w-11 h-11 rounded-lg border text-sm tabular-nums transition-colors
-                    ${on ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-medium"
-                         : "bg-white border-slate-200 text-slate-400 hover:bg-slate-50"}`}>
+                    ${dup ? "bg-slate-100 border-slate-200 text-slate-300 line-through cursor-not-allowed"
+                      : on ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-medium"
+                           : "bg-white border-slate-200 text-slate-400 hover:bg-slate-50"}`}>
                   {v}
                 </button>
               );
@@ -209,12 +241,18 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+            {checking && <span className="text-slate-400">กำลังเช็กเล่มที่มีอยู่แล้ว…</span>}
             <span className="inline-flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />มีแล้ว <b>{owned.size}</b> เล่ม
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-500" />อยากได้ <b>{n - owned.size}</b> เล่ม
+              <span className="w-2 h-2 rounded-full bg-amber-500" />อยากได้ <b>{n - owned.size - dupes.size}</b> เล่ม
             </span>
+            {dupes.size > 0 && (
+              <span className="inline-flex items-center gap-1.5 text-slate-400">
+                <span className="w-2 h-2 rounded-full bg-slate-300" />ข้าม <b>{dupes.size}</b> เล่ม (มีในคลังแล้ว)
+              </span>
+            )}
           </div>
         </div>
       )}

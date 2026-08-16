@@ -23,7 +23,7 @@ type ParsedBook = {
   isbn: string; price: number | null; currency: string; store: string;
   purchased_at: string; release_date: string; buy_url: string; status: string;
 };
-type Row = ParsedBook & { _use: boolean };
+type Row = ParsedBook & { _use: boolean; _dup: boolean };
 
 const STATUSES = ["owned", "wishlist", "upcoming", "skipped"] as const;
 
@@ -61,7 +61,23 @@ export function ImportMailModal({ open, onClose, onImported }: {
       if (j.error) { toast.error(String(j.error)); return; }
       const books = (j.books ?? []) as ParsedBook[];
       if (books.length === 0) { toast.warning("ไม่พบรายการหนังสือในข้อความนี้ — ลองวางเนื้อหาส่วนที่มีชื่อหนังสือกับราคา"); return; }
-      setRows(books.map((b) => ({ ...b, _use: true })));
+
+      // เล่มที่มีในคลังแล้ว → ติดป้าย "ซ้ำ" + ไม่ติ๊กให้ (ผู้ใช้ยังติ๊กเองได้ถ้าตั้งใจ)
+      let dupTitles: Record<string, unknown> = {};
+      try {
+        const dRes = await apiFetch("/api/book-library/check-duplicates", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ titles: books.map((b) => b.title) }),
+        });
+        dupTitles = ((await dRes.json()).existing ?? {}) as Record<string, unknown>;
+      } catch { /* เช็กไม่ได้ก็ปล่อยผ่าน — ฐานข้อมูลกันซ้ำให้อีกชั้น */ }
+
+      const dupCount = books.filter((b) => dupTitles[b.title]).length;
+      if (dupCount > 0) toast.info(`มี ${dupCount} เล่มที่อยู่ในคลังแล้ว — ไม่ติ๊กให้ กันเพิ่มซ้ำ`);
+      setRows(books.map((b) => {
+        const dup = !!dupTitles[b.title];
+        return { ...b, _dup: dup, _use: !dup };
+      }));
     } catch (e) {
       toast.error((e as Error).message ?? "อ่านอีเมลไม่สำเร็จ");
     } finally { setParsing(false); }
@@ -138,8 +154,8 @@ export function ImportMailModal({ open, onClose, onImported }: {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <span className="text-sm text-slate-600">พบ {rows.length} เล่ม — ติ๊กเล่มที่จะบันทึก แล้วแก้ข้อมูลได้เลย</span>
-            <button onClick={() => setRows(rows.map((r) => ({ ...r, _use: true })))}
-              className="text-xs text-blue-600 hover:underline">เลือกทั้งหมด</button>
+            <button onClick={() => setRows(rows.map((r) => ({ ...r, _use: !r._dup })))}
+              className="text-xs text-blue-600 hover:underline">เลือกทั้งหมด (ยกเว้นที่ซ้ำ)</button>
             <button onClick={() => setRows(rows.map((r) => ({ ...r, _use: false })))}
               className="text-xs text-slate-400 hover:underline">ไม่เลือกเลย</button>
           </div>
@@ -163,7 +179,15 @@ export function ImportMailModal({ open, onClose, onImported }: {
                     <td className="p-2 align-middle">
                       <input type="checkbox" checked={r._use} onChange={(e) => patch(i, { _use: e.target.checked })} />
                     </td>
-                    <td className="p-1"><input value={r.title} onChange={(e) => patch(i, { title: e.target.value })} className={cell} /></td>
+                    <td className="p-1">
+                      <div className="flex items-center gap-1">
+                        <input value={r.title} onChange={(e) => patch(i, { title: e.target.value, _dup: false })} className={cell} />
+                        {r._dup && (
+                          <span title="ชื่อนี้มีในคลังแล้ว — ติ๊กบันทึกจะซ้ำ (เปลี่ยนชื่อได้ถ้าเป็นคนละเล่ม)"
+                            className="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700 border border-amber-200">ซ้ำ</span>
+                        )}
+                      </div>
+                    </td>
                     <td className="p-1"><input value={r.series} onChange={(e) => patch(i, { series: e.target.value })} className={cell} /></td>
                     <td className="p-1"><input value={r.volume} onChange={(e) => patch(i, { volume: e.target.value })} className={cell} /></td>
                     <td className="p-1">
