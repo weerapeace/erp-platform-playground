@@ -54,25 +54,44 @@ export async function POST(
 
   // ---- อ่าน relation fields จากทะเบียน (เพื่อแปลงชื่อ → id) ----
   const { data: mod } = await admin.from("erp_modules").select("id").eq("table_name", cfg.table).maybeSingle();
-  let relFields: { col: string; tgt: string; labelField: string }[] = [];
+  // matchFields = ช่องที่ยอมให้ไฟล์นำเข้าใช้ "อ้างถึง" แถวปลายทางได้
+  //   ชื่อที่โชว์ (target_label_field) + ช่องที่ใช้ค้นหา (target_search_fields) + ช่องรอง (secondary_label_field)
+  //   เช่นสัญญาเงินกู้: ใส่ "LOAN-2026-0003" / ชื่อสัญญา / เลขที่บัญชี ก็จับคู่ได้
+  //   (เดิมต้องสะกดตรงกับ "ชื่อ" เป๊ะ ๆ เท่านั้น — คนทำไฟล์มักมีแต่รหัส)
+  let relFields: { col: string; tgt: string; matchFields: string[] }[] = [];
   if (mod) {
     const { data: flds } = await admin.from("erp_module_fields")
       .select("column_name, ui_field_type, relation_config")
       .eq("module_id", mod.id).eq("is_active", true).eq("ui_field_type", "relation");
     relFields = (flds ?? []).map((f) => {
       const rc = (f.relation_config ?? {}) as Record<string, unknown>;
-      return { col: String(f.column_name ?? ""), tgt: String(rc.target_table ?? ""), labelField: String(rc.target_label_field ?? "name") };
-    }).filter((r) => r.col && r.tgt && SAFE.test(r.tgt) && SAFE.test(r.labelField));
+      const search = Array.isArray(rc.target_search_fields) ? (rc.target_search_fields as unknown[]).map((s) => String(s)) : [];
+      const matchFields = [...new Set([
+        String(rc.target_label_field ?? "name"),
+        ...search,
+        ...(rc.secondary_label_field ? [String(rc.secondary_label_field)] : []),
+      ])].filter((c) => c && SAFE.test(c));
+      return { col: String(f.column_name ?? ""), tgt: String(rc.target_table ?? ""), matchFields };
+    }).filter((r) => r.col && r.tgt && SAFE.test(r.tgt) && r.matchFields.length > 0);
   }
 
-  // ---- สร้าง map ชื่อ→id ของแต่ละ relation (เฉพาะค่าที่อยู่ใน batch นี้) ----
+  // ---- สร้าง map "ค่าที่อ้างถึง → id" ของแต่ละ relation (เฉพาะค่าที่อยู่ใน batch นี้) ----
+  // ไล่ทีละช่อง: ชื่อก่อน แล้วค่อยรหัส/ช่องรอง — ช่องแรกที่เจอชนะ (ไม่ทับของเดิม)
   const relMap: Record<string, Map<string, string>> = {};
   for (const rf of relFields) {
     const vals = [...new Set(rows.map((r) => r[rf.col]).filter((v) => v != null && v !== "" && !UUID_RE.test(String(v))).map((v) => String(v)))];
     relMap[rf.col] = new Map();
     if (vals.length === 0) continue;
-    const { data: td } = await admin.from(rf.tgt).select(`id, ${rf.labelField}`).in(rf.labelField, vals);
-    (td ?? []).forEach((t) => { const o = t as unknown as Record<string, unknown>; relMap[rf.col].set(String(o[rf.labelField]).toLowerCase(), String(o.id)); });
+    for (const field of rf.matchFields) {
+      const missing = vals.filter((v) => !relMap[rf.col].has(v.toLowerCase()));
+      if (missing.length === 0) break;
+      const { data: td } = await admin.from(rf.tgt).select(`id, ${field}`).in(field, missing);
+      (td ?? []).forEach((t) => {
+        const o = t as unknown as Record<string, unknown>;
+        const key = String(o[field] ?? "").toLowerCase();
+        if (key && !relMap[rf.col].has(key)) relMap[rf.col].set(key, String(o.id));
+      });
+    }
   }
 
   // ---- เตรียมแถว: แปลง relation + คงเลขแถวจริงไว้ (สำหรับรายงาน) ----
