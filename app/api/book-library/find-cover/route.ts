@@ -63,8 +63,10 @@ const upgradeThumb = (url: string) =>
   url.replace(/^http:/, "https:").replace(/&zoom=\d+/, "&zoom=1").replace(/&edge=curl/, "");
 
 async function search(key: string, q: string): Promise<Volume[]> {
+  // 40 = เพดานของ Google Books · เดิมใช้ 10 แล้วเล่มที่ต้องการหลุดออกนอกสิบอันดับแรกบ่อย
+  // (ชุดยาว ๆ เช่นการ์ตูน 23 เล่ม ผลลัพธ์ชื่อคล้ายกันหมด เล่มที่หาอาจอยู่อันดับ 20+)
   const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}`
-    + `&maxResults=10&printType=books&country=TH&key=${encodeURIComponent(key)}`;
+    + `&maxResults=40&printType=books&country=TH&key=${encodeURIComponent(key)}`;
   const res = await fetch(url);
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Google Books: ${(j?.error?.message as string) || `HTTP ${res.status}`}`);
@@ -121,15 +123,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (isbn.length >= 10) {
       hit = pickMatch(await search(key, `isbn:${isbn}`), expected, "");   // ISBN ตรงเล่มอยู่แล้ว ไม่ต้องเช็กเลขเล่ม
     }
-    if (!hit && base) {
-      hit = pickMatch(await search(key, `intitle:"${base}"${volume ? ` ${volume}` : ""}`), expected, volume);
-    }
+    /** ลองหลายรูปแบบคำค้นของชื่อเดียว — ชุดยาวต้องเจาะจงเลขเล่มถึงจะเจอ */
+    const tryTitle = async (name: string): Promise<Volume | null> => {
+      const queries = volume
+        ? [`intitle:"${name}" ${volume}`, `intitle:"${name} ${volume}"`, `intitle:"${name}" intitle:"vol ${volume}"`]
+        : [`intitle:"${name}"`];
+      for (const q of queries) {
+        const m = pickMatch(await search(key, q), expected, volume);
+        if (m) return m;
+      }
+      return null;
+    };
+
+    if (!hit && base) hit = await tryTitle(base);
     // ชื่อไทยมักไม่มีในคลัง Google → ลองชื่อต้นฉบับ EN/JP
     if (!hit && THAI.test(base)) {
       const alts = await translateTitle(base);
       expected = [...expected, ...alts];
       for (const alt of alts) {
-        hit = pickMatch(await search(key, `intitle:"${alt}"${volume ? ` ${volume}` : ""}`), expected, volume);
+        hit = await tryTitle(alt);
         if (hit) break;
       }
     }
