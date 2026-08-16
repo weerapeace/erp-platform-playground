@@ -46,6 +46,7 @@ type FailRow = { row: number; error: string };
 const BLANK_ROWS = 3;
 const MAX_ROWS = 200;
 const MAX_COLS = 8;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** ชนิดที่กรอกในตารางแถวเดียวไม่ไหว (รูป/รายการลูก/ค่าที่ระบบคิดเอง) */
 const SKIP_TYPES = new Set(["image", "one2many", "many2many", "computed", "textarea"]);
@@ -95,13 +96,75 @@ export function InlineCreatePanel({
 
   const removeRow = (key: string) => setRows((p) => (p.length <= 1 ? p : p.filter((r) => r.key !== key)));
 
+  /**
+   * เติมลงล่าง (flash fill / fill down) — เอาค่าของ "แถวบนสุดที่กรอกไว้" ในคอลัมน์นั้น
+   * ไปใส่ทุกแถวที่อยู่ต่ำกว่า · ใช้ตอนหลายแถวใช้ค่าเดียวกัน เช่น สัญญาเดียวกัน วันเดียวกัน
+   */
+  const fillDown = (colKey: string) => setRows((p) => {
+    const from = p.findIndex((r) => { const v = r.data[colKey]; return v != null && String(v).trim() !== ""; });
+    if (from < 0) return p;
+    const val = p[from].data[colKey];
+    return p.map((r, i) => (i > from ? { ...r, data: { ...r.data, [colKey]: val } } : r));
+  });
+
+  /** เติมลงล่างให้ทุกคอลัมน์รวดเดียว */
+  const fillDownAll = () => cols.forEach((c) => fillDown(c.key));
+
+  /** มีค่าให้เติมลงล่างไหม (ใช้เปิด/ปิดปุ่ม) */
+  const canFill = (colKey: string) => {
+    const from = rows.findIndex((r) => { const v = r.data[colKey]; return v != null && String(v).trim() !== ""; });
+    return from >= 0 && from < rows.length - 1;
+  };
+  const canFillAny = useMemo(() => cols.some((c) => canFill(c.key)), // eslint-disable-line react-hooks/exhaustive-deps
+    [rows, cols]);
+
   /** แถวที่มีข้อมูลจริง (ไม่นับแถวเปล่า) */
   const filled = useMemo(
     () => rows.filter((r) => Object.values(r.data).some((v) => v != null && String(v).trim() !== "")),
     [rows],
   );
 
-  /** วางจาก Excel — คอลัมน์เรียงตามหัวตารางที่เห็นบนจอ */
+  /** แปลงข้อความ 1 ช่อง → ค่าที่เก็บจริง ตามชนิดของคอลัมน์นั้น */
+  const toCellValue = (f: InlineField, raw: string): unknown => {
+    const s = raw.trim();
+    if (s === "") return "";
+    if (f.type === "number") return parseNumberCell(s);
+    if (f.type === "date") return parseDateCell(s) || s;
+    if (f.type === "boolean") return /^(true|1|ใช่|yes|y|เปิด)$/i.test(s);
+    return s;   // relation/select ส่งเป็นชื่อ/รหัสได้ — API นำเข้าจับคู่ให้ตอนบันทึก
+  };
+
+  /**
+   * วางข้อมูลลงตารางโดยเริ่มที่ช่องที่เคอร์เซอร์อยู่ (แบบ Excel)
+   *  • คัดลอกมา 1 คอลัมน์ 8 ค่า → ไหลลง 8 แถวของคอลัมน์นั้น
+   *  • คัดลอกมาเป็นบล็อกหลายคอลัมน์ → วางเป็นบล็อกจากช่องนั้นไปทางขวา/ลงล่าง
+   *  • แถวไม่พอ → เพิ่มแถวให้อัตโนมัติ
+   */
+  const pasteAt = (rowIdx: number, colIdx: number, text: string): boolean => {
+    const grid = parsePastedTable(text);
+    // ค่าเดียวช่องเดียว → ปล่อยให้เบราว์เซอร์วางตามปกติ
+    if (grid.length === 0 || (grid.length === 1 && grid[0].length <= 1)) return false;
+    setRows((p) => {
+      const need = rowIdx + grid.length;
+      const next = [...p];
+      for (let i = next.length; i < Math.min(need, MAX_ROWS); i++) next.push({ key: `a${i}-${Date.now()}`, data: {} });
+      grid.forEach((cells, ri) => {
+        const target = next[rowIdx + ri];
+        if (!target) return;                       // เกิน MAX_ROWS แล้ว
+        const data = { ...target.data };
+        cells.forEach((cell, ci) => {
+          const f = cols[colIdx + ci];
+          if (!f) return;                          // เกินคอลัมน์ที่แสดงอยู่
+          data[f.key] = toCellValue(f, cell);
+        });
+        next[rowIdx + ri] = { ...target, data };
+      });
+      return next;
+    });
+    return true;
+  };
+
+  /** วางจาก Excel (ทั้งตาราง) — คอลัมน์เรียงตามหัวตารางที่เห็นบนจอ */
   const applyPaste = () => {
     const grid = parsePastedTable(pasteText);
     if (grid.length === 0) { setErr("อ่านตารางที่วางมาไม่ได้"); return; }
@@ -157,7 +220,17 @@ export function InlineCreatePanel({
     const v = r.data[f.key];
     const set = (val: unknown) => setCell(r.key, f.key, val);
     if (f.type === "relation" && f.relationConfig) {
-      return <RelationPicker value={(v as string) || null} onChange={(id) => set(id)} config={f.relationConfig}
+      const s = v == null ? "" : String(v);
+      // วางชื่อ/รหัสมาเป็นข้อความ (ยังไม่ใช่ id) → โชว์ตามที่วาง แล้วให้ระบบจับคู่ตอนบันทึก
+      if (s && !UUID_RE.test(s)) {
+        return (
+          <div className="h-8 flex items-center gap-1 px-2 rounded-md border border-amber-200 bg-amber-50" title="จะจับคู่กับข้อมูลจริงตอนบันทึก">
+            <span className="flex-1 truncate text-sm text-amber-800">{s}</span>
+            <button type="button" onClick={() => set(null)} title="ล้างค่า" className="shrink-0 text-amber-400 hover:text-red-600">✕</button>
+          </div>
+        );
+      }
+      return <RelationPicker value={s || null} onChange={(id) => set(id)} config={f.relationConfig}
         placeholder="— เลือก —" siblingValues={r.data} />;
     }
     if (f.type === "select") {
@@ -241,6 +314,11 @@ export function InlineCreatePanel({
             className={`h-8 px-3 text-xs rounded-lg border ${pasteOpen ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
             📋 วางจาก Excel
           </button>
+          <button onClick={fillDownAll} disabled={!canFillAny}
+            title="เอาค่าที่กรอกไว้แถวบนสุดของทุกคอลัมน์ ไปใส่ทุกแถวข้างล่าง"
+            className="h-8 px-3 text-xs rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent">
+            ⤓ เติมลงทุกช่อง
+          </button>
           <span className="text-[11px] text-slate-400 ml-auto">แสดง {cols.length} คอลัมน์แรก · ช่องอื่นแก้ทีหลังในตารางได้</span>
         </div>
 
@@ -271,7 +349,13 @@ export function InlineCreatePanel({
             <div className="grid gap-2 px-2 py-2 bg-slate-100 text-[11px] font-semibold text-slate-600 sticky top-0 z-10" style={{ gridTemplateColumns: gridCols }}>
               <span className="text-center">#</span>
               {cols.map((c) => (
-                <span key={c.key} className="truncate">{c.label}{c.required && <span className="text-red-500 ml-0.5">*</span>}</span>
+                <span key={c.key} className="flex items-center gap-1 min-w-0">
+                  <span className="truncate">{c.label}{c.required && <span className="text-red-500 ml-0.5">*</span>}</span>
+                  {/* ⤓ เติมค่าจากแถวบนสุดลงทุกแถวข้างล่าง (flash fill) */}
+                  <button type="button" onClick={() => fillDown(c.key)} disabled={!canFill(c.key)}
+                    title="เติมค่าจากแถวบนสุดลงทุกแถวข้างล่าง"
+                    className="shrink-0 w-5 h-5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-slate-400">⤓</button>
+                </span>
               ))}
               <span />
             </div>
@@ -279,7 +363,15 @@ export function InlineCreatePanel({
               {rows.map((r, i) => (
                 <div key={r.key} className="grid gap-2 px-2 py-1.5 items-start" style={{ gridTemplateColumns: gridCols }}>
                   <span className="text-[11px] text-slate-400 text-center pt-2">{i + 1}</span>
-                  {cols.map((c) => <div key={c.key} className="min-w-0">{renderCell(c, r)}</div>)}
+                  {cols.map((c, ci) => (
+                    <div key={c.key} className="min-w-0"
+                      onPaste={(e) => {
+                        const text = e.clipboardData.getData("text/plain");
+                        if (text && pasteAt(i, ci, text)) e.preventDefault();   // หลายค่า → วางลงตาราง
+                      }}>
+                      {renderCell(c, r)}
+                    </div>
+                  ))}
                   <div className="flex justify-center pt-1">
                     <button type="button" onClick={() => removeRow(r.key)} title="ลบแถวนี้"
                       className="w-6 h-6 rounded text-slate-300 hover:text-red-600 hover:bg-red-50">🗑</button>
@@ -291,7 +383,9 @@ export function InlineCreatePanel({
         </div>
 
         <p className="text-[11px] text-slate-400">
-          บันทึกผ่านช่องทางเดียวกับ “นำเข้าไฟล์” — จึงมีรายงานรายแถวว่าแถวไหนเข้าไม่ได้เพราะอะไร
+          📋 คัดลอกคอลัมน์เดียวจาก Excel แล้วคลิกช่องแรกของคอลัมน์นั้น กด Ctrl+V → ค่าจะไหลลงทุกแถวให้เอง (แถวไม่พอระบบเพิ่มให้) ·
+          ⤓ ที่หัวคอลัมน์ = เติมค่าจากแถวบนสุดลงทุกแถวข้างล่าง ·
+          บันทึกผ่านช่องทางเดียวกับ “นำเข้าไฟล์” จึงมีรายงานรายแถวว่าแถวไหนเข้าไม่ได้เพราะอะไร
         </p>
       </div>
     </ERPModal>
