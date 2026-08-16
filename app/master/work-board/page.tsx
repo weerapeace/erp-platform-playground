@@ -272,7 +272,7 @@ function WorkBoardPageInner() {
   const [pendGroupFilter, setPendGroupFilter] = useState("__all__");
   // เมนูพิมพ์รายงาน (รอจ่าย / กำลังผลิต) — เปิดหน้าพิมพ์กลาง /print/work-board ตามกลุ่มที่กรองอยู่
   const [printOpen, setPrintOpen] = useState(false);
-  const printUrl = useCallback((type: "pending" | "production" | "piece") => {
+  const printUrl = useCallback((type: "pending" | "production" | "piece" | "all") => {
     const g = pendGroupFilter && pendGroupFilter !== "__all__" ? `&group=${encodeURIComponent(pendGroupFilter)}` : "";
     return `/print/work-board?type=${type}${g}`;
   }, [pendGroupFilter]);
@@ -1188,6 +1188,7 @@ function WorkBoardPageInner() {
                     {moGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
                   </select>
                 </div>
+                <a href={printUrl("all")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-indigo-700 bg-indigo-50/60 hover:bg-indigo-50 font-medium">🖨 พิมพ์ทั้งหมดในใบเดียว<div className="text-[11px] text-indigo-400 font-normal">รอจ่าย + งานเหมา + กำลังผลิต (ของจริง)</div></a>
                 <a href={printUrl("pending")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">📋 รายการรอจ่ายทั้งหมด<div className="text-[11px] text-slate-400">พร้อมรูป+ค่าแรง · ตัวที่ยังไม่ตั้ง = เว้นช่องให้กรอก</div></a>
                 <a href={printUrl("piece")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">🧵 รายการรอจ่ายเหมาทั้งหมด<div className="text-[11px] text-slate-400">เฉพาะงานเหมารายชิ้นที่รอจ่าย</div></a>
                 <a href={printUrl("production")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">🔨 รายการกำลังผลิต<div className="text-[11px] text-slate-400">แยกตามโต๊ะ/ช่าง มีรายละเอียดแต่ละโต๊ะ</div></a>
