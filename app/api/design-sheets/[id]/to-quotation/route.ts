@@ -21,10 +21,12 @@ import type { QuoteLine, QuoteDetail } from "../../../quotations/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type LineIn = { product_name?: string; variation?: string | null; unit_price?: number | null; qty?: number | null; sku?: string | null; product_id?: string | null };
 type Body = {
   target?: string;
   customer?: { id?: string; name?: string | null; code?: string | null } | null;
-  line?: { product_name?: string; variation?: string; unit_price?: number | null; qty?: number | null; sku?: string | null; product_id?: string | null };
+  line?: LineIn;      // ส่งทีละรายการ (เดิม)
+  lines?: LineIn[];   // ส่งหลายรายการพร้อมกัน (เช่น ทั้งตารางตีราคาจากร้าน)
 };
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -38,11 +40,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const target = (body.target ?? "new").trim();
-  const name = (body.line?.product_name ?? "").trim();
-  if (!name) return NextResponse.json({ error: "ต้องระบุชื่อสินค้า" }, { status: 400 });
-  const price = body.line?.unit_price != null ? Number(body.line.unit_price) : 0;
-  if (!Number.isFinite(price) || price < 0) return NextResponse.json({ error: "ราคาต้องเป็นตัวเลขและไม่ติดลบ" }, { status: 400 });
-  const qty = body.line?.qty != null && Number(body.line.qty) > 0 ? Number(body.line.qty) : 1;
+  // รับได้ทั้ง 1 รายการ (line) และหลายรายการ (lines) — รวมเป็นชุดเดียวแล้วตรวจทีเดียว
+  const inLines: LineIn[] = (Array.isArray(body.lines) && body.lines.length ? body.lines : (body.line ? [body.line] : []))
+    .filter((l) => (l?.product_name ?? "").trim());
+  if (inLines.length === 0) return NextResponse.json({ error: "ต้องระบุชื่อสินค้า" }, { status: 400 });
+  for (const l of inLines) {
+    const p = l.unit_price != null ? Number(l.unit_price) : 0;
+    if (!Number.isFinite(p) || p < 0) return NextResponse.json({ error: "ราคาต้องเป็นตัวเลขและไม่ติดลบ" }, { status: 400 });
+  }
+  const name = (inLines[0].product_name ?? "").trim();
+  const price = inLines[0].unit_price != null ? Number(inLines[0].unit_price) : 0;
 
   // ใบเสนอราคาควรโชว์รหัสสินค้าจริงเท่านั้น ไม่เอารหัสใบงาน DS-... ไปออกเอกสาร
   const { data: sheet } = await supabaseAdmin()
@@ -52,12 +59,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     .maybeSingle();
   const productCode = (sheet?.parent_sku_code as string | undefined)?.trim() || null;
   // ถ้าเลือก SKU เจาะจงจากใบงาน (มี sku/product_id) → ใช้รหัสสินค้าจริงนั้น แทนรหัส Parent
-  const lineSku = (body.line?.sku ?? "").trim() || productCode;
-
-  const newLine: QuoteLine = {
-    sku: lineSku, product_id: body.line?.product_id ?? null, product_name: name, qty, unit: "ชิ้น", unit_price: price,
-    note: body.line?.variation?.trim() || null,
-  };
+  const newLines: QuoteLine[] = inLines.map((l) => ({
+    sku: (l.sku ?? "").trim() || productCode,
+    product_id: l.product_id ?? null,
+    product_name: (l.product_name ?? "").trim(),
+    qty: l.qty != null && Number(l.qty) > 0 ? Number(l.qty) : 1,
+    unit: "ชิ้น",
+    unit_price: l.unit_price != null ? Number(l.unit_price) : 0,
+    note: l.variation?.trim() || null,
+  }));
 
   const actor = user?.email ?? null;
 
@@ -67,15 +77,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!custId) return NextResponse.json({ error: "ต้องเลือกลูกค้าก่อนสร้างใบเสนอราคาใหม่" }, { status: 400 });
     const { data, error } = await client.rpc("erp_playground_quote_create", {
       p_header: { status: "draft", customer_id: custId, customer_name: body.customer?.name ?? null, customer_code: body.customer?.code ?? null },
-      p_lines: [newLine], p_actor: actor,
+      p_lines: newLines, p_actor: actor,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     await writeAudit(supabaseAdmin(), {
       action: "to_quotation", entityType: "design_sheet", entityId: id,
       actorId: user?.id ?? null, actorName: actor,
-      metadata: { quotation_id: data, mode: "new", product_name: name, unit_price: price },
+      metadata: { quotation_id: data, mode: "new", lines: newLines.length, product_name: name, unit_price: price },
     });
-    return NextResponse.json({ quotation_id: data, mode: "new", error: null });
+    return NextResponse.json({ quotation_id: data, mode: "new", lines: newLines.length, error: null });
   }
 
   // ---- เพิ่มเข้าใบเดิม: ดึงบรรทัดเดิม + ต่อท้าย ----
@@ -89,7 +99,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     id: l.id, product_id: l.product_id ?? null, sku: l.sku, product_name: l.product_name,
     qty: l.qty, unit: l.unit, unit_price: l.unit_price,
     discount_type: l.discount_type, discount_value: l.discount_value, tax_code: l.tax_code ?? null, note: l.note ?? null,
-  })), newLine];
+  })), ...newLines];
 
   const { data, error } = await client.rpc("erp_playground_quote_update", {
     p_id: target, p_header: null, p_lines: lines, p_actor: actor,   // null = ไม่แก้หัวใบ (ส่ง {} จะไปชนบั๊ก v_cust ในฟังก์ชัน)
@@ -98,7 +108,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   await writeAudit(supabaseAdmin(), {
     action: "to_quotation", entityType: "design_sheet", entityId: id,
     actorId: user?.id ?? null, actorName: actor,
-    metadata: { quotation_id: target, mode: "append", product_name: name, unit_price: price },
+    metadata: { quotation_id: target, mode: "append", lines: newLines.length, product_name: name, unit_price: price },
   });
-  return NextResponse.json({ quotation_id: data ?? target, mode: "append", error: null });
+  return NextResponse.json({ quotation_id: data ?? target, mode: "append", lines: newLines.length, error: null });
 }

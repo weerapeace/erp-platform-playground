@@ -15,14 +15,19 @@ import { CustomerPicker } from "@/components/pickers";
 import type { CustomerPickerValue } from "@/components/pickers";
 import type { SheetSku } from "@/app/api/design-sheets/[id]/skus/route";
 
+/** รายการที่ส่งมาเป็นชุด (เช่น ทั้งตาราง "คำนวณจากซัพพลายเออร์") — มีแล้วจะไม่ถามชื่อ/ราคาทีละชิ้น */
+export type PresetQuoteLine = { product_name: string; variation: string | null; unit_price: number; qty: number };
+
 export function ToQuotationModal({
-  open, onClose, sheetId, sheetName, defaultPrice, cartId, cartLabel, onCartSet, onAdded,
+  open, onClose, sheetId, sheetName, defaultPrice, cartId, cartLabel, onCartSet, onAdded, presetLines,
 }: {
   open: boolean;
   onClose: () => void;
   sheetId: string;
   sheetName: string;
   defaultPrice: number | null;
+  /** ส่งหลายรายการพร้อมกัน (จากตารางตีราคาจากร้าน) — ไม่ส่ง = โหมดกรอกทีละชิ้นเหมือนเดิม */
+  presetLines?: PresetQuoteLine[];
   /** ตะกร้าปัจจุบัน (ใบร่าง active) — มี = หย่อนเข้าใบนี้ */
   cartId: string | null;
   /** ป้ายตะกร้า (เลขที่ใบ · ลูกค้า) โชว์ใน banner */
@@ -70,8 +75,11 @@ export function ToQuotationModal({
     }
   };
 
+  const batch = presetLines ?? null;   // โหมดส่งเป็นชุด
+
   const save = async () => {
-    if (!name.trim()) { toast.error("กรอกชื่อสินค้า"); return; }
+    if (!batch && !name.trim()) { toast.error("กรอกชื่อสินค้า"); return; }
+    if (batch && batch.length === 0) { toast.error("ไม่มีรายการที่จะส่ง"); return; }
     if (!hasCart && !customer) { toast.error("เลือกลูกค้าก่อน"); return; }
     const sel = sheetSkus.find((x) => x.id === selSkuId);
     setSaving(true);
@@ -81,14 +89,18 @@ export function ToQuotationModal({
         body: JSON.stringify({
           target: hasCart ? cartId : "new",
           customer: !hasCart && customer ? { id: customer.id, name: customer.name, code: customer.code } : null,
-          line: { product_name: name.trim(), variation: variation.trim() || null, unit_price: price === "" ? 0 : Number(price), qty: Number(qty) || 1,
-                  sku: sel?.code ?? null, product_id: sel?.id ?? null },
+          ...(batch
+            ? { lines: batch }
+            : { line: { product_name: name.trim(), variation: variation.trim() || null, unit_price: price === "" ? 0 : Number(price), qty: Number(qty) || 1,
+                        sku: sel?.code ?? null, product_id: sel?.id ?? null } }),
         }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       if (!hasCart && j.quotation_id) onCartSet(j.quotation_id as string);
       onAdded();
-      toast.success(hasCart ? "เพิ่มเข้าตะกร้าแล้ว" : "สร้างตะกร้าใบเสนอราคาแล้ว");
+      toast.success(batch
+        ? `${hasCart ? "เพิ่มเข้าตะกร้า" : "สร้างตะกร้าใบเสนอราคา"} ${batch.length} รายการแล้ว`
+        : hasCart ? "เพิ่มเข้าตะกร้าแล้ว" : "สร้างตะกร้าใบเสนอราคาแล้ว");
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "ส่งไปใบเสนอราคาไม่สำเร็จ");
@@ -119,7 +131,27 @@ export function ToQuotationModal({
           </label>
         )}
 
-        {sheetSkus.length > 0 && (
+        {/* โหมดส่งเป็นชุด — โชว์รายการที่จะส่ง แทนช่องกรอกทีละชิ้น */}
+        {batch && (
+          <div className="rounded-lg border border-slate-200">
+            <div className="border-b border-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">รายการที่จะส่ง {batch.length} รายการ</div>
+            <div className="max-h-56 divide-y divide-slate-50 overflow-auto">
+              {batch.map((l, i) => (
+                <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[13px]">
+                  <span className="min-w-0 flex-1 truncate text-slate-700">{l.product_name}{l.variation ? <span className="text-slate-400"> · {l.variation}</span> : null}</span>
+                  <span className="shrink-0 text-slate-400">×{l.qty.toLocaleString("th-TH")}</span>
+                  <span className="shrink-0 tabular-nums text-slate-700">{l.unit_price.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between border-t border-slate-100 px-3 py-1.5 text-[13px]">
+              <span className="text-slate-500">รวม</span>
+              <b className="tabular-nums text-emerald-700">{batch.reduce((s, l) => s + l.qty * l.unit_price, 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ฿</b>
+            </div>
+          </div>
+        )}
+
+        {!batch && sheetSkus.length > 0 && (
           <label className="block">
             <span className="text-xs text-slate-500">เลือก SKU ของงานนี้ (หรือพิมพ์ชื่อเอง)</span>
             <select value={selSkuId} onChange={(e) => pickSku(e.target.value)}
@@ -130,16 +162,16 @@ export function ToQuotationModal({
           </label>
         )}
 
-        <label className="block">
+        {!batch && <label className="block">
           <span className="text-xs text-slate-500">ชื่อสินค้า *</span>
           <input value={name} onChange={(e) => { setName(e.target.value); setSelSkuId(""); }} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </label>
-        <label className="block">
+        </label>}
+        {!batch && <label className="block">
           <span className="text-xs text-slate-500">ตัวเลือก / variation (สี, ขนาด...)</span>
           <input value={variation} onChange={(e) => setVariation(e.target.value)} placeholder="เช่น สีดำ ขนาด L"
             className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </label>
-        <div className="grid grid-cols-2 gap-2">
+        </label>}
+        <div className={`grid grid-cols-2 gap-2 ${batch ? "hidden" : ""}`}>
           <label className="block">
             <span className="text-xs text-slate-500">ราคาที่เสนอ (บาท)</span>
             <input type="number" min={0} step="any" value={price} onChange={(e) => setPrice(e.target.value)}

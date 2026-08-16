@@ -25,7 +25,7 @@ import { BomFromCostWizard } from "./bom-from-cost-wizard";
 import { FabricCalcModal } from "./fabric-calc-modal";
 import { BomToCostWizard, type BomPulledLine } from "./bom-to-cost-wizard";
 import { SupplierQuoteSection } from "./supplier-quote";
-import { ToQuotationModal } from "@/app/master/design-sheets/to-quotation-modal";
+import { ToQuotationModal, type PresetQuoteLine } from "@/app/master/design-sheets/to-quotation-modal";
 import { QuotationCartDrawer } from "@/app/master/design-sheets/quotation-cart-drawer";
 
 const QUOTE_CART_KEY = "erp-design-quote-cart";   // ตัวชี้ใบเสนอราคาร่างที่เป็น "ตะกร้า" ปัจจุบัน (ต่อ browser)
@@ -940,6 +940,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [fabricCalc, setFabricCalc] = useState(false); // 🧵 คำนวณจำนวนผ้า (จากขนาดชิ้น × จำนวนผลิต)
   const [bomPull, setBomPull] = useState(false);       // Wizard ดึงโครงจาก BOM → ตีราคา (คู่กลับ)
   const [toQuote, setToQuote] = useState(false);       // ส่งไปใบเสนอราคา (ระบบขาย)
+  const [quoteBatch, setQuoteBatch] = useState<PresetQuoteLine[] | null>(null);   // ส่งเป็นชุดจากตารางตีราคาจากร้าน
   const [cartId, setCartId] = useState<string | null>(null);   // ตะกร้าใบเสนอราคาปัจจุบัน
   const [cartLabel, setCartLabel] = useState<string | null>(null);
   const [cartRefresh, setCartRefresh] = useState(0);
@@ -2011,7 +2012,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 <SupplierQuoteSection sheetId={form.id} parentCode={costParent} parentTabs={costParentTabs}
                   canEdit={fullEdit} canSeeCost={canSeeCost}
                   pushToast={(type, m) => (type === "error" ? toast.error(m) : type === "info" ? toast.info(m) : toast.success(m))}
-                  onDirtyChange={setSupplierDirty} saveRef={supplierSaveRef} />
+                  onDirtyChange={setSupplierDirty} saveRef={supplierSaveRef}
+                  onRequestEdit={() => setEditing(true)}
+                  onSendToQuote={(lines) => {
+                    if (!lines.length) { toast.error("ยังไม่มีรายการที่ใส่ราคาที่จะเสนอ"); return; }
+                    if (supplierDirty) { toast.error("มีรายการที่ยังไม่บันทึก — กด 💾 บันทึก ก่อนส่งไปใบเสนอราคา"); return; }
+                    setQuoteBatch(lines); setToQuote(true);
+                  }} />
               )}
 
               {/* แถบยอดรวม + ปุ่ม — sticky ติดล่าง (เลื่อนตารางยาวแค่ไหนก็เห็นปุ่มเสมอ) */}
@@ -2198,8 +2205,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
       {/* ส่งสินค้าไปใบเสนอราคา (ระบบขาย) — หย่อนเข้าตะกร้า หรือเริ่มใบใหม่ */}
       {form?.id && (
-        <ToQuotationModal open={toQuote} onClose={() => setToQuote(false)}
+        <ToQuotationModal open={toQuote} onClose={() => { setToQuote(false); setQuoteBatch(null); }}
           sheetId={form.id} sheetName={form.name} defaultPrice={offeredPrice}
+          presetLines={quoteBatch ?? undefined}
           cartId={cartId} cartLabel={cartLabel} onCartSet={setCart} onAdded={bumpCart} />
       )}
 
