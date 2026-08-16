@@ -185,6 +185,9 @@ export function InlineCreatePanel({
   };
 
   const gridCols = `2.25rem ${cols.map(() => "minmax(9rem, 1fr)").join(" ")} 2.25rem`;
+  // ความกว้างขั้นต่ำของตาราง = คอลัมน์ลำดับ + คอลัมน์ข้อมูล + คอลัมน์ลบ + ช่องไฟระหว่างคอลัมน์
+  // ต้องคิดให้ครบ ไม่งั้นกล่องแถวจะกว้างเกินกล่องนอก แล้วเกิดแถบเลื่อนซ้อนกัน 2 ชั้น
+  const minWidthRem = 2.25 + cols.length * 9 + 2.25 + 0.5 * (cols.length + 1);
 
   return (
     <ERPModal
@@ -261,16 +264,18 @@ export function InlineCreatePanel({
           </div>
         )}
 
-        <div className="overflow-x-auto">
-          <div style={{ minWidth: `${cols.length * 9 + 5}rem` }}>
-            <div className="grid gap-2 px-2 py-2 bg-slate-100 rounded-t-lg text-[11px] font-semibold text-slate-600" style={{ gridTemplateColumns: gridCols }}>
+        {/* กล่องเลื่อน "ตัวเดียว" คุมทั้งแนวนอน+แนวตั้ง — หัวตารางติดหนึบด้านบนตอนเลื่อนดูแถวล่าง
+            (เดิมแยกเป็น 2 กล่องซ้อนกัน ทำให้มีแถบเลื่อนแนวนอน 2 ชั้น) */}
+        <div className="border border-slate-200 rounded-lg overflow-auto max-h-[46vh]">
+          <div style={{ minWidth: `${minWidthRem}rem` }}>
+            <div className="grid gap-2 px-2 py-2 bg-slate-100 text-[11px] font-semibold text-slate-600 sticky top-0 z-10" style={{ gridTemplateColumns: gridCols }}>
               <span className="text-center">#</span>
               {cols.map((c) => (
                 <span key={c.key} className="truncate">{c.label}{c.required && <span className="text-red-500 ml-0.5">*</span>}</span>
               ))}
               <span />
             </div>
-            <div className="border border-t-0 border-slate-200 rounded-b-lg divide-y divide-slate-100 max-h-[50vh] overflow-y-auto">
+            <div className="divide-y divide-slate-100">
               {rows.map((r, i) => (
                 <div key={r.key} className="grid gap-2 px-2 py-1.5 items-start" style={{ gridTemplateColumns: gridCols }}>
                   <span className="text-[11px] text-slate-400 text-center pt-2">{i + 1}</span>
