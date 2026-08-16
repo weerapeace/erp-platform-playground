@@ -50,6 +50,8 @@ const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-t
 const ParentIssuesPanel = dynamic(() => import("@/components/parent-issues-panel").then((m) => m.ParentIssuesPanel), { ssr: false });
 // ตัวเลือกธนาคารกลาง — ใช้กับฟิลด์ข้อความที่ตั้ง options.picker = "bank" (โหลดเฉพาะโมดูลที่ใช้)
 const BankPicker = dynamic(() => import("@/components/bank-picker").then((m) => m.BankPicker), { ssr: false });
+// เพิ่มหลายรายการแบบ inline (โหลดตอนกดปุ่มเท่านั้น)
+const InlineCreatePanel = dynamic(() => import("@/components/master-crud/inline-create").then((m) => m.InlineCreatePanel), { ssr: false });
 const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").then((m) => m.SkuSupplierList), { ssr: false });
 const AiProductDetailModal = dynamic(() => import("@/components/ai-product-detail").then((m) => m.AiProductDetailModal), { ssr: false });
 // หมวดกลางสำหรับลงขาย — picker ค้นหา + เพิ่มหมวดใหม่พร้อมจับคู่ร้านในตัว (ของกลาง)
@@ -471,6 +473,8 @@ export type MasterCRUDConfig = {
   cellRenderers?: Record<string, (value: unknown, row?: Record<string, unknown>) => React.ReactNode>;
   /** custom field ในฟอร์ม (key → renderForm) — merge เข้า field จาก Registry ได้ (คู่กับ cellRenderers) */
   formRenderers?: Record<string, FieldDef["renderForm"]>;
+  /** ปิดปุ่ม "เพิ่มหลายรายการ (inline)" ของโมดูลนี้ (ค่าเริ่มต้น = เปิด ถ้ามีสิทธิ์สร้าง) */
+  inlineCreate?: boolean;
   /**
    * ของกลาง — บรรทัดข้อความ "สด" ใต้ช่องกรอก ที่คิดจากค่าอื่นในฟอร์มตอนนั้น
    * (ต่างจาก help_text ในทะเบียนฟิลด์ ซึ่งเป็นข้อความตายตัว)
@@ -1093,6 +1097,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);   // นำเข้าข้อมูล (ของกลาง)
+  const [inlineCreateOpen, setInlineCreateOpen] = useState(false);   // เพิ่มหลายรายการแบบ inline (ของกลาง)
   const [customCreateOpen, setCustomCreateOpen] = useState(false);   // UI สร้างเอง (เช่น SKU Wizard)
   const [toolsOpen, setToolsOpen] = useState(false);     // เมนู "ปรับแต่ง" (ยุบปุ่ม admin)
   // หัวหน้า (title + ปุ่ม เพิ่ม/นำเข้า/ปรับแต่ง) ติดหนึบขอบบน → วัดความสูงส่งให้ toolbar ตารางเรียงใต้
@@ -2457,6 +2462,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 📥 {tr("นำเข้า", "Import")}
               </button>
             )}
+            {/* เพิ่มหลายรายการรวดเดียว (ของกลาง) — ปิดต่อโมดูลได้ด้วย config.inlineCreate = false */}
+            {config.moduleKey && canCreate && config.inlineCreate !== false && registryFields && registryFields.length > 0 && (
+              <button onClick={() => setInlineCreateOpen(true)}
+                title={tr("กรอกหลายแถวรวดเดียว / วางจาก Excel", "Fill many rows at once / paste from Excel")}
+                className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">
+                ➕ {tr("เพิ่มหลายรายการ", "Add many")}
+              </button>
+            )}
             {canCreate && (
               <button onClick={() => config.customCreate ? setCustomCreateOpen(true) : openCreate()}
                 className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap">
@@ -2486,6 +2499,19 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               />
             </div>
           </div>
+        )}
+
+        {/* เพิ่มหลายรายการแบบ inline (ของกลาง) — กรอกหลายแถว/วางจาก Excel แล้วส่งผ่าน endpoint นำเข้าเดียวกัน */}
+        {inlineCreateOpen && (
+          <InlineCreatePanel
+            open={inlineCreateOpen}
+            onClose={() => setInlineCreateOpen(false)}
+            onSaved={() => { void refreshData(); }}
+            fields={effectiveFields}
+            apiBase={apiBase}
+            apiPath={config.apiPath}
+            title={config.title}
+          />
         )}
 
         {error && (
