@@ -122,7 +122,8 @@ async function fetchClMats(moId: string): Promise<ClMats> {
   return { rows, cutRows, summary: moSummary, materials: moMaterials, requested: (j?.data?.requested ?? {}) as Record<string, number>, sizeQty };
 }
 // dispatchedMos = ใบที่จ่ายงานครบแล้ว (ไม่ใช่การ์ดรอจ่าย) — ยังต้องส่งลูกค้า ปฏิทินเลยต้องเห็น
-type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[]; dispatchedMos: PendingMO[]; pendingPiece: PendingPiece[] };
+type DeliveryPlan = { id: string; mo_id: string; mo_no: string; due_date: string; qty: number; note?: string | null };
+type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[]; dispatchedMos: PendingMO[]; deliveryPlans: DeliveryPlan[]; pendingPiece: PendingPiece[] };
 type Pos = { x: number; y: number };
 type Size = { w: number; h: number };
 type Viewport = { x: number; y: number; scale: number };
@@ -214,7 +215,7 @@ function WorkBoardPageInner() {
   const isAdmin = user?.role === "admin" || canAdminUsers;
   const toast = useToast();
 
-  const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], dispatchedMos: [], pendingPiece: [] });
+  const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], dispatchedMos: [], deliveryPlans: [], pendingPiece: [] });
   const [loading, setLoading] = useState(true);
   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ + จำมุมมองเริ่มต้นต่อผู้ใช้ (⭐)
   const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase", "calendar", "exec"] as const, "board");
@@ -348,6 +349,12 @@ function WorkBoardPageInner() {
   const [moDueSaving, setMoDueSaving] = useState<"" | "due" | "internal">("");
   const [woDue, setWoDue] = useState("");                     // กำหนดเสร็จของ "ใบจ่ายงาน" ใบนี้
   const [woDueSaving, setWoDueSaving] = useState(false);
+  // 📦 แบ่งงวดส่ง — ใบเดียวส่งหลายวัน (วันไหนส่งเท่าไหร่)
+  const [planOpen, setPlanOpen] = useState(false);
+  const [newPlanDate, setNewPlanDate] = useState("");
+  const [newPlanQty, setNewPlanQty] = useState("");
+  const [newPlanNote, setNewPlanNote] = useState("");
+  const [planSaving, setPlanSaving] = useState(false);
   const [qtySaving, setQtySaving] = useState(false);
   // ปกติจำนวนเป็น "อ่านอย่างเดียว" — ต้องกดปุ่ม ✏️ ก่อนถึงจะพิมพ์แก้ได้ (กันเผลอพิมพ์ทับ = สูตรกางใหม่ทั้งใบ)
   const [qtyEditing, setQtyEditing] = useState(false);
@@ -380,7 +387,7 @@ function WorkBoardPageInner() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try { const res = await apiFetch("/api/mo/work-board"); const j = await res.json();
-      if (!j.error) { setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], dispatchedMos: j.dispatched_mos ?? [], pendingPiece: j.pending_piece ?? [] }); setLoadError(false); }
+      if (!j.error) { setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], dispatchedMos: j.dispatched_mos ?? [], deliveryPlans: j.delivery_plans ?? [], pendingPiece: j.pending_piece ?? [] }); setLoadError(false); }
       else if (!silent) setLoadError(true);
     } catch { if (!silent) setLoadError(true); } finally { if (!silent) setLoading(false); }
   }, []);
@@ -1079,6 +1086,39 @@ function WorkBoardPageInner() {
     if (r.ok) await load(true);
   }, [checklistMO, toast, load]);
 
+  /**
+   * งวดส่ง — "ใบนี้ 1,000 ชิ้น ส่ง 300 วันที่ 20 · อีก 700 วันที่ 28"
+   * เก็บที่ mo_delivery_plan · ปฏิทินนัดส่งลูกค้าโชว์ทีละงวด (ลากเลื่อนวันได้)
+   */
+  const addPlanRow = useCallback(async () => {
+    if (!checklistMO) return;
+    const qty = Number(newPlanQty);
+    if (!newPlanDate) { toast.error("เลือกวันที่ส่งก่อน"); return; }
+    if (!(qty > 0)) { toast.error("ใส่จำนวนที่จะส่งงวดนี้"); return; }
+    setPlanSaving(true);
+    const r = await apiSave(toast, "/api/mo/delivery-plan",
+      { method: "POST", body: { mo_id: checklistMO.id, due_date: newPlanDate, qty, note: newPlanNote.trim() || null } },
+      { ok: `เพิ่มงวดส่ง ${fmt(qty)} ชิ้นแล้ว`, fail: "เพิ่มงวดส่งไม่สำเร็จ" });
+    setPlanSaving(false);
+    if (r.ok) { setNewPlanQty(""); setNewPlanNote(""); await load(true); }
+  }, [checklistMO, newPlanDate, newPlanQty, newPlanNote, toast, load]);
+
+  const patchPlanRow = useCallback(async (id: string, patch: { due_date?: string; qty?: number }) => {
+    setPlanSaving(true);
+    const r = await apiSave(toast, "/api/mo/delivery-plan", { method: "PATCH", body: { id, ...patch } },
+      { ok: "แก้งวดส่งแล้ว", fail: "แก้งวดส่งไม่สำเร็จ" });
+    setPlanSaving(false);
+    if (r.ok) await load(true);
+  }, [toast, load]);
+
+  const delPlanRow = useCallback(async (id: string) => {
+    setPlanSaving(true);
+    const r = await apiSave(toast, `/api/mo/delivery-plan?id=${encodeURIComponent(id)}`, { method: "DELETE" },
+      { ok: "ลบงวดส่งแล้ว (จำนวนกลับไปเป็นยังไม่แบ่งงวด)", fail: "ลบงวดส่งไม่สำเร็จ" });
+    setPlanSaving(false);
+    if (r.ok) await load(true);
+  }, [toast, load]);
+
   // บันทึกกำหนดเสร็จของ "ใบจ่ายงาน" ใบเดียว (แท็บส่งงาน)
   const saveWoDue = useCallback(async (value: string) => {
     if (!clWO) return;
@@ -1284,6 +1324,7 @@ function WorkBoardPageInner() {
         <BoardCalendar
           pending={board.pending}
           extraMos={board.dispatchedMos}
+          plans={board.deliveryPlans}
           workOrders={board.workOrders}
           departments={board.departments}
           canEdit={canEdit}
@@ -1749,6 +1790,72 @@ function WorkBoardPageInner() {
                     : <span className="text-[11px] text-slate-400">ตั้งวันภายใน = ใบจ่ายงานที่ยังทำอยู่ของใบนี้ขยับตามให้ · ใบที่จ่ายทีหลังได้วันนี้เป็นค่าเริ่มต้น</span>}
                 </div>
               )}
+              {/* 📦 แบ่งงวดส่ง — วันไหนส่งเท่าไหร่ (ใบเดียวส่งหลายรอบได้) */}
+              {!clWO && (() => {
+                const rows = board.deliveryPlans.filter((p) => p.mo_id === checklistMO.id);
+                const planned = rows.reduce((n, p) => n + (Number(p.qty) || 0), 0);
+                const left = Math.round(((checklistMO.qty || 0) - planned) * 100) / 100;
+                const show = planOpen || rows.length > 0;
+                return (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 text-[12px]">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button type="button" onClick={() => setPlanOpen((v) => !v)}
+                        className="h-7 px-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-600 hover:text-indigo-600 hover:border-indigo-300">
+                        📦 แบ่งงวดส่ง {rows.length > 0 ? `(${rows.length} งวด)` : ""} {show ? "▾" : "▸"}
+                      </button>
+                      {rows.length > 0 && (
+                        <span className="text-slate-500">
+                          แบ่งแล้ว <b className="text-slate-700 tabular-nums">{fmt(planned)}</b> / {fmt(checklistMO.qty || 0)} ชิ้น
+                          {left > 0.0001 ? <> · ยังไม่แบ่ง <b className="text-amber-600 tabular-nums">{fmt(left)}</b></>
+                            : left < -0.0001 ? <span className="text-rose-600"> · เกินยอดสั่ง {fmt(-left)}</span>
+                            : <span className="text-emerald-600"> · แบ่งครบแล้ว ✓</span>}
+                        </span>
+                      )}
+                      {rows.length === 0 && !planOpen && <span className="text-slate-400">ยังไม่ได้แบ่ง — ส่งทีเดียวตามวันนัดส่งลูกค้า</span>}
+                    </div>
+                    {show && (
+                      <div className="mt-2 space-y-1">
+                        {rows.map((p, i) => (
+                          <div key={p.id} className="flex items-center gap-2 flex-wrap">
+                            <span className="w-14 shrink-0 text-[11px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-center">งวด {i + 1}</span>
+                            <input type="date" defaultValue={p.due_date?.slice(0, 10) ?? ""} disabled={!canEdit || planSaving}
+                              onChange={(e) => { if (e.target.value) void patchPlanRow(p.id, { due_date: e.target.value }); }}
+                              className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white disabled:bg-slate-100" />
+                            <input type="number" min={0} step="any" defaultValue={p.qty} disabled={!canEdit || planSaving}
+                              onBlur={(e) => { const n = Number(e.target.value); if (n > 0 && n !== Number(p.qty)) void patchPlanRow(p.id, { qty: n }); }}
+                              className="w-24 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg bg-white disabled:bg-slate-100" />
+                            <span className="text-slate-400">ชิ้น</span>
+                            {p.note && <span className="text-[11px] text-slate-500 truncate max-w-[10rem]">{p.note}</span>}
+                            {canEdit && (
+                              <button type="button" onClick={() => void delPlanRow(p.id)} disabled={planSaving}
+                                title="ลบงวดนี้ (จำนวนกลับไปเป็นยังไม่แบ่ง)"
+                                className="h-7 w-7 rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-rose-600 hover:border-rose-300 disabled:opacity-40">🗑</button>
+                            )}
+                          </div>
+                        ))}
+                        {canEdit && (
+                          <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-200/70">
+                            <span className="w-14 shrink-0 text-[11px] text-slate-400 text-center">เพิ่ม</span>
+                            <input type="date" value={newPlanDate} onChange={(e) => setNewPlanDate(e.target.value)} disabled={planSaving}
+                              className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white" />
+                            <input type="number" min={0} step="any" value={newPlanQty} onChange={(e) => setNewPlanQty(e.target.value)} disabled={planSaving}
+                              placeholder={left > 0 ? String(left) : "จำนวน"}
+                              className="w-24 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg bg-white" />
+                            <input value={newPlanNote} onChange={(e) => setNewPlanNote(e.target.value)} disabled={planSaving} placeholder="หมายเหตุ (ไม่ใส่ก็ได้)"
+                              className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white w-40" />
+                            <button type="button" onClick={() => void addPlanRow()} disabled={planSaving}
+                              className="h-8 px-3 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">
+                              {planSaving ? "กำลังบันทึก…" : "➕ เพิ่มงวด"}
+                            </button>
+                            {left > 0.0001 && <button type="button" onClick={() => setNewPlanQty(String(left))} className="text-[11px] text-indigo-600 underline">ใส่ที่เหลือ {fmt(left)}</button>}
+                          </div>
+                        )}
+                        <p className="text-[11px] text-slate-400">แบ่งแล้วปฏิทินนัดส่งลูกค้าจะโชว์แยกทีละงวด · ลากการ์ดงวดในปฏิทินเพื่อเลื่อนวันได้</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {/* รายละเอียดสั่งงาน (เหมือนหน้าแก้ใบสั่งผลิต) — พับไว้ โชว์แค่รูป+ชื่อ กดกางดูสเปกเต็ม */}
               {checklistMO.product_sku && <WorkInstructionPanel sku={checklistMO.product_sku} editable={false} defaultOpen={false} onAfterBomEdit={() => load(true)} />}
               {/* แท็บรวม 6 หน้า — ใช้ได้ทั้งมี/ไม่มี BOM */}

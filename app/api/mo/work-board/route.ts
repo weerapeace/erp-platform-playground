@@ -210,6 +210,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return { id: String(p.id), mo_no: moNo, job_name: (p.job_name as string) ?? "งานเหมา", rate: Number(p.rate) || 0, qty_per: Number(p.qty_per) || 1, qty: Number(p.total_qty) || 0, product_sku: mi.sku, product_name: mi.name, ...inf };
     });
 
+  // งวดส่ง (แบ่งส่งหลายวันต่อ 1 ใบ) — ปฏิทินนัดส่งลูกค้าเอาไปโชว์ทีละงวด
+  const openMoIds = allMos.map((m) => m.id);
+  const { data: plans } = openMoIds.length
+    ? await admin.from("mo_delivery_plan").select("id, mo_id, mo_no, due_date, qty, note")
+        .in("mo_id", openMoIds).eq("is_active", true).order("due_date", { ascending: true })
+    : { data: [] as Record<string, unknown>[] };
+
   return NextResponse.json({ departments, workOrders: enrichedWO, pending: pendingEnriched,
-    dispatched_mos: dispatchedMos, pending_piece: pendingPiece, error: null });
+    dispatched_mos: dispatchedMos, delivery_plans: plans ?? [], pending_piece: pendingPiece, error: null });
 }

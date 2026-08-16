@@ -4,6 +4,7 @@
  * BoardCalendar — มุมมองปฏิทินของบอร์ดจ่ายงาน (2 ปฏิทินในตัวเดียว)
  *
  *  1) 📦 นัดส่งลูกค้า  = วันกำหนดส่งของ "ใบสั่งผลิต" (manufacturing_orders.due_date)
+ *     + งวดส่ง (mo_delivery_plan) ถ้าใบไหนแบ่งส่งหลายวัน จะโชว์ทีละงวด
  *  2) 🪑 นัดส่งงาน (ภายใน) = วันกำหนดเสร็จของ "ใบจ่ายงาน" ที่จ่ายให้โต๊ะ/ช่าง (mo_work_orders.due_date)
  *     + ใบสั่งผลิตที่ยังไม่ได้จ่ายงาน ใช้ manufacturing_orders.internal_due_date (ตั้งวันล่วงหน้าได้)
  *
@@ -26,6 +27,8 @@ type CalMO = {
   qty: number; remaining: number; due_date: string | null; internal_due_date?: string | null; image_url: string | null;
   brand?: string | null; brand_oem?: boolean; ready?: boolean;
 };
+// 1 แถว = ส่งกี่ชิ้น วันไหน (ใบเดียวมีได้หลายงวด)
+type CalPlan = { id: string; mo_id: string; mo_no: string; due_date: string; qty: number; note?: string | null };
 type CalWO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; due_date?: string | null; department_name?: string | null; assignee_name: string | null;
@@ -36,9 +39,10 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const TH_DAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 
-export function BoardCalendar({ pending, extraMos = [], workOrders, departments = [], canEdit, moGroups, groupOf, onOpenMO, onOpenWO, onReload }: {
+export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, departments = [], canEdit, moGroups, groupOf, onOpenMO, onOpenWO, onReload }: {
   pending: CalMO[];
   extraMos?: CalMO[];          // ใบที่จ่ายงานครบแล้ว — ยังต้องส่งลูกค้า จึงต้องอยู่ในปฏิทินนัดส่งลูกค้า
+  plans?: CalPlan[];           // งวดส่ง (แบ่งส่งหลายวัน)
   workOrders: CalWO[];
   departments?: { id: string; name: string }[];   // รายชื่อโต๊ะทั้งหมด (ใช้ทำ dropdown + สีประจำโต๊ะ)
   canEdit: boolean;
@@ -52,7 +56,7 @@ export function BoardCalendar({ pending, extraMos = [], workOrders, departments 
   const [mode, setMode] = useState<"customer" | "internal">("customer");
   const [cursor, setCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [busy, setBusy] = useState(false);
-  const [drag, setDrag] = useState<{ kind: "mo" | "wo"; field: "due" | "internal"; id: string; label: string } | null>(null);
+  const [drag, setDrag] = useState<{ kind: "mo" | "wo" | "plan"; field: "due" | "internal"; id: string; label: string } | null>(null);
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("__all__");
   const [brandFilter, setBrandFilter] = useState("__all__");
@@ -65,7 +69,7 @@ export function BoardCalendar({ pending, extraMos = [], workOrders, departments 
 
   // ── รายการที่จะวางบนปฏิทิน (ตามโหมด) ──
   // field = วันที่กำลังแก้ ("due" = นัดส่งลูกค้า · "internal" = ส่งงานภายใน) · desk = โต๊ะ/แผนกที่งานอยู่
-  type Item = { key: string; kind: "mo" | "wo"; field: "due" | "internal"; id: string; moNo: string; date: string | null; sku: string | null; name: string | null; qty: number; img: string | null; sub: string; brand: string | null; oem: boolean; desk: string | null };
+  type Item = { key: string; kind: "mo" | "wo" | "plan"; field: "due" | "internal"; id: string; moId?: string; moNo: string; date: string | null; sku: string | null; name: string | null; qty: number; img: string | null; sub: string; brand: string | null; oem: boolean; desk: string | null; lot?: string };
 
   // ใบสั่งผลิตใบไหนอยู่โต๊ะไหนบ้าง (จากใบจ่ายงานที่ยังไม่ยกเลิก) — ใช้กรองโต๊ะในโหมดนัดส่งลูกค้า
   const desksByMo = useMemo(() => {
@@ -82,12 +86,26 @@ export function BoardCalendar({ pending, extraMos = [], workOrders, departments 
   const allItems: Item[] = useMemo(() => {
     if (mode === "customer") {
       // นัดส่งลูกค้า = ทุกใบที่ยังไม่ปิด (รวมใบที่จ่ายงานครบแล้ว — ของยังไม่ถึงมือลูกค้า)
-      // จำนวนที่โชว์ = ยอดสั่งผลิตทั้งใบ ไม่ใช่ยอดที่ยังไม่จ่าย
-      return [...pending, ...extraMos].map((m) => ({
-        key: `mo:${m.id}`, kind: "mo" as const, field: "due" as const, id: m.id, moNo: m.mo_no, date: m.due_date, sku: m.product_sku, name: m.product_name,
-        qty: m.qty, img: m.image_url, sub: `${m.mo_no}${m.brand ? ` · ${m.brand}` : ""}`, brand: m.brand ?? null, oem: !!m.brand_oem,
-        desk: (desksByMo.get(m.mo_no) ?? [])[0] ?? null,
-      }));
+      // ใบที่ "แบ่งงวดส่ง" ไว้ → 1 การ์ด = 1 งวด · ที่เหลือยังไม่แบ่งค่อยโชว์เป็นการ์ดใบรวม
+      const out: Item[] = [];
+      for (const m of [...pending, ...extraMos]) {
+        const desk = (desksByMo.get(m.mo_no) ?? [])[0] ?? null;
+        const base = { sku: m.product_sku, name: m.product_name, img: m.image_url, brand: m.brand ?? null, oem: !!m.brand_oem, desk, moNo: m.mo_no, moId: m.id };
+        const rows = plans.filter((p) => p.mo_id === m.id);
+        rows.forEach((p, i) => out.push({
+          ...base, key: `plan:${p.id}`, kind: "plan" as const, field: "due" as const, id: p.id, date: p.due_date,
+          qty: Number(p.qty) || 0, lot: `งวด ${i + 1}/${rows.length}`,
+          sub: `งวด ${i + 1}/${rows.length} · ${m.mo_no}${p.note ? ` · ${p.note}` : ""}`,
+        }));
+        const planned = rows.reduce((n, p) => n + (Number(p.qty) || 0), 0);
+        const left = Math.round(((m.qty || 0) - planned) * 100) / 100;
+        if (left > 0.0001 || rows.length === 0) out.push({
+          ...base, key: `mo:${m.id}`, kind: "mo" as const, field: "due" as const, id: m.id, date: m.due_date,
+          qty: rows.length ? left : m.qty,
+          sub: `${rows.length ? "ยังไม่แบ่งงวด · " : ""}${m.mo_no}${m.brand ? ` · ${m.brand}` : ""}`,
+        });
+      }
+      return out;
     }
     // ภายใน = ใบจ่ายงานที่ยังทำอยู่ + ใบสั่งผลิตที่ยังไม่ได้จ่ายงานเลย (ตั้งวันภายในล่วงหน้าได้)
     const woItems = workOrders.filter((w) => w.status !== "done").map((w) => ({
@@ -101,7 +119,7 @@ export function BoardCalendar({ pending, extraMos = [], workOrders, departments 
       desk: null,
     }));
     return [...woItems, ...moItems];
-  }, [mode, pending, extraMos, workOrders, desksByMo, dispatchedMoNos]);
+  }, [mode, pending, extraMos, plans, workOrders, desksByMo, dispatchedMoNos]);
 
   const brandOptions = useMemo(() => [...new Set(allItems.map((i) => i.brand).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, "th")), [allItems]);
   const deskOptions = useMemo(() => {
@@ -160,10 +178,20 @@ export function BoardCalendar({ pending, extraMos = [], workOrders, departments 
   const inMonth = (d: Date) => d.getMonth() === cursor.getMonth();
 
   // ── ตั้ง/ล้างวัน ──
-  const setDate = async (it: { kind: "mo" | "wo"; field: "due" | "internal"; id: string; label: string }, date: string | null) => {
+  const setDate = async (it: { kind: "mo" | "wo" | "plan"; field: "due" | "internal"; id: string; label: string }, date: string | null) => {
     if (!canEdit) return;
     setBusy(true);
     try {
+      // งวดส่งต้องมีวันเสมอ → ลากออกนอกปฏิทิน = ยกเลิกงวดนั้น (จำนวนกลับไปเป็น "ยังไม่แบ่งงวด")
+      if (it.kind === "plan") {
+        const r = date
+          ? await apiFetch("/api/mo/delivery-plan", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: it.id, due_date: date }) })
+          : await apiFetch(`/api/mo/delivery-plan?id=${encodeURIComponent(it.id)}`, { method: "DELETE" });
+        const jr = await r.json(); if (jr.error) throw new Error(jr.error);
+        toast.success(date ? `เลื่อนงวดส่ง ${it.label} แล้ว` : `ยกเลิกงวดส่ง ${it.label} แล้ว`);
+        await onReload();
+        return;
+      }
       const res = it.kind === "mo"
         ? await apiFetch("/api/mo/set-due-date", { method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify(it.field === "internal" ? { id: it.id, internal_due_date: date } : { id: it.id, due_date: date }) })
@@ -182,13 +210,16 @@ export function BoardCalendar({ pending, extraMos = [], workOrders, departments 
       draggable={canEdit}
       onDragStart={() => setDrag({ kind: it.kind, field: it.field, id: it.id, label: it.sku ?? it.sub })}
       onDragEnd={() => setDrag(null)}
-      onClick={() => (it.kind === "mo" ? onOpenMO(it.id) : onOpenWO(it.id))}
+      onClick={() => (it.kind === "wo" ? onOpenWO(it.id) : onOpenMO(it.kind === "plan" ? (it.moId ?? it.id) : it.id))}
       title={`${it.sku ?? ""} ${it.name ?? ""}\n${it.sub}\n${fmt(it.qty)} ชิ้น${canEdit ? "\n(ลากไปวางวันอื่นเพื่อเลื่อนวัน)" : ""}`}
       style={it.desk ? { borderLeftWidth: 3, borderLeftColor: dc.dot } : undefined}
       className={`group flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1 py-0.5 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50 ${canEdit ? "active:cursor-grabbing" : ""}`}>
       <HoverImage url={it.img} size={compact ? 16 : 20} previewSize={220} />
       <span className="min-w-0 flex-1">
-        <span className="block text-[10px] font-semibold text-slate-700 truncate leading-tight">{it.sku ?? "—"}</span>
+        <span className="block text-[10px] font-semibold text-slate-700 truncate leading-tight">
+          {it.lot && <span className="mr-1 px-1 rounded bg-indigo-100 text-indigo-700 text-[9px] align-middle">{it.lot}</span>}
+          {it.sku ?? "—"}
+        </span>
         {!compact && <span className="block text-[9px] text-slate-400 truncate leading-tight">{it.sub}</span>}
       </span>
       <span className="shrink-0 text-[9px] text-indigo-700 font-semibold">{fmt(it.qty)}</span>
