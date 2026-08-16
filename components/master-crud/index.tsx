@@ -444,6 +444,12 @@ export type MasterCRUDConfig = {
   icon?:          string;
   /** เลย์เอาต์ฟอร์ม: "tabs" (ค่าเริ่มต้น = แบ่งกลุ่มเป็นแท็บ) หรือ "sections" (ทุกกลุ่มเรียงลงมาหน้าเดียว เลื่อนดู) */
   formLayout?:    "tabs" | "sections";
+  /**
+   * คลิกแถวแล้วไป "หน้าเต็มของ record นั้น" แทนเปิด drawer ฟอร์มยาว
+   * ใช้กับโมดูลที่มีหน้ารายละเอียดอ่านง่ายกว่าอยู่แล้ว (เช่น พนักงาน → /payroll/employees/<id>)
+   * ไม่ใส่ = พฤติกรรมเดิม (เปิด drawer) → โมดูลอื่นไม่กระทบ
+   */
+  recordHref?:    (row: Record<string, unknown>) => string;
   /** permission keys */
   permissions: {
     view:   Permission;
@@ -2513,7 +2519,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           exportEntityType={config.exportEntityType}
           canCheck={(p) => can(p as Parameters<typeof can>[0])}
           pageSize={config.serverMode ? 50 : 20}
-          onRowClick={openEdit}
+          onRowClick={config.recordHref
+            ? (r: Row) => { const href = config.recordHref?.(r); if (href) window.location.href = href; }
+            : openEdit}
           onVisibleRowsChange={onVisibleRowsChange}
           serverFetch={config.serverMode ? serverFetch : undefined}
           serverRefreshKey={config.serverMode ? serverRefresh : undefined}

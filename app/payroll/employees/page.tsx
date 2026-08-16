@@ -161,6 +161,9 @@ const CONFIG: MasterCRUDConfig = {
   description: "ทะเบียนพนักงานจริง 78 คน — โมดูลเงินเดือนเวอร์ชันใช้ของกลาง erp",
   uniqueKey:   "employee_code",
   activeField: "active",
+  // คลิกแถว → เปิด "หน้าประวัติพนักงาน" (การ์ดหมวด อ่านง่าย/กรอกง่าย)
+  // แทน drawer ฟอร์มยาว ~40 ช่องรวดเดียวที่ดูยาก (ปุ่ม ✏️ แก้ ในตารางยังเปิด drawer เดิมได้)
+  recordHref:  (row) => `/payroll/employees/${String(row.id ?? "")}`,
   // ปุ่มดาวน์โหลด/พิมพ์ "ใบกรอกประวัติพนักงาน" (ฟอร์มเปล่า 3 ภาษา ไทย/อังกฤษ/พม่า)
   headerActions: () => (
     <span className="flex items-center gap-2">
