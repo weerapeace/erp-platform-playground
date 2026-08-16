@@ -27,13 +27,18 @@ type Row = ParsedBook & { _use: boolean; _dup: boolean };
 
 const STATUSES = ["owned", "wishlist", "upcoming", "skipped"] as const;
 
-/** ตัดช่องว่างทิ้งก่อนส่งเข้าตัวนำเข้ากลาง — คอลัมน์วันที่รับ "" ไม่ได้ (ต้องไม่ส่งไปเลย) */
+/**
+ * ตัดช่องว่างทิ้งก่อนส่งเข้าตัวนำเข้ากลาง — คอลัมน์วันที่รับ "" ไม่ได้ (ต้องไม่ส่งไปเลย)
+ * ช่อง "ร้าน" ส่งเป็น store_id = "ชื่อร้าน" → ตัวนำเข้ากลางแปลงชื่อ → id ให้เอง
+ * (ต้องมีร้านนั้นในทะเบียนก่อน — ดู ensureStores)
+ */
 function toPayload(r: Row): Record<string, unknown> {
   const out: Record<string, unknown> = { title: r.title.trim(), status: r.status };
   const text = (k: keyof ParsedBook) => { const v = String(r[k] ?? "").trim(); if (v) out[k] = v; };
-  (["series", "volume", "author", "category", "isbn", "store", "buy_url", "currency"] as const).forEach(text);
+  (["series", "volume", "author", "category", "isbn", "buy_url", "currency"] as const).forEach(text);
   (["purchased_at", "release_date"] as const).forEach((k) => { if (r[k]) out[k] = r[k]; });
   if (r.price != null) out.price = r.price;
+  if (r.store.trim()) out.store_id = r.store.trim();
   return out;
 }
 
@@ -83,11 +88,31 @@ export function ImportMailModal({ open, onClose, onImported }: {
     } finally { setParsing(false); }
   };
 
+  /**
+   * ร้านที่อ่านได้จากอีเมลต้องมีในทะเบียนร้านก่อน ตัวนำเข้ากลางถึงจะแปลงชื่อ → id ได้
+   * → เพิ่มร้านที่ยังไม่มีให้อัตโนมัติ (ชื่อซ้ำถูกกันด้วย unique index ฝั่ง DB อยู่แล้ว)
+   */
+  const ensureStores = async (names: string[]) => {
+    const uniq = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+    if (uniq.length === 0) return;
+    const res = await apiFetch("/api/master-v2/book_stores?limit=2000");
+    const j = await res.json();
+    const have = new Set(((j.data ?? []) as { name?: string }[]).map((s) => String(s.name ?? "").trim().toLowerCase()));
+    for (const name of uniq) {
+      if (have.has(name.toLowerCase())) continue;
+      await apiFetch("/api/master-v2/book_stores", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, actor: user?.name ?? user?.email }),
+      }).catch(() => { /* สร้างไม่ได้ก็ปล่อย — แถวนั้นจะถูกรายงานว่าไม่พบร้าน */ });
+    }
+  };
+
   const save = async () => {
     const picked = (rows ?? []).filter((r) => r._use && r.title.trim());
     if (picked.length === 0) { toast.warning("ยังไม่ได้เลือกเล่มไหนเลย"); return; }
     setSaving(true);
     try {
+      await ensureStores(picked.map((r) => r.store));
       const res = await apiFetch("/api/master-v2/book_library/import", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows: picked.map(toPayload), mode: "create", actor: user?.name ?? user?.email }),

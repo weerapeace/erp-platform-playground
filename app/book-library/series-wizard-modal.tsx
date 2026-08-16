@@ -13,6 +13,8 @@
 import { useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { MoneyInput } from "@/components/money-input";
+import { RelationPicker } from "@/components/relation-picker";
+import { STORE_RELATION } from "./store-relation";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -44,7 +46,7 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
   const [total, setTotal] = useState("");
   const [author, setAuthor] = useState("");
   const [category, setCategory] = useState("");
-  const [store, setStore] = useState("");
+  const [storeId, setStoreId] = useState<string | null>(null);
   const [price, setPrice] = useState<string>("");
   const [owned, setOwned] = useState<Set<number>>(new Set());
   const [rangeText, setRangeText] = useState("");
@@ -59,7 +61,7 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
 
   const reset = () => {
     setStep(1); setSeries(""); setTotal(""); setAuthor(""); setCategory("");
-    setStore(""); setPrice(""); setOwned(new Set()); setRangeText(""); setSaving(false);
+    setStoreId(null); setPrice(""); setOwned(new Set()); setRangeText(""); setSaving(false);
     setDupes(new Map()); setChecking(false);
   };
   const close = () => { reset(); onClose(); };
@@ -117,7 +119,7 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
         };
         if (author.trim()) row.author = author.trim();
         if (category.trim()) row.category = category.trim();
-        if (store.trim()) row.store = store.trim();
+        if (storeId) row.store_id = storeId;
         if (priceNum != null && priceNum > 0) row.price = priceNum;
         return row;
       });
@@ -195,7 +197,9 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
             </div>
             <div>
               <label className={label}>ร้านที่ซื้อ</label>
-              <input value={store} onChange={(e) => setStore(e.target.value)} className={field} />
+              <RelationPicker value={storeId} onChange={(v) => setStoreId(v)} config={STORE_RELATION}
+                placeholder="— เลือกร้าน —" />
+              <p className="mt-1 text-[10px] text-slate-400">ไม่มีร้านที่ต้องการ? กด + สร้างใหม่ในดรอปดาวน์ · จัดการทั้งหมดที่เมนู 🏪 ร้านหนังสือ</p>
             </div>
             <div>
               <label className={label}>ราคาต่อเล่ม</label>
