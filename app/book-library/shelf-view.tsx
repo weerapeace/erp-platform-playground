@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { usePermission, AccessDenied } from "@/components/auth";
+import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { getStatusStyle } from "@/lib/status-config";
@@ -79,6 +80,7 @@ function Cover({ book }: { book: Book }) {
 export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void }) {
   const canView = usePermission("books.view");
   const canEdit = usePermission("books.edit");
+  const toast = useToast();
 
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,6 +91,7 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
   const [creating, setCreating] = useState(false);
   const [mailOpen, setMailOpen] = useState(false);
   const [seriesOpen, setSeriesOpen] = useState(false);
+  const [coverJob, setCoverJob] = useState<{ done: number; total: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -103,6 +106,32 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  /**
+   * หารูปปกให้เล่มที่ยังไม่มีปก — ยิงทีละเล่ม (ไม่ยิงรัวพร้อมกัน กันโดนจำกัดจาก Google
+   * และไม่ให้เซิร์ฟเวอร์ทำงานเกินเวลา) · โชว์ความคืบหน้า · หยุดทันทีถ้าติดปัญหาการตั้งค่า
+   */
+  const findCovers = useCallback(async () => {
+    const targets = books.filter((b) => !b.cover_r2_key);
+    if (targets.length === 0) { toast.info("ทุกเล่มมีรูปปกแล้ว"); return; }
+    setCoverJob({ done: 0, total: targets.length });
+    let found = 0;
+    for (let i = 0; i < targets.length; i++) {
+      try {
+        const res = await apiFetch("/api/book-library/find-cover", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: targets[i].id }),
+        });
+        const j = await res.json();
+        if (j.error) { toast.error(String(j.error)); break; }   // ตั้งค่าไม่ครบ/โควตาหมด → หยุด ไม่ต้องยิงต่อให้เสียเวลา
+        if (j.found) found++;
+      } catch { /* เล่มนี้พลาด ข้ามไปเล่มต่อไป */ }
+      setCoverJob({ done: i + 1, total: targets.length });
+    }
+    setCoverJob(null);
+    await load();
+    toast.success(`หารูปปกเสร็จ — เจอ ${found} เล่ม จาก ${targets.length} เล่มที่ยังไม่มีปก`);
+  }, [books, toast, load]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -156,6 +185,13 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
           </div>
           {canEdit && (
             <>
+              {books.some((b) => !b.cover_r2_key) && (
+                <button onClick={findCovers} disabled={!!coverJob}
+                  title="ค้นรูปปกจาก Google Books ให้เล่มที่ยังไม่มีปก"
+                  className="h-9 px-4 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                  {coverJob ? `🖼 กำลังหา ${coverJob.done}/${coverJob.total}…` : "🖼 หารูปปกให้"}
+                </button>
+              )}
               <button onClick={() => setSeriesOpen(true)}
                 className="h-9 px-4 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">📚 เพิ่มทั้งชุด</button>
               <button onClick={() => setMailOpen(true)}
