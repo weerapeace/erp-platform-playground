@@ -11,6 +11,7 @@ import type { Notification, NotificationsResponse, TeamNotification, TeamNotific
 import type { DashboardStats, DashboardResponse } from "@/app/api/dashboard/route";
 import type { AuditLogsResponse } from "@/app/api/audit-logs/route";
 import { SystemCards, type SystemApp } from "./system-cards";
+import { DeliveryAlert } from "./delivery-alert";
 import { DashboardCalendar } from "./dashboard-calendar";
 import { PanelConfigModal } from "./panel-config-modal";
 import { systemForEvent, type DashboardPanel } from "@/lib/dashboard-systems";
@@ -335,6 +336,8 @@ export default function DashboardPage() {
       </div>
 
       <div className={`px-4 sm:px-8 py-5 space-y-5 mx-auto w-full ${wideView ? "max-w-7xl" : "max-w-4xl"}`}>
+        {/* 🚚 เตือนงวดส่งที่เลยกำหนด/ต้องส่งวันนี้ แต่ยังไม่ได้ติ๊กว่าส่งแล้ว (ไม่มีของค้าง = ไม่ขึ้น) */}
+        <DeliveryAlert />
         {/* ---- widget เสริม (เรียง/เปิด-ปิด ตามหน้าแดชบอร์ดของตำแหน่ง — เฟส 3) ---- */}
         {/* มุมมองผู้บริหารเป็นหน้าเต็มของตัวเอง ไม่โชว์ widget strip ซ้ำ */}
         {view !== "executive" && myLayout.widgets.map((w) => {

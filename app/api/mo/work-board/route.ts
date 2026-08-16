@@ -213,7 +213,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // งวดส่ง (แบ่งส่งหลายวันต่อ 1 ใบ) — ปฏิทินนัดส่งลูกค้าเอาไปโชว์ทีละงวด
   const openMoIds = allMos.map((m) => m.id);
   const { data: plans } = openMoIds.length
-    ? await admin.from("mo_delivery_plan").select("id, mo_id, mo_no, due_date, qty, note")
+    ? await admin.from("mo_delivery_plan").select("id, mo_id, mo_no, due_date, qty, note, shipped, shipped_at, dn_number, delivery_note_id")
         .in("mo_id", openMoIds).eq("is_active", true).order("due_date", { ascending: true })
     : { data: [] as Record<string, unknown>[] };
 

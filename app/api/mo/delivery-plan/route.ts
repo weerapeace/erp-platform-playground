@@ -22,8 +22,40 @@ const day = (v: unknown) => (v ? String(v).slice(0, 10) : null);
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
-  const moId = request.nextUrl.searchParams.get("mo_id");
+  const sp = request.nextUrl.searchParams;
+  const moId = sp.get("mo_id");
   const admin = supabaseAdmin();
+
+  // view=alerts → งวดที่ "ยังไม่ส่ง" ถึงวันที่กำหนด (ใช้เตือนบนหน้าแรก + สรุปยอดต้องส่ง)
+  //   ต้องส่งวันไหน = due_date · today ต้องส่งมาจากฝั่ง client (เวลาไทย UTC+7 — ห้ามใช้ CURRENT_DATE ของ DB)
+  if (sp.get("view") === "alerts") {
+    const today = (sp.get("today") ?? "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+    const days = Math.max(0, Math.min(60, Number(sp.get("days") ?? 7)));
+    const until = new Date(`${today}T00:00:00Z`); until.setUTCDate(until.getUTCDate() + days);
+    const { data, error } = await admin.from("mo_delivery_plan")
+      .select("id, mo_id, mo_no, due_date, qty, note, dn_number, delivery_note_id, shipped")
+      .eq("is_active", true).eq("shipped", false)
+      .lte("due_date", until.toISOString().slice(0, 10))
+      .order("due_date", { ascending: true });
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    const rows = data ?? [];
+    // เติมชื่อ/รหัสสินค้าจากใบสั่งผลิต + ตัดใบที่ปิด/ยกเลิกไปแล้วออก
+    const ids = [...new Set(rows.map((r) => String(r.mo_id)))];
+    const { data: mos } = ids.length
+      ? await admin.from("manufacturing_orders").select("id, product_sku, product_name, status, is_active").in("id", ids)
+      : { data: [] as Record<string, unknown>[] };
+    const moBy = new Map((mos ?? []).map((m) => [String(m.id), m]));
+    const out = rows.filter((r) => {
+      const m = moBy.get(String(r.mo_id));
+      return m && m.is_active !== false && !["cancelled", "done"].includes(String(m.status));
+    }).map((r) => {
+      const m = moBy.get(String(r.mo_id));
+      return { ...r, product_sku: (m?.product_sku as string) ?? null, product_name: (m?.product_name as string) ?? null,
+        overdue: String(r.due_date).slice(0, 10) < today, today: String(r.due_date).slice(0, 10) === today };
+    });
+    return NextResponse.json({ data: out, error: null });
+  }
+
   let q = admin.from("mo_delivery_plan").select("*").eq("is_active", true).order("due_date", { ascending: true });
   if (moId) q = q.eq("mo_id", moId);
   const { data, error } = await q;
@@ -58,7 +90,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { id?: string; due_date?: string; qty?: number; note?: string | null };
+  let body: { id?: string; due_date?: string; qty?: number; note?: string | null;
+    delivery_note_id?: string | null; dn_number?: string | null; shipped?: boolean; shipped_at?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.id) return NextResponse.json({ error: "ไม่ระบุงวดส่ง" }, { status: 400 });
 
@@ -74,6 +107,14 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     patch.qty = n;
   }
   if ("note" in body) patch.note = body.note ?? null;
+  if ("delivery_note_id" in body) patch.delivery_note_id = body.delivery_note_id || null;
+  if ("dn_number" in body) patch.dn_number = body.dn_number || null;
+  if ("shipped" in body) {
+    patch.shipped = !!body.shipped;
+    // ติ๊กส่งแล้วโดยไม่ระบุวัน = ลงวันที่ส่งเป็นวันกำหนดของงวดนั้น (client ส่ง shipped_at มาทับได้)
+    if (!("shipped_at" in body)) patch.shipped_at = body.shipped ? null : null;
+  }
+  if ("shipped_at" in body) patch.shipped_at = day(body.shipped_at);
 
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("mo_delivery_plan").update(patch).eq("id", body.id).select("*").single();

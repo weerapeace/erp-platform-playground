@@ -15,6 +15,7 @@ import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { apiSave } from "@/lib/save-toast";
+import { InlineEdit } from "@/components/inline-edit";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
 import type { MoCost, MoCostMaterial, CostScenario, PieceJob } from "@/app/api/mo/[id]/cost/route";
@@ -122,7 +123,8 @@ async function fetchClMats(moId: string): Promise<ClMats> {
   return { rows, cutRows, summary: moSummary, materials: moMaterials, requested: (j?.data?.requested ?? {}) as Record<string, number>, sizeQty };
 }
 // dispatchedMos = ใบที่จ่ายงานครบแล้ว (ไม่ใช่การ์ดรอจ่าย) — ยังต้องส่งลูกค้า ปฏิทินเลยต้องเห็น
-type DeliveryPlan = { id: string; mo_id: string; mo_no: string; due_date: string; qty: number; note?: string | null };
+type DeliveryPlan = { id: string; mo_id: string; mo_no: string; due_date: string; qty: number; note?: string | null;
+  delivery_note_id?: string | null; dn_number?: string | null; shipped?: boolean; shipped_at?: string | null };
 type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[]; dispatchedMos: PendingMO[]; deliveryPlans: DeliveryPlan[]; pendingPiece: PendingPiece[] };
 type Pos = { x: number; y: number };
 type Size = { w: number; h: number };
@@ -1103,13 +1105,47 @@ function WorkBoardPageInner() {
     if (r.ok) { setNewPlanQty(""); setNewPlanNote(""); await load(true); }
   }, [checklistMO, newPlanDate, newPlanQty, newPlanNote, toast, load]);
 
-  const patchPlanRow = useCallback(async (id: string, patch: { due_date?: string; qty?: number }) => {
+  const patchPlanRow = useCallback(async (id: string, patch: {
+    due_date?: string; qty?: number; shipped?: boolean; shipped_at?: string | null;
+    delivery_note_id?: string | null; dn_number?: string | null;
+  }) => {
     setPlanSaving(true);
+    const okMsg = "shipped" in patch ? (patch.shipped ? "ติ๊กว่าส่งแล้ว" : "ยกเลิกติ๊กส่งแล้ว") : "แก้งวดส่งแล้ว";
     const r = await apiSave(toast, "/api/mo/delivery-plan", { method: "PATCH", body: { id, ...patch } },
-      { ok: "แก้งวดส่งแล้ว", fail: "แก้งวดส่งไม่สำเร็จ" });
+      { ok: okMsg, fail: "บันทึกงวดส่งไม่สำเร็จ" });
     setPlanSaving(false);
     if (r.ok) await load(true);
   }, [toast, load]);
+
+  /**
+   * ออกใบส่งสินค้า (ร่าง) จากงวดส่ง — ใช้ระบบใบส่งสินค้าของกลาง (/api/delivery-notes)
+   * ใบสั่งผลิตไม่มีข้อมูลลูกค้า → ออกเป็นร่างพร้อมรายการสินค้า แล้วไปเลือกลูกค้าต่อในใบ
+   */
+  const createDNForPlan = useCallback(async (p: DeliveryPlan) => {
+    const mo = [...board.pending, ...board.dispatchedMos].find((m) => m.id === p.mo_id);
+    if (!mo) { toast.error("ไม่พบใบสั่งผลิตของงวดนี้"); return; }
+    setPlanSaving(true);
+    const r = await apiSave<{ id?: string }>(toast, "/api/delivery-notes", {
+      method: "POST",
+      body: {
+        header: { delivery_date: String(p.due_date).slice(0, 10), note: `จากใบสั่งผลิต ${mo.mo_no}${p.note ? ` · ${p.note}` : ""}` },
+        lines: [{ sku: mo.product_sku, product_name: mo.product_name ?? mo.product_sku ?? "", qty: Number(p.qty) || 0, unit: "ชิ้น" }],
+        actor: user?.email ?? null,
+      },
+    }, { ok: "ออกใบส่งสินค้า (ร่าง) แล้ว — ไปเลือกลูกค้าในใบต่อได้เลย", fail: "ออกใบส่งสินค้าไม่สำเร็จ" });
+    if (!r.ok || !r.data?.id) { setPlanSaving(false); return; }
+    // อ่านเลขที่ใบมาโชว์บนงวด (ไม่สำเร็จก็ไม่เป็นไร ยังลิงก์ด้วย id ได้)
+    let dnNo: string | null = null;
+    try {
+      const d = await apiFetch(`/api/delivery-notes/${r.data.id}`);
+      const dj = await d.json(); dnNo = (dj?.data?.dn_number as string) ?? null;
+    } catch { /* ไม่มีเลขก็โชว์ว่า "ใบส่งสินค้า" */ }
+    await apiSave(toast, "/api/mo/delivery-plan",
+      { method: "PATCH", body: { id: p.id, delivery_note_id: r.data.id, dn_number: dnNo } },
+      { quiet: true });
+    setPlanSaving(false);
+    await load(true);
+  }, [board.pending, board.dispatchedMos, user?.email, toast, load]);
 
   const delPlanRow = useCallback(async (id: string) => {
     setPlanSaving(true);
@@ -1773,21 +1809,19 @@ function WorkBoardPageInner() {
               {/* 📅 วันกำหนด 2 อัน — เลือกวันแล้วบันทึกให้เลย (ไม่ต้องกดปุ่ม)
                   ลูกค้า = วันที่ต้องส่งของถึงลูกค้า · ภายใน = วันที่ช่าง/โต๊ะต้องทำเสร็จ */}
               {!clWO && (
-                <div className="flex items-center gap-x-4 gap-y-2 flex-wrap text-[12px] rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
-                  <label className="flex items-center gap-1.5">
+                <div className="flex items-center gap-x-4 gap-y-1 flex-wrap text-[12px] rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5">
+                  <span className="flex items-center gap-1">
                     <span className="text-slate-500 whitespace-nowrap">📦 กำหนดส่งลูกค้า</span>
-                    <input type="date" value={moDue} disabled={!canEdit || moDueSaving !== ""}
-                      onChange={(e) => { setMoDue(e.target.value); void saveMoDue("due", e.target.value); }}
-                      className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100" />
-                  </label>
-                  <label className="flex items-center gap-1.5">
+                    <InlineEdit type="date" value={moDue} disabled={!canEdit || moDueSaving !== ""} width="9.5rem" placeholder="— ยังไม่กำหนด —"
+                      onSave={(v) => { setMoDue(v); void saveMoDue("due", v); }} />
+                  </span>
+                  <span className="flex items-center gap-1">
                     <span className="text-slate-500 whitespace-nowrap">🪑 กำหนดส่งงานภายใน</span>
-                    <input type="date" value={moDueInt} disabled={!canEdit || moDueSaving !== ""}
-                      onChange={(e) => { setMoDueInt(e.target.value); void saveMoDue("internal", e.target.value); }}
-                      className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100" />
-                  </label>
+                    <InlineEdit type="date" value={moDueInt} disabled={!canEdit || moDueSaving !== ""} width="9.5rem" placeholder="— ยังไม่กำหนด —"
+                      onSave={(v) => { setMoDueInt(v); void saveMoDue("internal", v); }} />
+                  </span>
                   {moDueSaving !== "" ? <span className="text-[11px] text-slate-400">กำลังบันทึก…</span>
-                    : <span className="text-[11px] text-slate-400">ตั้งวันภายใน = ใบจ่ายงานที่ยังทำอยู่ของใบนี้ขยับตามให้ · ใบที่จ่ายทีหลังได้วันนี้เป็นค่าเริ่มต้น</span>}
+                    : <span className="text-[11px] text-slate-400">ตั้งวันภายใน = ใบจ่ายงานที่ยังทำอยู่ของใบนี้ขยับตามให้</span>}
                 </div>
               )}
               {/* 📦 แบ่งงวดส่ง — วันไหนส่งเท่าไหร่ (ใบเดียวส่งหลายรอบได้) */}
@@ -1816,17 +1850,33 @@ function WorkBoardPageInner() {
                     {show && (
                       <div className="mt-2 space-y-1">
                         {rows.map((p, i) => (
-                          <div key={p.id} className="flex items-center gap-2 flex-wrap">
-                            <span className="w-14 shrink-0 text-[11px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-center">งวด {i + 1}</span>
-                            <input type="date" defaultValue={p.due_date?.slice(0, 10) ?? ""} disabled={!canEdit || planSaving}
-                              onChange={(e) => { if (e.target.value) void patchPlanRow(p.id, { due_date: e.target.value }); }}
-                              className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white disabled:bg-slate-100" />
-                            <input type="number" min={0} step="any" defaultValue={p.qty} disabled={!canEdit || planSaving}
-                              onBlur={(e) => { const n = Number(e.target.value); if (n > 0 && n !== Number(p.qty)) void patchPlanRow(p.id, { qty: n }); }}
-                              className="w-24 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg bg-white disabled:bg-slate-100" />
-                            <span className="text-slate-400">ชิ้น</span>
+                          <div key={p.id} className={`flex items-center gap-2 flex-wrap rounded-lg px-1 py-0.5 ${p.shipped ? "bg-emerald-50/70" : ""}`}>
+                            <span className={`w-14 shrink-0 text-[11px] px-1.5 py-0.5 rounded text-center ${p.shipped ? "bg-emerald-100 text-emerald-700" : "bg-indigo-100 text-indigo-700"}`}>งวด {i + 1}</span>
+                            <InlineEdit type="date" value={p.due_date?.slice(0, 10) ?? ""} disabled={!canEdit || planSaving} width="9.5rem"
+                              onSave={(v) => { if (v) void patchPlanRow(p.id, { due_date: v }); }} />
+                            <InlineEdit type="number" value={p.qty} suffix="ชิ้น" align="right" width="6rem" disabled={!canEdit || planSaving}
+                              onSave={(v) => { const n = Number(v); if (n > 0 && n !== Number(p.qty)) void patchPlanRow(p.id, { qty: n }); }} />
                             {p.note && <span className="text-[11px] text-slate-500 truncate max-w-[10rem]">{p.note}</span>}
+                            {/* 🧾 ใบส่งสินค้า — ยังไม่มีก็กดออกได้เลย (ร่าง) · มีแล้วกดเปิดดู */}
+                            {p.delivery_note_id ? (
+                              <a href={`/delivery-notes?id=${encodeURIComponent(p.delivery_note_id)}`} target="_blank" rel="noreferrer"
+                                className="h-7 px-2 inline-flex items-center gap-1 text-[11px] rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-indigo-600 hover:border-indigo-300">
+                                🧾 {p.dn_number ?? "ใบส่งสินค้า"} ↗
+                              </a>
+                            ) : canEdit && (
+                              <button type="button" onClick={() => void createDNForPlan(p)} disabled={planSaving}
+                                title="ออกใบส่งสินค้า (ร่าง) จากงวดนี้ — ไปเลือกลูกค้าต่อในใบ"
+                                className="h-7 px-2 text-[11px] rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-40">🧾 ออกใบส่งของ</button>
+                            )}
                             {canEdit && (
+                              <label className={`h-7 px-2 inline-flex items-center gap-1 text-[11px] rounded-lg border cursor-pointer ${p.shipped ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500 hover:border-emerald-300"}`}>
+                                <input type="checkbox" checked={!!p.shipped} disabled={planSaving}
+                                  onChange={(e) => void patchPlanRow(p.id, { shipped: e.target.checked, shipped_at: e.target.checked ? todayLocal() : null })}
+                                  className="w-3.5 h-3.5 accent-emerald-600" />
+                                {p.shipped ? `ส่งแล้ว${p.shipped_at ? ` ${p.shipped_at.slice(8, 10)}/${p.shipped_at.slice(5, 7)}` : ""}` : "ส่งแล้ว"}
+                              </label>
+                            )}
+                            {canEdit && !p.shipped && (
                               <button type="button" onClick={() => void delPlanRow(p.id)} disabled={planSaving}
                                 title="ลบงวดนี้ (จำนวนกลับไปเป็นยังไม่แบ่ง)"
                                 className="h-7 w-7 rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-rose-600 hover:border-rose-300 disabled:opacity-40">🗑</button>

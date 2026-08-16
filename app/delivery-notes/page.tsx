@@ -5,7 +5,7 @@
  * สร้างได้ 2 แบบ: เลือกสินค้าเอง (เหมือนใบขาย) หรือดึงจากใบขายหลายใบ (ลูกค้าเดียวกัน) → รวมรายการ+จำนวน
  * ไม่มีราคา · workflow ร่าง → ส่งแล้ว → ยกเลิก (+ ย้อนสถานะ) · พิมพ์ด้วยแม่แบบใบส่งสินค้า
  */
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { ERPModal } from "@/components/modal";
@@ -83,6 +83,14 @@ export default function DeliveryNotesPage() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
+  // เปิดใบตรงจากลิงก์ /delivery-notes?id=<uuid> (เช่น กดจากงวดส่งในบอร์ดจ่ายงาน)
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (!canView || deepLinked.current) return;
+    const id = new URLSearchParams(window.location.search).get("id");
+    if (id) { deepLinked.current = true; void openDetail(id); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canView]);
 
   const openCreate = () => {
     setEditingId(null); setCustomer(null); setDeliveryDate(new Date().toISOString().slice(0, 10));

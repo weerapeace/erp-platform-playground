@@ -28,7 +28,8 @@ type CalMO = {
   brand?: string | null; brand_oem?: boolean; ready?: boolean;
 };
 // 1 แถว = ส่งกี่ชิ้น วันไหน (ใบเดียวมีได้หลายงวด)
-type CalPlan = { id: string; mo_id: string; mo_no: string; due_date: string; qty: number; note?: string | null };
+type CalPlan = { id: string; mo_id: string; mo_no: string; due_date: string; qty: number; note?: string | null;
+  shipped?: boolean; shipped_at?: string | null; dn_number?: string | null; delivery_note_id?: string | null };
 type CalWO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; due_date?: string | null; department_name?: string | null; assignee_name: string | null;
@@ -69,7 +70,7 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
 
   // ── รายการที่จะวางบนปฏิทิน (ตามโหมด) ──
   // field = วันที่กำลังแก้ ("due" = นัดส่งลูกค้า · "internal" = ส่งงานภายใน) · desk = โต๊ะ/แผนกที่งานอยู่
-  type Item = { key: string; kind: "mo" | "wo" | "plan"; field: "due" | "internal"; id: string; moId?: string; moNo: string; date: string | null; sku: string | null; name: string | null; qty: number; img: string | null; sub: string; brand: string | null; oem: boolean; desk: string | null; lot?: string };
+  type Item = { key: string; kind: "mo" | "wo" | "plan"; field: "due" | "internal"; id: string; moId?: string; moNo: string; date: string | null; sku: string | null; name: string | null; qty: number; img: string | null; sub: string; brand: string | null; oem: boolean; desk: string | null; lot?: string; shipped?: boolean; dn?: string | null };
 
   // ใบสั่งผลิตใบไหนอยู่โต๊ะไหนบ้าง (จากใบจ่ายงานที่ยังไม่ยกเลิก) — ใช้กรองโต๊ะในโหมดนัดส่งลูกค้า
   const desksByMo = useMemo(() => {
@@ -94,8 +95,8 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
         const rows = plans.filter((p) => p.mo_id === m.id);
         rows.forEach((p, i) => out.push({
           ...base, key: `plan:${p.id}`, kind: "plan" as const, field: "due" as const, id: p.id, date: p.due_date,
-          qty: Number(p.qty) || 0, lot: `งวด ${i + 1}/${rows.length}`,
-          sub: `งวด ${i + 1}/${rows.length} · ${m.mo_no}${p.note ? ` · ${p.note}` : ""}`,
+          qty: Number(p.qty) || 0, lot: `งวด ${i + 1}/${rows.length}`, shipped: !!p.shipped, dn: p.dn_number ?? null,
+          sub: `งวด ${i + 1}/${rows.length} · ${m.mo_no}${p.shipped ? " · ส่งแล้ว ✓" : ""}${p.note ? ` · ${p.note}` : ""}`,
         }));
         const planned = rows.reduce((n, p) => n + (Number(p.qty) || 0), 0);
         const left = Math.round(((m.qty || 0) - planned) * 100) / 100;
@@ -160,6 +161,29 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
     });
   }, [allItems, mode, showOwn, groupFilter, brandFilter, deskFilter, desksByMo, groupOf, search]);
 
+  /**
+   * สรุปยอดต้องส่ง — นับเฉพาะที่ "ยังไม่ส่ง" (งวดที่ติ๊กส่งแล้วไม่นับ)
+   * เลยกำหนด / วันนี้ / ใน 7 วัน / เดือนนี้ — รวมทุกลูกค้า
+   */
+  const summary = useMemo(() => {
+    const wk = new Date(`${today}T00:00:00Z`); wk.setUTCDate(wk.getUTCDate() + 7);
+    const in7 = wk.toISOString().slice(0, 10);
+    const monthEnd = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-31`;
+    const monthStart = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-01`;
+    const box = () => ({ n: 0, qty: 0 });
+    const out = { late: box(), today: box(), week: box(), month: box() };
+    for (const i of items) {
+      if (i.shipped || !i.date) continue;
+      const d = i.date.slice(0, 10);
+      const add = (b: { n: number; qty: number }) => { b.n += 1; b.qty += i.qty || 0; };
+      if (d < today) add(out.late);
+      else if (d === today) add(out.today);
+      if (d >= today && d <= in7) add(out.week);
+      if (d >= monthStart && d <= monthEnd) add(out.month);
+    }
+    return out;
+  }, [items, today, cursor]);
+
   const byDate = useMemo(() => {
     const m = new Map<string, Item[]>();
     for (const it of items) { if (!it.date) continue; const k = it.date.slice(0, 10); (m.get(k) ?? m.set(k, []).get(k)!).push(it); }
@@ -213,11 +237,11 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
       onClick={() => (it.kind === "wo" ? onOpenWO(it.id) : onOpenMO(it.kind === "plan" ? (it.moId ?? it.id) : it.id))}
       title={`${it.sku ?? ""} ${it.name ?? ""}\n${it.sub}\n${fmt(it.qty)} ชิ้น${canEdit ? "\n(ลากไปวางวันอื่นเพื่อเลื่อนวัน)" : ""}`}
       style={it.desk ? { borderLeftWidth: 3, borderLeftColor: dc.dot } : undefined}
-      className={`group flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1 py-0.5 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50 ${canEdit ? "active:cursor-grabbing" : ""}`}>
+      className={`group flex items-center gap-1 rounded-md border px-1 py-0.5 cursor-pointer ${it.shipped ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100" : "border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50"} ${canEdit ? "active:cursor-grabbing" : ""}`}>
       <HoverImage url={it.img} size={compact ? 16 : 20} previewSize={220} />
       <span className="min-w-0 flex-1">
         <span className="block text-[10px] font-semibold text-slate-700 truncate leading-tight">
-          {it.lot && <span className="mr-1 px-1 rounded bg-indigo-100 text-indigo-700 text-[9px] align-middle">{it.lot}</span>}
+          {it.lot && <span className={`mr-1 px-1 rounded text-[9px] align-middle ${it.shipped ? "bg-emerald-200 text-emerald-800" : "bg-indigo-100 text-indigo-700"}`}>{it.shipped ? "✓ " : ""}{it.lot}</span>}
           {it.sku ?? "—"}
         </span>
         {!compact && <span className="block text-[9px] text-slate-400 truncate leading-tight">{it.sub}</span>}
@@ -287,6 +311,21 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
             🏷 รวมแบรนด์เราเอง{ownCount > 0 ? ` (${ownCount})` : ""}
           </label>
         )}
+      </div>
+
+      {/* สรุปยอดต้องส่ง (ยังไม่ติ๊กว่าส่งแล้ว) — รวมทุกลูกค้า */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {([
+          ["⏰ เลยกำหนด ยังไม่ส่ง", summary.late, "border-rose-300 bg-rose-50 text-rose-700"],
+          ["📦 ต้องส่งวันนี้", summary.today, "border-indigo-300 bg-indigo-50 text-indigo-700"],
+          ["🗓 ใน 7 วัน", summary.week, "border-amber-200 bg-amber-50 text-amber-700"],
+          ["📅 ทั้งเดือนที่ดูอยู่", summary.month, "border-slate-200 bg-white text-slate-600"],
+        ] as const).map(([label, v, cls]) => (
+          <div key={label} className={`rounded-xl border px-3 py-1.5 ${cls}`}>
+            <div className="text-[10px] opacity-80">{label}</div>
+            <div className="text-sm font-bold tabular-nums">{v.n} ใบ <span className="font-normal opacity-70">· {fmt(v.qty)} ชิ้น</span></div>
+          </div>
+        ))}
       </div>
 
       {/* แถบสีประจำโต๊ะ — กดที่สีเพื่อกรองเฉพาะโต๊ะนั้น (กดซ้ำ = ยกเลิก) */}
