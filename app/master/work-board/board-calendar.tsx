@@ -19,6 +19,7 @@ import { useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { HoverImage } from "@/components/hover-image";
+import { deptColor } from "@/lib/dept-color";
 
 type CalMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
@@ -35,9 +36,11 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const TH_DAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 
-export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf, onOpenMO, onOpenWO, onReload }: {
+export function BoardCalendar({ pending, extraMos = [], workOrders, departments = [], canEdit, moGroups, groupOf, onOpenMO, onOpenWO, onReload }: {
   pending: CalMO[];
+  extraMos?: CalMO[];          // ใบที่จ่ายงานครบแล้ว — ยังต้องส่งลูกค้า จึงต้องอยู่ในปฏิทินนัดส่งลูกค้า
   workOrders: CalWO[];
+  departments?: { id: string; name: string }[];   // รายชื่อโต๊ะทั้งหมด (ใช้ทำ dropdown + สีประจำโต๊ะ)
   canEdit: boolean;
   moGroups: { name: string; mo_nos: string[] }[];
   groupOf: (moNo: string) => string | null;
@@ -78,9 +81,11 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
 
   const allItems: Item[] = useMemo(() => {
     if (mode === "customer") {
-      return pending.map((m) => ({
+      // นัดส่งลูกค้า = ทุกใบที่ยังไม่ปิด (รวมใบที่จ่ายงานครบแล้ว — ของยังไม่ถึงมือลูกค้า)
+      // จำนวนที่โชว์ = ยอดสั่งผลิตทั้งใบ ไม่ใช่ยอดที่ยังไม่จ่าย
+      return [...pending, ...extraMos].map((m) => ({
         key: `mo:${m.id}`, kind: "mo" as const, field: "due" as const, id: m.id, moNo: m.mo_no, date: m.due_date, sku: m.product_sku, name: m.product_name,
-        qty: m.remaining, img: m.image_url, sub: `${m.mo_no}${m.brand ? ` · ${m.brand}` : ""}`, brand: m.brand ?? null, oem: !!m.brand_oem,
+        qty: m.qty, img: m.image_url, sub: `${m.mo_no}${m.brand ? ` · ${m.brand}` : ""}`, brand: m.brand ?? null, oem: !!m.brand_oem,
         desk: (desksByMo.get(m.mo_no) ?? [])[0] ?? null,
       }));
     }
@@ -96,11 +101,24 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
       desk: null,
     }));
     return [...woItems, ...moItems];
-  }, [mode, pending, workOrders, desksByMo, dispatchedMoNos]);
+  }, [mode, pending, extraMos, workOrders, desksByMo, dispatchedMoNos]);
 
   const brandOptions = useMemo(() => [...new Set(allItems.map((i) => i.brand).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, "th")), [allItems]);
-  const deskOptions = useMemo(() => [...new Set(allItems.map((i) => i.desk).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, "th")), [allItems]);
+  const deskOptions = useMemo(() => {
+    const fromItems = allItems.map((i) => i.desk).filter(Boolean) as string[];
+    const fromDepts = departments.map((d) => d.name);
+    return [...new Set([...fromDepts, ...fromItems])].sort((a, b) => a.localeCompare(b, "th"));
+  }, [allItems, departments]);
   const ownCount = useMemo(() => (mode === "customer" ? allItems.filter((i) => !i.oem).length : 0), [allItems, mode]);
+  // แถบสีประจำโต๊ะ (กดเพื่อกรองได้) — นับจำนวนงานของแต่ละโต๊ะ
+  const deskLegend = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const i of allItems) {
+      const desks = mode === "customer" ? (desksByMo.get(i.moNo) ?? []) : (i.desk ? [i.desk] : []);
+      for (const d of desks) n.set(d, (n.get(d) ?? 0) + 1);
+    }
+    return [...n.entries()].sort((a, b) => b[1] - a[1]);
+  }, [allItems, mode, desksByMo]);
 
   const items: Item[] = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -157,13 +175,16 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
     finally { setBusy(false); setDrag(null); }
   };
 
-  const chip = (it: Item, compact = false) => (
+  const chip = (it: Item, compact = false) => {
+    const dc = deptColor(it.desk);
+    return (
     <div key={it.key}
       draggable={canEdit}
       onDragStart={() => setDrag({ kind: it.kind, field: it.field, id: it.id, label: it.sku ?? it.sub })}
       onDragEnd={() => setDrag(null)}
       onClick={() => (it.kind === "mo" ? onOpenMO(it.id) : onOpenWO(it.id))}
       title={`${it.sku ?? ""} ${it.name ?? ""}\n${it.sub}\n${fmt(it.qty)} ชิ้น${canEdit ? "\n(ลากไปวางวันอื่นเพื่อเลื่อนวัน)" : ""}`}
+      style={it.desk ? { borderLeftWidth: 3, borderLeftColor: dc.dot } : undefined}
       className={`group flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1 py-0.5 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50 ${canEdit ? "active:cursor-grabbing" : ""}`}>
       <HoverImage url={it.img} size={compact ? 16 : 20} previewSize={220} />
       <span className="min-w-0 flex-1">
@@ -172,7 +193,8 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
       </span>
       <span className="shrink-0 text-[9px] text-indigo-700 font-semibold">{fmt(it.qty)}</span>
     </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-2">
@@ -215,12 +237,17 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
           </select>
         )}
         {deskOptions.length > 0 && (
-          <select value={deskFilter} onChange={(e) => setDeskFilter(e.target.value)} title="กรองตามโต๊ะ/แผนก"
-            className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600">
-            <option value="__all__">🪑 ทุกโต๊ะ</option>
-            {deskOptions.map((d) => <option key={d} value={d}>{d}</option>)}
-            <option value="__none__">— ยังไม่จ่ายงาน —</option>
-          </select>
+          // กรองตามโต๊ะ — แต่ละโต๊ะมีสีประจำ (สีเดียวกับแถบซ้ายของการ์ด) จะได้กวาดตาหาได้เร็ว
+          <span className="inline-flex items-center gap-1.5 h-8 pl-2 pr-1 rounded-lg border bg-white"
+            style={{ borderColor: deskFilter !== "__all__" && deskFilter !== "__none__" ? deptColor(deskFilter).dot : "#e2e8f0" }}>
+            <i className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: deskFilter === "__all__" || deskFilter === "__none__" ? "#cbd5e1" : deptColor(deskFilter).dot }} />
+            <select value={deskFilter} onChange={(e) => setDeskFilter(e.target.value)} title="กรองตามโต๊ะ/แผนก"
+              className="h-7 pr-1 text-[12px] bg-transparent text-slate-600 focus:outline-none">
+              <option value="__all__">🪑 ทุกโต๊ะ</option>
+              {deskOptions.map((d) => <option key={d} value={d} style={{ color: deptColor(d).text }}>● {d}</option>)}
+              <option value="__none__">— ยังไม่จ่ายงาน —</option>
+            </select>
+          </span>
         )}
         {mode === "customer" && (
           <label className={`flex items-center gap-1.5 h-8 px-2.5 text-[12px] rounded-lg border cursor-pointer ${showOwn ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600"}`}
@@ -230,6 +257,24 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
           </label>
         )}
       </div>
+
+      {/* แถบสีประจำโต๊ะ — กดที่สีเพื่อกรองเฉพาะโต๊ะนั้น (กดซ้ำ = ยกเลิก) */}
+      {deskLegend.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] text-slate-400 mr-0.5">สีตามโต๊ะ:</span>
+          {deskLegend.map(([name, n]) => {
+            const c = deptColor(name); const on = deskFilter === name;
+            return (
+              <button key={name} type="button" onClick={() => setDeskFilter(on ? "__all__" : name)}
+                style={{ background: on ? c.bg : "#fff", borderColor: on ? c.dot : c.border, color: c.text }}
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full border text-[10px] hover:shadow-sm ${on ? "font-semibold" : ""}`}>
+                <i className="w-2 h-2 rounded-full shrink-0" style={{ background: c.dot }} />{name}
+                <span className="text-slate-400">{n}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* ปฏิทินซ้าย + กล่อง "ยังไม่กำหนดวัน" ขวา (จอเล็กกล่องไปอยู่ล่าง) */}
       <div className="flex flex-col lg:flex-row gap-2 items-start">

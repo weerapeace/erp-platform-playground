@@ -121,7 +121,8 @@ async function fetchClMats(moId: string): Promise<ClMats> {
   for (const s of sb) { const lb = s?.label != null ? String(s.label) : ""; if (lb) sizeQty[lb] = Number(s.qty) || 0; }
   return { rows, cutRows, summary: moSummary, materials: moMaterials, requested: (j?.data?.requested ?? {}) as Record<string, number>, sizeQty };
 }
-type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[]; pendingPiece: PendingPiece[] };
+// dispatchedMos = ใบที่จ่ายงานครบแล้ว (ไม่ใช่การ์ดรอจ่าย) — ยังต้องส่งลูกค้า ปฏิทินเลยต้องเห็น
+type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[]; dispatchedMos: PendingMO[]; pendingPiece: PendingPiece[] };
 type Pos = { x: number; y: number };
 type Size = { w: number; h: number };
 type Viewport = { x: number; y: number; scale: number };
@@ -213,7 +214,7 @@ function WorkBoardPageInner() {
   const isAdmin = user?.role === "admin" || canAdminUsers;
   const toast = useToast();
 
-  const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], pendingPiece: [] });
+  const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], dispatchedMos: [], pendingPiece: [] });
   const [loading, setLoading] = useState(true);
   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ + จำมุมมองเริ่มต้นต่อผู้ใช้ (⭐)
   const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase", "calendar", "exec"] as const, "board");
@@ -379,7 +380,7 @@ function WorkBoardPageInner() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try { const res = await apiFetch("/api/mo/work-board"); const j = await res.json();
-      if (!j.error) { setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], pendingPiece: j.pending_piece ?? [] }); setLoadError(false); }
+      if (!j.error) { setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], dispatchedMos: j.dispatched_mos ?? [], pendingPiece: j.pending_piece ?? [] }); setLoadError(false); }
       else if (!silent) setLoadError(true);
     } catch { if (!silent) setLoadError(true); } finally { if (!silent) setLoading(false); }
   }, []);
@@ -1282,11 +1283,13 @@ function WorkBoardPageInner() {
       ) : viewMode === "calendar" ? (
         <BoardCalendar
           pending={board.pending}
+          extraMos={board.dispatchedMos}
           workOrders={board.workOrders}
+          departments={board.departments}
           canEdit={canEdit}
           moGroups={moGroups}
           groupOf={pendGroupOf}
-          onOpenMO={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }}
+          onOpenMO={(moId) => { const mo = [...board.pending, ...board.dispatchedMos].find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }}
           onOpenWO={(woId) => { const wo = board.workOrders.find((x) => x.id === woId); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
           onReload={() => load(true)}
         />

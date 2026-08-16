@@ -153,7 +153,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return { ...w, ...inf, mo_id: moIdByNo.get(moNo) ?? null, labor, central_rate: centralRateOf(moNo) };
   });
 
-  const pending = (mos ?? []).map((m: Record<string, unknown>) => {
+  const allMos = (mos ?? []).map((m: Record<string, unknown>) => {
     const qty = Number(m.qty) || 0;
     const dispatched = dispatchedByMo.get(String(m.mo_no)) ?? 0;
     const remaining = r2(Math.max(0, qty - dispatched));
@@ -168,7 +168,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // ใบที่แบ่งจำนวนตามไซส์ → จำนวนรวมมาจากผลบวกไซส์ แก้จำนวนตรง ๆ ไม่ได้ (ต้องแก้ที่หน้าใบสั่งผลิต)
       has_sizes: Array.isArray(m.size_breakdown) && (m.size_breakdown as unknown[]).length > 0,
       ...inf, labor: laborOfMo(String(m.mo_no)), central_rate: centralRateOf(String(m.mo_no)) };
-  }).filter((m) => m.remaining > 0.0001);   // ซ่อน MO ที่จ่ายครบแล้ว
+  });
+  const pending = allMos.filter((m) => m.remaining > 0.0001);   // การ์ดโซน "รอจ่าย" = ยังจ่ายไม่ครบ
+  // ใบที่จ่ายงานครบแล้วแต่ยังไม่ปิด — ไม่ใช่การ์ดรอจ่าย แต่ "ยังต้องส่งลูกค้า"
+  // → ปฏิทินนัดส่งลูกค้าต้องเห็นด้วย ไม่งั้นค้นหาใบพวกนี้ไม่เจอ (บั๊กที่เจอกับ CTL107-01)
+  const dispatchedMos = allMos.filter((m) => m.remaining <= 0.0001);
 
   // เช็กลิสต์วัตถุดิบจาก BOM ต่อใบ (ดึงมาแล้วในรอบ parallel ข้างบน: sumsRes/matsRes) — เตรียม=is_ready, ตัด=cut_done
   const prog = new Map<string, { prepTotal: number; prepDone: number; cutTotal: number; cutDone: number }>();
@@ -206,5 +210,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return { id: String(p.id), mo_no: moNo, job_name: (p.job_name as string) ?? "งานเหมา", rate: Number(p.rate) || 0, qty_per: Number(p.qty_per) || 1, qty: Number(p.total_qty) || 0, product_sku: mi.sku, product_name: mi.name, ...inf };
     });
 
-  return NextResponse.json({ departments, workOrders: enrichedWO, pending: pendingEnriched, pending_piece: pendingPiece, error: null });
+  return NextResponse.json({ departments, workOrders: enrichedWO, pending: pendingEnriched,
+    dispatched_mos: dispatchedMos, pending_piece: pendingPiece, error: null });
 }
