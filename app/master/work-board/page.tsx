@@ -1243,6 +1243,8 @@ function WorkBoardPageInner() {
           pending={board.pending}
           workOrders={board.workOrders}
           canEdit={canEdit}
+          moGroups={moGroups}
+          groupOf={pendGroupOf}
           onOpenMO={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }}
           onOpenWO={(woId) => { const wo = board.workOrders.find((x) => x.id === woId); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
           onReload={() => load(true)}

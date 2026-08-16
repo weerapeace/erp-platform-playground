@@ -22,22 +22,24 @@ import { HoverImage } from "@/components/hover-image";
 type CalMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; remaining: number; due_date: string | null; image_url: string | null;
-  brand?: string | null; ready?: boolean;
+  brand?: string | null; brand_oem?: boolean; ready?: boolean;
 };
 type CalWO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; due_date?: string | null; department_name?: string | null; assignee_name: string | null;
-  image_url?: string | null; status: string;
+  image_url?: string | null; status: string; brand?: string | null; brand_oem?: boolean;
 };
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const TH_DAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 
-export function BoardCalendar({ pending, workOrders, canEdit, onOpenMO, onOpenWO, onReload }: {
+export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf, onOpenMO, onOpenWO, onReload }: {
   pending: CalMO[];
   workOrders: CalWO[];
   canEdit: boolean;
+  moGroups: { name: string; mo_nos: string[] }[];
+  groupOf: (moNo: string) => string | null;
   onOpenMO: (moId: string) => void;
   onOpenWO: (woId: string) => void;
   onReload: () => void | Promise<void>;
@@ -47,23 +49,49 @@ export function BoardCalendar({ pending, workOrders, canEdit, onOpenMO, onOpenWO
   const [cursor, setCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState<{ kind: "mo" | "wo"; id: string; label: string } | null>(null);
+  const [search, setSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState("__all__");
+  const [brandFilter, setBrandFilter] = useState("__all__");
+  // นัดส่งลูกค้า: ปกติโชว์เฉพาะ "งานลูกค้า (OEM)" — ของแบรนด์เราเองไม่ใช่นัดส่งลูกค้า
+  // แต่บางทีก็ต้องส่งของแบรนด์เราไปขาย offline → กดสวิตช์นี้เพื่อโชว์เพิ่ม
+  const [showOwn, setShowOwn] = useState(false);
 
   const today = ymd(new Date());
 
   // ── รายการที่จะวางบนปฏิทิน (ตามโหมด) ──
-  type Item = { key: string; kind: "mo" | "wo"; id: string; date: string | null; sku: string | null; name: string | null; qty: number; img: string | null; sub: string };
-  const items: Item[] = useMemo(() => {
+  type Item = { key: string; kind: "mo" | "wo"; id: string; moNo: string; date: string | null; sku: string | null; name: string | null; qty: number; img: string | null; sub: string; brand: string | null; oem: boolean };
+  const allItems: Item[] = useMemo(() => {
     if (mode === "customer") {
       return pending.map((m) => ({
-        key: `mo:${m.id}`, kind: "mo" as const, id: m.id, date: m.due_date, sku: m.product_sku, name: m.product_name,
-        qty: m.remaining, img: m.image_url, sub: `${m.mo_no}${m.brand ? ` · ${m.brand}` : ""}`,
+        key: `mo:${m.id}`, kind: "mo" as const, id: m.id, moNo: m.mo_no, date: m.due_date, sku: m.product_sku, name: m.product_name,
+        qty: m.remaining, img: m.image_url, sub: `${m.mo_no}${m.brand ? ` · ${m.brand}` : ""}`, brand: m.brand ?? null, oem: !!m.brand_oem,
       }));
     }
     return workOrders.filter((w) => w.status !== "done").map((w) => ({
-      key: `wo:${w.id}`, kind: "wo" as const, id: w.id, date: w.due_date ?? null, sku: w.product_sku, name: w.product_name,
-      qty: w.qty, img: w.image_url ?? null, sub: `${w.department_name ?? "—"}${w.assignee_name ? ` · ${w.assignee_name}` : ""}`,
+      key: `wo:${w.id}`, kind: "wo" as const, id: w.id, moNo: w.mo_no, date: w.due_date ?? null, sku: w.product_sku, name: w.product_name,
+      qty: w.qty, img: w.image_url ?? null, sub: `${w.department_name ?? "—"}${w.assignee_name ? ` · ${w.assignee_name}` : ""}`, brand: w.brand ?? null, oem: !!w.brand_oem,
     }));
   }, [mode, pending, workOrders]);
+
+  const brandOptions = useMemo(() => [...new Set(allItems.map((i) => i.brand).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, "th")), [allItems]);
+  const ownCount = useMemo(() => (mode === "customer" ? allItems.filter((i) => !i.oem).length : 0), [allItems, mode]);
+
+  const items: Item[] = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return allItems.filter((i) => {
+      // นัดส่งลูกค้า = เฉพาะงาน OEM (รับจ้างผลิต) เว้นแต่กดโชว์แบรนด์เราเอง
+      if (mode === "customer" && !showOwn && !i.oem) return false;
+      if (groupFilter !== "__all__") {
+        const g = groupOf(i.moNo);
+        if (groupFilter === "__none__" ? g !== null : g !== groupFilter) return false;
+      }
+      if (brandFilter !== "__all__") {
+        if (brandFilter === "__none__" ? !!i.brand : i.brand !== brandFilter) return false;
+      }
+      if (q && !`${i.sku ?? ""} ${i.name ?? ""} ${i.moNo} ${i.sub}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [allItems, mode, showOwn, groupFilter, brandFilter, groupOf, search]);
 
   const byDate = useMemo(() => {
     const m = new Map<string, Item[]>();
@@ -132,6 +160,35 @@ export function BoardCalendar({ pending, workOrders, canEdit, onOpenMO, onOpenWO
           {mode === "customer" ? "วันกำหนดส่งของใบสั่งผลิต (ส่งลูกค้า)" : "วันกำหนดเสร็จของใบจ่ายงาน (ช่าง/โต๊ะ)"}
           {" · "}มีวันแล้ว {items.length - noDate.length} · ยังไม่กำหนด {noDate.length}
         </span>
+      </div>
+
+      {/* ค้นหา + กรอง */}
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 ค้นหา รหัส / ชื่อ / เลขใบ / โต๊ะ-ช่าง…"
+          className="h-8 px-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 min-w-[220px] flex-1 max-w-sm" />
+        {moGroups.length > 0 && (
+          <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} title="กรองตามกลุ่มงาน"
+            className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600">
+            <option value="__all__">🗂 ทุกกลุ่ม</option>
+            {moGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
+            <option value="__none__">— ยังไม่จับกลุ่ม —</option>
+          </select>
+        )}
+        {brandOptions.length > 0 && (
+          <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)} title="กรองตามแบรนด์"
+            className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600">
+            <option value="__all__">🏷 ทุกแบรนด์</option>
+            {brandOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+            <option value="__none__">— ไม่ระบุแบรนด์ —</option>
+          </select>
+        )}
+        {mode === "customer" && (
+          <label className={`flex items-center gap-1.5 h-8 px-2.5 text-[12px] rounded-lg border cursor-pointer ${showOwn ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600"}`}
+            title="ปกติปฏิทินนี้โชว์เฉพาะงานลูกค้า (OEM) — ติ๊กเพื่อโชว์ของแบรนด์เราเองด้วย (เช่น ส่งไปขาย offline)">
+            <input type="checkbox" checked={showOwn} onChange={(e) => setShowOwn(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+            🏷 รวมแบรนด์เราเอง{ownCount > 0 ? ` (${ownCount})` : ""}
+          </label>
+        )}
       </div>
 
       {/* ยังไม่กำหนดวัน — ลากไปวางบนวันได้ */}

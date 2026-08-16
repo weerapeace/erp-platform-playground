@@ -16,7 +16,8 @@ export const revalidate = 0;
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-type SkuInfo = { image_url: string | null; brand: string | null; brand_color: string | null; color: string | null };
+// brand_oem = แบรนด์นี้ตั้งไว้ว่าเป็นงาน OEM (รับจ้างผลิตให้ลูกค้า) — ใช้แยก "นัดส่งลูกค้า" ออกจากของแบรนด์เราเอง
+type SkuInfo = { image_url: string | null; brand: string | null; brand_color: string | null; brand_oem: boolean; color: string | null };
 
 /**
  * ดึงแถวของหลาย MO "ให้ครบจริง" — ไล่ทีละหน้า
@@ -50,12 +51,12 @@ async function skuInfoMap(admin: ReturnType<typeof supabaseAdmin>, skus: string[
   for (let i = 0; i < list.length; i += 300) chunks.push(list.slice(i, i + 300));
   const results = await Promise.all(chunks.map((chunk) =>
     admin.from("skus_v2")
-      .select("code, cover_image_r2_key, color_th, color, parent:parent_skus_v2!parent_sku_id ( brand:brands!brand_id ( name, color ) )")
+      .select("code, cover_image_r2_key, color_th, color, parent:parent_skus_v2!parent_sku_id ( brand:brands!brand_id ( name, color, pricing_mode ) )")
       .in("code", chunk)));
   for (const { data } of results) {
     for (const s of (data ?? []) as Record<string, unknown>[]) {
       const parent = (Array.isArray(s.parent) ? s.parent[0] : s.parent) as { brand?: unknown } | null;
-      const brand = (parent && (Array.isArray(parent.brand) ? parent.brand[0] : parent.brand)) as { name?: string; color?: string } | null;
+      const brand = (parent && (Array.isArray(parent.brand) ? parent.brand[0] : parent.brand)) as { name?: string; color?: string; pricing_mode?: string } | null;
       const key = s.cover_image_r2_key as string | null;
       // สี: ใช้ color_th ก่อน ถ้าไม่มีใช้ color (โชว์ต่อท้ายชื่อบนการ์ด)
       const colorTh = String(s.color_th ?? "").trim();
@@ -63,6 +64,7 @@ async function skuInfoMap(admin: ReturnType<typeof supabaseAdmin>, skus: string[
       map.set(String(s.code), {
         image_url: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
         brand: brand?.name ?? null, brand_color: brand?.color ?? null,
+        brand_oem: brand?.pricing_mode === "oem",
         color: colorTh || colorEn || null,
       });
     }
@@ -138,7 +140,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 
   const enrichedWO = workOrders.map((w) => {
-    const inf = info.get(String(w.product_sku)) ?? { image_url: null, brand: null, brand_color: null, color: null };
+    const inf = info.get(String(w.product_sku)) ?? { image_url: null, brand: null, brand_color: null, brand_oem: false, color: null };
     const moNo = String(w.mo_no);
     // ใบจ่ายงาน 1 ใบ = ส่วนแบ่งตามจำนวนของทั้งใบสั่งผลิต (กันนับซ้ำเมื่อ MO แตกหลายใบจ่ายงาน)
     const moQty = moQtyByNo.get(moNo) || dispatchedByMo.get(moNo) || (Number(w.qty) || 0);
@@ -155,7 +157,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const qty = Number(m.qty) || 0;
     const dispatched = dispatchedByMo.get(String(m.mo_no)) ?? 0;
     const remaining = r2(Math.max(0, qty - dispatched));
-    const inf = info.get(String(m.product_sku)) ?? { image_url: null, brand: null, brand_color: null, color: null };
+    const inf = info.get(String(m.product_sku)) ?? { image_url: null, brand: null, brand_color: null, brand_oem: false, color: null };
     return { id: String(m.id), mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
       qty, dispatched: r2(dispatched), remaining, due_date: m.due_date ?? null, status: m.status,
       prep_done: !!m.prep_done, cut_done: !!m.cut_done, bom_code: (m.bom_code as string) ?? null,
@@ -198,7 +200,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .map((p) => {
       const moNo = String(p.mo_no);
       const mi = moInfoByNo.get(moNo) ?? { sku: null, name: null };
-      const inf = (mi.sku && info.get(mi.sku)) || { image_url: null, brand: null, brand_color: null, color: null };
+      const inf = (mi.sku && info.get(mi.sku)) || { image_url: null, brand: null, brand_color: null, brand_oem: false, color: null };
       return { id: String(p.id), mo_no: moNo, job_name: (p.job_name as string) ?? "งานเหมา", rate: Number(p.rate) || 0, qty_per: Number(p.qty_per) || 1, qty: Number(p.total_qty) || 0, product_sku: mi.sku, product_name: mi.name, ...inf };
     });
 
