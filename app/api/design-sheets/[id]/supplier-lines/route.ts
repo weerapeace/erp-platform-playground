@@ -20,7 +20,7 @@ export const revalidate = 0;
 
 const COLS = `id, sheet_id, parent_code, item_name, supplier_id, supplier_name, source_url,
   price, currency, fx_rate, price_unit, pack_qty, qty, offer_price,
-  box_w_cm, box_l_cm, box_h_cm, ship_mode, ship_rate, freight_total, note, split_json, sort_order`;
+  box_w_cm, box_l_cm, box_h_cm, ship_mode, ship_rate, freight_total, note, split_json, in_total, sort_order`;
 
 const num = (v: unknown): number | null => (v == null || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null);
 const cleanSplits = (raw: unknown): ProfitSplit[] =>
@@ -75,6 +75,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     freight_total: num(l.freight_total),
     note: l.note?.trim() || null,
     split_json: cleanSplits(l.split_json),
+    in_total: l.in_total !== false,        // ไม่ส่งมา = นับรวม (ของเดิมทั้งหมด)
     sort_order: i + 1,
   }));
 

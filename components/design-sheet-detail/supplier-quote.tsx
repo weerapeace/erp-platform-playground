@@ -18,7 +18,7 @@ import { SupplierPicker, type SupplierPickerValue } from "@/components/pickers";
 import { MoneyInput } from "@/components/money-input";
 import { apiFetch } from "@/lib/api";
 import {
-  calcSupplierLine, sumSupplierLines, splitAmount, emptySupplierLine, fmtBaht, fmtNum,
+  calcSupplierLine, sumSupplierLines, splitAmount, emptySupplierLine, isInTotal, fmtBaht, fmtNum,
   DEFAULT_FREIGHT, DEFAULT_FX, type SupplierLine, type FreightRates, type ProfitSplit, type ShipMode,
 } from "@/lib/supplier-quote";
 import type { SupplierPriceRow } from "@/app/api/design-sheets/supplier-prices/route";
@@ -155,6 +155,14 @@ export function SupplierQuoteSection({ sheetId, parentCode, parentTabs, canEdit,
 
   // ── คอลัมน์ตาราง (ของกลาง LineItemsGrid) ───────────────────────────────
   const cols: LineColumn<Row>[] = [
+    // ติ๊กเลือกว่าจะเอาบรรทัดไหน "รวมยอด" (ไม่ติ๊ก = ยังเก็บไว้ในตาราง แต่ไม่นับในสรุป/ไม่ส่งใบเสนอราคา)
+    { key: "in_total", header: "รวม", width: 46, align: "center",
+      render: (r, u, ro) => (
+        <input type="checkbox" disabled={ro} checked={r.in_total !== false}
+          title={r.in_total !== false ? "นับรวมในยอดสรุป (ติ๊กออก = ไม่นับ)" : "ไม่นับในยอดสรุป — ติ๊กเพื่อนับรวม"}
+          onChange={(e) => u({ in_total: e.target.checked })}
+          className="h-4 w-4 cursor-pointer accent-violet-600" />
+      ) },
     { key: "item_name", header: "รายการ", width: 190, align: "left",
       render: (r, u, ro) => <input value={r.item_name ?? ""} disabled={ro} onChange={(e) => u({ item_name: e.target.value })}
         placeholder="ชื่อสินค้า" className="h-8 w-full rounded border border-slate-200 px-2 text-sm disabled:bg-slate-50" /> },
@@ -272,7 +280,7 @@ export function SupplierQuoteSection({ sheetId, parentCode, parentTabs, canEdit,
         )}
         {onSendToQuote && rows.length > 0 && (
           <button onClick={() => onSendToQuote(rows
-            .filter((r) => (Number(r.offer_price) || 0) > 0)
+            .filter((r) => isInTotal(r) && (Number(r.offer_price) || 0) > 0)   // ส่งเฉพาะรายการที่ติ๊กรวมยอดไว้
             .map((r) => ({ product_name: r.item_name?.trim() || "สินค้า", variation: r.supplier_name ? `ร้าน ${r.supplier_name}` : null, unit_price: Number(r.offer_price) || 0, qty: Math.max(1, Number(r.qty) || 1) })))}
             title="ส่ง 'ราคาที่จะเสนอ' ทุกรายการเข้าใบเสนอราคา (ตะกร้า)"
             className="h-8 rounded-lg border border-indigo-300 px-2.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50">🧾 ส่งไปใบเสนอราคา</button>
@@ -285,7 +293,19 @@ export function SupplierQuoteSection({ sheetId, parentCode, parentTabs, canEdit,
         )}
       </div>
 
-      {/* สรุปยอด */}
+      {/* สรุปยอด — นับเฉพาะบรรทัดที่ติ๊ก "รวม" ไว้ */}
+      {rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+          <span>รวมยอดจาก <b className="text-slate-700">{totals.lines}</b>/{totals.linesAll} รายการที่ติ๊กไว้</span>
+          <button type="button" disabled={!canEdit}
+            onClick={() => { setAll((list) => list.map((l) => (pkey(l.parent_code) === parentCode ? { ...l, in_total: true } : l))); markDirty(); }}
+            className="rounded border border-slate-200 bg-white px-2 py-0.5 hover:border-violet-300 disabled:opacity-40">ติ๊กทั้งหมด</button>
+          <button type="button" disabled={!canEdit}
+            onClick={() => { setAll((list) => list.map((l) => (pkey(l.parent_code) === parentCode ? { ...l, in_total: false } : l))); markDirty(); }}
+            className="rounded border border-slate-200 bg-white px-2 py-0.5 hover:border-violet-300 disabled:opacity-40">ล้างติ๊ก</button>
+          {totals.lines < totals.linesAll && <span className="text-amber-600">⚠ มี {totals.linesAll - totals.lines} รายการที่ไม่ถูกนับ (ยังเก็บไว้ในตาราง)</span>}
+        </div>
+      )}
       {rows.length > 0 && (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
           <Stat label="จำนวนรวม" value={`${fmtNum(totals.qty)} ชิ้น`} />

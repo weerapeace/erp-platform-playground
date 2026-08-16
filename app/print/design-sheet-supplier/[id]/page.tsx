@@ -44,7 +44,7 @@ function buildData(sheet: Sheet, lines: SupplierLine[], splits: ProfitSplit[], f
       const c = calcSupplierLine(l, fx, rates);
       const offer = Number(l.offer_price) || 0;
       return {
-        item_name: l.item_name ?? "—",
+        item_name: `${l.in_total === false ? "(ไม่รวมยอด) " : ""}${l.item_name ?? "—"}`,
         supplier_name: l.supplier_name ?? "—",
         price_src: `${fmtBaht(Number(l.price) || 0)} ${l.currency === "CNY" ? "¥" : "฿"}${l.price_unit === "pack" ? `/แพ็ค(${fmtNum(l.pack_qty ?? 1)})` : ""}`,
         price_baht: fmtBaht(c.priceBaht),
@@ -59,6 +59,7 @@ function buildData(sheet: Sheet, lines: SupplierLine[], splits: ProfitSplit[], f
       };
     }),
     no_lines: lines.length === 0,
+    counted_note: t.lines < t.linesAll ? `นับรวม ${t.lines}/${t.linesAll} รายการ (ที่ขึ้น "ไม่รวมยอด" ไม่ถูกนับ)` : "",
     total_qty: fmtNum(t.qty), total_cbm: t.cbm.toFixed(3),
     total_freight: `${fmtBaht(t.freight)} ฿`, total_cost: `${fmtBaht(t.cost)} ฿`,
     total_sale: `${fmtBaht(t.sale)} ฿`, total_profit: `${fmtBaht(t.profit)} ฿`,

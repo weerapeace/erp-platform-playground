@@ -75,6 +75,22 @@ describe("supplier-quote (ตีราคาสินค้าสั่งจา
     expect(t.profitAfterLine).toBeCloseTo(7182, 6);   // ฐานของการแบ่งทั้งใบ
   });
 
+  it("ติ๊ก 'รวมยอด' ออก = ไม่นับบรรทัดนั้นในสรุป (แต่ยังอยู่ในตาราง)", () => {
+    const a = base();
+    const b = base({ in_total: false, qty: 500, offer_price: 99 });
+    const t = sumSupplierLines([a, b], DEFAULT_FX, DEFAULT_FREIGHT);
+    expect(t.linesAll).toBe(2);
+    expect(t.lines).toBe(1);            // นับแค่บรรทัดที่ติ๊ก
+    expect(t.qty).toBe(1000);           // ไม่รวม 500 ของบรรทัดที่ไม่ติ๊ก
+    expect(t.sale).toBeCloseTo(35000, 6);
+  });
+
+  it("ไม่ระบุ in_total = นับรวม (ข้อมูลเก่าไม่กระทบ)", () => {
+    const t = sumSupplierLines([{ ...base(), in_total: undefined }], DEFAULT_FX, DEFAULT_FREIGHT);
+    expect(t.lines).toBe(1);
+    expect(t.qty).toBe(1000);
+  });
+
   it("รวมยอดหลายบรรทัด", () => {
     const t = sumSupplierLines([base(), base({ price: 12.8, qty: 300, offer_price: 149, box_w_cm: 16, box_l_cm: 16, box_h_cm: 9, ship_mode: "truck" })], DEFAULT_FX, DEFAULT_FREIGHT);
     expect(t.lines).toBe(2);

@@ -31,8 +31,13 @@ export type SupplierLine = {
   freight_total?: number | null; // snapshot (คำนวณใหม่ทุกครั้งที่เปิด)
   note?: string | null;
   split_json?: ProfitSplit[];    // แบ่งกำไรเฉพาะบรรทัดนี้
+  /** ติ๊กว่าบรรทัดนี้นับรวมในยอดสรุป/กำไร/ส่งใบเสนอราคาไหม (ไม่ระบุ = รวม) */
+  in_total?: boolean;
   sort_order?: number;
 };
+
+/** บรรทัดนี้นับรวมในยอดไหม (ค่าเริ่มต้น = รวม) */
+export const isInTotal = (l: SupplierLine) => l.in_total !== false;
 
 export type FreightRates = { truck: number; ship: number };
 export const DEFAULT_FREIGHT: FreightRates = { truck: 7000, ship: 3500 };
@@ -96,16 +101,19 @@ export function splitAmount(splits: ProfitSplit[], profitBase: number): number {
 }
 
 export type SupplierTotals = {
-  lines: number; qty: number; cbm: number;
+  lines: number;             // จำนวนบรรทัดที่นับรวม
+  linesAll: number;          // บรรทัดทั้งหมดในแท็บนี้ (รวมที่ไม่ได้ติ๊ก)
+  qty: number; cbm: number;
   freight: number; cost: number; sale: number;
   profit: number;            // กำไรรวมก่อนแบ่ง
   splitLine: number;         // แบ่งรายบรรทัดรวม
   profitAfterLine: number;   // กำไรหลังหักแบ่งรายบรรทัด (ฐานของการแบ่งทั้งใบ)
 };
 
-/** รวมทั้งชุด (ของแท็บ Parent ที่กำลังดู) */
-export function sumSupplierLines(lines: SupplierLine[], fx: number, rates: FreightRates): SupplierTotals {
-  const t: SupplierTotals = { lines: lines.length, qty: 0, cbm: 0, freight: 0, cost: 0, sale: 0, profit: 0, splitLine: 0, profitAfterLine: 0 };
+/** รวมทั้งชุด (ของแท็บ Parent ที่กำลังดู) — นับเฉพาะบรรทัดที่ติ๊ก "รวมยอด" ไว้ */
+export function sumSupplierLines(all: SupplierLine[], fx: number, rates: FreightRates): SupplierTotals {
+  const lines = all.filter(isInTotal);
+  const t: SupplierTotals = { lines: lines.length, linesAll: all.length, qty: 0, cbm: 0, freight: 0, cost: 0, sale: 0, profit: 0, splitLine: 0, profitAfterLine: 0 };
   for (const l of lines) {
     const c = calcSupplierLine(l, fx, rates);
     t.qty += Math.max(0, n(l.qty));
@@ -129,6 +137,6 @@ export function emptySupplierLine(parentCode: string | null, sortOrder = 0): Sup
     price: null, currency: "CNY", fx_rate: null, price_unit: "pcs", pack_qty: null,
     qty: null, offer_price: null,
     box_w_cm: null, box_l_cm: null, box_h_cm: null,
-    ship_mode: "ship", ship_rate: null, note: null, split_json: [], sort_order: sortOrder,
+    ship_mode: "ship", ship_rate: null, note: null, split_json: [], in_total: true, sort_order: sortOrder,
   };
 }
