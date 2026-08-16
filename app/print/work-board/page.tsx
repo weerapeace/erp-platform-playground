@@ -113,12 +113,14 @@ const TEMPLATE_PRODUCTION: ReportTemplate = {
     <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
   </div>`,
   body_html: `{{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
-  <table class="grp-rows">
-    <thead><tr><th>ช่าง</th><th>สินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง</th></tr></thead>
-    <tbody>{{#rows}}<tr><td>{{assignee}}</td><td><span class="mono">{{sku}}</span> · {{name}}</td><td class="r">{{qty}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
+  <table class="wb-t">
+    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th>ช่าง</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
+    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td>{{assignee}}</td><td class="r">{{qty}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
+    <tfoot><tr><td colspan="5">รวม {{g_count}} รายการ</td><td class="r">{{g_qty}}</td><td class="r"></td><td class="r">{{g_labor}}</td></tr></tfoot>
   </table>{{/groups}}
   {{#empty}}<div class="wb-empty">ไม่มีงานกำลังผลิต</div>{{/empty}}
-  {{#has_groups}}<div class="grp-head" style="margin-top:4mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมทั้งหมด</span><span class="grp-sum" style="color:#334155;">{{total_qty}} ชิ้น · ฿{{total_labor}}</span></div>{{/has_groups}}`,
+  {{#has_groups}}<div class="grp-head" style="margin-top:4mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมทั้งหมด</span><span class="grp-sum" style="color:#334155;">{{total_qty}} ชิ้น · ฿{{total_labor}}</span></div>
+  <div class="wb-note">ช่องว่าง = ยังไม่ใส่ค่าแรงของใบจ่ายงานนั้น (เขียนกรอกด้วยมือได้) · ค่าแรง/ชิ้น = ยอดรวม ÷ จำนวน</div>{{/has_groups}}`,
   footer_html: "", custom_css: COMMON_CSS,
 };
 
@@ -147,9 +149,10 @@ const TEMPLATE_ALL: ReportTemplate = {
 
   <div class="wb-sec">3) กำลังผลิต (ของจริง — แยกตามโต๊ะ/ช่าง)</div>
   {{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
-  <table class="grp-rows">
-    <thead><tr><th>ช่าง</th><th>สินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง</th></tr></thead>
-    <tbody>{{#rows}}<tr><td>{{assignee}}</td><td><span class="mono">{{sku}}</span> · {{name}}</td><td class="r">{{qty}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
+  <table class="wb-t">
+    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th>ช่าง</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
+    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td>{{assignee}}</td><td class="r">{{qty}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
+    <tfoot><tr><td colspan="5">รวม {{g_count}} รายการ</td><td class="r">{{g_qty}}</td><td class="r"></td><td class="r">{{g_labor}}</td></tr></tfoot>
   </table>{{/groups}}
   {{^has_groups}}<div class="wb-empty">ไม่มีงานกำลังผลิต</div>{{/has_groups}}
   {{#has_groups}}<div class="grp-head" style="margin-top:3mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมกำลังผลิต</span><span class="grp-sum" style="color:#334155;">{{prod_qty}} ชิ้น · ฿{{prod_labor}}</span></div>{{/has_groups}}
@@ -286,9 +289,19 @@ function WorkBoardPrintInner() {
         const gQty = list.reduce((a, w) => a + (w.qty || 0), 0);
         const gLabor = list.reduce((a, w) => a + (w.labor_cost || 0), 0);
         tQty += gQty; tLabor += gLabor;
-        return { dept, staff_html: staffHtmlOf(dept), g_qty: num(gQty), g_labor: money(gLabor),
-          rows: list.map((w) => ({ assignee: shortAssignee(w.assignee_name, w.assignee_id) || w.department_name || "—", sku: w.product_sku || "—", name: w.product_name || "—",
-            qty: num(w.qty || 0), labor_cell: (w.labor_cost != null && w.labor_cost > 0) ? money(w.labor_cost) : BLANK })) };
+        return { dept, staff_html: staffHtmlOf(dept), g_qty: num(gQty), g_labor: money(gLabor), g_count: list.length,
+          rows: list.map((w) => {
+            const qty = w.qty || 0;
+            const total = (w.labor_cost != null && w.labor_cost > 0) ? w.labor_cost : 0;
+            // ค่าแรง/ชิ้น ของจริง = ยอดรวมของใบจ่ายงาน ÷ จำนวน (ยังไม่ใส่ค่าแรง = เว้นช่องให้เขียนมือ)
+            const pp = total > 0 && qty > 0 ? total / qty : 0;
+            return {
+              img_cell: imgCell(w.image_url ?? null), mo_no: w.mo_no,
+              assignee: shortAssignee(w.assignee_name, w.assignee_id) || w.department_name || "—",
+              sku: w.product_sku || "—", name: w.product_name || "—",
+              qty: num(qty), rate_cell: pp > 0 ? money(pp) : BLANK, labor_cell: total > 0 ? money(total) : BLANK,
+            };
+          }) };
       });
       return { groups, count: wos.length, total_qty: num(tQty), total_labor: money(tLabor) };
     };
