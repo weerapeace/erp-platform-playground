@@ -24,6 +24,7 @@ import { SkuWizard } from "@/app/master/design-sheets/sku-wizard";
 import { BomFromCostWizard } from "./bom-from-cost-wizard";
 import { FabricCalcModal } from "./fabric-calc-modal";
 import { BomToCostWizard, type BomPulledLine } from "./bom-to-cost-wizard";
+import { SupplierQuoteSection } from "./supplier-quote";
 import { ToQuotationModal } from "@/app/master/design-sheets/to-quotation-modal";
 import { QuotationCartDrawer } from "@/app/master/design-sheets/quotation-cart-drawer";
 
@@ -401,6 +402,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const canView = usePermission("products.view");
   const canCreate = usePermission("products.create");
   const canEdit = usePermission("products.edit");
+  const canSeeCost = usePermission("products.cost.view");   // เห็นตัวเลขต้นทุน/กำไรของ Section สั่งจากร้าน (ผู้บริหาร/จัดซื้อ)
+  const [supplierDirty, setSupplierDirty] = useState(false); // Section สั่งจากร้าน มีแก้ค้างไหม (เตือนก่อนปิด)
+  const supplierSaveRef = useRef<(() => Promise<void>) | null>(null);   // ปุ่ม "บันทึกแล้วปิด" เรียกบันทึก Section นี้ได้ด้วย
   const { can, user } = useAuth();
   const toast = useToast();
 
@@ -711,14 +715,15 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   }, [clearPend, detailOnly, onDetailClose]);
   const requestClose = () => {
     if (saving) return;
-    if (costDirty) setCloseConfirm(true);
+    if (costDirty || supplierDirty) setCloseConfirm(true);   // ตีราคา หรือ ตีราคาสั่งจากร้าน มีแก้ค้าง
     else doClose();
   };
-  // "บันทึกแล้วปิด" — บันทึกตีราคาที่ค้าง แล้วปิด
+  // "บันทึกแล้วปิด" — บันทึกตีราคา + ตีราคาสั่งจากร้าน ที่ค้าง แล้วปิด
   const saveAndClose = async () => {
     setCloseSaving(true);
     try {
       if (costDirty) await saveCost();
+      if (supplierDirty) await supplierSaveRef.current?.();
       doClose();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setCloseSaving(false); }
@@ -2000,6 +2005,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   <span>ต้นทุนสินค้า (รวมทั้งหมด)</span><span className="tabular-nums">{fmtBaht(grandTotal)} ฿</span>
                 </div>
               </div>
+
+              {/* 🛒 Section: คำนวณจากซัพพลายเออร์ (สินค้าสั่งจากร้าน — ราคา+ค่าส่งตามคิว → กำไร → แบ่งกำไร) */}
+              {form?.id && (
+                <SupplierQuoteSection sheetId={form.id} parentCode={costParent} parentTabs={costParentTabs}
+                  canEdit={fullEdit} canSeeCost={canSeeCost}
+                  pushToast={(type, m) => (type === "error" ? toast.error(m) : type === "info" ? toast.info(m) : toast.success(m))}
+                  onDirtyChange={setSupplierDirty} saveRef={supplierSaveRef} />
+              )}
 
               {/* แถบยอดรวม + ปุ่ม — sticky ติดล่าง (เลื่อนตารางยาวแค่ไหนก็เห็นปุ่มเสมอ) */}
               <div className="sticky bottom-0 z-10 -mx-1 px-1 py-2 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">

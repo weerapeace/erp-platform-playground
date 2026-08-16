@@ -79,6 +79,7 @@ type PatchBody = {
   is_active?: boolean; parent_sku_code?: string | null; parent_sku_codes?: string[];
   cost_extra?: CostExtra[] | Record<string, CostExtra[]>;   // array (เดิม) หรือ object แยกตาม Parent (ข้อ 7)
   parent_sku_drafts?: string[];   // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
+  profit_splits?: Record<string, { name?: string; type?: string; value?: number; on?: boolean }[]>;   // แบ่งกำไรทั้งใบ (ต่อแท็บ Parent)
 };
 
 // sanitize ค่าใช้จ่ายเพิ่ม 1 ชุด (array ของ {label, amount})
@@ -155,6 +156,21 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
     patch.parent_sku_codes = codes;
     patch.parent_sku_code = codes[0] ?? null;   // เก็บตัวแรกไว้ด้วย (backward compat)
+  }
+
+  // แบ่งกำไรทั้งใบ (ต่อแท็บ Parent) — { "<parent_code|>": [{name,type:pct|amt,value,on}] }
+  if (body.profit_splits !== undefined) {
+    const out: Record<string, { name: string; type: "pct" | "amt"; value: number; on: boolean }[]> = {};
+    for (const [k, arr] of Object.entries(body.profit_splits ?? {})) {
+      const list = (Array.isArray(arr) ? arr : []).slice(0, 20).map((s) => ({
+        name: String(s?.name ?? "").slice(0, 120),
+        type: (s?.type === "amt" ? "amt" : "pct") as "pct" | "amt",
+        value: Number(s?.value) || 0,
+        on: s?.on !== false,
+      })).filter((s) => s.name || s.value);
+      if (list.length) out[String(k).slice(0, 120)] = list;
+    }
+    patch.profit_splits = out;
   }
 
   // ข้อ 6: ร่าง Parent (ชื่อล้วน) — ไม่เช็คซ้ำในระบบ (ยังไม่ใช่รหัสจริง) แค่ sanitize + dedupe
