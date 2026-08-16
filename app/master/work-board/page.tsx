@@ -32,6 +32,8 @@ import { useViewPref } from "@/lib/use-view-pref";
 import { PurchaseNeeds } from "./purchase-needs";
 import { DispatchShop } from "./dispatch-shop";
 import { ExecPlan, type ExecRow } from "./exec-plan";
+// มุมมองปฏิทิน (นัดส่งลูกค้า / นัดส่งงานภายใน) — โหลดตอนเปิดแท็บเท่านั้น
+const BoardCalendar = dynamicImport(() => import("./board-calendar").then((m) => m.BoardCalendar), { ssr: false });
 import { DeskShop } from "./desk-shop";
 import { BoardLineSettings } from "@/components/board-line-settings";
 import { RequestInboxButton } from "@/components/request-inbox";
@@ -213,7 +215,7 @@ function WorkBoardPageInner() {
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], pendingPiece: [] });
   const [loading, setLoading] = useState(true);
   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ + จำมุมมองเริ่มต้นต่อผู้ใช้ (⭐)
-  const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase", "exec"] as const, "board");
+  const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase", "calendar", "exec"] as const, "board");
   // ถ้าเคยตั้ง "แผนผู้บริหาร" เป็นค่าเริ่มต้นไว้ แล้วสิทธิ์ถูกถอดทีหลัง → ถอยกลับบอร์ดปกติ (ไม่ค้างหน้าว่าง)
   const viewMode = viewRaw === "exec" && !isAdmin ? "board" : viewRaw;
   const [shopMode, setShopMode] = useState<"dispatch" | "desk">("dispatch");   // มุมมองช้อป: รอจ่าย / งานในโต๊ะ
@@ -1142,6 +1144,7 @@ function WorkBoardPageInner() {
             <option value="table">▦ ตาราง</option>
             <option value="shop">🛒 ช้อปจ่ายงาน</option>
             <option value="purchase">📦 ขอซื้อ/เตรียม</option>
+            <option value="calendar">📅 ปฏิทิน</option>
             {/* แผนผู้บริหาร — เห็นเฉพาะแอดมิน (มีตัวเลขราคาขาย/ต้นทุน/กำไร) */}
             {isAdmin && <option value="exec">👔 แผนผู้บริหาร</option>}
           </select>
@@ -1235,6 +1238,15 @@ function WorkBoardPageInner() {
           <p className="text-slate-400 text-sm mt-1">เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา — ไม่ใช่ว่าไม่มีงาน</p>
           <button onClick={() => void load()} className="mt-4 h-9 px-4 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700">↻ ลองใหม่</button>
         </div>
+      ) : viewMode === "calendar" ? (
+        <BoardCalendar
+          pending={board.pending}
+          workOrders={board.workOrders}
+          canEdit={canEdit}
+          onOpenMO={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }}
+          onOpenWO={(woId) => { const wo = board.workOrders.find((x) => x.id === woId); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
+          onReload={() => load(true)}
+        />
       ) : viewMode === "exec" ? (
         <ExecPlan onOpenMO={(row: ExecRow) => {
           setClWO(null);
