@@ -35,6 +35,8 @@ import { DispatchShop } from "./dispatch-shop";
 import { ExecPlan, type ExecRow } from "./exec-plan";
 // มุมมองปฏิทิน (นัดส่งลูกค้า / นัดส่งงานภายใน) — โหลดตอนเปิดแท็บเท่านั้น
 const BoardCalendar = dynamicImport(() => import("./board-calendar").then((m) => m.BoardCalendar), { ssr: false });
+// สรุปค่าแรงรายเดือนแยกตามช่าง — โหลดตอนเปิดแท็บเท่านั้น
+const LaborSummary = dynamicImport(() => import("./labor-summary").then((m) => m.LaborSummary), { ssr: false });
 import { DeskShop } from "./desk-shop";
 import { BoardLineSettings } from "@/components/board-line-settings";
 import { RequestInboxButton } from "@/components/request-inbox";
@@ -220,7 +222,7 @@ function WorkBoardPageInner() {
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], dispatchedMos: [], deliveryPlans: [], pendingPiece: [] });
   const [loading, setLoading] = useState(true);
   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ + จำมุมมองเริ่มต้นต่อผู้ใช้ (⭐)
-  const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase", "calendar", "exec"] as const, "board");
+  const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase", "calendar", "labor", "exec"] as const, "board");
   // ถ้าเคยตั้ง "แผนผู้บริหาร" เป็นค่าเริ่มต้นไว้ แล้วสิทธิ์ถูกถอดทีหลัง → ถอยกลับบอร์ดปกติ (ไม่ค้างหน้าว่าง)
   const viewMode = viewRaw === "exec" && !isAdmin ? "board" : viewRaw;
   const [shopMode, setShopMode] = useState<"dispatch" | "desk">("dispatch");   // มุมมองช้อป: รอจ่าย / งานในโต๊ะ
@@ -1275,6 +1277,7 @@ function WorkBoardPageInner() {
             <option value="shop">🛒 ช้อปจ่ายงาน</option>
             <option value="purchase">📦 ขอซื้อ/เตรียม</option>
             <option value="calendar">📅 ปฏิทิน</option>
+            <option value="labor">💰 ค่าแรงรายเดือน</option>
             {/* แผนผู้บริหาร — เห็นเฉพาะแอดมิน (มีตัวเลขราคาขาย/ต้นทุน/กำไร) */}
             {isAdmin && <option value="exec">👔 แผนผู้บริหาร</option>}
           </select>
@@ -1382,6 +1385,8 @@ function WorkBoardPageInner() {
           onOpenWO={(woId) => { const wo = board.workOrders.find((x) => x.id === woId); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
           onReload={() => load(true)}
         />
+      ) : viewMode === "labor" ? (
+        <LaborSummary />
       ) : viewMode === "exec" ? (
         <ExecPlan onOpenMO={(row: ExecRow) => {
           setClWO(null);
@@ -2843,6 +2848,11 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
   const [dueOpen, setDueOpen] = useState(false);
   const [dueVal, setDueVal] = useState("");
   const [dueField, setDueField] = useState<"due" | "internal">("due");   // แก้วันไหน: นัดส่งลูกค้า / ส่งงานภายใน
+  // 💰 ใส่ค่าแรงให้ใบจ่ายงานหลายใบพร้อมกัน (ตารางล่าง)
+  const [woSel, setWoSel] = useState<Set<string>>(new Set());
+  const [woLaborOpen, setWoLaborOpen] = useState(false);
+  const [woLaborRate, setWoLaborRate] = useState("");
+  const [woLaborSaving, setWoLaborSaving] = useState(false);
   const [dueSaving, setDueSaving] = useState(false);
   const selMoNos = pending.filter((m) => sel.has(m.id)).map((m) => m.mo_no);
   // คลิกแถว/ชื่อ: ถ้ากำลังเลือกอยู่ (มีติ๊กแล้ว) → สลับติ๊ก (แบบ Gmail) · ถ้ายังไม่ติ๊กอะไร → เปิดรายละเอียด
@@ -2860,6 +2870,22 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setDueSaving(false); }
   }, [pending, sel, dueVal, dueField, toast, onReload]);
+
+  // ใส่ค่าแรง/ชิ้น ให้ใบจ่ายงานที่ติ๊กไว้ — ใบละ (ค่าแรง/ชิ้น × จำนวนของใบนั้น)
+  const selWos = wos.filter((w) => woSel.has(w.id));
+  const applyWoLabor = useCallback(async () => {
+    const ids = wos.filter((w) => woSel.has(w.id)).map((w) => w.id);
+    if (!ids.length) return;
+    setWoLaborSaving(true);
+    try {
+      const r = await apiFetch("/api/mo/work-orders/bulk-labor", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, rate_per_piece: woLaborRate.trim() === "" ? null : Number(woLaborRate) }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast.success(woLaborRate.trim() === "" ? `ล้างค่าแรงแล้ว ${j.updated} ใบ` : `ใส่ค่าแรง ฿${woLaborRate}/ชิ้น แล้ว ${j.updated} ใบ`);
+      setWoLaborOpen(false); setWoSel(new Set()); onReload?.();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setWoLaborSaving(false); }
+  }, [wos, woSel, woLaborRate, toast, onReload]);
   // กลุ่มใบสั่งผลิต (สำหรับคอลัมน์ "กลุ่ม" + จัดกลุ่มตามกลุ่ม)
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
@@ -2891,6 +2917,11 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
     { key: "qty", header: "จำนวน", width: "5rem", align: "right", sortValue: (w) => w.qty, sortLabel: "จำนวน", cell: (w) => <span className="tabular-nums">{fmt(w.qty)}</span> },
     { key: "recv", header: "รับคืน", width: "5rem", align: "right", cell: (w) => <span className="tabular-nums text-slate-500">{fmt(w.received_qty)}</span> },
     { key: "due", header: "กำหนดเสร็จ", width: "minmax(9rem,1fr)", sortValue: (w) => w.due_date ?? "9999", sortLabel: "กำหนดเสร็จ", cell: (w) => <DueCell d={w.due_date} /> },
+    // ค่าแรง/ชิ้น ของจริง = ยอดค่าแรงใบนั้น ÷ จำนวน · ยังไม่ใส่ = ขึ้นเตือนสีส้ม
+    { key: "rate", header: "ค่าแรง/ชิ้น", width: "7rem", align: "right", sortValue: (w) => ((w.labor_cost ?? 0) > 0 && w.qty > 0 ? (w.labor_cost as number) / w.qty : -1), sortLabel: "ค่าแรง/ชิ้น",
+      cell: (w) => ((w.labor_cost ?? 0) > 0 && w.qty > 0)
+        ? <span className="tabular-nums text-slate-600">฿{fmt(Math.round(((w.labor_cost as number) / w.qty) * 100) / 100)}</span>
+        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 whitespace-nowrap">ยังไม่ใส่</span> },
     { key: "status", header: "สถานะ", width: "7rem", align: "center", sortValue: (w) => (WO_STATUS[w.status]?.label ?? w.status), sortLabel: "สถานะ", cell: (w) => { const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched; return <span className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap ${st.cls}`}>{st.label}</span>; } },
   ];
 
@@ -2942,19 +2973,48 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
       )}
       <MiniTable
         key={`wo-${woGroup}`}
-        rows={wos} rowKey={(w) => w.id} columns={woCols} onRowClick={onOpenWO}
+        rows={wos} rowKey={(w) => w.id} columns={woCols}
+        onRowClick={(w) => { if (woSel.size > 0) setWoSel((prev) => { const n = new Set(prev); n.has(w.id) ? n.delete(w.id) : n.add(w.id); return n; }); else onOpenWO(w); }}
         title="🛠 จ่ายแล้ว — กำลังผลิต" countUnit="ใบ"
-        actions={<select value={woGroup} onChange={(e) => setWoGroup(e.target.value as "none" | "group" | "status")} className={grpSelectCls} title="จัดกลุ่มตาราง">
-          <option value="none">ไม่จัดกลุ่ม</option>
-          <option value="group">จัดกลุ่มตามกลุ่ม</option>
-          <option value="status">จัดกลุ่มตามสถานะ</option>
-        </select>}
+        selectable selected={woSel} onSelectedChange={setWoSel}
+        actions={<div className="flex items-center gap-2">
+          <select value={woGroup} onChange={(e) => setWoGroup(e.target.value as "none" | "group" | "status")} className={grpSelectCls} title="จัดกลุ่มตาราง">
+            <option value="none">ไม่จัดกลุ่ม</option>
+            <option value="group">จัดกลุ่มตามกลุ่ม</option>
+            <option value="status">จัดกลุ่มตามสถานะ</option>
+          </select>
+          {selWos.length > 0 && (
+            <button onClick={() => setWoLaborOpen(true)} className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">💰 ใส่ค่าแรง ({selWos.length})</button>
+          )}
+        </div>}
         searchText={(w) => `${w.product_sku ?? ""} ${w.product_name ?? ""} ${w.wo_no} ${w.department_name ?? ""} ${w.assignee_name ?? ""}`}
         searchPlaceholder="ค้นหา สินค้า / ใบจ่ายงาน / แผนก"
         groupBy={woGroup === "group" ? (w) => groupNameOf(w.mo_no) ?? "— ยังไม่จับกลุ่ม —" : woGroup === "status" ? (w) => (WO_STATUS[w.status]?.label ?? w.status) : undefined}
         groupLabel={woGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : "จัดกลุ่มตามสถานะ"} defaultGrouped={woGroup !== "none"}
         emptyText="ยังไม่มีงานที่จ่าย"
       />
+      {woLaborOpen && (() => {
+        const rate = Number(woLaborRate) || 0;
+        const totalQty = selWos.reduce((n, w) => n + (w.qty || 0), 0);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setWoLaborOpen(false)}>
+            <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-base font-bold text-slate-800">💰 ใส่ค่าแรงให้ใบจ่ายงาน</h3>
+              <p className="mt-0.5 mb-3 text-xs text-slate-500">เลือกไว้ <b>{selWos.length}</b> ใบ · รวม {fmt(totalQty)} ชิ้น — แต่ละใบจะได้ (ค่าแรง/ชิ้น × จำนวนของใบนั้น)</p>
+              <label className="block text-[11px] text-slate-500">ค่าแรง/ชิ้น (บาท)</label>
+              <input type="number" min={0} step="any" value={woLaborRate} onChange={(e) => setWoLaborRate(e.target.value)} autoFocus placeholder="เช่น 55"
+                className="mt-0.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              {rate > 0 && <p className="mt-1.5 text-[11px] text-slate-500">รวมทั้งหมดประมาณ <b className="text-slate-700">฿{fmt(rate * totalQty)}</b></p>}
+              <button onClick={() => setWoLaborRate("")} className="mt-1.5 text-[11px] text-slate-400 underline hover:text-slate-600">ล้างค่าแรง (ตั้งเป็นยังไม่ใส่)</button>
+              <div className="mt-4 flex justify-end gap-2">
+                <button onClick={() => setWoLaborOpen(false)} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+                <button onClick={() => void applyWoLabor()} disabled={woLaborSaving} className="h-9 rounded-lg bg-indigo-600 px-5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">{woLaborSaving ? "กำลังบันทึก…" : "บันทึก"}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 }

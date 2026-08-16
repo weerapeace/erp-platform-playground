@@ -77,13 +77,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   const woNo = await nextWoNo(admin);
+
+  /**
+   * ค่าแรงของใบจ่ายงาน — ถ้าฝั่งที่จ่ายไม่ได้ส่งมา ให้เติมให้อัตโนมัติ
+   * เดิม: จ่ายงานแล้วค่าแรงว่าง ต้องไล่ตามใส่ทีหลังเป็นสิบ ๆ ใบ
+   * ลำดับที่ใช้: ค่าแรง/ชิ้นที่วางแผนไว้ในใบสั่งผลิต (est_labor_cost ÷ จำนวนทั้งใบ)
+   *              ถ้าใบสั่งผลิตยังไม่ตั้ง → ราคากลาง/ชิ้น จาก BOM ของสินค้านั้น
+   */
+  let laborCost: number | null = body.labor_cost != null ? num(body.labor_cost) : null;
+  if (laborCost == null) {
+    const { data: moRow } = await admin.from("manufacturing_orders")
+      .select("qty, est_labor_cost, bom_code").eq("mo_no", body.mo_no).maybeSingle();
+    const moQty = Number(moRow?.qty) || 0;
+    const est = Number(moRow?.est_labor_cost) || 0;
+    let perPiece = moQty > 0 && est > 0 ? est / moQty : 0;
+    if (perPiece <= 0 && moRow?.bom_code) {
+      const { data: rate } = await admin.from("bom_labor_rates").select("rate")
+        .eq("bom_code", moRow.bom_code).is("craftsman_id", null)
+        .eq("is_current", true).eq("is_active", true).maybeSingle();
+      perPiece = Number(rate?.rate) || 0;
+    }
+    if (perPiece > 0) laborCost = Math.round(perPiece * qty * 100) / 100;
+  }
+
   const { data: wo, error } = await admin.from("mo_work_orders").insert({
     wo_no: woNo, mo_no: body.mo_no, product_sku: body.product_sku ?? null, product_name: body.product_name ?? null,
     stage: body.stage || "cut", assignee_type: body.assignee_type || "craftsman",
     assignee_id: body.assignee_id ?? null, assignee_name: body.assignee_name ?? null,
     department_id: body.department_id ?? null, department_name: body.department_name ?? null,
     qty, uom: body.uom ?? null, received_qty: 0,
-    labor_cost: body.labor_cost != null ? num(body.labor_cost) : null,
+    labor_cost: laborCost,
     dispatch_date: body.dispatch_date || new Date().toISOString().slice(0, 10),
     due_date: body.due_date || null, status: "dispatched", note: body.note ?? null,
     created_by: user.id, is_active: true,
