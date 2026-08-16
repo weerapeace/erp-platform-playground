@@ -111,9 +111,10 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
    * หารูปปกให้เล่มที่ยังไม่มีปก — ยิงทีละเล่ม (ไม่ยิงรัวพร้อมกัน กันโดนจำกัดจาก Google
    * และไม่ให้เซิร์ฟเวอร์ทำงานเกินเวลา) · โชว์ความคืบหน้า · หยุดทันทีถ้าติดปัญหาการตั้งค่า
    */
-  const findCovers = useCallback(async () => {
-    const targets = books.filter((b) => !b.cover_r2_key);
+  const findCovers = useCallback(async (all = false) => {
+    const targets = all ? books : books.filter((b) => !b.cover_r2_key);
     if (targets.length === 0) { toast.info("ทุกเล่มมีรูปปกแล้ว"); return; }
+    if (all && !confirm(`หาปกใหม่ทั้งหมด ${targets.length} เล่ม — ปกเดิมที่ผิดจะถูกทับ (เล่มที่หาไม่เจอจะคงปกเดิมไว้)\n\nยืนยัน?`)) return;
     setCoverJob({ done: 0, total: targets.length });
     let found = 0;
     for (let i = 0; i < targets.length; i++) {
@@ -186,10 +187,17 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
           {canEdit && (
             <>
               {books.some((b) => !b.cover_r2_key) && (
-                <button onClick={findCovers} disabled={!!coverJob}
+                <button onClick={() => findCovers(false)} disabled={!!coverJob}
                   title="ค้นรูปปกจาก Google Books ให้เล่มที่ยังไม่มีปก"
                   className="h-9 px-4 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">
                   {coverJob ? `🖼 กำลังหา ${coverJob.done}/${coverJob.total}…` : "🖼 หารูปปกให้"}
+                </button>
+              )}
+              {books.some((b) => b.cover_r2_key) && (
+                <button onClick={() => findCovers(true)} disabled={!!coverJob}
+                  title="ค้นใหม่ทุกเล่ม ทับปกเดิม (ใช้เมื่อปกที่ได้มาผิด)"
+                  className="h-9 px-4 text-sm font-medium rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">
+                  {coverJob ? `🔄 ${coverJob.done}/${coverJob.total}…` : "🔄 หาปกใหม่ทั้งหมด"}
                 </button>
               )}
               <button onClick={() => setSeriesOpen(true)}
