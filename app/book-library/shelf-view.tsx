@@ -15,6 +15,7 @@ import { usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { getStatusStyle } from "@/lib/status-config";
+import { ImportMailModal } from "./import-mail-modal";
 
 const MasterRecordDrawer = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterRecordDrawer),
@@ -85,6 +86,7 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
   const [status, setStatus] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [mailOpen, setMailOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -151,8 +153,12 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
             <button className="h-8 px-3 text-sm rounded-md bg-slate-800 text-white font-medium">📚 ชั้นหนังสือ</button>
           </div>
           {canEdit && (
-            <button onClick={() => setCreating(true)}
-              className="h-9 px-4 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">+ เพิ่มเล่ม</button>
+            <>
+              <button onClick={() => setMailOpen(true)}
+                className="h-9 px-4 text-sm font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">📧 จากอีเมล</button>
+              <button onClick={() => setCreating(true)}
+                className="h-9 px-4 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">+ เพิ่มเล่ม</button>
+            </>
           )}
         </div>
 
@@ -219,6 +225,8 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
           </div>
         )}
       </div>
+
+      <ImportMailModal open={mailOpen} onClose={() => setMailOpen(false)} onImported={load} />
 
       {(openId || creating) && (
         <MasterRecordDrawer

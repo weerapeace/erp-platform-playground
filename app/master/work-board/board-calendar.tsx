@@ -5,6 +5,7 @@
  *
  *  1) 📦 นัดส่งลูกค้า  = วันกำหนดส่งของ "ใบสั่งผลิต" (manufacturing_orders.due_date)
  *  2) 🪑 นัดส่งงาน (ภายใน) = วันกำหนดเสร็จของ "ใบจ่ายงาน" ที่จ่ายให้โต๊ะ/ช่าง (mo_work_orders.due_date)
+ *     + ใบสั่งผลิตที่ยังไม่ได้จ่ายงาน ใช้ manufacturing_orders.internal_due_date (ตั้งวันล่วงหน้าได้)
  *
  * ทำอะไรได้:
  *  - ดูเป็นเดือน · เลื่อนเดือน · กดวันนี้ · นับงาน/ชิ้นต่อวัน
@@ -21,7 +22,7 @@ import { HoverImage } from "@/components/hover-image";
 
 type CalMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
-  qty: number; remaining: number; due_date: string | null; image_url: string | null;
+  qty: number; remaining: number; due_date: string | null; internal_due_date?: string | null; image_url: string | null;
   brand?: string | null; brand_oem?: boolean; ready?: boolean;
 };
 type CalWO = {
@@ -48,10 +49,11 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
   const [mode, setMode] = useState<"customer" | "internal">("customer");
   const [cursor, setCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [busy, setBusy] = useState(false);
-  const [drag, setDrag] = useState<{ kind: "mo" | "wo"; id: string; label: string } | null>(null);
+  const [drag, setDrag] = useState<{ kind: "mo" | "wo"; field: "due" | "internal"; id: string; label: string } | null>(null);
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("__all__");
   const [brandFilter, setBrandFilter] = useState("__all__");
+  const [deskFilter, setDeskFilter] = useState("__all__");   // กรองตามโต๊ะ/แผนก
   // นัดส่งลูกค้า: ปกติโชว์เฉพาะ "งานลูกค้า (OEM)" — ของแบรนด์เราเองไม่ใช่นัดส่งลูกค้า
   // แต่บางทีก็ต้องส่งของแบรนด์เราไปขาย offline → กดสวิตช์นี้เพื่อโชว์เพิ่ม
   const [showOwn, setShowOwn] = useState(false);
@@ -59,21 +61,45 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
   const today = ymd(new Date());
 
   // ── รายการที่จะวางบนปฏิทิน (ตามโหมด) ──
-  type Item = { key: string; kind: "mo" | "wo"; id: string; moNo: string; date: string | null; sku: string | null; name: string | null; qty: number; img: string | null; sub: string; brand: string | null; oem: boolean };
+  // field = วันที่กำลังแก้ ("due" = นัดส่งลูกค้า · "internal" = ส่งงานภายใน) · desk = โต๊ะ/แผนกที่งานอยู่
+  type Item = { key: string; kind: "mo" | "wo"; field: "due" | "internal"; id: string; moNo: string; date: string | null; sku: string | null; name: string | null; qty: number; img: string | null; sub: string; brand: string | null; oem: boolean; desk: string | null };
+
+  // ใบสั่งผลิตใบไหนอยู่โต๊ะไหนบ้าง (จากใบจ่ายงานที่ยังไม่ยกเลิก) — ใช้กรองโต๊ะในโหมดนัดส่งลูกค้า
+  const desksByMo = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const w of workOrders) {
+      if (w.status === "cancelled" || !w.department_name) continue;
+      const arr = m.get(w.mo_no) ?? []; if (!arr.includes(w.department_name)) arr.push(w.department_name);
+      m.set(w.mo_no, arr);
+    }
+    return m;
+  }, [workOrders]);
+  const dispatchedMoNos = useMemo(() => new Set(workOrders.filter((w) => w.status !== "cancelled").map((w) => w.mo_no)), [workOrders]);
+
   const allItems: Item[] = useMemo(() => {
     if (mode === "customer") {
       return pending.map((m) => ({
-        key: `mo:${m.id}`, kind: "mo" as const, id: m.id, moNo: m.mo_no, date: m.due_date, sku: m.product_sku, name: m.product_name,
+        key: `mo:${m.id}`, kind: "mo" as const, field: "due" as const, id: m.id, moNo: m.mo_no, date: m.due_date, sku: m.product_sku, name: m.product_name,
         qty: m.remaining, img: m.image_url, sub: `${m.mo_no}${m.brand ? ` · ${m.brand}` : ""}`, brand: m.brand ?? null, oem: !!m.brand_oem,
+        desk: (desksByMo.get(m.mo_no) ?? [])[0] ?? null,
       }));
     }
-    return workOrders.filter((w) => w.status !== "done").map((w) => ({
-      key: `wo:${w.id}`, kind: "wo" as const, id: w.id, moNo: w.mo_no, date: w.due_date ?? null, sku: w.product_sku, name: w.product_name,
+    // ภายใน = ใบจ่ายงานที่ยังทำอยู่ + ใบสั่งผลิตที่ยังไม่ได้จ่ายงานเลย (ตั้งวันภายในล่วงหน้าได้)
+    const woItems = workOrders.filter((w) => w.status !== "done").map((w) => ({
+      key: `wo:${w.id}`, kind: "wo" as const, field: "internal" as const, id: w.id, moNo: w.mo_no, date: w.due_date ?? null, sku: w.product_sku, name: w.product_name,
       qty: w.qty, img: w.image_url ?? null, sub: `${w.department_name ?? "—"}${w.assignee_name ? ` · ${w.assignee_name}` : ""}`, brand: w.brand ?? null, oem: !!w.brand_oem,
+      desk: w.department_name ?? null,
     }));
-  }, [mode, pending, workOrders]);
+    const moItems = pending.filter((m) => !dispatchedMoNos.has(m.mo_no)).map((m) => ({
+      key: `moi:${m.id}`, kind: "mo" as const, field: "internal" as const, id: m.id, moNo: m.mo_no, date: m.internal_due_date ?? null, sku: m.product_sku, name: m.product_name,
+      qty: m.remaining, img: m.image_url, sub: `ยังไม่จ่ายงาน · ${m.mo_no}`, brand: m.brand ?? null, oem: !!m.brand_oem,
+      desk: null,
+    }));
+    return [...woItems, ...moItems];
+  }, [mode, pending, workOrders, desksByMo, dispatchedMoNos]);
 
   const brandOptions = useMemo(() => [...new Set(allItems.map((i) => i.brand).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, "th")), [allItems]);
+  const deskOptions = useMemo(() => [...new Set(allItems.map((i) => i.desk).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, "th")), [allItems]);
   const ownCount = useMemo(() => (mode === "customer" ? allItems.filter((i) => !i.oem).length : 0), [allItems, mode]);
 
   const items: Item[] = useMemo(() => {
@@ -88,10 +114,15 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
       if (brandFilter !== "__all__") {
         if (brandFilter === "__none__" ? !!i.brand : i.brand !== brandFilter) return false;
       }
+      if (deskFilter !== "__all__") {
+        // โหมดลูกค้า: 1 ใบอาจอยู่หลายโต๊ะ → เทียบทั้งชุด · โหมดภายใน: เทียบโต๊ะของใบจ่ายงานนั้น
+        const desks = mode === "customer" ? (desksByMo.get(i.moNo) ?? []) : (i.desk ? [i.desk] : []);
+        if (deskFilter === "__none__" ? desks.length > 0 : !desks.includes(deskFilter)) return false;
+      }
       if (q && !`${i.sku ?? ""} ${i.name ?? ""} ${i.moNo} ${i.sub}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [allItems, mode, showOwn, groupFilter, brandFilter, groupOf, search]);
+  }, [allItems, mode, showOwn, groupFilter, brandFilter, deskFilter, desksByMo, groupOf, search]);
 
   const byDate = useMemo(() => {
     const m = new Map<string, Item[]>();
@@ -111,12 +142,13 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
   const inMonth = (d: Date) => d.getMonth() === cursor.getMonth();
 
   // ── ตั้ง/ล้างวัน ──
-  const setDate = async (it: { kind: "mo" | "wo"; id: string; label: string }, date: string | null) => {
+  const setDate = async (it: { kind: "mo" | "wo"; field: "due" | "internal"; id: string; label: string }, date: string | null) => {
     if (!canEdit) return;
     setBusy(true);
     try {
       const res = it.kind === "mo"
-        ? await apiFetch("/api/mo/set-due-date", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: it.id, due_date: date }) })
+        ? await apiFetch("/api/mo/set-due-date", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(it.field === "internal" ? { id: it.id, internal_due_date: date } : { id: it.id, due_date: date }) })
         : await apiFetch(`/api/mo/work-orders/${encodeURIComponent(it.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ due_date: date }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(date ? `ตั้งวัน ${it.label} → ${new Date(date + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" })}` : `ล้างวันของ ${it.label} แล้ว`);
@@ -128,7 +160,7 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
   const chip = (it: Item, compact = false) => (
     <div key={it.key}
       draggable={canEdit}
-      onDragStart={() => setDrag({ kind: it.kind, id: it.id, label: it.sku ?? it.sub })}
+      onDragStart={() => setDrag({ kind: it.kind, field: it.field, id: it.id, label: it.sku ?? it.sub })}
       onDragEnd={() => setDrag(null)}
       onClick={() => (it.kind === "mo" ? onOpenMO(it.id) : onOpenWO(it.id))}
       title={`${it.sku ?? ""} ${it.name ?? ""}\n${it.sub}\n${fmt(it.qty)} ชิ้น${canEdit ? "\n(ลากไปวางวันอื่นเพื่อเลื่อนวัน)" : ""}`}
@@ -157,7 +189,7 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
           <button onClick={() => { const d = new Date(); setCursor(new Date(d.getFullYear(), d.getMonth(), 1)); }} className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50">วันนี้</button>
         </div>
         <span className="text-[11px] text-slate-500">
-          {mode === "customer" ? "วันกำหนดส่งของใบสั่งผลิต (ส่งลูกค้า)" : "วันกำหนดเสร็จของใบจ่ายงาน (ช่าง/โต๊ะ)"}
+          {mode === "customer" ? "วันกำหนดส่งของใบสั่งผลิต (ส่งลูกค้า)" : "วันที่ช่าง/โต๊ะต้องทำเสร็จ (รวมใบที่ยังไม่จ่ายงาน)"}
           {" · "}มีวันแล้ว {items.length - noDate.length} · ยังไม่กำหนด {noDate.length}
         </span>
       </div>
@@ -180,6 +212,14 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
             <option value="__all__">🏷 ทุกแบรนด์</option>
             {brandOptions.map((b) => <option key={b} value={b}>{b}</option>)}
             <option value="__none__">— ไม่ระบุแบรนด์ —</option>
+          </select>
+        )}
+        {deskOptions.length > 0 && (
+          <select value={deskFilter} onChange={(e) => setDeskFilter(e.target.value)} title="กรองตามโต๊ะ/แผนก"
+            className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600">
+            <option value="__all__">🪑 ทุกโต๊ะ</option>
+            {deskOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+            <option value="__none__">— ยังไม่จ่ายงาน —</option>
           </select>
         )}
         {mode === "customer" && (

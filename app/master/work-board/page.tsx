@@ -59,6 +59,7 @@ type Labor = { prod_plan: number; prod_actual: number; piece_plan: number; piece
 type PendingMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; dispatched: number; remaining: number; due_date: string | null; status: string;
+  internal_due_date?: string | null;   // 🪑 กำหนดส่งงานภายใน (ช่าง/โต๊ะต้องเสร็จ) — คนละอันกับ due_date ที่เป็นนัดส่งลูกค้า
   image_url: string | null; brand: string | null; brand_color: string | null; color?: string | null;
   prep_done: boolean; cut_done: boolean;
   // Phase 2: เช็กลิสต์วัตถุดิบจาก BOM
@@ -340,6 +341,12 @@ function WorkBoardPageInner() {
   const [estEditing, setEstEditing] = useState(false);
   const estLaborInit = useRef("");                            // ค่าแรงเดิมตอนเปิดป๊อป (ไว้กด "ยกเลิก" คืนค่า)        // ค่าแรง/ชิ้น: มีค่าแล้ว = อ่านอย่างเดียว ต้องกด ✏️ ก่อนแก้
   const [moQty, setMoQty] = useState("");                     // จำนวนสั่งผลิต (แก้ได้ในป๊อปเช็กลิสต์)
+  // 📅 วันกำหนด 2 อันของใบสั่งผลิต — แก้ได้จากป๊อปเช็กลิสต์เลย (เดิมต้องไปหน้าใบสั่งผลิต/ลากในปฏิทิน)
+  const [moDue, setMoDue] = useState("");                     // 📦 นัดส่งลูกค้า
+  const [moDueInt, setMoDueInt] = useState("");               // 🪑 ส่งงานภายใน
+  const [moDueSaving, setMoDueSaving] = useState<"" | "due" | "internal">("");
+  const [woDue, setWoDue] = useState("");                     // กำหนดเสร็จของ "ใบจ่ายงาน" ใบนี้
+  const [woDueSaving, setWoDueSaving] = useState(false);
   const [qtySaving, setQtySaving] = useState(false);
   // ปกติจำนวนเป็น "อ่านอย่างเดียว" — ต้องกดปุ่ม ✏️ ก่อนถึงจะพิมพ์แก้ได้ (กันเผลอพิมพ์ทับ = สูตรกางใหม่ทั้งใบ)
   const [qtyEditing, setQtyEditing] = useState(false);
@@ -515,7 +522,7 @@ function WorkBoardPageInner() {
 
   // เปิด popup จ่ายงาน (ตั้งค่าเริ่มต้นจาก MO)
   const openDispatch = useCallback((mo: PendingMO, dept: Dept | null) => {
-    setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? "");
+    setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.internal_due_date ?? mo.due_date ?? "");
     setDispRates([]); setDispLaborRate(""); setDefectListOpen(false);
     // ดึงค่าแรง/ชิ้น จาก BOM ของสินค้านี้ (ราคากลาง + รายช่าง) → ใช้ตั้ง default
     if (mo.bom_code) void (async () => {
@@ -624,7 +631,7 @@ function WorkBoardPageInner() {
   // เปิดป๊อปอัปเช็กลิสต์จากใบจ่ายงาน (มีแท็บ "รับงานคืน" เป็นแท็บแรก) — ถ้าไม่รู้ MO id ใช้ป๊อปอัปเดิม
   const openWO = (wo: WorkOrder) => {
     if (!wo.mo_id) { setDetailWO(wo); setRecvLabor(wo.labor_cost != null ? String(wo.labor_cost) : ""); setSaveLaborBom(false); return; }
-    setClWO(wo); setClTab("recv");
+    setClWO(wo); setClTab("recv"); setWoDue((wo.due_date ?? "").slice(0, 10));
     setRecvLabor(wo.labor_cost != null ? String(wo.labor_cost) : ""); setSaveLaborBom(false);
     setChecklistMO({
       id: wo.mo_id, mo_no: wo.mo_no, product_sku: wo.product_sku, product_name: wo.product_name,
@@ -663,7 +670,7 @@ function WorkBoardPageInner() {
         body: JSON.stringify({ mo_no: mo.mo_no, product_sku: mo.product_sku, product_name: mo.product_name,
           stage: stageOfDept(dept.name), department_id: dept.id, department_name: dept.name,
           assignee_type: "department", assignee_id: null, assignee_name: dept.name,
-          qty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: mo.due_date ?? null,
+          qty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: mo.internal_due_date ?? mo.due_date ?? null,
           note: `จากใบสั่งผลิต ${mo.mo_no}`, labor_cost: ratePerUnit > 0 ? ratePerUnit * qty : null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(`จ่ายเข้า ${dept.name}: ${fmt(qty)} ชิ้น`);
@@ -808,8 +815,10 @@ function WorkBoardPageInner() {
     setDelArmed(false); setClTab(clWO ? "recv" : "prep");
     setClPurch(null); setClIssues(null); setClHist(null); setClCost(null); setIssType(""); setIssSev("medium"); setIssQty("");
     setQtyEditing(false); setEstEditing(false);   // เปิดป๊อปใหม่ = จำนวน/ค่าแรง กลับเป็นอ่านอย่างเดียวเสมอ
-    if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); setMoQty(""); return; }
+    if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); setMoQty(""); setMoDue(""); setMoDueInt(""); return; }
     setMoQty(String(checklistMO.qty ?? ""));   // ช่องแก้จำนวนสั่งผลิตในป๊อป
+    setMoDue((checklistMO.due_date ?? "").slice(0, 10));
+    setMoDueInt((checklistMO.internal_due_date ?? "").slice(0, 10));
     // ค่าแรงผลิตวางแผน — กรอกเป็น "ราคา/ชิ้น"
     // default: ราคากลาง/ชิ้น จาก BOM ก่อน · ไม่มีค่อยถอดจากยอดรวมที่เคยตั้งไว้ (prod_plan ÷ จำนวน)
     setEstSaveBom(false);
@@ -1048,6 +1057,38 @@ function WorkBoardPageInner() {
       toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
     }
   }, [canEdit, toast]);
+  /**
+   * บันทึก "วันกำหนด" ของใบสั่งผลิตจากป๊อปเช็กลิสต์
+   *  · due      = 📦 นัดส่งลูกค้า
+   *  · internal = 🪑 ส่งงานภายใน (เซิร์ฟเวอร์จะไล่ขยับใบจ่ายงานที่ยังทำอยู่ให้ด้วย)
+   */
+  const saveMoDue = useCallback(async (field: "due" | "internal", value: string) => {
+    if (!checklistMO) return;
+    setMoDueSaving(field);
+    const body = field === "due"
+      ? { id: checklistMO.id, due_date: value || null }
+      : { id: checklistMO.id, internal_due_date: value || null };
+    const r = await apiSave<{ cascaded?: number }>(toast, "/api/mo/set-due-date", { method: "POST", body }, {
+      ok: field === "due"
+        ? (value ? "ตั้งวันนัดส่งลูกค้าแล้ว" : "ล้างวันนัดส่งลูกค้าแล้ว")
+        : (value ? "ตั้งวันส่งงานภายในแล้ว" : "ล้างวันส่งงานภายในแล้ว"),
+      fail: "บันทึกวันไม่สำเร็จ",
+    });
+    setMoDueSaving("");
+    if (r.ok) await load(true);
+  }, [checklistMO, toast, load]);
+
+  // บันทึกกำหนดเสร็จของ "ใบจ่ายงาน" ใบเดียว (แท็บส่งงาน)
+  const saveWoDue = useCallback(async (value: string) => {
+    if (!clWO) return;
+    setWoDueSaving(true);
+    const r = await apiSave(toast, `/api/mo/work-orders/${encodeURIComponent(clWO.id)}`,
+      { method: "PATCH", body: { due_date: value || null } },
+      { ok: value ? "ตั้งกำหนดเสร็จแล้ว" : "ล้างกำหนดเสร็จแล้ว", fail: "บันทึกกำหนดเสร็จไม่สำเร็จ" });
+    setWoDueSaving(false);
+    if (r.ok) { setClWO({ ...clWO, due_date: value || null }); await load(true); }
+  }, [clWO, toast, load]);
+
   const closeChecklist = useCallback(() => { setChecklistMO(null); setClWO(null); setDelArmed(false); void load(true); }, [load]);
 
   // เปิดเช็กลิสต์งานจาก URL (?mo=<id>) — ใช้ตอนกดการ์ดจากหน้า Dashboard ผลิต (เปิด modal ตัวจริงตัวเดียวกัน)
@@ -1685,6 +1726,26 @@ function WorkBoardPageInner() {
                 {curMo.has_sizes && <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">ใบนี้แบ่งตามไซส์ — แก้จำนวนที่หน้าใบสั่งผลิต</span>}
                 {qtyEditing && <span className="text-[11px] text-slate-400">บันทึกแล้ววัตถุดิบจะคิดใหม่ให้ (ค่าที่ติ๊กไว้ยังอยู่)</span>}
               </div>
+              {/* 📅 วันกำหนด 2 อัน — เลือกวันแล้วบันทึกให้เลย (ไม่ต้องกดปุ่ม)
+                  ลูกค้า = วันที่ต้องส่งของถึงลูกค้า · ภายใน = วันที่ช่าง/โต๊ะต้องทำเสร็จ */}
+              {!clWO && (
+                <div className="flex items-center gap-x-4 gap-y-2 flex-wrap text-[12px] rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+                  <label className="flex items-center gap-1.5">
+                    <span className="text-slate-500 whitespace-nowrap">📦 กำหนดส่งลูกค้า</span>
+                    <input type="date" value={moDue} disabled={!canEdit || moDueSaving !== ""}
+                      onChange={(e) => { setMoDue(e.target.value); void saveMoDue("due", e.target.value); }}
+                      className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100" />
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <span className="text-slate-500 whitespace-nowrap">🪑 กำหนดส่งงานภายใน</span>
+                    <input type="date" value={moDueInt} disabled={!canEdit || moDueSaving !== ""}
+                      onChange={(e) => { setMoDueInt(e.target.value); void saveMoDue("internal", e.target.value); }}
+                      className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100" />
+                  </label>
+                  {moDueSaving !== "" ? <span className="text-[11px] text-slate-400">กำลังบันทึก…</span>
+                    : <span className="text-[11px] text-slate-400">ตั้งวันภายใน = ใบจ่ายงานที่ยังทำอยู่ของใบนี้ขยับตามให้ · ใบที่จ่ายทีหลังได้วันนี้เป็นค่าเริ่มต้น</span>}
+                </div>
+              )}
               {/* รายละเอียดสั่งงาน (เหมือนหน้าแก้ใบสั่งผลิต) — พับไว้ โชว์แค่รูป+ชื่อ กดกางดูสเปกเต็ม */}
               {checklistMO.product_sku && <WorkInstructionPanel sku={checklistMO.product_sku} editable={false} defaultOpen={false} onAfterBomEdit={() => load(true)} />}
               {/* แท็บรวม 6 หน้า — ใช้ได้ทั้งมี/ไม่มี BOM */}
@@ -1764,7 +1825,13 @@ function WorkBoardPageInner() {
                           <span className="text-slate-400">แผนก/ผู้รับ</span><span className="text-slate-700">{clWO.department_name ?? "—"} · {clWO.assignee_name ?? "—"}</span>
                           <span className="text-slate-400">จ่าย</span><span className="text-slate-700">{fmt(clWO.qty)} ชิ้น</span>
                           <span className="text-slate-400">ส่งแล้ว</span><span className="text-slate-700">{fmt(clWO.received_qty)} · เหลือ {fmt(Math.max(0, (clWO.qty || 0) - (clWO.received_qty || 0)))}</span>
-                          <span className="text-slate-400">กำหนดเสร็จ</span><span className="text-slate-700">{clWO.due_date ?? "—"}</span>
+                          <span className="text-slate-400">กำหนดเสร็จ</span>
+                          <span className="flex items-center gap-1.5">
+                            <input type="date" value={woDue} disabled={!canEdit || woDueSaving}
+                              onChange={(e) => { setWoDue(e.target.value); void saveWoDue(e.target.value); }}
+                              className="h-7 px-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                            {woDueSaving && <span className="text-[11px] text-slate-400">กำลังบันทึก…</span>}
+                          </span>
                           <span className="text-slate-400">สถานะ</span><span><span className={`text-[11px] px-2 py-0.5 rounded border ${(WO_STATUS[clWO.status] ?? WO_STATUS.dispatched).cls}`}>{(WO_STATUS[clWO.status] ?? WO_STATUS.dispatched).label}</span></span>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
@@ -2597,6 +2664,7 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
   const [assignOpen, setAssignOpen] = useState(false);
   const [dueOpen, setDueOpen] = useState(false);
   const [dueVal, setDueVal] = useState("");
+  const [dueField, setDueField] = useState<"due" | "internal">("due");   // แก้วันไหน: นัดส่งลูกค้า / ส่งงานภายใน
   const [dueSaving, setDueSaving] = useState(false);
   const selMoNos = pending.filter((m) => sel.has(m.id)).map((m) => m.mo_no);
   // คลิกแถว/ชื่อ: ถ้ากำลังเลือกอยู่ (มีติ๊กแล้ว) → สลับติ๊ก (แบบ Gmail) · ถ้ายังไม่ติ๊กอะไร → เปิดรายละเอียด
@@ -2607,13 +2675,13 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
     if (!ids.length) return;
     setDueSaving(true);
     try {
-      const r = await apiFetch("/api/mo/bulk-due-date", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, due_date: dueVal || null }) });
+      const r = await apiFetch("/api/mo/bulk-due-date", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, due_date: dueVal || null, field: dueField }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
-      toast.success(`แก้กำหนดเสร็จแล้ว ${j.updated} ใบ`);
+      toast.success(`${dueField === "due" ? "แก้วันนัดส่งลูกค้า" : "แก้วันส่งงานภายใน"}แล้ว ${j.updated} ใบ${j.cascaded ? ` (ใบจ่ายงานขยับตาม ${j.cascaded} ใบ)` : ""}`);
       setDueOpen(false); setSel(new Set()); onReload?.();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setDueSaving(false); }
-  }, [pending, sel, dueVal, toast, onReload]);
+  }, [pending, sel, dueVal, dueField, toast, onReload]);
   // กลุ่มใบสั่งผลิต (สำหรับคอลัมน์ "กลุ่ม" + จัดกลุ่มตามกลุ่ม)
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
@@ -2632,7 +2700,8 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
     { key: "qty", header: "จำนวน", width: "5rem", align: "right", sortValue: (m) => m.qty, sortLabel: "จำนวน", cell: (m) => <span className="tabular-nums">{fmt(m.qty)}</span> },
     { key: "disp", header: "จ่ายแล้ว", width: "5rem", align: "right", cell: (m) => <span className="tabular-nums text-slate-500">{fmt(m.dispatched)}</span> },
     { key: "rem", header: "เหลือ", width: "4.5rem", align: "right", sortValue: (m) => m.remaining, sortLabel: "เหลือ", cell: (m) => <span className="tabular-nums font-semibold text-rose-600">{fmt(m.remaining)}</span> },
-    { key: "due", header: "กำหนดเสร็จ", width: "minmax(9rem,1fr)", sortValue: (m) => m.due_date ?? "9999", sortLabel: "กำหนดเสร็จ", cell: (m) => <DueCell d={m.due_date} /> },
+    { key: "due", header: "📦 ส่งลูกค้า", width: "minmax(9rem,1fr)", sortValue: (m) => m.due_date ?? "9999", sortLabel: "กำหนดส่งลูกค้า", cell: (m) => <DueCell d={m.due_date} /> },
+    { key: "due_int", header: "🪑 ส่งภายใน", width: "minmax(9rem,1fr)", sortValue: (m) => m.internal_due_date ?? "9999", sortLabel: "กำหนดส่งภายใน", cell: (m) => <DueCell d={m.internal_due_date ?? null} /> },
     { key: "ready", header: "พร้อม", width: "6.5rem", align: "center", sortValue: (m) => (m.ready ? 0 : 1), sortLabel: "ความพร้อม", cell: (m) => m.ready ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span> : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span> },
   ];
 
@@ -2662,7 +2731,7 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
           </select>
           {selMoNos.length > 0 && <>
             <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จับเข้ากลุ่ม ({selMoNos.length})</button>
-            <button onClick={() => setDueOpen(true)} className="h-8 px-3 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700">📅 แก้กำหนดเสร็จ ({selMoNos.length})</button>
+            <button onClick={() => setDueOpen(true)} className="h-8 px-3 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700">📅 แก้วันกำหนด ({selMoNos.length})</button>
           </>}
         </div>}
         searchText={(m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`}
@@ -2675,8 +2744,15 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
       {dueOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setDueOpen(false)}>
           <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-slate-800">📅 แก้กำหนดเสร็จ</h3>
-            <p className="mt-0.5 mb-3 text-xs text-slate-500">ตั้งวันกำหนดเสร็จใหม่ให้ใบที่เลือก <b>{selMoNos.length}</b> ใบ</p>
+            <h3 className="text-base font-bold text-slate-800">📅 แก้วันกำหนด</h3>
+            <p className="mt-0.5 mb-3 text-xs text-slate-500">ตั้งวันใหม่ให้ใบที่เลือก <b>{selMoNos.length}</b> ใบ</p>
+            <div className="mb-3 flex gap-1.5">
+              {([["due", "📦 นัดส่งลูกค้า"], ["internal", "🪑 ส่งงานภายใน"]] as const).map(([k, label]) => (
+                <button key={k} onClick={() => setDueField(k)}
+                  className={`h-8 flex-1 rounded-lg border text-xs font-medium ${dueField === k ? "bg-amber-600 text-white border-amber-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{label}</button>
+              ))}
+            </div>
+            {dueField === "internal" && <p className="mb-2 text-[11px] text-slate-400">ใบจ่ายงานที่ยังทำอยู่ของใบเหล่านี้จะขยับวันตามให้ด้วย</p>}
             <input type="date" value={dueVal} onChange={(e) => setDueVal(e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
             <button onClick={() => setDueVal("")} className="mt-1.5 text-[11px] text-slate-400 underline hover:text-slate-600">ล้างวัน (ตั้งเป็นไม่กำหนด)</button>
             <div className="mt-4 flex justify-end gap-2">

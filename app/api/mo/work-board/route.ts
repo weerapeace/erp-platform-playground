@@ -79,7 +79,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const [{ data: depts }, { data: wos }, { data: mos }] = await Promise.all([
     admin.from("departments").select("id, name, status, note, show_note, display_order, show_on_board").order("display_order", { ascending: true, nullsFirst: false }).order("name", { ascending: true }),
     admin.from("mo_work_orders").select("*").eq("is_active", true).order("created_at", { ascending: true }).limit(2000),
-    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, size_breakdown").eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000),
+    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, internal_due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, size_breakdown").eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000),
   ]);
 
   const departments = (depts ?? []).filter((d: Record<string, unknown>) => !d.status || d.status === "active")
@@ -160,6 +160,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const inf = info.get(String(m.product_sku)) ?? { image_url: null, brand: null, brand_color: null, brand_oem: false, color: null };
     return { id: String(m.id), mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
       qty, dispatched: r2(dispatched), remaining, due_date: m.due_date ?? null, status: m.status,
+      // 📦 due_date = นัดส่งลูกค้า · 🪑 internal_due_date = กำหนดส่งงานภายใน (ตั้งได้ตั้งแต่ยังไม่จ่ายงาน)
+      internal_due_date: (m.internal_due_date as string) ?? null,
       prep_done: !!m.prep_done, cut_done: !!m.cut_done, bom_code: (m.bom_code as string) ?? null,
       // ธง "งานเร่ง/สำคัญ" ที่ผู้บริหารติดไว้ในแท็บ 👔 แผนผู้บริหาร (0=ปกติ 1=สำคัญ 2=เร่งด่วน)
       priority: Number(m.priority) || 0, priority_note: (m.priority_note as string) ?? null,

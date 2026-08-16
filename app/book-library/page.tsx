@@ -9,12 +9,13 @@
  * ชื่อช่อง/คอลัมน์/ป้ายตัวเลือก แก้เองได้ที่ปุ่ม 🎨 แต่งฟอร์ม (ทะเบียนกลาง erp_module_fields) ไม่ต้องแก้โค้ด
  */
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { StatusBadge } from "@/components/data-table";
 import { useViewPref } from "@/lib/use-view-pref";
 import { BookShelfView } from "./shelf-view";
+import { ImportMailModal } from "./import-mail-modal";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -71,23 +72,35 @@ type View = (typeof VIEWS)[number];
 
 export default function BookLibraryPage() {
   const { view, setView, saveDefault } = useViewPref<View>("book_library_view", VIEWS, "shelf");
+  const [mailOpen, setMailOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);   // นำเข้าเสร็จ → บังคับตารางโหลดใหม่
 
   // เปลี่ยนมุมมอง = จำไว้ให้ด้วย (ต่อคน) → เปิดครั้งหน้าได้มุมมองเดิม
   const go = useCallback((v: View) => { setView(v); void saveDefault(v); }, [setView, saveDefault]);
+  const openMail = useCallback(() => setMailOpen(true), []);
 
-  // ปุ่มสลับมุมมองบนหัวหน้าตาราง — useMemo กันตารางถูกสร้างใหม่ทุกครั้งที่ re-render
+  // ปุ่มบนหัวหน้าตาราง — useMemo (deps คงที่) กันตารางถูกสร้างใหม่ทุกครั้งที่ re-render
   const tableConfig = useMemo<MasterCRUDConfig>(() => ({
     ...CONFIG,
     headerActions: () => (
-      <div className="flex items-center rounded-lg border border-slate-200 bg-white p-0.5">
-        <button onClick={() => go("table")}
-          className="h-8 px-3 text-sm rounded-md bg-slate-800 text-white font-medium">📋 ตาราง</button>
-        <button onClick={() => go("shelf")}
-          className="h-8 px-3 text-sm rounded-md text-slate-500 hover:bg-slate-50">📚 ชั้นหนังสือ</button>
-      </div>
+      <>
+        <button onClick={openMail}
+          className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">📧 จากอีเมล</button>
+        <div className="flex items-center rounded-lg border border-slate-200 bg-white p-0.5">
+          <button onClick={() => go("table")}
+            className="h-8 px-3 text-sm rounded-md bg-slate-800 text-white font-medium">📋 ตาราง</button>
+          <button onClick={() => go("shelf")}
+            className="h-8 px-3 text-sm rounded-md text-slate-500 hover:bg-slate-50">📚 ชั้นหนังสือ</button>
+        </div>
+      </>
     ),
-  }), [go]);
+  }), [go, openMail]);
 
   if (view === "shelf") return <BookShelfView onSwitchToTable={() => go("table")} />;
-  return <MasterCRUDPage config={tableConfig} />;
+  return (
+    <>
+      <MasterCRUDPage key={reloadKey} config={tableConfig} />
+      <ImportMailModal open={mailOpen} onClose={() => setMailOpen(false)} onImported={() => setReloadKey((k) => k + 1)} />
+    </>
+  );
 }
