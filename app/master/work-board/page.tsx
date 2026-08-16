@@ -362,6 +362,7 @@ function WorkBoardPageInner() {
   const [qtyEditing, setQtyEditing] = useState(false);
   const [estSaving, setEstSaving] = useState(false);
   const [estSaveBom, setEstSaveBom] = useState(false);        // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง)
+  const [estAllParent, setEstAllParent] = useState(false);    // ใส่ค่าแรง/ชิ้น ให้ทุกใบของรุ่นเดียวกัน (Parent SKU)
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
   const [clCutGroup, setClCutGroup] = useState<"none" | "type" | "material">("none");   // จัดกลุ่มหน้าตัด
   const [clSummary, setClSummary] = useState<MoMatSummary[]>([]);   // ตารางวัตถุดิบกลาง (สรุป)
@@ -793,6 +794,17 @@ function WorkBoardPageInner() {
     setEstSaving(true);
     try {
       const perPiece = estLabor.trim() === "" ? null : Number(estLabor) || 0;   // ราคา/ชิ้น ที่กรอก
+      // ติ๊ก "ใส่ทุกใบของรุ่นเดียวกัน" → เซิร์ฟเวอร์ไล่ใส่ให้ทุกใบที่ยังเปิดอยู่ของ Parent SKU เดียวกัน
+      // (แต่ละใบคิดยอดรวมจากจำนวนของใบนั้นเอง) + เขียนราคากลางเข้า BOM ของทุกสีถ้าติ๊กไว้
+      if (estAllParent && perPiece != null) {
+        const r = await apiSave<{ count?: number; bom_updated?: number }>(toast, "/api/mo/est-labor",
+          { method: "POST", body: { mo_id: checklistMO.id, rate_per_piece: perPiece, scope: "parent", save_bom: estSaveBom } },
+          { quiet: true });
+        if (!r.ok) throw new Error(r.error ?? "บันทึกไม่สำเร็จ");
+        toast.success(`ใส่ค่าแรง ฿${fmt(perPiece)}/ชิ้น ให้ทุกใบของรุ่นนี้แล้ว ${r.data?.count ?? 0} ใบ${r.data?.bom_updated ? ` · เข้า BOM ${r.data.bom_updated} สูตร` : ""}`);
+        await load(true);
+        return;
+      }
       const total = perPiece == null ? null : Math.round(perPiece * (checklistMO.qty || 0) * 100) / 100;   // ยอดรวม → เก็บใน est_labor_cost (ระบบเดิมใช้ยอดรวม)
       const res = await apiFetch("/api/mo/est-labor", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mo_id: checklistMO.id, est_labor_cost: total }) });
@@ -1973,6 +1985,12 @@ function WorkBoardPageInner() {
                             <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer w-fit">
                               <input type="checkbox" checked={estSaveBom} onChange={(e) => setEstSaveBom(e.target.checked)} className="w-3.5 h-3.5 accent-indigo-600" />
                               💾 บันทึกกลับเข้า BOM ด้วย (เป็นราคากลาง/ชิ้น)
+                            </label>
+                            {/* ใส่ค่าแรงเดียวกันให้ทุกสีของรุ่นนี้ — ไม่ต้องเปิดทีละใบพิมพ์ซ้ำ */}
+                            <label className={`flex items-center gap-1.5 text-[11px] cursor-pointer w-fit ${estAllParent ? "text-indigo-700 font-medium" : "text-slate-500"}`}
+                              title="ใส่ค่าแรง/ชิ้น นี้ให้ทุกใบสั่งผลิตที่ยังเปิดอยู่ ของสินค้ารุ่นเดียวกัน (ทุกสี/ทุกไซส์ที่อยู่ใต้ Parent SKU เดียวกัน) — แต่ละใบคิดยอดรวมจากจำนวนของใบนั้นเอง">
+                              <input type="checkbox" checked={estAllParent} onChange={(e) => setEstAllParent(e.target.checked)} className="w-3.5 h-3.5 accent-indigo-600" />
+                              🧬 ใส่ให้ทุกใบของรุ่นเดียวกัน (Parent SKU เดียวกัน)
                             </label>
                             <span className="block text-[10px] text-slate-400">เหมา-จริง = กด “เสร็จ” ในแท็บ 🧵</span>
                           </div>
