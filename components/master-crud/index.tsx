@@ -476,6 +476,12 @@ export type MasterCRUDConfig = {
   /** ปิดปุ่ม "เพิ่มหลายรายการ (inline)" ของโมดูลนี้ (ค่าเริ่มต้น = เปิด ถ้ามีสิทธิ์สร้าง) */
   inlineCreate?: boolean;
   /**
+   * ตรวจแต่ละแถวในตาราง "เพิ่มหลายรายการ" ก่อนบันทึก (ของกลาง)
+   * เช่น ใบจ่ายเงินกู้: ยอดที่แยกต้องรวมได้เท่ากับยอดจ่ายรวม
+   * คืน { ok:false, message } → แถวนั้นขึ้น ⚠ และปุ่มบันทึกจะกดไม่ได้
+   */
+  inlineRowCheck?: (data: Record<string, unknown>) => { ok: boolean; message?: string } | null;
+  /**
    * ของกลาง — บรรทัดข้อความ "สด" ใต้ช่องกรอก ที่คิดจากค่าอื่นในฟอร์มตอนนั้น
    * (ต่างจาก help_text ในทะเบียนฟิลด์ ซึ่งเป็นข้อความตายตัว)
    * เช่น "เบิกได้อีก ฿1,200,000" ใต้ช่องยอดเบิก · "สต๊อกคงเหลือ 25 ชิ้น" ใต้ช่องจำนวน
@@ -2511,6 +2517,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             apiBase={apiBase}
             apiPath={config.apiPath}
             title={config.title}
+            rowCheck={config.inlineRowCheck}
           />
         )}
 

@@ -44,6 +44,24 @@ const CONFIG: MasterCRUDConfig = {
     create: "loan_payments.create",
     edit:   "loan_payments.edit",
   },
+  // ตรวจก่อนบันทึกในโหมด "เพิ่มหลายรายการ": ยอดที่แยกต้องรวมได้เท่ากับยอดจ่ายรวม
+  // (กฎเดียวกับที่ฐานข้อมูลบังคับ — บอกตั้งแต่บนจอ จะได้ไม่เสียเที่ยว)
+  inlineRowCheck: (d) => {
+    const n = (k: string) => { const v = Number(d[k]); return isFinite(v) ? v : 0; };
+    const total = n("total_paid");
+    const split = Math.round((n("principal_amount") + n("interest_amount") + n("penalty_amount")
+                            + n("fee_amount") + n("other_amount")) * 100) / 100;
+    if (total <= 0) return { ok: false, message: "ยังไม่ได้ใส่ยอดจ่าย" };
+    if (split === 0) return { ok: true, message: "ไม่ได้แยกยอด — ระบบจะตัดดอกเบี้ยก่อนแล้วเงินต้นให้เอง" };
+    const diff = Math.round((total - split) * 100) / 100;
+    if (Math.abs(diff) <= 0.01) return { ok: true, message: "ยอดที่แยกตรงกับยอดจ่ายรวม" };
+    return {
+      ok: false,
+      message: diff > 0
+        ? `ยอดที่แยกรวม ${split.toLocaleString("th-TH")} ยังขาดอีก ${diff.toLocaleString("th-TH")} จากยอดจ่าย ${total.toLocaleString("th-TH")}`
+        : `ยอดที่แยกรวม ${split.toLocaleString("th-TH")} เกินยอดจ่าย ${total.toLocaleString("th-TH")} อยู่ ${(-diff).toLocaleString("th-TH")}`,
+    };
+  },
   customCreate: {
     label: "+ บันทึกการจ่าย",
     render: ({ open, onClose, onCreated }) => (

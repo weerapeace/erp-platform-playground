@@ -9,6 +9,7 @@
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { LoanProgressActions } from "./progress-actions";
+import { LoanPaymentsSection } from "./payments-section";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -80,6 +81,15 @@ const CONFIG: MasterCRUDConfig = {
       />
     ),
   },
+  // แผง "รายการการจ่ายเงินกู้" ท้ายหน้ารายละเอียดสัญญา (ของกลาง recordSections)
+  // โชว์ทุกใบจ่ายของสัญญานี้ + แยกเงินต้น/ดอกเบี้ย/ดอกผิดนัด/ค่าธรรมเนียม/อื่น ๆ + ยอดรวม
+  recordSections: [
+    {
+      key: "loan-payments",
+      title: "💸 รายการการจ่ายเงินกู้",
+      render: ({ recordId }) => <LoanPaymentsSection contractId={recordId} />,
+    },
+  ],
   cellRenderers: {
     lifecycle_status: (v) => {
       const m = LIFECYCLE[String(v ?? "")];

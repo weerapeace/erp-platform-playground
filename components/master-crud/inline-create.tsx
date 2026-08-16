@@ -54,7 +54,7 @@ const SKIP_TYPES = new Set(["image", "one2many", "many2many", "computed", "texta
 const inputCls = "w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500";
 
 export function InlineCreatePanel({
-  open, onClose, onSaved, fields, apiBase, apiPath, title,
+  open, onClose, onSaved, fields, apiBase, apiPath, title, rowCheck,
 }: {
   open: boolean;
   onClose: () => void;
@@ -64,6 +64,8 @@ export function InlineCreatePanel({
   apiBase: string;
   apiPath: string;
   title: string;
+  /** ตรวจความสมเหตุสมผลของแต่ละแถวก่อนบันทึก (เช่น ยอดแยกต้องรวมได้เท่ายอดจ่าย) */
+  rowCheck?: (data: Record<string, unknown>) => { ok: boolean; message?: string } | null;
 }) {
   // คอลัมน์ที่กรอกได้จริง — เรียงตามทะเบียนฟิลด์ · ฟิลด์บังคับมาก่อนเสมอ
   const cols = useMemo(() => {
@@ -117,6 +119,20 @@ export function InlineCreatePanel({
   };
   const canFillAny = useMemo(() => cols.some((c) => canFill(c.key)), // eslint-disable-line react-hooks/exhaustive-deps
     [rows, cols]);
+
+  /** ผลตรวจของแต่ละแถว (เฉพาะแถวที่กรอกแล้ว) */
+  const checks = useMemo(() => {
+    const m = new Map<string, { ok: boolean; message?: string }>();
+    if (!rowCheck) return m;
+    rows.forEach((r) => {
+      const hasData = Object.values(r.data).some((v) => v != null && String(v).trim() !== "");
+      if (!hasData) return;
+      const res = rowCheck(r.data);
+      if (res) m.set(r.key, res);
+    });
+    return m;
+  }, [rows, rowCheck]);
+  const badRows = useMemo(() => [...checks.values()].filter((c) => !c.ok).length, [checks]);
 
   /** แถวที่มีข้อมูลจริง (ไม่นับแถวเปล่า) */
   const filled = useMemo(
@@ -195,6 +211,7 @@ export function InlineCreatePanel({
       const miss = req.filter((c) => { const v = filled[i].data[c.key]; return v == null || String(v).trim() === ""; });
       if (miss.length) { setErr(`แถวที่ ${i + 1} ยังไม่ได้กรอก: ${miss.map((m) => m.label).join(", ")}`); return; }
     }
+    if (badRows > 0) { setErr(`มี ${badRows} แถวที่ยอดยังไม่ถูกต้อง — ดูเครื่องหมาย ⚠ ท้ายแถว`); return; }
     setSaving(true);
     try {
       const res = await apiFetch(`${apiBase}${apiPath}/import`, {
@@ -257,10 +274,10 @@ export function InlineCreatePanel({
     );
   };
 
-  const gridCols = `2.25rem ${cols.map(() => "minmax(9rem, 1fr)").join(" ")} 2.25rem`;
+  const gridCols = `2.25rem ${cols.map(() => "minmax(9rem, 1fr)").join(" ")}${rowCheck ? " 2.5rem" : ""} 2.25rem`;
   // ความกว้างขั้นต่ำของตาราง = คอลัมน์ลำดับ + คอลัมน์ข้อมูล + คอลัมน์ลบ + ช่องไฟระหว่างคอลัมน์
   // ต้องคิดให้ครบ ไม่งั้นกล่องแถวจะกว้างเกินกล่องนอก แล้วเกิดแถบเลื่อนซ้อนกัน 2 ชั้น
-  const minWidthRem = 2.25 + cols.length * 9 + 2.25 + 0.5 * (cols.length + 1);
+  const minWidthRem = 2.25 + cols.length * 9 + (rowCheck ? 2.5 : 0) + 2.25 + 0.5 * (cols.length + 1);
 
   return (
     <ERPModal
@@ -276,11 +293,16 @@ export function InlineCreatePanel({
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <span className="text-[11px] text-slate-500">
             กรอกแล้ว <b className="text-slate-700">{filled.length}</b> แถว จาก {rows.length}
+            {rowCheck && filled.length > 0 && (
+              badRows > 0
+                ? <span className="ml-2 text-red-600">· ⚠ ยอดไม่ตรง <b>{badRows}</b> แถว</span>
+                : <span className="ml-2 text-emerald-600">· ✓ ยอดตรงทุกแถว</span>
+            )}
           </span>
           <div className="flex items-center gap-2">
             <button onClick={() => { reset(); onClose(); }} disabled={saving}
               className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
-            <button onClick={save} disabled={saving || filled.length === 0}
+            <button onClick={save} disabled={saving || filled.length === 0 || badRows > 0}
               className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {saving ? "กำลังบันทึก..." : `บันทึก ${filled.length} รายการ`}
             </button>
@@ -357,6 +379,7 @@ export function InlineCreatePanel({
                     className="shrink-0 w-5 h-5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-slate-400">⤓</button>
                 </span>
               ))}
+              {rowCheck && <span className="text-center" title="ตรวจว่ายอดตรงกันไหม">ตรวจ</span>}
               <span />
             </div>
             <div className="divide-y divide-slate-100">
@@ -372,6 +395,16 @@ export function InlineCreatePanel({
                       {renderCell(c, r)}
                     </div>
                   ))}
+                  {rowCheck && (() => {
+                    const c = checks.get(r.key);
+                    return (
+                      <div className="flex justify-center pt-1.5" title={c?.message ?? ""}>
+                        {!c ? <span className="text-slate-200 text-xs">—</span>
+                          : c.ok ? <span className="text-emerald-600 text-sm">✓</span>
+                          : <span className="text-red-600 text-sm cursor-help">⚠</span>}
+                      </div>
+                    );
+                  })()}
                   <div className="flex justify-center pt-1">
                     <button type="button" onClick={() => removeRow(r.key)} title="ลบแถวนี้"
                       className="w-6 h-6 rounded text-slate-300 hover:text-red-600 hover:bg-red-50">🗑</button>
