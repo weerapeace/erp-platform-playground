@@ -37,7 +37,7 @@ export type Permission =
   | "roles.view" | "admin.roles"
   | "comments.view" | "comments.create" | "comments.edit"
   | "notification_rules.view" | "admin.notification_rules"
-  | "so.view" | "so.create" | "so.edit" | "so.confirm" | "so.ship" | "so.complete" | "so.cancel"
+  | "so.view" | "so.create" | "so.edit" | "so.confirm" | "so.ship" | "so.complete" | "so.cancel" | "so.delete"
   | "qt.view" | "qt.create" | "qt.edit" | "qt.send" | "qt.accept" | "qt.reject" | "qt.cancel"
   | "stock.view" | "stock.create" | "stock.adjust"
   | "po.view" | "po.create" | "po.edit" | "po.confirm" | "po.receive" | "po.complete" | "po.cancel"
@@ -85,7 +85,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "roles.view", "admin.roles",
     "comments.view", "comments.create", "comments.edit",
     "notification_rules.view", "admin.notification_rules",
-    "so.view", "so.create", "so.edit", "so.confirm", "so.ship", "so.complete", "so.cancel",
+    "so.view", "so.create", "so.edit", "so.confirm", "so.ship", "so.complete", "so.cancel", "so.delete",
     "qt.view", "qt.create", "qt.edit", "qt.send", "qt.accept", "qt.reject", "qt.cancel",
     "stock.view", "stock.create", "stock.adjust",
     "po.view", "po.create", "po.edit", "po.confirm", "po.receive", "po.complete", "po.cancel",
@@ -122,7 +122,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "warehouses.view", "departments.view", "units.view", "taxes.view", "validation.view", "roles.view",
     "comments.view", "comments.create", "comments.edit",
     "notification_rules.view",
-    "so.view", "so.create", "so.edit", "so.confirm", "so.ship", "so.cancel",
+    "so.view", "so.create", "so.edit", "so.confirm", "so.ship", "so.cancel", "so.delete",
     "qt.view", "qt.create", "qt.edit", "qt.send", "qt.accept", "qt.reject", "qt.cancel",
     "stock.view", "stock.create",
     "po.view", "po.create", "po.edit", "po.receive", "po.cancel",

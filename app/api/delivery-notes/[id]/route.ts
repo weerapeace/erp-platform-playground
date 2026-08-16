@@ -56,12 +56,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
 /**
  * DELETE — ลบใบส่งสินค้าออกจากระบบถาวร
- *   สิทธิ์: so.cancel (สิทธิ์เดียวกับการยกเลิกเอกสารขาย)
+ *   สิทธิ์: so.delete (เจ้าของกำหนด: admin + ผู้จัดการเท่านั้น · ปรับได้เองที่ /admin/role-board)
  *   กติกา: ลบได้เฉพาะใบ "ร่าง" หรือ "ยกเลิกแล้ว" — ใบที่ส่งของแล้วต้องกดยกเลิกก่อน
  *   ก่อนลบเก็บสำเนาทั้งใบ (หัวบิล + รายการสินค้า) ลง audit log ไว้ตรวจย้อนหลัง
  */
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const denied = await guardApi(request, "so.cancel"); if (denied) return denied;
+  const denied = await guardApi(request, "so.delete"); if (denied) return denied;
   const { id } = await params;
   const actor = new URL(request.url).searchParams.get("actor");
 

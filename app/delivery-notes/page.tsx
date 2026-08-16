@@ -42,7 +42,7 @@ function mergeLines(base: EditorLine[], incoming: EditorLine[]): EditorLine[] {
 export default function DeliveryNotesPage() {
   const canView   = usePermission("so.view");
   const canCreate = usePermission("so.create");
-  const canDelete = usePermission("so.cancel");   // สิทธิ์ลบ = สิทธิ์เดียวกับยกเลิกเอกสารขาย
+  const canDelete = usePermission("so.delete");   // ลบเอกสารขาย — เจ้าของกำหนดให้ admin + ผู้จัดการ (แก้ได้ที่ /admin/role-board)
   const { user } = useAuth();
 
   const [rows,    setRows]    = useState<DeliveryNoteListItem[]>([]);
