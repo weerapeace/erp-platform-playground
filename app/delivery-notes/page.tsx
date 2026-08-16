@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
-import { ERPModal } from "@/components/modal";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { CustomerPicker } from "@/components/pickers";
 import type { CustomerPickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
@@ -42,6 +42,7 @@ function mergeLines(base: EditorLine[], incoming: EditorLine[]): EditorLine[] {
 export default function DeliveryNotesPage() {
   const canView   = usePermission("so.view");
   const canCreate = usePermission("so.create");
+  const canDelete = usePermission("so.cancel");   // สิทธิ์ลบ = สิทธิ์เดียวกับยกเลิกเอกสารขาย
   const { user } = useAuth();
 
   const [rows,    setRows]    = useState<DeliveryNoteListItem[]>([]);
@@ -65,6 +66,8 @@ export default function DeliveryNotesPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [wfLoading,  setWfLoading]  = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DeliveryNoteDetail | null>(null);   // ใบที่กำลังจะลบ
+  const [deleting,   setDeleting]   = useState(false);
 
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
@@ -184,6 +187,22 @@ export default function DeliveryNotesPage() {
       await fetchList();
     } catch (err) { setFormErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
+  };
+
+  /** ลบใบส่งสินค้าถาวร — ร่าง/ยกเลิกแล้วเท่านั้น (ใบที่ส่งของแล้วต้องยกเลิกก่อน) · ระบบเก็บประวัติไว้ให้ */
+  const doDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const res = await apiFetch(`/api/delivery-notes/${deleteTarget.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      flash(`ลบ ${deleteTarget.dn_number ?? "ใบร่าง"} แล้ว`);
+      setDeleteTarget(null);
+      setDetailOpen(false);
+      await fetchList();
+    } catch (err) { flash(err instanceof Error ? err.message : "ลบไม่สำเร็จ"); }
+    finally { setDeleting(false); }
   };
 
   const transition = async (id: string, action: string, reason?: string) => {
@@ -330,6 +349,11 @@ export default function DeliveryNotesPage() {
               <button onClick={() => { if (confirm("ย้อนสถานะกลับหนึ่งขั้น?")) transition(detail.id, "revert"); }} disabled={wfLoading}
                 className="h-9 px-4 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 disabled:opacity-50">↩ ย้อนสถานะ</button>
             )}
+            {/* ลบถาวร — เฉพาะใบร่าง/ยกเลิกแล้ว (ใบที่ส่งของแล้วต้องกดยกเลิกก่อน) */}
+            {canDelete && (detail.status === "draft" || detail.status === "cancelled") && (
+              <button onClick={() => setDeleteTarget(detail)} disabled={wfLoading}
+                className="h-9 px-4 text-sm border border-red-300 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 disabled:opacity-50">🗑 ลบ</button>
+            )}
           </>
         ) : null}>
         {detailLoading || !detail ? (
@@ -382,6 +406,32 @@ export default function DeliveryNotesPage() {
           </div>
         )}
       </ERPModal>
+
+      {/* กล่องยืนยันลบ (ของกลาง ConfirmDialog — ลบถาวร กู้เองไม่ได้) */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={doDelete}
+        loading={deleting}
+        variant="danger"
+        title="ลบใบส่งสินค้า?"
+        confirmText="ลบถาวร"
+        message={deleteTarget ? (
+          <div className="space-y-2 text-sm">
+            <div>
+              จะลบ <strong>{deleteTarget.dn_number ?? "ใบร่าง (ยังไม่มีเลขที่)"}</strong>
+              {deleteTarget.customer_name ? <> ของ <strong>{deleteTarget.customer_name}</strong></> : null}
+              {" "}ออกจากระบบถาวร
+            </div>
+            <div className="text-slate-500">
+              สินค้าในใบนี้ {deleteTarget.lines?.length ?? 0} รายการ · รวม {Number(deleteTarget.total_qty ?? 0).toLocaleString("th-TH")} ชิ้น
+            </div>
+            <div className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
+              ลบแล้วกดกู้คืนเองไม่ได้ (ระบบเก็บประวัติไว้ให้ตรวจย้อนหลัง) — ถ้าแค่ไม่อยากใช้ใบนี้ แนะนำกด <strong>ยกเลิก</strong> แทน
+            </div>
+          </div>
+        ) : ""}
+      />
     </PlaygroundShell>
   );
 }
