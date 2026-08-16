@@ -71,6 +71,13 @@ export const MODULE_STATUS_OVERRIDES: Record<string, Record<string, Partial<Stat
     waiting:     { ...FAM.red },
     rfq_created: { ...FAM.amber },
   },
+  // คลังหนังสือ — สถานะเฉพาะโมดูลนี้ (ไม่ใช่สถานะเอกสาร จึงไม่ใส่ในชุด default)
+  book_library: {
+    owned:    { label: "มีแล้ว",      ...FAM.emerald },
+    wishlist: { label: "อยากได้",     ...FAM.amber },
+    upcoming: { label: "รอวางขาย",    ...FAM.blue },
+    skipped:  { label: "ข้ามเล่มนี้",  ...FAM.slate },
+  },
 };
 
 /** ดึงป้าย/สีของสถานะ — ระบุ moduleKey เพื่อใช้ override รายโมดูล (ถ้ามี) */
