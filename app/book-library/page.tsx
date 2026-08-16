@@ -4,13 +4,17 @@
  * คลังหนังสือ (Book Library) — /book-library
  *
  * ทะเบียนหนังสือ/การ์ตูนส่วนตัว: มีแล้ว / อยากได้ / รอวางขาย / ข้ามเล่มนี้
- * ใช้ของกลาง MasterCRUDPage → ตาราง ค้นหา ตัวกรอง ฟอร์ม รูปปก สิทธิ์ ประวัติ นำเข้า/ส่งออก ครบในตัว
+ * 2 มุมมอง (จำค่าที่เลือกไว้ต่อคน): 📚 ชั้นหนังสือ (เห็นปก จัดตามชุด) · 📋 ตาราง (ค้น/กรอง/นำเข้า-ส่งออก)
+ * ทั้งสองมุมมองใช้ข้อมูล + ฟอร์มตัวเดียวกัน (ของกลาง MasterCRUD) — แก้ที่เดียวเปลี่ยนทั้งคู่
  * ชื่อช่อง/คอลัมน์/ป้ายตัวเลือก แก้เองได้ที่ปุ่ม 🎨 แต่งฟอร์ม (ทะเบียนกลาง erp_module_fields) ไม่ต้องแก้โค้ด
  */
 
+import { useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { StatusBadge } from "@/components/data-table";
+import { useViewPref } from "@/lib/use-view-pref";
+import { BookShelfView } from "./shelf-view";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -62,6 +66,28 @@ const CONFIG: MasterCRUDConfig = {
   },
 };
 
+const VIEWS = ["shelf", "table"] as const;
+type View = (typeof VIEWS)[number];
+
 export default function BookLibraryPage() {
-  return <MasterCRUDPage config={CONFIG} />;
+  const { view, setView, saveDefault } = useViewPref<View>("book_library_view", VIEWS, "shelf");
+
+  // เปลี่ยนมุมมอง = จำไว้ให้ด้วย (ต่อคน) → เปิดครั้งหน้าได้มุมมองเดิม
+  const go = useCallback((v: View) => { setView(v); void saveDefault(v); }, [setView, saveDefault]);
+
+  // ปุ่มสลับมุมมองบนหัวหน้าตาราง — useMemo กันตารางถูกสร้างใหม่ทุกครั้งที่ re-render
+  const tableConfig = useMemo<MasterCRUDConfig>(() => ({
+    ...CONFIG,
+    headerActions: () => (
+      <div className="flex items-center rounded-lg border border-slate-200 bg-white p-0.5">
+        <button onClick={() => go("table")}
+          className="h-8 px-3 text-sm rounded-md bg-slate-800 text-white font-medium">📋 ตาราง</button>
+        <button onClick={() => go("shelf")}
+          className="h-8 px-3 text-sm rounded-md text-slate-500 hover:bg-slate-50">📚 ชั้นหนังสือ</button>
+      </div>
+    ),
+  }), [go]);
+
+  if (view === "shelf") return <BookShelfView onSwitchToTable={() => go("table")} />;
+  return <MasterCRUDPage config={tableConfig} />;
 }
