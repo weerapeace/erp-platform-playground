@@ -231,23 +231,10 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
         )}
       </div>
 
-      {/* ยังไม่กำหนดวัน — ลากไปวางบนวันได้ */}
-      <div
-        onDragOver={(e) => { if (canEdit && drag) e.preventDefault(); }}
-        onDrop={() => { if (canEdit && drag) void setDate(drag, null); }}
-        className="rounded-xl border border-amber-200 bg-amber-50/60 p-2">
-        <div className="text-[11px] font-semibold text-amber-800 mb-1">
-          ⏳ ยังไม่กำหนดวัน ({noDate.length}) <span className="font-normal text-amber-600">{canEdit ? "— ลากไปวางบนวันในปฏิทินเพื่อตั้งวัน · ลากกลับมาที่นี่ = ล้างวัน" : ""}</span>
-        </div>
-        {noDate.length === 0 ? <div className="text-[11px] text-amber-600/70 py-1">กำหนดวันครบทุกงานแล้ว 🎉</div> : (
-          <div className="grid gap-1 max-h-28 overflow-y-auto scrollbar-hide" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
-            {noDate.slice(0, 200).map((it) => chip(it, true))}
-          </div>
-        )}
-      </div>
-
+      {/* ปฏิทินซ้าย + กล่อง "ยังไม่กำหนดวัน" ขวา (จอเล็กกล่องไปอยู่ล่าง) */}
+      <div className="flex flex-col lg:flex-row gap-2 items-start">
       {/* ตารางเดือน */}
-      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="flex-1 min-w-0 w-full rounded-xl border border-slate-200 bg-white overflow-hidden">
         <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-200">
           {TH_DAYS.map((d, i) => <div key={d} className={`px-2 py-1 text-[11px] font-semibold text-center ${i === 0 || i === 6 ? "text-rose-500" : "text-slate-500"}`}>{d}</div>)}
         </div>
@@ -275,6 +262,23 @@ export function BoardCalendar({ pending, workOrders, canEdit, moGroups, groupOf,
           })}
         </div>
       </div>
+
+      {/* กล่องขวา: ยังไม่กำหนดวัน — ลากออกไปวางบนวันในปฏิทิน · ลากกลับมาที่นี่ = ล้างวัน */}
+      <div
+        onDragOver={(e) => { if (canEdit && drag) e.preventDefault(); }}
+        onDrop={() => { if (canEdit && drag) void setDate(drag, null); }}
+        className="w-full lg:w-64 shrink-0 rounded-xl border border-amber-200 bg-amber-50/60 p-2">
+        <div className="text-[11px] font-semibold text-amber-800">⏳ ยังไม่กำหนดวัน ({noDate.length})</div>
+        {canEdit && <div className="text-[10px] text-amber-600 mb-1 leading-tight">ลากไปวางบนวันในปฏิทิน = ตั้งวัน · ลากกลับมาที่นี่ = ล้างวัน</div>}
+        {noDate.length === 0 ? <div className="text-[11px] text-amber-600/70 py-1">กำหนดวันครบทุกงานแล้ว 🎉</div> : (
+          <div className="space-y-1 overflow-y-auto scrollbar-hide" style={{ maxHeight: "calc(100vh - 300px)" }}>
+            {noDate.slice(0, 300).map((it) => chip(it))}
+            {noDate.length > 300 && <div className="text-[10px] text-amber-600/70 text-center py-1">…และอีก {noDate.length - 300} ใบ (ใช้ตัวกรองช่วยแคบลง)</div>}
+          </div>
+        )}
+      </div>
+      </div>
+
       <p className="text-[11px] text-slate-400">
         กดการ์ด = เปิดรายละเอียดงาน · {canEdit ? "ลากการ์ดวางบนวัน = ตั้ง/เลื่อนวัน (บันทึกทันที)" : "ดูอย่างเดียว (ไม่มีสิทธิ์แก้)"} · วันที่ผ่านมาแล้วขึ้นป้ายแดง
       </p>
