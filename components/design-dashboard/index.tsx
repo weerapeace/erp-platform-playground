@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import { createPortal } from "react-dom";
 import type { AuditLogEntry } from "@/app/api/audit-logs/route";
@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
+import { FloatingDropdown } from "@/components/floating-dropdown";
 import { usePermission } from "@/components/auth";
 import { CampaignBoardPicker, useCanSendToBoard, SEND_TO_BOARD_MAX } from "@/components/campaign-board-send";
 import { RecordTasksButton } from "@/components/record-tasks";
@@ -194,6 +195,7 @@ export function DesignDashboard() {
   const { cols: galleryCols, setCols: setGalleryCols, gridStyle: galleryGridStyle } = useGalleryColumns("design-dashboard", 6);   // จำนวนการ์ดต่อแถว (ของกลาง จำรายคน)
   const [brandLogos, setBrandLogos] = useState<Record<string, string>>({});   // brand id → logo R2 key (จาก /api/brands)
   const [othersOpen, setOthersOpen] = useState(false);                        // ดรอปดาวน์ "แบรนด์อื่นๆ"
+  const othersAnchorRef = useRef<HTMLDivElement>(null);                       // จุดยึดของดรอปดาวน์ (ให้ของกลางลอยทับได้ ไม่โดนการ์ดข้างล่างบัง)
   // โหลดโลโก้แบรนด์ (จาก /master/brands → brands.logo_url) มาโชว์ในการ์ดแบรนด์แถวบน
   useEffect(() => {
     let alive = true;
@@ -205,13 +207,7 @@ export function DesignDashboard() {
     }).catch(() => {});
     return () => { alive = false; };
   }, []);
-  // ปิดดรอปดาวน์ "อื่นๆ" เมื่อคลิกนอก
-  useEffect(() => {
-    if (!othersOpen) return;
-    const onDown = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest("[data-brands-others]")) setOthersOpen(false); };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [othersOpen]);
+  // (คลิกนอกแล้วปิด — ของกลาง FloatingDropdown จัดการให้แล้ว)
   // ตั้งค่าแบรนด์ (เรียง/ซ่อน) — เก็บรายคนที่ user_ui_prefs
   const [brandPrefs, setBrandPrefs] = useState<{ order: string[]; hidden: string[] }>({ order: [], hidden: [] });
   const [brandSettingsOpen, setBrandSettingsOpen] = useState(false);
@@ -572,14 +568,16 @@ export function DesignDashboard() {
             })}
 
             {otherBrands.length > 0 && (
-              <div className="relative" data-brands-others>
+              // ⚠️ รายการ "แบรนด์อื่นๆ" ต้องใช้ FloatingDropdown ของกลาง (portal → body + fixed)
+              // ของเดิมเป็น absolute z-30 อยู่ในแถบแบรนด์ → โดนการ์ดสรุปข้างล่างทับ ("จม") มองไม่เห็นรายการ
+              <div className="relative" data-brands-others ref={othersAnchorRef}>
                 <button onClick={() => setOthersOpen((o) => !o)}
                   className={`flex h-full flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${othersSelected ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
                   <span className="max-w-[140px] truncate text-sm font-semibold">{othersSelected ? othersSelected.name : "แบรนด์อื่นๆ"} ▾</span>
                   <span className="text-[11px] opacity-70">{othersSelected ? `${othersSelected.active} เดิน` : `อีก ${otherBrands.length} แบรนด์`}</span>
                 </button>
-                {othersOpen && (
-                  <div className="absolute left-0 top-full z-30 mt-1 max-h-72 w-60 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+                <FloatingDropdown anchorRef={othersAnchorRef} open={othersOpen} onClose={() => setOthersOpen(false)} minWidth={240} maxWidth={320}>
+                  <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
                     {otherBrands.map((brand) => (
                       <button key={brand.key} onClick={() => { setSelectedBrandKey(brand.key); setOthersOpen(false); }}
                         className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${selectedBrandKey === brand.key ? "bg-blue-50" : ""}`}>
@@ -589,7 +587,7 @@ export function DesignDashboard() {
                       </button>
                     ))}
                   </div>
-                )}
+                </FloatingDropdown>
               </div>
             )}
 
