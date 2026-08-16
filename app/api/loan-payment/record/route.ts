@@ -5,7 +5,8 @@
  * body: {
  *   contract_id, payment_date?, amount, paid_from?, reference?,
  *   principal?, interest?, penalty?, fee?,    // แยกยอดตามใบเสร็จธนาคาร (ไม่ส่ง = ให้ระบบเดา)
- *   receipt_no?, receipt_image?               // เลขที่ใบเสร็จ + รูปใบเสร็จ (R2 key)
+ *   receipt_no?, receipt_image?,              // เลขที่ใบเสร็จ + รูปใบเสร็จ (R2 key)
+ *   lines?: [{ charge_type_id?, label, bucket, amount }]   // รายการเพิ่มเติมของแต่ละธนาคาร
  * }
  *
  * แยกยอดมา → ตัดตามช่อง (ดอกเข้าดอก เงินต้นเข้าเงินต้น ค่าธรรมเนียม/ดอกผิดนัดเข้าช่องตัวเอง)
@@ -19,6 +20,8 @@ import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const money = (v: unknown) => {
   const n = Number(v);
@@ -36,6 +39,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     paid_from?: string; reference?: string;
     principal?: number; interest?: number; penalty?: number; fee?: number;
     receipt_no?: string; receipt_image?: string;
+    lines?: Array<Record<string, unknown>>;
   };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -51,10 +55,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const receipt_no    = typeof body.receipt_no === "string" ? body.receipt_no.trim().slice(0, 120) : "";
   const receipt_image = typeof body.receipt_image === "string" && /^[a-zA-Z0-9._/-]*$/.test(body.receipt_image) ? body.receipt_image : "";
 
+  // รายการแยกเพิ่มเติม (ประเภทตั้งค่าไว้ที่ /loan-charge-types หรือผู้ใช้พิมพ์เอง)
+  const BUCKETS = new Set(["principal", "interest", "penalty", "fee", "other"]);
+  const rawLines = Array.isArray(body.lines) ? body.lines.slice(0, 50) : [];
+  const lines = rawLines
+    .map((l) => ({
+      charge_type_id: typeof l?.charge_type_id === "string" && UUID_RE.test(l.charge_type_id) ? l.charge_type_id : null,
+      label: String(l?.label ?? "").trim().slice(0, 120) || "รายการอื่น",
+      bucket: BUCKETS.has(String(l?.bucket ?? "")) ? String(l.bucket) : "fee",
+      amount: money(l?.amount),
+    }))
+    .filter((l) => l.amount > 0);
+  const lineTotal = Math.round(lines.reduce((a, l) => a + l.amount, 0) * 100) / 100;
+
   if (!contract_id) return NextResponse.json({ error: "กรุณาเลือกสัญญาเงินกู้" }, { status: 400 });
   if (amount <= 0) return NextResponse.json({ error: "ยอดจ่ายต้องมากกว่า 0" }, { status: 400 });
 
-  const split = Math.round((principal + interest + penalty + fee) * 100) / 100;
+  const split = Math.round((principal + interest + penalty + fee + lineTotal) * 100) / 100;
   if (split > 0 && Math.abs(split - amount) > 0.01) {
     return NextResponse.json({
       error: `ยอดที่แยก (${split.toLocaleString("th-TH")}) ไม่เท่ากับยอดจ่ายรวม (${amount.toLocaleString("th-TH")})`,
@@ -74,6 +91,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     p_fee: fee,
     p_receipt_no: receipt_no,
     p_receipt_image: receipt_image,
+    p_lines: lines,
   });
   if (error) return NextResponse.json({ error: "บันทึกการจ่ายไม่สำเร็จ: " + error.message }, { status: 500 });
 
@@ -82,7 +100,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     entityType: "loan_payments",
     entityId: data as string,
     actorId: user?.id,
-    metadata: { contract_id, amount, split: split > 0 ? { principal, interest, penalty, fee } : null, receipt_no, has_image: !!receipt_image },
+    metadata: { contract_id, amount, split: split > 0 ? { principal, interest, penalty, fee } : null, lines: lines.length ? lines : null, receipt_no, has_image: !!receipt_image },
   });
 
   return NextResponse.json({ payment_id: data, error: null });

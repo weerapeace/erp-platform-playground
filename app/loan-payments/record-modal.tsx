@@ -17,7 +17,22 @@ import { ImageInput } from "@/components/image-input";
 import { apiFetch } from "@/lib/api";
 import { formatAmount } from "@/lib/money";
 
-type ContractOpt = { id: string; loan_code: string; loan_name: string; contract_no: string; outstanding: number };
+type ContractOpt = { id: string; loan_code: string; loan_name: string; contract_no: string; lender_name: string; outstanding: number };
+
+/** ประเภทรายการจ่ายที่ตั้งไว้ที่ /loan-charge-types (แต่ละธนาคารมีไม่เหมือนกัน) */
+type ChargeType = { id: string; name: string; bucket: string; lender_name: string; sort_order: number };
+
+/** แถวรายการเพิ่มเติมในป๊อป (มาจากประเภทที่ตั้งไว้ หรือผู้ใช้พิมพ์เอง) */
+type ExtraLine = { key: string; charge_type_id: string | null; label: string; bucket: string; amount: string };
+
+const BUCKET_OPTS = [
+  { value: "fee",       label: "ค่าธรรมเนียม" },
+  { value: "interest",  label: "ดอกเบี้ย" },
+  { value: "penalty",   label: "ดอกเบี้ยผิดนัดชำระ" },
+  { value: "principal", label: "เงินต้น" },
+  { value: "other",     label: "อื่น ๆ (ไม่ตัดเข้างวด)" },
+];
+const bucketLabel = (b: string) => BUCKET_OPTS.find((x) => x.value === b)?.label ?? b;
 
 const n2 = (v: string) => { const n = Number(v); return isFinite(n) ? Math.round(n * 100) / 100 : 0; };
 
@@ -54,6 +69,8 @@ export function RecordPaymentModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const [f, setF] = useState({ ...EMPTY });
+  const [chargeTypes, setChargeTypes] = useState<ChargeType[]>([]);
+  const [extra, setExtra] = useState<ExtraLine[]>([]);
   const [imageKey, setImageKey] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
   const [readNote, setReadNote] = useState("");
@@ -74,11 +91,24 @@ export function RecordPaymentModal({
         setContracts(rows.map((r) => ({
           id: String(r.id), loan_code: String(r.loan_code ?? ""), loan_name: String(r.loan_name ?? ""),
           contract_no: String(r.contract_no ?? ""),
+          lender_name: String(r.lender_name ?? ""),
           outstanding: Number(r.outstanding_principal ?? 0),
         })));
       })
       .catch(() => setErr("โหลดรายชื่อสัญญาไม่สำเร็จ"))
       .finally(() => setLoadingList(false));
+
+    // ประเภทรายการจ่ายที่ตั้งไว้ (ตั้งค่าเพิ่มเองได้ที่ /loan-charge-types)
+    apiFetch("/api/master-v2/loan-charge-types?limit=200&sort_by=sort_order&sort_dir=asc")
+      .then((r) => r.json())
+      .then((j) => {
+        const rows = (j?.data ?? []) as Record<string, unknown>[];
+        setChargeTypes(rows.map((r) => ({
+          id: String(r.id), name: String(r.name ?? ""), bucket: String(r.bucket ?? "fee"),
+          lender_name: String(r.lender_name ?? ""), sort_order: Number(r.sort_order ?? 100),
+        })));
+      })
+      .catch(() => { /* ไม่มีก็ยังบันทึกได้ตามปกติ */ });
   }, [open]);
 
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -86,14 +116,39 @@ export function RecordPaymentModal({
 
   // ผลรวมของช่องที่แยก เทียบกับยอดจ่ายรวม
   const total = n2(f.amount);
+  const extraTotal = useMemo(
+    () => Math.round(extra.reduce((a, l) => a + n2(l.amount), 0) * 100) / 100,
+    [extra],
+  );
   const split = useMemo(
-    () => Math.round(SPLIT_FIELDS.reduce((a, s) => a + n2(f[s.key]), 0) * 100) / 100,
+    () => Math.round((SPLIT_FIELDS.reduce((a, s) => a + n2(f[s.key]), 0) + extraTotal) * 100) / 100,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [f.principal, f.interest, f.penalty, f.fee],
+    [f.principal, f.interest, f.penalty, f.fee, extraTotal],
   );
   const hasSplit = split > 0;
   const diff = Math.round((total - split) * 100) / 100;
   const splitBad = hasSplit && Math.abs(diff) > 0.01;
+
+  // ประเภทรายการที่ใช้ได้กับสัญญานี้ = ของธนาคารนั้น + ของกลาง (เว้นชื่อธนาคารว่าง)
+  const lender = (selected?.lender_name ?? "").trim();
+  const usableTypes = useMemo(
+    () => chargeTypes
+      .filter((t) => !t.lender_name.trim() || t.lender_name.trim() === lender)
+      .filter((t) => !extra.some((l) => l.charge_type_id === t.id))
+      .sort((a, b) => a.sort_order - b.sort_order),
+    [chargeTypes, lender, extra],
+  );
+
+  const addLine = (t?: ChargeType) => setExtra((p) => [...p, {
+    key: `x-${Date.now()}-${p.length}`,
+    charge_type_id: t?.id ?? null,
+    label: t?.name ?? "",
+    bucket: t?.bucket ?? "fee",
+    amount: "",
+  }]);
+  const setLine = (key: string, patch: Partial<ExtraLine>) =>
+    setExtra((p) => p.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const removeLine = (key: string) => setExtra((p) => p.filter((l) => l.key !== key));
 
   /** เติมส่วนที่ยังขาดลงช่องเงินต้น (ธนาคารมักบอกดอกเบี้ยมา ที่เหลือคือเงินต้น) */
   const fillRest = () => {
@@ -164,13 +219,16 @@ export function RecordPaymentModal({
           principal: n2(f.principal), interest: n2(f.interest),
           penalty: n2(f.penalty), fee: n2(f.fee),
           receipt_no: f.receipt_no, receipt_image: imageKey ?? "",
+          lines: extra
+            .filter((l) => n2(l.amount) > 0)
+            .map((l) => ({ charge_type_id: l.charge_type_id, label: l.label, bucket: l.bucket, amount: n2(l.amount) })),
         }),
       });
       const j = await res.json();
       if (!res.ok || j?.error) { setErr(j?.error || "บันทึกไม่สำเร็จ"); setSaving(false); return; }
       setSaving(false);
       setF({ ...EMPTY, contract_id: contractId ?? "" });
-      setImageKey(null); setReadNote("");
+      setImageKey(null); setReadNote(""); setExtra([]);
       onCreated();
     } catch {
       setErr("เกิดข้อผิดพลาดในการเชื่อมต่อ");
@@ -264,6 +322,51 @@ export function RecordPaymentModal({
                 <MoneyInput value={f[s.key as SplitKey]} onChange={(raw) => set(s.key, raw)} placeholder="0.00" className={moneyCls} />
               </ERPFormField>
             ))}
+          </div>
+
+          {/* รายการเพิ่มเติมของธนาคารนี้ (ตั้งค่าที่ /loan-charge-types) */}
+          {extra.length > 0 && (
+            <div className="space-y-2 pt-1 border-t border-slate-100">
+              {extra.map((l) => (
+                <div key={l.key} className="grid grid-cols-12 gap-2 items-start">
+                  <div className="col-span-5">
+                    <ERPInput value={l.label} onChange={(e) => setLine(l.key, { label: e.target.value })}
+                      placeholder="ชื่อรายการ เช่น ค่าอากรแสตมป์" />
+                  </div>
+                  <div className="col-span-3">
+                    <ERPSelect value={l.bucket} onChange={(e) => setLine(l.key, { bucket: e.target.value })} options={BUCKET_OPTS} />
+                  </div>
+                  <div className="col-span-3">
+                    <MoneyInput value={l.amount} onChange={(raw) => setLine(l.key, { amount: raw })} placeholder="0.00" className={moneyCls} />
+                  </div>
+                  <div className="col-span-1 flex justify-center pt-1.5">
+                    <button type="button" onClick={() => removeLine(l.key)} title="ลบรายการนี้"
+                      className="w-6 h-6 rounded text-slate-300 hover:text-red-600 hover:bg-red-50">🗑</button>
+                  </div>
+                </div>
+              ))}
+              <p className="text-[11px] text-slate-400">
+                “อื่น ๆ” = บันทึกว่าจ่ายจริงแต่ไม่ตัดเข้างวดผ่อน (เช่น ค่าอากรแสตมป์)
+              </p>
+            </div>
+          )}
+
+          {/* ปุ่มเพิ่มรายการ — ดึงจากประเภทที่ตั้งไว้สำหรับธนาคารนี้ */}
+          <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100">
+            <span className="text-[11px] text-slate-400">เพิ่มรายการของธนาคารนี้:</span>
+            {usableTypes.slice(0, 8).map((t) => (
+              <button key={t.id} type="button" onClick={() => addLine(t)}
+                title={`จัดเข้ากลุ่ม: ${bucketLabel(t.bucket)}`}
+                className="h-7 px-2.5 text-[11px] rounded-full border border-slate-200 text-slate-600 bg-white hover:bg-slate-50">
+                + {t.name}
+              </button>
+            ))}
+            <button type="button" onClick={() => addLine()}
+              className="h-7 px-2.5 text-[11px] rounded-full border border-dashed border-slate-300 text-slate-500 hover:bg-slate-50">
+              ➕ รายการอื่น (พิมพ์เอง)
+            </button>
+            <a href="/loan-charge-types" target="_blank" rel="noopener noreferrer"
+              className="text-[11px] text-blue-600 hover:underline ml-auto">ตั้งค่ารายการของแต่ละธนาคาร ↗</a>
           </div>
 
           {hasSplit && (
