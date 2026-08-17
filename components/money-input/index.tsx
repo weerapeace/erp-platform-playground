@@ -65,14 +65,22 @@ export function MoneyInput({
 }: MoneyInputProps) {
   const ref = useRef<HTMLInputElement>(null);
   const caretRef = useRef<number | null>(null);
+  /** ค่าดิบที่เราส่งออกไปล่าสุด — ใช้แยก "เสียงสะท้อนของการพิมพ์เอง" ออกจาก "ค่าที่ตั้งมาจากข้างนอก" */
+  const lastEmitRef = useRef<string>(value == null ? "" : String(value));
   const [text, setText] = useState(() => groupThousands(value == null ? "" : String(value)));
 
-  // ค่าจากภายนอกเปลี่ยน (โหลดข้อมูล / สลับ record / รีเซ็ตฟอร์ม) → sync เข้าช่อง
-  // ข้ามตอนที่ผู้ใช้กำลังพิมพ์อยู่ในช่องนี้ เพื่อไม่ให้เคอร์เซอร์กระโดด
+  // ค่าจากภายนอกเปลี่ยน (โหลดข้อมูล / สลับ record / รีเซ็ตฟอร์ม / วางข้อมูลลงตาราง) → sync เข้าช่อง
+  //
+  // ⚠️ ห้ามใช้ "กำลังโฟกัสอยู่ = ไม่รับค่า" เป็นเงื่อนไข — เคยทำแล้วเจอบั๊ก:
+  //    วางข้อมูลจาก Excel ลงคอลัมน์ ช่องที่เคอร์เซอร์อยู่ (แถวบนสุด) จะไม่ขึ้นค่า
+  //    ทั้งที่ข้อมูลเข้าแล้ว เพราะช่องนั้นโฟกัสอยู่พอดี
+  // ใช้วิธี "จำค่าที่เราส่งออกไปล่าสุด" แทน: ค่าที่กลับมาตรงกับที่เราส่ง = เสียงสะท้อนของการพิมพ์เอง
+  // (ข้าม ไม่งั้นเคอร์เซอร์กระโดด) · ต่างจากนั้น = มีคนอื่นตั้งค่ามาจากข้างนอก → รับเสมอ
   useEffect(() => {
     const incoming = value == null ? "" : String(value);
-    if (document.activeElement === ref.current) return;
-    if (sanitizeNumeric(text) === sanitizeNumeric(incoming)) return;
+    if (sanitizeNumeric(incoming) === sanitizeNumeric(lastEmitRef.current)) return;   // ค่าที่เราเพิ่งพิมพ์เอง
+    if (sanitizeNumeric(text) === sanitizeNumeric(incoming)) return;                  // ตรงกับที่แสดงอยู่แล้ว
+    lastEmitRef.current = incoming;
     setText(groupThousands(incoming));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
@@ -95,6 +103,7 @@ export function MoneyInput({
     let c = 0, seen = 0;
     while (c < shown.length && seen < meaningful) { if (shown[c] !== ",") seen++; c++; }
     caretRef.current = c;
+    lastEmitRef.current = raw;
     setText(shown);
     onChange(raw);
   };
@@ -129,6 +138,7 @@ export function MoneyInput({
       onBlur={() => {
         // ออกจากช่อง → เก็บกวาดค่าที่พิมพ์ค้าง เช่น "1234." → "1234"
         const raw = sanitizeNumeric(text).replace(/\.$/, "");
+        lastEmitRef.current = raw;
         if (raw !== sanitizeNumeric(text)) onChange(raw);
         setText(groupThousands(raw));
         onBlur?.(raw);
