@@ -80,8 +80,13 @@ export function friendlyDbError(msg: string): string {
     return "ทำรายการไม่ได้ เพราะมีข้อมูลอื่นอ้างถึงรายการนี้อยู่ (เช่น ถูกใช้ในเอกสาร)";
   if (/duplicate key|unique constraint|23505/i.test(msg))
     return "ข้อมูลซ้ำ — มีค่าที่ต้องไม่ซ้ำกันอยู่แล้วในระบบ";
-  if (/not-null|null value in column|23502/i.test(msg))
-    return "มีช่องที่จำเป็นถูกเว้นว่าง — กรุณากรอกให้ครบ";
+  if (/not-null|null value in column|23502/i.test(msg)) {
+    // บอกชื่อช่องที่ขาดไปด้วย ไม่งั้นผู้ใช้ไม่รู้ว่าต้องกรอกอะไร (เคสจริง: บริษัทลืมกรอก "รหัส")
+    const col = msg.match(/null value in column "([^"]+)"/i)?.[1];
+    return col
+      ? `ยังไม่ได้กรอกช่องที่จำเป็น: "${col}" — กรุณากรอกให้ครบแล้วบันทึกใหม่`
+      : "มีช่องที่จำเป็นถูกเว้นว่าง — กรุณากรอกให้ครบ";
+  }
   if (/check constraint/i.test(msg))
     return "ค่าที่กรอกไม่ผ่านเงื่อนไขของระบบ (ละเมิดกฎข้อมูล) — กรุณาตรวจสอบค่าอีกครั้ง";
   return msg;
