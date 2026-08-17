@@ -164,6 +164,23 @@ export function InstallmentsModal({
   const setCell = (key: string, patch: Partial<Row>) =>
     setDraft((p) => p && p.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
+  /**
+   * พิมพ์ "รวมต้องจ่าย" ของงวดนั้นตรง ๆ (ตามใบธนาคารที่บอกมาแต่ยอดรวม)
+   * → คงดอกเบี้ยไว้ แล้วปรับ "เงินต้น" ให้ผลรวมเท่ากับที่พิมพ์
+   *   (ดอกเบี้ยคิดจากอัตรา×ยอดคงเหลือ เป็นตัวตั้ง · เงินต้นคือส่วนที่เหลือ)
+   * ถ้าพิมพ์ยอดน้อยกว่าดอกเบี้ย+ค่าธรรมเนียม → เงินต้น 0 แล้วลดดอกเบี้ยลงแทน
+   */
+  const setTotal = (r: Row, raw: string) => {
+    const total = n2(raw);
+    const fixed = r.fee + r.penalty;
+    const interest = n2(r.interest);
+    if (total >= interest + fixed) {
+      setCell(r.key, { principal: String(Math.round((total - interest - fixed) * 100) / 100) });
+    } else {
+      setCell(r.key, { principal: "0", interest: String(Math.max(Math.round((total - fixed) * 100) / 100, 0)) });
+    }
+  };
+
   const addRow = () => setDraft((p) => {
     const list = p ?? [];
     const last = list[list.length - 1];
@@ -288,7 +305,11 @@ export function InstallmentsModal({
       {
         key: "total", header: "รวมต้องจ่าย", width: "1fr", align: "right",
         sortValue: sv((r) => calc.get(r.key)?.total ?? 0), sortLabel: "รวมต้องจ่าย",
-        cell: (r) => <span className={`text-sm font-medium ${editing ? "text-blue-600" : "text-slate-800"}`}>{money(calc.get(r.key)?.total ?? 0)}</span>,
+        cell: (r) => editing
+          ? <MoneyInput value={calc.get(r.key)?.total ?? 0} onChange={(raw) => setTotal(r, raw)}
+              title="พิมพ์ยอดรวมของงวดนี้ → ระบบปรับ 'เงินต้น' ให้เอง (ดอกเบี้ยคงเดิม)"
+              className={`${inputCls} text-blue-700 font-medium`} />
+          : <span className="text-sm font-medium text-slate-800">{money(calc.get(r.key)?.total ?? 0)}</span>,
       },
       {
         key: "paid", header: "จ่ายแล้ว", width: "1fr", align: "right",
@@ -381,8 +402,10 @@ export function InstallmentsModal({
 
           {editing && (
             <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              พิมพ์ยอดจริงตามใบของธนาคารได้เลย — แต่ละงวดเงินต้นกับดอกเบี้ยไม่เท่ากันก็ได้ · เพิ่ม/ลบงวดได้ ระบบเรียงเลขงวดใหม่ให้เอง ·
-              เมื่อบันทึก ระบบจะคิด “เงินต้นคงเหลือ” ต่อเนื่องใหม่ทั้งตาราง และตัดยอดการจ่ายที่บันทึกไว้แล้วใหม่ให้อัตโนมัติ
+              พิมพ์ยอดจริงตามใบของธนาคารได้เลย — แก้ได้ทั้ง <b>วันครบกำหนด · เงินต้น · ดอกเบี้ย</b> และ <b>รวมต้องจ่าย</b> ·
+              ถ้าใบธนาคารบอกมาแต่ยอดรวม ให้พิมพ์ที่ช่อง “รวมต้องจ่าย” ระบบจะปรับเงินต้นให้เอง (ดอกเบี้ยคงเดิม) ·
+              เพิ่ม/ลบงวดได้ ระบบเรียงเลขงวดใหม่ให้ · เมื่อบันทึก ระบบคิด “เงินต้นคงเหลือ” ต่อเนื่องใหม่ทั้งตาราง
+              และตัดยอดการจ่ายที่บันทึกไว้แล้วใหม่ให้อัตโนมัติ
             </div>
           )}
 
