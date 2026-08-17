@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MoneyInput } from "@/components/money-input";
 import { DateInput } from "@/components/date-input";
 import { apiFetch } from "@/lib/api";
+import { useToast } from "@/components/toast";
 import { formatAmount } from "@/lib/money";
 
 type Fee = { id: string; label: string; amount: number; fee_date: string | null; note: string };
@@ -24,7 +25,12 @@ type ChargeType = { id: string; name: string; bucket: string; lender_name: strin
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 const inputCls = "w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500";
 
-export function LoanFeesSection({ contractId }: { contractId: string }) {
+export function LoanFeesSection({ contractId, onChanged }: {
+  contractId: string;
+  /** เพิ่ม/ลบค่าธรรมเนียมแล้ว → ให้หน้าสัญญาโหลด "ค่าธรรมเนียมรวม / ได้รับเงินจริง" ใหม่ */
+  onChanged?: () => Promise<void> | void;
+}) {
+  const toast = useToast();
   const [rows, setRows] = useState<Fee[]>([]);
   const [types, setTypes] = useState<ChargeType[]>([]);
   const [loading, setLoading] = useState(false);
@@ -76,7 +82,9 @@ export function LoanFeesSection({ contractId }: { contractId: string }) {
       const j = await res.json();
       if (!res.ok || j?.error) { setErr(j?.error || "เพิ่มรายการไม่สำเร็จ"); setBusy(false); return; }
       setDraft({ label: "", amount: "", fee_date: "" });
+      toast.success(`เพิ่ม “${label}” แล้ว`);
       await load();
+      await onChanged?.();
     } catch { setErr("เกิดข้อผิดพลาดในการเชื่อมต่อ"); }
     finally { setBusy(false); }
   };
@@ -87,7 +95,9 @@ export function LoanFeesSection({ contractId }: { contractId: string }) {
       const res = await apiFetch(`/api/master-v2/loan-contract-fees/${id}`, { method: "DELETE" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j?.error) { setErr(j?.error || "ลบไม่สำเร็จ"); setBusy(false); return; }
+      toast.success("ลบรายการแล้ว");
       await load();
+      await onChanged?.();
     } catch { setErr("เกิดข้อผิดพลาดในการเชื่อมต่อ"); }
     finally { setBusy(false); }
   };

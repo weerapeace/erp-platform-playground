@@ -21,6 +21,7 @@ import { MoneyInput } from "@/components/money-input";
 import { DateInput } from "@/components/date-input";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { apiFetch } from "@/lib/api";
+import { useToast } from "@/components/toast";
 import { parsePastedTable, parsePastedGrid, parseNumberCell, parseDateCell } from "@/lib/paste-table";
 
 /** รูปแบบฟิลด์เท่าที่ตารางกรอกต้องรู้ (ตัดมาจาก FieldDef ของ MasterCRUD) */
@@ -72,6 +73,7 @@ export function InlineCreatePanel({
    */
   fixedValues?: Record<string, unknown>;
 }) {
+  const toast = useToast();
   // คอลัมน์ที่กรอกได้จริง — เรียงตามทะเบียนฟิลด์ · ฟิลด์บังคับมาก่อนเสมอ
   const cols = useMemo(() => {
     const locked = new Set(Object.keys(fixedValues ?? {}));
@@ -231,10 +233,18 @@ export function InlineCreatePanel({
       const j = await res.json();
       if (!res.ok || (j?.error && !j?.created)) { setErr(j?.error || "บันทึกไม่สำเร็จ"); setSaving(false); return; }
       const failed = (j?.failed ?? []) as FailRow[];
-      setResult({ created: Number(j?.created ?? 0), failed });
-      if (Number(j?.created ?? 0) > 0) await onSaved();
-      // เข้าครบทุกแถว → ล้างตารางให้พร้อมกรอกชุดถัดไป
-      if (failed.length === 0) setRows(Array.from({ length: BLANK_ROWS }, (_, i) => ({ key: `n${i}-${Date.now()}`, data: {} })));
+      const created = Number(j?.created ?? 0);
+      setResult({ created, failed });
+      if (created > 0) await onSaved();          // รีเฟรชรายการ/ยอดสรุปให้ทันที ไม่ต้องปิด-เปิดใหม่
+      if (failed.length === 0) {
+        // เข้าครบทุกแถว → บอกผล แล้วปิดป๊อปให้เลย (ผู้ใช้จะได้เห็นรายการที่เพิ่มทันที)
+        toast.success(`บันทึกสำเร็จ ${created} รายการ`);
+        setRows(Array.from({ length: BLANK_ROWS }, (_, i) => ({ key: `n${i}-${Date.now()}`, data: {} })));
+        setSaving(false);
+        onClose();
+        return;
+      }
+      toast.error(`บันทึกได้ ${created} รายการ · ไม่สำเร็จ ${failed.length} แถว — ดูรายละเอียดในตาราง`);
     } catch {
       setErr("เกิดข้อผิดพลาดในการเชื่อมต่อ");
     } finally {

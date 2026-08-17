@@ -16,6 +16,7 @@ import { paymentSplitCheck } from "@/app/loan-payments/split-check";
 import { InlineCreateButton } from "@/components/master-crud/inline-create";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
+import { useToast } from "@/components/toast";
 import { formatAmount } from "@/lib/money";
 import { formatDate } from "@/lib/date";
 
@@ -44,7 +45,12 @@ const STATUS: Record<string, [string, string]> = {
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 const money = (v: number) => v ? <span className="tabular-nums">{formatAmount(v)}</span> : <span className="text-slate-300">—</span>;
 
-export function LoanPaymentsSection({ contractId }: { contractId: string }) {
+export function LoanPaymentsSection({ contractId, onChanged }: {
+  contractId: string;
+  /** บันทึกอะไรแล้ว → ให้หน้าสัญญาโหลดตัวเลขสรุปใหม่ (ไม่ต้องปิด-เปิด drawer) */
+  onChanged?: () => Promise<void> | void;
+}) {
+  const toast = useToast();
   const [rows, setRows] = useState<Pay[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -158,7 +164,7 @@ export function LoanPaymentsSection({ contractId }: { contractId: string }) {
                   title="การจ่ายเงินกู้"
                   fixedValues={{ loan_contract_id: contractId }}
                   rowCheck={paymentSplitCheck}
-                  onSaved={load}
+                  onSaved={async () => { await load(); await onChanged?.(); }}
                   label="➕ เพิ่มหลายรายการ"
                 />
                 <a href={`/loan-payments?flt=${encodeURIComponent(JSON.stringify({ loan_contract_id: contractId }))}`}
@@ -176,7 +182,12 @@ export function LoanPaymentsSection({ contractId }: { contractId: string }) {
       <RecordPaymentModal
         open={payOpen} contractId={contractId}
         onClose={() => setPayOpen(false)}
-        onCreated={() => { setPayOpen(false); void load(); }}
+        onCreated={async () => {
+          setPayOpen(false);
+          toast.success("บันทึกการจ่ายแล้ว — กำลังคิดยอดใหม่");
+          await load();
+          await onChanged?.();
+        }}
       />
     </div>
   );

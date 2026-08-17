@@ -88,12 +88,12 @@ const CONFIG: MasterCRUDConfig = {
     {
       key: "loan-fees",
       title: "🧾 ค่าธรรมเนียมของสัญญา",
-      render: ({ recordId }) => <LoanFeesSection contractId={recordId} />,
+      render: ({ recordId, refresh }) => <LoanFeesSection contractId={recordId} onChanged={refresh} />,
     },
     {
       key: "loan-payments",
       title: "💸 รายการการจ่ายเงินกู้",
-      render: ({ recordId }) => <LoanPaymentsSection contractId={recordId} />,
+      render: ({ recordId, refresh }) => <LoanPaymentsSection contractId={recordId} onChanged={refresh} />,
     },
   ],
   cellRenderers: {
