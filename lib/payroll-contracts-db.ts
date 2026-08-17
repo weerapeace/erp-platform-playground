@@ -7,6 +7,7 @@
  * soft delete = status → cancelled (กันลบสัญญาจริงที่มีเงินเดือนผูก)
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 import { nullifyEmpty } from "@/lib/payroll-coerce";
 import {
   applyContractLifecycle,
@@ -155,6 +156,37 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
     ...cols,
   };
 
+  // ── ต่อสัญญา: สัญญาปัจจุบันมีได้ฉบับเดียวต่อคน ────────────────────────────
+  // ฐานข้อมูลมี unique index (employee_contracts_one_current_idx) คุมไว้
+  // เดิมถ้าเพิ่มสัญญาใหม่แบบติ๊ก "เป็นสัญญาปัจจุบัน" ขณะที่ยังมีฉบับเดิมอยู่
+  // จะชน constraint แล้วโชว์ error ดิบจาก DB ให้ผู้ใช้เห็น (duplicate key …)
+  // → ตีความว่าเป็น "การต่อสัญญา" ปิดฉบับเดิมให้อัตโนมัติ (วันสิ้นสุด = ก่อนวันเริ่มฉบับใหม่ 1 วัน)
+  const willBeCurrent = baseInsert.is_current !== false && String(baseInsert.status ?? "active") === "active";
+  if (willBeCurrent) {
+    const { data: currentRows, error: currentErr } = await admin.from(TABLE)
+      .select("id, contract_no, start_date, end_date")
+      .eq("employee_id", employeeId).eq("is_current", true).eq("status", "active");
+    if (currentErr) throw new Error(currentErr.message);
+    const newStart = String(baseInsert.start_date ?? "").slice(0, 10);
+    const dayBefore = (iso: string) => {
+      const d = new Date(`${iso}T00:00:00Z`);
+      if (Number.isNaN(d.getTime())) return "";
+      d.setUTCDate(d.getUTCDate() - 1);
+      return d.toISOString().slice(0, 10);
+    };
+    for (const prev of (currentRows ?? []) as Record<string, unknown>[]) {
+      const endDate = String(prev.end_date ?? "").slice(0, 10) || dayBefore(newStart) || newStart;
+      const { error } = await admin.from(TABLE)
+        .update({ is_current: false, status: "ended", end_date: endDate })
+        .eq("id", String(prev.id));
+      if (error) throw new Error(error.message);
+      await writeAudit(admin, {
+        action: "end_contract_on_renew", entityType: TABLE, entityId: String(prev.id),
+        metadata: { employee_id: String(employeeId), contract_no: prev.contract_no ?? null, end_date: endDate, reason: "มีสัญญาใหม่เป็นฉบับปัจจุบัน" },
+      });
+    }
+  }
+
   // ลองบันทึก พร้อม retry ถ้าเลขซ้ำ (กรณีออกเลขอัตโนมัติแล้วชนกัน)
   let contractNo = providedNo || (await nextContractNo(admin, year));
   let data: Record<string, unknown>[] | null = null;
@@ -163,11 +195,18 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
     const res = await admin.from(TABLE).insert(insertWithLifecycle).select(SELECT).limit(1);
     if (!res.error) { data = res.data as Record<string, unknown>[]; break; }
     // เลขซ้ำ + ออกเลขอัตโนมัติ → ขยับเลขแล้วลองใหม่
-    if (res.error.code === "23505" && !providedNo && attempt < 3) {
+    if (res.error.code === "23505" && !providedNo && attempt < 3 && !res.error.message.includes("one_current")) {
       contractNo = await nextContractNo(admin, year);
       continue;
     }
-    throw new Error(res.error.message);
+    // แปล error ดิบจากฐานข้อมูลเป็นภาษาคน (ห้ามโชว์ duplicate key … ให้ผู้ใช้)
+    const raw = res.error.message;
+    if (res.error.code === "23505" && raw.includes("one_current")) {
+      throw new Error("พนักงานคนนี้มีสัญญาปัจจุบันอยู่แล้ว — ถ้าจะต่อสัญญาให้ติ๊ก “เป็นสัญญาปัจจุบัน” (ระบบจะปิดฉบับเดิมให้) หรือถ้าเป็นสัญญาเก่าย้อนหลัง ให้เอาติ๊กออกก่อนบันทึก");
+    }
+    if (res.error.code === "23505") throw new Error(`เลขที่สัญญา “${contractNo}” มีอยู่แล้ว — เว้นว่างเพื่อให้ระบบออกเลขให้ หรือเปลี่ยนเลขใหม่`);
+    if (res.error.code === "23503") throw new Error("ข้อมูลอ้างอิงไม่ถูกต้อง (พนักงาน/บริษัท/แผนกที่เลือกอาจถูกลบไปแล้ว)");
+    throw new Error(raw);
   }
   if (!data) throw new Error("บันทึกสัญญาไม่สำเร็จ");
   const mergedFinal: Record<string, unknown> = { ...baseInsert, contract_no: contractNo };
