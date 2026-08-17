@@ -54,7 +54,7 @@ const SKIP_TYPES = new Set(["image", "one2many", "many2many", "computed", "texta
 const inputCls = "w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500";
 
 export function InlineCreatePanel({
-  open, onClose, onSaved, fields, apiBase, apiPath, title, rowCheck,
+  open, onClose, onSaved, fields, apiBase, apiPath, title, rowCheck, fixedValues,
 }: {
   open: boolean;
   onClose: () => void;
@@ -66,16 +66,23 @@ export function InlineCreatePanel({
   title: string;
   /** ตรวจความสมเหตุสมผลของแต่ละแถวก่อนบันทึก (เช่น ยอดแยกต้องรวมได้เท่ายอดจ่าย) */
   rowCheck?: (data: Record<string, unknown>) => { ok: boolean; message?: string } | null;
+  /**
+   * ค่าที่ล็อกไว้ให้ทุกแถว (เช่น เปิดจากในหน้าสัญญา → loan_contract_id ของสัญญานั้น)
+   * ช่องพวกนี้จะไม่โผล่ในตาราง และถูกใส่ให้ตอนบันทึก
+   */
+  fixedValues?: Record<string, unknown>;
 }) {
   // คอลัมน์ที่กรอกได้จริง — เรียงตามทะเบียนฟิลด์ · ฟิลด์บังคับมาก่อนเสมอ
   const cols = useMemo(() => {
+    const locked = new Set(Object.keys(fixedValues ?? {}));
     const usable = fields
-      .filter((f) => !f.readonly && !f.hideInForm && !SKIP_TYPES.has(f.type) && f.key !== "id")
+      .filter((f) => !f.readonly && !f.hideInForm && !SKIP_TYPES.has(f.type) && f.key !== "id" && !locked.has(f.key))
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     const required = usable.filter((f) => f.required);
     const rest = usable.filter((f) => !f.required);
     return [...required, ...rest].slice(0, MAX_COLS);
-  }, [fields]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fields, fixedValues]);
 
   const [rows, setRows] = useState<Row[]>(() =>
     Array.from({ length: BLANK_ROWS }, (_, i) => ({ key: `r${i}`, data: {} })));
@@ -217,7 +224,7 @@ export function InlineCreatePanel({
       const res = await apiFetch(`${apiBase}${apiPath}/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: filled.map((r) => r.data), mode: "create" }),
+        body: JSON.stringify({ rows: filled.map((r) => ({ ...(fixedValues ?? {}), ...r.data })), mode: "create" }),
       });
       const j = await res.json();
       if (!res.ok || (j?.error && !j?.created)) { setErr(j?.error || "บันทึกไม่สำเร็จ"); setSaving(false); return; }
@@ -422,5 +429,101 @@ export function InlineCreatePanel({
         </p>
       </div>
     </ERPModal>
+  );
+}
+
+// ============================================================
+// InlineCreateButton — ปุ่ม "เพิ่มหลายรายการ" แบบใช้ได้ทุกที่ (ของกลาง)
+// ------------------------------------------------------------
+// ดึงทะเบียนฟิลด์ของโมดูลมาเอง → หน้าไหนก็วางปุ่มนี้ได้เลย ไม่ต้องผ่าน MasterCRUDPage
+// เช่น แผง "รายการการจ่ายเงินกู้" ในหน้าสัญญา (ล็อกสัญญาไว้ด้วย fixedValues)
+// ============================================================
+
+/** แปลงทะเบียนฟิลด์ (erp_module_fields) → รูปแบบที่ตารางกรอกใช้ */
+export function registryToInlineFields(rows: Record<string, unknown>[]): InlineField[] {
+  return rows.map((rf) => {
+    const ui = String(rf.ui_field_type ?? "text");
+    const type =
+      ui === "boolean" ? "boolean"
+      : ui === "number" || ui === "currency" ? "number"
+      : ui === "date" ? "date"
+      : ui === "relation" ? "relation"
+      : ui === "select" ? "select"
+      : ui === "image" ? "image"
+      : ui === "textarea" || ui === "json" ? "textarea"
+      : ui === "many2many" ? "many2many"
+      : ui === "one2many" ? "one2many"
+      : ui === "computed" ? "computed"
+      : "text";
+    const opts = (rf.options ?? {}) as { options?: string[]; labels?: Record<string, string>; currency?: string; currency_field?: string };
+    const rel = (rf.relation_config ?? {}) as Record<string, unknown>;
+    return {
+      key: String(rf.column_name ?? rf.field_key ?? ""),
+      label: String(rf.field_label ?? ""),
+      type,
+      required: !!rf.is_required,
+      readonly: !rf.is_editable,
+      hideInForm: !rf.show_in_form,
+      options: Array.isArray(opts.options) ? opts.options : undefined,
+      optionLabels: opts.labels,
+      relationConfig: rel.target_table ? (rel as unknown as RelationConfig) : undefined,
+      currencyCode: opts.currency || (ui === "currency" && !opts.currency_field ? "THB" : undefined),
+      currencyField: opts.currency_field,
+      placeholder: (rf.placeholder as string) ?? undefined,
+      order: Number(rf.display_order ?? 0),
+    };
+  }).filter((f) => f.key);
+}
+
+export function InlineCreateButton({
+  moduleKey, apiBase = "/api/master-v2/", apiPath, title, fixedValues, rowCheck, onSaved,
+  label = "➕ เพิ่มหลายรายการ", className,
+}: {
+  moduleKey: string;
+  apiBase?: string;
+  /** ค่าเริ่มต้น = moduleKey */
+  apiPath?: string;
+  title?: string;
+  fixedValues?: Record<string, unknown>;
+  rowCheck?: (data: Record<string, unknown>) => { ok: boolean; message?: string } | null;
+  onSaved: () => void | Promise<void>;
+  label?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [fields, setFields] = useState<InlineField[] | null>(null);
+
+  const openPanel = async () => {
+    setOpen(true);
+    if (fields) return;
+    try {
+      const r = await apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(moduleKey)}`);
+      const j = await r.json();
+      setFields(registryToInlineFields((j?.fields ?? []) as Record<string, unknown>[]));
+    } catch {
+      setFields([]);
+    }
+  };
+
+  return (
+    <>
+      <button type="button" onClick={openPanel}
+        className={className ?? "h-8 px-3 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"}>
+        {label}
+      </button>
+      {open && fields && (
+        <InlineCreatePanel
+          open={open}
+          onClose={() => setOpen(false)}
+          onSaved={onSaved}
+          fields={fields}
+          apiBase={apiBase}
+          apiPath={apiPath ?? moduleKey}
+          title={title ?? moduleKey}
+          rowCheck={rowCheck}
+          fixedValues={fixedValues}
+        />
+      )}
+    </>
   );
 }

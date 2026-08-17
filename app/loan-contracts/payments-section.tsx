@@ -12,6 +12,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RecordPaymentModal } from "@/app/loan-payments/record-modal";
+import { paymentSplitCheck } from "@/app/loan-payments/split-check";
+import { InlineCreateButton } from "@/components/master-crud/inline-create";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
 import { formatAmount } from "@/lib/money";
@@ -150,6 +152,15 @@ export function LoanPaymentsSection({ contractId }: { contractId: string }) {
                   className="h-8 px-3 text-xs font-medium rounded-lg border border-blue-600 bg-blue-600 text-white hover:bg-blue-700">
                   💵 บันทึกการจ่าย
                 </button>
+                {/* ลงหลายใบรวดเดียว (ของกลาง) — ล็อกสัญญานี้ไว้ให้ทุกแถว ไม่ต้องเลือกซ้ำ */}
+                <InlineCreateButton
+                  moduleKey="loan-payments"
+                  title="การจ่ายเงินกู้"
+                  fixedValues={{ loan_contract_id: contractId }}
+                  rowCheck={paymentSplitCheck}
+                  onSaved={load}
+                  label="➕ เพิ่มหลายรายการ"
+                />
                 <a href={`/loan-payments?flt=${encodeURIComponent(JSON.stringify({ loan_contract_id: contractId }))}`}
                   target="_blank" rel="noopener noreferrer"
                   className="h-8 px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 inline-flex items-center">
