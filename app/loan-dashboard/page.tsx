@@ -12,7 +12,8 @@ import { apiFetch } from "@/lib/api";
 type DueRow = { loan_code: string; loan_name: string; installment_no: number; due_date: string; amount: number };
 type Dash = {
   as_of: string;
-  summary: { active_count: number; contract_count: number; total_outstanding: number; total_drawn: number; total_paid: number };
+  summary: { active_count: number; contract_count: number; total_outstanding: number; total_drawn: number; total_paid: number;
+             monthly_estimate?: number; monthly_estimate_count?: number };
   due_30: number; overdue_amount: number;
   overdue: DueRow[]; due_soon: DueRow[];
 };
@@ -38,6 +39,9 @@ export default function LoanDashboardPage() {
     { label: "เงินต้นคงเหลือรวม", value: THB(d.summary.total_outstanding), sub: `${d.summary.active_count} สัญญาที่ใช้งานอยู่`, tone: "text-slate-900" },
     { label: "เบิกสะสมรวม", value: THB(d.summary.total_drawn), sub: `${d.summary.contract_count} สัญญาทั้งหมด`, tone: "text-slate-900" },
     { label: "ชำระเงินต้นสะสม", value: THB(d.summary.total_paid), sub: "รวมทุกสัญญา", tone: "text-emerald-600" },
+    // ยอดที่ต้องเตรียมจ่ายทุกเดือน — คิดจากตารางผ่อน ถ้าไม่มีก็ดูจากที่จ่ายจริงย้อนหลัง
+    { label: "ต้องจ่ายทุกเดือน (ประมาณ)", value: THB(d.summary.monthly_estimate ?? 0),
+      sub: `${d.summary.monthly_estimate_count ?? 0} สัญญาที่คิดได้`, tone: "text-violet-700" },
     { label: "ต้องจ่ายใน 30 วัน", value: THB(d.due_30), sub: "งวดที่ใกล้ครบกำหนด", tone: "text-blue-700" },
     { label: "ยอดเกินกำหนด", value: THB(d.overdue_amount), sub: `${d.overdue.length} งวดค้างชำระ`, tone: d.overdue_amount > 0 ? "text-red-600" : "text-slate-900" },
   ] : [];
