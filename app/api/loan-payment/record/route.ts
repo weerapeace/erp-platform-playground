@@ -6,7 +6,8 @@
  *   contract_id, payment_date?, amount, paid_from?, reference?,
  *   principal?, interest?, penalty?, fee?,    // แยกยอดตามใบเสร็จธนาคาร (ไม่ส่ง = ให้ระบบเดา)
  *   receipt_no?, receipt_image?,              // เลขที่ใบเสร็จ + รูปใบเสร็จ (R2 key)
- *   lines?: [{ charge_type_id?, label, bucket, amount }]   // รายการเพิ่มเติมของแต่ละธนาคาร
+ *   lines?: [{ charge_type_id?, label, bucket, amount }],  // รายการเพิ่มเติมของแต่ละธนาคาร
+ *   payment_method?                           // วิธีจ่าย (ไม่ส่ง = ใช้ของสัญญา)
  * }
  *
  * แยกยอดมา → ตัดตามช่อง (ดอกเข้าดอก เงินต้นเข้าเงินต้น ค่าธรรมเนียม/ดอกผิดนัดเข้าช่องตัวเอง)
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     principal?: number; interest?: number; penalty?: number; fee?: number;
     receipt_no?: string; receipt_image?: string;
     lines?: Array<Record<string, unknown>>;
+    payment_method?: string;
   };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -54,6 +56,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const fee       = money(body.fee);
   const receipt_no    = typeof body.receipt_no === "string" ? body.receipt_no.trim().slice(0, 120) : "";
   const receipt_image = typeof body.receipt_image === "string" && /^[a-zA-Z0-9._/-]*$/.test(body.receipt_image) ? body.receipt_image : "";
+  const METHODS = new Set(["auto_debit", "transfer", "counter", "cheque", "cash", "other"]);
+  const payment_method = typeof body.payment_method === "string" && METHODS.has(body.payment_method) ? body.payment_method : "";
 
   // รายการแยกเพิ่มเติม (ประเภทตั้งค่าไว้ที่ /loan-charge-types หรือผู้ใช้พิมพ์เอง)
   const BUCKETS = new Set(["principal", "interest", "penalty", "fee", "other"]);
@@ -92,6 +96,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     p_receipt_no: receipt_no,
     p_receipt_image: receipt_image,
     p_lines: lines,
+    p_payment_method: payment_method,
   });
   if (error) return NextResponse.json({ error: "บันทึกการจ่ายไม่สำเร็จ: " + error.message }, { status: 500 });
 

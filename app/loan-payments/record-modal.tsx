@@ -17,7 +17,17 @@ import { ImageInput } from "@/components/image-input";
 import { apiFetch } from "@/lib/api";
 import { formatAmount } from "@/lib/money";
 
-type ContractOpt = { id: string; loan_code: string; loan_name: string; contract_no: string; lender_name: string; outstanding: number };
+type ContractOpt = { id: string; loan_code: string; loan_name: string; contract_no: string; lender_name: string; outstanding: number; payment_method: string };
+
+/** วิธีจ่าย — ป้ายเดียวกับทะเบียนฟิลด์ (options.labels ของ payment_method) */
+const METHOD_OPTS = [
+  { value: "auto_debit", label: "หักบัญชีอัตโนมัติ" },
+  { value: "transfer",   label: "โอนเงิน" },
+  { value: "counter",    label: "จ่ายที่เคาน์เตอร์ธนาคาร" },
+  { value: "cheque",     label: "เช็ค" },
+  { value: "cash",       label: "เงินสด" },
+  { value: "other",      label: "อื่น ๆ" },
+];
 
 /** ประเภทรายการจ่ายที่ตั้งไว้ที่ /loan-charge-types (แต่ละธนาคารมีไม่เหมือนกัน) */
 type ChargeType = { id: string; name: string; bucket: string; lender_name: string; sort_order: number };
@@ -52,7 +62,7 @@ type SplitKey = typeof SPLIT_FIELDS[number]["key"];
 const EMPTY = {
   contract_id: "", payment_date: "", amount: "", paid_from: "", reference: "",
   principal: "", interest: "", penalty: "", fee: "",
-  receipt_no: "",
+  receipt_no: "", payment_method: "",
 };
 
 const moneyCls = "w-full h-9 px-3 text-sm tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500";
@@ -93,6 +103,7 @@ export function RecordPaymentModal({
           contract_no: String(r.contract_no ?? ""),
           lender_name: String(r.lender_name ?? ""),
           outstanding: Number(r.outstanding_principal ?? 0),
+          payment_method: String(r.payment_method ?? ""),
         })));
       })
       .catch(() => setErr("โหลดรายชื่อสัญญาไม่สำเร็จ"))
@@ -113,6 +124,12 @@ export function RecordPaymentModal({
 
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const selected = contracts.find((c) => c.id === f.contract_id);
+
+  // เลือกสัญญาแล้ว + ยังไม่ได้เลือกวิธีจ่าย → ใช้วิธีจ่ายประจำของสัญญานั้น
+  useEffect(() => {
+    if (selected?.payment_method && !f.payment_method) set("payment_method", selected.payment_method);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
 
   // ผลรวมของช่องที่แยก เทียบกับยอดจ่ายรวม
   const total = n2(f.amount);
@@ -219,6 +236,7 @@ export function RecordPaymentModal({
           principal: n2(f.principal), interest: n2(f.interest),
           penalty: n2(f.penalty), fee: n2(f.fee),
           receipt_no: f.receipt_no, receipt_image: imageKey ?? "",
+          payment_method: f.payment_method,
           lines: extra
             .filter((l) => n2(l.amount) > 0)
             .map((l) => ({ charge_type_id: l.charge_type_id, label: l.label, bucket: l.bucket, amount: n2(l.amount) })),
@@ -391,6 +409,10 @@ export function RecordPaymentModal({
         </div>
 
         <div className="grid grid-cols-2 gap-4">
+          <ERPFormField label="วิธีจ่าย" hint={selected?.payment_method ? "ค่าตั้งต้นมาจากวิธีจ่ายประจำของสัญญา" : "จ่ายด้วยวิธีไหน"}>
+            <ERPSelect value={f.payment_method} onChange={(e) => set("payment_method", e.target.value)}
+              options={METHOD_OPTS} placeholder="— เลือกวิธีจ่าย —" />
+          </ERPFormField>
           <ERPFormField label="เลขที่ใบเสร็จรับเงิน" hint="เลขที่ใบเสร็จที่ธนาคารออกให้">
             <ERPInput value={f.receipt_no} onChange={(e) => set("receipt_no", e.target.value)} placeholder="เช่น RC-2569-000123" />
           </ERPFormField>
