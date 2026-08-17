@@ -16,7 +16,9 @@ type Dash = {
              monthly_estimate?: number; monthly_estimate_count?: number };
   due_30: number; overdue_amount: number;
   overdue: DueRow[]; due_soon: DueRow[];
+  by_company?: CompanyRow[];
 };
+type CompanyRow = { company: string; company_code: string; contract_count: number; outstanding: number; monthly_estimate: number };
 
 const THB = (n: number) => "฿" + Number(n).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 
@@ -80,6 +82,38 @@ export default function LoanDashboardPage() {
                 <p className="text-xs text-blue-500 mt-1">ดู/สร้าง/แก้สัญญาทั้งหมด</p>
               </Link>
             </div>
+
+            {/* แยกยอดรายบริษัท — กลุ่มมีหลายบริษัท ต้องรู้ว่าหนี้ก้อนไหนของใคร */}
+            {(d.by_company?.length ?? 0) > 0 && (
+              <div className="bg-white rounded-xl border border-slate-200 p-4 mb-5">
+                <h2 className="text-sm font-semibold text-slate-700 mb-3">🏢 แยกตามบริษัท</h2>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-[11px] text-slate-400 border-b border-slate-100">
+                        <th className="text-left font-medium pb-2">บริษัท</th>
+                        <th className="text-right font-medium pb-2">สัญญา</th>
+                        <th className="text-right font-medium pb-2">เงินต้นคงเหลือ</th>
+                        <th className="text-right font-medium pb-2">ต้องจ่าย/เดือน (ประมาณ)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {d.by_company!.map((c, i) => (
+                        <tr key={i}>
+                          <td className="py-2 text-slate-700">
+                            {c.company}
+                            {c.company_code && <span className="ml-1.5 text-[11px] text-slate-400">{c.company_code}</span>}
+                          </td>
+                          <td className="py-2 text-right tabular-nums text-slate-500">{c.contract_count}</td>
+                          <td className="py-2 text-right tabular-nums font-medium text-slate-800">{THB(c.outstanding)}</td>
+                          <td className="py-2 text-right tabular-nums text-violet-700">{THB(c.monthly_estimate)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             <div className="grid lg:grid-cols-2 gap-5">
               <DueCard title="⚠️ เกินกำหนดชำระ" rows={d.overdue} tone="red" emptyText="ไม่มีงวดเกินกำหนด 🎉" />
