@@ -457,6 +457,12 @@ async function pickOrderColumn(admin: ReturnType<typeof supabaseAdmin>, table: s
   return "id"; // ทุกตารางมี id เสมอ
 }
 
+/** ตารางนี้มีคอลัมน์นี้จริงไหม — ตารางเก่าบางตัวไม่มี is_active (เช่น companies ใช้ status แทน) */
+async function hasColumn(admin: ReturnType<typeof supabaseAdmin>, table: string, col: string): Promise<boolean> {
+  const { error } = await admin.from(table).select(col).limit(1);
+  return !error;
+}
+
 // อ่าน relation fields ของ "โมดูล" จากทะเบียน → RelationResolve[] (ของกลาง ใช้ได้ทั้ง hardcode + generic)
 type FieldRow = { column_name: string | null; ui_field_type: string; relation_config: unknown };
 function buildRelationResolves(flds: FieldRow[]): RelationResolve[] {
@@ -522,12 +528,15 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
   const relationResolves = buildRelationResolves((flds ?? []) as FieldRow[]);
   const tableName = mod.table_name as string;
   const orderColumn = await pickOrderColumn(admin, tableName);
+  // ตารางที่ "ไม่มี" คอลัมน์ is_active (เช่น companies ที่ใช้ status) ห้ามยัดค่านี้เข้าไป
+  // ไม่งั้น list จะกรองด้วยคอลัมน์ที่ไม่มี และ create จะพังด้วย
+  // "Could not find the 'is_active' column ... in the schema cache"
+  const softDelete = await hasColumn(admin, tableName, "is_active");
   const cfg: EntityConfig = {
     table: tableName,
     selectColumns: "*",
     searchColumns: searchColumns.length ? searchColumns : ["name"],
-    softDeleteColumn: "is_active",
-    defaults: { is_active: true },
+    ...(softDelete ? { softDeleteColumn: "is_active", defaults: { is_active: true } } : {}),
     relationResolves,
     orderColumn,
   };
