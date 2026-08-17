@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { RecordPaymentModal } from "@/app/loan-payments/record-modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
 import { formatAmount } from "@/lib/money";
@@ -45,6 +46,7 @@ export function LoanPaymentsSection({ contractId }: { contractId: string }) {
   const [rows, setRows] = useState<Pay[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [payOpen, setPayOpen] = useState(false);   // บันทึกการจ่ายจากตรงนี้ได้เลย
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -108,10 +110,10 @@ export function LoanPaymentsSection({ contractId }: { contractId: string }) {
   ], []);
 
   if (loading && rows.length === 0) return <div className="py-8 text-center text-sm text-slate-400">กำลังโหลดรายการจ่าย...</div>;
-  if (err) return <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {err}</div>;
 
   return (
     <div className="space-y-2">
+      {err && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {err}</div>}
       {/* สรุปยอดรวมของใบที่ยืนยันแล้ว */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {[
@@ -140,18 +142,31 @@ export function LoanPaymentsSection({ contractId }: { contractId: string }) {
             countUnit="ใบ"
             dense
             maxHeightClass="max-h-[26rem]"
-            emptyText="ยังไม่มีการจ่ายของสัญญานี้ — กด 💵 บันทึกการจ่าย ในหมวดความคืบหน้าการผ่อน"
+            emptyText="ยังไม่มีการจ่ายของสัญญานี้ — กดปุ่ม 💵 บันทึกการจ่าย ด้านบนได้เลย"
             footnote="ยอดรวมด้านบนนับเฉพาะใบที่สถานะ “ยืนยันแล้ว” · ยอด “อื่น ๆ” เช่น ค่าอากรแสตมป์ จ่ายจริงแต่ไม่ตัดเข้างวดผ่อน"
             actions={
-              <a href={`/loan-payments?flt=${encodeURIComponent(JSON.stringify({ loan_contract_id: contractId }))}`}
-                target="_blank" rel="noopener noreferrer"
-                className="h-8 px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 inline-flex items-center">
-                เปิดหน้าเต็ม ↗
-              </a>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setPayOpen(true)}
+                  className="h-8 px-3 text-xs font-medium rounded-lg border border-blue-600 bg-blue-600 text-white hover:bg-blue-700">
+                  💵 บันทึกการจ่าย
+                </button>
+                <a href={`/loan-payments?flt=${encodeURIComponent(JSON.stringify({ loan_contract_id: contractId }))}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="h-8 px-3 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 inline-flex items-center">
+                  เปิดหน้าเต็ม ↗
+                </a>
+              </div>
             }
           />
         </div>
       </div>
+
+      {/* บันทึกการจ่ายจากในหน้าสัญญาได้เลย — ป๊อปกลางตัวเดียวกับหน้า /loan-payments */}
+      <RecordPaymentModal
+        open={payOpen} contractId={contractId}
+        onClose={() => setPayOpen(false)}
+        onCreated={() => { setPayOpen(false); void load(); }}
+      />
     </div>
   );
 }

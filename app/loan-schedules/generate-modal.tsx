@@ -5,7 +5,7 @@ import { ERPModal } from "@/components/modal";
 import { ERPFormField, ERPInput, ERPSelect } from "@/components/form";
 import { apiFetch } from "@/lib/api";
 
-type ContractOpt = { id: string; loan_code: string; loan_name: string; contract_no: string };
+type ContractOpt = { id: string; loan_code: string; loan_name: string; contract_no: string; term_months: number; payment_frequency: string };
 
 /** ป้ายสัญญา: รหัส — ชื่อ · เลขที่บัญชี (เจ้าของขอให้เห็นเลขบัญชีด้วย) */
 const contractLabel = (c: ContractOpt) =>
@@ -47,7 +47,7 @@ export function GenerateScheduleModal({
       .then((r) => r.json())
       .then((j) => {
         const rows = (j?.data ?? []) as Record<string, unknown>[];
-        setContracts(rows.map((r) => ({ id: String(r.id), loan_code: String(r.loan_code ?? ""), loan_name: String(r.loan_name ?? ""), contract_no: String(r.contract_no ?? "") })));
+        setContracts(rows.map((r) => ({ id: String(r.id), loan_code: String(r.loan_code ?? ""), loan_name: String(r.loan_name ?? ""), contract_no: String(r.contract_no ?? ""), term_months: Number(r.term_months ?? 0), payment_frequency: String(r.payment_frequency ?? "monthly") })));
       })
       .catch(() => setErr("โหลดรายชื่อสัญญาไม่สำเร็จ"))
       .finally(() => setLoadingList(false));
@@ -60,6 +60,18 @@ export function GenerateScheduleModal({
 
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const picked = contracts.find((c) => c.id === f.contract_id);
+
+  // เลือกสัญญาแล้ว + ยังไม่ได้ใส่จำนวนงวด → เดาให้จาก "ระยะเวลาชำระคืน" ในสัญญา
+  // (หารด้วยเดือนต่องวดตามความถี่จ่าย เช่น 60 เดือน ราย 3 เดือน = 20 งวด)
+  useEffect(() => {
+    if (!picked || f.num.trim() !== "" || !picked.term_months) return;
+    const per = picked.payment_frequency === "quarterly" ? 3
+      : picked.payment_frequency === "semiannual" ? 6
+      : picked.payment_frequency === "yearly" ? 12 : 1;
+    const n = Math.floor(picked.term_months / per);
+    if (n > 0) setF((p) => ({ ...p, num: String(n) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picked?.id]);
 
   const isCustom = f.method === "custom";
 
