@@ -21,7 +21,7 @@ import { MoneyInput } from "@/components/money-input";
 import { DateInput } from "@/components/date-input";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { apiFetch } from "@/lib/api";
-import { parsePastedTable, parseNumberCell, parseDateCell } from "@/lib/paste-table";
+import { parsePastedTable, parsePastedGrid, parseNumberCell, parseDateCell } from "@/lib/paste-table";
 
 /** รูปแบบฟิลด์เท่าที่ตารางกรอกต้องรู้ (ตัดมาจาก FieldDef ของ MasterCRUD) */
 export type InlineField = {
@@ -164,7 +164,8 @@ export function InlineCreatePanel({
    *  • แถวไม่พอ → เพิ่มแถวให้อัตโนมัติ
    */
   const pasteAt = (rowIdx: number, colIdx: number, text: string): boolean => {
-    const grid = parsePastedTable(text);
+    // ใช้แบบ "คงตำแหน่ง" — ช่องว่างใน Excel ต้องนับเป็นแถวด้วย ไม่งั้นค่าข้างล่างเลื่อนขึ้นมาผิดแถว
+    const grid = parsePastedGrid(text);
     // ค่าเดียวช่องเดียว → ปล่อยให้เบราว์เซอร์วางตามปกติ
     if (grid.length === 0 || (grid.length === 1 && grid[0].length <= 1)) return false;
     setRows((p) => {
@@ -178,6 +179,7 @@ export function InlineCreatePanel({
         cells.forEach((cell, ci) => {
           const f = cols[colIdx + ci];
           if (!f) return;                          // เกินคอลัมน์ที่แสดงอยู่
+          if (cell.trim() === "") return;          // ช่องว่างใน Excel → ข้ามไป ไม่เขียนทับของเดิม
           data[f.key] = toCellValue(f, cell);
         });
         next[rowIdx + ri] = { ...target, data };
@@ -354,7 +356,7 @@ export function InlineCreatePanel({
         {pasteOpen && (
           <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-3 space-y-2">
             <div className="text-[11px] text-slate-600">
-              คัดลอกจาก Excel แล้ววางที่นี่ · เรียงคอลัมน์ตามหัวตารางข้างล่าง:
+              คัดลอกจาก Excel แล้ววางที่นี่ · ช่องที่เว้นว่างจะถูกข้ามไป · เรียงคอลัมน์ตามหัวตารางข้างล่าง:
               <b className="ml-1">{cols.map((c) => c.label).join(" · ")}</b>
               <span className="text-slate-400"> (มีหัวตารางติดมาก็ได้)</span>
             </div>
@@ -423,7 +425,7 @@ export function InlineCreatePanel({
         </div>
 
         <p className="text-[11px] text-slate-400">
-          📋 คัดลอกคอลัมน์เดียวจาก Excel แล้วคลิกช่องแรกของคอลัมน์นั้น กด Ctrl+V → ค่าจะไหลลงทุกแถวให้เอง (แถวไม่พอระบบเพิ่มให้) ·
+          📋 คัดลอกคอลัมน์เดียวจาก Excel แล้วคลิกช่องแรกของคอลัมน์นั้น กด Ctrl+V → ค่าจะไหลลงทุกแถวให้เอง (แถวไม่พอระบบเพิ่มให้ · ช่องที่เว้นว่างใน Excel จะข้ามแถวนั้นไป ค่าไม่เลื่อน) ·
           ⤓ ที่หัวคอลัมน์ = เติมค่าจากแถวบนสุดลงทุกแถวข้างล่าง ·
           บันทึกผ่านช่องทางเดียวกับ “นำเข้าไฟล์” จึงมีรายงานรายแถวว่าแถวไหนเข้าไม่ได้เพราะอะไร
         </p>

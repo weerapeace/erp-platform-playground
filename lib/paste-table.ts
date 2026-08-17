@@ -18,12 +18,24 @@
 
 /** แยกข้อความที่วางมาเป็นตาราง 2 มิติ (ตัดบรรทัดว่างทิ้ง) */
 export function parsePastedTable(text: string): string[][] {
-  return String(text ?? "")
+  return parsePastedGrid(text).filter((cells) => cells.some((c) => c !== ""));
+}
+
+/**
+ * แยกเป็นตาราง 2 มิติ แบบ "คงตำแหน่งเดิม" — ช่องว่างยังนับเป็นแถว
+ *
+ * ใช้ตอนวางลงตารางที่มีข้อมูลอยู่แล้ว: ถ้าตัดบรรทัดว่างทิ้ง ค่าข้างล่างจะเลื่อนขึ้นมา
+ * แทนที่แถวผิด (ข้อมูลเพี้ยนแบบเงียบ ๆ) — ผู้เรียกควร "ข้าม" ช่องที่ว่าง ไม่ใช่เขียนทับด้วยค่าว่าง
+ * (ตัดเฉพาะบรรทัดว่างที่ห้อยท้าย ซึ่งมาจากการคัดลอกของ Excel เอง)
+ */
+export function parsePastedGrid(text: string): string[][] {
+  const rows = String(text ?? "")
     .replace(/\r/g, "")
     .split("\n")
     .map((line) => (line.includes("\t") ? line.split("\t") : line.split(",")))
-    .map((cells) => cells.map((c) => c.trim()))
-    .filter((cells) => cells.some((c) => c !== ""));
+    .map((cells) => cells.map((c) => c.trim()));
+  while (rows.length > 0 && rows[rows.length - 1].every((c) => c === "")) rows.pop();
+  return rows;
 }
 
 /** แถวแรกเป็นหัวตารางไหม (ผู้ใช้มักคัดลอกหัวมาด้วย) — ส่ง regex ที่คาดว่าจะเจอในหัว */
