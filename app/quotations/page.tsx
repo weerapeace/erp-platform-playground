@@ -312,6 +312,23 @@ export default function QuotationsPage() {
     finally { setWfLoading(false); }
   };
 
+  /** คัดลอกใบเสนอราคา → ใบร่างใหม่ (เลขที่ใหม่) พร้อมลูกค้า/รายการ/รูป/ส่วนลดเดิม */
+  const copyQuote = async (id: string) => {
+    setWfLoading(true);
+    try {
+      const res = await apiFetch(`/api/quotations/${id}/copy`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor: user?.name }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      flash(`คัดลอกจาก ${json.copied_from ?? "ใบเดิม"} แล้ว (${json.lines ?? 0} รายการ) — ใบใหม่เป็นร่าง แก้ได้เลย`);
+      await fetchList();
+      if (json.id) openEdit(await fetchDetail(String(json.id)));   // เปิดใบใหม่ให้แก้ต่อทันที
+    } catch (err) { flash(err instanceof Error ? err.message : "คัดลอกไม่สำเร็จ"); }
+    finally { setWfLoading(false); }
+  };
+
   const loadExpandedDetail = useCallback(async (id: string) => {
     if (expandedDetails[id] || expandedLoading[id]) return;
     setExpandedLoading(prev => ({ ...prev, [id]: true }));
@@ -587,6 +604,8 @@ export default function QuotationsPage() {
               onOpenDetail={() => openDetail(row.id)}
               onPrint={() => openPrint(row.id)}
               onEdit={() => openEditFromRow(row)}
+              onCopy={() => copyQuote(row.id)}
+              canCopy={canCreate}
               onSend={() => transition(row.id, "send")}
               onAccept={() => transition(row.id, "accept")}
               onConvert={() => convertToSO(row.id)}
@@ -852,6 +871,8 @@ function QuoteExpandedPanel({
   onOpenDetail,
   onPrint,
   onEdit,
+  onCopy,
+  canCopy,
   onSend,
   onAccept,
   onConvert,
@@ -869,6 +890,8 @@ function QuoteExpandedPanel({
   onOpenDetail: () => void;
   onPrint: () => void;
   onEdit: () => void;
+  onCopy: () => void;
+  canCopy: boolean;
   onSend: () => void;
   onAccept: () => void;
   onConvert: () => void;
@@ -904,6 +927,13 @@ function QuoteExpandedPanel({
               className="h-8 px-3 text-xs border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">
               พิมพ์
             </button>
+            {canCopy && (
+              <button type="button" onClick={onCopy} disabled={wfLoading}
+                title="สร้างใบใหม่จากใบนี้ (คัดลอกลูกค้า/รายการ/รูป/ส่วนลด · ได้เลขที่ใหม่ สถานะร่าง)"
+                className="h-8 px-3 text-xs border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50 disabled:opacity-50">
+                ⧉ คัดลอก
+              </button>
+            )}
             {detail.status === "draft" && (
               <button type="button" onClick={onEdit}
                 className="h-8 px-3 text-xs border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">
