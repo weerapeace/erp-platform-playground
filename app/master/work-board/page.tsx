@@ -147,6 +147,13 @@ const WO_STATUS: Record<string, { label: string; cls: string }> = {
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 // วันที่ "วันนี้" ตามเวลาเครื่อง (เวลาไทย) — ห้ามปล่อยให้ DB ใส่ CURRENT_DATE เอง เพราะนั่นคือเวลา UTC
 // (เที่ยงคืน–ตี 7 บ้านเราจะถูกบันทึกเป็นเมื่อวาน)
+// รวมเงินงานเหมาของใบสั่งผลิต 1 ใบ — ทั้งหมด / ที่ติ๊กจ่ายในใบนี้ / ที่ทำเสร็จแล้ว
+const pieceSums = (rows: MoPieceRow[]) => rows.reduce((a, r) => {
+  const qty = Number(r.total_qty) || 0, amt = qty * (Number(r.rate) || 0);
+  a.qty += qty; a.money += amt;
+  if (r.selected_id) { a.selQty += qty; a.selMoney += amt; if (r.status === "done") a.doneMoney += amt; }
+  return a;
+}, { qty: 0, money: 0, selQty: 0, selMoney: 0, doneMoney: 0 });
 const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 const ZONE_W = 220, HEADER_H = 44, NOTE_H = 26, CARD_W = 150, CARD_SLOT = 228, GAP_C = 14, PENDING_W = 3 * 150 + 2 * 14 + 24, PAD = 12, GAP = 40;
@@ -2140,9 +2147,18 @@ function WorkBoardPageInner() {
                         <div className="border border-slate-100 rounded-lg overflow-hidden">
                           <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50">
                             <span className="text-[11px] font-medium text-slate-500">เลือกงานเหมาที่จะจ่าย</span>
-                            {canEdit && <button onClick={() => setAddPieceOpen(true)} className="text-[11px] text-blue-600 hover:underline">➕ เพิ่มงานเข้า BOM</button>}
+                            <span className="flex items-center gap-2">
+                              {(() => { const t = pieceSums(clPieceRows); return (
+                                <span className="text-[11px] text-slate-500">
+                                  จ่ายในใบนี้ <b className="text-indigo-700">฿{fmt(t.selMoney)}</b>
+                                  {t.doneMoney > 0 && <> · เสร็จแล้ว <b className="text-emerald-700">฿{fmt(t.doneMoney)}</b></>}
+                                  <span className="text-slate-400"> · ทั้งหมด ฿{fmt(t.money)}</span>
+                                </span>
+                              ); })()}
+                              {canEdit && <button onClick={() => setAddPieceOpen(true)} className="text-[11px] text-blue-600 hover:underline">➕ เพิ่มงานเข้า BOM</button>}
+                            </span>
                           </div>
-                          <div className="grid grid-cols-[2rem_1fr_4.5rem_3.6rem_3.4rem] gap-2 px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span><span className="text-center">เสร็จ</span><span className="text-center">แก้/ลบ</span></div>
+                          <div className="grid grid-cols-[2rem_1fr_4.5rem_5rem_3.6rem_3.4rem] gap-2 px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span><span className="text-right">รวมเงิน</span><span className="text-center">เสร็จ</span><span className="text-center">แก้/ลบ</span></div>
                           <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
                             {clPieceRows.map((r) => {
                               const done = r.status === "done";
@@ -2167,13 +2183,14 @@ function WorkBoardPageInner() {
                                 </div>
                               );
                               return (
-                              <div key={r.key} className="grid grid-cols-[2rem_1fr_4.5rem_3.6rem_3.4rem] gap-2 px-3 py-2 items-center hover:bg-slate-50/60">
+                              <div key={r.key} className="grid grid-cols-[2rem_1fr_4.5rem_5rem_3.6rem_3.4rem] gap-2 px-3 py-2 items-center hover:bg-slate-50/60">
                                 <span className="flex justify-center"><input type="checkbox" checked={!!r.selected_id} disabled={!canEdit} onChange={() => togglePiece(r.key)} className="w-4 h-4 accent-blue-600" title="เลือกจ่ายงานนี้" /></span>
                                 <div className="min-w-0">
                                   <p className="text-sm text-slate-800 truncate">{r.job_name} {r.is_detail && <span className="text-[10px] text-amber-600">★ละเอียด</span>}{!r.in_bom && <span className="text-[10px] text-slate-400">(เพิ่มเอง)</span>}</p>
                                   <p className="text-[10px] text-slate-400">{fmt(r.qty_per)} × จำนวนสั่ง{r.rate ? ` · ${fmt(r.rate)} ฿/ชิ้น · รวม ฿${fmt(r.total_qty * r.rate)}` : ""}</p>
                                 </div>
                                 <span className="text-right text-sm font-semibold text-slate-700">{fmt(r.total_qty)}</span>
+                                <span className={`text-right text-sm tabular-nums ${r.selected_id ? "text-indigo-700 font-semibold" : "text-slate-400"}`}>{r.rate > 0 ? `฿${fmt(r.total_qty * r.rate)}` : "—"}</span>
                                 <span className="flex justify-center">
                                   {r.selected_id ? (
                                     <button type="button" disabled={!canEdit} onClick={() => void togglePieceDone(r)}
@@ -2199,6 +2216,16 @@ function WorkBoardPageInner() {
                               );
                             })}
                           </div>
+                          {/* แถวรวมท้ายตาราง — ยอดที่จะจ่ายจริงในใบนี้ (นับเฉพาะที่ติ๊ก) */}
+                          {(() => { const t = pieceSums(clPieceRows); return (
+                            <div className="grid grid-cols-[2rem_1fr_4.5rem_5rem_3.6rem_3.4rem] gap-2 px-3 py-1.5 bg-slate-50 border-t border-slate-200 text-[11px] font-semibold text-slate-600">
+                              <span />
+                              <span>รวมที่ติ๊กจ่าย {clPieceRows.filter((x) => x.selected_id).length}/{clPieceRows.length} รายการ</span>
+                              <span className="text-right tabular-nums">{fmt(t.selQty)}</span>
+                              <span className="text-right tabular-nums text-indigo-700">฿{fmt(t.selMoney)}</span>
+                              <span /><span />
+                            </div>
+                          ); })()}
                         </div>
                       )
                     ) : clTab === "cost" ? (
