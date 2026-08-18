@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { skuIdsByBracketCode, resolveSkuId } from "@/lib/sku-code-lookup";
 import { computeDueDate } from "@/lib/credit-term";
 import { buildPartnerMatcher } from "@/lib/partner-match";
 
@@ -34,6 +35,15 @@ async function loadSkuMap(admin: ReturnType<typeof supabaseAdmin>, ids: unknown[
     });
   }
   return map;
+}
+
+type SkuRow = { item_sku_id?: unknown; item_name?: unknown };
+/** ของกลาง: ใบที่มาจากใบสั่งงาน (BOM) ไม่ผูก SKU — รหัสอยู่ในชื่อ → เดา SKU จากรหัสนั้น ไม่งั้นรูป/ลิงก์ไม่ขึ้น */
+async function loadSkuFor(admin: ReturnType<typeof supabaseAdmin>, rows: SkuRow[]) {
+  const codeSkuMap = await skuIdsByBracketCode(admin, rows.map((r) => r.item_name));
+  const idOf = (r: SkuRow) => resolveSkuId(r.item_sku_id, r.item_name, codeSkuMap);
+  const map = await loadSkuMap(admin, rows.map(idOf));
+  return { idOf, skuOf: (r: SkuRow) => { const id = idOf(r); return id ? (map.get(id) ?? null) : null; } };
 }
 
 export type DrillRow = {
@@ -84,14 +94,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .eq("status", "waiting").eq("is_active", true).order("created_at", { ascending: false }).limit(5000);
     const all = (data ?? []) as Record<string, unknown>[];
     // join skus_v2 → รหัส + รูปปก + ลิงก์ + แหล่งซื้อที่ 2 — ไว้ตรวจ "ข้อมูลไม่ครบ" + โชว์ในป๊อป
-    const skuMap = await loadSkuMap(admin, all.map((r) => r.item_sku_id));
+    const { skuOf, idOf } = await loadSkuFor(admin, all);
     sellers = [...new Set(all.map((r) => String(r.seller_name ?? "")).filter(Boolean))].sort();
     rows = all
       .filter((r) => (!seller || String(r.seller_name ?? "") === seller) && (!mo || String(r.source_mo_no ?? "") === mo)
         && (hit(String(r.item_name ?? "")) || hit(String(r.seller_name ?? "")) || hit(String(r.pr_no ?? ""))))
       .slice(0, limit)
       .map((r) => {
-        const sk = r.item_sku_id ? skuMap.get(String(r.item_sku_id)) : null;
+        const sk = skuOf(r);
         const imgKey = sk?.cover ?? (r.image_key as string) ?? null;
         const qty = num(r.qty), price = num(r.price_est);
         const missing: string[] = [];
@@ -117,7 +127,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           line_total_thb: Math.round(toThb(price * qty, r.currency)),
           order_date: (r.order_date as string) ?? null,
           purchase_url: (r.purchase_url as string) ?? null,
-          sku_id: (r.item_sku_id as string) ?? null,
+          sku_id: idOf(r),
           needed_date: (r.needed_date as string) ?? null,
           note: (r.note as string) ?? null,
           created_at: (r.created_at as string) ?? null,
@@ -229,13 +239,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const scoped = type === "supplier" ? enriched.filter((x) => String(x.po!.seller_name ?? "") === seller) : enriched;
     sellers = [...new Set(scoped.map((x) => String(x.po!.seller_name ?? "")).filter(Boolean))].sort();
     // join skus_v2 → รหัส + รูปปก + ลิงก์ + แหล่งซื้อที่ 2 (โชว์รูป + ตรวจ "ข้อมูลไม่ครบ")
-    const skuMap = await loadSkuMap(admin, scoped.map((x) => x.l.item_sku_id));
+    const { skuOf: skuOfLine, idOf: idOfLine } = await loadSkuFor(admin, scoped.map((x) => x.l));
     rows = scoped
       .filter((x) => (!seller || type === "supplier" || String(x.po!.seller_name ?? "") === seller) && (hit(String(x.l.item_name ?? "")) || hit(String(x.po!.po_no ?? ""))))
       .slice(0, limit)
       .map((x) => {
         const remain = Math.max(0, num(x.l.qty) - num(x.l.qty_received));
-        const sk = x.l.item_sku_id ? skuMap.get(String(x.l.item_sku_id)) : null;
+        const sk = skuOfLine(x.l);
         const imgKey = sk?.cover ?? null;
         const qty = num(x.l.qty), price = num(x.l.price_est);
         const missing: string[] = [];
@@ -261,7 +271,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           unit_price: price, currency: String(x.l.currency ?? "THB"),
           unit_price_thb: Math.round(toThb(price, x.l.currency)),
           line_total_thb: Math.round(toThb(price * qty, x.l.currency)),
-          sku_id: (x.l.item_sku_id as string) ?? null,
+          sku_id: idOfLine(x.l),
           missing,
           alt_seller: sk?.alt_seller ?? null, alt_price: sk?.alt_price ?? null, alt_currency: sk?.alt_currency ?? null, alt_link: sk?.alt_link ?? null,
         };

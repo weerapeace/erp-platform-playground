@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { skuIdsByBracketCode, resolveSkuId } from "@/lib/sku-code-lookup";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,7 +25,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .limit(500);
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
-  const skuIds = [...new Set((prs ?? []).map((p) => p.item_sku_id).filter(Boolean) as string[])];
+  // ใบที่มาจากใบสั่งงาน (BOM) ยังไม่ผูก SKU — รหัสอยู่ในชื่อ "[CODE] ชื่อ" → เดา SKU จากรหัสนั้น (ของกลาง)
+  const codeSkuMap = await skuIdsByBracketCode(admin, (prs ?? []).map((p) => p.item_name));
+  const skuIdOf = (p: { item_sku_id?: unknown; item_name?: unknown }) => resolveSkuId(p.item_sku_id, p.item_name, codeSkuMap);
+  const skuIds = [...new Set((prs ?? []).map(skuIdOf).filter(Boolean) as string[])];
   const skuMap = new Map<string, { code: string | null; cover: string | null }>();
   for (let i = 0; i < skuIds.length; i += 300) {
     const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key").in("id", skuIds.slice(i, i + 300));
@@ -32,7 +36,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const rows = (prs ?? []).map((p) => {
-    const sk = p.item_sku_id ? skuMap.get(String(p.item_sku_id)) : null;
+    const sid = skuIdOf(p);
+    const sk = sid ? skuMap.get(sid) : null;
     const key = sk?.cover ?? p.image_key ?? null;
     return {
       id: String(p.id),

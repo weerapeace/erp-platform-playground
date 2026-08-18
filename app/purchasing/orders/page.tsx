@@ -1497,10 +1497,13 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
       const res = await apiFetch(`/api/master-v2/purchase-requests-v2/${row.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ qty: Number(qty) || 0, price_est: Number(price) || 0, note: note || null, seller_name: seller || null, currency: cur, actor: user?.name,
-          ...(swap ? { item_sku_id: swap.id, item_name: swap.name, uom: swap.uom || row.uom || null } : {}) }),
+          ...(swap ? { item_sku_id: swap.id, item_name: swap.name, uom: swap.uom || row.uom || null } : {}),
+          // รูป: ใบที่ยังไม่รู้ว่าเป็นสินค้าตัวไหน (ไม่มี SKU ผูก) → เก็บรูปติดใบขอซื้อใบนี้ไว้ ไม่งั้นกดบันทึกแล้วรูปหายเฉย ๆ
+          ...(imgKey !== row.cover_key && !row.item_sku_id ? { image_key: imgKey } : {}) }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      // มี SKU ผูกอยู่ → เก็บเป็น "รูปปกสินค้า" ใช้ซ้ำได้ทุกหน้า (ขอซื้อ/สั่งซื้อ/รับของ)
       if (imgKey !== row.cover_key && row.item_sku_id) {
         await apiFetch(`/api/master-v2/skus/${row.item_sku_id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },

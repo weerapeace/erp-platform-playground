@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { skuIdsByBracketCode, resolveSkuId } from "@/lib/sku-code-lookup";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,8 +29,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .limit(2000);
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
+  // ใบที่มาจากใบสั่งงาน (BOM) ยังไม่ผูก SKU — เก็บรหัสไว้ในชื่อ "[CODE] ชื่อ" เท่านั้น
+  // → เดา SKU จากรหัสนั้น (ของกลาง lib/sku-code-lookup) ไม่งั้นรูป/ลิงก์ซื้อ/รหัสร้าน/MOQ ไม่ขึ้น
+  const codeSkuMap = await skuIdsByBracketCode(admin, (prs ?? []).map((p) => p.item_name));
+  const skuIdOf = (p: { item_sku_id?: unknown; item_name?: unknown }) => resolveSkuId(p.item_sku_id, p.item_name, codeSkuMap);
+
   // ดึง code + รูปปก SKU จริง (batch)
-  const skuIds = [...new Set((prs ?? []).map((p) => p.item_sku_id).filter(Boolean) as string[])];
+  const skuIds = [...new Set((prs ?? []).map(skuIdOf).filter(Boolean) as string[])];
   const skuMap = new Map<string, { code: string | null; cover: string | null; link: string | null; uom_id: string | null; supplier_sku_code: string | null; name_cn: string | null; name_en: string | null; purchase_uom_en: string | null }>();
   for (let i = 0; i < skuIds.length; i += 300) {
     const chunk = skuIds.slice(i, i + 300);
@@ -70,13 +76,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const rows = (prs ?? []).map((p) => {
-    const sk = p.item_sku_id ? skuMap.get(String(p.item_sku_id)) : null;
-    const shopSku = p.item_sku_id ? shopSkuMap.get(`${p.item_sku_id}::${String(p.seller_name ?? "").trim()}`) : null;
+    const sid = skuIdOf(p);
+    const sk = sid ? skuMap.get(sid) : null;
+    const shopSku = sid ? shopSkuMap.get(`${sid}::${String(p.seller_name ?? "").trim()}`) : null;
     const key = sk?.cover ?? p.image_key ?? null;
     return {
       id: String(p.id),
       seller_name: p.seller_name ?? "—",
-      item_sku_id: p.item_sku_id ?? null,
+      item_sku_id: sid,   // sku ที่ผูกไว้ หรือที่เดาได้จากรหัสในชื่อ → หน้าจอแก้รูป/ราคาของ SKU ตัวจริงได้
       item_name: p.item_name ?? "",
       // รหัสวัตถุดิบ: จาก SKU ที่ผูกไว้ · ถ้ายังไม่ผูก (ใบที่มาจาก BOM) → ดึงจากวงเล็บหน้าชื่อ "[CODE] ชื่อ"
       code: sk?.code || (String(p.item_name ?? "").match(/^\s*\[([^\]]+)\]/)?.[1] ?? ""),
@@ -97,9 +104,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       purchase_link: sk?.link ?? null,   // ลิงก์ซื้อสินค้า (จาก SKU)
       supplier_sku_code: shopSku ?? sk?.supplier_sku_code ?? null,   // รหัสร้าน: per-shop (supplier_items) ก่อน แล้ว fallback ฟิลด์เดี่ยว SKU
       name_cn: sk?.name_cn ?? null, name_en: sk?.name_en ?? null, purchase_uom_en: sk?.purchase_uom_en ?? null,
-      moq: (p.item_sku_id ? supMap.get(String(p.item_sku_id))?.moq : null) ?? null,
-      lead_time_days: (p.item_sku_id ? supMap.get(String(p.item_sku_id))?.lead : null) ?? null,
-      price_tiers: (p.item_sku_id ? supMap.get(String(p.item_sku_id))?.tiers : null) ?? [],
+      moq: (sid ? supMap.get(sid)?.moq : null) ?? null,
+      lead_time_days: (sid ? supMap.get(sid)?.lead : null) ?? null,
+      price_tiers: (sid ? supMap.get(sid)?.tiers : null) ?? [],
     };
   });
 

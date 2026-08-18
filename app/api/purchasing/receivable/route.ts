@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { skuIdsByBracketCode, resolveSkuId } from "@/lib/sku-code-lookup";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -70,8 +71,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   if (lines.length === 0) return NextResponse.json({ data: [], error: null });
 
+  // บรรทัดที่มาจากใบสั่งงาน (BOM) ยังไม่ผูก SKU — เก็บรหัสไว้ในชื่อ "[CODE] ชื่อ" เท่านั้น
+  // → เดา SKU จากรหัสนั้น (ของกลาง lib/sku-code-lookup) ไม่งั้นรูปสินค้าไม่ขึ้นบนหน้ารับของ
+  const codeSkuMap = await skuIdsByBracketCode(admin, lines.map((l) => l.item_name));
+  const skuIdOf = (l: Record<string, unknown>) => resolveSkuId(l.item_sku_id, l.item_name, codeSkuMap);
+
   // 3) รหัส + รูปปก จาก SKU (batch)
-  const skuIds = [...new Set(lines.map((l) => l.item_sku_id).filter(Boolean) as string[])];
+  const skuIds = [...new Set(lines.map(skuIdOf).filter(Boolean) as string[])];
   const skuMap = new Map<string, { code: string | null; cover: string | null }>();
   for (let i = 0; i < skuIds.length; i += 300) {
     const chunk = skuIds.slice(i, i + 300);
@@ -115,10 +121,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const t = today();
   const rows = lines.map((l) => {
     const po = poMap.get(String(l.po_id)); if (!po) return null;
-    const sk = l.item_sku_id ? skuMap.get(String(l.item_sku_id)) : null;
+    const sid = skuIdOf(l);
+    const sk = sid ? skuMap.get(sid) : null;
     const cover = sk?.cover ?? null;
     const orderDate = (po.order_date as string) || null;
-    const lead = l.item_sku_id ? (leadMap.get(String(l.item_sku_id)) ?? null) : null;
+    const lead = sid ? (leadMap.get(sid) ?? null) : null;
 
     // สถานะจ่ายเงิน + ร้านส่งก่อนจ่าย → จุดเริ่มนับวันส่ง
     const sellerName = (po.seller_name as string) ?? "";
@@ -145,7 +152,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       po_no: (po.po_no as string) ?? "",
       po_status: (po.status as string) ?? "",
       seller_name: (po.seller_name as string) ?? "—",
-      item_sku_id: l.item_sku_id ?? null,
+      item_sku_id: sid,   // sku ที่ผูกไว้ หรือที่เดาได้จากรหัสในชื่อ
       item_name: (l.item_name as string) ?? "",
       code: sk?.code ?? "",
       image_url: cover ? `/api/r2-image?key=${encodeURIComponent(cover)}` : null,
