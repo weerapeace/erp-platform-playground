@@ -3,6 +3,7 @@
  * POST { job_name, rate?, is_detail?, note?, product_sku? }
  *   1) หา/สร้างงานในทะเบียนกลาง piecework_jobs (+ ประวัติราคา)
  *   2) ถ้าระบุ product_sku → ผูกเข้า BOM ที่ใช้งานของสินค้านั้น (เพิ่มแถว bom_piecework_lines)
+ *      all_siblings = true → ผูกให้ทุกสินค้าที่อยู่ใต้ Parent SKU เดียวกันด้วย (รุ่นเดียวกันงานเหมาเหมือนกัน)
  * ของกลาง: guardApi(production.piecework) + supabaseAdmin + audit
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -16,7 +17,7 @@ export const revalidate = 0;
 
 const num = (v: unknown, d = 0) => { const n = Number(v); return isFinite(n) ? n : d; };
 
-type Body = { job_name?: string; rate?: unknown; is_detail?: boolean; note?: string; product_sku?: string; qty_per?: unknown };
+type Body = { job_name?: string; rate?: unknown; is_detail?: boolean; note?: string; product_sku?: string; qty_per?: unknown; all_siblings?: boolean };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "production.piecework"); if (denied) return denied;
@@ -45,30 +46,42 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (rate > 0) await admin.from("piecework_rate_history").insert({ job_id: jobId, rate, note: "สร้างจากใบสั่งซื้อ", created_by: user?.id ?? null }).then(() => {}, () => {});
   }
 
-  // 2) ผูกเข้า BOM ของสินค้า (ถ้าระบุ SKU)
-  let attached = false; let bomCode: string | null = null; let warn: string | null = null;
+  // 2) ผูกเข้า BOM ของสินค้า (ถ้าระบุ SKU) — all_siblings = ใส่ให้ทุกตัวใต้ Parent SKU เดียวกัน
+  let attached = false; let bomCode: string | null = null; let warn: string | null = null; let attachedCount = 0;
   if (sku) {
-    const { data: bom } = await admin.from("bom_headers").select("bom_code").eq("product_sku", sku).eq("is_active", true)
-      .order("updated_at", { ascending: false }).limit(1).maybeSingle();
-    bomCode = (bom as { bom_code?: string } | null)?.bom_code ?? null;
-    if (!bomCode) { warn = `ไม่พบ BOM ที่ใช้งานของสินค้า ${sku} — สร้างงานในทะเบียนแล้ว แต่ยังไม่ได้ผูกเข้า BOM`; }
-    else {
-      // กันซ้ำ: ถ้างานนี้อยู่ใน BOM แล้ว ไม่เพิ่มซ้ำ
-      const { data: dup } = await admin.from("bom_piecework_lines").select("id").eq("bom_code", bomCode).eq("job_id", jobId).eq("is_active", true).limit(1).maybeSingle();
-      if (dup) { attached = true; }
-      else {
-        const { data: maxSeq } = await admin.from("bom_piecework_lines").select("sequence").eq("bom_code", bomCode).order("sequence", { ascending: false }).limit(1).maybeSingle();
-        const seq = (num((maxSeq as { sequence?: number } | null)?.sequence) || 0) + 1;
-        const qtyPer = num(b.qty_per, 1) || 1;
-        const { error: bErr } = await admin.from("bom_piecework_lines").insert({
-          bom_code: bomCode, job_id: jobId, job_name: name, rate, is_detail: !!b.is_detail, note: (b.note ?? "").trim() || null, qty_per: qtyPer, sequence: seq, is_active: true,
-        });
-        if (bErr) return NextResponse.json({ error: bErr.message }, { status: 400 });
-        attached = true;
+    let skus = [sku];
+    if (b.all_siblings) {
+      const { data: me } = await admin.from("skus_v2").select("parent_sku_id").eq("code", sku).maybeSingle();
+      const parentId = (me as { parent_sku_id?: string } | null)?.parent_sku_id ?? null;
+      if (parentId) {
+        const { data: sibs } = await admin.from("skus_v2").select("code").eq("parent_sku_id", parentId).limit(500);
+        const codes = (sibs ?? []).map((r) => String((r as { code: string }).code));
+        if (codes.length) skus = [...new Set([sku, ...codes])];
       }
+    }
+    const { data: boms } = await admin.from("bom_headers").select("bom_code, product_sku, updated_at")
+      .in("product_sku", skus).eq("is_active", true).order("updated_at", { ascending: false });
+    const bomBySku = new Map<string, string>();
+    for (const row of (boms ?? []) as Record<string, unknown>[]) {
+      const k = String(row.product_sku); if (!bomBySku.has(k)) bomBySku.set(k, String(row.bom_code));
+    }
+    bomCode = bomBySku.get(sku) ?? null;
+    if (bomBySku.size === 0) { warn = `ไม่พบ BOM ที่ใช้งานของสินค้า ${sku} — สร้างงานในทะเบียนแล้ว แต่ยังไม่ได้ผูกเข้า BOM`; }
+    for (const bc of new Set(bomBySku.values())) {
+      // กันซ้ำ: ถ้างานนี้อยู่ใน BOM แล้ว ไม่เพิ่มซ้ำ
+      const { data: dup } = await admin.from("bom_piecework_lines").select("id").eq("bom_code", bc).eq("job_id", jobId).eq("is_active", true).limit(1).maybeSingle();
+      if (dup) { attached = true; continue; }
+      const { data: maxSeq } = await admin.from("bom_piecework_lines").select("sequence").eq("bom_code", bc).order("sequence", { ascending: false }).limit(1).maybeSingle();
+      const seq = (num((maxSeq as { sequence?: number } | null)?.sequence) || 0) + 1;
+      const qtyPer = num(b.qty_per, 1) || 1;
+      const { error: bErr } = await admin.from("bom_piecework_lines").insert({
+        bom_code: bc, job_id: jobId, job_name: name, rate, is_detail: !!b.is_detail, note: (b.note ?? "").trim() || null, qty_per: qtyPer, sequence: seq, is_active: true,
+      });
+      if (bErr) return NextResponse.json({ error: bErr.message }, { status: 400 });
+      attached = true; attachedCount += 1;
     }
   }
 
-  await writeAudit(admin, { action: "create", entityType: "piecework_from_po", entityId: jobId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { name, rate, product_sku: sku || null, bom_code: bomCode, attached } });
-  return NextResponse.json({ job_id: jobId, bom_code: bomCode, attached, warn, error: null });
+  await writeAudit(admin, { action: "create", entityType: "piecework_from_po", entityId: jobId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { name, rate, product_sku: sku || null, bom_code: bomCode, attached, all_siblings: !!b.all_siblings, attached_count: attachedCount } });
+  return NextResponse.json({ job_id: jobId, bom_code: bomCode, attached, attached_count: attachedCount, warn, error: null });
 }

@@ -23,6 +23,7 @@ import type { PurchaseStatusRow } from "@/app/api/mo/purchase-status/route";
 import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import { AddPieceworkModal } from "./add-piecework-modal";
+import { CopyPieceworkModal } from "./copy-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
 import { BomRefreshButton } from "@/components/bom-refresh";
@@ -387,6 +388,7 @@ function WorkBoardPageInner() {
   const [pieceEditKey, setPieceEditKey] = useState<string | null>(null);
   const [pieceEdit, setPieceEdit] = useState<{ job_name: string; rate: string; qty_per: string }>({ job_name: "", rate: "", qty_per: "" });
   const [pieceBusy, setPieceBusy] = useState(false);   // popup เพิ่มงานเหมาเข้า BOM
+  const [copyPieceOpen, setCopyPieceOpen] = useState(false);   // popup คัดลอกงานเหมาจากสินค้าอื่น
   // popup ตั้งค่าแผนก (สร้าง/แก้/ลบ/โชว์-ซ่อน/หมายเหตุ/เรียงลำดับ)
   const [deptMgrOpen, setDeptMgrOpen] = useState(false);
   const [deptList, setDeptList] = useState<DeptFull[]>([]);
@@ -2141,7 +2143,13 @@ function WorkBoardPageInner() {
                       clPieceRows.length === 0 ? (
                         <div className="text-center py-8">
                           <p className="text-slate-300 text-sm mb-3">สินค้านี้ยังไม่มีงานเหมาใน BOM</p>
-                          {canEdit && <button onClick={() => setAddPieceOpen(true)} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">➕ เพิ่มงานเหมาเข้า BOM</button>}
+                          {canEdit && (
+                            <div className="flex items-center justify-center gap-2">
+                              <button onClick={() => setAddPieceOpen(true)} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">➕ เพิ่มงานเหมาเข้า BOM</button>
+                              <button onClick={() => setCopyPieceOpen(true)} title="ยกงานเหมาจากรุ่นเดียวกันหรือสินค้าตัวอื่นมาทั้งชุด"
+                                className="h-9 px-4 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:border-blue-300 hover:text-blue-600">📋 คัดลอกจากรุ่นอื่น</button>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="border border-slate-100 rounded-lg overflow-hidden">
@@ -2155,6 +2163,7 @@ function WorkBoardPageInner() {
                                   <span className="text-slate-400"> · ทั้งหมด ฿{fmt(t.money)}</span>
                                 </span>
                               ); })()}
+                              {canEdit && <button onClick={() => setCopyPieceOpen(true)} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">📋 คัดลอกจากรุ่นอื่น</button>}
                               {canEdit && <button onClick={() => setAddPieceOpen(true)} className="text-[11px] text-blue-600 hover:underline">➕ เพิ่มงานเข้า BOM</button>}
                             </span>
                           </div>
@@ -2255,6 +2264,9 @@ function WorkBoardPageInner() {
       {/* popup เพิ่มงานเหมาเข้า BOM (จากแท็บงานเหมา) */}
       <AddPieceworkModal open={addPieceOpen} productSku={checklistMO?.product_sku ?? null} productName={checklistMO?.product_name ?? null}
         onClose={() => setAddPieceOpen(false)} onAdded={() => void reloadPiece()} />
+      {/* คัดลอกงานเหมาจากสินค้าตัวอื่น / รุ่นเดียวกัน */}
+      <CopyPieceworkModal open={copyPieceOpen} productSku={checklistMO?.product_sku ?? null} productName={checklistMO?.product_name ?? null}
+        onClose={() => setCopyPieceOpen(false)} onCopied={() => void reloadPiece()} />
 
       {/* ⚙️ ตั้งค่าแผนก — จบในที่เดียว (สร้าง/แก้/ลบ/ซ่อน/หมายเหตุ/เรียงลำดับ) */}
       <ERPModal open={deptMgrOpen} onClose={closeDeptMgr} size="md" title="⚙️ ตั้งค่าแผนก"

@@ -24,10 +24,12 @@ export function AddPieceworkModal({ open, productSku, productName, onClose, onAd
   // แก้ชื่องานในทะเบียน (พิมพ์ผิดแก้ได้เลย ไม่ต้องออกไปหน้าแอดมิน)
   const [renaming, setRenaming] = useState(false);
   const [renameVal, setRenameVal] = useState("");
+  // ใส่งานนี้ให้ทุกสินค้าใต้ Parent SKU เดียวกัน (รุ่นเดียวกันงานเหมามักเหมือนกัน)
+  const [allSiblings, setAllSiblings] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setSel(""); setName(""); setRate(0); setQtyPer(1); setIsDetail(false); setNote("");
+    setSel(""); setName(""); setRate(0); setQtyPer(1); setIsDetail(false); setNote(""); setAllSiblings(false);
     setRenaming(false); setRenameVal("");
     void loadJobs();
   }, [open]);
@@ -58,10 +60,10 @@ export function AddPieceworkModal({ open, productSku, productName, onClose, onAd
     setSaving(true);
     try {
       const res = await apiFetch("/api/piecework/from-po", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_name: name.trim(), rate, is_detail: isDetail, note: note.trim() || null, qty_per: qtyPer, product_sku: productSku }) });
+        body: JSON.stringify({ job_name: name.trim(), rate, is_detail: isDetail, note: note.trim() || null, qty_per: qtyPer, product_sku: productSku, all_siblings: allSiblings }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       if (j.warn) toast.error(j.warn);
-      else toast.success(`เพิ่มงานเหมา “${name.trim()}” เข้า BOM แล้ว`);
+      else toast.success(`เพิ่มงานเหมา “${name.trim()}” เข้า BOM แล้ว${allSiblings && j.attached_count > 1 ? ` (${j.attached_count} รุ่น)` : ""}`);
       onAdded(); onClose();
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); }
     finally { setSaving(false); }
@@ -120,7 +122,11 @@ export function AddPieceworkModal({ open, productSku, productName, onClose, onAd
             <input type="checkbox" checked={isDetail} onChange={(e) => setIsDetail(e.target.checked)} className="w-4 h-4 accent-blue-600" /> ละเอียด
           </label>
         </div>
-        <p className="text-[11px] text-slate-400">จำนวน× = ตัวคูณต่อ 1 ใบสั่ง (เช่น เย็บ 4 จุด ใส่ 4)</p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input type="checkbox" checked={allSiblings} onChange={(e) => setAllSiblings(e.target.checked)} className="w-4 h-4 accent-blue-600" />
+          📌 ใส่ให้ทุกตัวในรุ่นเดียวกัน (Parent SKU เดียวกัน)
+        </label>
+        <p className="text-[11px] text-slate-400">จำนวน× = ตัวคูณต่อ 1 ใบสั่ง (เช่น เย็บ 4 จุด ใส่ 4) · ตัวที่มีงานนี้อยู่แล้วจะไม่เพิ่มซ้ำ</p>
       </div>
     </ERPModal>
   );
