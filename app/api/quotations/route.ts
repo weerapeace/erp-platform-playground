@@ -20,6 +20,8 @@ export type QuoteLine = {
   vat_amount?:      number;
   line_total?:      number;
   note?:            string | null;
+  /** รูปประกอบของบรรทัด (R2 key) — แนบเองจากคลังไฟล์ · ไม่มี = ใช้รูปของ SKU ที่ผูกไว้ */
+  image_key?:       string | null;
 };
 
 export type QuoteListItem = {

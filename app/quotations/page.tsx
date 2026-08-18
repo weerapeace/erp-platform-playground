@@ -171,10 +171,10 @@ export default function QuotationsPage() {
 
     return {
       ...q,
-      lines: q.lines.map(line => ({
-        ...line,
-        ...(line.sku ? imageBySku.get(line.sku) : undefined),
-      })),
+      // รูปที่แนบเองมาก่อน — ไม่มีค่อยใช้รูปของ SKU
+      lines: q.lines.map(line => (line.image_key
+        ? { ...line, image_url: `/api/r2-image?key=${encodeURIComponent(line.image_key)}` }
+        : { ...line, ...(line.sku ? imageBySku.get(line.sku) : undefined) })),
     };
   }, []);
 
@@ -249,6 +249,7 @@ export default function QuotationsPage() {
         qty: l.qty, unit: l.unit, unit_price: l.unit_price,
         discount_type: l.discount_type, discount_value: l.discount_value,
         tax_code: l.tax_code, note: l.note,
+        image_key: l.image_key ?? null,   // รูปที่แนบเอง (ติดไปกับใบพิมพ์)
       }));
       const url = editingId ? `/api/quotations/${editingId}` : "/api/quotations";
       const method = editingId ? "PATCH" : "POST";

@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { SkuPicker, UnitPicker } from "@/components/pickers";
 import type { SkuPickerValue, UnitPickerValue } from "@/components/pickers";
 import { ImageThumbnail } from "@/components/image-manager";
+import { AssetPicker } from "@/components/asset-picker";
 import { calculateDocument, type DocumentResult } from "@/lib/tax";
 import { format as formatMoney, money } from "@/lib/money";
 import { LineImportModal, type ImportedLine } from "@/components/line-import";
@@ -58,6 +59,36 @@ export const emptyLine = (): EditorLine => ({
   discount_value: 0,
   tax_code: null,
 });
+
+/**
+ * รูปประกอบของบรรทัด — คลิกเพื่อแนบ/เปลี่ยนรูปจากคลังไฟล์กลาง (ติดไปกับใบพิมพ์คอลัมน์ "ภาพ")
+ * ไม่แนบเอง = ใช้รูปของ SKU ที่ผูกไว้ตามเดิม
+ */
+function LineImagePick({ url, size, readonly, onPick, onClear, alt }: {
+  url: string | null; size: number; readonly?: boolean; alt?: string;
+  onPick: (r2Key: string, url: string | null) => void; onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative inline-block">
+      <button type="button" disabled={readonly} onClick={() => setOpen(true)}
+        title={readonly ? undefined : url ? "เปลี่ยนรูปประกอบ" : "แนบรูปประกอบ (จะติดไปกับใบพิมพ์)"}
+        className={`block overflow-hidden rounded-lg border ${url ? "border-slate-200" : "border-dashed border-slate-300 bg-slate-50 text-slate-400"} ${readonly ? "" : "hover:border-violet-400"}`}
+        style={{ width: size, height: size }}>
+        {url ? <ImageThumbnail url={url} size={size} alt={alt} />
+          : <span className="flex h-full w-full items-center justify-center text-[10px] leading-tight">＋<br />รูป</span>}
+      </button>
+      {url && !readonly && (
+        <button type="button" onClick={onClear} title="เอารูปที่แนบออก"
+          className="absolute -right-1.5 -top-1.5 h-4 w-4 rounded-full border border-slate-200 bg-white text-[10px] leading-none text-slate-400 shadow hover:text-rose-500">x</button>
+      )}
+      {open && (
+        <AssetPicker open onClose={() => setOpen(false)} typeFilter="image" title="เลือกรูปประกอบรายการ"
+          onSelect={(assets) => { const a = assets[0]; if (a) onPick(a.r2_key, a.url ?? null); setOpen(false); }} />
+      )}
+    </div>
+  );
+}
 
 const lineImageUrl = (line: Pick<EditorLine, "image_url" | "image_key">) => {
   if (line.image_url) return line.image_url;
@@ -257,7 +288,8 @@ export function SOLineEditor({
                   <td className="px-2 py-2 text-center font-mono text-xs text-slate-400">{i + 1}</td>
                   <td className="px-2 py-2">
                     <div className="flex items-start gap-2">
-                      <div className="pt-0.5"><ImageThumbnail url={lineImageUrl(l)} size={36} alt={l.product_name || "สินค้า"} /></div>
+                      <div className="pt-0.5"><LineImagePick url={lineImageUrl(l)} size={36} readonly={readonly} alt={l.product_name || "สินค้า"}
+                        onPick={(k, u) => update(i, { image_key: k, image_url: u })} onClear={() => update(i, { image_key: null, image_url: null })} /></div>
                       <div className="min-w-0 flex-1">
                         <SkuPicker value={pickerValueOf(l)} onChange={(p) => applyPick(i, p, l)} disabled={readonly} placeholder="เลือก SKU / ชื่อสินค้า..." />
                         {(l.sku || l.product_name) && (
@@ -394,7 +426,8 @@ export function SOLineEditor({
               <div className="grid grid-cols-[28px_64px_minmax(0,1fr)_auto] items-start gap-3">
                 <div className="pt-3 text-center font-mono text-xs text-slate-400">{i + 1}</div>
                 <div className="pt-1">
-                  <ImageThumbnail url={lineImageUrl(l)} size={56} alt={l.product_name || "สินค้า"} />
+                  <LineImagePick url={lineImageUrl(l)} size={56} readonly={readonly} alt={l.product_name || "สินค้า"}
+                    onPick={(k, u) => update(i, { image_key: k, image_url: u })} onClear={() => update(i, { image_key: null, image_url: null })} />
                 </div>
                 <div className="min-w-0">
                   <label className="mb-1 block text-xs font-medium text-slate-500">สินค้า</label>

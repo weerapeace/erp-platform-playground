@@ -54,10 +54,10 @@ async function enrichQuoteImages(q: QuoteDetail): Promise<QuotePrintDetail> {
 
   return {
     ...(q as QuotePrintDetail),
-    lines: q.lines.map(line => ({
-      ...line,
-      ...(line.sku ? imageBySku.get(line.sku) : undefined),
-    })),
+    // รูปที่แนบเองมาก่อนเสมอ — ไม่มีค่อย fallback เป็นรูปของ SKU ที่ผูกไว้
+    lines: q.lines.map(line => (line.image_key
+      ? { ...line, image_url: `/api/r2-image?key=${encodeURIComponent(line.image_key)}` }
+      : { ...line, ...(line.sku ? imageBySku.get(line.sku) : undefined) })),
   };
 }
 
