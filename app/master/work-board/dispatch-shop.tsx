@@ -31,6 +31,8 @@ type ShopMO = {
 type ShopDept = { id: string; name: string };
 type ShopCraftsman = { id: string; name: string; code: string | null; department_id?: string | null };
 
+// วันนี้ตามเวลาเครื่อง (ไทย) — ห้ามใช้ toISOString เพราะเป็น UTC (ดึก ๆ จะร่นไปเป็นเมื่อวาน)
+const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const stageOfDept = (name: string) => (name.includes("ตัด") || name.includes("เตรียม") ? "cut" : "assemble");
 const daysUntil = (due: string | null): number | null => {
@@ -138,6 +140,7 @@ export function DispatchShop({
   const [craftListOpen, setCraftListOpen] = useState(false);
   const [craftSearch, setCraftSearch] = useState("");
   const [due, setDue] = useState<string>("");
+  const [dispDate, setDispDate] = useState<string>(todayLocal());   // วันที่จ่ายงาน (ตั้งต้น = วันนี้)
   const [saving, setSaving] = useState(false);
   // ป๊อปยืนยันจ่ายงาน
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -241,7 +244,7 @@ export function DispatchShop({
             body: JSON.stringify({ mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
               stage: stageOfDept(selDept!.name), department_id: selDept!.id, department_name: selDept!.name,
               assignee_type: craft ? "craftsman" : "department", assignee_id: craft?.id ?? null, assignee_name: craft?.name ?? selDept!.name,
-              qty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: due || m.due_date || null,
+              qty, uom: "ชิ้น", dispatch_date: dispDate || todayLocal(), due_date: due || m.due_date || null,
               note: `จากใบสั่งผลิต ${m.mo_no}`, labor_cost: rate > 0 ? rate * qty : null }) });
           const j = await res.json(); if (j.error) throw new Error(j.error);
           ok++; dispatched += qty;
@@ -500,6 +503,11 @@ export function DispatchShop({
           </div>
         )}
       </div>
+
+      <label className="block">
+        <span className="text-xs text-slate-500">วันที่จ่าย (ตั้งต้นวันนี้ — ย้อนวันได้ถ้าคีย์ตามหลัง)</span>
+        <input type="date" value={dispDate} onChange={(e) => setDispDate(e.target.value)} className={`${selCls} w-full mt-0.5`} />
+      </label>
 
       <label className="block">
         <span className="text-xs text-slate-500">กำหนดเสร็จ (ทั้งตะกร้า — ว่าง = ใช้ของแต่ละใบ)</span>

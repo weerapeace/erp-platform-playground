@@ -328,6 +328,7 @@ function WorkBoardPageInner() {
   const [dispQty, setDispQty] = useState(0);
   const [dispCraftsman, setDispCraftsman] = useState("");
   const [dispDue, setDispDue] = useState("");
+  const [dispDate, setDispDate] = useState(todayLocal());   // วันที่จ่ายงาน (ตั้งต้น = วันนี้) — ย้อนวันได้เวลาคีย์ตามหลัง
   const [dispSaving, setDispSaving] = useState(false);
   const [dispPiece, setDispPiece] = useState<PendingPiece | null>(null);   // งานเหมารายชิ้นที่กำลังจ่ายให้ช่างเหมา
   const [pieceCraftsman, setPieceCraftsman] = useState("");
@@ -546,7 +547,7 @@ function WorkBoardPageInner() {
 
   // เปิด popup จ่ายงาน (ตั้งค่าเริ่มต้นจาก MO)
   const openDispatch = useCallback((mo: PendingMO, dept: Dept | null) => {
-    setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.internal_due_date ?? mo.due_date ?? "");
+    setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.internal_due_date ?? mo.due_date ?? ""); setDispDate(todayLocal());
     setDispRates([]); setDispLaborRate(""); setDefectListOpen(false);
     // ดึงค่าแรง/ชิ้น จาก BOM ของสินค้านี้ (ราคากลาง + รายช่าง) → ใช้ตั้ง default
     if (mo.bom_code) void (async () => {
@@ -676,7 +677,7 @@ function WorkBoardPageInner() {
         body: JSON.stringify({ mo_no: dispMO.mo_no, product_sku: dispMO.product_sku, product_name: dispMO.product_name,
           stage: stageOfDept(dispDept.name), department_id: dispDept.id, department_name: dispDept.name,
           assignee_type: craft ? "craftsman" : "department", assignee_id: craft?.id ?? null, assignee_name: craft?.name ?? dispDept.name,
-          qty: dispQty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: dispDue || null, note: `จากใบสั่งผลิต ${dispMO.mo_no}`,
+          qty: dispQty, uom: "ชิ้น", dispatch_date: dispDate || todayLocal(), due_date: dispDue || null, note: `จากใบสั่งผลิต ${dispMO.mo_no}`,
           labor_cost: dispLaborRate.trim() !== "" ? (Number(dispLaborRate) || 0) * dispQty : null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(`จ่ายงานเข้า ${dispDept.name} แล้ว: ${j.wo_no ?? ""}`);
@@ -1674,10 +1675,13 @@ function WorkBoardPageInner() {
                 {board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <label className="block"><span className="text-[11px] text-slate-500">จำนวนที่จ่าย</span>
                 <input type="number" min={0} step="any" max={dispMO.remaining} value={dispQty} onChange={(e) => setDispQty(Number(e.target.value))}
                   className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
+              <label className="block"><span className="text-[11px] text-slate-500">วันที่จ่าย</span>
+                <input type="date" value={dispDate} onChange={(e) => setDispDate(e.target.value)} title="วันที่จ่ายงานจริง — ตั้งต้นเป็นวันนี้ ย้อนวันได้ถ้าคีย์ตามหลัง"
+                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
               <label className="block"><span className="text-[11px] text-slate-500">กำหนดเสร็จ</span>
                 <input type="date" value={dispDue} onChange={(e) => setDispDue(e.target.value)} className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
             </div>
@@ -2936,6 +2940,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
   const [dispDeptId, setDispDeptId] = useState("");
   const [dispCraft, setDispCraft] = useState("");
   const [dispDue2, setDispDue2] = useState("");
+  const [dispDate2, setDispDate2] = useState(todayLocal());   // วันที่จ่ายงาน (ตั้งต้น = วันนี้)
   const [dispRate, setDispRate] = useState("");                       // ช่อง "ใส่ให้ทุกใบ" (ตัวช่วย)
   const [dispRateBy, setDispRateBy] = useState<Record<string, string>>({});   // ค่าแรง/ชิ้น รายใบ (ตั้งต้นจากสูตรของสินค้านั้น)
   const [dispBusy, setDispBusy] = useState(false);
@@ -3016,7 +3021,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
             mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
             stage: stageOfDept(dept.name), department_id: dept.id, department_name: dept.name,
             assignee_type: craft ? "craftsman" : "department", assignee_id: craft?.id ?? null, assignee_name: craft?.name ?? dept.name,
-            qty: m.remaining, uom: "ชิ้น", dispatch_date: todayLocal(),
+            qty: m.remaining, uom: "ชิ้น", dispatch_date: dispDate2 || todayLocal(),
             due_date: dispDue2 || m.internal_due_date || m.due_date || null,
             note: `จากใบสั่งผลิต ${m.mo_no}`,
             // ค่าแรงรายใบ (0 = ไม่ส่ง → เซิร์ฟเวอร์เติมจากใบสั่งผลิต/ราคากลางในสูตรให้เอง)
@@ -3031,7 +3036,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
     if (ok > 0) toast.success(`จ่ายเข้า ${dept.name}${craft ? ` · ${craft.name}` : ""} แล้ว ${ok} ใบ`);
     if (fails.length) toast.error(`ไม่สำเร็จ ${fails.length} ใบ — ${fails[0]}`);
     if (ok > 0) { setDispOpen(false); setSel(new Set()); onReload?.(); }
-  }, [pending, sel, departments, craftsmen, dispDeptId, dispCraft, dispDue2, dispRateBy, toast, onReload]);
+  }, [pending, sel, departments, craftsmen, dispDeptId, dispCraft, dispDate2, dispDue2, dispRateBy, toast, onReload]);
 
   // ใส่ค่าแรง/ชิ้น ให้ใบจ่ายงานที่ติ๊กไว้ — ใบละ (ค่าแรง/ชิ้น × จำนวนของใบนั้น)
   const selWos = wos.filter((w) => woSel.has(w.id));
@@ -3127,7 +3132,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
               // ค่าแรงตั้งต้น = ราคากลางในสูตรของสินค้านั้น (ไม่มีก็ถอดจากค่าแรงที่วางแผนไว้) — แก้รายใบได้
               const init: Record<string, string> = {};
               for (const m of pending.filter((x) => sel.has(x.id))) { const r = rateOf(m); if (r > 0) init[m.id] = String(r); }
-              setDispRateBy(init); setDispRate(""); setDispOpen(true); setDispMsg("");
+              setDispRateBy(init); setDispRate(""); setDispDate2(todayLocal()); setDispOpen(true); setDispMsg("");
             }} className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🚚 จ่ายงาน ({selMoNos.length})</button>}
           </>}
         </div>}
@@ -3200,6 +3205,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
                 </div>
                 {isHire ? <span className="text-[10px] text-rose-500">งานเหมา — ต้องเลือกช่าง (จ่ายทั้งแผนกไม่ได้) · พิมพ์ชื่อ/รหัสค้นหา</span>
                   : deptCrafts.length === 0 && dept && <span className="text-[10px] text-slate-400">แผนกนี้ยังไม่มีช่าง — จ่ายเป็นทั้งแผนกได้</span>}
+              </label>
+
+              <label className="block"><span className="text-[11px] text-slate-500">วันที่จ่าย <span className="text-slate-400">— ตั้งต้นวันนี้ · ย้อนวันได้ถ้าคีย์ตามหลัง</span></span>
+                <input type="date" value={dispDate2} onChange={(e) => setDispDate2(e.target.value)}
+                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </label>
 
               <label className="block"><span className="text-[11px] text-slate-500">กำหนดเสร็จ <span className="text-slate-400">— เว้นว่าง = ใช้วันส่งภายใน/ส่งลูกค้าของแต่ละใบ</span></span>
