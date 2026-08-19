@@ -18,7 +18,7 @@ export const revalidate = 0;
 
 export type MoListItem = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
-  qty: number; status: string | null; due_date: string | null;
+  qty: number; status: string | null; due_date: string | null; order_date?: string | null;
   bom_code: string | null; bom_version: string | null; is_active: boolean;
   product_image?: string | null;   // รูปสินค้า (เติมในตอน list)
   group_name?: string | null;      // ชื่อกลุ่มใบสั่งงานที่ใบนี้อยู่ (เติมในตอน list)
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   let q = supabaseFromRequest(request)
     .from("manufacturing_orders")
-    .select("id, mo_no, product_sku, product_name, qty, status, due_date, bom_code, bom_version, is_active", { count: "exact" })
+    .select("id, mo_no, product_sku, product_name, qty, status, order_date, due_date, bom_code, bom_version, is_active", { count: "exact" })
     .eq("is_active", true)
     .order(orderCol, { ascending: orderAsc })
     .range(offset, offset + limit - 1);
@@ -105,6 +105,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 // ---- POST create ----
 type CreateBody = {
   product_sku?: string; product_name?: string; qty?: number; due_date?: string | null;
+  order_date?: string | null;          // วันที่สั่งงาน (ฝั่ง client ส่งวันที่ไทยมา — ห้ามใช้ CURRENT_DATE ของ DB)
   bom_code?: string | null; bom_version?: string | null; status?: string; note?: string;
   size_breakdown?: SizeQty[] | null;   // กลุ่ม C: แบ่งจำนวนตามไซส์
 };
@@ -136,6 +137,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: mo, error } = await admin.from("manufacturing_orders").insert({
     mo_no: moNo, product_sku: body.product_sku, product_name: body.product_name ?? null, qty,
     status: body.status || "draft", due_date: body.due_date || null,
+    order_date: body.order_date ? String(body.order_date).slice(0, 10) : null,
     bom_code: body.bom_code ?? null, bom_version: body.bom_version ?? null, note: body.note ?? null, is_active: true,
     size_breakdown: sizeBreakdown,
   }).select("id, mo_no").single();

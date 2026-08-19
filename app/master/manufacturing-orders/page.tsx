@@ -427,6 +427,7 @@ export default function MoWorkspacePage() {
       </div>) },
     { id: "qty", accessorKey: "qty", header: "จำนวน", size: 90, cell: ({ getValue }) => <span className="tabular-nums">{fmt(getValue() as number)}</span> },
     { id: "bom_version", accessorKey: "bom_version", header: "สูตร", size: 90 },
+    { id: "order_date", accessorKey: "order_date", header: "วันที่สั่ง", size: 105 },
     { id: "due_date", accessorKey: "due_date", header: "กำหนดส่ง", size: 110 },
     { id: "status", accessorKey: "status", header: "สถานะ", size: 110, cell: ({ getValue }) => { const s = STATUS[(getValue() as string) ?? "draft"] ?? STATUS.draft; return <span className={`text-xs px-2 py-0.5 rounded ${s.cls}`}>{s.label}</span>; } },
     { id: "group_name", accessorKey: "group_name", header: "กลุ่ม", size: 130, cell: ({ getValue }) => { const g = getValue() as string | null; return g ? <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">🗂 {g}</span> : <span className="text-xs text-slate-300">—</span>; } },
