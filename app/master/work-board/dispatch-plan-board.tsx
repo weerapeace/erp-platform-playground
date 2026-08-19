@@ -11,17 +11,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import dynamicImport from "next/dynamic";
 import { HoverImage } from "@/components/hover-image";
 import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type DeptLite = { id: string; name: string };
-type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null; status?: string; ready?: boolean; prep_done?: boolean; cut_done?: boolean; brand?: string | null };
+type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null; status?: string; ready?: boolean; prep_done?: boolean; cut_done?: boolean; brand?: string | null; due_date?: string | null; internal_due_date?: string | null };
 type PieceLite = { id: string; mo_no: string; job_name: string; rate: number; qty_per: number; qty: number; product_sku: string | null; product_name: string | null; image_url?: string | null };
-type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; department_id: string | null; stage: string; assignee_id?: string | null; assignee_name: string | null; assignees?: { id: string | null; name: string }[]; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number }; brand?: string | null };
+type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; department_id: string | null; stage: string; assignee_id?: string | null; assignee_name: string | null; assignees?: { id: string | null; name: string }[]; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number }; brand?: string | null; due_date?: string | null };
 type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null };
 type DefectMap = Record<string, { count: number } | undefined>;
 
+// drawer ข้อมูลสินค้า (ของกลางตัวเดียวกับหน้า master) — โหลดตอนกดชื่อสินค้าเท่านั้น (ตัวนี้หนัก)
+const SkuDrawer = dynamicImport(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
+const dayText = (d?: string | null) => (d ? new Date(String(d).slice(0, 10) + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : null);
+const ymdKey = (d: Date) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-");
+const TH_DOW = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 const baht = (n: number) => "฿" + fmt(n);
 
 function Thumb({ url }: { url?: string | null }) {
@@ -97,6 +104,52 @@ export function DispatchPlanBoard({
   const [staffPopup, setStaffPopup] = useState<DeptLite | null>(null);   // popup พนักงานในโต๊ะ (แก้คน + ตั้ง OT)
   // ⛶ ขยายดูรายการในช่อง (รอจ่าย / โต๊ะ) — คอลัมน์บนบอร์ดยาว เลื่อนหาของยาก
   const [listPopup, setListPopup] = useState<{ kind: "pending" | "dept"; dept?: DeptLite } | null>(null);
+  const [listView, setListView] = useState<"cards" | "cal">("cards");      // ในป๊อป: การ์ด / ปฏิทิน (ตามกำหนดส่ง)
+  const [calCursor, setCalCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [skuPeek, setSkuPeek] = useState<string | null>(null);             // uuid ของ SKU ที่กดดูข้อมูล
+  const [skuPeeking, setSkuPeeking] = useState(false);
+  // ลำดับการ์ดในป๊อป (ลากจัดเองได้) — จำไว้ในเครื่องนี้ต่อโต๊ะ
+  const [cardOrder, setCardOrder] = useState<Record<string, string[]>>({});
+  const [dragCard, setDragCard] = useState<string | null>(null);
+
+  /** กดชื่อสินค้า → เปิด drawer ข้อมูลสินค้า (ของกลาง) — แปลงรหัสเป็น id ด้วย /api/skus/lookup */
+  const openSkuInfo = useCallback(async (code: string | null | undefined) => {
+    const c = (code ?? "").trim();
+    if (!c || skuPeeking) return;
+    setSkuPeeking(true);
+    try {
+      const j = await apiFetch("/api/skus/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codes: [c] }) })
+        .then((r) => r.json());
+      const hit = (j?.data ?? {})[c] as { id?: string } | null;
+      if (hit?.id) setSkuPeek(String(hit.id));
+      else toast.error(`ไม่พบข้อมูลสินค้า ${c}`);
+    } catch { toast.error("เปิดข้อมูลสินค้าไม่สำเร็จ"); }
+    finally { setSkuPeeking(false); }
+  }, [skuPeeking, toast]);
+
+  /** ลำดับการ์ดที่ลากจัดไว้เอง (เก็บในเครื่อง) */
+  const orderKeyOf = (kind: string, deptId?: string) => `wb:cardOrder:${kind}:${deptId ?? "-"}`;
+  const applyOrder = useCallback(<T,>(rows: T[], keyOf: (r: T) => string, storeKey: string): T[] => {
+    const ord = cardOrder[storeKey];
+    if (!ord || ord.length === 0) return rows;
+    const idx = new Map(ord.map((k, i) => [k, i]));
+    return [...rows].sort((a, b) => (idx.get(keyOf(a)) ?? 9999) - (idx.get(keyOf(b)) ?? 9999));
+  }, [cardOrder]);
+  const moveCard = useCallback((storeKey: string, keys: string[], from: string, to: string) => {
+    if (from === to) return;
+    const base = (cardOrder[storeKey]?.length ? cardOrder[storeKey].filter((k) => keys.includes(k)) : keys).slice();
+    for (const k of keys) if (!base.includes(k)) base.push(k);
+    const fi = base.indexOf(from), ti = base.indexOf(to);
+    if (fi < 0 || ti < 0) return;
+    base.splice(ti, 0, base.splice(fi, 1)[0]);
+    setCardOrder((p) => { const next = { ...p, [storeKey]: base }; try { localStorage.setItem(storeKey, JSON.stringify(base)); } catch { /* โหมดส่วนตัว */ } return next; });
+  }, [cardOrder]);
+  // อ่านลำดับที่เคยจัดไว้ตอนเปิดป๊อป
+  useEffect(() => {
+    if (!listPopup) return;
+    const k = orderKeyOf(listPopup.kind, listPopup.dept?.id);
+    try { const raw = localStorage.getItem(k); if (raw) setCardOrder((p) => ({ ...p, [k]: JSON.parse(raw) as string[] })); } catch { /* ignore */ }
+  }, [listPopup]);
   const [listSearch, setListSearch] = useState("");
   const [listAddOpen, setListAddOpen] = useState(false);      // ป๊อป ⛶: โหมด "＋ เพิ่มงานจากรอจ่าย"
   const [listAddSearch, setListAddSearch] = useState("");
@@ -857,19 +910,35 @@ export function DispatchPlanBoard({
         const hit = (...vals: (string | null | undefined)[]) => !q || vals.some((v) => (v ?? "").toLowerCase().includes(q));
         const close = () => { setListPopup(null); setListSearch(""); };
 
-        const pendRows = isPending ? visiblePending.filter((p) => hit(p.product_sku, p.product_name, p.mo_no)) : [];
-        const drafts = !isPending && d ? (draftByDept.get(d.id) ?? []).filter((l) => hit(l.product_sku, l.product_name, l.mo_no, l.assignee_name)) : [];
-        const reals = !isPending && d ? (realByDept.get(d.id) ?? []).filter((w) => hit(w.product_sku, w.product_name, w.mo_no, w.assignee_name)) : [];
+        const orderKey = `wb:cardOrder:${listPopup.kind}:${d?.id ?? "-"}`;
+        const pendRows = applyOrder(isPending ? visiblePending.filter((p) => hit(p.product_sku, p.product_name, p.mo_no)) : [], (p) => `p:${p.id}`, orderKey);
+        const drafts = applyOrder(!isPending && d ? (draftByDept.get(d.id) ?? []).filter((l) => hit(l.product_sku, l.product_name, l.mo_no, l.assignee_name)) : [], (l) => `d:${l.id}`, orderKey);
+        const reals = applyOrder(!isPending && d ? (realByDept.get(d.id) ?? []).filter((w) => hit(w.product_sku, w.product_name, w.mo_no, w.assignee_name)) : [], (w) => `w:${w.id}`, orderKey);
+        const storeKey = `wb:cardOrder:${listPopup.kind}:${d?.id ?? "-"}`;
+        // วันกำหนดส่งต่อใบสั่งผลิต (ใช้กับการ์ดร่าง/รอจ่ายที่ไม่มีวันของตัวเอง)
+        const dueByMo = new Map<string, string | null>();
+        for (const p of pending) dueByMo.set(p.mo_no, p.internal_due_date ?? p.due_date ?? null);
+        const dueOf = (kind: "w" | "d" | "p", row: { mo_no?: string | null; due_date?: string | null }) =>
+          (kind === "w" ? (row.due_date ?? dueByMo.get(String(row.mo_no)) ?? null) : (dueByMo.get(String(row.mo_no)) ?? null));
+
         const sumQty = isPending ? pendRows.reduce((n, p) => n + availOf(p), 0)
           : drafts.reduce((n, l) => n + (Number(l.qty) || 0), 0) + reals.reduce((n, w) => n + (Number(w.qty) || 0), 0);
         const sumLabor = isPending ? 0 : drafts.reduce((n, l) => n + lineLabor(l), 0) + reals.reduce((n, w) => n + woLabor(w), 0);
         const total = isPending ? pendRows.length : drafts.length + reals.length;
 
         // การ์ด 1 ใบ — รูปใหญ่ด้านบน ข้อมูลใต้รูป (หน้าตาแนวเดียวกับการ์ดในช้อปจ่ายงาน)
+        const cardKeys = [
+          ...pendRows.map((p) => `p:${p.id}`),
+          ...reals.map((w) => `w:${w.id}`),
+          ...drafts.map((l) => `d:${l.id}`),
+        ];
         const card = (key: string, img: string | null | undefined, sku: string | null, name: string | null, moNo: string | null,
-                      qty: number, right: ReactNode, badge?: ReactNode, onClick?: () => void) => (
+                      qty: number, right: ReactNode, badge?: ReactNode, onClick?: () => void, due?: string | null) => (
           <div key={key} onClick={onClick}
-            className={`rounded-xl border border-slate-200 bg-white overflow-hidden transition ${onClick ? "cursor-pointer hover:border-indigo-300 hover:shadow-sm" : ""}`}>
+            draggable onDragStart={(e) => { setDragCard(key); e.stopPropagation(); }} onDragEnd={() => setDragCard(null)}
+            onDragOver={(e) => { if (dragCard && dragCard !== key) e.preventDefault(); }}
+            onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (dragCard) { moveCard(storeKey, cardKeys, dragCard, key); setDragCard(null); } }}
+            className={`rounded-xl border bg-white overflow-hidden transition ${dragCard === key ? "opacity-40" : "border-slate-200"} ${onClick ? "cursor-pointer hover:border-indigo-300 hover:shadow-sm" : ""}`}>
             <div className="relative h-24 bg-slate-50 flex items-center justify-center">
               {img
                 ? <img src={img} alt={sku ?? ""} loading="lazy" decoding="async" className="max-h-full max-w-full object-contain" />
@@ -877,9 +946,13 @@ export function DispatchPlanBoard({
               {badge && <span className="absolute top-1 left-1">{badge}</span>}
             </div>
             <div className="p-2">
-              <div className="text-sm font-semibold text-slate-800 truncate">{sku ?? "—"}</div>
-              <div className="text-[11px] text-slate-500 truncate">{name}</div>
+              {/* กดชื่อ = เปิดข้อมูลสินค้า (ไม่ไปโดนคลิกการ์ด) */}
+              <button type="button" onClick={(e) => { e.stopPropagation(); void openSkuInfo(sku); }} title="กดเพื่อดูข้อมูลสินค้า"
+                className="block w-full text-left text-sm font-semibold text-slate-800 truncate hover:text-indigo-600 hover:underline">{sku ?? "—"}</button>
+              <button type="button" onClick={(e) => { e.stopPropagation(); void openSkuInfo(sku); }} title="กดเพื่อดูข้อมูลสินค้า"
+                className="block w-full text-left text-[11px] text-slate-500 truncate hover:text-indigo-600">{name}</button>
               <div className="text-[10px] text-slate-400 font-mono truncate">{moNo}</div>
+              {due && <div className="text-[10px] text-slate-500">📅 {dayText(due)}</div>}
               <div className="flex items-center justify-between gap-1 mt-1.5">
                 <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap"><b className="text-sm">{fmt(qty)}</b> ชิ้น</span>
                 <span className="text-right leading-tight">{right}</span>
@@ -895,6 +968,10 @@ export function DispatchPlanBoard({
                 <h3 className="text-sm font-bold text-slate-800 truncate">
                   {isPending ? "📥 รอจ่าย" : `🪑 ${d?.name ?? ""}`} <span className="text-slate-400 font-normal">({total} รายการ)</span>
                 </h3>
+                <div className="ml-auto inline-flex rounded-lg border border-slate-200 overflow-hidden text-[11px] shrink-0">
+                  <button onClick={() => setListView("cards")} className={`h-8 px-2.5 font-medium ${listView === "cards" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🗂 การ์ด</button>
+                  <button onClick={() => setListView("cal")} className={`h-8 px-2.5 font-medium border-l border-slate-200 ${listView === "cal" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📅 ปฏิทิน</button>
+                </div>
                 {!isPending && d && editable && (
                   <button onClick={() => { setListAddOpen((v) => !v); setListAddSearch(""); }}
                     className={`h-8 px-3 text-xs font-medium rounded-lg border ${listAddOpen ? "bg-indigo-600 text-white border-indigo-600" : "border-indigo-200 text-indigo-700 hover:bg-indigo-50"}`}>
@@ -942,21 +1019,95 @@ export function DispatchPlanBoard({
 
               <div className="flex-1 overflow-y-auto -mx-1 px-1">
                 {total === 0 && <div className="py-10 text-center text-slate-300 text-sm">— ไม่มีรายการ —</div>}
-                <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
+
+                {/* 📅 ปฏิทิน — วางงานตามวันกำหนดส่ง (ดูอย่างเดียว กดการ์ดเปิดงานได้) */}
+                {listView === "cal" && total > 0 && (() => {
+                  type CalIt = { key: string; sku: string | null; name: string | null; moNo: string | null; qty: number; due: string | null; open?: () => void };
+                  const items: CalIt[] = [
+                    ...pendRows.map((p) => ({ key: `p:${p.id}`, sku: p.product_sku, name: p.product_name, moNo: p.mo_no, qty: availOf(p), due: dueOf("p", p),
+                      open: () => onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }) })),
+                    ...reals.map((w) => ({ key: `w:${w.id}`, sku: w.product_sku, name: w.product_name, moNo: w.mo_no, qty: Number(w.qty) || 0, due: dueOf("w", w),
+                      open: () => onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }) })),
+                    ...drafts.map((l) => ({ key: `d:${l.id}`, sku: l.product_sku, name: l.product_name, moNo: l.mo_no, qty: Number(l.qty) || 0, due: dueOf("d", l) })),
+                  ];
+                  const byDay = new Map<string, CalIt[]>();
+                  const noDay: CalIt[] = [];
+                  for (const it of items) {
+                    const k = it.due ? String(it.due).slice(0, 10) : "";
+                    if (!k) { noDay.push(it); continue; }
+                    byDay.set(k, [...(byDay.get(k) ?? []), it]);
+                  }
+                  const first = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
+                  const start = new Date(first); start.setDate(1 - first.getDay());
+                  const cells = Array.from({ length: 42 }, (_, i) => { const dt = new Date(start); dt.setDate(start.getDate() + i); return dt; });
+                  const today = ymdKey(new Date());
+                  const chip = (it: CalIt) => (
+                    <div key={it.key} onClick={it.open} title={`${it.sku ?? ""} ${it.name ?? ""}\n${it.moNo ?? ""} · ${fmt(it.qty)} ชิ้น`}
+                      className={`flex items-center gap-1 rounded border border-slate-200 bg-white px-1 py-0.5 ${it.open ? "cursor-pointer hover:border-indigo-300" : ""}`}>
+                      <span className="min-w-0 flex-1 text-[10px] font-semibold text-slate-700 truncate">{it.sku ?? "—"}</span>
+                      <span className="text-[9px] text-indigo-700 font-semibold shrink-0">{fmt(it.qty)}</span>
+                    </div>
+                  );
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => setCalCursor((c) => new Date(c.getFullYear(), c.getMonth() - 1, 1))} className="h-7 w-7 border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50">‹</button>
+                        <span className="min-w-[130px] text-center text-[12px] font-semibold text-slate-700">{calCursor.toLocaleDateString("th-TH", { month: "long", year: "numeric" })}</span>
+                        <button onClick={() => setCalCursor((c) => new Date(c.getFullYear(), c.getMonth() + 1, 1))} className="h-7 w-7 border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50">›</button>
+                        <button onClick={() => { const dt = new Date(); setCalCursor(new Date(dt.getFullYear(), dt.getMonth(), 1)); }} className="h-7 px-2 text-[11px] border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50">วันนี้</button>
+                        <span className="ml-auto text-[10px] text-slate-400">วางตามกำหนดส่ง · ไม่กำหนดวัน {noDay.length} ใบ</span>
+                      </div>
+                      {noDay.length > 0 && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-1.5">
+                          <div className="text-[10px] font-semibold text-amber-800 mb-1">⏳ ยังไม่กำหนดวันส่ง ({noDay.length})</div>
+                          <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))" }}>{noDay.slice(0, 60).map(chip)}</div>
+                        </div>
+                      )}
+                      <div className="rounded-lg border border-slate-200 overflow-hidden">
+                        <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-200">
+                          {TH_DOW.map((x, i) => <div key={x} className={`px-1 py-1 text-[10px] font-semibold text-center ${i === 0 || i === 6 ? "text-rose-500" : "text-slate-500"}`}>{x}</div>)}
+                        </div>
+                        <div className="grid grid-cols-7">
+                          {cells.map((dt) => {
+                            const k = ymdKey(dt);
+                            const list = byDay.get(k) ?? [];
+                            const inMonth = dt.getMonth() === calCursor.getMonth();
+                            const qty = list.reduce((n, x) => n + x.qty, 0);
+                            return (
+                              <div key={k} className={`min-h-[76px] border-b border-r border-slate-100 p-1 ${inMonth ? "bg-white" : "bg-slate-50/60"} ${k === today ? "ring-2 ring-inset ring-indigo-400" : ""}`}>
+                                <div className="flex items-center justify-between">
+                                  <span className={`text-[10px] font-semibold ${k === today ? "text-indigo-700" : inMonth ? "text-slate-600" : "text-slate-300"}`}>{dt.getDate()}</span>
+                                  {list.length > 0 && <span className={`text-[9px] px-1 rounded ${k < today ? "bg-rose-100 text-rose-700" : "bg-indigo-50 text-indigo-700"}`}>{list.length} · {fmt(qty)}</span>}
+                                </div>
+                                <div className="space-y-0.5 max-h-[70px] overflow-y-auto scrollbar-hide">{list.map(chip)}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className={`grid gap-2 ${listView === "cal" ? "hidden" : ""}`} style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
                   {/* รอจ่าย */}
                   {pendRows.map((p) => card(`p:${p.id}`, imageByMo[p.mo_no], p.product_sku, p.product_name, p.mo_no, availOf(p),
                     <span className="text-[10px] text-slate-400">จ่ายแล้ว {fmt((p.qty || 0) - p.remaining)}/{fmt(p.qty)}</span>,
                     (p.ready ?? (!!p.prep_done && !!p.cut_done))
                       ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">พร้อม ✓</span>
                       : <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">รอเตรียม/ตัด</span>,
-                    () => onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty })))}
+                    () => onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }), dueOf("p", p)))}
 
                   {/* ในโต๊ะ: ใบจ่ายงานจริง */}
                   {reals.map((w) => {
                     const wl = woLabor(w);
                     const editingLabor = listLaborId === w.id;
                     return (
-                      <div key={`w:${w.id}`} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                      <div key={`w:${w.id}`}
+                        draggable onDragStart={(e) => { setDragCard(`w:${w.id}`); e.stopPropagation(); }} onDragEnd={() => setDragCard(null)}
+                        onDragOver={(e) => { if (dragCard && dragCard !== `w:${w.id}`) e.preventDefault(); }}
+                        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (dragCard) { moveCard(storeKey, cardKeys, dragCard, `w:${w.id}`); setDragCard(null); } }}
+                        className={`rounded-xl border bg-white overflow-hidden ${dragCard === `w:${w.id}` ? "opacity-40 border-indigo-300" : "border-slate-200"}`}>
                         <div onClick={() => onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 })}
                           title="กดเพื่อเปิดรายละเอียดงาน (ปิดแล้วกลับมาหน้านี้)" className="cursor-pointer hover:bg-slate-50/60">
                           <div className="relative h-24 bg-slate-50 flex items-center justify-center">
@@ -966,9 +1117,12 @@ export function DispatchPlanBoard({
                             <span className="absolute top-1 left-1 text-[9px] px-1.5 py-0.5 rounded-full bg-blue-600 text-white max-w-[110px] truncate">{w.assignee_name || "ทั้งโต๊ะ"}</span>
                           </div>
                           <div className="px-2 pt-2">
-                            <div className="text-sm font-semibold text-slate-800 truncate">{w.product_sku ?? "—"}</div>
-                            <div className="text-[11px] text-slate-500 truncate">{w.product_name}</div>
+                            <button type="button" onClick={(e) => { e.stopPropagation(); void openSkuInfo(w.product_sku); }} title="กดเพื่อดูข้อมูลสินค้า"
+                              className="block w-full text-left text-sm font-semibold text-slate-800 truncate hover:text-indigo-600 hover:underline">{w.product_sku ?? "—"}</button>
+                            <button type="button" onClick={(e) => { e.stopPropagation(); void openSkuInfo(w.product_sku); }} title="กดเพื่อดูข้อมูลสินค้า"
+                              className="block w-full text-left text-[11px] text-slate-500 truncate hover:text-indigo-600">{w.product_name}</button>
                             <div className="text-[10px] text-slate-400 font-mono truncate">{w.mo_no}</div>
+                            {dueOf("w", w) && <div className="text-[10px] text-slate-500">📅 {dayText(dueOf("w", w))}</div>}
                           </div>
                         </div>
                         <div className="px-2 pb-2">
@@ -1013,7 +1167,8 @@ export function DispatchPlanBoard({
                   {/* ในโต๊ะ: ร่าง (ยังไม่ดันเป็นของจริง) */}
                   {drafts.map((l) => card(`d:${l.id}`, imageByMo[l.mo_no ?? ""], l.product_sku, l.product_name, l.mo_no, Number(l.qty) || 0,
                     <span className="text-[10px] text-amber-600 font-medium">{baht(lineLabor(l))}</span>,
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-600 text-white max-w-[110px] truncate inline-block">ร่าง{l.assignee_name ? ` · ${l.assignee_name}` : ""}</span>))}
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-600 text-white max-w-[110px] truncate inline-block">ร่าง{l.assignee_name ? ` · ${l.assignee_name}` : ""}</span>,
+                    undefined, dueOf("d", l)))}
                 </div>
               </div>
 
@@ -1021,11 +1176,17 @@ export function DispatchPlanBoard({
                 <span className="text-slate-500">รวม <b className="text-slate-700">{fmt(sumQty)}</b> ชิ้น</span>
                 {!isPending && sumLabor > 0 && <span className="text-amber-700">ค่าแรงรวม <b>{baht(sumLabor)}</b></span>}
               </div>
-              <p className="text-[10px] text-slate-400 mt-1">{isPending ? "กดการ์ด = เปิดเช็กลิสต์ใบนั้น (ปิดแล้วกลับมาหน้านี้)" : "กดการ์ด = เปิดรายละเอียดงาน (ปิดแล้วกลับมาหน้านี้) · 💰 ใส่ค่าแรง · ↩ คืนรอจ่าย · รายการ “ร่าง” แก้ที่การ์ดบนบอร์ด"}</p>
+              <p className="text-[10px] text-slate-400 mt-1">
+                {isPending ? "กดการ์ด = เปิดเช็กลิสต์ใบนั้น" : "กดการ์ด = เปิดรายละเอียดงาน · 💰 ใส่ค่าแรง · ↩ คืนรอจ่าย"}
+                {" · กดชื่อ/รหัสสินค้า = ดูข้อมูลสินค้า · ลากการ์ดสลับตำแหน่งได้ (จำเฉพาะเครื่องนี้)"}
+              </p>
             </div>
           </div>
         );
       })()}
+
+      {/* 📦 ข้อมูลสินค้า — drawer ตัวเดียวกับหน้า master (เปิดจากการกดชื่อ/รหัสบนการ์ด) */}
+      {skuPeek && <SkuDrawer moduleKey="skus-v2" recordId={skuPeek} onClose={() => setSkuPeek(null)} />}
 
       {/* 👥 พนักงานในโต๊ะ — ย้ายคนเข้า/ออก + ตั้ง OT วางแผนรายคน (฿/ชม. × ชม./วัน × วัน) */}
       {staffPopup && (() => {
