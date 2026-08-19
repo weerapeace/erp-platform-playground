@@ -92,21 +92,25 @@ async function buildRateMap(admin: ReturnType<typeof supabaseAdmin>, skus: strin
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "qc.view"); if (denied) return denied;
   const admin = supabaseAdmin();
+  // ?only=queue → เอาเฉพาะ "คิวรอ QC รับเข้า" + ชั้น + สาเหตุ (ใช้ที่บอร์ดจ่ายงาน section รับเข้า QC)
+  //   ไม่ต้องลากของบนชั้นทั้งโกดัง/งานในโต๊ะมาด้วย — หน้าบอร์ดจะได้ไม่หน่วง
+  const onlyQueue = (new URL(request.url).searchParams.get("only") ?? "") === "queue";
+  const noRows = { data: [] as Record<string, unknown>[], error: null };
   const [sh, it, rs, wo, sc, ad] = await Promise.all([
     admin.from("qc_shelves").select("id,name,kind,sort_order").eq("is_active", true).order("sort_order"),
-    admin.from("qc_warehouse_items").select("id,shelf_id,wo_id,mo_no,sku,sku_name,worker,qty,status,reason,repair_by,source,created_at").order("created_at").limit(10000),   // กันโตแบบไร้เพดาน (เดิมไม่มี limit)
+    onlyQueue ? Promise.resolve(noRows) : admin.from("qc_warehouse_items").select("id,shelf_id,wo_id,mo_no,sku,sku_name,worker,qty,status,reason,repair_by,source,created_at").order("created_at").limit(10000),   // กันโตแบบไร้เพดาน (เดิมไม่มี limit)
     admin.from("qc_defect_reasons").select("id,name").eq("is_active", true).order("sort_order"),
     admin.from("mo_work_orders").select("id,mo_no,product_sku,product_name,assignee_name,assignee_id,assignee_type,received_qty,qc_pulled_qty,due_date").eq("is_active", true).gt("received_qty", 0),
-    admin.from("qc_sources").select("id,name").eq("is_active", true).order("sort_order"),
+    onlyQueue ? Promise.resolve(noRows) : admin.from("qc_sources").select("id,name").eq("is_active", true).order("sort_order"),
     // "จ่ายไปที่โต๊ะ" — ใบจ่ายงาน active ที่ยังไม่ done (ยังทำ/ส่งไม่ครบที่โต๊ะ)
-    admin.from("mo_work_orders").select("id,wo_no,mo_no,product_sku,product_name,department_name,assignee_name,qty,received_qty,status,due_date,labor_cost").eq("is_active", true).neq("status", "done"),
+    onlyQueue ? Promise.resolve(noRows) : admin.from("mo_work_orders").select("id,wo_no,mo_no,product_sku,product_name,department_name,assignee_name,qty,received_qty,status,due_date,labor_cost").eq("is_active", true).neq("status", "done"),
   ]);
   const err = sh.error || it.error || rs.error || wo.error || sc.error || ad.error;
   if (err) return NextResponse.json({ error: friendlyDbError(err.message) }, { status: 500 });
 
   // รูป + แบรนด์ ต่อ SKU (จากของบนชั้น + งานในคิว + งานในโต๊ะ)
   const skus = Array.from(new Set([...(it.data ?? []).map((i) => i.sku as string | null), ...(wo.data ?? []).map((w) => w.product_sku as string | null), ...(ad.data ?? []).map((w) => w.product_sku as string | null)].filter((s): s is string => !!s)));
-  const [imgMap, brandMap, rateMap] = await Promise.all([buildImageMap(admin, skus), buildBrandMap(admin, skus), buildRateMap(admin, skus)]);
+  const [imgMap, brandMap, rateMap] = await Promise.all([buildImageMap(admin, skus), buildBrandMap(admin, skus), onlyQueue ? Promise.resolve({} as Record<string, number>) : buildRateMap(admin, skus)]);
 
   // ช่างเหมา: assignee_id (craftsman) → employees.is_subcontract
   const assigneeIds = Array.from(new Set((wo.data ?? []).filter((w) => w.assignee_type === "craftsman" && w.assignee_id).map((w) => w.assignee_id as string)));

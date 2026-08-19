@@ -2913,6 +2913,8 @@ function BoardImg({ url }: { url: string | null | undefined }) {
 }
 
 // ---- มุมมองตาราง (สลับจากบอร์ด) — รอจ่าย + จ่ายแล้ว ----
+// แถวคิว "รอ QC รับเข้า" (มาจาก /api/qc-warehouse?only=queue)
+type QcQueueRow = { wo_id: string; mo_no: string | null; sku: string | null; name: string | null; worker: string | null; remaining: number; due_date: string | null; image_key?: string | null; received_at?: string | null };
 const ProdCell = ({ url, sku, name }: { url: string | null | undefined; sku: string | null; name: string | null }) => (
   <div className="flex items-center gap-2">
     <BoardImg url={url} />
@@ -2958,6 +2960,30 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
   const [qcRows, setQcRows] = useState<Record<string, { qty: string; wage: string }>>({});
   const [qcBusy, setQcBusy] = useState(false);
   const [qcMsg, setQcMsg] = useState("");
+  // 📥 section "รับเข้า QC" — งานที่ช่างส่งมาแล้ว รอ QC ดึงเข้าชั้น (คิวเดียวกับหน้าโกดัง QC)
+  const [qQueue, setQQueue] = useState<QcQueueRow[]>([]);
+  const [qShelves, setQShelves] = useState<{ id: string; name: string; kind: string }[]>([]);
+  const [qReasons, setQReasons] = useState<{ id: string; name: string }[]>([]);
+  const [qcSectionOn, setQcSectionOn] = useState(true);     // ไม่มีสิทธิ์ดู QC → ซ่อน section ไปเลย
+  const [qSel, setQSel] = useState<Set<string>>(new Set());
+  const [recvOpen, setRecvOpen] = useState(false);
+  const [recvShelf, setRecvShelf] = useState("");
+  const [recvRows, setRecvRows] = useState<Record<string, { good: string; bad: string; reason: string }>>({});
+  const [recvBusy, setRecvBusy] = useState(false);
+  const [recvMsg, setRecvMsg] = useState("");
+
+  const loadQcQueue = useCallback(async () => {
+    try {
+      const r = await apiFetch("/api/qc-warehouse?only=queue");   // only=queue = เอาเฉพาะคิว+ชั้น+สาเหตุ (ไม่ลากของทั้งโกดังมา)
+      if (!r.ok) { setQcSectionOn(false); return; }               // 401 = ไม่มีสิทธิ์ qc.view → ซ่อนเงียบ ๆ
+      const j = await r.json();
+      if (j?.error) { setQcSectionOn(false); return; }
+      setQQueue((j.queue ?? []) as QcQueueRow[]);
+      setQShelves(((j.shelves ?? []) as { id: string; name: string; kind: string }[]).filter((x) => x.kind !== "defect"));
+      setQReasons((j.reasons ?? []) as { id: string; name: string }[]);
+    } catch { /* เงียบ — section แค่ไม่มีข้อมูล */ }
+  }, []);
+  useEffect(() => { void loadQcQueue(); }, [loadQcQueue]);
   const [dueSaving, setDueSaving] = useState(false);
   const selMoNos = pending.filter((m) => sel.has(m.id)).map((m) => m.mo_no);
   // คลิกแถว/ชื่อ: ถ้ากำลังเลือกอยู่ (มีติ๊กแล้ว) → สลับติ๊ก (แบบ Gmail) · ถ้ายังไม่ติ๊กอะไร → เปิดรายละเอียด
@@ -3062,6 +3088,40 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
     finally { setWoLaborSaving(false); }
   }, [wos, woSel, woLaborRate, toast, onReload]);
 
+  /** เปิดป๊อป "รับเข้า QC" — ตั้งต้น: ของดี = จำนวนที่รอรับเข้าทั้งหมด · ของเสีย = 0 */
+  const openRecv = useCallback(() => {
+    const init: Record<string, { good: string; bad: string; reason: string }> = {};
+    for (const q of qQueue.filter((x) => qSel.has(x.wo_id))) init[q.wo_id] = { good: String(q.remaining), bad: "", reason: "" };
+    setRecvRows(init); setRecvShelf((prev) => prev || qShelves[0]?.id || ""); setRecvMsg(""); setRecvOpen(true);
+  }, [qQueue, qSel, qShelves]);
+
+  const submitRecv = useCallback(async () => {
+    const shelf = qShelves.find((s2) => s2.id === recvShelf);
+    if (!shelf) { toast.error("เลือกชั้นที่จะรับเข้าก่อน"); return; }
+    const list = qQueue.filter((q) => qSel.has(q.wo_id));
+    setRecvBusy(true);
+    let ok = 0; const fails: string[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const q = list[i];
+      const row = recvRows[q.wo_id] ?? { good: "", bad: "", reason: "" };
+      const good = Number(row.good) || 0, bad = Number(row.bad) || 0;
+      if (good + bad <= 0) continue;
+      setRecvMsg(`กำลังรับเข้า ${i + 1}/${list.length} · ${q.sku ?? q.mo_no}`);
+      try {
+        const res = await apiFetch("/api/qc-warehouse/items", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "receive", wo_id: q.wo_id, shelf_id: shelf.id, good,
+            bad: bad > 0 ? [{ reason: row.reason || "ไม่ระบุ", qty: bad }] : [] }) });
+        const j = await res.json();
+        if (!res.ok || j?.error) throw new Error(j?.error || "รับเข้าไม่สำเร็จ");
+        ok += 1;
+      } catch (e) { fails.push(`${q.sku ?? q.mo_no}: ${e instanceof Error ? e.message : "ไม่สำเร็จ"}`); }
+    }
+    setRecvBusy(false); setRecvMsg("");
+    if (ok > 0) toast.success(`รับเข้าชั้น ${shelf.name} แล้ว ${ok} ใบ`);
+    if (fails.length) toast.error(`ไม่สำเร็จ ${fails.length} ใบ — ${fails[0]}`);
+    if (ok > 0) { setRecvOpen(false); setQSel(new Set()); await loadQcQueue(); onReload?.(); }
+  }, [qQueue, qSel, qShelves, recvShelf, recvRows, toast, loadQcQueue, onReload]);
+
   /** จำนวนที่ยังไม่ได้ส่งของใบนั้น */
   const woLeft = (w: WorkOrder) => Math.max(0, (Number(w.qty) || 0) - (Number(w.received_qty) || 0));
   /** เปิดป๊อปส่งงาน QC — ตั้งต้น: จำนวน = ที่เหลือของใบนั้น · ค่าแรง = ค่าแรงของใบนั้น (เหมือนป๊อปส่งงานทีละใบ) */
@@ -3148,7 +3208,16 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
     { key: "group", header: "กลุ่ม", width: "minmax(7rem,1fr)", sortValue: (w) => groupNameOf(w.mo_no) ?? "~", sortLabel: "กลุ่ม", cell: (w) => <GroupCell moNo={w.mo_no} /> },
     { key: "dept", header: "แผนก/ช่าง", width: "minmax(8rem,1fr)", sortValue: (w) => w.department_name ?? "", sortLabel: "แผนก", cell: (w) => <span className="text-[12px] text-slate-600">{w.department_name ?? "—"}{w.assignee_name ? ` · ${w.assignee_name}` : ""}</span> },
     { key: "qty", header: "จำนวน", width: "5rem", align: "right", sortValue: (w) => w.qty, sortLabel: "จำนวน", cell: (w) => <span className="tabular-nums">{fmt(w.qty)}</span> },
-    { key: "recv", header: "รับคืน", width: "5rem", align: "right", cell: (w) => <span className="tabular-nums text-slate-500">{fmt(w.received_qty)}</span> },
+    // ส่งแล้วเท่าไหร่ + ค้างอีกเท่าไหร่ (ค้าง = จำนวนที่จ่าย − ที่ช่างส่งกลับมาแล้ว) — ค้างขึ้นสีส้มให้สะดุดตา
+    { key: "recv", header: "ส่งแล้ว", width: "7rem", align: "right",
+      sortValue: (w) => Math.max(0, (w.qty || 0) - (w.received_qty || 0)), sortLabel: "ค้างส่ง",
+      cell: (w) => { const left = Math.round(Math.max(0, (w.qty || 0) - (w.received_qty || 0)) * 100) / 100; return (
+        <span className="flex items-center justify-end gap-1 whitespace-nowrap">
+          <span className="tabular-nums text-slate-500">{fmt(w.received_qty)}</span>
+          {left > 0
+            ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 tabular-nums">ค้าง {fmt(left)}</span>
+            : <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">ครบ ✓</span>}
+        </span> ); } },
     { key: "due", header: "กำหนดเสร็จ", width: "minmax(9rem,1fr)", sortValue: (w) => w.due_date ?? "9999", sortLabel: "กำหนดเสร็จ", cell: (w) => <DueCell d={w.due_date} /> },
     // ค่าแรง/ชิ้น ของจริง = ยอดค่าแรงใบนั้น ÷ จำนวน · ยังไม่ใส่ = ขึ้นเตือนสีส้ม
     { key: "rate", header: "ค่าแรง/ชิ้น", width: "7rem", align: "right", sortValue: (w) => ((w.labor_cost ?? 0) > 0 && w.qty > 0 ? (w.labor_cost as number) / w.qty : -1), sortLabel: "ค่าแรง/ชิ้น",
@@ -3345,6 +3414,102 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
         groupLabel={woGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : "จัดกลุ่มตามสถานะ"} defaultGrouped={woGroup !== "none"}
         emptyText="ยังไม่มีงานที่จ่าย"
       />
+      {/* 📥 รับเข้า QC — งานที่ช่างส่งมาแล้ว รอดึงเข้าชั้น (คิวเดียวกับหน้าโกดัง QC) จัดการจบในหน้าเดียว */}
+      {qcSectionOn && (
+        <MiniTable
+          rows={qQueue} rowKey={(q) => q.wo_id}
+          columns={[
+            { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (q) => q.sku ?? "", sortLabel: "ชื่อสินค้า", cell: (q) => <ProdCell url={q.image_key ? `/api/r2-image?key=${encodeURIComponent(q.image_key)}` : null} sku={q.sku} name={q.name} /> },
+            { key: "mo", header: "ใบสั่งผลิต", width: "9rem", sortValue: (q) => q.mo_no ?? "", sortLabel: "เลขใบสั่งผลิต", cell: (q) => <span className="font-mono text-[11px] text-slate-500">{q.mo_no ?? "—"}</span> },
+            { key: "worker", header: "ช่างที่ส่ง", width: "minmax(8rem,1fr)", sortValue: (q) => q.worker ?? "", sortLabel: "ช่าง", cell: (q) => <span className="text-[12px] text-slate-600">{q.worker ?? "—"}</span> },
+            { key: "qty", header: "รอรับเข้า", width: "6rem", align: "right", sortValue: (q) => q.remaining, sortLabel: "จำนวน", cell: (q) => <span className="tabular-nums font-semibold text-slate-700">{fmt(q.remaining)}</span> },
+            { key: "recv", header: "วันที่ช่างส่ง", width: "minmax(8rem,1fr)", sortValue: (q) => q.received_at ?? "9999", sortLabel: "วันที่ช่างส่ง", cell: (q) => <span className="text-[12px] text-slate-500">{q.received_at ? dueDateText(q.received_at) : "—"}</span> },
+            { key: "due", header: "กำหนดเสร็จ", width: "minmax(9rem,1fr)", sortValue: (q) => q.due_date ?? "9999", sortLabel: "กำหนดเสร็จ", cell: (q) => <DueCell d={q.due_date} /> },
+          ]}
+          title="📥 รอ QC รับเข้า" countUnit="ใบ"
+          selectable selected={qSel} onSelectedChange={setQSel}
+          actions={<div className="flex items-center gap-2">
+            {qSel.size > 0 && canEdit && (
+              <button onClick={openRecv} className="h-8 px-3 text-sm font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-700">📥 รับเข้าชั้น ({qSel.size})</button>
+            )}
+            <a href="/master/qc-warehouse" className="h-8 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">เปิดโกดัง QC ↗</a>
+          </div>}
+          searchText={(q) => `${q.sku ?? ""} ${q.name ?? ""} ${q.mo_no ?? ""} ${q.worker ?? ""}`}
+          searchPlaceholder="ค้นหา สินค้า / ใบสั่งผลิต / ช่าง — ค้นทุกตาราง"
+          searchValue={tableSearch} onSearchChange={setTableSearch}
+          emptyText="ไม่มีงานรอรับเข้า QC"
+        />
+      )}
+
+      {/* ป๊อปรับเข้าชั้น QC (หลายใบ) */}
+      {(() => {
+        const list = qQueue.filter((q) => qSel.has(q.wo_id));
+        const sumGood = list.reduce((n, q) => n + (Number(recvRows[q.wo_id]?.good) || 0), 0);
+        const sumBad = list.reduce((n, q) => n + (Number(recvRows[q.wo_id]?.bad) || 0), 0);
+        return (
+          <ERPModal open={recvOpen} onClose={() => { if (!recvBusy) setRecvOpen(false); }} size="md"
+            title={`📥 รับเข้า QC ${list.length} ใบ`}
+            footer={<>
+              <span className="mr-auto text-[11px] text-slate-400">{recvMsg}</span>
+              <button onClick={() => setRecvOpen(false)} disabled={recvBusy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+              <button onClick={() => void submitRecv()} disabled={recvBusy || !recvShelf || (sumGood + sumBad) <= 0}
+                className="h-9 px-4 text-sm bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50">
+                {recvBusy ? "กำลังรับเข้า…" : `✓ รับเข้า ${list.length} ใบ`}
+              </button>
+            </>}>
+            <div className="space-y-3">
+              <p className="text-[11px] text-slate-400">รับเข้าชั้นรวม <b>{fmt(sumGood)}</b> ชิ้นดี{sumBad > 0 ? <> · <b className="text-rose-600">{fmt(sumBad)}</b> ชิ้นเสีย</> : null} — ของเสียจะเข้าชั้นของเสียให้อัตโนมัติ + แจ้งเตือนช่าง</p>
+
+              <label className="block"><span className="text-[11px] text-slate-500">ชั้นที่จะรับเข้า</span>
+                <select value={recvShelf} onChange={(e) => setRecvShelf(e.target.value)}
+                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-500">
+                  <option value="">— เลือกชั้น —</option>
+                  {qShelves.map((sh) => <option key={sh.id} value={sh.id}>{sh.name}</option>)}
+                </select>
+              </label>
+
+              <div className="rounded-lg border border-slate-200 overflow-hidden">
+                <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-[11px] text-slate-500">ใบที่จะรับเข้า ({list.length}) · แยกของดี/ของเสียรายใบได้</div>
+                <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+                  {list.map((q) => {
+                    const row = recvRows[q.wo_id] ?? { good: "", bad: "", reason: "" };
+                    const over = (Number(row.good) || 0) + (Number(row.bad) || 0) > q.remaining;
+                    const put = (patch: Partial<{ good: string; bad: string; reason: string }>) =>
+                      setRecvRows((p) => ({ ...p, [q.wo_id]: { ...(p[q.wo_id] ?? { good: "", bad: "", reason: "" }), ...patch } }));
+                    return (
+                      <div key={q.wo_id} className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-slate-700 truncate">{q.sku ?? q.name}</div>
+                            <div className="text-[10px] text-slate-400 truncate">{q.mo_no ?? "—"} · {q.worker ?? "—"} · รอรับเข้า {fmt(q.remaining)}</div>
+                          </div>
+                          <input type="number" min={0} step="any" value={row.good} title="จำนวนของดี"
+                            onChange={(e) => put({ good: e.target.value })}
+                            className={`w-20 h-8 px-2 text-sm text-right border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 shrink-0 ${over ? "border-rose-300 bg-rose-50" : "border-slate-200"}`} />
+                          <input type="number" min={0} step="any" value={row.bad} placeholder="เสีย" title="จำนวนของเสีย"
+                            onChange={(e) => put({ bad: e.target.value })}
+                            className="w-16 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-400 shrink-0" />
+                        </div>
+                        {(Number(row.bad) || 0) > 0 && (
+                          <div className="mt-1 flex items-center gap-2">
+                            <span className="text-[11px] text-rose-500 shrink-0">สาเหตุของเสีย</span>
+                            <select value={row.reason} onChange={(e) => put({ reason: e.target.value })}
+                              className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white flex-1">
+                              <option value="">— ไม่ระบุ —</option>
+                              {qReasons.map((rs) => <option key={rs.id} value={rs.name}>{rs.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </ERPModal>
+        );
+      })()}
+
       {/* 📤 ส่งงานเข้า QC หลายใบ — ใช้ของกลาง ERPModal · ลงวันที่ได้ (ตั้งต้นวันนี้) */}
       {(() => {
         const list = wos.filter((w) => woSel.has(w.id));
