@@ -60,6 +60,7 @@ async function skuInfoMap(admin: ReturnType<typeof supabaseAdmin>, skus: string[
   const results = await Promise.all(chunks.map((chunk) =>
     admin.from("skus_v2")
       .select("code, cover_image_r2_key, color_th, color, parent:parent_skus_v2!parent_sku_id ( brand:brands!brand_id ( name, color, pricing_mode ) )")
+      .eq("is_active", true)   // ⚠️ ไม่เอาตัวที่อยู่ถังขยะ — รหัสซ้ำกับของจริงได้ แล้วรูป/แบรนด์จะเพี้ยน
       .in("code", chunk)));
   for (const { data } of results) {
     for (const s of (data ?? []) as Record<string, unknown>[]) {

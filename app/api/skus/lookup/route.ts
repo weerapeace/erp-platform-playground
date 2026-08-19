@@ -11,6 +11,7 @@
  *     วิธีใหม่: ยิงถามเฉพาะรหัสที่ต้องการด้วย .in() (ผลลัพธ์ไม่มีทางเกินจำนวนรหัสที่ถาม) → ไม่โดนตัด + เร็วกว่าเดิม
  *
  * ลำดับการจับคู่: code เป๊ะ → barcode เป๊ะ → ไม่สนตัวพิมพ์ใหญ่เล็ก/ช่องว่างหัวท้าย (เฉพาะตัวที่ยังไม่เจอ)
+ * ⚠️ ไม่หยิบ SKU ที่อยู่ "ถังขยะ" (is_active=false) — รหัสซ้ำกับของจริงได้ ถ้าหยิบมาจะเพิ่มของผิดตัว
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -64,8 +65,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const groups = chunk(codes, 200);
   const results = await Promise.all(groups.flatMap((g) => [
-    admin.from("skus_v2").select(SELECT).in("code", g),
-    admin.from("skus_v2").select(SELECT).in("barcode", g),
+    admin.from("skus_v2").select(SELECT).eq("is_active", true).in("code", g),
+    admin.from("skus_v2").select(SELECT).eq("is_active", true).in("barcode", g),
   ]));
   // เติม barcode ก่อน แล้วค่อย code (code ทับได้)
   results.forEach((res, i) => { if (i % 2 === 1) for (const r of ((res.data ?? []) as Row[])) addRow(r, "barcode"); });
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (missing.length > 0) {
     for (const g of chunk(missing, 10)) {   // ทีละ 10 คำสั่งพร้อมกัน กันยิงถล่ม DB
       const found = await Promise.all(g.map((c) =>
-        admin.from("skus_v2").select(SELECT).ilike("code", likeSafe(c)).limit(1)));
+        admin.from("skus_v2").select(SELECT).eq("is_active", true).ilike("code", likeSafe(c)).limit(1)));
       found.forEach((res, i) => {
         const r = ((res.data ?? []) as Row[])[0];
         // ยืนยันอีกชั้นด้วยการเทียบแบบ normalize (กัน ilike จับผิดตัว)
