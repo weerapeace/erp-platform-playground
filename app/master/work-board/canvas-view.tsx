@@ -63,8 +63,24 @@ type CardSpec = {
   data: Record<string, unknown>;     // snapshot ของการ์ด (มี qty/labor ให้หัวกรอบเอาไปรวม)
 };
 
+// วัดสัดส่วนรูปทุกใบพร้อมกัน (ขนาน) — ทำเองแทนที่จะให้ insert วัดทีละใบ (100+ ใบจะรอนาน)
+// รูปที่โหลดไม่ได้/ช้าเกิน 5 วิ → ถือว่าจัตุรัส (1:1) การ์ดยังขึ้นครบ ไม่ค้าง
+async function measureRatios(urls: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const list = [...new Set(urls.filter(Boolean))];
+  await Promise.all(list.map((u) => new Promise<void>((done) => {
+    const im = new Image();
+    const finish = (r: number) => { out.set(u, r > 0 ? r : 1); done(); };
+    const timer = setTimeout(() => finish(1), 5000);
+    im.onload = () => { clearTimeout(timer); finish((im.naturalWidth || 1) / (im.naturalHeight || 1)); };
+    im.onerror = () => { clearTimeout(timer); finish(1); };
+    im.src = u;
+  })));
+  return out;
+}
+
 // การ์ด 1 ใบ = กรอบ + รูปย่อ + ข้อความ (จัดกลุ่มเดียวกัน) — คืน skeleton + id ของ element ทั้งหมด (ให้ frame ใช้เป็น children)
-function cardSkeleton(c: CardSpec, x: number, y: number): { els: Record<string, unknown>[]; ids: string[] } {
+function cardSkeleton(c: CardSpec, x: number, y: number, ratio = 1): { els: Record<string, unknown>[]; ids: string[] } {
   const gid = `g-${c.key}`;
   const locked = c.kind === "wb_real";                 // ของจริง = ล็อก ลาก/แก้ไม่ได้
   const rectId = `${c.key}-r`, imgId = `${c.key}-i`, textId = `${c.key}-t`;
@@ -74,7 +90,11 @@ function cardSkeleton(c: CardSpec, x: number, y: number): { els: Record<string, 
   ];
   const ids = [rectId];
   if (c.img) {
-    els.push({ type: "image", id: imgId, _imageUrl: c.img, x: x + 12, y: y + 18, width: IMG, height: IMG, groupIds: [gid], locked, customData: c.data });
+    // จัดรูปให้พอดีกรอบสี่เหลี่ยม IMG×IMG แบบคงสัดส่วน (ไม่ยืดเบี้ยว) + จัดกึ่งกลาง
+    let iw = IMG, ih = IMG / (ratio || 1);
+    if (ih > IMG) { ih = IMG; iw = IMG * (ratio || 1); }
+    els.push({ type: "image", id: imgId, _imageUrl: c.img, x: x + 12 + (IMG - iw) / 2, y: y + 18 + (IMG - ih) / 2,
+      width: iw, height: ih, groupIds: [gid], locked, customData: c.data });
     ids.push(imgId);
   }
   const tx = x + (c.img ? IMG + 22 : 14);
@@ -187,7 +207,7 @@ export function CanvasView({
   }, [departments]);
 
   // ---- วางโครงทั้งกระดาน (กรอบโต๊ะ + การ์ดในกรอบ) ----
-  const seedSkeletons = useCallback((): Record<string, unknown>[] => {
+  const seedSkeletons = useCallback((ratios?: Map<string, number>): Record<string, unknown>[] => {
     const out: Record<string, unknown>[] = [];
     const desks: { id: string; name: string }[] = [
       ...departments.map((d) => ({ id: d.id, name: d.name })),
@@ -199,7 +219,7 @@ export function CanvasView({
       const children: string[] = [];
       cards.forEach((c, j) => {
         const slot = slotPos(fx, fy, j);
-        const { els, ids } = cardSkeleton(c, slot.x, slot.y);
+        const { els, ids } = cardSkeleton(c, slot.x, slot.y, c.img ? (ratios?.get(c.img) ?? 1) : 1);
         out.push(...els); children.push(...ids);
       });
       out.push({ type: "frame", id: `frame-${d.id}`, children, name: d.name, x: fx, y: fy, width: FRAME_W, height: frameHeight(cards.length),
@@ -234,7 +254,8 @@ export function CanvasView({
     const cards = c.listCards();
     const already = cards.some((x) => x.kind === "wb_plan" || x.kind === "wb_real" || x.kind === "wb_desk");
     if (!already) {                                     // กระดานเปล่า → วางโครงให้ทั้งชุด
-      const sk = seedSkeletons();
+      const ratios = await measureRatios([...byDesk.values()].flat().map((c) => c.img ?? ""));
+      const sk = seedSkeletons(ratios);
       if (sk.length) { await c.insert(sk, { fitImages: false }); if (!silent) toast.success("วางโครงกระดานตามแผนให้แล้ว"); }
       return;
     }
@@ -255,11 +276,12 @@ export function CanvasView({
     const missing = [...specOf.entries()].filter(([k]) => !on.has(k)).map(([, s]) => s);
     if (missing.length) {
       const sk: Record<string, unknown>[] = [];
-      missing.forEach((s, i) => { sk.push(...cardSkeleton(s, (i % 2) * (CARD_W + 16), Math.floor(i / 2) * (CARD_H + 12)).els); });
+      const ratios = await measureRatios(missing.map((s) => s.img ?? ""));
+      missing.forEach((s, i) => { sk.push(...cardSkeleton(s, (i % 2) * (CARD_W + 16), Math.floor(i / 2) * (CARD_H + 12), s.img ? (ratios.get(s.img) ?? 1) : 1).els); });
       await c.insert(sk, { fitImages: false });
       toast.info(`มีงานใหม่ ${missing.length} ใบ — วางไว้กลางจอ ลากเข้ากรอบโต๊ะได้เลย`);
     } else if (!silent) toast.success("กระดานตรงกับข้อมูลล่าสุดแล้ว");
-  }, [lines, activeWOs, seedSkeletons, planCard, realCard, toast]);
+  }, [lines, activeWOs, byDesk, seedSkeletons, planCard, realCard, toast]);
 
   // ---- วางโครงใหม่ทั้งกระดาน (เก็บของที่วาดเอง ลบเฉพาะการ์ด/กรอบของระบบ) ----
   const rebuild = useCallback(async () => {
@@ -272,11 +294,12 @@ export function CanvasView({
         return d?.kind === "wb_desk" ? { isDeleted: true } : null;
       });
       deskSeen.current = new Map();
-      const sk = seedSkeletons();
+      const ratios = await measureRatios([...byDesk.values()].flat().map((x) => x.img ?? ""));
+      const sk = seedSkeletons(ratios);
       if (sk.length) await c.insert(sk, { fitImages: false });
       toast.success("วางโครงกระดานใหม่แล้ว");
     } finally { setBusy(false); }
-  }, [seedSkeletons, toast]);
+  }, [byDesk, seedSkeletons, toast]);
 
   // ---- เขียนกลับ: ลากการ์ดแผนข้ามกรอบโต๊ะ = ย้ายโต๊ะในแผนจริง ----
   const moveLine = useCallback(async (lineId: string, deptId: string | null) => {
