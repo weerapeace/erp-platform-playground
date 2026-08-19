@@ -1022,13 +1022,13 @@ export function DispatchPlanBoard({
 
                 {/* 📅 ปฏิทิน — วางงานตามวันกำหนดส่ง (ดูอย่างเดียว กดการ์ดเปิดงานได้) */}
                 {listView === "cal" && total > 0 && (() => {
-                  type CalIt = { key: string; sku: string | null; name: string | null; moNo: string | null; qty: number; due: string | null; open?: () => void };
+                  type CalIt = { key: string; sku: string | null; name: string | null; moNo: string | null; qty: number; due: string | null; img?: string | null; open?: () => void };
                   const items: CalIt[] = [
-                    ...pendRows.map((p) => ({ key: `p:${p.id}`, sku: p.product_sku, name: p.product_name, moNo: p.mo_no, qty: availOf(p), due: dueOf("p", p),
+                    ...pendRows.map((p) => ({ key: `p:${p.id}`, sku: p.product_sku, name: p.product_name, moNo: p.mo_no, qty: availOf(p), due: dueOf("p", p), img: p.image_url ?? imageByMo[p.mo_no],
                       open: () => onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }) })),
-                    ...reals.map((w) => ({ key: `w:${w.id}`, sku: w.product_sku, name: w.product_name, moNo: w.mo_no, qty: Number(w.qty) || 0, due: dueOf("w", w),
+                    ...reals.map((w) => ({ key: `w:${w.id}`, sku: w.product_sku, name: w.product_name, moNo: w.mo_no, qty: Number(w.qty) || 0, due: dueOf("w", w), img: w.image_url ?? imageByMo[w.mo_no],
                       open: () => onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }) })),
-                    ...drafts.map((l) => ({ key: `d:${l.id}`, sku: l.product_sku, name: l.product_name, moNo: l.mo_no, qty: Number(l.qty) || 0, due: dueOf("d", l) })),
+                    ...drafts.map((l) => ({ key: `d:${l.id}`, sku: l.product_sku, name: l.product_name, moNo: l.mo_no, qty: Number(l.qty) || 0, due: dueOf("d", l), img: imageByMo[l.mo_no ?? ""] })),
                   ];
                   const byDay = new Map<string, CalIt[]>();
                   const noDay: CalIt[] = [];
@@ -1044,6 +1044,7 @@ export function DispatchPlanBoard({
                   const chip = (it: CalIt) => (
                     <div key={it.key} onClick={it.open} title={`${it.sku ?? ""} ${it.name ?? ""}\n${it.moNo ?? ""} · ${fmt(it.qty)} ชิ้น`}
                       className={`flex items-center gap-1 rounded border border-slate-200 bg-white px-1 py-0.5 ${it.open ? "cursor-pointer hover:border-indigo-300" : ""}`}>
+                      <HoverImage url={it.img} size={18} previewSize={220} />
                       <span className="min-w-0 flex-1 text-[10px] font-semibold text-slate-700 truncate">{it.sku ?? "—"}</span>
                       <span className="text-[9px] text-indigo-700 font-semibold shrink-0">{fmt(it.qty)}</span>
                     </div>
@@ -1074,12 +1075,12 @@ export function DispatchPlanBoard({
                             const inMonth = dt.getMonth() === calCursor.getMonth();
                             const qty = list.reduce((n, x) => n + x.qty, 0);
                             return (
-                              <div key={k} className={`min-h-[76px] border-b border-r border-slate-100 p-1 ${inMonth ? "bg-white" : "bg-slate-50/60"} ${k === today ? "ring-2 ring-inset ring-indigo-400" : ""}`}>
+                              <div key={k} className={`min-h-[92px] border-b border-r border-slate-100 p-1 ${inMonth ? "bg-white" : "bg-slate-50/60"} ${k === today ? "ring-2 ring-inset ring-indigo-400" : ""}`}>
                                 <div className="flex items-center justify-between">
                                   <span className={`text-[10px] font-semibold ${k === today ? "text-indigo-700" : inMonth ? "text-slate-600" : "text-slate-300"}`}>{dt.getDate()}</span>
                                   {list.length > 0 && <span className={`text-[9px] px-1 rounded ${k < today ? "bg-rose-100 text-rose-700" : "bg-indigo-50 text-indigo-700"}`}>{list.length} · {fmt(qty)}</span>}
                                 </div>
-                                <div className="space-y-0.5 max-h-[70px] overflow-y-auto scrollbar-hide">{list.map(chip)}</div>
+                                <div className="space-y-0.5 max-h-[86px] overflow-y-auto scrollbar-hide">{list.map(chip)}</div>
                               </div>
                             );
                           })}
