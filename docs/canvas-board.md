@@ -1,6 +1,6 @@
 # CanvasBoard — กระดาน Section + การ์ด (ของกลาง)
 
-`components/canvas-board/index.tsx` · ใช้จริง: `/master/design-sheets` (โซน=แบรนด์) · `/master/work-board` มุมมอง 🗂 แคนวาส (โซน=โต๊ะ) · ตัวอย่างโค้ด: `app/_demos/canvas-board-demo/page.tsx` (โฟลเดอร์ `_demos` ถูกซ่อนจาก URL ตามนโยบายซ่อนหน้าเดโม่ — เปิดดูของจริงที่ Design Sheets ได้เลย)
+`components/canvas-board/index.tsx` · ใช้จริง: `/master/design-sheets` (โซน=แบรนด์) · ตัวอย่างโค้ด: `app/_demos/canvas-board-demo/page.tsx` (โฟลเดอร์ `_demos` ถูกซ่อนจาก URL ตามนโยบายซ่อนหน้าเดโม่ — เปิดดูของจริงที่ Design Sheets ได้เลย)
 
 ## ใช้ทำอะไร
 
@@ -26,7 +26,6 @@
 | `onMove(item, toZoneId)` | ปล่อยการ์ดลงโซนใหม่ — ไม่ส่ง = ลากไม่ได้ |
 | `onCardClick(item)` | คลิกการ์ด (เปิด modal แก้ ฯลฯ) |
 | `canDrag` | ปิดการลากตาม permission (`canDrag={canEdit}`) |
-| `canDragItem(item)` | ล็อกการ์ดเป็นรายใบ — คืน `false` = การ์ดนั้นลากไม่ได้ (ยังคลิกได้) เช่นบอร์ดจ่ายงานล็อกการ์ด "ของจริง" |
 | `cardWidth` | ความกว้างการ์ด px (default 184) |
 | `hideEmptyZones` | ซ่อนโซนว่าง (default โชว์ไว้ให้ลากลง) |
 
@@ -55,4 +54,4 @@
 ## ข้อจำกัดที่รู้แล้ว
 
 - ลากจัดลำดับการ์ด "ในโซนเดียวกัน" ยังไม่รองรับ (ตอนนี้เรียงตามลำดับ items ที่ส่งเข้า)
-- work-board (บอร์ดจ่ายงาน) มีมุมมอง 🗂 แคนวาส ที่ใช้ CanvasBoard แล้ว (`app/master/work-board/canvas-view.tsx` — โซน=โต๊ะ · การ์ดแผนลากได้ · การ์ดของจริงล็อกด้วย `canDragItem`) ส่วนมุมมอง "บอร์ด" เดิมยังใช้โค้ดลากแบบตำแหน่งอิสระของตัวเองอยู่
+- work-board (บอร์ดจ่ายงาน) ไม่ได้ใช้ตัวนี้ — มุมมอง 🗂 แคนวาส ของบอร์ดจ่ายงานใช้ CanvasSketch (Excalidraw) เพราะต้องการกระดานลากอิสระแบบ Campaign ส่วนมุมมอง "บอร์ด" เดิมใช้โค้ดลากตำแหน่งอิสระของตัวเอง

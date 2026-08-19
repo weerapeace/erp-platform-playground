@@ -1,18 +1,29 @@
 "use client";
 
 /**
- * มุมมอง "แคนวาส" ของบอร์ดจ่ายงาน — 1 section = 1 โต๊ะ
- *  • การ์ด "แผน" (mo_dispatch_plan_lines) → ลากข้ามโต๊ะได้ บันทึกลงแผนทันที (optimistic + คืนที่เดิมถ้าพลาด)
- *  • การ์ด "ของจริง" (ใบจ่ายงานที่จ่ายไปแล้ว) → สีเทา 🔒 ลากไม่ได้ ดูอย่างเดียว
- * ของกลาง: CanvasBoard (components/canvas-board) · HoverImage · apiFetch · useToast
- * ห้ามเขียนบอร์ดลาก-วางเองซ้ำในโมดูล — ต่อยอดที่ CanvasBoard
+ * มุมมอง "แคนวาส" ของบอร์ดจ่ายงาน — กระดานวาดแบบเดียวกับกระดานแคมเปญ (Excalidraw)
+ *  • 1 กระดาน = 1 แผนจ่ายงาน (entity_type = "work_board", entity_id = <plan id>)
+ *  • เปิดครั้งแรก ระบบวางโครงให้เอง: กรอบ (Section) 1 กรอบ = 1 โต๊ะ · ในกรอบมีการ์ดงานตามแผน + การ์ดของจริง
+ *  • การ์ดของจริง (ใบจ่ายงานที่จ่ายไปแล้ว) = สีเทา 🔒 ล็อกไว้ ลาก/แก้ไม่ได้
+ *  • ลากการ์ด "แผน" ข้ามไปกรอบโต๊ะอื่น → หลังกระดานบันทึกอัตโนมัติ ระบบเขียนกลับเข้าแผนจ่ายงานให้เอง
+ *  • ดับเบิลคลิกการ์ด = เปิดรายละเอียดงาน (แผน) / ป๊อปรับงาน (ของจริง)
+ * ของกลาง: CanvasSketch (components/canvas-sketch) · apiFetch · useToast
+ * ห้ามเขียนกระดานวาดเองซ้ำในโมดูล — ต่อยอดที่ CanvasSketch
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
-import { HoverImage } from "@/components/hover-image";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamicImport from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { withImageWidth } from "@/lib/r2-image";
+import { deskOfPlanCards, diffDeskMoves, type CanvasEl } from "@/lib/work-board-canvas";
+import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import type { DispatchPlan, DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
+
+// Excalidraw ก้อนใหญ่ — โหลดเฉพาะตอนเปิดแท็บนี้ (ไม่ถ่วงมุมมองอื่นของบอร์ด)
+const CanvasSketch = dynamicImport(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
+  ssr: false,
+  loading: () => <div className="h-[60vh] flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl">กำลังเปิดกระดาน…</div>,
+});
 
 type DeptLite = { id: string; name: string };
 type WOLite = {
@@ -22,34 +33,73 @@ type WOLite = {
   qty: number; received_qty: number; status: string; image_url?: string | null;
 };
 
-// โซนปลายทางของงานที่ยังไม่ระบุโต๊ะ (หรือโต๊ะที่ไม่ได้โชว์บนบอร์ด เช่น เตรียม/ตัด)
+// ---- ขนาด/สีของโครงกระดาน ----
+const CARD_W = 250, CARD_H = 78, IMG = 56, GAPX = 16, GAPY = 14, COLS = 2;
+const FRAME_HEAD = 46, FRAME_W = COLS * CARD_W + (COLS + 1) * GAPX, FRAME_GAP = 56;
+const PLAN_STROKE = "#6366f1", PLAN_BG = "#ffffff";
+const REAL_STROKE = "#94a3b8", REAL_BG = "#e2e8f0";
 const NO_DESK = "__no_desk__";
-const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
-const baht = (n: number) => "฿" + fmt(n);
 
-type Card =
-  | { kind: "plan"; id: string; zone: string; line: DispatchPlanLine }
-  | { kind: "real"; id: string; zone: string; wo: WOLite };
+const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
+// ตัดชื่อยาวให้พอดีการ์ด (Excalidraw ไม่ตัดบรรทัดเอง · ไทยไม่มีเว้นวรรค → ตัดตามตัวอักษร)
+const clip = (s: string | null | undefined, max = 24) => {
+  const v = (s ?? "").trim(); if (!v) return "";
+  return v.length <= max ? v : v.slice(0, max - 1) + "…";
+};
+
+type CardSpec = {
+  key: string;                       // ไอดีที่ใช้ผูก element ในชุดเดียวกัน
+  kind: "wb_plan" | "wb_real";
+  id: string;
+  title: string; name: string; meta: string;
+  img: string | null;
+  data: Record<string, unknown>;
+};
+
+// การ์ด 1 ใบ = กรอบ + รูปย่อ + ข้อความ (จัดกลุ่มเดียวกัน) — คืน skeleton + id ของ element ทั้งหมด (ให้ frame ใช้เป็น children)
+function cardSkeleton(c: CardSpec, x: number, y: number): { els: Record<string, unknown>[]; ids: string[] } {
+  const gid = `g-${c.key}`;
+  const locked = c.kind === "wb_real";
+  const stroke = locked ? REAL_STROKE : PLAN_STROKE;
+  const rectId = `${c.key}-r`, imgId = `${c.key}-i`, textId = `${c.key}-t`;
+  const text = [c.title, c.name, c.meta].filter(Boolean).join("\n");
+  const els: Record<string, unknown>[] = [
+    { type: "rectangle", id: rectId, x, y, width: CARD_W, height: CARD_H, backgroundColor: locked ? REAL_BG : PLAN_BG,
+      strokeColor: stroke, fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], locked, customData: c.data },
+  ];
+  const ids = [rectId];
+  if (c.img) {
+    els.push({ type: "image", id: imgId, _imageUrl: c.img, x: x + 8, y: y + (CARD_H - IMG) / 2, width: IMG, height: IMG, groupIds: [gid], locked, customData: c.data });
+    ids.push(imgId);
+  }
+  const tx = x + (c.img ? IMG + 18 : 12);
+  els.push({ type: "text", id: textId, x: tx, y: y + 11, width: x + CARD_W - 12 - tx, text, fontSize: 12,
+    strokeColor: locked ? "#475569" : "#1e293b", groupIds: [gid], locked, customData: c.data });
+  ids.push(textId);
+  return { els, ids };
+}
 
 export function CanvasView({
-  departments, realWOs, plans, canEdit, imageByMo, laborPerUnit, onOpenWO, onOpenWork,
+  departments, realWOs, plans, canEdit, imageByMo, onOpenWO, onOpenWork,
 }: {
   departments: DeptLite[];
   realWOs: WOLite[];
   plans: DispatchPlan[];
   canEdit: boolean;
   imageByMo: Record<string, string | null>;
-  laborPerUnit: Record<string, number>;   // mo_no → ค่าแรง/ชิ้น
   onOpenWO?: (id: string) => void;
   onOpenWork?: (info: { moId: string | null; moNo: string | null; productSku: string | null; productName: string | null; qty: number }) => void;
 }) {
   const toast = useToast();
+  const ref = useRef<CanvasSketchControls | null>(null);
   const [planId, setPlanId] = useState<string>("");
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showReal, setShowReal] = useState(true);
+  const [busy, setBusy] = useState(false);
+  // โต๊ะล่าสุดของการ์ดแผนแต่ละใบ "ตามที่เห็นบนกระดาน" — ใช้จับว่าผู้ใช้ลากย้ายโต๊ะ (ไม่ใช่ค่าจาก DB)
+  const deskSeen = useRef<Map<string, string | null>>(new Map());
 
-  // แผนที่เลือก — ค่าเริ่มต้นคือแผนแรกที่ยังแก้ได้ (ไม่มีก็แผนแรกสุด)
+  // แผนที่เลือก — ค่าเริ่มต้นคือแผนแรกที่ยังแก้ได้
   useEffect(() => {
     if (planId && plans.some((p) => p.id === planId)) return;
     const first = plans.find((p) => p.status !== "applied") ?? plans[0];
@@ -69,61 +119,126 @@ export function CanvasView({
     } catch { setLines([]); }
     finally { setLoading(false); }
   }, [planId]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { deskSeen.current = new Map(); void load(); }, [load]);
 
-  // โซน = โต๊ะ (+ ช่องท้ายสำหรับงานที่ยังไม่ระบุโต๊ะ)
+  // ---- ข้อมูลที่จะกลายเป็นการ์ด ----
   const deptIds = useMemo(() => new Set(departments.map((d) => d.id)), [departments]);
-  const zoneOf = useCallback((id: string | null) => (id && deptIds.has(id) ? id : NO_DESK), [deptIds]);
+  const activeWOs = useMemo(() => realWOs.filter((w) => w.status !== "done"), [realWOs]);   // ส่งครบแล้ว = ออกจากโต๊ะ
 
-  const cards = useMemo<Card[]>(() => {
-    const out: Card[] = [];
-    for (const l of lines) out.push({ kind: "plan", id: `plan:${l.id}`, zone: zoneOf(l.department_id), line: l });
-    if (showReal) {
-      for (const w of realWOs) {
-        if (w.status === "done") continue;               // ส่งครบแล้ว = ออกจากโต๊ะไปแล้ว
-        out.push({ kind: "real", id: `real:${w.id}`, zone: zoneOf(w.department_id), wo: w });
-      }
-    }
-    return out;
-  }, [lines, realWOs, showReal, zoneOf]);
+  const planCard = useCallback((l: DispatchPlanLine): CardSpec => ({
+    key: `plan-${l.id}`, kind: "wb_plan", id: l.id,
+    title: `📋 ${l.product_sku ?? l.mo_no ?? "—"}`,
+    name: clip(l.product_name),
+    meta: [`${fmt(Number(l.qty) || 0)} ชิ้น`, l.assignee_name ? `👤 ${clip(l.assignee_name, 12)}` : null].filter(Boolean).join("  ·  "),
+    img: withImageWidth(imageByMo[String(l.mo_no ?? "")] ?? null, 160),
+    data: { kind: "wb_plan", id: l.id, mo_id: l.mo_id, mo_no: l.mo_no, product_sku: l.product_sku, product_name: l.product_name, qty: Number(l.qty) || 0 },
+  }), [imageByMo]);
 
-  const zones = useMemo<CanvasZone[]>(() => {
-    const sum = new Map<string, { plan: number; real: number }>();
-    for (const c of cards) {
-      const s = sum.get(c.zone) ?? { plan: 0, real: 0 };
-      if (c.kind === "plan") s.plan += Number(c.line.qty) || 0; else s.real += Number(c.wo.qty) || 0;
-      sum.set(c.zone, s);
-    }
-    const hintOf = (id: string) => {
-      const s = sum.get(id); if (!s || (s.plan === 0 && s.real === 0)) return undefined;
-      return `แผน ${fmt(s.plan)} ชิ้น · ของจริง ${fmt(s.real)} ชิ้น`;
+  const realCard = useCallback((w: WOLite): CardSpec => {
+    const recv = Number(w.received_qty) || 0;
+    return {
+      key: `real-${w.id}`, kind: "wb_real", id: w.id,
+      title: `🔒 ${w.product_sku ?? w.mo_no}`,
+      name: clip(w.product_name),
+      meta: [`${fmt(Number(w.qty) || 0)} ชิ้น`, recv > 0 ? `ส่งแล้ว ${fmt(recv)}` : null, w.assignee_name ? `👤 ${clip(w.assignee_name, 12)}` : null].filter(Boolean).join("  ·  "),
+      img: withImageWidth(w.image_url ?? imageByMo[String(w.mo_no)] ?? null, 160),
+      data: { kind: "wb_real", id: w.id, wo_no: w.wo_no ?? null, mo_no: w.mo_no, product_sku: w.product_sku, product_name: w.product_name, qty: Number(w.qty) || 0 },
     };
-    return [
-      ...departments.map((d) => ({ id: d.id, title: d.name, color: "#6366f1", hint: hintOf(d.id) })),
-      { id: NO_DESK, title: "ยังไม่ระบุโต๊ะ", color: "#94a3b8", hint: hintOf(NO_DESK) },
-    ];
-  }, [departments, cards]);
+  }, [imageByMo]);
 
-  // ลากการ์ดแผนข้ามโต๊ะ → บันทึกลงแผน (optimistic; พลาดแล้วคืนที่เดิม)
-  const move = useCallback(async (card: Card, toZone: string) => {
-    if (card.kind !== "plan" || !planId) return;
-    const dept = departments.find((d) => d.id === toZone) ?? null;
-    const before = card.line;
-    setLines((ls) => ls.map((l) => l.id === before.id
-      ? { ...l, department_id: dept?.id ?? null, department_name: dept?.name ?? null, assignee_id: null, assignee_name: null }
-      : l));
+  // งานของแต่ละโต๊ะ (แผนก่อน แล้วค่อยของจริง) + กองท้ายสำหรับงานที่ยังไม่ระบุโต๊ะ
+  const byDesk = useMemo(() => {
+    const m = new Map<string, CardSpec[]>();
+    const put = (k: string, c: CardSpec) => { const a = m.get(k) ?? []; a.push(c); m.set(k, a); };
+    for (const l of lines) put(l.department_id && deptIds.has(l.department_id) ? l.department_id : NO_DESK, planCard(l));
+    for (const w of activeWOs) put(w.department_id && deptIds.has(w.department_id) ? w.department_id : NO_DESK, realCard(w));
+    return m;
+  }, [lines, activeWOs, deptIds, planCard, realCard]);
+
+  // ---- วางโครงทั้งกระดาน (กรอบโต๊ะ + การ์ดในกรอบ) ----
+  const seedSkeletons = useCallback((): Record<string, unknown>[] => {
+    const out: Record<string, unknown>[] = [];
+    const desks: { id: string; name: string }[] = [
+      ...departments.map((d) => ({ id: d.id, name: d.name })),
+      ...((byDesk.get(NO_DESK)?.length ?? 0) > 0 ? [{ id: NO_DESK, name: "🆕 ยังไม่ระบุโต๊ะ" }] : []),
+    ];
+    desks.forEach((d, i) => {
+      const cards = byDesk.get(d.id) ?? [];
+      const rows = Math.max(1, Math.ceil(cards.length / COLS));
+      const fx = i * (FRAME_W + FRAME_GAP), fy = 0;
+      const fh = FRAME_HEAD + rows * (CARD_H + GAPY) + GAPY;
+      const children: string[] = [];
+      cards.forEach((c, j) => {
+        const cx = fx + GAPX + (j % COLS) * (CARD_W + GAPX);
+        const cy = fy + FRAME_HEAD + Math.floor(j / COLS) * (CARD_H + GAPY);
+        const { els, ids } = cardSkeleton(c, cx, cy);
+        out.push(...els); children.push(...ids);
+      });
+      out.push({ type: "frame", id: `frame-${d.id}`, children, name: d.name, x: fx, y: fy, width: FRAME_W, height: fh,
+        customData: { kind: "wb_desk", id: d.id === NO_DESK ? "" : d.id } });
+    });
+    return out;
+  }, [departments, byDesk]);
+
+  // ---- ซิงค์: มีอะไรใหม่เพิ่มเข้ามา / อันไหนหายไป / ข้อความเปลี่ยน ----
+  const syncBoard = useCallback(async (silent = false) => {
+    const c = ref.current; if (!c) return;
+    const cards = c.listCards();
+    const already = cards.some((x) => x.kind === "wb_plan" || x.kind === "wb_real" || x.kind === "wb_desk");
+    if (!already) {                                     // กระดานเปล่า → วางโครงให้ทั้งชุด
+      const sk = seedSkeletons();
+      if (sk.length) { await c.insert(sk); if (!silent) toast.success("วางโครงกระดานตามแผนให้แล้ว"); }
+      return;
+    }
+    const planIds = new Set(lines.map((l) => l.id));
+    const woIds = new Set(activeWOs.map((w) => w.id));
+    // 1) การ์ดที่ไม่มีในข้อมูลแล้ว (ลบออกจากแผน / รับงานครบ) → เอาออกจากกระดาน
+    c.removeCards((card) => (card.kind === "wb_plan" && !planIds.has(card.id)) || (card.kind === "wb_real" && !woIds.has(card.id)));
+    // 2) การ์ดเดิม → อัปเดตข้อความให้ตรงข้อมูลล่าสุด (จำนวน/ช่าง/ส่งแล้ว)
+    const specOf = new Map<string, CardSpec>();
+    for (const l of lines) specOf.set(`wb_plan:${l.id}`, planCard(l));
+    for (const w of activeWOs) specOf.set(`wb_real:${w.id}`, realCard(w));
+    await c.refreshCards(async (card) => {
+      const s = specOf.get(`${card.kind}:${card.id}`); if (!s) return null;
+      return { text: [s.title, s.name, s.meta].filter(Boolean).join("\n"), data: s.data };
+    });
+    // 3) งานใหม่ที่ยังไม่มีการ์ด → วางไว้กลางจอให้ลากเข้าโต๊ะ
+    const on = new Set(cards.map((x) => `${x.kind}:${String(x.data.id ?? "")}`));
+    const missing = [...specOf.entries()].filter(([k]) => !on.has(k)).map(([, s]) => s);
+    if (missing.length) {
+      const sk: Record<string, unknown>[] = [];
+      missing.forEach((s, i) => { sk.push(...cardSkeleton(s, (i % COLS) * (CARD_W + GAPX), Math.floor(i / COLS) * (CARD_H + GAPY)).els); });
+      await c.insert(sk);
+      toast.info(`มีงานใหม่ ${missing.length} ใบ — วางไว้กลางจอ ลากเข้ากรอบโต๊ะได้เลย`);
+    } else if (!silent) toast.success("กระดานตรงกับข้อมูลล่าสุดแล้ว");
+  }, [lines, activeWOs, seedSkeletons, planCard, realCard, toast]);
+
+  // ---- เขียนกลับ: ลากการ์ดแผนข้ามกรอบโต๊ะ = ย้ายโต๊ะในแผนจริง ----
+  const moveLine = useCallback(async (lineId: string, deptId: string | null) => {
+    const dept = departments.find((d) => d.id === deptId) ?? null;
+    const before = lines.find((l) => l.id === lineId) ?? null;
+    setLines((ls) => ls.map((l) => l.id === lineId ? { ...l, department_id: dept?.id ?? null, department_name: dept?.name ?? null, assignee_id: null, assignee_name: null } : l));
     try {
       const res = await apiFetch(`/api/mo/dispatch-plans/${planId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_line", lineId: before.id, department_id: dept?.id ?? null, department_name: dept?.name ?? null }),
+        body: JSON.stringify({ action: "update_line", lineId, department_id: dept?.id ?? null, department_name: dept?.name ?? null }),
       });
       const j = await res.json(); if (j?.error) throw new Error(j.error);
-      toast.success(`ย้ายไป ${dept?.name ?? "ยังไม่ระบุโต๊ะ"} แล้ว`);
+      toast.success(`ย้ายเข้า ${dept?.name ?? "ยังไม่ระบุโต๊ะ"} แล้ว`);
     } catch (e) {
-      setLines((ls) => ls.map((l) => l.id === before.id ? before : l));
-      toast.error(e instanceof Error ? e.message : "ย้ายโต๊ะไม่สำเร็จ");
+      if (before) setLines((ls) => ls.map((l) => l.id === lineId ? before : l));
+      toast.error(e instanceof Error ? e.message : "ย้ายโต๊ะไม่สำเร็จ (กระดานยังแสดงตำแหน่งใหม่ ลองกดซิงค์)");
     }
-  }, [planId, departments, toast]);
+  }, [departments, lines, planId, toast]);
+
+  // อ่านกระดาน → การ์ดแผนใบไหนอยู่กรอบโต๊ะไหน · write=false = แค่จำไว้เป็นจุดตั้งต้น (ไม่บันทึกอะไร)
+  const observeDesks = useCallback((write: boolean) => {
+    const c = ref.current; if (!c) return;
+    const now = deskOfPlanCards(c.getElements() as CanvasEl[], departments);
+    const moves = write ? diffDeskMoves(now, deskSeen.current) : [];
+    for (const [lineId, desk] of now) deskSeen.current.set(lineId, desk);
+    for (const m of moves) void moveLine(m.lineId, m.deptId);
+  }, [departments, moveLine]);
 
   if (plans.length === 0) {
     return (
@@ -137,79 +252,45 @@ export function CanvasView({
 
   return (
     <div>
-      {/* แถบเครื่องมือ — เลือกแผน · ซ่อน/แสดงของจริง · โหลดใหม่ */}
-      <div className="flex items-center gap-2 flex-wrap mb-3">
-        <select value={planId} onChange={(e) => setPlanId(e.target.value)} title="เลือกแผนงานที่จะวางบนแคนวาส"
+      {/* แถบเครื่องมือ — เลือกแผน · ซิงค์งานเข้ากระดาน */}
+      <div className="flex items-center gap-2 flex-wrap mb-2">
+        <select value={planId} onChange={(e) => setPlanId(e.target.value)} title="เลือกแผนงาน — 1 แผน = 1 กระดาน"
           className="h-9 px-2 text-sm font-medium border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
           {plans.map((p) => <option key={p.id} value={p.id}>📅 {p.name}{p.status === "applied" ? " (ดันเป็นของจริงแล้ว)" : ""}</option>)}
         </select>
-        <label className="h-9 px-3 inline-flex items-center gap-1.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 cursor-pointer">
-          <input type="checkbox" checked={showReal} onChange={(e) => setShowReal(e.target.checked)} className="accent-slate-500" />
-          แสดงของจริง (สีเทา)
-        </label>
-        <button onClick={() => void load()} title="โหลดใหม่" className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⟳</button>
+        <button onClick={() => { setBusy(true); void load().then(() => syncBoard()).finally(() => setBusy(false)); }} disabled={busy || loading}
+          title="ดึงงานล่าสุดจากแผน + ใบจ่ายงานจริง มาลงกระดาน (ของที่วาดเองไม่หาย)"
+          className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+          {busy ? "⏳ กำลังซิงค์…" : "🔄 ซิงค์งานเข้ากระดาน"}
+        </button>
         <span className="text-[11px] text-slate-400">
-          {editable
-            ? "ลากการ์ด “แผน” ข้ามโต๊ะได้ · การ์ดสีเทา = ของจริงที่จ่ายไปแล้ว ล็อกไว้ ย้ายไม่ได้"
-            : "แผนนี้แก้ไม่ได้ (ดันเป็นของจริงแล้ว หรือไม่มีสิทธิ์จ่ายงาน) — ดูได้อย่างเดียว"}
+          1 กรอบ = 1 โต๊ะ · การ์ด <b className="text-indigo-500">แผน</b> ลากข้ามโต๊ะได้ (ระบบบันทึกเข้าแผนให้เอง) · การ์ด <b>สีเทา 🔒</b> = ของจริง ย้ายไม่ได้ · ดับเบิลคลิกการ์ด = ดูรายละเอียด
         </span>
       </div>
 
       {loading ? <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลดแผน…</div> : (
-        <CanvasBoard<Card>
-          zones={zones}
-          items={cards}
-          getItemId={(c) => c.id}
-          getZoneId={(c) => c.zone}
-          canDrag={editable}
-          canDragItem={(c) => c.kind === "plan"}   // ของจริงล็อกไว้ ลากไม่ได้
-          cardWidth={210}
-          emptyText="ยังไม่มีงานในโต๊ะนี้ — ลากการ์ดแผนมาวางได้"
-          onMove={(c, to) => void move(c, to)}
-          onCardClick={(c) => {
-            if (c.kind === "real") { onOpenWO?.(c.wo.id); return; }
-            onOpenWork?.({ moId: c.line.mo_id, moNo: c.line.mo_no, productSku: c.line.product_sku, productName: c.line.product_name, qty: Number(c.line.qty) || 0 });
+        <CanvasSketch
+          key={planId}
+          entityType="work_board"
+          entityId={planId}
+          editable={editable}
+          collab
+          height="calc(100vh - 250px)"
+          controlsRef={ref}
+          onReady={() => { void (async () => { await syncBoard(true); observeDesks(false); })(); }}
+          onSaved={() => observeDesks(editable)}
+          onCardOpen={(d) => {
+            if (d?.kind === "wb_real") { onOpenWO?.(String(d.id ?? "")); return; }
+            if (d?.kind === "wb_plan") {
+              onOpenWork?.({
+                moId: d.mo_id ? String(d.mo_id) : null, moNo: d.mo_no ? String(d.mo_no) : null,
+                productSku: d.product_sku ? String(d.product_sku) : null, productName: d.product_name ? String(d.product_name) : null,
+                qty: Number(d.qty) || 0,
+              });
+            }
           }}
-          renderCard={(c, dragging) => <BoardCard card={c} dragging={dragging} imageByMo={imageByMo} laborPerUnit={laborPerUnit} />}
         />
       )}
-    </div>
-  );
-}
-
-// การ์ดบนแคนวาส — แผน = พื้นขาว เส้นซ้ายม่วง · ของจริง = พื้นเทา จาง + 🔒
-function BoardCard({ card, dragging, imageByMo, laborPerUnit }: {
-  card: Card; dragging: boolean; imageByMo: Record<string, string | null>; laborPerUnit: Record<string, number>;
-}) {
-  const isPlan = card.kind === "plan";
-  const moNo = isPlan ? (card.line.mo_no ?? "") : card.wo.mo_no;
-  const sku = isPlan ? card.line.product_sku : card.wo.product_sku;
-  const name = isPlan ? card.line.product_name : card.wo.product_name;
-  const qty = Number(isPlan ? card.line.qty : card.wo.qty) || 0;
-  const worker = isPlan ? card.line.assignee_name : card.wo.assignee_name;
-  const recv = isPlan ? 0 : Number(card.wo.received_qty) || 0;
-  const img = (isPlan ? null : card.wo.image_url) ?? imageByMo[moNo] ?? null;
-  const rate = laborPerUnit[moNo] ?? 0;
-  return (
-    <div className={`rounded-lg border px-2 py-1.5 ${dragging ? "shadow-lg" : ""} ${isPlan ? "bg-white border-slate-200" : "bg-slate-100 border-slate-200 opacity-80"}`}
-      style={isPlan ? { borderLeft: "3px solid #6366f1" } : undefined}>
-      <div className="flex items-center gap-2">
-        <HoverImage url={img} size={28} previewSize={224} />
-        <div className="min-w-0 flex-1">
-          <div className={`text-sm font-semibold truncate ${isPlan ? "text-slate-800" : "text-slate-500"}`}>{sku || name || moNo}</div>
-          <div className="text-[10px] text-slate-400 truncate">{moNo}{rate > 0 ? ` · ${baht(rate)}/ชิ้น` : ""}</div>
-        </div>
-        <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-md ${isPlan ? "bg-indigo-50 text-indigo-700" : "bg-slate-200 text-slate-500"}`}>
-          {isPlan ? "แผน" : "🔒 ของจริง"}
-        </span>
-      </div>
-      <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-        <span className={`text-[11px] px-1.5 py-0.5 rounded-md ${isPlan ? "bg-slate-50 text-slate-600" : "bg-white/70 text-slate-500"}`}>
-          {fmt(qty)} ชิ้น{recv > 0 ? ` · ส่งแล้ว ${fmt(recv)}` : ""}
-        </span>
-        {worker && <span className="text-[10px] text-violet-600 truncate">👤 {worker}</span>}
-        {rate > 0 && qty > 0 && <span className="text-[10px] text-slate-400 ml-auto">รวม {baht(rate * qty)}</span>}
-      </div>
     </div>
   );
 }

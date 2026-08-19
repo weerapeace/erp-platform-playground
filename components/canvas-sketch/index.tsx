@@ -39,6 +39,8 @@ export type CanvasSketchControls = {
   isDirty: () => boolean; save: () => Promise<void>; discard: () => void;
   insert: (skeletons: Record<string, unknown>[]) => Promise<void>;
   listCards: () => { kind: string; data: Record<string, unknown> }[];
+  /** อ่าน element ดิบบนกระดาน (อ่านอย่างเดียว) — โมดูลที่ต้องรู้ตำแหน่ง/frame ของการ์ด เช่น บอร์ดจ่ายงาน (การ์ดอยู่ในกรอบโต๊ะไหน) */
+  getElements: () => Record<string, unknown>[];
   /** ลบการ์ด (ทั้งกลุ่ม) ที่ตรงเงื่อนไข match — เช่นลบการ์ดคอนเทนต์ทั้งหมดของ content id หนึ่งเมื่อคอนเทนต์ถูกลบ */
   removeCards: (match: (card: { kind: string; id: string; data: Record<string, unknown> }) => boolean) => void;
   /** แทนที่การ์ดที่ match ด้วย skeleton ใหม่ (ลบเดิม + วางใหม่ที่ตำแหน่งเดิม) — ใช้ตอนแก้ตารางแล้ว render การ์ดใหม่ */
@@ -49,7 +51,7 @@ export type CanvasSketchControls = {
 };
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, collab = false, stickyTop,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, collab = false, stickyTop,
 }: {
   entityType: string;
   entityId:   string;
@@ -67,6 +69,8 @@ export function CanvasSketch({
   onCardOpen?: (data: Record<string, unknown>) => void;
   /** เรียกครั้งเดียวเมื่อกระดานโหลดเสร็จพร้อมใช้ (ใช้ซิงค์การ์ดสด ฯลฯ) */
   onReady?: () => void;
+  /** เรียกทุกครั้งที่บันทึกกระดานสำเร็จ — ใช้ตอนต้องเขียนผลการลากกลับเข้าข้อมูลจริง (เช่น ลากการ์ดข้ามโต๊ะ → อัปเดตแผนจ่ายงาน) */
+  onSaved?: () => void;
 }) {
   const t = useT();
   const [scene, setScene] = useState<Scene | "loading">("loading");
@@ -97,6 +101,7 @@ export function CanvasSketch({
   const dirtyCbRef = useRef(onDirtyChange); dirtyCbRef.current = onDirtyChange;
   const cardCbRef  = useRef(onCardOpen);   cardCbRef.current  = onCardOpen;
   const readyCbRef = useRef(onReady);      readyCbRef.current = onReady;
+  const savedCbRef = useRef(onSaved);      savedCbRef.current = onSaved;
   const editableRef = useRef(editable);    editableRef.current = editable;
   const hoistRef = useRef<((files: Record<string, any>) => void) | null>(null); // ตัวย้ายรูปขึ้น R2 (ตั้งค่าหลัง hoistImages นิยาม)
   const markDirty  = (d: boolean) => { dirtyRef.current = d; dirtyCbRef.current?.(d); };
@@ -240,6 +245,7 @@ export function CanvasSketch({
         baseRevRef.current = Number(j.rev) || baseRevRef.current + 1;
         setLastMerged(merged);
         setSaveState("saved");
+        try { savedCbRef.current?.(); } catch (e) { console.error("[canvas-sketch] onSaved failed:", e); }
         try { setSavedAt(new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })); } catch { setSavedAt("✓"); }
         break;
       }
@@ -377,6 +383,8 @@ export function CanvasSketch({
         }
         return out;
       },
+      // element ดิบบนกระดาน (ยังไม่ถูกลบ) — อ่านอย่างเดียว
+      getElements: () => { const api = apiRef.current; return api ? ((api.getSceneElements() as Record<string, unknown>[]) ?? []) : []; },
       // ลบการ์ดทั้งกลุ่มที่ match (เช่น content id ที่ถูกลบ) → mark isDeleted + bump version
       // ⚠️ ต้อง isDeleted (ไม่ใช่ filter ทิ้ง) ไม่งั้น collab merge (mergeById เก็บ version สูงกว่า) จะดึงการ์ดกลับมา
       removeCards: (match) => {

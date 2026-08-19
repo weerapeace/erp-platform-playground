@@ -1,6 +1,6 @@
 # CanvasSketch — กระดานวาด Excalidraw (ของกลาง)
 
-`components/canvas-sketch/index.tsx` · API: `/api/canvas-sketch` · ตาราง: `erp_canvas_sketches` · ใช้จริง: Design Sheets แท็บ "🖌 กระดาน"
+`components/canvas-sketch/index.tsx` · API: `/api/canvas-sketch` · ตาราง: `erp_canvas_sketches` · ใช้จริง: Design Sheets แท็บ "🖌 กระดาน" · Campaign Canvas · บอร์ดจ่ายงาน มุมมอง "🗂 แคนวาส"
 
 ## ใช้ทำอะไร
 
@@ -31,6 +31,19 @@ ref.current?.insert([
 
 ใช้จริง: Campaign Canvas (`app/tasks/campaigns/[id]`) — ปุ่ม Section (Frame) / SKU Card / Task Card
 
+### อ่านกระดาน + รู้ตอนบันทึก (`controlsRef.getElements` / prop `onSaved`)
+
+โมดูลที่ต้อง "เขียนผลการลากกลับเข้าข้อมูลจริง" ใช้คู่กันสองตัวนี้:
+
+- `getElements()` — อ่าน element ดิบบนกระดาน (อ่านอย่างเดียว) เช่นดูว่าการ์ดอยู่ใน frame ไหน (`el.frameId`)
+- `onSaved` — เรียกทุกครั้งที่บันทึกกระดานสำเร็จ (บันทึกอัตโนมัติหลังหยุดลาก ~2.5 วิ)
+
+ใช้จริง: บอร์ดจ่ายงาน มุมมอง "🗂 แคนวาส" (`app/master/work-board/canvas-view.tsx`) — 1 frame = 1 โต๊ะ ·
+ลากการ์ด "แผน" ข้ามกรอบ → `onSaved` → อ่าน `getElements()` → เทียบกับครั้งก่อน (`lib/work-board-canvas.ts` มีเทสต์) → PATCH แผนจ่ายงาน ·
+การ์ด "ของจริง" ใส่ `locked: true` + สีเทา = เห็นได้ ลาก/แก้ไม่ได้
+
+> กฎกันข้อมูลพัง: การ์ดที่หลุดออกนอกกรอบที่ระบบรู้จัก ให้ถือว่า "ไม่รู้" อย่าเขียนค่าว่างกลับเข้าข้อมูล
+
 - 1 เอกสาร = 1 กระดาน (unique entity_type + entity_id)
 - component จัดการโหลด/บันทึกเองทั้งหมด — **บันทึกอัตโนมัติ**: หยุดวาด ~2.5 วิ → save เอง + flush ตอนปิดแท็บ/ปิด modal · มีตัวบอกสถานะ (รอบันทึก/กำลังบันทึก/✓ แล้ว) · บันทึกพลาด (เน็ตสะดุด) → ขึ้น ⚠ + ปุ่มลองใหม่ และจะลองซ้ำเองเมื่อแก้ครั้งถัดไป
 - ภาพถ่ายกระดาน: key ตายตัว `canvas-sketch/<type>/<id>.png` — บันทึกใหม่ทับของเก่า **ไม่มีไฟล์ขยะใน R2**
@@ -41,5 +54,5 @@ ref.current?.insert([
 - ขนาดกระดานจำกัด 8MB (รูปที่วางฝังใน scene) — วางรูปใหญ่หลายรูปมากๆ จะเตือน
 - ไม่มีตารางสำเร็จรูป (วาดกล่องเรียงแทน)
 - ตัวเสริม: `@excalidraw/excalidraw` v0.18 — โหลดเฉพาะหน้าที่ใช้ (dynamic import) ไม่ถ่วงหน้าอื่น
-- สิทธิ์ API เลือกตาม entity_type ฝั่ง server (map `PERM` ใน route): `design_sheet`→products.* · `creative_board`→tasks.* · อื่นๆ default products.* (เพิ่ม entity ใหม่ก็เติม map — client ระบุสิทธิ์เองไม่ได้ กันสวมสิทธิ์ข้ามโมดูล)
+- สิทธิ์ API เลือกตาม entity_type ฝั่ง server (map `PERM` ใน route): `design_sheet`→products.* · `creative_board`→tasks.* · `work_board`→products.* · อื่นๆ default products.* (เพิ่ม entity ใหม่ก็เติม map — client ระบุสิทธิ์เองไม่ได้ กันสวมสิทธิ์ข้ามโมดูล)
 - ลบเอกสารแม่ ไม่ได้ลบกระดานอัตโนมัติ (entity_id เป็น text ไม่มี FK) — ยอมรับได้: กระดานเก่าไม่โผล่ที่ไหน
