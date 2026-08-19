@@ -266,6 +266,12 @@ export default function PurchaseOrdersPage() {
       default: return undefined;
     }
   };
+  // จำนวนรวมในตะกร้า แยกตามหน่วยนับ (เช่น "200 Units · 12 ชิ้น")
+  const qtyText = (list: Row[]) => {
+    const t: Record<string, number> = {};
+    for (const r of list) { const u = r.uom || "หน่วย"; t[u] = (t[u] ?? 0) + (cart[r.id]?.qty ?? r.qty); }
+    return Object.entries(t).map(([u, q]) => `${q.toLocaleString()} ${u}`).join(" · ");
+  };
   const grandByCur = useMemo(() => { const t: Record<string, number> = {}; for (const r of cartRows) t[r.currency] = (t[r.currency] ?? 0) + lineTotal(r); return t; }, [cartRows, cart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ยืนยันจากป๊อปทวนรายการ → สร้างใบสั่งซื้อจริง (แยกใบละร้าน)
@@ -636,7 +642,7 @@ export default function PurchaseOrdersPage() {
                                   <td colSpan={6} className="px-1.5 py-1 border-t border-slate-200">
                                     <span className="flex items-center justify-between gap-2">
                                       <span className="font-medium text-slate-600">🏪 {shop}</span>
-                                      <span className="text-slate-600">{money(subtotal, cur)}</span>
+                                      <span className="text-slate-600"><span className="font-normal text-slate-400 mr-1.5">{qtyText(items)}</span>{money(subtotal, cur)}</span>
                                     </span>
                                   </td>
                                 </tr>
@@ -686,7 +692,7 @@ export default function PurchaseOrdersPage() {
                         <div key={shop}>
                           <div className="text-xs font-medium text-slate-500 mb-1 flex items-center justify-between">
                             <span>🏪 {shop}</span>
-                            <span className="text-slate-600">{money(subtotal, cur)}{isCNY(cur) && rate > 0 && <span className="text-slate-400"> ≈ ฿{Math.round(subtotal * rate).toLocaleString()}</span>}</span>
+                            <span className="text-slate-600"><span className="font-normal text-slate-400 mr-1.5">{qtyText(items)}</span>{money(subtotal, cur)}{isCNY(cur) && rate > 0 && <span className="text-slate-400"> ≈ ฿{Math.round(subtotal * rate).toLocaleString()}</span>}</span>
                           </div>
                           <div className="space-y-2">
                             {shown.map((r) => {
@@ -725,6 +731,9 @@ export default function PurchaseOrdersPage() {
                     })}
                   </div>
                   <div className="p-3 border-t border-slate-100 space-y-2">
+                    {cartRows.length > 0 && (
+                      <div className="flex justify-between text-sm"><span className="text-slate-500">จำนวนรวม</span><span className="font-semibold text-slate-700 tabular-nums">{qtyText(cartRows)}</span></div>
+                    )}
                     {Object.entries(grandByCur).map(([cur, sum]) => (
                       <div key={cur} className="flex justify-between text-sm"><span className="text-slate-500">ยอดรวม ({curLabel(cur)})</span><span className="font-bold text-blue-600">{money(sum, cur)}{isCNY(cur) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(sum * rate).toLocaleString()}</span>}</span></div>
                     ))}
@@ -804,7 +813,7 @@ export default function PurchaseOrdersPage() {
               return (
                 <div key={shop} className="border border-slate-200 rounded-lg overflow-hidden">
                   <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100 gap-2">
-                    <span className="text-sm font-semibold text-slate-700 min-w-0 truncate">🏪 {shop} <span className="text-[11px] font-normal text-slate-400">({items.length} รายการ)</span></span>
+                    <span className="text-sm font-semibold text-slate-700 min-w-0 truncate">🏪 {shop} <span className="text-[11px] font-normal text-slate-400">({items.length} รายการ · {qtyText(items)})</span></span>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button type="button" onClick={() => {
                         if (isChineseShop(shop, items[0]?.currency ?? "THB")) setCnBuilder({ shop, items });
@@ -842,6 +851,12 @@ export default function PurchaseOrdersPage() {
             })}
             {/* ยอดรวมทั้งหมดแยกสกุลเงิน */}
             <div className="pt-2 border-t border-slate-200 space-y-0.5">
+              {cartRows.length > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">จำนวนรวมทั้งหมด</span>
+                  <span className="font-semibold text-slate-700 tabular-nums">{qtyText(cartRows)}</span>
+                </div>
+              )}
               {Object.entries(grandByCur).map(([c, sum]) => (
                 <div key={c} className="flex justify-between text-sm">
                   <span className="text-slate-500">ยอดรวมทั้งหมด ({curLabel(c)})</span>
