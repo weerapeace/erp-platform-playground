@@ -261,6 +261,17 @@ export default function QuotationsPage() {
       if (json.error) throw new Error(json.error);
       flash(editingId ? "บันทึกแล้ว" : "สร้างใบเสนอราคาใหม่");
       setModalOpen(false);
+      // ⚠️ ต้องล้าง/โหลดรายละเอียดใหม่ด้วย — หน้านี้แคช detail ไว้ใน expandedDetails
+      // ถ้าไม่ล้าง เปิดดู/กดแก้ซ้ำจะเห็นค่าเดิม (เคสจริง: แก้ราคาแล้วเหมือนบันทึกไม่ติด)
+      const savedId = editingId ?? (json.id ? String(json.id) : null);
+      if (savedId) {
+        setExpandedDetails(prev => { const next = { ...prev }; delete next[savedId]; return next; });
+        try {
+          const fresh = await fetchDetail(savedId);
+          setExpandedDetails(prev => ({ ...prev, [savedId]: fresh }));
+          setDetail(prev => (prev && prev.id === savedId ? fresh : prev));
+        } catch { /* โหลดสดไม่ได้ก็ไม่เป็นไร — แคชถูกล้างแล้ว ครั้งหน้าดึงใหม่เอง */ }
+      }
       await fetchList();
     } catch (err) { setFormErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
