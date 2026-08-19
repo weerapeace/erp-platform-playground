@@ -1416,7 +1416,9 @@ function WorkBoardPageInner() {
       ) : viewMode === "purchase" ? (
         <PurchaseNeeds canEdit={canEdit} onOpenMo={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "table" ? (
-        <BoardTable pending={board.pending} workOrders={board.workOrders} onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
+        <BoardTable pending={board.pending} workOrders={board.workOrders}
+          departments={board.departments} craftsmen={craftsmen} canEdit={canDispatch}
+          onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : viewMode === "shop" ? (
         <div className="space-y-3">
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
@@ -2877,8 +2879,10 @@ const DueCell = ({ d }: { d: string | null }) => (
   <span className="text-[12px] whitespace-nowrap">📅 {dueDateText(d)} <span className={daysLeftClass(d)}>· {daysLeftText(d)}</span></span>
 );
 
-function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
-  pending: PendingMO[]; workOrders: WorkOrder[]; onOpenMO: (mo: PendingMO) => void; onOpenWO: (wo: WorkOrder) => void; onReload?: () => void;
+function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOpenMO, onOpenWO, onReload }: {
+  pending: PendingMO[]; workOrders: WorkOrder[];
+  departments: Dept[]; craftsmen: Assignee[]; canEdit: boolean;
+  onOpenMO: (mo: PendingMO) => void; onOpenWO: (wo: WorkOrder) => void; onReload?: () => void;
 }) {
   const toast = useToast();
   const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
@@ -2887,6 +2891,14 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
   const [dueOpen, setDueOpen] = useState(false);
   const [dueVal, setDueVal] = useState("");
   const [dueField, setDueField] = useState<"due" | "internal">("due");   // แก้วันไหน: นัดส่งลูกค้า / ส่งงานภายใน
+  // 🚚 จ่ายงานตามที่ติ๊ก (จ่ายทีเดียวหลายใบเข้าโต๊ะเดียวกัน)
+  const [dispOpen, setDispOpen] = useState(false);
+  const [dispDeptId, setDispDeptId] = useState("");
+  const [dispCraft, setDispCraft] = useState("");
+  const [dispDue2, setDispDue2] = useState("");
+  const [dispRate, setDispRate] = useState("");
+  const [dispBusy, setDispBusy] = useState(false);
+  const [dispMsg, setDispMsg] = useState("");
   // 💰 ใส่ค่าแรงให้ใบจ่ายงานหลายใบพร้อมกัน (ตารางล่าง)
   const [woSel, setWoSel] = useState<Set<string>>(new Set());
   const [woLaborOpen, setWoLaborOpen] = useState(false);
@@ -2909,6 +2921,47 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setDueSaving(false); }
   }, [pending, sel, dueVal, dueField, toast, onReload]);
+
+  /**
+   * จ่ายงานทุกใบที่ติ๊กไว้ เข้าโต๊ะ/ช่างเดียวกัน — จำนวน = "เหลือ" ของแต่ละใบ
+   * (ยิง /api/mo/work-orders ตัวเดิม เลข WO / แจ้งเตือน / ย้ายวัตถุดิบเข้า WIP ทำฝั่งเซิร์ฟเวอร์)
+   * ค่าแรงเว้นว่างได้ — เซิร์ฟเวอร์จะเติมจากค่าแรง/ชิ้นของใบสั่งผลิตหรือราคากลาง BOM ให้เอง
+   */
+  const selPend = pending.filter((m) => sel.has(m.id));
+  const dispatchSelected = useCallback(async () => {
+    const dept = departments.find((d) => d.id === dispDeptId);
+    if (!dept) { toast.error("เลือกโต๊ะ/แผนกก่อน"); return; }
+    const list = pending.filter((m) => sel.has(m.id) && m.remaining > 0);
+    if (!list.length) { toast.error("ใบที่ติ๊กไว้ไม่มีจำนวนคงเหลือให้จ่าย"); return; }
+    const craft = craftsmen.find((c) => c.id === dispCraft);
+    const rate = dispRate.trim() === "" ? null : Number(dispRate) || 0;
+
+    setDispBusy(true);
+    let ok = 0; const fails: string[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      setDispMsg(`กำลังจ่าย ${i + 1}/${list.length} · ${m.product_sku ?? m.mo_no}`);
+      try {
+        const res = await apiFetch("/api/mo/work-orders", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
+            stage: stageOfDept(dept.name), department_id: dept.id, department_name: dept.name,
+            assignee_type: craft ? "craftsman" : "department", assignee_id: craft?.id ?? null, assignee_name: craft?.name ?? dept.name,
+            qty: m.remaining, uom: "ชิ้น", dispatch_date: todayLocal(),
+            due_date: dispDue2 || m.internal_due_date || m.due_date || null,
+            note: `จากใบสั่งผลิต ${m.mo_no}`,
+            labor_cost: rate != null && rate > 0 ? rate * m.remaining : undefined,
+          }) });
+        const j = await res.json();
+        if (!res.ok || j?.error) throw new Error(j?.error || "จ่ายไม่สำเร็จ");
+        ok += 1;
+      } catch (e) { fails.push(`${m.product_sku ?? m.mo_no}: ${e instanceof Error ? e.message : "ไม่สำเร็จ"}`); }
+    }
+    setDispBusy(false); setDispMsg("");
+    if (ok > 0) toast.success(`จ่ายเข้า ${dept.name}${craft ? ` · ${craft.name}` : ""} แล้ว ${ok} ใบ`);
+    if (fails.length) toast.error(`ไม่สำเร็จ ${fails.length} ใบ — ${fails[0]}`);
+    if (ok > 0) { setDispOpen(false); setSel(new Set()); onReload?.(); }
+  }, [pending, sel, departments, craftsmen, dispDeptId, dispCraft, dispDue2, dispRate, toast, onReload]);
 
   // ใส่ค่าแรง/ชิ้น ให้ใบจ่ายงานที่ติ๊กไว้ — ใบละ (ค่าแรง/ชิ้น × จำนวนของใบนั้น)
   const selWos = wos.filter((w) => woSel.has(w.id));
@@ -2980,6 +3033,7 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
           {selMoNos.length > 0 && <>
             <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จับเข้ากลุ่ม ({selMoNos.length})</button>
             <button onClick={() => setDueOpen(true)} className="h-8 px-3 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700">📅 แก้วันกำหนด ({selMoNos.length})</button>
+            {canEdit && <button onClick={() => { setDispOpen(true); setDispMsg(""); }} className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🚚 จ่ายงาน ({selMoNos.length})</button>}
           </>}
         </div>}
         searchText={(m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`}
@@ -3010,6 +3064,61 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
           </div>
         </div>
       )}
+      {dispOpen && (() => {
+        const totalQty = selPend.reduce((n, m) => n + (m.remaining || 0), 0);
+        const rate = Number(dispRate) || 0;
+        const deptCrafts = craftsmen.filter((c) => !dispDeptId || !c.department_id || c.department_id === dispDeptId);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !dispBusy && setDispOpen(false)}>
+            <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-base font-bold text-slate-800">🚚 จ่ายงานตามที่ติ๊ก</h3>
+              <p className="mt-0.5 mb-3 text-xs text-slate-500">
+                จ่าย <b>{selPend.length}</b> ใบ · รวม <b>{fmt(totalQty)}</b> ชิ้น (จำนวน = ยอดคงเหลือของแต่ละใบ)
+              </p>
+              <div className="space-y-2.5">
+                <label className="block">
+                  <span className="text-[11px] text-slate-500">โต๊ะ/แผนกที่จ่ายเข้า *</span>
+                  <select value={dispDeptId} onChange={(e) => { setDispDeptId(e.target.value); setDispCraft(""); }}
+                    className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="">— เลือกโต๊ะ —</option>
+                    {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] text-slate-500">ช่าง (ไม่เลือก = จ่ายเข้าทั้งโต๊ะ)</span>
+                  <select value={dispCraft} onChange={(e) => setDispCraft(e.target.value)}
+                    className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="">— ทั้งโต๊ะ —</option>
+                    {deptCrafts.map((c) => <option key={c.id} value={c.id}>{c.nickname || c.name}</option>)}
+                  </select>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="text-[11px] text-slate-500">กำหนดเสร็จ</span>
+                    <input type="date" value={dispDue2} onChange={(e) => setDispDue2(e.target.value)} title="ไม่ใส่ = ใช้วันส่งภายใน/วันส่งลูกค้าของแต่ละใบ"
+                      className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg" />
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] text-slate-500">ค่าแรง/ชิ้น (บาท)</span>
+                    <input type="number" min={0} step="any" value={dispRate} onChange={(e) => setDispRate(e.target.value)} placeholder="เว้นว่าง = ใช้ของสูตร"
+                      className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg" />
+                  </label>
+                </div>
+                {rate > 0 && <p className="text-[11px] text-slate-500">ค่าแรงรวมประมาณ <b className="text-slate-700">฿{fmt(rate * totalQty)}</b></p>}
+                <p className="text-[11px] text-slate-400">ไม่ใส่ค่าแรง = ระบบเติมจากค่าแรง/ชิ้นของใบสั่งผลิต หรือราคากลางในสูตรให้เอง</p>
+              </div>
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <span className="mr-auto text-[11px] text-slate-400">{dispMsg}</span>
+                <button onClick={() => setDispOpen(false)} disabled={dispBusy} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+                <button onClick={() => void dispatchSelected()} disabled={dispBusy || !dispDeptId}
+                  className="h-9 rounded-lg bg-emerald-600 px-5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
+                  {dispBusy ? "กำลังจ่าย…" : `จ่าย ${selPend.length} ใบ`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       <MiniTable
         key={`wo-${woGroup}`}
         rows={wos} rowKey={(w) => w.id} columns={woCols}
