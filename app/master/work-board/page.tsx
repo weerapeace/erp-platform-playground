@@ -1402,13 +1402,9 @@ function WorkBoardPageInner() {
       ) : viewMode === "canvas" ? (
         (() => {
           // แคนวาส — กระดาน Excalidraw: 1 กรอบ = 1 โต๊ะ · การ์ดแผน (ลากย้ายโต๊ะได้) + ของจริง (สีเทา ล็อก)
-          const imageByMo: Record<string, string | null> = {};
-          for (const m of board.pending) if (m.image_url) imageByMo[m.mo_no] = m.image_url;
-          for (const w of board.workOrders) { const k = String(w.mo_no); if (imageByMo[k] == null && w.image_url) imageByMo[k] = w.image_url; }
           return <CanvasView
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
             realWOs={board.workOrders} plans={plans} canEdit={canDispatch}
-            imageByMo={imageByMo}
             onOpenWO={(id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
             onOpenWork={(info) => {
               const mo = info.moId ? board.pending.find((x) => x.id === info.moId) : null;

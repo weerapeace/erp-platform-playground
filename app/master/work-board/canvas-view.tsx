@@ -14,7 +14,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamicImport from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { withImageWidth } from "@/lib/r2-image";
 import { deskOfPlanCards, diffDeskMoves, type CanvasEl } from "@/lib/work-board-canvas";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import type { DispatchPlan, DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
@@ -34,7 +33,7 @@ type WOLite = {
 };
 
 // ---- ขนาด/สีของโครงกระดาน ----
-const CARD_W = 250, CARD_H = 78, IMG = 56, GAPX = 16, GAPY = 14, COLS = 2;
+const CARD_W = 250, CARD_H = 74, GAPX = 16, GAPY = 12, COLS = 2;
 const FRAME_HEAD = 46, FRAME_W = COLS * CARD_W + (COLS + 1) * GAPX, FRAME_GAP = 56;
 const PLAN_STROKE = "#6366f1", PLAN_BG = "#ffffff";
 const REAL_STROKE = "#94a3b8", REAL_BG = "#e2e8f0";
@@ -52,41 +51,32 @@ type CardSpec = {
   kind: "wb_plan" | "wb_real";
   id: string;
   title: string; name: string; meta: string;
-  img: string | null;
   data: Record<string, unknown>;
 };
 
-// การ์ด 1 ใบ = กรอบ + รูปย่อ + ข้อความ (จัดกลุ่มเดียวกัน) — คืน skeleton + id ของ element ทั้งหมด (ให้ frame ใช้เป็น children)
+// การ์ด 1 ใบ = กรอบ + ข้อความ (จัดกลุ่มเดียวกัน) — คืน skeleton + id ของ element ทั้งหมด (ให้ frame ใช้เป็น children)
+// ไม่ใส่รูปในการ์ด: บอร์ดจริงมีการ์ด 100+ ใบ ถ้าใส่รูปต้องรอโหลดรูปทีละใบตอนวางโครง (เปิดครั้งแรกค้างเป็นสิบวินาที)
 function cardSkeleton(c: CardSpec, x: number, y: number): { els: Record<string, unknown>[]; ids: string[] } {
   const gid = `g-${c.key}`;
-  const locked = c.kind === "wb_real";
-  const stroke = locked ? REAL_STROKE : PLAN_STROKE;
-  const rectId = `${c.key}-r`, imgId = `${c.key}-i`, textId = `${c.key}-t`;
+  const locked = c.kind === "wb_real";                 // ของจริง = ล็อก ลาก/แก้ไม่ได้
+  const rectId = `${c.key}-r`, textId = `${c.key}-t`;
   const text = [c.title, c.name, c.meta].filter(Boolean).join("\n");
   const els: Record<string, unknown>[] = [
     { type: "rectangle", id: rectId, x, y, width: CARD_W, height: CARD_H, backgroundColor: locked ? REAL_BG : PLAN_BG,
-      strokeColor: stroke, fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], locked, customData: c.data },
+      strokeColor: locked ? REAL_STROKE : PLAN_STROKE, fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], locked, customData: c.data },
+    { type: "text", id: textId, x: x + 12, y: y + 10, width: CARD_W - 24, text, fontSize: 12,
+      strokeColor: locked ? "#475569" : "#1e293b", groupIds: [gid], locked, customData: c.data },
   ];
-  const ids = [rectId];
-  if (c.img) {
-    els.push({ type: "image", id: imgId, _imageUrl: c.img, x: x + 8, y: y + (CARD_H - IMG) / 2, width: IMG, height: IMG, groupIds: [gid], locked, customData: c.data });
-    ids.push(imgId);
-  }
-  const tx = x + (c.img ? IMG + 18 : 12);
-  els.push({ type: "text", id: textId, x: tx, y: y + 11, width: x + CARD_W - 12 - tx, text, fontSize: 12,
-    strokeColor: locked ? "#475569" : "#1e293b", groupIds: [gid], locked, customData: c.data });
-  ids.push(textId);
-  return { els, ids };
+  return { els, ids: [rectId, textId] };
 }
 
 export function CanvasView({
-  departments, realWOs, plans, canEdit, imageByMo, onOpenWO, onOpenWork,
+  departments, realWOs, plans, canEdit, onOpenWO, onOpenWork,
 }: {
   departments: DeptLite[];
   realWOs: WOLite[];
   plans: DispatchPlan[];
   canEdit: boolean;
-  imageByMo: Record<string, string | null>;
   onOpenWO?: (id: string) => void;
   onOpenWork?: (info: { moId: string | null; moNo: string | null; productSku: string | null; productName: string | null; qty: number }) => void;
 }) {
@@ -130,9 +120,8 @@ export function CanvasView({
     title: `📋 ${l.product_sku ?? l.mo_no ?? "—"}`,
     name: clip(l.product_name),
     meta: [`${fmt(Number(l.qty) || 0)} ชิ้น`, l.assignee_name ? `👤 ${clip(l.assignee_name, 12)}` : null].filter(Boolean).join("  ·  "),
-    img: withImageWidth(imageByMo[String(l.mo_no ?? "")] ?? null, 160),
     data: { kind: "wb_plan", id: l.id, mo_id: l.mo_id, mo_no: l.mo_no, product_sku: l.product_sku, product_name: l.product_name, qty: Number(l.qty) || 0 },
-  }), [imageByMo]);
+  }), []);
 
   const realCard = useCallback((w: WOLite): CardSpec => {
     const recv = Number(w.received_qty) || 0;
@@ -141,10 +130,9 @@ export function CanvasView({
       title: `🔒 ${w.product_sku ?? w.mo_no}`,
       name: clip(w.product_name),
       meta: [`${fmt(Number(w.qty) || 0)} ชิ้น`, recv > 0 ? `ส่งแล้ว ${fmt(recv)}` : null, w.assignee_name ? `👤 ${clip(w.assignee_name, 12)}` : null].filter(Boolean).join("  ·  "),
-      img: withImageWidth(w.image_url ?? imageByMo[String(w.mo_no)] ?? null, 160),
       data: { kind: "wb_real", id: w.id, wo_no: w.wo_no ?? null, mo_no: w.mo_no, product_sku: w.product_sku, product_name: w.product_name, qty: Number(w.qty) || 0 },
     };
-  }, [imageByMo]);
+  }, []);
 
   // งานของแต่ละโต๊ะ (แผนก่อน แล้วค่อยของจริง) + กองท้ายสำหรับงานที่ยังไม่ระบุโต๊ะ
   const byDesk = useMemo(() => {
