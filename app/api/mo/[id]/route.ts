@@ -108,6 +108,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const sizesProvided = body.size_breakdown !== undefined;
   const effSizes = sizesProvided ? cleanSizes(body.size_breakdown) : cleanSizes((existing as { size_breakdown?: unknown }).size_breakdown);
   const newQty = effSizes ? effSizes.reduce((a, s) => a + s.qty, 0) : (body.qty != null ? Number(body.qty) : (existing as { qty: number }).qty);
+  // ใบที่แบ่งจำนวนตามไซส์: จำนวนรวมมาจากผลบวกไซส์เสมอ — ถ้ามีคนส่ง qty มาเปล่า ๆ ต้องบอกให้รู้
+  // (เดิมเงียบ ๆ ไม่เปลี่ยนอะไร → ฝั่งหน้าจอขึ้นว่าบันทึกสำเร็จ แต่ตัวเลขไม่ขยับ)
+  if (!sizesProvided && effSizes && body.qty != null && Number(body.qty) !== newQty) {
+    return NextResponse.json({ error: "ใบนี้แบ่งจำนวนตามไซส์ — แก้จำนวนรวมตรง ๆ ไม่ได้ ให้แก้จำนวนรายไซส์ที่หน้าใบสั่งผลิต" }, { status: 400 });
+  }
 
   // ⚠️ อัปเดตเฉพาะฟิลด์ที่ "ส่งมาจริง" — เดิมเขียนทุกฟิลด์เสมอ (product_name/due_date/note/bom_version
   //    ที่ไม่ได้ส่งมาจะกลายเป็น null) → ใครยิง PATCH แค่ {qty} จากหน้าอื่น ข้อมูลใบนั้นหายไปเงียบ ๆ

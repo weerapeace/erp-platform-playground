@@ -81,7 +81,9 @@ type CutRow = { id: string; component_sku: string | null; component_name: string
 type PendingPiece = { id: string; mo_no: string; job_name: string; rate: number; qty_per: number; qty: number; product_sku: string | null; product_name: string | null; image_url: string | null; brand: string | null; brand_color: string | null };
 
 // ---- โหลด+แปลงวัตถุดิบของใบสั่งผลิต (ใช้ทั้งตอนเปิดป๊อป และตอนกด "อัพเดตตาม BOM") ----
-type ClMats = { rows: MatRow[]; cutRows: CutRow[]; summary: MoMatSummary[]; materials: MoMatPreview[]; requested: Record<string, number>; sizeQty: Record<string, number> };
+// mo = ค่าจริงจากฐานข้อมูลของใบนั้น (จำนวน/วันกำหนด/มีไซส์ไหม) — เอาไว้ sync ป๊อปให้ตรงเสมอ
+type ClMats = { rows: MatRow[]; cutRows: CutRow[]; summary: MoMatSummary[]; materials: MoMatPreview[]; requested: Record<string, number>; sizeQty: Record<string, number>;
+  mo: { qty: number; due_date: string | null; internal_due_date: string | null; status: string | null; has_sizes: boolean } };
 async function fetchClMats(moId: string): Promise<ClMats> {
   const res = await apiFetch(`/api/mo/${moId}`); const j = await res.json();
   const summary = (j?.data?.summary ?? []) as Record<string, unknown>[];
@@ -125,7 +127,15 @@ async function fetchClMats(moId: string): Promise<ClMats> {
   const sb = (j?.data?.size_breakdown ?? []) as { label?: unknown; qty?: unknown }[];
   const sizeQty: Record<string, number> = {};
   for (const s of sb) { const lb = s?.label != null ? String(s.label) : ""; if (lb) sizeQty[lb] = Number(s.qty) || 0; }
-  return { rows, cutRows, summary: moSummary, materials: moMaterials, requested: (j?.data?.requested ?? {}) as Record<string, number>, sizeQty };
+  const head = (j?.data ?? {}) as Record<string, unknown>;
+  return { rows, cutRows, summary: moSummary, materials: moMaterials, requested: (j?.data?.requested ?? {}) as Record<string, number>, sizeQty,
+    mo: {
+      qty: Number(head.qty) || 0,
+      due_date: (head.due_date as string) ?? null,
+      internal_due_date: (head.internal_due_date as string) ?? null,
+      status: (head.status as string) ?? null,
+      has_sizes: Array.isArray(head.size_breakdown) && (head.size_breakdown as unknown[]).length > 0,
+    } };
 }
 // dispatchedMos = ใบที่จ่ายงานครบแล้ว (ไม่ใช่การ์ดรอจ่าย) — ยังต้องส่งลูกค้า ปฏิทินเลยต้องเห็น
 type DeliveryPlan = { id: string; mo_id: string; mo_no: string; due_date: string; qty: number; note?: string | null;
@@ -867,7 +877,21 @@ function WorkBoardPageInner() {
       try {
         const d = await fetchClMats(checklistMO.id);
         savedSumRef.current = new Map(d.summary.filter((s) => s.id).map((s) => [s.id as string, { on: s.on_hand_qty, rd: s.is_ready, po: s.purchase_override }]));
-        if (!cancel) { setClRows(d.rows); setClCutRows(d.cutRows); setClSummary(d.summary); setClMaterials(d.materials); setClRequested(d.requested); setClSizeQty(d.sizeQty); }
+        if (!cancel) {
+          setClRows(d.rows); setClCutRows(d.cutRows); setClSummary(d.summary); setClMaterials(d.materials); setClRequested(d.requested); setClSizeQty(d.sizeQty);
+          // 🐛 ให้ตัวเลขในป๊อปตรงกับฐานข้อมูลเสมอ (บางทางเปิดป๊อปมาด้วยข้อมูลของการ์ดที่อาจค้างเก่า)
+          setChecklistMO((m) => {
+            if (!m || m.id !== checklistMO.id) return m;
+            const same = m.qty === d.mo.qty && (m.due_date ?? null) === d.mo.due_date
+              && (m.internal_due_date ?? null) === d.mo.internal_due_date && !!m.has_sizes === d.mo.has_sizes;
+            if (same) return m;
+            return { ...m, qty: d.mo.qty, remaining: Math.max(0, d.mo.qty - (m.dispatched || 0)),
+              due_date: d.mo.due_date, internal_due_date: d.mo.internal_due_date, has_sizes: d.mo.has_sizes };
+          });
+          setMoQty(String(d.mo.qty));
+          setMoDue((d.mo.due_date ?? "").slice(0, 10));
+          setMoDueInt((d.mo.internal_due_date ?? "").slice(0, 10));
+        }
       } catch { if (!cancel) { setClRows([]); setClCutRows([]); setClSummary([]); setClMaterials([]); } }
       finally { if (!cancel) setClLoading(false); }
     })();
@@ -883,7 +907,9 @@ function WorkBoardPageInner() {
     const moNo = checklistMO.mo_no;
     void (async () => { try { const r = await apiFetch(`/api/mo/issues?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClIssues((j?.data ?? []) as MoIssue[]); } catch { if (!cancel) setClIssues([]); } })();
     return () => { cancel = true; };
-  }, [checklistMO]);
+    // ผูกกับ "ใบไหน" อย่างเดียว — ข้างในมี setChecklistMO (sync ค่าจาก DB) ถ้าผูกทั้งก้อนจะวิ่งซ้ำไม่จบ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checklistMO?.id, clWO?.id]);
 
   // เลื่อนโหลด: ของซื้อ/ประวัติ ดึงเฉพาะตอนกดเข้าแท็บนั้น (ยังไม่เคยโหลด = null)
   useEffect(() => {
