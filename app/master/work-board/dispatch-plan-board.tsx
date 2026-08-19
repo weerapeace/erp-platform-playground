@@ -801,16 +801,24 @@ export function DispatchPlanBoard({
                         className="mt-1 text-[11px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100">💰 ใส่ค่าแรง</button>
                     )}
                     {canEditWO && editing && (
-                      <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <div className="mt-1 flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                        {/* การ์ดแคบ → ให้ตัดบรรทัดได้ และปุ่มบันทึกห้ามหด (เดิมปุ่ม ✓ หลุดขอบการ์ด กดไม่ได้) */}
                         <input type="number" min={0} step="any" autoFocus value={laborEditVal} onChange={(e) => setLaborEditVal(e.target.value)} placeholder="บาท/ชิ้น"
-                          className="w-20 h-7 px-1.5 text-xs text-right border border-amber-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400" />
-                        <span className="text-[10px] text-slate-400 shrink-0">× {fmt(w.qty)} = ฿{fmt((Number(laborEditVal) || 0) * (Number(w.qty) || 0))}</span>
-                        <button disabled={laborSaving} title="บันทึก" onClick={async () => {
+                          onKeyDown={async (e) => {
+                            if (e.key === "Escape") { setLaborEditId(null); return; }
+                            if (e.key !== "Enter") return;
+                            setLaborSaving(true);
+                            try { await onUpdateWO!(w.id, { labor_cost: (Number(laborEditVal) || 0) * (Number(w.qty) || 0) }); setLaborEditId(null); }
+                            catch { /* parent toast */ } finally { setLaborSaving(false); }
+                          }}
+                          className="w-16 h-7 px-1.5 text-xs text-right border border-amber-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                        <button disabled={laborSaving} title="บันทึก (หรือกด Enter)" onClick={async () => {
                           setLaborSaving(true);
                           try { await onUpdateWO!(w.id, { labor_cost: (Number(laborEditVal) || 0) * (Number(w.qty) || 0) }); setLaborEditId(null); }
                           catch { /* parent toast */ } finally { setLaborSaving(false); }
-                        }} className="h-7 px-2 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50">✓</button>
-                        <button title="ยกเลิก" onClick={() => setLaborEditId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
+                        }} className="h-7 px-2 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 shrink-0">💾</button>
+                        <button title="ยกเลิก" onClick={() => setLaborEditId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600 shrink-0">✕</button>
+                        <span className="w-full text-[10px] text-slate-400">× {fmt(w.qty)} = ฿{fmt((Number(laborEditVal) || 0) * (Number(w.qty) || 0))}</span>
                       </div>
                     )}
                     {/* ยืนยันย้อนกลับไปรอจ่าย */}

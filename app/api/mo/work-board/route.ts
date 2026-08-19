@@ -43,9 +43,17 @@ async function fetchAllByMo(
   return { data: out };
 }
 
+/**
+ * รูป/แบรนด์ของสินค้าแต่ละรหัส
+ *
+ * 🐛 บั๊กที่แก้: บางรหัสมี SKU ซ้ำกันหลายแถว (และบางใบสั่งผลิตเก็บรหัสติดช่องว่างท้าย)
+ *    เดิมแถวหลังทับแถวก่อนเสมอ → ถ้าตัวซ้ำไม่มีรูป การ์ดก็ไม่มีรูป (เจอกับ PIX34-05)
+ *    ตอนนี้ตัดช่องว่างหัวท้ายก่อนจับคู่ + ตัวที่ "มีรูป" ชนะตัวที่ไม่มีรูป
+ */
 async function skuInfoMap(admin: ReturnType<typeof supabaseAdmin>, skus: string[]): Promise<Map<string, SkuInfo>> {
   const map = new Map<string, SkuInfo>();
-  const list = [...new Set(skus.filter(Boolean))];
+  // ถามทั้งรหัสแบบดิบและแบบตัดช่องว่าง (บางแถวใน DB เก็บรหัสติดช่องว่างท้าย)
+  const list = [...new Set(skus.flatMap((s) => [String(s ?? ""), String(s ?? "").trim()]).filter(Boolean))];
   // ยิงทุก chunk ขนานกัน (เดิมรอทีละ chunk — SKU เยอะ = หลายรอบต่อคิว ทำบอร์ดเปิดช้า)
   const chunks: string[][] = [];
   for (let i = 0; i < list.length; i += 300) chunks.push(list.slice(i, i + 300));
@@ -61,12 +69,16 @@ async function skuInfoMap(admin: ReturnType<typeof supabaseAdmin>, skus: string[
       // สี: ใช้ color_th ก่อน ถ้าไม่มีใช้ color (โชว์ต่อท้ายชื่อบนการ์ด)
       const colorTh = String(s.color_th ?? "").trim();
       const colorEn = String(s.color ?? "").trim();
-      map.set(String(s.code), {
+      const code = String(s.code ?? "").trim();
+      const info: SkuInfo = {
         image_url: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
         brand: brand?.name ?? null, brand_color: brand?.color ?? null,
         brand_oem: brand?.pricing_mode === "oem",
         color: colorTh || colorEn || null,
-      });
+      };
+      const prev = map.get(code);
+      // รหัสซ้ำ: เก็บตัวที่ข้อมูลครบกว่า (มีรูปมาก่อน แล้วค่อยดูแบรนด์)
+      if (!prev || (!prev.image_url && info.image_url) || (!prev.brand && info.brand && !info.image_url === !prev.image_url)) map.set(code, info);
     }
   }
   return map;
@@ -140,7 +152,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 
   const enrichedWO = workOrders.map((w) => {
-    const inf = info.get(String(w.product_sku)) ?? { image_url: null, brand: null, brand_color: null, brand_oem: false, color: null };
+    const inf = info.get(String(w.product_sku ?? "").trim()) ?? { image_url: null, brand: null, brand_color: null, brand_oem: false, color: null };
     const moNo = String(w.mo_no);
     // ใบจ่ายงาน 1 ใบ = ส่วนแบ่งตามจำนวนของทั้งใบสั่งผลิต (กันนับซ้ำเมื่อ MO แตกหลายใบจ่ายงาน)
     const moQty = moQtyByNo.get(moNo) || dispatchedByMo.get(moNo) || (Number(w.qty) || 0);
@@ -157,7 +169,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const qty = Number(m.qty) || 0;
     const dispatched = dispatchedByMo.get(String(m.mo_no)) ?? 0;
     const remaining = r2(Math.max(0, qty - dispatched));
-    const inf = info.get(String(m.product_sku)) ?? { image_url: null, brand: null, brand_color: null, brand_oem: false, color: null };
+    const inf = info.get(String(m.product_sku ?? "").trim()) ?? { image_url: null, brand: null, brand_color: null, brand_oem: false, color: null };
     return { id: String(m.id), mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
       qty, dispatched: r2(dispatched), remaining, due_date: m.due_date ?? null, status: m.status,
       // 📦 due_date = นัดส่งลูกค้า · 🪑 internal_due_date = กำหนดส่งงานภายใน (ตั้งได้ตั้งแต่ยังไม่จ่ายงาน)
@@ -206,7 +218,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .map((p) => {
       const moNo = String(p.mo_no);
       const mi = moInfoByNo.get(moNo) ?? { sku: null, name: null };
-      const inf = (mi.sku && info.get(mi.sku)) || { image_url: null, brand: null, brand_color: null, brand_oem: false, color: null };
+      const inf = (mi.sku && info.get(String(mi.sku).trim())) || { image_url: null, brand: null, brand_color: null, brand_oem: false, color: null };
       return { id: String(p.id), mo_no: moNo, job_name: (p.job_name as string) ?? "งานเหมา", rate: Number(p.rate) || 0, qty_per: Number(p.qty_per) || 1, qty: Number(p.total_qty) || 0, product_sku: mi.sku, product_name: mi.name, ...inf };
     });
 

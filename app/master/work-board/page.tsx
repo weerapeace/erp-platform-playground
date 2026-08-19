@@ -359,7 +359,7 @@ function WorkBoardPageInner() {
   const [clCutRows, setClCutRows] = useState<CutRow[]>([]);
   const [clLoading, setClLoading] = useState(false);
   const [delArmed, setDelArmed] = useState(false);   // ยืนยันลบงานใน popup
-  const [clTab, setClTab] = useState<"recv" | "prep" | "cut" | "piece" | "purch" | "issue" | "hist" | "cost">("prep");
+  const [clTab, setClTab] = useState<"recv" | "prep" | "cut" | "piece" | "purch" | "issue" | "hist" | "cost" | "disp">("prep");
   const [clCost, setClCost] = useState<MoCost | null>(null);   // ต้นทุน/กำไรของใบ (lazy)
   const [clWO, setClWO] = useState<WorkOrder | null>(null);   // เปิดเช็กลิสต์จากใบจ่ายงาน → มีแท็บ "รับงานคืน"
   const [recvLabor, setRecvLabor] = useState("");             // ค่าแรงผลิตของใบจ่ายงานนี้
@@ -752,18 +752,43 @@ function WorkBoardPageInner() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
   };
   // การ์ดร่าง (แผน) กด "ใส่ค่าแรง" → ตั้งเรตกลางสินค้า (bom_labor_rates ราคากลาง) → ทุกการ์ดของสินค้านี้อัปเดตตาม
+  /**
+   * ตั้งค่าแรง/ชิ้น จากการ์ดบนบอร์ด
+   *
+   * 🐛 บั๊กที่แก้: เดิมเก็บไว้ที่ "ราคากลางของสูตร (BOM)" อย่างเดียว
+   *    สินค้าที่ยังไม่มีสูตร → API ตอบ error แล้วค่าแรงไม่ขึ้นบนการ์ดเลย (เจอกับ PIX34-02..05)
+   *    ตอนนี้บันทึกลง "ค่าแรงที่วางแผนของใบนั้น" เสมอ (ตัวเลขขึ้นแน่นอน)
+   *    แล้วค่อยพยายามเก็บเข้าเป็นราคากลางของสูตรถ้ามีสูตร
+   */
   const setCentralRate = async ({ moNo, rate }: { moNo: string; rate: number }) => {
     const mo = board.pending.find((x) => x.mo_no === moNo);
     const wo = board.workOrders.find((x) => x.mo_no === moNo);
     const bomCode = mo?.bom_code ?? null;
     const productSku = mo?.product_sku ?? wo?.product_sku ?? null;
-    if (!bomCode && !productSku) { toast.error("สินค้านี้ยังไม่มี BOM ตั้งค่าแรงกลางไม่ได้"); return; }
-    try {
-      const res = await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bom_code: bomCode ?? undefined, product_sku: productSku ?? undefined, craftsman_id: null, craftsman_name: "ราคากลาง", rate }) });
-      const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("ตั้งค่าแรงกลางแล้ว — การ์ดของสินค้านี้อัปเดตตาม"); await load(true);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ตั้งค่าแรงไม่สำเร็จ"); }
+    const moId = mo?.id ?? wo?.mo_id ?? null;
+    const moQtyAll = mo?.qty ?? 0;
+
+    let savedPlan = false;
+    if (moId && moQtyAll > 0) {
+      const r = await apiSave(toast, "/api/mo/est-labor",
+        { method: "POST", body: { mo_id: moId, est_labor_cost: Math.round(rate * moQtyAll * 100) / 100 } },
+        { quiet: true });
+      savedPlan = r.ok;
+    }
+
+    let savedBom = false;
+    if (bomCode || productSku) {
+      const r = await apiSave(toast, "/api/bom/labor-rates",
+        { method: "POST", body: { bom_code: bomCode ?? undefined, product_sku: productSku ?? undefined, craftsman_id: null, craftsman_name: "ราคากลาง", rate } },
+        { quiet: true });
+      savedBom = r.ok;
+    }
+
+    if (!savedPlan && !savedBom) { toast.error("ตั้งค่าแรงไม่สำเร็จ"); return; }
+    toast.success(savedBom
+      ? `ตั้งค่าแรง ฿${fmt(rate)}/ชิ้น แล้ว — เก็บเป็นราคากลางของสูตรด้วย`
+      : `ตั้งค่าแรง ฿${fmt(rate)}/ชิ้น ให้ใบนี้แล้ว (สินค้ายังไม่มีสูตร จึงยังไม่ได้เก็บเป็นราคากลาง)`);
+    await load(true);
   };
   // เฟส 2: จ่ายงานเหมารายชิ้นให้ช่างเหมา (set assignee_name → ออกจากรอจ่าย)
   const assignPiece = async () => {
@@ -2034,6 +2059,7 @@ function WorkBoardPageInner() {
                       {clWO && tabBtn("recv", "📤 ส่งงาน")}
                       {tabBtn("prep", `📋 วัตถุดิบ · เตรียม ${prepDone}/${prepTotal} · ตัด ${cutDone}/${cutTotal}`)}
                       {tabBtn("piece", `🧵 งานเหมา ${clPieceRows.filter((r) => r.selected_id).length}/${clPieceRows.length}`)}
+                      {tabBtn("disp", `🧰 จ่ายงาน ${board.workOrders.filter((w) => w.mo_no === checklistMO.mo_no && w.status !== "cancelled").length}`)}
                       {tabBtn("cost", "💰 ต้นทุน")}
                       {tabBtn("purch", "📦 ของซื้อ")}
                       {tabBtn("issue", `⚠️ ปัญหา${issN ? ` ${issN}` : ""}`)}
@@ -2336,6 +2362,54 @@ function WorkBoardPageInner() {
                           ); })()}
                         </div>
                       )
+                    ) : clTab === "disp" ? (
+                      // 🧰 รายละเอียดการจ่ายงานของใบนี้ — ใครรับไปเท่าไหร่ ส่งกลับแล้วเท่าไหร่ ค่าแรงเท่าไหร่
+                      (() => {
+                        const list = board.workOrders
+                          .filter((w) => w.mo_no === checklistMO.mo_no && w.status !== "cancelled")
+                          .sort((a, b) => (a.department_name ?? "").localeCompare(b.department_name ?? "", "th"));
+                        const sumQty = list.reduce((n, w) => n + (Number(w.qty) || 0), 0);
+                        const sumRecv = list.reduce((n, w) => n + (Number(w.received_qty) || 0), 0);
+                        const sumLabor = list.reduce((n, w) => n + (Number(w.labor_cost) || 0), 0);
+                        if (list.length === 0) return <div className="text-center py-8 text-sm text-slate-300">ใบนี้ยังไม่ได้จ่ายงานให้ใคร</div>;
+                        return (
+                          <div className="border border-slate-100 rounded-lg overflow-hidden">
+                            <div className="grid grid-cols-[1fr_5rem_5rem_5.5rem_4.5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500">
+                              <span>โต๊ะ / ช่าง</span><span className="text-right">จ่าย</span><span className="text-right">ส่งแล้ว</span><span className="text-right">ค่าแรง</span><span className="text-center">สถานะ</span>
+                            </div>
+                            <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
+                              {list.map((w) => {
+                                const left = Math.max(0, (Number(w.qty) || 0) - (Number(w.received_qty) || 0));
+                                const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
+                                return (
+                                  <div key={w.id} onClick={() => { setRecvQty(left); openWO(w); }}
+                                    title="กดเพื่อเปิดใบจ่ายงานนี้ (ส่งงาน / แก้จำนวน / ใส่ค่าแรง)"
+                                    className="grid grid-cols-[1fr_5rem_5rem_5.5rem_4.5rem] gap-2 px-3 py-2 items-center text-[12px] hover:bg-slate-50/60 cursor-pointer">
+                                    <span className="min-w-0">
+                                      <span className="block text-slate-700 truncate">{w.department_name ?? "—"}{w.assignee_name ? ` · ${w.assignee_name}` : ""}</span>
+                                      <span className="block text-[10px] text-slate-400 font-mono truncate">{w.wo_no}{w.due_date ? ` · กำหนด ${dueDateText(w.due_date)}` : ""}</span>
+                                    </span>
+                                    <span className="text-right tabular-nums font-semibold text-slate-700">{fmt(Number(w.qty) || 0)}</span>
+                                    <span className="text-right tabular-nums text-slate-600">
+                                      {fmt(Number(w.received_qty) || 0)}
+                                      {left > 0 && <span className="block text-[10px] text-amber-600">ค้าง {fmt(left)}</span>}
+                                    </span>
+                                    <span className="text-right tabular-nums text-slate-600">{(Number(w.labor_cost) || 0) > 0 ? `฿${fmt(Number(w.labor_cost) || 0)}` : <span className="text-slate-300">—</span>}</span>
+                                    <span className="text-center"><span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${st.cls}`}>{st.label}</span></span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div className="grid grid-cols-[1fr_5rem_5rem_5.5rem_4.5rem] gap-2 px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[11px] font-semibold text-slate-600">
+                              <span>รวม {list.length} ใบจ่ายงาน</span>
+                              <span className="text-right tabular-nums">{fmt(sumQty)}</span>
+                              <span className="text-right tabular-nums">{fmt(sumRecv)}</span>
+                              <span className="text-right tabular-nums text-indigo-700">฿{fmt(sumLabor)}</span>
+                              <span />
+                            </div>
+                          </div>
+                        );
+                      })()
                     ) : clTab === "cost" ? (
                       <CostTab cost={clCost} pieceRows={clPieceRows} moId={checklistMO.id} bomCode={checklistMO.bom_code ?? null} departments={board.departments} deptWages={deptWages} craftsmen={craftsmen} canEdit={canEdit} onReloadCost={() => setClCost(null)} />
                     ) : clTab === "purch" ? (
@@ -2348,6 +2422,7 @@ function WorkBoardPageInner() {
                     {clTab !== "recv" && <p className="text-[11px] text-slate-400">{clTab === "prep" ? "ติ๊ก ✓ เมื่อเตรียมวัตถุดิบชิ้นนั้นครบ · ครบทั้ง 2 หน้า → การ์ดไฟเขียว"
                       : clTab === "cut" ? "ติ๊ก ✓ ตัดครบรายบล็อก — ตัดครบทุกบล็อกของวัตถุดิบใด ระบบติ๊กเตรียมครบให้อัตโนมัติ"
                       : clTab === "piece" ? "ติ๊กเลือกงานเหมาที่จะจ่ายในใบนี้ · จำนวนรวม = จำนวนต่อใบ × จำนวนที่สั่ง"
+                      : clTab === "disp" ? "กดแถวเพื่อเปิดใบจ่ายงานนั้น (ส่งงาน · แก้จำนวนที่จ่าย · ใส่ค่าแรง)"
                       : clTab === "purch" ? "สถานะและวันของจะถึง ดึงจากใบขอซื้อ/ใบสั่งซื้อที่ผูกกับงานนี้"
                       : clTab === "cost" ? "ต้นทุนวัตถุดิบ = Σ(ใช้/ชิ้น × Standard Price) · ราคาขาย = Sale Price · เพดานค่าแรง = ค่าแรงกลาง"
                       : clTab === "issue" ? "ลงปัญหาที่เจอ (เชื่อมระบบ QC) — ใช้ติดตามของเสีย/แก้ไข"
