@@ -1106,8 +1106,10 @@ export default function QcWarehousePage() {
           const d = detail.kind === "queue" ? detail.card : detail.item;
           const name = detail.kind === "queue" ? detail.card.name : detail.item.sku_name;
           const rows: [string, string][] = [["สินค้า", name ?? "—"], ["SKU", d.sku ?? "—"], ["เลขใบผลิต", d.mo_no ?? "—"], ["ช่างผลิต", d.worker ?? "—"]];
-          if (detail.kind === "queue") rows.push(["เหลือรับเข้า", `${fmt(detail.card.remaining)} ชิ้น`], ["กำหนดส่ง", dueText(detail.card.due_date) ?? "—"]);
-          else { rows.push(["จำนวน", `${fmt(Number(detail.item.qty))} ชิ้น`], ["อยู่ที่ชั้น", detail.shelf.name], ["ที่มา", sourceLabel(detail.item.source)]);
+          if (detail.kind === "queue") rows.push(["เหลือรับเข้า", `${fmt(detail.card.remaining)} ชิ้น`],
+            ["วันรับเข้า (ช่างส่งล่าสุด)", detail.card.received_at ? (dueText(String(detail.card.received_at).slice(0, 10)) ?? "—") : "—"],
+            ["กำหนดส่ง", dueText(detail.card.due_date) ?? "—"]);
+          else { rows.push(["จำนวน", `${fmt(Number(detail.item.qty))} ชิ้น`], ["วันรับเข้า", detail.item.created_at ? tsText(String(detail.item.created_at)) : "—"], ["อยู่ที่ชั้น", detail.shelf.name], ["ที่มา", sourceLabel(detail.item.source)]);
             if (detail.shelf.kind === "defect") rows.push(["สาเหตุ", detail.item.reason ?? "—"], ["สถานะซ่อม", detail.item.status === "repairing" ? `กำลังซ่อม (${detail.item.repair_by})` : "รอดำเนินการ"]); }
           return (
             <div className="space-y-3">

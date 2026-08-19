@@ -25,10 +25,11 @@ export type SkuLookupHit = {
   name: string;
   uom: string | null;
   price: number | null;
+  image_key: string | null;   // คีย์รูปปก (เอาไปโชว์รูปในตารางที่วางจาก Excel ได้)
 };
 
 type Row = Record<string, unknown>;
-const SELECT = "id, code, barcode, name_th, name_en, list_price, uom_id";
+const SELECT = "id, code, barcode, name_th, name_en, list_price, uom_id, cover_image_r2_key";
 const norm = (s: unknown) => String(s ?? "").trim().toLowerCase();
 const chunk = <T,>(arr: T[], n: number): T[][] => {
   const out: T[][] = [];
@@ -103,6 +104,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           name: String(hit.name_th ?? hit.name_en ?? hit.code ?? ""),
           uom: hit.uom_id ? (uomName.get(String(hit.uom_id)) ?? null) : null,
           price: hit.list_price == null ? null : Number(hit.list_price),
+          image_key: hit.cover_image_r2_key ? String(hit.cover_image_r2_key) : null,
         }
       : null;
   }

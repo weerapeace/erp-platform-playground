@@ -17,6 +17,7 @@ export type QcItem = {
   sku: string | null; sku_name: string | null; worker: string | null;
   qty: number; status: "good" | "defect" | "repairing"; reason: string | null; repair_by: string | null;
   source?: string | null;
+  created_at?: string | null;    // วันที่ของเข้าชั้นนี้ = วันรับเข้า
   image_key?: string | null; brand_color?: string | null; brand_name?: string | null; is_customer_job?: boolean;
 };
 export type QcReason = { id: string; name: string };
@@ -24,6 +25,7 @@ export type QcSource = { id: string; name: string };
 export type QcQueueCard = {
   wo_id: string; mo_no: string | null; sku: string | null; name: string | null;
   worker: string | null; remaining: number; due_date: string | null; image_key?: string | null;
+  received_at?: string | null;   // วันที่ช่างส่งงานเข้ามาล่าสุด (จากใบส่งงาน) — โชว์เป็น "วันรับเข้า"
   brand_color?: string | null; brand_name?: string | null; is_customer_job?: boolean; is_subcontract?: boolean;
 };
 // "จ่ายไปที่โต๊ะ" — ใบจ่ายงานที่ยังทำอยู่ที่โต๊ะ (ยังไม่ส่งครบ/ยังไม่ done) โชว์เป็นพรีวิวในหน้า QC ช้อป
@@ -92,7 +94,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const [sh, it, rs, wo, sc, ad] = await Promise.all([
     admin.from("qc_shelves").select("id,name,kind,sort_order").eq("is_active", true).order("sort_order"),
-    admin.from("qc_warehouse_items").select("id,shelf_id,wo_id,mo_no,sku,sku_name,worker,qty,status,reason,repair_by,source").order("created_at").limit(10000),   // กันโตแบบไร้เพดาน (เดิมไม่มี limit)
+    admin.from("qc_warehouse_items").select("id,shelf_id,wo_id,mo_no,sku,sku_name,worker,qty,status,reason,repair_by,source,created_at").order("created_at").limit(10000),   // กันโตแบบไร้เพดาน (เดิมไม่มี limit)
     admin.from("qc_defect_reasons").select("id,name").eq("is_active", true).order("sort_order"),
     admin.from("mo_work_orders").select("id,mo_no,product_sku,product_name,assignee_name,assignee_id,assignee_type,received_qty,qc_pulled_qty,due_date").eq("is_active", true).gt("received_qty", 0),
     admin.from("qc_sources").select("id,name").eq("is_active", true).order("sort_order"),
@@ -115,12 +117,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const items: QcItem[] = (it.data ?? []).map((i) => { const b = i.sku ? brandMap[i.sku as string] : undefined; return { ...(i as QcItem), image_key: i.sku ? imgMap[i.sku as string] ?? null : null, brand_color: b?.color ?? null, brand_name: b?.name ?? null, is_customer_job: b?.is_customer_job ?? false }; });
+  // วันรับเข้า = วันที่ช่างส่งงานเข้ามาล่าสุดของใบนั้น (ใบส่งงาน wo_submissions)
+  const woIds = Array.from(new Set((wo.data ?? []).map((w) => String(w.id))));
+  const lastSubBy: Record<string, string> = {};
+  if (woIds.length > 0) {
+    const { data: subs } = await admin.from("wo_submissions")
+      .select("wo_id, submitted_at").in("wo_id", woIds).order("submitted_at", { ascending: true }).limit(5000);
+    for (const r of (subs ?? []) as { wo_id: string | null; submitted_at: string | null }[]) {
+      if (r.wo_id && r.submitted_at) lastSubBy[String(r.wo_id)] = String(r.submitted_at);   // เรียงเก่า→ใหม่ ตัวท้ายคือล่าสุด
+    }
+  }
+
   const queue: QcQueueCard[] = (wo.data ?? []).map((w) => { const sku = w.product_sku as string | null; const b = sku ? brandMap[sku] : undefined; return {
     wo_id: w.id as string, mo_no: w.mo_no as string | null, sku,
     name: (w.product_name as string | null) ?? sku,
     worker: w.assignee_name as string | null,
     remaining: Number(w.received_qty ?? 0) - Number(w.qc_pulled_qty ?? 0),
     due_date: w.due_date as string | null,
+    received_at: lastSubBy[String(w.id)] ?? null,
     image_key: sku ? imgMap[sku] ?? null : null,
     brand_color: b?.color ?? null, brand_name: b?.name ?? null, is_customer_job: b?.is_customer_job ?? false,
     is_subcontract: w.assignee_type === "craftsman" && w.assignee_id ? subMap[w.assignee_id as string] ?? false : false,

@@ -34,7 +34,7 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 // วันนี้ตามเวลาเครื่อง (ไทย) — ห้ามใช้ toISOString() ตรง ๆ เพราะ UTC ร่นไป 1 วันช่วงเช้า
 const todayLocal = () => { const d = new Date(); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-"); };
 // 1 บรรทัดในโหมดเพิ่มหลายรายการ
-type MultiRow = { code: string; qty: string; due: string; note: string; name?: string | null; bad?: boolean };
+type MultiRow = { code: string; qty: string; due: string; note: string; name?: string | null; image?: string | null; bad?: boolean };
 const emptyRow = (): MultiRow => ({ code: "", qty: "", due: "", note: "" });
 const lblCls = "text-[11px] text-slate-500";
 const inCls = "w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
@@ -71,6 +71,8 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
   const [rows, setRows] = useState<MultiRow[]>([emptyRow(), emptyRow(), emptyRow()]);
   const [multiBusy, setMultiBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  const [pasteOpen, setPasteOpen] = useState(false);   // กล่อง "วางจาก Excel"
+  const [pasteText, setPasteText] = useState("");
 
   // เปิดใหม่ = ล้างฟอร์ม (เผื่อสร้างต่อหลายใบ)
   useEffect(() => {
@@ -78,7 +80,7 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
     setSku(defaultProductSku ?? ""); setName(defaultProductName ?? ""); setImage(defaultProductImage ?? null);
     setQty(1); setDue(""); setStatus("draft"); setNote("");
     setVersions([]); setVerId(""); setBomCode(null); setBomVersion(null); setSizes([]); setSizeQty({}); setErr(null);
-    setOrderDate(todayLocal()); setMulti(false); setRows([emptyRow(), emptyRow(), emptyRow()]); setProgress("");
+    setOrderDate(todayLocal()); setMulti(false); setRows([emptyRow(), emptyRow(), emptyRow()]); setProgress(""); setPasteOpen(false); setPasteText("");
   }, [open, defaultProductSku, defaultProductName, defaultProductImage]);
 
   /** โหลดไซส์ของสูตร (ถ้าสูตรนั้นมีไซส์ → จำนวนรวมคิดจากผลบวกต่อไซส์) */
@@ -150,10 +152,8 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
     setRows((prev) => prev.map((r, k) => (k === i ? { ...r, ...patch } : r)));
 
   /** วางจาก Excel: คอลัมน์ = รหัสสินค้า | จำนวน | กำหนดส่ง | หมายเหตุ (2 คอลัมน์แรกก็พอ) */
-  const onPasteGrid = (e: React.ClipboardEvent, startIdx: number) => {
-    const text = e.clipboardData.getData("text/plain");
-    if (!text || !/[\t\n,]/.test(text)) return;      // วางค่าเดียว = ปล่อยให้ช่องนั้นจัดการเอง
-    e.preventDefault();
+  const applyPaste = async (text: string, startIdx = 0) => {
+    if (!text.trim()) return;
     let grid = parsePastedTable(text);
     if (looksLikeHeaderRow(grid[0], /รหัส|sku|จำนวน|qty/i)) grid = grid.slice(1);
     setRows((prev) => {
@@ -171,7 +171,11 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
       while (next.length < 3) next.push(emptyRow());
       return next;
     });
-    toast.success("วาง " + grid.length + " บรรทัดแล้ว — กด 🔎 ตรวจรหัส ก่อนบันทึกได้");
+    // ตรวจรหัส + ดึงชื่อ/รูปให้ทันที (จะได้เห็นว่าตัวไหนผิดตั้งแต่วางเสร็จ)
+    setMultiBusy(true);
+    setRows((prev) => { void checkCodes(prev).then((c) => { setRows(c); setMultiBusy(false); }); return prev; });
+    setPasteOpen(false); setPasteText("");
+    toast.success("วาง " + grid.length + " บรรทัดแล้ว");
   };
 
   /** ตรวจว่ารหัสสินค้ามีจริงไหม + เติมชื่อให้ดู (ของกลาง /api/skus/lookup) */
@@ -181,11 +185,11 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
     try {
       const j = await apiFetch("/api/skus/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codes }) })
         .then((r) => r.json());
-      const map = (j?.data ?? {}) as Record<string, { code: string; name: string } | null>;
+      const map = (j?.data ?? {}) as Record<string, { code: string; name: string; image_key?: string | null } | null>;
       return list.map((r) => {
-        const key = r.code.trim(); if (!key) return { ...r, name: null, bad: false };
+        const key = r.code.trim(); if (!key) return { ...r, name: null, image: null, bad: false };
         const hit = map[key];
-        return { ...r, code: hit?.code ?? key, name: hit?.name ?? null, bad: !hit };
+        return { ...r, code: hit?.code ?? key, name: hit?.name ?? null, image: hit?.image_key ?? null, bad: !hit };
       });
     } catch { return list; }
   }, []);
@@ -293,23 +297,50 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
 
         {multi ? (
           <div className="rounded-lg border border-slate-200 overflow-hidden">
-            <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50 text-[11px] text-slate-500">
-              <span>📋 รายการที่จะสร้าง — วางจาก Excel ได้เลย (คอลัมน์: รหัสสินค้า · จำนวน · กำหนดส่ง · หมายเหตุ)</span>
-              <button type="button" onClick={() => setRows((p) => [...p, emptyRow(), emptyRow(), emptyRow()])} className="text-[11px] text-blue-600 hover:underline">+ เพิ่มบรรทัด</button>
+            <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50 text-[11px] text-slate-500">
+              <span>📋 รายการที่จะสร้าง</span>
+              <span className="flex items-center gap-2">
+                <button type="button" onClick={() => setPasteOpen((v) => !v)} className="text-[11px] text-blue-600 hover:underline">📥 วางจาก Excel</button>
+                <button type="button" onClick={() => setRows((p) => [...p, emptyRow(), emptyRow(), emptyRow()])} className="text-[11px] text-blue-600 hover:underline">+ เพิ่มบรรทัด</button>
+              </span>
             </div>
-            <div className="grid grid-cols-[1.6fr_4.5rem_8rem_1fr_1.8rem] gap-1.5 px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[11px] font-medium text-slate-500">
-              <span>รหัสสินค้า</span><span className="text-right">จำนวน</span><span>กำหนดส่ง</span><span>หมายเหตุ</span><span />
+
+            {pasteOpen && (
+              <div className="px-3 py-2 bg-blue-50/50 border-t border-blue-100 space-y-1.5">
+                <p className="text-[11px] text-slate-500">คัดลอกจาก Excel แล้ววางในช่องนี้ — คอลัมน์: <b>รหัสสินค้า · จำนวน · กำหนดส่ง · หมายเหตุ</b> (2 คอลัมน์แรกก็พอ)</p>
+                <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={4} autoFocus
+                  onPaste={(e) => { const t = e.clipboardData.getData("text/plain"); if (t && /[\t\n,]/.test(t)) { e.preventDefault(); void applyPaste(t, 0); } }}
+                  placeholder={"CTL107-01\t300\n WK42-01\t120"}
+                  className="w-full px-2 py-1.5 text-sm border border-blue-200 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => void applyPaste(pasteText, 0)} className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">ลงตาราง</button>
+                  <button type="button" onClick={() => { setPasteOpen(false); setPasteText(""); }} className="h-8 px-3 text-xs border border-slate-200 rounded-lg text-slate-500">ปิด</button>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-[minmax(11rem,1.7fr)_5.5rem_9.5rem_minmax(6rem,1fr)_2rem] gap-1.5 px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[11px] font-medium text-slate-500 items-center">
+              <span>สินค้า</span>
+              <span className="text-right">จำนวน</span>
+              <span className="flex items-center gap-1">
+                กำหนดส่ง
+                <button type="button" title="ลงวันกำหนดส่งด้านบนให้ทุกบรรทัด"
+                  onClick={() => { if (!due) { toast.error("ใส่กำหนดส่งด้านบนก่อน"); return; } setRows((p) => p.map((r) => ({ ...r, due }))); toast.success("ลงกำหนดส่งให้ทุกบรรทัดแล้ว"); }}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 bg-white text-blue-600 hover:bg-blue-50">⬇ ลงทั้งหมด</button>
+              </span>
+              <span>หมายเหตุ</span>
+              <span />
             </div>
-            <div className="divide-y divide-slate-50 max-h-64 overflow-y-auto">
+
+            <div className="divide-y divide-slate-50 max-h-72 overflow-y-auto">
               {rows.map((r, i) => (
-                <div key={i} className={"grid grid-cols-[1.6fr_4.5rem_8rem_1fr_1.8rem] gap-1.5 px-3 py-1 items-center " + (r.bad ? "bg-rose-50/60" : "")}>
+                <div key={i} className={"grid grid-cols-[minmax(11rem,1.7fr)_5.5rem_9.5rem_minmax(6rem,1fr)_2rem] gap-1.5 px-3 py-1 items-center " + (r.bad ? "bg-rose-50/60" : "")}>
                   <span className="min-w-0">
-                    <input value={r.code} onChange={(e) => setRow(i, { code: e.target.value, bad: false, name: null })} onPaste={(e) => onPasteGrid(e, i)}
-                      placeholder="เช่น CTL107-01" className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    {r.name && <span className="block text-[10px] text-slate-400 truncate">{r.name}</span>}
-                    {r.bad && <span className="block text-[10px] text-rose-600">ไม่พบรหัสนี้</span>}
+                    <ComponentPicker sku={r.code} name={r.name ?? ""} imageKey={r.image ?? null} placeholder="— เลือกสินค้า —"
+                      onPick={(c) => setRow(i, { code: c.code, name: c.name, image: c.image_key ?? null, bad: false })} />
+                    {r.bad && <span className="block text-[10px] text-rose-600">ไม่พบรหัส {r.code}</span>}
                   </span>
-                  <input type="number" min={0} step="any" value={r.qty} onChange={(e) => setRow(i, { qty: e.target.value })} onPaste={(e) => onPasteGrid(e, i)}
+                  <input type="number" min={0} step="any" value={r.qty} onChange={(e) => setRow(i, { qty: e.target.value })} placeholder="0"
                     className="h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   <input type="date" value={r.due} onChange={(e) => setRow(i, { due: e.target.value })} title="ไม่ใส่ = ใช้กำหนดส่งด้านบน"
                     className="h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
