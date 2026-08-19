@@ -22,8 +22,8 @@ type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; d
 type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null };
 type DefectMap = Record<string, { count: number } | undefined>;
 
-// drawer ข้อมูลสินค้า (ของกลางตัวเดียวกับหน้า master) — โหลดตอนกดชื่อสินค้าเท่านั้น (ตัวนี้หนัก)
-const SkuDrawer = dynamicImport(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+// drawer ข้อมูลใบสั่งผลิต (ของกลางตัวเดียวกับหน้า master) — โหลดตอนกดชื่อบนการ์ดเท่านั้น (ตัวนี้หนัก)
+const RecordDrawer = dynamicImport(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const dayText = (d?: string | null) => (d ? new Date(String(d).slice(0, 10) + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : null);
@@ -106,26 +106,16 @@ export function DispatchPlanBoard({
   const [listPopup, setListPopup] = useState<{ kind: "pending" | "dept"; dept?: DeptLite } | null>(null);
   const [listView, setListView] = useState<"cards" | "cal">("cards");      // ในป๊อป: การ์ด / ปฏิทิน (ตามกำหนดส่ง)
   const [calCursor, setCalCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
-  const [skuPeek, setSkuPeek] = useState<string | null>(null);             // uuid ของ SKU ที่กดดูข้อมูล
-  const [skuPeeking, setSkuPeeking] = useState(false);
+  const [moPeek, setMoPeek] = useState<string | null>(null);              // id ใบสั่งผลิตที่กดดูข้อมูล
   // ลำดับการ์ดในป๊อป (ลากจัดเองได้) — จำไว้ในเครื่องนี้ต่อโต๊ะ
   const [cardOrder, setCardOrder] = useState<Record<string, string[]>>({});
   const [dragCard, setDragCard] = useState<string | null>(null);
 
-  /** กดชื่อสินค้า → เปิด drawer ข้อมูลสินค้า (ของกลาง) — แปลงรหัสเป็น id ด้วย /api/skus/lookup */
-  const openSkuInfo = useCallback(async (code: string | null | undefined) => {
-    const c = (code ?? "").trim();
-    if (!c || skuPeeking) return;
-    setSkuPeeking(true);
-    try {
-      const j = await apiFetch("/api/skus/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codes: [c] }) })
-        .then((r) => r.json());
-      const hit = (j?.data ?? {})[c] as { id?: string } | null;
-      if (hit?.id) setSkuPeek(String(hit.id));
-      else toast.error(`ไม่พบข้อมูลสินค้า ${c}`);
-    } catch { toast.error("เปิดข้อมูลสินค้าไม่สำเร็จ"); }
-    finally { setSkuPeeking(false); }
-  }, [skuPeeking, toast]);
+  /** กดชื่อบนการ์ด → เปิด drawer "ข้อมูลใบสั่งผลิต" (ของกลาง MasterRecordDrawer) */
+  const openMoInfo = useCallback((moId: string | null | undefined) => {
+    if (!moId) { toast.error("งานนี้ยังไม่ผูกกับใบสั่งผลิต"); return; }
+    setMoPeek(String(moId));
+  }, [toast]);
 
   /** ลำดับการ์ดที่ลากจัดไว้เอง (เก็บในเครื่อง) */
   const orderKeyOf = (kind: string, deptId?: string) => `wb:cardOrder:${kind}:${deptId ?? "-"}`;
@@ -933,7 +923,7 @@ export function DispatchPlanBoard({
           ...drafts.map((l) => `d:${l.id}`),
         ];
         const card = (key: string, img: string | null | undefined, sku: string | null, name: string | null, moNo: string | null,
-                      qty: number, right: ReactNode, badge?: ReactNode, onClick?: () => void, due?: string | null) => (
+                      qty: number, right: ReactNode, badge?: ReactNode, onClick?: () => void, due?: string | null, moId?: string | null) => (
           <div key={key} onClick={onClick}
             draggable onDragStart={(e) => { setDragCard(key); e.stopPropagation(); }} onDragEnd={() => setDragCard(null)}
             onDragOver={(e) => { if (dragCard && dragCard !== key) e.preventDefault(); }}
@@ -947,9 +937,9 @@ export function DispatchPlanBoard({
             </div>
             <div className="p-2">
               {/* กดชื่อ = เปิดข้อมูลสินค้า (ไม่ไปโดนคลิกการ์ด) */}
-              <button type="button" onClick={(e) => { e.stopPropagation(); void openSkuInfo(sku); }} title="กดเพื่อดูข้อมูลสินค้า"
+              <button type="button" onClick={(e) => { e.stopPropagation(); openMoInfo(moId); }} title="กดเพื่อเปิดข้อมูลใบสั่งผลิต"
                 className="block w-full text-left text-sm font-semibold text-slate-800 truncate hover:text-indigo-600 hover:underline">{sku ?? "—"}</button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); void openSkuInfo(sku); }} title="กดเพื่อดูข้อมูลสินค้า"
+              <button type="button" onClick={(e) => { e.stopPropagation(); openMoInfo(moId); }} title="กดเพื่อเปิดข้อมูลใบสั่งผลิต"
                 className="block w-full text-left text-[11px] text-slate-500 truncate hover:text-indigo-600">{name}</button>
               <div className="text-[10px] text-slate-400 font-mono truncate">{moNo}</div>
               {due && <div className="text-[10px] text-slate-500">📅 {dayText(due)}</div>}
@@ -1097,7 +1087,7 @@ export function DispatchPlanBoard({
                     (p.ready ?? (!!p.prep_done && !!p.cut_done))
                       ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">พร้อม ✓</span>
                       : <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">รอเตรียม/ตัด</span>,
-                    () => onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }), dueOf("p", p)))}
+                    () => onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }), dueOf("p", p), p.id))}
 
                   {/* ในโต๊ะ: ใบจ่ายงานจริง */}
                   {reals.map((w) => {
@@ -1118,9 +1108,9 @@ export function DispatchPlanBoard({
                             <span className="absolute top-1 left-1 text-[9px] px-1.5 py-0.5 rounded-full bg-blue-600 text-white max-w-[110px] truncate">{w.assignee_name || "ทั้งโต๊ะ"}</span>
                           </div>
                           <div className="px-2 pt-2">
-                            <button type="button" onClick={(e) => { e.stopPropagation(); void openSkuInfo(w.product_sku); }} title="กดเพื่อดูข้อมูลสินค้า"
+                            <button type="button" onClick={(e) => { e.stopPropagation(); openMoInfo(w.mo_id); }} title="กดเพื่อเปิดข้อมูลใบสั่งผลิต"
                               className="block w-full text-left text-sm font-semibold text-slate-800 truncate hover:text-indigo-600 hover:underline">{w.product_sku ?? "—"}</button>
-                            <button type="button" onClick={(e) => { e.stopPropagation(); void openSkuInfo(w.product_sku); }} title="กดเพื่อดูข้อมูลสินค้า"
+                            <button type="button" onClick={(e) => { e.stopPropagation(); openMoInfo(w.mo_id); }} title="กดเพื่อเปิดข้อมูลใบสั่งผลิต"
                               className="block w-full text-left text-[11px] text-slate-500 truncate hover:text-indigo-600">{w.product_name}</button>
                             <div className="text-[10px] text-slate-400 font-mono truncate">{w.mo_no}</div>
                             {dueOf("w", w) && <div className="text-[10px] text-slate-500">📅 {dayText(dueOf("w", w))}</div>}
@@ -1169,7 +1159,7 @@ export function DispatchPlanBoard({
                   {drafts.map((l) => card(`d:${l.id}`, imageByMo[l.mo_no ?? ""], l.product_sku, l.product_name, l.mo_no, Number(l.qty) || 0,
                     <span className="text-[10px] text-amber-600 font-medium">{baht(lineLabor(l))}</span>,
                     <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-600 text-white max-w-[110px] truncate inline-block">ร่าง{l.assignee_name ? ` · ${l.assignee_name}` : ""}</span>,
-                    undefined, dueOf("d", l)))}
+                    undefined, dueOf("d", l), l.mo_id))}
                 </div>
               </div>
 
@@ -1179,15 +1169,16 @@ export function DispatchPlanBoard({
               </div>
               <p className="text-[10px] text-slate-400 mt-1">
                 {isPending ? "กดการ์ด = เปิดเช็กลิสต์ใบนั้น" : "กดการ์ด = เปิดรายละเอียดงาน · 💰 ใส่ค่าแรง · ↩ คืนรอจ่าย"}
-                {" · กดชื่อ/รหัสสินค้า = ดูข้อมูลสินค้า · ลากการ์ดสลับตำแหน่งได้ (จำเฉพาะเครื่องนี้)"}
+                {" · กดชื่อ/รหัสบนการ์ด = เปิดข้อมูลใบสั่งผลิต · ลากการ์ดสลับตำแหน่งได้ (จำเฉพาะเครื่องนี้)"}
               </p>
             </div>
           </div>
         );
       })()}
 
-      {/* 📦 ข้อมูลสินค้า — drawer ตัวเดียวกับหน้า master (เปิดจากการกดชื่อ/รหัสบนการ์ด) */}
-      {skuPeek && <SkuDrawer moduleKey="skus-v2" recordId={skuPeek} onClose={() => setSkuPeek(null)} />}
+      {/* 🏭 ข้อมูลใบสั่งผลิต — drawer ตัวเดียวกับหน้า master (เปิดจากการกดชื่อ/รหัสบนการ์ด) */}
+      {moPeek && <RecordDrawer moduleKey="manufacturing-orders" apiPath="manufacturing-orders" recordId={moPeek}
+        title="ใบสั่งผลิต" icon="🏭" onClose={() => setMoPeek(null)} />}
 
       {/* 👥 พนักงานในโต๊ะ — ย้ายคนเข้า/ออก + ตั้ง OT วางแผนรายคน (฿/ชม. × ชม./วัน × วัน) */}
       {staffPopup && (() => {
