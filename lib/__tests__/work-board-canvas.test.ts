@@ -67,3 +67,59 @@ describe("diffDeskMoves", () => {
     expect(diffDeskMoves(now, seen)).toEqual([{ lineId: "l1", deptId: null }]);
   });
 });
+
+// ---- snap เข้าช่อง + สรุปค่าแรงต่อโต๊ะ ----
+import { layoutDesks, slotPos, frameHeight, CARD_W, FRAME_W } from "../work-board-canvas";
+
+const card = (id: string, kind: string, frameId: string, x: number, y: number, qty: number, labor: number): CanvasEl[] => ([
+  { id: `${id}-r`, type: "rectangle", frameId, groupIds: [`g-${id}`], x, y, width: CARD_W, height: 88, customData: { kind, id, qty, labor } },
+  { id: `${id}-t`, type: "text", frameId, groupIds: [`g-${id}`], x: x + 74, y: y + 12, customData: { kind, id, qty, labor } },
+]);
+
+describe("layoutDesks", () => {
+  const frame: CanvasEl = { id: "f1", type: "frame", name: "โต๊ะขาล", x: 100, y: 200, width: FRAME_W, height: 500, customData: { kind: "wb_desk", id: "d1" } };
+  const s0 = slotPos(100, 200, 0), s1 = slotPos(100, 200, 1);
+
+  it("การ์ดที่โยนเข้ามามั่ว ๆ ถูกจัดเข้าช่อง (snap) ตามลำดับบน→ล่าง ซ้าย→ขวา", () => {
+    const els = [frame, ...card("a", "wb_plan", "f1", 137, 411, 10, 100), ...card("b", "wb_plan", "f1", 900, 260, 5, 50)];
+    const { moves } = layoutDesks(els, DEPTS);
+    const byId = new Map(moves.map((m) => [m.id, m]));
+    // b อยู่สูงกว่า → ได้ช่องแรก · a ได้ช่องสอง
+    expect(byId.get("b-r")).toMatchObject({ x: s0.x, y: s0.y });
+    expect(byId.get("a-r")).toMatchObject({ x: s1.x, y: s1.y });
+  });
+
+  it("ขยับทั้งใบ (ทุก element ในกลุ่มเลื่อนเท่ากัน) ไม่ใช่แค่กรอบการ์ด", () => {
+    const els = [frame, ...card("a", "wb_plan", "f1", 137, 411, 10, 100)];
+    const { moves } = layoutDesks(els, DEPTS);
+    const r = moves.find((m) => m.id === "a-r")!, t = moves.find((m) => m.id === "a-t")!;
+    expect(t.x - r.x).toBe(74);
+    expect(t.y - r.y).toBe(12);
+  });
+
+  it("การ์ดที่อยู่ตรงช่องอยู่แล้ว ไม่ต้องขยับ (กันบันทึกวนไม่จบ)", () => {
+    const els = [frame, ...card("a", "wb_plan", "f1", s0.x, s0.y, 10, 100)];
+    expect(layoutDesks(els, DEPTS).moves).toEqual([]);
+  });
+
+  it("สรุปจำนวน/ค่าแรงแยกแผนกับของจริง + ความสูงกรอบพอดีจำนวนการ์ด", () => {
+    const els = [frame, ...card("a", "wb_plan", "f1", s0.x, s0.y, 10, 100), ...card("w", "wb_real", "f1", s1.x, s1.y, 4, 40)];
+    const f = layoutDesks(els, DEPTS).frames.find((x) => x.id === "f1")!;
+    expect(f).toMatchObject({ deptId: "d1", cards: 2, planQty: 10, planLabor: 100, realQty: 4, realLabor: 40 });
+    expect(f.height).toBe(frameHeight(2));
+  });
+
+  it("กรอบสูงพอดีอยู่แล้ว = ไม่ส่ง height มาแก้ (กันบันทึกวนไม่จบ)", () => {
+    const fitted = { ...frame, height: frameHeight(1) };
+    const els = [fitted, ...card("a", "wb_plan", "f1", s0.x, s0.y, 10, 100)];
+    expect(layoutDesks(els, DEPTS).frames[0].height).toBeUndefined();
+  });
+
+  it("หัวกรอบมียอดต่อท้ายแล้ว ยังจับคู่โต๊ะได้จากชื่อ (กรอบที่ผู้ใช้วาดเอง)", () => {
+    const drawn: CanvasEl = { id: "f9", type: "frame", name: "โต๊ะแต๋ว · แผน 10 ชิ้น ฿100", x: 0, y: 0, width: FRAME_W, height: 300 };
+    const els = [drawn, ...card("a", "wb_plan", "f9", 5, 5, 10, 100)];
+    const f = layoutDesks(els, DEPTS).frames.find((x) => x.id === "f9")!;
+    expect(f.deptId).toBe("d2");
+    expect(f.stampDesk).toBe(true);   // ควรประทับ customData ให้ถาวร
+  });
+});

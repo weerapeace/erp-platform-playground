@@ -37,10 +37,13 @@ const Excalidraw = dynamic(async () => (await import("@excalidraw/excalidraw")).
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
 export type CanvasSketchControls = {
   isDirty: () => boolean; save: () => Promise<void>; discard: () => void;
-  insert: (skeletons: Record<string, unknown>[]) => Promise<void>;
+  /** opts.fitImages=false → ไม่ต้องวัดสัดส่วนรูปจริง (ใช้กรอบที่ส่งมาเลย) — แทรกการ์ดจำนวนมากพร้อมรูปได้ทันที ไม่ต้องรอโหลดทีละใบ */
+  insert: (skeletons: Record<string, unknown>[], opts?: { fitImages?: boolean }) => Promise<void>;
   listCards: () => { kind: string; data: Record<string, unknown> }[];
   /** อ่าน element ดิบบนกระดาน (อ่านอย่างเดียว) — โมดูลที่ต้องรู้ตำแหน่ง/frame ของการ์ด เช่น บอร์ดจ่ายงาน (การ์ดอยู่ในกรอบโต๊ะไหน) */
   getElements: () => Record<string, unknown>[];
+  /** แก้ค่าบน element ที่มีอยู่ (คืน null = ไม่แก้ใบนั้น) — ใช้จัดตำแหน่งการ์ด/เปลี่ยนชื่อกรอบ · ไม่มีอะไรเปลี่ยนจริง = ไม่บันทึก */
+  patchElements: (patch: (el: Record<string, unknown>) => Record<string, unknown> | null) => void;
   /** ลบการ์ด (ทั้งกลุ่ม) ที่ตรงเงื่อนไข match — เช่นลบการ์ดคอนเทนต์ทั้งหมดของ content id หนึ่งเมื่อคอนเทนต์ถูกลบ */
   removeCards: (match: (card: { kind: string; id: string; data: Record<string, unknown> }) => boolean) => void;
   /** แทนที่การ์ดที่ match ด้วย skeleton ใหม่ (ลบเดิม + วางใหม่ที่ตำแหน่งเดิม) — ใช้ตอนแก้ตารางแล้ว render การ์ดใหม่ */
@@ -319,7 +322,7 @@ export function CanvasSketch({
       discard: () => { discardRef.current = true; markDirty(false); setSaveState("idle"); },
       // แทรก element (การ์ด/โซน) ลงกลางจอ แล้วบันทึกอัตโนมัติ
       // skeleton ที่เป็นรูปให้ใส่ `_imageUrl` (แทน fileId) — ระบบจะโหลดรูป → ลงทะเบียนไฟล์ → ใส่ fileId ให้เอง
-      insert: async (skeletons) => {
+      insert: async (skeletons, opts) => {
         const api = apiRef.current;
         if (!api || !skeletons?.length) return;
         try {
@@ -339,8 +342,8 @@ export function CanvasSketch({
                   fileId = `f${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
                   api.addFiles([{ id: fileId, dataURL: url, mimeType: "image/png", created: Date.now() }]);
                   urlToFileId.set(url, fileId);
-                  // อ่านขนาดจริงของรูปจาก URL → เก็บอัตราส่วน
-                  try { const dim = await new Promise<{ w: number; h: number }>((resolve, reject) => { const im = new Image(); im.onload = () => resolve({ w: im.naturalWidth || 1, h: im.naturalHeight || 1 }); im.onerror = reject; im.src = url; }); if (dim.h > 0) urlToRatio.set(url, dim.w / dim.h); } catch { /* ใช้กรอบเดิม */ }
+                  // อ่านขนาดจริงของรูปจาก URL → เก็บอัตราส่วน (ข้ามได้ด้วย fitImages:false — แทรกทีละร้อยใบจะได้ไม่ต้องรอ)
+                  if (opts?.fitImages !== false) try { const dim = await new Promise<{ w: number; h: number }>((resolve, reject) => { const im = new Image(); im.onload = () => resolve({ w: im.naturalWidth || 1, h: im.naturalHeight || 1 }); im.onerror = reject; im.src = url; }); if (dim.h > 0) urlToRatio.set(url, dim.w / dim.h); } catch { /* ใช้กรอบเดิม */ }
                 } catch (e) { console.error("[canvas-sketch] image load failed:", e); }
               }
               if (fileId) s.fileId = fileId;
@@ -385,6 +388,24 @@ export function CanvasSketch({
       },
       // element ดิบบนกระดาน (ยังไม่ถูกลบ) — อ่านอย่างเดียว
       getElements: () => { const api = apiRef.current; return api ? ((api.getSceneElements() as Record<string, unknown>[]) ?? []) : []; },
+      // แก้ค่าบน element เดิม (ตำแหน่ง/ชื่อกรอบ ฯลฯ) — bump version ให้ collab merge ได้ · ไม่มีอะไรเปลี่ยน = ไม่ยุ่งกับ scene
+      patchElements: (patch) => {
+        const api = apiRef.current; if (!api) return;
+        const all = api.getSceneElements() as Record<string, unknown>[];
+        let changed = false;
+        const next = all.map((el) => {
+          let p: Record<string, unknown> | null = null;
+          try { p = patch(el); } catch { p = null; }
+          if (!p) return el;
+          const keys = Object.keys(p);
+          if (!keys.length || keys.every((k) => el[k] === p![k])) return el;
+          changed = true;
+          return { ...el, ...p, version: (Number(el.version) || 0) + 1 };
+        });
+        if (!changed) return;
+        api.updateScene({ elements: next });
+        if (editable) queueSave();
+      },
       // ลบการ์ดทั้งกลุ่มที่ match (เช่น content id ที่ถูกลบ) → mark isDeleted + bump version
       // ⚠️ ต้อง isDeleted (ไม่ใช่ filter ทิ้ง) ไม่งั้น collab merge (mergeById เก็บ version สูงกว่า) จะดึงการ์ดกลับมา
       removeCards: (match) => {
