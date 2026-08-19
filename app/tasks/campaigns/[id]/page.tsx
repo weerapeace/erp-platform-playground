@@ -30,6 +30,7 @@ import { useCreativeOptions } from "../../use-options";
 import { getCampaign, updateCampaign, deleteTask, createContent, getContent, listBrands, listSubtasks, POST_TYPES, type CampaignDetail, type CreativeTask, type BrandOption } from "../../data";
 import { ContentDrawer } from "../../content/content";
 import { AssetPicker } from "@/components/asset-picker";
+import { FloatingDropdown } from "@/components/floating-dropdown";
 import type { AssetRow } from "@/app/api/assets/shared";
 import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
 import { getLang } from "@/lib/lang";
@@ -329,13 +330,12 @@ function ToolMenu({ label, icon, tone = "slate", items }: {
 }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+  // ปิดด้วย Esc (คลิกนอก FloatingDropdown จัดการให้แล้ว)
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!boxRef.current?.contains(e.target as Node)) setOpen(false); };
     const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onEsc);
-    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onEsc); };
+    return () => document.removeEventListener("keydown", onEsc);
   }, [open]);
   return (
     <div className="relative" ref={boxRef}>
@@ -343,8 +343,10 @@ function ToolMenu({ label, icon, tone = "slate", items }: {
         className={`h-9 px-3 inline-flex items-center gap-1 text-sm font-medium border rounded-lg ${TOOL_TONE[tone]} ${open ? "bg-white ring-2 ring-violet-200" : ""}`}>
         <span>{icon}</span>{label}<span className="text-[10px] text-slate-400">▾</span>
       </button>
-      {open && (
-        <div className="absolute right-0 z-40 mt-1 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
+      {/* ของกลาง FloatingDropdown: portal ไป body + position:fixed → ไม่จมใต้กระดาน/แถบเครื่องมือ Excalidraw
+          (ของเดิมเป็น absolute z-40 เลยโดนแถบกระดานทับ) */}
+      <FloatingDropdown anchorRef={boxRef} open={open} onClose={() => setOpen(false)} minWidth={256} maxWidth={320}>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-2xl">
           {items.map((it) => (
             <button key={it.label} onClick={() => { setOpen(false); it.onClick(); }}
               className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50">
@@ -356,7 +358,7 @@ function ToolMenu({ label, icon, tone = "slate", items }: {
             </button>
           ))}
         </div>
-      )}
+      </FloatingDropdown>
     </div>
   );
 }
