@@ -32,6 +32,20 @@ const prodColor = (sku: string | null) => { let h = 0; for (const c of sku ?? ""
 // สีการ์ด = สีแบรนด์จริงถ้ามี, ไม่งั้นสีสุ่มตามรหัส
 const cardColor = (brand?: string | null, sku?: string | null) => brand || prodColor(sku ?? null);
 const dueText = (d: string | null) => d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : null;
+// วันรับเข้า (ช่างส่งงานล่าสุด) → ข้อความสั้น + ป้าย "ค้างกี่วัน" (7 วัน=ส้ม · 14 วัน=แดง)
+const recvText = (d?: string | null) => (d ? dueText(String(d).slice(0, 10)) : null);
+const daysSince = (d?: string | null) => {
+  if (!d) return null;
+  const t = new Date(String(d).slice(0, 10) + "T00:00:00").getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+};
+const waitBadge = (d?: string | null) => {
+  const n = daysSince(d);
+  if (n === null) return null;
+  return { n, t: n === 0 ? "วันนี้" : `ค้าง ${n} วัน`,
+    c: n >= 14 ? "bg-rose-100 text-rose-700" : n >= 7 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500" };
+};
 const imgUrl = (k?: string | null) => k ? `/api/r2-image?key=${encodeURIComponent(k)}` : null;
 const daysLeft = (d: string | null): number | null => { if (!d) return null; const t = new Date(); t.setHours(0, 0, 0, 0); return Math.floor((new Date(d + "T00:00:00").getTime() - t.getTime()) / 86400000); };
 function dueBadge(d: string | null): { t: string; c: string } | null {
@@ -126,7 +140,18 @@ export default function QcWarehousePage() {
     try { const r = await apiFetch(`/api/qc-warehouse/defect-history?search=${encodeURIComponent(search)}`); const j = await r.json(); setHistRows(j.data ?? []); } catch { /* ignore */ }
   }, []);
   const tsText = (s: string) => { try { return new Date(s).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }); } catch { return s; } };
-  const sortedQueue = useMemo(() => [...queue].sort((a, b) => (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999")), [queue]);
+  // เรียงคิว: ตามกำหนดส่ง (งานด่วนก่อน) หรือ ตามวันรับเข้า (ค้างนานสุดก่อน)
+  const [queueSort, setQueueSort] = useState<"due" | "recv">("due");
+  const sortedQueue = useMemo(() => [...queue].sort((a, b) => (queueSort === "recv"
+    ? String(a.received_at ?? "9999").localeCompare(String(b.received_at ?? "9999"))
+    : (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999"))), [queue, queueSort]);
+  const sortSelect = (
+    <select value={queueSort} onChange={(e) => setQueueSort(e.target.value as "due" | "recv")} title="เรียงคิวงาน"
+      className="h-7 px-1.5 text-[11px] border border-slate-200 rounded-lg bg-white text-slate-600">
+      <option value="due">เรียงตามกำหนดส่ง</option>
+      <option value="recv">เรียงตามวันรับเข้า (ค้างนานก่อน)</option>
+    </select>
+  );
 
   const act = useCallback(async (path: string, body: Record<string, unknown>): Promise<boolean> => {
     try { const res = await apiFetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); const j = await res.json(); if (j.error) throw new Error(j.error); await load(); return true; }
@@ -506,6 +531,12 @@ export default function QcWarehousePage() {
           <div className="text-[13px] font-semibold text-slate-800 leading-snug truncate">{c.name || c.sku}</div>
           <div className="text-[11px] text-slate-500 font-mono truncate">{c.sku} · {c.mo_no}</div>
           <div className="text-[11px] text-slate-500 truncate">👷 {c.worker ?? "—"}</div>
+          {c.received_at && (() => { const w = waitBadge(c.received_at); return (
+            <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1 flex-wrap">
+              <span>📥 {recvText(c.received_at)}</span>
+              {w && <span className={`text-[10px] rounded px-1.5 py-0.5 ${w.c}`}>{w.t}</span>}
+            </div>
+          ); })()}
         </div>
         <span className="text-xs font-bold text-indigo-600 shrink-0">รอรับ {fmt(c.remaining)}</span>
       </div>
@@ -544,8 +575,9 @@ export default function QcWarehousePage() {
             <span className="text-base font-bold text-slate-700">📥 งานรอ QC</span>
             <span className="text-xs font-medium text-slate-500 bg-white rounded-full px-2 py-0.5 border border-slate-200">{queue.length}</span>
           </div>
+          <div className="px-1 mb-2">{sortSelect}</div>
           <div className="space-y-2.5">
-            {queue.map((c) => { const db = dueBadge(c.due_date); return (
+            {sortedQueue.map((c) => { const db = dueBadge(c.due_date); return (
               <div key={c.wo_id} draggable onDragStart={() => setDragWo(c.wo_id)} onDragEnd={() => setDragWo(null)}
                 onClick={() => setDetail({ kind: "queue", card: c })}
                 className={`rounded-xl bg-white border shadow-sm p-2.5 cursor-grab active:cursor-grabbing select-none hover:border-indigo-300 ${dragWo === c.wo_id ? "opacity-50 rotate-1" : ""}`}
@@ -556,6 +588,12 @@ export default function QcWarehousePage() {
                     <div className="text-sm font-semibold text-slate-800 leading-snug">{c.name}</div>
                     <div className="text-[11px] text-slate-500 font-mono">{c.sku}</div>
                     <div className="text-[11px] text-slate-500 mt-0.5">👷 {c.worker ?? "—"}</div>
+                    {c.received_at && (() => { const w = waitBadge(c.received_at); return (
+                      <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1 flex-wrap">
+                        <span>📥 {recvText(c.received_at)}</span>
+                        {w && <span className={`text-[10px] rounded px-1.5 py-0.5 ${w.c}`}>{w.t}</span>}
+                      </div>
+                    ); })()}
                   </div>
                   <Thumb k={c.image_key} color={cardColor(c.brand_color, c.sku)} />
                 </div>
@@ -664,7 +702,7 @@ export default function QcWarehousePage() {
           const gridCls = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5";
           const selCls = "h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500";
           const deskFiltered = atDesks.filter((w) => q === "" || `${w.sku ?? ""} ${w.name ?? ""} ${w.mo_no ?? ""} ${w.worker ?? ""} ${w.department_name ?? ""}`.toLowerCase().includes(q));
-          const queueFiltered = queue.filter((c) => q === "" || `${c.sku ?? ""} ${c.name ?? ""} ${c.mo_no ?? ""} ${c.worker ?? ""}`.toLowerCase().includes(q));
+          const queueFiltered = sortedQueue.filter((c) => q === "" || `${c.sku ?? ""} ${c.name ?? ""} ${c.mo_no ?? ""} ${c.worker ?? ""}`.toLowerCase().includes(q));
           return (
             <div>
               {/* แท็บย่อย: รับ-ส่งงาน / ของในชั้น + ช่องค้นหา */}
@@ -681,7 +719,10 @@ export default function QcWarehousePage() {
                 <>
                   {/* 📥 งานรอ QC — ติ๊กเลือกใส่ตะกร้า → รับเข้าชั้นทีเดียว */}
                   <div className="mb-5">
-                    <div className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-1.5 mb-2">📥 งานรอ QC (กดการ์ด → เลือกชั้นรับเข้า) <span className="text-indigo-400 font-normal">({queueFiltered.length})</span></div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-1.5">📥 งานรอ QC (กดการ์ด → เลือกชั้นรับเข้า) <span className="text-indigo-400 font-normal">({queueFiltered.length})</span></div>
+                      {sortSelect}
+                    </div>
                     {queueFiltered.length === 0
                       ? <div className="text-center py-6 text-[12px] text-slate-300">ไม่มีงานรอรับเข้า (งานที่ช่างส่งกลับจากบอร์ดจ่ายงานจะมาโชว์ที่นี่)</div>
                       : <div className={gridCls}>{queueFiltered.map(renderQueueCard)}</div>}
@@ -772,7 +813,10 @@ export default function QcWarehousePage() {
       ) : (
         /* ── คิวงาน (สำหรับพนักงาน) เรียงตามกำหนดส่ง ── */
         <div className="max-w-[820px] mx-auto space-y-2">
-          <p className="text-[12px] text-slate-500 px-1">เรียงตามกำหนดส่ง — งานด่วนอยู่บนสุด · กดเพื่อรับเข้าชั้น</p>
+          <div className="flex items-center justify-between gap-2 px-1">
+            <p className="text-[12px] text-slate-500">{queueSort === "recv" ? "เรียงตามวันรับเข้า — ค้างนานสุดอยู่บนสุด" : "เรียงตามกำหนดส่ง — งานด่วนอยู่บนสุด"} · กดเพื่อรับเข้าชั้น</p>
+            {sortSelect}
+          </div>
           {sortedQueue.map((c) => { const db = dueBadge(c.due_date); return (
             <div key={c.wo_id} onClick={() => setDetail({ kind: "queue", card: c })}
               className="flex items-center gap-3 rounded-xl bg-white border border-slate-200 shadow-sm p-2.5 cursor-pointer hover:border-indigo-300" style={{ borderLeft: `4px solid ${cardColor(c.brand_color, c.sku)}` }}>
@@ -784,6 +828,12 @@ export default function QcWarehousePage() {
                   {c.is_subcontract && <span className="text-[10px] rounded px-1.5 py-0.5 bg-orange-100 text-orange-700">🧵 งานเหมา</span>}
                 </div>
                 <div className="text-[11px] text-slate-500 font-mono">{c.sku} · {c.mo_no} · 👷 {c.worker ?? "—"}</div>
+                {c.received_at && (() => { const w = waitBadge(c.received_at); return (
+                  <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1 flex-wrap">
+                    <span>📥 รับเข้า {recvText(c.received_at)}</span>
+                    {w && <span className={`text-[10px] rounded px-1.5 py-0.5 ${w.c}`}>{w.t}</span>}
+                  </div>
+                ); })()}
               </div>
               <div className="text-right shrink-0">
                 {db && <div className={`text-[10px] rounded px-1.5 py-0.5 inline-block ${db.c}`}>{db.t}</div>}
