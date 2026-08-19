@@ -2933,7 +2933,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
   const [dispDeptId, setDispDeptId] = useState("");
   const [dispCraft, setDispCraft] = useState("");
   const [dispDue2, setDispDue2] = useState("");
-  const [dispRate, setDispRate] = useState("");
+  const [dispRate, setDispRate] = useState("");                       // ช่อง "ใส่ให้ทุกใบ" (ตัวช่วย)
+  const [dispRateBy, setDispRateBy] = useState<Record<string, string>>({});   // ค่าแรง/ชิ้น รายใบ (ตั้งต้นจากสูตรของสินค้านั้น)
   const [dispBusy, setDispBusy] = useState(false);
   const [dispMsg, setDispMsg] = useState("");
   // 💰 ใส่ค่าแรงให้ใบจ่ายงานหลายใบพร้อมกัน (ตารางล่าง)
@@ -2995,7 +2996,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
     const craft = craftsmen.find((c) => c.id === dispCraft);
     // งานเหมา = ต้องระบุช่าง (กฎเดียวกับป๊อปจ่ายงานปกติ)
     if (/เหมา/.test(dept.name) && !craft) { toast.error("งานเหมา ต้องเลือกช่างก่อน"); return; }
-    const rate = dispRate.trim() === "" ? null : Number(dispRate) || 0;
+    const rateFor = (m: PendingMO) => {
+      const v = dispRateBy[m.id];
+      if (v == null || v.trim() === "") return 0;
+      return Number(v) || 0;
+    };
 
     setDispBusy(true);
     let ok = 0; const fails: string[] = [];
@@ -3011,7 +3016,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
             qty: m.remaining, uom: "ชิ้น", dispatch_date: todayLocal(),
             due_date: dispDue2 || m.internal_due_date || m.due_date || null,
             note: `จากใบสั่งผลิต ${m.mo_no}`,
-            labor_cost: rate != null && rate > 0 ? rate * m.remaining : undefined,
+            // ค่าแรงรายใบ (0 = ไม่ส่ง → เซิร์ฟเวอร์เติมจากใบสั่งผลิต/ราคากลางในสูตรให้เอง)
+            labor_cost: rateFor(m) > 0 ? Math.round(rateFor(m) * m.remaining * 100) / 100 : undefined,
           }) });
         const j = await res.json();
         if (!res.ok || j?.error) throw new Error(j?.error || "จ่ายไม่สำเร็จ");
@@ -3022,7 +3028,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
     if (ok > 0) toast.success(`จ่ายเข้า ${dept.name}${craft ? ` · ${craft.name}` : ""} แล้ว ${ok} ใบ`);
     if (fails.length) toast.error(`ไม่สำเร็จ ${fails.length} ใบ — ${fails[0]}`);
     if (ok > 0) { setDispOpen(false); setSel(new Set()); onReload?.(); }
-  }, [pending, sel, departments, craftsmen, dispDeptId, dispCraft, dispDue2, dispRate, toast, onReload]);
+  }, [pending, sel, departments, craftsmen, dispDeptId, dispCraft, dispDue2, dispRateBy, toast, onReload]);
 
   // ใส่ค่าแรง/ชิ้น ให้ใบจ่ายงานที่ติ๊กไว้ — ใบละ (ค่าแรง/ชิ้น × จำนวนของใบนั้น)
   const selWos = wos.filter((w) => woSel.has(w.id));
@@ -3114,7 +3120,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
           {selMoNos.length > 0 && <>
             <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จับเข้ากลุ่ม ({selMoNos.length})</button>
             <button onClick={() => setDueOpen(true)} className="h-8 px-3 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700">📅 แก้วันกำหนด ({selMoNos.length})</button>
-            {canEdit && <button onClick={() => { setDispOpen(true); setDispMsg(""); }} className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🚚 จ่ายงาน ({selMoNos.length})</button>}
+            {canEdit && <button onClick={() => {
+              // ค่าแรงตั้งต้น = ราคากลางในสูตรของสินค้านั้น (ไม่มีก็ถอดจากค่าแรงที่วางแผนไว้) — แก้รายใบได้
+              const init: Record<string, string> = {};
+              for (const m of pending.filter((x) => sel.has(x.id))) { const r = rateOf(m); if (r > 0) init[m.id] = String(r); }
+              setDispRateBy(init); setDispRate(""); setDispOpen(true); setDispMsg("");
+            }} className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🚚 จ่ายงาน ({selMoNos.length})</button>}
           </>}
         </div>}
         searchText={(m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`}
@@ -3151,7 +3162,6 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
         const isHire = !!dept && /เหมา/.test(dept.name);
         const deptCrafts = !dept ? [] : (isHire ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id));
         const totalQty = selPend.reduce((n, m) => n + (m.remaining || 0), 0);
-        const rate = Number(dispRate) || 0;
         return (
           <ERPModal open={dispOpen} onClose={() => { if (!dispBusy) setDispOpen(false); }} size="md"
             title={`🧰 จ่ายงาน ${selPend.length} ใบ${dept ? ` → ${dept.name}` : ""}`}
@@ -3195,23 +3205,58 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
               </label>
 
               <label className="block">
-                <span className="text-[11px] text-slate-500">💰 ค่าแรงผลิต / ชิ้น (บาท) <span className="text-slate-400">— เว้นว่างได้ ระบบใช้ค่าแรงของแต่ละใบ/ราคากลางในสูตร</span></span>
+                <span className="text-[11px] text-slate-500">💰 ใส่ค่าแรง/ชิ้น ให้ทุกใบพร้อมกัน <span className="text-slate-400">— หรือแก้รายใบด้านล่าง</span></span>
                 <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                   <input type="number" min={0} step="any" value={dispRate} onChange={(e) => setDispRate(e.target.value)} placeholder="—"
                     className="w-28 h-9 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-                  <span className="text-[11px] text-slate-500">× {fmt(totalQty)} = <b className="text-slate-700">฿{fmt(rate * totalQty)}</b></span>
+                  <button type="button" onClick={() => {
+                    const v = dispRate.trim();
+                    setDispRateBy(Object.fromEntries(selPend.map((m) => [m.id, v])));
+                  }} className="h-9 px-3 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⬇ ลงทุกใบ</button>
+                  <button type="button" onClick={() => {
+                    // กลับไปใช้ค่าตั้งต้นจากสูตรของแต่ละสินค้า
+                    const init: Record<string, string> = {};
+                    for (const m of selPend) { const r = rateOf(m); if (r > 0) init[m.id] = String(r); }
+                    setDispRateBy(init); setDispRate("");
+                  }} className="h-9 px-3 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">↺ ใช้ค่าจากสูตร</button>
                 </div>
               </label>
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 max-h-40 overflow-y-auto space-y-0.5">
-                {selPend.map((m) => (
-                  <div key={m.id} className="flex items-center gap-2 text-[12px]">
-                    <span className="font-mono text-[11px] text-slate-400 shrink-0">{m.mo_no}</span>
-                    <span className="truncate text-slate-600">{m.product_sku} · {m.product_name}</span>
-                    <span className="ml-auto tabular-nums font-semibold text-slate-700 shrink-0">{fmt(m.remaining)} ชิ้น</span>
+              {(() => {
+                const sumLabor = selPend.reduce((n, m) => n + (Number(dispRateBy[m.id]) || 0) * (m.remaining || 0), 0);
+                const noRate = selPend.filter((m) => !(Number(dispRateBy[m.id]) > 0)).length;
+                return (
+                  <div className="rounded-lg border border-slate-200 overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50 text-[11px] text-slate-500">
+                      <span>ใบที่จะจ่าย ({selPend.length}) · ค่าแรง/ชิ้น ตั้งต้นจากสูตรของสินค้านั้น</span>
+                      <span>รวมค่าแรง <b className="text-slate-700">฿{fmt(sumLabor)}</b></span>
+                    </div>
+                    <div className="divide-y divide-slate-50 max-h-52 overflow-y-auto">
+                      {selPend.map((m) => {
+                        const r = Number(dispRateBy[m.id]) || 0;
+                        return (
+                          <div key={m.id} className="flex items-center gap-2 px-3 py-1 text-[12px]">
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-slate-700">{m.product_sku} · {m.product_name}</span>
+                              <span className="block font-mono text-[10px] text-slate-400">{m.mo_no} · {fmt(m.remaining)} ชิ้น</span>
+                            </span>
+                            <input type="number" min={0} step="any" value={dispRateBy[m.id] ?? ""} placeholder="—"
+                              onChange={(e) => setDispRateBy((p) => ({ ...p, [m.id]: e.target.value }))}
+                              title="ค่าแรง/ชิ้น ของใบนี้ (เว้นว่าง = ให้ระบบเติมจากสูตรตอนบันทึก)"
+                              className="w-20 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 shrink-0" />
+                            <span className="w-24 text-right tabular-nums text-slate-600 shrink-0">{r > 0 ? `฿${fmt(r * (m.remaining || 0))}` : "—"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {noRate > 0 && (
+                      <div className="px-3 py-1.5 bg-amber-50 border-t border-amber-100 text-[11px] text-amber-700">
+                        มี {noRate} ใบที่ยังไม่มีค่าแรง — จ่ายได้ ระบบจะเติมจากค่าแรงของใบสั่งผลิต/ราคากลางในสูตรให้ตอนบันทึก
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
+                );
+              })()}
             </div>
           </ERPModal>
         );
