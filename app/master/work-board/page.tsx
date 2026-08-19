@@ -38,6 +38,8 @@ import { ExecPlan, type ExecRow } from "./exec-plan";
 const BoardCalendar = dynamicImport(() => import("./board-calendar").then((m) => m.BoardCalendar), { ssr: false });
 // สรุปค่าแรงรายเดือนแยกตามช่าง — โหลดตอนเปิดแท็บเท่านั้น
 const LaborSummary = dynamicImport(() => import("./labor-summary").then((m) => m.LaborSummary), { ssr: false });
+// มุมมองแคนวาส (section = โต๊ะ) — โหลดตอนเปิดแท็บเท่านั้น
+const CanvasView = dynamicImport(() => import("./canvas-view").then((m) => m.CanvasView), { ssr: false });
 import { DeskShop } from "./desk-shop";
 import { BoardLineSettings } from "@/components/board-line-settings";
 import { RequestInboxButton } from "@/components/request-inbox";
@@ -230,7 +232,7 @@ function WorkBoardPageInner() {
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], dispatchedMos: [], deliveryPlans: [], pendingPiece: [] });
   const [loading, setLoading] = useState(true);
   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ + จำมุมมองเริ่มต้นต่อผู้ใช้ (⭐)
-  const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "table", "shop", "purchase", "calendar", "labor", "exec"] as const, "board");
+  const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "canvas", "table", "shop", "purchase", "calendar", "labor", "exec"] as const, "board");
   // ถ้าเคยตั้ง "แผนผู้บริหาร" เป็นค่าเริ่มต้นไว้ แล้วสิทธิ์ถูกถอดทีหลัง → ถอยกลับบอร์ดปกติ (ไม่ค้างหน้าว่าง)
   const viewMode = viewRaw === "exec" && !isAdmin ? "board" : viewRaw;
   const [shopMode, setShopMode] = useState<"dispatch" | "desk">("dispatch");   // มุมมองช้อป: รอจ่าย / งานในโต๊ะ
@@ -1282,6 +1284,7 @@ function WorkBoardPageInner() {
           <select value={viewMode} onChange={(e) => setViewMode(e.target.value as typeof viewMode)} title="เลือกมุมมองของหน้านี้"
             className="h-9 px-2 text-sm font-medium border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
             <option value="board">📋 บอร์ด</option>
+            <option value="canvas">🗂 แคนวาส (โซนตามโต๊ะ)</option>
             <option value="table">▦ ตาราง</option>
             <option value="shop">🛒 ช้อปจ่ายงาน</option>
             <option value="purchase">📦 ขอซื้อ/เตรียม</option>
@@ -1396,6 +1399,31 @@ function WorkBoardPageInner() {
         />
       ) : viewMode === "labor" ? (
         <LaborSummary />
+      ) : viewMode === "canvas" ? (
+        (() => {
+          // แคนวาส — โซน = โต๊ะ · การ์ดแผน (ลากย้ายโต๊ะได้) + ของจริง (สีเทา ล็อก)
+          const laborPerUnit: Record<string, number> = {};
+          const imageByMo: Record<string, string | null> = {};
+          for (const m of board.pending) { laborPerUnit[m.mo_no] = (m.central_rate && m.central_rate > 0) ? m.central_rate : (m.qty > 0 && m.labor ? m.labor.prod_plan / m.qty : 0); if (m.image_url) imageByMo[m.mo_no] = m.image_url; }
+          for (const w of board.workOrders) { const k = String(w.mo_no); if (!laborPerUnit[k]) laborPerUnit[k] = (w.central_rate && w.central_rate > 0) ? w.central_rate : ((w.qty || 0) > 0 && w.labor ? w.labor.prod_plan / (w.qty || 1) : 0); if (imageByMo[k] == null && w.image_url) imageByMo[k] = w.image_url; }
+          return <CanvasView
+            departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
+            realWOs={board.workOrders} plans={plans} canEdit={canDispatch}
+            imageByMo={imageByMo} laborPerUnit={laborPerUnit}
+            onOpenWO={(id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
+            onOpenWork={(info) => {
+              const mo = info.moId ? board.pending.find((x) => x.id === info.moId) : null;
+              setClWO(null);
+              if (mo) { setChecklistMO(mo); return; }
+              setChecklistMO({
+                id: info.moId ?? "", mo_no: info.moNo ?? "", product_sku: info.productSku, product_name: info.productName,
+                qty: info.qty || 0, dispatched: 0, remaining: 0, due_date: null, status: "",
+                image_url: null, brand: null, brand_color: null,
+                prep_done: false, cut_done: false, has_bom: false, prep_total: 0, prep_ready: 0, cut_total: 0, cut_ready: 0, ready: false,
+              });
+            }}
+          />;
+        })()
       ) : viewMode === "exec" ? (
         <ExecPlan onOpenMO={(row: ExecRow) => {
           setClWO(null);
@@ -1969,32 +1997,41 @@ function WorkBoardPageInner() {
                         </div>
                         {canEdit && (
                           <div className="space-y-1.5">
-                            {/* มีค่าแรงอยู่แล้ว = อ่านอย่างเดียว (กัน DblClick พิมพ์ทับ) — กด ✏️ ก่อนถึงแก้ได้ */}
+                            {/* อ่านอย่างเดียวจนกว่าจะกด ✏️ — โหมดขึ้นกับ estEditing เท่านั้น
+                                🐛 เดิมเช็ก "มีค่าแล้วหรือยัง" ด้วย → พิมพ์ 1 ตัวแรกช่องก็เด้งกลับเป็นอ่านอย่างเดียว
+                                   (จะพิมพ์ 100 ได้แค่ 1 ต้องกดแก้ใหม่ทุกครั้ง) */}
                             {(() => {
                               const hasRate = estLabor.trim() !== "" && Number(estLabor) > 0;
-                              if (hasRate && !estEditing) return (
+                              const totalTxt = (checklistMO.qty || 0) > 0
+                                ? `= รวม ฿${fmt((Number(estLabor) || 0) * (checklistMO.qty || 0))} (${fmt(checklistMO.qty || 0)} ชิ้น)` : "";
+                              if (!estEditing) return (
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <label className="text-[11px] text-slate-500 whitespace-nowrap">ค่าแรงผลิต/ชิ้น (วางแผน)</label>
-                                  <b className="text-sm text-slate-700 tabular-nums">฿{fmt(Number(estLabor) || 0)}</b>
-                                  <span className="text-[10px] text-slate-400">บาท/ชิ้น</span>
-                                  {(checklistMO.qty || 0) > 0 && (
-                                    <span className="text-[10px] text-slate-400">= รวม ฿{fmt((Number(estLabor) || 0) * (checklistMO.qty || 0))} ({fmt(checklistMO.qty || 0)} ชิ้น)</span>
-                                  )}
-                                  <button onClick={() => setEstEditing(true)} title="แก้ค่าแรงผลิต/ชิ้น ของใบนี้"
-                                    className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 bg-white hover:text-indigo-600 hover:border-indigo-300">✏️ แก้ค่าแรง</button>
+                                  {hasRate ? (<>
+                                    <b className="text-sm text-slate-700 tabular-nums">฿{fmt(Number(estLabor) || 0)}</b>
+                                    <span className="text-[10px] text-slate-400">บาท/ชิ้น</span>
+                                    {totalTxt && <span className="text-[10px] text-slate-400">{totalTxt}</span>}
+                                  </>) : <span className="text-[12px] text-slate-400 italic">— ยังไม่ใส่ค่าแรง —</span>}
+                                  <button onClick={() => { estLaborInit.current = estLabor; setEstEditing(true); }} title="แก้ค่าแรงผลิต/ชิ้น ของใบนี้"
+                                    className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 bg-white hover:text-indigo-600 hover:border-indigo-300">
+                                    {hasRate ? "✏️ แก้ค่าแรง" : "✏️ ใส่ค่าแรง"}
+                                  </button>
                                 </div>
                               );
                               return (
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <label className="text-[11px] text-slate-500 whitespace-nowrap">ค่าแรงผลิต/ชิ้น (วางแผน)</label>
-                                  <input type="number" min={0} step="any" autoFocus={estEditing} value={estLabor} onChange={(e) => setEstLabor(e.target.value)} placeholder="—"
+                                  <input type="number" min={0} step="any" autoFocus value={estLabor} onChange={(e) => setEstLabor(e.target.value)} placeholder="—"
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") { e.preventDefault(); void (async () => { await saveEstLabor(); setEstEditing(false); })(); }
+                                      if (e.key === "Escape") { setEstLabor(estLaborInit.current); setEstEditing(false); }
+                                    }}
                                     className="w-24 h-8 px-2 text-sm text-right border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                                   <span className="text-[10px] text-slate-400">บาท/ชิ้น</span>
-                                  {estLabor.trim() !== "" && (checklistMO.qty || 0) > 0 && (
-                                    <span className="text-[10px] text-slate-400">= รวม ฿{fmt((Number(estLabor) || 0) * (checklistMO.qty || 0))} ({fmt(checklistMO.qty || 0)} ชิ้น)</span>
-                                  )}
+                                  {estLabor.trim() !== "" && totalTxt && <span className="text-[10px] text-slate-400">{totalTxt}</span>}
                                   <button onClick={async () => { await saveEstLabor(); setEstEditing(false); }} disabled={estSaving} className="h-8 px-3 text-sm border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50">{estSaving ? "บันทึก…" : "💾 บันทึก"}</button>
-                                  {estEditing && <button onClick={() => { setEstEditing(false); setEstLabor(estLaborInit.current); }} disabled={estSaving} className="h-8 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 disabled:opacity-50">ยกเลิก</button>}
+                                  <button onClick={() => { setEstEditing(false); setEstLabor(estLaborInit.current); }} disabled={estSaving} className="h-8 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 disabled:opacity-50">ยกเลิก</button>
+                                  <span className="text-[10px] text-slate-400">กด Enter = บันทึก · Esc = ยกเลิก</span>
                                 </div>
                               );
                             })()}
@@ -2956,6 +2993,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
     const list = pending.filter((m) => sel.has(m.id) && m.remaining > 0);
     if (!list.length) { toast.error("ใบที่ติ๊กไว้ไม่มีจำนวนคงเหลือให้จ่าย"); return; }
     const craft = craftsmen.find((c) => c.id === dispCraft);
+    // งานเหมา = ต้องระบุช่าง (กฎเดียวกับป๊อปจ่ายงานปกติ)
+    if (/เหมา/.test(dept.name) && !craft) { toast.error("งานเหมา ต้องเลือกช่างก่อน"); return; }
     const rate = dispRate.trim() === "" ? null : Number(dispRate) || 0;
 
     setDispBusy(true);
@@ -3106,59 +3145,75 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
           </div>
         </div>
       )}
-      {dispOpen && (() => {
+      {/* จ่ายงานหลายใบ — ใช้ของกลางชุดเดียวกับป๊อปจ่ายงานปกติ (ERPModal + SearchableSelect + กฎงานเหมา) */}
+      {(() => {
+        const dept = departments.find((d) => d.id === dispDeptId) ?? null;
+        const isHire = !!dept && /เหมา/.test(dept.name);
+        const deptCrafts = !dept ? [] : (isHire ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id));
         const totalQty = selPend.reduce((n, m) => n + (m.remaining || 0), 0);
         const rate = Number(dispRate) || 0;
-        const deptCrafts = craftsmen.filter((c) => !dispDeptId || !c.department_id || c.department_id === dispDeptId);
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !dispBusy && setDispOpen(false)}>
-            <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-base font-bold text-slate-800">🚚 จ่ายงานตามที่ติ๊ก</h3>
-              <p className="mt-0.5 mb-3 text-xs text-slate-500">
-                จ่าย <b>{selPend.length}</b> ใบ · รวม <b>{fmt(totalQty)}</b> ชิ้น (จำนวน = ยอดคงเหลือของแต่ละใบ)
+          <ERPModal open={dispOpen} onClose={() => { if (!dispBusy) setDispOpen(false); }} size="md"
+            title={`🧰 จ่ายงาน ${selPend.length} ใบ${dept ? ` → ${dept.name}` : ""}`}
+            footer={<>
+              <span className="mr-auto text-[11px] text-slate-400">{dispMsg}</span>
+              <button onClick={() => setDispOpen(false)} disabled={dispBusy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+              <button onClick={() => void dispatchSelected()} disabled={dispBusy || !dept || (isHire && !dispCraft)}
+                title={!dept ? "เลือกโต๊ะก่อน" : (isHire && !dispCraft) ? "งานเหมา ต้องเลือกช่างก่อน" : ""}
+                className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                {dispBusy ? "กำลังจ่าย..." : `ยืนยันจ่ายงาน ${selPend.length} ใบ`}
+              </button>
+            </>}>
+            <div className="space-y-3">
+              <p className="text-[11px] text-slate-400">
+                จ่าย <b>{selPend.length}</b> ใบ · รวม <b>{fmt(totalQty)}</b> ชิ้น — จำนวนของแต่ละใบ = ยอดคงเหลือของใบนั้น
               </p>
-              <div className="space-y-2.5">
-                <label className="block">
-                  <span className="text-[11px] text-slate-500">โต๊ะ/แผนกที่จ่ายเข้า *</span>
-                  <select value={dispDeptId} onChange={(e) => { setDispDeptId(e.target.value); setDispCraft(""); }}
-                    className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                    <option value="">— เลือกโต๊ะ —</option>
-                    {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="text-[11px] text-slate-500">ช่าง (ไม่เลือก = จ่ายเข้าทั้งโต๊ะ)</span>
-                  <select value={dispCraft} onChange={(e) => setDispCraft(e.target.value)}
-                    className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                    <option value="">— ทั้งโต๊ะ —</option>
-                    {deptCrafts.map((c) => <option key={c.id} value={c.id}>{c.nickname || c.name}</option>)}
-                  </select>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="block">
-                    <span className="text-[11px] text-slate-500">กำหนดเสร็จ</span>
-                    <input type="date" value={dispDue2} onChange={(e) => setDispDue2(e.target.value)} title="ไม่ใส่ = ใช้วันส่งภายใน/วันส่งลูกค้าของแต่ละใบ"
-                      className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg" />
-                  </label>
-                  <label className="block">
-                    <span className="text-[11px] text-slate-500">ค่าแรง/ชิ้น (บาท)</span>
-                    <input type="number" min={0} step="any" value={dispRate} onChange={(e) => setDispRate(e.target.value)} placeholder="เว้นว่าง = ใช้ของสูตร"
-                      className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg" />
-                  </label>
+
+              <label className="block"><span className="text-[11px] text-slate-500">โต๊ะ/แผนกที่จ่าย</span>
+                <select value={dispDeptId} onChange={(e) => { setDispDeptId(e.target.value); setDispCraft(""); }}
+                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                  <option value="">— เลือกโต๊ะ —</option>
+                  {departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </label>
+
+              <label className="block"><span className="text-[11px] text-slate-500">{isHire ? "เลือกช่าง (งานเหมา — จำเป็น *)" : `ช่างในแผนก ${dept?.name ?? ""}`}</span>
+                <div className="mt-0.5">
+                  <SearchableSelect value={dispCraft} onChange={setDispCraft} placeholder={isHire ? "— เลือกช่าง (จำเป็น) —" : "— ทั้งแผนก (ไม่ระบุช่าง) —"}
+                    options={[
+                      ...(isHire ? [] : [{ value: "", label: "— ทั้งแผนก (ไม่ระบุช่าง) —" }]),
+                      ...deptCrafts.map((c) => ({ value: c.id, label: `${c.code ? `[${c.code}] ` : ""}${c.name}`, searchText: `${c.code ?? ""} ${c.name}` })),
+                    ]} />
                 </div>
-                {rate > 0 && <p className="text-[11px] text-slate-500">ค่าแรงรวมประมาณ <b className="text-slate-700">฿{fmt(rate * totalQty)}</b></p>}
-                <p className="text-[11px] text-slate-400">ไม่ใส่ค่าแรง = ระบบเติมจากค่าแรง/ชิ้นของใบสั่งผลิต หรือราคากลางในสูตรให้เอง</p>
-              </div>
-              <div className="mt-4 flex items-center justify-end gap-2">
-                <span className="mr-auto text-[11px] text-slate-400">{dispMsg}</span>
-                <button onClick={() => setDispOpen(false)} disabled={dispBusy} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-                <button onClick={() => void dispatchSelected()} disabled={dispBusy || !dispDeptId}
-                  className="h-9 rounded-lg bg-emerald-600 px-5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
-                  {dispBusy ? "กำลังจ่าย…" : `จ่าย ${selPend.length} ใบ`}
-                </button>
+                {isHire ? <span className="text-[10px] text-rose-500">งานเหมา — ต้องเลือกช่าง (จ่ายทั้งแผนกไม่ได้) · พิมพ์ชื่อ/รหัสค้นหา</span>
+                  : deptCrafts.length === 0 && dept && <span className="text-[10px] text-slate-400">แผนกนี้ยังไม่มีช่าง — จ่ายเป็นทั้งแผนกได้</span>}
+              </label>
+
+              <label className="block"><span className="text-[11px] text-slate-500">กำหนดเสร็จ <span className="text-slate-400">— เว้นว่าง = ใช้วันส่งภายใน/ส่งลูกค้าของแต่ละใบ</span></span>
+                <input type="date" value={dispDue2} onChange={(e) => setDispDue2(e.target.value)}
+                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </label>
+
+              <label className="block">
+                <span className="text-[11px] text-slate-500">💰 ค่าแรงผลิต / ชิ้น (บาท) <span className="text-slate-400">— เว้นว่างได้ ระบบใช้ค่าแรงของแต่ละใบ/ราคากลางในสูตร</span></span>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <input type="number" min={0} step="any" value={dispRate} onChange={(e) => setDispRate(e.target.value)} placeholder="—"
+                    className="w-28 h-9 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <span className="text-[11px] text-slate-500">× {fmt(totalQty)} = <b className="text-slate-700">฿{fmt(rate * totalQty)}</b></span>
+                </div>
+              </label>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 max-h-40 overflow-y-auto space-y-0.5">
+                {selPend.map((m) => (
+                  <div key={m.id} className="flex items-center gap-2 text-[12px]">
+                    <span className="font-mono text-[11px] text-slate-400 shrink-0">{m.mo_no}</span>
+                    <span className="truncate text-slate-600">{m.product_sku} · {m.product_name}</span>
+                    <span className="ml-auto tabular-nums font-semibold text-slate-700 shrink-0">{fmt(m.remaining)} ชิ้น</span>
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
+          </ERPModal>
         );
       })()}
       <MiniTable
