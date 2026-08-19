@@ -2952,6 +2952,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
   const [woLaborOpen, setWoLaborOpen] = useState(false);
   const [woLaborRate, setWoLaborRate] = useState("");
   const [woLaborSaving, setWoLaborSaving] = useState(false);
+  // 📤 ส่งงานเข้า QC หลายใบพร้อมกัน (จากใบที่ติ๊กไว้ในตาราง "จ่ายแล้ว")
+  const [qcOpen, setQcOpen] = useState(false);
+  const [qcDate, setQcDate] = useState(todayLocal());                       // วันที่ส่งงาน (ตั้งต้น = วันนี้ · ลงย้อนหลังได้)
+  const [qcRows, setQcRows] = useState<Record<string, { qty: string; wage: string }>>({});
+  const [qcBusy, setQcBusy] = useState(false);
+  const [qcMsg, setQcMsg] = useState("");
   const [dueSaving, setDueSaving] = useState(false);
   const selMoNos = pending.filter((m) => sel.has(m.id)).map((m) => m.mo_no);
   // คลิกแถว/ชื่อ: ถ้ากำลังเลือกอยู่ (มีติ๊กแล้ว) → สลับติ๊ก (แบบ Gmail) · ถ้ายังไม่ติ๊กอะไร → เปิดรายละเอียด
@@ -3055,6 +3061,44 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setWoLaborSaving(false); }
   }, [wos, woSel, woLaborRate, toast, onReload]);
+
+  /** จำนวนที่ยังไม่ได้ส่งของใบนั้น */
+  const woLeft = (w: WorkOrder) => Math.max(0, (Number(w.qty) || 0) - (Number(w.received_qty) || 0));
+  /** เปิดป๊อปส่งงาน QC — ตั้งต้น: จำนวน = ที่เหลือของใบนั้น · ค่าแรง = ค่าแรงของใบนั้น (เหมือนป๊อปส่งงานทีละใบ) */
+  const openQc = useCallback(() => {
+    const init: Record<string, { qty: string; wage: string }> = {};
+    for (const w of wos.filter((x) => woSel.has(x.id))) init[w.id] = { qty: String(woLeft(w)), wage: w.labor_cost != null ? String(w.labor_cost) : "" };
+    setQcRows(init); setQcDate(todayLocal()); setQcMsg(""); setQcOpen(true);
+  }, [wos, woSel]);
+
+  const submitQc = useCallback(async () => {
+    const list = wos.filter((w) => woSel.has(w.id) && (Number(qcRows[w.id]?.qty) || 0) > 0);
+    if (!list.length) { toast.error("ยังไม่มีใบที่มีจำนวนส่ง"); return; }
+    setQcBusy(true);
+    let ok = 0; let pending = 0; const fails: string[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const w = list[i];
+      const row = qcRows[w.id];
+      const qty = Number(row?.qty) || 0;
+      const wageTxt = (row?.wage ?? "").trim();
+      setQcMsg(`กำลังส่ง ${i + 1}/${list.length} · ${w.product_sku ?? w.wo_no}`);
+      try {
+        const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wo_id: w.id, qty, submitted_at: qcDate || todayLocal(),
+            // ไม่ใส่ค่าแรง = ส่งไว้ก่อน แล้วไปเติมทีหลังที่ "ตารางส่งงาน" (ระบบจะขึ้นธง "ยังไม่ครบ" ให้)
+            ...(wageTxt === "" ? { info_pending: true } : { wage: Number(wageTxt) || 0 }),
+          }) });
+        const j = await res.json();
+        if (!res.ok || j?.error) throw new Error(j?.error || "ส่งไม่สำเร็จ");
+        ok += 1; if (wageTxt === "") pending += 1;
+      } catch (e) { fails.push(`${w.product_sku ?? w.wo_no}: ${e instanceof Error ? e.message : "ไม่สำเร็จ"}`); }
+    }
+    setQcBusy(false); setQcMsg("");
+    if (ok > 0) toast.success(`ส่งเข้า QC แล้ว ${ok} ใบ${pending > 0 ? ` (${pending} ใบยังไม่ลงค่าแรง — เติมได้ที่ตารางส่งงาน)` : ""}`);
+    if (fails.length) toast.error(`ไม่สำเร็จ ${fails.length} ใบ — ${fails[0]}`);
+    if (ok > 0) { setQcOpen(false); setWoSel(new Set()); onReload?.(); }
+  }, [wos, woSel, qcRows, qcDate, toast, onReload]);
   // กลุ่มใบสั่งผลิต (สำหรับคอลัมน์ "กลุ่ม" + จัดกลุ่มตามกลุ่ม)
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
@@ -3289,9 +3333,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
             <option value="status">จัดกลุ่มตามสถานะ</option>
           </select>
-          {selWos.length > 0 && (
+          {selWos.length > 0 && (<>
+            {canEdit && <button onClick={openQc} title="ส่งงานที่ติ๊กไว้เข้า QC (ลงวันที่ย้อนหลังได้)" className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">📤 ส่งงาน QC ({selWos.length})</button>}
             <button onClick={() => setWoLaborOpen(true)} className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">💰 ใส่ค่าแรง ({selWos.length})</button>
-          )}
+          </>)}
         </div>}
         searchText={(w) => `${w.product_sku ?? ""} ${w.product_name ?? ""} ${w.wo_no} ${w.department_name ?? ""} ${w.assignee_name ?? ""}`}
         searchPlaceholder="ค้นหา สินค้า / ใบจ่ายงาน / แผนก — ค้นทั้ง 2 ตาราง"
@@ -3300,6 +3345,68 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
         groupLabel={woGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : "จัดกลุ่มตามสถานะ"} defaultGrouped={woGroup !== "none"}
         emptyText="ยังไม่มีงานที่จ่าย"
       />
+      {/* 📤 ส่งงานเข้า QC หลายใบ — ใช้ของกลาง ERPModal · ลงวันที่ได้ (ตั้งต้นวันนี้) */}
+      {(() => {
+        const list = wos.filter((w) => woSel.has(w.id));
+        const sumQty = list.reduce((n, w) => n + (Number(qcRows[w.id]?.qty) || 0), 0);
+        const sumWage = list.reduce((n, w) => n + (Number(qcRows[w.id]?.wage) || 0), 0);
+        const noWage = list.filter((w) => (qcRows[w.id]?.wage ?? "").trim() === "").length;
+        return (
+          <ERPModal open={qcOpen} onClose={() => { if (!qcBusy) setQcOpen(false); }} size="md"
+            title={`📤 ส่งงานเข้า QC ${list.length} ใบ`}
+            footer={<>
+              <span className="mr-auto text-[11px] text-slate-400">{qcMsg}</span>
+              <button onClick={() => setQcOpen(false)} disabled={qcBusy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+              <button onClick={() => void submitQc()} disabled={qcBusy || sumQty <= 0}
+                className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                {qcBusy ? "กำลังส่ง…" : `✓ ส่งงาน ${list.length} ใบ`}
+              </button>
+            </>}>
+            <div className="space-y-3">
+              <p className="text-[11px] text-slate-400">ส่งเข้า QC รวม <b>{fmt(sumQty)}</b> ชิ้น — งานจะไปโผล่ที่ <b>โกดัง QC</b> และมีแจ้งเตือนให้ฝ่าย QC</p>
+
+              <label className="block"><span className="text-[11px] text-slate-500">วันที่ส่งงาน <span className="text-slate-400">— ตั้งต้นวันนี้ · ลงย้อนหลังได้</span></span>
+                <input type="date" value={qcDate} onChange={(e) => setQcDate(e.target.value)}
+                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              </label>
+
+              <div className="rounded-lg border border-slate-200 overflow-hidden">
+                <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-[11px] text-slate-500 flex items-center justify-between">
+                  <span>ใบที่จะส่ง ({list.length}) · แก้จำนวน/ค่าแรงรายใบได้</span>
+                  <span>รวมค่าแรง <b className="text-slate-700">฿{fmt(sumWage)}</b></span>
+                </div>
+                <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+                  {list.map((w) => {
+                    const left = woLeft(w);
+                    const row = qcRows[w.id] ?? { qty: "", wage: "" };
+                    const over = (Number(row.qty) || 0) > left;
+                    return (
+                      <div key={w.id} className="flex items-center gap-2 px-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium text-slate-700 truncate">{w.product_sku ?? w.product_name}</div>
+                          <div className="text-[10px] text-slate-400 font-mono truncate">{w.wo_no} · {w.assignee_name ?? w.department_name ?? "—"} · เหลือส่ง {fmt(left)}</div>
+                        </div>
+                        <input type="number" min={0} step="any" value={row.qty} title="จำนวนที่ส่งเข้า QC"
+                          onChange={(e) => setQcRows((p) => ({ ...p, [w.id]: { ...(p[w.id] ?? { qty: "", wage: "" }), qty: e.target.value } }))}
+                          className={`w-20 h-8 px-2 text-sm text-right border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 shrink-0 ${over ? "border-rose-300 bg-rose-50" : "border-slate-200"}`} />
+                        <input type="number" min={0} step="any" value={row.wage} placeholder="ค่าแรง —" title="ค่าแรงของใบนี้ (เว้นว่าง = ส่งไว้ก่อน ค่อยเติมทีหลัง)"
+                          onChange={(e) => setQcRows((p) => ({ ...p, [w.id]: { ...(p[w.id] ?? { qty: "", wage: "" }), wage: e.target.value } }))}
+                          className="w-24 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 shrink-0" />
+                      </div>
+                    );
+                  })}
+                </div>
+                {noWage > 0 && (
+                  <div className="px-3 py-1.5 bg-amber-50 border-t border-amber-100 text-[11px] text-amber-700">
+                    มี {noWage} ใบที่ยังไม่ลงค่าแรง — ส่งได้เลย ระบบจะติดธง “ยังไม่ครบ” ให้ไปเติมทีหลังที่ 📤 ตารางส่งงาน
+                  </div>
+                )}
+              </div>
+            </div>
+          </ERPModal>
+        );
+      })()}
+
       {woLaborOpen && (() => {
         const rate = Number(woLaborRate) || 0;
         const totalQty = selWos.reduce((n, w) => n + (w.qty || 0), 0);
