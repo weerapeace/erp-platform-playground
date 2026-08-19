@@ -167,9 +167,18 @@ export function DispatchPlanBoard({
   const [assignPopup, setAssignPopup] = useState<{ wo?: WOLite; line?: DispatchPlanLine; dept: DeptLite } | null>(null);
   const [assignSel, setAssignSel] = useState<Set<string>>(new Set());
   const [assignSaving, setAssignSaving] = useState(false);
+  // ➕ เพิ่มช่างใหม่จากป๊อปเลือกช่าง (ช่างเหมาที่เพิ่งรับเข้ามา ไม่ต้องวิ่งไปหน้าพนักงาน)
+  const [newCrafts, setNewCrafts] = useState<CraftLite[]>([]);   // คนที่เพิ่งเพิ่ม (หน้าแม่ยังโหลดรายชื่อใหม่ไม่ทัน)
+  const [addOpen, setAddOpen] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addNick, setAddNick] = useState("");
+  const [addCode, setAddCode] = useState("");
+  const [addSaving, setAddSaving] = useState(false);
   const [assignSearch, setAssignSearch] = useState("");   // ค้นหาช่างในป๊อปเลือกช่าง
   // เปิด/บันทึก ตัวเลือกช่างหลายคน
-  const craftsOfDept = useCallback((dept: DeptLite) => /เหมา/.test(dept.name) ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id), [craftsmen]);
+  // รายชื่อช่างที่ใช้จริง = ของหน้าแม่ + คนที่เพิ่งเพิ่มจากป๊อป (กันเลือกไม่ได้เพราะหน้าแม่ยังโหลดไม่เสร็จ)
+  const allCrafts = useMemo(() => [...craftsmen, ...newCrafts.filter((n) => !craftsmen.some((c) => c.id === n.id))], [craftsmen, newCrafts]);
+  const craftsOfDept = useCallback((dept: DeptLite) => /เหมา/.test(dept.name) ? allCrafts : allCrafts.filter((c) => c.department_id === dept.id), [allCrafts]);
   const openAssign = (w: WOLite, dept: DeptLite) => {
     const cur = new Set<string>();
     (w.assignees ?? []).forEach((a) => { if (a.id) cur.add(a.id); });
@@ -181,19 +190,39 @@ export function DispatchPlanBoard({
     setAssignSel(new Set(l.assignee_id ? [l.assignee_id] : []));
     setAssignSearch(""); setAssignPopup({ line: l, dept });
   };
+  /** ➕ เพิ่มช่างใหม่เข้าแผนก/โต๊ะที่กำลังเลือกอยู่ แล้วเลือกให้เลย */
+  const addCraftsman = async () => {
+    if (!assignPopup) return;
+    const name = addName.trim();
+    if (!name) { toast.error("ใส่ชื่อช่างก่อน"); return; }
+    setAddSaving(true);
+    try {
+      const res = await apiFetch("/api/mo/assignees", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, nickname: addNick.trim() || null, code: addCode.trim() || null, department_id: assignPopup.dept.id }) });
+      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "เพิ่มช่างไม่สำเร็จ");
+      const c = j.data as CraftLite;
+      setNewCrafts((p) => [...p, c]);
+      setAssignSel((prev) => (assignPopup.line ? new Set([c.id]) : new Set([...prev, c.id])));   // เพิ่มแล้วเลือกให้เลย
+      setAddName(""); setAddNick(""); setAddCode(""); setAddOpen(false);
+      toast.success(`เพิ่มช่าง ${c.name} แล้ว${c.code ? ` (${c.code})` : ""}`);
+      onStaffMoved?.();                                   // ให้หน้าแม่โหลดรายชื่อใหม่
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มช่างไม่สำเร็จ"); }
+    finally { setAddSaving(false); }
+  };
+
   const saveAssign = async () => {
     if (!assignPopup) return;
     // รายการร่าง — เก็บช่างเดียว (โครงข้อมูลของแผนรองรับคนเดียว)
     if (assignPopup.line) {
       const id = [...assignSel][0] ?? null;
-      const c = id ? craftsmen.find((x) => x.id === id) ?? null : null;
+      const c = id ? allCrafts.find((x) => x.id === id) ?? null : null;
       setAssignSaving(true);
       try { await updateLine(assignPopup.line.id, { assignee_id: c?.id ?? null, assignee_name: c?.name ?? null }); setAssignPopup(null); }
       finally { setAssignSaving(false); }
       return;
     }
     if (!onUpdateWO) return;
-    const list = [...assignSel].map((id) => { const c = craftsmen.find((x) => x.id === id); return c ? { id: c.id, name: c.name } : null; }).filter(Boolean) as { id: string; name: string }[];
+    const list = [...assignSel].map((id) => { const c = allCrafts.find((x) => x.id === id); return c ? { id: c.id, name: c.name } : null; }).filter(Boolean) as { id: string; name: string }[];
     setAssignSaving(true);
     try {
       await onUpdateWO(assignPopup.wo!.id, { assignees: list, assignee_name: list.map((x) => x.name).join(", ") || null, assignee_id: list[0]?.id ?? null, assignee_type: list.length ? "craftsman" : "department" });
@@ -837,6 +866,29 @@ export function DispatchPlanBoard({
             {/* ค้นหาช่าง — ช่างเหมามีหลายสิบคน เลื่อนหายาก */}
             <input autoFocus value={assignSearch} onChange={(e) => setAssignSearch(e.target.value)} placeholder="ค้นหา ชื่อ / รหัสพนักงาน…"
               className="h-8 px-2 mb-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" />
+            {/* ➕ ไม่มีชื่อในลิสต์ → เพิ่มช่างใหม่เข้าโต๊ะนี้ได้เลย (ช่างเหมารับเข้ามาใหม่บ่อย) */}
+            {editable && (addOpen ? (
+              <div className="mb-2 rounded-lg border border-violet-200 bg-violet-50/50 p-2 space-y-1.5">
+                <div className="text-[11px] font-semibold text-violet-700">➕ ช่างใหม่เข้า {assignPopup.dept.name}</div>
+                <input autoFocus value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="ชื่อ-นามสกุล *"
+                  onKeyDown={(e) => { if (e.key === "Enter" && !addSaving) void addCraftsman(); }}
+                  className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                <div className="flex gap-1.5">
+                  <input value={addNick} onChange={(e) => setAddNick(e.target.value)} placeholder="ชื่อเล่น"
+                    className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                  <input value={addCode} onChange={(e) => setAddCode(e.target.value)} placeholder="รหัส (ว่าง = ออกให้)"
+                    className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button disabled={addSaving || !addName.trim()} onClick={() => void addCraftsman()}
+                    className="h-7 px-3 text-xs font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">{addSaving ? "กำลังเพิ่ม…" : "เพิ่ม + เลือกเลย"}</button>
+                  <button onClick={() => { setAddOpen(false); setAddName(""); setAddNick(""); setAddCode(""); }} className="h-7 px-2 text-xs text-slate-500 hover:text-slate-700">ยกเลิก</button>
+                  <span className="text-[10px] text-slate-400 ml-auto">{/เหมา/.test(assignPopup.dept.name) ? "ติ๊กเป็นช่างเหมาให้อัตโนมัติ" : ""}</span>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setAddOpen(true)} className="mb-2 h-7 px-2 text-xs text-violet-600 border border-dashed border-violet-300 rounded-lg hover:bg-violet-50">➕ เพิ่มช่างใหม่เข้า {assignPopup.dept.name}</button>
+            ))}
             <div className="flex-1 overflow-auto -mx-1 px-1 space-y-0.5">
               {(() => {
                 const q = assignSearch.trim().toLowerCase();
