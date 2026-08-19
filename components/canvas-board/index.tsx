@@ -38,6 +38,7 @@ type CanvasBoardProps<T> = {
   onReorder?: (orderedIds: string[]) => void;            // ลำดับ id ทั้งหมดหลังลากสลับ
   onCardClick?: (item: T) => void;
   canDrag?: boolean;
+  canDragItem?: (item: T) => boolean;   // ล็อกการ์ดเป็นรายใบ (เช่น การ์ด "ของจริง" ดูได้แต่ลากไม่ได้)
   cardWidth?: number;
   hideEmptyZones?: boolean;
   emptyText?: string;
@@ -79,7 +80,7 @@ function DroppableZoneBox({ zone, count, children }: { zone: CanvasZone; count: 
 
 export function CanvasBoard<T>({
   zones, items, getItemId, getZoneId, renderCard, onMove, onReorder, onCardClick,
-  canDrag = true, cardWidth = 184, hideEmptyZones = false,
+  canDrag = true, canDragItem, cardWidth = 184, hideEmptyZones = false,
   emptyText = "ยังไม่มีการ์ด — ลากมาวางที่นี่ได้",
 }: CanvasBoardProps<T>) {
   const itemMap = new Map(items.map((it) => [getItemId(it), it]));
@@ -156,6 +157,7 @@ export function CanvasBoard<T>({
     }
     // ย้ายโซน → onMove (เปลี่ยนสถานะ/หมวด)
     const item = itemMap.get(activeIdL);
+    if (item && canDragItem && !canDragItem(item)) { setContainers(buildContainers()); return; }   // การ์ดล็อก — กันพลาด ไม่บันทึกอะไร
     if (item && getZoneId(item) !== zone && onMove) onMove(item, zone);
     // ลำดับใหม่ทั้งหมด (เรียงตามโซน) → onReorder
     if (onReorder) {
@@ -179,9 +181,11 @@ export function CanvasBoard<T>({
               {ids.map((id) => {
                 const it = itemMap.get(id);
                 if (!it) return null;
+                // การ์ดที่ล็อกไว้ (canDragItem คืน false) — ยังเห็น/กดได้ แต่ลากไม่ได้
+                const locked = !draggable || (canDragItem ? !canDragItem(it) : false);
                 return (
                   <div key={id} style={{ width: cardWidth }}>
-                    <SortableCard id={id} disabled={!draggable} onClick={onCardClick ? () => onCardClick(it) : undefined}>
+                    <SortableCard id={id} disabled={locked} onClick={onCardClick ? () => onCardClick(it) : undefined}>
                       {renderCard(it, false)}
                     </SortableCard>
                   </div>
