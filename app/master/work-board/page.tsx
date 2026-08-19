@@ -374,6 +374,8 @@ function WorkBoardPageInner() {
   const [moDueSaving, setMoDueSaving] = useState<"" | "due" | "internal">("");
   const [woDue, setWoDue] = useState("");                     // กำหนดเสร็จของ "ใบจ่ายงาน" ใบนี้
   const [woDueSaving, setWoDueSaving] = useState(false);
+  const [woQty, setWoQty] = useState("");                     // จำนวนที่จ่ายของใบจ่ายงาน (แก้ได้ตอนลงผิด)
+  const [woQtySaving, setWoQtySaving] = useState(false);
   // 📦 แบ่งงวดส่ง — ใบเดียวส่งหลายวัน (วันไหนส่งเท่าไหร่)
   const [planOpen, setPlanOpen] = useState(false);
   const [newPlanDate, setNewPlanDate] = useState("");
@@ -666,7 +668,7 @@ function WorkBoardPageInner() {
   // เปิดป๊อปอัปเช็กลิสต์จากใบจ่ายงาน (มีแท็บ "รับงานคืน" เป็นแท็บแรก) — ถ้าไม่รู้ MO id ใช้ป๊อปอัปเดิม
   const openWO = (wo: WorkOrder) => {
     if (!wo.mo_id) { setDetailWO(wo); setRecvLabor(wo.labor_cost != null ? String(wo.labor_cost) : ""); setSaveLaborBom(false); return; }
-    setClWO(wo); setClTab("recv"); setWoDue((wo.due_date ?? "").slice(0, 10));
+    setClWO(wo); setClTab("recv"); setWoDue((wo.due_date ?? "").slice(0, 10)); setWoQty(String(wo.qty ?? ""));
     setRecvLabor(wo.labor_cost != null ? String(wo.labor_cost) : ""); setSaveLaborBom(false);
     setChecklistMO({
       id: wo.mo_id, mo_no: wo.mo_no, product_sku: wo.product_sku, product_name: wo.product_name,
@@ -1206,6 +1208,25 @@ function WorkBoardPageInner() {
     setPlanSaving(false);
     if (r.ok) await load(true);
   }, [toast, load]);
+
+  /**
+   * แก้ "จำนวนที่จ่าย" ของใบจ่ายงาน — ใช้ตอนลงผิด (เช่น เปิดใบ 30 แต่งานจริง 20)
+   * กติกา: ห้ามน้อยกว่าจำนวนที่ช่างส่งกลับมาแล้ว (ไม่งั้นยอดติดลบ)
+   * ถ้าใบสั่งผลิตยังเป็นจำนวนเดิม ต้องไปแก้จำนวนใบสั่งผลิตด้วย (ป๊อปเตือนให้)
+   */
+  const saveWoQty = useCallback(async (value: string) => {
+    if (!clWO) return;
+    const n = Number(value);
+    if (!isFinite(n) || n <= 0) { toast.error("จำนวนต้องมากกว่า 0"); return; }
+    const recv = Number(clWO.received_qty) || 0;
+    if (n < recv - 0.0001) { toast.error(`ลดต่ำกว่าที่ส่งกลับมาแล้วไม่ได้ (ส่งแล้ว ${fmt(recv)} ชิ้น)`); return; }
+    setWoQtySaving(true);
+    const r = await apiSave(toast, `/api/mo/work-orders/${encodeURIComponent(clWO.id)}`,
+      { method: "PATCH", body: { qty: n } },
+      { ok: `แก้จำนวนที่จ่ายเป็น ${fmt(n)} ชิ้นแล้ว`, fail: "แก้จำนวนที่จ่ายไม่สำเร็จ" });
+    setWoQtySaving(false);
+    if (r.ok) { setClWO({ ...clWO, qty: n }); setWoQty(String(n)); await load(true); }
+  }, [clWO, toast, load]);
 
   // บันทึกกำหนดเสร็จของ "ใบจ่ายงาน" ใบเดียว (แท็บส่งงาน)
   const saveWoDue = useCallback(async (value: string) => {
@@ -2087,7 +2108,13 @@ function WorkBoardPageInner() {
                       <div className="space-y-3">
                         <div className="grid grid-cols-[6rem_1fr] gap-y-1.5 text-xs">
                           <span className="text-slate-400">แผนก/ผู้รับ</span><span className="text-slate-700">{clWO.department_name ?? "—"} · {clWO.assignee_name ?? "—"}</span>
-                          <span className="text-slate-400">จ่าย</span><span className="text-slate-700">{fmt(clWO.qty)} ชิ้น</span>
+                          <span className="text-slate-400">จ่าย</span>
+                          <span className="flex items-center gap-1.5 flex-wrap">
+                            <InlineEdit type="number" value={woQty} suffix="ชิ้น" width="6rem" disabled={!canEdit || woQtySaving}
+                              onSave={(v) => void saveWoQty(v)} />
+                            {woQtySaving && <span className="text-[11px] text-slate-400">กำลังบันทึก…</span>}
+                            <span className="text-[10px] text-slate-400">แก้ได้ถ้าลงผิด (ลดต่ำกว่าที่ส่งแล้วไม่ได้)</span>
+                          </span>
                           <span className="text-slate-400">ส่งแล้ว</span><span className="text-slate-700">{fmt(clWO.received_qty)} · เหลือ {fmt(Math.max(0, (clWO.qty || 0) - (clWO.received_qty || 0)))}</span>
                           <span className="text-slate-400">กำหนดเสร็จ</span>
                           <span className="flex items-center gap-1.5">
