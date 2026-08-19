@@ -650,6 +650,8 @@ export function CanvasSketch({
       const els = api.getSceneElements() as any[];
       for (let i = els.length - 1; i >= 0; i--) {
         const it = els[i]; const d = it?.customData;
+        // ⚠️ ข้ามกรอบ (frame) — กรอบครอบทั้งโซน ถ้านับด้วยจะ "กลืน" ดับเบิลคลิกของการ์ดที่อยู่ข้างใน
+        if (it?.type === "frame" || it?.type === "magicframe") continue;
         if (d?.kind && px >= it.x && px <= it.x + it.width && py >= it.y && py <= it.y + it.height) { e.preventDefault(); e.stopPropagation(); cb(d); return; }
       }
     };

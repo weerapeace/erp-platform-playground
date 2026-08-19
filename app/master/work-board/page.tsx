@@ -1413,7 +1413,9 @@ function WorkBoardPageInner() {
             imageByMo={imageByMo} laborPerUnit={laborPerUnit}
             onOpenWO={(id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
             onOpenWork={(info) => {
-              const mo = info.moId ? board.pending.find((x) => x.id === info.moId) : null;
+              // ดับเบิลคลิกการ์ดแผน → เปิดป๊อปรายละเอียดงาน · หาใบจาก "รอจ่าย" ก่อน ไม่เจอค่อยหาจากใบที่จ่ายครบแล้ว
+              const all = [...board.pending, ...board.dispatchedMos];
+              const mo = info.moId ? all.find((x) => x.id === info.moId) : (info.moNo ? all.find((x) => x.mo_no === info.moNo) : null);
               setClWO(null);
               if (mo) { setChecklistMO(mo); return; }
               setChecklistMO({

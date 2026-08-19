@@ -123,3 +123,36 @@ describe("layoutDesks", () => {
     expect(f.stampDesk).toBe(true);   // ควรประทับ customData ให้ถาวร
   });
 });
+
+describe("layoutDesks — โยนการ์ดเข้ากรอบ (adopt)", () => {
+  const f1: CanvasEl = { id: "f1", type: "frame", name: "โต๊ะขาล", x: 0, y: 0, width: FRAME_W, height: frameHeight(1), customData: { kind: "wb_desk", id: "d1" } };
+  const f2: CanvasEl = { id: "f2", type: "frame", name: "โต๊ะแต๋ว", x: 2000, y: 0, width: FRAME_W, height: frameHeight(1), customData: { kind: "wb_desk", id: "d2" } };
+
+  it("การ์ดที่จุดกึ่งกลางตกอยู่ในกรอบ ถูกผูกเข้ากรอบให้เอง แม้ Excalidraw ยังไม่ผูก (การ์ดล้นขอบ)", () => {
+    // วางคร่อมขอบล่างกรอบ f1 แต่จุดกึ่งกลางยังอยู่ในกรอบ · frameId ยังว่าง
+    const cy = frameHeight(1) - 50;
+    const els = [f1, f2, ...card("a", "wb_plan", "", 20, cy, 10, 100)];
+    const { adopts, moves, planDesk } = layoutDesks(els, DEPTS);
+    expect(adopts.map((x) => x.frameId)).toEqual(["f1", "f1"]);      // ทั้งกรอบการ์ดและข้อความ
+    expect(planDesk.get("a")).toBe("d1");                            // เขียนกลับเข้าแผนว่าอยู่โต๊ะขาล
+    expect(moves.find((m) => m.id === "a-r")).toMatchObject(slotPos(0, 0, 0));   // แล้วจัดเข้าช่องด้วย
+  });
+
+  it("การ์ดที่ลอยนอกกรอบทุกใบ = ไม่ผูก ไม่ขยับ ไม่แตะแผน", () => {
+    const els = [f1, f2, ...card("a", "wb_plan", "", 1200, 900, 10, 100)];
+    const { adopts, moves, planDesk } = layoutDesks(els, DEPTS);
+    expect(adopts).toEqual([]);
+    expect(moves).toEqual([]);
+    expect(planDesk.has("a")).toBe(false);
+  });
+
+  it("การ์ดที่ Excalidraw ผูกกรอบให้แล้ว ไม่ต้องผูกซ้ำ", () => {
+    const els = [f1, ...card("a", "wb_plan", "f1", slotPos(0, 0, 0).x, slotPos(0, 0, 0).y, 10, 100)];
+    expect(layoutDesks(els, DEPTS).adopts).toEqual([]);
+  });
+
+  it("ลากข้ามไปกรอบอีกโต๊ะ (Excalidraw ผูกให้แล้ว) → planDesk บอกโต๊ะใหม่", () => {
+    const els = [f1, f2, ...card("a", "wb_plan", "f2", 2020, 60, 10, 100)];
+    expect(layoutDesks(els, DEPTS).planDesk.get("a")).toBe("d2");
+  });
+});

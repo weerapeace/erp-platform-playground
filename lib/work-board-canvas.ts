@@ -84,6 +84,10 @@ export function diffDeskMoves(
 export type DeskLayout = {
   /** element ที่ต้องขยับ (snap เข้าช่อง) */
   moves: { id: string; x: number; y: number }[];
+  /** element ที่ต้อง "ผูกเข้ากรอบ" (โยนเข้ามาแล้ว แต่ Excalidraw ยังไม่นับเป็นลูกของกรอบ เช่นการ์ดล้นขอบกรอบ) */
+  adopts: { id: string; frameId: string }[];
+  /** การ์ดแผนใบไหนอยู่โต๊ะไหน (รวมใบที่เพิ่งถูกผูกเข้ากรอบ) — ใช้เขียนกลับเข้าแผน */
+  planDesk: Map<string, string | null>;
   /** สรุปรายกรอบ — ไว้ตั้งความสูงกรอบ + เขียนหัวกรอบ (จำนวน/ค่าแรง) */
   frames: {
     id: string; deptId: string | null;
@@ -94,32 +98,68 @@ export type DeskLayout = {
 };
 
 /**
- * จัดการ์ดในแต่ละกรอบโต๊ะให้เข้าช่องกริด (snap) + สรุปจำนวน/ค่าแรงของโต๊ะนั้น
+ * อ่านกระดาน 1 รอบ แล้วบอกทุกอย่างที่ต้องทำ: การ์ดใบไหนอยู่โต๊ะไหน · ต้องผูกเข้ากรอบไหม · ต้องขยับเข้าช่องตรงไหน · ยอดรวมของแต่ละโต๊ะ
+ *
+ * - การ์ด 1 ใบ = element ที่ groupIds[0] เดียวกัน (กรอบการ์ด + ข้อความ + รูป) → ขยับ/ผูกกรอบทั้งใบพร้อมกัน
+ * - "โยนเข้ากรอบ" นับจาก **จุดกึ่งกลางการ์ดอยู่ในกรอบ** ไม่ใช่รอให้ Excalidraw ผูกให้ (การ์ดที่ล้นขอบกรอบ Excalidraw จะไม่ผูกให้ → เคยทำให้ไม่จัดเรียง)
  * - ลำดับช่อง = ตำแหน่งที่ผู้ใช้วางไว้ (บน→ล่าง, ซ้าย→ขวา) แล้วค่อยจัดให้ตรงช่อง
- * - การ์ด 1 ใบ = element ที่ groupIds[0] เดียวกัน (กรอบ+ข้อความ+รูป) → ขยับทั้งใบพร้อมกัน
- * - ค่าแรง/จำนวน อ่านจาก customData ของการ์ด (labor, qty) — ไม่ต้องยิง API
+ * - ค่าแรง/จำนวน อ่านจาก customData ของการ์ด (qty, labor) — ไม่ต้องยิง API
  */
 export function layoutDesks(els: CanvasEl[], departments: DeskDept[]): DeskLayout {
   const frames = deskFrames(els, departments);
   const frameEl = new Map<string, CanvasEl>();
   for (const el of els) if (el?.type === "frame" && el.id && frames.has(String(el.id))) frameEl.set(String(el.id), el);
 
-  // รวม element เป็น "การ์ด" (ตาม groupIds[0]) เฉพาะการ์ดงานของบอร์ดนี้
-  type Card = { key: string; frameId: string; kind: string; qty: number; labor: number; minX: number; minY: number; els: CanvasEl[] };
+  // รวม element เป็น "การ์ด" (ตาม groupIds[0]) — เก็บกรอบครอบการ์ดไว้หาจุดกึ่งกลาง
+  type Card = {
+    key: string; kind: string; id: string; qty: number; labor: number;
+    minX: number; minY: number; maxX: number; maxY: number;
+    frameNow: string; els: CanvasEl[];
+  };
   const cards = new Map<string, Card>();
   for (const el of els) {
     const d = el?.customData as { kind?: string; id?: string; qty?: unknown; labor?: unknown } | undefined | null;
     if (d?.kind !== "wb_plan" && d?.kind !== "wb_real") continue;
-    const fid = el.frameId ? String(el.frameId) : "";
-    if (!fid || !frames.has(fid)) continue;
     const key = (el.groupIds && el.groupIds[0]) || `${d.kind}:${d.id ?? ""}`;
+    const x = num(el.x), y = num(el.y), x2 = x + num(el.width), y2 = y + num(el.height);
     const hit = cards.get(key);
-    if (hit) { hit.minX = Math.min(hit.minX, num(el.x)); hit.minY = Math.min(hit.minY, num(el.y)); hit.els.push(el); continue; }
-    cards.set(key, { key, frameId: fid, kind: String(d.kind), qty: num(d.qty), labor: num(d.labor), minX: num(el.x), minY: num(el.y), els: [el] });
+    if (hit) {
+      hit.minX = Math.min(hit.minX, x); hit.minY = Math.min(hit.minY, y);
+      hit.maxX = Math.max(hit.maxX, x2); hit.maxY = Math.max(hit.maxY, y2);
+      if (!hit.frameNow && el.frameId) hit.frameNow = String(el.frameId);
+      hit.els.push(el);
+      continue;
+    }
+    cards.set(key, {
+      key, kind: String(d.kind), id: String(d.id ?? ""), qty: num(d.qty), labor: num(d.labor),
+      minX: x, minY: y, maxX: x2, maxY: y2, frameNow: el.frameId ? String(el.frameId) : "", els: [el],
+    });
   }
 
+  // การ์ดใบนี้ควรอยู่กรอบไหน — กรอบเดิมถ้ายังใช่ · ไม่งั้นดูว่าจุดกึ่งกลางการ์ดตกอยู่ในกรอบโต๊ะไหน
+  const inFrame = (c: Card): string => {
+    if (c.frameNow && frames.has(c.frameNow)) return c.frameNow;
+    const cx = (c.minX + c.maxX) / 2, cy = (c.minY + c.maxY) / 2;
+    for (const [fid, f] of frameEl) {
+      const fx = num(f.x), fy = num(f.y);
+      if (cx >= fx && cx <= fx + num(f.width) && cy >= fy && cy <= fy + num(f.height)) return fid;
+    }
+    return "";
+  };
+
   const byFrame = new Map<string, Card[]>();
-  for (const c of cards.values()) { const a = byFrame.get(c.frameId) ?? []; a.push(c); byFrame.set(c.frameId, a); }
+  const adopts: DeskLayout["adopts"] = [];
+  const planDesk = new Map<string, string | null>();
+  for (const c of cards.values()) {
+    const fid = inFrame(c);
+    if (!fid) continue;                                        // ลอยนอกกรอบโต๊ะ → ไม่ยุ่ง (กันเผลอล้างโต๊ะออกจากแผน)
+    const a = byFrame.get(fid) ?? []; a.push(c); byFrame.set(fid, a);
+    if (c.kind === "wb_plan" && c.id) planDesk.set(c.id, frames.get(fid) ?? null);
+    for (const el of c.els) {
+      if (!el.id) continue;
+      if ((el.frameId ? String(el.frameId) : "") !== fid) adopts.push({ id: String(el.id), frameId: fid });
+    }
+  }
 
   const moves: DeskLayout["moves"] = [];
   const out: DeskLayout["frames"] = [];
@@ -143,5 +183,5 @@ export function layoutDesks(els: CanvasEl[], departments: DeskDept[]): DeskLayou
       ...(d?.kind === "wb_desk" ? {} : { stampDesk: true }),
     });
   }
-  return { moves, frames: out };
+  return { moves, adopts, planDesk, frames: out };
 }

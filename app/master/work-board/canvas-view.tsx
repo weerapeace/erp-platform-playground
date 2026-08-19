@@ -42,6 +42,8 @@ type WOLite = {
 };
 
 const NO_DESK = "__no_desk__";
+// เวอร์ชันหน้าตาการ์ด — การ์ดที่วางไว้ก่อนหน้านี้ (ไม่มีรูป) จะถูกวางใหม่ให้อัตโนมัติตอนซิงค์
+const CARD_VER = 2;
 const IMG = 52;
 const PLAN_STROKE = "#6366f1", PLAN_BG = "#ffffff";
 const REAL_STROKE = "#94a3b8", REAL_BG = "#e2e8f0";
@@ -165,7 +167,7 @@ export function CanvasView({
         l.assignee_name ? `👤 ${clip(l.assignee_name, 16)}` : "",
       ],
       img: withImageWidth(imageByMo[String(l.mo_no ?? "")] ?? null, 160),
-      data: { kind: "wb_plan", id: l.id, mo_id: l.mo_id, mo_no: l.mo_no, product_sku: l.product_sku, product_name: l.product_name, qty, labor },
+      data: { kind: "wb_plan", v: CARD_VER, id: l.id, mo_id: l.mo_id, mo_no: l.mo_no, product_sku: l.product_sku, product_name: l.product_name, qty, labor },
     };
   }, [imageByMo, laborPerUnit]);
 
@@ -183,7 +185,7 @@ export function CanvasView({
         [recv > 0 ? `ส่งแล้ว ${fmt(recv)}` : "", w.assignee_name ? `👤 ${clip(w.assignee_name, 14)}` : ""].filter(Boolean).join("  ·  "),
       ],
       img: withImageWidth(w.image_url ?? imageByMo[String(w.mo_no)] ?? null, 160),
-      data: { kind: "wb_real", id: w.id, wo_no: w.wo_no ?? null, mo_no: w.mo_no, product_sku: w.product_sku, product_name: w.product_name, qty, labor },
+      data: { kind: "wb_real", v: CARD_VER, id: w.id, wo_no: w.wo_no ?? null, mo_no: w.mo_no, product_sku: w.product_sku, product_name: w.product_name, qty, labor },
     };
   }, [imageByMo, laborPerUnit]);
 
@@ -228,25 +230,74 @@ export function CanvasView({
     return out;
   }, [departments, byDesk]);
 
-  // ---- snap การ์ดเข้าช่อง + เขียนหัวกรอบ (จำนวน/ค่าแรง) ----
-  const applyLayout = useCallback(() => {
-    const c = ref.current; if (!c || !editable) return;
-    const { moves, frames } = layoutDesks(c.getElements() as CanvasEl[], departments);
-    if (!moves.length && !frames.length) return;
+  // ---- เขียนกลับ: ลากการ์ดแผนข้ามกรอบโต๊ะ = ย้ายโต๊ะในแผนจริง ----
+  const moveLine = useCallback(async (lineId: string, deptId: string | null) => {
+    const dept = departments.find((d) => d.id === deptId) ?? null;
+    const before = lines.find((l) => l.id === lineId) ?? null;
+    setLines((ls) => ls.map((l) => l.id === lineId ? { ...l, department_id: dept?.id ?? null, department_name: dept?.name ?? null, assignee_id: null, assignee_name: null } : l));
+    try {
+      const res = await apiFetch(`/api/mo/dispatch-plans/${planId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_line", lineId, department_id: dept?.id ?? null, department_name: dept?.name ?? null }),
+      });
+      const j = await res.json(); if (j?.error) throw new Error(j.error);
+      toast.success(`ย้ายเข้า ${dept?.name ?? "ยังไม่ระบุโต๊ะ"} แล้ว`);
+    } catch (e) {
+      if (before) setLines((ls) => ls.map((l) => l.id === lineId ? before : l));
+      toast.error(e instanceof Error ? e.message : "ย้ายโต๊ะไม่สำเร็จ (กระดานยังแสดงตำแหน่งใหม่ ลองกดซิงค์)");
+    }
+  }, [departments, lines, planId, toast]);
+
+  // ---- อ่านกระดาน 1 รอบ → เขียนกลับเข้าแผน + ผูกการ์ดเข้ากรอบ + snap เข้าช่อง + เขียนหัวกรอบ ----
+  // write=false → แค่จำตำแหน่งตั้งต้น ไม่บันทึกอะไรเข้าแผน (ใช้ตอนเพิ่งเปิดกระดาน)
+  const applyBoardState = useCallback((write: boolean) => {
+    const c = ref.current; if (!c) return;
+    const { moves, adopts, planDesk, frames } = layoutDesks(c.getElements() as CanvasEl[], departments);
+
+    // (1) การ์ดแผนถูกย้ายโต๊ะ → เขียนกลับเข้าแผนจริง
+    const toWrite = write && editable ? diffDeskMoves(planDesk, deskSeen.current) : [];
+    for (const [lineId, desk] of planDesk) deskSeen.current.set(lineId, desk);
+    for (const m of toWrite) void moveLine(m.lineId, m.deptId);
+
+    // (2) จัดกระดาน — ผูกการ์ดเข้ากรอบที่มันถูกโยนลงไป + snap เข้าช่อง + หัวกรอบ/ความสูง
+    if (!editable) return;
+    if (!moves.length && !adopts.length && !frames.length) return;
     const moveMap = new Map(moves.map((m) => [m.id, m]));
-    const frameMap = new Map(frames.map((f) => [f.id, f]));
+    const adoptMap = new Map(adopts.map((a) => [a.id, a.frameId]));
+    const frameMap = new Map(frames.map((fr) => [fr.id, fr]));
     c.patchElements((el) => {
       const id = String(el.id ?? "");
-      const m = moveMap.get(id); if (m) return { x: m.x, y: m.y };
-      const f = frameMap.get(id);
-      if (!f) return null;
-      const p: Record<string, unknown> = { name: frameLabel(f) };
-      if (f.height != null) p.height = f.height;
+      const m = moveMap.get(id), a = adoptMap.get(id);
+      if (m || a) return { ...(m ? { x: m.x, y: m.y } : {}), ...(a ? { frameId: a } : {}) };
+      const fr = frameMap.get(id);
+      if (!fr) return null;
+      const p: Record<string, unknown> = { name: frameLabel(fr) };
+      if (fr.height != null) p.height = fr.height;
       // กรอบที่รู้จักจาก "ชื่อ" เฉย ๆ (ผู้ใช้วาดเอง) → ประทับให้ถาวร จะได้ไม่หลุดตอนหัวกรอบมีตัวเลขต่อท้าย
-      if (f.stampDesk) p.customData = { kind: "wb_desk", id: f.deptId ?? "" };
+      if (fr.stampDesk) p.customData = { kind: "wb_desk", id: fr.deptId ?? "" };
       return p;
     });
-  }, [departments, editable, frameLabel]);
+  }, [departments, editable, frameLabel, moveLine]);
+
+  // ---- วางโครงใหม่ทั้งกระดาน (เก็บของที่วาดเอง ลบเฉพาะการ์ด/กรอบของระบบ) ----
+  const reseed = useCallback(async (why: string) => {
+    const c = ref.current; if (!c) return;
+    c.removeCards((card) => card.kind === "wb_plan" || card.kind === "wb_real");
+    c.patchElements((el) => {
+      const d = el.customData as { kind?: string } | undefined | null;
+      return d?.kind === "wb_desk" ? { isDeleted: true } : null;
+    });
+    deskSeen.current = new Map();
+    const ratios = await measureRatios([...byDesk.values()].flat().map((x) => x.img ?? ""));
+    const sk = seedSkeletons(ratios);
+    if (sk.length) await c.insert(sk, { fitImages: false });
+    if (why) toast.success(why);
+  }, [byDesk, seedSkeletons, toast]);
+
+  const rebuild = useCallback(async () => {
+    setAskRebuild(false); setBusy(true);
+    try { await reseed("วางโครงกระดานใหม่แล้ว"); } finally { setBusy(false); }
+  }, [reseed]);
 
   // ---- ซิงค์: มีอะไรใหม่เพิ่มเข้ามา / อันไหนหายไป / ข้อความเปลี่ยน ----
   const syncBoard = useCallback(async (silent = false) => {
@@ -259,6 +310,9 @@ export function CanvasView({
       if (sk.length) { await c.insert(sk, { fitImages: false }); if (!silent) toast.success("วางโครงกระดานตามแผนให้แล้ว"); }
       return;
     }
+    // การ์ดรุ่นเก่า (วางไว้ตอนที่การ์ดยังไม่มีรูป) → วางใหม่ให้ทั้งกระดาน จะได้ได้รูป+ค่าแรงครบ
+    const old = cards.some((x) => (x.kind === "wb_plan" || x.kind === "wb_real") && Number(x.data.v ?? 0) < CARD_VER);
+    if (old) { await reseed("อัปเดตหน้าตาการ์ดให้แล้ว (มีรูป + ค่าแรง)"); return; }
     const planIds = new Set(lines.map((l) => l.id));
     const woIds = new Set(activeWOs.map((w) => w.id));
     // 1) การ์ดที่ไม่มีในข้อมูลแล้ว (ลบออกจากแผน / รับงานครบ) → เอาออกจากกระดาน
@@ -281,52 +335,7 @@ export function CanvasView({
       await c.insert(sk, { fitImages: false });
       toast.info(`มีงานใหม่ ${missing.length} ใบ — วางไว้กลางจอ ลากเข้ากรอบโต๊ะได้เลย`);
     } else if (!silent) toast.success("กระดานตรงกับข้อมูลล่าสุดแล้ว");
-  }, [lines, activeWOs, byDesk, seedSkeletons, planCard, realCard, toast]);
-
-  // ---- วางโครงใหม่ทั้งกระดาน (เก็บของที่วาดเอง ลบเฉพาะการ์ด/กรอบของระบบ) ----
-  const rebuild = useCallback(async () => {
-    const c = ref.current; if (!c) return;
-    setAskRebuild(false); setBusy(true);
-    try {
-      c.removeCards((card) => card.kind === "wb_plan" || card.kind === "wb_real");
-      c.patchElements((el) => {
-        const d = el.customData as { kind?: string } | undefined | null;
-        return d?.kind === "wb_desk" ? { isDeleted: true } : null;
-      });
-      deskSeen.current = new Map();
-      const ratios = await measureRatios([...byDesk.values()].flat().map((x) => x.img ?? ""));
-      const sk = seedSkeletons(ratios);
-      if (sk.length) await c.insert(sk, { fitImages: false });
-      toast.success("วางโครงกระดานใหม่แล้ว");
-    } finally { setBusy(false); }
-  }, [byDesk, seedSkeletons, toast]);
-
-  // ---- เขียนกลับ: ลากการ์ดแผนข้ามกรอบโต๊ะ = ย้ายโต๊ะในแผนจริง ----
-  const moveLine = useCallback(async (lineId: string, deptId: string | null) => {
-    const dept = departments.find((d) => d.id === deptId) ?? null;
-    const before = lines.find((l) => l.id === lineId) ?? null;
-    setLines((ls) => ls.map((l) => l.id === lineId ? { ...l, department_id: dept?.id ?? null, department_name: dept?.name ?? null, assignee_id: null, assignee_name: null } : l));
-    try {
-      const res = await apiFetch(`/api/mo/dispatch-plans/${planId}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_line", lineId, department_id: dept?.id ?? null, department_name: dept?.name ?? null }),
-      });
-      const j = await res.json(); if (j?.error) throw new Error(j.error);
-      toast.success(`ย้ายเข้า ${dept?.name ?? "ยังไม่ระบุโต๊ะ"} แล้ว`);
-    } catch (e) {
-      if (before) setLines((ls) => ls.map((l) => l.id === lineId ? before : l));
-      toast.error(e instanceof Error ? e.message : "ย้ายโต๊ะไม่สำเร็จ (กระดานยังแสดงตำแหน่งใหม่ ลองกดซิงค์)");
-    }
-  }, [departments, lines, planId, toast]);
-
-  // อ่านกระดาน → การ์ดแผนใบไหนอยู่กรอบโต๊ะไหน · write=false = แค่จำไว้เป็นจุดตั้งต้น (ไม่บันทึกอะไร)
-  const observeDesks = useCallback((write: boolean) => {
-    const c = ref.current; if (!c) return;
-    const now = deskOfPlanCards(c.getElements() as CanvasEl[], departments);
-    const moves = write ? diffDeskMoves(now, deskSeen.current) : [];
-    for (const [lineId, desk] of now) deskSeen.current.set(lineId, desk);
-    for (const m of moves) void moveLine(m.lineId, m.deptId);
-  }, [departments, moveLine]);
+  }, [lines, activeWOs, byDesk, seedSkeletons, reseed, planCard, realCard, toast]);
 
   // กระดานพร้อม → วางโครง/ซิงค์ แล้วจำตำแหน่งตั้งต้น
   // ⚠️ onReady อาจมาถึงก่อน controlsRef ถูกผูก (คนละ effect) — ถ้าไม่รอ จะกลายเป็น "เปิดมาแล้วกระดานว่าง ไม่วางโครงให้"
@@ -334,9 +343,8 @@ export function CanvasView({
     for (let i = 0; i < 40 && !ref.current; i++) await new Promise((r) => setTimeout(r, 50));
     if (!ref.current) return;
     await syncBoard(true);
-    observeDesks(false);
-    applyLayout();
-  }, [syncBoard, observeDesks, applyLayout]);
+    applyBoardState(false);
+  }, [syncBoard, applyBoardState]);
 
   if (plans.length === 0) {
     return (
@@ -370,7 +378,8 @@ export function CanvasView({
         </span>
       </div>
 
-      {loading ? <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลดแผน…</div> : (
+      {/* ⚠️ ห้าม mount กระดานก่อนรู้ว่าเป็นแผนไหน — เคยทำให้กระดานของ entity ว่างถูกสร้าง/เซฟทิ้ง แล้วแผนจริงไม่ถูกวางโครง */}
+      {loading || !planId ? <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลดแผน…</div> : (
         <CanvasSketch
           key={planId}
           entityType="work_board"
@@ -380,7 +389,7 @@ export function CanvasView({
           height="calc(100vh - 250px)"
           controlsRef={ref}
           onReady={() => { void onBoardReady(); }}
-          onSaved={() => { observeDesks(editable); applyLayout(); }}
+          onSaved={() => applyBoardState(true)}
           onCardOpen={(d) => {
             if (d?.kind === "wb_real") { onOpenWO?.(String(d.id ?? "")); return; }
             if (d?.kind === "wb_plan") {
