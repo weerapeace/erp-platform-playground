@@ -316,6 +316,51 @@ function taskCardSkeleton(t: CreatedTask): Record<string, unknown>[] {
   ];
 }
 
+// ── ปุ่มกลุ่มเครื่องมือบนแถบกระดาน (dropdown) ───────────────────────────────
+// เดิมปุ่มเรียงยาว 14 ปุ่มจนแถบรก → รวมตามประเภทเป็นเมนู กดแล้วกางรายการ
+const TOOL_TONE: Record<string, string> = {
+  violet: "text-violet-700 border-violet-200 hover:bg-violet-50",
+  teal: "text-teal-700 border-teal-200 hover:bg-teal-50",
+  slate: "text-slate-600 border-slate-200 hover:bg-slate-50",
+};
+function ToolMenu({ label, icon, tone = "slate", items }: {
+  label: string; icon: string; tone?: "violet" | "teal" | "slate";
+  items: { icon: string; label: string; hint?: string; onClick: () => void }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!boxRef.current?.contains(e.target as Node)) setOpen(false); };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onEsc);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onEsc); };
+  }, [open]);
+  return (
+    <div className="relative" ref={boxRef}>
+      <button onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        className={`h-9 px-3 inline-flex items-center gap-1 text-sm font-medium border rounded-lg ${TOOL_TONE[tone]} ${open ? "bg-white ring-2 ring-violet-200" : ""}`}>
+        <span>{icon}</span>{label}<span className="text-[10px] text-slate-400">▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-40 mt-1 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
+          {items.map((it) => (
+            <button key={it.label} onClick={() => { setOpen(false); it.onClick(); }}
+              className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50">
+              <span className="w-5 shrink-0 text-center text-base leading-5">{it.icon}</span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-slate-700">{it.label}</span>
+                {it.hint && <span className="block text-[11px] leading-tight text-slate-400">{it.hint}</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CampaignCanvasPage() {
   const t = useT();
   const id = String(useParams().id);
@@ -368,6 +413,10 @@ export default function CampaignCanvasPage() {
   // ── การ์ดใบงานออกแบบ (เชื่อมกับ Design Dashboard) ──
   const canDesign = usePermission("products.view");
   const [dsPickOpen, setDsPickOpen] = useState(false);        // ป๊อปอัปเลือกใบงาน
+  const [trendOpen, setTrendOpen] = useState(false);          // ป๊อปอัปเลือกเทรนด์ (บอร์ดเทรนด์ → การ์ดบนกระดาน)
+  const [trendList, setTrendList] = useState<TrendCardInfo[] | null>(null);
+  const [trendSel, setTrendSel] = useState<string[]>([]);
+  const [trendQ, setTrendQ] = useState("");
   const [dsSel, setDsSel] = useState<DesignSheetListItem[]>([]);
   const [dsViewId, setDsViewId] = useState<string | null>(null);   // ดับเบิลคลิกการ์ด → เปิดป๊อปอัปใบงาน
   const [dsCreate, setDsCreate] = useState(false);                 // สร้างใบงานใหม่จากบนกระดาน
@@ -617,6 +666,25 @@ export default function CampaignCanvasPage() {
     return fresh.length;
   }, []);
 
+  // เปิดป๊อปเทรนด์ → โหลดรายการทั้งหมด (ครั้งแรกครั้งเดียว)
+  useEffect(() => {
+    if (!trendOpen || trendList !== null) return;
+    let alive = true;
+    apiFetch("/api/creative-trends").then((r) => r.json())
+      .then((j) => { if (alive) setTrendList((j.data ?? []) as TrendCardInfo[]); })
+      .catch(() => { if (alive) setTrendList([]); });
+    return () => { alive = false; };
+  }, [trendOpen, trendList]);
+
+  const confirmTrends = () => {
+    const rows = (trendList ?? []).filter((x) => trendSel.includes(x.id));
+    const n = placeTrendCards(rows);
+    setTrendOpen(false); setTrendSel([]);
+    pushToast(n ? "success" : "info", n
+      ? t(`วางการ์ดเทรนด์ ${n} ใบแล้ว`, `Placed ${n} trend card(s)`)
+      : t("เทรนด์ที่เลือกอยู่บนกระดานแล้ว", "Selected trends are already on the board"));
+  };
+
   // รับใบงาน/เทรนด์ที่ส่งมา (?add_design_sheets=id,id · ?add_trends=id,id) → วางการ์ดตอนกระดานพร้อม แล้วล้าง param ออกจาก URL
   const pendingDsRef = useRef<string[]>([]);
   const pendingTrendRef = useRef<string[]>([]);
@@ -684,21 +752,29 @@ export default function CampaignCanvasPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setSectionOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 Section</button>
-            <button onClick={() => { setSkuSel([]); setSkuOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📦 SKU Card</button>
-            <button onClick={() => { setParentSel([]); setParentOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-50">🧬 Parent SKU</button>
-            <button onClick={() => setTaskOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">✅ Task Card</button>
-            <button onClick={openDragPanel} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">🧲 {t("ลากงานเข้า", "Drag tasks in")}</button>
-            <button onClick={() => setContentOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50">📱 Content Card</button>
-            {canDesign && <button onClick={() => { setDsSel([]); setDsPickOpen(true); }} title={t("ดึงใบงานจาก Design Dashboard มาวางบนกระดาน หรือสร้างใบงานใหม่", "Bring design sheets onto the board, or create a new one")} className="h-9 px-3 inline-flex items-center text-sm font-medium text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-50">📐 {t("ใบงานออกแบบ", "Design sheet")}</button>}
-            <button onClick={createTableCard} className="h-9 px-3 inline-flex items-center text-sm font-medium text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-50">▦ {t("ตาราง", "Table")}</button>
-            <button onClick={() => setFolderOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-cyan-700 border border-cyan-200 rounded-lg hover:bg-cyan-50">📁 {t("โฟลเดอร์", "Folder")}</button>
-            <button onClick={() => { setAssetSel([]); setAssetOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-pink-700 border border-pink-200 rounded-lg hover:bg-pink-50">🖼️ {t("รูปจากคลัง", "Library image")}</button>
-            <button onClick={openCards} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂️ {t("การ์ดบนกระดาน", "Cards on board")}</button>
-            <button onClick={() => setKnowledgeOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50">📚 {t("ความรู้", "Knowledge")}</button>
-            <button onClick={() => setDrawerOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📋 {t("รายละเอียด", "Details")}</button>
-            <button onClick={refreshBoard} disabled={refreshing} title={t("โหลดกระดานล่าสุด (ดึงงานคนอื่นมาด้วย)", "Reload latest board")} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{refreshing ? "⏳" : "🔄"} {t("รีเฟรช", "Refresh")}</button>
-            <button onClick={toggleFs} title={t("เต็มจอ", "Fullscreen")} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{fs ? `⛶ ${t("ออกเต็มจอ", "Exit Fullscreen")}` : `⛶ ${t("เต็มจอ", "Fullscreen")}`}</button>
+            {/* จัดปุ่มเป็นกลุ่มตามประเภท — เดิมเรียงยาว 14 ปุ่มจนแถบรก */}
+            <ToolMenu label={t("เพิ่มการ์ด", "Add card")} icon="＋" tone="violet" items={[
+              { icon: "📦", label: "SKU Card", hint: t("สินค้าราย SKU", "Product SKUs"), onClick: () => { setSkuSel([]); setSkuOpen(true); } },
+              { icon: "🧬", label: "Parent SKU", hint: t("สินค้าหลัก", "Parent products"), onClick: () => { setParentSel([]); setParentOpen(true); } },
+              { icon: "✅", label: "Task Card", hint: t("สร้างงานใหม่ + วางการ์ด", "New task + card"), onClick: () => setTaskOpen(true) },
+              { icon: "🧲", label: t("ลากงานเข้า", "Drag tasks in"), hint: t("งานในแคมเปญที่ยังไม่อยู่บนกระดาน", "Campaign tasks not on the board yet"), onClick: openDragPanel },
+              { icon: "📱", label: "Content Card", hint: t("คอนเทนต์ที่จะโพสต์", "Content to post"), onClick: () => setContentOpen(true) },
+              { icon: "🔥", label: t("เทรนด์", "Trend"), hint: t("บอร์ดเทรนด์ (โทนสี/ref/เลย์เอาต์)", "Trend boards"), onClick: () => setTrendOpen(true) },
+              ...(canDesign ? [{ icon: "📐", label: t("ใบงานออกแบบ", "Design sheet"), hint: t("ดึงจาก Design Dashboard หรือสร้างใหม่", "From Design Dashboard, or create new"), onClick: () => { setDsSel([]); setDsPickOpen(true); } }] : []),
+            ]} />
+            <ToolMenu label={t("เครื่องมือ", "Tools")} icon="🧰" tone="teal" items={[
+              { icon: "🗂", label: "Section", hint: t("กรอบแบ่งโซนบนกระดาน", "Frame to group the board"), onClick: () => setSectionOpen(true) },
+              { icon: "▦", label: t("ตาราง", "Table"), hint: t("ตารางคำนวณบนกระดาน", "Spreadsheet card"), onClick: createTableCard },
+              { icon: "📁", label: t("โฟลเดอร์", "Folder"), hint: t("การ์ดลัดเปิดโฟลเดอร์ในเครื่อง", "Shortcut to a local folder"), onClick: () => setFolderOpen(true) },
+              { icon: "🖼️", label: t("รูปจากคลัง", "Library image"), hint: t("รูปจากคลังไฟล์กลาง", "From the asset library"), onClick: () => { setAssetSel([]); setAssetOpen(true); } },
+            ]} />
+            <ToolMenu label={t("ข้อมูล", "Info")} icon="📋" tone="slate" items={[
+              { icon: "🗂️", label: t("การ์ดบนกระดาน", "Cards on board"), hint: t("รายการการ์ดทั้งหมด", "List every card"), onClick: openCards },
+              { icon: "📚", label: t("ความรู้", "Knowledge"), hint: t("คลังความรู้ของทีม", "Team knowledge base"), onClick: () => setKnowledgeOpen(true) },
+              { icon: "📋", label: t("รายละเอียดแคมเปญ", "Campaign details"), hint: t("แก้ข้อมูล/งานในแคมเปญ", "Edit campaign info"), onClick: () => setDrawerOpen(true) },
+            ]} />
+            <button onClick={refreshBoard} disabled={refreshing} title={t("โหลดกระดานล่าสุด (ดึงงานคนอื่นมาด้วย)", "Reload latest board")} className="h-9 w-9 inline-flex items-center justify-center text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{refreshing ? "⏳" : "🔄"}</button>
+            <button onClick={toggleFs} title={fs ? t("ออกเต็มจอ", "Exit fullscreen") : t("เต็มจอ", "Fullscreen")} className="h-9 w-9 inline-flex items-center justify-center text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">⛶</button>
           </div>
         </div>
       </div>
@@ -767,6 +843,50 @@ export default function CampaignCanvasPage() {
           <button onClick={confirmDesignSheets} disabled={!dsSel.length} className="h-9 px-4 text-sm text-white bg-indigo-600 rounded-lg disabled:opacity-50">{t("เพิ่มการ์ด", "Add card")}{dsSel.length ? ` (${dsSel.length})` : ""}</button>
         </>}>
         <DesignSheetMultiPick selected={dsSel} onChange={setDsSel} statusLabel={dsLabel} />
+      </ERPModal>
+
+      {/* เลือกเทรนด์จากบอร์ดเทรนด์ → วางเป็นการ์ดบนกระดาน (รูปหน้าเทรนด์ + ความแรง + % ความครบ) */}
+      <ERPModal open={trendOpen} onClose={() => setTrendOpen(false)} size="md"
+        title={`🔥 ${t("เพิ่มการ์ดเทรนด์ลงกระดาน", "Add trend card to board")}`}
+        description={t("เลือกเทรนด์ที่จะใช้กับแคมเปญนี้ — ดับเบิลคลิกการ์ดบนกระดานจะเปิดบอร์ดเทรนด์", "Pick trends for this campaign — double-click the card opens its trend board")}
+        footer={<>
+          <a href="/tasks/trends" target="_blank" rel="noreferrer" className="mr-auto h-9 px-3 inline-flex items-center text-sm text-rose-700 border border-rose-200 rounded-lg hover:bg-rose-50">↗ {t("ไปหน้าเทรนด์", "Open Trends")}</a>
+          <button onClick={() => setTrendOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={confirmTrends} disabled={!trendSel.length} className="h-9 px-4 text-sm text-white bg-rose-600 rounded-lg disabled:opacity-50">{t("เพิ่มการ์ด", "Add card")}{trendSel.length ? ` (${trendSel.length})` : ""}</button>
+        </>}>
+        <div className="space-y-2">
+          <input value={trendQ} onChange={(e) => setTrendQ(e.target.value)} placeholder={`🔍 ${t("ค้นหาเทรนด์...", "Search trends...")}`}
+            className="h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-rose-200" />
+          {trendList === null ? (
+            <p className="py-8 text-center text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
+          ) : trendList.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">{t("ยังไม่มีเทรนด์ — สร้างได้ที่หน้า 🔥 เทรนด์", "No trends yet — create one on the Trends page")}</p>
+          ) : (
+            <div className="grid max-h-[46vh] grid-cols-2 gap-2 overflow-auto sm:grid-cols-3">
+              {trendList
+                .filter((x) => !trendQ.trim() || `${x.title} ${x.brand_name ?? ""}`.toLowerCase().includes(trendQ.trim().toLowerCase()))
+                .map((x) => {
+                  const on = trendSel.includes(x.id);
+                  return (
+                    <button key={x.id} type="button"
+                      onClick={() => setTrendSel((p) => (p.includes(x.id) ? p.filter((k) => k !== x.id) : [...p, x.id]))}
+                      className={`overflow-hidden rounded-lg border text-left ${on ? "border-rose-500 ring-2 ring-rose-200" : "border-slate-200 hover:border-rose-300"}`}>
+                      <div className="flex h-20 items-center justify-center border-b border-slate-100 bg-slate-50">
+                        {x.cover_url
+                          // eslint-disable-next-line @next/next/no-img-element
+                          ? <img src={withImageWidth(x.cover_url, 240) ?? x.cover_url} alt="" className="h-full w-full object-contain" />
+                          : <span className="text-[11px] text-slate-300">{t("ยังไม่มีรูปบนบอร์ด", "Board is empty")}</span>}
+                      </div>
+                      <div className="p-1.5">
+                        <p className="line-clamp-2 text-[12px] font-medium leading-tight text-slate-800">{x.heat === "hot" ? "🔥" : x.heat === "cooling" ? "❄️" : "🌱"} {x.title}</p>
+                        {x.total ? <p className="text-[10px] text-slate-400">✅ {x.done ?? 0}/{x.total} ({x.percent ?? 0}%)</p> : null}
+                      </div>
+                    </button>
+                  );
+                })}
+            </div>
+          )}
+        </div>
       </ERPModal>
 
       {/* ดับเบิลคลิกการ์ดใบงาน → ป๊อปอัปใบงานของกลาง (ดู/แก้/เปลี่ยนสถานะ) · ปิดแล้วซิงค์การ์ด */}
