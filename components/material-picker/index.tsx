@@ -18,6 +18,7 @@ import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { PagerBar } from "@/components/pager-bar";
 import type { BomComponent } from "@/app/api/bom/components/route";
+import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";   // "ใช้ล่าสุด" ของกลาง
 
 // โหลดเมื่อกดปุ่มเท่านั้น (dynamic กัน bundle บวม/import วน — material-picker เป็นของกลางใช้ทุกหน้า)
 const SkuWizard = dynamic(() => import("@/app/master/skus/sku-wizard").then((m) => m.SkuWizard), { ssr: false });
@@ -74,11 +75,8 @@ function Thumb({ k, size = 22 }: { k: string | null; size?: number }) {
   return <img src={thumbUrl(k)} alt="" loading="lazy" className="rounded object-cover bg-slate-50 shrink-0" style={{ width: size, height: size }} />;
 }
 
-const RECENT_MAT_KEY = "erp-recent-materials";
-function loadRecentMat(): BomComponent[] { try { return JSON.parse(localStorage.getItem(RECENT_MAT_KEY) ?? "[]") as BomComponent[]; } catch { return []; } }
-function pushRecentMat(c: BomComponent) {
-  try { const list = loadRecentMat().filter((x) => x.id !== c.id); localStorage.setItem(RECENT_MAT_KEY, JSON.stringify([c, ...list].slice(0, 8))); } catch { /* ignore */ }
-}
+const loadRecentMat = () => loadRecent<BomComponent>(RECENT_KEYS.materials);
+const pushRecentMat = (c: BomComponent) => pushRecent(RECENT_KEYS.materials, c, 8);
 
 export function ComponentPicker({ sku, name, imageKey, placeholder = "— เลือกวัตถุดิบ —", onPick, allowedGroupCodes, allowedTags }: { sku: string; name: string; imageKey?: string | null; placeholder?: string; onPick: (c: BomComponent) => void; allowedGroupCodes?: string[]; allowedTags?: string[] }) {
   const [open, setOpen] = useState(false);

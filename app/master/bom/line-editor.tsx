@@ -18,6 +18,7 @@ import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import type { CuttingBlock } from "@/app/api/bom/cutting-blocks/route";
 import type { BomComponent } from "@/app/api/bom/components/route";
+import { RECENT_KEYS, loadRecent } from "@/lib/recent-picks";   // "ใช้ล่าสุด" ของกลาง
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { ERPModal } from "@/components/modal";
@@ -138,12 +139,8 @@ function Thumb({ k, size = 22 }: { k: string | null; size?: number }) {
   return <img src={thumbUrl(k)} alt="" loading="lazy" className="rounded object-cover bg-slate-50 shrink-0" style={{ width: size, height: size }} />;
 }
 
-// recently used (วัตถุดิบที่เลือกล่าสุด) — เหมือน ProductPicker ของกลาง
-const RECENT_MAT_KEY = "erp-recent-materials";
-function loadRecentMat(): BomComponent[] { try { return JSON.parse(localStorage.getItem(RECENT_MAT_KEY) ?? "[]") as BomComponent[]; } catch { return []; } }
-function pushRecentMat(c: BomComponent) {
-  try { const list = loadRecentMat().filter((x) => x.id !== c.id); localStorage.setItem(RECENT_MAT_KEY, JSON.stringify([c, ...list].slice(0, 8))); } catch { /* ignore */ }
-}
+// recently used (วัตถุดิบที่เลือกล่าสุด) — ใช้ของกลาง lib/recent-picks (แชร์กับ MaterialPicker)
+const loadRecentMat = () => loadRecent<BomComponent>(RECENT_KEYS.materials);
 
 // หมายเหตุ: เลือก SKU เดี่ยว ใช้ของกลาง `SkuPicker` จาก @/components/pickers เท่านั้น
 // (ของเดิมที่นี่เป็น one-off /api/admin/picker ไม่มีรูป/ราคา/โหลดเพิ่ม — ลบทิ้งแล้ว)

@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { ImageThumbnail } from "@/components/image-manager";
 import { FloatingDropdown, PICKER_PANEL, PICKER_PANEL_WIDE, PICKER_NAME_CLASS } from "@/components/floating-dropdown";
+import { RECENT_KEYS, useRecentPicks } from "@/lib/recent-picks";   // "เคยใช้ล่าสุด" (ของกลาง)
 
 // ---- Icons ----
 
@@ -213,24 +214,12 @@ export interface ProductPickerProps {
   disableCreate?: boolean;
 }
 
-const RECENT_KEY = "erp-recent-products";
-
-function loadRecent(): ProductPickerValue[] {
-  try { return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]"); } catch { return []; }
-}
-function pushRecent(p: ProductPickerValue) {
-  try {
-    const list = loadRecent().filter(x => x.id !== p.id);
-    localStorage.setItem(RECENT_KEY, JSON.stringify([p, ...list].slice(0, 6)));
-  } catch { /* ignore */ }
-}
-
 export function ProductPicker({ value, onChange, placeholder = "เลือกสินค้า...", disabled, error, disableCreate }: ProductPickerProps) {
   const { can } = useAuth();
   const [open, setOpen]     = useState(false);
   const [query, setQuery]   = useState("");
   const [results, setResults] = useState<ProductPickerValue[]>([]);
-  const [recent, setRecent]   = useState<ProductPickerValue[]>([]);
+  const { recent, remember }  = useRecentPicks<ProductPickerValue>(RECENT_KEYS.products, open);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -238,9 +227,6 @@ export function ProductPicker({ value, onChange, placeholder = "เลือก�
   const canCreate = !disableCreate && can("products.create");
 
   // outside-click จัดการโดย FloatingDropdown (รวม dropdown ใน portal ด้วย)
-
-  // โหลด recently used เมื่อเปิด
-  useEffect(() => { if (open) setRecent(loadRecent()); }, [open]);
 
   // ค้นหาจาก Supabase (debounce)
   useEffect(() => {
@@ -259,8 +245,8 @@ export function ProductPicker({ value, onChange, placeholder = "เลือก�
   }, [query, open]);
 
   const select = useCallback((p: ProductPickerValue) => {
-    onChange(p); pushRecent(p); setOpen(false); setQuery("");
-  }, [onChange]);
+    onChange(p); remember(p); setOpen(false); setQuery("");
+  }, [onChange, remember]);
 
   const createNew = async () => {
     if (!query.trim()) return;
@@ -419,6 +405,7 @@ export function SkuPicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SkuPickerValue[]>([]);
+  const { recent, remember } = useRecentPicks<SkuPickerValue>(RECENT_KEYS.skus, open);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -454,9 +441,14 @@ export function SkuPicker({
 
   const select = useCallback((sku: SkuPickerValue) => {
     onChange(sku);
+    remember(sku);
     setOpen(false);
     setQuery("");
-  }, [onChange]);
+  }, [onChange, remember]);
+
+  // ยังไม่พิมพ์ค้นหา → โชว์ "เคยใช้ล่าสุด" ไว้บนสุด (ไม่ซ้ำกับรายการด้านล่าง)
+  const recentShown = query.trim() ? [] : recent;
+  const recentIds = new Set(recentShown.map((r) => r.id));
 
   return (
     <div className="relative" ref={boxRef}>
@@ -485,12 +477,26 @@ export function SkuPicker({
           </div>
 
           <div className="max-h-64 overflow-y-auto">
+            {recentShown.length > 0 && (
+              <>
+                <div className="px-3 pt-1.5 pb-0.5 text-[11px] text-slate-400">⏱ เคยใช้ล่าสุด</div>
+                {recentShown.map(sku => (
+                  <button key={"recent-" + sku.id} type="button" onClick={() => select(sku)}
+                    className={`w-full px-3 py-2 flex items-center gap-2 hover:bg-blue-50 transition-colors text-left ${value?.id === sku.id ? "bg-blue-50" : ""}`}>
+                    <ImageThumbnail url={sku.image_url} size={26} alt={sku.name} />
+                    <span className="font-mono text-xs bg-slate-100 px-1.5 py-1 rounded text-slate-600 truncate max-w-[120px]" title={sku.code}>{sku.code || "-"}</span>
+                    <span className={PICKER_NAME_CLASS} title={sku.name}>{sku.name}</span>
+                  </button>
+                ))}
+                <div className="px-3 pt-1.5 pb-0.5 text-[11px] text-slate-400 border-t border-slate-100">ทั้งหมด</div>
+              </>
+            )}
             {loading ? (
               <div className="px-3 py-3 flex items-center justify-center gap-2 text-xs text-slate-400"><IconLoader />กำลังค้นหา...</div>
             ) : results.length === 0 ? (
               <div className="px-3 py-4 text-center text-sm text-slate-400">ไม่พบ SKU</div>
             ) : (
-              results.map(sku => (
+              results.filter(sku => !recentIds.has(sku.id)).map(sku => (
                 <button key={sku.id} type="button" onClick={() => select(sku)}
                   className={`w-full px-3 py-2 grid grid-cols-[34px_minmax(88px,120px)_minmax(0,1fr)_72px] items-start gap-2 hover:bg-blue-50 transition-colors text-left ${value?.id === sku.id ? "bg-blue-50" : ""}`}>
                   <ImageThumbnail url={sku.image_url} size={30} alt={sku.name} />
@@ -553,6 +559,7 @@ export function ParentSkuPicker({ value, onChange, placeholder = "เลือ�
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ParentSkuPickerValue[]>([]);
+  const { recent, remember } = useRecentPicks<ParentSkuPickerValue>(RECENT_KEYS.parentSkus, open);
   const PARENT_PAGE = 24;                         // โหลดทีละหน้า + ปุ่มโหลดเพิ่ม
   const [total, setTotal] = useState(0);          // ทั้งหมดที่ตรงคำค้น (ไว้บอก + โหลดเพิ่ม)
   const [loadingMore, setLoadingMore] = useState(false);
@@ -577,7 +584,9 @@ export function ParentSkuPicker({ value, onChange, placeholder = "เลือ�
     return () => { active = false; clearTimeout(t); };
   }, [open, query]);
 
-  const select = useCallback((p: ParentSkuPickerValue) => { onChange(p); setOpen(false); setQuery(""); }, [onChange]);
+  const select = useCallback((p: ParentSkuPickerValue) => { onChange(p); remember(p); setOpen(false); setQuery(""); }, [onChange, remember]);
+  const recentShown = query.trim() ? [] : recent;
+  const recentIds = new Set(recentShown.map((r) => r.id));
 
   // โหลดเพิ่ม (ต่อท้าย) — กันเคสค้นแล้วเจอเกินหน้าแรก เช่นพิมพ์ "WK" เจอ 40 แต่เห็นแค่หน้าละ 24
   const loadMore = async () => {
@@ -626,12 +635,26 @@ export function ParentSkuPicker({ value, onChange, placeholder = "เลือ�
               className="w-full h-8 pl-7 pr-3 text-sm bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
           <div className="max-h-64 overflow-y-auto">
+            {recentShown.length > 0 && (
+              <>
+                <div className="px-3 pt-1.5 pb-0.5 text-[11px] text-slate-400">⏱ เคยใช้ล่าสุด</div>
+                {recentShown.map((p) => (
+                  <button key={"recent-" + p.id} type="button" onClick={() => select(p)}
+                    className={`w-full px-3 py-2 flex items-start gap-2 hover:bg-blue-50 transition-colors text-left ${value?.id === p.id ? "bg-blue-50" : ""}`}>
+                    <ImageThumbnail url={p.image_url} size={26} alt={p.name} />
+                    <span className="font-mono text-xs bg-slate-100 px-1.5 py-1 rounded text-slate-600 shrink-0 truncate max-w-[120px]" title={p.code}>{p.code || "-"}</span>
+                    <span className={PICKER_NAME_CLASS} title={p.name}>{p.name}</span>
+                  </button>
+                ))}
+                <div className="px-3 pt-1.5 pb-0.5 text-[11px] text-slate-400 border-t border-slate-100">ทั้งหมด</div>
+              </>
+            )}
             {loading ? (
               <div className="px-3 py-3 flex items-center justify-center gap-2 text-xs text-slate-400"><IconLoader />กำลังค้นหา...</div>
             ) : results.length === 0 ? (
               <div className="px-3 py-4 text-center text-sm text-slate-400">{showCreate ? `ไม่พบ "${query.trim()}"` : "ไม่พบ Parent SKU"}</div>
             ) : (
-              results.map((p) => (
+              results.filter((p) => !recentIds.has(p.id)).map((p) => (
                 <button key={p.id} type="button" onClick={() => select(p)}
                   className={`w-full px-3 py-2 flex items-start gap-2 hover:bg-blue-50 transition-colors text-left ${value?.id === p.id ? "bg-blue-50" : ""}`}>
                   <ImageThumbnail url={p.image_url} size={30} alt={p.name} />
@@ -684,24 +707,12 @@ export interface SupplierPickerProps {
   disableCreate?: boolean;
 }
 
-const SUPPLIER_RECENT_KEY = "erp-recent-suppliers";
-
-function loadSupplierRecent(): SupplierPickerValue[] {
-  try { return JSON.parse(localStorage.getItem(SUPPLIER_RECENT_KEY) ?? "[]"); } catch { return []; }
-}
-function pushSupplierRecent(s: SupplierPickerValue) {
-  try {
-    const list = loadSupplierRecent().filter(x => x.id !== s.id);
-    localStorage.setItem(SUPPLIER_RECENT_KEY, JSON.stringify([s, ...list].slice(0, 6)));
-  } catch { /* ignore */ }
-}
-
 export function SupplierPicker({ value, onChange, placeholder = "เลือกผู้จำหน่าย...", disabled, error, disableCreate }: SupplierPickerProps) {
   const { can } = useAuth();
   const [open, setOpen]     = useState(false);
   const [query, setQuery]   = useState("");
   const [results, setResults] = useState<SupplierPickerValue[]>([]);
-  const [recent, setRecent]   = useState<SupplierPickerValue[]>([]);
+  const { recent, remember }  = useRecentPicks<SupplierPickerValue>(RECENT_KEYS.suppliers, open);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -709,8 +720,6 @@ export function SupplierPicker({ value, onChange, placeholder = "เลือก
   const canCreate = !disableCreate && can("suppliers.create");
 
   // outside-click จัดการโดย FloatingDropdown (รวม dropdown ใน portal ด้วย)
-
-  useEffect(() => { if (open) setRecent(loadSupplierRecent()); }, [open]);
 
   // search (debounce 300ms)
   useEffect(() => {
@@ -729,8 +738,8 @@ export function SupplierPicker({ value, onChange, placeholder = "เลือก
   }, [query, open]);
 
   const select = useCallback((s: SupplierPickerValue) => {
-    onChange(s); pushSupplierRecent(s); setOpen(false); setQuery("");
-  }, [onChange]);
+    onChange(s); remember(s); setOpen(false); setQuery("");
+  }, [onChange, remember]);
 
   const createNew = async () => {
     if (!query.trim()) return;

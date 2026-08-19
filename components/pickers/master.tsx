@@ -13,6 +13,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { useAuth, type Permission } from "@/components/auth";
 import { FloatingDropdown, PICKER_PANEL, PICKER_NAME_CLASS } from "@/components/floating-dropdown";
+import { loadRecent, pushRecent, loadFav, toggleFav } from "@/lib/recent-picks";   // "เคยใช้ล่าสุด" + ปักหมุด (ของกลาง)
 
 // ---- Shared types ----
 
@@ -48,39 +49,6 @@ const IconSearch  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="
 const IconChev    = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>;
 const IconX       = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
 const IconLoader  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>;
-
-// ---- Recently used ----
-
-function loadRecent<V>(key: string): V[] {
-  try { return JSON.parse(localStorage.getItem(key) ?? "[]"); } catch { return []; }
-}
-function pushRecent<V extends { id: string }>(key: string, v: V) {
-  try {
-    const list = loadRecent<V>(key).filter(x => x.id !== v.id);
-    localStorage.setItem(key, JSON.stringify([v, ...list].slice(0, 6)));
-  } catch { /* ignore */ }
-}
-
-// ---- Favorite / pinned (กลาง — ทุก picker ได้ฟรี) ----
-
-const favKey = (storageKey: string) => `${storageKey}-fav`;
-function loadFav<V>(key: string): V[] {
-  try { return JSON.parse(localStorage.getItem(favKey(key)) ?? "[]"); } catch { return []; }
-}
-function isFav(key: string, id: string): boolean {
-  return loadFav<{ id: string }>(key).some(x => x.id === id);
-}
-/** toggle ปักหมุด/เอาออก — คืน list ใหม่ */
-function toggleFav<V extends { id: string }>(key: string, v: V): V[] {
-  try {
-    const list = loadFav<V>(key);
-    const next = list.some(x => x.id === v.id)
-      ? list.filter(x => x.id !== v.id)            // เอาออก
-      : [v, ...list].slice(0, 12);                  // ปักหมุด (สูงสุด 12)
-    localStorage.setItem(favKey(key), JSON.stringify(next));
-    return next;
-  } catch { return loadFav<V>(key); }
-}
 
 // ============================================================
 // Factory

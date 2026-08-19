@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { SupplierPicker } from "@/components/supplier-picker";
+import { RECENT_KEYS, pushRecent } from "@/lib/recent-picks";   // จำร้านที่เพิ่งใช้ (ของกลาง)
 
 type Shop = { id: string; partner_id: string | null; partner_name: string; price: number | null; currency: string; is_default: boolean; supplier_sku: string | null };
 const curSym = (c: string) => (["RMB", "YUAN", "CNY"].includes(String(c).toUpperCase()) ? "¥" : "฿");
@@ -67,7 +68,7 @@ export function SkuShopSelect({
               const on = !!s.partner_id && s.partner_id === valueId;
               return (
                 <button key={s.id} type="button" disabled={disabled || busy || !s.partner_id}
-                  onClick={() => s.partner_id && onPick({ id: s.partner_id, name: s.partner_name, price: s.price, currency: s.currency })}
+                  onClick={() => { if (!s.partner_id) return; pushRecent(RECENT_KEYS.suppliers, { id: s.partner_id, name: s.partner_name }); onPick({ id: s.partner_id, name: s.partner_name, price: s.price, currency: s.currency }); }}
                   title={s.supplier_sku ? `รหัสร้าน: ${s.supplier_sku}` : undefined}
                   className={`h-7 px-2 text-xs rounded-md border inline-flex items-center gap-1 ${on
                     ? "bg-blue-600 text-white border-blue-600"

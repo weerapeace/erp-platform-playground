@@ -6,9 +6,11 @@
  * - value = id ร้าน, onChange(id, name)
  * - onAddNew (ถ้ามี) → โชว์ "+ เพิ่มร้านใหม่" ท้ายรายการ
  * - dropdown เรนเดอร์ผ่าน portal + fixed position → ไม่โดนกรอบ popup ตัด
+ * - "⏱ เคยใช้ล่าสุด" อยู่บนสุด (ของกลาง lib/recent-picks — แชร์ประวัติกับ SupplierPicker ตัวอื่น)
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { RECENT_KEYS, useRecentPicks } from "@/lib/recent-picks";
 
 type Supplier = { id: string; name: string; cn?: boolean };   // cn = ร้านจีน
 
@@ -24,16 +26,27 @@ export function SupplierPicker({ value, onChange, suppliers, onAddNew, placehold
   const [q, setQ] = useState("");
   const [kind, setKind] = useState<"all" | "th" | "cn">("all");   // กรองร้านไทย/จีน
   const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  const { recent, remember } = useRecentPicks<Supplier>(RECENT_KEYS.suppliers, open);   // เคยใช้ล่าสุด (ของกลาง)
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const sel = suppliers.find((s) => s.id === value);
   const ql = q.trim().toLowerCase();
   const hasKinds = suppliers.some((s) => s.cn);   // มีร้านจีนอย่างน้อย 1 → โชว์ badge กรอง
+  const inKind = (s: Supplier) => kind === "all" ? true : kind === "cn" ? !!s.cn : !s.cn;
+  // เคยใช้ล่าสุด — เอาเฉพาะร้านที่ยังอยู่ในทะเบียน + ใช้ชื่อล่าสุดจากทะเบียน (กันร้านถูกลบ/เปลี่ยนชื่อ)
+  const recentShown = useMemo(() => (ql ? [] : recent
+    .map((r) => suppliers.find((s) => s.id === r.id))
+    .filter((s): s is Supplier => !!s && inKind(s))
+    .slice(0, 5)), [recent, suppliers, ql, kind]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const recentIds = new Set(recentShown.map((s) => s.id));
   const filtered = useMemo(() => suppliers
     .filter((s) => (ql ? s.name.toLowerCase().includes(ql) : true))
     .filter((s) => kind === "all" ? true : kind === "cn" ? !!s.cn : !s.cn)
     .slice(0, 300), [suppliers, ql, kind]);
+
+  // เลือกร้าน → จำไว้เป็น "เคยใช้ล่าสุด" ให้ทุก picker ร้านเห็นเหมือนกัน
+  const pick = (s: Supplier) => { remember({ id: s.id, name: s.name, cn: s.cn }); onChange(s.id, s.name); setOpen(false); };
 
   const openPanel = () => {
     if (disabled) return;
@@ -77,9 +90,21 @@ export function SupplierPicker({ value, onChange, suppliers, onAddNew, placehold
           </div>
           <div className="overflow-y-auto">
             {value && <button type="button" onClick={() => { onChange("", ""); setOpen(false); }} className="w-full px-3 py-1.5 text-sm text-left text-slate-400 hover:bg-slate-50">— ไม่เลือก —</button>}
+            {recentShown.length > 0 && (
+              <>
+                <div className="px-3 pt-1.5 pb-0.5 text-[11px] text-slate-400">⏱ เคยใช้ล่าสุด</div>
+                {recentShown.map((s) => (
+                  <button key={"recent-" + s.id} type="button" onClick={() => pick(s)}
+                    className={`w-full px-3 py-1.5 text-sm text-left hover:bg-blue-50 truncate ${s.id === value ? "bg-blue-50/60 text-blue-700" : "text-slate-700"}`}>
+                    <span className="text-slate-300 mr-1">↺</span>{s.name}
+                  </button>
+                ))}
+                <div className="px-3 pt-1.5 pb-0.5 text-[11px] text-slate-400 border-t border-slate-100">ร้านทั้งหมด</div>
+              </>
+            )}
             {filtered.length === 0 && <div className="px-3 py-3 text-xs text-slate-300 text-center">ไม่พบร้าน</div>}
-            {filtered.map((s) => (
-              <button key={s.id} type="button" onClick={() => { onChange(s.id, s.name); setOpen(false); }}
+            {filtered.filter((s) => !recentIds.has(s.id)).map((s) => (
+              <button key={s.id} type="button" onClick={() => pick(s)}
                 className={`w-full px-3 py-1.5 text-sm text-left hover:bg-blue-50 truncate ${s.id === value ? "bg-blue-50/60 text-blue-700" : "text-slate-700"}`}>{s.name}</button>
             ))}
           </div>
