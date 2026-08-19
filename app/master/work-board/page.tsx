@@ -2931,6 +2931,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
   const toast = useToast();
   const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
   const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม / แก้กำหนดเสร็จ
+  // คำค้นร่วมของทั้ง 2 ตาราง — พิมพ์ที่ไหนก็กรองทั้ง "รอจ่าย" และ "จ่ายแล้ว" (เดิมต่างคนต่างค้น หาของที่จ่ายไปแล้วไม่เจอ)
+  const [tableSearch, setTableSearch] = useState("");
   const [assignOpen, setAssignOpen] = useState(false);
   const [dueOpen, setDueOpen] = useState(false);
   const [dueVal, setDueVal] = useState("");
@@ -3137,7 +3139,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
           </>}
         </div>}
         searchText={(m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`}
-        searchPlaceholder="ค้นหา สินค้า / เลขใบสั่งผลิต"
+        searchPlaceholder="ค้นหา สินค้า / เลขใบสั่งผลิต — ค้นทั้ง 2 ตาราง"
+        searchValue={tableSearch} onSearchChange={setTableSearch}
         groupBy={pendGroup === "group" ? (m) => groupNameOf(m.mo_no) ?? "— ยังไม่จับกลุ่ม —" : pendGroup === "ready" ? (m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม") : undefined}
         groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : "จัดกลุ่มตามความพร้อม"} defaultGrouped={pendGroup !== "none"}
         emptyText="ไม่มีงานรอจ่าย"
@@ -3291,7 +3294,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
           )}
         </div>}
         searchText={(w) => `${w.product_sku ?? ""} ${w.product_name ?? ""} ${w.wo_no} ${w.department_name ?? ""} ${w.assignee_name ?? ""}`}
-        searchPlaceholder="ค้นหา สินค้า / ใบจ่ายงาน / แผนก"
+        searchPlaceholder="ค้นหา สินค้า / ใบจ่ายงาน / แผนก — ค้นทั้ง 2 ตาราง"
+        searchValue={tableSearch} onSearchChange={setTableSearch}
         groupBy={woGroup === "group" ? (w) => groupNameOf(w.mo_no) ?? "— ยังไม่จับกลุ่ม —" : woGroup === "status" ? (w) => (WO_STATUS[w.status]?.label ?? w.status) : undefined}
         groupLabel={woGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : "จัดกลุ่มตามสถานะ"} defaultGrouped={woGroup !== "none"}
         emptyText="ยังไม่มีงานที่จ่าย"

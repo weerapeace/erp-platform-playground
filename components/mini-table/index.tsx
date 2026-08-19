@@ -43,6 +43,10 @@ export type MiniTableProps<T> = {
   // ค้นหา — ใส่ฟังก์ชันคืน text ที่ค้นได้ จึงจะมีช่องค้นหา
   searchText?: (row: T) => string;
   searchPlaceholder?: string;
+  /** คุมคำค้นจากภายนอก (ใส่คู่กับ onSearchChange) — ใช้เมื่ออยากให้หลายตารางในหน้าเดียวกันค้นด้วยคำเดียวกัน
+   *  เช่นบอร์ดจ่ายงาน: พิมพ์ครั้งเดียว กรองทั้งตาราง "รอจ่าย" และ "จ่ายแล้ว" */
+  searchValue?: string;
+  onSearchChange?: (v: string) => void;
 
   // จัดกลุ่ม — ใส่ฟังก์ชันคืนชื่อกลุ่ม จึงจะมีปุ่มจัดกลุ่ม
   groupBy?: (row: T) => string;
@@ -81,7 +85,7 @@ type Dir = "asc" | "desc";
 
 export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
-    rows, columns, rowKey, searchText, searchPlaceholder = "ค้นหา…",
+    rows, columns, rowKey, searchText, searchPlaceholder = "ค้นหา…", searchValue, onSearchChange,
     groupBy, groupLabel = "จัดกลุ่ม", defaultGrouped = true,
     selectable, selected, onSelectedChange, onRowClick,
     title, actions, countUnit = "รายการ",
@@ -91,7 +95,10 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   } = props;
 
   const sortable = columns.filter((c) => c.sortValue);
-  const [q, setQ] = useState("");
+  const [qInner, setQInner] = useState("");
+  // คุมจากภายนอกถ้าส่ง searchValue มา (ไม่ส่ง = ตารางเก็บคำค้นเอง เหมือนเดิม)
+  const q = searchValue ?? qInner;
+  const setQ = (v: string) => { if (onSearchChange) onSearchChange(v); else setQInner(v); };
   const [sortKey, setSortKey] = useState<string>("");   // "" = ลำดับเดิม
   const [dir, setDir] = useState<Dir>("asc");
   const [grouped, setGrouped] = useState(defaultGrouped);
