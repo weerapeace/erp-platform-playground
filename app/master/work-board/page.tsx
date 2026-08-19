@@ -2928,6 +2928,28 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
    * ค่าแรงเว้นว่างได้ — เซิร์ฟเวอร์จะเติมจากค่าแรง/ชิ้นของใบสั่งผลิตหรือราคากลาง BOM ให้เอง
    */
   const selPend = pending.filter((m) => sel.has(m.id));
+
+  // ── แก้ค่าในตารางได้เลย (ดับเบิลคลิกที่ช่อง) ──
+  const saveMoDate = useCallback(async (id: string, field: "due" | "internal", value: string) => {
+    const body = field === "due" ? { id, due_date: value || null } : { id, internal_due_date: value || null };
+    const r = await apiSave(toast, "/api/mo/set-due-date", { method: "POST", body },
+      { ok: field === "due" ? "บันทึกวันส่งลูกค้าแล้ว" : "บันทึกวันส่งภายในแล้ว", fail: "บันทึกวันไม่สำเร็จ" });
+    if (r.ok) onReload?.();
+  }, [toast, onReload]);
+
+  /** ค่าแรง/ชิ้น ของใบสั่งผลิต — เก็บเป็นยอดรวม (est_labor_cost = ต่อชิ้น × จำนวนทั้งใบ) */
+  const saveMoRate = useCallback(async (m: PendingMO, value: string) => {
+    const per = value.trim() === "" ? null : Number(value) || 0;
+    const total = per == null ? null : Math.round(per * (m.qty || 0) * 100) / 100;
+    const r = await apiSave(toast, "/api/mo/est-labor", { method: "POST", body: { mo_id: m.id, est_labor_cost: total } },
+      { ok: per == null ? "ล้างค่าแรงแล้ว" : `ใส่ค่าแรง ฿${fmt(per)}/ชิ้น แล้ว`, fail: "บันทึกค่าแรงไม่สำเร็จ" });
+    if (r.ok) onReload?.();
+  }, [toast, onReload]);
+
+  /** ค่าแรง/ชิ้นที่ใช้อยู่ของใบนั้น (ราคากลางจาก BOM ก่อน ถ้าไม่มีใช้ค่าที่วางแผนไว้ ÷ จำนวน) */
+  const rateOf = (m: PendingMO) => (m.central_rate && m.central_rate > 0)
+    ? m.central_rate
+    : (m.qty > 0 && m.labor?.prod_plan ? Math.round((m.labor.prod_plan / m.qty) * 100) / 100 : 0);
   const dispatchSelected = useCallback(async () => {
     const dept = departments.find((d) => d.id === dispDeptId);
     if (!dept) { toast.error("เลือกโต๊ะ/แผนกก่อน"); return; }
@@ -2996,8 +3018,28 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
     { key: "qty", header: "จำนวน", width: "5rem", align: "right", sortValue: (m) => m.qty, sortLabel: "จำนวน", cell: (m) => <span className="tabular-nums">{fmt(m.qty)}</span> },
     { key: "disp", header: "จ่ายแล้ว", width: "5rem", align: "right", cell: (m) => <span className="tabular-nums text-slate-500">{fmt(m.dispatched)}</span> },
     { key: "rem", header: "เหลือ", width: "4.5rem", align: "right", sortValue: (m) => m.remaining, sortLabel: "เหลือ", cell: (m) => <span className="tabular-nums font-semibold text-rose-600">{fmt(m.remaining)}</span> },
-    { key: "due", header: "📦 ส่งลูกค้า", width: "minmax(9rem,1fr)", sortValue: (m) => m.due_date ?? "9999", sortLabel: "กำหนดส่งลูกค้า", cell: (m) => <DueCell d={m.due_date} /> },
-    { key: "due_int", header: "🪑 ส่งภายใน", width: "minmax(9rem,1fr)", sortValue: (m) => m.internal_due_date ?? "9999", sortLabel: "กำหนดส่งภายใน", cell: (m) => <DueCell d={m.internal_due_date ?? null} /> },
+    // ดับเบิลคลิกที่ช่องวัน = แก้ได้เลย (คลิกครั้งเดียวยังเป็นเปิดรายละเอียด/ติ๊กเลือกเหมือนเดิม)
+    { key: "due", header: "📦 ส่งลูกค้า", width: "minmax(9.5rem,1fr)", sortValue: (m) => m.due_date ?? "9999", sortLabel: "กำหนดส่งลูกค้า",
+      cell: (m) => <span className="flex items-center gap-1">
+        <InlineEdit type="date" trigger="dblclick" compact width="9rem" disabled={!canEdit} value={m.due_date ?? ""} placeholder="— ยังไม่กำหนด —"
+          onSave={(v) => void saveMoDate(m.id, "due", v)} />
+        {m.due_date && <span className={`text-[10px] ${daysLeftClass(m.due_date)}`}>{daysLeftText(m.due_date)}</span>}
+      </span> },
+    { key: "due_int", header: "🪑 ส่งภายใน", width: "minmax(9.5rem,1fr)", sortValue: (m) => m.internal_due_date ?? "9999", sortLabel: "กำหนดส่งภายใน",
+      cell: (m) => <span className="flex items-center gap-1">
+        <InlineEdit type="date" trigger="dblclick" compact width="9rem" disabled={!canEdit} value={m.internal_due_date ?? ""} placeholder="— ยังไม่กำหนด —"
+          onSave={(v) => void saveMoDate(m.id, "internal", v)} />
+        {m.internal_due_date && <span className={`text-[10px] ${daysLeftClass(m.internal_due_date)}`}>{daysLeftText(m.internal_due_date)}</span>}
+      </span> },
+    // ค่าแรง/ชิ้น — ดับเบิลคลิกแก้ได้ (บันทึกเป็นยอดรวมของใบให้อัตโนมัติ)
+    { key: "rate", header: "💰 ค่าแรง/ชิ้น", width: "8.5rem", align: "right", sortValue: (m) => rateOf(m), sortLabel: "ค่าแรง/ชิ้น",
+      cell: (m) => { const r = rateOf(m); return (
+        <span className="flex items-center justify-end gap-1">
+          <InlineEdit type="number" trigger="dblclick" compact align="right" width="5rem" disabled={!canEdit}
+            value={r > 0 ? r : ""} placeholder="— ใส่ —" className="text-slate-600"
+            onSave={(v) => void saveMoRate(m, v)} />
+          {r > 0 && <span className="text-[10px] text-slate-400 whitespace-nowrap">= ฿{fmt(Math.round(r * (m.qty || 0) * 100) / 100)}</span>}
+        </span> ); } },
     { key: "ready", header: "พร้อม", width: "6.5rem", align: "center", sortValue: (m) => (m.ready ? 0 : 1), sortLabel: "ความพร้อม", cell: (m) => m.ready ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span> : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span> },
   ];
 
