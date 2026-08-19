@@ -217,9 +217,14 @@ export function ExecPlan({ onOpenMO }: {
   );
 
   const groupSum = (items: ExecRow[]) => {
-    let v = 0, p = 0, q = 0;
-    for (const r of items) { v += r.remaining * r.list_price; q += r.remaining; if (canProfit(r)) p += unitProfit(r) * r.remaining; }
-    return { v, p, q };
+    // v = มูลค่าทั้งใบ (จำนวนสั่งผลิต × ราคาขาย) · vLeft = เฉพาะส่วนที่ยังไม่ได้จ่ายงาน
+    let v = 0, vLeft = 0, p = 0, q = 0, qAll = 0;
+    for (const r of items) {
+      v += r.qty * r.list_price; vLeft += r.remaining * r.list_price;
+      q += r.remaining; qAll += r.qty;
+      if (canProfit(r)) p += unitProfit(r) * r.qty;
+    }
+    return { v, vLeft, p, q, qAll };
   };
 
   return (
@@ -315,9 +320,9 @@ export function ExecPlan({ onOpenMO }: {
             {b.label && (
               <div className="flex items-center gap-2 text-xs font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 mb-1.5">
                 <span>{groupMode === "month" ? "📅 " : "🏷 "}{b.label}</span>
-                <span className="text-slate-400 font-normal">({b.items.length} ใบ · {fmt(s.q)} ชิ้น)</span>
-                <span className="ml-auto text-indigo-700">มูลค่า {moneyK(s.v)}</span>
-                <span className="text-emerald-700">กำไรประมาณ {moneyK(s.p)}</span>
+                <span className="text-slate-400 font-normal">({b.items.length} ใบ · {fmt(s.qAll)} ชิ้น · ค้างจ่าย {fmt(s.q)})</span>
+                <span className="ml-auto text-indigo-700">มูลค่า {moneyK(s.v)}{s.vLeft > 0 ? <span className="text-indigo-400 font-normal"> (ค้าง {moneyK(s.vLeft)})</span> : null}</span>
+                <span className="text-emerald-700" title="กำไรประมาณของทั้งกลุ่ม คิดจากทั้งใบ (จำนวนสั่งผลิต × กำไร/ชิ้น)">กำไรประมาณ {moneyK(s.p)}</span>
               </div>
             )}
             <div className="border border-slate-200 rounded-xl overflow-x-auto bg-white">
@@ -339,15 +344,16 @@ export function ExecPlan({ onOpenMO }: {
                         </button>
                       </span>
                     </th>
-                    <th className="px-2 py-2 font-medium text-right whitespace-nowrap">มูลค่าที่ยังค้าง</th>
+                    <th className="px-2 py-2 font-medium text-right whitespace-nowrap" title="มูลค่าทั้งใบ = จำนวนสั่งผลิต × ราคาขาย/ชิ้น · บรรทัดล่างคือส่วนที่ยังไม่ได้จ่ายงาน">มูลค่าใบนี้</th>
                     <th className="px-2 py-2 font-medium text-right whitespace-nowrap">ต้นทุน/ชิ้น</th>
                     <th className="px-2 py-2 font-medium text-right whitespace-nowrap">กำไร/ชิ้น</th>
-                    <th className="px-2 py-2 font-medium text-right whitespace-nowrap">กำไรทั้งก้อน</th>
+                    <th className="px-2 py-2 font-medium text-right whitespace-nowrap" title="กำไรทั้งใบ = กำไร/ชิ้น × จำนวนสั่งผลิต · บรรทัดล่างคือส่วนที่ยังไม่ได้จ่ายงาน">กำไรทั้งใบ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {b.items.map((r) => {
-                    const value = r.remaining * r.list_price;
+                    const value = r.remaining * r.list_price;     // ส่วนที่ยังไม่ได้จ่ายงาน
+                    const valueAll = r.qty * r.list_price;        // มูลค่าทั้งใบ
                     const prof = unitProfit(r), ok = canProfit(r);
                     const pct = Math.round(marginPct(r));
                     const donePct = r.qty > 0 ? Math.min(100, Math.round((r.dispatched / r.qty) * 100)) : 0;
@@ -396,7 +402,14 @@ export function ExecPlan({ onOpenMO }: {
                             : r.brand_oem ? <span className="text-[10px] text-violet-500" title="งาน OEM — ราคาตกลงกันต่อออเดอร์ ไม่ได้ตั้งไว้ในระบบสินค้า">ราคาต่อออเดอร์</span>
                             : <span className="text-[10px] text-amber-600">ยังไม่ตั้งราคา</span>}
                         </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-indigo-700 whitespace-nowrap">{value > 0 ? money(value) : "—"}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">
+                          {valueAll > 0 ? <>
+                            <div className="font-semibold text-indigo-700">{money(valueAll)}</div>
+                            <div className="text-[9px] font-normal text-slate-400">
+                              {r.remaining > 0 ? <>ค้าง {money(value)}</> : "จ่ายงานครบแล้ว"}
+                            </div>
+                          </> : <span className="text-slate-300">—</span>}
+                        </td>
                         <td className="px-2 py-1.5 text-right tabular-nums text-slate-600 whitespace-nowrap">
                           {r.has_bom ? money(unitCost(r)) : <span className="text-slate-300">—</span>}
                           <div className="text-[9px] text-slate-400">
@@ -407,7 +420,10 @@ export function ExecPlan({ onOpenMO }: {
                           {ok ? <>{money(prof)}<div className="text-[9px] font-normal text-slate-400">{pct}%</div></> : "—"}
                         </td>
                         <td className={`px-2 py-1.5 text-right tabular-nums whitespace-nowrap ${ok ? "text-emerald-700" : "text-slate-300"}`}>
-                          {ok ? money(prof * r.remaining) : "—"}
+                          {ok ? <>
+                            <div className="font-semibold">{money(prof * r.qty)}</div>
+                            <div className="text-[9px] font-normal text-slate-400">{r.remaining > 0 ? <>ค้าง {money(prof * r.remaining)}</> : "จ่ายงานครบแล้ว"}</div>
+                          </> : "—"}
                         </td>
                       </tr>
                     );
@@ -420,7 +436,7 @@ export function ExecPlan({ onOpenMO }: {
       })}
 
       <p className="text-[11px] text-slate-400 leading-relaxed">
-        • <b>มูลค่าที่ยังค้าง</b> = จำนวนที่ยังไม่ได้จ่ายงาน × ราคาขาย/ชิ้น (Sale Price ในหน้าสินค้า) ·
+        • <b>มูลค่าใบนี้</b> = จำนวนสั่งผลิตทั้งใบ × ราคาขาย/ชิ้น (Sale Price ในหน้าสินค้า) — ตัวเลขเล็กใต้เลขคือส่วนที่ <b>ยังไม่ได้จ่ายงาน</b> ·
         <b> ต้นทุน/ชิ้น</b> = วัตถุดิบตามสูตร (ราคาซื้อล่าสุดในระบบ) + ค่าแรงกลาง + ค่าแรงเหมา ·
         <b> กำไร</b> จึงเป็น <b>ตัวเลขประมาณ</b> ไม่ใช่กำไรจริงต่อบิลขาย (ยังไม่รวมส่วนลด/ค่าขนส่ง/ค่าใช้จ่ายอื่น)
         <br />• ใบที่ยังไม่ตั้งราคาขาย หรือยังไม่มีสูตรวัตถุดิบ จะไม่ถูกนับในยอดกำไร (ขึ้น “—”) เพื่อไม่ให้ตัวเลขรวมหลอกตา
