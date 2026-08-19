@@ -11,7 +11,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import dynamicImport from "next/dynamic";
 import { HoverImage } from "@/components/hover-image";
 import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
@@ -23,7 +22,6 @@ type CraftLite = { id: string; name: string; department_id?: string | null; code
 type DefectMap = Record<string, { count: number } | undefined>;
 
 // drawer ข้อมูลใบสั่งผลิต (ของกลางตัวเดียวกับหน้า master) — โหลดตอนกดชื่อบนการ์ดเท่านั้น (ตัวนี้หนัก)
-const RecordDrawer = dynamicImport(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const dayText = (d?: string | null) => (d ? new Date(String(d).slice(0, 10) + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : null);
@@ -106,16 +104,9 @@ export function DispatchPlanBoard({
   const [listPopup, setListPopup] = useState<{ kind: "pending" | "dept"; dept?: DeptLite } | null>(null);
   const [listView, setListView] = useState<"cards" | "cal">("cards");      // ในป๊อป: การ์ด / ปฏิทิน (ตามกำหนดส่ง)
   const [calCursor, setCalCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
-  const [moPeek, setMoPeek] = useState<string | null>(null);              // id ใบสั่งผลิตที่กดดูข้อมูล
   // ลำดับการ์ดในป๊อป (ลากจัดเองได้) — จำไว้ในเครื่องนี้ต่อโต๊ะ
   const [cardOrder, setCardOrder] = useState<Record<string, string[]>>({});
   const [dragCard, setDragCard] = useState<string | null>(null);
-
-  /** กดชื่อบนการ์ด → เปิด drawer "ข้อมูลใบสั่งผลิต" (ของกลาง MasterRecordDrawer) */
-  const openMoInfo = useCallback((moId: string | null | undefined) => {
-    if (!moId) { toast.error("งานนี้ยังไม่ผูกกับใบสั่งผลิต"); return; }
-    setMoPeek(String(moId));
-  }, [toast]);
 
   /** ลำดับการ์ดที่ลากจัดไว้เอง (เก็บในเครื่อง) */
   const orderKeyOf = (kind: string, deptId?: string) => `wb:cardOrder:${kind}:${deptId ?? "-"}`;
@@ -936,10 +927,10 @@ export function DispatchPlanBoard({
               {badge && <span className="absolute top-1 left-1">{badge}</span>}
             </div>
             <div className="p-2">
-              {/* กดชื่อ = เปิดข้อมูลสินค้า (ไม่ไปโดนคลิกการ์ด) */}
-              <button type="button" onClick={(e) => { e.stopPropagation(); openMoInfo(moId); }} title="กดเพื่อเปิดข้อมูลใบสั่งผลิต"
+              {/* กดชื่อ/รหัส = เปิดป๊อปรายละเอียดงานเต็ม (เช็คลิสต์เตรียม/ตัด · วัตถุดิบ · ค่าแรง) — ไม่ไปโดนคลิกการ์ด */}
+              <button type="button" onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: moId ?? null, moNo, productSku: sku, productName: name, qty }); }} title="กดเพื่อเปิดรายละเอียดงาน"
                 className="block w-full text-left text-sm font-semibold text-slate-800 truncate hover:text-indigo-600 hover:underline">{sku ?? "—"}</button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); openMoInfo(moId); }} title="กดเพื่อเปิดข้อมูลใบสั่งผลิต"
+              <button type="button" onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: moId ?? null, moNo, productSku: sku, productName: name, qty }); }} title="กดเพื่อเปิดรายละเอียดงาน"
                 className="block w-full text-left text-[11px] text-slate-500 truncate hover:text-indigo-600">{name}</button>
               <div className="text-[10px] text-slate-400 font-mono truncate">{moNo}</div>
               {due && <div className="text-[10px] text-slate-500">📅 {dayText(due)}</div>}
@@ -978,29 +969,39 @@ export function DispatchPlanBoard({
                 <div className="mb-2 rounded-lg border border-indigo-200 bg-indigo-50/50 p-2">
                   <input autoFocus value={listAddSearch} onChange={(e) => setListAddSearch(e.target.value)} placeholder="ค้นหางานที่ยังไม่ได้จ่าย…"
                     className="w-full h-8 px-2 mb-1.5 text-sm border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-                  <div className="max-h-40 overflow-y-auto scrollbar-hide space-y-1">
+                  {/* การ์ดแนวตั้ง เรียงเป็นตาราง — เห็นทีเดียวราว 10 ใบ (เลื่อนดูต่อได้) */}
+                  <div className="max-h-[300px] overflow-y-auto scrollbar-hide">
                     {(() => {
                       const aq = listAddSearch.trim().toLowerCase();
                       const opts = visiblePending.filter((p) => !aq || `${p.product_sku ?? ""} ${p.product_name ?? ""} ${p.mo_no}`.toLowerCase().includes(aq));
                       if (opts.length === 0) return <div className="py-3 text-center text-[11px] text-slate-400">ไม่มีงานรอจ่ายที่ตรงกับที่ค้น</div>;
-                      return opts.slice(0, 60).map((p) => (
-                        <button key={p.id} disabled={listBusy}
-                          onClick={async () => {
-                            setListBusy(true);
-                            try {
-                              if (realMode) { onDispatch?.({ moId: p.id, deptId: d.id, qty: availOf(p) }); close(); }
-                              else { await addLineFor(p.mo_no, d); }
-                            } finally { setListBusy(false); }
-                          }}
-                          className="w-full flex items-center gap-2 px-2 py-1.5 bg-white border border-slate-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 text-left disabled:opacity-50">
-                          <Thumb url={imageByMo[p.mo_no]} />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-semibold text-slate-800 truncate">{p.product_sku}</span>
-                            <span className="block text-[10px] text-slate-400 font-mono truncate">{p.mo_no}</span>
-                          </span>
-                          <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">เหลือ <b>{fmt(availOf(p))}</b></span>
-                        </button>
-                      ));
+                      return (
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(112px, 1fr))" }}>
+                          {opts.slice(0, 60).map((p) => (
+                            <button key={p.id} disabled={listBusy}
+                              onClick={async () => {
+                                setListBusy(true);
+                                try {
+                                  if (realMode) { onDispatch?.({ moId: p.id, deptId: d.id, qty: availOf(p) }); close(); }
+                                  else { await addLineFor(p.mo_no, d); }
+                                } finally { setListBusy(false); }
+                              }}
+                              title={`${p.product_sku ?? ""} · ${p.product_name ?? ""}\n${p.mo_no} · เหลือ ${fmt(availOf(p))}`}
+                              className="bg-white border border-slate-200 rounded-lg overflow-hidden hover:border-indigo-400 hover:shadow-sm text-left disabled:opacity-50">
+                              <span className="block h-16 bg-slate-50 flex items-center justify-center">
+                                {imageByMo[p.mo_no]
+                                  ? <img src={imageByMo[p.mo_no] as string} alt={p.product_sku ?? ""} loading="lazy" decoding="async" className="max-h-full max-w-full object-contain" />
+                                  : <span className="text-2xl text-slate-200">📦</span>}
+                              </span>
+                              <span className="block px-1.5 py-1">
+                                <span className="block text-[12px] font-semibold text-slate-800 truncate">{p.product_sku}</span>
+                                <span className="block text-[9px] text-slate-400 font-mono truncate">{p.mo_no}</span>
+                                <span className="mt-0.5 inline-block text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">เหลือ <b>{fmt(availOf(p))}</b></span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      );
                     })()}
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">{realMode ? "กดแล้วจ่ายจริงทันที (จำนวนที่เหลือทั้งหมด)" : "กดแล้วเพิ่มเป็นรายการร่างในโต๊ะนี้"}</p>
@@ -1108,9 +1109,9 @@ export function DispatchPlanBoard({
                             <span className="absolute top-1 left-1 text-[9px] px-1.5 py-0.5 rounded-full bg-blue-600 text-white max-w-[110px] truncate">{w.assignee_name || "ทั้งโต๊ะ"}</span>
                           </div>
                           <div className="px-2 pt-2">
-                            <button type="button" onClick={(e) => { e.stopPropagation(); openMoInfo(w.mo_id); }} title="กดเพื่อเปิดข้อมูลใบสั่งผลิต"
+                            <button type="button" onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }); }} title="กดเพื่อเปิดรายละเอียดงาน"
                               className="block w-full text-left text-sm font-semibold text-slate-800 truncate hover:text-indigo-600 hover:underline">{w.product_sku ?? "—"}</button>
-                            <button type="button" onClick={(e) => { e.stopPropagation(); openMoInfo(w.mo_id); }} title="กดเพื่อเปิดข้อมูลใบสั่งผลิต"
+                            <button type="button" onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }); }} title="กดเพื่อเปิดรายละเอียดงาน"
                               className="block w-full text-left text-[11px] text-slate-500 truncate hover:text-indigo-600">{w.product_name}</button>
                             <div className="text-[10px] text-slate-400 font-mono truncate">{w.mo_no}</div>
                             {dueOf("w", w) && <div className="text-[10px] text-slate-500">📅 {dayText(dueOf("w", w))}</div>}
@@ -1175,10 +1176,6 @@ export function DispatchPlanBoard({
           </div>
         );
       })()}
-
-      {/* 🏭 ข้อมูลใบสั่งผลิต — drawer ตัวเดียวกับหน้า master (เปิดจากการกดชื่อ/รหัสบนการ์ด) */}
-      {moPeek && <RecordDrawer moduleKey="manufacturing-orders" apiPath="manufacturing-orders" recordId={moPeek}
-        title="ใบสั่งผลิต" icon="🏭" onClose={() => setMoPeek(null)} />}
 
       {/* 👥 พนักงานในโต๊ะ — ย้ายคนเข้า/ออก + ตั้ง OT วางแผนรายคน (฿/ชม. × ชม./วัน × วัน) */}
       {staffPopup && (() => {
