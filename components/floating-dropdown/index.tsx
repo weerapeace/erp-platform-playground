@@ -77,3 +77,19 @@ export function FloatingDropdown({
 
   return createPortal(<div ref={panelRef} style={style}>{children}</div>, document.body);
 }
+
+// ============================================================
+// ขนาดมาตรฐานของ dropdown "ตัวเลือกข้อมูล" (ของกลาง — ใช้กับ picker ทุกตัว)
+//   เดิม dropdown กว้างเท่าปุ่ม → ในฟอร์ม 2 คอลัมน์ ชื่อยาว ๆ โดนตัดเป็น "..." มองไม่ออกว่าใครเป็นใคร
+//   ตอนนี้บังคับกว้างขั้นต่ำ + ปล่อยให้ชื่อขึ้นบรรทัดใหม่ได้ (ดู PICKER_NAME_CLASS)
+//   หมายเหตุ: FloatingDropdown จะจำกัดไม่ให้เกินขอบจอ และเลื่อนซ้าย/ขวาให้พอดีเอง
+// ============================================================
+
+/** picker ทั่วไป (ลูกค้า / พนักงาน / คลัง / แผนก / หน่วย / ภาษี / ผู้จำหน่าย) */
+export const PICKER_PANEL = { minWidth: 400, maxWidth: 680 } as const;
+
+/** picker ที่แถวเป็นตาราง มีรูป+รหัส+ราคา (สินค้า / SKU) — ต้องกว้างกว่า */
+export const PICKER_PANEL_WIDE = { minWidth: 540, maxWidth: 760 } as const;
+
+/** ชื่อรายการในลิสต์: ขึ้นบรรทัดใหม่ได้ ไม่ตัดท้ายด้วย ... (ปุ่มที่ปิดอยู่ยังตัดบรรทัดเดียวเหมือนเดิม) */
+export const PICKER_NAME_CLASS = "text-sm text-slate-800 break-words whitespace-normal";
