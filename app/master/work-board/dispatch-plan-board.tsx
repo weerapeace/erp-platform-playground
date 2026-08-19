@@ -7,7 +7,7 @@
  * - กด "ดันเป็นของจริง" → สร้างใบจ่ายงานจริงตามร่างทั้งแผน
  * แยกจากบอร์ด canvas เดิม เพื่อไม่ให้กระทบของจริง
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
@@ -102,6 +102,7 @@ export function DispatchPlanBoard({
   const [staffPopup, setStaffPopup] = useState<DeptLite | null>(null);   // popup พนักงานในโต๊ะ (แก้คน + ตั้ง OT)
   // ⛶ ขยายดูรายการในช่อง (รอจ่าย / โต๊ะ) — คอลัมน์บนบอร์ดยาว เลื่อนหาของยาก
   const [listPopup, setListPopup] = useState<{ kind: "pending" | "dept"; dept?: DeptLite } | null>(null);
+  const [listByWorker, setListByWorker] = useState(true);   // ป๊อปรายการงานในโต๊ะ: จัดกลุ่มการ์ดตามช่าง (โต๊ะช่างเหมามีหลายคน)
   const [listView, setListView] = useState<"cards" | "cal">("cards");      // ในป๊อป: การ์ด / ปฏิทิน (ตามกำหนดส่ง)
   const [calCursor, setCalCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   // ลำดับการ์ดในป๊อป (ลากจัดเองได้) — จำไว้ในเครื่องนี้ต่อโต๊ะ
@@ -994,6 +995,72 @@ export function DispatchPlanBoard({
           </div>
         );
 
+        /** การ์ด "ใบจ่ายงานจริง" 1 ใบ — แยกเป็นฟังก์ชันเพื่อใช้ได้ทั้งแบบเรียงรวมและแบบแยกกลุ่มตามช่าง */
+        const renderReal = (w: WOLite) => {
+        const wl = woLabor(w);
+        const editingLabor = listLaborId === w.id;
+        return (
+          <div key={`w:${w.id}`}
+            draggable onDragStart={(e) => { setDragCard(`w:${w.id}`); e.stopPropagation(); }} onDragEnd={() => setDragCard(null)}
+            onDragOver={(e) => { if (dragCard && dragCard !== `w:${w.id}`) e.preventDefault(); }}
+            onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (dragCard) { moveCard(storeKey, cardKeys, dragCard, `w:${w.id}`); setDragCard(null); } }}
+            className={`rounded-xl border bg-white overflow-hidden ${dragCard === `w:${w.id}` ? "opacity-40 border-indigo-300" : "border-slate-200"}`}>
+            <div onClick={() => onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 })}
+              title="กดเพื่อเปิดรายละเอียดงาน (ปิดแล้วกลับมาหน้านี้)" className="cursor-pointer hover:bg-slate-50/60">
+              <div className="relative h-24 bg-slate-50 flex items-center justify-center">
+                {(w.image_url ?? imageByMo[w.mo_no])
+                  ? <img src={(w.image_url ?? imageByMo[w.mo_no]) as string} alt={w.product_sku ?? ""} loading="lazy" decoding="async" className="max-h-full max-w-full object-contain" />
+                  : <span className="text-3xl text-slate-200">📦</span>}
+                <span className="absolute top-1 left-1 text-[9px] px-1.5 py-0.5 rounded-full bg-blue-600 text-white max-w-[110px] truncate">{w.assignee_name || "ทั้งโต๊ะ"}</span>
+              </div>
+              <div className="px-2 pt-2">
+                <button type="button" onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }); }} title="กดเพื่อเปิดรายละเอียดงาน"
+                  className="block w-full text-left text-sm font-semibold text-slate-800 truncate hover:text-indigo-600 hover:underline">{w.product_sku ?? "—"}</button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }); }} title="กดเพื่อเปิดรายละเอียดงาน"
+                  className="block w-full text-left text-[11px] text-slate-500 truncate hover:text-indigo-600">{w.product_name}</button>
+                <div className="text-[10px] text-slate-400 font-mono truncate">{w.mo_no}</div>
+                {dueOf("w", w) && <div className="text-[10px] text-slate-500">📅 {dayText(dueOf("w", w))}</div>}
+              </div>
+            </div>
+            <div className="px-2 pb-2">
+              <div className="flex items-center justify-between gap-1 mt-1.5">
+                <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap"><b className="text-sm">{fmt(Number(w.qty) || 0)}</b> ชิ้น</span>
+                {wl > 0 ? <span className="text-[10px] text-amber-600 font-medium">{baht(wl)}</span> : <span className="text-[10px] text-slate-300">ยังไม่ใส่ค่าแรง</span>}
+              </div>
+              {realMode && editable && onUpdateWO && (
+                editingLabor ? (
+                  <div className="flex items-center gap-1 mt-1.5" onClick={(e) => e.stopPropagation()}>
+                    <input type="number" min={0} step="any" autoFocus value={listLaborVal} onChange={(e) => setListLaborVal(e.target.value)} placeholder="฿/ชิ้น"
+                      className="w-16 h-7 px-1.5 text-xs text-right border border-amber-300 rounded" />
+                    <span className="text-[10px] text-slate-400">= ฿{fmt((Number(listLaborVal) || 0) * (Number(w.qty) || 0))}</span>
+                    <button disabled={listBusy} onClick={async () => {
+                      setListBusy(true);
+                      try { await onUpdateWO(w.id, { labor_cost: (Number(listLaborVal) || 0) * (Number(w.qty) || 0) }, true); setListLaborId(null); toast.success("ใส่ค่าแรงแล้ว"); }
+                      catch { /* parent toast */ } finally { setListBusy(false); }
+                    }} className="ml-auto h-7 px-2 text-[11px] bg-amber-500 text-white rounded hover:bg-amber-600 disabled:opacity-50">บันทึก</button>
+                    <button onClick={() => setListLaborId(null)} className="h-7 px-1.5 text-[11px] text-slate-400">✕</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 mt-1.5">
+                    <button onClick={(e) => { e.stopPropagation(); setListLaborId(w.id); setListLaborVal(wl > 0 && (Number(w.qty) || 0) > 0 ? String(Math.round((wl / (Number(w.qty) || 1)) * 100) / 100) : ""); }}
+                      className="h-6 px-1.5 text-[10px] rounded border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100">💰 {wl > 0 ? "แก้ค่าแรง" : "ใส่ค่าแรง"}</button>
+                    {onCancelWO && w.status !== "partial_return" && (
+                      <button onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!window.confirm(`ย้อน "${w.product_sku ?? "งานนี้"}" (${fmt(Number(w.qty) || 0)} ชิ้น) กลับไปรอจ่าย?`)) return;
+                        setListBusy(true);
+                        try { await onCancelWO(w.id); } finally { setListBusy(false); }
+                      }} disabled={listBusy}
+                        className="h-6 px-1.5 text-[10px] rounded border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300 disabled:opacity-50">↩ คืนรอจ่าย</button>
+                    )}
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        );
+        };
+
         return (
           <div className="fixed inset-0 z-40 bg-black/30 flex items-center justify-center p-4" onClick={close}>
             <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col p-4" onClick={(e) => e.stopPropagation()}>
@@ -1003,7 +1070,11 @@ export function DispatchPlanBoard({
                 </h3>
                 <div className="ml-auto inline-flex rounded-lg border border-slate-200 overflow-hidden text-[11px] shrink-0">
                   <button onClick={() => setListView("cards")} className={`h-8 px-2.5 font-medium ${listView === "cards" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🗂 การ์ด</button>
-                  <button onClick={() => setListView("cal")} className={`h-8 px-2.5 font-medium border-l border-slate-200 ${listView === "cal" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📅 ปฏิทิน</button>
+                  {!isPending && (
+                  <button onClick={() => setListByWorker((v) => !v)} title="แยกการ์ดเป็นกลุ่มตามช่างที่ถืองาน"
+                    className={`h-8 px-2.5 text-xs rounded-lg border ${listByWorker ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>👤 แยกตามช่าง</button>
+                )}
+                <button onClick={() => setListView("cal")} className={`h-8 px-2.5 font-medium border-l border-slate-200 ${listView === "cal" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📅 ปฏิทิน</button>
                 </div>
                 {!isPending && d && editable && (
                   <button onClick={() => { setListAddOpen((v) => !v); setListAddSearch(""); }}
@@ -1143,70 +1214,26 @@ export function DispatchPlanBoard({
                     () => onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }), dueOf("p", p), p.id))}
 
                   {/* ในโต๊ะ: ใบจ่ายงานจริง */}
-                  {reals.map((w) => {
-                    const wl = woLabor(w);
-                    const editingLabor = listLaborId === w.id;
-                    return (
-                      <div key={`w:${w.id}`}
-                        draggable onDragStart={(e) => { setDragCard(`w:${w.id}`); e.stopPropagation(); }} onDragEnd={() => setDragCard(null)}
-                        onDragOver={(e) => { if (dragCard && dragCard !== `w:${w.id}`) e.preventDefault(); }}
-                        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (dragCard) { moveCard(storeKey, cardKeys, dragCard, `w:${w.id}`); setDragCard(null); } }}
-                        className={`rounded-xl border bg-white overflow-hidden ${dragCard === `w:${w.id}` ? "opacity-40 border-indigo-300" : "border-slate-200"}`}>
-                        <div onClick={() => onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 })}
-                          title="กดเพื่อเปิดรายละเอียดงาน (ปิดแล้วกลับมาหน้านี้)" className="cursor-pointer hover:bg-slate-50/60">
-                          <div className="relative h-24 bg-slate-50 flex items-center justify-center">
-                            {(w.image_url ?? imageByMo[w.mo_no])
-                              ? <img src={(w.image_url ?? imageByMo[w.mo_no]) as string} alt={w.product_sku ?? ""} loading="lazy" decoding="async" className="max-h-full max-w-full object-contain" />
-                              : <span className="text-3xl text-slate-200">📦</span>}
-                            <span className="absolute top-1 left-1 text-[9px] px-1.5 py-0.5 rounded-full bg-blue-600 text-white max-w-[110px] truncate">{w.assignee_name || "ทั้งโต๊ะ"}</span>
-                          </div>
-                          <div className="px-2 pt-2">
-                            <button type="button" onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }); }} title="กดเพื่อเปิดรายละเอียดงาน"
-                              className="block w-full text-left text-sm font-semibold text-slate-800 truncate hover:text-indigo-600 hover:underline">{w.product_sku ?? "—"}</button>
-                            <button type="button" onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: Number(w.qty) || 0 }); }} title="กดเพื่อเปิดรายละเอียดงาน"
-                              className="block w-full text-left text-[11px] text-slate-500 truncate hover:text-indigo-600">{w.product_name}</button>
-                            <div className="text-[10px] text-slate-400 font-mono truncate">{w.mo_no}</div>
-                            {dueOf("w", w) && <div className="text-[10px] text-slate-500">📅 {dayText(dueOf("w", w))}</div>}
-                          </div>
+                  {(() => {
+                    // 👤 แยกตามช่าง — โต๊ะช่างเหมามีหลายคนปนกัน ดูรวม ๆ แล้วไม่รู้ว่าใครถืออะไรอยู่
+                    const nameOf = (w: WOLite) => w.assignee_name || "— ทั้งโต๊ะ (ไม่ระบุช่าง) —";
+                    if (!listByWorker || new Set(reals.map(nameOf)).size < 2) return reals.map(renderReal);
+                    const byWorker = new Map<string, WOLite[]>();
+                    for (const w of reals) { const k = nameOf(w); (byWorker.get(k) ?? byWorker.set(k, []).get(k)!).push(w); }
+                    const sumOf = (ws: WOLite[]) => ws.reduce((a, w) => a + (Number(w.qty) || 0), 0);
+                    // ใครถืองานเยอะสุดขึ้นก่อน (เห็นภาระงานทันที)
+                    const groups = [...byWorker.entries()].sort((a, b) => sumOf(b[1]) - sumOf(a[1]));
+                    return groups.map(([wname, ws]) => (
+                      <Fragment key={`gw:${wname}`}>
+                        <div className="col-span-full flex items-center gap-2 mt-1 px-1 py-1 border-b border-violet-100">
+                          <span className="text-[12px] font-semibold text-violet-700 truncate">👤 {wname}</span>
+                          <span className="text-[11px] text-slate-400 shrink-0">{ws.length} ใบ · {fmt(sumOf(ws))} ชิ้น</span>
+                          {(() => { const lb = ws.reduce((a, w) => a + woLabor(w), 0); return lb > 0 ? <span className="text-[11px] text-amber-700 shrink-0 ml-auto">{baht(lb)}</span> : null; })()}
                         </div>
-                        <div className="px-2 pb-2">
-                          <div className="flex items-center justify-between gap-1 mt-1.5">
-                            <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap"><b className="text-sm">{fmt(Number(w.qty) || 0)}</b> ชิ้น</span>
-                            {wl > 0 ? <span className="text-[10px] text-amber-600 font-medium">{baht(wl)}</span> : <span className="text-[10px] text-slate-300">ยังไม่ใส่ค่าแรง</span>}
-                          </div>
-                          {realMode && editable && onUpdateWO && (
-                            editingLabor ? (
-                              <div className="flex items-center gap-1 mt-1.5" onClick={(e) => e.stopPropagation()}>
-                                <input type="number" min={0} step="any" autoFocus value={listLaborVal} onChange={(e) => setListLaborVal(e.target.value)} placeholder="฿/ชิ้น"
-                                  className="w-16 h-7 px-1.5 text-xs text-right border border-amber-300 rounded" />
-                                <span className="text-[10px] text-slate-400">= ฿{fmt((Number(listLaborVal) || 0) * (Number(w.qty) || 0))}</span>
-                                <button disabled={listBusy} onClick={async () => {
-                                  setListBusy(true);
-                                  try { await onUpdateWO(w.id, { labor_cost: (Number(listLaborVal) || 0) * (Number(w.qty) || 0) }, true); setListLaborId(null); toast.success("ใส่ค่าแรงแล้ว"); }
-                                  catch { /* parent toast */ } finally { setListBusy(false); }
-                                }} className="ml-auto h-7 px-2 text-[11px] bg-amber-500 text-white rounded hover:bg-amber-600 disabled:opacity-50">บันทึก</button>
-                                <button onClick={() => setListLaborId(null)} className="h-7 px-1.5 text-[11px] text-slate-400">✕</button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1 mt-1.5">
-                                <button onClick={(e) => { e.stopPropagation(); setListLaborId(w.id); setListLaborVal(wl > 0 && (Number(w.qty) || 0) > 0 ? String(Math.round((wl / (Number(w.qty) || 1)) * 100) / 100) : ""); }}
-                                  className="h-6 px-1.5 text-[10px] rounded border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100">💰 {wl > 0 ? "แก้ค่าแรง" : "ใส่ค่าแรง"}</button>
-                                {onCancelWO && w.status !== "partial_return" && (
-                                  <button onClick={async (e) => {
-                                    e.stopPropagation();
-                                    if (!window.confirm(`ย้อน "${w.product_sku ?? "งานนี้"}" (${fmt(Number(w.qty) || 0)} ชิ้น) กลับไปรอจ่าย?`)) return;
-                                    setListBusy(true);
-                                    try { await onCancelWO(w.id); } finally { setListBusy(false); }
-                                  }} disabled={listBusy}
-                                    className="h-6 px-1.5 text-[10px] rounded border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300 disabled:opacity-50">↩ คืนรอจ่าย</button>
-                                )}
-                              </div>
-                            )
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                        {ws.map(renderReal)}
+                      </Fragment>
+                    ));
+                  })()}
 
                   {/* ในโต๊ะ: ร่าง (ยังไม่ดันเป็นของจริง) */}
                   {drafts.map((l) => card(`d:${l.id}`, imageByMo[l.mo_no ?? ""], l.product_sku, l.product_name, l.mo_no, Number(l.qty) || 0,
