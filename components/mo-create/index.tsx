@@ -148,8 +148,14 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
   };
 
   // ── โหมดเพิ่มหลายรายการ ──────────────────────────────────────────────
+  /** ให้มี "บรรทัดว่างท้ายตาราง" เสมอ 1 บรรทัด — กรอกบรรทัดสุดท้ายแล้วเด้งบรรทัดใหม่ให้เอง ไม่ต้องกดเพิ่มเอง */
+  const withTrailingBlank = (list: MultiRow[]) => {
+    const last = list[list.length - 1];
+    const blank = !!last && !last.code.trim() && !String(last.qty).trim() && !last.due && !last.note.trim();
+    return blank ? list : [...list, emptyRow()];
+  };
   const setRow = (i: number, patch: Partial<MultiRow>) =>
-    setRows((prev) => prev.map((r, k) => (k === i ? { ...r, ...patch } : r)));
+    setRows((prev) => withTrailingBlank(prev.map((r, k) => (k === i ? { ...r, ...patch } : r))));
 
   /** วางจาก Excel: คอลัมน์ = รหัสสินค้า | จำนวน | กำหนดส่ง | หมายเหตุ (2 คอลัมน์แรกก็พอ) */
   const applyPaste = async (text: string, startIdx = 0) => {
@@ -169,7 +175,7 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
         if (i < next.length) next[i] = row; else next.push(row);
       });
       while (next.length < 3) next.push(emptyRow());
-      return next;
+      return withTrailingBlank(next);
     });
     // ตรวจรหัส + ดึงชื่อ/รูปให้ทันที (จะได้เห็นว่าตัวไหนผิดตั้งแต่วางเสร็จ)
     setMultiBusy(true);
