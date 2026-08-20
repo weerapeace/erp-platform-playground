@@ -19,7 +19,7 @@ type PlanResp = { id: string; name: string; status: string; start_date: string |
 type AssigneeResp = { craftsmen: { id: string; name: string; nickname?: string | null; department_id?: string | null }[]; dept_wages: Record<string, number> };
 type PendingMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
-  qty: number; remaining: number; due_date: string | null;
+  qty: number; remaining: number; due_date: string | null; internal_due_date?: string | null; order_date?: string | null;
   brand: string | null; image_url: string | null; labor?: Labor; central_rate?: number;
 };
 type PendingPiece = { id: string; mo_no: string; job_name: string; rate: number; qty: number; product_sku: string | null; product_name: string | null; image_url: string | null };
@@ -27,6 +27,7 @@ type WorkOrder = {
   id: string; wo_no: string; mo_no: string; product_sku: string | null; product_name: string | null;
   stage: string; assignee_name: string | null; assignee_id?: string | null; department_name: string | null;
   qty: number; status: string; labor_cost?: number | null; image_url?: string | null; central_rate?: number;
+  due_date?: string | null;
 };
 type BoardResp = { departments: { id: string; name: string }[]; workOrders: WorkOrder[]; pending: PendingMO[]; pending_piece: PendingPiece[] };
 
@@ -114,9 +115,9 @@ const TEMPLATE_PRODUCTION: ReportTemplate = {
   </div>`,
   body_html: `{{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
   <table class="wb-t">
-    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th>ช่าง</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td>{{assignee}}</td><td class="r">{{qty}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="5">รวม {{g_count}} รายการ</td><td class="r">{{g_qty}}</td><td class="r"></td><td class="r">{{g_labor}}</td></tr></tfoot>
+    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th>ช่าง</th><th class="r">กำหนดส่ง</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
+    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td>{{assignee}}</td><td class="r">{{due}}</td><td class="r">{{qty}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
+    <tfoot><tr><td colspan="6">รวม {{g_count}} รายการ</td><td class="r">{{g_qty}}</td><td class="r"></td><td class="r">{{g_labor}}</td></tr></tfoot>
   </table>{{/groups}}
   {{#empty}}<div class="wb-empty">ไม่มีงานกำลังผลิต</div>{{/empty}}
   {{#has_groups}}<div class="grp-head" style="margin-top:4mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมทั้งหมด</span><span class="grp-sum" style="color:#334155;">{{total_qty}} ชิ้น · ฿{{total_labor}}</span></div>
@@ -150,9 +151,9 @@ const TEMPLATE_ALL: ReportTemplate = {
   <div class="wb-sec">3) กำลังผลิต (ของจริง — แยกตามโต๊ะ/ช่าง)</div>
   {{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
   <table class="wb-t">
-    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th>ช่าง</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td>{{assignee}}</td><td class="r">{{qty}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="5">รวม {{g_count}} รายการ</td><td class="r">{{g_qty}}</td><td class="r"></td><td class="r">{{g_labor}}</td></tr></tfoot>
+    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th>ช่าง</th><th class="r">กำหนดส่ง</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
+    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td>{{assignee}}</td><td class="r">{{due}}</td><td class="r">{{qty}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
+    <tfoot><tr><td colspan="6">รวม {{g_count}} รายการ</td><td class="r">{{g_qty}}</td><td class="r"></td><td class="r">{{g_labor}}</td></tr></tfoot>
   </table>{{/groups}}
   {{^has_groups}}<div class="wb-empty">ไม่มีงานกำลังผลิต</div>{{/has_groups}}
   {{#has_groups}}<div class="grp-head" style="margin-top:3mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมกำลังผลิต</span><span class="grp-sum" style="color:#334155;">{{prod_qty}} ชิ้น · ฿{{prod_labor}}</span></div>{{/has_groups}}
@@ -163,13 +164,13 @@ const TEMPLATE_ALL: ReportTemplate = {
 const TEMPLATE_PLAN: ReportTemplate = {
   paper_size: "A4", orientation: "portrait",
   header_html: `<div class="wb-head">
-    <div><div class="wb-title">รายการจ่ายงานตามแผน</div><div class="wb-sub">แผน: {{plan_name}} · {{date_range}} · {{count}} รายการ</div></div>
+    <div><div class="wb-title">รายการจ่ายงานตามแผน</div><div class="wb-sub">แผน: {{plan_name}} · {{date_range}} · {{count}} รายการ · เรียงตาม{{sort_label}}</div></div>
     <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
   </div>`,
   body_html: `{{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
   <table class="grp-rows">
-    <thead><tr><th class="img">รูป</th><th>ช่าง</th><th>สินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง</th></tr></thead>
-    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td>{{assignee}}</td><td><span class="mono">{{sku}}</span> · {{name}}</td><td class="r">{{qty}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
+    <thead><tr><th class="img">รูป</th><th>ช่าง</th><th>สินค้า</th><th class="r">กำหนดส่ง</th><th class="r">จำนวน</th><th class="r">ค่าแรง</th></tr></thead>
+    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td>{{assignee}}</td><td><span class="mono">{{sku}}</span> · {{name}}</td><td class="r">{{due}}</td><td class="r">{{qty}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
   </table>{{/groups}}
   {{#empty}}<div class="wb-empty">แผนนี้ยังไม่มีรายการจ่าย</div>{{/empty}}
   {{#has_groups}}<div class="grp-head" style="margin-top:4mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมทั้งหมด</span><span class="grp-sum" style="color:#334155;">{{total_qty}} ชิ้น · ฿{{total_labor}}</span></div>
@@ -197,6 +198,13 @@ function WorkBoardPrintInner() {
   const [assignees, setAssignees] = useState<AssigneeResp>({ craftsmen: [], dept_wages: {} });
   const [error, setError] = useState<string | null>(null);
   const withStaff = type === "plan" || type === "production" || type === "all";   // ใบที่แยกตามโต๊ะ → โชว์พนักงานในโต๊ะ
+  // เรียงรายการในแต่ละโต๊ะได้ (จำไว้ให้ในเครื่องนี้)
+  const [sortBy, setSortBy] = useState<"opened" | "name" | "due" | "qty">("opened");
+  useEffect(() => {
+    try { const v = localStorage.getItem("print:work-board:sort"); if (v === "opened" || v === "name" || v === "due" || v === "qty") setSortBy(v); } catch { /* ignore */ }
+  }, []);
+  const pickSort = (v: "opened" | "name" | "due" | "qty") => { setSortBy(v); try { localStorage.setItem("print:work-board:sort", v); } catch { /* ignore */ } };
+  const SORT_LABEL: Record<string, string> = { opened: "วันที่เปิดใบงาน", name: "ชื่อสินค้า", due: "กำหนดส่ง", qty: "จำนวน" };
 
   useEffect(() => {
     let on = true;
@@ -290,7 +298,7 @@ function WorkBoardPrintInner() {
         const gLabor = list.reduce((a, w) => a + (w.labor_cost || 0), 0);
         tQty += gQty; tLabor += gLabor;
         return { dept, staff_html: staffHtmlOf(dept), g_qty: num(gQty), g_labor: money(gLabor), g_count: list.length,
-          rows: list.map((w) => {
+          rows: sortRows(list, (w) => ({ moNo: w.mo_no, name: w.product_name, qty: w.qty || 0 })).map((w) => {
             const qty = w.qty || 0;
             const total = (w.labor_cost != null && w.labor_cost > 0) ? w.labor_cost : 0;
             // ค่าแรง/ชิ้น ของจริง = ยอดรวมของใบจ่ายงาน ÷ จำนวน (ยังไม่ใส่ค่าแรง = เว้นช่องให้เขียนมือ)
@@ -299,6 +307,7 @@ function WorkBoardPrintInner() {
               img_cell: imgCell(w.image_url ?? null), mo_no: w.mo_no,
               assignee: shortAssignee(w.assignee_name, w.assignee_id) || w.department_name || "—",
               sku: w.product_sku || "—", name: w.product_name || "—",
+              due: dueText(dueByMo.get(String(w.mo_no)) ?? null),
               qty: num(qty), rate_cell: pp > 0 ? money(pp) : BLANK, labor_cell: total > 0 ? money(total) : BLANK,
             };
           }) };
@@ -331,6 +340,27 @@ function WorkBoardPrintInner() {
       });
     }
 
+    // วันกำหนดส่ง / วันที่เปิดใบ ต่อใบสั่งผลิต — ใช้ทั้งโชว์ในตารางและใช้เรียง
+    const dueByMo = new Map<string, string | null>();
+    const openedByMo = new Map<string, string>();
+    for (const m of board.pending) {
+      dueByMo.set(m.mo_no, m.internal_due_date ?? m.due_date ?? null);
+      openedByMo.set(m.mo_no, (m.order_date ?? "") || m.mo_no);   // ไม่มีวันที่เปิด → ใช้เลขใบ (เรียงตามลำดับที่สร้าง)
+    }
+    for (const w of board.workOrders) {
+      if (!dueByMo.has(w.mo_no)) dueByMo.set(w.mo_no, w.due_date ?? null);
+      if (!openedByMo.has(w.mo_no)) openedByMo.set(w.mo_no, w.mo_no);
+    }
+    /** เรียงรายการตามที่เลือกไว้ (ใช้ร่วมกันทั้งใบแผน/ใบกำลังผลิต) */
+    const sortRows = <T,>(rows: T[], get: (r: T) => { moNo: string | null; name: string | null; qty: number }) =>
+      [...rows].sort((a, b) => {
+        const A = get(a), B = get(b);
+        if (sortBy === "qty") return B.qty - A.qty;                                   // มาก → น้อย
+        if (sortBy === "name") return (A.name ?? "").localeCompare(B.name ?? "", "th");
+        if (sortBy === "due") return (dueByMo.get(A.moNo ?? "") ?? "9999").localeCompare(dueByMo.get(B.moNo ?? "") ?? "9999");
+        return (openedByMo.get(A.moNo ?? "") ?? "zzz").localeCompare(openedByMo.get(B.moNo ?? "") ?? "zzz");
+      });
+
     if (type === "plan") {
       if (!plan) return "";
       // แผนที่ + ค่าแรง/รูป จากบอร์ด (plan lines ไม่มีรูป/เรต → ดึงจาก pending/workOrders ตาม sku/mo)
@@ -348,12 +378,12 @@ function WorkBoardPrintInner() {
       let totQty = 0, totLabor = 0;
       const groups = [...byDept.entries()].sort((a, b) => (deptOrder.get(a[0]) ?? 999) - (deptOrder.get(b[0]) ?? 999)).map(([dept, list]) => {
         let gQty = 0, gLabor = 0;
-        const rows = list.map((l) => {
+        const rows = sortRows(list, (l) => ({ moNo: l.mo_no, name: l.product_name, qty: l.qty || 0 })).map((l) => {
           const rate = l.mo_no ? (rateByMo.get(l.mo_no) ?? 0) : 0; const qty = l.qty || 0; const labor = rate > 0 ? rate * qty : 0;
           gQty += qty; if (labor > 0) gLabor += labor;
           return { img_cell: imgCell(l.product_sku ? (imgBySku.get(l.product_sku) ?? null) : null),
             assignee: shortAssignee(l.assignee_name, l.assignee_id) || "(ทั้งโต๊ะ)", sku: l.product_sku || "—", name: l.product_name || "—",
-            qty: num(qty), labor_cell: rate > 0 ? money(labor) : BLANK };
+            due: dueText(dueByMo.get(l.mo_no ?? "") ?? null), qty: num(qty), labor_cell: rate > 0 ? money(labor) : BLANK };
         });
         totQty += gQty; totLabor += gLabor;
         return { dept, staff_html: staffHtmlOf(dept), g_qty: num(gQty), g_labor: money(gLabor), rows };
@@ -361,6 +391,7 @@ function WorkBoardPrintInner() {
       const date_range = (plan.start_date || plan.end_date) ? `${dueText(plan.start_date)} – ${dueText(plan.end_date)}` : "ทั้งแผน";
       return buildReportHtml(TEMPLATE_PLAN, {
         plan_name: plan.name, date_range, printed_at, count: plan.lines.length, groups, has_groups: groups.length > 0,
+        sort_label: SORT_LABEL[sortBy] ?? "",
         total_qty: num(totQty), total_labor: money(totLabor), empty: groups.length === 0,
       });
     }
@@ -371,7 +402,7 @@ function WorkBoardPrintInner() {
       group_label, printed_at, dept_count: prod.groups.length, groups: prod.groups, has_groups: prod.groups.length > 0,
       total_qty: prod.total_qty, total_labor: prod.total_labor, empty: prod.groups.length === 0,
     });
-  }, [board, moGroups, plan, assignees, type, group]);
+  }, [board, moGroups, plan, assignees, type, group, sortBy]);
 
   // กด Ctrl/Cmd+P → เด้งหน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่างเกินจาก iframe)
   useEffect(() => {
@@ -394,6 +425,16 @@ function WorkBoardPrintInner() {
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <span className="text-sm text-slate-600">🖨️ {title} · {subLabel}</span>
         <div className="flex-1" />
+        <label className="flex items-center gap-1.5 text-sm text-slate-600">
+          เรียงตาม
+          <select value={sortBy} onChange={(e) => pickSort(e.target.value as "opened" | "name" | "due" | "qty")}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
+            <option value="opened">วันที่เปิดใบงาน</option>
+            <option value="name">ชื่อสินค้า</option>
+            <option value="due">กำหนดส่ง</option>
+            <option value="qty">จำนวน (มาก→น้อย)</option>
+          </select>
+        </label>
         <button onClick={() => printReportHtmlInNewWindow(html)} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
       </div>
       <div className="px-4 py-6">
