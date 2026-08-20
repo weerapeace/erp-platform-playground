@@ -468,7 +468,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [costLines, setCostLines] = useState<CostRow[]>([]);             // ทุก Parent รวมกัน (กรองด้วย parent_code ตอนแสดง)
   const [costDirty, setCostDirty] = useState(false);
   const [costSaving, setCostSaving] = useState(false);
-  const [costParent, setCostParent] = useState<string>("");              // ข้อ 7: แท็บ Parent ที่กำลังดู ("" = ทั่วไป)
+  const [costParent, setCostParent] = useState<string>("");
+  const [verOpen, setVerOpen] = useState(false);          // ป๊อป "เพิ่มเวอร์ชันตีราคา"
+  const [verName, setVerName] = useState("");
+  const [verCopy, setVerCopy] = useState(true);           // คัดลอกรายการจากแท็บที่กำลังดู              // ข้อ 7: แท็บ Parent ที่กำลังดู ("" = ทั่วไป)
   const [costExtraMap, setCostExtraMap] = useState<Record<string, CostExtra[]>>({});   // ค่าใช้จ่ายเพิ่ม แยกตาม Parent
   // บรรทัด + ค่าใช้จ่าย ของ Parent ที่กำลังดู (ตีราคาแยกตาม Parent SKU)
   const curLines = useMemo(() => costLines.filter((r) => pkey(r.parent_code) === costParent), [costLines, costParent]);
@@ -807,7 +810,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         apiFetch(`/api/design-sheets/${form.id}/cost-lines`, { method: "PUT", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ lines: costLines.map((row, i) => { const { key: _key, ...l } = row; void _key; return { ...l, sort_order: i + 1 }; }) }) }),
         apiFetch(`/api/design-sheets/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cost_extra: costExtraMap }) }),   // ส่งทั้ง map (แยกตาม Parent) — backend sanitize เอง
+          // ส่ง cost_extra ทั้ง map (แยกตาม Parent) + ชื่อเวอร์ชัน/ร่าง Parent (แท็บที่เพิ่มจากหน้านี้จะได้ไม่หายตอนรีโหลด)
+          body: JSON.stringify({ cost_extra: costExtraMap, parent_sku_drafts: form.parent_sku_drafts }) }),
       ]);
       const lj = await lr.json(); if (lj.error) throw new Error(lj.error);
       const ej = await er.json(); if (ej.error) throw new Error(ej.error);
@@ -816,7 +820,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       return true;
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกตีราคาไม่สำเร็จ"); return false; }
     finally { setCostSaving(false); }
-  }, [form?.id, costLines, costExtraMap, toast]);
+  }, [form?.id, form?.parent_sku_drafts, costLines, costExtraMap, toast]);
 
   // ส่งยอดต้นทุนสินค้ารวม (วัสดุ + ค่าใช้จ่ายเพิ่ม) ไปเป็นรอบเสนอราคาใหม่
   const sendCostToQuote = async () => {
@@ -1867,13 +1871,15 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     </button>
                   );
                 })}
-                {/* ปุ่มเพิ่มบรรทัดไว้ตรงแท็บด้วย — ของเดิมอยู่ใต้ตาราง พอมี 14 บรรทัดต้องเลื่อนหาไกล
-                    โหมดดูก็กดได้ (เข้าโหมดแก้ + เพิ่มบรรทัดให้เลย) */}
+                {/* เพิ่ม "เวอร์ชัน" ตีราคา = แท็บใหม่ (ลองราคาอีกแบบ / อีกไซส์) — โหมดดูก็กดได้ */}
                 {canEdit && (
-                  <button onClick={() => { if (!fullEdit) setEditing(true); addCostRow(); }}
-                    title={`เพิ่มวัตถุดิบ 1 บรรทัดในแท็บ "${costParent === "" ? "ทั่วไป" : costParent}"`}
-                    className="ml-auto h-7 px-2.5 text-xs font-medium rounded-md border border-amber-300 bg-amber-500 text-white hover:bg-amber-600">
-                    ＋ เพิ่มวัตถุดิบ
+                  <button onClick={() => {
+                    const n = costParentTabs.filter((t) => t.kind === "draft").length + 2;
+                    setVerName(`เวอร์ชัน ${n}`); setVerCopy(true); setVerOpen(true);
+                  }}
+                    title="เพิ่มเวอร์ชันตีราคาใหม่ (แท็บใหม่) — คัดลอกจากแท็บที่ดูอยู่ได้"
+                    className="ml-auto h-7 px-2.5 text-xs font-medium rounded-md border border-dashed border-blue-300 text-blue-700 bg-white hover:bg-blue-50">
+                    ＋ เพิ่มเวอร์ชัน
                   </button>
                 )}
               </div>
@@ -2211,6 +2217,63 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             toast.success(`ดึงจาก BOM ${srcLabel} มา ${rows.length} บรรทัด — เลือกวัสดุ/ใส่ราคาต่อได้เลย`);
           }} />
       )}
+
+      {/* เพิ่มเวอร์ชันตีราคา = แท็บใหม่ (เก็บชื่อไว้ใน "ร่าง Parent" ของใบงาน) */}
+      <ERPModal open={verOpen} onClose={() => setVerOpen(false)} size="sm"
+        title="➕ เพิ่มเวอร์ชันตีราคา"
+        description="สร้างแท็บตีราคาใหม่ไว้ลองราคาอีกแบบ (คนละสูตร/คนละไซส์) โดยไม่ทับของเดิม"
+        footer={
+          <div className="flex w-full justify-end gap-2">
+            <button onClick={() => setVerOpen(false)} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+            <button
+              onClick={() => {
+                const name = verName.trim();
+                if (!name) { toast.error("ตั้งชื่อเวอร์ชันก่อน"); return; }
+                const exists = costParentTabs.some((t) => t.key === name) || name === "";
+                if (exists) { toast.error(`มีแท็บชื่อ "${name}" อยู่แล้ว`); return; }
+                if (!fullEdit) setEditing(true);
+                // ชื่อเวอร์ชันเก็บเป็น "ร่าง Parent" (แท็บโชว์ด้วยเส้นประ ✎) — บันทึกพร้อมตีราคา
+                setForm((f) => (f ? { ...f, parent_sku_drafts: [...f.parent_sku_drafts, name] } : f));
+                if (verCopy) {
+                  const src = costLines.filter((r) => pkey(r.parent_code) === costParent);
+                  if (src.length) {
+                    const cloned = src.map((r, i) => recomputeRow({ ...r, key: `v${Date.now()}_${i}`, id: undefined, parent_code: name }));
+                    setCostLines((prev) => [...prev, ...cloned]);
+                  }
+                  setCostExtraMap((m) => ({ ...m, [name]: (m[costParent] ?? []).map((c) => ({ ...c })) }));
+                  setCostDirty(true);
+                  toast.success(`เพิ่มเวอร์ชัน "${name}" + คัดลอก ${src.length} บรรทัดจาก "${costParent === "" ? "ทั่วไป" : costParent}" แล้ว`);
+                } else {
+                  setCostDirty(true);
+                  toast.success(`เพิ่มเวอร์ชัน "${name}" แล้ว — เริ่มใส่วัตถุดิบได้เลย`);
+                }
+                setCostParent(name);
+                setVerOpen(false);
+              }}
+              className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">สร้างเวอร์ชัน</button>
+          </div>
+        }>
+        <div className="space-y-3">
+          <label className="block">
+            <span className="text-xs text-slate-500">ชื่อเวอร์ชัน *</span>
+            <input value={verName} onChange={(e) => setVerName(e.target.value)} autoFocus
+              placeholder="เช่น เวอร์ชัน 2 · ผ้าถูกลง · ไซส์ L"
+              className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </label>
+          <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-2">
+            <input type="checkbox" checked={verCopy} onChange={(e) => setVerCopy(e.target.checked)} className="mt-0.5 h-4 w-4 accent-blue-600" />
+            <span className="text-[13px] leading-snug text-slate-700">
+              คัดลอกรายการจากแท็บ <b>{costParent === "" ? "ทั่วไป" : costParent}</b> มาตั้งต้น
+              <span className="block text-[11px] text-slate-400">
+                {costLines.filter((r) => pkey(r.parent_code) === costParent).length} บรรทัด + ค่าใช้จ่ายเพิ่ม — ก๊อปมาแล้วแก้ตัวเลขต่อได้เลย
+              </span>
+            </span>
+          </label>
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+            💡 อย่าลืมกด <b>บันทึกตีราคา</b> หลังแก้เสร็จ — เวอร์ชันใหม่จะถูกบันทึกไปพร้อมกัน
+          </p>
+        </div>
+      </ERPModal>
 
       {/* ส่งสินค้าไปใบเสนอราคา (ระบบขาย) — หย่อนเข้าตะกร้า หรือเริ่มใบใหม่ */}
       {form?.id && (
