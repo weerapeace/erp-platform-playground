@@ -73,7 +73,7 @@ async function skuImages(admin: ReturnType<typeof supabaseAdmin>, codes: string[
   const m = new Map<string, string>();
   const uniq = [...new Set(codes.filter(Boolean))];
   for (let i = 0; i < uniq.length; i += 300) {
-    const { data } = await admin.from("skus_v2").select("code, cover_image_r2_key").in("code", uniq.slice(i, i + 300));
+    const { data } = await admin.from("skus_v2").select("code, cover_image_r2_key").in("code", uniq.slice(i, i + 300)).eq("is_active", true);
     for (const r of (data ?? []) as Row[]) if (r.cover_image_r2_key) m.set(s(r.code), s(r.cover_image_r2_key));
   }
   return m;
@@ -306,7 +306,7 @@ async function production(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
     const priced = new Set<string>();
     const skuIdImg = new Map<string, { id: string; img: string }>();
     for (let i = 0; i < codes.length; i += 300) {
-      const { data } = await admin.from("skus_v2").select("id, code, standard_price, cover_image_r2_key").in("code", codes.slice(i, i + 300));
+      const { data } = await admin.from("skus_v2").select("id, code, standard_price, cover_image_r2_key").in("code", codes.slice(i, i + 300)).eq("is_active", true);
       for (const r of (data ?? []) as Row[]) {
         if (Number(r.standard_price) > 0) priced.add(s(r.code));
         skuIdImg.set(s(r.code), { id: s(r.id), img: s(r.cover_image_r2_key) });

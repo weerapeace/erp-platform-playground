@@ -41,7 +41,7 @@ type BrandInfo = { color: string | null; name: string | null; is_customer_job: b
 async function buildBrandMap(admin: ReturnType<typeof supabaseAdmin>, skus: string[]): Promise<Record<string, BrandInfo>> {
   const map: Record<string, BrandInfo> = {};
   if (skus.length === 0) return map;
-  const { data: sk } = await admin.from("skus_v2").select("code, parent_sku_id").in("code", skus);
+  const { data: sk } = await admin.from("skus_v2").select("code, parent_sku_id").in("code", skus).eq("is_active", true);
   const codeParent = new Map<string, string>();
   const parentIds = new Set<string>();
   for (const r of (sk ?? []) as { code: string | null; parent_sku_id: string | null }[]) if (r.code && r.parent_sku_id) { codeParent.set(r.code, r.parent_sku_id); parentIds.add(r.parent_sku_id); }
@@ -64,7 +64,7 @@ async function buildImageMap(admin: ReturnType<typeof supabaseAdmin>, skus: stri
   const map: Record<string, string> = {};
   const list = skus.filter(Boolean);
   if (list.length === 0) return map;
-  const { data } = await admin.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", list);
+  const { data } = await admin.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", list).eq("is_active", true);
   for (const r of (data ?? []) as SkuImgRow[]) {
     const p = Array.isArray(r.parent_skus_v2) ? r.parent_skus_v2[0] : r.parent_skus_v2;
     const key = r.cover_image_r2_key ?? p?.cover_image_r2_key ?? null;

@@ -79,7 +79,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ].filter(Boolean))];
   const [{ data: skus }, { data: groups }] = await Promise.all([
     matCodes.length
-      ? admin.from("skus_v2").select("id, code, cover_image_r2_key, material_group_id").in("code", matCodes.slice(0, 2000))
+      ? admin.from("skus_v2").select("id, code, cover_image_r2_key, material_group_id").in("code", matCodes.slice(0, 2000)).eq("is_active", true)
       : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     admin.from("material_groups").select("id, criticality"),
   ]);

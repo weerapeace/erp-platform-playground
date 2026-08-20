@@ -63,7 +63,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const chunks: string[][] = [];
     for (let i = 0; i < codeList.length; i += 300) chunks.push(codeList.slice(i, i + 300));
     const results = await Promise.all(chunks.map((c) =>
-      admin.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", c)));
+      admin.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", c).eq("is_active", true)));
     for (const { data: skus } of results) {
       for (const sk of (skus ?? []) as Record<string, unknown>[]) {
         const parRel = sk.parent_skus_v2;

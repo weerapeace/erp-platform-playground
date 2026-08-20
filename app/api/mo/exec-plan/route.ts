@@ -48,7 +48,7 @@ async function fetchSkus(admin: Admin, codes: string[], select: string): Promise
   const list = [...new Set(codes.filter(Boolean))];
   const chunks: string[][] = [];
   for (let i = 0; i < list.length; i += 300) chunks.push(list.slice(i, i + 300));
-  const results = await Promise.all(chunks.map((c) => admin.from("skus_v2").select(select).in("code", c)));
+  const results = await Promise.all(chunks.map((c) => admin.from("skus_v2").select(select).in("code", c).eq("is_active", true)));
   return results.flatMap((r) => (r.data ?? []) as unknown as Row[]);
 }
 

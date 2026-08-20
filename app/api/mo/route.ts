@@ -90,7 +90,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const imgMap = new Map<string, string>();
   if (codes.length) {
     const { data: skus } = await supabaseFromRequest(request)
-      .from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", codes);
+      .from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", codes).eq("is_active", true);
     for (const s of (skus ?? []) as Record<string, unknown>[]) {
       const parRel = s.parent_skus_v2;
       const par = (Array.isArray(parRel) ? parRel[0] : parRel) as { cover_image_r2_key?: string | null } | null;

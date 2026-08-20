@@ -34,7 +34,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   const codes = [...new Set(rows.map((l) => l.component_sku).filter(Boolean) as string[])];
   const typeMap = new Map<string, string>();
   if (codes.length > 0) {
-    const { data: skus } = await admin.from("skus_v2").select("code, grp:material_groups!material_group_id ( name )").in("code", codes);
+    const { data: skus } = await admin.from("skus_v2").select("code, grp:material_groups!material_group_id ( name )").in("code", codes).eq("is_active", true);
     for (const s of (skus ?? []) as Array<Record<string, unknown>>) {
       const g = (Array.isArray(s.grp) ? s.grp[0] : s.grp) as { name?: string } | null;
       if (g?.name) typeMap.set(String(s.code), g.name);

@@ -69,7 +69,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const skuCodes = [...new Set(list.map((m) => str(m.product_sku)).filter(Boolean))];
   let brand: string | null = null, parent_code: string | null = null, parent_name: string | null = null;
   if (skuCodes.length) {
-    const { data: skus } = await admin.from("skus_v2").select("code, parent_sku_id").in("code", skuCodes);
+    const { data: skus } = await admin.from("skus_v2").select("code, parent_sku_id").in("code", skuCodes).eq("is_active", true);
     const parentIds = new Set<string>();
     for (const s of (skus ?? []) as Record<string, unknown>[]) if (s.parent_sku_id) parentIds.add(String(s.parent_sku_id));
     if (parentIds.size > 1) warnings.push("ใบสั่งผลิตที่เลือกมาจากหลายรุ่น (Parent SKU ไม่เหมือนกัน) — สเปกอาจไม่ตรงทุกใบ");
@@ -110,7 +110,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const buckleCodes = [...new Set([...buckleByBom.values()].map((b) => b.code).filter(Boolean))];
     const imgByCode = new Map<string, string | null>();
     if (buckleCodes.length) {
-      const { data: bs } = await admin.from("skus_v2").select("code, cover_image_r2_key").in("code", buckleCodes);
+      const { data: bs } = await admin.from("skus_v2").select("code, cover_image_r2_key").in("code", buckleCodes).eq("is_active", true);
       for (const b of (bs ?? []) as Record<string, unknown>[]) { const k = b.cover_image_r2_key as string | null; imgByCode.set(str(b.code), k ? `/api/r2-image?key=${encodeURIComponent(k)}` : null); }
     }
     for (const sku of skuCodes) {

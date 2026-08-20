@@ -67,7 +67,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const prodCodes = [...new Set([...moByNo.values()].map((m) => String(m.product_sku ?? "").trim()).filter(Boolean))];
   const imgByCode = new Map<string, string>();
   if (prodCodes.length > 0) {
-    const { data: skus } = await admin.from("skus_v2").select("code, cover_image_r2_key").in("code", prodCodes.slice(0, 1000));
+    const { data: skus } = await admin.from("skus_v2").select("code, cover_image_r2_key").in("code", prodCodes.slice(0, 1000)).eq("is_active", true);
     for (const s of (skus ?? []) as Record<string, unknown>[]) {
       if (s.cover_image_r2_key) imgByCode.set(String(s.code), `/api/r2-image?key=${encodeURIComponent(String(s.cover_image_r2_key))}&w=120`);
     }

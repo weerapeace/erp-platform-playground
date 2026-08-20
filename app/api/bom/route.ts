@@ -128,7 +128,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const skuCodes = [...new Set(rows.map((r) => r.product_sku).filter(Boolean))] as string[];
   const imgMap = new Map<string, string>();
   if (skuCodes.length > 0) {
-    const { data: sk } = await supabase.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", skuCodes);
+    const { data: sk } = await supabase.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", skuCodes).eq("is_active", true);
     for (const s of (sk ?? []) as Record<string, unknown>[]) {
       const own = (s.cover_image_r2_key as string) || "";
       const par = (Array.isArray(s.parent_skus_v2) ? s.parent_skus_v2[0] : s.parent_skus_v2) as { cover_image_r2_key?: string | null } | null;

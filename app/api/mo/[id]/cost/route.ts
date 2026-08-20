@@ -92,7 +92,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   for (const x of matRows) if (x.component_sku) codes.add(String(x.component_sku));
   const priceMap = new Map<string, { std: number; list: number }>();
   if (codes.size) {
-    const { data: skus } = await admin.from("skus_v2").select("code, standard_price, list_price").in("code", [...codes]);
+    const { data: skus } = await admin.from("skus_v2").select("code, standard_price, list_price").in("code", [...codes]).eq("is_active", true);
     for (const s of (skus ?? []) as Record<string, unknown>[]) priceMap.set(String(s.code), { std: num(s.standard_price), list: num(s.list_price) });
   }
 

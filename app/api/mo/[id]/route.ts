@@ -32,7 +32,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     supabaseAdmin().from("purchase_requests_v2").select("item_name, qty, status")
       .contains("source_mo_nos", [moNo]).eq("is_active", true).not("status", "in", "(rejected,cancelled)"),   // m2m: เช็กทุกใบที่ผูก MO นี้
     productSku
-      ? supabase.from("skus_v2").select("cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").eq("code", productSku).maybeSingle()
+      ? supabase.from("skus_v2").select("cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").eq("code", productSku).eq("is_active", true).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
   const materials = matRes.data; const summary = sumRes.data;
@@ -62,7 +62,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     .filter(Boolean))];
   const matImages: Record<string, string> = {};
   if (matCodes.length > 0) {
-    const { data: comps } = await supabase.from("skus_v2").select("code, cover_image_r2_key").in("code", matCodes.slice(0, 500));
+    const { data: comps } = await supabase.from("skus_v2").select("code, cover_image_r2_key").in("code", matCodes.slice(0, 500)).eq("is_active", true);
     for (const c of (comps ?? []) as { code: string; cover_image_r2_key: string | null }[]) {
       if (c.cover_image_r2_key) matImages[c.code] = `/api/r2-image?key=${encodeURIComponent(c.cover_image_r2_key)}&w=120`;
     }
