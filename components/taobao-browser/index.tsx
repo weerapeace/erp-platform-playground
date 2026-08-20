@@ -286,13 +286,14 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
             onGone={() => { setOpenId(null); void load(0); }}
             onMatch={() => setMatchRow(cur)}
             onCreate={() => setWizardRow(cur)}
-            onOpenSku={cur.matched_sku_id ? () => setSkuDrawerId(cur.matched_sku_id) : undefined} />
+            onOpenSku={cur.matched_sku_id ? () => setSkuDrawerId(cur.matched_sku_id) : undefined}
+            behind={!!skuDrawerId} />
         );
       })()}
 
       {/* จอรายละเอียด SKU ที่จับคู่ไว้ — ของกลางตัวเดียวกับหน้า /master/skus */}
       {skuDrawerId && (
-        <MasterRecordDrawer moduleKey="skus-v2" recordId={skuDrawerId}
+        <MasterRecordDrawer moduleKey="skus-v2" apiPath="skus" recordId={skuDrawerId}
           onClose={() => setSkuDrawerId(null)}
           onChanged={() => void load(0)} />
       )}
@@ -528,12 +529,14 @@ function MatchModal({ row, rate, onClose, onDone }: { row: Card; rate: number; o
 }
 
 // ── drawer รายละเอียด (ขวามือ เต็มความสูง — แบบเดียวกับ drawer อื่นในระบบ) ──
-function TaobaoDrawer({ card, rate, hasPrev, hasNext, onPrev, onNext, onClose, onChanged, onGone, onMatch, onCreate, onOpenSku }: {
+function TaobaoDrawer({ card, rate, hasPrev, hasNext, onPrev, onNext, onClose, onChanged, onGone, onMatch, onCreate, onOpenSku, behind }: {
   card: Card; rate: number;
   hasPrev: boolean; hasNext: boolean; onPrev: () => void; onNext: () => void;
   onClose: () => void; onChanged: () => void; onGone: () => void; onMatch: () => void; onCreate: () => void;
   /** จับคู่แล้ว → เปิดจอสินค้า (SKU) ที่ผูกไว้ */
   onOpenSku?: () => void;
+  /** จอ SKU เปิดทับอยู่ → จอนี้หลบลงไปข้างหลัง (จอ SKU ของกลางอยู่ชั้น z-50) */
+  behind?: boolean;
 }) {
   const toast = useToast();
   const [name, setName] = useState(card.translated_name ?? "");
@@ -557,12 +560,13 @@ function TaobaoDrawer({ card, rate, hasPrev, hasNext, onPrev, onNext, onClose, o
     || tags.tagIds.join(",") !== tagKey;
   const baht = Number(price) > 0 ? Number(price) * rate : null;
 
-  // ปิดด้วย Esc
+  // ปิดด้วย Esc — ตอนมีจอ SKU ทับอยู่ ปล่อยให้จอบนสุดจัดการเอง (กัน Esc ทีเดียวปิด 2 ชั้น)
   useEffect(() => {
+    if (behind) return;
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [onClose]);
+  }, [onClose, behind]);
 
   const patch = async (body: Record<string, unknown>, okMsg: string) => {
     setSaving(true);
@@ -592,7 +596,7 @@ function TaobaoDrawer({ card, rate, hasPrev, hasNext, onPrev, onNext, onClose, o
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[140] bg-black/30 flex justify-end" onClick={onClose}>
+    <div className={`fixed inset-0 flex justify-end ${behind ? "z-[40] pointer-events-none" : "z-[140] bg-black/30"}`} onClick={behind ? undefined : onClose}>
       <div onClick={(e) => e.stopPropagation()}
         className="bg-white h-full w-full max-w-xl shadow-2xl flex flex-col animate-[slideIn_.15s_ease-out]">
         {/* หัว */}

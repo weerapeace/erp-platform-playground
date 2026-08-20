@@ -3191,7 +3191,9 @@ export function MasterRecordDrawer({
       : (productEntity ? { entityType: productEntity, title: tr("รูปสินค้า", "Product images"), maxItems: 9, imageOnly: true, layout: "gallery" } : undefined);
     return {
       apiBase: apiBase ?? "/api/master-v2/",
-      apiPath: apiPath ?? moduleKey,        // v2 API รับ moduleKey ตรงๆ ได้ (RelationPeek ใช้แบบนี้อยู่แล้ว)
+      // v2 API รับ moduleKey ตรงๆ ได้ ยกเว้นสินค้า: entity ที่มี join ครบชื่อ "skus"/"parent-skus"
+      // (ส่ง "skus-v2" จะตกไปทาง generic → ไม่มี join ชื่อ Parent/ร้าน/หน่วย และค่าบางช่องหาย)
+      apiPath: apiPath ?? (moduleKey === "skus-v2" ? "skus" : moduleKey === "parent-skus-v2" ? "parent-skus" : moduleKey),
       moduleKey, tableId: `embed-${moduleKey}`,
       title: title ?? createTitle ?? prettifyModuleKey(moduleKey),
       icon, activeField: "is_active", serverMode: true,
