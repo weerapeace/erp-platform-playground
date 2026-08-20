@@ -1867,6 +1867,15 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     </button>
                   );
                 })}
+                {/* ปุ่มเพิ่มบรรทัดไว้ตรงแท็บด้วย — ของเดิมอยู่ใต้ตาราง พอมี 14 บรรทัดต้องเลื่อนหาไกล
+                    โหมดดูก็กดได้ (เข้าโหมดแก้ + เพิ่มบรรทัดให้เลย) */}
+                {canEdit && (
+                  <button onClick={() => { if (!fullEdit) setEditing(true); addCostRow(); }}
+                    title={`เพิ่มวัตถุดิบ 1 บรรทัดในแท็บ "${costParent === "" ? "ทั่วไป" : costParent}"`}
+                    className="ml-auto h-7 px-2.5 text-xs font-medium rounded-md border border-amber-300 bg-amber-500 text-white hover:bg-amber-600">
+                    ＋ เพิ่มวัตถุดิบ
+                  </button>
+                )}
               </div>
               {/* โหมดดู: ล็อกเฉพาะ "ช่อง/ปุ่มที่แก้ข้อมูล" (ทำที่ตัวมันเอง) — ห้ามใช้ fieldset disabled ครอบ
                   เพราะ fieldset disabled ล็อกทุกอย่างข้างในรวมของที่ควรใช้ได้ตลอด:
