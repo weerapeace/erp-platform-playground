@@ -36,6 +36,8 @@ const num = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const money = (n: number) => Math.round(n * 100) / 100 === 0 ? "0" : (Math.round(n * 100) / 100).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 const dueText = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "—");
 const BLANK = `<span class="blank"></span>`;
+// คอลัมน์ที่พิมพ์ได้ — ค่าเริ่มต้นเปิดทั้งหมด (ยกเว้นรหัส MO ที่ไม่ค่อยได้ใช้ในใบแผน)
+const DEFAULT_COLS = { img: true, assignee: true, mo: true, sku: true, name: true, due: true, qty: true, rate: true, labor: true };
 // ใส่ origin เต็ม + ย่อรูป — กัน path สั้น /api/... resolve ผิดฐานในหน้าต่าง Blob / iframe srcDoc (รูปไม่ขึ้น)
 const ORIGIN = () => (typeof window !== "undefined" ? window.location.origin : "");
 const thumb = (url: string | null) => (url ? `${url.startsWith("/") ? ORIGIN() : ""}${url}${url.includes("?") ? "&" : "?"}w=120` : "");
@@ -77,9 +79,9 @@ const TEMPLATE_PENDING: ReportTemplate = {
     <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
   </div>`,
   body_html: `{{#has_rows}}<table class="wb-t">
-    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th class="r">กำหนดส่ง</th><th class="r">เหลือจ่าย</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{due}}</td><td class="r">{{remaining}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{total_cell}}}</td></tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="5">รวม {{count}} รายการ</td><td class="r">{{total_qty}}</td><td class="r"></td><td class="r">{{grand_total}}</td></tr></tfoot>
+    <thead><tr>{{#c_img}}<th class="img">รูป</th>{{/c_img}}{{#c_mo}}<th>รหัส MO</th>{{/c_mo}}{{#c_sku}}<th>SKU</th>{{/c_sku}}{{#c_name}}<th>ชื่อสินค้า</th>{{/c_name}}{{#c_due}}<th class="r">กำหนดส่ง</th>{{/c_due}}{{#c_qty}}<th class="r">เหลือจ่าย</th>{{/c_qty}}{{#c_rate}}<th class="r">ค่าแรง/ชิ้น</th>{{/c_rate}}{{#c_labor}}<th class="r">ยอดรวม</th>{{/c_labor}}</tr></thead>
+    <tbody>{{#rows}}<tr>{{#c_img}}<td class="img">{{{img_cell}}}</td>{{/c_img}}{{#c_mo}}<td class="mono">{{mo_no}}</td>{{/c_mo}}{{#c_sku}}<td class="mono">{{sku}}</td>{{/c_sku}}{{#c_name}}<td>{{name}}</td>{{/c_name}}{{#c_due}}<td class="r">{{due}}</td>{{/c_due}}{{#c_qty}}<td class="r">{{remaining}}</td>{{/c_qty}}{{#c_rate}}<td class="r">{{{rate_cell}}}</td>{{/c_rate}}{{#c_labor}}<td class="r">{{{total_cell}}}</td>{{/c_labor}}</tr>{{/rows}}</tbody>
+    <tfoot><tr><td colspan="{{pend_span}}">รวม {{count}} รายการ</td>{{#c_qty}}<td class="r">{{total_qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r"></td>{{/c_rate}}{{#c_labor}}<td class="r">{{grand_total}}</td>{{/c_labor}}</tr></tfoot>
   </table>
   <div class="wb-note">ช่องว่าง = ยังไม่ตั้งค่าแรง · เขียนกรอกด้วยมือ (ยอดรวมด้านล่างนับเฉพาะรายการที่มีค่าแรงแล้ว)</div>{{/has_rows}}
   {{#has_piece}}<div class="wb-sec">งานเหมารอจ่าย</div>
@@ -115,9 +117,9 @@ const TEMPLATE_PRODUCTION: ReportTemplate = {
   </div>`,
   body_html: `{{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
   <table class="wb-t">
-    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th>ช่าง</th><th class="r">กำหนดส่ง</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td>{{assignee}}</td><td class="r">{{due}}</td><td class="r">{{qty}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="6">รวม {{g_count}} รายการ</td><td class="r">{{g_qty}}</td><td class="r"></td><td class="r">{{g_labor}}</td></tr></tfoot>
+    <thead><tr>{{#c_img}}<th class="img">รูป</th>{{/c_img}}{{#c_mo}}<th>รหัส MO</th>{{/c_mo}}{{#c_sku}}<th>SKU</th>{{/c_sku}}{{#c_name}}<th>ชื่อสินค้า</th>{{/c_name}}{{#c_assignee}}<th>ช่าง</th>{{/c_assignee}}{{#c_due}}<th class="r">กำหนดส่ง</th>{{/c_due}}{{#c_qty}}<th class="r">จำนวน</th>{{/c_qty}}{{#c_rate}}<th class="r">ค่าแรง/ชิ้น</th>{{/c_rate}}{{#c_labor}}<th class="r">ยอดรวม</th>{{/c_labor}}</tr></thead>
+    <tbody>{{#rows}}<tr>{{#c_img}}<td class="img">{{{img_cell}}}</td>{{/c_img}}{{#c_mo}}<td class="mono">{{mo_no}}</td>{{/c_mo}}{{#c_sku}}<td class="mono">{{sku}}</td>{{/c_sku}}{{#c_name}}<td>{{name}}</td>{{/c_name}}{{#c_assignee}}<td>{{assignee}}</td>{{/c_assignee}}{{#c_due}}<td class="r">{{due}}</td>{{/c_due}}{{#c_qty}}<td class="r">{{qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r">{{{rate_cell}}}</td>{{/c_rate}}{{#c_labor}}<td class="r">{{{labor_cell}}}</td>{{/c_labor}}</tr>{{/rows}}</tbody>
+    <tfoot><tr><td colspan="{{foot_span}}">รวม {{g_count}} รายการ</td>{{#c_qty}}<td class="r">{{g_qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r"></td>{{/c_rate}}{{#c_labor}}<td class="r">{{g_labor}}</td>{{/c_labor}}</tr></tfoot>
   </table>{{/groups}}
   {{#empty}}<div class="wb-empty">ไม่มีงานกำลังผลิต</div>{{/empty}}
   {{#has_groups}}<div class="grp-head" style="margin-top:4mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมทั้งหมด</span><span class="grp-sum" style="color:#334155;">{{total_qty}} ชิ้น · ฿{{total_labor}}</span></div>
@@ -134,9 +136,9 @@ const TEMPLATE_ALL: ReportTemplate = {
   </div>`,
   body_html: `<div class="wb-sec">1) รายการรอจ่าย</div>
   {{#has_rows}}<table class="wb-t">
-    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th class="r">กำหนดส่ง</th><th class="r">เหลือจ่าย</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{due}}</td><td class="r">{{remaining}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{total_cell}}}</td></tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="5">รวม {{count}} รายการ</td><td class="r">{{total_qty}}</td><td class="r"></td><td class="r">{{grand_total}}</td></tr></tfoot>
+    <thead><tr>{{#c_img}}<th class="img">รูป</th>{{/c_img}}{{#c_mo}}<th>รหัส MO</th>{{/c_mo}}{{#c_sku}}<th>SKU</th>{{/c_sku}}{{#c_name}}<th>ชื่อสินค้า</th>{{/c_name}}{{#c_due}}<th class="r">กำหนดส่ง</th>{{/c_due}}{{#c_qty}}<th class="r">เหลือจ่าย</th>{{/c_qty}}{{#c_rate}}<th class="r">ค่าแรง/ชิ้น</th>{{/c_rate}}{{#c_labor}}<th class="r">ยอดรวม</th>{{/c_labor}}</tr></thead>
+    <tbody>{{#rows}}<tr>{{#c_img}}<td class="img">{{{img_cell}}}</td>{{/c_img}}{{#c_mo}}<td class="mono">{{mo_no}}</td>{{/c_mo}}{{#c_sku}}<td class="mono">{{sku}}</td>{{/c_sku}}{{#c_name}}<td>{{name}}</td>{{/c_name}}{{#c_due}}<td class="r">{{due}}</td>{{/c_due}}{{#c_qty}}<td class="r">{{remaining}}</td>{{/c_qty}}{{#c_rate}}<td class="r">{{{rate_cell}}}</td>{{/c_rate}}{{#c_labor}}<td class="r">{{{total_cell}}}</td>{{/c_labor}}</tr>{{/rows}}</tbody>
+    <tfoot><tr><td colspan="{{pend_span}}">รวม {{count}} รายการ</td>{{#c_qty}}<td class="r">{{total_qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r"></td>{{/c_rate}}{{#c_labor}}<td class="r">{{grand_total}}</td>{{/c_labor}}</tr></tfoot>
   </table>{{/has_rows}}
   {{^has_rows}}<div class="wb-empty">ไม่มีรายการรอจ่าย</div>{{/has_rows}}
 
@@ -151,9 +153,9 @@ const TEMPLATE_ALL: ReportTemplate = {
   <div class="wb-sec">3) กำลังผลิต (ของจริง — แยกตามโต๊ะ/ช่าง)</div>
   {{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
   <table class="wb-t">
-    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th>ช่าง</th><th class="r">กำหนดส่ง</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td>{{assignee}}</td><td class="r">{{due}}</td><td class="r">{{qty}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="6">รวม {{g_count}} รายการ</td><td class="r">{{g_qty}}</td><td class="r"></td><td class="r">{{g_labor}}</td></tr></tfoot>
+    <thead><tr>{{#c_img}}<th class="img">รูป</th>{{/c_img}}{{#c_mo}}<th>รหัส MO</th>{{/c_mo}}{{#c_sku}}<th>SKU</th>{{/c_sku}}{{#c_name}}<th>ชื่อสินค้า</th>{{/c_name}}{{#c_assignee}}<th>ช่าง</th>{{/c_assignee}}{{#c_due}}<th class="r">กำหนดส่ง</th>{{/c_due}}{{#c_qty}}<th class="r">จำนวน</th>{{/c_qty}}{{#c_rate}}<th class="r">ค่าแรง/ชิ้น</th>{{/c_rate}}{{#c_labor}}<th class="r">ยอดรวม</th>{{/c_labor}}</tr></thead>
+    <tbody>{{#rows}}<tr>{{#c_img}}<td class="img">{{{img_cell}}}</td>{{/c_img}}{{#c_mo}}<td class="mono">{{mo_no}}</td>{{/c_mo}}{{#c_sku}}<td class="mono">{{sku}}</td>{{/c_sku}}{{#c_name}}<td>{{name}}</td>{{/c_name}}{{#c_assignee}}<td>{{assignee}}</td>{{/c_assignee}}{{#c_due}}<td class="r">{{due}}</td>{{/c_due}}{{#c_qty}}<td class="r">{{qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r">{{{rate_cell}}}</td>{{/c_rate}}{{#c_labor}}<td class="r">{{{labor_cell}}}</td>{{/c_labor}}</tr>{{/rows}}</tbody>
+    <tfoot><tr><td colspan="{{foot_span}}">รวม {{g_count}} รายการ</td>{{#c_qty}}<td class="r">{{g_qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r"></td>{{/c_rate}}{{#c_labor}}<td class="r">{{g_labor}}</td>{{/c_labor}}</tr></tfoot>
   </table>{{/groups}}
   {{^has_groups}}<div class="wb-empty">ไม่มีงานกำลังผลิต</div>{{/has_groups}}
   {{#has_groups}}<div class="grp-head" style="margin-top:3mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมกำลังผลิต</span><span class="grp-sum" style="color:#334155;">{{prod_qty}} ชิ้น · ฿{{prod_labor}}</span></div>{{/has_groups}}
@@ -169,8 +171,8 @@ const TEMPLATE_PLAN: ReportTemplate = {
   </div>`,
   body_html: `{{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
   <table class="grp-rows">
-    <thead><tr><th class="img">รูป</th><th>ช่าง</th><th>สินค้า</th><th class="r">กำหนดส่ง</th><th class="r">จำนวน</th><th class="r">ค่าแรง</th></tr></thead>
-    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td>{{assignee}}</td><td><span class="mono">{{sku}}</span> · {{name}}</td><td class="r">{{due}}</td><td class="r">{{qty}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
+    <thead><tr>{{#c_img}}<th class="img">รูป</th>{{/c_img}}{{#c_assignee}}<th>ช่าง</th>{{/c_assignee}}{{#c_mo}}<th>รหัส MO</th>{{/c_mo}}<th>สินค้า</th>{{#c_due}}<th class="r">กำหนดส่ง</th>{{/c_due}}{{#c_qty}}<th class="r">จำนวน</th>{{/c_qty}}{{#c_labor}}<th class="r">ค่าแรง</th>{{/c_labor}}</tr></thead>
+    <tbody>{{#rows}}<tr>{{#c_img}}<td class="img">{{{img_cell}}}</td>{{/c_img}}{{#c_assignee}}<td>{{assignee}}</td>{{/c_assignee}}{{#c_mo}}<td class="mono">{{mo_no}}</td>{{/c_mo}}<td>{{#c_sku}}<span class="mono">{{sku}}</span>{{/c_sku}}{{#c_name}} · {{name}}{{/c_name}}</td>{{#c_due}}<td class="r">{{due}}</td>{{/c_due}}{{#c_qty}}<td class="r">{{qty}}</td>{{/c_qty}}{{#c_labor}}<td class="r">{{{labor_cell}}}</td>{{/c_labor}}</tr>{{/rows}}</tbody>
   </table>{{/groups}}
   {{#empty}}<div class="wb-empty">แผนนี้ยังไม่มีรายการจ่าย</div>{{/empty}}
   {{#has_groups}}<div class="grp-head" style="margin-top:4mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมทั้งหมด</span><span class="grp-sum" style="color:#334155;">{{total_qty}} ชิ้น · ฿{{total_labor}}</span></div>
@@ -205,6 +207,32 @@ function WorkBoardPrintInner() {
   }, []);
   const pickSort = (v: "opened" | "name" | "due" | "qty") => { setSortBy(v); try { localStorage.setItem("print:work-board:sort", v); } catch { /* ignore */ } };
   const SORT_LABEL: Record<string, string> = { opened: "วันที่เปิดใบงาน", name: "ชื่อสินค้า", due: "กำหนดส่ง", qty: "จำนวน" };
+
+  // เลือกได้ว่าจะพิมพ์คอลัมน์ไหนบ้าง (จำไว้ในเครื่องนี้)
+  const COL_LIST: [keyof typeof DEFAULT_COLS, string][] = [
+    ["img", "รูป"], ["assignee", "ช่าง"], ["mo", "รหัส MO"], ["sku", "รหัส SKU"], ["name", "ชื่อสินค้า"],
+    ["due", "กำหนดส่ง"], ["qty", "จำนวน"], ["rate", "ค่าแรง/ชิ้น"], ["labor", "ยอดรวมค่าแรง"],
+  ];
+  const [cols, setCols] = useState(DEFAULT_COLS);
+  const [colsOpen, setColsOpen] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("print:work-board:cols");
+      if (raw) setCols({ ...DEFAULT_COLS, ...(JSON.parse(raw) as Partial<typeof DEFAULT_COLS>) });
+    } catch { /* ignore */ }
+  }, []);
+  const toggleCol = (k: keyof typeof DEFAULT_COLS) => setCols((p) => {
+    const next = { ...p, [k]: !p[k] };
+    try { localStorage.setItem("print:work-board:cols", JSON.stringify(next)); } catch { /* ignore */ }
+    return next;
+  });
+  // ธงคอลัมน์ที่ส่งเข้าแม่แบบ + จำนวนช่องของแถวรวม (colspan)
+  const colFlags = {
+    c_img: cols.img, c_assignee: cols.assignee, c_mo: cols.mo, c_sku: cols.sku, c_name: cols.name,
+    c_due: cols.due, c_qty: cols.qty, c_rate: cols.rate, c_labor: cols.labor,
+    foot_span: [cols.img, cols.mo, cols.sku, cols.name, cols.assignee, cols.due].filter(Boolean).length || 1,
+    pend_span: [cols.img, cols.mo, cols.sku, cols.name, cols.due].filter(Boolean).length || 1,
+  };
 
   useEffect(() => {
     let on = true;
@@ -321,6 +349,7 @@ function WorkBoardPrintInner() {
       const pieceGrand = piece_rows.reduce((a, r) => a + r._t, 0);
       const prod = productionData();
       return buildReportHtml(TEMPLATE_ALL, {
+        ...colFlags,
         group_label, printed_at,
         count: pd.rows.length, has_rows: pd.rows.length > 0, rows: pd.rows, total_qty: pd.total_qty, grand_total: pd.grand_total,
         has_piece: piece_rows.length > 0, piece_rows, piece_count: piece_rows.length, piece_grand: money(pieceGrand),
@@ -333,6 +362,7 @@ function WorkBoardPrintInner() {
       const piece_rows = pieceRowsOf();
       const pieceGrand = piece_rows.reduce((a, r) => a + r._t, 0);
       return buildReportHtml(TEMPLATE_PENDING, {
+        ...colFlags,
         group_label, printed_at, count: pd.rows.length, has_rows: pd.rows.length > 0, rows: pd.rows,
         total_qty: pd.total_qty, grand_total: pd.grand_total,
         has_piece: piece_rows.length > 0, piece_rows, piece_count: piece_rows.length, piece_grand: money(pieceGrand),
@@ -383,13 +413,14 @@ function WorkBoardPrintInner() {
           gQty += qty; if (labor > 0) gLabor += labor;
           return { img_cell: imgCell(l.product_sku ? (imgBySku.get(l.product_sku) ?? null) : null),
             assignee: shortAssignee(l.assignee_name, l.assignee_id) || "(ทั้งโต๊ะ)", sku: l.product_sku || "—", name: l.product_name || "—",
-            due: dueText(dueByMo.get(l.mo_no ?? "") ?? null), qty: num(qty), labor_cell: rate > 0 ? money(labor) : BLANK };
+            mo_no: l.mo_no || "—", due: dueText(dueByMo.get(l.mo_no ?? "") ?? null), qty: num(qty), labor_cell: rate > 0 ? money(labor) : BLANK };
         });
         totQty += gQty; totLabor += gLabor;
         return { dept, staff_html: staffHtmlOf(dept), g_qty: num(gQty), g_labor: money(gLabor), rows };
       });
       const date_range = (plan.start_date || plan.end_date) ? `${dueText(plan.start_date)} – ${dueText(plan.end_date)}` : "ทั้งแผน";
       return buildReportHtml(TEMPLATE_PLAN, {
+        ...colFlags,
         plan_name: plan.name, date_range, printed_at, count: plan.lines.length, groups, has_groups: groups.length > 0,
         sort_label: SORT_LABEL[sortBy] ?? "",
         total_qty: num(totQty), total_labor: money(totLabor), empty: groups.length === 0,
@@ -399,10 +430,11 @@ function WorkBoardPrintInner() {
     // production
     const prod = productionData();
     return buildReportHtml(TEMPLATE_PRODUCTION, {
+        ...colFlags,
       group_label, printed_at, dept_count: prod.groups.length, groups: prod.groups, has_groups: prod.groups.length > 0,
       total_qty: prod.total_qty, total_labor: prod.total_labor, empty: prod.groups.length === 0,
     });
-  }, [board, moGroups, plan, assignees, type, group, sortBy]);
+  }, [board, moGroups, plan, assignees, type, group, sortBy, cols]);
 
   // กด Ctrl/Cmd+P → เด้งหน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่างเกินจาก iframe)
   useEffect(() => {
@@ -435,6 +467,28 @@ function WorkBoardPrintInner() {
             <option value="qty">จำนวน (มาก→น้อย)</option>
           </select>
         </label>
+        <div className="relative">
+          <button onClick={() => setColsOpen((v) => !v)}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50">
+            ⚙️ คอลัมน์ ({COL_LIST.filter(([k]) => cols[k]).length}/{COL_LIST.length})
+          </button>
+          {colsOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setColsOpen(false)} />
+              <div className="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                <div className="mb-1 px-1 text-[11px] text-slate-400">เลือกคอลัมน์ที่จะพิมพ์</div>
+                {COL_LIST.map(([k, label]) => (
+                  <label key={k} className="flex items-center gap-2 rounded-lg px-2 py-1 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer">
+                    <input type="checkbox" checked={cols[k]} onChange={() => toggleCol(k)} className="w-4 h-4 accent-blue-600" />
+                    {label}
+                  </label>
+                ))}
+                <button onClick={() => { setCols(DEFAULT_COLS); try { localStorage.removeItem("print:work-board:cols"); } catch { /* ignore */ } }}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-50">↺ เลือกทั้งหมด</button>
+              </div>
+            </>
+          )}
+        </div>
         <button onClick={() => printReportHtmlInNewWindow(html)} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
       </div>
       <div className="px-4 py-6">
