@@ -15,6 +15,7 @@ import { useT, LangToggle } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { SkuWizard } from "./sku-wizard";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
+import { SkuTaobaoSource } from "@/components/sku-taobao-source";
 
 // F20: client-only render — กัน Worker 1102 (SSR component หนัก)
 const MasterCRUDPage = dynamic(
@@ -127,7 +128,7 @@ export default function SkusV2Page() {
     extraTabs: [{
       key: "suppliers", label: "ร้านที่จำหน่าย + ราคาซื้อ", icon: "🏪", inTab: "tab_ราคา",
       render: ({ recordId }) => recordId
-        ? <div className="pt-1"><SkuSupplierList skuId={recordId} defaultOpen /></div>
+        ? <div className="pt-1 space-y-3"><SkuSupplierList skuId={recordId} defaultOpen /><SkuTaobaoSource skuId={recordId} /></div>
         : <div className="p-3 text-sm text-slate-400">บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย</div>,
     }],
   }), [toast, tr]);

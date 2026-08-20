@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import nextDynamic from "next/dynamic";
 import { HoverPreview } from "@/components/hover-image";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { ERPModal } from "@/components/modal";
@@ -24,6 +25,9 @@ import { apiFetch } from "@/lib/api";
 import { SkuPicker, SupplierPicker, type SkuPickerValue, type SupplierPickerValue } from "@/components/pickers";
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 import { r2ImageUrl } from "@/lib/r2-image";
+
+// จอรายละเอียดสินค้าของกลาง — กด "เปิดหน้า SKU" จากการ์ด/จอรายละเอียดแล้วดูได้ในหน้าเดียวกัน
+const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 type Variant = { originalName?: string; translatedName?: string };
 type Card = {
@@ -61,9 +65,13 @@ const fmtRmb = (n: number | null) => (n == null ? null : `¥${n.toLocaleString("
 /** รูปที่เก็บไว้เป็น R2 key → ผ่าน proxy ของกลาง (ย่อขนาดให้) · ถ้าเป็น URL เต็มอยู่แล้วก็ใช้ตรง ๆ */
 const imgSrc = (v: string | null, w: number) => (!v ? null : v.startsWith("http") ? v : r2ImageUrl(v, w));
 
-export function TaobaoBrowser() {
+export function TaobaoBrowser({ focusId, initialStatus }: {
+  /** เปิดจากลิงก์ "ดูในกล่องพัก" ในหน้า SKU → เปิดจอรายละเอียดใบนี้ให้เลย */
+  focusId?: string | null;
+  initialStatus?: StatusKey;
+} = {}) {
   const toast = useToast();
-  const [status, setStatus] = useState<StatusKey>("new");
+  const [status, setStatus] = useState<StatusKey>(initialStatus ?? "new");
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);   // กรองแท็ก (ของกลางตัวเดียวกับหน้า SKU)
   const [bulkTag, setBulkTag] = useState<TagFilterValue>(EMPTY_FILTER);       // ติดแท็กให้รายการที่เลือก
@@ -77,6 +85,8 @@ export function TaobaoBrowser() {
   const [matchRow, setMatchRow] = useState<Card | null>(null);
   const [wizardRow, setWizardRow] = useState<Card | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);   // drawer รายละเอียด (กดที่การ์ด)
+  const [skuDrawerId, setSkuDrawerId] = useState<string | null>(null);   // จอ SKU ที่จับคู่ไว้ (ของกลาง MasterRecordDrawer)
+  const [focusDone, setFocusDone] = useState(false);
 
   // เรตหยวน→บาท (ของกลางเดียวกับ SkuWizard)
   useEffect(() => {
@@ -105,6 +115,12 @@ export function TaobaoBrowser() {
 
   // โหลดครั้งแรก + เปลี่ยนสถานะ · ค้นหา debounce 300ms
   useEffect(() => { const t = setTimeout(() => { void load(0); }, search ? 300 : 0); return () => clearTimeout(t); }, [load, search]);
+
+  // มาจากลิงก์ "ดูในกล่องพัก" (หน้า SKU) → เปิดจอรายละเอียดใบนั้นให้อัตโนมัติ ครั้งเดียว
+  useEffect(() => {
+    if (!focusId || focusDone || loading) return;
+    if (cards.some((c) => c.id === focusId)) { setOpenId(focusId); setFocusDone(true); }
+  }, [focusId, focusDone, loading, cards]);
 
   const toggleSel = (id: string) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allSelected = cards.length > 0 && cards.every((c) => sel.has(c.id));
@@ -240,6 +256,7 @@ export function TaobaoBrowser() {
                 onReject={() => patchStatus([c.id], "rejected")}
                 onRestore={() => patchStatus([c.id], "new")}
                 onTagClick={(id) => setTagFilter({ tagIds: [id], none: false })}
+                onOpenSku={c.matched_sku_id ? () => setSkuDrawerId(c.matched_sku_id) : undefined}
                 activeTagIds={tagFilter.tagIds} />
             ))}
           </div>
@@ -268,9 +285,17 @@ export function TaobaoBrowser() {
             onChanged={() => void load(0)}
             onGone={() => { setOpenId(null); void load(0); }}
             onMatch={() => setMatchRow(cur)}
-            onCreate={() => setWizardRow(cur)} />
+            onCreate={() => setWizardRow(cur)}
+            onOpenSku={cur.matched_sku_id ? () => setSkuDrawerId(cur.matched_sku_id) : undefined} />
         );
       })()}
+
+      {/* จอรายละเอียด SKU ที่จับคู่ไว้ — ของกลางตัวเดียวกับหน้า /master/skus */}
+      {skuDrawerId && (
+        <MasterRecordDrawer moduleKey="skus-v2" recordId={skuDrawerId}
+          onClose={() => setSkuDrawerId(null)}
+          onChanged={() => void load(0)} />
+      )}
 
       {/* ป๊อปจับคู่ SKU เดิม */}
       {matchRow && (
@@ -304,11 +329,13 @@ export function TaobaoBrowser() {
 }
 
 // ── การ์ด 1 ใบ ──
-function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCreate, onReject, onRestore, onTagClick, activeTagIds = [] }: {
+function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCreate, onReject, onRestore, onTagClick, onOpenSku, activeTagIds = [] }: {
   card: Card; rate: number; selected: boolean;
   onToggle: () => void; onOpen: () => void; onMatch: () => void; onCreate: () => void; onReject: () => void; onRestore: () => void;
   /** กดแท็กบนการ์ด = กรองให้เหลือเฉพาะแท็กนั้น */
   onTagClick?: (tagId: string) => void;
+  /** จับคู่แล้ว → กดชื่อ SKU เพื่อเปิดจอสินค้าตัวนั้น */
+  onOpenSku?: () => void;
   activeTagIds?: string[];
 }) {
   const baht = card.price_rmb != null ? card.price_rmb * rate : null;
@@ -372,7 +399,12 @@ function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCre
           </div>
         )}
 
-        {card.matched_label && <p className="text-[10px] text-emerald-700 line-clamp-1 mt-0.5" title={card.matched_label}>🔗 {card.matched_label}</p>}
+        {card.matched_label && (
+          onOpenSku
+            ? <button onClick={(e) => { e.stopPropagation(); onOpenSku(); }} title={`เปิดหน้า SKU — ${card.matched_label}`}
+                className="text-[10px] text-emerald-700 hover:text-emerald-900 hover:underline line-clamp-1 mt-0.5 text-left w-full">🔗 {card.matched_label}</button>
+            : <p className="text-[10px] text-emerald-700 line-clamp-1 mt-0.5" title={card.matched_label}>🔗 {card.matched_label}</p>
+        )}
 
         <div onClick={(e) => e.stopPropagation()} className="mt-auto pt-2 flex items-center gap-1 flex-wrap">
           {card.taobao_url && (
@@ -434,7 +466,13 @@ function MatchModal({ row, rate, onClose, onDone }: { row: Card; rate: number; o
       });
       const j2 = await res2.json(); if (j2.error) throw new Error(j2.error);
 
-      toast.success(supplier ? `จับคู่กับ ${sku.code} + บันทึกราคาร้านแล้ว` : `จับคู่กับ ${sku.code} แล้ว`);
+      // API ยกรูป/ลิงก์ไปให้ SKU ให้เองเมื่อ SKU นั้นยังไม่มี — บอกผู้ใช้ให้รู้ว่าเกิดอะไรขึ้น
+      const extra = [
+        j2.synced?.cover ? "ใส่รูปให้สินค้าแล้ว" : "",
+        j2.synced?.link ? "ใส่ลิงก์ซื้อแล้ว" : "",
+      ].filter(Boolean).join(" · ");
+      const base = supplier ? `จับคู่กับ ${sku.code} + บันทึกราคาร้านแล้ว` : `จับคู่กับ ${sku.code} แล้ว`;
+      toast.success(extra ? `${base} (${extra})` : base);
       onDone();
     } catch (e) { toast.error(e instanceof Error ? e.message : "จับคู่ไม่สำเร็จ"); }
     finally { setSaving(false); }
@@ -490,10 +528,12 @@ function MatchModal({ row, rate, onClose, onDone }: { row: Card; rate: number; o
 }
 
 // ── drawer รายละเอียด (ขวามือ เต็มความสูง — แบบเดียวกับ drawer อื่นในระบบ) ──
-function TaobaoDrawer({ card, rate, hasPrev, hasNext, onPrev, onNext, onClose, onChanged, onGone, onMatch, onCreate }: {
+function TaobaoDrawer({ card, rate, hasPrev, hasNext, onPrev, onNext, onClose, onChanged, onGone, onMatch, onCreate, onOpenSku }: {
   card: Card; rate: number;
   hasPrev: boolean; hasNext: boolean; onPrev: () => void; onNext: () => void;
   onClose: () => void; onChanged: () => void; onGone: () => void; onMatch: () => void; onCreate: () => void;
+  /** จับคู่แล้ว → เปิดจอสินค้า (SKU) ที่ผูกไว้ */
+  onOpenSku?: () => void;
 }) {
   const toast = useToast();
   const [name, setName] = useState(card.translated_name ?? "");
@@ -582,7 +622,12 @@ function TaobaoDrawer({ card, rate, hasPrev, hasNext, onPrev, onNext, onClose, o
             <span className={`text-[11px] px-2 py-1 rounded ${card.status === "matched" ? "bg-emerald-100 text-emerald-700" : card.status === "rejected" ? "bg-slate-200 text-slate-600" : "bg-blue-100 text-blue-700"}`}>
               {card.status === "matched" ? "✅ จับคู่แล้ว" : card.status === "rejected" ? "🚫 ตีตก" : "🆕 ยังไม่จับคู่"}
             </span>
-            {card.matched_label && <span className="text-[12px] text-emerald-700">🔗 {card.matched_label}</span>}
+            {card.matched_label && (
+              onOpenSku
+                ? <button onClick={onOpenSku} title="เปิดหน้าสินค้า (SKU) ที่จับคู่ไว้"
+                    className="text-[12px] text-emerald-700 hover:text-emerald-900 hover:underline truncate max-w-[46%]">🔗 {card.matched_label}</button>
+                : <span className="text-[12px] text-emerald-700 truncate max-w-[46%]">🔗 {card.matched_label}</span>
+            )}
             {card.taobao_url && (
               <a href={card.taobao_url} target="_blank" rel="noopener noreferrer"
                 className="text-[12px] text-indigo-600 hover:underline ml-auto">เปิดหน้า Taobao ↗</a>
@@ -651,7 +696,22 @@ function TaobaoDrawer({ card, rate, hasPrev, hasNext, onPrev, onNext, onClose, o
           </button>
           {card.status !== "rejected" ? (
             <>
-              <button onClick={onMatch} className="h-9 px-3 text-sm border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-50">🔗 จับคู่ SKU</button>
+              {card.matched_sku_id && onOpenSku && (
+                <button onClick={onOpenSku} className="h-9 px-3 text-sm border border-emerald-300 bg-emerald-50 rounded-lg text-emerald-800 hover:bg-emerald-100">
+                  📦 เปิดหน้า SKU
+                </button>
+              )}
+              {card.matched_sku_id && card.image_url && (
+                <button onClick={() => patch({ use_image_for_sku: true }, "ตั้งเป็นรูปปกของสินค้าแล้ว")} disabled={saving}
+                  title="ใช้รูปนี้เป็นรูปปกของ SKU ที่จับคู่ไว้ (ทับรูปเดิม)"
+                  className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖼 ใช้รูปนี้เป็นรูปปก</button>
+              )}
+              {card.matched_sku_id ? (
+                <button onClick={() => { if (confirm("ยกเลิกการจับคู่? รายการนี้จะกลับไปอยู่ช่อง “ยังไม่จับคู่” (ไม่กระทบ SKU ที่สร้างไปแล้ว)")) void patch({ status: "new" }, "ยกเลิกการจับคู่แล้ว"); }} disabled={saving}
+                  className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">↩️ ยกเลิกจับคู่</button>
+              ) : (
+                <button onClick={onMatch} className="h-9 px-3 text-sm border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-50">🔗 จับคู่ SKU</button>
+              )}
               <button onClick={onCreate} className="h-9 px-3 text-sm border border-emerald-200 rounded-lg text-emerald-700 hover:bg-emerald-50">➕ สร้าง SKU</button>
               <button onClick={() => patch({ status: "rejected" }, "ตีตกแล้ว")} disabled={saving}
                 className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">🚫 ตีตก</button>

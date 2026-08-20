@@ -53,6 +53,8 @@ const BankPicker = dynamic(() => import("@/components/bank-picker").then((m) => 
 // เพิ่มหลายรายการแบบ inline (โหลดตอนกดปุ่มเท่านั้น)
 const InlineCreatePanel = dynamic(() => import("@/components/master-crud/inline-create").then((m) => m.InlineCreatePanel), { ssr: false });
 const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").then((m) => m.SkuSupplierList), { ssr: false });
+// แถบ "🛒 มาจาก Taobao" — ลิงก์ย้อนกลับไปยังรายการในกล่องพักที่จับคู่มาเป็นสินค้าตัวนี้
+const SkuTaobaoSource = dynamic(() => import("@/components/sku-taobao-source").then((m) => m.SkuTaobaoSource), { ssr: false });
 const AiProductDetailModal = dynamic(() => import("@/components/ai-product-detail").then((m) => m.AiProductDetailModal), { ssr: false });
 // หมวดกลางสำหรับลงขาย — picker ค้นหา + เพิ่มหมวดใหม่พร้อมจับคู่ร้านในตัว (ของกลาง)
 const CentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker), { ssr: false });
@@ -2385,6 +2387,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         ? <span className="text-xs text-slate-600" style={vs}>{ents.map(([k, vv]) => `${k}: ${typeof vv === "object" ? JSON.stringify(vv) : String(vv)}`).join(" · ")}</span>
         : <span className="text-slate-300 text-sm">—</span>;
     }
+    // ค่าที่เป็นลิงก์ (http/https) → กดเปิดหน้านั้นได้เลยในหน้ารายละเอียด (ของกลาง — ใช้กับทุกโมดูล เช่น "ลิงก์ซื้อ" ของสินค้า)
+    if (typeof v === "string" && /^https?:\/\//i.test(v.trim())) {
+      return (
+        <a href={v.trim()} target="_blank" rel="noopener noreferrer" style={vs}
+          className="text-sm text-blue-600 hover:underline inline-flex items-start gap-1">
+          <span className="break-all">{String(v)}</span><span className="text-[10px] opacity-60 shrink-0">↗</span>
+        </a>
+      );
+    }
     return <span className="text-sm text-slate-800 whitespace-pre-wrap break-words" style={vs}>{String(v)}</span>;
   };
 
@@ -3227,7 +3238,7 @@ export function MasterRecordDrawer({
         ? [
             // ฝังอยู่ในแท็บ "ราคา" (ข้อมูลซื้อทั้งหมดอยู่ที่เดียว) — ดู inTab ใน LayoutTabs
             { key: "suppliers", label: tr("ร้านที่จำหน่าย + ราคาซื้อ", "Suppliers + buying price"), icon: "🏪", inTab: "tab_ราคา", render: ({ recordId }) => recordId
-              ? <div className="pt-1"><SkuSupplierList skuId={recordId} defaultOpen /></div>
+              ? <div className="pt-1 space-y-3"><SkuSupplierList skuId={recordId} defaultOpen /><SkuTaobaoSource skuId={recordId} /></div>
               : <div className="p-3 text-sm text-slate-400">{tr("บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย", "Save the product first, then add suppliers")}</div> },
           ]
         : undefined,

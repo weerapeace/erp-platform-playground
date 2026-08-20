@@ -155,6 +155,15 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   useEffect(() => { if (entityProp && entityProp !== entity) setEntity(entityProp); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [entityProp]);
   const entityRef = useRef(entity); entityRef.current = entity;   // ให้ pushNav อ่านค่าล่าสุดโดยไม่ต้องผูก dep
   const [taobao, setTaobao] = useState(false);   // 🛒 โหมดกล่องพัก "สินค้าจาก Taobao" (ไม่ใช้แท็ก/กลุ่ม — คนละชุดข้อมูล)
+  // มาจากลิงก์ "ดูในกล่องพัก" ในหน้า SKU: /master/skus?taobao=1&focus=<id>&tb_status=matched
+  const [taobaoOpen, setTaobaoOpen] = useState<{ focusId: string | null; status: "new" | "matched" | "rejected" } | null>(null);
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("taobao") !== "1") return;
+    const st = sp.get("tb_status");
+    setTaobao(true);
+    setTaobaoOpen({ focusId: sp.get("focus"), status: st === "matched" || st === "rejected" ? st : "new" });
+  }, []);
   const [tree, setTree] = useState<BrowseTree | null>(null);
   const [groupPath, setGroupPath] = useState<Crumb[]>(nav0?.gp ?? []);
   const [tagFilter, setTagFilter] = useState<TagFilterValue>(nav0?.tf ?? EMPTY_FILTER);
@@ -454,7 +463,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
           confirmText={t("คัดลอก", "Duplicate")} onConfirm={() => { const id = copyPending.id; setCopyPending(null); void doCopy(id); }} />
       )}
       {/* 🛒 กล่องพักสินค้าจาก Taobao — โหมดแยก (ไม่ใช้แท็ก/กลุ่ม) */}
-      {taobao ? <TaobaoBrowser /> : (<>
+      {taobao ? <TaobaoBrowser focusId={taobaoOpen?.focusId ?? null} initialStatus={taobaoOpen?.status} /> : (<>
 
       {/* search + กรองแท็ก (ของกลาง) + ปรับการ์ด */}
       <div className="flex items-center gap-2 mb-3">
