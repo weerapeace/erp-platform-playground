@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { computeDueDate } from "@/lib/credit-term";
+import { computeDueDate, formatCreditTerm } from "@/lib/credit-term";
 import { SO_ACTIVE_STATUSES } from "@/lib/so-status";
 import {
   addDaysISO, dayOfMonthISO, endOfMonthISO, monthsBetween, todayISO,
@@ -72,14 +72,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ข้อมูลตั้งต้นที่ใช้ร่วมกัน — คู่ค้า (เครดิต) + เรตหยวน + ยอดเงินตั้งต้น
   // ------------------------------------------------------------
   const [partnersRes, chinaRateRes, openingRes] = await Promise.all([
-    db.from("partners_v2").select("id, display_name, name_th, code, payment_terms_days, purchase_credit_term").limit(5000),
+    db.from("partners_v2").select("id, display_name, name_th, code, payment_terms_days, sales_credit_term, purchase_credit_term").limit(5000),
     db.from("china_bills").select("rate, bill_date").not("rate", "is", null).order("bill_date", { ascending: false }).limit(1),
     db.from("cashflow_opening_balances").select("id, label, amount, as_of_date").eq("is_active", true).order("sort_order").limit(200),
   ]);
 
   type PartnerRow = {
     id: string; display_name: string | null; name_th: string | null; code: string | null;
-    payment_terms_days: number | null; purchase_credit_term: string | null;
+    payment_terms_days: number | null; sales_credit_term: string | null; purchase_credit_term: string | null;
   };
   const partners = new Map<string, PartnerRow>();
   for (const p of (partnersRes.data ?? []) as PartnerRow[]) partners.set(p.id, p);
@@ -161,11 +161,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const amount = num(s.amount_due) || num(s.grand_total);
       if (amount <= 0) continue;
 
-      const terms = num(partners.get(String(s.customer_id ?? ""))?.payment_terms_days);
+      const partner = partners.get(String(s.customer_id ?? ""));
       const base = String(s.order_date || s.expected_ship_date || today).slice(0, 10);
-      const hasTerms = terms > 0;
+      // เครดิตลูกค้าใช้รูปแบบเดียวกับร้านค้า (สิ้นเดือน / ทุกวันที่ N ได้) · ค่าเก่าที่เป็นจำนวนวันยังใช้เป็นตัวสำรอง
+      const fromTerm = computeDueDate(base, partner?.sales_credit_term);
+      const legacyDays = num(partner?.payment_terms_days);
+      const hasTerms = !!fromTerm || legacyDays > 0;
       if (!hasTerms) guessed += 1;
-      const date = addDaysISO(base, hasTerms ? terms : customerDefaultDays);
+      const date = fromTerm ?? addDaysISO(base, legacyDays > 0 ? legacyDays : customerDefaultDays);
 
       events.push({
         id: `so:${s.id}`,
@@ -178,7 +181,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         amount,
         dateConfident: hasTerms,
         dateNote: hasTerms
-          ? `เครดิตลูกค้า ${terms} วัน นับจากวันที่ขาย`
+          ? `เครดิตลูกค้า: ${formatCreditTerm(partner?.sales_credit_term) !== "—" ? formatCreditTerm(partner?.sales_credit_term) : `${legacyDays} วัน`}`
           : `ลูกค้ารายนี้ยังไม่ได้ตั้งเครดิต — ระบบใช้ค่าเริ่มต้น ${customerDefaultDays} วัน`,
         href: "/sales-orders",
       });

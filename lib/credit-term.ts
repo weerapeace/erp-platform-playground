@@ -115,3 +115,30 @@ export function computeArrivalDate(baseDate: string | null | undefined, leadStr:
   d.setDate(d.getDate() + t.days);
   return fmt(d);
 }
+
+// ============================================================
+// ตัวเลือกเครดิตมาตรฐาน — ของกลาง ใช้ทั้งฝั่งลูกค้า (เงินเข้า) และฝั่งร้านค้า (เงินออก)
+// เพิ่ม/แก้ตัวเลือกที่นี่ที่เดียว ทุกหน้าที่มีดรอปดาวน์เครดิตจะเปลี่ยนตาม
+// ============================================================
+
+export type CreditTermOption = { value: string; label: string };
+
+export const CREDIT_TERM_OPTIONS: CreditTermOption[] = [
+  { value: "",                 label: "— ยังไม่ตั้ง —" },
+  { value: "immediate",        label: "ต้องชำระเลย" },
+  { value: "days:7",           label: "7 วัน" },
+  { value: "days:15",          label: "15 วัน" },
+  { value: "days:30",          label: "30 วัน" },
+  { value: "days:45",          label: "45 วัน" },
+  { value: "days:60",          label: "60 วัน" },
+  { value: "eom",              label: "สิ้นเดือน (เดือนที่ซื้อ)" },
+  { value: "monthday:5",       label: "ทุกวันที่ 5" },
+  { value: "monthday:10",      label: "ทุกวันที่ 10" },
+  { value: "monthday:15",      label: "ทุกวันที่ 15" },
+  { value: "monthday:25",      label: "ทุกวันที่ 25" },
+  { value: "monthday_next:5",  label: "ทุกวันที่ 5 (เดือนถัดไป)" },
+  { value: "monthday_next:15", label: "ทุกวันที่ 15 (เดือนถัดไป)" },
+];
+
+/** ตัวเลือกที่เอาไว้ทำปุ่มลัด "เติมให้ทุกรายที่ยังไม่ได้ตั้ง" */
+export const CREDIT_TERM_QUICK: string[] = ["days:15", "days:30", "eom", "monthday:25"];

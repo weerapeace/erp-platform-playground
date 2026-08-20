@@ -8,7 +8,8 @@
  * แต่ข้อมูลจริงตั้งเครดิตไว้แค่ลูกค้า 1/125 ราย · ร้านค้า 2/80 ราย → ระบบต้องเดาเกือบทั้งหมด
  * หน้านี้เรียงจาก "ยอดค้างมากสุด" ให้ตั้งไล่จากบนลงล่างรวดเดียว แล้วกดบันทึกครั้งเดียว
  *
- * เก็บที่เดิม ไม่สร้างช่องใหม่ — ลูกค้าเก็บเป็นจำนวนวัน · ร้านค้าเก็บเป็นรูปแบบของ lib/credit-term
+ * ทั้งสองฝั่งใช้ดรอปดาวน์ตัวเลือกเดียวกัน (CREDIT_TERM_OPTIONS ของกลาง) — เลือก "สิ้นเดือน" / "ทุกวันที่ 25" ได้ทั้งคู่
+ * ลูกค้าเก็บที่ partners_v2.sales_credit_term · ร้านค้าเก็บที่ purchase_credit_term
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -17,30 +18,11 @@ import { InfoHint } from "@/components/info-hint";
 import { usePermission, AccessDenied, useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { THB } from "@/lib/cashflow";
-import { formatCreditTerm } from "@/lib/credit-term";
+import { CREDIT_TERM_OPTIONS, CREDIT_TERM_QUICK, formatCreditTerm } from "@/lib/credit-term";
 import type { CreditTermRow } from "@/app/api/cashflow/credit-terms/route";
 
 type Side = "customer" | "supplier";
 
-/** ตัวเลือกเครดิตร้านค้าที่ใช้บ่อย — ค่าเป็นรูปแบบที่ lib/credit-term อ่านออก */
-const SUPPLIER_TERMS = [
-  { value: "",              label: "— ยังไม่ตั้ง —" },
-  { value: "immediate",     label: "ต้องชำระเลย" },
-  { value: "days:7",        label: "7 วัน" },
-  { value: "days:15",       label: "15 วัน" },
-  { value: "days:30",       label: "30 วัน" },
-  { value: "days:45",       label: "45 วัน" },
-  { value: "days:60",       label: "60 วัน" },
-  { value: "eom",           label: "สิ้นเดือน (เดือนที่ซื้อ)" },
-  { value: "monthday:5",    label: "ทุกวันที่ 5" },
-  { value: "monthday:10",   label: "ทุกวันที่ 10" },
-  { value: "monthday:15",   label: "ทุกวันที่ 15" },
-  { value: "monthday:25",   label: "ทุกวันที่ 25" },
-  { value: "monthday_next:5",  label: "ทุกวันที่ 5 (เดือนถัดไป)" },
-  { value: "monthday_next:15", label: "ทุกวันที่ 15 (เดือนถัดไป)" },
-];
-
-const CUSTOMER_QUICK = ["", "0", "7", "15", "30", "45", "60", "90"];
 
 export default function CreditTermsPage() {
   const canView = usePermission("cashflow.view");
@@ -149,19 +131,12 @@ export default function CreditTermsPage() {
             <span className="text-sm font-medium text-blue-800">
               เติมให้ทุกรายที่ยังไม่ได้ตั้ง ({shown.filter((r) => !r.current).length} ราย) เป็น
             </span>
-            {side === "customer"
-              ? ["7", "15", "30", "45", "60"].map((d) => (
-                  <button key={d} onClick={() => fillMissing(d)}
-                          className="h-8 px-3 text-xs bg-white border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-100">
-                    {d} วัน
-                  </button>
-                ))
-              : ["days:15", "days:30", "eom", "monthday:5"].map((t) => (
-                  <button key={t} onClick={() => fillMissing(t)}
-                          className="h-8 px-3 text-xs bg-white border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-100">
-                    {formatCreditTerm(t)}
-                  </button>
-                ))}
+            {CREDIT_TERM_QUICK.map((t) => (
+              <button key={t} onClick={() => fillMissing(t)}
+                      className="h-8 px-3 text-xs bg-white border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-100">
+                {formatCreditTerm(t)}
+              </button>
+            ))}
             <InfoHint>เติมลงช่องให้ก่อนเฉย ๆ ยังไม่บันทึก — ปรับรายที่ไม่ตรงได้ แล้วค่อยกดปุ่มบันทึกด้านล่าง</InfoHint>
           </div>
         )}
@@ -204,35 +179,15 @@ export default function CreditTermsPage() {
                       </td>
                       <td className="px-4 py-2">
                         {r.current
-                          ? <span className="text-slate-600">{side === "customer" ? `${r.current} วัน` : formatCreditTerm(r.current)}</span>
+                          ? <span className="text-slate-600">{formatCreditTerm(r.current)}</span>
                           : <span className="text-amber-600 text-xs">ยังไม่ตั้ง (ระบบเดาให้)</span>}
                       </td>
                       <td className="px-4 py-2">
-                        {side === "customer" ? (
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="number" min={0} max={365} value={v} disabled={!canManage}
-                              onChange={(e) => setEdits({ ...edits, [r.id]: e.target.value })}
-                              placeholder="กี่วัน"
-                              className="w-24 h-8 px-2 text-sm border border-slate-200 rounded outline-none focus:border-blue-400"
-                            />
-                            <span className="text-xs text-slate-400">วัน</span>
-                            <div className="flex gap-1">
-                              {CUSTOMER_QUICK.slice(2, 6).map((d) => (
-                                <button key={d} disabled={!canManage} onClick={() => setEdits({ ...edits, [r.id]: d })}
-                                        className="h-7 px-1.5 text-[11px] text-slate-500 border border-slate-200 rounded hover:bg-slate-50">
-                                  {d}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ) : (
-                          <select value={v} disabled={!canManage}
-                                  onChange={(e) => setEdits({ ...edits, [r.id]: e.target.value })}
-                                  className="w-full h-8 px-2 text-sm border border-slate-200 rounded bg-white outline-none focus:border-blue-400">
-                            {SUPPLIER_TERMS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                          </select>
-                        )}
+                        <select value={v} disabled={!canManage}
+                                onChange={(e) => setEdits({ ...edits, [r.id]: e.target.value })}
+                                className="w-full h-8 px-2 text-sm border border-slate-200 rounded bg-white outline-none focus:border-blue-400">
+                          {CREDIT_TERM_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                        </select>
                       </td>
                     </tr>
                   );

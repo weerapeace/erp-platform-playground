@@ -8,9 +8,9 @@
  * ลูกค้า 1/125 ราย และร้านค้า 2/80 ราย → ระบบต้องเดาวันเกือบทั้งหมด
  * ถ้าให้ไปตั้งทีละรายในทะเบียนคู่ค้าคงไม่มีใครทำ จึงทำหน้ารวมที่เรียงตาม "ยอดค้างมากสุด" ให้ตั้งรวดเดียว
  *
- * เก็บที่เดิมทั้งคู่ (ไม่สร้างช่องใหม่):
- *   ลูกค้า  → partners_v2.payment_terms_days   (จำนวนวัน)
- *   ร้านค้า → partners_v2.purchase_credit_term (ข้อความรูปแบบของ lib/credit-term)
+ * เก็บที่ partners_v2 ทั้งคู่ ใช้รูปแบบเดียวกัน (lib/credit-term) จะได้เลือก "สิ้นเดือน" / "ทุกวันที่ 25" ได้ทั้งสองฝั่ง
+ *   ลูกค้า  → sales_credit_term    (ของเดิม payment_terms_days ยังอ่านเป็นค่าสำรองถ้าช่องใหม่ว่าง)
+ *   ร้านค้า → purchase_credit_term
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -29,7 +29,7 @@ export type CreditTermRow = {
   id: string;
   name: string;
   code: string | null;
-  /** เครดิตที่ตั้งไว้ตอนนี้ — ลูกค้าเป็นจำนวนวัน (number) · ร้านค้าเป็นข้อความรูปแบบ credit-term */
+  /** เครดิตที่ตั้งไว้ตอนนี้ — รูปแบบข้อความของ lib/credit-term ทั้งสองฝั่ง (null = ยังไม่ตั้ง) */
   current: string | null;
   /** จำนวนเอกสารที่ยังค้าง */
   openDocs: number;
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data: partners } = await db
     .from("partners_v2")
-    .select("id, display_name, name_th, code, payment_terms_days, purchase_credit_term")
+    .select("id, display_name, name_th, code, payment_terms_days, sales_credit_term, purchase_credit_term")
     .limit(5000);
   const pMap = new Map((partners ?? []).map((p) => [String(p.id), p]));
 
@@ -87,8 +87,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const rows: CreditTermRow[] = [...agg.entries()].map(([id, v]) => {
     const p = pMap.get(id);
+    // ลูกค้า: ใช้ช่องใหม่ก่อน · ถ้าว่างค่อยแปลงค่าเก่า (จำนวนวัน) มาเป็นรูปแบบเดียวกัน
     const current = side === "customer"
-      ? (num(p?.payment_terms_days) > 0 ? String(num(p?.payment_terms_days)) : null)
+      ? (p?.sales_credit_term
+          ? String(p.sales_credit_term)
+          : num(p?.payment_terms_days) > 0 ? `days:${num(p?.payment_terms_days)}` : null)
       : (p?.purchase_credit_term ? String(p.purchase_credit_term) : null);
     return {
       id,
@@ -131,17 +134,15 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const id = typeof it.id === "string" && UUID_RE.test(it.id) ? it.id : null;
     if (!id) { failed.push(String(it.id ?? "(ไม่มี id)")); continue; }
 
-    let patch: Record<string, unknown>;
-    if (side === "customer") {
-      const days = it.value === null || it.value === "" ? null : Math.round(Number(it.value));
-      if (days !== null && (!Number.isFinite(days) || days < 0 || days > 365)) { failed.push(id); continue; }
-      patch = { payment_terms_days: days };
-    } else {
-      const term = it.value === null || it.value === "" ? null : String(it.value);
-      // ต้องเป็นรูปแบบที่ lib/credit-term อ่านออก ไม่งั้นหน้ากระแสเงินสดจะคำนวณวันไม่ได้
-      if (term !== null && !parseCreditTerm(term)) { failed.push(id); continue; }
-      patch = { purchase_credit_term: term };
-    }
+    // ทั้งสองฝั่งใช้รูปแบบเดียวกัน — ต้องเป็นค่าที่ lib/credit-term อ่านออก
+    // ไม่งั้นหน้ากระแสเงินสดจะคำนวณวันไม่ได้ (เช็กที่นี่ ไม่ใช่แค่ฝั่งหน้าจอ)
+    const term = it.value === null || it.value === "" ? null : String(it.value);
+    if (term !== null && !parseCreditTerm(term)) { failed.push(id); continue; }
+    // หมายเหตุ: ไม่แตะ payment_terms_days ของเดิม — คู่ค้าบางรายเป็นทั้งลูกค้าและร้านค้า
+    // และ supplier-wizard ก็เขียนช่องนั้นอยู่ ถ้าล้างทิ้งจะทำข้อมูลของอีกฝั่งหาย
+    const patch: Record<string, unknown> = side === "customer"
+      ? { sales_credit_term: term }
+      : { purchase_credit_term: term };
 
     const { error } = await admin.from("partners_v2").update(patch).eq("id", id);
     if (error) { failed.push(id); continue; }
