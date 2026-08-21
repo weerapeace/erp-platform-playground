@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { SkuWizard } from "./sku-wizard";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
 import { SkuTaobaoSource } from "@/components/sku-taobao-source";
+import { BomWhereUsed } from "@/components/bom-where-used";
 
 // F20: client-only render — กัน Worker 1102 (SSR component หนัก)
 const MasterCRUDPage = dynamic(
@@ -130,6 +131,10 @@ export default function SkusV2Page() {
       render: ({ recordId }) => recordId
         ? <div className="pt-1 space-y-3"><SkuSupplierList skuId={recordId} defaultOpen /><SkuTaobaoSource skuId={recordId} /></div>
         : <div className="p-3 text-sm text-slate-400">บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย</div>,
+    }, {
+      // ย้อน BOM: ของชิ้นนี้ถูกใช้ในสูตรของสินค้าตัวไหนบ้าง (แปะท้ายแท็บ BOM)
+      key: "bom_where_used", label: "ใช้ในสูตรของสินค้าอื่น", icon: "🔎", inTab: "bom",
+      render: ({ recordId }) => recordId ? <div className="pt-1"><BomWhereUsed skuId={recordId} /></div> : null,
     }],
   }), [toast, tr]);
 

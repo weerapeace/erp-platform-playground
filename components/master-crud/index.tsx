@@ -55,6 +55,8 @@ const InlineCreatePanel = dynamic(() => import("@/components/master-crud/inline-
 const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").then((m) => m.SkuSupplierList), { ssr: false });
 // แถบ "🛒 มาจาก Taobao" — ลิงก์ย้อนกลับไปยังรายการในกล่องพักที่จับคู่มาเป็นสินค้าตัวนี้
 const SkuTaobaoSource = dynamic(() => import("@/components/sku-taobao-source").then((m) => m.SkuTaobaoSource), { ssr: false });
+// "ย้อน BOM" — สินค้าชิ้นนี้ถูกใช้เป็นวัตถุดิบในสูตรของสินค้าตัวไหนบ้าง (แปะในแท็บ BOM)
+const BomWhereUsed = dynamic(() => import("@/components/bom-where-used").then((m) => m.BomWhereUsed), { ssr: false });
 const AiProductDetailModal = dynamic(() => import("@/components/ai-product-detail").then((m) => m.AiProductDetailModal), { ssr: false });
 // หมวดกลางสำหรับลงขาย — picker ค้นหา + เพิ่มหมวดใหม่พร้อมจับคู่ร้านในตัว (ของกลาง)
 const CentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker), { ssr: false });
@@ -3242,6 +3244,10 @@ export function MasterRecordDrawer({
             { key: "suppliers", label: tr("ร้านที่จำหน่าย + ราคาซื้อ", "Suppliers + buying price"), icon: "🏪", inTab: "tab_ราคา", render: ({ recordId }) => recordId
               ? <div className="pt-1 space-y-3"><SkuSupplierList skuId={recordId} defaultOpen /><SkuTaobaoSource skuId={recordId} /></div>
               : <div className="p-3 text-sm text-slate-400">{tr("บันทึกสินค้าก่อน แล้วค่อยเพิ่มร้านที่จำหน่าย", "Save the product first, then add suppliers")}</div> },
+            // ฝังท้ายแท็บ "BOM (สูตรผลิต)" — ย้อนกลับว่าของชิ้นนี้ไปอยู่ในสูตรของใครบ้าง
+            { key: "bom_where_used", label: tr("ใช้ในสูตรของสินค้าอื่น", "Used in other products' BOM"), icon: "🔎", inTab: "bom", render: ({ recordId }) => recordId
+              ? <div className="pt-1"><BomWhereUsed skuId={recordId} /></div>
+              : null },
           ]
         : undefined,
     };
