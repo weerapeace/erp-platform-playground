@@ -39,6 +39,7 @@ export type Permission =
   | "notification_rules.view" | "admin.notification_rules"
   | "so.view" | "so.create" | "so.edit" | "so.confirm" | "so.ship" | "so.complete" | "so.cancel" | "so.delete"
   | "qt.view" | "qt.create" | "qt.edit" | "qt.send" | "qt.accept" | "qt.reject" | "qt.cancel"
+  | "cn.view" | "cn.create" | "cn.cancel"
   | "stock.view" | "stock.create" | "stock.adjust"
   | "po.view" | "po.create" | "po.edit" | "po.confirm" | "po.receive" | "po.complete" | "po.cancel"
   | "attachments.view" | "attachments.upload" | "attachments.delete"
@@ -89,6 +90,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "notification_rules.view", "admin.notification_rules",
     "so.view", "so.create", "so.edit", "so.confirm", "so.ship", "so.complete", "so.cancel", "so.delete",
     "qt.view", "qt.create", "qt.edit", "qt.send", "qt.accept", "qt.reject", "qt.cancel",
+    "cn.view", "cn.create", "cn.cancel",
     "stock.view", "stock.create", "stock.adjust",
     "po.view", "po.create", "po.edit", "po.confirm", "po.receive", "po.complete", "po.cancel",
     "attachments.view", "attachments.upload", "attachments.delete",
@@ -126,6 +128,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "notification_rules.view",
     "so.view", "so.create", "so.edit", "so.confirm", "so.ship", "so.cancel", "so.delete",
     "qt.view", "qt.create", "qt.edit", "qt.send", "qt.accept", "qt.reject", "qt.cancel",
+    "cn.view", "cn.create", "cn.cancel",
     "stock.view", "stock.create",
     "po.view", "po.create", "po.edit", "po.receive", "po.cancel",
     "attachments.view", "attachments.upload",
@@ -133,7 +136,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   viewer: ["goals.view", "products.view", "pr.view", "suppliers.view", "fields.view", "numbering.view", "approval.view", "notifications.view", "workflow.view", "reports.view", "plugins.view", "table_layouts.view",
     "customers.view", "employees.view", "warehouses.view", "departments.view", "units.view", "taxes.view", "validation.view", "roles.view",
     "comments.view", "notification_rules.view",
-    "so.view", "qt.view", "stock.view", "po.view",
+    "so.view", "qt.view", "cn.view", "stock.view", "po.view",
     "attachments.view"],
 };
 
