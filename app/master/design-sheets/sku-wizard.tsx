@@ -78,6 +78,9 @@ export function SkuWizard({
   const [pImgs, setPImgs] = useState<string[]>([]);                  // รูป Parent (R2 keys, ตัวแรก = ปก)
   const [pickOpen, setPickOpen] = useState<string | null>(null);     // ช่องรูปที่กำลังเลือก ("parent" | "row-<i>")
   const [pickPos, setPickPos] = useState<{ left: number; top: number } | null>(null);   // ตำแหน่งป๊อปอัปเลือกรูป (fixed/portal)
+  const [uploading, setUploading] = useState(0);                     // จำนวนรูปที่กำลังอัปโหลดเข้าใบงาน
+  const [dragOver, setDragOver] = useState(false);                   // ลากไฟล์มาวางบนป๊อปเลือกรูป
+  const pastePickRef = useRef<((files: File[]) => void) | null>(null);   // ตัวรับ Ctrl+V ของช่องรูปที่เปิดอยู่
   const [picked, setPicked] = useState<ParentSkuPickerValue | null>(null);   // Parent เดิมที่เลือกจากช่องค้นหา (โชว์ในตัวเลือก)
   const [showKids, setShowKids] = useState(false);                   // กาง/พับ รายการ SKU ลูกที่มีอยู่แล้ว
   const prefilledRef = useRef<string | null>(null);                  // id ของ Parent ที่ดึงข้อมูลมาเติมแล้ว (กันเติมซ้ำทับที่ผู้ใช้แก้)
@@ -127,6 +130,19 @@ export function SkuWizard({
     const onDown = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest("[data-imgpick]")) setPickOpen(null); };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
+  }, [pickOpen]);
+
+  // เปิดตัวเลือกรูปอยู่ + กด Ctrl+V = อัปรูปจากคลิปบอร์ดเข้าใบงานเลย (ก๊อปรูปจากที่อื่นมาวางได้)
+  useEffect(() => {
+    if (!pickOpen) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+      if (!files.length) return;
+      e.preventDefault();
+      pastePickRef.current?.(files);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
   }, [pickOpen]);
 
   // เช็ครหัส Parent: ซ้ำ / ล่าสุด / ถัดไป / รายการที่มี — อ่าน j.data (ของเดิมอ่าน j เฉยๆ เลยไม่เคยเตือนซ้ำ)
@@ -186,9 +202,45 @@ export function SkuWizard({
     const top = r.bottom + 4 + Hest > window.innerHeight - 8 ? Math.max(8, r.top - Hest - 4) : r.bottom + 4;
     setPickPos({ left, top }); setPickOpen(id);
   };
+  /**
+   * โยนรูปใหม่เข้ามาในป๊อปเลือกรูปได้เลย (ปุ่มเลือกไฟล์ / ลากมาวาง / Ctrl+V)
+   * อัปเข้าแกลเลอรีของใบงานผ่านระบบแนบไฟล์กลาง แล้วเลือกให้อัตโนมัติ — ไม่ต้องออกไปแนบที่แท็บข้อมูลงานก่อน
+   */
+  const uploadImages = async (files: File[], onPicked: (key: string) => void) => {
+    const imgs = files.filter((f) => f.type.startsWith("image/"));
+    if (!imgs.length || !sheetId) return;
+    setUploading((n) => n + imgs.length);
+    let ok = 0;
+    for (const file of imgs) {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("entity_type", "design_sheet");
+        fd.append("entity_id", sheetId);
+        const j = await apiFetch("/api/attachments", { method: "POST", body: fd }).then((r) => r.json());
+        if (j.error) throw new Error(j.error);
+        const key = (j.data?.file_path as string) ?? "";
+        const url = (j.public_url as string) ?? (key ? `/api/r2-image?key=${encodeURIComponent(key)}` : "");
+        if (key) {
+          setSheetImgs((cur) => (cur.some((im) => im.key === key) ? cur : [...cur, { key, url, sourceLabel: "เพิ่งอัปโหลด" }]));
+          onPicked(key);
+          ok++;
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "อัปโหลดรูปไม่สำเร็จ");
+      } finally {
+        setUploading((n) => Math.max(0, n - 1));
+      }
+    }
+    if (ok) toast.success(`อัปโหลด ${ok} รูปเข้าใบงานแล้ว`);
+  };
+
   // ช่องเลือกรูปจากใบงาน — เลือกได้หลายรูป (รูปแรก = ปก) · ป๊อปอัปลอย + hover ขยาย (ผ่าน ImageThumbnail)
   const imgSlot = (values: string[], onToggle: (k: string) => void, onClear: () => void, id: string) => {
     const cover = values[0];
+    // รูปที่เพิ่งอัปโหลด = เลือกให้เลย (ถ้ายังไม่ถูกเลือก) — ไม่ใช้ onToggle ตรง ๆ กันเผลอสลับออก
+    const onToggleAdd = (k: string) => { if (!values.includes(k)) onToggle(k); };
+    if (pickOpen === id) pastePickRef.current = (files: File[]) => { void uploadImages(files, onToggleAdd); };
     // จัดกลุ่มรูปตามแหล่ง (คงลำดับที่ endpoint ส่งมา: แกลเลอรี → รายละเอียด → คอมเมนต์)
     const groups: Array<[string, typeof sheetImgs]> = [];
     for (const im of sheetImgs) {
@@ -204,9 +256,14 @@ export function SkuWizard({
           {values.length > 1 && <span className="absolute -right-1 -top-1 z-10 rounded-full bg-blue-600 px-1 text-[9px] font-medium text-white">+{values.length - 1}</span>}
         </button>
         {pickOpen === id && pickPos && createPortal(
-          <div data-imgpick className="rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl"
-            style={{ position: "fixed", left: pickPos.left, top: pickPos.top, width: 236, zIndex: 1000 }}>
-            {sheetImgs.length === 0 ? <div className="p-2 text-[11px] text-slate-400">ใบงานนี้ยังไม่มีรูปแนบ</div> : (
+          <div data-imgpick className={`rounded-lg border bg-white p-1.5 shadow-xl ${dragOver ? "border-blue-400 ring-2 ring-blue-200" : "border-slate-200"}`}
+            style={{ position: "fixed", left: pickPos.left, top: pickPos.top, width: 236, zIndex: 1000 }}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); void uploadImages(Array.from(e.dataTransfer.files), onToggleAdd); }}>
+            {sheetImgs.length === 0 ? (
+              <div className="p-2 text-center text-[11px] text-slate-400">ใบงานนี้ยังไม่มีรูปแนบ<br />— ลากรูปมาวาง หรือกดปุ่มด้านล่าง —</div>
+            ) : (
               <>
                 <div className="max-h-52 space-y-1.5 overflow-auto">
                   <button type="button" onClick={onClear}
@@ -235,6 +292,12 @@ export function SkuWizard({
                 </div>
               </>
             )}
+            {/* โยนรูปใหม่เข้ามาได้เลย — เลือกไฟล์ / ลากมาวาง / Ctrl+V (เข้าแกลเลอรีใบงาน + เลือกให้ทันที) */}
+            <label className={`mt-1 flex h-9 cursor-pointer items-center justify-center gap-1 rounded border border-dashed text-[11px] ${uploading ? "border-slate-200 text-slate-400" : "border-blue-300 text-blue-600 hover:bg-blue-50"}`}>
+              {uploading ? `⏳ กำลังอัปโหลด ${uploading} รูป…` : "⬆️ เพิ่มรูปใหม่ (เลือกไฟล์ · ลากวาง · Ctrl+V)"}
+              <input type="file" accept="image/*" multiple className="hidden" disabled={!!uploading}
+                onChange={(e) => { void uploadImages(Array.from(e.target.files ?? []), onToggleAdd); e.target.value = ""; }} />
+            </label>
           </div>,
           document.body
         )}
