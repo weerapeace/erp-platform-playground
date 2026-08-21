@@ -34,7 +34,8 @@ export type CashflowSource =
   | "payroll"         // เงินเดือน (เงินออก)
   | "loan"            // งวดผ่อนเงินกู้ (เงินออก)
   | "od_interest"     // ดอกเบี้ย OD (เงินออก)
-  | "china";          // โอนเงินจีน (เงินออก)
+  | "china"           // โอนเงินจีน (เงินออก)
+  | "manual";         // รายการที่กรอกเอง — ค่าเช่า ค่าน้ำไฟ ภาษี ประกันสังคม (เข้าหรือออกก็ได้)
 
 export type CashflowEvent = {
   /** ไม่ซ้ำทั้งชุด — ใช้เป็น key ของตาราง */
@@ -85,6 +86,7 @@ export const CASHFLOW_SOURCE: Record<CashflowSource, { label: string; icon: stri
   loan:           { label: "เงินกู้",     icon: "🏦", color: "#DC2626", href: "/loan-installments" },
   od_interest:    { label: "ดอกเบี้ย OD", icon: "📈", color: "#B45309", href: "/od-facilities" },
   china:          { label: "เงินจีน",     icon: "🇨🇳", color: "#DB2777", href: "/app/china-pay" },
+  manual:         { label: "รายการประจำ", icon: "📌", color: "#0F766E", href: "/cashflow" },
 };
 
 export const CASHFLOW_CERTAINTY: Record<CashflowCertainty, { label: string; hint: string; badge: string }> = {
@@ -289,4 +291,48 @@ const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.�
 export function monthLabelTH(ym: string): string {
   const [y, m] = ym.split("-").map(Number);
   return `${TH_MONTHS[(m || 1) - 1]} ${String((y || 0) + 543).slice(-2)}`;
+}
+
+
+// ============================================================
+// รายการที่กรอกเอง (ค่าเช่า · ค่าน้ำไฟ · ภาษี · ประกันสังคม)
+// ============================================================
+
+export type ManualRepeatKind = "once" | "monthly";
+
+/** หมวดที่ใช้บ่อย — เลือกจากดรอปดาวน์ได้ หรือพิมพ์เองก็ได้ */
+export const MANUAL_CATEGORIES = [
+  "ค่าเช่า",
+  "ค่าน้ำ / ค่าไฟ",
+  "อินเทอร์เน็ต / โทรศัพท์",
+  "ภาษี",
+  "ประกันสังคม",
+  "ค่าขนส่ง",
+  "ค่าบริการรายเดือน",
+  "อื่น ๆ",
+];
+
+/**
+ * วันที่ของรายการรายเดือนในเดือนที่ระบุ
+ * day = 0 หมายถึงสิ้นเดือน · เดือนที่สั้นกว่าวันที่ระบุจะเลื่อนมาวันสุดท้ายให้เอง
+ * (เช่น ตั้งวันที่ 31 เดือน ก.พ. จะได้ 28/29)
+ */
+export function manualDateInMonth(monthStart: string, day: number): string {
+  return day <= 0 ? endOfMonthISO(monthStart) : dayOfMonthISO(monthStart, day);
+}
+
+/** ป้ายไทยของรอบ เช่น "ทุกวันที่ 5" / "ทุกสิ้นเดือน" / "ครั้งเดียว 5 ก.ย." */
+export function manualScheduleLabel(
+  kind: string, dayOfMonth: number | null | undefined, onceDate: string | null | undefined,
+): string {
+  if (kind === "once") return onceDate ? `ครั้งเดียว ${formatDayMonthTH(onceDate)}` : "ครั้งเดียว";
+  if (dayOfMonth === 0) return "ทุกสิ้นเดือน";
+  return dayOfMonth ? `ทุกวันที่ ${dayOfMonth}` : "ทุกเดือน";
+}
+
+const TH_MONTHS_SHORT = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+/** "2026-09-05" → "5 ก.ย." */
+export function formatDayMonthTH(iso: string): string {
+  const d = parseISO(iso);
+  return `${d.getUTCDate()} ${TH_MONTHS_SHORT[d.getUTCMonth()]}`;
 }

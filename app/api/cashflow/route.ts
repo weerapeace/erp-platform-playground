@@ -18,7 +18,7 @@ import { guardApi } from "@/lib/api-auth";
 import { computeDueDate, formatCreditTerm } from "@/lib/credit-term";
 import { SO_ACTIVE_STATUSES } from "@/lib/so-status";
 import {
-  addDaysISO, dayOfMonthISO, endOfMonthISO, monthsBetween, todayISO,
+  addDaysISO, dayOfMonthISO, endOfMonthISO, manualDateInMonth, manualScheduleLabel, monthsBetween, todayISO,
   type CashflowEvent,
 } from "@/lib/cashflow";
 
@@ -508,6 +508,63 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         count: noRate,
         message: `บิลจีน ${noRate} ใบยังไม่ได้ใส่เรตแลกเงิน — ใช้เรต ${rmbRate} แทน (${rmbRateSource})`,
         href: "/app/china-pay",
+      });
+    }
+  }
+
+  // ------------------------------------------------------------
+  // 8) รายการที่กรอกเอง — ค่าเช่า · ค่าน้ำไฟ · ภาษี · ประกันสังคม
+  //    (ไม่มีเอกสารในระบบ ถ้าไม่ใส่ตรงนี้ ยอดเงินออกจะต่ำกว่าความจริงทุกเดือน)
+  // ------------------------------------------------------------
+  {
+    const miRes = await db
+      .from("cashflow_manual_items")
+      .select("id, label, direction, amount, category, repeat_kind, day_of_month, once_date, start_date, end_date, note")
+      .eq("is_active", true).limit(1000);
+
+    const items = miRes.data ?? [];
+    for (const m of items) {
+      const amount = num(m.amount);
+      if (amount <= 0) continue;
+      const dir = m.direction === "in" ? "in" : "out";
+      const startAt = m.start_date ? String(m.start_date).slice(0, 10) : null;
+      const endAt = m.end_date ? String(m.end_date).slice(0, 10) : null;
+
+      /** ใส่ 1 ครั้งลงวันที่กำหนด ถ้าอยู่ในช่วงที่ขอมาและอยู่ในอายุของรายการ */
+      const push = (date: string, key: string) => {
+        if (date > to) return;
+        if (startAt && date < startAt) return;
+        if (endAt && date > endAt) return;
+        events.push({
+          id: `manual:${m.id}:${key}`,
+          date, direction: dir, source: "manual", certainty: "expected",
+          ref: String(m.category || "รายการประจำ"),
+          party: String(m.label ?? "รายการที่กรอกเอง"),
+          amount,
+          dateConfident: true,
+          dateNote: manualScheduleLabel(String(m.repeat_kind), m.day_of_month as number | null, m.once_date as string | null),
+          note: (m.note as string | null) ?? undefined,
+          href: "/cashflow",
+          // แก้ที่ตั้งค่าเท่านั้น — ถ้าให้ลากบนกระดานจะกลายเป็นแก้ "รอบ" ทั้งชุดโดยไม่ตั้งใจ
+          movable: false,
+        });
+      };
+
+      if (m.repeat_kind === "once") {
+        if (m.once_date) push(String(m.once_date).slice(0, 10), "once");
+      } else {
+        const day = Number(m.day_of_month ?? 0);
+        for (const monthStart of monthsBetween(from, to)) {
+          push(manualDateInMonth(monthStart, day), monthStart.slice(0, 7));
+        }
+      }
+    }
+
+    if (!items.length) {
+      warnings.push({
+        code: "no_manual_items",
+        message: "ยังไม่ได้ใส่รายจ่ายประจำ (ค่าเช่า ค่าน้ำไฟ ภาษี ประกันสังคม) — ยอดเงินออกจริงจะมากกว่าที่เห็นตรงนี้",
+        href: "/cashflow",
       });
     }
   }

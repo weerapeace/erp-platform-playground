@@ -23,13 +23,14 @@ import { usePermission, AccessDenied, useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import {
-  CASHFLOW_CERTAINTY, CASHFLOW_SOURCE, THB, THBShort,
+  CASHFLOW_CERTAINTY, CASHFLOW_SOURCE, MANUAL_CATEGORIES, THB, THBShort, manualScheduleLabel,
   addDaysISO, buildDailySeries, firstNegativeDay, monthLabelTH, todayISO, totalsByMonth,
   type CashflowEvent, type CashflowSource,
 } from "@/lib/cashflow";
 import type { CashflowApiData } from "@/app/api/cashflow/route";
 import type { OpeningBalance } from "@/app/api/cashflow/opening-balances/route";
 import type { LoanReconcileRow } from "@/app/api/cashflow/loan-reallocate/route";
+import type { ManualItem } from "@/app/api/cashflow/manual-items/route";
 
 const ALL_SOURCES = Object.keys(CASHFLOW_SOURCE) as CashflowSource[];
 const RANGES = [
@@ -769,6 +770,9 @@ function SettingsModal({
               </div>
             </div>
           </section>
+
+          {/* ---- รายการที่กรอกเอง ---- */}
+          <ManualItemsSection canManage={canManage} onChanged={onSaved} />
         </div>
       </ERPModal>
 
@@ -782,5 +786,197 @@ function SettingsModal({
         variant="danger"
       />
     </>
+  );
+}
+
+/**
+ * รายจ่าย/รายรับประจำที่ไม่มีเอกสารในระบบ — ค่าเช่า · ค่าน้ำไฟ · ภาษี · ประกันสังคม
+ * ถ้าไม่ใส่ตรงนี้ ยอด "เงินออก" บนกระแสเงินสดจะต่ำกว่าความจริงทุกเดือน
+ */
+function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onChanged: () => void }) {
+  const [items, setItems] = useState<ManualItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<ManualItem | null>(null);
+
+  const [label, setLabel] = useState("");
+  const [amount, setAmount] = useState("");
+  const [direction, setDirection] = useState<"in" | "out">("out");
+  const [category, setCategory] = useState(MANUAL_CATEGORIES[0]);
+  const [repeatKind, setRepeatKind] = useState<"once" | "monthly">("monthly");
+  const [dayOfMonth, setDayOfMonth] = useState("1");
+  const [onceDate, setOnceDate] = useState(todayISO());
+
+  const load = useCallback(() => {
+    setLoading(true); setErr(null);
+    apiFetch("/api/cashflow/manual-items")
+      .then((r) => r.json())
+      .then((j) => { if (j?.error) setErr(j.error); else setItems((j.data ?? []) as ManualItem[]); })
+      .catch(() => setErr("โหลดรายการประจำไม่สำเร็จ"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(load, [load]);
+
+  const add = async () => {
+    setSaving(true); setErr(null);
+    try {
+      const res = await apiFetch("/api/cashflow/manual-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label, amount: Number(amount || 0), direction, category,
+          repeat_kind: repeatKind,
+          day_of_month: repeatKind === "monthly" ? Number(dayOfMonth) : null,
+          once_date: repeatKind === "once" ? onceDate : null,
+        }),
+      });
+      const j = await res.json();
+      if (j?.error) { setErr(j.error); return; }
+      setLabel(""); setAmount("");
+      load(); onChanged();
+    } catch { setErr("บันทึกไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  };
+
+  const remove = async (item: ManualItem) => {
+    setErr(null);
+    try {
+      const res = await apiFetch(`/api/cashflow/manual-items?id=${item.id}`, { method: "DELETE" });
+      const j = await res.json();
+      if (j?.error) { setErr(j.error); return; }
+      setRemoveTarget(null);
+      load(); onChanged();
+    } catch { setErr("ลบไม่สำเร็จ"); }
+  };
+
+  const monthlyOut = items
+    .filter((i) => i.repeat_kind === "monthly" && i.direction === "out")
+    .reduce((s, i) => s + Number(i.amount || 0), 0);
+
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="font-semibold text-slate-800">📌 รายจ่าย/รายรับประจำ</h3>
+        <InfoHint>ค่าใช้จ่ายที่ไม่มีใบเอกสารในระบบ เช่น ค่าเช่า ค่าน้ำไฟ ภาษี ประกันสังคม — ใส่ไว้แล้วจะไปโผล่บนเส้นเวลาและกระดานเงินสดให้ทุกเดือนเอง</InfoHint>
+      </div>
+      <p className="text-xs text-slate-500 mb-3">
+        ถ้าไม่ใส่ ยอด “เงินออก” จะต่ำกว่าความจริงทุกเดือน
+        {monthlyOut > 0 && <> · ตอนนี้รายจ่ายประจำรวม <b className="text-slate-700">{THB(monthlyOut)}/เดือน</b></>}
+      </p>
+
+      {err && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-600 mb-2">{err}</div>}
+      {loading && <p className="text-sm text-slate-400 py-2">กำลังโหลด…</p>}
+
+      {!loading && items.length === 0 && (
+        <p className="text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg py-4 text-center">
+          ยังไม่มีรายการประจำ — เพิ่มด้านล่างได้เลย
+        </p>
+      )}
+
+      {items.length > 0 && (
+        <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+          {items.map((i) => (
+            <div key={i.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${
+                i.direction === "in" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
+                {i.direction === "in" ? "เข้า" : "ออก"}
+              </span>
+              <span className="flex-1 min-w-0 truncate text-slate-700">
+                {i.label}
+                {i.category && <span className="ml-1.5 text-[11px] text-slate-400">{i.category}</span>}
+              </span>
+              <span className="text-[11px] text-slate-500 whitespace-nowrap">
+                {manualScheduleLabel(i.repeat_kind, i.day_of_month, i.once_date)}
+              </span>
+              <span className={`tabular-nums font-medium whitespace-nowrap ${
+                i.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
+                {THB(Number(i.amount || 0))}
+              </span>
+              {canManage && (
+                <button onClick={() => setRemoveTarget(i)}
+                        className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded shrink-0" title="เอาออก">
+                  🗑
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {canManage && (
+        <div className="mt-3 grid sm:grid-cols-2 gap-2 items-end">
+          <div className="sm:col-span-2">
+            <label className="block text-xs text-slate-500 mb-1">ชื่อรายการ</label>
+            <input value={label} onChange={(e) => setLabel(e.target.value)}
+                   placeholder="เช่น ค่าเช่าโรงงาน"
+                   className="w-full h-9 px-2.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-blue-400" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">หมวด</label>
+            <select value={category} onChange={(e) => setCategory(e.target.value)}
+                    className="w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+              {MANUAL_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">เข้าหรือออก</label>
+            <select value={direction} onChange={(e) => setDirection(e.target.value as "in" | "out")}
+                    className="w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+              <option value="out">เงินออก (จ่าย)</option>
+              <option value="in">เงินเข้า (รับ)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">จำนวนเงิน</label>
+            <MoneyInput value={amount} onChange={setAmount}
+                        className="w-full h-9 px-2.5 text-sm text-right border border-slate-200 rounded-lg" />
+          </div>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-500 mb-1">รอบ</label>
+              <select value={repeatKind} onChange={(e) => setRepeatKind(e.target.value as "once" | "monthly")}
+                      className="w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                <option value="monthly">ทุกเดือน</option>
+                <option value="once">ครั้งเดียว</option>
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-slate-500 mb-1">{repeatKind === "monthly" ? "วันที่ของเดือน" : "วันที่"}</label>
+              {repeatKind === "monthly" ? (
+                <select value={dayOfMonth} onChange={(e) => setDayOfMonth(e.target.value)}
+                        className="w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                  <option value="0">สิ้นเดือน</option>
+                  {Array.from({ length: 31 }, (_, n) => String(n + 1)).map((d) => (
+                    <option key={d} value={d}>วันที่ {d}</option>
+                  ))}
+                </select>
+              ) : (
+                <DateInput value={onceDate} onChange={setOnceDate} />
+              )}
+            </div>
+          </div>
+          <div className="sm:col-span-2">
+            <button onClick={add} disabled={saving || !label.trim() || Number(amount || 0) <= 0}
+                    className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saving ? "กำลังเพิ่ม…" : "+ เพิ่มรายการประจำ"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={!!removeTarget}
+        onClose={() => setRemoveTarget(null)}
+        onConfirm={() => removeTarget && remove(removeTarget)}
+        title="เอารายการนี้ออก?"
+        message={removeTarget
+          ? `“${removeTarget.label}” (${THB(Number(removeTarget.amount || 0))}) จะไม่ถูกนับในกระแสเงินสดอีก — ข้อมูลเก่ายังเก็บไว้ในประวัติ`
+          : ""}
+        confirmText="เอาออก"
+        variant="danger"
+      />
+    </section>
   );
 }
