@@ -46,6 +46,7 @@ const emptyLine = (): EditLine => ({
 type CompanyOpt = { id: string; company_code: string; name: string; name_th: string | null; is_default: boolean };
 
 type FormState = {
+  cn_number: string;          // ปล่อยว่าง = ให้ระบบออกเลขให้ตอนกดออกเอกสาร
   company_id: string;
   company_code: string;
   cn_date: string;
@@ -61,7 +62,7 @@ type FormState = {
 };
 
 const EMPTY: FormState = {
-  company_id: "", company_code: "", cn_date: new Date().toISOString().slice(0, 10),
+  cn_number: "", company_id: "", company_code: "", cn_date: new Date().toISOString().slice(0, 10),
   ref_so_id: null, ref_invoice_no: "", ref_invoice_date: "",
   customer: null, original_amount: 0, vat_rate: 7, reason: "", note: "", lines: [emptyLine()],
 };
@@ -110,6 +111,8 @@ export default function CreditNotesPage() {
   const [cancelTarget, setCancelTarget] = useState<CreditNoteDetail | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<CreditNoteDetail | null>(null);
+  const [renumberTarget, setRenumberTarget] = useState<CreditNoteDetail | null>(null);   // แก้เลขที่เอกสาร
+  const [renumberValue, setRenumberValue] = useState("");
 
   // ---- โหลดรายการ ----
   const fetchList = useCallback(async () => {
@@ -151,6 +154,7 @@ export default function CreditNotesPage() {
   const openEdit = (d: CreditNoteDetail) => {
     setEditingId(d.id);
     setForm({
+      cn_number: d.cn_number ?? "",
       company_id: d.company_id ?? "", company_code: d.company_code ?? "",
       cn_date: d.cn_date, ref_so_id: d.ref_so_id, ref_invoice_no: d.ref_invoice_no ?? "",
       ref_invoice_date: d.ref_invoice_date ?? "",
@@ -210,6 +214,7 @@ export default function CreditNotesPage() {
     setSaving(true); setFormErr(null);
     try {
       const header = {
+        cn_number: form.cn_number.trim() || null,
         company_id: form.company_id || null,
         company_code: form.company_code || companies.find(c => c.id === form.company_id)?.company_code || null,
         cn_date: form.cn_date,
@@ -275,6 +280,25 @@ export default function CreditNotesPage() {
       setDeleteTarget(null); setDetailOpen(false);
       await fetchList();
     } catch (err) { flash(err instanceof Error ? err.message : "ลบไม่สำเร็จ"); }
+    finally { setWfLoading(false); }
+  };
+
+  /** แก้เลขที่เอกสาร (ใช้ได้ทั้งใบร่างและใบที่ออกแล้ว — เนื้อหาอื่นของใบที่ออกแล้วยังล็อกอยู่) */
+  const saveNumber = async () => {
+    if (!renumberTarget) return;
+    setWfLoading(true);
+    try {
+      const res = await apiFetch(`/api/credit-notes/${renumberTarget.id}/number`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cn_number: renumberValue, actor: user?.name }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      flash(`เปลี่ยนเลขที่เป็น ${json.cn_number} แล้ว`);
+      setRenumberTarget(null);
+      await fetchList();
+      await openDetail(renumberTarget.id);
+    } catch (err) { flash(err instanceof Error ? err.message : "แก้เลขที่ไม่สำเร็จ"); }
     finally { setWfLoading(false); }
   };
 
@@ -390,6 +414,13 @@ export default function CreditNotesPage() {
               <label className="block">
                 <span className="text-xs font-medium text-slate-600">วันที่ใบลดหนี้</span>
                 <DateInput value={form.cn_date} onChange={v => setForm(f => ({ ...f, cn_date: v }))} />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">เลขที่เอกสาร</span>
+                <input value={form.cn_number} onChange={e => setForm(f => ({ ...f, cn_number: e.target.value }))}
+                  placeholder="ปล่อยว่าง = ระบบออกให้"
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-mono outline-none focus:border-blue-400" />
+                <span className="mt-1 block text-[11px] text-slate-400">ระบบออกให้เป็น CN-ปี-เดือน-ลำดับ ตอนกด &ldquo;ออกเอกสาร&rdquo; · พิมพ์เองได้ถ้าจำเป็น</span>
               </label>
               <label className="block">
                 <span className="text-xs font-medium text-slate-600">ลูกค้า *</span>
@@ -610,6 +641,10 @@ export default function CreditNotesPage() {
                   className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">✅ ออกเอกสาร</button>
               </>
             )}
+            {detail.status !== "draft" && canCreate && (
+              <button onClick={() => { setRenumberTarget(detail); setRenumberValue(detail.cn_number ?? ""); }} disabled={wfLoading}
+                className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">🔢 แก้เลขที่</button>
+            )}
             {detail.status === "issued" && canCancel && (
               <button onClick={() => { setCancelTarget(detail); setCancelReason(""); }} disabled={wfLoading}
                 className="h-9 px-4 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50">⊘ ยกเลิก</button>
@@ -709,6 +744,25 @@ export default function CreditNotesPage() {
           <input autoFocus value={cancelReason} onChange={e => setCancelReason(e.target.value)}
             placeholder="เหตุผลที่ยกเลิก เช่น ออกผิดใบ"
             className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400" />
+        </div>
+      </ERPModal>
+
+      {/* แก้เลขที่เอกสาร */}
+      <ERPModal open={!!renumberTarget} onClose={() => setRenumberTarget(null)} size="sm" title="แก้เลขที่เอกสาร"
+        footer={
+          <>
+            <button onClick={() => setRenumberTarget(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
+            <button onClick={saveNumber} disabled={wfLoading || !renumberValue.trim()}
+              className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">บันทึกเลขที่</button>
+          </>
+        }>
+        <div className="space-y-2 text-sm">
+          <p className="text-slate-600">
+            รูปแบบปกติคือ <code className="font-mono">CN-ปี-เดือน-ลำดับ</code> เช่น <code className="font-mono">CN-2026-08-001</code>
+            {" "}— ระบบจะกันไม่ให้ซ้ำกับใบอื่น และบันทึกประวัติว่าใครแก้จากเลขอะไร
+          </p>
+          <input autoFocus value={renumberValue} onChange={e => setRenumberValue(e.target.value)}
+            className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-mono outline-none focus:border-blue-400" />
         </div>
       </ERPModal>
 

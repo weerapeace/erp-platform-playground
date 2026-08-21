@@ -41,14 +41,28 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
     if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 
-    // เลขเอกสารแยกชุดต่อบริษัท (cn_ISG / cn_LOUIS) — ไม่มีกฎของบริษัทนั้นก็ถอยไปใช้ของ ISG
-    const code = String(row.company_code ?? "").toUpperCase();
-    let cnNumber: string | null = null;
-    for (const key of [code ? `cn_${code}` : "", "cn_ISG"].filter(Boolean)) {
-      const { data: n, error: numErr } = await admin.rpc("erp_next_number", { p_key: key, p_branch: null });
-      if (!numErr && n) { cnNumber = String(n); break; }
+    // เลขที่เอกสาร:
+    //   พิมพ์เลขเองไว้แล้ว → ใช้เลขนั้น (ตัวนับไม่ขยับ)
+    //   ไม่ได้พิมพ์          → ออกจากชุดเลข 'cn' (CN-{ปี}-{เดือน}-{ลำดับ} เริ่ม 001 ใหม่ทุกเดือน)
+    // ⚠️ ถ้าเลขที่ออกได้ชนกับใบที่พิมพ์เลขเองไว้ ให้ขยับไปเลขถัดไป (กันเลขซ้ำในเอกสารภาษี)
+    let cnNumber = String(row.cn_number ?? "").trim() || null;
+    if (!cnNumber) {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const { data: n, error: numErr } = await admin.rpc("erp_next_number", { p_key: "cn", p_branch: null });
+        if (numErr || !n) {
+          return NextResponse.json({ error: `ออกเลขเอกสารไม่สำเร็จ — ตรวจกฎเลขที่ "cn" (${numErr?.message ?? "ไม่มีกฎ"})` }, { status: 500 });
+        }
+        const candidate = String(n);
+        const { data: dup } = await admin.from("erp_playground_credit_notes")
+          .select("id").eq("cn_number", candidate).maybeSingle();
+        if (!dup) { cnNumber = candidate; break; }
+      }
+      if (!cnNumber) return NextResponse.json({ error: "ออกเลขเอกสารไม่สำเร็จ — เลขชนกับใบเดิมหลายครั้ง ตรวจตัวนับเลขที่ตั้งค่าระบบ" }, { status: 500 });
+    } else {
+      const { data: dup } = await admin.from("erp_playground_credit_notes")
+        .select("id").eq("cn_number", cnNumber).neq("id", id).maybeSingle();
+      if (dup) return NextResponse.json({ error: `เลขที่ ${cnNumber} ถูกใช้กับใบลดหนี้ใบอื่นแล้ว` }, { status: 400 });
     }
-    if (!cnNumber) return NextResponse.json({ error: "ออกเลขเอกสารไม่สำเร็จ — ตรวจกฎเลขที่ cn_<รหัสบริษัท>" }, { status: 500 });
 
     const { error } = await admin.from("erp_playground_credit_notes").update({
       status: "issued", cn_number: cnNumber, issued_at: new Date().toISOString(), updated_at: new Date().toISOString(),

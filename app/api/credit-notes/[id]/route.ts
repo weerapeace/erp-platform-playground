@@ -100,7 +100,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const h = body.header ?? {};
   const { rows, totals } = computeCreditNote(body.lines ?? [], num(h.original_amount), num(h.vat_rate ?? 7));
 
+  // เลขที่เอกสารพิมพ์เองได้ (ปล่อยว่าง = ให้ระบบออกให้ตอนกดออกเอกสาร)
+  const manualNo = String(h.cn_number ?? "").trim();
+  if (manualNo) {
+    const { data: dup } = await admin.from("erp_playground_credit_notes")
+      .select("id").eq("cn_number", manualNo).neq("id", id).maybeSingle();
+    if (dup) return NextResponse.json({ error: `เลขที่ ${manualNo} ถูกใช้กับใบลดหนี้ใบอื่นแล้ว` }, { status: 400 });
+  }
+
   const { error } = await admin.from("erp_playground_credit_notes").update({
+    cn_number: manualNo || null,
     company_id: h.company_id || null,
     company_code: h.company_code || null,
     ref_so_id: h.ref_so_id || null,
