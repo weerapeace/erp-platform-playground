@@ -54,13 +54,17 @@ function buildCreditNoteData(cn: CreditNoteDetail): Record<string, unknown> {
     vat_amount:       baht(cn.vat_amount),
     grand_total:      baht(cn.grand_total),
     amount_in_words:  thaiBahtText(cn.grand_total),
-    lines: cn.lines.map((l, i) => ({
+    // พิมพ์เฉพาะบรรทัดที่มีการลดจริง — บรรทัดที่ลด 0 ไม่มีความหมายบนใบลดหนี้
+    // (ดึงจากใบกำกับมาทั้งใบ บรรทัดที่ไม่ได้แก้จะเป็น 0 → ถ้าพิมพ์ออกมาด้วยจะรกทั้งหน้า)
+    lines: cn.lines.filter(l => Number(l.qty_diff ?? 0) !== 0 || Number(l.amount_diff ?? 0) !== 0).map((l, i) => ({
       idx:          i + 1,
       sku:          l.sku ?? "",
       product_name: l.product_name,
       desc2:        l.note ?? "",
       unit:         l.unit ?? "",
       unit_price:   baht(l.unit_price),
+      // ใบพิมพ์โชว์แค่ "จำนวนที่ลดหนี้" (เจ้าของสั่ง) — เดิม/ที่ถูกต้อง ยังส่งไปด้วยเผื่อแม่แบบอื่นเรียกใช้
+      qty_diff:     qty(l.qty_diff),
       qty_original: qty(l.qty_original),
       qty_correct:  qty(l.qty_correct),
       amount_diff:  baht(l.amount_diff),
