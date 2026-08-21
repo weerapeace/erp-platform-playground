@@ -7,7 +7,9 @@ import {
   endOfMonthISO,
   firstNegativeDay,
   monthLabelTH,
+  isMovableSource,
   monthsBetween,
+  MOVABLE_SOURCES,
   THB,
   THBShort,
   totals,
@@ -162,5 +164,30 @@ describe("cashflow — แสดงผลเป็นภาษาคน", () => 
   it("ชื่อเดือนไทยย่อ + ปี พ.ศ.", () => {
     expect(monthLabelTH("2026-08")).toBe("ส.ค. 69");
     expect(monthLabelTH("2027-01")).toBe("ม.ค. 70");
+  });
+});
+
+describe("cashflow — การ์ดไหนเลื่อนวันได้ (กระดานเงินสด)", () => {
+  it("เลื่อนได้เฉพาะเอกสารที่เราคุมวันจ่าย/วันรับเองได้", () => {
+    expect(isMovableSource("purchase_order")).toBe(true);
+    expect(isMovableSource("billing_note")).toBe(true);
+    expect(isMovableSource("sales_order")).toBe(true);
+    expect(isMovableSource("china")).toBe(true);
+  });
+
+  it("งวดผ่อน / เงินเดือน / ดอกเบี้ย OD ต้องเลื่อนไม่ได้ — ธนาคารกับพนักงานรอไม่ได้", () => {
+    expect(isMovableSource("loan")).toBe(false);
+    expect(isMovableSource("payroll")).toBe(false);
+    expect(isMovableSource("od_interest")).toBe(false);
+    expect(isMovableSource("ค่าที่ไม่รู้จัก")).toBe(false);
+  });
+
+  it("ทุกชนิดที่เลื่อนได้ต้องระบุตาราง + ช่องวันที่ครบ (API ใช้ชื่อนี้เขียนลง DB ตรง ๆ)", () => {
+    for (const [key, cfg] of Object.entries(MOVABLE_SOURCES)) {
+      expect(cfg, key).toBeTruthy();
+      expect(cfg!.table, key).toMatch(/^[a-z0-9_]+$/);
+      expect(cfg!.dateField, key).toMatch(/^[a-z0-9_]+$/);
+      expect(cfg!.label.length, key).toBeGreaterThan(0);
+    }
   });
 });

@@ -57,7 +57,24 @@ export type CashflowEvent = {
   note?: string;
   /** ลิงก์ไปหน้าเอกสารต้นทาง */
   href?: string;
+  /**
+   * เลื่อนวันได้ไหม (ใช้ที่กระดานเงินสด /cashflow/board)
+   * false = ธนาคาร/พนักงานรอไม่ได้ เช่น งวดผ่อน · เงินเดือน · ดอกเบี้ย OD
+   */
+  movable?: boolean;
+  /** id เอกสารต้นทาง — ใช้ตอนบันทึกวันใหม่ (ไม่ใช่ id ของ event) */
+  docId?: string;
 };
+
+/** ชนิดเอกสารที่กระดานเลื่อนวันให้ได้ + ช่องที่เก็บวันนั้นในฐานข้อมูล */
+export const MOVABLE_SOURCES: Partial<Record<CashflowSource, { table: string; dateField: string; label: string }>> = {
+  purchase_order: { table: "purchase_orders_v2",              dateField: "payment_due_date",        label: "วันครบกำหนดจ่าย" },
+  billing_note:   { table: "erp_playground_billing_notes",    dateField: "due_date",                label: "วันครบกำหนดชำระ" },
+  sales_order:    { table: "erp_playground_sales_orders",     dateField: "expected_payment_date",   label: "วันที่คาดว่าจะได้รับเงิน" },
+  china:          { table: "china_bills",                     dateField: "transfer_date",           label: "วันโอนเงิน" },
+};
+
+export const isMovableSource = (s: string): boolean => !!MOVABLE_SOURCES[s as CashflowSource];
 
 /** ป้าย / ไอคอน / สี ของแต่ละแหล่ง — ใช้ร่วมกันทุกหน้า */
 export const CASHFLOW_SOURCE: Record<CashflowSource, { label: string; icon: string; color: string; href: string }> = {

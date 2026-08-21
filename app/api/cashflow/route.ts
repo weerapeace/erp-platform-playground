@@ -142,6 +142,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         dateNote: hasDue ? undefined : "ใบวางบิลนี้ไม่ได้ระบุวันครบกำหนด — ใช้วันที่วางบิลแทน",
         note: b.status === "draft" ? "ใบวางบิลยังเป็นร่าง" : undefined,
         href: "/billing-notes",
+        movable: true, docId: String(b.id),
       });
     }
   }
@@ -152,7 +153,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (incomeBasis === "so" || incomeBasis === "both") {
     const soRes = await db
       .from("erp_playground_sales_orders")
-      .select("id, so_number, status, customer_id, customer_name, order_date, expected_ship_date, grand_total, amount_due")
+      .select("id, so_number, status, customer_id, customer_name, order_date, expected_ship_date, expected_payment_date, grand_total, amount_due")
       .in("status", SO_ACTIVE_STATUSES).limit(5000);
 
     let guessed = 0;
@@ -166,9 +167,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // เครดิตลูกค้าใช้รูปแบบเดียวกับร้านค้า (สิ้นเดือน / ทุกวันที่ N ได้) · ค่าเก่าที่เป็นจำนวนวันยังใช้เป็นตัวสำรอง
       const fromTerm = computeDueDate(base, partner?.sales_credit_term);
       const legacyDays = num(partner?.payment_terms_days);
-      const hasTerms = !!fromTerm || legacyDays > 0;
+      // ตั้งวันไว้เองจากกระดานเงินสด → ใช้อันนั้นเลย ไม่ต้องคำนวณ
+      const pinned = s.expected_payment_date ? String(s.expected_payment_date).slice(0, 10) : null;
+      const hasTerms = !!pinned || !!fromTerm || legacyDays > 0;
       if (!hasTerms) guessed += 1;
-      const date = fromTerm ?? addDaysISO(base, legacyDays > 0 ? legacyDays : customerDefaultDays);
+      const date = pinned ?? fromTerm ?? addDaysISO(base, legacyDays > 0 ? legacyDays : customerDefaultDays);
 
       events.push({
         id: `so:${s.id}`,
@@ -180,10 +183,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         party: String(s.customer_name ?? partnerName(s.customer_id as string, "ไม่ระบุลูกค้า")),
         amount,
         dateConfident: hasTerms,
-        dateNote: hasTerms
-          ? `เครดิตลูกค้า: ${formatCreditTerm(partner?.sales_credit_term) !== "—" ? formatCreditTerm(partner?.sales_credit_term) : `${legacyDays} วัน`}`
-          : `ลูกค้ารายนี้ยังไม่ได้ตั้งเครดิต — ระบบใช้ค่าเริ่มต้น ${customerDefaultDays} วัน`,
+        dateNote: pinned
+          ? "ตั้งวันรับเงินไว้เองจากกระดานเงินสด"
+          : hasTerms
+            ? `เครดิตลูกค้า: ${formatCreditTerm(partner?.sales_credit_term) !== "—" ? formatCreditTerm(partner?.sales_credit_term) : `${legacyDays} วัน`}`
+            : `ลูกค้ารายนี้ยังไม่ได้ตั้งเครดิต — ระบบใช้ค่าเริ่มต้น ${customerDefaultDays} วัน`,
         href: "/sales-orders",
+        movable: true, docId: String(s.id),
       });
     }
     if (guessed > 0) {
@@ -250,6 +256,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             : `ร้านนี้ยังไม่ได้ตั้งเครดิต — ระบบใช้ค่าเริ่มต้น ${supplierDefaultDays} วันนับจากวันสั่งซื้อ`,
         note: isRmb ? `ยอดจริง ¥${num(p.grand_total).toLocaleString("th-TH")} × เรต ${rmbRate}` : undefined,
         href: "/purchasing/po-list",
+        movable: true, docId: String(p.id),
       });
     }
     if (guessed > 0) {
@@ -492,6 +499,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         dateNote: b.transfer_date ? undefined : "ยังไม่ระบุวันโอน — ใช้วันที่บิล",
         note: num(b.amount_thb) > 0 ? undefined : `¥${(num(b.amount_rmb) + num(b.fee_rmb)).toLocaleString("th-TH")} × เรต ${rate}`,
         href: "/app/china-pay",
+        movable: true, docId: String(b.id),
       });
     }
     if (noRate > 0) {
