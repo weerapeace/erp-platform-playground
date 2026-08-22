@@ -10,6 +10,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { ERPModal } from "@/components/modal";
+import { SupplierWizard } from "@/components/supplier-wizard";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
@@ -64,10 +65,13 @@ const COLS_LS = "sku-wizard-batch-cols";
 const SKIP_COLS = new Set(["id", "is_active", "sale_ok", "purchase_ok", "created_at", "updated_at", "attribute_values", "cover_image_r2_key", "odoo_form_details", "odoo_form_synced_at"]);
 
 // ---- ตัวเลือกแบบค้นหา (async) จาก picker กลาง ----
-function AsyncPick({ table, label, secondary, value, valueLabel, onChange, placeholder, pinned }: {
+function AsyncPick({ table, label, secondary, value, valueLabel, onChange, placeholder, pinned, onAddNew, addNewLabel }: {
   table: string; label: string; secondary?: string;
   value: string | null; valueLabel?: string; onChange: (id: string | null, lbl: string) => void; placeholder: string;
   pinned?: { id: string; label: string }[];   // รายการ "ใช้บ่อย" ปักหมุดบนสุด (⭐)
+  /** มี = โชว์ปุ่ม "+ เพิ่มใหม่" ท้ายรายการ (ส่งคำที่พิมพ์ค้างไว้ไปให้ ไม่ต้องพิมพ์ซ้ำ) */
+  onAddNew?: (typedName: string) => void;
+  addNewLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -130,6 +134,16 @@ function AsyncPick({ table, label, secondary, value, valueLabel, onChange, place
                 </button>
               ))}
               {opts.length === 0 && (pinned ?? []).length === 0 && <div className="px-3 py-2 text-xs text-slate-400">— ไม่พบ —</div>}
+              {/* เพิ่มรายการใหม่ได้จากตรงนี้เลย — เปิดวิซาร์ดของกลาง (ไม่ต้องออกไปหน้าอื่นแล้วกลับมากรอกใหม่) */}
+              {onAddNew && (
+                <>
+                  <div className="border-t border-slate-100 my-1" />
+                  <button type="button" onClick={() => { const t = q.trim(); setOpen(false); setQ(""); onAddNew(t); }}
+                    className="w-full px-3 py-1.5 text-left text-sm text-blue-600 hover:bg-blue-50 truncate">
+                    ➕ {addNewLabel ?? "เพิ่มใหม่"}{q.trim() ? ` “${q.trim()}”` : ""}
+                  </button>
+                </>
+              )}
             </div>
         </div>
       )}
@@ -160,6 +174,8 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
   const [prefixMgr, setPrefixMgr] = useState(false);   // ป๊อปจัดการรหัสนำหน้า
   const [saving, setSaving] = useState(false);
   const [rmbRate, setRmbRate] = useState(5.2);         // เรตหยวน→บาท (ui_config rmb_to_thb_rate, default 5.2)
+  // "เพิ่มผู้ขายใหม่" จากในฟอร์มนี้เลย — ใช้วิซาร์ดคู่ค้าของกลาง แล้วเติมค่าที่เพิ่งสร้างกลับให้ช่องที่กดมา
+  const [newSupplier, setNewSupplier] = useState<{ name: string; apply: (id: string, label: string) => void } | null>(null);
 
   // โหลดเรตหยวน→บาท ตอนเปิด
   useEffect(() => {
@@ -403,7 +419,9 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
   // ---- render cell ตามชนิดคอลัมน์ ----
   const cell = (col: ColDef, val: unknown, lbl: string | undefined, onVal: (v: unknown, lbl?: string) => void) => {
     if (col.type === "relation" && col.rel)
-      return <AsyncPick table={col.rel.table} label={col.rel.label} secondary={col.rel.secondary} value={(val as string) || null} valueLabel={lbl} onChange={(id, l) => onVal(id, l)} placeholder={col.label} />;
+      return <AsyncPick table={col.rel.table} label={col.rel.label} secondary={col.rel.secondary} value={(val as string) || null} valueLabel={lbl} onChange={(id, l) => onVal(id, l)} placeholder={col.label}
+        addNewLabel={col.rel.table === "partners_v2" ? "เพิ่มผู้ขายใหม่" : undefined}
+        onAddNew={col.rel.table === "partners_v2" ? (typed: string) => setNewSupplier({ name: typed, apply: (id: string, l: string) => onVal(id, l) }) : undefined} />;
     if (col.type === "boolean")
       return <input type="checkbox" checked={!!val} onChange={(e) => onVal(e.target.checked)} className="h-4 w-4 accent-blue-600" />;
     if (col.type === "number")
@@ -522,7 +540,9 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
             <label className="block"><span className="text-xs text-slate-500">หน่วย (Uom)</span>
               <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => setSV("uom_id", id, lbl)} placeholder="เลือกหน่วย" /></div></label>
             <label className="block"><span className="text-xs text-slate-500">ผู้ขาย</span>
-              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="partners_v2" label="name_th" secondary="code" pinned={sellerPins} value={(single.values.seller_partner_id as string) ?? null} valueLabel={single.labels.seller_partner_id} onChange={(id, lbl) => setSV("seller_partner_id", id, lbl)} placeholder="เลือกผู้ขาย" /></div></label>
+              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="partners_v2" label="name_th" secondary="code" pinned={sellerPins} value={(single.values.seller_partner_id as string) ?? null} valueLabel={single.labels.seller_partner_id} onChange={(id, lbl) => setSV("seller_partner_id", id, lbl)} placeholder="เลือกผู้ขาย"
+                addNewLabel="เพิ่มผู้ขายใหม่"
+                onAddNew={(typed: string) => setNewSupplier({ name: typed, apply: (id: string, lbl: string) => setSV("seller_partner_id", id, lbl) })} /></div></label>
             <label className="block"><span className="text-xs text-slate-500">ราคาซื้อ</span>
               <input type="number" step="any" value={(single.values.standard_price as string) ?? ""} onChange={(e) => setSV("standard_price", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" />
               <span className="block text-[10px] text-slate-400 mt-0.5">คำนวณจาก ราคาซื้อหยวน × {rmbRate} (แก้ทับเองได้)</span></label>
@@ -618,6 +638,12 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
 
       {/* ป๊อปจัดการรหัสนำหน้า (ของกลาง) — ปิดแล้วโหลดประเภทใหม่ */}
       {prefixMgr && <SkuPrefixManager onClose={() => { setPrefixMgr(false); loadTags(); }} />}
+      {/* เพิ่มผู้ขายใหม่โดยไม่ต้องออกจากฟอร์ม — ของกลาง SupplierWizard (partners_v2) */}
+      {newSupplier && (
+        <SupplierWizard role="supplier" initialName={newSupplier.name}
+          onClose={() => setNewSupplier(null)}
+          onCreated={(pn) => { newSupplier.apply(pn.id, pn.name); setNewSupplier(null); toast.success(`เพิ่มผู้ขาย “${pn.name}” แล้ว`); }} />
+      )}
     </ERPModal>
   );
 }
