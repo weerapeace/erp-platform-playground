@@ -710,7 +710,8 @@ function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPo
             {has("status") && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{c.is_active ? "ใช้งาน" : "ปิด"}</span>}
           </div>
         )}
-        {has("name") && <p className="text-[12px] text-slate-700 mt-1" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.4em" }}>{c.name || "—"}</p>}
+        {/* การ์ดจำกัด 2 บรรทัดเพื่อให้สูงเท่ากัน — ชี้ที่ชื่อเพื่อดูเต็ม (มุมมองตารางแสดงเต็มอยู่แล้ว) */}
+        {has("name") && <p title={c.name || ""} className="text-[12px] text-slate-700 mt-1" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.4em" }}>{c.name || "—"}</p>}
         {c.variant_count != null ? (
           <div className="mt-1.5 text-[12px] text-indigo-600">📦 {c.variant_count.toLocaleString("th-TH")} ตัวลูก (SKU)</div>
         ) : showPriceRow ? (
@@ -737,13 +738,14 @@ function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPo
 
 // มุมมองตาราง — ใช้ข้อมูลชุดเดียวกับการ์ด (filter/sort/เลือก เหมือนกัน)
 // หัวคอลัมน์ที่กดเรียงได้ — เรียงที่เซิร์ฟเวอร์ (ครบทุกหน้า ไม่ใช่แค่หน้าที่เห็น) · กดซ้ำ = สลับน้อย→มาก/มาก→น้อย
-function SortTh({ label, ascKey, descKey, sortKey, onSort, align = "left" }: {
+function SortTh({ label, ascKey, descKey, sortKey, onSort, align = "left", className = "" }: {
   label: string; ascKey: string; descKey: string; sortKey: string; onSort: (k: string) => void; align?: "left" | "right";
+  className?: string;
 }) {
   const asc = sortKey === ascKey, desc = sortKey === descKey;
   const on = asc || desc;
   return (
-    <th className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : ""}`}>
+    <th className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : ""} ${className}`}>
       <button type="button" onClick={() => onSort(asc ? descKey : ascKey)} title={`เรียงตาม${label}`}
         className={`inline-flex items-center gap-1 hover:text-slate-800 ${on ? "text-indigo-600 font-semibold" : ""} ${align === "right" ? "flex-row-reverse" : ""}`}>
         {label}<span className={`text-[10px] ${on ? "" : "text-slate-300"}`}>{asc ? "▲" : desc ? "▼" : "⇅"}</span>
@@ -764,7 +766,7 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
             <th className="px-2 py-2 w-8"></th>
             <th className="px-2 py-2 w-12">รูป</th>
             <SortTh label="รหัส" ascKey="code" descKey="code_desc" sortKey={sortKey} onSort={onSort} />
-            <SortTh label="ชื่อ" ascKey="name" descKey="name_desc" sortKey={sortKey} onSort={onSort} />
+            <SortTh label="ชื่อ" ascKey="name" descKey="name_desc" sortKey={sortKey} onSort={onSort} className="w-full" />
             <SortTh label="ราคาขาย" ascKey="price_asc" descKey="price_desc" sortKey={sortKey} onSort={onSort} align="right" />
             <th className="px-3 py-2 font-medium text-right">สต๊อก</th>
             <th className="px-3 py-2 font-medium">แท็ก</th>
@@ -788,7 +790,7 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
                     : <div className="w-9 h-9 rounded bg-slate-100 flex items-center justify-center text-slate-300 text-xs">—</div>}
                 </td>
                 <td className="px-3 py-1.5 font-mono text-[12px] whitespace-nowrap">{c.code}</td>
-                <td className="px-3 py-1.5"><span className="block max-w-[260px] truncate">{c.name || "—"}</span></td>
+                <td className="px-3 py-1.5"><span className="block whitespace-normal break-words leading-snug min-w-[16rem]">{c.name || <span className="text-slate-300">—</span>}</span></td>
                 <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{c.list_price != null && c.list_price > 0 ? `฿${Number(c.list_price).toLocaleString("th-TH")}` : "—"}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-slate-500 whitespace-nowrap">{c.qty_on_hand != null ? Number(c.qty_on_hand).toLocaleString("th-TH") : "—"}</td>
                 <td className="px-3 py-1.5">
