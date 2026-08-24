@@ -137,6 +137,17 @@ export default function BillingNotesPage() {
 
   const pickedTotal = useMemo(() => picked.reduce((s, p) => s + p.grand_total, 0), [picked]);
 
+  // ยอดใบลดหนี้ที่หักจากบิลที่เปิดดูอยู่ (แยกก่อน VAT / VAT / รวม) — ใช้ทั้งในตารางรายการและยอดสรุป
+  const { creditSub, creditVat, creditTotal } = useMemo(() => {
+    const list = detail?.credit_notes ?? [];
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    return {
+      creditSub:   r2(list.reduce((sum, c) => sum + c.diff_amount, 0)),
+      creditVat:   r2(list.reduce((sum, c) => sum + c.vat_amount, 0)),
+      creditTotal: r2(list.reduce((sum, c) => sum + c.grand_total, 0)),
+    };
+  }, [detail]);
+
   const save = async () => {
     if (picked.length === 0) { setFormErr("เลือกใบกำกับภาษีอย่างน้อย 1 ใบ"); return; }
     if (!customer) { setFormErr("ไม่พบลูกค้า — เลือกใบกำกับภาษีก่อน"); return; }
@@ -402,46 +413,32 @@ export default function BillingNotesPage() {
                       <td className="px-3 py-2 text-right font-mono tabular-nums font-semibold">{baht(l.total_amount)}</td>
                     </tr>
                   ))}
+                  {/* ใบลดหนี้ = บรรทัดติดลบต่อท้าย (ให้เหมือนใบที่พิมพ์ออกมา) */}
+                  {(detail.credit_notes ?? []).map((c, i) => (
+                    <tr key={c.id} className="bg-red-50/50 text-red-700">
+                      <td className="px-3 py-2 text-center font-mono text-xs">{detail.lines.length + i + 1}</td>
+                      <td className="px-3 py-2">
+                        <code className="font-mono text-xs">{c.cn_number ?? "ใบลดหนี้"}</code>
+                        <span className="block text-[10px] opacity-80">ลดหนี้ {c.ref_invoice_no ?? "—"}{c.reason ? ` · ${c.reason}` : ""}</span>
+                      </td>
+                      <td className="px-3 py-2">{formatDate(c.cn_date)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">-{baht(c.diff_amount)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">-{baht(c.vat_amount)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums font-semibold">-{baht(c.grand_total)}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 grid grid-cols-2 gap-x-6 gap-y-1 text-sm max-w-md ml-auto">
-              <Row label="จำนวนเงิน" value={baht(detail.subtotal)} />
-              <Row label="ภาษีมูลค่าเพิ่ม" value={baht(detail.total_vat)} />
+              <Row label="จำนวนเงิน" value={baht(detail.subtotal - creditSub)} />
+              <Row label="ภาษีมูลค่าเพิ่ม" value={baht(detail.total_vat - creditVat)} />
+              <Row label="จำนวนเงินทั้งสิ้น" value={baht(detail.grand_total - creditTotal)} />
               <Row label="หัก ณ ที่จ่าย" value={baht(detail.total_wht)} />
-              {Number(detail.credit_total ?? 0) > 0 && (
-                <Row label="หักใบลดหนี้" value={"−" + baht(detail.credit_total ?? 0)} />
-              )}
               <Row label="จำนวนเงินที่ชำระ" value={baht(detail.net_amount_due ?? detail.amount_due)} bold />
             </div>
 
-            {/* ใบลดหนี้ที่หักจากบิลนี้ — ออกใบลดหนี้ทีหลังก็มาโผล่เอง */}
-            {(detail.credit_notes ?? []).length > 0 && (
-              <div className="rounded-xl border border-red-200 bg-red-50/40 p-3">
-                <h3 className="text-sm font-semibold text-red-800 mb-2">🧾➖ ใบลดหนี้ที่หักจากบิลนี้</h3>
-                <table className="w-full text-sm">
-                  <thead className="text-[11px] uppercase text-slate-500">
-                    <tr className="border-b border-red-200">
-                      <th className="px-2 py-1 text-left font-semibold">เลขที่</th>
-                      <th className="px-2 py-1 text-left font-semibold">อ้างอิงใบกำกับ</th>
-                      <th className="px-2 py-1 text-left font-semibold">เหตุผล</th>
-                      <th className="px-2 py-1 text-right font-semibold">ยอดหัก</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-red-100">
-                    {(detail.credit_notes ?? []).map(c => (
-                      <tr key={c.id}>
-                        <td className="px-2 py-1.5"><code className="font-mono text-xs text-slate-700">{c.cn_number ?? "—"}</code></td>
-                        <td className="px-2 py-1.5"><code className="font-mono text-xs text-slate-500">{c.ref_invoice_no ?? "—"}</code></td>
-                        <td className="px-2 py-1.5 text-xs text-slate-600">{c.reason ?? "—"}</td>
-                        <td className="px-2 py-1.5 text-right font-mono tabular-nums text-red-700">−{baht(c.grand_total)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
             {detail.note && <p className="text-sm text-slate-500">หมายเหตุ: {detail.note}</p>}
           </div>
         )}

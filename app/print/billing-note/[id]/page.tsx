@@ -29,6 +29,17 @@ const thaiShort = (iso: string | null | undefined) => {
 };
 
 function buildData(b: BillingNoteExt): Record<string, unknown> {
+  // ใบลดหนี้ → แสดงเป็น "บรรทัดติดลบ" ต่อท้ายรายการบิล แล้วรวมเข้ายอดสรุปเลย
+  // (เจ้าของสั่ง: ให้ขึ้นเป็นลำดับในตาราง + รวมยอดให้เสร็จ ไม่ต้องมีบรรทัดหักแยกท้ายใบ)
+  const credits = b.credit_notes ?? [];
+  const creditSub   = credits.reduce((sum, c) => sum + c.diff_amount, 0);
+  const creditVat   = credits.reduce((sum, c) => sum + c.vat_amount, 0);
+  const creditTotal = credits.reduce((sum, c) => sum + c.grand_total, 0);
+  const netSubtotal = Math.round((b.subtotal - creditSub) * 100) / 100;
+  const netVat      = Math.round((b.total_vat - creditVat) * 100) / 100;
+  const netGrand    = Math.round((b.grand_total - creditTotal) * 100) / 100;
+  const netDue      = Math.round((b.amount_due - creditTotal) * 100) / 100;
+
   return {
     bill_number:      b.bill_number ?? "(ยังไม่ออกเลข)",
     bill_date:        thaiShort(b.bill_date),
@@ -36,28 +47,38 @@ function buildData(b: BillingNoteExt): Record<string, unknown> {
     customer_name:    b.customer_name ?? "—",
     customer_address: b.customer_address ?? "",
     customer_tax_id:  b.customer_tax_id ?? "",
-    subtotal:         baht(b.subtotal),
-    total_vat:        baht(b.total_vat),
+    // ยอดสรุปหักใบลดหนี้ไปแล้วทุกบรรทัด (ตัวเลขจึงตรงกับรายการในตาราง)
+    subtotal:         baht(netSubtotal),
+    total_vat:        baht(netVat),
     total_wht:        baht(b.total_wht),
     has_wht:          b.total_wht > 0 ? "1" : "",
-    grand_total:      baht(b.grand_total),
-    amount_due:       baht(b.amount_due),
-    // หักใบลดหนี้ที่ออกให้ใบกำกับในบิลนี้ — ยอดที่ลูกค้าต้องจ่ายจริงคือหลังหักแล้ว
-    has_credit:       Number(b.credit_total ?? 0) > 0 ? "1" : "",
-    credit_total:     baht(b.credit_total ?? 0),
-    credit_numbers:   (b.credit_notes ?? []).map(c => c.cn_number).filter(Boolean).join(", "),
-    net_amount_due:   baht(b.net_amount_due ?? b.amount_due),
-    amount_in_words:  thaiBahtText(Number(b.net_amount_due ?? b.amount_due)),
-    lines: b.lines.map((l, i) => ({
-      idx:          i + 1,
-      so_number:    l.so_number ?? "",
-      bill_date:    thaiShort(l.bill_date),
-      due_date:     thaiShort(l.due_date),
-      amount:       baht(l.amount),
-      vat_amount:   baht(l.vat_amount),
-      total_amount: baht(l.total_amount),
-      note:         l.note ?? "",
-    })),
+    grand_total:      baht(netGrand),
+    amount_due:       baht(netDue),
+    net_amount_due:   baht(netDue),
+    amount_in_words:  thaiBahtText(netDue),
+    lines: [
+      ...b.lines.map((l, i) => ({
+        idx:          i + 1,
+        so_number:    l.so_number ?? "",
+        bill_date:    thaiShort(l.bill_date),
+        due_date:     thaiShort(l.due_date),
+        amount:       baht(l.amount),
+        vat_amount:   baht(l.vat_amount),
+        total_amount: baht(l.total_amount),
+        note:         l.note ?? "",
+      })),
+      // บรรทัดใบลดหนี้ (ยอดติดลบ) — ต่อลำดับจากรายการบิล
+      ...credits.map((c, i) => ({
+        idx:          b.lines.length + i + 1,
+        so_number:    c.cn_number ?? "ใบลดหนี้",
+        bill_date:    thaiShort(c.cn_date),
+        due_date:     "",
+        amount:       baht(-c.diff_amount),
+        vat_amount:   baht(-c.vat_amount),
+        total_amount: baht(-c.grand_total),
+        note:         c.ref_invoice_no ? `ลดหนี้ ${c.ref_invoice_no}` : "ใบลดหนี้",
+      })),
+    ],
   };
 }
 
