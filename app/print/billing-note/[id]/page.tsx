@@ -42,7 +42,12 @@ function buildData(b: BillingNoteExt): Record<string, unknown> {
     has_wht:          b.total_wht > 0 ? "1" : "",
     grand_total:      baht(b.grand_total),
     amount_due:       baht(b.amount_due),
-    amount_in_words:  thaiBahtText(b.amount_due),
+    // หักใบลดหนี้ที่ออกให้ใบกำกับในบิลนี้ — ยอดที่ลูกค้าต้องจ่ายจริงคือหลังหักแล้ว
+    has_credit:       Number(b.credit_total ?? 0) > 0 ? "1" : "",
+    credit_total:     baht(b.credit_total ?? 0),
+    credit_numbers:   (b.credit_notes ?? []).map(c => c.cn_number).filter(Boolean).join(", "),
+    net_amount_due:   baht(b.net_amount_due ?? b.amount_due),
+    amount_in_words:  thaiBahtText(Number(b.net_amount_due ?? b.amount_due)),
     lines: b.lines.map((l, i) => ({
       idx:          i + 1,
       so_number:    l.so_number ?? "",

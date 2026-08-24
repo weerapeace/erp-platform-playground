@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { creditNotesForSoIds, sumCredit, type LinkedCreditNote } from "@/lib/credit-note-link";
 
 // ---- Types ----
 
@@ -31,6 +32,10 @@ export type BillingNoteListItem = {
   created_at:    string;
   updated_at:    string;
   total_count:   number;
+  /** ยอดใบลดหนี้ที่หักจากบิลนี้ (รวม VAT) — คิดสด ๆ ตอนอ่าน เพราะออกใบลดหนี้ทีหลังได้ */
+  credit_total?:   number;
+  /** ยอดที่ต้องเก็บจริงหลังหักใบลดหนี้ */
+  net_amount_due?: number;
 };
 
 export type BillingNoteDetail = Omit<BillingNoteListItem, "line_count" | "total_count"> & {
@@ -46,6 +51,10 @@ export type BillingNoteDetail = Omit<BillingNoteListItem, "line_count" | "total_
   customer_phone?:   string | null;
   customer_tax_id?:  string | null;
   lines:         BillingNoteLine[];
+  /** ใบลดหนี้ที่หักจากบิลนี้ (เฉพาะที่ออกเอกสารแล้ว) */
+  credit_notes?:   LinkedCreditNote[];
+  credit_total?:   number;
+  net_amount_due?: number;
 };
 
 export type BillingNoteListResponse = { data: BillingNoteListItem[]; total: number; error: string | null };
@@ -64,7 +73,29 @@ export async function GET(request: NextRequest) {
   });
   if (error) return NextResponse.json({ data: [], total: 0, error: error.message } satisfies BillingNoteListResponse, { status: 500 });
   const rows = (data as BillingNoteListItem[]) ?? [];
-  return NextResponse.json({ data: rows, total: Number(rows[0]?.total_count ?? 0), error: null } satisfies BillingNoteListResponse);
+
+  // หักใบลดหนี้: หา SO ของแต่ละบิล → หาใบลดหนี้ที่ผูกกับ SO เหล่านั้น → หักออกจากยอดที่ต้องเก็บ
+  const client = supabaseFromRequest(request);
+  const billIds = rows.map(r => r.id);
+  const soByBill = new Map<string, string[]>();
+  for (let i = 0; i < billIds.length; i += 200) {
+    const { data: bl } = await client.from("erp_playground_billing_note_lines")
+      .select("billing_note_id, so_id").in("billing_note_id", billIds.slice(i, i + 200));
+    for (const l of (bl ?? []) as Record<string, unknown>[]) {
+      const k = String(l.billing_note_id);
+      const so = String(l.so_id ?? "");
+      if (!so) continue;
+      soByBill.set(k, [...(soByBill.get(k) ?? []), so]);
+    }
+  }
+  const creditBySo = await creditNotesForSoIds(client, [...soByBill.values()].flat());
+  const withCredit = rows.map(r => {
+    const credit = (soByBill.get(r.id) ?? []).flatMap(so => creditBySo.get(so) ?? []);
+    const total = sumCredit(credit);
+    return { ...r, credit_total: total, net_amount_due: Math.round((r.amount_due - total) * 100) / 100 };
+  });
+
+  return NextResponse.json({ data: withCredit, total: Number(rows[0]?.total_count ?? 0), error: null } satisfies BillingNoteListResponse);
 }
 
 // ---- POST — create จาก SO ที่เลือก ----

@@ -189,6 +189,18 @@ export default function BillingNotesPage() {
       cell: ({ getValue }) => { const s = getValue() as string; return <span className={`text-xs px-2 py-0.5 rounded ${STATUS_STYLE[s] ?? "bg-slate-100"}`}>{STATUS_LABEL[s] ?? s}</span>; },
     },
     { id: "grand_total", accessorKey: "grand_total", header: "ยอดรวม", size: 130, cell: ({ getValue }) => <span className="tabular-nums font-mono block text-right">{baht(getValue() as number)}</span> },
+    // ยอดที่ต้องเก็บจริง = ยอดรวม − ใบลดหนี้ที่ออกให้ใบกำกับในบิลนี้
+    { id: "net_amount_due", accessorKey: "net_amount_due", header: "ยอดที่ต้องเก็บ", size: 150,
+      cell: ({ row }) => {
+        const credit = Number(row.original.credit_total ?? 0);
+        const net = Number(row.original.net_amount_due ?? row.original.amount_due ?? 0);
+        return (
+          <span className="block text-right">
+            <span className="tabular-nums font-mono font-semibold">{baht(net)}</span>
+            {credit > 0 && <span className="block text-[10px] text-red-600">หักใบลดหนี้ −{baht(credit)}</span>}
+          </span>
+        );
+      } },
     { id: "bill_date", accessorKey: "bill_date", header: "วันที่", size: 110, cell: ({ getValue }) => <span>{formatDate(getValue())}</span> },
     { id: "due_date", accessorKey: "due_date", header: "กำหนดชำระ", size: 110, cell: ({ getValue }) => <span>{formatDate(getValue())}</span> },
     { id: "line_count", accessorKey: "line_count", header: "จำนวนบิล", size: 90, cell: ({ getValue }) => <span className="text-xs text-slate-500">{getValue() as number}</span> },
@@ -398,8 +410,38 @@ export default function BillingNotesPage() {
               <Row label="จำนวนเงิน" value={baht(detail.subtotal)} />
               <Row label="ภาษีมูลค่าเพิ่ม" value={baht(detail.total_vat)} />
               <Row label="หัก ณ ที่จ่าย" value={baht(detail.total_wht)} />
-              <Row label="จำนวนเงินที่ชำระ" value={baht(detail.amount_due)} bold />
+              {Number(detail.credit_total ?? 0) > 0 && (
+                <Row label="หักใบลดหนี้" value={"−" + baht(detail.credit_total ?? 0)} />
+              )}
+              <Row label="จำนวนเงินที่ชำระ" value={baht(detail.net_amount_due ?? detail.amount_due)} bold />
             </div>
+
+            {/* ใบลดหนี้ที่หักจากบิลนี้ — ออกใบลดหนี้ทีหลังก็มาโผล่เอง */}
+            {(detail.credit_notes ?? []).length > 0 && (
+              <div className="rounded-xl border border-red-200 bg-red-50/40 p-3">
+                <h3 className="text-sm font-semibold text-red-800 mb-2">🧾➖ ใบลดหนี้ที่หักจากบิลนี้</h3>
+                <table className="w-full text-sm">
+                  <thead className="text-[11px] uppercase text-slate-500">
+                    <tr className="border-b border-red-200">
+                      <th className="px-2 py-1 text-left font-semibold">เลขที่</th>
+                      <th className="px-2 py-1 text-left font-semibold">อ้างอิงใบกำกับ</th>
+                      <th className="px-2 py-1 text-left font-semibold">เหตุผล</th>
+                      <th className="px-2 py-1 text-right font-semibold">ยอดหัก</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-red-100">
+                    {(detail.credit_notes ?? []).map(c => (
+                      <tr key={c.id}>
+                        <td className="px-2 py-1.5"><code className="font-mono text-xs text-slate-700">{c.cn_number ?? "—"}</code></td>
+                        <td className="px-2 py-1.5"><code className="font-mono text-xs text-slate-500">{c.ref_invoice_no ?? "—"}</code></td>
+                        <td className="px-2 py-1.5 text-xs text-slate-600">{c.reason ?? "—"}</td>
+                        <td className="px-2 py-1.5 text-right font-mono tabular-nums text-red-700">−{baht(c.grand_total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {detail.note && <p className="text-sm text-slate-500">หมายเหตุ: {detail.note}</p>}
           </div>
         )}

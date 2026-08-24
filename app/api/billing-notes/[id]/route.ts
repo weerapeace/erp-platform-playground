@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { formatThaiAddress, formatTaxId } from "@/lib/thai-address";
+import { creditNotesForSoIds, sumCredit } from "@/lib/credit-note-link";
 
 const firstText = (...values: unknown[]) => {
   for (const value of values) {
@@ -35,9 +36,21 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_billing_note_get", { p_id: id });
+  const client = supabaseFromRequest(request);
+  const { data, error } = await client.rpc("erp_playground_billing_note_get", { p_id: id });
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
-  const enriched = await enrichCustomer(request, data);
+  const enriched = await enrichCustomer(request, data) as Record<string, unknown> | null;
+
+  // หักใบลดหนี้ของใบกำกับที่อยู่ในบิลนี้ (คิดสดตอนอ่าน — ออกใบลดหนี้หลังวางบิลได้)
+  if (enriched) {
+    const lines = (enriched.lines ?? []) as { so_id: string | null }[];
+    const creditBySo = await creditNotesForSoIds(client, lines.map(l => String(l.so_id ?? "")));
+    const credit = [...creditBySo.values()].flat();
+    const total = sumCredit(credit);
+    enriched.credit_notes = credit;
+    enriched.credit_total = total;
+    enriched.net_amount_due = Math.round((Number(enriched.amount_due ?? 0) - total) * 100) / 100;
+  }
   return NextResponse.json({ data: enriched, error: null });
 }
 
