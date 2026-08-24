@@ -163,7 +163,7 @@ function buyRmbWithThb(thb: number, r1: number): { tierIdx: number; rate: number
   return { tierIdx: 0, rate: r1, rmb: thb / r1 };
 }
 
-type Tab = "dashboard" | "bill" | "transfer" | "transfers" | "all" | "rate" | "ctw" | "automation" | "menusettings";
+type Tab = "dashboard" | "bill" | "transfer" | "transfers" | "all" | "rate" | "ctw" | "suppliers" | "automation" | "menusettings";
 
 // บันทึกรูปลงเครื่อง — บน iPhone ใช้ share sheet (Save Image เข้า Photos, ไม่เปิดแท็บใหม่)
 // บน desktop ใช้ <a download> ปกติ (โหลดไฟล์ลงเครื่อง ไม่เปิดแท็บใหม่)
@@ -268,6 +268,7 @@ const MENU: { k: Tab; icon: string; label: string }[] = [
   { k: "all", icon: "📋", label: "บิลจีนทั้งหมด" },
   { k: "rate", icon: "💱", label: "เรท" },
   { k: "ctw", icon: "📑", label: "บิลจาก CTW" },
+  { k: "suppliers", icon: "🏪", label: "ร้านค้าจีน" },
   { k: "automation", icon: "🤖", label: "กฎอัตโนมัติ" },
 ];
 const ALL_TAB_KEYS = MENU.map(m => m.k);
@@ -436,6 +437,7 @@ export default function ChinaPayApp() {
           {renderTab === "all" && <AllList canDelete={canManage} />}
           {renderTab === "rate" && <RateTab />}
           {renderTab === "ctw" && <CtwList canDelete={canManage} />}
+          {renderTab === "suppliers" && <SupplierList canManage={canManage} />}
           {renderTab === "transfer" && <TransferPage preselect={preselect} onConsumePreselect={() => setPreselect([])} />}
           {renderTab === "transfers" && <TransferList canDelete={canManage} onGo={go} />}
           {renderTab === "automation" && <AutomationPage />}
@@ -2170,6 +2172,205 @@ function RateTab() {
 }
 
 // ---------------- บิลจาก CTW ----------------
+// ---------------- 🏪 ร้านค้าจีน (จัดการ Supplier) ----------------
+// เพิ่ม/แก้ร้านจีนได้จากในแอปเลย ไม่ต้องออกไปหน้า Master Data
+// ★ ร้านที่สร้างจากหน้านี้ตั้ง shop_country="จีน" + is_supplier=true ให้อัตโนมัติ
+//   → โผล่ในช่องเลือกร้านของหน้า "ลงบิล" ทันที (SUPPLIER_CFG กรอง shop_country=จีน)
+// ★ ช่องบัญชี/ธนาคาร/เบอร์ = ชุดเดียวกับที่พิมพ์ลงใบสรุปการโอน
+type ShopForm = {
+  name_th: string; name_en: string; bank_account_name: string; account_number: string;
+  bank_name_brief: string; phone: string; wechat_id: string; notes: string; is_active: boolean;
+};
+const emptyShop = (): ShopForm => ({
+  name_th: "", name_en: "", bank_account_name: "", account_number: "",
+  bank_name_brief: "", phone: "", wechat_id: "", notes: "", is_active: true,
+});
+const shopFromRow = (r: Record<string, unknown>): ShopForm => ({
+  name_th: String(r.name_th ?? ""), name_en: String(r.name_en ?? ""),
+  bank_account_name: String(r.bank_account_name ?? ""), account_number: String(r.account_number ?? ""),
+  bank_name_brief: String(r.bank_name_brief ?? ""), phone: String(r.phone ?? ""),
+  wechat_id: String(r.wechat_id ?? ""), notes: String(r.notes ?? ""), is_active: r.is_active !== false,
+});
+const SHOP_SEARCH_FIELDS = ["name_th", "name_en", "account_number", "bank_account_name", "bank_name_brief", "phone"];
+
+function SupplierList({ canManage }: { canManage?: boolean }) {
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+  const [edit, setEdit] = useState<Record<string, unknown> | "new" | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    // ดึงคู่ค้าทั้งหมด (ราว 200 แถว) แล้วกรอง "ร้านจีน" ฝั่งหน้าเว็บ — ชัวร์กว่าพึ่ง filter ฝั่ง API
+    apiFetch("/api/master-v2/partners?limit=500&sort_by=name_th&sort_dir=asc").then(r => r.json())
+      .then(j => setRows(((j.data ?? []) as Record<string, unknown>[]).filter(r => String(r.shop_country ?? "") === "จีน")))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(load, [load]);
+
+  const noAcct = rows.filter(r => !String(r.account_number ?? "").trim()).length;
+  const kw = q.trim().toLowerCase();
+  const shown = kw
+    ? rows.filter(r => SHOP_SEARCH_FIELDS.some(f => String(r[f] ?? "").toLowerCase().includes(kw)))
+    : rows;
+
+  if (edit) return (
+    <SupplierForm shop={edit === "new" ? null : edit} canManage={canManage}
+      onCancel={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />
+  );
+
+  return (
+    <div className="space-y-3">
+      <Card>
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="font-semibold text-slate-800">ร้านค้าจีน {rows.length} ร้าน</div>
+            <div className="text-xs mt-0.5">
+              {noAcct > 0
+                ? <span className="text-amber-600">⚠️ ยังไม่ใส่เลขบัญชี {noAcct} ร้าน</span>
+                : <span className="text-emerald-600">ใส่เลขบัญชีครบทุกร้าน</span>}
+            </div>
+          </div>
+          <button onClick={() => setEdit("new")}
+            className="h-11 px-4 rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-white font-medium shadow-md shadow-orange-500/30 active:scale-95 transition flex-shrink-0">
+            ➕ เพิ่มร้าน
+          </button>
+        </div>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาชื่อร้าน / เลขบัญชี / เบอร์…"
+          className="w-full h-11 px-3 mt-3 text-base border border-slate-200 rounded-lg" />
+      </Card>
+
+      {loading ? <Card><div className="text-center text-slate-400 py-6">กำลังโหลด…</div></Card>
+        : shown.length === 0 ? <Card><div className="text-center text-slate-400 py-6">{kw ? "ไม่พบร้านที่ค้นหา" : "ยังไม่มีร้านจีน — กด ➕ เพิ่มร้าน"}</div></Card>
+        : shown.map(r => {
+          const acct = String(r.account_number ?? "").trim();
+          const off = r.is_active === false;
+          return (
+            <Card key={String(r.id)}>
+              <button onClick={() => setEdit(r)} className="w-full text-left flex justify-between items-start gap-3">
+                <div className="min-w-0">
+                  <div className={off ? "font-medium truncate text-slate-400 line-through" : "font-medium truncate text-slate-800"}>{String(r.name_th ?? "—")}</div>
+                  {!!String(r.name_en ?? "") && <div className="text-xs text-slate-400 truncate">{String(r.name_en)}</div>}
+                  <div className="text-xs mt-1 truncate">
+                    {acct
+                      ? <span className="text-slate-500">{String(r.bank_name_brief ?? "")} {acct}</span>
+                      : <span className="text-amber-600 font-medium">⚠️ ยังไม่ใส่เลขบัญชี</span>}
+                  </div>
+                </div>
+                <span className="text-slate-300 text-lg flex-shrink-0">›</span>
+              </button>
+            </Card>
+          );
+        })}
+    </div>
+  );
+}
+
+function SupplierForm({ shop, canManage, onCancel, onSaved }:
+  { shop: Record<string, unknown> | null; canManage?: boolean; onCancel: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const celebrate = useCelebrate();
+  const isEdit = !!shop;
+  const [f, setF] = useState<ShopForm>(() => (shop ? shopFromRow(shop) : emptyShop()));
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof ShopForm, v: string | boolean) => setF(p => ({ ...p, [k]: v }));
+  const txtCls = "w-full h-11 px-3 text-base border border-slate-200 rounded-lg";
+
+  const save = async () => {
+    if (!f.name_th.trim()) { toast.error("กรอกชื่อร้านก่อน"); return; }
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        name_th: f.name_th.trim(),
+        name_en: f.name_en.trim() || null,
+        phone: f.phone.trim() || null,
+        wechat_id: f.wechat_id.trim() || null,
+        notes: f.notes.trim() || null,
+        is_active: f.is_active,
+        actor: "china-app",
+      };
+      // ★ ช่องบัญชีธนาคารตั้ง view_roles = admin/manager ในทะเบียนฟิลด์ → role อื่นอ่านค่ามาเป็นว่าง
+      //   ถ้าส่งกลับไปด้วยจะเขียนทับของจริงเป็นว่าง (edit_roles ไม่ได้ตั้ง = ไม่ถูกกันตอนเขียน)
+      //   → ส่งเฉพาะคนที่เห็นข้อมูลจริงเท่านั้น
+      if (canManage) {
+        body.bank_account_name = f.bank_account_name.trim() || null;
+        body.account_number = f.account_number.trim() || null;
+        body.bank_name_brief = f.bank_name_brief.trim() || null;
+      }
+      // ร้านใหม่: ติดธง "ร้านจีน" + "เป็นผู้ขาย" ให้เอง ไม่งั้นจะไม่โผล่ในช่องเลือกร้านของหน้าลงบิล
+      if (!isEdit) { body.shop_country = "จีน"; body.is_supplier = true; }
+      const url = isEdit ? "/api/master-v2/partners/" + String(shop!.id) : "/api/master-v2/partners";
+      const res = await apiFetch(url, {
+        method: isEdit ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const j = await res.json();
+      if (j.error) { toast.error(j.error); return; }
+      celebrate(isEdit ? "แก้ไขร้านแล้ว" : "เพิ่มร้านแล้ว");
+      onSaved();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <Label>ชื่อร้าน (ที่เราเรียกกัน) *</Label>
+        <input value={f.name_th} onChange={e => set("name_th", e.target.value)} placeholder="เช่น ร้านผ้าแคนวาสเมืองจีน YOU BANG" className={txtCls} />
+        <div className="mt-3"><Label>ชื่ออังกฤษ / พินอิน (ไม่บังคับ)</Label>
+          <input value={f.name_en} onChange={e => set("name_en", e.target.value)} placeholder="เช่น YOU BANG" className={txtCls} /></div>
+        <div className="mt-3"><Label>เบอร์โทร</Label>
+          <input value={f.phone} onChange={e => set("phone", e.target.value)} placeholder="เบอร์ติดต่อร้าน" className={txtCls} /></div>
+      </Card>
+
+      {!canManage ? (
+        <Card><div className="text-sm text-slate-500">🔒 ข้อมูลบัญชีธนาคารของร้าน ดูและแก้ไขได้เฉพาะแอดมินกับผู้จัดการ</div></Card>
+      ) : (
+      <Card>
+        <div className="text-sm font-semibold text-slate-700">บัญชีสำหรับโอนเงิน</div>
+        <div className="text-xs text-slate-400 mb-3 mt-0.5">ข้อมูลชุดนี้จะถูกพิมพ์ลงในใบสรุปการโอน</div>
+        <Label>ชื่อบัญชี</Label>
+        <input value={f.bank_account_name} onChange={e => set("bank_account_name", e.target.value)} placeholder="ชื่อผู้รับเงิน" className={txtCls} />
+        <div className="mt-3"><Label>เลขบัญชี</Label>
+          <input value={f.account_number} onChange={e => set("account_number", e.target.value)} placeholder="เลขที่บัญชีปลายทาง" className={txtCls} /></div>
+        <div className="mt-3"><Label>ธนาคาร (ตัวย่อ)</Label>
+          <input value={f.bank_name_brief} onChange={e => set("bank_name_brief", e.target.value)} placeholder="เช่น ICBC / ABC" className={txtCls} /></div>
+      </Card>
+      )}
+
+      <Card>
+        <Label>WeChat (ไม่บังคับ)</Label>
+        <input value={f.wechat_id} onChange={e => set("wechat_id", e.target.value)} placeholder="WeChat ID" className={txtCls} />
+        <div className="mt-3"><Label>หมายเหตุ</Label>
+          <textarea value={f.notes} onChange={e => set("notes", e.target.value)} rows={2} placeholder="โน้ตภายใน เช่น ขายผ้าอะไร ติดต่อใคร"
+            className="w-full px-3 py-2 text-base border border-slate-200 rounded-lg" /></div>
+        {isEdit && canManage && (
+          <>
+            <button type="button" onClick={() => set("is_active", !f.is_active)}
+              className={f.is_active
+                ? "mt-3 w-full h-11 rounded-lg border text-sm font-medium transition border-emerald-300 bg-emerald-50 text-emerald-700"
+                : "mt-3 w-full h-11 rounded-lg border text-sm font-medium transition border-slate-200 text-slate-400"}>
+              {f.is_active ? "✅ เปิดใช้งานอยู่ (แตะเพื่อปิด)" : "⛔ ปิดใช้งานอยู่ (แตะเพื่อเปิด)"}
+            </button>
+            {!f.is_active && (
+              <div className="mt-2 text-xs text-slate-400">ปิดแล้วยังเลือกได้อยู่ แต่จะขึ้นสีจาง ๆ พร้อมป้าย “ปิดอยู่” ในช่องเลือกร้าน · บิลเก่าไม่หาย</div>
+            )}
+          </>
+        )}
+      </Card>
+
+      <div className="flex gap-2 pb-2">
+        <button onClick={onCancel} disabled={saving}
+          className="flex-1 h-12 rounded-xl border border-slate-200 text-slate-600 font-medium disabled:opacity-50">ยกเลิก</button>
+        <button onClick={save} disabled={saving || !f.name_th.trim()}
+          className="flex-[2] h-12 rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-white font-semibold shadow-md shadow-orange-500/30 active:scale-95 transition disabled:opacity-40">
+          {saving ? "กำลังบันทึก…" : isEdit ? "บันทึกการแก้ไข" : "เพิ่มร้าน"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CtwList({ canDelete }: { canDelete?: boolean }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
