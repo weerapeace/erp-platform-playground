@@ -114,9 +114,9 @@ const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(
 
 // ค่าโอน (¥) ตามชั้นยอด
 const FEE_TABLE = [
-  { label: "1 – 4,999", fee: 3 }, { label: "5,000 – 9,999", fee: 5 },
-  { label: "10,000 – 29,999", fee: 10 }, { label: "30,000 – 49,999", fee: 30 },
-  { label: "50,000 ขึ้นไป", fee: 50 },
+  { label: "¥1 – 4,999", fee: 3 }, { label: "¥5,000 – 9,999", fee: 5 },
+  { label: "¥10,000 – 29,999", fee: 10 }, { label: "¥30,000 – 49,999", fee: 30 },
+  { label: "¥50,000 ขึ้นไป", fee: 50 },
 ];
 function feeFor(amt: number): number {
   if (amt <= 0) return 0;
@@ -127,17 +127,40 @@ function feeFor(amt: number): number {
   return 50;
 }
 // เรทตามชั้นยอด — กรอกแค่ R1, R2-R4 = R1 ลบส่วนต่างคงที่
+// ★ บันไดชั้นเรทนับเป็น "หยวน (¥)" ไม่ใช่บาท (ยืนยันกับร้านรับโอน 2026-08-24)
+//   เดิมโค้ดเอา "ยอดบาท" ไปเทียบบันได → โอนเกิน ฿5,000 (≈¥1,000) ก็ได้ R2 ทันที R1 แทบไม่เคยถูกใช้
 const RATE_OFFSET = { r2: 0.035, r3: 0.075, r4: 0.08 };
 const RATE_TABLE = [
-  { tier: "R1", label: "1 – 5,000", off: 0 }, { tier: "R2", label: "5,001 – 99,999", off: RATE_OFFSET.r2 },
-  { tier: "R3", label: "100,000 – 399,999", off: RATE_OFFSET.r3 }, { tier: "R4", label: "400,000 ขึ้นไป", off: RATE_OFFSET.r4 },
+  { tier: "R1", label: "¥1 – 5,000", off: 0 }, { tier: "R2", label: "¥5,001 – 99,999", off: RATE_OFFSET.r2 },
+  { tier: "R3", label: "¥100,000 – 399,999", off: RATE_OFFSET.r3 }, { tier: "R4", label: "¥400,000 ขึ้นไป", off: RATE_OFFSET.r4 },
 ];
-function rateFor(amt: number, r1: number): number {
+const TIER_NAMES = ["R1", "R2", "R3", "R4"];
+const TIER_MIN = [0, 5001, 100000, 400000];                                    // ¥ ขั้นต่ำของแต่ละชั้น
+const TIER_OFF = [0, RATE_OFFSET.r2, RATE_OFFSET.r3, RATE_OFFSET.r4];
+
+// รู้ "จำนวนหยวน" อยู่แล้ว → บอกชั้น/เรทได้ตรง ๆ
+function tierIdxForRmb(rmb: number): number {
+  if (rmb <= 5000) return 0;
+  if (rmb <= 99999) return 1;
+  if (rmb <= 399999) return 2;
+  return 3;
+}
+function rateForRmb(rmb: number, r1: number): number {
   if (!r1) return 0;
-  if (amt <= 5000) return r1;
-  if (amt <= 99999) return +(r1 - RATE_OFFSET.r2).toFixed(4);
-  if (amt <= 399999) return +(r1 - RATE_OFFSET.r3).toFixed(4);
-  return +(r1 - RATE_OFFSET.r4).toFixed(4);
+  const off = TIER_OFF[tierIdxForRmb(rmb)];
+  return off ? +(r1 - off).toFixed(4) : r1;
+}
+
+// รู้แค่ "จำนวนบาทที่โอน" → หาว่าซื้อหยวนได้เท่าไร (เรทขึ้นกับจำนวนหยวน = วนกันเอง)
+// วิธีตัด: ไล่จากชั้นสูงลงต่ำ ชั้นไหน "ใช้เรทชั้นนั้นแล้วซื้อหยวนได้ถึงขั้นต่ำของชั้นจริง" = ใช้ชั้นนั้น
+function buyRmbWithThb(thb: number, r1: number): { tierIdx: number; rate: number; rmb: number } {
+  if (!r1 || thb <= 0) return { tierIdx: 0, rate: r1 || 0, rmb: 0 };
+  for (let i = TIER_MIN.length - 1; i >= 1; i--) {
+    const rate = +(r1 - TIER_OFF[i]).toFixed(4);
+    const rmb = rate > 0 ? thb / rate : 0;
+    if (rmb >= TIER_MIN[i]) return { tierIdx: i, rate, rmb };
+  }
+  return { tierIdx: 0, rate: r1, rmb: thb / r1 };
 }
 
 type Tab = "dashboard" | "bill" | "transfer" | "transfers" | "all" | "rate" | "ctw" | "automation" | "menusettings";
@@ -2762,12 +2785,14 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   // ===== สูตรคำนวณตามชีต Excel =====
   const transferred = num(amount);                            // โอนจริง (฿)
   const chinaRemainThb = transferred - thbSelTotal;           // คงเหลือ = โอนจริง − ค่าส่ง/VAT (฿)
-  const tierBasisThb = Math.max(0, chinaRemainThb);          // ★ ฐานเลือกชั้นเรท R1-R4
-  const effRate = hasRate ? rateFor(tierBasisThb, r1) : 0;
-  const activeTier = tierBasisThb <= 5000 ? "R1" : tierBasisThb <= 99999 ? "R2" : tierBasisThb <= 399999 ? "R3" : "R4";
+  const tierBasisThb = Math.max(0, chinaRemainThb);          // เงินที่เหลือไว้ซื้อหยวน (฿)
+  // ★ ชั้นเรทดูจาก "จำนวนหยวนที่ซื้อได้" ไม่ใช่จำนวนบาท (บันไดร้านรับโอนเป็น ¥)
+  const bought = hasRate ? buyRmbWithThb(tierBasisThb, r1) : { tierIdx: 0, rate: 0, rmb: 0 };
+  const effRate = bought.rate;
+  const activeTier = TIER_NAMES[bought.tierIdx];
   const selectedSum = selectedRmb * effRate;                 // บิลจีนเป็นบาท (฿)
   const roundTotalThb = selectedSum + thbSelTotal;           // ยอดเต็มถ้าไม่ใช้คงเหลือ (฿)
-  const chinaYuanBought = effRate ? tierBasisThb / effRate : 0; // เป็นเงินจีน = คงเหลือ ÷ เรท (¥)
+  const chinaYuanBought = bought.rmb;                        // เป็นเงินจีน = คงเหลือ ÷ เรท (¥)
   const shortfallRmb = Math.max(0, selectedRmb - chinaYuanBought); // หัก บช ISG (¥) — ส่วนที่ขาด
   const surplusRmb   = Math.max(0, chinaYuanBought - selectedRmb); // เข้าบัญชีจีน ส่วนต่าง (¥) — ส่วนเกิน
   const needBalance  = hasRate && shortfallRmb > 0.0001;     // เงินโอนไม่พอ → ต้องดึงยอดคงเหลือ
@@ -2792,9 +2817,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   // คิดชั้นเรทจาก "ยอดหลังหักยอดคงเหลือจีน" (บิลจีน − คงเหลือ) เพื่อโชว์ยอดที่ต้องโอนโดยประมาณ
   // ★ ไม่ใช้ในตอนสรุป/ใบเสร็จ — ตอนนั้นยังคิดจาก (ยอดโอนจริง − ค่าส่ง/VAT) ตามเดิม
   const afterBalanceRmb = Math.max(0, selectedRmb - chinaCoverRmb);   // ยอดหลังหักยอดคงเหลือจีน (¥)
-  const previewTierThb = afterBalanceRmb * r1;                        // แปลงด้วยเรทฐานเพื่อหาชั้น
-  const previewRate = hasRate ? rateFor(previewTierThb, r1) : 0;
-  const previewTier = previewTierThb <= 5000 ? "R1" : previewTierThb <= 99999 ? "R2" : previewTierThb <= 399999 ? "R3" : "R4";
+  const previewRate = hasRate ? rateForRmb(afterBalanceRmb, r1) : 0;  // ชั้นเรทจากจำนวนหยวนตรง ๆ
+  const previewTier = TIER_NAMES[tierIdxForRmb(afterBalanceRmb)];
   const previewMinTransfer = afterBalanceRmb * previewRate + thbSelTotal;   // ยอดที่ต้องโอน (ประมาณ)
 
   // ตัด/เคลียร์ บิล CTW (ตัดบางส่วนได้: cleared_amount สะสม)
