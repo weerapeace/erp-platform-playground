@@ -269,6 +269,16 @@ export default function ChinaPayApp() {
   const [deepBill, setDeepBill] = useState<Record<string, unknown> | null>(null);   // เปิดบิลจากลิงก์ ?bill=id
   const [deepTransfer, setDeepTransfer] = useState<Record<string, unknown> | null>(null);   // เปิดใบสรุปการโอนจากลิงก์ ?transfer=id
   const [rateMissing, setRateMissing] = useState(false);   // วันนี้ยังไม่มีเรท → โชว์ badge เตือน
+  const [inApp, setInApp] = useState(false);   // true = เปิดจากไอคอนแอปที่ติดตั้ง (PWA) → ไม่ต้องมีทางออกไป ERP
+
+  // เปิดในเบราว์เซอร์ (ไม่ใช่แอปที่ติดตั้ง) → โชว์ทางออกกลับ ERP ในเมนู ☰ (กันเปิดบนคอมแล้วออกไปแอปอื่นไม่ได้)
+  useEffect(() => {
+    try {
+      const standalone = window.matchMedia("(display-mode: standalone)").matches
+        || (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+      setInApp(standalone);
+    } catch { /* noop */ }
+  }, []);
 
   // เช็คว่าวันนี้มีเรทหรือยัง (badge เตือนบนเมนูเรท)
   useEffect(() => {
@@ -452,6 +462,21 @@ export default function ChinaPayApp() {
                 </button>
               ))}
             </div>
+            {/* ทางออกกลับ ERP — เฉพาะตอนเปิดในเบราว์เซอร์ (โหมดแอปที่ติดตั้งแล้วให้อยู่แค่แอปนี้) */}
+            {!inApp && (
+              <div className="border-t border-slate-100 py-2">
+                <Link href="/m/china-dashboard" onClick={() => setMenuOpen(false)}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left text-slate-600 hover:bg-slate-50">
+                  <span className="text-xl w-7 text-center">🖥️</span>
+                  <span className="flex-1">Dashboard (จอคอม)</span>
+                </Link>
+                <Link href="/apps" onClick={() => setMenuOpen(false)}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left text-slate-600 hover:bg-slate-50">
+                  <span className="text-xl w-7 text-center">↩︎</span>
+                  <span className="flex-1">กลับหน้ารวมแอป ERP</span>
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       )}
