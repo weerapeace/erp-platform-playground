@@ -13,6 +13,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR } from "@/lib/swr-lite";
 import { formatDate } from "@/lib/date";
+import { useOpenParam } from "@/lib/open-param";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SOListItem, SODetail } from "@/app/api/sales-orders/route";
 import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
@@ -200,6 +201,9 @@ export default function SalesOrdersPage() {
       setDetailOpen(false);
     } finally { setDetailLoading(false); }
   };
+
+  // ลิงก์ตรงถึงใบ: /sales-orders?open=<id> (เช่นกดจากกระดานเงินสด)
+  useOpenParam(canView, openDetail);
 
   // ---- Open edit (draft only) ----
   const openEdit = (so: SODetail) => {

@@ -11,6 +11,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR } from "@/lib/swr-lite";
 import { formatDate } from "@/lib/date";
+import { useOpenParam } from "@/lib/open-param";
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { BillingNoteListItem, BillingNoteDetail } from "@/app/api/billing-notes/route";
@@ -108,6 +109,9 @@ export default function BillingNotesPage() {
     } catch (err) { flash(err instanceof Error ? err.message : "โหลดไม่ได้"); setDetailOpen(false); }
     finally { setDetailLoading(false); }
   };
+
+  // ลิงก์ตรงถึงใบ: /billing-notes?open=<id> (เช่นกดจากกระดานเงินสด)
+  useOpenParam(canView, openDetail);
 
   // เลือกใบกำกับภาษี (SO) เข้าใบวางบิล
   const handlePicked = (rowsPicked: SourceDocRow[]) => {

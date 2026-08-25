@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { computeDueDate, formatCreditTerm } from "@/lib/credit-term";
+import { openLink } from "@/lib/open-param";
 import { SO_ACTIVE_STATUSES } from "@/lib/so-status";
 import {
   addDaysISO, dayOfMonthISO, endOfMonthISO, manualDateInMonth, manualScheduleLabel, monthsBetween, todayISO,
@@ -141,7 +142,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         dateConfident: hasDue,
         dateNote: hasDue ? undefined : "ใบวางบิลนี้ไม่ได้ระบุวันครบกำหนด — ใช้วันที่วางบิลแทน",
         note: b.status === "draft" ? "ใบวางบิลยังเป็นร่าง" : undefined,
-        href: "/billing-notes",
+        href: openLink("/billing-notes", String(b.id)),
         movable: true, docId: String(b.id),
       });
     }
@@ -188,7 +189,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           : hasTerms
             ? `เครดิตลูกค้า: ${formatCreditTerm(partner?.sales_credit_term) !== "—" ? formatCreditTerm(partner?.sales_credit_term) : `${legacyDays} วัน`}`
             : `ลูกค้ารายนี้ยังไม่ได้ตั้งเครดิต — ระบบใช้ค่าเริ่มต้น ${customerDefaultDays} วัน`,
-        href: "/sales-orders",
+        href: openLink("/sales-orders", String(s.id)),
         movable: true, docId: String(s.id),
       });
     }
@@ -255,7 +256,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             ? "คำนวณจากเครดิตที่ตั้งไว้ให้ร้านนี้"
             : `ร้านนี้ยังไม่ได้ตั้งเครดิต — ระบบใช้ค่าเริ่มต้น ${supplierDefaultDays} วันนับจากวันสั่งซื้อ`,
         note: isRmb ? `ยอดจริง ¥${num(p.grand_total).toLocaleString("th-TH")} × เรต ${rmbRate}` : undefined,
-        href: "/purchasing/po-list",
+        href: openLink("/purchasing/po-list", String(p.id)),
         movable: true, docId: String(p.id),
       });
     }
@@ -421,7 +422,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           amount,
           dateConfident: true,
           note: date < today ? "เลยกำหนดชำระแล้ว" : undefined,
-          href: "/loan-installments",
+          href: openLink("/loan-installments", String(i.id)),
+          docId: String(i.id),
         });
       }
       if (overdue > 0) {
@@ -462,7 +464,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           dateConfident: false,
           dateNote: "ธนาคารมักตัดดอกเบี้ยสิ้นเดือน",
           note: "ประมาณการจากยอดที่ใช้อยู่ปัจจุบัน",
-          href: "/od-facilities",
+          href: openLink("/od-facilities", String(od.id)),
+          docId: String(od.id),
         });
       }
     }
