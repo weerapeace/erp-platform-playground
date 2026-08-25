@@ -19,11 +19,13 @@ import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { InfoHint } from "@/components/info-hint";
+import { DateInput } from "@/components/date-input";
 import { usePermission, AccessDenied, useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import {
-  CASHFLOW_SOURCE, THB, addDaysISO, buildDailySeries, formatDayMonthTH, parseISO, toISO, todayISO,
+  CASHFLOW_CERTAINTY, CASHFLOW_SOURCE, MOVABLE_SOURCES, THB,
+  addDaysISO, buildDailySeries, endOfMonthISO, formatDayMonthTH, monthLabelTH, parseISO, toISO, todayISO,
   type CashflowEvent, type CashflowSource,
 } from "@/lib/cashflow";
 import type { CashflowApiData } from "@/app/api/cashflow/route";
@@ -79,6 +81,8 @@ export default function CashBoardPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [noteEdit, setNoteEdit] = useState<Partial<BoardNote> & { note_date: string } | null>(null);
+  /** การ์ดที่กดเปิดดูรายละเอียดอยู่ (เก็บแค่ id — เนื้อหาอ่านสด ๆ จะได้อัปเดตตามตอนเลื่อนวัน) */
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const from = todayISO();
   const to = addDaysISO(from, rangeDays);
@@ -184,6 +188,23 @@ export default function CashBoardPage() {
     () => (data?.events ?? []).filter((e) => pending[e.id] && pending[e.id] !== e.date),
     [data, pending],
   );
+
+  const detailEvent = useMemo(
+    () => (detailId ? events.find((e) => e.id === detailId) ?? null : null),
+    [detailId, events],
+  );
+
+  /** ย้ายใบเดียวไปวันที่กำหนด (ใช้จากป๊อปรายละเอียด — ไม่ต้องลาก) */
+  const moveOne = (id: string, day: string) => {
+    const src = (data?.events ?? []).find((e) => e.id === id);
+    if (!src?.movable) return;
+    setPending((p) => {
+      const next = { ...p };
+      if (day === src.date) delete next[id];
+      else next[id] = day;
+      return next;
+    });
+  };
 
   // ---- เลือก / ลาก ----
   const toggleSelect = (id: string) =>
@@ -399,9 +420,9 @@ export default function CashBoardPage() {
               <InfoHint>คลิกการ์ดเพื่อเลือก (เลือกได้หลายใบ) แล้วลากใบไหนก็ได้ ทั้งชุดจะย้ายตาม · การลากยังไม่บันทึกจนกว่าจะกดยืนยัน</InfoHint>
             </p>
             <ol className="list-decimal pl-4 space-y-1">
+              <li><b>กดที่การ์ด</b> = เปิดดูรายละเอียด + เลื่อนวันจากในนั้นได้เลย</li>
               <li>หาช่องแดง — วันนั้นเงินจะไม่พอ</li>
-              <li>คลิกเลือกใบที่เลื่อนได้ (หรือกด “เลือกทั้งวัน” ที่หัวคอลัมน์)</li>
-              <li>ลากไปวางหลังวันที่เงินเข้า</li>
+              <li>ติ๊กช่องมุมการ์ด (หรือกด “เลือกทั้งวัน”) เพื่อเลือกหลายใบ แล้วลากทีเดียว</li>
               <li>ดูว่า “วันที่เงินติดลบ” ลดลงไหม แล้วค่อยกดยืนยัน</li>
             </ol>
           </div>
@@ -431,6 +452,7 @@ export default function CashBoardPage() {
               originalDate={(id) => data.events.find((e) => e.id === id)?.date ?? ""}
               onDragStart={startDrag} onDragEnd={() => { setDragIds(null); setOverDay(null); }}
               onOver={setOverDay} onDrop={drop} onToggleSelect={toggleSelect} onSelectDay={selectDay}
+              onOpenDetail={setDetailId}
               onToggleGroup={(k) => setOpenGroups((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n; })}
               onAddNote={(day) => setNoteEdit({ note_date: day, body: "", color: "yellow" })}
               onEditNote={(n) => setNoteEdit({ ...n })}
@@ -467,6 +489,16 @@ export default function CashBoardPage() {
           </div>
         }
         confirmText="ยืนยันเลื่อนวัน"
+      />
+
+      {/* ---- ป๊อปรายละเอียดการ์ด ---- */}
+      <CardDetailModal
+        ev={detailEvent}
+        originalDate={detailEvent ? (data?.events.find((e) => e.id === detailEvent.id)?.date ?? null) : null}
+        selected={detailEvent ? selected.has(detailEvent.id) : false}
+        onClose={() => setDetailId(null)}
+        onMove={moveOne}
+        onToggleSelect={toggleSelect}
       />
 
       {/* ---- ป๊อปโน้ต ---- */}
@@ -553,6 +585,138 @@ const LegendRow = ({ color, text }: { color: string; text: string }) => (
   <div className="flex items-center gap-2"><span className={`w-2.5 h-2.5 rounded-sm shrink-0 ${color}`} />{text}</div>
 );
 
+/**
+ * รายละเอียดการ์ด — กดที่การ์ดแล้วเปิดอันนี้
+ * บอกครบว่าเงินก้อนนี้คืออะไร ทำไมถึงตกวันนี้ และเลื่อนได้ไหม (เลื่อนจากในนี้ได้เลย ไม่ต้องลาก)
+ */
+function CardDetailModal({ ev, originalDate, selected, onClose, onMove, onToggleSelect }: {
+  ev: CashflowEvent | null;
+  originalDate: string | null;
+  selected: boolean;
+  onClose: () => void;
+  onMove: (id: string, day: string) => void;
+  onToggleSelect: (id: string) => void;
+}) {
+  const meta = ev ? CASHFLOW_SOURCE[ev.source as CashflowSource] : null;
+  const cert = ev ? CASHFLOW_CERTAINTY[ev.certainty] : null;
+  const moveCfg = ev ? MOVABLE_SOURCES[ev.source as CashflowSource] : undefined;
+  const moved = !!(ev && originalDate && originalDate !== ev.date);
+
+  return (
+    <ERPModal
+      open={!!ev}
+      onClose={onClose}
+      title={ev ? `${meta?.icon ?? ""} ${ev.ref}` : ""}
+      description={ev?.party}
+      size="md"
+      storageKey="cashflow-card-detail"
+      footer={
+        <div className="flex items-center justify-between gap-2 w-full flex-wrap">
+          {ev?.href
+            ? <a href={ev.href} target="_blank" rel="noreferrer"
+                 className="h-9 px-3.5 inline-flex items-center text-sm text-blue-700 border border-blue-200 bg-blue-50 rounded-lg hover:bg-blue-100">
+                เปิดเอกสารต้นทาง ↗
+              </a>
+            : <span />}
+          <button onClick={onClose}
+                  className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
+            ปิด
+          </button>
+        </div>
+      }
+    >
+      {ev && (
+        <div className="space-y-4">
+          {/* ---- ยอดเงิน ---- */}
+          <div className="flex items-end justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-xs text-slate-500">{ev.direction === "in" ? "เงินเข้า" : "เงินออก"}</p>
+              <p className={`text-3xl font-bold tabular-nums ${ev.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
+                {ev.direction === "in" ? "+" : "−"}{THB(ev.amount)}
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-1.5">
+              <span className="text-[11px] px-2 py-0.5 rounded-full"
+                    style={{ color: meta?.color, background: `${meta?.color}18` }}>
+                {meta?.icon} {meta?.label}
+              </span>
+              {cert && <span className={`text-[11px] px-2 py-0.5 rounded-full ${cert.badge}`} title={cert.hint}>{cert.label}</span>}
+            </div>
+          </div>
+
+          {/* ---- วันที่ ---- */}
+          <div className="rounded-lg border border-slate-200 divide-y divide-slate-100 text-sm">
+            <Row label="วันที่เงินเข้า/ออก">
+              <span className="font-medium">{formatDate(ev.date)}</span>
+              {moved && (
+                <span className="ml-2 text-xs text-blue-600">
+                  (ลองเลื่อนจาก {formatDayMonthTH(originalDate!)} — ยังไม่บันทึก)
+                </span>
+              )}
+            </Row>
+            <Row label="ทำไมเป็นวันนี้">
+              <span className={ev.dateConfident ? "text-slate-700" : "text-amber-700"}>
+                {ev.dateNote || (ev.dateConfident ? "ระบุไว้ในเอกสารแล้ว" : "ระบบเดาวันให้")}
+              </span>
+            </Row>
+            {cert && <Row label="ความมั่นใจ"><span className="text-slate-600">{cert.hint}</span></Row>}
+            {ev.note && <Row label="หมายเหตุ"><span className="text-slate-600">{ev.note}</span></Row>}
+          </div>
+
+          {/* ---- เลื่อนวัน ---- */}
+          {ev.movable ? (
+            <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3">
+              <p className="text-sm font-semibold text-slate-800 mb-1">เลื่อน{moveCfg?.label ?? "วัน"}</p>
+              <p className="text-xs text-slate-500 mb-2.5">เลือกวันใหม่ได้เลย — ยังไม่บันทึกจนกว่าจะกด “ยืนยัน” ที่กระดาน</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="w-40">
+                  <DateInput value={ev.date} onChange={(iso) => iso && onMove(ev.id, iso)} />
+                </div>
+                {[7, 15, 30].map((d) => (
+                  <button key={d} onClick={() => onMove(ev.id, addDaysISO(ev.date, d))}
+                          className="h-8 px-2.5 text-xs bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
+                    +{d} วัน
+                  </button>
+                ))}
+                <button onClick={() => onMove(ev.id, endOfMonthISO(ev.date))}
+                        className="h-8 px-2.5 text-xs bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
+                  สิ้นเดือน
+                </button>
+                {moved && (
+                  <button onClick={() => onMove(ev.id, originalDate!)}
+                          className="h-8 px-2.5 text-xs text-slate-600 border border-slate-300 rounded-lg hover:bg-white">
+                    คืนวันเดิม
+                  </button>
+                )}
+              </div>
+              <label className="flex items-center gap-2 mt-3 text-xs text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={selected} onChange={() => onToggleSelect(ev.id)} />
+                เลือกใบนี้ไว้ (เลือกหลายใบแล้วลากทีเดียวได้)
+              </label>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm text-violet-800">
+              🔒 <b>เลื่อนวันไม่ได้</b> —{" "}
+              {ev.source === "manual"
+                ? "รายการประจำต้องแก้ที่หน้ากระแสเงินสด → ⚙️ ตั้งค่า (ลากบนกระดานจะกลายเป็นแก้รอบทั้งชุด)"
+                : ev.source === "loan" ? "งวดผ่อนตามสัญญากับธนาคาร เลื่อนเองไม่ได้"
+                : ev.source === "payroll" ? "รอบจ่ายเงินเดือน พนักงานรอไม่ได้"
+                : "ดอกเบี้ยธนาคารตัดตามรอบของธนาคาร"}
+            </div>
+          )}
+        </div>
+      )}
+    </ERPModal>
+  );
+}
+
+const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <div className="flex items-start gap-3 px-3 py-2">
+    <span className="w-32 shrink-0 text-slate-500 text-xs pt-0.5">{label}</span>
+    <span className="min-w-0">{children}</span>
+  </div>
+);
+
 type BoardProps = {
   days: string[];
   cardsByDay: Map<string, BoardCard[]>;
@@ -574,6 +738,7 @@ type BoardProps = {
   onDrop: (day: string) => void;
   onToggleSelect: (id: string) => void;
   onSelectDay: (day: string) => void;
+  onOpenDetail: (id: string) => void;
   onToggleGroup: (key: string) => void;
   onAddNote: (day: string) => void;
   onEditNote: (n: BoardNote) => void;
@@ -583,13 +748,25 @@ function Board(p: BoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const colRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [path, setPath] = useState<{ line: string; area: string; zeroY: number; w: number; h: number } | null>(null);
+  /** แถบเดือน — ความกว้างของแต่ละเดือนต้องเท่ากับผลรวมคอลัมน์ของเดือนนั้น */
+  const [monthBand, setMonthBand] = useState<{ ym: string; width: number }[]>([]);
 
-  // คอลัมน์กว้างไม่เท่ากัน → ต้องวัดจริงหลัง layout ถึงจะวางเส้นได้ตรง
+  // คอลัมน์กว้างไม่เท่ากัน → ต้องวัดจริงหลัง layout ถึงจะวางเส้น/แถบเดือนได้ตรง
   const draw = useCallback(() => {
     const el = boardRef.current;
     if (!el) return;
     const w = el.scrollWidth, h = el.clientHeight;
     if (!w || !h || !p.levelByDay.length) return;
+
+    const bands: { ym: string; width: number }[] = [];
+    for (const day of p.days) {
+      const cw = colRefs.current[day]?.offsetWidth ?? 0;
+      const ym = day.slice(0, 7);
+      const last = bands[bands.length - 1];
+      if (last && last.ym === ym) last.width += cw;
+      else bands.push({ ym, width: cw });
+    }
+    setMonthBand(bands);
 
     const top = 58, bottom = h - 16, span = Math.max(40, bottom - top);
     const vals = p.levelByDay.map((x) => x.bal).concat([0]);
@@ -609,7 +786,7 @@ function Board(p: BoardProps) {
     const zeroY = y(0);
     const area = `${line} L${pts[pts.length - 1][0].toFixed(1)} ${zeroY.toFixed(1)} L${pts[0][0].toFixed(1)} ${zeroY.toFixed(1)} Z`;
     setPath({ line, area, zeroY, w, h });
-  }, [p.levelByDay]);
+  }, [p.levelByDay, p.days]);
 
   useLayoutEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -620,6 +797,17 @@ function Board(p: BoardProps) {
 
   return (
     <div className="overflow-x-auto">
+      {/* แถบเดือน — กันสับสนตอนเลขวันวนกลับเป็น 1 */}
+      {monthBand.length > 0 && (
+        <div className="sticky top-0 z-30 flex border-b border-slate-200 bg-white">
+          {monthBand.map((b) => (
+            <div key={b.ym} style={{ width: b.width }}
+                 className="shrink-0 border-r border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 whitespace-nowrap overflow-hidden">
+              <span className="sticky left-2">{monthLabelTH(b.ym)}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div ref={boardRef} className="relative flex items-stretch min-h-[560px] pb-4">
         {path && (
           <svg className="absolute inset-0 pointer-events-none z-0" width={path.w} height={path.h}
@@ -654,7 +842,7 @@ function Board(p: BoardProps) {
                 ${p.overDay === day ? "bg-blue-50 ring-2 ring-inset ring-blue-400" : ""}
                 ${day === p.today ? "shadow-[inset_2px_0_0_#059669]" : ""}`}
             >
-              <div className="sticky top-0 z-20 px-2 py-1.5 border-b border-slate-200 bg-white/85 backdrop-blur">
+              <div className="sticky top-[26px] z-20 px-2 py-1.5 border-b border-slate-200 bg-white/85 backdrop-blur">
                 <div className="flex items-start justify-between gap-1">
                   <div>
                     <div className={`font-semibold tabular-nums leading-tight ${busy ? "text-[15px]" : "text-[13px] text-center"}`}>
@@ -697,13 +885,15 @@ function Board(p: BoardProps) {
                           dragging={!!p.dragIds?.includes(c.ev.id)}
                           checked={p.selected.has(c.ev.id)}
                           movedFrom={p.pending[c.ev.id] ? p.originalDate(c.ev.id) : null}
-                          onDragStart={p.onDragStart} onDragEnd={p.onDragEnd} onToggleSelect={p.onToggleSelect} />
+                          onDragStart={p.onDragStart} onDragEnd={p.onDragEnd}
+                          onToggleSelect={p.onToggleSelect} onOpenDetail={p.onOpenDetail} />
                   ) : (
                     <GroupCard key={c.key} card={c} open={p.openGroups.has(c.key)}
                                dragging={!!p.dragIds?.some((id) => c.events.some((e) => e.id === id))}
                                selected={p.selected} pending={p.pending} originalDate={p.originalDate}
                                onToggle={() => p.onToggleGroup(c.key)}
-                               onDragStart={p.onDragStart} onDragEnd={p.onDragEnd} onToggleSelect={p.onToggleSelect} />
+                               onDragStart={p.onDragStart} onDragEnd={p.onDragEnd}
+                               onToggleSelect={p.onToggleSelect} onOpenDetail={p.onOpenDetail} />
                   ),
                 )}
 
@@ -717,9 +907,10 @@ function Board(p: BoardProps) {
   );
 }
 
-function Card({ ev, dragging, checked, movedFrom, onDragStart, onDragEnd, onToggleSelect }: {
+function Card({ ev, dragging, checked, movedFrom, onDragStart, onDragEnd, onToggleSelect, onOpenDetail }: {
   ev: CashflowEvent; dragging: boolean; checked: boolean; movedFrom: string | null;
-  onDragStart: (ids: string[]) => void; onDragEnd: () => void; onToggleSelect: (id: string) => void;
+  onDragStart: (ids: string[]) => void; onDragEnd: () => void;
+  onToggleSelect: (id: string) => void; onOpenDetail: (id: string) => void;
 }) {
   const meta = CASHFLOW_SOURCE[ev.source as CashflowSource];
   const locked = !ev.movable;
@@ -727,7 +918,11 @@ function Card({ ev, dragging, checked, movedFrom, onDragStart, onDragEnd, onTogg
   return (
     <div
       draggable={!locked}
-      onClick={() => { if (!locked) onToggleSelect(ev.id); }}
+      // กดการ์ด = ดูรายละเอียด · กดค้าง Ctrl/⌘/Shift หรือติ๊กช่องมุมซ้าย = เลือกไว้ลากหลายใบ
+      onClick={(e) => {
+        if (!locked && (e.ctrlKey || e.metaKey || e.shiftKey)) { onToggleSelect(ev.id); return; }
+        onOpenDetail(ev.id);
+      }}
       onDragStart={(e) => {
         if (locked) { e.preventDefault(); return; }
         onDragStart([ev.id]);
@@ -735,18 +930,27 @@ function Card({ ev, dragging, checked, movedFrom, onDragStart, onDragEnd, onTogg
       }}
       onDragEnd={onDragEnd}
       title={locked
-        ? `${meta.label} — เลื่อนไม่ได้${ev.source === "manual" ? " (แก้ที่ตั้งค่ารายจ่ายประจำ)" : " ธนาคาร/พนักงานรอไม่ได้"}`
-        : `คลิกเพื่อเลือก · ลากไปวันอื่นเพื่อเลื่อน${movedFrom ? ` · เดิมคือ ${formatDayMonthTH(movedFrom)}` : ""}`}
-      className={`rounded-lg border border-l-[3px] border-slate-200 bg-white p-1.5 shadow-sm select-none ${edge}
-        ${locked ? "cursor-not-allowed bg-slate-50" : "cursor-grab active:cursor-grabbing hover:shadow-md"}
+        ? `${meta.label} — กดดูรายละเอียด · เลื่อนวันไม่ได้`
+        : `กดดูรายละเอียด · ลากไปวันอื่นเพื่อเลื่อน${movedFrom ? ` · เดิมคือ ${formatDayMonthTH(movedFrom)}` : ""}`}
+      className={`group/card relative rounded-lg border border-l-[3px] border-slate-200 bg-white p-1.5 shadow-sm select-none ${edge}
+        ${locked ? "cursor-pointer bg-slate-50" : "cursor-grab active:cursor-grabbing hover:shadow-md"}
         ${dragging ? "opacity-40" : ""} ${movedFrom ? "border-dashed" : ""}
         ${checked ? "ring-2 ring-blue-500" : movedFrom ? "ring-2 ring-blue-200" : ""}`}
     >
+      {!locked && (
+        <input
+          type="checkbox" checked={checked} onChange={() => onToggleSelect(ev.id)}
+          onClick={(e) => e.stopPropagation()}
+          title="เลือกไว้ลากหลายใบพร้อมกัน"
+          className={`absolute -top-1.5 -left-1.5 z-10 w-3.5 h-3.5 cursor-pointer accent-blue-600 transition-opacity
+            ${checked ? "opacity-100" : "opacity-0 group-hover/card:opacity-100"}`}
+        />
+      )}
       <div className="flex items-center justify-between gap-1.5">
         <span className={`text-[9.5px] px-1.5 py-px rounded-full whitespace-nowrap ${
           locked ? "bg-violet-100 text-violet-700"
             : ev.direction === "in" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
-          {locked ? "🔒 " : checked ? "✓ " : ""}{meta.label}
+          {locked ? "🔒 " : ""}{meta.label}
         </span>
         <span className={`text-[13px] font-semibold tabular-nums whitespace-nowrap ${
           ev.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
@@ -762,13 +966,14 @@ function Card({ ev, dragging, checked, movedFrom, onDragStart, onDragEnd, onTogg
 }
 
 /** กองการ์ดของร้านเดียวกันในวันเดียวกัน — ลากทั้งกองได้ กดเพื่อกางดูรายใบ */
-function GroupCard({ card, open, dragging, selected, pending, originalDate, onToggle, onDragStart, onDragEnd, onToggleSelect }: {
+function GroupCard({ card, open, dragging, selected, pending, originalDate, onToggle, onDragStart, onDragEnd, onToggleSelect, onOpenDetail }: {
   card: Extract<BoardCard, { kind: "group" }>;
   open: boolean; dragging: boolean;
   selected: Set<string>; pending: Record<string, string>;
   originalDate: (id: string) => string;
   onToggle: () => void;
-  onDragStart: (ids: string[]) => void; onDragEnd: () => void; onToggleSelect: (id: string) => void;
+  onDragStart: (ids: string[]) => void; onDragEnd: () => void;
+  onToggleSelect: (id: string) => void; onOpenDetail: (id: string) => void;
 }) {
   const ids = card.events.map((e) => e.id);
   const edge = !card.movable ? "border-l-violet-500" : card.direction === "in" ? "border-l-emerald-500" : "border-l-rose-500";
@@ -806,7 +1011,8 @@ function GroupCard({ card, open, dragging, selected, pending, originalDate, onTo
           {card.events.map((ev) => (
             <Card key={ev.id} ev={ev} dragging={false} checked={selected.has(ev.id)}
                   movedFrom={pending[ev.id] ? originalDate(ev.id) : null}
-                  onDragStart={onDragStart} onDragEnd={onDragEnd} onToggleSelect={onToggleSelect} />
+                  onDragStart={onDragStart} onDragEnd={onDragEnd}
+                  onToggleSelect={onToggleSelect} onOpenDetail={onOpenDetail} />
           ))}
         </div>
       )}
