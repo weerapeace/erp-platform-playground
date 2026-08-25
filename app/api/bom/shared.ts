@@ -30,6 +30,9 @@ export function lineToRow(l: BomLine, bomCode: string, idx: number): Record<stri
     cut_width:        l.cut_width != null ? Number(l.cut_width) : null,
     cut_length:       l.cut_length != null ? Number(l.cut_length) : null,
     face_width_cm:    l.face_width_cm != null ? Number(l.face_width_cm) : null,
+    // ขนาดผืนเต็ม — ใช้กับวัตถุดิบที่ขายเป็นผืน/ชิ้น (คิดปริมาณ = พื้นที่ตัด ÷ พื้นที่ผืน)
+    sheet_width:      l.sheet_width != null ? Number(l.sheet_width) : null,
+    sheet_length:     l.sheet_length != null ? Number(l.sheet_length) : null,
     material_type:    l.material_type || null,
     size_variant:     !!l.size_variant,
     size_dim:         l.size_dim || "cut_length",

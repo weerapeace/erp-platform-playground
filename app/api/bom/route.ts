@@ -43,6 +43,8 @@ export type BomLine = {
   cut_width?:      number | null;
   cut_length?:     number | null;
   face_width_cm?:  number | null;
+  sheet_width?:    number | null;   // ขนาดผืนเต็ม กว้าง (ซม.) — ชนิดที่ขายเป็นผืน/ชิ้น
+  sheet_length?:   number | null;   // ขนาดผืนเต็ม ยาว (ซม.)
   material_type?:  string | null;
   // เฟส 4: ผันตามไซส์
   size_variant?:   boolean;

@@ -47,6 +47,8 @@ export type EditorLine = {
   cut_width:      number;
   cut_length:     number;
   face_width_cm:  number;
+  sheet_width:    number;            // ขนาดผืนเต็ม กว้าง (ซม.) — ใช้กับผ้าที่ขายเป็นผืน/ชิ้น
+  sheet_length:   number;            // ขนาดผืนเต็ม ยาว (ซม.)
   slot_code:      string | null;
   source?:        string | null;
   odoo_bom_line_id?: number | null;
@@ -68,7 +70,7 @@ export function emptyLine(): EditorLine {
   return {
     key: genKey(), component_id: null, component_sku: "", component_name: "", image_key: null,
     material_group_id: null, material_type: "", qty: 0, uom: "หลา", uom_id: null, waste_percent: 0, is_optional: false,
-    cut_block_id: null, cut_block_code: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, slot_code: null,
+    cut_block_id: null, cut_block_code: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, sheet_width: 0, sheet_length: 0, slot_code: null,
     size_variant: false, size_dim: "cut_length", size_values: {},
   };
 }
@@ -107,6 +109,7 @@ function calcLine(l: EditorLine, g: GroupInfo | undefined): number | null {
     cut_width:     l.cut_width,
     cut_length:    l.cut_length,
     face_width_cm: l.face_width_cm,
+    sheet_width: l.sheet_width || null, sheet_length: l.sheet_length || null,
   });
 }
 
@@ -154,6 +157,7 @@ function replacePatch(c: BomComponent): Partial<EditorLine> {
     component_id: c.id, component_sku: c.code, component_name: c.name, image_key: c.image_key ?? null,
     material_group_id: c.material_group_id, material_type: c.material_type ?? "",
     face_width_cm: c.fabric_width_cm ?? 0, waste_percent: c.loss_percent ?? 0,
+    sheet_width: c.sheet_width_cm ?? 0, sheet_length: c.sheet_length_cm ?? 0,
     uom: c.uom_name ?? "", uom_id: c.uom_id ?? null,
   };
 }
@@ -392,11 +396,14 @@ export function BomLineEditor({
     return g ? { calc_method: g.calc_method, divisor: g.divisor ?? 90 } : undefined;
   };
   const methodOf  = (l: EditorLine) => groupOf(l.material_type)?.calc_method ?? "manual";
-  const lineCalc  = (l: EditorLine) => calcLine(l, groupOf(l.material_type));
+  const lineCalc  = (l: EditorLine) => calcLine(l, groupOf(l.material_type));   // calcLine ส่ง sheet_width/length ต่อให้แล้ว
   const isArea    = (l: EditorLine) => { const m = methodOf(l); return m === "area_face" || m === "area_100"; };
   const usesWidth  = (l: EditorLine) => isArea(l);
   const usesLength = (l: EditorLine) => { const m = methodOf(l); return m === "area_face" || m === "area_100" || m === "length"; };
   const usesFace   = (l: EditorLine) => methodOf(l) === "area_face";
+  // ผ้า/ของที่ขายเป็น "ผืน/ชิ้น" — ปริมาณ = พื้นที่ที่ตัด ÷ พื้นที่ผืนเต็ม (ต้องรู้ขนาดผืน)
+  const usesSheet  = (l: EditorLine) => methodOf(l) === "area_sheet";
+  const needSheet  = (l: EditorLine) => usesSheet(l) && (l.cut_width > 0 || l.cut_length > 0) && !(l.sheet_width > 0 && l.sheet_length > 0);
   const showStatus = (l: EditorLine) => isArea(l);
   const needFace   = (l: EditorLine) => methodOf(l) === "area_face" && (l.cut_width > 0 || l.cut_length > 0) && !l.face_width_cm;
 
@@ -420,6 +427,7 @@ export function BomLineEditor({
     component_id: c.id, component_sku: c.code, component_name: c.name, image_key: c.image_key ?? null,
     material_group_id: c.material_group_id, material_type: c.material_type ?? "",
     face_width_cm: c.fabric_width_cm ?? l.face_width_cm,
+    sheet_width: c.sheet_width_cm ?? l.sheet_width, sheet_length: c.sheet_length_cm ?? l.sheet_length,
     waste_percent: c.loss_percent ?? l.waste_percent,
     uom: c.uom_name ?? l.uom, uom_id: c.uom_id ?? l.uom_id,
   });
@@ -466,6 +474,15 @@ export function BomLineEditor({
   /** id ของชนิดที่บรรทัดนี้ใช้อยู่ — บางบรรทัดเก็บมาแต่ชื่อ (ไม่มี id) จึงเทียบชื่อให้ด้วย */
   const groupIdOf = (l: EditorLine) =>
     l.material_group_id ?? groups.find((g) => g.name === l.material_type)?.id ?? "";
+
+  /** บันทึก "ขนาดผืนเต็ม" กลับไปที่ SKU — ครั้งหน้าใช้ค่านี้เลย */
+  const saveSheetToSku = async (l: EditorLine) => {
+    const skuId = await resolveSkuId(l);
+    if (!skuId) { toast.error(noSkuMsg); return; }
+    await apiSave(toast, "/api/bom/components",
+      { body: { sku_id: skuId, sheet_width_cm: l.sheet_width || null, sheet_length_cm: l.sheet_length || null } },
+      { ok: `บันทึกขนาดผืน ${l.sheet_width || "—"}×${l.sheet_length || "—"} ซม. กลับเข้า ${l.component_sku} แล้ว`, fail: "บันทึกขนาดผืนไม่สำเร็จ" });
+  };
 
   // เลือกชนิดให้ SKU (บันทึก material_group_id ที่ SKU ด้วย เพื่อครั้งหน้าใช้ซ้ำ)
   const tagGroup = async (l: EditorLine, update: (p: Partial<EditorLine>) => void, groupId: string) => {
@@ -575,6 +592,17 @@ export function BomLineEditor({
     {
       key: "face_width_cm", header: "หน้ากว้าง", width: 104, align: "right",
       render: (l, u, ro) => {
+        if (usesSheet(l)) {
+          // ชนิดที่ขายเป็นผืน — ช่องนี้ใช้โชว์/แก้ "ขนาดผืนเต็ม" แทนหน้ากว้าง
+          const txt = (l.sheet_width > 0 && l.sheet_length > 0) ? `${l.sheet_width}×${l.sheet_length}` : "";
+          if (ro) return <span className="block px-2 text-sm text-right text-slate-700">{txt || "—"}</span>;
+          return (
+            <button type="button" onClick={() => setDetailKey(l.key)} title="ขนาดผืนเต็ม — กดเพื่อแก้ในรายละเอียด"
+              className={`w-full h-8 px-2 text-sm text-right rounded-lg border ${txt ? "border-slate-200 text-slate-700 hover:bg-slate-50" : "border-amber-300 text-amber-700 bg-amber-50/50"}`}>
+              {txt || "ใส่ขนาดผืน"}
+            </button>
+          );
+        }
         if (!usesFace(l)) return dash;
         if (ro) return <span className="block px-2 text-sm text-right text-slate-700">{l.face_width_cm || "—"}</span>;
         const editing = editFace.has(l.key) || needFace(l);
@@ -777,6 +805,28 @@ export function BomLineEditor({
                     )}
                   </div>
 
+                  {usesSheet(d) && (
+                    <div className={rowCls}>
+                      <span className={labCls}>ขนาดผืนเต็ม:</span>
+                      <input type="number" min={0} step="any" value={d.sheet_width} disabled={readonly}
+                        onChange={(e) => u({ sheet_width: Number(e.target.value) })} className={numCls} title="กว้าง (ซม.)" />
+                      <span className="text-slate-400 text-xs">×</span>
+                      <input type="number" min={0} step="any" value={d.sheet_length} disabled={readonly}
+                        onChange={(e) => u({ sheet_length: Number(e.target.value) })} className={numCls} title="ยาว (ซม.)" />
+                      <span className="text-slate-400 text-xs">ซม.</span>
+                      {!readonly && (
+                        <button type="button" title="บันทึกขนาดผืนนี้กลับไปที่ SKU (ครั้งหน้าใช้ค่านี้เลย)"
+                          onClick={() => saveSheetToSku(d)}
+                          className="h-7 px-2 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50">💾 บันทึกกลับ SKU</button>
+                      )}
+                    </div>
+                  )}
+                  {usesSheet(d) && (
+                    <div className="text-[11px] text-slate-400 pl-28">
+                      ชนิดนี้คิดจากพื้นที่: (กว้าง×ยาว×ชิ้น ที่ตัด) × เผื่อเสีย ÷ พื้นที่ผืนเต็ม = ใช้กี่ผืน
+                      {needSheet(d) && <span className="block text-amber-600">⚠ ยังไม่ได้ใส่ขนาดผืนเต็ม — ปริมาณจะยังคำนวณไม่ได้</span>}
+                    </div>
+                  )}
                   {usesFace(d) && (
                     <div className={rowCls}>
                       <span className={labCls}>หน้ากว้างผ้า:</span>
