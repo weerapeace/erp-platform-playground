@@ -35,6 +35,12 @@ const DONE_BADGE: Record<string, { text: string; cls: string }> = {
   received: { text: "✅ รับครบ", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   short_closed: { text: "🔴 ปิดยอด (ขาด)", cls: "bg-orange-50 text-orange-700 border-orange-200" },
 };
+const CANCELLED_BADGE = { text: "❌ ยกเลิก", cls: "bg-red-50 text-red-700 border-red-200" };
+/** ป้ายของบรรทัดที่ปิดแล้ว — ปิดยอดโดยไม่ได้รับอะไรเลย = ยกเลิก (เช่น ร้านไม่มีของ) */
+function doneBadge(it: { line_status: string; qty_received: number }): { text: string; cls: string } {
+  if (it.line_status === "short_closed" && it.qty_received <= 0) return CANCELLED_BADGE;
+  return DONE_BADGE[it.line_status] ?? { text: it.line_status, cls: "bg-slate-100 text-slate-500 border-slate-200" };
+}
 // ป้ายสถานะจ่ายเงิน (การ์ดติดตาม)
 function payBadge(it: { payment_status: string; ship_before_pay: boolean; paid_date: string | null }): { text: string; cls: string } {
   if (it.payment_status === "paid") return { text: `🟢 จ่ายแล้ว${it.paid_date ? ` ${formatDate(it.paid_date)}` : ""}`, cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
@@ -271,7 +277,7 @@ export default function ReceiveGoodsPage() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       // ใบ PO ที่ปิดไปแล้ว ต้องกลับมาเป็น "รับบางส่วน" ไม่งั้นรายการไม่โผล่ในแท็บรอเข้า
-      if (it.po_status === "received" || it.po_status === "short_closed") {
+      if (it.po_status === "received" || it.po_status === "short_closed" || it.po_status === "cancelled") {
         await apiFetch(`/api/master-v2/purchase-orders-v2/${it.po_id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: "partial", actor: user?.name }),
@@ -283,6 +289,36 @@ export default function ReceiveGoodsPage() {
     } catch (e) { toast.error("เปิดกลับไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setReopening(false); }
   }, [user?.name, toast, loadPending]);
+  // ── ยกเลิกรายการที่สั่งไปแล้ว (เคสร้านไม่มีของ) — ปิดยอดส่วนที่ค้าง ผ่าน API กลาง (มี audit log) ──
+  const [cancelTarget, setCancelTarget] = useState<PendItem | null>(null);
+  const [cancelReason, setCancelReason] = useState("ร้านไม่มีของ");
+  const [cancelWholePo, setCancelWholePo] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const openCancel = useCallback((it: PendItem) => { setCancelReason("ร้านไม่มีของ"); setCancelWholePo(false); setCancelTarget(it); }, []);
+  // จำนวนรายการที่ยังค้างของใบ PO เดียวกัน (ไว้เสนอ "ยกเลิกทั้งใบ")
+  const cancelPoCount = useMemo(
+    () => cancelTarget ? pend.filter((p) => p.po_id === cancelTarget.po_id).length : 0,
+    [cancelTarget, pend],
+  );
+  const doCancel = useCallback(async () => {
+    if (!cancelTarget) return;
+    const it = cancelTarget;
+    const ids = cancelWholePo ? pend.filter((p) => p.po_id === it.po_id).map((p) => p.id) : [it.id];
+    setCancelling(true);
+    try {
+      const res = await apiFetch("/api/purchasing/cancel-line", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ po_line_ids: ids, reason: cancelReason.trim() || "ร้านไม่มีของ", actor: user?.name }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      toast.success(`ยกเลิกแล้ว ${j.cancelled ?? ids.length} รายการ — ย้ายไปแท็บ "รับครบแล้ว"`);
+      setCancelTarget(null); setQtyEdit(null);
+      await loadPending(doneMode ? "done" : "pending");
+    } catch (e) { toast.error("ยกเลิกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setCancelling(false); }
+  }, [cancelTarget, cancelWholePo, cancelReason, pend, user?.name, toast, loadPending, doneMode]);
+
   const setPendInput = (id: string, patch: Partial<Input>) => setPendInputs((p) => ({ ...p, [id]: { ...p[id], ...patch } }));
 
   // ค้นหา + ร้านที่เลือก + เรียงลำดับ (วันคาด / วันสั่ง / ชื่อ) — ค่าว่างไปท้ายสุดเสมอ
@@ -711,13 +747,18 @@ export default function ReceiveGoodsPage() {
                         const hasQty = !doneMode && (recv > 0 || def > 0);
                         const short = recv > 0 && recv < it.remaining;
                         const b = doneMode
-                          ? (DONE_BADGE[it.line_status] ?? { text: it.line_status, cls: "bg-slate-100 text-slate-500 border-slate-200" })
+                          ? doneBadge(it)
                           : etaBadge(it.days_remaining);
                         return (
                           <div key={it.id} onClick={() => setQtyEdit(it)}
                             className={`bg-white border rounded-xl overflow-hidden flex flex-col cursor-pointer transition-all ${hasQty ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-blue-300 hover:shadow-sm"}`}>
                             <div className="aspect-square bg-slate-50 flex items-center justify-center relative">
                               <span className={`absolute top-1.5 left-1.5 z-10 text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>
+                              {!doneMode && (
+                                <button onClick={(e) => { e.stopPropagation(); openCancel(it); }}
+                                  title="ยกเลิกรายการนี้ (เช่น ร้านไม่มีของ)"
+                                  className="absolute top-1 right-1 z-10 w-6 h-6 rounded-md bg-white/85 text-slate-400 hover:text-red-600 hover:bg-red-50 border border-slate-200 text-xs leading-none">✕</button>
+                              )}
                               {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">📦</span>}
                             </div>
                             <div className="p-2.5 flex flex-col flex-1">
@@ -805,6 +846,7 @@ export default function ReceiveGoodsPage() {
                             <th className="text-right px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("remaining")} className="inline-flex items-center hover:text-slate-700">คงเหลือ{sortArrow("remaining")}</button></th>
                             <th className="text-center px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("recv")} className="inline-flex items-center hover:text-slate-700">รับครั้งนี้{sortArrow("recv")}</button></th>
                             <th className="text-center px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("def")} className="inline-flex items-center hover:text-slate-700">เสีย/ผิด{sortArrow("def")}</button></th>
+                            <th className="px-2 py-2 font-medium w-10"></th>
                           </>
                         )}
                       </tr>
@@ -812,7 +854,7 @@ export default function ReceiveGoodsPage() {
                     <tbody className="divide-y divide-slate-100">
                       {groupedPend.map((g) => (
                         <Fragment key={g.key}>
-                          {g.label && <tr className="bg-slate-50/70"><td colSpan={8} className="px-3 py-1.5 text-xs font-semibold text-slate-600">{g.label} <span className="font-normal text-slate-400">({g.items.length})</span></td></tr>}
+                          {g.label && <tr className="bg-slate-50/70"><td colSpan={doneMode ? 8 : 9} className="px-3 py-1.5 text-xs font-semibold text-slate-600">{g.label} <span className="font-normal text-slate-400">({g.items.length})</span></td></tr>}
                           {g.items.map((it) => {
                         const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
                         const short = num(inp.recv) > 0 && num(inp.recv) < it.remaining;
@@ -830,7 +872,7 @@ export default function ReceiveGoodsPage() {
                             {doneMode ? (
                               <>
                                 <td className="px-3 py-2 whitespace-nowrap">
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${(DONE_BADGE[it.line_status] ?? { cls: "bg-slate-100 text-slate-500 border-slate-200" }).cls}`}>{(DONE_BADGE[it.line_status] ?? { text: it.line_status }).text}</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${doneBadge(it).cls}`}>{doneBadge(it).text}</span>
                                   <button onClick={(e) => { e.stopPropagation(); setQtyEdit(it); }} title="ดูประวัติ / แก้ไข" className="ml-1 text-slate-400 hover:text-blue-600 text-xs">👁</button>
                                 </td>
                                 <td className="px-3 py-2 text-right tabular-nums text-slate-500">{it.qty.toLocaleString()} {it.uom}</td>
@@ -854,6 +896,11 @@ export default function ReceiveGoodsPage() {
                                 : <span className="text-xs text-blue-500">＋ แตะเพื่อรับ</span>}
                             </td>
                             <td className="px-3 py-2 text-center tabular-nums text-xs">{num(inp.def) > 0 ? <span className="text-red-600">{num(inp.def).toLocaleString()}</span> : <span className="text-slate-300">-</span>}</td>
+                            <td className="px-2 py-2 text-center">
+                              <button onClick={(e) => { e.stopPropagation(); openCancel(it); }}
+                                title="ยกเลิกรายการนี้ (เช่น ร้านไม่มีของ)"
+                                className="w-7 h-7 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">✕</button>
+                            </td>
                               </>
                             )}
                           </tr>
@@ -1036,7 +1083,7 @@ export default function ReceiveGoodsPage() {
 
         // ── โหมดดูรายการที่ปิดแล้ว: ประวัติ + เปิดกลับมารอรับ / ลิงก์ไปใบรับ ──
         if (doneMode) {
-          const badge = DONE_BADGE[it.line_status] ?? { text: it.line_status, cls: "bg-slate-100 text-slate-500 border-slate-200" };
+          const badge = doneBadge(it);
           return (
             <ERPModal open onClose={() => !reopening && setQtyEdit(null)} size="md" storageKey="recv-done"
               title="ประวัติ / แก้ไขรายการรับ"
@@ -1149,10 +1196,51 @@ export default function ReceiveGoodsPage() {
               allocatable refType="po_line" refId={it.id} refLabel={it.po_no} />
 
             <div className="mt-2 text-[11px] text-slate-400">ใส่จำนวนแล้วกด <b>ปิด</b> → เลือกรายการอื่นต่อได้ → กด <b>✓ ยืนยันรับของ</b> ด้านล่าง (ใส่วันที่ + แนบใบรับ/บิล + ผู้รับ)</div>
+            <div className="mt-3 pt-3 border-t border-slate-100">
+              <button onClick={() => openCancel(it)} className="text-xs text-slate-400 hover:text-red-600">❌ ยกเลิกรายการนี้ (ของไม่มาแล้ว / ร้านไม่มีของ)</button>
+            </div>
             {historyBlock}
           </ERPModal>
         );
       })()}
+
+      {/* popup ยืนยันยกเลิกรายการ — เคสสั่งไปแล้วร้านไม่มีของ */}
+      {cancelTarget && (
+        <ERPModal open onClose={() => !cancelling && setCancelTarget(null)} size="sm" storageKey="recv-cancel"
+          title="❌ ยกเลิกรายการที่สั่งไว้"
+          description={`🏪 ${cancelTarget.seller_name} · ${cancelTarget.po_no}`}
+          footer={<>
+            <button onClick={() => setCancelTarget(null)} disabled={cancelling} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ไม่ยกเลิก</button>
+            <button onClick={() => void doCancel()} disabled={cancelling} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{cancelling ? "กำลังยกเลิก…" : "ยืนยันยกเลิก"}</button>
+          </>}>
+          <div className="text-sm text-slate-700">{stripCode(cancelTarget.item_name)}</div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            ยกเลิกส่วนที่ยังไม่ได้รับ <b className="text-slate-800">{cancelTarget.remaining.toLocaleString()} {cancelTarget.uom}</b>
+            {cancelTarget.qty_received > 0 && <> · ของที่รับไปแล้ว {cancelTarget.qty_received.toLocaleString()} ยังอยู่เหมือนเดิม</>}
+          </div>
+
+          <label className="block text-xs font-medium text-slate-600 mt-3 mb-1">เหตุผล (เก็บไว้ดูย้อนหลัง)</label>
+          <input value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="ร้านไม่มีของ"
+            className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
+          <div className="flex gap-1.5 mt-1.5 flex-wrap">
+            {["ร้านไม่มีของ", "ร้านยกเลิกเอง", "สั่งซ้ำ", "ไม่ต้องใช้แล้ว"].map((r) => (
+              <button key={r} type="button" onClick={() => setCancelReason(r)}
+                className={`h-7 px-2.5 text-xs rounded-md border ${cancelReason === r ? "border-red-300 bg-red-50 text-red-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{r}</button>
+            ))}
+          </div>
+
+          {cancelPoCount > 1 && (
+            <label className="flex items-start gap-2 mt-3 p-2.5 rounded-lg border border-slate-200 bg-slate-50/60 cursor-pointer">
+              <input type="checkbox" checked={cancelWholePo} onChange={(e) => setCancelWholePo(e.target.checked)} className="mt-0.5 rounded border-slate-300 text-red-600" />
+              <span className="text-xs text-slate-600">ยกเลิก<b>ทุกรายการที่ยังค้าง</b>ของใบนี้ ({cancelPoCount} รายการ) — ใช้ตอนร้านไม่มีของทั้งใบ</span>
+            </label>
+          )}
+
+          <p className="text-[11px] text-slate-400 mt-3">
+            รายการที่ยกเลิกจะย้ายไปแท็บ <b>✅ รับครบแล้ว</b> (ป้าย &quot;ยกเลิก&quot;) · ถ้ายกเลิกผิด เปิดกลับมารอรับได้จากแท็บนั้น
+          </p>
+        </ERPModal>
+      )}
 
       {/* popup ใส่วันที่จ่าย (default วันนี้) */}
       {payEdit && (

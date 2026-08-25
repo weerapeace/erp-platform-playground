@@ -38,12 +38,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const mode = request.nextUrl.searchParams.get("mode") === "done" ? "done" : "pending";
 
-  // 1) ใบสั่งซื้อ — pending: ตัด received/cancelled · done: ตัดเฉพาะ cancelled (ใบที่รับครบต้องยังเห็น)
+  // 1) ใบสั่งซื้อ — pending: ตัด received/cancelled · done: เห็นทุกใบที่ปิดแล้ว รวมใบที่ยกเลิกทั้งใบ (จะได้กดเปิดกลับได้)
   let poQuery = admin
     .from("purchase_orders_v2")
     .select("id, po_no, seller_name, currency, status, order_date, expected_date, payment_status, paid_date")
     .limit(1000);
-  poQuery = mode === "done" ? poQuery.neq("status", "cancelled") : poQuery.not("status", "in", "(received,cancelled)");
+  if (mode !== "done") poQuery = poQuery.not("status", "in", "(received,cancelled)");
   const { data: pos, error: poErr } = await poQuery;
   if (poErr) return NextResponse.json({ data: [], error: poErr.message }, { status: 500 });
   const poMap = new Map((pos ?? []).map((p) => [String(p.id), p as Record<string, unknown>]));
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (lErr) return NextResponse.json({ data: [], error: lErr.message }, { status: 500 });
     for (const l of (ls ?? []) as Record<string, unknown>[]) {
       const st = l.line_status as string | null;
-      const closed = st === "received" || st === "short_closed";
+      const closed = st === "received" || st === "short_closed" || st === "closed_short" || st === "cancelled";
       if (mode === "done") { if (closed) lines.push(l); continue; }
       // pending: ข้ามที่ปิดแล้ว แม้จะยังมีคงเหลือ
       if (closed) continue;
