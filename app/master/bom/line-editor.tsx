@@ -463,6 +463,10 @@ export function BomLineEditor({
       { ok: `เปลี่ยนหน่วยของ ${l.component_sku} เป็น "${uomName}" แล้ว`, fail: "บันทึกหน่วยไม่สำเร็จ" });
   };
 
+  /** id ของชนิดที่บรรทัดนี้ใช้อยู่ — บางบรรทัดเก็บมาแต่ชื่อ (ไม่มี id) จึงเทียบชื่อให้ด้วย */
+  const groupIdOf = (l: EditorLine) =>
+    l.material_group_id ?? groups.find((g) => g.name === l.material_type)?.id ?? "";
+
   // เลือกชนิดให้ SKU (บันทึก material_group_id ที่ SKU ด้วย เพื่อครั้งหน้าใช้ซ้ำ)
   const tagGroup = async (l: EditorLine, update: (p: Partial<EditorLine>) => void, groupId: string) => {
     const g = groups.find((x) => x.id === groupId);
@@ -519,12 +523,17 @@ export function BomLineEditor({
       key: "material_type", header: "ชนิด", width: 130, sortable: true,
       getValue: (l) => l.material_type,
       groupLabel: (l) => l.material_type || "— ไม่ระบุชนิด —",
+      // 🐛 เดิมพอมีชนิดแล้วจะกลายเป็นป้ายนิ่ง เปลี่ยนไม่ได้ — ต้องไปแก้ที่อื่นแล้วหน้านี้ก็ไม่อัปเดตตาม
+      //    ตอนนี้เป็นช่องเลือกตลอด เปลี่ยนแล้วสูตรคำนวณ/ช่องที่ต้องกรอก/เผื่อเสีย เปลี่ยนตามทันที
       render: (l, u, ro) =>
-        l.material_type ? (
-          <span className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700 inline-block truncate max-w-full" title={l.material_type}>{l.material_type}</span>
-        ) : ro ? <span className="text-slate-300 text-xs">—</span> : (
-          <select value="" onChange={(e) => e.target.value && tagGroup(l, u, e.target.value)} className={`${inputCls} text-amber-700`} title="เลือกชนิดวัตถุดิบให้ SKU">
-            <option value="">＋ เลือกชนิด</option>
+        ro ? (
+          l.material_type
+            ? <span className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700 inline-block truncate max-w-full" title={l.material_type}>{l.material_type}</span>
+            : <span className="text-slate-300 text-xs">—</span>
+        ) : (
+          <select value={groupIdOf(l)} onChange={(e) => e.target.value && tagGroup(l, u, e.target.value)}
+            className={`${inputCls} ${l.material_type ? "" : "text-amber-700"}`} title="ชนิดวัตถุดิบ — เปลี่ยนได้ (มีผลกับวิธีคิดปริมาณ)">
+            <option value="">{l.material_type ? "— ไม่ระบุชนิด —" : "＋ เลือกชนิด"}</option>
             {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
         ),
@@ -751,15 +760,21 @@ export function BomLineEditor({
 
                   <div className={rowCls}>
                     <span className={labCls}>ชนิด:</span>
-                    {d.material_type
-                      ? <span className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700">{d.material_type}</span>
-                      : readonly ? <span className="text-slate-300">— ยังไม่ระบุ —</span> : (
-                        <select value="" onChange={(e) => e.target.value && tagGroup(d, u, e.target.value)}
-                          className="h-8 px-2 text-sm border border-amber-300 text-amber-700 rounded-lg bg-white" title="เลือกชนิดวัตถุดิบให้ SKU (ใช้ซ้ำครั้งหน้า)">
-                          <option value="">＋ เลือกชนิด</option>
+                    {readonly
+                      ? (d.material_type
+                        ? <span className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700">{d.material_type}</span>
+                        : <span className="text-slate-300">— ยังไม่ระบุ —</span>)
+                      : (
+                        <select value={groupIdOf(d)} onChange={(e) => e.target.value && tagGroup(d, u, e.target.value)}
+                          className={`h-8 px-2 text-sm border rounded-lg bg-white ${d.material_type ? "border-slate-200 text-slate-700" : "border-amber-300 text-amber-700"}`}
+                          title="ชนิดวัตถุดิบ — เปลี่ยนได้ (บันทึกกลับไปที่ SKU ด้วย ใช้ซ้ำครั้งหน้า)">
+                          <option value="">{d.material_type ? "— ไม่ระบุชนิด —" : "＋ เลือกชนิด"}</option>
                           {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                         </select>
                       )}
+                    {!readonly && d.material_type && (
+                      <span className="text-[11px] text-slate-400">เปลี่ยนชนิด = วิธีคิดปริมาณเปลี่ยนตาม</span>
+                    )}
                   </div>
 
                   {usesFace(d) && (
