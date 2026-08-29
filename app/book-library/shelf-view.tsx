@@ -16,6 +16,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { getStatusStyle } from "@/lib/status-config";
+import { useViewPref } from "@/lib/use-view-pref";
 import { ImportMailModal } from "./import-mail-modal";
 import { SeriesWizardModal } from "./series-wizard-modal";
 
@@ -32,12 +33,69 @@ type Book = {
   volume: string;
   category: string;
   status: string;
+  series_status: string;   // "" | ongoing | ended — ชุดจบหรือยัง (ทั้งชุดค่าเดียวกัน)
   rating: number | null;
   cover_r2_key: string | null;
 };
 
 const STATUSES = ["owned", "wishlist", "upcoming", "skipped"] as const;
 const NO_SERIES = "__no_series__";   // ชั้น "ไม่ได้จัดชุด" — เรียงไว้ท้ายสุดเสมอ
+
+/** ป้าย "จบแล้ว / ยังไม่จบ" บนหัวชั้น — บอกว่ายังต้องตามเก็บเล่มใหม่อีกไหม */
+const SERIES_BADGE: Record<string, { label: string; cls: string }> = {
+  ended:   { label: "จบแล้ว",   cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  ongoing: { label: "ยังไม่จบ", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+};
+
+/** เลขเล่มเรียงแล้ว → ช่วงสั้น ๆ: [1,2,3,5,6,9] → "1-3, 5-6, 9" */
+function toRangeText(nums: number[]): string {
+  if (nums.length === 0) return "";
+  const out: string[] = [];
+  let start = nums[0], prev = nums[0];
+  for (let i = 1; i <= nums.length; i++) {
+    const cur = nums[i];
+    if (cur !== prev + 1) { out.push(start === prev ? String(start) : `${start}-${prev}`); start = cur; }
+    prev = cur;
+  }
+  return out.join(", ");
+}
+
+/** เลขเล่มจากช่อง "เล่มที่" (ไม่ใช่ตัวเลข = null) */
+const volumeNum = (v: string) => {
+  const n = parseFloat(String(v ?? "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * สรุปชุดหนึ่งชั้น — "มีเล่มอะไรบ้าง ถึงเล่มไหน ขาดเล่มไหน"
+ * ขาด = เลขที่อยู่ระหว่างเล่มแรกถึงเล่มสุดท้ายแต่ไม่มีในคลังเลย (เช่น มี 1-33 แต่ไม่มี 20)
+ */
+function seriesSummary(list: Book[]) {
+  const nums: number[] = [];
+  let unnumbered = 0;
+  for (const b of list) {
+    const n = volumeNum(b.volume);
+    if (n === null) unnumbered++; else nums.push(n);
+  }
+  const sorted = [...new Set(nums)].sort((a, b) => a - b);
+  if (sorted.length === 0) return { sorted, min: null, max: null, missing: [] as number[], unnumbered };
+  const min = sorted[0], max = sorted[sorted.length - 1];
+  const have = new Set(sorted);
+  const missing: number[] = [];
+  for (let i = Math.ceil(min); i <= Math.floor(max); i++) if (!have.has(i)) missing.push(i);
+  return { sorted, min, max, missing, unnumbered };
+}
+
+/** ข้อความสรุปหน้าชั้น เช่น "เล่ม 1-33 · ขาด 20" หรือ "เล่ม 1-23 · ครบ" */
+function summaryText(s: ReturnType<typeof seriesSummary>): string {
+  if (s.min === null) return s.unnumbered > 0 ? `${s.unnumbered} เล่ม (ไม่ได้ระบุเล่มที่)` : "";
+  const range = s.min === s.max ? `เล่ม ${s.min}` : `เล่ม ${s.min}-${s.max}`;
+  const tail = s.missing.length > 0 ? `ขาด ${toRangeText(s.missing)}` : "ครบ";
+  return `${range} · ${tail}`;
+}
+
+const DISPLAYS = ["covers", "list"] as const;
+type Display = (typeof DISPLAYS)[number];
 
 /** เรียงเล่มที่แบบเข้าใจตัวเลข (เล่ม 2 มาก่อนเล่ม 10) */
 const volumeOrder = (v: string) => {
@@ -92,6 +150,9 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
   const [mailOpen, setMailOpen] = useState(false);
   const [seriesOpen, setSeriesOpen] = useState(false);
   const [coverJob, setCoverJob] = useState<{ done: number; total: number } | null>(null);
+  // โชว์เป็นรูปปก หรือเป็นรายชื่อ/เลขเล่มแบบย่อ (จำไว้ต่อคน)
+  const { view: display, setView: setDisplay, saveDefault: saveDisplay } = useViewPref<Display>("book_library_shelf_display", DISPLAYS, "covers");
+  const goDisplay = useCallback((d: Display) => { setDisplay(d); void saveDisplay(d); }, [setDisplay, saveDisplay]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -160,6 +221,10 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
       .map(([key, list]) => ({
         key,
         label: key === NO_SERIES ? "ไม่ได้จัดชุด" : key,
+        // ทั้งชุดค่าเดียวกันอยู่แล้ว (ฐานข้อมูลคุมให้) — หยิบตัวแรกที่ระบุไว้มาโชว์
+        seriesStatus: key === NO_SERIES ? "" : (list.find((b) => b.series_status)?.series_status ?? ""),
+        // "มีเล่มอะไร ถึงเล่มไหน ขาดเล่มไหน" — ชั้น "ไม่ได้จัดชุด" ไม่ต้องสรุป (คนละเรื่องกันทั้งชั้น)
+        summary: key === NO_SERIES ? null : seriesSummary(list),
         books: list.sort((x, y) => volumeOrder(x.volume) - volumeOrder(y.volume) || x.title.localeCompare(y.title, "th")),
       }));
   }, [books, q, status]);
@@ -229,6 +294,14 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
               </button>
             );
           })}
+
+          {/* โชว์เป็นปก หรือเป็นรายชื่อ/เลขเล่มย่อ (เห็นทั้งชุดจบในบรรทัดเดียว) */}
+          <div className="ml-auto flex items-center rounded-lg border border-slate-200 bg-white p-0.5">
+            <button onClick={() => goDisplay("covers")} title="โชว์รูปปก"
+              className={`h-7 px-2.5 text-xs rounded-md ${display === "covers" ? "bg-slate-800 text-white font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🖼 ปก</button>
+            <button onClick={() => goDisplay("list")} title="โชว์เป็นรายชื่อ + เลขเล่ม (เห็นว่าขาดเล่มไหน)"
+              className={`h-7 px-2.5 text-xs rounded-md ${display === "list" ? "bg-slate-800 text-white font-medium" : "text-slate-500 hover:bg-slate-50"}`}>📇 รายชื่อ</button>
+          </div>
         </div>
 
         {/* ชั้นหนังสือ */}
@@ -252,22 +325,68 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
             </div>
           </div>
         ) : (
-          <div className="space-y-8">
+          <div className={display === "list" ? "space-y-3" : "space-y-8"}>
             {shelves.map((sh) => (
-              <div key={sh.key}>
-                <div className="flex items-baseline gap-2 mb-2">
+              <div key={sh.key} className={display === "list" ? "rounded-xl border border-slate-200 bg-white p-3" : undefined}>
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 mb-2">
                   <h2 className="text-sm font-semibold text-slate-700">{sh.label}</h2>
                   <span className="text-xs text-slate-400">{sh.books.length} เล่ม</span>
+                  {SERIES_BADGE[sh.seriesStatus] && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${SERIES_BADGE[sh.seriesStatus].cls}`}>
+                      {SERIES_BADGE[sh.seriesStatus].label}
+                    </span>
+                  )}
+                  {/* "เล่ม 1-33 · ขาด 20" — เห็นทั้งชุดจบในบรรทัดเดียว ไม่ต้องไล่นับปก */}
+                  {sh.summary && summaryText(sh.summary) && (
+                    <span className="text-xs text-slate-500">
+                      {sh.summary.min === null ? summaryText(sh.summary) : (
+                        <>
+                          เล่ม {sh.summary.min === sh.summary.max ? sh.summary.min : `${sh.summary.min}-${sh.summary.max}`}
+                          {" · "}
+                          {sh.summary.missing.length > 0
+                            ? <span className="text-rose-600 font-medium">ขาด {toRangeText(sh.summary.missing)}</span>
+                            : <span className="text-emerald-600">ครบ</span>}
+                          {sh.summary.unnumbered > 0 && <span className="text-slate-400"> · ไม่ระบุเล่มที่ {sh.summary.unnumbered}</span>}
+                        </>
+                      )}
+                    </span>
+                  )}
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-3 items-end pb-3">
-                  {sh.books.map((b) => (
-                    <div key={b.id} onClick={() => setOpenId(b.id)}>
-                      <Cover book={b} />
+
+                {display === "list" ? (
+                  /* รายชื่อแบบย่อ — เลขเล่มที่มี (สีตามสถานะ) + เล่มที่ขาด (กรอบประ) กดที่เลขเพื่อเปิดเล่มนั้น */
+                  <div className="flex flex-wrap gap-1">
+                    {sh.books.map((b) => {
+                      const st = getStatusStyle(b.status, "book_library");
+                      const num = volumeNum(b.volume);
+                      return (
+                        <button key={b.id} onClick={() => setOpenId(b.id)}
+                          title={`${b.title} — ${st.label}`}
+                          className={`h-7 min-w-[28px] px-1.5 text-xs rounded-md border tabular-nums ${st.bg} ${st.text} ${st.border} hover:brightness-95`}>
+                          {num ?? b.title}
+                        </button>
+                      );
+                    })}
+                    {sh.summary?.missing.map((n) => (
+                      <span key={`miss-${n}`} title={`เล่ม ${n} — ยังไม่มีในคลัง`}
+                        className="h-7 min-w-[28px] px-1.5 text-xs rounded-md border border-dashed border-rose-300 text-rose-500 bg-rose-50/40 tabular-nums inline-flex items-center justify-center">
+                        {n}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-x-4 gap-y-3 items-end pb-3">
+                      {sh.books.map((b) => (
+                        <div key={b.id} onClick={() => setOpenId(b.id)}>
+                          <Cover book={b} />
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                {/* แผ่นชั้นวาง */}
-                <div className="h-2.5 rounded-sm bg-gradient-to-b from-amber-700/80 to-amber-900/80 shadow-[0_6px_10px_-6px_rgba(0,0,0,0.55)]" />
+                    {/* แผ่นชั้นวาง */}
+                    <div className="h-2.5 rounded-sm bg-gradient-to-b from-amber-700/80 to-amber-900/80 shadow-[0_6px_10px_-6px_rgba(0,0,0,0.55)]" />
+                  </>
+                )}
               </div>
             ))}
           </div>

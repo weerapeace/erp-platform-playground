@@ -21,6 +21,14 @@ import { apiFetch } from "@/lib/api";
 
 const MAX_VOLUMES = 200;
 
+/** ชุดจบหรือยัง — ตรงกับคอลัมน์ book_library.series_status ("" = ยังไม่ระบุ) */
+type SeriesStatus = "" | "ongoing" | "ended";
+const SERIES_STATUS_CHOICES: { key: SeriesStatus; label: string; hint: string }[] = [
+  { key: "",        label: "ยังไม่ระบุ",  hint: "ไม่รู้ / ค่อยมาใส่ทีหลัง" },
+  { key: "ongoing", label: "ยังไม่จบ",    hint: "ยังออกเล่มใหม่ต่อ — ต้องตามเก็บอีก" },
+  { key: "ended",   label: "จบแล้ว",      hint: "ออกครบทั้งชุดแล้ว ไม่มีเล่มใหม่" },
+];
+
 /** "1-10, 12, 15-18" → {1..10,12,15..18} — ผู้ใช้พิมพ์เร็วกว่าไล่กดทีละเล่ม */
 function parseRanges(input: string, max: number): Set<number> {
   const out = new Set<number>();
@@ -48,6 +56,7 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
   const [category, setCategory] = useState("");
   const [storeId, setStoreId] = useState<string | null>(null);
   const [price, setPrice] = useState<string>("");
+  const [seriesStatus, setSeriesStatus] = useState<SeriesStatus>("");   // ชุดนี้จบหรือยัง — ตั้งครั้งเดียว ใช้ทั้งชุด
   const [owned, setOwned] = useState<Set<number>>(new Set());
   const [rangeText, setRangeText] = useState("");
   const [saving, setSaving] = useState(false);
@@ -61,7 +70,7 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
 
   const reset = () => {
     setStep(1); setSeries(""); setTotal(""); setAuthor(""); setCategory("");
-    setStoreId(null); setPrice(""); setOwned(new Set()); setRangeText(""); setSaving(false);
+    setStoreId(null); setPrice(""); setSeriesStatus(""); setOwned(new Set()); setRangeText(""); setSaving(false);
     setDupes(new Map()); setChecking(false);
   };
   const close = () => { reset(); onClose(); };
@@ -117,6 +126,7 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
           volume: String(v),
           status: owned.has(v) ? "owned" : "wishlist",
         };
+        if (seriesStatus) row.series_status = seriesStatus;
         if (author.trim()) row.author = author.trim();
         if (category.trim()) row.category = category.trim();
         if (storeId) row.store_id = storeId;
@@ -206,9 +216,37 @@ export function SeriesWizardModal({ open, onClose, onCreated }: {
               <MoneyInput value={price} onChange={setPrice} placeholder="ใส่ก็ได้ ไม่ใส่ก็ได้" className={field} />
             </div>
           </div>
+
+          {/* ชุดนี้จบหรือยัง — ใช้ทั้งชุด (เก็บลงทุกเล่ม แล้วฐานข้อมูลคุมให้ตรงกันทั้งชั้น) */}
+          <div>
+            <label className={label}>ชุดนี้จบหรือยัง</label>
+            <div className="flex flex-wrap gap-2">
+              {SERIES_STATUS_CHOICES.map((c) => {
+                const on = seriesStatus === c.key;
+                return (
+                  <button key={c.key || "unset"} type="button" onClick={() => setSeriesStatus(c.key)} title={c.hint}
+                    className={`h-9 px-3.5 text-sm rounded-lg border transition-colors
+                      ${on
+                        ? c.key === "ended"   ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-medium"
+                        : c.key === "ongoing" ? "bg-amber-50 border-amber-300 text-amber-700 font-medium"
+                        :                       "bg-slate-100 border-slate-300 text-slate-600 font-medium"
+                        : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                    {on ? "✓ " : ""}{c.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1 text-[10px] text-slate-400">
+              {SERIES_STATUS_CHOICES.find((c) => c.key === seriesStatus)?.hint} · แก้ทีหลังได้ที่เล่มไหนก็ได้ เล่มอื่นในชุดเปลี่ยนตามเอง
+            </p>
+          </div>
+
           {series.trim() && n > 0 && (
             <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm text-slate-600">
-              จะสร้าง <b className="text-slate-800">{n} เล่ม</b> ชื่อ:{" "}
+              จะสร้าง <b className="text-slate-800">{n} เล่ม</b>
+              {seriesStatus === "ended" && <span className="text-emerald-600"> (จบแล้ว)</span>}
+              {seriesStatus === "ongoing" && <span className="text-amber-600"> (ยังไม่จบ)</span>}
+              {" "}ชื่อ:{" "}
               <span className="text-slate-800">{titleOf(1)}</span> … <span className="text-slate-800">{titleOf(n)}</span>
             </div>
           )}
