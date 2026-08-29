@@ -10,15 +10,20 @@
  * (แก้รายเล่มลึก ๆ เช่น ราคา/ปก ให้กดที่เลขเล่มเปิดฟอร์มของเล่มนั้นแทน)
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { RelationPicker } from "@/components/relation-picker";
+import { STORE_RELATION } from "./store-relation";
+import { getStatusStyle } from "@/lib/status-config";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 
 const MAX_TOTAL = 200;
+const BOOK_STATUSES = ["owned", "wishlist", "upcoming", "skipped"] as const;
 
 type EditBook = {
-  id: string; title: string; title_en: string; series: string; volume: string; status: string; series_status: string;
+  id: string; title: string; title_en: string; series: string; volume: string;
+  status: string; series_status: string; store_id: string | null;
 };
 
 type SeriesStatus = "" | "ongoing" | "ended";
@@ -38,22 +43,27 @@ const enTitleFor = (nameEn: string, volume: string) =>
 /** ถอดชื่อชุดภาษาอังกฤษจากชื่อเล่ม (ตัด " Vol. 23" ท้ายออก) */
 const seriesEnOf = (titleEn: string) => titleEn.replace(/\s*Vol\.?\s*[\d.]+\s*$/i, "").trim();
 
-export function SeriesEditModal({ open, seriesName, books, onClose, onSaved }: {
+export function SeriesEditModal({ open, seriesName, books, onClose, onSaved, onOpenBook }: {
   open: boolean;
   seriesName: string;
   books: EditBook[];
   onClose: () => void;
   onSaved: () => void;
+  /** เปิดฟอร์มเต็มของเล่มนั้น (ปิดป๊อปอัปนี้ก่อน) */
+  onOpenBook: (id: string) => void;
 }) {
   const toast = useToast();
   const [name, setName] = useState(seriesName);
   const [nameEn, setNameEn] = useState("");
   const [status, setStatus] = useState<SeriesStatus>("");
+  const [storeId, setStoreId] = useState<string | null>(null);
   const [totalText, setTotalText] = useState("");
   const [addStatus, setAddStatus] = useState<"wishlist" | "owned">("wishlist");
   const [specials, setSpecials] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [showVolumes, setShowVolumes] = useState(false);   // เปิดรายการเล่ม (จัดการรายเล่ม)
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   // เลขเล่มที่มีอยู่ตอนนี้
   const owned = useMemo(() => {
@@ -68,14 +78,23 @@ export function SeriesEditModal({ open, seriesName, books, onClose, onSaved }: {
     [books],
   );
 
+  /** ร้านที่ซื้อที่ใช้อยู่ (เล่มแรกที่ระบุไว้) */
+  const currentStore = useMemo(() => books.find((b) => b.store_id)?.store_id ?? null, [books]);
+
+  // ตั้งค่าเริ่มต้นครั้งเดียวตอนเปิด — โหลดข้อมูลใหม่ระหว่างเปิดอยู่ (เช่นหลังแก้รายเล่ม) จะไม่ล้างที่พิมพ์ไว้
+  const openedRef = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open) { openedRef.current = false; return; }
+    if (openedRef.current) return;
+    openedRef.current = true;
     setName(seriesName);
     setNameEn(currentEn);
+    setStoreId(currentStore);
     setStatus((books.find((b) => b.series_status)?.series_status ?? "") as SeriesStatus);
     setTotalText(String(maxVol || ""));
     setSpecials(""); setAddStatus("wishlist"); setSaving(false); setConfirmOpen(false);
-  }, [open, seriesName, books, maxVol, currentEn]);
+    setShowVolumes(false); setBusyId(null);
+  }, [open, seriesName, books, maxVol, currentEn, currentStore]);
 
   const total = Math.min(MAX_TOTAL, Math.max(0, parseInt(totalText || "0", 10) || 0));
   const have = useMemo(() => new Set(owned), [owned]);
@@ -108,7 +127,50 @@ export function SeriesEditModal({ open, seriesName, books, onClose, onSaved }: {
   const renamed = name.trim() !== "" && name.trim() !== seriesName;
   const renamedEn = nameEn.trim() !== currentEn;
   const statusChanged = status !== ((books.find((b) => b.series_status)?.series_status ?? "") as SeriesStatus);
-  const dirty = renamed || renamedEn || statusChanged || toAdd.length > 0 || toRemove.length > 0 || specialsToAdd.length > 0;
+  const storeChanged = (storeId ?? null) !== (currentStore ?? null);
+  const dirty = renamed || renamedEn || statusChanged || storeChanged || toAdd.length > 0 || toRemove.length > 0 || specialsToAdd.length > 0;
+
+  /** เรียงเล่มแบบเข้าใจตัวเลข (เล่ม 2 มาก่อน 10) — เล่มพิเศษที่เป็นข้อความไว้ท้าย */
+  const sortedBooks = useMemo(
+    () => [...books].sort((a, b) => {
+      const na = volNum(a.volume), nb = volNum(b.volume);
+      if (na !== null && nb !== null) return na - nb;
+      if (na !== null) return -1;
+      if (nb !== null) return 1;
+      return a.title.localeCompare(b.title, "th");
+    }),
+    [books],
+  );
+
+  /** เปลี่ยนสถานะเล่มเดียวทันที (ไม่ต้องกดบันทึกรวม) */
+  const setBookStatus = async (b: EditBook, next: string) => {
+    setBusyId(b.id);
+    try {
+      const r = await apiFetch(`/api/master-v2/book_library/${b.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next }),
+      });
+      const j = await r.json();
+      if (j.error) throw new Error(String(j.error));
+      onSaved();
+    } catch (e) { toast.error((e as Error).message ?? "เปลี่ยนสถานะไม่สำเร็จ"); }
+    finally { setBusyId(null); }
+  };
+
+  /** ลบเล่มเดียวทันที */
+  const removeBook = async (b: EditBook) => {
+    if (!confirm(`ลบ "${b.title}" ออกจากคลังถาวร?`)) return;
+    setBusyId(b.id);
+    try {
+      const r = await apiFetch(`/api/master-v2/book_library/${b.id}`, { method: "DELETE" });
+      const j = await r.json().catch(() => ({}));
+      if (j.error) throw new Error(String(j.error));
+      const n = volNum(b.volume);
+      if (n !== null && n === maxVol) setTotalText(String(Math.max(0, maxVol - 1)));   // ลบเล่มท้าย → ลดจำนวนรวมตาม
+      toast.success("ลบแล้ว");
+      onSaved();
+    } catch (e) { toast.error((e as Error).message ?? "ลบไม่สำเร็จ"); }
+    finally { setBusyId(null); }
+  };
 
   const rangeText = (nums: number[]) => {
     if (nums.length === 0) return "";
@@ -128,9 +190,10 @@ export function SeriesEditModal({ open, seriesName, books, onClose, onSaved }: {
     try {
       const finalName = name.trim();
 
-      // 1) เปลี่ยนชื่อชุด (ไทย/อังกฤษ) — ชื่อเล่มที่ขึ้นต้นด้วยชื่อชุดเดิมเปลี่ยนตาม (ชื่อที่ตั้งเองไว้ไม่ถูกแตะ)
+      // 1) แก้ที่ใช้ร่วมทั้งชุด: ชื่อไทย/อังกฤษ + ร้านที่ซื้อ
+      //    (ชื่อเล่มที่ขึ้นต้นด้วยชื่อชุดเดิมเปลี่ยนตาม · ชื่อที่ตั้งเองไว้แปลก ๆ ไม่ถูกแตะ)
       const finalEn = nameEn.trim();
-      if (renamed || renamedEn) {
+      if (renamed || renamedEn || storeChanged) {
         for (const b of books) {
           const patch: Record<string, unknown> = {};
           if (renamed) {
@@ -138,6 +201,7 @@ export function SeriesEditModal({ open, seriesName, books, onClose, onSaved }: {
             if (b.title.startsWith(seriesName)) patch.title = finalName + b.title.slice(seriesName.length);
           }
           if (renamedEn) patch.title_en = enTitleFor(finalEn, b.volume);
+          if (storeChanged) patch.store_id = storeId;
           if (Object.keys(patch).length === 0) continue;
           const r = await apiFetch(`/api/master-v2/book_library/${b.id}`, {
             method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
@@ -173,6 +237,7 @@ export function SeriesEditModal({ open, seriesName, books, onClose, onSaved }: {
           status: addStatus,
           ...(finalEn ? { title_en: enTitleFor(finalEn, v) } : {}),
           ...(status ? { series_status: status } : {}),
+          ...(storeId ? { store_id: storeId } : {}),
         }));
         const r = await apiFetch("/api/master-v2/book_library/import", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows, mode: "create" }),
@@ -232,6 +297,13 @@ export function SeriesEditModal({ open, seriesName, books, onClose, onSaved }: {
           </div>
 
           <div>
+            <label className={label}>ร้านที่ซื้อ (ทั้งชุด)</label>
+            <RelationPicker value={storeId} onChange={(v) => setStoreId(v)} config={STORE_RELATION}
+              placeholder="— เลือกร้าน —" />
+            {storeChanged && <p className="mt-1 text-[10px] text-amber-600">จะตั้งร้านนี้ให้ทั้ง {books.length} เล่ม</p>}
+          </div>
+
+          <div>
             <label className={label}>ชุดจบหรือยัง</label>
             <div className="flex flex-wrap gap-1.5">
               {STATUS_CHOICES.map((c) => {
@@ -282,9 +354,47 @@ export function SeriesEditModal({ open, seriesName, books, onClose, onSaved }: {
             )}
           </div>
 
-          <p className="text-[10px] text-slate-400 border-t border-slate-100 pt-2">
-            อยากแก้ราคา / ปก / สถานะรายเล่ม → ปิดหน้านี้แล้วกดที่เลขเล่มในชั้นได้เลย
-          </p>
+          {/* จัดการรายเล่ม — เปลี่ยนสถานะ/เปิดฟอร์มเต็ม/ลบ ทีละเล่ม (มีผลทันที ไม่ต้องกดบันทึกรวม) */}
+          <div className="border-t border-slate-100 pt-2">
+            <button type="button" onClick={() => setShowVolumes((v) => !v)}
+              className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1.5">
+              📋 จัดการรายเล่ม ({books.length}) <span className="text-[10px] text-slate-400">{showVolumes ? "▲ ซ่อน" : "▼ เปิด"}</span>
+            </button>
+
+            {showVolumes && (
+              <div className="mt-2 max-h-[38vh] overflow-y-auto rounded-lg border border-slate-100 divide-y divide-slate-50">
+                {sortedBooks.map((b) => {
+                  const st = getStatusStyle(b.status, "book_library");
+                  const busy = busyId === b.id;
+                  return (
+                    <div key={b.id} className={`flex items-center gap-2 px-2 py-1.5 ${busy ? "opacity-50" : ""}`}>
+                      <span className={`h-6 min-w-[30px] px-1 text-[11px] leading-none rounded border tabular-nums inline-flex items-center justify-center shrink-0 ${st.bg} ${st.text} ${st.border}`}>
+                        {b.volume || "—"}
+                      </span>
+                      <span className="flex-1 min-w-0 truncate text-xs text-slate-600" title={b.title}>{b.title}</span>
+                      <select value={b.status} disabled={busy}
+                        onChange={(e) => void setBookStatus(b, e.target.value)}
+                        className="h-7 px-1 text-[11px] border border-slate-200 rounded-md bg-white text-slate-600">
+                        {BOOK_STATUSES.map((s) => (
+                          <option key={s} value={s}>{getStatusStyle(s, "book_library").label}</option>
+                        ))}
+                      </select>
+                      <button type="button" disabled={busy} title="เปิดฟอร์มเต็มของเล่มนี้ (ราคา / ปก / โน้ต)"
+                        onClick={() => { onClose(); onOpenBook(b.id); }}
+                        className="h-7 w-7 shrink-0 rounded-md border border-slate-200 text-xs text-slate-500 hover:bg-slate-50">✎</button>
+                      <button type="button" disabled={busy} title="ลบเล่มนี้"
+                        onClick={() => void removeBook(b)}
+                        className="h-7 w-7 shrink-0 rounded-md border border-slate-200 text-xs text-slate-400 hover:bg-red-50 hover:text-red-500">🗑</button>
+                    </div>
+                  );
+                })}
+                {sortedBooks.length === 0 && <div className="px-2 py-4 text-center text-xs text-slate-400">ยังไม่มีเล่มในชุดนี้</div>}
+              </div>
+            )}
+            <p className="mt-1.5 text-[10px] text-slate-400">
+              เปลี่ยนสถานะ/ลบ มีผลทันที · กด ✎ เพื่อแก้ราคา ปก โน้ต ของเล่มนั้น
+            </p>
+          </div>
         </div>
       </ERPModal>
 

@@ -36,6 +36,7 @@ type Book = {
   category: string;
   status: string;
   series_status: string;   // "" | ongoing | ended — ชุดจบหรือยัง (ทั้งชุดค่าเดียวกัน)
+  store_id: string | null;
   rating: number | null;
   cover_r2_key: string | null;
 };
@@ -430,6 +431,7 @@ export function BookShelfView({ onSwitchToTable }: { onSwitchToTable: () => void
           books={books.filter((b) => (b.series ?? "").trim() === editSeries)}
           onClose={() => setEditSeries(null)}
           onSaved={load}
+          onOpenBook={(id) => { setEditSeries(null); setOpenId(id); }}
         />
       )}
 
