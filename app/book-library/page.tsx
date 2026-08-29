@@ -58,7 +58,7 @@ const CONFIG: MasterCRUDConfig = {
   activeField: "is_active",
   exportEntityType: "book_library",
   uniqueKey:   "title",
-  searchKeys:  ["title", "series", "volume", "author", "category", "store", "isbn"],
+  searchKeys:  ["title", "title_en", "series", "volume", "author", "category", "store", "isbn"],
   permissions: { view: "books.view", create: "books.edit", edit: "books.edit" },
   copyFromRecord: true,
   cellRenderers: {
