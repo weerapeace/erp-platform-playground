@@ -109,9 +109,12 @@ type GridCell = {
   date: string; status: string; label: string; sublabel?: string; editable: boolean; allow_ot: boolean;
   has_input: boolean; late_minutes: number; absence_hours: number; leave_days: number; ot_hours: number;
   amount: number; note?: string;
+  /** เหตุผลที่ช่องนี้ไม่มีค่า (ยังไม่เริ่มสัญญา / วันหยุด ฯลฯ) — โชว์เป็น tooltip */
+  reason?: string;
 };
 type GridRow = {
   employee_id: string; employee_code: string; employee_name: string; contract_type?: string | null; wage_type?: string | null; net_estimate: number; manual_days: number; cells: GridCell[];
+  contract_start?: string | null; contract_end?: string | null;
 };
 type GridData = { days: GridDay[]; rows: GridRow[]; period?: { default_hours_per_day?: number } };
 type ManualInputPeriodMeta = {
@@ -2061,6 +2064,8 @@ function clockText(clock: string): string {
 
 function cellTooltip(cell: GridCell): string {
   const parts = [formatDate(cell.date)];
+  // ช่องที่ไม่มีค่า: บอกเหตุผลให้ชัด (เช่น "ยังไม่เริ่มสัญญา — สัญญาเริ่ม 20 ส.ค. 2569")
+  if (cell.reason) parts.push(cell.reason);
   if (["full", "partial", "zero"].includes(cell.status)) {
     parts.push(`ทำงานสุทธิ ${clockText(cell.label)}`);
   }
@@ -2140,6 +2145,13 @@ function AttendanceGrid({
                   <div className="text-[11px] text-slate-400">
                     {row.manual_days ? `มีรายการในงวดนี้ ${row.manual_days} วัน` : "ทำงานปกติทั้งงวด"}
                   </div>
+                  {/* วันเริ่ม/สิ้นสุดสัญญา — อธิบายว่าทำไมช่องต้นงวด/ท้ายงวดถึงว่าง */}
+                  {(row.contract_start || row.contract_end) && (
+                    <div className="text-[11px] text-slate-400" title="ช่วงที่มีสัญญาจ้าง — วันนอกช่วงนี้จะไม่มีค่าในตาราง">
+                      📄 {row.contract_start ? `เริ่มสัญญา ${formatDate(row.contract_start)}` : "ไม่ระบุวันเริ่ม"}
+                      {row.contract_end ? ` → สิ้นสุด ${formatDate(row.contract_end)}` : ""}
+                    </div>
+                  )}
                 </td>
                 {row.cells.map((cell) => {
                   const disabled = !editable || (!cell.editable && !cell.allow_ot);

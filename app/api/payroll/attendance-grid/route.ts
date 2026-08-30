@@ -48,6 +48,14 @@ function eachDay(start: string, end: string): { iso: string; day: number; dow: n
   return out;
 }
 
+/** 2026-08-20 → 20 ส.ค. 2569 (ใช้ในข้อความอธิบายช่องว่าง) */
+const TH_MONTHS = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+function thaiDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso ?? ""));
+  if (!m) return String(iso ?? "");
+  return `${Number(m[3])} ${TH_MONTHS[Number(m[2]) - 1] ?? m[2]} ${Number(m[1]) + 543}`;
+}
+
 function key(employeeId: unknown, date: unknown): string {
   return `${String(employeeId)}::${String(date)}`;
 }
@@ -199,6 +207,26 @@ export async function GET(req: NextRequest) {
           // วันนอกช่วงสัญญา (ก่อนเข้า/หลังออก) — ไม่ใช่วันทำงาน โชว์ว่าง
           if (!employed) { status = "none"; label = "—"; sublabel = ""; amount = 0; }
 
+          // เหตุผลของช่องที่ไม่มีค่า — เอาไปโชว์เป็น tooltip ให้ผู้ใช้เข้าใจว่าทำไมว่าง
+          let reason = "";
+          if (!employed) {
+            if (!validDate(cStart) && !validDate(cEnd)) {
+              reason = "ยังไม่มีสัญญาจ้าง — ต้องเพิ่มสัญญาก่อน ระบบถึงจะคิดเวลาทำงานให้";
+            } else if (validDate(cStart) && day.iso < cStart) {
+              reason = `ยังไม่เริ่มสัญญา — สัญญาเริ่ม ${thaiDate(cStart)}`;
+            } else if (validDate(cEnd) && day.iso > cEnd) {
+              reason = `พ้นสภาพแล้ว — สัญญาสิ้นสุด ${thaiDate(cEnd)}`;
+            } else {
+              reason = "อยู่นอกช่วงสัญญา";
+            }
+          } else if (paidHoliday) {
+            reason = "วันหยุดพิเศษ (ได้รับค่าจ้าง)";
+          } else if (holiday) {
+            reason = "วันหยุดพิเศษของงวดนี้";
+          } else if (!scheduled) {
+            reason = "วันหยุดประจำสัปดาห์ (ไม่ใช่วันทำงานตามตารางกะ)";
+          }
+
           return {
             date: day.iso,
             status,
@@ -215,6 +243,7 @@ export async function GET(req: NextRequest) {
             ot_hours: otHours,
             amount: roundMoney(amount),
             note: input.note ?? "",
+            reason,
           };
         });
         const manualDays = cells.filter((c) => c.has_input).length;
@@ -223,6 +252,8 @@ export async function GET(req: NextRequest) {
           employee_code: line.employee_code,
           employee_name: employeeName.get(employeeId) ?? "",
           contract_type: line.contract_type ?? contract.contract_type ?? null,
+          contract_start: validDate(cStart) ? cStart : null,   // โชว์ใต้ชื่อ + ใช้อธิบายช่องว่าง
+          contract_end: validDate(cEnd) ? cEnd : null,
           wage_type: line.wage_type ?? contract.wage_type ?? null,
           net_estimate: money(line.net_pay),
           manual_days: manualDays,
