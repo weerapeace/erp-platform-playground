@@ -11,6 +11,7 @@ import {
   type AttendanceWorkTimeProfile,
 } from "@/lib/payroll-attendance-import";
 import { apiFetch } from "@/lib/api";
+import { RealEmployeePicker, type EmployeePickerValue } from "@/components/real-employee-picker";
 import { formatDate } from "@/lib/date";
 import { isPayrollContractor, shouldReceivePaidPeriodHoliday } from "@/lib/payroll-attendance-rules";
 
@@ -380,6 +381,7 @@ export function AttendanceImportPreview({
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);   // กดหัวคอลัมน์เพื่อเรียง
   const [editRow, setEditRow] = useState<DisplayImportRow | null>(null);                   // แถวที่กำลังเปิดป๊อปอัปตรวจ/แก้
   const [pendingMatches, setPendingMatches] = useState<Record<string, string>>({});        // รหัสสแกน → employee_id ที่จะจับคู่
+  const [pendingMatchPick, setPendingMatchPick] = useState<Record<string, EmployeePickerValue | null>>({});   // ค่าที่เลือกไว้ (โชว์ในช่องค้นหา)
   const [matchSaving, setMatchSaving] = useState(false);
   const [committingCount, setCommittingCount] = useState<number | null>(null);   // โชว์ overlay "กำลังบันทึก..." ตอน commit (ยอดรวม)
   const [committingDone, setCommittingDone] = useState(0);                        // เป้าหมาย progress (ขยับทีละ chunk)
@@ -842,12 +844,6 @@ export function AttendanceImportPreview({
   const toggleSort = (key: SortKey) =>
     setSort((cur) => (cur?.key === key ? (cur.dir === "asc" ? { key, dir: "desc" } : null) : { key, dir: "asc" }));
 
-  // รายชื่อพนักงาน (จากงวดนี้) สำหรับ dropdown จับคู่รหัสสแกน
-  const employeeOptions = useMemo(
-    () => rows.map((r) => ({ id: r.employee_id, label: `${r.employee_code} · ${r.employee_name}` }))
-      .sort((a, b) => a.label.localeCompare(b.label, "th", { numeric: true })),
-    [rows],
-  );
   const pendingMatchCount = Object.values(pendingMatches).filter(Boolean).length;
 
   // บันทึก decision ของ 1 แถวลง draft (persist) / preview (reviewDecisions)
@@ -926,6 +922,7 @@ export function AttendanceImportPreview({
         ok++;
       }
       setPendingMatches({});
+      setPendingMatchPick({});
       matchedCodesRef.current = new Set(entries.map(([code]) => code));   // ให้ draft อัปเดตแถวที่จับคู่หลัง employees โหลดใหม่
       setMessage(`จับคู่แล้ว ${ok} รหัส — กำลังอัปเดตในตาราง`);
       onCommitted?.();
@@ -1233,15 +1230,21 @@ export function AttendanceImportPreview({
                       {(row.status === "unmapped" || row.status === "blocked") ? (
                         <div className="space-y-1">
                           {row.scannerName && <div className="text-xs text-slate-500">เครื่อง: <span className="text-slate-700">{row.scannerName}</span></div>}
-                          <select
-                            value={pendingMatches[row.scannerCode] || ""}
-                            onChange={(event) => setPendingMatches((cur) => ({ ...cur, [row.scannerCode]: event.target.value }))}
-                            disabled={!editable}
-                            className="h-7 w-44 max-w-full rounded border border-slate-200 bg-white px-1 text-xs"
-                          >
-                            <option value="">— จับคู่พนักงาน —</option>
-                            {employeeOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-                          </select>
+                          {/* picker พนักงานกลาง: พิมพ์ค้นหาได้ + ดึงจากทะเบียนพนักงานทั้งหมด
+                              (เดิมเป็น dropdown ที่สร้างจากเฉพาะคนที่มีบรรทัดเงินเดือนในงวดนี้ → รายชื่อไม่ครบ
+                               คนใหม่ที่ยังไม่เข้างวดเลยไม่ขึ้น ทั้งที่เป็นกลุ่มที่ต้องจับคู่พอดี) */}
+                          <div className="w-56 max-w-full">
+                            <RealEmployeePicker
+                              value={pendingMatchPick[row.scannerCode] ?? null}
+                              onChange={(v) => {
+                                setPendingMatchPick((cur) => ({ ...cur, [row.scannerCode]: v }));
+                                setPendingMatches((cur) => ({ ...cur, [row.scannerCode]: v?.id ?? "" }));
+                              }}
+                              disabled={!editable}
+                              disableCreate
+                              placeholder="— จับคู่พนักงาน —"
+                            />
+                          </div>
                         </div>
                       ) : row.employeeLabel}
                     </td>
