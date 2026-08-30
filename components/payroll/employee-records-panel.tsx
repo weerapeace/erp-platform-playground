@@ -28,6 +28,8 @@ type Field = {
   key: string; label: string;
   type: "text" | "number" | "date" | "select" | "textarea" | "checkbox";
   options?: Opt[]; required?: boolean; span?: 1 | 2; placeholder?: string; hint?: string;
+  /** ตัวเลือกที่ต้องโหลดจากฐานข้อมูล (ไม่ใช่ค่าคงที่) เช่น รายชื่อบริษัท */
+  optionsFrom?: "companies";
   showIf?: (f: Row) => boolean;
 };
 
@@ -153,6 +155,10 @@ const KINDS: Record<RecordKind, KindCfg> = {
     defaults: { contract_type: "permanent", employment_type: "full_time", wage_type: "monthly", status: "active", is_current: true, start_date: today() },
     fields: [
       { key: "contract_no", label: "เลขที่สัญญา", type: "text", placeholder: "เว้นว่าง = ออกเลขให้อัตโนมัติ" },
+      // บริษัทสำคัญมาก: การคำนวณเงินเดือนเลือกสัญญาตามบริษัทของงวด
+      // ถ้าไม่ระบุ พนักงานจะหายไปจากงวดนั้นทั้งหมด (ไม่ขึ้นตารางเข้างาน/ไม่ถูกคำนวณ)
+      { key: "company_id", label: "บริษัท", type: "select", optionsFrom: "companies",
+        hint: "งวดเงินเดือนแยกตามบริษัท — ต้องตรงกับบริษัทของงวด ถึงจะถูกคำนวณ" },
       { key: "contract_type", label: "ประเภทสัญญา", type: "select", options: CONTRACT_TYPE, required: true },
       { key: "employment_type", label: "รูปแบบจ้าง", type: "select", options: EMPLOYMENT_TYPE },
       { key: "wage_type", label: "วิธีคิดค่าจ้าง", type: "select", options: WAGE_TYPE },
@@ -215,6 +221,23 @@ export function EmployeeRecordsPanel({
   const [editing, setEditing] = useState<{ id: string | null; form: Row } | null>(null);   // id=null → เพิ่มใหม่
   const [confirmRow, setConfirmRow] = useState<Row | null>(null);                          // แถวที่รอยืนยันปิดใช้งาน
   const [toggled, setToggled] = useState<Set<string>>(new Set());                          // แถวที่ผู้ใช้กดสลับ กาง/ย่อ เอง
+  const [companyOpts, setCompanyOpts] = useState<Opt[]>([]);                               // รายชื่อบริษัท (ช่อง "บริษัท" ในสัญญา)
+
+  // โหลดรายชื่อบริษัทครั้งเดียวเมื่อพาเนลมีแท็บสัญญา
+  useEffect(() => {
+    if (!kinds.includes("contracts")) return;
+    let alive = true;
+    (async () => {
+      try {
+        const j = await apiFetch("/api/payroll/master/companies").then((r) => r.json());
+        if (!alive || j.error) return;
+        setCompanyOpts(((j.data ?? []) as Row[])
+          .map((c) => ({ v: s(c.id), th: s(c.name) || s(c.code) || s(c.id) }))
+          .filter((o) => o.v));
+      } catch { /* ไม่มีรายชื่อก็ยังบันทึกสัญญาได้ (ระบบสืบทอดบริษัทจากสัญญาก่อนหน้าให้) */ }
+    })();
+    return () => { alive = false; };
+  }, [kinds]);
 
   const load = useCallback(async () => {
     try {
@@ -329,7 +352,7 @@ export function EmployeeRecordsPanel({
                 <label className="block text-[11px] text-slate-500 mb-0.5">
                   {f.label}{f.required && <span className="text-red-500"> *</span>}
                 </label>
-                <FieldInput f={f} value={editing.form[f.key]}
+                <FieldInput f={f} value={editing.form[f.key]} dynamicOptions={f.optionsFrom === "companies" ? companyOpts : undefined}
                   onChange={(v) => setEditing((e) => (e ? { ...e, form: { ...e.form, [f.key]: v } } : e))} />
                 {f.hint && <div className="text-[10px] text-slate-400 mt-0.5">{f.hint}</div>}
               </div>
@@ -393,12 +416,13 @@ export function EmployeeRecordsPanel({
   );
 }
 
-function FieldInput({ f, value, onChange }: { f: Field; value: unknown; onChange: (v: unknown) => void }) {
+function FieldInput({ f, value, onChange, dynamicOptions }: { f: Field; value: unknown; onChange: (v: unknown) => void; dynamicOptions?: Opt[] }) {
   const base = "w-full h-9 px-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200";
   if (f.type === "select") {
     return (
       <select value={s(value)} onChange={(e) => onChange(e.target.value)} className={base}>
-        {(f.options ?? []).map((o) => <option key={o.v} value={o.v}>{o.th}</option>)}
+        {f.optionsFrom && <option value="">— เลือกบริษัท —</option>}
+        {(f.optionsFrom ? (dynamicOptions ?? []) : (f.options ?? [])).map((o) => <option key={o.v} value={o.v}>{o.th}</option>)}
       </select>
     );
   }

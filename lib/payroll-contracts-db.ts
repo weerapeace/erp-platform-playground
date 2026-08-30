@@ -25,6 +25,8 @@ const WRITABLE = new Set([
   "base_salary", "daily_wage", "hourly_wage", "piece_rate_default", "payment_cycle",
   "start_date", "end_date", "is_current", "status", "payroll_register_base_salary",
   "work_schedule_id", "overtime_policy_id", "leave_policy_id",
+  // บริษัทต้องเขียนได้ ไม่งั้นตั้งบริษัทให้สัญญาไม่ได้เลย (การคำนวณเงินเดือนกรองด้วยบริษัท)
+  "company_id",
   "include_pnd3_export", "include_payroll_register_export", "attendance_scan_exempt",
 ]);
 const NUMERIC = ["base_salary", "daily_wage", "hourly_wage", "piece_rate_default", "payroll_register_base_salary"];
@@ -155,6 +157,27 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
     status:        cols.status ?? "active",
     ...cols,
   };
+
+  // ── บริษัทของสัญญา (สำคัญมาก) ──────────────────────────────────────────
+  // ฟอร์ม "เพิ่มสัญญา" ไม่มีช่องบริษัท → สัญญาที่สร้างจากฟอร์มจะได้ company_id = null
+  // แต่การคำนวณเงินเดือน (computePeriodPreview) กรองสัญญาด้วย company_id ของงวด
+  // → สัญญาที่ไม่มีบริษัทถูกตัดออกจาก "ทุกงวด" = พนักงานหายจากตารางเข้างาน
+  //   ไม่ถูกคำนวณ และไม่ได้เงิน โดยไม่มีข้อความเตือนอะไรเลย (เจอจริงกับ ISG-064 วาวา)
+  // → ถ้าไม่ได้ส่งบริษัทมา ให้สืบทอดจากสัญญาก่อนหน้าของพนักงานคนนี้
+  //   ถ้าไม่เคยมีสัญญาเลย และระบบมีบริษัทเดียว ก็ใช้บริษัทนั้น
+  if (!baseInsert.company_id) {
+    const { data: prevRows } = await admin.from(TABLE)
+      .select("company_id, start_date").eq("employee_id", employeeId)
+      .not("company_id", "is", null)
+      .order("start_date", { ascending: false }).limit(1);
+    const inherited = (prevRows ?? [])[0]?.company_id as string | undefined;
+    if (inherited) {
+      baseInsert.company_id = inherited;
+    } else {
+      const { data: companies } = await admin.from("companies").select("id").not("is_active", "is", false).limit(2);
+      if ((companies ?? []).length === 1) baseInsert.company_id = (companies ?? [])[0].id;
+    }
+  }
 
   // ── ต่อสัญญา: สัญญาปัจจุบันมีได้ฉบับเดียวต่อคน ────────────────────────────
   // ฐานข้อมูลมี unique index (employee_contracts_one_current_idx) คุมไว้
