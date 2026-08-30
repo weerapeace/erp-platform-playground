@@ -171,6 +171,20 @@ function buildLine(period: Row, employee: Row, contract: Row, setting: Row, manu
   const baseCap = money(period.default_work_days);
   const sched = baseCap > 0 ? Math.min(schedRaw, baseCap) : schedRaw;
   const payable = payableWorkDays(period, contract) || schedRaw;
+
+  // ── พนักงานรายเดือนที่เข้า/ออกกลางงวด: ตัดเงินเดือนตามสัดส่วนวันที่อยู่ในสัญญา ──
+  // เดิมได้เงินเดือน "เต็มเดือน" แม้สัญญาเริ่มวันที่ 17 (ตารางเข้างานขึ้นวันสีเทา
+  // ก่อนเริ่มสัญญา แต่ไม่ได้ถูกหักเงินเลย) — ต้องจ่ายตามวันที่มีสัญญาจริง
+  // ไม่กระทบคนที่ทำครบงวด (วันในสัญญา = วันของงวด → สัดส่วน = 1)
+  // ถ้าผู้ใช้กรอกเงินเดือนของงวดนี้เอง (manual.base_salary) จะเคารพค่าที่กรอก ไม่ตัดซ้ำ
+  if (!contractor && !payByAttendance && !hasInput(manual.base_salary)) {
+    const fullRaw = scheduledWorkDays(period, { work_schedule_id: contract.work_schedule_id })
+      || money(period.default_work_days ?? 0);
+    const fullDays = baseCap > 0 ? Math.min(fullRaw, baseCap) : fullRaw;
+    if (fullDays > 0 && sched > 0 && sched < fullDays) {
+      values.base_salary = roundMoney(money(values.base_salary) * (sched / fullDays));
+    }
+  }
   const defaultWorkDays = payByAttendance ? payable : sched;
   const hoursPerDay = money(period.default_hours_per_day ?? 8);
   const manualAtt = hasInput(manual.attendance_days);
