@@ -60,6 +60,9 @@ const STATUS_LABEL: Record<string, string> = {
 
 type FormState = {
   customer: CustomerPickerValue | null;
+  /** พิมพ์ชื่อลูกค้าเอง (ใช้กับบิลไม่มี VAT เช่น ขายหน้าร้าน/ในนามบุคคล ที่ลูกค้าไม่ได้อยู่ในทะเบียน) */
+  customer_manual: boolean;
+  customer_text: string;
   warehouse: WarehousePickerValue | null;
   sale_person_name: string;
   order_date: string;
@@ -79,7 +82,7 @@ type FormState = {
 };
 
 const EMPTY: FormState = {
-  customer: null, warehouse: null, sale_person_name: "",
+  customer: null, customer_manual: false, customer_text: "", warehouse: null, sale_person_name: "",
   order_date: new Date().toISOString().slice(0, 10), expected_ship_date: "",
   vat_rate: 7, vat_included: false, wht_rate: 0,
   header_discount_type: "percent", header_discount_value: 0, shipping_fee: 0,
@@ -150,6 +153,12 @@ export default function SalesOrdersPage() {
   useEffect(() => {
     if (companyNoVat) setForm((f) => (f.vat_rate === 0 ? f : { ...f, vat_rate: 0 }));
   }, [companyNoVat]);
+
+  /** บิลใบนี้ไม่มี VAT — ใบกำกับภาษีต้องมีลูกค้าในทะเบียน แต่บิลไม่มี VAT พิมพ์ชื่อเองได้ */
+  const noVatDoc = form.vat_rate === 0;
+  useEffect(() => {
+    if (!noVatDoc) setForm((f) => (f.customer_manual ? { ...f, customer_manual: false } : f));
+  }, [noVatDoc]);
 
   // detail drawer
   const [detail,        setDetail]        = useState<SODetail | null>(null);
@@ -226,6 +235,8 @@ export default function SalesOrdersPage() {
       customer: so.customer_id ? {
         id: so.customer_id, code: so.customer_code, name: so.customer_name ?? "",
       } as CustomerPickerValue : null,
+      customer_manual: !so.customer_id && !!so.customer_name,
+      customer_text: so.customer_id ? "" : (so.customer_name ?? ""),
       warehouse: (so as unknown as { from_warehouse_id?: string; from_warehouse_code?: string; from_warehouse_name?: string }).from_warehouse_id ? {
         id: (so as unknown as { from_warehouse_id: string }).from_warehouse_id,
         code: (so as unknown as { from_warehouse_code: string | null }).from_warehouse_code,
@@ -345,14 +356,20 @@ export default function SalesOrdersPage() {
 
   // ---- Save ----
   const save = async () => {
-    if (!form.customer) { setFormErr("กรุณาเลือกลูกค้า"); return; }
+    const manualName = form.customer_manual ? form.customer_text.trim() : "";
+    if (!form.customer && !manualName) {
+      setFormErr(form.customer_manual ? "กรุณาพิมพ์ชื่อลูกค้า" : "กรุณาเลือกลูกค้า"); return;
+    }
     if (form.lines.length === 0 || form.lines.some(l => !l.product_name.trim())) {
       setFormErr("ต้องมีรายการสินค้าอย่างน้อย 1 รายการ"); return;
     }
     setSaving(true); setFormErr(null);
     try {
       const header = {
-        customer_id: form.customer.id, customer_name: form.customer.name, customer_code: form.customer.code,
+        // พิมพ์ชื่อเอง = ไม่ผูกกับทะเบียนลูกค้า (เก็บแค่ชื่อบนเอกสาร)
+        customer_id: manualName ? null : form.customer?.id ?? null,
+        customer_name: manualName || form.customer?.name || null,
+        customer_code: manualName ? null : form.customer?.code ?? null,
         from_warehouse_id: form.warehouse?.id ?? null,
         sale_person_name: form.sale_person_name || null,
         order_date: form.order_date,
@@ -773,12 +790,43 @@ export default function SalesOrdersPage() {
           <SectionCard step={1} title="ข้อมูลเอกสาร" subtitle="ลูกค้าและรายละเอียดการสั่งซื้อ">
             <div className="grid grid-cols-1 gap-x-3 gap-y-2 md:grid-cols-2">
               <div className="md:col-span-2">
-                <FieldLabel required>ลูกค้า</FieldLabel>
-                <div className="mt-0.5">
-                  <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })}
-                    onAddNew={(q) => setNewCustomerName(q)} />
+                <div className="flex items-center justify-between gap-2">
+                  <FieldLabel required>ลูกค้า</FieldLabel>
+                  {/* บิลไม่มี VAT (ขายในนามบุคคล/ขายหน้าร้าน) → พิมพ์ชื่อลูกค้าเองได้ ไม่ต้องมีในทะเบียน */}
+                  {noVatDoc && (
+                    <div className="inline-flex h-7 rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-[11px]">
+                      {[
+                        { manual: false, label: "เลือกจากทะเบียน" },
+                        { manual: true, label: "พิมพ์ชื่อเอง" },
+                      ].map((opt) => (
+                        <button key={String(opt.manual)} type="button"
+                          onClick={() => setForm({ ...form, customer_manual: opt.manual })}
+                          className={`rounded-md px-2 font-medium transition ${
+                            form.customer_manual === opt.manual ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                          }`}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {form.customer && (
+                <div className="mt-0.5">
+                  {form.customer_manual ? (
+                    <input value={form.customer_text}
+                      onChange={(e) => setForm({ ...form, customer_text: e.target.value })}
+                      placeholder="พิมพ์ชื่อลูกค้า เช่น คุณสมชาย ใจดี"
+                      className="h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
+                  ) : (
+                    <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })}
+                      onAddNew={(q) => setNewCustomerName(q)} />
+                  )}
+                </div>
+                {form.customer_manual && (
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    ชื่อนี้จะขึ้นบนเอกสารอย่างเดียว ไม่ถูกบันทึกเข้าทะเบียนลูกค้า
+                  </p>
+                )}
+                {!form.customer_manual && form.customer && (
                   <RecordPeekLink
                     moduleKey="partners-v2"
                     recordId={form.customer.id}
