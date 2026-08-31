@@ -248,16 +248,17 @@ export function PayslipPrintContent({ embedded = false }: { embedded?: boolean }
 function PayslipSheet({ period, slip }: { period: PrintResponse["period"]; slip: PrintSlip }) {
   const lang = slip.payslip_language;
   const displayItems = payslipDisplayMoneyItems(slip.line);
-  // พิมพ์เฉพาะบรรทัดที่ไม่ได้ซ่อน (เงินเดือนถูกซ่อนตามที่เจ้าของสั่ง)
-  // แต่ "รวมรายได้" ยังคิดจากรายการเต็ม → ยอดรวม/ยอดสุทธิยังตรงกับหน้าคำนวณ
-  const earnings = itemRows(visiblePayslipItems(displayItems.earnings), lang);
+  // ⚠️ กติกาที่เจ้าของยืนยันเอง (2026-08-31) — อย่า "แก้กลับ" ว่าเป็นบั๊ก
+  //   1) เงินเดือนห้ามพิมพ์บนสลิป (ดู HIDDEN_ON_SLIP ใน lib/payroll-payslip-print)
+  //   2) "รวมรายได้" ต้อง = ผลรวมของ "บรรทัดที่เห็นบนสลิป" เท่านั้น (เช่น มีแต่ OT ก็โชว์ 225.96)
+  //      → ตัวเลขบนกระดาษบวกกันได้ตรง และไม่มีทางถอดเงินเดือนกลับ
+  //   3) ยอดจ่ายสุทธิยังเป็นยอดจริงจากการคำนวณ (เข้ารหัสไว้) จึงไม่เท่ากับ รวมรายได้ − รวมหัก โดยตั้งใจ
+  const visibleEarnings = visiblePayslipItems(displayItems.earnings);
+  const earnings = itemRows(visibleEarnings, lang);
   const deductions = itemRows(visiblePayslipItems(displayItems.deductions), lang);
-  const extraEarningsTotal = displayItems.earnings.reduce((sum, item) => sum + item.amount, 0);
+  const extraEarningsTotal = visibleEarnings.reduce((sum, item) => sum + item.amount, 0);
   const roundedNet = roundPayslipNetPay(slip.net_pay);
   const encodedNetPay = lang === "en" ? roundedNet.rounded.toLocaleString("en-US") : encodePayslipNetPay(roundedNet.rounded);
-  // "รวมรายได้" ก็ต้องซ่อนด้วย — ไม่งั้นเอาไปลบ OT ก็ได้เงินเดือนกลับมา (เจ้าของสั่ง 2026-08-31)
-  const encodedEarnings = lang === "en" ? undefined
-    : encodePayslipNetPay(roundPayslipNetPay(extraEarningsTotal).rounded);   // ปัดเศษแบบเดียวกับยอดสุทธิ
   const workDays = money(slip.line.work_days || slip.line.attendance_days);
   const workHours = money(slip.line.work_hours || slip.line.attendance_hours);
   // จำนวนจริง (จาก route) + ยอดเงิน (จาก line) → โชว์ "จำนวน (฿เงิน)"
@@ -305,7 +306,7 @@ function PayslipSheet({ period, slip }: { period: PrintResponse["period"]; slip:
 
       <div className="payslip-main-grid mt-3 grid grid-cols-[1fr_1fr_150px]">
         <AmountPanel title={label(lang, "รายการรายได้", "Earnings")} tone="green" rows={earnings}
-          totalLabel={label(lang, "รวมรายได้", "Total Earnings")} total={extraEarningsTotal} totalDisplay={encodedEarnings} />
+          totalLabel={label(lang, "รวมรายได้", "Total Earnings")} total={extraEarningsTotal} />
         <AmountPanel title={label(lang, "รายการหัก", "Deductions")} tone="red" rows={deductions} totalLabel={label(lang, "รวมหัก", "Total Deductions")} total={slip.total_deduction} />
         <NetPayBox lang={lang} encodedNetPay={encodedNetPay} />
       </div>
@@ -353,14 +354,12 @@ function Metric({ label: labelText, value, danger = false, tone }: { label: stri
   );
 }
 
-function AmountPanel({ title, tone, rows, totalLabel, total, totalDisplay }: {
+function AmountPanel({ title, tone, rows, totalLabel, total }: {
   title: string;
   tone: "green" | "red";
   rows: { key: string; label: string; amount: number }[];
   totalLabel: string;
   total: number;
-  /** ถ้าส่งมา จะโชว์ข้อความนี้แทนตัวเลข (ใช้ตอนเข้ารหัสยอดรวมรายได้) */
-  totalDisplay?: string;
 }) {
   const titleClass = tone === "green" ? "bg-emerald-700" : "bg-red-600";
   const totalClass = tone === "green" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600";
@@ -376,7 +375,7 @@ function AmountPanel({ title, tone, rows, totalLabel, total, totalDisplay }: {
         </div>
       ))}
       <div className={`grid grid-cols-[1fr_92px] px-2 py-1.5 font-bold ${totalClass}`}>
-        <span>{totalLabel}</span><span className="text-right tabular-nums">{totalDisplay ?? baht(total)}</span>
+        <span>{totalLabel}</span><span className="text-right tabular-nums">{baht(total)}</span>
       </div>
     </div>
   );
