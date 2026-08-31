@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPayslipPrintHref,
   encodePayslipNetPay,
+  visiblePayslipItems,
   payslipDisplayMoneyItems,
   normalizePayslipPrintLanguage,
   payslipLanguageForEmployee,
@@ -63,14 +64,23 @@ describe("payroll payslip print", () => {
     expect(encodePayslipNetPay(0)).toBe("P");
   });
 
-  it("keeps base salary out of printed earnings items", () => {
+  // เจ้าของสั่ง: ห้ามพิมพ์เงินเดือนบนสลิป (กล่องยอดสุทธิเข้ารหัสไว้ ถ้าโชว์เงินเดือนก็ลบเลขเอาเองได้)
+  // แต่ต้องยังนับใน "รวมรายได้" ไม่งั้นยอดรวมต่ำกว่าจริงแบบบั๊กเดิม (ISG-006 เงินเดือน 14,400 หาย)
+  it("นับเงินเดือนในยอดรวม แต่ตั้งค่า hidden ไว้ไม่ให้พิมพ์เป็นบรรทัด", () => {
     const items = payslipDisplayMoneyItems({
       base_salary: 17000,
       overtime_amount: 250,
       allowance_amount: 0,
       social_security_employee: 558,
     });
-    expect(items.earnings).toEqual([{ key: "overtime_amount", th: "OT", en: "OT", amount: 250 }]);
+    expect(items.earnings).toEqual([
+      { key: "base_salary", th: "เงินเดือน", en: "Salary", amount: 17000, hidden: true },
+      { key: "overtime_amount", th: "OT", en: "OT", amount: 250 },
+    ]);
+    // ยอดรวมคิดจากรายการเต็ม
+    expect(items.earnings.reduce((sum, i) => sum + i.amount, 0)).toBe(17250);
+    // บรรทัดที่พิมพ์จริงต้องไม่มีเงินเดือน
+    expect(visiblePayslipItems(items.earnings).map((i) => i.key)).toEqual(["overtime_amount"]);
     expect(items.deductions).toEqual([{ key: "social_security_employee", th: "ประกันสังคม", en: "Social Security", amount: 558 }]);
   });
 });

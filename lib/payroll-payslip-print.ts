@@ -1,11 +1,16 @@
 export type PayslipPrintLanguage = "employee" | "th" | "en";
 export type RenderedPayslipLanguage = "th" | "en";
 export type PayslipPrintPaper = "a6-landscape" | "a5-landscape";
-export type PayslipMoneyItem = { key: string; th: string; en: string; amount: number };
+export type PayslipMoneyItem = {
+  key: string; th: string; en: string; amount: number;
+  /** นับรวมในยอดรวม แต่ไม่พิมพ์เป็นบรรทัดบนสลิป (เจ้าของไม่ต้องการให้เงินเดือนโผล่บนกระดาษ) */
+  hidden?: boolean;
+};
 
 const EARNINGS_FOR_PRINT: readonly (readonly [string, string, string])[] = [
-  // เงินเดือนต้องมาก่อน — เดิมตกหล่น ทำให้สลิปของพนักงานรายเดือนไม่มีบรรทัดเงินเดือน
-  // และ "รวมรายได้" ต่ำกว่าความจริง (เจอจริง: ISG-006 เงินเดือน 14,400 หายไปจากสลิป)
+  // เงินเดือนต้องอยู่ในรายการ — ไม่งั้น "รวมรายได้" ต่ำกว่าความจริง
+  // (เจอจริง: ISG-006 เงินเดือน 14,400 หายไปจากสลิป)
+  // แต่ "ไม่พิมพ์เป็นบรรทัด" ตามที่เจ้าของสั่ง → ใส่ไว้ใน HIDDEN_ON_SLIP ด้านล่าง
   ["base_salary", "เงินเดือน", "Salary"],
   ["daily_wage_amount", "ค่าแรงรายวัน", "Daily Wage"],
   ["hourly_wage_amount", "ค่าแรงรายชั่วโมง", "Hourly Wage"],
@@ -101,11 +106,25 @@ export function encodePayslipNetPay(value: unknown): string {
   return String(rounded).split("").map((digit) => NET_PAY_DIGIT_CODE[digit] ?? "").join("");
 }
 
+/**
+ * รายการที่ "นับในยอดรวม แต่ไม่พิมพ์เป็นบรรทัด" บนสลิป
+ * เจ้าของสั่ง (2026-08-31): ห้ามให้เงินเดือนขึ้นบนสลิป — กล่องยอดสุทธิเข้ารหัสไว้แล้ว
+ * ถ้าโชว์เงินเดือนด้วย การเข้ารหัสก็ไม่มีประโยชน์ (ลบเลขเอาเองได้)
+ */
+const HIDDEN_ON_SLIP = new Set<string>(["base_salary"]);
+
 function moneyItems(line: Record<string, unknown>, defs: readonly (readonly [string, string, string])[]): PayslipMoneyItem[] {
   return defs
-    .map(([key, th, en]) => ({ key, th, en, amount: round2(money(line[key])) }))
+    .map(([key, th, en]) => ({
+      key, th, en,
+      amount: round2(money(line[key])),
+      ...(HIDDEN_ON_SLIP.has(key) ? { hidden: true } : {}),
+    }))
     .filter((item) => Math.abs(item.amount) > 0.004);
 }
+
+/** เฉพาะบรรทัดที่พิมพ์จริง (ตัดตัวที่ซ่อนออก) — ยอดรวมยังต้องคิดจากรายการเต็ม */
+export const visiblePayslipItems = (items: PayslipMoneyItem[]) => items.filter((item) => !item.hidden);
 
 export function payslipDisplayMoneyItems(line: Record<string, unknown>): {
   earnings: PayslipMoneyItem[];

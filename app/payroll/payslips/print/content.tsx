@@ -9,6 +9,7 @@ import {
   normalizePayslipPrintPaper,
   normalizePayslipPrintLanguage,
   payslipDisplayMoneyItems,
+  visiblePayslipItems,
   roundPayslipNetPay,
   type PayslipMoneyItem,
   type PayslipPrintLanguage,
@@ -247,8 +248,10 @@ export function PayslipPrintContent({ embedded = false }: { embedded?: boolean }
 function PayslipSheet({ period, slip }: { period: PrintResponse["period"]; slip: PrintSlip }) {
   const lang = slip.payslip_language;
   const displayItems = payslipDisplayMoneyItems(slip.line);
-  const earnings = itemRows(displayItems.earnings, lang);
-  const deductions = itemRows(displayItems.deductions, lang);
+  // พิมพ์เฉพาะบรรทัดที่ไม่ได้ซ่อน (เงินเดือนถูกซ่อนตามที่เจ้าของสั่ง)
+  // แต่ "รวมรายได้" ยังคิดจากรายการเต็ม → ยอดรวม/ยอดสุทธิยังตรงกับหน้าคำนวณ
+  const earnings = itemRows(visiblePayslipItems(displayItems.earnings), lang);
+  const deductions = itemRows(visiblePayslipItems(displayItems.deductions), lang);
   const extraEarningsTotal = displayItems.earnings.reduce((sum, item) => sum + item.amount, 0);
   const roundedNet = roundPayslipNetPay(slip.net_pay);
   const encodedNetPay = lang === "en" ? roundedNet.rounded.toLocaleString("en-US") : encodePayslipNetPay(roundedNet.rounded);
