@@ -89,7 +89,13 @@ function aggregateManual(entries: { attendance: Row[]; leave: Row[]; overtime: R
     const c = contractBy.get(String(row.employee_id));
     if (isContractor(c ?? {}) || !isPayableWorkDate(String(row.work_date), c ?? {}, period)) continue;
     const vals: Row = { hourly_wage_amount: row.hourly_wage_amount, late_deduction: row.late_deduction, absence_deduction: row.absence_deduction };
-    if (!(isDailyPaid(c ?? {}) && c?.wage_type === "daily")) {
+    // คนที่จ่ายตามวันทำงาน (สัญญารายวัน/ค่าจ้างรายวัน-รายชม.) ห้ามให้ "รายการแก้มือ"
+    // มาทับจำนวนวันทั้งเดือน — เพราะรายการมีเฉพาะวันที่ผิดปกติ ไม่ใช่ทุกวันที่มาทำงาน
+    //   เดิมเช็ก wage_type === "daily" ด้วย → สัญญา "รายวัน" ที่ตั้งค่าจ้าง=รายเดือน หลุดเงื่อนไข
+    //   พอมีรายการขาดแค่วันเดียว วันทำงานทั้งเดือนถูกทับเหลือ 0 → ไม่ได้เงินเลย
+    //   (เจอจริง: ISG-130 ขาด 2.22 ชม. วันเดียว แล้วยอดทั้งเดือนเป็น 0)
+    //   การขาด/สายยังหักผ่าน absence_deduction/late_deduction ตามปกติ
+    if (!isDailyPaid(c ?? {})) {
       vals.attendance_days = money(row.absence_hours) > 0 ? 0 : 1;
       vals.attendance_hours = row.regular_hours;
     }
