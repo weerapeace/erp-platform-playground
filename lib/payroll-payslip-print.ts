@@ -4,6 +4,9 @@ export type PayslipPrintPaper = "a6-landscape" | "a5-landscape";
 export type PayslipMoneyItem = { key: string; th: string; en: string; amount: number };
 
 const EARNINGS_FOR_PRINT: readonly (readonly [string, string, string])[] = [
+  // เงินเดือนต้องมาก่อน — เดิมตกหล่น ทำให้สลิปของพนักงานรายเดือนไม่มีบรรทัดเงินเดือน
+  // และ "รวมรายได้" ต่ำกว่าความจริง (เจอจริง: ISG-006 เงินเดือน 14,400 หายไปจากสลิป)
+  ["base_salary", "เงินเดือน", "Salary"],
   ["daily_wage_amount", "ค่าแรงรายวัน", "Daily Wage"],
   ["hourly_wage_amount", "ค่าแรงรายชั่วโมง", "Hourly Wage"],
   ["piece_rate_amount", "ค่าเหมา", "Piece Rate"],

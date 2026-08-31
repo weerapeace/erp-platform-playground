@@ -261,7 +261,10 @@ function PayslipSheet({ period, slip }: { period: PrintResponse["period"]; slip:
   const absAmt = money(slip.line.absence_deduction);
   const leaveDays = money(slip.leave_days_qty);
   const leaveHours = money(slip.leave_hours_qty);
-  const leaveTotalHours = leaveHours + leaveDays * 8;
+  // ชั่วโมงลา กับ วันลา คือ "ค่าเดียวกันคนละหน่วย" (1 วัน = 8 ชม.) ที่ API ส่งมาทั้งคู่
+  // เดิมบวกกันทั้งสองตัว → วันลาบนสลิปเบิ้ล 2 เท่า (ลา 1.5 วัน ขึ้นเป็น 3 วัน)
+  // ใช้ชั่วโมงก่อนถ้ามี ไม่งั้นค่อยแปลงจากวัน — ตรงกับที่ฝั่งคำนวณทำ
+  const leaveTotalHours = leaveHours || leaveDays * 8;
   const leaveAmt = money(slip.line.unpaid_leave_deduction);
   const otHours = money(slip.ot_hours_qty);
   const otAmt = money(slip.line.overtime_amount);
