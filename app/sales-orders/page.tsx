@@ -861,8 +861,9 @@ export default function SalesOrdersPage() {
                   <DateInput value={form.expected_ship_date} onChange={(iso) => setForm({ ...form, expected_ship_date: iso })} />
                 </div>
               </div>
-              {/* ออกในนามบริษัทไหน — ตัวนี้กำหนดหัวบิลบนใบกำกับภาษี และชุดเลขเอกสาร */}
-              <div>
+              {/* ออกในนามบริษัทไหน — กำหนดหัวบิลบนใบกำกับภาษี และชุดเลขเอกสาร
+                  บิลไม่มี VAT ไม่ต้องเลือก (ออกในนามบุคคลอยู่แล้ว) → ซ่อนช่องนี้ ใช้บริษัทตั้งต้นเก็บไว้เฉย ๆ */}
+              <div className={noVatDoc ? "hidden" : undefined}>
                 <FieldLabel hint="ขึ้นหัวบิลบนใบกำกับภาษี">ออกในนามบริษัท</FieldLabel>
                 <select value={form.company_id} onChange={e => setForm({ ...form, company_id: e.target.value })}
                   className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100">
