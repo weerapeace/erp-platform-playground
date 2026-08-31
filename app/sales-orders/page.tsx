@@ -87,7 +87,11 @@ const EMPTY: FormState = {
 };
 
 /** ทะเบียนบริษัท (หัวบิล) — โหลดครั้งเดียวต่อการเปิดหน้า */
-type CompanyOpt = { id: string; company_code: string; name: string; is_default: boolean; status: string | null };
+type CompanyOpt = {
+  id: string; company_code: string; name: string; is_default: boolean; status: string | null;
+  /** ไม่ได้จดทะเบียน VAT (เช่น ออกบิลในนามบุคคล) → บิลของผู้ออกรายนี้ไม่คิด VAT */
+  vat_registered?: boolean;
+};
 
 const formSnapshot = (form: FormState) => JSON.stringify({
   ...form,
@@ -136,6 +140,16 @@ export default function SalesOrdersPage() {
     () => companies.find((c) => c.is_default)?.id ?? companies[0]?.id ?? "",
     [companies],
   );
+
+  /** ผู้ออกบิลที่เลือกอยู่ ไม่ได้จด VAT หรือไม่ (เช่น ออกในนามบุคคล) */
+  const companyNoVat = useMemo(
+    () => companies.find((c) => c.id === form.company_id)?.vat_registered === false,
+    [companies, form.company_id],
+  );
+  // เลือกผู้ออกบิลที่ไม่จด VAT → บังคับ VAT = 0 ให้เลย (กันลืม)
+  useEffect(() => {
+    if (companyNoVat) setForm((f) => (f.vat_rate === 0 ? f : { ...f, vat_rate: 0 }));
+  }, [companyNoVat]);
 
   // detail drawer
   const [detail,        setDetail]        = useState<SODetail | null>(null);
@@ -806,7 +820,9 @@ export default function SalesOrdersPage() {
                   className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100">
                   {companies.length === 0 && <option value="">— ยังไม่มีบริษัทในทะเบียน —</option>}
                   {companies.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}{c.is_default ? " (ตั้งต้น)" : ""}</option>
+                    <option key={c.id} value={c.id}>
+                      {c.name}{c.is_default ? " (ตั้งต้น)" : ""}{c.vat_registered === false ? " · ไม่มี VAT" : ""}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -854,8 +870,29 @@ export default function SalesOrdersPage() {
                   ))}
                 </div>
               </div>
-              <NumField label="VAT" suffix="%" value={form.vat_rate}
-                onChange={(n) => setForm({ ...form, vat_rate: n })} />
+              {/* เลือกออกบิลแบบมี/ไม่มี VAT — "ในนามบุคคล" ที่ไม่ได้จด VAT ใช้แบบไม่มี VAT */}
+              <div>
+                <FieldLabel hint={companyNoVat ? "ผู้ออกบิลนี้ไม่ได้จด VAT" : undefined}>ภาษีขาย</FieldLabel>
+                <div className="mt-0.5 inline-flex h-9 w-full rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs">
+                  {[
+                    { on: true,  label: "มี VAT 7%" },
+                    { on: false, label: "ไม่มี VAT" },
+                  ].map((opt) => (
+                    <button key={String(opt.on)} type="button"
+                      disabled={companyNoVat && opt.on}
+                      onClick={() => setForm({ ...form, vat_rate: opt.on ? (form.vat_rate || 7) || 7 : 0 })}
+                      className={`flex-1 rounded-md font-medium transition disabled:opacity-40 ${
+                        (form.vat_rate > 0) === opt.on ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                      }`}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {form.vat_rate > 0 && (
+                <NumField label="อัตรา VAT" suffix="%" value={form.vat_rate}
+                  onChange={(n) => setForm({ ...form, vat_rate: n })} />
+              )}
               <NumField label="หัก ณ ที่จ่าย (WHT)" suffix="%" value={form.wht_rate}
                 onChange={(n) => setForm({ ...form, wht_rate: n })} />
               <NumField label="ค่าจัดส่ง" prefix="฿" value={form.shipping_fee}

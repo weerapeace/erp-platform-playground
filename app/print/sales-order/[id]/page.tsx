@@ -84,6 +84,11 @@ export function buildSoData(so: SODetailExt): Record<string, unknown> {
     customer_po_no:   so.customer_po_no ?? "",
     vat_rate:         so.vat_rate,
     vat_rate_label:   so.vat_included ? `${so.vat_rate}% รวมแล้ว` : `${so.vat_rate}%`,
+    // บิลที่ไม่มี VAT (เช่น ออกในนามบุคคลที่ไม่ได้จดทะเบียน VAT) — ห้ามพิมพ์ว่า "ใบกำกับภาษี"
+    has_vat:          Number(so.vat_rate ?? 0) > 0 ? "1" : "",
+    no_vat:           Number(so.vat_rate ?? 0) > 0 ? "" : "1",
+    doc_title_th:     Number(so.vat_rate ?? 0) > 0 ? "ใบเสร็จรับเงิน/ใบกำกับภาษี" : "ใบเสร็จรับเงิน/ใบส่งของ",
+    doc_title_en:     Number(so.vat_rate ?? 0) > 0 ? "Receipt/Tax Invoice" : "Receipt/Delivery Note",
     subtotal:         baht(so.subtotal ?? so.taxable),
     taxable:          baht(so.taxable),
     total_vat:        baht(so.total_vat),

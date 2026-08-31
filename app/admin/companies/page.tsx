@@ -20,6 +20,7 @@ const BLANK: Partial<Company> = {
   company_code: "", name: "", name_th: "", name_en: "",
   address_line: "", sub_district: "", district: "", province: "", postal_code: "",
   tax_id: "", tax_branch: "00000", phone: "", fax: "", doc_pattern: "",
+  vat_registered: true,
 };
 
 export default function CompaniesPage() {
@@ -118,6 +119,7 @@ export default function CompaniesPage() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{c.company_code}</span>
                     {c.is_default && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">ตั้งต้น</span>}
+                  {c.vat_registered === false && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">ไม่มี VAT</span>}
                   </div>
                   <div className="text-sm text-slate-800 mt-1 leading-snug">{c.name_th || c.name}</div>
                   {!c.tax_id && <div className="text-[11px] text-rose-500 mt-0.5">⚠️ ยังไม่มีเลขผู้เสียภาษี</div>}
@@ -184,6 +186,18 @@ export default function CompaniesPage() {
                 <div><label className={lbl}>แฟกซ์</label>
                   <input value={form.fax ?? ""} onChange={(e) => set("fax", e.target.value)} className={inp} /></div>
               </div>
+
+              {/* ไม่จด VAT (เช่น ออกบิลในนามบุคคล) → เอกสารจะไม่คิด VAT และไม่ใช่ใบกำกับภาษี */}
+              <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                <input type="checkbox" className="mt-0.5" checked={form.vat_registered !== false}
+                  onChange={(e) => set("vat_registered", e.target.checked)} />
+                <span className="text-sm text-slate-700">
+                  จดทะเบียน VAT (ออกใบกำกับภาษีได้)
+                  <span className="block text-[11px] text-slate-500">
+                    ติ๊กออก = ออกบิลในนามนี้จะ<strong>ไม่คิด VAT</strong> และเอกสารจะพิมพ์เป็น &ldquo;บิลเงินสด/ใบส่งของ&rdquo; ไม่ใช่ใบกำกับภาษี (เช่น ออกในนามบุคคล)
+                  </span>
+                </span>
+              </label>
 
               <div><label className={lbl}>โลโก้บริษัท (ถ้ามี)</label>
                 <ImageAttachKeys value={form.logo_key ? [form.logo_key] : []}

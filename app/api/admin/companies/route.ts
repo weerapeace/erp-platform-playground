@@ -44,6 +44,8 @@ export type Company = {
   is_default: boolean;
   sort_order: number;
   status: string | null;
+  /** จดทะเบียน VAT ไหม — false = ออกบิลแบบไม่มี VAT (เช่น ในนามบุคคล) */
+  vat_registered: boolean;
 };
 
 /** ช่องที่แก้ได้ (ห้ามให้ client ส่งอะไรก็ได้เข้าตาราง) */
@@ -51,6 +53,7 @@ const EDITABLE = [
   "company_code", "name", "name_th", "name_en",
   "address_line", "sub_district", "district", "province", "postal_code",
   "tax_id", "tax_branch", "phone", "fax", "logo_key", "doc_pattern", "sort_order", "status",
+  "vat_registered",
 ] as const;
 
 const numberingKey = (code: string) => `so_tax_${code.toUpperCase()}`;
@@ -105,6 +108,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const row: Record<string, unknown> = { company_code: code, name, status: "active" };
   for (const k of EDITABLE) if (body[k] !== undefined && k !== "company_code" && k !== "name") row[k] = nullable(body[k]);
   if (body.sort_order !== undefined) row.sort_order = Number(body.sort_order) || 0;
+  if (body.vat_registered !== undefined) row.vat_registered = body.vat_registered !== false;
   // ไม่ตั้งรูปแบบเลขมา → ใช้รหัสบริษัทนำหน้าให้เลย
   if (!row.doc_pattern) row.doc_pattern = `${code}{BYYYY}-{MM}-{000}`;
 
@@ -136,6 +140,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     if (body[k] === undefined) continue;
     if (k === "company_code") { patch[k] = str(body[k]).toUpperCase(); continue; }
     if (k === "sort_order") { patch[k] = Number(body[k]) || 0; continue; }
+    // ค่าบูลีน — nullable() แปลงเป็นข้อความ ถ้าปล่อยผ่านจะกลายเป็น null
+    if (k === "vat_registered") { patch[k] = body[k] !== false; continue; }
     patch[k] = nullable(body[k]);
   }
   if (!patch.name && body.name !== undefined) return NextResponse.json({ error: "ชื่อบริษัทว่างไม่ได้" }, { status: 400 });
