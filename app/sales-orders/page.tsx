@@ -382,7 +382,8 @@ export default function SalesOrdersPage() {
         payment_terms: form.payment_terms || null,
         customer_po_no: form.customer_po_no || null,
         company_id: form.company_id || null,
-        tax_invoice_no: form.tax_invoice_no.trim() || null,
+        // บิลไม่มี VAT ไม่ใช่ใบกำกับภาษี → ไม่ส่งเลขใบกำกับ (ระบบออกเลขบิล BILL-… ให้แทน ไม่กินเลขชุดใบกำกับ)
+        tax_invoice_no: form.vat_rate > 0 ? (form.tax_invoice_no.trim() || null) : null,
       };
       const lines = form.lines.map(l => ({
         product_id: l.product_id, sku: l.sku, product_name: l.product_name,
@@ -887,7 +888,8 @@ export default function SalesOrdersPage() {
                   placeholder="เช่น เงินสด, เครดิต 30 วัน"
                   className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
               </div>
-              <div>
+              {/* บิลไม่มี VAT ไม่ใช่ใบกำกับภาษี → ไม่มีเลขใบกำกับ และไม่กินเลขชุดใบกำกับ (ระบบออกเลขบิล BILL-… ให้แทน) */}
+              <div className={noVatDoc ? "hidden" : undefined}>
                 <FieldLabel hint="เว้นว่าง = ออกอัตโนมัติ">เลขที่ใบกำกับภาษี</FieldLabel>
                 <input value={form.tax_invoice_no} onChange={e => setForm({ ...form, tax_invoice_no: e.target.value })}
                   placeholder="เว้นว่างให้ระบบออกให้ (ISG{พ.ศ.}-{เดือน}-NNN)"
