@@ -440,7 +440,8 @@ export const ENTITIES: Record<string, EntityConfig> = {
     selectColumns: "*",
     searchColumns: ["name", "display_name"],
     softDeleteColumn: "active",
-    defaults: { active: true },
+    // หน่วยที่สร้างเองใน ERP (ไม่ได้ sync จาก Odoo) → ไม่มี odoo_id, sync_status = skipped (ต้องรัน migration ให้ odoo_id เป็น NULL ได้)
+    defaults: { active: true, sync_status: "skipped" },
   },
 };
 

@@ -12,6 +12,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
+import { formatAmount } from "@/lib/money";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
@@ -69,8 +70,10 @@ function patchNav(p: Partial<SkuNav>): void {
 
 const CARD_FIELDS: { key: string; label: string }[] = [
   { key: "image",  label: "รูป" }, { key: "code", label: "รหัส" }, { key: "name", label: "ชื่อ" },
-  { key: "price",  label: "ราคาขาย" }, { key: "stock", label: "สต๊อกคงเหลือ" }, { key: "tags", label: "แท็ก" }, { key: "status", label: "สถานะ" },
+  { key: "price",  label: "ราคาขาย" }, { key: "buy_price", label: "ราคาซื้อ (ล่าสุด)" }, { key: "stock", label: "สต๊อกคงเหลือ" }, { key: "tags", label: "แท็ก" }, { key: "status", label: "สถานะ" },
 ];
+/** ข้อความราคาซื้อ (ฝั่ง server ส่งมาเฉพาะคนที่มีสิทธิ์ดูต้นทุน — ไม่มี = "—") */
+function fmtBuy(bp: SkuCard["buy_price"]): string { return bp && bp.price > 0 ? formatAmount(bp.price, bp.currency) : "—"; }
 const DEFAULT_CARD_FIELDS = CARD_FIELDS.map((f) => f.key);
 const CORE_KEYS = new Set(DEFAULT_CARD_FIELDS);   // 7 ฟิลด์หลัก (เรนเดอร์พิเศษ) — ที่เหลือ = ฟิลด์เพิ่มจาก Field Registry
 const CORE_COLUMNS = new Set(["id", "code", "name_th", "list_price", "is_active", "cover_image_r2_key"]);
@@ -185,6 +188,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   const [loadingCards, setLoadingCards] = useState(false);
 
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_CARD_FIELDS);
+  const [costAllowed, setCostAllowed] = useState(false);   // server บอกว่าคนนี้เห็นราคาซื้อได้ (products.cost.view) → โชว์คอลัมน์
   const [availFields, setAvailFields] = useState<FieldDef[]>([]);   // ฟิลด์ SKU ทั้งหมด (จาก Field Registry — ไม่ hardcode)
   const [bulkFields, setBulkFields] = useState<BulkEditField[]>([]);   // ฟิลด์ที่ "แก้หลายรายการ" ได้ (จาก Field Registry §18)
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
@@ -252,6 +256,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
     const extra = cardFields.filter((k) => !CORE_KEYS.has(k));
     if (extra.length) p.set("fields", extra.join(","));
     const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
+    setCostAllowed(j.cost_allowed === true);
     return { cards: (j.cards ?? []) as SkuCard[], total: Number(j.total ?? 0) };
   }, [tagFilter, search, sort, cardFields, entity, special]);
 
@@ -393,8 +398,11 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   const exportCsv = () => {
     const rows = shown.filter((c) => selected.has(c.id)); if (rows.length === 0) return;
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const lines = [["รหัส", "ชื่อ", "ราคาขาย", "สต๊อก", "แท็ก", "สถานะ"].join(",")]
-      .concat(rows.map((c) => [c.code, c.name, c.list_price ?? "", c.qty_on_hand ?? "", c.tags.join("|"), c.is_active ? "ใช้งาน" : "ปิด"].map(esc).join(",")));
+    const costCols = costAllowed ? ["ราคาซื้อล่าสุด", "สกุลเงินซื้อ", "ที่มาราคาซื้อ"] : [];
+    const lines = [["รหัส", "ชื่อ", "ราคาขาย", ...costCols, "สต๊อก", "แท็ก", "สถานะ"].join(",")]
+      .concat(rows.map((c) => [c.code, c.name, c.list_price ?? "",
+        ...(costAllowed ? [c.buy_price?.price ?? "", c.buy_price?.currency ?? "", c.buy_price?.label ?? ""] : []),
+        c.qty_on_hand ?? "", c.tags.join("|"), c.is_active ? "ใช้งาน" : "ปิด"].map(esc).join(",")));
     const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "skus-export.csv"; a.click(); URL.revokeObjectURL(a.href);
     toast.success(`Export ${rows.length} รายการแล้ว`);
@@ -539,7 +547,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">{t("หน้านี้ไม่มีรายการที่ข้อมูลไม่ครบ 🎉", "Nothing incomplete on this page 🎉")}</div>
               : view === "table"
-                ? <SkuTable rows={shown} selected={pick ? pickedSet : selected} selectMode={selectMode}
+                ? <SkuTable rows={shown} selected={pick ? pickedSet : selected} selectMode={selectMode} showCost={costAllowed}
                     onToggle={pick ? ((id) => { const c = shown.find((x) => x.id === id); if (c) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); } }) : toggleSel}
                     onOpen={(id) => { if (pick) { const c = shown.find((x) => x.id === id); if (c) onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); return; } setPeekId(id); }}
                     sortKey={sortKey} onSort={(k) => { setSortKey(k); setPage(0); patchNav({ page: 0 }); }} />
@@ -720,6 +728,9 @@ function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPo
             {has("stock") && <span className="text-[11px] text-slate-400">สต๊อก {c.qty_on_hand != null ? Number(c.qty_on_hand).toLocaleString("th-TH") : "—"}</span>}
           </div>
         ) : null}
+        {c.variant_count == null && has("buy_price") && c.buy_price !== undefined && (
+          <div className="mt-0.5 text-[11px] text-slate-500" title={c.buy_price?.label ?? "ยังไม่มีราคาซื้อ (ไม่มี PO / ราคาร้าน / ต้นทุนมาตรฐาน)"}>ซื้อ {fmtBuy(c.buy_price)}</div>
+        )}
         {has("tags") && c.tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {c.tags.slice(0, 3).map((t) => <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{t}</span>)}
@@ -754,9 +765,10 @@ function SortTh({ label, ascKey, descKey, sortKey, onSort, align = "left", class
   );
 }
 
-function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort }: {
+function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort, showCost = false }: {
   rows: SkuCard[]; selected: Set<string>; selectMode: boolean; onToggle: (id: string) => void; onOpen: (id: string) => void;
   sortKey: string; onSort: (col: string) => void;
+  showCost?: boolean;   // มีสิทธิ์ดูต้นทุน → เพิ่มคอลัมน์ "ราคาซื้อ (ล่าสุด)"
 }) {
   return (
     <div className="rounded-xl border border-slate-200 overflow-x-auto bg-white">
@@ -768,6 +780,7 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
             <SortTh label="รหัส" ascKey="code" descKey="code_desc" sortKey={sortKey} onSort={onSort} />
             <SortTh label="ชื่อ" ascKey="name" descKey="name_desc" sortKey={sortKey} onSort={onSort} className="w-full" />
             <SortTh label="ราคาขาย" ascKey="price_asc" descKey="price_desc" sortKey={sortKey} onSort={onSort} align="right" />
+            {showCost && <th className="px-3 py-2 font-medium text-right whitespace-nowrap" title="ราคาซื้อล่าสุด — จากใบ PO ล่าสุด ถ้าไม่มีใช้ราคาร้าน ถ้าไม่มีอีกใช้ต้นทุนมาตรฐานใน SKU (ชี้ที่ตัวเลขเพื่อดูที่มา)">ราคาซื้อ</th>}
             <th className="px-3 py-2 font-medium text-right">สต๊อก</th>
             <th className="px-3 py-2 font-medium">แท็ก</th>
             <th className="px-3 py-2 font-medium">สถานะ</th>
@@ -792,6 +805,16 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
                 <td className="px-3 py-1.5 font-mono text-[12px] whitespace-nowrap">{c.code}</td>
                 <td className="px-3 py-1.5"><span className="block whitespace-normal break-words leading-snug min-w-[16rem]">{c.name || <span className="text-slate-300">—</span>}</span></td>
                 <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{c.list_price != null && c.list_price > 0 ? `฿${Number(c.list_price).toLocaleString("th-TH")}` : "—"}</td>
+                {showCost && (
+                  <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap" title={c.buy_price?.label ?? "ยังไม่มีราคาซื้อ (ไม่มี PO / ราคาร้าน / ต้นทุนมาตรฐาน)"}>
+                    {c.variant_count != null ? "—" : (
+                      <span className={c.buy_price ? "text-slate-700" : "text-slate-300"}>
+                        {fmtBuy(c.buy_price)}
+                        {c.buy_price && <span className="ml-1 text-[9px] text-slate-400 align-middle">{c.buy_price.source === "po" ? "PO" : c.buy_price.source === "list" ? "ร้าน" : "มาตรฐาน"}</span>}
+                      </span>
+                    )}
+                  </td>
+                )}
                 <td className="px-3 py-1.5 text-right tabular-nums text-slate-500 whitespace-nowrap">{c.qty_on_hand != null ? Number(c.qty_on_hand).toLocaleString("th-TH") : "—"}</td>
                 <td className="px-3 py-1.5">
                   <div className="flex flex-wrap gap-1">

@@ -7,7 +7,7 @@
  *   · skus_v2_product_family_m2m (src_id=sku, tgt_id=tag) · skus_v2 · sku_stock_balances
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +23,14 @@ export type SkuCard = {
   has_bom: boolean;   // มีสูตร BOM ไหม (ไว้เตือน "ข้อมูลไม่ครบ")
   variant_count?: number | null;     // จำนวน SKU ลูก (เฉพาะ Parent SKU — แทนราคา/สต๊อก)
   extra?: Record<string, unknown>;   // ฟิลด์เพิ่มที่เลือกโชว์บนการ์ด (จาก Field Registry — ไม่ hardcode)
+  buy_price?: BuyPrice | null;       // ราคาซื้อล่าสุด — ส่งเฉพาะคนที่มีสิทธิ์ products.cost.view (บังคับฝั่ง server)
+};
+/** ราคาซื้อล่าสุดของ SKU — ลำดับแหล่ง: ใบ PO ล่าสุด → ราคาร้าน (supplier_items) ที่อัปเดตล่าสุด → ต้นทุนมาตรฐานใน SKU */
+export type BuyPrice = {
+  price: number; currency: string;
+  source: "po" | "list" | "std";
+  label: string;              // ข้อความบอกที่มา เช่น "PO-2026-0012 · 12 ส.ค. 69 · ร้าน X"
+  date: string | null;        // วันที่ของราคานี้ (ISO) ถ้ามี
 };
 
 const sanitize = (t: string) => t.replace(/[,()%*]/g, " ").trim();
@@ -37,6 +45,8 @@ export async function GET(request: NextRequest) {
   const showAll  = sp.get("all") === "1";   // โหมด "ทั้งหมด/ล่าสุด" — โชว์ทุกรายการ (ไม่กรองแท็ก)
   const trash    = sp.get("trash") === "1"; // โหมดถังขยะ — โชว์เฉพาะที่ปิด/ลบแล้ว (is_active=false)
   const admin = supabaseAdmin();
+  // ราคาซื้อ = ต้นทุน (sensitive) → ส่งเฉพาะคนที่มีสิทธิ์ดูต้นทุน (เช็คที่ server ไม่ใช่แค่ซ่อนที่หน้าจอ)
+  const canCost = await apiCan(request, "products.cost.view");
 
   // entity: skus (ดีฟอลต์) หรือ parent-skus — สลับตาราง/junction/RPC (ใช้ของกลางตัวเดียว)
   const entity = sp.get("entity") === "parent-skus" ? "parent-skus" : "skus";
@@ -106,7 +116,8 @@ export async function GET(request: NextRequest) {
       extraCols = reqFields.filter((f) => allowed.has(f));
     }
   }
-  const baseCols = "id, code, name_th, cover_image_r2_key, is_active" + (ENT.hasPrice ? ", list_price" : "");
+  const baseCols = "id, code, name_th, cover_image_r2_key, is_active" + (ENT.hasPrice ? ", list_price" : "")
+    + (ENT.hasPrice && canCost ? ", standard_price, rmb_cost" : "");   // ต้นทุนมาตรฐาน = แหล่งสำรองของ "ราคาซื้อล่าสุด"
   const effSort = (!ENT.hasPrice && sortBy === "list_price") ? "code" : sortBy;   // parent ไม่มี list_price
   const sel = baseCols + (extraCols.length ? ", " + extraCols.join(", ") : "");
   let rows: SkuRow[] = [];
@@ -147,18 +158,69 @@ export async function GET(request: NextRequest) {
   const tagMap  = new Map<string, string[]>();
   const variant = new Map<string, number>();   // จำนวน SKU ลูก ต่อ Parent
   const childCover = new Map<string, string>();   // รูปปกของ SKU ลูกตัวแรก (fallback ตอน Parent ไม่มีรูป)
+  const buyMap = new Map<string, BuyPrice>();     // ราคาซื้อล่าสุด ต่อ SKU (เฉพาะ canCost)
 
   if (ids.length) {
     let linkData: { src_id: string; tgt_id: string }[] = [];
     if (ENT.hasPrice) {
-      const [linkRes, balRes, bomRes] = await Promise.all([
+      type PoLine = { item_sku_id: string; price_est: number | string; currency: string | null; created_at: string; po_id: string | null };
+      type SupItem = { item_sku_id: string; price: number | string; currency: string | null; updated_at: string | null; is_default: boolean | null; supplier_partner: string | null };
+      const [linkRes, balRes, bomRes, poRes, siRes] = await Promise.all([
         admin.from(ENT.junction).select("src_id, tgt_id").in("src_id", ids),
         admin.from("sku_stock_balances").select("sku_id, qty_on_hand").in("sku_id", ids),
         admin.from("bom_headers").select("product_sku").in("product_sku", codes),
+        // ราคาซื้อจริงจากบรรทัด PO (ทุกสถานะ ยกเว้นที่ปิดใช้งาน) — ใหม่สุดก่อน
+        canCost ? admin.from("purchase_order_lines_v2").select("item_sku_id, price_est, currency, created_at, po_id")
+          .in("item_sku_id", ids).gt("price_est", 0).not("is_active", "is", false).order("created_at", { ascending: false })
+          : Promise.resolve({ data: null }),
+        // ราคาจาก price list ร้านค้า — อัปเดตล่าสุดก่อน
+        canCost ? admin.from("supplier_items").select("item_sku_id, price, currency, updated_at, is_default, supplier_partner")
+          .in("item_sku_id", ids).gt("price", 0).not("is_active", "is", false).order("updated_at", { ascending: false })
+          : Promise.resolve({ data: null }),
       ]);
       linkData = (linkRes.data ?? []) as { src_id: string; tgt_id: string }[];
       for (const b of ((balRes.data ?? []) as { sku_id: string; qty_on_hand: number | string | null }[])) stock.set(b.sku_id, Number(b.qty_on_hand ?? 0));
       for (const b of ((bomRes.data ?? []) as { product_sku: string }[])) bomSet.add(b.product_sku);
+
+      if (canCost) {
+        const thDate = (iso: string | null) => iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "";
+        // 1) PO ล่าสุด — ยึดวันที่ใบ PO (order_date) ถ้าไม่มีใช้วันที่สร้างบรรทัด
+        const poLines = (poRes.data ?? []) as PoLine[];
+        const poIds = [...new Set(poLines.map((l) => l.po_id).filter((x): x is string => !!x))];
+        const poHead = new Map<string, { po_no: string | null; order_date: string | null; seller_name: string | null }>();
+        if (poIds.length) {
+          const { data: pos } = await admin.from("purchase_orders_v2").select("id, po_no, order_date, seller_name").in("id", poIds);
+          for (const p of (pos ?? []) as { id: string; po_no: string | null; order_date: string | null; seller_name: string | null }[]) poHead.set(p.id, p);
+        }
+        const best = new Map<string, { at: number; bp: BuyPrice }>();
+        for (const l of poLines) {
+          const h = l.po_id ? poHead.get(l.po_id) : undefined;
+          const dateIso = h?.order_date ?? l.created_at;
+          const at = new Date(dateIso).getTime() || 0;
+          const cur = best.get(l.item_sku_id);
+          if (cur && cur.at >= at) continue;
+          best.set(l.item_sku_id, { at, bp: {
+            price: Number(l.price_est), currency: l.currency ?? "THB", source: "po", date: dateIso,
+            label: [h?.po_no ? `ใบ ${h.po_no}` : "ใบ PO", thDate(dateIso), h?.seller_name].filter(Boolean).join(" · "),
+          } });
+        }
+        for (const [id, v] of best) buyMap.set(id, v.bp);
+        // 2) ไม่มี PO → ราคาร้าน (เรียง updated_at ใหม่สุดมาก่อนแล้ว · ร้านหลัก is_default ชนะถ้าวันเดียวกัน)
+        for (const s of ((siRes.data ?? []) as SupItem[])) {
+          if (buyMap.has(s.item_sku_id)) continue;
+          buyMap.set(s.item_sku_id, {
+            price: Number(s.price), currency: s.currency ?? "THB", source: "list", date: s.updated_at,
+            label: ["ราคาร้าน", s.supplier_partner, thDate(s.updated_at)].filter(Boolean).join(" · "),
+          });
+        }
+        // 3) ไม่มีทั้งคู่ → ต้นทุนมาตรฐานใน SKU (standard_price บาท / rmb_cost หยวน)
+        for (const r of rows) {
+          if (buyMap.has(r.id)) continue;
+          const std = Number(r.standard_price ?? 0), rmb = Number(r.rmb_cost ?? 0);
+          if (std > 0) buyMap.set(r.id, { price: std, currency: "THB", source: "std", date: null, label: "ต้นทุนมาตรฐาน (Standard Price ใน SKU)" });
+          else if (rmb > 0) buyMap.set(r.id, { price: rmb, currency: "RMB", source: "std", date: null, label: "ต้นทุนมาตรฐาน (RMB Cost ใน SKU)" });
+        }
+      }
     } else {
       const [linkRes, varRes] = await Promise.all([
         admin.from(ENT.junction).select("src_id, tgt_id").in("src_id", ids),
@@ -197,7 +259,8 @@ export async function GET(request: NextRequest) {
     variant_count: ENT.hasPrice ? null : (variant.get(r.id) ?? 0),
     is_active: r.is_active, tags: tagMap.get(r.id) ?? [], has_bom: ENT.hasPrice ? bomSet.has(r.code) : false,
     extra: extraCols.length ? Object.fromEntries(extraCols.map((col) => [col, r[col] ?? null])) : undefined,
+    buy_price: canCost && ENT.hasPrice ? (buyMap.get(r.id) ?? null) : undefined,
     };
   });
-  return NextResponse.json({ cards, total, error: null });
+  return NextResponse.json({ cards, total, cost_allowed: canCost && ENT.hasPrice, error: null });
 }

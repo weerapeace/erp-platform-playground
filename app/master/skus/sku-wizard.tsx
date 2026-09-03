@@ -65,17 +65,35 @@ const COLS_LS = "sku-wizard-batch-cols";
 const SKIP_COLS = new Set(["id", "is_active", "sale_ok", "purchase_ok", "created_at", "updated_at", "attribute_values", "cover_image_r2_key", "odoo_form_details", "odoo_form_synced_at"]);
 
 // ---- ตัวเลือกแบบค้นหา (async) จาก picker กลาง ----
-function AsyncPick({ table, label, secondary, value, valueLabel, onChange, placeholder, pinned, onAddNew, addNewLabel }: {
+function AsyncPick({ table, label, secondary, value, valueLabel, onChange, placeholder, pinned, onAddNew, addNewLabel, quickCreate }: {
   table: string; label: string; secondary?: string;
   value: string | null; valueLabel?: string; onChange: (id: string | null, lbl: string) => void; placeholder: string;
   pinned?: { id: string; label: string }[];   // รายการ "ใช้บ่อย" ปักหมุดบนสุด (⭐)
   /** มี = โชว์ปุ่ม "+ เพิ่มใหม่" ท้ายรายการ (ส่งคำที่พิมพ์ค้างไว้ไปให้ ไม่ต้องพิมพ์ซ้ำ) */
   onAddNew?: (typedName: string) => void;
   addNewLabel?: string;
+  /** สร้างรายการใหม่ "ในกล่องนี้เลย" จากคำที่พิมพ์ (สำหรับ master เล็ก ๆ เช่น หน่วยนับ) — คืน id+ชื่อ แล้วเลือกให้ทันที */
+  quickCreate?: { entity: string; field: string; label?: string };
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [opts, setOpts] = useState<PickerOpt[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [createErr, setCreateErr] = useState<string | null>(null);
+  // ยิงสร้างผ่าน API master กลาง (/api/master-v2/<entity> — ตรวจสิทธิ์ products.create + ฟิลด์บังคับ + audit ให้เอง)
+  const doQuickCreate = async () => {
+    const name = q.trim(); if (!quickCreate || !name || creating) return;
+    setCreating(true); setCreateErr(null);
+    try {
+      const res = await apiFetch(`/api/master-v2/${quickCreate.entity}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [quickCreate.field]: name }) });
+      const j = await res.json();
+      if (!res.ok || j.error) { setCreateErr(String(j.error ?? "สร้างไม่สำเร็จ")); return; }
+      const row = (j.data ?? {}) as Record<string, unknown>;
+      onChange(String(row.id), String(row[quickCreate.field] ?? name));
+      setOpen(false); setQ("");
+    } catch (e) { setCreateErr(String((e as Error).message ?? e)); }
+    finally { setCreating(false); }
+  };
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -134,6 +152,17 @@ function AsyncPick({ table, label, secondary, value, valueLabel, onChange, place
                 </button>
               ))}
               {opts.length === 0 && (pinned ?? []).length === 0 && <div className="px-3 py-2 text-xs text-slate-400">— ไม่พบ —</div>}
+              {/* สร้างใหม่ในกล่องนี้เลย — โชว์เมื่อพิมพ์คำที่ยังไม่มีในรายการ (ชื่อตรงกันเป๊ะ = ไม่ต้องสร้างซ้ำ) */}
+              {quickCreate && q.trim() && !opts.some((o) => o.label.trim().toLowerCase() === q.trim().toLowerCase()) && (
+                <>
+                  <div className="border-t border-slate-100 my-1" />
+                  <button type="button" disabled={creating} onClick={() => { void doQuickCreate(); }}
+                    className="w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50 truncate disabled:opacity-60">
+                    {creating ? "กำลังสร้าง..." : <>➕ {quickCreate.label ?? "สร้างใหม่"}: <strong>“{q.trim()}”</strong></>}
+                  </button>
+                  {createErr && <div className="px-3 py-1.5 text-[11px] text-red-600 bg-red-50 border-t border-red-100">⚠ {createErr}</div>}
+                </>
+              )}
               {/* เพิ่มรายการใหม่ได้จากตรงนี้เลย — เปิดวิซาร์ดของกลาง (ไม่ต้องออกไปหน้าอื่นแล้วกลับมากรอกใหม่) */}
               {onAddNew && (
                 <>
@@ -538,7 +567,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
                 </div>
               )}</label>
             <label className="block"><span className="text-xs text-slate-500">หน่วย (Uom)</span>
-              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => setSV("uom_id", id, lbl)} placeholder="เลือกหน่วย" /></div></label>
+              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => setSV("uom_id", id, lbl)} placeholder="เลือกหน่วย" quickCreate={{ entity: "uoms", field: "name", label: "เพิ่มหน่วยใหม่" }} /></div></label>
             <label className="block"><span className="text-xs text-slate-500">ผู้ขาย</span>
               <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="partners_v2" label="name_th" secondary="code" pinned={sellerPins} value={(single.values.seller_partner_id as string) ?? null} valueLabel={single.labels.seller_partner_id} onChange={(id, lbl) => setSV("seller_partner_id", id, lbl)} placeholder="เลือกผู้ขาย"
                 addNewLabel="เพิ่มผู้ขายใหม่"
