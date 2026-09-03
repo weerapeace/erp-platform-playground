@@ -37,6 +37,8 @@ import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { SkuLite } from "@/app/api/design-sheets/price-item-skus/route";
 import { SearchableSelect } from "@/components/searchable-select";
+import { ComponentPicker } from "@/components/material-picker";
+import type { BomComponent } from "@/app/api/bom/components/route";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
@@ -148,6 +150,31 @@ function costItemPatch(it: PriceItem, r: CostRow): Partial<CostRow> {
     pieces: piece ? (r.pieces ?? 1) : r.pieces,
     uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
     unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit,
+  };
+}
+
+/**
+ * เลือกวัตถุดิบ "จาก SKU คลังสินค้า" → เติมให้อัตโนมัติ: ประเภท(กลุ่ม) · สูตรคิด · ราคาซื้อมาตรฐาน · หน่วย · หน้ากว้าง · %เผื่อเสีย
+ * กว้าง×ยาว ไม่เติม — เป็นขนาดชิ้นที่ตัดของงานนี้ ต้องกรอกเอง (ยกเว้นวัสดุที่ขายเป็นแผ่นซึ่งมีขนาดผืนติดมา)
+ */
+function costSkuPatch(c: BomComponent, groups: PriceGroup[], r: CostRow): Partial<CostRow> {
+  const g = groups.find((x) => x.name === c.material_type);   // กลุ่มวัตถุดิบเดียวกันทั้งระบบ (ชื่อกลุ่มตรงกัน)
+  const method = g?.calc_method ?? null;
+  return {
+    item_sku_id: c.id, item_sku_code: c.code,
+    item_id: null, price_basis: null,                         // ไม่ได้มาจาก master วัสดุตีราคา
+    item_name: c.name || c.code,
+    group_name: c.material_type ?? r.group_name ?? null,
+    group_code: g?.code ?? null,
+    calc_method: method,
+    unit_price: c.standard_price ?? r.unit_price ?? null,     // ราคาซื้อมาตรฐานของ SKU
+    uom: c.uom_name ?? g?.uom_default ?? r.uom ?? null,
+    face_width_cm: c.fabric_width_cm ?? r.face_width_cm ?? null,
+    waste_percent: r.waste_percent ?? c.loss_percent ?? g?.loss_percent ?? null,
+    divisor: g?.divisor ?? r.divisor ?? null,
+    // วัสดุที่ขายเป็นแผ่น (มีขนาดผืนใน SKU) → เติมขนาดให้เป็นค่าตั้งต้น
+    width_cm: r.width_cm ?? c.sheet_width_cm ?? null,
+    length_cm: r.length_cm ?? c.sheet_length_cm ?? null,
   };
 }
 
@@ -1348,6 +1375,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           <div className="space-y-1">
             <div className="flex items-center gap-1">
               <div className="flex-1 min-w-0">
+                {/* แหล่งวัสดุ 2 ทาง: master "วัสดุตีราคา" (เดิม) หรือ "SKU คลังสินค้า" (ดึงประเภท/ราคา/หน่วย/หน้ากว้างมาให้) */}
+                {r.item_sku_id ? (
+                  <ComponentPicker sku={r.item_sku_code ?? ""} name={r.item_name ?? ""}
+                    placeholder="— เลือก SKU วัตถุดิบ —"
+                    onPick={(c) => u(costSkuPatch(c, priceGroups, r))} />
+                ) : (
                 <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!fullEdit} placeholder="— เลือกกลุ่ม / วัสดุ —"
                   initialQuery={!r.item_id ? bomRefSearchSeed(r.note) : undefined}
                   options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
@@ -1358,7 +1391,21 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   }}
                   onCreate={fullEdit ? (q) => void createPriceItemInline(q, applyItem) : undefined}
                   createLabel="เพิ่มวัสดุใหม่" />
+                )}
               </div>
+              {/* สลับแหล่ง: 🏷️ = เลือกจาก SKU คลังสินค้า · 🧮 = กลับไปใช้ master วัสดุตีราคา */}
+              {fullEdit && (
+                <button type="button"
+                  onClick={() => u(r.item_sku_id
+                    ? { item_sku_id: null, item_sku_code: null }
+                    : { item_sku_id: "", item_sku_code: "", item_id: null, price_basis: null })}
+                  title={r.item_sku_id
+                    ? "กลับไปเลือกจาก “วัสดุตีราคา” (master)"
+                    : "เลือกวัตถุดิบจากคลังสินค้า (SKU) — ดึงประเภท ราคาซื้อ หน่วย หน้ากว้าง มาให้"}
+                  className={`h-7 shrink-0 rounded border px-1.5 text-xs ${r.item_sku_id ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-400 hover:border-blue-300 hover:text-blue-600"}`}>
+                  🏷️
+                </button>
+              )}
               {/* ฐานราคาของวัสดุ (ปุ่ม compact มีสัญลักษณ์) จาก SKU ที่ผูก — ไม่โชว์กับชนิดชิ้น */}
               {item && !rowIsPiece(r) && fullEdit && (
                 <BasisPicker value={r.price_basis ?? "manual"}

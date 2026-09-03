@@ -20,6 +20,7 @@ export const revalidate = 0;
 export type CostLine = {
   id?: string; item_id: string | null; item_name: string | null; group_name: string | null;
   group_code?: string | null; price_basis?: string | null;   // ตีราคาแบบกลุ่ม: code กลุ่ม + ฐานราคา (avg/set/manual)
+  item_sku_id?: string | null; item_sku_code?: string | null;   // เลือกวัตถุดิบจากคลังสินค้า (SKU) โดยตรง
   parent_code?: string | null;   // ข้อ 7: บรรทัดนี้อยู่แท็บ Parent ไหน (null = ทั่วไป)
   calc_method: string | null; width_cm: number | null; length_cm: number | null; pieces: number | null;
   face_width_cm: number | null; waste_percent: number | null; divisor: number | null;
@@ -51,6 +52,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     sheet_id: id,
     item_id: l.item_id || null, item_name: l.item_name?.trim() || null, group_name: l.group_name || null,
     group_code: l.group_code || null, price_basis: l.price_basis || null,
+    item_sku_id: l.item_sku_id || null, item_sku_code: l.item_sku_code?.trim() || null,
     parent_code: l.parent_code || null,
     calc_method: l.calc_method || null,
     width_cm: num(l.width_cm), length_cm: num(l.length_cm), pieces: num(l.pieces),
