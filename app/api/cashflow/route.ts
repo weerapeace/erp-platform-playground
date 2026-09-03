@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { computeDueDate, formatCreditTerm } from "@/lib/credit-term";
-import { openLink } from "@/lib/open-param";
+import { openLink } from "@/lib/open-link";
 import { SO_ACTIVE_STATUSES } from "@/lib/so-status";
 import {
   addDaysISO, dayOfMonthISO, endOfMonthISO, manualDateInMonth, manualScheduleLabel, monthsBetween, todayISO,

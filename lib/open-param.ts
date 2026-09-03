@@ -32,7 +32,6 @@ export function useOpenParam(ready: boolean, open: (id: string) => void): void {
   }, [ready]);
 }
 
-/** สร้างลิงก์ตรงถึงใบ เช่น openLink("/sales-orders", id) → "/sales-orders?open=<id>" */
-export function openLink(path: string, id: string | null | undefined): string {
-  return id ? `${path}?open=${encodeURIComponent(id)}` : path;
-}
+/** สร้างลิงก์ตรงถึงใบ — ตัวจริงอยู่ lib/open-link.ts (server-safe) · re-export ให้หน้าจอที่ import จากที่นี่อยู่แล้ว
+ *  ⚠️ API route ห้าม import จากไฟล์นี้ (เป็น "use client") — ให้ import จาก @/lib/open-link แทน */
+export { openLink } from "./open-link";
