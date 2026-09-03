@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { PlaygroundShell } from "@/components/playground-shell";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
@@ -250,9 +251,10 @@ export default function SoOrdersPage() {
     amount: r.grand_total, color: ST[r.status]?.color ?? "#94a3b8", approx: !r.due_date,
   }));
 
-  if (!canView) return <AccessDenied message="คุณยังไม่มีสิทธิ์ดูใบสั่งขาย (so.view)" />;
+  if (!canView) return <PlaygroundShell><AccessDenied message="คุณยังไม่มีสิทธิ์ดูใบสั่งขาย (so.view)" /></PlaygroundShell>;
 
   return (
+    <PlaygroundShell>
     <div className="max-w-[1500px] mx-auto px-5 py-5 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
@@ -402,6 +404,7 @@ export default function SoOrdersPage() {
         title="ยกเลิกใบสั่งขาย?" variant="danger" confirmText="ยกเลิกใบ"
         message="ใบจะถูกทำเครื่องหมายว่ายกเลิก (ไม่ลบทิ้ง) · ใบสั่งผลิตที่เปิดไปแล้วจะไม่ถูกยกเลิกให้อัตโนมัติ — ต้องไปจัดการที่ใบสั่งผลิตเอง" />
     </div>
+    </PlaygroundShell>
   );
 }
 
