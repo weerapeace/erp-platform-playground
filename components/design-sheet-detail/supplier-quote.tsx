@@ -29,8 +29,10 @@ type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 const keyOf = (l: SupplierLine, i: number) => l.key ?? l.id ?? `r${i}`;
 const pkey = (s: string | null | undefined) => s ?? "";
 
-export function SupplierQuoteSection({ sheetId, parentCode, parentTabs, canEdit, canSeeCost, pushToast, onDirtyChange, saveRef, onRequestEdit, onSendToQuote }: {
+export function SupplierQuoteSection({ sheetId, parentCode, parentTabs, canEdit, canSeeCost, pushToast, onDirtyChange, saveRef, onRequestEdit, onSendToQuote, reloadKey = 0 }: {
   sheetId: string;
+  /** เปลี่ยนค่า = โหลดบรรทัด/แบ่งกำไรใหม่จากเซิร์ฟเวอร์ (หน้าแม่เปลี่ยนชื่อ/ลบเวอร์ชันแล้ว) */
+  reloadKey?: number;
   /** แท็บไซส์/Parent ที่กำลังดู ("" = ทั่วไป) — บรรทัดผูกกับแท็บเหมือนตีราคา */
   parentCode: string;
   parentTabs?: { key: string; label: string }[];
@@ -83,7 +85,7 @@ export function SupplierQuoteSection({ sheetId, parentCode, parentTabs, canEdit,
     }).catch(() => { /* เงียบ — โหลดไม่ได้ = เริ่มจากว่าง */ })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [sheetId]);
+  }, [sheetId, reloadKey]);
 
   const rows = useMemo(() => all.filter((l) => pkey(l.parent_code) === parentCode), [all, parentCode]);
   const splits = splitsMap[parentCode] ?? [];

@@ -472,6 +472,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [verOpen, setVerOpen] = useState(false);          // ป๊อป "เพิ่มเวอร์ชันตีราคา"
   const [verName, setVerName] = useState("");
   const [verCopy, setVerCopy] = useState(true);           // คัดลอกรายการจากแท็บที่กำลังดู              // ข้อ 7: แท็บ Parent ที่กำลังดู ("" = ทั่วไป)
+  const [verRename, setVerRename] = useState<string | null>(null);   // ป๊อป "เปลี่ยนชื่อเวอร์ชัน" (key แท็บที่จะเปลี่ยน)
+  const [verRenameName, setVerRenameName] = useState("");
+  const [verDel, setVerDel] = useState<string | null>(null);         // ยืนยัน "ลบเวอร์ชัน" (key แท็บ)
+  const [verBusy, setVerBusy] = useState(false);
+  const [supplierReload, setSupplierReload] = useState(0);           // บังคับ Section สั่งจากร้าน โหลดใหม่หลังเปลี่ยนชื่อ/ลบเวอร์ชัน
   const [costExtraMap, setCostExtraMap] = useState<Record<string, CostExtra[]>>({});   // ค่าใช้จ่ายเพิ่ม แยกตาม Parent
   // บรรทัด + ค่าใช้จ่าย ของ Parent ที่กำลังดู (ตีราคาแยกตาม Parent SKU)
   const curLines = useMemo(() => costLines.filter((r) => pkey(r.parent_code) === costParent), [costLines, costParent]);
@@ -821,6 +826,48 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกตีราคาไม่สำเร็จ"); return false; }
     finally { setCostSaving(false); }
   }, [form?.id, form?.parent_sku_drafts, costLines, costExtraMap, toast]);
+
+  // เปลี่ยนชื่อ / ลบ "เวอร์ชันตีราคา" (แท็บ) — เซิร์ฟเวอร์แก้ให้ครบทุกตาราง (วัสดุ/สั่งจากร้าน/เสนอราคา/ค่าใช้จ่ายเพิ่ม/แบ่งกำไร/ชื่อ) แล้วหน้าจอรีโหลด
+  const versionOp = async (action: "rename" | "delete", from: string, to?: string): Promise<boolean> => {
+    if (!form?.id) return false;
+    setVerBusy(true);
+    try {
+      // ของที่แก้ค้างบนหน้าจอต้องลงฐานข้อมูลก่อน — ไม่งั้นเซิร์ฟเวอร์เปลี่ยนชื่อไม่ครบ / ลบแล้วบรรทัดโผล่กลับตอนกดบันทึก
+      if (costDirty && !(await saveCost())) return false;
+      if (supplierDirty) await supplierSaveRef.current?.();
+      const res = await apiFetch(`/api/design-sheets/${form.id}/versions`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, from, to }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      // รีโหลดบรรทัดวัสดุ + ปรับชื่อเวอร์ชัน/ค่าใช้จ่ายเพิ่มในหน้าจอให้ตรงกับที่เซิร์ฟเวอร์ทำ + Section สั่งจากร้านโหลดใหม่
+      await loadCq(form.id);
+      setForm((f) => {
+        if (!f) return f;
+        let drafts = f.parent_sku_drafts.filter((d) => d !== from);
+        if (action === "rename" && to && !drafts.includes(to)) drafts = [...drafts, to];
+        return { ...f, parent_sku_drafts: drafts };
+      });
+      setCostExtraMap((m) => {
+        const out: Record<string, CostExtra[]> = {};
+        for (const [k, v] of Object.entries(m)) { if (k === from) { if (action === "rename" && to) out[to] = v; } else out[k] = v; }
+        return out;
+      });
+      setSupplierReload((n) => n + 1);
+      setCostParent(action === "rename" && to ? to : "");
+      const c = (j.counts ?? {}) as Record<string, number>;
+      const n = (c.design_sheet_cost_lines ?? 0) + (c.design_sheet_supplier_lines ?? 0);
+      toast.success(action === "rename" ? `เปลี่ยนชื่อ "${from}" → "${to}" แล้ว (${n} รายการตามไปด้วย)` : `ลบเวอร์ชัน "${from}" แล้ว (${n} รายการ)`);
+      return true;
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); return false; }
+    finally { setVerBusy(false); }
+  };
+
+  const doRename = async () => {
+    const from = verRename ?? ""; const to = verRenameName.trim();
+    if (!to) { toast.error("ตั้งชื่อใหม่ก่อน"); return; }
+    if (to === from) { setVerRename(null); return; }
+    if (costParentTabs.some((t) => t.key === to)) { toast.error(`มีแท็บชื่อ "${to}" อยู่แล้ว — ตั้งชื่ออื่น`); return; }
+    if (await versionOp("rename", from, to)) setVerRename(null);
+  };
 
   // ส่งยอดต้นทุนสินค้ารวม (วัสดุ + ค่าใช้จ่ายเพิ่ม) ไปเป็นรอบเสนอราคาใหม่
   const sendCostToQuote = async () => {
@@ -1888,8 +1935,21 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   จัดกลุ่ม · เรียงลำดับหัวคอลัมน์ · ปุ่มคำนวณผ้า · ค้นหา */}
               <div className="contents space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-[11px] text-slate-400">
+                <div className="text-[11px] text-slate-400 inline-flex items-center gap-1.5">
                   กำลังตีราคาของ: <b className="text-slate-600">{costParent === "" ? "ทั่วไป" : costParent}</b>
+                  {/* เปลี่ยนชื่อ/ลบ ได้เฉพาะแท็บที่เป็น "ชื่อ" (เวอร์ชัน ✎ / orphan ⚠) — รหัส Parent จริงไปจัดการที่แท็บข้อมูลงาน */}
+                  {canEdit && costParent !== "" && (() => {
+                    const kind = costParentTabs.find((t) => t.key === costParent)?.kind;
+                    if (kind === "code") return <span className="text-[10px] text-slate-300" title="รหัส Parent SKU จริง — เพิ่ม/เอาออกที่แท็บ ข้อมูลงาน">(รหัสจริง)</span>;
+                    return (
+                      <>
+                        <button onClick={() => { setVerRenameName(costParent); setVerRename(costParent); }} disabled={verBusy}
+                          title="เปลี่ยนชื่อเวอร์ชันนี้" className="h-5 px-1.5 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 hover:text-blue-700 disabled:opacity-50">✎ เปลี่ยนชื่อ</button>
+                        <button onClick={() => setVerDel(costParent)} disabled={verBusy}
+                          title="ลบเวอร์ชันนี้ทั้งแท็บ" className="h-5 px-1.5 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 disabled:opacity-50">🗑 ลบเวอร์ชัน</button>
+                      </>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center gap-2">
                   {fullEdit && costParentTabs.length > 1 && (
@@ -2024,7 +2084,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
               {/* 🛒 Section: คำนวณจากซัพพลายเออร์ (สินค้าสั่งจากร้าน — ราคา+ค่าส่งตามคิว → กำไร → แบ่งกำไร) */}
               {form?.id && (
-                <SupplierQuoteSection sheetId={form.id} parentCode={costParent} parentTabs={costParentTabs}
+                <SupplierQuoteSection sheetId={form.id} parentCode={costParent} parentTabs={costParentTabs} reloadKey={supplierReload}
                   canEdit={fullEdit} canSeeCost={canSeeCost}
                   pushToast={(type, m) => (type === "error" ? toast.error(m) : type === "info" ? toast.info(m) : toast.success(m))}
                   onDirtyChange={setSupplierDirty} saveRef={supplierSaveRef}
@@ -2274,6 +2334,37 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           </p>
         </div>
       </ERPModal>
+
+      {/* เปลี่ยนชื่อเวอร์ชันตีราคา — เซิร์ฟเวอร์เปลี่ยน parent_code ให้ครบทุกตาราง (บันทึกทันที ไม่ต้องกดบันทึกตีราคาซ้ำ) */}
+      <ERPModal open={verRename !== null} onClose={() => { if (!verBusy) setVerRename(null); }} size="sm"
+        title="✎ เปลี่ยนชื่อเวอร์ชัน"
+        description={`เปลี่ยนชื่อแท็บ "${verRename ?? ""}" — บรรทัดวัสดุ / ตีราคาสั่งจากร้าน / รอบเสนอราคา ของแท็บนี้จะย้ายตามชื่อใหม่ทั้งหมด`}
+        footer={
+          <div className="flex w-full justify-end gap-2">
+            <button onClick={() => setVerRename(null)} disabled={verBusy} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+            <button disabled={verBusy} onClick={() => void doRename()}
+              className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{verBusy ? "กำลังเปลี่ยน…" : "เปลี่ยนชื่อ"}</button>
+          </div>
+        }>
+        <label className="block">
+          <span className="text-xs text-slate-500">ชื่อใหม่ *</span>
+          <input value={verRenameName} onChange={(e) => setVerRenameName(e.target.value)} autoFocus
+            onKeyDown={(e) => { if (e.key === "Enter" && !verBusy) void doRename(); }}
+            className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </label>
+        {(costDirty || supplierDirty) && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+            💡 มีข้อมูลที่ยังไม่บันทึก — ระบบจะ<b>บันทึกให้ก่อน</b>แล้วค่อยเปลี่ยนชื่อ
+          </p>
+        )}
+      </ERPModal>
+
+      {/* ลบเวอร์ชันตีราคา — ลบบรรทัดวัสดุ + สั่งจากร้าน + ค่าใช้จ่ายเพิ่ม + แบ่งกำไร ของแท็บนี้ (รอบเสนอราคาเก็บไว้เป็นประวัติ) */}
+      <ConfirmDialog open={verDel !== null} onClose={() => { if (!verBusy) setVerDel(null); }}
+        onConfirm={async () => { if (verDel != null && (await versionOp("delete", verDel))) setVerDel(null); }}
+        title="ลบเวอร์ชันตีราคา" variant="danger" loading={verBusy}
+        confirmText="ลบเวอร์ชัน" cancelText="ยกเลิก"
+        message={`ต้องการลบเวอร์ชัน "${verDel ?? ""}" ทั้งแท็บหรือไม่?\n\nจะลบ: บรรทัดวัสดุ ${costLines.filter((r) => pkey(r.parent_code) === (verDel ?? "")).length} บรรทัด + ตีราคาสั่งจากร้าน + ค่าใช้จ่ายเพิ่ม + แบ่งกำไร ของแท็บนี้ (ลบแล้วกู้คืนไม่ได้)\nรอบเสนอราคาที่เคยส่งจากแท็บนี้ยังเก็บไว้เป็นประวัติ${(costDirty || supplierDirty) ? "\n\n💡 มีข้อมูลที่ยังไม่บันทึก — ระบบจะบันทึกให้ก่อนแล้วค่อยลบ" : ""}`} />
 
       {/* ส่งสินค้าไปใบเสนอราคา (ระบบขาย) — หย่อนเข้าตะกร้า หรือเริ่มใบใหม่ */}
       {form?.id && (
