@@ -16,9 +16,11 @@ import type { QuoteDetail, QuoteLine } from "@/app/api/quotations/route";
 const baht = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function QuotationCartDrawer({
-  cartId, refreshKey, onClear, onLabel,
+  cartId, refreshKey, onClear, onLabel, sheetId,
 }: {
   cartId: string | null;
+  /** ใบงานออกแบบที่เปิดอยู่ — ใช้เป็นแหล่งรูป (แกลเลอรี/รายละเอียด/คอมเมนต์) + ที่เก็บรูปที่อัปใหม่ */
+  sheetId?: string | null;
   /** เปลี่ยนค่า = บังคับโหลดใหม่ (หลังเพิ่งหย่อนสินค้าเข้าตะกร้า) */
   refreshKey: number;
   /** ตะกร้าหมดอายุ/ถูกแปลงไปแล้ว หรือกด "เริ่มใบใหม่" → ล้างตัวชี้ */
@@ -35,6 +37,40 @@ export function QuotationCartDrawer({
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   const [detailOpen, setDetailOpen] = useState(false);   // ป๊อปอัปดูรายละเอียด + พิมพ์
+  const [imgFor, setImgFor] = useState<number | null>(null);   // บรรทัดที่กำลังเลือกรูป
+  const [sheetImgs, setSheetImgs] = useState<{ key: string; url: string; source_label: string }[] | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  // รูปจากใบงานออกแบบที่เปิดอยู่ (ทุกแหล่ง) — โหลดครั้งเดียวตอนเปิดตัวเลือกรูป
+  useEffect(() => {
+    if (imgFor === null || sheetImgs !== null || !sheetId) return;
+    let alive = true;
+    apiFetch(`/api/design-sheets/${sheetId}/images`).then((r) => r.json())
+      .then((j) => { if (alive) setSheetImgs((j.data ?? []) as { key: string; url: string; source_label: string }[]); })
+      .catch(() => { if (alive) setSheetImgs([]); });
+    return () => { alive = false; };
+  }, [imgFor, sheetImgs, sheetId]);
+
+  /** อัปรูปใหม่เข้าใบงาน แล้วใช้เป็นรูปของบรรทัดนี้ */
+  const uploadForLine = async (i: number, file: File) => {
+    if (!sheetId) { toast.error("เปิดจากใบงานออกแบบถึงจะอัปรูปใหม่ได้"); return; }
+    if (!file.type.startsWith("image/")) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file); fd.append("entity_type", "design_sheet"); fd.append("entity_id", sheetId);
+      const j = await apiFetch("/api/attachments", { method: "POST", body: fd }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      const key = (j.data?.file_path as string) ?? "";
+      const url = (j.public_url as string) ?? "";
+      if (key) {
+        setSheetImgs((cur) => [...(cur ?? []), { key, url, source_label: "เพิ่งอัปโหลด" }]);
+        setLine(i, { image_key: key });
+        toast.success("อัปโหลดรูปแล้ว");
+      }
+    } catch (e) { toast.error(e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ"); }
+    finally { setUploading(false); }
+  };
 
   const load = useCallback(async () => {
     if (!cartId) { setQuote(null); setLines([]); onLabel?.(null); return; }
@@ -62,6 +98,7 @@ export function QuotationCartDrawer({
         id: l.id, product_id: l.product_id ?? null, sku: l.sku, product_name: l.product_name,
         qty: Number(l.qty) || 0, unit: l.unit, unit_price: Number(l.unit_price) || 0,
         discount_type: l.discount_type, discount_value: l.discount_value, tax_code: l.tax_code ?? null, note: l.note ?? null,
+        image_key: l.image_key ?? null,          // รูปประกอบของบรรทัด (ติดไปกับใบพิมพ์)
       }));
       const res = await apiFetch(`/api/quotations/${cartId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: payload }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
@@ -109,6 +146,15 @@ export function QuotationCartDrawer({
                 <div key={l.id ?? i} className="rounded-lg border border-slate-200 p-2">
                   {/* ชื่อสินค้า + ตัวเลือก (สี/ไซส์) แก้ได้ตรงนี้เลย เช่น "ครีม L" → "ครีม M" */}
                   <div className="flex items-start justify-between gap-2">
+                    {/* รูปประกอบของบรรทัด — กดเพื่อเลือกจากใบงานออกแบบ หรืออัปโหลดใหม่ (ติดไปกับใบพิมพ์) */}
+                    <button type="button" onClick={() => setImgFor(imgFor === i ? null : i)}
+                      title={l.image_key ? "เปลี่ยน/เอารูปออก" : "ใส่รูปประกอบ (เลือกจากใบงาน หรืออัปโหลดใหม่)"}
+                      className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded border bg-white ${l.image_key ? "border-slate-200" : "border-dashed border-slate-300 text-[10px] leading-tight text-slate-400"} hover:border-indigo-400`}>
+                      {l.image_key
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={`/api/r2-image?key=${encodeURIComponent(l.image_key)}`} alt="" className="h-full w-full object-cover" />
+                        : <span>＋<br />รูป</span>}
+                    </button>
                     <div className="min-w-0 flex-1 space-y-1">
                       <input value={l.product_name ?? ""} onChange={(e) => setLine(i, { product_name: e.target.value })}
                         title="ชื่อสินค้า (แก้ได้)" placeholder="ชื่อสินค้า"
@@ -130,6 +176,43 @@ export function QuotationCartDrawer({
                       title="ราคา/หน่วย" className="h-7 w-24 rounded border border-slate-200 px-1.5 text-right text-sm" />
                     <span className="ml-auto text-sm font-medium tabular-nums text-slate-700">{baht((Number(l.qty) || 0) * (Number(l.unit_price) || 0))}</span>
                   </div>
+
+                  {/* แผงเลือกรูป: รูปจากใบงานออกแบบ + อัปโหลดใหม่ + เอาออก */}
+                  {imgFor === i && (
+                    <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50/40 p-2"
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) void uploadForLine(i, f); }}>
+                      <div className="mb-1 flex items-center gap-2">
+                        <span className="text-[11px] font-medium text-indigo-800">รูปประกอบรายการนี้</span>
+                        {l.image_key && (
+                          <button onClick={() => setLine(i, { image_key: null })} className="text-[11px] text-slate-500 hover:text-rose-600">✕ เอารูปออก</button>
+                        )}
+                        <button onClick={() => setImgFor(null)} className="ml-auto text-[11px] text-slate-400 hover:text-slate-700">ปิด</button>
+                      </div>
+                      {!sheetId ? (
+                        <p className="mb-1 text-[11px] text-slate-400">เปิดตะกร้าจากใบงานออกแบบ จะเลือกรูปจากใบงานได้</p>
+                      ) : sheetImgs === null ? (
+                        <p className="mb-1 text-[11px] text-slate-400">กำลังโหลดรูปจากใบงาน…</p>
+                      ) : sheetImgs.length === 0 ? (
+                        <p className="mb-1 text-[11px] text-slate-400">ใบงานนี้ยังไม่มีรูป — อัปโหลดใหม่ได้เลย</p>
+                      ) : (
+                        <div className="mb-1 grid max-h-32 grid-cols-4 gap-1 overflow-auto">
+                          {sheetImgs.map((im) => (
+                            <button key={im.key} type="button" onClick={() => setLine(i, { image_key: im.key })} title={im.source_label}
+                              className={`flex h-14 items-center justify-center overflow-hidden rounded border bg-white ${l.image_key === im.key ? "border-indigo-500 ring-1 ring-indigo-300" : "border-slate-200 hover:border-indigo-300"}`}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={im.url} alt="" loading="lazy" className="h-full w-full object-contain" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <label className={`flex h-8 cursor-pointer items-center justify-center rounded border border-dashed text-[11px] ${uploading ? "border-slate-200 text-slate-400" : "border-indigo-300 text-indigo-700 hover:bg-white"}`}>
+                        {uploading ? "⏳ กำลังอัปโหลด…" : "⬆️ อัปโหลดรูปใหม่ (หรือลากมาวาง)"}
+                        <input type="file" accept="image/*" className="hidden" disabled={uploading}
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadForLine(i, f); e.target.value = ""; }} />
+                      </label>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -187,8 +270,16 @@ export function QuotationCartDrawer({
                   {lines.map((l, i) => (
                     <tr key={l.id ?? i} className="border-b border-slate-100 align-top">
                       <td className="py-1.5">
+                        <div className="flex items-start gap-2">
+                          {l.image_key && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={`/api/r2-image?key=${encodeURIComponent(l.image_key)}`} alt="" className="h-10 w-10 shrink-0 rounded border border-slate-200 object-cover" />
+                          )}
+                          <div className="min-w-0">
                         <div className="text-slate-800">{l.product_name}</div>
                         {l.note && <div className="text-[11px] text-slate-400">ตัวเลือก: {l.note}</div>}
+                          </div>
+                        </div>
                       </td>
                       <td className="py-1.5 text-right tabular-nums">{Number(l.qty) || 0}</td>
                       <td className="py-1.5 text-right tabular-nums">{baht(Number(l.unit_price) || 0)}</td>

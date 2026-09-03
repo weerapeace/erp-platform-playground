@@ -2422,7 +2422,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       )}
 
       {/* ตะกร้าใบเสนอราคา (drawer ขอบขวา) — โผล่เมื่อมีรายการในตะกร้า */}
-      <QuotationCartDrawer cartId={cartId} refreshKey={cartRefresh} onClear={clearCart} onLabel={setCartLabel} />
+      <QuotationCartDrawer cartId={cartId} refreshKey={cartRefresh} onClear={clearCart} onLabel={setCartLabel} sheetId={form?.id ?? null} />
 
       {/* เตือนก่อนปิด เมื่อมีข้อมูลยังไม่บันทึก (กระดาน/ตีราคา) — 3 ทางเลือก */}
       {/* เลือกแคมเปญปลายทาง (ของกลาง) → ไปกระดานนั้นพร้อมวางการ์ดใบงานนี้ */}
