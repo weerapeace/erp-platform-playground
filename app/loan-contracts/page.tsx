@@ -11,6 +11,7 @@ import type { MasterCRUDConfig } from "@/components/master-crud";
 import { LoanProgressActions } from "./progress-actions";
 import { LoanPaymentsSection } from "./payments-section";
 import { LoanFeesSection } from "./fees-section";
+import { LoanRestructureSection } from "./restructure-section";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -86,6 +87,11 @@ const CONFIG: MasterCRUDConfig = {
   // โชว์ทุกใบจ่ายของสัญญานี้ + แยกเงินต้น/ดอกเบี้ย/ดอกผิดนัด/ค่าธรรมเนียม/อื่น ๆ + ยอดรวม
   recordSections: [
     {
+      key: "loan-restructure",
+      title: "🔧 ปรับโครงสร้างหนี้",
+      render: ({ recordId, row, refresh }) => <LoanRestructureSection contractId={recordId} row={row} onChanged={refresh} />,
+    },
+    {
       key: "loan-fees",
       title: "🧾 ค่าธรรมเนียมของสัญญา",
       render: ({ recordId, refresh }) => <LoanFeesSection contractId={recordId} onChanged={refresh} />,
@@ -97,6 +103,13 @@ const CONFIG: MasterCRUDConfig = {
     },
   ],
   cellRenderers: {
+    // ปรับโครงสร้างหนี้ — ป้ายส้มบอกจำนวนครั้ง (0 = ไม่เคย)
+    restructure_count: (v, row) => {
+      const n = Number(v ?? 0);
+      if (!n) return <span className="text-xs text-slate-300">—</span>;
+      const d = String(row?.last_restructure_date ?? "");
+      return chip(`ปรับแล้ว ${n} ครั้ง${d ? " · " + new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : ""}`, "bg-orange-50 text-orange-700 border-orange-200");
+    },
     lifecycle_status: (v) => {
       const m = LIFECYCLE[String(v ?? "")];
       return m ? chip(m[0], m[1]) : <span className="text-xs text-slate-300">{String(v ?? "—")}</span>;

@@ -47,7 +47,7 @@ export type Permission =
   | "accounting.view" | "accounting.manage" | "accounting.post"
   | "subscriptions.view" | "subscriptions.edit"
   | "books.view" | "books.edit"
-  | "loan_contracts.view" | "loan_contracts.create" | "loan_contracts.edit" | "loan_contracts.delete" | "loan_contracts.export"
+  | "loan_contracts.view" | "loan_contracts.create" | "loan_contracts.edit" | "loan_contracts.delete" | "loan_contracts.export" | "loan_contracts.restructure"
   | "loan_drawdowns.view" | "loan_drawdowns.create" | "loan_drawdowns.edit" | "loan_drawdowns.delete"
   | "loan_schedules.view" | "loan_schedules.create" | "loan_schedules.edit" | "loan_schedules.delete"
   | "loan_installments.view"
