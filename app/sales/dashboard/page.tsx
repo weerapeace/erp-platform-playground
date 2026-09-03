@@ -115,6 +115,7 @@ export default function SalesDashboardPage() {
           <div className="flex gap-2 flex-wrap">
             <Link href="/sales/monthly" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">📈 สรุปรายเดือน</Link>
             <Link href="/sales-orders" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">🧾 ใบขาย</Link>
+            <Link href="/master/sales-orders-plan" title="ใบสั่งขายแบบตาราง/ปฏิทิน — ดูกำหนดส่งรายวัน" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">📅 ใบสั่งขาย (ตาราง/ปฏิทิน)</Link>
             <Link href="/billing-notes" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">📑 ใบวางบิล</Link>
             <Link href="/delivery-notes" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">📦 ใบส่งสินค้า</Link>
           </div>
