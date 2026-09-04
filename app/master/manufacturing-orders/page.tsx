@@ -40,13 +40,14 @@ type FormState = {
   qty: number; due_date: string;
   bom_code: string | null; bom_version: string | null; bom_id: string | null;
   status: string; note: string;
+  fabric_calc_mode: "lay" | "classic";   // วิธีคิดผ้าของใบนี้ (เปลี่ยนได้ที่แท็บวัตถุดิบ)
   materials: PreviewMat[];   // ต่อบล็อก (แท็บรายละเอียด)
   summary: SummaryMat[];     // รวมต่อวัตถุดิบ (แท็บวัตถุดิบที่ต้องใช้ + checklist)
   requested: Record<string, number>;  // วัตถุดิบ(รหัส) → จำนวนที่ขอซื้อไปแล้ว (จากใบขอซื้อที่ผูก MO นี้)
   sizes: { label: string; sort?: number }[];   // กลุ่ม C: ไซส์ที่สูตรนี้รองรับ (ถ้ามี)
   size_qty: Record<string, number>;            // กลุ่ม C: จำนวนต่อไซส์ของใบนี้
 };
-const empty = (): FormState => ({ id: null, mo_no: "", product_sku: "", product_name: "", product_image: null, qty: 1, due_date: "", bom_code: null, bom_version: null, bom_id: null, status: "draft", note: "", materials: [], summary: [], requested: {}, sizes: [], size_qty: {} });
+const empty = (): FormState => ({ id: null, mo_no: "", product_sku: "", product_name: "", product_image: null, qty: 1, due_date: "", bom_code: null, bom_version: null, bom_id: null, status: "draft", fabric_calc_mode: "lay", note: "", materials: [], summary: [], requested: {}, sizes: [], size_qty: {} });
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   draft:       { label: "ร่าง",        cls: "bg-slate-100 text-slate-600" },
@@ -123,6 +124,7 @@ export default function MoWorkspacePage() {
   const [recvSaving, setRecvSaving] = useState(false);
 
   const [ungroupedOnly, setUngroupedOnly] = useState(false);   // กรองเฉพาะใบที่ยังไม่จับกลุ่ม
+  const [fabricModeBusy, setFabricModeBusy] = useState(false);   // กำลังเปลี่ยนวิธีคิดผ้า
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
     const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
     if (p.search) params.set("search", p.search);
@@ -241,6 +243,7 @@ export default function MoWorkspacePage() {
         id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: (d.product_image as string) ?? null,
         qty: Number(d.qty) || 1, due_date: d.due_date ?? "", bom_code: d.bom_code ?? null, bom_version: d.bom_version ?? null, bom_id: null,
         status: d.status ?? "draft", note: d.note ?? "", materials: mats, summary: summ,
+        fabric_calc_mode: d.fabric_calc_mode === "classic" ? "classic" : "lay",
         requested: (d.requested ?? {}) as Record<string, number>,
         sizes: [], size_qty: {},   // เติมจาก BOM ด้านล่าง (เมื่อเจอ cur)
       });
@@ -304,6 +307,21 @@ export default function MoWorkspacePage() {
     return [...map.values()];
   };
   const sumSource = (): SummaryMat[] => (form?.id ? form.summary : aggregate(form?.materials ?? []));
+
+  // สวิตช์วิธีคิดผ้าของใบนี้ (เจ้าของขอให้เลือกได้): เปลี่ยนแล้วกางสูตรใหม่ทันที (คงค่าที่กรอกไว้)
+  const switchFabricMode = async (mode: "lay" | "classic") => {
+    if (!form?.id || form.fabric_calc_mode === mode) return;
+    setFabricModeBusy(true);
+    try {
+      const payload: Record<string, unknown> = { fabric_calc_mode: mode, reexplode: true, preserve: true };
+      if (form.sizes.length > 0) payload.size_breakdown = form.sizes.map((s) => ({ label: s.label, qty: form.size_qty[s.label] || 0 }));
+      const res = await apiFetch(`/api/mo/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "เปลี่ยนวิธีคิดผ้าไม่สำเร็จ");
+      toast.success(mode === "lay" ? "คิดผ้าแบบ ✂ วางคุ้มสุด แล้ว" : "คิดผ้าแบบ 📐 สูตรเดิม (เผื่อเสีย) แล้ว");
+      await openEdit({ id: form.id, product_sku: form.product_sku } as MoListItem);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เปลี่ยนวิธีคิดผ้าไม่สำเร็จ"); }
+    finally { setFabricModeBusy(false); }
+  };
 
   // เปิด popup ขอซื้อ — เตรียมรายการที่ขาด + วันที่/ชื่อที่สั่ง
   const openPR = () => {
@@ -652,6 +670,17 @@ export default function MoWorkspacePage() {
                       <button type="button" onClick={() => setMatTab("block")} className={`h-7 px-3 border-l border-slate-200 ${matTab === "block" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>รายละเอียด (บล็อก)</button>
                     </div>
                     <div className="flex items-center gap-2">
+                      {form.id && form.bom_code && (
+                        <div className="flex border border-slate-200 rounded-lg overflow-hidden text-xs" title="วิธีคิดจำนวนผ้าของใบนี้ — เปลี่ยนแล้วระบบคิดใหม่ให้ทันที">
+                          {([["lay", "✂ วางคุ้มสุด"], ["classic", "📐 สูตรเดิม+เผื่อเสีย"]] as const).map(([v, lab]) => (
+                            <button key={v} type="button" disabled={!canEdit || fabricModeBusy || form.fabric_calc_mode === v}
+                              onClick={() => void switchFabricMode(v)}
+                              className={`h-7 px-2 ${form.fabric_calc_mode === v ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:cursor-default`}>
+                              {fabricModeBusy && form.fabric_calc_mode !== v ? "…" : lab}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {editable && canEdit && form.id && form.bom_code && (
                         <BomRefreshButton moId={form.id} productSku={form.product_sku || null} currentBomCode={form.bom_code} currentBomVersion={form.bom_version}
                           sizeBreakdown={form.sizes.length > 0 ? form.sizes.map((s) => ({ label: s.label, qty: form.size_qty[s.label] || 0 })) : null}

@@ -9,7 +9,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { explodeBom } from "../shared";
+import { explodeBom, fabricModeOf } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -75,6 +75,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
 type MatEdit = { id: string; on_hand_qty: number; is_ready: boolean; to_purchase_qty: number };
 type SaveBody = {
+  fabric_calc_mode?: "lay" | "classic";   // วิธีคิดผ้าของใบนี้ (เปลี่ยน = กางสูตรใหม่)
   product_sku?: string; product_name?: string; qty?: number; due_date?: string | null;
   bom_code?: string | null; bom_version?: string | null; status?: string; note?: string; reexplode?: boolean;
   preserve?: boolean;      // กางสูตรใหม่แบบเก็บค่าที่เคยกรอก (ปุ่ม "อัพเดตวัตถุดิบตาม BOM")
@@ -100,7 +101,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const admin = supabaseAdmin();
-  const { data: existing, error: exErr } = await admin.from("manufacturing_orders").select("mo_no, qty, bom_code, size_breakdown").eq("id", id).single();
+  const { data: existing, error: exErr } = await admin.from("manufacturing_orders").select("mo_no, qty, bom_code, size_breakdown, fabric_calc_mode").eq("id", id).single();
   if (exErr) return NextResponse.json({ error: "ไม่พบใบสั่งผลิตนี้" }, { status: 404 });
   const moNo = (existing as { mo_no: string }).mo_no;
   const newBom = body.bom_code !== undefined ? body.bom_code : (existing as { bom_code: string | null }).bom_code;
@@ -125,15 +126,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if ("bom_version"  in body) patch.bom_version  = body.bom_version ?? null;
   if ("note"         in body) patch.note         = body.note ?? null;
   if (sizesProvided)          patch.size_breakdown = effSizes;
+  const oldMode = fabricModeOf((existing as { fabric_calc_mode?: unknown }).fabric_calc_mode);
+  const newMode = body.fabric_calc_mode !== undefined ? fabricModeOf(body.fabric_calc_mode) : oldMode;
+  if (newMode !== oldMode)    patch.fabric_calc_mode = newMode;
   const { error } = await admin.from("manufacturing_orders").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
   // กางสูตรใหม่เมื่อจำนวน/สูตร/ไซส์เปลี่ยน หรือสั่ง reexplode
   const qtyChanged = newQty !== (existing as { qty: number }).qty;
   const bomChanged = newBom !== (existing as { bom_code: string | null }).bom_code;
-  const reexploded = body.reexplode || qtyChanged || bomChanged || sizesProvided;
+  const reexploded = body.reexplode || qtyChanged || bomChanged || sizesProvided || newMode !== oldMode;
   if (reexploded) {
-    await explodeBom(admin, newBom ?? null, moNo, newQty, effSizes, body.preserve === true);
+    await explodeBom(admin, newBom ?? null, moNo, newQty, effSizes, body.preserve === true, newMode);
   } else if (Array.isArray(body.materials)) {
     // อัปเดต checklist เตรียม/จำนวนที่มี/ขอซื้อ ที่ "สรุปต่อวัตถุดิบ" (เฉพาะเมื่อไม่ได้กางสูตรใหม่)
     for (const m of body.materials) {

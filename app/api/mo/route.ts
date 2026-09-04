@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { explodeBom, type SizeQty } from "./shared";
+import { explodeBom, fabricModeOf, type SizeQty } from "./shared";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
@@ -104,6 +104,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
 // ---- POST create ----
 type CreateBody = {
+  fabric_calc_mode?: "lay" | "classic";   // วิธีคิดผ้า (ไม่ส่ง = วางคุ้มสุด)
   product_sku?: string; product_name?: string; qty?: number; due_date?: string | null;
   order_date?: string | null;          // วันที่สั่งงาน (ฝั่ง client ส่งวันที่ไทยมา — ห้ามใช้ CURRENT_DATE ของ DB)
   bom_code?: string | null; bom_version?: string | null; status?: string; note?: string;
@@ -139,11 +140,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     status: body.status || "draft", due_date: body.due_date || null,
     order_date: body.order_date ? String(body.order_date).slice(0, 10) : null,
     bom_code: body.bom_code ?? null, bom_version: body.bom_version ?? null, note: body.note ?? null, is_active: true,
-    size_breakdown: sizeBreakdown,
+    size_breakdown: sizeBreakdown, fabric_calc_mode: fabricModeOf(body.fabric_calc_mode),
   }).select("id, mo_no").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
-  await explodeBom(admin, body.bom_code ?? null, moNo, qty, sizeBreakdown);  // กางสูตรตอนบันทึก (เผื่อยังไม่ได้กด)
+  await explodeBom(admin, body.bom_code ?? null, moNo, qty, sizeBreakdown, false, fabricModeOf(body.fabric_calc_mode));  // กางสูตรตอนบันทึก (เผื่อยังไม่ได้กด)
   await admin.from("audit_logs").insert({ actor_user_id: user.id, action: "create", entity_type: "mo", entity_id: mo.id, metadata: { mo_no: moNo, qty } }).then(() => {}, () => {});
   return NextResponse.json({ id: mo.id, mo_no: moNo, error: null });
 }

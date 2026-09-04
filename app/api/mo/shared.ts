@@ -5,6 +5,9 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { layFabric, type LayBlock } from "@/lib/mo-fabric-lay";
 
 export type SizeQty = { label: string; qty: number };
+/** วิธีคิดผ้าต่อใบ: lay = วางผ้าให้คุ้มที่สุด (ค่าเริ่มต้น) · classic = สูตรเดิม พื้นที่ + เผื่อเสีย% */
+export type FabricCalcMode = "lay" | "classic";
+export const fabricModeOf = (v: unknown): FabricCalcMode => (v === "classic" ? "classic" : "lay");
 
 /**
  * กางสูตร: ดึง bom_lines ของ bomCode → insert mo_materials
@@ -13,7 +16,7 @@ export type SizeQty = { label: string; qty: number };
  *   ใช้ค่ามิติของไซส์นั้น (size_values[label] ตาม size_dim) · required = qty_per(ของไซส์) × จำนวนไซส์นั้น
  *   บรรทัดที่ไม่ผันตามไซส์ → แถวเดียว required = qty_per × moQty(รวมทุกไซส์)
  */
-export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCode: string | null, moNo: string, moQty: number, sizeBreakdown: SizeQty[] | null = null, preserve = false) {
+export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCode: string | null, moNo: string, moQty: number, sizeBreakdown: SizeQty[] | null = null, preserve = false, fabricMode: FabricCalcMode = "lay") {
   // preserve = พยายามเก็บค่าที่เคยกรอก (จำนวนที่มี/เตรียม/ขอซื้อ + ตัดครบ) ของวัตถุดิบชิ้นเดิมที่ยังอยู่ในสูตรใหม่
   const prevSum = new Map<string, { on_hand: number; ready: boolean; to_purchase: number | null }>();
   const prevCut = new Map<string, boolean>();
@@ -105,7 +108,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   // บรรทัดที่ข้อมูลไม่พอ (ไม่มีขนาดตัด/ไม่รู้หน้ากว้าง) → คงสูตรเดิม
   type LayRow = Record<string, unknown> & { __lay?: { no_rotate: boolean; face: number; sheetW: number; sheetL: number; rowQty: number } };
   const layNoteOf = new Map<string, { note: string; length_cm: number; eff: number }>();   // ต่อ component_sku (ไว้ใส่แถวสรุป)
-  {
+  if (fabricMode === "lay") {   // classic = คงสูตรเดิม (เจ้าของขอให้เลือกได้ต่อใบ)
     const groups = new Map<string, { rows: LayRow[]; face: number; sheetL: number | null; divisor: number }>();
     for (const m of mats as LayRow[]) {
       const sku = (m.component_sku as string) ?? null; const L = m.__lay; if (!sku || !L) continue;
