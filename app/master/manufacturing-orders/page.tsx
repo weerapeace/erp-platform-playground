@@ -32,8 +32,9 @@ type PreviewMat = {
   size_label?: string | null;   // ไซส์ของบล็อกนี้ (กลุ่ม C) — null = ทุกไซส์
   lay_note?: string | null;     // วิธีวางผ้าที่ระบบคำนวณให้ (วางผ้าให้คุ้มที่สุด)
 };
-type MatRow = PreviewMat & { required: number; to_purchase: number };
-type SummaryMat = { key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null; uom: string | null; qty_per: number; on_hand_qty: number; is_ready: boolean; purchase_override: number | null; lay_note?: string | null };
+type MatRow = PreviewMat & { required: number; to_purchase: number; required_lay?: number | null; required_classic?: number | null };
+type SummaryMat = { key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null; uom: string | null; qty_per: number; on_hand_qty: number; is_ready: boolean; purchase_override: number | null; lay_note?: string | null;
+  required_lay?: number | null; required_classic?: number | null };   // ตัวเลขทั้ง 2 วิธีคิดผ้า (โชว์คู่กัน)
 type FormState = {
   id: string | null; mo_no: string;
   product_sku: string; product_name: string; product_image: string | null;
@@ -237,7 +238,8 @@ export default function MoWorkspacePage() {
         const override = stored != null && Math.round(stored * 10000) !== Math.round(base * 10000) ? stored : null;
         return { key: `s${i}`, id: (s.id as string) ?? null, component_sku: (s.component_sku as string) ?? null, component_name: (s.component_name as string) ?? null,
           material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, qty_per: qtyPer, on_hand_qty: onHand, is_ready: !!s.is_ready, purchase_override: override,
-          lay_note: (s.lay_note as string) ?? null };
+          lay_note: (s.lay_note as string) ?? null,
+          required_lay: s.required_lay != null ? Number(s.required_lay) : null, required_classic: s.required_classic != null ? Number(s.required_classic) : null };
       });
       setForm({
         id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: (d.product_image as string) ?? null,
@@ -604,6 +606,7 @@ export default function MoWorkspacePage() {
                 return { key: s.key, id: s.id, component_sku: s.component_sku, component_name: s.component_name, material_type: s.material_type, uom: s.uom,
                   qty_per: s.qty_per, cut_block_code: null, cut_width: null, cut_length: null, pieces: null,
                   on_hand_qty: s.on_hand_qty, is_ready: s.is_ready, purchase_override: s.purchase_override, cut_done: false, lay_note: s.lay_note ?? null,
+                  required_lay: s.required_lay ?? null, required_classic: s.required_classic ?? null,
                   required, to_purchase: s.purchase_override != null ? s.purchase_override : base };
               });
               const rowQty = (sl: string | null | undefined) => (sl != null && form.size_qty[sl] != null) ? form.size_qty[sl] : (form.qty || 0);
@@ -615,7 +618,15 @@ export default function MoWorkspacePage() {
                   {r.lay_note && <span className="block truncate text-[10px] text-indigo-600" title={r.lay_note}>✂ {r.lay_note}</span>}</span>,
               };
               const typeCol: LineColumn<MatRow> = { key: "material_type", header: "ประเภท", width: 110, sortable: true, getValue: (r) => r.material_type, groupLabel: (r) => r.material_type || "— ไม่ระบุ —" };
-              const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required, render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmt(r.required)}</span> };
+              const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required,
+                render: (r) => {
+                  // ตัวเลขเล็กใต้ค่าจริง = "อีกวิธี" (เจ้าของขอเทียบโดยไม่ต้องกดสลับ) — โชว์เฉพาะผ้าที่คิดได้ทั้ง 2 แบบ
+                  const isLay = form.fabric_calc_mode === "lay";
+                  const other = isLay ? r.required_classic : r.required_lay;
+                  const showOther = r.required_lay != null && r.required_classic != null && other != null && Math.abs(other - r.required) >= 0.005;
+                  return <span className="block px-1 text-right tabular-nums"><span className="font-semibold text-emerald-700">{fmt(r.required)}</span>
+                    {showOther && <span className="block text-[10px] text-slate-400" title={isLay ? "ถ้าคิดแบบ 📐 สูตรเดิม+เผื่อเสีย" : "ถ้าคิดแบบ ✂ วางคุ้มสุด"}>{isLay ? "📐" : "✂"} {fmt(other)}</span>}</span>;
+                } };
               const uomCol: LineColumn<MatRow> = { key: "uom", header: "หน่วย", width: 60, getValue: (r) => r.uom };
               const onhandCol: LineColumn<MatRow> = { key: "on_hand_qty", header: "จำนวนที่มี", width: 92, align: "right", getValue: (r) => r.on_hand_qty,
                 render: (r, u) => <input type="number" min={0} step="any" value={r.on_hand_qty} onChange={(e) => u({ on_hand_qty: Number(e.target.value) })} className={numCls} /> };

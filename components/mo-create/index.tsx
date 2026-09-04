@@ -55,6 +55,7 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
   const [qty, setQty] = useState<number>(1);
   const [due, setDue] = useState("");
   const [status, setStatus] = useState("draft");
+  const [fabricMode, setFabricMode] = useState<"lay" | "classic">("lay");   // วิธีคิดผ้า (เจ้าของขอเลือกได้ตั้งแต่สร้าง)
   const [note, setNote] = useState("");
   const [versions, setVersions] = useState<Version[]>([]);
   const [verId, setVerId] = useState("");
@@ -132,7 +133,7 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
     const payload: Record<string, unknown> = {
       product_sku: sku, product_name: name || null, qty,
       due_date: due || null, order_date: orderDate || null, bom_code: bomCode, bom_version: bomVersion,
-      status, note: note || null,
+      status, note: note || null, fabric_calc_mode: fabricMode,
     };
     // สูตรมีไซส์ → ส่งจำนวนต่อไซส์ (เซิร์ฟเวอร์คิดจำนวนรวม + แตกวัตถุดิบตามไซส์เอง)
     if (sizes.length > 0) payload.size_breakdown = sizes.map((s) => ({ label: s.label, qty: sizeQty[s.label] || 0 }));
@@ -240,7 +241,7 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
           body: JSON.stringify({
             product_sku: r.code, product_name: r.name ?? null, qty: Number(r.qty) || 0,
             due_date: r.due || due || null, order_date: orderDate || null,
-            bom_code: b.code, bom_version: b.version, status, note: r.note || note || null,
+            bom_code: b.code, bom_version: b.version, status, note: r.note || note || null, fabric_calc_mode: fabricMode,
           }) });
         const j = await res.json();
         if (!res.ok || j?.error) throw new Error(j?.error || "สร้างไม่สำเร็จ");
@@ -390,6 +391,15 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
               {STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
+          <div className="block">
+            <span className={lblCls}>วิธีคิดผ้า</span>
+            <div className="flex h-8 mt-0.5 border border-slate-200 rounded-lg overflow-hidden text-xs" title="เปลี่ยนทีหลังได้ในใบ (ปุ่ม ✂/📐 ที่แท็บวัตถุดิบ)">
+              {([["lay", "✂ วางคุ้มสุด"], ["classic", "📐 สูตรเดิม+เผื่อเสีย"]] as const).map(([v, l]) => (
+                <button key={v} type="button" onClick={() => setFabricMode(v)}
+                  className={`flex-1 px-1 whitespace-nowrap ${fabricMode === v ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {sku && versions.length === 0 && !loadingBom && (

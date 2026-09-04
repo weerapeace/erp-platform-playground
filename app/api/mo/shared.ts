@@ -106,9 +106,9 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   // ผ้า/ลายพิมพ์/PU/ตัวเสริม (คิดตามหน้ากว้าง) และผ้าผืน: เอาทุกบล็อกของผ้าตัวเดียวกันมาวางรวมกันบนหน้าผ้าจริง
   // ตามจำนวนที่สั่ง → ได้ความยาวที่ต้องใช้จริง ไม่บวกเผื่อเสีย (ทับค่าที่คิดจากสูตรต่อชุด)
   // บรรทัดที่ข้อมูลไม่พอ (ไม่มีขนาดตัด/ไม่รู้หน้ากว้าง) → คงสูตรเดิม
-  type LayRow = Record<string, unknown> & { __lay?: { no_rotate: boolean; face: number; sheetW: number; sheetL: number; rowQty: number } };
+  type LayRow = Record<string, unknown> & { __lay?: { no_rotate: boolean; face: number; sheetW: number; sheetL: number; rowQty: number }; __layQty?: number; __classicQty?: number };
   const layNoteOf = new Map<string, { note: string; length_cm: number; eff: number }>();   // ต่อ component_sku (ไว้ใส่แถวสรุป)
-  if (fabricMode === "lay") {   // classic = คงสูตรเดิม (เจ้าของขอให้เลือกได้ต่อใบ)
+  {   // คิดแบบวางผ้า "เสมอ" เพื่อเก็บตัวเลขทั้ง 2 วิธีคู่กัน (เจ้าของขอโชว์เทียบ) · ตัวที่ใช้จริงเลือกตาม fabricMode
     const groups = new Map<string, { rows: LayRow[]; face: number; sheetL: number | null; divisor: number }>();
     for (const m of mats as LayRow[]) {
       const sku = (m.component_sku as string) ?? null; const L = m.__lay; if (!sku || !L) continue;
@@ -136,16 +136,29 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
       g.rows.forEach((m, i) => {
         const pb = res.per_block[`b${i}`]; if (!pb) return;
         const rowQty = m.__lay?.rowQty ?? 0;
-        m.required_qty = pb.qty;
-        m.qty_per = rowQty > 0 ? r4(pb.qty / rowQty) : 0;
+        m.__classicQty = Number(m.required_qty) || 0;   // สูตรเดิม (พื้นที่+เผื่อเสีย) เก็บไว้เทียบ
+        m.__layQty = pb.qty;
         m.lay_note = pb.note;
+        if (fabricMode === "lay") {                       // ใบนี้ใช้แบบวางคุ้มสุด → ทับตัวเลขที่ใช้จริง
+          m.required_qty = pb.qty;
+          m.qty_per = rowQty > 0 ? r4(pb.qty / rowQty) : 0;
+        }
       });
       const sku = String(g.rows[0].component_sku);
       const prev = layNoteOf.get(sku);
       layNoteOf.set(sku, { note: prev ? `${prev.note} · ${res.note}` : res.note, length_cm: (prev?.length_cm ?? 0) + res.length_cm, eff: res.efficiency_pct });
     }
   }
-  for (const m of mats as LayRow[]) delete m.__lay;
+  // ตัวเลขทั้ง 2 วิธี รวมต่อวัตถุดิบ (ไว้โชว์คู่กันในแถวสรุป) — วัตถุดิบที่ไม่ได้วางผ้า = ตัวเลขเดียวกันทั้ง 2 วิธี
+  const both = new Map<string, { lay: number; classic: number; hasLay: boolean }>();
+  for (const m of mats as LayRow[]) {
+    const k = (m.component_sku as string) ?? "∅";
+    const req = Number(m.required_qty) || 0;
+    const e = both.get(k) ?? both.set(k, { lay: 0, classic: 0, hasLay: false }).get(k)!;
+    if (m.__layQty != null) { e.lay += m.__layQty; e.classic += m.__classicQty ?? req; e.hasLay = true; }
+    else { e.lay += req; e.classic += req; }
+    delete m.__lay; delete m.__layQty; delete m.__classicQty;
+  }
   if (mats.length > 0) await admin.from("mo_materials").insert(mats);
 
   // สรุปต่อวัตถุดิบ (รวมทุกไซส์/ทุกบล็อก — สำหรับซื้อ ไม่ต้องแยกไซส์)
@@ -168,6 +181,8 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
       lay_note: e.sku ? (layNoteOf.get(e.sku)?.note ?? null) : null,
       lay_length_cm: e.sku ? (layNoteOf.get(e.sku)?.length_cm ?? null) : null,
       lay_efficiency_pct: e.sku ? (layNoteOf.get(e.sku)?.eff ?? null) : null,
+      required_lay:     both.get(e.sku ?? "∅")?.hasLay ? r4(both.get(e.sku ?? "∅")!.lay) : null,
+      required_classic: both.get(e.sku ?? "∅")?.hasLay ? r4(both.get(e.sku ?? "∅")!.classic) : null,
     };
   });
   if (sumRows.length > 0) await admin.from("mo_material_summary").insert(sumRows);
