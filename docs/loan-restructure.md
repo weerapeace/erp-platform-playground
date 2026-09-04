@@ -59,3 +59,9 @@
 เมื่อ contracted_principal / approved_limit / loan_type / start_date เปลี่ยน) · แก้เงินต้น → ใบ AUTO ปรับตาม · มีใบเบิกที่คนลงเอง → ไม่ยุ่ง
 · เปลี่ยนเป็น revolving → ปิดใบ AUTO · ใบดอกทบจากการปรับโครงสร้าง = `reference_no = 'RESTRUCTURE'` (ไม่นับเป็นใบรับเงิน)
 คอลัมน์ "เบิกสะสม/สถานะการเบิก" ซ่อนจากตารางและโชว์ในฟอร์มเฉพาะ loan_type = revolving (condition_rules ของทะเบียนฟิลด์)
+
+## ยอดยกมา + ชำระทั้งหมดครั้งเดียว (2026-09-04)
+
+- `lump_sum_due_date` "วันกำหนดชำระทั้งหมด" → trigger สร้างตารางผ่อน `source='lump_sum'` 1 งวด (ดอก = ต้น×อัตรา×วัน/365) · แก้/ล้างวันแล้วปรับตาม · ไม่ทับตารางจริง (migration `202609041300`)
+- `opening_principal_paid / opening_interest_paid / opening_paid_installments / opening_as_of_date` "ยอดยกมา" หมวดความคืบหน้า → `loan_contract_recompute` บวกเข้ายอดสะสม (migration `202609041400`)
+- **ฐานตารางผ่อน = `loan_schedule_base(contract)` = เงินต้นตามสัญญา − ยอดยกมา** ใช้ร่วมใน generate / chain_recompute / restructure_apply (migration `202609041500`) · แก้ยอดยกมา → ตารางที่มีอยู่ไล่ยอดใหม่
