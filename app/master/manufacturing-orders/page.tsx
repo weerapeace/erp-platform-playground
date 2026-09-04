@@ -9,6 +9,8 @@ import { useState, useCallback, useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable, type ServerFetchParams } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { FabricLayoutPreview } from "@/components/design-sheet-detail/fabric-layout-preview";   // ตัววาดผังของกลาง (ตัวเดียวกับใบงานออกแบบ)
+import type { LayLayout } from "@/lib/mo-fabric-lay";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -32,9 +34,10 @@ type PreviewMat = {
   size_label?: string | null;   // ไซส์ของบล็อกนี้ (กลุ่ม C) — null = ทุกไซส์
   lay_note?: string | null;     // วิธีวางผ้าที่ระบบคำนวณให้ (วางผ้าให้คุ้มที่สุด)
 };
-type MatRow = PreviewMat & { required: number; to_purchase: number; required_lay?: number | null; required_classic?: number | null };
+type MatRow = PreviewMat & { required: number; to_purchase: number; required_lay?: number | null; required_classic?: number | null; lay_layout?: LayLayout[] | null };
 type SummaryMat = { key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null; uom: string | null; qty_per: number; on_hand_qty: number; is_ready: boolean; purchase_override: number | null; lay_note?: string | null;
-  required_lay?: number | null; required_classic?: number | null };   // ตัวเลขทั้ง 2 วิธีคิดผ้า (โชว์คู่กัน)
+  required_lay?: number | null; required_classic?: number | null;   // ตัวเลขทั้ง 2 วิธีคิดผ้า (โชว์คู่กัน)
+  lay_layout?: LayLayout[] | null };   // ผังการวางผ้า (ป๊อป 🧵)
 type FormState = {
   id: string | null; mo_no: string;
   product_sku: string; product_name: string; product_image: string | null;
@@ -126,6 +129,7 @@ export default function MoWorkspacePage() {
 
   const [ungroupedOnly, setUngroupedOnly] = useState(false);   // กรองเฉพาะใบที่ยังไม่จับกลุ่ม
   const [fabricModeBusy, setFabricModeBusy] = useState(false);   // กำลังเปลี่ยนวิธีคิดผ้า
+  const [layView, setLayView] = useState<{ name: string; layouts: LayLayout[] } | null>(null);   // ป๊อป "ดูผังการวางผ้า"
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
     const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
     if (p.search) params.set("search", p.search);
@@ -239,7 +243,8 @@ export default function MoWorkspacePage() {
         return { key: `s${i}`, id: (s.id as string) ?? null, component_sku: (s.component_sku as string) ?? null, component_name: (s.component_name as string) ?? null,
           material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, qty_per: qtyPer, on_hand_qty: onHand, is_ready: !!s.is_ready, purchase_override: override,
           lay_note: (s.lay_note as string) ?? null,
-          required_lay: s.required_lay != null ? Number(s.required_lay) : null, required_classic: s.required_classic != null ? Number(s.required_classic) : null };
+          required_lay: s.required_lay != null ? Number(s.required_lay) : null, required_classic: s.required_classic != null ? Number(s.required_classic) : null,
+          lay_layout: Array.isArray(s.lay_layout) ? (s.lay_layout as LayLayout[]) : null };
       });
       setForm({
         id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: (d.product_image as string) ?? null,
@@ -504,6 +509,25 @@ export default function MoWorkspacePage() {
       {/* สร้างใบใหม่ — ของกลาง (บอร์ดจ่ายงานใช้ตัวเดียวกัน) · สร้างเสร็จรีเฟรชรายการ แล้วคลิกแถวเพื่อแก้ต่อ */}
       <MoCreateModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={() => refresh()} />
 
+      {/* ป๊อปดูผังการวางผ้า (เจ้าของขอ: "อยากได้หน้าทดลองวางให้ดูด้วย ในแต่ละผ้าเลย") */}
+      <ERPModal open={!!layView} onClose={() => setLayView(null)} size="lg" title={`🧵 ผังการวางผ้า — ${layView?.name ?? ""}`}
+        footer={<button onClick={() => setLayView(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>}>
+        {layView && (
+          <div className="space-y-5">
+            {layView.layouts.map((g, i) => (
+              <div key={i} className="space-y-2">
+                {layView.layouts.length > 1 && <div className="text-sm font-semibold text-slate-700">กลุ่มที่ {i + 1} · หน้าผ้า {g.face_width_cm} ซม.{g.sheet_length_cm ? ` · ผืนละ ${g.sheet_length_cm} ซม.` : ""}</div>}
+                <p className="text-[12px] text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">✂ {g.note}</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                  {g.blocks.map((b) => <span key={b.key}>▪ {b.label} ซม. × {b.total_pieces} ชิ้น{b.no_rotate ? " (ห้ามหมุน)" : ""}</span>)}
+                </div>
+                <FabricLayoutPreview result={g.result} faceWidthCm={g.face_width_cm} sheetLengthCm={g.sheet_length_cm} mode={g.sheet_length_cm ? "sheet" : "roll"} />
+              </div>
+            ))}
+          </div>
+        )}
+      </ERPModal>
+
       <ERPModal open={form !== null} onClose={() => !saving && setForm(null)} size="xl"
         title={form?.id ? `แก้ใบสั่งผลิต: ${form.mo_no}` : "สร้างใบสั่งผลิตใหม่"}
         footer={<>
@@ -606,7 +630,7 @@ export default function MoWorkspacePage() {
                 return { key: s.key, id: s.id, component_sku: s.component_sku, component_name: s.component_name, material_type: s.material_type, uom: s.uom,
                   qty_per: s.qty_per, cut_block_code: null, cut_width: null, cut_length: null, pieces: null,
                   on_hand_qty: s.on_hand_qty, is_ready: s.is_ready, purchase_override: s.purchase_override, cut_done: false, lay_note: s.lay_note ?? null,
-                  required_lay: s.required_lay ?? null, required_classic: s.required_classic ?? null,
+                  required_lay: s.required_lay ?? null, required_classic: s.required_classic ?? null, lay_layout: s.lay_layout ?? null,
                   required, to_purchase: s.purchase_override != null ? s.purchase_override : base };
               });
               const rowQty = (sl: string | null | undefined) => (sl != null && form.size_qty[sl] != null) ? form.size_qty[sl] : (form.qty || 0);
@@ -615,7 +639,13 @@ export default function MoWorkspacePage() {
                 key: "component", header: "วัตถุดิบ", minWidth: 220, sortable: true,
                 getValue: (r) => r.component_name || r.component_sku, groupLabel: (r) => r.component_sku ? `${r.component_sku} ${r.component_name}` : "— ไม่ระบุ —",
                 render: (r) => <span className="block min-w-0"><span className="block truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> <span className="text-slate-700">{r.component_name}</span></span>
-                  {r.lay_note && <span className="block truncate text-[10px] text-indigo-600" title={r.lay_note}>✂ {r.lay_note}</span>}</span>,
+                  {r.lay_note && <span className="flex items-center gap-1 min-w-0">
+                    <span className="truncate text-[10px] text-indigo-600" title={r.lay_note}>✂ {r.lay_note}</span>
+                    {r.lay_layout && r.lay_layout.length > 0 && (
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setLayView({ name: `${r.component_sku ?? ""} ${r.component_name ?? ""}`.trim(), layouts: r.lay_layout! }); }}
+                        className="shrink-0 h-5 px-1.5 rounded border border-indigo-200 bg-indigo-50 text-[10px] text-indigo-700 hover:bg-indigo-100" title="ดูภาพผังการวางผ้า">🧵 ผัง</button>
+                    )}
+                  </span>}</span>,
               };
               const typeCol: LineColumn<MatRow> = { key: "material_type", header: "ประเภท", width: 110, sortable: true, getValue: (r) => r.material_type, groupLabel: (r) => r.material_type || "— ไม่ระบุ —" };
               const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required,

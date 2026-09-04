@@ -12,7 +12,16 @@
  *   - แบ่งปริมาณกลับให้แต่ละบล็อกตามสัดส่วนพื้นที่ (ให้ตาราง "รายละเอียด (บล็อก)" ยังมีตัวเลขต่อบรรทัด)
  *   - สร้างข้อความ "วิธีวาง" ให้ช่างอ่านรู้เรื่อง
  */
-import { packFabric, type FabricPiece } from "./fabric-calc";
+import { packFabric, type FabricPiece, type FabricResult } from "./fabric-calc";
+
+/** ผังการวาง 1 กลุ่ม (ผ้าตัวเดียวกัน หน้ากว้างเดียวกัน) — เก็บลง mo_material_summary.lay_layout ไว้เปิดดูในใบสั่งผลิต */
+export type LayLayout = {
+  face_width_cm: number;
+  sheet_length_cm: number | null;   // ผ้าผืน = ความยาวต่อผืน · null = ผ้าม้วน
+  note: string;
+  blocks: { key: string; label: string; width_cm: number; length_cm: number; total_pieces: number; no_rotate: boolean }[];
+  result: FabricResult;
+};
 
 export type LayBlock = {
   key: string;
@@ -42,6 +51,7 @@ export type LayResult = {
   total_pieces: number;
   note: string;               // สรุปสำหรับแถวรวมต่อวัตถุดิบ
   per_block: Record<string, { qty: number; share_pct: number; rotated_pct: number; note: string }>;
+  layout?: FabricResult;      // ผังที่จำลอง (ไว้วาดภาพ)
 };
 
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
@@ -111,6 +121,6 @@ export function layFabric(i: LayInput): LayResult {
 
   return {
     ok: true, length_cm: r4(r.usedLengthCm), qty, sheets: isSheet ? qty : undefined,
-    efficiency_pct: eff, total_pieces: totalPieces, note, per_block,
+    efficiency_pct: eff, total_pieces: totalPieces, note, per_block, layout: r,
   };
 }

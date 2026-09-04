@@ -2,7 +2,7 @@
  * ของใช้ร่วมของ MO API (แยกจาก route.ts — กัน Next.js error เรื่อง route export ของเกิน handler)
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { layFabric, type LayBlock } from "@/lib/mo-fabric-lay";
+import { layFabric, type LayBlock, type LayLayout } from "@/lib/mo-fabric-lay";
 
 export type SizeQty = { label: string; qty: number };
 /** วิธีคิดผ้าต่อใบ: lay = วางผ้าให้คุ้มที่สุด (ค่าเริ่มต้น) · classic = สูตรเดิม พื้นที่ + เผื่อเสีย% */
@@ -108,6 +108,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   // บรรทัดที่ข้อมูลไม่พอ (ไม่มีขนาดตัด/ไม่รู้หน้ากว้าง) → คงสูตรเดิม
   type LayRow = Record<string, unknown> & { __lay?: { no_rotate: boolean; face: number; sheetW: number; sheetL: number; rowQty: number }; __layQty?: number; __classicQty?: number };
   const layNoteOf = new Map<string, { note: string; length_cm: number; eff: number }>();   // ต่อ component_sku (ไว้ใส่แถวสรุป)
+  const layLayoutOf = new Map<string, LayLayout[]>();   // ผังการวางต่อ component_sku (ป๊อป "ดูผังการวาง")
   {   // คิดแบบวางผ้า "เสมอ" เพื่อเก็บตัวเลขทั้ง 2 วิธีคู่กัน (เจ้าของขอโชว์เทียบ) · ตัวที่ใช้จริงเลือกตาม fabricMode
     const groups = new Map<string, { rows: LayRow[]; face: number; sheetL: number | null; divisor: number }>();
     for (const m of mats as LayRow[]) {
@@ -145,6 +146,12 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
         }
       });
       const sku = String(g.rows[0].component_sku);
+      if (res.layout) {
+        (layLayoutOf.get(sku) ?? layLayoutOf.set(sku, []).get(sku)!).push({
+          face_width_cm: g.face, sheet_length_cm: g.sheetL, note: res.note, result: res.layout,
+          blocks: blocks.map((b) => ({ key: b.key, label: b.label, width_cm: b.width_cm, length_cm: b.length_cm, total_pieces: b.total_pieces, no_rotate: !!b.no_rotate })),
+        });
+      }
       const prev = layNoteOf.get(sku);
       layNoteOf.set(sku, { note: prev ? `${prev.note} · ${res.note}` : res.note, length_cm: (prev?.length_cm ?? 0) + res.length_cm, eff: res.efficiency_pct });
     }
@@ -181,6 +188,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
       lay_note: e.sku ? (layNoteOf.get(e.sku)?.note ?? null) : null,
       lay_length_cm: e.sku ? (layNoteOf.get(e.sku)?.length_cm ?? null) : null,
       lay_efficiency_pct: e.sku ? (layNoteOf.get(e.sku)?.eff ?? null) : null,
+      lay_layout: e.sku ? (layLayoutOf.get(e.sku) ?? null) : null,
       required_lay:     both.get(e.sku ?? "∅")?.hasLay ? r4(both.get(e.sku ?? "∅")!.lay) : null,
       required_classic: both.get(e.sku ?? "∅")?.hasLay ? r4(both.get(e.sku ?? "∅")!.classic) : null,
     };
