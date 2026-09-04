@@ -43,13 +43,16 @@ export function useBanks(country = "TH"): BankOption[] {
 }
 
 export function BankPicker({
-  value, onChange, country = "TH", disabled, allowCreate = true, placeholder = "เลือกธนาคาร / พิมพ์ค้นหา",
+  value, onChange, country = "TH", disabled, allowCreate = true, allowFreeText = false, placeholder = "เลือกธนาคาร / พิมพ์ค้นหา",
 }: {
   value: string;
   onChange: (name: string, digits: number) => void;
   country?: string;
   disabled?: boolean;
   allowCreate?: boolean;
+  /** ให้ใช้ชื่อที่พิมพ์ได้เลยโดยไม่ต้องเพิ่มเข้าทะเบียนธนาคาร — สำหรับเจ้าหนี้ที่ไม่ใช่ธนาคาร
+   *  (บุคคล / บริษัทอื่น / ลีสซิ่ง) เช่น ช่อง "ผู้ให้กู้" ของสัญญาเงินกู้ · ตั้งจากทะเบียนฟิลด์ options.picker_free_text = true */
+  allowFreeText?: boolean;
   placeholder?: string;
 }) {
   const [banks, setBanks] = useState<BankOption[]>(cache ?? []);
@@ -96,6 +99,14 @@ export function BankPicker({
   }, [banks, q]);
 
   const canCreate = allowCreate && !!q && !banks.some((b) => b.name.toLowerCase() === q);
+  const canFreeText = allowFreeText && !!q && !banks.some((b) => b.name.toLowerCase() === q);
+
+  const useTyped = () => {
+    const name = query.trim();
+    if (!name) return;
+    onChange(name, 10);
+    setOpen(false); setQuery("");
+  };
 
   const pick = (b: BankOption) => {
     onChange(b.name, Number(b.account_digits) > 0 ? Number(b.account_digits) : 10);
@@ -150,10 +161,18 @@ export function BankPicker({
                 {b.code && <span className="shrink-0 font-mono text-[11px] text-slate-400">{b.code}</span>}
               </button>
             ))}
-            {!filtered.length && !canCreate && (
+            {!filtered.length && !canCreate && !canFreeText && (
               <div className="px-3 py-6 text-center text-xs text-slate-400">ไม่พบธนาคารที่ค้นหา</div>
             )}
           </div>
+          {canFreeText && (
+            <button
+              type="button" onClick={useTyped}
+              className="w-full border-t border-slate-100 bg-slate-50 px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              {`✏️ ใช้ชื่อ “${query.trim()}” ตามที่พิมพ์ (ไม่ใช่ธนาคาร — ไม่เพิ่มเข้าทะเบียน)`}
+            </button>
+          )}
           {canCreate && (
             <button
               type="button" onClick={() => void createBank()} disabled={busy}

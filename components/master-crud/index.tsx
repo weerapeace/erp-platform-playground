@@ -2136,6 +2136,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     // ของกลาง: ฟิลด์ข้อความที่ให้ "เลือกจากทะเบียนกลาง" แทนพิมพ์เอง (ทะเบียนฟิลด์ options.picker)
     // ตอนนี้รองรับ "bank" — เพิ่มชนิดอื่นได้ที่นี่ที่เดียว แล้วทุกโมดูลใช้ได้ทันที
     const pickerKind = f.type === "text" ? String((f.optionsRaw as { picker?: unknown } | undefined)?.picker ?? "") : "";
+    // options.picker_free_text = true → ตัวเลือกธนาคารยอมให้ใช้ชื่อที่พิมพ์ได้เลย (เจ้าหนี้ที่ไม่ใช่ธนาคาร)
+    const pickerFreeText = (f.optionsRaw as { picker_free_text?: unknown } | undefined)?.picker_free_text === true;
     // ช่องที่มี control ซ้อน (dropdown) ห้ามครอบด้วย <label> — คลิกในรายการจะไปโดน control ตัวแรก
     const FieldWrap: "label" | "div" = (f.type === "many2many" || f.type === "one2many" || pickerKind) ? "div" : "label";
     return (
@@ -2244,7 +2246,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               value={(v as string) || ""}
               onChange={(name) => updateForm({ [f.key]: name })}
               disabled={disabled}
-              placeholder={f.placeholder ?? tr("เลือกธนาคาร / พิมพ์ค้นหา", "Pick a bank / type to search")}
+              allowFreeText={pickerFreeText}
+              placeholder={f.placeholder ?? (pickerFreeText ? tr("เลือกธนาคาร หรือพิมพ์ชื่อผู้ให้กู้", "Pick a bank or type a lender name") : tr("เลือกธนาคาร / พิมพ์ค้นหา", "Pick a bank / type to search"))}
             />
           </div>
         ) : (
