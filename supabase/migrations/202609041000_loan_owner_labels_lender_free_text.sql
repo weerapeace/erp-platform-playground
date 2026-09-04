@@ -19,3 +19,13 @@ update public.erp_module_fields f
        help_text = 'บริษัทในกลุ่มที่ใช้เงินก้อนนี้ — เลือกได้ทั้งหนี้ของบริษัทและหนี้ส่วนตัวที่เอามาใช้ในบริษัท'
   from public.erp_modules m
  where m.id = f.module_id and m.module_key in ('loan-contracts','od-facilities') and f.column_name = 'company_id';
+
+-- เอาช่อง "ชื่อบุคคล (เจ้าของหนี้)" ออกจากฟอร์ม/ตาราง (เจ้าของขอ 2026-09-04) — ซ่อนไว้ ไม่ลบคอลัมน์ เปิดคืนได้ที่ Studio
+update public.erp_module_fields f
+   set show_in_form = false, is_visible = false, is_required = false
+  from public.erp_modules m
+ where m.id = f.module_id and m.module_key in ('loan-contracts','od-facilities') and f.column_name = 'owner_person';
+update public.erp_module_fields f
+   set help_text = 'หนี้ส่วนตัว = กู้ในนามบุคคล · ของบริษัท = กู้ในนามบริษัทในกลุ่ม — ทั้งสองแบบเลือก "บริษัท" ที่ใช้เงินได้'
+  from public.erp_modules m
+ where m.id = f.module_id and m.module_key in ('loan-contracts','od-facilities') and f.column_name = 'owner_type';
