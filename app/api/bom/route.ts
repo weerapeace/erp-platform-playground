@@ -50,6 +50,8 @@ export type BomLine = {
   size_variant?:   boolean;
   size_dim?:       string | null;                 // cut_length | cut_width | pieces | qty
   size_values?:    Record<string, number> | null; // { "40\"": 100, ... } คีย์ = ชื่อไซส์
+  /** ห้ามหมุนชิ้น 90° ตอนวางผ้า (ผ้าลาย/ตามเกรน) — ใช้ตอนกางสูตรเข้าใบสั่งผลิต */
+  no_rotate?:      boolean;
 };
 
 export type BomSize = { label: string; sort?: number };

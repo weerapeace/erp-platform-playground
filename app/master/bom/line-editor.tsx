@@ -59,10 +59,12 @@ export type EditorLine = {
   size_variant:   boolean;
   size_dim:       string;                     // cut_length | cut_width | pieces | qty
   size_values:    Record<string, number>;     // { "40\"": 100 } คีย์ = ชื่อไซส์
+  /** ห้ามหมุนชิ้นตอนวางผ้า (ผ้าลาย/ตามเกรน) — ใบสั่งผลิตใช้ตอน "วางผ้าให้คุ้มที่สุด" */
+  no_rotate?:     boolean;
 };
 export const SIZE_DIMS: [string, string][] = [["cut_length", "ยาว"], ["cut_width", "กว้าง"], ["pieces", "ชิ้น"], ["qty", "จำนวน"]];
 // คอลัมน์ที่โชว์ในมุมมอง BASIC (ที่เหลือซ่อน: ช่อง/สถานะ/บล็อกตัด/หน้ากว้าง/%เผื่อเสีย/พื้นที่/ทางเลือก/ผันไซส์)
-const BASIC_COLS = new Set(["component", "material_type", "pieces", "cut_width", "cut_length", "calc", "qty", "uom"]);
+const BASIC_COLS = new Set(["component", "material_type", "pieces", "cut_width", "cut_length", "no_rotate", "calc", "qty", "uom"]);
 
 let _seq = 0;
 const genKey = () => `l${Date.now()}_${_seq++}`;
@@ -71,7 +73,7 @@ export function emptyLine(): EditorLine {
     key: genKey(), component_id: null, component_sku: "", component_name: "", image_key: null,
     material_group_id: null, material_type: "", qty: 0, uom: "หลา", uom_id: null, waste_percent: 0, is_optional: false,
     cut_block_id: null, cut_block_code: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, sheet_width: 0, sheet_length: 0, slot_code: null,
-    size_variant: false, size_dim: "cut_length", size_values: {},
+    size_variant: false, size_dim: "cut_length", size_values: {}, no_rotate: false,
   };
 }
 
@@ -588,6 +590,17 @@ export function BomLineEditor({
       key: "cut_length", header: "ยาว", width: 64, align: "right",
       render: (l, u, ro) => !usesLength(l) ? dash : <input type="number" min={0} step="any" value={l.cut_length} disabled={ro || !!l.cut_block_code}
         title={l.cut_block_code ? "ดึงจากบล็อก" : ""} onChange={(e) => u({ cut_length: Number(e.target.value) })} className={`${inputCls} text-right`} />,
+    },
+    {
+      // ใบสั่งผลิต "วางผ้าให้คุ้มที่สุด" จะลองหมุนชิ้น 90° ให้ — ผ้าลาย/ต้องตามเกรน ให้ล็อกที่นี่
+      key: "no_rotate", header: "หมุน", width: 60, align: "center",
+      render: (l, u, ro) => !isArea(l) ? dash : ro
+        ? <span className="text-xs text-slate-500">{l.no_rotate ? "🔒" : "↻"}</span>
+        : <button type="button" onClick={() => u({ no_rotate: !l.no_rotate })}
+            title={l.no_rotate ? "ห้ามหมุนชิ้น (ตามเกรน/ผ้าลาย) — กดเพื่ออนุญาตหมุน" : "หมุนได้ — ระบบเลือกท่าที่ประหยัดผ้าให้ · กดเพื่อล็อกห้ามหมุน"}
+            className={`h-8 w-full rounded-lg border text-sm ${l.no_rotate ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+            {l.no_rotate ? "🔒" : "↻"}
+          </button>,
     },
     {
       key: "face_width_cm", header: "หน้ากว้าง", width: 104, align: "right",

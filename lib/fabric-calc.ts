@@ -20,6 +20,7 @@ export type FabricPiece = {
   width_cm: number;
   length_cm: number;
   qty: number;          // จำนวนชิ้นทั้งหมดที่ต้องตัด (จำนวนต่อใบ × จำนวนที่ผลิตแล้ว)
+  noRotate?: boolean;   // ชิ้นนี้ห้ามหมุน (ผ้าลาย/ตามเกรน) แม้ allowRotate จะเปิด
 };
 
 export type FabricInput = {
@@ -78,14 +79,14 @@ export function packFabric(input: FabricInput): FabricResult {
   const simRatio = wantTotal > MAX_SIM_PIECES ? MAX_SIM_PIECES / wantTotal : 1;
 
   // กระจายเป็นชิ้นเดี่ยว ๆ (qty ชิ้น) + ตัดชิ้นที่ข้อมูลไม่ครบออก
-  const flat: { key: string; label: string; w: number; h: number }[] = [];
+  const flat: Piece[] = [];
   let realArea = 0;
   for (const p of input.pieces) {
     const w = Number(p.width_cm) || 0, h = Number(p.length_cm) || 0, n = Math.max(0, Math.floor(Number(p.qty) || 0));
     if (w <= 0 || h <= 0 || n === 0) continue;
     realArea += w * h * n;
     const simN = simRatio < 1 ? Math.max(1, Math.round(n * simRatio)) : n;   // ย่อสัดส่วน (อย่างน้อยชนิดละ 1)
-    for (let i = 0; i < simN; i++) flat.push({ key: p.key, label: p.label, w, h });
+    for (let i = 0; i < simN; i++) flat.push({ key: p.key, label: p.label, w, h, noRotate: !!p.noRotate });
   }
   // สัดส่วนจริงที่ย่อได้ (หลังปัดเศษ) → ใช้ขยายผลกลับ
   const simArea = flat.reduce((s, p) => s + p.w * p.h, 0);
@@ -97,7 +98,7 @@ export function packFabric(input: FabricInput): FabricResult {
   if (flat.length === 0) return emptyResult("ไม่มีชิ้นที่ต้องตัด (ตรวจว่ากรอกกว้าง/ยาว/จำนวนชิ้นครบไหม)", 0, 0);
 
   // ชิ้นที่กว้างเกินหน้าผ้า → วางไม่ได้ (ลองหมุนก่อนถ้าอนุญาต)
-  const oversize = flat.find((p) => Math.min(p.w, rotate ? p.h : p.w) > face);
+  const oversize = flat.find((p) => Math.min(p.w, rotate && !p.noRotate ? p.h : p.w) > face);
   if (oversize) return emptyResult(`ชิ้น "${oversize.label}" (${oversize.w}×${oversize.h} ซม.) กว้างเกินหน้าผ้า ${face} ซม.`, flat.length, pieceAreaCm2);
 
   const sheetLen = Number(input.sheetLengthCm) || 0;
@@ -205,14 +206,15 @@ export function packFabric(input: FabricInput): FabricResult {
 }
 
 // ── กลยุทธ์การวาง (ลองทุกแบบแล้วเลือกที่ประหยัดผ้าที่สุด) ─────────────────
-type Piece = { key: string; label: string; w: number; h: number };
+type Piece = { key: string; label: string; w: number; h: number; noRotate?: boolean };
 type OrientMode = "as-is" | "landscape" | "portrait";
 type SortMode = "longest" | "area" | "height" | "width";
 type ScoreMode = "low-y" | "low-top-waste";
 
 /** จัดท่าเริ่มต้นของชิ้น (หมุนได้เท่านั้น): นอน = ด้านยาวขวางหน้าผ้า · ตั้ง = ด้านยาวไปตามความยาวผ้า */
 const orientPiece = (p: Piece, mode: OrientMode): Piece =>
-  mode === "landscape" ? { ...p, w: Math.max(p.w, p.h), h: Math.min(p.w, p.h) }
+  p.noRotate ? { ...p }
+    : mode === "landscape" ? { ...p, w: Math.max(p.w, p.h), h: Math.min(p.w, p.h) }
     : mode === "portrait" ? { ...p, w: Math.min(p.w, p.h), h: Math.max(p.w, p.h) }
       : { ...p };
 
@@ -277,7 +279,7 @@ function packSkyline(
     let best: { x: number; y: number; w: number; h: number; rot: boolean; top: number; waste: number } | null = null;
     for (let i = 0; i < sky.length; i++) {
       // ลองทั้ง 2 ท่า (ถ้าอนุญาตหมุน)
-      const tries: [number, number, boolean][] = rotate
+      const tries: [number, number, boolean][] = rotate && !p.noRotate
         ? [[p.w, p.h, false], [p.h, p.w, true]]
         : [[p.w, p.h, false]];
       for (const [w, h, rot] of tries) {
@@ -315,7 +317,7 @@ function fitHintsOf(pieces: FabricPiece[], face: number, rotate: boolean, gap: n
     const w0 = Number(p.width_cm) || 0, h0 = Number(p.length_cm) || 0, n = Math.max(0, Math.floor(Number(p.qty) || 0));
     if (w0 <= 0 || h0 <= 0 || n === 0) continue;
     // ด้านที่กินหน้ากว้าง: เลือกท่าที่วางได้ต่อแถวเยอะกว่า (ถ้าหมุนได้)
-    const cand = rotate ? [w0, h0] : [w0];
+    const cand = rotate && !p.noRotate ? [w0, h0] : [w0];
     let bestW = w0, bestPerRow = 0;
     for (const w of cand) {
       if (w > face) continue;

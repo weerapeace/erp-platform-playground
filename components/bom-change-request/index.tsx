@@ -34,10 +34,12 @@ const toEditorLine = (l: Record<string, unknown>): EditorLine => ({
   cut_block_id: (l.cut_block_id as number) ?? null, cut_block_code: (l.cut_block_code as string) ?? "",
   pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,
   face_width_cm: Number(l.face_width_cm) || 0,
+  sheet_width: Number(l.sheet_width) || 0, sheet_length: Number(l.sheet_length) || 0,
   source: (l.source as string) ?? undefined, odoo_bom_line_id: (l.odoo_bom_line_id as number) ?? undefined,
   free_text: !!l.free_text,
   size_variant: !!l.size_variant, size_dim: (l.size_dim as EditorLine["size_dim"]) ?? "cut_length",
   size_values: (l.size_values ?? {}) as Record<string, number>,
+  no_rotate: !!l.no_rotate,
 });
 
 /** EditorLine → รูปที่ PATCH /api/bom/[id] รับ (ชุดเดียวกับที่หน้า /master/bom ส่งตอนเซฟ)
@@ -50,6 +52,7 @@ const toSaveLine = (l: EditorLine, i: number) => ({
   pieces: l.pieces, cut_width: l.cut_width, cut_length: l.cut_length,
   face_width_cm: l.face_width_cm, material_type: l.material_type || null,
   size_variant: l.size_variant, size_dim: l.size_dim, size_values: l.size_values,
+  no_rotate: !!l.no_rotate,
   // บรรทัดพิมพ์ชื่อเอง (ยังไม่รู้รหัส) — lineToRow ของ /api/bom/[id] คัดเฉพาะคอลัมน์จริง คีย์นี้จึงไม่ไปโผล่ในสูตร
   free_text: !!l.free_text,
 });

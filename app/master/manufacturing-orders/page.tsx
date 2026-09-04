@@ -30,9 +30,10 @@ type PreviewMat = {
   qty_per: number; uom: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null;
   on_hand_qty: number; is_ready: boolean; purchase_override: number | null; cut_done: boolean;
   size_label?: string | null;   // ไซส์ของบล็อกนี้ (กลุ่ม C) — null = ทุกไซส์
+  lay_note?: string | null;     // วิธีวางผ้าที่ระบบคำนวณให้ (วางผ้าให้คุ้มที่สุด)
 };
 type MatRow = PreviewMat & { required: number; to_purchase: number };
-type SummaryMat = { key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null; uom: string | null; qty_per: number; on_hand_qty: number; is_ready: boolean; purchase_override: number | null };
+type SummaryMat = { key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null; uom: string | null; qty_per: number; on_hand_qty: number; is_ready: boolean; purchase_override: number | null; lay_note?: string | null };
 type FormState = {
   id: string | null; mo_no: string;
   product_sku: string; product_name: string; product_image: string | null;
@@ -224,6 +225,7 @@ export default function MoWorkspacePage() {
           cut_width: m.cut_width != null ? Number(m.cut_width) : null, cut_length: m.cut_length != null ? Number(m.cut_length) : null,
           pieces: m.pieces != null ? Number(m.pieces) : null, size_label: (m.size_label as string) ?? null,
           on_hand_qty: onHand, is_ready: !!m.is_ready, purchase_override: override, cut_done: !!m.cut_done,
+          lay_note: (m.lay_note as string) ?? null,
         };
       });
       const summ: SummaryMat[] = (d.summary ?? []).map((s: Record<string, unknown>, i: number) => {
@@ -232,7 +234,8 @@ export default function MoWorkspacePage() {
         const stored = s.to_purchase_qty != null ? Number(s.to_purchase_qty) : null;
         const override = stored != null && Math.round(stored * 10000) !== Math.round(base * 10000) ? stored : null;
         return { key: `s${i}`, id: (s.id as string) ?? null, component_sku: (s.component_sku as string) ?? null, component_name: (s.component_name as string) ?? null,
-          material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, qty_per: qtyPer, on_hand_qty: onHand, is_ready: !!s.is_ready, purchase_override: override };
+          material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, qty_per: qtyPer, on_hand_qty: onHand, is_ready: !!s.is_ready, purchase_override: override,
+          lay_note: (s.lay_note as string) ?? null };
       });
       setForm({
         id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: (d.product_image as string) ?? null,
@@ -582,7 +585,7 @@ export default function MoWorkspacePage() {
                 const base = Math.max(0, Math.round((required - (s.on_hand_qty || 0)) * 10000) / 10000);
                 return { key: s.key, id: s.id, component_sku: s.component_sku, component_name: s.component_name, material_type: s.material_type, uom: s.uom,
                   qty_per: s.qty_per, cut_block_code: null, cut_width: null, cut_length: null, pieces: null,
-                  on_hand_qty: s.on_hand_qty, is_ready: s.is_ready, purchase_override: s.purchase_override, cut_done: false,
+                  on_hand_qty: s.on_hand_qty, is_ready: s.is_ready, purchase_override: s.purchase_override, cut_done: false, lay_note: s.lay_note ?? null,
                   required, to_purchase: s.purchase_override != null ? s.purchase_override : base };
               });
               const rowQty = (sl: string | null | undefined) => (sl != null && form.size_qty[sl] != null) ? form.size_qty[sl] : (form.qty || 0);
@@ -590,7 +593,8 @@ export default function MoWorkspacePage() {
               const codeCol: LineColumn<MatRow> = {
                 key: "component", header: "วัตถุดิบ", minWidth: 220, sortable: true,
                 getValue: (r) => r.component_name || r.component_sku, groupLabel: (r) => r.component_sku ? `${r.component_sku} ${r.component_name}` : "— ไม่ระบุ —",
-                render: (r) => <span className="block truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> <span className="text-slate-700">{r.component_name}</span></span>,
+                render: (r) => <span className="block min-w-0"><span className="block truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> <span className="text-slate-700">{r.component_name}</span></span>
+                  {r.lay_note && <span className="block truncate text-[10px] text-indigo-600" title={r.lay_note}>✂ {r.lay_note}</span>}</span>,
               };
               const typeCol: LineColumn<MatRow> = { key: "material_type", header: "ประเภท", width: 110, sortable: true, getValue: (r) => r.material_type, groupLabel: (r) => r.material_type || "— ไม่ระบุ —" };
               const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required, render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmt(r.required)}</span> };

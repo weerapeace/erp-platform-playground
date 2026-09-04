@@ -2,6 +2,7 @@
  * ของใช้ร่วมของ MO API (แยกจาก route.ts — กัน Next.js error เรื่อง route export ของเกิน handler)
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { layFabric, type LayBlock } from "@/lib/mo-fabric-lay";
 
 export type SizeQty = { label: string; qty: number };
 
@@ -33,11 +34,20 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   // ดึง "ประเภท" (กลุ่มวัตถุดิบ) จาก SKU ของแต่ละ component
   const codes = [...new Set(rows.map((l) => l.component_sku).filter(Boolean) as string[])];
   const typeMap = new Map<string, string>();
+  // ข้อมูลไว้ "วางผ้าให้คุ้มที่สุด": กฎคิดของกลุ่ม + หน้ากว้าง/ขนาดผืนของผ้าตัวนั้น
+  type SkuCalc = { calc: string; divisor: number; face: number; sheetW: number; sheetL: number };
+  const calcMap = new Map<string, SkuCalc>();
   if (codes.length > 0) {
-    const { data: skus } = await admin.from("skus_v2").select("code, grp:material_groups!material_group_id ( name )").in("code", codes).eq("is_active", true);
+    const { data: skus } = await admin.from("skus_v2")
+      .select("code, fabric_width_cm, sheet_width_cm, sheet_length_cm, grp:material_groups!material_group_id ( name, calc_method, divisor )")
+      .in("code", codes).eq("is_active", true);
     for (const s of (skus ?? []) as Array<Record<string, unknown>>) {
-      const g = (Array.isArray(s.grp) ? s.grp[0] : s.grp) as { name?: string } | null;
+      const g = (Array.isArray(s.grp) ? s.grp[0] : s.grp) as { name?: string; calc_method?: string; divisor?: number } | null;
       if (g?.name) typeMap.set(String(s.code), g.name);
+      calcMap.set(String(s.code), {
+        calc: g?.calc_method ?? "manual", divisor: Number(g?.divisor) || 90,
+        face: Number(s.fabric_width_cm) || 0, sheetW: Number(s.sheet_width_cm) || 0, sheetL: Number(s.sheet_length_cm) || 0,
+      });
     }
   }
 
@@ -63,6 +73,12 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
       cut_done:       preserve ? (prevCut.get(`${sku ?? ""}|${(l.cut_block_code as string) ?? ""}`) ?? false) : false,
       is_active:      true,
     };
+    // ข้อมูลชั่วคราวไว้วางผ้า (ลบก่อน insert): จำนวนที่คูณของแถว + ห้ามหมุน + หน้ากว้าง/ผืนของบรรทัด
+    const lay = {
+      no_rotate: !!l.no_rotate,
+      face: Number(l.face_width_cm) || 0,
+      sheetW: Number(l.sheet_width) || 0, sheetL: Number(l.sheet_length) || 0,
+    };
     if (useSize && l.size_variant) {
       const dim = String(l.size_dim || "cut_length");   // cut_length | cut_width | pieces | qty
       const sv = (l.size_values ?? {}) as Record<string, number>;
@@ -75,12 +91,58 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
         else if (dimVal != null) { row[dim] = dimVal; }   // ปรับมิติ (ความยาว/กว้าง/ชิ้น) ของไซส์นั้น
         row.qty_per = effQtyPer;
         row.required_qty = r4(effQtyPer * Qs);
+        row.__lay = { ...lay, rowQty: Qs };
         mats.push(row);
       }
     } else {
-      mats.push({ ...base, size_label: null, sequence: ++seq, qty_per: qtyPer, required_qty: r4(qtyPer * (moQty || 0)) });
+      mats.push({ ...base, size_label: null, sequence: ++seq, qty_per: qtyPer, required_qty: r4(qtyPer * (moQty || 0)), __lay: { ...lay, rowQty: moQty || 0 } });
     }
   }
+
+  // ── วางผ้าให้คุ้มที่สุด (เจ้าของสั่ง 2026-09-04) ─────────────────────────────
+  // ผ้า/ลายพิมพ์/PU/ตัวเสริม (คิดตามหน้ากว้าง) และผ้าผืน: เอาทุกบล็อกของผ้าตัวเดียวกันมาวางรวมกันบนหน้าผ้าจริง
+  // ตามจำนวนที่สั่ง → ได้ความยาวที่ต้องใช้จริง ไม่บวกเผื่อเสีย (ทับค่าที่คิดจากสูตรต่อชุด)
+  // บรรทัดที่ข้อมูลไม่พอ (ไม่มีขนาดตัด/ไม่รู้หน้ากว้าง) → คงสูตรเดิม
+  type LayRow = Record<string, unknown> & { __lay?: { no_rotate: boolean; face: number; sheetW: number; sheetL: number; rowQty: number } };
+  const layNoteOf = new Map<string, { note: string; length_cm: number; eff: number }>();   // ต่อ component_sku (ไว้ใส่แถวสรุป)
+  {
+    const groups = new Map<string, { rows: LayRow[]; face: number; sheetL: number | null; divisor: number }>();
+    for (const m of mats as LayRow[]) {
+      const sku = (m.component_sku as string) ?? null; const L = m.__lay; if (!sku || !L) continue;
+      const c = calcMap.get(sku); if (!c) continue;
+      const w = Number(m.cut_width) || 0, h = Number(m.cut_length) || 0;
+      if (w <= 0 || h <= 0 || L.rowQty <= 0) continue;
+      let face = 0, sheetL: number | null = null;
+      if (c.calc === "area_face") { face = L.face > 0 ? L.face : c.face; }
+      else if (c.calc === "area_sheet") { face = L.sheetW > 0 ? L.sheetW : c.sheetW; sheetL = L.sheetL > 0 ? L.sheetL : c.sheetL; if (!sheetL) continue; }
+      else continue;
+      if (face <= 0) continue;
+      const key = `${sku}|${face}|${sheetL ?? ""}`;
+      const g = groups.get(key) ?? groups.set(key, { rows: [], face, sheetL, divisor: c.divisor }).get(key)!;
+      g.rows.push(m);
+    }
+    for (const g of groups.values()) {
+      const blocks: LayBlock[] = g.rows.map((m, i) => ({
+        key: `b${i}`, label: `${m.cut_width}×${m.cut_length}`,
+        width_cm: Number(m.cut_width) || 0, length_cm: Number(m.cut_length) || 0,
+        total_pieces: (Number(m.pieces) || 1) * (m.__lay?.rowQty ?? 0),
+        no_rotate: !!m.__lay?.no_rotate,
+      }));
+      const res = layFabric({ blocks, face_width_cm: g.face, sheet_length_cm: g.sheetL, divisor: g.divisor, unit: (g.rows[0].uom as string) ?? null });
+      if (!res.ok) continue;
+      g.rows.forEach((m, i) => {
+        const pb = res.per_block[`b${i}`]; if (!pb) return;
+        const rowQty = m.__lay?.rowQty ?? 0;
+        m.required_qty = pb.qty;
+        m.qty_per = rowQty > 0 ? r4(pb.qty / rowQty) : 0;
+        m.lay_note = pb.note;
+      });
+      const sku = String(g.rows[0].component_sku);
+      const prev = layNoteOf.get(sku);
+      layNoteOf.set(sku, { note: prev ? `${prev.note} · ${res.note}` : res.note, length_cm: (prev?.length_cm ?? 0) + res.length_cm, eff: res.efficiency_pct });
+    }
+  }
+  for (const m of mats as LayRow[]) delete m.__lay;
   if (mats.length > 0) await admin.from("mo_materials").insert(mats);
 
   // สรุปต่อวัตถุดิบ (รวมทุกไซส์/ทุกบล็อก — สำหรับซื้อ ไม่ต้องแยกไซส์)
@@ -100,6 +162,9 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
       on_hand_qty: prev ? prev.on_hand : 0,
       to_purchase_qty: prev && prev.to_purchase != null ? prev.to_purchase : required,
       is_ready: prev ? prev.ready : false, sequence: i + 1, is_active: true,
+      lay_note: e.sku ? (layNoteOf.get(e.sku)?.note ?? null) : null,
+      lay_length_cm: e.sku ? (layNoteOf.get(e.sku)?.length_cm ?? null) : null,
+      lay_efficiency_pct: e.sku ? (layNoteOf.get(e.sku)?.eff ?? null) : null,
     };
   });
   if (sumRows.length > 0) await admin.from("mo_material_summary").insert(sumRows);
