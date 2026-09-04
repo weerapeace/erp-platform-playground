@@ -12,3 +12,10 @@ update public.erp_module_fields f
        help_text = 'เลือกธนาคารจากทะเบียนกลาง หรือพิมพ์ชื่อผู้ให้กู้ที่ไม่ใช่ธนาคาร (บุคคล / บริษัทอื่น / ลีสซิ่ง) แล้วกด "✏️ ใช้ชื่อตามที่พิมพ์"'
   from public.erp_modules m
  where m.id = f.module_id and m.module_key = 'loan-contracts' and f.column_name = 'lender_name';
+
+-- ช่อง "บริษัท" โชว์เสมอ — หนี้ส่วนตัวก็เลือกได้ว่าเอาไปใช้กับบริษัทไหน (เจ้าของขอ 2026-09-04)
+update public.erp_module_fields f
+   set condition_rules = '{}'::jsonb,
+       help_text = 'บริษัทในกลุ่มที่ใช้เงินก้อนนี้ — เลือกได้ทั้งหนี้ของบริษัทและหนี้ส่วนตัวที่เอามาใช้ในบริษัท'
+  from public.erp_modules m
+ where m.id = f.module_id and m.module_key in ('loan-contracts','od-facilities') and f.column_name = 'company_id';
