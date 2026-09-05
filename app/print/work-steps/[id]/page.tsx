@@ -60,7 +60,6 @@ const CSS = `
   .grid th.v { height: 20mm; }
   .grid td.piece { width: 34%; }
   .grid td.piece small { color: #64748b; font-size: 10px; display: block; }
-  .grid td.piece .pchk { display: inline-block; width: 4.2mm; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; vertical-align: middle; margin-right: 2mm; }
   .grid td.qty { width: 44px; text-align: center; }
   .grid td.tick { text-align: center; }
   .grid td.tick::before { content: ""; display: inline-block; width: 4.2mm; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; margin-top: 1mm; }
@@ -109,7 +108,7 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
   for (let i = 0; i < rows.length; i += perPage) chunks.push({ rows: rows.slice(i, i + perPage), offset: i });
   if (chunks.length === 0) chunks.push({ rows: [], offset: 0 });
   const rowHtml = (p: Piece, i: number) => `<tr><td class="n">${i + 1}</td>
-      <td class="piece">${p.label ? `<span class="pchk"></span>` : ""}${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</td>
+      <td class="piece">${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</td>
       <td class="qty">${esc(p.qty)}</td>
       ${cols.map((c) => { const n = c.split("+").map((x) => x.trim()).filter(Boolean).length; return n > 1 ? `<td class="tickm"><span class="multi">${Array.from({ length: n - 1 }, (_, k) => `<i style="left:${((k + 1) / n) * 100}%"></i>`).join("")}</span></td>` : `<td class="tick"></td>`; }).join("")}
       <td></td></tr>`;
@@ -124,6 +123,42 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
     ${pagesHtml}</body></html>`;
 }
 
+/** กล่องข้อความที่พิมพ์ @ ต้นบรรทัดแล้วเลือกจากทะเบียนได้ (ใช้ทั้งคอลัมน์ประเภทงานและชิ้นส่วน) */
+function AtTextarea({ value, onChange, options, placeholder, rows = 8 }: {
+  value: string; onChange: (v: string) => void; options: string[]; placeholder?: string; rows?: number;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [q, setQ] = useState<string | null>(null);   // null = ไม่ได้พิมพ์ @
+  const [line, setLine] = useState(0);
+  const matches = q === null ? [] : options.filter((o) => !q || o.toLowerCase().includes(q.toLowerCase())).slice(0, 12);
+  const change = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const v = e.target.value; onChange(v);
+    const before = v.slice(0, e.target.selectionStart ?? v.length);
+    const li = before.split("\n").length - 1; const cur = before.split("\n")[li] ?? "";
+    if (cur.startsWith("@")) { setQ(cur.slice(1).trim()); setLine(li); } else setQ(null);
+  };
+  const pick = (name: string) => {
+    const lines = value.split("\n"); lines[line] = name; onChange(lines.join("\n")); setQ(null);
+    setTimeout(() => ref.current?.focus(), 0);
+  };
+  return (
+    <div className="relative">
+      <textarea ref={ref} value={value} onChange={change} rows={rows} placeholder={placeholder}
+        onKeyDown={(e) => { if (q === null) return; if (e.key === "Enter" && matches.length) { e.preventDefault(); pick(matches[0]); } if (e.key === "Escape") setQ(null); }}
+        onBlur={() => setTimeout(() => setQ(null), 150)}
+        className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg font-mono" />
+      {q !== null && (
+        <div className="absolute left-2 right-2 top-full -mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+          <div className="px-3 py-1 text-[10px] text-slate-400 border-b border-slate-100">เลือกจากรายการ (Enter = เลือกอันแรก · Esc = ปิด)</div>
+          {matches.length === 0
+            ? <div className="px-3 py-2 text-sm text-slate-400">ไม่มีในรายการ — พิมพ์ต่อได้เลย แล้วกด ⚙ จัดการรายการ เพื่อเพิ่ม</div>
+            : matches.map((o) => <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); pick(o); }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50">{o}</button>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PrintWorkStepsPage() {
   const params = useParams<{ id: string }>();
   const sp = useSearchParams();
@@ -133,23 +168,21 @@ export default function PrintWorkStepsPage() {
   const [steps, setSteps] = useState<WorkStep[]>([]);
   const [grid, setGrid] = useState(sp.get("blank") === "1");
   const [cols, setCols] = useState<string[]>([]);
-  // ทะเบียนประเภทงาน (ตัวช่วย @) + ป๊อปจัดการรายการ
-  const [ops, setOps] = useState<string[]>([]);
-  const [opsOpen, setOpsOpen] = useState(false);
-  const [opsDraft, setOpsDraft] = useState<string[]>([]);
-  const [opsNew, setOpsNew] = useState("");
-  const [opsSaving, setOpsSaving] = useState(false);
-  const [atQuery, setAtQuery] = useState<string | null>(null);   // null = ไม่ได้พิมพ์ @ · "" = พิมพ์ @ เฉย ๆ
-  const [atLine, setAtLine] = useState(0);
-  const colsRef = useRef<HTMLTextAreaElement>(null);
   const [colsText, setColsText] = useState("");
   const [piecesText, setPiecesText] = useState("");
+  // ทะเบียนสำหรับตัวช่วย @ (ทั้งระบบ): ประเภทงาน / ชิ้นส่วน
+  const [ops, setOps] = useState<string[]>([]);
+  const [pieceOps, setPieceOps] = useState<string[]>([]);
+  // ป๊อปจัดการรายการ — จัดการได้ทั้ง 2 ทะเบียน
+  const [manage, setManage] = useState<null | "ops" | "piece_ops">(null);
+  const [draft, setDraft] = useState<string[]>([]);
+  const [draftNew, setDraftNew] = useState("");
+  const [saving, setSaving] = useState<null | "cols" | "pieces" | "manage">(null);
   const [editOpen, setEditOpen] = useState(false);
-  // จำนวนแถว + ความสูงแถว (จำไว้ในเครื่องนี้) — เจ้าของขอปรับได้
+  // จำนวนแถว + ความสูงแถว (จำไว้ในเครื่องนี้)
   const [rowCount, setRowCount] = useState<number>(() => { try { return Number(localStorage.getItem("ws-print-rows")) || MIN_ROWS; } catch { return MIN_ROWS; } });
   const [rowMm, setRowMm] = useState<number>(() => { try { return Number(localStorage.getItem("ws-print-rowmm")) || 0; } catch { return 0; } });
   useEffect(() => { try { localStorage.setItem("ws-print-rows", String(rowCount)); localStorage.setItem("ws-print-rowmm", String(rowMm)); } catch { /* ignore */ } }, [rowCount, rowMm]);
-  const [savingCols, setSavingCols] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -157,23 +190,25 @@ export default function PrintWorkStepsPage() {
     let on = true;
     void (async () => {
       try {
-        const [mj, sj, cj] = await Promise.all([
-          apiFetch(`/api/mo/${params.id}`).then((r) => r.json()),
-          apiFetch(`/api/bom/work-steps?mo_id=${encodeURIComponent(params.id)}`).then((r) => r.json()),
-          apiFetch("/api/bom/work-steps/columns").then((r) => r.json()),
-        ]);
-        if (!on) return;
+        const mj = await apiFetch(`/api/mo/${params.id}`).then((r) => r.json());
         const d = (mj?.data ?? null) as Record<string, unknown> | null;
         const h = ((d?.header as Record<string, unknown> | undefined) ?? d) as Record<string, unknown> | null;
-        if (!h || !h.mo_no) { setError("ไม่พบใบสั่งผลิต"); return; }
-        setMo({ id: String(h.id), mo_no: String(h.mo_no), product_sku: (h.product_sku as string) ?? null, product_name: (h.product_name as string) ?? null,
+        if (!h || !h.mo_no) { if (on) setError("ไม่พบใบสั่งผลิต"); return; }
+        const sku = (h.product_sku as string) ?? null;
+        const [sj, cj] = await Promise.all([
+          apiFetch(`/api/bom/work-steps?mo_id=${encodeURIComponent(params.id)}`).then((r) => r.json()),
+          apiFetch(`/api/bom/work-steps/columns${sku ? `?product_sku=${encodeURIComponent(sku)}` : ""}`).then((r) => r.json()),
+        ]);
+        if (!on) return;
+        setMo({ id: String(h.id), mo_no: String(h.mo_no), product_sku: sku, product_name: (h.product_name as string) ?? null,
           qty: Number(h.qty) || 0, due_date: (h.due_date as string) ?? null, note: (h.note as string) ?? null,
           image: (d?.product_image as string) ?? null });
-        // แถวชิ้นส่วน: ปล่อยว่างให้เขียนเอง (เจ้าของบอกบล็อกตัดของผ้า "ไม่เกี่ยวกับหน้านี้") — พิมพ์รายการล่วงหน้าได้ที่ ✎ แก้รายการ
         const st = (sj?.data ?? []) as WorkStep[]; setSteps(st);
         const c = (cj?.data ?? []) as string[]; setCols(c); setColsText(c.join("\n"));
-        setOps(((cj?.ops ?? []) as string[]));
-        if (st.length === 0 && sp.get("blank") !== "0") setGrid(true);   // ไม่มีขั้นตอน → ตารางติ๊กอัตโนมัติ
+        setOps((cj?.ops ?? []) as string[]); setPieceOps((cj?.piece_ops ?? []) as string[]);
+        // ชิ้นส่วนที่เคยบันทึกไว้ของสินค้านี้ → เติมให้ · ไม่มี = ว่าง (พิมพ์ช่องว่างให้เขียนเอง)
+        setPiecesText(((cj?.pieces ?? []) as string[]).join("\n"));
+        if (st.length === 0 && sp.get("blank") !== "0") setGrid(true);
       } catch { if (on) setError("โหลดข้อมูลไม่สำเร็จ"); }
       finally { if (on) setLoading(false); }
     })();
@@ -191,46 +226,39 @@ export default function PrintWorkStepsPage() {
   const html = useMemo(() => (mo ? (grid ? buildGridHtml(mo, pieces, liveCols.length ? liveCols : cols, rowCount, rowMm) : buildStepsHtml(mo, steps)) : ""), [mo, grid, pieces, liveCols, cols, steps, rowCount, rowMm]);
   const fileName = docFileName(grid ? "ตารางขั้นตอนการผลิต" : "ขั้นตอนงาน", mo?.mo_no);
 
-  // ── ตัวช่วย @ : พิมพ์ @ ต้นบรรทัดในกล่องคอลัมน์ → เลือกจากทะเบียน (เจ้าของขอ) ──
-  const onColsChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const v = e.target.value; setColsText(v);
-    const pos = e.target.selectionStart ?? v.length;
-    const before = v.slice(0, pos); const lineIdx = before.split("\n").length - 1;
-    const line = before.split("\n")[lineIdx] ?? "";
-    if (line.startsWith("@")) { setAtQuery(line.slice(1).trim()); setAtLine(lineIdx); } else setAtQuery(null);
+  const put = async (body: Record<string, unknown>) => {
+    const res = await apiFetch("/api/bom/work-steps/columns", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+    if (Array.isArray(j.data)) setCols(j.data as string[]);
+    if (Array.isArray(j.ops)) setOps(j.ops as string[]);
+    if (Array.isArray(j.piece_ops)) setPieceOps(j.piece_ops as string[]);
+    return j as Record<string, unknown>;
   };
-  const atMatches = atQuery === null ? [] : ops.filter((o) => !atQuery || o.toLowerCase().includes(atQuery.toLowerCase())).slice(0, 12);
-  const pickAt = (name: string) => {
-    const lines = colsText.split("\n"); lines[atLine] = name;
-    setColsText(lines.join("\n")); setAtQuery(null);
-    setTimeout(() => colsRef.current?.focus(), 0);
+  const saveCols = async () => {
+    setSaving("cols");
+    try { await put({ columns: liveCols }); toast.success("บันทึกคอลัมน์แล้ว — ใช้กับทุกใบทั้งระบบ"); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSaving(null); }
   };
-  const onColsKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (atQuery === null) return;
-    if (e.key === "Enter" && atMatches.length > 0) { e.preventDefault(); pickAt(atMatches[0]); }
-    if (e.key === "Escape") setAtQuery(null);
+  const savePieces = async () => {
+    if (!mo?.product_sku) { toast.error("ใบนี้ไม่มีรหัสสินค้า — บันทึกชิ้นส่วนต่อสินค้าไม่ได้"); return; }
+    setSaving("pieces");
+    try { await put({ product_sku: mo.product_sku, pieces: piecesText.split("\n").map((x) => x.trim()).filter(Boolean) }); toast.success(`บันทึกชิ้นส่วนของ ${mo.product_sku} แล้ว — พิมพ์ครั้งหน้าเติมให้เอง`); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSaving(null); }
   };
-  const openOps = () => { setOpsDraft(ops); setOpsNew(""); setOpsOpen(true); };
-  const addOpsDraft = () => { const v = opsNew.trim(); if (!v) return; setOpsDraft((d) => [...new Set([...d, v])]); setOpsNew(""); };
-  const saveOps = async () => {
-    setOpsSaving(true);
-    try {
-      const res = await apiFetch("/api/bom/work-steps/columns", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ops: opsDraft }) });
-      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
-      setOps(j.ops as string[]); setOpsOpen(false); toast.success("บันทึกรายการประเภทงานแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
-    finally { setOpsSaving(false); }
+  const openManage = (which: "ops" | "piece_ops") => { setDraft(which === "ops" ? ops : pieceOps); setDraftNew(""); setManage(which); };
+  const addDraft = () => { const v = draftNew.trim(); if (!v) return; setDraft((d) => [...new Set([...d, v])]); setDraftNew(""); };
+  const saveManage = async () => {
+    if (!manage) return;
+    setSaving("manage");
+    try { await put({ [manage]: draft }); setManage(null); toast.success("บันทึกรายการแล้ว"); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSaving(null); }
   };
 
-  const saveCols = async () => {
-    setSavingCols(true);
-    try {
-      const res = await apiFetch("/api/bom/work-steps/columns", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ columns: liveCols }) });
-      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
-      setCols(j.data as string[]); if (Array.isArray(j.ops)) setOps(j.ops as string[]); toast.success("บันทึกคอลัมน์แล้ว — ใช้กับทุกใบทั้งระบบ");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
-    finally { setSavingCols(false); }
-  };
+  const btnGhost = "h-8 px-3 text-[12px] border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50";
+  const btnSave = "h-8 px-3 text-[12px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50";
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -264,58 +292,51 @@ export default function PrintWorkStepsPage() {
             <span className="text-[11px] text-slate-400">อัตโนมัติ = ทุกแถวแบ่งพื้นที่ให้พอดี 1 หน้า · ตั้งความสูงเอง = แถวเยอะจะต่อหน้า 2 ให้ · จำค่านี้ไว้ในเครื่องนี้</span>
           </div>
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-sm font-medium text-slate-700">คอลัมน์ประเภทงาน <span className="text-[11px] text-slate-400">(บรรทัดละ 1 · ใช้ร่วมกันทั้งระบบ)</span></span>
+            <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
+              <span className="text-sm font-medium text-slate-700">คอลัมน์ประเภทงาน <span className="text-[11px] text-slate-400">(บรรทัดละ 1 · ใช้ร่วมกันทั้งระบบ · พิมพ์ @ เลือกจากรายการ)</span></span>
               <span className="flex gap-1">
-                <button onClick={openOps} className="h-8 px-3 text-[12px] border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50" title="รายการประเภทงานที่บันทึกไว้ — พิมพ์ @ ในกล่องเพื่อเลือก">⚙ จัดการรายการ ({ops.length})</button>
-                <button onClick={() => void saveCols()} disabled={savingCols || liveCols.length === 0} className="h-8 px-3 text-[12px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{savingCols ? "กำลังบันทึก…" : "💾 บันทึกคอลัมน์"}</button>
+                <button onClick={() => openManage("ops")} className={btnGhost} title="รายการประเภทงานที่บันทึกไว้">⚙ จัดการรายการ ({ops.length})</button>
+                <button onClick={() => void saveCols()} disabled={saving !== null || liveCols.length === 0} className={btnSave}>{saving === "cols" ? "กำลังบันทึก…" : "💾 บันทึกคอลัมน์"}</button>
               </span>
             </div>
-            <div className="relative">
-              <textarea ref={colsRef} value={colsText} onChange={onColsChange} onKeyDown={onColsKey} onBlur={() => setTimeout(() => setAtQuery(null), 150)} rows={8}
-                placeholder={"พิมพ์ชื่อประเภทงาน บรรทัดละ 1\nพิมพ์ @ เพื่อเลือกจากรายการที่บันทึกไว้\nใส่ + คั่น = กล่องแบ่งช่อง เช่น ทากาว + ติดกาว"}
-                className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg font-mono" />
-              {atQuery !== null && (
-                <div className="absolute left-2 right-2 top-full -mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
-                  <div className="px-3 py-1 text-[10px] text-slate-400 border-b border-slate-100">เลือกประเภทงาน (Enter = เลือกอันแรก · Esc = ปิด)</div>
-                  {atMatches.length === 0
-                    ? <div className="px-3 py-2 text-sm text-slate-400">ไม่มีในรายการ — พิมพ์ต่อได้เลย แล้วกด ⚙ จัดการรายการ เพื่อเพิ่ม</div>
-                    : atMatches.map((o) => <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); pickAt(o); }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50">{o}</button>)}
-                </div>
-              )}
-            </div>
+            <AtTextarea value={colsText} onChange={setColsText} options={ops}
+              placeholder={"พิมพ์ชื่อประเภทงาน บรรทัดละ 1\nพิมพ์ @ เพื่อเลือกจากรายการที่บันทึกไว้\nใส่ + คั่น = กล่องแบ่งช่อง เช่น ทากาว + ติดกาว"} />
           </div>
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-sm font-medium text-slate-700">ชิ้นส่วน (แถว) <span className="text-[11px] text-slate-400">(บรรทัดละ 1 · ใส่ <code>| จำนวน</code> ต่อท้ายได้ · เว้นว่าง = พิมพ์ช่องว่างให้เขียนเอง)</span></span>
-              <span className="text-[11px] text-slate-400">แก้เฉพาะครั้งนี้ ไม่บันทึก</span>
+            <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
+              <span className="text-sm font-medium text-slate-700">ชิ้นส่วน (แถว) <span className="text-[11px] text-slate-400">(บรรทัดละ 1 · ใส่ <code>| จำนวน</code> ต่อท้ายได้ · พิมพ์ @ เลือกจากรายการ · ว่าง = พิมพ์ช่องว่างให้เขียนเอง)</span></span>
+              <span className="flex gap-1">
+                <button onClick={() => openManage("piece_ops")} className={btnGhost} title="รายการชื่อชิ้นส่วนที่บันทึกไว้">⚙ จัดการรายการ ({pieceOps.length})</button>
+                <button onClick={() => void savePieces()} disabled={saving !== null || !mo?.product_sku} className={btnSave} title={mo?.product_sku ? `จำไว้กับสินค้า ${mo.product_sku} — พิมพ์ใบไหนของสินค้านี้ก็เติมให้` : "ใบนี้ไม่มีรหัสสินค้า"}>{saving === "pieces" ? "กำลังบันทึก…" : `💾 บันทึกชิ้นส่วน (${mo?.product_sku ?? "สินค้านี้"})`}</button>
+              </span>
             </div>
-            <textarea value={piecesText} onChange={(e) => setPiecesText(e.target.value)} rows={8} placeholder={"ตัวหน้า | 1\nตัวหลัง | 1\nหูหิ้ว (หนัง) | 2"} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg font-mono" />
+            <AtTextarea value={piecesText} onChange={setPiecesText} options={pieceOps}
+              placeholder={"ตัวหน้า | 1\nตัวหลัง | 1\nหูหิ้ว (หนัง) | 2\nพิมพ์ @ เพื่อเลือกจากรายการที่บันทึกไว้"} />
           </div>
         </div>
       )}
 
-      {/* ป๊อปจัดการทะเบียนประเภทงาน (ตัวช่วย @) */}
-      <ERPModal open={opsOpen} onClose={() => setOpsOpen(false)} size="sm" title="⚙ รายการประเภทงาน (ตัวช่วย @)"
+      {/* ป๊อปจัดการทะเบียน (ตัวช่วย @) — ใช้ร่วมกันทั้งประเภทงานและชิ้นส่วน */}
+      <ERPModal open={manage !== null} onClose={() => setManage(null)} size="sm" title={manage === "piece_ops" ? "⚙ รายการชิ้นส่วน (ตัวช่วย @)" : "⚙ รายการประเภทงาน (ตัวช่วย @)"}
         footer={<>
-          <button onClick={() => setOpsOpen(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
-          <button onClick={() => void saveOps()} disabled={opsSaving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{opsSaving ? "กำลังบันทึก…" : "บันทึก"}</button>
+          <button onClick={() => setManage(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
+          <button onClick={() => void saveManage()} disabled={saving !== null} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving === "manage" ? "กำลังบันทึก…" : "บันทึก"}</button>
         </>}>
-        <p className="text-[11px] text-slate-500 mb-2">ชื่อที่บันทึกไว้จะโผล่ให้เลือกตอนพิมพ์ @ ในกล่องคอลัมน์ · ชื่อใหม่ที่กด "บันทึกคอลัมน์" ระบบเติมให้เองด้วย</p>
+        <p className="text-[11px] text-slate-500 mb-2">ชื่อที่บันทึกไว้จะโผล่ให้เลือกตอนพิมพ์ @ · ชื่อใหม่ที่กด 💾 บันทึก ระบบเติมเข้ารายการให้เองด้วย</p>
         <div className="flex gap-1 mb-2">
-          <input value={opsNew} onChange={(e) => setOpsNew(e.target.value)} placeholder="เพิ่มชื่อใหม่ เช่น พับ"
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addOpsDraft(); } }}
+          <input value={draftNew} onChange={(e) => setDraftNew(e.target.value)} placeholder={manage === "piece_ops" ? "เพิ่มชื่อชิ้นส่วน เช่น ตัวหน้า" : "เพิ่มประเภทงาน เช่น พับ"}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addDraft(); } }}
             className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-lg" />
-          <button onClick={addOpsDraft} className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">＋</button>
+          <button onClick={addDraft} className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">＋</button>
         </div>
         <ul className="max-h-72 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg">
-          {opsDraft.length === 0 && <li className="px-3 py-3 text-sm text-slate-400 text-center">ยังไม่มีรายการ</li>}
-          {opsDraft.map((o, i) => (
+          {draft.length === 0 && <li className="px-3 py-3 text-sm text-slate-400 text-center">ยังไม่มีรายการ</li>}
+          {draft.map((o, i) => (
             <li key={o} className="flex items-center gap-2 px-3 py-1.5 text-sm">
               <span className="flex-1">{o}</span>
-              <button onClick={() => setOpsDraft((d) => { const n = [...d]; if (i > 0) [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; })} disabled={i === 0} className="h-6 w-6 text-slate-400 hover:text-slate-700 disabled:opacity-30">↑</button>
-              <button onClick={() => setOpsDraft((d) => { const n = [...d]; if (i < n.length - 1) [n[i + 1], n[i]] = [n[i], n[i + 1]]; return n; })} disabled={i === opsDraft.length - 1} className="h-6 w-6 text-slate-400 hover:text-slate-700 disabled:opacity-30">↓</button>
-              <button onClick={() => setOpsDraft((d) => d.filter((x) => x !== o))} className="h-6 w-6 text-slate-300 hover:text-rose-600" title="ลบ">✕</button>
+              <button onClick={() => setDraft((d) => { const n = [...d]; if (i > 0) [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; })} disabled={i === 0} className="h-6 w-6 text-slate-400 hover:text-slate-700 disabled:opacity-30">↑</button>
+              <button onClick={() => setDraft((d) => { const n = [...d]; if (i < n.length - 1) [n[i + 1], n[i]] = [n[i], n[i + 1]]; return n; })} disabled={i === draft.length - 1} className="h-6 w-6 text-slate-400 hover:text-slate-700 disabled:opacity-30">↓</button>
+              <button onClick={() => setDraft((d) => d.filter((x) => x !== o))} className="h-6 w-6 text-slate-300 hover:text-rose-600" title="ลบ">✕</button>
             </li>
           ))}
         </ul>
@@ -329,3 +350,4 @@ export default function PrintWorkStepsPage() {
     </div>
   );
 }
+
