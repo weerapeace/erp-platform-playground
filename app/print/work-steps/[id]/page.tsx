@@ -55,8 +55,7 @@ const CSS = `
   .grid th.v span { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; white-space: nowrap; font-size: 11px; }
   /* เต็ม A4 หน้าเดียวแน่นอน: ล็อกความสูง "ทั้งตาราง" เป็น มม. แล้วให้ 20 แถวแบ่งพื้นที่กันเอง
      (A4 297 − ขอบ 20 − padding 18 − หัวใบ ≤40 − ท้าย 8 → ตาราง 196 มม.) */
-  .grid { height: 196mm; }
-  .grid td { height: auto; }
+  .grid { height: auto; }   /* ความสูงแถวคิดเป็น มม. ในโค้ด (sizeCss) เสมอ → แบ่งหน้าเองได้แม่นทุกโหมด */
   .grid tbody tr { page-break-inside: avoid; }
   .grid th.v { height: 20mm; }
   .grid td.piece { width: 34%; }
@@ -98,8 +97,13 @@ function buildStepsHtml(mo: MoHead, steps: WorkStep[]): string {
 function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: number, rowHeightMm: number): string {
   const rows = [...pieces, ...Array.from({ length: Math.max(0, rowCount - pieces.length) }, () => ({ label: "", sub: "", qty: "" }))];
   // ความสูงแถว: 0 = ให้แบ่งเต็มหน้า A4 (ตาราง 196 มม.) · ใส่ค่า = สูงตายตัวต่อแถว → แบ่งหน้าเอง (หัวใบซ้ำทุกหน้า + เลขหน้า x/y)
-  const sizeCss = rowHeightMm > 0 ? `.grid { height: auto; } .grid td { height: ${rowHeightMm}mm; }` : "";
-  const perPage = rowHeightMm > 0 ? Math.max(1, Math.floor(172 / (rowHeightMm + 0.6))) : rows.length;   // พื้นที่แถว ≈ 172 มม./หน้า (หลังหักหัวใบ+หัวตาราง+ท้าย)
+  // พื้นที่สำหรับแถว ≈ 172 มม./หน้า (หลังหักหัวใบ+หัวตาราง+ท้าย) · แถวต่ำสุด 7.9 มม. (กล่องติ๊ก 4.2 + ช่องไฟ)
+  // อัตโนมัติ = แบ่ง 172 มม. ให้แถวเท่า ๆ กัน (ไม่เกิน 20 แถว/หน้า) · แถวเกิน → หน้าถัดไปด้วยความสูงเดียวกัน
+  const ROW_AREA = 172, ROW_MIN = 7.9, ROW_GAP = 0.4;
+  const autoH = Math.max(ROW_MIN, Math.round((ROW_AREA / Math.max(1, Math.min(rows.length, 20)) - ROW_GAP) * 10) / 10);
+  const rowH = rowHeightMm > 0 ? rowHeightMm : autoH;
+  const sizeCss = `.grid td { height: ${rowH}mm; }`;
+  const perPage = Math.max(1, Math.floor(ROW_AREA / (rowH + ROW_GAP)));
   const chunks: { rows: typeof rows; offset: number }[] = [];
   for (let i = 0; i < rows.length; i += perPage) chunks.push({ rows: rows.slice(i, i + perPage), offset: i });
   if (chunks.length === 0) chunks.push({ rows: [], offset: 0 });
