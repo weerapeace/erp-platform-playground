@@ -7,12 +7,13 @@
  *       ให้เอาไปถามช่างแล้วติ๊กได้เลย · แถวเติมจากบล็อกตัดของใบให้ (แก้ได้) · คอลัมน์แก้ได้และจำไว้ทั้งระบบ
  *   ใช้ PrintFrame + printReportFrameOrWindow ของกลาง (เหมือนใบสั่งงาน)
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { useToast } from "@/components/toast";
+import { ERPModal } from "@/components/modal";
 import type { WorkStep } from "@/app/api/bom/work-steps/route";
 
 type MoHead = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; due_date: string | null; note: string | null; image: string | null };
@@ -126,6 +127,15 @@ export default function PrintWorkStepsPage() {
   const [steps, setSteps] = useState<WorkStep[]>([]);
   const [grid, setGrid] = useState(sp.get("blank") === "1");
   const [cols, setCols] = useState<string[]>([]);
+  // ทะเบียนประเภทงาน (ตัวช่วย @) + ป๊อปจัดการรายการ
+  const [ops, setOps] = useState<string[]>([]);
+  const [opsOpen, setOpsOpen] = useState(false);
+  const [opsDraft, setOpsDraft] = useState<string[]>([]);
+  const [opsNew, setOpsNew] = useState("");
+  const [opsSaving, setOpsSaving] = useState(false);
+  const [atQuery, setAtQuery] = useState<string | null>(null);   // null = ไม่ได้พิมพ์ @ · "" = พิมพ์ @ เฉย ๆ
+  const [atLine, setAtLine] = useState(0);
+  const colsRef = useRef<HTMLTextAreaElement>(null);
   const [colsText, setColsText] = useState("");
   const [piecesText, setPiecesText] = useState("");
   const [editOpen, setEditOpen] = useState(false);
@@ -156,6 +166,7 @@ export default function PrintWorkStepsPage() {
         // แถวชิ้นส่วน: ปล่อยว่างให้เขียนเอง (เจ้าของบอกบล็อกตัดของผ้า "ไม่เกี่ยวกับหน้านี้") — พิมพ์รายการล่วงหน้าได้ที่ ✎ แก้รายการ
         const st = (sj?.data ?? []) as WorkStep[]; setSteps(st);
         const c = (cj?.data ?? []) as string[]; setCols(c); setColsText(c.join("\n"));
+        setOps(((cj?.ops ?? []) as string[]));
         if (st.length === 0 && sp.get("blank") !== "0") setGrid(true);   // ไม่มีขั้นตอน → ตารางติ๊กอัตโนมัติ
       } catch { if (on) setError("โหลดข้อมูลไม่สำเร็จ"); }
       finally { if (on) setLoading(false); }
@@ -174,12 +185,43 @@ export default function PrintWorkStepsPage() {
   const html = useMemo(() => (mo ? (grid ? buildGridHtml(mo, pieces, liveCols.length ? liveCols : cols, rowCount, rowMm) : buildStepsHtml(mo, steps)) : ""), [mo, grid, pieces, liveCols, cols, steps, rowCount, rowMm]);
   const fileName = docFileName(grid ? "ตารางขั้นตอนการผลิต" : "ขั้นตอนงาน", mo?.mo_no);
 
+  // ── ตัวช่วย @ : พิมพ์ @ ต้นบรรทัดในกล่องคอลัมน์ → เลือกจากทะเบียน (เจ้าของขอ) ──
+  const onColsChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const v = e.target.value; setColsText(v);
+    const pos = e.target.selectionStart ?? v.length;
+    const before = v.slice(0, pos); const lineIdx = before.split("\n").length - 1;
+    const line = before.split("\n")[lineIdx] ?? "";
+    if (line.startsWith("@")) { setAtQuery(line.slice(1).trim()); setAtLine(lineIdx); } else setAtQuery(null);
+  };
+  const atMatches = atQuery === null ? [] : ops.filter((o) => !atQuery || o.toLowerCase().includes(atQuery.toLowerCase())).slice(0, 12);
+  const pickAt = (name: string) => {
+    const lines = colsText.split("\n"); lines[atLine] = name;
+    setColsText(lines.join("\n")); setAtQuery(null);
+    setTimeout(() => colsRef.current?.focus(), 0);
+  };
+  const onColsKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (atQuery === null) return;
+    if (e.key === "Enter" && atMatches.length > 0) { e.preventDefault(); pickAt(atMatches[0]); }
+    if (e.key === "Escape") setAtQuery(null);
+  };
+  const openOps = () => { setOpsDraft(ops); setOpsNew(""); setOpsOpen(true); };
+  const addOpsDraft = () => { const v = opsNew.trim(); if (!v) return; setOpsDraft((d) => [...new Set([...d, v])]); setOpsNew(""); };
+  const saveOps = async () => {
+    setOpsSaving(true);
+    try {
+      const res = await apiFetch("/api/bom/work-steps/columns", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ops: opsDraft }) });
+      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      setOps(j.ops as string[]); setOpsOpen(false); toast.success("บันทึกรายการประเภทงานแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setOpsSaving(false); }
+  };
+
   const saveCols = async () => {
     setSavingCols(true);
     try {
       const res = await apiFetch("/api/bom/work-steps/columns", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ columns: liveCols }) });
       const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
-      setCols(j.data as string[]); toast.success("บันทึกคอลัมน์แล้ว — ใช้กับทุกใบทั้งระบบ");
+      setCols(j.data as string[]); if (Array.isArray(j.ops)) setOps(j.ops as string[]); toast.success("บันทึกคอลัมน์แล้ว — ใช้กับทุกใบทั้งระบบ");
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSavingCols(false); }
   };
@@ -218,9 +260,24 @@ export default function PrintWorkStepsPage() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <span className="text-sm font-medium text-slate-700">คอลัมน์ประเภทงาน <span className="text-[11px] text-slate-400">(บรรทัดละ 1 · ใช้ร่วมกันทั้งระบบ)</span></span>
-              <button onClick={() => void saveCols()} disabled={savingCols || liveCols.length === 0} className="h-8 px-3 text-[12px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{savingCols ? "กำลังบันทึก…" : "💾 บันทึกคอลัมน์"}</button>
+              <span className="flex gap-1">
+                <button onClick={openOps} className="h-8 px-3 text-[12px] border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50" title="รายการประเภทงานที่บันทึกไว้ — พิมพ์ @ ในกล่องเพื่อเลือก">⚙ จัดการรายการ ({ops.length})</button>
+                <button onClick={() => void saveCols()} disabled={savingCols || liveCols.length === 0} className="h-8 px-3 text-[12px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{savingCols ? "กำลังบันทึก…" : "💾 บันทึกคอลัมน์"}</button>
+              </span>
             </div>
-            <textarea value={colsText} onChange={(e) => setColsText(e.target.value)} rows={8} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg font-mono" />
+            <div className="relative">
+              <textarea ref={colsRef} value={colsText} onChange={onColsChange} onKeyDown={onColsKey} onBlur={() => setTimeout(() => setAtQuery(null), 150)} rows={8}
+                placeholder={"พิมพ์ชื่อประเภทงาน บรรทัดละ 1\nพิมพ์ @ เพื่อเลือกจากรายการที่บันทึกไว้\nใส่ + คั่น = กล่องแบ่งช่อง เช่น ทากาว + ติดกาว"}
+                className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg font-mono" />
+              {atQuery !== null && (
+                <div className="absolute left-2 right-2 top-full -mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+                  <div className="px-3 py-1 text-[10px] text-slate-400 border-b border-slate-100">เลือกประเภทงาน (Enter = เลือกอันแรก · Esc = ปิด)</div>
+                  {atMatches.length === 0
+                    ? <div className="px-3 py-2 text-sm text-slate-400">ไม่มีในรายการ — พิมพ์ต่อได้เลย แล้วกด ⚙ จัดการรายการ เพื่อเพิ่ม</div>
+                    : atMatches.map((o) => <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); pickAt(o); }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50">{o}</button>)}
+                </div>
+              )}
+            </div>
           </div>
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -231,6 +288,32 @@ export default function PrintWorkStepsPage() {
           </div>
         </div>
       )}
+
+      {/* ป๊อปจัดการทะเบียนประเภทงาน (ตัวช่วย @) */}
+      <ERPModal open={opsOpen} onClose={() => setOpsOpen(false)} size="sm" title="⚙ รายการประเภทงาน (ตัวช่วย @)"
+        footer={<>
+          <button onClick={() => setOpsOpen(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
+          <button onClick={() => void saveOps()} disabled={opsSaving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{opsSaving ? "กำลังบันทึก…" : "บันทึก"}</button>
+        </>}>
+        <p className="text-[11px] text-slate-500 mb-2">ชื่อที่บันทึกไว้จะโผล่ให้เลือกตอนพิมพ์ @ ในกล่องคอลัมน์ · ชื่อใหม่ที่กด "บันทึกคอลัมน์" ระบบเติมให้เองด้วย</p>
+        <div className="flex gap-1 mb-2">
+          <input value={opsNew} onChange={(e) => setOpsNew(e.target.value)} placeholder="เพิ่มชื่อใหม่ เช่น พับ"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addOpsDraft(); } }}
+            className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-lg" />
+          <button onClick={addOpsDraft} className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">＋</button>
+        </div>
+        <ul className="max-h-72 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg">
+          {opsDraft.length === 0 && <li className="px-3 py-3 text-sm text-slate-400 text-center">ยังไม่มีรายการ</li>}
+          {opsDraft.map((o, i) => (
+            <li key={o} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+              <span className="flex-1">{o}</span>
+              <button onClick={() => setOpsDraft((d) => { const n = [...d]; if (i > 0) [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; })} disabled={i === 0} className="h-6 w-6 text-slate-400 hover:text-slate-700 disabled:opacity-30">↑</button>
+              <button onClick={() => setOpsDraft((d) => { const n = [...d]; if (i < n.length - 1) [n[i + 1], n[i]] = [n[i], n[i + 1]]; return n; })} disabled={i === opsDraft.length - 1} className="h-6 w-6 text-slate-400 hover:text-slate-700 disabled:opacity-30">↓</button>
+              <button onClick={() => setOpsDraft((d) => d.filter((x) => x !== o))} className="h-6 w-6 text-slate-300 hover:text-rose-600" title="ลบ">✕</button>
+            </li>
+          ))}
+        </ul>
+      </ERPModal>
 
       <div className="px-4 py-6">
         {loading ? <div className="py-20 text-center text-slate-400">กำลังโหลด...</div>
