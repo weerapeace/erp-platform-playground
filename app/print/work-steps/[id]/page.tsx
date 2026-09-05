@@ -66,9 +66,9 @@ const CSS = `
   .grid td.tick::before { content: ""; display: inline-block; width: 4.2mm; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; margin-top: 1mm; }
   /* คอลัมน์ที่มี "+" (เช่น ทากาว + ติดกาว) → กล่องเดียวแบ่งเป็นหลายช่อง ติ๊กแยกได้ (เจ้าของขอ) */
   .grid td.tickm { text-align: center; }
-  .grid td.tickm .multi { display: inline-flex; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; margin-top: 1mm; overflow: hidden; }
-  .grid td.tickm .multi i { display: block; width: 4.2mm; border-left: 1.5px solid #334155; }
-  .grid td.tickm .multi i:first-child { border-left: 0; }
+  /* กล่องเดียวขนาดเท่าปกติ แบ่งครึ่งด้วยเส้นกลาง (เส้นยื่นเลยขอบบน-ล่างนิดหน่อยตามที่เจ้าของวาด) */
+  .grid td.tickm .multi { display: inline-block; position: relative; width: 4.2mm; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; margin-top: 1mm; overflow: visible; vertical-align: top; }
+  .grid td.tickm .multi i { position: absolute; top: -0.9mm; bottom: -0.9mm; width: 0; border-left: 1.5px solid #334155; }
 `;
 
 function head(mo: MoHead, title: string, pageLabel = "") {
@@ -105,7 +105,7 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
   if (chunks.length === 0) chunks.push({ rows: [], offset: 0 });
   const rowHtml = (p: Piece, i: number) => `<tr><td class="n">${i + 1}</td>
       <td class="piece">${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</td>
-      ${cols.map((c) => { const n = c.split("+").map((x) => x.trim()).filter(Boolean).length; return n > 1 ? `<td class="tickm"><span class="multi">${"<i></i>".repeat(n)}</span></td>` : `<td class="tick"></td>`; }).join("")}
+      ${cols.map((c) => { const n = c.split("+").map((x) => x.trim()).filter(Boolean).length; return n > 1 ? `<td class="tickm"><span class="multi">${Array.from({ length: n - 1 }, (_, k) => `<i style="left:${((k + 1) / n) * 100}%"></i>`).join("")}</span></td>` : `<td class="tick"></td>`; }).join("")}
       <td class="qty">${esc(p.qty)}</td><td></td></tr>`;
   const thead = `<thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:44px;text-align:center">จำนวน</th><th style="width:16%">หมายเหตุ</th></tr></thead>`;
   const pagesHtml = chunks.map((ch, pi) => `<div class="page">
