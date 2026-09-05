@@ -85,13 +85,15 @@ function buildStepsHtml(mo: MoHead, steps: WorkStep[]): string {
 }
 
 /** แบบ 2: ตารางติ๊ก — แถว = ชิ้นส่วน · คอลัมน์ = ประเภทงาน */
-function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[]): string {
-  const rows = [...pieces, ...Array.from({ length: Math.max(0, MIN_ROWS - pieces.length) }, () => ({ label: "", sub: "", qty: "" }))];
+function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: number, rowHeightMm: number): string {
+  const rows = [...pieces, ...Array.from({ length: Math.max(0, rowCount - pieces.length) }, () => ({ label: "", sub: "", qty: "" }))];
+  // ความสูงแถว: 0 = ให้แบ่งเต็มหน้า A4 (ตาราง 196 มม.) · ใส่ค่า = สูงตายตัวต่อแถว (แถวเยอะก็ต่อหน้า 2 ได้)
+  const sizeCss = rowHeightMm > 0 ? `.grid { height: auto; } .grid td { height: ${rowHeightMm}mm; }` : "";
   const body = rows.map((p, i) => `<tr><td class="n">${i + 1}</td>
       <td class="piece">${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</td>
       ${cols.map(() => `<td class="tick"></td>`).join("")}
       <td class="qty">${esc(p.qty)}</td><td></td></tr>`).join("");
-  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ขั้นตอนการผลิต ${esc(mo.mo_no)}</title><style>${CSS}</style></head><body>
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ขั้นตอนการผลิต ${esc(mo.mo_no)}</title><style>${CSS}${sizeCss}</style></head><body>
     ${head(mo, "▦ ขั้นตอนการผลิต (ติ๊กตามชิ้น)")}
     <table class="grid"><thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:44px;text-align:center">จำนวน</th><th style="width:16%">หมายเหตุ</th></tr></thead>
     <tbody>${body}</tbody></table>
@@ -111,6 +113,10 @@ export default function PrintWorkStepsPage() {
   const [colsText, setColsText] = useState("");
   const [piecesText, setPiecesText] = useState("");
   const [editOpen, setEditOpen] = useState(false);
+  // จำนวนแถว + ความสูงแถว (จำไว้ในเครื่องนี้) — เจ้าของขอปรับได้
+  const [rowCount, setRowCount] = useState<number>(() => { try { return Number(localStorage.getItem("ws-print-rows")) || MIN_ROWS; } catch { return MIN_ROWS; } });
+  const [rowMm, setRowMm] = useState<number>(() => { try { return Number(localStorage.getItem("ws-print-rowmm")) || 0; } catch { return 0; } });
+  useEffect(() => { try { localStorage.setItem("ws-print-rows", String(rowCount)); localStorage.setItem("ws-print-rowmm", String(rowMm)); } catch { /* ignore */ } }, [rowCount, rowMm]);
   const [savingCols, setSavingCols] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -149,7 +155,7 @@ export default function PrintWorkStepsPage() {
   }), [piecesText]);
   const liveCols = useMemo(() => colsText.split("\n").map((x) => x.trim()).filter(Boolean), [colsText]);
 
-  const html = useMemo(() => (mo ? (grid ? buildGridHtml(mo, pieces, liveCols.length ? liveCols : cols) : buildStepsHtml(mo, steps)) : ""), [mo, grid, pieces, liveCols, cols, steps]);
+  const html = useMemo(() => (mo ? (grid ? buildGridHtml(mo, pieces, liveCols.length ? liveCols : cols, rowCount, rowMm) : buildStepsHtml(mo, steps)) : ""), [mo, grid, pieces, liveCols, cols, steps, rowCount, rowMm]);
   const fileName = docFileName(grid ? "ตารางขั้นตอนการผลิต" : "ขั้นตอนงาน", mo?.mo_no);
 
   const saveCols = async () => {
@@ -180,6 +186,19 @@ export default function PrintWorkStepsPage() {
 
       {grid && editOpen && (
         <div className="no-print border-b border-slate-200 bg-white px-6 py-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2 flex items-center gap-4 flex-wrap text-sm text-slate-700">
+            <label className="flex items-center gap-2">จำนวนแถว (ลำดับ)
+              <input type="number" min={1} max={60} value={rowCount} onChange={(e) => setRowCount(Math.min(60, Math.max(1, Number(e.target.value) || 1)))}
+                className="w-20 h-8 px-2 text-sm text-center border border-slate-200 rounded-lg" />
+            </label>
+            <label className="flex items-center gap-2">ความสูงแถว
+              <select value={rowMm} onChange={(e) => setRowMm(Number(e.target.value))} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                <option value={0}>อัตโนมัติ (แบ่งเต็มหน้า A4)</option>
+                {[6, 7, 8, 9, 10, 12, 14, 16, 20].map((v) => <option key={v} value={v}>{v} มม.</option>)}
+              </select>
+            </label>
+            <span className="text-[11px] text-slate-400">อัตโนมัติ = ทุกแถวแบ่งพื้นที่ให้พอดี 1 หน้า · ตั้งความสูงเอง = แถวเยอะจะต่อหน้า 2 ให้ · จำค่านี้ไว้ในเครื่องนี้</span>
+          </div>
           <div>
             <div className="flex items-center justify-between mb-1">
               <span className="text-sm font-medium text-slate-700">คอลัมน์ประเภทงาน <span className="text-[11px] text-slate-400">(บรรทัดละ 1 · ใช้ร่วมกันทั้งระบบ)</span></span>
