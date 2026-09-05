@@ -15,7 +15,7 @@ import { docFileName } from "@/lib/print-filename";
 import { useToast } from "@/components/toast";
 import type { WorkStep } from "@/app/api/bom/work-steps/route";
 
-type MoHead = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; due_date: string | null; note: string | null };
+type MoHead = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; due_date: string | null; note: string | null; image: string | null };
 type Piece = { label: string; sub: string; qty: string };
 
 const MIN_ROWS = 12;
@@ -23,8 +23,11 @@ const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&
 const thDate = (s: string | null) => (s ? new Date(s.slice(0, 10) + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "—");
 
 const CSS = `
-  @page { size: A4; margin: 12mm 10mm; }
-  body { font-family: "Sarabun", "Noto Sans Thai", "Tahoma", sans-serif; color: #0f172a; font-size: 12px; margin: 0; }
+  @page { size: A4; margin: 10mm 8mm; }
+  body { font-family: "Sarabun", "Noto Sans Thai", "Tahoma", sans-serif; color: #0f172a; font-size: 12px; margin: 0; padding: 8mm 8mm 10mm; box-sizing: border-box; }
+  .right { display: flex; align-items: flex-start; gap: 8px; }
+  .photo { width: 92px; height: 92px; border: 1px solid #cbd5e1; border-radius: 4px; object-fit: cover; background: #f8fafc; }
+  .photo-empty { width: 92px; height: 92px; border: 1px dashed #cbd5e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #94a3b8; }
   h1 { font-size: 18px; margin: 0 0 2px; }
   .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 8px; }
   .meta { font-size: 12px; line-height: 1.6; }
@@ -58,7 +61,7 @@ function head(mo: MoHead, title: string) {
       <div><b>จำนวน</b> ${Number(mo.qty || 0).toLocaleString("th-TH")} ชิ้น &nbsp;&nbsp; <b>กำหนดส่ง</b> ${thDate(mo.due_date)}</div>
       ${mo.note ? `<div><b>หมายเหตุ</b> ${esc(mo.note)}</div>` : ""}
     </div></div>
-    <div class="box">ผู้ให้ข้อมูล/ผู้ทำ: ______________<br>วันที่: ______ / ______ / ______</div></div>`;
+    <div class="right">${mo.image ? `<img class="photo" src="${esc(mo.image)}" alt="รูปสินค้า" />` : `<div class="photo-empty">ไม่มีรูป</div>`}<div class="box">ผู้ให้ข้อมูล/ผู้ทำ: ______________<br>วันที่: ______ / ______ / ______</div></div></div>`;
 }
 
 /** แบบ 1: รายการขั้นตอนจากสูตร */
@@ -86,7 +89,7 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[]): string {
     <table class="grid"><thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:44px;text-align:center">จำนวน</th><th style="width:16%">หมายเหตุ</th></tr></thead>
     <tbody>${body}</tbody></table>
     <div class="foot"><div>สอบถามจาก: <span></span></div><div>บันทึกโดย: <span></span></div></div>
-    <div class="hint">ติ๊ก ✓ ว่าชิ้นนี้ต้องทำงานประเภทไหนบ้าง · แถวเติมจากบล็อกตัดของใบให้ก่อน แก้/เพิ่มได้ · เสร็จแล้วเอาไปกรอกที่แท็บ 🪜 ขั้นตอนงาน</div></body></html>`;
+    <div class="hint">ติ๊ก ✓ ว่าชิ้นนี้ต้องทำงานประเภทไหนบ้าง · เขียนชื่อชิ้นส่วนลงช่อง (หรือพิมพ์ล่วงหน้าที่ ✎ แก้รายการ) · เสร็จแล้วเอาไปกรอกที่แท็บ 🪜 ขั้นตอนงาน</div></body></html>`;
 }
 
 export default function PrintWorkStepsPage() {
@@ -119,17 +122,9 @@ export default function PrintWorkStepsPage() {
         const h = ((d?.header as Record<string, unknown> | undefined) ?? d) as Record<string, unknown> | null;
         if (!h || !h.mo_no) { setError("ไม่พบใบสั่งผลิต"); return; }
         setMo({ id: String(h.id), mo_no: String(h.mo_no), product_sku: (h.product_sku as string) ?? null, product_name: (h.product_name as string) ?? null,
-          qty: Number(h.qty) || 0, due_date: (h.due_date as string) ?? null, note: (h.note as string) ?? null });
-        // แถวชิ้นส่วน: จากบล็อกตัดของใบ (ไม่ซ้ำรหัสบล็อก) — ผู้ใช้แก้ในกล่องข้อความได้ก่อนพิมพ์
-        const mats = ((d?.materials as Record<string, unknown>[] | undefined) ?? []);
-        const seen = new Set<string>(); const lines: string[] = [];
-        for (const m of mats) {
-          const code = String(m.cut_block_code ?? "").trim(); if (!code || seen.has(code)) continue; seen.add(code);
-          const comp = String(m.component_name ?? m.component_sku ?? "").trim();
-          const pcs = m.pieces != null ? String(Number(m.pieces) || "") : "";
-          lines.push(`${code}${comp ? ` (${comp})` : ""}${pcs ? ` | ${pcs}` : ""}`);
-        }
-        setPiecesText(lines.join("\n"));
+          qty: Number(h.qty) || 0, due_date: (h.due_date as string) ?? null, note: (h.note as string) ?? null,
+          image: (d?.product_image as string) ?? null });
+        // แถวชิ้นส่วน: ปล่อยว่างให้เขียนเอง (เจ้าของบอกบล็อกตัดของผ้า "ไม่เกี่ยวกับหน้านี้") — พิมพ์รายการล่วงหน้าได้ที่ ✎ แก้รายการ
         const st = (sj?.data ?? []) as WorkStep[]; setSteps(st);
         const c = (cj?.data ?? []) as string[]; setCols(c); setColsText(c.join("\n"));
         if (st.length === 0 && sp.get("blank") !== "0") setGrid(true);   // ไม่มีขั้นตอน → ตารางติ๊กอัตโนมัติ
@@ -187,7 +182,7 @@ export default function PrintWorkStepsPage() {
           </div>
           <div>
             <div className="flex items-center justify-between mb-1">
-              <span className="text-sm font-medium text-slate-700">ชิ้นส่วน (แถว) <span className="text-[11px] text-slate-400">(บรรทัดละ 1 · เติมจากบล็อกตัดของใบให้แล้ว · ใส่ <code>| จำนวน</code> ต่อท้ายได้)</span></span>
+              <span className="text-sm font-medium text-slate-700">ชิ้นส่วน (แถว) <span className="text-[11px] text-slate-400">(บรรทัดละ 1 · ใส่ <code>| จำนวน</code> ต่อท้ายได้ · เว้นว่าง = พิมพ์ช่องว่างให้เขียนเอง)</span></span>
               <span className="text-[11px] text-slate-400">แก้เฉพาะครั้งนี้ ไม่บันทึก</span>
             </div>
             <textarea value={piecesText} onChange={(e) => setPiecesText(e.target.value)} rows={8} placeholder={"ตัวหน้า | 1\nตัวหลัง | 1\nหูหิ้ว (หนัง) | 2"} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg font-mono" />
