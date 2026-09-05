@@ -45,6 +45,10 @@ const CSS = `
   .foot span { display: inline-block; border-bottom: 1px dotted #94a3b8; min-width: 140px; }
   .hint { font-size: 10px; color: #94a3b8; margin-top: 6px; }
   @media print { .hint { display: none; } .foot { margin-top: 4mm; } }
+  .pg { margin-top: 3px; text-align: right; font-weight: 600; color: #0f172a; }
+  .page { page-break-after: always; break-after: page; }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  @media screen { .page + .page { margin-top: 8mm; padding-top: 6mm; border-top: 2px dashed #cbd5e1; } }
   /* ตารางติ๊ก */
   .grid th.v { height: 78px; vertical-align: bottom; text-align: center; padding: 4px 2px; width: 30px; }
   .grid th.v span { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; white-space: nowrap; font-size: 11px; }
@@ -61,14 +65,14 @@ const CSS = `
   .grid td.tick::before { content: ""; display: inline-block; width: 4.2mm; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; margin-top: 1mm; }
 `;
 
-function head(mo: MoHead, title: string) {
+function head(mo: MoHead, title: string, pageLabel = "") {
   return `<div class="head"><div><h1>${title}</h1><div class="meta">
       <div><b>ใบสั่งผลิต</b> ${esc(mo.mo_no)}</div>
       <div><b>สินค้า</b> <span class="nm" title="${esc(mo.product_name ?? "")}">${esc(mo.product_sku ?? "")} ${esc(mo.product_name ?? "")}</span></div>
       <div><b>จำนวน</b> ${Number(mo.qty || 0).toLocaleString("th-TH")} ชิ้น &nbsp;&nbsp; <b>กำหนดส่ง</b> ${thDate(mo.due_date)}</div>
       ${mo.note ? `<div><b>หมายเหตุ</b> ${esc(mo.note)}</div>` : ""}
     </div></div>
-    <div class="right">${mo.image ? `<img class="photo" src="${esc(mo.image)}" alt="รูปสินค้า" />` : `<div class="photo-empty">ไม่มีรูป</div>`}<div class="box">ผู้ให้ข้อมูล/ผู้ทำ: ______________<br>วันที่: ______ / ______ / ______</div></div></div>`;
+    <div class="right">${mo.image ? `<img class="photo" src="${esc(mo.image)}" alt="รูปสินค้า" />` : `<div class="photo-empty">ไม่มีรูป</div>`}<div class="box">ผู้ให้ข้อมูล/ผู้ทำ: ______________<br>วันที่: ______ / ______ / ______${pageLabel ? `<div class="pg">${pageLabel}</div>` : ""}</div></div></div>`;
 }
 
 /** แบบ 1: รายการขั้นตอนจากสูตร */
@@ -87,18 +91,25 @@ function buildStepsHtml(mo: MoHead, steps: WorkStep[]): string {
 /** แบบ 2: ตารางติ๊ก — แถว = ชิ้นส่วน · คอลัมน์ = ประเภทงาน */
 function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: number, rowHeightMm: number): string {
   const rows = [...pieces, ...Array.from({ length: Math.max(0, rowCount - pieces.length) }, () => ({ label: "", sub: "", qty: "" }))];
-  // ความสูงแถว: 0 = ให้แบ่งเต็มหน้า A4 (ตาราง 196 มม.) · ใส่ค่า = สูงตายตัวต่อแถว (แถวเยอะก็ต่อหน้า 2 ได้)
+  // ความสูงแถว: 0 = ให้แบ่งเต็มหน้า A4 (ตาราง 196 มม.) · ใส่ค่า = สูงตายตัวต่อแถว → แบ่งหน้าเอง (หัวใบซ้ำทุกหน้า + เลขหน้า x/y)
   const sizeCss = rowHeightMm > 0 ? `.grid { height: auto; } .grid td { height: ${rowHeightMm}mm; }` : "";
-  const body = rows.map((p, i) => `<tr><td class="n">${i + 1}</td>
+  const perPage = rowHeightMm > 0 ? Math.max(1, Math.floor(172 / (rowHeightMm + 0.6))) : rows.length;   // พื้นที่แถว ≈ 172 มม./หน้า (หลังหักหัวใบ+หัวตาราง+ท้าย)
+  const chunks: { rows: typeof rows; offset: number }[] = [];
+  for (let i = 0; i < rows.length; i += perPage) chunks.push({ rows: rows.slice(i, i + perPage), offset: i });
+  if (chunks.length === 0) chunks.push({ rows: [], offset: 0 });
+  const rowHtml = (p: Piece, i: number) => `<tr><td class="n">${i + 1}</td>
       <td class="piece">${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</td>
       ${cols.map(() => `<td class="tick"></td>`).join("")}
-      <td class="qty">${esc(p.qty)}</td><td></td></tr>`).join("");
-  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ขั้นตอนการผลิต ${esc(mo.mo_no)}</title><style>${CSS}${sizeCss}</style></head><body>
-    ${head(mo, "▦ ขั้นตอนการผลิต (ติ๊กตามชิ้น)")}
-    <table class="grid"><thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:44px;text-align:center">จำนวน</th><th style="width:16%">หมายเหตุ</th></tr></thead>
-    <tbody>${body}</tbody></table>
+      <td class="qty">${esc(p.qty)}</td><td></td></tr>`;
+  const thead = `<thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:44px;text-align:center">จำนวน</th><th style="width:16%">หมายเหตุ</th></tr></thead>`;
+  const pagesHtml = chunks.map((ch, pi) => `<div class="page">
+    ${head(mo, "▦ ขั้นตอนการผลิต (ติ๊กตามชิ้น)", chunks.length > 1 ? `หน้า ${pi + 1}/${chunks.length}` : "")}
+    <table class="grid">${thead}<tbody>${ch.rows.map((p, i) => rowHtml(p, ch.offset + i)).join("")}</tbody></table>
     <div class="foot"><div>สอบถามจาก: <span></span></div><div>บันทึกโดย: <span></span></div></div>
-    <div class="hint">ติ๊ก ✓ ว่าชิ้นนี้ต้องทำงานประเภทไหนบ้าง · เขียนชื่อชิ้นส่วนลงช่อง (หรือพิมพ์ล่วงหน้าที่ ✎ แก้รายการ) · เสร็จแล้วเอาไปกรอกที่แท็บ 🪜 ขั้นตอนงาน</div></body></html>`;
+    ${pi === chunks.length - 1 ? `<div class="hint">ติ๊ก ✓ ว่าชิ้นนี้ต้องทำงานประเภทไหนบ้าง · เขียนชื่อชิ้นส่วนลงช่อง (หรือพิมพ์ล่วงหน้าที่ ✎ แก้รายการ) · เสร็จแล้วเอาไปกรอกที่แท็บ 🪜 ขั้นตอนงาน</div>` : ""}
+  </div>`).join("");
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ขั้นตอนการผลิต ${esc(mo.mo_no)}</title><style>${CSS}${sizeCss}</style></head><body>
+    ${pagesHtml}</body></html>`;
 }
 
 export default function PrintWorkStepsPage() {
