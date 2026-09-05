@@ -141,6 +141,9 @@ const SIZE_CLASS: Record<ModalSize, string> = {
   xl: "max-w-4xl",
 };
 
+/** คีย์จำ "เปิดป๊อปเต็มจอไหม" ของผู้ใช้เครื่องนี้ — ไม่มีค่า = เต็มจอ (ค่าเริ่มต้นตามเจ้าของสั่ง) */
+const EXPANDED_PREF_KEY = "erp-modal-expanded";
+
 const DRAWER_SIZE: Record<string, string> = {
   sm: "max-w-xs",
   md: "max-w-sm",
@@ -210,7 +213,12 @@ export function ERPModal({
 }: ERPModalProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  // เจ้าของสั่ง (2026-09-04): "ทุก popup เปิด default เป็นเต็มจอ" — จำค่าที่ผู้ใช้กดย่อ/ขยายล่าสุดไว้ (localStorage)
+  // ป๊อปเล็ก (size="sm" = ยืนยัน/ถามสั้น ๆ) ไม่ขยาย เพราะเต็มจอแล้วอ่านยากกว่า
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    if (size === "sm") return false;
+    try { const v = localStorage.getItem(EXPANDED_PREF_KEY); return v == null ? true : v === "1"; } catch { return true; }
+  });
   // ขนาดที่ผู้ใช้ลากเอง (null = ใช้ preset). { w, h } เป็น px
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const resizing = useRef(false);
@@ -368,8 +376,8 @@ export function ERPModal({
               </button>
             )}
             <button
-              onClick={() => setExpanded((v) => !v)}
-              title={expanded ? "ย่อหน้าต่าง" : "ขยายหน้าต่าง"}
+              onClick={() => setExpanded((v) => { const n = !v; try { localStorage.setItem(EXPANDED_PREF_KEY, n ? "1" : "0"); } catch { /* ignore */ } return n; })}
+              title={expanded ? "ย่อหน้าต่าง (จำไว้เป็นค่าเริ่มต้น)" : "ขยายหน้าต่าง (จำไว้เป็นค่าเริ่มต้น)"}
               className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
             >
               {expanded ? (

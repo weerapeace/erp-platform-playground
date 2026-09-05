@@ -18,6 +18,8 @@ import { apiSave } from "@/lib/save-toast";
 import { InlineEdit } from "@/components/inline-edit";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
+import type { WorkStep } from "@/app/api/bom/work-steps/route";
+import { WorkStepsTab } from "./work-steps-tab";
 import type { MoCost, MoCostMaterial, CostScenario, PieceJob } from "@/app/api/mo/[id]/cost/route";
 import type { PurchaseStatusRow } from "@/app/api/mo/purchase-status/route";
 import type { MoIssue } from "@/app/api/mo/issues/route";
@@ -359,7 +361,7 @@ function WorkBoardPageInner() {
   const [clCutRows, setClCutRows] = useState<CutRow[]>([]);
   const [clLoading, setClLoading] = useState(false);
   const [delArmed, setDelArmed] = useState(false);   // ยืนยันลบงานใน popup
-  const [clTab, setClTab] = useState<"recv" | "prep" | "cut" | "piece" | "purch" | "issue" | "hist" | "cost" | "disp">("prep");
+  const [clTab, setClTab] = useState<"recv" | "steps" | "prep" | "cut" | "piece" | "purch" | "issue" | "hist" | "cost" | "disp">("prep");
   const [clCost, setClCost] = useState<MoCost | null>(null);   // ต้นทุน/กำไรของใบ (lazy)
   const [clWO, setClWO] = useState<WorkOrder | null>(null);   // เปิดเช็กลิสต์จากใบจ่ายงาน → มีแท็บ "รับงานคืน"
   const [recvLabor, setRecvLabor] = useState("");             // ค่าแรงผลิตของใบจ่ายงานนี้
@@ -389,6 +391,10 @@ function WorkBoardPageInner() {
   const [estSaveBom, setEstSaveBom] = useState(false);        // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง)
   const [estAllParent, setEstAllParent] = useState(false);    // ใส่ค่าแรง/ชิ้น ให้ทุกใบของรุ่นเดียวกัน (Parent SKU)
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
+  // 📋 ขั้นตอนงาน (เก็บที่สูตร BOM) — null = ยังไม่โหลด · โหลดตอนเปิดแท็บ
+  const [clSteps, setClSteps] = useState<WorkStep[] | null>(null);
+  const [clStepsBom, setClStepsBom] = useState<string | null>(null);
+  const [stepsPrintAsk, setStepsPrintAsk] = useState(false);   // ถามว่าจะพิมพ์ขั้นตอน หรือแม่แบบเปล่า
   const [clCutGroup, setClCutGroup] = useState<"none" | "type" | "material">("none");   // จัดกลุ่มหน้าตัด
   const [clSummary, setClSummary] = useState<MoMatSummary[]>([]);   // ตารางวัตถุดิบกลาง (สรุป)
   const [clMaterials, setClMaterials] = useState<MoMatPreview[]>([]); // ตารางวัตถุดิบกลาง (รายบล็อก)
@@ -888,6 +894,7 @@ function WorkBoardPageInner() {
     setDelArmed(false); setClTab(clWO ? "recv" : "prep");
     setClPurch(null); setClIssues(null); setClHist(null); setClCost(null); setIssType(""); setIssSev("medium"); setIssQty("");
     setQtyEditing(false); setEstEditing(false);   // เปิดป๊อปใหม่ = จำนวน/ค่าแรง กลับเป็นอ่านอย่างเดียวเสมอ
+    setClSteps(null); setClStepsBom(null);   // เปลี่ยนใบ → โหลดขั้นตอนใหม่
     if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); setMoQty(""); setMoDue(""); setMoDueInt(""); return; }
     setMoQty(String(checklistMO.qty ?? ""));   // ช่องแก้จำนวนสั่งผลิตในป๊อป
     setMoDue((checklistMO.due_date ?? "").slice(0, 10));
@@ -1889,11 +1896,32 @@ function WorkBoardPageInner() {
       <MoCreateModal open={moCreateOpen} onClose={() => setMoCreateOpen(false)} onCreated={() => void load(true)} />
 
       {/* เช็กลิสต์วัตถุดิบ เตรียม/ตัด (Phase 2 — จาก BOM) */}
+      {/* ถามแบบพิมพ์ขั้นตอนงาน: ขั้นตอนจากสูตร หรือแม่แบบเปล่าให้เขียนเอง */}
+      <ERPModal open={stepsPrintAsk} onClose={() => setStepsPrintAsk(false)} size="sm" title="🪜 พิมพ์ขั้นตอนงาน"
+        footer={<button onClick={() => setStepsPrintAsk(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>}>
+        <div className="grid grid-cols-1 gap-2">
+          <button type="button" onClick={() => { if (checklistMO) window.open(`/print/work-steps/${checklistMO.id}`, "_blank"); setStepsPrintAsk(false); }}
+            className="text-left rounded-lg border border-blue-200 bg-blue-50/40 hover:bg-blue-50 px-4 py-3">
+            <div className="text-sm font-semibold text-slate-800">📋 พิมพ์ขั้นตอน ({clSteps?.length ?? 0} ขั้น)</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">ขั้นตอนจากสูตรของสินค้า + ช่องผู้ทำ/วันที่/✓ ให้ช่างติ๊ก</div>
+          </button>
+          <button type="button" onClick={() => { if (checklistMO) window.open(`/print/work-steps/${checklistMO.id}?blank=1`, "_blank"); setStepsPrintAsk(false); }}
+            className="text-left rounded-lg border border-slate-200 hover:bg-slate-50 px-4 py-3">
+            <div className="text-sm font-semibold text-slate-800">▭ พิมพ์แม่แบบเปล่า</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">ตาราง 15 บรรทัดว่าง ให้เขียนขั้นตอนเองด้วยมือ</div>
+          </button>
+        </div>
+      </ERPModal>
       <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="xl" storageKey="wb-checklist" title={clWO ? `🔄 ใบจ่ายงาน · ${clWO.wo_no}` : `📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
         footer={<>
           {checklistMO && !clWO && canEdit && (delArmed
             ? <span className="mr-auto flex gap-1"><button onClick={() => deleteMO(checklistMO)} className="h-9 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยันลบงานนี้</button><button onClick={() => setDelArmed(false)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">ยกเลิก</button></span>
             : <button onClick={() => setDelArmed(true)} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 mr-auto">🗑 ลบงาน</button>)}
+          {checklistMO && (
+            <button type="button" title="พิมพ์รายการขั้นตอนงานให้ช่าง — ถ้าสินค้ายังไม่มีขั้นตอนในสูตร จะพิมพ์แม่แบบเปล่าให้เขียนเอง"
+              onClick={() => { if (clSteps && clSteps.length > 0) setStepsPrintAsk(true); else window.open(`/print/work-steps/${checklistMO.id}${clSteps ? "?blank=1" : ""}`, "_blank"); }}
+              className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🪜 พิมพ์ขั้นตอนงาน</button>
+          )}
           {checklistMO && <a href={`/print/work-order/${checklistMO.id}`} target="_blank" rel="noreferrer" className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🖨 พิมพ์ใบสั่งงาน</a>}
           <button onClick={closeChecklist} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button>
         </>}>
@@ -2057,6 +2085,7 @@ function WorkBoardPageInner() {
                   <div className="space-y-2">
                     <div className="flex flex-wrap gap-1 text-[12px]">
                       {clWO && tabBtn("recv", "📤 ส่งงาน")}
+                      {tabBtn("steps", `🪜 ขั้นตอนงาน${clSteps ? ` ${clSteps.length}` : ""}`)}
                       {tabBtn("prep", `📋 วัตถุดิบ · เตรียม ${prepDone}/${prepTotal} · ตัด ${cutDone}/${cutTotal}`)}
                       {tabBtn("piece", `🧵 งานเหมา ${clPieceRows.filter((r) => r.selected_id).length}/${clPieceRows.length}`)}
                       {tabBtn("disp", `🧰 จ่ายงาน ${board.workOrders.filter((w) => w.mo_no === checklistMO.mo_no && w.status !== "cancelled").length}`)}
@@ -2174,6 +2203,9 @@ function WorkBoardPageInner() {
                         )}
                         <p className="text-[11px] text-slate-400">แท็บอื่นด้านบนดูข้อมูลใบสั่งผลิตเดียวกัน (เตรียม/ตัด/งานเหมา/ของซื้อ/ปัญหา/ประวัติ)</p>
                       </div>
+                    ) : clTab === "steps" ? (
+                      <WorkStepsTab moId={checklistMO.id} bomCode={clStepsBom ?? checklistMO.bom_code ?? null} pieceRows={clPieceRows} canEdit={canEdit}
+                        steps={clSteps} onSteps={(s, b) => { setClSteps(s); if (b) setClStepsBom(b); }} />
                     ) : (clTab === "prep" || clTab === "cut" || clTab === "piece") && clLoading ? (
                       <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
                     ) : clTab === "prep" ? (
