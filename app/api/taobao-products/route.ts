@@ -4,9 +4,9 @@
  * ของที่เครื่องมือ taobao-catalog ดูดมา (ชื่อจีน/ชื่อไทย/ราคา ¥/ลิงก์/รูป/ตัวเลือก)
  * พักไว้ที่ตาราง taobao_products — ยังไม่เข้า skus_v2 จนกว่าจะกด "จับคู่และเพิ่ม"
  *
- * GET    ?status=new|matched|rejected|all &search= &limit= &offset=  → รายการ + จำนวนแต่ละสถานะ
+ * GET    ?status=new|matched|rejected|all|wishlist &search= &limit= &offset=  → รายการ + จำนวนแต่ละสถานะ (wishlist = 💛 อยากซื้อให้ด้วย ไม่สนสถานะ)
  * GET    ?matched_sku_id=<uuid>                                       → รายการที่ผูกกับ SKU นั้น (แถบ "มาจาก Taobao" ในหน้า SKU)
- * PATCH  {id, status?, note?, translated_name?, price_rmb?, matched_sku_id?, matched_parent_sku_id?, supplier_item_id?, use_image_for_sku?}
+ * PATCH  {id, status?, note?, translated_name?, price_rmb?, matched_sku_id?, matched_parent_sku_id?, supplier_item_id?, use_image_for_sku?, wishlist?, wishlist_group?}
  * DELETE ?id=...   (ลบจริง — เป็นแค่กล่องพัก ไม่ใช่ข้อมูลหลัก)
  *
  * ของกลาง: guardApi (products.view/edit) · supabaseAdmin · writeAudit
@@ -38,13 +38,15 @@ export type TaobaoCard = {
   matched_label: string | null;   // "รหัส · ชื่อ" ของ SKU/Parent ที่จับคู่ไว้ (ไว้โชว์บนการ์ด)
   supplier_item_id: string | null;
   family_tag_ids: string[];                       // แท็กกลาง (product_families) ที่ติดไว้กับรายการนี้
+  wishlist: boolean;                              // 💛 อยากซื้อให้ด้วย (แยกจาก status — ติดได้ทุกสถานะ)
+  wishlist_group: string | null;                  // ชื่อกลุ่มใน wishlist (พิมพ์เอง · null = ยังไม่จัดกลุ่ม)
   tags: { id: string; name: string }[];           // ชื่อแท็ก — ไว้โชว์ chips บนการ์ด
   created_at: string | null;
 };
 
 const SELECT =
   "id, original_name, translated_name, price_text, price_rmb, taobao_url, image_url, variants, note, status, " +
-  "matched_sku_id, matched_parent_sku_id, supplier_item_id, family_tag_ids, created_at";
+  "matched_sku_id, matched_parent_sku_id, supplier_item_id, family_tag_ids, wishlist, wishlist_group, wishlist_at, created_at";
 
 const STATUSES = new Set(["new", "matched", "rejected"]);
 
@@ -68,6 +70,8 @@ function shape(r: Record<string, unknown>, labels: Map<string, string>, tagNames
     matched_label:   (skuId && labels.get(skuId)) || (parentId && labels.get(parentId)) || null,
     supplier_item_id: r.supplier_item_id ? String(r.supplier_item_id) : null,
     family_tag_ids:  tagIds,
+    wishlist:        r.wishlist === true,
+    wishlist_group:  (r.wishlist_group as string) || null,
     tags:            tagIds.map((id) => ({ id, name: tagNames?.get(id) ?? "แท็ก" })),
     created_at:      (r.created_at as string) ?? null,
   };
@@ -136,6 +140,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (bySku)    q = q.eq("matched_sku_id", bySku);
   if (byParent) q = q.eq("matched_parent_sku_id", byParent);
   if (STATUSES.has(status) && !bySku && !byParent) q = q.eq("status", status);
+  const wishMode = status === "wishlist" && !bySku && !byParent;   // 💛 แท็บอยากซื้อให้ด้วย — ทุกสถานะที่ติดธง
+  if (wishMode) q = q.eq("wishlist", true);
   if (familyIds.length > 0) q = q.or(familyIds.map((id) => `family_tag_ids.cs.["${id}"]`).join(","));
   if (search) {
     const s = search.replace(/[,()%*]/g, " ").trim();
@@ -143,8 +149,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const [listRes, countRes] = await Promise.all([
-    q.order("created_at", { ascending: false }).range(offset, offset + limit - 1),
-    admin.from("taobao_products").select("status"),   // นับแยกสถานะ (ตารางพัก ข้อมูลไม่เยอะ)
+    (wishMode ? q.order("wishlist_at", { ascending: false, nullsFirst: false }) : q.order("created_at", { ascending: false })).range(offset, offset + limit - 1),
+    admin.from("taobao_products").select("status, wishlist"),   // นับแยกสถานะ + wishlist (ตารางพัก ข้อมูลไม่เยอะ)
   ]);
   if (listRes.error) return NextResponse.json({ data: [], error: listRes.error.message }, { status: 500 });
 
@@ -175,9 +181,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     for (const t of (data ?? []) as Record<string, unknown>[]) tagNames.set(String(t.id), String(t.name ?? "แท็ก"));
   }
 
-  const counts = { new: 0, matched: 0, rejected: 0 };
-  for (const r of (countRes.data ?? []) as { status: string }[]) {
+  const counts = { new: 0, matched: 0, rejected: 0, wishlist: 0 };
+  for (const r of (countRes.data ?? []) as { status: string; wishlist: boolean | null }[]) {
     if (r.status === "new" || r.status === "matched" || r.status === "rejected") counts[r.status]++;
+    if (r.wishlist === true) counts.wishlist++;
   }
 
   return NextResponse.json({
@@ -217,6 +224,14 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("supplier_item_id" in b)      patch.supplier_item_id      = typeof b.supplier_item_id === "string" ? b.supplier_item_id : null;
   // แท็ก: ส่ง family_tag_ids = ตั้งใหม่ทั้งชุด · add_tag_ids = เพิ่มเข้าของเดิม (ใช้ตอนติดแท็กหลายรายการพร้อมกัน)
   if (Array.isArray(b.family_tag_ids)) patch.family_tag_ids = [...new Set(b.family_tag_ids.map(String))];
+  // 💛 wishlist: ติด/ปลดธง (จำว่าใครติดเมื่อไหร่) · wishlist_group = ชื่อกลุ่ม (ว่าง = เอาออกจากกลุ่ม)
+  if (typeof b.wishlist === "boolean") {
+    patch.wishlist = b.wishlist;
+    patch.wishlist_at = b.wishlist ? new Date().toISOString() : null;
+    patch.wishlist_by = b.wishlist ? (user?.email ?? null) : null;
+    if (!b.wishlist) patch.wishlist_group = null;
+  }
+  if ("wishlist_group" in b) patch.wishlist_group = typeof b.wishlist_group === "string" && b.wishlist_group.trim() ? b.wishlist_group.trim() : null;
 
   const admin = supabaseAdmin();
 

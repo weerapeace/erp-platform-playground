@@ -47,9 +47,11 @@ type Card = {
   supplier_item_id: string | null;
   family_tag_ids: string[];
   tags: { id: string; name: string }[];
+  wishlist: boolean;                 // 💛 อยากซื้อให้ด้วย
+  wishlist_group: string | null;     // ชื่อกลุ่มใน wishlist (null = ยังไม่จัดกลุ่ม)
   created_at: string | null;
 };
-type Counts = { new: number; matched: number; rejected: number };
+type Counts = { new: number; matched: number; rejected: number; wishlist: number };
 const EMPTY_FILTER: TagFilterValue = { tagIds: [], none: false };
 
 const PAGE = 60;
@@ -57,8 +59,10 @@ const STATUS_TABS = [
   { key: "new",      label: "🆕 ยังไม่จับคู่" },
   { key: "matched",  label: "✅ จับคู่แล้ว" },
   { key: "rejected", label: "🚫 ตีตก" },
+  { key: "wishlist", label: "💛 อยากซื้อให้ด้วย" },   // ไม่ใช่สถานะ — ธงแยก ติดได้ทุกสถานะ
 ] as const;
 type StatusKey = (typeof STATUS_TABS)[number]["key"];
+const NO_GROUP = "ยังไม่จัดกลุ่ม";
 
 const fmtRmb = (n: number | null) => (n == null ? null : `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`);
 
@@ -76,7 +80,9 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
   const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);   // กรองแท็ก (ของกลางตัวเดียวกับหน้า SKU)
   const [bulkTag, setBulkTag] = useState<TagFilterValue>(EMPTY_FILTER);       // ติดแท็กให้รายการที่เลือก
   const [cards, setCards] = useState<Card[]>([]);
-  const [counts, setCounts] = useState<Counts>({ new: 0, matched: 0, rejected: 0 });
+  const [counts, setCounts] = useState<Counts>({ new: 0, matched: 0, rejected: 0, wishlist: 0 });
+  const [wishView, setWishView] = useState<"list" | "group">("list");   // แท็บ 💛: ดูเป็นรายการ / จัดตามกลุ่ม
+  const [groupTarget, setGroupTarget] = useState<string[] | null>(null); // ป๊อปตั้งกลุ่ม (ids ที่จะจัด)
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -98,7 +104,7 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
   const load = useCallback(async (offset = 0) => {
     offset === 0 ? setLoading(true) : setLoadingMore(true);
     try {
-      const p = new URLSearchParams({ status, limit: String(PAGE), offset: String(offset) });
+      const p = new URLSearchParams({ status, limit: String(status === "wishlist" ? 200 : PAGE), offset: String(offset) });
       if (search.trim()) p.set("search", search.trim());
       if (tagFilter.tagIds.length > 0) p.set("family_ids", tagFilter.tagIds.join(","));
       const j = await apiFetch(`/api/taobao-products?${p}`).then((r) => r.json());
@@ -126,7 +132,7 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
   const allSelected = cards.length > 0 && cards.every((c) => sel.has(c.id));
 
   // เปลี่ยนสถานะ (ตีตก / กู้คืน) — รองรับหลายรายการ
-  const patchStatus = async (ids: string[], next: StatusKey) => {
+  const patchStatus = async (ids: string[], next: "new" | "rejected") => {
     if (ids.length === 0) return;
     try {
       const res = await apiFetch("/api/taobao-products", {
@@ -138,6 +144,29 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
       void load(0);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
   };
+
+  // 💛 ติด/ปลด "อยากซื้อให้ด้วย" — หลายรายการได้
+  const setWishlist = async (ids: string[], on: boolean) => {
+    if (ids.length === 0) return;
+    try {
+      const res = await apiFetch("/api/taobao-products", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, wishlist: on }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(on ? `ใส่ "อยากซื้อให้ด้วย" ${ids.length} รายการแล้ว` : `เอาออกจาก "อยากซื้อให้ด้วย" ${ids.length} รายการแล้ว`);
+      void load(0);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+  };
+  // 📁 ตั้งกลุ่มใน wishlist (ว่าง = เอาออกจากกลุ่ม)
+  const setGroup = async (ids: string[], name: string | null) => {
+    if (ids.length === 0) return;
+    try {
+      const res = await apiFetch("/api/taobao-products", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, wishlist: true, wishlist_group: name }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(name ? `จัดเข้ากลุ่ม "${name}" ${ids.length} รายการแล้ว` : `เอาออกจากกลุ่ม ${ids.length} รายการแล้ว`);
+      setGroupTarget(null); setSel(new Set());
+      void load(0);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+  };
+  const groupNames = [...new Set(cards.map((c) => c.wishlist_group).filter((g): g is string => !!g))].sort((a, b) => a.localeCompare(b, "th"));
 
   // ติดแท็กให้รายการที่เลือก (เพิ่มเข้าของเดิม ไม่ทับ)
   const applyBulkTag = async () => {
@@ -188,6 +217,12 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
           {search && <button onClick={() => setSearch("")} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>}
         </div>
         <TagGroupFilter value={tagFilter} onChange={setTagFilter} label="กรองแท็ก" showNone={false} />
+        {status === "wishlist" && (
+          <div className="inline-flex rounded-lg border border-amber-200 overflow-hidden" title="ดูเป็นรายการ หรือจัดตามกลุ่ม">
+            <button onClick={() => setWishView("list")} className={`h-9 px-3 text-sm ${wishView === "list" ? "bg-amber-50 text-amber-800 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>▦ รายการ</button>
+            <button onClick={() => setWishView("group")} className={`h-9 px-3 text-sm border-l border-amber-200 ${wishView === "group" ? "bg-amber-50 text-amber-800 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>📁 กลุ่ม{groupNames.length > 0 ? ` (${groupNames.length})` : ""}</button>
+          </div>
+        )}
       </div>
 
       {/* แถบเลือกหลายรายการ */}
@@ -201,11 +236,22 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
               ติด {bulkTag.tagIds.length} แท็ก
             </button>
           )}
-          {status !== "rejected" && (
+          {status === "wishlist" ? (
+            <>
+              <button onClick={() => setGroupTarget([...sel])}
+                className="h-8 px-3 text-[12px] bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium">📁 จัดกลุ่ม</button>
+              <button onClick={() => setWishlist([...sel], false)}
+                className="h-8 px-3 text-[12px] bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">💔 เอาออกจากอยากซื้อ</button>
+            </>
+          ) : (
+            <button onClick={() => setWishlist([...sel], true)}
+              className="h-8 px-3 text-[12px] bg-white border border-amber-300 rounded-lg text-amber-700 hover:bg-amber-50">💛 อยากซื้อให้ด้วย</button>
+          )}
+          {status !== "rejected" && status !== "wishlist" && (
             <button onClick={() => patchStatus([...sel], "rejected")}
               className="h-8 px-3 text-[12px] bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🚫 ตีตก</button>
           )}
-          {status !== "new" && (
+          {status !== "new" && status !== "wishlist" && (
             <button onClick={() => patchStatus([...sel], "new")}
               className="h-8 px-3 text-[12px] bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">↩️ กู้คืน</button>
           )}
@@ -246,8 +292,8 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
         <EmptyBox status={status} hasSearch={!!search.trim()} />
       ) : (
         <>
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(210px,1fr))]">
-            {cards.map((c) => (
+          {(() => {
+            const renderCard = (c: Card) => (
               <TaobaoCardView key={c.id} card={c} rate={rate} selected={sel.has(c.id)}
                 onToggle={() => toggleSel(c.id)}
                 onOpen={() => (sel.size > 0 ? toggleSel(c.id) : setOpenId(c.id))}
@@ -255,11 +301,38 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
                 onCreate={() => setWizardRow(c)}
                 onReject={() => patchStatus([c.id], "rejected")}
                 onRestore={() => patchStatus([c.id], "new")}
+                onWish={() => setWishlist([c.id], !c.wishlist)}
+                onGroup={status === "wishlist" ? () => setGroupTarget([c.id]) : undefined}
                 onTagClick={(id) => setTagFilter({ tagIds: [id], none: false })}
                 onOpenSku={c.matched_sku_id ? () => setSkuDrawerId(c.matched_sku_id) : undefined}
                 activeTagIds={tagFilter.tagIds} />
-            ))}
-          </div>
+            );
+            if (status === "wishlist" && wishView === "group") {
+              // 📁 มุมมองกลุ่ม: หัวกลุ่ม (จำนวน + รวม ¥) + การ์ดข้างใน · "ยังไม่จัดกลุ่ม" ไว้ท้ายสุด
+              const groups = new Map<string, Card[]>();
+              for (const c of cards) { const k = c.wishlist_group || NO_GROUP; groups.set(k, [...(groups.get(k) ?? []), c]); }
+              const keys = [...groups.keys()].filter((k) => k !== NO_GROUP).sort((a, b) => a.localeCompare(b, "th"));
+              if (groups.has(NO_GROUP)) keys.push(NO_GROUP);
+              return keys.map((k) => {
+                const list = groups.get(k) ?? [];
+                const sum = list.reduce((a, c) => a + (c.price_rmb ?? 0), 0);
+                const allSel = list.every((c) => sel.has(c.id));
+                return (
+                  <section key={k} className="mb-5">
+                    <div className={`flex items-center gap-2 mb-2 px-3 h-10 rounded-lg border ${k === NO_GROUP ? "bg-slate-50 border-slate-200" : "bg-amber-50 border-amber-200"}`}>
+                      <span className="text-sm font-semibold text-slate-800">{k === NO_GROUP ? "🗂 ยังไม่จัดกลุ่ม" : `📁 ${k}`}</span>
+                      <span className="text-[11px] text-slate-500">{list.length} รายการ · รวม {fmtRmb(sum)} ≈ ฿{(sum * rate).toLocaleString("th-TH", { maximumFractionDigits: 0 })}</span>
+                      <button onClick={() => setSel((p) => { const n = new Set(p); list.forEach((c) => allSel ? n.delete(c.id) : n.add(c.id)); return n; })}
+                        className="ml-auto h-7 px-2 text-[11px] rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">{allSel ? "☑ เลือกทั้งกลุ่ม" : "☐ เลือกทั้งกลุ่ม"}</button>
+                      {k !== NO_GROUP && <button onClick={() => setGroupTarget(list.map((c) => c.id))} className="h-7 px-2 text-[11px] rounded-lg border border-amber-300 bg-white text-amber-700 hover:bg-amber-100" title="เปลี่ยนชื่อกลุ่ม / ย้ายทั้งกลุ่ม">✏️ เปลี่ยนชื่อ</button>}
+                    </div>
+                    <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(210px,1fr))]">{list.map(renderCard)}</div>
+                  </section>
+                );
+              });
+            }
+            return <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(210px,1fr))]">{cards.map(renderCard)}</div>;
+          })()}
           {cards.length < total && (
             <div className="text-center mt-4">
               <button onClick={() => void load(cards.length)} disabled={loadingMore}
@@ -269,6 +342,13 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
             </div>
           )}
         </>
+      )}
+
+      {/* 📁 ป๊อปตั้งกลุ่มใน wishlist */}
+      {groupTarget && (
+        <GroupModal ids={groupTarget} existing={groupNames}
+          current={groupTarget.length === 1 ? (cards.find((c) => c.id === groupTarget[0])?.wishlist_group ?? null) : null}
+          onClose={() => setGroupTarget(null)} onSave={(name) => setGroup(groupTarget, name)} />
       )}
 
       {/* drawer รายละเอียด — กดที่การ์ด */}
@@ -330,9 +410,13 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
 }
 
 // ── การ์ด 1 ใบ ──
-function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCreate, onReject, onRestore, onTagClick, onOpenSku, activeTagIds = [] }: {
+function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCreate, onReject, onRestore, onWish, onGroup, onTagClick, onOpenSku, activeTagIds = [] }: {
   card: Card; rate: number; selected: boolean;
   onToggle: () => void; onOpen: () => void; onMatch: () => void; onCreate: () => void; onReject: () => void; onRestore: () => void;
+  /** 💛 ติด/ปลด "อยากซื้อให้ด้วย" */
+  onWish: () => void;
+  /** 📁 ตั้งกลุ่ม (มีเฉพาะในแท็บ wishlist) */
+  onGroup?: () => void;
   /** กดแท็กบนการ์ด = กรองให้เหลือเฉพาะแท็กนั้น */
   onTagClick?: (tagId: string) => void;
   /** จับคู่แล้ว → กดชื่อ SKU เพื่อเปิดจอสินค้าตัวนั้น */
@@ -354,6 +438,11 @@ function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCre
           title="เลือก">✓</button>
         {card.status === "matched" && <span className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">จับคู่แล้ว</span>}
         {card.status === "rejected" && <span className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">ตีตก</span>}
+        {/* 💛 อยากซื้อให้ด้วย — กดที่หัวใจได้เลย (ไม่เปิดการ์ด) */}
+        <button onClick={(e) => { e.stopPropagation(); onWish(); }} title={card.wishlist ? "เอาออกจาก “อยากซื้อให้ด้วย”" : "อยากซื้อให้ด้วย (ใส่ wishlist)"}
+          className={`absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full border text-[14px] leading-none flex items-center justify-center shadow-sm ${card.wishlist ? "bg-amber-400 border-amber-400 text-white" : "bg-white/90 border-slate-200 text-slate-400 hover:text-amber-500 hover:border-amber-300"}`}>
+          {card.wishlist ? "💛" : "🤍"}
+        </button>
       </div>
       </HoverPreview>
 
@@ -400,6 +489,13 @@ function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCre
           </div>
         )}
 
+        {onGroup && (
+          // 📁 ชิปกลุ่ม (เฉพาะแท็บ wishlist) — กดเพื่อตั้ง/ย้ายกลุ่ม
+          <button onClick={(e) => { e.stopPropagation(); onGroup(); }} title="ตั้งกลุ่ม / ย้ายกลุ่ม"
+            className={`text-[10px] px-1.5 py-0.5 rounded border self-start max-w-full truncate mt-0.5 ${card.wishlist_group ? "bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100" : "bg-white border-dashed border-slate-300 text-slate-400 hover:text-amber-700 hover:border-amber-300"}`}>
+            📁 {card.wishlist_group ?? "จัดกลุ่ม…"}
+          </button>
+        )}
         {card.matched_label && (
           onOpenSku
             ? <button onClick={(e) => { e.stopPropagation(); onOpenSku(); }} title={`เปิดหน้า SKU — ${card.matched_label}`}
@@ -626,6 +722,10 @@ function TaobaoDrawer({ card, rate, hasPrev, hasNext, onPrev, onNext, onClose, o
             <span className={`text-[11px] px-2 py-1 rounded ${card.status === "matched" ? "bg-emerald-100 text-emerald-700" : card.status === "rejected" ? "bg-slate-200 text-slate-600" : "bg-blue-100 text-blue-700"}`}>
               {card.status === "matched" ? "✅ จับคู่แล้ว" : card.status === "rejected" ? "🚫 ตีตก" : "🆕 ยังไม่จับคู่"}
             </span>
+            <button onClick={() => patch({ wishlist: !card.wishlist }, card.wishlist ? "เอาออกจาก “อยากซื้อให้ด้วย” แล้ว" : "ใส่ “อยากซื้อให้ด้วย” แล้ว")} disabled={saving}
+              className={`text-[11px] px-2 py-1 rounded border ${card.wishlist ? "bg-amber-400 border-amber-400 text-white" : "bg-white border-amber-300 text-amber-700 hover:bg-amber-50"}`}>
+              {card.wishlist ? `💛 อยากซื้อให้ด้วย${card.wishlist_group ? ` · 📁 ${card.wishlist_group}` : ""}` : "🤍 อยากซื้อให้ด้วย"}
+            </button>
             {card.matched_label && (
               onOpenSku
                 ? <button onClick={onOpenSku} title="เปิดหน้าสินค้า (SKU) ที่จับคู่ไว้"
@@ -751,5 +851,39 @@ function EmptyBox({ status, hasSearch }: { status: StatusKey; hasSearch: boolean
       <p className="text-slate-400 text-[13px] mt-1">เปิดเครื่องมือ taobao-catalog บนเครื่อง → วิเคราะห์รูป → กด “📤 ส่งเข้า ERP” แล้วรายการจะมาโผล่ที่นี่</p>
     </div>
   );
+  if (status === "wishlist") return (
+    <div className="text-center py-16">
+      <p className="text-4xl mb-2">💛</p>
+      <p className="text-slate-500 text-sm font-medium">ยังไม่มีรายการ “อยากซื้อให้ด้วย”</p>
+      <p className="text-slate-400 text-[13px] mt-1">กดหัวใจ 🤍 มุมขวาล่างของรูปในแท็บอื่น (หรือเลือกหลายใบแล้วกด 💛) รายการจะมารวมที่นี่ และจัดกลุ่มได้</p>
+    </div>
+  );
   return <div className="text-center py-16 text-slate-400 text-sm">ยังไม่มีรายการในสถานะนี้</div>;
+}
+
+// ── ป๊อป "ตั้งกลุ่ม" ใน wishlist — พิมพ์ชื่อใหม่ หรือเลือกกลุ่มที่มีอยู่ ──
+function GroupModal({ ids, existing, current, onClose, onSave }: { ids: string[]; existing: string[]; current: string | null; onClose: () => void; onSave: (name: string | null) => void }) {
+  const [name, setName] = useState(current ?? "");
+  return (
+    <ERPModal open onClose={onClose} title={`📁 จัดกลุ่ม (${ids.length} รายการ)`} size="sm"
+      footer={<div className="flex items-center gap-2">
+        {current && <button onClick={() => onSave(null)} className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">เอาออกจากกลุ่ม</button>}
+        <span className="flex-1" />
+        <button onClick={onClose} className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={() => onSave(name.trim() || null)} disabled={!name.trim()} className="h-9 px-4 text-sm rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">บันทึก</button>
+      </div>}>
+      <label className="block text-sm">
+        <span className="text-slate-600">ชื่อกลุ่ม</span>
+        <input autoFocus list="wish-groups" value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น ของตกแต่งห้อง / รอบสั่งซื้อ ก.ย."
+          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) onSave(name.trim()); }}
+          className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200" />
+        <datalist id="wish-groups">{existing.map((g) => <option key={g} value={g} />)}</datalist>
+      </label>
+      {existing.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {existing.map((g) => <button key={g} onClick={() => setName(g)} className={`text-[11px] px-2 py-0.5 rounded-full border ${name === g ? "bg-amber-400 border-amber-400 text-white" : "bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100"}`}>📁 {g}</button>)}
+        </div>
+      )}
+    </ERPModal>
+  );
 }
