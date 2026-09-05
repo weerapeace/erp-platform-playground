@@ -18,7 +18,7 @@ import type { WorkStep } from "@/app/api/bom/work-steps/route";
 type MoHead = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; due_date: string | null; note: string | null; image: string | null };
 type Piece = { label: string; sub: string; qty: string };
 
-const MIN_ROWS = 12;
+const MIN_ROWS = 20;   // ตารางติ๊ก: 20 แถว × 9.2 มม. ≈ เต็มหน้า A4 พอดี (เจ้าของขอ "ทำให้เต็ม A4")
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
 const thDate = (s: string | null) => (s ? new Date(s.slice(0, 10) + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "—");
 
@@ -46,12 +46,13 @@ const CSS = `
   /* ตารางติ๊ก */
   .grid th.v { height: 78px; vertical-align: bottom; text-align: center; padding: 4px 2px; width: 30px; }
   .grid th.v span { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; white-space: nowrap; font-size: 11px; }
-  .grid td { height: 30px; }
+  .grid td { height: 9.2mm; }   /* หน่วย มม. ให้เต็ม A4 เท่ากันทั้งพรีวิว/พิมพ์ */
+  .grid tbody tr { page-break-inside: avoid; }
   .grid td.piece { width: 34%; }
   .grid td.piece small { color: #64748b; font-size: 10px; display: block; }
   .grid td.qty { width: 44px; text-align: center; }
   .grid td.tick { text-align: center; }
-  .grid td.tick::before { content: ""; display: inline-block; width: 13px; height: 13px; border: 1.5px solid #334155; border-radius: 2px; }
+  .grid td.tick::before { content: ""; display: inline-block; width: 4.2mm; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; margin-top: 1mm; }
 `;
 
 function head(mo: MoHead, title: string) {
