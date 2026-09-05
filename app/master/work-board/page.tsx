@@ -1907,8 +1907,8 @@ function WorkBoardPageInner() {
           </button>
           <button type="button" onClick={() => { if (checklistMO) window.open(`/print/work-steps/${checklistMO.id}?blank=1`, "_blank"); setStepsPrintAsk(false); }}
             className="text-left rounded-lg border border-slate-200 hover:bg-slate-50 px-4 py-3">
-            <div className="text-sm font-semibold text-slate-800">▭ พิมพ์แม่แบบเปล่า</div>
-            <div className="text-[11px] text-slate-500 mt-0.5">ตาราง 15 บรรทัดว่าง ให้เขียนขั้นตอนเองด้วยมือ</div>
+            <div className="text-sm font-semibold text-slate-800">▦ ตารางติ๊ก (ชิ้นส่วน × ประเภทงาน)</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">แถว = ชิ้นส่วน (เติมจากบล็อกตัดให้) · คอลัมน์ = ทับ/เย็บตรง/เย็บโค้ง/ทากาว… เอาไปถามช่างแล้วติ๊ก</div>
           </button>
         </div>
       </ERPModal>
@@ -1918,7 +1918,7 @@ function WorkBoardPageInner() {
             ? <span className="mr-auto flex gap-1"><button onClick={() => deleteMO(checklistMO)} className="h-9 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยันลบงานนี้</button><button onClick={() => setDelArmed(false)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">ยกเลิก</button></span>
             : <button onClick={() => setDelArmed(true)} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 mr-auto">🗑 ลบงาน</button>)}
           {checklistMO && (
-            <button type="button" title="พิมพ์รายการขั้นตอนงานให้ช่าง — ถ้าสินค้ายังไม่มีขั้นตอนในสูตร จะพิมพ์แม่แบบเปล่าให้เขียนเอง"
+            <button type="button" title="พิมพ์รายการขั้นตอนงานให้ช่าง — ถ้าสินค้ายังไม่มีขั้นตอนในสูตร จะพิมพ์ตารางติ๊ก (ชิ้นส่วน × ประเภทงาน) ให้เอาไปถามช่าง"
               onClick={() => { if (clSteps && clSteps.length > 0) setStepsPrintAsk(true); else window.open(`/print/work-steps/${checklistMO.id}${clSteps ? "?blank=1" : ""}`, "_blank"); }}
               className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🪜 พิมพ์ขั้นตอนงาน</button>
           )}

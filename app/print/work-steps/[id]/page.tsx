@@ -1,33 +1,29 @@
 "use client";
 
 /**
- * 🖨 พิมพ์ "รายการขั้นตอนงาน" ของใบสั่งผลิต — /print/work-steps/<mo_id>?blank=1
- *   • มีขั้นตอนในสูตร → พิมพ์ขั้นตอนเรียงลำดับ + ช่องผู้ทำ/วันที่/✓/หมายเหตุ ให้ช่างติ๊ก
- *   • ไม่มี (หรือ ?blank=1) → พิมพ์แม่แบบเปล่า 15 บรรทัด ให้เขียนขั้นตอนเองด้วยมือ
- *   สลับสองแบบได้จากแถบบน · ใช้ PrintFrame + printReportFrameOrWindow ของกลาง (เหมือนใบสั่งงาน)
+ * 🖨 พิมพ์ "ขั้นตอนงาน" ของใบสั่งผลิต — /print/work-steps/<mo_id>?blank=1
+ *   • มีขั้นตอนในสูตร → "📋 รายการขั้นตอน" เรียงลำดับ + ช่องผู้ทำ/วันที่/✓
+ *   • ไม่มี (หรือ ?blank=1) → "▦ ตารางติ๊ก" (เจ้าของขอ 2026-09-04): แถว = ชิ้นส่วน · คอลัมน์ = ประเภทงาน (ทับ/เย็บตรง/…)
+ *       ให้เอาไปถามช่างแล้วติ๊กได้เลย · แถวเติมจากบล็อกตัดของใบให้ (แก้ได้) · คอลัมน์แก้ได้และจำไว้ทั้งระบบ
+ *   ใช้ PrintFrame + printReportFrameOrWindow ของกลาง (เหมือนใบสั่งงาน)
  */
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
+import { useToast } from "@/components/toast";
 import type { WorkStep } from "@/app/api/bom/work-steps/route";
 
 type MoHead = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; due_date: string | null; note: string | null };
+type Piece = { label: string; sub: string; qty: string };
 
+const MIN_ROWS = 12;
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
 const thDate = (s: string | null) => (s ? new Date(s.slice(0, 10) + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "—");
 
-function buildHtml(mo: MoHead, steps: WorkStep[], blank: boolean): string {
-  const rows = blank
-    ? Array.from({ length: 15 }, (_, i) => `<tr><td class="n">${i + 1}</td><td class="step"></td><td></td><td></td><td class="chk"></td><td></td></tr>`).join("")
-    : steps.map((s, i) => `<tr>
-        <td class="n">${i + 1}</td>
-        <td class="step"><b>${esc(s.step_name)}</b>${s.station ? ` <span class="tag">📍 ${esc(s.station)}</span>` : ""}${s.job_name ? ` <span class="tag">🧵 ${esc(s.job_name)}${s.job_rate ? ` ฿${s.job_rate}/ชิ้น` : ""}</span>` : ""}${s.instruction ? `<div class="ins">${esc(s.instruction).replace(/\n/g, "<br>")}</div>` : ""}</td>
-        <td></td><td></td><td class="chk"></td><td></td></tr>`).join("");
-  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ขั้นตอนงาน ${esc(mo.mo_no)}</title>
-<style>
-  @page { size: A4; margin: 14mm 12mm; }
+const CSS = `
+  @page { size: A4; margin: 12mm 10mm; }
   body { font-family: "Sarabun", "Noto Sans Thai", "Tahoma", sans-serif; color: #0f172a; font-size: 12px; margin: 0; }
   h1 { font-size: 18px; margin: 0 0 2px; }
   .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 8px; }
@@ -35,45 +31,77 @@ function buildHtml(mo: MoHead, steps: WorkStep[], blank: boolean): string {
   .meta b { display: inline-block; min-width: 72px; color: #475569; font-weight: 500; }
   .box { border: 1px solid #94a3b8; border-radius: 4px; padding: 4px 8px; font-size: 11px; min-width: 150px; }
   table { width: 100%; border-collapse: collapse; margin-top: 6px; }
-  th, td { border: 1px solid #94a3b8; padding: 5px 6px; vertical-align: top; }
+  th, td { border: 1px solid #64748b; padding: 5px 6px; vertical-align: top; }
   th { background: #f1f5f9; font-weight: 600; font-size: 11px; text-align: left; }
   td.n { width: 22px; text-align: center; font-weight: 600; }
-  td.step { width: ${blank ? "40%" : "44%"}; ${blank ? "height: 26px;" : ""} }
   td.chk { width: 34px; text-align: center; font-size: 16px; }
   .tag { font-size: 10px; color: #4338ca; background: #eef2ff; border-radius: 3px; padding: 0 4px; }
   .ins { font-size: 11px; color: #475569; margin-top: 2px; white-space: pre-line; }
   .foot { margin-top: 10px; display: flex; gap: 24px; font-size: 11px; color: #475569; }
   .foot span { display: inline-block; border-bottom: 1px dotted #94a3b8; min-width: 140px; }
   .hint { font-size: 10px; color: #94a3b8; margin-top: 6px; }
-</style></head><body>
-<div class="head">
-  <div>
-    <h1>📋 รายการขั้นตอนงาน${blank ? " (แม่แบบ)" : ""}</h1>
-    <div class="meta">
+  /* ตารางติ๊ก */
+  .grid th.v { height: 78px; vertical-align: bottom; text-align: center; padding: 4px 2px; width: 30px; }
+  .grid th.v span { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; white-space: nowrap; font-size: 11px; }
+  .grid td { height: 30px; }
+  .grid td.piece { width: 34%; }
+  .grid td.piece small { color: #64748b; font-size: 10px; display: block; }
+  .grid td.qty { width: 44px; text-align: center; }
+  .grid td.tick { text-align: center; }
+  .grid td.tick::before { content: ""; display: inline-block; width: 13px; height: 13px; border: 1.5px solid #334155; border-radius: 2px; }
+`;
+
+function head(mo: MoHead, title: string) {
+  return `<div class="head"><div><h1>${title}</h1><div class="meta">
       <div><b>ใบสั่งผลิต</b> ${esc(mo.mo_no)}</div>
       <div><b>สินค้า</b> ${esc(mo.product_sku ?? "")} ${esc(mo.product_name ?? "")}</div>
       <div><b>จำนวน</b> ${Number(mo.qty || 0).toLocaleString("th-TH")} ชิ้น &nbsp;&nbsp; <b>กำหนดส่ง</b> ${thDate(mo.due_date)}</div>
       ${mo.note ? `<div><b>หมายเหตุ</b> ${esc(mo.note)}</div>` : ""}
-    </div>
-  </div>
-  <div class="box">ผู้รับผิดชอบ: ________________<br>วันที่เริ่ม: ______ / ______ / ______</div>
-</div>
-<table>
-  <thead><tr><th>#</th><th>ขั้นตอน / วิธีทำ</th><th style="width:16%">ผู้ทำ</th><th style="width:13%">วันที่</th><th>✓</th><th style="width:18%">หมายเหตุ</th></tr></thead>
-  <tbody>${rows}</tbody>
-</table>
-<div class="foot"><div>ตรวจโดย: <span></span></div><div>วันที่: <span></span></div></div>
-<div class="hint">${blank ? "แม่แบบเปล่า — เขียนขั้นตอนลงช่องแล้วนำไปกรอกเข้าระบบที่แท็บ 📋 ขั้นตอนงาน ในบอร์ดจ่ายงาน" : "ขั้นตอนจากสูตร BOM ของสินค้า · แก้ได้ที่แท็บ 📋 ขั้นตอนงาน ในบอร์ดจ่ายงาน"}</div>
-</body></html>`;
+    </div></div>
+    <div class="box">ผู้ให้ข้อมูล/ผู้ทำ: ______________<br>วันที่: ______ / ______ / ______</div></div>`;
+}
+
+/** แบบ 1: รายการขั้นตอนจากสูตร */
+function buildStepsHtml(mo: MoHead, steps: WorkStep[]): string {
+  const rows = steps.map((s, i) => `<tr>
+      <td class="n">${i + 1}</td>
+      <td><b>${esc(s.step_name)}</b>${s.station ? ` <span class="tag">📍 ${esc(s.station)}</span>` : ""}${s.job_name ? ` <span class="tag">🧵 ${esc(s.job_name)}${s.job_rate ? ` ฿${s.job_rate}/ชิ้น` : ""}</span>` : ""}${s.instruction ? `<div class="ins">${esc(s.instruction).replace(/\n/g, "<br>")}</div>` : ""}</td>
+      <td></td><td></td><td class="chk"></td><td></td></tr>`).join("");
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ขั้นตอนงาน ${esc(mo.mo_no)}</title><style>${CSS}</style></head><body>
+    ${head(mo, "📋 รายการขั้นตอนงาน")}
+    <table><thead><tr><th>#</th><th>ขั้นตอน / วิธีทำ</th><th style="width:16%">ผู้ทำ</th><th style="width:13%">วันที่</th><th>✓</th><th style="width:18%">หมายเหตุ</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="foot"><div>ตรวจโดย: <span></span></div><div>วันที่: <span></span></div></div>
+    <div class="hint">ขั้นตอนจากสูตร BOM ของสินค้า · แก้ได้ที่แท็บ 🪜 ขั้นตอนงาน ในบอร์ดจ่ายงาน</div></body></html>`;
+}
+
+/** แบบ 2: ตารางติ๊ก — แถว = ชิ้นส่วน · คอลัมน์ = ประเภทงาน */
+function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[]): string {
+  const rows = [...pieces, ...Array.from({ length: Math.max(0, MIN_ROWS - pieces.length) }, () => ({ label: "", sub: "", qty: "" }))];
+  const body = rows.map((p, i) => `<tr><td class="n">${i + 1}</td>
+      <td class="piece">${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</td>
+      ${cols.map(() => `<td class="tick"></td>`).join("")}
+      <td class="qty">${esc(p.qty)}</td><td></td></tr>`).join("");
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ขั้นตอนการผลิต ${esc(mo.mo_no)}</title><style>${CSS}</style></head><body>
+    ${head(mo, "▦ ขั้นตอนการผลิต (ติ๊กตามชิ้น)")}
+    <table class="grid"><thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:44px;text-align:center">จำนวน</th><th style="width:16%">หมายเหตุ</th></tr></thead>
+    <tbody>${body}</tbody></table>
+    <div class="foot"><div>สอบถามจาก: <span></span></div><div>บันทึกโดย: <span></span></div></div>
+    <div class="hint">ติ๊ก ✓ ว่าชิ้นนี้ต้องทำงานประเภทไหนบ้าง · แถวเติมจากบล็อกตัดของใบให้ก่อน แก้/เพิ่มได้ · เสร็จแล้วเอาไปกรอกที่แท็บ 🪜 ขั้นตอนงาน</div></body></html>`;
 }
 
 export default function PrintWorkStepsPage() {
   const params = useParams<{ id: string }>();
   const sp = useSearchParams();
   const router = useRouter();
+  const toast = useToast();
   const [mo, setMo] = useState<MoHead | null>(null);
   const [steps, setSteps] = useState<WorkStep[]>([]);
-  const [blank, setBlank] = useState(sp.get("blank") === "1");
+  const [grid, setGrid] = useState(sp.get("blank") === "1");
+  const [cols, setCols] = useState<string[]>([]);
+  const [colsText, setColsText] = useState("");
+  const [piecesText, setPiecesText] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [savingCols, setSavingCols] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,41 +109,92 @@ export default function PrintWorkStepsPage() {
     let on = true;
     void (async () => {
       try {
-        const [mj, sj] = await Promise.all([
+        const [mj, sj, cj] = await Promise.all([
           apiFetch(`/api/mo/${params.id}`).then((r) => r.json()),
           apiFetch(`/api/bom/work-steps?mo_id=${encodeURIComponent(params.id)}`).then((r) => r.json()),
+          apiFetch("/api/bom/work-steps/columns").then((r) => r.json()),
         ]);
         if (!on) return;
-        const h = (mj?.data?.header ?? mj?.data ?? null) as Record<string, unknown> | null;
+        const d = (mj?.data ?? null) as Record<string, unknown> | null;
+        const h = ((d?.header as Record<string, unknown> | undefined) ?? d) as Record<string, unknown> | null;
         if (!h || !h.mo_no) { setError("ไม่พบใบสั่งผลิต"); return; }
         setMo({ id: String(h.id), mo_no: String(h.mo_no), product_sku: (h.product_sku as string) ?? null, product_name: (h.product_name as string) ?? null,
           qty: Number(h.qty) || 0, due_date: (h.due_date as string) ?? null, note: (h.note as string) ?? null });
-        const st = (sj?.data ?? []) as WorkStep[];
-        setSteps(st);
-        if (st.length === 0 && sp.get("blank") !== "0") setBlank(true);   // ไม่มีขั้นตอน → แม่แบบเปล่าอัตโนมัติ
+        // แถวชิ้นส่วน: จากบล็อกตัดของใบ (ไม่ซ้ำรหัสบล็อก) — ผู้ใช้แก้ในกล่องข้อความได้ก่อนพิมพ์
+        const mats = ((d?.materials as Record<string, unknown>[] | undefined) ?? []);
+        const seen = new Set<string>(); const lines: string[] = [];
+        for (const m of mats) {
+          const code = String(m.cut_block_code ?? "").trim(); if (!code || seen.has(code)) continue; seen.add(code);
+          const comp = String(m.component_name ?? m.component_sku ?? "").trim();
+          const pcs = m.pieces != null ? String(Number(m.pieces) || "") : "";
+          lines.push(`${code}${comp ? ` (${comp})` : ""}${pcs ? ` | ${pcs}` : ""}`);
+        }
+        setPiecesText(lines.join("\n"));
+        const st = (sj?.data ?? []) as WorkStep[]; setSteps(st);
+        const c = (cj?.data ?? []) as string[]; setCols(c); setColsText(c.join("\n"));
+        if (st.length === 0 && sp.get("blank") !== "0") setGrid(true);   // ไม่มีขั้นตอน → ตารางติ๊กอัตโนมัติ
       } catch { if (on) setError("โหลดข้อมูลไม่สำเร็จ"); }
       finally { if (on) setLoading(false); }
     })();
     return () => { on = false; };
   }, [params.id, sp]);
 
-  const html = useMemo(() => (mo ? buildHtml(mo, steps, blank) : ""), [mo, steps, blank]);
-  const fileName = docFileName(blank ? "แม่แบบขั้นตอนงาน" : "ขั้นตอนงาน", mo?.mo_no);
+  // "ชื่อชิ้น (คำอธิบาย) | จำนวน" → Piece
+  const pieces = useMemo<Piece[]>(() => piecesText.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const [name, qty = ""] = l.split("|").map((x) => x.trim());
+    const m = name.match(/^(.*?)\s*\((.*)\)\s*$/);
+    return { label: m ? m[1] : name, sub: m ? m[2] : "", qty };
+  }), [piecesText]);
+  const liveCols = useMemo(() => colsText.split("\n").map((x) => x.trim()).filter(Boolean), [colsText]);
+
+  const html = useMemo(() => (mo ? (grid ? buildGridHtml(mo, pieces, liveCols.length ? liveCols : cols) : buildStepsHtml(mo, steps)) : ""), [mo, grid, pieces, liveCols, cols, steps]);
+  const fileName = docFileName(grid ? "ตารางขั้นตอนการผลิต" : "ขั้นตอนงาน", mo?.mo_no);
+
+  const saveCols = async () => {
+    setSavingCols(true);
+    try {
+      const res = await apiFetch("/api/bom/work-steps/columns", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ columns: liveCols }) });
+      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      setCols(j.data as string[]); toast.success("บันทึกคอลัมน์แล้ว — ใช้กับทุกใบทั้งระบบ");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSavingCols(false); }
+  };
 
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-6 py-3">
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <div className="inline-flex bg-white border border-slate-200 rounded-lg p-0.5">
-          <button onClick={() => setBlank(false)} disabled={steps.length === 0} title={steps.length === 0 ? "สินค้านี้ยังไม่มีขั้นตอนในสูตร" : ""}
-            className={`px-3 h-8 rounded-md text-sm ${!blank ? "bg-slate-800 text-white" : "text-slate-600"} disabled:opacity-40`}>📋 พิมพ์ขั้นตอน ({steps.length})</button>
-          <button onClick={() => setBlank(true)} className={`px-3 h-8 rounded-md text-sm ${blank ? "bg-slate-800 text-white" : "text-slate-600"}`}>▭ แม่แบบเปล่า</button>
+          <button onClick={() => setGrid(false)} disabled={steps.length === 0} title={steps.length === 0 ? "สินค้านี้ยังไม่มีขั้นตอนในสูตร" : ""}
+            className={`px-3 h-8 rounded-md text-sm ${!grid ? "bg-slate-800 text-white" : "text-slate-600"} disabled:opacity-40`}>📋 รายการขั้นตอน ({steps.length})</button>
+          <button onClick={() => setGrid(true)} className={`px-3 h-8 rounded-md text-sm ${grid ? "bg-slate-800 text-white" : "text-slate-600"}`}>▦ ตารางติ๊ก (ชิ้น × ประเภทงาน)</button>
         </div>
+        {grid && <button onClick={() => setEditOpen((v) => !v)} className={`h-9 rounded-lg border px-4 text-sm ${editOpen ? "bg-slate-800 text-white border-slate-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>✎ แก้รายการ</button>}
         <div className="flex-1" />
         <button onClick={() => printReportFrameOrWindow(fileName)} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">🖨️ พิมพ์</button>
         <button onClick={() => printReportFrameOrWindow(fileName)} title={`เลือกปลายทาง "บันทึกเป็น PDF" — ชื่อไฟล์ "${fileName}.pdf"`}
           className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">⬇ ดาวน์โหลด PDF</button>
       </div>
+
+      {grid && editOpen && (
+        <div className="no-print border-b border-slate-200 bg-white px-6 py-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-medium text-slate-700">คอลัมน์ประเภทงาน <span className="text-[11px] text-slate-400">(บรรทัดละ 1 · ใช้ร่วมกันทั้งระบบ)</span></span>
+              <button onClick={() => void saveCols()} disabled={savingCols || liveCols.length === 0} className="h-8 px-3 text-[12px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{savingCols ? "กำลังบันทึก…" : "💾 บันทึกคอลัมน์"}</button>
+            </div>
+            <textarea value={colsText} onChange={(e) => setColsText(e.target.value)} rows={8} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg font-mono" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-medium text-slate-700">ชิ้นส่วน (แถว) <span className="text-[11px] text-slate-400">(บรรทัดละ 1 · เติมจากบล็อกตัดของใบให้แล้ว · ใส่ <code>| จำนวน</code> ต่อท้ายได้)</span></span>
+              <span className="text-[11px] text-slate-400">แก้เฉพาะครั้งนี้ ไม่บันทึก</span>
+            </div>
+            <textarea value={piecesText} onChange={(e) => setPiecesText(e.target.value)} rows={8} placeholder={"ตัวหน้า | 1\nตัวหลัง | 1\nหูหิ้ว (หนัง) | 2"} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg font-mono" />
+          </div>
+        </div>
+      )}
+
       <div className="px-4 py-6">
         {loading ? <div className="py-20 text-center text-slate-400">กำลังโหลด...</div>
           : error || !mo ? <div className="py-20 text-center text-red-500">⚠ {error ?? "ไม่พบเอกสาร"}</div>
