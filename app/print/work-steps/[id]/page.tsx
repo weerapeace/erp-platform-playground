@@ -109,10 +109,11 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
   if (chunks.length === 0) chunks.push({ rows: [], offset: 0 });
   const rowHtml = (p: Piece, i: number) => `<tr><td class="n">${i + 1}</td>
       <td class="piece">${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</td>
+      <td class="tick"></td>
       <td class="qty">${esc(p.qty)}</td>
       ${cols.map((c) => { const n = c.split("+").map((x) => x.trim()).filter(Boolean).length; return n > 1 ? `<td class="tickm"><span class="multi">${Array.from({ length: n - 1 }, (_, k) => `<i style="left:${((k + 1) / n) * 100}%"></i>`).join("")}</span></td>` : `<td class="tick"></td>`; }).join("")}
       <td></td></tr>`;
-  const thead = `<thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th><th style="width:44px;text-align:center">จำนวน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:16%">หมายเหตุ</th></tr></thead>`;
+  const thead = `<thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th><th class="v" title="ติ๊กว่าชิ้นนี้ทำแล้ว"><span>✓ ชิ้นนี้</span></th><th style="width:44px;text-align:center">จำนวน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:16%">หมายเหตุ</th></tr></thead>`;
   const pagesHtml = chunks.map((ch, pi) => `<div class="page">
     ${head(mo, "▦ ขั้นตอนการผลิต (ติ๊กตามชิ้น)", chunks.length > 1 ? `หน้า ${pi + 1}/${chunks.length}` : "")}
     <table class="grid">${thead}<tbody>${ch.rows.map((p, i) => rowHtml(p, ch.offset + i)).join("")}</tbody></table>
