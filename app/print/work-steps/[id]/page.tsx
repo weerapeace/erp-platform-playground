@@ -60,6 +60,7 @@ const CSS = `
   .grid th.v { height: 20mm; }
   .grid td.piece { width: 34%; }
   .grid td.piece small { color: #64748b; font-size: 10px; display: block; }
+  .grid td.piece .pchk { display: inline-block; width: 4.2mm; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; vertical-align: middle; margin-right: 2mm; }
   .grid td.qty { width: 44px; text-align: center; }
   .grid td.tick { text-align: center; }
   .grid td.tick::before { content: ""; display: inline-block; width: 4.2mm; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; margin-top: 1mm; }
@@ -108,10 +109,11 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
   for (let i = 0; i < rows.length; i += perPage) chunks.push({ rows: rows.slice(i, i + perPage), offset: i });
   if (chunks.length === 0) chunks.push({ rows: [], offset: 0 });
   const rowHtml = (p: Piece, i: number) => `<tr><td class="n">${i + 1}</td>
-      <td class="piece">${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</td>
+      <td class="piece">${p.label ? `<span class="pchk"></span>` : ""}${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</td>
+      <td class="qty">${esc(p.qty)}</td>
       ${cols.map((c) => { const n = c.split("+").map((x) => x.trim()).filter(Boolean).length; return n > 1 ? `<td class="tickm"><span class="multi">${Array.from({ length: n - 1 }, (_, k) => `<i style="left:${((k + 1) / n) * 100}%"></i>`).join("")}</span></td>` : `<td class="tick"></td>`; }).join("")}
-      <td class="qty">${esc(p.qty)}</td><td></td></tr>`;
-  const thead = `<thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:44px;text-align:center">จำนวน</th><th style="width:16%">หมายเหตุ</th></tr></thead>`;
+      <td></td></tr>`;
+  const thead = `<thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th><th style="width:44px;text-align:center">จำนวน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:16%">หมายเหตุ</th></tr></thead>`;
   const pagesHtml = chunks.map((ch, pi) => `<div class="page">
     ${head(mo, "▦ ขั้นตอนการผลิต (ติ๊กตามชิ้น)", chunks.length > 1 ? `หน้า ${pi + 1}/${chunks.length}` : "")}
     <table class="grid">${thead}<tbody>${ch.rows.map((p, i) => rowHtml(p, ch.offset + i)).join("")}</tbody></table>
