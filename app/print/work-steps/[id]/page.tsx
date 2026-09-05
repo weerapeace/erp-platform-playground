@@ -52,13 +52,15 @@ const CSS = `
   @media screen { .page + .page { margin-top: 8mm; padding-top: 6mm; border-top: 2px dashed #cbd5e1; } }
   /* ตารางติ๊ก */
   .grid th.v { height: 78px; vertical-align: bottom; text-align: center; padding: 4px 2px; width: 30px; }
+  .grid th.sub { height: 20mm; vertical-align: bottom; }
+  .grid thead tr:first-child th[colspan] { text-align: left; height: auto; padding: 4px 6px; }
   .grid th.v span { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; white-space: nowrap; font-size: 11px; }
   /* เต็ม A4 หน้าเดียวแน่นอน: ล็อกความสูง "ทั้งตาราง" เป็น มม. แล้วให้ 20 แถวแบ่งพื้นที่กันเอง
      (A4 297 − ขอบ 20 − padding 18 − หัวใบ ≤40 − ท้าย 8 → ตาราง 196 มม.) */
   .grid { height: auto; }   /* ความสูงแถวคิดเป็น มม. ในโค้ด (sizeCss) เสมอ → แบ่งหน้าเองได้แม่นทุกโหมด */
   .grid tbody tr { page-break-inside: avoid; }
   .grid th.v { height: 20mm; }
-  .grid td.piece { width: 34%; }
+  .grid td.piece { width: 30%; min-width: 34mm; }
   .grid td.piece small { color: #64748b; font-size: 10px; display: block; }
   .grid td.qty { width: 44px; text-align: center; }
   .grid td.tick { text-align: center; }
@@ -95,10 +97,11 @@ function buildStepsHtml(mo: MoHead, steps: WorkStep[]): string {
 
 /** แบบ 2: ตารางติ๊ก — แถว = ชิ้นส่วน · คอลัมน์ = ประเภทงาน */
 function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: number, rowHeightMm: number): string {
-  const rows = [...pieces, ...Array.from({ length: Math.max(0, rowCount - pieces.length) }, () => ({ label: "", sub: "", qty: "" }))];
-  // ความสูงแถว: 0 = ให้แบ่งเต็มหน้า A4 (ตาราง 196 มม.) · ใส่ค่า = สูงตายตัวต่อแถว → แบ่งหน้าเอง (หัวใบซ้ำทุกหน้า + เลขหน้า x/y)
-  // พื้นที่สำหรับแถว ≈ 172 มม./หน้า (หลังหักหัวใบ+หัวตาราง+ท้าย) · แถวต่ำสุด 7.9 มม. (กล่องติ๊ก 4.2 + ช่องไฟ)
-  // อัตโนมัติ = แบ่ง 172 มม. ให้แถวเท่า ๆ กัน (ไม่เกิน 20 แถว/หน้า) · แถวเกิน → หน้าถัดไปด้วยความสูงเดียวกัน
+  // แถว = ลำดับขั้นตอน (ช่างเขียนเอง) · ชิ้นส่วน = คอลัมน์ย่อยติ๊กใต้หัว "ชิ้นส่วน" (เจ้าของวาดให้ 2026-09-04)
+  //   → แต่ละแถวติ๊กว่าเป็นชิ้นไหน + งานประเภทไหน · ไม่มีชิ้นส่วน = ช่องชื่อกว้าง ๆ แบบเดิม
+  const rows = Array.from({ length: Math.max(1, rowCount) }, () => ({ label: "", sub: "", qty: "" }));
+  const pieceCols = pieces.map((p) => p.label).filter(Boolean);
+  // ความสูงแถว: 0 = แบ่งเต็มหน้า A4 · ใส่ค่า = สูงตายตัวต่อแถว → แบ่งหน้าเอง (หัวใบซ้ำทุกหน้า + เลขหน้า x/y)
   const ROW_AREA = 172, ROW_MIN = 7.9, ROW_GAP = 0.4;
   const autoH = Math.max(ROW_MIN, Math.round((ROW_AREA / Math.max(1, Math.min(rows.length, 20)) - ROW_GAP) * 10) / 10);
   const rowH = rowHeightMm > 0 ? rowHeightMm : autoH;
@@ -107,18 +110,23 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
   const chunks: { rows: typeof rows; offset: number }[] = [];
   for (let i = 0; i < rows.length; i += perPage) chunks.push({ rows: rows.slice(i, i + perPage), offset: i });
   if (chunks.length === 0) chunks.push({ rows: [], offset: 0 });
-  const rowHtml = (p: Piece, i: number) => `<tr><td class="n">${i + 1}</td>
-      <td class="piece">${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</td>
-      <td class="tick"></td>
-      <td class="qty">${esc(p.qty)}</td>
-      ${cols.map((c) => { const n = c.split("+").map((x) => x.trim()).filter(Boolean).length; return n > 1 ? `<td class="tickm"><span class="multi">${Array.from({ length: n - 1 }, (_, k) => `<i style="left:${((k + 1) / n) * 100}%"></i>`).join("")}</span></td>` : `<td class="tick"></td>`; }).join("")}
+  const tickTd = (c: string) => { const n = c.split("+").map((x) => x.trim()).filter(Boolean).length; return n > 1 ? `<td class="tickm"><span class="multi">${Array.from({ length: n - 1 }, (_, k) => `<i style="left:${((k + 1) / n) * 100}%"></i>`).join("")}</span></td>` : `<td class="tick"></td>`; };
+  const rowHtml = (_p: Piece, i: number) => `<tr><td class="n">${i + 1}</td>
+      <td class="piece"></td>
+      ${pieceCols.map(() => `<td class="tick"></td>`).join("")}
+      <td class="qty"></td>
+      ${cols.map(tickTd).join("")}
       <td></td></tr>`;
-  const thead = `<thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th><th class="v" title="ติ๊กว่าชิ้นนี้ทำแล้ว"><span>✓ ชิ้นนี้</span></th><th style="width:44px;text-align:center">จำนวน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:16%">หมายเหตุ</th></tr></thead>`;
+  // หัวตาราง 2 ชั้น: "ชิ้นส่วน" ครอบช่องชื่อ + คอลัมน์ย่อยชิ้นส่วน (หัวตั้ง) · คอลัมน์อื่น rowspan 2
+  const thead = pieceCols.length > 0
+    ? `<thead><tr><th rowspan="2" style="width:22px">ลำดับ</th><th colspan="${1 + pieceCols.length}">ชิ้นส่วน</th><th rowspan="2" style="width:44px;text-align:center">จำนวน</th>${cols.map((c) => `<th rowspan="2" class="v"><span>${esc(c)}</span></th>`).join("")}<th rowspan="2" style="width:16%">หมายเหตุ</th></tr>
+        <tr><th class="sub"></th>${pieceCols.map((c) => `<th class="v sub"><span>${esc(c)}</span></th>`).join("")}</tr></thead>`
+    : `<thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th><th style="width:44px;text-align:center">จำนวน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:16%">หมายเหตุ</th></tr></thead>`;
   const pagesHtml = chunks.map((ch, pi) => `<div class="page">
     ${head(mo, "▦ ขั้นตอนการผลิต (ติ๊กตามชิ้น)", chunks.length > 1 ? `หน้า ${pi + 1}/${chunks.length}` : "")}
     <table class="grid">${thead}<tbody>${ch.rows.map((p, i) => rowHtml(p, ch.offset + i)).join("")}</tbody></table>
     <div class="foot"><div>สอบถามจาก: <span></span></div><div>บันทึกโดย: <span></span></div></div>
-    ${pi === chunks.length - 1 ? `<div class="hint">ติ๊ก ✓ ว่าชิ้นนี้ต้องทำงานประเภทไหนบ้าง · เขียนชื่อชิ้นส่วนลงช่อง (หรือพิมพ์ล่วงหน้าที่ ✎ แก้รายการ) · เสร็จแล้วเอาไปกรอกที่แท็บ 🪜 ขั้นตอนงาน</div>` : ""}
+    ${pi === chunks.length - 1 ? `<div class="hint">แต่ละแถว = 1 ขั้นตอน: เขียนชื่อขั้นตอน/ชิ้น แล้วติ๊กว่าเป็นชิ้นไหน + งานประเภทไหน · ชิ้นส่วนตั้งได้ที่ ✎ แก้รายการ · เสร็จแล้วเอาไปกรอกที่แท็บ 🪜 ขั้นตอนงาน</div>` : ""}
   </div>`).join("");
   return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ขั้นตอนการผลิต ${esc(mo.mo_no)}</title><style>${CSS}${sizeCss}</style></head><body>
     ${pagesHtml}</body></html>`;
