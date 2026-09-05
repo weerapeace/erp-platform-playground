@@ -32,6 +32,7 @@ const CSS = `
   .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 8px; }
   .meta { font-size: 12px; line-height: 1.6; }
   .meta b { display: inline-block; min-width: 72px; color: #475569; font-weight: 500; }
+  .meta .nm { display: inline-block; max-width: 100mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
   .box { border: 1px solid #94a3b8; border-radius: 4px; padding: 4px 8px; font-size: 11px; min-width: 150px; }
   table { width: 100%; border-collapse: collapse; margin-top: 6px; }
   th, td { border: 1px solid #64748b; padding: 5px 6px; vertical-align: top; }
@@ -43,11 +44,16 @@ const CSS = `
   .foot { margin-top: 10px; display: flex; gap: 24px; font-size: 11px; color: #475569; }
   .foot span { display: inline-block; border-bottom: 1px dotted #94a3b8; min-width: 140px; }
   .hint { font-size: 10px; color: #94a3b8; margin-top: 6px; }
+  @media print { .hint { display: none; } .foot { margin-top: 4mm; } }
   /* ตารางติ๊ก */
   .grid th.v { height: 78px; vertical-align: bottom; text-align: center; padding: 4px 2px; width: 30px; }
   .grid th.v span { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; white-space: nowrap; font-size: 11px; }
-  .grid td { height: 9.2mm; }   /* หน่วย มม. ให้เต็ม A4 เท่ากันทั้งพรีวิว/พิมพ์ */
+  /* เต็ม A4 หน้าเดียวแน่นอน: ล็อกความสูง "ทั้งตาราง" เป็น มม. แล้วให้ 20 แถวแบ่งพื้นที่กันเอง
+     (A4 297 − ขอบ 20 − padding 18 − หัวใบ ≤40 − ท้าย 8 → ตาราง 196 มม.) */
+  .grid { height: 196mm; }
+  .grid td { height: auto; }
   .grid tbody tr { page-break-inside: avoid; }
+  .grid th.v { height: 20mm; }
   .grid td.piece { width: 34%; }
   .grid td.piece small { color: #64748b; font-size: 10px; display: block; }
   .grid td.qty { width: 44px; text-align: center; }
@@ -58,7 +64,7 @@ const CSS = `
 function head(mo: MoHead, title: string) {
   return `<div class="head"><div><h1>${title}</h1><div class="meta">
       <div><b>ใบสั่งผลิต</b> ${esc(mo.mo_no)}</div>
-      <div><b>สินค้า</b> ${esc(mo.product_sku ?? "")} ${esc(mo.product_name ?? "")}</div>
+      <div><b>สินค้า</b> <span class="nm" title="${esc(mo.product_name ?? "")}">${esc(mo.product_sku ?? "")} ${esc(mo.product_name ?? "")}</span></div>
       <div><b>จำนวน</b> ${Number(mo.qty || 0).toLocaleString("th-TH")} ชิ้น &nbsp;&nbsp; <b>กำหนดส่ง</b> ${thDate(mo.due_date)}</div>
       ${mo.note ? `<div><b>หมายเหตุ</b> ${esc(mo.note)}</div>` : ""}
     </div></div>
