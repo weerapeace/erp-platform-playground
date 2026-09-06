@@ -60,9 +60,14 @@ const CSS = `
   .grid { height: auto; }   /* ความสูงแถวคิดเป็น มม. ในโค้ด (sizeCss) เสมอ → แบ่งหน้าเองได้แม่นทุกโหมด */
   .grid tbody tr { page-break-inside: avoid; }
   .grid th.v { height: 20mm; }
-  .grid td.piece { width: 30%; min-width: 34mm; }
+  .grid td.piece { width: 22%; min-width: 28mm; }
   .grid td.piece small { color: #64748b; font-size: 10px; display: block; }
-  .grid td.qty { width: 44px; text-align: center; }
+  .grid td.qty { width: 18mm; text-align: center; }
+  /* คอลัมน์ย่อยชิ้นส่วน: วงกลมเล็ก (เจ้าของขอ) · คอลัมน์แคบ · ช่องที่ไม่มีหัว = โล่งไว้เขียนชื่อชิ้นเอง */
+  .grid th.p { width: 5.2mm; min-width: 5.2mm; padding: 3px 1px; }
+  .grid th.p span { font-size: 10px; }
+  .grid td.pt { text-align: center; padding-left: 1px; padding-right: 1px; }
+  .grid td.pt::before { content: ""; display: inline-block; width: 3.4mm; height: 3.4mm; border: 1.3px solid #334155; border-radius: 50%; margin-top: 1.4mm; }
   .grid td.tick { text-align: center; }
   .grid td.tick::before { content: ""; display: inline-block; width: 4.2mm; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; margin-top: 1mm; }
   /* คอลัมน์ที่มี "+" (เช่น ทากาว + ติดกาว) → กล่องเดียวแบ่งเป็นหลายช่อง ติ๊กแยกได้ (เจ้าของขอ) */
@@ -100,7 +105,9 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
   // แถว = ลำดับขั้นตอน (ช่างเขียนเอง) · ชิ้นส่วน = คอลัมน์ย่อยติ๊กใต้หัว "ชิ้นส่วน" (เจ้าของวาดให้ 2026-09-04)
   //   → แต่ละแถวติ๊กว่าเป็นชิ้นไหน + งานประเภทไหน · ไม่มีชิ้นส่วน = ช่องชื่อกว้าง ๆ แบบเดิม
   const rows = Array.from({ length: Math.max(1, rowCount) }, () => ({ label: "", sub: "", qty: "" }));
-  const pieceCols = pieces.map((p) => p.label).filter(Boolean);
+  const PIECE_SLOTS = 10;   // ช่องชิ้นส่วนทั้งหมด (มีชื่อ + โล่งไว้เขียนเอง) — เจ้าของขอ "ให้เต็มชิ้นส่วนเลย"
+  const named = pieces.map((p) => p.label).filter(Boolean).slice(0, PIECE_SLOTS);
+  const pieceCols = [...named, ...Array.from({ length: PIECE_SLOTS - named.length }, () => "")];
   // ความสูงแถว: 0 = แบ่งเต็มหน้า A4 · ใส่ค่า = สูงตายตัวต่อแถว → แบ่งหน้าเอง (หัวใบซ้ำทุกหน้า + เลขหน้า x/y)
   const ROW_AREA = 172, ROW_MIN = 7.9, ROW_GAP = 0.4;
   const autoH = Math.max(ROW_MIN, Math.round((ROW_AREA / Math.max(1, Math.min(rows.length, 20)) - ROW_GAP) * 10) / 10);
@@ -113,15 +120,13 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
   const tickTd = (c: string) => { const n = c.split("+").map((x) => x.trim()).filter(Boolean).length; return n > 1 ? `<td class="tickm"><span class="multi">${Array.from({ length: n - 1 }, (_, k) => `<i style="left:${((k + 1) / n) * 100}%"></i>`).join("")}</span></td>` : `<td class="tick"></td>`; };
   const rowHtml = (_p: Piece, i: number) => `<tr><td class="n">${i + 1}</td>
       <td class="piece"></td>
-      ${pieceCols.map(() => `<td class="tick"></td>`).join("")}
+      ${pieceCols.map(() => `<td class="pt"></td>`).join("")}
       <td class="qty"></td>
       ${cols.map(tickTd).join("")}
       <td></td></tr>`;
   // หัวตาราง 2 ชั้น: "ชิ้นส่วน" ครอบช่องชื่อ + คอลัมน์ย่อยชิ้นส่วน (หัวตั้ง) · คอลัมน์อื่น rowspan 2
-  const thead = pieceCols.length > 0
-    ? `<thead><tr><th rowspan="2" style="width:22px">ลำดับ</th><th colspan="${1 + pieceCols.length}">ชิ้นส่วน</th><th rowspan="2" style="width:44px;text-align:center">จำนวน</th>${cols.map((c) => `<th rowspan="2" class="v"><span>${esc(c)}</span></th>`).join("")}<th rowspan="2" style="width:16%">หมายเหตุ</th></tr>
-        <tr><th class="sub"></th>${pieceCols.map((c) => `<th class="v sub"><span>${esc(c)}</span></th>`).join("")}</tr></thead>`
-    : `<thead><tr><th style="width:22px">ลำดับ</th><th>ชิ้นส่วน</th><th style="width:44px;text-align:center">จำนวน</th>${cols.map((c) => `<th class="v"><span>${esc(c)}</span></th>`).join("")}<th style="width:16%">หมายเหตุ</th></tr></thead>`;
+  const thead = `<thead><tr><th rowspan="2" style="width:22px">ลำดับ</th><th colspan="${1 + pieceCols.length}">ชิ้นส่วน</th><th rowspan="2" style="width:18mm;text-align:center">จำนวน</th>${cols.map((c) => `<th rowspan="2" class="v"><span>${esc(c)}</span></th>`).join("")}<th rowspan="2" style="width:14%">หมายเหตุ</th></tr>
+        <tr><th class="sub"></th>${pieceCols.map((c) => `<th class="v sub p"><span>${esc(c)}</span></th>`).join("")}</tr></thead>`;
   const pagesHtml = chunks.map((ch, pi) => `<div class="page">
     ${head(mo, "▦ ขั้นตอนการผลิต (ติ๊กตามชิ้น)", chunks.length > 1 ? `หน้า ${pi + 1}/${chunks.length}` : "")}
     <table class="grid">${thead}<tbody>${ch.rows.map((p, i) => rowHtml(p, ch.offset + i)).join("")}</tbody></table>
