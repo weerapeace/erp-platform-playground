@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
 
   // ฝั่งขายอ้างด้วย product_id หรือรหัส — ดึงทั้งสองแบบแล้วรวม (กันเคสรหัสถูกพิมพ์เอง)
   // รหัส SKU 43% มี # และอาจมี , ( ) . → ครอบด้วยเครื่องหมายคำพูดตามกติกา PostgREST (escape \" ข้างใน)
-  const quoted = `"${code.replace(/\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+  const quoted = `"${code.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   const skuMatch = code ? `product_id.eq.${skuId},sku.eq.${quoted}` : `product_id.eq.${skuId}`;
 
   const [poLinesRes, prRes, soLinesRes, qLinesRes] = await Promise.all([
