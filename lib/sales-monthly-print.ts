@@ -6,11 +6,11 @@
  */
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import { soStatusLabel } from "@/lib/so-status";
+import { monthLabelTh } from "@/lib/month";
 import type { SalesMonthlyReport } from "@/app/api/sales/monthly-report/route";
 
 const baht = (n: number) => Math.round(n || 0).toLocaleString("th-TH");
-const TH_MONTH = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
-const monthLabel = (ym: string) => { const [y, m] = ym.split("-").map(Number); return `${TH_MONTH[(m || 1) - 1]} ${(y || 0) + 543}`; };
+const monthLabel = (ym: string) => monthLabelTh(ym);
 const dmy = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—");
 
 // ============================================================

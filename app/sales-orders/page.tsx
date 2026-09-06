@@ -582,6 +582,9 @@ export default function SalesOrdersPage() {
             <Link href="/sales/monthly" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">
               📈 สรุปรายเดือน
             </Link>
+            <Link href="/sales/tax-report" title="รายงานภาษีขายรายเดือน (ส่งบัญชี)" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">
+              🧾 รายงานภาษีขาย
+            </Link>
             {canCreate && (
               <button onClick={openCreate}
                 className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">

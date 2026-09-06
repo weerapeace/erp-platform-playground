@@ -20,6 +20,8 @@ import { buildSalesMonthlyReportHtml } from "@/lib/sales-monthly-print";
 import { printReportHtmlInNewWindow } from "@/components/report";
 import { useReportSections, ReportSectionPicker, type ReportSection } from "@/components/report-sections";
 import { soStatusLabel, soStatusColor } from "@/lib/so-status";
+import { MonthNav } from "@/components/month-nav";
+import { TH_MONTHS, monthLabelTh, thisMonth } from "@/lib/month";
 import type { SalesMonthlyReport, SalesMonthlyRow } from "@/app/api/sales/monthly-report/route";
 
 /** ส่วนต่าง ๆ ของรายงาน — ผู้ใช้ติ๊กเลือกได้ว่าจะโชว์อะไร (มีผลทั้งบนจอและตอนพิมพ์) */
@@ -42,15 +44,7 @@ const bahtShort = (n: number) => {
   if (v >= 100_000) return "฿" + Math.round(v / 1000) + "k";
   return "฿" + v.toLocaleString("th-TH");
 };
-const TH_MONTH = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
-const monthLabel = (ym: string) => { const [y, m] = ym.split("-").map(Number); return `${TH_MONTH[(m || 1) - 1]} ${(y || 0) + 543}`; };
 const dmy = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—");
-const thisMonth = () => new Date().toISOString().slice(0, 7);
-const shiftMonth = (ym: string, delta: number) => {
-  const [y, m] = ym.split("-").map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
-  return d.toISOString().slice(0, 7);
-};
 
 
 // ============================================================
@@ -191,15 +185,7 @@ export default function SalesMonthlyReportPage() {
             <p className="text-sm text-slate-500">ยอดขายทั้งเดือน · แยกตามลูกค้า / พนักงานขาย / สินค้า · พิมพ์เป็น A4 ได้</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center border border-slate-200 rounded-lg bg-white overflow-hidden">
-              <button onClick={() => setMonth(m => shiftMonth(m, -1))} className="h-9 px-2.5 text-slate-500 hover:bg-slate-50" title="เดือนก่อน">◀</button>
-              <input type="month" value={month} onChange={e => e.target.value && setMonth(e.target.value)}
-                className="h-9 px-2 text-sm border-x border-slate-200 outline-none" />
-              <button onClick={() => setMonth(m => shiftMonth(m, 1))} className="h-9 px-2.5 text-slate-500 hover:bg-slate-50" title="เดือนถัดไป">▶</button>
-            </div>
-            {month !== thisMonth() && (
-              <button onClick={() => setMonth(thisMonth())} className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">เดือนนี้</button>
-            )}
+            <MonthNav value={month} onChange={setMonth} />
             <ReportSectionPicker sections={SECTIONS} on={on} onToggle={toggle} onReset={reset} />
             <button onClick={() => printHtml && printReportHtmlInNewWindow(printHtml)} disabled={!printHtml}
               className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">🖨 พิมพ์ / PDF</button>
@@ -207,10 +193,11 @@ export default function SalesMonthlyReportPage() {
               className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50 disabled:opacity-50">⬇ Excel</button>
             <Link href="/sales/dashboard" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">📊 แดชบอร์ด</Link>
             <Link href="/sales-orders" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">🧾 ใบขาย</Link>
+            <Link href="/sales/tax-report" className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50">🧾 รายงานภาษีขาย</Link>
           </div>
         </div>
 
-        <div className="text-sm text-slate-500">เดือน <span className="font-semibold text-slate-700">{monthLabel(month)}</span></div>
+        <div className="text-sm text-slate-500">เดือน <span className="font-semibold text-slate-700">{monthLabelTh(month)}</span></div>
 
         {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
 
@@ -222,7 +209,7 @@ export default function SalesMonthlyReportPage() {
           <Card>
             <div className="py-16 text-center">
               <div className="text-3xl mb-2">🗓️</div>
-              <div className="text-slate-600 font-medium">เดือน {monthLabel(month)} ยังไม่มีใบขาย</div>
+              <div className="text-slate-600 font-medium">เดือน {monthLabelTh(month)} ยังไม่มีใบขาย</div>
               <div className="text-sm text-slate-400 mt-1">ลองเลือกเดือนอื่น หรือไปสร้างใบขายใหม่ที่หน้าใบขาย</div>
             </div>
           </Card>
@@ -255,7 +242,7 @@ export default function SalesMonthlyReportPage() {
                       style={{ height: `${d.amt > 0 ? Math.max(3, (d.amt / maxDaily) * 100) : 0}%` }} />
                     {d.amt > 0 && (
                       <div className="absolute bottom-full mb-1 hidden group-hover:block whitespace-nowrap bg-slate-800 text-white text-[10px] px-2 py-1 rounded z-10">
-                        {d.d} {TH_MONTH[Number(month.slice(5, 7)) - 1]} · ฿{baht(d.amt)} · {d.n} ใบ
+                        {d.d} {TH_MONTHS[Number(month.slice(5, 7)) - 1]} · ฿{baht(d.amt)} · {d.n} ใบ
                       </div>
                     )}
                   </div>
