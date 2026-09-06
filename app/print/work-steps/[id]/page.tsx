@@ -69,6 +69,9 @@ const CSS = `
   .grid th.p span { font-size: 10px; }
   .grid td.pt { text-align: center; padding-left: 1px; padding-right: 1px; }
   .grid td.pt::before { content: ""; display: inline-block; width: 3.4mm; height: 3.4mm; border: 1.3px solid #334155; border-radius: 50%; margin-top: 1.4mm; }
+  .grid tr.sec td { background: #e2e8f0; font-weight: 700; font-size: 12px; height: auto; padding: 4px 8px; }
+  .grid td.dim { background: #f1f5f9; }
+  .grid.pp td.step { width: 30%; }
   .grid td.tick { text-align: center; }
   .grid td.tick::before { content: ""; display: inline-block; width: 4.2mm; height: 4.2mm; border: 1.5px solid #334155; border-radius: 2px; margin-top: 1mm; }
   /* คอลัมน์ที่มี "+" (เช่น ทากาว + ติดกาว) → กล่องเดียวแบ่งเป็นหลายช่อง ติ๊กแยกได้ (เจ้าของขอ) */
@@ -138,6 +141,48 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
     ${pagesHtml}</body></html>`;
 }
 
+/** แบบ 3: แยกตามชิ้น — แต่ละชิ้นมีขั้นตอนของตัวเอง แล้วปิดท้ายด้วย "ประกอบรวม" (ร่างตามที่เจ้าของขอ 2026-09-04)
+ *   ตารางเดียวต่อหน้า (หัวตั้งครั้งเดียว) · แบ่งเป็นช่วง: 🧩 ชิ้น A → แถวขั้นตอน · 🧩 ชิ้น B → … · 🔗 ประกอบรวม (มีวงกลมชิ้นส่วนให้ติ๊กว่าเอาชิ้นไหนมาต่อกัน)
+ *   ช่วงไหนอยู่ท้ายหน้าไม่พอวาง 2 แถว → ยกทั้งช่วงไปหน้าถัดไป · ทุกหน้ามีหัวใบ + เลขหน้า */
+function buildPerPieceHtml(mo: MoHead, pieceNames: string[], cols: string[], rowsPerPiece: number, asmRows: number, rowHeightMm: number): string {
+  const names = pieceNames.filter(Boolean);
+  const rowH = rowHeightMm > 0 ? rowHeightMm : 7.6;
+  const ROW_AREA = 160, ROW_GAP = 0.4, SEC_H = 7.5;
+  const sizeCss = `.grid td { height: ${rowH}mm; }`;
+  type Item = { kind: "sec"; title: string; asm: boolean } | { kind: "row"; n: number; asm: boolean };
+  const items: Item[] = [];
+  const sections = names.length > 0
+    ? names.map((n) => ({ title: `🧩 ${n}`, rows: rowsPerPiece, asm: false }))
+    : [1, 2, 3].map((i) => ({ title: `🧩 ชิ้นที่ ${i}: ____________________`, rows: rowsPerPiece, asm: false }));
+  sections.push({ title: "🔗 ประกอบรวม (นำชิ้นมาต่อกัน — ติ๊กวงกลมว่าใช้ชิ้นไหน)", rows: asmRows, asm: true });
+  for (const sec of sections) { items.push({ kind: "sec", title: sec.title, asm: sec.asm }); for (let i = 0; i < sec.rows; i++) items.push({ kind: "row", n: i + 1, asm: sec.asm }); }
+  // แบ่งหน้า: หัวช่วงต้องมีแถวตามอย่างน้อย 2 แถวในหน้าเดียวกัน
+  const pages: Item[][] = []; let cur: Item[] = []; let used = 0;
+  const hOf = (it: Item) => (it.kind === "sec" ? SEC_H : rowH + ROW_GAP);
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const need = it.kind === "sec" ? SEC_H + 2 * (rowH + ROW_GAP) : hOf(it);
+    if (used + need > ROW_AREA && cur.length > 0) { pages.push(cur); cur = []; used = 0; }
+    cur.push(it); used += hOf(it);
+  }
+  if (cur.length) pages.push(cur);
+  const tickTd = (c: string) => { const n = c.split("+").map((x) => x.trim()).filter(Boolean).length; return n > 1 ? `<td class="tickm"><span class="multi">${Array.from({ length: n - 1 }, (_, k) => `<i style="left:${((k + 1) / n) * 100}%"></i>`).join("")}</span></td>` : `<td class="tick"></td>`; };
+  const pcols = names.length > 0 ? names : [];
+  const colCount = 2 + pcols.length + 1 + cols.length + 1;
+  const thead = `<thead><tr><th rowspan="2" style="width:22px">ลำดับ</th><th rowspan="2">ขั้นตอน / วิธีทำ</th>${pcols.length ? `<th colspan="${pcols.length}">ชิ้นที่ใช้ (ประกอบรวม)</th>` : ""}<th rowspan="2" style="width:14mm;text-align:center">จำนวน</th>${cols.map((c) => `<th rowspan="2" class="v"><span>${esc(c)}</span></th>`).join("")}<th rowspan="2" style="width:15%">หมายเหตุ</th></tr>
+    <tr>${pcols.map((c) => `<th class="v sub p"><span>${esc(c)}</span></th>`).join("")}</tr></thead>`;
+  const rowHtml = (it: Item) => it.kind === "sec"
+    ? `<tr class="sec"><td colspan="${colCount}">${esc(it.title)}</td></tr>`
+    : `<tr><td class="n">${it.n}</td><td class="step"></td>${pcols.map(() => (it.asm ? `<td class="pt"></td>` : `<td class="dim"></td>`)).join("")}<td class="qty"></td>${cols.map(tickTd).join("")}<td></td></tr>`;
+  const pagesHtml = pages.map((pg, pi) => `<div class="page">
+    ${head(mo, "▤ ขั้นตอนการผลิต (แยกตามชิ้น + ประกอบรวม)", pages.length > 1 ? `หน้า ${pi + 1}/${pages.length}` : "")}
+    <table class="grid pp">${thead}<tbody>${pg.map(rowHtml).join("")}</tbody></table>
+    <div class="foot"><div>สอบถามจาก: <span></span></div><div>บันทึกโดย: <span></span></div></div>
+    ${pi === pages.length - 1 ? `<div class="hint">แต่ละชิ้นเขียนขั้นตอนของตัวเอง แล้วช่วง 🔗 ประกอบรวม เขียนขั้นตอนตอนเอาชิ้นมาต่อกัน + ติ๊กวงกลมว่าใช้ชิ้นไหน · ชิ้นส่วน/คอลัมน์ตั้งได้ที่ ✎ แก้รายการ</div>` : ""}
+  </div>`).join("");
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ขั้นตอนการผลิต (แยกชิ้น) ${esc(mo.mo_no)}</title><style>${CSS}${sizeCss}</style></head><body>${pagesHtml}</body></html>`;
+}
+
 /** กล่องข้อความที่พิมพ์ @ ต้นบรรทัดแล้วเลือกจากทะเบียนได้ (ใช้ทั้งคอลัมน์ประเภทงานและชิ้นส่วน) */
 function AtTextarea({ value, onChange, options, placeholder, rows = 8 }: {
   value: string; onChange: (v: string) => void; options: string[]; placeholder?: string; rows?: number;
@@ -181,7 +226,10 @@ export default function PrintWorkStepsPage() {
   const toast = useToast();
   const [mo, setMo] = useState<MoHead | null>(null);
   const [steps, setSteps] = useState<WorkStep[]>([]);
-  const [grid, setGrid] = useState(sp.get("blank") === "1");
+  // โหมดพิมพ์: steps = รายการขั้นตอนจากสูตร · grid = ตารางติ๊ก · perpiece = แยกตามชิ้น + ประกอบรวม
+  const [mode, setMode] = useState<"steps" | "grid" | "perpiece">(sp.get("mode") === "perpiece" ? "perpiece" : sp.get("blank") === "1" ? "grid" : "steps");
+  const grid = mode !== "steps";
+  const setGrid = (v: boolean) => setMode(v ? "grid" : "steps");
   const [cols, setCols] = useState<string[]>([]);
   const [colsText, setColsText] = useState("");
   const [piecesText, setPiecesText] = useState("");
@@ -197,6 +245,9 @@ export default function PrintWorkStepsPage() {
   // จำนวนแถว + ความสูงแถว (จำไว้ในเครื่องนี้)
   const [rowCount, setRowCount] = useState<number>(() => { try { return Number(localStorage.getItem("ws-print-rows")) || MIN_ROWS; } catch { return MIN_ROWS; } });
   const [rowMm, setRowMm] = useState<number>(() => { try { return Number(localStorage.getItem("ws-print-rowmm")) || 0; } catch { return 0; } });
+  const [ppRows, setPpRows] = useState<number>(() => { try { return Number(localStorage.getItem("ws-print-pprows")) || 5; } catch { return 5; } });
+  const [asmRows, setAsmRows] = useState<number>(() => { try { return Number(localStorage.getItem("ws-print-asmrows")) || 8; } catch { return 8; } });
+  useEffect(() => { try { localStorage.setItem("ws-print-pprows", String(ppRows)); localStorage.setItem("ws-print-asmrows", String(asmRows)); } catch { /* ignore */ } }, [ppRows, asmRows]);
   useEffect(() => { try { localStorage.setItem("ws-print-rows", String(rowCount)); localStorage.setItem("ws-print-rowmm", String(rowMm)); } catch { /* ignore */ } }, [rowCount, rowMm]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -223,7 +274,7 @@ export default function PrintWorkStepsPage() {
         setOps((cj?.ops ?? []) as string[]); setPieceOps((cj?.piece_ops ?? []) as string[]);
         // ชิ้นส่วนที่เคยบันทึกไว้ของสินค้านี้ → เติมให้ · ไม่มี = ว่าง (พิมพ์ช่องว่างให้เขียนเอง)
         setPiecesText(((cj?.pieces ?? []) as string[]).join("\n"));
-        if (st.length === 0 && sp.get("blank") !== "0") setGrid(true);
+        if (st.length === 0 && sp.get("blank") !== "0" && sp.get("mode") !== "perpiece") setMode("grid");
       } catch { if (on) setError("โหลดข้อมูลไม่สำเร็จ"); }
       finally { if (on) setLoading(false); }
     })();
@@ -238,8 +289,14 @@ export default function PrintWorkStepsPage() {
   }), [piecesText]);
   const liveCols = useMemo(() => colsText.split("\n").map((x) => x.trim()).filter(Boolean), [colsText]);
 
-  const html = useMemo(() => (mo ? (grid ? buildGridHtml(mo, pieces, liveCols.length ? liveCols : cols, rowCount, rowMm) : buildStepsHtml(mo, steps)) : ""), [mo, grid, pieces, liveCols, cols, steps, rowCount, rowMm]);
-  const fileName = docFileName(grid ? "ตารางขั้นตอนการผลิต" : "ขั้นตอนงาน", mo?.mo_no);
+  const html = useMemo(() => {
+    if (!mo) return "";
+    const useCols = liveCols.length ? liveCols : cols;
+    if (mode === "perpiece") return buildPerPieceHtml(mo, pieces.map((p) => p.label), useCols, ppRows, asmRows, rowMm);
+    if (mode === "grid") return buildGridHtml(mo, pieces, useCols, rowCount, rowMm);
+    return buildStepsHtml(mo, steps);
+  }, [mo, mode, pieces, liveCols, cols, steps, rowCount, rowMm, ppRows, asmRows]);
+  const fileName = docFileName(mode === "perpiece" ? "ขั้นตอนการผลิต แยกชิ้น" : mode === "grid" ? "ตารางขั้นตอนการผลิต" : "ขั้นตอนงาน", mo?.mo_no);
 
   const put = async (body: Record<string, unknown>) => {
     const res = await apiFetch("/api/bom/work-steps/columns", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -280,9 +337,10 @@ export default function PrintWorkStepsPage() {
       <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-6 py-3">
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <div className="inline-flex bg-white border border-slate-200 rounded-lg p-0.5">
-          <button onClick={() => setGrid(false)} disabled={steps.length === 0} title={steps.length === 0 ? "สินค้านี้ยังไม่มีขั้นตอนในสูตร" : ""}
-            className={`px-3 h-8 rounded-md text-sm ${!grid ? "bg-slate-800 text-white" : "text-slate-600"} disabled:opacity-40`}>📋 รายการขั้นตอน ({steps.length})</button>
-          <button onClick={() => setGrid(true)} className={`px-3 h-8 rounded-md text-sm ${grid ? "bg-slate-800 text-white" : "text-slate-600"}`}>▦ ตารางติ๊ก (ชิ้น × ประเภทงาน)</button>
+          <button onClick={() => setMode("steps")} disabled={steps.length === 0} title={steps.length === 0 ? "สินค้านี้ยังไม่มีขั้นตอนในสูตร" : ""}
+            className={`px-3 h-8 rounded-md text-sm ${mode === "steps" ? "bg-slate-800 text-white" : "text-slate-600"} disabled:opacity-40`}>📋 รายการขั้นตอน ({steps.length})</button>
+          <button onClick={() => setMode("grid")} className={`px-3 h-8 rounded-md text-sm ${mode === "grid" ? "bg-slate-800 text-white" : "text-slate-600"}`}>▦ ตารางติ๊ก (ชิ้น × ประเภทงาน)</button>
+          <button onClick={() => setMode("perpiece")} className={`px-3 h-8 rounded-md text-sm ${mode === "perpiece" ? "bg-slate-800 text-white" : "text-slate-600"}`}>▤ แยกตามชิ้น + ประกอบรวม</button>
         </div>
         {grid && <button onClick={() => setEditOpen((v) => !v)} className={`h-9 rounded-lg border px-4 text-sm ${editOpen ? "bg-slate-800 text-white border-slate-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>✎ แก้รายการ</button>}
         <div className="flex-1" />
@@ -304,7 +362,15 @@ export default function PrintWorkStepsPage() {
                 {[6, 7, 8, 9, 10, 12, 14, 16, 20].map((v) => <option key={v} value={v}>{v} มม.</option>)}
               </select>
             </label>
-            <span className="text-[11px] text-slate-400">อัตโนมัติ = ทุกแถวแบ่งพื้นที่ให้พอดี 1 หน้า · ตั้งความสูงเอง = แถวเยอะจะต่อหน้า 2 ให้ · จำค่านี้ไว้ในเครื่องนี้</span>
+            {mode === "perpiece" && (<>
+              <label className="flex items-center gap-2">แถวต่อชิ้น
+                <input type="number" min={1} max={20} value={ppRows} onChange={(e) => setPpRows(Math.min(20, Math.max(1, Number(e.target.value) || 1)))} className="w-16 h-8 px-2 text-sm text-center border border-slate-200 rounded-lg" />
+              </label>
+              <label className="flex items-center gap-2">แถวประกอบรวม
+                <input type="number" min={1} max={30} value={asmRows} onChange={(e) => setAsmRows(Math.min(30, Math.max(1, Number(e.target.value) || 1)))} className="w-16 h-8 px-2 text-sm text-center border border-slate-200 rounded-lg" />
+              </label>
+            </>)}
+            <span className="text-[11px] text-slate-400">{mode === "perpiece" ? "แบบแยกชิ้น: ทุกชิ้นในช่องชิ้นส่วนได้ช่วงของตัวเอง + ช่วงประกอบรวมท้ายสุด · ความสูงแถวอัตโนมัติ = 7.6 มม." : "อัตโนมัติ = ทุกแถวแบ่งพื้นที่ให้พอดี 1 หน้า · ตั้งความสูงเอง = แถวเยอะจะต่อหน้า 2 ให้"} · จำค่านี้ไว้ในเครื่องนี้</span>
           </div>
           <div>
             <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">

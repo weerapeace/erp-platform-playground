@@ -1910,6 +1910,11 @@ function WorkBoardPageInner() {
             <div className="text-sm font-semibold text-slate-800">▦ ตารางติ๊ก (ชิ้นส่วน × ประเภทงาน)</div>
             <div className="text-[11px] text-slate-500 mt-0.5">แถว = ชิ้นส่วน (เติมจากบล็อกตัดให้) · คอลัมน์ = ทับ/เย็บตรง/เย็บโค้ง/ทากาว… เอาไปถามช่างแล้วติ๊ก</div>
           </button>
+          <button type="button" onClick={() => { if (checklistMO) window.open(`/print/work-steps/${checklistMO.id}?mode=perpiece`, "_blank"); setStepsPrintAsk(false); }}
+            className="text-left rounded-lg border border-slate-200 hover:bg-slate-50 px-4 py-3">
+            <div className="text-sm font-semibold text-slate-800">▤ แยกตามชิ้น + ประกอบรวม</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">แต่ละชิ้นมีช่วงขั้นตอนของตัวเอง แล้วปิดท้ายด้วยช่วงประกอบรวม (ติ๊กว่าใช้ชิ้นไหน)</div>
+          </button>
         </div>
       </ERPModal>
       <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="xl" storageKey="wb-checklist" title={clWO ? `🔄 ใบจ่ายงาน · ${clWO.wo_no}` : `📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
