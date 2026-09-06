@@ -138,7 +138,7 @@ export default function SkusV2Page() {
       render: ({ recordId }) => recordId ? <div className="pt-1"><BomWhereUsed skuId={recordId} /></div> : null,
     }, {
       // 📜 ประวัติซื้อ-ขาย ของ SKU นี้ (ใบสั่งซื้อ/ใบขอซื้อ + ใบขาย/ใบเสนอราคา)
-      key: "trade_history", label: "ประวัติซื้อ-ขาย", icon: "📜",
+      key: "trade_history", label: "ประวัติซื้อ-ขาย-ผลิต", icon: "📜",
       render: ({ recordId }) => recordId ? <div className="p-3"><SkuTradeHistory skuId={recordId} /></div> : <div className="p-3 text-sm text-slate-400">บันทึกสินค้าก่อน แล้วประวัติจะมาแสดงที่นี่</div>,
     }],
   }), [toast, tr]);

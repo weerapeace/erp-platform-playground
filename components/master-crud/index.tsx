@@ -3253,7 +3253,7 @@ export function MasterRecordDrawer({
               ? <div className="pt-1"><BomWhereUsed skuId={recordId} /></div>
               : null },
             // 📜 ประวัติซื้อ-ขาย — แท็บของตัวเอง (PO/ใบขอซื้อ + ใบขาย/ใบเสนอราคา ของ SKU นี้)
-            { key: "trade_history", label: tr("ประวัติซื้อ-ขาย", "Buy & sell history"), icon: "📜", render: ({ recordId }) => recordId
+            { key: "trade_history", label: tr("ประวัติซื้อ-ขาย-ผลิต", "Buy / sell / production history"), icon: "📜", render: ({ recordId }) => recordId
               ? <div className="p-3"><SkuTradeHistory skuId={recordId} /></div>
               : <div className="p-3 text-sm text-slate-400">{tr("บันทึกสินค้าก่อน แล้วประวัติจะมาแสดงที่นี่", "Save the product first — history shows up here")}</div> },
           ]
