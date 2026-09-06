@@ -57,6 +57,7 @@ const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").t
 const SkuTaobaoSource = dynamic(() => import("@/components/sku-taobao-source").then((m) => m.SkuTaobaoSource), { ssr: false });
 // "ย้อน BOM" — สินค้าชิ้นนี้ถูกใช้เป็นวัตถุดิบในสูตรของสินค้าตัวไหนบ้าง (แปะในแท็บ BOM)
 const BomWhereUsed = dynamic(() => import("@/components/bom-where-used").then((m) => m.BomWhereUsed), { ssr: false });
+const SkuTradeHistory = dynamic(() => import("@/components/sku-trade-history").then((m) => m.SkuTradeHistory), { ssr: false });
 const AiProductDetailModal = dynamic(() => import("@/components/ai-product-detail").then((m) => m.AiProductDetailModal), { ssr: false });
 // หมวดกลางสำหรับลงขาย — picker ค้นหา + เพิ่มหมวดใหม่พร้อมจับคู่ร้านในตัว (ของกลาง)
 const CentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker), { ssr: false });
@@ -3251,6 +3252,10 @@ export function MasterRecordDrawer({
             { key: "bom_where_used", label: tr("ใช้ในสูตรของสินค้าอื่น", "Used in other products' BOM"), icon: "🔎", inTab: "bom", render: ({ recordId }) => recordId
               ? <div className="pt-1"><BomWhereUsed skuId={recordId} /></div>
               : null },
+            // 📜 ประวัติซื้อ-ขาย — แท็บของตัวเอง (PO/ใบขอซื้อ + ใบขาย/ใบเสนอราคา ของ SKU นี้)
+            { key: "trade_history", label: tr("ประวัติซื้อ-ขาย", "Buy & sell history"), icon: "📜", render: ({ recordId }) => recordId
+              ? <div className="p-3"><SkuTradeHistory skuId={recordId} /></div>
+              : <div className="p-3 text-sm text-slate-400">{tr("บันทึกสินค้าก่อน แล้วประวัติจะมาแสดงที่นี่", "Save the product first — history shows up here")}</div> },
           ]
         : undefined,
     };
