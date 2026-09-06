@@ -42,7 +42,7 @@ const CSS = `
   td.chk { width: 34px; text-align: center; font-size: 16px; }
   .tag { font-size: 10px; color: #4338ca; background: #eef2ff; border-radius: 3px; padding: 0 4px; }
   .ins { font-size: 11px; color: #475569; margin-top: 2px; white-space: pre-line; }
-  .foot { margin-top: 10px; display: flex; gap: 24px; font-size: 11px; color: #475569; }
+  .foot { margin-top: 10px; display: flex; gap: 24px; font-size: 11px; color: #475569; page-break-inside: avoid; break-inside: avoid; }
   .foot span { display: inline-block; border-bottom: 1px dotted #94a3b8; min-width: 140px; }
   .hint { font-size: 10px; color: #94a3b8; margin-top: 6px; }
   @media print { .hint { display: none; } .foot { margin-top: 4mm; } }
@@ -59,6 +59,7 @@ const CSS = `
      (A4 297 − ขอบ 20 − padding 18 − หัวใบ ≤40 − ท้าย 8 → ตาราง 196 มม.) */
   .grid { height: auto; }   /* ความสูงแถวคิดเป็น มม. ในโค้ด (sizeCss) เสมอ → แบ่งหน้าเองได้แม่นทุกโหมด */
   .grid tbody tr { page-break-inside: avoid; }
+  .grid td { padding-top: 3px; padding-bottom: 3px; }   /* ช่องไฟบน-ล่างเล็กลง ให้ 20 แถวลงหน้าเดียวพร้อมท้ายกระดาษ */
   .grid th.v { height: 20mm; }
   .grid td.piece { width: 22%; min-width: 28mm; }
   .grid td.piece small { color: #64748b; font-size: 10px; display: block; }
@@ -109,7 +110,8 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
   const named = pieces.map((p) => p.label).filter(Boolean).slice(0, PIECE_SLOTS);
   const pieceCols = [...named, ...Array.from({ length: PIECE_SLOTS - named.length }, () => "")];
   // ความสูงแถว: 0 = แบ่งเต็มหน้า A4 · ใส่ค่า = สูงตายตัวต่อแถว → แบ่งหน้าเอง (หัวใบซ้ำทุกหน้า + เลขหน้า x/y)
-  const ROW_AREA = 172, ROW_MIN = 7.9, ROW_GAP = 0.4;
+  // หัวตาราง 2 ชั้น (ชิ้นส่วน + หัวตั้ง) กินที่เพิ่ม → พื้นที่แถวเหลือ ~160 มม. (เผื่อท้ายกระดาษไม่หลุดไปหน้าใหม่)
+  const ROW_AREA = 160, ROW_MIN = 7.0, ROW_GAP = 0.4;
   const autoH = Math.max(ROW_MIN, Math.round((ROW_AREA / Math.max(1, Math.min(rows.length, 20)) - ROW_GAP) * 10) / 10);
   const rowH = rowHeightMm > 0 ? rowHeightMm : autoH;
   const sizeCss = `.grid td { height: ${rowH}mm; }`;
