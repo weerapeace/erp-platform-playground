@@ -119,14 +119,13 @@ function buildGridHtml(mo: MoHead, pieces: Piece[], cols: string[], rowCount: nu
   if (chunks.length === 0) chunks.push({ rows: [], offset: 0 });
   const tickTd = (c: string) => { const n = c.split("+").map((x) => x.trim()).filter(Boolean).length; return n > 1 ? `<td class="tickm"><span class="multi">${Array.from({ length: n - 1 }, (_, k) => `<i style="left:${((k + 1) / n) * 100}%"></i>`).join("")}</span></td>` : `<td class="tick"></td>`; };
   const rowHtml = (_p: Piece, i: number) => `<tr><td class="n">${i + 1}</td>
-      <td class="piece"></td>
       ${pieceCols.map(() => `<td class="pt"></td>`).join("")}
       <td class="qty"></td>
       ${cols.map(tickTd).join("")}
       <td></td></tr>`;
   // หัวตาราง 2 ชั้น: "ชิ้นส่วน" ครอบช่องชื่อ + คอลัมน์ย่อยชิ้นส่วน (หัวตั้ง) · คอลัมน์อื่น rowspan 2
-  const thead = `<thead><tr><th rowspan="2" style="width:22px">ลำดับ</th><th colspan="${1 + pieceCols.length}">ชิ้นส่วน</th><th rowspan="2" style="width:18mm;text-align:center">จำนวน</th>${cols.map((c) => `<th rowspan="2" class="v"><span>${esc(c)}</span></th>`).join("")}<th rowspan="2" style="width:14%">หมายเหตุ</th></tr>
-        <tr><th class="sub"></th>${pieceCols.map((c) => `<th class="v sub p"><span>${esc(c)}</span></th>`).join("")}</tr></thead>`;
+  const thead = `<thead><tr><th rowspan="2" style="width:22px">ลำดับ</th><th colspan="${pieceCols.length}">ชิ้นส่วน</th><th rowspan="2" style="width:18mm;text-align:center">จำนวน</th>${cols.map((c) => `<th rowspan="2" class="v"><span>${esc(c)}</span></th>`).join("")}<th rowspan="2" style="width:14%">หมายเหตุ</th></tr>
+        <tr>${pieceCols.map((c) => `<th class="v sub p"><span>${esc(c)}</span></th>`).join("")}</tr></thead>`;
   const pagesHtml = chunks.map((ch, pi) => `<div class="page">
     ${head(mo, "▦ ขั้นตอนการผลิต (ติ๊กตามชิ้น)", chunks.length > 1 ? `หน้า ${pi + 1}/${chunks.length}` : "")}
     <table class="grid">${thead}<tbody>${ch.rows.map((p, i) => rowHtml(p, ch.offset + i)).join("")}</tbody></table>
