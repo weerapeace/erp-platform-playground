@@ -438,6 +438,35 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // ------------------------------------------------------------
+  // 5b) เงินออก — บัตรเครดิต / วงเงินหมุนเวียน (debt_cards: ยอดตามใบแจ้งยอด − จ่ายแล้ว · เลื่อนไม่ได้)
+  // ------------------------------------------------------------
+  {
+    const cardRes = await db
+      .from("debt_cards")
+      .select("id, card_name, lender_name, statement_balance, paid_amount, minimum_due, due_date, status")
+      .eq("is_active", true).neq("status", "paid").not("due_date", "is", null).lte("due_date", to).limit(500);
+    for (const k of cardRes.data ?? []) {
+      const amount = Math.max(0, num(k.statement_balance) - num(k.paid_amount));
+      if (amount <= 0) continue;
+      const date = String(k.due_date).slice(0, 10);
+      events.push({
+        id: `card:${k.id}`,
+        date,
+        direction: "out",
+        source: "card",
+        certainty: "actual",
+        ref: String(k.card_name ?? "บัตรเครดิต"),
+        party: String(k.lender_name ?? "ธนาคาร"),
+        amount,
+        dateConfident: true,
+        note: date < today ? "เลยกำหนดชำระแล้ว — ถ้าจ่ายแล้วให้กรอก 'จ่ายแล้ว' ที่บัตร" : (num(k.minimum_due) > 0 && num(k.minimum_due) < amount ? `ขั้นต่ำ ${num(k.minimum_due).toLocaleString("th-TH")}` : undefined),
+        href: openLink("/debt-cards", String(k.id)),
+        docId: String(k.id),
+      });
+    }
+  }
+
+  // ------------------------------------------------------------
   // 6) เงินออก — ดอกเบี้ย OD (ประมาณการรายเดือน)
   // ------------------------------------------------------------
   {
