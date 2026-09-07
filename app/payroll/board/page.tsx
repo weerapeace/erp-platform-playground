@@ -65,6 +65,9 @@ export default function PayrollBoardPage() {
   const [sel, setSel] = useState<Card | null>(null);
   const [cfg, setCfg] = useState<BoardConfig>({ color_by: "contract_type", colors: {}, show_photo: true });
   const [cfgOpen, setCfgOpen] = useState(false);
+  // เมนูพิมพ์รายชื่อพนักงาน — เปิดหน้าพิมพ์กลาง /print/employee-board (ทุกแผนก / ทีละแผนก)
+  const [printOpen, setPrintOpen] = useState(false);
+  const printHref = (deptKey: string) => `/print/employee-board?dept=${encodeURIComponent(deptKey)}`;
 
   // pointer drag
   const dragRef = useRef<{ card: Card; fromZone: string; sx: number; sy: number } | null>(null);
@@ -187,6 +190,8 @@ export default function PayrollBoardPage() {
             <h2 className="font-semibold text-slate-800 truncate">{z.name}</h2>
             {sticky && <span className="text-[10px] text-slate-400" title="ปักไว้ซ้าย">📌</span>}
             <span className="text-sm font-normal text-slate-400 shrink-0">· {cards.length} คน</span>
+            <a href={printHref(z.key)} target="_blank" rel="noreferrer" title={`พิมพ์รายชื่อ ${z.name}`}
+              className="ml-auto shrink-0 text-slate-400 hover:text-slate-700 text-sm leading-none">🖨</a>
           </div>
           <div className="text-[13px] text-slate-500">ฐานเงินเดือนรวม <b className="text-slate-700 tabular-nums">{baht(zoneSalary(z.key))}</b></div>
           {z.manager_employee_id && (
@@ -226,6 +231,27 @@ export default function PayrollBoardPage() {
           <button onClick={() => setCfgOpen(true)} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">🎨 ตั้งค่าสี</button>
           {pending.length > 0 && <button onClick={() => void load()} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">↺ ยกเลิก</button>}
           <button onClick={() => void save()} disabled={pending.length === 0 || saving} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">{saving ? "กำลังบันทึก…" : `💾 บันทึกการย้าย${pending.length ? ` (${pending.length})` : ""}`}</button>
+          <div className="relative">
+            <button onClick={() => setPrintOpen((v) => !v)} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">🖨 พิมพ์ ▾</button>
+            {printOpen && (<>
+              <div className="fixed inset-0 z-40" onClick={() => setPrintOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 w-64 max-h-[70vh] overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
+                <a href={printHref("__all__")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-indigo-700 bg-indigo-50/60 hover:bg-indigo-50 font-medium">🖨 พิมพ์ทุกแผนก<div className="text-[11px] text-indigo-400 font-normal">แผนกละ 1 หน้า · {zones.length} แผนก</div></a>
+                <div className="px-3 pt-2 pb-1 text-[11px] text-slate-400 border-t border-slate-100">พิมพ์ทีละแผนก</div>
+                {zones.filter((z) => z.key !== NO_DEPT).map((z) => (
+                  <a key={z.key} href={printHref(z.key)} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="flex items-center justify-between px-3 py-1.5 text-slate-700 hover:bg-slate-50">
+                    <span className="truncate">{z.name}</span><span className="text-[11px] text-slate-400 shrink-0 ml-2">{(zoneCards[z.key] ?? []).length} คน</span>
+                  </a>
+                ))}
+                {(zoneCards[NO_DEPT] ?? []).length > 0 && (
+                  <a href={printHref(NO_DEPT)} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="flex items-center justify-between px-3 py-1.5 text-slate-500 hover:bg-slate-50 border-t border-slate-100">
+                    <span>ยังไม่ระบุแผนก</span><span className="text-[11px] text-slate-400">{(zoneCards[NO_DEPT] ?? []).length} คน</span>
+                  </a>
+                )}
+                {pending.length > 0 && <div className="px-3 py-2 text-[11px] text-amber-600 border-t border-slate-100">✋ มีการย้ายที่ยังไม่บันทึก {pending.length} คน — ใบพิมพ์จะใช้ข้อมูลที่บันทึกแล้วเท่านั้น</div>}
+              </div>
+            </>)}
+          </div>
           <Link href="/payroll/employees" className="h-9 px-3 inline-flex items-center text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">📋 ตาราง</Link>
         </div>
       </div>
