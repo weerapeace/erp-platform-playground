@@ -6,6 +6,7 @@
  *   dept=__none__  → เฉพาะคนที่ยังไม่ระบุแผนก
  *   dept=<id>      → แผนกเดียว
  *   salary=1       → แสดงคอลัมน์ฐานเงินเดือน (ปิดเป็นค่าเริ่มต้น — ข้อมูลอ่อนไหว)
+ *   layout=flow    → ทุกแผนกต่อเนื่องในชุดเดียว (หัวข้อคั่นแผนก ไม่ขึ้นหน้าใหม่ทุกแผนก — ประหยัดกระดาษ) · ค่าเริ่มต้น = แผนกละ 1 หน้า
  * ข้อมูลชุดเดียวกับหน้า "ผังพนักงาน (บอร์ด)" (/api/payroll/board) — เห็นเฉพาะที่บันทึกแล้ว (การย้ายที่ยังไม่กดบันทึกจะไม่ติดมา)
  * ของกลาง: ระบบพิมพ์ (buildReportHtmlMulti + PrintFrame) · apiFetch · r2ImageUrl
  */
@@ -14,7 +15,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { buildReportHtmlMulti, type ReportTemplate } from "@/lib/template";
+import { buildReportHtml, buildReportHtmlMulti, type ReportTemplate } from "@/lib/template";
 
 type Card = {
   id: string; employee_code: string; nickname: string; full_name: string;
@@ -62,7 +63,11 @@ tfoot td { background: #f8fafc; font-weight: 800; }
 .sign div { flex: 1; text-align: center; font-size: 10px; color: #6b7280; }
 .sign .line { border-top: 1px solid #94a3b8; margin-bottom: 1.5mm; padding-top: 10mm; }
 .note { font-size: 9.5px; color: #94a3b8; margin-top: 2mm; }
-.empty { text-align: center; color: #94a3b8; padding: 14mm 0; font-size: 12px; }`;
+.empty { text-align: center; color: #94a3b8; padding: 14mm 0; font-size: 12px; }
+.sec { margin-bottom: 5mm; break-inside: avoid; page-break-inside: avoid; }
+.sec-h { display: flex; justify-content: space-between; align-items: baseline; background: #e2e8f0; border: 1px solid #cbd5e1; border-bottom: 0; padding: 1.5mm 2.5mm; font-size: 12px; font-weight: 800; }
+.sec-h .sub { font-size: 10px; font-weight: 400; color: #475569; }
+.sec-h .star { color: #b45309; }`;
 
 const TEMPLATE: ReportTemplate = {
   paper_size: "A4", orientation: "portrait",
@@ -81,9 +86,29 @@ const TEMPLATE: ReportTemplate = {
   footer_html: "", custom_css: CSS,
 };
 
+// แบบต่อเนื่อง — ทุกแผนกอยู่ในชุดเดียว มีแถบหัวข้อคั่นแต่ละแผนก (แผนกเล็ก ๆ ไม่เปลืองกระดาษทั้งแผ่น)
+// ใช้ thead/tbody ชุดเดียวกับแบบแผนกละหน้า — แก้คอลัมน์ที่ TEMPLATE ที่เดียวแล้วทั้งสองแบบเปลี่ยนตาม
+const ROWS_HTML = TEMPLATE.body_html.match(/<tbody>[\s\S]*?<\/tbody>/)?.[0] ?? "";
+const HEAD_HTML = TEMPLATE.body_html.match(/<thead>[\s\S]*?<\/thead>/)?.[0] ?? "";
+const FLOW_TEMPLATE: ReportTemplate = {
+  ...TEMPLATE,
+  header_html: `<div class="hd">
+    <div><div class="t1">รายชื่อพนักงานทั้งหมด — แยกตามแผนก</div><div class="t2">{{dept_count}} แผนก · {{total_count}} คน{{#show_salary}} · ฐานเงินเดือนรวม {{grand_salary}}{{/show_salary}}</div></div>
+    <div class="no">ผังพนักงาน<br/>พิมพ์ {{printed_at}}</div>
+  </div>`,
+  body_html: `{{#depts}}<div class="sec">
+    <div class="sec-h"><span>{{dept_name}} <span class="sub">· {{headcount}} คน{{#manager_name}} · <span class="star">⭐</span> หัวหน้า: {{manager_name}}{{/manager_name}}</span></span>{{#show_salary}}<span class="sub">ฐานเงินเดือนรวม <b>{{total_salary}}</b></span>{{/show_salary}}</div>
+    {{#has_rows}}<table>${HEAD_HTML}${ROWS_HTML}</table>{{/has_rows}}
+    {{^has_rows}}<div class="empty" style="padding:4mm 0;border:1px solid #cbd5e1">ยังไม่มีพนักงาน</div>{{/has_rows}}
+  </div>{{/depts}}
+  <div class="note">ข้อมูลตามที่บันทึกไว้ในผังพนักงาน · ⭐ = หัวหน้าประจำแผนก</div>
+  <div class="sign"><div><div class="line"></div>ผู้จัดทำ</div><div><div class="line"></div>ฝ่ายบุคคล</div><div><div class="line"></div>ผู้อนุมัติ</div></div>`,
+};
+
 function Inner() {
   const sp = useSearchParams(); const router = useRouter();
   const dept = sp.get("dept") || ALL;
+  const flow = sp.get("layout") === "flow";
   const [showSalary, setShowSalary] = useState(sp.get("salary") === "1");
   const [data, setData] = useState<BoardResp | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -134,8 +159,15 @@ function Inner() {
       };
     });
     if (list.length === 0) return buildReportHtmlMulti(TEMPLATE, [{ dept_name: "ไม่พบแผนก", headcount: 0, has_rows: false, printed_at: printedAt }], "รายชื่อพนักงาน");
+    if (flow && list.length > 1) {
+      const grand = groups.reduce((t, g) => t + g.employees.reduce((x, c) => x + c.base_salary, 0), 0);
+      return buildReportHtml(FLOW_TEMPLATE, {
+        depts: list, dept_count: list.length, total_count: groups.reduce((t, g) => t + g.headcount, 0),
+        show_salary: showSalary, grand_salary: baht(grand), printed_at: printedAt,
+      }, "รายชื่อพนักงานทั้งหมด — แยกตามแผนก");
+    }
     return buildReportHtmlMulti(TEMPLATE, list, `รายชื่อพนักงาน — ${list.length === 1 ? list[0].dept_name : "ทุกแผนก"}`);
-  }, [data, groups, showSalary]);
+  }, [data, groups, showSalary, flow]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -145,7 +177,7 @@ function Inner() {
     return () => window.removeEventListener("keydown", onKey);
   }, [html]);
 
-  const title = groups.length === 1 ? groups[0].department_name : `ทุกแผนก (${groups.length} แผนก)`;
+  const title = groups.length === 1 ? groups[0].department_name : `ทุกแผนก (${groups.length} แผนก${flow ? " · ต่อเนื่อง" : " · แผนกละหน้า"})`;
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-6 py-3">
@@ -154,6 +186,14 @@ function Inner() {
         <label className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
           <input type="checkbox" checked={showSalary} onChange={(e) => setShowSalary(e.target.checked)} /> แสดงฐานเงินเดือน
         </label>
+        {groups.length > 1 && (
+          <span className="inline-flex rounded-lg border border-slate-200 bg-white overflow-hidden text-sm">
+            {([["page", "แผนกละหน้า"], ["flow", "ต่อเนื่อง (ประหยัดกระดาษ)"]] as const).map(([k, label]) => (
+              <button key={k} onClick={() => router.replace(`/print/employee-board?dept=${encodeURIComponent(dept)}${k === "flow" ? "&layout=flow" : ""}${showSalary ? "&salary=1" : ""}`)}
+                className={`px-3 h-9 ${(flow ? "flow" : "page") === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+            ))}
+          </span>
+        )}
         <div className="flex-1" />
         <button onClick={() => printReportHtmlInNewWindow(html)} disabled={!html}
           className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>

@@ -232,11 +232,15 @@ export default function PayrollBoardPage() {
           {pending.length > 0 && <button onClick={() => void load()} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">↺ ยกเลิก</button>}
           <button onClick={() => void save()} disabled={pending.length === 0 || saving} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">{saving ? "กำลังบันทึก…" : `💾 บันทึกการย้าย${pending.length ? ` (${pending.length})` : ""}`}</button>
           <div className="relative">
-            <button onClick={() => setPrintOpen((v) => !v)} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">🖨 พิมพ์ ▾</button>
+            <span className="inline-flex h-9 rounded-lg border border-slate-300 overflow-hidden text-sm text-slate-600 whitespace-nowrap">
+              <a href={printHref("__all__")} target="_blank" rel="noreferrer" title="พิมพ์พนักงานทั้งหมด แยกเป็นแต่ละแผนก (แผนกละ 1 หน้า)" className="px-3 inline-flex items-center hover:bg-slate-50">🖨 พิมพ์ทั้งหมด</a>
+              <button onClick={() => setPrintOpen((v) => !v)} title="เลือกพิมพ์ทีละแผนก / แบบต่อเนื่อง" className="px-2 border-l border-slate-300 hover:bg-slate-50">▾</button>
+            </span>
             {printOpen && (<>
               <div className="fixed inset-0 z-40" onClick={() => setPrintOpen(false)} />
               <div className="absolute right-0 top-full mt-1 z-50 w-64 max-h-[70vh] overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
-                <a href={printHref("__all__")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-indigo-700 bg-indigo-50/60 hover:bg-indigo-50 font-medium">🖨 พิมพ์ทุกแผนก<div className="text-[11px] text-indigo-400 font-normal">แผนกละ 1 หน้า · {zones.length} แผนก</div></a>
+                <a href={printHref("__all__")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-indigo-700 bg-indigo-50/60 hover:bg-indigo-50 font-medium">🖨 พิมพ์ทุกแผนก — แผนกละ 1 หน้า<div className="text-[11px] text-indigo-400 font-normal">{zones.length} แผนก · เหมาะแจกให้หัวหน้าแต่ละแผนก</div></a>
+                <a href={`${printHref("__all__")}&layout=flow`} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">📄 พิมพ์ทุกแผนก — ต่อเนื่องชุดเดียว<div className="text-[11px] text-slate-400">หัวข้อคั่นแต่ละแผนก ประหยัดกระดาษ · {total} คน</div></a>
                 <div className="px-3 pt-2 pb-1 text-[11px] text-slate-400 border-t border-slate-100">พิมพ์ทีละแผนก</div>
                 {zones.filter((z) => z.key !== NO_DEPT).map((z) => (
                   <a key={z.key} href={printHref(z.key)} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="flex items-center justify-between px-3 py-1.5 text-slate-700 hover:bg-slate-50">
