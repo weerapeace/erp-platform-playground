@@ -197,6 +197,8 @@ export type MenuRow = {
   show_in_sidebar: boolean; show_in_launcher: boolean;
   permission_key: string | null; is_active: boolean;
   app_keys?: string[];   // โมดูลใหญ่ (App) ที่เมนูนี้สังกัด — many-to-many
+  /** ชื่อหมวด/ป้าย/ลำดับ เฉพาะแอป — เมนูเดียวกันโผล่หลายแอปแต่จัดหมวดต่างกัน (เช่น "สั่งซื้อ" อยู่หมวด "เงินออก" ในแอปการเงิน) */
+  app_overrides?: Record<string, { section?: string; label?: string; sort?: number }>;
   module_key?: string | null;   // โมดูลที่เมนูนี้ผูก (สำหรับหมวด ⚙ ตั้งค่า) — ตั้งที่ /admin/menu
   parent_id?: string | null;   // เมนูแม่ — ถ้ามี เมนูนี้เป็นลูกโผล่ใน dropdown ของแม่ (null = เมนูหลัก)
 };
@@ -493,7 +495,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     let target: string | undefined;
     if (matches.length > 0) {
       const best = matches.sort((a, b) => (b.href?.length ?? 0) - (a.href?.length ?? 0))[0];
-      const keys = best.app_keys ?? [];
+      // หน้าเดียวกันอาจมีเมนูหลายแถว (แต่ละแอปตั้งชื่อหมวดของตัวเอง เช่น "สั่งซื้อ" อยู่ทั้งแอปจัดซื้อและหมวด "เงินออก" ของแอปการเงิน)
+      // → รวม app_keys ของทุกแถวที่ href เดียวกัน ไม่งั้นกดเมนูจากแอปการเงินแล้วเด้งไปแอปจัดซื้อ
+      const keys = [...new Set(matches.filter((r) => r.href === best.href).flatMap((r) => r.app_keys ?? []))];
       // ผู้ใช้เพิ่งกดแท็บเอง + หน้านี้เป็นของแอปที่กด → เคารพการเลือก (กันเด้งไป app_keys ตัวแรก เช่น "จ่ายงาน")
       const picked = pickedAppRef.current;
       if (picked && keys.includes(picked) && appGroups.some((a) => a.key === picked)) {
@@ -524,7 +528,12 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     let rows = fromRegistry ? menuRows!.filter((r) => r.is_active && r.show_in_sidebar) : null;
     // กรองตามโมดูลใหญ่ (App) ที่เลือก — ถ้ามี App + เลือกอยู่
     if (rows && activeApp && appGroups.length > 0) {
-      rows = rows.filter((r) => (r.app_keys ?? []).includes(activeApp));
+      rows = rows.filter((r) => (r.app_keys ?? []).includes(activeApp))
+        // ใช้ชื่อหมวด/ป้าย/ลำดับที่แอปนี้กำหนดเอง (erp_menu_items.app_overrides) ถ้ามี
+        .map((r) => {
+          const ov = r.app_overrides?.[activeApp];
+          return ov ? { ...r, section: ov.section ?? r.section, label: ov.label ?? r.label, sort_order: ov.sort ?? r.sort_order } : r;
+        });
     }
     // ทะเบียนหมวด (ไอคอน/ลำดับ) ของแอปที่เปิดอยู่ → ใช้จัดลำดับ + แสดงไอคอนหัวหมวด
     const secMeta = new Map<string, SectionMeta>();
@@ -580,7 +589,8 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         const best = matches.sort((a, b) => (b.href?.length ?? 0) - (a.href?.length ?? 0))[0];
         // หน้าที่อยู่หลายแอป (เช่น SKUs อยู่ทั้ง master+purchasing) → ยึดแอปที่เปิดอยู่ก่อน
         // (ไม่งั้น favicon/ชื่อแท็บ/ตัวกันสิทธิ์จะเดาเป็น app_key ตัวแรกเสมอ = เด้งเป็น Master Data)
-        const valid = (best.app_keys ?? []).filter((x) => appGroups.some((a) => a.key === x));
+        const allKeys = [...new Set(matches.filter((r) => r.href === best.href).flatMap((r) => r.app_keys ?? []))];
+        const valid = allKeys.filter((x) => appGroups.some((a) => a.key === x));
         if (valid.length) return (activeApp && valid.includes(activeApp)) ? activeApp : valid[0];
       }
     }
