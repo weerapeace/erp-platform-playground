@@ -207,8 +207,8 @@ export default function BankDebtsPage() {
                   )}
                 </div>
                 <div>
-                  <div className="text-[11px] text-slate-400">{it.kind === "od" ? "ดอกเบี้ยเดือนนี้" : it.kind === "card" ? "ขั้นต่ำ / ต้องจ่าย" : "ต่อเดือน"}</div>
-                  <div className="font-semibold tabular-nums text-slate-800">{it.monthly > 0 ? THB(it.monthly) : <span className="text-slate-300">—</span>}</div>
+                  <div className="text-[11px] text-slate-400">{it.kind === "od" ? "ดอกเบี้ยเดือนนี้" : it.kind === "card" ? "ขั้นต่ำ / ต้องจ่าย" : it.lump_sum ? "วิธีชำระ" : "ต่อเดือน"}</div>
+                  <div className="font-semibold tabular-nums text-slate-800">{it.lump_sum ? <span className="text-sm text-amber-700">คืนก้อนเดียว</span> : it.monthly > 0 ? THB(it.monthly) : <span className="text-slate-300">—</span>}</div>
                 </div>
                 <div>
                   <div className="text-[11px] text-slate-400">{it.kind === "od" ? "ต่ออายุ" : "งวดถัดไป"}</div>

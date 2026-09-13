@@ -41,6 +41,8 @@ export type DebtItem = {
   progress: number | null;
   progress_label: string;
   has_schedule: boolean;
+  /** กู้ก้อนเดียวคืนทีเดียว (ตารางผ่อน 1 งวด) — ไม่มี "ต่อเดือน" */
+  lump_sum: boolean;
   restructure_count: number;
   lifecycle: string;
   /** ป้ายสถานะที่หน้าจอโชว์ — บอกว่า "ต้องทำอะไรต่อ" */
@@ -66,7 +68,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const today = todayISO();
   const [loansRes, odRes, cardsRes, compRes] = await Promise.all([
     db.from("loan_contracts")
-      .select("id, loan_code, loan_name, lender_name, loan_type, contract_no, lifecycle_status, repayment_health, owner_type, company_id, interest_rate, outstanding_principal, contracted_principal, approved_limit, principal_paid_amount, estimated_monthly_payment, next_due_date, next_due_amount, total_installment_count, paid_installment_count, restructure_count, last_restructure_date, end_date, lump_sum_due_date, note")
+      .select("id, loan_code, loan_name, lender_name, loan_type, contract_no, lifecycle_status, repayment_health, owner_type, company_id, interest_rate, outstanding_principal, contracted_principal, approved_limit, principal_paid_amount, estimated_monthly_payment, monthly_estimate_source, next_due_date, next_due_amount, total_installment_count, paid_installment_count, restructure_count, last_restructure_date, end_date, lump_sum_due_date, note")
       .eq("is_active", true).limit(500),
     db.from("od_facilities")
       .select("id, od_code, lender_name, bank_account, lifecycle_status, owner_type, company_id, interest_rate, limit_amount, current_used_amount, available_limit, utilization_percent, estimated_interest_this_month, expiry_date, review_date, note")
@@ -95,6 +97,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const paidPri = num(c.principal_paid_amount);
     const totalN = num(c.total_installment_count), paidN = num(c.paid_installment_count);
     const hasSchedule = totalN > 0;
+    const lumpSum = totalN === 1 || String(c.monthly_estimate_source ?? "") === "lump_sum";
     const nextDue = c.next_due_date ? String(c.next_due_date) : (c.lump_sum_due_date ? String(c.lump_sum_due_date) : null);
     const flags: DebtItem["flags"] = [];
     if (status === "draft") flags.push({ key: "draft", label: "ร่าง", tone: "grey" });
@@ -112,11 +115,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       product: LOAN_TYPE[String(c.loan_type)] ?? String(c.loan_type ?? ""),
       owner_type: String(c.owner_type ?? "company"), company_id: c.company_id ? String(c.company_id) : null, company_name: compName(c.company_id),
       outstanding, limit: num(c.approved_limit) > 0 ? num(c.approved_limit) : null,
-      monthly: num(c.estimated_monthly_payment), rate: c.interest_rate == null ? null : num(c.interest_rate),
+      monthly: lumpSum ? 0 : num(c.estimated_monthly_payment), rate: c.interest_rate == null ? null : num(c.interest_rate),
       next_due_date: nextDue, next_due_amount: num(c.next_due_amount),
       progress: base > 0 ? Math.max(0, Math.min(100, Math.round((paidPri / base) * 100))) : null,
-      progress_label: hasSchedule ? `ผ่อนแล้ว ${paidN}/${totalN} งวด` : (base > 0 ? `ผ่อนแล้ว ${Math.round((paidPri / base) * 100)}% ของ ${fmtM(base)}` : ""),
-      has_schedule: hasSchedule, restructure_count: num(c.restructure_count), lifecycle: status,
+      progress_label: lumpSum ? "ชำระทั้งหมดครั้งเดียว" : hasSchedule ? `ผ่อนแล้ว ${paidN}/${totalN} งวด` : (base > 0 ? `ผ่อนแล้ว ${Math.round((paidPri / base) * 100)}% ของ ${fmtM(base)}` : ""),
+      has_schedule: hasSchedule, lump_sum: lumpSum, restructure_count: num(c.restructure_count), lifecycle: status,
       flags, end_date: c.end_date ? String(c.end_date) : null, note: String(c.note ?? ""),
     });
   }
@@ -140,7 +143,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       outstanding: used, limit, monthly: num(o.estimated_interest_this_month), rate: o.interest_rate == null ? null : num(o.interest_rate),
       next_due_date: null, next_due_amount: 0,
       progress: util, progress_label: `ใช้ไป ${util}% ของวงเงิน · เหลือ ${fmtM(Math.max(0, limit - used))}`,
-      has_schedule: false, restructure_count: 0, lifecycle: status, flags,
+      has_schedule: false, lump_sum: false, restructure_count: 0, lifecycle: status, flags,
       end_date: o.expiry_date ? String(o.expiry_date) : null, note: String(o.note ?? ""),
     });
   }
@@ -168,7 +171,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       next_due_date: status === "paid" ? null : due, next_due_amount: status === "paid" ? 0 : outstanding,
       progress: limit > 0 ? Math.max(0, Math.min(100, Math.round((bal / limit) * 100))) : null,
       progress_label: limit > 0 ? `ใช้ไป ${Math.round((bal / limit) * 100)}% ของวงเงิน${k.statement_date ? ` · ใบแจ้งยอด ${String(k.statement_date)}` : ""}` : (k.statement_date ? `ใบแจ้งยอด ${String(k.statement_date)}` : ""),
-      has_schedule: false, restructure_count: 0, lifecycle: status, flags,
+      has_schedule: false, lump_sum: false, restructure_count: 0, lifecycle: status, flags,
       end_date: null, note: String(k.note ?? ""),
     });
   }
