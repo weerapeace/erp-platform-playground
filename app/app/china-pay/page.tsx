@@ -181,6 +181,62 @@ async function downloadOrSaveImage(blob: Blob, filename: string): Promise<void> 
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// บันทึกหลายรูปพร้อมกัน — iPhone: share sheet ครั้งเดียวได้ทุกรูป · desktop/Android: โหลดทีละไฟล์เว้นช่วงสั้น ๆ
+// (Chrome จะถามอนุญาต "ดาวน์โหลดหลายไฟล์" ครั้งแรก — กด "อนุญาต" แล้วครั้งต่อไปไม่ถามอีก)
+async function downloadOrSaveImages(files: { blob: Blob; name: string }[]): Promise<void> {
+  if (files.length <= 1) { if (files[0]) await downloadOrSaveImage(files[0].blob, files[0].name); return; }
+  const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+  const ua = navigator.userAgent;
+  const isIOS = /iP(hone|ad|od)/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (isIOS && nav.canShare) {
+    const fs = files.map(f => new File([f.blob], f.name, { type: f.blob.type || "image/png" }));
+    if (nav.canShare({ files: fs })) { await nav.share({ files: fs }); return; }
+  }
+  for (let i = 0; i < files.length; i++) {
+    if (i > 0) await new Promise(r => setTimeout(r, 400));
+    await downloadOrSaveImage(files[i].blob, files[i].name);
+  }
+}
+
+// ---------------- วาดใบสรุปการโอนลง canvas (ของกลางของ TransferReceiptPopup ใช้ทั้งรวมบิล/แยกบิล) ----------------
+type ReceiptRow = { t: "kv" | "sep" | "head" | "sub"; l?: string; r?: string; bold?: boolean; color?: string };
+function drawTransferReceipt(cv: HTMLCanvasElement, subtitle: string, rows: ReceiptRow[]): void {
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const W = 600, headerH = 96, padX = 36, padTop = 24, padBottom = 36;
+  const hOf = (r: ReceiptRow) => r.t === "sep" ? 18 : r.t === "sub" ? 26 : r.t === "head" ? 40 : 40;
+  const H = headerH + padTop + rows.reduce((a, r) => a + hOf(r), 0) + padBottom;
+  cv.width = W * DPR; cv.height = H * DPR;
+  const ctx = cv.getContext("2d"); if (!ctx) return;
+  ctx.scale(DPR, DPR);
+  const FONT = "'Noto Sans Thai','Sarabun',-apple-system,'Segoe UI',sans-serif";
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  const grad = ctx.createLinearGradient(0, 0, W, 0); grad.addColorStop(0, "#10b981"); grad.addColorStop(1, "#0d9488");
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, headerH);
+  ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+  ctx.font = `bold 28px ${FONT}`; ctx.fillText("💸 ใบสรุปการโอนเงินจีน", padX, 38);
+  ctx.font = `15px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.9)";
+  ctx.fillText(subtitle, padX, 70);
+  let y = headerH + padTop;
+  const padR = 56;   // ขอบขวากว้างพิเศษ กันค่าชนขอบ/โดนตัด
+  // วาดตัวเลขชิดขวาแบบวัดความกว้างเอง (textAlign:"right" เพี้ยนบน iOS → ค่า ฿ ถูกดันเลยขอบ)
+  const fit = (text: string, size: number, bold: boolean, color: string, leftBound: number) => {
+    const maxW = (W - padR) - leftBound; let s = size; ctx.fillStyle = color; ctx.textAlign = "left";
+    do { ctx.font = `${bold ? "bold " : ""}${s}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; s -= 1; } while (s > 9);
+    const tw = ctx.measureText(text).width;
+    ctx.fillText(text, (W - padR) - tw, y);
+  };
+  for (const r of rows) {
+    const h = hOf(r);
+    if (r.t === "sep") { ctx.strokeStyle = "#e5e7eb"; ctx.beginPath(); ctx.moveTo(padX, y + 9); ctx.lineTo(W - padX, y + 9); ctx.stroke(); y += h; continue; }
+    const my = y + h / 2;
+    const oldY = y; y = my; // fit() uses y
+    if (r.t === "head") { ctx.textAlign = "left"; ctx.fillStyle = "#0f766e"; ctx.font = `bold 17px ${FONT}`; ctx.fillText(r.l ?? "", padX, my); }
+    else if (r.t === "sub") { ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `14px ${FONT}`; ctx.fillText(r.l ?? "", padX + 8, my); }
+    else { ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `17px ${FONT}`; const lw = r.l ? ctx.measureText(r.l).width : 0; if (r.l) ctx.fillText(r.l, padX, my); fit(r.r ?? "", r.bold ? 20 : 18, !!r.bold, r.color ?? "#1e293b", padX + lw + 16); }
+    y = oldY + h;
+  }
+}
+
 // ขอเรท — ส่งข้อความเข้า LINE กลุ่มอัตโนมัติ (ไม่เด้ง share แล้ว) คืน true ถ้าส่งสำเร็จ
 async function requestRateViaLine(toast: ReturnType<typeof useToast>): Promise<boolean> {
   const text = "ขอเรทเงินด้วยค่ะ";
@@ -3877,94 +3933,106 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
   }, []);
   const feeOf = (l: Record<string, unknown>) => extras?.feeByBill[String(l.bill_id)] ?? 0;
 
-  // วาดใบสรุปการโอนลง canvas (สำหรับโหลดเป็นรูป)
-  useEffect(() => {
-    const cv = canvasRef.current; if (!cv) return;
-    type Row = { t: "kv" | "sep" | "head" | "sub"; l?: string; r?: string; bold?: boolean; color?: string };
+  // ---- แถวข้อมูลของใบสรุป (ใช้ร่วมกันทั้ง "รวมบิล" และ "แยกบิล") ----
+  const summaryRows = (): ReceiptRow[] => {
     const bd = t.breakdown as Record<string, unknown> | undefined;
-    const rows: Row[] = [
-      ...(t.ref_no ? [{ t: "kv", l: "เลขอ้างอิง", r: String(t.ref_no) } as Row] : []),
+    return [
+      ...(t.ref_no ? [{ t: "kv", l: "เลขอ้างอิง", r: String(t.ref_no) } as ReceiptRow] : []),
       { t: "kv", l: "โอนจริง", r: "฿" + fmt(num(t.transferred)), bold: true },
       ...(bd ? [
-        ...(num(bd.thb) > 0 ? [{ t: "kv", l: "หัก ค่าส่ง/VAT", r: "−฿" + fmt(num(bd.thb)), color: "#e11d48" } as Row] : []),
-        { t: "kv", l: "คงเหลือ", r: "฿" + fmt(num(bd.chinaRemainThb)) } as Row,
-        { t: "kv", l: `เรทที่ใช้ (ชั้น ${String(bd.tier ?? "")})`, r: fmt(num(t.rate)) } as Row,
-        { t: "kv", l: "เป็นเงินจีน", r: "¥" + fmt(+num(bd.chinaYuanBought).toFixed(2)) } as Row,
-        ...(num(bd.shortfallRmb) > 0 ? [{ t: "kv", l: "หัก ยอดคงเหลือจีน", r: "¥" + fmt(+num(bd.shortfallRmb).toFixed(2)), color: "#ea580c" } as Row] : []),
-        { t: "kv", l: "รวมยอด (บิลจีน)", r: "¥" + fmt(num(t.selectedRmb)), bold: true } as Row,
-      ] : [{ t: "kv", l: "เรทที่ใช้", r: fmt(num(t.rate)) } as Row]),
+        ...(num(bd.thb) > 0 ? [{ t: "kv", l: "หัก ค่าส่ง/VAT", r: "−฿" + fmt(num(bd.thb)), color: "#e11d48" } as ReceiptRow] : []),
+        { t: "kv", l: "คงเหลือ", r: "฿" + fmt(num(bd.chinaRemainThb)) } as ReceiptRow,
+        { t: "kv", l: `เรทที่ใช้ (ชั้น ${String(bd.tier ?? "")})`, r: fmt(num(t.rate)) } as ReceiptRow,
+        { t: "kv", l: "เป็นเงินจีน", r: "¥" + fmt(+num(bd.chinaYuanBought).toFixed(2)) } as ReceiptRow,
+        ...(num(bd.shortfallRmb) > 0 ? [{ t: "kv", l: "หัก ยอดคงเหลือจีน", r: "¥" + fmt(+num(bd.shortfallRmb).toFixed(2)), color: "#ea580c" } as ReceiptRow] : []),
+        { t: "kv", l: "รวมยอด (บิลจีน)", r: "¥" + fmt(num(t.selectedRmb)), bold: true } as ReceiptRow,
+      ] : [{ t: "kv", l: "เรทที่ใช้", r: fmt(num(t.rate)) } as ReceiptRow]),
       { t: "kv", l: "เข้าบัญชีจีน (ส่วนต่าง)", r: "¥" + fmt(+num(t.chinaInRmb).toFixed(2)), color: "#059669" },
-      ...(extras ? [{ t: "kv", l: "ยอดคงเหลือบัญชีจีน", r: "¥" + fmt(+extras.balanceRmb.toFixed(2)), bold: true, color: "#059669" } as Row] : []),
+      ...(extras ? [{ t: "kv", l: "ยอดคงเหลือบัญชีจีน", r: "¥" + fmt(+extras.balanceRmb.toFixed(2)), bold: true, color: "#059669" } as ReceiptRow] : []),
     ];
+  };
+  // แถวของบิลจีน 1 ใบ (ชื่อร้าน + ยอด + ข้อมูลบัญชี)
+  const chinaBillRows = (l: Record<string, unknown>): ReceiptRow[] => {
+    const sp = (l.sup ?? {}) as Record<string, unknown>;
+    const fee = feeOf(l); const base = num(l.paid_rmb) - fee;
+    const rows: ReceiptRow[] = [{ t: "kv", l: String(l.label || "—") + (fee > 0 ? ` (ค่าโอน ¥${fmt(fee)})` : ""), r: "¥" + fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb)), bold: true }];
+    if (sp.name_en) rows.push({ t: "sub", l: String(sp.name_en) });
+    if (sp.phone) rows.push({ t: "sub", l: "โทร: " + String(sp.phone) });
+    if (sp.bank_account_name) rows.push({ t: "sub", l: "ชื่อบัญชี: " + String(sp.bank_account_name) });
+    if (sp.account_number) rows.push({ t: "sub", l: "เลขบัญชี: " + String(sp.account_number) });
+    if (sp.bank_name_brief) rows.push({ t: "sub", l: "ธนาคาร: " + String(sp.bank_name_brief) });
+    return rows;
+  };
+  // แถวของบิล CTW 1 ใบ
+  const ctwBillRows = (l: Record<string, unknown>): ReceiptRow[] => {
+    const d = extras?.ctwDateByBill[String(l.bill_id)];
+    return [
+      { t: "kv", l: String(l.doc_number || "—"), r: "฿" + fmt(num(l.paid_thb)), bold: true },
+      { t: "sub", l: String(l.label || "—") + (d ? ` · ${d}` : "") },
+    ];
+  };
+  const headerSub = `เลขโอน ${String(t.transfer_no ?? "—")} · ${String(t.date ?? "")}`;
+
+  // วาดใบสรุปการโอน "รวมบิล" ลง canvas (ใช้ทั้งโหลดรูปและส่ง LINE)
+  useEffect(() => {
+    const cv = canvasRef.current; if (!cv) return;
+    const rows: ReceiptRow[] = summaryRows();
     if (cn.length) {
       rows.push({ t: "sep" }, { t: "head", l: `บิลจีน (${cn.length})` });
-      cn.forEach((l, i) => {
-        if (i > 0) rows.push({ t: "sep" });   // เส้นแบ่งระหว่างร้าน
-        const sp = (l.sup ?? {}) as Record<string, unknown>;
-        const fee = feeOf(l); const base = num(l.paid_rmb) - fee;
-        rows.push({ t: "kv", l: String(l.label || "—") + (fee > 0 ? ` (ค่าโอน ¥${fmt(fee)})` : ""), r: "¥" + fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb)), bold: true });
-        if (sp.name_en) rows.push({ t: "sub", l: String(sp.name_en) });
-        if (sp.phone) rows.push({ t: "sub", l: "โทร: " + String(sp.phone) });
-        if (sp.bank_account_name) rows.push({ t: "sub", l: "ชื่อบัญชี: " + String(sp.bank_account_name) });
-        if (sp.account_number) rows.push({ t: "sub", l: "เลขบัญชี: " + String(sp.account_number) });
-        if (sp.bank_name_brief) rows.push({ t: "sub", l: "ธนาคาร: " + String(sp.bank_name_brief) });
-      });
+      cn.forEach((l, i) => { if (i > 0) rows.push({ t: "sep" }); rows.push(...chinaBillRows(l)); });   // เส้นแบ่งระหว่างร้าน
     }
     if (cw.length) {
       rows.push({ t: "sep" }, { t: "head", l: `บิล CTW (${cw.length})` });
-      cw.forEach(l => {
-        rows.push({ t: "kv", l: String(l.doc_number || "—"), r: "฿" + fmt(num(l.paid_thb)), bold: true });
-        const d = extras?.ctwDateByBill[String(l.bill_id)];
-        rows.push({ t: "sub", l: String(l.label || "—") + (d ? ` · ${d}` : "") });
-      });
+      cw.forEach(l => rows.push(...ctwBillRows(l)));
     }
-    const DPR = Math.min(window.devicePixelRatio || 1, 2);
-    const W = 600, headerH = 96, padX = 36, padTop = 24, padBottom = 36;
-    const hOf = (r: Row) => r.t === "sep" ? 18 : r.t === "sub" ? 26 : r.t === "head" ? 40 : 40;
-    const H = headerH + padTop + rows.reduce((a, r) => a + hOf(r), 0) + padBottom;
-    cv.width = W * DPR; cv.height = H * DPR; cv.style.width = "100%"; cv.style.height = "auto";
-    const ctx = cv.getContext("2d"); if (!ctx) return;
-    ctx.scale(DPR, DPR);
-    const FONT = "'Noto Sans Thai','Sarabun',-apple-system,'Segoe UI',sans-serif";
-    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-    const grad = ctx.createLinearGradient(0, 0, W, 0); grad.addColorStop(0, "#10b981"); grad.addColorStop(1, "#0d9488");
-    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, headerH);
-    ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
-    ctx.font = `bold 28px ${FONT}`; ctx.fillText("💸 ใบสรุปการโอนเงินจีน", padX, 38);
-    ctx.font = `15px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.9)";
-    ctx.fillText(`เลขโอน ${String(t.transfer_no ?? "—")} · ${String(t.date ?? "")}`, padX, 70);
-    let y = headerH + padTop;
-    const padR = 56;   // ขอบขวากว้างพิเศษ กันค่าชนขอบ/โดนตัด
-    // วาดตัวเลขชิดขวาแบบวัดความกว้างเอง (textAlign:"right" เพี้ยนบน iOS → ค่า ฿ ถูกดันเลยขอบ)
-    const fit = (text: string, size: number, bold: boolean, color: string, leftBound: number) => {
-      const maxW = (W - padR) - leftBound; let s = size; ctx.fillStyle = color; ctx.textAlign = "left";
-      do { ctx.font = `${bold ? "bold " : ""}${s}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; s -= 1; } while (s > 9);
-      const tw = ctx.measureText(text).width;
-      ctx.fillText(text, (W - padR) - tw, y);
-    };
-    for (const r of rows) {
-      const h = hOf(r);
-      if (r.t === "sep") { ctx.strokeStyle = "#e5e7eb"; ctx.beginPath(); ctx.moveTo(padX, y + 9); ctx.lineTo(W - padX, y + 9); ctx.stroke(); y += h; continue; }
-      const my = y + h / 2;
-      const oldY = y; y = my; // fit() uses y
-      if (r.t === "head") { ctx.textAlign = "left"; ctx.fillStyle = "#0f766e"; ctx.font = `bold 17px ${FONT}`; ctx.fillText(r.l ?? "", padX, my); }
-      else if (r.t === "sub") { ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `14px ${FONT}`; ctx.fillText(r.l ?? "", padX + 8, my); }
-      else { ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `17px ${FONT}`; const lw = r.l ? ctx.measureText(r.l).width : 0; if (r.l) ctx.fillText(r.l, padX, my); fit(r.r ?? "", r.bold ? 20 : 18, !!r.bold, r.color ?? "#1e293b", padX + lw + 16); }
-      y = oldY + h;
-    }
+    drawTransferReceipt(cv, headerSub, rows);
+    cv.style.width = "100%"; cv.style.height = "auto";
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t, cn, cw, fontsReady, extras]);
 
-  const saveImage = async () => {
+  const fileSafe = (s: string) => s.replace(/[\\/:*?"<>|]/g, "_");
+  const canvasBlob = (cv: HTMLCanvasElement | null) => new Promise<Blob | null>(res => cv ? cv.toBlob(res, "image/png") : res(null));
+
+  // โหลดรูป "รวมบิล" = รูปเดียวมีทุกบิล
+  const saveImageAll = async () => {
     setBusy(true);
     try {
-      const cv = canvasRef.current; const blob = await new Promise<Blob | null>(res => cv ? cv.toBlob(res, "image/png") : res(null));
+      const blob = await canvasBlob(canvasRef.current);
       if (!blob) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
-      const name = `china-transfer-${String(t.transfer_no ?? "")}.png`.replace(/[\\/:*?"<>|]/g, "_");
-      await downloadOrSaveImage(blob, name);
+      await downloadOrSaveImages([{ blob, name: fileSafe(`china-transfer-${String(t.transfer_no ?? "")}.png`) }]);
       toast.success("บันทึกรูปแล้ว");
     } catch (e) { if ((e as Error).name !== "AbortError") toast.error(String((e as Error).message ?? e)); }
     finally { setBusy(false); }
   };
+
+  // โหลดรูป "แยกบิล" = บิลละ 1 รูป (หัวใบเดียวกัน + เรท + ข้อมูลร้าน/บัญชีของบิลนั้น)
+  const saveImageEach = async () => {
+    setBusy(true);
+    try {
+      const total = cn.length + cw.length;
+      if (!total) { toast.error("รายการโอนนี้ไม่มีบิล"); return; }
+      const rateRow: ReceiptRow = { t: "kv", l: "เรทที่ใช้", r: fmt(num(t.rate)) };
+      const files: { blob: Blob; name: string }[] = [];
+      let idx = 0;
+      const render = async (rows: ReceiptRow[], tag: string) => {
+        idx += 1;
+        const cv = document.createElement("canvas");
+        drawTransferReceipt(cv, `${headerSub} · บิล ${idx}/${total}`, rows);
+        const blob = await canvasBlob(cv);
+        if (blob) files.push({ blob, name: fileSafe(`china-transfer-${String(t.transfer_no ?? "")}-${idx}-${tag}.png`) });
+      };
+      for (const l of cn) await render([rateRow, { t: "sep" }, { t: "head", l: "บิลจีน" }, ...chinaBillRows(l)], String(l.label || "china"));
+      for (const l of cw) await render([rateRow, { t: "sep" }, { t: "head", l: "บิล CTW" }, ...ctwBillRows(l)], String(l.doc_number || "ctw"));
+      if (!files.length) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
+      await downloadOrSaveImages(files);
+      toast.success(`บันทึกรูปแล้ว ${files.length} รูป`);
+    } catch (e) { if ((e as Error).name !== "AbortError") toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  // กดปุ่มโหลดรูป → ถามก่อนว่าจะ "รวมบิล" (รูปเดียว) หรือ "แยกบิล" (บิลละรูป); ถ้ามีบิลเดียวไม่ต้องถาม
+  const [askSaveMode, setAskSaveMode] = useState(false);
+  const saveImage = () => { if (cn.length + cw.length <= 1) void saveImageAll(); else setAskSaveMode(true); };
 
   // ส่งใบสรุปการโอน "เป็นรูป" + สลิปที่แนบ เข้า LINE กลุ่ม
   const sendLineImage = async () => {
@@ -4137,6 +4205,15 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
           <button onClick={(e) => { e.stopPropagation(); setLightbox(null); }} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white text-2xl leading-none">×</button>
         </div></Portal>
       )}
+      {askSaveMode && (
+        <ChoicePopup title="โหลดรูปแบบไหน?" message={`รายการโอนนี้มี ${cn.length + cw.length} บิล`}
+          options={[
+            { key: "all", icon: "🧾", label: "รวมบิล", desc: "รูปเดียว มีทุกบิลในใบสรุป" },
+            { key: "each", icon: "🗂️", label: "แยกบิล", desc: `บิลละ 1 รูป (ได้ ${cn.length + cw.length} รูป) เอาไว้ส่งแยกร้าน` },
+          ]}
+          onCancel={() => setAskSaveMode(false)}
+          onPick={(k) => { setAskSaveMode(false); if (k === "each") void saveImageEach(); else void saveImageAll(); }} />
+      )}
       {sendState && <SendingOverlay state={sendState} />}
     </div>
     </Portal>
@@ -4164,6 +4241,35 @@ function ConfirmPopup({ title, message, confirmText = "ยืนยัน", tone
         </div>
       </div>
     </div>
+  );
+}
+
+// ---------------- Popup เลือกตัวเลือก (ของกลางเล็กๆ) — เช่น โหลดรูป รวมบิล/แยกบิล ----------------
+function ChoicePopup({ title, message, options, onCancel, onPick }: {
+  title: string; message?: string;
+  options: { key: string; label: string; desc?: string; icon?: string }[];
+  onCancel: () => void; onPick: (key: string) => void;
+}) {
+  return (
+    <Portal><div className="fixed inset-0 z-[330] bg-black/40 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); onCancel(); }}>
+      <div className="bg-white rounded-2xl w-full max-w-xs p-5" onClick={e => e.stopPropagation()}>
+        <div className="text-lg font-semibold text-slate-800 text-center">{title}</div>
+        {message && <div className="mt-1 text-sm text-slate-500 text-center">{message}</div>}
+        <div className="mt-4 space-y-2">
+          {options.map(o => (
+            <button key={o.key} type="button" onClick={() => onPick(o.key)}
+              className="w-full text-left border border-slate-200 rounded-xl px-4 py-3 hover:bg-emerald-50 hover:border-emerald-300 active:bg-emerald-100 flex items-start gap-3">
+              {o.icon && <span className="text-2xl leading-none">{o.icon}</span>}
+              <span className="min-w-0">
+                <span className="block font-semibold text-slate-800">{o.label}</span>
+                {o.desc && <span className="block text-xs text-slate-500 mt-0.5">{o.desc}</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={onCancel} className="mt-3 w-full h-11 border border-slate-200 rounded-lg text-slate-600">ยกเลิก</button>
+      </div>
+    </div></Portal>
   );
 }
 
