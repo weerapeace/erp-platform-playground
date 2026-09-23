@@ -195,7 +195,7 @@ export function buildQuotationHtml(
   <title>${escapeHtml(docFileName("ใบเสนอราคา", quote.quote_number))}</title>
   <base href="${escapeHtml(origin || "/")}">
   <style>
-    @page { size: A4; margin: 0; }
+    @page { size: A4; margin: ${layout.topMarginMm}mm ${layout.horizontalMarginMm}mm ${layout.bottomMarginMm}mm; }
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff; color: #000; font-family: Tahoma, "Sarabun", Arial, sans-serif; font-size: ${layout.fontSizePx}px; }
     .page { width: 210mm; min-height: 297mm; padding: ${layout.topMarginMm}mm ${layout.horizontalMarginMm}mm ${layout.bottomMarginMm}mm; margin: 0 auto; background: #fff; display: flex; flex-direction: column; }
@@ -211,13 +211,16 @@ export function buildQuotationHtml(
     .items th, .items td { border: 1px solid #000; padding: 2mm 1.5mm; vertical-align: middle; }
     .items th { text-align: center; font-weight: 700; line-height: 1.1; }
     .items tbody tr { height: ${layout.rowHeightMm}mm; }
+    .items thead { display: table-header-group; }
+    .items tr { break-inside: avoid; page-break-inside: avoid; }
     .center { text-align: center; }
     .right { text-align: right; }
     .code { font-size: 10px; }
     ${layout.showImage ? `.photo-cell { padding: 1mm !important; text-align: center; }
     .photo-cell img { width: 100%; height: 22mm; object-fit: contain; display: block; }` : ""}
+    .items tbody tr.summary-row { height: auto; }
     .summary-row td { height: auto !important; padding: 1.5mm; }
-    .bottom { display: grid; grid-template-columns: 1.95fr 1fr; border-left: 1px solid #000; border-right: 1px solid #000; border-bottom: 1px solid #000; }
+    .bottom { display: grid; grid-template-columns: 1.95fr 1fr; border: 1px solid #000; margin-top: -1px; break-inside: avoid; page-break-inside: avoid; }
     .bottom-no-note { width: 42%; margin-left: auto; grid-template-columns: 1fr; border-top: 1px solid #000; }
     .note { border-right: 1px solid #000; min-height: 18mm; padding: 2mm; }
     .bottom-note-only { grid-template-columns: 1fr; }
@@ -226,7 +229,8 @@ export function buildQuotationHtml(
     .totals td { border-bottom: 1px solid #000; padding: 2mm; }
     .totals tr:last-child td { border-bottom: 0; font-weight: 700; }
     .amount-text { text-align: center; font-weight: 700; padding: 3mm 0 1mm; }
-    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 28mm; margin-top: ${signatureMarginTop}; padding: ${layout.signatureGapMm}mm 18mm 0; }
+    .closing { margin-top: ${signatureMarginTop}; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; }
+    .signatures { break-inside: avoid; page-break-inside: avoid; display: grid; grid-template-columns: 1fr 1fr; gap: 28mm; padding: ${layout.signatureGapMm}mm 18mm 0; }
     .signature { text-align: center; position: relative; min-height: 24mm; }
     .signature-assets { position: absolute; left: 50%; bottom: 7mm; width: 0; height: 0; pointer-events: none; }
     .signature-image, .stamp-image { position: absolute; bottom: 0; left: 0; max-height: 24mm; object-fit: contain; }
@@ -235,7 +239,8 @@ export function buildQuotationHtml(
     .sig-date { font-size: 10px; margin-top: 1mm; }
     @media print {
       body { background: #fff; }
-      .page { box-shadow: none; margin: 0; }
+      /* ขอบกระดาษย้ายไป @page แล้ว → หน้าเอกสารสูงเท่าพื้นที่พิมพ์ (ลายเซ็นชิดล่างในหน้าเดียว, ยาวกว่าก็ต่อหน้าใหม่สวย ๆ) */
+      .page { box-shadow: none; margin: 0; padding: 0; width: auto; min-height: calc(297mm - ${layout.topMarginMm + layout.bottomMarginMm}mm - 1mm); }
     }
   </style>
 </head>
@@ -309,6 +314,7 @@ export function buildQuotationHtml(
     <div class="amount-text">(${escapeHtml(thaiBahtText(quote.grand_total))})</div>`
     : layout.showNote ? `<section class="bottom bottom-note-only"><div class="note"><span class="label">หมายเหตุ :</span><br>${escapeHtml(quote.note || "")}</div></section>` : ""}
 
+    <div class="closing">
     <section class="signatures">
       <div class="signature">
         <div class="sig-line">ลูกค้าอนุมัติ</div>
@@ -319,6 +325,7 @@ export function buildQuotationHtml(
         <div class="sig-date">${escapeHtml(thaiDate(quote.quote_date))}</div>
       </div>
     </section>
+    </div>
   </main>
 </body>
 </html>`;
