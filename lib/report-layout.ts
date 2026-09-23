@@ -11,6 +11,8 @@ export type ReportLayoutSettings = {
   showPhone: boolean;
   showResponsible: boolean;
   showNote: boolean;
+  /** แสดงยอดรวม (แถวรวม + รวมเงิน/VAT/ทั้งสิ้น + ตัวอักษร) — ปิดได้ เช่น ใบเสนอราคาหลายราคาตามจำนวน ที่รวมยอดแล้วไม่มีความหมาย */
+  showTotals: boolean;
   showAuthorizedSignature: boolean;
   authorizedSignatureUrl: string;
   authorizedSignatureWidthMm: number;
@@ -36,6 +38,7 @@ export const DEFAULT_REPORT_LAYOUT: ReportLayoutSettings = {
   showPhone: true,
   showResponsible: true,
   showNote: true,
+  showTotals: true,
   showAuthorizedSignature: false,
   authorizedSignatureUrl: "",
   authorizedSignatureWidthMm: 38,
@@ -77,6 +80,7 @@ export function normalizeReportLayout(input: Partial<ReportLayoutSettings> = {})
     showPhone: input.showPhone ?? DEFAULT_REPORT_LAYOUT.showPhone,
     showResponsible: input.showResponsible ?? DEFAULT_REPORT_LAYOUT.showResponsible,
     showNote: input.showNote ?? DEFAULT_REPORT_LAYOUT.showNote,
+    showTotals: input.showTotals ?? DEFAULT_REPORT_LAYOUT.showTotals,
     showAuthorizedSignature: input.showAuthorizedSignature ?? DEFAULT_REPORT_LAYOUT.showAuthorizedSignature,
     authorizedSignatureUrl: safeAssetUrl(input.authorizedSignatureUrl),
     authorizedSignatureWidthMm: clamp(input.authorizedSignatureWidthMm, 10, 70, DEFAULT_REPORT_LAYOUT.authorizedSignatureWidthMm),

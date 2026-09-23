@@ -111,6 +111,22 @@ describe("quotation print", () => {
     expect(html).not.toContain("center code");
   });
 
+  it("hides all totals when showTotals is off but keeps line amounts and the note", () => {
+    const html = buildQuotationHtml(quote, "", { showTotals: false });
+
+    expect(html).not.toContain("summary-row\"");
+    expect(html).not.toContain("จำนวนเงินทั้งสิ้น");
+    expect(html).not.toContain("amount-text\"");
+    expect(html).toContain("bottom-note-only\"");
+    expect(html).toContain("จำนวนเงิน</th>");
+  });
+
+  it("drops the whole bottom box when both totals and note are hidden", () => {
+    const html = buildQuotationHtml(quote, "", { showTotals: false, showNote: false });
+
+    expect(html).not.toContain("<section class=\"bottom");
+  });
+
   it("prints authorized signature and company stamp assets when enabled", () => {
     const html = buildQuotationHtml(quote, "", {
       showAuthorizedSignature: true,

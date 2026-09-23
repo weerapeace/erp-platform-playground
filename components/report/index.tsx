@@ -513,6 +513,13 @@ export function ReportLayoutControls({
         >
           รีเซ็ต
         </button>
+        <label
+          title="ติ๊ก = ไม่พิมพ์ยอดรวมท้ายใบ (แถวรวม, รวมเงิน, VAT, จำนวนเงินทั้งสิ้น) — เหมาะกับใบที่เสนอหลายราคาตามจำนวน"
+          className={`flex h-9 cursor-pointer items-center gap-2 rounded-lg border px-3 text-sm font-medium ${layout.showTotals ? "border-slate-200 bg-white text-slate-700 hover:bg-slate-50" : "border-amber-300 bg-amber-50 text-amber-800"}`}
+        >
+          <input type="checkbox" checked={!layout.showTotals} onChange={(e) => patch({ showTotals: !e.target.checked })} className="h-4 w-4 cursor-pointer" />
+          ไม่รวมยอดทั้งหมด
+        </label>
         {onUseDefault && (
           <button
             type="button"
@@ -552,6 +559,7 @@ export function ReportLayoutControls({
             <VisibilityToggle label="เบอร์โทร" checked={layout.showPhone} onChange={(showPhone) => patch({ showPhone })} />
             <VisibilityToggle label="ผู้รับผิดชอบ" checked={layout.showResponsible} onChange={(showResponsible) => patch({ showResponsible })} />
             <VisibilityToggle label="หมายเหตุ" checked={layout.showNote} onChange={(showNote) => patch({ showNote })} />
+            <VisibilityToggle label="ยอดรวมท้ายใบ" checked={layout.showTotals} onChange={(showTotals) => patch({ showTotals })} />
             <VisibilityToggle label="ลายเซ็นชิดล่าง" checked={layout.signatureToBottom} onChange={(signatureToBottom) => patch({ signatureToBottom })} />
           </div>
         </div>

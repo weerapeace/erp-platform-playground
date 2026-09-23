@@ -62,6 +62,15 @@ async function enrichQuoteImages(q: QuoteDetail): Promise<QuotePrintDetail> {
 }
 
 
+// จำ "ไม่รวมยอดทั้งหมด" รายใบ (ต่อ browser) — ใบที่เสนอหลายราคาตามจำนวน เปิดพิมพ์ซ้ำไม่ต้องติ๊กใหม่
+const hideTotalsKey = (id: string) => `qt-print-hide-totals:${id}`;
+const readHideTotals = (id: string): boolean | null => {
+  try { const v = localStorage.getItem(hideTotalsKey(id)); return v == null ? null : v === "1"; } catch { return null; }
+};
+const writeHideTotals = (id: string, hide: boolean) => {
+  try { if (hide) localStorage.setItem(hideTotalsKey(id), "1"); else localStorage.removeItem(hideTotalsKey(id)); } catch { /* ไม่มี storage ก็แค่ไม่จำ */ }
+};
+
 export default function PrintQuotationPage() {
   const params = useParams();
   const router = useRouter();
@@ -102,6 +111,10 @@ export default function PrintQuotationPage() {
           setUseStandardLayout(true);
           setLayoutDefaultMessage("ใช้ค่าเริ่มต้นที่บันทึกไว้");
         }
+        if (alive && readHideTotals(id)) {
+          setLayout(current => ({ ...current, showTotals: false }));
+          setUseStandardLayout(true);
+        }
       })
       .catch(err => {
         if (alive) setError(err instanceof Error ? err.message : "โหลดเอกสารไม่ได้");
@@ -131,6 +144,7 @@ export default function PrintQuotationPage() {
   }, [fileName, layout, origin, quote, template, useStandardLayout]);
 
   const updateLayout = (next: ReportLayoutSettings) => {
+    if (next.showTotals !== layout.showTotals) writeHideTotals(id, !next.showTotals);
     setLayout(next);
     setUseStandardLayout(true);
     setLayoutDefaultMessage(null);

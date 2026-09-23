@@ -220,6 +220,8 @@ export function buildQuotationHtml(
     .bottom { display: grid; grid-template-columns: 1.95fr 1fr; border-left: 1px solid #000; border-right: 1px solid #000; border-bottom: 1px solid #000; }
     .bottom-no-note { width: 42%; margin-left: auto; grid-template-columns: 1fr; border-top: 1px solid #000; }
     .note { border-right: 1px solid #000; min-height: 18mm; padding: 2mm; }
+    .bottom-note-only { grid-template-columns: 1fr; }
+    .bottom-note-only .note { border-right: 0; }
     .totals { width: 100%; border-collapse: collapse; }
     .totals td { border-bottom: 1px solid #000; padding: 2mm; }
     .totals tr:last-child td { border-bottom: 0; font-weight: 700; }
@@ -284,18 +286,18 @@ export function buildQuotationHtml(
       </thead>
       <tbody>
         ${rows || `<tr><td colspan="${visibleColumnCount}" class="center">ไม่มีรายการสินค้า</td></tr>`}
-        <tr class="summary-row">
+        ${layout.showTotals ? `<tr class="summary-row">
           <td></td>
           <td colspan="${summaryLabelColspan}" class="center">รวม</td>
           <td class="right">${formatQty(totalQty)}</td>
           <td></td>
           <td></td>
           <td class="right">${formatMoney(subtotal)}</td>
-        </tr>
+        </tr>` : ""}
       </tbody>
     </table>
 
-    <section class="bottom${layout.showNote ? "" : " bottom-no-note"}">
+    ${layout.showTotals ? `<section class="bottom${layout.showNote ? "" : " bottom-no-note"}">
       ${layout.showNote ? `<div class="note"><span class="label">หมายเหตุ :</span><br>${escapeHtml(quote.note || "")}</div>` : ""}
       <table class="totals">
         <tr><td class="label">รวมเงิน</td><td class="right">${formatMoney(subtotal)}</td></tr>
@@ -304,7 +306,8 @@ export function buildQuotationHtml(
       </table>
     </section>
 
-    <div class="amount-text">(${escapeHtml(thaiBahtText(quote.grand_total))})</div>
+    <div class="amount-text">(${escapeHtml(thaiBahtText(quote.grand_total))})</div>`
+    : layout.showNote ? `<section class="bottom bottom-note-only"><div class="note"><span class="label">หมายเหตุ :</span><br>${escapeHtml(quote.note || "")}</div></section>` : ""}
 
     <section class="signatures">
       <div class="signature">
