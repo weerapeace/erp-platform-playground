@@ -478,10 +478,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [newQOffered, setNewQOffered] = useState("");  // ราคาที่เสนอ (ใช้อันนี้)
   const [newQStatus, setNewQStatus] = useState("pending");
   const [newQNote, setNewQNote] = useState("");
+  const [newQQty, setNewQQty] = useState("");         // จำนวนที่ราคานี้ใช้ (ราคาขั้นบันได) — เว้นว่างได้
   const [newQParent, setNewQParent] = useState("");   // ไซส์/แท็บที่จะเสนอราคา ("" = ทั่วไป)
   const [qSaving, setQSaving] = useState(false);
   const [editQid, setEditQid] = useState<string | null>(null);
-  const [editQ, setEditQ] = useState({ quote_date: "", price: "", offered: "", note: "", parent_code: "" });
+  const [editQ, setEditQ] = useState({ quote_date: "", price: "", offered: "", qty: "", note: "", parent_code: "" });
   const [delQuote, setDelQuote] = useState<DesignSheetQuote | null>(null);
 
   // ---- เฟส 4: ตีราคา ----
@@ -963,9 +964,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       // ถ้าไม่กรอกราคาที่เสนอ ใช้ราคาจากตีราคาแทน
       const offered = newQOffered !== "" ? Number(newQOffered) : (newQPrice !== "" ? Number(newQPrice) : null);
       const res = await apiFetch(`/api/design-sheets/${form.id}/quotes`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: newQDate || todayStr(), price: newQPrice === "" ? null : Number(newQPrice), offered_price: offered, status: newQStatus, note: newQNote || null, parent_code: newQParent }) });
+        body: JSON.stringify({ quote_date: newQDate || todayStr(), price: newQPrice === "" ? null : Number(newQPrice), offered_price: offered, qty: newQQty === "" ? null : Number(newQQty), status: newQStatus, note: newQNote || null, parent_code: newQParent }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      setNewQPrice(""); setNewQOffered(""); setNewQNote(""); setNewQStatus("pending"); setNewQDate(todayStr());
+      setNewQPrice(""); setNewQOffered(""); setNewQNote(""); setNewQQty(""); setNewQStatus("pending"); setNewQDate(todayStr());
       await loadCq(form.id); toast.success(`เพิ่มรอบเสนอราคา ครั้งที่ ${j.round} แล้ว`);
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มรอบเสนอราคาไม่สำเร็จ"); }
     finally { setQSaving(false); }
@@ -982,12 +983,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch (e) { setQuotes(prev); toast.error(e instanceof Error ? e.message : "เปลี่ยนสถานะไม่สำเร็จ"); }
   };
 
-  const startEditQuote = (q: DesignSheetQuote) => { setEditQid(q.id); setEditQ({ quote_date: q.quote_date ?? "", price: q.price != null ? String(q.price) : "", offered: q.offered_price != null ? String(q.offered_price) : "", note: q.note ?? "", parent_code: q.parent_code ?? "" }); };
+  const startEditQuote = (q: DesignSheetQuote) => { setEditQid(q.id); setEditQ({ quote_date: q.quote_date ?? "", price: q.price != null ? String(q.price) : "", offered: q.offered_price != null ? String(q.offered_price) : "", qty: q.qty != null ? String(q.qty) : "", note: q.note ?? "", parent_code: q.parent_code ?? "" }); };
   const saveEditQuote = async () => {
     if (!form?.id || !editQid) return;
     try {
       const res = await apiFetch(`/api/design-sheets/${form.id}/quotes/${editQid}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: editQ.quote_date || null, price: editQ.price === "" ? null : Number(editQ.price), offered_price: editQ.offered === "" ? null : Number(editQ.offered), note: editQ.note || null, parent_code: editQ.parent_code }) });
+        body: JSON.stringify({ quote_date: editQ.quote_date || null, price: editQ.price === "" ? null : Number(editQ.price), offered_price: editQ.offered === "" ? null : Number(editQ.offered), qty: editQ.qty === "" ? null : Number(editQ.qty), note: editQ.note || null, parent_code: editQ.parent_code }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       setEditQid(null); await loadCq(form.id); toast.success("แก้รอบเสนอราคาแล้ว");
     } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
@@ -2179,6 +2180,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     className="h-8 px-2 text-sm text-right border border-slate-200 rounded-lg w-32" />
                   <input type="number" min={0} step="any" value={newQOffered} onChange={(e) => setNewQOffered(e.target.value)} placeholder="ราคาที่เสนอ" title="ราคาที่เสนอลูกค้าจริง (ใช้อันนี้) — เว้นว่าง = ใช้ราคาจากตีราคา"
                     className="h-8 px-2 text-sm text-right border border-blue-300 bg-blue-50/40 rounded-lg w-32 font-medium" />
+                  <input type="number" min={1} step="any" value={newQQty} onChange={(e) => setNewQQty(e.target.value)} placeholder="จำนวน (ชิ้น)" title="ราคานี้ใช้ที่จำนวนเท่าไหร่ (ราคาขั้นบันได เช่น 100 ชิ้น / 500 ชิ้น) — เว้นว่างได้"
+                    className="h-8 px-2 text-sm text-right border border-slate-200 rounded-lg w-28" />
                   <select value={newQStatus} onChange={(e) => setNewQStatus(e.target.value)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg">
                     {QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
@@ -2196,6 +2199,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       <th className="border border-slate-200 px-2 py-1.5 w-24">ไซส์</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-28 text-right text-slate-400">ราคาจากตีราคา</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-28 text-right bg-blue-50 text-blue-600">ราคาที่เสนอ</th>
+                      <th className="border border-slate-200 px-2 py-1.5 w-24 text-right">จำนวน (ชิ้น)</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-28">สถานะ</th>
                       <th className="border border-slate-200 px-2 py-1.5 text-left">หมายเหตุ</th>
                       {canEdit && <th className="border border-slate-200 px-2 py-1.5 w-20"></th>}
@@ -2227,6 +2231,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                             {editing ? <input type="number" min={0} step="any" value={editQ.offered} onChange={(e) => setEditQ({ ...editQ, offered: e.target.value })} placeholder="ใช้ราคาตีราคา" className="h-7 px-1 w-24 text-sm text-right border border-blue-300 rounded" />
                               : (q.offered_price != null ? Number(q.offered_price).toLocaleString("th-TH", { minimumFractionDigits: 2 })
                                 : (q.price != null ? <span className="text-slate-400 font-normal">{Number(q.price).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span> : "—"))}
+                          </td>
+                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums text-slate-700">
+                            {editing ? <input type="number" min={1} step="any" value={editQ.qty} onChange={(e) => setEditQ({ ...editQ, qty: e.target.value })} placeholder="—" className="h-7 px-1 w-20 text-sm text-right border border-slate-200 rounded" />
+                              : (q.qty != null ? Number(q.qty).toLocaleString("th-TH") : <span className="text-slate-300">—</span>)}
                           </td>
                           <td className="border border-slate-200 px-2 py-1 text-center">
                             {canEdit ? (
@@ -2418,6 +2426,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         <ToQuotationModal open={toQuote} onClose={() => { setToQuote(false); setQuoteBatch(null); }}
           sheetId={form.id} sheetName={form.name} defaultPrice={offeredPrice}
           presetLines={quoteBatch ?? undefined}
+          quotes={quoteBatch ? undefined : quotes} sizeLabel={quoteSizeLabel}
           cartId={cartId} cartLabel={cartLabel} onCartSet={setCart} onAdded={bumpCart} />
       )}
 

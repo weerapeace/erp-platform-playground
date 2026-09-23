@@ -19,6 +19,7 @@ export type DesignSheetQuote = {
   id: string; sheet_id: string; round: number;
   quote_date: string | null; price: number | null; offered_price: number | null; status: string; note: string | null;
   parent_code: string | null;   // ไซส์/แท็บที่เสนอราคา ("" = ทั่วไป · null = รอบเก่าไม่ระบุ)
+  qty: number | null;           // จำนวนที่ราคานี้ใช้ (ราคาขั้นบันได) · null = ไม่ระบุ
 };
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -34,13 +35,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { quote_date?: string; price?: number; offered_price?: number; status?: string; note?: string; parent_code?: string | null };
+  let body: { quote_date?: string; price?: number; offered_price?: number; status?: string; note?: string; parent_code?: string | null; qty?: number | null };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const price = body.price != null ? Number(body.price) : null;
   const offered = body.offered_price != null ? Number(body.offered_price) : null;
   for (const v of [price, offered]) if (v != null && (!Number.isFinite(v) || v < 0)) {
     return NextResponse.json({ error: "ราคาต้องเป็นตัวเลขและไม่ติดลบ" }, { status: 400 });
+  }
+  const qty = body.qty != null && String(body.qty) !== "" ? Number(body.qty) : null;
+  if (qty != null && (!Number.isFinite(qty) || qty <= 0)) {
+    return NextResponse.json({ error: "จำนวนต้องเป็นตัวเลขมากกว่า 0" }, { status: 400 });
   }
   const status = body.status && (QUOTE_STATUSES as readonly string[]).includes(body.status) ? body.status : "pending";
 
@@ -52,7 +57,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const { data: row, error } = await admin.from("design_sheet_quotes").insert({
     sheet_id: id, round, quote_date: body.quote_date || new Date().toISOString().slice(0, 10),
-    price, offered_price: offered, status, note: body.note?.trim() || null, created_by: user?.id ?? null,
+    price, offered_price: offered, qty, status, note: body.note?.trim() || null, created_by: user?.id ?? null,
     parent_code: body.parent_code == null ? null : String(body.parent_code),   // ไซส์ที่เสนอ ("" = ทั่วไป)
   }).select("id, round").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
@@ -60,7 +65,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   await writeAudit(admin, {
     action: "quote_add", entityType: "design_sheet", entityId: id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { quote_id: row.id, round, price, status },
+    metadata: { quote_id: row.id, round, price, offered_price: offered, qty, status },
   });
   return NextResponse.json({ id: row.id, round, error: null });
 }

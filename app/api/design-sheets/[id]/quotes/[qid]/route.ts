@@ -1,7 +1,7 @@
 /**
  * Design Sheets — รอบเสนอราคา รายแถว (เฟส 3)
  *
- * PATCH  /api/design-sheets/[id]/quotes/[qid] → แก้ { quote_date, price, status, note }
+ * PATCH  /api/design-sheets/[id]/quotes/[qid] → แก้ { quote_date, price, offered_price, qty, status, note, parent_code }
  * DELETE /api/design-sheets/[id]/quotes/[qid] → ลบรอบ
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -19,7 +19,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id, qid } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { quote_date?: string; price?: number | null; offered_price?: number | null; status?: string; note?: string | null; parent_code?: string | null };
+  let body: { quote_date?: string; price?: number | null; offered_price?: number | null; status?: string; note?: string | null; parent_code?: string | null; qty?: number | null };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -44,6 +44,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: "สถานะไม่ถูกต้อง" }, { status: 400 });
     }
     patch.status = body.status;
+  }
+  if (body.qty !== undefined) {
+    const qty = body.qty != null && String(body.qty) !== "" ? Number(body.qty) : null;
+    if (qty != null && (!Number.isFinite(qty) || qty <= 0)) {
+      return NextResponse.json({ error: "จำนวนต้องเป็นตัวเลขมากกว่า 0" }, { status: 400 });
+    }
+    patch.qty = qty;
   }
   if (body.note !== undefined) patch.note = body.note?.trim() || null;
   if (body.parent_code !== undefined) patch.parent_code = body.parent_code == null ? null : String(body.parent_code);

@@ -35,6 +35,7 @@ function buildData(sheet: Sheet, quotes: DesignSheetQuote[], cover: Attachment |
     // ราคาที่พิมพ์ = ราคาที่เสนอจริง (offered_price) ถ้าไม่มีใช้ราคาจากตีราคา
     round: q.round, date_th: thaiDate(q.quote_date), price_th: baht(q.offered_price ?? q.price),
     status_label: QUOTE_STATUS[q.status]?.label ?? q.status, note: q.note ?? "",
+    qty_th: q.qty != null ? Number(q.qty).toLocaleString("th-TH") : "",   // จำนวน (ใช้ในเทมเพลตได้ {{qty_th}})
   });
   const latest = quotes.length > 0 ? quotes[quotes.length - 1] : null;
   return {
