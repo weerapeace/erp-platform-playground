@@ -520,6 +520,26 @@ export function ReportLayoutControls({
           <input type="checkbox" checked={!layout.showTotals} onChange={(e) => patch({ showTotals: !e.target.checked })} className="h-4 w-4 cursor-pointer" />
           ไม่รวมยอดทั้งหมด
         </label>
+        <div className={`flex h-9 items-center gap-1 rounded-lg border px-2 text-sm ${layout.sortBy === "none" ? "border-slate-200 bg-white text-slate-700" : "border-indigo-300 bg-indigo-50 text-indigo-800"}`}
+          title="เรียงรายการเฉพาะตอนพิมพ์ — ลำดับในเอกสารจริงไม่เปลี่ยน">
+          <span className="font-medium">เรียง</span>
+          <select value={layout.sortBy} onChange={(e) => patch({ sortBy: e.target.value as ReportLayoutSettings["sortBy"] })}
+            className="h-7 cursor-pointer rounded border-0 bg-transparent pr-1 text-sm font-medium focus:outline-none">
+            <option value="none">ตามที่บันทึก</option>
+            <option value="qty">จำนวน</option>
+            <option value="price">ราคา/หน่วย</option>
+            <option value="sku">รหัสสินค้า</option>
+          </select>
+          {layout.sortBy !== "none" && (<>
+            <button type="button" onClick={() => patch({ sortDesc: !layout.sortDesc })}
+              title={layout.sortDesc ? "มาก → น้อย (กดสลับ)" : "น้อย → มาก (กดสลับ)"}
+              className="h-7 rounded px-1.5 text-xs font-medium hover:bg-white">{layout.sortDesc ? "มาก→น้อย ↓" : "น้อย→มาก ↑"}</button>
+            <label className="flex cursor-pointer items-center gap-1 whitespace-nowrap pl-1 text-xs" title="เรียงแยกเป็นกลุ่มตามตัวเลือก (สี/ไซส์) — กลุ่มเรียงตามที่เจอก่อน">
+              <input type="checkbox" checked={layout.sortGroupByNote} onChange={(e) => patch({ sortGroupByNote: e.target.checked })} className="h-3.5 w-3.5 cursor-pointer" />
+              แยกตามตัวเลือก
+            </label>
+          </>)}
+        </div>
         {onUseDefault && (
           <button
             type="button"

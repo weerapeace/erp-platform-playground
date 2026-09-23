@@ -62,13 +62,25 @@ async function enrichQuoteImages(q: QuoteDetail): Promise<QuotePrintDetail> {
 }
 
 
-// จำ "ไม่รวมยอดทั้งหมด" รายใบ (ต่อ browser) — ใบที่เสนอหลายราคาตามจำนวน เปิดพิมพ์ซ้ำไม่ต้องติ๊กใหม่
-const hideTotalsKey = (id: string) => `qt-print-hide-totals:${id}`;
-const readHideTotals = (id: string): boolean | null => {
-  try { const v = localStorage.getItem(hideTotalsKey(id)); return v == null ? null : v === "1"; } catch { return null; }
+// จำค่าที่ตั้งรายใบ (ต่อ browser): "ไม่รวมยอดทั้งหมด" + การเรียงรายการ — เปิดพิมพ์ใบเดิมซ้ำไม่ต้องตั้งใหม่
+type PerQuoteView = Partial<Pick<ReportLayoutSettings, "showTotals" | "sortBy" | "sortDesc" | "sortGroupByNote">>;
+const PER_QUOTE_FIELDS = ["showTotals", "sortBy", "sortDesc", "sortGroupByNote"] as const;
+const viewKey = (id: string) => `qt-print-view:${id}`;
+const legacyHideTotalsKey = (id: string) => `qt-print-hide-totals:${id}`;
+const readPerQuoteView = (id: string): PerQuoteView | null => {
+  try {
+    const raw = localStorage.getItem(viewKey(id));
+    if (raw) return JSON.parse(raw) as PerQuoteView;
+    return localStorage.getItem(legacyHideTotalsKey(id)) === "1" ? { showTotals: false } : null;
+  } catch { return null; }
 };
-const writeHideTotals = (id: string, hide: boolean) => {
-  try { if (hide) localStorage.setItem(hideTotalsKey(id), "1"); else localStorage.removeItem(hideTotalsKey(id)); } catch { /* ไม่มี storage ก็แค่ไม่จำ */ }
+const writePerQuoteView = (id: string, layout: ReportLayoutSettings) => {
+  try {
+    const v: PerQuoteView = {};
+    for (const k of PER_QUOTE_FIELDS) if (layout[k] !== DEFAULT_REPORT_LAYOUT[k]) (v as Record<string, unknown>)[k] = layout[k];
+    if (Object.keys(v).length) localStorage.setItem(viewKey(id), JSON.stringify(v)); else localStorage.removeItem(viewKey(id));
+    localStorage.removeItem(legacyHideTotalsKey(id));
+  } catch { /* ไม่มี storage ก็แค่ไม่จำ */ }
 };
 
 export default function PrintQuotationPage() {
@@ -111,8 +123,9 @@ export default function PrintQuotationPage() {
           setUseStandardLayout(true);
           setLayoutDefaultMessage("ใช้ค่าเริ่มต้นที่บันทึกไว้");
         }
-        if (alive && readHideTotals(id)) {
-          setLayout(current => ({ ...current, showTotals: false }));
+        const perQuote = alive ? readPerQuoteView(id) : null;
+        if (perQuote) {
+          setLayout(current => reportLayoutFromStoredValue({ ...current, ...perQuote }));
           setUseStandardLayout(true);
         }
       })
@@ -138,13 +151,13 @@ export default function PrintQuotationPage() {
         body_html: template.body_html,
         footer_html: template.footer_html,
         custom_css: template.custom_css,
-      }, buildPrintableQuoteTemplateData(quote, origin), fileName);
+      }, buildPrintableQuoteTemplateData(quote, origin, layout), fileName);
     }
     return buildPrintableQuotationHtml(quote, origin, layout);
   }, [fileName, layout, origin, quote, template, useStandardLayout]);
 
   const updateLayout = (next: ReportLayoutSettings) => {
-    if (next.showTotals !== layout.showTotals) writeHideTotals(id, !next.showTotals);
+    if (PER_QUOTE_FIELDS.some(k => next[k] !== layout[k])) writePerQuoteView(id, next);
     setLayout(next);
     setUseStandardLayout(true);
     setLayoutDefaultMessage(null);

@@ -1,3 +1,7 @@
+/** เรียงบรรทัดตอนพิมพ์ — none = ตามลำดับที่บันทึก */
+export type ReportLineSort = "none" | "qty" | "price" | "sku";
+export const REPORT_LINE_SORTS: ReportLineSort[] = ["none", "qty", "price", "sku"];
+
 export type ReportLayoutSettings = {
   topMarginMm: number;
   horizontalMarginMm: number;
@@ -13,6 +17,11 @@ export type ReportLayoutSettings = {
   showNote: boolean;
   /** แสดงยอดรวม (แถวรวม + รวมเงิน/VAT/ทั้งสิ้น + ตัวอักษร) — ปิดได้ เช่น ใบเสนอราคาหลายราคาตามจำนวน ที่รวมยอดแล้วไม่มีความหมาย */
   showTotals: boolean;
+  /** เรียงรายการตาม จำนวน/ราคา/รหัส (เฉพาะตอนพิมพ์ ไม่แก้ลำดับในเอกสารจริง) */
+  sortBy: ReportLineSort;
+  sortDesc: boolean;
+  /** เรียงภายในกลุ่มตัวเลือก (สี/ไซส์) — กลุ่มเรียงตามที่เจอก่อน */
+  sortGroupByNote: boolean;
   showAuthorizedSignature: boolean;
   authorizedSignatureUrl: string;
   authorizedSignatureWidthMm: number;
@@ -39,6 +48,9 @@ export const DEFAULT_REPORT_LAYOUT: ReportLayoutSettings = {
   showResponsible: true,
   showNote: true,
   showTotals: true,
+  sortBy: "none",
+  sortDesc: false,
+  sortGroupByNote: true,
   showAuthorizedSignature: false,
   authorizedSignatureUrl: "",
   authorizedSignatureWidthMm: 38,
@@ -81,6 +93,9 @@ export function normalizeReportLayout(input: Partial<ReportLayoutSettings> = {})
     showResponsible: input.showResponsible ?? DEFAULT_REPORT_LAYOUT.showResponsible,
     showNote: input.showNote ?? DEFAULT_REPORT_LAYOUT.showNote,
     showTotals: input.showTotals ?? DEFAULT_REPORT_LAYOUT.showTotals,
+    sortBy: REPORT_LINE_SORTS.includes(input.sortBy as ReportLineSort) ? (input.sortBy as ReportLineSort) : DEFAULT_REPORT_LAYOUT.sortBy,
+    sortDesc: input.sortDesc ?? DEFAULT_REPORT_LAYOUT.sortDesc,
+    sortGroupByNote: input.sortGroupByNote ?? DEFAULT_REPORT_LAYOUT.sortGroupByNote,
     showAuthorizedSignature: input.showAuthorizedSignature ?? DEFAULT_REPORT_LAYOUT.showAuthorizedSignature,
     authorizedSignatureUrl: safeAssetUrl(input.authorizedSignatureUrl),
     authorizedSignatureWidthMm: clamp(input.authorizedSignatureWidthMm, 10, 70, DEFAULT_REPORT_LAYOUT.authorizedSignatureWidthMm),

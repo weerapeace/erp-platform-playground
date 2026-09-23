@@ -112,12 +112,46 @@ export function imageSrc(line: QuoteLinePrint, origin: string): string {
   return `${origin}${raw.startsWith("/") ? raw : `/${raw}`}`;
 }
 
+/**
+ * เรียงบรรทัดสำหรับพิมพ์ (ไม่แตะข้อมูลจริง) — ค่าเท่ากันคงลำดับเดิม
+ * sortGroupByNote: จัดกลุ่มตามตัวเลือก (note) ก่อน กลุ่มเรียงตามที่เจอก่อน แล้วค่อยเรียงในกลุ่ม
+ */
+export function sortQuoteLines<T extends QuoteLinePrint>(lines: T[], layoutInput: Partial<ReportLayoutSettings> = {}): T[] {
+  const layout = normalizeReportLayout(layoutInput);
+  if (layout.sortBy === "none") return lines;
+  const dir = layout.sortDesc ? -1 : 1;
+  const groupOrder = new Map<string, number>();
+  for (const line of lines) {
+    const g = (line.note ?? "").trim();
+    if (!groupOrder.has(g)) groupOrder.set(g, groupOrder.size);
+  }
+  const keyOf = (line: T): number | string => layout.sortBy === "qty" ? Number(line.qty ?? 0)
+    : layout.sortBy === "price" ? Number(line.unit_price ?? 0)
+    : String(line.sku ?? "").trim();
+  return lines
+    .map((line, index) => ({ line, index }))
+    .sort((a, b) => {
+      if (layout.sortGroupByNote) {
+        const ga = groupOrder.get((a.line.note ?? "").trim()) ?? 0;
+        const gb = groupOrder.get((b.line.note ?? "").trim()) ?? 0;
+        if (ga !== gb) return ga - gb;
+      }
+      const ka = keyOf(a.line), kb = keyOf(b.line);
+      const c = typeof ka === "number" && typeof kb === "number"
+        ? ka - kb
+        : String(ka).localeCompare(String(kb), "th", { numeric: true });
+      return c !== 0 ? c * dir : a.index - b.index;
+    })
+    .map(x => x.line);
+}
+
 export function quoteSubtotalBeforeVat(quote: QuotePrintDetail): number {
   if (typeof quote.subtotal === "number" && Number.isFinite(quote.subtotal)) return quote.subtotal;
   return quote.lines.reduce((sum, line) => sum + quoteLinePrintAmount(line), 0);
 }
 
-export function buildQuoteTemplateData(quote: QuotePrintDetail, origin: string): Record<string, unknown> {
+export function buildQuoteTemplateData(quote: QuotePrintDetail, origin: string, layoutInput: Partial<ReportLayoutSettings> = {}): Record<string, unknown> {
+  const sortedLines = sortQuoteLines(quote.lines, layoutInput);
   const subtotal = quoteSubtotalBeforeVat(quote);
   return {
     quote_number: quote.quote_number || "-",
@@ -134,7 +168,7 @@ export function buildQuoteTemplateData(quote: QuotePrintDetail, origin: string):
     total_vat: formatMoney(quote.total_vat),
     grand_total: formatMoney(quote.grand_total),
     grand_total_text: thaiBahtText(quote.grand_total),
-    lines: quote.lines.map((line, index) => {
+    lines: sortedLines.map((line, index) => {
       const src = imageSrc(line, origin);
       return {
         idx: index + 1,
@@ -157,7 +191,7 @@ export function buildQuotationHtml(
   layoutInput: Partial<ReportLayoutSettings> = {},
 ): string {
   const layout = normalizeReportLayout(layoutInput);
-  const rows = quote.lines.map((line, index) => {
+  const rows = sortQuoteLines(quote.lines, layout).map((line, index) => {
     const src = imageSrc(line, origin);
     return `
       <tr>
