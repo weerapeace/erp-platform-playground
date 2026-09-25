@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  analyzeInvoiceSequence, branchLabel, splitTaxId, invoiceRow, creditNoteRow, sortSalesTaxRows, summarizeSalesTax,
+  analyzeInvoiceSequence, branchLabel, splitTaxId, invoiceRow, creditNoteRow, sortSalesTaxRows, summarizeSalesTax, dropVoidedInvoices,
 } from "@/lib/sales-tax-report";
 import { monthRange, shiftMonth, monthLabelTh, thisMonth, isMonthKey } from "@/lib/month";
 
@@ -101,5 +101,36 @@ describe("invoiceRow / creditNoteRow / summarizeSalesTax", () => {
     expect(s.net_total).toBe(60829.5);
     expect(s.no_vat_n).toBe(1); expect(s.no_vat_total).toBe(60000);
     expect(s.missing_tax_id_n).toBe(1);
+    expect(s.void_n).toBe(0);
+  });
+});
+
+describe("เลขที่ยกเลิกถูกนำกลับมาใช้ (ระบบเลขเอกสารคืนเลข) — ผลต่อรายงานภาษีขาย", () => {
+  const cust = { tax_id: "0105561095357", branch: "00000" };
+  // เคสจริง ก.ย. 2569: 009 ถูกยกเลิก (14/09) แล้วใบใหม่ได้เลข 009 ซ้ำ (16/09)
+  const cxl009 = invoiceRow({ id: "x", tax_invoice_no: "ISG2569-09-009", order_date: "2026-09-14", customer_name: "A", status: "cancelled", taxable: 20800, total_vat: 1456 }, cust);
+  const live009 = invoiceRow({ id: "y", tax_invoice_no: "ISG2569-09-009", order_date: "2026-09-16", customer_name: "B", status: "confirmed", taxable: 45000, total_vat: 3150 }, cust);
+  const live010 = invoiceRow({ id: "z", tax_invoice_no: "ISG2569-09-010", order_date: "2026-09-16", customer_name: "B", status: "confirmed", taxable: 1000, total_vat: 70 }, cust);
+  // ใบยกเลิกที่เลขยังไม่ถูกใช้ซ้ำ → ต้องยังอยู่ (ยอด 0) เพื่ออธิบายเลขที่หาย
+  const cxl011 = invoiceRow({ id: "w", tax_invoice_no: "ISG2569-09-011", order_date: "2026-09-20", customer_name: "C", status: "cancelled", taxable: 500, total_vat: 35 }, cust);
+
+  it("ใบยกเลิกที่เลขถูกใบใหม่ใช้ซ้ำ → ตัดออก · ใบยกเลิกที่เลขยังว่าง → คงไว้", () => {
+    const { rows, void_n } = dropVoidedInvoices([cxl009, live009, live010, cxl011]);
+    expect(void_n).toBe(1);
+    expect(rows.map(r => `${r.doc_no}:${r.status}`)).toEqual(["ISG2569-09-009:confirmed", "ISG2569-09-010:confirmed", "ISG2569-09-011:cancelled"]);
+  });
+  it("นับ 'ซ้ำ' เฉพาะใบที่ยังไม่ยกเลิก — เลขที่ใบยกเลิกใช้ร่วมกับใบใหม่ไม่ใช่ความผิด", () => {
+    const all = ["ISG2569-09-009", "ISG2569-09-009", "ISG2569-09-010"];
+    expect(analyzeInvoiceSequence(all).duplicates).toEqual(["ISG2569-09-009"]);                       // ไม่บอกว่าใบไหนยกเลิก → ซ้ำ
+    expect(analyzeInvoiceSequence(all, ["ISG2569-09-009", "ISG2569-09-010"]).duplicates).toEqual([]);  // บอกแล้ว → ไม่ซ้ำ
+    expect(analyzeInvoiceSequence(all, ["ISG2569-09-009", "ISG2569-09-009"]).duplicates).toEqual(["ISG2569-09-009"]); // ซ้ำจริงระหว่างใบที่ยังอยู่
+  });
+  it("สรุปนับ void_n แยกจาก cancelled_n", () => {
+    const { rows, void_n } = dropVoidedInvoices([cxl009, live009, live010, cxl011]);
+    const s = summarizeSalesTax(rows, { n: 0, total: 0 }, void_n);
+    expect(s.invoice_n).toBe(2);
+    expect(s.cancelled_n).toBe(1);
+    expect(s.void_n).toBe(1);
+    expect(s.invoice_taxable).toBe(46000);
   });
 });

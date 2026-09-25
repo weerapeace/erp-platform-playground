@@ -39,6 +39,8 @@ export type SalesTaxSummary = {
   /** ใบกำกับที่ไม่ยกเลิก (รวมใบร่างที่มีเลขแล้ว) */
   invoice_n: number; invoice_taxable: number; invoice_vat: number; invoice_total: number;
   cancelled_n: number;
+  /** ใบยกเลิกที่เลขถูกใบใหม่ใช้ซ้ำแล้ว (ระบบนำเลขที่ยกเลิกกลับมาใช้) — ไม่แสดงในรายงาน ถือว่าใบนั้นไม่เคยมี */
+  void_n: number;
   draft_n: number; draft_taxable: number; draft_vat: number;
   /** ใบลดหนี้ — เก็บเป็นค่าบวก (เอาไปหัก) */
   cn_n: number; cn_taxable: number; cn_vat: number; cn_total: number;
@@ -157,14 +159,30 @@ export function sortSalesTaxRows(rows: SalesTaxRow[]): SalesTaxRow[] {
     rank(a) - rank(b) || a.doc_no.localeCompare(b.doc_no) || (a.doc_date ?? "").localeCompare(b.doc_date ?? ""));
 }
 
-/** ตรวจลำดับเลขใบกำกับ: เลขขาดหาย (ระหว่างต่ำสุด-สูงสุดของคำนำหน้าเดียวกัน) + เลขซ้ำ */
-export function analyzeInvoiceSequence(numbers: string[]): SalesTaxIssues {
+/**
+ * ใบยกเลิกที่ "เลขถูกใบใหม่ใช้ซ้ำแล้ว" = ถือว่าไม่เคยมี → ตัดออกจากรายงาน (ระบบเลขเอกสารนำเลขที่ยกเลิกกลับมาใช้ — เจ้าของสั่ง)
+ * ใบยกเลิกที่เลขยังไม่ถูกใช้ซ้ำ ยังต้องแสดง (ยอด 0) เพื่ออธิบายว่าเลขนั้นหายไปไหน
+ */
+export function dropVoidedInvoices(rows: SalesTaxRow[]): { rows: SalesTaxRow[]; void_n: number } {
+  const live = new Set(rows.filter(r => r.kind === "invoice" && !r.cancelled).map(r => r.doc_no));
+  const kept = rows.filter(r => !(r.kind === "invoice" && r.cancelled && live.has(r.doc_no)));
+  return { rows: kept, void_n: rows.length - kept.length };
+}
+
+/**
+ * ตรวจลำดับเลขใบกำกับ: เลขขาดหาย (ระหว่างต่ำสุด-สูงสุดของคำนำหน้าเดียวกัน) + เลขซ้ำ
+ * `liveNumbers` = เลขของใบที่ยังไม่ยกเลิก — ถ้าส่งมา จะนับ "ซ้ำ" เฉพาะในกลุ่มนี้ (ใบยกเลิกใช้เลขซ้ำกับใบใหม่ได้ ไม่ใช่ความผิด)
+ */
+export function analyzeInvoiceSequence(numbers: string[], liveNumbers?: string[]): SalesTaxIssues {
   const byPrefix = new Map<string, { width: number; nums: Set<number> }>();
   const count = new Map<string, number>();
+  for (const raw of liveNumbers ?? numbers) {
+    const s = String(raw ?? "").trim();
+    if (s) count.set(s, (count.get(s) ?? 0) + 1);
+  }
   for (const raw of numbers) {
     const s = String(raw ?? "").trim();
     if (!s) continue;
-    count.set(s, (count.get(s) ?? 0) + 1);
     const m = s.match(/^(.*?)(\d+)$/);
     if (!m) continue;
     const e = byPrefix.get(m[1]) ?? { width: m[2].length, nums: new Set<number>() };
@@ -183,7 +201,9 @@ export function analyzeInvoiceSequence(numbers: string[]): SalesTaxIssues {
 }
 
 /** สรุปยอดทั้งเดือน: ใบกำกับ (ไม่ยกเลิก) − ใบลดหนี้ = สุทธิ · แยกยอดใบร่างให้เห็น */
-export function summarizeSalesTax(rows: SalesTaxRow[], noVat: { n: number; total: number } = { n: 0, total: 0 }): SalesTaxSummary {
+export function summarizeSalesTax(
+  rows: SalesTaxRow[], noVat: { n: number; total: number } = { n: 0, total: 0 }, voidN = 0,
+): SalesTaxSummary {
   const sum = (list: SalesTaxRow[], f: (r: SalesTaxRow) => number) => round2(list.reduce((a, r) => a + f(r), 0));
   const invoices = rows.filter(r => r.kind === "invoice");
   const live = invoices.filter(r => !r.cancelled);
@@ -196,6 +216,7 @@ export function summarizeSalesTax(rows: SalesTaxRow[], noVat: { n: number; total
   return {
     invoice_n: live.length, invoice_taxable, invoice_vat, invoice_total: round2(invoice_taxable + invoice_vat),
     cancelled_n: invoices.length - live.length,
+    void_n: voidN,
     draft_n: drafts.length, draft_taxable: sum(drafts, r => r.taxable), draft_vat: sum(drafts, r => r.vat),
     cn_n: cns.length, cn_taxable, cn_vat, cn_total: round2(cn_taxable + cn_vat),
     net_taxable: round2(invoice_taxable - cn_taxable),

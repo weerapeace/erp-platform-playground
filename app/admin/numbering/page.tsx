@@ -10,6 +10,7 @@ import type { NumberingRule, NumberingResponse } from "@/app/api/numbering/route
 
 const TOKEN_DOCS: { token: string; desc: string }[] = [
   { token: "{YYYY}",  desc: "ปี 4 หลัก เช่น 2026" },
+  { token: "{BYYYY}", desc: "ปี พ.ศ. 4 หลัก เช่น 2569" },
   { token: "{YY}",    desc: "ปี 2 หลัก เช่น 26" },
   { token: "{MM}",    desc: "เดือน 2 หลัก เช่น 05" },
   { token: "{DD}",    desc: "วัน 2 หลัก เช่น 30" },
@@ -34,6 +35,7 @@ export default function NumberingAdminPage() {
 
   const [rules,   setRules]   = useState<NumberingRule[]>([]);
   const [preview, setPreview] = useState<Record<string, string | null>>({});
+  const [gaps,    setGaps]    = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export default function NumberingAdminPage() {
       if (json.error) throw new Error(json.error);
       setRules(json.data);
       setPreview(json.preview);
+      setGaps(json.gaps ?? {});
       const d: Record<string, NumberingRule> = {};
       json.data.forEach(r => { d[r.key] = { ...r }; });
       setDraft(d);
@@ -69,7 +72,8 @@ export default function NumberingAdminPage() {
     if (!o || !d) return false;
     return o.label !== d.label || o.pattern !== d.pattern ||
            o.reset_policy !== d.reset_policy || o.active !== d.active ||
-           (o.notes ?? "") !== (d.notes ?? "");
+           (o.notes ?? "") !== (d.notes ?? "") ||
+           (o.recycle_cancelled ?? false) !== (d.recycle_cancelled ?? false);
   };
 
   // local preview แบบไม่ต้องเรียก API (สำหรับเห็นทันทีตอนพิมพ์)
@@ -79,7 +83,9 @@ export default function NumberingAdminPage() {
     // ถ้า reset policy → assume period match (preview แบบลอย ๆ)
     if (reset !== "never") next = current + 1;
     let r = pattern;
+    r = r.replace(/\{YYYYMM\}/g, `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}`);
     r = r.replace(/\{YYYY\}/g, String(now.getFullYear()));
+    r = r.replace(/\{BYYYY\}/g, String(now.getFullYear() + 543));
     r = r.replace(/\{YY\}/g,   String(now.getFullYear()).slice(2));
     r = r.replace(/\{MM\}/g,   String(now.getMonth()+1).padStart(2,"0"));
     r = r.replace(/\{DD\}/g,   String(now.getDate()).padStart(2,"0"));
@@ -99,6 +105,8 @@ export default function NumberingAdminPage() {
         body: JSON.stringify({
           key: d.key, label: d.label, pattern: d.pattern,
           reset_policy: d.reset_policy, active: d.active, notes: d.notes,
+          // ส่งเฉพาะชุดที่ผูกตารางเอกสารไว้ (ชุดอื่น undefined → JSON ตัดทิ้ง → DB คงค่าเดิม)
+          recycle_cancelled: d.recycle_table ? !!d.recycle_cancelled : undefined,
         }),
       });
       const json = await res.json();
@@ -203,6 +211,30 @@ export default function NumberingAdminPage() {
                     <input value={d.notes ?? ""} onChange={e => updateDraft(r.key, { notes: e.target.value })} disabled={!canEdit}
                       className="w-full h-9 mt-0.5 px-2.5 text-sm border border-slate-200 rounded-md disabled:bg-slate-50" />
                   </label>
+
+                  {/* ♻️ คืนเลขที่ยกเลิก — โชว์เฉพาะชุดที่ผูกตารางเอกสารไว้ (ตั้งจาก migration: ใบขาย/ใบวางบิล/ใบส่งสินค้า/ใบสั่งขาย) */}
+                  {r.recycle_table && (
+                    <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={!!d.recycle_cancelled}
+                          onChange={e => updateDraft(r.key, { recycle_cancelled: e.target.checked })}
+                          disabled={!canEdit} className="rounded border-slate-300" />
+                        <span className="font-medium text-emerald-900">♻️ นำเลขของใบที่ยกเลิกกลับมาใช้</span>
+                      </label>
+                      <div className="mt-1 pl-6 text-xs text-emerald-800/80">
+                        เลขถัดไป = เลขว่างที่เล็กสุดของงวดนี้ โดยไม่นับใบที่ยกเลิก — ยกเลิกใบ 009 แล้วสร้างใหม่จะได้ 009 ไม่ข้ามไป 010
+                        · สแกนจากตาราง <code className="font-mono">{r.recycle_table}.{r.recycle_column}</code>
+                      </div>
+                      {(gaps[r.key]?.length ?? 0) > 0 && (
+                        <div className="mt-1.5 pl-6 text-xs">
+                          <span className="text-slate-500">เลขว่างรอใช้ในงวดนี้:</span>{" "}
+                          {gaps[r.key].map(g => (
+                            <code key={g} className="mr-1 rounded border border-emerald-200 bg-white px-1.5 py-0.5 font-mono text-emerald-700">{g}</code>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
                     <label className="flex items-center gap-2 text-sm">

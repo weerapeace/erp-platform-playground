@@ -213,7 +213,11 @@ export default function DeliveryNotesPage() {
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash({ deliver: "ส่งของแล้ว", cancel: "ยกเลิกแล้ว", revert: "ย้อนสถานะแล้ว" }[action] ?? "อัปเดตแล้ว");
+      // ย้อนสถานะใบที่ยกเลิก: ถ้าเลขเดิมถูกใบใหม่ใช้ไปแล้ว (ระบบนำเลขที่ยกเลิกกลับมาใช้) ใบนี้จะได้เลขใหม่ — ต้องบอกให้รู้
+      const result = (json.data ?? {}) as { dn_number?: string; renumbered_from?: string | null };
+      flash(result.renumbered_from
+        ? `ย้อนสถานะแล้ว · เลข ${result.renumbered_from} ถูกใบอื่นใช้ไปแล้ว จึงได้เลขใหม่ ${result.dn_number}`
+        : ({ deliver: "ส่งของแล้ว", cancel: "ยกเลิกแล้ว", revert: "ย้อนสถานะแล้ว" }[action] ?? "อัปเดตแล้ว"));
       setDetailOpen(false);
       await fetchList();
     } catch (err) { flash(err instanceof Error ? err.message : "ผิดพลาด"); }

@@ -434,11 +434,15 @@ export default function SalesOrdersPage() {
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash({
-        confirm: "ยืนยันแล้ว · ออกเลข SO", start_production: "เริ่มผลิต",
-        mark_ready: "พร้อมจัดส่ง", ship: "จัดส่งแล้ว",
-        complete: "ปิด SO", cancel: "ยกเลิกแล้ว",
-      }[action] ?? "อัปเดตแล้ว");
+      // ยกเลิกแล้ว: ระบบเลขเอกสารจะเอาเลขนี้ไปให้ใบถัดไป (ถ้าชุดเลขเปิด "นำเลขที่ยกเลิกกลับมาใช้" และยังอยู่งวดเดียวกัน)
+      const result = (json.data ?? {}) as { so_number?: string | null; number_reusable?: boolean };
+      flash(action === "cancel" && result.number_reusable && result.so_number
+        ? `ยกเลิกแล้ว · เลข ${result.so_number} ว่างให้ใบถัดไปใช้`
+        : ({
+            confirm: "ยืนยันแล้ว · ออกเลข SO", start_production: "เริ่มผลิต",
+            mark_ready: "พร้อมจัดส่ง", ship: "จัดส่งแล้ว",
+            complete: "ปิด SO", cancel: "ยกเลิกแล้ว",
+          }[action] ?? "อัปเดตแล้ว"));
       setDetailOpen(false); setCancelTarget(null); setCancelReason("");
       await fetchList();
     } catch (err) { flash(err instanceof Error ? err.message : "ผิดพลาด"); }

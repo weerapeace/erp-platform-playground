@@ -18,7 +18,7 @@ import { firstText } from "@/lib/doc-parties";
 import { formatThaiAddress } from "@/lib/thai-address";
 import { isMonthKey, monthRange, thisMonth } from "@/lib/month";
 import {
-  analyzeInvoiceSequence, creditNoteRow, invoiceRow, sortSalesTaxRows, summarizeSalesTax,
+  analyzeInvoiceSequence, creditNoteRow, dropVoidedInvoices, invoiceRow, sortSalesTaxRows, summarizeSalesTax,
   type CustomerTax, type SalesTaxCompany, type SalesTaxReport, type SalesTaxRow,
 } from "@/lib/sales-tax-report";
 
@@ -85,7 +85,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const custOf = (r: Record<string, unknown>) => taxById.get(String(r.customer_id ?? "")) ?? null;
 
   // ---- ประกอบบรรทัดรายงาน ----
-  const rows: SalesTaxRow[] = sortSalesTaxRows([
+  const built: SalesTaxRow[] = sortSalesTaxRows([
     ...invoices.map(s => invoiceRow({
       id: String(s.id), tax_invoice_no: String(s.tax_invoice_no).trim(), so_number: (s.so_number as string) ?? null,
       order_date: (s.order_date as string) ?? null, customer_name: (s.customer_name as string) ?? null,
@@ -99,10 +99,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }, custOf(c))),
   ]);
 
+  // ใบยกเลิกที่เลขถูกใบใหม่ใช้ซ้ำแล้ว = ไม่เคยมี → ไม่แสดง (ระบบเลขเอกสารนำเลขที่ยกเลิกกลับมาใช้)
+  const { rows, void_n } = dropVoidedInvoices(built);
+  const invoiceNos = rows.filter(r => r.kind === "invoice").map(r => r.doc_no);
+  const liveNos = rows.filter(r => r.kind === "invoice" && !r.cancelled).map(r => r.doc_no);
+
   const report: SalesTaxReport = {
     month, company, companies, rows,
-    summary: summarizeSalesTax(rows, { n: noVatRows.length, total: noVatRows.reduce((a, s) => a + num(s.grand_total), 0) }),
-    issues: analyzeInvoiceSequence(rows.filter(r => r.kind === "invoice").map(r => r.doc_no)),
+    summary: summarizeSalesTax(rows, { n: noVatRows.length, total: noVatRows.reduce((a, s) => a + num(s.grand_total), 0) }, void_n),
+    issues: analyzeInvoiceSequence(invoiceNos, liveNos),
   };
   return NextResponse.json({ data: report, error: null });
 }

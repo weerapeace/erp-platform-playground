@@ -152,7 +152,7 @@ export default function SalesTaxReportPage() {
   const co = rep?.company;
   const issues = rep?.issues;
   const warnings: React.ReactNode[] = [];
-  if (issues?.duplicates.length) warnings.push(<>เลขใบกำกับ<b>ซ้ำ</b>: {issues.duplicates.join(", ")} — ต้องแก้ให้ไม่ซ้ำก่อนยื่น (ปุ่ม 🔢 แก้เลขที่ในหน้าใบขาย)</>);
+  if (issues?.duplicates.length) warnings.push(<>เลขใบกำกับ<b>ซ้ำ</b> (ใบที่ยังไม่ยกเลิก): {issues.duplicates.join(", ")} — ต้องแก้ให้เหลือเลขละ 1 ใบก่อนยื่น (แก้ช่อง "เลขที่ใบกำกับภาษี" ในหน้าใบขาย หรือยกเลิกใบที่ผิด)</>);
   if (issues?.gaps.length) warnings.push(<>เลขใบกำกับ<b>ขาดหาย</b>: {issues.gaps.join(", ")} — ตรวจว่ามีใบไหนลงวันที่ผิดเดือน หรือถูกลบไป</>);
   if (s?.draft_n) warnings.push(<>มี<b>ใบร่าง {s.draft_n} ใบ</b>ที่มีเลขใบกำกับแล้ว (มูลค่า {money(s.draft_taxable)} · VAT {money(s.draft_vat)}) — นับรวมในยอดอยู่ ควรกด "ยืนยัน" หรือ "ยกเลิก" ก่อนยื่นภาษี</>);
   if (s?.missing_tax_id_n) warnings.push(<>ลูกค้า<b>ไม่มีเลขผู้เสียภาษีในทะเบียน</b> {s.missing_tax_id_n} ใบ — ไปเติมที่ ลูกค้า (Customers) แล้วกลับมาโหลดใหม่</>);
@@ -213,7 +213,7 @@ export default function SalesTaxReportPage() {
             {/* ===== KPI ===== */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <Kpi tone="blue" label="ใบกำกับภาษี (ไม่รวมยกเลิก)" value={`${s.invoice_n} ใบ`}
-                sub={<>{s.cancelled_n > 0 && <>ยกเลิก {s.cancelled_n} ใบ · </>}{s.draft_n > 0 && <span className="text-amber-600">ร่าง {s.draft_n} ใบ · </span>}{s.no_vat_n > 0 && <>บิลไม่มี VAT {s.no_vat_n} ใบ (ไม่อยู่ในรายงาน)</>}</>} />
+                sub={<>{s.cancelled_n > 0 && <>ยกเลิก {s.cancelled_n} ใบ · </>}{s.void_n > 0 && <span title="ใบที่ยกเลิกแล้วเลขถูกใบใหม่ใช้ซ้ำ — ถือว่าไม่เคยมี จึงไม่อยู่ในรายงาน">เลขถูกใช้ซ้ำแล้ว {s.void_n} ใบ (ไม่แสดง) · </span>}{s.draft_n > 0 && <span className="text-amber-600">ร่าง {s.draft_n} ใบ · </span>}{s.no_vat_n > 0 && <>บิลไม่มี VAT {s.no_vat_n} ใบ (ไม่อยู่ในรายงาน)</>}</>} />
               <Kpi tone="slate" label="มูลค่าสินค้า/บริการ (ก่อน VAT)" value={`฿${money(s.invoice_taxable)}`}
                 sub={s.cn_n > 0 ? <>หักใบลดหนี้ {s.cn_n} ใบ −฿{money(s.cn_taxable)}</> : "ไม่มีใบลดหนี้"} />
               <Kpi tone="amber" label="ภาษีขาย (VAT)" value={`฿${money(s.invoice_vat)}`}
