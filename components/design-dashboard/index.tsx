@@ -19,6 +19,7 @@ import { wfIconSlotId } from "@/lib/brand-theme";
 import { BrandSlot } from "@/components/brand-theme/slots";
 import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provider";
 import { BrandThemeBuilder } from "@/components/brand-theme-builder";
+import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame } from "@/components/device-view";
 
 const WorkflowStatusManager = dynamic(
   () => import("@/components/workflow-status-manager").then((mod) => mod.WorkflowStatusManager),
@@ -193,6 +194,19 @@ export function DesignDashboard() {
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
   const [viewMode, setViewMode] = useState<"board" | "gallery">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี)
   const { cols: galleryCols, setCols: setGalleryCols, gridStyle: galleryGridStyle } = useGalleryColumns("design-dashboard", 6);   // จำนวนการ์ดต่อแถว (ของกลาง จำรายคน)
+  // ── รูปแบบจอ (ของกลาง device-view): จอคอม / แท็บเล็ต / มือถือ — อัตโนมัติตามจอจริง หรือเลือกเอง (?device=) ──
+  // `layout` = สิ่งที่ต้องเรนเดอร์จริง · เลือกดูแบบมือถือบนจอคอม → DevicePreviewFrame ครอบเป็นกรอบเครื่อง + QR ให้สแกนเปิดบนเครื่องจริง
+  const viewport = useViewportLayout();
+  const { mode: deviceMode, setMode: setDeviceMode, layout } = useDeviceMode(viewport);
+  const isDesktop = layout === "desktop";
+  const isPhone = layout === "phone";
+  const colRefs = useRef<Record<string, HTMLDivElement | null>>({});   // คอลัมน์สถานะ (โหมดมือถือ/แท็บเล็ต: กดชิปสถานะแล้วเลื่อนไปคอลัมน์นั้น)
+  const galleryStyle = useMemo(() => (
+    // แกลเลอรีบนมือถือ = 2 ต่อแถว · แท็บเล็ต = ไม่เกิน 4 (การ์ดไม่จิ๋วเกินอ่าน) · จอคอม = ตามที่ผู้ใช้เลือก
+    isPhone ? { display: "grid", gap: "0.5rem", gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }
+      : layout === "tablet" ? { ...galleryGridStyle, gridTemplateColumns: `repeat(${Math.min(galleryCols, 4)}, minmax(0, 1fr))` }
+      : galleryGridStyle
+  ), [isPhone, layout, galleryCols, galleryGridStyle]);
   const [brandLogos, setBrandLogos] = useState<Record<string, string>>({});   // brand id → logo R2 key (จาก /api/brands)
   const [othersOpen, setOthersOpen] = useState(false);                        // ดรอปดาวน์ "แบรนด์อื่นๆ"
   const othersAnchorRef = useRef<HTMLDivElement>(null);                       // จุดยึดของดรอปดาวน์ (ให้ของกลางลอยทับได้ ไม่โดนการ์ดข้างล่างบัง)
@@ -470,10 +484,11 @@ export function DesignDashboard() {
     if (sheetId) void moveSheetToStatus(sheetId, column.key);
   }
 
-  return (
-    <BrandThemedShell theme={brandTheme}>
-      {/* จำกัดความกว้างเนื้อหา + จัดกลางจอ (เจ้าของขอ) — จอกว้างมากถ้ายืดเต็มจะกวาดตาไกล อ่านยาก */}
-      <div className="mx-auto w-full max-w-screen-2xl px-3 py-4 sm:px-5 lg:px-6 lg:py-5">
+  // เนื้อหาทั้งหน้า (ไม่รวมป๊อปอัป/แถบล่างที่ portal ออกไป) — ถ้าเลือกดูแบบมือถือ/แท็บเล็ตบนจอที่กว้างกว่า
+  // DevicePreviewFrame จะครอบเป็นกรอบเครื่อง + QR · ถ้าเปิดบนเครื่องจริงอยู่แล้ว = เรนเดอร์ตรง ๆ
+  const body = (
+      /* จำกัดความกว้างเนื้อหา + จัดกลางจอ (เจ้าของขอ) — จอกว้างมากถ้ายืดเต็มจะกวาดตาไกล อ่านยาก */
+      <div className={`mx-auto w-full max-w-screen-2xl ${isPhone ? "px-3 py-3" : isDesktop ? "px-6 py-5" : "px-4 py-4"}`}>
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex items-start gap-2">
             <BrandSlot theme={brandTheme} id="header_left" className="shrink-0 mt-1" />
@@ -490,6 +505,8 @@ export function DesignDashboard() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <BrandSlot theme={brandTheme} id="header_right" className="shrink-0" />
+            {/* สลับรูปแบบจอ (ของกลาง): 🖥️ จอคอม / 📟 แท็บเล็ต / 📱 มือถือ — เลือกแบบเล็กกว่าจอจริงจะได้กรอบพรีวิว + QR สแกนเปิดบนเครื่อง */}
+            <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact={!isDesktop} />
             <RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} />
             <a data-gg-action href="/master/design-sheets" className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
               กลับ Design Sheets
@@ -541,7 +558,8 @@ export function DesignDashboard() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-stretch gap-2">
+          {/* จอคอม = ห่อบรรทัด · แท็บเล็ต/มือถือ = แถวเดียวเลื่อนซ้าย-ขวา (การ์ดแบรนด์ไม่กินพื้นที่แนวตั้ง) */}
+          <div className={isDesktop ? "flex flex-wrap items-stretch gap-2" : "flex items-stretch gap-2 overflow-x-auto pb-1 [&>*]:shrink-0"}>
             <button data-gg-action onClick={() => setCreateOpen(true)} title="สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)"
               className="flex flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600">＋ เพิ่มงาน</button>
 
@@ -556,11 +574,11 @@ export function DesignDashboard() {
               return (
                 <button key={brand.key} data-gg-brand-card data-gg-selected={selected ? "true" : undefined}
                   onClick={() => setSelectedBrandKey(brand.key)}
-                  className="flex items-center gap-3 rounded-xl border bg-white px-4 py-3 text-left transition hover:-translate-y-0.5"
+                  className={`flex items-center rounded-xl border bg-white text-left transition hover:-translate-y-0.5 ${isPhone ? "gap-2 px-3 py-2" : "gap-3 px-4 py-3"}`}
                   style={{ borderColor: selected ? brand.color : "#e2e8f0", boxShadow: selected ? `0 0 0 1px ${brand.color}55` : undefined }}>
-                  {brandMark(brand, "h-12 w-12")}
+                  {brandMark(brand, isPhone ? "h-9 w-9" : "h-12 w-12")}
                   <div className="min-w-0">
-                    <div className="max-w-[170px] truncate text-base font-semibold text-slate-800">{brand.name}</div>
+                    <div className={`truncate font-semibold text-slate-800 ${isPhone ? "max-w-[120px] text-sm" : "max-w-[170px] text-base"}`}>{brand.name}</div>
                     <div className="text-xs text-slate-400">{brand.active} เดิน{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} ใกล้ครบ</span></> : null}</div>
                   </div>
                 </button>
@@ -635,7 +653,7 @@ export function DesignDashboard() {
 
         {/* สถิติ (แถวป้ายเล็กด้านบน) + บอร์ด (เต็มกว้าง) */}
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className={`grid gap-2 ${isPhone ? "grid-cols-2" : "grid-cols-4"}`}>
             {loading ? (
               <><LoadingCard /><LoadingCard /><LoadingCard /><LoadingCard /></>
             ) : (
@@ -699,7 +717,7 @@ export function DesignDashboard() {
                   </button>
                 )}
                 {/* เลือกจำนวนการ์ดต่อแถว (ของกลาง) — เฉพาะมุมมองแกลเลอรี */}
-                {viewMode === "gallery" && (
+                {viewMode === "gallery" && !isPhone && (
                   <GalleryColumnsControl cols={galleryCols} onChange={setGalleryCols} className="ml-auto" />
                 )}
                 {/* สลับมุมมอง: บอร์ด Kanban ↔ การ์ดรูปใหญ่ (แกลเลอรี) — จำค่ารายคน */}
@@ -722,7 +740,7 @@ export function DesignDashboard() {
                 </div>
               ) : viewMode === "gallery" ? (
                 /* ── มุมมองการ์ดรูปใหญ่ (แกลเลอรี): เห็นรูปงานเต็มใบ ไม่โดนตัด · จำนวนต่อแถวเลือกได้ · เรียงตามอัปเดตล่าสุด ── */
-                <div style={galleryGridStyle}>
+                <div style={galleryStyle}>
                   {filteredSheets.map((sheet) => {
                     const brandColor = safeColor(sheet.brand_color);
                     const coverUrl = sheetCoverUrl(sheet);
@@ -791,8 +809,24 @@ export function DesignDashboard() {
               ) : (
                 /* ห้ามใส่ overflow-* ที่กรอบนี้ — จะทำให้หัวคอลัมน์ sticky ยึดกับกรอบแทนหน้าจอ (คอลัมน์พอดีจอแล้ว ไม่ต้อง scroll แนวนอน) */
                 <div className="px-1 pb-2">
-                  {/* เห็นครบทุกคอลัมน์พอดีจอ (minmax(0,1fr) = คอลัมน์หดพอดี ไม่ต้องเลื่อนแนวนอน) · gap-4 เว้นช่องไฟ */}
-                  <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${boardColumns.length}, minmax(0, 1fr))` }}>
+                  {/* แท็บเล็ต/มือถือ: ชิปสถานะด้านบน — กดแล้วเลื่อนไปคอลัมน์นั้น (คอลัมน์เรียงแนวนอน ปัดซ้าย-ขวาทีละสถานะ) */}
+                  {!isDesktop && (
+                    <div className="mb-2 flex gap-1 overflow-x-auto pb-1">
+                      {boardColumns.map((column) => (
+                        <button key={column.key} type="button"
+                          onClick={() => colRefs.current[column.key]?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" })}
+                          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border bg-white px-2.5 text-[11px] font-medium text-slate-700"
+                          style={{ borderColor: `${column.color}66` }}>
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: column.color }} />
+                          {column.label} <span className="text-slate-400">{column.sheets.length}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {/* จอคอม: เห็นครบทุกคอลัมน์พอดีจอ (minmax(0,1fr) = คอลัมน์หดพอดี ไม่ต้องเลื่อนแนวนอน) · gap-4 เว้นช่องไฟ
+                      แท็บเล็ต/มือถือ: แถวเลื่อนแนวนอน + snap ทีละคอลัมน์ (มือถือ 1 คอลัมน์/จอ · แท็บเล็ต ~2.5 คอลัมน์) */}
+                  <div className={isDesktop ? "grid gap-4" : "flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2"}
+                    style={isDesktop ? { gridTemplateColumns: `repeat(${boardColumns.length}, minmax(0, 1fr))` } : undefined}>
                     {boardColumns.map((column, index) => {
                       const expanded = expandedCols.has(column.key);
                       const shown = expanded ? column.sheets : column.sheets.slice(0, 8);
@@ -807,10 +841,14 @@ export function DesignDashboard() {
                           onDragEnter={(event) => handleColumnDragOver(event, column)}
                           onDragLeave={(event) => handleColumnDragLeave(event, column)}
                           onDrop={(event) => handleColumnDrop(event, column)}
-                          className={`relative rounded-xl p-2 transition-colors ${isDropTarget ? "bg-amber-50/70 ring-2 ring-amber-300 ring-offset-2" : ""}`}
-                          style={isDropTarget ? undefined : { background: `${column.color}12`, border: `1px solid ${column.color}26` }}
+                          ref={(el) => { colRefs.current[column.key] = el; }}
+                          className={`relative rounded-xl p-2 transition-colors ${isDesktop ? "" : "shrink-0 snap-start"} ${isDropTarget ? "bg-amber-50/70 ring-2 ring-amber-300 ring-offset-2" : ""}`}
+                          style={{
+                            ...(isDropTarget ? {} : { background: `${column.color}12`, border: `1px solid ${column.color}26` }),
+                            ...(isPhone ? { width: "86%" } : isDesktop ? {} : { width: 300 }),
+                          }}
                         >
-                          <div data-gg-column-header className="sticky top-16 z-10 mb-3 rounded-lg border px-2 py-2 text-center shadow-sm" style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%), #ffffff` }}>
+                          <div data-gg-column-header className={`${isDesktop ? "sticky top-16 z-10" : ""} mb-3 rounded-lg border px-2 py-2 text-center shadow-sm`} style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%), #ffffff` }}>
                             <BrandSlot theme={brandTheme} id={wfIconSlotId(column.key)} w={96} size="w-7 h-7" className="absolute left-1 top-1" />
                             <div data-gg-column-dot className="mx-auto mb-1 h-3 w-3 rounded-full shadow-[0_0_16px_rgba(245,158,11,0.65)]" style={{ backgroundColor: column.color }} />
                             <div className="truncate text-xs font-semibold text-slate-800" title={column.label}>{column.label}</div>
@@ -832,11 +870,11 @@ export function DesignDashboard() {
                                   onClick={activate}
                                   onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
                                   data-gg-task-card
-                                  draggable={!movingSheetId && !pickMode}
+                                  draggable={isDesktop && !movingSheetId && !pickMode}   /* ทัชลากไม่ได้ → เปลี่ยนสถานะผ่านป๊อปอัปรายละเอียดแทน */
                                   onDragStart={(event) => handleCardDragStart(event, sheet)}
                                   onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
                                   aria-busy={isMoving}
-                                  title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : "Drag to change status or click to open"}
+                                  title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : isDesktop ? "ลากเพื่อเปลี่ยนสถานะ หรือกดเพื่อเปิด" : "แตะเพื่อเปิด (เปลี่ยนสถานะได้ในป๊อปอัป)"}
                                   className={`relative block overflow-hidden rounded-lg border bg-white p-2.5 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
                                 >
                                   {pickMode && <PickBadge checked={picked} />}
@@ -925,7 +963,7 @@ export function DesignDashboard() {
                   ยังไม่มีประวัติที่โหลดได้ หรือระบบยังไม่เปิดสิทธิ์อ่านประวัติในหน้านี้
                 </div>
               ) : (
-                <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                <div className={`mt-3 grid gap-3 ${isDesktop ? "grid-cols-3" : isPhone ? "grid-cols-1" : "grid-cols-2"}`}>
                   {auditRows.map((row) => (
                     <div key={row.id} data-gg-audit-row className="rounded-lg border border-white/10 bg-white/5 p-3">
                       <div className="mb-2 flex items-center gap-2">
@@ -942,6 +980,11 @@ export function DesignDashboard() {
           </main>
         </div>
       </div>
+  );
+
+  return (
+    <BrandThemedShell theme={brandTheme}>
+      <DevicePreviewFrame layout={layout} viewport={viewport}>{body}</DevicePreviewFrame>
 
       {/* แถบล่าง "เลือกไว้ N ใบ" (Bulk action bar) — โผล่เฉพาะโหมดเลือก */}
       {pickMode && createPortal(
