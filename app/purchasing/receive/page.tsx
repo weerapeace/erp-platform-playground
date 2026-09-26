@@ -112,6 +112,7 @@ export default function ReceiveGoodsPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  const [doneGrs, setDoneGrs] = useState<string[]>([]);   // เลขใบรับที่เพิ่งสร้าง → ปุ่มพิมพ์ใบรับ
   const [err, setErr] = useState<string | null>(null);
   const [shortDialog, setShortDialog] = useState<{ base: PayloadLine[]; shortIds: string[]; shortNames: string[] } | null>(null);
 
@@ -535,7 +536,7 @@ export default function ReceiveGoodsPage() {
     try {
       const j = await postReceive(poId, payloadLines);
       if (j.error) { setErr(j.error); return; }
-      setDone(`✅ รับสินค้าสำเร็จ — เลขที่ ${j.gr_no} · สถานะ PO: ${j.po_status}`);
+      setDone(`✅ รับสินค้าสำเร็จ — เลขที่ ${j.gr_no} · สถานะ PO: ${j.po_status}`); setDoneGrs([String(j.gr_no)]);
       setPoId(""); setLines([]); setInputs({}); setShortDialog(null); resetAfterSave();
     } catch (e) { setErr(String(e)); }
     finally { setSaving(false); }
@@ -595,7 +596,7 @@ export default function ReceiveGoodsPage() {
         if (j.error) { setErr(`PO ${pos.find(p => p.id === pid)?.po_no ?? pid}: ${j.error}`); setSaving(false); return; }
         results.push(j.gr_no);
       }
-      setDone(`✅ รับสินค้าสำเร็จ ${results.length} ใบรับ (${byPo.size} ใบสั่งซื้อ): ${results.join(", ")}`);
+      setDone(`✅ รับสินค้าสำเร็จ ${results.length} ใบรับ (${byPo.size} ใบสั่งซื้อ): ${results.join(", ")}`); setDoneGrs(results.map(String));
       setCartFormOpen(false); setSelectedIds(new Set());
       resetAfterSave();
       await loadPending(doneMode ? "done" : "pending");
@@ -649,7 +650,17 @@ export default function ReceiveGoodsPage() {
           <button onClick={() => { setTab("done"); setDone(null); }} className={`px-4 py-2 transition-colors ${tab === "done" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>✅ รับครบแล้ว</button>
         </div>
 
-        {done && <div className="mb-4 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">{done} — <a href="/m/goods-receipts-v2" className="underline">ดูใบรับสินค้า</a></div>}
+        {done && (
+          <div className="mb-4 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 flex items-center gap-2 flex-wrap">
+            <span>{done} — <a href="/m/goods-receipts-v2" className="underline">ดูใบรับสินค้า</a></span>
+            {/* พิมพ์ใบรับ (ไม่มีราคา) ทันที · ราคา/ค่าส่งไปทำที่ใบสำคัญรับ (จัดซื้อ) */}
+            {doneGrs.map((no) => (
+              <a key={no} href={`/print/goods-receipt/${encodeURIComponent(no)}`} target="_blank" rel="noreferrer"
+                className="h-7 px-2.5 inline-flex items-center text-xs rounded-md border border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100">🖨 พิมพ์ใบรับ {no}</a>
+            ))}
+            <a href="/purchasing/vouchers" className="h-7 px-2.5 inline-flex items-center text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">🧾 ไปออกใบสำคัญรับ (ใส่ราคา)</a>
+          </div>
+        )}
         {err && <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {err}</div>}
 
 
@@ -1172,7 +1183,7 @@ export default function ReceiveGoodsPage() {
                         <td className="px-2.5 py-1.5 text-slate-600">{h.receiver || "—"}</td>
                         <td className="px-2.5 py-1.5 text-right tabular-nums text-slate-700">{h.qty_received.toLocaleString()}</td>
                         <td className="px-2.5 py-1.5 text-right tabular-nums text-slate-500">{h.qty_defective ? h.qty_defective.toLocaleString() : "-"}</td>
-                        <td className="px-2.5 py-1.5 text-slate-500">{CASE_LABEL[h.case_type] ?? h.case_type}{h.gr_no ? <span className="text-slate-300"> · {h.gr_no}</span> : ""}</td>
+                        <td className="px-2.5 py-1.5 text-slate-500">{CASE_LABEL[h.case_type] ?? h.case_type}{h.gr_no ? <a href={`/print/goods-receipt/${encodeURIComponent(h.gr_no)}`} target="_blank" rel="noreferrer" title="พิมพ์ใบรับ" className="text-slate-400 hover:text-blue-600 ml-1">🖨 {h.gr_no}</a> : ""}</td>
                       </tr>
                     ))}
                   </tbody>
