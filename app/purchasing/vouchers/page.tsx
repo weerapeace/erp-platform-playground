@@ -15,6 +15,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { fmtMoney, curSymbol } from "@/lib/landed-cost";
+import { GrDetailModal } from "@/components/gr-detail-modal";
 
 type PendingGr = { id: string; gr_no: string; po_id: string | null; po_no: string; seller_name: string; receive_date: string | null; receiver: string; line_count: number; currency: string };
 type VoucherRow = { id: string; pv_no: string | null; status: string; voucher_date: string; seller_name: string | null; currency: string; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; line_count: number; gr_nos: string[]; po_nos: string[]; ship_method: string };
@@ -38,6 +39,7 @@ export default function PurchaseVouchersPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
   const [vStatus, setVStatus] = useState<"all" | "draft" | "confirmed">("all");
+  const [detailGr, setDetailGr] = useState<PendingGr | null>(null);   // ป๊อปรายละเอียดใบรับ (ของกลาง GrDetailModal)
 
   useEffect(() => { const t = localStorage.getItem(TAB_KEY); if (t === "pending" || t === "vouchers") setTab(t); }, []);
   const changeTab = (t: "pending" | "vouchers") => { setTab(t); localStorage.setItem(TAB_KEY, t); };
@@ -60,14 +62,16 @@ export default function PurchaseVouchersPage() {
   const selCurrencies = useMemo(() => [...new Set(selRows.map((g) => g.currency))], [selRows]);
   const selSellers = useMemo(() => [...new Set(selRows.map((g) => g.seller_name))], [selRows]);
 
-  const createVoucher = async () => {
-    if (selRows.length === 0) return;
+  // สร้างใบสำคัญจากใบรับที่ติ๊ก (หรือส่ง ids มาเจาะจง เช่น จากป๊อปรายละเอียด = ใบเดียว)
+  const createVoucher = async (ids?: string[]) => {
+    const grIds = ids ?? selRows.map((g) => g.id);
+    if (grIds.length === 0) return;
     setCreating(true);
     try {
-      const res = await apiFetch("/api/purchasing/vouchers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gr_ids: selRows.map((g) => g.id) }) });
+      const res = await apiFetch("/api/purchasing/vouchers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gr_ids: grIds }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
-      toast.success(`สร้างใบสำคัญรับ (ร่าง) จากใบรับ ${selRows.length} ใบแล้ว`);
+      toast.success(`สร้างใบสำคัญรับ (ร่าง) จากใบรับ ${grIds.length} ใบแล้ว`);
       setSelected(new Set());
       router.push(`/purchasing/vouchers/${j.id}`);
     } catch (e) { toast.error("สร้างไม่สำเร็จ: " + String((e as Error).message ?? e)); }
@@ -82,9 +86,13 @@ export default function PurchaseVouchersPage() {
     { key: "receiver", header: "ผู้รับ", width: "8rem", cell: (g) => <span className="text-xs text-slate-500 truncate block">{g.receiver}</span> },
     { key: "cur", header: "สกุล", width: "4rem", align: "center", cell: (g) => <span className="text-xs">{curSymbol(g.currency)}</span> },
     { key: "n", header: "รายการ", width: "5rem", align: "right", sortValue: (g) => g.line_count, cell: (g) => <span className="tabular-nums">{g.line_count}</span> },
-    { key: "print", header: "", width: "6rem", align: "center", cell: (g) => (
-      <a href={`/print/goods-receipt/${g.id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-        className="text-xs text-slate-500 hover:text-blue-600 border border-slate-200 rounded-md px-2 h-7 inline-flex items-center hover:bg-slate-50">🖨 ใบรับ</a>
+    { key: "actions", header: "", width: "11rem", align: "center", cell: (g) => (
+      <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        <button onClick={() => setDetailGr(g)} title="ดูรายการในใบรับ / ไฟล์แนบ"
+          className="text-xs text-slate-600 hover:text-blue-600 border border-slate-200 rounded-md px-2 h-7 inline-flex items-center hover:bg-slate-50">👁 รายละเอียด</button>
+        <a href={`/print/goods-receipt/${g.id}`} target="_blank" rel="noreferrer"
+          className="text-xs text-slate-500 hover:text-blue-600 border border-slate-200 rounded-md px-2 h-7 inline-flex items-center hover:bg-slate-50">🖨</a>
+      </div>
     ) },
   ], []);
 
@@ -160,6 +168,15 @@ export default function PurchaseVouchersPage() {
           </>
         )}
       </div>
+
+      {/* ป๊อปรายละเอียดใบรับ (ของกลาง) + ปุ่มออกใบสำคัญจากใบนี้ใบเดียว */}
+      {detailGr && (
+        <GrDetailModal grId={detailGr.id} onClose={() => setDetailGr(null)}
+          footer={canEdit ? (
+            <button onClick={() => { const g = detailGr; setDetailGr(null); void createVoucher([g.id]); }} disabled={creating}
+              className="h-9 px-4 text-sm font-medium rounded-lg border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-40">🧾 ออกใบสำคัญจากใบนี้</button>
+          ) : undefined} />
+      )}
     </PlaygroundShell>
   );
 }
