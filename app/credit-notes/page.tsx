@@ -21,6 +21,7 @@ import { DateInput } from "@/components/date-input";
 import { MoneyInput } from "@/components/money-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { useOpenParam } from "@/lib/open-param";
 import { formatDate } from "@/lib/date";
 import { computeCreditNote, validateBeforeIssue, type CreditNoteLine } from "@/lib/credit-note";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -252,6 +253,8 @@ export default function CreditNotesPage() {
     } catch (err) { flash(err instanceof Error ? err.message : "โหลดไม่ได้"); setDetailOpen(false); }
     finally { setDetailLoading(false); }
   };
+  // ลิงก์ตรงถึงใบลดหนี้ `?open=<id>` (จาก Global Search) → เปิดรายละเอียดให้เลย
+  useOpenParam(canView, (id) => { void openDetail(id); });
 
   const runTransition = async (id: string, action: "issue" | "cancel", reason?: string) => {
     setWfLoading(true);

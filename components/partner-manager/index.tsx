@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import nextDynamic from "next/dynamic";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
+import { useOpenParam } from "@/lib/open-param";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { Spinner } from "@/components/spinner";
@@ -128,6 +129,8 @@ export function PartnerManager() {
   const pageRows = filtered.slice(page * PAGE, page * PAGE + PAGE);
 
   const openView = (p: Partner) => { setSel(p); setMode("view"); };
+  // ลิงก์ตรงถึงคู่ค้า `?open=<id>` (จาก Global Search / หน้าอื่น) → เปิดป๊อปให้เลยเมื่อโหลดรายชื่อเสร็จ
+  useOpenParam(!loading && all.length > 0, (id) => { const p = all.find((x) => x.id === id); if (p) openView(p); });
   const openCreate = () => {
     setSel({ id: "", default_currency: "THB", is_customer: tab === "customer", is_supplier: tab === "supplier" || tab === "china", is_company: true } as Partner);
     setMode("create");

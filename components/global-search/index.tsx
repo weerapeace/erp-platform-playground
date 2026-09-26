@@ -9,13 +9,22 @@ import type { SearchHit, GlobalSearchResponse } from "@/app/api/global-search/ro
 // ---- Entity icon/label config ----
 
 const ENTITY: Record<SearchHit["entity_type"], { icon: string; label: string; color: string }> = {
-  page:     { icon: "📄", label: "หน้า / เมนู", color: "text-slate-800"   },
-  guide:    { icon: "📖", label: "วิธีใช้งาน",  color: "text-teal-700"    },
-  product:  { icon: "📦", label: "สินค้า",      color: "text-blue-700"    },
-  supplier: { icon: "🏢", label: "ผู้จำหน่าย", color: "text-emerald-700" },
-  pr:       { icon: "🛒", label: "ใบขอซื้อ",   color: "text-amber-700"   },
-  user:     { icon: "👤", label: "ผู้ใช้",      color: "text-purple-700"  },
-  asset:    { icon: "🖼️", label: "ไฟล์/คลัง",  color: "text-indigo-700"  },
+  page:      { icon: "📄", label: "หน้า / เมนู",        color: "text-slate-800"   },
+  guide:     { icon: "📖", label: "วิธีใช้งาน",         color: "text-teal-700"    },
+  sku:       { icon: "📦", label: "สินค้า (SKU)",       color: "text-blue-700"    },
+  partner:   { icon: "🏢", label: "คู่ค้า (ลูกค้า/ร้าน)", color: "text-emerald-700" },
+  po:        { icon: "🧾", label: "ใบสั่งซื้อ (PO)",    color: "text-amber-700"   },
+  pv:        { icon: "🧾", label: "ใบสำคัญรับ (ใบซื้อ)", color: "text-orange-700"  },
+  mo:        { icon: "🏭", label: "ใบสั่งผลิต (MO)",    color: "text-rose-700"    },
+  invoice:   { icon: "🧾", label: "ใบขาย / ใบกำกับ",    color: "text-violet-700"  },
+  quotation: { icon: "📝", label: "ใบเสนอราคา",        color: "text-violet-700"  },
+  billing:   { icon: "📑", label: "ใบวางบิล",          color: "text-violet-700"  },
+  delivery:  { icon: "🚚", label: "ใบส่งสินค้า",        color: "text-violet-700"  },
+  cn:        { icon: "➖", label: "ใบลดหนี้",           color: "text-violet-700"  },
+  task:      { icon: "🎨", label: "งาน Creative",       color: "text-pink-700"    },
+  employee:  { icon: "🧑‍💼", label: "พนักงาน",           color: "text-cyan-700"    },
+  user:      { icon: "👤", label: "ผู้ใช้ระบบ",         color: "text-purple-700"  },
+  asset:     { icon: "🖼️", label: "ไฟล์/คลัง",          color: "text-indigo-700"  },
 };
 
 // ---- Highlight helper ----
@@ -135,7 +144,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
           <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="ค้นหาหน้า/เมนู (เช่น ค่าส่ง, เครดิต), วิธีใช้งาน, SKU, ผู้จำหน่าย, ไฟล์…"
+            placeholder="ค้นหน้า/เมนู, SKU, ชื่อร้าน/ลูกค้า, เลข PO / ใบขาย / MO, งาน, พนักงาน, วิธีใช้…"
             className="flex-1 text-sm bg-transparent border-0 focus:outline-none text-slate-800 placeholder-slate-400" />
           <kbd className="text-[10px] font-mono text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded">ESC</kbd>
         </div>
@@ -148,7 +157,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             <div className="px-4 py-10 text-center">
               <div className="text-3xl mb-2 opacity-30">🔍</div>
               <p className="text-sm text-slate-400">พิมพ์เพื่อค้นหา · ใช้ <kbd className="bg-slate-100 px-1 rounded">↑↓</kbd> เลือก · <kbd className="bg-slate-100 px-1 rounded">↵</kbd> เปิด</p>
-              <p className="text-xs text-slate-400 mt-2">ค้นได้: 📄 ชื่อหน้า/เมนู · 📖 วิธีใช้งาน · 📦 สินค้า · 🏢 ผู้จำหน่าย · 🛒 ใบขอซื้อ · 🖼️ ไฟล์</p>
+              <p className="text-xs text-slate-400 mt-2">ค้นได้: 📄 หน้า/เมนู · 📖 วิธีใช้ · 📦 SKU · 🏢 คู่ค้า · 🧾 PO / ใบสำคัญรับ / ใบขาย / วางบิล · 🚚 ใบส่งของ · 🏭 ใบสั่งผลิต · 🎨 งาน · 🧑‍💼 พนักงาน · 🖼️ ไฟล์</p>
               <div className="flex flex-wrap justify-center gap-1.5 mt-3">
                 {["ค่าส่ง", "เครดิต", "ตั้งค่า", "วิธีใช้"].map((s) => (
                   <button key={s} type="button" onClick={() => setQuery(s)}
