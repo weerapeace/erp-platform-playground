@@ -137,7 +137,8 @@ export function DevicePreviewFrame({ layout, viewport, children }: { layout: Dev
   if (!preview) return <>{children}</>;
   return (
     <div className="mx-auto flex w-full max-w-screen-2xl flex-col items-center gap-4 px-3 py-4 lg:flex-row lg:items-start lg:justify-center lg:px-6">
-      <div className="shrink-0 overflow-hidden rounded-[2rem] border-[10px] border-slate-900 bg-slate-100 shadow-2xl" style={frameStyle} data-device-frame={layout}>
+      {/* transform บนกรอบ → ปุ่มลอย (position: fixed) ของหน้าข้างในยึดกับกรอบเครื่อง ไม่หลุดไปมุมจอจริง */}
+      <div className="shrink-0 overflow-hidden rounded-[2rem] border-[10px] border-slate-900 bg-slate-100 shadow-2xl [transform:translateZ(0)]" style={frameStyle} data-device-frame={layout}>
         <div className="max-h-[82vh] overflow-y-auto overscroll-contain">
           {children}
         </div>

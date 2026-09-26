@@ -200,7 +200,10 @@ export function DesignDashboard() {
   const { mode: deviceMode, setMode: setDeviceMode, layout } = useDeviceMode(viewport);
   const isDesktop = layout === "desktop";
   const isPhone = layout === "phone";
-  const colRefs = useRef<Record<string, HTMLDivElement | null>>({});   // คอลัมน์สถานะ (โหมดมือถือ/แท็บเล็ต: กดชิปสถานะแล้วเลื่อนไปคอลัมน์นั้น)
+  const colRefs = useRef<Record<string, HTMLDivElement | null>>({});   // คอลัมน์สถานะ (โหมดแท็บเล็ต: กดชิปสถานะแล้วเลื่อนไปคอลัมน์นั้น)
+  const [moreOpen, setMoreOpen] = useState(false);                     // มือถือ: เมนู ⋯ รวมปุ่มรอง (กลับ/รีเฟรช/ธีม/จัดการสถานะ/ส่งขึ้นกระดาน/ตั้งค่าแบรนด์)
+  const moreAnchorRef = useRef<HTMLDivElement>(null);
+  const [phoneStatus, setPhoneStatus] = useState<string | null>(null); // มือถือ: บอร์ดเป็น "แท็บสถานะ" ทีละสถานะ (ไม่ใช่คอลัมน์เรียงข้าง)
   const galleryStyle = useMemo(() => (
     // แกลเลอรีบนมือถือ = 2 ต่อแถว · แท็บเล็ต = ไม่เกิน 4 (การ์ดไม่จิ๋วเกินอ่าน) · จอคอม = ตามที่ผู้ใช้เลือก
     isPhone ? { display: "grid", gap: "0.5rem", gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }
@@ -484,11 +487,108 @@ export function DesignDashboard() {
     if (sheetId) void moveSheetToStatus(sheetId, column.key);
   }
 
+  // การ์ดแบบแกลเลอรี (รูปเต็มใบ) — ใช้ทั้งมุมมองแกลเลอรี และบอร์ดมือถือ (แท็บสถานะ)
+  const renderGalleryCard = (sheet: DesignSheetListItem) => {
+                    const brandColor = safeColor(sheet.brand_color);
+                    const coverUrl = sheetCoverUrl(sheet);
+                    const st = statusInfo.get(sheet.status);
+                    const picked = pickedIds.has(sheet.id);
+                    const activate = () => (pickMode ? togglePicked(sheet.id) : openDetail(sheet.id));
+                    return (
+                      <div
+                        key={sheet.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={activate}
+                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
+                        data-gg-task-card
+                        title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : `${sheet.code} • ${sheet.name}`}
+                        className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-white shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"}`}
+                      >
+                        {pickMode && <PickBadge checked={picked} />}
+                        <BrandSlot theme={brandTheme} id="task_corner" />
+                        {coverUrl ? (
+                          <HoverPreview url={sheet.cover_url} previewW={640}>
+                            {/* รูปเต็มใบ (object-contain) ไม่ crop — กรอบ 1:1 */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              data-gg-cover
+                              src={coverUrl}
+                              alt={sheet.name}
+                              loading="lazy"
+                              decoding="async"
+                              className="aspect-square w-full bg-slate-50 object-contain"
+                            />
+                          </HoverPreview>
+                        ) : (
+                          <div data-gg-cover className="flex aspect-square w-full items-center justify-center" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
+                            <BrandSlot theme={brandTheme} id="task_placeholder" size="max-h-16" />
+                          </div>
+                        )}
+                        <div className="flex flex-1 flex-col gap-1 p-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />
+                            <span className="font-mono text-[10px] text-slate-400">{sheet.code}</span>
+                          </div>
+                          <div className="line-clamp-2 text-xs font-semibold text-slate-800">{sheet.name}</div>
+                          {st && (
+                            <span className="inline-flex w-fit items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ color: st.color, backgroundColor: `${st.color}1a` }}>
+                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: st.color }} />
+                              {st.label}
+                            </span>
+                          )}
+                          <div className="mt-auto flex items-center justify-between gap-1.5 pt-0.5">
+                            <span className="truncate text-[10px] text-slate-400">{sheet.brand_name ?? "ไม่ระบุ"}</span>
+                            <CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} />
+                          </div>
+                          {(sheet.has_cost || sheet.has_quote || sheet.parent_count > 0) && (
+                            <div className="flex flex-wrap gap-1 text-[9px] text-slate-400">
+                              {sheet.has_cost && <span className="rounded bg-violet-50 px-1 py-0.5 text-violet-600">ตีราคา</span>}
+                              {sheet.has_quote && <span className="rounded bg-indigo-50 px-1 py-0.5 text-indigo-600">มีราคา</span>}
+                              {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1 py-0.5 text-emerald-600">มี SKU</span>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+  };
+  // มือถือ: สถานะที่เลือกดูอยู่ (ค่าเริ่มต้น = คอลัมน์แรก)
+  const phoneCol = boardColumns.find((c) => c.key === phoneStatus) ?? boardColumns[0] ?? null;
+  const menuItem = "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-slate-700 hover:bg-slate-50";
+
   // เนื้อหาทั้งหน้า (ไม่รวมป๊อปอัป/แถบล่างที่ portal ออกไป) — ถ้าเลือกดูแบบมือถือ/แท็บเล็ตบนจอที่กว้างกว่า
   // DevicePreviewFrame จะครอบเป็นกรอบเครื่อง + QR · ถ้าเปิดบนเครื่องจริงอยู่แล้ว = เรนเดอร์ตรง ๆ
   const body = (
       /* จำกัดความกว้างเนื้อหา + จัดกลางจอ (เจ้าของขอ) — จอกว้างมากถ้ายืดเต็มจะกวาดตาไกล อ่านยาก */
       <div className={`mx-auto w-full max-w-screen-2xl ${isPhone ? "px-3 py-3" : isDesktop ? "px-6 py-5" : "px-4 py-4"}`}>
+        {isPhone ? (
+          /* ── หัวแบบมือถือ: ชื่อหน้า + สรุปสั้น · ขวา = สลับจอ + เมนู ⋯ (ปุ่มรองทั้งหมดอยู่ในเมนู · ปุ่ม ＋ เป็นปุ่มลอยมุมล่าง) ── */
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <BrandSlot theme={brandTheme} id="header_left" className="shrink-0" />
+              <div className="min-w-0">
+                <h1 className="truncate text-lg font-semibold leading-tight text-slate-900">แผนที่ภารกิจงานออกแบบ</h1>
+                <p className="truncate text-[11px] text-slate-400">{selectedBrand ? selectedBrand.name : "ทุกแบรนด์"} · {activeJobs} งานเดินอยู่{urgentJobs > 0 ? <> · <span className="text-rose-500">{urgentJobs} ใกล้ครบ</span></> : null}</p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5" ref={moreAnchorRef}>
+              <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact />
+              <button type="button" onClick={() => setMoreOpen((o) => !o)} title="เมนูเพิ่มเติม" aria-label="เมนูเพิ่มเติม"
+                className={`flex h-9 w-9 items-center justify-center rounded-md border text-lg leading-none ${moreOpen ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>⋯</button>
+              <FloatingDropdown anchorRef={moreAnchorRef} open={moreOpen} onClose={() => setMoreOpen(false)} minWidth={224} maxWidth={280}>
+                <div className="rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
+                  <div className="px-1 py-0.5"><RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} /></div>
+                  <a href="/master/design-sheets" className={menuItem}>📄 กลับ Design Sheets</a>
+                  <button type="button" className={menuItem} onClick={() => { refreshDashboard(); setMoreOpen(false); }}>🔄 รีเฟรชข้อมูล</button>
+                  {selectedBrandId && <button type="button" className={menuItem} onClick={() => { setThemeBuilderOpen(true); setMoreOpen(false); }}>🎨 ปรับธีม {selectedBrand?.name}</button>}
+                  <button type="button" className={menuItem} onClick={() => { setStatusMgr(true); setMoreOpen(false); }}>🔀 จัดการสถานะ</button>
+                  {canTasks && <button type="button" className={menuItem} onClick={() => { if (pickMode) exitPickMode(); else setPickMode(true); setMoreOpen(false); }}>{pickMode ? "✕ ออกจากโหมดเลือก" : "🎨 ส่งขึ้นกระดาน"}</button>}
+                  <button type="button" className={menuItem} onClick={() => { setBrandSettingsOpen(true); setMoreOpen(false); }}>⚙️ ตั้งค่าแบรนด์</button>
+                </div>
+              </FloatingDropdown>
+            </div>
+          </div>
+        ) : (
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex items-start gap-2">
             <BrandSlot theme={brandTheme} id="header_left" className="shrink-0 mt-1" />
@@ -530,6 +630,7 @@ export function DesignDashboard() {
             </button>
           </div>
         </div>
+        )}
 
         {error && (
           <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -544,6 +645,28 @@ export function DesignDashboard() {
         )}
 
         {/* แบรนด์: แถวบนสุด (เต็มกว้าง) */}
+        {isPhone ? (
+          /* ── มือถือ: แบรนด์เป็นชิปแถวเดียวเลื่อนซ้าย-ขวา (ตั้งค่าแบรนด์อยู่ในเมนู ⋯) ── */
+          <div className="-mx-3 mb-3 flex gap-1.5 overflow-x-auto px-3 pb-1">
+            <button type="button" onClick={() => setSelectedBrandKey("ALL")}
+              className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium ${selectedBrandKey === "ALL" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
+              ทั้งหมด <span className="opacity-60">{brandSummaries.reduce((n, b) => n + b.active, 0)}</span>
+            </button>
+            {[...topBrands, ...otherBrands].map((brand) => {
+              const selected = selectedBrandKey === brand.key;
+              return (
+                <button key={brand.key} type="button" onClick={() => setSelectedBrandKey(brand.key)}
+                  className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border py-0 pl-1 pr-2.5 text-xs font-medium ${selected ? "bg-white text-slate-900" : "border-slate-200 bg-white text-slate-600"}`}
+                  style={selected ? { borderColor: brand.color, boxShadow: `0 0 0 1.5px ${brand.color}` } : undefined}>
+                  {brandMark(brand, "h-6 w-6")}
+                  <span className="max-w-[110px] truncate">{brand.name}</span>
+                  <span className="opacity-60">{brand.active}</span>
+                  {brand.urgent > 0 && <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
         <aside data-gg-sidebar className="mb-4 rounded-lg border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
           <BrandSlot theme={brandTheme} id="sidebar_top" />
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -615,6 +738,7 @@ export function DesignDashboard() {
           </div>
           <BrandSlot theme={brandTheme} id="sidebar_bottom" />
         </aside>
+        )}
 
         {/* ป๊อปอัปตั้งค่าแบรนด์ (เรียง/ซ่อน) — บันทึกรายคน */}
         {brandSettingsOpen && createPortal(
@@ -653,7 +777,7 @@ export function DesignDashboard() {
 
         {/* สถิติ (แถวป้ายเล็กด้านบน) + บอร์ด (เต็มกว้าง) */}
         <div className="space-y-4">
-          <div className={`grid gap-2 ${isPhone ? "grid-cols-2" : "grid-cols-4"}`}>
+          <div className={`grid grid-cols-4 ${isPhone ? "gap-1.5" : "gap-2"}`}>
             {loading ? (
               <><LoadingCard /><LoadingCard /><LoadingCard /><LoadingCard /></>
             ) : (
@@ -663,20 +787,31 @@ export function DesignDashboard() {
                 ["ใกล้ครบกำหนด", urgentJobs, "ควรไล่สถานะวันนี้"],
                 ["ปิดงานแล้ว", finishedJobs, "อนุมัติ / ตั้ง SKU / ยกเลิก"],
               ].map(([label, value, hint], index) => (
-                <div key={label} data-gg-stat-card className="relative overflow-hidden rounded-lg border border-white/70 bg-white/80 px-3 py-2 shadow-sm backdrop-blur">
+                <div key={label} data-gg-stat-card className={`relative overflow-hidden rounded-lg border border-white/70 bg-white/80 shadow-sm backdrop-blur ${isPhone ? "px-1 py-1.5 text-center" : "px-3 py-2"}`}>
                   <BrandSlot theme={brandTheme} id={`stat_icon_${index}`} />
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-[11px] font-medium text-slate-400">{label}</span>
-                    <span className="text-xl font-semibold text-slate-900">{value}</span>
-                  </div>
-                  <div className="truncate text-[10px] text-slate-400">{hint}</div>
+                  {isPhone ? (
+                    /* มือถือ: ตัวเลขใหญ่ + ป้ายสั้น 4 ช่องแถวเดียว */
+                    <>
+                      <div className="text-base font-semibold leading-tight text-slate-900">{value}</div>
+                      <div className="truncate text-[9px] text-slate-400">{label}</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-[11px] font-medium text-slate-400">{label}</span>
+                        <span className="text-xl font-semibold text-slate-900">{value}</span>
+                      </div>
+                      <div className="truncate text-[10px] text-slate-400">{hint}</div>
+                    </>
+                  )}
                 </div>
               ))
             )}
           </div>
 
           <main className="min-w-0 space-y-4">
-            <section data-gg-panel className="min-w-0 rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+            <section data-gg-panel className={`min-w-0 rounded-lg border border-white/70 bg-white/80 shadow-sm backdrop-blur ${isPhone ? "p-3" : "p-4"}`}>
+              {!isPhone && (
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-800">เส้นทางสถานะจาก Workflow กลาง</h2>
@@ -697,8 +832,29 @@ export function DesignDashboard() {
                   </button>
                 </div>
               </div>
+              )}
 
-              {/* แถบเครื่องมือ: ค้นหา + ตัวกรองด่วน */}
+              {isPhone ? (
+                /* ── มือถือ: ค้นหาเต็มแถว + สลับบอร์ด/แกลเลอรี (ไอคอน) · ตัวกรองด่วนเป็นชิปเลื่อนซ้าย-ขวา ── */
+                <div className="mb-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="🔍 ค้นหารหัส / ชื่องาน..."
+                      className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                    <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
+                      {([["board", "🗂️", "บอร์ดตามสถานะ"], ["gallery", "🖼️", "การ์ดรูปใหญ่"]] as const).map(([key, icon, label]) => (
+                        <button key={key} type="button" onClick={() => changeViewMode(key)} title={label} aria-label={label}
+                          className={`h-8 w-9 rounded text-sm transition ${viewMode === key ? "bg-slate-900 text-white" : "text-slate-600"}`}>{icon}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="-mx-3 flex gap-1 overflow-x-auto px-3 pb-1">
+                    {([["all", "ทั้งหมด"], ["active", "🛠 กำลังทำ"], ["urgent", "🔴 ด่วน"], ["soon", "🟠 ใกล้กำหนด"], ["closed", "✅ ปิดงาน"]] as const).map(([key, label]) => (
+                      <button key={key} type="button" onClick={() => setQuickFilter(key)}
+                        className={`h-8 shrink-0 rounded-full border px-3 text-xs font-medium transition ${quickFilter === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="🔍 ค้นหารหัส / ชื่องาน / แบรนด์..."
                   className="h-9 min-w-[180px] flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
@@ -728,6 +884,7 @@ export function DesignDashboard() {
                   ))}
                 </div>
               </div>
+              )}
 
               {loading ? (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -741,75 +898,36 @@ export function DesignDashboard() {
               ) : viewMode === "gallery" ? (
                 /* ── มุมมองการ์ดรูปใหญ่ (แกลเลอรี): เห็นรูปงานเต็มใบ ไม่โดนตัด · จำนวนต่อแถวเลือกได้ · เรียงตามอัปเดตล่าสุด ── */
                 <div style={galleryStyle}>
-                  {filteredSheets.map((sheet) => {
-                    const brandColor = safeColor(sheet.brand_color);
-                    const coverUrl = sheetCoverUrl(sheet);
-                    const st = statusInfo.get(sheet.status);
-                    const picked = pickedIds.has(sheet.id);
-                    const activate = () => (pickMode ? togglePicked(sheet.id) : openDetail(sheet.id));
-                    return (
-                      <div
-                        key={sheet.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={activate}
-                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
-                        data-gg-task-card
-                        title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : `${sheet.code} • ${sheet.name}`}
-                        className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-white shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"}`}
-                      >
-                        {pickMode && <PickBadge checked={picked} />}
-                        <BrandSlot theme={brandTheme} id="task_corner" />
-                        {coverUrl ? (
-                          <HoverPreview url={sheet.cover_url} previewW={640}>
-                            {/* รูปเต็มใบ (object-contain) ไม่ crop — กรอบ 1:1 */}
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              data-gg-cover
-                              src={coverUrl}
-                              alt={sheet.name}
-                              loading="lazy"
-                              decoding="async"
-                              className="aspect-square w-full bg-slate-50 object-contain"
-                            />
-                          </HoverPreview>
-                        ) : (
-                          <div data-gg-cover className="flex aspect-square w-full items-center justify-center" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
-                            <BrandSlot theme={brandTheme} id="task_placeholder" size="max-h-16" />
-                          </div>
-                        )}
-                        <div className="flex flex-1 flex-col gap-1 p-2">
-                          <div className="flex items-center gap-1.5">
-                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />
-                            <span className="font-mono text-[10px] text-slate-400">{sheet.code}</span>
-                          </div>
-                          <div className="line-clamp-2 text-xs font-semibold text-slate-800">{sheet.name}</div>
-                          {st && (
-                            <span className="inline-flex w-fit items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ color: st.color, backgroundColor: `${st.color}1a` }}>
-                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: st.color }} />
-                              {st.label}
-                            </span>
-                          )}
-                          <div className="mt-auto flex items-center justify-between gap-1.5 pt-0.5">
-                            <span className="truncate text-[10px] text-slate-400">{sheet.brand_name ?? "ไม่ระบุ"}</span>
-                            <CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} />
-                          </div>
-                          {(sheet.has_cost || sheet.has_quote || sheet.parent_count > 0) && (
-                            <div className="flex flex-wrap gap-1 text-[9px] text-slate-400">
-                              {sheet.has_cost && <span className="rounded bg-violet-50 px-1 py-0.5 text-violet-600">ตีราคา</span>}
-                              {sheet.has_quote && <span className="rounded bg-indigo-50 px-1 py-0.5 text-indigo-600">มีราคา</span>}
-                              {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1 py-0.5 text-emerald-600">มี SKU</span>}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {filteredSheets.map(renderGalleryCard)}
                 </div>
               ) : (
                 /* ห้ามใส่ overflow-* ที่กรอบนี้ — จะทำให้หัวคอลัมน์ sticky ยึดกับกรอบแทนหน้าจอ (คอลัมน์พอดีจอแล้ว ไม่ต้อง scroll แนวนอน) */
+                isPhone ? (
+                  /* ── มือถือ: แท็บสถานะ (ชิปสีตามสถานะ) → การ์ด 2 ต่อแถวของสถานะที่เลือก · ไม่มีคอลัมน์เรียงข้าง ── */
+                  <div>
+                    <div className="-mx-3 mb-2 flex gap-1.5 overflow-x-auto px-3 pb-1">
+                      {boardColumns.map((column) => {
+                        const on = phoneCol?.key === column.key;
+                        return (
+                          <button key={column.key} type="button" onClick={() => setPhoneStatus(column.key)}
+                            className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition ${on ? "text-white" : "bg-white text-slate-700"}`}
+                            style={on ? { backgroundColor: column.color, borderColor: column.color } : { borderColor: `${column.color}66` }}>
+                            {!on && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: column.color }} />}
+                            {column.label}
+                            <span className={on ? "opacity-80" : "text-slate-400"}>{column.sheets.length}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {phoneCol && phoneCol.sheets.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-2">{phoneCol.sheets.map(renderGalleryCard)}</div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-6 text-center text-xs text-slate-400">ไม่มีงานในสถานะนี้</div>
+                    )}
+                  </div>
+                ) : (
                 <div className="px-1 pb-2">
-                  {/* แท็บเล็ต/มือถือ: ชิปสถานะด้านบน — กดแล้วเลื่อนไปคอลัมน์นั้น (คอลัมน์เรียงแนวนอน ปัดซ้าย-ขวาทีละสถานะ) */}
+                  {/* แท็บเล็ต: ชิปสถานะด้านบน — กดแล้วเลื่อนไปคอลัมน์นั้น (คอลัมน์เรียงแนวนอน ปัดซ้าย-ขวาทีละสถานะ) */}
                   {!isDesktop && (
                     <div className="mb-2 flex gap-1 overflow-x-auto pb-1">
                       {boardColumns.map((column) => (
@@ -944,16 +1062,17 @@ export function DesignDashboard() {
                     })}
                   </div>
                 </div>
+                )
               )}
             </section>
 
-            <section data-gg-audit className="rounded-lg border border-white/70 bg-slate-900 p-4 text-white shadow-sm">
+            <section data-gg-audit className={`rounded-lg border border-white/70 bg-slate-900 text-white shadow-sm ${isPhone ? "p-3" : "p-4"}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <BrandSlot theme={brandTheme} id="audit_badge" />
                   <div>
-                    <h2 className="text-sm font-semibold">ประวัติจาก Audit Log กลาง</h2>
-                    <p className="mt-1 text-xs text-slate-300">อ่านจากประวัติจริงของใบงานออกแบบ</p>
+                    <h2 className="text-sm font-semibold">{isPhone ? "📜 ประวัติล่าสุด" : "ประวัติจาก Audit Log กลาง"}</h2>
+                    {!isPhone && <p className="mt-1 text-xs text-slate-300">อ่านจากประวัติจริงของใบงานออกแบบ</p>}
                   </div>
                 </div>
                 <span data-gg-audit-count className="rounded-md bg-white/10 px-2 py-1 text-xs text-slate-200">{auditRows.length} รายการล่าสุด</span>
@@ -979,6 +1098,11 @@ export function DesignDashboard() {
             </section>
           </main>
         </div>
+        {/* มือถือ: ปุ่ม ＋ ลอยมุมล่างขวา (ซ่อนตอนอยู่โหมดเลือกส่งขึ้นกระดาน — แถบล่างใช้พื้นที่นั้น) */}
+        {isPhone && !pickMode && (
+          <button type="button" onClick={() => setCreateOpen(true)} title="เพิ่มงานใหม่" aria-label="เพิ่มงานใหม่"
+            className="fixed bottom-5 right-4 z-[60] flex h-[52px] w-[52px] items-center justify-center rounded-full bg-slate-900 text-2xl leading-none text-white shadow-lg shadow-slate-900/30 active:scale-95">＋</button>
+        )}
       </div>
   );
 
