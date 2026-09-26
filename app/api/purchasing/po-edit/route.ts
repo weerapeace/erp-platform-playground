@@ -5,6 +5,7 @@
  *   po_id: string,
  *   header?: { seller_name?, seller_partner_id?, order_date?, expected_date?, note?, currency?, vat_rate?, vat_included? },
  *   lines?:  [{ id?, item_sku_id?, item_name, qty, uom?, price? }]   // ส่งมา = แทนที่ทั้งชุด (ไม่ส่ง = ไม่แตะ)
+ *   line_qty?: [{ id, qty }]   // แก้เฉพาะ "จำนวนที่สั่ง" ของบางบรรทัด (หน้ารับของใช้) — ไม่แตะบรรทัดอื่น
  * }
  *
  * กันพลาดกับของที่รับเข้ามาแล้ว (สำคัญ — ไม่งั้นสต๊อกกับใบจะไม่ตรงกัน):
@@ -32,7 +33,9 @@ type InHeader = {
   order_date?: string | null; expected_date?: string | null; note?: string | null;
   currency?: string; vat_rate?: number; vat_included?: boolean;
 };
-type Body = { po_id?: string; header?: InHeader; lines?: InLine[] };
+type Body = { po_id?: string; header?: InHeader; lines?: InLine[]; line_qty?: { id?: string; qty?: number }[] };
+// สถานะบรรทัดที่ถือว่า "ปิดแล้ว" (สะกดเดียวกับ cancel-line / receivable)
+const CLOSED_LINE = ["received", "short_closed", "closed_short", "cancelled"];
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -53,7 +56,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const cur = po as Record<string, unknown>;
 
   const { data: existing } = await admin.from("purchase_order_lines_v2")
-    .select("id, qty, qty_received, item_name, is_active").eq("po_id", poId);
+    .select("id, qty, qty_received, item_name, is_active, price_est, line_status").eq("po_id", poId);
   const oldLines = ((existing ?? []) as Record<string, unknown>[]).filter((l) => l.is_active !== false);
   const oldById = new Map(oldLines.map((l) => [String(l.id), l]));
 
@@ -147,6 +150,32 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     lineSum = incoming.reduce((a, l) => a + num(l.qty) * num(l.price), 0);
   }
 
+  // ---------- แก้เฉพาะ "จำนวนที่สั่ง" ของบางบรรทัด (หน้ารับของ) — ยอดบรรทัดคิดใหม่จากราคาต่อหน่วยเดิม ----------
+  const qtyChanges: { id: string; item_name: string; from: number; to: number }[] = [];
+  if (Array.isArray(body.line_qty) && body.line_qty.length > 0) {
+    for (const c of body.line_qty) {
+      const id = str(c.id);
+      const old = oldById.get(id);
+      if (!old) return NextResponse.json({ error: "ไม่พบรายการที่จะแก้จำนวน" }, { status: 400 });
+      const qty = num(c.qty);
+      if (qty <= 0) return NextResponse.json({ error: `"${str(old.item_name)}" จำนวนต้องมากกว่า 0` }, { status: 400 });
+      if (qty < num(old.qty_received)) {
+        return NextResponse.json({ error: `"${str(old.item_name)}" รับของมาแล้ว ${num(old.qty_received)} — ตั้งจำนวนต่ำกว่านี้ไม่ได้` }, { status: 400 });
+      }
+      const price = num(old.price_est);
+      const upd: Record<string, unknown> = { qty, line_total: Math.round(qty * price * 100) / 100 };
+      // ลดจำนวนลงมาเท่าที่รับแล้ว = บรรทัดนี้รับครบ (ไม่งั้นจะค้างเป็น "รอรับ 0")
+      if (num(old.qty_received) >= qty && !CLOSED_LINE.includes(String(old.line_status ?? ""))) upd.line_status = "received";
+      const { error } = await admin.from("purchase_order_lines_v2").update(upd).eq("id", id);
+      if (error) return NextResponse.json({ error: "แก้จำนวนไม่สำเร็จ: " + error.message }, { status: 400 });
+      qtyChanges.push({ id, item_name: str(old.item_name), from: num(old.qty), to: qty });
+    }
+    // ถ้าทุกบรรทัดปิดหมดหลังแก้ → ใบ PO = รับครบ (สูตรเดียวกับ cancel-line)
+    const { data: after } = await admin.from("purchase_order_lines_v2").select("line_status, is_active").eq("po_id", poId);
+    const act = ((after ?? []) as Record<string, unknown>[]).filter((l) => l.is_active !== false);
+    if (act.length > 0 && act.every((l) => CLOSED_LINE.includes(String(l.line_status ?? "")))) patch.status = "received";
+  }
+
   // ---------- ยอดรวม (ของกลาง lib/po-total) ----------
   if (lineSum === null) {
     const { data: nowLines } = await admin.from("purchase_order_lines_v2")
@@ -168,7 +197,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     entityId: poId,
     actorId: user.id,
     actorName: user.email ?? "system",
-    metadata: { po_no: cur.po_no, changed: Object.keys(patch), lines: body.lines?.length ?? null, totals },
+    metadata: { po_no: cur.po_no, changed: Object.keys(patch), lines: body.lines?.length ?? null, totals, ...(qtyChanges.length ? { line_qty: qtyChanges } : {}) },
   });
 
   return NextResponse.json({ id: poId, ...totals, error: null });

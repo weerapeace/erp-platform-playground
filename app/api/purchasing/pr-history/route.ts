@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { SKU_COVER_SELECT, resolveSkuCover } from "@/lib/sku-cover";
 import { skuIdsByBracketCode, resolveSkuId } from "@/lib/sku-code-lookup";
 
 export const dynamic = "force-dynamic";
@@ -31,8 +32,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const skuIds = [...new Set((prs ?? []).map(skuIdOf).filter(Boolean) as string[])];
   const skuMap = new Map<string, { code: string | null; cover: string | null }>();
   for (let i = 0; i < skuIds.length; i += 300) {
-    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key").in("id", skuIds.slice(i, i + 300));
-    for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null });
+    const { data: sk } = await admin.from("skus_v2").select("id, code, " + SKU_COVER_SELECT + "").in("id", skuIds.slice(i, i + 300));
+    for (const s of (sk ?? []) as unknown as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: resolveSkuCover(s).key });
   }
 
   const rows = (prs ?? []).map((p) => {

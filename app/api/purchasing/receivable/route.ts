@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { skuIdsByBracketCode, resolveSkuId } from "@/lib/sku-code-lookup";
+import { SKU_COVER_SELECT, resolveSkuCover, coverUrl } from "@/lib/sku-cover";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -76,13 +77,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const codeSkuMap = await skuIdsByBracketCode(admin, lines.map((l) => l.item_name));
   const skuIdOf = (l: Record<string, unknown>) => resolveSkuId(l.item_sku_id, l.item_name, codeSkuMap);
 
-  // 3) รหัส + รูปปก จาก SKU (batch)
+  // 3) รหัส + รูปปก จาก SKU (batch) — ไม่มีรูปตัวเอง → ใช้รูป Parent SKU (ของกลาง lib/sku-cover)
   const skuIds = [...new Set(lines.map(skuIdOf).filter(Boolean) as string[])];
-  const skuMap = new Map<string, { code: string | null; cover: string | null }>();
+  const skuMap = new Map<string, { code: string | null; cover: string | null; coverFromParent: boolean }>();
   for (let i = 0; i < skuIds.length; i += 300) {
     const chunk = skuIds.slice(i, i + 300);
-    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key").in("id", chunk);
-    for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null });
+    const { data: sk } = await admin.from("skus_v2").select("id, code, " + SKU_COVER_SELECT).in("id", chunk);
+    for (const s of (sk ?? []) as unknown as Record<string, unknown>[]) { const c = resolveSkuCover(s); skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: c.key, coverFromParent: c.fromParent }); }
   }
 
   // 4) ลีดไทม์ร้านหลัก (is_default) — ไว้คำนวณวันคาดเมื่อ PO ไม่ได้ระบุ
@@ -155,7 +156,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       item_sku_id: sid,   // sku ที่ผูกไว้ หรือที่เดาได้จากรหัสในชื่อ
       item_name: (l.item_name as string) ?? "",
       code: sk?.code ?? "",
-      image_url: cover ? `/api/r2-image?key=${encodeURIComponent(cover)}` : null,
+      image_url: coverUrl(cover),
+      image_from_parent: !!cover && !!sk?.coverFromParent,   // รูปที่โชว์เป็นของ Parent SKU (ตัวนี้ไม่มีรูปเอง)
       uom: (l.uom as string) ?? "",
       qty: num(l.qty),
       qty_received: num(l.qty_received),

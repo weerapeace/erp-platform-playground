@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { SKU_COVER_SELECT, resolveSkuCover } from "@/lib/sku-cover";
 import { skuIdsByBracketCode, resolveSkuId } from "@/lib/sku-code-lookup";
 import { computeDueDate } from "@/lib/credit-term";
 import { buildPartnerMatcher } from "@/lib/partner-match";
@@ -27,9 +28,9 @@ async function loadSkuMap(admin: ReturnType<typeof supabaseAdmin>, ids: unknown[
   const skuIds = [...new Set(ids.filter(Boolean).map(String))];
   const map = new Map<string, SkuInfo>();
   for (let i = 0; i < skuIds.length; i += 300) {
-    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key, purchase_link, alt_seller, alt_price, alt_currency, alt_link").in("id", skuIds.slice(i, i + 300));
-    for (const s of (sk ?? []) as Record<string, unknown>[]) map.set(String(s.id), {
-      code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null, link: (s.purchase_link as string) ?? null,
+    const { data: sk } = await admin.from("skus_v2").select("id, code, " + SKU_COVER_SELECT + ", purchase_link, alt_seller, alt_price, alt_currency, alt_link").in("id", skuIds.slice(i, i + 300));
+    for (const s of (sk ?? []) as unknown as Record<string, unknown>[]) map.set(String(s.id), {
+      code: (s.code as string) ?? null, cover: resolveSkuCover(s).key, link: (s.purchase_link as string) ?? null,
       alt_seller: (s.alt_seller as string) ?? null, alt_price: s.alt_price != null ? Number(s.alt_price) : null,
       alt_currency: (s.alt_currency as string) ?? null, alt_link: (s.alt_link as string) ?? null,
     });
@@ -186,8 +187,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const coverMap = new Map<string, string | null>();
     const skuArr = [...skuIds];
     for (let i = 0; i < skuArr.length; i += 300) {
-      const { data: sk } = await admin.from("skus_v2").select("id, cover_image_r2_key").in("id", skuArr.slice(i, i + 300));
-      for (const s of (sk ?? []) as Record<string, unknown>[]) coverMap.set(String(s.id), (s.cover_image_r2_key as string) ?? null);
+      const { data: sk } = await admin.from("skus_v2").select("id, " + SKU_COVER_SELECT + "").in("id", skuArr.slice(i, i + 300));
+      for (const s of (sk ?? []) as unknown as Record<string, unknown>[]) coverMap.set(String(s.id), resolveSkuCover(s).key);
     }
 
     rows = shown.map((p) => {

@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { SKU_COVER_SELECT, resolveSkuCover } from "@/lib/sku-cover";
 import { writeAudit } from "@/lib/audit";
 import { computeDueDate, computeArrivalDate, parseLeadTime } from "@/lib/credit-term";
 import { buildPartnerMatcher } from "@/lib/partner-match";
@@ -186,9 +187,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const skuArr = [...skuIds];
   for (let i = 0; i < skuArr.length; i += 300) {
     const chunk = skuArr.slice(i, i + 300);
-    const { data: sk } = await admin.from("skus_v2").select("id, cover_image_r2_key, uom_id").in("id", chunk);
-    for (const s of (sk ?? []) as Record<string, unknown>[]) {
-      coverMap.set(String(s.id), (s.cover_image_r2_key as string) ?? null);
+    const { data: sk } = await admin.from("skus_v2").select("id, " + SKU_COVER_SELECT + ", uom_id").in("id", chunk);
+    for (const s of (sk ?? []) as unknown as Record<string, unknown>[]) {
+      coverMap.set(String(s.id), resolveSkuCover(s).key);
       skuUomId.set(String(s.id), s.uom_id ? String(s.uom_id) : null);
     }
   }

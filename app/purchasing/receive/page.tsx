@@ -21,6 +21,8 @@ import { WarehousePicker } from "@/components/pickers";
 import type { WarehousePickerValue } from "@/components/pickers";
 import { Pager } from "@/components/pager";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import { HoverPreview } from "@/components/hover-image";
+import { CopyButton } from "@/components/copy-button";
 
 type PO = { id: string; po_no: string; seller_name: string; status: string; currency: string; expected_date?: string | null; order_date?: string | null };
 type PoCard = PO & { pendCount: number };
@@ -59,6 +61,7 @@ const PO_BADGE: Record<string, { text: string; cls: string }> = {
 type PendItem = {
   id: string; po_id: string; po_no: string; po_status: string; seller_name: string;
   item_sku_id: string | null; item_name: string; code: string; image_url: string | null;
+  image_from_parent?: boolean;                                    // รูปที่โชว์เป็นของ Parent SKU (ตัวนี้ไม่มีรูปเอง)
   uom: string; qty: number; qty_received: number; qty_defective: number; line_status: string;
   remaining: number; currency: string;
   order_date: string | null; expected_date: string | null;
@@ -86,7 +89,7 @@ function etaBadge(days: number | null): { text: string; cls: string } {
 }
 
 const PEND_VIEW_KEY = "recv_pend_view", PEND_COLS_KEY = "recv_pend_cols", PEND_SORT_KEY = "recv_pend_sort", PEND_GROUP_KEY = "recv_pend_group";
-const PEND_DIR_KEY = "recv_pend_dir", PEND_PSIZE_KEY = "recv_pend_psize", PO_VIEW_KEY = "recv_po_view";
+const PEND_DIR_KEY = "recv_pend_dir", PEND_PSIZE_KEY = "recv_pend_psize", PO_VIEW_KEY = "recv_po_view", PEND_COPY_KEY = "recv_pend_copy";
 const COL_OPTIONS = [3, 4, 5, 6, 8, 10];
 const PAGE_SIZES = [50, 100, 200];
 // ข้อมูลที่เลือกโชว์ได้บนการ์ดติดตาม (Card Builder)
@@ -144,9 +147,24 @@ export default function ReceiveGoodsPage() {
   const { fields: cardFields, reload: reloadCard } = useCardLayout("receive-tracking");
   const [designOpen, setDesignOpen] = useState(false);
   const trackKeys = cardFields ?? TRACK_CARD_FIELDS.map((f) => f.key);   // ยังไม่ตั้ง = โชว์ทั้งหมด
-  const [etaEdit, setEtaEdit] = useState<{ po_id: string; po_no: string; seller_name: string; value: string } | null>(null);
+  // แก้วันคาดเข้า / วันที่สั่ง — 1 ใบ หรือหลายใบพร้อมกัน (จากแถบ Mass) · วันอยู่ที่หัวใบ PO จึงมีผลทุกบรรทัดในใบ
+  const [etaEdit, setEtaEdit] = useState<{ po_ids: string[]; label: string; field: "expected_date" | "order_date"; value: string } | null>(null);
   const [etaSaving, setEtaSaving] = useState(false);
   const [qtyEdit, setQtyEdit] = useState<PendItem | null>(null);   // คลิกการ์ด → popup กรอกจำนวน
+  // ── ปุ่มคัดลอก / เลือกหลายรายการ (Mass) / แก้จำนวนที่สั่ง ──
+  const canEditPo = usePermission("products.edit");                      // แก้จำนวนที่สั่งได้ (สิทธิ์เดียวกับแก้ใบ PO)
+  const [showCopy, setShowCopy] = useState(false);                        // โชว์ปุ่มคัดลอกชื่อ/รหัส (จำต่อคน)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // รายการที่ติ๊กเลือก (ข้ามหน้าได้)
+  const [massRecv, setMassRecv] = useState<PendItem[] | null>(null);      // ป๊อปรับของหลายรายการ
+  const [cancelMany, setCancelMany] = useState<PendItem[] | null>(null);  // ยกเลิกหลายรายการ (จากแถบ Mass)
+  const [qtyOrderEdit, setQtyOrderEdit] = useState<{ it: PendItem; value: string } | null>(null);   // แก้จำนวนที่สั่ง
+  const [qtySaving, setQtySaving] = useState(false);
+  const toggleSelect = (id: string) => setSelectedIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  // ติ๊กหัวตาราง: ถ้าที่เห็นถูกเลือกครบแล้ว → เอาออกทั้งหมด ไม่งั้นเลือกทั้งหมดที่เห็น
+  const toggleSelectAll = (items: PendItem[]) => setSelectedIds((s) => {
+    const all = items.length > 0 && items.every((p) => s.has(p.id));
+    const n = new Set(s); for (const p of items) { if (all) n.delete(p.id); else n.add(p.id); } return n;
+  });
   const [history, setHistory] = useState<HistRow[]>([]);
   const [histLoading, setHistLoading] = useState(false);
 
@@ -173,7 +191,9 @@ export default function ReceiveGoodsPage() {
     const ps = Number(localStorage.getItem(PEND_PSIZE_KEY)); if (PAGE_SIZES.includes(ps)) setPendPageSize(ps);
     const pv = localStorage.getItem(PO_VIEW_KEY); if (pv === "card" || pv === "table") setPoView(pv);
     const g = localStorage.getItem(PEND_GROUP_KEY); if (["none","shop","eta","po","mo"].includes(g ?? "")) setPendGroup(g as PendGroup);
+    if (localStorage.getItem(PEND_COPY_KEY) === "1") setShowCopy(true);
   }, []);
+  const changeShowCopy = (v: boolean) => { setShowCopy(v); localStorage.setItem(PEND_COPY_KEY, v ? "1" : "0"); };
   const changePendView = (v: "card" | "table") => { setPendView(v); localStorage.setItem(PEND_VIEW_KEY, v); };
   const changePendCols = (n: number) => { setPendCols(n); localStorage.setItem(PEND_COLS_KEY, String(n)); };
   const changePendSort = (s: PendSort) => { setPendSort(s); setPendDir("asc"); localStorage.setItem(PEND_SORT_KEY, s); localStorage.setItem(PEND_DIR_KEY, "asc"); };
@@ -241,7 +261,7 @@ export default function ReceiveGoodsPage() {
       .catch(() => {});
   }, []);
   // สลับแท็บ → ล้างร้านที่เลือกไว้ (รายชื่อร้านของแต่ละแท็บไม่เหมือนกัน)
-  useEffect(() => { setActiveShop(null); setActiveMo(null); }, [tab]);
+  useEffect(() => { setActiveShop(null); setActiveMo(null); setSelectedIds(new Set()); }, [tab]);
 
   // มาร์ค/ยกเลิก "จ่ายแล้ว" ที่ใบ PO — ผ่าน API กลาง (audit) → วันคาดเข้าเริ่มนับจากวันจ่าย
   const [marking, setMarking] = useState(false);
@@ -294,7 +314,9 @@ export default function ReceiveGoodsPage() {
   const [cancelReason, setCancelReason] = useState("ร้านไม่มีของ");
   const [cancelWholePo, setCancelWholePo] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const openCancel = useCallback((it: PendItem) => { setCancelReason("ร้านไม่มีของ"); setCancelWholePo(false); setCancelTarget(it); }, []);
+  const openCancel = useCallback((it: PendItem) => { setCancelReason("ร้านไม่มีของ"); setCancelWholePo(false); setCancelMany(null); setCancelTarget(it); }, []);
+  // ยกเลิกหลายรายการจากแถบ Mass — ใช้ป๊อปเดียวกัน แต่โชว์รายชื่อแทนรายละเอียดตัวเดียว
+  const openCancelMany = useCallback((items: PendItem[]) => { if (items.length === 0) return; setCancelReason("ร้านไม่มีของ"); setCancelWholePo(false); setCancelMany(items); setCancelTarget(items[0]); }, []);
   // จำนวนรายการที่ยังค้างของใบ PO เดียวกัน (ไว้เสนอ "ยกเลิกทั้งใบ")
   const cancelPoCount = useMemo(
     () => cancelTarget ? pend.filter((p) => p.po_id === cancelTarget.po_id).length : 0,
@@ -303,7 +325,7 @@ export default function ReceiveGoodsPage() {
   const doCancel = useCallback(async () => {
     if (!cancelTarget) return;
     const it = cancelTarget;
-    const ids = cancelWholePo ? pend.filter((p) => p.po_id === it.po_id).map((p) => p.id) : [it.id];
+    const ids = cancelMany ? cancelMany.map((p) => p.id) : cancelWholePo ? pend.filter((p) => p.po_id === it.po_id).map((p) => p.id) : [it.id];
     setCancelling(true);
     try {
       const res = await apiFetch("/api/purchasing/cancel-line", {
@@ -313,11 +335,11 @@ export default function ReceiveGoodsPage() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       toast.success(`ยกเลิกแล้ว ${j.cancelled ?? ids.length} รายการ — ย้ายไปแท็บ "รับครบแล้ว"`);
-      setCancelTarget(null); setQtyEdit(null);
+      setCancelTarget(null); setCancelMany(null); setQtyEdit(null); setSelectedIds(new Set());
       await loadPending(doneMode ? "done" : "pending");
     } catch (e) { toast.error("ยกเลิกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setCancelling(false); }
-  }, [cancelTarget, cancelWholePo, cancelReason, pend, user?.name, toast, loadPending, doneMode]);
+  }, [cancelTarget, cancelMany, cancelWholePo, cancelReason, pend, user?.name, toast, loadPending, doneMode]);
 
   const setPendInput = (id: string, patch: Partial<Input>) => setPendInputs((p) => ({ ...p, [id]: { ...p[id], ...patch } }));
 
@@ -446,22 +468,54 @@ export default function ReceiveGoodsPage() {
   );
   const cartCount = cartItems.length;
 
-  // บันทึกวันคาดการณ์ของเข้าลงใบ PO (ผ่าน API กลาง — มี audit/guard) → ใช้กับทุกบรรทัดของใบนั้น
+  // เปิดป๊อปแก้วัน (วันคาดเข้า / วันที่สั่ง) — 1 รายการ หรือหลายรายการที่ติ๊ก (รวมเป็นรายใบ PO)
+  const openDateEdit = (items: PendItem[], field: "expected_date" | "order_date") => {
+    const poIds = [...new Set(items.map((p) => p.po_id))];
+    if (poIds.length === 0) return;
+    const one = poIds.length === 1 ? items[0] : null;
+    const label = one ? `${one.po_no} · ${one.seller_name}` : `${poIds.length} ใบสั่งซื้อ (${items.length} รายการ)`;
+    const value = !one ? "" : field === "order_date" ? (one.order_date ?? "") : (one.expected_source === "po" ? (one.expected_date ?? "") : "");
+    setEtaEdit({ po_ids: poIds, label, field, value });
+  };
+  // บันทึกวันคาดการณ์ของเข้า / วันที่สั่ง ลงใบ PO (ผ่าน API กลาง — มี audit/guard) → ใช้กับทุกบรรทัดของใบนั้น · หลายใบ = ยิงทีละใบ
   const saveEta = async () => {
     if (!etaEdit) return;
+    if (etaEdit.field === "order_date" && !etaEdit.value) { toast.error("วันที่สั่งเว้นว่างไม่ได้"); return; }
     setEtaSaving(true);
     try {
-      const res = await apiFetch(`/api/master-v2/purchase-orders-v2/${etaEdit.po_id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expected_date: etaEdit.value || null, actor: user?.name }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
-      toast.success(`บันทึกวันคาดการณ์ของเข้า — ${etaEdit.po_no} แล้ว`);
-      setEtaEdit(null);
+      for (const pid of etaEdit.po_ids) {
+        const res = await apiFetch(`/api/master-v2/purchase-orders-v2/${pid}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [etaEdit.field]: etaEdit.value || null, actor: user?.name }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+      toast.success(`บันทึก${etaEdit.field === "order_date" ? "วันที่สั่ง" : "วันคาดการณ์ของเข้า"} — ${etaEdit.label} แล้ว`);
+      setEtaEdit(null); setSelectedIds(new Set());
       await loadPending(doneMode ? "done" : "pending");
     } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setEtaSaving(false); }
+  };
+  // แก้ "จำนวนที่สั่ง" ของบรรทัด — ผ่าน API แก้ใบ PO (กันต่ำกว่าที่รับแล้ว + คิดยอดใบใหม่ + audit log)
+  const saveOrderQty = async () => {
+    if (!qtyOrderEdit) return;
+    const { it } = qtyOrderEdit;
+    const qty = num(qtyOrderEdit.value);
+    if (qty <= 0 || qty < it.qty_received) { toast.error(`จำนวนต้องมากกว่า 0 และไม่ต่ำกว่าที่รับมาแล้ว (${it.qty_received.toLocaleString()})`); return; }
+    setQtySaving(true);
+    try {
+      const res = await apiFetch("/api/purchasing/po-edit", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ po_id: it.po_id, line_qty: [{ id: it.id, qty }] }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      toast.success(`แก้จำนวนที่สั่ง "${stripCode(it.item_name)}" → ${qty.toLocaleString()} ${it.uom}`);
+      setQtyOrderEdit(null); setQtyEdit(null);
+      await loadPending(doneMode ? "done" : "pending");
+    } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setQtySaving(false); }
   };
 
   // ---- ยิง API (1 PO) ----
@@ -542,7 +596,7 @@ export default function ReceiveGoodsPage() {
         results.push(j.gr_no);
       }
       setDone(`✅ รับสินค้าสำเร็จ ${results.length} ใบรับ (${byPo.size} ใบสั่งซื้อ): ${results.join(", ")}`);
-      setCartFormOpen(false);
+      setCartFormOpen(false); setSelectedIds(new Set());
       resetAfterSave();
       await loadPending(doneMode ? "done" : "pending");
     } catch (e) { setErr(String(e)); }
@@ -711,6 +765,9 @@ export default function ReceiveGoodsPage() {
                   </select>
                 </label>
               )}
+              <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer whitespace-nowrap" title="โชว์ปุ่มคัดลอกชื่อ / รหัสสินค้า">
+                <input type="checkbox" checked={showCopy} onChange={(e) => changeShowCopy(e.target.checked)} className="rounded border-slate-300" /> 📋 ปุ่มคัดลอก
+              </label>
               {pendView === "card" && !doneMode && (
                 <button onClick={() => setDesignOpen(true)} title="เลือกข้อมูลที่โชว์บนการ์ด" className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">🎨 ออกแบบการ์ด</button>
               )}
@@ -724,6 +781,22 @@ export default function ReceiveGoodsPage() {
                 <button onClick={() => changePendView("table")} className={`h-9 px-3 border-l border-slate-200 ${pendView === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
               </div>
             </div>
+
+            {/* แถบจัดการหลายรายการ (Mass) — โผล่เมื่อติ๊กเลือก: รับของ / ตั้งวันสั่ง / ตั้งวันคาดเข้า / ยกเลิก */}
+            {!doneMode && selectedIds.size > 0 && (() => {
+              const sel = pend.filter((p) => selectedIds.has(p.id));
+              if (sel.length === 0) return null;
+              return (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-3 flex items-center gap-2 flex-wrap sticky top-2 z-20 shadow-sm">
+                  <span className="text-sm font-medium text-blue-800">☑ เลือก {sel.length} รายการ</span>
+                  <button onClick={() => setMassRecv(sel)} className="h-8 px-3 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">📥 รับของ ({sel.length})</button>
+                  <button onClick={() => openDateEdit(sel, "order_date")} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">📅 ตั้งวันที่สั่ง</button>
+                  <button onClick={() => openDateEdit(sel, "expected_date")} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">🚚 ตั้งวันคาดเข้า</button>
+                  <button onClick={() => openCancelMany(sel)} className="h-8 px-3 text-xs font-medium rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกรายการ</button>
+                  <button onClick={() => setSelectedIds(new Set())} className="ml-auto h-8 px-3 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">ล้างเลือก</button>
+                </div>
+              );
+            })()}
 
             {/* แถบแบ่งหน้า — บนสุด */}
             {pendPagerBar && <div className="mb-3">{pendPagerBar}</div>}
@@ -754,6 +827,13 @@ export default function ReceiveGoodsPage() {
                             className={`bg-white border rounded-xl overflow-hidden flex flex-col cursor-pointer transition-all ${hasQty ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-blue-300 hover:shadow-sm"}`}>
                             <div className="aspect-square bg-slate-50 flex items-center justify-center relative">
                               <span className={`absolute top-1.5 left-1.5 z-10 text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>
+                              {/* ติ๊กเลือกหลายรายการ (Mass) + ป้ายรูปตัวแม่ */}
+                              {!doneMode && (
+                                <label onClick={(e) => e.stopPropagation()} className="absolute bottom-1.5 left-1.5 z-10 w-6 h-6 rounded-md bg-white/90 border border-slate-200 flex items-center justify-center cursor-pointer" title="เลือกรายการนี้">
+                                  <input type="checkbox" checked={selectedIds.has(it.id)} onChange={() => toggleSelect(it.id)} className="rounded border-slate-300" />
+                                </label>
+                              )}
+                              {it.image_from_parent && <span title="ตัวนี้ไม่มีรูปเอง — โชว์รูปของ Parent SKU" className="absolute bottom-1.5 right-1.5 z-10 text-[9px] px-1 py-0.5 rounded bg-indigo-600/80 text-white">รูปตัวแม่</span>}
                               {!doneMode && (
                                 <button onClick={(e) => { e.stopPropagation(); openCancel(it); }}
                                   title="ยกเลิกรายการนี้ (เช่น ร้านไม่มีของ)"
@@ -762,8 +842,8 @@ export default function ReceiveGoodsPage() {
                               {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">📦</span>}
                             </div>
                             <div className="p-2.5 flex flex-col flex-1">
-                              <div className="text-sm font-medium text-slate-800 line-clamp-2 leading-snug" title={it.item_name}>{stripCode(it.item_name)}</div>
-                              {it.code && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{it.code}</div>}
+                              <div className="text-sm font-medium text-slate-800 line-clamp-2 leading-snug" title={it.item_name}>{stripCode(it.item_name)}{showCopy && <CopyButton value={stripCode(it.item_name)} title="คัดลอกชื่อสินค้า" className="ml-1" />}</div>
+                              {it.code && <div className="flex items-center gap-1 mt-0.5 min-w-0"><span className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded max-w-full truncate">{it.code}</span>{showCopy && <CopyButton value={it.code} title="คัดลอกรหัส" />}</div>}
                               {doneMode ? (
                                 <>
                                   <div className="mt-1.5 text-2xl font-bold text-slate-900 tabular-nums leading-none">{it.qty_received.toLocaleString()} <span className="text-sm font-normal text-slate-400">/ {it.qty.toLocaleString()} {it.uom}</span></div>
@@ -791,7 +871,7 @@ export default function ReceiveGoodsPage() {
                                         <span>🚚 คาดเข้า: {it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}</span>
                                         {it.expected_source === "lead" && <span title="ประเมินจากลีดไทม์ร้าน (แก้ได้)" className="text-[10px] text-indigo-500">~ลีดไทม์</span>}
                                         {it.expected_source === "china" && <span title="ค่าเริ่มต้นร้านจีน +14 วัน (แก้ได้)" className="text-[10px] text-orange-500">~จีน 14 วัน</span>}
-                                        <button onClick={(e) => { e.stopPropagation(); setEtaEdit({ po_id: it.po_id, po_no: it.po_no, seller_name: it.seller_name, value: it.expected_source === "po" ? (it.expected_date ?? "") : "" }); }}
+                                        <button onClick={(e) => { e.stopPropagation(); openDateEdit([it], "expected_date"); }}
                                           title="แก้วันคาดการณ์ของเข้า (ใช้กับทั้งใบ PO)" className="text-slate-400 hover:text-blue-600 text-xs">✎</button>
                                       </div>
                                     );
@@ -829,6 +909,9 @@ export default function ReceiveGoodsPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 text-slate-500 text-xs">
                       <tr>
+                        {!doneMode && (() => { const vis = groupedPend.flatMap((g) => g.items); const all = vis.length > 0 && vis.every((p) => selectedIds.has(p.id)); return (
+                          <th className="px-2 py-2 w-8"><input type="checkbox" checked={all} onChange={() => toggleSelectAll(vis)} title="เลือกทั้งหมดที่เห็น" className="rounded border-slate-300" /></th>
+                        ); })()}
                         <th className="px-3 py-2 font-medium w-14">รูป</th>
                         <th className="text-left px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("name")} className="inline-flex items-center hover:text-slate-700">สินค้า{sortArrow("name")}</button></th>
                         <th className="text-left px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("seller")} className="inline-flex items-center hover:text-slate-700">ร้าน / PO{sortArrow("seller")}</button></th>
@@ -854,21 +937,36 @@ export default function ReceiveGoodsPage() {
                     <tbody className="divide-y divide-slate-100">
                       {groupedPend.map((g) => (
                         <Fragment key={g.key}>
-                          {g.label && <tr className="bg-slate-50/70"><td colSpan={doneMode ? 8 : 9} className="px-3 py-1.5 text-xs font-semibold text-slate-600">{g.label} <span className="font-normal text-slate-400">({g.items.length})</span></td></tr>}
+                          {g.label && <tr className="bg-slate-50/70"><td colSpan={doneMode ? 8 : 10} className="px-3 py-1.5 text-xs font-semibold text-slate-600">{g.label} <span className="font-normal text-slate-400">({g.items.length})</span></td></tr>}
                           {g.items.map((it) => {
                         const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
                         const short = num(inp.recv) > 0 && num(inp.recv) < it.remaining;
                         const b = etaBadge(it.days_remaining);
                         return (
-                          <tr key={it.id} onClick={() => setQtyEdit(it)} className="cursor-pointer hover:bg-slate-50">
+                          <tr key={it.id} onClick={() => setQtyEdit(it)} className={`cursor-pointer hover:bg-slate-50 ${selectedIds.has(it.id) ? "bg-blue-50/60" : ""}`}>
+                            {!doneMode && (
+                              <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                                <input type="checkbox" checked={selectedIds.has(it.id)} onChange={() => toggleSelect(it.id)} className="rounded border-slate-300" />
+                              </td>
+                            )}
                             <td className="px-3 py-2">
-                              <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100">
-                                {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
-                              </div>
+                              {/* รูปย่อ + ชี้เมาส์ดูรูปใหญ่ (ของกลาง HoverPreview — ไม่กินคลิก แถวยังเปิดป๊อปรับของได้) */}
+                              <HoverPreview url={it.image_url} previewW={320}>
+                                <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 relative">
+                                  {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
+                                  {it.image_from_parent && <span title="ตัวนี้ไม่มีรูปเอง — โชว์รูปของ Parent SKU" className="absolute bottom-0 inset-x-0 text-[8px] leading-3 text-center bg-indigo-600/80 text-white">แม่</span>}
+                                </div>
+                              </HoverPreview>
                             </td>
-                            <td className="px-3 py-2"><div className="text-slate-700">{stripCode(it.item_name)}</div>{it.code && <div className="text-[11px] font-mono text-slate-400">{it.code}</div>}</td>
+                            <td className="px-3 py-2">
+                              <div className="text-slate-700 flex items-center gap-1">{stripCode(it.item_name)}{showCopy && <CopyButton value={stripCode(it.item_name)} title="คัดลอกชื่อสินค้า" />}</div>
+                              {it.code && <div className="text-[11px] font-mono text-slate-400 flex items-center gap-1">{it.code}{showCopy && <CopyButton value={it.code} title="คัดลอกรหัส" />}</div>}
+                            </td>
                             <td className="px-3 py-2 text-slate-500"><div className="text-slate-700">{it.seller_name}</div><div className="text-[11px] text-slate-400">{it.po_no}</div></td>
-                            <td className="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">{it.order_date ? formatDate(it.order_date) : "—"}</td>
+                            <td className="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">
+                              {it.order_date ? formatDate(it.order_date) : "—"}
+                              {!doneMode && <button onClick={(e) => { e.stopPropagation(); openDateEdit([it], "order_date"); }} title="แก้วันที่สั่ง (ใช้กับทั้งใบ PO)" className="ml-1 text-slate-400 hover:text-blue-600">✎</button>}
+                            </td>
                             {doneMode ? (
                               <>
                                 <td className="px-3 py-2 whitespace-nowrap">
@@ -885,11 +983,14 @@ export default function ReceiveGoodsPage() {
                               <div className="text-xs text-slate-500">{it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}{it.expected_source === "lead" && <span className="text-[10px] text-indigo-500 ml-1">~ลีดไทม์</span>}{it.expected_source === "china" && <span className="text-[10px] text-orange-500 ml-1">~จีน 14 วัน</span>}</div>
                               <div className="flex items-center gap-1">
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>
-                                <button onClick={(e) => { e.stopPropagation(); setEtaEdit({ po_id: it.po_id, po_no: it.po_no, seller_name: it.seller_name, value: it.expected_source === "po" ? (it.expected_date ?? "") : "" }); }}
+                                <button onClick={(e) => { e.stopPropagation(); openDateEdit([it], "expected_date"); }}
                                   title="แก้วันคาดการณ์ของเข้า (ใช้กับทั้งใบ PO)" className="text-slate-400 hover:text-blue-600 text-xs">✎</button>
                               </div>
                             </td>
-                            <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-700">{it.remaining.toLocaleString()} {it.uom}</td>
+                            <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-700 whitespace-nowrap">
+                              {it.remaining.toLocaleString()} {it.uom}
+                              {canEditPo && <button onClick={(e) => { e.stopPropagation(); setQtyOrderEdit({ it, value: String(it.qty) }); }} title={`แก้จำนวนที่สั่ง (สั่งไว้ ${it.qty.toLocaleString()} ${it.uom})`} className="ml-1 text-slate-400 hover:text-blue-600 text-xs font-normal">✎</button>}
+                            </td>
                             <td className="px-3 py-2 text-center">
                               {num(inp.recv) > 0
                                 ? <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium tabular-nums ${short ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>{num(inp.recv).toLocaleString()}{short ? " · ไม่ครบ" : ""}</span>
@@ -1141,9 +1242,14 @@ export default function ReceiveGoodsPage() {
                 {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-2xl">📦</span>}
               </div>
               <div className="min-w-0">
-                <div className="text-sm font-medium text-slate-800 leading-snug">{stripCode(it.item_name)}</div>
-                {it.code && <div className="text-[11px] font-mono text-slate-500 mt-0.5">{it.code}</div>}
-                <div className="text-sm text-slate-600 mt-1">คงเหลือรอรับ <b className="text-slate-900">{it.remaining.toLocaleString()}</b> {it.uom}{it.qty_received > 0 && <span className="text-emerald-600"> · รับแล้ว {it.qty_received.toLocaleString()} ({it.receive_count} ครั้ง)</span>}</div>
+                <div className="text-sm font-medium text-slate-800 leading-snug">{stripCode(it.item_name)}{showCopy && <CopyButton value={stripCode(it.item_name)} title="คัดลอกชื่อสินค้า" className="ml-1" />}</div>
+                {it.code && <div className="text-[11px] font-mono text-slate-500 mt-0.5 flex items-center gap-1">{it.code}{showCopy && <CopyButton value={it.code} title="คัดลอกรหัส" />}</div>}
+                <div className="text-sm text-slate-600 mt-1">
+                  คงเหลือรอรับ <b className="text-slate-900">{it.remaining.toLocaleString()}</b> {it.uom}
+                  <span className="text-slate-400"> · สั่ง {it.qty.toLocaleString()}</span>
+                  {canEditPo && <button onClick={() => setQtyOrderEdit({ it, value: String(it.qty) })} title="แก้จำนวนที่สั่ง" className="ml-1 text-slate-400 hover:text-blue-600 text-xs">✎</button>}
+                  {it.qty_received > 0 && <span className="text-emerald-600"> · รับแล้ว {it.qty_received.toLocaleString()} ({it.receive_count} ครั้ง)</span>}
+                </div>
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                   <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded border ${pb.cls}`}>{pb.text}</span>
@@ -1204,20 +1310,114 @@ export default function ReceiveGoodsPage() {
         );
       })()}
 
-      {/* popup ยืนยันยกเลิกรายการ — เคสสั่งไปแล้วร้านไม่มีของ */}
-      {cancelTarget && (
-        <ERPModal open onClose={() => !cancelling && setCancelTarget(null)} size="sm" storageKey="recv-cancel"
-          title="❌ ยกเลิกรายการที่สั่งไว้"
-          description={`🏪 ${cancelTarget.seller_name} · ${cancelTarget.po_no}`}
+      {/* popup รับของหลายรายการ (Mass) — กรอกแยกทีละตัว หรือกด "รับครบทุกตัว" → เข้าตะกร้าเดิม → ยืนยันรับของตามปกติ (วันที่ + แนบเอกสาร) */}
+      {massRecv && (
+        <ERPModal open onClose={() => setMassRecv(null)} size="lg" storageKey="recv-mass"
+          title={`📥 รับของ ${massRecv.length} รายการ`}
+          description="ใส่จำนวนที่รับจริงทีละรายการ หรือกดรับครบทุกตัว → รายการจะเข้าตะกร้า → กดยืนยันรับของ (ใส่วันที่ + แนบใบรับ/บิล)"
           footer={<>
-            <button onClick={() => setCancelTarget(null)} disabled={cancelling} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ไม่ยกเลิก</button>
-            <button onClick={() => void doCancel()} disabled={cancelling} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{cancelling ? "กำลังยกเลิก…" : "ยืนยันยกเลิก"}</button>
+            <button onClick={() => setMassRecv(null)} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด (เก็บไว้ในตะกร้า)</button>
+            <button onClick={() => { setMassRecv(null); if (cartCount > 0) setCartFormOpen(true); }} disabled={cartCount === 0}
+              className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">✓ ไปยืนยันรับของ ({cartCount})</button>
           </>}>
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <button onClick={() => setPendInputs((p) => { const n = { ...p }; for (const it of massRecv) n[it.id] = { ...(n[it.id] ?? { def: "0" }), recv: String(it.remaining) }; return n; })}
+              className="h-8 px-3 text-xs font-medium rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100">✓ รับครบทุกตัว</button>
+            <button onClick={() => setPendInputs((p) => { const n = { ...p }; for (const it of massRecv) n[it.id] = { recv: "0", def: "0" }; return n; })}
+              className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">ล้างจำนวน</button>
+            <span className="text-[11px] text-slate-400">รับไม่ครบ = ค่าเริ่มต้น &quot;รอรับเพิ่ม&quot; · เปลี่ยนเป็น &quot;ปิดบิล&quot; ได้ทีละรายการ</span>
+          </div>
+          <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100 max-h-[60vh] overflow-y-auto">
+            {massRecv.map((it) => {
+              const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
+              const recv = num(inp.recv);
+              const short = recv > 0 && recv < it.remaining;
+              const over = recv > it.remaining;
+              return (
+                <div key={it.id} className="flex items-center gap-3 px-3 py-2 flex-wrap sm:flex-nowrap">
+                  <HoverPreview url={it.image_url} previewW={240}>
+                    <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 shrink-0">
+                      {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
+                    </div>
+                  </HoverPreview>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-slate-800 truncate" title={it.item_name}>{stripCode(it.item_name)}</div>
+                    <div className="text-[11px] text-slate-400 truncate">{it.code ? `${it.code} · ` : ""}{it.seller_name} · {it.po_no} · คงเหลือ <b className="text-slate-600">{it.remaining.toLocaleString()}</b> {it.uom}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] text-slate-400">รับ</span>
+                    <input type="number" inputMode="decimal" step="any" min={0} value={inp.recv} onChange={(e) => setPendInput(it.id, { recv: e.target.value })} onFocus={(e) => e.target.select()}
+                      className={`w-20 h-9 px-2 text-sm text-center border rounded-md tabular-nums ${short || over ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
+                    <button onClick={() => setPendInput(it.id, { recv: String(it.remaining) })} title={`รับครบ ${it.remaining.toLocaleString()}`} className="h-9 px-2 text-xs rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100">ครบ</button>
+                    <span className="text-[10px] text-slate-400 ml-1">เสีย</span>
+                    <input type="number" inputMode="decimal" step="any" min={0} value={inp.def} onChange={(e) => setPendInput(it.id, { def: e.target.value })} onFocus={(e) => e.target.select()}
+                      className="w-16 h-9 px-2 text-sm text-center border border-slate-200 rounded-md tabular-nums" />
+                    {short && (
+                      <select value={inp.close ? "close" : "wait"} onChange={(e) => setPendInput(it.id, { close: e.target.value === "close" })} className="h-9 px-1.5 text-xs border border-amber-300 bg-amber-50 rounded-md">
+                        <option value="wait">🟡 รอรับเพิ่ม</option>
+                        <option value="close">🔴 ปิดบิล</option>
+                      </select>
+                    )}
+                    {over && <span className="text-[10px] text-amber-600">⚠ เกิน</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </ERPModal>
+      )}
+
+      {/* popup แก้จำนวนที่สั่ง — ผ่าน API แก้ใบ PO (กันต่ำกว่าที่รับแล้ว + คิดยอดใบใหม่ + audit log) */}
+      {qtyOrderEdit && (() => {
+        const it = qtyOrderEdit.it;
+        const v = num(qtyOrderEdit.value);
+        const bad = v <= 0 || v < it.qty_received;
+        return (
+          <ERPModal open onClose={() => !qtySaving && setQtyOrderEdit(null)} size="sm" storageKey="recv-qty-order"
+            title="✎ แก้จำนวนที่สั่ง"
+            description={`${stripCode(it.item_name)} · ${it.po_no}`}
+            footer={<>
+              <button onClick={() => setQtyOrderEdit(null)} disabled={qtySaving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+              <button onClick={() => void saveOrderQty()} disabled={qtySaving || bad} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{qtySaving ? "กำลังบันทึก…" : "บันทึก"}</button>
+            </>}>
+            <div className="text-xs text-slate-500 mb-3">สั่งไว้ <b className="text-slate-800">{it.qty.toLocaleString()}</b> {it.uom} · รับแล้ว <b className="text-slate-800">{it.qty_received.toLocaleString()}</b> · คงเหลือ <b className="text-slate-800">{it.remaining.toLocaleString()}</b></div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">จำนวนที่สั่งใหม่ ({it.uom})</label>
+            <input type="number" inputMode="decimal" step="any" min={it.qty_received} autoFocus value={qtyOrderEdit.value}
+              onChange={(e) => setQtyOrderEdit((p) => p ? { ...p, value: e.target.value } : p)} onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => { if (e.key === "Enter" && !bad && !qtySaving) void saveOrderQty(); }}
+              className={`w-full h-11 px-3 text-lg text-center border rounded-md tabular-nums ${bad ? "border-red-300 bg-red-50" : "border-slate-200"}`} />
+            {bad && <p className="text-[11px] text-red-600 mt-1">ต้องมากกว่า 0 และไม่ต่ำกว่าที่รับมาแล้ว ({it.qty_received.toLocaleString()})</p>}
+            {!bad && v !== it.qty && <p className="text-[11px] text-slate-600 mt-1">คงเหลือรอรับจะเป็น <b>{Math.max(0, v - it.qty_received).toLocaleString()}</b> {it.uom}{v === it.qty_received ? " → รายการนี้ถือว่ารับครบ" : ""}</p>}
+            <p className="text-[11px] text-slate-400 mt-2">ยอดเงินบรรทัดและยอดรวมใบ PO จะคิดใหม่ตามราคาต่อหน่วยเดิม · บันทึกลงประวัติ (audit log)</p>
+          </ERPModal>
+        );
+      })()}
+
+      {/* popup ยืนยันยกเลิกรายการ — เคสสั่งไปแล้วร้านไม่มีของ (1 รายการ / ทั้งใบ / หลายรายการที่ติ๊ก) */}
+      {cancelTarget && (
+        <ERPModal open onClose={() => { if (!cancelling) { setCancelTarget(null); setCancelMany(null); } }} size="sm" storageKey="recv-cancel"
+          title="❌ ยกเลิกรายการที่สั่งไว้"
+          description={cancelMany ? `${cancelMany.length} รายการ · ${new Set(cancelMany.map((p) => p.po_no)).size} ใบสั่งซื้อ` : `🏪 ${cancelTarget.seller_name} · ${cancelTarget.po_no}`}
+          footer={<>
+            <button onClick={() => { setCancelTarget(null); setCancelMany(null); }} disabled={cancelling} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ไม่ยกเลิก</button>
+            <button onClick={() => void doCancel()} disabled={cancelling} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{cancelling ? "กำลังยกเลิก…" : `ยืนยันยกเลิก${cancelMany ? ` (${cancelMany.length})` : ""}`}</button>
+          </>}>
+          {cancelMany ? (
+            <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-48 overflow-y-auto">
+              {cancelMany.map((p) => (
+                <div key={p.id} className="px-2.5 py-1.5 text-xs flex items-center justify-between gap-2">
+                  <span className="text-slate-700 truncate" title={p.item_name}>{stripCode(p.item_name)} <span className="text-slate-400">· {p.po_no}</span></span>
+                  <span className="text-slate-500 tabular-nums shrink-0">ค้าง {p.remaining.toLocaleString()} {p.uom}</span>
+                </div>
+              ))}
+            </div>
+          ) : (<>
           <div className="text-sm text-slate-700">{stripCode(cancelTarget.item_name)}</div>
           <div className="text-xs text-slate-500 mt-0.5">
             ยกเลิกส่วนที่ยังไม่ได้รับ <b className="text-slate-800">{cancelTarget.remaining.toLocaleString()} {cancelTarget.uom}</b>
             {cancelTarget.qty_received > 0 && <> · ของที่รับไปแล้ว {cancelTarget.qty_received.toLocaleString()} ยังอยู่เหมือนเดิม</>}
           </div>
+          </>)}
 
           <label className="block text-xs font-medium text-slate-600 mt-3 mb-1">เหตุผล (เก็บไว้ดูย้อนหลัง)</label>
           <input value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="ร้านไม่มีของ"
@@ -1229,7 +1429,7 @@ export default function ReceiveGoodsPage() {
             ))}
           </div>
 
-          {cancelPoCount > 1 && (
+          {!cancelMany && cancelPoCount > 1 && (
             <label className="flex items-start gap-2 mt-3 p-2.5 rounded-lg border border-slate-200 bg-slate-50/60 cursor-pointer">
               <input type="checkbox" checked={cancelWholePo} onChange={(e) => setCancelWholePo(e.target.checked)} className="mt-0.5 rounded border-slate-300 text-red-600" />
               <span className="text-xs text-slate-600">ยกเลิก<b>ทุกรายการที่ยังค้าง</b>ของใบนี้ ({cancelPoCount} รายการ) — ใช้ตอนร้านไม่มีของทั้งใบ</span>
@@ -1258,19 +1458,27 @@ export default function ReceiveGoodsPage() {
         </ERPModal>
       )}
 
-      {/* popup แก้วันคาดการณ์ของเข้า (ใช้กับทั้งใบ PO) */}
+      {/* popup แก้วันคาดการณ์ของเข้า / วันที่สั่ง (อยู่ที่หัวใบ PO → มีผลทุกบรรทัดในใบ · หลายใบพร้อมกันได้จากแถบ Mass) */}
       {etaEdit && (
         <ERPModal open onClose={() => !etaSaving && setEtaEdit(null)} size="sm" storageKey="recv-eta"
-          title="📅 วันคาดการณ์ของเข้า"
-          description={`ใบสั่งซื้อ ${etaEdit.po_no} · ${etaEdit.seller_name} (มีผลกับทุกบรรทัดในใบนี้)`}
+          title={etaEdit.field === "order_date" ? "📅 วันที่สั่ง" : "🚚 วันคาดการณ์ของเข้า"}
+          description={`${etaEdit.label} (มีผลกับทุกบรรทัดในใบ${etaEdit.po_ids.length > 1 ? "เหล่านี้" : "นี้"})`}
           footer={<>
             <button onClick={() => setEtaEdit(null)} disabled={etaSaving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-            <button onClick={() => void saveEta()} disabled={etaSaving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{etaSaving ? "กำลังบันทึก…" : "บันทึก"}</button>
+            <button onClick={() => void saveEta()} disabled={etaSaving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{etaSaving ? "กำลังบันทึก…" : etaEdit.po_ids.length > 1 ? `บันทึก ${etaEdit.po_ids.length} ใบ` : "บันทึก"}</button>
           </>}>
-          <label className="block text-xs font-medium text-slate-600 mb-1">วันที่คาดว่าของจะเข้า</label>
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs mb-3">
+            <button type="button" onClick={() => setEtaEdit((p) => p ? { ...p, field: "order_date" } : p)} className={`h-8 px-3 ${etaEdit.field === "order_date" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📅 วันที่สั่ง</button>
+            <button type="button" onClick={() => setEtaEdit((p) => p ? { ...p, field: "expected_date" } : p)} className={`h-8 px-3 border-l border-slate-200 ${etaEdit.field === "expected_date" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🚚 วันคาดเข้า</button>
+          </div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">{etaEdit.field === "order_date" ? "วันที่สั่งซื้อ" : "วันที่คาดว่าของจะเข้า"}</label>
           <input type="date" value={etaEdit.value} onChange={(e) => setEtaEdit((p) => p ? { ...p, value: e.target.value } : p)}
             className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
-          <p className="text-[11px] text-slate-400 mt-2">เว้นว่างไว้ = กลับไปใช้ค่าประเมินจากลีดไทม์ร้าน (ถ้ามี)</p>
+          <p className="text-[11px] text-slate-400 mt-2">
+            {etaEdit.field === "order_date"
+              ? "แก้วันสั่งแล้ว วันคาดเข้าที่ประเมินจากลีดไทม์ร้าน (ร้านส่งก่อนจ่าย) จะขยับตาม"
+              : "เว้นว่างไว้ = กลับไปใช้ค่าประเมินจากลีดไทม์ร้าน (ถ้ามี)"}
+          </p>
         </ERPModal>
       )}
 

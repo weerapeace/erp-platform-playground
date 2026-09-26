@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { SKU_COVER_SELECT, resolveSkuCover } from "@/lib/sku-cover";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
 import { formatCreditTerm } from "@/lib/credit-term";
 import { computePoTotals, sumActiveLines } from "@/lib/po-total";
@@ -86,15 +87,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const uomBySku = new Map<string, string | null>();
   const codeBySku = new Map<string, string | null>();
   if (skuIds.length) {
-    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key, uom_id").in("id", skuIds);
-    const uomIds = [...new Set(((sk ?? []) as Record<string, unknown>[]).map((s) => s.uom_id).filter(Boolean) as string[])];
+    const { data: sk } = await admin.from("skus_v2").select("id, code, " + SKU_COVER_SELECT + ", uom_id").in("id", skuIds);
+    const uomIds = [...new Set(((sk ?? []) as unknown as Record<string, unknown>[]).map((s) => s.uom_id).filter(Boolean) as string[])];
     const uomName = new Map<string, string>();
     if (uomIds.length) {
       const { data: us } = await admin.from("uoms").select("id, name").in("id", uomIds);
       for (const u of (us ?? []) as Record<string, unknown>[]) uomName.set(String(u.id), String(u.name ?? ""));
     }
-    for (const s of (sk ?? []) as Record<string, unknown>[]) {
-      coverMap.set(String(s.id), (s.cover_image_r2_key as string) ?? null);
+    for (const s of (sk ?? []) as unknown as Record<string, unknown>[]) {
+      coverMap.set(String(s.id), resolveSkuCover(s).key);
       uomBySku.set(String(s.id), s.uom_id ? (uomName.get(String(s.uom_id)) ?? null) : null);
       codeBySku.set(String(s.id), (s.code as string) ?? null);
     }

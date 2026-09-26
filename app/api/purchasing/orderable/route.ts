@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { SKU_COVER_SELECT, resolveSkuCover } from "@/lib/sku-cover";
 import { skuIdsByBracketCode, resolveSkuId } from "@/lib/sku-code-lookup";
 
 export const dynamic = "force-dynamic";
@@ -39,8 +40,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const skuMap = new Map<string, { code: string | null; cover: string | null; link: string | null; uom_id: string | null; supplier_sku_code: string | null; name_cn: string | null; name_en: string | null; purchase_uom_en: string | null }>();
   for (let i = 0; i < skuIds.length; i += 300) {
     const chunk = skuIds.slice(i, i + 300);
-    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key, purchase_link, uom_id, supplier_sku_code, name_cn, name_en, purchase_uom_en").in("id", chunk);
-    for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null, link: (s.purchase_link as string) ?? null, uom_id: (s.uom_id as string) ?? null, supplier_sku_code: (s.supplier_sku_code as string) ?? null, name_cn: (s.name_cn as string) ?? null, name_en: (s.name_en as string) ?? null, purchase_uom_en: (s.purchase_uom_en as string) ?? null });
+    const { data: sk } = await admin.from("skus_v2").select("id, code, " + SKU_COVER_SELECT + ", purchase_link, uom_id, supplier_sku_code, name_cn, name_en, purchase_uom_en").in("id", chunk);
+    for (const s of (sk ?? []) as unknown as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: resolveSkuCover(s).key, link: (s.purchase_link as string) ?? null, uom_id: (s.uom_id as string) ?? null, supplier_sku_code: (s.supplier_sku_code as string) ?? null, name_cn: (s.name_cn as string) ?? null, name_en: (s.name_en as string) ?? null, purchase_uom_en: (s.purchase_uom_en as string) ?? null });
   }
 
   // หน่วยนับจาก SKU (uoms.name) — ไว้เติมเมื่อใบขอซื้อไม่มีหน่วย เช่น "หลา"
