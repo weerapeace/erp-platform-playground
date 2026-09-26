@@ -611,7 +611,8 @@ export default function ReceiveGoodsPage() {
     <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4">
       <div className="text-sm font-semibold text-slate-700 mb-2">📎 เอกสารแนบ (บังคับ) <span className="text-xs font-normal text-slate-400">— รูปถ่ายหรือ PDF</span></div>
       <div className="grid grid-cols-2 gap-3">
-        <FileInput label="📄 ใบรับของ" value={receiptKey} onChange={setReceiptKey} folder="goods-receipts" required hasError={!receiptKey && !!err} />
+        {/* ใบส่งของจากขนส่ง (Delivery Bill) แนบตรงนี้ → ตอนออกใบสำคัญรับ จัดซื้อกด "อ่านด้วย AI" ได้เลย (รหัสขนส่ง EK- + น้ำหนัก/คิวรายกล่อง) */}
+        <FileInput label="📄 ใบรับของ / ใบส่งของขนส่ง" value={receiptKey} onChange={setReceiptKey} folder="goods-receipts" required hasError={!receiptKey && !!err} />
         <FileInput label="🧾 บิล / ใบเสร็จ" value={billKey} onChange={setBillKey} folder="goods-receipts" required hasError={!billKey && !!err} />
       </div>
     </div>

@@ -31,7 +31,7 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
 type PatchBody = {
   header?: {
     voucher_date?: string; currency?: string; fx_rate?: unknown; ship_method?: string; ship_rate?: unknown; ship_manual_total?: unknown; note?: string | null; seller_name?: string;
-    carrier_id?: string | null; carrier_name?: string | null;
+    carrier_id?: string | null; carrier_name?: string | null; tracking_no?: string | null;
     shipping_bill_id?: string | null; shipping_payment_status?: string; shipping_paid_date?: string | null;
   };
   lines?: { id: string; unit_price?: unknown; cbm_per_unit?: unknown; kg_per_unit?: unknown }[];
@@ -49,7 +49,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   // ใบที่ยืนยันแล้ว: แก้ได้เฉพาะ "การจ่ายค่าส่ง" + หมายเหตุ (ราคาถูกเขียนกลับระบบไปแล้ว)
-  const PAY_KEYS = new Set(["shipping_payment_status", "shipping_paid_date", "shipping_bill_id", "note"]);
+  const PAY_KEYS = new Set(["shipping_payment_status", "shipping_paid_date", "shipping_bill_id", "note", "tracking_no"]);
   if (!isDraft) {
     const keys = Object.keys(body.header ?? {});
     if (Array.isArray(body.lines) && body.lines.length) return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว แก้รายการไม่ได้" }, { status: 400 });
@@ -60,6 +60,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
     const h = body.header; const patch: Record<string, unknown> = {};
     if (h.carrier_id !== undefined) patch.carrier_id = h.carrier_id ? String(h.carrier_id) : null;
     if (h.carrier_name !== undefined) patch.carrier_name = h.carrier_name ? String(h.carrier_name) : null;
+    if (h.tracking_no !== undefined) patch.tracking_no = h.tracking_no ? String(h.tracking_no).trim().toUpperCase() : null;
     if (h.shipping_bill_id !== undefined) patch.shipping_bill_id = h.shipping_bill_id ? String(h.shipping_bill_id) : null;
     if (h.shipping_payment_status !== undefined) patch.shipping_payment_status = h.shipping_payment_status === "paid" ? "paid" : "unpaid";
     if (h.shipping_paid_date !== undefined) patch.shipping_paid_date = h.shipping_paid_date ? String(h.shipping_paid_date) : null;

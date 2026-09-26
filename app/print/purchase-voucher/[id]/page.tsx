@@ -64,7 +64,7 @@ export default function PrintPurchaseVoucherPage() {
     const draftMark = h.status !== "confirmed" ? `<div style="position:fixed;top:40%;left:0;right:0;text-align:center;font-size:72px;color:rgba(220,38,38,.12);font-weight:700;transform:rotate(-20deg);pointer-events:none">ร่าง</div>` : "";
     return buildReportHtml({ ...template, header_html: draftMark + template.header_html }, {
       pv_number: h.pv_no ?? "(ร่าง)", voucher_date_th: thaiDate(h.voucher_date), supplier_name: h.seller_name ?? "—",
-      gr_numbers: h.gr_nos.join(", ") || "—", po_numbers: h.po_nos.join(", ") || "—",
+      gr_numbers: h.gr_nos.join(", ") || "—", po_numbers: h.po_nos.join(", ") || "—", tracking_no: h.tracking_no ?? "",
       currency_code: h.currency === "YUAN" ? "RMB" : h.currency, currency_symbol: sym, is_foreign: foreign ? "1" : "",
       fx_rate: h.fx_rate != null ? String(h.fx_rate) : "",
       subtotal_foreign: fmtMoney(h.subtotal_foreign), subtotal_thb: fmtMoney(h.subtotal_thb),

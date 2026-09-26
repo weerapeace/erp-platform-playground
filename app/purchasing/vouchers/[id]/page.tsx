@@ -17,6 +17,7 @@ import { formatDate } from "@/lib/date";
 import { MoneyInput } from "@/components/money-input";
 import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
+import { DeliveryBillPanel } from "@/components/delivery-bill-panel";
 import { computeVoucher, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
 
@@ -198,7 +199,7 @@ export default function PurchaseVoucherFormPage() {
                 <h1 className="text-xl font-semibold text-slate-800 mt-1">🧾 ใบสำคัญรับ {hd.pv_no ? <span className="font-mono">{hd.pv_no}</span> : <span className="text-slate-400 text-base">(ร่าง — ยังไม่ออกเลข)</span>}
                   {hd.status === "confirmed" && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 align-middle">✅ ยืนยันแล้ว {hd.confirmed_at ? formatDate(hd.confirmed_at) : ""} {hd.confirmed_by ? `· ${hd.confirmed_by}` : ""}</span>}
                 </h1>
-                <div className="text-sm text-slate-500 mt-0.5">🏪 {hd.seller_name ?? "—"} · ใบรับ {hd.gr_nos.join(", ") || "—"} · PO {hd.po_nos.join(", ") || "—"}</div>
+                <div className="text-sm text-slate-500 mt-0.5">🏪 {hd.seller_name ?? "—"} · ใบรับ {hd.gr_nos.join(", ") || "—"} · PO {hd.po_nos.join(", ") || "—"}{hd.tracking_no && <span className="ml-2 font-mono text-xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200" title="รหัสขนส่ง (จากใบส่งของ)">🚚 {hd.tracking_no}</span>}</div>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 {grIds.map((gid) => {
@@ -267,6 +268,11 @@ export default function PurchaseVoucherFormPage() {
                     <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_basis_count} รายการยังไม่มี{basisLabel} (ไม่ได้ตั้งขนาด/น้ำหนักที่ Parent SKU) → รายการนั้นจะไม่ได้รับค่าส่งเฉลี่ย ใส่เองในตารางได้</div>
                   )}
                 </div>
+
+                {/* ใบส่งของจากขนส่ง — AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → จับคู่สินค้า → ใช้ค่าจริง */}
+                <DeliveryBillPanel voucherId={id} readonly={readonly}
+                  lines={data.lines.map((l) => ({ id: l.id, code: l.code, item_name: l.item_name, qty: l.qty, uom: l.uom, gr_no: l.gr_no }))}
+                  onApplied={load} />
 
                 {/* รายการ */}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">

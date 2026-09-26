@@ -287,6 +287,7 @@ export const REPORT_ENTITY_DEFS: Record<string, ReportEntityDef> = {
       { key: "supplier_name", label: "ร้าน / ผู้ขาย", group: "หัวเอกสาร", sample: "ร้านอี้หลงเจียห่าว" },
       { key: "gr_numbers", label: "เลขใบรับ (ทั้งหมด)", group: "หัวเอกสาร", sample: "GR-2026-00012, GR-2026-00013" },
       { key: "po_numbers", label: "เลขใบสั่งซื้อ (ทั้งหมด)", group: "หัวเอกสาร", sample: "PO-2026-00113" },
+      { key: "tracking_no", label: "รหัสขนส่ง (จากใบส่งของ)", group: "ค่าส่ง", sample: "EK-08310926" },
       { key: "currency_code", label: "สกุลเงิน", group: "ยอดเงิน", sample: "RMB" },
       { key: "currency_symbol", label: "สัญลักษณ์สกุล", group: "ยอดเงิน", sample: "¥" },
       { key: "fx_rate", label: "เรท ฿ ต่อ 1 หน่วย", group: "ยอดเงิน", sample: "5.18" },
@@ -504,7 +505,7 @@ export const DEFAULT_PV_TEMPLATE = {
   </div>
   <div class="info-box">
     <div><span class="label">เลขที่:</span> {{pv_number}}</div>
-    <div><span class="label">วันที่:</span> {{voucher_date_th}}</div>
+    <div><span class="label">วันที่:</span> {{voucher_date_th}}{{#tracking_no}} &nbsp;·&nbsp; <span class="label">รหัสขนส่ง:</span> {{tracking_no}}{{/tracking_no}}</div>
     <div><span class="label">สกุลเงิน:</span> {{currency_code}}{{#is_foreign}} &nbsp;·&nbsp; <span class="label">เรท:</span> {{fx_rate}} ฿/{{currency_symbol}}{{/is_foreign}}</div>
   </div>
 </section>`,
