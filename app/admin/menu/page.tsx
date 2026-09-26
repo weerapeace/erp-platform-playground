@@ -761,6 +761,13 @@ export default function MenuManagerPage() {
                                 className={`h-7 px-2 rounded border text-[11px] font-medium max-w-[10rem] truncate ${it.permission_key ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"}`}>
                                 {it.permission_key ? `🔒 ${it.permission_key}` : "🌐 ทุกคน"} →
                               </button></span>
+                            <label className="flex items-center gap-1.5 text-slate-600" title="คำอื่นที่คนมักพิมพ์หาหน้านี้ใน Global Search (Ctrl+K) คั่นด้วยลูกน้ำ เช่น ค่าส่ง, ขนส่ง, shipping">🔍 คำค้นเพิ่ม
+                              <input defaultValue={(it.search_keywords ?? []).join(", ")}
+                                onBlur={(e) => {
+                                  const next = e.target.value.split(/[,、\n]/).map((s) => s.trim()).filter(Boolean);
+                                  if (next.join("|") !== (it.search_keywords ?? []).join("|")) patch(it.id!, { search_keywords: next });
+                                }}
+                                placeholder="ค่าส่ง, ขนส่ง, shipping" className="w-52 h-7 px-2 border border-slate-200 rounded" /></label>
                             <label className="flex items-center gap-1.5 text-slate-600">ผูกหน้าข้อมูล
                               <select value={it.module_key ?? ""} onChange={(e) => patch(it.id!, { module_key: e.target.value || null })} className="w-36 h-7 px-1 border border-slate-200 rounded bg-white">
                                 <option value="">— ไม่ผูก —</option>

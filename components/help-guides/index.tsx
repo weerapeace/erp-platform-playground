@@ -220,6 +220,14 @@ export function HelpGuidesManager() {
   const [delId, setDelId] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
 
+  // เปิดคู่มือตาม ?guide=<id> (มาจาก Global Search) — อ่านจาก URL ตอน mount (ไม่ใช้ useSearchParams กัน Suspense ในเชลล์)
+  useEffect(() => {
+    try {
+      const g = new URLSearchParams(window.location.search).get("guide");
+      if (g) setOpenId(g);
+    } catch { /* ignore */ }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try { setGuides(((await (await apiFetch("/api/help-guides")).json()).data ?? []) as HelpGuide[]); } catch { /* ignore */ }

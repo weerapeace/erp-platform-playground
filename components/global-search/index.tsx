@@ -9,6 +9,8 @@ import type { SearchHit, GlobalSearchResponse } from "@/app/api/global-search/ro
 // ---- Entity icon/label config ----
 
 const ENTITY: Record<SearchHit["entity_type"], { icon: string; label: string; color: string }> = {
+  page:     { icon: "📄", label: "หน้า / เมนู", color: "text-slate-800"   },
+  guide:    { icon: "📖", label: "วิธีใช้งาน",  color: "text-teal-700"    },
   product:  { icon: "📦", label: "สินค้า",      color: "text-blue-700"    },
   supplier: { icon: "🏢", label: "ผู้จำหน่าย", color: "text-emerald-700" },
   pr:       { icon: "🛒", label: "ใบขอซื้อ",   color: "text-amber-700"   },
@@ -133,7 +135,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
           <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="ค้นหา SKU, ผู้จำหน่าย, เลข PR, ไฟล์/artwork, ชื่อ user..."
+            placeholder="ค้นหาหน้า/เมนู (เช่น ค่าส่ง, เครดิต), วิธีใช้งาน, SKU, ผู้จำหน่าย, ไฟล์…"
             className="flex-1 text-sm bg-transparent border-0 focus:outline-none text-slate-800 placeholder-slate-400" />
           <kbd className="text-[10px] font-mono text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded">ESC</kbd>
         </div>
@@ -146,9 +148,19 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             <div className="px-4 py-10 text-center">
               <div className="text-3xl mb-2 opacity-30">🔍</div>
               <p className="text-sm text-slate-400">พิมพ์เพื่อค้นหา · ใช้ <kbd className="bg-slate-100 px-1 rounded">↑↓</kbd> เลือก · <kbd className="bg-slate-100 px-1 rounded">↵</kbd> เปิด</p>
+              <p className="text-xs text-slate-400 mt-2">ค้นได้: 📄 ชื่อหน้า/เมนู · 📖 วิธีใช้งาน · 📦 สินค้า · 🏢 ผู้จำหน่าย · 🛒 ใบขอซื้อ · 🖼️ ไฟล์</p>
+              <div className="flex flex-wrap justify-center gap-1.5 mt-3">
+                {["ค่าส่ง", "เครดิต", "ตั้งค่า", "วิธีใช้"].map((s) => (
+                  <button key={s} type="button" onClick={() => setQuery(s)}
+                    className="text-xs px-2 py-0.5 rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50">{s}</button>
+                ))}
+              </div>
             </div>
           ) : results.length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-slate-400">ไม่พบผลลัพธ์ที่ตรงกับ &quot;{query}&quot;</div>
+            <div className="px-4 py-10 text-center text-sm text-slate-400">
+              <p>ไม่พบผลลัพธ์ที่ตรงกับ &quot;{query}&quot;</p>
+              <p className="text-xs mt-2 text-slate-400">ถ้าเป็นชื่อหน้า: ลองคำอื่น หรือให้แอดมินเพิ่ม “คำค้นเพิ่ม” ให้เมนูนั้นที่ จัดการเมนู</p>
+            </div>
           ) : (
             <>
               {grouped.order.map((entity) => {

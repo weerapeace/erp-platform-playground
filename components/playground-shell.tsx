@@ -201,6 +201,7 @@ export type MenuRow = {
   app_overrides?: Record<string, { section?: string; label?: string; sort?: number }>;
   module_key?: string | null;   // โมดูลที่เมนูนี้ผูก (สำหรับหมวด ⚙ ตั้งค่า) — ตั้งที่ /admin/menu
   parent_id?: string | null;   // เมนูแม่ — ถ้ามี เมนูนี้เป็นลูกโผล่ใน dropdown ของแม่ (null = เมนูหลัก)
+  search_keywords?: string[];  // คำค้นเพิ่ม/คำพ้อง สำหรับ Global Search (เช่น "ค่าส่ง" → ร้านขนส่ง/เรทค่าส่ง) — ตั้งที่ /admin/menu
 };
 
 // โมดูลใหญ่ (App) — tabs บนสุด
