@@ -199,11 +199,12 @@ async function downloadOrSaveImages(files: { blob: Blob; name: string }[]): Prom
 }
 
 // ---------------- วาดใบสรุปการโอนลง canvas (ของกลางของ TransferReceiptPopup ใช้ทั้งรวมบิล/แยกบิล) ----------------
-type ReceiptRow = { t: "kv" | "sep" | "head" | "sub"; l?: string; r?: string; bold?: boolean; color?: string };
+// t: kv=ป้ายซ้าย ค่าขวา · sep=เส้นคั่น · head=หัวข้อ · sub=บรรทัดย่อยซ้าย · right=บรรทัดย่อยชิดขวา (เช่น ค่าโอน/รวม ใต้ยอด)
+type ReceiptRow = { t: "kv" | "sep" | "head" | "sub" | "right"; l?: string; r?: string; bold?: boolean; color?: string };
 function drawTransferReceipt(cv: HTMLCanvasElement, subtitle: string, rows: ReceiptRow[]): void {
   const DPR = Math.min(window.devicePixelRatio || 1, 2);
   const W = 600, headerH = 96, padX = 36, padTop = 24, padBottom = 36;
-  const hOf = (r: ReceiptRow) => r.t === "sep" ? 18 : r.t === "sub" ? 26 : r.t === "head" ? 40 : 40;
+  const hOf = (r: ReceiptRow) => r.t === "sep" ? 18 : r.t === "sub" || r.t === "right" ? 26 : r.t === "head" ? 40 : 40;
   const H = headerH + padTop + rows.reduce((a, r) => a + hOf(r), 0) + padBottom;
   cv.width = W * DPR; cv.height = H * DPR;
   const ctx = cv.getContext("2d"); if (!ctx) return;
@@ -232,6 +233,7 @@ function drawTransferReceipt(cv: HTMLCanvasElement, subtitle: string, rows: Rece
     const oldY = y; y = my; // fit() uses y
     if (r.t === "head") { ctx.textAlign = "left"; ctx.fillStyle = "#0f766e"; ctx.font = `bold 17px ${FONT}`; ctx.fillText(r.l ?? "", padX, my); }
     else if (r.t === "sub") { ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `14px ${FONT}`; ctx.fillText(r.l ?? "", padX + 8, my); }
+    else if (r.t === "right") { fit(`${r.l ?? ""} ${r.r ?? ""}`.trim(), r.bold ? 15 : 14, !!r.bold, r.color ?? (r.bold ? "#1e293b" : "#64748b"), padX); }
     else { ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `17px ${FONT}`; const lw = r.l ? ctx.measureText(r.l).width : 0; if (r.l) ctx.fillText(r.l, padX, my); fit(r.r ?? "", r.bold ? 20 : 18, !!r.bold, r.color ?? "#1e293b", padX + lw + 16); }
     y = oldY + h;
   }
@@ -2741,7 +2743,7 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
   if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => {
     const sp = (l.sup ?? {}) as Record<string, unknown>;
     const fee = feeByBill[String(l.bill_id)] ?? 0; const base = num(l.paid_rmb) - fee;
-    let s = `• ${String(l.label)} ¥${fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb))}${fee > 0 ? ` (+ค่าโอน ¥${fmt(fee)})` : ""}`;
+    let s = `• ${String(l.label)} ¥${fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb))}${fee > 0 ? ` + ค่าโอน ¥${fmt(fee)} = รวม ¥${fmt(num(l.paid_rmb))}` : ""}`;
     if (sp.bank_account_name) s += `\n   ชื่อบัญชี: ${String(sp.bank_account_name)}`;
     if (sp.account_number) s += `\n   เลขบัญชี: ${String(sp.account_number)}`;
     if (sp.bank_name_brief) s += `\n   ธนาคาร: ${String(sp.bank_name_brief)}`;
@@ -3955,7 +3957,12 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
   const chinaBillRows = (l: Record<string, unknown>): ReceiptRow[] => {
     const sp = (l.sup ?? {}) as Record<string, unknown>;
     const fee = feeOf(l); const base = num(l.paid_rmb) - fee;
-    const rows: ReceiptRow[] = [{ t: "kv", l: String(l.label || "—") + (fee > 0 ? ` (ค่าโอน ¥${fmt(fee)})` : ""), r: "¥" + fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb)), bold: true }];
+    // ยอดชิดขวา 3 บรรทัด: ยอด / ค่าโอน / รวม (ถ้ามีค่าโอน)
+    const rows: ReceiptRow[] = [{ t: "kv", l: String(l.label || "—"), r: "¥" + fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb)), bold: true }];
+    if (fee > 0) {
+      rows.push({ t: "right", l: "ค่าโอน", r: "¥" + fmt(fee) });
+      rows.push({ t: "right", l: "รวม", r: "¥" + fmt(num(l.paid_rmb)), bold: true });
+    }
     if (sp.name_en) rows.push({ t: "sub", l: String(sp.name_en) });
     if (sp.phone) rows.push({ t: "sub", l: "โทร: " + String(sp.phone) });
     if (sp.bank_account_name) rows.push({ t: "sub", l: "ชื่อบัญชี: " + String(sp.bank_account_name) });
@@ -4122,8 +4129,13 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
                 return (
                   <div key={i} className="border-b border-slate-100 py-2">
                     <div className="flex justify-between text-sm">
-                      <span className="font-medium text-slate-800 mr-2 min-w-0 truncate">{String(l.label || "—")}{fee > 0 ? <span className="text-[10px] text-slate-400 ml-1">(ค่าโอน ¥{fmt(fee)})</span> : null}</span>
-                      <span className="font-semibold text-slate-800 flex-shrink-0 ml-auto text-right whitespace-nowrap">¥{fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb))}</span>
+                      <span className="font-medium text-slate-800 mr-2 min-w-0 truncate">{String(l.label || "—")}</span>
+                      {/* ยอดชิดขวา 3 บรรทัด: ยอด / ค่าโอน / รวม */}
+                      <span className="flex-shrink-0 ml-auto text-right whitespace-nowrap">
+                        <span className="block font-semibold text-slate-800">¥{fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb))}</span>
+                        {fee > 0 && <span className="block text-[11px] text-slate-500">ค่าโอน ¥{fmt(fee)}</span>}
+                        {fee > 0 && <span className="block text-xs font-semibold text-slate-800">รวม ¥{fmt(num(l.paid_rmb))}</span>}
+                      </span>
                     </div>
                     {!!sp.name_en && <div className="text-[11px] text-slate-500">{String(sp.name_en)}</div>}
                     <div className="text-[11px] text-slate-500 mt-0.5 space-y-0.5">
