@@ -3960,7 +3960,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
     // ยอดชิดขวา 3 บรรทัด: ยอด / ค่าโอน / รวม (ถ้ามีค่าโอน)
     const rows: ReceiptRow[] = [{ t: "kv", l: String(l.label || "—"), r: "¥" + fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb)), bold: true }];
     if (fee > 0) {
-      rows.push({ t: "right", l: "ค่าโอน", r: "¥" + fmt(fee) });
+      rows.push({ t: "right", l: "ค่าโอน", r: "¥" + fmt(fee), color: "#0f172a" });   // สีดำชัด ๆ ตามที่เจ้าของขอ
       rows.push({ t: "right", l: "รวม", r: "¥" + fmt(num(l.paid_rmb)), bold: true });
     }
     if (sp.name_en) rows.push({ t: "sub", l: String(sp.name_en) });
@@ -4133,7 +4133,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
                       {/* ยอดชิดขวา 3 บรรทัด: ยอด / ค่าโอน / รวม */}
                       <span className="flex-shrink-0 ml-auto text-right whitespace-nowrap">
                         <span className="block font-semibold text-slate-800">¥{fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb))}</span>
-                        {fee > 0 && <span className="block text-[11px] text-slate-500">ค่าโอน ¥{fmt(fee)}</span>}
+                        {fee > 0 && <span className="block text-xs text-slate-900">ค่าโอน ¥{fmt(fee)}</span>}
                         {fee > 0 && <span className="block text-xs font-semibold text-slate-800">รวม ¥{fmt(num(l.paid_rmb))}</span>}
                       </span>
                     </div>
